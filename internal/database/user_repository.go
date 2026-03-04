@@ -11,12 +11,16 @@ import (
 
 // UserRepository handles user database operations
 type UserRepository struct {
-	db *sql.DB
+	db      *dialectAwareDB
+	dialect dialectHelper
 }
 
 // NewUserRepository creates a new user repository
-func NewUserRepository(db *sql.DB) *UserRepository {
-	return &UserRepository{db: db}
+func NewUserRepository(db *sql.DB, d Dialect) *UserRepository {
+	return &UserRepository{
+		db:      newDialectAwareDB(db, d),
+		dialect: dialectHelper{d: d},
+	}
 }
 
 // GetUserByID retrieves a user by their unique user ID
@@ -76,20 +80,25 @@ func (r *UserRepository) CreateUser(ctx context.Context, user *User) error {
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
-	result, err := r.db.ExecContext(ctx, query,
-		user.UserID, user.Email, user.Name, user.AvatarURL,
-		user.Provider, user.ProviderID, user.PasswordHash, user.APIKey, user.IsAdmin,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to create user: %w", err)
+	args := []any{user.UserID, user.Email, user.Name, user.AvatarURL,
+		user.Provider, user.ProviderID, user.PasswordHash, user.APIKey, user.IsAdmin}
+
+	if r.dialect.IsPostgres() {
+		err := r.db.QueryRowContext(ctx, query+" RETURNING id", args...).Scan(&user.ID)
+		if err != nil {
+			return fmt.Errorf("failed to create user: %w", err)
+		}
+	} else {
+		result, err := r.db.ExecContext(ctx, query, args...)
+		if err != nil {
+			return fmt.Errorf("failed to create user: %w", err)
+		}
+		user.ID, err = result.LastInsertId()
+		if err != nil {
+			return fmt.Errorf("failed to get user ID: %w", err)
+		}
 	}
 
-	id, err := result.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("failed to get user ID: %w", err)
-	}
-
-	user.ID = id
 	user.CreatedAt = time.Now()
 	user.UpdatedAt = time.Now()
 

@@ -42,7 +42,9 @@ type repositorySet struct {
 // initializeDatabase creates and initializes the database
 func initializeDatabase(ctx context.Context, cfg *config.Config) (*database.DB, error) {
 	dbConfig := database.Config{
+		Type:         cfg.Database.Type,
 		DatabasePath: cfg.Database.Path,
+		DSN:          cfg.Database.DSN,
 	}
 
 	db, err := database.NewDB(dbConfig)
@@ -206,12 +208,13 @@ func createFiberApp(ctx context.Context, cfg *config.Config) (*fiber.App, *bool)
 // setupRepositories creates all database repositories
 func setupRepositories(ctx context.Context, db *database.DB) *repositorySet {
 	dbConn := db.Connection()
+	d := db.Dialect()
 
 	return &repositorySet{
-		MainRepo:   database.NewRepository(dbConn),
-		MediaRepo:  database.NewMediaRepository(dbConn),
-		HealthRepo: database.NewHealthRepository(dbConn),
-		UserRepo:   database.NewUserRepository(dbConn),
+		MainRepo:   database.NewRepository(dbConn, d),
+		MediaRepo:  database.NewMediaRepository(dbConn, d),
+		HealthRepo: database.NewHealthRepository(dbConn, d),
+		UserRepo:   database.NewUserRepository(dbConn, d),
 	}
 }
 
