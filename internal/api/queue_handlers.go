@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -655,6 +656,83 @@ func embedPasswordInNZB(nzbContent []byte, password string) []byte {
 	}
 
 	return []byte(content)
+}
+
+// handleSearchNZBByName handles POST /api/queue/upload-by-name
+func (s *Server) handleSearchNZBByName(c *fiber.Ctx) error {
+	var req struct {
+		Name         string `json:"name"`
+		Password     string `json:"password"`
+		Category     string `json:"category"`
+		Priority     int    `json:"priority"`
+		RelativePath string `json:"relative_path"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return RespondBadRequest(c, "Invalid request body", err.Error())
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		return RespondValidationError(c, "Name is required", "")
+	}
+	if s.importerService == nil {
+		return RespondServiceUnavailable(c, "Importer service not available", "The import service is not configured or running")
+	}
+
+	// Build a synthetic nzblnk URL using name as both t= and h=
+	syntheticLink := "nzblnk:?t=" + url.QueryEscape(req.Name) + "&h=" + url.QueryEscape(req.Name)
+	if req.Password != "" {
+		syntheticLink += "&p=" + url.QueryEscape(req.Password)
+	}
+
+	resolver := nzblnk.NewResolver()
+	resolved, err := resolver.Resolve(c.Context(), syntheticLink)
+	if err != nil {
+		return RespondNotFound(c, "NZB", "Could not find NZB for name '"+req.Name+"': "+err.Error())
+	}
+
+	uploadDir := filepath.Join(os.TempDir(), "altmount-uploads")
+	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+		return RespondInternalError(c, "Failed to create upload directory", err.Error())
+	}
+	safeTitle := sanitizeFilename(resolved.Title)
+	tempFile := filepath.Join(uploadDir, safeTitle+".nzb")
+
+	nzbContent := resolved.NZBContent
+	if resolved.Password != "" {
+		nzbContent = embedPasswordInNZB(nzbContent, resolved.Password)
+		slog.DebugContext(c.Context(), "Embedded password in NZB", "title", resolved.Title)
+	}
+	if err := os.WriteFile(tempFile, nzbContent, 0644); err != nil {
+		return RespondInternalError(c, "Failed to save NZB file", err.Error())
+	}
+
+	var categoryPtr *string
+	if req.Category != "" {
+		categoryPtr = &req.Category
+	}
+
+	var basePath *string
+	if s.configManager != nil {
+		if completeDir := s.configManager.GetConfig().SABnzbd.CompleteDir; completeDir != "" {
+			p := completeDir
+			if req.RelativePath != "" {
+				p = filepath.Join(p, req.RelativePath)
+			}
+			basePath = &p
+		}
+	}
+
+	priority := database.QueuePriority(req.Priority)
+	item, err := s.importerService.AddToQueue(c.Context(), tempFile, basePath, categoryPtr, &priority)
+	if err != nil {
+		os.Remove(tempFile)
+		return RespondInternalError(c, "Failed to add to queue", err.Error())
+	}
+
+	return RespondCreated(c, fiber.Map{
+		"queue_id": item.ID,
+		"title":    resolved.Title,
+		"indexer":  resolved.Indexer,
+	})
 }
 
 // handleRestartQueueBulk handles POST /api/queue/bulk/restart
