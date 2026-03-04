@@ -45,6 +45,11 @@ func HasRarMagic(data []byte) bool {
 	return HasRar4Magic(data) || HasRar5Magic(data)
 }
 
+// Has7zMagic checks if the data contains 7-Zip magic bytes
+func Has7zMagic(data []byte) bool {
+	return len(data) >= len(SevenZipMagic) && bytes.Equal(data[:len(SevenZipMagic)], SevenZipMagic)
+}
+
 // IsVideoFile checks if the filename is a video file based on extension
 func IsVideoFile(filename string) bool {
 	if filename == "" {
