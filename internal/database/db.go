@@ -6,27 +6,42 @@ import (
 	"fmt"
 	"time"
 
+	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/pressly/goose/v3"
 )
 
-//go:embed migrations/*.sql
+//go:embed migrations/sqlite/*.sql migrations/postgres/*.sql
 var embedMigrations embed.FS
 
-// DB wraps the database connection and provides access to operations
+// DB wraps the database connection and provides access to operations.
 type DB struct {
-	conn       *sql.DB
+	conn    *sql.DB
+	dialect dialectHelper
+	// Repository is kept for backwards-compat; prefer using Connection() directly.
 	Repository *QueueRepository
 }
 
-// Config holds database configuration
+// Config holds database configuration.
 type Config struct {
-	DatabasePath string
+	// Type selects the backend: "sqlite" (default) or "postgres".
+	Type         string
+	DatabasePath string // SQLite only
+	DSN          string // PostgreSQL only
 }
 
-// NewDB creates a new database connection and runs migrations
+// NewDB creates a new database connection and runs migrations.
 func NewDB(config Config) (*DB, error) {
-	// Configure connection string optimized for write-heavy queue operations
+	switch config.Type {
+	case "postgres":
+		return newPostgresDB(config)
+	default:
+		return newSQLiteDB(config)
+	}
+}
+
+// newSQLiteDB opens a SQLite database with queue-optimized settings.
+func newSQLiteDB(config Config) (*DB, error) {
 	connString := fmt.Sprintf("%s?_journal_mode=WAL&_synchronous=NORMAL&_cache_size=-32000&_temp_store=MEMORY&_busy_timeout=30000",
 		config.DatabasePath)
 
@@ -35,94 +50,119 @@ func NewDB(config Config) (*DB, error) {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	// Set connection pool settings optimized for queue operations
-	conn.SetMaxOpenConns(8) // Fewer connections for queue operations
-	conn.SetMaxIdleConns(3) // Keep fewer idle connections
+	conn.SetMaxOpenConns(8)
+	conn.SetMaxIdleConns(3)
 	conn.SetConnMaxLifetime(0)
-	conn.SetConnMaxIdleTime(15 * time.Minute) // Shorter idle time
+	conn.SetConnMaxIdleTime(15 * time.Minute)
 
-	// Test the connection
 	if err := conn.Ping(); err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	// Set SQLite pragmas optimized for write-heavy queue operations
 	pragmas := []string{
 		"PRAGMA foreign_keys = ON",
-		"PRAGMA journal_mode = WAL",       // WAL mode for concurrency
-		"PRAGMA synchronous = NORMAL",     // Good balance for queue operations
-		"PRAGMA cache_size = -32000",      // 32MB cache (smaller than main DB)
-		"PRAGMA temp_store = MEMORY",      // Memory temp storage
-		"PRAGMA busy_timeout = 30000",     // 30 second timeout
-		"PRAGMA wal_autocheckpoint = 500", // More frequent checkpoints for writes
-		"PRAGMA optimize",                 // Optimize query planner
-		"PRAGMA mmap_size = 268435456",    // 256MB memory map
+		"PRAGMA journal_mode = WAL",
+		"PRAGMA synchronous = NORMAL",
+		"PRAGMA cache_size = -32000",
+		"PRAGMA temp_store = MEMORY",
+		"PRAGMA busy_timeout = 30000",
+		"PRAGMA wal_autocheckpoint = 500",
+		"PRAGMA optimize",
+		"PRAGMA mmap_size = 268435456",
 	}
-
 	for _, pragma := range pragmas {
 		if _, err := conn.Exec(pragma); err != nil {
 			conn.Close()
-			return nil, fmt.Errorf("failed to set queue pragma '%s': %w", pragma, err)
+			return nil, fmt.Errorf("failed to set pragma '%s': %w", pragma, err)
 		}
 	}
 
-	// Run database migrations
-	if err := runMigrations(conn); err != nil {
+	if err := runMigrations(conn, DialectSQLite); err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("failed to run migrations: %w", err)
 	}
 
-	db := &DB{
-		conn: conn,
-	}
-
-	db.Repository = NewQueueRepository(conn)
-
+	dh := dialectHelper{d: DialectSQLite}
+	db := &DB{conn: conn, dialect: dh}
+	db.Repository = NewQueueRepository(conn, DialectSQLite)
 	return db, nil
 }
 
-// runMigrations runs database migrations using Goose
-func runMigrations(db *sql.DB) error {
-	// Set the migration provider for embedded filesystem
+// newPostgresDB opens a PostgreSQL database and runs migrations.
+func newPostgresDB(config Config) (*DB, error) {
+	conn, err := sql.Open("pgx", config.DSN)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open postgres database: %w", err)
+	}
+
+	conn.SetMaxOpenConns(25)
+	conn.SetMaxIdleConns(5)
+	conn.SetConnMaxLifetime(5 * time.Minute)
+	conn.SetConnMaxIdleTime(1 * time.Minute)
+
+	if err := conn.Ping(); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("failed to ping postgres database: %w", err)
+	}
+
+	if err := runMigrations(conn, DialectPostgres); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("failed to run postgres migrations: %w", err)
+	}
+
+	dh := dialectHelper{d: DialectPostgres}
+	db := &DB{conn: conn, dialect: dh}
+	db.Repository = NewQueueRepository(conn, DialectPostgres)
+	return db, nil
+}
+
+// runMigrations runs goose migrations for the given dialect.
+func runMigrations(db *sql.DB, d Dialect) error {
 	goose.SetBaseFS(embedMigrations)
 
-	if err := goose.SetDialect("sqlite3"); err != nil {
+	var gooseDialect, migrationsDir string
+	if d == DialectPostgres {
+		gooseDialect = "postgres"
+		migrationsDir = "migrations/postgres"
+	} else {
+		gooseDialect = "sqlite3"
+		migrationsDir = "migrations/sqlite"
+	}
+
+	if err := goose.SetDialect(gooseDialect); err != nil {
 		return fmt.Errorf("failed to set goose dialect: %w", err)
 	}
 
-	if err := goose.Up(db, "migrations"); err != nil {
-		return fmt.Errorf("failed to run queue migrations: %w", err)
+	if err := goose.Up(db, migrationsDir); err != nil {
+		return fmt.Errorf("failed to run migrations: %w", err)
 	}
 
 	return nil
 }
 
-// Close closes the database connection
+// Dialect returns the dialect helper for this database.
+func (db *DB) Dialect() Dialect {
+	return db.dialect.d
+}
+
+// Close closes the database connection.
 func (db *DB) Close() error {
 	return db.conn.Close()
 }
 
-// Connection returns the underlying database connection
+// Connection returns the underlying database connection.
 func (db *DB) Connection() *sql.DB {
 	return db.conn
 }
 
-// UpdateConnectionPool adjusts the database connection pool settings based on worker count
-// This should be called when the number of concurrent workers changes to prevent connection starvation
+// UpdateConnectionPool adjusts the database connection pool settings based on worker count.
 func (db *DB) UpdateConnectionPool(workerCount int) {
 	if workerCount <= 0 {
-		workerCount = 2 // Default minimum
+		workerCount = 2
 	}
-
-	// Scale connection pool with worker count
-	// Formula: workers + 4 buffer for API/other operations
-	// Each worker needs 1 connection for queue claims + buffer for concurrent API requests
 	maxConns := workerCount + 4
-	idleConns := max(workerCount/2,
-		// Minimum idle connections
-		2)
-
+	idleConns := max(workerCount/2, 2)
 	db.conn.SetMaxOpenConns(maxConns)
 	db.conn.SetMaxIdleConns(idleConns)
 }

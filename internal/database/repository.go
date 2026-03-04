@@ -18,12 +18,16 @@ type DBQuerier interface {
 
 // Repository provides database operations for NZB and file management
 type Repository struct {
-	db DBQuerier
+	db      DBQuerier
+	dialect dialectHelper
 }
 
 // NewRepository creates a new repository instance
-func NewRepository(db *sql.DB) *Repository {
-	return &Repository{db: db}
+func NewRepository(db *sql.DB, d Dialect) *Repository {
+	return &Repository{
+		db:      newDialectAwareDB(db, d),
+		dialect: dialectHelper{d: d},
+	}
 }
 
 // Transaction support
@@ -37,19 +41,17 @@ func (r *Repository) WithTransaction(ctx context.Context, fn func(*Repository) e
 // This reduces lock contention for queue operations by acquiring write locks immediately
 // Uses SQLite's IMMEDIATE transaction mode via BeginTx with Serializable isolation
 func (r *Repository) WithImmediateTransaction(ctx context.Context, fn func(*Repository) error) error {
-	// Cast to *sql.DB to access BeginTx method
-	sqlDB, ok := r.db.(*sql.DB)
+	ddb, ok := r.db.(*dialectAwareDB)
 	if !ok {
-		return fmt.Errorf("repository not connected to sql.DB")
+		return fmt.Errorf("repository not connected to dialectAwareDB")
 	}
 
-	tx, err := sqlDB.BeginTx(ctx, nil)
+	tx, err := ddb.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 
-	// Create a repository that uses the transaction
-	txRepo := &Repository{db: tx}
+	txRepo := &Repository{db: tx, dialect: r.dialect}
 
 	err = fn(txRepo)
 	if err != nil {
@@ -68,18 +70,17 @@ func (r *Repository) WithImmediateTransaction(ctx context.Context, fn func(*Repo
 
 // withTransactionMode executes a function within a database transaction with specified mode
 func (r *Repository) withTransactionMode(ctx context.Context, mode string, fn func(*Repository) error) error {
-	// Cast to *sql.DB to access Begin method
-	sqlDB, ok := r.db.(*sql.DB)
+	ddb, ok := r.db.(*dialectAwareDB)
 	if !ok {
-		return fmt.Errorf("repository not connected to sql.DB")
+		return fmt.Errorf("repository not connected to dialectAwareDB")
 	}
 
-	tx, err := sqlDB.BeginTx(ctx, nil)
+	tx, err := ddb.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 
-	txRepo := &Repository{db: tx}
+	txRepo := &Repository{db: tx, dialect: r.dialect}
 
 	err = fn(txRepo)
 	if err != nil {
@@ -114,19 +115,22 @@ func (r *Repository) AddToQueue(ctx context.Context, item *ImportQueueItem) erro
 		WHERE status NOT IN ('processing', 'completed')
 	`
 
-	result, err := r.db.ExecContext(ctx, query,
-		item.NzbPath, item.RelativePath, item.Category, item.Priority, item.Status,
-		item.RetryCount, item.MaxRetries, item.BatchID, item.Metadata, item.FileSize)
-	if err != nil {
-		return fmt.Errorf("failed to add to queue: %w", err)
+	args := []any{item.NzbPath, item.RelativePath, item.Category, item.Priority, item.Status,
+		item.RetryCount, item.MaxRetries, item.BatchID, item.Metadata, item.FileSize}
+
+	if r.dialect.IsPostgres() {
+		err := r.db.QueryRowContext(ctx, query+" RETURNING id", args...).Scan(&item.ID)
+		if err != nil && err != sql.ErrNoRows {
+			return fmt.Errorf("failed to add to queue: %w", err)
+		}
+	} else {
+		result, err := r.db.ExecContext(ctx, query, args...)
+		if err != nil {
+			return fmt.Errorf("failed to add to queue: %w", err)
+		}
+		item.ID, _ = result.LastInsertId()
 	}
 
-	id, err := result.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("failed to get queue item id: %w", err)
-	}
-
-	item.ID = id
 	item.CreatedAt = time.Now()
 	item.UpdatedAt = time.Now()
 	return nil
@@ -136,18 +140,18 @@ func (r *Repository) AddToQueue(ctx context.Context, item *ImportQueueItem) erro
 // Uses optimized query with row-level locking for better concurrency
 func (r *Repository) GetNextQueueItems(ctx context.Context, limit int) ([]*ImportQueueItem, error) {
 	// Use a CTE to select items and immediately mark them as claimed to avoid race conditions
-	query := `
+	query := fmt.Sprintf(`
 		WITH selected_items AS (
 			SELECT id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
 			       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size
 			FROM import_queue
 			WHERE status = 'pending'
-			  AND (started_at IS NULL OR datetime(started_at, '+10 minutes') < datetime('now'))
+			  AND (started_at IS NULL OR %s < datetime('now'))
 			ORDER BY priority ASC, created_at ASC
 			LIMIT ?
 		)
 		SELECT * FROM selected_items
-	`
+	`, r.dialect.ColumnPlusMinutes("started_at", 10))
 
 	rows, err := r.db.QueryContext(ctx, query, limit)
 	if err != nil {
@@ -182,7 +186,7 @@ func (r *Repository) ClaimNextQueueItem(ctx context.Context) (*ImportQueueItem, 
 	err := r.WithImmediateTransaction(ctx, func(txRepo *Repository) error {
 		// Single atomic operation: update and return in one query
 		// This eliminates the race condition window between SELECT and UPDATE
-		updateQuery := `
+		updateQuery := fmt.Sprintf(`
 			UPDATE import_queue
 			SET status = 'processing',
 			    started_at = datetime('now'),
@@ -190,14 +194,14 @@ func (r *Repository) ClaimNextQueueItem(ctx context.Context) (*ImportQueueItem, 
 			WHERE id = (
 				SELECT id FROM import_queue
 				WHERE status = 'pending'
-				  AND (started_at IS NULL OR datetime(started_at, '+10 minutes') < datetime('now'))
+				  AND (started_at IS NULL OR %s < datetime('now'))
 				ORDER BY priority ASC, created_at ASC
 				LIMIT 1
 			) AND status = 'pending'
 			RETURNING id, nzb_path, relative_path, category, priority, status,
 			          created_at, updated_at, started_at, completed_at,
 			          retry_count, max_retries, error_message, batch_id, metadata, file_size
-		`
+		`, r.dialect.ColumnPlusMinutes("started_at", 10))
 
 		var item ImportQueueItem
 		err := txRepo.db.QueryRowContext(ctx, updateQuery).Scan(
@@ -250,19 +254,23 @@ func (r *Repository) AddBatchToQueue(ctx context.Context, items []*ImportQueueIt
 
 		now := time.Now()
 		for _, item := range items {
-			result, err := txRepo.db.ExecContext(ctx, query,
-				item.NzbPath, item.RelativePath, item.Category, item.Priority, item.Status,
-				item.RetryCount, item.MaxRetries, item.BatchID, item.Metadata, item.FileSize)
-			if err != nil {
-				return fmt.Errorf("failed to insert queue item %s: %w", item.NzbPath, err)
-			}
+			args := []any{item.NzbPath, item.RelativePath, item.Category, item.Priority, item.Status,
+				item.RetryCount, item.MaxRetries, item.BatchID, item.Metadata, item.FileSize}
 
-			// Update ID for the item
-			if id, err := result.LastInsertId(); err == nil {
-				item.ID = id
-				item.CreatedAt = now
-				item.UpdatedAt = now
+			if txRepo.dialect.IsPostgres() {
+				err := txRepo.db.QueryRowContext(ctx, query+" RETURNING id", args...).Scan(&item.ID)
+				if err != nil && err != sql.ErrNoRows {
+					return fmt.Errorf("failed to insert queue item %s: %w", item.NzbPath, err)
+				}
+			} else {
+				result, err := txRepo.db.ExecContext(ctx, query, args...)
+				if err != nil {
+					return fmt.Errorf("failed to insert queue item %s: %w", item.NzbPath, err)
+				}
+				item.ID, _ = result.LastInsertId()
 			}
+			item.CreatedAt = now
+			item.UpdatedAt = now
 		}
 
 		return nil
@@ -554,11 +562,11 @@ func (r *Repository) UpdateQueueStats(ctx context.Context) error {
 
 	// Calculate average processing time for completed items
 	var avgProcessingTimeFloat sql.NullFloat64
-	avgQuery := `
-		SELECT AVG((julianday(completed_at) - julianday(started_at)) * 24 * 60 * 60 * 1000)
-		FROM import_queue 
+	avgQuery := fmt.Sprintf(`
+		SELECT AVG(%s)
+		FROM import_queue
 		WHERE status = 'completed' AND started_at IS NOT NULL AND completed_at IS NOT NULL
-	`
+	`, r.dialect.AvgProcessingTimeMS("started_at", "completed_at"))
 	err := r.db.QueryRowContext(ctx, avgQuery).Scan(&avgProcessingTimeFloat)
 	if err != nil {
 		return fmt.Errorf("failed to calculate average processing time: %w", err)
@@ -928,13 +936,13 @@ func (r *Repository) FilterExistingNzbdavIds(ctx context.Context, ids []string) 
 			args[j] = id
 		}
 
-		// Query using json_extract to find matching IDs
-		// We use DISTINCT to avoid duplicates in the result
+		// Query using json_extract (SQLite) or ->>'key' (PostgreSQL) to find matching IDs
+		jsonExpr := r.dialect.JSONExtract("metadata", "nzbdav_id")
 		query := fmt.Sprintf(`
-			SELECT DISTINCT json_extract(metadata, '$.nzbdav_id') 
-			FROM import_queue 
-			WHERE json_extract(metadata, '$.nzbdav_id') IN (%s)
-		`, strings.Join(placeholders, ","))
+			SELECT DISTINCT %s
+			FROM import_queue
+			WHERE %s IN (%s)
+		`, jsonExpr, jsonExpr, strings.Join(placeholders, ","))
 
 		rows, err := r.db.QueryContext(ctx, query, args...)
 		if err != nil {
@@ -1016,14 +1024,15 @@ func (r *Repository) ListImportHistory(ctx context.Context, limit, offset int, s
 
 // GetImportDailyStats retrieves import statistics for the specified number of days
 func (r *Repository) GetImportDailyStats(ctx context.Context, days int) ([]*ImportDailyStat, error) {
+	cutoff := time.Now().UTC().AddDate(0, 0, -days).Format("2006-01-02")
 	query := `
 		SELECT day, completed_count, failed_count, bytes_downloaded, updated_at
 		FROM import_daily_stats
-		WHERE day >= date('now', ?)
+		WHERE day >= ?
 		ORDER BY day ASC
 	`
 
-	rows, err := r.db.QueryContext(ctx, query, fmt.Sprintf("-%d days", days))
+	rows, err := r.db.QueryContext(ctx, query, cutoff)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get import daily stats: %w", err)
 	}
@@ -1044,14 +1053,15 @@ func (r *Repository) GetImportDailyStats(ctx context.Context, days int) ([]*Impo
 
 // GetImportHourlyStats retrieves import statistics for the specified number of hours
 func (r *Repository) GetImportHourlyStats(ctx context.Context, hours int) ([]*ImportHourlyStat, error) {
+	cutoff := time.Now().UTC().Add(-time.Duration(hours) * time.Hour)
 	query := `
 		SELECT hour, completed_count, failed_count, bytes_downloaded, updated_at
 		FROM import_hourly_stats
-		WHERE hour >= datetime('now', ?)
+		WHERE hour >= ?
 		ORDER BY hour ASC
 	`
 
-	rows, err := r.db.QueryContext(ctx, query, fmt.Sprintf("-%d hours", hours))
+	rows, err := r.db.QueryContext(ctx, query, cutoff)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get import hourly stats: %w", err)
 	}
@@ -1205,13 +1215,12 @@ func (r *Repository) BatchUpdateSystemStats(ctx context.Context, stats map[strin
 		return nil
 	}
 
-	// Cast to *sql.DB to access BeginTx method
-	sqlDB, ok := r.db.(*sql.DB)
+	ddb, ok := r.db.(*dialectAwareDB)
 	if !ok {
-		return fmt.Errorf("repository not connected to sql.DB, cannot begin transaction")
+		return fmt.Errorf("repository not connected to dialectAwareDB, cannot begin transaction")
 	}
 
-	tx, err := sqlDB.BeginTx(ctx, nil)
+	tx, err := ddb.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}

@@ -96,7 +96,7 @@ func newRepairTestEnv(t *testing.T, tempDir string, arrsErr error) *repairTestEn
 	`)
 	require.NoError(t, err)
 
-	healthRepo := database.NewHealthRepository(db)
+	healthRepo := database.NewHealthRepository(db, database.DialectSQLite)
 	metadataService := metadata.NewMetadataService(tempDir)
 
 	healthEnabled := true

@@ -25,7 +25,7 @@ func TestConcurrentQueueItemClaims(t *testing.T) {
 	db.SetMaxOpenConns(10)
 	db.SetMaxIdleConns(5)
 
-	repo := NewRepository(db)
+	repo := NewRepository(db, DialectSQLite)
 
 	// Test: Launch 10 concurrent workers trying to claim
 	numWorkers := 10
@@ -106,7 +106,7 @@ func TestConcurrentQueueItemClaims_MultipleItems(t *testing.T) {
 	db.SetMaxOpenConns(10)
 	db.SetMaxIdleConns(5)
 
-	repo := NewRepository(db)
+	repo := NewRepository(db, DialectSQLite)
 
 	// Test: Launch 10 concurrent workers (more workers than items)
 	numWorkers := 10
@@ -172,7 +172,7 @@ func TestClaimNextQueueItem_NoAvailableItems(t *testing.T) {
 
 	setupQueueSchema(t, db)
 
-	repo := NewRepository(db)
+	repo := NewRepository(db, DialectSQLite)
 
 	// Test: Try to claim from empty queue
 	item, err := repo.ClaimNextQueueItem(context.Background())
@@ -199,7 +199,7 @@ func TestClaimNextQueueItem_PriorityOrdering(t *testing.T) {
 	`)
 	require.NoError(t, err)
 
-	repo := NewRepository(db)
+	repo := NewRepository(db, DialectSQLite)
 
 	// Test: Claim items in priority order
 	item1, err := repo.ClaimNextQueueItem(context.Background())

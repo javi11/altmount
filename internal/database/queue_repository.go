@@ -10,12 +10,16 @@ import (
 
 // QueueRepository handles queue-specific database operations
 type QueueRepository struct {
-	db DBQuerier
+	db      DBQuerier
+	dialect dialectHelper
 }
 
 // NewQueueRepository creates a new queue repository
-func NewQueueRepository(db *sql.DB) *QueueRepository {
-	return &QueueRepository{db: db}
+func NewQueueRepository(db *sql.DB, d Dialect) *QueueRepository {
+	return &QueueRepository{
+		db:      newDialectAwareDB(db, d),
+		dialect: dialectHelper{d: d},
+	}
 }
 
 // RemoveFromQueue removes an item from the queue
@@ -121,19 +125,22 @@ func (r *QueueRepository) AddToQueue(ctx context.Context, item *ImportQueueItem)
 		WHERE status NOT IN ('processing', 'pending')
 	`
 
-	result, err := r.db.ExecContext(ctx, query,
-		item.NzbPath, item.RelativePath, item.Category, item.Priority, item.Status,
-		item.RetryCount, item.MaxRetries, item.BatchID, item.Metadata, item.FileSize)
-	if err != nil {
-		return fmt.Errorf("failed to add queue item: %w", err)
+	args := []any{item.NzbPath, item.RelativePath, item.Category, item.Priority, item.Status,
+		item.RetryCount, item.MaxRetries, item.BatchID, item.Metadata, item.FileSize}
+
+	if r.dialect.IsPostgres() {
+		err := r.db.QueryRowContext(ctx, query+" RETURNING id", args...).Scan(&item.ID)
+		if err != nil && err != sql.ErrNoRows {
+			return fmt.Errorf("failed to add queue item: %w", err)
+		}
+	} else {
+		result, err := r.db.ExecContext(ctx, query, args...)
+		if err != nil {
+			return fmt.Errorf("failed to add queue item: %w", err)
+		}
+		item.ID, _ = result.LastInsertId()
 	}
 
-	id, err := result.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("failed to get queue item id: %w", err)
-	}
-
-	item.ID = id
 	item.CreatedAt = time.Now()
 	item.UpdatedAt = time.Now()
 	return nil
@@ -288,6 +295,7 @@ func (r *QueueRepository) IncrementDailyStat(ctx context.Context, statType strin
 	// Also increment hourly stat for rolling 24h calculation
 	_ = r.IncrementHourlyStat(ctx, statType)
 
+	// date('now') is rewritten to CURRENT_DATE for postgres by the dialectAwareDB wrapper.
 	query := fmt.Sprintf(`
 		INSERT INTO import_daily_stats (day, %s, updated_at)
 		VALUES (date('now'), 1, datetime('now'))
@@ -324,14 +332,15 @@ func (r *QueueRepository) IncrementHourlyStat(ctx context.Context, statType stri
 
 // GetImportHourlyStats retrieves import statistics for the specified number of hours
 func (r *QueueRepository) GetImportHourlyStats(ctx context.Context, hours int) ([]*ImportHourlyStat, error) {
+	cutoff := time.Now().UTC().Add(-time.Duration(hours) * time.Hour)
 	query := `
 		SELECT hour, completed_count, failed_count, bytes_downloaded, updated_at
 		FROM import_hourly_stats
-		WHERE hour >= datetime('now', ?)
+		WHERE hour >= ?
 		ORDER BY hour ASC
 	`
 
-	rows, err := r.db.QueryContext(ctx, query, fmt.Sprintf("-%d hours", hours))
+	rows, err := r.db.QueryContext(ctx, query, cutoff)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get import hourly stats: %w", err)
 	}
@@ -352,14 +361,15 @@ func (r *QueueRepository) GetImportHourlyStats(ctx context.Context, hours int) (
 
 // GetImportDailyStats retrieves historical import statistics for the last N days
 func (r *QueueRepository) GetImportDailyStats(ctx context.Context, days int) ([]*ImportDailyStat, error) {
+	cutoff := time.Now().UTC().AddDate(0, 0, -days).Format("2006-01-02")
 	query := `
 		SELECT day, completed_count, failed_count, bytes_downloaded, updated_at
 		FROM import_daily_stats
-		WHERE day >= date('now', ?)
+		WHERE day >= ?
 		ORDER BY day ASC
 	`
 
-	rows, err := r.db.QueryContext(ctx, query, fmt.Sprintf("-%d days", days))
+	rows, err := r.db.QueryContext(ctx, query, cutoff)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get import history: %w", err)
 	}
@@ -470,12 +480,13 @@ func (r *QueueRepository) FilterExistingNzbdavIds(ctx context.Context, ids []str
 			args[j] = id
 		}
 
-		// Query using json_extract to find matching IDs
+		// Query using json_extract (SQLite) or ->>'key' (PostgreSQL) to find matching IDs
+		jsonExpr := r.dialect.JSONExtract("metadata", "nzbdav_id")
 		query := fmt.Sprintf(`
-			SELECT DISTINCT json_extract(metadata, '$.nzbdav_id') 
-			FROM import_queue 
-			WHERE json_extract(metadata, '$.nzbdav_id') IN (%s)
-		`, strings.Join(placeholders, ","))
+			SELECT DISTINCT %s
+			FROM import_queue
+			WHERE %s IN (%s)
+		`, jsonExpr, jsonExpr, strings.Join(placeholders, ","))
 
 		rows, err := r.db.QueryContext(ctx, query, args...)
 		if err != nil {
@@ -557,11 +568,11 @@ func (r *QueueRepository) GetQueueStats(ctx context.Context) (*QueueStats, error
 
 	// Calculate average processing time for completed items
 	var avgProcessingTimeFloat sql.NullFloat64
-	avgQuery := `
-		SELECT AVG((julianday(completed_at) - julianday(started_at)) * 24 * 60 * 60 * 1000)
-		FROM import_queue 
+	avgQuery := fmt.Sprintf(`
+		SELECT AVG(%s)
+		FROM import_queue
 		WHERE status = 'completed' AND started_at IS NOT NULL AND completed_at IS NOT NULL
-	`
+	`, r.dialect.AvgProcessingTimeMS("started_at", "completed_at"))
 	err = r.db.QueryRowContext(ctx, avgQuery).Scan(&avgProcessingTimeFloat)
 	if err != nil {
 		return nil, fmt.Errorf("failed to calculate average processing time: %w", err)
@@ -600,19 +611,23 @@ func (r *QueueRepository) AddBatchToQueue(ctx context.Context, items []*ImportQu
 
 		now := time.Now()
 		for _, item := range items {
-			result, err := txRepo.db.ExecContext(ctx, query,
-				item.NzbPath, item.RelativePath, item.Category, item.Priority, item.Status,
-				item.RetryCount, item.MaxRetries, item.BatchID, item.Metadata, item.FileSize)
-			if err != nil {
-				return fmt.Errorf("failed to insert queue item %s: %w", item.NzbPath, err)
-			}
+			args := []any{item.NzbPath, item.RelativePath, item.Category, item.Priority, item.Status,
+				item.RetryCount, item.MaxRetries, item.BatchID, item.Metadata, item.FileSize}
 
-			// Update ID for the item
-			if id, err := result.LastInsertId(); err == nil {
-				item.ID = id
-				item.CreatedAt = now
-				item.UpdatedAt = now
+			if txRepo.dialect.IsPostgres() {
+				err := txRepo.db.QueryRowContext(ctx, query+" RETURNING id", args...).Scan(&item.ID)
+				if err != nil && err != sql.ErrNoRows {
+					return fmt.Errorf("failed to insert queue item %s: %w", item.NzbPath, err)
+				}
+			} else {
+				result, err := txRepo.db.ExecContext(ctx, query, args...)
+				if err != nil {
+					return fmt.Errorf("failed to insert queue item %s: %w", item.NzbPath, err)
+				}
+				item.ID, _ = result.LastInsertId()
 			}
+			item.CreatedAt = now
+			item.UpdatedAt = now
 		}
 
 		return nil
@@ -645,19 +660,18 @@ func (r *QueueRepository) GetQueueItem(ctx context.Context, id int64) (*ImportQu
 
 // withQueueTransaction executes a function within a queue database transaction
 func (r *QueueRepository) withQueueTransaction(ctx context.Context, fn func(*QueueRepository) error) error {
-	// Cast to *sql.DB to access BeginTx method
-	sqlDB, ok := r.db.(*sql.DB)
+	ddb, ok := r.db.(*dialectAwareDB)
 	if !ok {
-		return fmt.Errorf("repository not connected to sql.DB")
+		return fmt.Errorf("repository not connected to dialectAwareDB")
 	}
 
-	tx, err := sqlDB.BeginTx(ctx, nil)
+	tx, err := ddb.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("failed to begin queue transaction: %w", err)
 	}
 
 	// Create a repository that uses the transaction
-	txRepo := &QueueRepository{db: tx}
+	txRepo := &QueueRepository{db: tx, dialect: r.dialect}
 
 	err = fn(txRepo)
 	if err != nil {

@@ -11,13 +11,13 @@ import (
 
 // MediaRepository handles operations for media files table
 type MediaRepository struct {
-	db *sql.DB
+	db *dialectAwareDB
 }
 
 // NewMediaRepository creates a new media repository
-func NewMediaRepository(db *sql.DB) *MediaRepository {
+func NewMediaRepository(db *sql.DB, d Dialect) *MediaRepository {
 	return &MediaRepository{
-		db: db,
+		db: newDialectAwareDB(db, d),
 	}
 }
 

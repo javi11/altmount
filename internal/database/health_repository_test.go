@@ -40,7 +40,7 @@ func setupTestDB(t *testing.T) *HealthRepository {
 	`)
 	require.NoError(t, err)
 
-	return NewHealthRepository(db)
+	return NewHealthRepository(db, DialectSQLite)
 }
 
 func TestGetFilesForRepairNotification_RespectsSchedule(t *testing.T) {
