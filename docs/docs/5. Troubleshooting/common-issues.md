@@ -794,6 +794,35 @@ NNTP pipelining sends multiple requests on a single connection before waiting fo
 When reporting connection issues, always mention your `inflight_requests` value. Setting it to `1` is the first thing to try when debugging any provider-related download problem.
 :::
 
+## Date Error When Adding a Provider
+
+### Symptoms
+
+- Error like `date command not supported` or `unexpected response to DATE` when saving a provider
+- Provider connection test fails with a date-related error
+- Some older or non-standard NNTP servers reject the ping check
+
+**Cause:**
+
+AltMount pings the server using the `DATE` NNTP command to verify connectivity before the connection pool is fully started. Some servers don't implement this command, causing the connection test to fail even though the server is otherwise functional.
+
+**Solution:**
+
+Enable **Skip server ping** in the provider settings via the web UI when editing or creating the provider, or set `skip_ping: true` in your config file:
+
+```yaml
+providers:
+  - host: "ssl-news.provider.com"
+    port: 563
+    username: "your_username"
+    password: "your_password"
+    max_connections: 20
+    tls: true
+    skip_ping: true  # Skip DATE command ping for servers that don't support it
+```
+
+This instructs AltMount to skip the `DATE` ping on startup for that provider. The provider will still be used normally for all downloads; only the initial handshake ping is skipped.
+
 ## Logging and Debugging
 
 ### Enable Debug Logging
