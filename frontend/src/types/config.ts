@@ -248,6 +248,7 @@ export interface ProviderConfig {
 	password_set: boolean;
 	enabled: boolean;
 	is_backup_provider: boolean;
+	skip_ping?: boolean;
 	last_rtt_ms?: number;
 	last_speed_test_mbps?: number;
 	last_speed_test_time?: string;
@@ -434,6 +435,7 @@ export interface ProviderUpdateRequest {
 	proxy_url?: string;
 	enabled?: boolean;
 	is_backup_provider?: boolean;
+	skip_ping?: boolean;
 }
 
 // SABnzbd update request
@@ -634,6 +636,7 @@ export interface ProviderFormData {
 	proxy_url: string;
 	enabled: boolean;
 	is_backup_provider: boolean;
+	skip_ping: boolean;
 }
 
 export interface LogFormData {
@@ -804,6 +807,7 @@ export interface ProviderCreateRequest {
 	proxy_url?: string;
 	enabled: boolean;
 	is_backup_provider: boolean;
+	skip_ping?: boolean;
 }
 
 export interface ProviderReorderRequest {
