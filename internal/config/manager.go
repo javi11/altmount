@@ -93,6 +93,25 @@ type APIConfig struct {
 	AllowedOrigins []string `yaml:"allowed_origins" mapstructure:"allowed_origins" json:"allowed_origins,omitempty"`
 }
 
+// ProwlarrConfig configures the Prowlarr indexer integration for Stremio addon searches.
+type ProwlarrConfig struct {
+	// Enabled controls whether Prowlarr search is active for the Stremio addon.
+	Enabled *bool `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	// Host is the Prowlarr base URL (e.g. "http://localhost:9696").
+	Host string `yaml:"host" mapstructure:"host" json:"host,omitempty"`
+	// APIKey is the Prowlarr API key.
+	APIKey string `yaml:"api_key" mapstructure:"api_key" json:"api_key,omitempty"`
+	// Categories filters search results by Newznab category IDs.
+	// Defaults to 5000 (Movies), 5010 (Movies/Foreign), 5030 (TV), 5040 (TV/HD).
+	Categories []int `yaml:"categories" mapstructure:"categories" json:"categories,omitempty"`
+	// Languages is an optional list of keywords; releases must contain at least one to pass.
+	// Empty = no filtering. Examples: ["Esp", "🇪🇸", "Spanish", "DUAL"]
+	Languages []string `yaml:"languages" mapstructure:"languages" json:"languages,omitempty"`
+	// Qualities is an optional list of keywords; releases must contain at least one to pass.
+	// Empty = no filtering. Examples: ["1080p", "HD", "4K", "3D"]
+	Qualities []string `yaml:"qualities" mapstructure:"qualities" json:"qualities,omitempty"`
+}
+
 // StremioConfig configures the Stremio NZB stream endpoint (POST /api/nzb/streams).
 type StremioConfig struct {
 	// Enabled controls whether the endpoint is active. Disabled by default.
@@ -106,6 +125,8 @@ type StremioConfig struct {
 	// (e.g. "https://altmount.example.com"). Falls back to the auto-detected
 	// request origin when not set.
 	BaseURL string `yaml:"base_url" mapstructure:"base_url" json:"base_url,omitempty"`
+	// Prowlarr configures the Prowlarr indexer used by the Stremio addon to search for NZBs.
+	Prowlarr ProwlarrConfig `yaml:"prowlarr" mapstructure:"prowlarr" json:"prowlarr"`
 }
 
 // AuthConfig represents authentication configuration
@@ -1119,7 +1140,8 @@ func DefaultConfig(configDir ...string) *Config {
 	scrapperEnabled := false
 	fuseEnabled := false
 	loginRequired := true  // Require login by default
-	stremioEnabled := false // Stremio endpoint disabled by default
+	stremioEnabled := false   // Stremio endpoint disabled by default
+	prowlarrEnabled := false  // Prowlarr integration disabled by default
 	skipHealthCheck := true
 	watchIntervalSeconds := 10 // Default watch interval
 	cleanupAutomaticImportFailure := false
@@ -1167,6 +1189,11 @@ func DefaultConfig(configDir ...string) *Config {
 		Stremio: StremioConfig{
 			Enabled:     &stremioEnabled,
 			NzbTTLHours: 24,
+			Prowlarr: ProwlarrConfig{
+				Enabled:    &prowlarrEnabled,
+				Host:       "http://localhost:9696",
+				Categories: []int{2000, 2010, 2030, 2040, 2045, 2060, 5000, 5010, 5030, 5040},
+			},
 		},
 		Auth: AuthConfig{
 			LoginRequired: &loginRequired,

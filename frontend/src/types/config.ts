@@ -24,6 +24,7 @@ export interface ConfigResponse {
 	mount_path: string;
 	mount_type: MountType;
 	api_key?: string;
+	download_key?: string;
 	profiler_enabled: boolean;
 }
 
@@ -745,10 +746,22 @@ export interface ArrsFormData {
 	cleanup_automatic_import_failure?: boolean;
 }
 
+// Prowlarr indexer configuration (nested inside StremioConfig)
+export interface ProwlarrConfig {
+	enabled: boolean;
+	host: string;
+	api_key: string;
+	categories: number[];
+	languages: string[];
+	qualities: string[];
+}
+
 // Stremio integration configuration
 export interface StremioConfig {
 	enabled: boolean;
 	nzb_ttl_hours: number;
+	base_url?: string;
+	prowlarr: ProwlarrConfig;
 }
 
 // Helper type for configuration sections

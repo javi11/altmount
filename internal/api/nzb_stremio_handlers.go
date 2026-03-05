@@ -61,7 +61,7 @@ func (s *Server) handleNzbStreams(c *fiber.Ctx) error {
 		return RespondServiceUnavailable(c, "Configuration not available", "")
 	}
 	cfg := s.configManager.GetConfig()
-	if cfg.Stremio.Enabled == nil || !*cfg.Stremio.Enabled {
+	if !isStremioEnabled(cfg) {
 		return RespondNotFound(c, "Stremio endpoint", "Stremio integration is disabled in configuration")
 	}
 
@@ -70,28 +70,7 @@ func (s *Server) handleNzbStreams(c *fiber.Ctx) error {
 	if downloadKey == "" {
 		return RespondUnauthorized(c, "download_key is required", "Provide the SHA256 hash of your API key")
 	}
-
-	if s.userRepo == nil {
-		return RespondInternalError(c, "User repository not available", "")
-	}
-
-	users, err := s.userRepo.GetAllUsers(ctx)
-	if err != nil {
-		return RespondInternalError(c, "Failed to authenticate", err.Error())
-	}
-
-	authenticated := false
-	for _, user := range users {
-		if user.APIKey == nil || *user.APIKey == "" {
-			continue
-		}
-		if hashAPIKey(*user.APIKey) == downloadKey {
-			authenticated = true
-			break
-		}
-	}
-
-	if !authenticated {
+	if !s.validateDownloadKey(ctx, downloadKey) {
 		slog.WarnContext(ctx, "Stremio stream endpoint: authentication failed - invalid download_key")
 		return RespondUnauthorized(c, "Invalid download_key", "")
 	}
@@ -112,10 +91,7 @@ func (s *Server) handleNzbStreams(c *fiber.Ctx) error {
 	}
 
 	// --- Resolve base URL ---
-	baseURL := strings.TrimRight(cfg.Stremio.BaseURL, "/")
-	if baseURL == "" {
-		baseURL = c.Protocol() + "://" + c.Hostname()
-	}
+	baseURL := resolveBaseURL(c, cfg.Stremio.BaseURL)
 
 	category := c.FormValue("category")
 
@@ -180,9 +156,8 @@ func (s *Server) handleNzbStreams(c *fiber.Ctx) error {
 		return RespondServiceUnavailable(c, "Importer service not available", "")
 	}
 
-	var categoryPtr *string
-	if category != "" {
-		categoryPtr = &category
+	if category == "" {
+		category = "stremio"
 	}
 
 	var basePath *string
@@ -191,7 +166,7 @@ func (s *Server) handleNzbStreams(c *fiber.Ctx) error {
 	}
 
 	priority := database.QueuePriorityHigh
-	item, err := s.importerService.AddToQueue(ctx, tempPath, basePath, categoryPtr, &priority)
+	item, err := s.importerService.AddToQueue(ctx, tempPath, basePath, &category, &priority)
 	if err != nil {
 		os.Remove(tempPath)
 		return RespondInternalError(c, "Failed to add NZB to queue", err.Error())
