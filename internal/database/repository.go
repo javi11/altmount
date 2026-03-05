@@ -1415,3 +1415,48 @@ func (r *Repository) ClearHourlyStats(ctx context.Context) error {
 	return nil
 }
 
+// GetExpiredStremioQueueItems returns completed Stremio queue items whose completed_at
+// is older than ttlHours. Items are identified as Stremio-originated by their nzb_path
+// containing tempUploadDir (typically os.TempDir()+"/altmount-uploads").
+func (r *Repository) GetExpiredStremioQueueItems(ctx context.Context, ttlHours int, tempUploadDir string) ([]*ImportQueueItem, error) {
+	var cutoffExpr string
+	if r.dialect.IsPostgres() {
+		cutoffExpr = fmt.Sprintf("NOW() - INTERVAL '%d hours'", ttlHours)
+	} else {
+		cutoffExpr = fmt.Sprintf("datetime('now', '-%d hours')", ttlHours)
+	}
+
+	query := fmt.Sprintf(`
+		SELECT id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
+		       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path
+		FROM import_queue
+		WHERE status = 'completed'
+		  AND completed_at < %s
+		  AND nzb_path LIKE ?
+		ORDER BY completed_at ASC
+		LIMIT 100
+	`, cutoffExpr)
+
+	rows, err := r.db.QueryContext(ctx, query, "%"+tempUploadDir+"%")
+	if err != nil {
+		return nil, fmt.Errorf("failed to query expired stremio queue items: %w", err)
+	}
+	defer rows.Close()
+
+	var items []*ImportQueueItem
+	for rows.Next() {
+		var item ImportQueueItem
+		err := rows.Scan(
+			&item.ID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
+			&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
+			&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan expired stremio queue item: %w", err)
+		}
+		items = append(items, &item)
+	}
+
+	return items, rows.Err()
+}
+

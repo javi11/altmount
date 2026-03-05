@@ -20,7 +20,8 @@ type ConfigAPIResponse struct {
 	RClone          RCloneAPIResponse     `json:"rclone"`
 	SABnzbd         SABnzbdAPIResponse    `json:"sabnzbd"`
 	Providers       []ProviderAPIResponse `json:"providers"`
-	APIKey          string                `json:"api_key,omitempty"` // User's API key for authentication
+	APIKey          string                `json:"api_key,omitempty"`      // User's API key for authentication
+	DownloadKey     string                `json:"download_key,omitempty"` // SHA256 of the API key, used for download/stream URLs
 	ProfilerEnabled bool                  `json:"profiler_enabled"`
 }
 
@@ -246,6 +247,11 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 		Host:     cfg.WebDAV.Host,
 	}
 
+	downloadKey := ""
+	if apiKey != "" {
+		downloadKey = hashAPIKey(apiKey)
+	}
+
 	return &ConfigAPIResponse{
 		Config:          cfg,
 		WebDAV:          webdavResp,
@@ -254,6 +260,7 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 		SABnzbd:         sabnzbdResp,
 		Providers:       providers,
 		APIKey:          apiKey,
+		DownloadKey:     downloadKey,
 		ProfilerEnabled: cfg.ProfilerEnabled,
 	}
 }
