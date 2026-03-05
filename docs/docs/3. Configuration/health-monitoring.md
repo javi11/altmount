@@ -1,3 +1,9 @@
+---
+title: Health Monitoring Configuration
+description: Configure AltMount's health monitoring to detect corrupted files and automatically coordinate repairs via ARR apps.
+keywords: [altmount, health monitoring, corrupted files, repair, arr, sonarr, radarr, usenet]
+---
+
 # Health Monitoring Configuration
 
 AltMount provides comprehensive health monitoring capabilities that detect corrupted files and can automatically coordinate repairs through your ARR applications. This guide covers configuring health monitoring for optimal media collection integrity.

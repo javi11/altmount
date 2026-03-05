@@ -1,3 +1,9 @@
+---
+title: Other Installation Methods
+description: Install AltMount as a standalone binary with rclone WebDAV mounting on Linux, macOS, and Windows.
+keywords: [altmount, install, binary, rclone, webdav, linux, macos, windows, standalone]
+---
+
 # Other Installation Methods
 
 This guide covers installing AltMount as a standalone binary and setting it up with rclone for WebDAV mounting on Linux, macOS, and Windows systems.

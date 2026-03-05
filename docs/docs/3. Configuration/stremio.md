@@ -1,3 +1,9 @@
+---
+title: Stremio Integration
+description: Stream Usenet content directly in Stremio using AltMount's built-in addon with automatic Prowlarr search.
+keywords: [altmount, stremio, streaming, usenet, prowlarr, addon, nzb]
+---
+
 # Stremio Integration
 
 AltMount provides two complementary ways to stream Usenet content directly through [Stremio](https://www.stremio.com/):

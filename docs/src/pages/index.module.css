@@ -8,6 +8,11 @@
   text-align: center;
   position: relative;
   overflow: hidden;
+  background-image: linear-gradient(
+    160deg,
+    color-mix(in srgb, var(--ifm-color-primary) 100%, transparent) 0%,
+    color-mix(in srgb, var(--ifm-color-primary-dark) 85%, #000) 100%
+  );
 }
 
 @media screen and (max-width: 996px) {

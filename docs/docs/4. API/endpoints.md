@@ -1,3 +1,9 @@
+---
+title: API Endpoints
+description: REST API reference for AltMount — authentication, NZB queue management, configuration, and status endpoints.
+keywords: [altmount, api, rest, endpoints, nzb, queue, authentication, reference]
+---
+
 # API Endpoints
 
 AltMount provides REST API endpoints for programmatic integration and automation.

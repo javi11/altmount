@@ -1,3 +1,9 @@
+---
+title: Streaming Configuration
+description: Configure AltMount's streaming system for direct media playback from Usenet with intelligent prefetching.
+keywords: [altmount, streaming, media, usenet, prefetch, playback, configuration]
+---
+
 # Streaming Configuration
 
 AltMount's streaming system enables direct media playback from Usenet without waiting for complete downloads. It uses intelligent prefetching to keep playback smooth.

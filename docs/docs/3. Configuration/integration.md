@@ -1,3 +1,9 @@
+---
+title: ARR Integration
+description: Integrate AltMount as a SABnzbd-compatible download client with Sonarr, Radarr, and other ARR applications.
+keywords: [altmount, sonarr, radarr, sabnzbd, arr, integration, download client, usenet]
+---
+
 # ARR Integration
 
 AltMount acts as a SABnzbd-compatible download client for Sonarr and Radarr. This guide walks through the full setup process for seamless integration with your media management applications.
