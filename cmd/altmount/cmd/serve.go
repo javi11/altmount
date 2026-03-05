@@ -144,6 +144,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	streamTracker.StartCleanup(ctx) // Periodic cleanup of stale streams
 
+	stremioCleanup := api.NewStremioCleanupService(repos.MainRepo, metadataService, configManager.GetConfigGetter())
+	stremioCleanup.StartCleanup(ctx)
+
 	apiServer := setupAPIServer(app, repos, authService, configManager, metadataReader, metadataService, fs, poolManager, importerService, arrsService, mountService, progressBroadcaster, streamTracker, segcacheMgr)
 
 	webdavHandler, err := setupWebDAV(cfg, fs, authService, repos.UserRepo, configManager, streamTracker)

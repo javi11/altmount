@@ -189,6 +189,7 @@ require (
 	github.com/mattn/go-runewidth v0.0.16 // indirect
 	github.com/mfridman/interpolate v0.0.2 // indirect
 	github.com/mgechev/revive v1.13.0 // indirect
+	github.com/middelink/go-parse-torrent-name v0.0.0-20190301154245-3ff4efacd4c4 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/mnightingale/rapidyenc v0.0.0-20251128204712-7aafef1eaf1c // indirect
 	github.com/montanaflynn/stats v0.7.1 // indirect

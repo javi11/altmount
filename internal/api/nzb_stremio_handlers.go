@@ -184,6 +184,10 @@ func (s *Server) handleNzbStreams(c *fiber.Ctx) error {
 	if category != "" {
 		categoryPtr = &category
 	}
+	if categoryPtr == nil {
+		defaultCat := "stremio"
+		categoryPtr = &defaultCat
+	}
 
 	var basePath *string
 	if completeDir := cfg.SABnzbd.CompleteDir; completeDir != "" {

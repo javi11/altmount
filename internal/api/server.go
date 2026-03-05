@@ -149,6 +149,17 @@ func (s *Server) GetProgressBroadcaster() *progress.ProgressBroadcaster {
 func (s *Server) SetupRoutes(app *fiber.App) {
 	app.Use("/sabnzbd", s.handleSABnzbd)
 
+	// Stremio addon endpoints — key-based auth, no JWT required.
+	// CORS must be open (*) so Stremio can install the addon from any origin.
+	stremioGroup := app.Group("/stremio", cors.New(cors.Config{
+		AllowOrigins: "*",
+		AllowHeaders: "Origin, Content-Type, Accept",
+		AllowMethods: "GET, OPTIONS",
+	}))
+	stremioGroup.Get("/:key/manifest.json", s.handleStremioManifest)
+	stremioGroup.Get("/:key/stream/:type/:id.json", s.handleStremioAddonStream)
+	stremioGroup.Get("/:key/play", s.handleStremioAddonPlay)
+
 	api := app.Group(s.config.Prefix)
 
 	// Public endpoints (authentication handled inside or not required)

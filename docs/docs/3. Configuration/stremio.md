@@ -1,23 +1,37 @@
 # Stremio Integration
 
-AltMount provides a dedicated endpoint for [Stremio](https://www.stremio.com/) add-on developers and power users who want to stream Usenet content directly through Stremio. Upload an NZB file, and AltMount will queue it with high priority, wait for the download to complete (or reach a streamable state), and return Stremio-compatible stream URLs for every media file found in the output.
+AltMount provides two complementary ways to stream Usenet content directly through [Stremio](https://www.stremio.com/):
+
+1. **Stremio Addon** — install a personalised addon in Stremio that automatically searches Prowlarr by IMDB ID, downloads the best NZB, and returns stream URLs without any manual steps.
+2. **Manual NZB upload** — POST an NZB file to `POST /api/nzb/streams` from your own Stremio add-on; AltMount queues it and returns stream URLs once the content is ready.
 
 ## Overview
 
-1. A client POSTs an NZB file to `POST /api/nzb/streams`.
-2. AltMount adds the NZB to the queue with elevated priority.
-3. The request blocks (long-polls) until the content is ready or the timeout is reached.
-4. AltMount returns a list of stream objects whose URLs point directly to the mounted media files, ready for Stremio to play.
-
-Because the request blocks synchronously, the add-on can hand the result straight to `callback({ streams })` — no polling required.
+| Mode | How it works | Best for |
+|------|-------------|----------|
+| Stremio Addon | Stremio requests streams → AltMount searches Prowlarr → downloads best NZB → returns streams | Fully automatic playback |
+| Manual endpoint | Your add-on POSTs an NZB → AltMount queues it → returns streams | Custom workflows, hand-picked NZBs |
 
 ## Prerequisites
 
 - Stremio integration enabled in your configuration (`stremio.enabled: true`).
 - At least one NNTP provider configured and online.
-- You know your AltMount API key (visible in **Settings > API Key**).
+- Your AltMount API key (visible in **Settings > API Key**).
+- *(For automatic search)* Prowlarr running and accessible from AltMount.
 
-## Configuration
+## Web UI Configuration
+
+![Stremio configuration](/images/config-stremio.png)
+_AltMount web interface showing the Stremio Integration settings_
+
+The Stremio settings are split into four cards:
+
+- **Endpoint** — toggle the integration on/off and set the Public Base URL.
+- **Addon Install URL** — appears automatically once the integration is enabled. Shows the manifest URL that Stremio needs. Use **Copy** to copy it to your clipboard or **Install** to open Stremio directly.
+- **Cache** — NZB File Cache TTL controls how long AltMount keeps downloaded NZBs on disk.
+- **Prowlarr Indexer** — optional automatic search by IMDB ID (see below).
+
+## Configuration (YAML)
 
 Add the following block to your `config.yaml`:
 
@@ -26,27 +40,49 @@ stremio:
   enabled: true
   nzb_ttl_hours: 24   # 0 = keep cached streams forever
   base_url: ""        # optional — set if auto-detection gives the wrong origin
+  prowlarr:
+    enabled: true
+    host: "http://localhost:9696"
+    api_key: "YOUR_PROWLARR_API_KEY"
+    categories: [2000, 2010, 2030, 2040, 2045, 2060, 5000, 5010, 5030, 5040]
+    languages: []   # e.g. ["English", "DUAL"] — empty = all
+    qualities: []   # e.g. ["1080p", "4K"] — empty = all
 ```
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `enabled` | bool | `false` | Enable the `/api/nzb/streams` endpoint |
+| `enabled` | bool | `false` | Enable the Stremio integration |
 | `nzb_ttl_hours` | int | `24` | Hours before a cached NZB result expires. `0` means never expire. |
-| `base_url` | string | `""` | Public base URL used when building stream links (e.g. `https://altmount.example.com`). When empty, AltMount auto-detects the origin from the incoming request. Set this when running behind a reverse proxy or when the detected origin is wrong. |
+| `base_url` | string | `""` | Public base URL used when building stream and manifest links (e.g. `https://altmount.example.com`). When empty, AltMount auto-detects the origin from the incoming request. Set this when running behind a reverse proxy or when the detected origin is wrong. |
 
 When `nzb_ttl_hours` is greater than zero, submitting the same NZB filename within the TTL window returns the cached stream URLs immediately without re-queueing or re-downloading.
 
+### Prowlarr Automatic Search
+
+When `prowlarr.enabled` is `true`, the Stremio addon endpoint searches Prowlarr by IMDB ID before returning streams. AltMount queries `/api/v1/search` on your Prowlarr instance, picks the best NZB, queues it, and returns stream URLs — all within a single Stremio request.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | `false` | Enable automatic Prowlarr search |
+| `host` | string | `http://localhost:9696` | Prowlarr base URL |
+| `api_key` | string | `""` | Prowlarr API key |
+| `categories` | int[] | `[2000,2010,…]` | Newznab category IDs to search |
+| `languages` | string[] | `[]` | Keyword filter — only show releases whose title contains at least one keyword. Empty = all. |
+| `qualities` | string[] | `[]` | Keyword filter — only show releases matching a quality keyword. Empty = all. |
+
+> **Tip:** The web UI renders categories, languages, and qualities as badge chips. Press Enter or comma to add a keyword; click × to remove.
+
 ## Authentication — the `download_key`
 
-The streams endpoint does **not** accept your raw API key. Instead it expects a `download_key`, which is the lowercase hex SHA-256 hash of your API key:
+The streams endpoint and addon routes do **not** accept your raw API key. Instead they expect a `download_key`, which is the lowercase hex SHA-256 hash of your API key:
 
 ```
 download_key = sha256(api_key)   # lowercase hex
 ```
 
-This is safe to embed in Stremio stream URLs and share with the Stremio app: it cannot be reversed to recover your API key, and it has no other privileges in AltMount.
+This is safe to embed in Stremio stream URLs and the addon manifest URL: it cannot be reversed to recover your API key, and it has no other privileges in AltMount.
 
-Compute it once and store it in your add-on configuration:
+The `download_key` is shown in the **Settings** page. You can also compute it manually:
 
 ```bash
 # Linux / macOS
@@ -56,11 +92,26 @@ echo -n "YOUR_API_KEY" | sha256sum | awk '{print $1}'
 echo -n "YOUR_API_KEY" | shasum -a 256 | awk '{print $1}'
 ```
 
+## Stremio Addon Install
+
+Once the integration is enabled and the configuration is saved, AltMount generates a personalised manifest URL:
+
+```
+<base_url>/stremio/<download_key>/manifest.json
+```
+
+This URL is shown in the **Addon Install URL** card in the web UI. You can:
+
+- **Copy** the URL and paste it into Stremio → Add-ons → Install from URL.
+- **Install** to open Stremio directly via the `stremio://` URI scheme.
+
+The `download_key` embedded in the URL is the SHA-256 hash of your API key — safe to share with the Stremio app (see [Authentication](#authentication--the-download_key)).
+
 ## Endpoint Reference
 
 ### `POST /api/nzb/streams`
 
-Submit an NZB and receive stream URLs.
+Submit an NZB manually and receive stream URLs. The request blocks (long-polls) until the content is ready or the timeout is reached, so the add-on can hand the result straight to `callback({ streams })` — no polling required.
 
 **Content-Type**: `multipart/form-data`
 
