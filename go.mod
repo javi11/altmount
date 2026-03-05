@@ -16,6 +16,7 @@ require (
 	github.com/gofiber/fiber/v2 v2.52.9
 	github.com/google/uuid v1.6.0
 	github.com/hanwen/go-fuse/v2 v2.9.0
+	github.com/jackc/pgx/v5 v5.8.0
 	github.com/javi11/nntppool/v4 v4.4.1
 	github.com/javi11/nxg v0.1.0
 	github.com/javi11/nzbparser v0.5.4
@@ -23,6 +24,7 @@ require (
 	github.com/javi11/sevenzip v1.6.2-0.20251026160715-ca961b7f1239
 	github.com/jinzhu/copier v0.4.0
 	github.com/mattn/go-sqlite3 v1.14.22
+	github.com/middelink/go-parse-torrent-name v0.0.0-20190301154245-3ff4efacd4c4
 	github.com/natefinch/lumberjack v2.0.0+incompatible
 	github.com/pressly/goose/v3 v3.24.3
 	github.com/rfjakob/eme v1.1.2
@@ -157,7 +159,6 @@ require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
-	github.com/jackc/pgx/v5 v5.8.0 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/jgautheron/goconst v1.8.2 // indirect
 	github.com/jingyugao/rowserrcheck v1.1.1 // indirect
@@ -189,7 +190,6 @@ require (
 	github.com/mattn/go-runewidth v0.0.16 // indirect
 	github.com/mfridman/interpolate v0.0.2 // indirect
 	github.com/mgechev/revive v1.13.0 // indirect
-	github.com/middelink/go-parse-torrent-name v0.0.0-20190301154245-3ff4efacd4c4 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/mnightingale/rapidyenc v0.0.0-20251128204712-7aafef1eaf1c // indirect
 	github.com/montanaflynn/stats v0.7.1 // indirect
