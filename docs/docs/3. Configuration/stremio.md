@@ -107,6 +107,129 @@ This URL is shown in the **Addon Install URL** card in the web UI. You can:
 
 The `download_key` embedded in the URL is the SHA-256 hash of your API key — safe to share with the Stremio app (see [Authentication](#authentication--the-download_key)).
 
+## Third-Party Addon Integration
+
+If you are building your own Stremio addon you can integrate with AltMount in two ways,
+depending on whether you want AltMount or your addon to handle NZB resolution.
+
+### Pattern A — AltMount resolves the NZB (Prowlarr required)
+
+Your addon proxies AltMount's stream endpoint. AltMount searches Prowlarr by IMDB ID and
+returns ready-to-use stream options; your addon just passes them to Stremio.
+
+```
+GET <base_url>/stremio/<download_key>/stream/<type>/<id>.json
+```
+
+| Parameter | Description |
+|-----------|-------------|
+| `download_key` | SHA-256 of your AltMount API key |
+| `type` | `movie` or `series` |
+| `id` | IMDB ID (`tt1234567`) or `tt1234567:season:episode` for series |
+
+**Response:**
+
+```json
+{
+  "streams": [
+    {
+      "name":  "AltMount 🇬🇧 1080p - My Movie (2024) [1080p][Eng]",
+      "title": "My.Movie.2024.1080p.BluRay.x264\n💾 8.50 GB 🌐 NZBgeek",
+      "url":   "<base_url>/stremio/<download_key>/play?url=<prowlarr_nzb_url>&title=..."
+    }
+  ]
+}
+```
+
+When Stremio follows a `url`, AltMount downloads the NZB, queues it at high priority, waits
+for the download, and 302-redirects to the WebDAV media file. Your addon has no further work.
+
+**JavaScript example:**
+
+```javascript
+const { addonBuilder } = require("stremio-addon-sdk");
+
+const ALTMOUNT = "http://altmount.example.com";
+const KEY      = "YOUR_DOWNLOAD_KEY"; // sha256(api_key)
+
+const builder = new addonBuilder({
+  id: "com.example.my-addon", version: "1.0.0", name: "My Addon",
+  resources: ["stream"], types: ["movie", "series"], catalogs: [], idPrefixes: ["tt"],
+});
+
+builder.defineStreamHandler(async ({ type, id }) => {
+  const res  = await fetch(`${ALTMOUNT}/stremio/${KEY}/stream/${type}/${id}.json`);
+  const data = await res.json();
+  return { streams: data.streams ?? [] };
+});
+
+module.exports = builder.getInterface();
+```
+
+---
+
+### Pattern B — Your addon resolves the NZB
+
+Your addon finds the NZB file itself (from any indexer or source) and hands it to AltMount.
+AltMount queues the download, waits for it to complete (long-poll), and returns stream URLs
+your addon passes directly to `callback({ streams })`.
+
+```
+POST <base_url>/api/nzb/streams
+Content-Type: multipart/form-data
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `download_key` | Yes | SHA-256 of your AltMount API key |
+| `file` | Yes | The `.nzb` file (max 100 MB) |
+| `category` | No | Download category (e.g. `movies`, `tv`) |
+| `timeout` | No | Seconds to wait before returning 408 (default: `300`) |
+
+**Success response (`200 OK`):**
+
+```json
+{
+  "streams": [
+    {
+      "url":   "http://altmount.example.com/webdav/movies/My.Movie.2024.mkv",
+      "title": "My.Movie.2024.mkv",
+      "name":  "AltMount"
+    }
+  ],
+  "_queue_item_id": 42,
+  "_queue_status":  "completed"
+}
+```
+
+**408 Timeout** — download did not finish within `timeout` seconds. Use `queue_item_id` from
+the error details to poll `GET /api/queue/:id` and retry.
+
+**JavaScript example:**
+
+```javascript
+builder.defineStreamHandler(async ({ type, id }) => {
+  // Your addon resolves the NZB however it likes
+  const nzbBuffer = await myIndexer.fetchNzb(id);
+
+  const form = new FormData();
+  form.append("download_key", KEY);
+  form.append("file", new Blob([nzbBuffer], { type: "application/x-nzb" }), `${id}.nzb`);
+  form.append("category", type === "movie" ? "movies" : "tv");
+  form.append("timeout", "300");
+
+  const res  = await fetch(`${ALTMOUNT}/api/nzb/streams`, { method: "POST", body: form });
+  if (!res.ok) return { streams: [] };
+
+  const data = await res.json();
+  return { streams: data.streams ?? [] };
+});
+```
+
+> **Caching:** AltMount deduplicates by NZB filename within the configured TTL
+> (`nzb_ttl_hours`). Submitting the same filename a second time returns cached stream URLs
+> immediately without re-downloading.
+
 ## Endpoint Reference
 
 ### `POST /api/nzb/streams`
