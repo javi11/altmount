@@ -1,7 +1,75 @@
 import { Check, Copy, ExternalLink, Info, Save, Tv, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { ConfigResponse, ProwlarrConfig, StremioConfig } from "../../types/config";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
+
+interface TagInputProps {
+	tags: string[];
+	onChange: (tags: string[]) => void;
+	disabled?: boolean;
+	placeholder?: string;
+	parseValue?: (raw: string) => string | null;
+}
+
+function TagInput({
+	tags,
+	onChange,
+	disabled = false,
+	placeholder = "Add...",
+	parseValue,
+}: TagInputProps) {
+	const [inputValue, setInputValue] = useState("");
+
+	const addTag = useCallback(
+		(raw: string) => {
+			const value = parseValue ? parseValue(raw) : raw.trim();
+			if (value && !tags.includes(value)) {
+				onChange([...tags, value]);
+			}
+		},
+		[tags, onChange, parseValue],
+	);
+
+	const commitAndClear = useCallback(() => {
+		addTag(inputValue);
+		setInputValue("");
+	}, [inputValue, addTag]);
+
+	return (
+		<div className="flex min-h-10 flex-wrap gap-2 rounded-box border border-base-300 bg-base-100 p-2">
+			{tags.map((tag) => (
+				<span key={String(tag)} className="badge badge-neutral gap-1">
+					{String(tag)}
+					{!disabled && (
+						<button
+							type="button"
+							aria-label={`Remove ${tag}`}
+							onClick={() => onChange(tags.filter((t) => t !== tag))}
+						>
+							<X className="h-3 w-3" />
+						</button>
+					)}
+				</span>
+			))}
+			{!disabled && (
+				<input
+					type="text"
+					className="input input-ghost input-xs w-28 min-w-0 focus:outline-none"
+					placeholder={placeholder}
+					value={inputValue}
+					onChange={(e) => setInputValue(e.target.value)}
+					onKeyDown={(e) => {
+						if (e.key === "Enter" || e.key === ",") {
+							e.preventDefault();
+							commitAndClear();
+						}
+					}}
+					onBlur={commitAndClear}
+				/>
+			)}
+		</div>
+	);
+}
 
 interface StremioConfigSectionProps {
 	config: ConfigResponse;
@@ -19,13 +87,13 @@ const DEFAULT_PROWLARR: ProwlarrConfig = {
 	qualities: [],
 };
 
-const resolveProwlarr = (p: ProwlarrConfig | undefined): ProwlarrConfig => {
+function resolveProwlarr(p: ProwlarrConfig | undefined): ProwlarrConfig {
 	const base = p ?? DEFAULT_PROWLARR;
 	return {
 		...base,
 		categories: base.categories?.length ? base.categories : DEFAULT_PROWLARR.categories,
 	};
-};
+}
 
 export function StremioConfigSection({
 	config,
@@ -41,9 +109,6 @@ export function StremioConfigSection({
 	});
 	const [hasChanges, setHasChanges] = useState(false);
 	const [urlCopied, setUrlCopied] = useState(false);
-	const [newCat, setNewCat] = useState("");
-	const [newLang, setNewLang] = useState("");
-	const [newQual, setNewQual] = useState("");
 
 	useEffect(() => {
 		setFormData({
@@ -281,56 +346,18 @@ export function StremioConfigSection({
 
 					<fieldset className="fieldset">
 						<legend className="fieldset-legend">Categories</legend>
-						<div className="flex min-h-10 flex-wrap gap-2 rounded-box border border-base-300 bg-base-100 p-2">
-							{(formData.prowlarr?.categories ?? []).map((cat) => (
-								<span key={cat} className="badge badge-neutral gap-1">
-									{cat}
-									{!isReadOnly && (
-										<button
-											type="button"
-											aria-label={`Remove category ${cat}`}
-											onClick={() =>
-												updateProwlarr({
-													categories: (formData.prowlarr?.categories ?? []).filter(
-														(c) => c !== cat,
-													),
-												})
-											}
-										>
-											<X className="h-3 w-3" />
-										</button>
-									)}
-								</span>
-							))}
-							{!isReadOnly && (
-								<input
-									type="number"
-									className="input input-ghost input-xs w-24 min-w-0 focus:outline-none"
-									placeholder="Add ID…"
-									value={newCat}
-									onChange={(e) => setNewCat(e.target.value)}
-									onKeyDown={(e) => {
-										if (e.key === "Enter" || e.key === ",") {
-											e.preventDefault();
-											const n = Number.parseInt(newCat.trim(), 10);
-											if (!Number.isNaN(n) && !(formData.prowlarr?.categories ?? []).includes(n)) {
-												updateProwlarr({
-													categories: [...(formData.prowlarr?.categories ?? []), n],
-												});
-											}
-											setNewCat("");
-										}
-									}}
-									onBlur={() => {
-										const n = Number.parseInt(newCat.trim(), 10);
-										if (!Number.isNaN(n) && !(formData.prowlarr?.categories ?? []).includes(n)) {
-											updateProwlarr({ categories: [...(formData.prowlarr?.categories ?? []), n] });
-										}
-										setNewCat("");
-									}}
-								/>
-							)}
-						</div>
+						<TagInput
+							tags={(formData.prowlarr?.categories ?? []).map(String)}
+							onChange={(tags) =>
+								updateProwlarr({ categories: tags.map((t) => Number.parseInt(t, 10)) })
+							}
+							disabled={isReadOnly}
+							placeholder="Add ID..."
+							parseValue={(raw) => {
+								const n = Number.parseInt(raw.trim(), 10);
+								return Number.isNaN(n) ? null : String(n);
+							}}
+						/>
 						<p className="label">
 							Newznab category IDs. Press Enter or comma to add. Defaults: 2000 (Movies), 2040
 							(Movies/HD), 2060 (Movies/4K), 5000 (TV), 5040 (TV/HD).
@@ -339,56 +366,12 @@ export function StremioConfigSection({
 
 					<fieldset className="fieldset">
 						<legend className="fieldset-legend">Language Filter</legend>
-						<div className="flex min-h-10 flex-wrap gap-2 rounded-box border border-base-300 bg-base-100 p-2">
-							{(formData.prowlarr?.languages ?? []).map((lang) => (
-								<span key={lang} className="badge badge-neutral gap-1">
-									{lang}
-									{!isReadOnly && (
-										<button
-											type="button"
-											aria-label={`Remove ${lang}`}
-											onClick={() =>
-												updateProwlarr({
-													languages: (formData.prowlarr?.languages ?? []).filter((l) => l !== lang),
-												})
-											}
-										>
-											<X className="h-3 w-3" />
-										</button>
-									)}
-								</span>
-							))}
-							{!isReadOnly && (
-								<input
-									type="text"
-									className="input input-ghost input-xs w-28 min-w-0 focus:outline-none"
-									placeholder="Add keyword…"
-									value={newLang}
-									onChange={(e) => setNewLang(e.target.value)}
-									onKeyDown={(e) => {
-										if (e.key === "Enter" || e.key === ",") {
-											e.preventDefault();
-											const v = newLang.trim();
-											if (v && !(formData.prowlarr?.languages ?? []).includes(v)) {
-												updateProwlarr({
-													languages: [...(formData.prowlarr?.languages ?? []), v],
-												});
-											}
-											setNewLang("");
-										}
-									}}
-									onBlur={() => {
-										const v = newLang.trim();
-										if (v && !(formData.prowlarr?.languages ?? []).includes(v)) {
-											updateProwlarr({
-												languages: [...(formData.prowlarr?.languages ?? []), v],
-											});
-										}
-										setNewLang("");
-									}}
-								/>
-							)}
-						</div>
+						<TagInput
+							tags={formData.prowlarr?.languages ?? []}
+							onChange={(languages) => updateProwlarr({ languages })}
+							disabled={isReadOnly}
+							placeholder="Add keyword..."
+						/>
 						<p className="label">
 							Only show releases whose title contains at least one of these keywords. Leave empty to
 							show all languages.
@@ -397,56 +380,12 @@ export function StremioConfigSection({
 
 					<fieldset className="fieldset">
 						<legend className="fieldset-legend">Quality Filter</legend>
-						<div className="flex min-h-10 flex-wrap gap-2 rounded-box border border-base-300 bg-base-100 p-2">
-							{(formData.prowlarr?.qualities ?? []).map((qual) => (
-								<span key={qual} className="badge badge-neutral gap-1">
-									{qual}
-									{!isReadOnly && (
-										<button
-											type="button"
-											aria-label={`Remove ${qual}`}
-											onClick={() =>
-												updateProwlarr({
-													qualities: (formData.prowlarr?.qualities ?? []).filter((q) => q !== qual),
-												})
-											}
-										>
-											<X className="h-3 w-3" />
-										</button>
-									)}
-								</span>
-							))}
-							{!isReadOnly && (
-								<input
-									type="text"
-									className="input input-ghost input-xs w-28 min-w-0 focus:outline-none"
-									placeholder="Add keyword…"
-									value={newQual}
-									onChange={(e) => setNewQual(e.target.value)}
-									onKeyDown={(e) => {
-										if (e.key === "Enter" || e.key === ",") {
-											e.preventDefault();
-											const v = newQual.trim();
-											if (v && !(formData.prowlarr?.qualities ?? []).includes(v)) {
-												updateProwlarr({
-													qualities: [...(formData.prowlarr?.qualities ?? []), v],
-												});
-											}
-											setNewQual("");
-										}
-									}}
-									onBlur={() => {
-										const v = newQual.trim();
-										if (v && !(formData.prowlarr?.qualities ?? []).includes(v)) {
-											updateProwlarr({
-												qualities: [...(formData.prowlarr?.qualities ?? []), v],
-											});
-										}
-										setNewQual("");
-									}}
-								/>
-							)}
-						</div>
+						<TagInput
+							tags={formData.prowlarr?.qualities ?? []}
+							onChange={(qualities) => updateProwlarr({ qualities })}
+							disabled={isReadOnly}
+							placeholder="Add keyword..."
+						/>
 						<p className="label">
 							Only show releases whose title contains at least one of these keywords. Leave empty to
 							show all quality tiers.

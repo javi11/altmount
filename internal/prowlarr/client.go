@@ -41,9 +41,9 @@ type NZBResult struct {
 	Indexer     string
 }
 
-// MatchesLanguage returns true when title contains at least one of the language
+// matchesAnyKeyword returns true when title contains at least one of the
 // keywords (case-insensitive). Returns true when keywords is empty (no filter).
-func MatchesLanguage(title string, keywords []string) bool {
+func matchesAnyKeyword(title string, keywords []string) bool {
 	if len(keywords) == 0 {
 		return true
 	}
@@ -56,19 +56,16 @@ func MatchesLanguage(title string, keywords []string) bool {
 	return false
 }
 
+// MatchesLanguage returns true when title contains at least one of the language
+// keywords (case-insensitive). Returns true when keywords is empty (no filter).
+func MatchesLanguage(title string, keywords []string) bool {
+	return matchesAnyKeyword(title, keywords)
+}
+
 // MatchesQuality returns true when title contains at least one of the quality
 // keywords (case-insensitive). Returns true when keywords is empty (no filter).
 func MatchesQuality(title string, keywords []string) bool {
-	if len(keywords) == 0 {
-		return true
-	}
-	lower := strings.ToLower(title)
-	for _, kw := range keywords {
-		if strings.Contains(lower, strings.ToLower(kw)) {
-			return true
-		}
-	}
-	return false
+	return matchesAnyKeyword(title, keywords)
 }
 
 // InferLanguage detects the most likely language from a release title using common scene/group

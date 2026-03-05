@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/prowlarr"
 )
@@ -28,22 +29,47 @@ type stremioManifest struct {
 	IDPrefixes  []string `json:"idPrefixes"`
 }
 
+// emptyStreamsResponse returns the Stremio-protocol empty streams JSON.
+func emptyStreamsResponse(c *fiber.Ctx) error {
+	return c.JSON(fiber.Map{"streams": []any{}})
+}
+
+// resolveBaseURL returns the public base URL for building stream links.
+// Uses the configured base_url if set, otherwise auto-detects from the request.
+func resolveBaseURL(c *fiber.Ctx, configuredURL string) string {
+	baseURL := strings.TrimRight(configuredURL, "/")
+	if baseURL == "" {
+		baseURL = c.Protocol() + "://" + c.Hostname()
+	}
+	return baseURL
+}
+
+// isStremioEnabled reports whether the Stremio integration is active.
+func isStremioEnabled(cfg *config.Config) bool {
+	return cfg.Stremio.Enabled != nil && *cfg.Stremio.Enabled
+}
+
+// isProwlarrEnabled reports whether the Prowlarr search is active.
+func isProwlarrEnabled(cfg *config.Config) bool {
+	return cfg.Stremio.Prowlarr.Enabled != nil && *cfg.Stremio.Prowlarr.Enabled
+}
+
 // handleStremioManifest handles GET /stremio/:key/manifest.json
 // Returns the Stremio addon manifest for addon installation.
 func (s *Server) handleStremioManifest(c *fiber.Ctx) error {
 	ctx := c.Context()
 
 	if s.configManager == nil {
-		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "configuration not available"})
+		return RespondServiceUnavailable(c, "Configuration not available", "")
 	}
 	cfg := s.configManager.GetConfig()
-	if cfg.Stremio.Enabled == nil || !*cfg.Stremio.Enabled {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Stremio integration is disabled"})
+	if !isStremioEnabled(cfg) {
+		return RespondNotFound(c, "Stremio endpoint", "Stremio integration is disabled")
 	}
 
 	key := c.Params("key")
 	if !s.validateDownloadKey(ctx, key) {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid key"})
+		return RespondUnauthorized(c, "Invalid key", "")
 	}
 
 	slog.InfoContext(ctx, "Stremio addon manifest requested")
@@ -61,21 +87,16 @@ func (s *Server) handleStremioManifest(c *fiber.Ctx) error {
 }
 
 // handleStremioAddonStream handles GET /stremio/:key/stream/:type/:id.json
-// Searches Prowlarr and returns play-URL options — no NZB download or queuing at this stage.
+// Searches Prowlarr and returns play-URL options -- no NZB download or queuing at this stage.
 func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 	ctx := c.Context()
 
 	if s.configManager == nil {
-		return c.JSON(fiber.Map{"streams": []any{}})
+		return emptyStreamsResponse(c)
 	}
 	cfg := s.configManager.GetConfig()
-	if cfg.Stremio.Enabled == nil || !*cfg.Stremio.Enabled {
-		return c.JSON(fiber.Map{"streams": []any{}})
-	}
-
-	prowlarrCfg := cfg.Stremio.Prowlarr
-	if prowlarrCfg.Enabled == nil || !*prowlarrCfg.Enabled {
-		return c.JSON(fiber.Map{"streams": []any{}})
+	if !isStremioEnabled(cfg) || !isProwlarrEnabled(cfg) {
+		return emptyStreamsResponse(c)
 	}
 
 	key := c.Params("key")
@@ -98,7 +119,7 @@ func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 	}
 
 	if !strings.HasPrefix(imdbID, "tt") {
-		return c.JSON(fiber.Map{"streams": []any{}})
+		return emptyStreamsResponse(c)
 	}
 
 	// Map Stremio type to Prowlarr search type
@@ -113,33 +134,28 @@ func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 	slog.InfoContext(ctx, "Stremio addon stream request",
 		"type", streamType, "id", rawID, "imdb_id", imdbID)
 
-	// Resolve base URL
-	baseURL := strings.TrimRight(cfg.Stremio.BaseURL, "/")
-	if baseURL == "" {
-		baseURL = c.Protocol() + "://" + c.Hostname()
-	}
+	baseURL := resolveBaseURL(c, cfg.Stremio.BaseURL)
+	prowlarrCfg := cfg.Stremio.Prowlarr
 
-	// Search Prowlarr — return play-URL options immediately, no download yet
+	// Search Prowlarr -- return play-URL options immediately, no download yet
 	client := prowlarr.NewClient(prowlarrCfg.Host, prowlarrCfg.APIKey)
 	results, err := client.Search(ctx, imdbID, prowlarrType, prowlarrCfg.Categories, season, episode)
 	if err != nil {
 		slog.WarnContext(ctx, "Prowlarr search failed", "error", err, "imdb_id", imdbID)
-		return c.JSON(fiber.Map{"streams": []any{}})
+		return emptyStreamsResponse(c)
 	}
 	if len(results) == 0 {
 		slog.InfoContext(ctx, "No Prowlarr results found", "imdb_id", imdbID)
-		return c.JSON(fiber.Map{"streams": []any{}})
+		return emptyStreamsResponse(c)
 	}
 
 	// Apply language and quality filters
-	langFilter := cfg.Stremio.Prowlarr.Languages
-	qualFilter := cfg.Stremio.Prowlarr.Qualities
 	filtered := results[:0]
 	for _, r := range results {
-		if !prowlarr.MatchesLanguage(r.Title, langFilter) {
+		if !prowlarr.MatchesLanguage(r.Title, prowlarrCfg.Languages) {
 			continue
 		}
-		if !prowlarr.MatchesQuality(r.Title, qualFilter) {
+		if !prowlarr.MatchesQuality(r.Title, prowlarrCfg.Qualities) {
 			continue
 		}
 		filtered = append(filtered, r)
@@ -211,37 +227,31 @@ func (s *Server) handleStremioAddonPlay(c *fiber.Ctx) error {
 	ctx := c.Context()
 
 	if s.configManager == nil {
-		return c.Status(fiber.StatusServiceUnavailable).SendString("configuration not available")
+		return RespondServiceUnavailable(c, "Configuration not available", "")
 	}
 	cfg := s.configManager.GetConfig()
-	if cfg.Stremio.Enabled == nil || !*cfg.Stremio.Enabled {
-		return c.Status(fiber.StatusNotFound).SendString("Stremio integration is disabled")
+	if !isStremioEnabled(cfg) {
+		return RespondNotFound(c, "Stremio endpoint", "Stremio integration is disabled")
 	}
-
-	prowlarrCfg := cfg.Stremio.Prowlarr
-	if prowlarrCfg.Enabled == nil || !*prowlarrCfg.Enabled {
-		return c.Status(fiber.StatusServiceUnavailable).SendString("Prowlarr integration is disabled")
+	if !isProwlarrEnabled(cfg) {
+		return RespondServiceUnavailable(c, "Prowlarr integration is disabled", "")
 	}
 
 	key := c.Params("key")
 	if !s.validateDownloadKey(ctx, key) {
-		return c.Status(fiber.StatusUnauthorized).SendString("invalid key")
+		return RespondUnauthorized(c, "Invalid key", "")
 	}
 
 	downloadURL := c.Query("url")
 	safeTitle := c.Query("title")
 	if downloadURL == "" {
-		return c.Status(fiber.StatusBadRequest).SendString("missing url parameter")
+		return RespondBadRequest(c, "Missing url parameter", "")
 	}
 	if safeTitle == "" {
 		safeTitle = "unknown"
 	}
 
-	// Resolve base URL
-	baseURL := strings.TrimRight(cfg.Stremio.BaseURL, "/")
-	if baseURL == "" {
-		baseURL = c.Protocol() + "://" + c.Hostname()
-	}
+	baseURL := resolveBaseURL(c, cfg.Stremio.BaseURL)
 
 	safeFilename := safeTitle + ".nzb"
 	nzbName := safeTitle
@@ -268,7 +278,7 @@ func (s *Server) handleStremioAddonPlay(c *fiber.Ctx) error {
 	uploadDir := filepath.Join(os.TempDir(), "altmount-uploads")
 	if err := os.MkdirAll(uploadDir, 0755); err != nil {
 		slog.ErrorContext(ctx, "Failed to create upload directory", "error", err)
-		return c.Status(fiber.StatusInternalServerError).SendString("failed to create upload directory")
+		return RespondInternalError(c, "Failed to create upload directory", err.Error())
 	}
 	tempPath := filepath.Join(uploadDir, safeFilename)
 
@@ -280,24 +290,25 @@ func (s *Server) handleStremioAddonPlay(c *fiber.Ctx) error {
 	}
 
 	// Download NZB from Prowlarr
+	prowlarrCfg := cfg.Stremio.Prowlarr
 	client := prowlarr.NewClient(prowlarrCfg.Host, prowlarrCfg.APIKey)
 	nzbData, err := client.DownloadNZB(ctx, downloadURL)
 	if err != nil {
 		slog.WarnContext(ctx, "Failed to download NZB from Prowlarr",
 			"error", err, "title", safeTitle)
-		return c.Status(fiber.StatusServiceUnavailable).SendString("failed to download NZB from Prowlarr")
+		return RespondServiceUnavailable(c, "Failed to download NZB from Prowlarr", err.Error())
 	}
 
 	if err := os.WriteFile(tempPath, nzbData, 0644); err != nil {
 		slog.ErrorContext(ctx, "Failed to write NZB temp file", "error", err)
-		return c.Status(fiber.StatusInternalServerError).SendString("failed to write NZB temp file")
+		return RespondInternalError(c, "Failed to write NZB temp file", err.Error())
 	}
 
 	// Add NZB to queue with high priority
 	if s.importerService == nil {
 		os.Remove(tempPath)
 		slog.ErrorContext(ctx, "Importer service not available for Stremio addon play")
-		return c.Status(fiber.StatusServiceUnavailable).SendString("importer service not available")
+		return RespondServiceUnavailable(c, "Importer service not available", "")
 	}
 
 	var basePath *string
@@ -311,7 +322,7 @@ func (s *Server) handleStremioAddonPlay(c *fiber.Ctx) error {
 	if err != nil {
 		os.Remove(tempPath)
 		slog.ErrorContext(ctx, "Failed to add Prowlarr NZB to queue", "error", err, "title", safeTitle)
-		return c.Status(fiber.StatusInternalServerError).SendString("failed to add NZB to queue")
+		return RespondInternalError(c, "Failed to add NZB to queue", err.Error())
 	}
 
 	slog.InfoContext(ctx, "Prowlarr NZB queued for Stremio play",
@@ -329,13 +340,13 @@ func (s *Server) waitAndRedirectToStream(c *fiber.Ctx, itemID int64, baseURL, do
 
 	current, err := s.queueRepo.GetQueueItem(ctx, itemID)
 	if err != nil || current == nil {
-		return c.Status(fiber.StatusServiceUnavailable).SendString("queue item not found")
+		return RespondServiceUnavailable(c, "Queue item not found", "")
 	}
 
 	redirectToFirst := func(item *database.ImportQueueItem) error {
 		streams, err := s.buildStremioStreams(item, baseURL, downloadKey, nzbName)
 		if err != nil || len(streams) == 0 {
-			return c.Status(fiber.StatusServiceUnavailable).SendString("no streams available")
+			return RespondServiceUnavailable(c, "No streams available", "")
 		}
 		return c.Redirect(streams[0].URL, fiber.StatusFound)
 	}
@@ -344,7 +355,7 @@ func (s *Server) waitAndRedirectToStream(c *fiber.Ctx, itemID int64, baseURL, do
 	case database.QueueStatusCompleted:
 		return redirectToFirst(current)
 	case database.QueueStatusFailed:
-		return c.Status(fiber.StatusServiceUnavailable).SendString("NZB processing failed")
+		return RespondServiceUnavailable(c, "NZB processing failed", "")
 	}
 
 	timer := time.NewTimer(time.Duration(timeoutSecs) * time.Second)
@@ -354,7 +365,7 @@ func (s *Server) waitAndRedirectToStream(c *fiber.Ctx, itemID int64, baseURL, do
 		select {
 		case update, ok := <-ch:
 			if !ok {
-				return c.Status(fiber.StatusServiceUnavailable).SendString("progress channel closed")
+				return RespondServiceUnavailable(c, "Progress channel closed", "")
 			}
 			if update.QueueID != int(itemID) {
 				continue
@@ -363,41 +374,45 @@ func (s *Server) waitAndRedirectToStream(c *fiber.Ctx, itemID int64, baseURL, do
 			case "completed":
 				item, err := s.queueRepo.GetQueueItem(ctx, itemID)
 				if err != nil {
-					return c.Status(fiber.StatusServiceUnavailable).SendString("failed to fetch queue item")
+					return RespondServiceUnavailable(c, "Failed to fetch queue item", "")
 				}
 				return redirectToFirst(item)
 			case "failed":
-				return c.Status(fiber.StatusServiceUnavailable).SendString("NZB processing failed")
+				return RespondServiceUnavailable(c, "NZB processing failed", "")
 			}
 		case <-timer.C:
-			return c.Status(fiber.StatusServiceUnavailable).
-				SendString(fmt.Sprintf("processing did not complete within %d seconds", timeoutSecs))
+			return RespondServiceUnavailable(c, "Processing timed out",
+				fmt.Sprintf("did not complete within %d seconds", timeoutSecs))
 		}
 	}
 }
 
 // waitAndRespondAddon waits for a queue item to complete and returns Stremio streams.
-// Always returns HTTP 200 — failures produce an empty streams array (Stremio shows "no streams").
+// Always returns HTTP 200 -- failures produce an empty streams array (Stremio shows "no streams").
 func (s *Server) waitAndRespondAddon(c *fiber.Ctx, itemID int64, baseURL, downloadKey, nzbName string, timeoutSecs int) error {
 	ctx := c.Context()
 
 	subID, ch := s.progressBroadcaster.Subscribe()
 	defer s.progressBroadcaster.Unsubscribe(subID)
 
+	respondStreams := func(item *database.ImportQueueItem) error {
+		streams, err := s.buildStremioStreams(item, baseURL, downloadKey, nzbName)
+		if err != nil || len(streams) == 0 {
+			return emptyStreamsResponse(c)
+		}
+		return c.JSON(fiber.Map{"streams": streams})
+	}
+
 	current, err := s.queueRepo.GetQueueItem(ctx, itemID)
 	if err != nil || current == nil {
-		return c.JSON(fiber.Map{"streams": []any{}})
+		return emptyStreamsResponse(c)
 	}
 
 	switch current.Status {
 	case database.QueueStatusCompleted:
-		streams, err := s.buildStremioStreams(current, baseURL, downloadKey, nzbName)
-		if err != nil || len(streams) == 0 {
-			return c.JSON(fiber.Map{"streams": []any{}})
-		}
-		return c.JSON(fiber.Map{"streams": streams})
+		return respondStreams(current)
 	case database.QueueStatusFailed:
-		return c.JSON(fiber.Map{"streams": []any{}})
+		return emptyStreamsResponse(c)
 	}
 
 	timer := time.NewTimer(time.Duration(timeoutSecs) * time.Second)
@@ -407,7 +422,7 @@ func (s *Server) waitAndRespondAddon(c *fiber.Ctx, itemID int64, baseURL, downlo
 		select {
 		case update, ok := <-ch:
 			if !ok {
-				return c.JSON(fiber.Map{"streams": []any{}})
+				return emptyStreamsResponse(c)
 			}
 			if update.QueueID != int(itemID) {
 				continue
@@ -416,18 +431,14 @@ func (s *Server) waitAndRespondAddon(c *fiber.Ctx, itemID int64, baseURL, downlo
 			case "completed":
 				item, err := s.queueRepo.GetQueueItem(ctx, itemID)
 				if err != nil {
-					return c.JSON(fiber.Map{"streams": []any{}})
+					return emptyStreamsResponse(c)
 				}
-				streams, err := s.buildStremioStreams(item, baseURL, downloadKey, nzbName)
-				if err != nil || len(streams) == 0 {
-					return c.JSON(fiber.Map{"streams": []any{}})
-				}
-				return c.JSON(fiber.Map{"streams": streams})
+				return respondStreams(item)
 			case "failed":
-				return c.JSON(fiber.Map{"streams": []any{}})
+				return emptyStreamsResponse(c)
 			}
 		case <-timer.C:
-			return c.JSON(fiber.Map{"streams": []any{}})
+			return emptyStreamsResponse(c)
 		}
 	}
 }
