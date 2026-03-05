@@ -57,6 +57,22 @@ function FileFormatIcon() {
   );
 }
 
+function RcloneIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={styles.featureIcon} aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" />
+    </svg>
+  );
+}
+
+function MountIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={styles.featureIcon} aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 5.625c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125" />
+    </svg>
+  );
+}
+
 const FeatureList: FeatureItem[] = [
   {
     title: 'WebDAV Interface',
@@ -118,11 +134,31 @@ const FeatureList: FeatureItem[] = [
       </>
     ),
   },
+  {
+    title: 'Built-in rclone',
+    Icon: RcloneIcon,
+    description: (
+      <>
+        Ships with rclone compiled in — no separate installation needed. Mount any rclone-supported
+        remote alongside your Usenet content using a single binary.
+      </>
+    ),
+  },
+  {
+    title: 'Custom Mount',
+    Icon: MountIcon,
+    description: (
+      <>
+        Native FUSE/OS-level mount support out of the box. Access your Usenet library as a local
+        drive in any app — zero extra tools or OS packages required.
+      </>
+    ),
+  },
 ];
 
 function Feature({ title, Icon, description }: FeatureItem) {
   return (
-    <div className={clsx('col col--4')}>
+    <div className={clsx('col col--3')}>
       <div className={styles.featureCard}>
         <div className={styles.featureIconWrap}>
           <Icon />

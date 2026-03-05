@@ -1,3 +1,9 @@
+---
+title: Frequently Asked Questions
+description: Answers to common questions about AltMount setup, Usenet providers, streaming, ARR integration, and more.
+keywords: [altmount, faq, questions, usenet, streaming, arr, setup, providers]
+---
+
 # Frequently Asked Questions
 
 Answers to the most common questions from the AltMount community.

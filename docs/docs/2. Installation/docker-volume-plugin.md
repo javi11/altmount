@@ -1,3 +1,9 @@
+---
+title: Rclone Docker Volume Plugin
+description: Mount WebDAV and remote storage as native Docker volumes using the rclone Docker Volume Plugin with AltMount.
+keywords: [altmount, rclone, docker, docker volume, webdav, mount, plugin]
+---
+
 # Rclone Docker Volume Plugin
 
 The Docker Rclone Plugin enables mounting remote storage like WebDAV directly as a Docker volume, allowing containers to transparently access external filesystems as if they were local volumes.
