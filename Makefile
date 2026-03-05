@@ -81,13 +81,25 @@ build-frontend:
 	COMMIT=$$(git rev-parse --short HEAD 2>/dev/null || echo "unknown"); \
 	cd frontend && bun install --frozen-lockfile && APP_VERSION=$$VERSION GIT_COMMIT=$$COMMIT bun run build
 
+# Install swag if not present then generate OpenAPI spec from handler annotations.
+# Output: docs/static/swagger.json (served as a static asset by Docusaurus).
+.PHONY: swagger
+swagger:
+	@which swag > /dev/null 2>&1 || GOTOOLCHAIN=local go install github.com/swaggo/swag/v2/cmd/swag@latest
+	swag init \
+		--generalInfo internal/api/swagger_docs.go \
+		--dir . \
+		--output docs/static \
+		--outputTypes json \
+		--quiet
+
 .PHONY: build-docs
-build-docs:
-	cd docs && bun install && bun run build
+build-docs: swagger
+	cd docs && bun install && bun run gen-api-docs && bun run build
 
 .PHONY: serve-docs
-serve-docs:
-	cd docs && bun run start
+serve-docs: swagger
+	cd docs && bun install && bun run gen-api-docs && bun run start
 
 .PHONY: build-cli
 build-cli: build-frontend

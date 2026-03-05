@@ -1,0 +1,1 @@
+{"parameters":[{"description":"Absolute directory path to browse (defaults to working directory)","name":"path","in":"query","schema":{"type":"string"}}]}

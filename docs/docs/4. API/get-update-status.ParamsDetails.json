@@ -1,0 +1,1 @@
+{"parameters":[{"description":"Update channel: 'latest' (stable release) or 'dev' (latest commit)","name":"channel","in":"query","schema":{"type":"string"}}]}

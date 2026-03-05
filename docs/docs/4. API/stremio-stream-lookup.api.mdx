@@ -1,0 +1,69 @@
+---
+id: stremio-stream-lookup
+title: "Stremio stream lookup"
+description: "Searches Prowlarr for NZBs matching the given IMDB ID and returns Stremio stream objects with play URLs. Requires Prowlarr integration to be enabled. Filtering by language and quality is applied based on configuration."
+sidebar_label: "Stremio stream lookup"
+hide_title: true
+hide_table_of_contents: true
+api: eJytVNFu21YM/RWCTxkgSHbWdoUwDHDqpHXXpEacrsDqPFASLd346l7lXsqBagjoR+wL9yXDlew1S7eHDfOLLYuH55A85B4L9rlTjShrMMUVk8sr9rB09kGTc7CxDq5+PfNQk+SVMiVIxVCqHRtYXM7PYDEHMgU4ltYZDytxXCsLXhxTDTa741w8PCipoNHUwYfrdz6Ga75vlXtMpIxw6SgIAbGQMbChTHMRw4XSwi5wZx1oMmVLJQ+s9y1pJR0oD9Q0WnEBGXkuwBrIrdmosh1TxhihUOkx/YQHiXgbYUOOahZ24cX+STPm9sFoSwVsuYOT1ZvZ6fMXYDcwWy7CX99hhIZqxhS33GGEKoAakgojdGN9BabiWo7Q5xXXhOkepWsCxEsoCPs+ekr7yhphIxACU6jtTjFYB56dYv+Vc8jzv5Eex5YfyBdzOOG4jEFkevr9s+cvfgga/nxIp+npo/pV8Z+V3IZg31jj2Yf3p5NJ+Pqruv16vcbRUT78TOFTHMe3PUZ4EBwwgwPyYdzJnQ/A/bfEoyExQioKFUJJL51t2Eno7iC3D58Ia5bKFphiySF+qCzFxI+dSvZb7vpkFJXsQ/Y+2auijwfqCD273dFXrdMBmmibk66sl/Tl5OUEQ/Ge89Yp6VZB6NiCWaN+5m7WBr6nnTh4b1jLxtnSUV2TqBwoz9l7OKEdKR32BjbO1vD6/AYSalQybkOY2aERNLB8nSE16pGN71t2HfYRnjE5dn8v5u3HGxC7ZQM2E1KGi5F0+X51YKVWqkTbUpkYLqyrSVJYH3LCjwP2pzX+s6jAa536PAz1qK1iKtgFF6MyG/utruvz1c2wpaFLMy2XtjUCv3/5DQg+cjaf/ZJcXaxgnBBklG/D3ejCnUs+eDYs0Xiw7ltuGWoyVHLNRiLYKM1QMWmpoLZGiQ0+joZjVHOh6HD4lCmHk6NED3UcRcyWi4NpKR9Meyz0GPBayZs2g4X37bDto3UqkcanSVIqqdoszm2d3NFOTacJaakDMFEjoo9Qq5yN50fZLxc3/yZVpm2W1OSFXfJu8er8anUe8gY7jw2exhPs+z8AKNUiFg==
+sidebar_class_name: "get api-method"
+info_path: docs/4. API/altmount-api
+custom_edit_url: null
+---
+
+import MethodEndpoint from "@theme/ApiExplorer/MethodEndpoint";
+import ParamsDetails from "@theme/ParamsDetails";
+import RequestSchema from "@theme/RequestSchema";
+import StatusCodes from "@theme/StatusCodes";
+import OperationTabs from "@theme/OperationTabs";
+import TabItem from "@theme/TabItem";
+import Heading from "@theme/Heading";
+import Translate from "@docusaurus/Translate";
+
+<Heading
+  as={"h1"}
+  className={"openapi__heading"}
+  children={"Stremio stream lookup"}
+>
+</Heading>
+
+<MethodEndpoint
+  method={"get"}
+  path={"/stremio/{key}/stream/{type}/{id}.json"}
+  context={"endpoint"}
+>
+  
+</MethodEndpoint>
+
+
+
+Searches Prowlarr for NZBs matching the given IMDB ID and returns Stremio stream objects with play URLs. Requires Prowlarr integration to be enabled. Filtering by language and quality is applied based on configuration.
+
+<Heading
+  id={"request"}
+  as={"h2"}
+  className={"openapi-tabs__heading"}
+>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
+<ParamsDetails
+  {...require("./stremio-stream-lookup.ParamsDetails.json")}
+>
+  
+</ParamsDetails>
+
+<RequestSchema
+  {...require("./stremio-stream-lookup.RequestSchema.json")}
+>
+  
+</RequestSchema>
+
+<StatusCodes
+  {...require("./stremio-stream-lookup.StatusCodes.json")}
+>
+  
+</StatusCodes>
+
+
+      

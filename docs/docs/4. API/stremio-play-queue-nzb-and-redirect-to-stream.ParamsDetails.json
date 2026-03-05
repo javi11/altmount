@@ -1,0 +1,1 @@
+{"parameters":[{"description":"Download key (SHA256 of API key)","name":"key","in":"path","required":true,"schema":{"type":"string"}},{"description":"Prowlarr NZB download URL","name":"url","in":"query","required":true,"schema":{"type":"string"}},{"description":"Safe filename title for the NZB","name":"title","in":"query","schema":{"type":"string"}}]}

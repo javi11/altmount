@@ -1,0 +1,1 @@
+{"title":"Body","body":{"content":{"application/json":{"schema":{"type":"object","properties":{"size":{"type":"string"}}}}},"description":"Test size (100MB, 1GB, 10GB)","required":true}}

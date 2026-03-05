@@ -1,0 +1,1 @@
+{"title":"Body","body":{"content":{"application/json":{"schema":{"type":"object","properties":{"category":{"type":"string"},"links":{"type":"array","items":{"type":"string"}},"priority":{"type":"integer"},"relative_path":{"type":"string"}}}}},"description":"NZBLNK links and options","required":true}}

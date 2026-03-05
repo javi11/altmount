@@ -53,6 +53,23 @@ type StremioStreamsResponse struct {
 // Accepts an NZB file, adds it to the import queue with high priority, and waits synchronously
 // for processing to complete before returning Stremio-compatible stream URLs for all media files
 // found in the NZB output.
+//
+// @Summary      Upload NZB and get stream URLs
+// @Description  Accepts a .nzb file upload, queues it with high priority, waits for processing to complete, and returns Stremio-compatible stream URLs for all media files. Authenticated via download_key (SHA256 of user API key). Caches results for re-use.
+// @Tags         NZB
+// @Accept       multipart/form-data
+// @Produce      json
+// @Param        file          formData  file    true   "NZB file to process"
+// @Param        download_key  formData  string  true   "SHA256 of the user API key"
+// @Param        category      formData  string  false  "Queue category (default: stremio)"
+// @Param        timeout       formData  int     false  "Processing timeout in seconds (default: 300)"
+// @Success      200  {object}  StremioStreamsResponse
+// @Failure      400  {object}  APIResponse
+// @Failure      401  {object}  APIResponse
+// @Failure      404  {object}  APIResponse  "Stremio not enabled"
+// @Failure      408  {object}  APIResponse  "Processing timed out"
+// @Failure      500  {object}  APIResponse
+// @Router       /api/nzb/streams [post]
 func (s *Server) handleNzbStreams(c *fiber.Ctx) error {
 	ctx := c.Context()
 

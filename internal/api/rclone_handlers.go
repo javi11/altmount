@@ -29,6 +29,14 @@ func NewRCloneHandlers(mountService *rclone.MountService, configGetter config.Co
 }
 
 // GetMountStatus returns the current mount status
+//
+// @Summary      Get RClone mount status
+// @Description  Returns the current status of the RClone mount
+// @Tags         RClone
+// @Produce      json
+// @Success      200  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/rclone/mount/status [get]
 func (h *RCloneHandlers) GetMountStatus(c *fiber.Ctx) error {
 	status := h.mountService.GetStatus()
 	return c.JSON(fiber.Map{
@@ -38,6 +46,15 @@ func (h *RCloneHandlers) GetMountStatus(c *fiber.Ctx) error {
 }
 
 // StartMount starts the rclone mount
+//
+// @Summary      Start RClone mount
+// @Description  Starts the RClone VFS mount
+// @Tags         RClone
+// @Produce      json
+// @Success      200  {object}  APIResponse
+// @Failure      500  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/rclone/mount/start [post]
 func (h *RCloneHandlers) StartMount(c *fiber.Ctx) error {
 	if err := h.mountService.Mount(c.Context()); err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
@@ -54,6 +71,15 @@ func (h *RCloneHandlers) StartMount(c *fiber.Ctx) error {
 }
 
 // StopMount stops the rclone mount
+//
+// @Summary      Stop RClone mount
+// @Description  Stops the RClone VFS mount
+// @Tags         RClone
+// @Produce      json
+// @Success      200  {object}  APIResponse
+// @Failure      500  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/rclone/mount/stop [post]
 func (h *RCloneHandlers) StopMount(c *fiber.Ctx) error {
 	if err := h.mountService.Unmount(c.Context()); err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
@@ -69,6 +95,17 @@ func (h *RCloneHandlers) StopMount(c *fiber.Ctx) error {
 }
 
 // TestMountConfig tests the mount configuration
+//
+// @Summary      Test RClone mount configuration
+// @Description  Validates the RClone mount configuration without applying it
+// @Tags         RClone
+// @Accept       json
+// @Produce      json
+// @Param        body  body  object{mount_point=string,mount_options=object}  false  "Mount configuration to test"
+// @Success      200  {object}  APIResponse
+// @Failure      400  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/rclone/mount/test [post]
 func (h *RCloneHandlers) TestMountConfig(c *fiber.Ctx) error {
 	// Parse test configuration from request body
 	var testConfig struct {
@@ -102,6 +139,17 @@ func (h *RCloneHandlers) TestMountConfig(c *fiber.Ctx) error {
 }
 
 // TestRCloneConnection tests the RClone RC connection
+//
+// @Summary      Test RClone RC connection
+// @Description  Tests connectivity to an external RClone RC server with the provided credentials
+// @Tags         RClone
+// @Accept       json
+// @Produce      json
+// @Param        body  body  object{rc_url=string,rc_user=string,rc_pass=string,vfs_name=string}  true  "RClone RC connection parameters"
+// @Success      200  {object}  APIResponse
+// @Failure      422  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/rclone/test [post]
 func (h *RCloneHandlers) TestRCloneConnection(c *fiber.Ctx) error {
 	// Decode test request
 	var testReq struct {
@@ -155,6 +203,16 @@ func (h *RCloneHandlers) TestRCloneConnection(c *fiber.Ctx) error {
 }
 
 // ClearRCloneCache removes the rclone VFS cache directory and recreates it empty.
+//
+// @Summary      Clear RClone cache
+// @Description  Removes the RClone VFS cache directory and recreates it empty
+// @Tags         RClone
+// @Produce      json
+// @Success      200  {object}  APIResponse
+// @Failure      400  {object}  APIResponse
+// @Failure      500  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/rclone/cache [delete]
 func (h *RCloneHandlers) ClearRCloneCache(c *fiber.Ctx) error {
 	cfg := h.configGetter()
 	cacheDir := cfg.RClone.CacheDir

@@ -1,0 +1,69 @@
+---
+id: upload-nzb-and-get-stream-ur-ls
+title: "Upload NZB and get stream URLs"
+description: "Accepts a .nzb file upload, queues it with high priority, waits for processing to complete, and returns Stremio-compatible stream URLs for all media files. Authenticated via download_key (SHA256 of user API key). Caches results for re-use."
+sidebar_label: "Upload NZB and get stream URLs"
+hide_title: true
+hide_table_of_contents: true
+api: eJztWOFu3DYMfhVCv1rAOV+6dggOw4BLlrZZ2zTrJSuQNghom2erkSVHotNeAgN7iD3hnmSQdJdzdw7aAQNaYMmf+EyK+sSPpEjfiIJcbmXD0mgxEdM8p4YdIIz0dQZzqQjaRhksErhsqSUHkuGj5AoqWVbQWGms5EUCH1Gyg7mx0FiTk3NSl8AGclM3ipgSQF2AJW6tdjBjS7U0W16KLDNF4NgS1nDy5mU0g0pBTYXEgMKNYNpyRZpljkwFXEmEwnzUHtv5BS3gwez59NGTH8HMoXVkYXp0ABe0eDiCPcwrcmDJtWqJ0dJW62gkEsFYOjF5Jw5Pd8VZIixdtuR41xQLMbkRudFMmv1j3SqWDVpO58bWWwUy+tcur6gOT7xoSEyEyT5QziIRjTUNWZbkvNQfwv//3N+Hp7vRyWxWfvOYoiXHVupSJMJviCwmIpMa7UJ0iegffdPs2hVc0Wfu2LDeJcI7tDR2wM5vnnJYyeFBQXNsFU8CWbU0D4fMsazJtLxp7agXGFEHpAZHudGF6xn/YTzuGZaaqSQrui6yIy0VnrDg0H844qz7XIttS+GFa4x2kYhH4/EmtNcvRNInG5tG+UCTRqcfnFf5eqbPQ6KcS6b6XBY9/duTJCsdx8it66msvRjToS9Da9Hz5w27L8PQWNOgZZashiWtVQPvV3+JeDzkul0s4E3Mmv/Oh8vs6hJB1hr75QW5KYbPVBCjVMM+rsk5LIfWdUHKX4E0N2087ibJStbyDpGZzx3dIWPDqIZEHpRr81Ak1uLMGEWoxZqk7U2STjS2XBkrr6m4Z+m7YOnxQNmOVRW0YSCNmbon6zsha+eLt1kB/s67Z+vbs/Vk6JY60ExWo4IZ2SuysB+8ek/Xt6Yr4q5MISaiMaGFaJArMREpNjLV11m66oQS4QJ3vl2/ib2KSFNlclSVcTzZGe+MRXfm1fLWDyUzT1489bSRL2jhJ4jN0Fh2xqvZpbRY18gyBwzQ4QFeoVS+GsPcmhqe7R9DAJcbPZdlr1XFsItIlr2X/x1bbun3uWwp9u67hJbsMJhf3x4DmwvSYDJGqamImx69ni139Rd5qkwp9QiehsFgAu+XNuGnsPbn9+JuUNNlIxACfYWtIiyWPbbUc7OJ683+7DjMEN5LU8WvfBjBX3/8CQhvKftl+nt6+HQGkSHIML+gArIFHJ7upieONHESx8bQ+EKNGkuqSXMS55+KUHEFtdGSjY/pOC/GATBGgNRlGNhi+ypuQUyPDpaJjDmvO9+1wjPJz9sMDpxryYdRDJ2KuXGTNC0lV202yk2dfsArub2douLaL0xlXBFSIyftqGf91cHxvzGVKZOlNTomm7482Ns/nO17uz6co4O3R2P/wudAjbq30UkYv70jg0dK4v6o7CegPlG9kfX/OMzHkGf6xGmjUOreVBPLyjufDz4ZrjOxHrLOEuFLiBff3GTo6MSqrvOvY9JO3p0l4gqt9FXA/+qSVcr4WhRmcLEXHb917EF4ddV6MEPfDbpktShy1FPfuIV8Rbstkb4MiERky88TdbhFwveBYDdZP3qQXfc3ld4u6g==
+sidebar_class_name: "post api-method"
+info_path: docs/4. API/altmount-api
+custom_edit_url: null
+---
+
+import MethodEndpoint from "@theme/ApiExplorer/MethodEndpoint";
+import ParamsDetails from "@theme/ParamsDetails";
+import RequestSchema from "@theme/RequestSchema";
+import StatusCodes from "@theme/StatusCodes";
+import OperationTabs from "@theme/OperationTabs";
+import TabItem from "@theme/TabItem";
+import Heading from "@theme/Heading";
+import Translate from "@docusaurus/Translate";
+
+<Heading
+  as={"h1"}
+  className={"openapi__heading"}
+  children={"Upload NZB and get stream URLs"}
+>
+</Heading>
+
+<MethodEndpoint
+  method={"post"}
+  path={"/api/nzb/streams"}
+  context={"endpoint"}
+>
+  
+</MethodEndpoint>
+
+
+
+Accepts a .nzb file upload, queues it with high priority, waits for processing to complete, and returns Stremio-compatible stream URLs for all media files. Authenticated via download_key (SHA256 of user API key). Caches results for re-use.
+
+<Heading
+  id={"request"}
+  as={"h2"}
+  className={"openapi-tabs__heading"}
+>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
+<ParamsDetails
+  parameters={undefined}
+>
+  
+</ParamsDetails>
+
+<RequestSchema
+  {...require("./upload-nzb-and-get-stream-ur-ls.RequestSchema.json")}
+>
+  
+</RequestSchema>
+
+<StatusCodes
+  {...require("./upload-nzb-and-get-stream-ur-ls.StatusCodes.json")}
+>
+  
+</StatusCodes>
+
+
+      

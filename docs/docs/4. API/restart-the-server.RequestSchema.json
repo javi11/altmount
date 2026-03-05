@@ -1,0 +1,1 @@
+{"title":"Body","body":{"content":{"application/json":{"schema":{"type":"object","properties":{"force":{"description":"Force restart even if unsafe","type":"boolean"}}}}},"description":"Restart options"}}

@@ -11,6 +11,22 @@ import (
 )
 
 // handleImportNzbdav handles POST /import/nzbdav
+//
+// @Summary      Import NzbDav database
+// @Description  Starts an async import from an NzbDav SQLite database file (by path or upload)
+// @Tags         NZBDav
+// @Accept       multipart/form-data
+// @Produce      json
+// @Param        rootFolder  formData  string  true   "Root folder path for imported files"
+// @Param        dbPath      formData  string  false  "Server-side path to SQLite database file"
+// @Param        file        formData  file    false  "SQLite database file upload (if dbPath not provided)"
+// @Success      202  {object}  APIResponse
+// @Failure      400  {object}  APIResponse
+// @Failure      409  {object}  APIResponse
+// @Failure      422  {object}  APIResponse
+// @Failure      500  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/import/nzbdav [post]
 func (s *Server) handleImportNzbdav(c *fiber.Ctx) error {
 	// Check if importer service is available
 	if s.importerService == nil {
@@ -85,6 +101,15 @@ func (s *Server) handleImportNzbdav(c *fiber.Ctx) error {
 }
 
 // handleGetNzbdavImportStatus handles GET /import/nzbdav/status
+//
+// @Summary      Get NzbDav import status
+// @Description  Returns the current status of the NzbDav import operation
+// @Tags         NZBDav
+// @Produce      json
+// @Success      200  {object}  APIResponse
+// @Failure      500  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/import/nzbdav/status [get]
 func (s *Server) handleGetNzbdavImportStatus(c *fiber.Ctx) error {
 	if s.importerService == nil {
 		return c.Status(500).JSON(fiber.Map{
@@ -101,6 +126,16 @@ func (s *Server) handleGetNzbdavImportStatus(c *fiber.Ctx) error {
 }
 
 // handleCancelNzbdavImport handles DELETE /import/nzbdav
+//
+// @Summary      Cancel NzbDav import
+// @Description  Cancels any in-progress NzbDav import operation
+// @Tags         NZBDav
+// @Produce      json
+// @Success      200  {object}  APIResponse
+// @Failure      400  {object}  APIResponse
+// @Failure      500  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/import/nzbdav [delete]
 func (s *Server) handleCancelNzbdavImport(c *fiber.Ctx) error {
 	if s.importerService == nil {
 		return c.Status(500).JSON(fiber.Map{
@@ -124,6 +159,15 @@ func (s *Server) handleCancelNzbdavImport(c *fiber.Ctx) error {
 }
 
 // handleResetNzbdavImportStatus handles POST /import/nzbdav/reset
+//
+// @Summary      Reset NzbDav import status
+// @Description  Resets the NzbDav import status to allow starting a new import
+// @Tags         NZBDav
+// @Produce      json
+// @Success      200  {object}  APIResponse
+// @Failure      500  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/import/nzbdav/reset [post]
 func (s *Server) handleResetNzbdavImportStatus(c *fiber.Ctx) error {
 	if s.importerService == nil {
 		return c.Status(500).JSON(fiber.Map{

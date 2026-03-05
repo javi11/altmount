@@ -1,0 +1,61 @@
+---
+id: stream-queue-progress-sse
+title: "Stream queue progress (SSE)"
+description: "Server-Sent Events stream that pushes real-time progress updates for all queue items. On connect, sends the full current state as an 'initial' event, then continues sending 'update' events as items progress. Sends a keep-alive comment every 30 seconds."
+sidebar_label: "Stream queue progress (SSE)"
+hide_title: true
+hide_table_of_contents: true
+api: eJztVs1u5EQQfpVSnxbJGU+Aw8pCSLMwGwJsNuCElcjMoWzX2L1pd3u7ywODZYmH4Al5ElRtTzabTcTPmYs97aqu+qq6vq9nUIHK3ms+qOxmUC8IPflVz43KbrbjNlEVhdLrjrWzKlM5+T35k5wsw3pPlgME9oQtcIMMXR8aCuAJzQnrlqDzrvYUAvRdhUwBds4DGgPveuoJNFMbFvDaQumspZITCGSrANwQ7HpjoOy9l2SBkQkwAFrYKG01azQbBSQgEvGPMVjbnkIMom0NGzXlPToGiRCT3iFbQB4zItwSdSdo9J6gdG0rWWlP/gCfLSFQ6WwVFipRjHVQ2Y36QSpQ20R5Cp2zgYLKBvXpcimvB13L13ObMqiQMYNhs9koPnQk70weM9DNRiXyELdoGxaLxTiqREl1ZFmiM/3KaSzoZAorH0PZUIvRfOhIZSqw17ZW4ziOifp8efoxrmuLPTfO69+o+i8ZXPGWSlaJ6rzryLOeeiDYVTaMiSLvnf/7DaWr6BHgMnyM2oRHbS2FgPVj+8Zo5X+AtHT9XO/kpi1TTV7CG93qJ0xutwv0hI0do3nMJKBCX5YU7pdTOGcIbTykI+7GVSpTNUW4KExUKXY6jZRJj3ObzueSqBA5GSJ/e2/EPTWuRNO4wNnz5fOlEiIfeZ7LKU7lrzr9HR0mtj+cjdXlOdzSIRI25sS2RdYlYKwBnuEetcHCEOy8a+FsfQURZunsTtefCFOmGjFmUYmy2M7r27jWkuddT/4gnbsvPQ/BfPvmCtjdkgVXMGpL1ZT08nU+Z5VBTo2rtV3AS+db5Aw2c0z4Iu79cqOeBrWaiYAx44ytIazi2cl65z7G9eM6vwLplHRpZfiVzBP8+fsfgPCGiq9XP6UXL3OYTggKLG+pguIAFz+/SK8DWeIEftHczHLYosWa2qhoO20IGkLDDbTOanYy3AmgraClSuOsKNrWUZU0m1jHEcTq8nymNJZxVo+FHh3ONH/TF3AeQk9BJfPoNMxdyNK01tz0xaJ0bfoW9/r0NEXDrWxM9bQjcqQkG+he9FfnV/8mVGFckbYYmHz6/flX64t8LXFlnKcGny6W8qFzgVu09xLl060z9e3ulnmW52uZvA9OaXgvbP/fX3cEiArfGdRWGhxPbJjl5kbYoRIVa5w0M6YSrZlEZ5soERdxHYYCA117M47yeaJzdrNN1B69Fn2I/ySSI5lEpYT+mVqVJXUicns0/R2kDy4d0a07RTxby2zhLBDveTyJyfxDwh9N9nAv+EOCTxjkOSZPbBmGSSXi9Tv5T6Ynd8w1Hr2lt9txHP8CucM9sg==
+sidebar_class_name: "get api-method"
+info_path: docs/4. API/altmount-api
+custom_edit_url: null
+---
+
+import MethodEndpoint from "@theme/ApiExplorer/MethodEndpoint";
+import ParamsDetails from "@theme/ParamsDetails";
+import RequestSchema from "@theme/RequestSchema";
+import StatusCodes from "@theme/StatusCodes";
+import OperationTabs from "@theme/OperationTabs";
+import TabItem from "@theme/TabItem";
+import Heading from "@theme/Heading";
+import Translate from "@docusaurus/Translate";
+
+<Heading
+  as={"h1"}
+  className={"openapi__heading"}
+  children={"Stream queue progress (SSE)"}
+>
+</Heading>
+
+<MethodEndpoint
+  method={"get"}
+  path={"/api/queue/progress/stream"}
+  context={"endpoint"}
+>
+  
+</MethodEndpoint>
+
+
+
+Server-Sent Events stream that pushes real-time progress updates for all queue items. On connect, sends the full current state as an "initial" event, then continues sending "update" events as items progress. Sends a keep-alive comment every 30 seconds.
+
+<ParamsDetails
+  parameters={undefined}
+>
+  
+</ParamsDetails>
+
+<RequestSchema
+  {...require("./stream-queue-progress-sse.RequestSchema.json")}
+>
+  
+</RequestSchema>
+
+<StatusCodes
+  {...require("./stream-queue-progress-sse.StatusCodes.json")}
+>
+  
+</StatusCodes>
+
+
+      

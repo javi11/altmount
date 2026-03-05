@@ -1,0 +1,1 @@
+{"title":"Body","body":{"content":{"application/json":{"schema":{"type":"object","properties":{"rc_pass":{"type":"string"},"rc_url":{"type":"string"},"rc_user":{"type":"string"},"vfs_name":{"type":"string"}}}}},"description":"RClone RC connection parameters","required":true}}

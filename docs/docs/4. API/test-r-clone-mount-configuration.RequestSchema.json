@@ -1,0 +1,1 @@
+{"title":"Body","body":{"content":{"application/json":{"schema":{"type":"object","properties":{"mount_options":{"type":"object"},"mount_point":{"type":"string"}}}}},"description":"Mount configuration to test"}}

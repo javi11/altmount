@@ -1,0 +1,69 @@
+---
+id: get-health-record
+title: "Get health record"
+description: "Returns a single file health record by ID"
+sidebar_label: "Get health record"
+hide_title: true
+hide_table_of_contents: true
+api: eJztGNtu2zb0Vwg+rYAaJUUHFMIwwG1zW9c0iNMVWGoYR9KxxIYiFfIoi2sI2EfsC/clw6Fkx3bktAUGbA/NgyPp3O88XEiPWeMUzWVytZAvERy6UUOlTK4m7SSSOfrMqZqUNTKRF0iNM16A8MoUGsVMaRQlgqZSOMysy0U6F6evZSQJCi+TK3kSoHISyRocVEjofBC2yfpkg0ngYKBCmUiVy0gqxqmBShlJhzeNcpjLhFyDkfRZiRXIZCFpXjOFJ6dMIVs2wKGvrfHoGf5sf5//bUp+90ZGMrOG0BBDoa61yoCh8SfPKIs1EaD1u1nQvxdm00+YkYxk7WyNjlQnKgdi/DaS6Jx1a9rtIMhsjgM2cAgIlPaDsAq9h2KIrg1Qgq8R3HSG92jKEBbomL1WldoBsrOZxx0wsgR6CMRK+SbL0K+bk1qrEUwAf6Vbv2SSQyDMp0CDXgsRmT7mV87raUi3IajKh+1WflqBv8Z8yLhIavA0zUrMNjHu+QaE7XRZA6vUgZvv1quCu6nDGpSbOiTXO+Ohnh3eIwi1U7ZrCg+gkUTTVDK52o8OomeTSN495Q9Pb8Fxva6V/HnP5My6CrSMtj6fqKJ88PEM70hOWi7blRnz6SMZ+kUErty80Zh3nt+VEt42LsOp+Zzudq8noGYgX1YukTWavPsShHWPXXucy5VR5FRRIDcw7jvONTVhLu9dmdmqQkNBUueecZD8askzkUfcd5UXWeMcGtJzkaIyhVhmV7RJuBLSU5bgRaU8N3HhsQjShHWB4wp3k8dJb0XPoQbvMV+2/iB2i+C898WaSGNJpIhmqaaYI21RXQQXXa481FN3ngtMAoOVC4UyYuSc5/jszMRNhaJhpw6b+7h2u9w8CdniECpliukMlG4c3mfp5vw56sCCWwcHZKZQ554n6INkbup8d1/jv0kbeuzzoTn3EnJxgTcNevqWgfd9zP37Y64P0vOHQTqzJI5sY/LvIfofhOjHoTo6NYTOgBZjdLfoxGHw6vdw/dfh6vQuLQ+NIgyWbpLLGGoVd5MqXqi8lZH0IXTdHtI4zUixthno0npKXuy/2Je8PCyXozHHrjN6VKs3OO9WpO3MGJ2fimuci5l1ona2cFBVQCoTEDQXP8AtKA0pL07OVuL48FIE5TJrZqp4ct/zIUi534GgVtfhPexBNw26OftrfV/bVuaXD5eC7DUaYVMCZTDvhJ6/G/dSoaEy1rZQZk8c8SGNEvGx5yl+CrQ/f5S7lWK51qnPIc+XupUIeYgYv8/sQ70uDseXgj3FXhppestZJP7+8y8B4gOmr0e/xWdHY9FFSKQQDgrpXJz9/jJ+79EgReIPRaW4abDhqWmgQD7BRBvbaGWNIsspHQkwuagwVyBWQ3mPzVKkgx1LJUbnp30dQxYydGnoEuFY0UmTilPvG+QJ3aVOSVT7JI4LRWWT7mW2ij/BrTo4iEFTxYSx6ihCZWRoPK5xf3t6+S2sUm3TuAJP6OJfT18dno0PmS+nc+fgg739cIa3niowa4KOkTZ3dbm13y/ue9i3rfpdfhDeUVxrUGHbCQYt+hq84uRZnYVlJBMVTrxcbgxdLFLw+N7ptuXPXYInV5NI3oJTXDHdlYHy/JzLZAba4yPq/3DRXxI8EQM3C4MKL7PccIrfgm74TUaSCy/cQrR8rOvzm7XpAKMsw5rWSB40f+4kq850fMjRhmZjx1iVd/+wdr2wqc52yXUq8O/a6rxJslh0ddu2K/wOtJOiN3FlOVvQtu0/e0ZKkA==
+sidebar_class_name: "get api-method"
+info_path: docs/4. API/altmount-api
+custom_edit_url: null
+---
+
+import MethodEndpoint from "@theme/ApiExplorer/MethodEndpoint";
+import ParamsDetails from "@theme/ParamsDetails";
+import RequestSchema from "@theme/RequestSchema";
+import StatusCodes from "@theme/StatusCodes";
+import OperationTabs from "@theme/OperationTabs";
+import TabItem from "@theme/TabItem";
+import Heading from "@theme/Heading";
+import Translate from "@docusaurus/Translate";
+
+<Heading
+  as={"h1"}
+  className={"openapi__heading"}
+  children={"Get health record"}
+>
+</Heading>
+
+<MethodEndpoint
+  method={"get"}
+  path={"/api/health/{id}"}
+  context={"endpoint"}
+>
+  
+</MethodEndpoint>
+
+
+
+Returns a single file health record by ID
+
+<Heading
+  id={"request"}
+  as={"h2"}
+  className={"openapi-tabs__heading"}
+>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
+<ParamsDetails
+  {...require("./get-health-record.ParamsDetails.json")}
+>
+  
+</ParamsDetails>
+
+<RequestSchema
+  {...require("./get-health-record.RequestSchema.json")}
+>
+  
+</RequestSchema>
+
+<StatusCodes
+  {...require("./get-health-record.StatusCodes.json")}
+>
+  
+</StatusCodes>
+
+
+      

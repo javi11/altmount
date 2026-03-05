@@ -1,0 +1,1 @@
+{"title":"Body","body":{"content":{"application/json":{"schema":{"type":"object","properties":{"file_paths":{"type":"array","items":{"type":"string"}}}}}},"description":"List of file paths to restart","required":true}}

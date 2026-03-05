@@ -17,6 +17,23 @@ import (
 )
 
 // handleListHealth handles GET /api/health
+//
+// @Summary      List health records
+// @Description  Returns a paginated list of file health records with optional filters
+// @Tags         Health
+// @Produce      json
+// @Param        status      query  string  false  "Filter by status (pending, checking, corrupted, repair_triggered, healthy)"
+// @Param        search      query  string  false  "Search by file path"
+// @Param        sort_by     query  string  false  "Sort field (file_path, created_at, status, priority, last_checked, scheduled_check_at)"
+// @Param        sort_order  query  string  false  "Sort order (asc, desc)"
+// @Param        since       query  string  false  "Filter items updated since this timestamp (RFC3339)"
+// @Param        limit       query  int     false  "Page size"
+// @Param        offset      query  int     false  "Page offset"
+// @Success      200  {object}  APIResponse{data=[]HealthItemResponse,meta=APIMeta}
+// @Failure      400  {object}  APIResponse
+// @Failure      500  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/health [get]
 func (s *Server) handleListHealth(c *fiber.Ctx) error {
 	// Parse pagination
 	pagination := ParsePaginationFiber(c)
@@ -107,6 +124,18 @@ func (s *Server) countHealthItems(ctx context.Context, statusFilter *database.He
 }
 
 // handleGetHealth handles GET /api/health/{id}
+//
+// @Summary      Get health record
+// @Description  Returns a single file health record by ID
+// @Tags         Health
+// @Produce      json
+// @Param        id  path  string  true  "Health record ID"
+// @Success      200  {object}  APIResponse{data=HealthItemResponse}
+// @Failure      400  {object}  APIResponse
+// @Failure      404  {object}  APIResponse
+// @Failure      500  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/health/{id} [get]
 func (s *Server) handleGetHealth(c *fiber.Ctx) error {
 	// Extract ID from path parameter
 	idStr := c.Params("id")
@@ -135,6 +164,18 @@ func (s *Server) handleGetHealth(c *fiber.Ctx) error {
 }
 
 // handleDeleteHealth handles DELETE /api/health/{id}
+//
+// @Summary      Delete health record
+// @Description  Deletes a health record by ID, cancelling any active check first
+// @Tags         Health
+// @Produce      json
+// @Param        id  path  string  true  "Health record ID"
+// @Success      200  {object}  APIResponse
+// @Failure      400  {object}  APIResponse
+// @Failure      404  {object}  APIResponse
+// @Failure      500  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/health/{id} [delete]
 func (s *Server) handleDeleteHealth(c *fiber.Ctx) error {
 	// Extract ID from path parameter
 	idStr := c.Params("id")
@@ -188,6 +229,18 @@ func (s *Server) handleDeleteHealth(c *fiber.Ctx) error {
 }
 
 // handleDeleteHealthBulk handles POST /api/health/bulk/delete
+//
+// @Summary      Bulk delete health records
+// @Description  Deletes multiple health records by file path in a single request (max 100)
+// @Tags         Health
+// @Accept       json
+// @Produce      json
+// @Param        body  body  object{file_paths=[]string}  true  "List of file paths to delete"
+// @Success      200  {object}  APIResponse
+// @Failure      400  {object}  APIResponse
+// @Failure      500  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/health/bulk/delete [post]
 func (s *Server) handleDeleteHealthBulk(c *fiber.Ctx) error {
 	// Parse request body
 	var req struct {
@@ -241,6 +294,20 @@ func (s *Server) handleDeleteHealthBulk(c *fiber.Ctx) error {
 }
 
 // handleRepairHealth handles POST /api/health/{id}/repair
+//
+// @Summary      Trigger file repair
+// @Description  Triggers an ARR rescan for the file to initiate repair, setting status to repair_triggered
+// @Tags         Health
+// @Accept       json
+// @Produce      json
+// @Param        id    path  string             true   "Health record ID"
+// @Param        body  body  HealthRepairRequest  false  "Repair options"
+// @Success      200  {object}  APIResponse{data=HealthItemResponse}
+// @Failure      400  {object}  APIResponse
+// @Failure      404  {object}  APIResponse
+// @Failure      500  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/health/{id}/repair [post]
 func (s *Server) handleRepairHealth(c *fiber.Ctx) error {
 	// Extract ID from path parameter
 	idStr := c.Params("id")
@@ -334,6 +401,18 @@ func (s *Server) handleRepairHealth(c *fiber.Ctx) error {
 }
 
 // handleRepairHealthBulk handles POST /api/health/bulk/repair
+//
+// @Summary      Bulk trigger file repairs
+// @Description  Triggers ARR rescan for multiple files to initiate repair (max 100)
+// @Tags         Health
+// @Accept       json
+// @Produce      json
+// @Param        body  body  object{file_paths=[]string}  true  "List of file paths to repair"
+// @Success      200  {object}  APIResponse
+// @Failure      400  {object}  APIResponse
+// @Failure      500  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/health/bulk/repair [post]
 func (s *Server) handleRepairHealthBulk(c *fiber.Ctx) error {
 	// Parse request body
 	var req struct {
@@ -421,6 +500,17 @@ func (s *Server) handleRepairHealthBulk(c *fiber.Ctx) error {
 }
 
 // handleListCorrupted handles GET /api/health/corrupted
+//
+// @Summary      List corrupted files
+// @Description  Returns a paginated list of files with corrupted health status
+// @Tags         Health
+// @Produce      json
+// @Param        limit   query  int  false  "Page size"
+// @Param        offset  query  int  false  "Page offset"
+// @Success      200  {object}  APIResponse{data=[]HealthItemResponse,meta=APIMeta}
+// @Failure      500  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/health/corrupted [get]
 func (s *Server) handleListCorrupted(c *fiber.Ctx) error {
 	// Parse pagination
 	pagination := ParsePaginationFiber(c)
@@ -464,6 +554,15 @@ func (s *Server) handleListCorrupted(c *fiber.Ctx) error {
 }
 
 // handleGetHealthStats handles GET /api/health/stats
+//
+// @Summary      Get health statistics
+// @Description  Returns aggregate statistics for all health records
+// @Tags         Health
+// @Produce      json
+// @Success      200  {object}  APIResponse
+// @Failure      500  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/health/stats [get]
 func (s *Server) handleGetHealthStats(c *fiber.Ctx) error {
 	stats, err := s.healthRepo.GetHealthStats(c.Context())
 	if err != nil {
@@ -475,6 +574,20 @@ func (s *Server) handleGetHealthStats(c *fiber.Ctx) error {
 }
 
 // handleCleanupHealth handles DELETE /api/health/cleanup
+//
+// @Summary      Cleanup old health records
+// @Description  Removes health records older than the specified time, optionally deleting physical files
+// @Tags         Health
+// @Accept       json
+// @Produce      json
+// @Param        older_than    query  string  false  "Delete records older than this timestamp (RFC3339)"
+// @Param        status        query  string  false  "Filter by status to cleanup"
+// @Param        delete_files  query  bool    false  "Also delete physical files from disk"
+// @Success      200  {object}  APIResponse
+// @Failure      400  {object}  APIResponse
+// @Failure      500  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/health/cleanup [delete]
 func (s *Server) handleCleanupHealth(c *fiber.Ctx) error {
 	// Parse request body
 	var req HealthCleanupRequest
@@ -652,6 +765,18 @@ func (s *Server) cleanupHealthRecords(ctx context.Context, olderThan time.Time, 
 }
 
 // handleAddHealthCheck handles POST /api/health/check
+//
+// @Summary      Add file to health check queue
+// @Description  Adds a file to the health check database for periodic checking
+// @Tags         Health
+// @Accept       json
+// @Produce      json
+// @Param        body  body  HealthCheckRequest  true  "Health check request"
+// @Success      200  {object}  APIResponse{data=HealthItemResponse}
+// @Failure      400  {object}  APIResponse
+// @Failure      500  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/health/check [post]
 func (s *Server) handleAddHealthCheck(c *fiber.Ctx) error {
 	// Parse request body
 	var req HealthCheckRequest
@@ -690,6 +815,15 @@ func (s *Server) handleAddHealthCheck(c *fiber.Ctx) error {
 }
 
 // handleGetHealthWorkerStatus handles GET /api/health/worker/status
+//
+// @Summary      Get health worker status
+// @Description  Returns the current status and statistics of the background health check worker
+// @Tags         Health
+// @Produce      json
+// @Success      200  {object}  APIResponse
+// @Failure      404  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/health/worker/status [get]
 func (s *Server) handleGetHealthWorkerStatus(c *fiber.Ctx) error {
 	if s.healthWorker == nil {
 		return RespondNotFound(c, "Health worker", "Health worker is not configured or not running")
@@ -714,6 +848,19 @@ func (s *Server) handleGetHealthWorkerStatus(c *fiber.Ctx) error {
 }
 
 // handleDirectHealthCheck handles POST /api/health/{id}/check-now
+//
+// @Summary      Immediately check file health
+// @Description  Starts an immediate background health check for the specified file
+// @Tags         Health
+// @Produce      json
+// @Param        id  path  string  true  "Health record ID"
+// @Success      200  {object}  APIResponse
+// @Failure      400  {object}  APIResponse
+// @Failure      404  {object}  APIResponse
+// @Failure      409  {object}  APIResponse
+// @Failure      500  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/health/{id}/check-now [post]
 func (s *Server) handleDirectHealthCheck(c *fiber.Ctx) error {
 	// Extract ID from path parameter
 	idStr := c.Params("id")
@@ -808,6 +955,19 @@ type SegmentsInfo struct {
 }
 
 // handleRestartHealthChecksBulk handles POST /api/health/bulk/restart
+//
+// @Summary      Bulk restart health checks
+// @Description  Resets multiple health check records back to pending status for reprocessing (max 100)
+// @Tags         Health
+// @Accept       json
+// @Produce      json
+// @Param        body  body  object{file_paths=[]string}  true  "List of file paths to restart"
+// @Success      200  {object}  APIResponse
+// @Failure      400  {object}  APIResponse
+// @Failure      404  {object}  APIResponse
+// @Failure      500  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/health/bulk/restart [post]
 func (s *Server) handleRestartHealthChecksBulk(c *fiber.Ctx) error {
 	// Parse request body
 	var req struct {
@@ -859,6 +1019,19 @@ func (s *Server) handleRestartHealthChecksBulk(c *fiber.Ctx) error {
 }
 
 // handleCancelHealthCheck handles POST /api/health/{id}/cancel
+//
+// @Summary      Cancel active health check
+// @Description  Cancels an in-progress health check for the specified file
+// @Tags         Health
+// @Produce      json
+// @Param        id  path  string  true  "Health record ID"
+// @Success      200  {object}  APIResponse
+// @Failure      400  {object}  APIResponse
+// @Failure      404  {object}  APIResponse
+// @Failure      409  {object}  APIResponse
+// @Failure      500  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/health/{id}/cancel [post]
 func (s *Server) handleCancelHealthCheck(c *fiber.Ctx) error {
 	// Extract ID from path parameter
 	idStr := c.Params("id")
@@ -918,6 +1091,18 @@ func (s *Server) handleCancelHealthCheck(c *fiber.Ctx) error {
 }
 
 // handleUnmaskHealth handles POST /api/health/{id}/unmask
+//
+// @Summary      Unmask health record
+// @Description  Removes the masked status from a health record so it can be checked again
+// @Tags         Health
+// @Produce      json
+// @Param        id  path  string  true  "Health record ID"
+// @Success      200  {object}  APIResponse
+// @Failure      400  {object}  APIResponse
+// @Failure      404  {object}  APIResponse
+// @Failure      500  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/health/{id}/unmask [post]
 func (s *Server) handleUnmaskHealth(c *fiber.Ctx) error {
 	// Extract ID from path parameter
 	idStr := c.Params("id")
@@ -965,6 +1150,20 @@ func (s *Server) handleUnmaskHealth(c *fiber.Ctx) error {
 }
 
 // handleSetHealthPriority handles POST /api/health/{id}/priority
+//
+// @Summary      Set health check priority
+// @Description  Updates the priority of a health record to control processing order
+// @Tags         Health
+// @Accept       json
+// @Produce      json
+// @Param        id    path  string                           true  "Health record ID"
+// @Param        body  body  object{priority=string}  true  "New priority value"
+// @Success      200  {object}  APIResponse
+// @Failure      400  {object}  APIResponse
+// @Failure      404  {object}  APIResponse
+// @Failure      500  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/health/{id}/priority [post]
 func (s *Server) handleSetHealthPriority(c *fiber.Ctx) error {
 	// Extract ID from path parameter
 	idStr := c.Params("id")
@@ -1022,6 +1221,15 @@ func (s *Server) handleSetHealthPriority(c *fiber.Ctx) error {
 }
 
 // handleResetAllHealthChecks handles POST /api/health/reset-all
+//
+// @Summary      Reset all health checks
+// @Description  Resets all health records back to pending status for full re-checking
+// @Tags         Health
+// @Produce      json
+// @Success      200  {object}  APIResponse
+// @Failure      500  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/health/reset-all [post]
 func (s *Server) handleResetAllHealthChecks(c *fiber.Ctx) error {
 	// Reset all items to pending status using repository method
 	restartedCount, err := s.healthRepo.ResetAllHealthChecks(c.Context())
@@ -1039,6 +1247,16 @@ func (s *Server) handleResetAllHealthChecks(c *fiber.Ctx) error {
 }
 
 // handleRegenerateSymlinks handles POST /api/health/regenerate-symlinks
+//
+// @Summary      Regenerate symlinks for health records
+// @Description  Creates symlinks in the import directory for files without a library path (SYMLINK strategy only)
+// @Tags         Health
+// @Produce      json
+// @Success      200  {object}  APIResponse
+// @Failure      400  {object}  APIResponse
+// @Failure      500  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/health/regenerate-symlinks [post]
 func (s *Server) handleRegenerateSymlinks(c *fiber.Ctx) error {
 	ctx := c.Context()
 	cfg := s.configManager.GetConfig()

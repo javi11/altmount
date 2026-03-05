@@ -1,0 +1,1 @@
+{"title":"Body","body":{"content":{"application/json":{"schema":{"type":"object","properties":{"provider_ids":{"type":"array","items":{"type":"string"}}}}}},"description":"Ordered list of provider IDs","required":true}}

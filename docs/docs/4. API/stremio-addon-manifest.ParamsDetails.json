@@ -1,0 +1,1 @@
+{"parameters":[{"description":"Download key (SHA256 of API key)","name":"key","in":"path","required":true,"schema":{"type":"string"}}]}

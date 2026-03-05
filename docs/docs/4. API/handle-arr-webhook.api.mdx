@@ -1,0 +1,69 @@
+---
+id: handle-arr-webhook
+title: "Handle ARR webhook"
+description: "Receives webhooks from Radarr/Sonarr to trigger health checks; authenticated via API key query param or header"
+sidebar_label: "Handle ARR webhook"
+hide_title: true
+hide_table_of_contents: true
+api: eJztV9tu4zYQ/RWCTy3AREkvwMItCjjbZDfdbjawk6Zo1g8jaSwxoUgtOXLWNQz0I/qF/ZJiKCt2YjvbNkXTh/hJJodz4ZkZnpnJHEPmdU3aWdmTA8xQTzCIG0xL566DGHtXiQHk4H0ydBa8F+QEeV0U6EWJYKgUWYnZdfhGQEMlWtIZEOZiokH0T4/FNU7Fhwb9VNTgoRIunsvRSyUJiiB7l7I/GAQ5UjJKIKHn1dk97zplY+dXTfGmkhYqlD0Jtb7GqVRS84loVioZshIrkL2ZpGnNYoG8toWcz9U/MfLzTr/WO2+Wdm7j2W5opKTHDw0GOnD5lCUyZwkt8SfUtVlYSa4C+zFbV+XSK8xIKll7V6MnjYF3czRImB9p0/5fSIP3EP0jrMKntdRA5Sa353MlsdbB5cgWHqFISZygpbO4vrav5FgbPN18WMnKTTS20a6CdeS8aOrCQ44h8cjwBCWoRMHaBPsiKl2UJFIU2gpHJXox1mjywHloEXPO57g7Ru8x56R8MMCxMzn6LZ7OO18ffVkBvcZHARfV3L2vi7asRQ1T44Bj5ZzUHHaPfINzXgi1s6FV/sXe3vqlv3sj1b+WvEAsxcnhvfOfPpC5fHP65EigTdicPRgCFJvORbyQ/oKnmWvacBdi2hIW6Fm90ZXesuXG44Bb9sgRmE1bEf4myzCshpM6ZxCs7JD9ahM2B5CLQdtmnkH6X4C0vw7SueWHxXn9a2w3zyg9NUpf7325jtIQ/URnKM4tTEAbSA0+g/XkYLV+ly6XPVm72OXaF1AmUOsEvA/JgrzK+IhOOi7ZeMNSiXEZmNIF6r3Ye7EnmZgFzBqvaTpk9Nqw+7V+g9N+0z6u2yli7V3hoaqAdCYg+i4+u02Ylj6/OjwT0bvM2bEuPl9SDIhWHmavcyUPEDz6zc78cHEmyF2jFS4l0Bbz1ujpu+HCKjebxLhC211x5HwF1BPvFzrFt/Hsd+/ldqf6i2bVkeBVxst4cO4PltT28CNUtcF1anrZkZXbLBytcct7Anc4Y7e6ShWXa7cMcZWf3WeQW80s2da9rTnHO3br9z44HJ7F8YazoG/oLdeJ+OO33wWIC0y/7/+UnBwNRZuBIoXsGnORTsXJLwfJeUCLpMSNppJHowZFBRYKrNCSarnrYrSqnNXk2BclwOaiwlyDCOQRKm2LXYZNk4k4dU70T48XnQqyWIMdkJ3AK02vm1Qch9BgkGpRGiVRHXpJUmgqm3Q3c1VyBRO9v5+AoYoPJro9EWs/QxtwRfvb47O/oyo1Lk0qCIQ++fH45eHJ8JD1crm2F7y/u8cLXOQV2BVDr8HmBkV/MBDLSr8Dzsps9QQjbZushB8pqQ1oy1HEa+mS65JLTCoe0fj2uyBGSnJb4v3ZLIWA597M57zcNoI4EOvAfSWXvTGYgA/E/eAcu9FH7jwrLWgCpmGhWKYT8Dq+gL3L0Vx11f/feLQ6bS+dUrPF9svWwE5sEkuJtdd5eaKfZVjTg7KjlWeGO6lUMl2M7VV8iaWHGx6f4Ia9UdLFgGMHiWszacAWTXx9ZauTf38C368GjQ==
+sidebar_class_name: "post api-method"
+info_path: docs/4. API/altmount-api
+custom_edit_url: null
+---
+
+import MethodEndpoint from "@theme/ApiExplorer/MethodEndpoint";
+import ParamsDetails from "@theme/ParamsDetails";
+import RequestSchema from "@theme/RequestSchema";
+import StatusCodes from "@theme/StatusCodes";
+import OperationTabs from "@theme/OperationTabs";
+import TabItem from "@theme/TabItem";
+import Heading from "@theme/Heading";
+import Translate from "@docusaurus/Translate";
+
+<Heading
+  as={"h1"}
+  className={"openapi__heading"}
+  children={"Handle ARR webhook"}
+>
+</Heading>
+
+<MethodEndpoint
+  method={"post"}
+  path={"/api/arrs/webhook"}
+  context={"endpoint"}
+>
+  
+</MethodEndpoint>
+
+
+
+Receives webhooks from Radarr/Sonarr to trigger health checks; authenticated via API key query param or header
+
+<Heading
+  id={"request"}
+  as={"h2"}
+  className={"openapi-tabs__heading"}
+>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
+<ParamsDetails
+  {...require("./handle-arr-webhook.ParamsDetails.json")}
+>
+  
+</ParamsDetails>
+
+<RequestSchema
+  {...require("./handle-arr-webhook.RequestSchema.json")}
+>
+  
+</RequestSchema>
+
+<StatusCodes
+  {...require("./handle-arr-webhook.StatusCodes.json")}
+>
+  
+</StatusCodes>
+
+
+      

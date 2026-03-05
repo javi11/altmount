@@ -1,0 +1,1 @@
+{"title":"Body","body":{"content":{"application/json":{"schema":{"type":"object","properties":{"path":{"type":"string"}}}}},"description":"Mount path","required":true}}

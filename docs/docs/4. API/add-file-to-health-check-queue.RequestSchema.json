@@ -1,0 +1,1 @@
+{"title":"Body","body":{"content":{"application/json":{"schema":{"type":"object","properties":{"file_path":{"type":"string"},"max_retries":{"type":"integer"},"priority":{"type":"integer","enum":[0,1,2],"x-enum-varnames":["HealthPriorityNormal","HealthPriorityHigh","HealthPriorityNext"]},"source_nzb_path":{"type":"string"}}}}},"description":"Health check request","required":true}}

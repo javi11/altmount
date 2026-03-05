@@ -1,0 +1,1 @@
+{"parameters":[{"description":"Page size","name":"limit","in":"query","schema":{"type":"integer"}},{"description":"Page offset","name":"offset","in":"query","schema":{"type":"integer"}}]}

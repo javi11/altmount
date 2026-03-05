@@ -56,6 +56,16 @@ func isProwlarrEnabled(cfg *config.Config) bool {
 
 // handleStremioManifest handles GET /stremio/:key/manifest.json
 // Returns the Stremio addon manifest for addon installation.
+//
+// @Summary      Stremio addon manifest
+// @Description  Returns the Stremio addon manifest JSON. Install by adding the manifest URL to Stremio. Key is the SHA256 hash of the user's API key (download_key).
+// @Tags         Stremio
+// @Produce      json
+// @Param        key  path  string  true  "Download key (SHA256 of API key)"
+// @Success      200  {object}  stremioManifest
+// @Failure      401  {object}  APIResponse
+// @Failure      404  {object}  APIResponse  "Stremio not enabled"
+// @Router       /stremio/{key}/manifest.json [get]
 func (s *Server) handleStremioManifest(c *fiber.Ctx) error {
 	ctx := c.Context()
 
@@ -88,6 +98,16 @@ func (s *Server) handleStremioManifest(c *fiber.Ctx) error {
 
 // handleStremioAddonStream handles GET /stremio/:key/stream/:type/:id.json
 // Searches Prowlarr and returns play-URL options -- no NZB download or queuing at this stage.
+//
+// @Summary      Stremio stream lookup
+// @Description  Searches Prowlarr for NZBs matching the given IMDB ID and returns Stremio stream objects with play URLs. Requires Prowlarr integration to be enabled. Filtering by language and quality is applied based on configuration.
+// @Tags         Stremio
+// @Produce      json
+// @Param        key   path  string  true  "Download key (SHA256 of API key)"
+// @Param        type  path  string  true  "Content type: movie or series"
+// @Param        id    path  string  true  "Stremio content ID (e.g. tt1234567 or tt1234567:1:2)"
+// @Success      200  {object}  map[string]interface{}  "{\"streams\": [...]}"
+// @Router       /stremio/{key}/stream/{type}/{id}.json [get]
 func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 	ctx := c.Context()
 
@@ -223,6 +243,19 @@ func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 // handleStremioAddonPlay handles GET /stremio/:key/play
 // Downloads the NZB from Prowlarr, queues it with high priority, waits for completion,
 // then 302-redirects to the first media stream URL.
+//
+// @Summary      Stremio play — queue NZB and redirect to stream
+// @Description  Downloads the NZB from the given Prowlarr URL, adds it to the import queue with high priority, waits for processing, then 302-redirects to the first media stream URL. Used by Stremio after the user selects a stream from handleStremioAddonStream.
+// @Tags         Stremio
+// @Produce      json
+// @Param        key    path   string  true  "Download key (SHA256 of API key)"
+// @Param        url    query  string  true  "Prowlarr NZB download URL"
+// @Param        title  query  string  false "Safe filename title for the NZB"
+// @Success      302  {string}  string  "Redirect to stream URL"
+// @Failure      400  {object}  APIResponse
+// @Failure      401  {object}  APIResponse
+// @Failure      503  {object}  APIResponse
+// @Router       /stremio/{key}/play [get]
 func (s *Server) handleStremioAddonPlay(c *fiber.Ctx) error {
 	ctx := c.Context()
 

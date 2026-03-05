@@ -1,0 +1,1 @@
+{"parameters":[{"description":"Provider ID","name":"id","in":"path","required":true,"schema":{"type":"string"}}]}

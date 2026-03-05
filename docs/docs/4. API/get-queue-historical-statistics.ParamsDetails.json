@@ -1,0 +1,1 @@
+{"parameters":[{"description":"Number of days to retrieve (default 1, max 365)","name":"days","in":"query","schema":{"type":"integer"}}]}

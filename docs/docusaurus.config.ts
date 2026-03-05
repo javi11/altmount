@@ -1,6 +1,7 @@
 import { themes as prismThemes } from "prism-react-renderer";
 import type { Config } from "@docusaurus/types";
 import type * as Preset from "@docusaurus/preset-classic";
+import type * as OpenApiPlugin from "docusaurus-plugin-openapi-docs";
 
 // This runs in Node.js - Don't use client-side code here (browser APIs, JSX...)
 
@@ -45,6 +46,8 @@ const config: Config = {
 					// Please change this to your repo.
 					// Remove this to remove the "edit this page" links.
 					editUrl: "https://github.com/javi11/altmount/tree/main/docs/",
+					// Required for docusaurus-plugin-openapi-docs
+					docItemComponent: "@theme/ApiItem",
 				},
 				blog: false,
 				theme: {
@@ -54,7 +57,29 @@ const config: Config = {
 		],
 	],
 
-	themes: ["@docusaurus/theme-mermaid"],
+	plugins: [
+		[
+			"docusaurus-plugin-openapi-docs",
+			{
+				id: "openapi",
+				docsPluginId: "classic",
+				config: {
+					altmount: {
+						specPath: "static/swagger.json",
+						outputDir: "docs/4. API",
+						sidebarOptions: {
+							groupPathsBy: "tag",
+							categoryLinkSource: "tag",
+						},
+						downloadUrl: "/swagger.json",
+						hideSendButton: false,
+					} satisfies OpenApiPlugin.Options,
+				},
+			},
+		],
+	],
+
+	themes: ["docusaurus-theme-openapi-docs", "@docusaurus/theme-mermaid"],
 
 	themeConfig: {
 		navbar: {
@@ -129,7 +154,7 @@ const config: Config = {
 			{ property: 'og:description', content: 'Mount Usenet as a local drive. Stream media directly, integrate with Sonarr/Radarr, and use rclone — all in a single binary.' },
 			{ name: 'twitter:card', content: 'summary' },
 			{ name: 'twitter:title', content: 'AltMount Documentation' },
-			{ name: 'twitter:description', content: 'Mount Usenet as a local drive. Stream media directly, integrate with Sonarr/Radarr, and use rclone — all in a single binary.' },
+			{ name: 'twitter:description', content: 'Mount Usenet as a local drive. Stream media directly, integrate with Sonarr/Radarr, and use rclone — all in a single backend.' },
 			{ name: 'keywords', content: 'altmount, usenet, webdav, nzb, nntp, sabnzbd, sonarr, radarr, streaming, rclone, fuse, mount, docker' },
 		],
 		prism: {

@@ -285,7 +285,10 @@ func ToImportAPIResponse(importConfig config.ImportConfig) ImportAPIResponse {
 
 // Common API response structures
 
-// APIResponse represents a standard API response wrapper
+// APIResponse represents a standard API response wrapper.
+// All endpoints return this envelope: success=true with data, or success=false with error.
+//
+// @name APIResponse
 type APIResponse struct {
 	Success bool      `json:"success"`
 	Data    any       `json:"data,omitempty"`
@@ -293,14 +296,18 @@ type APIResponse struct {
 	Meta    *APIMeta  `json:"meta,omitempty"`
 }
 
-// APIError represents an error response
+// APIError represents an API error payload returned inside APIResponse.
+//
+// @name APIError
 type APIError struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
 	Details string `json:"details,omitempty"`
 }
 
-// APIMeta represents metadata for paginated responses
+// APIMeta represents pagination metadata for paginated list responses.
+//
+// @name APIMeta
 type APIMeta struct {
 	Total  int `json:"total"`
 	Limit  int `json:"limit"`

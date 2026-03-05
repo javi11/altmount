@@ -20,6 +20,18 @@ import (
 )
 
 // handleGetFileMetadata handles GET /files/info requests
+//
+// @Summary      Get file metadata
+// @Description  Returns metadata for a file in the virtual filesystem by its path
+// @Tags         Files
+// @Produce      json
+// @Param        path  query  string  true  "Virtual file path"
+// @Success      200  {object}  APIResponse{data=FileMetadataResponse}
+// @Failure      400  {object}  APIResponse
+// @Failure      404  {object}  APIResponse
+// @Failure      500  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/files/info [get]
 func (s *Server) handleGetFileMetadata(c *fiber.Ctx) error {
 	// Get path from query parameters
 	path := c.Query("path")
@@ -183,6 +195,18 @@ type nzbHead struct {
 }
 
 // handleExportMetadataToNZB handles GET /files/export-nzb requests
+//
+// @Summary      Export file metadata as NZB
+// @Description  Generates and downloads an NZB file from the metadata of a virtual filesystem file
+// @Tags         Files
+// @Produce      application/x-nzb
+// @Param        path  query  string  true  "Virtual file path"
+// @Success      200  {file}  binary
+// @Failure      400  {object}  APIResponse
+// @Failure      404  {object}  APIResponse
+// @Failure      500  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/files/export-nzb [get]
 func (s *Server) handleExportMetadataToNZB(c *fiber.Ctx) error {
 	// Get path from query parameters
 	path := c.Query("path")
@@ -360,6 +384,19 @@ func shouldExcludeFile(filename string, excludeArchives bool) bool {
 }
 
 // handleBatchExportNZB handles POST /files/export-batch requests
+//
+// @Summary      Batch export NZB files as ZIP
+// @Description  Exports all metadata files as NZB files packaged in a ZIP archive, excluding archives and AES-encrypted files
+// @Tags         Files
+// @Accept       json
+// @Produce      application/zip
+// @Param        body  body  BatchExportRequest  true  "Export request"
+// @Success      200  {file}  binary
+// @Failure      400  {object}  APIResponse
+// @Failure      404  {object}  APIResponse
+// @Failure      500  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/files/export-batch [post]
 func (s *Server) handleBatchExportNZB(c *fiber.Ctx) error {
 	ctx := context.Background()
 

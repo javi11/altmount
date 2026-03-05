@@ -13,6 +13,15 @@ import (
 
 // handleProgressStream handles GET /api/queue/progress/stream
 // Server-Sent Events endpoint for real-time progress updates
+//
+// @Summary      Stream queue progress (SSE)
+// @Description  Server-Sent Events stream that pushes real-time progress updates for all queue items. On connect, sends the full current state as an "initial" event, then continues sending "update" events as items progress. Sends a keep-alive comment every 30 seconds.
+// @Tags         Queue
+// @Produce      text/event-stream
+// @Success      200  {string}  string  "SSE stream: data: {\"type\":\"update\",\"data\":{...}}"
+// @Failure      401  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/queue/progress/stream [get]
 func (s *Server) handleProgressStream(c *fiber.Ctx) error {
 	// Set SSE headers
 	c.Set("Content-Type", "text/event-stream")

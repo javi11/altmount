@@ -1,0 +1,1 @@
+{"parameters":[{"description":"Instance type (radarr or sonarr)","name":"type","in":"path","required":true,"schema":{"type":"string"}},{"description":"Instance name","name":"name","in":"path","required":true,"schema":{"type":"string"}}]}

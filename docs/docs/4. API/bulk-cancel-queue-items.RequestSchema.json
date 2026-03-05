@@ -1,0 +1,1 @@
+{"title":"Body","body":{"content":{"application/json":{"schema":{"type":"object","properties":{"ids":{"type":"array","items":{"type":"integer"}}}}}},"description":"List of queue item IDs to cancel","required":true}}

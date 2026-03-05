@@ -1,0 +1,1 @@
+{"parameters":[{"description":"API key for authentication","name":"apikey","in":"query","required":true,"schema":{"type":"string"}}]}

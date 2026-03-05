@@ -1,0 +1,1 @@
+{"parameters":[{"description":"Delete records older than this timestamp (RFC3339)","name":"older_than","in":"query","schema":{"type":"string"}},{"description":"Filter by status to cleanup","name":"status","in":"query","schema":{"type":"string"}},{"description":"Also delete physical files from disk","name":"delete_files","in":"query","schema":{"type":"boolean"}}]}

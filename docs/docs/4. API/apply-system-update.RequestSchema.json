@@ -1,0 +1,1 @@
+{"title":"Body","body":{"content":{"application/json":{"schema":{"type":"object","properties":{"channel":{"type":"string"}}}}},"description":"Update channel (latest or dev)","required":true}}

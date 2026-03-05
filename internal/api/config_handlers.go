@@ -83,6 +83,15 @@ func RegisterLogLevelHandler(ctx context.Context, configManager *config.Manager,
 }
 
 // handleGetConfig returns the current configuration
+//
+// @Summary      Get current configuration
+// @Description  Returns the full application configuration including providers (passwords redacted)
+// @Tags         Config
+// @Produce      json
+// @Success      200  {object}  APIResponse
+// @Failure      503  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/config [get]
 func (s *Server) handleGetConfig(c *fiber.Ctx) error {
 	if s.configManager == nil {
 		return RespondServiceUnavailable(c, "Configuration management not available", "CONFIG_UNAVAILABLE")
@@ -101,6 +110,19 @@ func (s *Server) handleGetConfig(c *fiber.Ctx) error {
 }
 
 // handleUpdateConfig updates the entire configuration
+//
+// @Summary      Update full configuration
+// @Description  Replaces the entire application configuration and saves it to disk
+// @Tags         Config
+// @Accept       json
+// @Produce      json
+// @Param        body  body  object  true  "Full configuration object"
+// @Success      200  {object}  APIResponse
+// @Failure      400  {object}  APIResponse
+// @Failure      500  {object}  APIResponse
+// @Failure      503  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/config [put]
 func (s *Server) handleUpdateConfig(c *fiber.Ctx) error {
 	if s.configManager == nil {
 		return RespondServiceUnavailable(c, "Configuration management not available", "CONFIG_UNAVAILABLE")
@@ -149,6 +171,20 @@ func (s *Server) handleUpdateConfig(c *fiber.Ctx) error {
 }
 
 // handlePatchConfigSection updates a specific configuration section
+//
+// @Summary      Patch a configuration section
+// @Description  Updates a specific section of the configuration (e.g. webdav, auth, health, rclone)
+// @Tags         Config
+// @Accept       json
+// @Produce      json
+// @Param        section  path  string  true  "Configuration section name"
+// @Param        body     body  object  true  "Partial configuration for the section"
+// @Success      200  {object}  APIResponse
+// @Failure      400  {object}  APIResponse
+// @Failure      500  {object}  APIResponse
+// @Failure      503  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/config/{section} [patch]
 func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 	if s.configManager == nil {
 		return RespondServiceUnavailable(c, "Configuration management not available", "CONFIG_UNAVAILABLE")
@@ -223,6 +259,16 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 }
 
 // handleReloadConfig reloads configuration from file
+//
+// @Summary      Reload configuration from disk
+// @Description  Re-reads the configuration file from disk and applies the loaded configuration
+// @Tags         Config
+// @Produce      json
+// @Success      200  {object}  APIResponse
+// @Failure      500  {object}  APIResponse
+// @Failure      503  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/config/reload [post]
 func (s *Server) handleReloadConfig(c *fiber.Ctx) error {
 	if s.configManager == nil {
 		return RespondServiceUnavailable(c, "Configuration management not available", "CONFIG_UNAVAILABLE")
@@ -242,6 +288,17 @@ func (s *Server) handleReloadConfig(c *fiber.Ctx) error {
 }
 
 // handleValidateConfig validates configuration without applying changes
+//
+// @Summary      Validate configuration
+// @Description  Validates a configuration object without applying it, returning any validation errors
+// @Tags         Config
+// @Accept       json
+// @Produce      json
+// @Param        body  body  object  true  "Configuration object to validate"
+// @Success      200  {object}  APIResponse
+// @Failure      503  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/config/validate [post]
 func (s *Server) handleValidateConfig(c *fiber.Ctx) error {
 	if s.configManager == nil {
 		return RespondServiceUnavailable(c, "Configuration management not available", "CONFIG_UNAVAILABLE")
@@ -284,6 +341,18 @@ func (s *Server) handleValidateConfig(c *fiber.Ctx) error {
 // Provider Management Handlers
 
 // handleTestProvider tests NNTP provider connectivity
+//
+// @Summary      Test NNTP provider connection
+// @Description  Tests connectivity to an NNTP provider and returns the round-trip time
+// @Tags         Providers
+// @Accept       json
+// @Produce      json
+// @Param        body  body  object{host=string,port=int,username=string,password=string,tls=bool,insecure_tls=bool,proxy_url=string,provider_id=string}  true  "Provider connection details"
+// @Success      200  {object}  APIResponse{data=TestProviderResponse}
+// @Failure      400  {object}  APIResponse
+// @Failure      503  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/providers/test [post]
 func (s *Server) handleTestProvider(c *fiber.Ctx) error {
 	if s.configManager == nil {
 		return RespondServiceUnavailable(c, "Configuration management not available", "CONFIG_UNAVAILABLE")
@@ -371,6 +440,19 @@ func (s *Server) handleTestProvider(c *fiber.Ctx) error {
 }
 
 // handleCreateProvider creates a new NNTP provider
+//
+// @Summary      Create NNTP provider
+// @Description  Adds a new NNTP provider to the configuration
+// @Tags         Providers
+// @Accept       json
+// @Produce      json
+// @Param        body  body  object{host=string,port=int,username=string,password=string,max_connections=int,tls=bool,insecure_tls=bool,enabled=bool,is_backup_provider=bool}  true  "Provider configuration"
+// @Success      200  {object}  APIResponse{data=ProviderAPIResponse}
+// @Failure      400  {object}  APIResponse
+// @Failure      500  {object}  APIResponse
+// @Failure      503  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/providers [post]
 func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 	if s.configManager == nil {
 		return RespondServiceUnavailable(c, "Configuration management not available", "CONFIG_UNAVAILABLE")
@@ -472,6 +554,21 @@ func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 }
 
 // handleUpdateProvider updates an existing NNTP provider
+//
+// @Summary      Update NNTP provider
+// @Description  Updates the configuration of an existing NNTP provider by ID
+// @Tags         Providers
+// @Accept       json
+// @Produce      json
+// @Param        id    path  string  true  "Provider ID"
+// @Param        body  body  object  true  "Provider fields to update (partial update)"
+// @Success      200  {object}  APIResponse{data=ProviderAPIResponse}
+// @Failure      400  {object}  APIResponse
+// @Failure      404  {object}  APIResponse
+// @Failure      500  {object}  APIResponse
+// @Failure      503  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/providers/{id} [put]
 func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 	if s.configManager == nil {
 		return RespondServiceUnavailable(c, "Configuration management not available", "CONFIG_UNAVAILABLE")
@@ -611,6 +708,19 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 }
 
 // handleDeleteProvider removes an NNTP provider
+//
+// @Summary      Delete NNTP provider
+// @Description  Removes an NNTP provider from the configuration by ID
+// @Tags         Providers
+// @Produce      json
+// @Param        id  path  string  true  "Provider ID"
+// @Success      200  {object}  APIResponse
+// @Failure      400  {object}  APIResponse
+// @Failure      404  {object}  APIResponse
+// @Failure      500  {object}  APIResponse
+// @Failure      503  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/providers/{id} [delete]
 func (s *Server) handleDeleteProvider(c *fiber.Ctx) error {
 	if s.configManager == nil {
 		return RespondServiceUnavailable(c, "Configuration management not available", "CONFIG_UNAVAILABLE")
@@ -669,6 +779,20 @@ func (s *Server) handleDeleteProvider(c *fiber.Ctx) error {
 }
 
 // handleReorderProviders reorders the provider list
+//
+// @Summary      Reorder NNTP providers
+// @Description  Reorders the list of NNTP providers to set priority (first provider is highest priority)
+// @Tags         Providers
+// @Accept       json
+// @Produce      json
+// @Param        body  body  object{provider_ids=[]string}  true  "Ordered list of provider IDs"
+// @Success      200  {object}  APIResponse
+// @Failure      400  {object}  APIResponse
+// @Failure      404  {object}  APIResponse
+// @Failure      500  {object}  APIResponse
+// @Failure      503  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/providers/reorder [put]
 func (s *Server) handleReorderProviders(c *fiber.Ctx) error {
 	if s.configManager == nil {
 		return RespondServiceUnavailable(c, "Configuration management not available", "CONFIG_UNAVAILABLE")

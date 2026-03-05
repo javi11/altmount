@@ -1,0 +1,1 @@
+{"title":"Body","body":{"content":{"application/json":{"schema":{"type":"object","properties":{"api_key":{"type":"string"},"type":{"type":"string"},"url":{"type":"string"}}}}},"description":"Connection details","required":true}}

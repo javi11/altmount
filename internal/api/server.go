@@ -363,6 +363,15 @@ func (s *Server) Shutdown(ctx context.Context) {
 }
 
 // handleGetActiveStreams handles GET /api/files/active-streams
+//
+// @Summary      Get active streams
+// @Description  Returns a list of currently active file streams
+// @Tags         Files
+// @Produce      json
+// @Param        type  query  string  false  "Filter by source type (e.g. file)"
+// @Success      200  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/files/active-streams [get]
 func (s *Server) handleGetActiveStreams(c *fiber.Ctx) error {
 	if s.streamTracker == nil {
 		return c.Status(200).JSON(fiber.Map{
@@ -500,6 +509,16 @@ func (s *Server) handleGetSyncNeeded(c *fiber.Ctx) error {
 }
 
 // handleKillStream handles DELETE /api/files/active-streams/:id
+//
+// @Summary      Kill an active stream
+// @Description  Terminates an active file stream by its ID
+// @Tags         Files
+// @Produce      json
+// @Param        id  path  string  true  "Stream ID"
+// @Success      200  {object}  APIResponse
+// @Failure      404  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/files/active-streams/{id} [delete]
 func (s *Server) handleKillStream(c *fiber.Ctx) error {
 	id := c.Params("id")
 	if s.streamTracker == nil {
@@ -523,6 +542,14 @@ func (s *Server) handleKillStream(c *fiber.Ctx) error {
 }
 
 // handleGetStreamHistory handles GET /api/files/streams/history
+//
+// @Summary      Get stream history
+// @Description  Returns a history of recent file stream sessions
+// @Tags         Files
+// @Produce      json
+// @Success      200  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/files/streams/history [get]
 func (s *Server) handleGetStreamHistory(c *fiber.Ctx) error {
 	if s.streamTracker == nil {
 		return c.JSON(fiber.Map{

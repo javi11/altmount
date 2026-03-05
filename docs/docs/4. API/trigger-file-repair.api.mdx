@@ -1,0 +1,69 @@
+---
+id: trigger-file-repair
+title: "Trigger file repair"
+description: "Triggers an ARR rescan for the file to initiate repair, setting status to repair_triggered"
+sidebar_label: "Trigger file repair"
+hide_title: true
+hide_table_of_contents: true
+api: eJztWO9u2zYQfxWCn1ZAjZKiAwpjGOC0SZN1TQMnXYGlhnGSzhIbilTJUxrXMLCH2BPuSYYjZcf/2wIbtg/1h0QS7+/veHc8TqXHvHWKJrJ3M5XHCA5dv6VK9m6Gs2EiC/S5Uw0pa2RPXjtVlui8ACP6g4Fw6HMwYmydoArFWGkUZIUyihQQCocNKJcIj0TKlMITUOuZJK6MKArEQiaSoPSydyPPEDRVcpjIBhzUSOh8sG7VlkgmHObWFeL8hUykgRplTyqWppimAapkIh1+bBUr6ZFrMZE+r7AG2ZtKmjTM4ckpU8oZe8zE6OnYFhOmyK0hNMSP0DRa5cD60w+ejZhuirLZB8xJJrJxtkFHCj2vOvRIo85rh+Qmo9y2UW7HmVmrEYyc8W8d+UHgFDa8ezljO31jjY/inxwe8r9VnjevZPL19oPWb8YB5/2eFEBMP0skOmfdl13PbYFbsGYPCZT2W9dq9B7KbXyzsEpfgfk6wMoQluhYvFa12rFkx2OPO9bIEuhtS2yUb/Mcvd8e0eQrYf2SSw6BsBgBbUUtRGS0D1dO0VFIi22rqtjut/KjGvwtFtucS6QGT6O8wnyV4kFuIFjfLkvLKnPgJrvtquF+OXc6MDbtjHR7CBqnbKx2G6uJRNPWsndzmBwlT4aJvH/MHx7fgeO6slSaLjshF9bVoGWy9vlMldXGxwu8JzkMabunBCxZ+kUCztyi1VhE5HdtCW9bl+PIfM52wxvL8ubSAhLZoCnil6AsPlbBw4lcOLVczXPrXNsQFvIBytzWNRoKmiI8V0Hz87nMnjzlFqK8yFvn0JCeiAy5c8x3V7LKuFDScVbgRa28D80Gy6BNWBckLmhXZZx1XnQSGvAeCxF9i2rXGC47LJZUGksiQzRzM8UEaY0rFvDrBUIdd0QuCAkCFhAKZUTfuVDqd+7EVYOS7aBud3e/dbtgHobd4hBqZcrRGJRuHT7s0tX+cxqXBZcODshYoS48d/qNzdw2xe66xr9hbIpPt/W5YyjEIHbtb2l439vcP9/muiA93QzShSVxaltTfA/R/yBEP27Lo3ND6AxocYXuDp04Cah+D9d/Ha5od2W5aTQ2FLnYymUKjUpjq0qnqpilsZ3IRPoQwjg3tU4zbaptDrqynnrPDp8dSh525tPfFccwOt9v1CucxBlwfYf0L8/FLU7CwNc4WzqoayCVCwgeiB/gDpSGTKMYO1uLlyfXItiYWzNW5aOH2g9By8PMBo26De9hbvvYopswbssD6boxv7y7FmRv0QibESiDRVR6+eaq0wotVam2pTIH4pQPa9QT7zuZ4qfA+/N7udso1mud+hz2+9y2CqEIkUskZ8DgYVw8uYe60bh/3OMJlE/UZmw3XRqcXF0LBpkB7mt6zTzirz/+FCDeYfai/1t6cXolYnBFBuGskU3Exe/H6VuPBikRnxRV4mOLLTdeAyXyISiJs3l3qqmtUWQ5KxIBphA1FgrEoq8fMCKKdIBgbkT/8rwrBZCHTT7HaE7wUtFZm4lz71vkJh93XUXU+F6aloqqNjvIbZ1+gDt1dJSCppoZUxU5QnLlaDwuSX99fv0tojJts7QGT+jSX8+fn1xcnbBczoQI8NHBYRgDrKcazJKi7ugTYVpk0Up0lu4C/uWLkLgbCe8pbTSoMGMFDKZd4t/wVl2cwGUie+HOo7N7mEjOciabTjPw+Nbp2Yw/x7zq3QwTeQdOcaLGmxXl+bmQvTFoj3sc/2HQ3aU8ElsuYLZaPk8uw5l1B7rlN5lIzvdwWTPjU2WXVmxNXHgedT6+ZvYHxo0OxKN15OjnOTa0l3a4VEq5TshEZt1FTx26jXTwiZGET9HI+YUL5zR/m0oNpmxDh5FRJlcCaFdGq0U16x6WblVWYVivMNER/rt0Y7DKMp3GMjWbLejj0k6ODtoF4ozDbDb7G2kp84c=
+sidebar_class_name: "post api-method"
+info_path: docs/4. API/altmount-api
+custom_edit_url: null
+---
+
+import MethodEndpoint from "@theme/ApiExplorer/MethodEndpoint";
+import ParamsDetails from "@theme/ParamsDetails";
+import RequestSchema from "@theme/RequestSchema";
+import StatusCodes from "@theme/StatusCodes";
+import OperationTabs from "@theme/OperationTabs";
+import TabItem from "@theme/TabItem";
+import Heading from "@theme/Heading";
+import Translate from "@docusaurus/Translate";
+
+<Heading
+  as={"h1"}
+  className={"openapi__heading"}
+  children={"Trigger file repair"}
+>
+</Heading>
+
+<MethodEndpoint
+  method={"post"}
+  path={"/api/health/{id}/repair"}
+  context={"endpoint"}
+>
+  
+</MethodEndpoint>
+
+
+
+Triggers an ARR rescan for the file to initiate repair, setting status to repair_triggered
+
+<Heading
+  id={"request"}
+  as={"h2"}
+  className={"openapi-tabs__heading"}
+>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
+<ParamsDetails
+  {...require("./trigger-file-repair.ParamsDetails.json")}
+>
+  
+</ParamsDetails>
+
+<RequestSchema
+  {...require("./trigger-file-repair.RequestSchema.json")}
+>
+  
+</RequestSchema>
+
+<StatusCodes
+  {...require("./trigger-file-repair.StatusCodes.json")}
+>
+  
+</StatusCodes>
+
+
+      

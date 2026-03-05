@@ -22,6 +22,14 @@ func NewLibrarySyncHandlers(librarySyncWorker *health.LibrarySyncWorker, configM
 }
 
 // handleGetLibrarySyncStatus handles GET /api/health/library-sync/status
+//
+// @Summary      Get library sync status
+// @Description  Returns the current status of the library synchronization worker
+// @Tags         Health
+// @Produce      json
+// @Success      200  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/health/library-sync/status [get]
 func (h *LibrarySyncHandlers) handleGetLibrarySyncStatus(c *fiber.Ctx) error {
 	status := h.librarySyncWorker.GetStatus()
 	return c.JSON(fiber.Map{
@@ -31,6 +39,15 @@ func (h *LibrarySyncHandlers) handleGetLibrarySyncStatus(c *fiber.Ctx) error {
 }
 
 // handleStartLibrarySync handles POST /api/health/library-sync/start
+//
+// @Summary      Start library sync
+// @Description  Triggers a manual library synchronization to align metadata with the health database
+// @Tags         Health
+// @Produce      json
+// @Success      200  {object}  APIResponse
+// @Failure      409  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/health/library-sync/start [post]
 func (h *LibrarySyncHandlers) handleStartLibrarySync(c *fiber.Ctx) error {
 	err := h.librarySyncWorker.TriggerManualSync(c.Context())
 	if err != nil {
@@ -49,6 +66,14 @@ func (h *LibrarySyncHandlers) handleStartLibrarySync(c *fiber.Ctx) error {
 }
 
 // handleCancelLibrarySync handles POST /api/health/library-sync/cancel
+//
+// @Summary      Cancel library sync
+// @Description  Stops any in-progress library synchronization
+// @Tags         Health
+// @Produce      json
+// @Success      200  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/health/library-sync/cancel [post]
 func (h *LibrarySyncHandlers) handleCancelLibrarySync(c *fiber.Ctx) error {
 	// Stop the library sync worker
 	h.librarySyncWorker.Stop(c.Context())
@@ -62,6 +87,15 @@ func (h *LibrarySyncHandlers) handleCancelLibrarySync(c *fiber.Ctx) error {
 }
 
 // handleDryRunLibrarySync handles POST /api/health/library-sync/dry-run
+//
+// @Summary      Dry run library sync
+// @Description  Simulates a library sync and returns what would be changed without applying changes
+// @Tags         Health
+// @Produce      json
+// @Success      200  {object}  APIResponse{data=DryRunSyncResult}
+// @Failure      500  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/health/library-sync/dry-run [post]
 func (h *LibrarySyncHandlers) handleDryRunLibrarySync(c *fiber.Ctx) error {
 	// Perform dry run using the refactored SyncLibrary method with dryRun=true
 	result := h.librarySyncWorker.SyncLibrary(c.Context(), true)
@@ -90,6 +124,14 @@ func (h *LibrarySyncHandlers) handleDryRunLibrarySync(c *fiber.Ctx) error {
 
 // handleGetSyncNeeded handles GET /api/health/library-sync/needed
 // Returns whether a library sync is needed due to configuration changes
+//
+// @Summary      Check if library sync is needed
+// @Description  Returns whether a library sync is needed due to configuration changes such as mount path change
+// @Tags         Health
+// @Produce      json
+// @Success      200  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/health/library-sync/needed [get]
 func (h *LibrarySyncHandlers) handleGetSyncNeeded(c *fiber.Ctx) error {
 	needsSync := false
 	reason := ""

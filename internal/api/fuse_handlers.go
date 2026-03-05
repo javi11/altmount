@@ -188,6 +188,19 @@ func (m *FuseManager) recoverMount(ctx context.Context) {
 }
 
 // handleStartFuseMount starts the FUSE mount
+//
+// @Summary      Start FUSE mount
+// @Description  Mounts the NZB virtual filesystem at the specified path using FUSE
+// @Tags         FUSE
+// @Accept       json
+// @Produce      json
+// @Param        body  body  object{path=string}  true  "Mount path"
+// @Success      200  {object}  APIResponse
+// @Failure      400  {object}  APIResponse
+// @Failure      409  {object}  APIResponse
+// @Failure      500  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/fuse/start [post]
 func (s *Server) handleStartFuseMount(c *fiber.Ctx) error {
 	var req struct {
 		Path string `json:"path"`
@@ -260,6 +273,16 @@ func (s *Server) handleStartFuseMount(c *fiber.Ctx) error {
 }
 
 // handleStopFuseMount stops the FUSE mount
+//
+// @Summary      Stop FUSE mount
+// @Description  Gracefully unmounts the FUSE filesystem
+// @Tags         FUSE
+// @Produce      json
+// @Success      200  {object}  APIResponse
+// @Failure      404  {object}  APIResponse
+// @Failure      500  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/fuse/stop [post]
 func (s *Server) handleStopFuseMount(c *fiber.Ctx) error {
 	s.fuseManager.mu.Lock()
 	defer s.fuseManager.mu.Unlock()
@@ -285,6 +308,16 @@ func (s *Server) handleStopFuseMount(c *fiber.Ctx) error {
 }
 
 // handleForceStopFuseMount force-unmounts the FUSE mount using platform-specific commands
+//
+// @Summary      Force stop FUSE mount
+// @Description  Force-unmounts the FUSE filesystem using platform-specific commands (use when graceful stop fails)
+// @Tags         FUSE
+// @Produce      json
+// @Success      200  {object}  APIResponse
+// @Failure      404  {object}  APIResponse
+// @Failure      500  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/fuse/force-stop [post]
 func (s *Server) handleForceStopFuseMount(c *fiber.Ctx) error {
 	s.fuseManager.mu.Lock()
 	defer s.fuseManager.mu.Unlock()
@@ -317,6 +350,14 @@ func (s *Server) handleForceStopFuseMount(c *fiber.Ctx) error {
 }
 
 // handleGetFuseStatus returns the current status
+//
+// @Summary      Get FUSE mount status
+// @Description  Returns the current status of the FUSE mount including health check results
+// @Tags         FUSE
+// @Produce      json
+// @Success      200  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/fuse/status [get]
 func (s *Server) handleGetFuseStatus(c *fiber.Ctx) error {
 	s.fuseManager.mu.Lock()
 	defer s.fuseManager.mu.Unlock()

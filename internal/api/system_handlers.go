@@ -18,6 +18,15 @@ import (
 var lastMissingWarnTime sync.Map
 
 // handleGetSystemStats handles GET /api/system/stats
+//
+// @Summary      Get system statistics
+// @Description  Returns combined queue, health, and system statistics
+// @Tags         System
+// @Produce      json
+// @Success      200  {object}  APIResponse{data=SystemStatsResponse}
+// @Failure      500  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/system/stats [get]
 func (s *Server) handleGetSystemStats(c *fiber.Ctx) error {
 	// Get queue statistics
 	queueStats, err := s.queueRepo.GetQueueStats(c.Context())
@@ -53,6 +62,15 @@ func (s *Server) handleGetSystemStats(c *fiber.Ctx) error {
 }
 
 // handleGetSystemHealth handles GET /api/system/health
+//
+// @Summary      Get system health status
+// @Description  Performs health checks on system components and returns overall health status
+// @Tags         System
+// @Produce      json
+// @Success      200  {object}  APIResponse{data=SystemHealthResponse}
+// @Failure      503  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/system/health [get]
 func (s *Server) handleGetSystemHealth(c *fiber.Ctx) error {
 	// Perform health checks
 	healthCheck := s.checkSystemHealth(c.Context())
@@ -87,6 +105,21 @@ func (s *Server) handleGetSystemHealth(c *fiber.Ctx) error {
 }
 
 // handleSystemCleanup handles POST /api/system/cleanup
+//
+// @Summary      System cleanup
+// @Description  Removes old queue items and health records based on configurable age thresholds
+// @Tags         System
+// @Accept       json
+// @Produce      json
+// @Param        queue_older_than   query  string  false  "Remove queue items older than this timestamp"
+// @Param        health_older_than  query  string  false  "Remove health records older than this timestamp"
+// @Param        dry_run            query  bool    false  "Simulate cleanup without actually deleting"
+// @Success      200  {object}  APIResponse{data=SystemCleanupResponse}
+// @Failure      400  {object}  APIResponse
+// @Failure      422  {object}  APIResponse
+// @Failure      500  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/system/cleanup [post]
 func (s *Server) handleSystemCleanup(c *fiber.Ctx) error {
 	// Parse request body
 	var req SystemCleanupRequest
@@ -186,6 +219,17 @@ func (s *Server) handleSystemCleanup(c *fiber.Ctx) error {
 }
 
 // handleSystemRestart handles POST /api/system/restart
+//
+// @Summary      Restart the server
+// @Description  Initiates a server restart; the response is returned before the restart occurs
+// @Tags         System
+// @Accept       json
+// @Produce      json
+// @Param        body  body  SystemRestartRequest  false  "Restart options"
+// @Success      200  {object}  APIResponse{data=SystemRestartResponse}
+// @Failure      400  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/system/restart [post]
 func (s *Server) handleSystemRestart(c *fiber.Ctx) error {
 	// Parse request body if present
 	var req SystemRestartRequest
@@ -220,6 +264,21 @@ func (s *Server) handleSystemRestart(c *fiber.Ctx) error {
 }
 
 // handleResetSystemStats handles POST /api/system/stats/reset
+//
+// @Summary      Reset system statistics
+// @Description  Resets NNTP pool metrics, import history, and optionally queue items
+// @Tags         System
+// @Produce      json
+// @Param        duration       query  string  false  "Reset statistics for last N duration (e.g. 24h)"
+// @Param        reset_peak     query  bool    false  "Reset peak speed metrics"
+// @Param        reset_totals   query  bool    false  "Reset total bytes/articles counters"
+// @Param        reset_history  query  bool    false  "Reset import history"
+// @Param        reset_queue    query  bool    false  "Clear completed and failed queue items"
+// @Success      200  {object}  APIResponse
+// @Failure      400  {object}  APIResponse
+// @Failure      500  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/system/stats/reset [post]
 func (s *Server) handleResetSystemStats(c *fiber.Ctx) error {
 	ctx := c.Context()
 	durationStr := c.Query("duration")
@@ -340,6 +399,15 @@ func (s *Server) performRestart(ctx context.Context) {
 }
 
 // handleGetPoolMetrics handles GET /api/system/pool/metrics
+//
+// @Summary      Get NNTP pool metrics
+// @Description  Returns real-time metrics for the NNTP connection pool including speeds, errors, and provider stats
+// @Tags         System
+// @Produce      json
+// @Success      200  {object}  APIResponse{data=PoolMetricsResponse}
+// @Failure      500  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/system/pool/metrics [get]
 func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 	// Check if pool manager is available
 	if s.poolManager == nil {
@@ -531,6 +599,17 @@ type FileEntry struct {
 }
 
 // handleSystemBrowse handles GET /api/system/browse
+//
+// @Summary      Browse filesystem
+// @Description  Lists files and directories at the given absolute path on the server filesystem
+// @Tags         System
+// @Produce      json
+// @Param        path  query  string  false  "Absolute directory path to browse (defaults to working directory)"
+// @Success      200  {object}  APIResponse
+// @Failure      400  {object}  APIResponse
+// @Failure      500  {object}  APIResponse
+// @Security     BearerAuth
+// @Router       /api/system/browse [get]
 func (s *Server) handleSystemBrowse(c *fiber.Ctx) error {
 	path := c.Query("path")
 	if path == "" {

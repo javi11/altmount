@@ -1,0 +1,69 @@
+---
+id: stremio-play-queue-nzb-and-redirect-to-stream
+title: "Stremio play — queue NZB and redirect to stream"
+description: "Downloads the NZB from the given Prowlarr URL, adds it to the import queue with high priority, waits for processing, then 302-redirects to the first media stream URL. Used by Stremio after the user selects a stream from handleStremioAddonStream."
+sidebar_label: "Stremio play — queue NZB and redirect to stream"
+hide_title: true
+hide_table_of_contents: true
+api: eJztV1FP3EYQ/iurfUokFx/QVJFVVToaQmgJRRzXSEl4GNtz9sJ61+yOj1xPlvoj+gv7S6pZ29wBB6HpQys1LyB7PPN9OzM7891S5ugzp2pS1shEvrLXRlvIvaASxfH7PTFztgoPhZqjESfOXmtwTkxPjyIBee6FIkE2fKKq2joSVw02KK4VlaJURSlqp6xTtIjENSjyYmadqJ3N0Htliohdjdgd7XzjMFcOM/JDwJlynkSFuQLhySFUjLslph5zkS7EhBxWygqYEbrg0Xh0wqMOUW6cwiFKMLnG3mWc59ZMgnVLRpKg8DL5IHurPI9kDQ4qJHRsWD6QJ3GJC/Fs8ma88+I7YWdifHLIr57LSBqoUCbyEhcykoqdaqBSRtLhVaMc5jIh12AkfVZiBTJZSlrU7OLJKVPIto3uwt5knyuTDxymp0crvMbpAe+qQbf4Z4ATmHEVNHJ0QYo0hvL13bGCDaa7wA8DnTMrX1vj0bN9d7TD/26Dn/btwN2wqr6MZGYNoSH2gLrWKgP2iC88uy0fgW3bSH47Gt2H2oNcnOJVg56+IL5NLzBjx9rZGh2p7lA5EH/VRhKds+7zDpnNcQPtSOZIoLTfaKvQeyg2+bXBSk9gmtmmO27/mTKEBToOr1WlHjDZ2czjAzayBHqTiUn5JuPLv2ZOrdUIJpSoK9L2/SJNDTRUWqd+w/xrlf4DVXox2r1fpQm6ucpQTA3MQWlIw1z4Wqx/t1gd79LmMpEFBrq8jRIZ+27lxctLXLRxrSFMbnTzYfPxRklkHGubgS6tp+Tl6OVI8gz3mDW82Sdcvu7c41r9jItxw8Hvtka/HQcBUDioKiCVCQjkxbObjuk29sH+mYihVnFmzUwVvFX7w0FAWa0fqNXaou32TxvJPQSHbjOZn96dCbKXaIRNCZTBvAM9+WXSo/K0ibUtlNkSr62rgBLxsY8pvg++P3yUD5Ma99MqtPrArUTIQ9H4eWY3bL39yVnQEZylsaa33Ejiz9//ECDeYfpq/Gt8/HoiugqJFLLLTgsdv9+Lpx4NUtRpr06GVWCgwAoNRWGRixJBUykqaxRZFwQYmPyWyFKmCKIo7PRE3pAYnxz2Vxmy0KTDQYcPDhS9aVJx6H2DXkZ965REtU/iuFBUNulWZqv4AuZqezsGTRU7xqrzCJcjQ+NxLfrbw7O/EyrVNo0r8IQuPjr8cf94ss9xuZ27BG9vjfhFbT1VYNaABjXJdyAkvMsgay3OkLsnR2R0u3bL1Zj7/yrp7i4QfiIeJspwrkPxlv3I+SD7kSMjmXS3Nkyd80jydOEPlssUPE6dblt+3d3noMKV5/GQy2QG2uMj+X922qve5+Ix1byRLpMalPQcdMNfyCCOnwz/eeH8CPIgplfY5/zgVFimX5yHJ/xo2UhqGG9msc5pIMt/2/M2GiYb0+ss4yzDmtZ87m1+PtfNWjrYP5Nt+xd4CgN9
+sidebar_class_name: "get api-method"
+info_path: docs/4. API/altmount-api
+custom_edit_url: null
+---
+
+import MethodEndpoint from "@theme/ApiExplorer/MethodEndpoint";
+import ParamsDetails from "@theme/ParamsDetails";
+import RequestSchema from "@theme/RequestSchema";
+import StatusCodes from "@theme/StatusCodes";
+import OperationTabs from "@theme/OperationTabs";
+import TabItem from "@theme/TabItem";
+import Heading from "@theme/Heading";
+import Translate from "@docusaurus/Translate";
+
+<Heading
+  as={"h1"}
+  className={"openapi__heading"}
+  children={"Stremio play — queue NZB and redirect to stream"}
+>
+</Heading>
+
+<MethodEndpoint
+  method={"get"}
+  path={"/stremio/{key}/play"}
+  context={"endpoint"}
+>
+  
+</MethodEndpoint>
+
+
+
+Downloads the NZB from the given Prowlarr URL, adds it to the import queue with high priority, waits for processing, then 302-redirects to the first media stream URL. Used by Stremio after the user selects a stream from handleStremioAddonStream.
+
+<Heading
+  id={"request"}
+  as={"h2"}
+  className={"openapi-tabs__heading"}
+>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
+<ParamsDetails
+  {...require("./stremio-play-queue-nzb-and-redirect-to-stream.ParamsDetails.json")}
+>
+  
+</ParamsDetails>
+
+<RequestSchema
+  {...require("./stremio-play-queue-nzb-and-redirect-to-stream.RequestSchema.json")}
+>
+  
+</RequestSchema>
+
+<StatusCodes
+  {...require("./stremio-play-queue-nzb-and-redirect-to-stream.StatusCodes.json")}
+>
+  
+</StatusCodes>
+
+
+      

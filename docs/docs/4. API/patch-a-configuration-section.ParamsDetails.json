@@ -1,0 +1,1 @@
+{"parameters":[{"description":"Configuration section name","name":"section","in":"path","required":true,"schema":{"type":"string"}}]}
