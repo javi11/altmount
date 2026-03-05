@@ -23,6 +23,7 @@ const defaultFormData: ProviderFormData = {
 	proxy_url: "",
 	enabled: true,
 	is_backup_provider: false,
+	skip_ping: false,
 };
 
 export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderModalProps) {
@@ -53,6 +54,7 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 				proxy_url: provider.proxy_url || "",
 				enabled: provider.enabled,
 				is_backup_provider: provider.is_backup_provider,
+				skip_ping: provider.skip_ping ?? false,
 			});
 			// For edit mode, allow saving without testing if only non-connection fields change
 			setCanSave(true);
@@ -154,6 +156,8 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 				if (formData.enabled !== provider.enabled) updateData.enabled = formData.enabled;
 				if (formData.is_backup_provider !== provider.is_backup_provider)
 					updateData.is_backup_provider = formData.is_backup_provider;
+				if (formData.skip_ping !== (provider.skip_ping ?? false))
+					updateData.skip_ping = formData.skip_ping;
 
 				await updateProvider.mutateAsync({
 					id: provider.id,
@@ -342,6 +346,26 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 									<span className="label-text font-bold text-xs">Backup Only</span>
 									<span className="block text-base-content/70 text-xs">
 										Only use when primary providers fail.
+									</span>
+								</div>
+							</label>
+
+							<label
+								htmlFor="skip_ping"
+								className="label cursor-pointer items-start justify-start gap-3"
+							>
+								<input
+									id="skip_ping"
+									type="checkbox"
+									className="checkbox checkbox-primary checkbox-sm mt-0.5"
+									checked={formData.skip_ping}
+									onChange={(e) => handleInputChange("skip_ping", e.target.checked)}
+								/>
+								<div className="min-w-0 flex-1">
+									<span className="label-text font-bold text-xs">Skip server ping</span>
+									<span className="block text-base-content/70 text-xs">
+										Enable if the server doesn't support the DATE command and you get a date/ping
+										error when connecting.
 									</span>
 								</div>
 							</label>
