@@ -14,6 +14,9 @@ var (
 
 	// Rar5Magic is the magic signature for RAR 5.x archives
 	Rar5Magic = []byte{0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x01, 0x00}
+
+	// SevenZipMagic is the magic signature for 7-Zip archives
+	SevenZipMagic = []byte{0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C}
 )
 
 // FileInfo represents parsed information about an NZB file
@@ -38,5 +41,6 @@ type NzbFileWithFirstSegment struct {
 	Headers       *nntppool.YEncMeta
 	First16KB     []byte
 	ReleaseDate   time.Time
-	OriginalIndex int // Original position in the parsed NZB file list
+	SubjectHeader string // Release name prefix from the subject line (before the filename)
+	OriginalIndex int    // Original position in the parsed NZB file list
 }

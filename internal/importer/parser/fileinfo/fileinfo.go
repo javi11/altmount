@@ -2,6 +2,7 @@ package fileinfo
 
 import (
 	"crypto/md5"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -20,10 +21,14 @@ var (
 func GetFileInfos(
 	files []*NzbFileWithFirstSegment,
 	par2Descriptors map[[16]byte]*par2.FileDescriptor,
+	nzbFilename string,
 ) []*FileInfo {
+	// Strip .nzb extension for use as last-resort filename stem
+	nzbStem := strings.TrimSuffix(nzbFilename, filepath.Ext(nzbFilename))
+
 	fileInfos := make([]*FileInfo, 0, len(files))
 	for _, file := range files {
-		info := getFileInfo(file, par2Descriptors)
+		info := getFileInfo(file, par2Descriptors, nzbStem)
 		fileInfos = append(fileInfos, info)
 	}
 
@@ -34,13 +39,17 @@ func GetFileInfos(
 func getFileInfo(
 	file *NzbFileWithFirstSegment,
 	hashToDescMap map[[16]byte]*par2.FileDescriptor,
+	nzbFilenameStem string,
 ) *FileInfo {
 	par2Filename := ""
 	par2FileSize := int64(0)
 
 	if len(hashToDescMap) > 0 {
-		// Calculate MD5 hash of first 16KB for PAR2 matching
-		md5Hash := md5.Sum(file.First16KB)
+		// Gap 1: PAR2 Hash16k is MD5 of the first 16384 bytes, zero-padded if file is shorter.
+		// Without zero-padding, md5.Sum(file.First16KB) produces a wrong hash for files < 16KB.
+		padded := make([]byte, 16384)
+		copy(padded, file.First16KB)
+		md5Hash := md5.Sum(padded)
 
 		desc, ok := hashToDescMap[md5Hash]
 		if ok {
@@ -56,8 +65,22 @@ func getFileInfo(
 		headerFilename = file.Headers.FileName
 	}
 
-	// Select best filename using priority system
-	filename := selectBestFilename(par2Filename, subjectFilename, headerFilename)
+	// Select best filename using priority system (PAR2 > subject > yEnc header > subject header)
+	filename := selectBestFilename(par2Filename, subjectFilename, headerFilename, file.SubjectHeader)
+
+	// Gap 4: Correct extension based on magic bytes when filename appears obfuscated.
+	// This handles files that were uploaded with a wrong or missing extension.
+	filename = correctExtensionFromMagicBytes(filename, file.First16KB)
+
+	// Gap 5: Last resort — use NZB filename stem when all other sources are obfuscated/empty.
+	if nzbFilenameStem != "" && (filename == "" || isProbablyObfuscated(filename)) {
+		ext := filepath.Ext(filename)
+		if ext != "" {
+			filename = nzbFilenameStem + ext
+		} else {
+			filename = nzbFilenameStem
+		}
+	}
 
 	// Determine file size (PAR2 has highest priority)
 	var fileSize *int64
@@ -71,8 +94,8 @@ func getFileInfo(
 	// Detect RAR archives (by magic bytes or extension)
 	isRar := HasRarMagic(file.First16KB) || IsRarFile(filename)
 
-	// Detect 7z archives (by extension only, no magic bytes check for 7z)
-	is7z := Is7zFile(filename)
+	// Gap 3: Detect 7z archives by magic bytes or extension
+	is7z := Has7zMagic(file.First16KB) || Is7zFile(filename)
 
 	isPar2Archive := IsPar2File(filename)
 
@@ -90,10 +113,26 @@ func getFileInfo(
 	}
 }
 
+// correctExtensionFromMagicBytes fixes the extension of an obfuscated file based on its magic bytes.
+// Only applies when the filename looks obfuscated — clear names are never modified.
+func correctExtensionFromMagicBytes(filename string, data []byte) string {
+	if !isProbablyObfuscated(filename) {
+		return filename
+	}
+	base := strings.TrimSuffix(filename, filepath.Ext(filename))
+	if HasRarMagic(data) {
+		return base + ".rar"
+	}
+	if Has7zMagic(data) {
+		return base + ".7z"
+	}
+	return filename
+}
+
 // selectBestFilename selects the best filename using priority system
-// Priority: PAR2 (3) > Subject (2) > Header (1)
+// Priority: PAR2 (3) > Subject (2) > yEnc header (1) > Subject header (0)
 // With adjustments for obfuscation, important types, and extension length
-func selectBestFilename(par2Filename, subjectFilename, headerFilename string) string {
+func selectBestFilename(par2Filename, subjectFilename, headerFilename, subjectHeader string) string {
 	type candidate struct {
 		filename string
 		priority int
@@ -103,6 +142,7 @@ func selectBestFilename(par2Filename, subjectFilename, headerFilename string) st
 		{filename: par2Filename, priority: getFilenamePriority(par2Filename, 3)},
 		{filename: subjectFilename, priority: getFilenamePriority(subjectFilename, 2)},
 		{filename: headerFilename, priority: getFilenamePriority(headerFilename, 1)},
+		{filename: subjectHeader, priority: getFilenamePriority(subjectHeader, 0)},
 	}
 
 	// Find candidate with highest priority

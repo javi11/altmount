@@ -142,18 +142,24 @@ func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string) (*P
 			continue
 		}
 
+		subjectHeader := ""
+		if s, err := nzbparser.ParseSubject(data.File.Subject); err == nil {
+			subjectHeader = s.Header
+		}
+
 		filesWithFirstSegment = append(filesWithFirstSegment, &fileinfo.NzbFileWithFirstSegment{
 			NzbFile:       data.File,
 			Headers:       &data.Headers,
 			First16KB:     data.RawBytes,
 			ReleaseDate:   time.Unix(int64(data.File.Date), 0),
+			SubjectHeader: subjectHeader,
 			OriginalIndex: data.OriginalIndex,
 		})
 	}
 
 	// Get file infos with priority-based filename selection
 	// This already filters out PAR2 files
-	fileInfos := fileinfo.GetFileInfos(filesWithFirstSegment, par2Descriptors)
+	fileInfos := fileinfo.GetFileInfos(filesWithFirstSegment, par2Descriptors, parsed.Filename)
 	if len(fileInfos) == 0 {
 		p.log.WarnContext(ctx, "Failed to get file infos from network, falling back to NZB XML data",
 			"nzb_path", nzbPath)
