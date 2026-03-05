@@ -1,3 +1,9 @@
+---
+title: Development Setup
+description: Set up a local development environment for contributing to AltMount's Go backend and React frontend.
+keywords: [altmount, development, setup, contributing, go, react, local environment]
+---
+
 # Development Setup
 
 This guide will help you set up a development environment for AltMount.

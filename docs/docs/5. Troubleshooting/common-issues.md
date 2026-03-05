@@ -1,3 +1,9 @@
+---
+title: Common Issues and Solutions
+description: Troubleshoot common AltMount problems including connection errors, download failures, and WebDAV issues.
+keywords: [altmount, troubleshoot, issues, errors, webdav, connection, download, fix]
+---
+
 # Common Issues and Solutions
 
 This guide covers the most frequently encountered issues with AltMount and their solutions, organized by category for quick diagnosis and resolution.

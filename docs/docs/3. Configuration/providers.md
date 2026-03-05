@@ -1,3 +1,9 @@
+---
+title: NNTP Providers Configuration
+description: Configure multiple Usenet NNTP providers in AltMount for maximum completion rates, failover, and load balancing.
+keywords: [altmount, nntp, usenet, providers, configuration, failover, load balancing, completion]
+---
+
 # NNTP Providers Configuration
 
 NNTP providers are the backbone of AltMount - they provide access to Usenet newsgroups for downloading content. This guide covers configuring multiple providers for optimal performance and reliability.

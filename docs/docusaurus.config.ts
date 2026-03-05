@@ -122,6 +122,16 @@ const config: Config = {
 			],
 			copyright: `Copyright © ${new Date().getFullYear()} AltMount. Built with Docusaurus.`,
 		},
+		metadata: [
+			{ name: 'description', content: 'AltMount is a high-performance WebDAV server backed by Usenet with streaming, ARR integration, rclone support, and native FUSE mounting.' },
+			{ property: 'og:type', content: 'website' },
+			{ property: 'og:site_name', content: 'AltMount Documentation' },
+			{ property: 'og:description', content: 'Mount Usenet as a local drive. Stream media directly, integrate with Sonarr/Radarr, and use rclone — all in a single binary.' },
+			{ name: 'twitter:card', content: 'summary' },
+			{ name: 'twitter:title', content: 'AltMount Documentation' },
+			{ name: 'twitter:description', content: 'Mount Usenet as a local drive. Stream media directly, integrate with Sonarr/Radarr, and use rclone — all in a single binary.' },
+			{ name: 'keywords', content: 'altmount, usenet, webdav, nzb, nntp, sabnzbd, sonarr, radarr, streaming, rclone, fuse, mount, docker' },
+		],
 		prism: {
 			theme: prismThemes.github,
 			darkTheme: prismThemes.dracula,

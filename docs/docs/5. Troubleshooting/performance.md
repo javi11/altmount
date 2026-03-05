@@ -1,3 +1,9 @@
+---
+title: Performance Optimization
+description: Tune AltMount for maximum download speeds and streaming quality with storage, connection, and cache settings.
+keywords: [altmount, performance, optimization, speed, cache, connection, tuning]
+---
+
 # Performance Optimization
 
 Tips for tuning AltMount to maximize download speeds and streaming quality.
