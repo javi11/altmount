@@ -2,6 +2,7 @@ package importer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -9,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/javi11/nntppool/v4"
 
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
@@ -283,6 +286,8 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 	// Update progress: complete
 	if err == nil {
 		proc.updateProgress(queueID, 100)
+	} else if errors.Is(err, nntppool.ErrArticleNotFound) {
+		return result, ErrArticlesNotFound
 	}
 
 	return result, err

@@ -69,4 +69,10 @@ var (
 		message: "SABnzbd fallback not configured",
 		cause:   nil,
 	}
+
+	// ErrArticlesNotFound indicates that one or more NZB segments could not be found on any provider.
+	ErrArticlesNotFound = &NonRetryableError{
+		message: "The file is incomplete or missing parts. Some segments of this file could not be found on any of the configured Usenet providers. This often happens with older or less popular files.",
+		cause:   nil,
+	}
 )
