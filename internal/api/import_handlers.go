@@ -13,6 +13,18 @@ import (
 )
 
 // handleStartManualScan handles POST /import/scan
+//
+//	@Summary		Start manual directory scan
+//	@Description	Scans a directory for NZB files and adds them to the import queue.
+//	@Tags			Import
+//	@Accept			json
+//	@Produce		json
+//	@Param			body	body		ManualScanRequest	true	"Directory path to scan"
+//	@Success		200		{object}	APIResponse
+//	@Failure		400		{object}	APIResponse
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/import/scan [post]
 func (s *Server) handleStartManualScan(c *fiber.Ctx) error {
 	// Check if importer service is available
 	if s.importerService == nil {
@@ -59,6 +71,15 @@ func (s *Server) handleStartManualScan(c *fiber.Ctx) error {
 }
 
 // handleGetScanStatus handles GET /import/scan/status
+//
+//	@Summary		Get scan status
+//	@Description	Returns the current status of the manual directory scan operation.
+//	@Tags			Import
+//	@Produce		json
+//	@Success		200	{object}	APIResponse{data=ScanStatusResponse}
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/import/scan/status [get]
 func (s *Server) handleGetScanStatus(c *fiber.Ctx) error {
 	// Check if importer service is available
 	if s.importerService == nil {
@@ -78,6 +99,15 @@ func (s *Server) handleGetScanStatus(c *fiber.Ctx) error {
 }
 
 // handleCancelScan handles DELETE /import/scan
+//
+//	@Summary		Cancel directory scan
+//	@Description	Cancels the currently running manual directory scan.
+//	@Tags			Import
+//	@Produce		json
+//	@Success		200	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/import/scan [delete]
 func (s *Server) handleCancelScan(c *fiber.Ctx) error {
 	// Check if importer service is available
 	if s.importerService == nil {
@@ -106,6 +136,19 @@ func (s *Server) handleCancelScan(c *fiber.Ctx) error {
 }
 
 // handleManualImportFile handles POST /import/file
+//
+//	@Summary		Manually import a file
+//	@Description	Adds an NZB file at a given filesystem path to the import queue. Public endpoint (API key in query).
+//	@Tags			Import
+//	@Accept			json
+//	@Produce		json
+//	@Param			body	body		ManualImportRequest		true	"File path to import"
+//	@Success		200		{object}	APIResponse{data=ManualImportResponse}
+//	@Failure		400		{object}	APIResponse
+//	@Failure		404		{object}	APIResponse
+//	@Failure		409		{object}	APIResponse
+//	@Security		ApiKeyAuth
+//	@Router			/import/file [post]
 func (s *Server) handleManualImportFile(c *fiber.Ctx) error {
 	// Check for API key authentication
 	apiKey := c.Query("apikey")
@@ -243,6 +286,18 @@ func (s *Server) handleManualImportFile(c *fiber.Ctx) error {
 }
 
 // handleGetImportHistory handles GET /api/import/history
+//
+//	@Summary		Get import history
+//	@Description	Returns a paginated list of completed import records.
+//	@Tags			Import
+//	@Produce		json
+//	@Param			limit	query		int	false	"Page size (default 50)"
+//	@Param			offset	query		int	false	"Page offset"
+//	@Success		200		{object}	APIResponse{data=[]ImportHistoryResponse,meta=APIMeta}
+//	@Failure		500		{object}	APIResponse
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/import/history [get]
 func (s *Server) handleGetImportHistory(c *fiber.Ctx) error {
 	limit := 50
 	if l := c.Query("limit"); l != "" {
@@ -278,6 +333,16 @@ func toScanStatusResponse(scanInfo importer.ScanInfo) *ScanStatusResponse {
 }
 
 // handleClearImportHistory handles DELETE /api/import/history
+//
+//	@Summary		Clear import history
+//	@Description	Removes all completed import history records.
+//	@Tags			Import
+//	@Produce		json
+//	@Success		200	{object}	APIResponse
+//	@Failure		500	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/import/history [delete]
 func (s *Server) handleClearImportHistory(c *fiber.Ctx) error {
 	if err := s.queueRepo.ClearImportHistory(c.Context()); err != nil {
 		return RespondInternalError(c, "Failed to clear import history", err.Error())

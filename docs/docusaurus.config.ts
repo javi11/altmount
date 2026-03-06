@@ -56,6 +56,21 @@ const config: Config = {
 
 	themes: ["@docusaurus/theme-mermaid"],
 
+	plugins: [
+		function webpackPolyfillPlugin() {
+			return {
+				name: "webpack-stream-polyfill",
+				configureWebpack() {
+					return {
+						resolve: {
+							fallback: { stream: false },
+						},
+					};
+				},
+			};
+		},
+	],
+
 	themeConfig: {
 		navbar: {
 			title: "AltMount",
@@ -69,6 +84,11 @@ const config: Config = {
 					sidebarId: "tutorialSidebar",
 					position: "left",
 					label: "Documentation",
+				},
+				{
+					to: "/api-explorer",
+					label: "API Explorer",
+					position: "left",
 				},
 				{
 					href: "https://github.com/javi11/altmount",

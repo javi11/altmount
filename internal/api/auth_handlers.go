@@ -44,6 +44,18 @@ type RegisterRequest struct {
 }
 
 // handleDirectLogin handles username/password authentication
+//
+//	@Summary		Login
+//	@Description	Authenticates with username and password and returns a JWT access token. Rate-limited to 10/min per IP.
+//	@Tags			Auth
+//	@Accept			json
+//	@Produce		json
+//	@Param			body	body		LoginRequest	true	"Login credentials"
+//	@Success		200		{object}	APIResponse{data=AuthResponse}
+//	@Failure		400		{object}	APIResponse
+//	@Failure		401		{object}	APIResponse
+//	@Failure		429		{object}	APIResponse
+//	@Router			/auth/login [post]
 func (s *Server) handleDirectLogin(c *fiber.Ctx) error {
 	var req LoginRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -91,6 +103,17 @@ func (s *Server) handleDirectLogin(c *fiber.Ctx) error {
 }
 
 // handleRegister handles user registration (first user only)
+//
+//	@Summary		Register
+//	@Description	Creates the first admin user account. Only allowed when no users exist yet.
+//	@Tags			Auth
+//	@Accept			json
+//	@Produce		json
+//	@Param			body	body		RegisterRequest	true	"Registration details"
+//	@Success		201		{object}	APIResponse{data=AuthResponse}
+//	@Failure		400		{object}	APIResponse
+//	@Failure		409		{object}	APIResponse
+//	@Router			/auth/register [post]
 func (s *Server) handleRegister(c *fiber.Ctx) error {
 	var req RegisterRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -131,6 +154,13 @@ func (s *Server) handleRegister(c *fiber.Ctx) error {
 }
 
 // handleCheckRegistration checks if registration is allowed
+//
+//	@Summary		Check registration status
+//	@Description	Returns whether registration is currently open (i.e. no users exist yet).
+//	@Tags			Auth
+//	@Produce		json
+//	@Success		200	{object}	APIResponse
+//	@Router			/auth/registration-status [get]
 func (s *Server) handleCheckRegistration(c *fiber.Ctx) error {
 	userCount, err := s.userRepo.GetUserCount(c.Context())
 	if err != nil {
@@ -145,6 +175,13 @@ func (s *Server) handleCheckRegistration(c *fiber.Ctx) error {
 }
 
 // handleGetAuthConfig returns authentication configuration (public endpoint)
+//
+//	@Summary		Get auth config
+//	@Description	Returns authentication configuration (login required flag, available providers). Public endpoint.
+//	@Tags			Auth
+//	@Produce		json
+//	@Success		200	{object}	APIResponse
+//	@Router			/auth/config [get]
 func (s *Server) handleGetAuthConfig(c *fiber.Ctx) error {
 	cfg := s.configManager.GetConfig()
 	loginRequired := true // Default to true if not set
@@ -159,6 +196,16 @@ func (s *Server) handleGetAuthConfig(c *fiber.Ctx) error {
 }
 
 // handleAuthUser returns current authenticated user information
+//
+//	@Summary		Get current user
+//	@Description	Returns information about the currently authenticated user.
+//	@Tags			User
+//	@Produce		json
+//	@Success		200	{object}	APIResponse{data=UserResponse}
+//	@Failure		401	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/user [get]
 func (s *Server) handleAuthUser(c *fiber.Ctx) error {
 	user := auth.GetUserFromContext(c)
 	if user == nil {
@@ -178,6 +225,14 @@ func (s *Server) handleAuthUser(c *fiber.Ctx) error {
 }
 
 // handleAuthLogout logs out the current user
+//
+//	@Summary		Logout
+//	@Description	Invalidates the current session and JWT token.
+//	@Tags			User
+//	@Produce		json
+//	@Success		200	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Router			/user/logout [post]
 func (s *Server) handleAuthLogout(c *fiber.Ctx) error {
 	// Clear JWT cookie using Fiber's native API
 	s.clearJWTCookie(c)
@@ -189,6 +244,15 @@ func (s *Server) handleAuthLogout(c *fiber.Ctx) error {
 }
 
 // handleAuthRefresh refreshes the current JWT token
+//
+//	@Summary		Refresh token
+//	@Description	Issues a new JWT access token using the current valid token.
+//	@Tags			User
+//	@Produce		json
+//	@Success		200	{object}	APIResponse{data=AuthResponse}
+//	@Failure		401	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Router			/user/refresh [post]
 func (s *Server) handleAuthRefresh(c *fiber.Ctx) error {
 	tokenService := s.authService.TokenService()
 
@@ -235,6 +299,18 @@ func (s *Server) isAdminOrLoginDisabled(user *database.User) bool {
 }
 
 // handleChangeOwnPassword allows the authenticated user to change their own password
+//
+//	@Summary		Change password
+//	@Description	Changes the password for the currently authenticated user.
+//	@Tags			User
+//	@Accept			json
+//	@Produce		json
+//	@Param			body	body		object{current_password=string,new_password=string}	true	"Password change request"
+//	@Success		200		{object}	APIResponse
+//	@Failure		400		{object}	APIResponse
+//	@Failure		401		{object}	APIResponse
+//	@Security		BearerAuth
+//	@Router			/user/password [put]
 func (s *Server) handleChangeOwnPassword(c *fiber.Ctx) error {
 	user := auth.GetUserFromContext(c)
 	if user == nil {
@@ -271,6 +347,15 @@ func (s *Server) handleChangeOwnPassword(c *fiber.Ctx) error {
 }
 
 // handleRegenerateAPIKey regenerates API key for the authenticated user
+//
+//	@Summary		Regenerate API key
+//	@Description	Generates a new API key for the authenticated user, invalidating the old one.
+//	@Tags			User
+//	@Produce		json
+//	@Success		200	{object}	APIResponse{data=UserResponse}
+//	@Failure		401	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Router			/user/api-key/regenerate [post]
 func (s *Server) handleRegenerateAPIKey(c *fiber.Ctx) error {
 	// Try to get user from context (auth enabled case)
 	user := auth.GetUserFromContext(c)

@@ -363,6 +363,16 @@ func (s *Server) Shutdown(ctx context.Context) {
 }
 
 // handleGetActiveStreams handles GET /api/files/active-streams
+//
+//	@Summary		List active streams
+//	@Description	Returns all currently active NZB file streams. Optionally filter by type=file.
+//	@Tags			Files
+//	@Produce		json
+//	@Param			type	query		string	false	"Filter by source type (e.g. file)"
+//	@Success		200		{object}	APIResponse
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/files/active-streams [get]
 func (s *Server) handleGetActiveStreams(c *fiber.Ctx) error {
 	if s.streamTracker == nil {
 		return c.Status(200).JSON(fiber.Map{
@@ -450,6 +460,18 @@ func (s *Server) checkSystemHealth(ctx context.Context) SystemHealthResponse {
 }
 
 // Library sync handler methods
+
+// handleGetLibrarySyncStatus handles GET /api/health/library-sync/status
+//
+//	@Summary		Get library sync status
+//	@Description	Returns the current status of the library sync worker.
+//	@Tags			Health
+//	@Produce		json
+//	@Success		200	{object}	APIResponse
+//	@Failure		503	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/health/library-sync/status [get]
 func (s *Server) handleGetLibrarySyncStatus(c *fiber.Ctx) error {
 	if s.librarySyncWorker == nil {
 		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
@@ -461,6 +483,17 @@ func (s *Server) handleGetLibrarySyncStatus(c *fiber.Ctx) error {
 	return handlers.handleGetLibrarySyncStatus(c)
 }
 
+// handleStartLibrarySync handles POST /api/health/library-sync/start
+//
+//	@Summary		Start library sync
+//	@Description	Triggers a library sync operation to reconcile the file system with the database.
+//	@Tags			Health
+//	@Produce		json
+//	@Success		200	{object}	APIResponse
+//	@Failure		503	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/health/library-sync/start [post]
 func (s *Server) handleStartLibrarySync(c *fiber.Ctx) error {
 	if s.librarySyncWorker == nil {
 		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
@@ -472,6 +505,17 @@ func (s *Server) handleStartLibrarySync(c *fiber.Ctx) error {
 	return handlers.handleStartLibrarySync(c)
 }
 
+// handleCancelLibrarySync handles POST /api/health/library-sync/cancel
+//
+//	@Summary		Cancel library sync
+//	@Description	Cancels an in-progress library sync operation.
+//	@Tags			Health
+//	@Produce		json
+//	@Success		200	{object}	APIResponse
+//	@Failure		503	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/health/library-sync/cancel [post]
 func (s *Server) handleCancelLibrarySync(c *fiber.Ctx) error {
 	if s.librarySyncWorker == nil {
 		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
@@ -483,6 +527,17 @@ func (s *Server) handleCancelLibrarySync(c *fiber.Ctx) error {
 	return handlers.handleCancelLibrarySync(c)
 }
 
+// handleDryRunLibrarySync handles POST /api/health/library-sync/dry-run
+//
+//	@Summary		Dry-run library sync
+//	@Description	Simulates a library sync and returns what would be changed without applying it.
+//	@Tags			Health
+//	@Produce		json
+//	@Success		200	{object}	APIResponse{data=DryRunSyncResult}
+//	@Failure		503	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/health/library-sync/dry-run [post]
 func (s *Server) handleDryRunLibrarySync(c *fiber.Ctx) error {
 	if s.librarySyncWorker == nil {
 		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
@@ -494,12 +549,33 @@ func (s *Server) handleDryRunLibrarySync(c *fiber.Ctx) error {
 	return handlers.handleDryRunLibrarySync(c)
 }
 
+// handleGetSyncNeeded handles GET /api/health/library-sync/needed
+//
+//	@Summary		Check if library sync is needed
+//	@Description	Returns whether a library sync is needed based on current configuration state.
+//	@Tags			Health
+//	@Produce		json
+//	@Success		200	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/health/library-sync/needed [get]
 func (s *Server) handleGetSyncNeeded(c *fiber.Ctx) error {
 	handlers := NewLibrarySyncHandlers(s.librarySyncWorker, s.configManager)
 	return handlers.handleGetSyncNeeded(c)
 }
 
 // handleKillStream handles DELETE /api/files/active-streams/:id
+//
+//	@Summary		Kill active stream
+//	@Description	Terminates an active NZB file stream by ID.
+//	@Tags			Files
+//	@Produce		json
+//	@Param			id	path		string	true	"Stream ID"
+//	@Success		200	{object}	APIResponse
+//	@Failure		404	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/files/active-streams/{id} [delete]
 func (s *Server) handleKillStream(c *fiber.Ctx) error {
 	id := c.Params("id")
 	if s.streamTracker == nil {
@@ -523,6 +599,15 @@ func (s *Server) handleKillStream(c *fiber.Ctx) error {
 }
 
 // handleGetStreamHistory handles GET /api/files/streams/history
+//
+//	@Summary		Get stream history
+//	@Description	Returns a history of recently completed NZB file streams.
+//	@Tags			Files
+//	@Produce		json
+//	@Success		200	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/files/streams/history [get]
 func (s *Server) handleGetStreamHistory(c *fiber.Ctx) error {
 	if s.streamTracker == nil {
 		return c.JSON(fiber.Map{

@@ -20,6 +20,18 @@ import (
 )
 
 // handleGetFileMetadata handles GET /files/info requests
+//
+//	@Summary		Get file metadata
+//	@Description	Returns metadata for a mounted NZB file including segment info, encryption, and status.
+//	@Tags			Files
+//	@Produce		json
+//	@Param			path	query		string	true	"Virtual path to the file"
+//	@Success		200		{object}	APIResponse{data=FileMetadataResponse}
+//	@Failure		400		{object}	APIResponse
+//	@Failure		500		{object}	APIResponse
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/files/info [get]
 func (s *Server) handleGetFileMetadata(c *fiber.Ctx) error {
 	// Get path from query parameters
 	path := c.Query("path")
@@ -183,6 +195,18 @@ type nzbHead struct {
 }
 
 // handleExportMetadataToNZB handles GET /files/export-nzb requests
+//
+//	@Summary		Export file metadata as NZB
+//	@Description	Exports the metadata of a mounted file back to a downloadable NZB file.
+//	@Tags			Files
+//	@Produce		application/x-nzb
+//	@Param			path	query	string	true	"Virtual path to the file"
+//	@Success		200
+//	@Failure		400	{object}	APIResponse
+//	@Failure		500	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/files/export-nzb [get]
 func (s *Server) handleExportMetadataToNZB(c *fiber.Ctx) error {
 	// Get path from query parameters
 	path := c.Query("path")
@@ -360,6 +384,19 @@ func shouldExcludeFile(filename string, excludeArchives bool) bool {
 }
 
 // handleBatchExportNZB handles POST /files/export-batch requests
+//
+//	@Summary		Batch export files as NZBs
+//	@Description	Exports multiple mounted files as NZBs packed in a single ZIP archive.
+//	@Tags			Files
+//	@Accept			json
+//	@Produce		application/zip
+//	@Param			body	body	object{paths=[]string}	true	"Virtual paths to export"
+//	@Success		200
+//	@Failure		400	{object}	APIResponse
+//	@Failure		500	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/files/export-batch [post]
 func (s *Server) handleBatchExportNZB(c *fiber.Ctx) error {
 	ctx := context.Background()
 

@@ -11,6 +11,18 @@ import (
 )
 
 // handleImportNzbdav handles POST /import/nzbdav
+//
+//	@Summary		Import from NZBDav source
+//	@Description	Starts an import from a WebDAV/NZBDav source, fetching NZBs from the remote.
+//	@Tags			Import
+//	@Accept			json
+//	@Produce		json
+//	@Param			body	body		object{}	false	"Import configuration (uses server config if omitted)"
+//	@Success		200		{object}	APIResponse
+//	@Failure		500		{object}	APIResponse
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/import/nzbdav [post]
 func (s *Server) handleImportNzbdav(c *fiber.Ctx) error {
 	// Check if importer service is available
 	if s.importerService == nil {
@@ -85,6 +97,15 @@ func (s *Server) handleImportNzbdav(c *fiber.Ctx) error {
 }
 
 // handleGetNzbdavImportStatus handles GET /import/nzbdav/status
+//
+//	@Summary		Get NZBDav import status
+//	@Description	Returns the current status of the NZBDav import operation.
+//	@Tags			Import
+//	@Produce		json
+//	@Success		200	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/import/nzbdav/status [get]
 func (s *Server) handleGetNzbdavImportStatus(c *fiber.Ctx) error {
 	if s.importerService == nil {
 		return c.Status(500).JSON(fiber.Map{
@@ -101,6 +122,15 @@ func (s *Server) handleGetNzbdavImportStatus(c *fiber.Ctx) error {
 }
 
 // handleCancelNzbdavImport handles DELETE /import/nzbdav
+//
+//	@Summary		Cancel NZBDav import
+//	@Description	Cancels the currently running NZBDav import operation.
+//	@Tags			Import
+//	@Produce		json
+//	@Success		200	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/import/nzbdav [delete]
 func (s *Server) handleCancelNzbdavImport(c *fiber.Ctx) error {
 	if s.importerService == nil {
 		return c.Status(500).JSON(fiber.Map{
@@ -124,6 +154,15 @@ func (s *Server) handleCancelNzbdavImport(c *fiber.Ctx) error {
 }
 
 // handleResetNzbdavImportStatus handles POST /import/nzbdav/reset
+//
+//	@Summary		Reset NZBDav import status
+//	@Description	Resets the NZBDav import state so a new import can be started.
+//	@Tags			Import
+//	@Produce		json
+//	@Success		200	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/import/nzbdav/reset [post]
 func (s *Server) handleResetNzbdavImportStatus(c *fiber.Ctx) error {
 	if s.importerService == nil {
 		return c.Status(500).JSON(fiber.Map{
