@@ -18,6 +18,16 @@ import (
 var lastMissingWarnTime sync.Map
 
 // handleGetSystemStats handles GET /api/system/stats
+//
+//	@Summary		Get system statistics
+//	@Description	Returns combined queue, health, and system information statistics.
+//	@Tags			System
+//	@Produce		json
+//	@Success		200	{object}	APIResponse{data=SystemStatsResponse}
+//	@Failure		500	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/system/stats [get]
 func (s *Server) handleGetSystemStats(c *fiber.Ctx) error {
 	// Get queue statistics
 	queueStats, err := s.queueRepo.GetQueueStats(c.Context())
@@ -53,6 +63,15 @@ func (s *Server) handleGetSystemStats(c *fiber.Ctx) error {
 }
 
 // handleGetSystemHealth handles GET /api/system/health
+//
+//	@Summary		Get system health
+//	@Description	Returns health status of all system components (database, workers, etc.).
+//	@Tags			System
+//	@Produce		json
+//	@Success		200	{object}	APIResponse{data=SystemHealthResponse}
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/system/health [get]
 func (s *Server) handleGetSystemHealth(c *fiber.Ctx) error {
 	// Perform health checks
 	healthCheck := s.checkSystemHealth(c.Context())
@@ -87,6 +106,18 @@ func (s *Server) handleGetSystemHealth(c *fiber.Ctx) error {
 }
 
 // handleSystemCleanup handles POST /api/system/cleanup
+//
+//	@Summary		System cleanup
+//	@Description	Removes old queue items and health records based on age. Supports dry-run mode.
+//	@Tags			System
+//	@Accept			json
+//	@Produce		json
+//	@Param			body	body		SystemCleanupRequest	false	"Cleanup criteria"
+//	@Success		200		{object}	APIResponse{data=SystemCleanupResponse}
+//	@Failure		400		{object}	APIResponse
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/system/cleanup [post]
 func (s *Server) handleSystemCleanup(c *fiber.Ctx) error {
 	// Parse request body
 	var req SystemCleanupRequest
@@ -186,6 +217,17 @@ func (s *Server) handleSystemCleanup(c *fiber.Ctx) error {
 }
 
 // handleSystemRestart handles POST /api/system/restart
+//
+//	@Summary		Restart system
+//	@Description	Schedules a graceful system restart. Use force=true to skip safety checks.
+//	@Tags			System
+//	@Accept			json
+//	@Produce		json
+//	@Param			body	body		SystemRestartRequest	false	"Restart options"
+//	@Success		200		{object}	APIResponse{data=SystemRestartResponse}
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/system/restart [post]
 func (s *Server) handleSystemRestart(c *fiber.Ctx) error {
 	// Parse request body if present
 	var req SystemRestartRequest
@@ -220,6 +262,15 @@ func (s *Server) handleSystemRestart(c *fiber.Ctx) error {
 }
 
 // handleResetSystemStats handles POST /api/system/stats/reset
+//
+//	@Summary		Reset system statistics
+//	@Description	Resets accumulated system statistics counters (pool metrics, download counters).
+//	@Tags			System
+//	@Produce		json
+//	@Success		200	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/system/stats/reset [post]
 func (s *Server) handleResetSystemStats(c *fiber.Ctx) error {
 	ctx := c.Context()
 	durationStr := c.Query("duration")
@@ -340,6 +391,15 @@ func (s *Server) performRestart(ctx context.Context) {
 }
 
 // handleGetPoolMetrics handles GET /api/system/pool/metrics
+//
+//	@Summary		Get NNTP pool metrics
+//	@Description	Returns download/upload metrics, speed, and per-provider connection statistics.
+//	@Tags			System
+//	@Produce		json
+//	@Success		200	{object}	APIResponse{data=PoolMetricsResponse}
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/system/pool/metrics [get]
 func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 	// Check if pool manager is available
 	if s.poolManager == nil {
@@ -531,6 +591,17 @@ type FileEntry struct {
 }
 
 // handleSystemBrowse handles GET /api/system/browse
+//
+//	@Summary		Browse filesystem
+//	@Description	Lists filesystem entries at a given path for directory/file picker UIs.
+//	@Tags			System
+//	@Produce		json
+//	@Param			path	query		string	false	"Directory path to browse (defaults to root)"
+//	@Success		200		{object}	APIResponse
+//	@Failure		400		{object}	APIResponse
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/system/browse [get]
 func (s *Server) handleSystemBrowse(c *fiber.Ctx) error {
 	path := c.Query("path")
 	if path == "" {

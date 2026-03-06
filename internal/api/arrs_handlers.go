@@ -66,6 +66,18 @@ func (df *ArrsDeletedFiles) UnmarshalJSON(data []byte) error {
 }
 
 // handleArrsWebhook handles webhooks from Radarr/Sonarr
+//
+//	@Summary		ARR webhook receiver
+//	@Description	Receives file-import webhook events from Sonarr/Radarr and triggers health checks. Authenticated via API key query parameter.
+//	@Tags			ARRs
+//	@Accept			json
+//	@Produce		json
+//	@Param			apikey	query		string				true	"AltMount API key"
+//	@Param			body	body		ArrsWebhookRequest	true	"Webhook payload"
+//	@Success		200		{object}	APIResponse
+//	@Failure		401		{object}	APIResponse
+//	@Security		ApiKeyAuth
+//	@Router			/arrs/webhook [post]
 func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 	// Check for API key authentication
 	// Try query param first, then header
@@ -433,6 +445,15 @@ type TestConnectionRequest struct {
 }
 
 // handleListArrsInstances returns all arrs instances
+//
+//	@Summary		List ARR instances
+//	@Description	Returns all configured Sonarr/Radarr instances.
+//	@Tags			ARRs
+//	@Produce		json
+//	@Success		200	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/arrs/instances [get]
 func (s *Server) handleListArrsInstances(c *fiber.Ctx) error {
 	if s.arrsService == nil {
 		slog.ErrorContext(c.Context(), "Arrs service is not available")
@@ -461,6 +482,18 @@ func (s *Server) handleListArrsInstances(c *fiber.Ctx) error {
 }
 
 // handleGetArrsInstance returns a single arrs instance by type and name
+//
+//	@Summary		Get ARR instance
+//	@Description	Returns a specific Sonarr/Radarr instance by type and name.
+//	@Tags			ARRs
+//	@Produce		json
+//	@Param			type	path		string	true	"Instance type (sonarr or radarr)"
+//	@Param			name	path		string	true	"Instance name"
+//	@Success		200		{object}	APIResponse
+//	@Failure		404		{object}	APIResponse
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/arrs/instances/{type}/{name} [get]
 func (s *Server) handleGetArrsInstance(c *fiber.Ctx) error {
 	if s.arrsService == nil {
 		slog.ErrorContext(c.Context(), "Arrs service is not available")
@@ -502,6 +535,18 @@ func (s *Server) handleGetArrsInstance(c *fiber.Ctx) error {
 }
 
 // handleTestArrsConnection tests connection to an arrs instance
+//
+//	@Summary		Test ARR connection
+//	@Description	Tests connectivity to a Sonarr/Radarr instance with given credentials.
+//	@Tags			ARRs
+//	@Accept			json
+//	@Produce		json
+//	@Param			body	body		ArrsInstanceRequest	true	"Instance connection details"
+//	@Success		200		{object}	APIResponse
+//	@Failure		400		{object}	APIResponse
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/arrs/instances/test [post]
 func (s *Server) handleTestArrsConnection(c *fiber.Ctx) error {
 	if s.arrsService == nil {
 		return RespondServiceUnavailable(c, "Arrs not available", "")
@@ -537,6 +582,15 @@ func (s *Server) handleTestArrsConnection(c *fiber.Ctx) error {
 }
 
 // handleGetArrsStats returns arrs statistics
+//
+//	@Summary		Get ARR statistics
+//	@Description	Returns sync statistics for all configured ARR instances.
+//	@Tags			ARRs
+//	@Produce		json
+//	@Success		200	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/arrs/stats [get]
 func (s *Server) handleGetArrsStats(c *fiber.Ctx) error {
 	if s.arrsService == nil {
 		return RespondServiceUnavailable(c, "Arrs not available", "")
@@ -579,6 +633,15 @@ func (s *Server) handleGetArrsStats(c *fiber.Ctx) error {
 }
 
 // handleGetArrsHealth returns health checks from all ARR instances
+//
+//	@Summary		Get ARR health
+//	@Description	Returns health check results from all configured Sonarr/Radarr instances.
+//	@Tags			ARRs
+//	@Produce		json
+//	@Success		200	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/arrs/health [get]
 func (s *Server) handleGetArrsHealth(c *fiber.Ctx) error {
 	if s.arrsService == nil {
 		return RespondServiceUnavailable(c, "Arrs not available", "")
@@ -600,6 +663,16 @@ func (s *Server) handleGetArrsHealth(c *fiber.Ctx) error {
 }
 
 // handleRegisterArrsWebhooks triggers automatic registration of webhooks in ARR instances
+//
+//	@Summary		Register ARR webhooks
+//	@Description	Automatically registers AltMount as a webhook connection in all configured Sonarr/Radarr instances.
+//	@Tags			ARRs
+//	@Produce		json
+//	@Success		200	{object}	APIResponse
+//	@Failure		500	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/arrs/webhook/register [post]
 func (s *Server) handleRegisterArrsWebhooks(c *fiber.Ctx) error {
 	if s.arrsService == nil {
 		return RespondServiceUnavailable(c, "Arrs not available", "")
@@ -637,6 +710,16 @@ func (s *Server) handleRegisterArrsWebhooks(c *fiber.Ctx) error {
 }
 
 // handleRegisterArrsDownloadClients triggers automatic registration of AltMount as a download client in ARR instances
+//
+//	@Summary		Register ARR download clients
+//	@Description	Automatically registers AltMount as a download client (SABnzbd-compatible) in all configured ARR instances.
+//	@Tags			ARRs
+//	@Produce		json
+//	@Success		200	{object}	APIResponse
+//	@Failure		500	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/arrs/download-client/register [post]
 func (s *Server) handleRegisterArrsDownloadClients(c *fiber.Ctx) error {
 	if s.arrsService == nil {
 		return RespondServiceUnavailable(c, "Arrs not available", "")
@@ -699,6 +782,15 @@ func (s *Server) handleRegisterArrsDownloadClients(c *fiber.Ctx) error {
 }
 
 // handleTestArrsDownloadClients tests the connection from ARR instances to AltMount
+//
+//	@Summary		Test ARR download clients
+//	@Description	Tests whether AltMount is reachable as a download client from all configured ARR instances.
+//	@Tags			ARRs
+//	@Produce		json
+//	@Success		200	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/arrs/download-client/test [post]
 func (s *Server) handleTestArrsDownloadClients(c *fiber.Ctx) error {
 	if s.arrsService == nil {
 		return RespondServiceUnavailable(c, "Arrs not available", "")

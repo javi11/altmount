@@ -18,6 +18,19 @@ type ProviderSpeedTestResponse struct {
 }
 
 // handleTestProviderSpeed tests the download speed of a specific provider
+//
+//	@Summary		Test provider download speed
+//	@Description	Runs a speed test against the specified NNTP provider and saves the result to config.
+//	@Tags			Providers
+//	@Produce		json
+//	@Param			id	path	string	true	"Provider ID"
+//	@Success		200	{object}	APIResponse{data=ProviderSpeedTestResponse}
+//	@Failure		400	{object}	APIResponse
+//	@Failure		404	{object}	APIResponse
+//	@Failure		500	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/config/providers/{id}/speedtest [post]
 func (s *Server) handleTestProviderSpeed(c *fiber.Ctx) error {
 	providerID := c.Params("id")
 	if providerID == "" {
