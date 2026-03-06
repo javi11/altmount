@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/javi11/altmount/internal/importer/filesystem"
@@ -23,7 +24,9 @@ import (
 // overwhelming the NNTP connection pool (each file uses up to maxValidationGoroutines connections).
 const maxConcurrentFileValidations = 4
 
-// ProcessRegularFiles processes multiple regular files
+// ProcessRegularFiles processes multiple regular files.
+// Returns the virtual paths of all metadata files successfully written, plus any error.
+// writtenPaths is populated even on partial failure (first-error mode).
 func ProcessRegularFiles(
 	ctx context.Context,
 	virtualDir string,
@@ -36,16 +39,16 @@ func ProcessRegularFiles(
 	segmentSamplePercentage int,
 	allowedFileExtensions []string,
 	timeout time.Duration,
-) error {
+) ([]string, error) {
 	if len(files) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	if !utils.HasAllowedFilesInRegular(files, allowedFileExtensions) {
 		slog.WarnContext(ctx, "No files with allowed extensions found",
 			"allowed_extensions", allowedFileExtensions,
 			"file_count", len(files))
-		return fmt.Errorf("no files with allowed extensions found (allowed: %v)", allowedFileExtensions)
+		return nil, fmt.Errorf("no files with allowed extensions found (allowed: %v)", allowedFileExtensions)
 	}
 
 	var par2Refs []*metapb.Par2FileReference
@@ -56,6 +59,9 @@ func ProcessRegularFiles(
 			SegmentData: par2File.Segments,
 		})
 	}
+
+	var writtenPaths []string
+	var writtenPathsMu sync.Mutex
 
 	pl := concpool.New().WithErrors().WithFirstError().WithMaxGoroutines(maxConcurrentFileValidations)
 
@@ -122,6 +128,10 @@ func ProcessRegularFiles(
 				return fmt.Errorf("failed to write metadata for file %s: %w", filename, err)
 			}
 
+			writtenPathsMu.Lock()
+			writtenPaths = append(writtenPaths, virtualPath)
+			writtenPathsMu.Unlock()
+
 			slog.DebugContext(ctx, "Created metadata file",
 				"file", filename,
 				"virtual_path", virtualPath,
@@ -131,12 +141,12 @@ func ProcessRegularFiles(
 	}
 
 	if err := pl.Wait(); err != nil {
-		return err
+		return writtenPaths, err
 	}
 
 	slog.InfoContext(ctx, "Successfully processed regular files",
 		"virtual_dir", virtualDir,
 		"files", len(files))
 
-	return nil
+	return writtenPaths, nil
 }

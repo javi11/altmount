@@ -170,6 +170,11 @@ type Service struct {
 
 	// categoryPathCache memoizes buildCategoryPath results; cleared on config reload.
 	categoryPathCache sync.Map
+
+	// writtenPathsCache stores the metadata paths written during ProcessItem so that
+	// HandleFailure can clean them up without changing the ItemProcessor interface.
+	// Keys are item.ID (int64), values are []string.
+	writtenPathsCache sync.Map
 }
 
 // NewService creates a new NZB import service with manual scanning and queue processing capabilities
@@ -310,16 +315,23 @@ func (s *Service) Start(ctx context.Context) error {
 
 // ProcessItem implements queue.ItemProcessor - processes a single queue item
 func (s *Service) ProcessItem(ctx context.Context, item *database.ImportQueueItem) (string, error) {
-	return s.processNzbItem(ctx, item)
+	resultPath, writtenPaths, err := s.processNzbItem(ctx, item)
+	// Always store written paths so HandleFailure can clean them up on error.
+	s.writtenPathsCache.Store(item.ID, writtenPaths)
+	return resultPath, err
 }
 
 // HandleSuccess implements queue.ItemProcessor - handles successful processing
 func (s *Service) HandleSuccess(ctx context.Context, item *database.ImportQueueItem, resultingPath string) error {
+	s.writtenPathsCache.Delete(item.ID)
 	return s.handleProcessingSuccess(ctx, item, resultingPath)
 }
 
 // HandleFailure implements queue.ItemProcessor - handles failed processing
 func (s *Service) HandleFailure(ctx context.Context, item *database.ImportQueueItem, err error) {
+	if paths, ok := s.writtenPathsCache.LoadAndDelete(item.ID); ok {
+		s.cleanupWrittenPaths(ctx, item.ID, paths.([]string))
+	}
 	s.handleProcessingFailure(ctx, item, err)
 }
 
@@ -624,7 +636,7 @@ func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath 
 }
 
 // processNzbItem processes the NZB file for a queue item
-func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueueItem) (string, error) {
+func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueueItem) (string, []string, error) {
 	// Determine the base path
 	basePath := ""
 	if item.RelativePath != nil {
@@ -636,7 +648,7 @@ func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueue
 
 	// Ensure NZB is in a persistent location to prevent data loss if /tmp is cleaned
 	if err := s.ensurePersistentNzb(ctx, item); err != nil {
-		return "", fmt.Errorf("failed to ensure persistent NZB: %w", err)
+		return "", nil, fmt.Errorf("failed to ensure persistent NZB: %w", err)
 	}
 
 	// Determine if allowed extensions override is needed
@@ -980,6 +992,37 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 	return nil
 }
 
+// cleanupWrittenPaths deletes metadata files/directories written during a failed import.
+// Paths prefixed with "DIR:" indicate a whole directory should be removed; others are individual files.
+func (s *Service) cleanupWrittenPaths(ctx context.Context, itemID int64, paths []string) {
+	for _, p := range paths {
+		if strings.HasPrefix(p, "DIR:") {
+			dirPath := strings.TrimPrefix(p, "DIR:")
+			if delErr := s.metadataService.DeleteDirectory(dirPath); delErr != nil {
+				s.log.WarnContext(ctx, "Failed to clean up metadata directory after import failure",
+					"queue_id", itemID,
+					"dir", dirPath,
+					"error", delErr)
+			} else {
+				s.log.DebugContext(ctx, "Cleaned up metadata directory after import failure",
+					"queue_id", itemID,
+					"dir", dirPath)
+			}
+		} else {
+			if delErr := s.metadataService.DeleteFileMetadata(p); delErr != nil {
+				s.log.WarnContext(ctx, "Failed to clean up metadata file after import failure",
+					"queue_id", itemID,
+					"path", p,
+					"error", delErr)
+			} else {
+				s.log.DebugContext(ctx, "Cleaned up metadata file after import failure",
+					"queue_id", itemID,
+					"path", p)
+			}
+		}
+	}
+}
+
 // handleProcessingFailure handles when processing fails
 func (s *Service) handleProcessingFailure(ctx context.Context, item *database.ImportQueueItem, processingErr error) {
 	errorMessage := processingErr.Error()
@@ -1120,11 +1163,12 @@ func (s *Service) ProcessItemInBackground(ctx context.Context, itemID int64) {
 		}()
 
 		// Process the NZB file using cancellable context
-		resultingPath, processingErr := s.processNzbItem(itemCtx, item)
+		resultingPath, writtenPaths, processingErr := s.processNzbItem(itemCtx, item)
 
 		// Update queue database with results
 		if processingErr != nil {
-			// Handle failure
+			// Clean up any metadata files written before the failure
+			s.cleanupWrittenPaths(ctx, item.ID, writtenPaths)
 			s.handleProcessingFailure(ctx, item, processingErr)
 		} else {
 			// Handle success (storage path, VFS notification, symlinks, status update)

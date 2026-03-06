@@ -296,21 +296,24 @@ func (hw *HealthWorker) AddToHealthCheck(ctx context.Context, filePath string, s
 		return fmt.Errorf("failed to check existing health record: %w", err)
 	}
 
-	// If file doesn't exist in health database, add it
+	// If file doesn't exist in health database, add it with a short jitter (0–5 min) so
+	// newly imported files are checked soon without all firing at the exact same instant.
 	if existingHealth == nil {
-		err = hw.healthRepo.UpdateFileHealth(ctx,
+		scheduledAt := calculateInitialCheckForNewFile()
+		err = hw.healthRepo.UpdateFileHealthScheduled(ctx,
 			filePath,
-			database.HealthStatusPending, // Start as pending - will be checked in next cycle
+			database.HealthStatusPending,
 			nil,
 			sourceNzb,
 			nil,
 			false,
+			scheduledAt,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to add file to health database: %w", err)
 		}
 
-		slog.InfoContext(ctx, "Added file to health check list", "file_path", filePath)
+		slog.InfoContext(ctx, "Added file to health check list", "file_path", filePath, "scheduled_at", scheduledAt)
 	} else {
 		// File already exists, just reset to pending status if not already pending
 		if existingHealth.Status != database.HealthStatusPending {
