@@ -199,7 +199,8 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 			return "", NewNonRetryableError("STRM validation failed", err)
 		}
 	} else {
-		parsed, err = proc.parser.ParseFile(ctx, file, filePath)
+		parseTracker := progress.NewTracker(proc.broadcaster, queueID, 0, 10)
+		parsed, err = proc.parser.ParseFile(ctx, file, filePath, parseTracker)
 		if err != nil {
 			return "", NewNonRetryableError("failed to parse NZB file", err)
 		}
