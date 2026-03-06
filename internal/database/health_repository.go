@@ -50,6 +50,35 @@ func (r *HealthRepository) UpdateFileHealth(ctx context.Context, filePath string
 	return nil
 }
 
+// UpdateFileHealthScheduled is like UpdateFileHealth but uses an explicit scheduledAt time
+// instead of datetime('now') for the scheduled_check_at column.
+func (r *HealthRepository) UpdateFileHealthScheduled(ctx context.Context, filePath string, status HealthStatus, errorMessage *string, sourceNzbPath *string, errorDetails *string, noRetry bool, scheduledAt time.Time) error {
+	filePath = strings.TrimPrefix(filePath, "/")
+	scheduledAtStr := scheduledAt.UTC().Format("2006-01-02 15:04:05")
+	query := `
+		INSERT INTO file_health (file_path, status, last_checked, last_error, source_nzb_path, error_details, retry_count, max_retries, repair_retry_count, created_at, updated_at, scheduled_check_at, priority)
+		VALUES (?, ?, datetime('now'), ?, ?, ?, CASE WHEN ? THEN 1 ELSE 0 END, 2, 0, datetime('now'), datetime('now'), ?, CASE WHEN ? THEN 2 ELSE 0 END)
+		ON CONFLICT(file_path) DO UPDATE SET
+		status = excluded.status,
+		last_checked = datetime('now'),
+		last_error = excluded.last_error,
+		source_nzb_path = COALESCE(excluded.source_nzb_path, source_nzb_path),
+		error_details = excluded.error_details,
+		retry_count = CASE WHEN ? THEN max_retries - 1 ELSE retry_count END,
+		max_retries = excluded.max_retries,
+		updated_at = datetime('now'),
+		scheduled_check_at = ?,
+		priority = CASE WHEN ? THEN 2 ELSE priority END
+	`
+
+	_, err := r.db.ExecContext(ctx, query, filePath, status, errorMessage, sourceNzbPath, errorDetails, noRetry, scheduledAtStr, noRetry, noRetry, scheduledAtStr, noRetry)
+	if err != nil {
+		return fmt.Errorf("failed to update file health: %w", err)
+	}
+
+	return nil
+}
+
 // GetFileHealth retrieves health record for a specific file
 func (r *HealthRepository) GetFileHealth(ctx context.Context, filePath string) (*FileHealth, error) {
 	filePath = strings.TrimPrefix(filePath, "/")

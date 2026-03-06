@@ -176,3 +176,78 @@ func TestHealthRepository_DeleteHealthRecordsByPrefix(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, h)
 }
+
+// queryScheduledCheckAt reads scheduled_check_at directly from the DB for a given file path.
+// This is needed because GetFileHealth does not select that column.
+// go-sqlite3 may return datetimes in either space-separated or RFC3339 format.
+func queryScheduledCheckAt(t *testing.T, repo *HealthRepository, filePath string) *time.Time {
+	t.Helper()
+	var raw sql.NullString
+	err := repo.db.QueryRowContext(context.Background(),
+		"SELECT scheduled_check_at FROM file_health WHERE file_path = ?", filePath,
+	).Scan(&raw)
+	require.NoError(t, err)
+	if !raw.Valid {
+		return nil
+	}
+	for _, layout := range []string{time.RFC3339, "2006-01-02 15:04:05"} {
+		if parsed, e := time.Parse(layout, raw.String); e == nil {
+			result := parsed.UTC()
+			return &result
+		}
+	}
+	t.Fatalf("cannot parse scheduled_check_at value %q", raw.String)
+	return nil
+}
+
+// TestUpdateFileHealthScheduled_SetsExplicitScheduledAt verifies Fix 1:
+// the new DB method stores the caller-supplied scheduled_check_at instead of datetime('now').
+func TestUpdateFileHealthScheduled_SetsExplicitScheduledAt(t *testing.T) {
+	repo := setupTestDB(t)
+	ctx := context.Background()
+
+	filePath := "movies/test.mkv"
+	// Choose a time ~3 minutes in the future (representative of the new short jitter).
+	scheduledAt := time.Now().UTC().Add(3 * time.Minute).Truncate(time.Second)
+
+	err := repo.UpdateFileHealthScheduled(ctx, filePath, HealthStatusPending, nil, nil, nil, false, scheduledAt)
+	require.NoError(t, err)
+
+	got := queryScheduledCheckAt(t, repo, filePath)
+	require.NotNil(t, got, "scheduled_check_at should be set")
+
+	// SQLite stores with second precision; allow 1s tolerance.
+	diff := got.Sub(scheduledAt)
+	if diff < 0 {
+		diff = -diff
+	}
+	assert.LessOrEqual(t, diff, time.Second,
+		"scheduled_check_at should match the provided time (got %v, want %v)", got, scheduledAt)
+}
+
+// TestUpdateFileHealthScheduled_UpdatesExistingRecord confirms the method works as an upsert.
+func TestUpdateFileHealthScheduled_UpdatesExistingRecord(t *testing.T) {
+	repo := setupTestDB(t)
+	ctx := context.Background()
+
+	filePath := "tv/show/ep01.mkv"
+
+	// Insert initial record using the standard method.
+	err := repo.UpdateFileHealth(ctx, filePath, HealthStatusPending, nil, nil, nil, false)
+	require.NoError(t, err)
+
+	// Now update with a specific scheduled time.
+	future := time.Now().UTC().Add(4 * time.Minute).Truncate(time.Second)
+	err = repo.UpdateFileHealthScheduled(ctx, filePath, HealthStatusPending, nil, nil, nil, false, future)
+	require.NoError(t, err)
+
+	got := queryScheduledCheckAt(t, repo, filePath)
+	require.NotNil(t, got, "scheduled_check_at should be set after upsert")
+
+	diff := got.Sub(future)
+	if diff < 0 {
+		diff = -diff
+	}
+	assert.LessOrEqual(t, diff, time.Second,
+		"scheduled_check_at should be updated to %v, got %v", future, got)
+}
