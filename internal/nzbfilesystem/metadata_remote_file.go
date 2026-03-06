@@ -1262,27 +1262,19 @@ func (mvf *MetadataVirtualFile) getRequestRange() (start, end int64) {
 		if rangeStr, ok := mvf.ctx.Value(utils.RangeKey).(string); ok && rangeStr != "" {
 			rangeHeader, err := utils.ParseRangeHeader(rangeStr)
 			if err == nil && rangeHeader != nil {
+				rangeHeader = utils.FixRangeHeader(rangeHeader, mvf.fileMeta.FileSize)
 				mvf.originalRangeEnd = rangeHeader.End
 				return rangeHeader.Start, rangeHeader.End
 			}
 		}
 
-		// No range header, set unbounded
-		mvf.originalRangeEnd = -1
-		return mvf.position, -1
+		// No range header, set unbounded — use fileSize-1 so segment range construction succeeds
+		mvf.originalRangeEnd = mvf.fileMeta.FileSize - 1
+		return mvf.position, mvf.fileMeta.FileSize - 1
 	}
 
 	// For subsequent reads, use current position and respect original range
-	var targetEnd int64
-	if mvf.originalRangeEnd == -1 {
-		// Original was unbounded, continue unbounded
-		targetEnd = -1
-	} else {
-		// Original had an end, respect it
-		targetEnd = mvf.originalRangeEnd
-	}
-
-	return mvf.position, targetEnd
+	return mvf.position, mvf.originalRangeEnd
 }
 
 // createUsenetReader creates a new usenet reader for the specified range using metadata segments
