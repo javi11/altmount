@@ -1272,6 +1272,8 @@ definitions:
         type: integer
       proxy_url:
         type: string
+      skip_ping:
+        type: boolean
       tls:
         type: boolean
       username:

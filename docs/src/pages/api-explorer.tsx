@@ -13,7 +13,7 @@ function SwaggerUI() {
 				require("swagger-ui-react/swagger-ui.css");
 				return (
 					<SwaggerUIComponent
-						url="/swagger.yaml"
+						url="/openapi.yaml"
 						docExpansion="list"
 						defaultModelsExpandDepth={1}
 						filter
