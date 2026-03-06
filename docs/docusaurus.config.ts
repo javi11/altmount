@@ -1,6 +1,7 @@
 import { themes as prismThemes } from "prism-react-renderer";
 import type { Config } from "@docusaurus/types";
 import type * as Preset from "@docusaurus/preset-classic";
+import webpack from "webpack";
 
 // This runs in Node.js - Don't use client-side code here (browser APIs, JSX...)
 
@@ -59,12 +60,20 @@ const config: Config = {
 	plugins: [
 		function webpackPolyfillPlugin() {
 			return {
-				name: "webpack-stream-polyfill",
+				name: "webpack-buffer-polyfill",
 				configureWebpack() {
 					return {
 						resolve: {
-							fallback: { stream: false },
+							fallback: {
+								stream: false,
+								buffer: require.resolve("buffer/"),
+							},
 						},
+						plugins: [
+							new webpack.ProvidePlugin({
+								Buffer: ["buffer", "Buffer"],
+							}),
+						],
 					};
 				},
 			};
