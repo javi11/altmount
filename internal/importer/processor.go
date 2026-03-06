@@ -165,8 +165,11 @@ func (proc *Processor) checkCancellation(ctx context.Context) error {
 	}
 }
 
-// ProcessNzbFile processes an NZB or STRM file maintaining the folder structure relative to relative path
-func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePath string, queueID int, allowedExtensionsOverride *[]string, virtualDirOverride *string, extractedFiles []parser.ExtractedFileInfo, category *string) (string, error) {
+// ProcessNzbFile processes an NZB or STRM file maintaining the folder structure relative to relative path.
+// Returns (resultPath, writtenMetadataPaths, error). writtenMetadataPaths contains all virtual paths of
+// metadata files written to disk; it is populated even on partial failure so callers can clean up.
+// Paths prefixed with "DIR:" indicate a metadata directory that should be removed entirely.
+func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePath string, queueID int, allowedExtensionsOverride *[]string, virtualDirOverride *string, extractedFiles []parser.ExtractedFileInfo, category *string) (string, []string, error) {
 	// Determine max connections to use
 	maxConnections := proc.maxImportConnections
 
@@ -181,7 +184,7 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 	// Step 1: Open and parse the file
 	file, err := os.Open(filePath)
 	if err != nil {
-		return "", NewNonRetryableError("failed to open file", err)
+		return "", nil, NewNonRetryableError("failed to open file", err)
 	}
 	defer file.Close()
 
@@ -191,23 +194,23 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 	if strings.HasSuffix(strings.ToLower(filePath), strmFileExtension) {
 		parsed, err = proc.strmParser.ParseStrmFile(file, filePath)
 		if err != nil {
-			return "", NewNonRetryableError("failed to parse STRM file", err)
+			return "", nil, NewNonRetryableError("failed to parse STRM file", err)
 		}
 
 		// Validate the parsed STRM
 		if err := proc.strmParser.ValidateStrmFile(parsed); err != nil {
-			return "", NewNonRetryableError("STRM validation failed", err)
+			return "", nil, NewNonRetryableError("STRM validation failed", err)
 		}
 	} else {
 		parseTracker := progress.NewTracker(proc.broadcaster, queueID, 0, 10)
 		parsed, err = proc.parser.ParseFile(ctx, file, filePath, parseTracker)
 		if err != nil {
-			return "", NewNonRetryableError("failed to parse NZB file", err)
+			return "", nil, NewNonRetryableError("failed to parse NZB file", err)
 		}
 
 		// Validate the parsed NZB
 		if err := proc.parser.ValidateNzb(parsed); err != nil {
-			return "", NewNonRetryableError("NZB validation failed", err)
+			return "", nil, NewNonRetryableError("NZB validation failed", err)
 		}
 	}
 
@@ -220,7 +223,7 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 
 	// Check for cancellation after parsing
 	if err := proc.checkCancellation(ctx); err != nil {
-		return "", err
+		return "", nil, err
 	}
 
 	// Step 2: Calculate virtual directory
@@ -244,7 +247,7 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 
 	// Check for cancellation before main processing
 	if err := proc.checkCancellation(ctx); err != nil {
-		return "", err
+		return "", nil, err
 	}
 
 	// Step 4: For NZB-based imports, ensure at least one NNTP provider is configured.
@@ -253,45 +256,46 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 		if !proc.poolManager.HasPool() {
 			proc.log.WarnContext(ctx, "No NNTP providers configured, deferring item processing",
 				"file_path", filePath, "queue_id", queueID)
-			return "", fmt.Errorf("no NNTP providers configured - item will be retried when providers are added")
+			return "", nil, fmt.Errorf("no NNTP providers configured - item will be retried when providers are added")
 		}
 	}
 
 	// Step 5: Process based on file type
 	var result string
+	var writtenPaths []string
 	switch parsed.Type {
 	case parser.NzbTypeSingleFile:
 		proc.updateProgress(queueID, 30)
-		result, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, queueID, maxConnections, allowedExtensions, proc.validationTimeout, category)
+		result, writtenPaths, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, queueID, maxConnections, allowedExtensions, proc.validationTimeout, category)
 
 	case parser.NzbTypeMultiFile:
 		proc.updateProgress(queueID, 30)
-		result, err = proc.processMultiFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, queueID, maxConnections, allowedExtensions, proc.validationTimeout, category)
+		result, writtenPaths, err = proc.processMultiFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, queueID, maxConnections, allowedExtensions, proc.validationTimeout, category)
 
 	case parser.NzbTypeRarArchive:
 		proc.updateProgress(queueID, 30)
-		result, err = proc.processRarArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, maxConnections, allowedExtensions, proc.validationTimeout, parsed.ExtractedFiles, category)
+		result, writtenPaths, err = proc.processRarArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, maxConnections, allowedExtensions, proc.validationTimeout, parsed.ExtractedFiles, category)
 
 	case parser.NzbType7zArchive:
 		proc.updateProgress(queueID, 30)
-		result, err = proc.processSevenZipArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, maxConnections, allowedExtensions, proc.validationTimeout, parsed.ExtractedFiles, category)
+		result, writtenPaths, err = proc.processSevenZipArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, maxConnections, allowedExtensions, proc.validationTimeout, parsed.ExtractedFiles, category)
 
 	case parser.NzbTypeStrm:
 		proc.updateProgress(queueID, 30)
-		result, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, queueID, maxConnections, allowedExtensions, proc.validationTimeout, category)
+		result, writtenPaths, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, queueID, maxConnections, allowedExtensions, proc.validationTimeout, category)
 
 	default:
-		return "", NewNonRetryableError(fmt.Sprintf("unknown file type: %s", parsed.Type), nil)
+		return "", nil, NewNonRetryableError(fmt.Sprintf("unknown file type: %s", parsed.Type), nil)
 	}
 
 	// Update progress: complete
 	if err == nil {
 		proc.updateProgress(queueID, 100)
 	} else if errors.Is(err, nntppool.ErrArticleNotFound) {
-		return result, ErrArticlesNotFound
+		return result, writtenPaths, ErrArticlesNotFound
 	}
 
-	return result, err
+	return result, writtenPaths, err
 }
 
 // processSingleFile handles single file imports
@@ -306,9 +310,9 @@ func (proc *Processor) processSingleFile(
 	allowedExtensions []string,
 	timeout time.Duration,
 	category *string,
-) (string, error) {
+) (string, []string, error) {
 	if len(regularFiles) == 0 {
-		return "", fmt.Errorf("no regular files to process")
+		return "", nil, fmt.Errorf("no regular files to process")
 	}
 
 	// Normalize virtualDir only for synthetic duplicate folders; skip if the NZB actually lives inside a
@@ -353,7 +357,7 @@ func (proc *Processor) processSingleFile(
 
 	// Ensure the parent directory exists in metadata
 	if err := filesystem.EnsureDirectoryExists(parentPath, proc.metadataService); err != nil {
-		return "", err
+		return "", nil, err
 	}
 
 	// Use the final name for processing
@@ -363,7 +367,7 @@ func (proc *Processor) processSingleFile(
 	samplePercentage := proc.segmentSamplePercentage
 
 	// Process the single file at the resolved parentPath
-	result, err := singlefile.ProcessSingleFile(
+	result, writtenPath, err := singlefile.ProcessSingleFile(
 		ctx,
 		parentPath,
 		regularFiles[0],
@@ -376,8 +380,12 @@ func (proc *Processor) processSingleFile(
 		allowedExtensions,
 		timeout,
 	)
+	var writtenPaths []string
+	if writtenPath != "" {
+		writtenPaths = []string{writtenPath}
+	}
 	if err != nil {
-		return "", err
+		return "", writtenPaths, err
 	}
 
 	// Record history
@@ -394,7 +402,7 @@ func (proc *Processor) processSingleFile(
 		})
 	}
 
-	return result, nil
+	return result, writtenPaths, nil
 }
 
 // processMultiFile handles multi-file imports
@@ -409,7 +417,7 @@ func (proc *Processor) processMultiFile(
 	allowedExtensions []string,
 	timeout time.Duration,
 	category *string,
-) (string, error) {
+) (string, []string, error) {
 	// If there's only one regular file (and the rest are likely PAR2s), avoid creating a redundant
 	// NZB-named directory that matches the file itself. Instead, keep the file directly under the
 	// provided virtual directory (preserving any subpaths inside the NZB).
@@ -431,18 +439,18 @@ func (proc *Processor) processMultiFile(
 
 		// Avoid nesting like /Season 02/<release>/<release>.mkv; drop the NZB-named folder here.
 		if err := filesystem.EnsureDirectoryExists(targetBaseDir, proc.metadataService); err != nil {
-			return "", err
+			return "", nil, err
 		}
 	} else {
 		// Create NZB folder for true multi-file imports
 		nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, nzbName, proc.metadataService)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
 
 		// Create directories for files
 		if err := filesystem.CreateDirectoriesForFiles(nzbFolder, regularFiles, proc.metadataService); err != nil {
-			return "", err
+			return "", nil, err
 		}
 
 		targetBaseDir = nzbFolder
@@ -452,7 +460,7 @@ func (proc *Processor) processMultiFile(
 	samplePercentage := proc.segmentSamplePercentage
 
 	// Process all regular files
-	if err := multifile.ProcessRegularFiles(
+	writtenPaths, err := multifile.ProcessRegularFiles(
 		ctx,
 		targetBaseDir,
 		regularFiles,
@@ -464,8 +472,9 @@ func (proc *Processor) processMultiFile(
 		samplePercentage,
 		allowedExtensions,
 		timeout,
-	); err != nil {
-		return "", err
+	)
+	if err != nil {
+		return "", writtenPaths, err
 	}
 
 	// Record history
@@ -487,7 +496,7 @@ func (proc *Processor) processMultiFile(
 		})
 	}
 
-	return targetBaseDir, nil
+	return targetBaseDir, writtenPaths, nil
 }
 
 // processRarArchive handles RAR archive imports
@@ -503,21 +512,25 @@ func (proc *Processor) processRarArchive(
 	timeout time.Duration,
 	extractedFiles []parser.ExtractedFileInfo,
 	category *string,
-) (string, error) {
+) (string, []string, error) {
 	// Create NZB folder
 	nzbName := proc.getCleanNzbName(parsed.Path, queueID)
 	nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, nzbName, proc.metadataService)
 	if err != nil {
-		return nzbFolder, err
+		return nzbFolder, nil, err
 	}
+
+	// Once the nzbFolder is created, track it for cleanup on failure.
+	// "DIR:" prefix signals handleProcessingFailure to delete the whole directory.
+	writtenPaths := []string{"DIR:" + nzbFolder}
 
 	// Process regular files first if any
 	if len(regularFiles) > 0 {
 		if err := filesystem.CreateDirectoriesForFiles(nzbFolder, regularFiles, proc.metadataService); err != nil {
-			return nzbFolder, err
+			return nzbFolder, writtenPaths, err
 		}
 
-		if err := multifile.ProcessRegularFiles(
+		if _, err := multifile.ProcessRegularFiles(
 			ctx,
 			nzbFolder,
 			regularFiles,
@@ -569,7 +582,7 @@ func (proc *Processor) processRarArchive(
 			proc.expandBlurayIso,
 		)
 		if err != nil {
-			return nzbFolder, err
+			return nzbFolder, writtenPaths, err
 		}
 	}
 
@@ -594,7 +607,7 @@ func (proc *Processor) processRarArchive(
 		})
 	}
 
-	return nzbFolder, nil
+	return nzbFolder, writtenPaths, nil
 }
 
 // processSevenZipArchive handles 7zip archive imports
@@ -610,21 +623,25 @@ func (proc *Processor) processSevenZipArchive(
 	timeout time.Duration,
 	extractedFiles []parser.ExtractedFileInfo,
 	category *string,
-) (string, error) {
+) (string, []string, error) {
 	// Create NZB folder
 	nzbName := proc.getCleanNzbName(parsed.Path, queueID)
 	nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, nzbName, proc.metadataService)
 	if err != nil {
-		return nzbFolder, err
+		return nzbFolder, nil, err
 	}
+
+	// Once the nzbFolder is created, track it for cleanup on failure.
+	// "DIR:" prefix signals handleProcessingFailure to delete the whole directory.
+	writtenPaths := []string{"DIR:" + nzbFolder}
 
 	// Process regular files first if any
 	if len(regularFiles) > 0 {
 		if err := filesystem.CreateDirectoriesForFiles(nzbFolder, regularFiles, proc.metadataService); err != nil {
-			return nzbFolder, err
+			return nzbFolder, writtenPaths, err
 		}
 
-		if err := multifile.ProcessRegularFiles(
+		if _, err := multifile.ProcessRegularFiles(
 			ctx,
 			nzbFolder,
 			regularFiles,
@@ -675,7 +692,7 @@ func (proc *Processor) processSevenZipArchive(
 			proc.expandBlurayIso,
 		)
 		if err != nil {
-			return nzbFolder, err
+			return nzbFolder, writtenPaths, err
 		}
 	}
 
@@ -700,7 +717,7 @@ func (proc *Processor) processSevenZipArchive(
 		})
 	}
 
-	return nzbFolder, nil
+	return nzbFolder, writtenPaths, nil
 }
 
 // normalizeReleaseFilename aligns the filename to the NZB basename while keeping the original extension.

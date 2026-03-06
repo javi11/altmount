@@ -21,6 +21,13 @@ func calculateInitialCheck(releaseDate time.Time) time.Time {
 	return time.Now().UTC().Add(time.Duration(jitterMinutes) * time.Minute)
 }
 
+// calculateInitialCheckForNewFile calculates the first check time for a freshly imported file.
+// Uses a short jitter (0–5 minutes) to spread concurrent imports without delaying corruption detection.
+func calculateInitialCheckForNewFile() time.Time {
+	jitterMinutes := rand.Intn(5)
+	return time.Now().UTC().Add(time.Duration(jitterMinutes) * time.Minute)
+}
+
 // CalculateNextCheck calculates the next check time after a successful health check
 // Implements a tiered scheduling strategy based on file age.
 func CalculateNextCheck(releaseDate, lastCheck time.Time) time.Time {
