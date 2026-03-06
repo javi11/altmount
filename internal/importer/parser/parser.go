@@ -658,9 +658,6 @@ func (p *Parser) fetchYencHeaders(ctx context.Context, segment nzbparser.NzbSegm
 	select {
 	case headers := <-metaCh:
 		if headers.PartSize <= 0 {
-			if p.poolManager != nil {
-				p.poolManager.UpdateDownloadProgress("", int64(segment.Bytes))
-			}
 			return nntppool.YEncMeta{}, errors.NewNonRetryableError("invalid part size from yenc header", nil)
 		}
 
@@ -673,10 +670,6 @@ func (p *Parser) fetchYencHeaders(ctx context.Context, segment nzbparser.NzbSegm
 	case result := <-resultCh:
 		// BodyAsync completed before onMeta fired — either error or non-yEnc article
 		if result.Err != nil {
-			// Advance progress using the NZB-reported size so the UI doesn't stall
-			if p.poolManager != nil {
-				p.poolManager.UpdateDownloadProgress("", int64(segment.Bytes))
-			}
 			return nntppool.YEncMeta{}, errors.NewNonRetryableError("failed to get body", result.Err)
 		}
 
@@ -688,16 +681,10 @@ func (p *Parser) fetchYencHeaders(ctx context.Context, segment nzbparser.NzbSegm
 		// onMeta didn't fire but body completed — use headers from result
 		headers := result.Body.YEnc
 		if headers.PartSize <= 0 {
-			if p.poolManager != nil {
-				p.poolManager.UpdateDownloadProgress("", int64(segment.Bytes))
-			}
 			return nntppool.YEncMeta{}, errors.NewNonRetryableError("invalid part size from yenc header", nil)
 		}
 		return headers, nil
 	case <-ctx.Done():
-		if p.poolManager != nil {
-			p.poolManager.UpdateDownloadProgress("", int64(segment.Bytes))
-		}
 		return nntppool.YEncMeta{}, errors.NewNonRetryableError("context canceled", ctx.Err())
 	}
 }
@@ -710,9 +697,6 @@ func (p *Parser) normalizeSegmentSizesWithYenc(ctx context.Context, segments []n
 	firstPartSize := cachedFirstSegmentSize
 	if firstPartSize <= 0 {
 		if _, known404 := notFoundIDs[segments[0].ID]; known404 {
-			if p.poolManager != nil {
-				p.poolManager.UpdateDownloadProgress("", int64(segments[0].Bytes))
-			}
 			return fmt.Errorf("first segment %s is known not found, skipping yEnc normalization", segments[0].ID)
 		}
 		// Fetch PartSize from first segment if not in cache
@@ -733,9 +717,6 @@ func (p *Parser) normalizeSegmentSizesWithYenc(ctx context.Context, segments []n
 		segments[0].Bytes = int(firstPartSize)
 
 		if _, known404 := notFoundIDs[segments[1].ID]; known404 {
-			if p.poolManager != nil {
-				p.poolManager.UpdateDownloadProgress("", int64(segments[1].Bytes))
-			}
 			return fmt.Errorf("second segment %s is known not found, skipping yEnc normalization", segments[1].ID)
 		}
 		// Fetch PartSize from last segment
@@ -752,16 +733,9 @@ func (p *Parser) normalizeSegmentSizesWithYenc(ctx context.Context, segments []n
 	lastSegmentIndex := len(segments) - 1
 
 	if _, known404 := notFoundIDs[segments[1].ID]; known404 {
-		if p.poolManager != nil {
-			p.poolManager.UpdateDownloadProgress("", int64(segments[1].Bytes))
-			p.poolManager.UpdateDownloadProgress("", int64(segments[lastSegmentIndex].Bytes))
-		}
 		return fmt.Errorf("second segment %s is known not found, skipping yEnc normalization", segments[1].ID)
 	}
 	if _, known404 := notFoundIDs[segments[lastSegmentIndex].ID]; known404 {
-		if p.poolManager != nil {
-			p.poolManager.UpdateDownloadProgress("", int64(segments[lastSegmentIndex].Bytes))
-		}
 		return fmt.Errorf("last segment %s is known not found, skipping yEnc normalization", segments[lastSegmentIndex].ID)
 	}
 
