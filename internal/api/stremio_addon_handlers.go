@@ -159,13 +159,43 @@ func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 
 	// Search Prowlarr -- return play-URL options immediately, no download yet
 	client := prowlarr.NewClient(prowlarrCfg.Host, prowlarrCfg.APIKey)
-	results, err := client.Search(ctx, imdbID, prowlarrType, prowlarrCfg.Categories, season, episode)
-	if err != nil {
-		slog.WarnContext(ctx, "Prowlarr search failed", "error", err, "imdb_id", imdbID)
-		return emptyStreamsResponse(c)
+	var (
+		results []prowlarr.NZBResult
+		err     error
+		tvdbID  string
+	)
+
+	// For series, prefer TvdbId queries when possible and fall back to ImdbId.
+	if streamType == "series" {
+		tvdbID, err = resolveTVDBFromIMDb(ctx, imdbID)
+		if err != nil {
+			slog.WarnContext(ctx, "Failed to resolve TVDB ID from IMDb ID",
+				"error", err, "imdb_id", imdbID)
+			tvdbID = ""
+		}
+
+		if tvdbID != "" {
+			slog.InfoContext(ctx, "Searching Prowlarr using TVDB ID for series",
+				"imdb_id", imdbID, "tvdb_id", tvdbID, "season", season, "episode", episode)
+			results, err = client.SearchByTVDB(ctx, tvdbID, prowlarrType, prowlarrCfg.Categories, season, episode)
+			if err != nil {
+				slog.WarnContext(ctx, "Prowlarr TVDB search failed; falling back to IMDb search",
+					"error", err, "imdb_id", imdbID, "tvdb_id", tvdbID)
+				results = nil
+			}
+		}
 	}
+
 	if len(results) == 0 {
-		slog.InfoContext(ctx, "No Prowlarr results found", "imdb_id", imdbID)
+		results, err = client.Search(ctx, imdbID, prowlarrType, prowlarrCfg.Categories, season, episode)
+		if err != nil {
+			slog.WarnContext(ctx, "Prowlarr search failed", "error", err, "imdb_id", imdbID, "tvdb_id", tvdbID)
+			return emptyStreamsResponse(c)
+		}
+	}
+
+	if len(results) == 0 {
+		slog.InfoContext(ctx, "No Prowlarr results found", "imdb_id", imdbID, "tvdb_id", tvdbID)
 		return emptyStreamsResponse(c)
 	}
 
