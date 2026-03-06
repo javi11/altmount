@@ -14,7 +14,7 @@ const iso9660SectorSize = 2048
 type isoFileEntry struct {
 	path string // full path within ISO (e.g. "BDMV/STREAM/00001.M2TS")
 	lba  uint32
-	size uint32
+	size uint64
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -26,11 +26,11 @@ type iso9660DirEntry struct {
 	name  string
 	isDir bool
 	lba   uint32
-	size  uint32
+	size  uint64
 }
 
 // iso9660ListDir returns all non-dot entries in an ISO 9660 directory sector range.
-func iso9660ListDir(rs io.ReadSeeker, dirLBA, dirSize uint32) ([]iso9660DirEntry, error) {
+func iso9660ListDir(rs io.ReadSeeker, dirLBA uint32, dirSize uint64) ([]iso9660DirEntry, error) {
 	data := make([]byte, dirSize)
 	if _, err := rs.Seek(int64(dirLBA)*iso9660SectorSize, io.SeekStart); err != nil {
 		return nil, err
@@ -73,7 +73,7 @@ func iso9660ListDir(rs io.ReadSeeker, dirLBA, dirSize uint32) ([]iso9660DirEntry
 			name:  identifier,
 			isDir: fileFlags&0x02 != 0,
 			lba:   entryLBA,
-			size:  entrySize,
+			size:  uint64(entrySize),
 		})
 		offset += recLen
 	}
@@ -82,7 +82,7 @@ func iso9660ListDir(rs io.ReadSeeker, dirLBA, dirSize uint32) ([]iso9660DirEntry
 
 // iso9660WalkAll recursively lists all non-directory files starting at dirLBA/dirSize.
 // prefix is prepended to each returned path (empty string for the root call).
-func iso9660WalkAll(rs io.ReadSeeker, dirLBA, dirSize uint32, prefix string) ([]isoFileEntry, error) {
+func iso9660WalkAll(rs io.ReadSeeker, dirLBA uint32, dirSize uint64, prefix string) ([]isoFileEntry, error) {
 	entries, err := iso9660ListDir(rs, dirLBA, dirSize)
 	if err != nil {
 		return nil, err
@@ -562,31 +562,34 @@ func udfWalkAll(rs io.ReadSeeker, dirICB udfLongAD, metaMap []udfMetaSpan, partS
 			}
 		}
 		if fileLBA > 0 {
-			result = append(result, isoFileEntry{path: entryPath, lba: fileLBA, size: uint32(infoLen)})
+			result = append(result, isoFileEntry{path: entryPath, lba: fileLBA, size: infoLen})
 		}
 	}
 	return result, nil
 }
 
 // ListISOFiles walks the ISO 9660/UDF filesystem and returns all non-directory
-// entries. It tries ISO 9660 first and falls back to UDF.
+// entries. It tries UDF first (correct 64-bit sizes, authoritative for Blu-ray)
+// and falls back to ISO 9660 for plain discs without UDF.
 func ListISOFiles(rs io.ReadSeeker) ([]isoFileEntry, error) {
-	// Try ISO 9660
+	// Try UDF first (handles Blu-ray and modern discs with correct 64-bit sizes)
+	if partStart, metaMap, rootICB, err := udfSetup(rs); err == nil {
+		files, err := udfWalkAll(rs, rootICB, metaMap, partStart, "")
+		if err == nil && len(files) > 0 {
+			return files, nil
+		}
+	}
+	// Fall back to ISO 9660
 	pvd := make([]byte, iso9660SectorSize)
 	if _, err := rs.Seek(16*iso9660SectorSize, io.SeekStart); err == nil {
 		if _, err := io.ReadFull(rs, pvd); err == nil {
 			if pvd[0] == 1 && string(pvd[1:6]) == "CD001" {
 				rootRec := pvd[156:]
 				dirLBA := binary.LittleEndian.Uint32(rootRec[2:6])
-				dirSize := binary.LittleEndian.Uint32(rootRec[10:14])
+				dirSize := uint64(binary.LittleEndian.Uint32(rootRec[10:14]))
 				return iso9660WalkAll(rs, dirLBA, dirSize, "")
 			}
 		}
 	}
-	// Fall back to UDF
-	partStart, metaMap, rootICB, err := udfSetup(rs)
-	if err != nil {
-		return nil, fmt.Errorf("iso: not a valid ISO 9660 or UDF image: %w", err)
-	}
-	return udfWalkAll(rs, rootICB, metaMap, partStart, "")
+	return nil, fmt.Errorf("iso: not a valid ISO 9660 or UDF image")
 }
