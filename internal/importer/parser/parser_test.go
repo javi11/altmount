@@ -43,7 +43,7 @@ func TestParseFile_EmptySegments(t *testing.T) {
 	// Then it will fall back to fallbackGetFileInfos.
 	m.On("HasPool").Return(false)
 
-	parsed, err := p.ParseFile(context.Background(), r, "test.nzb")
+	parsed, err := p.ParseFile(context.Background(), r, "test.nzb", nil)
 	
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "NZB file contains no valid files")
@@ -79,7 +79,7 @@ func TestParseFile_MixedSegments(t *testing.T) {
 	// HasPool returns false to trigger fallback to fallbackGetFileInfos
 	m.On("HasPool").Return(false)
 
-	parsed, err := p.ParseFile(context.Background(), r, "test.nzb")
+	parsed, err := p.ParseFile(context.Background(), r, "test.nzb", nil)
 	
 	assert.NoError(t, err)
 	assert.NotNil(t, parsed)
