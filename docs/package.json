@@ -13,7 +13,7 @@
     "write-translations": "docusaurus write-translations",
     "write-heading-ids": "docusaurus write-heading-ids",
     "typecheck": "tsc",
-    "gen-swagger": "cd .. && go tool swag init --generalInfo doc.go --dir ./internal/api,./internal/database,./internal/config --output docs/static --outputTypes yaml,json --parseInternal"
+    "gen-swagger": "cd .. && go tool swag init --generalInfo doc.go --dir ./internal/api,./internal/database,./internal/config --output docs/static --outputTypes yaml,json --parseInternal && swagger2openapi docs/static/swagger.yaml -o docs/static/openapi.yaml"
   },
   "dependencies": {
     "@docusaurus/core": "3.8.1",
@@ -31,6 +31,7 @@
     "@docusaurus/module-type-aliases": "3.8.1",
     "@docusaurus/tsconfig": "3.8.1",
     "@docusaurus/types": "3.8.1",
+    "swagger2openapi": "^7.0.8",
     "typescript": "~5.6.2"
   },
   "browserslist": {

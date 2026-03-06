@@ -1,0 +1,4926 @@
+openapi: 3.0.0
+info:
+  contact:
+    name: AltMount
+    url: https://github.com/javi11/altmount/issues
+  description: REST API for AltMount — Usenet WebDAV server with NZB queue, health
+    monitoring, ARR integration, FUSE/rclone mounting, and Stremio addon.
+  license:
+    name: MIT
+  termsOfService: http://altmount.kipsilabs.top
+  title: AltMount API
+  version: "1.0"
+paths:
+  /arrs/download-client/register:
+    post:
+      description: Automatically registers AltMount as a download client
+        (SABnzbd-compatible) in all configured ARR instances.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Register ARR download clients
+      tags:
+        - ARRs
+  /arrs/download-client/test:
+    post:
+      description: Tests whether AltMount is reachable as a download client from all
+        configured ARR instances.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Test ARR download clients
+      tags:
+        - ARRs
+  /arrs/health:
+    get:
+      description: Returns health check results from all configured Sonarr/Radarr instances.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Get ARR health
+      tags:
+        - ARRs
+  /arrs/instances:
+    get:
+      description: Returns all configured Sonarr/Radarr instances.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: List ARR instances
+      tags:
+        - ARRs
+  "/arrs/instances/{type}/{name}":
+    get:
+      description: Returns a specific Sonarr/Radarr instance by type and name.
+      parameters:
+        - description: Instance type (sonarr or radarr)
+          in: path
+          name: type
+          required: true
+          schema:
+            type: string
+        - description: Instance name
+          in: path
+          name: name
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Get ARR instance
+      tags:
+        - ARRs
+  /arrs/instances/test:
+    post:
+      description: Tests connectivity to a Sonarr/Radarr instance with given credentials.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/api.ArrsInstanceRequest"
+        description: Instance connection details
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Test ARR connection
+      tags:
+        - ARRs
+  /arrs/stats:
+    get:
+      description: Returns sync statistics for all configured ARR instances.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Get ARR statistics
+      tags:
+        - ARRs
+  /arrs/webhook:
+    post:
+      description: Receives file-import webhook events from Sonarr/Radarr and triggers
+        health checks. Authenticated via API key query parameter.
+      parameters:
+        - description: AltMount API key
+          in: query
+          name: apikey
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/api.ArrsWebhookRequest"
+        description: Webhook payload
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - ApiKeyAuth: []
+      summary: ARR webhook receiver
+      tags:
+        - ARRs
+  /arrs/webhook/register:
+    post:
+      description: Automatically registers AltMount as a webhook connection in all
+        configured Sonarr/Radarr instances.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Register ARR webhooks
+      tags:
+        - ARRs
+  /auth/config:
+    get:
+      description: Returns authentication configuration (login required flag,
+        available providers). Public endpoint.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      summary: Get auth config
+      tags:
+        - Auth
+  /auth/login:
+    post:
+      description: Authenticates with username and password and returns a JWT access
+        token. Rate-limited to 10/min per IP.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/api.LoginRequest"
+        description: Login credentials
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/api.APIResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/api.AuthResponse"
+                    type: object
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "429":
+          description: Too Many Requests
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      summary: Login
+      tags:
+        - Auth
+  /auth/register:
+    post:
+      description: Creates the first admin user account. Only allowed when no users
+        exist yet.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/api.RegisterRequest"
+        description: Registration details
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/api.APIResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/api.AuthResponse"
+                    type: object
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      summary: Register
+      tags:
+        - Auth
+  /auth/registration-status:
+    get:
+      description: Returns whether registration is currently open (i.e. no users exist yet).
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      summary: Check registration status
+      tags:
+        - Auth
+  /config:
+    get:
+      description: Returns the current AltMount configuration with sensitive values masked.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/api.APIResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/api.ConfigAPIResponse"
+                    type: object
+        "503":
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Get configuration
+      tags:
+        - Config
+    put:
+      description: Replaces the entire AltMount configuration. Triggers restart if required.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+        description: Complete configuration object
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Update configuration
+      tags:
+        - Config
+  "/config/{section}":
+    patch:
+      description: Updates a specific named section of the configuration (e.g. import,
+        sabnzbd, rclone).
+      parameters:
+        - description: Config section name
+          in: path
+          name: section
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+        description: Section configuration
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Patch configuration section
+      tags:
+        - Config
+  "/config/providers/{id}/speedtest":
+    post:
+      description: Runs a speed test against the specified NNTP provider and saves the
+        result to config.
+      parameters:
+        - description: Provider ID
+          in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/api.APIResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/api.ProviderSpeedTestResponse"
+                    type: object
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Test provider download speed
+      tags:
+        - Providers
+  /config/reload:
+    post:
+      description: Reloads the AltMount configuration from disk without restarting.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Reload configuration
+      tags:
+        - Config
+  /config/validate:
+    post:
+      description: Validates a configuration object without saving it.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+        description: Configuration to validate
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Validate configuration
+      tags:
+        - Config
+  /files/active-streams:
+    get:
+      description: Returns all currently active NZB file streams. Optionally filter by
+        type=file.
+      parameters:
+        - description: Filter by source type (e.g. file)
+          in: query
+          name: type
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: List active streams
+      tags:
+        - Files
+  "/files/active-streams/{id}":
+    delete:
+      description: Terminates an active NZB file stream by ID.
+      parameters:
+        - description: Stream ID
+          in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Kill active stream
+      tags:
+        - Files
+  /files/export-batch:
+    post:
+      description: Exports multiple mounted files as NZBs packed in a single ZIP archive.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                paths:
+                  items:
+                    type: string
+                  type: array
+              type: object
+        description: Virtual paths to export
+        required: true
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad Request
+          content:
+            application/zip:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "500":
+          description: Internal Server Error
+          content:
+            application/zip:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Batch export files as NZBs
+      tags:
+        - Files
+  /files/export-nzb:
+    get:
+      description: Exports the metadata of a mounted file back to a downloadable NZB file.
+      parameters:
+        - description: Virtual path to the file
+          in: query
+          name: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad Request
+          content:
+            application/x-nzb:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "500":
+          description: Internal Server Error
+          content:
+            application/x-nzb:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Export file metadata as NZB
+      tags:
+        - Files
+  /files/info:
+    get:
+      description: Returns metadata for a mounted NZB file including segment info,
+        encryption, and status.
+      parameters:
+        - description: Virtual path to the file
+          in: query
+          name: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/api.APIResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/api.FileMetadataResponse"
+                    type: object
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Get file metadata
+      tags:
+        - Files
+  /files/streams/history:
+    get:
+      description: Returns a history of recently completed NZB file streams.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Get stream history
+      tags:
+        - Files
+  /fuse/force-stop:
+    post:
+      description: Force-unmounts the FUSE filesystem using platform-specific commands
+        (fusermount/umount).
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Force stop FUSE mount
+      tags:
+        - FUSE
+  /fuse/start:
+    post:
+      description: Mounts the NZB filesystem at the given path using FUSE.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                path:
+                  type: string
+              type: object
+        description: Mount path
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Start FUSE mount
+      tags:
+        - FUSE
+  /fuse/status:
+    get:
+      description: Returns the current status of the FUSE mount (stopped, starting,
+        running, error).
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Get FUSE status
+      tags:
+        - FUSE
+  /fuse/stop:
+    post:
+      description: Gracefully unmounts the FUSE filesystem.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Stop FUSE mount
+      tags:
+        - FUSE
+  /health:
+    get:
+      description: Returns a paginated list of file health records with optional
+        status/search filters.
+      parameters:
+        - description: Filter by status
+          in: query
+          name: status
+          schema:
+            type: string
+            enum:
+              - pending
+              - checking
+              - corrupted
+              - repair_triggered
+              - healthy
+        - description: Search by file path
+          in: query
+          name: search
+          schema:
+            type: string
+        - description: Sort field
+          in: query
+          name: sort_by
+          schema:
+            type: string
+            enum:
+              - file_path
+              - created_at
+              - status
+              - priority
+              - last_checked
+              - scheduled_check_at
+        - description: Sort direction
+          in: query
+          name: sort_order
+          schema:
+            type: string
+            enum:
+              - asc
+              - desc
+        - description: ISO8601 timestamp filter
+          in: query
+          name: since
+          schema:
+            type: string
+        - description: Page size (default 50)
+          in: query
+          name: limit
+          schema:
+            type: integer
+        - description: Page offset
+          in: query
+          name: offset
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/api.APIResponse"
+                  - properties:
+                      data:
+                        items:
+                          $ref: "#/components/schemas/api.HealthItemResponse"
+                        type: array
+                      meta:
+                        $ref: "#/components/schemas/api.APIMeta"
+                    type: object
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: List health records
+      tags:
+        - Health
+  "/health/{id}":
+    delete:
+      description: Deletes a health record and optionally the associated physical file.
+      parameters:
+        - description: Health record ID
+          in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+        - description: Also delete the physical file
+          in: query
+          name: delete_file
+          schema:
+            type: boolean
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Delete health record
+      tags:
+        - Health
+    get:
+      description: Returns a single health record by ID.
+      parameters:
+        - description: Health record ID
+          in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/api.APIResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/api.HealthItemResponse"
+                    type: object
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Get health record
+      tags:
+        - Health
+  "/health/{id}/cancel":
+    post:
+      description: Cancels an in-progress health check for a file.
+      parameters:
+        - description: Health record ID
+          in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Cancel health check
+      tags:
+        - Health
+  "/health/{id}/check-now":
+    post:
+      description: Triggers an immediate health check for a file, bypassing the queue.
+      parameters:
+        - description: Health record ID
+          in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/api.APIResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/api.HealthItemResponse"
+                    type: object
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Trigger immediate health check
+      tags:
+        - Health
+  "/health/{id}/priority":
+    post:
+      description: Sets the checking priority for a health record.
+      parameters:
+        - description: Health record ID
+          in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                priority:
+                  type: string
+              type: object
+        description: "Priority: normal or high"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/api.APIResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/api.HealthItemResponse"
+                    type: object
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Set health check priority
+      tags:
+        - Health
+  "/health/{id}/repair":
+    post:
+      description: Triggers a repair attempt for a corrupted file.
+      parameters:
+        - description: Health record ID
+          in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/api.HealthRepairRequest"
+        description: Repair options
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/api.APIResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/api.HealthItemResponse"
+                    type: object
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Trigger health repair
+      tags:
+        - Health
+  "/health/{id}/unmask":
+    post:
+      description: Clears the streaming-failure mask on a health record so it can be
+        checked again.
+      parameters:
+        - description: Health record ID
+          in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/api.APIResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/api.HealthItemResponse"
+                    type: object
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Unmask health record
+      tags:
+        - Health
+  /health/bulk/delete:
+    post:
+      description: Deletes multiple health records by ID.
+      requestBody:
+        $ref: "#/components/requestBodies/Body"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Bulk delete health records
+      tags:
+        - Health
+  /health/bulk/repair:
+    post:
+      description: Triggers repair attempts for multiple corrupted files.
+      requestBody:
+        $ref: "#/components/requestBodies/Body"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Bulk trigger health repair
+      tags:
+        - Health
+  /health/bulk/restart:
+    post:
+      description: Resets multiple health records to pending status for re-checking.
+      requestBody:
+        $ref: "#/components/requestBodies/Body"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Bulk restart health checks
+      tags:
+        - Health
+  /health/check:
+    post:
+      description: Adds a file to the health monitoring queue for checking.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/api.HealthCheckRequest"
+        description: File to check
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/api.APIResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/api.HealthItemResponse"
+                    type: object
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Add file for health check
+      tags:
+        - Health
+  /health/cleanup:
+    delete:
+      description: Removes old health records based on age, status, or both.
+        Optionally deletes physical files.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/api.HealthCleanupRequest"
+        description: Cleanup filter criteria
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Cleanup health records
+      tags:
+        - Health
+  /health/corrupted:
+    get:
+      description: Returns a paginated list of health records with corrupted status.
+      parameters:
+        - description: Page size (default 50)
+          in: query
+          name: limit
+          schema:
+            type: integer
+        - description: Page offset
+          in: query
+          name: offset
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/api.APIResponse"
+                  - properties:
+                      data:
+                        items:
+                          $ref: "#/components/schemas/api.HealthItemResponse"
+                        type: array
+                      meta:
+                        $ref: "#/components/schemas/api.APIMeta"
+                    type: object
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: List corrupted files
+      tags:
+        - Health
+  /health/library-sync/cancel:
+    post:
+      description: Cancels an in-progress library sync operation.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "503":
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Cancel library sync
+      tags:
+        - Health
+  /health/library-sync/dry-run:
+    post:
+      description: Simulates a library sync and returns what would be changed without
+        applying it.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/api.APIResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/api.DryRunSyncResult"
+                    type: object
+        "503":
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Dry-run library sync
+      tags:
+        - Health
+  /health/library-sync/needed:
+    get:
+      description: Returns whether a library sync is needed based on current
+        configuration state.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Check if library sync is needed
+      tags:
+        - Health
+  /health/library-sync/start:
+    post:
+      description: Triggers a library sync operation to reconcile the file system with
+        the database.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "503":
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Start library sync
+      tags:
+        - Health
+  /health/library-sync/status:
+    get:
+      description: Returns the current status of the library sync worker.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "503":
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Get library sync status
+      tags:
+        - Health
+  /health/regenerate-symlinks:
+    post:
+      description: Regenerates all library symlinks and STRM files for files that
+        already have metadata.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Regenerate library symlinks
+      tags:
+        - Health
+  /health/reset-all:
+    post:
+      description: Resets all health records to pending status for a full re-check cycle.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Reset all health checks
+      tags:
+        - Health
+  /health/stats:
+    get:
+      description: Returns counts of health records grouped by status.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/api.APIResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/api.HealthStatsResponse"
+                    type: object
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Get health statistics
+      tags:
+        - Health
+  /health/worker/status:
+    get:
+      description: Returns the current status and statistics of the background health
+        check worker.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/api.APIResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/api.HealthWorkerStatusResponse"
+                    type: object
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Get health worker status
+      tags:
+        - Health
+  /import/file:
+    post:
+      description: Adds an NZB file at a given filesystem path to the import queue.
+        Public endpoint (API key in query).
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/api.ManualImportRequest"
+        description: File path to import
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/api.APIResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/api.ManualImportResponse"
+                    type: object
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - ApiKeyAuth: []
+      summary: Manually import a file
+      tags:
+        - Import
+  /import/history:
+    delete:
+      description: Removes all completed import history records.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Clear import history
+      tags:
+        - Import
+    get:
+      description: Returns a paginated list of completed import records.
+      parameters:
+        - description: Page size (default 50)
+          in: query
+          name: limit
+          schema:
+            type: integer
+        - description: Page offset
+          in: query
+          name: offset
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/api.APIResponse"
+                  - properties:
+                      data:
+                        items:
+                          $ref: "#/components/schemas/api.ImportHistoryResponse"
+                        type: array
+                      meta:
+                        $ref: "#/components/schemas/api.APIMeta"
+                    type: object
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Get import history
+      tags:
+        - Import
+  /import/nzbdav:
+    delete:
+      description: Cancels the currently running NZBDav import operation.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Cancel NZBDav import
+      tags:
+        - Import
+    post:
+      description: Starts an import from a WebDAV/NZBDav source, fetching NZBs from
+        the remote.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+        description: Import configuration (uses server config if omitted)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Import from NZBDav source
+      tags:
+        - Import
+  /import/nzbdav/reset:
+    post:
+      description: Resets the NZBDav import state so a new import can be started.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Reset NZBDav import status
+      tags:
+        - Import
+  /import/nzbdav/status:
+    get:
+      description: Returns the current status of the NZBDav import operation.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Get NZBDav import status
+      tags:
+        - Import
+  /import/scan:
+    delete:
+      description: Cancels the currently running manual directory scan.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Cancel directory scan
+      tags:
+        - Import
+    post:
+      description: Scans a directory for NZB files and adds them to the import queue.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/api.ManualScanRequest"
+        description: Directory path to scan
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Start manual directory scan
+      tags:
+        - Import
+  /import/scan/status:
+    get:
+      description: Returns the current status of the manual directory scan operation.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/api.APIResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/api.ScanStatusResponse"
+                    type: object
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Get scan status
+      tags:
+        - Import
+  /nzb/streams:
+    post:
+      description: Accepts an NZB file upload, queues it with high priority, and
+        synchronously waits for completion before returning Stremio-compatible
+        stream URLs for all media files found in the NZB output. Authenticated
+        via download_key form field (SHA256 of API key).
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  description: NZB file to process
+                  type: string
+                  format: binary
+                download_key:
+                  description: SHA256 hash of the user's API key
+                  type: string
+                category:
+                  description: "Queue category (default: stremio)"
+                  type: string
+                timeout:
+                  description: "Processing timeout in seconds (default: 300)"
+                  type: integer
+              required:
+                - file
+                - download_key
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.StremioStreamsResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "503":
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      summary: Get Stremio streams for NZB file
+      tags:
+        - Stremio
+  /providers:
+    post:
+      description: Adds a new NNTP provider to the configuration.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/api.ProviderCreateRequest"
+        description: Provider details
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/api.APIResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/api.ProviderAPIResponse"
+                    type: object
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Create NNTP provider
+      tags:
+        - Providers
+  "/providers/{id}":
+    delete:
+      description: Removes an NNTP provider by ID from the configuration.
+      parameters:
+        - description: Provider ID
+          in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Delete NNTP provider
+      tags:
+        - Providers
+    put:
+      description: Updates an existing NNTP provider by ID.
+      parameters:
+        - description: Provider ID
+          in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/api.ProviderUpdateRequest"
+        description: Fields to update
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/api.APIResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/api.ProviderAPIResponse"
+                    type: object
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Update NNTP provider
+      tags:
+        - Providers
+  /providers/reorder:
+    put:
+      description: Sets the priority order of NNTP providers.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/api.ProviderReorderRequest"
+        description: Ordered list of provider IDs
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Reorder NNTP providers
+      tags:
+        - Providers
+  /providers/test:
+    post:
+      description: Tests NNTP provider connectivity with given credentials, returning
+        RTT on success.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/api.ProviderTestRequest"
+        description: Provider credentials to test
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/api.APIResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/api.TestProviderResponse"
+                    type: object
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Test NNTP provider
+      tags:
+        - Providers
+  /queue:
+    get:
+      description: Returns a paginated list of NZB download queue items with optional
+        filters.
+      parameters:
+        - description: Filter by status
+          in: query
+          name: status
+          schema:
+            type: string
+            enum:
+              - pending
+              - processing
+              - completed
+              - failed
+        - description: Search by filename
+          in: query
+          name: search
+          schema:
+            type: string
+        - description: Sort field
+          in: query
+          name: sort_by
+          schema:
+            type: string
+            enum:
+              - created_at
+              - updated_at
+              - status
+              - nzb_path
+        - description: Sort direction
+          in: query
+          name: sort_order
+          schema:
+            type: string
+            enum:
+              - asc
+              - desc
+        - description: ISO8601 timestamp filter
+          in: query
+          name: since
+          schema:
+            type: string
+        - description: Page size (default 50)
+          in: query
+          name: limit
+          schema:
+            type: integer
+        - description: Page offset
+          in: query
+          name: offset
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/api.APIResponse"
+                  - properties:
+                      data:
+                        items:
+                          $ref: "#/components/schemas/api.QueueItemResponse"
+                        type: array
+                      meta:
+                        $ref: "#/components/schemas/api.APIMeta"
+                    type: object
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: List queue items
+      tags:
+        - Queue
+  "/queue/{id}":
+    delete:
+      description: Deletes a queue item by ID. Cannot delete items currently being
+        processed.
+      parameters:
+        - description: Queue item ID
+          in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Delete queue item
+      tags:
+        - Queue
+    get:
+      description: Returns a single queue item by ID.
+      parameters:
+        - description: Queue item ID
+          in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/api.APIResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/api.QueueItemResponse"
+                    type: object
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Get queue item
+      tags:
+        - Queue
+  "/queue/{id}/cancel":
+    post:
+      description: Requests cancellation of a queue item that is currently being processed.
+      parameters:
+        - description: Queue item ID
+          in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "202":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Cancel queue item
+      tags:
+        - Queue
+  "/queue/{id}/download":
+    get:
+      description: Downloads the original NZB file associated with a queue item.
+      parameters:
+        - description: Queue item ID
+          in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad Request
+          content:
+            application/x-nzb:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "404":
+          description: Not Found
+          content:
+            application/x-nzb:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Download NZB file
+      tags:
+        - Queue
+  "/queue/{id}/priority":
+    patch:
+      description: Changes the priority of a pending or failed queue item.
+      parameters:
+        - description: Queue item ID
+          in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                priority:
+                  type: integer
+              type: object
+        description: "Priority: 1=high, 2=normal, 3=low"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/api.APIResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/api.QueueItemResponse"
+                    type: object
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Update queue item priority
+      tags:
+        - Queue
+  "/queue/{id}/retry":
+    post:
+      description: Resets a failed, pending, or completed queue item to pending and
+        triggers processing.
+      parameters:
+        - description: Queue item ID
+          in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/api.APIResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/api.QueueItemResponse"
+                    type: object
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Retry queue item
+      tags:
+        - Queue
+  /queue/bulk:
+    delete:
+      description: Deletes multiple queue items by ID. Cannot delete items currently
+        being processed.
+      requestBody:
+        $ref: "#/components/requestBodies/Body2"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Bulk delete queue items
+      tags:
+        - Queue
+  /queue/bulk/cancel:
+    post:
+      description: Requests cancellation of multiple currently-processing queue items.
+      requestBody:
+        $ref: "#/components/requestBodies/Body2"
+      responses:
+        "202":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Bulk cancel queue items
+      tags:
+        - Queue
+  /queue/bulk/restart:
+    post:
+      description: Resets multiple queue items to pending status for reprocessing.
+      requestBody:
+        $ref: "#/components/requestBodies/Body2"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Bulk restart queue items
+      tags:
+        - Queue
+  /queue/completed:
+    delete:
+      description: Removes all completed items from the queue.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Clear completed queue items
+      tags:
+        - Queue
+  /queue/failed:
+    delete:
+      description: Removes all failed items from the queue.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Clear failed queue items
+      tags:
+        - Queue
+  /queue/pending:
+    delete:
+      description: Removes all pending items from the queue.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Clear pending queue items
+      tags:
+        - Queue
+  /queue/stats:
+    get:
+      description: Returns current queue statistics (counts by status, average
+        processing time).
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/api.APIResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/api.QueueStatsResponse"
+                    type: object
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Get queue statistics
+      tags:
+        - Queue
+  /queue/stats/history:
+    get:
+      description: Returns historical import statistics over a rolling window (last
+        24h, 7d, 30d, 365d).
+      parameters:
+        - description: Number of days of history (default 1, max 365)
+          in: query
+          name: days
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/api.APIResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/api.QueueHistoricalStatsResponse"
+                    type: object
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Get historical queue statistics
+      tags:
+        - Queue
+  /queue/test:
+    post:
+      description: Downloads a test NZB from sabnzbd.org and adds it to the queue for
+        connectivity testing.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                size:
+                  type: string
+              type: object
+        description: "Size: 100MB, 1GB, or 10GB"
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/api.APIResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/api.QueueItemResponse"
+                    type: object
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "502":
+          description: Bad Gateway
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Add test download to queue
+      tags:
+        - Queue
+  /queue/upload:
+    post:
+      description: Uploads an NZB file and adds it to the download queue.
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  description: NZB file to upload (max 100MB)
+                  type: string
+                  format: binary
+                category:
+                  description: Optional category
+                  type: string
+                relative_path:
+                  description: Optional relative path under CompleteDir
+                  type: string
+                priority:
+                  description: "Priority: 1=high, 2=normal, 3=low"
+                  type: integer
+              required:
+                - file
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/api.APIResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/api.QueueItemResponse"
+                    type: object
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "503":
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Upload NZB file to queue
+      tags:
+        - Queue
+  /queue/upload-by-name:
+    post:
+      description: Searches for an NZB by name via the configured indexer and adds the
+        result to the queue.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                category:
+                  type: string
+                name:
+                  type: string
+                password:
+                  type: string
+                priority:
+                  type: integer
+                relative_path:
+                  type: string
+              type: object
+        description: Search request
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "503":
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Search NZB by name and add to queue
+      tags:
+        - Queue
+  /queue/upload-nzblnk:
+    post:
+      description: Resolves one or more nzblnk:// links and adds the resulting NZBs to
+        the queue.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                category:
+                  type: string
+                links:
+                  items:
+                    type: string
+                  type: array
+                priority:
+                  type: integer
+                relative_path:
+                  type: string
+              type: object
+        description: NZBLNK request (max 20 links)
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "503":
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Add NZBLnk links to queue
+      tags:
+        - Queue
+  "/stremio/{key}/manifest.json":
+    get:
+      description: Returns the Stremio addon manifest JSON for installation. The key
+        authenticates the addon.
+      parameters:
+        - description: Download key (SHA256 of API key)
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.stremioManifest"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      summary: Stremio addon manifest
+      tags:
+        - Stremio
+  "/stremio/{key}/play":
+    get:
+      description: Downloads the NZB from Prowlarr by URL, queues it with high
+        priority, waits for download completion, then redirects (302) to the
+        first media stream URL.
+      parameters:
+        - description: Download key (SHA256 of API key)
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+        - description: Prowlarr NZB download URL
+          in: query
+          name: url
+          required: true
+          schema:
+            type: string
+        - description: Safe filename title for the NZB
+          in: query
+          name: title
+          schema:
+            type: string
+      responses:
+        "302":
+          description: Redirects to media stream URL
+          content:
+            application/json:
+              schema:
+                type: string
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "503":
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      summary: Play Stremio NZB stream
+      tags:
+        - Stremio
+  "/stremio/{key}/stream/{type}/{id}.json":
+    get:
+      description: Searches Prowlarr for matching NZBs and returns Stremio-compatible
+        stream URL options.
+      parameters:
+        - description: Download key
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+        - description: Content type (movie or series)
+          in: path
+          name: type
+          required: true
+          schema:
+            type: string
+        - description: Stremio content ID (e.g. tt1234567)
+          in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      summary: Stremio stream handler
+      tags:
+        - Stremio
+  /system/browse:
+    get:
+      description: Lists filesystem entries at a given path for directory/file picker UIs.
+      parameters:
+        - description: Directory path to browse (defaults to root)
+          in: query
+          name: path
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Browse filesystem
+      tags:
+        - System
+  /system/cleanup:
+    post:
+      description: Removes old queue items and health records based on age. Supports
+        dry-run mode.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/api.SystemCleanupRequest"
+        description: Cleanup criteria
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/api.APIResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/api.SystemCleanupResponse"
+                    type: object
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: System cleanup
+      tags:
+        - System
+  /system/health:
+    get:
+      description: Returns health status of all system components (database, workers, etc.).
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/api.APIResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/api.SystemHealthResponse"
+                    type: object
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Get system health
+      tags:
+        - System
+  /system/pool/metrics:
+    get:
+      description: Returns download/upload metrics, speed, and per-provider connection
+        statistics.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/api.APIResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/api.PoolMetricsResponse"
+                    type: object
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Get NNTP pool metrics
+      tags:
+        - System
+  /system/restart:
+    post:
+      description: Schedules a graceful system restart. Use force=true to skip safety
+        checks.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/api.SystemRestartRequest"
+        description: Restart options
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/api.APIResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/api.SystemRestartResponse"
+                    type: object
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Restart system
+      tags:
+        - System
+  /system/stats:
+    get:
+      description: Returns combined queue, health, and system information statistics.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/api.APIResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/api.SystemStatsResponse"
+                    type: object
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Get system statistics
+      tags:
+        - System
+  /system/stats/reset:
+    post:
+      description: Resets accumulated system statistics counters (pool metrics,
+        download counters).
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Reset system statistics
+      tags:
+        - System
+  /system/update/apply:
+    post:
+      description: Pulls the latest Docker image and restarts the container to apply
+        the update.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                channel:
+                  type: string
+              type: object
+        description: Update channel (latest or dev)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "503":
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Apply update
+      tags:
+        - System
+  /system/update/status:
+    get:
+      description: Checks Docker Hub for the latest available version and returns
+        whether an update is available.
+      parameters:
+        - description: Release channel
+          in: query
+          name: channel
+          schema:
+            type: string
+            enum:
+              - latest
+              - dev
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/api.APIResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/api.UpdateStatusResponse"
+                    type: object
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Get update status
+      tags:
+        - System
+  /user:
+    get:
+      description: Returns information about the currently authenticated user.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/api.APIResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/api.UserResponse"
+                    type: object
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Get current user
+      tags:
+        - User
+  /user/api-key/regenerate:
+    post:
+      description: Generates a new API key for the authenticated user, invalidating
+        the old one.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/api.APIResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/api.UserResponse"
+                    type: object
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+      summary: Regenerate API key
+      tags:
+        - User
+  /user/logout:
+    post:
+      description: Invalidates the current session and JWT token.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+      summary: Logout
+      tags:
+        - User
+  /user/password:
+    put:
+      description: Changes the password for the currently authenticated user.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                current_password:
+                  type: string
+                new_password:
+                  type: string
+              type: object
+        description: Password change request
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+      summary: Change password
+      tags:
+        - User
+  /user/refresh:
+    post:
+      description: Issues a new JWT access token using the current valid token.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/api.APIResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/api.AuthResponse"
+                    type: object
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+      summary: Refresh token
+      tags:
+        - User
+tags:
+  - description: NZB download queue management
+    name: Queue
+  - description: File health monitoring and repair
+    name: Health
+  - description: File metadata, streams, and NZB export
+    name: Files
+  - description: Manual file imports and directory scanning
+    name: Import
+  - description: NNTP provider management
+    name: Providers
+  - description: Sonarr/Radarr integration
+    name: ARRs
+  - description: Configuration management
+    name: Config
+  - description: System stats, health, and maintenance
+    name: System
+  - description: FUSE mount management
+    name: FUSE
+  - description: Stremio addon and NZB stream endpoints
+    name: Stremio
+  - description: Authentication and registration
+    name: Auth
+  - description: Current user management
+    name: User
+servers:
+  - url: //localhost:8080/api
+components:
+  requestBodies:
+    Body:
+      content:
+        application/json:
+          schema:
+            properties:
+              ids:
+                items:
+                  type: integer
+                type: array
+            type: object
+      description: List of health record IDs
+      required: true
+    Body2:
+      content:
+        application/json:
+          schema:
+            properties:
+              ids:
+                items:
+                  type: integer
+                type: array
+            type: object
+      description: List of queue item IDs
+      required: true
+  securitySchemes:
+    ApiKeyAuth:
+      in: query
+      name: apikey
+      type: apiKey
+  schemas:
+    api.APIError:
+      properties:
+        code:
+          type: string
+        details:
+          type: string
+        message:
+          type: string
+      type: object
+    api.APIMeta:
+      properties:
+        count:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        total:
+          type: integer
+      type: object
+    api.APIResponse:
+      properties:
+        data: {}
+        error:
+          $ref: "#/components/schemas/api.APIError"
+        meta:
+          $ref: "#/components/schemas/api.APIMeta"
+        success:
+          type: boolean
+      type: object
+    api.ArrsDeletedFile:
+      properties:
+        path:
+          type: string
+      type: object
+    api.ArrsInstanceRequest:
+      properties:
+        api_key:
+          type: string
+        category:
+          type: string
+        enabled:
+          type: boolean
+        name:
+          type: string
+        sync_interval_hours:
+          type: integer
+        type:
+          type: string
+        url:
+          type: string
+      type: object
+    api.ArrsWebhookRequest:
+      properties:
+        deletedFiles:
+          items:
+            $ref: "#/components/schemas/api.ArrsDeletedFile"
+          type: array
+        episodeFile:
+          properties:
+            path:
+              type: string
+          type: object
+        eventType:
+          type: string
+        filePath:
+          type: string
+        movie:
+          description: For upgrades/renames, the file path might be in other fields or
+            need to be inferred
+          properties:
+            folderPath:
+              type: string
+          type: object
+        movieFile:
+          properties:
+            path:
+              type: string
+          type: object
+        series:
+          properties:
+            path:
+              type: string
+          type: object
+      type: object
+    api.AuthResponse:
+      properties:
+        message:
+          type: string
+        redirect_url:
+          type: string
+        user:
+          $ref: "#/components/schemas/api.UserResponse"
+      type: object
+    api.ComponentHealth:
+      properties:
+        details:
+          type: string
+        message:
+          type: string
+        status:
+          description: '"healthy", "degraded", "unhealthy"'
+          type: string
+      type: object
+    api.ConfigAPIResponse:
+      properties:
+        api:
+          $ref: "#/components/schemas/config.APIConfig"
+        api_key:
+          description: User's API key for authentication
+          type: string
+        arrs:
+          $ref: "#/components/schemas/config.ArrsConfig"
+        auth:
+          $ref: "#/components/schemas/config.AuthConfig"
+        database:
+          $ref: "#/components/schemas/config.DatabaseConfig"
+        download_key:
+          description: SHA256 of the API key, used for download/stream URLs
+          type: string
+        fuse:
+          $ref: "#/components/schemas/config.FuseConfig"
+        health:
+          $ref: "#/components/schemas/config.HealthConfig"
+        import:
+          $ref: "#/components/schemas/api.ImportAPIResponse"
+        log:
+          $ref: "#/components/schemas/config.LogConfig"
+        metadata:
+          $ref: "#/components/schemas/config.MetadataConfig"
+        mount_path:
+          type: string
+        mount_type:
+          $ref: "#/components/schemas/config.MountType"
+        profiler_enabled:
+          type: boolean
+        providers:
+          items:
+            $ref: "#/components/schemas/api.ProviderAPIResponse"
+          type: array
+        rclone:
+          $ref: "#/components/schemas/api.RCloneAPIResponse"
+        sabnzbd:
+          $ref: "#/components/schemas/api.SABnzbdAPIResponse"
+        segment_cache:
+          $ref: "#/components/schemas/config.SegmentCacheConfig"
+        streaming:
+          $ref: "#/components/schemas/config.StreamingConfig"
+        stremio:
+          $ref: "#/components/schemas/config.StremioConfig"
+        webdav:
+          $ref: "#/components/schemas/api.WebDAVAPIResponse"
+      type: object
+    api.DailyStat:
+      properties:
+        completed:
+          type: integer
+        day:
+          type: string
+        failed:
+          type: integer
+      type: object
+    api.DryRunSyncResult:
+      properties:
+        database_records_to_clean:
+          description: Number of database records to clean
+          type: integer
+        orphaned_library_files:
+          description: Number of orphaned library files (symlinks/STRM)
+          type: integer
+        orphaned_metadata_count:
+          description: Number of orphaned metadata files
+          type: integer
+        would_cleanup:
+          description: Whether cleanup would occur based on config
+          type: boolean
+      type: object
+    api.FileMetadataResponse:
+      properties:
+        available_segments:
+          type: integer
+        created_at:
+          type: string
+        encryption:
+          type: string
+        file_size:
+          type: integer
+        modified_at:
+          type: string
+        nested_sources:
+          items:
+            $ref: "#/components/schemas/api.NestedSourceResponse"
+          type: array
+        password_protected:
+          type: boolean
+        segment_count:
+          type: integer
+        segments:
+          items:
+            $ref: "#/components/schemas/api.SegmentInfoResponse"
+          type: array
+        source_nzb_path:
+          type: string
+        status:
+          type: string
+      type: object
+    api.HealthCheckRequest:
+      properties:
+        file_path:
+          type: string
+        max_retries:
+          type: integer
+        priority:
+          $ref: "#/components/schemas/database.HealthPriority"
+        source_nzb_path:
+          type: string
+      type: object
+    api.HealthCleanupRequest:
+      properties:
+        delete_files:
+          description: Whether to also delete the physical files
+          type: boolean
+        older_than:
+          type: string
+        status:
+          $ref: "#/components/schemas/database.HealthStatus"
+      type: object
+    api.HealthItemResponse:
+      properties:
+        created_at:
+          type: string
+        error_details:
+          type: string
+        file_path:
+          type: string
+        id:
+          type: integer
+        is_masked:
+          type: boolean
+        last_checked:
+          type: string
+        last_error:
+          type: string
+        library_path:
+          type: string
+        max_repair_retries:
+          type: integer
+        max_retries:
+          type: integer
+        priority:
+          $ref: "#/components/schemas/database.HealthPriority"
+        repair_retry_count:
+          type: integer
+        retry_count:
+          type: integer
+        scheduled_check_at:
+          type: string
+        source_nzb_path:
+          type: string
+        status:
+          $ref: "#/components/schemas/database.HealthStatus"
+        streaming_failure_count:
+          description: Failure masking fields
+          type: integer
+        updated_at:
+          type: string
+      type: object
+    api.HealthRepairRequest:
+      properties:
+        reset_repair_retry_count:
+          type: boolean
+      type: object
+    api.HealthStatsResponse:
+      properties:
+        checking:
+          type: integer
+        corrupted:
+          type: integer
+        healthy:
+          type: integer
+        pending:
+          type: integer
+        repair_triggered:
+          type: integer
+        total:
+          type: integer
+      type: object
+    api.HealthWorkerStatusResponse:
+      properties:
+        current_run_files_checked:
+          type: integer
+        current_run_start_time:
+          type: string
+        error_count:
+          type: integer
+        last_error:
+          type: string
+        last_run_time:
+          type: string
+        next_run_time:
+          type: string
+        status:
+          type: string
+        total_files_checked:
+          type: integer
+        total_files_corrupted:
+          type: integer
+        total_files_healthy:
+          type: integer
+        total_runs_completed:
+          type: integer
+      type: object
+    api.ImportAPIResponse:
+      properties:
+        allow_nested_rar_extraction:
+          type: boolean
+        allowed_file_extensions:
+          items:
+            type: string
+          type: array
+        import_dir:
+          type: string
+        import_strategy:
+          $ref: "#/components/schemas/config.ImportStrategy"
+        max_download_prefetch:
+          type: integer
+        max_import_connections:
+          type: integer
+        max_processor_workers:
+          type: integer
+        queue_processing_interval_seconds:
+          description: Interval in seconds
+          type: integer
+        read_timeout_seconds:
+          type: integer
+        segment_sample_percentage:
+          description: Percentage of segments to check (1-100)
+          type: integer
+        skip_health_check:
+          type: boolean
+        watch_dir:
+          type: string
+        watch_interval_seconds:
+          type: integer
+      type: object
+    api.ImportHistoryResponse:
+      properties:
+        category:
+          type: string
+        completed_at:
+          type: string
+        file_name:
+          type: string
+        file_size:
+          type: integer
+        id:
+          type: integer
+        library_path:
+          type: string
+        nzb_id:
+          type: integer
+        nzb_name:
+          type: string
+        virtual_path:
+          type: string
+      type: object
+    api.LoginRequest:
+      properties:
+        password:
+          type: string
+        username:
+          type: string
+      type: object
+    api.ManualImportRequest:
+      properties:
+        file_path:
+          type: string
+        relative_path:
+          type: string
+      type: object
+    api.ManualImportResponse:
+      properties:
+        message:
+          type: string
+        queue_id:
+          type: integer
+      type: object
+    api.ManualScanRequest:
+      properties:
+        path:
+          type: string
+      type: object
+    api.NestedSegmentResponse:
+      properties:
+        end_offset:
+          type: integer
+        message_id:
+          type: string
+        segment_size:
+          type: integer
+        start_offset:
+          type: integer
+      type: object
+    api.NestedSourceResponse:
+      properties:
+        encrypted:
+          type: boolean
+        inner_length:
+          type: integer
+        inner_volume_size:
+          type: integer
+        segment_count:
+          type: integer
+        segments:
+          items:
+            $ref: "#/components/schemas/api.NestedSegmentResponse"
+          type: array
+        volume_index:
+          type: integer
+      type: object
+    api.PoolMetricsResponse:
+      properties:
+        articles_downloaded:
+          type: integer
+        articles_posted:
+          type: integer
+        bytes_downloaded:
+          type: integer
+        bytes_downloaded_24h:
+          type: integer
+        bytes_uploaded:
+          type: integer
+        download_speed_bytes_per_sec:
+          type: number
+        max_download_speed_bytes_per_sec:
+          type: number
+        provider_errors:
+          additionalProperties:
+            format: int64
+            type: integer
+          type: object
+        providers:
+          items:
+            $ref: "#/components/schemas/api.ProviderStatusResponse"
+          type: array
+        timestamp:
+          type: string
+        total_errors:
+          type: integer
+        upload_speed_bytes_per_sec:
+          type: number
+      type: object
+    api.ProviderAPIResponse:
+      properties:
+        enabled:
+          type: boolean
+        host:
+          type: string
+        id:
+          type: string
+        inflight_requests:
+          type: integer
+        insecure_tls:
+          type: boolean
+        is_backup_provider:
+          type: boolean
+        last_rtt_ms:
+          type: integer
+        last_speed_test_mbps:
+          type: number
+        last_speed_test_time:
+          type: string
+        max_connections:
+          type: integer
+        password_set:
+          type: boolean
+        port:
+          type: integer
+        proxy_url:
+          type: string
+        tls:
+          type: boolean
+        username:
+          type: string
+      type: object
+    api.ProviderCreateRequest:
+      properties:
+        enabled:
+          type: boolean
+        host:
+          type: string
+        insecure_tls:
+          type: boolean
+        is_backup_provider:
+          type: boolean
+        max_connections:
+          type: integer
+        password:
+          type: string
+        port:
+          type: integer
+        proxy_url:
+          type: string
+        tls:
+          type: boolean
+        username:
+          type: string
+      type: object
+    api.ProviderReorderRequest:
+      properties:
+        provider_ids:
+          items:
+            type: string
+          type: array
+      type: object
+    api.ProviderSpeedTestResponse:
+      properties:
+        duration_seconds:
+          type: number
+        speed_mbps:
+          type: number
+      type: object
+    api.ProviderStatusResponse:
+      properties:
+        current_speed_bytes_per_sec:
+          type: number
+        error_count:
+          type: integer
+        failure_reason:
+          type: string
+        host:
+          type: string
+        id:
+          type: string
+        last_connection_attempt:
+          type: string
+        last_speed_test_mbps:
+          type: number
+        last_speed_test_time:
+          type: string
+        last_successful_connect:
+          type: string
+        max_connections:
+          type: integer
+        missing_count:
+          type: integer
+        missing_rate_per_minute:
+          type: number
+        missing_warning:
+          type: boolean
+        ping_ms:
+          type: integer
+        state:
+          type: string
+        used_connections:
+          type: integer
+        username:
+          type: string
+      type: object
+    api.ProviderTestRequest:
+      properties:
+        host:
+          type: string
+        insecure_tls:
+          type: boolean
+        password:
+          type: string
+        port:
+          type: integer
+        proxy_url:
+          type: string
+        tls:
+          type: boolean
+        username:
+          type: string
+      type: object
+    api.ProviderUpdateRequest:
+      properties:
+        enabled:
+          type: boolean
+        host:
+          type: string
+        insecure_tls:
+          type: boolean
+        is_backup_provider:
+          type: boolean
+        max_connections:
+          type: integer
+        password:
+          type: string
+        port:
+          type: integer
+        proxy_url:
+          type: string
+        tls:
+          type: boolean
+        username:
+          type: string
+      type: object
+    api.QueueHistoricalStatsResponse:
+      properties:
+        daily:
+          items:
+            $ref: "#/components/schemas/api.DailyStat"
+          type: array
+        last_7_days:
+          $ref: "#/components/schemas/api.QueueHistoryRange"
+        last_24_hours:
+          $ref: "#/components/schemas/api.QueueHistoryRange"
+        last_30_days:
+          $ref: "#/components/schemas/api.QueueHistoryRange"
+        last_365_days:
+          $ref: "#/components/schemas/api.QueueHistoryRange"
+      type: object
+    api.QueueHistoryRange:
+      properties:
+        completed:
+          type: integer
+        failed:
+          type: integer
+        percentage:
+          type: number
+      type: object
+    api.QueueItemResponse:
+      properties:
+        batch_id:
+          type: string
+        category:
+          type: string
+        completed_at:
+          type: string
+        created_at:
+          type: string
+        error_message:
+          type: string
+        file_size:
+          type: integer
+        id:
+          type: integer
+        max_retries:
+          type: integer
+        metadata:
+          type: string
+        nzb_path:
+          type: string
+        percentage:
+          description: Progress percentage (0-100), only for items being processed
+          type: integer
+        priority:
+          $ref: "#/components/schemas/database.QueuePriority"
+        retry_count:
+          type: integer
+        started_at:
+          type: string
+        status:
+          $ref: "#/components/schemas/database.QueueStatus"
+        target_path:
+          type: string
+        updated_at:
+          type: string
+      type: object
+    api.QueueStatsResponse:
+      properties:
+        avg_processing_time_ms:
+          type: integer
+        last_updated:
+          type: string
+        total_completed:
+          type: integer
+        total_failed:
+          type: integer
+        total_processing:
+          type: integer
+        total_queued:
+          type: integer
+      type: object
+    api.RCloneAPIResponse:
+      properties:
+        allow_non_empty:
+          type: boolean
+        allow_other:
+          description: Mount-Specific Settings
+          type: boolean
+        async_read:
+          type: boolean
+        attr_timeout:
+          type: string
+        buffer_size:
+          type: string
+        cache_dir:
+          description: VFS Cache Settings
+          type: string
+        dir_cache_time:
+          type: string
+        gid:
+          type: integer
+        links:
+          type: boolean
+        log_level:
+          description: System and filesystem options
+          type: string
+        mount_enabled:
+          description: Mount Configuration
+          type: boolean
+        mount_options:
+          additionalProperties:
+            type: string
+          type: object
+        no_checksum:
+          type: boolean
+        no_mod_time:
+          description: Advanced Settings
+          type: boolean
+        password_set:
+          description: Encryption
+          type: boolean
+        rc_enabled:
+          type: boolean
+        rc_options:
+          additionalProperties:
+            type: string
+          type: object
+        rc_pass_set:
+          type: boolean
+        rc_port:
+          type: integer
+        rc_url:
+          type: string
+        rc_user:
+          type: string
+        read_chunk_size:
+          type: string
+        read_chunk_size_limit:
+          type: string
+        read_only:
+          type: boolean
+        salt_set:
+          type: boolean
+        syslog:
+          type: boolean
+        timeout:
+          type: string
+        transfers:
+          type: integer
+        uid:
+          type: integer
+        umask:
+          type: string
+        use_mmap:
+          type: boolean
+        vfs_cache_max_age:
+          type: string
+        vfs_cache_max_size:
+          type: string
+        vfs_cache_min_free_space:
+          type: string
+        vfs_cache_mode:
+          type: string
+        vfs_disk_space_total:
+          type: string
+        vfs_fast_fingerprint:
+          type: boolean
+        vfs_name:
+          type: string
+        vfs_read_ahead:
+          type: string
+        vfs_read_chunk_streams:
+          type: integer
+      type: object
+    api.RegisterRequest:
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+        username:
+          type: string
+      type: object
+    api.SABnzbdAPIResponse:
+      properties:
+        categories:
+          items:
+            $ref: "#/components/schemas/config.SABnzbdCategory"
+          type: array
+        complete_dir:
+          type: string
+        download_client_base_url:
+          type: string
+        enabled:
+          type: boolean
+        fallback_api_key:
+          description: Obfuscated if set
+          type: string
+        fallback_api_key_set:
+          description: Indicates if API key is set
+          type: boolean
+        fallback_host:
+          type: string
+      type: object
+    api.ScanStatusResponse:
+      properties:
+        current_file:
+          type: string
+        files_added:
+          type: integer
+        files_found:
+          type: integer
+        last_error:
+          type: string
+        path:
+          type: string
+        start_time:
+          type: string
+        status:
+          type: string
+      type: object
+    api.SegmentInfoResponse:
+      properties:
+        available:
+          type: boolean
+        end_offset:
+          type: integer
+        message_id:
+          type: string
+        segment_size:
+          type: integer
+        start_offset:
+          type: integer
+      type: object
+    api.StremioStream:
+      properties:
+        name:
+          type: string
+        title:
+          type: string
+        url:
+          type: string
+      type: object
+    api.StremioStreamsResponse:
+      properties:
+        _queue_item_id:
+          type: integer
+        _queue_status:
+          type: string
+        streams:
+          items:
+            $ref: "#/components/schemas/api.StremioStream"
+          type: array
+      type: object
+    api.SystemCleanupRequest:
+      properties:
+        dry_run:
+          type: boolean
+        health_older_than:
+          type: string
+        queue_older_than:
+          type: string
+      type: object
+    api.SystemCleanupResponse:
+      properties:
+        dry_run:
+          type: boolean
+        health_records_removed:
+          type: integer
+        queue_items_removed:
+          type: integer
+      type: object
+    api.SystemHealthResponse:
+      properties:
+        components:
+          additionalProperties:
+            $ref: "#/components/schemas/api.ComponentHealth"
+          type: object
+        status:
+          description: '"healthy", "degraded", "unhealthy"'
+          type: string
+        timestamp:
+          type: string
+      type: object
+    api.SystemInfoResponse:
+      properties:
+        git_commit:
+          type: string
+        go_version:
+          type: string
+        start_time:
+          type: string
+        uptime:
+          type: string
+        version:
+          type: string
+      type: object
+    api.SystemRestartRequest:
+      properties:
+        force:
+          description: Force restart even if unsafe
+          type: boolean
+      type: object
+    api.SystemRestartResponse:
+      properties:
+        message:
+          type: string
+        timestamp:
+          type: string
+      type: object
+    api.SystemStatsResponse:
+      properties:
+        health:
+          $ref: "#/components/schemas/api.HealthStatsResponse"
+        queue:
+          $ref: "#/components/schemas/api.QueueStatsResponse"
+        system:
+          $ref: "#/components/schemas/api.SystemInfoResponse"
+      type: object
+    api.TestProviderResponse:
+      properties:
+        error_message:
+          type: string
+        rtt_ms:
+          type: integer
+        success:
+          type: boolean
+      type: object
+    api.UpdateChannel:
+      enum:
+        - latest
+        - dev
+      type: string
+      x-enum-varnames:
+        - UpdateChannelLatest
+        - UpdateChannelDev
+    api.UpdateStatusResponse:
+      properties:
+        channel:
+          $ref: "#/components/schemas/api.UpdateChannel"
+        current_version:
+          type: string
+        docker_available:
+          type: boolean
+        git_commit:
+          type: string
+        latest_version:
+          type: string
+        release_url:
+          type: string
+        update_available:
+          type: boolean
+      type: object
+    api.UserResponse:
+      properties:
+        api_key:
+          type: string
+        avatar_url:
+          type: string
+        email:
+          type: string
+        id:
+          type: string
+        is_admin:
+          type: boolean
+        last_login:
+          type: string
+        name:
+          type: string
+        provider:
+          type: string
+      type: object
+    api.WebDAVAPIResponse:
+      properties:
+        host:
+          type: string
+        password:
+          description: Masked if set
+          type: string
+        port:
+          type: integer
+        user:
+          type: string
+      type: object
+    api.stremioManifest:
+      properties:
+        catalogs:
+          items: {}
+          type: array
+        description:
+          type: string
+        id:
+          type: string
+        idPrefixes:
+          items:
+            type: string
+          type: array
+        name:
+          type: string
+        resources:
+          items:
+            type: string
+          type: array
+        types:
+          items:
+            type: string
+          type: array
+        version:
+          type: string
+      type: object
+    config.APIConfig:
+      properties:
+        allowed_origins:
+          items:
+            type: string
+          type: array
+        key_override:
+          type: string
+        prefix:
+          type: string
+      type: object
+    config.ArrsConfig:
+      properties:
+        cleanup_automatic_import_failure:
+          type: boolean
+        enabled:
+          type: boolean
+        max_workers:
+          type: integer
+        queue_cleanup_allowlist:
+          items:
+            $ref: "#/components/schemas/config.IgnoredMessage"
+          type: array
+        queue_cleanup_enabled:
+          type: boolean
+        queue_cleanup_grace_period_minutes:
+          type: integer
+        queue_cleanup_interval_seconds:
+          type: integer
+        radarr_instances:
+          items:
+            $ref: "#/components/schemas/config.ArrsInstanceConfig"
+          type: array
+        sonarr_instances:
+          items:
+            $ref: "#/components/schemas/config.ArrsInstanceConfig"
+          type: array
+        webhook_base_url:
+          type: string
+      type: object
+    config.ArrsInstanceConfig:
+      properties:
+        api_key:
+          type: string
+        category:
+          type: string
+        enabled:
+          type: boolean
+        name:
+          type: string
+        sync_interval_hours:
+          type: integer
+        url:
+          type: string
+      type: object
+    config.AuthConfig:
+      properties:
+        login_required:
+          type: boolean
+      type: object
+    config.DatabaseConfig:
+      properties:
+        dsn:
+          description: >-
+            DSN is the PostgreSQL connection string (postgres only).
+
+            Example: "postgres://user:password@localhost:5432/altmount?sslmode=disable"
+          type: string
+        path:
+          description: Path is the SQLite database file path (sqlite only).
+          type: string
+        type:
+          description: 'Type selects the database backend: "sqlite" (default) or
+            "postgres".'
+          type: string
+      type: object
+    config.FailureMaskingConfig:
+      properties:
+        enabled:
+          type: boolean
+        threshold:
+          type: integer
+      type: object
+    config.FuseConfig:
+      properties:
+        allow_other:
+          type: boolean
+        attr_timeout_seconds:
+          type: integer
+        backend:
+          description: '"hanwen" or "cgo" (empty = platform default)'
+          type: string
+        debug:
+          type: boolean
+        enabled:
+          type: boolean
+        entry_timeout_seconds:
+          type: integer
+        max_cache_size_mb:
+          type: integer
+        max_read_ahead_mb:
+          type: integer
+        mount_path:
+          type: string
+      type: object
+    config.HealthConfig:
+      properties:
+        acceptable_missing_segments_percentage:
+          type: number
+        check_all_segments:
+          type: boolean
+        check_interval_seconds:
+          type: integer
+        cleanup_orphaned_metadata:
+          type: boolean
+        enabled:
+          type: boolean
+        library_dir:
+          type: string
+        library_sync_concurrency:
+          type: integer
+        library_sync_interval_minutes:
+          type: integer
+        max_concurrent_jobs:
+          type: integer
+        max_connections_for_health_checks:
+          type: integer
+        repair:
+          $ref: "#/components/schemas/config.RepairConfig"
+        resolve_repair_on_import:
+          type: boolean
+        segment_sample_percentage:
+          type: integer
+        verify_data:
+          type: boolean
+      type: object
+    config.IgnoredMessage:
+      properties:
+        enabled:
+          type: boolean
+        message:
+          type: string
+      type: object
+    config.ImportConfig:
+      properties:
+        allow_nested_rar_extraction:
+          type: boolean
+        allowed_file_extensions:
+          items:
+            type: string
+          type: array
+        expand_bluray_iso:
+          type: boolean
+        import_dir:
+          type: string
+        import_strategy:
+          $ref: "#/components/schemas/config.ImportStrategy"
+        max_download_prefetch:
+          type: integer
+        max_import_connections:
+          type: integer
+        max_processor_workers:
+          type: integer
+        queue_processing_interval_seconds:
+          type: integer
+        read_timeout_seconds:
+          type: integer
+        segment_sample_percentage:
+          type: integer
+        skip_health_check:
+          type: boolean
+        watch_dir:
+          type: string
+        watch_interval_seconds:
+          type: integer
+      type: object
+    config.ImportStrategy:
+      enum:
+        - NONE
+        - SYMLINK
+        - STRM
+      type: string
+      x-enum-varnames:
+        - ImportStrategyNone
+        - ImportStrategySYMLINK
+        - ImportStrategySTRM
+    config.LogConfig:
+      properties:
+        compress:
+          description: Compress old log files
+          type: boolean
+        file:
+          description: Log file path (empty = console only)
+          type: string
+        level:
+          description: Log level (debug, info, warn, error)
+          type: string
+        max_age:
+          description: Max age in days to keep files
+          type: integer
+        max_backups:
+          description: Max number of old files to keep
+          type: integer
+        max_size:
+          description: Max size in MB before rotation
+          type: integer
+      type: object
+    config.MetadataBackupConfig:
+      properties:
+        enabled:
+          type: boolean
+        interval_hours:
+          type: integer
+        keep_backups:
+          type: integer
+        path:
+          type: string
+      type: object
+    config.MetadataConfig:
+      properties:
+        backup:
+          $ref: "#/components/schemas/config.MetadataBackupConfig"
+        delete_completed_nzb:
+          type: boolean
+        delete_failed_nzb:
+          type: boolean
+        delete_source_nzb_on_removal:
+          type: boolean
+        root_path:
+          type: string
+      type: object
+    config.MountType:
+      enum:
+        - none
+        - rclone
+        - fuse
+        - rclone_external
+      type: string
+      x-enum-varnames:
+        - MountTypeNone
+        - MountTypeRClone
+        - MountTypeFuse
+        - MountTypeRCloneExternal
+    config.ProviderConfig:
+      properties:
+        enabled:
+          type: boolean
+        host:
+          type: string
+        id:
+          type: string
+        inflight_requests:
+          type: integer
+        insecure_tls:
+          type: boolean
+        is_backup_provider:
+          type: boolean
+        last_rtt_ms:
+          type: integer
+        last_speed_test_mbps:
+          type: number
+        last_speed_test_time:
+          type: string
+        max_connections:
+          type: integer
+        port:
+          type: integer
+        proxy_url:
+          type: string
+        skip_ping:
+          type: boolean
+        tls:
+          type: boolean
+        username:
+          type: string
+      type: object
+    config.ProwlarrConfig:
+      properties:
+        api_key:
+          description: APIKey is the Prowlarr API key.
+          type: string
+        categories:
+          description: >-
+            Categories filters search results by Newznab category IDs.
+
+            Defaults to 5000 (Movies), 5010 (Movies/Foreign), 5030 (TV), 5040 (TV/HD).
+          items:
+            type: integer
+          type: array
+        enabled:
+          description: Enabled controls whether Prowlarr search is active for the Stremio
+            addon.
+          type: boolean
+        host:
+          description: Host is the Prowlarr base URL (e.g. "http://localhost:9696").
+          type: string
+        languages:
+          description: >-
+            Languages is an optional list of keywords; releases must contain at
+            least one to pass.
+
+            Empty = no filtering. Examples: ["Esp", "🇪🇸", "Spanish", "DUAL"]
+          items:
+            type: string
+          type: array
+        qualities:
+          description: >-
+            Qualities is an optional list of keywords; releases must contain at
+            least one to pass.
+
+            Empty = no filtering. Examples: ["1080p", "HD", "4K", "3D"]
+          items:
+            type: string
+          type: array
+      type: object
+    config.RCloneConfig:
+      properties:
+        allow_non_empty:
+          type: boolean
+        allow_other:
+          description: Mount-Specific Settings
+          type: boolean
+        async_read:
+          type: boolean
+        attr_timeout:
+          type: string
+        buffer_size:
+          type: string
+        cache_dir:
+          description: VFS Cache Settings
+          type: string
+        dir_cache_time:
+          type: string
+        gid:
+          type: integer
+        links:
+          type: boolean
+        log_level:
+          type: string
+        mount_enabled:
+          description: Mount Configuration
+          type: boolean
+        mount_options:
+          additionalProperties:
+            type: string
+          type: object
+        no_checksum:
+          type: boolean
+        no_mod_time:
+          description: Advanced Settings
+          type: boolean
+        path:
+          description: RClone Path
+          type: string
+        rc_enabled:
+          description: RC (Remote Control) Configuration
+          type: boolean
+        rc_options:
+          additionalProperties:
+            type: string
+          type: object
+        rc_port:
+          type: integer
+        rc_url:
+          type: string
+        rc_user:
+          type: string
+        read_chunk_size:
+          type: string
+        read_chunk_size_limit:
+          type: string
+        read_only:
+          type: boolean
+        syslog:
+          type: boolean
+        timeout:
+          type: string
+        transfers:
+          type: integer
+        uid:
+          type: integer
+        umask:
+          type: string
+        use_mmap:
+          type: boolean
+        vfs_cache_max_age:
+          type: string
+        vfs_cache_max_size:
+          type: string
+        vfs_cache_min_free_space:
+          type: string
+        vfs_cache_mode:
+          type: string
+        vfs_cache_poll_interval:
+          type: string
+        vfs_disk_space_total:
+          type: string
+        vfs_fast_fingerprint:
+          type: boolean
+        vfs_name:
+          type: string
+        vfs_read_ahead:
+          type: string
+        vfs_read_chunk_size:
+          type: string
+        vfs_read_chunk_streams:
+          type: integer
+      type: object
+    config.RepairConfig:
+      properties:
+        enabled:
+          type: boolean
+        exponential_backoff:
+          type: boolean
+        interval_minutes:
+          type: integer
+        max_cooldown_hours:
+          type: integer
+      type: object
+    config.SABnzbdCategory:
+      properties:
+        dir:
+          type: string
+        name:
+          type: string
+        order:
+          type: integer
+        priority:
+          type: integer
+        type:
+          description: '"sonarr" or "radarr"'
+          type: string
+      type: object
+    config.SABnzbdConfig:
+      properties:
+        categories:
+          items:
+            $ref: "#/components/schemas/config.SABnzbdCategory"
+          type: array
+        complete_dir:
+          type: string
+        download_client_base_url:
+          type: string
+        enabled:
+          type: boolean
+        fallback_api_key:
+          description: Masked in API responses
+          type: string
+        fallback_host:
+          description: Fallback configuration for sending failed imports to external SABnzbd
+          type: string
+      type: object
+    config.SegmentCacheConfig:
+      properties:
+        cache_path:
+          type: string
+        enabled:
+          type: boolean
+        expiry_hours:
+          type: integer
+        max_size_gb:
+          type: integer
+      type: object
+    config.StreamingConfig:
+      properties:
+        failure_masking:
+          $ref: "#/components/schemas/config.FailureMaskingConfig"
+        max_prefetch:
+          type: integer
+      type: object
+    config.StremioConfig:
+      properties:
+        base_url:
+          description: >-
+            BaseURL is the public base URL used when building Stremio stream
+            links
+
+            (e.g. "https://altmount.example.com"). Falls back to the auto-detected
+
+            request origin when not set.
+          type: string
+        enabled:
+          description: >-
+            Enabled controls whether the endpoint is active. Disabled by
+            default.
+
+            When false, the endpoint returns 404 Not Found.
+          type: boolean
+        nzb_ttl_hours:
+          description: >-
+            NzbTTLHours controls how long a completed NZB result is cached
+            before
+
+            the same NZB is re-processed on the next request.
+
+            Set to 0 to disable expiry (cache forever). Defaults to 24 hours.
+          type: integer
+        prowlarr:
+          allOf:
+            - $ref: "#/components/schemas/config.ProwlarrConfig"
+          description: Prowlarr configures the Prowlarr indexer used by the Stremio addon
+            to search for NZBs.
+      type: object
+    config.WebDAVConfig:
+      properties:
+        host:
+          type: string
+        password:
+          type: string
+        port:
+          type: integer
+        user:
+          type: string
+      type: object
+    database.HealthPriority:
+      enum:
+        - 0
+        - 1
+        - 2
+      type: integer
+      x-enum-varnames:
+        - HealthPriorityNormal
+        - HealthPriorityHigh
+        - HealthPriorityNext
+    database.HealthStatus:
+      enum:
+        - pending
+        - checking
+        - healthy
+        - repair_triggered
+        - corrupted
+      type: string
+      x-enum-comments:
+        HealthStatusChecking: File is currently being checked
+        HealthStatusCorrupted: File has missing segments or is corrupted
+        HealthStatusHealthy: File passed health check
+        HealthStatusPending: File has not been checked yet
+        HealthStatusRepairTriggered: File repair has been triggered in Arrs
+      x-enum-descriptions:
+        - File has not been checked yet
+        - File is currently being checked
+        - File passed health check
+        - File repair has been triggered in Arrs
+        - File has missing segments or is corrupted
+      x-enum-varnames:
+        - HealthStatusPending
+        - HealthStatusChecking
+        - HealthStatusHealthy
+        - HealthStatusRepairTriggered
+        - HealthStatusCorrupted
+    database.QueuePriority:
+      enum:
+        - 1
+        - 2
+        - 3
+      type: integer
+      x-enum-varnames:
+        - QueuePriorityHigh
+        - QueuePriorityNormal
+        - QueuePriorityLow
+    database.QueueStatus:
+      enum:
+        - pending
+        - processing
+        - completed
+        - failed
+        - paused
+        - fallback
+      type: string
+      x-enum-comments:
+        QueueStatusFallback: Sent to external SABnzbd as fallback
+      x-enum-descriptions:
+        - ""
+        - ""
+        - ""
+        - ""
+        - ""
+        - Sent to external SABnzbd as fallback
+      x-enum-varnames:
+        - QueueStatusPending
+        - QueueStatusProcessing
+        - QueueStatusCompleted
+        - QueueStatusFailed
+        - QueueStatusPaused
+        - QueueStatusFallback
