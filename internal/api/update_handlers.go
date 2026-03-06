@@ -97,6 +97,17 @@ func fetchLatestGitHubCommit(ctx context.Context) (string, error) {
 }
 
 // handleGetUpdateStatus handles GET /api/system/update/status
+//
+//	@Summary		Get update status
+//	@Description	Checks Docker Hub for the latest available version and returns whether an update is available.
+//	@Tags			System
+//	@Produce		json
+//	@Param			channel	query		string	false	"Release channel"	Enums(latest,dev)
+//	@Success		200		{object}	APIResponse{data=UpdateStatusResponse}
+//	@Failure		400		{object}	APIResponse
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/system/update/status [get]
 func (s *Server) handleGetUpdateStatus(c *fiber.Ctx) error {
 	channel := UpdateChannel(c.Query("channel", string(UpdateChannelLatest)))
 	if channel != UpdateChannelLatest && channel != UpdateChannelDev {
@@ -145,6 +156,19 @@ func (s *Server) handleGetUpdateStatus(c *fiber.Ctx) error {
 }
 
 // handleApplyUpdate handles POST /api/system/update/apply
+//
+//	@Summary		Apply update
+//	@Description	Pulls the latest Docker image and restarts the container to apply the update.
+//	@Tags			System
+//	@Accept			json
+//	@Produce		json
+//	@Param			body	body		object{channel=string}	false	"Update channel (latest or dev)"
+//	@Success		200		{object}	APIResponse
+//	@Failure		400		{object}	APIResponse
+//	@Failure		503		{object}	APIResponse
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/system/update/apply [post]
 func (s *Server) handleApplyUpdate(c *fiber.Ctx) error {
 	user := auth.GetUserFromContext(c)
 	if !s.isAdminOrLoginDisabled(user) {
