@@ -16,6 +16,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/javi11/altmount/internal/database"
+	internalerrors "github.com/javi11/altmount/internal/errors"
 	"github.com/javi11/altmount/internal/nzblnk"
 )
 
@@ -25,9 +26,9 @@ func transformQueueError(err *string) string {
 		return ""
 	}
 
-	// Check if it's the article not found error
-	if strings.Contains(*err, "article is not found") {
-		return "The file is incomplete or missing parts. Some segments of this file could not be found on any of the configured Usenet providers. This often happens with older or less popular files."
+	// Check if it's the article not found error (old raw NNTP message or new sentinel message)
+	if strings.Contains(*err, "article is not found") || *err == internalerrors.ErrArticlesNotFound.Error() {
+		return internalerrors.ErrArticlesNotFound.Error()
 	}
 
 	// Return the original error message for other errors

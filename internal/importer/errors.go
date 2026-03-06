@@ -21,4 +21,7 @@ var (
 
 	// ErrFallbackNotConfigured indicates that SABnzbd fallback is not enabled or configured.
 	ErrFallbackNotConfigured = sharedErrors.ErrFallbackNotConfigured
+
+	// ErrArticlesNotFound indicates that one or more NZB segments could not be found on any provider.
+	ErrArticlesNotFound = sharedErrors.ErrArticlesNotFound
 )
