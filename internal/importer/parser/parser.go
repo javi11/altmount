@@ -491,10 +491,6 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 			result, err := cp.BodyPriority(ctx, firstSegment.ID)
 			if err != nil {
 				notFound := stderrors.Is(err, nntppool.ErrArticleNotFound)
-				// Still advance progress so the UI doesn't appear frozen
-				if p.poolManager != nil {
-					p.poolManager.UpdateDownloadProgress("", int64(firstSegment.Bytes))
-				}
 				return fetchResult{
 					segmentID:  firstSegment.ID,
 					isNotFound: notFound,
