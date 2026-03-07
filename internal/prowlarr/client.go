@@ -196,9 +196,19 @@ func InferReleaseMeta(title string) ReleaseMeta {
 // season and episode are optional (pass 0 to omit); used for tvsearch to scope results to a specific episode.
 // Results are returned sorted by publish date descending (newest first).
 func (c *Client) Search(ctx context.Context, imdbID, searchType string, categories []int, season, episode int) ([]NZBResult, error) {
+	return c.searchWithID(ctx, "ImdbId", imdbID, searchType, categories, season, episode)
+}
+
+// SearchByTVDB queries Prowlarr for NZB releases using TVDB ID and categories.
+// This is primarily used by TV series lookups when indexers support TvdbId but not ImdbId.
+func (c *Client) SearchByTVDB(ctx context.Context, tvdbID, searchType string, categories []int, season, episode int) ([]NZBResult, error) {
+	return c.searchWithID(ctx, "TvdbId", tvdbID, searchType, categories, season, episode)
+}
+
+func (c *Client) searchWithID(ctx context.Context, idField, idValue, searchType string, categories []int, season, episode int) ([]NZBResult, error) {
 	var query strings.Builder
-	if imdbID != "" {
-		query.WriteString("{ImdbId:" + imdbID + "}")
+	if idValue != "" {
+		query.WriteString("{" + idField + ":" + idValue + "}")
 	}
 	if season > 0 {
 		query.WriteString("{Season:" + strconv.Itoa(season) + "}")
