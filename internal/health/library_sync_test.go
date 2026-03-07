@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/javi11/altmount/internal/config"
@@ -25,6 +26,9 @@ func (m *MockRcloneClient) RefreshDir(ctx context.Context, provider string, dirs
 }
 
 func TestSyncLibrary_WorkerPool(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks not supported on Windows")
+	}
 	// Setup temporary directory for metadata
 	tempDir, err := os.MkdirTemp("", "altmount_test_metadata")
 	require.NoError(t, err)

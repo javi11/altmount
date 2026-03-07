@@ -3,6 +3,7 @@ package health
 import (
 	"context"
 	"database/sql"
+	"runtime"
 	"testing"
 	"time"
 
@@ -75,6 +76,9 @@ func queryScheduledAt(t *testing.T, db *sql.DB, filePath string) *time.Time {
 // a freshly imported file must be scheduled for health check within 5 minutes,
 // not the 0–24h window used by library sync.
 func TestAddToHealthCheck_NewFile_ScheduledWithinFiveMinutes(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks not supported on Windows")
+	}
 	repo, db := setupWorkerTestDB(t)
 	worker := &HealthWorker{healthRepo: repo}
 	ctx := context.Background()

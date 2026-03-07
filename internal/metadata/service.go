@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -362,7 +363,12 @@ func (ms *MetadataService) RenameFileMetadata(oldVirtualPath, newVirtualPath str
 }
 
 // UpdateIDSymlink creates or updates an ID-based symlink in the .ids/ sharded directory.
+// On Windows, symlinks are not supported and this operation is skipped gracefully.
 func (ms *MetadataService) UpdateIDSymlink(nzbdavID, virtualPath string) error {
+	if runtime.GOOS == "windows" {
+		return nil // Symlinks not supported on Windows; ID-based lookup via symlinks is skipped
+	}
+
 	id := strings.ToLower(nzbdavID)
 	if len(id) < 5 {
 		return nil // Invalid ID for sharding
