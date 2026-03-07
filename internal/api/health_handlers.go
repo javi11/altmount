@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -1259,6 +1260,10 @@ func (s *Server) handleResetAllHealthChecks(c *fiber.Ctx) error {
 func (s *Server) handleRegenerateSymlinks(c *fiber.Ctx) error {
 	ctx := c.Context()
 	cfg := s.configManager.GetConfig()
+
+	if runtime.GOOS == "windows" {
+		return RespondBadRequest(c, "Symlink regeneration is not supported on Windows; use STRM import strategy instead", "")
+	}
 
 	// Validate that symlink strategy is enabled
 	if cfg.Import.ImportStrategy != config.ImportStrategySYMLINK {

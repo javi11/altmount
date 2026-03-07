@@ -148,7 +148,7 @@ func CreateDirectoriesForFiles(virtualDir string, files []parser.ParsedFile, met
 		normalizedFilename = filepath.Clean(normalizedFilename)
 		normalizedFilename = strings.TrimPrefix(normalizedFilename, "/")
 
-		dir := filepath.Dir(normalizedFilename)
+		dir := filepath.ToSlash(filepath.Dir(normalizedFilename))
 		name := filepath.Base(normalizedFilename)
 
 		// Check for redundant nesting (e.g. file.mkv/file.mkv)
@@ -156,7 +156,7 @@ func CreateDirectoriesForFiles(virtualDir string, files []parser.ParsedFile, met
 		// Also check without extension for cases like Movie/Movie.mkv
 		nameWithoutExt := strings.TrimSuffix(name, filepath.Ext(name))
 		if filepath.Base(dir) == name || filepath.Base(dir) == nameWithoutExt {
-			dir = filepath.Dir(dir)
+			dir = filepath.ToSlash(filepath.Dir(dir))
 		}
 
 		// Flatten redundant nesting against parent directory (same-level duplicate names)
@@ -190,7 +190,7 @@ func DetermineFileLocation(file parser.ParsedFile, baseDir string) (parentPath, 
 	normalizedFilename = filepath.Clean(normalizedFilename)
 	normalizedFilename = strings.TrimPrefix(normalizedFilename, "/")
 
-	dir := filepath.Dir(normalizedFilename)
+	dir := filepath.ToSlash(filepath.Dir(normalizedFilename))
 	name := filepath.Base(normalizedFilename)
 
 	// Check for redundant nesting (e.g. file.mkv/file.mkv)
@@ -198,7 +198,7 @@ func DetermineFileLocation(file parser.ParsedFile, baseDir string) (parentPath, 
 	// Also check without extension for cases like Movie/Movie.mkv
 	nameWithoutExt := strings.TrimSuffix(name, filepath.Ext(name))
 	if filepath.Base(dir) == name || filepath.Base(dir) == nameWithoutExt {
-		dir = filepath.Dir(dir)
+		dir = filepath.ToSlash(filepath.Dir(dir))
 	}
 
 	// Flatten redundant nesting against parent directory (same-level duplicate names)

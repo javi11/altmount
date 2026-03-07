@@ -149,7 +149,9 @@ import:
   import_cache_size_mb: 64 # Cache size in MB for archive analysis
   segment_sample_percentage: 1 # Percentage of segments to sample for validation (1-100)
   import_strategy: 'NONE' # Import strategy: NONE (direct import), SYMLINK (create symlinks), STRM (create .strm files)
+                          # NOTE: SYMLINK is not supported on Windows. Use STRM instead.
   import_dir: '' # Import directory (required when import_strategy is SYMLINK or STRM, must be absolute path)
+                 # Windows example: 'C:\Users\user\Videos'
   skip_health_check: true # Bypass Usenet article validation during import (default: true)
 
 # Health monitoring configuration
@@ -166,7 +168,8 @@ health:
   resolve_repair_on_import: false # Automatically resolve pending repairs in the same directory when a new file is imported (default: false)
 
 # WebDAV mount path configuration
-mount_path: '' # WebDAV mount path, Example: '/mnt/remotes/altmount' or '/mnt/unionfs'. Must be an absolute path starting with /
+mount_path: '' # WebDAV mount path, Example: '/mnt/remotes/altmount' or '/mnt/unionfs'. Must be an absolute path.
+               # Windows examples: 'Z:' (drive letter via WinFsp) or 'C:\altmount' (directory mount)
 
 # SABnzbd-compatible API configuration
 sabnzbd:
