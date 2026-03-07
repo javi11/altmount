@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/javi11/altmount/internal/config"
@@ -13,6 +14,9 @@ import (
 )
 
 func TestCreateSymlinks_WithCategoryInjection(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks not supported on Windows")
+	}
 	// Setup temporary directories
 	tmpDir := t.TempDir()
 	metadataDir := filepath.Join(tmpDir, "metadata")

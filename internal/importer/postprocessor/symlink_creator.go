@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/javi11/altmount/internal/config"
@@ -196,6 +197,9 @@ func (c *Coordinator) createSingleSymlink(actualPath, resultingPath string) erro
 	}
 
 	// Create the symlink using the absolute actual path
+	if runtime.GOOS == "windows" {
+		return fmt.Errorf("symlinks are not supported on Windows; use STRM import strategy instead")
+	}
 	if err := os.Symlink(actualPath, symlinkPath); err != nil {
 		return fmt.Errorf("failed to create symlink: %w", err)
 	}
