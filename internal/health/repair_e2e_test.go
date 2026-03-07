@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"runtime"
 	"sync"
 	"testing"
 
@@ -183,6 +184,9 @@ func advanceScheduledCheck(t *testing.T, db *sql.DB, filePath string) {
 // is already at MaxRetries-1, a single health check cycle triggers ARR repair,
 // moves metadata to the corrupted folder, and sets DB status to repair_triggered.
 func TestE2E_FileRepairTriggered_ARRResearchCalled(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks not supported on Windows")
+	}
 	tempDir := t.TempDir()
 	env := newRepairTestEnv(t, tempDir, nil) // ARR returns nil (success)
 
@@ -224,6 +228,9 @@ func TestE2E_FileRepairTriggered_ARRResearchCalled(t *testing.T) {
 // TestE2E_FileRepairTriggered_FullRetryFlow verifies that a file starting at retry_count=0
 // requires exactly MaxRetries failed cycles before ARR repair is triggered.
 func TestE2E_FileRepairTriggered_FullRetryFlow(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks not supported on Windows")
+	}
 	tempDir := t.TempDir()
 	env := newRepairTestEnv(t, tempDir, nil) // ARR returns nil (success)
 
@@ -284,6 +291,9 @@ func TestE2E_FileRepairTriggered_FullRetryFlow(t *testing.T) {
 // TestE2E_FileRepairTriggered_ARRReturnsAlreadySatisfied verifies that when ARR returns
 // ErrEpisodeAlreadySatisfied the health record is deleted (zombie cleanup).
 func TestE2E_FileRepairTriggered_ARRReturnsAlreadySatisfied(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks not supported on Windows")
+	}
 	tempDir := t.TempDir()
 	env := newRepairTestEnv(t, tempDir, arrs.ErrEpisodeAlreadySatisfied)
 
@@ -313,6 +323,9 @@ func TestE2E_FileRepairTriggered_ARRReturnsAlreadySatisfied(t *testing.T) {
 // TestE2E_FileRepairTriggered_ARRReturnsPathNotFound verifies that when ARR returns
 // ErrPathMatchFailed the health record is deleted (orphan cleanup).
 func TestE2E_FileRepairTriggered_ARRReturnsPathNotFound(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks not supported on Windows")
+	}
 	tempDir := t.TempDir()
 	env := newRepairTestEnv(t, tempDir, arrs.ErrPathMatchFailed)
 
