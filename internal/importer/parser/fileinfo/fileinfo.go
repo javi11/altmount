@@ -126,6 +126,9 @@ func correctExtensionFromMagicBytes(filename string, data []byte) string {
 	if Has7zMagic(data) {
 		return base + ".7z"
 	}
+	if par2.HasMagicBytes(data) {
+		return base + ".par2"
+	}
 	return filename
 }
 
