@@ -67,7 +67,7 @@ func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Ma
 		configGetter:            configGetter,
 		maxImportConnections:    maxImportConnections,
 		segmentSamplePercentage: segmentSamplePercentage,
-		validationTimeout:       30 * time.Second, // Default validation timeout for imports
+		validationTimeout:       10 * time.Second, // Default validation timeout for imports
 		maxDownloadPrefetch:     maxDownloadPrefetch,
 		readTimeout:             readTimeout,
 		allowedFileExtensions:   allowedFileExtensions,
