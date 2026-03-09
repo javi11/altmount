@@ -274,6 +274,8 @@ func (h *Handler) SyncAuthCredentials() {
 	}
 }
 
+// noOpLockSystem implements the webdav.LockSystem interface with dummy methods.
+// This is used to bypass WebDAV locking requirements that cause 423/500 errors in rclone.
 type noOpLockSystem struct{}
 
 func (ls *noOpLockSystem) Confirm(ctx context.Context, name, token string, condition ...webdav.Condition) (func(), error) {
