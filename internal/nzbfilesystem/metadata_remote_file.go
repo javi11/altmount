@@ -37,6 +37,7 @@ type MetadataRemoteFile struct {
 	aesCipher        *aes.AesCipher      // For AES encryption/decryption
 	streamTracker    StreamTracker       // Stream tracker for monitoring active streams
 	segmentStore     usenet.SegmentStore // Optional segment cache (nil = disabled)
+	renameMu         sync.Mutex          // Mutex to protect rename operations from race conditions
 }
 
 // Configuration is now accessed dynamically through config.ConfigGetter
@@ -311,6 +312,9 @@ func (mrf *MetadataRemoteFile) RemoveFile(ctx context.Context, fileName string) 
 
 // RenameFile renames a virtual file or directory in the metadata
 func (mrf *MetadataRemoteFile) RenameFile(ctx context.Context, oldName, newName string) (bool, error) {
+	mrf.renameMu.Lock()
+	defer mrf.renameMu.Unlock()
+
 	// Normalize paths
 	normalizedOld := normalizePath(oldName)
 	normalizedNew := normalizePath(newName)
@@ -374,8 +378,6 @@ func (mrf *MetadataRemoteFile) RenameFile(ctx context.Context, oldName, newName 
 		return false, fmt.Errorf("failed to rename metadata: %w", err)
 	}
 
-	slog.InfoContext(ctx, "MOVE operation successful", "source", normalizedOld, "destination", normalizedNew)
-
 	// Update ID symlink if file has a NzbdavId
 	if fileMeta != nil && fileMeta.NzbdavId != "" {
 		if err := mrf.metadataService.UpdateIDSymlink(fileMeta.NzbdavId, normalizedNew); err != nil {
@@ -383,10 +385,14 @@ func (mrf *MetadataRemoteFile) RenameFile(ctx context.Context, oldName, newName 
 		}
 	}
 
-	// Update health records
+	// Update health records and resolve pending repairs
 	if mrf.healthRepository != nil {
 		if err := mrf.healthRepository.RenameHealthRecord(ctx, normalizedOld, normalizedNew); err != nil {
-			slog.WarnContext(ctx, "Failed to update health record path during MOVE", "old", normalizedOld, "new", normalizedNew, "error", err)
+			// If DB update fails, we already renamed the file on disk. This is where ghosts are born.
+			// Log it clearly as a DB sync error.
+			slog.ErrorContext(ctx, "CRITICAL: Metadata moved but DB update failed. Ghost record created.",
+				"old", normalizedOld, "new", normalizedNew, "error", err)
+			return false, fmt.Errorf("failed to update health record path: %w", err)
 		}
 
 		// Check if we should resolve other repairs in the same directory
@@ -407,6 +413,8 @@ func (mrf *MetadataRemoteFile) RenameFile(ctx context.Context, oldName, newName 
 			}
 		}
 	}
+
+	slog.InfoContext(ctx, "MOVE operation successful", "source", normalizedOld, "destination", normalizedNew)
 
 	return true, nil
 }
