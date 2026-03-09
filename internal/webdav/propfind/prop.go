@@ -244,11 +244,8 @@ func findETag(ctx context.Context, name string, fi os.FileInfo) (string, error) 
 }
 
 func findSupportedLock(ctx context.Context, name string, fi os.FileInfo) (string, error) {
-	return `` +
-		`<D:lockentry xmlns:D="DAV:">` +
-		`<D:lockscope><D:exclusive/></D:lockscope>` +
-		`<D:locktype><D:write/></D:locktype>` +
-		`</D:lockentry>`, nil
+	// Return empty supportedlock because we disabled LockSystem in adapter.go
+	return "", nil
 }
 
 // findFilesystemId returns a unique identifier for the filesystem

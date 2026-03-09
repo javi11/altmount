@@ -60,7 +60,7 @@ func NewHandler(
 
 	webdavHandler := &webdav.Handler{
 		FileSystem: finalFS,
-		LockSystem: webdav.NewMemLS(),
+		LockSystem: nil,
 		Prefix:     config.Prefix,
 		Logger: func(r *http.Request, err error) {
 			if err != nil && !errors.Is(err, context.Canceled) {
