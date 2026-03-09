@@ -16,6 +16,7 @@ import (
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pathutil"
+	"github.com/javi11/altmount/internal/progress"
 	"github.com/sourcegraph/conc"
 )
 
@@ -51,11 +52,12 @@ type WorkerStats struct {
 
 // HealthWorker manages continuous health monitoring and manual check requests
 type HealthWorker struct {
-	healthChecker   *HealthChecker
-	healthRepo      *database.HealthRepository
-	metadataService *metadata.MetadataService
-	arrsService     ARRsRepairService
-	configGetter    config.ConfigGetter
+	healthChecker       *HealthChecker
+	healthRepo          *database.HealthRepository
+	metadataService     *metadata.MetadataService
+	arrsService         ARRsRepairService
+	configGetter        config.ConfigGetter
+	progressBroadcaster *progress.ProgressBroadcaster // optional, may be nil
 
 	// Worker state
 	status       WorkerStatus
@@ -81,19 +83,28 @@ func NewHealthWorker(
 	metadataService *metadata.MetadataService,
 	arrsService ARRsRepairService,
 	configGetter config.ConfigGetter,
+	broadcaster *progress.ProgressBroadcaster,
 ) *HealthWorker {
 	return &HealthWorker{
-		healthChecker:   healthChecker,
-		healthRepo:      healthRepo,
-		metadataService: metadataService,
-		arrsService:     arrsService,
-		configGetter:    configGetter,
-		status:          WorkerStatusStopped,
-		stopChan:        make(chan struct{}),
-		activeChecks:    make(map[string]context.CancelFunc),
+		healthChecker:       healthChecker,
+		healthRepo:          healthRepo,
+		metadataService:     metadataService,
+		arrsService:         arrsService,
+		configGetter:        configGetter,
+		progressBroadcaster: broadcaster,
+		status:              WorkerStatusStopped,
+		stopChan:            make(chan struct{}),
+		activeChecks:        make(map[string]context.CancelFunc),
 		stats: WorkerStats{
 			Status: WorkerStatusStopped,
 		},
+	}
+}
+
+// broadcastHealthChanged notifies SSE subscribers that health state has changed.
+func (hw *HealthWorker) broadcastHealthChanged() {
+	if hw.progressBroadcaster != nil {
+		hw.progressBroadcaster.BroadcastHealthChanged()
 	}
 }
 
@@ -221,6 +232,7 @@ func (hw *HealthWorker) CancelHealthCheck(ctx context.Context, filePath string) 
 		return fmt.Errorf("failed to update file status after cancellation: %w", err)
 	}
 
+	hw.broadcastHealthChanged()
 	slog.InfoContext(ctx, "Health check cancelled", "file_path", filePath)
 	return nil
 }
@@ -599,6 +611,7 @@ func (hw *HealthWorker) performDirectCheck(ctx context.Context, filePath string)
 		if err := hw.healthRepo.UpdateHealthStatusBulk(ctx, []database.HealthStatusUpdate{*updatePtr}); err != nil {
 			return fmt.Errorf("failed to update health status: %w", err)
 		}
+		hw.broadcastHealthChanged()
 	}
 
 	// Notify rclone VFS about the status change
@@ -773,6 +786,7 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 		if err := hw.healthRepo.UpdateHealthStatusBulk(ctx, results); err != nil {
 			slog.ErrorContext(ctx, "Failed to perform bulk health status update", "error", err)
 		}
+		hw.broadcastHealthChanged()
 	}
 
 	// Update final stats

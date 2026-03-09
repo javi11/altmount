@@ -3,8 +3,6 @@ interface HealthFiltersProps {
 	statusFilter: string;
 	onSearchChange: (value: string) => void;
 	onStatusFilterChange: (value: string) => void;
-	onUserInteractionStart: () => void;
-	onUserInteractionEnd: () => void;
 }
 
 export function HealthFilters({
@@ -12,8 +10,6 @@ export function HealthFilters({
 	statusFilter,
 	onSearchChange,
 	onStatusFilterChange,
-	onUserInteractionStart,
-	onUserInteractionEnd,
 }: HealthFiltersProps) {
 	return (
 		<div className="card bg-base-100 shadow-lg">
@@ -28,8 +24,6 @@ export function HealthFilters({
 							className="input"
 							value={searchTerm}
 							onChange={(e) => onSearchChange(e.target.value)}
-							onFocus={onUserInteractionStart}
-							onBlur={onUserInteractionEnd}
 						/>
 					</fieldset>
 
@@ -40,8 +34,6 @@ export function HealthFilters({
 							className="select"
 							value={statusFilter}
 							onChange={(e) => onStatusFilterChange(e.target.value)}
-							onFocus={onUserInteractionStart}
-							onBlur={onUserInteractionEnd}
 						>
 							<option value="">All Statuses</option>
 							<option value="pending">Pending</option>

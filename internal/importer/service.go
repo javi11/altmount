@@ -263,7 +263,8 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 			ConfigGetter: configGetter,
 		},
 		database.Repository,
-		service,
+		service, // ItemProcessor
+		service, // QueueEventListener
 	)
 
 	return service, nil
@@ -626,6 +627,10 @@ func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath 
 		return nil, err
 	}
 
+	if s.broadcaster != nil {
+		s.broadcaster.BroadcastQueueChanged()
+	}
+
 	if fileSize != nil {
 		s.log.InfoContext(ctx, "Added NZB file to queue", "file", item.NzbPath, "queue_id", item.ID, "file_size", *fileSize)
 	} else {
@@ -976,6 +981,7 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 	// Notify completion and clear progress tracking
 	if s.broadcaster != nil {
 		s.broadcaster.NotifyComplete(int(item.ID), "completed")
+		s.broadcaster.BroadcastQueueChanged()
 	}
 
 	s.log.InfoContext(ctx, "Successfully processed queue item", "queue_id", item.ID, "file", item.NzbPath)
@@ -990,6 +996,14 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 	}
 
 	return nil
+}
+
+// OnItemClaimed implements queue.QueueEventListener. It broadcasts a queue-changed
+// notification whenever a worker claims a pending item (pending → processing transition).
+func (s *Service) OnItemClaimed(ctx context.Context, item *database.ImportQueueItem) {
+	if s.broadcaster != nil {
+		s.broadcaster.BroadcastQueueChanged()
+	}
 }
 
 // cleanupWrittenPaths deletes metadata files/directories written during a failed import.
@@ -1052,6 +1066,7 @@ func (s *Service) handleProcessingFailure(ctx context.Context, item *database.Im
 	// Notify failure and clear progress tracking
 	if s.broadcaster != nil {
 		s.broadcaster.NotifyComplete(int(item.ID), "failed")
+		s.broadcaster.BroadcastQueueChanged()
 	}
 
 	// Delegate fallback handling to post-processor
@@ -1145,6 +1160,10 @@ func (s *Service) ProcessItemInBackground(ctx context.Context, itemID int64) {
 		if err := s.database.Repository.UpdateQueueItemStatus(ctx, itemID, database.QueueStatusProcessing, nil); err != nil {
 			s.log.ErrorContext(ctx, "Failed to update item status to processing", "item_id", itemID, "error", err)
 			return
+		}
+
+		if s.broadcaster != nil {
+			s.broadcaster.BroadcastQueueChanged()
 		}
 
 		// Create cancellable context for this item

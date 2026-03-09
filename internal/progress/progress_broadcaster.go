@@ -169,3 +169,43 @@ func (pb *ProgressBroadcaster) HasSubscribers() bool {
 	defer pb.subMu.RUnlock()
 	return len(pb.subscribers) > 0
 }
+
+// BroadcastHealthChanged sends a health-change notification to all SSE subscribers.
+// Uses QueueID=0 and Status="health_changed" as a sentinel for health state changes.
+func (pb *ProgressBroadcaster) BroadcastHealthChanged() {
+	update := ProgressUpdate{
+		QueueID:   0,
+		Status:    "health_changed",
+		Timestamp: time.Now(),
+	}
+	pb.subMu.RLock()
+	defer pb.subMu.RUnlock()
+	for subID, ch := range pb.subscribers {
+		select {
+		case ch <- update:
+		default:
+			pb.log.WarnContext(context.Background(),
+				"subscriber channel full, skipping health_changed", "subscriber_id", subID)
+		}
+	}
+}
+
+// BroadcastQueueChanged sends a queue-change notification to all SSE subscribers.
+// Uses QueueID=0 and Status="queue_changed" as a sentinel for non-progress queue events.
+func (pb *ProgressBroadcaster) BroadcastQueueChanged() {
+	update := ProgressUpdate{
+		QueueID:   0,
+		Status:    "queue_changed",
+		Timestamp: time.Now(),
+	}
+	pb.subMu.RLock()
+	defer pb.subMu.RUnlock()
+	for subID, ch := range pb.subscribers {
+		select {
+		case ch <- update:
+		default:
+			pb.log.WarnContext(context.Background(),
+				"subscriber channel full, skipping queue_changed", "subscriber_id", subID)
+		}
+	}
+}

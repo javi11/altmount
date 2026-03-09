@@ -10,6 +10,11 @@ import (
 	"github.com/javi11/altmount/internal/database"
 )
 
+// QueueEventListener receives notifications about queue item lifecycle events.
+type QueueEventListener interface {
+	OnItemClaimed(ctx context.Context, item *database.ImportQueueItem)
+}
+
 // ItemProcessor defines the interface for processing queue items
 type ItemProcessor interface {
 	// ProcessItem processes a single queue item and returns the resulting path or an error
@@ -32,6 +37,7 @@ type Manager struct {
 	repository   *database.QueueRepository
 	claimer      *Claimer
 	processor    ItemProcessor
+	listener     QueueEventListener
 	configGetter config.ConfigGetter
 	log          *slog.Logger
 
@@ -52,7 +58,7 @@ type Manager struct {
 }
 
 // NewManager creates a new queue manager
-func NewManager(cfg ManagerConfig, repository *database.QueueRepository, processor ItemProcessor) *Manager {
+func NewManager(cfg ManagerConfig, repository *database.QueueRepository, processor ItemProcessor, listener QueueEventListener) *Manager {
 	if cfg.Workers == 0 {
 		cfg.Workers = 2
 	}
@@ -64,6 +70,7 @@ func NewManager(cfg ManagerConfig, repository *database.QueueRepository, process
 		repository:   repository,
 		claimer:      NewClaimer(repository),
 		processor:    processor,
+		listener:     listener,
 		configGetter: cfg.ConfigGetter,
 		log:          slog.Default().With("component", "queue-manager"),
 		ctx:          ctx,
@@ -223,6 +230,10 @@ func (m *Manager) processNextItem(ctx context.Context, workerID int) {
 
 	if item == nil {
 		return // No work to do
+	}
+
+	if m.listener != nil {
+		m.listener.OnItemClaimed(ctx, item)
 	}
 
 	m.log.DebugContext(ctx, "Processing claimed queue item", "worker_id", workerID, "queue_id", item.ID, "file", item.NzbPath)
