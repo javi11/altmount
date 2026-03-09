@@ -8,7 +8,7 @@ import {
 	Loader,
 	Wrench,
 } from "lucide-react";
-import { useState } from "react";
+import { memo, useState } from "react";
 import { HealthBadge } from "../../../../components/ui/StatusBadge";
 import { formatFutureTime, formatRelativeTime, truncateText } from "../../../../lib/utils";
 import { type FileHealth, HealthPriority } from "../../../../types/api";
@@ -31,7 +31,7 @@ interface HealthItemCardProps {
 	isUnmaskPending: boolean;
 }
 
-export function HealthItemCard({
+export const HealthItemCard = memo(function HealthItemCard({
 	item,
 	isSelected,
 	onSelectChange,
@@ -222,4 +222,4 @@ export function HealthItemCard({
 			</div>
 		</div>
 	);
-}
+});

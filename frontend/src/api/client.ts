@@ -65,6 +65,7 @@ export class APIClient {
 
 		const config: RequestInit = {
 			credentials: "include", // Include cookies for Safari compatibility
+			cache: "no-store",
 			headers: {
 				"Content-Type": "application/json",
 				...options.headers,
@@ -120,6 +121,7 @@ export class APIClient {
 
 		const config: RequestInit = {
 			credentials: "include", // Include cookies for Safari compatibility
+			cache: "no-store",
 			headers: {
 				"Content-Type": "application/json",
 				...options.headers,
@@ -192,7 +194,7 @@ export class APIClient {
 	}) {
 		const searchParams = new URLSearchParams();
 		if (params?.limit) searchParams.set("limit", params.limit.toString());
-		if (params?.offset) searchParams.set("offset", params.offset.toString());
+		if (params?.offset !== undefined) searchParams.set("offset", params.offset.toString());
 		if (params?.status) searchParams.set("status", params.status);
 		if (params?.since) searchParams.set("since", params.since);
 		if (params?.search) searchParams.set("search", params.search);
@@ -319,7 +321,7 @@ export class APIClient {
 	}) {
 		const searchParams = new URLSearchParams();
 		if (params?.limit) searchParams.set("limit", params.limit.toString());
-		if (params?.offset) searchParams.set("offset", params.offset.toString());
+		if (params?.offset !== undefined) searchParams.set("offset", params.offset.toString());
 		if (params?.status) searchParams.set("status", params.status);
 		if (params?.since) searchParams.set("since", params.since);
 		if (params?.search) searchParams.set("search", params.search);
