@@ -308,10 +308,59 @@ func (s *Service) Start(ctx context.Context) error {
 		// Don't fail service start if watcher fails
 	}
 
+	// Start history cleanup worker
+	go s.runHistoryCleanup(s.ctx)
+
 	s.running = true
 	s.log.InfoContext(ctx, fmt.Sprintf("NZB import service started successfully with %d workers", s.config.Workers))
 
 	return nil
+}
+
+func (s *Service) runHistoryCleanup(ctx context.Context) {
+	// Initial delay before first run
+	select {
+	case <-time.After(1 * time.Minute):
+	case <-ctx.Done():
+		return
+	}
+
+	// Run every 24 hours
+	ticker := time.NewTicker(24 * time.Hour)
+	defer ticker.Stop()
+
+	// Initial run
+	s.performHistoryCleanup(ctx)
+
+	for {
+		select {
+		case <-ticker.C:
+			s.performHistoryCleanup(ctx)
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func (s *Service) performHistoryCleanup(ctx context.Context) {
+	retentionDays := s.configGetter().Import.HistoryRetentionDays
+	if retentionDays <= 0 {
+		return
+	}
+
+	olderThan := time.Now().AddDate(0, 0, -retentionDays)
+	removed, err := s.database.Repository.DeleteImportHistoryOlderThan(ctx, olderThan)
+	if err != nil {
+		s.log.ErrorContext(ctx, "Failed to perform automatic history cleanup", "error", err)
+		return
+	}
+
+	if removed > 0 {
+		s.log.InfoContext(ctx, "Automatic history cleanup completed",
+			"removed_count", removed,
+			"retention_days", retentionDays,
+			"older_than", olderThan.Format("2006-01-02"))
+	}
 }
 
 // ProcessItem implements queue.ItemProcessor - processes a single queue item

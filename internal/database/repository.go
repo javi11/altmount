@@ -1023,6 +1023,36 @@ func (r *Repository) ListImportHistory(ctx context.Context, limit, offset int, s
 	return history, rows.Err()
 }
 
+// CountImportHistory counts the total number of items in the persistent history table
+func (r *Repository) CountImportHistory(ctx context.Context, search string, category string) (int, error) {
+	query := `
+		SELECT COUNT(*)
+		FROM import_history h
+		WHERE (? = '' OR h.nzb_name LIKE ? OR h.file_name LIKE ? OR h.virtual_path LIKE ?)
+		  AND (? = '' OR h.category = ?)
+	`
+
+	searchPattern := "%" + search + "%"
+	var count int
+	err := r.db.QueryRowContext(ctx, query, search, searchPattern, searchPattern, searchPattern, category, category).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count import history: %w", err)
+	}
+
+	return count, nil
+}
+
+// DeleteImportHistoryOlderThan removes records from the import_history table older than the given date
+func (r *Repository) DeleteImportHistoryOlderThan(ctx context.Context, olderThan time.Time) (int64, error) {
+	query := `DELETE FROM import_history WHERE completed_at < ?`
+	result, err := r.db.ExecContext(ctx, query, olderThan)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete old import history: %w", err)
+	}
+
+	return result.RowsAffected()
+}
+
 // GetImportDailyStats retrieves import statistics for the specified number of days
 func (r *Repository) GetImportDailyStats(ctx context.Context, days int) ([]*ImportDailyStat, error) {
 	cutoff := time.Now().UTC().AddDate(0, 0, -days).Format("2006-01-02")
