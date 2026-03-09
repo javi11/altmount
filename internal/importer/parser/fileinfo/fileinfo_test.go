@@ -155,6 +155,7 @@ func TestSelectBestFilename(t *testing.T) {
 func TestCorrectExtensionFromMagicBytes(t *testing.T) {
 	rar4Header := append([]byte(nil), Rar4Magic...)
 	sevenZipHeader := append([]byte(nil), SevenZipMagic...)
+	par2Header := []byte{'P', 'A', 'R', '2', 0, 'P', 'K', 'T'}
 
 	tests := []struct {
 		name     string
@@ -175,10 +176,16 @@ func TestCorrectExtensionFromMagicBytes(t *testing.T) {
 			want:     "0675e29e9abfd2.f7d069dab0b853283cc1b069a25f82.7z",
 		},
 		{
-			name:     "clear filename not changed even with RAR magic",
+			name:     "clear filename changed with RAR magic",
 			filename: "Movie.Name.2023.mkv",
 			data:     rar4Header,
-			want:     "Movie.Name.2023.mkv",
+			want:     "Movie.Name.2023.rar",
+		},
+		{
+			name:     "clear filename changed with PAR2 magic",
+			filename: "Taxi.Driver.S01E03.mp4",
+			data:     par2Header,
+			want:     "Taxi.Driver.S01E03.par2",
 		},
 		{
 			name:     "no magic bytes — no change",
