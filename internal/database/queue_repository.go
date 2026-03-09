@@ -411,15 +411,19 @@ func (r *QueueRepository) AddImportHistory(ctx context.Context, history *ImportH
 }
 
 // ListImportHistory retrieves the last N successful imports from the persistent history
-func (r *QueueRepository) ListImportHistory(ctx context.Context, limit int) ([]*ImportHistory, error) {
+func (r *QueueRepository) ListImportHistory(ctx context.Context, limit, offset int, search string, category string) ([]*ImportHistory, error) {
 	query := `
 		SELECT h.id, h.nzb_id, h.nzb_name, h.file_name, h.file_size, h.virtual_path, f.library_path, h.category, h.completed_at
 		FROM import_history h
 		LEFT JOIN file_health f ON h.virtual_path = f.file_path
+		WHERE (? = '' OR h.nzb_name LIKE ? OR h.file_name LIKE ? OR h.virtual_path LIKE ?)
+		  AND (? = '' OR h.category = ?)
 		ORDER BY h.completed_at DESC
-		LIMIT ?
+		LIMIT ? OFFSET ?
 	`
-	rows, err := r.db.QueryContext(ctx, query, limit)
+
+	searchPattern := "%" + search + "%"
+	rows, err := r.db.QueryContext(ctx, query, search, searchPattern, searchPattern, searchPattern, category, category, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list import history: %w", err)
 	}
@@ -435,6 +439,36 @@ func (r *QueueRepository) ListImportHistory(ctx context.Context, limit int) ([]*
 		history = append(history, &h)
 	}
 	return history, nil
+}
+
+// CountImportHistory counts the total number of items in the persistent history table
+func (r *QueueRepository) CountImportHistory(ctx context.Context, search string, category string) (int, error) {
+	query := `
+		SELECT COUNT(*)
+		FROM import_history h
+		WHERE (? = '' OR h.nzb_name LIKE ? OR h.file_name LIKE ? OR h.virtual_path LIKE ?)
+		  AND (? = '' OR h.category = ?)
+	`
+
+	searchPattern := "%" + search + "%"
+	var count int
+	err := r.db.QueryRowContext(ctx, query, search, searchPattern, searchPattern, searchPattern, category, category).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count import history: %w", err)
+	}
+
+	return count, nil
+}
+
+// DeleteImportHistoryOlderThan removes records from the import_history table older than the given date
+func (r *QueueRepository) DeleteImportHistoryOlderThan(ctx context.Context, olderThan time.Time) (int64, error) {
+	query := `DELETE FROM import_history WHERE completed_at < ?`
+	result, err := r.db.ExecContext(ctx, query, olderThan)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete old import history: %w", err)
+	}
+
+	return result.RowsAffected()
 }
 
 // IncrementRetryCountAndResetStatus increments the retry count and resets the status to pending
