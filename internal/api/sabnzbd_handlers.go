@@ -654,10 +654,25 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 		totalFailed = len(failed)
 	}
 
+	// NEW: Get persistent history items
+	persistentHistory, err := s.queueRepo.ListImportHistory(c.Context(), limit, start, "", categoryFilter)
+	if err != nil {
+		slog.ErrorContext(c.Context(), "Failed to get persistent history", "error", err)
+		persistentHistory = []*database.ImportHistory{}
+	}
+
+	totalPersistent, err := s.queueRepo.CountImportHistory(c.Context(), "", categoryFilter)
+	if err != nil {
+		totalPersistent = len(persistentHistory)
+	}
+
 	// Combine and convert to SABnzbd format
-	slots := make([]SABnzbdHistorySlot, 0, len(completed)+len(failed))
+	slots := make([]SABnzbdHistorySlot, 0, len(completed)+len(failed)+len(persistentHistory))
 	index := 0
 	var totalBytes int64
+
+	// Track seen NzoIDs to prevent duplicates between queue and history
+	seenIDs := make(map[string]bool)
 
 	for _, item := range completed {
 		// Calculate category-specific base path for this item
@@ -665,7 +680,9 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 		finalPath := s.calculateHistoryStoragePath(item, itemBasePath)
 
 		slot := ToSABnzbdHistorySlot(item, start+index, finalPath)
-		slog.DebugContext(c.Context(), "Reporting completed item to SABnzbd API",
+		seenIDs[slot.NzoID] = true
+
+		slog.DebugContext(c.Context(), "Reporting completed queue item to SABnzbd API",
 			"name", slot.Name,
 			"path", slot.Path,
 			"status", slot.Status)
@@ -673,6 +690,32 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 		totalBytes += slot.Bytes
 		index++
 	}
+
+	for _, item := range persistentHistory {
+		nzoID := "0"
+		if item.NzbID != nil {
+			nzoID = fmt.Sprintf("%d", *item.NzbID)
+		}
+
+		if nzoID != "0" && seenIDs[nzoID] {
+			continue
+		}
+
+		// Calculate category-specific base path for this item
+		itemBasePath := s.calculateItemBasePath()
+		// History items already have the absolute virtual path stored
+		finalPath := filepath.Join(itemBasePath, item.VirtualPath)
+
+		slot := ToSABnzbdHistorySlotFromHistory(item, start+index, finalPath)
+		slog.DebugContext(c.Context(), "Reporting persistent history item to SABnzbd API",
+			"name", slot.Name,
+			"path", slot.Path,
+			"status", slot.Status)
+		slots = append(slots, slot)
+		totalBytes += slot.Bytes
+		index++
+	}
+
 	for _, item := range failed {
 		// Calculate category-specific base path for this item
 		itemBasePath := s.calculateItemBasePath()
@@ -693,7 +736,7 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 			WeekSize:  "0 B",
 			Version:   "4.5.0",
 			DaySize:   "0 B",
-			Noofslots: totalCompleted + totalFailed,
+			Noofslots: totalCompleted + totalFailed + totalPersistent,
 		},
 	}
 
