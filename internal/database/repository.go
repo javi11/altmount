@@ -1042,6 +1042,28 @@ func (r *Repository) CountImportHistory(ctx context.Context, search string, cate
 	return count, nil
 }
 
+// DeleteImportHistoryByID removes a record from the import_history table by its internal ID
+func (r *Repository) DeleteImportHistoryByID(ctx context.Context, id int64) error {
+	query := `DELETE FROM import_history WHERE id = ?`
+	_, err := r.db.ExecContext(ctx, query, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete import history by id: %w", err)
+	}
+
+	return nil
+}
+
+// DeleteImportHistoryByNzbID removes a record from the import_history table by its original NZB ID
+func (r *Repository) DeleteImportHistoryByNzbID(ctx context.Context, nzbID int64) error {
+	query := `DELETE FROM import_history WHERE nzb_id = ?`
+	_, err := r.db.ExecContext(ctx, query, nzbID)
+	if err != nil {
+		return fmt.Errorf("failed to delete import history by nzb_id: %w", err)
+	}
+
+	return nil
+}
+
 // DeleteImportHistoryOlderThan removes records from the import_history table older than the given date
 func (r *Repository) DeleteImportHistoryOlderThan(ctx context.Context, olderThan time.Time) (int64, error) {
 	query := `DELETE FROM import_history WHERE completed_at < ?`

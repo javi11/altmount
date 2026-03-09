@@ -554,7 +554,7 @@ func ToSABnzbdHistorySlotFromHistory(h *database.ImportHistory, index int, final
 	downloaded := sizeBytes
 	actionLine := "Finished"
 
-	nzoID := "0"
+	nzoID := fmt.Sprintf("h%d", h.ID)
 	if h.NzbID != nil {
 		nzoID = fmt.Sprintf("%d", *h.NzbID)
 	}

@@ -692,12 +692,12 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 	}
 
 	for _, item := range persistentHistory {
-		nzoID := "0"
+		nzoID := fmt.Sprintf("h%d", item.ID)
 		if item.NzbID != nil {
 			nzoID = fmt.Sprintf("%d", *item.NzbID)
 		}
 
-		if nzoID != "0" && seenIDs[nzoID] {
+		if seenIDs[nzoID] {
 			continue
 		}
 
@@ -757,18 +757,38 @@ func (s *Server) handleSABnzbdHistoryDelete(c *fiber.Ctx) error {
 		return s.writeSABnzbdErrorFiber(c, "Missing nzo_id parameter")
 	}
 
-	// Convert nzo_id to database ID
+	if s.importerService == nil {
+		return s.writeSABnzbdErrorFiber(c, "Importer service not available")
+	}
+
+	// Check if it's a history-only ID (prefixed with 'h')
+	if strings.HasPrefix(nzoID, "h") {
+		idStr := strings.TrimPrefix(nzoID, "h")
+		id, err := strconv.ParseInt(idStr, 10, 64)
+		if err != nil {
+			return s.writeSABnzbdErrorFiber(c, "Invalid history ID")
+		}
+
+		err = s.queueRepo.DeleteImportHistoryByID(c.Context(), id)
+		if err != nil {
+			return s.writeSABnzbdErrorFiber(c, fmt.Sprintf("Failed to delete history item: %v", err))
+		}
+
+		return s.writeSABnzbdResponseFiber(c, SABnzbdDeleteResponse{Status: true})
+	}
+
+	// Standard numerical ID (should be NzbID)
 	id, err := strconv.ParseInt(nzoID, 10, 64)
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Invalid nzo_id")
 	}
 
-	if s.importerService == nil {
-		return s.writeSABnzbdErrorFiber(c, "Importer service not available")
-	}
-
 	// Delete from queue (history items are still queue items with completed/failed status)
 	err = s.queueRepo.RemoveFromQueue(c.Context(), id)
+
+	// Also try to delete from persistent history by NzbID
+	_ = s.queueRepo.DeleteImportHistoryByNzbID(c.Context(), id)
+
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return s.writeSABnzbdResponseFiber(c, SABnzbdDeleteResponse{
