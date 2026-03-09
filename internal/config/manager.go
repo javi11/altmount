@@ -259,6 +259,7 @@ type ImportConfig struct {
 	WatchIntervalSeconds           *int           `yaml:"watch_interval_seconds" mapstructure:"watch_interval_seconds" json:"watch_interval_seconds,omitempty"`
 	AllowNestedRarExtraction       *bool          `yaml:"allow_nested_rar_extraction" mapstructure:"allow_nested_rar_extraction" json:"allow_nested_rar_extraction,omitempty"`
 	ExpandBlurayIso                *bool          `yaml:"expand_bluray_iso" mapstructure:"expand_bluray_iso" json:"expand_bluray_iso,omitempty"`
+	HistoryRetentionDays           int            `yaml:"history_retention_days" mapstructure:"history_retention_days" json:"history_retention_days"`
 }
 
 // LogConfig represents logging configuration with rotation support
@@ -1286,6 +1287,7 @@ func DefaultConfig(configDir ...string) *Config {
 			SkipHealthCheck:         &skipHealthCheck,
 			WatchDir:                nil,
 			WatchIntervalSeconds:    &watchIntervalSeconds,
+			HistoryRetentionDays:    30,
 		},
 		Log: LogConfig{
 			File:       logPath, // Default log file path
