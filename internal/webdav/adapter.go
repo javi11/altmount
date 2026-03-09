@@ -282,14 +282,14 @@ func (ls *noOpLockSystem) Confirm(now time.Time, name, token string, condition .
 	return func() {}, nil
 }
 
-func (ls *noOpLockSystem) Create(ctx context.Context, name string, settings webdav.LockDetails) (string, error) {
+func (ls *noOpLockSystem) Create(now time.Time, details webdav.LockDetails) (string, error) {
 	return "", nil
 }
 
-func (ls *noOpLockSystem) Refresh(ctx context.Context, token string, duration time.Duration) (webdav.LockDetails, error) {
+func (ls *noOpLockSystem) Refresh(now time.Time, token string, duration time.Duration) (webdav.LockDetails, error) {
 	return webdav.LockDetails{}, nil
 }
 
-func (ls *noOpLockSystem) Unlock(ctx context.Context, token string) error {
+func (ls *noOpLockSystem) Unlock(now time.Time, token string) error {
 	return nil
 }
