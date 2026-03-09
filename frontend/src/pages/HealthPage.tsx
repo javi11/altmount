@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import {
 	FileCheck,
 	RefreshCw,
@@ -7,8 +8,7 @@ import {
 	ShieldCheck,
 	Trash2,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { Pagination } from "../components/ui/Pagination";
 import { useConfirm } from "../contexts/ModalContext";
@@ -36,6 +36,7 @@ import {
 	useLibrarySyncStatus,
 	useStartLibrarySync,
 } from "../hooks/useLibrarySync";
+import { debounce } from "../lib/utils";
 import { HealthPriority } from "../types/api";
 import { BulkActionsToolbar } from "./HealthPage/components/BulkActionsToolbar";
 import { CleanupModal } from "./HealthPage/components/CleanupModal";
@@ -108,13 +109,19 @@ export function HealthPage() {
 	const { showToast } = useToast();
 	const queryClient = useQueryClient();
 
-	// SSE stream for real-time health updates
+	// SSE stream for real-time health updates — debounced to avoid an HTTP GET on every event
+	const debouncedHealthRefetch = useMemo(
+		() =>
+			debounce(() => {
+				void refetch();
+				void queryClient.invalidateQueries({ queryKey: ["health", "stats"] });
+			}, 2000),
+		[refetch, queryClient],
+	);
+
 	useHealthStream({
 		enabled: activeTab === "files",
-		onHealthChanged: useCallback(() => {
-			void refetch();
-			queryClient.invalidateQueries({ queryKey: ["health", "stats"] });
-		}, [refetch, queryClient]),
+		onHealthChanged: debouncedHealthRefetch,
 	});
 
 	// Config hook
@@ -130,63 +137,72 @@ export function HealthPage() {
 	const startLibrarySync = useStartLibrarySync();
 	const cancelLibrarySync = useCancelLibrarySync();
 
-	const handleDelete = async (id: number) => {
-		const confirmed = await confirmAction(
-			"Delete Health Record",
-			"Are you sure you want to delete this health record? The actual file won´t be deleted.",
-			{
-				type: "warning",
-				confirmText: "Delete",
-				confirmButtonClass: "btn-error",
-			},
-		);
-		if (confirmed) {
-			await deleteItem.mutateAsync(id);
-		}
-	};
+	const handleDelete = useCallback(
+		async (id: number) => {
+			const confirmed = await confirmAction(
+				"Delete Health Record",
+				"Are you sure you want to delete this health record? The actual file won´t be deleted.",
+				{
+					type: "warning",
+					confirmText: "Delete",
+					confirmButtonClass: "btn-error",
+				},
+			);
+			if (confirmed) {
+				await deleteItem.mutateAsync(id);
+			}
+		},
+		[confirmAction, deleteItem],
+	);
 
-	const handleUnmask = async (id: number) => {
-		try {
-			await unmaskItem.mutateAsync(id);
-			showToast({
-				title: "File Unmasked",
-				message: "The file has been unmasked and will now be visible in mounts.",
-				type: "success",
-			});
-		} catch (err) {
-			console.error("Failed to unmask file:", err);
-			showToast({
-				title: "Unmask Failed",
-				message: "Failed to unmask file health record",
-				type: "error",
-			});
-		}
-	};
+	const handleUnmask = useCallback(
+		async (id: number) => {
+			try {
+				await unmaskItem.mutateAsync(id);
+				showToast({
+					title: "File Unmasked",
+					message: "The file has been unmasked and will now be visible in mounts.",
+					type: "success",
+				});
+			} catch (err) {
+				console.error("Failed to unmask file:", err);
+				showToast({
+					title: "Unmask Failed",
+					message: "Failed to unmask file health record",
+					type: "error",
+				});
+			}
+		},
+		[unmaskItem, showToast],
+	);
 
-	const handleSetPriority = async (id: number, priority: HealthPriority) => {
-		try {
-			await setHealthPriority.mutateAsync({ id, priority });
-			const priorityLabel =
-				priority === HealthPriority.Next
-					? "Next"
-					: priority === HealthPriority.High
-						? "High"
-						: "Normal";
+	const handleSetPriority = useCallback(
+		async (id: number, priority: HealthPriority) => {
+			try {
+				await setHealthPriority.mutateAsync({ id, priority });
+				const priorityLabel =
+					priority === HealthPriority.Next
+						? "Next"
+						: priority === HealthPriority.High
+							? "High"
+							: "Normal";
 
-			showToast({
-				title: "Priority Updated",
-				message: `File priority set to ${priorityLabel}`,
-				type: "success",
-			});
-		} catch (err) {
-			console.error("Failed to update priority:", err);
-			showToast({
-				title: "Update Failed",
-				message: "Failed to update file priority",
-				type: "error",
-			});
-		}
-	};
+				showToast({
+					title: "Priority Updated",
+					message: `File priority set to ${priorityLabel}`,
+					type: "success",
+				});
+			} catch (err) {
+				console.error("Failed to update priority:", err);
+				showToast({
+					title: "Update Failed",
+					message: "Failed to update file priority",
+					type: "error",
+				});
+			}
+		},
+		[setHealthPriority, showToast],
+	);
 
 	const handleCleanup = () => {
 		setCleanupConfig({
@@ -405,7 +421,7 @@ export function HealthPage() {
 		}
 	};
 
-	const handleSelectItem = (filePath: string, checked: boolean) => {
+	const handleSelectItem = useCallback((filePath: string, checked: boolean) => {
 		setSelectedItems((prev) => {
 			const newSet = new Set(prev);
 			if (checked) {
@@ -415,7 +431,7 @@ export function HealthPage() {
 			}
 			return newSet;
 		});
-	};
+	}, []);
 
 	const handleSelectAll = (checked: boolean) => {
 		if (checked && data) {

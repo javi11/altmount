@@ -124,31 +124,40 @@ export function QueuePage() {
 	const addTestQueueItem = useAddTestQueueItem();
 	const { confirmDelete, confirmAction } = useConfirm();
 
-	const handleDelete = async (id: number) => {
-		const confirmed = await confirmDelete("queue item");
-		if (confirmed) {
-			await deleteItem.mutateAsync(id);
-		}
-	};
+	const handleDelete = useCallback(
+		async (id: number) => {
+			const confirmed = await confirmDelete("queue item");
+			if (confirmed) {
+				await deleteItem.mutateAsync(id);
+			}
+		},
+		[confirmDelete, deleteItem],
+	);
 
-	const handleRetry = async (id: number) => {
-		await retryItem.mutateAsync(id);
-	};
+	const handleRetry = useCallback(
+		async (id: number) => {
+			await retryItem.mutateAsync(id);
+		},
+		[retryItem],
+	);
 
-	const handleCancel = async (id: number) => {
-		const confirmed = await confirmAction(
-			"Cancel Processing",
-			"Are you sure you want to cancel this processing item? The item will be marked as failed and can be retried later.",
-			{
-				type: "warning",
-				confirmText: "Cancel Item",
-				confirmButtonClass: "btn-warning",
-			},
-		);
-		if (confirmed) {
-			await cancelItem.mutateAsync(id);
-		}
-	};
+	const handleCancel = useCallback(
+		async (id: number) => {
+			const confirmed = await confirmAction(
+				"Cancel Processing",
+				"Are you sure you want to cancel this processing item? The item will be marked as failed and can be retried later.",
+				{
+					type: "warning",
+					confirmText: "Cancel Item",
+					confirmButtonClass: "btn-warning",
+				},
+			);
+			if (confirmed) {
+				await cancelItem.mutateAsync(id);
+			}
+		},
+		[confirmAction, cancelItem],
+	);
 
 	const handleDownload = async (id: number) => {
 		try {
@@ -222,14 +231,14 @@ export function QueuePage() {
 		}
 	};
 
-	const handleSelectItem = (id: number, checked: boolean) => {
+	const handleSelectItem = useCallback((id: number, checked: boolean) => {
 		setSelectedItems((prev) => {
 			const newSet = new Set(prev);
 			if (checked) newSet.add(id);
 			else newSet.delete(id);
 			return newSet;
 		});
-	};
+	}, []);
 
 	const handleSelectAll = (checked: boolean) => {
 		if (checked && enrichedQueueData) {
