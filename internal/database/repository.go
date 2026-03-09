@@ -991,6 +991,7 @@ func (r *Repository) AddImportHistory(ctx context.Context, history *ImportHistor
 }
 
 // ListImportHistory retrieves import history items with optional filtering and pagination
+// ListImportHistory retrieves the last N successful imports from the persistent history
 func (r *Repository) ListImportHistory(ctx context.Context, limit, offset int, search string, category string) ([]*ImportHistory, error) {
 	query := `
 		SELECT h.id, h.nzb_id, h.nzb_name, h.file_name, h.file_size, h.virtual_path, f.library_path, h.category, h.completed_at
