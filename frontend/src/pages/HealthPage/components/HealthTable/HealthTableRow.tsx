@@ -1,4 +1,5 @@
 import { Clock, Heart, HeartCrack, Loader, Wrench } from "lucide-react";
+import { memo } from "react";
 import { HealthBadge } from "../../../../components/ui/StatusBadge";
 import { formatFutureTime, formatRelativeTime, truncateText } from "../../../../lib/utils";
 import { type FileHealth, HealthPriority } from "../../../../types/api";
@@ -21,7 +22,7 @@ interface HealthTableRowProps {
 	onSetPriority: (id: number, priority: HealthPriority) => void;
 }
 
-export function HealthTableRow({
+export const HealthTableRow = memo(function HealthTableRow({
 	item,
 	isSelected,
 	isCancelPending,
@@ -197,4 +198,4 @@ export function HealthTableRow({
 			</td>
 		</tr>
 	);
-}
+});

@@ -1,5 +1,5 @@
+import { useQueryClient } from "@tanstack/react-query";
 import {
-	Clock,
 	FileCheck,
 	RefreshCw,
 	RotateCcw,
@@ -8,7 +8,7 @@ import {
 	ShieldCheck,
 	Trash2,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { Pagination } from "../components/ui/Pagination";
 import { useConfirm } from "../contexts/ModalContext";
@@ -30,11 +30,13 @@ import {
 	useUnmaskHealthItem,
 } from "../hooks/useApi";
 import { useConfig } from "../hooks/useConfig";
+import { useHealthStream } from "../hooks/useHealthStream";
 import {
 	useCancelLibrarySync,
 	useLibrarySyncStatus,
 	useStartLibrarySync,
 } from "../hooks/useLibrarySync";
+import { debounce } from "../lib/utils";
 import { HealthPriority } from "../types/api";
 import { BulkActionsToolbar } from "./HealthPage/components/BulkActionsToolbar";
 import { CleanupModal } from "./HealthPage/components/CleanupModal";
@@ -71,11 +73,6 @@ export function HealthPage() {
 		older_than: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16),
 		delete_files: false,
 	});
-	const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
-	const [refreshInterval] = useState(5000);
-	const [nextRefreshTime, setNextRefreshTime] = useState<Date | null>(null);
-	const [userInteracting, setUserInteracting] = useState(false);
-	const [countdown, setCountdown] = useState(0);
 	const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
 	const [sortBy, setSortBy] = useState<SortBy>("created_at");
 	const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
@@ -93,7 +90,6 @@ export function HealthPage() {
 		status: statusFilter || undefined,
 		sort_by: sortBy,
 		sort_order: sortOrder,
-		refetchInterval: autoRefreshEnabled && !userInteracting ? refreshInterval : undefined,
 	});
 
 	const { data: stats } = useHealthStats();
@@ -111,6 +107,22 @@ export function HealthPage() {
 	const unmaskItem = useUnmaskHealthItem();
 	const { confirmAction } = useConfirm();
 	const { showToast } = useToast();
+	const queryClient = useQueryClient();
+
+	// SSE stream for real-time health updates — debounced to avoid an HTTP GET on every event
+	const debouncedHealthRefetch = useMemo(
+		() =>
+			debounce(() => {
+				void refetch();
+				void queryClient.invalidateQueries({ queryKey: ["health", "stats"] });
+			}, 2000),
+		[refetch, queryClient],
+	);
+
+	useHealthStream({
+		enabled: activeTab === "files",
+		onHealthChanged: debouncedHealthRefetch,
+	});
 
 	// Config hook
 	const { data: config } = useConfig();
@@ -125,63 +137,72 @@ export function HealthPage() {
 	const startLibrarySync = useStartLibrarySync();
 	const cancelLibrarySync = useCancelLibrarySync();
 
-	const handleDelete = async (id: number) => {
-		const confirmed = await confirmAction(
-			"Delete Health Record",
-			"Are you sure you want to delete this health record? The actual file won´t be deleted.",
-			{
-				type: "warning",
-				confirmText: "Delete",
-				confirmButtonClass: "btn-error",
-			},
-		);
-		if (confirmed) {
-			await deleteItem.mutateAsync(id);
-		}
-	};
+	const handleDelete = useCallback(
+		async (id: number) => {
+			const confirmed = await confirmAction(
+				"Delete Health Record",
+				"Are you sure you want to delete this health record? The actual file won´t be deleted.",
+				{
+					type: "warning",
+					confirmText: "Delete",
+					confirmButtonClass: "btn-error",
+				},
+			);
+			if (confirmed) {
+				await deleteItem.mutateAsync(id);
+			}
+		},
+		[confirmAction, deleteItem],
+	);
 
-	const handleUnmask = async (id: number) => {
-		try {
-			await unmaskItem.mutateAsync(id);
-			showToast({
-				title: "File Unmasked",
-				message: "The file has been unmasked and will now be visible in mounts.",
-				type: "success",
-			});
-		} catch (err) {
-			console.error("Failed to unmask file:", err);
-			showToast({
-				title: "Unmask Failed",
-				message: "Failed to unmask file health record",
-				type: "error",
-			});
-		}
-	};
+	const handleUnmask = useCallback(
+		async (id: number) => {
+			try {
+				await unmaskItem.mutateAsync(id);
+				showToast({
+					title: "File Unmasked",
+					message: "The file has been unmasked and will now be visible in mounts.",
+					type: "success",
+				});
+			} catch (err) {
+				console.error("Failed to unmask file:", err);
+				showToast({
+					title: "Unmask Failed",
+					message: "Failed to unmask file health record",
+					type: "error",
+				});
+			}
+		},
+		[unmaskItem, showToast],
+	);
 
-	const handleSetPriority = async (id: number, priority: HealthPriority) => {
-		try {
-			await setHealthPriority.mutateAsync({ id, priority });
-			const priorityLabel =
-				priority === HealthPriority.Next
-					? "Next"
-					: priority === HealthPriority.High
-						? "High"
-						: "Normal";
+	const handleSetPriority = useCallback(
+		async (id: number, priority: HealthPriority) => {
+			try {
+				await setHealthPriority.mutateAsync({ id, priority });
+				const priorityLabel =
+					priority === HealthPriority.Next
+						? "Next"
+						: priority === HealthPriority.High
+							? "High"
+							: "Normal";
 
-			showToast({
-				title: "Priority Updated",
-				message: `File priority set to ${priorityLabel}`,
-				type: "success",
-			});
-		} catch (err) {
-			console.error("Failed to update priority:", err);
-			showToast({
-				title: "Update Failed",
-				message: "Failed to update file priority",
-				type: "error",
-			});
-		}
-	};
+				showToast({
+					title: "Priority Updated",
+					message: `File priority set to ${priorityLabel}`,
+					type: "success",
+				});
+			} catch (err) {
+				console.error("Failed to update priority:", err);
+				showToast({
+					title: "Update Failed",
+					message: "Failed to update file priority",
+					type: "error",
+				});
+			}
+		},
+		[setHealthPriority, showToast],
+	);
 
 	const handleCleanup = () => {
 		setCleanupConfig({
@@ -400,12 +421,7 @@ export function HealthPage() {
 		}
 	};
 
-	const toggleAutoRefresh = () => {
-		setAutoRefreshEnabled(!autoRefreshEnabled);
-		setNextRefreshTime(null);
-	};
-
-	const handleSelectItem = (filePath: string, checked: boolean) => {
+	const handleSelectItem = useCallback((filePath: string, checked: boolean) => {
 		setSelectedItems((prev) => {
 			const newSet = new Set(prev);
 			if (checked) {
@@ -415,7 +431,7 @@ export function HealthPage() {
 			}
 			return newSet;
 		});
-	};
+	}, []);
 
 	const handleSelectAll = (checked: boolean) => {
 		if (checked && data) {
@@ -542,58 +558,8 @@ export function HealthPage() {
 		clearSelection();
 	};
 
-	const handleUserInteractionStart = () => {
-		setUserInteracting(true);
-	};
-
-	const handleUserInteractionEnd = () => {
-		const timer = setTimeout(() => {
-			setUserInteracting(false);
-		}, 2000);
-
-		return () => clearTimeout(timer);
-	};
-
 	const data = healthResponse?.data;
 	const meta = healthResponse?.meta;
-
-	// Update next refresh time when auto-refresh is enabled
-	useEffect(() => {
-		if (!autoRefreshEnabled || userInteracting) {
-			setNextRefreshTime(null);
-			return;
-		}
-
-		setNextRefreshTime(new Date(Date.now() + refreshInterval));
-
-		const interval = setInterval(() => {
-			setNextRefreshTime(new Date(Date.now() + refreshInterval));
-		}, refreshInterval);
-
-		return () => clearInterval(interval);
-	}, [autoRefreshEnabled, refreshInterval, userInteracting]);
-
-	// Update countdown timer every second
-	useEffect(() => {
-		if (!nextRefreshTime || !autoRefreshEnabled || userInteracting) {
-			setCountdown(0);
-			return;
-		}
-
-		const updateCountdown = () => {
-			const remaining = Math.max(0, Math.ceil((nextRefreshTime.getTime() - Date.now()) / 1000));
-			setCountdown(remaining);
-
-			if (remaining === 0) {
-				setNextRefreshTime(new Date(Date.now() + refreshInterval));
-			}
-		};
-
-		updateCountdown();
-		const timer = setInterval(updateCountdown, 1000);
-
-		return () => clearInterval(timer);
-	}, [nextRefreshTime, autoRefreshEnabled, userInteracting, refreshInterval]);
 
 	// Reset page when search term or status filter changes
 	useEffect(() => {
@@ -657,34 +623,19 @@ export function HealthPage() {
 						</ul>
 					</div>
 
-					<div className="join">
-						<button
-							type="button"
-							className={`btn btn-outline btn-sm join-item ${autoRefreshEnabled ? "btn-primary" : ""}`}
-							onClick={toggleAutoRefresh}
-						>
-							{autoRefreshEnabled ? (
-								<Clock className="h-3.5 w-3.5" />
-							) : (
-								<Clock className="h-3.5 w-3.5 text-base-content/70" />
-							)}
-							{autoRefreshEnabled ? `${countdown}s` : "Off"}
-						</button>
-
-						<button
-							type="button"
-							className="btn btn-outline btn-sm join-item"
-							onClick={() => refetch()}
-							disabled={isLoading}
-						>
-							{isLoading ? (
-								<span className="loading loading-spinner loading-xs" />
-							) : (
-								<RefreshCw className="h-3.5 w-3.5" />
-							)}
-							Refresh
-						</button>
-					</div>
+					<button
+						type="button"
+						className="btn btn-outline btn-sm"
+						onClick={() => refetch()}
+						disabled={isLoading}
+					>
+						{isLoading ? (
+							<span className="loading loading-spinner loading-xs" />
+						) : (
+							<RefreshCw className="h-3.5 w-3.5" />
+						)}
+						Refresh
+					</button>
 				</div>
 			</div>
 
@@ -784,8 +735,6 @@ export function HealthPage() {
 											statusFilter={statusFilter}
 											onSearchChange={setSearchTerm}
 											onStatusFilterChange={setStatusFilter}
-											onUserInteractionStart={handleUserInteractionStart}
-											onUserInteractionEnd={handleUserInteractionEnd}
 										/>
 
 										<BulkActionsToolbar

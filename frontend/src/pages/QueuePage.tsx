@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import {
 	Activity,
 	AlertCircle,
@@ -46,7 +47,7 @@ import {
 	useRetryQueueItem,
 	useUpdateQueueItemPriority,
 } from "../hooks/useApi";
-import { useProgressStream } from "../hooks/useProgressStream";
+import { useQueueStream } from "../hooks/useQueueStream";
 import { formatBytes, formatRelativeTime, truncateText } from "../lib/utils";
 import { type QueueItem, QueueStatus } from "../types/api";
 
@@ -66,16 +67,13 @@ export function QueuePage() {
 	const [page, setPage] = useState(0);
 	const [statusFilter, setStatusFilter] = useState<QueueFilter>("");
 	const [searchTerm, setSearchTerm] = useState("");
-	const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
-	const [refreshInterval] = useState(5000);
-	const [nextRefreshTime, setNextRefreshTime] = useState<Date | null>(null);
-	const [userInteracting, setUserInteracting] = useState(false);
-	const [countdown, setCountdown] = useState(0);
 	const [selectedItems, setSelectedItems] = useState<Set<number>>(new Set());
 	const [sortBy, setSortBy] = useState<"created_at" | "updated_at" | "status" | "nzb_path">(
 		"updated_at",
 	);
 	const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+
+	const queryClient = useQueryClient();
 
 	const pageSize = 20;
 	const {
@@ -90,20 +88,18 @@ export function QueuePage() {
 		search: searchTerm || undefined,
 		sort_by: sortBy,
 		sort_order: sortOrder,
-		refetchInterval:
-			autoRefreshEnabled && !userInteracting && view === "list" ? refreshInterval : undefined,
 	});
 
 	const queueData = queueResponse?.data;
 	const meta = queueResponse?.meta;
 	const totalPages = meta?.total ? Math.ceil(meta.total / pageSize) : 0;
 
-	const hasProcessingItems = useMemo(() => {
-		return queueData?.some((item) => item.status === QueueStatus.PROCESSING) ?? false;
-	}, [queueData]);
-
-	const { progress: liveProgress } = useProgressStream({
-		enabled: hasProcessingItems && view === "list",
+	const { progress: liveProgress } = useQueueStream({
+		enabled: view === "list",
+		onQueueChanged: useCallback(() => {
+			refetch();
+			queryClient.invalidateQueries({ queryKey: ["queue", "stats"] });
+		}, [refetch, queryClient]),
 	});
 
 	const enrichedQueueData = useMemo(() => {
@@ -128,31 +124,40 @@ export function QueuePage() {
 	const addTestQueueItem = useAddTestQueueItem();
 	const { confirmDelete, confirmAction } = useConfirm();
 
-	const handleDelete = async (id: number) => {
-		const confirmed = await confirmDelete("queue item");
-		if (confirmed) {
-			await deleteItem.mutateAsync(id);
-		}
-	};
+	const handleDelete = useCallback(
+		async (id: number) => {
+			const confirmed = await confirmDelete("queue item");
+			if (confirmed) {
+				await deleteItem.mutateAsync(id);
+			}
+		},
+		[confirmDelete, deleteItem],
+	);
 
-	const handleRetry = async (id: number) => {
-		await retryItem.mutateAsync(id);
-	};
+	const handleRetry = useCallback(
+		async (id: number) => {
+			await retryItem.mutateAsync(id);
+		},
+		[retryItem],
+	);
 
-	const handleCancel = async (id: number) => {
-		const confirmed = await confirmAction(
-			"Cancel Processing",
-			"Are you sure you want to cancel this processing item? The item will be marked as failed and can be retried later.",
-			{
-				type: "warning",
-				confirmText: "Cancel Item",
-				confirmButtonClass: "btn-warning",
-			},
-		);
-		if (confirmed) {
-			await cancelItem.mutateAsync(id);
-		}
-	};
+	const handleCancel = useCallback(
+		async (id: number) => {
+			const confirmed = await confirmAction(
+				"Cancel Processing",
+				"Are you sure you want to cancel this processing item? The item will be marked as failed and can be retried later.",
+				{
+					type: "warning",
+					confirmText: "Cancel Item",
+					confirmButtonClass: "btn-warning",
+				},
+			);
+			if (confirmed) {
+				await cancelItem.mutateAsync(id);
+			}
+		},
+		[confirmAction, cancelItem],
+	);
 
 	const handleDownload = async (id: number) => {
 		try {
@@ -226,19 +231,14 @@ export function QueuePage() {
 		}
 	};
 
-	const toggleAutoRefresh = () => {
-		setAutoRefreshEnabled(!autoRefreshEnabled);
-		setNextRefreshTime(null);
-	};
-
-	const handleSelectItem = (id: number, checked: boolean) => {
+	const handleSelectItem = useCallback((id: number, checked: boolean) => {
 		setSelectedItems((prev) => {
 			const newSet = new Set(prev);
 			if (checked) newSet.add(id);
 			else newSet.delete(id);
 			return newSet;
 		});
-	};
+	}, []);
 
 	const handleSelectAll = (checked: boolean) => {
 		if (checked && enrichedQueueData) {
@@ -316,37 +316,6 @@ export function QueuePage() {
 	const isAllSelected =
 		queueData && queueData.length > 0 && queueData.every((item) => selectedItems.has(item.id));
 	const isIndeterminate = queueData && selectedItems.size > 0 && !isAllSelected;
-
-	useEffect(() => {
-		if (autoRefreshEnabled && !userInteracting && view === "list") {
-			setNextRefreshTime(new Date(Date.now() + refreshInterval));
-			const interval = setInterval(() => {
-				setNextRefreshTime(new Date(Date.now() + refreshInterval));
-			}, refreshInterval);
-			return () => clearInterval(interval);
-		}
-		setNextRefreshTime(null);
-	}, [autoRefreshEnabled, refreshInterval, userInteracting, view]);
-
-	const handleUserInteractionStart = () => setUserInteracting(true);
-	const handleUserInteractionEnd = () => {
-		const timer = setTimeout(() => setUserInteracting(false), 2000);
-		return () => clearTimeout(timer);
-	};
-
-	useEffect(() => {
-		if (nextRefreshTime && autoRefreshEnabled && !userInteracting && view === "list") {
-			const updateCountdown = () => {
-				const remaining = Math.max(0, Math.ceil((nextRefreshTime.getTime() - Date.now()) / 1000));
-				setCountdown(remaining);
-				if (remaining === 0) setNextRefreshTime(new Date(Date.now() + refreshInterval));
-			};
-			updateCountdown();
-			const timer = setInterval(updateCountdown, 1000);
-			return () => clearInterval(timer);
-		}
-		setCountdown(0);
-	}, [nextRefreshTime, autoRefreshEnabled, userInteracting, refreshInterval, view]);
 
 	useEffect(() => {
 		setPage(0);
@@ -461,28 +430,15 @@ export function QueuePage() {
 								</ul>
 							</div>
 
-							<div className="join">
-								<button
-									type="button"
-									className={`btn btn-outline btn-sm join-item ${autoRefreshEnabled ? "btn-primary" : ""}`}
-									onClick={toggleAutoRefresh}
-								>
-									<Clock
-										className={`h-3.5 w-3.5 ${autoRefreshEnabled ? "" : "text-base-content/70"}`}
-									/>
-									{autoRefreshEnabled ? `${countdown}s` : "Off"}
-								</button>
-
-								<button
-									type="button"
-									className="btn btn-outline btn-sm join-item"
-									onClick={() => refetch()}
-									disabled={isLoading}
-								>
-									{isLoading ? <LoadingSpinner size="sm" /> : <RefreshCw className="h-3.5 w-3.5" />}
-									Refresh
-								</button>
-							</div>
+							<button
+								type="button"
+								className="btn btn-outline btn-sm"
+								onClick={() => refetch()}
+								disabled={isLoading}
+							>
+								{isLoading ? <LoadingSpinner size="sm" /> : <RefreshCw className="h-3.5 w-3.5" />}
+								Refresh
+							</button>
 						</>
 					)}
 				</div>
@@ -568,8 +524,6 @@ export function QueuePage() {
 											className="input input-sm w-full bg-base-200/50 pl-9 text-xs"
 											value={searchTerm}
 											onChange={(e) => setSearchTerm(e.target.value)}
-											onFocus={handleUserInteractionStart}
-											onBlur={handleUserInteractionEnd}
 										/>
 									</div>
 								</div>

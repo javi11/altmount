@@ -10,7 +10,7 @@ import {
 	Trash2,
 	XCircle,
 } from "lucide-react";
-import { useState } from "react";
+import { memo, useState } from "react";
 import { formatBytes, formatRelativeTime, truncateText } from "../../lib/utils";
 import { type QueueItem, QueueStatus } from "../../types/api";
 import { PathDisplay } from "../ui/PathDisplay";
@@ -29,7 +29,7 @@ interface QueueItemCardProps {
 	isDeletePending: boolean;
 }
 
-export function QueueItemCard({
+export const QueueItemCard = memo(function QueueItemCard({
 	item,
 	isSelected,
 	onSelectChange,
@@ -204,4 +204,4 @@ export function QueueItemCard({
 			</div>
 		</div>
 	);
-}
+});
