@@ -1052,7 +1052,6 @@ func (r *Repository) DeleteImportHistoryOlderThan(ctx context.Context, olderThan
 
 	return result.RowsAffected()
 }
-
 // GetImportDailyStats retrieves import statistics for the specified number of days
 func (r *Repository) GetImportDailyStats(ctx context.Context, days int) ([]*ImportDailyStat, error) {
 	cutoff := time.Now().UTC().AddDate(0, 0, -days).Format("2006-01-02")

@@ -458,105 +458,140 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, finalPath s
 	}
 
 	// Get file size if available
-
 	var sizeBytes int64
-
 	if item.FileSize != nil {
-
 		sizeBytes = *item.FileSize
-
 	}
 
 	downloaded := int64(0)
-
 	actionLine := ""
 
 	switch item.Status {
 	case database.QueueStatusCompleted:
-
 		downloaded = sizeBytes
-
 		actionLine = "Finished"
-
 	case database.QueueStatusFailed:
-
 		actionLine = "Failed"
-
 		if item.ErrorMessage != nil {
-
 			actionLine = fmt.Sprintf("Failed: %s", *item.ErrorMessage)
-
 		}
-
 	}
 
 	return SABnzbdHistorySlot{
-
-		Index: index,
-
-		NzoID: fmt.Sprintf("%d", item.ID),
-
-		Name: jobName,
-
-		Category: category,
-
-		Cat: category,
-
-		PP: "3",
-
-		Script: "",
-
-		Report: "",
-
-		URL: "",
-
-		Status: status,
-
-		NzbName: nzbFilename,
-
-		Download: jobName,
-
-		Storage: finalPath,
-
-		Path: finalPath,
-
-		Postproc: "",
-
-		Downloaded: downloaded,
-
+		Index:        index,
+		NzoID:        fmt.Sprintf("%d", item.ID),
+		Name:         jobName,
+		Category:     category,
+		Cat:          category,
+		PP:           "3",
+		Script:       "",
+		Report:       "",
+		URL:          "",
+		Status:       status,
+		NzbName:      nzbFilename,
+		Download:     jobName,
+		Storage:      finalPath,
+		Path:         finalPath,
+		Postproc:     "",
+		Downloaded:   downloaded,
 		Completetime: completetime,
-
-		NzbAvg: "",
-
-		Script_log: "",
-
+		NzbAvg:       "",
+		Script_log:   "",
 		DuplicateKey: jobName,
-
-		Script_line: "",
-
+		Script_line:  "",
 		Fail_message: failMessage,
+		Url_info:     "",
+		Bytes:        sizeBytes,
+		Meta:         []string{},
+		Series:       "",
+		Md5sum:       "",
+		Password:     "",
+		ActionLine:   actionLine,
+		Size:         formatHumanSize(sizeBytes),
+		Loaded:       true,
+		Retry:        item.RetryCount,
+		StateLog:     []string{},
+	}
+}
 
-		Url_info: "",
-
-		Bytes: sizeBytes,
-
-		Meta: []string{},
-
-		Series: "",
-
-		Md5sum: "",
-
-		Password: "",
-
-		ActionLine: actionLine,
-
-		Size: formatHumanSize(sizeBytes),
-
-		Loaded: true,
-
-		Retry: item.RetryCount,
-
-		StateLog: []string{},
+// ToSABnzbdHistorySlotFromHistory converts a persistent AltMount ImportHistory item to SABnzbd format
+func ToSABnzbdHistorySlotFromHistory(h *database.ImportHistory, index int, finalPath string) SABnzbdHistorySlot {
+	if h == nil {
+		return SABnzbdHistorySlot{}
 	}
 
+	// For persistent history, status is always Completed
+	status := "Completed"
+
+	// Calculate jobName
+	var jobName string
+	// Calculate jobName from the finalPath
+	jobName = filepath.Base(finalPath)
+
+	// Safety check: If the job name matches a generic category name, it means it was a flattened import.
+	isGeneric := jobName == "movies" || jobName == "tv" || jobName == "complete" || jobName == "."
+	if h.Category != nil && jobName == *h.Category {
+		isGeneric = true
+	}
+
+	if isGeneric {
+		// It's a flattened import
+		jobName = strings.TrimSuffix(h.NzbName, filepath.Ext(h.NzbName))
+	}
+
+	// Ensure nzb_name is just the filename
+	nzbFilename := h.NzbName
+
+	completetime := h.CompletedAt.Unix()
+
+	// Get category, default to "default" if not set
+	category := "default"
+	if h.Category != nil && *h.Category != "" {
+		category = *h.Category
+	}
+
+	sizeBytes := h.FileSize
+	downloaded := sizeBytes
+	actionLine := "Finished"
+
+	nzoID := "0"
+	if h.NzbID != nil {
+		nzoID = fmt.Sprintf("%d", *h.NzbID)
+	}
+
+	return SABnzbdHistorySlot{
+		Index:        index,
+		NzoID:        nzoID,
+		Name:         jobName,
+		Category:     category,
+		Cat:          category,
+		PP:           "3",
+		Script:       "",
+		Report:       "",
+		URL:          "",
+		Status:       status,
+		NzbName:      nzbFilename,
+		Download:     jobName,
+		Storage:      finalPath,
+		Path:         finalPath,
+		Postproc:     "",
+		Downloaded:   downloaded,
+		Completetime: completetime,
+		NzbAvg:       "",
+		Script_log:   "",
+		DuplicateKey: jobName,
+		Script_line:  "",
+		Fail_message: "",
+		Url_info:     "",
+		Bytes:        sizeBytes,
+		Meta:         []string{},
+		Series:       "",
+		Md5sum:       "",
+		Password:     "",
+		ActionLine:   actionLine,
+		Size:         formatHumanSize(sizeBytes),
+		Loaded:       true,
+		Retry:        0,
+		StateLog:     []string{},
+	}
 }
