@@ -230,6 +230,10 @@ func (s *Server) handleDeleteQueue(c *fiber.Ctx) error {
 		return RespondInternalError(c, "Failed to delete queue item", err.Error())
 	}
 
+	if s.progressBroadcaster != nil {
+		s.progressBroadcaster.BroadcastQueueChanged()
+	}
+
 	return RespondNoContent(c)
 }
 
@@ -283,6 +287,10 @@ func (s *Server) handleRetryQueue(c *fiber.Ctx) error {
 	// Trigger background processing immediately
 	if s.importerService != nil {
 		s.importerService.ProcessItemInBackground(c.Context(), id)
+	}
+
+	if s.progressBroadcaster != nil {
+		s.progressBroadcaster.BroadcastQueueChanged()
 	}
 
 	// Get updated item
@@ -435,6 +443,10 @@ func (s *Server) handleClearCompletedQueue(c *fiber.Ctx) error {
 		return RespondInternalError(c, "Failed to clear completed queue items", err.Error())
 	}
 
+	if s.progressBroadcaster != nil {
+		s.progressBroadcaster.BroadcastQueueChanged()
+	}
+
 	return RespondSuccess(c, fiber.Map{"removed_count": count})
 }
 
@@ -456,6 +468,10 @@ func (s *Server) handleClearFailedQueue(c *fiber.Ctx) error {
 		return RespondInternalError(c, "Failed to clear failed queue items", err.Error())
 	}
 
+	if s.progressBroadcaster != nil {
+		s.progressBroadcaster.BroadcastQueueChanged()
+	}
+
 	return RespondSuccess(c, fiber.Map{"removed_count": count})
 }
 
@@ -475,6 +491,10 @@ func (s *Server) handleClearPendingQueue(c *fiber.Ctx) error {
 	count, err := s.queueRepo.ClearPendingQueueItems(c.Context())
 	if err != nil {
 		return RespondInternalError(c, "Failed to clear pending queue items", err.Error())
+	}
+
+	if s.progressBroadcaster != nil {
+		s.progressBroadcaster.BroadcastQueueChanged()
 	}
 
 	return RespondSuccess(c, fiber.Map{"removed_count": count})
@@ -518,6 +538,10 @@ func (s *Server) handleDeleteQueueBulk(c *fiber.Ctx) error {
 		}
 
 		return RespondInternalError(c, "Failed to delete queue items", err.Error())
+	}
+
+	if s.progressBroadcaster != nil {
+		s.progressBroadcaster.BroadcastQueueChanged()
 	}
 
 	return RespondSuccess(c, fiber.Map{
@@ -974,6 +998,10 @@ func (s *Server) handleRestartQueueBulk(c *fiber.Ctx) error {
 		return RespondInternalError(c, "Failed to restart queue items", err.Error())
 	}
 
+	if s.progressBroadcaster != nil {
+		s.progressBroadcaster.BroadcastQueueChanged()
+	}
+
 	return RespondSuccess(c, fiber.Map{
 		"restarted_count": len(request.IDs) - notFoundCount,
 		"message":         fmt.Sprintf("Successfully restarted %d queue items", len(request.IDs)-notFoundCount),
@@ -1204,6 +1232,10 @@ func (s *Server) handleUpdateQueueItemPriority(c *fiber.Ctx) error {
 
 	if err := s.queueRepo.UpdateQueueItemPriority(c.Context(), id, database.QueuePriority(req.Priority)); err != nil {
 		return RespondInternalError(c, "Failed to update priority", err.Error())
+	}
+
+	if s.progressBroadcaster != nil {
+		s.progressBroadcaster.BroadcastQueueChanged()
 	}
 
 	updated, err := s.queueRepo.GetQueueItem(c.Context(), id)

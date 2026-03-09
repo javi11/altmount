@@ -377,6 +377,7 @@ func startHealthWorker(
 	configManager *config.Manager,
 	rcloneClient rclonecli.RcloneRcClient,
 	arrsService *arrs.Service,
+	broadcaster *progress.ProgressBroadcaster,
 ) (*health.HealthWorker, *health.LibrarySyncWorker, error) {
 	// Create metadata service for health worker
 	metadataService := metadata.NewMetadataService(cfg.Metadata.RootPath)
@@ -396,6 +397,7 @@ func startHealthWorker(
 		metadataService,
 		arrsService,
 		configManager.GetConfigGetter(),
+		broadcaster,
 	)
 
 	// Create library sync worker (always create, but only start if enabled)

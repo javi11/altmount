@@ -32,7 +32,6 @@ export const useQueueStats = () => {
 	return useQuery({
 		queryKey: ["queue", "stats"],
 		queryFn: () => apiClient.getQueueStats(),
-		refetchInterval: 5000, // Refetch every 5 seconds
 	});
 };
 
@@ -173,16 +172,7 @@ export const useHealth = (params?: {
 	return useQuery({
 		queryKey: ["health", params],
 		queryFn: () => apiClient.getHealth(params),
-		refetchInterval: (query) => {
-			// Use custom refetch interval if provided
-			if (params?.refetchInterval !== undefined) {
-				return params.refetchInterval;
-			}
-			// Otherwise, poll every 5 seconds if any items are in "checking" status
-			const data = query.state.data?.data;
-			const hasCheckingItems = data?.some((item) => item.status === "checking");
-			return hasCheckingItems ? 5000 : false;
-		},
+		refetchInterval: false,
 	});
 };
 
@@ -205,7 +195,6 @@ export const useHealthStats = () => {
 	return useQuery({
 		queryKey: ["health", "stats"],
 		queryFn: () => apiClient.getHealthStats(),
-		refetchInterval: 5000, // Refetch every 5 seconds
 	});
 };
 

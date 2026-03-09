@@ -130,6 +130,7 @@ func newRepairTestEnv(t *testing.T, tempDir string, arrsErr error) *repairTestEn
 		metadataService,
 		mockARRs,
 		configManager.GetConfig,
+		nil,
 	)
 
 	return &repairTestEnv{

@@ -11,9 +11,61 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-// handleProgressStream handles GET /api/queue/progress/stream
-// Server-Sent Events endpoint for real-time progress updates
-func (s *Server) handleProgressStream(c *fiber.Ctx) error {
+// handleHealthStream handles GET /api/health/stream
+// Server-Sent Events endpoint for real-time health-change notifications
+func (s *Server) handleHealthStream(c *fiber.Ctx) error {
+	c.Set("Content-Type", "text/event-stream")
+	c.Set("Cache-Control", "no-cache")
+	c.Set("Connection", "keep-alive")
+	c.Set("Transfer-Encoding", "chunked")
+	c.Set("X-Accel-Buffering", "no")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
+		subID, updateCh := s.progressBroadcaster.Subscribe()
+		defer s.progressBroadcaster.Unsubscribe(subID)
+
+		// Initial ping — tells frontend to fetch current health state immediately
+		fmt.Fprintf(w, "data: {\"type\":\"initial\"}\n\n")
+		if err := w.Flush(); err != nil {
+			return
+		}
+
+		keepAliveTicker := time.NewTicker(30 * time.Second)
+		defer keepAliveTicker.Stop()
+
+		for {
+			select {
+			case update, ok := <-updateCh:
+				if !ok {
+					return
+				}
+				if update.Status != "health_changed" {
+					continue
+				}
+				fmt.Fprintf(w, "data: {\"type\":\"update\"}\n\n")
+				if err := w.Flush(); err != nil {
+					return
+				}
+			case <-keepAliveTicker.C:
+				fmt.Fprintf(w, ": keep-alive\n\n")
+				if err := w.Flush(); err != nil {
+					return
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	})
+
+	return nil
+}
+
+// handleQueueStream handles GET /api/queue/stream
+// Server-Sent Events endpoint for real-time progress and queue-change updates
+func (s *Server) handleQueueStream(c *fiber.Ctx) error {
 	// Set SSE headers
 	c.Set("Content-Type", "text/event-stream")
 	c.Set("Cache-Control", "no-cache")
