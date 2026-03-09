@@ -94,10 +94,10 @@ func getFileInfo(
 	// Detect RAR archives (by magic bytes or extension)
 	isRar := HasRarMagic(file.First16KB) || IsRarFile(filename)
 
-	// Gap 3: Detect 7z archives by magic bytes or extension
+	// Detect 7z archives by magic bytes or extension
 	is7z := Has7zMagic(file.First16KB) || Is7zFile(filename)
 
-	isPar2Archive := IsPar2File(filename)
+	isPar2Archive := par2.HasMagicBytes(file.First16KB) || IsPar2File(filename)
 
 	return &FileInfo{
 		NzbFile:       *file.NzbFile,
@@ -116,17 +116,14 @@ func getFileInfo(
 // correctExtensionFromMagicBytes fixes the extension of an obfuscated file based on its magic bytes.
 // Only applies when the filename looks obfuscated — clear names are never modified.
 func correctExtensionFromMagicBytes(filename string, data []byte) string {
-	if !isProbablyObfuscated(filename) {
-		return filename
-	}
 	base := strings.TrimSuffix(filename, filepath.Ext(filename))
-	if HasRarMagic(data) {
+	if HasRarMagic(data) && !IsRarFile(filename) {
 		return base + ".rar"
 	}
-	if Has7zMagic(data) {
+	if Has7zMagic(data) && !Is7zFile(filename) {
 		return base + ".7z"
 	}
-	if par2.HasMagicBytes(data) {
+	if par2.HasMagicBytes(data) && !IsPar2File(filename) {
 		return base + ".par2"
 	}
 	return filename
