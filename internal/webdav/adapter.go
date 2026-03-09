@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/go-pkgz/auth/v2/token"
 	"github.com/javi11/altmount/internal/api"
@@ -60,7 +61,7 @@ func NewHandler(
 
 	webdavHandler := &webdav.Handler{
 		FileSystem: finalFS,
-		LockSystem: nil,
+		LockSystem: &noOpLockSystem{},
 		Prefix:     config.Prefix,
 		Logger: func(r *http.Request, err error) {
 			if err != nil && !errors.Is(err, context.Canceled) {
@@ -271,4 +272,22 @@ func (h *Handler) SyncAuthCredentials() {
 
 		slog.DebugContext(context.Background(), "WebDAV configuration synced from config")
 	}
+}
+
+type noOpLockSystem struct{}
+
+func (ls *noOpLockSystem) Confirm(ctx context.Context, name, token string, condition ...webdav.Condition) (func(), error) {
+	return func() {}, nil
+}
+
+func (ls *noOpLockSystem) Create(ctx context.Context, name string, settings webdav.LockDetails) (string, error) {
+	return "", nil
+}
+
+func (ls *noOpLockSystem) Refresh(ctx context.Context, token string, duration time.Duration) (webdav.LockDetails, error) {
+	return webdav.LockDetails{}, nil
+}
+
+func (ls *noOpLockSystem) Unlock(ctx context.Context, token string) error {
+	return nil
 }
