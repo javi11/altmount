@@ -537,10 +537,6 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 				}
 
 				// Fetch all needed segments in parallel
-				type segResult struct {
-					idx   int
-					bytes []byte
-				}
 				segResults := make([][]byte, len(segsNeeded))
 				g, gctx := errgroup.WithContext(ctx)
 				for i, seg := range segsNeeded {
