@@ -11,15 +11,14 @@ import (
 
 	"github.com/javi11/altmount/internal/nzbfilesystem"
 	"github.com/javi11/altmount/internal/slogutil"
-	"golang.org/x/net/webdav"
 )
 
-// customErrorHandler wraps a webdav.FileSystem and maps our custom errors to HTTP status codes
+// customErrorHandler wraps a FileSystem and maps our custom errors to HTTP status codes
 type customErrorHandler struct {
-	fileSystem webdav.FileSystem
+	fileSystem FileSystem
 }
 
-// Implement webdav.FileSystem interface by delegating to wrapped filesystem
+// Implement FileSystem interface by delegating to wrapped filesystem
 func (c *customErrorHandler) Mkdir(ctx context.Context, name string, perm os.FileMode) error {
 	return c.fileSystem.Mkdir(ctx, name, perm)
 }
@@ -36,7 +35,7 @@ func (c *customErrorHandler) Stat(ctx context.Context, name string) (os.FileInfo
 	return c.fileSystem.Stat(ctx, name)
 }
 
-func (c *customErrorHandler) OpenFile(ctx context.Context, name string, flag int, perm os.FileMode) (webdav.File, error) {
+func (c *customErrorHandler) OpenFile(ctx context.Context, name string, flag int, perm os.FileMode) (File, error) {
 	file, err := c.fileSystem.OpenFile(ctx, name, flag, perm)
 	if err != nil {
 		return nil, c.mapError(err)
@@ -97,9 +96,9 @@ func (e *HTTPError) Unwrap() error {
 	return e.Err
 }
 
-// errorHandlingFile wraps a webdav.File and handles read errors from our virtual files
+// errorHandlingFile wraps a File and handles read errors from our virtual files
 type errorHandlingFile struct {
-	webdav.File
+	File
 	ctx context.Context
 }
 
