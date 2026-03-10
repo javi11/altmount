@@ -3,6 +3,7 @@ package webdav
 import (
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"mime"
 	"net/http"
@@ -55,6 +56,8 @@ func (h *webdavMethods) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleOptions(w, r)
 	case http.MethodHead, http.MethodGet:
 		h.handleGet(w, r)
+	case http.MethodPut:
+		h.handlePut(w, r)
 	case "PROPFIND":
 		status, err := propfind.HandlePropfind(propfindFS{h.fs}, w, r, h.prefix)
 		if status != 0 {
@@ -83,7 +86,7 @@ func (h *webdavMethods) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (h *webdavMethods) handleOptions(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("DAV", "1")
-	w.Header().Set("Allow", "OPTIONS, HEAD, GET, PROPFIND, DELETE, MOVE, MKCOL")
+	w.Header().Set("Allow", "OPTIONS, HEAD, GET, PROPFIND, DELETE, MOVE, MKCOL, PUT")
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -125,6 +128,40 @@ func (h *webdavMethods) handleGet(w http.ResponseWriter, r *http.Request) {
 	defer f.Close()
 
 	http.ServeContent(w, r, fi.Name(), fi.ModTime(), f)
+}
+
+func (h *webdavMethods) handlePut(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	reqPath, status, err := propfind.StripPrefix(r.URL.Path, h.prefix)
+	if err != nil {
+		http.Error(w, "Not Found", status)
+		return
+	}
+
+	// Check if file exists to determine status code
+	_, statErr := h.fs.Stat(ctx, reqPath)
+
+	f, err := h.fs.OpenFile(ctx, reqPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0666)
+	if err != nil {
+		if os.IsNotExist(err) {
+			http.Error(w, "Conflict: parent collection does not exist", http.StatusConflict)
+		} else {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		}
+		return
+	}
+	defer f.Close()
+
+	if _, err := io.Copy(f, r.Body); err != nil {
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	if os.IsNotExist(statErr) {
+		w.WriteHeader(http.StatusCreated)
+	} else {
+		w.WriteHeader(http.StatusNoContent)
+	}
 }
 
 func (h *webdavMethods) handleDelete(w http.ResponseWriter, r *http.Request) {
