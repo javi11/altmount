@@ -12,8 +12,6 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
-
-	"golang.org/x/net/webdav"
 )
 
 const (
@@ -28,8 +26,8 @@ var (
 	errPrefixMismatch  = errors.New("webdav: prefix mismatch")
 )
 
-func HandlePropfind(fs webdav.FileSystem, ls webdav.LockSystem, w http.ResponseWriter, r *http.Request, prefix string) (status int, err error) {
-	reqPath, status, err := stripPrefix(r.URL.Path, prefix)
+func HandlePropfind(fs FS, w http.ResponseWriter, r *http.Request, prefix string) (status int, err error) {
+	reqPath, status, err := StripPrefix(r.URL.Path, prefix)
 	if err != nil {
 		return status, err
 	}
@@ -61,15 +59,15 @@ func HandlePropfind(fs webdav.FileSystem, ls webdav.LockSystem, w http.ResponseW
 			return handlePropfindError(err, info)
 		}
 
-		var pstats []webdav.Propstat
+		var pstats []Propstat
 		if pf.Propname != nil {
 			pnames, err := propnames(info)
 			if err != nil {
 				return handlePropfindError(err, info)
 			}
-			pstat := webdav.Propstat{Status: http.StatusOK}
+			pstat := Propstat{Status: http.StatusOK}
 			for _, xmlname := range pnames {
-				pstat.Props = append(pstat.Props, webdav.Property{XMLName: xmlname})
+				pstat.Props = append(pstat.Props, Property{XMLName: xmlname})
 			}
 			pstats = append(pstats, pstat)
 		} else if pf.Allprop != nil {
@@ -122,33 +120,21 @@ func parseDepth(s string) int {
 }
 
 func handlePropfindError(err error, info os.FileInfo) error {
-	var skipResp error = nil
-	if info != nil && info.IsDir() {
-		skipResp = filepath.SkipDir
+	if errors.Is(err, os.ErrPermission) || errors.As(err, new(*os.PathError)) {
+		// Permission errors and bad paths: skip the entry (SkipDir for
+		// directories, nil for files).
+		if info != nil && info.IsDir() {
+			return filepath.SkipDir
+		}
+		return nil
 	}
 
-	if errors.Is(err, os.ErrPermission) {
-		// If the server cannot recurse into a directory because it is not allowed,
-		// then there is nothing more to say about it. Just skip sending anything.
-		return skipResp
-	}
-
-	if _, ok := err.(*os.PathError); ok {
-		// If the file is just bad, it couldn't be a proper WebDAV resource. Skip it.
-		return skipResp
-	}
-
-	// We need to be careful with other errors: there is no way to abort the xml stream
-	// part way through while returning a valid PROPFIND response. Returning only half
-	// the data would be misleading, but so would be returning results tainted by errors.
-	// The current behaviour by returning an error here leads to the stream being aborted,
-	// and the parent http server complaining about writing a spurious header. We should
-	// consider further enhancing this error handling to more gracefully fail, or perhaps
-	// buffer the entire response until we've walked the tree.
+	// Other errors abort the stream. There is no way to emit a partial but
+	// valid PROPFIND response, so we propagate the error upward.
 	return err
 }
 
-func makePropstatResponse(href string, pstats []webdav.Propstat) *response {
+func makePropstatResponse(href string, pstats []Propstat) *response {
 	resp := response{
 		Href:     []string{(&url.URL{Path: href}).EscapedPath()},
 		Propstat: make([]propstat, 0, len(pstats)),
@@ -159,7 +145,7 @@ func makePropstatResponse(href string, pstats []webdav.Propstat) *response {
 			xmlErr = &xmlError{InnerXML: []byte(p.XMLError)}
 		}
 		resp.Propstat = append(resp.Propstat, propstat{
-			Status:              fmt.Sprintf("HTTP/1.1 %d %s", p.Status, webdav.StatusText(p.Status)),
+			Status:              fmt.Sprintf("HTTP/1.1 %d %s", p.Status, http.StatusText(p.Status)),
 			Prop:                p.Props,
 			ResponseDescription: p.ResponseDescription,
 			Error:               xmlErr,
@@ -173,7 +159,7 @@ func makePropstatResponse(href string, pstats []webdav.Propstat) *response {
 // Allowed values for depth are 0, 1 or infiniteDepth. For each visited node,
 // walkFS calls walkFn. If a visited file system node is a directory and
 // walkFn returns filepath.SkipDir, walkFS will skip traversal of this node.
-func walkFS(ctx context.Context, fs webdav.FileSystem, depth int, name string, info os.FileInfo, walkFn filepath.WalkFunc) error {
+func walkFS(ctx context.Context, fs FS, depth int, name string, info os.FileInfo, walkFn filepath.WalkFunc) error {
 	// This implementation is based on Walk's code in the standard path/filepath package.
 	err := walkFn(name, info, nil)
 	if err != nil {
@@ -213,7 +199,8 @@ func walkFS(ctx context.Context, fs webdav.FileSystem, depth int, name string, i
 	return nil
 }
 
-func stripPrefix(p, prefix string) (string, int, error) {
+// StripPrefix strips the prefix from path p.
+func StripPrefix(p, prefix string) (string, int, error) {
 	if prefix == "" {
 		return p, http.StatusOK, nil
 	}
