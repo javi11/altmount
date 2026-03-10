@@ -546,6 +546,7 @@ func (proc *Processor) processRarArchive(
 			proc.segmentSamplePercentage,
 			allowedExtensions,
 			proc.validationTimeout,
+			proc.verifyData,
 		); err != nil {
 			slog.DebugContext(ctx, "Failed to process regular files", "error", err)
 		}
@@ -658,6 +659,7 @@ func (proc *Processor) processSevenZipArchive(
 			proc.segmentSamplePercentage,
 			allowedExtensions,
 			proc.validationTimeout,
+			proc.verifyData,
 		); err != nil {
 			slog.DebugContext(ctx, "Failed to process regular files", "error", err)
 		}

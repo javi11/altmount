@@ -99,7 +99,7 @@ func ProcessRegularFiles(
 				file.Encryption,
 				poolManager,
 				maxValidationGoroutines,
-				segmentSamplePercentage,
+				samplePercentage,
 				nil, // No progress callback for multi-file imports
 				timeout,
 				verifyData,
