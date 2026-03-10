@@ -36,10 +36,12 @@ func ProcessRegularFiles(
 	metadataService *metadata.MetadataService,
 	poolManager pool.Manager,
 	maxValidationGoroutines int,
-	segmentSamplePercentage int,
+	samplePercentage int,
 	allowedFileExtensions []string,
 	timeout time.Duration,
-) ([]string, error) {
+	verifyData bool,
+	) ([]string, error) {
+
 	if len(files) == 0 {
 		return nil, nil
 	}
@@ -100,6 +102,7 @@ func ProcessRegularFiles(
 				segmentSamplePercentage,
 				nil, // No progress callback for multi-file imports
 				timeout,
+				verifyData,
 			); err != nil {
 				return err
 			}

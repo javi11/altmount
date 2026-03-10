@@ -188,6 +188,7 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 	currentConfig := configGetter()
 	maxImportConnections := currentConfig.Import.MaxImportConnections
 	segmentSamplePercentage := currentConfig.Import.SegmentSamplePercentage
+	verifyData := currentConfig.Health.VerifyData != nil && *currentConfig.Health.VerifyData
 	allowedFileExtensions := currentConfig.Import.AllowedFileExtensions
 	maxDownloadPrefetch := currentConfig.Import.MaxDownloadPrefetch
 	readTimeout := time.Duration(currentConfig.Import.ReadTimeoutSeconds) * time.Second
@@ -204,7 +205,7 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 	}
 
 	// Create processor with poolManager for dynamic pool access
-	processor := NewProcessor(metadataService, poolManager, maxImportConnections, segmentSamplePercentage, allowedFileExtensions, maxDownloadPrefetch, readTimeout, broadcaster, configGetter, nil, allowNestedRarExtraction, expandBlurayIso)
+	processor := NewProcessor(metadataService, poolManager, maxImportConnections, segmentSamplePercentage, verifyData, allowedFileExtensions, maxDownloadPrefetch, readTimeout, broadcaster, configGetter, nil, allowNestedRarExtraction, expandBlurayIso)
 
 	ctx, cancel := context.WithCancel(context.Background())
 

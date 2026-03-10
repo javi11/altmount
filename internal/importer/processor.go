@@ -41,6 +41,7 @@ type Processor struct {
 	configGetter            config.ConfigGetter
 	maxImportConnections    int // Maximum concurrent NNTP connections for validation and archive processing
 	segmentSamplePercentage int // Percentage of segments to check when sampling (1-100)
+	verifyData              bool
 	validationTimeout       time.Duration
 	maxDownloadPrefetch     int           // Prefetch depth for Usenet segment reads (used by ISO reader)
 	readTimeout             time.Duration // Read timeout for Usenet data (used by ISO reader)
@@ -56,7 +57,7 @@ type Processor struct {
 }
 
 // NewProcessor creates a new NZB processor using metadata storage
-func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Manager, maxImportConnections int, segmentSamplePercentage int, allowedFileExtensions []string, maxDownloadPrefetch int, readTimeout time.Duration, broadcaster *progress.ProgressBroadcaster, configGetter config.ConfigGetter, recorder HistoryRecorder, allowNestedRarExtraction bool, expandBlurayIso bool) *Processor {
+func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Manager, maxImportConnections int, segmentSamplePercentage int, verifyData bool, allowedFileExtensions []string, maxDownloadPrefetch int, readTimeout time.Duration, broadcaster *progress.ProgressBroadcaster, configGetter config.ConfigGetter, recorder HistoryRecorder, allowNestedRarExtraction bool, expandBlurayIso bool) *Processor {
 	return &Processor{
 		parser:                  parser.NewParser(poolManager),
 		strmParser:              parser.NewStrmParser(),
@@ -67,6 +68,7 @@ func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Ma
 		configGetter:            configGetter,
 		maxImportConnections:    maxImportConnections,
 		segmentSamplePercentage: segmentSamplePercentage,
+		verifyData:              verifyData,
 		validationTimeout:       30 * time.Second, // Default validation timeout for imports
 		maxDownloadPrefetch:     maxDownloadPrefetch,
 		readTimeout:             readTimeout,
@@ -379,6 +381,7 @@ func (proc *Processor) processSingleFile(
 		samplePercentage,
 		allowedExtensions,
 		timeout,
+		proc.verifyData,
 	)
 	var writtenPaths []string
 	if writtenPath != "" {
@@ -472,6 +475,7 @@ func (proc *Processor) processMultiFile(
 		samplePercentage,
 		allowedExtensions,
 		timeout,
+		proc.verifyData,
 	)
 	if err != nil {
 		return "", writtenPaths, err
@@ -580,6 +584,7 @@ func (proc *Processor) processRarArchive(
 			proc.maxDownloadPrefetch,
 			proc.readTimeout,
 			proc.expandBlurayIso,
+			proc.verifyData,
 		)
 		if err != nil {
 			return nzbFolder, writtenPaths, err
@@ -690,6 +695,7 @@ func (proc *Processor) processSevenZipArchive(
 			proc.maxDownloadPrefetch,
 			proc.readTimeout,
 			proc.expandBlurayIso,
+			proc.verifyData,
 		)
 		if err != nil {
 			return nzbFolder, writtenPaths, err

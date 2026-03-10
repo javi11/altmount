@@ -148,6 +148,7 @@ func ProcessArchive(
 	maxPrefetch int,
 	readTimeout time.Duration,
 	expandBlurayIso bool,
+	verifyData bool,
 ) error {
 	if len(archiveFiles) == 0 {
 		return nil
@@ -330,6 +331,7 @@ func ProcessArchive(
 				segmentSamplePercentage,
 				offsetTracker, // Real-time segment progress with cumulative offset
 				timeout,
+				verifyData,
 			); err != nil {
 				slog.WarnContext(ctx, "Skipping RAR file due to validation error", "error", err, "file", baseFilename)
 

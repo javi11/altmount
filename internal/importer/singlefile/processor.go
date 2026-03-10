@@ -28,10 +28,12 @@ func ProcessSingleFile(
 	metadataService *metadata.MetadataService,
 	poolManager pool.Manager,
 	maxValidationGoroutines int,
-	segmentSamplePercentage int,
+	samplePercentage int,
 	allowedFileExtensions []string,
 	timeout time.Duration,
-) (string, string, error) {
+	verifyData bool,
+	) (string, string, error) {
+
 	// Validate file extension before processing
 	if !utils.HasAllowedFilesInRegular([]parser.ParsedFile{file}, allowedFileExtensions) {
 		slog.WarnContext(ctx, "File does not match allowed extensions",
@@ -68,10 +70,12 @@ func ProcessSingleFile(
 		file.Encryption,
 		poolManager,
 		maxValidationGoroutines,
-		segmentSamplePercentage,
+		samplePercentage,
 		nil, // No progress callback for single file imports
 		timeout,
+		verifyData,
 	); err != nil {
+
 		return "", "", err
 	}
 

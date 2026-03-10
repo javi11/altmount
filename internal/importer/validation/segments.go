@@ -34,6 +34,7 @@ func ValidateSegmentsForFile(
 	samplePercentage int,
 	progressTracker progress.ProgressTracker,
 	timeout time.Duration,
+	verifyData bool,
 ) error {
 	if len(segments) == 0 {
 		return fmt.Errorf("no segments provided for file %s", filename)
@@ -77,7 +78,7 @@ func ValidateSegmentsForFile(
 	}
 
 	selected := usenet.SelectSegmentsForValidation(segments, samplePercentage)
-	if err := usenet.ValidateSegmentList(ctx, selected, poolManager, maxGoroutines, progressTracker, timeout, false); err != nil {
+	if err := usenet.ValidateSegmentList(ctx, selected, poolManager, maxGoroutines, progressTracker, timeout, verifyData); err != nil {
 		return err
 	}
 
