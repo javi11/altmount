@@ -142,6 +142,11 @@ func (h *webdavMethods) handlePut(w http.ResponseWriter, r *http.Request) {
 	// Check if file exists to determine status code
 	_, statErr := h.fs.Stat(ctx, reqPath)
 
+	// If file exists, try to delete it first to handle NzbFilesystem's overwrite restriction
+	if statErr == nil {
+		_ = h.fs.RemoveAll(ctx, reqPath)
+	}
+
 	f, err := h.fs.OpenFile(ctx, reqPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0666)
 	if err != nil {
 		if os.IsNotExist(err) {
