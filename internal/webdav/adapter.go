@@ -134,6 +134,7 @@ func (h *webdavMethods) handlePut(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	reqPath, status, err := propfind.StripPrefix(r.URL.Path, h.prefix)
 	if err != nil {
+		slog.ErrorContext(ctx, "PUT: failed to strip prefix", "path", r.URL.Path, "err", err)
 		http.Error(w, "Not Found", status)
 		return
 	}
@@ -144,18 +145,24 @@ func (h *webdavMethods) handlePut(w http.ResponseWriter, r *http.Request) {
 	f, err := h.fs.OpenFile(ctx, reqPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0666)
 	if err != nil {
 		if os.IsNotExist(err) {
+			slog.WarnContext(ctx, "PUT: parent collection does not exist", "path", reqPath)
 			http.Error(w, "Conflict: parent collection does not exist", http.StatusConflict)
 		} else {
+			slog.ErrorContext(ctx, "PUT: failed to open file", "path", reqPath, "err", err)
 			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		}
 		return
 	}
 	defer f.Close()
 
-	if _, err := io.Copy(f, r.Body); err != nil {
+	n, err := io.Copy(f, r.Body)
+	if err != nil {
+		slog.ErrorContext(ctx, "PUT: failed to copy body", "path", reqPath, "err", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
+
+	slog.InfoContext(ctx, "PUT: successfully wrote file", "path", reqPath, "bytes", n)
 
 	if os.IsNotExist(statErr) {
 		w.WriteHeader(http.StatusCreated)
