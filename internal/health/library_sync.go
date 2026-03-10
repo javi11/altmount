@@ -579,10 +579,10 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 		}
 	}
 
-	normalizeKeys(libraryFiles.Symlinks)
-	normalizeKeys(libraryFiles.StrmFiles)
 	normalizeKeys(importDirFiles.Symlinks)
 	normalizeKeys(importDirFiles.StrmFiles)
+	normalizeKeys(libraryFiles.Symlinks)
+	normalizeKeys(libraryFiles.StrmFiles)
 
 	// Get all health check paths from database
 	dbRecords, err := lsw.healthRepo.GetAllHealthCheckRecords(ctx)
@@ -1067,38 +1067,55 @@ func (lsw *LibrarySyncWorker) getAllLibraryFiles(ctx context.Context, oldMountPa
 
 		// Check if it's a symlink
 		if d.Type()&os.ModeSymlink != 0 {
-			// Read the symlink target
-			target, err := os.Readlink(path)
-			if err != nil {
-				slog.WarnContext(ctx, "Failed to read symlink", "path", path, "error", err)
-				return nil
-			}
-
-			// Make target absolute if it's relative
-			if !filepath.IsAbs(target) {
-				target = filepath.Join(filepath.Dir(path), target)
-			}
-
-			// Clean the paths for comparison
-			cleanTarget := filepath.Clean(target)
-
-			// Update symlink if it points to the old mount path
-			if shouldUpdateSymlinks && strings.HasPrefix(cleanTarget, oldMountPathClean) {
-				newTarget, updated, err := updateSymlinkForMountChange(ctx, path, cleanTarget, oldMountPathClean, newMountPathClean)
+			currentPath := path
+			var cleanTarget string
+			
+			// Resolve symlinks recursively (up to 3 levels) to handle chains like Library -> Import -> Mount
+			for depth := 0; depth < 3; depth++ {
+				target, err := os.Readlink(currentPath)
 				if err != nil {
-					return nil
+					if depth == 0 {
+						slog.WarnContext(ctx, "Failed to read symlink", "path", currentPath, "error", err)
+					}
+					break
 				}
-				if updated {
-					symlinkUpdates++
-					cleanTarget = newTarget
-				}
-			}
 
-			// Check if this symlink points inside the mount directory
-			if strings.HasPrefix(cleanTarget, cleanMountDir) {
-				// Store mapping of mount target path -> library symlink path
-				result.Symlinks[cleanTarget] = path
-				count++
+				// Make target absolute if it's relative
+				if !filepath.IsAbs(target) {
+					target = filepath.Join(filepath.Dir(currentPath), target)
+				}
+
+				// Clean the paths for comparison
+				cleanTarget = filepath.Clean(target)
+
+				// Update symlink if it points to the old mount path (only for the first level)
+				if depth == 0 && shouldUpdateSymlinks && strings.HasPrefix(cleanTarget, oldMountPathClean) {
+					newTarget, updated, err := updateSymlinkForMountChange(ctx, currentPath, cleanTarget, oldMountPathClean, newMountPathClean)
+					if err != nil {
+						break
+					}
+					if updated {
+						symlinkUpdates++
+						cleanTarget = newTarget
+					}
+				}
+
+				// Check if this target points inside the mount directory
+				if strings.HasPrefix(cleanTarget, cleanMountDir) {
+					// Store mapping of mount target path -> original library symlink path
+					result.Symlinks[cleanTarget] = path
+					count++
+					return nil // Found the mount target, stop resolving this chain
+				}
+
+				// If the target is itself a symlink, continue resolving
+				if info, err := os.Lstat(cleanTarget); err == nil && info.Mode()&os.ModeSymlink != 0 {
+					currentPath = cleanTarget
+					continue
+				}
+				
+				// Not a symlink and not in mount, stop
+				break
 			}
 		} else if !d.IsDir() {
 			// Check if it's a .strm file
