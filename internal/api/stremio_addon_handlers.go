@@ -450,62 +450,6 @@ func (s *Server) waitAndRedirectToStream(c *fiber.Ctx, itemID int64, baseURL, do
 	}
 }
 
-// waitAndRespondAddon waits for a queue item to complete and returns Stremio streams.
-// Always returns HTTP 200 -- failures produce an empty streams array (Stremio shows "no streams").
-func (s *Server) waitAndRespondAddon(c *fiber.Ctx, itemID int64, baseURL, downloadKey, nzbName string, timeoutSecs int) error {
-	ctx := c.Context()
-
-	subID, ch := s.progressBroadcaster.Subscribe()
-	defer s.progressBroadcaster.Unsubscribe(subID)
-
-	respondStreams := func(item *database.ImportQueueItem) error {
-		streams, err := s.buildStremioStreams(item, baseURL, downloadKey, nzbName)
-		if err != nil || len(streams) == 0 {
-			return emptyStreamsResponse(c)
-		}
-		return c.JSON(fiber.Map{"streams": streams})
-	}
-
-	current, err := s.queueRepo.GetQueueItem(ctx, itemID)
-	if err != nil || current == nil {
-		return emptyStreamsResponse(c)
-	}
-
-	switch current.Status {
-	case database.QueueStatusCompleted:
-		return respondStreams(current)
-	case database.QueueStatusFailed:
-		return emptyStreamsResponse(c)
-	}
-
-	timer := time.NewTimer(time.Duration(timeoutSecs) * time.Second)
-	defer timer.Stop()
-
-	for {
-		select {
-		case update, ok := <-ch:
-			if !ok {
-				return emptyStreamsResponse(c)
-			}
-			if update.QueueID != int(itemID) {
-				continue
-			}
-			switch update.Status {
-			case "completed":
-				item, err := s.queueRepo.GetQueueItem(ctx, itemID)
-				if err != nil {
-					return emptyStreamsResponse(c)
-				}
-				return respondStreams(item)
-			case "failed":
-				return emptyStreamsResponse(c)
-			}
-		case <-timer.C:
-			return emptyStreamsResponse(c)
-		}
-	}
-}
-
 // validateDownloadKey returns true if key matches any user's hashed API key.
 func (s *Server) validateDownloadKey(ctx context.Context, key string) bool {
 	if s.userRepo == nil || key == "" {
