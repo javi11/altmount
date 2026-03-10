@@ -43,6 +43,10 @@ func (fs *fileSystem) Stat(ctx context.Context, name string) (os.FileInfo, error
 	return fs.nzbFs.Stat(ctx, name)
 }
 
+func (fs *fileSystem) GetRootPath() string {
+	return fs.nzbFs.GetRemoteFile().GetMetadataService().GetRootPath()
+}
+
 // HTTPError represents an HTTP error with a specific status code
 type HTTPError struct {
 	StatusCode int
@@ -79,6 +83,10 @@ func (c *customErrorHandler) OpenFile(ctx context.Context, name string, flag int
 		File: file,
 		ctx:  ctx,
 	}, nil
+}
+
+func (c *customErrorHandler) GetRootPath() string {
+	return c.FileSystem.GetRootPath()
 }
 
 // mapError converts our custom errors to appropriate HTTP errors

@@ -142,13 +142,48 @@ func (h *webdavMethods) handlePut(w http.ResponseWriter, r *http.Request) {
 	// Check if file exists to determine status code
 	_, statErr := h.fs.Stat(ctx, reqPath)
 
-	// If file exists, try to delete it first to handle NzbFilesystem's overwrite restriction
-	if statErr == nil {
-		_ = h.fs.RemoveAll(ctx, reqPath)
-	}
-
+	// Try standard OpenFile first
 	f, err := h.fs.OpenFile(ctx, reqPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0666)
 	if err != nil {
+		if os.IsPermission(err) {
+			// Permission denied on NzbFilesystem (it's read-only).
+			// Handle as a sidecar file by writing directly to the host filesystem in metadata root.
+			rootPath := h.fs.GetRootPath()
+			if rootPath != "" {
+				hostPath := filepath.Join(rootPath, reqPath)
+				// Ensure parent directory exists
+				if err := os.MkdirAll(filepath.Dir(hostPath), 0755); err != nil {
+					slog.ErrorContext(ctx, "PUT: failed to create sidecar directory", "path", hostPath, "err", err)
+					http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+					return
+				}
+
+				hf, err := os.OpenFile(hostPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0666)
+				if err != nil {
+					slog.ErrorContext(ctx, "PUT: failed to open sidecar file on host", "path", hostPath, "err", err)
+					http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+					return
+				}
+				defer hf.Close()
+
+				n, err := io.Copy(hf, r.Body)
+				if err != nil {
+					slog.ErrorContext(ctx, "PUT: failed to copy sidecar body", "path", hostPath, "err", err)
+					http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+					return
+				}
+
+				slog.InfoContext(ctx, "PUT: successfully wrote sidecar file to host", "path", reqPath, "host_path", hostPath, "bytes", n)
+
+				if os.IsNotExist(statErr) {
+					w.WriteHeader(http.StatusCreated)
+				} else {
+					w.WriteHeader(http.StatusNoContent)
+				}
+				return
+			}
+		}
+
 		if os.IsNotExist(err) {
 			slog.WarnContext(ctx, "PUT: parent collection does not exist", "path", reqPath)
 			http.Error(w, "Conflict: parent collection does not exist", http.StatusConflict)

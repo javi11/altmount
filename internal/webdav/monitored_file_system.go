@@ -49,6 +49,10 @@ func (m *monitoredFileSystem) Stat(ctx context.Context, name string) (os.FileInf
 	return m.fs.Stat(ctx, name)
 }
 
+func (m *monitoredFileSystem) GetRootPath() string {
+	return m.fs.GetRootPath()
+}
+
 type monitoredFile struct {
 	File
 	stream *nzbfilesystem.ActiveStream

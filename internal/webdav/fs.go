@@ -13,6 +13,7 @@ type FileSystem interface {
 	RemoveAll(ctx context.Context, name string) error
 	Rename(ctx context.Context, oldName, newName string) error
 	Stat(ctx context.Context, name string) (os.FileInfo, error)
+	GetRootPath() string
 }
 
 // File provides access to a single file or directory.
