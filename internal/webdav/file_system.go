@@ -6,14 +6,13 @@ import (
 	"os"
 
 	"github.com/javi11/altmount/internal/nzbfilesystem"
-	"golang.org/x/net/webdav"
 )
 
 type fileSystem struct {
 	nzbFs *nzbfilesystem.NzbFilesystem
 }
 
-func nzbToWebdavFS(nzbFs *nzbfilesystem.NzbFilesystem) webdav.FileSystem {
+func nzbToWebdavFS(nzbFs *nzbfilesystem.NzbFilesystem) FileSystem {
 	return &fileSystem{
 		nzbFs: nzbFs,
 	}
@@ -23,7 +22,7 @@ func (fs *fileSystem) Mkdir(ctx context.Context, name string, perm os.FileMode) 
 	return fs.nzbFs.Mkdir(ctx, name, perm)
 }
 
-func (fs *fileSystem) OpenFile(ctx context.Context, name string, flag int, perm os.FileMode) (webdav.File, error) {
+func (fs *fileSystem) OpenFile(ctx context.Context, name string, flag int, perm os.FileMode) (File, error) {
 	return fs.nzbFs.OpenFile(ctx, name, flag, perm)
 }
 
