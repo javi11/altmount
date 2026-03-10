@@ -234,7 +234,7 @@ func NewHandler(
 	// Create custom error handler that maps our errors to proper HTTP status codes
 	webdavFS := nzbToWebdavFS(fs)
 	errorHandler := &customErrorHandler{
-		fileSystem: webdavFS,
+		FileSystem: webdavFS,
 	}
 
 	var finalFS FileSystem = errorHandler
@@ -315,28 +315,21 @@ func NewHandler(
 		}
 
 		w.Header().Set("Accept-Ranges", "bytes")
-		r = r.WithContext(context.WithValue(r.Context(), utils.ContentLengthKey, r.Header.Get("Content-Length")))
-		r = r.WithContext(context.WithValue(r.Context(), utils.RangeKey, r.Header.Get("Range")))
-		r = r.WithContext(context.WithValue(r.Context(), utils.IsCopy, r.Method == "COPY"))
-		r = r.WithContext(context.WithValue(r.Context(), utils.Origin, r.RequestURI))
-		r = r.WithContext(context.WithValue(r.Context(), utils.ShowCorrupted, r.Header.Get("X-Show-Corrupted") == "true"))
-		r = r.WithContext(context.WithValue(r.Context(), utils.ClientIPKey, r.RemoteAddr))
-		r = r.WithContext(context.WithValue(r.Context(), utils.UserAgentKey, r.UserAgent()))
+		ctx := r.Context()
+		ctx = context.WithValue(ctx, utils.ContentLengthKey, r.Header.Get("Content-Length"))
+		ctx = context.WithValue(ctx, utils.RangeKey, r.Header.Get("Range"))
+		ctx = context.WithValue(ctx, utils.IsCopy, r.Method == "COPY")
+		ctx = context.WithValue(ctx, utils.Origin, r.RequestURI)
+		ctx = context.WithValue(ctx, utils.ShowCorrupted, r.Header.Get("X-Show-Corrupted") == "true")
+		ctx = context.WithValue(ctx, utils.ClientIPKey, r.RemoteAddr)
+		ctx = context.WithValue(ctx, utils.UserAgentKey, r.UserAgent())
+		r = r.WithContext(ctx)
 
-		// Log MOVE and COPY operations to understand client behavior
-		switch r.Method {
-		case "MOVE":
-			destination := r.Header.Get("Destination")
+		// Log MOVE operations to understand client behavior
+		if r.Method == "MOVE" {
 			slog.InfoContext(r.Context(), "WebDAV MOVE operation",
 				"source", r.RequestURI,
-				"destination", destination,
-				"overwrite", r.Header.Get("Overwrite"),
-				"user_agent", r.Header.Get("User-Agent"))
-		case "COPY":
-			destination := r.Header.Get("Destination")
-			slog.InfoContext(r.Context(), "WebDAV COPY operation",
-				"source", r.RequestURI,
-				"destination", destination,
+				"destination", r.Header.Get("Destination"),
 				"overwrite", r.Header.Get("Overwrite"),
 				"user_agent", r.Header.Get("User-Agent"))
 		}

@@ -122,16 +122,9 @@ var liveProps = map[xml.Name]struct {
 func props(ctx context.Context, fi os.FileInfo, name string, pnames []xml.Name) ([]Propstat, error) {
 	isDir := fi.IsDir()
 
-	var deadProps map[xml.Name]Property
 	pstatOK := Propstat{Status: http.StatusOK}
 	pstatNotFound := Propstat{Status: http.StatusNotFound}
 	for _, pn := range pnames {
-		// If this file has dead properties, check if they contain pn.
-		if dp, ok := deadProps[pn]; ok {
-			pstatOK.Props = append(pstatOK.Props, dp)
-			continue
-		}
-		// Otherwise, it must either be a live Property or we don't know it.
 		if prop := liveProps[pn]; prop.findFn != nil && (prop.dir || !isDir) {
 			innerXML, err := prop.findFn(ctx, name, fi)
 			if err != nil {
