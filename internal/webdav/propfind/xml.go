@@ -9,7 +9,6 @@ import (
 	"net/http"
 
 	ixml "github.com/javi11/altmount/internal/webdav/propfind/xml"
-	"golang.org/x/net/webdav"
 )
 
 type countingReader struct {
@@ -132,10 +131,10 @@ type xmlError struct {
 // http://www.webdav.org/specs/rfc4918.html#ELEMENT_propstat
 // See multistatusWriter for the "D:" namespace prefix.
 type propstat struct {
-	Prop                []webdav.Property `xml:"D:prop>_ignored_"`
-	Status              string            `xml:"D:status"`
-	Error               *xmlError         `xml:"D:error"`
-	ResponseDescription string            `xml:"D:responsedescription,omitempty"`
+	Prop                []Property `xml:"D:prop>_ignored_"`
+	Status              string     `xml:"D:status"`
+	Error               *xmlError  `xml:"D:error"`
+	ResponseDescription string     `xml:"D:responsedescription,omitempty"`
 }
 
 // ixmlPropstat is the same as the propstat type except it holds an ixml.Name
@@ -243,7 +242,7 @@ func (w *multistatusWriter) writeHeader() error {
 		return nil
 	}
 	w.w.Header().Add("Content-Type", "text/xml; charset=utf-8")
-	w.w.WriteHeader(webdav.StatusMulti)
+	w.w.WriteHeader(207) // 207 Multi-Status
 	_, err := fmt.Fprintf(w.w, `<?xml version="1.0" encoding="UTF-8"?>`)
 	if err != nil {
 		return err

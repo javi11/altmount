@@ -7,18 +7,17 @@ import (
 
 	"github.com/javi11/altmount/internal/nzbfilesystem"
 	"github.com/javi11/altmount/internal/utils"
-	"golang.org/x/net/webdav"
 )
 
 type monitoredFileSystem struct {
-	fs webdav.FileSystem
+	fs FileSystem
 }
 
 func (m *monitoredFileSystem) Mkdir(ctx context.Context, name string, perm os.FileMode) error {
 	return m.fs.Mkdir(ctx, name, perm)
 }
 
-func (m *monitoredFileSystem) OpenFile(ctx context.Context, name string, flag int, perm os.FileMode) (webdav.File, error) {
+func (m *monitoredFileSystem) OpenFile(ctx context.Context, name string, flag int, perm os.FileMode) (File, error) {
 	f, err := m.fs.OpenFile(ctx, name, flag, perm)
 	if err != nil {
 		return nil, err
@@ -51,7 +50,7 @@ func (m *monitoredFileSystem) Stat(ctx context.Context, name string) (os.FileInf
 }
 
 type monitoredFile struct {
-	webdav.File
+	File
 	stream *nzbfilesystem.ActiveStream
 	ctx    context.Context
 }
@@ -84,8 +83,4 @@ func (m *monitoredFile) Write(p []byte) (n int, err error) {
 		return 0, err
 	}
 	return m.File.Write(p)
-}
-
-func (m *monitoredFile) Close() error {
-	return m.File.Close()
 }

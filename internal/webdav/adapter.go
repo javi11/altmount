@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
+	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -16,7 +18,6 @@ import (
 	"github.com/javi11/altmount/internal/nzbfilesystem"
 	"github.com/javi11/altmount/internal/utils"
 	"github.com/javi11/altmount/internal/webdav/propfind"
-	"golang.org/x/net/webdav"
 )
 
 // Handler provides WebDAV functionality as an HTTP handler
@@ -26,11 +27,203 @@ type Handler struct {
 	configGetter config.ConfigGetter
 }
 
+// propfindFS adapts FileSystem to propfind.FS.
+// This is needed because propfind.FS.OpenFile returns propfind.FSFile, while
+// FileSystem.OpenFile returns File. Since File is a superset of propfind.FSFile,
+// the adapter simply forwards the call.
+type propfindFS struct {
+	fs FileSystem
+}
+
+func (p propfindFS) Stat(ctx context.Context, name string) (os.FileInfo, error) {
+	return p.fs.Stat(ctx, name)
+}
+
+func (p propfindFS) OpenFile(ctx context.Context, name string, flag int, perm os.FileMode) (propfind.FSFile, error) {
+	return p.fs.OpenFile(ctx, name, flag, perm)
+}
+
+// webdavMethods handles the individual WebDAV HTTP methods.
+type webdavMethods struct {
+	fs     FileSystem
+	prefix string
+}
+
+func (h *webdavMethods) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "OPTIONS":
+		h.handleOptions(w, r)
+	case http.MethodHead, http.MethodGet:
+		h.handleGet(w, r)
+	case "PROPFIND":
+		status, err := propfind.HandlePropfind(propfindFS{h.fs}, w, r, h.prefix)
+		if status != 0 {
+			w.WriteHeader(status)
+			if status != http.StatusNoContent {
+				_, _ = w.Write([]byte(http.StatusText(status)))
+			}
+			return
+		}
+		if err != nil {
+			slog.ErrorContext(r.Context(), "Error handling PROPFIND", "err", err)
+		}
+	case "DELETE":
+		h.handleDelete(w, r)
+	case "MOVE":
+		h.handleMove(w, r)
+	case "MKCOL":
+		h.handleMkcol(w, r)
+	case "COPY":
+		// NzbFilesystem explicitly forbids COPY (IsCopy context flag)
+		http.Error(w, "Forbidden", http.StatusForbidden)
+	default:
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (h *webdavMethods) handleOptions(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("DAV", "1")
+	w.Header().Set("Allow", "OPTIONS, HEAD, GET, PROPFIND, DELETE, MOVE, MKCOL")
+	w.WriteHeader(http.StatusOK)
+}
+
+func (h *webdavMethods) handleGet(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	reqPath, status, err := propfind.StripPrefix(r.URL.Path, h.prefix)
+	if err != nil {
+		http.Error(w, "Not Found", status)
+		return
+	}
+
+	fi, err := h.fs.Stat(ctx, reqPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			http.Error(w, "Not Found", http.StatusNotFound)
+		} else {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	if fi.IsDir() {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	f, err := h.fs.OpenFile(ctx, reqPath, os.O_RDONLY, 0)
+	if err != nil {
+		var httpErr *HTTPError
+		if errors.As(err, &httpErr) {
+			http.Error(w, httpErr.Message, httpErr.StatusCode)
+		} else if os.IsNotExist(err) {
+			http.Error(w, "Not Found", http.StatusNotFound)
+		} else {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		}
+		return
+	}
+	defer f.Close()
+
+	http.ServeContent(w, r, fi.Name(), fi.ModTime(), f)
+}
+
+func (h *webdavMethods) handleDelete(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	reqPath, status, err := propfind.StripPrefix(r.URL.Path, h.prefix)
+	if err != nil {
+		http.Error(w, "Not Found", status)
+		return
+	}
+
+	if err := h.fs.RemoveAll(ctx, reqPath); err != nil {
+		if os.IsNotExist(err) {
+			http.Error(w, "Not Found", http.StatusNotFound)
+		} else {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		}
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *webdavMethods) handleMove(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	src, status, err := propfind.StripPrefix(r.URL.Path, h.prefix)
+	if err != nil {
+		http.Error(w, "Not Found", status)
+		return
+	}
+
+	destHeader := r.Header.Get("Destination")
+	if destHeader == "" {
+		http.Error(w, "Bad Request: missing Destination header", http.StatusBadRequest)
+		return
+	}
+
+	destURL, err := url.Parse(destHeader)
+	if err != nil {
+		http.Error(w, "Bad Request: invalid Destination header", http.StatusBadRequest)
+		return
+	}
+
+	dst, _, err := propfind.StripPrefix(destURL.Path, h.prefix)
+	if err != nil {
+		// Destination is outside our root — treat as conflict
+		http.Error(w, "Conflict: destination outside WebDAV root", http.StatusConflict)
+		return
+	}
+
+	// Check if destination already exists to determine response code
+	_, statErr := h.fs.Stat(ctx, dst)
+
+	if err := h.fs.Rename(ctx, src, dst); err != nil {
+		if os.IsNotExist(err) {
+			http.Error(w, "Not Found", http.StatusNotFound)
+		} else {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	if os.IsNotExist(statErr) {
+		w.WriteHeader(http.StatusCreated)
+	} else {
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func (h *webdavMethods) handleMkcol(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	reqPath, status, err := propfind.StripPrefix(r.URL.Path, h.prefix)
+	if err != nil {
+		http.Error(w, "Not Found", status)
+		return
+	}
+
+	if r.ContentLength > 0 {
+		// RFC 4918: MKCOL request with a body must return 415 Unsupported Media Type
+		http.Error(w, "Unsupported Media Type", http.StatusUnsupportedMediaType)
+		return
+	}
+
+	if err := h.fs.Mkdir(ctx, reqPath, 0755); err != nil {
+		if os.IsExist(err) {
+			http.Error(w, "Method Not Allowed: collection already exists", http.StatusMethodNotAllowed)
+		} else if os.IsNotExist(err) {
+			http.Error(w, "Conflict: parent collection does not exist", http.StatusConflict)
+		} else {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		}
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
+}
+
 // NewHandler creates a new WebDAV handler that can be used with Fiber adaptor
 func NewHandler(
 	config *Config,
 	fs *nzbfilesystem.NzbFilesystem,
-	tokenService *token.Service,     // Optional token service for JWT auth
+	tokenService *token.Service,      // Optional token service for JWT auth
 	userRepo *database.UserRepository, // Optional user repository for JWT auth
 	configGetter config.ConfigGetter,  // Dynamic config access
 	streamTracker *api.StreamTracker,  // Optional stream tracker
@@ -41,23 +234,17 @@ func NewHandler(
 	// Create custom error handler that maps our errors to proper HTTP status codes
 	webdavFS := nzbToWebdavFS(fs)
 	errorHandler := &customErrorHandler{
-		fileSystem: webdavFS,
+		FileSystem: webdavFS,
 	}
 
-	var finalFS webdav.FileSystem = errorHandler
+	var finalFS FileSystem = errorHandler
 	if streamTracker != nil {
 		finalFS = &monitoredFileSystem{fs: errorHandler}
 	}
 
-	webdavHandler := &webdav.Handler{
-		FileSystem: finalFS,
-		LockSystem: webdav.NewMemLS(),
-		Prefix:     config.Prefix,
-		Logger: func(r *http.Request, err error) {
-			if err != nil && !errors.Is(err, context.Canceled) {
-				slog.DebugContext(r.Context(), "WebDav error", "err", err)
-			}
-		},
+	methods := &webdavMethods{
+		fs:     finalFS,
+		prefix: config.Prefix,
 	}
 
 	// Create the main handler with authentication
@@ -115,7 +302,8 @@ func NewHandler(
 			effectiveUser = "WebDAV"
 		}
 
-		// This will prevent webdav internal seeks which is not supported by usenet reader
+		// Pre-set Content-Type to prevent http.ServeContent from sniffing (which
+		// reads 512 bytes then seeks back to 0 — not supported by usenet reader).
 		ext := filepath.Ext(r.URL.Path)
 		if ext != "" {
 			mimeType := mime.TypeByExtension(ext)
@@ -127,78 +315,45 @@ func NewHandler(
 		}
 
 		w.Header().Set("Accept-Ranges", "bytes")
-		r = r.WithContext(context.WithValue(r.Context(), utils.ContentLengthKey, r.Header.Get("Content-Length")))
-		r = r.WithContext(context.WithValue(r.Context(), utils.RangeKey, r.Header.Get("Range")))
-		r = r.WithContext(context.WithValue(r.Context(), utils.IsCopy, r.Method == "COPY"))
-		r = r.WithContext(context.WithValue(r.Context(), utils.Origin, r.RequestURI))
-		r = r.WithContext(context.WithValue(r.Context(), utils.ShowCorrupted, r.Header.Get("X-Show-Corrupted") == "true"))
-		r = r.WithContext(context.WithValue(r.Context(), utils.ClientIPKey, r.RemoteAddr))
-		r = r.WithContext(context.WithValue(r.Context(), utils.UserAgentKey, r.UserAgent()))
+		ctx := r.Context()
+		ctx = context.WithValue(ctx, utils.ContentLengthKey, r.Header.Get("Content-Length"))
+		ctx = context.WithValue(ctx, utils.RangeKey, r.Header.Get("Range"))
+		ctx = context.WithValue(ctx, utils.IsCopy, r.Method == "COPY")
+		ctx = context.WithValue(ctx, utils.Origin, r.RequestURI)
+		ctx = context.WithValue(ctx, utils.ShowCorrupted, r.Header.Get("X-Show-Corrupted") == "true")
+		ctx = context.WithValue(ctx, utils.ClientIPKey, r.RemoteAddr)
+		ctx = context.WithValue(ctx, utils.UserAgentKey, r.UserAgent())
+		r = r.WithContext(ctx)
 
-		// Log MOVE and COPY operations to understand client behavior
-		switch r.Method {
-		case "MOVE":
-			destination := r.Header.Get("Destination")
+		// Log MOVE operations to understand client behavior
+		if r.Method == "MOVE" {
 			slog.InfoContext(r.Context(), "WebDAV MOVE operation",
 				"source", r.RequestURI,
-				"destination", destination,
+				"destination", r.Header.Get("Destination"),
 				"overwrite", r.Header.Get("Overwrite"),
 				"user_agent", r.Header.Get("User-Agent"))
-		case "COPY":
-			destination := r.Header.Get("Destination")
-			slog.InfoContext(r.Context(), "WebDAV COPY operation",
-				"source", r.RequestURI,
-				"destination", destination,
-				"overwrite", r.Header.Get("Overwrite"),
-				"user_agent", r.Header.Get("User-Agent"))
-		}
-
-		if r.Method == "PROPFIND" {
-			status, err := propfind.HandlePropfind(webdavHandler.FileSystem, webdavHandler.LockSystem, w, r, config.Prefix)
-			if status != 0 {
-				w.WriteHeader(status)
-				if status != http.StatusNoContent {
-					_, _ = w.Write([]byte(webdav.StatusText(status)))
-					return
-				}
-			}
-
-			if err != nil {
-				slog.ErrorContext(r.Context(), "Error handling the request", "err", err)
-				return
-			}
-
-			return
 		}
 
 		// Track active streams for GET requests
 		if r.Method == http.MethodGet && streamTracker != nil {
-			// Extract path (this includes prefix, but that's fine for display)
-			// r.URL.Path contains the full path including prefix
-			// Create cancellable context
 			streamCtx, cancel := context.WithCancel(r.Context())
-			defer cancel() // Ensure cleanup for this specific stream context
+			defer cancel()
 
-			// Add to tracker with full metadata
 			stream := streamTracker.Add(r.URL.Path, "WebDAV", effectiveUser, r.RemoteAddr, r.UserAgent(), 0)
 			defer streamTracker.Remove(stream)
 
-			// Register cancel function in tracker
 			streamTracker.SetCancelFunc(stream, cancel)
 
-			// Add stream ID to context for low-level tracking
 			streamCtx = context.WithValue(streamCtx, utils.StreamIDKey, stream)
 
-			// Inject stream into context for monitoredFileSystem
 			if sObj := streamTracker.GetStream(stream); sObj != nil {
-				r = r.WithContext(context.WithValue(streamCtx, utils.ActiveStreamKey, sObj)) // Use streamCtx for the new context
+				r = r.WithContext(context.WithValue(streamCtx, utils.ActiveStreamKey, sObj))
 			} else {
-				// If streamObj is nil, we still need to use streamCtx for the request
 				r = r.WithContext(streamCtx)
 			}
 		}
 
-		webdavHandler.ServeHTTP(w, r)
+		methods.ServeHTTP(w, r)
 	})
 
 	// Create a mux to handle the WebDAV routing

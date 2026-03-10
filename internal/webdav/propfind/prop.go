@@ -13,15 +13,28 @@ import (
 	"path"
 	"path/filepath"
 	"strconv"
-
-	"golang.org/x/net/webdav"
 )
+
+// Property represents a single DAV property.
+type Property struct {
+	XMLName  xml.Name
+	Lang     string `xml:"xml:lang,attr,omitempty"`
+	InnerXML []byte `xml:",innerxml"`
+}
+
+// Propstat groups a set of properties with a common HTTP status.
+type Propstat struct {
+	Props               []Property
+	Status              int
+	XMLError            string
+	ResponseDescription string
+}
 
 // makePropstats returns a slice containing those of x and y whose Props slice
 // is non-empty. If both are empty, it returns a slice containing an otherwise
-// zero webdav.Propstat whose HTTP status code is 200 OK.
-func makePropstats(x, y webdav.Propstat) []webdav.Propstat {
-	pstats := make([]webdav.Propstat, 0, 2)
+// zero Propstat whose HTTP status code is 200 OK.
+func makePropstats(x, y Propstat) []Propstat {
+	pstats := make([]Propstat, 0, 2)
 	if len(x.Props) != 0 {
 		pstats = append(pstats, x)
 	}
@@ -29,7 +42,7 @@ func makePropstats(x, y webdav.Propstat) []webdav.Propstat {
 		pstats = append(pstats, y)
 	}
 	if len(pstats) == 0 {
-		pstats = append(pstats, webdav.Propstat{
+		pstats = append(pstats, Propstat{
 			Status: http.StatusOK,
 		})
 	}
@@ -38,10 +51,10 @@ func makePropstats(x, y webdav.Propstat) []webdav.Propstat {
 
 // liveProps contains all supported, protected DAV: properties.
 var liveProps = map[xml.Name]struct {
-	// findFn implements the propfind function of this webdav.Property. If nil,
-	// it indicates a hidden webdav.Property.
+	// findFn implements the propfind function of this Property. If nil,
+	// it indicates a hidden Property.
 	findFn func(context.Context, string, os.FileInfo) (string, error)
-	// dir is true if the webdav.Property applies to directories.
+	// dir is true if the Property applies to directories.
 	dir bool
 }{
 	{Space: "DAV:", Local: "resourcetype"}: {
@@ -88,7 +101,7 @@ var liveProps = map[xml.Name]struct {
 		dir: false,
 	},
 
-	// TODO: The lockdiscovery webdav.Property requires webdav.LockSystem to list the
+	// TODO: The lockdiscovery Property requires a LockSystem to list the
 	// active locks on a resource.
 	{Space: "DAV:", Local: "lockdiscovery"}: {},
 	{Space: "DAV:", Local: "supportedlock"}: {
@@ -104,32 +117,25 @@ var liveProps = map[xml.Name]struct {
 
 // props returns the status of the properties named pnames for resource name.
 //
-// Each webdav.Propstat has a unique status and each webdav.Property name will only be part
-// of one webdav.Propstat element.
-func props(ctx context.Context, fi os.FileInfo, name string, pnames []xml.Name) ([]webdav.Propstat, error) {
+// Each Propstat has a unique status and each Property name will only be part
+// of one Propstat element.
+func props(ctx context.Context, fi os.FileInfo, name string, pnames []xml.Name) ([]Propstat, error) {
 	isDir := fi.IsDir()
 
-	var deadProps map[xml.Name]webdav.Property
-	pstatOK := webdav.Propstat{Status: http.StatusOK}
-	pstatNotFound := webdav.Propstat{Status: http.StatusNotFound}
+	pstatOK := Propstat{Status: http.StatusOK}
+	pstatNotFound := Propstat{Status: http.StatusNotFound}
 	for _, pn := range pnames {
-		// If this file has dead properties, check if they contain pn.
-		if dp, ok := deadProps[pn]; ok {
-			pstatOK.Props = append(pstatOK.Props, dp)
-			continue
-		}
-		// Otherwise, it must either be a live webdav.Property or we don't know it.
 		if prop := liveProps[pn]; prop.findFn != nil && (prop.dir || !isDir) {
 			innerXML, err := prop.findFn(ctx, name, fi)
 			if err != nil {
 				return nil, err
 			}
-			pstatOK.Props = append(pstatOK.Props, webdav.Property{
+			pstatOK.Props = append(pstatOK.Props, Property{
 				XMLName:  pn,
 				InnerXML: []byte(innerXML),
 			})
 		} else {
-			pstatNotFound.Props = append(pstatNotFound.Props, webdav.Property{
+			pstatNotFound.Props = append(pstatNotFound.Props, Property{
 				XMLName: pn,
 			})
 		}
@@ -137,7 +143,7 @@ func props(ctx context.Context, fi os.FileInfo, name string, pnames []xml.Name) 
 	return makePropstats(pstatOK, pstatNotFound), nil
 }
 
-// propnames returns the webdav.Property names defined for resource name.
+// propnames returns the Property names defined for resource name.
 func propnames(fi os.FileInfo) ([]xml.Name, error) {
 	isDir := fi.IsDir()
 
@@ -159,7 +165,7 @@ func propnames(fi os.FileInfo) ([]xml.Name, error) {
 // returned if they are named in 'include'.
 //
 // See http://www.webdav.org/specs/rfc4918.html#METHOD_PROPFIND
-func allprop(ctx context.Context, info os.FileInfo, name string, include []xml.Name) ([]webdav.Propstat, error) {
+func allprop(ctx context.Context, info os.FileInfo, name string, include []xml.Name) ([]Propstat, error) {
 	pnames, err := propnames(info)
 	if err != nil {
 		return nil, err
@@ -231,12 +237,6 @@ func findContentType(ctx context.Context, name string, fi os.FileInfo) (string, 
 }
 
 func findETag(ctx context.Context, name string, fi os.FileInfo) (string, error) {
-	if do, ok := fi.(webdav.ETager); ok {
-		etag, err := do.ETag(ctx)
-		if err != webdav.ErrNotImplemented {
-			return etag, err
-		}
-	}
 	// The Apache http 2.4 web server by default concatenates the
 	// modification time and size of a file. We replicate the heuristic
 	// with nanosecond granularity.
