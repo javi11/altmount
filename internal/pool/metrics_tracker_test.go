@@ -1,6 +1,7 @@
 package pool
 
 import (
+	"context"
 	"log/slog"
 	"testing"
 	"time"
@@ -82,7 +83,7 @@ func TestMetricsTracker_Reset(t *testing.T) {
 	mt.articlesDownloaded.Store(10)
 
 	// Case 1: Reset Peak only
-	err := mt.Reset(nil, true, false)
+	err := mt.Reset(context.TODO(), true, false)
 	assert.NoError(t, err)
 	assert.Equal(t, 0.0, mt.maxDownloadSpeed)
 	assert.Equal(t, int64(1000), mt.liveBytesDownloaded.Load())
@@ -91,7 +92,7 @@ func TestMetricsTracker_Reset(t *testing.T) {
 
 	// Case 2: Reset Totals only
 	mt.maxDownloadSpeed = 500.0
-	err = mt.Reset(nil, false, true)
+	err = mt.Reset(context.TODO(), false, true)
 	assert.NoError(t, err)
 	assert.Equal(t, 500.0, mt.maxDownloadSpeed)
 	assert.Equal(t, int64(0), mt.liveBytesDownloaded.Load())
@@ -102,7 +103,7 @@ func TestMetricsTracker_Reset(t *testing.T) {
 	mt.liveBytesDownloaded.Store(1000)
 	mt.articlesDownloaded.Store(10)
 	mt.samples = []metricsample{{totalBytes: 100, timestamp: time.Now()}}
-	err = mt.Reset(nil, true, true)
+	err = mt.Reset(context.TODO(), true, true)
 	assert.NoError(t, err)
 	assert.Equal(t, 0.0, mt.maxDownloadSpeed)
 	assert.Equal(t, int64(0), mt.liveBytesDownloaded.Load())
