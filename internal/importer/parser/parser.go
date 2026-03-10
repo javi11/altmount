@@ -9,9 +9,9 @@ import (
 	"log/slog"
 	"path/filepath"
 	"sort"
-	"sync/atomic"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -19,11 +19,11 @@ import (
 	"github.com/javi11/altmount/internal/encryption"
 	"github.com/javi11/altmount/internal/encryption/rclone"
 	"github.com/javi11/altmount/internal/errors"
-	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/importer/parser/fileinfo"
 	"github.com/javi11/altmount/internal/importer/parser/par2"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/slogutil"
 	"github.com/javi11/nntppool/v4"
 	"github.com/javi11/nzbparser"
@@ -537,10 +537,6 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 				}
 
 				// Fetch all needed segments in parallel
-				type segResult struct {
-					idx   int
-					bytes []byte
-				}
 				segResults := make([][]byte, len(segsNeeded))
 				g, gctx := errgroup.WithContext(ctx)
 				for i, seg := range segsNeeded {
