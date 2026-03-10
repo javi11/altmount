@@ -703,8 +703,14 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 
 		// Calculate category-specific base path for this item
 		itemBasePath := s.calculateItemBasePath()
-		// History items already have the absolute virtual path stored
-		finalPath := filepath.Join(itemBasePath, item.VirtualPath)
+
+		// Use standard path calculation to handle complete_dir stripping correctly
+		// History items store the virtual path in the same format as queue items store StoragePath
+		historyItem := &database.ImportQueueItem{
+			StoragePath: &item.VirtualPath,
+			Category:    item.Category,
+		}
+		finalPath := s.calculateHistoryStoragePath(historyItem, itemBasePath)
 
 		slot := ToSABnzbdHistorySlotFromHistory(item, start+index, finalPath)
 		slog.DebugContext(c.Context(), "Reporting persistent history item to SABnzbd API",
