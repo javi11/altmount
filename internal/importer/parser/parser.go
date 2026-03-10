@@ -103,17 +103,10 @@ func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string, pro
 	// Create a map of first segment ID to PartSize for optimization in normalizeSegmentSizesWithYenc
 	// This avoids redundant fetching of yEnc headers for the first segment
 	firstSegmentSizeCache := make(map[string]int64)
-	var globalStandardPartSize int64
 	for _, data := range firstSegmentCache {
 		if data != nil && data.File != nil && !data.MissingFirstSegment && len(data.File.Segments) > 0 {
 			if data.Headers.PartSize > 0 {
-				firstPartSize := int64(data.Headers.PartSize)
-				firstSegmentSizeCache[data.File.Segments[0].ID] = firstPartSize
-
-				// Use the first valid PartSize we find as our global standard for middle segments
-				if globalStandardPartSize == 0 {
-					globalStandardPartSize = firstPartSize
-				}
+				firstSegmentSizeCache[data.File.Segments[0].ID] = int64(data.Headers.PartSize)
 			}
 		}
 	}
@@ -190,7 +183,7 @@ func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string, pro
 	// Process files in parallel using conc pool
 	for _, info := range fileInfos {
 		concPool.Go(func(ctx context.Context) (fileResult, error) {
-			parsedFile, err := p.parseFile(ctx, n.Meta, parsed.Filename, info, firstSegmentSizeCache, notFoundIDs, globalStandardPartSize)
+			parsedFile, err := p.parseFile(ctx, n.Meta, parsed.Filename, info, firstSegmentSizeCache, notFoundIDs)
 
 			return fileResult{
 				parsedFile: parsedFile,
@@ -251,7 +244,7 @@ func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string, pro
 // parseFile processes a single file entry from the NZB
 // Uses fileInfo for filename, size, and type information
 // firstSegmentSizeCache contains pre-fetched yEnc PartSize values for first segments to avoid redundant fetching
-func (p *Parser) parseFile(ctx context.Context, meta map[string]string, nzbFilename string, info *fileinfo.FileInfo, firstSegmentSizeCache map[string]int64, notFoundIDs map[string]struct{}, globalStandardPartSize int64) (*ParsedFile, error) {
+func (p *Parser) parseFile(ctx context.Context, meta map[string]string, nzbFilename string, info *fileinfo.FileInfo, firstSegmentSizeCache map[string]int64, notFoundIDs map[string]struct{}) (*ParsedFile, error) {
 	if len(info.NzbFile.Segments) == 0 {
 		return nil, fmt.Errorf("file has no segments")
 	}
@@ -265,13 +258,14 @@ func (p *Parser) parseFile(ctx context.Context, meta map[string]string, nzbFilen
 		// Safe to access Segments[0] since files without segments are filtered earlier
 		cachedFirstSegmentSize := firstSegmentSizeCache[info.NzbFile.Segments[0].ID]
 
-		// Get the total file size from info (parsed from =ybegin in the first segment)
-		var totalFileSize int64
-		if info.FileSize != nil {
-			totalFileSize = *info.FileSize
+		err := p.normalizeSegmentSizesWithYenc(ctx, info.NzbFile.Segments, cachedFirstSegmentSize, notFoundIDs)
+		if err != nil {
+			// Log the error but continue with original segment sizes
+			// This ensures processing continues even if yEnc header fetching fails
+			p.log.WarnContext(ctx, "Failed to normalize segment sizes with yEnc headers",
+				"error", err,
+				"segments", len(info.NzbFile.Segments))
 		}
-
-		p.normalizeSegmentSizesWithYenc(info.NzbFile.Segments, cachedFirstSegmentSize, globalStandardPartSize, totalFileSize)
 	}
 
 	// Convert segments
@@ -543,6 +537,10 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 				}
 
 				// Fetch all needed segments in parallel
+				type segResult struct {
+					idx   int
+					bytes []byte
+				}
 				segResults := make([][]byte, len(segsNeeded))
 				g, gctx := errgroup.WithContext(ctx)
 				for i, seg := range segsNeeded {
@@ -566,6 +564,7 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 					})
 				}
 				_ = g.Wait() // best-effort: use whatever we got
+
 				// Assemble in segment order
 				buffer := make([]byte, maxRead)
 				copy(buffer, rawBytes)
@@ -635,55 +634,147 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 	return cache, notFoundIDs, nil
 }
 
+// fetchYencHeaders fetches the yenc header to get the actual part size for a specific segment.
+// It uses BodyAsync with io.Discard + onMeta to return headers as soon as =ybegin/=ypart
+// lines are parsed, without waiting for the full article body to transfer.
+func (p *Parser) fetchYencHeaders(ctx context.Context, segment nzbparser.NzbSegment, groups []string) (nntppool.YEncMeta, error) {
+	if p.poolManager == nil {
+		return nntppool.YEncMeta{}, errors.NewNonRetryableError("no pool manager available", nil)
+	}
+
+	cp, err := p.poolManager.GetPool()
+	if err != nil {
+		return nntppool.YEncMeta{}, errors.NewNonRetryableError("no connection pool available", err)
+	}
+
+	// onMeta fires after =ybegin/=ypart parsing (~first 2 lines),
+	// while the body continues draining to io.Discard in the background.
+	metaCh := make(chan nntppool.YEncMeta, 1)
+	resultCh := cp.BodyAsync(ctx, segment.ID, io.Discard, func(meta nntppool.YEncMeta) {
+		metaCh <- meta
+	})
+
+	// Wait for either: headers via onMeta (fast), full result (error or no yEnc), or context cancel.
+	select {
+	case headers := <-metaCh:
+		if headers.PartSize <= 0 {
+			return nntppool.YEncMeta{}, errors.NewNonRetryableError("invalid part size from yenc header", nil)
+		}
+
+		if p.poolManager != nil {
+			p.poolManager.IncArticlesDownloaded()
+			p.poolManager.UpdateDownloadProgress("", int64(headers.PartSize))
+		}
+
+		return headers, nil
+	case result := <-resultCh:
+		// BodyAsync completed before onMeta fired — either error or non-yEnc article
+		if result.Err != nil {
+			return nntppool.YEncMeta{}, errors.NewNonRetryableError("failed to get body", result.Err)
+		}
+
+		if p.poolManager != nil {
+			p.poolManager.IncArticlesDownloaded()
+			p.poolManager.UpdateDownloadProgress("", int64(result.Body.YEnc.PartSize))
+		}
+
+		// onMeta didn't fire but body completed — use headers from result
+		headers := result.Body.YEnc
+		if headers.PartSize <= 0 {
+			return nntppool.YEncMeta{}, errors.NewNonRetryableError("invalid part size from yenc header", nil)
+		}
+		return headers, nil
+	case <-ctx.Done():
+		return nntppool.YEncMeta{}, errors.NewNonRetryableError("context canceled", ctx.Err())
+	}
+}
+
 // normalizeSegmentSizesWithYenc normalizes segment sizes using yEnc PartSize headers.
 // This handles cases where NZB segment sizes include yEnc overhead.
 // cachedFirstSegmentSize is the pre-fetched PartSize for the first segment (guaranteed to be > 0).
-// totalSize is used to calculate the last segment size accurately.
-func (p *Parser) normalizeSegmentSizesWithYenc(segments []nzbparser.NzbSegment, cachedFirstSegmentSize int64, globalStandardPartSize int64, totalSize int64) {
+// notFoundIDs is the set of segment IDs known to return 430; those are skipped without a network call.
+func (p *Parser) normalizeSegmentSizesWithYenc(ctx context.Context, segments []nzbparser.NzbSegment, cachedFirstSegmentSize int64, notFoundIDs map[string]struct{}) error {
 	firstPartSize := cachedFirstSegmentSize
-	standardPartSize := globalStandardPartSize
-
-	if len(segments) == 0 {
-		return
+	if firstPartSize <= 0 {
+		if _, known404 := notFoundIDs[segments[0].ID]; known404 {
+			return fmt.Errorf("first segment %s is known not found, skipping yEnc normalization", segments[0].ID)
+		}
+		// Fetch PartSize from first segment if not in cache
+		firstPartHeaders, err := p.fetchYencHeaders(ctx, segments[0], nil)
+		if err != nil {
+			return fmt.Errorf("failed to fetch first segment yEnc part size: %w", err)
+		}
+		firstPartSize = int64(firstPartHeaders.PartSize)
 	}
 
-	// Apply actual size to the first segment
-	if firstPartSize > 0 {
-		segments[0].Bytes = int(firstPartSize)
-	}
-
-	// For single-segment files, we're done
 	if len(segments) == 1 {
-		return
+		segments[0].Bytes = int(firstPartSize)
+		return nil
 	}
 
-	// Apply standard part size to middle segments (index 1 to N-2)
-	// These are guaranteed to be of standard size.
-	if standardPartSize > 0 {
-		for i := 1; i < len(segments)-1; i++ {
-			segments[i].Bytes = int(standardPartSize)
-		}
+	// Handle files with exactly 2 segments (first and last only)
+	if len(segments) == 2 {
+		segments[0].Bytes = int(firstPartSize)
 
-		// Calculate the last segment's size (index N-1)
-		// LastSize = TotalSize - Sum(PreviousSegments)
-		if totalSize > 0 {
-			var currentSum int64
-			for i := 0; i < len(segments)-1; i++ {
-				currentSum += int64(segments[i].Bytes)
-			}
-
-			lastSize := totalSize - currentSum
-			if lastSize > 0 {
-				segments[len(segments)-1].Bytes = int(lastSize)
-			} else {
-				// Fallback if totalSize is somehow smaller than segments sum
-				segments[len(segments)-1].Bytes = int(standardPartSize)
-			}
-		} else {
-			// Fallback: use standard size if totalSize is unknown
-			segments[len(segments)-1].Bytes = int(standardPartSize)
+		if _, known404 := notFoundIDs[segments[1].ID]; known404 {
+			return fmt.Errorf("second segment %s is known not found, skipping yEnc normalization", segments[1].ID)
 		}
+		// Fetch PartSize from last segment
+		lastPartHeaders, err := p.fetchYencHeaders(ctx, segments[1], nil)
+		if err != nil {
+			return fmt.Errorf("failed to fetch last segment yEnc part size: %w", err)
+		}
+		segments[1].Bytes = int(lastPartHeaders.PartSize)
+
+		return nil
 	}
+
+	// Fetch PartSize from second and last segments concurrently
+	lastSegmentIndex := len(segments) - 1
+
+	if _, known404 := notFoundIDs[segments[1].ID]; known404 {
+		return fmt.Errorf("second segment %s is known not found, skipping yEnc normalization", segments[1].ID)
+	}
+	if _, known404 := notFoundIDs[segments[lastSegmentIndex].ID]; known404 {
+		return fmt.Errorf("last segment %s is known not found, skipping yEnc normalization", segments[lastSegmentIndex].ID)
+	}
+
+	var secondPartHeaders, lastPartHeaders nntppool.YEncMeta
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() error {
+		h, err := p.fetchYencHeaders(gctx, segments[1], nil)
+		if err != nil {
+			return fmt.Errorf("failed to fetch second segment yEnc part size: %w", err)
+		}
+		secondPartHeaders = h
+		return nil
+	})
+	g.Go(func() error {
+		h, err := p.fetchYencHeaders(gctx, segments[lastSegmentIndex], nil)
+		if err != nil {
+			return fmt.Errorf("failed to fetch last segment yEnc part size: %w", err)
+		}
+		lastPartHeaders = h
+		return nil
+	})
+	if err := g.Wait(); err != nil {
+		return err
+	}
+	standardPartSize := int64(secondPartHeaders.PartSize)
+
+	// Apply the sizes:
+	// - First segment: use its actual size
+	segments[0].Bytes = int(firstPartSize)
+
+	// - Middle segments (indices 1 through n-2): use standard size from second segment
+	for i := 1; i < len(segments)-1; i++ {
+		segments[i].Bytes = int(standardPartSize)
+	}
+
+	// - Last segment: use its actual size
+	segments[lastSegmentIndex].Bytes = int(lastPartHeaders.PartSize)
+
+	return nil
 }
 
 // fallbackGetFileInfos is a "dumb" fallback that extracts file info directly from NZB XML
