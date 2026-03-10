@@ -265,7 +265,13 @@ func (p *Parser) parseFile(ctx context.Context, meta map[string]string, nzbFilen
 		// Safe to access Segments[0] since files without segments are filtered earlier
 		cachedFirstSegmentSize := firstSegmentSizeCache[info.NzbFile.Segments[0].ID]
 
-		p.normalizeSegmentSizesWithYenc(info.NzbFile.Segments, cachedFirstSegmentSize, globalStandardPartSize)
+		// Get the total file size from info (parsed from =ybegin in the first segment)
+		var totalFileSize int64
+		if info.FileSize != nil {
+			totalFileSize = *info.FileSize
+		}
+
+		p.normalizeSegmentSizesWithYenc(info.NzbFile.Segments, cachedFirstSegmentSize, globalStandardPartSize, totalFileSize)
 	}
 
 	// Convert segments
@@ -632,22 +638,50 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 // normalizeSegmentSizesWithYenc normalizes segment sizes using yEnc PartSize headers.
 // This handles cases where NZB segment sizes include yEnc overhead.
 // cachedFirstSegmentSize is the pre-fetched PartSize for the first segment (guaranteed to be > 0).
-func (p *Parser) normalizeSegmentSizesWithYenc(segments []nzbparser.NzbSegment, cachedFirstSegmentSize int64, globalStandardPartSize int64) {
+// totalSize is used to calculate the last segment size accurately.
+func (p *Parser) normalizeSegmentSizesWithYenc(segments []nzbparser.NzbSegment, cachedFirstSegmentSize int64, globalStandardPartSize int64, totalSize int64) {
 	firstPartSize := cachedFirstSegmentSize
 	standardPartSize := globalStandardPartSize
 
-	// Apply the sizes:
-	// - First segment: use its actual size from cache
+	if len(segments) == 0 {
+		return
+	}
+
+	// Apply actual size to the first segment
 	if firstPartSize > 0 {
 		segments[0].Bytes = int(firstPartSize)
 	}
 
-	// - All other segments: use the standard part size
-	// We assume all subsequent segments follow the same standard size.
-	// This is significantly faster than fetching headers for the last segment of every file.
+	// For single-segment files, we're done
+	if len(segments) == 1 {
+		return
+	}
+
+	// Apply standard part size to middle segments (index 1 to N-2)
+	// These are guaranteed to be of standard size.
 	if standardPartSize > 0 {
-		for i := 1; i < len(segments); i++ {
+		for i := 1; i < len(segments)-1; i++ {
 			segments[i].Bytes = int(standardPartSize)
+		}
+
+		// Calculate the last segment's size (index N-1)
+		// LastSize = TotalSize - Sum(PreviousSegments)
+		if totalSize > 0 {
+			var currentSum int64
+			for i := 0; i < len(segments)-1; i++ {
+				currentSum += int64(segments[i].Bytes)
+			}
+
+			lastSize := totalSize - currentSum
+			if lastSize > 0 {
+				segments[len(segments)-1].Bytes = int(lastSize)
+			} else {
+				// Fallback if totalSize is somehow smaller than segments sum
+				segments[len(segments)-1].Bytes = int(standardPartSize)
+			}
+		} else {
+			// Fallback: use standard size if totalSize is unknown
+			segments[len(segments)-1].Bytes = int(standardPartSize)
 		}
 	}
 }
