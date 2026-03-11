@@ -71,6 +71,12 @@ export interface MetadataBackupConfig {
 // Streaming configuration
 export interface StreamingConfig {
 	max_prefetch: number;
+	failure_masking: FailureMaskingConfig;
+}
+
+export interface FailureMaskingConfig {
+	enabled: boolean;
+	threshold: number;
 }
 
 // Segment cache configuration

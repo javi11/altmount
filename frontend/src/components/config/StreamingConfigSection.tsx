@@ -33,21 +33,25 @@ export function StreamingConfigSection({
 	};
 
 	const handleStreamingChange = (field: keyof StreamingConfig, value: number | boolean) => {
-		const newData = { ...streamingData, [field]: value };
-		setStreamingData(newData);
-		checkChanges(newData, cacheData);
+		setStreamingData((prev) => {
+			const newData = { ...prev, [field]: value };
+			checkChanges(newData, cacheData);
+			return newData;
+		});
 	};
 
 	const handleFailureMaskingChange = (field: string, value: boolean | number) => {
-		const newData = {
-			...streamingData,
-			failure_masking: {
-				...streamingData.failure_masking,
-				[field]: value,
-			},
-		};
-		setStreamingData(newData);
-		checkChanges(newData, cacheData);
+		setStreamingData((prev) => {
+			const newData = {
+				...prev,
+				failure_masking: {
+					...prev.failure_masking,
+					[field]: value,
+				},
+			};
+			checkChanges(newData, cacheData);
+			return newData;
+		});
 	};
 
 	const handleCacheChange = (field: keyof SegmentCacheConfig, value: boolean | string | number) => {
