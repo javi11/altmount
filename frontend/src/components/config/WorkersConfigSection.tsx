@@ -1,4 +1,4 @@
-import { Plus, Save, X } from "lucide-react";
+import { Info, Plus, Save, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ConfigResponse, ImportConfig } from "../../types/config";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
@@ -91,7 +91,15 @@ export function ImportConfigSection({
 
 					<div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
 						<fieldset className="fieldset">
-							<legend className="fieldset-legend font-semibold">Active Workers</legend>
+							<legend className="fieldset-legend font-semibold flex items-center gap-2">
+								Active Workers
+								<div
+									className="tooltip tooltip-right"
+									data-tip="Number of concurrent NZBs AltMount will process at the same time."
+								>
+									<Info className="h-3.5 w-3.5 text-base-content/60" />
+								</div>
+							</legend>
 							<input
 								type="number"
 								className="input input-bordered w-full bg-base-100 font-mono text-sm"
@@ -112,7 +120,15 @@ export function ImportConfigSection({
 						</fieldset>
 
 						<fieldset className="fieldset">
-							<legend className="fieldset-legend">Max Connections (per Worker)</legend>
+							<legend className="fieldset-legend font-semibold flex items-center gap-2">
+								Max Connections (per Worker)
+								<div
+									className="tooltip tooltip-right"
+									data-tip="Maximum number of connections used per worker to download validation segments during import. If set to 10 and 2 workers are active, up to 20 connections may be used."
+								>
+									<Info className="h-3.5 w-3.5 text-base-content/60" />
+								</div>
+							</legend>
 							<input
 								type="number"
 								className="input input-bordered w-full bg-base-100 font-mono text-sm"
@@ -134,7 +150,15 @@ export function ImportConfigSection({
 
 					<div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
 						<fieldset className="fieldset">
-							<legend className="fieldset-legend font-semibold">Max Download Prefetch</legend>
+							<legend className="fieldset-legend font-semibold flex items-center gap-2">
+								Max Download Prefetch
+								<div
+									className="tooltip tooltip-right"
+									data-tip="Number of RAR or 7z segments to download in advance during archive extraction. Higher values use more memory but can speed up extraction on fast connections."
+								>
+									<Info className="h-3.5 w-3.5 text-base-content/60" />
+								</div>
+							</legend>
 							<input
 								type="number"
 								className="input input-bordered w-full bg-base-100 font-mono text-sm"
@@ -154,7 +178,15 @@ export function ImportConfigSection({
 						</fieldset>
 
 						<fieldset className="fieldset">
-							<legend className="fieldset-legend font-semibold">Read Timeout (Seconds)</legend>
+							<legend className="fieldset-legend font-semibold flex items-center gap-2">
+								Read Timeout (Seconds)
+								<div
+									className="tooltip tooltip-right"
+									data-tip="Timeout in seconds for Usenet socket reads. If a provider stalls longer than this during import, the connection is closed and retried."
+								>
+									<Info className="h-3.5 w-3.5 text-base-content/60" />
+								</div>
+							</legend>
 							<input
 								type="number"
 								className="input input-bordered w-full bg-base-100 font-mono text-sm"
@@ -187,7 +219,15 @@ export function ImportConfigSection({
 					<div className="space-y-6">
 						<div className="flex items-center justify-between">
 							<div className="min-w-0">
-								<h5 className="font-bold text-sm">Segment Verification</h5>
+								<h5 className="font-bold text-sm flex items-center gap-2">
+									Segment Verification
+									<div
+										className="tooltip tooltip-right"
+										data-tip="How thoroughly to check an NZB's segments against your providers during the initial import. 1% is fast and catches most missing articles. 100% guarantees the file is healthy but takes a long time."
+									>
+										<Info className="h-3.5 w-3.5 text-base-content/60" />
+									</div>
+								</h5>
 								<p className="mt-1 break-words text-[11px] text-base-content/50">
 									Percentage of Usenet segments to validate before import.
 								</p>
@@ -231,8 +271,14 @@ export function ImportConfigSection({
 								onChange={(e) => handleInputChange("verify_data", e.target.checked)}
 							/>
 							<div className="min-w-0 flex-1">
-								<span className="block whitespace-normal break-words font-bold text-xs">
+								<span className="flex items-center gap-2 whitespace-normal break-words font-bold text-xs">
 									Verify Data
+									<div
+										className="tooltip tooltip-right"
+										data-tip="If enabled, AltMount actually downloads a tiny piece of the article to ensure it contains real data. If disabled, it only asks the server 'Does this article ID exist?' (which is faster but can be fooled by fake zero-filled articles)."
+									>
+										<Info className="h-3.5 w-3.5 text-base-content/60" />
+									</div>
 								</span>
 								<span className="mt-1 block whitespace-normal break-words text-base-content/50 text-xs leading-relaxed">
 									Download 1 byte from each sampled segment to ensure it's not a zero-filled or
@@ -252,8 +298,14 @@ export function ImportConfigSection({
 								onChange={(e) => handleInputChange("skip_health_check", e.target.checked)}
 							/>
 							<div className="min-w-0 flex-1">
-								<span className="block whitespace-normal break-words font-bold text-xs">
+								<span className="flex items-center gap-2 whitespace-normal break-words font-bold text-xs">
 									Lenient Import (Instant)
+									<div
+										className="tooltip tooltip-right"
+										data-tip="Completely skips all validation checks. The file will appear in your library instantly, but it may be broken or unplayable if the Usenet articles are actually missing."
+									>
+										<Info className="h-3.5 w-3.5 text-base-content/60" />
+									</div>
 								</span>
 								<span className="mt-1 block whitespace-normal break-words text-base-content/50 text-xs leading-relaxed">
 									Bypass validation entirely for immediate exposure in the library. Recommended only
@@ -273,8 +325,14 @@ export function ImportConfigSection({
 								onChange={(e) => handleInputChange("allow_nested_rar_extraction", e.target.checked)}
 							/>
 							<div className="min-w-0 flex-1">
-								<span className="block whitespace-normal break-words font-bold text-xs">
+								<span className="flex items-center gap-2 whitespace-normal break-words font-bold text-xs">
 									Nested RAR Extraction
+									<div
+										className="tooltip tooltip-right"
+										data-tip="If a downloaded RAR file contains another RAR file inside it, AltMount will automatically 'drill down' and expose the final video file. Turn off if this causes slow imports."
+									>
+										<Info className="h-3.5 w-3.5 text-base-content/60" />
+									</div>
 								</span>
 								<span className="mt-1 block whitespace-normal break-words text-base-content/50 text-xs leading-relaxed">
 									Extract nested RAR archives found inside other RAR or 7zip archives. Disable if

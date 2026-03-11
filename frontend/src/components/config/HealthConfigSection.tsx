@@ -199,7 +199,15 @@ export function HealthConfigSection({
 						<div className="fade-in slide-in-from-top-2 mt-6 animate-in border-base-300/50 border-t pt-6">
 							<div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
 								<fieldset className="fieldset">
-									<legend className="fieldset-legend font-semibold">Base Interval (Minutes)</legend>
+									<legend className="fieldset-legend font-semibold flex items-center gap-2">
+										Base Interval (Minutes)
+										<div
+											className="tooltip tooltip-right"
+											data-tip="If a file is corrupted, how long AltMount should wait before telling Sonarr/Radarr to search for it again."
+										>
+											<Info className="h-3.5 w-3.5 text-base-content/60" />
+										</div>
+									</legend>
 									<input
 										type="number"
 										className="input input-bordered w-full bg-base-100 font-mono text-sm"
@@ -219,7 +227,15 @@ export function HealthConfigSection({
 								</fieldset>
 
 								<fieldset className="fieldset">
-									<legend className="fieldset-legend font-semibold">Max Cooldown (Hours)</legend>
+									<legend className="fieldset-legend font-semibold flex items-center gap-2">
+										Max Cooldown (Hours)
+										<div
+											className="tooltip tooltip-right"
+											data-tip="The absolute maximum time between repair attempts, ensuring AltMount doesn't give up completely but also doesn't spam your trackers."
+										>
+											<Info className="h-3.5 w-3.5 text-base-content/60" />
+										</div>
+									</legend>
 									<input
 										type="number"
 										className="input input-bordered w-full bg-base-100 font-mono text-sm"
@@ -241,7 +257,15 @@ export function HealthConfigSection({
 
 							<div className="mt-6 flex items-start justify-between gap-4 rounded-xl bg-base-100/50 p-4">
 								<div className="min-w-0 flex-1">
-									<h5 className="font-bold text-xs">Exponential Back-off</h5>
+									<h5 className="font-bold text-xs flex items-center gap-2">
+										Exponential Back-off
+										<div
+											className="tooltip tooltip-right"
+											data-tip="Highly recommended. If a repair fails, it waits 1 hr, then 2 hrs, then 4 hrs (up to Max Cooldown). Prevents your indexers from banning you for too many requests."
+										>
+											<Info className="h-3.5 w-3.5 text-base-content/60" />
+										</div>
+									</h5>
 									<p className="mt-1 text-[10px] text-base-content/60 leading-relaxed">
 										Double the wait time after each failed repair attempt (e.g. 1h, 2h, 4h...) to
 										prevent API hammering.
@@ -487,7 +511,15 @@ export function HealthConfigSection({
 
 						<div className="grid grid-cols-1 gap-6 pb-4 sm:grid-cols-2">
 							<fieldset className="fieldset">
-								<legend className="fieldset-legend font-semibold">Parallel Processing</legend>
+								<legend className="fieldset-legend font-semibold flex items-center gap-2">
+									Parallel Processing
+									<div
+										className="tooltip tooltip-right"
+										data-tip="Maximum number of files AltMount will actively health-check at the exact same time."
+									>
+										<Info className="h-3.5 w-3.5 text-base-content/60" />
+									</div>
+								</legend>
 								<input
 									type="number"
 									className="input input-bordered w-full bg-base-100 font-mono text-sm"
@@ -507,7 +539,15 @@ export function HealthConfigSection({
 								</p>
 							</fieldset>
 							<fieldset className="fieldset">
-								<legend className="fieldset-legend font-semibold">Sync Interval (Minutes)</legend>
+								<legend className="fieldset-legend font-semibold flex items-center gap-2">
+									Sync Interval (Minutes)
+									<div
+										className="tooltip tooltip-right"
+										data-tip="How often AltMount scans your physical library folder to find new files that need to be added to its health monitoring database."
+									>
+										<Info className="h-3.5 w-3.5 text-base-content/60" />
+									</div>
+								</legend>
 								<input
 									type="number"
 									className="input input-bordered w-full bg-base-100 font-mono text-sm"
@@ -530,8 +570,14 @@ export function HealthConfigSection({
 
 						<div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
 							<fieldset className="fieldset">
-								<legend className="fieldset-legend font-semibold">
+								<legend className="fieldset-legend font-semibold flex items-center gap-2">
 									Health Check Loop Interval (Sec)
+									<div
+										className="tooltip tooltip-right"
+										data-tip="The delay between background health check cycles. Lower values make AltMount find corrupted files faster but use more CPU."
+									>
+										<Info className="h-3.5 w-3.5 text-base-content/60" />
+									</div>
 								</legend>
 								<input
 									type="number"
@@ -551,7 +597,15 @@ export function HealthConfigSection({
 								</p>
 							</fieldset>
 							<fieldset className="fieldset">
-								<legend className="fieldset-legend font-semibold">Sync Concurrency</legend>
+								<legend className="fieldset-legend font-semibold flex items-center gap-2">
+									Sync Concurrency
+									<div
+										className="tooltip tooltip-right"
+										data-tip="Maximum number of parallel workers used to scan your library directory during the Sync phase. 0 means it will automatically scale based on your CPU."
+									>
+										<Info className="h-3.5 w-3.5 text-base-content/60" />
+									</div>
+								</legend>
 								<input
 									type="number"
 									className="input input-bordered w-full bg-base-100 font-mono text-sm"
