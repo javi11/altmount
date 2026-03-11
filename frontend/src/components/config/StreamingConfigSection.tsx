@@ -74,7 +74,15 @@ export function StreamingConfigSection({
 				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 						<div className="min-w-0">
-							<h4 className="font-bold text-base-content text-sm">Segment Prefetch</h4>
+							<h4 className="font-bold text-base-content text-sm flex items-center gap-2">
+								Segment Prefetch
+								<div
+									className="tooltip tooltip-right"
+									data-tip="Number of articles to download ahead of your current watching position. Higher values prevent buffering on unstable connections but use more RAM."
+								>
+									<Info className="h-3.5 w-3.5 text-base-content/60" />
+								</div>
+							</h4>
 							<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
 								Number of Usenet articles to download ahead of current playback position.
 							</p>
@@ -142,7 +150,15 @@ export function StreamingConfigSection({
 				{/* Enabled toggle */}
 				<div className="flex items-center justify-between rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="min-w-0">
-						<h4 className="font-bold text-base-content text-sm">Enable Segment Cache</h4>
+						<h4 className="font-bold text-base-content text-sm flex items-center gap-2">
+							Enable Segment Cache
+							<div
+								className="tooltip tooltip-right"
+								data-tip="Stores decoded segments on your local SSD. This speeds up 'Seek' operations and prevents re-downloading the same data if you restart a movie."
+							>
+								<Info className="h-3.5 w-3.5 text-base-content/60" />
+							</div>
+						</h4>
 						<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
 							When enabled, decoded segments are stored on disk and shared by FUSE and WebDAV.
 						</p>
@@ -159,7 +175,15 @@ export function StreamingConfigSection({
 				{/* Cache Path */}
 				<div className="space-y-3 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="min-w-0">
-						<h4 className="font-bold text-base-content text-sm">Cache Path</h4>
+						<h4 className="font-bold text-base-content text-sm flex items-center gap-2">
+							Cache Path
+							<div
+								className="tooltip tooltip-right"
+								data-tip="Where cached segments are saved. Highly recommended to use an SSD or NVMe drive for instant seeking."
+							>
+								<Info className="h-3.5 w-3.5 text-base-content/60" />
+							</div>
+						</h4>
 						<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
 							Directory where cached segment data is stored. Use a fast disk (SSD/NVMe) for best
 							results.
@@ -179,7 +203,15 @@ export function StreamingConfigSection({
 				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 						<div className="min-w-0">
-							<h4 className="font-bold text-base-content text-sm">Maximum Cache Size</h4>
+							<h4 className="font-bold text-base-content text-sm flex items-center gap-2">
+								Maximum Cache Size
+								<div
+									className="tooltip tooltip-right"
+									data-tip="The total amount of space AltMount can use for caching. When this limit is reached, the oldest segments are deleted to make room for new ones."
+								>
+									<Info className="h-3.5 w-3.5 text-base-content/60" />
+								</div>
+							</h4>
 							<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
 								Maximum disk space the segment cache may use before evicting old entries.
 							</p>
@@ -219,8 +251,14 @@ export function StreamingConfigSection({
 				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 						<div className="min-w-0">
-							<h4 className="overflow-visible whitespace-normal font-bold text-base-content text-sm">
+							<h4 className="overflow-visible whitespace-normal font-bold text-base-content text-sm flex items-center gap-2">
 								Cache Expiry
+								<div
+									className="tooltip tooltip-right"
+									data-tip="How many hours a segment stays on disk before it is considered 'stale' and deleted. Increase this if you frequently re-watch the same content."
+								>
+									<Info className="h-3.5 w-3.5 text-base-content/60" />
+								</div>
 							</h4>
 							<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
 								How long cached segments are kept before automatic eviction.

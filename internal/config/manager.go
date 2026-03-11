@@ -294,9 +294,9 @@ type HealthConfig struct {
 	LibrarySyncIntervalMinutes    int          `yaml:"library_sync_interval_minutes" mapstructure:"library_sync_interval_minutes" json:"library_sync_interval_minutes,omitempty"`
 	LibrarySyncConcurrency        int          `yaml:"library_sync_concurrency" mapstructure:"library_sync_concurrency" json:"library_sync_concurrency,omitempty"`
 	ResolveRepairOnImport         *bool        `yaml:"resolve_repair_on_import" mapstructure:"resolve_repair_on_import" json:"resolve_repair_on_import,omitempty"`
-	VerifyData                    *bool        `yaml:"verify_data" mapstructure:"verify_data" json:"verify_data,omitempty"`
+	VerifyData                    *bool        `yaml:"verify_data" mapstructure:"verify_data" json:"verify_data"`
 	CheckAllSegments              *bool        `yaml:"check_all_segments" mapstructure:"check_all_segments" json:"check_all_segments,omitempty"`
-	AcceptableMissingSegmentsPercentage float64 `yaml:"acceptable_missing_segments_percentage" mapstructure:"acceptable_missing_segments_percentage" json:"acceptable_missing_segments_percentage,omitempty"`
+	AcceptableMissingSegmentsPercentage float64 `yaml:"acceptable_missing_segments_percentage" mapstructure:"acceptable_missing_segments_percentage" json:"acceptable_missing_segments_percentage"`
 	Repair                        RepairConfig `yaml:"repair" mapstructure:"repair" json:"repair"`
 }
 
