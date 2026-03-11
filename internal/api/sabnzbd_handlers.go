@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
 	"net/http"
 	"net/url"
 	"os"
@@ -407,12 +408,30 @@ func (s *Server) handleSABnzbdAddUrl(c *fiber.Ctx) error {
 		return s.writeSABnzbdErrorFiber(c, "Failed to create upload directory")
 	}
 
-	// Extract filename from URL or use default
-	filename := "downloaded.nzb"
-	if u, err := url.Parse(nzbUrl); err == nil && u.Path != "" {
-		if base := filepath.Base(u.Path); base != "" && base != "." {
-			filename = base
+	// Extract filename: prefer Content-Disposition header, then URL path, then default
+	filename := ""
+
+	// 1. Try Content-Disposition header
+	if cd := resp.Header.Get("Content-Disposition"); cd != "" {
+		if _, params, err := mime.ParseMediaType(cd); err == nil {
+			if fn := params["filename"]; fn != "" {
+				filename = filepath.Base(fn)
+			}
 		}
+	}
+
+	// 2. Fall back to URL path
+	if filename == "" {
+		if u, err := url.Parse(nzbUrl); err == nil && u.Path != "" {
+			if base := filepath.Base(u.Path); base != "" && base != "." {
+				filename = base
+			}
+		}
+	}
+
+	// 3. Final fallback
+	if filename == "" {
+		filename = "downloaded.nzb"
 	}
 
 	// Ensure .nzb extension

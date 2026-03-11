@@ -12,6 +12,10 @@ import (
 	"github.com/javi11/nzbparser"
 )
 
+// maxIndexSegments is the upper bound for treating a PAR2 file as an index file
+// (no recovery blocks). Recovery block files have many more segments.
+const maxIndexSegments = 5
+
 // nzbSegmentLoader adapts []nzbparser.NzbSegment into usenet.SegmentLoader.
 // Each raw NZB segment maps with Start=0, End=Bytes-1 (all data is usable).
 type nzbSegmentLoader struct {
@@ -54,43 +58,32 @@ func GetFileDescriptors(
 		return descriptors, nil
 	}
 
-	// Find the PAR2 index file (smallest file with PAR2 magic bytes)
-	// Similar to C# code: files.Where(x => HasPar2MagicBytes).MinBy(x => segments.Count)
-	var par2IndexFile *nzbparser.NzbFile
-	smallestSegmentCount := -1
-
+	// Read all small PAR2 files (index files) and merge their descriptors.
+	// Index files never contain recovery blocks so they have few segments (≤ maxIndexSegments).
+	// Recovery block files have many segments and are skipped.
+	// Merging handles releases with multiple PAR2 sets (e.g. main archive + sample).
 	for _, cachedData := range firstSegmentCache {
-		// Skip invalid entries
 		if cachedData == nil || cachedData.File == nil || len(cachedData.File.Segments) == 0 {
 			continue
 		}
-
-		// Check for PAR2 magic bytes using cached data
-		if HasMagicBytes(cachedData.RawBytes) {
-			segmentCount := len(cachedData.File.Segments)
-
-			// Select the PAR2 file with the smallest segment count (likely the index file)
-			if smallestSegmentCount == -1 || segmentCount < smallestSegmentCount {
-				smallestSegmentCount = segmentCount
-				par2IndexFile = cachedData.File
+		if !HasMagicBytes(cachedData.RawBytes) {
+			continue
+		}
+		if len(cachedData.File.Segments) > maxIndexSegments {
+			continue // Skip large recovery block files
+		}
+		fileDescriptors, err := readFileDescriptors(ctx, cachedData.File, poolManager)
+		if err != nil {
+			slog.DebugContext(ctx, "Failed to read PAR2 file descriptors, skipping",
+				"error", err, "segments", len(cachedData.File.Segments))
+			continue
+		}
+		for i := range fileDescriptors {
+			desc := &fileDescriptors[i]
+			if _, exists := descriptors[desc.Hash16k]; !exists {
+				descriptors[desc.Hash16k] = desc // first occurrence wins (identical across set files)
 			}
 		}
-	}
-
-	if par2IndexFile == nil {
-		return descriptors, nil
-	}
-
-	// Parse the PAR2 file and extract file descriptors
-	fileDescriptors, err := readFileDescriptors(ctx, par2IndexFile, poolManager)
-	if err != nil {
-		return descriptors, fmt.Errorf("failed to read PAR2 file descriptors: %w", err)
-	}
-
-	// Build lookup map by Hash16k for fast matching
-	for i := range fileDescriptors {
-		desc := &fileDescriptors[i]
-		descriptors[desc.Hash16k] = desc
 	}
 
 	return descriptors, nil
