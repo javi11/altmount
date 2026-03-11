@@ -55,8 +55,6 @@ func (h *webdavMethods) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleOptions(w, r)
 	case http.MethodHead, http.MethodGet:
 		h.handleGet(w, r)
-	case http.MethodPut:
-		h.handlePut(w, r)
 	case "PROPFIND":
 		status, err := propfind.HandlePropfind(propfindFS{h.fs}, w, r, h.prefix)
 		if status != 0 {
@@ -85,7 +83,7 @@ func (h *webdavMethods) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (h *webdavMethods) handleOptions(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("DAV", "1")
-	w.Header().Set("Allow", "OPTIONS, HEAD, GET, PROPFIND, DELETE, MOVE, MKCOL, PUT")
+	w.Header().Set("Allow", "OPTIONS, HEAD, GET, PROPFIND, DELETE, MOVE, MKCOL")
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -127,11 +125,6 @@ func (h *webdavMethods) handleGet(w http.ResponseWriter, r *http.Request) {
 	defer f.Close()
 
 	http.ServeContent(w, r, fi.Name(), fi.ModTime(), f)
-}
-
-func (h *webdavMethods) handlePut(w http.ResponseWriter, r *http.Request) {
-	// Adding files directly to the mount is not supported (Virtual Usenet drive)
-	http.Error(w, "Forbidden: adding files directly to the mount is not supported", http.StatusForbidden)
 }
 
 func (h *webdavMethods) handleDelete(w http.ResponseWriter, r *http.Request) {

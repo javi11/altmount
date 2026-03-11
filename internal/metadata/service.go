@@ -45,11 +45,6 @@ func (ms *MetadataService) truncateFilename(filename string) string {
 	return filename[:maxLen] + fileExt
 }
 
-// GetRootPath returns the root path for metadata storage
-func (ms *MetadataService) GetRootPath() string {
-	return ms.rootPath
-}
-
 // WriteFileMetadata writes file metadata to disk
 func (ms *MetadataService) WriteFileMetadata(virtualPath string, metadata *metapb.FileMetadata) error {
 	// Ensure the directory exists
