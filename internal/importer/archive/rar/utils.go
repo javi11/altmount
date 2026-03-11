@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/javi11/altmount/internal/importer/archive"
 )
@@ -20,6 +21,31 @@ var (
 	rPatternNumber       = regexp.MustCompile(`\.r(\d+)$`)
 	numericPatternNumber = regexp.MustCompile(`\.(\d+)$`)
 )
+
+// extractRarBaseName returns the lowercase base name of a RAR filename,
+// stripping the part number and extension used for multi-volume sets.
+// Used to group related RAR parts before archive analysis.
+func extractRarBaseName(filename string) string {
+	lower := strings.ToLower(filepath.Base(filename))
+
+	// Pattern 1: filename.part###.rar
+	if m := partPattern.FindStringSubmatch(lower); len(m) > 1 {
+		return m[1]
+	}
+	// Pattern 2: filename.rar (single part)
+	if strings.HasSuffix(lower, ".rar") {
+		return strings.TrimSuffix(lower, ".rar")
+	}
+	// Pattern 3: filename.r##
+	if m := rPattern.FindStringSubmatch(lower); len(m) > 1 {
+		return m[1]
+	}
+	// Pattern 4: filename.### (numeric)
+	if m := numericPattern.FindStringSubmatch(lower); len(m) > 1 {
+		return m[1]
+	}
+	return lower
+}
 
 // hasExtension checks if a filename has an extension
 func hasExtension(filename string) bool {
