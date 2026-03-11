@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -40,6 +41,7 @@ type SegmentCache struct {
 	config    Config
 	logger    *slog.Logger
 	totalSize int64
+	dirty     atomic.Bool
 }
 
 // NewSegmentCache creates a new segment cache, loading any existing catalog.
@@ -74,7 +76,10 @@ func (c *SegmentCache) Get(messageID string) ([]byte, bool) {
 		c.mu.Unlock()
 		return nil, false
 	}
-	e.LastAccess = time.Now()
+	if time.Since(e.LastAccess) > 60*time.Second {
+		e.LastAccess = time.Now()
+		c.dirty.Store(true)
+	}
 	path := e.DataPath
 	c.mu.Unlock()
 
@@ -121,6 +126,8 @@ func (c *SegmentCache) Put(messageID string, data []byte) error {
 	c.totalSize += e.Size
 	c.mu.Unlock()
 
+	c.dirty.Store(true)
+
 	return nil
 }
 
@@ -147,6 +154,7 @@ func (c *SegmentCache) Evict() {
 		return sorted[i].e.LastAccess.Before(sorted[j].e.LastAccess)
 	})
 
+	removed := false
 	for _, pair := range sorted {
 		if c.totalSize <= c.config.MaxSizeBytes {
 			break
@@ -154,6 +162,10 @@ func (c *SegmentCache) Evict() {
 		_ = os.Remove(pair.e.DataPath)
 		c.totalSize -= pair.e.Size
 		delete(c.items, pair.id)
+		removed = true
+	}
+	if removed {
+		c.dirty.Store(true)
 	}
 }
 
@@ -168,12 +180,17 @@ func (c *SegmentCache) Cleanup() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	removed := false
 	for id, e := range c.items {
 		if e.LastAccess.Before(deadline) {
 			_ = os.Remove(e.DataPath)
 			c.totalSize -= e.Size
 			delete(c.items, id)
+			removed = true
 		}
+	}
+	if removed {
+		c.dirty.Store(true)
 	}
 }
 
@@ -192,7 +209,12 @@ func (c *SegmentCache) ItemCount() int {
 }
 
 // SaveCatalog flushes the in-memory catalog to disk (catalog.json) atomically.
+// It is a no-op when the catalog has not changed since the last flush.
 func (c *SegmentCache) SaveCatalog() error {
+	if !c.dirty.Load() {
+		return nil
+	}
+
 	c.mu.Lock()
 	snapshot := make(map[string]*cacheEntry, len(c.items))
 	for k, v := range c.items {
@@ -217,6 +239,8 @@ func (c *SegmentCache) SaveCatalog() error {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("segcache: rename catalog: %w", err)
 	}
+
+	c.dirty.Store(false)
 
 	return nil
 }

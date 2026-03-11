@@ -138,7 +138,7 @@ func (m *Manager) cleanupLoop() {
 func (m *Manager) catalogFlushLoop() {
 	defer m.wg.Done()
 
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(60 * time.Second)
 	defer ticker.Stop()
 
 	for {
