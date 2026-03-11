@@ -3,7 +3,6 @@ package webdav
 import (
 	"context"
 	"errors"
-	"io"
 	"log/slog"
 	"mime"
 	"net/http"
@@ -131,84 +130,8 @@ func (h *webdavMethods) handleGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *webdavMethods) handlePut(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	reqPath, status, err := propfind.StripPrefix(r.URL.Path, h.prefix)
-	if err != nil {
-		slog.ErrorContext(ctx, "PUT: failed to strip prefix", "path", r.URL.Path, "err", err)
-		http.Error(w, "Not Found", status)
-		return
-	}
-
-	// Check if file exists to determine status code
-	_, statErr := h.fs.Stat(ctx, reqPath)
-
-	// Try standard OpenFile first
-	f, err := h.fs.OpenFile(ctx, reqPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0666)
-	if err != nil {
-		if os.IsPermission(err) {
-			// Permission denied on NzbFilesystem (it's read-only).
-			// Handle as a sidecar file by writing directly to the host filesystem in metadata root.
-			rootPath := h.fs.GetRootPath()
-			if rootPath != "" {
-				hostPath := filepath.Join(rootPath, reqPath)
-				// Ensure parent directory exists
-				if err := os.MkdirAll(filepath.Dir(hostPath), 0755); err != nil {
-					slog.ErrorContext(ctx, "PUT: failed to create sidecar directory", "path", hostPath, "err", err)
-					http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-					return
-				}
-
-				hf, err := os.OpenFile(hostPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0666)
-				if err != nil {
-					slog.ErrorContext(ctx, "PUT: failed to open sidecar file on host", "path", hostPath, "err", err)
-					http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-					return
-				}
-				defer hf.Close()
-
-				n, err := io.Copy(hf, r.Body)
-				if err != nil {
-					slog.ErrorContext(ctx, "PUT: failed to copy sidecar body", "path", hostPath, "err", err)
-					http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-					return
-				}
-
-				slog.InfoContext(ctx, "PUT: successfully wrote sidecar file to host", "path", reqPath, "host_path", hostPath, "bytes", n)
-
-				if os.IsNotExist(statErr) {
-					w.WriteHeader(http.StatusCreated)
-				} else {
-					w.WriteHeader(http.StatusNoContent)
-				}
-				return
-			}
-		}
-
-		if os.IsNotExist(err) {
-			slog.WarnContext(ctx, "PUT: parent collection does not exist", "path", reqPath)
-			http.Error(w, "Conflict: parent collection does not exist", http.StatusConflict)
-		} else {
-			slog.ErrorContext(ctx, "PUT: failed to open file", "path", reqPath, "err", err)
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		}
-		return
-	}
-	defer f.Close()
-
-	n, err := io.Copy(f, r.Body)
-	if err != nil {
-		slog.ErrorContext(ctx, "PUT: failed to copy body", "path", reqPath, "err", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
-	slog.InfoContext(ctx, "PUT: successfully wrote file", "path", reqPath, "bytes", n)
-
-	if os.IsNotExist(statErr) {
-		w.WriteHeader(http.StatusCreated)
-	} else {
-		w.WriteHeader(http.StatusNoContent)
-	}
+	// Adding files directly to the mount is not supported (Virtual Usenet drive)
+	http.Error(w, "Forbidden: adding files directly to the mount is not supported", http.StatusForbidden)
 }
 
 func (h *webdavMethods) handleDelete(w http.ResponseWriter, r *http.Request) {

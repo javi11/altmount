@@ -42,10 +42,6 @@ type MetadataRemoteFile struct {
 // Configuration is now accessed dynamically through config.ConfigGetter
 // No longer need a separate config struct
 
-func (mrf *MetadataRemoteFile) GetMetadataService() *metadata.MetadataService {
-	return mrf.metadataService
-}
-
 // NewMetadataRemoteFile creates a new metadata-based remote file handler
 func NewMetadataRemoteFile(
 	metadataService *metadata.MetadataService,
