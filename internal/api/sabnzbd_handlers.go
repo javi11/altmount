@@ -675,6 +675,16 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 	seenIDs := make(map[string]bool)
 
 	for _, item := range completed {
+		// Verify metadata exists on disk before reporting as completed
+		if item.StoragePath != nil {
+			if meta, err := s.metadataService.ReadFileMetadata(*item.StoragePath); err != nil || meta == nil {
+				// Metadata missing or unreadable — hide from Sonarr history
+				slog.DebugContext(c.Context(), "Hiding completed item from SABnzbd history: metadata missing",
+					"path", *item.StoragePath)
+				continue
+			}
+		}
+
 		// Calculate category-specific base path for this item
 		itemBasePath := s.calculateItemBasePath()
 		finalPath := s.calculateHistoryStoragePath(item, itemBasePath)
@@ -692,6 +702,14 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 	}
 
 	for _, item := range persistentHistory {
+		// Verify metadata exists on disk before reporting as completed
+		if meta, err := s.metadataService.ReadFileMetadata(item.VirtualPath); err != nil || meta == nil {
+			// Metadata missing or unreadable — hide from Sonarr history
+			slog.DebugContext(c.Context(), "Hiding persistent item from SABnzbd history: metadata missing",
+				"path", item.VirtualPath)
+			continue
+		}
+
 		nzoID := fmt.Sprintf("h%d", item.ID)
 		if item.NzbID != nil {
 			nzoID = fmt.Sprintf("%d", *item.NzbID)
