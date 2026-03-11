@@ -1332,7 +1332,26 @@ func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, e
 		}
 	}
 
-	return usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxPrefetch, mvf.streamTracker, mvf.streamID, mvf.segmentStore)
+	zeroFill := false
+	currentConfig := mvf.configGetter()
+	if currentConfig.Health.AcceptableMissingSegmentsPercentage > 0 {
+		totalSegments := int64(len(mvf.fileMeta.SegmentData))
+		if totalSegments > 0 {
+			var missingCount int64
+			for _, seg := range mvf.fileMeta.SegmentData {
+				if seg.Id == "" {
+					missingCount++
+				}
+			}
+			missingPercentage := (float64(missingCount) / float64(totalSegments)) * 100
+
+			if missingPercentage <= currentConfig.Health.AcceptableMissingSegmentsPercentage {
+				zeroFill = true
+			}
+		}
+	}
+
+	return usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxPrefetch, mvf.streamTracker, mvf.streamID, mvf.segmentStore, zeroFill)
 }
 
 // createNestedReader creates a reader for files backed by nested RAR sources.
@@ -1450,7 +1469,26 @@ func (mvf *MetadataVirtualFile) createUsenetReaderFromSegments(ctx context.Conte
 		return nil, fmt.Errorf("no segments cover range [%d, %d]", start, end)
 	}
 
-	return usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxPrefetch, mvf.streamTracker, mvf.streamID, mvf.segmentStore)
+	zeroFill := false
+	currentConfig := mvf.configGetter()
+	if currentConfig.Health.AcceptableMissingSegmentsPercentage > 0 {
+		totalSegments := int64(len(mvf.fileMeta.SegmentData))
+		if totalSegments > 0 {
+			var missingCount int64
+			for _, seg := range mvf.fileMeta.SegmentData {
+				if seg.Id == "" {
+					missingCount++
+				}
+			}
+			missingPercentage := (float64(missingCount) / float64(totalSegments)) * 100
+
+			if missingPercentage <= currentConfig.Health.AcceptableMissingSegmentsPercentage {
+				zeroFill = true
+			}
+		}
+	}
+
+	return usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxPrefetch, mvf.streamTracker, mvf.streamID, mvf.segmentStore, zeroFill)
 }
 
 // nestedSourceSpec holds the parameters needed to lazily open one inner-volume reader.

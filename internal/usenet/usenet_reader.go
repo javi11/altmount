@@ -75,6 +75,8 @@ type UsenetReader struct {
 	// Tracing counters (atomic, no lock needed)
 	inFlight atomic.Int32 // goroutines actively downloading right now
 
+	zeroFill bool // If true, return zeros for missing articles instead of error
+
 	mu sync.Mutex
 }
 
@@ -86,6 +88,7 @@ func NewUsenetReader(
 	metricsTracker MetricsTracker,
 	streamID string,
 	segmentStore SegmentStore,
+	zeroFill bool,
 ) (*UsenetReader, error) {
 	log := slog.Default().With("component", "usenet-reader")
 	ctx, cancel := context.WithCancel(ctx)
@@ -105,6 +108,7 @@ func NewUsenetReader(
 		metricsTracker: metricsTracker,
 		streamID:       streamID,
 		segmentStore:   segmentStore,
+		zeroFill:       zeroFill,
 	}
 
 	ur.cond = sync.NewCond(&ur.mu)
@@ -198,6 +202,19 @@ func (b *UsenetReader) Read(p []byte) (int, error) {
 		b.mu.Unlock()
 
 		if b.isArticleNotFoundError(err) {
+			if b.zeroFill {
+				// Return a reader that produces zeros for the entire segment size
+				// Get the missing segment info
+				seg, _ := rg.GetSegment(rg.GetCurrentIndex())
+				if seg != nil {
+					b.log.WarnContext(b.ctx, "Article not found, zero-filling segment",
+						"segment_id", seg.Id,
+						"size", seg.SegmentSize)
+					s.SetReader(io.LimitReader(zeroReader{}, int64(seg.SegmentSize)))
+					goto proceed
+				}
+			}
+
 			if totalRead > 0 {
 				return 0, &DataCorruptionError{
 					UnderlyingErr: err,
@@ -213,6 +230,7 @@ func (b *UsenetReader) Read(p []byte) (int, error) {
 		return 0, io.EOF
 	}
 
+proceed:
 	n := 0
 	for n < len(p) {
 		nn, err := s.GetReaderContext(b.ctx).Read(p[n:])
@@ -246,6 +264,18 @@ func (b *UsenetReader) Read(p []byte) (int, error) {
 					}
 
 					if b.isArticleNotFoundError(err) {
+						if b.zeroFill {
+							// Try to zero-fill the next segment too
+							seg, _ := rg.GetSegment(rg.GetCurrentIndex())
+							if seg != nil {
+								b.log.WarnContext(b.ctx, "Article not found, zero-filling next segment",
+									"segment_id", seg.Id,
+									"size", seg.SegmentSize)
+								s.SetReader(io.LimitReader(zeroReader{}, int64(seg.SegmentSize)))
+								continue
+							}
+						}
+
 						if totalRead > 0 {
 							return n, &DataCorruptionError{
 								UnderlyingErr: err,
@@ -407,6 +437,16 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 	}
 
 	return resultBytes, err
+}
+
+// zeroReader is a helper that returns only zero bytes
+type zeroReader struct{}
+
+func (zeroReader) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = 0
+	}
+	return len(p), nil
 }
 
 func (b *UsenetReader) downloadManager(ctx context.Context) {

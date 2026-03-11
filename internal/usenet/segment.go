@@ -258,6 +258,20 @@ func (s *segment) SetError(err error) {
 	s.signalReady()
 }
 
+// SetReader manually sets the reader for the segment data.
+// This is used for zero-filling missing segments.
+func (s *segment) SetReader(r io.Reader) {
+	if s == nil {
+		return
+	}
+	s.mx.Lock()
+	s.limitedReader = r
+	s.readerReady = true
+	s.mx.Unlock()
+
+	s.signalReady()
+}
+
 // GetDownloadError returns any download error that occurred.
 func (s *segment) GetDownloadError() error {
 	if s == nil {
