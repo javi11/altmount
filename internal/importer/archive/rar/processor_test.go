@@ -2,6 +2,7 @@ package rar
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/javi11/altmount/internal/importer/parser"
@@ -226,4 +227,36 @@ func TestPatchMissingSegment_VerySmallShortfall(t *testing.T) {
 	// Verify the patch segment
 	patchSeg := patched[1]
 	require.Equal(t, shortfall-1, patchSeg.EndOffset, "patch should cover exactly 100 bytes")
+}
+
+func TestGroupArchivesByBaseName(t *testing.T) {
+	// Build 46 r-extension parts for first archive
+	var files []parser.ParsedFile
+	for i := 0; i <= 45; i++ {
+		files = append(files, parser.ParsedFile{
+			Filename: fmt.Sprintf("nova.s44e02.720p-dhd.r%02d", i),
+		})
+	}
+	// Add single-part .rar from the second archive (uppercase to test case-insensitivity)
+	files = append(files, parser.ParsedFile{
+		Filename: "NOVA.S44E02.School.of.the.Future.720p.HDTV.x264-DHD.part01.rar",
+	})
+
+	groups := GroupArchivesByBaseName(files)
+
+	require.Len(t, groups, 2, "should produce 2 distinct archive groups")
+
+	// Groups are sorted by base name; find by size
+	var group46, group1 []parser.ParsedFile
+	for _, g := range groups {
+		if len(g) == 46 {
+			group46 = g
+		} else {
+			group1 = g
+		}
+	}
+	require.NotNil(t, group46, "should have group with 46 parts")
+	require.NotNil(t, group1, "should have group with 1 part")
+	require.Len(t, group46, 46)
+	require.Len(t, group1, 1)
 }

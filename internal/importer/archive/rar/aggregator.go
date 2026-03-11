@@ -159,14 +159,20 @@ func ProcessArchive(
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
-	rarContents, err := rarProcessor.AnalyzeRarContentFromNzb(ctx, archiveFiles, password, archiveProgressTracker)
-	if err != nil {
-		slog.ErrorContext(ctx, "Failed to analyze RAR archive content", "error", err)
-		return err
+	// Group archive files by their base name to handle NZBs with multiple separate RAR archives
+	archiveGroups := GroupArchivesByBaseName(archiveFiles)
+	var rarContents []Content
+	for _, group := range archiveGroups {
+		groupContents, err := rarProcessor.AnalyzeRarContentFromNzb(ctx, group, password, archiveProgressTracker)
+		if err != nil {
+			slog.ErrorContext(ctx, "Failed to analyze RAR archive group", "error", err, "first_file", group[0].Filename)
+			return err
+		}
+		rarContents = append(rarContents, groupContents...)
 	}
 
 	// Expand ISO files found inside the RAR archive into their inner media files
-	rarContents, err = expandISOContents(ctx, expandBlurayIso, rarContents, poolManager, maxPrefetch, readTimeout, allowedFileExtensions)
+	rarContents, err := expandISOContents(ctx, expandBlurayIso, rarContents, poolManager, maxPrefetch, readTimeout, allowedFileExtensions)
 	if err != nil {
 		slog.WarnContext(ctx, "ISO expansion failed, proceeding without ISO contents", "error", err)
 	}
@@ -474,6 +480,26 @@ func expandISOContents(
 		result = append(result, nc)
 	}
 	return result, nil
+}
+
+// GroupArchivesByBaseName groups ParsedFiles by their RAR base name (case-insensitive).
+// Returns groups in deterministic order (sorted by base name) for testability.
+func GroupArchivesByBaseName(files []parser.ParsedFile) [][]parser.ParsedFile {
+	groupMap := make(map[string][]parser.ParsedFile)
+	var keys []string
+	for _, f := range files {
+		key := extractRarBaseName(f.Filename)
+		if _, exists := groupMap[key]; !exists {
+			keys = append(keys, key)
+		}
+		groupMap[key] = append(groupMap[key], f)
+	}
+	sort.Strings(keys)
+	groups := make([][]parser.ParsedFile, 0, len(keys))
+	for _, k := range keys {
+		groups = append(groups, groupMap[k])
+	}
+	return groups
 }
 
 // normalizeArchiveReleaseFilename aligns the filename to the NZB basename while keeping the original extension.
