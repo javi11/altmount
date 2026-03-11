@@ -250,8 +250,10 @@ type ImportConfig struct {
 	AllowedFileExtensions          []string       `yaml:"allowed_file_extensions" mapstructure:"allowed_file_extensions" json:"allowed_file_extensions"`
 	MaxImportConnections           int            `yaml:"max_import_connections" mapstructure:"max_import_connections" json:"max_import_connections"`
 	MaxDownloadPrefetch            int            `yaml:"max_download_prefetch" mapstructure:"max_download_prefetch" json:"max_download_prefetch"`
-	SegmentSamplePercentage        int            `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage"`
-	ReadTimeoutSeconds             int            `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds"`
+	SegmentSamplePercentage        int                   `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage,omitempty"`
+	VerifyData                     *bool                 `yaml:"verify_data" mapstructure:"verify_data" json:"verify_data,omitempty"`
+	ReadTimeoutSeconds             int                   `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds,omitempty"`
+
 	ImportStrategy                 ImportStrategy `yaml:"import_strategy" mapstructure:"import_strategy" json:"import_strategy"`
 	ImportDir                      *string        `yaml:"import_dir" mapstructure:"import_dir" json:"import_dir,omitempty"`
 	SkipHealthCheck                *bool          `yaml:"skip_health_check" mapstructure:"skip_health_check" json:"skip_health_check,omitempty"`

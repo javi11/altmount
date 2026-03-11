@@ -226,6 +226,27 @@ export function ImportConfigSection({
 							<input
 								type="checkbox"
 								className="toggle toggle-primary toggle-sm mt-1 shrink-0"
+								checked={formData.verify_data ?? false}
+								disabled={isReadOnly}
+								onChange={(e) => handleInputChange("verify_data", e.target.checked)}
+							/>
+							<div className="min-w-0 flex-1">
+								<span className="block whitespace-normal break-words font-bold text-xs">
+									Verify Data
+								</span>
+								<span className="mt-1 block whitespace-normal break-words text-base-content/50 text-xs leading-relaxed">
+									Download 1 byte from each sampled segment to ensure it's not a zero-filled or
+									fake article. Slower but more accurate.
+								</span>
+							</div>
+						</label>
+
+						<div className="divider text-base-content/70" />
+
+						<label className="label cursor-pointer items-start justify-start gap-4">
+							<input
+								type="checkbox"
+								className="toggle toggle-primary toggle-sm mt-1 shrink-0"
 								checked={formData.skip_health_check ?? false}
 								disabled={isReadOnly}
 								onChange={(e) => handleInputChange("skip_health_check", e.target.checked)}

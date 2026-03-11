@@ -215,6 +215,7 @@ export interface ImportConfig {
 	max_import_connections: number;
 	max_download_prefetch: number;
 	segment_sample_percentage: number; // Percentage of segments to check (1-100)
+	verify_data?: boolean; // Verify 1 byte of data for each segment
 	read_timeout_seconds: number;
 	import_strategy: ImportStrategy;
 	import_dir?: string | null;
@@ -403,6 +404,8 @@ export interface ImportUpdateRequest {
 	max_processor_workers?: number;
 	queue_processing_interval_seconds?: number; // Interval in seconds for queue processing
 	allowed_file_extensions?: string[];
+	segment_sample_percentage?: number;
+	verify_data?: boolean;
 	import_strategy?: ImportStrategy;
 	import_dir?: string | null;
 	skip_health_check?: boolean;
@@ -499,6 +502,8 @@ export interface ImportFormData {
 	queue_processing_interval_seconds: number; // Interval in seconds for queue processing
 	max_download_prefetch: number;
 	read_timeout_seconds: number;
+	segment_sample_percentage: number;
+	verify_data: boolean;
 	import_strategy: ImportStrategy;
 	import_dir: string;
 	watch_dir?: string;
