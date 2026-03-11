@@ -32,8 +32,20 @@ export function StreamingConfigSection({
 		setHasChanges(streamingChanged || cacheChanged);
 	};
 
-	const handleStreamingChange = (field: keyof StreamingConfig, value: number) => {
+	const handleStreamingChange = (field: keyof StreamingConfig, value: number | boolean) => {
 		const newData = { ...streamingData, [field]: value };
+		setStreamingData(newData);
+		checkChanges(newData, cacheData);
+	};
+
+	const handleFailureMaskingChange = (field: string, value: boolean | number) => {
+		const newData = {
+			...streamingData,
+			failure_masking: {
+				...streamingData.failure_masking,
+				[field]: value,
+			},
+		};
 		setStreamingData(newData);
 		checkChanges(newData, cacheData);
 	};
@@ -131,6 +143,68 @@ export function StreamingConfigSection({
 							Default (30) is recommended for most 4K streaming scenarios.
 						</div>
 					</div>
+				</div>
+			</div>
+
+			{/* Failure Protection */}
+			<div className="border-base-200 border-t pt-10">
+				<h3 className="font-bold text-base-content text-lg">Failure Protection</h3>
+				<p className="text-base-content/50 text-sm">
+					Prevent your library from crashing by automatically hiding files that repeatedly fail to
+					stream.
+				</p>
+			</div>
+
+			<div className="space-y-8">
+				<div className="flex items-center justify-between rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+					<div className="min-w-0">
+						<h4 className="font-bold text-base-content text-sm flex items-center gap-2">
+							Enable Failure Masking
+							<div
+								className="tooltip tooltip-right"
+								data-tip="If a file fails to stream multiple times (e.g. it hits a DMCA hole), AltMount will automatically 'mask' it, hiding the file from your mount. This prevents Plex/Jellyfin from constantly trying to play a broken file."
+							>
+								<Info className="h-3.5 w-3.5 text-base-content/60" />
+							</div>
+						</h4>
+						<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
+							Automatically hide corrupted files after repeated streaming failures.
+						</p>
+					</div>
+					<input
+						type="checkbox"
+						className="toggle toggle-primary"
+						checked={streamingData.failure_masking?.enabled ?? false}
+						disabled={isReadOnly}
+						onChange={(e) => handleFailureMaskingChange("enabled", e.target.checked)}
+					/>
+				</div>
+
+				<div className="space-y-3 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+					<div className="min-w-0">
+						<h4 className="font-bold text-base-content text-sm flex items-center gap-2">
+							Failure Threshold
+							<div
+								className="tooltip tooltip-right"
+								data-tip="How many times a file is allowed to fail before it is hidden. Default is 3. Set this higher if you have an unstable connection, or lower to hide bad files faster."
+							>
+								<Info className="h-3.5 w-3.5 text-base-content/60" />
+							</div>
+						</h4>
+						<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
+							Number of failures allowed before masking the file.
+						</p>
+					</div>
+					<input
+						type="number"
+						className="input input-bordered w-full font-mono text-sm"
+						value={streamingData.failure_masking?.threshold ?? 3}
+						disabled={isReadOnly}
+						min={1}
+						onChange={(e) =>
+							handleFailureMaskingChange("threshold", Number.parseInt(e.target.value, 10) || 3)
+						}
+					/>
 				</div>
 			</div>
 
