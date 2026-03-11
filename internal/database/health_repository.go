@@ -141,19 +141,22 @@ func (r *HealthRepository) GetFileHealthByID(ctx context.Context, id int64) (*Fi
 }
 
 // IncrementStreamingFailureCount increments the streaming failure count and masks the file if threshold reached
+// If masked, it also marks the file as corrupted and schedules an immediate health check to trigger repair.
 func (r *HealthRepository) IncrementStreamingFailureCount(ctx context.Context, filePath string, threshold int) (bool, error) {
 	filePath = strings.TrimPrefix(filePath, "/")
 	query := `
 		UPDATE file_health
 		SET streaming_failure_count = streaming_failure_count + 1,
 		    is_masked = CASE WHEN streaming_failure_count + 1 >= ? THEN TRUE ELSE is_masked END,
+		    status = CASE WHEN streaming_failure_count + 1 >= ? THEN 'corrupted' ELSE status END,
+		    scheduled_check_at = CASE WHEN streaming_failure_count + 1 >= ? THEN datetime('now') ELSE scheduled_check_at END,
 		    updated_at = datetime('now')
 		WHERE file_path = ?
 		RETURNING is_masked
 	`
 
 	var isMasked bool
-	err := r.db.QueryRowContext(ctx, query, threshold, filePath).Scan(&isMasked)
+	err := r.db.QueryRowContext(ctx, query, threshold, threshold, threshold, filePath).Scan(&isMasked)
 	if err != nil {
 		return false, fmt.Errorf("failed to increment streaming failure count: %w", err)
 	}
