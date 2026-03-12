@@ -687,7 +687,11 @@ func (s *Server) handleRegisterArrsWebhooks(c *fiber.Ctx) error {
 	}
 
 	// Get configured base URL or use default
-	baseURL := "http://altmount:8080"
+	cfg := s.configManager.GetConfig()
+	baseURL := cfg.Arrs.WebhookBaseURL
+	if baseURL == "" {
+		baseURL = "http://altmount:8080"
+	}
 	if s.configManager != nil {
 		cfg := s.configManager.GetConfig()
 		if cfg.Arrs.WebhookBaseURL != "" {
