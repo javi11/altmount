@@ -181,7 +181,7 @@ func (r *HealthRepository) UnmaskFile(ctx context.Context, filePath string) erro
 }
 
 // GetUnhealthyFiles returns files that need health checks
-func (r *HealthRepository) GetUnhealthyFiles(ctx context.Context, limit int, strategy string) ([]*FileHealth, error) {
+func (r *HealthRepository) GetUnhealthyFiles(ctx context.Context, limit int, strategy string, libraryDir string) ([]*FileHealth, error) {
 	query := `
 		SELECT id, file_path, status, last_checked, last_error, retry_count, max_retries,
 		       repair_retry_count, max_repair_retries, source_nzb_path,
@@ -192,12 +192,19 @@ func (r *HealthRepository) GetUnhealthyFiles(ctx context.Context, limit int, str
 		  AND scheduled_check_at <= datetime('now')
 		  AND retry_count < max_retries
 		  AND status NOT IN ('repair_triggered', 'corrupted', 'checking')
-		  AND (? = 'NONE' OR library_path IS NOT NULL)
+		  AND (? = 'NONE' OR (library_path IS NOT NULL AND library_path LIKE ?))
 		ORDER BY priority DESC, scheduled_check_at ASC
 		LIMIT ?
 	`
 
-	rows, err := r.db.QueryContext(ctx, query, strategy, limit)
+	// Build the library directory prefix filter (e.g. /mnt/usenet-rclone/%)
+	libraryPrefix := libraryDir
+	if !strings.HasSuffix(libraryPrefix, "/") {
+		libraryPrefix += "/"
+	}
+	libraryPrefix += "%"
+
+	rows, err := r.db.QueryContext(ctx, query, strategy, libraryPrefix, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query files due for check: %w", err)
 	}

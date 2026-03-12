@@ -655,10 +655,14 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 	maxJobs := hw.getMaxConcurrentJobs()
 	cfg := hw.configGetter()
 	strategy := string(cfg.Import.ImportStrategy)
+	libraryDir := ""
+	if cfg.Health.LibraryDir != nil {
+		libraryDir = *cfg.Health.LibraryDir
+	}
 
 	// Get files due for checking (ordered by scheduled_check_at)
 	// New logic: Only check files with library_path (imported) unless strategy is NONE
-	unhealthyFiles, err := hw.healthRepo.GetUnhealthyFiles(ctx, maxJobs, strategy)
+	unhealthyFiles, err := hw.healthRepo.GetUnhealthyFiles(ctx, maxJobs, strategy, libraryDir)
 	if err != nil {
 		return fmt.Errorf("failed to get unhealthy files: %w", err)
 	}

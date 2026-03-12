@@ -77,13 +77,13 @@ func (c *Coordinator) CreateStrmFiles(ctx context.Context, item *database.Import
 	if err != nil {
 		metaFile := metadataPath + ".meta"
 		if _, metaErr := os.Stat(metaFile); metaErr == nil {
-			return c.createSingleStrmFile(ctx, resultingPath, originalResultingPath, cfg.WebDAV.Port)
+			return c.CreateSingleStrmFile(ctx, resultingPath, originalResultingPath, cfg.WebDAV.Port)
 		}
 		return fmt.Errorf("failed to stat metadata path: %w", err)
 	}
 
 	if !fileInfo.IsDir() {
-		return c.createSingleStrmFile(ctx, resultingPath, originalResultingPath, cfg.WebDAV.Port)
+		return c.CreateSingleStrmFile(ctx, resultingPath, originalResultingPath, cfg.WebDAV.Port)
 	}
 
 	// Directory - walk through and create STRM files for all files
@@ -154,7 +154,7 @@ func (c *Coordinator) CreateStrmFiles(ctx context.Context, item *database.Import
 		strmResultingPath := filepath.Join(pathParts...)
 		strmResultingPath = filepath.ToSlash(filepath.Clean(strmResultingPath))
 
-		if err := c.createSingleStrmFile(ctx, strmResultingPath, relPathWithMeta, cfg.WebDAV.Port); err != nil {
+		if err := c.CreateSingleStrmFile(ctx, strmResultingPath, relPathWithMeta, cfg.WebDAV.Port); err != nil {
 			c.log.ErrorContext(ctx, "Failed to create STRM file",
 				"path", relPath,
 				"error", err)
@@ -180,8 +180,8 @@ func (c *Coordinator) CreateStrmFiles(ctx context.Context, item *database.Import
 	return nil
 }
 
-// createSingleStrmFile creates a STRM file for a single file with authentication
-func (c *Coordinator) createSingleStrmFile(ctx context.Context, strmResultingPath, originalVirtualPath string, port int) error {
+// CreateSingleStrmFile creates a STRM file for a single file with authentication
+func (c *Coordinator) CreateSingleStrmFile(ctx context.Context, strmResultingPath, originalVirtualPath string, port int) error {
 	cfg := c.configGetter()
 
 	baseDir := filepath.Join(*cfg.Import.ImportDir, filepath.Dir(strings.TrimPrefix(strmResultingPath, "/")))

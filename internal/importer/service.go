@@ -137,6 +137,11 @@ func isFileAlreadyProcessed(metadataService *metadata.MetadataService, filePath 
 	return false
 }
 
+// GetPostProcessor returns the post-processor coordinator
+func (s *Service) GetPostProcessor() *postprocessor.Coordinator {
+	return s.postProcessor
+}
+
 // Service provides NZB import functionality with manual directory scanning and queue-based processing
 type Service struct {
 	config          ServiceConfig

@@ -513,7 +513,11 @@ func (s *Server) handleListCorrupted(c *fiber.Ctx) error {
 	// Get corrupted files using GetUnhealthyFiles
 	cfg := s.configManager.GetConfig()
 	strategy := string(cfg.Import.ImportStrategy)
-	items, err := s.healthRepo.GetUnhealthyFiles(c.Context(), pagination.Limit, strategy)
+	libraryDir := ""
+	if cfg.Health.LibraryDir != nil {
+		libraryDir = *cfg.Health.LibraryDir
+	}
+	items, err := s.healthRepo.GetUnhealthyFiles(c.Context(), pagination.Limit, strategy, libraryDir)
 	if err != nil {
 		return RespondInternalError(c, "Failed to retrieve corrupted files", err.Error())
 	}
