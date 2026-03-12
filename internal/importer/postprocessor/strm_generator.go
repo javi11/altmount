@@ -30,35 +30,44 @@ func (c *Coordinator) CreateStrmFiles(ctx context.Context, item *database.Import
 	// Keep the original resulting path for metadata and streaming URL
 	originalResultingPath := resultingPath
 
-	// Strip SABnzbd CompleteDir prefix from resultingPath if present
-	// This prevents creating nested "complete" folders in the STRM directory
-	if cfg.SABnzbd.CompleteDir != "" {
-		completeDir := filepath.ToSlash(cfg.SABnzbd.CompleteDir)
-		if !strings.HasPrefix(completeDir, "/") {
-			completeDir = "/" + completeDir
-		}
+	// 1. Get the internal relative path (relative to FUSE mount)
+	relPath := strings.TrimPrefix(resultingPath, "/")
 
-		// Ensure checkPath starts with / for reliable prefix checking
-		checkPath := resultingPath
-		if !strings.HasPrefix(checkPath, "/") {
-			checkPath = "/" + checkPath
-		}
-
-		if after, ok := strings.CutPrefix(checkPath, completeDir); ok {
-			resultingPath = after
-		}
-	}
-
-	// Ensure the resulting path respects the category if provided
+	// 2. Strip any existing /complete or /category prefix from the internal path to start clean
+	category := ""
 	if item.Category != nil && *item.Category != "" {
-		category := strings.Trim(*item.Category, "/")
-		cleanPath := strings.TrimPrefix(resultingPath, "/")
+		category = strings.Trim(*item.Category, "/")
+	}
 
-		// If path doesn't start with category, prepend it
-		if !strings.HasPrefix(cleanPath, category+"/") && cleanPath != category {
-			resultingPath = filepath.Join(category, cleanPath)
+	if cfg.SABnzbd.CompleteDir != "" {
+		completeDir := strings.Trim(filepath.ToSlash(cfg.SABnzbd.CompleteDir), "/")
+		if after, ok := strings.CutPrefix(relPath, completeDir+"/"); ok {
+			relPath = after
+		} else if relPath == completeDir {
+			relPath = ""
 		}
 	}
+	if category != "" {
+		if after, ok := strings.CutPrefix(relPath, category+"/"); ok {
+			relPath = after
+		} else if relPath == category {
+			relPath = ""
+		}
+	}
+
+	// 3. Build the clean, isolated library path
+	// Construct: [CompleteDir] + [Category] + RelPath
+	pathParts := []string{}
+	if cfg.SABnzbd.CompleteDir != "" {
+		pathParts = append(pathParts, strings.Trim(cfg.SABnzbd.CompleteDir, "/"))
+	}
+	if category != "" {
+		pathParts = append(pathParts, category)
+	}
+	pathParts = append(pathParts, relPath)
+
+	resultingPath = filepath.Join(pathParts...)
+	resultingPath = filepath.ToSlash(filepath.Clean(resultingPath))
 
 	// Check the metadata directory to determine if this is a file or directory
 	metadataPath := filepath.Join(cfg.Metadata.RootPath, strings.TrimPrefix(originalResultingPath, "/"))
@@ -94,7 +103,7 @@ func (c *Coordinator) CreateStrmFiles(ctx context.Context, item *database.Import
 		}
 
 		// Calculate relative path from the root metadata directory
-		relPath, err := filepath.Rel(cfg.Metadata.RootPath, path)
+		relPathWithMeta, err := filepath.Rel(cfg.Metadata.RootPath, path)
 		if err != nil {
 			c.log.ErrorContext(ctx, "Failed to calculate relative path",
 				"path", path,
@@ -104,39 +113,48 @@ func (c *Coordinator) CreateStrmFiles(ctx context.Context, item *database.Import
 		}
 
 		// Remove .meta extension
-		relPath = strings.TrimSuffix(relPath, ".meta")
+		relPath := strings.TrimSuffix(relPathWithMeta, ".meta")
 
-		// Build the STRM resulting path (stripped if needed)
-		strmResultingPath := relPath
-		if cfg.SABnzbd.CompleteDir != "" {
-			completeDir := filepath.ToSlash(cfg.SABnzbd.CompleteDir)
-			if !strings.HasPrefix(completeDir, "/") {
-				completeDir = "/" + completeDir
-			}
+		// 1. Get the internal relative path (relative to FUSE mount)
+		relPath = strings.TrimPrefix(relPath, "/")
 
-			// Ensure checkPath starts with / for reliable prefix checking
-			checkPath := strmResultingPath
-			if !strings.HasPrefix(checkPath, "/") {
-				checkPath = "/" + checkPath
-			}
-
-			if after, ok := strings.CutPrefix(checkPath, completeDir); ok {
-				strmResultingPath = after
-			}
-		}
-
-		// Ensure the resulting path respects the category if provided
+		// 2. Strip any existing /complete or /category prefix from the internal path to start clean
+		category := ""
 		if item.Category != nil && *item.Category != "" {
-			category := strings.Trim(*item.Category, "/")
-			cleanPath := strings.TrimPrefix(strmResultingPath, "/")
+			category = strings.Trim(*item.Category, "/")
+		}
 
-			// If path doesn't start with category, prepend it
-			if !strings.HasPrefix(cleanPath, category+"/") && cleanPath != category {
-				strmResultingPath = filepath.Join(category, cleanPath)
+		if cfg.SABnzbd.CompleteDir != "" {
+			completeDir := strings.Trim(filepath.ToSlash(cfg.SABnzbd.CompleteDir), "/")
+			if after, ok := strings.CutPrefix(relPath, completeDir+"/"); ok {
+				relPath = after
+			} else if relPath == completeDir {
+				relPath = ""
+			}
+		}
+		if category != "" {
+			if after, ok := strings.CutPrefix(relPath, category+"/"); ok {
+				relPath = after
+			} else if relPath == category {
+				relPath = ""
 			}
 		}
 
-		if err := c.createSingleStrmFile(ctx, strmResultingPath, relPath, cfg.WebDAV.Port); err != nil {
+		// 3. Build the clean, isolated library path
+		// Construct: [CompleteDir] + [Category] + RelPath
+		pathParts := []string{}
+		if cfg.SABnzbd.CompleteDir != "" {
+			pathParts = append(pathParts, strings.Trim(cfg.SABnzbd.CompleteDir, "/"))
+		}
+		if category != "" {
+			pathParts = append(pathParts, category)
+		}
+		pathParts = append(pathParts, relPath)
+
+		strmResultingPath := filepath.Join(pathParts...)
+		strmResultingPath = filepath.ToSlash(filepath.Clean(strmResultingPath))
+
+		if err := c.createSingleStrmFile(ctx, strmResultingPath, relPathWithMeta, cfg.WebDAV.Port); err != nil {
 			c.log.ErrorContext(ctx, "Failed to create STRM file",
 				"path", relPath,
 				"error", err)
