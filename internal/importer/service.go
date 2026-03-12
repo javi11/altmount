@@ -771,38 +771,20 @@ func (s *Service) calculateProcessVirtualDir(item *database.ImportQueueItem, bas
 	}
 	virtualDir = filepath.ToSlash(virtualDir)
 
-	// Prepend SABnzbd CompleteDir to virtualDir
 	cfg := s.configGetter()
-	if cfg.SABnzbd.CompleteDir != "" {
-		completeDir := filepath.ToSlash(cfg.SABnzbd.CompleteDir)
-		// Ensure completeDir is absolute for comparison
+	// ALWAYS prepend CompleteDir to isolate completed downloads from final library.
+	if cfg != nil && cfg.SABnzbd.CompleteDir != "" {
+		completeDir := strings.TrimRight(filepath.ToSlash(cfg.SABnzbd.CompleteDir), "/")
 		if !strings.HasPrefix(completeDir, "/") {
 			completeDir = "/" + completeDir
 		}
 
-		// Normalize virtualDir for comparison
-		vDir := filepath.ToSlash(virtualDir)
-		if !strings.HasPrefix(vDir, "/") {
-			vDir = "/" + vDir
-		}
-
-		// Check if virtualDir already starts with completeDir at a directory boundary
-		hasPrefix := false
-		if completeDir == "/" {
-			hasPrefix = true
-		} else if strings.HasPrefix(vDir, completeDir) {
-			if len(vDir) == len(completeDir) || vDir[len(completeDir)] == '/' {
-				hasPrefix = true
-			}
-		}
-
-		if !hasPrefix {
+		if completeDir != "/" && !strings.HasPrefix(virtualDir, completeDir+"/") && virtualDir != completeDir {
 			virtualDir = filepath.Join(completeDir, virtualDir)
-			virtualDir = filepath.ToSlash(virtualDir)
 		}
 	}
 
-	return virtualDir
+	return filepath.ToSlash(virtualDir)
 }
 
 // ensurePersistentNzb moves the NZB file to a persistent location in the metadata directory

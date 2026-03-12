@@ -29,27 +29,13 @@ func (c *Coordinator) CreateSymlinks(ctx context.Context, item *database.ImportQ
 	// Keep the original resulting path for metadata and actual mount path lookups
 	originalResultingPath := resultingPath
 
-	// Strip SABnzbd CompleteDir prefix from resultingPath if present
-	// This prevents creating nested "complete" folders in the symlink directory
+	// Ensure the resulting path includes the complete_dir prefix.
+	// This ensures that physical symlinks land in the isolated 'incoming' folder.
 	if cfg.SABnzbd.CompleteDir != "" {
-		completeDir := filepath.ToSlash(cfg.SABnzbd.CompleteDir)
-		if !strings.HasPrefix(completeDir, "/") {
-			completeDir = "/" + completeDir
-		}
-
-		// Ensure checkPath starts with / for reliable prefix checking
-		checkPath := resultingPath
-		if !strings.HasPrefix(checkPath, "/") {
-			checkPath = "/" + checkPath
-		}
-
-		if strings.HasPrefix(checkPath, completeDir) {
-			// Check for directory boundary
-			if len(checkPath) == len(completeDir) {
-				resultingPath = "/"
-			} else if checkPath[len(completeDir)] == '/' {
-				resultingPath = checkPath[len(completeDir):]
-			}
+		completeDir := strings.Trim(filepath.ToSlash(cfg.SABnzbd.CompleteDir), "/")
+		cleanRes := strings.Trim(filepath.ToSlash(resultingPath), "/")
+		if !strings.HasPrefix(cleanRes, completeDir+"/") && cleanRes != completeDir {
+			resultingPath = filepath.Join(completeDir, cleanRes)
 		}
 	}
 
