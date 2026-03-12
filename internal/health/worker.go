@@ -653,9 +653,12 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 	})
 
 	maxJobs := hw.getMaxConcurrentJobs()
+	cfg := hw.configGetter()
+	strategy := string(cfg.Import.ImportStrategy)
 
 	// Get files due for checking (ordered by scheduled_check_at)
-	unhealthyFiles, err := hw.healthRepo.GetUnhealthyFiles(ctx, maxJobs)
+	// New logic: Only check files with library_path (imported) unless strategy is NONE
+	unhealthyFiles, err := hw.healthRepo.GetUnhealthyFiles(ctx, maxJobs, strategy)
 	if err != nil {
 		return fmt.Errorf("failed to get unhealthy files: %w", err)
 	}
@@ -764,7 +767,7 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 	wg.Wait()
 
 	// Build list of protected directories (categories and complete dir)
-	cfg := hw.configGetter()
+	cfg = hw.configGetter()
 	protected := []string{"complete", "corrupted_metadata"} // Protect 'complete' and safety folder
 	if cfg.SABnzbd.CompleteDir != "" {
 		protected = append(protected, filepath.Base(cfg.SABnzbd.CompleteDir))

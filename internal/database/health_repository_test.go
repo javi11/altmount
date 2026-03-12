@@ -122,7 +122,7 @@ func TestRegisterCorruptedFile_PlaybackFailureBehavior(t *testing.T) {
 	assert.Equal(t, fileHealth.MaxRetries-1, fileHealth.RetryCount, "RetryCount should equal MaxRetries-1 to trigger immediate repair on next check")
 
 	// 3. Verify GetUnhealthyFiles picks it up
-	unhealthyFiles, err := repo.GetUnhealthyFiles(ctx, 10)
+	unhealthyFiles, err := repo.GetUnhealthyFiles(ctx, 10, "NONE")
 	require.NoError(t, err)
 
 	found := false

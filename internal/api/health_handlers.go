@@ -469,14 +469,6 @@ func (s *Server) handleRepairHealthBulk(c *fiber.Ctx) error {
 		// Trigger rescan
 		err = s.arrsService.TriggerFileRescan(ctx, pathForRescan, item.FilePath)
 		if err != nil {
-			// If failed, track error but don't delete record yet?
-			// Actually existing single repair endpoint deletes it even if it fails?
-			// No, single endpoint returns 500/404 if TriggerFileRescan fails, and only deletes if successful (mostly).
-			// Wait, lines 437 in single handler:
-			// if err != nil { ... return ... }
-			// if err := s.healthRepo.DeleteHealthRecord...
-			// So it only deletes if TriggerFileRescan succeeds.
-
 			failedCount++
 			errors[filePath] = fmt.Sprintf("Failed to trigger repair: %v", err)
 			continue
@@ -519,7 +511,9 @@ func (s *Server) handleListCorrupted(c *fiber.Ctx) error {
 	pagination := ParsePaginationFiber(c)
 
 	// Get corrupted files using GetUnhealthyFiles
-	items, err := s.healthRepo.GetUnhealthyFiles(c.Context(), pagination.Limit)
+	cfg := s.configManager.GetConfig()
+	strategy := string(cfg.Import.ImportStrategy)
+	items, err := s.healthRepo.GetUnhealthyFiles(c.Context(), pagination.Limit, strategy)
 	if err != nil {
 		return RespondInternalError(c, "Failed to retrieve corrupted files", err.Error())
 	}
@@ -1246,45 +1240,39 @@ func (s *Server) handleResetAllHealthChecks(c *fiber.Ctx) error {
 	return RespondSuccess(c, response)
 }
 
-// handleRegenerateSymlinks handles POST /api/health/regenerate-symlinks
-//
-//	@Summary		Regenerate library symlinks
-//	@Description	Regenerates all library symlinks and STRM files for files that already have metadata.
-//	@Tags			Health
-//	@Produce		json
-//	@Success		200	{object}	APIResponse
-//	@Failure		500	{object}	APIResponse
-//	@Security		BearerAuth
-//	@Security		ApiKeyAuth
-//	@Router			/health/regenerate-symlinks [post]
-func (s *Server) handleRegenerateSymlinks(c *fiber.Ctx) error {
+// handleRegenerateLibraryFiles handles the POST /health/regenerate-symlinks request.
+// It supports global, bulk (via file_paths), or single item regeneration.
+func (s *Server) handleRegenerateLibraryFiles(c *fiber.Ctx) error {
 	ctx := c.Context()
 	cfg := s.configManager.GetConfig()
 
-	if runtime.GOOS == "windows" {
-		return RespondBadRequest(c, "Symlink regeneration is not supported on Windows; use STRM import strategy instead", "")
+	// 1. Parse optional bulk request body
+	var req struct {
+		FilePaths []string `json:"file_paths"`
+	}
+	_ = c.BodyParser(&req)
+
+	var files []*database.FileHealth
+	var err error
+
+	// 2. Determine which files to process
+	if len(req.FilePaths) > 0 {
+		// Bulk/Single item mode
+		files, err = s.healthRepo.GetFilesByPaths(ctx, req.FilePaths)
+	} else {
+		// Global mode: Get all records for verification
+		files, err = s.healthRepo.GetFilesForLibrarySync(ctx)
 	}
 
-	// Validate that symlink strategy is enabled
-	if cfg.Import.ImportStrategy != config.ImportStrategySYMLINK {
-		return RespondBadRequest(c, "Symlink regeneration is only available when import strategy is set to SYMLINK", "")
-	}
-
-	if cfg.Import.ImportDir == nil || *cfg.Import.ImportDir == "" {
-		return RespondBadRequest(c, "Import directory is not configured", "")
-	}
-
-	// Get all files without library path
-	files, err := s.healthRepo.GetFilesWithoutLibraryPath(ctx)
 	if err != nil {
-		return RespondInternalError(c, "Failed to retrieve files without library path", err.Error())
+		return RespondInternalError(c, "Failed to retrieve health records", err.Error())
 	}
 
 	if len(files) == 0 {
 		return RespondSuccess(c, fiber.Map{
-			"message":          "No files without library path found",
+			"message":          "No library files found to process",
 			"files_processed":  0,
-			"symlinks_created": 0,
+			"success_count":    0,
 			"errors":           []string{},
 			"completed_at":     time.Now().Format(time.RFC3339),
 		})
@@ -1295,59 +1283,133 @@ func (s *Server) handleRegenerateSymlinks(c *fiber.Ctx) error {
 	errors := make([]string, 0)
 
 	for _, file := range files {
+		// Build the library file path in the import directory
+		var libraryPath string
+
+		// SMART LOGIC: If we already have a valid library path that is in our library mount,
+		// we should preserve it exactly as is. This respects Sonarr's final renaming.
+		preserveExistingPath := false
+		if file.LibraryPath != nil && *file.LibraryPath != "" {
+			lp := *file.LibraryPath
+			// If it's already in the usenet-rclone mount, keep it!
+			// This includes both /tv/NiceName and /complete/IncomingName
+			if strings.HasPrefix(lp, "/mnt/usenet-rclone") {
+				preserveExistingPath = true
+				libraryPath = lp
+			}
+		}
+
+		if !preserveExistingPath {
+			// Determine category folder from path
+			category := config.DefaultCategoryName
+			cleanFilePath := strings.TrimPrefix(file.FilePath, "/")
+			if strings.HasPrefix(cleanFilePath, "tv/") || strings.Contains(cleanFilePath, "/tv/") {
+				category = "tv"
+			} else if strings.HasPrefix(cleanFilePath, "movies/") || strings.Contains(cleanFilePath, "/movies/") {
+				category = "movies"
+			}
+
+			// 1. Get the internal relative path (relative to FUSE mount)
+			relPath := strings.TrimPrefix(file.FilePath, "/")
+
+			// 2. Strip any existing /complete or /category prefix from the internal path to start clean
+			if cfg.SABnzbd.CompleteDir != "" {
+				completeDir := strings.Trim(filepath.ToSlash(cfg.SABnzbd.CompleteDir), "/")
+				if after, ok := strings.CutPrefix(relPath, completeDir+"/"); ok {
+					relPath = after
+				} else if relPath == completeDir {
+					relPath = ""
+				}
+			}
+			if after, ok := strings.CutPrefix(relPath, category+"/"); ok {
+				relPath = after
+			} else if relPath == category {
+				relPath = ""
+			}
+
+			// 3. Build the clean, isolated library path
+			importDir := cfg.MountPath
+			if cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
+				importDir = *cfg.Import.ImportDir
+			}
+
+			// Construct: ImportDir + CompleteDir + Category + RelPath
+			pathParts := []string{importDir}
+			if cfg.SABnzbd.CompleteDir != "" {
+				pathParts = append(pathParts, strings.Trim(cfg.SABnzbd.CompleteDir, "/"))
+			}
+			pathParts = append(pathParts, category)
+			pathParts = append(pathParts, relPath)
+
+			fullPathStr := filepath.Join(pathParts...)
+			if cfg.Import.ImportStrategy == config.ImportStrategySYMLINK {
+				libraryPath = filepath.ToSlash(filepath.Clean(fullPathStr))
+			} else {
+				// STRM files have the .strm extension
+				libraryPath = filepath.ToSlash(filepath.Clean(fullPathStr + ".strm"))
+			}
+		}
+
 		// Build the actual file path in the mount
 		actualPath := pathutil.JoinAbsPath(cfg.MountPath, file.FilePath)
 
-		// Build the symlink path in the import directory
-		symlinkPath := pathutil.JoinAbsPath(*cfg.Import.ImportDir, file.FilePath)
-
 		// Create directory if needed
-		baseDir := filepath.Dir(symlinkPath)
+		baseDir := filepath.Dir(libraryPath)
 		if err := os.MkdirAll(baseDir, 0755); err != nil {
 			errorCount++
 			errors = append(errors, fmt.Sprintf("%s: failed to create directory: %v", file.FilePath, err))
 			continue
 		}
 
-		// Remove existing symlink if present
-		if _, err := os.Lstat(symlinkPath); err == nil {
-			if err := os.Remove(symlinkPath); err != nil {
-				errorCount++
-				errors = append(errors, fmt.Sprintf("%s: failed to remove existing symlink: %v", file.FilePath, err))
-				continue
+		// Remove existing file if present
+		if _, err := os.Lstat(libraryPath); err == nil {
+			_ = os.Remove(libraryPath)
+		}
+
+		// Create the file based on strategy
+		var creationErr error
+		if cfg.Import.ImportStrategy == config.ImportStrategySTRM {
+			if s.importerService != nil && s.importerService.GetPostProcessor() != nil {
+				creationErr = s.importerService.GetPostProcessor().CreateSingleStrmFile(ctx, libraryPath, file.FilePath, cfg.WebDAV.Port)
+			} else {
+				creationErr = fmt.Errorf("importer service or post-processor not available")
+			}
+		} else {
+			if runtime.GOOS == "windows" {
+				creationErr = fmt.Errorf("symlinks not supported on Windows")
+			} else {
+				creationErr = os.Symlink(actualPath, libraryPath)
 			}
 		}
 
-		// Create the symlink
-		if err := os.Symlink(actualPath, symlinkPath); err != nil {
+		if creationErr != nil {
 			errorCount++
-			errors = append(errors, fmt.Sprintf("%s: failed to create symlink: %v", file.FilePath, err))
+			errors = append(errors, fmt.Sprintf("%s: failed to recreate library file: %v", file.FilePath, creationErr))
 			continue
 		}
 
 		// Update the library path in the database
-		if err := s.healthRepo.UpdateLibraryPath(ctx, file.FilePath, symlinkPath); err != nil {
+		if err := s.healthRepo.UpdateLibraryPath(ctx, file.FilePath, libraryPath); err != nil {
 			slog.ErrorContext(ctx, "Failed to update library path in database",
 				"file_path", file.FilePath,
-				"symlink_path", symlinkPath,
+				"library_path", libraryPath,
 				"error", err)
-			// Don't count as error since symlink was created successfully
 		}
 
 		successCount++
 	}
 
 	response := fiber.Map{
-		"message":          fmt.Sprintf("Regenerated symlinks for %d files", successCount),
+		"message":          fmt.Sprintf("Successfully processed %d library files", successCount),
 		"files_processed":  len(files),
-		"symlinks_created": successCount,
+		"success_count":    successCount,
 		"errors":           errors,
 		"error_count":      errorCount,
 		"completed_at":     time.Now().Format(time.RFC3339),
 	}
 
 	if errorCount > 0 {
-		response["warning"] = fmt.Sprintf("%d file(s) failed to regenerate symlinks", errorCount)
+		response["warning"] = fmt.Sprintf("%d file(s) failed to regenerate library files", errorCount)
 	}
 
 	return RespondSuccess(c, response)

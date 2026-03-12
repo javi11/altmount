@@ -180,8 +180,8 @@ func (r *HealthRepository) UnmaskFile(ctx context.Context, filePath string) erro
 	return nil
 }
 
-// GetUnhealthyFiles returns files that need health checks (excluding repair_triggered files)
-func (r *HealthRepository) GetUnhealthyFiles(ctx context.Context, limit int) ([]*FileHealth, error) {
+// GetUnhealthyFiles returns files that need health checks
+func (r *HealthRepository) GetUnhealthyFiles(ctx context.Context, limit int, strategy string) ([]*FileHealth, error) {
 	query := `
 		SELECT id, file_path, status, last_checked, last_error, retry_count, max_retries,
 		       repair_retry_count, max_repair_retries, source_nzb_path,
@@ -192,11 +192,12 @@ func (r *HealthRepository) GetUnhealthyFiles(ctx context.Context, limit int) ([]
 		  AND scheduled_check_at <= datetime('now')
 		  AND retry_count < max_retries
 		  AND status NOT IN ('repair_triggered', 'corrupted', 'checking')
+		  AND (? = 'NONE' OR library_path IS NOT NULL)
 		ORDER BY priority DESC, scheduled_check_at ASC
 		LIMIT ?
 	`
 
-	rows, err := r.db.QueryContext(ctx, query, limit)
+	rows, err := r.db.QueryContext(ctx, query, strategy, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query files due for check: %w", err)
 	}
@@ -1604,4 +1605,90 @@ func (r *HealthRepository) UpdateSystemState(ctx context.Context, key string, va
 		return fmt.Errorf("failed to update system state: %w", err)
 	}
 	return nil
+}
+
+// GetFilesByPaths returns health records for the specified file paths
+func (r *HealthRepository) GetFilesByPaths(ctx context.Context, filePaths []string) ([]*FileHealth, error) {
+	if len(filePaths) == 0 {
+		return nil, nil
+	}
+
+	// Build placeholders for the IN clause
+	placeholders := make([]string, len(filePaths))
+	args := make([]any, len(filePaths))
+	for i, path := range filePaths {
+		placeholders[i] = "?"
+		args[i] = strings.TrimPrefix(path, "/")
+	}
+
+	query := fmt.Sprintf(`
+		SELECT id, file_path, library_path, status, last_checked, last_error, retry_count, max_retries,
+		       repair_retry_count, max_repair_retries, source_nzb_path,
+		       error_details, created_at, updated_at, release_date, priority
+		FROM file_health
+		WHERE file_path IN (%s)
+		ORDER BY file_path ASC
+	`, strings.Join(placeholders, ","))
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query files by paths: %w", err)
+	}
+	defer rows.Close()
+
+	var files []*FileHealth
+	for rows.Next() {
+		var health FileHealth
+		err := rows.Scan(
+			&health.ID, &health.FilePath, &health.LibraryPath, &health.Status, &health.LastChecked,
+			&health.LastError, &health.RetryCount, &health.MaxRetries,
+			&health.RepairRetryCount, &health.MaxRepairRetries, &health.SourceNzbPath,
+			&health.ErrorDetails, &health.CreatedAt, &health.UpdatedAt, &health.ReleaseDate, &health.Priority,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan file health: %w", err)
+		}
+		files = append(files, &health)
+	}
+
+	return files, nil
+}
+
+// GetFilesForLibrarySync returns all health records to verify their physical presence in the library
+func (r *HealthRepository) GetFilesForLibrarySync(ctx context.Context) ([]*FileHealth, error) {
+	query := `
+		SELECT id, file_path, library_path, status, last_checked, last_error, retry_count, max_retries,
+		       repair_retry_count, max_repair_retries, source_nzb_path,
+		       error_details, created_at, updated_at, release_date, priority
+		FROM file_health
+		ORDER BY file_path ASC
+	`
+
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query files for library sync: %w", err)
+	}
+	defer rows.Close()
+
+	var files []*FileHealth
+	for rows.Next() {
+		var health FileHealth
+		err := rows.Scan(
+			&health.ID, &health.FilePath, &health.LibraryPath, &health.Status, &health.LastChecked,
+			&health.LastError, &health.RetryCount, &health.MaxRetries,
+			&health.RepairRetryCount, &health.MaxRepairRetries,
+			&health.SourceNzbPath, &health.ErrorDetails,
+			&health.CreatedAt, &health.UpdatedAt, &health.ReleaseDate, &health.Priority,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan file health: %w", err)
+		}
+		files = append(files, &health)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate files for library sync: %w", err)
+	}
+
+	return files, nil
 }
