@@ -415,7 +415,7 @@ export class APIClient {
 		});
 	}
 
-	async regenerateSymlinks() {
+	async regenerateSymlinks(filePaths?: string[]) {
 		return this.request<{
 			message: string;
 			files_processed: number;
@@ -426,6 +426,7 @@ export class APIClient {
 			completed_at: string;
 		}>("/health/regenerate-symlinks", {
 			method: "POST",
+			body: JSON.stringify({ file_paths: filePaths }),
 		});
 	}
 
