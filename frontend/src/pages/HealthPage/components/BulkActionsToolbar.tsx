@@ -5,10 +5,12 @@ interface BulkActionsToolbarProps {
 	isRestartPending: boolean;
 	isDeletePending: boolean;
 	isRepairPending: boolean;
+	isRegeneratePending?: boolean;
 	onClearSelection: () => void;
 	onBulkRestart: () => void;
 	onBulkDelete: () => void;
 	onBulkRepair: () => void;
+	onBulkRegenerate?: () => void;
 }
 
 export function BulkActionsToolbar({
@@ -16,10 +18,12 @@ export function BulkActionsToolbar({
 	isRestartPending,
 	isDeletePending,
 	isRepairPending,
+	isRegeneratePending,
 	onClearSelection,
 	onBulkRestart,
 	onBulkDelete,
 	onBulkRepair,
+	onBulkRegenerate,
 }: BulkActionsToolbarProps) {
 	if (selectedCount === 0) {
 		return null;
@@ -38,6 +42,15 @@ export function BulkActionsToolbar({
 						</button>
 					</div>
 					<div className="flex items-center gap-2">
+						<button
+							type="button"
+							className="btn btn-primary btn-sm"
+							onClick={onBulkRegenerate}
+							disabled={isRegeneratePending}
+						>
+							<RefreshCw className="h-4 w-4" />
+							Regenerate Selected
+						</button>
 						<button
 							type="button"
 							className="btn btn-warning btn-sm"

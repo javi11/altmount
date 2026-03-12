@@ -1,4 +1,4 @@
-import { Eye, MoreHorizontal, PlayCircle, Trash2, Wrench, X } from "lucide-react";
+import { Eye, MoreHorizontal, PlayCircle, RefreshCw, Trash2, Wrench, X } from "lucide-react";
 import type { FileHealth } from "../../../../types/api";
 
 interface HealthItemActionsMenuProps {
@@ -8,11 +8,13 @@ interface HealthItemActionsMenuProps {
 	isRepairPending: boolean;
 	isDeletePending: boolean;
 	isUnmaskPending: boolean;
+	isRegeneratePending?: boolean;
 	onCancelCheck: (id: number) => void;
 	onManualCheck: (id: number) => void;
 	onRepair: (id: number) => void;
 	onDelete: (id: number) => void;
 	onUnmask: (id: number) => void;
+	onRegenerate?: (filePath: string) => void;
 }
 
 export function HealthItemActionsMenu({
@@ -22,11 +24,13 @@ export function HealthItemActionsMenu({
 	isRepairPending,
 	isDeletePending,
 	isUnmaskPending,
+	isRegeneratePending,
 	onCancelCheck,
 	onManualCheck,
 	onRepair,
 	onDelete,
 	onUnmask,
+	onRegenerate,
 }: HealthItemActionsMenuProps) {
 	return (
 		<div className="dropdown dropdown-end">
@@ -71,6 +75,17 @@ export function HealthItemActionsMenu({
 						</button>
 					</li>
 				)}
+				<li>
+					<button
+						type="button"
+						onClick={() => onRegenerate?.(item.file_path)}
+						disabled={isRegeneratePending}
+						className="text-primary"
+					>
+						<RefreshCw className="h-4 w-4" />
+						Regenerate File
+					</button>
+				</li>
 				<li>
 					<button
 						type="button"
