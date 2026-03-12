@@ -1295,9 +1295,14 @@ func (s *Server) handleRegenerateLibraryFiles(c *fiber.Ctx) error {
 		preserveExistingPath := false
 		if file.LibraryPath != nil && *file.LibraryPath != "" {
 			lp := *file.LibraryPath
-			// If it's already in the usenet-rclone mount, keep it!
+			libraryDir := ""
+			if cfg.Health.LibraryDir != nil {
+				libraryDir = *cfg.Health.LibraryDir
+			}
+
+			// If it's already in the configured library mount, keep it!
 			// This includes both /tv/NiceName and /complete/IncomingName
-			if strings.HasPrefix(lp, "/mnt/usenet-rclone") {
+			if libraryDir != "" && strings.HasPrefix(lp, libraryDir) {
 				preserveExistingPath = true
 				libraryPath = lp
 			}
