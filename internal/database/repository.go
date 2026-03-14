@@ -1005,8 +1005,8 @@ func (r *Repository) GetImportHistoryByPath(ctx context.Context, virtualPath str
 	query := `
 		SELECT h.id, h.nzb_id, h.nzb_name, h.file_name, h.file_size, h.virtual_path, f.library_path, h.category, h.completed_at
 		FROM import_history h
-		LEFT JOIN file_health f ON h.virtual_path = f.file_path
-		WHERE h.virtual_path = ?
+		LEFT JOIN file_health f ON TRIM(h.virtual_path, '/') = TRIM(f.file_path, '/')
+		WHERE TRIM(h.virtual_path, '/') = TRIM(?, '/')
 		LIMIT 1
 	`
 
@@ -1066,7 +1066,7 @@ func (r *Repository) ListRecentImportHistory(ctx context.Context, minutes int, c
 	query := fmt.Sprintf(`
 		SELECT h.id, h.nzb_id, h.nzb_name, h.file_name, h.file_size, h.virtual_path, f.library_path, h.category, h.completed_at
 		FROM import_history h
-		LEFT JOIN file_health f ON h.virtual_path = f.file_path
+		LEFT JOIN file_health f ON TRIM(h.virtual_path, '/') = TRIM(f.file_path, '/')
 		WHERE h.completed_at >= %s
 		  AND (? = '' OR h.category = ?)
 		ORDER BY h.completed_at DESC

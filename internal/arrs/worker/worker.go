@@ -295,10 +295,16 @@ func (w *Worker) cleanupSonarrQueue(ctx context.Context, instance *model.ConfigI
 			if virtualPath != "" {
 				history, err := w.repo.GetImportHistoryByPath(ctx, virtualPath)
 				if err == nil && history != nil {
-					slog.InfoContext(ctx, "Found ghost queue item (successfully imported in history), cleaning up immediately",
-						"path", q.OutputPath, "title", q.Title, "instance", instance.Name)
-					idsToRemove = append(idsToRemove, q.ID)
-					continue
+					// ONLY cleanup if it has been moved to the library (Sonarr's final step)
+					if history.LibraryPath != nil && *history.LibraryPath != "" {
+						slog.InfoContext(ctx, "Found ghost queue item (confirmed moved to library), cleaning up immediately",
+							"path", q.OutputPath, "library_path", *history.LibraryPath, "title", q.Title, "instance", instance.Name)
+						idsToRemove = append(idsToRemove, q.ID)
+						continue
+					} else {
+						slog.DebugContext(ctx, "Item found in history but not yet moved to library, waiting for Sonarr final step",
+							"path", q.OutputPath, "title", q.Title)
+					}
 				}
 			}
 
