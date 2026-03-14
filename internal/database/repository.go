@@ -1000,6 +1000,28 @@ func (r *Repository) AddImportHistory(ctx context.Context, history *ImportHistor
 	return nil
 }
 
+// GetImportHistoryByPath retrieves an import history item by its virtual path
+func (r *Repository) GetImportHistoryByPath(ctx context.Context, virtualPath string) (*ImportHistory, error) {
+	query := `
+		SELECT h.id, h.nzb_id, h.nzb_name, h.file_name, h.file_size, h.virtual_path, f.library_path, h.category, h.completed_at
+		FROM import_history h
+		LEFT JOIN file_health f ON h.virtual_path = f.file_path
+		WHERE h.virtual_path = ?
+		LIMIT 1
+	`
+
+	var h ImportHistory
+	err := r.db.QueryRowContext(ctx, query, virtualPath).Scan(&h.ID, &h.NzbID, &h.NzbName, &h.FileName, &h.FileSize, &h.VirtualPath, &h.LibraryPath, &h.Category, &h.CompletedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get import history by path: %w", err)
+	}
+
+	return &h, nil
+}
+
 // ListImportHistory retrieves import history items with optional filtering and pagination
 func (r *Repository) ListImportHistory(ctx context.Context, limit, offset int, search string, category string) ([]*ImportHistory, error) {
 	query := `

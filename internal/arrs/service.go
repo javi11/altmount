@@ -48,7 +48,7 @@ func NewService(configGetter config.ConfigGetter, configManager model.ConfigMana
 	clientManager := clients.NewManager()
 	dataManager := data.NewManager()
 	scannerManager := scanner.NewManager(configGetter, instManager, clientManager, dataManager)
-	workerManager := worker.NewWorker(configGetter, instManager, clientManager)
+	workerManager := worker.NewWorker(configGetter, instManager, clientManager, userRepo.GetRepository())
 	registrarManager := registrar.NewManager(instManager, clientManager)
 
 	return &Service{
