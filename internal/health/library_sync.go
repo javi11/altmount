@@ -749,10 +749,10 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 	<-done
 
 	// Additional cleanup of orphaned database records if enabled
-	// We no longer delete metadata files here for safety.
+	metadataDeletedCount := 0
 	if shouldCleanup {
 		// We already have libraryFiles from earlier in the function
-		for relativeMountPath := range metaFileSet {
+		for relativeMountPath, metaPath := range metaFileSet {
 			select {
 			case <-ctx.Done():
 				return nil
@@ -762,17 +762,26 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 			libraryPath := lsw.getLibraryPath(relativeMountPath, filesInUse)
 
 			if libraryPath == nil {
-				// We used to delete metadata here, but it's removed for safety.
-				// If a file is missing from the library, we just let the database cleanup handle it later
-				// or keep the metadata so it can be re-linked if found.
-				slog.DebugContext(ctx, "File missing from library, but preserving metadata for safety", 
-					"path", relativeMountPath)
+				if !dryRun {
+					// DELETE physical metadata file if it's not found in the library
+					if err := os.Remove(metaPath); err != nil {
+						if !os.IsNotExist(err) {
+							slog.ErrorContext(ctx, "Failed to delete orphaned metadata file", 
+								"path", metaPath, "error", err)
+						}
+					} else {
+						slog.InfoContext(ctx, "Deleted orphaned metadata file (not found in library)", 
+							"path", metaPath)
+						metadataDeletedCount++
+					}
+				} else {
+					metadataDeletedCount++
+				}
 			}
 		}
 	}
 
 	// Cleanup orphaned library files (symlinks and STRM files without metadata)
-	metadataDeletedCount := 0
 	libraryFilesDeletedCount := 0
 	libraryDirsDeletedCount := 0
 
