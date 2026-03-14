@@ -14,6 +14,7 @@ import (
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/progress"
 )
 
 // ProcessSingleFile processes a single file (creates and writes metadata).
@@ -31,6 +32,7 @@ func ProcessSingleFile(
 	segmentSamplePercentage int,
 	allowedFileExtensions []string,
 	timeout time.Duration,
+	tracker *progress.Tracker,
 ) (string, string, error) {
 	// Validate file extension before processing
 	if !utils.HasAllowedFilesInRegular([]parser.ParsedFile{file}, allowedFileExtensions) {
@@ -69,7 +71,7 @@ func ProcessSingleFile(
 		poolManager,
 		maxValidationGoroutines,
 		segmentSamplePercentage,
-		nil, // No progress callback for single file imports
+		tracker,
 		timeout,
 	); err != nil {
 		return "", "", err
