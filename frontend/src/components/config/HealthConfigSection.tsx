@@ -256,8 +256,6 @@ export function HealthConfigSection({
 										Number of repair notification attempts before giving up.
 									</p>
 								</fieldset>
-
-
 							</div>
 
 							<div className="mt-6 flex items-start justify-between gap-4 rounded-xl bg-base-100/50 p-4">
@@ -518,10 +516,7 @@ export function HealthConfigSection({
 									readOnly={isReadOnly}
 									min={0}
 									onChange={(e) =>
-										handleInputChange(
-											"max_retries",
-											Number.parseInt(e.target.value, 10) || 0,
-										)
+										handleInputChange("max_retries", Number.parseInt(e.target.value, 10) || 0)
 									}
 								/>
 								<p className="label break-words text-base-content/70 text-xs">

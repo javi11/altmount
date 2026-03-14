@@ -12,6 +12,7 @@ import { ConfigurationPage } from "./pages/ConfigurationPage";
 import { Dashboard } from "./pages/Dashboard";
 import { FilesPage } from "./pages/FilesPage";
 import { HealthPage } from "./pages/HealthPage";
+import { LogsPage } from "./pages/LogsPage";
 import { QueuePage } from "./pages/QueuePage";
 
 function App() {
@@ -36,6 +37,7 @@ function App() {
 										<Route path="queue" element={<QueuePage />} />
 										<Route path="health" element={<HealthPage />} />
 										<Route path="files" element={<FilesPage />} />
+										<Route path="logs" element={<LogsPage />} />
 
 										{/* Admin-only routes */}
 										<Route

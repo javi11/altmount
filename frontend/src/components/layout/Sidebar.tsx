@@ -8,6 +8,7 @@ import {
 	Heart,
 	Home,
 	List,
+	ScrollText,
 	Settings,
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
@@ -34,6 +35,11 @@ const navigation = [
 		name: "Files",
 		href: "/files",
 		icon: Folder,
+	},
+	{
+		name: "Logs",
+		href: "/logs",
+		icon: ScrollText,
 	},
 	{
 		name: "Configuration",
