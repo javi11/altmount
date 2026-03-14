@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"maps"
 	"sync"
 	"time"
 )
@@ -13,13 +12,27 @@ import (
 type ProgressUpdate struct {
 	QueueID    int       `json:"queue_id"`
 	Percentage int       `json:"percentage"`
+	Stage      string    `json:"stage,omitempty"`  // e.g. "Parsing NZB", "Validating segments"
 	Status     string    `json:"status,omitempty"` // "completed" or "failed" on terminal events
 	Timestamp  time.Time `json:"timestamp"`
 }
 
+// ProgressEntry holds the current progress state for a single queue item.
+// It is returned by GetAllProgress for the SSE initial payload.
+type ProgressEntry struct {
+	Percentage int    `json:"percentage"`
+	Stage      string `json:"stage,omitempty"`
+}
+
+// progressState is the internal progress record (unexported).
+type progressState struct {
+	percentage int
+	stage      string
+}
+
 // ProgressBroadcaster manages progress tracking for queue items
 type ProgressBroadcaster struct {
-	progress    map[int]int
+	progress    map[int]progressState
 	mu          sync.RWMutex
 	log         *slog.Logger
 	subscribers map[string]chan ProgressUpdate
@@ -29,7 +42,7 @@ type ProgressBroadcaster struct {
 // NewProgressBroadcaster creates a new progress broadcaster
 func NewProgressBroadcaster() *ProgressBroadcaster {
 	pb := &ProgressBroadcaster{
-		progress:    make(map[int]int),
+		progress:    make(map[int]progressState),
 		subscribers: make(map[string]chan ProgressUpdate),
 		log:         slog.Default().With("component", "progress-broadcaster"),
 	}
@@ -48,8 +61,13 @@ func (pb *ProgressBroadcaster) Close() error {
 	return nil
 }
 
-// UpdateProgress updates the progress for a queue item
+// UpdateProgress updates the progress for a queue item (no stage label).
 func (pb *ProgressBroadcaster) UpdateProgress(queueID int, percentage int) {
+	pb.UpdateProgressWithStage(queueID, percentage, "")
+}
+
+// UpdateProgressWithStage updates the progress for a queue item with an optional stage label.
+func (pb *ProgressBroadcaster) UpdateProgressWithStage(queueID int, percentage int, stage string) {
 	// Clamp percentage to 0-100 range
 	if percentage < 0 {
 		percentage = 0
@@ -63,7 +81,7 @@ func (pb *ProgressBroadcaster) UpdateProgress(queueID int, percentage int) {
 		// Remove progress when complete (100%)
 		delete(pb.progress, queueID)
 	} else {
-		pb.progress[queueID] = percentage
+		pb.progress[queueID] = progressState{percentage: percentage, stage: stage}
 	}
 	pb.mu.Unlock()
 
@@ -71,6 +89,7 @@ func (pb *ProgressBroadcaster) UpdateProgress(queueID int, percentage int) {
 	update := ProgressUpdate{
 		QueueID:    queueID,
 		Percentage: percentage,
+		Stage:      stage,
 		Timestamp:  time.Now(),
 	}
 
@@ -117,22 +136,25 @@ func (pb *ProgressBroadcaster) ClearProgress(queueID int) {
 	pb.mu.Unlock()
 }
 
-// GetProgress returns the current progress for a queue item
+// GetProgress returns the current progress percentage for a queue item.
 func (pb *ProgressBroadcaster) GetProgress(queueID int) (int, bool) {
 	pb.mu.RLock()
 	defer pb.mu.RUnlock()
-	percentage, exists := pb.progress[queueID]
-	return percentage, exists
+	state, exists := pb.progress[queueID]
+	return state.percentage, exists
 }
 
-// GetAllProgress returns a copy of all current progress states
-func (pb *ProgressBroadcaster) GetAllProgress() map[int]int {
+// GetAllProgress returns a copy of all current progress states including stage labels.
+// The returned map is used to build the initial SSE payload sent to new subscribers.
+func (pb *ProgressBroadcaster) GetAllProgress() map[int]ProgressEntry {
 	pb.mu.RLock()
 	defer pb.mu.RUnlock()
 
-	progressCopy := make(map[int]int, len(pb.progress))
-	maps.Copy(progressCopy, pb.progress)
-	return progressCopy
+	result := make(map[int]ProgressEntry, len(pb.progress))
+	for id, state := range pb.progress {
+		result[id] = ProgressEntry{Percentage: state.percentage, Stage: state.stage}
+	}
+	return result
 }
 
 // CreateTracker creates a progress tracker for a specific queue item with a percentage range

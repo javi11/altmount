@@ -106,7 +106,8 @@ export function QueuePage() {
 		if (!queueData) return undefined;
 		return queueData.map((item) => ({
 			...item,
-			percentage: liveProgress[item.id] ?? item.percentage,
+			percentage: liveProgress[item.id]?.percentage ?? item.percentage,
+			stage: liveProgress[item.id]?.stage,
 		}));
 	}, [queueData, liveProgress]);
 
@@ -756,7 +757,7 @@ export function QueuePage() {
 																			item.percentage != null ? (
 																			<div className="flex w-24 flex-col gap-1">
 																				<div className="flex justify-between font-bold font-mono text-base-content/80 text-xs">
-																					<span>PROGRESS</span>
+																					<span>{item.stage ?? "PROGRESS"}</span>
 																					<span>{item.percentage}%</span>
 																				</div>
 																				<progress

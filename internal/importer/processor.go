@@ -155,6 +155,13 @@ func (proc *Processor) updateProgress(queueID int, percentage int) {
 	}
 }
 
+// updateProgressWithStage emits a progress update with a stage label if broadcaster is available
+func (proc *Processor) updateProgressWithStage(queueID int, percentage int, stage string) {
+	if proc.broadcaster != nil {
+		proc.broadcaster.UpdateProgressWithStage(queueID, percentage, stage)
+	}
+}
+
 // checkCancellation checks if processing should be cancelled
 func (proc *Processor) checkCancellation(ctx context.Context) error {
 	select {
@@ -180,7 +187,7 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 	}
 
 	// Update progress: starting
-	proc.updateProgress(queueID, 0)
+	proc.updateProgressWithStage(queueID, 0, "Parsing NZB")
 	// Step 1: Open and parse the file
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -218,8 +225,8 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 	if len(extractedFiles) > 0 {
 		parsed.ExtractedFiles = extractedFiles
 	}
-	// Update progress: parsing complete
-	proc.updateProgress(queueID, 10)
+	// Update progress: parsing complete, about to identify file type
+	proc.updateProgressWithStage(queueID, 10, "Identifying files")
 
 	// Check for cancellation after parsing
 	if err := proc.checkCancellation(ctx); err != nil {
@@ -265,23 +272,23 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 	var writtenPaths []string
 	switch parsed.Type {
 	case parser.NzbTypeSingleFile:
-		proc.updateProgress(queueID, 30)
+		proc.updateProgressWithStage(queueID, 30, "Validating segments")
 		result, writtenPaths, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, queueID, maxConnections, allowedExtensions, proc.validationTimeout, category)
 
 	case parser.NzbTypeMultiFile:
-		proc.updateProgress(queueID, 30)
+		proc.updateProgressWithStage(queueID, 30, "Validating segments")
 		result, writtenPaths, err = proc.processMultiFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, queueID, maxConnections, allowedExtensions, proc.validationTimeout, category)
 
 	case parser.NzbTypeRarArchive:
-		proc.updateProgress(queueID, 30)
+		proc.updateProgressWithStage(queueID, 15, "Analyzing archive")
 		result, writtenPaths, err = proc.processRarArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, maxConnections, allowedExtensions, proc.validationTimeout, parsed.ExtractedFiles, category)
 
 	case parser.NzbType7zArchive:
-		proc.updateProgress(queueID, 30)
+		proc.updateProgressWithStage(queueID, 15, "Analyzing archive")
 		result, writtenPaths, err = proc.processSevenZipArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, maxConnections, allowedExtensions, proc.validationTimeout, parsed.ExtractedFiles, category)
 
 	case parser.NzbTypeStrm:
-		proc.updateProgress(queueID, 30)
+		proc.updateProgressWithStage(queueID, 30, "Validating segments")
 		result, writtenPaths, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, queueID, maxConnections, allowedExtensions, proc.validationTimeout, category)
 
 	default:
@@ -366,6 +373,13 @@ func (proc *Processor) processSingleFile(
 	// Determine sample percentage based on skipHealthCheck
 	samplePercentage := proc.segmentSamplePercentage
 
+	// Create a granular progress tracker covering the 30–100% range.
+	var fileTracker *progress.Tracker
+	if proc.broadcaster != nil && proc.broadcaster.HasSubscribers() {
+		fileTracker = proc.broadcaster.CreateTracker(queueID, 30, 100)
+		fileTracker.WithStage("Validating segments")
+	}
+
 	// Process the single file at the resolved parentPath
 	result, writtenPath, err := singlefile.ProcessSingleFile(
 		ctx,
@@ -379,6 +393,7 @@ func (proc *Processor) processSingleFile(
 		samplePercentage,
 		allowedExtensions,
 		timeout,
+		fileTracker,
 	)
 	var writtenPaths []string
 	if writtenPath != "" {
@@ -459,6 +474,13 @@ func (proc *Processor) processMultiFile(
 	// Determine sample percentage based on skipHealthCheck
 	samplePercentage := proc.segmentSamplePercentage
 
+	// Create a granular progress tracker covering the 30–100% range.
+	var fileTracker *progress.Tracker
+	if proc.broadcaster != nil && proc.broadcaster.HasSubscribers() {
+		fileTracker = proc.broadcaster.CreateTracker(queueID, 30, 100)
+		fileTracker.WithStage("Validating segments")
+	}
+
 	// Process all regular files
 	writtenPaths, err := multifile.ProcessRegularFiles(
 		ctx,
@@ -472,6 +494,7 @@ func (proc *Processor) processMultiFile(
 		samplePercentage,
 		allowedExtensions,
 		timeout,
+		fileTracker,
 	)
 	if err != nil {
 		return "", writtenPaths, err
@@ -542,19 +565,20 @@ func (proc *Processor) processRarArchive(
 			proc.segmentSamplePercentage,
 			allowedExtensions,
 			proc.validationTimeout,
+			nil, // No progress tracker for pre-archive regular files
 		); err != nil {
 			slog.DebugContext(ctx, "Failed to process regular files", "error", err)
 		}
 	}
 
 	if len(archiveFiles) > 0 {
-		proc.updateProgress(queueID, 50)
-
 		// Lazy tracker allocation: nil *progress.Tracker is safe (nil-receiver guard).
 		var archiveProgressTracker, validationProgressTracker *progress.Tracker
 		if proc.broadcaster != nil && proc.broadcaster.HasSubscribers() {
-			archiveProgressTracker = proc.broadcaster.CreateTracker(queueID, 50, 80)
+			archiveProgressTracker = proc.broadcaster.CreateTracker(queueID, 15, 80)
+			archiveProgressTracker.WithStage("Analyzing archive")
 			validationProgressTracker = proc.broadcaster.CreateTracker(queueID, 80, 95)
+			validationProgressTracker.WithStage("Verifying archive")
 		}
 
 		releaseDate := archiveFiles[0].ReleaseDate.Unix()
@@ -653,18 +677,19 @@ func (proc *Processor) processSevenZipArchive(
 			proc.segmentSamplePercentage,
 			allowedExtensions,
 			proc.validationTimeout,
+			nil, // No progress tracker for pre-archive regular files
 		); err != nil {
 			slog.DebugContext(ctx, "Failed to process regular files", "error", err)
 		}
 	}
 
 	if len(archiveFiles) > 0 {
-		proc.updateProgress(queueID, 50)
-
 		var archiveProgressTracker, validationProgressTracker *progress.Tracker
 		if proc.broadcaster != nil && proc.broadcaster.HasSubscribers() {
-			archiveProgressTracker = proc.broadcaster.CreateTracker(queueID, 50, 80)
+			archiveProgressTracker = proc.broadcaster.CreateTracker(queueID, 15, 80)
+			archiveProgressTracker.WithStage("Analyzing archive")
 			validationProgressTracker = proc.broadcaster.CreateTracker(queueID, 80, 95)
+			validationProgressTracker.WithStage("Verifying archive")
 		}
 
 		releaseDate := archiveFiles[0].ReleaseDate.Unix()

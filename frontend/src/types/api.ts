@@ -48,6 +48,7 @@ export interface QueueItem {
 	metadata?: string;
 	file_size?: number;
 	percentage?: number; // Progress percentage (0-100), only present for items being processed
+	stage?: string; // Human-readable stage label (e.g. "Validating segments"), injected client-side from live progress
 }
 
 export interface ProgressUpdate {

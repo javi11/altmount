@@ -17,6 +17,7 @@ import (
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/progress"
 	concpool "github.com/sourcegraph/conc/pool"
 )
 
@@ -39,6 +40,7 @@ func ProcessRegularFiles(
 	segmentSamplePercentage int,
 	allowedFileExtensions []string,
 	timeout time.Duration,
+	tracker *progress.Tracker,
 ) ([]string, error) {
 	if len(files) == 0 {
 		return nil, nil
@@ -60,12 +62,26 @@ func ProcessRegularFiles(
 		})
 	}
 
+	// Pre-compute per-file segment offsets for cumulative progress reporting.
+	// Each file gets an OffsetTracker so parallel validations report additive progress.
+	var totalSegments int
+	fileOffsets := make([]int, len(files))
+	for i, f := range files {
+		fileOffsets[i] = totalSegments
+		totalSegments += len(f.Segments)
+	}
+
 	var writtenPaths []string
 	var writtenPathsMu sync.Mutex
 
 	pl := concpool.New().WithErrors().WithFirstError().WithMaxGoroutines(maxConcurrentFileValidations)
 
-	for _, file := range files {
+	for i, file := range files {
+		fileOffset := fileOffsets[i]
+		var fileTracker progress.ProgressTracker
+		if tracker != nil && totalSegments > 0 {
+			fileTracker = progress.NewOffsetTracker(tracker, fileOffset, totalSegments)
+		}
 		pl.Go(func() error {
 			parentPath, filename := filesystem.DetermineFileLocation(file, virtualDir)
 
@@ -98,7 +114,7 @@ func ProcessRegularFiles(
 				poolManager,
 				maxValidationGoroutines,
 				segmentSamplePercentage,
-				nil, // No progress callback for multi-file imports
+				fileTracker,
 				timeout,
 			); err != nil {
 				return err
