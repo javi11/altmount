@@ -129,6 +129,8 @@ type ImportService interface {
 	SetArrsService(service any)
 	// RegisterConfigChangeHandler registers a handler for configuration changes
 	RegisterConfigChangeHandler(configManager any)
+	// RegenerateMetadata attempts to rebuild metadata for a file by finding its original NZB
+	RegenerateMetadata(ctx context.Context, mountRelativePath string) error
 }
 
 // FileSizeCalculator calculates file sizes for different file types

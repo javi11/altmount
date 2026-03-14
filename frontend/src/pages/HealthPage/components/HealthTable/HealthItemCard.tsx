@@ -24,11 +24,13 @@ interface HealthItemCardProps {
 	onRepair: (id: number) => void;
 	onDelete: (id: number) => void;
 	onUnmask: (id: number) => void;
+	onRegenerate?: (filePath: string) => void;
 	isCancelPending: boolean;
 	isDirectCheckPending: boolean;
 	isRepairPending: boolean;
 	isDeletePending: boolean;
 	isUnmaskPending: boolean;
+	isRegeneratePending?: boolean;
 }
 
 export const HealthItemCard = memo(function HealthItemCard({
@@ -41,11 +43,13 @@ export const HealthItemCard = memo(function HealthItemCard({
 	onRepair,
 	onDelete,
 	onUnmask,
+	onRegenerate,
 	isCancelPending,
 	isDirectCheckPending,
 	isRepairPending,
 	isDeletePending,
 	isUnmaskPending,
+	isRegeneratePending,
 }: HealthItemCardProps) {
 	const [isExpanded, setIsExpanded] = useState(false);
 
@@ -159,11 +163,13 @@ export const HealthItemCard = memo(function HealthItemCard({
 							isRepairPending={isRepairPending}
 							isDeletePending={isDeletePending}
 							isUnmaskPending={isUnmaskPending}
+							isRegeneratePending={isRegeneratePending}
 							onCancelCheck={onCancelCheck}
 							onManualCheck={onManualCheck}
 							onRepair={onRepair}
 							onDelete={onDelete}
 							onUnmask={onUnmask}
+							onRegenerate={onRegenerate}
 						/>
 					</div>
 				</div>

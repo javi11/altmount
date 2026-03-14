@@ -13,6 +13,7 @@ interface HealthTableRowProps {
 	isRepairPending: boolean;
 	isDeletePending: boolean;
 	isUnmaskPending: boolean;
+	isRegeneratePending?: boolean;
 	onSelectChange: (filePath: string, checked: boolean) => void;
 	onCancelCheck: (id: number) => void;
 	onManualCheck: (id: number) => void;
@@ -20,6 +21,7 @@ interface HealthTableRowProps {
 	onDelete: (id: number) => void;
 	onUnmask: (id: number) => void;
 	onSetPriority: (id: number, priority: HealthPriority) => void;
+	onRegenerate?: (filePath: string) => void;
 }
 
 export const HealthTableRow = memo(function HealthTableRow({
@@ -30,6 +32,7 @@ export const HealthTableRow = memo(function HealthTableRow({
 	isRepairPending,
 	isDeletePending,
 	isUnmaskPending,
+	isRegeneratePending,
 	onSelectChange,
 	onCancelCheck,
 	onManualCheck,
@@ -37,6 +40,7 @@ export const HealthTableRow = memo(function HealthTableRow({
 	onDelete,
 	onUnmask,
 	onSetPriority,
+	onRegenerate,
 }: HealthTableRowProps) {
 	const getNextPriority = (current: HealthPriority): HealthPriority => {
 		switch (current) {
@@ -189,11 +193,13 @@ export const HealthTableRow = memo(function HealthTableRow({
 					isRepairPending={isRepairPending}
 					isDeletePending={isDeletePending}
 					isUnmaskPending={isUnmaskPending}
+					isRegeneratePending={isRegeneratePending}
 					onCancelCheck={onCancelCheck}
 					onManualCheck={onManualCheck}
 					onRepair={onRepair}
 					onDelete={onDelete}
 					onUnmask={onUnmask}
+					onRegenerate={onRegenerate}
 				/>
 			</td>
 		</tr>

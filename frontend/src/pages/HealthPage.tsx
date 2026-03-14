@@ -242,34 +242,43 @@ export function HealthPage() {
 		}
 	};
 
-	const handleRegenerateSymlinks = async () => {
-		const confirmed = await confirmAction(
-			"Regenerate Symlinks",
-			"This will regenerate symlinks for all files without library path. This operation is only available when import strategy is set to SYMLINK. Are you sure you want to continue?",
-			{
-				type: "info",
-				confirmText: "Regenerate",
-				confirmButtonClass: "btn-primary",
-			},
-		);
+	const handleRegenerateLibraryFiles = async (filePaths?: string[]) => {
+		const isBulk = filePaths && filePaths.length > 0;
+		const message = isBulk
+			? `This will regenerate library files for the ${filePaths.length} selected items. Are you sure?`
+			: "This will regenerate library files for all records in the database. Are you sure you want to continue?";
+
+		const confirmed = await confirmAction("Regenerate Library Files", message, {
+			type: "info",
+			confirmText: "Regenerate",
+			confirmButtonClass: "btn-primary",
+		});
 
 		if (confirmed) {
 			try {
-				const result = await regenerateSymlinks.mutateAsync();
+				const result = await regenerateSymlinks.mutateAsync(filePaths);
 				showToast({
-					title: "Symlinks Regenerated",
+					title: "Regeneration Complete",
 					message: result.message,
 					type: result.error_count > 0 ? "warning" : "success",
 				});
+				if (isBulk) {
+					setSelectedItems(new Set());
+				}
 			} catch (error) {
-				console.error("Failed to regenerate symlinks:", error);
+				console.error("Failed to regenerate library files:", error);
 				showToast({
 					title: "Regeneration Failed",
-					message: error instanceof Error ? error.message : "Failed to regenerate symlinks",
+					message: error instanceof Error ? error.message : "Failed to regenerate library files",
 					type: "error",
 				});
 			}
 		}
+	};
+
+	const handleBulkRegenerate = () => {
+		if (selectedItems.size === 0) return;
+		handleRegenerateLibraryFiles(Array.from(selectedItems));
 	};
 
 	const handleCleanupConfirm = async () => {
@@ -616,8 +625,8 @@ export function HealthPage() {
 								</button>
 							</li>
 							<li>
-								<button type="button" onClick={handleRegenerateSymlinks} className="gap-2">
-									<RefreshCw className="h-4 w-4" /> Regenerate Symlinks
+								<button type="button" onClick={() => handleRegenerateLibraryFiles()} className="gap-2">
+									<RefreshCw className="h-4 w-4" /> Regenerate Library Files
 								</button>
 							</li>
 						</ul>
@@ -742,10 +751,12 @@ export function HealthPage() {
 											isRestartPending={restartBulkItems.isPending}
 											isDeletePending={deleteBulkItems.isPending}
 											isRepairPending={repairBulkItems.isPending}
+											isRegeneratePending={regenerateSymlinks.isPending}
 											onClearSelection={() => setSelectedItems(new Set())}
 											onBulkRestart={handleBulkRestart}
 											onBulkDelete={handleBulkDelete}
 											onBulkRepair={handleBulkRepair}
+											onBulkRegenerate={handleBulkRegenerate}
 										/>
 
 										<div className="mt-6">
@@ -771,6 +782,7 @@ export function HealthPage() {
 												onDelete={handleDelete}
 												onUnmask={handleUnmask}
 												onSetPriority={handleSetPriority}
+												onRegenerate={(filePath: string) => handleRegenerateLibraryFiles([filePath])}
 											/>
 										</div>
 

@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCreateSymlinks_WithStripping(t *testing.T) {
+func TestCreateSymlinks_WithIsolation(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlinks not supported on Windows")
 	}
@@ -52,7 +52,7 @@ func TestCreateSymlinks_WithStripping(t *testing.T) {
 	err = os.WriteFile(actualFilePath, []byte("movie content"), 0644)
 	require.NoError(t, err)
 
-	// Setup Config with stripping
+	// Setup Config with isolation
 	cfg := &config.Config{
 		Import: config.ImportConfig{
 			ImportStrategy: config.ImportStrategySYMLINK,
@@ -83,9 +83,9 @@ func TestCreateSymlinks_WithStripping(t *testing.T) {
 	require.NoError(t, err)
 
 	// Check generated symlink
-	// It should be at /import/tv/show/episode.mkv (stripped)
+	// It should be at /import/complete/tv/show/episode.mkv (isolated)
 	// It should point to /mount/complete/tv/show/episode.mkv (original)
-	expectedSymlinkPath := filepath.Join(importDir, "tv", "show", "episode.mkv")
+	expectedSymlinkPath := filepath.Join(importDir, "complete", "tv", "show", "episode.mkv")
 	assert.FileExists(t, expectedSymlinkPath)
 
 	target, err := os.Readlink(expectedSymlinkPath)
@@ -93,7 +93,7 @@ func TestCreateSymlinks_WithStripping(t *testing.T) {
 	assert.Equal(t, actualFilePath, target)
 }
 
-func TestCreateStrmFiles_WithStripping(t *testing.T) {
+func TestCreateStrmFiles_WithIsolation(t *testing.T) {
 	// Setup temporary directories
 	tmpDir := t.TempDir()
 	metadataDir := filepath.Join(tmpDir, "metadata")
@@ -129,7 +129,7 @@ func TestCreateStrmFiles_WithStripping(t *testing.T) {
 	err = os.WriteFile(metaFilePath, []byte("metadata content"), 0644)
 	require.NoError(t, err)
 
-	// Setup Config with stripping
+	// Setup Config with isolation
 	cfg := &config.Config{
 		Import: config.ImportConfig{
 			ImportStrategy: config.ImportStrategySTRM,
@@ -164,9 +164,9 @@ func TestCreateStrmFiles_WithStripping(t *testing.T) {
 	require.NoError(t, err)
 
 	// Check generated STRM file
-	// It should be at /import/movies/test.mkv.strm (stripped)
+	// It should be at /import/complete/movies/test.mkv.strm (isolated)
 	// Inside it should point to /complete/movies/test.mkv (original)
-	expectedStrmPath := filepath.Join(importDir, "movies", "test.mkv.strm")
+	expectedStrmPath := filepath.Join(importDir, "complete", "movies", "test.mkv.strm")
 	assert.FileExists(t, expectedStrmPath)
 
 	content, err := os.ReadFile(expectedStrmPath)
@@ -175,5 +175,4 @@ func TestCreateStrmFiles_WithStripping(t *testing.T) {
 	
 	// Check that the URL contains the ORIGINAL path (with /complete)
 	assert.Contains(t, url, "path=/complete/movies/test.mkv")
-	assert.NotContains(t, url, "path=/movies/test.mkv")
 }

@@ -377,6 +377,7 @@ func startHealthWorker(
 	configManager *config.Manager,
 	rcloneClient rclonecli.RcloneRcClient,
 	arrsService *arrs.Service,
+	importerService importer.ImportService,
 	broadcaster *progress.ProgressBroadcaster,
 ) (*health.HealthWorker, *health.LibrarySyncWorker, error) {
 	// Create metadata service for health worker
@@ -396,6 +397,7 @@ func startHealthWorker(
 		healthRepo,
 		metadataService,
 		arrsService,
+		importerService,
 		configManager.GetConfigGetter(),
 		broadcaster,
 	)

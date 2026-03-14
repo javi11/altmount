@@ -25,6 +25,7 @@ type ConfigInstance struct {
 // ConfigManager interface defines methods needed for configuration management
 type ConfigManager interface {
 	GetConfig() *config.Config
+	GetConfigGetter() config.ConfigGetter
 	UpdateConfig(config *config.Config) error
 	SaveConfig() error
 }

@@ -101,7 +101,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// 5. Initialize importer and filesystem
 
-	arrsService := arrs.NewService(configManager.GetConfigGetter(), configManager, repos.UserRepo)
+	arrsService := arrs.NewService(configManager.GetConfigGetter(), configManager, repos.UserRepo, repos.MainRepo)
 
 	// Create progress broadcaster for WebSocket progress updates
 	progressBroadcaster := progress.NewProgressBroadcaster()
@@ -165,7 +165,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	webdav.RegisterConfigHandlers(ctx, configManager, webdavHandler)
 	api.RegisterLogLevelHandler(ctx, configManager, debugMode)
 
-	healthWorker, librarySyncWorker, err := startHealthWorker(ctx, cfg, repos.HealthRepo, poolManager, configManager, rcloneRCClient, arrsService, progressBroadcaster)
+	healthWorker, librarySyncWorker, err := startHealthWorker(ctx, cfg, repos.HealthRepo, poolManager, configManager, rcloneRCClient, arrsService, importerService, progressBroadcaster)
 	if err != nil {
 		logger.Warn("Health worker initialization failed", "err", err)
 	}

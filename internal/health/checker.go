@@ -74,13 +74,16 @@ func (hc *HealthChecker) CheckFile(ctx context.Context, filePath string, opts ..
 	// Get file metadata
 	fileMeta, err := hc.metadataService.ReadFileMetadata(filePath)
 	if err != nil {
-		return HealthEvent{
-			Type:      EventTypeCheckFailed,
+		event := HealthEvent{
+			Type:      EventTypeFileCorrupted,
 			FilePath:  filePath,
 			Status:    database.HealthStatusCorrupted,
 			Error:     fmt.Errorf("failed to read file metadata: %w", err),
 			Timestamp: time.Now(),
 		}
+		details := fmt.Sprintf(`{"error": "metadata_read_failed", "message": %q}`, err.Error())
+		event.Details = &details
+		return event
 	}
 	if fileMeta == nil {
 		// File not found - remove from health database
@@ -157,7 +160,7 @@ func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, f
 		cfg.GetMaxConnectionsForHealthChecks(),
 		samplePercentage,
 		nil, // No progress callback for health checks
-		30*time.Second,
+		cfg.GetHealthReadTimeout(),
 		verifyData,
 	)
 

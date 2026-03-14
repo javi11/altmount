@@ -226,27 +226,6 @@ export function ImportConfigSection({
 							<input
 								type="checkbox"
 								className="toggle toggle-primary toggle-sm mt-1 shrink-0"
-								checked={formData.skip_health_check ?? false}
-								disabled={isReadOnly}
-								onChange={(e) => handleInputChange("skip_health_check", e.target.checked)}
-							/>
-							<div className="min-w-0 flex-1">
-								<span className="block whitespace-normal break-words font-bold text-xs">
-									Lenient Import (Instant)
-								</span>
-								<span className="mt-1 block whitespace-normal break-words text-base-content/50 text-xs leading-relaxed">
-									Bypass validation entirely for immediate exposure in the library. Recommended only
-									for high-completion providers.
-								</span>
-							</div>
-						</label>
-
-						<div className="divider text-base-content/70" />
-
-						<label className="label cursor-pointer items-start justify-start gap-4">
-							<input
-								type="checkbox"
-								className="toggle toggle-primary toggle-sm mt-1 shrink-0"
 								checked={formData.allow_nested_rar_extraction ?? true}
 								disabled={isReadOnly}
 								onChange={(e) => handleInputChange("allow_nested_rar_extraction", e.target.checked)}

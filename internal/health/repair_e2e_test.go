@@ -11,6 +11,7 @@ import (
 	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/importer"
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
@@ -55,6 +56,15 @@ func (m *mockARRsService) TriggerFileRescan(_ context.Context, pathForRescan str
 	return m.returnErr
 }
 
+// mockImportService implements importer.ImportService for testing.
+type mockImportService struct {
+	importer.ImportService
+}
+
+func (m *mockImportService) RegenerateMetadata(_ context.Context, _ string) error {
+	return nil
+}
+
 // repairTestEnv holds all the pieces needed for repair e2e tests.
 type repairTestEnv struct {
 	db              *sql.DB
@@ -94,6 +104,12 @@ func newRepairTestEnv(t *testing.T, tempDir string, arrsErr error) *repairTestEn
 			streaming_failure_count INTEGER DEFAULT 0,
 			is_masked BOOLEAN DEFAULT FALSE
 		);
+
+		CREATE TABLE IF NOT EXISTS system_state (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
 	`)
 	require.NoError(t, err)
 
@@ -103,6 +119,7 @@ func newRepairTestEnv(t *testing.T, tempDir string, arrsErr error) *repairTestEn
 	healthEnabled := true
 	cfg := config.DefaultConfig()
 	cfg.Health.Enabled = &healthEnabled
+	cfg.Health.MaxRetries = 3
 	cfg.Metadata.RootPath = tempDir
 	cfg.MountPath = "/mnt/test"
 	cfg.Health.MaxConcurrentJobs = 1
@@ -115,6 +132,7 @@ func newRepairTestEnv(t *testing.T, tempDir string, arrsErr error) *repairTestEn
 	configManager := config.NewManager(cfg, "")
 
 	mockARRs := &mockARRsService{returnErr: arrsErr}
+	mockImporter := &mockImportService{}
 
 	healthChecker := NewHealthChecker(
 		healthRepo,
@@ -129,6 +147,7 @@ func newRepairTestEnv(t *testing.T, tempDir string, arrsErr error) *repairTestEn
 		healthRepo,
 		metadataService,
 		mockARRs,
+		mockImporter,
 		configManager.GetConfig,
 		nil,
 	)
