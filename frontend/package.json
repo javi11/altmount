@@ -14,6 +14,7 @@
 		"@hookform/resolvers": "^5.2.1",
 		"@tanstack/react-query": "^5.85.5",
 		"@tanstack/react-query-devtools": "^5.85.5",
+		"@tanstack/react-virtual": "^3.13.22",
 		"clsx": "^2.1.1",
 		"date-fns": "^3.0.0",
 		"lucide-react": "^0.540.0",

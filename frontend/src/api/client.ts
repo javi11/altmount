@@ -41,6 +41,14 @@ import type {
 } from "../types/config";
 import type { UpdateChannel, UpdateStatusResponse } from "../types/update";
 
+export interface LogEntry {
+	time: string;
+	level: string;
+	msg: string;
+	attrs?: Record<string, unknown>;
+	[key: string]: unknown;
+}
+
 export class APIError extends Error {
 	public status: number;
 	public details: string;
@@ -946,6 +954,14 @@ export class APIClient {
 			method: "POST",
 			body: JSON.stringify({ channel }),
 		});
+	}
+
+	async getLogs(params?: { level?: string; limit?: number }): Promise<LogEntry[]> {
+		const searchParams = new URLSearchParams();
+		if (params?.level) searchParams.set("level", params.level);
+		if (params?.limit) searchParams.set("limit", params.limit.toString());
+		const query = searchParams.toString();
+		return this.request<LogEntry[]>(`/logs${query ? `?${query}` : ""}`);
 	}
 }
 

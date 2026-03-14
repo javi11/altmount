@@ -1,7 +1,7 @@
 package slogutil
 
 import (
-	"io"
+	"context"
 	"log/slog"
 	"os"
 	"strings"
@@ -9,6 +9,47 @@ import (
 	"github.com/javi11/altmount/internal/config"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
+
+// multiHandler fans out slog records to multiple handlers.
+type multiHandler struct {
+	handlers []slog.Handler
+}
+
+func (m multiHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	for _, h := range m.handlers {
+		if h.Enabled(ctx, level) {
+			return true
+		}
+	}
+	return false
+}
+
+func (m multiHandler) Handle(ctx context.Context, r slog.Record) error {
+	for _, h := range m.handlers {
+		if h.Enabled(ctx, r.Level) {
+			if err := h.Handle(ctx, r.Clone()); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (m multiHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	handlers := make([]slog.Handler, len(m.handlers))
+	for i, h := range m.handlers {
+		handlers[i] = h.WithAttrs(attrs)
+	}
+	return multiHandler{handlers: handlers}
+}
+
+func (m multiHandler) WithGroup(name string) slog.Handler {
+	handlers := make([]slog.Handler, len(m.handlers))
+	for i, h := range m.handlers {
+		handlers[i] = h.WithGroup(name)
+	}
+	return multiHandler{handlers: handlers}
+}
 
 type Format string
 
@@ -66,41 +107,46 @@ func parseLevel(level string) slog.Leveler {
 	}
 }
 
-// SetupLogRotation configures slog with log rotation using lumberjack
-// If logConfig.File is empty, it logs to console only
-// If logConfig.File is configured, it logs to both console and file
-// Returns the configured logger
-func SetupLogRotation(logConfig config.LogConfig) *slog.Logger {
-	var writer io.Writer = os.Stdout
-
-	// If log file is configured, set up dual logging (console + file with rotation)
+// GetLogFilePath returns the resolved log file path.
+// If logConfig.File is empty, it returns the default "activity.log".
+func GetLogFilePath(logConfig config.LogConfig) string {
 	if logConfig.File != "" {
-		fileWriter := &lumberjack.Logger{
-			Filename:   logConfig.File,
-			MaxSize:    logConfig.MaxSize,    // MB
-			MaxBackups: logConfig.MaxBackups, // number of old files
-			MaxAge:     logConfig.MaxAge,     // days
-			Compress:   logConfig.Compress,   // compress old files
-		}
-		// Use io.MultiWriter to write to both console and file
-		writer = io.MultiWriter(os.Stdout, fileWriter)
+		return logConfig.File
+	}
+	return "activity.log"
+}
+
+// SetupLogRotation configures slog with log rotation using lumberjack.
+// Always logs to both stdout (text format) and a file (JSON format).
+// The file path defaults to "activity.log" if logConfig.File is empty.
+func SetupLogRotation(logConfig config.LogConfig) *slog.Logger {
+	logFile := GetLogFilePath(logConfig)
+
+	fileWriter := &lumberjack.Logger{
+		Filename:   logFile,
+		MaxSize:    logConfig.MaxSize,    // MB
+		MaxBackups: logConfig.MaxBackups, // number of old files
+		MaxAge:     logConfig.MaxAge,     // days
+		Compress:   logConfig.Compress,   // compress old files
 	}
 
-	// Determine log level (prefer new config.Log.Level over old config.LogLevel)
+	// Determine log level
 	level := logConfig.Level
 	if level == "" {
-		level = "info" // fallback default
+		level = "info"
 	}
 
-	// Create handler with the writer and level
-	handler := slog.NewTextHandler(writer, &slog.HandlerOptions{
+	opts := &slog.HandlerOptions{
 		Level: parseLevel(level),
-	})
+	}
 
-	// Wrap handler to support context data extraction
-	wrappedHandler := WrapHandler(handler)
+	// Text handler for human-readable stdout, JSON handler for machine-readable file.
+	textHandler := slog.NewTextHandler(os.Stdout, opts)
+	jsonHandler := slog.NewJSONHandler(fileWriter, opts)
 
-	return slog.New(wrappedHandler)
+	combined := multiHandler{handlers: []slog.Handler{textHandler, jsonHandler}}
+
+	return slog.New(WrapHandler(combined))
 }
 
 // SetupLogRotationWithFallback sets up log rotation with backward compatibility

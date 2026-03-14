@@ -148,6 +148,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	stremioCleanup.StartCleanup(ctx)
 
 	apiServer := setupAPIServer(app, repos, authService, configManager, metadataReader, metadataService, fs, poolManager, importerService, arrsService, mountService, progressBroadcaster, streamTracker, segcacheMgr)
+	apiServer.SetLogFilePath(slogutil.GetLogFilePath(cfg.Log))
 
 	webdavHandler, err := setupWebDAV(cfg, fs, authService, repos.UserRepo, configManager, streamTracker)
 	if err != nil {
