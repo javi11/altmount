@@ -62,13 +62,16 @@ export function ImportStatusCard({ className }: ImportStatusCardProps) {
 			let count = 0;
 
 			for (const item of processingQueue.data) {
-				const percent = liveProgress[item.id] ?? item.percentage ?? 0;
+				const entry = liveProgress[item.id];
+				const percent = entry?.percentage ?? item.percentage ?? 0;
 				totalPercent += percent;
 				count++;
 			}
 
 			const avgPercent = count > 0 ? Math.round(totalPercent / count) : 0;
 			const topItem = processingQueue.data[0];
+			const topEntry = liveProgress[topItem.id];
+			const stage = count === 1 ? topEntry?.stage : undefined;
 			const displayName = topItem.target_path
 				? topItem.target_path.split("/").pop()
 				: topItem.nzb_path.split("/").pop();
@@ -77,8 +80,13 @@ export function ImportStatusCard({ className }: ImportStatusCardProps) {
 				title: "Queue Import",
 				icon: <Download className="h-8 w-8 text-info" />,
 				progress: avgPercent,
-				detail: count > 1 ? `${count} items processing` : displayName,
-				status: count > 1 ? `${avgPercent}% (avg)` : `${avgPercent}%`,
+				detail: count > 1 ? `${count} items processing` : (stage ?? displayName),
+				status:
+					count > 1
+						? `${avgPercent}% (avg)`
+						: stage
+							? `${avgPercent}% · ${stage}`
+							: `${avgPercent}%`,
 				color: "progress-info",
 			};
 		}

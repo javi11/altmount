@@ -1,18 +1,25 @@
 import { useEffect, useRef, useState } from "react";
 
+export interface ProgressEntry {
+	percentage: number;
+	stage?: string;
+}
+
 interface ProgressUpdate {
 	queue_id: number;
 	percentage: number;
+	stage?: string;
+	status?: string;
 	timestamp: string;
 }
 
 interface ProgressData {
 	type: "initial" | "update";
-	data: Record<number, number> | ProgressUpdate;
+	data: Record<number, ProgressEntry> | ProgressUpdate;
 }
 
 interface UseProgressStreamReturn {
-	progress: Record<number, number>;
+	progress: Record<number, ProgressEntry>;
 	isConnected: boolean;
 	error: Error | null;
 }
@@ -28,7 +35,7 @@ interface UseProgressStreamOptions {
  */
 export function useProgressStream(options: UseProgressStreamOptions = {}): UseProgressStreamReturn {
 	const { enabled = true } = options;
-	const [progress, setProgress] = useState<Record<number, number>>({});
+	const [progress, setProgress] = useState<Record<number, ProgressEntry>>({});
 	const [isConnected, setIsConnected] = useState(false);
 	const [error, setError] = useState<Error | null>(null);
 	const eventSourceRef = useRef<EventSource | null>(null);
@@ -59,7 +66,7 @@ export function useProgressStream(options: UseProgressStreamOptions = {}): UsePr
 			}
 
 			try {
-				const eventSource = new EventSource("/api/queue/progress/stream");
+				const eventSource = new EventSource("/api/queue/stream");
 				eventSourceRef.current = eventSource;
 
 				eventSource.onopen = () => {
@@ -75,10 +82,21 @@ export function useProgressStream(options: UseProgressStreamOptions = {}): UsePr
 
 						if (data.type === "initial") {
 							// Initial state: replace all progress
-							setProgress(data.data as Record<number, number>);
+							setProgress(data.data as Record<number, ProgressEntry>);
 						} else if (data.type === "update") {
 							// Incremental update: merge with existing state
 							const update = data.data as ProgressUpdate;
+
+							// Skip non-progress sentinel events
+							if (
+								update.status === "queue_changed" ||
+								update.status === "completed" ||
+								update.status === "failed" ||
+								update.status === "health_changed"
+							) {
+								return;
+							}
+
 							setProgress((prev) => {
 								const newProgress = { ...prev };
 
@@ -86,7 +104,10 @@ export function useProgressStream(options: UseProgressStreamOptions = {}): UsePr
 								if (update.percentage >= 100) {
 									delete newProgress[update.queue_id];
 								} else {
-									newProgress[update.queue_id] = update.percentage;
+									newProgress[update.queue_id] = {
+										percentage: update.percentage,
+										stage: update.stage,
+									};
 								}
 
 								return newProgress;

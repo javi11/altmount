@@ -2,6 +2,7 @@ package par2
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -143,7 +144,7 @@ func readFileDescriptors(
 		// Read packet header
 		header, err := packetReader.ReadHeader()
 		if err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				break
 			}
 

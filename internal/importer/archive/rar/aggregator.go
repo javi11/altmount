@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/javi11/altmount/internal/encryption/aes"
@@ -161,14 +162,31 @@ func ProcessArchive(
 
 	// Group archive files by their base name to handle NZBs with multiple separate RAR archives
 	archiveGroups := GroupArchivesByBaseName(archiveFiles)
+
+	type groupResult struct {
+		contents  []Content
+		err       error
+		firstName string
+	}
+	groupResults := make([]groupResult, len(archiveGroups))
+	var wg sync.WaitGroup
+	for i, group := range archiveGroups {
+		wg.Add(1)
+		go func(idx int, g []parser.ParsedFile) {
+			defer wg.Done()
+			groupContents, err := rarProcessor.AnalyzeRarContentFromNzb(ctx, g, password, archiveProgressTracker)
+			groupResults[idx] = groupResult{groupContents, err, g[0].Filename}
+		}(i, group)
+	}
+	wg.Wait()
+
 	var rarContents []Content
-	for _, group := range archiveGroups {
-		groupContents, err := rarProcessor.AnalyzeRarContentFromNzb(ctx, group, password, archiveProgressTracker)
-		if err != nil {
-			slog.ErrorContext(ctx, "Failed to analyze RAR archive group", "error", err, "first_file", group[0].Filename)
-			return err
+	for _, r := range groupResults {
+		if r.err != nil {
+			slog.ErrorContext(ctx, "Failed to analyze RAR archive group", "error", r.err, "first_file", r.firstName)
+			return r.err
 		}
-		rarContents = append(rarContents, groupContents...)
+		rarContents = append(rarContents, r.contents...)
 	}
 
 	// Expand ISO files found inside the RAR archive into their inner media files
