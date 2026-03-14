@@ -380,7 +380,7 @@ export function QueuePage() {
 											type="button"
 											onClick={handleClearCompleted}
 											className="text-success"
-											disabled={!stats || stats.total_completed === 0 || clearCompleted.isPending}
+											disabled={clearCompleted.isPending}
 										>
 											<Trash2 className="h-4 w-4" /> Clear Completed
 										</button>
@@ -390,7 +390,7 @@ export function QueuePage() {
 											type="button"
 											onClick={handleClearPending}
 											className="text-warning"
-											disabled={!stats || stats.total_queued === 0 || clearPending.isPending}
+											disabled={clearPending.isPending}
 										>
 											<Trash2 className="h-4 w-4" /> Clear Pending
 										</button>
@@ -400,7 +400,7 @@ export function QueuePage() {
 											type="button"
 											onClick={handleClearFailed}
 											className="text-error"
-											disabled={!stats || stats.total_failed === 0 || clearFailed.isPending}
+											disabled={clearFailed.isPending}
 										>
 											<Trash2 className="h-4 w-4" /> Clear Failed
 										</button>

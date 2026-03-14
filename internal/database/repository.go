@@ -400,6 +400,16 @@ func (r *Repository) RemoveFromQueue(ctx context.Context, id int64) error {
 	return nil
 }
 
+// RemoveFromHistoryByNzbID removes a record from import_history by its original NZB ID
+func (r *Repository) RemoveFromHistoryByNzbID(ctx context.Context, nzbID int64) error {
+	query := `DELETE FROM import_history WHERE nzb_id = ?`
+	_, err := r.db.ExecContext(ctx, query, nzbID)
+	if err != nil {
+		return fmt.Errorf("failed to remove from history: %w", err)
+	}
+	return nil
+}
+
 // BulkDeleteResult contains the result of a bulk delete operation
 type BulkDeleteResult struct {
 	DeletedCount    int64
@@ -1022,6 +1032,43 @@ func (r *Repository) ListImportHistory(ctx context.Context, limit, offset int, s
 	return history, rows.Err()
 }
 
+// ListRecentImportHistory retrieves import history items completed within the last N minutes.
+func (r *Repository) ListRecentImportHistory(ctx context.Context, minutes int, category string) ([]*ImportHistory, error) {
+	var cutoffExpr string
+	if r.dialect.IsPostgres() {
+		cutoffExpr = fmt.Sprintf("NOW() - INTERVAL '%d minutes'", minutes)
+	} else {
+		cutoffExpr = fmt.Sprintf("datetime('now', '-%d minutes')", minutes)
+	}
+
+	query := fmt.Sprintf(`
+		SELECT h.id, h.nzb_id, h.nzb_name, h.file_name, h.file_size, h.virtual_path, f.library_path, h.category, h.completed_at
+		FROM import_history h
+		LEFT JOIN file_health f ON h.virtual_path = f.file_path
+		WHERE h.completed_at >= %s
+		  AND (? = '' OR h.category = ?)
+		ORDER BY h.completed_at DESC
+	`, cutoffExpr)
+
+	rows, err := r.db.QueryContext(ctx, query, category, category)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list recent import history: %w", err)
+	}
+	defer rows.Close()
+
+	var history []*ImportHistory
+	for rows.Next() {
+		var h ImportHistory
+		err := rows.Scan(&h.ID, &h.NzbID, &h.NzbName, &h.FileName, &h.FileSize, &h.VirtualPath, &h.LibraryPath, &h.Category, &h.CompletedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan import history: %w", err)
+		}
+		history = append(history, &h)
+	}
+
+	return history, rows.Err()
+}
+
 // GetImportDailyStats retrieves import statistics for the specified number of days
 func (r *Repository) GetImportDailyStats(ctx context.Context, days int) ([]*ImportDailyStat, error) {
 	cutoff := time.Now().UTC().AddDate(0, 0, -days).Format("2006-01-02")
@@ -1406,11 +1453,30 @@ func (r *Repository) ClearDailyStats(ctx context.Context) error {
 	return r.ClearHourlyStats(ctx)
 }
 
+// ClearDailyStatsSince deletes records from the import_daily_stats table since the specified time
+func (r *Repository) ClearDailyStatsSince(ctx context.Context, since time.Time) error {
+	day := since.Format("2006-01-02")
+	query := `DELETE FROM import_daily_stats WHERE day >= ?`
+	if _, err := r.db.ExecContext(ctx, query, day); err != nil {
+		return fmt.Errorf("failed to clear daily stats since: %w", err)
+	}
+	return r.ClearHourlyStatsSince(ctx, since)
+}
+
 // ClearHourlyStats deletes all records from the import_hourly_stats table
 func (r *Repository) ClearHourlyStats(ctx context.Context) error {
 	queryHourly := `DELETE FROM import_hourly_stats`
 	if _, err := r.db.ExecContext(ctx, queryHourly); err != nil {
 		return fmt.Errorf("failed to clear hourly stats: %w", err)
+	}
+	return nil
+}
+
+// ClearHourlyStatsSince deletes records from the import_hourly_stats table since the specified time
+func (r *Repository) ClearHourlyStatsSince(ctx context.Context, since time.Time) error {
+	query := `DELETE FROM import_hourly_stats WHERE hour >= ?`
+	if _, err := r.db.ExecContext(ctx, query, since); err != nil {
+		return fmt.Errorf("failed to clear hourly stats since: %w", err)
 	}
 	return nil
 }

@@ -71,6 +71,29 @@ func (c *Config) GetCheckAllSegments() bool {
 	return *c.Health.CheckAllSegments
 }
 
+// GetHealthReadTimeout returns the health check read timeout as a duration with a default fallback.
+func (c *Config) GetHealthReadTimeout() time.Duration {
+	if c.Health.ReadTimeoutSeconds <= 0 {
+		return 30 * time.Second // Default: 30 seconds
+	}
+	return time.Duration(c.Health.ReadTimeoutSeconds) * time.Second
+}
+
+// GetMaxRetries returns the maximum number of health check retries.
+func (c *Config) GetMaxRetries() int {
+	if c.Health.MaxRetries <= 0 {
+		return 2 // Default: 2 retries
+	}
+	return c.Health.MaxRetries
+}
+
+// GetMaxRepairRetries returns the maximum number of repair notification retries.
+func (c *Config) GetMaxRepairRetries() int {
+	if c.Health.Repair.MaxRepairRetries <= 0 {
+		return 3 // Default: 3 retries
+	}
+	return c.Health.Repair.MaxRepairRetries
+}
 // Import config accessor methods.
 
 // GetMaxImportConnections returns max import connections with a default fallback.

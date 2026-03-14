@@ -81,8 +81,19 @@ func ValidateSegmentList(
 	pl := concpool.New().WithErrors().WithFirstError().WithMaxGoroutines(maxConnections)
 	for _, seg := range segments {
 		pl.Go(func() error {
-			checkCtx, cancel := context.WithTimeout(ctx, timeout)
+			checkCtx, cancel := context.WithCancel(ctx)
 			defer cancel()
+
+			// Add timeout to our cancelable context
+			go func() {
+				timer := time.NewTimer(timeout)
+				defer timer.Stop()
+				select {
+				case <-checkCtx.Done():
+				case <-timer.C:
+					cancel()
+				}
+			}()
 
 			var err error
 			if verifyData {
@@ -95,7 +106,9 @@ func ValidateSegmentList(
 
 				if err == nil {
 					poolManager.IncArticlesDownloaded()
-					poolManager.UpdateDownloadProgress("", lw.read)
+					// Report the full segment size as progress, even if we only read 1 byte to verify it.
+					// This prevents the system from thinking the segment is only 1 byte large.
+					poolManager.UpdateDownloadProgress("", seg.SegmentSize)
 					if !lw.hasData {
 						err = fmt.Errorf("segment with ID %s contains only zero bytes", seg.Id)
 					}
@@ -177,8 +190,19 @@ func ValidateSegmentAvailabilityDetailed(
 	pl := concpool.New().WithErrors().WithMaxGoroutines(maxConnections)
 	for _, seg := range segmentsToValidate {
 		pl.Go(func() error {
-			checkCtx, cancel := context.WithTimeout(ctx, timeout)
+			checkCtx, cancel := context.WithCancel(ctx)
 			defer cancel()
+
+			// Add timeout to our cancelable context
+			go func() {
+				timer := time.NewTimer(timeout)
+				defer timer.Stop()
+				select {
+				case <-checkCtx.Done():
+				case <-timer.C:
+					cancel()
+				}
+			}()
 
 			var err error
 			if verifyData {
@@ -191,7 +215,9 @@ func ValidateSegmentAvailabilityDetailed(
 
 				if err == nil {
 					poolManager.IncArticlesDownloaded()
-					poolManager.UpdateDownloadProgress("", lw.read)
+					// Report the full segment size as progress, even if we only read 1 byte to verify it.
+					// This prevents the system from thinking the segment is only 1 byte large.
+					poolManager.UpdateDownloadProgress("", seg.SegmentSize)
 					if !lw.hasData {
 						err = fmt.Errorf("segment with ID %s contains only zero bytes", seg.Id)
 					}

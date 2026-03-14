@@ -61,6 +61,12 @@ func TestSyncLibrary_WorkerPool(t *testing.T) {
 			streaming_failure_count INTEGER DEFAULT 0,
 			is_masked BOOLEAN DEFAULT FALSE
 		);
+
+		CREATE TABLE IF NOT EXISTS system_state (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
 	`)
 	require.NoError(t, err)
 
@@ -139,13 +145,13 @@ func TestFindFilesToDelete_RepairTriggered(t *testing.T) {
 		"deleted.mkv":   "path/to/meta/deleted.mkv.meta",
 	}
 
-	filesInUse := map[string]string{
-		"movie.mkv": "path/to/lib/link",
-		// repairing.mkv is MISSING from filesInUse (simulating ARR deleted it)
-		// deleted.mkv is MISSING from filesInUse
+	filesInLibrary := map[string]bool{
+		"movie.mkv": true,
+		// repairing.mkv is MISSING from filesInLibrary (simulating ARR deleted it)
+		// deleted.mkv is MISSING from filesInLibrary
 	}
 
-	toDelete := worker.findFilesToDelete(context.Background(), dbRecords, metaFileSet, filesInUse)
+	toDelete := worker.findFilesToDelete(context.Background(), dbRecords, metaFileSet, filesInLibrary)
 
 	// repairing.mkv should be protected by its status
 	// deleted.mkv should be marked for deletion

@@ -647,20 +647,54 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 		}
 	}
 
-	// Get completed items
+	// Get completed items from active queue (not yet deleted)
 	completedStatus := database.QueueStatusCompleted
-	completed, err := s.queueRepo.ListQueueItems(c.Context(), &completedStatus, "", categoryFilter, limit, start, "updated_at", "desc")
+	completedQueueItems, err := s.queueRepo.ListQueueItems(c.Context(), &completedStatus, "", categoryFilter, limit, start, "updated_at", "desc")
 	if err != nil {
-		return s.writeSABnzbdErrorFiber(c, "Failed to get completed items")
+		return s.writeSABnzbdErrorFiber(c, "Failed to get completed items from queue")
 	}
 
-	// Get total completed count
-	totalCompleted, err := s.queueRepo.CountQueueItems(c.Context(), &completedStatus, "", categoryFilter)
+	// Get recent items from persistent history (buffer for Sonarr)
+	// We look back 24 hours to be safe
+	recentHistory, err := s.queueRepo.ListRecentImportHistory(c.Context(), 1440, categoryFilter)
 	if err != nil {
-		totalCompleted = len(completed)
+		recentHistory = []*database.ImportHistory{} // Fallback
 	}
 
-	// Get failed items
+	// Combine and deduplicate by NZB Name
+	// Priority goes to items still in the queue (as they have more metadata)
+	seenNames := make(map[string]bool)
+	finalItems := make([]*database.ImportQueueItem, 0)
+
+	for _, item := range completedQueueItems {
+		name := filepath.Base(item.NzbPath)
+		if !seenNames[name] {
+			finalItems = append(finalItems, item)
+			seenNames[name] = true
+		}
+	}
+
+	for _, item := range recentHistory {
+		if !seenNames[item.NzbName] {
+			id := item.ID
+			if item.NzbID != nil {
+				id = *item.NzbID
+			}
+			qItem := &database.ImportQueueItem{
+				ID:          id,
+				NzbPath:     item.NzbName,
+				Status:      database.QueueStatusCompleted,
+				FileSize:    &item.FileSize,
+				CompletedAt: &item.CompletedAt,
+				Category:    item.Category,
+				StoragePath: &item.VirtualPath,
+			}
+			finalItems = append(finalItems, qItem)
+			seenNames[item.NzbName] = true
+		}
+	}
+
+	// Get failed items from active queue
 	failedStatus := database.QueueStatusFailed
 	failed, err := s.queueRepo.ListQueueItems(c.Context(), &failedStatus, "", categoryFilter, limit, start, "updated_at", "desc")
 	if err != nil {
@@ -674,20 +708,16 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 	}
 
 	// Combine and convert to SABnzbd format
-	slots := make([]SABnzbdHistorySlot, 0, len(completed)+len(failed))
+	slots := make([]SABnzbdHistorySlot, 0, len(finalItems)+len(failed))
 	index := 0
 	var totalBytes int64
 
-	for _, item := range completed {
-		// Calculate category-specific base path for this item
+	for _, item := range finalItems {
+		// Calculate category-specific base path
 		itemBasePath := s.calculateItemBasePath()
 		finalPath := s.calculateHistoryStoragePath(item, itemBasePath)
 
 		slot := ToSABnzbdHistorySlot(item, start+index, finalPath)
-		slog.DebugContext(c.Context(), "Reporting completed item to SABnzbd API",
-			"name", slot.Name,
-			"path", slot.Path,
-			"status", slot.Status)
 		slots = append(slots, slot)
 		totalBytes += slot.Bytes
 		index++
@@ -712,7 +742,7 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 			WeekSize:  "0 B",
 			Version:   "4.5.0",
 			DaySize:   "0 B",
-			Noofslots: totalCompleted + totalFailed,
+			Noofslots: len(finalItems) + totalFailed,
 		},
 	}
 
@@ -740,13 +770,21 @@ func (s *Server) handleSABnzbdHistoryDelete(c *fiber.Ctx) error {
 	// Delete from queue (history items are still queue items with completed/failed status)
 	err = s.queueRepo.RemoveFromQueue(c.Context(), id)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		// If not in active queue, it might be in persistent history
+		histErr := s.queueRepo.RemoveFromHistoryByNzbID(c.Context(), id)
+
+		if errors.Is(err, sql.ErrNoRows) && histErr == nil {
 			return s.writeSABnzbdResponseFiber(c, SABnzbdDeleteResponse{
 				Status: true,
 			})
 		}
 
-		return s.writeSABnzbdErrorFiber(c, fmt.Sprintf("Failed to delete history item: %v", err))
+		if !errors.Is(err, sql.ErrNoRows) {
+			return s.writeSABnzbdErrorFiber(c, fmt.Sprintf("Failed to delete history item: %v", err))
+		}
+	} else {
+		// Also remove from history if it existed there
+		_ = s.queueRepo.RemoveFromHistoryByNzbID(c.Context(), id)
 	}
 
 	response := SABnzbdDeleteResponse{
@@ -1089,90 +1127,51 @@ func (s *Server) calculateHistoryStoragePath(item *database.ImportQueueItem, bas
 		category = *item.Category
 	}
 
-	// Get the raw relative path by stripping the mount path
-	resultingPath := storagePath
-	if after, ok := strings.CutPrefix(storagePath, cfg.MountPath); ok {
-		resultingPath = after
-	}
+	// 1. Get the internal relative path (relative to FUSE mount)
+	relPath := strings.TrimPrefix(storagePath, "/")
 
-	// For Strategy None, it relies on complete_dir, but we also want the relative job folder path.
-	if cfg.Import.ImportStrategy == config.ImportStrategyNone {
-		pathComponents := []string{cfg.MountPath}
-
-		if cfg.SABnzbd.CompleteDir != "" {
-			pathComponents = append(pathComponents, strings.TrimPrefix(cfg.SABnzbd.CompleteDir, "/"))
-		}
-
-		// The virtual file system places files directly inside the category folder
-		// under the complete directory. The file itself might be in a job folder.
-
-		// Ensure category is respected
-		cleanPath := strings.TrimPrefix(resultingPath, "/")
-		if cfg.SABnzbd.CompleteDir != "" {
-			cleanCompleteDir := strings.TrimPrefix(cfg.SABnzbd.CompleteDir, "/")
-			if after, ok := strings.CutPrefix(cleanPath, cleanCompleteDir+"/"); ok {
-				cleanPath = after
-			} else if cleanPath == cleanCompleteDir {
-				cleanPath = ""
-			}
-		}
-
-		if !strings.HasPrefix(cleanPath, category+"/") && cleanPath != category {
-			pathComponents = append(pathComponents, category)
-		}
-
-		fullPath := filepath.Join(append(pathComponents, cleanPath)...)
-		fullPath = filepath.ToSlash(filepath.Clean(fullPath))
-
-		// We only want to report the directory, not the actual file
-		// Since some files might not have popular extensions or might be folders,
-		// we check if it is explicitly a file based on PopularExtensions.
-		if utils.HasPopularExtension(fullPath) {
-			return filepath.Dir(fullPath)
-		}
-		return fullPath
-	}
-
-	// For explicit import strategies (symlink, hardlink, copy, move, strm),
-	// the post-processor strips complete_dir and places it into {ImportDir}/{Category}/{RelativeJobFolder}.
-
-	// Strip SABnzbd CompleteDir prefix from resultingPath if present
+	// 2. Strip any existing /complete or /category prefix from the internal path to start clean
 	if cfg.SABnzbd.CompleteDir != "" {
-		completeDir := filepath.ToSlash(cfg.SABnzbd.CompleteDir)
-		if !strings.HasPrefix(completeDir, "/") {
-			completeDir = "/" + completeDir
+		completeDir := strings.Trim(filepath.ToSlash(cfg.SABnzbd.CompleteDir), "/")
+		if after, ok := strings.CutPrefix(relPath, completeDir+"/"); ok {
+			relPath = after
+		} else if relPath == completeDir {
+			relPath = ""
 		}
+	}
+	if after, ok := strings.CutPrefix(relPath, category+"/"); ok {
+		relPath = after
+	} else if relPath == category {
+		relPath = ""
+	}
 
-		checkPath := resultingPath
-		if !strings.HasPrefix(checkPath, "/") {
-			checkPath = "/" + checkPath
-		}
-
-		if strings.HasPrefix(checkPath, completeDir) {
-			if len(checkPath) == len(completeDir) {
-				resultingPath = "/"
-			} else if checkPath[len(completeDir)] == '/' {
-				resultingPath = checkPath[len(completeDir):]
-			}
+	// 3. Determine the base path for reporting
+	// For NONE, use MountPath. For others, use ImportDir.
+	finalBasePath := cfg.MountPath
+	if cfg.Import.ImportStrategy != config.ImportStrategyNone {
+		if cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
+			finalBasePath = *cfg.Import.ImportDir
 		}
 	}
 
-	// Ensure the resulting path respects the category
-	cleanPath := strings.TrimPrefix(resultingPath, "/")
-	if !strings.HasPrefix(cleanPath, category+"/") && cleanPath != category {
-		resultingPath = filepath.Join(category, cleanPath)
+	// 4. Build the clean, isolated reporting path
+	// Construct: Base + CompleteDir + Category + RelPath
+	pathParts := []string{finalBasePath}
+	if cfg.SABnzbd.CompleteDir != "" {
+		pathParts = append(pathParts, strings.Trim(cfg.SABnzbd.CompleteDir, "/"))
 	}
+	pathParts = append(pathParts, category)
+	pathParts = append(pathParts, relPath)
 
-	// Determine the base path for these strategies
-	stratBasePath := cfg.MountPath
-	if cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
-		stratBasePath = *cfg.Import.ImportDir
-	}
-
-	fullStoragePath := filepath.Join(stratBasePath, strings.TrimPrefix(resultingPath, "/"))
+	fullStoragePath := filepath.Join(pathParts...)
 	fullStoragePath = filepath.ToSlash(filepath.Clean(fullStoragePath))
 
-	// Return the directory, not the file
+	// Return the full file path for SYMLINK/STRM to help Arrs find it immediately.
+	// Otherwise return directory.
+	if cfg.Import.ImportStrategy == config.ImportStrategySYMLINK || cfg.Import.ImportStrategy == config.ImportStrategySTRM {
+		return fullStoragePath
+	}
+
 	if utils.HasPopularExtension(fullStoragePath) {
 		return filepath.Dir(fullStoragePath)
 	}

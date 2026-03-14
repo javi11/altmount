@@ -1,0 +1,104 @@
+time=2026-03-12T21:48:50.218Z level=INFO msg="OK   001_initial_schema.sql (7.89ms)"
+time=2026-03-12T21:48:50.227Z level=INFO msg="OK   002_add_repair_retry_system.sql (7.21ms)"
+time=2026-03-12T21:48:50.228Z level=INFO msg="OK   003_add_file_id_column.sql (937.73µs)"
+time=2026-03-12T21:48:50.231Z level=INFO msg="OK   004_remove_partial_status.sql (2.93ms)"
+time=2026-03-12T21:48:50.233Z level=INFO msg="OK   005_add_health_scheduling_fields.sql (1.51ms)"
+time=2026-03-12T21:48:50.234Z level=INFO msg="OK   006_remove_next_retry_at.sql (1.37ms)"
+time=2026-03-12T21:48:50.235Z level=INFO msg="OK   007_add_library_path.sql (352.87µs)"
+time=2026-03-12T21:48:50.235Z level=INFO msg="OK   008_add_priority_column.sql (252.52µs)"
+time=2026-03-12T21:48:50.235Z level=INFO msg="EMPTY 009_update_priority_to_integer.sql (35.64µs)"
+time=2026-03-12T21:48:50.235Z level=INFO msg="OK   010_add_nzbdav_id_index.sql (101.4µs)"
+time=2026-03-12T21:48:50.235Z level=INFO msg="OK   011_add_system_stats_table.sql (144.46µs)"
+time=2026-03-12T21:48:50.236Z level=INFO msg="OK   012_add_system_state_table.sql (128.01µs)"
+time=2026-03-12T21:48:50.236Z level=INFO msg="OK   013_add_import_daily_stats.sql (155.8µs)"
+time=2026-03-12T21:48:50.236Z level=INFO msg="OK   014_add_import_history.sql (221.19µs)"
+time=2026-03-12T21:48:50.236Z level=INFO msg="OK   015_add_bytes_to_daily_stats.sql (290.74µs)"
+time=2026-03-12T21:48:50.236Z level=INFO msg="OK   016_add_import_hourly_stats.sql (143.79µs)"
+time=2026-03-12T21:48:50.237Z level=INFO msg="OK   017_add_failure_masking.sql (587.37µs)"
+time=2026-03-12T21:48:50.237Z level=INFO msg="goose: successfully migrated database to version: 17"
+time=2026-03-12T21:48:50.238Z level=INFO msg="Starting server without NNTP providers - configure via API to enable downloads"
+time=2026-03-12T21:48:50.238Z level=INFO msg="RClone RC notifications disabled"
+time=2026-03-12T21:48:50.239Z level=INFO msg="Updated database connection pool" component=importer-service workers=2 max_connections=6
+time=2026-03-12T21:48:50.240Z level=INFO msg="Queue manager started" component=queue-manager workers=2
+time=2026-03-12T21:48:50.240Z level=INFO msg="NZB import service started successfully with 2 workers" component=importer-service
+time=2026-03-12T21:48:50.240Z level=INFO msg="Segment cache disabled"
+time=2026-03-12T21:48:50.240Z level=INFO msg="Authentication service initialized"
+time=2026-03-12T21:48:50.242Z level=INFO msg="Health system disabled - no health monitoring or repairs will occur"
+time=2026-03-12T21:48:50.244Z level=INFO msg="ARR queue cleanup disabled (ARRs disabled)"
+time=2026-03-12T21:48:50.244Z level=INFO msg="Arrs service is disabled in configuration"
+time=2026-03-12T21:48:50.244Z level=INFO msg="AltMount server started" port=8080 webdav_path=/webdav api_path=/api providers=0 processor_workers=2
+time=2026-03-12T21:48:52.245Z level=INFO msg="RClone mount service is disabled in configuration"
+time=2026-03-12T21:48:55.245Z level=WARN msg="No admin API key found, skipping automatic webhook registration"
+time=2026-03-12T21:49:56.262Z level=INFO msg="Received shutdown signal" signal=terminated
+time=2026-03-12T21:49:56.262Z level=INFO msg="Starting graceful shutdown sequence"
+time=2026-03-12T21:49:56.262Z level=ERROR msg="Failed to stop health worker" error="health worker not running"
+time=2026-03-12T21:49:56.262Z level=INFO msg="Shutting down server..."
+time=2026-03-12T21:49:56.262Z level=INFO msg="Server shutdown completed"
+time=2026-03-12T21:49:56.263Z level=INFO msg="AltMount server shutdown completed successfully"
+time=2026-03-12T21:49:56.263Z level=INFO msg="Closing importer service"
+time=2026-03-12T21:49:56.263Z level=INFO msg="Stopping NZB import service" component=importer-service
+time=2026-03-12T21:49:56.263Z level=INFO msg="Stopping queue manager" component=queue-manager
+time=2026-03-12T21:49:56.263Z level=INFO msg="Queue worker stopped" component=queue-manager worker_id=1
+time=2026-03-12T21:49:56.263Z level=INFO msg="Queue worker stopped" component=queue-manager worker_id=0
+time=2026-03-12T21:49:56.263Z level=INFO msg="Queue manager stopped" component=queue-manager
+time=2026-03-12T21:49:56.263Z level=INFO msg="NZB import service stopped" component=importer-service
+time=2026-03-12T21:49:56.263Z level=INFO msg="Clearing NNTP pool"
+time=2026-03-12T21:49:56.263Z level=INFO msg="Closing database"
+time=2026-03-12T21:57:58.894Z level=INFO msg="goose: no migrations to run. current version: 17"
+time=2026-03-12T21:57:58.894Z level=INFO msg="Starting server without NNTP providers - configure via API to enable downloads"
+time=2026-03-12T21:57:58.894Z level=INFO msg="RClone RC notifications disabled"
+time=2026-03-12T21:57:58.894Z level=INFO msg="Updated database connection pool" component=importer-service workers=2 max_connections=6
+time=2026-03-12T21:57:58.894Z level=INFO msg="Queue manager started" component=queue-manager workers=2
+time=2026-03-12T21:57:58.894Z level=INFO msg="NZB import service started successfully with 2 workers" component=importer-service
+time=2026-03-12T21:57:58.894Z level=INFO msg="Segment cache disabled"
+time=2026-03-12T21:57:58.895Z level=INFO msg="Authentication service initialized"
+time=2026-03-12T21:57:58.895Z level=INFO msg="Health system disabled - no health monitoring or repairs will occur"
+time=2026-03-12T21:57:58.895Z level=INFO msg="ARR queue cleanup disabled (ARRs disabled)"
+time=2026-03-12T21:57:58.895Z level=INFO msg="Arrs service is disabled in configuration"
+time=2026-03-12T21:57:58.895Z level=INFO msg="AltMount server started" port=8080 webdav_path=/webdav api_path=/api providers=0 processor_workers=2
+time=2026-03-12T21:58:00.896Z level=INFO msg="RClone mount service is disabled in configuration"
+time=2026-03-12T21:58:03.899Z level=WARN msg="No admin API key found, skipping automatic webhook registration"
+time=2026-03-12T22:03:56.166Z level=INFO msg="Received shutdown signal" signal=terminated
+time=2026-03-12T22:03:56.167Z level=INFO msg="Starting graceful shutdown sequence"
+time=2026-03-12T22:03:56.167Z level=ERROR msg="Failed to stop health worker" error="health worker not running"
+time=2026-03-12T22:03:56.167Z level=INFO msg="Shutting down server..."
+time=2026-03-12T22:03:56.167Z level=INFO msg="Server shutdown completed"
+time=2026-03-12T22:03:56.167Z level=INFO msg="AltMount server shutdown completed successfully"
+time=2026-03-12T22:03:56.167Z level=INFO msg="Closing importer service"
+time=2026-03-12T22:03:56.167Z level=INFO msg="Stopping NZB import service" component=importer-service
+time=2026-03-12T22:03:56.167Z level=INFO msg="Stopping queue manager" component=queue-manager
+time=2026-03-12T22:03:56.167Z level=INFO msg="Queue worker stopped" component=queue-manager worker_id=0
+time=2026-03-12T22:03:56.167Z level=INFO msg="Queue worker stopped" component=queue-manager worker_id=1
+time=2026-03-12T22:03:56.167Z level=INFO msg="Queue manager stopped" component=queue-manager
+time=2026-03-12T22:03:56.167Z level=INFO msg="NZB import service stopped" component=importer-service
+time=2026-03-12T22:03:56.167Z level=INFO msg="Clearing NNTP pool"
+time=2026-03-12T22:03:56.167Z level=INFO msg="Closing database"
+time=2026-03-13T02:05:43.815Z level=INFO msg="goose: no migrations to run. current version: 17"
+time=2026-03-13T02:05:43.815Z level=INFO msg="Starting server without NNTP providers - configure via API to enable downloads"
+time=2026-03-13T02:05:43.815Z level=INFO msg="RClone RC notifications disabled"
+time=2026-03-13T02:05:43.816Z level=INFO msg="Updated database connection pool" component=importer-service workers=2 max_connections=6
+time=2026-03-13T02:05:43.816Z level=INFO msg="Queue manager started" component=queue-manager workers=2
+time=2026-03-13T02:05:43.816Z level=INFO msg="NZB import service started successfully with 2 workers" component=importer-service
+time=2026-03-13T02:05:43.816Z level=INFO msg="Segment cache disabled"
+time=2026-03-13T02:05:43.816Z level=INFO msg="Authentication service initialized"
+time=2026-03-13T02:05:43.816Z level=INFO msg="Health system disabled - no health monitoring or repairs will occur"
+time=2026-03-13T02:05:43.816Z level=INFO msg="ARR queue cleanup disabled (ARRs disabled)"
+time=2026-03-13T02:05:43.816Z level=INFO msg="Arrs service is disabled in configuration"
+time=2026-03-13T02:05:43.816Z level=INFO msg="AltMount server started" port=8080 webdav_path=/webdav api_path=/api providers=0 processor_workers=2
+time=2026-03-13T02:05:45.817Z level=INFO msg="RClone mount service is disabled in configuration"
+time=2026-03-13T02:05:48.817Z level=WARN msg="No admin API key found, skipping automatic webhook registration"
+time=2026-03-13T02:07:10.345Z level=INFO msg="Received shutdown signal" signal=terminated
+time=2026-03-13T02:07:10.346Z level=INFO msg="Starting graceful shutdown sequence"
+time=2026-03-13T02:07:10.346Z level=ERROR msg="Failed to stop health worker" error="health worker not running"
+time=2026-03-13T02:07:10.346Z level=INFO msg="Shutting down server..."
+time=2026-03-13T02:07:10.346Z level=INFO msg="Server shutdown completed"
+time=2026-03-13T02:07:10.346Z level=INFO msg="AltMount server shutdown completed successfully"
+time=2026-03-13T02:07:10.346Z level=INFO msg="Closing importer service"
+time=2026-03-13T02:07:10.346Z level=INFO msg="Stopping NZB import service" component=importer-service
+time=2026-03-13T02:07:10.346Z level=INFO msg="Stopping queue manager" component=queue-manager
+time=2026-03-13T02:07:10.346Z level=INFO msg="Queue worker stopped" component=queue-manager worker_id=0
+time=2026-03-13T02:07:10.346Z level=INFO msg="Queue worker stopped" component=queue-manager worker_id=1
+time=2026-03-13T02:07:10.346Z level=INFO msg="Queue manager stopped" component=queue-manager
+time=2026-03-13T02:07:10.346Z level=INFO msg="NZB import service stopped" component=importer-service
+time=2026-03-13T02:07:10.346Z level=INFO msg="Clearing NNTP pool"
+time=2026-03-13T02:07:10.346Z level=INFO msg="Closing database"
