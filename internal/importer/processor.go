@@ -363,7 +363,7 @@ func (proc *Processor) processSingleFile(
 	// Use the final name for processing
 	regularFiles[0].Filename = finalName
 
-	// Determine sample percentage based on skipHealthCheck
+	// Use configured sample percentage for validation
 	samplePercentage := proc.segmentSamplePercentage
 
 	// Process the single file at the resolved parentPath
@@ -456,7 +456,7 @@ func (proc *Processor) processMultiFile(
 		targetBaseDir = nzbFolder
 	}
 
-	// Determine sample percentage based on skipHealthCheck
+	// Use configured sample percentage for validation
 	samplePercentage := proc.segmentSamplePercentage
 
 	// Process all regular files

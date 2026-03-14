@@ -254,7 +254,6 @@ type ImportConfig struct {
 	ReadTimeoutSeconds             int            `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds"`
 	ImportStrategy                 ImportStrategy `yaml:"import_strategy" mapstructure:"import_strategy" json:"import_strategy"`
 	ImportDir                      *string        `yaml:"import_dir" mapstructure:"import_dir" json:"import_dir,omitempty"`
-	SkipHealthCheck                *bool          `yaml:"skip_health_check" mapstructure:"skip_health_check" json:"skip_health_check,omitempty"`
 	WatchDir                       *string        `yaml:"watch_dir" mapstructure:"watch_dir" json:"watch_dir,omitempty"`
 	WatchIntervalSeconds           *int           `yaml:"watch_interval_seconds" mapstructure:"watch_interval_seconds" json:"watch_interval_seconds,omitempty"`
 	AllowNestedRarExtraction       *bool          `yaml:"allow_nested_rar_extraction" mapstructure:"allow_nested_rar_extraction" json:"allow_nested_rar_extraction,omitempty"`
@@ -1153,7 +1152,6 @@ func DefaultConfig(configDir ...string) *Config {
 	loginRequired := true  // Require login by default
 	stremioEnabled := false   // Stremio endpoint disabled by default
 	prowlarrEnabled := false  // Prowlarr integration disabled by default
-	skipHealthCheck := true
 	watchIntervalSeconds := 10 // Default watch interval
 	cleanupAutomaticImportFailure := false
 	metadataBackupEnabled := false
@@ -1287,7 +1285,6 @@ func DefaultConfig(configDir ...string) *Config {
 			ReadTimeoutSeconds:      300,                // Default: 5 minutes read timeout
 			ImportStrategy:          ImportStrategyNone, // Default: no import strategy (direct import)
 			ImportDir:               nil,                // No default import directory
-			SkipHealthCheck:         &skipHealthCheck,
 			WatchDir:                nil,
 			WatchIntervalSeconds:    &watchIntervalSeconds,
 		},
