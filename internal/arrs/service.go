@@ -43,12 +43,12 @@ type Service struct {
 }
 
 // NewService creates a new arrs service for health monitoring and file repair
-func NewService(configGetter config.ConfigGetter, configManager model.ConfigManager, userRepo *database.UserRepository) *Service {
+func NewService(configGetter config.ConfigGetter, configManager model.ConfigManager, userRepo *database.UserRepository, queueRepo *database.Repository) *Service {
 	instManager := instances.NewManager(configGetter, configManager)
 	clientManager := clients.NewManager()
 	dataManager := data.NewManager()
 	scannerManager := scanner.NewManager(configGetter, instManager, clientManager, dataManager)
-	workerManager := worker.NewWorker(configGetter, instManager, clientManager, userRepo.GetRepository())
+	workerManager := worker.NewWorker(configGetter, instManager, clientManager, queueRepo)
 	registrarManager := registrar.NewManager(instManager, clientManager)
 
 	return &Service{
