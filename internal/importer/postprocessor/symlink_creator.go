@@ -29,40 +29,44 @@ func (c *Coordinator) CreateSymlinks(ctx context.Context, item *database.ImportQ
 	// Keep the original resulting path for metadata and actual mount path lookups
 	originalResultingPath := resultingPath
 
-	// Strip SABnzbd CompleteDir prefix from resultingPath if present
-	// This prevents creating nested "complete" folders in the symlink directory
-	if cfg.SABnzbd.CompleteDir != "" {
-		completeDir := filepath.ToSlash(cfg.SABnzbd.CompleteDir)
-		if !strings.HasPrefix(completeDir, "/") {
-			completeDir = "/" + completeDir
-		}
+	// 1. Get the internal relative path (relative to FUSE mount)
+	relPath := strings.TrimPrefix(resultingPath, "/")
 
-		// Ensure checkPath starts with / for reliable prefix checking
-		checkPath := resultingPath
-		if !strings.HasPrefix(checkPath, "/") {
-			checkPath = "/" + checkPath
-		}
-
-		if strings.HasPrefix(checkPath, completeDir) {
-			// Check for directory boundary
-			if len(checkPath) == len(completeDir) {
-				resultingPath = "/"
-			} else if checkPath[len(completeDir)] == '/' {
-				resultingPath = checkPath[len(completeDir):]
-			}
-		}
-	}
-
-	// Ensure the resulting path respects the category if provided
+	// 2. Strip any existing /complete or /category prefix from the internal path to start clean
+	category := ""
 	if item.Category != nil && *item.Category != "" {
-		category := strings.Trim(*item.Category, "/")
-		cleanPath := strings.TrimPrefix(resultingPath, "/")
+		category = strings.Trim(*item.Category, "/")
+	}
 
-		// If path doesn't start with category, prepend it
-		if !strings.HasPrefix(cleanPath, category+"/") && cleanPath != category {
-			resultingPath = filepath.Join(category, cleanPath)
+	if cfg.SABnzbd.CompleteDir != "" {
+		completeDir := strings.Trim(filepath.ToSlash(cfg.SABnzbd.CompleteDir), "/")
+		if after, ok := strings.CutPrefix(relPath, completeDir+"/"); ok {
+			relPath = after
+		} else if relPath == completeDir {
+			relPath = ""
 		}
 	}
+	if category != "" {
+		if after, ok := strings.CutPrefix(relPath, category+"/"); ok {
+			relPath = after
+		} else if relPath == category {
+			relPath = ""
+		}
+	}
+
+	// 3. Build the clean, isolated library path
+	// Construct: [CompleteDir] + [Category] + RelPath
+	pathParts := []string{}
+	if cfg.SABnzbd.CompleteDir != "" {
+		pathParts = append(pathParts, strings.Trim(cfg.SABnzbd.CompleteDir, "/"))
+	}
+	if category != "" {
+		pathParts = append(pathParts, category)
+	}
+	pathParts = append(pathParts, relPath)
+
+	resultingPath = filepath.Join(pathParts...)
+	resultingPath = filepath.ToSlash(filepath.Clean(resultingPath))
 
 	// Get the actual metadata/mount path (where the content actually lives)
 	actualPath := filepath.Join(cfg.MountPath, strings.TrimPrefix(originalResultingPath, "/"))
@@ -116,40 +120,44 @@ func (c *Coordinator) CreateSymlinks(ctx context.Context, item *database.ImportQ
 		// Build the actual file path in the mount
 		actualFilePath := filepath.Join(cfg.MountPath, strings.TrimPrefix(relPath, "/"))
 
-		// Build the symlink resulting path (stripped if needed)
-		symlinkResultingPath := relPath
-		if cfg.SABnzbd.CompleteDir != "" {
-			completeDir := filepath.ToSlash(cfg.SABnzbd.CompleteDir)
-			if !strings.HasPrefix(completeDir, "/") {
-				completeDir = "/" + completeDir
-			}
+		// 1. Get the internal relative path (relative to FUSE mount)
+		relPath = strings.TrimPrefix(relPath, "/")
 
-			// Ensure checkPath starts with / for reliable prefix checking
-			checkPath := symlinkResultingPath
-			if !strings.HasPrefix(checkPath, "/") {
-				checkPath = "/" + checkPath
-			}
-
-			if strings.HasPrefix(checkPath, completeDir) {
-				// Check for directory boundary
-				if len(checkPath) == len(completeDir) {
-					symlinkResultingPath = "/"
-				} else if checkPath[len(completeDir)] == '/' {
-					symlinkResultingPath = checkPath[len(completeDir):]
-				}
-			}
-		}
-
-		// Ensure the resulting path respects the category if provided
+		// 2. Strip any existing /complete or /category prefix from the internal path to start clean
+		category := ""
 		if item.Category != nil && *item.Category != "" {
-			category := strings.Trim(*item.Category, "/")
-			cleanPath := strings.TrimPrefix(symlinkResultingPath, "/")
+			category = strings.Trim(*item.Category, "/")
+		}
 
-			// If path doesn't start with category, prepend it
-			if !strings.HasPrefix(cleanPath, category+"/") && cleanPath != category {
-				symlinkResultingPath = filepath.Join(category, cleanPath)
+		if cfg.SABnzbd.CompleteDir != "" {
+			completeDir := strings.Trim(filepath.ToSlash(cfg.SABnzbd.CompleteDir), "/")
+			if after, ok := strings.CutPrefix(relPath, completeDir+"/"); ok {
+				relPath = after
+			} else if relPath == completeDir {
+				relPath = ""
 			}
 		}
+		if category != "" {
+			if after, ok := strings.CutPrefix(relPath, category+"/"); ok {
+				relPath = after
+			} else if relPath == category {
+				relPath = ""
+			}
+		}
+
+		// 3. Build the clean, isolated library path
+		// Construct: [CompleteDir] + [Category] + RelPath
+		pathParts := []string{}
+		if cfg.SABnzbd.CompleteDir != "" {
+			pathParts = append(pathParts, strings.Trim(cfg.SABnzbd.CompleteDir, "/"))
+		}
+		if category != "" {
+			pathParts = append(pathParts, category)
+		}
+		pathParts = append(pathParts, relPath)
+
+		symlinkResultingPath := filepath.Join(pathParts...)
+		symlinkResultingPath = filepath.ToSlash(filepath.Clean(symlinkResultingPath))
 
 		if err := c.createSingleSymlink(actualFilePath, symlinkResultingPath); err != nil {
 			c.log.ErrorContext(ctx, "Failed to create symlink",

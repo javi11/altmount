@@ -137,6 +137,11 @@ func isFileAlreadyProcessed(metadataService *metadata.MetadataService, filePath 
 	return false
 }
 
+// GetPostProcessor returns the post-processor coordinator
+func (s *Service) GetPostProcessor() *postprocessor.Coordinator {
+	return s.postProcessor
+}
+
 // Service provides NZB import functionality with manual directory scanning and queue-based processing
 type Service struct {
 	config          ServiceConfig
@@ -359,8 +364,9 @@ func (s *Service) IsPaused() bool {
 	return s.queueManager.IsPaused()
 }
 
-func (s *Service) RegisterConfigChangeHandler(configManager *config.Manager) {
-	configManager.OnConfigChange(func(oldConfig, newConfig *config.Config) {
+func (s *Service) RegisterConfigChangeHandler(configManager any) {
+	mgr := configManager.(*config.Manager)
+	mgr.OnConfigChange(func(oldConfig, newConfig *config.Config) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 
@@ -425,14 +431,18 @@ func (s *Service) IsRunning() bool {
 }
 
 // SetRcloneClient sets or updates the RClone client for VFS notifications
-func (s *Service) SetRcloneClient(client rclonecli.RcloneRcClient) {
+func (s *Service) SetRcloneClient(client any) {
+	var rc rclonecli.RcloneRcClient
+	if client != nil {
+		rc = client.(rclonecli.RcloneRcClient)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.rcloneClient = client
+	s.rcloneClient = rc
 	if s.postProcessor != nil {
-		s.postProcessor.SetRcloneClient(client)
+		s.postProcessor.SetRcloneClient(rc)
 	}
-	if client != nil {
+	if rc != nil {
 		s.log.InfoContext(s.ctx, "RClone client updated for VFS notifications")
 	} else {
 		s.log.InfoContext(s.ctx, "RClone client disabled")
@@ -440,12 +450,16 @@ func (s *Service) SetRcloneClient(client rclonecli.RcloneRcClient) {
 }
 
 // SetArrsService sets or updates the ARRs service
-func (s *Service) SetArrsService(service *arrs.Service) {
+func (s *Service) SetArrsService(service any) {
+	var as *arrs.Service
+	if service != nil {
+		as = service.(*arrs.Service)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.arrsService = service
+	s.arrsService = as
 	if s.postProcessor != nil {
-		s.postProcessor.SetArrsService(service)
+		s.postProcessor.SetArrsService(as)
 	}
 }
 
@@ -771,38 +785,20 @@ func (s *Service) calculateProcessVirtualDir(item *database.ImportQueueItem, bas
 	}
 	virtualDir = filepath.ToSlash(virtualDir)
 
-	// Prepend SABnzbd CompleteDir to virtualDir
 	cfg := s.configGetter()
-	if cfg.SABnzbd.CompleteDir != "" {
-		completeDir := filepath.ToSlash(cfg.SABnzbd.CompleteDir)
-		// Ensure completeDir is absolute for comparison
+	// ALWAYS prepend CompleteDir to isolate completed downloads from final library.
+	if cfg != nil && cfg.SABnzbd.CompleteDir != "" {
+		completeDir := strings.TrimRight(filepath.ToSlash(cfg.SABnzbd.CompleteDir), "/")
 		if !strings.HasPrefix(completeDir, "/") {
 			completeDir = "/" + completeDir
 		}
 
-		// Normalize virtualDir for comparison
-		vDir := filepath.ToSlash(virtualDir)
-		if !strings.HasPrefix(vDir, "/") {
-			vDir = "/" + vDir
-		}
-
-		// Check if virtualDir already starts with completeDir at a directory boundary
-		hasPrefix := false
-		if completeDir == "/" {
-			hasPrefix = true
-		} else if strings.HasPrefix(vDir, completeDir) {
-			if len(vDir) == len(completeDir) || vDir[len(completeDir)] == '/' {
-				hasPrefix = true
-			}
-		}
-
-		if !hasPrefix {
+		if completeDir != "/" && !strings.HasPrefix(virtualDir, completeDir+"/") && virtualDir != completeDir {
 			virtualDir = filepath.Join(completeDir, virtualDir)
-			virtualDir = filepath.ToSlash(virtualDir)
 		}
 	}
 
-	return virtualDir
+	return filepath.ToSlash(virtualDir)
 }
 
 // ensurePersistentNzb moves the NZB file to a persistent location in the metadata directory
@@ -1271,4 +1267,81 @@ func (s *Service) calculateStrmFileSize(r io.Reader) (int64, error) {
 	}
 
 	return 0, NewNonRetryableError("no valid NXG link found in STRM file", nil)
+}
+
+// RegenerateMetadata attempts to find the original NZB for a file and re-process it to fix corrupted metadata.
+func (s *Service) RegenerateMetadata(ctx context.Context, mountRelativePath string) error {
+	nzbFolder := s.GetNzbFolder()
+	if nzbFolder == "" {
+		return fmt.Errorf("NZB storage folder not configured")
+	}
+
+	// The mountRelativePath typically looks like:
+	// "complete/tv/Show.Name.S01E01.1080p.WEB-DL/Show.Name.S01E01.1080p.WEB-DL.mkv"
+	// or "tv/Show Name/Season 01/Show Name - S01E01.mkv"
+
+	// Try to extract the release name. For "complete/" files, it's the folder name.
+	releaseName := ""
+	if strings.HasPrefix(mountRelativePath, "complete/") {
+		parts := strings.Split(mountRelativePath, "/")
+		if len(parts) >= 3 {
+			releaseName = parts[2]
+		}
+	}
+
+	if releaseName == "" {
+		// Fallback: use the filename without extension
+		releaseName = filepath.Base(mountRelativePath)
+		releaseName = strings.TrimSuffix(releaseName, filepath.Ext(releaseName))
+	}
+
+	s.log.InfoContext(ctx, "Attempting to regenerate metadata", "path", mountRelativePath, "release_name", releaseName)
+
+	// Search for the NZB file in the .nzbs directory
+	var foundNzbPath string
+	err := filepath.WalkDir(nzbFolder, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+
+		filename := d.Name()
+		// Match release name (ignoring .nzb extension and queue ID prefix)
+		// NZBs are stored as "ID_ReleaseName.nzb" or just "ReleaseName.nzb"
+		cleanName := strings.TrimSuffix(filename, ".nzb")
+		if idx := strings.Index(cleanName, "_"); idx != -1 {
+			// Check both with and without prefix
+			if cleanName[idx+1:] == releaseName || cleanName == releaseName {
+				foundNzbPath = path
+				return filepath.SkipAll
+			}
+		} else if cleanName == releaseName {
+			foundNzbPath = path
+			return filepath.SkipAll
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to search for NZB: %w", err)
+	}
+
+	if foundNzbPath == "" {
+		return fmt.Errorf("could not find original NZB for release: %s", releaseName)
+	}
+
+	s.log.InfoContext(ctx, "Found original NZB, rebuilding metadata", "nzb_path", foundNzbPath)
+
+	// Determine virtual directory based on where the file was originally (e.g. "complete/tv")
+	virtualDir := filepath.ToSlash(filepath.Dir(mountRelativePath))
+
+	// Re-process the NZB file. We use a dummy queue ID.
+	// This will overwrite the existing .meta file.
+	_, _, err = s.processor.ProcessNzbFile(ctx, foundNzbPath, "", 0, nil, &virtualDir, nil, nil)
+	if err != nil {
+		return fmt.Errorf("failed to re-process NZB: %w", err)
+	}
+
+	s.log.InfoContext(ctx, "Successfully regenerated metadata", "path", mountRelativePath)
+	return nil
 }

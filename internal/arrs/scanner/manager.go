@@ -53,7 +53,43 @@ func (m *Manager) findInstanceForFilePath(ctx context.Context, filePath string, 
 		}
 	}
 
-	// Strategy 2: Slow Path - Search Cache by Relative Path
+	// Strategy 2: Category Match - Check if file is in the staging/complete folder
+	cfg := m.configGetter()
+	if cfg.SABnzbd.CompleteDir != "" {
+		completeDir := strings.TrimRight(filepath.ToSlash(cfg.SABnzbd.CompleteDir), "/")
+		if !strings.HasPrefix(completeDir, "/") {
+			completeDir = "/" + completeDir
+		}
+
+		normalizedPath := filepath.ToSlash(filePath)
+		if !strings.HasPrefix(normalizedPath, "/") {
+			normalizedPath = "/" + normalizedPath
+		}
+
+		// Check if path starts with complete_dir
+		if strings.HasPrefix(normalizedPath, completeDir+"/") {
+			// Extract category (e.g. /complete/tv/show -> tv)
+			afterPrefix := strings.TrimPrefix(normalizedPath, completeDir+"/")
+			parts := strings.Split(afterPrefix, "/")
+			if len(parts) > 0 {
+				category := parts[0]
+				slog.DebugContext(ctx, "File is in complete_dir, matching by category", "category", category)
+
+				for _, instance := range allInstances {
+					if !instance.Enabled {
+						continue
+					}
+
+					if strings.EqualFold(instance.Category, category) {
+						slog.InfoContext(ctx, "Found managing instance by category in complete_dir", "instance", instance.Name, "category", category)
+						return instance.Type, instance.Name, nil
+					}
+				}
+			}
+		}
+	}
+
+	// Strategy 3: Slow Path - Search Cache by Relative Path
 	if relativePath != "" {
 		slog.InfoContext(ctx, "Root folder match failed, attempting relative path search", "relative_path", relativePath)
 
@@ -385,15 +421,6 @@ func (m *Manager) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 					break
 				}
 			}
-		} else {
-			// Fallback: Check if the folder name matches the release name or if it's inside the movie folder
-			if strings.Contains(filePath, movie.Path) || strings.Contains(requestFileName, movie.Title) {
-				slog.InfoContext(ctx, "Found Radarr movie match by path/title fallback",
-					"movie", movie.Title,
-					"path", movie.Path)
-				targetMovie = movie
-				break
-			}
 		}
 	}
 
@@ -585,39 +612,6 @@ func (m *Manager) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 					"episode_file_id", targetEpisodeFile.ID,
 					"error", err)
 			}
-		}
-	}
-
-	if len(episodeIDs) == 0 {
-		// Fallback: Try to find episodes by parsing SxxExx from the filename
-		// This handles cases where Sonarr has already unlinked the file
-		fileName := filepath.Base(filePath)
-		slog.InfoContext(ctx, "No linked episodes found, attempting filename parsing fallback", "filename", fileName)
-
-		allSatisfied := true
-		for _, episode := range episodes {
-			// Construct SxxExx pattern (e.g. S01E01)
-			sxxExx := fmt.Sprintf("S%02dE%02d", episode.SeasonNumber, episode.EpisodeNumber)
-			if strings.Contains(strings.ToUpper(fileName), sxxExx) {
-				slog.InfoContext(ctx, "Found Sonarr episode match by filename pattern",
-					"pattern", sxxExx,
-					"episode_id", episode.ID)
-
-				// Check if this episode is already satisfied by a different healthy file
-				if !episode.HasFile || episode.EpisodeFileID == 0 {
-					allSatisfied = false
-				}
-
-				episodeIDs = append(episodeIDs, episode.ID)
-			}
-		}
-
-		// If we found episodes and ALL of them are already satisfied by other files,
-		// then this file is a "zombie" duplicate and can be safely deleted.
-		if len(episodeIDs) > 0 && allSatisfied {
-			slog.InfoContext(ctx, "All episodes in unlinked file are already satisfied by other files in Sonarr. Marking as zombie.",
-				"file_path", filePath)
-			return fmt.Errorf("file %s is a zombie: %w", filePath, model.ErrEpisodeAlreadySatisfied)
 		}
 	}
 

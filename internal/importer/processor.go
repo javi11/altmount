@@ -370,7 +370,7 @@ func (proc *Processor) processSingleFile(
 	// Use the final name for processing
 	regularFiles[0].Filename = finalName
 
-	// Determine sample percentage based on skipHealthCheck
+	// Use configured sample percentage for validation
 	samplePercentage := proc.segmentSamplePercentage
 
 	// Create a granular progress tracker covering the 30–100% range.
@@ -471,7 +471,7 @@ func (proc *Processor) processMultiFile(
 		targetBaseDir = nzbFolder
 	}
 
-	// Determine sample percentage based on skipHealthCheck
+	// Use configured sample percentage for validation
 	samplePercentage := proc.segmentSamplePercentage
 
 	// Create a granular progress tracker covering the 30–100% range.

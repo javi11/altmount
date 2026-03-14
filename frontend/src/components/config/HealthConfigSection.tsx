@@ -237,6 +237,27 @@ export function HealthConfigSection({
 										Maximum delay between repair attempts.
 									</p>
 								</fieldset>
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend font-semibold">Max Repair Retries</legend>
+									<input
+										type="number"
+										className="input input-bordered w-full bg-base-100 font-mono text-sm"
+										value={formData.repair?.max_repair_retries ?? 3}
+										disabled={isReadOnly}
+										onChange={(e) =>
+											handleRepairChange(
+												"max_repair_retries",
+												Number.parseInt(e.target.value, 10) || 0,
+											)
+										}
+										min="0"
+									/>
+									<p className="label break-words text-[10px] text-base-content/50">
+										Number of repair notification attempts before giving up.
+									</p>
+								</fieldset>
+
+
 							</div>
 
 							<div className="mt-6 flex items-start justify-between gap-4 rounded-xl bg-base-100/50 p-4">
@@ -486,6 +507,47 @@ export function HealthConfigSection({
 								</div>
 							</div>
 						)}
+
+						<div className="grid grid-cols-1 gap-6 pb-4 sm:grid-cols-2">
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend font-semibold">Max Health Retries</legend>
+								<input
+									type="number"
+									className="input input-bordered w-full bg-base-100 font-mono text-sm"
+									value={formData.max_retries ?? 2}
+									readOnly={isReadOnly}
+									min={0}
+									onChange={(e) =>
+										handleInputChange(
+											"max_retries",
+											Number.parseInt(e.target.value, 10) || 0,
+										)
+									}
+								/>
+								<p className="label break-words text-base-content/70 text-xs">
+									Number of retries before marking a file as corrupted.
+								</p>
+							</fieldset>
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend font-semibold">Read Timeout (Sec)</legend>
+								<input
+									type="number"
+									className="input input-bordered w-full bg-base-100 font-mono text-sm"
+									value={formData.read_timeout_seconds ?? 30}
+									readOnly={isReadOnly}
+									min={1}
+									onChange={(e) =>
+										handleInputChange(
+											"read_timeout_seconds",
+											Number.parseInt(e.target.value, 10) || 30,
+										)
+									}
+								/>
+								<p className="label break-words text-base-content/70 text-xs">
+									Timeout for reading segments from Usenet.
+								</p>
+							</fieldset>
+						</div>
 
 						<div className="grid grid-cols-1 gap-6 pb-4 sm:grid-cols-2">
 							<fieldset className="fieldset">

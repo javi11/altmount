@@ -13,6 +13,7 @@ import (
 	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/importer"
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pathutil"
@@ -56,6 +57,7 @@ type HealthWorker struct {
 	healthRepo          *database.HealthRepository
 	metadataService     *metadata.MetadataService
 	arrsService         ARRsRepairService
+	importerService     importer.ImportService
 	configGetter        config.ConfigGetter
 	progressBroadcaster *progress.ProgressBroadcaster // optional, may be nil
 
@@ -82,6 +84,7 @@ func NewHealthWorker(
 	healthRepo *database.HealthRepository,
 	metadataService *metadata.MetadataService,
 	arrsService ARRsRepairService,
+	importerService importer.ImportService,
 	configGetter config.ConfigGetter,
 	broadcaster *progress.ProgressBroadcaster,
 ) *HealthWorker {
@@ -90,6 +93,7 @@ func NewHealthWorker(
 		healthRepo:          healthRepo,
 		metadataService:     metadataService,
 		arrsService:         arrsService,
+		importerService:     importerService,
 		configGetter:        configGetter,
 		progressBroadcaster: broadcaster,
 		status:              WorkerStatusStopped,
@@ -433,7 +437,7 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 
 	switch fh.Status {
 	case database.HealthStatusRepairTriggered:
-		if fh.RepairRetryCount >= fh.MaxRepairRetries-1 {
+		if fh.RepairRetryCount >= hw.configGetter().GetMaxRepairRetries()-1 {
 			update.Type = database.UpdateTypeCorrupted
 			update.Status = database.HealthStatusCorrupted
 			sideEffect = func() error {
@@ -472,7 +476,7 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 
 	default:
 		// Regular health check phase
-		if fh.RetryCount >= fh.MaxRetries-1 {
+		if fh.RetryCount >= hw.configGetter().GetMaxRetries()-1 {
 			update.Type = database.UpdateTypeRepairTrigger
 			update.Status = database.HealthStatusRepairTriggered
 			update.ScheduledCheckAt = time.Now().UTC().Add(hw.configGetter().GetRepairInterval())
@@ -513,7 +517,7 @@ func (hw *HealthWorker) prepareRepairNotificationUpdate(ctx context.Context, fh 
 		FilePath: fh.FilePath,
 	}
 
-	if fh.RepairRetryCount >= fh.MaxRepairRetries-1 {
+	if fh.RepairRetryCount >= hw.configGetter().GetMaxRepairRetries()-1 {
 		// Retries exhausted — give up and mark corrupted.
 		update.Type = database.UpdateTypeCorrupted
 		update.Status = database.HealthStatusCorrupted
@@ -653,9 +657,16 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 	})
 
 	maxJobs := hw.getMaxConcurrentJobs()
+	cfg := hw.configGetter()
+	strategy := string(cfg.Import.ImportStrategy)
+	libraryDir := ""
+	if cfg.Health.LibraryDir != nil {
+		libraryDir = *cfg.Health.LibraryDir
+	}
 
 	// Get files due for checking (ordered by scheduled_check_at)
-	unhealthyFiles, err := hw.healthRepo.GetUnhealthyFiles(ctx, maxJobs)
+	// New logic: Only check files with library_path (imported) unless strategy is NONE
+	unhealthyFiles, err := hw.healthRepo.GetUnhealthyFiles(ctx, maxJobs, strategy, libraryDir, hw.configGetter().GetMaxRetries())
 	if err != nil {
 		return fmt.Errorf("failed to get unhealthy files: %w", err)
 	}
@@ -764,7 +775,7 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 	wg.Wait()
 
 	// Build list of protected directories (categories and complete dir)
-	cfg := hw.configGetter()
+	cfg = hw.configGetter()
 	protected := []string{"complete", "corrupted_metadata"} // Protect 'complete' and safety folder
 	if cfg.SABnzbd.CompleteDir != "" {
 		protected = append(protected, filepath.Base(cfg.SABnzbd.CompleteDir))
@@ -828,9 +839,10 @@ func (hw *HealthWorker) getMaxConcurrentJobs() int {
 type repairOutcome int
 
 const (
-	repairOutcomeTriggered repairOutcome = iota // ARR accepted the repair; metadata moved to corrupted folder
-	repairOutcomeCorrupted                      // ARR failed with a generic error; mark file corrupted
-	repairOutcomeDeleted                        // Health record and/or metadata were deleted (zombie)
+	repairOutcomeTriggered  repairOutcome = iota // ARR accepted the repair; metadata moved to corrupted folder
+	repairOutcomeCorrupted                       // ARR failed with a generic error; mark file corrupted
+	repairOutcomeDeleted                         // Health record and/or metadata were deleted (zombie)
+	repairOutcomeRegenerated                     // Metadata was successfully regenerated from NZB
 )
 
 // applyRepairOutcome maps a repairOutcome to the corresponding fields on the HealthStatusUpdate.
@@ -838,6 +850,10 @@ func applyRepairOutcome(update *database.HealthStatusUpdate, outcome repairOutco
 	switch outcome {
 	case repairOutcomeDeleted:
 		update.Skip = true
+	case repairOutcomeRegenerated:
+		update.Type = database.UpdateTypeHealthy
+		update.Status = database.HealthStatusHealthy
+		update.ScheduledCheckAt = time.Now().UTC().Add(24 * time.Hour) // Re-check tomorrow
 	case repairOutcomeCorrupted:
 		update.Type = database.UpdateTypeCorrupted
 		update.Status = database.HealthStatusCorrupted
@@ -890,11 +906,14 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, item *database.Fi
 
 	// Check if file metadata still exists. If not, the file is gone (likely upgraded/deleted by Sonarr already)
 	// and this health record is a zombie.
+	var metadataErr error
 	{
 		meta, err := hw.metadataService.ReadFileMetadata(filePath)
 		if err != nil {
-			slog.ErrorContext(ctx, "Failed to read metadata during repair trigger", "file_path", filePath, "error", err)
-			// Continue with repair attempt if read failed (could be transient)
+			slog.WarnContext(ctx, "Metadata file unreadable during repair trigger (likely physical corruption) — proceeding with repair anyway",
+				"file_path", filePath, "error", err)
+			metadataErr = err
+			// Proceed with repair attempt: physical corruption is why we're here
 		} else if meta == nil {
 			slog.WarnContext(ctx, "File metadata missing during repair trigger - file likely deleted/upgraded externally. Cleaning up zombie record.",
 				"file_path", filePath)
@@ -904,6 +923,18 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, item *database.Fi
 				return repairOutcomeDeleted, delErr
 			}
 			return repairOutcomeDeleted, nil
+		}
+	}
+
+	// SPECIAL CASE: If metadata is corrupted AND we don't have a library path, 
+	// we try to regenerate the metadata first before triggering a full ARR repair.
+	if metadataErr != nil && (item.LibraryPath == nil || *item.LibraryPath == "") {
+		slog.InfoContext(ctx, "Metadata corrupted and no library path found - attempting regeneration from NZB", "file_path", filePath)
+		if regenErr := hw.importerService.RegenerateMetadata(ctx, filePath); regenErr == nil {
+			slog.InfoContext(ctx, "Successfully regenerated metadata for corrupted item", "file_path", filePath)
+			return repairOutcomeRegenerated, nil
+		} else {
+			slog.WarnContext(ctx, "Regeneration attempt failed, proceeding with normal repair", "file_path", filePath, "error", regenErr)
 		}
 	}
 

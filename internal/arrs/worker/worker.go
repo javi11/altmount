@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -13,6 +14,7 @@ import (
 	"github.com/javi11/altmount/internal/arrs/instances"
 	"github.com/javi11/altmount/internal/arrs/model"
 	"github.com/javi11/altmount/internal/config"
+	"github.com/javi11/altmount/internal/database"
 	"golift.io/starr"
 )
 
@@ -20,6 +22,7 @@ type Worker struct {
 	configGetter config.ConfigGetter
 	instances    *instances.Manager
 	clients      *clients.Manager
+	repo         *database.Repository
 
 	// Queue cleanup worker state
 	workerCtx     context.Context
@@ -34,11 +37,12 @@ type Worker struct {
 	firstSeenMu sync.RWMutex
 }
 
-func NewWorker(configGetter config.ConfigGetter, instances *instances.Manager, clients *clients.Manager) *Worker {
+func NewWorker(configGetter config.ConfigGetter, instances *instances.Manager, clients *clients.Manager, repo *database.Repository) *Worker {
 	return &Worker{
 		configGetter: configGetter,
 		instances:    instances,
 		clients:      clients,
+		repo:         repo,
 		firstSeen:    make(map[string]time.Time),
 	}
 }
@@ -280,6 +284,40 @@ func (w *Worker) cleanupSonarrQueue(ctx context.Context, instance *model.ConfigI
 
 	var idsToRemove []int64
 	for _, q := range queue.Records {
+		// Strategy 1: Immediate cleanup for already imported files
+		// Check Altmount's import history to see if this file was already processed successfully
+		if q.OutputPath != "" {
+			// Extract mount relative path for history lookup
+			mountPath := cfg.MountPath
+			virtualPath := strings.TrimPrefix(filepath.ToSlash(q.OutputPath), filepath.ToSlash(mountPath))
+			virtualPath = strings.TrimPrefix(virtualPath, "/")
+
+			if virtualPath != "" {
+				history, err := w.repo.GetImportHistoryByPath(ctx, virtualPath)
+				if err == nil && history != nil {
+					// ONLY cleanup if it has been moved to the library (Sonarr's final step)
+					if history.LibraryPath != nil && *history.LibraryPath != "" {
+						slog.InfoContext(ctx, "Found ghost queue item (confirmed moved to library), cleaning up immediately",
+							"path", q.OutputPath, "library_path", *history.LibraryPath, "title", q.Title, "instance", instance.Name)
+						idsToRemove = append(idsToRemove, q.ID)
+						continue
+					} else {
+						slog.DebugContext(ctx, "Item found in history but not yet moved to library, waiting for Sonarr final step",
+							"path", q.OutputPath, "title", q.Title)
+					}
+				}
+			}
+
+			// Fallback: If not in history, check if the source folder is physically gone (moved by Sonarr)
+			if _, err := os.Stat(q.OutputPath); os.IsNotExist(err) {
+				slog.InfoContext(ctx, "Found ghost queue item (source path already gone), cleaning up immediately",
+					"path", q.OutputPath, "title", q.Title, "instance", instance.Name)
+				idsToRemove = append(idsToRemove, q.ID)
+				continue
+			}
+		}
+
+		// Strategy 2: Graceful cleanup for blocked/failed imports
 		// Check for completed items with warning status that are pending import
 		if q.Protocol != "usenet" || q.Status != "completed" || q.TrackedDownloadStatus != "warning" || (q.TrackedDownloadState != "importPending" && q.TrackedDownloadState != "importBlocked") {
 			continue

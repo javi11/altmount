@@ -351,7 +351,7 @@ export function ProvidersConfigSection({
 									</div>
 
 									{/* Quick Details Grid */}
-									<div className="mt-5 grid grid-cols-2 gap-x-6 gap-y-4 rounded-xl bg-base-200/30 p-4 text-[11px] md:grid-cols-5">
+									<div className="mt-5 grid grid-cols-2 gap-x-6 gap-y-4 rounded-xl bg-base-200/30 p-4 text-xs md:grid-cols-5">
 										<div className="min-w-0">
 											<span className="mb-1 block font-black text-base-content/50 text-xs uppercase tracking-widest">
 												Max Conn
@@ -359,7 +359,7 @@ export function ProvidersConfigSection({
 											<div className="flex items-center gap-2">
 												<input
 													type="number"
-													className="input input-xs input-bordered w-full max-w-[50px] bg-base-100 font-bold font-mono"
+													className="input input-xs input-bordered w-full max-w-[70px] bg-base-100 font-bold font-mono"
 													value={provider.max_connections}
 													onChange={(e) =>
 														handleFieldChange(
@@ -380,7 +380,7 @@ export function ProvidersConfigSection({
 											<div className="flex items-center gap-2">
 												<input
 													type="number"
-													className="input input-xs input-bordered w-full max-w-[50px] bg-base-100 font-bold font-mono"
+													className="input input-xs input-bordered w-full max-w-[70px] bg-base-100 font-bold font-mono"
 													value={provider.inflight_requests || 10}
 													onChange={(e) =>
 														handleFieldChange(
