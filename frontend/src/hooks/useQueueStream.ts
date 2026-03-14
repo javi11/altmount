@@ -1,19 +1,25 @@
 import { useEffect, useRef, useState } from "react";
 
+export interface ProgressEntry {
+	percentage: number;
+	stage?: string;
+}
+
 interface ProgressUpdate {
 	queue_id: number;
 	percentage: number;
+	stage?: string;
 	status?: string;
 	timestamp: string;
 }
 
 interface QueueStreamData {
 	type: "initial" | "update";
-	data: Record<number, number> | ProgressUpdate;
+	data: Record<number, ProgressEntry> | ProgressUpdate;
 }
 
 interface UseQueueStreamReturn {
-	progress: Record<number, number>;
+	progress: Record<number, ProgressEntry>;
 	isConnected: boolean;
 	error: Error | null;
 }
@@ -31,7 +37,7 @@ interface UseQueueStreamOptions {
  */
 export function useQueueStream(options: UseQueueStreamOptions = {}): UseQueueStreamReturn {
 	const { enabled = true, onQueueChanged } = options;
-	const [progress, setProgress] = useState<Record<number, number>>({});
+	const [progress, setProgress] = useState<Record<number, ProgressEntry>>({});
 	const [isConnected, setIsConnected] = useState(false);
 	const [error, setError] = useState<Error | null>(null);
 	const eventSourceRef = useRef<EventSource | null>(null);
@@ -76,7 +82,7 @@ export function useQueueStream(options: UseQueueStreamOptions = {}): UseQueueStr
 						const data: QueueStreamData = JSON.parse(event.data);
 
 						if (data.type === "initial") {
-							setProgress(data.data as Record<number, number>);
+							setProgress(data.data as Record<number, ProgressEntry>);
 							onQueueChangedRef.current?.();
 						} else if (data.type === "update") {
 							const update = data.data as ProgressUpdate;
@@ -101,7 +107,10 @@ export function useQueueStream(options: UseQueueStreamOptions = {}): UseQueueStr
 								if (update.percentage >= 100) {
 									delete next[update.queue_id];
 								} else {
-									next[update.queue_id] = update.percentage;
+									next[update.queue_id] = {
+										percentage: update.percentage,
+										stage: update.stage,
+									};
 								}
 								return next;
 							});
