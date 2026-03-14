@@ -106,7 +106,8 @@ export function QueuePage() {
 		if (!queueData) return undefined;
 		return queueData.map((item) => ({
 			...item,
-			percentage: liveProgress[item.id] ?? item.percentage,
+			percentage: liveProgress[item.id]?.percentage ?? item.percentage,
+			stage: liveProgress[item.id]?.stage,
 		}));
 	}, [queueData, liveProgress]);
 
@@ -380,7 +381,7 @@ export function QueuePage() {
 											type="button"
 											onClick={handleClearCompleted}
 											className="text-success"
-											disabled={!stats || stats.total_completed === 0 || clearCompleted.isPending}
+											disabled={clearCompleted.isPending}
 										>
 											<Trash2 className="h-4 w-4" /> Clear Completed
 										</button>
@@ -390,7 +391,7 @@ export function QueuePage() {
 											type="button"
 											onClick={handleClearPending}
 											className="text-warning"
-											disabled={!stats || stats.total_queued === 0 || clearPending.isPending}
+											disabled={clearPending.isPending}
 										>
 											<Trash2 className="h-4 w-4" /> Clear Pending
 										</button>
@@ -400,7 +401,7 @@ export function QueuePage() {
 											type="button"
 											onClick={handleClearFailed}
 											className="text-error"
-											disabled={!stats || stats.total_failed === 0 || clearFailed.isPending}
+											disabled={clearFailed.isPending}
 										>
 											<Trash2 className="h-4 w-4" /> Clear Failed
 										</button>
@@ -756,7 +757,7 @@ export function QueuePage() {
 																			item.percentage != null ? (
 																			<div className="flex w-24 flex-col gap-1">
 																				<div className="flex justify-between font-bold font-mono text-base-content/80 text-xs">
-																					<span>PROGRESS</span>
+																					<span>{item.stage ?? "PROGRESS"}</span>
 																					<span>{item.percentage}%</span>
 																				</div>
 																				<progress

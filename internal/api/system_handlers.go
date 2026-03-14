@@ -296,18 +296,15 @@ func (s *Server) handleResetSystemStats(c *fiber.Ctx) error {
 		since := time.Now().Add(-duration)
 
 		if s.queueRepo != nil && resetHistory {
-			if err := s.queueRepo.ClearImportHistorySince(ctx, since); err != nil {
-				return c.Status(500).JSON(fiber.Map{
-					"success": false,
-					"message": "Failed to reset statistics for duration",
-					"details": err.Error(),
-				})
+			// Clear dashboard stats only, preserve Sonarr history records
+			if err := s.queueRepo.ClearDailyStatsSince(ctx, since); err != nil {
+				return RespondInternalError(c, "Failed to reset dashboard statistics", err.Error())
 			}
 		}
 
 		return c.Status(200).JSON(fiber.Map{
 			"success": true,
-			"message": fmt.Sprintf("Statistics for last %s reset successfully", durationStr),
+			"message": fmt.Sprintf("Dashboard statistics for last %s reset successfully", durationStr),
 		})
 	}
 
@@ -315,23 +312,16 @@ func (s *Server) handleResetSystemStats(c *fiber.Ctx) error {
 	// Reset pool metrics (NNTP errors, totals, peak)
 	if s.poolManager != nil && (resetTotals || resetPeak) {
 		if err := s.poolManager.ResetMetrics(ctx, resetPeak, resetTotals); err != nil {
-			return c.Status(500).JSON(fiber.Map{
-				"success": false,
-				"message": "Failed to reset pool metrics",
-				"details": err.Error(),
-			})
+			return RespondInternalError(c, "Failed to reset pool metrics", err.Error())
 		}
 	}
 
 	// Reset import history and daily stats
 	if s.queueRepo != nil {
 		if resetHistory {
-			if err := s.queueRepo.ClearImportHistory(ctx); err != nil {
-				return c.Status(500).JSON(fiber.Map{
-					"success": false,
-					"message": "Failed to reset import history",
-					"details": err.Error(),
-				})
+			// Clear dashboard totals but KEEP the actual history records for Sonarr deduplication
+			if err := s.queueRepo.ClearDailyStats(ctx); err != nil {
+				return RespondInternalError(c, "Failed to reset dashboard statistics", err.Error())
 			}
 		}
 

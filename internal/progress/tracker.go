@@ -3,6 +3,7 @@ package progress
 // Broadcaster interface for updating progress
 type Broadcaster interface {
 	UpdateProgress(queueID int, percentage int)
+	UpdateProgressWithStage(queueID int, percentage int, stage string)
 }
 
 // ProgressTracker interface for types that can report progress
@@ -17,6 +18,7 @@ type Tracker struct {
 	broadcaster Broadcaster
 	minPercent  int
 	maxPercent  int
+	stage       string
 }
 
 // NewTracker creates a progress tracker for a specific queue item with a percentage range
@@ -29,6 +31,15 @@ func NewTracker(broadcaster Broadcaster, queueID, minPercent, maxPercent int) *T
 	}
 }
 
+// WithStage sets a human-readable stage label that is attached to every progress update
+// emitted by this tracker. Returns the same tracker for chaining.
+func (pt *Tracker) WithStage(stage string) *Tracker {
+	if pt != nil {
+		pt.stage = stage
+	}
+	return pt
+}
+
 // Update reports progress within the configured percentage range.
 // Safe to call on a nil receiver (no-op).
 func (pt *Tracker) Update(current, total int) {
@@ -38,16 +49,15 @@ func (pt *Tracker) Update(current, total int) {
 	if total > 0 {
 		rangeSize := pt.maxPercent - pt.minPercent
 		percentage := pt.minPercent + (current * rangeSize / total)
-		pt.broadcaster.UpdateProgress(pt.queueID, percentage)
+		pt.broadcaster.UpdateProgressWithStage(pt.queueID, percentage, pt.stage)
 	}
 }
 
-// UpdateAbsolute reports an absolute percentage value, bypassing the tracker's range
-// This is useful for final progress updates (e.g., 100%) when the tracker's range
-// doesn't cover the full 0-100% spectrum
+// UpdateAbsolute reports an absolute percentage value, bypassing the tracker's range.
+// The stored stage label is still attached to the broadcast update.
 func (pt *Tracker) UpdateAbsolute(percentage int) {
 	if pt != nil && pt.broadcaster != nil {
-		pt.broadcaster.UpdateProgress(pt.queueID, percentage)
+		pt.broadcaster.UpdateProgressWithStage(pt.queueID, percentage, pt.stage)
 	}
 }
 

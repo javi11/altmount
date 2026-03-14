@@ -124,9 +124,9 @@ type ImportAPIResponse struct {
 	ReadTimeoutSeconds             int                   `json:"read_timeout_seconds"`
 	SegmentSamplePercentage        int                   `json:"segment_sample_percentage"` // Percentage of segments to check (1-100)
 	ImportStrategy                 config.ImportStrategy `json:"import_strategy"`
-	ImportDir                      *string               `json:"import_dir,omitempty"`
-	SkipHealthCheck                bool                  `json:"skip_health_check"`
-	WatchDir                       *string               `json:"watch_dir,omitempty"`
+	ImportDir                      *string               `json:"import_dir"`
+	WatchDir                       *string               `json:"watch_dir"`
+
 	WatchIntervalSeconds           *int                  `json:"watch_interval_seconds,omitempty"`
 	AllowNestedRarExtraction       *bool                 `json:"allow_nested_rar_extraction,omitempty"`
 }
@@ -276,8 +276,8 @@ func ToImportAPIResponse(importConfig config.ImportConfig) ImportAPIResponse {
 		SegmentSamplePercentage:        importConfig.SegmentSamplePercentage,
 		ImportStrategy:                 importConfig.ImportStrategy,
 		ImportDir:                      importConfig.ImportDir,
-		SkipHealthCheck:                importConfig.SkipHealthCheck != nil && *importConfig.SkipHealthCheck,
 		WatchDir:                       importConfig.WatchDir,
+
 		WatchIntervalSeconds:           importConfig.WatchIntervalSeconds,
 		AllowNestedRarExtraction:       importConfig.AllowNestedRarExtraction,
 	}

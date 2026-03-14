@@ -367,7 +367,8 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 			}
 
 			// Add to health check (pending status) with high priority (Next) to ensure it's processed right away
-			err := s.healthRepo.AddFileToHealthCheckWithMetadata(c.Context(), normalizedPath, 2, sourceNzb, database.HealthPriorityNext, releaseDate)
+			cfg := s.configManager.GetConfigGetter()()
+			err := s.healthRepo.AddFileToHealthCheckWithMetadata(c.Context(), normalizedPath, cfg.GetMaxRetries(), cfg.GetMaxRepairRetries(), sourceNzb, database.HealthPriorityNext, releaseDate)
 			if err != nil {
 				slog.ErrorContext(c.Context(), "Failed to add webhook file to health check", "path", normalizedPath, "error", err)
 			} else {
@@ -687,7 +688,11 @@ func (s *Server) handleRegisterArrsWebhooks(c *fiber.Ctx) error {
 	}
 
 	// Get configured base URL or use default
-	baseURL := "http://altmount:8080"
+	cfg := s.configManager.GetConfig()
+	baseURL := cfg.Arrs.WebhookBaseURL
+	if baseURL == "" {
+		baseURL = "http://altmount:8080"
+	}
 	if s.configManager != nil {
 		cfg := s.configManager.GetConfig()
 		if cfg.Arrs.WebhookBaseURL != "" {

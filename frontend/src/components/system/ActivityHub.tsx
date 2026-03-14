@@ -28,7 +28,7 @@ export function ActivityHub() {
 		if (!queueItems) return [];
 		return queueItems.map((item) => ({
 			...item,
-			percentage: liveProgress[item.id] ?? item.percentage,
+			percentage: liveProgress[item.id]?.percentage ?? item.percentage,
 		}));
 	}, [queueItems, liveProgress]);
 

@@ -214,7 +214,7 @@ export const useRegenerateSymlinks = () => {
 	const queryClient = useQueryClient();
 
 	return useMutation({
-		mutationFn: () => apiClient.regenerateSymlinks(),
+		mutationFn: (filePaths?: string[]) => apiClient.regenerateSymlinks(filePaths),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["health"] });
 			queryClient.invalidateQueries({ queryKey: ["health", "stats"] });

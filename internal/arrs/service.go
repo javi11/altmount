@@ -43,12 +43,12 @@ type Service struct {
 }
 
 // NewService creates a new arrs service for health monitoring and file repair
-func NewService(configGetter config.ConfigGetter, configManager model.ConfigManager, userRepo *database.UserRepository) *Service {
+func NewService(configGetter config.ConfigGetter, configManager model.ConfigManager, userRepo *database.UserRepository, queueRepo *database.Repository) *Service {
 	instManager := instances.NewManager(configGetter, configManager)
 	clientManager := clients.NewManager()
 	dataManager := data.NewManager()
 	scannerManager := scanner.NewManager(configGetter, instManager, clientManager, dataManager)
-	workerManager := worker.NewWorker(configGetter, instManager, clientManager)
+	workerManager := worker.NewWorker(configGetter, instManager, clientManager, queueRepo)
 	registrarManager := registrar.NewManager(instManager, clientManager)
 
 	return &Service{
@@ -90,8 +90,12 @@ func (s *Service) RegisterInstance(ctx context.Context, arrURL, apiKey string) e
 
 			key := s.GetFirstAdminAPIKey(bgCtx)
 			if key != "" {
-				// Use default internal URL
-				_ = s.registrar.EnsureWebhookRegistration(bgCtx, "http://altmount:8080", key)
+				cfg := s.configGetter()
+				baseURL := cfg.Arrs.WebhookBaseURL
+				if baseURL == "" {
+					baseURL = "http://altmount:8080"
+				}
+				_ = s.registrar.EnsureWebhookRegistration(bgCtx, baseURL, key)
 			}
 		}()
 	}

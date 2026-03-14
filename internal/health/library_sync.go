@@ -295,7 +295,7 @@ func (lsw *LibrarySyncWorker) findFilesToDelete(
 	ctx context.Context,
 	dbRecords []database.AutomaticHealthCheckRecord,
 	metaFileSet map[string]string,
-	filesInUse map[string]string,
+	filesInLibrary map[string]bool,
 ) []string {
 	var filesToDelete []string
 
@@ -312,14 +312,14 @@ func (lsw *LibrarySyncWorker) findFilesToDelete(
 			continue
 		}
 
-		// Check if file is in use (only for full sync, not metadata-only)
-		if filesInUse != nil {
+		// Check if file is in the official library (only for full sync, not metadata-only)
+		if filesInLibrary != nil {
 			// If repair is triggered, skip file existence check as it might be temporarily missing during repair
 			if dbRecord.Status == database.HealthStatusRepairTriggered {
 				continue
 			}
 
-			if _, exists := filesInUse[dbRecord.FilePath]; !exists {
+			if !filesInLibrary[dbRecord.FilePath] {
 				filesToDelete = append(filesToDelete, dbRecord.FilePath)
 			}
 		}
@@ -568,21 +568,26 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 
 	// Build a reverse map: mount relative path -> library path for quick lookup
 	filesInUse := make(map[string]string)
+	// Track which files are actually in the official library (to protect them from deletion)
+	filesInLibrary := make(map[string]bool)
 
 	// Helper to normalize keys to mount relative paths
-	normalizeKeys := func(m map[string]string) {
+	normalizeKeys := func(m map[string]string, isLibrary bool) {
 		for target, libPath := range m {
 			// Extract relative path within the mount
 			rel := strings.TrimPrefix(filepath.ToSlash(target), filepath.ToSlash(cfg.MountPath))
 			rel = strings.TrimPrefix(rel, "/")
 			filesInUse[rel] = libPath
+			if isLibrary {
+				filesInLibrary[rel] = true
+			}
 		}
 	}
 
-	normalizeKeys(libraryFiles.Symlinks)
-	normalizeKeys(libraryFiles.StrmFiles)
-	normalizeKeys(importDirFiles.Symlinks)
-	normalizeKeys(importDirFiles.StrmFiles)
+	normalizeKeys(libraryFiles.Symlinks, true)
+	normalizeKeys(libraryFiles.StrmFiles, true)
+	normalizeKeys(importDirFiles.Symlinks, false)
+	normalizeKeys(importDirFiles.StrmFiles, false)
 
 	// Get all health check paths from database
 	dbRecords, err := lsw.healthRepo.GetAllHealthCheckRecords(ctx)
@@ -711,16 +716,15 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 			if needsProcess {
 				record, err := lsw.processMetadataForSync(ctx, path, libraryPath)
 				if err != nil {
-					slog.ErrorContext(ctx, "Failed to read metadata",
+					slog.ErrorContext(ctx, "Failed to read metadata during sync, registering as corrupted",
 						"mount_relative_path", path,
 						"error", err)
 
 					// Register as corrupted so HealthWorker can pick it up and trigger repair
-					if libraryPath != nil {
-						regErr := lsw.healthRepo.RegisterCorruptedFile(ctx, path, libraryPath, err.Error())
-						if regErr != nil {
-							slog.ErrorContext(ctx, "Failed to register corrupted file", "path", path, "error", regErr)
-						}
+					// Even if libraryPath is nil, we want to track this metadata corruption
+					regErr := lsw.healthRepo.RegisterCorruptedFile(ctx, path, libraryPath, err.Error())
+					if regErr != nil {
+						slog.ErrorContext(ctx, "Failed to register corrupted file", "path", path, "error", regErr)
 					}
 					return
 				}
@@ -745,10 +749,10 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 	<-done
 
 	// Additional cleanup of orphaned database records if enabled
-	// We no longer delete metadata files here for safety.
+	metadataDeletedCount := 0
 	if shouldCleanup {
 		// We already have libraryFiles from earlier in the function
-		for relativeMountPath := range metaFileSet {
+		for relativeMountPath, metaPath := range metaFileSet {
 			select {
 			case <-ctx.Done():
 				return nil
@@ -758,17 +762,26 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 			libraryPath := lsw.getLibraryPath(relativeMountPath, filesInUse)
 
 			if libraryPath == nil {
-				// We used to delete metadata here, but it's removed for safety.
-				// If a file is missing from the library, we just let the database cleanup handle it later
-				// or keep the metadata so it can be re-linked if found.
-				slog.DebugContext(ctx, "File missing from library, but preserving metadata for safety", 
-					"path", relativeMountPath)
+				if !dryRun {
+					// DELETE physical metadata file if it's not found in the library
+					if err := os.Remove(metaPath); err != nil {
+						if !os.IsNotExist(err) {
+							slog.ErrorContext(ctx, "Failed to delete orphaned metadata file", 
+								"path", metaPath, "error", err)
+						}
+					} else {
+						slog.InfoContext(ctx, "Deleted orphaned metadata file (not found in library)", 
+							"path", metaPath)
+						metadataDeletedCount++
+					}
+				} else {
+					metadataDeletedCount++
+				}
 			}
 		}
 	}
 
 	// Cleanup orphaned library files (symlinks and STRM files without metadata)
-	metadataDeletedCount := 0
 	libraryFilesDeletedCount := 0
 	libraryDirsDeletedCount := 0
 
@@ -834,14 +847,14 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 		}
 	}
 
-	// Find files to delete (in database but not in filesystem or not in use)
+	// Find files to delete (in database but not in filesystem or not in the official library)
 	// SAFETY: If mount protection is triggered (shouldCleanup is false),
-	// we pass nil for filesInUse to skip the 'in-use' check and prevent mass record deletion.
-	effectiveFilesInUse := filesInUse
+	// we pass nil for filesInLibrary to skip the 'in-use' check and prevent mass record deletion.
+	effectiveFilesInLibrary := filesInLibrary
 	if !shouldCleanup {
-		effectiveFilesInUse = nil
+		effectiveFilesInLibrary = nil
 	}
-	filesToDelete := lsw.findFilesToDelete(ctx, dbRecords, metaFileSet, effectiveFilesInUse)
+	filesToDelete := lsw.findFilesToDelete(ctx, dbRecords, metaFileSet, effectiveFilesInLibrary)
 
 	// Perform batch operations for deletions (additions were already streamed)
 	dbCounts := lsw.syncDatabaseRecords(ctx, nil, filesToDelete, dryRun)
@@ -973,12 +986,16 @@ func (lsw *LibrarySyncWorker) processMetadataForSync(
 	// Calculate initial check time
 	scheduledCheckAt := calculateInitialCheck(releaseDateAsTime)
 
+	cfg := lsw.configGetter()
+
 	return &database.AutomaticHealthCheckRecord{
 		FilePath:         path,
 		LibraryPath:      libraryPath,
 		ReleaseDate:      &releaseDateAsTime,
 		ScheduledCheckAt: &scheduledCheckAt,
 		SourceNzbPath:    &fileMeta.SourceNzbPath,
+		MaxRetries:       cfg.GetMaxRetries(),
+		MaxRepairRetries: cfg.GetMaxRepairRetries(),
 	}, nil
 }
 

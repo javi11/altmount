@@ -71,10 +71,17 @@ func (ms *MetadataService) WriteFileMetadata(virtualPath string, metadata *metap
 		return fmt.Errorf("failed to marshal metadata: %w", err)
 	}
 
-	// Write directly to metadata file
-	if err := os.WriteFile(metadataPath, data, 0644); err != nil {
+	// Write atomically using a temporary file
+	tmpPath := metadataPath + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
 		metadata.NzbdavId = nzbdavId // Restore on error
-		return fmt.Errorf("failed to write metadata file: %w", err)
+		return fmt.Errorf("failed to write temporary metadata file: %w", err)
+	}
+
+	if err := os.Rename(tmpPath, metadataPath); err != nil {
+		metadata.NzbdavId = nzbdavId // Restore on error
+		_ = os.Remove(tmpPath)       // Clean up
+		return fmt.Errorf("failed to rename metadata file: %w", err)
 	}
 
 	// Handle ID sidecar file
