@@ -63,6 +63,7 @@ type Server struct {
 	streamTracker       *StreamTracker
 	fuseManager         *FuseManager
 	segcacheMgr         *segcache.Manager // nil if segment cache is disabled
+	logFilePath         string
 	ready               atomic.Bool
 }
 
@@ -123,6 +124,11 @@ func (s *Server) SetHealthWorker(healthWorker *health.HealthWorker) {
 // SetLibrarySyncWorker sets the library sync worker reference for the server
 func (s *Server) SetLibrarySyncWorker(librarySyncWorker *health.LibrarySyncWorker) {
 	s.librarySyncWorker = librarySyncWorker
+}
+
+// SetLogFilePath sets the path to the JSON log file used by the logs endpoints.
+func (s *Server) SetLogFilePath(path string) {
+	s.logFilePath = path
 }
 
 // SetReady sets the server as ready to accept requests
@@ -279,6 +285,9 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	// Note: /files/stream is handled by StreamHandler at HTTP server level
 
 	api.Post("/import/scan", s.handleStartManualScan)
+	api.Get("/logs", s.handleGetLogs)
+	// Note: /logs/stream is handled by ServeLogsSSE at HTTP server level (bypasses adaptor)
+
 	api.Get("/import/scan/status", s.handleGetScanStatus)
 	api.Delete("/import/scan", s.handleCancelScan)
 	api.Get("/import/history", s.handleGetImportHistory)

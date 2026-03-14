@@ -625,7 +625,11 @@ export function HealthPage() {
 								</button>
 							</li>
 							<li>
-								<button type="button" onClick={() => handleRegenerateLibraryFiles()} className="gap-2">
+								<button
+									type="button"
+									onClick={() => handleRegenerateLibraryFiles()}
+									className="gap-2"
+								>
 									<RefreshCw className="h-4 w-4" /> Regenerate Library Files
 								</button>
 							</li>
@@ -782,7 +786,9 @@ export function HealthPage() {
 												onDelete={handleDelete}
 												onUnmask={handleUnmask}
 												onSetPriority={handleSetPriority}
-												onRegenerate={(filePath: string) => handleRegenerateLibraryFiles([filePath])}
+												onRegenerate={(filePath: string) =>
+													handleRegenerateLibraryFiles([filePath])
+												}
 											/>
 										</div>
 

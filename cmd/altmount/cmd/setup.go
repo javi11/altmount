@@ -481,6 +481,14 @@ func createHTTPServer(apiServer *api.Server, app *fiber.App, webdavHandler *webd
 			return
 		}
 
+		// Route SSE log stream directly — bypasses adaptor.FiberApp which
+		// blocks forever on streaming responses (calls Response.Body() which
+		// reads the SSE pipe until EOF that never comes).
+		if path == "/api/logs/stream" {
+			apiServer.ServeLogsSSE(w, r)
+			return
+		}
+
 		// Route WebDAV requests directly to WebDAV handler
 		if len(path) >= 7 && path[:7] == "/webdav" {
 			webdavHTTPHandler.ServeHTTP(w, r)
