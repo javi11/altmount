@@ -261,8 +261,12 @@ func (w *Worker) cleanupRadarrQueue(ctx context.Context, instance *model.ConfigI
 		}
 		for _, id := range idsToRemove {
 			if err := client.DeleteQueueContext(ctx, id, opts); err != nil {
-				slog.ErrorContext(ctx, "Failed to delete queue item",
-					"id", id, "error", err)
+				if strings.Contains(err.Error(), "404") {
+					slog.DebugContext(ctx, "Queue item already removed from Radarr", "id", id)
+				} else {
+					slog.ErrorContext(ctx, "Failed to delete queue item",
+						"id", id, "error", err)
+				}
 			}
 		}
 		slog.InfoContext(ctx, "Cleaned up Radarr queue items",
@@ -400,8 +404,12 @@ func (w *Worker) cleanupSonarrQueue(ctx context.Context, instance *model.ConfigI
 		}
 		for _, id := range idsToRemove {
 			if err := client.DeleteQueueContext(ctx, id, opts); err != nil {
-				slog.ErrorContext(ctx, "Failed to delete queue item",
-					"id", id, "error", err)
+				if strings.Contains(err.Error(), "404") {
+					slog.DebugContext(ctx, "Queue item already removed from Sonarr", "id", id)
+				} else {
+					slog.ErrorContext(ctx, "Failed to delete queue item",
+						"id", id, "error", err)
+				}
 			}
 		}
 		slog.InfoContext(ctx, "Cleaned up Sonarr queue items",
