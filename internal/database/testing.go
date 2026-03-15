@@ -18,7 +18,7 @@ func setupQueueSchema(t *testing.T, db *sql.DB) {
 			relative_path TEXT DEFAULT NULL,
 			storage_path TEXT DEFAULT NULL,
 			priority INTEGER NOT NULL DEFAULT 1,
-			status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'processing', 'completed', 'failed', 'fallback')),
+			status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'processing', 'completed', 'failed', 'fallback', 'paused')),
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			started_at DATETIME DEFAULT NULL,
@@ -30,6 +30,7 @@ func setupQueueSchema(t *testing.T, db *sql.DB) {
 			metadata TEXT DEFAULT NULL,
 			category TEXT DEFAULT NULL,
 			file_size BIGINT DEFAULT NULL,
+			target_path TEXT DEFAULT NULL,
 			UNIQUE(nzb_path)
 		);
 
