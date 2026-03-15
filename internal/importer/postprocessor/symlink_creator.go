@@ -17,6 +17,13 @@ import (
 func (c *Coordinator) CreateSymlinks(ctx context.Context, item *database.ImportQueueItem, resultingPath string) error {
 	cfg := c.configGetter()
 
+	// If a forced target path is set, create the symlink at that exact location
+	// regardless of the configured import strategy.
+	if item.TargetPath != nil && *item.TargetPath != "" {
+		actualPath := filepath.Join(cfg.MountPath, strings.TrimPrefix(resultingPath, "/"))
+		return c.createAbsoluteSymlink(actualPath, *item.TargetPath)
+	}
+
 	// Check if symlinks are enabled
 	if cfg.Import.ImportStrategy != config.ImportStrategySYMLINK {
 		return nil // Skip if not enabled
@@ -180,6 +187,31 @@ func (c *Coordinator) CreateSymlinks(ctx context.Context, item *database.ImportQ
 			"queue_id", item.ID,
 			"total_errors", len(symlinkErrors),
 			"successful", symlinkCount)
+	}
+
+	return nil
+}
+
+// createAbsoluteSymlink creates a symlink at an exact absolute destination path.
+// It creates any missing parent directories and removes an existing symlink at destPath.
+func (c *Coordinator) createAbsoluteSymlink(actualPath, destPath string) error {
+	if err := os.MkdirAll(filepath.Dir(destPath), 0775); err != nil {
+		return fmt.Errorf("failed to create parent directory for target symlink: %w", err)
+	}
+
+	// Remove existing symlink if present
+	if _, err := os.Lstat(destPath); err == nil {
+		if err := os.Remove(destPath); err != nil {
+			return fmt.Errorf("failed to remove existing file at target path: %w", err)
+		}
+	}
+
+	if runtime.GOOS == "windows" {
+		return fmt.Errorf("symlinks are not supported on Windows; use STRM import strategy instead")
+	}
+
+	if err := os.Symlink(actualPath, destPath); err != nil {
+		return fmt.Errorf("failed to create symlink at target path: %w", err)
 	}
 
 	return nil

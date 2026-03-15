@@ -249,6 +249,19 @@ func (s *Server) handleManualImportFile(c *fiber.Ctx) error {
 		})
 	}
 
+	// Read optional target_path query param (forced symlink destination)
+	var targetPath *string
+	if tp := c.Query("target_path"); tp != "" {
+		tp = filepath.Clean(tp)
+		if !filepath.IsAbs(tp) {
+			return c.Status(422).JSON(fiber.Map{
+				"success": false,
+				"message": "target_path must be absolute",
+			})
+		}
+		targetPath = &tp
+	}
+
 	// Add the file to the processing queue
 	item := &database.ImportQueueItem{
 		NzbPath:      req.FilePath,
@@ -258,9 +271,10 @@ func (s *Server) handleManualImportFile(c *fiber.Ctx) error {
 		MaxRetries:   3,
 		CreatedAt:    time.Now(),
 		RelativePath: req.RelativePath,
+		TargetPath:   targetPath,
 	}
 
-	slog.DebugContext(c.Context(), "Adding file to queue", "file", req.FilePath, "relative_path", req.RelativePath)
+	slog.DebugContext(c.Context(), "Adding file to queue", "file", req.FilePath, "relative_path", req.RelativePath, "target_path", targetPath)
 
 	err = s.queueRepo.AddToQueue(c.Context(), item)
 	if err != nil {

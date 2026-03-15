@@ -11,7 +11,20 @@ import (
 
 // NotifyARR notifies ARR applications about imported content
 func (c *Coordinator) NotifyARR(ctx context.Context, item *database.ImportQueueItem, resultingPath string) error {
-	if c.arrsService == nil || item.Category == nil {
+	if c.arrsService == nil {
+		return nil
+	}
+
+	// When a forced target path is set, scan that path directly (no category required).
+	if item.TargetPath != nil && *item.TargetPath != "" {
+		if err := c.arrsService.TriggerScanForFile(ctx, *item.TargetPath); err != nil {
+			c.log.WarnContext(ctx, "Failed to trigger ARR scan for target path",
+				"path", *item.TargetPath, "error", err)
+		}
+		return nil
+	}
+
+	if item.Category == nil {
 		return nil
 	}
 
