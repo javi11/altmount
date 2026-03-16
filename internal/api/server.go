@@ -230,8 +230,8 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Get("/queue", s.handleListQueue)
 	api.Get("/queue/stats", s.handleGetQueueStats)
 	api.Get("/queue/stats/history", s.handleGetQueueHistoricalStats)
-	api.Get("/queue/stream", s.handleQueueStream)   // SSE endpoint for real-time queue updates
-	api.Get("/health/stream", s.handleHealthStream) // SSE endpoint for real-time health updates
+	// Note: /queue/stream and /health/stream are served by ServeQueueSSE/ServeHealthSSE
+	// at the HTTP server level (setup.go) — bypasses adaptor.FiberApp for correct SSE streaming.
 	api.Delete("/queue/completed", s.handleClearCompletedQueue)
 	api.Delete("/queue/failed", s.handleClearFailedQueue)
 	api.Delete("/queue/pending", s.handleClearPendingQueue)
