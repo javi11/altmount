@@ -97,7 +97,9 @@ func getFileInfo(
 	// Gap 3: Detect 7z archives by magic bytes or extension
 	is7z := Has7zMagic(file.First16KB) || Is7zFile(filename)
 
-	isPar2Archive := IsPar2File(filename)
+	// Check selected, subject, and header filenames — yEnc headers often omit the .par2 extension
+	// (e.g. encoder stores "Movie.mkv" in the yEnc name= field for a "Movie.mkv.vol07+8.par2" segment)
+	isPar2Archive := IsPar2File(filename) || IsPar2File(subjectFilename) || IsPar2File(headerFilename)
 
 	return &FileInfo{
 		NzbFile:       *file.NzbFile,

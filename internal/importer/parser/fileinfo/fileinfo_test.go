@@ -2,6 +2,9 @@ package fileinfo
 
 import (
 	"testing"
+
+	"github.com/javi11/nntppool/v4"
+	"github.com/javi11/nzbparser"
 )
 
 func TestIsProbablyObfuscated(t *testing.T) {
@@ -193,6 +196,62 @@ func TestCorrectExtensionFromMagicBytes(t *testing.T) {
 			got := correctExtensionFromMagicBytes(tt.filename, tt.data)
 			if got != tt.want {
 				t.Errorf("correctExtensionFromMagicBytes(%q) = %q, want %q", tt.filename, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestGetFileInfo_Par2DetectionViaSubject verifies that a file whose yEnc header
+// strips the .par2 extension is still correctly identified as a PAR2 archive when
+// the subject filename retains the full .par2 extension.
+func TestGetFileInfo_Par2DetectionViaSubject(t *testing.T) {
+	tests := []struct {
+		name            string
+		subjectFilename string // NzbFile.Filename (from subject line)
+		headerFilename  string // yEnc header name=
+		wantIsPar2      bool
+	}{
+		{
+			name:            "subject .par2 wins even when yEnc header shows .mkv",
+			subjectFilename: "Movie.Name.2023.mkv.vol07+8.par2",
+			headerFilename:  "Movie.Name.2023.mkv",
+			wantIsPar2:      true,
+		},
+		{
+			name:            "both subject and header are .par2",
+			subjectFilename: "Movie.Name.2023.mkv.vol07+8.par2",
+			headerFilename:  "Movie.Name.2023.mkv.vol07+8.par2",
+			wantIsPar2:      true,
+		},
+		{
+			name:            "neither is .par2 — not a PAR2 file",
+			subjectFilename: "Movie.Name.2023.mkv",
+			headerFilename:  "Movie.Name.2023.mkv",
+			wantIsPar2:      false,
+		},
+		{
+			name:            "header is .par2 and subject is not",
+			subjectFilename: "Movie.Name.2023.mkv",
+			headerFilename:  "Movie.Name.2023.mkv.vol07+8.par2",
+			wantIsPar2:      true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			file := &NzbFileWithFirstSegment{
+				NzbFile: &nzbparser.NzbFile{
+					Filename: tt.subjectFilename,
+				},
+				Headers: &nntppool.YEncMeta{
+					FileName: tt.headerFilename,
+				},
+				First16KB: make([]byte, 16),
+			}
+			info := getFileInfo(file, nil, "nzb-stem")
+			if info.IsPar2Archive != tt.wantIsPar2 {
+				t.Errorf("getFileInfo IsPar2Archive = %v, want %v (subject=%q header=%q selected=%q)",
+					info.IsPar2Archive, tt.wantIsPar2, tt.subjectFilename, tt.headerFilename, info.Filename)
 			}
 		})
 	}
