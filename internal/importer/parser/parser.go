@@ -162,7 +162,7 @@ func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string, pro
 	}
 
 	// Get file infos with priority-based filename selection
-	// This already filters out PAR2 files
+	// GetFileInfos processes ALL files including PAR2 files; SeparateFiles handles the split
 	fileInfos := fileinfo.GetFileInfos(filesWithFirstSegment, par2Descriptors, parsed.Filename)
 	if len(fileInfos) == 0 {
 		p.log.WarnContext(ctx, "Failed to get file infos from network, falling back to NZB XML data",
@@ -815,6 +815,18 @@ func (p *Parser) fallbackGetFileInfos(files []nzbparser.NzbFile) []*fileinfo.Fil
 
 // determineNzbType analyzes the parsed files to determine the NZB type
 func (p *Parser) determineNzbType(files []ParsedFile) NzbType {
+	// Exclude PAR2 files — a single media file + N PAR2 files is still a single-file NZB
+	var mediaFiles []ParsedFile
+	for _, f := range files {
+		if !f.IsPar2Archive && !fileinfo.IsPar2File(f.Filename) {
+			mediaFiles = append(mediaFiles, f)
+		}
+	}
+	if len(mediaFiles) == 0 {
+		return NzbTypeMultiFile // all-PAR2 edge case; allPar2 check handles this earlier
+	}
+	files = mediaFiles
+
 	if len(files) == 1 {
 		// Single file NZB
 		if files[0].IsRarArchive {
