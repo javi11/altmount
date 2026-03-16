@@ -1,148 +1,132 @@
 package api
 
 import (
-	"bufio"
-	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"time"
-
-	"github.com/gofiber/fiber/v2"
 )
 
-// handleHealthStream handles GET /api/health/stream
-// Server-Sent Events endpoint for real-time health-change notifications
-func (s *Server) handleHealthStream(c *fiber.Ctx) error {
-	c.Set("Content-Type", "text/event-stream")
-	c.Set("Cache-Control", "no-cache")
-	c.Set("Connection", "keep-alive")
-	c.Set("Transfer-Encoding", "chunked")
-	c.Set("X-Accel-Buffering", "no")
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
-		subID, updateCh := s.progressBroadcaster.Subscribe()
-		defer s.progressBroadcaster.Unsubscribe(subID)
-
-		// Initial ping — tells frontend to fetch current health state immediately
-		fmt.Fprintf(w, "data: {\"type\":\"initial\"}\n\n")
-		if err := w.Flush(); err != nil {
-			return
-		}
-
-		keepAliveTicker := time.NewTicker(30 * time.Second)
-		defer keepAliveTicker.Stop()
-
-		for {
-			select {
-			case update, ok := <-updateCh:
-				if !ok {
-					return
-				}
-				if update.Status != "health_changed" {
-					continue
-				}
-				fmt.Fprintf(w, "data: {\"type\":\"update\"}\n\n")
-				if err := w.Flush(); err != nil {
-					return
-				}
-			case <-keepAliveTicker.C:
-				fmt.Fprintf(w, ": keep-alive\n\n")
-				if err := w.Flush(); err != nil {
-					return
-				}
-			case <-ctx.Done():
+// ServeQueueSSE is a native net/http SSE handler for GET /api/queue/stream.
+// It bypasses adaptor.FiberApp which cannot stream responses (blocks on
+// Response.Body() reading the SSE pipe until EOF that never comes).
+func (s *Server) ServeQueueSSE(w http.ResponseWriter, r *http.Request) {
+	// Replicate RequireAuth logic for net/http requests.
+	loginRequired := true
+	if cfg := s.configManager.GetConfig(); cfg != nil && cfg.Auth.LoginRequired != nil {
+		loginRequired = *cfg.Auth.LoginRequired
+	}
+	if loginRequired && s.authService != nil {
+		if ts := s.authService.TokenService(); ts != nil {
+			if _, _, err := ts.Get(r); err != nil {
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
 			}
 		}
-	})
+	}
 
-	return nil
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+
+	subID, updateCh := s.progressBroadcaster.Subscribe()
+	defer s.progressBroadcaster.Unsubscribe(subID)
+
+	initialProgress := s.progressBroadcaster.GetAllProgress()
+	if data, err := json.Marshal(map[string]any{"type": "initial", "data": initialProgress}); err == nil {
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		flusher.Flush()
+	}
+
+	keepAlive := time.NewTicker(30 * time.Second)
+	defer keepAlive.Stop()
+
+	for {
+		select {
+		case update, ok := <-updateCh:
+			if !ok {
+				return
+			}
+			if data, err := json.Marshal(map[string]any{"type": "update", "data": update}); err == nil {
+				fmt.Fprintf(w, "data: %s\n\n", data)
+				flusher.Flush()
+			} else {
+				slog.ErrorContext(r.Context(), "failed to marshal progress update", "error", err, "queue_id", update.QueueID)
+			}
+		case <-keepAlive.C:
+			fmt.Fprintf(w, ": keep-alive\n\n")
+			flusher.Flush()
+		case <-r.Context().Done():
+			return
+		}
+	}
 }
 
-// handleQueueStream handles GET /api/queue/stream
-// Server-Sent Events endpoint for real-time progress and queue-change updates
-func (s *Server) handleQueueStream(c *fiber.Ctx) error {
-	// Set SSE headers
-	c.Set("Content-Type", "text/event-stream")
-	c.Set("Cache-Control", "no-cache")
-	c.Set("Connection", "keep-alive")
-	c.Set("Transfer-Encoding", "chunked")
-	c.Set("X-Accel-Buffering", "no") // Disable nginx buffering
-
-	// Create a context for this SSE connection with cancellation
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
-		// Subscribe to progress updates
-		subID, updateCh := s.progressBroadcaster.Subscribe()
-		defer s.progressBroadcaster.Unsubscribe(subID)
-
-		// Send initial progress state
-		initialProgress := s.progressBroadcaster.GetAllProgress()
-		initialData, err := json.Marshal(fiber.Map{
-			"type": "initial",
-			"data": initialProgress,
-		})
-		if err != nil {
-			slog.ErrorContext(c.Context(), "failed to marshal initial progress", "error", err)
-			return
-		}
-
-		// Send initial state
-		fmt.Fprintf(w, "data: %s\n\n", initialData)
-		if err := w.Flush(); err != nil {
-			return
-		}
-
-		// Create a ticker for keep-alive messages (every 30 seconds)
-		keepAliveTicker := time.NewTicker(30 * time.Second)
-		defer keepAliveTicker.Stop()
-
-		// Stream updates until client disconnects
-		for {
-			select {
-			case update, ok := <-updateCh:
-				if !ok {
-					// Channel closed, subscriber removed
-					return
-				}
-
-				// Marshal update
-				updateData, err := json.Marshal(fiber.Map{
-					"type": "update",
-					"data": update,
-				})
-				if err != nil {
-					slog.ErrorContext(c.Context(), "failed to marshal progress update", "error", err, "queue_id", update.QueueID)
-					continue
-				}
-
-				// Send update to client
-				fmt.Fprintf(w, "data: %s\n\n", updateData)
-				if err := w.Flush(); err != nil {
-					// Client disconnected
-					return
-				}
-
-			case <-keepAliveTicker.C:
-				// Send keep-alive comment to prevent connection timeout
-				fmt.Fprintf(w, ": keep-alive\n\n")
-				if err := w.Flush(); err != nil {
-					// Client disconnected
-					return
-				}
-
-			case <-ctx.Done():
-				// Context cancelled
+// ServeHealthSSE is a native net/http SSE handler for GET /api/health/stream.
+// It bypasses adaptor.FiberApp which cannot stream responses (blocks on
+// Response.Body() reading the SSE pipe until EOF that never comes).
+func (s *Server) ServeHealthSSE(w http.ResponseWriter, r *http.Request) {
+	// Replicate RequireAuth logic for net/http requests.
+	loginRequired := true
+	if cfg := s.configManager.GetConfig(); cfg != nil && cfg.Auth.LoginRequired != nil {
+		loginRequired = *cfg.Auth.LoginRequired
+	}
+	if loginRequired && s.authService != nil {
+		if ts := s.authService.TokenService(); ts != nil {
+			if _, _, err := ts.Get(r); err != nil {
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
 			}
 		}
-	})
+	}
 
-	return nil
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+
+	subID, updateCh := s.progressBroadcaster.Subscribe()
+	defer s.progressBroadcaster.Unsubscribe(subID)
+
+	fmt.Fprintf(w, "data: {\"type\":\"initial\"}\n\n")
+	flusher.Flush()
+
+	keepAlive := time.NewTicker(30 * time.Second)
+	defer keepAlive.Stop()
+
+	for {
+		select {
+		case update, ok := <-updateCh:
+			if !ok {
+				return
+			}
+			if update.Status != "health_changed" {
+				continue
+			}
+			fmt.Fprintf(w, "data: {\"type\":\"update\"}\n\n")
+			flusher.Flush()
+		case <-keepAlive.C:
+			fmt.Fprintf(w, ": keep-alive\n\n")
+			flusher.Flush()
+		case <-r.Context().Done():
+			return
+		}
+	}
 }
+
