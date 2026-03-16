@@ -488,6 +488,14 @@ func createHTTPServer(apiServer *api.Server, app *fiber.App, webdavHandler *webd
 			apiServer.ServeLogsSSE(w, r)
 			return
 		}
+		if path == "/api/queue/stream" {
+			apiServer.ServeQueueSSE(w, r)
+			return
+		}
+		if path == "/api/health/stream" {
+			apiServer.ServeHealthSSE(w, r)
+			return
+		}
 
 		// Route WebDAV requests directly to WebDAV handler
 		if len(path) >= 7 && path[:7] == "/webdav" {
