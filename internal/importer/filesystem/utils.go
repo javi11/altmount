@@ -61,7 +61,7 @@ func SeparateFiles(files []parser.ParsedFile, nzbType parser.NzbType) (regular, 
 		for _, file := range files {
 			if file.IsRarArchive {
 				archive = append(archive, file)
-			} else if IsPar2File(file.Filename) {
+			} else if file.IsPar2Archive || IsPar2File(file.Filename) {
 				par2 = append(par2, file)
 			} else {
 				regular = append(regular, file)
@@ -72,7 +72,7 @@ func SeparateFiles(files []parser.ParsedFile, nzbType parser.NzbType) (regular, 
 		for _, file := range files {
 			if file.Is7zArchive {
 				archive = append(archive, file)
-			} else if IsPar2File(file.Filename) {
+			} else if file.IsPar2Archive || IsPar2File(file.Filename) {
 				par2 = append(par2, file)
 			} else {
 				regular = append(regular, file)
@@ -82,7 +82,7 @@ func SeparateFiles(files []parser.ParsedFile, nzbType parser.NzbType) (regular, 
 	default:
 		// For single file and multi-file types, just separate PAR2 files
 		for _, file := range files {
-			if IsPar2File(file.Filename) {
+			if file.IsPar2Archive || IsPar2File(file.Filename) {
 				par2 = append(par2, file)
 			} else {
 				regular = append(regular, file)
