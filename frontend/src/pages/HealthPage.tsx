@@ -144,14 +144,14 @@ export function HealthPage() {
 	const startLibrarySync = useStartLibrarySync();
 	const cancelLibrarySync = useCancelLibrarySync();
 
-	// Auto-refresh health list when library scan completes
-	const prevIsRunningRef = useRef(librarySyncStatus?.is_running);
+	// Auto-refresh health list when library scan completes (true → false transition only)
+	const prevIsRunningRef = useRef<boolean | undefined>();
 	useEffect(() => {
 		const wasRunning = prevIsRunningRef.current;
 		const isRunning = librarySyncStatus?.is_running;
 		prevIsRunningRef.current = isRunning;
 
-		if (wasRunning && !isRunning) {
+		if (wasRunning === true && isRunning === false) {
 			void refetch();
 			void queryClient.invalidateQueries({ queryKey: ["health", "stats"] });
 		}

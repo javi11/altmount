@@ -244,7 +244,7 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 	}
 
 	// Process File Deletions
-	deleteSourceNzb := cfg.Metadata.DeleteSourceNzbOnRemoval != nil && *cfg.Metadata.DeleteSourceNzbOnRemoval
+	deleteSourceNzb := cfg.Metadata.ShouldDeleteSourceNzb()
 
 	for _, path := range filesToDelete {
 		normalizedPath := normalize(path)

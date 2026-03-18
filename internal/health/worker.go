@@ -898,10 +898,7 @@ func (hw *HealthWorker) cleanupZombieRecord(ctx context.Context, item *database.
 	relativePath := strings.TrimPrefix(item.FilePath, cfg.MountPath)
 	relativePath = strings.TrimPrefix(relativePath, "/")
 
-	deleteSourceNzb := false
-	if cfg.Metadata.DeleteSourceNzbOnRemoval != nil {
-		deleteSourceNzb = *cfg.Metadata.DeleteSourceNzbOnRemoval
-	}
+	deleteSourceNzb := cfg.Metadata.ShouldDeleteSourceNzb()
 	if delMetaErr := hw.metadataService.DeleteFileMetadataWithSourceNzb(ctx, relativePath, deleteSourceNzb); delMetaErr != nil {
 		slog.ErrorContext(ctx, "Failed to delete metadata during cleanup", "file_path", item.FilePath, "error", delMetaErr)
 	}

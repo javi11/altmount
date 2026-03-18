@@ -229,43 +229,22 @@ func (s *Server) handleDeleteHealth(c *fiber.Ctx) error {
 	metaDeleted := false
 	symlinkDeleted := false
 
-	// Delete metadata if requested
-	if deleteMeta && s.metadataService != nil {
+	if deleteMeta || deleteSymlink {
 		cfg := s.configManager.GetConfig()
-		deleteSourceNzb := cfg.Metadata.DeleteSourceNzbOnRemoval != nil && *cfg.Metadata.DeleteSourceNzbOnRemoval
-		if delErr := s.metadataService.DeleteFileMetadataWithSourceNzb(c.Context(), item.FilePath, deleteSourceNzb); delErr != nil {
-			slog.ErrorContext(c.Context(), "Failed to delete metadata during health record deletion", "file_path", item.FilePath, "error", delErr)
-		} else {
-			metaDeleted = true
-		}
-	}
 
-	// Delete library symlink if requested
-	if deleteSymlink {
-		cfg := s.configManager.GetConfig()
-		var pathToDelete string
-		if item.LibraryPath != nil && *item.LibraryPath != "" {
-			pathToDelete = *item.LibraryPath
-		} else {
-			pathToDelete = pathutil.JoinAbsPath(cfg.MountPath, item.FilePath)
-		}
-		if delErr := os.Remove(pathToDelete); delErr != nil {
-			slog.ErrorContext(c.Context(), "Failed to delete library file during health record deletion", "path", pathToDelete, "error", delErr)
-		} else {
-			symlinkDeleted = true
-			// Clean up empty parent directories
-			var rootPath string
-			if item.LibraryPath != nil && *item.LibraryPath != "" {
-				if cfg.Health.LibraryDir != nil && *cfg.Health.LibraryDir != "" {
-					rootPath = *cfg.Health.LibraryDir
-				} else {
-					rootPath = filepath.Dir(filepath.Dir(pathToDelete))
-				}
+		// Delete metadata if requested
+		if deleteMeta && s.metadataService != nil {
+			if delErr := s.metadataService.DeleteFileMetadataWithSourceNzb(c.Context(), item.FilePath, cfg.Metadata.ShouldDeleteSourceNzb()); delErr != nil {
+				slog.ErrorContext(c.Context(), "Failed to delete metadata during health record deletion", "file_path", item.FilePath, "error", delErr)
 			} else {
-				rootPath = cfg.MountPath
+				metaDeleted = true
 			}
-			if rootPath != "" {
-				pathutil.RemoveEmptyDirs(rootPath, filepath.Dir(pathToDelete))
+		}
+
+		// Delete library symlink if requested
+		if deleteSymlink {
+			if deleteLibraryFile(c.Context(), cfg, item) {
+				symlinkDeleted = true
 			}
 		}
 	}
@@ -341,8 +320,7 @@ func (s *Server) handleDeleteHealthBulk(c *fiber.Ctx) error {
 
 			// Delete metadata if requested
 			if req.DeleteMeta && s.metadataService != nil {
-				deleteSourceNzb := cfg.Metadata.DeleteSourceNzbOnRemoval != nil && *cfg.Metadata.DeleteSourceNzbOnRemoval
-				if delErr := s.metadataService.DeleteFileMetadataWithSourceNzb(c.Context(), item.FilePath, deleteSourceNzb); delErr != nil {
+				if delErr := s.metadataService.DeleteFileMetadataWithSourceNzb(c.Context(), item.FilePath, cfg.Metadata.ShouldDeleteSourceNzb()); delErr != nil {
 					slog.ErrorContext(c.Context(), "Failed to delete metadata during bulk deletion", "file_path", item.FilePath, "error", delErr)
 				} else {
 					metaDeletedCount++
@@ -351,29 +329,8 @@ func (s *Server) handleDeleteHealthBulk(c *fiber.Ctx) error {
 
 			// Delete library symlink if requested
 			if req.DeleteSymlink {
-				var pathToDelete string
-				if item.LibraryPath != nil && *item.LibraryPath != "" {
-					pathToDelete = *item.LibraryPath
-				} else {
-					pathToDelete = pathutil.JoinAbsPath(cfg.MountPath, item.FilePath)
-				}
-				if delErr := os.Remove(pathToDelete); delErr != nil {
-					slog.ErrorContext(c.Context(), "Failed to delete library file during bulk deletion", "path", pathToDelete, "error", delErr)
-				} else {
+				if deleteLibraryFile(c.Context(), cfg, item) {
 					symlinkDeletedCount++
-					var rootPath string
-					if item.LibraryPath != nil && *item.LibraryPath != "" {
-						if cfg.Health.LibraryDir != nil && *cfg.Health.LibraryDir != "" {
-							rootPath = *cfg.Health.LibraryDir
-						} else {
-							rootPath = filepath.Dir(filepath.Dir(pathToDelete))
-						}
-					} else {
-						rootPath = cfg.MountPath
-					}
-					if rootPath != "" {
-						pathutil.RemoveEmptyDirs(rootPath, filepath.Dir(pathToDelete))
-					}
 				}
 			}
 		}
@@ -1523,4 +1480,37 @@ func (s *Server) handleRegenerateLibraryFiles(c *fiber.Ctx) error {
 	}
 
 	return RespondSuccess(c, response)
+}
+
+// deleteLibraryFile removes the library file (symlink) for a health record and cleans up empty parent directories.
+// Returns true if the file was successfully deleted.
+func deleteLibraryFile(ctx context.Context, cfg *config.Config, item *database.FileHealth) bool {
+	var pathToDelete string
+	if item.LibraryPath != nil && *item.LibraryPath != "" {
+		pathToDelete = *item.LibraryPath
+	} else {
+		pathToDelete = pathutil.JoinAbsPath(cfg.MountPath, item.FilePath)
+	}
+
+	if err := os.Remove(pathToDelete); err != nil {
+		slog.ErrorContext(ctx, "Failed to delete library file", "path", pathToDelete, "error", err)
+		return false
+	}
+
+	// Clean up empty parent directories
+	var rootPath string
+	if item.LibraryPath != nil && *item.LibraryPath != "" {
+		if cfg.Health.LibraryDir != nil && *cfg.Health.LibraryDir != "" {
+			rootPath = *cfg.Health.LibraryDir
+		} else {
+			rootPath = filepath.Dir(filepath.Dir(pathToDelete))
+		}
+	} else {
+		rootPath = cfg.MountPath
+	}
+	if rootPath != "" {
+		pathutil.RemoveEmptyDirs(rootPath, filepath.Dir(pathToDelete))
+	}
+
+	return true
 }

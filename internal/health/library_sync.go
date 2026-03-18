@@ -799,7 +799,7 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 				previousPending = make(map[string]bool)
 			}
 
-			deleteSourceNzb := cfg.Metadata.DeleteSourceNzbOnRemoval != nil && *cfg.Metadata.DeleteSourceNzbOnRemoval
+			deleteSourceNzb := cfg.Metadata.ShouldDeleteSourceNzb()
 
 			for relativeMountPath := range currentMetaOrphans {
 				select {
