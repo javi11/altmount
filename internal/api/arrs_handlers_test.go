@@ -97,7 +97,7 @@ func TestHandleArrsWebhook_EpisodeFileDelete(t *testing.T) {
 	}
 
 	assert.Equal(t, true, result["success"])
-	assert.Equal(t, "Ignored", result["message"])
+	assert.Equal(t, "No path to scan", result["message"])
 }
 func TestHandleArrsWebhook_MovieFileDelete(t *testing.T) {
 	app := fiber.New()
@@ -137,7 +137,7 @@ func TestHandleArrsWebhook_MovieFileDelete(t *testing.T) {
 	}
 
 	assert.Equal(t, true, result["success"])
-	assert.Equal(t, "Ignored", result["message"])
+	assert.Equal(t, "No path to scan", result["message"])
 }
 
 func TestArrsWebhookRequest_Unmarshal(t *testing.T) {

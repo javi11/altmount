@@ -279,6 +279,11 @@ func (ms *MetadataService) DeleteFileMetadataWithSourceNzb(ctx context.Context, 
 		}
 	}
 
+	// Remove .ids/ symlink before deletion
+	if idData, readErr := os.ReadFile(metadataPath + ".id"); readErr == nil && len(idData) > 0 {
+		_ = ms.RemoveIDSymlink(string(idData))
+	}
+
 	// Delete the metadata file
 	err := os.Remove(metadataPath)
 	if err != nil && !os.IsNotExist(err) {
@@ -619,6 +624,11 @@ func (ms *MetadataService) MoveToCorrupted(ctx context.Context, virtualPath stri
 
 	targetPath := filepath.Join(targetDir, truncatedFilename+".meta")
 
+	// Remove .ids/ symlink before moving to corrupted
+	if idData, readErr := os.ReadFile(metadataPath + ".id"); readErr == nil && len(idData) > 0 {
+		_ = ms.RemoveIDSymlink(string(idData))
+	}
+
 	// Move the .meta file
 	if err := os.Rename(metadataPath, targetPath); err != nil {
 		slog.WarnContext(ctx, "Failed to move corrupted metadata, trying copy fallback", "error", err)
@@ -637,6 +647,65 @@ func (ms *MetadataService) MoveToCorrupted(ctx context.Context, virtualPath stri
 		"original", metadataPath,
 		"target", targetPath)
 	return nil
+}
+
+// CleanupOrphanedIDSymlinks walks the .ids/ directory and removes symlinks whose
+// targets no longer exist. Empty shard directories are cleaned up afterwards.
+// Returns the number of removed symlinks.
+func (ms *MetadataService) CleanupOrphanedIDSymlinks(ctx context.Context) (int, error) {
+	idsRoot := filepath.Join(ms.rootPath, ".ids")
+	if _, err := os.Stat(idsRoot); os.IsNotExist(err) {
+		return 0, nil
+	}
+
+	removed := 0
+	err := filepath.WalkDir(idsRoot, func(path string, d fs.DirEntry, err error) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		if err != nil {
+			return nil // skip errors
+		}
+		if d.IsDir() {
+			return nil
+		}
+
+		// Only process symlinks
+		if d.Type()&os.ModeSymlink == 0 {
+			return nil
+		}
+
+		// Check if the symlink target exists
+		target, readErr := os.Readlink(path)
+		if readErr != nil {
+			return nil
+		}
+
+		// Make target absolute if relative
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(filepath.Dir(path), target)
+		}
+
+		if _, statErr := os.Stat(target); os.IsNotExist(statErr) {
+			if removeErr := os.Remove(path); removeErr == nil {
+				removed++
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return removed, err
+	}
+
+	// Clean empty shard directories bottom-up
+	pathutil.RemoveEmptyDirs(ms.rootPath, idsRoot)
+
+	return removed, nil
 }
 
 func (ms *MetadataService) isCompleteDir(path string) bool {
