@@ -150,7 +150,6 @@ type DatabaseConfig struct {
 type MetadataConfig struct {
 	RootPath                 string               `yaml:"root_path" mapstructure:"root_path" json:"root_path"`
 	DeleteSourceNzbOnRemoval *bool                `yaml:"delete_source_nzb_on_removal" mapstructure:"delete_source_nzb_on_removal" json:"delete_source_nzb_on_removal,omitempty"`
-	DeleteFailedNzb          *bool                `yaml:"delete_failed_nzb" mapstructure:"delete_failed_nzb" json:"delete_failed_nzb,omitempty"`
 	DeleteCompletedNzb       *bool                `yaml:"delete_completed_nzb" mapstructure:"delete_completed_nzb" json:"delete_completed_nzb,omitempty"`
 	Backup                   MetadataBackupConfig `yaml:"backup" mapstructure:"backup" json:"backup"`
 }
@@ -263,6 +262,7 @@ type ImportConfig struct {
 	WatchIntervalSeconds           *int           `yaml:"watch_interval_seconds" mapstructure:"watch_interval_seconds" json:"watch_interval_seconds,omitempty"`
 	AllowNestedRarExtraction       *bool          `yaml:"allow_nested_rar_extraction" mapstructure:"allow_nested_rar_extraction" json:"allow_nested_rar_extraction,omitempty"`
 	ExpandBlurayIso                *bool          `yaml:"expand_bluray_iso" mapstructure:"expand_bluray_iso" json:"expand_bluray_iso,omitempty"`
+	FailedItemRetentionHours       *int           `yaml:"failed_item_retention_hours" mapstructure:"failed_item_retention_hours" json:"failed_item_retention_hours,omitempty"`
 }
 
 // LogConfig represents logging configuration with rotation support

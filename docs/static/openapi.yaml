@@ -4492,6 +4492,8 @@ components:
           type: array
         expand_bluray_iso:
           type: boolean
+        failed_item_retention_hours:
+          type: integer
         import_dir:
           type: string
         import_strategy:
@@ -4562,8 +4564,6 @@ components:
         backup:
           $ref: "#/components/schemas/config.MetadataBackupConfig"
         delete_completed_nzb:
-          type: boolean
-        delete_failed_nzb:
           type: boolean
         delete_source_nzb_on_removal:
           type: boolean
