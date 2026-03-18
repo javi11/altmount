@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -880,13 +881,21 @@ func (hw *HealthWorker) resolvePathForRescan(item *database.FileHealth) string {
 // cleanupZombieRecord deletes the health record and associated metadata for a file that is
 // no longer tracked by ARR (zombie or orphan). Errors are logged but not returned because
 // cleanup is best-effort.
-func (hw *HealthWorker) cleanupZombieRecord(ctx context.Context, filePath string) {
-	if delErr := hw.healthRepo.DeleteHealthRecord(ctx, filePath); delErr != nil {
-		slog.ErrorContext(ctx, "Failed to delete health record during cleanup", "file_path", filePath, "error", delErr)
+func (hw *HealthWorker) cleanupZombieRecord(ctx context.Context, item *database.FileHealth) {
+	// Delete library symlink/STRM if it exists
+	if item.LibraryPath != nil && *item.LibraryPath != "" {
+		if err := os.Remove(*item.LibraryPath); err != nil && !os.IsNotExist(err) {
+			slog.ErrorContext(ctx, "Failed to delete library file during zombie cleanup",
+				"path", *item.LibraryPath, "error", err)
+		}
+	}
+
+	if delErr := hw.healthRepo.DeleteHealthRecord(ctx, item.FilePath); delErr != nil {
+		slog.ErrorContext(ctx, "Failed to delete health record during cleanup", "file_path", item.FilePath, "error", delErr)
 	}
 
 	cfg := hw.configGetter()
-	relativePath := strings.TrimPrefix(filePath, cfg.MountPath)
+	relativePath := strings.TrimPrefix(item.FilePath, cfg.MountPath)
 	relativePath = strings.TrimPrefix(relativePath, "/")
 
 	deleteSourceNzb := false
@@ -894,7 +903,7 @@ func (hw *HealthWorker) cleanupZombieRecord(ctx context.Context, filePath string
 		deleteSourceNzb = *cfg.Metadata.DeleteSourceNzbOnRemoval
 	}
 	if delMetaErr := hw.metadataService.DeleteFileMetadataWithSourceNzb(ctx, relativePath, deleteSourceNzb); delMetaErr != nil {
-		slog.ErrorContext(ctx, "Failed to delete metadata during cleanup", "file_path", filePath, "error", delMetaErr)
+		slog.ErrorContext(ctx, "Failed to delete metadata during cleanup", "file_path", item.FilePath, "error", delMetaErr)
 	}
 }
 
@@ -947,7 +956,7 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, item *database.Fi
 		if errors.Is(err, arrs.ErrEpisodeAlreadySatisfied) || errors.Is(err, arrs.ErrPathMatchFailed) {
 			slog.WarnContext(ctx, "File no longer tracked by ARR, removing from AltMount",
 				"file_path", filePath, "arr_error", err)
-			hw.cleanupZombieRecord(ctx, filePath)
+			hw.cleanupZombieRecord(ctx, item)
 			return repairOutcomeDeleted, nil
 		}
 
@@ -989,7 +998,7 @@ func (hw *HealthWorker) retriggerFileRepair(ctx context.Context, item *database.
 	if err != nil {
 		if errors.Is(err, arrs.ErrEpisodeAlreadySatisfied) || errors.Is(err, arrs.ErrPathMatchFailed) {
 			slog.WarnContext(ctx, "File no longer tracked by ARR during re-trigger, removing from AltMount", "file_path", filePath)
-			hw.cleanupZombieRecord(ctx, filePath)
+			hw.cleanupZombieRecord(ctx, item)
 			return repairOutcomeDeleted, nil
 		}
 
