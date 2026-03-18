@@ -226,7 +226,15 @@ export const useDeleteHealthItem = () => {
 	const queryClient = useQueryClient();
 
 	return useMutation({
-		mutationFn: (id: number) => apiClient.deleteHealthItem(id),
+		mutationFn: ({
+			id,
+			deleteMeta,
+			deleteSymlink,
+		}: {
+			id: number;
+			deleteMeta?: boolean;
+			deleteSymlink?: boolean;
+		}) => apiClient.deleteHealthItem(id, { deleteMeta, deleteSymlink }),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["health"] });
 		},
@@ -237,7 +245,15 @@ export const useDeleteBulkHealthItems = () => {
 	const queryClient = useQueryClient();
 
 	return useMutation({
-		mutationFn: (filePaths: string[]) => apiClient.deleteBulkHealthItems(filePaths),
+		mutationFn: ({
+			filePaths,
+			deleteMeta,
+			deleteSymlink,
+		}: {
+			filePaths: string[];
+			deleteMeta?: boolean;
+			deleteSymlink?: boolean;
+		}) => apiClient.deleteBulkHealthItems(filePaths, { deleteMeta, deleteSymlink }),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["health"] });
 		},

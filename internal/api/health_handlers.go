@@ -216,17 +216,67 @@ func (s *Server) handleDeleteHealth(c *fiber.Ctx) error {
 		}
 	}
 
+	// Parse optional deletion flags
+	deleteMeta := c.QueryBool("delete_meta", false)
+	deleteSymlink := c.QueryBool("delete_symlink", false)
+
 	// Delete the health record from database using ID
 	err = s.healthRepo.DeleteHealthRecordByID(c.Context(), id)
 	if err != nil {
 		return RespondInternalError(c, "Failed to delete health record", err.Error())
 	}
 
+	metaDeleted := false
+	symlinkDeleted := false
+
+	// Delete metadata if requested
+	if deleteMeta && s.metadataService != nil {
+		cfg := s.configManager.GetConfig()
+		deleteSourceNzb := cfg.Metadata.DeleteSourceNzbOnRemoval != nil && *cfg.Metadata.DeleteSourceNzbOnRemoval
+		if delErr := s.metadataService.DeleteFileMetadataWithSourceNzb(c.Context(), item.FilePath, deleteSourceNzb); delErr != nil {
+			slog.ErrorContext(c.Context(), "Failed to delete metadata during health record deletion", "file_path", item.FilePath, "error", delErr)
+		} else {
+			metaDeleted = true
+		}
+	}
+
+	// Delete library symlink if requested
+	if deleteSymlink {
+		cfg := s.configManager.GetConfig()
+		var pathToDelete string
+		if item.LibraryPath != nil && *item.LibraryPath != "" {
+			pathToDelete = *item.LibraryPath
+		} else {
+			pathToDelete = pathutil.JoinAbsPath(cfg.MountPath, item.FilePath)
+		}
+		if delErr := os.Remove(pathToDelete); delErr != nil {
+			slog.ErrorContext(c.Context(), "Failed to delete library file during health record deletion", "path", pathToDelete, "error", delErr)
+		} else {
+			symlinkDeleted = true
+			// Clean up empty parent directories
+			var rootPath string
+			if item.LibraryPath != nil && *item.LibraryPath != "" {
+				if cfg.Health.LibraryDir != nil && *cfg.Health.LibraryDir != "" {
+					rootPath = *cfg.Health.LibraryDir
+				} else {
+					rootPath = filepath.Dir(filepath.Dir(pathToDelete))
+				}
+			} else {
+				rootPath = cfg.MountPath
+			}
+			if rootPath != "" {
+				pathutil.RemoveEmptyDirs(rootPath, filepath.Dir(pathToDelete))
+			}
+		}
+	}
+
 	return RespondSuccess(c, fiber.Map{
-		"message":    "Health record deleted successfully",
-		"id":         id,
-		"file_path":  item.FilePath,
-		"deleted_at": time.Now().Format(time.RFC3339),
+		"message":         "Health record deleted successfully",
+		"id":              id,
+		"file_path":       item.FilePath,
+		"deleted_at":      time.Now().Format(time.RFC3339),
+		"meta_deleted":    metaDeleted,
+		"symlink_deleted": symlinkDeleted,
 	})
 }
 
@@ -246,7 +296,9 @@ func (s *Server) handleDeleteHealth(c *fiber.Ctx) error {
 func (s *Server) handleDeleteHealthBulk(c *fiber.Ctx) error {
 	// Parse request body
 	var req struct {
-		FilePaths []string `json:"file_paths"`
+		FilePaths     []string `json:"file_paths"`
+		DeleteMeta    bool     `json:"delete_meta"`
+		DeleteSymlink bool     `json:"delete_symlink"`
 	}
 
 	if err := c.BodyParser(&req); err != nil {
@@ -262,20 +314,66 @@ func (s *Server) handleDeleteHealthBulk(c *fiber.Ctx) error {
 		return RespondValidationError(c, "Too many file paths", "Maximum 100 files allowed per bulk operation")
 	}
 
+	metaDeletedCount := 0
+	symlinkDeletedCount := 0
+
 	// Check for any items currently being checked and cancel if needed
-	if s.healthWorker != nil {
+	// Also perform meta/symlink deletions before removing DB records
+	if s.healthWorker != nil || req.DeleteMeta || req.DeleteSymlink {
+		cfg := s.configManager.GetConfig()
+
 		for _, filePath := range req.FilePaths {
-			// Get the record to check status
+			// Get the record to check status and get library path
 			item, err := s.healthRepo.GetFileHealth(c.Context(), filePath)
 			if err != nil {
-				continue // Skip if we can't get the record, will fail in bulk delete anyway
+				continue
 			}
 
 			if item != nil && item.Status == database.HealthStatusChecking {
-				// Check if there's actually an active check to cancel
-				if s.healthWorker.IsCheckActive(filePath) {
-					// Cancel the health check before deletion
-					_ = s.healthWorker.CancelHealthCheck(c.Context(), filePath) // Ignore error, proceed with deletion
+				if s.healthWorker != nil && s.healthWorker.IsCheckActive(filePath) {
+					_ = s.healthWorker.CancelHealthCheck(c.Context(), filePath)
+				}
+			}
+
+			if item == nil {
+				continue
+			}
+
+			// Delete metadata if requested
+			if req.DeleteMeta && s.metadataService != nil {
+				deleteSourceNzb := cfg.Metadata.DeleteSourceNzbOnRemoval != nil && *cfg.Metadata.DeleteSourceNzbOnRemoval
+				if delErr := s.metadataService.DeleteFileMetadataWithSourceNzb(c.Context(), item.FilePath, deleteSourceNzb); delErr != nil {
+					slog.ErrorContext(c.Context(), "Failed to delete metadata during bulk deletion", "file_path", item.FilePath, "error", delErr)
+				} else {
+					metaDeletedCount++
+				}
+			}
+
+			// Delete library symlink if requested
+			if req.DeleteSymlink {
+				var pathToDelete string
+				if item.LibraryPath != nil && *item.LibraryPath != "" {
+					pathToDelete = *item.LibraryPath
+				} else {
+					pathToDelete = pathutil.JoinAbsPath(cfg.MountPath, item.FilePath)
+				}
+				if delErr := os.Remove(pathToDelete); delErr != nil {
+					slog.ErrorContext(c.Context(), "Failed to delete library file during bulk deletion", "path", pathToDelete, "error", delErr)
+				} else {
+					symlinkDeletedCount++
+					var rootPath string
+					if item.LibraryPath != nil && *item.LibraryPath != "" {
+						if cfg.Health.LibraryDir != nil && *cfg.Health.LibraryDir != "" {
+							rootPath = *cfg.Health.LibraryDir
+						} else {
+							rootPath = filepath.Dir(filepath.Dir(pathToDelete))
+						}
+					} else {
+						rootPath = cfg.MountPath
+					}
+					if rootPath != "" {
+						pathutil.RemoveEmptyDirs(rootPath, filepath.Dir(pathToDelete))
+					}
 				}
 			}
 		}
@@ -288,10 +386,12 @@ func (s *Server) handleDeleteHealthBulk(c *fiber.Ctx) error {
 	}
 
 	return RespondSuccess(c, fiber.Map{
-		"message":       "Health records deleted successfully",
-		"deleted_count": len(req.FilePaths),
-		"file_paths":    req.FilePaths,
-		"deleted_at":    time.Now().Format(time.RFC3339),
+		"message":               "Health records deleted successfully",
+		"deleted_count":         len(req.FilePaths),
+		"file_paths":            req.FilePaths,
+		"deleted_at":            time.Now().Format(time.RFC3339),
+		"meta_deleted_count":    metaDeletedCount,
+		"symlink_deleted_count": symlinkDeletedCount,
 	})
 }
 

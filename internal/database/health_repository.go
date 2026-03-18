@@ -554,6 +554,65 @@ func (r *HealthRepository) DeleteHealthRecord(ctx context.Context, filePath stri
 	return nil
 }
 
+// DeleteHealthRecordByLibraryPath deletes the health record matching the given absolute library path.
+// Returns the file_path of the deleted record so the caller can use it for metadata cleanup.
+func (r *HealthRepository) DeleteHealthRecordByLibraryPath(ctx context.Context, libraryPath string) (string, error) {
+	var filePath string
+	selectQuery := `SELECT file_path FROM file_health WHERE library_path = ? LIMIT 1`
+	err := r.db.QueryRowContext(ctx, selectQuery, libraryPath).Scan(&filePath)
+	if err != nil {
+		return "", fmt.Errorf("no health record found for library_path %s: %w", libraryPath, err)
+	}
+
+	deleteQuery := `DELETE FROM file_health WHERE library_path = ?`
+	if _, err := r.db.ExecContext(ctx, deleteQuery, libraryPath); err != nil {
+		return "", fmt.Errorf("failed to delete health record by library_path: %w", err)
+	}
+
+	return filePath, nil
+}
+
+// DeleteHealthRecordsByLibraryPathPrefix deletes health records where library_path matches the given prefix.
+// Returns the file_paths of deleted records for metadata cleanup, plus the count.
+func (r *HealthRepository) DeleteHealthRecordsByLibraryPathPrefix(ctx context.Context, libraryPathPrefix string) ([]string, int64, error) {
+	if libraryPathPrefix == "" {
+		return nil, 0, nil
+	}
+
+	likePattern := libraryPathPrefix + "/%"
+	selectQuery := `SELECT file_path FROM file_health WHERE library_path = ? OR library_path LIKE ?`
+	rows, err := r.db.QueryContext(ctx, selectQuery, libraryPathPrefix, likePattern)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to query health records by library_path prefix %s: %w", libraryPathPrefix, err)
+	}
+	defer rows.Close()
+
+	var filePaths []string
+	for rows.Next() {
+		var fp string
+		if err := rows.Scan(&fp); err != nil {
+			return nil, 0, fmt.Errorf("failed to scan file_path: %w", err)
+		}
+		filePaths = append(filePaths, fp)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("error iterating rows: %w", err)
+	}
+
+	if len(filePaths) == 0 {
+		return nil, 0, nil
+	}
+
+	deleteQuery := `DELETE FROM file_health WHERE library_path = ? OR library_path LIKE ?`
+	result, err := r.db.ExecContext(ctx, deleteQuery, libraryPathPrefix, likePattern)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to delete health records by library_path prefix %s: %w", libraryPathPrefix, err)
+	}
+
+	count, _ := result.RowsAffected()
+	return filePaths, count, nil
+}
+
 // DeleteHealthRecordsByPrefix removes health records that start with the given prefix
 func (r *HealthRepository) DeleteHealthRecordsByPrefix(ctx context.Context, prefix string) (int64, error) {
 	prefix = strings.TrimPrefix(prefix, "/")
