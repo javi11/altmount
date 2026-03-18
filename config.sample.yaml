@@ -25,6 +25,8 @@ database:
 metadata:
   root_path: '/config/metadata' # Directory to store metadata files (required)
   delete_source_nzb_on_removal: false # Delete source NZB file when metadata is removed (default: false)
+  delete_failed_nzb: false # Delete NZB source file when import fails (default: false)
+  delete_completed_nzb: false # Delete NZB source file after successful import (default: false, DANGEROUS: prevents re-import)
   backup:
     enabled: false # Enable automatic metadata backups
     interval_hours: 24 # Backup interval in hours

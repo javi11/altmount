@@ -284,7 +284,7 @@ func (mrf *MetadataRemoteFile) RemoveFile(ctx context.Context, fileName string) 
 
 	// Check if we should delete the source NZB file
 	cfg := mrf.configGetter()
-	deleteSourceNzb := cfg.Metadata.DeleteSourceNzbOnRemoval != nil && *cfg.Metadata.DeleteSourceNzbOnRemoval
+	deleteSourceNzb := cfg.Metadata.ShouldDeleteSourceNzb()
 
 	// Use MetadataService's file delete operation with optional NZB deletion
 	err := mrf.metadataService.DeleteFileMetadataWithSourceNzb(ctx, normalizedName, deleteSourceNzb)

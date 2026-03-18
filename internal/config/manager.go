@@ -155,6 +155,11 @@ type MetadataConfig struct {
 	Backup                   MetadataBackupConfig `yaml:"backup" mapstructure:"backup" json:"backup"`
 }
 
+// ShouldDeleteSourceNzb returns whether source NZB files should be deleted on removal.
+func (m MetadataConfig) ShouldDeleteSourceNzb() bool {
+	return m.DeleteSourceNzbOnRemoval != nil && *m.DeleteSourceNzbOnRemoval
+}
+
 // MetadataBackupConfig represents metadata backup configuration
 type MetadataBackupConfig struct {
 	Enabled       *bool  `yaml:"enabled" mapstructure:"enabled" json:"enabled"`

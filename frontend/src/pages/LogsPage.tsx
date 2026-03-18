@@ -262,48 +262,48 @@ export function LogsPage() {
 			{/* Log output */}
 			<div className="card bg-base-200 shadow">
 				<div className="relative">
-				<div
-					ref={scrollRef}
-					role="log"
-					className="card-body h-[65vh] overflow-y-auto p-3"
-					aria-live={liveEnabled ? "polite" : "off"}
-					aria-atomic="false"
-					onScroll={handleScroll}
-				>
-					{filteredEntries.length === 0 ? (
-						<p className="text-base-content/50 text-sm">No log entries to display.</p>
-					) : (
-						<div style={{ height: `${rowVirtualizer.getTotalSize()}px`, position: "relative" }}>
-							{rowVirtualizer.getVirtualItems().map((virtualRow) => (
-								<div
-									key={virtualRow.key}
-									data-index={virtualRow.index}
-									ref={rowVirtualizer.measureElement}
-									style={{
-										position: "absolute",
-										top: 0,
-										left: 0,
-										width: "100%",
-										transform: `translateY(${virtualRow.start}px)`,
-									}}
-								>
-									<LogRow entry={filteredEntries[virtualRow.index]} />
-								</div>
-							))}
-						</div>
-					)}
-				</div>
-				{!isFollowing && (
-					<button
-						type="button"
-						className="absolute right-4 bottom-4 btn btn-sm btn-primary gap-1 shadow-lg"
-						onClick={handleFollowClick}
-						aria-label="Scroll to latest log entry"
+					<div
+						ref={scrollRef}
+						role="log"
+						className="card-body h-[65vh] overflow-y-auto p-3"
+						aria-live={liveEnabled ? "polite" : "off"}
+						aria-atomic="false"
+						onScroll={handleScroll}
 					>
-						<ArrowDown className="h-4 w-4" />
-						Follow
-					</button>
-				)}
+						{filteredEntries.length === 0 ? (
+							<p className="text-base-content/50 text-sm">No log entries to display.</p>
+						) : (
+							<div style={{ height: `${rowVirtualizer.getTotalSize()}px`, position: "relative" }}>
+								{rowVirtualizer.getVirtualItems().map((virtualRow) => (
+									<div
+										key={virtualRow.key}
+										data-index={virtualRow.index}
+										ref={rowVirtualizer.measureElement}
+										style={{
+											position: "absolute",
+											top: 0,
+											left: 0,
+											width: "100%",
+											transform: `translateY(${virtualRow.start}px)`,
+										}}
+									>
+										<LogRow entry={filteredEntries[virtualRow.index]} />
+									</div>
+								))}
+							</div>
+						)}
+					</div>
+					{!isFollowing && (
+						<button
+							type="button"
+							className="btn btn-sm btn-primary absolute right-4 bottom-4 gap-1 shadow-lg"
+							onClick={handleFollowClick}
+							aria-label="Scroll to latest log entry"
+						>
+							<ArrowDown className="h-4 w-4" />
+							Follow
+						</button>
+					)}
 				</div>
 			</div>
 
