@@ -193,6 +193,21 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 	normalize := func(path string) string {
 		normalizedPath := path
 
+		// If it's a symlink, try to resolve it to the mount path
+		if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			if target, err := os.Readlink(path); err == nil {
+				// Make target absolute if it's relative
+				if !filepath.IsAbs(target) {
+					target = filepath.Join(filepath.Dir(path), target)
+				}
+				cleanTarget := filepath.Clean(target)
+				// If symlink target is inside mountPath, use it for normalization
+				if mountPath != "" && strings.HasPrefix(cleanTarget, mountPath) {
+					normalizedPath = cleanTarget
+				}
+			}
+		}
+
 		// Find the longest matching prefix to avoid over-truncation
 		prefixes := []string{}
 		if mountPath != "" {
