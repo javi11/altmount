@@ -191,6 +191,10 @@ export function MetadataConfigSection({
 						</h4>
 						<div className="h-px flex-1 bg-base-300/50" />
 					</div>
+					<p className="text-[11px] text-base-content/40 leading-relaxed">
+						Controls NZB source file retention during import. For orphaned file cleanup, see{" "}
+						<span className="font-semibold text-base-content/60">Health → Orphan Cleanup</span>.
+					</p>
 
 					<div className="space-y-4">
 						<label className="label cursor-pointer items-start justify-start gap-4">

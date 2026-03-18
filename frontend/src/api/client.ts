@@ -344,21 +344,34 @@ export class APIClient {
 		return this.request<FileHealth>(`/health/${encodeURIComponent(id)}`);
 	}
 
-	async deleteHealthItem(id: number) {
-		return this.request<FileHealth>(`/health/${id}`, {
+	async deleteHealthItem(id: number, options?: { deleteMeta?: boolean; deleteSymlink?: boolean }) {
+		const searchParams = new URLSearchParams();
+		if (options?.deleteMeta) searchParams.set("delete_meta", "true");
+		if (options?.deleteSymlink) searchParams.set("delete_symlink", "true");
+		const query = searchParams.toString();
+		return this.request<FileHealth>(`/health/${id}${query ? `?${query}` : ""}`, {
 			method: "DELETE",
 		});
 	}
 
-	async deleteBulkHealthItems(filePaths: string[]) {
+	async deleteBulkHealthItems(
+		filePaths: string[],
+		options?: { deleteMeta?: boolean; deleteSymlink?: boolean },
+	) {
 		return this.request<{
 			message: string;
 			deleted_count: number;
 			file_paths: string[];
 			deleted_at: string;
+			meta_deleted_count?: number;
+			symlink_deleted_count?: number;
 		}>("/health/bulk/delete", {
 			method: "POST",
-			body: JSON.stringify({ file_paths: filePaths }),
+			body: JSON.stringify({
+				file_paths: filePaths,
+				delete_meta: options?.deleteMeta ?? false,
+				delete_symlink: options?.deleteSymlink ?? false,
+			}),
 		});
 	}
 
