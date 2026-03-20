@@ -8,7 +8,7 @@ import {
 	ShieldCheck,
 	Trash2,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { Pagination } from "../components/ui/Pagination";
 import { useConfirm } from "../contexts/ModalContext";
@@ -40,6 +40,8 @@ import { debounce } from "../lib/utils";
 import { HealthPriority } from "../types/api";
 import { BulkActionsToolbar } from "./HealthPage/components/BulkActionsToolbar";
 import { CleanupModal } from "./HealthPage/components/CleanupModal";
+import type { DeleteHealthOptions } from "./HealthPage/components/DeleteHealthModal";
+import { DeleteHealthModal } from "./HealthPage/components/DeleteHealthModal";
 import { HealthFilters } from "./HealthPage/components/HealthFilters";
 import { HealthStatsCards } from "./HealthPage/components/HealthStatsCards";
 import { HealthStatusAlert } from "./HealthPage/components/HealthStatusAlert";
@@ -76,6 +78,11 @@ export function HealthPage() {
 	const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
 	const [sortBy, setSortBy] = useState<SortBy>("created_at");
 	const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
+	const [deleteModal, setDeleteModal] = useState<{
+		show: boolean;
+		itemId?: number;
+		isBulk: boolean;
+	}>({ show: false, isBulk: false });
 
 	const pageSize = 20;
 	const {
@@ -137,23 +144,22 @@ export function HealthPage() {
 	const startLibrarySync = useStartLibrarySync();
 	const cancelLibrarySync = useCancelLibrarySync();
 
-	const handleDelete = useCallback(
-		async (id: number) => {
-			const confirmed = await confirmAction(
-				"Delete Health Record",
-				"Are you sure you want to delete this health record? The actual file won´t be deleted.",
-				{
-					type: "warning",
-					confirmText: "Delete",
-					confirmButtonClass: "btn-error",
-				},
-			);
-			if (confirmed) {
-				await deleteItem.mutateAsync(id);
-			}
-		},
-		[confirmAction, deleteItem],
-	);
+	// Auto-refresh health list when library scan completes (true → false transition only)
+	const prevIsRunningRef = useRef<boolean | undefined>(undefined);
+	useEffect(() => {
+		const wasRunning = prevIsRunningRef.current;
+		const isRunning = librarySyncStatus?.is_running;
+		prevIsRunningRef.current = isRunning;
+
+		if (wasRunning === true && isRunning === false) {
+			void refetch();
+			void queryClient.invalidateQueries({ queryKey: ["health", "stats"] });
+		}
+	}, [librarySyncStatus?.is_running, refetch, queryClient]);
+
+	const handleDelete = useCallback((id: number) => {
+		setDeleteModal({ show: true, itemId: id, isBulk: false });
+	}, []);
 
 	const handleUnmask = useCallback(
 		async (id: number) => {
@@ -450,37 +456,46 @@ export function HealthPage() {
 		}
 	};
 
-	const handleBulkDelete = async () => {
+	const handleBulkDelete = () => {
 		if (selectedItems.size === 0) return;
+		setDeleteModal({ show: true, isBulk: true });
+	};
 
-		const confirmed = await confirmAction(
-			"Delete Selected Health Records",
-			`Are you sure you want to delete ${selectedItems.size} selected health records? The actual file won´t be deleted.`,
-			{
-				type: "warning",
-				confirmText: "Delete Selected",
-				confirmButtonClass: "btn-error",
-			},
-		);
-
-		if (confirmed) {
-			try {
+	const handleDeleteConfirm = async (options: DeleteHealthOptions) => {
+		try {
+			if (deleteModal.isBulk) {
 				const filePaths = Array.from(selectedItems);
-				await deleteBulkItems.mutateAsync(filePaths);
+				await deleteBulkItems.mutateAsync({
+					filePaths,
+					deleteMeta: options.deleteMeta,
+					deleteSymlink: options.deleteSymlink,
+				});
 				setSelectedItems(new Set());
 				showToast({
 					title: "Success",
 					message: `Successfully deleted ${filePaths.length} health records`,
 					type: "success",
 				});
-			} catch (error) {
-				console.error("Failed to delete selected health records:", error);
+			} else if (deleteModal.itemId !== undefined) {
+				await deleteItem.mutateAsync({
+					id: deleteModal.itemId,
+					deleteMeta: options.deleteMeta,
+					deleteSymlink: options.deleteSymlink,
+				});
 				showToast({
-					title: "Error",
-					message: "Failed to delete selected health records",
-					type: "error",
+					title: "Success",
+					message: "Health record deleted successfully",
+					type: "success",
 				});
 			}
+			setDeleteModal({ show: false, isBulk: false });
+		} catch (error) {
+			console.error("Failed to delete health records:", error);
+			showToast({
+				title: "Error",
+				message: "Failed to delete health records",
+				type: "error",
+			});
 		}
 	};
 
@@ -816,6 +831,20 @@ export function HealthPage() {
 									onClose={() => setShowCleanupModal(false)}
 									onConfigChange={setCleanupConfig}
 									onConfirm={handleCleanupConfirm}
+								/>
+
+								<DeleteHealthModal
+									show={deleteModal.show}
+									itemCount={
+										deleteModal.isBulk
+											? selectedItems.size
+											: deleteModal.itemId !== undefined
+												? 1
+												: 0
+									}
+									isPending={deleteItem.isPending || deleteBulkItems.isPending}
+									onClose={() => setDeleteModal({ show: false, isBulk: false })}
+									onConfirm={handleDeleteConfirm}
 								/>
 							</div>
 						) : (

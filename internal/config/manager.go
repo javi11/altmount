@@ -150,9 +150,13 @@ type DatabaseConfig struct {
 type MetadataConfig struct {
 	RootPath                 string               `yaml:"root_path" mapstructure:"root_path" json:"root_path"`
 	DeleteSourceNzbOnRemoval *bool                `yaml:"delete_source_nzb_on_removal" mapstructure:"delete_source_nzb_on_removal" json:"delete_source_nzb_on_removal,omitempty"`
-	DeleteFailedNzb          *bool                `yaml:"delete_failed_nzb" mapstructure:"delete_failed_nzb" json:"delete_failed_nzb,omitempty"`
 	DeleteCompletedNzb       *bool                `yaml:"delete_completed_nzb" mapstructure:"delete_completed_nzb" json:"delete_completed_nzb,omitempty"`
 	Backup                   MetadataBackupConfig `yaml:"backup" mapstructure:"backup" json:"backup"`
+}
+
+// ShouldDeleteSourceNzb returns whether source NZB files should be deleted on removal.
+func (m MetadataConfig) ShouldDeleteSourceNzb() bool {
+	return m.DeleteSourceNzbOnRemoval != nil && *m.DeleteSourceNzbOnRemoval
 }
 
 // MetadataBackupConfig represents metadata backup configuration
@@ -260,6 +264,7 @@ type ImportConfig struct {
 	ExpandBlurayIso                *bool          `yaml:"expand_bluray_iso" mapstructure:"expand_bluray_iso" json:"expand_bluray_iso,omitempty"`
 	AllowFileRenaming              *bool          `yaml:"allow_file_renaming" mapstructure:"allow_file_renaming" json:"allow_file_renaming,omitempty"`
 	FilterSampleAndProof           *bool          `yaml:"filter_sample_and_proof" mapstructure:"filter_sample_and_proof" json:"filter_sample_and_proof,omitempty"`
+	FailedItemRetentionHours       *int           `yaml:"failed_item_retention_hours" mapstructure:"failed_item_retention_hours" json:"failed_item_retention_hours,omitempty"`
 }
 
 // LogConfig represents logging configuration with rotation support
@@ -405,7 +410,7 @@ func (c *Config) Validate() error {
 	}
 
 	if c.Streaming.MaxPrefetch <= 0 {
-		c.Streaming.MaxPrefetch = 30 // Default to 30 segments prefetched ahead if not set
+		c.Streaming.MaxPrefetch = 60 // Default to 60 segments prefetched ahead if not set
 	}
 
 	if c.Import.MaxProcessorWorkers <= 0 {
@@ -1224,7 +1229,7 @@ func DefaultConfig(configDir ...string) *Config {
 			},
 		},
 		Streaming: StreamingConfig{
-			MaxPrefetch: 30, // Default: 30 segments prefetched ahead
+			MaxPrefetch: 60, // Default: 60 segments prefetched ahead
 			FailureMasking: FailureMaskingConfig{
 				Enabled:   &failureMaskingEnabled,
 				Threshold: 3,

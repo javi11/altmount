@@ -56,7 +56,6 @@ export interface DatabaseConfig {
 export interface MetadataConfig {
 	root_path: string;
 	delete_source_nzb_on_removal?: boolean;
-	delete_failed_nzb?: boolean;
 	delete_completed_nzb?: boolean;
 	backup: MetadataBackupConfig;
 }
@@ -227,6 +226,7 @@ export interface ImportConfig {
 	allow_nested_rar_extraction?: boolean;
 	allow_file_renaming?: boolean;
 	filter_sample_and_proof?: boolean;
+	failed_item_retention_hours?: number | null;
 }
 
 // Log configuration
@@ -339,10 +339,13 @@ export interface StreamingUpdateRequest {
 
 // Health update request
 export interface HealthUpdateRequest {
-	auto_repair_enabled?: boolean;
+	enabled?: boolean;
+	library_dir?: string;
+	cleanup_orphaned_metadata?: boolean;
 	check_interval_seconds?: number; // Interval in seconds (optional)
 	max_connections_for_health_checks?: number;
 	max_concurrent_jobs?: number; // Max concurrent health check jobs
+	segment_sample_percentage?: number; // Percentage of segments to check (1-100)
 	max_retries?: number;
 	read_timeout_seconds?: number;
 	library_sync_interval_minutes?: number; // Library sync interval in minutes (optional)

@@ -191,6 +191,10 @@ export function MetadataConfigSection({
 						</h4>
 						<div className="h-px flex-1 bg-base-300/50" />
 					</div>
+					<p className="text-[11px] text-base-content/40 leading-relaxed">
+						Controls NZB source file retention during import. For orphaned file cleanup, see{" "}
+						<span className="font-semibold text-base-content/60">Health → Orphan Cleanup</span>.
+					</p>
 
 					<div className="space-y-4">
 						<label className="label cursor-pointer items-start justify-start gap-4">
@@ -209,24 +213,6 @@ export function MetadataConfigSection({
 								</span>
 								<span className="mt-1 block whitespace-normal break-words text-base-content/50 text-xs leading-relaxed">
 									Delete original NZB file when metadata is manually removed from AltMount.
-								</span>
-							</div>
-						</label>
-
-						<label className="label cursor-pointer items-start justify-start gap-4">
-							<input
-								type="checkbox"
-								className="checkbox checkbox-primary checkbox-sm mt-1 shrink-0"
-								checked={formData.delete_failed_nzb ?? true}
-								disabled={isReadOnly}
-								onChange={(e) => handleCheckboxChange("delete_failed_nzb", e.target.checked)}
-							/>
-							<div className="min-w-0 flex-1">
-								<span className="block whitespace-normal break-words font-bold text-xs">
-									Clean Failed NZBs
-								</span>
-								<span className="mt-1 block whitespace-normal break-words text-base-content/50 text-xs leading-relaxed">
-									Permanently delete NZBs that fail processing instead of moving to 'failed' folder.
 								</span>
 							</div>
 						</label>

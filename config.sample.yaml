@@ -25,6 +25,7 @@ database:
 metadata:
   root_path: '/config/metadata' # Directory to store metadata files (required)
   delete_source_nzb_on_removal: false # Delete source NZB file when metadata is removed (default: false)
+  delete_completed_nzb: false # Delete NZB source file after successful import (default: false, DANGEROUS: prevents re-import)
   backup:
     enabled: false # Enable automatic metadata backups
     interval_hours: 24 # Backup interval in hours
@@ -153,6 +154,7 @@ import:
   import_dir: '' # Import directory (required when import_strategy is SYMLINK or STRM, must be absolute path)
                  # Windows example: 'C:\Users\user\Videos'
   skip_health_check: true # Bypass Usenet article validation during import (default: true)
+  failed_item_retention_hours: 24 # Auto-remove failed queue items and NZB files after this many hours (0 to disable, default: 24)
 
 # Health monitoring configuration
 health:

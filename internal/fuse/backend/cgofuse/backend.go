@@ -155,6 +155,7 @@ func (b *Backend) mountOptions() []string {
 			"-o", "volname=altmount",
 			"-o", "noapplexattr",
 			"-o", "noappledouble",
+			"-o", "iosize=1048576", // 1MB I/O size (macOS default is 64KB)
 		)
 		if b.cfg.FuseConfig.AllowOther {
 			opts = append(opts, "-o", "allow_other")

@@ -90,11 +90,11 @@ const SECTION_GROUPS = [
 	},
 	{
 		title: "Automation",
-		sections: ["sabnzbd", "arrs", "health", "stremio"],
+		sections: ["sabnzbd", "arrs", "health", "stremio", "import"],
 	},
 	{
 		title: "System",
-		sections: ["auth", "import", "system"],
+		sections: ["auth", "system"],
 	},
 ];
 
