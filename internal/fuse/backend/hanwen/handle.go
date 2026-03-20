@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"sync"
 	"sync/atomic"
 	"syscall"
 
@@ -20,8 +19,9 @@ import (
 var _ fs.FileReleaser = (*Handle)(nil)
 
 // Handle wraps an afero.File for Seek+Read-based reads.
-// Uses mutex-protected Seek+Read to preserve the persistent reader's
-// prefetch state in UsenetReader (ReadAt creates a new reader per call).
+// Preserves the persistent reader's prefetch state in UsenetReader
+// (ReadAt creates a new reader per call). No mutex needed — FUSE
+// serializes reads per handle.
 type Handle struct {
 	file          afero.File
 	closed        atomic.Bool
@@ -30,8 +30,7 @@ type Handle struct {
 	stream        *nzbfilesystem.ActiveStream
 	streamTracker backend.StreamTracker
 
-	// Seek+Read serialization
-	mu       sync.Mutex
+	// Position tracking for skip-seek optimization (no mutex needed — FUSE serializes reads per handle)
 	position int64
 }
 
@@ -52,16 +51,13 @@ func NewHandle(
 	}
 }
 
-// Read handles a read request using mutex-protected Seek+Read.
+// Read handles a read request using Seek+Read.
 // This keeps the persistent UsenetReader alive across reads, allowing
 // the downloadManager prefetch pipeline to stay effective.
 func (h *Handle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
 	if h.closed.Load() {
 		return nil, syscall.EIO
 	}
-
-	h.mu.Lock()
-	defer h.mu.Unlock()
 
 	// Skip seek if already at the correct position (sequential read optimization)
 	if off != h.position {
