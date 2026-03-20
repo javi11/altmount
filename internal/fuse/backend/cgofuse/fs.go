@@ -449,4 +449,3 @@ func (f *FS) fillStat(info os.FileInfo, stat *cgofuse.Stat_t) {
 		stat.Nlink = 1
 	}
 }
-

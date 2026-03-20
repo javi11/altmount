@@ -35,14 +35,14 @@ type NestedSource struct {
 type Content struct {
 	InternalPath  string                `json:"internal_path"`
 	Filename      string                `json:"filename"`
-	Size          int64                 `json:"size"`                   // Uncompressed size (for file metadata)
-	PackedSize    int64                 `json:"packed_size"`            // Compressed size in RAR (for segment validation)
-	Segments      []*metapb.SegmentData `json:"segments"`               // Segment data for this file
-	IsDirectory   bool                  `json:"is_directory,omitempty"` // Indicates if this is a directory
-	AesKey        []byte                `json:"aes_key,omitempty"`      // AES encryption key (if encrypted)
-	AesIV         []byte                `json:"aes_iv,omitempty"`       // AES initialization vector (if encrypted)
-	NzbdavID      string                `json:"nzbdav_id,omitempty"`    // Original ID from nzbdav
-	NestedSources      []NestedSource `json:"nested_sources,omitempty"` // Nested RAR sources (encrypted outer)
+	Size          int64                 `json:"size"`                     // Uncompressed size (for file metadata)
+	PackedSize    int64                 `json:"packed_size"`              // Compressed size in RAR (for segment validation)
+	Segments      []*metapb.SegmentData `json:"segments"`                 // Segment data for this file
+	IsDirectory   bool                  `json:"is_directory,omitempty"`   // Indicates if this is a directory
+	AesKey        []byte                `json:"aes_key,omitempty"`        // AES encryption key (if encrypted)
+	AesIV         []byte                `json:"aes_iv,omitempty"`         // AES initialization vector (if encrypted)
+	NzbdavID      string                `json:"nzbdav_id,omitempty"`      // Original ID from nzbdav
+	NestedSources []NestedSource        `json:"nested_sources,omitempty"` // Nested RAR sources (encrypted outer)
 	// ISOExpansionIndex is non-zero for files expanded from an ISO archive.
 	// It is the 1-based position of this file when all ISO files in the archive
 	// are sorted by size descending (1 = largest / main feature).

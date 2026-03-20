@@ -14,8 +14,8 @@ import (
 )
 
 const (
-	fuseMonitorInterval  = 15 * time.Second
-	fuseRecoveryDelay    = 2 * time.Second
+	fuseMonitorInterval     = 15 * time.Second
+	fuseRecoveryDelay       = 2 * time.Second
 	fuseMaxRecoveryAttempts = 3
 )
 

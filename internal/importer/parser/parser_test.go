@@ -38,13 +38,13 @@ func TestParseFile_EmptySegments(t *testing.T) {
 </nzb>`
 
 	r := strings.NewReader(nzbXML)
-	
+
 	// We expect fetchAllFirstSegments to be called, which will return MissingFirstSegment for files with no segments.
 	// Then it will fall back to fallbackGetFileInfos.
 	m.On("HasPool").Return(false)
 
 	parsed, err := p.ParseFile(context.Background(), r, "test.nzb", nil)
-	
+
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "NZB file contains no valid files")
 	assert.Nil(t, parsed)
@@ -75,12 +75,12 @@ func TestParseFile_MixedSegments(t *testing.T) {
 </nzb>`
 
 	r := strings.NewReader(nzbXML)
-	
+
 	// HasPool returns false to trigger fallback to fallbackGetFileInfos
 	m.On("HasPool").Return(false)
 
 	parsed, err := p.ParseFile(context.Background(), r, "test.nzb", nil)
-	
+
 	assert.NoError(t, err)
 	assert.NotNil(t, parsed)
 	assert.Len(t, parsed.Files, 1)
@@ -89,7 +89,7 @@ func TestParseFile_MixedSegments(t *testing.T) {
 
 func TestFallbackGetFileInfos_EmptySegments(t *testing.T) {
 	p := NewParser(nil)
-	
+
 	files := []nzbparser.NzbFile{
 		{
 			Filename: "file1.txt",
@@ -102,7 +102,7 @@ func TestFallbackGetFileInfos_EmptySegments(t *testing.T) {
 			},
 		},
 	}
-	
+
 	infos := p.fallbackGetFileInfos(files)
 
 	assert.Len(t, infos, 1)

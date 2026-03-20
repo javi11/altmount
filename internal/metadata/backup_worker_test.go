@@ -63,7 +63,7 @@ func TestBackupWorker_performBackup(t *testing.T) {
 	assert.True(t, dirs[0].IsDir())
 
 	backupDir := filepath.Join(backupRoot, dirs[0].Name())
-	
+
 	// Verify copied files and structure
 	assert.FileExists(t, filepath.Join(backupDir, "movies", "test1.meta"))
 	assert.FileExists(t, filepath.Join(backupDir, "test2.meta"))

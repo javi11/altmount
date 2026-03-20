@@ -618,13 +618,13 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 	// Collect results via channel to avoid large slice allocations and lock contention
 	filesToAddChan := make(chan database.AutomaticHealthCheckRecord, 100)
 	var totalAdded int
-	
+
 	// Start a goroutine to process results from the channel in batches to save RAM
 	done := make(chan struct{})
 	go func() {
 		const batchSize = 1000
 		batch := make([]database.AutomaticHealthCheckRecord, 0, batchSize)
-		
+
 		flushBatch := func() {
 			if len(batch) == 0 {
 				return
@@ -681,13 +681,13 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 			// Look up library path from our map (found via symlinks/strm scanning)
 			libraryPath := lsw.getLibraryPath(path, filesInUse)
 
-			// Path Recovery: If record exists but the physical path is broken, 
+			// Path Recovery: If record exists but the physical path is broken,
 			// try to see if it's at the expected location even if not in filesInUse
 			if existingRecord != nil && libraryPath == nil {
 				lp := existingRecord.LibraryPath
 				// A path needs recovery if it's nil, missing from disk, or is a relative path (buggy)
 				needsRecovery := lp == nil
-				
+
 				if !needsRecovery {
 					// Check if path is absolute and file exists
 					if !filepath.IsAbs(*lp) {
@@ -704,12 +704,12 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 						// Found it! Use this recovered path
 						libStr := expectedPath
 						libraryPath = &libStr
-						slog.InfoContext(ctx, "Recovered broken library path", 
+						slog.InfoContext(ctx, "Recovered broken library path",
 							"path", path, "new_location", expectedPath)
-						
+
 						// Update DB immediately for this recovered path
 						if err := lsw.healthRepo.UpdateLibraryPath(ctx, path, expectedPath); err != nil {
-							slog.ErrorContext(ctx, "Failed to update recovered library path", 
+							slog.ErrorContext(ctx, "Failed to update recovered library path",
 								"path", path, "error", err)
 						}
 					}

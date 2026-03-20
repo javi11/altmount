@@ -196,10 +196,10 @@ type segment struct {
 	groups      []string
 
 	// Data handoff fields (replaces io.Pipe)
-	data      []byte       // Downloaded segment data (set once by downloader)
-	dataErr   error        // Download error (set once by downloader)
+	data      []byte        // Downloaded segment data (set once by downloader)
+	dataErr   error         // Download error (set once by downloader)
 	dataReady chan struct{} // Closed when data or dataErr is set
-	readyOnce sync.Once    // Guards closing dataReady channel
+	readyOnce sync.Once     // Guards closing dataReady channel
 
 	limitedReader io.Reader  // Cached limited reader
 	readerReady   bool       // Whether limitedReader has been successfully initialized

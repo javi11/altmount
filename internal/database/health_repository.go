@@ -1452,8 +1452,8 @@ func (r *HealthRepository) batchInsertAutomaticHealthChecks(ctx context.Context,
 			scheduledCheckAtStr = record.ScheduledCheckAt.UTC().Format("2006-01-02 15:04:05")
 		}
 
-		args = append(args, 
-			record.FilePath, record.LibraryPath, HealthStatusHealthy, 
+		args = append(args,
+			record.FilePath, record.LibraryPath, HealthStatusHealthy,
 			record.MaxRetries, record.MaxRepairRetries,
 			record.SourceNzbPath, releaseDateStr, scheduledCheckAtStr)
 	}

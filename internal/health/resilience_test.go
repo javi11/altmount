@@ -166,7 +166,7 @@ func TestCleanupZombieRecord_NoLibraryPath(t *testing.T) {
 
 	item := &database.FileHealth{
 		FilePath:    "/" + filePath, // cleanupZombieRecord receives the full path with leading /
-		LibraryPath: nil,           // No library path
+		LibraryPath: nil,            // No library path
 	}
 
 	ctx := context.Background()
