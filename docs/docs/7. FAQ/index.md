@@ -60,7 +60,7 @@ The default **5%** works well for most libraries. It catches the majority of cor
 - Use **10-20%** if you want more confidence with moderate resource usage.
 - Use **100%** temporarily after switching Usenet providers or if you suspect widespread issues.
 
-See [Choosing the Right Percentage](../3.%20Configuration/health-monitoring.md#choosing-the-right-segment_sample_percentage) for guidelines.
+See [Choosing the Right Percentage](../3. Configuration/health-monitoring.md#choosing-the-right-segment_sample_percentage) for guidelines.
 
 ### How do I configure symlink paths with Docker?
 

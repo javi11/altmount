@@ -866,12 +866,15 @@ func applyRepairOutcome(update *database.HealthStatusUpdate, outcome repairOutco
 }
 
 // resolvePathForRescan determines the absolute path that ARR should rescan for a given file.
-// It checks LibraryPath first, then ImportDir, and falls back to MountPath.
+// It checks LibraryPath first, then LibraryDir, then ImportDir, and falls back to MountPath.
 func (hw *HealthWorker) resolvePathForRescan(item *database.FileHealth) string {
 	if item.LibraryPath != nil && *item.LibraryPath != "" {
 		return *item.LibraryPath
 	}
 	cfg := hw.configGetter()
+	if cfg.Health.LibraryDir != nil && *cfg.Health.LibraryDir != "" {
+		return pathutil.JoinAbsPath(*cfg.Health.LibraryDir, item.FilePath)
+	}
 	if cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
 		return pathutil.JoinAbsPath(*cfg.Import.ImportDir, item.FilePath)
 	}
@@ -970,13 +973,19 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, item *database.Fi
 		"path_for_rescan", pathForRescan)
 
 	// Move the metadata file to the corrupted folder so FUSE/WebDAV stops showing it.
-	// We do this AFTER ARR accepts the repair so the file stays visible if ARR cannot find a replacement.
-	cfg := hw.configGetter()
-	relativePath := strings.TrimPrefix(filePath, cfg.MountPath)
-	relativePath = strings.TrimPrefix(relativePath, "/")
-	slog.InfoContext(ctx, "Moving metadata file for corrupted item to safety folder to trigger replacement", "file_path", filePath)
-	if moveErr := hw.metadataService.MoveToCorrupted(ctx, relativePath); moveErr != nil {
-		slog.WarnContext(ctx, "Failed to move corrupted metadata file, proceeding with repair trigger status", "error", moveErr)
+	// CRITICAL: We only do this if the file has already been imported (has a LibraryPath).
+	// If it hasn't been imported yet, we keep it visible so ARR can see the "Missing File"
+	// or "Empty Folder" and report its own warning, which helps the repair cycle.
+	if item.LibraryPath != nil && *item.LibraryPath != "" {
+		cfg := hw.configGetter()
+		relativePath := strings.TrimPrefix(filePath, cfg.MountPath)
+		relativePath = strings.TrimPrefix(relativePath, "/")
+		slog.InfoContext(ctx, "Moving metadata file for corrupted item to safety folder to trigger replacement", "file_path", filePath)
+		if moveErr := hw.metadataService.MoveToCorrupted(ctx, relativePath); moveErr != nil {
+			slog.WarnContext(ctx, "Failed to move corrupted metadata file, proceeding with repair trigger status", "error", moveErr)
+		}
+	} else {
+		slog.InfoContext(ctx, "Skipping metadata move for corrupted item - file not yet imported by ARR", "file_path", filePath)
 	}
 
 	return repairOutcomeTriggered, nil

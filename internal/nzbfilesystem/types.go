@@ -1,6 +1,7 @@
 package nzbfilesystem
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"time"
@@ -27,6 +28,11 @@ type ActiveStream struct {
 	TotalConnections int       `json:"total_connections"`
 	BufferedOffset   int64     `json:"buffered_offset"`
 	Status           string    `json:"status"` // e.g., "Buffering", "Streaming", "Stalled"
+}
+
+// ARRsRepairService abstracts the ARR repair operations needed by the filesystem.
+type ARRsRepairService interface {
+	TriggerFileRescan(ctx context.Context, pathForRescan string, relativePath string) error
 }
 
 // StreamTracker interface for tracking active streams

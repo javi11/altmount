@@ -140,8 +140,8 @@ func (r *HealthRepository) GetFileHealthByID(ctx context.Context, id int64) (*Fi
 	return &health, nil
 }
 
-// IncrementStreamingFailureCount increments the streaming failure count and masks the file if threshold reached
-func (r *HealthRepository) IncrementStreamingFailureCount(ctx context.Context, filePath string, threshold int) (bool, error) {
+// IncrementStreamingFailureCount increments the streaming failure count and returns whether masking/repair threshold was reached
+func (r *HealthRepository) IncrementStreamingFailureCount(ctx context.Context, filePath string, threshold int) (bool, bool, error) {
 	filePath = strings.TrimPrefix(filePath, "/")
 	query := `
 		UPDATE file_health
@@ -149,16 +149,17 @@ func (r *HealthRepository) IncrementStreamingFailureCount(ctx context.Context, f
 		    is_masked = CASE WHEN streaming_failure_count + 1 >= ? THEN TRUE ELSE is_masked END,
 		    updated_at = datetime('now')
 		WHERE file_path = ?
-		RETURNING is_masked
+		RETURNING is_masked, (streaming_failure_count >= ?)
 	`
 
 	var isMasked bool
-	err := r.db.QueryRowContext(ctx, query, threshold, filePath).Scan(&isMasked)
+	var shouldRepair bool
+	err := r.db.QueryRowContext(ctx, query, threshold, filePath, threshold).Scan(&isMasked, &shouldRepair)
 	if err != nil {
-		return false, fmt.Errorf("failed to increment streaming failure count: %w", err)
+		return false, false, fmt.Errorf("failed to increment streaming failure count: %w", err)
 	}
 
-	return isMasked, nil
+	return isMasked, shouldRepair, nil
 }
 
 // UnmaskFile removes the mask from a file and resets the failure count

@@ -2,7 +2,6 @@ package usenet
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/rand"
 	"sync/atomic"
@@ -38,14 +37,13 @@ func ValidateSegmentAvailability(
 	samplePercentage int,
 	progressTracker progress.ProgressTracker,
 	timeout time.Duration,
-	verifyData bool,
 ) error {
 	if len(segments) == 0 {
 		return nil
 	}
 
 	selected := selectSegmentsForValidation(segments, samplePercentage)
-	return ValidateSegmentList(ctx, selected, poolManager, maxConnections, progressTracker, timeout, verifyData)
+	return ValidateSegmentList(ctx, selected, poolManager, maxConnections, progressTracker, timeout)
 }
 
 // ValidateSegmentList validates a pre-selected list of segments via Usenet.
@@ -60,7 +58,6 @@ func ValidateSegmentList(
 	maxConnections int,
 	progressTracker progress.ProgressTracker,
 	timeout time.Duration,
-	verifyData bool,
 ) error {
 	if len(segments) == 0 {
 		return nil
@@ -85,27 +82,10 @@ func ValidateSegmentList(
 			defer cancel()
 
 			var err error
-			if verifyData {
-				lw := &limitedWriter{limit: 1}
-				_, err = usenetPool.BodyStream(checkCtx, seg.Id, lw)
-
-				if errors.Is(err, ErrLimitReached) {
-					err = nil
-				}
-
-				if err == nil {
-					poolManager.IncArticlesDownloaded()
-					poolManager.UpdateDownloadProgress("", lw.read)
-					if !lw.hasData {
-						err = fmt.Errorf("segment with ID %s contains only zero bytes", seg.Id)
-					}
-				}
-			} else {
-				_, err = usenetPool.Stat(checkCtx, seg.Id)
-				if err == nil {
-					poolManager.IncArticlesDownloaded()
-					poolManager.UpdateDownloadProgress("", 100)
-				}
+			_, err = usenetPool.Stat(checkCtx, seg.Id)
+			if err == nil {
+				poolManager.IncArticlesDownloaded()
+				poolManager.UpdateDownloadProgress("", 100)
 			}
 			if err != nil {
 				return fmt.Errorf("segment with ID %s unreachable: %w", seg.Id, err)
@@ -147,7 +127,6 @@ func ValidateSegmentAvailabilityDetailed(
 	samplePercentage int,
 	progressTracker progress.ProgressTracker,
 	timeout time.Duration,
-	verifyData bool,
 ) (ValidationResult, error) {
 	result := ValidationResult{
 		MissingIDs: []string{},
@@ -181,27 +160,10 @@ func ValidateSegmentAvailabilityDetailed(
 			defer cancel()
 
 			var err error
-			if verifyData {
-				lw := &limitedWriter{limit: 1}
-				_, err = usenetPool.BodyStream(checkCtx, seg.Id, lw)
-
-				if errors.Is(err, ErrLimitReached) {
-					err = nil
-				}
-
-				if err == nil {
-					poolManager.IncArticlesDownloaded()
-					poolManager.UpdateDownloadProgress("", lw.read)
-					if !lw.hasData {
-						err = fmt.Errorf("segment with ID %s contains only zero bytes", seg.Id)
-					}
-				}
-			} else {
-				_, err = usenetPool.Stat(checkCtx, seg.Id)
-				if err == nil {
-					poolManager.IncArticlesDownloaded()
-					poolManager.UpdateDownloadProgress("", 100)
-				}
+			_, err = usenetPool.Stat(checkCtx, seg.Id)
+			if err == nil {
+				poolManager.IncArticlesDownloaded()
+				poolManager.UpdateDownloadProgress("", 100)
 			}
 			if err != nil {
 				atomic.AddInt32(&missingCount, 1)
@@ -229,38 +191,6 @@ func ValidateSegmentAvailabilityDetailed(
 	}
 
 	return result, nil
-}
-
-// limitedWriter is an io.Writer that stops after reaching a certain byte limit
-// and tracks if any non-zero bytes were seen.
-type limitedWriter struct {
-	limit   int64
-	read    int64
-	hasData bool
-}
-
-func (lw *limitedWriter) Write(p []byte) (n int, err error) {
-	if !lw.hasData {
-		for _, b := range p {
-			if b != 0 {
-				lw.hasData = true
-				break
-			}
-		}
-	}
-
-	canWrite := lw.limit - lw.read
-	if canWrite <= 0 {
-		return 0, ErrLimitReached
-	}
-
-	if int64(len(p)) > canWrite {
-		lw.read += canWrite
-		return int(canWrite), ErrLimitReached
-	}
-
-	lw.read += int64(len(p))
-	return len(p), nil
 }
 
 // selectSegmentsForValidation determines which segments to validate based on validation mode and sample percentage.

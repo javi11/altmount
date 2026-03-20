@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 )
 
@@ -30,13 +31,57 @@ func (c *Coordinator) NotifyARR(ctx context.Context, item *database.ImportQueueI
 
 	cfg := c.configGetter()
 
-	// Try to trigger scan on the specific instance that manages this file
-	fullMountPath := filepath.Join(cfg.MountPath, strings.TrimPrefix(resultingPath, "/"))
+	// Build the path for ARR to scan
+	var basePath string
+	if cfg.Import.ImportStrategy != config.ImportStrategyNone &&
+		cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
+		basePath = *cfg.Import.ImportDir
+	} else {
+		basePath = cfg.MountPath
+	}
 
-	if err := c.arrsService.TriggerScanForFile(ctx, fullMountPath); err != nil {
+	// 1. Get the internal relative path (relative to FUSE mount)
+	relPath := strings.TrimPrefix(resultingPath, "/")
+
+	// 2. Strip any existing /complete or /category prefix from the internal path to start clean
+	category := ""
+	if item.Category != nil {
+		category = strings.Trim(*item.Category, "/")
+	}
+
+	if cfg.SABnzbd.CompleteDir != "" {
+		completeDir := strings.Trim(filepath.ToSlash(cfg.SABnzbd.CompleteDir), "/")
+		if after, ok := strings.CutPrefix(relPath, completeDir+"/"); ok {
+			relPath = after
+		} else if relPath == completeDir {
+			relPath = ""
+		}
+	}
+	if category != "" {
+		if after, ok := strings.CutPrefix(relPath, category+"/"); ok {
+			relPath = after
+		} else if relPath == category {
+			relPath = ""
+		}
+	}
+
+	// 3. Build the clean path using the determined base
+	pathParts := []string{basePath}
+	if cfg.SABnzbd.CompleteDir != "" {
+		pathParts = append(pathParts, strings.Trim(cfg.SABnzbd.CompleteDir, "/"))
+	}
+	if category != "" {
+		pathParts = append(pathParts, category)
+	}
+	pathParts = append(pathParts, relPath)
+
+	pathForARR := filepath.Join(pathParts...)
+	pathForARR = filepath.ToSlash(filepath.Clean(pathForARR))
+
+	if err := c.arrsService.TriggerScanForFile(ctx, pathForARR); err != nil {
 		// Fallback: broadcast to all instances of the type
 		c.log.DebugContext(ctx, "Could not find specific ARR instance for file, broadcasting scan",
-			"path", fullMountPath, "error", err)
+			"path", pathForARR, "error", err)
 
 		return c.broadcastToARRType(ctx, item)
 	}

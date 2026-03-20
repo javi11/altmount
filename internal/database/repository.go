@@ -402,14 +402,36 @@ func (r *Repository) RemoveFromQueue(ctx context.Context, id int64) error {
 	return nil
 }
 
-// RemoveFromHistoryByNzbID removes a record from import_history by its original NZB ID
-func (r *Repository) RemoveFromHistoryByNzbID(ctx context.Context, nzbID int64) error {
-	query := `DELETE FROM import_history WHERE nzb_id = ?`
-	_, err := r.db.ExecContext(ctx, query, nzbID)
+// RemoveFromHistory removes a record from import_history by its own ID
+func (r *Repository) RemoveFromHistory(ctx context.Context, id int64) (int64, error) {
+	query := `DELETE FROM import_history WHERE id = ?`
+	result, err := r.db.ExecContext(ctx, query, id)
 	if err != nil {
-		return fmt.Errorf("failed to remove from history: %w", err)
+		return 0, fmt.Errorf("failed to remove history record: %w", err)
 	}
-	return nil
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	return rowsAffected, nil
+}
+
+// RemoveFromHistoryByNzbID removes a record from import_history by its original NZB ID
+func (r *Repository) RemoveFromHistoryByNzbID(ctx context.Context, nzbID int64) (int64, error) {
+	query := `DELETE FROM import_history WHERE nzb_id = ?`
+	result, err := r.db.ExecContext(ctx, query, nzbID)
+	if err != nil {
+		return 0, fmt.Errorf("failed to remove from history: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	return rowsAffected, nil
 }
 
 // BulkDeleteResult contains the result of a bulk delete operation

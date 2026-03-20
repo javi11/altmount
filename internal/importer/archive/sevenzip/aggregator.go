@@ -54,6 +54,53 @@ func getContentSegments(content Content) []*metapb.SegmentData {
 	return content.Segments
 }
 
+// validateSegmentIntegrity checks if the segments provided for a file actually cover the expected size.
+// Returns an error if segment coverage is significantly lower than expected (1% shortfall threshold).
+func validateSegmentIntegrity(ctx context.Context, content Content) error {
+	const shortfallThresholdPercent = 1 // Fail if more than 1% of the file is missing
+
+	if len(content.NestedSources) > 0 {
+		// For nested sources, validate each source independently
+		for _, ns := range content.NestedSources {
+			var covered int64
+			for _, seg := range ns.Segments {
+				covered += (seg.EndOffset - seg.StartOffset + 1)
+			}
+
+			shortfall := ns.InnerLength - covered
+			if shortfall > 0 {
+				shortfallPercent := (shortfall * 100) / ns.InnerLength
+				if shortfallPercent >= shortfallThresholdPercent {
+					return fmt.Errorf("corrupted nested source: missing %d bytes (%d%% of part)", shortfall, shortfallPercent)
+				}
+			}
+		}
+	} else {
+		// For standard files, validate total segment coverage against PackedSize (if available)
+		var totalCovered int64
+		for _, seg := range content.Segments {
+			totalCovered += (seg.EndOffset - seg.StartOffset + 1)
+		}
+
+		expectedSize := content.PackedSize
+		if expectedSize <= 0 {
+			expectedSize = content.Size
+		}
+
+		if expectedSize > 0 {
+			shortfall := expectedSize - totalCovered
+			if shortfall > 0 {
+				shortfallPercent := (shortfall * 100) / expectedSize
+				if shortfallPercent >= shortfallThresholdPercent {
+					return fmt.Errorf("corrupted file: missing %d bytes (%d%% of total size)", shortfall, shortfallPercent)
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
 // calculateSegmentsToValidate calculates the actual number of segments that will be validated
 // based on the validation mode (full or sampling) and sample percentage.
 // This mirrors the logic in usenet.ValidateSegmentAvailability which uses selectSegmentsForValidation.
@@ -283,6 +330,17 @@ func ProcessArchive(
 				"file", baseFilename,
 				"size", sevenZipContent.Size)
 		} else {
+			// Perform segment integrity check before validation and metadata creation.
+			// This catches "born corrupted" files where the NZB does not provide enough segments
+			// to cover the expected file size.
+			if err := validateSegmentIntegrity(ctx, sevenZipContent); err != nil {
+				slog.ErrorContext(ctx, "Skipping SevenZip file due to segment integrity failure (missing segments in NZB)",
+					"file", baseFilename,
+					"error", err)
+
+				continue
+			}
+
 			// Create offset tracker for real-time segment-level progress
 			// This maps individual file segment progress (0→N) to cumulative progress across all files
 			var offsetTracker *progress.OffsetTracker

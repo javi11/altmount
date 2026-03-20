@@ -28,7 +28,8 @@ metadata:
   delete_completed_nzb: false # Delete NZB source file after successful import (default: false, DANGEROUS: prevents re-import)
   backup:
     enabled: false # Enable automatic metadata backups
-    interval_hours: 24 # Backup interval in hours
+    interval_hours: 24 # Backup interval in hours (used if backup_time is empty)
+    backup_time: '03:00' # Specific time of day to run backup (HH:MM format, 24h, UTC)
     keep_backups: 1 # Number of old backups to keep
     path: '/config/backups' # Absolute path to store backups
 

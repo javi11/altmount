@@ -143,7 +143,7 @@ export function MetadataConfigSection({
 									/>
 								</fieldset>
 
-								<div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+								<div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
 									<fieldset className="fieldset">
 										<legend className="fieldset-legend font-semibold">Interval (Hours)</legend>
 										<input
@@ -159,6 +159,19 @@ export function MetadataConfigSection({
 											}
 											min="1"
 										/>
+										<div className="mt-1 text-[10px] text-base-content/40">Fallback interval</div>
+									</fieldset>
+									<fieldset className="fieldset">
+										<legend className="fieldset-legend font-semibold">Daily Schedule (UTC)</legend>
+										<input
+											type="text"
+											className="input input-bordered w-full bg-base-100 font-mono text-sm"
+											value={formData.backup?.backup_time ?? ""}
+											disabled={isReadOnly}
+											onChange={(e) => handleBackupChange("backup_time", e.target.value)}
+											placeholder="03:00"
+										/>
+										<div className="mt-1 text-[10px] text-base-content/40">HH:MM format</div>
 									</fieldset>
 									<fieldset className="fieldset">
 										<legend className="fieldset-legend font-semibold">Retention (Count)</legend>

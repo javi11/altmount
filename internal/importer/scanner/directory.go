@@ -13,7 +13,7 @@ import (
 
 // QueueAdder defines the interface for adding items to the queue
 type QueueAdder interface {
-	AddToQueue(ctx context.Context, filePath string, relativePath *string) error
+	AddToQueue(ctx context.Context, filePath string, relativePath *string, metadata *string) error
 	IsFileInQueue(ctx context.Context, filePath string) bool
 	IsFileProcessed(filePath string, scanRoot string) bool
 }
@@ -190,7 +190,7 @@ func (d *DirectoryScanner) performScan(ctx context.Context, scanPath string) {
 			return nil
 		}
 
-		if err := d.queueAdder.AddToQueue(ctx, path, &scanPath); err != nil {
+		if err := d.queueAdder.AddToQueue(ctx, path, &scanPath, nil); err != nil {
 			d.log.ErrorContext(ctx, "Failed to add file to queue during scan", "file", path, "error", err)
 		}
 

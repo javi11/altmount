@@ -962,10 +962,10 @@ export class APIClient {
 		return this.request<UpdateStatusResponse>(`/system/update/status?channel=${channel}`);
 	}
 
-	async applyUpdate(channel: UpdateChannel): Promise<{ message: string }> {
+	async applyUpdate(channel: UpdateChannel, force = false): Promise<{ message: string }> {
 		return this.request<{ message: string }>("/system/update/apply", {
 			method: "POST",
-			body: JSON.stringify({ channel }),
+			body: JSON.stringify({ channel, force }),
 		});
 	}
 
