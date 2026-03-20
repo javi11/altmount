@@ -139,7 +139,10 @@ func (r *QueueRepository) AddToQueue(ctx context.Context, item *ImportQueueItem)
 		if err != nil {
 			return fmt.Errorf("failed to add queue item: %w", err)
 		}
-		item.ID, _ = result.LastInsertId()
+		item.ID, err = result.LastInsertId()
+		if err != nil {
+			return fmt.Errorf("failed to get last insert ID: %w", err)
+		}
 	}
 
 	item.CreatedAt = time.Now()
@@ -624,7 +627,10 @@ func (r *QueueRepository) AddBatchToQueue(ctx context.Context, items []*ImportQu
 				if err != nil {
 					return fmt.Errorf("failed to insert queue item %s: %w", item.NzbPath, err)
 				}
-				item.ID, _ = result.LastInsertId()
+				item.ID, err = result.LastInsertId()
+				if err != nil {
+					return fmt.Errorf("failed to get last insert ID for %s: %w", item.NzbPath, err)
+				}
 			}
 			item.CreatedAt = now
 			item.UpdatedAt = now
