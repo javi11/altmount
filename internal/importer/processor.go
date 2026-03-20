@@ -583,6 +583,10 @@ func (proc *Processor) processRarArchive(
 
 		releaseDate := archiveFiles[0].ReleaseDate.Unix()
 		samplePercentage := proc.segmentSamplePercentage
+		allowFileRenaming := proc.configGetter().Import.AllowFileRenaming
+		filterSampleAndProof := proc.configGetter().Import.FilterSampleAndProof
+
+		var options = rar.ValidationOpts{AllowFileRenaming: *allowFileRenaming, FilterSampleAndProof: *filterSampleAndProof}
 
 		err := rar.ProcessArchive(
 			ctx,
@@ -604,6 +608,7 @@ func (proc *Processor) processRarArchive(
 			proc.maxDownloadPrefetch,
 			proc.readTimeout,
 			proc.expandBlurayIso,
+			options,
 		)
 		if err != nil {
 			return nzbFolder, writtenPaths, err

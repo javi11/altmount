@@ -149,6 +149,7 @@ func ProcessArchive(
 	maxPrefetch int,
 	readTimeout time.Duration,
 	expandBlurayIso bool,
+	validationOpts ...ValidationOpts,
 ) error {
 	if len(archiveFiles) == 0 {
 		return nil
@@ -159,6 +160,14 @@ func ProcessArchive(
 	// Analyze RAR content with timeout
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
+
+	var options ValidationOpts
+	if len(validationOpts) > 0 {
+		options = validationOpts[0]
+	} else {
+		// by default, we want to filter out sample/proof files and allow file renaming
+		options = ValidationOpts{AllowFileRenaming: true, FilterSampleAndProof: true}
+	}
 
 	// Group archive files by their base name to handle NZBs with multiple separate RAR archives
 	archiveGroups := GroupArchivesByBaseName(archiveFiles)
@@ -220,8 +229,8 @@ func ProcessArchive(
 	// Only do this if there's exactly one media file in the archive
 	mediaFilesCount := 0
 	for _, content := range rarContents {
-		if !content.IsDirectory && (utils.IsAllowedFile(content.InternalPath, content.Size, allowedFileExtensions) ||
-			utils.IsAllowedFile(content.Filename, content.Size, allowedFileExtensions)) {
+		if !content.IsDirectory && (utils.IsAllowedFile(content.InternalPath, content.Size, allowedFileExtensions, options.FilterSampleAndProof) ||
+			utils.IsAllowedFile(content.Filename, content.Size, allowedFileExtensions, options.FilterSampleAndProof)) {
 			mediaFilesCount++
 		}
 	}
@@ -249,8 +258,8 @@ func ProcessArchive(
 		baseFilename := filepath.Base(normalizedInternalPath)
 
 		// Double check if this specific file is allowed
-		if !utils.IsAllowedFile(rarContent.InternalPath, rarContent.Size, allowedFileExtensions) &&
-			!utils.IsAllowedFile(rarContent.Filename, rarContent.Size, allowedFileExtensions) {
+		if !utils.IsAllowedFile(rarContent.InternalPath, rarContent.Size, allowedFileExtensions, options.FilterSampleAndProof) &&
+			!utils.IsAllowedFile(rarContent.Filename, rarContent.Size, allowedFileExtensions, options.FilterSampleAndProof) {
 			continue
 		}
 
@@ -268,14 +277,15 @@ func ProcessArchive(
 			slog.InfoContext(ctx, "Renaming ISO-expanded file using NZB release name",
 				"original", rarContent.Filename,
 				"renamed", baseFilename)
-		} else if shouldNormalizeName && (utils.IsAllowedFile(rarContent.InternalPath, rarContent.Size, allowedFileExtensions) ||
-			utils.IsAllowedFile(rarContent.Filename, rarContent.Size, allowedFileExtensions)) {
+		} else if shouldNormalizeName && options.AllowFileRenaming && (utils.IsAllowedFile(rarContent.InternalPath, rarContent.Size, allowedFileExtensions) ||
+			utils.IsAllowedFile(rarContent.Filename, rarContent.Size, allowedFileExtensions, options.AllowFileRenaming)) {
 			// Normalize filename to match NZB if it's the only media file (non-ISO archives)
 			baseFilename = normalizeArchiveReleaseFilename(nzbName, baseFilename)
 			slog.InfoContext(ctx, "Normalizing obfuscated filename in RAR archive",
 				"original", rarContent.Filename,
 				"normalized", baseFilename)
 		}
+
 		// Create the virtual file path directly in the RAR directory (flattened)
 		virtualFilePath := filepath.Join(virtualDir, baseFilename)
 		virtualFilePath = strings.ReplaceAll(virtualFilePath, string(filepath.Separator), "/")
