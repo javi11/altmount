@@ -457,6 +457,36 @@ export function ImportConfigSection({
 						</div>
 					</fieldset>
 				</div>
+				{/* Queue Maintenance */}
+				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+					<div className="flex items-center gap-2">
+						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
+							Queue Maintenance
+						</h4>
+						<div className="h-px flex-1 bg-base-300/50" />
+					</div>
+
+					<fieldset className="fieldset">
+						<legend className="fieldset-legend font-semibold">Failed Item Retention (Hours)</legend>
+						<input
+							type="number"
+							className="input input-bordered w-full bg-base-100 font-mono text-sm"
+							value={formData.failed_item_retention_hours ?? 24}
+							readOnly={isReadOnly}
+							min={0}
+							onChange={(e) =>
+								handleInputChange(
+									"failed_item_retention_hours",
+									Number.parseInt(e.target.value, 10) || 0,
+								)
+							}
+						/>
+						<p className="label break-words text-base-content/70 text-xs">
+							Auto-remove failed queue items and their NZB files after this many hours. Set to 0 to
+							disable.
+						</p>
+					</fieldset>
+				</div>
 			</div>
 
 			{/* Save Button */}

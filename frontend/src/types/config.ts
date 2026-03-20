@@ -56,7 +56,6 @@ export interface DatabaseConfig {
 export interface MetadataConfig {
 	root_path: string;
 	delete_source_nzb_on_removal?: boolean;
-	delete_failed_nzb?: boolean;
 	delete_completed_nzb?: boolean;
 	backup: MetadataBackupConfig;
 }
@@ -225,6 +224,7 @@ export interface ImportConfig {
 	watch_dir?: string | null;
 	watch_interval_seconds?: number | null;
 	allow_nested_rar_extraction?: boolean;
+	failed_item_retention_hours?: number | null;
 }
 
 // Log configuration
