@@ -313,6 +313,9 @@ func (s *Service) Start(ctx context.Context) error {
 		// Don't fail service start if watcher fails
 	}
 
+	// Start background cleanup of stale failed queue items
+	go s.runFailedItemCleanup(ctx)
+
 	s.running = true
 	s.log.InfoContext(ctx, fmt.Sprintf("NZB import service started successfully with %d workers", s.config.Workers))
 
@@ -1085,23 +1088,9 @@ func (s *Service) handleProcessingFailure(ctx context.Context, item *database.Im
 			"queue_id", item.ID,
 			"file", item.NzbPath)
 
-		// Handle failed NZB based on config
-		cfg := s.configGetter()
-		deleteFailed := true // Default to delete
-		if cfg.Metadata.DeleteFailedNzb != nil {
-			deleteFailed = *cfg.Metadata.DeleteFailedNzb
-		}
-
-		if deleteFailed {
-			s.log.InfoContext(ctx, "Deleting failed NZB (per config)", "file", item.NzbPath)
-			if rmErr := os.Remove(item.NzbPath); rmErr != nil {
-				s.log.WarnContext(ctx, "Failed to delete failed NZB", "file", item.NzbPath, "error", rmErr)
-			}
-		} else {
-			// Move to failed folder
-			if moveErr := s.MoveToFailedFolder(ctx, item); moveErr != nil {
-				s.log.ErrorContext(ctx, "Failed to move NZB to failed folder", "error", moveErr)
-			}
+		// Always move failed NZB to failed folder for potential retry
+		if moveErr := s.MoveToFailedFolder(ctx, item); moveErr != nil {
+			s.log.ErrorContext(ctx, "Failed to move NZB to failed folder", "error", moveErr)
 		}
 	} else {
 		s.log.ErrorContext(ctx, "Fallback handling failed",
@@ -1109,25 +1098,68 @@ func (s *Service) handleProcessingFailure(ctx context.Context, item *database.Im
 			"file", item.NzbPath,
 			"error", err)
 
-		// Handle failed NZB based on config
-		cfg := s.configGetter()
-		deleteFailed := true // Default to delete
-		if cfg.Metadata.DeleteFailedNzb != nil {
-			deleteFailed = *cfg.Metadata.DeleteFailedNzb
+		// Always move failed NZB to failed folder for potential retry
+		if moveErr := s.MoveToFailedFolder(ctx, item); moveErr != nil {
+			s.log.ErrorContext(ctx, "Failed to move NZB to failed folder", "error", moveErr)
 		}
+	}
+}
 
-		if deleteFailed {
-			s.log.InfoContext(ctx, "Deleting failed NZB (per config)", "file", item.NzbPath)
-			if rmErr := os.Remove(item.NzbPath); rmErr != nil {
-				s.log.WarnContext(ctx, "Failed to delete failed NZB", "file", item.NzbPath, "error", rmErr)
-			}
-		} else {
-			// Move to failed folder
-			if moveErr := s.MoveToFailedFolder(ctx, item); moveErr != nil {
-				s.log.ErrorContext(ctx, "Failed to move NZB to failed folder", "error", moveErr)
+// runFailedItemCleanup periodically removes stale failed queue items and their NZB files.
+func (s *Service) runFailedItemCleanup(ctx context.Context) {
+	// Run once at startup
+	s.cleanupFailedItems(ctx)
+
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.cleanupFailedItems(ctx)
+		}
+	}
+}
+
+// cleanupFailedItems deletes failed queue items older than the configured retention period
+// and removes their associated NZB files.
+func (s *Service) cleanupFailedItems(ctx context.Context) {
+	cfg := s.configGetter()
+	retentionHours := 24 // default
+	if cfg.Import.FailedItemRetentionHours != nil {
+		retentionHours = *cfg.Import.FailedItemRetentionHours
+	}
+
+	if retentionHours <= 0 {
+		return // disabled
+	}
+
+	cutoff := time.Now().Add(-time.Duration(retentionHours) * time.Hour)
+	deletedItems, err := s.database.Repository.DeleteFailedItemsOlderThan(ctx, cutoff)
+	if err != nil {
+		s.log.ErrorContext(ctx, "Failed to cleanup old failed queue items", "error", err)
+		return
+	}
+
+	if len(deletedItems) == 0 {
+		return
+	}
+
+	// Remove NZB files for deleted items
+	for _, item := range deletedItems {
+		if item.NzbPath != "" {
+			if rmErr := os.Remove(item.NzbPath); rmErr != nil && !os.IsNotExist(rmErr) {
+				s.log.WarnContext(ctx, "Failed to remove NZB file during cleanup", "file", item.NzbPath, "error", rmErr)
 			}
 		}
 	}
+
+	s.broadcaster.BroadcastQueueChanged()
+	s.log.InfoContext(ctx, "Cleaned up stale failed queue items",
+		"count", len(deletedItems),
+		"retention_hours", retentionHours)
 }
 
 // CancelProcessing cancels a processing queue item by cancelling its context
