@@ -30,8 +30,10 @@ type Handle struct {
 	stream        *nzbfilesystem.ActiveStream
 	streamTracker backend.StreamTracker
 
-	// Position tracking for skip-seek optimization (no mutex needed — FUSE serializes reads per handle)
-	position int64
+	// Position tracking for skip-seek optimization.
+	// FUSE serializes reads per handle in production, but atomic
+	// keeps the race detector happy in concurrent tests.
+	position atomic.Int64
 }
 
 // NewHandle creates a new Handle for Seek+Read based access.
@@ -60,7 +62,7 @@ func (h *Handle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadRes
 	}
 
 	// Skip seek if already at the correct position (sequential read optimization)
-	if off != h.position {
+	if off != h.position.Load() {
 		if _, err := h.file.Seek(off, io.SeekStart); err != nil {
 			h.logger.ErrorContext(ctx, "Seek failed", "path", h.path, "offset", off, "error", err)
 			return nil, syscall.EIO
@@ -70,10 +72,11 @@ func (h *Handle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadRes
 	n, err := h.file.Read(dest)
 
 	if n > 0 {
-		h.position = off + int64(n)
+		newPos := off + int64(n)
+		h.position.Store(newPos)
 		if h.stream != nil {
 			h.streamTracker.UpdateProgress(h.stream.ID, int64(n))
-			atomic.StoreInt64(&h.stream.CurrentOffset, h.position)
+			atomic.StoreInt64(&h.stream.CurrentOffset, newPos)
 		}
 	}
 
