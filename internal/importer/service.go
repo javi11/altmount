@@ -61,7 +61,7 @@ type queueAdapterForScanner struct {
 	calcFileSize    func(string) (int64, error)
 }
 
-func (a *queueAdapterForScanner) AddToQueue(ctx context.Context, filePath string, relativePath *string) error {
+func (a *queueAdapterForScanner) AddToQueue(ctx context.Context, filePath string, relativePath *string, metadata *string) error {
 	// Calculate file size before adding to queue
 	var fileSize *int64
 	if size, err := a.calcFileSize(filePath); err == nil {
@@ -76,6 +76,7 @@ func (a *queueAdapterForScanner) AddToQueue(ctx context.Context, filePath string
 		RetryCount:   0,
 		MaxRetries:   3,
 		FileSize:     fileSize,
+		Metadata:     metadata,
 		CreatedAt:    time.Now(),
 	}
 
@@ -376,6 +377,9 @@ func (s *Service) RegisterConfigChangeHandler(configManager any) {
 		if s.processor != nil {
 			s.processor.SetSegmentSamplePercentage(newConfig.Import.SegmentSamplePercentage)
 		}
+		if s.postProcessor != nil {
+			s.postProcessor.SetRcloneClient(s.rcloneClient)
+		}
 	})
 }
 
@@ -597,7 +601,7 @@ func sanitizeFilename(name string) string {
 }
 
 // AddToQueue adds a new NZB file to the import queue with optional category and priority
-func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath *string, category *string, priority *database.QueuePriority) (*database.ImportQueueItem, error) {
+func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath *string, category *string, priority *database.QueuePriority, metadata *string) (*database.ImportQueueItem, error) {
 	// Check context before proceeding
 	select {
 	case <-ctx.Done():
@@ -630,6 +634,7 @@ func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath 
 		RetryCount:   0,
 		MaxRetries:   3,
 		FileSize:     fileSize,
+		Metadata:     metadata,
 		CreatedAt:    time.Now(),
 	}
 
@@ -692,7 +697,7 @@ func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueue
 		}
 	}
 
-	return s.processor.ProcessNzbFile(ctx, item.NzbPath, basePath, int(item.ID), allowedExtensionsOverride, &virtualDir, extractedFiles, item.Category)
+	return s.processor.ProcessNzbFile(ctx, item.NzbPath, basePath, int(item.ID), allowedExtensionsOverride, &virtualDir, extractedFiles, item.Category, item.Metadata)
 }
 
 func (s *Service) calculateProcessVirtualDir(item *database.ImportQueueItem, basePath *string) string {
@@ -1369,7 +1374,7 @@ func (s *Service) RegenerateMetadata(ctx context.Context, mountRelativePath stri
 
 	// Re-process the NZB file. We use a dummy queue ID.
 	// This will overwrite the existing .meta file.
-	_, _, err = s.processor.ProcessNzbFile(ctx, foundNzbPath, "", 0, nil, &virtualDir, nil, nil)
+	_, _, err = s.processor.ProcessNzbFile(ctx, foundNzbPath, "", 0, nil, &virtualDir, nil, nil, nil)
 	if err != nil {
 		return fmt.Errorf("failed to re-process NZB: %w", err)
 	}

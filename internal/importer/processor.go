@@ -176,7 +176,7 @@ func (proc *Processor) checkCancellation(ctx context.Context) error {
 // Returns (resultPath, writtenMetadataPaths, error). writtenMetadataPaths contains all virtual paths of
 // metadata files written to disk; it is populated even on partial failure so callers can clean up.
 // Paths prefixed with "DIR:" indicate a metadata directory that should be removed entirely.
-func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePath string, queueID int, allowedExtensionsOverride *[]string, virtualDirOverride *string, extractedFiles []parser.ExtractedFileInfo, category *string) (string, []string, error) {
+func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePath string, queueID int, allowedExtensionsOverride *[]string, virtualDirOverride *string, extractedFiles []parser.ExtractedFileInfo, category *string, metadata *string) (string, []string, error) {
 	// Determine max connections to use
 	maxConnections := proc.maxImportConnections
 
@@ -273,23 +273,23 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 	switch parsed.Type {
 	case parser.NzbTypeSingleFile:
 		proc.updateProgressWithStage(queueID, 30, "Validating segments")
-		result, writtenPaths, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, queueID, maxConnections, allowedExtensions, proc.validationTimeout, category)
+		result, writtenPaths, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, queueID, maxConnections, allowedExtensions, proc.validationTimeout, category, metadata)
 
 	case parser.NzbTypeMultiFile:
 		proc.updateProgressWithStage(queueID, 30, "Validating segments")
-		result, writtenPaths, err = proc.processMultiFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, queueID, maxConnections, allowedExtensions, proc.validationTimeout, category)
+		result, writtenPaths, err = proc.processMultiFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, queueID, maxConnections, allowedExtensions, proc.validationTimeout, category, metadata)
 
 	case parser.NzbTypeRarArchive:
 		proc.updateProgressWithStage(queueID, 15, "Analyzing archive")
-		result, writtenPaths, err = proc.processRarArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, maxConnections, allowedExtensions, proc.validationTimeout, parsed.ExtractedFiles, category)
+		result, writtenPaths, err = proc.processRarArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, maxConnections, allowedExtensions, proc.validationTimeout, parsed.ExtractedFiles, category, metadata)
 
 	case parser.NzbType7zArchive:
 		proc.updateProgressWithStage(queueID, 15, "Analyzing archive")
-		result, writtenPaths, err = proc.processSevenZipArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, maxConnections, allowedExtensions, proc.validationTimeout, parsed.ExtractedFiles, category)
+		result, writtenPaths, err = proc.processSevenZipArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, maxConnections, allowedExtensions, proc.validationTimeout, parsed.ExtractedFiles, category, metadata)
 
 	case parser.NzbTypeStrm:
 		proc.updateProgressWithStage(queueID, 30, "Validating segments")
-		result, writtenPaths, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, queueID, maxConnections, allowedExtensions, proc.validationTimeout, category)
+		result, writtenPaths, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, queueID, maxConnections, allowedExtensions, proc.validationTimeout, category, metadata)
 
 	default:
 		return "", nil, NewNonRetryableError(fmt.Sprintf("unknown file type: %s", parsed.Type), nil)
@@ -317,6 +317,7 @@ func (proc *Processor) processSingleFile(
 	allowedExtensions []string,
 	timeout time.Duration,
 	category *string,
+	metadata *string,
 ) (string, []string, error) {
 	if len(regularFiles) == 0 {
 		return "", nil, fmt.Errorf("no regular files to process")
@@ -413,6 +414,7 @@ func (proc *Processor) processSingleFile(
 			FileSize:    regularFiles[0].Size,
 			VirtualPath: result,
 			Category:    category,
+			Metadata:    metadata,
 			CompletedAt: time.Now(),
 		})
 	}
@@ -432,6 +434,7 @@ func (proc *Processor) processMultiFile(
 	allowedExtensions []string,
 	timeout time.Duration,
 	category *string,
+	metadata *string,
 ) (string, []string, error) {
 	// If there's only one regular file (and the rest are likely PAR2s), avoid creating a redundant
 	// NZB-named directory that matches the file itself. Instead, keep the file directly under the
@@ -515,6 +518,7 @@ func (proc *Processor) processMultiFile(
 			FileSize:    totalSize,
 			VirtualPath: targetBaseDir,
 			Category:    category,
+			Metadata:    metadata,
 			CompletedAt: time.Now(),
 		})
 	}
@@ -535,6 +539,7 @@ func (proc *Processor) processRarArchive(
 	timeout time.Duration,
 	extractedFiles []parser.ExtractedFileInfo,
 	category *string,
+	metadata *string,
 ) (string, []string, error) {
 	// Create NZB folder
 	nzbName := proc.getCleanNzbName(parsed.Path, queueID)
@@ -627,6 +632,7 @@ func (proc *Processor) processRarArchive(
 			FileSize:    totalSize,
 			VirtualPath: nzbFolder,
 			Category:    category,
+			Metadata:    metadata,
 			CompletedAt: time.Now(),
 		})
 	}
@@ -647,6 +653,7 @@ func (proc *Processor) processSevenZipArchive(
 	timeout time.Duration,
 	extractedFiles []parser.ExtractedFileInfo,
 	category *string,
+	metadata *string,
 ) (string, []string, error) {
 	// Create NZB folder
 	nzbName := proc.getCleanNzbName(parsed.Path, queueID)
@@ -738,6 +745,7 @@ func (proc *Processor) processSevenZipArchive(
 			FileSize:    totalSize,
 			VirtualPath: nzbFolder,
 			Category:    category,
+			Metadata:    metadata,
 			CompletedAt: time.Now(),
 		})
 	}

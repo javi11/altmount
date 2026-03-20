@@ -12,6 +12,7 @@ import (
 
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/pathutil"
 )
 
 // CreateStrmFiles creates STRM files for an imported file or directory
@@ -33,41 +34,13 @@ func (c *Coordinator) CreateStrmFiles(ctx context.Context, item *database.Import
 	// 1. Get the internal relative path (relative to FUSE mount)
 	relPath := strings.TrimPrefix(resultingPath, "/")
 
-	// 2. Strip any existing /complete or /category prefix from the internal path to start clean
+	// 2. Build the clean, isolated library path using the path utility
 	category := ""
 	if item.Category != nil && *item.Category != "" {
-		category = strings.Trim(*item.Category, "/")
+		category = *item.Category
 	}
 
-	if cfg.SABnzbd.CompleteDir != "" {
-		completeDir := strings.Trim(filepath.ToSlash(cfg.SABnzbd.CompleteDir), "/")
-		if after, ok := strings.CutPrefix(relPath, completeDir+"/"); ok {
-			relPath = after
-		} else if relPath == completeDir {
-			relPath = ""
-		}
-	}
-	if category != "" {
-		if after, ok := strings.CutPrefix(relPath, category+"/"); ok {
-			relPath = after
-		} else if relPath == category {
-			relPath = ""
-		}
-	}
-
-	// 3. Build the clean, isolated library path
-	// Construct: [CompleteDir] + [Category] + RelPath
-	pathParts := []string{}
-	if cfg.SABnzbd.CompleteDir != "" {
-		pathParts = append(pathParts, strings.Trim(cfg.SABnzbd.CompleteDir, "/"))
-	}
-	if category != "" {
-		pathParts = append(pathParts, category)
-	}
-	pathParts = append(pathParts, relPath)
-
-	resultingPath = filepath.Join(pathParts...)
-	resultingPath = filepath.ToSlash(filepath.Clean(resultingPath))
+	resultingPath = pathutil.NormalizeLibraryPath(relPath, cfg.SABnzbd.CompleteDir, category)
 
 	// Check the metadata directory to determine if this is a file or directory
 	metadataPath := filepath.Join(cfg.Metadata.RootPath, strings.TrimPrefix(originalResultingPath, "/"))
@@ -118,41 +91,13 @@ func (c *Coordinator) CreateStrmFiles(ctx context.Context, item *database.Import
 		// 1. Get the internal relative path (relative to FUSE mount)
 		relPath = strings.TrimPrefix(relPath, "/")
 
-		// 2. Strip any existing /complete or /category prefix from the internal path to start clean
+		// 2. Build the clean, isolated library path using the path utility
 		category := ""
 		if item.Category != nil && *item.Category != "" {
-			category = strings.Trim(*item.Category, "/")
+			category = *item.Category
 		}
 
-		if cfg.SABnzbd.CompleteDir != "" {
-			completeDir := strings.Trim(filepath.ToSlash(cfg.SABnzbd.CompleteDir), "/")
-			if after, ok := strings.CutPrefix(relPath, completeDir+"/"); ok {
-				relPath = after
-			} else if relPath == completeDir {
-				relPath = ""
-			}
-		}
-		if category != "" {
-			if after, ok := strings.CutPrefix(relPath, category+"/"); ok {
-				relPath = after
-			} else if relPath == category {
-				relPath = ""
-			}
-		}
-
-		// 3. Build the clean, isolated library path
-		// Construct: [CompleteDir] + [Category] + RelPath
-		pathParts := []string{}
-		if cfg.SABnzbd.CompleteDir != "" {
-			pathParts = append(pathParts, strings.Trim(cfg.SABnzbd.CompleteDir, "/"))
-		}
-		if category != "" {
-			pathParts = append(pathParts, category)
-		}
-		pathParts = append(pathParts, relPath)
-
-		strmResultingPath := filepath.Join(pathParts...)
-		strmResultingPath = filepath.ToSlash(filepath.Clean(strmResultingPath))
+		strmResultingPath := pathutil.NormalizeLibraryPath(relPath, cfg.SABnzbd.CompleteDir, category)
 
 		if err := c.CreateSingleStrmFile(ctx, strmResultingPath, relPathWithMeta, cfg.WebDAV.Port); err != nil {
 			c.log.ErrorContext(ctx, "Failed to create STRM file",
@@ -220,16 +165,39 @@ func (c *Coordinator) CreateSingleStrmFile(ctx context.Context, strmResultingPat
 	// Hash the API key with SHA256
 	hashedKey := hashAPIKey(adminAPIKey)
 
-	// Determine host to use
-	host := cfg.WebDAV.Host
-	if host == "" {
-		host = "localhost"
+	// Determine base URL to use
+	var baseURL string
+	if cfg.SABnzbd.DownloadClientBaseURL != "" {
+		baseURL = strings.TrimSuffix(cfg.SABnzbd.DownloadClientBaseURL, "/")
+		// If the base URL includes /sabnzbd, remove it for the generic API stream path
+		baseURL = strings.TrimSuffix(baseURL, "/sabnzbd")
+	} else {
+		host := cfg.WebDAV.Host
+		if host == "" {
+			host = "localhost"
+		}
+		scheme := "http"
+		if port == 443 {
+			scheme = "https"
+		}
+		baseURL = fmt.Sprintf("%s://%s:%d", scheme, host, port)
 	}
 
 	// Generate streaming URL with download_key using the ORIGINAL virtual path
 	encodedPath := strings.ReplaceAll(originalVirtualPath, " ", "%20")
-	streamURL := fmt.Sprintf("http://%s:%d/api/files/stream?path=%s&download_key=%s",
-		host, port, encodedPath, hashedKey)
+	prefix := strings.Trim(cfg.API.Prefix, "/")
+	if prefix == "" {
+		prefix = "api"
+	}
+
+	// Ensure baseURL doesn't already contain the prefix
+	cleanBaseURL := strings.TrimSuffix(baseURL, "/")
+	if !strings.HasSuffix(cleanBaseURL, "/"+prefix) {
+		cleanBaseURL = fmt.Sprintf("%s/%s", cleanBaseURL, prefix)
+	}
+
+	streamURL := fmt.Sprintf("%s/files/stream?path=%s&download_key=%s",
+		cleanBaseURL, encodedPath, hashedKey)
 
 	// Check if STRM file already exists with the same content
 	if existingContent, err := os.ReadFile(strmPath); err == nil {

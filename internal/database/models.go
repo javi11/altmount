@@ -175,5 +175,6 @@ type ImportHistory struct {
 	VirtualPath  string    `db:"virtual_path"`
 	LibraryPath  *string   `db:"library_path"` // Added to show final location from file_health
 	Category     *string   `db:"category"`
+	Metadata     *string   `db:"metadata"`
 	CompletedAt  time.Time `db:"completed_at"`
 }

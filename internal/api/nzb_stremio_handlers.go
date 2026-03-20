@@ -181,7 +181,7 @@ func (s *Server) handleNzbStreams(c *fiber.Ctx) error {
 	}
 
 	priority := database.QueuePriorityHigh
-	item, err := s.importerService.AddToQueue(ctx, tempPath, basePath, &category, &priority)
+	item, err := s.importerService.AddToQueue(ctx, tempPath, basePath, &category, &priority, nil)
 	if err != nil {
 		os.Remove(tempPath)
 		return RespondInternalError(c, "Failed to add NZB to queue", err.Error())

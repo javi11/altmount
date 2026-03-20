@@ -163,6 +163,7 @@ func (m MetadataConfig) ShouldDeleteSourceNzb() bool {
 type MetadataBackupConfig struct {
 	Enabled       *bool  `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
 	IntervalHours int    `yaml:"interval_hours" mapstructure:"interval_hours" json:"interval_hours"`
+	BackupTime    string `yaml:"backup_time" mapstructure:"backup_time" json:"backup_time"` // HH:MM format
 	KeepBackups   int    `yaml:"keep_backups" mapstructure:"keep_backups" json:"keep_backups"`
 	Path          string `yaml:"path" mapstructure:"path" json:"path"`
 }
@@ -1222,6 +1223,7 @@ func DefaultConfig(configDir ...string) *Config {
 			Backup: MetadataBackupConfig{
 				Enabled:       &metadataBackupEnabled,
 				IntervalHours: 24,
+				BackupTime:    "03:00",
 				KeepBackups:   1,
 				Path:          backupPath,
 			},

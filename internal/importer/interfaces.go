@@ -49,7 +49,7 @@ type NzbDavImporter interface {
 // QueueOperations provides queue manipulation operations
 type QueueOperations interface {
 	// AddToQueue adds an item to the import queue
-	AddToQueue(ctx context.Context, filePath string, relativePath *string, category *string, priority *database.QueuePriority) (*database.ImportQueueItem, error)
+	AddToQueue(ctx context.Context, filePath string, relativePath *string, category *string, priority *database.QueuePriority, metadata *string) (*database.ImportQueueItem, error)
 	// GetQueueStats returns queue statistics
 	GetQueueStats(ctx context.Context) (*database.QueueStats, error)
 }

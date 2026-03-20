@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -72,12 +73,36 @@ func (w *BackupWorker) Stop(ctx context.Context) {
 func (w *BackupWorker) runWorker() {
 	defer w.workerWg.Done()
 
-	ticker := time.NewTicker(w.configGetter().GetMetadataBackupInterval())
-	defer ticker.Stop()
-
 	for {
+		cfg := w.configGetter()
+		var nextRun time.Duration
+
+		if cfg.Metadata.Backup.BackupTime != "" {
+			// Schedule based on specific time of day (HH:MM)
+			now := time.Now().UTC()
+			parts := strings.Split(cfg.Metadata.Backup.BackupTime, ":")
+			if len(parts) == 2 {
+				hour, _ := strconv.Atoi(parts[0])
+				minute, _ := strconv.Atoi(parts[1])
+
+				target := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, time.UTC)
+				if target.Before(now) || target.Equal(now) {
+					target = target.Add(24 * time.Hour)
+				}
+				nextRun = target.Sub(now)
+				slog.InfoContext(w.workerCtx, "Scheduled next metadata backup", "at", target.Format("2006-01-02 15:04:05 UTC"), "in", nextRun.String())
+			}
+		}
+
+		// Fallback to interval-based if BackupTime is empty or invalid
+		if nextRun <= 0 {
+			interval := w.configGetter().GetMetadataBackupInterval()
+			nextRun = interval
+			slog.InfoContext(w.workerCtx, "Scheduled next metadata backup (interval-based)", "in", nextRun.String())
+		}
+
 		select {
-		case <-ticker.C:
+		case <-time.After(nextRun):
 			w.performBackup()
 		case <-w.workerCtx.Done():
 			return
@@ -102,6 +127,14 @@ func (w *BackupWorker) performBackup() {
 
 	count := 0
 	err := filepath.Walk(metadataDir, func(path string, info os.FileInfo, err error) error {
+		if w.workerCtx != nil {
+			select {
+			case <-w.workerCtx.Done():
+				return w.workerCtx.Err()
+			default:
+			}
+		}
+
 		if err != nil {
 			return err
 		}
@@ -132,7 +165,11 @@ func (w *BackupWorker) performBackup() {
 	})
 
 	if err != nil {
-		slog.Error("Failed to complete metadata backup", "error", err)
+		if err == context.Canceled {
+			slog.Info("Metadata backup canceled")
+		} else {
+			slog.Error("Failed to complete metadata backup", "error", err)
+		}
 		// Cleanup failed partial backup
 		os.RemoveAll(backupDir)
 		return

@@ -125,8 +125,6 @@ func newRepairTestEnv(t *testing.T, tempDir string, arrsErr error) *repairTestEn
 	cfg.Health.MaxConcurrentJobs = 1
 	cfg.Health.CheckIntervalSeconds = 3600
 	cfg.Health.SegmentSamplePercentage = 10
-	verifyData := false
-	cfg.Health.VerifyData = &verifyData
 	cfg.Health.MaxConnectionsForHealthChecks = 1
 
 	configManager := config.NewManager(cfg, "")
