@@ -240,6 +240,43 @@ export function ImportConfigSection({
 								</span>
 							</div>
 						</label>
+
+						<label className="label cursor-pointer items-start justify-start gap-4">
+							<input
+								type="checkbox"
+								className="toggle toggle-primary toggle-sm mt-1 shrink-0"
+								checked={formData.allow_file_renaming ?? true}
+								disabled={isReadOnly}
+								onChange={(e) => handleInputChange("allow_file_renaming", e.target.checked)}
+							/>
+							<div className="min-w-0 flex-1">
+								<span className="block whitespace-normal break-words font-bold text-xs">
+									Allow file renaming during NZB import
+								</span>
+								<span className="mt-1 block whitespace-normal break-words text-base-content/50 text-xs leading-relaxed">
+									In some situations (e.g. de-obfuscation) files will be renamed during import processing.
+									Disable this option to keep original filenames.
+								</span>
+							</div>
+						</label>
+
+						<label className="label cursor-pointer items-start justify-start gap-4">
+							<input
+								type="checkbox"
+								className="toggle toggle-primary toggle-sm mt-1 shrink-0"
+								checked={formData.filter_sample_and_proof ?? true}
+								disabled={isReadOnly}
+								onChange={(e) => handleInputChange("filter_sample_and_proof", e.target.checked)}
+							/>
+							<div className="min-w-0 flex-1">
+								<span className="block whitespace-normal break-words font-bold text-xs">
+									Filter Sample and Proof
+								</span>
+								<span className="mt-1 block whitespace-normal break-words text-base-content/50 text-xs leading-relaxed">
+									Samples and Proofs will be filtered out by default and will not be imported. Disable this option to allow files with "sample" or "proof" in the name to be imported.
+								</span>
+							</div>
+						</label>
 					</div>
 				</div>
 
