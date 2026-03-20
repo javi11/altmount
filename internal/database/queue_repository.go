@@ -689,6 +689,60 @@ func (r *QueueRepository) withQueueTransaction(ctx context.Context, fn func(*Que
 	return nil
 }
 
+// DeleteFailedItemsOlderThan deletes failed queue items older than the given time.
+// Returns the deleted items so the caller can clean up associated NZB files.
+func (r *QueueRepository) DeleteFailedItemsOlderThan(ctx context.Context, olderThan time.Time) ([]*ImportQueueItem, error) {
+	var deletedItems []*ImportQueueItem
+
+	err := r.withQueueTransaction(ctx, func(txRepo *QueueRepository) error {
+		// Select failed items older than the threshold
+		selectQuery := `SELECT id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
+			started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path, target_path
+			FROM import_queue WHERE status = 'failed' AND updated_at < ?`
+
+		rows, err := txRepo.db.QueryContext(ctx, selectQuery, olderThan)
+		if err != nil {
+			return fmt.Errorf("failed to select old failed items: %w", err)
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var item ImportQueueItem
+			if err := rows.Scan(
+				&item.ID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
+				&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
+				&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath, &item.TargetPath,
+			); err != nil {
+				return fmt.Errorf("failed to scan failed queue item: %w", err)
+			}
+			deletedItems = append(deletedItems, &item)
+		}
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("failed to iterate failed queue items: %w", err)
+		}
+
+		if len(deletedItems) == 0 {
+			return nil
+		}
+
+		// Delete the selected items
+		for _, item := range deletedItems {
+			deleteQuery := `DELETE FROM import_queue WHERE id = ?`
+			if _, err := txRepo.db.ExecContext(ctx, deleteQuery, item.ID); err != nil {
+				return fmt.Errorf("failed to delete failed item %d: %w", item.ID, err)
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return deletedItems, nil
+}
+
 // ResetStaleItems resets processing items back to pending on service startup
 func (r *QueueRepository) ResetStaleItems(ctx context.Context) error {
 	// Reset all items that are in 'processing' status
