@@ -60,7 +60,6 @@ func (c *Coordinator) SetArrsService(service *arrs.Service) {
 	c.arrsService = service
 }
 
-
 // ProcessingResult holds the result of post-processing operations
 type ProcessingResult struct {
 	SymlinksCreated bool

@@ -490,73 +490,73 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, finalPath s
 		}
 
 	}
-// Get series title from metadata if available
-seriesTitle := ""
-if item.Metadata != nil && *item.Metadata != "" {
-	var meta map[string]string
-	if err := json.Unmarshal([]byte(*item.Metadata), &meta); err == nil {
-		if title, ok := meta["series_title"]; ok && title != "" {
-			seriesTitle = title
-		} else if title, ok := meta["movie_title"]; ok && title != "" {
-			seriesTitle = title
+	// Get series title from metadata if available
+	seriesTitle := ""
+	if item.Metadata != nil && *item.Metadata != "" {
+		var meta map[string]string
+		if err := json.Unmarshal([]byte(*item.Metadata), &meta); err == nil {
+			if title, ok := meta["series_title"]; ok && title != "" {
+				seriesTitle = title
+			} else if title, ok := meta["movie_title"]; ok && title != "" {
+				seriesTitle = title
+			}
 		}
 	}
-}
 
-return SABnzbdHistorySlot{
-	Index: index,
+	return SABnzbdHistorySlot{
+		Index: index,
 
-	NzoID: fmt.Sprintf("%d", item.ID),
+		NzoID: fmt.Sprintf("%d", item.ID),
 
-	Name: jobName,
+		Name: jobName,
 
-	Category: category,
+		Category: category,
 
-	Cat: category,
+		Cat: category,
 
-	PP: "3",
+		PP: "3",
 
-	Script: "",
+		Script: "",
 
-	Report: "",
+		Report: "",
 
-	URL: "",
+		URL: "",
 
-	Status: status,
+		Status: status,
 
-	NzbName: nzbFilename,
+		NzbName: nzbFilename,
 
-	Download: jobName,
+		Download: jobName,
 
-	Storage: finalPath,
+		Storage: finalPath,
 
-	Path: finalPath,
+		Path: finalPath,
 
-	Postproc: "",
+		Postproc: "",
 
-	Downloaded: downloaded,
+		Downloaded: downloaded,
 
-	Completetime: completetime,
+		Completetime: completetime,
 
-	NzbAvg: "",
+		NzbAvg: "",
 
-	Script_log: "",
+		Script_log: "",
 
-	DuplicateKey: jobName,
+		DuplicateKey: jobName,
 
-	Script_line: "",
+		Script_line: "",
 
-	Fail_message: failMessage,
+		Fail_message: failMessage,
 
-	Url_info: "",
+		Url_info: "",
 
-	Bytes: sizeBytes,
+		Bytes: sizeBytes,
 
-	Meta: []string{},
+		Meta: []string{},
 
-	Series: seriesTitle,
+		Series: seriesTitle,
 
-	Md5sum: "",
+		Md5sum: "",
 
 		Password: "",
 

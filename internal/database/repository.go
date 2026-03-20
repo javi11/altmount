@@ -1237,7 +1237,6 @@ func (r *Repository) IncrementHourlyStat(ctx context.Context, statType string) e
 	return err
 }
 
-
 // GetImportHistory retrieves historical import statistics for the last N days (Alias for GetImportDailyStats)
 func (r *Repository) GetImportHistory(ctx context.Context, days int) ([]*ImportDailyStat, error) {
 	return r.GetImportDailyStats(ctx, days)
@@ -1571,4 +1570,3 @@ func (r *Repository) GetExpiredStremioQueueItems(ctx context.Context, ttlHours i
 
 	return items, rows.Err()
 }
-

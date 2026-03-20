@@ -36,10 +36,10 @@ func TestCreateSymlinks_WithCategoryInjection(t *testing.T) {
 	// Full path in mount: /movies/MyMovie.mkv
 	// Category: movies
 	// Result: /import/movies/MyMovie.mkv
-	
+
 	fullPath1 := "/MyMovie.mkv" // Path relative to mount root
 	category1 := "movies"
-	
+
 	// Create metadata file
 	metaFilePath1 := filepath.Join(metadataDir, "MyMovie.mkv.meta")
 	err = os.WriteFile(metaFilePath1, []byte("metadata content"), 0644)
@@ -100,7 +100,7 @@ func TestCreateSymlinks_WithCategoryInjection(t *testing.T) {
 		ID:       1,
 		Category: &category1,
 	}
-	
+
 	err = coord.CreateSymlinks(ctx, item1, fullPath1)
 	require.NoError(t, err)
 
@@ -117,14 +117,14 @@ func TestCreateSymlinks_WithCategoryInjection(t *testing.T) {
 		ID:       2,
 		Category: &category2,
 	}
-	
+
 	err = coord.CreateSymlinks(ctx, item2, fullPath2)
 	require.NoError(t, err)
 
 	// Check generated symlink: Should be inside 'tv' folder (only once)
 	expectedSymlinkPath2 := filepath.Join(importDir, "tv", "MyShow", "Episode.mkv")
 	assert.FileExists(t, expectedSymlinkPath2)
-	
+
 	// Ensure double category didn't happen
 	unexpectedPath2 := filepath.Join(importDir, "tv", "tv", "MyShow", "Episode.mkv")
 	assert.NoFileExists(t, unexpectedPath2)

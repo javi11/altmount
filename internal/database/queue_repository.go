@@ -395,7 +395,6 @@ func (r *QueueRepository) GetImportHistory(ctx context.Context, days int) ([]*Im
 	return r.GetImportDailyStats(ctx, days)
 }
 
-
 // AddImportHistory records a successful file import in the persistent history table
 func (r *QueueRepository) AddImportHistory(ctx context.Context, history *ImportHistory) error {
 	query := `
@@ -815,4 +814,3 @@ func (r *QueueRepository) ClearImportHistorySince(ctx context.Context, since tim
 	// as strict rolling 24h will naturally age out the data.
 	return nil
 }
-

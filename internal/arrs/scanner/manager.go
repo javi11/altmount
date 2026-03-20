@@ -665,9 +665,9 @@ func (m *Manager) failRadarrQueueItemByPath(ctx context.Context, client *radarr.
 
 	for _, q := range queue.Records {
 		// Try exact match, suffix match, or filename match
-		if q.OutputPath == path || 
-		   (q.OutputPath != "" && strings.HasSuffix(filepath.ToSlash(path), filepath.ToSlash(q.OutputPath))) ||
-		   (q.OutputPath != "" && filepath.Base(q.OutputPath) == filepath.Base(path)) {
+		if q.OutputPath == path ||
+			(q.OutputPath != "" && strings.HasSuffix(filepath.ToSlash(path), filepath.ToSlash(q.OutputPath))) ||
+			(q.OutputPath != "" && filepath.Base(q.OutputPath) == filepath.Base(path)) {
 			slog.InfoContext(ctx, "Found matching item in Radarr download queue, marking as failed",
 				"queue_id", q.ID, "path", path, "output_path", q.OutputPath)
 
@@ -693,9 +693,9 @@ func (m *Manager) failSonarrQueueItemByPath(ctx context.Context, client *sonarr.
 
 	for _, q := range queue.Records {
 		// Try exact match, suffix match, or filename match
-		if q.OutputPath == path || 
-		   (q.OutputPath != "" && strings.HasSuffix(filepath.ToSlash(path), filepath.ToSlash(q.OutputPath))) ||
-		   (q.OutputPath != "" && filepath.Base(q.OutputPath) == filepath.Base(path)) {
+		if q.OutputPath == path ||
+			(q.OutputPath != "" && strings.HasSuffix(filepath.ToSlash(path), filepath.ToSlash(q.OutputPath))) ||
+			(q.OutputPath != "" && filepath.Base(q.OutputPath) == filepath.Base(path)) {
 			slog.InfoContext(ctx, "Found matching item in Sonarr download queue, marking as failed",
 				"queue_id", q.ID, "path", path, "output_path", q.OutputPath)
 

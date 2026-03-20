@@ -10,11 +10,7 @@
 		"ignoreUnknown": false,
 		"includes": [
 			"**",
-			"!**/convex/_generated",
-			"!**/env.d.ts",
-			"!**/bun.lock",
-			"!**/convex.json",
-			"!**/styles/**/*.css"
+			"!**/bun.lock"
 		]
 	},
 	"formatter": {

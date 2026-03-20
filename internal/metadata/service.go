@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/javi11/altmount/internal/pathutil"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	"github.com/javi11/altmount/internal/pathutil"
 	"google.golang.org/protobuf/proto"
 )
 

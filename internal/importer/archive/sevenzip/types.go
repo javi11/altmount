@@ -37,12 +37,12 @@ type Content struct {
 	Filename      string                `json:"filename"`
 	Size          int64                 `json:"size"`
 	PackedSize    int64                 `json:"packed_size"`              // Packed/compressed size for nested content validation
-	Segments      []*metapb.SegmentData `json:"segments"`                // Segment data for this file
-	IsDirectory   bool                  `json:"is_directory,omitempty"`  // Indicates if this is a directory
-	AesKey        []byte                `json:"aes_key,omitempty"`       // AES encryption key (if encrypted)
-	AesIV         []byte                `json:"aes_iv,omitempty"`        // AES initialization vector (if encrypted)
-	NzbdavID      string                `json:"nzbdav_id,omitempty"`     // Original ID from nzbdav
-	NestedSources []NestedSource `json:"nested_sources,omitempty"` // Nested RAR sources (encrypted outer 7z)
+	Segments      []*metapb.SegmentData `json:"segments"`                 // Segment data for this file
+	IsDirectory   bool                  `json:"is_directory,omitempty"`   // Indicates if this is a directory
+	AesKey        []byte                `json:"aes_key,omitempty"`        // AES encryption key (if encrypted)
+	AesIV         []byte                `json:"aes_iv,omitempty"`         // AES initialization vector (if encrypted)
+	NzbdavID      string                `json:"nzbdav_id,omitempty"`      // Original ID from nzbdav
+	NestedSources []NestedSource        `json:"nested_sources,omitempty"` // Nested RAR sources (encrypted outer 7z)
 	// ISOExpansionIndex is non-zero for files expanded from an ISO archive.
 	// It is the 1-based position of this file when all ISO files in the archive
 	// are sorted by size descending (1 = largest / main feature).
