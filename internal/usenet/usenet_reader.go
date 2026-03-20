@@ -161,6 +161,7 @@ func (b *UsenetReader) Close() error {
 				_ = b.rg.Clear()
 				b.rg = nil
 			}
+			b.downloadCond.Broadcast()
 			b.mu.Unlock()
 		}
 	})
