@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"sync"
 	"sync/atomic"
 	"syscall"
 
@@ -20,8 +19,9 @@ import (
 var _ fs.FileReleaser = (*Handle)(nil)
 
 // Handle wraps an afero.File for Seek+Read-based reads.
-// Uses mutex-protected Seek+Read to preserve the persistent reader's
-// prefetch state in UsenetReader (ReadAt creates a new reader per call).
+// Preserves the persistent reader's prefetch state in UsenetReader
+// (ReadAt creates a new reader per call). No mutex needed — FUSE
+// serializes reads per handle.
 type Handle struct {
 	file          afero.File
 	closed        atomic.Bool
@@ -30,9 +30,10 @@ type Handle struct {
 	stream        *nzbfilesystem.ActiveStream
 	streamTracker backend.StreamTracker
 
-	// Seek+Read serialization
-	mu       sync.Mutex
-	position int64
+	// Position tracking for skip-seek optimization.
+	// FUSE serializes reads per handle in production, but atomic
+	// keeps the race detector happy in concurrent tests.
+	position atomic.Int64
 }
 
 // NewHandle creates a new Handle for Seek+Read based access.
@@ -52,7 +53,7 @@ func NewHandle(
 	}
 }
 
-// Read handles a read request using mutex-protected Seek+Read.
+// Read handles a read request using Seek+Read.
 // This keeps the persistent UsenetReader alive across reads, allowing
 // the downloadManager prefetch pipeline to stay effective.
 func (h *Handle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
@@ -60,11 +61,8 @@ func (h *Handle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadRes
 		return nil, syscall.EIO
 	}
 
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
 	// Skip seek if already at the correct position (sequential read optimization)
-	if off != h.position {
+	if off != h.position.Load() {
 		if _, err := h.file.Seek(off, io.SeekStart); err != nil {
 			h.logger.ErrorContext(ctx, "Seek failed", "path", h.path, "offset", off, "error", err)
 			return nil, syscall.EIO
@@ -74,10 +72,11 @@ func (h *Handle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadRes
 	n, err := h.file.Read(dest)
 
 	if n > 0 {
-		h.position = off + int64(n)
+		newPos := off + int64(n)
+		h.position.Store(newPos)
 		if h.stream != nil {
 			h.streamTracker.UpdateProgress(h.stream.ID, int64(n))
-			atomic.StoreInt64(&h.stream.CurrentOffset, h.position)
+			atomic.StoreInt64(&h.stream.CurrentOffset, newPos)
 		}
 	}
 

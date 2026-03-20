@@ -145,7 +145,7 @@ export function HealthPage() {
 	const cancelLibrarySync = useCancelLibrarySync();
 
 	// Auto-refresh health list when library scan completes (true → false transition only)
-	const prevIsRunningRef = useRef<boolean | undefined>();
+	const prevIsRunningRef = useRef<boolean | undefined>(undefined);
 	useEffect(() => {
 		const wasRunning = prevIsRunningRef.current;
 		const isRunning = librarySyncStatus?.is_running;

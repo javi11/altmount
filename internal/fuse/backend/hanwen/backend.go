@@ -90,6 +90,7 @@ func (b *Backend) Mount(ctx context.Context, onReady func()) error {
 			fmt.Sprintf("volname=%s", "altmount"),
 			"noapplexattr",
 			"noappledouble",
+			"iosize=1048576", // 1MB I/O size (macOS default is 64KB)
 		)
 		opts.DirectMount = false // not supported on macOS
 	}
