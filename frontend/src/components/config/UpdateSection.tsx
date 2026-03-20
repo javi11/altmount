@@ -33,25 +33,30 @@ export function UpdateSection() {
 		refetch();
 	};
 
-	const handleApplyUpdate = async () => {
-		const confirmed = await confirmAction(
-			"Apply Update",
-			`This will pull the latest ${channel} image and restart the container. The service will be briefly unavailable. Continue?`,
-			{ type: "warning", confirmText: "Update Now", confirmButtonClass: "btn-warning" },
-		);
+	const handleApplyUpdate = async (force = false) => {
+		const actionTitle = force ? "Force Reinstall" : "Apply Update";
+		const actionMessage = force
+			? `This will force-pull the ${channel} image and restart the container, even if the version hasn't changed. Continue?`
+			: `This will pull the latest ${channel} image and restart the container. The service will be briefly unavailable. Continue?`;
+
+		const confirmed = await confirmAction(actionTitle, actionMessage, {
+			type: force ? "error" : "warning",
+			confirmText: force ? "Force Reinstall" : "Update Now",
+			confirmButtonClass: force ? "btn-error" : "btn-warning",
+		});
 		if (!confirmed) return;
 
 		try {
-			await applyUpdate.mutateAsync(channel);
+			await applyUpdate.mutateAsync({ channel, force });
 			showToast({
 				type: "success",
-				title: "Update started",
-				message: "Pulling new image. The container will restart automatically.",
+				title: force ? "Reinstall started" : "Update started",
+				message: "Pulling image. The container will restart automatically.",
 			});
 		} catch (err) {
 			showToast({
 				type: "error",
-				title: "Update failed",
+				title: "Operation failed",
 				message: err instanceof Error ? err.message : "Failed to apply update",
 			});
 		}
@@ -144,11 +149,11 @@ export function UpdateSection() {
 						Check for Updates
 					</button>
 
-					{updateAvailable && (
+					{updateAvailable ? (
 						<button
 							type="button"
 							className="btn btn-sm btn-warning"
-							onClick={handleApplyUpdate}
+							onClick={() => handleApplyUpdate(false)}
 							disabled={applyUpdate.isPending || dockerUnavailable}
 						>
 							{applyUpdate.isPending ? (
@@ -157,6 +162,20 @@ export function UpdateSection() {
 								<ArrowUpCircle className="h-3 w-3" />
 							)}
 							Update Now
+						</button>
+					) : (
+						<button
+							type="button"
+							className="btn btn-sm btn-ghost border-base-300 bg-base-100 hover:bg-base-200"
+							onClick={() => handleApplyUpdate(true)}
+							disabled={applyUpdate.isPending || dockerUnavailable || isChecking}
+						>
+							{applyUpdate.isPending ? (
+								<LoadingSpinner size="sm" />
+							) : (
+								<RefreshCw className="h-3 w-3" />
+							)}
+							Force Reinstall
 						</button>
 					)}
 				</div>

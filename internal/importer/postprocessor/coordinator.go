@@ -6,6 +6,7 @@ package postprocessor
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/config"
@@ -77,6 +78,15 @@ func (c *Coordinator) HandleSuccess(ctx context.Context, item *database.ImportQu
 	// 1. Notify VFS (blocking to ensure visibility)
 	c.NotifyVFS(ctx, resultingPath, false)
 	result.VFSNotified = true
+
+	// Small delay to allow FUSE mount propagation through kernel and into other containers
+	// This helps prevent race conditions where Sonarr tries to probe the file before it's visible.
+	select {
+	case <-ctx.Done():
+		return result, ctx.Err()
+	case <-time.After(1 * time.Second):
+		// Continue
+	}
 
 	// 2. Create symlinks if configured
 	if err := c.CreateSymlinks(ctx, item, resultingPath); err != nil {

@@ -762,37 +762,39 @@ func (s *Server) handleRegisterArrsDownloadClients(c *fiber.Ctx) error {
 		})
 	}
 
-	// Get configured host/port or use default
-	host := "altmount"
-	port := 8080
+	// Get configured host/port or use defaults from WebDAV config
+	cfg := s.configManager.GetConfig()
+	host := cfg.WebDAV.Host
+	if host == "" {
+		host = "altmount"
+	}
+	port := cfg.WebDAV.Port
+	if port == 0 {
+		port = 8080
+	}
 	urlBase := "sabnzbd"
-	if s.configManager != nil {
-		cfg := s.configManager.GetConfig()
-		if cfg.SABnzbd.DownloadClientBaseURL != "" {
-			rawURL := cfg.SABnzbd.DownloadClientBaseURL
-			if !strings.Contains(rawURL, "://") {
-				rawURL = "http://" + rawURL
+
+	if cfg.SABnzbd.DownloadClientBaseURL != "" {
+		rawURL := cfg.SABnzbd.DownloadClientBaseURL
+		if !strings.Contains(rawURL, "://") {
+			rawURL = "http://" + rawURL
+		}
+		if u, err := url.Parse(rawURL); err == nil {
+			if h := u.Hostname(); h != "" {
+				host = h
 			}
-			if u, err := url.Parse(rawURL); err == nil {
-				host = u.Hostname()
-				if host == "" {
-					host = "altmount"
+			if p := u.Port(); p != "" {
+				if portVal, err := strconv.Atoi(p); err == nil {
+					port = portVal
 				}
-				if p := u.Port(); p != "" {
-					if portVal, err := strconv.Atoi(p); err == nil {
-						port = portVal
-					}
-				} else if u.Scheme == "https" {
-					port = 443
-				} else if u.Scheme == "http" {
-					port = 80
-				}
-				if u.Path != "" && u.Path != "/" {
-					urlBase = strings.Trim(u.Path, "/")
-				}
+			} else if u.Scheme == "https" {
+				port = 443
+			} else if u.Scheme == "http" {
+				port = 80
 			}
-		} else {
-			port = cfg.WebDAV.Port
+			if u.Path != "" && u.Path != "/" {
+				urlBase = strings.Trim(u.Path, "/")
+			}
 		}
 	}
 
@@ -833,37 +835,39 @@ func (s *Server) handleTestArrsDownloadClients(c *fiber.Ctx) error {
 		})
 	}
 
-	// Get configured host/port or use default
-	host := "altmount"
-	port := 8080
+	// Get configured host/port or use defaults from WebDAV config
+	cfg := s.configManager.GetConfig()
+	host := cfg.WebDAV.Host
+	if host == "" {
+		host = "altmount"
+	}
+	port := cfg.WebDAV.Port
+	if port == 0 {
+		port = 8080
+	}
 	urlBase := "sabnzbd"
-	if s.configManager != nil {
-		cfg := s.configManager.GetConfig()
-		if cfg.SABnzbd.DownloadClientBaseURL != "" {
-			rawURL := cfg.SABnzbd.DownloadClientBaseURL
-			if !strings.Contains(rawURL, "://") {
-				rawURL = "http://" + rawURL
+
+	if cfg.SABnzbd.DownloadClientBaseURL != "" {
+		rawURL := cfg.SABnzbd.DownloadClientBaseURL
+		if !strings.Contains(rawURL, "://") {
+			rawURL = "http://" + rawURL
+		}
+		if u, err := url.Parse(rawURL); err == nil {
+			if h := u.Hostname(); h != "" {
+				host = h
 			}
-			if u, err := url.Parse(rawURL); err == nil {
-				host = u.Hostname()
-				if host == "" {
-					host = "altmount"
+			if p := u.Port(); p != "" {
+				if portVal, err := strconv.Atoi(p); err == nil {
+					port = portVal
 				}
-				if p := u.Port(); p != "" {
-					if portVal, err := strconv.Atoi(p); err == nil {
-						port = portVal
-					}
-				} else if u.Scheme == "https" {
-					port = 443
-				} else if u.Scheme == "http" {
-					port = 80
-				}
-				if u.Path != "" && u.Path != "/" {
-					urlBase = strings.Trim(u.Path, "/")
-				}
+			} else if u.Scheme == "https" {
+				port = 443
+			} else if u.Scheme == "http" {
+				port = 80
 			}
-		} else {
-			port = cfg.WebDAV.Port
+			if u.Path != "" && u.Path != "/" {
+				urlBase = strings.Trim(u.Path, "/")
+			}
 		}
 	}
 

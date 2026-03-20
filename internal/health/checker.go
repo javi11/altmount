@@ -121,25 +121,21 @@ func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, f
 
 	cfg := hc.configGetter()
 	samplePercentage := cfg.GetSegmentSamplePercentage()
-	verifyData := cfg.GetVerifyData()
 
 	if cfg.GetCheckAllSegments() {
 		samplePercentage = 100
-		verifyData = true // Always verify data when doing a full deep check
 	}
 
 	// Override sample percentage if forced full check is requested
 	if len(opts) > 0 && opts[0].ForceFullCheck {
 		samplePercentage = 100
-		verifyData = true
-		slog.InfoContext(ctx, "Forcing full health check (100% sampling + data verification)", "file_path", filePath)
+		slog.InfoContext(ctx, "Forcing full health check (100% sampling)", "file_path", filePath)
 	}
 
 	slog.InfoContext(ctx, "Checking segment availability",
 		"file_path", filePath,
 		"total_segments", len(fileMeta.SegmentData),
-		"sample_percentage", samplePercentage,
-		"verify_data", verifyData)
+		"sample_percentage", samplePercentage)
 
 	// 1. Metadata integrity check - Verify the entire file map is complete
 	loader := &metadataSegmentLoader{segments: fileMeta.SegmentData}
@@ -161,7 +157,6 @@ func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, f
 		samplePercentage,
 		nil, // No progress callback for health checks
 		cfg.GetHealthReadTimeout(),
-		verifyData,
 	)
 
 	if err != nil {
@@ -172,34 +167,9 @@ func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, f
 	}
 
 	if result.MissingCount > 0 {
-		// Calculate missing percentage
-		missingPercentage := (float64(result.MissingCount) / float64(result.TotalChecked)) * 100
-
-		// Check if missing percentage is within acceptable threshold
-		acceptableThreshold := cfg.Health.AcceptableMissingSegmentsPercentage
-		if missingPercentage <= acceptableThreshold {
-			slog.InfoContext(ctx, "File has missing segments but within acceptable threshold",
-				"file_path", filePath,
-				"missing_count", result.MissingCount,
-				"total_checked", result.TotalChecked,
-				"missing_percentage", fmt.Sprintf("%.2f%%", missingPercentage),
-				"threshold", fmt.Sprintf("%.2f%%", acceptableThreshold))
-
-			// Treat as healthy
-			event.Type = EventTypeFileHealthy
-			return event
-		}
-
 		event.Type = EventTypeFileCorrupted
 		event.Status = database.HealthStatusCorrupted
-		event.Error = fmt.Errorf("file corrupted: missing %d/%d checked segments (%.2f%%)",
-			result.MissingCount, result.TotalChecked, missingPercentage)
-
-		// Create detailed JSON report
-		details := fmt.Sprintf(`{"missing_count": %d, "total_checked": %d, "missing_percentage": %.2f, "missing_ids": %q}`,
-			result.MissingCount, result.TotalChecked, missingPercentage, result.MissingIDs)
-		event.Details = &details
-
+		event.Error = fmt.Errorf("missing %d segments", result.MissingCount)
 		return event
 	}
 

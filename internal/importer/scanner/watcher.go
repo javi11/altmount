@@ -15,7 +15,7 @@ import (
 
 // WatchQueueAdder defines the interface for adding items to the queue with category support
 type WatchQueueAdder interface {
-	AddToQueue(ctx context.Context, filePath string, relativePath *string, category *string, priority *database.QueuePriority) (*database.ImportQueueItem, error)
+	AddToQueue(ctx context.Context, filePath string, relativePath *string, category *string, priority *database.QueuePriority, metadata *string) (*database.ImportQueueItem, error)
 	IsFileInQueue(ctx context.Context, filePath string) (bool, error)
 }
 
@@ -289,7 +289,7 @@ func (w *Watcher) processNzb(ctx context.Context, watchRoot, filePath string) er
 
 	// Add to queue
 	priority := database.QueuePriorityNormal
-	item, err := w.queueAdder.AddToQueue(ctx, filePath, relativePath, category, &priority)
+	item, err := w.queueAdder.AddToQueue(ctx, filePath, relativePath, category, &priority, nil)
 	if err != nil {
 		return fmt.Errorf("failed to add to queue: %w", err)
 	}

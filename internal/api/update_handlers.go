@@ -135,7 +135,7 @@ func (s *Server) handleGetUpdateStatus(c *fiber.Ctx) error {
 		resp.ReleaseURL = releaseURL
 		current := strings.TrimPrefix(version.Version, "v")
 		latest := strings.TrimPrefix(tag, "v")
-		resp.UpdateAvailable = current != latest && version.Version != "dev"
+		resp.UpdateAvailable = current != latest
 
 	case UpdateChannelDev:
 		sha, err := fetchLatestGitHubCommit(ctx)
@@ -181,6 +181,7 @@ func (s *Server) handleApplyUpdate(c *fiber.Ctx) error {
 
 	var req struct {
 		Channel UpdateChannel `json:"channel"`
+		Force   bool          `json:"force"`
 	}
 	if err := c.BodyParser(&req); err != nil {
 		return RespondBadRequest(c, "Invalid request body", err.Error())
@@ -201,7 +202,7 @@ func (s *Server) handleApplyUpdate(c *fiber.Ctx) error {
 		defer cancel()
 
 		image := fmt.Sprintf("ghcr.io/%s/%s:%s", ghRepoOwner, ghRepoName, channel)
-		slog.Info("Starting auto-update", "channel", channel, "image", image)
+		slog.Info("Starting auto-update", "channel", channel, "image", image, "force", req.Force)
 
 		// 1. Pull the new image
 		cmd := exec.CommandContext(ctx, "docker", "pull", image)
