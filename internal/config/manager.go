@@ -408,7 +408,7 @@ func (c *Config) Validate() error {
 	}
 
 	if c.Streaming.MaxPrefetch <= 0 {
-		c.Streaming.MaxPrefetch = 30 // Default to 30 segments prefetched ahead if not set
+		c.Streaming.MaxPrefetch = 60 // Default to 60 segments prefetched ahead if not set
 	}
 
 	if c.Import.MaxProcessorWorkers <= 0 {
@@ -1227,7 +1227,7 @@ func DefaultConfig(configDir ...string) *Config {
 			},
 		},
 		Streaming: StreamingConfig{
-			MaxPrefetch: 30, // Default: 30 segments prefetched ahead
+			MaxPrefetch: 60, // Default: 60 segments prefetched ahead
 			FailureMasking: FailureMaskingConfig{
 				Enabled:   &failureMaskingEnabled,
 				Threshold: 3,
