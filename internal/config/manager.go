@@ -35,25 +35,25 @@ const (
 
 // Config represents the complete application configuration
 type Config struct {
-	WebDAV          WebDAVConfig        `yaml:"webdav" mapstructure:"webdav" json:"webdav"`
-	API             APIConfig           `yaml:"api" mapstructure:"api" json:"api"`
-	Auth            AuthConfig          `yaml:"auth" mapstructure:"auth" json:"auth"`
-	Database        DatabaseConfig      `yaml:"database" mapstructure:"database" json:"database"`
-	Metadata        MetadataConfig      `yaml:"metadata" mapstructure:"metadata" json:"metadata"`
-	Streaming       StreamingConfig     `yaml:"streaming" mapstructure:"streaming" json:"streaming"`
-	Health          HealthConfig        `yaml:"health" mapstructure:"health" json:"health"`
-	RClone          RCloneConfig        `yaml:"rclone" mapstructure:"rclone" json:"rclone"`
-	Import          ImportConfig        `yaml:"import" mapstructure:"import" json:"import"`
-	Log             LogConfig           `yaml:"log" mapstructure:"log" json:"log"`
-	SABnzbd         SABnzbdConfig       `yaml:"sabnzbd" mapstructure:"sabnzbd" json:"sabnzbd"`
-	Arrs            ArrsConfig          `yaml:"arrs" mapstructure:"arrs" json:"arrs"`
-	Stremio         StremioConfig       `yaml:"stremio" mapstructure:"stremio" json:"stremio"`
-	Fuse            FuseConfig          `yaml:"fuse" mapstructure:"fuse" json:"fuse"`
-	SegmentCache    SegmentCacheConfig  `yaml:"segment_cache" mapstructure:"segment_cache" json:"segment_cache"`
-	Providers       []ProviderConfig    `yaml:"providers" mapstructure:"providers" json:"providers"`
-	MountPath       string              `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"`
-	MountType       MountType           `yaml:"mount_type" mapstructure:"mount_type" json:"mount_type"`
-	ProfilerEnabled bool                `yaml:"profiler_enabled" mapstructure:"profiler_enabled" json:"profiler_enabled" default:"false"`
+	WebDAV          WebDAVConfig       `yaml:"webdav" mapstructure:"webdav" json:"webdav"`
+	API             APIConfig          `yaml:"api" mapstructure:"api" json:"api"`
+	Auth            AuthConfig         `yaml:"auth" mapstructure:"auth" json:"auth"`
+	Database        DatabaseConfig     `yaml:"database" mapstructure:"database" json:"database"`
+	Metadata        MetadataConfig     `yaml:"metadata" mapstructure:"metadata" json:"metadata"`
+	Streaming       StreamingConfig    `yaml:"streaming" mapstructure:"streaming" json:"streaming"`
+	Health          HealthConfig       `yaml:"health" mapstructure:"health" json:"health"`
+	RClone          RCloneConfig       `yaml:"rclone" mapstructure:"rclone" json:"rclone"`
+	Import          ImportConfig       `yaml:"import" mapstructure:"import" json:"import"`
+	Log             LogConfig          `yaml:"log" mapstructure:"log" json:"log"`
+	SABnzbd         SABnzbdConfig      `yaml:"sabnzbd" mapstructure:"sabnzbd" json:"sabnzbd"`
+	Arrs            ArrsConfig         `yaml:"arrs" mapstructure:"arrs" json:"arrs"`
+	Stremio         StremioConfig      `yaml:"stremio" mapstructure:"stremio" json:"stremio"`
+	Fuse            FuseConfig         `yaml:"fuse" mapstructure:"fuse" json:"fuse"`
+	SegmentCache    SegmentCacheConfig `yaml:"segment_cache" mapstructure:"segment_cache" json:"segment_cache"`
+	Providers       []ProviderConfig   `yaml:"providers" mapstructure:"providers" json:"providers"`
+	MountPath       string             `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"`
+	MountType       MountType          `yaml:"mount_type" mapstructure:"mount_type" json:"mount_type"`
+	ProfilerEnabled bool               `yaml:"profiler_enabled" mapstructure:"profiler_enabled" json:"profiler_enabled" default:"false"`
 }
 
 // SegmentCacheConfig configures the segment-aligned disk cache shared by FUSE and WebDAV.
@@ -258,6 +258,8 @@ type ImportConfig struct {
 	WatchIntervalSeconds           *int           `yaml:"watch_interval_seconds" mapstructure:"watch_interval_seconds" json:"watch_interval_seconds,omitempty"`
 	AllowNestedRarExtraction       *bool          `yaml:"allow_nested_rar_extraction" mapstructure:"allow_nested_rar_extraction" json:"allow_nested_rar_extraction,omitempty"`
 	ExpandBlurayIso                *bool          `yaml:"expand_bluray_iso" mapstructure:"expand_bluray_iso" json:"expand_bluray_iso,omitempty"`
+	AllowFileRenaming              *bool          `yaml:"allow_file_renaming" mapstructure:"allow_file_renaming" json:"allow_file_renaming,omitempty"`
+	FilterSampleAndProof           *bool          `yaml:"filter_sample_and_proof" mapstructure:"filter_sample_and_proof" json:"filter_sample_and_proof,omitempty"`
 }
 
 // LogConfig represents logging configuration with rotation support
@@ -272,32 +274,32 @@ type LogConfig struct {
 
 // RepairConfig represents repair behavior configuration
 type RepairConfig struct {
-	Enabled             *bool `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
-	IntervalMinutes     int   `yaml:"interval_minutes" mapstructure:"interval_minutes" json:"interval_minutes,omitempty"`
-	MaxCoolDownHours    int   `yaml:"max_cooldown_hours" mapstructure:"max_cooldown_hours" json:"max_cooldown_hours,omitempty"`
-	MaxRepairRetries   int   `yaml:"max_repair_retries" mapstructure:"max_repair_retries" json:"max_repair_retries"`
+	Enabled          *bool `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
+	IntervalMinutes  int   `yaml:"interval_minutes" mapstructure:"interval_minutes" json:"interval_minutes,omitempty"`
+	MaxCoolDownHours int   `yaml:"max_cooldown_hours" mapstructure:"max_cooldown_hours" json:"max_cooldown_hours,omitempty"`
+	MaxRepairRetries int   `yaml:"max_repair_retries" mapstructure:"max_repair_retries" json:"max_repair_retries"`
 
-	ExponentialBackoff  *bool `yaml:"exponential_backoff" mapstructure:"exponential_backoff" json:"exponential_backoff,omitempty"`
+	ExponentialBackoff *bool `yaml:"exponential_backoff" mapstructure:"exponential_backoff" json:"exponential_backoff,omitempty"`
 }
 
 // HealthConfig represents health checker configuration
 type HealthConfig struct {
-	Enabled                       *bool        `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
-	LibraryDir                    *string      `yaml:"library_dir" mapstructure:"library_dir" json:"library_dir,omitempty"`
-	CleanupOrphanedMetadata       *bool        `yaml:"cleanup_orphaned_metadata" mapstructure:"cleanup_orphaned_metadata" json:"cleanup_orphaned_metadata,omitempty"`
-	CheckIntervalSeconds          int          `yaml:"check_interval_seconds" mapstructure:"check_interval_seconds" json:"check_interval_seconds,omitempty"`
-	MaxConnectionsForHealthChecks int          `yaml:"max_connections_for_health_checks" mapstructure:"max_connections_for_health_checks" json:"max_connections_for_health_checks,omitempty"`
-	MaxConcurrentJobs             int          `yaml:"max_concurrent_jobs" mapstructure:"max_concurrent_jobs" json:"max_concurrent_jobs,omitempty"`
-	SegmentSamplePercentage       int          `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage,omitempty"`
-	MaxRetries                    int          `yaml:"max_retries" mapstructure:"max_retries" json:"max_retries"`
-	LibrarySyncIntervalMinutes    int          `yaml:"library_sync_interval_minutes" mapstructure:"library_sync_interval_minutes" json:"library_sync_interval_minutes,omitempty"`
-	LibrarySyncConcurrency        int          `yaml:"library_sync_concurrency" mapstructure:"library_sync_concurrency" json:"library_sync_concurrency,omitempty"`
-	ResolveRepairOnImport         *bool        `yaml:"resolve_repair_on_import" mapstructure:"resolve_repair_on_import" json:"resolve_repair_on_import,omitempty"`
-	VerifyData                    *bool        `yaml:"verify_data" mapstructure:"verify_data" json:"verify_data,omitempty"`
-	CheckAllSegments              *bool        `yaml:"check_all_segments" mapstructure:"check_all_segments" json:"check_all_segments,omitempty"`
-	ReadTimeoutSeconds            int          `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds,omitempty"`
-	AcceptableMissingSegmentsPercentage float64 `yaml:"acceptable_missing_segments_percentage" mapstructure:"acceptable_missing_segments_percentage" json:"acceptable_missing_segments_percentage,omitempty"`
-	Repair                        RepairConfig `yaml:"repair" mapstructure:"repair" json:"repair"`
+	Enabled                             *bool        `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
+	LibraryDir                          *string      `yaml:"library_dir" mapstructure:"library_dir" json:"library_dir,omitempty"`
+	CleanupOrphanedMetadata             *bool        `yaml:"cleanup_orphaned_metadata" mapstructure:"cleanup_orphaned_metadata" json:"cleanup_orphaned_metadata,omitempty"`
+	CheckIntervalSeconds                int          `yaml:"check_interval_seconds" mapstructure:"check_interval_seconds" json:"check_interval_seconds,omitempty"`
+	MaxConnectionsForHealthChecks       int          `yaml:"max_connections_for_health_checks" mapstructure:"max_connections_for_health_checks" json:"max_connections_for_health_checks,omitempty"`
+	MaxConcurrentJobs                   int          `yaml:"max_concurrent_jobs" mapstructure:"max_concurrent_jobs" json:"max_concurrent_jobs,omitempty"`
+	SegmentSamplePercentage             int          `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage,omitempty"`
+	MaxRetries                          int          `yaml:"max_retries" mapstructure:"max_retries" json:"max_retries"`
+	LibrarySyncIntervalMinutes          int          `yaml:"library_sync_interval_minutes" mapstructure:"library_sync_interval_minutes" json:"library_sync_interval_minutes,omitempty"`
+	LibrarySyncConcurrency              int          `yaml:"library_sync_concurrency" mapstructure:"library_sync_concurrency" json:"library_sync_concurrency,omitempty"`
+	ResolveRepairOnImport               *bool        `yaml:"resolve_repair_on_import" mapstructure:"resolve_repair_on_import" json:"resolve_repair_on_import,omitempty"`
+	VerifyData                          *bool        `yaml:"verify_data" mapstructure:"verify_data" json:"verify_data,omitempty"`
+	CheckAllSegments                    *bool        `yaml:"check_all_segments" mapstructure:"check_all_segments" json:"check_all_segments,omitempty"`
+	ReadTimeoutSeconds                  int          `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds,omitempty"`
+	AcceptableMissingSegmentsPercentage float64      `yaml:"acceptable_missing_segments_percentage" mapstructure:"acceptable_missing_segments_percentage" json:"acceptable_missing_segments_percentage,omitempty"`
+	Repair                              RepairConfig `yaml:"repair" mapstructure:"repair" json:"repair"`
 }
 
 // GenerateProviderID creates a unique ID based on host, port, and username
@@ -1149,9 +1151,9 @@ func DefaultConfig(configDir ...string) *Config {
 	sabnzbdEnabled := false
 	scrapperEnabled := false
 	fuseEnabled := false
-	loginRequired := true  // Require login by default
-	stremioEnabled := false   // Stremio endpoint disabled by default
-	prowlarrEnabled := false  // Prowlarr integration disabled by default
+	loginRequired := true      // Require login by default
+	stremioEnabled := false    // Stremio endpoint disabled by default
+	prowlarrEnabled := false   // Prowlarr integration disabled by default
 	watchIntervalSeconds := 10 // Default watch interval
 	cleanupAutomaticImportFailure := false
 	metadataBackupEnabled := false
@@ -1297,15 +1299,15 @@ func DefaultConfig(configDir ...string) *Config {
 			Compress:   true,    // Compress old files
 		},
 		Health: HealthConfig{
-			Enabled:                       &healthEnabled,           // Disabled by default
-			CleanupOrphanedMetadata:       &cleanupOrphanedMetadata, // Disabled by default
-			CheckIntervalSeconds:          5,
-			MaxConnectionsForHealthChecks: 5,
-			MaxConcurrentJobs:             1,                      // Default: 1 concurrent job
-			SegmentSamplePercentage:       5,                      // Default: 5% segment sampling
-			LibrarySyncIntervalMinutes:    360,                    // Default: sync every 6 hours
-			ResolveRepairOnImport:         &resolveRepairOnImport, // Enabled by default
-			AcceptableMissingSegmentsPercentage: 0,                // Default: no missing segments allowed
+			Enabled:                             &healthEnabled,           // Disabled by default
+			CleanupOrphanedMetadata:             &cleanupOrphanedMetadata, // Disabled by default
+			CheckIntervalSeconds:                5,
+			MaxConnectionsForHealthChecks:       5,
+			MaxConcurrentJobs:                   1,                      // Default: 1 concurrent job
+			SegmentSamplePercentage:             5,                      // Default: 5% segment sampling
+			LibrarySyncIntervalMinutes:          360,                    // Default: sync every 6 hours
+			ResolveRepairOnImport:               &resolveRepairOnImport, // Enabled by default
+			AcceptableMissingSegmentsPercentage: 0,                      // Default: no missing segments allowed
 			Repair: RepairConfig{
 				Enabled:            &repairEnabled,
 				IntervalMinutes:    60,

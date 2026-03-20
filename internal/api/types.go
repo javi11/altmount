@@ -127,8 +127,10 @@ type ImportAPIResponse struct {
 	ImportDir                      *string               `json:"import_dir"`
 	WatchDir                       *string               `json:"watch_dir"`
 
-	WatchIntervalSeconds           *int                  `json:"watch_interval_seconds,omitempty"`
-	AllowNestedRarExtraction       *bool                 `json:"allow_nested_rar_extraction,omitempty"`
+	WatchIntervalSeconds     *int  `json:"watch_interval_seconds,omitempty"`
+	AllowNestedRarExtraction *bool `json:"allow_nested_rar_extraction,omitempty"`
+	FilterSampleAndProof     *bool `json:"filter_sample_and_proof,omitempty"`
+	AllowFileRenaming        *bool `json:"allow_file_renaming,omitempty"`
 }
 
 // SABnzbdAPIResponse sanitizes SABnzbd config for API responses
@@ -278,8 +280,10 @@ func ToImportAPIResponse(importConfig config.ImportConfig) ImportAPIResponse {
 		ImportDir:                      importConfig.ImportDir,
 		WatchDir:                       importConfig.WatchDir,
 
-		WatchIntervalSeconds:           importConfig.WatchIntervalSeconds,
-		AllowNestedRarExtraction:       importConfig.AllowNestedRarExtraction,
+		WatchIntervalSeconds:     importConfig.WatchIntervalSeconds,
+		AllowNestedRarExtraction: importConfig.AllowNestedRarExtraction,
+		FilterSampleAndProof:     importConfig.FilterSampleAndProof,
+		AllowFileRenaming:        importConfig.AllowFileRenaming,
 	}
 }
 
@@ -714,22 +718,22 @@ func ToHealthItemResponse(item *database.FileHealth) *HealthItemResponse {
 		return nil
 	}
 	return &HealthItemResponse{
-		ID:               item.ID,
-		FilePath:         item.FilePath,
-		LibraryPath:      item.LibraryPath,
-		Status:           item.Status,
-		LastChecked:      item.LastChecked,
-		LastError:        item.LastError,
-		RetryCount:       item.RetryCount,
-		MaxRetries:       item.MaxRetries,
-		SourceNzbPath:    item.SourceNzbPath,
-		ErrorDetails:     item.ErrorDetails,
-		RepairRetryCount: item.RepairRetryCount,
-		MaxRepairRetries: item.MaxRepairRetries,
-		CreatedAt:        item.CreatedAt,
-		UpdatedAt:        item.UpdatedAt,
-		ScheduledCheckAt: item.ScheduledCheckAt,
-		Priority:         item.Priority,
+		ID:                    item.ID,
+		FilePath:              item.FilePath,
+		LibraryPath:           item.LibraryPath,
+		Status:                item.Status,
+		LastChecked:           item.LastChecked,
+		LastError:             item.LastError,
+		RetryCount:            item.RetryCount,
+		MaxRetries:            item.MaxRetries,
+		SourceNzbPath:         item.SourceNzbPath,
+		ErrorDetails:          item.ErrorDetails,
+		RepairRetryCount:      item.RepairRetryCount,
+		MaxRepairRetries:      item.MaxRepairRetries,
+		CreatedAt:             item.CreatedAt,
+		UpdatedAt:             item.UpdatedAt,
+		ScheduledCheckAt:      item.ScheduledCheckAt,
+		Priority:              item.Priority,
 		StreamingFailureCount: item.StreamingFailureCount,
 		IsMasked:              item.IsMasked,
 	}

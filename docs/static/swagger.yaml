@@ -1156,6 +1156,10 @@ definitions:
         type: array
       expand_bluray_iso:
         type: boolean
+      allow_file_renaming:
+        type: boolean
+      filter_sample_and_proof:
+        type: boolean
       import_dir:
         type: string
       import_strategy:

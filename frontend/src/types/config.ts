@@ -225,6 +225,8 @@ export interface ImportConfig {
 	watch_dir?: string | null;
 	watch_interval_seconds?: number | null;
 	allow_nested_rar_extraction?: boolean;
+	allow_file_renaming?: boolean;
+	filter_sample_and_proof?: boolean;
 }
 
 // Log configuration
