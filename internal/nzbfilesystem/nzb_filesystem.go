@@ -152,4 +152,3 @@ func (nfs *NzbFilesystem) Chtimes(name string, atime, mtime time.Time) error {
 func (nfs *NzbFilesystem) GetRemoteFile() *MetadataRemoteFile {
 	return nfs.remoteFile
 }
-

@@ -840,10 +840,10 @@ func (hw *HealthWorker) getMaxConcurrentJobs() int {
 type repairOutcome int
 
 const (
-	repairOutcomeTriggered  repairOutcome = iota // ARR accepted the repair; metadata moved to corrupted folder
-	repairOutcomeCorrupted                       // ARR failed with a generic error; mark file corrupted
-	repairOutcomeDeleted                         // Health record and/or metadata were deleted (zombie)
-	repairOutcomeRegenerated                     // Metadata was successfully regenerated from NZB
+	repairOutcomeTriggered   repairOutcome = iota // ARR accepted the repair; metadata moved to corrupted folder
+	repairOutcomeCorrupted                        // ARR failed with a generic error; mark file corrupted
+	repairOutcomeDeleted                          // Health record and/or metadata were deleted (zombie)
+	repairOutcomeRegenerated                      // Metadata was successfully regenerated from NZB
 )
 
 // applyRepairOutcome maps a repairOutcome to the corresponding fields on the HealthStatusUpdate.
@@ -935,7 +935,7 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, item *database.Fi
 		}
 	}
 
-	// SPECIAL CASE: If metadata is corrupted AND we don't have a library path, 
+	// SPECIAL CASE: If metadata is corrupted AND we don't have a library path,
 	// we try to regenerate the metadata first before triggering a full ARR repair.
 	if metadataErr != nil && (item.LibraryPath == nil || *item.LibraryPath == "") {
 		slog.InfoContext(ctx, "Metadata corrupted and no library path found - attempting regeneration from NZB", "file_path", filePath)

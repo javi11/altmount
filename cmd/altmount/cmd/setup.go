@@ -24,9 +24,9 @@ import (
 	"github.com/javi11/altmount/internal/nzbfilesystem"
 	"github.com/javi11/altmount/internal/nzbfilesystem/segcache"
 	"github.com/javi11/altmount/internal/pool"
-	"github.com/javi11/altmount/internal/usenet"
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/rclone"
+	"github.com/javi11/altmount/internal/usenet"
 	"github.com/javi11/altmount/internal/webdav"
 	"github.com/javi11/altmount/pkg/rclonecli"
 )

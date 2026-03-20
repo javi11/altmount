@@ -66,7 +66,6 @@ func TestHandleResetSystemStats_Granular(t *testing.T) {
 	assert.Equal(t, 200, resp.StatusCode)
 }
 
-
 func TestHandleGetSystemHealth_Unhealthy(t *testing.T) {
 	// I've verified the core logic in response_test.go.
 }

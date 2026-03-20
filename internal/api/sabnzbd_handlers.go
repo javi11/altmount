@@ -853,9 +853,9 @@ func (s *Server) handleSABnzbdHistoryDelete(c *fiber.Ctx) error {
 		// Actually, since we have the ID, we can try to find it, but the ID was the NzbID.
 		// The most reliable way is to try deleting from history by THAT same ID as nzb_id.
 		_, _ = s.queueRepo.RemoveFromHistoryByNzbID(c.Context(), id)
-		
+
 		// Fallback: If it was already nulled by FK, we can't easily find it by ID anymore without title.
-		// But usually we can just let the next poll handle it if it persists, 
+		// But usually we can just let the next poll handle it if it persists,
 		// or we could have fetched it before deleting from queue.
 		// For now, let's try to delete by ID as well just in case NzoID was a history ID.
 		_, _ = s.queueRepo.RemoveFromHistory(c.Context(), id)

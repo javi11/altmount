@@ -1354,11 +1354,11 @@ func (s *Server) handleRegenerateLibraryFiles(c *fiber.Ctx) error {
 
 	if len(files) == 0 {
 		return RespondSuccess(c, fiber.Map{
-			"message":          "No library files found to process",
-			"files_processed":  0,
-			"success_count":    0,
-			"errors":           []string{},
-			"completed_at":     time.Now().Format(time.RFC3339),
+			"message":         "No library files found to process",
+			"files_processed": 0,
+			"success_count":   0,
+			"errors":          []string{},
+			"completed_at":    time.Now().Format(time.RFC3339),
 		})
 	}
 
@@ -1496,12 +1496,12 @@ func (s *Server) handleRegenerateLibraryFiles(c *fiber.Ctx) error {
 	}
 
 	response := fiber.Map{
-		"message":          fmt.Sprintf("Successfully processed %d library files", successCount),
-		"files_processed":  len(files),
-		"success_count":    successCount,
-		"errors":           errors,
-		"error_count":      errorCount,
-		"completed_at":     time.Now().Format(time.RFC3339),
+		"message":         fmt.Sprintf("Successfully processed %d library files", successCount),
+		"files_processed": len(files),
+		"success_count":   successCount,
+		"errors":          errors,
+		"error_count":     errorCount,
+		"completed_at":    time.Now().Format(time.RFC3339),
 	}
 
 	if errorCount > 0 {

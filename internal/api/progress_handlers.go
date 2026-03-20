@@ -129,4 +129,3 @@ func (s *Server) ServeHealthSSE(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 }
-

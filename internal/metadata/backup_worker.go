@@ -16,11 +16,11 @@ import (
 )
 
 type BackupWorker struct {
-	configGetter config.ConfigGetter
-	workerCtx    context.Context
-	workerCancel context.CancelFunc
-	workerWg     sync.WaitGroup
-	workerMu     sync.Mutex
+	configGetter  config.ConfigGetter
+	workerCtx     context.Context
+	workerCancel  context.CancelFunc
+	workerWg      sync.WaitGroup
+	workerMu      sync.Mutex
 	workerRunning bool
 }
 
