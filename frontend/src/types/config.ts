@@ -225,6 +225,8 @@ export interface ImportConfig {
 	watch_dir?: string | null;
 	watch_interval_seconds?: number | null;
 	allow_nested_rar_extraction?: boolean;
+	rename_to_nzb_name?: boolean;
+	filter_sample_files?: boolean;
 	failed_item_retention_hours?: number | null;
 }
 
@@ -419,6 +421,8 @@ export interface ImportUpdateRequest {
 	watch_dir?: string | null;
 	watch_interval_seconds?: number | null;
 	allow_nested_rar_extraction?: boolean;
+	rename_to_nzb_name?: boolean;
+	filter_sample_files?: boolean;
 }
 
 // Log update request

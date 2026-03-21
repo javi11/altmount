@@ -47,7 +47,7 @@ var whitelistedExtensions = map[string]bool{
 // IsAllowedFile checks if a filename has an allowed extension
 // If allowedExtensions is empty, all files are allowed
 // size is used to prevent false positives for sample/proof checks on large files
-func IsAllowedFile(filename string, size int64, allowedExtensions []string) bool {
+func IsAllowedFile(filename string, size int64, allowedExtensions []string, filterSamples bool) bool {
 	if filename == "" {
 		return false
 	}
@@ -66,7 +66,7 @@ func IsAllowedFile(filename string, size int64, allowedExtensions []string) bool
 	}
 
 	// Check if file is a sample or proof
-	if isSampleOrProof(filename, size) {
+	if filterSamples && isSampleOrProof(filename, size) {
 		return false
 	}
 
@@ -82,9 +82,9 @@ func IsAllowedFile(filename string, size int64, allowedExtensions []string) bool
 
 // HasAllowedFilesInRegular checks if any regular (non-archive) files match allowed extensions
 // If allowedExtensions is empty, all file types are allowed
-func HasAllowedFilesInRegular(regularFiles []parser.ParsedFile, allowedExtensions []string) bool {
+func HasAllowedFilesInRegular(regularFiles []parser.ParsedFile, allowedExtensions []string, filterSamples bool) bool {
 	for _, file := range regularFiles {
-		if IsAllowedFile(file.Filename, file.Size, allowedExtensions) {
+		if IsAllowedFile(file.Filename, file.Size, allowedExtensions, filterSamples) {
 			return true
 		}
 	}

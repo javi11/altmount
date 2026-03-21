@@ -33,9 +33,10 @@ func ProcessSingleFile(
 	allowedFileExtensions []string,
 	timeout time.Duration,
 	tracker *progress.Tracker,
+	filterSamples bool,
 ) (string, string, error) {
 	// Validate file extension before processing
-	if !utils.HasAllowedFilesInRegular([]parser.ParsedFile{file}, allowedFileExtensions) {
+	if !utils.HasAllowedFilesInRegular([]parser.ParsedFile{file}, allowedFileExtensions, filterSamples) {
 		slog.WarnContext(ctx, "File does not match allowed extensions",
 			"filename", file.Filename,
 			"allowed_extensions", allowedFileExtensions)
@@ -57,7 +58,7 @@ func ProcessSingleFile(
 	}
 
 	// Double check if this specific file is allowed
-	if !utils.IsAllowedFile(file.Filename, file.Size, allowedFileExtensions) {
+	if !utils.IsAllowedFile(file.Filename, file.Size, allowedFileExtensions, filterSamples) {
 		return "", "", fmt.Errorf("file '%s' is not allowed", file.Filename)
 	}
 
