@@ -6,26 +6,36 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 )
 
 // NotifyARR notifies ARR applications about imported content
 func (c *Coordinator) NotifyARR(ctx context.Context, item *database.ImportQueueItem, resultingPath string) error {
-	if c.arrsService == nil {
+	c.mu.RLock()
+	arrsService := c.arrsService
+	c.mu.RUnlock()
+
+	return c.notifyARRWith(ctx, arrsService, item, resultingPath)
+}
+
+// notifyARRWith notifies ARR using the provided service (avoids re-locking)
+func (c *Coordinator) notifyARRWith(ctx context.Context, arrsService *arrs.Service, item *database.ImportQueueItem, resultingPath string) error {
+	if arrsService == nil {
 		return nil
 	}
 
 	// When a forced target path is set, scan that path directly (no category required).
 	if item.TargetPath != nil && *item.TargetPath != "" {
-		if err := c.arrsService.TriggerScanForFile(ctx, *item.TargetPath); err != nil {
+		if err := arrsService.TriggerScanForFile(ctx, *item.TargetPath); err != nil {
 			c.log.WarnContext(ctx, "Failed to trigger ARR scan for target path",
 				"path", *item.TargetPath, "error", err)
 		}
 		return nil
 	}
 
-	if item.Category == nil {
+	if item.Category == nil || *item.Category == "" {
 		return nil
 	}
 
@@ -78,19 +88,22 @@ func (c *Coordinator) NotifyARR(ctx context.Context, item *database.ImportQueueI
 	pathForARR := filepath.Join(pathParts...)
 	pathForARR = filepath.ToSlash(filepath.Clean(pathForARR))
 
-	if err := c.arrsService.TriggerScanForFile(ctx, pathForARR); err != nil {
+	if err := arrsService.TriggerScanForFile(ctx, pathForARR); err != nil {
 		// Fallback: broadcast to all instances of the type
 		c.log.DebugContext(ctx, "Could not find specific ARR instance for file, broadcasting scan",
 			"path", pathForARR, "error", err)
 
-		return c.broadcastToARRType(ctx, item)
+		return c.broadcastToARRType(ctx, arrsService, item)
 	}
 
 	return nil
 }
 
 // broadcastToARRType broadcasts scan to all instances of the determined ARR type
-func (c *Coordinator) broadcastToARRType(ctx context.Context, item *database.ImportQueueItem) error {
+func (c *Coordinator) broadcastToARRType(ctx context.Context, arrsService *arrs.Service, item *database.ImportQueueItem) error {
+	if item.Category == nil {
+		return fmt.Errorf("cannot determine ARR type: category is nil")
+	}
 	categoryName := *item.Category
 	category := strings.ToLower(categoryName)
 	arrType := ""
@@ -115,7 +128,7 @@ func (c *Coordinator) broadcastToARRType(ctx context.Context, item *database.Imp
 	}
 
 	if arrType != "" {
-		c.arrsService.TriggerDownloadScan(ctx, arrType)
+		arrsService.TriggerDownloadScan(ctx, arrType)
 		return nil
 	}
 
