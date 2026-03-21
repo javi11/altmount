@@ -58,9 +58,9 @@ func (m *FuseManager) Stop() {
 	}
 
 	if m.server != nil {
-		slog.Info("Unmounting FUSE on manager stop")
+		slog.InfoContext(context.Background(), "Unmounting FUSE on manager stop")
 		if err := m.server.Unmount(); err != nil {
-			slog.Error("Failed to unmount FUSE on manager stop", "error", err)
+			slog.ErrorContext(context.Background(), "Failed to unmount FUSE on manager stop", "error", err)
 		}
 		m.server = nil
 		m.status = "stopped"
@@ -99,7 +99,7 @@ func (m *FuseManager) startMonitor() {
 
 				healthy, err := server.ValidateMount()
 				if !healthy {
-					slog.Warn("FUSE health check failed", "error", err)
+					slog.WarnContext(ctx, "FUSE health check failed", "error", err)
 
 					m.mu.Lock()
 					m.status = "error"
@@ -123,18 +123,18 @@ func (m *FuseManager) recoverMount(ctx context.Context) {
 	m.mu.Unlock()
 
 	if attempt > fuseMaxRecoveryAttempts {
-		slog.Error("FUSE recovery exhausted, staying in error state",
+		slog.ErrorContext(ctx, "FUSE recovery exhausted, staying in error state",
 			"attempts", attempt-1,
 			"path", path)
 		return
 	}
 
 	if factory == nil {
-		slog.Error("FUSE recovery not possible: no mount factory configured")
+		slog.ErrorContext(ctx, "FUSE recovery not possible: no mount factory configured")
 		return
 	}
 
-	slog.Info("Attempting FUSE recovery",
+	slog.InfoContext(ctx, "Attempting FUSE recovery",
 		"attempt", attempt,
 		"max_attempts", fuseMaxRecoveryAttempts,
 		"path", path)
@@ -165,11 +165,11 @@ func (m *FuseManager) recoverMount(ctx context.Context) {
 			m.status = "running"
 			m.recoveryAttempts = 0
 			m.mu.Unlock()
-			slog.Info("FUSE recovery successful", "path", path)
+			slog.InfoContext(ctx, "FUSE recovery successful", "path", path)
 		}
 
 		if err := newServer.Mount(onReady); err != nil {
-			slog.Error("FUSE recovery mount failed", "error", err, "attempt", attempt)
+			slog.ErrorContext(ctx, "FUSE recovery mount failed", "error", err, "attempt", attempt)
 			m.mu.Lock()
 			m.status = "error"
 			m.server = nil
@@ -255,7 +255,7 @@ func (s *Server) handleStartFuseMount(c *fiber.Ctx) error {
 		}
 
 		if err := server.Mount(onReady); err != nil {
-			slog.Error("FUSE mount failed", "error", err)
+			slog.ErrorContext(context.Background(), "FUSE mount failed", "error", err)
 			s.fuseManager.mu.Lock()
 			s.fuseManager.status = "error"
 			s.fuseManager.server = nil
@@ -333,7 +333,7 @@ func (s *Server) handleForceStopFuseMount(c *fiber.Ctx) error {
 
 	if s.fuseManager.server != nil {
 		if err := s.fuseManager.server.ForceUnmount(); err != nil {
-			slog.Error("Force unmount failed", "error", err)
+			slog.ErrorContext(c.Context(), "Force unmount failed", "error", err)
 			// Still reset state so user can retry
 			s.fuseManager.server = nil
 			s.fuseManager.status = "stopped"
@@ -388,22 +388,22 @@ func (s *Server) handleGetFuseStatus(c *fiber.Ctx) error {
 func (s *Server) AutoStartFuse() {
 	cfg := s.configManager.GetConfig()
 
-	slog.Debug("Checking FUSE auto-start conditions",
+	slog.DebugContext(context.Background(), "Checking FUSE auto-start conditions",
 		"mount_type", cfg.MountType,
 		"mount_path", cfg.Fuse.MountPath)
 
 	if cfg.MountType != config.MountTypeFuse {
-		slog.Debug("FUSE auto-start skipped: mount_type is not fuse",
+		slog.DebugContext(context.Background(), "FUSE auto-start skipped: mount_type is not fuse",
 			"mount_type", cfg.MountType)
 		return
 	}
 
 	if cfg.Fuse.MountPath == "" {
-		slog.Warn("FUSE auto-start skipped: mount_path is empty despite mount_type=fuse")
+		slog.WarnContext(context.Background(), "FUSE auto-start skipped: mount_path is empty despite mount_type=fuse")
 		return
 	}
 
-	slog.Info("Auto-starting FUSE mount", "path", cfg.Fuse.MountPath)
+	slog.InfoContext(context.Background(), "Auto-starting FUSE mount", "path", cfg.Fuse.MountPath)
 
 	s.fuseManager.mu.Lock()
 	if s.fuseManager.status == "running" {
@@ -416,7 +416,7 @@ func (s *Server) AutoStartFuse() {
 
 	if _, err := os.Stat(cfg.Fuse.MountPath); os.IsNotExist(err) {
 		if err := os.MkdirAll(cfg.Fuse.MountPath, 0755); err != nil {
-			slog.Error("Failed to create auto-mount directory", "path", cfg.Fuse.MountPath, "error", err)
+			slog.ErrorContext(context.Background(), "Failed to create auto-mount directory", "path", cfg.Fuse.MountPath, "error", err)
 			s.fuseManager.mu.Lock()
 			s.fuseManager.status = "error"
 			s.fuseManager.mu.Unlock()
@@ -444,7 +444,7 @@ func (s *Server) AutoStartFuse() {
 		}
 
 		if err := server.Mount(onReady); err != nil {
-			slog.Error("FUSE auto-mount failed", "error", err)
+			slog.ErrorContext(context.Background(), "FUSE auto-mount failed", "error", err)
 			s.fuseManager.mu.Lock()
 			s.fuseManager.status = "error"
 			s.fuseManager.server = nil

@@ -2,8 +2,7 @@ package api
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
+	"crypto/subtle"
 	"log/slog"
 	"mime"
 	"net/http"
@@ -11,6 +10,7 @@ import (
 	"path/filepath"
 	"sync/atomic"
 
+	"github.com/javi11/altmount/internal/auth"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/nzbfilesystem"
 	"github.com/javi11/altmount/internal/utils"
@@ -99,10 +99,10 @@ func (h *StreamHandler) authenticate(r *http.Request) (*database.User, bool) {
 		}
 
 		// Hash the user's API key with SHA256
-		hashedKey := hashAPIKey(*user.APIKey)
+		hashedKey := auth.HashAPIKey(*user.APIKey)
 
 		// Compare with provided download_key (constant-time comparison for security)
-		if hashedKey == downloadKey {
+		if subtle.ConstantTimeCompare([]byte(hashedKey), []byte(downloadKey)) == 1 {
 			return user, true
 		}
 	}
@@ -113,11 +113,6 @@ func (h *StreamHandler) authenticate(r *http.Request) (*database.User, bool) {
 	return nil, false
 }
 
-// hashAPIKey generates a SHA256 hash of the API key for secure comparison
-func hashAPIKey(apiKey string) string {
-	hash := sha256.Sum256([]byte(apiKey))
-	return hex.EncodeToString(hash[:])
-}
 
 // GetHTTPHandler returns an http.Handler that serves files from NzbFilesystem
 // This handler:

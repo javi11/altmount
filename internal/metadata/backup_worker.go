@@ -119,11 +119,11 @@ func (w *BackupWorker) performBackup() {
 	backupDir := filepath.Join(backupRoot, timestamp)
 
 	if err := os.MkdirAll(backupDir, 0755); err != nil {
-		slog.Error("Failed to create backup directory", "error", err, "path", backupDir)
+		slog.ErrorContext(w.workerCtx, "Failed to create backup directory", "error", err, "path", backupDir)
 		return
 	}
 
-	slog.Info("Starting metadata backup (copy)", "destination", backupDir)
+	slog.InfoContext(w.workerCtx, "Starting metadata backup (copy)", "destination", backupDir)
 
 	count := 0
 	err := filepath.Walk(metadataDir, func(path string, info os.FileInfo, err error) error {
@@ -166,16 +166,16 @@ func (w *BackupWorker) performBackup() {
 
 	if err != nil {
 		if err == context.Canceled {
-			slog.Info("Metadata backup canceled")
+			slog.InfoContext(w.workerCtx, "Metadata backup canceled")
 		} else {
-			slog.Error("Failed to complete metadata backup", "error", err)
+			slog.ErrorContext(w.workerCtx, "Failed to complete metadata backup", "error", err)
 		}
 		// Cleanup failed partial backup
 		os.RemoveAll(backupDir)
 		return
 	}
 
-	slog.Info("Metadata backup completed successfully", "files_copied", count)
+	slog.InfoContext(w.workerCtx, "Metadata backup completed successfully", "files_copied", count)
 
 	w.cleanupOldBackups(backupRoot, cfg.GetMetadataBackupKeep())
 }
@@ -200,7 +200,7 @@ func (w *BackupWorker) copyFile(src, dst string) error {
 func (w *BackupWorker) cleanupOldBackups(backupRoot string, keep int) {
 	files, err := os.ReadDir(backupRoot)
 	if err != nil {
-		slog.Error("Failed to read backup directory for cleanup", "error", err)
+		slog.ErrorContext(w.workerCtx, "Failed to read backup directory for cleanup", "error", err)
 		return
 	}
 
@@ -232,9 +232,9 @@ func (w *BackupWorker) cleanupOldBackups(backupRoot string, keep int) {
 
 	for i := keep; i < len(backups); i++ {
 		path := filepath.Join(backupRoot, backups[i].name)
-		slog.Info("Deleting old backup directory", "path", path)
+		slog.InfoContext(w.workerCtx, "Deleting old backup directory", "path", path)
 		if err := os.RemoveAll(path); err != nil {
-			slog.Error("Failed to delete old backup directory", "error", err, "path", path)
+			slog.ErrorContext(w.workerCtx, "Failed to delete old backup directory", "error", err, "path", path)
 		}
 	}
 }

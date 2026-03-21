@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/javi11/altmount/internal/auth"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 )
@@ -249,7 +250,7 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 
 	downloadKey := ""
 	if apiKey != "" {
-		downloadKey = hashAPIKey(apiKey)
+		downloadKey = auth.HashAPIKey(apiKey)
 	}
 
 	return &ConfigAPIResponse{

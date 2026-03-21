@@ -46,9 +46,9 @@ func CheckDirectoryWritable(path string) error {
 		return fmt.Errorf("directory %s is not writable: %w", absPath, err)
 	}
 
+	defer file.Close()
 	// Write some test data
 	_, writeErr := file.Write([]byte("test"))
-	file.Close()
 
 	// Clean up test file
 	os.Remove(testFile)
