@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/javi11/altmount/internal/arrs/clients"
 	"github.com/javi11/altmount/internal/arrs/data"
@@ -107,16 +108,32 @@ func (m *Manager) findInstanceForFilePath(ctx context.Context, filePath string, 
 
 func (m *Manager) managesFile(ctx context.Context, instanceType string, client any, filePath string) bool {
 	if instanceType == "radarr" {
-		return m.radarrManagesFile(ctx, client.(*radarr.Radarr), filePath)
+		rc, ok := client.(*radarr.Radarr)
+		if !ok {
+			return false
+		}
+		return m.radarrManagesFile(ctx, rc, filePath)
 	}
-	return m.sonarrManagesFile(ctx, client.(*sonarr.Sonarr), filePath)
+	sc, ok := client.(*sonarr.Sonarr)
+	if !ok {
+		return false
+	}
+	return m.sonarrManagesFile(ctx, sc, filePath)
 }
 
 func (m *Manager) hasFile(ctx context.Context, instanceType string, client any, instanceName, relativePath string) bool {
 	if instanceType == "radarr" {
-		return m.radarrHasFile(ctx, client.(*radarr.Radarr), instanceName, relativePath)
+		rc, ok := client.(*radarr.Radarr)
+		if !ok {
+			return false
+		}
+		return m.radarrHasFile(ctx, rc, instanceName, relativePath)
 	}
-	return m.sonarrHasFile(ctx, client.(*sonarr.Sonarr), instanceName, relativePath)
+	sc, ok := client.(*sonarr.Sonarr)
+	if !ok {
+		return false
+	}
+	return m.sonarrHasFile(ctx, sc, instanceName, relativePath)
 }
 
 // radarrManagesFile checks if Radarr manages the given file path using root folders (checkrr approach)
@@ -135,7 +152,7 @@ func (m *Manager) radarrManagesFile(ctx context.Context, client *radarr.Radarr, 
 	for _, folder := range rootFolders {
 		slog.DebugContext(ctx, "Checking Radarr root folder", "folder_path", folder.Path, "file_path", filePath)
 		// Check for direct prefix match or if the filePath contains the folder.Path (common in Docker/Remote setups)
-		if strings.HasPrefix(filePath, folder.Path) || strings.Contains(filePath, folder.Path) {
+		if strings.HasPrefix(filePath, folder.Path) {
 			slog.DebugContext(ctx, "File matches Radarr root folder", "folder_path", folder.Path)
 			return true
 		}
@@ -160,8 +177,7 @@ func (m *Manager) sonarrManagesFile(ctx context.Context, client *sonarr.Sonarr, 
 	// Check if file path starts with any root folder path
 	for _, folder := range rootFolders {
 		slog.DebugContext(ctx, "Checking Sonarr root folder", "folder_path", folder.Path, "file_path", filePath)
-		// Check for direct prefix match or if the filePath contains the folder.Path (common in Docker/Remote setups)
-		if strings.HasPrefix(filePath, folder.Path) || strings.Contains(filePath, folder.Path) {
+		if strings.HasPrefix(filePath, folder.Path) {
 			slog.DebugContext(ctx, "File matches Sonarr root folder", "folder_path", folder.Path)
 			return true
 		}
@@ -277,8 +293,8 @@ func (m *Manager) TriggerScanForFile(ctx context.Context, filePath string) error
 
 	// Launch scan in background to not block caller
 	go func() {
-		// Use a new background context for the async call
-		bgCtx := context.Background()
+		bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
 
 		switch instance.Type {
 		case "radarr":
@@ -325,8 +341,8 @@ func (m *Manager) TriggerDownloadScan(ctx context.Context, instanceType string) 
 		slog.DebugContext(ctx, "Triggering download client scan", "instance", instance.Name, "type", instance.Type)
 
 		go func(inst *model.ConfigInstance) {
-			// Use a new background context for the async call
-			bgCtx := context.Background()
+			bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
 
 			switch inst.Type {
 			case "radarr":

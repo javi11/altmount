@@ -369,7 +369,10 @@ func (s *Service) IsPaused() bool {
 }
 
 func (s *Service) RegisterConfigChangeHandler(configManager any) {
-	mgr := configManager.(*config.Manager)
+	mgr, ok := configManager.(*config.Manager)
+	if !ok {
+		return
+	}
 	mgr.OnConfigChange(func(oldConfig, newConfig *config.Config) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
@@ -441,7 +444,12 @@ func (s *Service) IsRunning() bool {
 func (s *Service) SetRcloneClient(client any) {
 	var rc rclonecli.RcloneRcClient
 	if client != nil {
-		rc = client.(rclonecli.RcloneRcClient)
+		var ok bool
+		rc, ok = client.(rclonecli.RcloneRcClient)
+		if !ok {
+			s.log.ErrorContext(s.ctx, "SetRcloneClient: unexpected client type", "type", fmt.Sprintf("%T", client))
+			return
+		}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -460,7 +468,12 @@ func (s *Service) SetRcloneClient(client any) {
 func (s *Service) SetArrsService(service any) {
 	var as *arrs.Service
 	if service != nil {
-		as = service.(*arrs.Service)
+		var ok bool
+		as, ok = service.(*arrs.Service)
+		if !ok {
+			s.log.ErrorContext(s.ctx, "SetArrsService: unexpected service type", "type", fmt.Sprintf("%T", service))
+			return
+		}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1161,7 +1174,9 @@ func (s *Service) cleanupFailedItems(ctx context.Context) {
 		}
 	}
 
-	s.broadcaster.BroadcastQueueChanged()
+	if s.broadcaster != nil {
+		s.broadcaster.BroadcastQueueChanged()
+	}
 	s.log.InfoContext(ctx, "Cleaned up stale failed queue items",
 		"count", len(deletedItems),
 		"retention_hours", retentionHours)
@@ -1172,7 +1187,9 @@ func (s *Service) CancelProcessing(itemID int64) error {
 	return s.queueManager.CancelProcessing(itemID)
 }
 
-// ProcessItemInBackground processes a specific queue item in the background
+// ProcessItemInBackground processes a specific queue item in the background.
+// NOTE: This intentionally runs outside the worker pool — it is used for manual retries
+// of specific items and should not compete with the normal import queue workers.
 func (s *Service) ProcessItemInBackground(ctx context.Context, itemID int64) {
 	go func() {
 		s.log.DebugContext(ctx, "Starting background processing of queue item", "item_id", itemID, "background", true)

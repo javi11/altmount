@@ -9,11 +9,21 @@ import (
 	"time"
 
 	"github.com/javi11/altmount/internal/config"
+	"github.com/javi11/altmount/pkg/rclonecli"
 )
 
 // NotifyVFS notifies rclone VFS about file changes
 func (c *Coordinator) NotifyVFS(ctx context.Context, resultingPath string, async bool) {
-	if c.rcloneClient == nil {
+	c.mu.RLock()
+	rcloneClient := c.rcloneClient
+	c.mu.RUnlock()
+
+	c.notifyVFSWith(ctx, rcloneClient, resultingPath, async)
+}
+
+// notifyVFSWith notifies rclone VFS using the provided client (avoids re-locking)
+func (c *Coordinator) notifyVFSWith(ctx context.Context, rcloneClient rclonecli.RcloneRcClient, resultingPath string, async bool) {
+	if rcloneClient == nil {
 		return
 	}
 
@@ -58,7 +68,7 @@ func (c *Coordinator) NotifyVFS(ctx context.Context, resultingPath string, async
 
 		slog.DebugContext(refreshCtx, "Notifying rclone VFS refresh", "dirs", dirsToRefresh, "vfs", vfsName)
 
-		err := c.rcloneClient.RefreshDir(refreshCtx, vfsName, dirsToRefresh)
+		err := rcloneClient.RefreshDir(refreshCtx, vfsName, dirsToRefresh)
 		if err != nil {
 			slog.WarnContext(refreshCtx, "Failed to notify rclone VFS refresh",
 				"dirs", dirsToRefresh,
@@ -78,7 +88,11 @@ func (c *Coordinator) NotifyVFS(ctx context.Context, resultingPath string, async
 
 // RefreshMountPathIfNeeded refreshes the mount path cache if required
 func (c *Coordinator) RefreshMountPathIfNeeded(ctx context.Context, resultingPath string, itemID int64) {
-	if c.rcloneClient == nil {
+	c.mu.RLock()
+	rcloneClient := c.rcloneClient
+	c.mu.RUnlock()
+
+	if rcloneClient == nil {
 		return
 	}
 
@@ -101,7 +115,7 @@ func (c *Coordinator) RefreshMountPathIfNeeded(ctx context.Context, resultingPat
 			}
 
 			// Refresh the root path if the mount path is not found
-			if err := c.rcloneClient.RefreshDir(ctx, vfsName, []string{"/"}); err != nil {
+			if err := rcloneClient.RefreshDir(ctx, vfsName, []string{"/"}); err != nil {
 				c.log.ErrorContext(ctx, "Failed to refresh mount path",
 					"queue_id", itemID,
 					"path", mountPath,

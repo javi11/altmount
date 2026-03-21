@@ -2,6 +2,7 @@ package metadata
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -82,15 +83,19 @@ func (w *BackupWorker) runWorker() {
 			now := time.Now().UTC()
 			parts := strings.Split(cfg.Metadata.Backup.BackupTime, ":")
 			if len(parts) == 2 {
-				hour, _ := strconv.Atoi(parts[0])
-				minute, _ := strconv.Atoi(parts[1])
-
-				target := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, time.UTC)
-				if target.Before(now) || target.Equal(now) {
-					target = target.Add(24 * time.Hour)
+				hour, errH := strconv.Atoi(parts[0])
+				minute, errM := strconv.Atoi(parts[1])
+				if errH != nil || errM != nil {
+					slog.WarnContext(w.workerCtx, "Invalid backup_time format, falling back to interval",
+						"backup_time", cfg.Metadata.Backup.BackupTime, "hour_err", errH, "minute_err", errM)
+				} else {
+					target := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, time.UTC)
+					if target.Before(now) || target.Equal(now) {
+						target = target.Add(24 * time.Hour)
+					}
+					nextRun = target.Sub(now)
+					slog.InfoContext(w.workerCtx, "Scheduled next metadata backup", "at", target.Format("2006-01-02 15:04:05 UTC"), "in", nextRun.String())
 				}
-				nextRun = target.Sub(now)
-				slog.InfoContext(w.workerCtx, "Scheduled next metadata backup", "at", target.Format("2006-01-02 15:04:05 UTC"), "in", nextRun.String())
 			}
 		}
 
@@ -165,7 +170,7 @@ func (w *BackupWorker) performBackup() {
 	})
 
 	if err != nil {
-		if err == context.Canceled {
+		if errors.Is(err, context.Canceled) {
 			slog.InfoContext(w.workerCtx, "Metadata backup canceled")
 		} else {
 			slog.ErrorContext(w.workerCtx, "Failed to complete metadata backup", "error", err)

@@ -19,7 +19,7 @@ import (
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pathutil"
 	"github.com/javi11/altmount/internal/progress"
-	"github.com/sourcegraph/conc"
+	"github.com/sourcegraph/conc/pool"
 )
 
 // ARRsRepairService abstracts the ARR repair operations needed by HealthWorker.
@@ -697,15 +697,15 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 		"total", totalFiles,
 		"max_concurrent_jobs", maxJobs)
 
-	// Process files in parallel using conc
-	wg := conc.NewWaitGroup()
+	// Process files in parallel with bounded concurrency
+	p := pool.New().WithMaxGoroutines(maxJobs)
 	var results []database.HealthStatusUpdate
 	var resultsMu sync.Mutex
 
 	// Process health check files
 	for _, fileHealth := range unhealthyFiles {
 		fh := fileHealth // Capture for closure
-		wg.Go(func() {
+		p.Go(func() {
 			slog.InfoContext(ctx, "Checking unhealthy file", "file_path", fh.FilePath)
 
 			// Set checking status
@@ -749,7 +749,7 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 
 	for _, fileHealth := range repairFiles {
 		fh := fileHealth // Capture for closure
-		wg.Go(func() {
+		p.Go(func() {
 			slog.InfoContext(ctx, "Re-triggering repair for file", "file_path", fh.FilePath)
 
 			updatePtr, sideEffect := hw.prepareRepairNotificationUpdate(ctx, fh)
@@ -773,7 +773,7 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 	}
 
 	// Wait for all files to complete processing
-	wg.Wait()
+	p.Wait()
 
 	// Build list of protected directories (categories and complete dir)
 	cfg = hw.configGetter()
