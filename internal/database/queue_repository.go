@@ -291,6 +291,10 @@ func (r *QueueRepository) UpdateQueueItemStatus(ctx context.Context, id int64, s
 
 // IncrementDailyStat increments the completed or failed count for the current day
 func (r *QueueRepository) IncrementDailyStat(ctx context.Context, statType string) error {
+	if statType != "completed" && statType != "failed" {
+		return fmt.Errorf("invalid stat type: %q (must be \"completed\" or \"failed\")", statType)
+	}
+
 	column := "completed_count"
 	if statType == "failed" {
 		column = "failed_count"
@@ -314,6 +318,10 @@ func (r *QueueRepository) IncrementDailyStat(ctx context.Context, statType strin
 
 // IncrementHourlyStat increments the completed or failed count for the current hour
 func (r *QueueRepository) IncrementHourlyStat(ctx context.Context, statType string) error {
+	if statType != "completed" && statType != "failed" {
+		return fmt.Errorf("invalid stat type: %q (must be \"completed\" or \"failed\")", statType)
+	}
+
 	column := "completed_count"
 	if statType == "failed" {
 		column = "failed_count"
@@ -390,7 +398,7 @@ func (r *QueueRepository) GetImportDailyStats(ctx context.Context, days int) ([]
 		stats = append(stats, &s)
 	}
 
-	return stats, nil
+	return stats, rows.Err()
 }
 
 // GetImportHistory retrieves historical import statistics for the last N days (Alias for GetImportDailyStats)
