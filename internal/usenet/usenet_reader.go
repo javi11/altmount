@@ -160,6 +160,9 @@ func (b *UsenetReader) Close() error {
 			b.rg = nil
 		}
 		b.mu.Unlock()
+
+		// Wake any goroutines that entered cond.Wait() after the initial Broadcast
+		b.cond.Broadcast()
 	})
 
 	return nil

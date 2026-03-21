@@ -1014,8 +1014,8 @@ func (s *Service) OnItemClaimed(ctx context.Context, item *database.ImportQueueI
 // Paths prefixed with "DIR:" indicate a whole directory should be removed; others are individual files.
 func (s *Service) cleanupWrittenPaths(ctx context.Context, itemID int64, paths []string) {
 	for _, p := range paths {
-		if strings.HasPrefix(p, "DIR:") {
-			dirPath := strings.TrimPrefix(p, "DIR:")
+		if after, ok := strings.CutPrefix(p, "DIR:"); ok {
+			dirPath := after
 			if delErr := s.metadataService.DeleteDirectory(dirPath); delErr != nil {
 				s.log.WarnContext(ctx, "Failed to clean up metadata directory after import failure",
 					"queue_id", itemID,
@@ -1345,9 +1345,9 @@ func (s *Service) RegenerateMetadata(ctx context.Context, mountRelativePath stri
 		// Match release name (ignoring .nzb extension and queue ID prefix)
 		// NZBs are stored as "ID_ReleaseName.nzb" or just "ReleaseName.nzb"
 		cleanName := strings.TrimSuffix(filename, ".nzb")
-		if idx := strings.Index(cleanName, "_"); idx != -1 {
+		if _, after, ok := strings.Cut(cleanName, "_"); ok {
 			// Check both with and without prefix
-			if cleanName[idx+1:] == releaseName || cleanName == releaseName {
+			if after == releaseName || cleanName == releaseName {
 				foundNzbPath = path
 				return filepath.SkipAll
 			}
