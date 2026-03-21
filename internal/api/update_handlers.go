@@ -202,16 +202,16 @@ func (s *Server) handleApplyUpdate(c *fiber.Ctx) error {
 		defer cancel()
 
 		image := fmt.Sprintf("ghcr.io/%s/%s:%s", ghRepoOwner, ghRepoName, channel)
-		slog.Info("Starting auto-update", "channel", channel, "image", image, "force", req.Force)
+		slog.InfoContext(ctx, "Starting auto-update", "channel", channel, "image", image, "force", req.Force)
 
 		// 1. Pull the new image
 		cmd := exec.CommandContext(ctx, "docker", "pull", image)
 		output, err := cmd.CombinedOutput()
 		if err != nil {
-			slog.Error("Failed to pull latest image", "error", err, "output", string(output))
+			slog.ErrorContext(ctx, "Failed to pull latest image", "error", err, "output", string(output))
 			return
 		}
-		slog.Info("Successfully pulled latest image", "output", string(output))
+		slog.InfoContext(ctx, "Successfully pulled latest image", "output", string(output))
 
 		// 2. Trigger restart
 		// Note: performRestart only restarts the process. To pick up the new image,

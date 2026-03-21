@@ -1,6 +1,7 @@
 package nzbdav
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -56,7 +57,7 @@ func (p *Parser) Parse() (<-chan *ParsedNzb, <-chan error) {
 				tables = append(tables, name)
 			}
 			tableRows.Close()
-			slog.Info("NZBDav Database Tables", "tables", tables)
+			slog.InfoContext(context.Background(), "NZBDav Database Tables", "tables", tables)
 		}
 
 		// Query ALL files, ordered by ParentId
@@ -85,7 +86,7 @@ func (p *Parser) Parse() (<-chan *ParsedNzb, <-chan error) {
 			return
 		}
 		defer rows.Close()
-		slog.Debug("NZBDav file query completed, starting iteration")
+		slog.DebugContext(context.Background(), "NZBDav file query completed, starting iteration")
 
 		var currentParentId string
 		var currentWriter *io.PipeWriter
@@ -97,7 +98,7 @@ func (p *Parser) Parse() (<-chan *ParsedNzb, <-chan error) {
 			if currentWriter != nil {
 				// Write NZB Footer
 				if _, err := currentWriter.Write([]byte("</nzb>")); err != nil {
-					slog.Error("Failed to write NZB footer", "error", err)
+					slog.ErrorContext(context.Background(), "Failed to write NZB footer", "error", err)
 				}
 				currentWriter.Close()
 				currentWriter = nil
@@ -112,7 +113,7 @@ func (p *Parser) Parse() (<-chan *ParsedNzb, <-chan error) {
 			var segmentIdsJSON, rarPartsJSON, multipartMetadataJSON sql.RawBytes
 
 			if err := rows.Scan(&releaseId, &releaseName, &releasePath, &fileId, &fileName, &fileSize, &segmentIdsJSON, &rarPartsJSON, &multipartMetadataJSON); err != nil {
-				slog.Error("Failed to scan row", "error", err)
+				slog.ErrorContext(context.Background(), "Failed to scan row", "error", err)
 				continue
 			}
 
@@ -142,7 +143,7 @@ func (p *Parser) Parse() (<-chan *ParsedNzb, <-chan error) {
 
 			count++
 			if count%100 == 0 {
-				slog.Info("NZBDav import progress", "files_scanned", count)
+				slog.InfoContext(context.Background(), "NZBDav import progress", "files_scanned", count)
 			}
 
 			// Check if we switched to a new release
@@ -151,7 +152,7 @@ func (p *Parser) Parse() (<-chan *ParsedNzb, <-chan error) {
 
 				currentParentId = releaseId
 				currentExtractedFiles = nil // Reset for new release
-				slog.Debug("Processing new release", "path", releasePath, "name", releaseName)
+				slog.DebugContext(context.Background(), "Processing new release", "path", releasePath, "name", releaseName)
 
 				// Create new pipe for this release
 				pr, pw := io.Pipe()
@@ -183,7 +184,7 @@ func (p *Parser) Parse() (<-chan *ParsedNzb, <-chan error) {
 	</head>
 `
 				if _, err := currentWriter.Write([]byte(header)); err != nil {
-					slog.Error("Failed to write NZB header", "release", releaseName, "error", err)
+					slog.ErrorContext(context.Background(), "Failed to write NZB header", "release", releaseName, "error", err)
 					currentWriter.CloseWithError(err)
 					currentWriter = nil
 					continue
@@ -192,12 +193,12 @@ func (p *Parser) Parse() (<-chan *ParsedNzb, <-chan error) {
 
 			// Write File Entry
 			if err := p.writeFileEntry(currentWriter, fileId, fileName, fileSize, segmentIdsJSON, rarPartsJSON, multipartMetadataJSON); err != nil {
-				slog.Error("Failed to write file entry", "file", fileName, "error", err)
+				slog.ErrorContext(context.Background(), "Failed to write file entry", "file", fileName, "error", err)
 				currentWriter.CloseWithError(err)
 				currentWriter = nil
 			}
 		}
-		slog.Info("NZBDav import scan completed", "total_files", count)
+		slog.InfoContext(context.Background(), "NZBDav import scan completed", "total_files", count)
 	}()
 
 	return out, errChan

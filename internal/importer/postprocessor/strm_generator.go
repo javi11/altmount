@@ -2,14 +2,13 @@ package postprocessor
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/javi11/altmount/internal/auth"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 )
@@ -218,7 +217,7 @@ func (c *Coordinator) CreateSingleStrmFile(ctx context.Context, strmResultingPat
 	}
 
 	// Hash the API key with SHA256
-	hashedKey := hashAPIKey(adminAPIKey)
+	hashedKey := auth.HashAPIKey(adminAPIKey)
 
 	// Determine host to use
 	host := cfg.WebDAV.Host
@@ -245,8 +244,3 @@ func (c *Coordinator) CreateSingleStrmFile(ctx context.Context, strmResultingPat
 	return nil
 }
 
-// hashAPIKey generates a SHA256 hash of the API key for secure comparison
-func hashAPIKey(apiKey string) string {
-	hash := sha256.Sum256([]byte(apiKey))
-	return hex.EncodeToString(hash[:])
-}
