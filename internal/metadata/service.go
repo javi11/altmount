@@ -89,7 +89,7 @@ func (ms *MetadataService) WriteFileMetadata(virtualPath string, metadata *metap
 	if nzbdavId != "" {
 		if err := os.WriteFile(idPath, []byte(nzbdavId), 0644); err != nil {
 			// Log error but don't fail the operation
-			slog.Warn("Failed to write ID sidecar file", "path", idPath, "error", err)
+			slog.WarnContext(context.Background(), "Failed to write ID sidecar file", "path", idPath, "error", err)
 		}
 	} else {
 		// Clean up existing ID file if present
@@ -366,7 +366,7 @@ func (ms *MetadataService) RenameFileMetadata(oldVirtualPath, newVirtualPath str
 			if isCrossDeviceError(err) {
 				_ = copyAndRemoveFile(oldIDPath, newIDPath)
 			} else {
-				slog.Warn("Failed to rename .id sidecar file", "old", oldIDPath, "new", newIDPath, "error", err)
+				slog.WarnContext(context.Background(), "Failed to rename .id sidecar file", "old", oldIDPath, "new", newIDPath, "error", err)
 			}
 		}
 	}
@@ -562,7 +562,7 @@ func (ms *MetadataService) cleanupEmptyDirsRecursive(path string, protected []st
 		if entry.IsDir() {
 			subPath := filepath.Join(path, entry.Name())
 			if err := ms.cleanupEmptyDirsRecursive(subPath, protected); err != nil {
-				slog.Debug("Failed to cleanup sub-directory", "path", subPath, "error", err)
+				slog.DebugContext(context.Background(), "Failed to cleanup sub-directory", "path", subPath, "error", err)
 				isEmpty = false // Keep parent if sub-cleanup failed
 				continue
 			}
@@ -591,7 +591,7 @@ func (ms *MetadataService) cleanupEmptyDirsRecursive(path string, protected []st
 			}
 		}
 
-		slog.Debug("Removing empty metadata directory", "path", path)
+		slog.DebugContext(context.Background(), "Removing empty metadata directory", "path", path)
 		return os.Remove(path)
 	}
 

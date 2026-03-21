@@ -780,6 +780,7 @@ type decrypter struct {
 	limit        int64 // limit of bytes to read, -1 for unlimited
 	open         OpenRangeSeek
 	k            *key
+	ctx          context.Context // stored from Open for use in Seek
 }
 
 // newDecrypter creates a new file handle decrypting on the fly
@@ -839,6 +840,7 @@ func (c *Cipher) newDecrypterSeek(ctx context.Context, open OpenRangeSeek, offse
 		return nil, err
 	}
 	fh.open = open // will be called by fh.RangeSeek
+	fh.ctx = ctx   // store for use in Seek
 	if doRangeSeek {
 		_, err = fh.RangeSeek(ctx, offset, io.SeekStart, limit)
 		if err != nil {
@@ -1029,7 +1031,11 @@ func (fh *decrypter) RangeSeek(ctx context.Context, offset int64, whence int, li
 
 // Seek implements the io.Seeker interface
 func (fh *decrypter) Seek(offset int64, whence int) (int64, error) {
-	return fh.RangeSeek(context.TODO(), offset, whence, -1)
+	ctx := fh.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return fh.RangeSeek(ctx, offset, whence, -1)
 }
 
 // finish sets the final error and tidies up

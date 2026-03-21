@@ -273,5 +273,5 @@ func (c *Client) DownloadNZB(ctx context.Context, downloadURL string) ([]byte, e
 		return nil, fmt.Errorf("prowlarr: download returned status %d: %s", resp.StatusCode, string(body))
 	}
 
-	return io.ReadAll(resp.Body)
+	return io.ReadAll(io.LimitReader(resp.Body, 50*1024*1024))
 }

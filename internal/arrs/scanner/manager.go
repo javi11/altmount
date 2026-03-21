@@ -62,9 +62,9 @@ func (m *Manager) findInstanceForFilePath(ctx context.Context, filePath string, 
 		normalizedPath := filepath.ToSlash(filePath)
 
 		// Check if path contains the complete directory as a segment
-		if idx := strings.Index(normalizedPath, completeSegment); idx != -1 {
+		if _, after, ok := strings.Cut(normalizedPath, completeSegment); ok {
 			// Extract everything after the complete directory segment (e.g., "tv/show/file.mkv")
-			afterPrefix := normalizedPath[idx+len(completeSegment):]
+			afterPrefix := after
 			parts := strings.Split(afterPrefix, "/")
 			if len(parts) > 0 {
 				category := parts[0]

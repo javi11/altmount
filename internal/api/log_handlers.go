@@ -219,7 +219,7 @@ func readNewLogLines(f *os.File, lastPos int64) (int64, []LogEntry) {
 	}
 
 	var entries []LogEntry
-	for _, raw := range bytes.Split(buf[:n], []byte("\n")) {
+	for raw := range bytes.SplitSeq(buf[:n], []byte("\n")) {
 		raw = bytes.TrimSpace(raw)
 		if len(raw) == 0 {
 			continue

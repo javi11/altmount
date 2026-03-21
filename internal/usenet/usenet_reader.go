@@ -139,7 +139,9 @@ func (b *UsenetReader) Close() error {
 			b.rg.CloseSegments()
 		}
 
-		// Wait synchronously with timeout to prevent goroutine leaks
+		// Wait for goroutines with timeout. The cancel() above ensures all
+		// goroutines will eventually terminate, so the waiter goroutine is
+		// not a permanent leak — it cleans up once downloads finish.
 		done := make(chan struct{})
 		go func() {
 			b.wg.Wait()
@@ -148,21 +150,19 @@ func (b *UsenetReader) Close() error {
 
 		select {
 		case <-done:
-			b.mu.Lock()
-			if b.rg != nil {
-				_ = b.rg.Clear()
-				b.rg = nil
-			}
-			b.mu.Unlock()
 		case <-time.After(30 * time.Second):
-			b.log.WarnContext(context.Background(), "Timeout waiting for downloads to complete during close, potential goroutine leak")
-			b.mu.Lock()
-			if b.rg != nil {
-				_ = b.rg.Clear()
-				b.rg = nil
-			}
-			b.mu.Unlock()
+			b.log.WarnContext(b.ctx, "Timeout waiting for downloads to complete during close")
 		}
+
+		b.mu.Lock()
+		if b.rg != nil {
+			_ = b.rg.Clear()
+			b.rg = nil
+		}
+		b.mu.Unlock()
+
+		// Wake any goroutines that entered cond.Wait() after the initial Broadcast
+		b.cond.Broadcast()
 	})
 
 	return nil

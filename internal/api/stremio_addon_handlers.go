@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/subtle"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/javi11/altmount/internal/auth"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/prowlarr"
@@ -125,6 +127,10 @@ func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 	}
 
 	streamType := c.Params("type")
+	if streamType != "movie" && streamType != "series" {
+		return emptyStreamsResponse(c)
+	}
+
 	rawID, _ := url.PathUnescape(c.Params("id"))
 
 	// Parse Stremio ID: tt1234567 (movie) or tt1234567:season:episode (series)
@@ -132,10 +138,18 @@ func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 	parts := strings.SplitN(rawID, ":", 3)
 	imdbID := parts[0]
 	if len(parts) >= 2 {
-		season, _ = strconv.Atoi(parts[1])
+		val, err := strconv.Atoi(parts[1])
+		if err != nil {
+			return emptyStreamsResponse(c)
+		}
+		season = val
 	}
 	if len(parts) >= 3 {
-		episode, _ = strconv.Atoi(parts[2])
+		val, err := strconv.Atoi(parts[2])
+		if err != nil {
+			return emptyStreamsResponse(c)
+		}
+		episode = val
 	}
 
 	if !strings.HasPrefix(imdbID, "tt") {
@@ -463,7 +477,7 @@ func (s *Server) validateDownloadKey(ctx context.Context, key string) bool {
 		if user.APIKey == nil || *user.APIKey == "" {
 			continue
 		}
-		if hashAPIKey(*user.APIKey) == key {
+		if subtle.ConstantTimeCompare([]byte(auth.HashAPIKey(*user.APIKey)), []byte(key)) == 1 {
 			return true
 		}
 	}
