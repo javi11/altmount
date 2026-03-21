@@ -179,6 +179,19 @@ func (w *Worker) cleanupRadarrQueue(ctx context.Context, instance *model.ConfigI
 
 	var idsToRemove []int64
 	for _, q := range queue.Records {
+		// Strategy 1: Ghost detection — cleanup already-imported files
+		if w.checkGhostByImportHistory(ctx, q.OutputPath, cfg, instance.Name, q.Title) {
+			idsToRemove = append(idsToRemove, q.ID)
+			continue
+		}
+
+		// Fallback: path-gone check with safety guards
+		if w.isGhostByPathGone(ctx, q.OutputPath, q.ID, cfg, instance.Name, q.Title) {
+			idsToRemove = append(idsToRemove, q.ID)
+			continue
+		}
+
+		// Strategy 2: Graceful cleanup for blocked/failed imports
 		// Check for completed items with warning status that are pending import
 		if q.Status != "completed" || q.TrackedDownloadStatus != "warning" || (q.TrackedDownloadState != "importPending" && q.TrackedDownloadState != "importBlocked") {
 			continue
@@ -289,36 +302,15 @@ func (w *Worker) cleanupSonarrQueue(ctx context.Context, instance *model.ConfigI
 	var idsToRemove []int64
 	for _, q := range queue.Records {
 		// Strategy 1: Immediate cleanup for already imported files
-		// Check Altmount's import history to see if this file was already processed successfully
-		if q.OutputPath != "" {
-			// Extract mount relative path for history lookup
-			mountPath := cfg.MountPath
-			virtualPath := strings.TrimPrefix(filepath.ToSlash(q.OutputPath), filepath.ToSlash(mountPath))
-			virtualPath = strings.TrimPrefix(virtualPath, "/")
+		if w.checkGhostByImportHistory(ctx, q.OutputPath, cfg, instance.Name, q.Title) {
+			idsToRemove = append(idsToRemove, q.ID)
+			continue
+		}
 
-			if virtualPath != "" {
-				history, err := w.repo.GetImportHistoryByPath(ctx, virtualPath)
-				if err == nil && history != nil {
-					// ONLY cleanup if it has been moved to the library (Sonarr's final step)
-					if history.LibraryPath != nil && *history.LibraryPath != "" {
-						slog.InfoContext(ctx, "Found ghost queue item (confirmed moved to library), cleaning up immediately",
-							"path", q.OutputPath, "library_path", *history.LibraryPath, "title", q.Title, "instance", instance.Name)
-						idsToRemove = append(idsToRemove, q.ID)
-						continue
-					} else {
-						slog.DebugContext(ctx, "Item found in history but not yet moved to library, waiting for Sonarr final step",
-							"path", q.OutputPath, "title", q.Title)
-					}
-				}
-			}
-
-			// Fallback: If not in history, check if the source folder is physically gone (moved by Sonarr)
-			if _, err := os.Stat(q.OutputPath); os.IsNotExist(err) {
-				slog.InfoContext(ctx, "Found ghost queue item (source path already gone), cleaning up immediately",
-					"path", q.OutputPath, "title", q.Title, "instance", instance.Name)
-				idsToRemove = append(idsToRemove, q.ID)
-				continue
-			}
+		// Fallback: path-gone check with safety guards
+		if w.isGhostByPathGone(ctx, q.OutputPath, q.ID, cfg, instance.Name, q.Title) {
+			idsToRemove = append(idsToRemove, q.ID)
+			continue
 		}
 
 		// Strategy 2: Graceful cleanup for blocked/failed imports
@@ -416,6 +408,102 @@ func (w *Worker) cleanupSonarrQueue(ctx context.Context, instance *model.ConfigI
 			"instance", instance.Name, "count", len(idsToRemove))
 	}
 	return nil
+}
+
+// checkGhostByImportHistory checks if a queue item has already been imported
+// by looking up AltMount's import history. Returns true if confirmed ghost
+// (i.e., the file has been moved to the library).
+func (w *Worker) checkGhostByImportHistory(ctx context.Context, outputPath string, cfg *config.Config, instanceName, title string) bool {
+	if outputPath == "" {
+		return false
+	}
+
+	mountPath := cfg.MountPath
+	virtualPath := strings.TrimPrefix(filepath.ToSlash(outputPath), filepath.ToSlash(mountPath))
+	virtualPath = strings.TrimPrefix(virtualPath, "/")
+
+	if virtualPath == "" {
+		return false
+	}
+
+	history, err := w.repo.GetImportHistoryByPath(ctx, virtualPath)
+	if err != nil || history == nil {
+		return false
+	}
+
+	if history.LibraryPath != nil && *history.LibraryPath != "" {
+		slog.InfoContext(ctx, "Found ghost queue item (confirmed moved to library), cleaning up immediately",
+			"path", outputPath, "library_path", *history.LibraryPath, "title", title, "instance", instanceName)
+		return true
+	}
+
+	slog.DebugContext(ctx, "Item found in history but not yet moved to library, waiting for ARR final step",
+		"path", outputPath, "title", title)
+	return false
+}
+
+// isGhostByPathGone checks if a queue item is a ghost by verifying the source
+// path no longer exists. Applies safety checks to avoid false positives from
+// transient FUSE mount issues or broken symlinks.
+func (w *Worker) isGhostByPathGone(ctx context.Context, outputPath string, queueID int64, cfg *config.Config, instanceName, title string) bool {
+	if outputPath == "" {
+		return false
+	}
+
+	// Check if path exists via Stat (follows symlinks)
+	_, statErr := os.Stat(outputPath)
+	if statErr == nil {
+		// Path exists — not a ghost
+		return false
+	}
+	if !os.IsNotExist(statErr) {
+		// Some other error (permission, etc.) — don't assume ghost
+		return false
+	}
+
+	// Broken symlink detection: if outputPath is inside ImportDir, check Lstat.
+	// If Lstat succeeds but Stat fails, it's a broken symlink, not a ghost.
+	if cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
+		importDir := filepath.Clean(*cfg.Import.ImportDir)
+		if strings.HasPrefix(filepath.Clean(outputPath), importDir) {
+			_, lstatErr := os.Lstat(outputPath)
+			if lstatErr == nil {
+				// Lstat succeeds (file entry exists) but Stat fails (target gone) → broken symlink
+				slog.DebugContext(ctx, "Broken symlink detected in import dir, not treating as ghost",
+					"path", outputPath, "title", title, "instance", instanceName)
+				return false
+			}
+		}
+	}
+
+	// Minimum observation window: require the path to be missing for >=60s
+	// to guard against transient FUSE hiccups.
+	ghostKey := fmt.Sprintf("ghost|%s|%d", instanceName, queueID)
+	w.firstSeenMu.Lock()
+	seenTime, exists := w.firstSeen[ghostKey]
+	if !exists {
+		w.firstSeen[ghostKey] = time.Now()
+		w.firstSeenMu.Unlock()
+		slog.DebugContext(ctx, "First time seeing path gone, starting observation window",
+			"path", outputPath, "title", title, "instance", instanceName)
+		return false
+	}
+	w.firstSeenMu.Unlock()
+
+	const ghostObservationWindow = 60 * time.Second
+	if time.Since(seenTime) < ghostObservationWindow {
+		return false
+	}
+
+	// Clean up tracking entry
+	w.firstSeenMu.Lock()
+	delete(w.firstSeen, ghostKey)
+	w.firstSeenMu.Unlock()
+
+	slog.WarnContext(ctx, "Found ghost queue item (source path gone after observation window), cleaning up",
+		"path", outputPath, "title", title, "instance", instanceName,
+		"missing_duration", time.Since(seenTime))
+	return true
 }
 
 func (w *Worker) isPathManaged(path string, cfg *config.Config) bool {
