@@ -895,6 +895,21 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 							slog.WarnContext(ctx, "Skipped orphaned file deletion: not a symlink", "path", file)
 							continue
 						}
+
+						// Protect symlinks that have import history (AltMount imported this file)
+						target, readlinkErr := os.Readlink(file)
+						if readlinkErr == nil {
+							mountRelPath := strings.TrimPrefix(filepath.ToSlash(target), filepath.ToSlash(cfg.MountPath))
+							mountRelPath = strings.TrimPrefix(mountRelPath, "/")
+							if mountRelPath != "" {
+								hasHistory, checkErr := lsw.healthRepo.HasImportHistoryForPath(ctx, mountRelPath)
+								if checkErr == nil && hasHistory {
+									slog.InfoContext(ctx, "Skipping orphaned symlink deletion: import history exists for this file",
+										"path", file, "virtual_path", mountRelPath)
+									continue
+								}
+							}
+						}
 					} else if cfg.Import.ImportStrategy == config.ImportStrategySTRM {
 						// Only delete if it's actually a .strm file
 						if !strings.HasSuffix(strings.ToLower(file), ".strm") {

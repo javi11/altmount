@@ -1766,3 +1766,19 @@ func (r *HealthRepository) GetFilesForLibrarySync(ctx context.Context) ([]*FileH
 
 	return files, nil
 }
+
+// HasImportHistoryForPath checks if any import history record exists for the
+// given virtual path. Used to protect symlinks from deletion when an import
+// has been recorded by AltMount, regardless of current metadata state.
+func (r *HealthRepository) HasImportHistoryForPath(ctx context.Context, virtualPath string) (bool, error) {
+	query := `SELECT 1 FROM import_history WHERE TRIM(virtual_path, '/') = TRIM(?, '/') LIMIT 1`
+	var exists int
+	err := r.db.QueryRowContext(ctx, query, virtualPath).Scan(&exists)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to check import history for path: %w", err)
+	}
+	return true, nil
+}
