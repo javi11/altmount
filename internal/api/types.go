@@ -343,7 +343,8 @@ type QueueItemResponse struct {
 	BatchID      *string                `json:"batch_id"`
 	Metadata     *string                `json:"metadata"`
 	FileSize     *int64                 `json:"file_size"`
-	Percentage   *int                   `json:"percentage,omitempty"` // Progress percentage (0-100), only for items being processed
+	Percentage   *int                   `json:"percentage,omitempty"`    // Progress percentage (0-100), only for items being processed
+	StoragePath  *string                `json:"storage_path,omitempty"` // Internal FUSE mount path (populated after completion)
 }
 
 // QueueListRequest represents request parameters for listing queue items
@@ -604,6 +605,7 @@ func ToQueueItemResponse(item *database.ImportQueueItem) *QueueItemResponse {
 		BatchID:      item.BatchID,
 		Metadata:     item.Metadata,
 		FileSize:     item.FileSize,
+		StoragePath:  item.StoragePath,
 	}
 }
 

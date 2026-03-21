@@ -5,6 +5,7 @@ import {
 	ChevronUp,
 	Download,
 	FileCode,
+	Link2,
 	MoreVertical,
 	PlayCircle,
 	Trash2,
@@ -24,9 +25,11 @@ interface QueueItemCardProps {
 	onCancel: (id: number) => void;
 	onDelete: (id: number) => void;
 	onDownload: (id: number) => void;
+	onRegenerateSymlink?: (storagePath: string) => void;
 	isRetryPending: boolean;
 	isCancelPending: boolean;
 	isDeletePending: boolean;
+	isRegenerateSymlinkPending?: boolean;
 }
 
 export const QueueItemCard = memo(function QueueItemCard({
@@ -37,9 +40,11 @@ export const QueueItemCard = memo(function QueueItemCard({
 	onCancel,
 	onDelete,
 	onDownload,
+	onRegenerateSymlink,
 	isRetryPending,
 	isCancelPending,
 	isDeletePending,
+	isRegenerateSymlinkPending,
 }: QueueItemCardProps) {
 	const [isExpanded, setIsExpanded] = useState(false);
 
@@ -126,6 +131,20 @@ export const QueueItemCard = memo(function QueueItemCard({
 									Download NZB
 								</button>
 							</li>
+							{item.status === QueueStatus.COMPLETED &&
+								item.storage_path &&
+								onRegenerateSymlink && (
+									<li>
+										<button
+											type="button"
+											onClick={() => onRegenerateSymlink(item.storage_path as string)}
+											disabled={isRegenerateSymlinkPending}
+										>
+											<Link2 className="h-4 w-4 text-primary" />
+											Regenerate Symlink
+										</button>
+									</li>
+								)}
 							<div className="divider my-1 text-base-content/70" />
 							{item.status !== QueueStatus.PROCESSING && (
 								<li>

@@ -15,9 +15,11 @@ interface FileListProps {
 	onInfo: (path: string) => void;
 	onExportNZB?: (path: string, filename: string) => void;
 	onPreview?: (file: WebDAVFile, currentPath: string) => void;
+	onRegenerateSymlink?: (path: string) => void;
 	isDownloading?: boolean;
 	isDeleting?: boolean;
 	isExportingNZB?: boolean;
+	isRegenerateSymlinkPending?: boolean;
 }
 
 // Virtual scrolling constants - Responsive heights for better mobile UX
@@ -49,9 +51,11 @@ export function FileList({
 	onInfo,
 	onExportNZB,
 	onPreview,
+	onRegenerateSymlink,
 	isDownloading = false,
 	isDeleting = false,
 	isExportingNZB = false,
+	isRegenerateSymlinkPending = false,
 }: FileListProps) {
 	const [containerDimensions, setContainerDimensions] = useState({ width: 0, height: 0 });
 	const [scrollTop, setScrollTop] = useState(0);
@@ -195,7 +199,9 @@ export function FileList({
 						formatFileSize={formatFileSize}
 						handleItemClick={handleItemClick}
 						onExportNZB={onExportNZB}
+						onRegenerateSymlink={onRegenerateSymlink}
 						isExportingNZB={isExportingNZB}
+						isRegenerateSymlinkPending={isRegenerateSymlinkPending}
 					/>
 				))}
 			</div>
@@ -238,8 +244,12 @@ export function FileList({
 								onDelete={onDelete}
 								onInfo={onInfo}
 								onPreview={onPreview}
+								onExportNZB={onExportNZB}
+								onRegenerateSymlink={onRegenerateSymlink}
 								isDownloading={isDownloading}
 								isDeleting={isDeleting}
+								isExportingNZB={isExportingNZB}
+								isRegenerateSymlinkPending={isRegenerateSymlinkPending}
 								getFileIcon={getFileIcon}
 								formatFileSize={formatFileSize}
 								handleItemClick={handleItemClick}
@@ -267,7 +277,9 @@ interface FileCardProps {
 	formatFileSize: (bytes: number) => string;
 	handleItemClick: (file: WebDAVFile) => void;
 	onExportNZB?: (path: string, filename: string) => void;
+	onRegenerateSymlink?: (path: string) => void;
 	isExportingNZB?: boolean;
+	isRegenerateSymlinkPending?: boolean;
 	itemHeight?: number;
 }
 
@@ -284,7 +296,9 @@ function FileCard({
 	formatFileSize,
 	handleItemClick,
 	onExportNZB,
+	onRegenerateSymlink,
 	isExportingNZB,
+	isRegenerateSymlinkPending,
 	itemHeight = 200,
 }: FileCardProps) {
 	return (
@@ -337,9 +351,11 @@ function FileCard({
 						onInfo={onInfo}
 						onExportNZB={onExportNZB}
 						onPreview={onPreview}
+						onRegenerateSymlink={onRegenerateSymlink}
 						isDownloading={isDownloading}
 						isDeleting={isDeleting}
 						isExportingNZB={isExportingNZB}
+						isRegenerateSymlinkPending={isRegenerateSymlinkPending}
 					/>
 				</div>
 

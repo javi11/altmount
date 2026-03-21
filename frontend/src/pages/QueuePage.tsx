@@ -13,6 +13,7 @@ import {
 	FileCode,
 	Filter,
 	Import,
+	Link2,
 	List,
 	MoreVertical,
 	PlayCircle,
@@ -43,6 +44,7 @@ import {
 	useDeleteQueueItem,
 	useQueue,
 	useQueueStats,
+	useRegenerateSymlinks,
 	useRestartBulkQueueItems,
 	useRetryQueueItem,
 	useUpdateQueueItemPriority,
@@ -123,6 +125,7 @@ export function QueuePage() {
 	const clearFailed = useClearFailedQueue();
 	const clearPending = useClearPendingQueue();
 	const addTestQueueItem = useAddTestQueueItem();
+	const regenerateSymlinks = useRegenerateSymlinks();
 	const { confirmDelete, confirmAction } = useConfirm();
 
 	const handleDelete = useCallback(
@@ -180,6 +183,24 @@ export function QueuePage() {
 			console.error("Failed to download NZB:", error);
 		}
 	};
+
+	const handleRegenerateSymlink = useCallback(
+		async (storagePath: string) => {
+			const confirmed = await confirmAction(
+				"Regenerate Symlink",
+				"Are you sure you want to regenerate the symlink for this item? This will recreate the library file link.",
+				{
+					type: "info",
+					confirmText: "Regenerate",
+					confirmButtonClass: "btn-primary",
+				},
+			);
+			if (confirmed) {
+				await regenerateSymlinks.mutateAsync([storagePath]);
+			}
+		},
+		[confirmAction, regenerateSymlinks],
+	);
 
 	const handleSetPriority = async (id: number, priority: 1 | 2 | 3) => {
 		await updatePriority.mutateAsync({ id, priority });
@@ -518,7 +539,7 @@ export function QueuePage() {
 										Search
 									</h3>
 									<div className="relative">
-										<Search className="-translate-y-1/2 absolute top-1/2 left-3 h-3.5 w-3.5 text-base-content/60" />
+										<Search className="absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2 text-base-content/60" />
 										<input
 											type="text"
 											placeholder="Find item..."
@@ -616,9 +637,11 @@ export function QueuePage() {
 														onCancel={handleCancel}
 														onDelete={handleDelete}
 														onDownload={handleDownload}
+														onRegenerateSymlink={handleRegenerateSymlink}
 														isRetryPending={retryItem.isPending}
 														isCancelPending={cancelItem.isPending}
 														isDeletePending={deleteItem.isPending}
+														isRegenerateSymlinkPending={regenerateSymlinks.isPending}
 													/>
 												))}
 											</div>
@@ -885,6 +908,21 @@ export function QueuePage() {
 																					Download NZB
 																				</button>
 																			</li>
+																			{item.status === QueueStatus.COMPLETED &&
+																				item.storage_path && (
+																					<li>
+																						<button
+																							type="button"
+																							onClick={() =>
+																								handleRegenerateSymlink(item.storage_path as string)
+																							}
+																							disabled={regenerateSymlinks.isPending}
+																						>
+																							<Link2 className="h-4 w-4 text-primary" />
+																							Regenerate Symlink
+																						</button>
+																					</li>
+																				)}
 																			<div className="divider my-1 text-base-content/70" />
 																			{item.status !== QueueStatus.PROCESSING && (
 																				<li>
