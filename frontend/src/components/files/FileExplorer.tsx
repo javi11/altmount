@@ -10,7 +10,7 @@ import {
 	X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { useImportHistory } from "../../hooks/useApi";
+import { useImportHistory, useRegenerateSymlinks } from "../../hooks/useApi";
 import { useFilePreview } from "../../hooks/useFilePreview";
 import { useWebDAVDirectory, useWebDAVFileOperations } from "../../hooks/useWebDAV";
 import type { WebDAVFile } from "../../types/webdav";
@@ -113,6 +113,7 @@ export function FileExplorer({
 	} = useWebDAVFileOperations();
 
 	const preview = useFilePreview();
+	const regenerateSymlinks = useRegenerateSymlinks();
 
 	// Filter files based on search term
 	const filteredFiles = useMemo(() => {
@@ -152,6 +153,10 @@ export function FileExplorer({
 
 	const handleExportNZB = (path: string, filename: string) => {
 		exportNZB({ path, filename });
+	};
+
+	const handleRegenerateSymlink = (path: string) => {
+		regenerateSymlinks.mutate([path]);
 	};
 
 	const handleFileInfo = (path: string) => {
@@ -409,9 +414,11 @@ export function FileExplorer({
 								onInfo={handleFileInfo}
 								onExportNZB={handleExportNZB}
 								onPreview={preview.openPreview}
+								onRegenerateSymlink={handleRegenerateSymlink}
 								isDownloading={isDownloading}
 								isDeleting={isDeleting}
 								isExportingNZB={isExportingNZB}
+								isRegenerateSymlinkPending={regenerateSymlinks.isPending}
 							/>
 						)
 					) : null}

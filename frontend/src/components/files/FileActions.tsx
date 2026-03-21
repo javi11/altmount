@@ -1,4 +1,4 @@
-import { Download, Eye, FileDown, Info, MoreHorizontal, Trash2 } from "lucide-react";
+import { Download, Eye, FileDown, Info, Link2, MoreHorizontal, Trash2 } from "lucide-react";
 import { useConfirm } from "../../contexts/ModalContext";
 import type { WebDAVFile } from "../../types/webdav";
 import { getFileTypeInfo } from "../../utils/fileUtils";
@@ -11,9 +11,11 @@ interface FileActionsProps {
 	onInfo: (path: string) => void;
 	onExportNZB?: (path: string, filename: string) => void;
 	onPreview?: (file: WebDAVFile, currentPath: string) => void;
+	onRegenerateSymlink?: (path: string) => void;
 	isDownloading?: boolean;
 	isDeleting?: boolean;
 	isExportingNZB?: boolean;
+	isRegenerateSymlinkPending?: boolean;
 }
 
 export function FileActions({
@@ -24,9 +26,11 @@ export function FileActions({
 	onInfo,
 	onExportNZB,
 	onPreview,
+	onRegenerateSymlink,
 	isDownloading = false,
 	isDeleting = false,
 	isExportingNZB = false,
+	isRegenerateSymlinkPending = false,
 }: FileActionsProps) {
 	const filePath = currentPath
 		? `${currentPath}/${file.basename}`.replace(/\/+/g, "/")
@@ -59,6 +63,12 @@ export function FileActions({
 	const handlePreview = () => {
 		if (file.type === "file" && onPreview) {
 			onPreview(file, currentPath);
+		}
+	};
+
+	const handleRegenerateSymlink = () => {
+		if (file.type === "file" && onRegenerateSymlink) {
+			onRegenerateSymlink(filePath);
 		}
 	};
 
@@ -103,6 +113,18 @@ export function FileActions({
 						<button type="button" onClick={handleExportNZB} disabled={isExportingNZB}>
 							<FileDown className="h-4 w-4" />
 							{isExportingNZB ? "Exporting..." : "Export as NZB"}
+						</button>
+					</li>
+				)}
+				{file.type === "file" && onRegenerateSymlink && (
+					<li>
+						<button
+							type="button"
+							onClick={handleRegenerateSymlink}
+							disabled={isRegenerateSymlinkPending}
+						>
+							<Link2 className="h-4 w-4 text-primary" />
+							{isRegenerateSymlinkPending ? "Regenerating..." : "Regenerate Symlink"}
 						</button>
 					</li>
 				)}
