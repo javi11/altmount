@@ -159,15 +159,15 @@ func newErrNoAllowedFiles(rarContents []Content, allowedExtensions []string) err
 
 // hasAllowedFiles checks if any files within RAR archive contents match allowed extensions
 // If allowedExtensions is empty, all file types are allowed
-func hasAllowedFiles(rarContents []Content, allowedExtensions []string) bool {
+func hasAllowedFiles(rarContents []Content, allowedExtensions []string, filterSamples bool) bool {
 	for _, content := range rarContents {
 		// Skip directories
 		if content.IsDirectory {
 			continue
 		}
 		// Check both the internal path and filename
-		if utils.IsAllowedFile(content.InternalPath, content.Size, allowedExtensions) ||
-			utils.IsAllowedFile(content.Filename, content.Size, allowedExtensions) {
+		if utils.IsAllowedFile(content.InternalPath, content.Size, allowedExtensions, filterSamples) ||
+			utils.IsAllowedFile(content.Filename, content.Size, allowedExtensions, filterSamples) {
 			return true
 		}
 	}
@@ -196,6 +196,7 @@ func ProcessArchive(
 	maxPrefetch int,
 	readTimeout time.Duration,
 	expandBlurayIso bool,
+	filterSamples bool,
 ) error {
 	if len(archiveFiles) == 0 {
 		return nil
@@ -243,7 +244,7 @@ func ProcessArchive(
 	}
 
 	// Validate file extensions before processing
-	if !hasAllowedFiles(rarContents, allowedFileExtensions) {
+	if !hasAllowedFiles(rarContents, allowedFileExtensions, filterSamples) {
 		err := newErrNoAllowedFiles(rarContents, allowedFileExtensions)
 		slog.WarnContext(ctx, "RAR archive contains no files with allowed extensions", "error", err)
 		return err
@@ -267,8 +268,8 @@ func ProcessArchive(
 	// Only do this if there's exactly one media file in the archive
 	mediaFilesCount := 0
 	for _, content := range rarContents {
-		if !content.IsDirectory && (utils.IsAllowedFile(content.InternalPath, content.Size, allowedFileExtensions) ||
-			utils.IsAllowedFile(content.Filename, content.Size, allowedFileExtensions)) {
+		if !content.IsDirectory && (utils.IsAllowedFile(content.InternalPath, content.Size, allowedFileExtensions, filterSamples) ||
+			utils.IsAllowedFile(content.Filename, content.Size, allowedFileExtensions, filterSamples)) {
 			mediaFilesCount++
 		}
 	}
@@ -296,8 +297,8 @@ func ProcessArchive(
 		baseFilename := filepath.Base(normalizedInternalPath)
 
 		// Double check if this specific file is allowed
-		if !utils.IsAllowedFile(rarContent.InternalPath, rarContent.Size, allowedFileExtensions) &&
-			!utils.IsAllowedFile(rarContent.Filename, rarContent.Size, allowedFileExtensions) {
+		if !utils.IsAllowedFile(rarContent.InternalPath, rarContent.Size, allowedFileExtensions, filterSamples) &&
+			!utils.IsAllowedFile(rarContent.Filename, rarContent.Size, allowedFileExtensions, filterSamples) {
 			continue
 		}
 
@@ -315,8 +316,8 @@ func ProcessArchive(
 			slog.InfoContext(ctx, "Renaming ISO-expanded file using NZB release name",
 				"original", rarContent.Filename,
 				"renamed", baseFilename)
-		} else if shouldNormalizeName && (utils.IsAllowedFile(rarContent.InternalPath, rarContent.Size, allowedFileExtensions) ||
-			utils.IsAllowedFile(rarContent.Filename, rarContent.Size, allowedFileExtensions)) {
+		} else if shouldNormalizeName && (utils.IsAllowedFile(rarContent.InternalPath, rarContent.Size, allowedFileExtensions, filterSamples) ||
+			utils.IsAllowedFile(rarContent.Filename, rarContent.Size, allowedFileExtensions, filterSamples)) {
 			// Normalize filename to match NZB if it's the only media file (non-ISO archives)
 			baseFilename = normalizeArchiveReleaseFilename(nzbName, baseFilename)
 			slog.InfoContext(ctx, "Normalizing obfuscated filename in RAR archive",
