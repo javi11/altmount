@@ -49,8 +49,3 @@ type Content struct {
 	// Zero means this Content did not come from an ISO.
 	ISOExpansionIndex int `json:"iso_expansion_index,omitempty"`
 }
-
-type ValidationOpts struct {
-	AllowFileRenaming    bool
-	FilterSampleAndProof bool
-}
