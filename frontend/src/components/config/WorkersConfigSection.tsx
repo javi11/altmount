@@ -240,6 +240,48 @@ export function ImportConfigSection({
 								</span>
 							</div>
 						</label>
+
+						<div className="divider text-base-content/70" />
+
+						<label className="label cursor-pointer items-start justify-start gap-4">
+							<input
+								type="checkbox"
+								className="toggle toggle-primary toggle-sm mt-1 shrink-0"
+								checked={formData.rename_to_nzb_name ?? true}
+								disabled={isReadOnly}
+								onChange={(e) => handleInputChange("rename_to_nzb_name", e.target.checked)}
+							/>
+							<div className="min-w-0 flex-1">
+								<span className="block whitespace-normal break-words font-bold text-xs">
+									Rename to NZB Name
+								</span>
+								<span className="mt-1 block whitespace-normal break-words text-base-content/50 text-xs leading-relaxed">
+									When an import produces a single file, rename it using the NZB release name
+									instead of the original (often obfuscated) filename.
+								</span>
+							</div>
+						</label>
+
+						<div className="divider text-base-content/70" />
+
+						<label className="label cursor-pointer items-start justify-start gap-4">
+							<input
+								type="checkbox"
+								className="toggle toggle-primary toggle-sm mt-1 shrink-0"
+								checked={formData.filter_sample_files ?? true}
+								disabled={isReadOnly}
+								onChange={(e) => handleInputChange("filter_sample_files", e.target.checked)}
+							/>
+							<div className="min-w-0 flex-1">
+								<span className="block whitespace-normal break-words font-bold text-xs">
+									Filter Sample Files
+								</span>
+								<span className="mt-1 block whitespace-normal break-words text-base-content/50 text-xs leading-relaxed">
+									Automatically reject files that appear to be samples or proofs (e.g.,
+									movie.sample.mkv). Files larger than 200MB are never filtered.
+								</span>
+							</div>
+						</label>
 					</div>
 				</div>
 

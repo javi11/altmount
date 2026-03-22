@@ -157,15 +157,15 @@ func newErrNoAllowedFiles(sevenZipContents []Content, allowedExtensions []string
 
 // hasAllowedFiles checks if any files within 7zip archive contents match allowed extensions
 // If allowedExtensions is empty, all file types are allowed
-func hasAllowedFiles(sevenZipContents []Content, allowedExtensions []string) bool {
+func hasAllowedFiles(sevenZipContents []Content, allowedExtensions []string, filterSamples bool) bool {
 	for _, content := range sevenZipContents {
 		// Skip directories
 		if content.IsDirectory {
 			continue
 		}
 		// Check both the internal path and filename
-		if utils.IsAllowedFile(content.InternalPath, content.Size, allowedExtensions) ||
-			utils.IsAllowedFile(content.Filename, content.Size, allowedExtensions) {
+		if utils.IsAllowedFile(content.InternalPath, content.Size, allowedExtensions, filterSamples) ||
+			utils.IsAllowedFile(content.Filename, content.Size, allowedExtensions, filterSamples) {
 			return true
 		}
 	}
@@ -194,6 +194,7 @@ func ProcessArchive(
 	maxPrefetch int,
 	readTimeout time.Duration,
 	expandBlurayIso bool,
+	filterSamples bool,
 ) error {
 	if len(archiveFiles) == 0 {
 		return nil
@@ -220,7 +221,7 @@ func ProcessArchive(
 	}
 
 	// Validate file extensions before processing
-	if !hasAllowedFiles(sevenZipContents, allowedFileExtensions) {
+	if !hasAllowedFiles(sevenZipContents, allowedFileExtensions, filterSamples) {
 		err := newErrNoAllowedFiles(sevenZipContents, allowedFileExtensions)
 		slog.WarnContext(ctx, "7zip archive contains no files with allowed extensions", "error", err)
 		return err
@@ -244,8 +245,8 @@ func ProcessArchive(
 	// Only do this if there's exactly one media file in the archive
 	mediaFilesCount := 0
 	for _, content := range sevenZipContents {
-		if !content.IsDirectory && (utils.IsAllowedFile(content.InternalPath, content.Size, allowedFileExtensions) ||
-			utils.IsAllowedFile(content.Filename, content.Size, allowedFileExtensions)) {
+		if !content.IsDirectory && (utils.IsAllowedFile(content.InternalPath, content.Size, allowedFileExtensions, filterSamples) ||
+			utils.IsAllowedFile(content.Filename, content.Size, allowedFileExtensions, filterSamples)) {
 			mediaFilesCount++
 		}
 	}
@@ -273,8 +274,8 @@ func ProcessArchive(
 		baseFilename := filepath.Base(normalizedInternalPath)
 
 		// Double check if this specific file is allowed
-		if !utils.IsAllowedFile(sevenZipContent.InternalPath, sevenZipContent.Size, allowedFileExtensions) &&
-			!utils.IsAllowedFile(sevenZipContent.Filename, sevenZipContent.Size, allowedFileExtensions) {
+		if !utils.IsAllowedFile(sevenZipContent.InternalPath, sevenZipContent.Size, allowedFileExtensions, filterSamples) &&
+			!utils.IsAllowedFile(sevenZipContent.Filename, sevenZipContent.Size, allowedFileExtensions, filterSamples) {
 			continue
 		}
 
@@ -292,8 +293,8 @@ func ProcessArchive(
 			slog.InfoContext(ctx, "Renaming ISO-expanded file using NZB release name",
 				"original", sevenZipContent.Filename,
 				"renamed", baseFilename)
-		} else if shouldNormalizeName && (utils.IsAllowedFile(sevenZipContent.InternalPath, sevenZipContent.Size, allowedFileExtensions) ||
-			utils.IsAllowedFile(sevenZipContent.Filename, sevenZipContent.Size, allowedFileExtensions)) {
+		} else if shouldNormalizeName && (utils.IsAllowedFile(sevenZipContent.InternalPath, sevenZipContent.Size, allowedFileExtensions, filterSamples) ||
+			utils.IsAllowedFile(sevenZipContent.Filename, sevenZipContent.Size, allowedFileExtensions, filterSamples)) {
 			// Normalize filename to match NZB if it's the only media file (non-ISO archives)
 			baseFilename = normalizeArchiveReleaseFilename(nzbName, baseFilename)
 			slog.InfoContext(ctx, "Normalizing obfuscated filename in 7zip archive",

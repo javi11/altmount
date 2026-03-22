@@ -46,6 +46,8 @@ type Processor struct {
 	readTimeout             time.Duration // Read timeout for Usenet data (used by ISO reader)
 	allowedFileExtensions   []string
 	expandBlurayIso         bool // Whether to expand Bluray ISO files inside archives
+	renameToNzbName         bool // Whether to rename single-file imports to the NZB release name
+	filterSampleFiles       bool // Whether to filter out sample/proof files during import
 	log                     *slog.Logger
 	broadcaster             *progress.ProgressBroadcaster // WebSocket progress broadcaster
 	recorder                HistoryRecorder
@@ -56,7 +58,7 @@ type Processor struct {
 }
 
 // NewProcessor creates a new NZB processor using metadata storage
-func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Manager, maxImportConnections int, segmentSamplePercentage int, allowedFileExtensions []string, maxDownloadPrefetch int, readTimeout time.Duration, broadcaster *progress.ProgressBroadcaster, configGetter config.ConfigGetter, recorder HistoryRecorder, allowNestedRarExtraction bool, expandBlurayIso bool) *Processor {
+func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Manager, maxImportConnections int, segmentSamplePercentage int, allowedFileExtensions []string, maxDownloadPrefetch int, readTimeout time.Duration, broadcaster *progress.ProgressBroadcaster, configGetter config.ConfigGetter, recorder HistoryRecorder, allowNestedRarExtraction bool, expandBlurayIso bool, renameToNzbName bool, filterSampleFiles bool) *Processor {
 	return &Processor{
 		parser:                  parser.NewParser(poolManager),
 		strmParser:              parser.NewStrmParser(),
@@ -72,6 +74,8 @@ func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Ma
 		readTimeout:             readTimeout,
 		allowedFileExtensions:   allowedFileExtensions,
 		expandBlurayIso:         expandBlurayIso,
+		renameToNzbName:         renameToNzbName,
+		filterSampleFiles:       filterSampleFiles,
 		log:                     slog.Default().With("component", "nzb-processor"),
 		broadcaster:             broadcaster,
 		recorder:                recorder,
@@ -352,12 +356,14 @@ func (proc *Processor) processSingleFile(
 
 	// Rename the file to match the NZB name to handle obfuscated filenames
 	// Keep NZB-provided subfolders but rename the leaf to the release name (preventing duplicate extensions)
-	originalDir := filepath.Dir(regularFiles[0].Filename)
-	normalizedBase := normalizeReleaseFilename(nzbName, filepath.Base(regularFiles[0].Filename))
-	if originalDir != "." && originalDir != "" {
-		regularFiles[0].Filename = filepath.Join(originalDir, normalizedBase)
-	} else {
-		regularFiles[0].Filename = normalizedBase
+	if proc.renameToNzbName {
+		originalDir := filepath.Dir(regularFiles[0].Filename)
+		normalizedBase := normalizeReleaseFilename(nzbName, filepath.Base(regularFiles[0].Filename))
+		if originalDir != "." && originalDir != "" {
+			regularFiles[0].Filename = filepath.Join(originalDir, normalizedBase)
+		} else {
+			regularFiles[0].Filename = normalizedBase
+		}
 	}
 
 	// Compute final parent/name, flattening only redundant nesting like file.mkv/file.mkv
@@ -395,6 +401,7 @@ func (proc *Processor) processSingleFile(
 		allowedExtensions,
 		timeout,
 		fileTracker,
+		proc.filterSampleFiles,
 	)
 	var writtenPaths []string
 	if writtenPath != "" {
@@ -447,12 +454,14 @@ func (proc *Processor) processMultiFile(
 
 	if singleLike {
 		// Rename the leaf to the release name (prevents ext duplication) but keep NZB-provided subfolders.
-		originalDir := filepath.Dir(regularFiles[0].Filename)
-		normalizedBase := normalizeReleaseFilename(nzbName, filepath.Base(regularFiles[0].Filename))
-		if originalDir != "." && originalDir != "" {
-			regularFiles[0].Filename = filepath.Join(originalDir, normalizedBase)
-		} else {
-			regularFiles[0].Filename = normalizedBase
+		if proc.renameToNzbName {
+			originalDir := filepath.Dir(regularFiles[0].Filename)
+			normalizedBase := normalizeReleaseFilename(nzbName, filepath.Base(regularFiles[0].Filename))
+			if originalDir != "." && originalDir != "" {
+				regularFiles[0].Filename = filepath.Join(originalDir, normalizedBase)
+			} else {
+				regularFiles[0].Filename = normalizedBase
+			}
 		}
 
 		// Avoid nesting like /Season 02/<release>/<release>.mkv; drop the NZB-named folder here.
@@ -498,6 +507,7 @@ func (proc *Processor) processMultiFile(
 		allowedExtensions,
 		timeout,
 		fileTracker,
+		proc.filterSampleFiles,
 	)
 	if err != nil {
 		return "", writtenPaths, err
@@ -571,6 +581,7 @@ func (proc *Processor) processRarArchive(
 			allowedExtensions,
 			proc.validationTimeout,
 			nil, // No progress tracker for pre-archive regular files
+			proc.filterSampleFiles,
 		); err != nil {
 			slog.DebugContext(ctx, "Failed to process regular files", "error", err)
 		}
@@ -609,6 +620,7 @@ func (proc *Processor) processRarArchive(
 			proc.maxDownloadPrefetch,
 			proc.readTimeout,
 			proc.expandBlurayIso,
+			proc.filterSampleFiles,
 		)
 		if err != nil {
 			return nzbFolder, writtenPaths, err
@@ -685,6 +697,7 @@ func (proc *Processor) processSevenZipArchive(
 			allowedExtensions,
 			proc.validationTimeout,
 			nil, // No progress tracker for pre-archive regular files
+			proc.filterSampleFiles,
 		); err != nil {
 			slog.DebugContext(ctx, "Failed to process regular files", "error", err)
 		}
@@ -722,6 +735,7 @@ func (proc *Processor) processSevenZipArchive(
 			proc.maxDownloadPrefetch,
 			proc.readTimeout,
 			proc.expandBlurayIso,
+			proc.filterSampleFiles,
 		)
 		if err != nil {
 			return nzbFolder, writtenPaths, err

@@ -208,9 +208,17 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 	if currentConfig.Import.ExpandBlurayIso != nil {
 		expandBlurayIso = *currentConfig.Import.ExpandBlurayIso
 	}
+	renameToNzbName := true
+	if currentConfig.Import.RenameToNzbName != nil {
+		renameToNzbName = *currentConfig.Import.RenameToNzbName
+	}
+	filterSampleFiles := true
+	if currentConfig.Import.FilterSampleFiles != nil {
+		filterSampleFiles = *currentConfig.Import.FilterSampleFiles
+	}
 
 	// Create processor with poolManager for dynamic pool access
-	processor := NewProcessor(metadataService, poolManager, maxImportConnections, segmentSamplePercentage, allowedFileExtensions, maxDownloadPrefetch, readTimeout, broadcaster, configGetter, nil, allowNestedRarExtraction, expandBlurayIso)
+	processor := NewProcessor(metadataService, poolManager, maxImportConnections, segmentSamplePercentage, allowedFileExtensions, maxDownloadPrefetch, readTimeout, broadcaster, configGetter, nil, allowNestedRarExtraction, expandBlurayIso, renameToNzbName, filterSampleFiles)
 
 	ctx, cancel := context.WithCancel(context.Background())
 

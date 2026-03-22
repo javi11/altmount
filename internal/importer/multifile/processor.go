@@ -41,12 +41,13 @@ func ProcessRegularFiles(
 	allowedFileExtensions []string,
 	timeout time.Duration,
 	tracker *progress.Tracker,
+	filterSamples bool,
 ) ([]string, error) {
 	if len(files) == 0 {
 		return nil, nil
 	}
 
-	if !utils.HasAllowedFilesInRegular(files, allowedFileExtensions) {
+	if !utils.HasAllowedFilesInRegular(files, allowedFileExtensions, filterSamples) {
 		slog.WarnContext(ctx, "No files with allowed extensions found",
 			"allowed_extensions", allowedFileExtensions,
 			"file_count", len(files))
@@ -101,7 +102,7 @@ func ProcessRegularFiles(
 				}
 			}
 
-			if !utils.IsAllowedFile(filename, file.Size, allowedFileExtensions) {
+			if !utils.IsAllowedFile(filename, file.Size, allowedFileExtensions, filterSamples) {
 				return nil
 			}
 
