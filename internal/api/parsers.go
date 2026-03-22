@@ -1,55 +1,11 @@
 package api
 
 import (
-	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 )
-
-// ParsePagination extracts pagination parameters from query string
-func ParsePagination(r *http.Request) Pagination {
-	pagination := DefaultPagination()
-
-	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
-		if limit, err := strconv.Atoi(limitStr); err == nil && limit > 0 && limit <= 1000 {
-			pagination.Limit = limit
-		}
-	}
-
-	if offsetStr := r.URL.Query().Get("offset"); offsetStr != "" {
-		if offset, err := strconv.Atoi(offsetStr); err == nil && offset >= 0 {
-			pagination.Offset = offset
-		}
-	}
-
-	return pagination
-}
-
-// ParseTimeParam extracts time parameter from query string
-func ParseTimeParam(r *http.Request, param string) (*time.Time, error) {
-	value := r.URL.Query().Get(param)
-	if value == "" {
-		return nil, nil
-	}
-
-	// Try different time formats
-	formats := []string{
-		time.RFC3339,
-		"2006-01-02T15:04:05Z",
-		"2006-01-02 15:04:05",
-		"2006-01-02",
-	}
-
-	for _, format := range formats {
-		if t, err := time.Parse(format, value); err == nil {
-			return &t, nil
-		}
-	}
-
-	return nil, &ValidationError{Message: "Invalid time format for parameter: " + param}
-}
 
 // ParseDuration parses a duration string, supporting 'd' for days
 func ParseDuration(s string) (time.Duration, error) {
