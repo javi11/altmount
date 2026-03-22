@@ -95,7 +95,7 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 	// Check if ALL files have no extension - if so, we'll add .partXX.rar extensions
 	allFilesNoExt := true
 	for _, file := range rarFiles {
-		if hasExtension(file.Filename) {
+		if archive.HasExtension(file.Filename) {
 			allFilesNoExt = false
 			break
 		}
@@ -321,7 +321,7 @@ func (rh *rarProcessor) parseRarFilename(filename string) (base string, part int
 	lowerFilename := strings.ToLower(filename)
 
 	// Pattern 1: filename.part###.rar (e.g., movie.part001.rar, movie.part01.rar)
-	if matches := partPattern.FindStringSubmatch(filename); len(matches) > 2 {
+	if matches := PartPattern.FindStringSubmatch(filename); len(matches) > 2 {
 		base = matches[1]
 		if partNum := archive.ParseInt(matches[2]); partNum >= 0 {
 			// Convert 1-based part numbers to 0-based (part001 becomes 0, part002 becomes 1)
@@ -339,7 +339,7 @@ func (rh *rarProcessor) parseRarFilename(filename string) (base string, part int
 	}
 
 	// Pattern 3: filename.r## or filename.r### (e.g., movie.r00, movie.r01)
-	if matches := rPattern.FindStringSubmatch(filename); len(matches) > 2 {
+	if matches := RPattern.FindStringSubmatch(filename); len(matches) > 2 {
 		base = matches[1]
 		if partNum := archive.ParseInt(matches[2]); partNum >= 0 {
 			// .r00 is part 0, .r01 is part 1, etc.
@@ -348,7 +348,7 @@ func (rh *rarProcessor) parseRarFilename(filename string) (base string, part int
 	}
 
 	// Pattern 4: filename.### (numeric extensions like .001, .002)
-	if matches := numericPattern.FindStringSubmatch(filename); len(matches) > 2 {
+	if matches := NumericPattern.FindStringSubmatch(filename); len(matches) > 2 {
 		base = matches[1]
 		if partNum := archive.ParseInt(matches[2]); partNum >= 0 {
 			// .001 becomes part 0, .002 becomes part 1, etc.
@@ -522,7 +522,7 @@ func isRarArchiveFile(filename string) bool {
 	if strings.HasSuffix(lower, ".rar") {
 		return true
 	}
-	if rPattern.MatchString(lower) {
+	if RPattern.MatchString(lower) {
 		return true
 	}
 	return false

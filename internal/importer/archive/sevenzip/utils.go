@@ -2,7 +2,6 @@ package sevenzip
 
 import (
 	"fmt"
-	"path/filepath"
 	"regexp"
 	"strconv"
 
@@ -15,12 +14,6 @@ var (
 	// Pattern for numeric extensions: filename.001, filename.002
 	numericPatternNumber = regexp.MustCompile(`\.(\d+)$`)
 )
-
-// hasExtension checks if a filename has an extension
-func hasExtension(filename string) bool {
-	ext := filepath.Ext(filename)
-	return ext != ""
-}
 
 // normalize7zPartFilename normalizes 7zip part filenames while preserving original number formatting
 // If allFilesNoExt is true, uses baseFilename for all parts with .XXX extension
@@ -37,7 +30,7 @@ func normalize7zPartFilename(filename string, index int, allFilesNoExt bool, tot
 	// If all files have no extension, use baseFilename with .XXX extension
 	// This ensures all parts of the same archive have the same base filename
 	// Using 7zip multi-volume convention: .001, .002, .003, etc. (1-based)
-	if allFilesNoExt && !hasExtension(filename) && baseFilename != "" {
+	if allFilesNoExt && !archive.HasExtension(filename) && baseFilename != "" {
 		// Calculate padding width based on total number of files (1-based, so totalFiles)
 		width := len(strconv.Itoa(totalFiles))
 		// Format with zero-padding (convert 0-based index to 1-based: index+1)

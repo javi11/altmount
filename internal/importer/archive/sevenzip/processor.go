@@ -15,6 +15,7 @@ import (
 
 	"github.com/javi11/altmount/internal/errors"
 	"github.com/javi11/altmount/internal/importer/archive"
+	"github.com/javi11/altmount/internal/importer/archive/rar"
 	"github.com/javi11/altmount/internal/importer/filesystem"
 	"github.com/javi11/altmount/internal/importer/parser"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
@@ -53,11 +54,11 @@ var (
 	sevenZipPartNumberPattern = regexp.MustCompile(`\.7z\.(\d+)$`)
 )
 
-// Pre-compiled regex patterns for nested RAR detection (duplicated from rar package since unexported)
+// RAR regex patterns imported from the rar package for nested RAR detection
 var (
-	rarPartPattern    = regexp.MustCompile(`^(.+)\.part(\d+)\.rar$`)
-	rarRPattern       = regexp.MustCompile(`^(.+)\.r(\d+)$`)
-	rarNumericPattern = regexp.MustCompile(`^(.+)\.(\d+)$`)
+	rarPartPattern    = rar.PartPattern
+	rarRPattern       = rar.RPattern
+	rarNumericPattern = rar.NumericPattern
 )
 
 // CreateFileMetadataFromSevenZipContent creates FileMetadata from SevenZipContent for the metadata system
@@ -556,7 +557,7 @@ func renameSevenZipFilesAndSort(sevenZipFiles []parser.ParsedFile) []parser.Pars
 	// Check if ALL files have no extension - if so, we'll add .XXX extensions
 	allFilesNoExt := true
 	for _, file := range sevenZipFiles {
-		if hasExtension(file.Filename) {
+		if archive.HasExtension(file.Filename) {
 			allFilesNoExt = false
 			break
 		}

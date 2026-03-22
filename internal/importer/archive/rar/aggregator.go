@@ -2,7 +2,6 @@ package rar
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -13,6 +12,7 @@ import (
 	"time"
 
 	"github.com/javi11/altmount/internal/encryption/aes"
+	"github.com/javi11/altmount/internal/importer/archive"
 	"github.com/javi11/altmount/internal/importer/archive/iso"
 	"github.com/javi11/altmount/internal/importer/parser"
 	"github.com/javi11/altmount/internal/importer/utils"
@@ -25,82 +25,24 @@ import (
 
 var (
 	// ErrNoAllowedFiles indicates that the archive contains no files matching allowed extensions
-	ErrNoAllowedFiles = errors.New("archive contains no files with allowed extensions")
+	ErrNoAllowedFiles = archive.ErrNoAllowedFiles
 	// ErrNoFilesProcessed indicates that no files were successfully processed (all files failed validation)
-	ErrNoFilesProcessed = errors.New("no files were successfully processed (all files failed validation)")
+	ErrNoFilesProcessed = archive.ErrNoFilesProcessed
 )
 
-// getContentSegmentCount returns the total number of segments for a Content,
-// counting NestedSources segments for encrypted nested RAR content.
+// getContentSegmentCount delegates to archive.GetContentSegmentCount.
 func getContentSegmentCount(content Content) int {
-	if len(content.NestedSources) > 0 {
-		total := 0
-		for _, ns := range content.NestedSources {
-			total += len(ns.Segments)
-		}
-		return total
-	}
-	return len(content.Segments)
+	return archive.GetContentSegmentCount(content)
 }
 
-// getContentSegments returns all segments for a Content,
-// collecting from NestedSources for encrypted nested RAR content.
+// getContentSegments delegates to archive.GetContentSegments.
 func getContentSegments(content Content) []*metapb.SegmentData {
-	if len(content.NestedSources) > 0 {
-		var all []*metapb.SegmentData
-		for _, ns := range content.NestedSources {
-			all = append(all, ns.Segments...)
-		}
-		return all
-	}
-	return content.Segments
+	return archive.GetContentSegments(content)
 }
 
-// validateSegmentIntegrity checks if the segments provided for a file actually cover the expected size.
-// Returns an error if segment coverage is significantly lower than expected (1% shortfall threshold).
+// validateSegmentIntegrity delegates to archive.ValidateSegmentIntegrity.
 func validateSegmentIntegrity(ctx context.Context, content Content) error {
-	const shortfallThresholdPercent = 1 // Fail if more than 1% of the file is missing
-
-	if len(content.NestedSources) > 0 {
-		// For nested sources, validate each source independently
-		for _, ns := range content.NestedSources {
-			var covered int64
-			for _, seg := range ns.Segments {
-				covered += (seg.EndOffset - seg.StartOffset + 1)
-			}
-
-			shortfall := ns.InnerLength - covered
-			if shortfall > 0 {
-				shortfallPercent := (shortfall * 100) / ns.InnerLength
-				if shortfallPercent >= shortfallThresholdPercent {
-					return fmt.Errorf("corrupted nested source: missing %d bytes (%d%% of part)", shortfall, shortfallPercent)
-				}
-			}
-		}
-	} else {
-		// For standard files, validate total segment coverage against PackedSize (for RARs)
-		var totalCovered int64
-		for _, seg := range content.Segments {
-			totalCovered += (seg.EndOffset - seg.StartOffset + 1)
-		}
-
-		expectedSize := content.PackedSize
-		if expectedSize <= 0 {
-			expectedSize = content.Size
-		}
-
-		if expectedSize > 0 {
-			shortfall := expectedSize - totalCovered
-			if shortfall > 0 {
-				shortfallPercent := (shortfall * 100) / expectedSize
-				if shortfallPercent >= shortfallThresholdPercent {
-					return fmt.Errorf("corrupted file: missing %d bytes (%d%% of total size)", shortfall, shortfallPercent)
-				}
-			}
-		}
-	}
-
-	return nil
+	return archive.ValidateSegmentIntegrity(ctx, content)
 }
 
 // calculateSegmentsToValidate calculates the actual number of segments that will be validated
