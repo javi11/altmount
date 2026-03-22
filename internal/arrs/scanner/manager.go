@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/javi11/altmount/internal/arrs/clients"
 	"github.com/javi11/altmount/internal/arrs/data"
@@ -56,20 +57,15 @@ func (m *Manager) findInstanceForFilePath(ctx context.Context, filePath string, 
 	// Strategy 2: Category Match - Check if file is in the staging/complete folder
 	cfg := m.configGetter()
 	if cfg.SABnzbd.CompleteDir != "" {
-		completeDir := strings.TrimRight(filepath.ToSlash(cfg.SABnzbd.CompleteDir), "/")
-		if !strings.HasPrefix(completeDir, "/") {
-			completeDir = "/" + completeDir
-		}
-
+		// Normalize completeDir to a segment like "/complete/"
+		completeDir := strings.Trim(filepath.ToSlash(cfg.SABnzbd.CompleteDir), "/")
+		completeSegment := "/" + completeDir + "/"
 		normalizedPath := filepath.ToSlash(filePath)
-		if !strings.HasPrefix(normalizedPath, "/") {
-			normalizedPath = "/" + normalizedPath
-		}
 
-		// Check if path starts with complete_dir
-		if strings.HasPrefix(normalizedPath, completeDir+"/") {
-			// Extract category (e.g. /complete/tv/show -> tv)
-			afterPrefix := strings.TrimPrefix(normalizedPath, completeDir+"/")
+		// Check if path contains the complete directory as a segment
+		if _, after, ok := strings.Cut(normalizedPath, completeSegment); ok {
+			// Extract everything after the complete directory segment (e.g., "tv/show/file.mkv")
+			afterPrefix := after
 			parts := strings.Split(afterPrefix, "/")
 			if len(parts) > 0 {
 				category := parts[0]
@@ -112,16 +108,32 @@ func (m *Manager) findInstanceForFilePath(ctx context.Context, filePath string, 
 
 func (m *Manager) managesFile(ctx context.Context, instanceType string, client any, filePath string) bool {
 	if instanceType == "radarr" {
-		return m.radarrManagesFile(ctx, client.(*radarr.Radarr), filePath)
+		rc, ok := client.(*radarr.Radarr)
+		if !ok {
+			return false
+		}
+		return m.radarrManagesFile(ctx, rc, filePath)
 	}
-	return m.sonarrManagesFile(ctx, client.(*sonarr.Sonarr), filePath)
+	sc, ok := client.(*sonarr.Sonarr)
+	if !ok {
+		return false
+	}
+	return m.sonarrManagesFile(ctx, sc, filePath)
 }
 
 func (m *Manager) hasFile(ctx context.Context, instanceType string, client any, instanceName, relativePath string) bool {
 	if instanceType == "radarr" {
-		return m.radarrHasFile(ctx, client.(*radarr.Radarr), instanceName, relativePath)
+		rc, ok := client.(*radarr.Radarr)
+		if !ok {
+			return false
+		}
+		return m.radarrHasFile(ctx, rc, instanceName, relativePath)
 	}
-	return m.sonarrHasFile(ctx, client.(*sonarr.Sonarr), instanceName, relativePath)
+	sc, ok := client.(*sonarr.Sonarr)
+	if !ok {
+		return false
+	}
+	return m.sonarrHasFile(ctx, sc, instanceName, relativePath)
 }
 
 // radarrManagesFile checks if Radarr manages the given file path using root folders (checkrr approach)
@@ -140,7 +152,7 @@ func (m *Manager) radarrManagesFile(ctx context.Context, client *radarr.Radarr, 
 	for _, folder := range rootFolders {
 		slog.DebugContext(ctx, "Checking Radarr root folder", "folder_path", folder.Path, "file_path", filePath)
 		// Check for direct prefix match or if the filePath contains the folder.Path (common in Docker/Remote setups)
-		if strings.HasPrefix(filePath, folder.Path) || strings.Contains(filePath, folder.Path) {
+		if strings.HasPrefix(filePath, folder.Path) {
 			slog.DebugContext(ctx, "File matches Radarr root folder", "folder_path", folder.Path)
 			return true
 		}
@@ -165,8 +177,7 @@ func (m *Manager) sonarrManagesFile(ctx context.Context, client *sonarr.Sonarr, 
 	// Check if file path starts with any root folder path
 	for _, folder := range rootFolders {
 		slog.DebugContext(ctx, "Checking Sonarr root folder", "folder_path", folder.Path, "file_path", filePath)
-		// Check for direct prefix match or if the filePath contains the folder.Path (common in Docker/Remote setups)
-		if strings.HasPrefix(filePath, folder.Path) || strings.Contains(filePath, folder.Path) {
+		if strings.HasPrefix(filePath, folder.Path) {
 			slog.DebugContext(ctx, "File matches Sonarr root folder", "folder_path", folder.Path)
 			return true
 		}
@@ -282,8 +293,8 @@ func (m *Manager) TriggerScanForFile(ctx context.Context, filePath string) error
 
 	// Launch scan in background to not block caller
 	go func() {
-		// Use a new background context for the async call
-		bgCtx := context.Background()
+		bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
 
 		switch instance.Type {
 		case "radarr":
@@ -330,8 +341,8 @@ func (m *Manager) TriggerDownloadScan(ctx context.Context, instanceType string) 
 		slog.DebugContext(ctx, "Triggering download client scan", "instance", instance.Name, "type", instance.Type)
 
 		go func(inst *model.ConfigInstance) {
-			// Use a new background context for the async call
-			bgCtx := context.Background()
+			bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
 
 			switch inst.Type {
 			case "radarr":
@@ -425,11 +436,16 @@ func (m *Manager) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 	}
 
 	if targetMovie == nil {
-		slog.WarnContext(ctx, "No movie found with matching file path in Radarr",
+		slog.WarnContext(ctx, "No movie found with matching file path in Radarr library, attempting queue-based failure",
 			"instance", instanceName,
 			"file_path", filePath)
 
-		return fmt.Errorf("no movie found with file path %s: %w", filePath, model.ErrPathMatchFailed)
+		// Fallback: search in Radarr download queue for active/stuck imports
+		if err := m.failRadarrQueueItemByPath(ctx, client, filePath); err == nil {
+			return nil
+		}
+
+		return fmt.Errorf("no movie found with file path %s in library or queue: %w", filePath, model.ErrPathMatchFailed)
 	}
 
 	slog.InfoContext(ctx, "Found matching movie for file",
@@ -524,8 +540,16 @@ func (m *Manager) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 	}
 
 	if targetSeries == nil {
-		slog.WarnContext(ctx, "No series found in Sonarr matching file path", "file_path", filePath)
-		return fmt.Errorf("no series found containing file path: %s", filePath)
+		slog.WarnContext(ctx, "No series found in Sonarr matching file path in library, attempting queue-based failure",
+			"instance", instanceName,
+			"file_path", filePath)
+
+		// Fallback: search in Sonarr download queue for active/stuck imports
+		if err := m.failSonarrQueueItemByPath(ctx, client, filePath); err == nil {
+			return nil
+		}
+
+		return fmt.Errorf("no series found containing file path in library or queue: %s", filePath)
 	}
 
 	slog.InfoContext(ctx, "Found matching series, searching for episode file",
@@ -613,10 +637,19 @@ func (m *Manager) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 					"error", err)
 			}
 		}
+	} else {
+		slog.WarnContext(ctx, "Series found but no matching episode file found in Sonarr library, attempting queue-based failure",
+			"series", targetSeries.Title,
+			"file_path", filePath)
+
+		// Fallback: search in Sonarr download queue
+		if err := m.failSonarrQueueItemByPath(ctx, client, filePath); err == nil {
+			return nil
+		}
 	}
 
 	if len(episodeIDs) == 0 {
-		return fmt.Errorf("no episodes found for file: %s: %w", filePath, model.ErrPathMatchFailed)
+		return fmt.Errorf("no episodes found for file in library or queue: %s: %w", filePath, model.ErrPathMatchFailed)
 	}
 
 	// Trigger targeted episode search for all episodes in this file
@@ -637,6 +670,62 @@ func (m *Manager) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 		"command_id", response.ID)
 
 	return nil
+}
+
+// failRadarrQueueItemByPath searches for an item in the active Radarr queue by path and marks it as failed
+func (m *Manager) failRadarrQueueItemByPath(ctx context.Context, client *radarr.Radarr, path string) error {
+	queue, err := client.GetQueueContext(ctx, 0, 500)
+	if err != nil {
+		return fmt.Errorf("failed to get Radarr queue: %w", err)
+	}
+
+	for _, q := range queue.Records {
+		// Try exact match, suffix match, or filename match
+		if q.OutputPath == path ||
+			(q.OutputPath != "" && strings.HasSuffix(filepath.ToSlash(path), filepath.ToSlash(q.OutputPath))) ||
+			(q.OutputPath != "" && filepath.Base(q.OutputPath) == filepath.Base(path)) {
+			slog.InfoContext(ctx, "Found matching item in Radarr download queue, marking as failed",
+				"queue_id", q.ID, "path", path, "output_path", q.OutputPath)
+
+			removeFromClient := true
+			opts := &starr.QueueDeleteOpts{
+				RemoveFromClient: &removeFromClient,
+				BlockList:        true,
+				SkipRedownload:   false,
+			}
+			return client.DeleteQueueContext(ctx, q.ID, opts)
+		}
+	}
+
+	return fmt.Errorf("no matching item found in Radarr queue for path: %s", path)
+}
+
+// failSonarrQueueItemByPath searches for an item in the active Sonarr queue by path and marks it as failed
+func (m *Manager) failSonarrQueueItemByPath(ctx context.Context, client *sonarr.Sonarr, path string) error {
+	queue, err := client.GetQueueContext(ctx, 0, 500)
+	if err != nil {
+		return fmt.Errorf("failed to get Sonarr queue: %w", err)
+	}
+
+	for _, q := range queue.Records {
+		// Try exact match, suffix match, or filename match
+		if q.OutputPath == path ||
+			(q.OutputPath != "" && strings.HasSuffix(filepath.ToSlash(path), filepath.ToSlash(q.OutputPath))) ||
+			(q.OutputPath != "" && filepath.Base(q.OutputPath) == filepath.Base(path)) {
+			slog.InfoContext(ctx, "Found matching item in Sonarr download queue, marking as failed",
+				"queue_id", q.ID, "path", path, "output_path", q.OutputPath)
+
+			removeFromClient := true
+			opts := &starr.QueueDeleteOpts{
+				RemoveFromClient: &removeFromClient,
+				BlockList:        true,
+				SkipRedownload:   false,
+			}
+			return client.DeleteQueueContext(ctx, q.ID, opts)
+		}
+	}
+
+	return fmt.Errorf("no matching item found in Sonarr queue for path: %s", path)
 }
 
 // blocklistRadarrMovieFile finds the history event for the given file and marks it as failed (blocklisting the release)

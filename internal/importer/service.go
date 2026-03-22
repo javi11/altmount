@@ -61,7 +61,7 @@ type queueAdapterForScanner struct {
 	calcFileSize    func(string) (int64, error)
 }
 
-func (a *queueAdapterForScanner) AddToQueue(ctx context.Context, filePath string, relativePath *string) error {
+func (a *queueAdapterForScanner) AddToQueue(ctx context.Context, filePath string, relativePath *string, metadata *string) error {
 	// Calculate file size before adding to queue
 	var fileSize *int64
 	if size, err := a.calcFileSize(filePath); err == nil {
@@ -76,6 +76,7 @@ func (a *queueAdapterForScanner) AddToQueue(ctx context.Context, filePath string
 		RetryCount:   0,
 		MaxRetries:   3,
 		FileSize:     fileSize,
+		Metadata:     metadata,
 		CreatedAt:    time.Now(),
 	}
 
@@ -368,13 +369,19 @@ func (s *Service) IsPaused() bool {
 }
 
 func (s *Service) RegisterConfigChangeHandler(configManager any) {
-	mgr := configManager.(*config.Manager)
+	mgr, ok := configManager.(*config.Manager)
+	if !ok {
+		return
+	}
 	mgr.OnConfigChange(func(oldConfig, newConfig *config.Config) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 
 		if s.processor != nil {
 			s.processor.SetSegmentSamplePercentage(newConfig.Import.SegmentSamplePercentage)
+		}
+		if s.postProcessor != nil {
+			s.postProcessor.SetRcloneClient(s.rcloneClient)
 		}
 	})
 }
@@ -437,7 +444,12 @@ func (s *Service) IsRunning() bool {
 func (s *Service) SetRcloneClient(client any) {
 	var rc rclonecli.RcloneRcClient
 	if client != nil {
-		rc = client.(rclonecli.RcloneRcClient)
+		var ok bool
+		rc, ok = client.(rclonecli.RcloneRcClient)
+		if !ok {
+			s.log.ErrorContext(s.ctx, "SetRcloneClient: unexpected client type", "type", fmt.Sprintf("%T", client))
+			return
+		}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -456,7 +468,12 @@ func (s *Service) SetRcloneClient(client any) {
 func (s *Service) SetArrsService(service any) {
 	var as *arrs.Service
 	if service != nil {
-		as = service.(*arrs.Service)
+		var ok bool
+		as, ok = service.(*arrs.Service)
+		if !ok {
+			s.log.ErrorContext(s.ctx, "SetArrsService: unexpected service type", "type", fmt.Sprintf("%T", service))
+			return
+		}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -597,7 +614,7 @@ func sanitizeFilename(name string) string {
 }
 
 // AddToQueue adds a new NZB file to the import queue with optional category and priority
-func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath *string, category *string, priority *database.QueuePriority) (*database.ImportQueueItem, error) {
+func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath *string, category *string, priority *database.QueuePriority, metadata *string) (*database.ImportQueueItem, error) {
 	// Check context before proceeding
 	select {
 	case <-ctx.Done():
@@ -630,6 +647,7 @@ func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath 
 		RetryCount:   0,
 		MaxRetries:   3,
 		FileSize:     fileSize,
+		Metadata:     metadata,
 		CreatedAt:    time.Now(),
 	}
 
@@ -692,7 +710,7 @@ func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueue
 		}
 	}
 
-	return s.processor.ProcessNzbFile(ctx, item.NzbPath, basePath, int(item.ID), allowedExtensionsOverride, &virtualDir, extractedFiles, item.Category)
+	return s.processor.ProcessNzbFile(ctx, item.NzbPath, basePath, int(item.ID), allowedExtensionsOverride, &virtualDir, extractedFiles, item.Category, item.Metadata)
 }
 
 func (s *Service) calculateProcessVirtualDir(item *database.ImportQueueItem, basePath *string) string {
@@ -1009,8 +1027,8 @@ func (s *Service) OnItemClaimed(ctx context.Context, item *database.ImportQueueI
 // Paths prefixed with "DIR:" indicate a whole directory should be removed; others are individual files.
 func (s *Service) cleanupWrittenPaths(ctx context.Context, itemID int64, paths []string) {
 	for _, p := range paths {
-		if strings.HasPrefix(p, "DIR:") {
-			dirPath := strings.TrimPrefix(p, "DIR:")
+		if after, ok := strings.CutPrefix(p, "DIR:"); ok {
+			dirPath := after
 			if delErr := s.metadataService.DeleteDirectory(dirPath); delErr != nil {
 				s.log.WarnContext(ctx, "Failed to clean up metadata directory after import failure",
 					"queue_id", itemID,
@@ -1156,7 +1174,9 @@ func (s *Service) cleanupFailedItems(ctx context.Context) {
 		}
 	}
 
-	s.broadcaster.BroadcastQueueChanged()
+	if s.broadcaster != nil {
+		s.broadcaster.BroadcastQueueChanged()
+	}
 	s.log.InfoContext(ctx, "Cleaned up stale failed queue items",
 		"count", len(deletedItems),
 		"retention_hours", retentionHours)
@@ -1167,7 +1187,9 @@ func (s *Service) CancelProcessing(itemID int64) error {
 	return s.queueManager.CancelProcessing(itemID)
 }
 
-// ProcessItemInBackground processes a specific queue item in the background
+// ProcessItemInBackground processes a specific queue item in the background.
+// NOTE: This intentionally runs outside the worker pool — it is used for manual retries
+// of specific items and should not compete with the normal import queue workers.
 func (s *Service) ProcessItemInBackground(ctx context.Context, itemID int64) {
 	go func() {
 		s.log.DebugContext(ctx, "Starting background processing of queue item", "item_id", itemID, "background", true)
@@ -1340,9 +1362,9 @@ func (s *Service) RegenerateMetadata(ctx context.Context, mountRelativePath stri
 		// Match release name (ignoring .nzb extension and queue ID prefix)
 		// NZBs are stored as "ID_ReleaseName.nzb" or just "ReleaseName.nzb"
 		cleanName := strings.TrimSuffix(filename, ".nzb")
-		if idx := strings.Index(cleanName, "_"); idx != -1 {
+		if _, after, ok := strings.Cut(cleanName, "_"); ok {
 			// Check both with and without prefix
-			if cleanName[idx+1:] == releaseName || cleanName == releaseName {
+			if after == releaseName || cleanName == releaseName {
 				foundNzbPath = path
 				return filepath.SkipAll
 			}
@@ -1369,7 +1391,7 @@ func (s *Service) RegenerateMetadata(ctx context.Context, mountRelativePath stri
 
 	// Re-process the NZB file. We use a dummy queue ID.
 	// This will overwrite the existing .meta file.
-	_, _, err = s.processor.ProcessNzbFile(ctx, foundNzbPath, "", 0, nil, &virtualDir, nil, nil)
+	_, _, err = s.processor.ProcessNzbFile(ctx, foundNzbPath, "", 0, nil, &virtualDir, nil, nil, nil)
 	if err != nil {
 		return fmt.Errorf("failed to re-process NZB: %w", err)
 	}

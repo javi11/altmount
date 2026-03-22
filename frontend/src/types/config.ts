@@ -61,8 +61,9 @@ export interface MetadataConfig {
 }
 
 export interface MetadataBackupConfig {
-	enabled: boolean;
+	enabled?: boolean;
 	interval_hours: number;
+	backup_time: string;
 	keep_backups: number;
 	path: string;
 }

@@ -42,9 +42,9 @@ type ImportQueueItem struct {
 	MaxRetries   int           `db:"max_retries"`
 	ErrorMessage *string       `db:"error_message"`
 	BatchID      *string       `db:"batch_id"`
-	Metadata     *string       `db:"metadata"`     // JSON metadata
-	FileSize     *int64        `db:"file_size"`    // Total size in bytes calculated from segments
-	TargetPath   *string       `db:"target_path"`  // Optional forced symlink destination path
+	Metadata     *string       `db:"metadata"`    // JSON metadata
+	FileSize     *int64        `db:"file_size"`   // Total size in bytes calculated from segments
+	TargetPath   *string       `db:"target_path"` // Optional forced symlink destination path
 }
 
 // BulkOperationResult represents the result of a bulk queue operation
@@ -167,13 +167,14 @@ type ImportHourlyStat struct {
 
 // ImportHistory represents a persistent record of a single imported file
 type ImportHistory struct {
-	ID           int64     `db:"id"`
-	NzbID        *int64    `db:"nzb_id"` // Nullable if queue item deleted
-	NzbName      string    `db:"nzb_name"`
-	FileName     string    `db:"file_name"`
-	FileSize     int64     `db:"file_size"`
-	VirtualPath  string    `db:"virtual_path"`
-	LibraryPath  *string   `db:"library_path"` // Added to show final location from file_health
-	Category     *string   `db:"category"`
-	CompletedAt  time.Time `db:"completed_at"`
+	ID          int64     `db:"id"`
+	NzbID       *int64    `db:"nzb_id"` // Nullable if queue item deleted
+	NzbName     string    `db:"nzb_name"`
+	FileName    string    `db:"file_name"`
+	FileSize    int64     `db:"file_size"`
+	VirtualPath string    `db:"virtual_path"`
+	LibraryPath *string   `db:"library_path"` // Added to show final location from file_health
+	Category    *string   `db:"category"`
+	Metadata    *string   `db:"metadata"`
+	CompletedAt time.Time `db:"completed_at"`
 }

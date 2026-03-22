@@ -31,12 +31,14 @@ import (
 type MetadataRemoteFile struct {
 	metadataService  *metadata.MetadataService
 	healthRepository *database.HealthRepository
+	arrsService      ARRsRepairService
 	poolManager      pool.Manager        // Pool manager for dynamic pool access
 	configGetter     config.ConfigGetter // Dynamic config access
 	rcloneCipher     *rclone.RcloneCrypt // For rclone encryption/decryption
 	aesCipher        *aes.AesCipher      // For AES encryption/decryption
 	streamTracker    StreamTracker       // Stream tracker for monitoring active streams
 	segmentStore     usenet.SegmentStore // Optional segment cache (nil = disabled)
+	renameMu         sync.Mutex          // Mutex to protect rename operations from race conditions
 }
 
 // Configuration is now accessed dynamically through config.ConfigGetter
@@ -46,6 +48,7 @@ type MetadataRemoteFile struct {
 func NewMetadataRemoteFile(
 	metadataService *metadata.MetadataService,
 	healthRepository *database.HealthRepository,
+	arrsService ARRsRepairService,
 	poolManager pool.Manager,
 	configGetter config.ConfigGetter,
 	streamTracker StreamTracker,
@@ -66,6 +69,7 @@ func NewMetadataRemoteFile(
 	return &MetadataRemoteFile{
 		metadataService:  metadataService,
 		healthRepository: healthRepository,
+		arrsService:      arrsService,
 		poolManager:      poolManager,
 		configGetter:     configGetter,
 		rcloneCipher:     rcloneCipher,
@@ -225,6 +229,7 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 		fileMeta:         fileMeta,
 		metadataService:  mrf.metadataService,
 		healthRepository: mrf.healthRepository,
+		arrsService:      mrf.arrsService,
 		configGetter:     mrf.configGetter,
 		poolManager:      mrf.poolManager,
 		ctx:              ctx,
@@ -311,6 +316,9 @@ func (mrf *MetadataRemoteFile) RemoveFile(ctx context.Context, fileName string) 
 
 // RenameFile renames a virtual file or directory in the metadata
 func (mrf *MetadataRemoteFile) RenameFile(ctx context.Context, oldName, newName string) (bool, error) {
+	mrf.renameMu.Lock()
+	defer mrf.renameMu.Unlock()
+
 	// Normalize paths
 	normalizedOld := normalizePath(oldName)
 	normalizedNew := normalizePath(newName)
@@ -374,8 +382,6 @@ func (mrf *MetadataRemoteFile) RenameFile(ctx context.Context, oldName, newName 
 		return false, fmt.Errorf("failed to rename metadata: %w", err)
 	}
 
-	slog.InfoContext(ctx, "MOVE operation successful", "source", normalizedOld, "destination", normalizedNew)
-
 	// Update ID symlink if file has a NzbdavId
 	if fileMeta != nil && fileMeta.NzbdavId != "" {
 		if err := mrf.metadataService.UpdateIDSymlink(fileMeta.NzbdavId, normalizedNew); err != nil {
@@ -383,10 +389,14 @@ func (mrf *MetadataRemoteFile) RenameFile(ctx context.Context, oldName, newName 
 		}
 	}
 
-	// Update health records
+	// Update health records and resolve pending repairs
 	if mrf.healthRepository != nil {
 		if err := mrf.healthRepository.RenameHealthRecord(ctx, normalizedOld, normalizedNew); err != nil {
-			slog.WarnContext(ctx, "Failed to update health record path during MOVE", "old", normalizedOld, "new", normalizedNew, "error", err)
+			// If DB update fails, we already renamed the file on disk. This is where ghosts are born.
+			// Log it clearly as a DB sync error.
+			slog.ErrorContext(ctx, "CRITICAL: Metadata moved but DB update failed. Ghost record created.",
+				"old", normalizedOld, "new", normalizedNew, "error", err)
+			return false, fmt.Errorf("failed to update health record path: %w", err)
 		}
 
 		// Check if we should resolve other repairs in the same directory
@@ -407,6 +417,8 @@ func (mrf *MetadataRemoteFile) RenameFile(ctx context.Context, oldName, newName 
 			}
 		}
 	}
+
+	slog.InfoContext(ctx, "MOVE operation successful", "source", normalizedOld, "destination", normalizedNew)
 
 	return true, nil
 }
@@ -739,6 +751,7 @@ type MetadataVirtualFile struct {
 	fileMeta         *metapb.FileMetadata
 	metadataService  *metadata.MetadataService
 	healthRepository *database.HealthRepository
+	arrsService      ARRsRepairService
 	configGetter     config.ConfigGetter
 	poolManager      pool.Manager // Pool manager for dynamic pool access
 	ctx              context.Context
@@ -1589,7 +1602,7 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 	// Any file with missing segments or corruption is marked as corrupted in metadata
 	// but set to pending in DB to trigger the repair cycle immediately
 	metadataStatus := metapb.FileStatus_FILE_STATUS_CORRUPTED
-	dbStatus := database.HealthStatusPending
+	var dbStatus database.HealthStatus
 
 	// Update metadata status (blocking with timeout)
 	if err := mvf.metadataService.UpdateFileStatus(mvf.name, metadataStatus); err != nil {
@@ -1607,14 +1620,37 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 	errorDetails := fmt.Sprintf(`{"missing_articles": %d, "total_articles": %d, "error_type": "ArticleNotFound"}`,
 		1, len(mvf.fileMeta.SegmentData))
 
-	// Increment streaming failure count and handle masking
+	// Mark as pending with high priority to trigger the health worker immediately
+	// The health worker will then handle the repair logic in its own cycle.
+	slog.InfoContext(ctx, "Streaming failure detected, scheduling high-priority health check", "file", mvf.name)
+	dbStatus = database.HealthStatusPending
+
+	// Update database with high priority
+	if err := mvf.healthRepository.UpdateFileHealthScheduled(ctx,
+		mvf.name,
+		dbStatus,
+		&errorMsg,
+		sourceNzbPath,
+		&errorDetails,
+		true, // noRetry=true forces it to be picked up for repair immediately
+		time.Now().UTC(),
+	); err != nil {
+		slog.WarnContext(ctx, "Failed to update health database for streaming failure", "file", mvf.name, "error", err)
+	}
+
+	// Move metadata to corrupted folder immediately so it's hidden from FUSE/WebDAV
+	if moveErr := mvf.metadataService.MoveToCorrupted(ctx, mvf.name); moveErr != nil {
+		slog.WarnContext(ctx, "Failed to move corrupted metadata file in real-time", "file", mvf.name, "error", moveErr)
+	}
+
+	// Increment failure count for tracking/masking if enabled
 	cfg := mvf.configGetter()
 	if cfg.Streaming.FailureMasking.Enabled == nil || *cfg.Streaming.FailureMasking.Enabled {
-		isMasked, err := mvf.healthRepository.IncrementStreamingFailureCount(ctx, mvf.name, cfg.Streaming.FailureMasking.Threshold)
+		isMasked, _, err := mvf.healthRepository.IncrementStreamingFailureCount(ctx, mvf.name, cfg.Streaming.FailureMasking.Threshold)
 		if err != nil {
-			slog.WarnContext(ctx, "Failed to increment streaming failure count", "file", mvf.name, "error", err)
+			slog.WarnContext(ctx, "Failed to update streaming failure count", "file", mvf.name, "error", err)
 		} else if isMasked {
-			slog.InfoContext(ctx, "File masked due to repeated streaming failures", "file", mvf.name, "threshold", cfg.Streaming.FailureMasking.Threshold)
+			slog.InfoContext(ctx, "File masked due to streaming failure", "file", mvf.name)
 		}
 	}
 

@@ -26,21 +26,23 @@ type mockPoolManager struct{}
 func (m *mockPoolManager) GetPool() (*nntppool.Client, error) {
 	return nil, errors.New("no pool available (test mock)")
 }
-func (m *mockPoolManager) SetProviders(_ []nntppool.Provider) error  { return nil }
-func (m *mockPoolManager) ClearPool() error                          { return nil }
-func (m *mockPoolManager) HasPool() bool                             { return false }
-func (m *mockPoolManager) GetMetrics() (pool.MetricsSnapshot, error) { return pool.MetricsSnapshot{}, nil }
+func (m *mockPoolManager) SetProviders(_ []nntppool.Provider) error { return nil }
+func (m *mockPoolManager) ClearPool() error                         { return nil }
+func (m *mockPoolManager) HasPool() bool                            { return false }
+func (m *mockPoolManager) GetMetrics() (pool.MetricsSnapshot, error) {
+	return pool.MetricsSnapshot{}, nil
+}
 func (m *mockPoolManager) ResetMetrics(_ context.Context, _, _ bool) error { return nil }
-func (m *mockPoolManager) IncArticlesDownloaded()                    {}
-func (m *mockPoolManager) UpdateDownloadProgress(_ string, _ int64)  {}
-func (m *mockPoolManager) IncArticlesPosted()                        {}
-func (m *mockPoolManager) AddProvider(_ nntppool.Provider) error     { return nil }
-func (m *mockPoolManager) RemoveProvider(_ string) error             { return nil }
+func (m *mockPoolManager) IncArticlesDownloaded()                          {}
+func (m *mockPoolManager) UpdateDownloadProgress(_ string, _ int64)        {}
+func (m *mockPoolManager) IncArticlesPosted()                              {}
+func (m *mockPoolManager) AddProvider(_ nntppool.Provider) error           { return nil }
+func (m *mockPoolManager) RemoveProvider(_ string) error                   { return nil }
 
 // mockARRsService captures TriggerFileRescan calls and returns a configurable error.
 type mockARRsService struct {
-	mu       sync.Mutex
-	calls    []triggerCall
+	mu        sync.Mutex
+	calls     []triggerCall
 	returnErr error
 }
 
@@ -125,8 +127,6 @@ func newRepairTestEnv(t *testing.T, tempDir string, arrsErr error) *repairTestEn
 	cfg.Health.MaxConcurrentJobs = 1
 	cfg.Health.CheckIntervalSeconds = 3600
 	cfg.Health.SegmentSamplePercentage = 10
-	verifyData := false
-	cfg.Health.VerifyData = &verifyData
 	cfg.Health.MaxConnectionsForHealthChecks = 1
 
 	configManager := config.NewManager(cfg, "")

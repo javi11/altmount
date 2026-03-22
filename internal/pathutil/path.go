@@ -46,9 +46,9 @@ func CheckDirectoryWritable(path string) error {
 		return fmt.Errorf("directory %s is not writable: %w", absPath, err)
 	}
 
+	defer file.Close()
 	// Write some test data
 	_, writeErr := file.Write([]byte("test"))
-	file.Close()
 
 	// Clean up test file
 	os.Remove(testFile)
@@ -109,6 +109,47 @@ func JoinAbsPath(basePath, otherPath string) string {
 	// Join them, ensuring otherPath is treated as relative to base
 	relOther := strings.TrimPrefix(cleanOther, "/")
 	return filepath.Join(basePath, filepath.FromSlash(relOther))
+}
+
+// NormalizeLibraryPath builds a clean absolute library path by combining prefix segments.
+// It handles stripping existing prefixes from the input path to prevent duplication.
+func NormalizeLibraryPath(relPath string, completeDir string, category string) string {
+	// Normalize relative path
+	relPath = strings.TrimPrefix(filepath.ToSlash(relPath), "/")
+
+	// Clean segments for comparison
+	cleanComplete := strings.Trim(filepath.ToSlash(completeDir), "/")
+	cleanCategory := strings.Trim(category, "/")
+
+	// 1. Strip existing /complete or /category prefix from the internal path to start clean
+	if cleanComplete != "" {
+		if after, ok := strings.CutPrefix(relPath, cleanComplete+"/"); ok {
+			relPath = after
+		} else if relPath == cleanComplete {
+			relPath = ""
+		}
+	}
+	if cleanCategory != "" {
+		if after, ok := strings.CutPrefix(relPath, cleanCategory+"/"); ok {
+			relPath = after
+		} else if relPath == cleanCategory {
+			relPath = ""
+		}
+	}
+
+	// 2. Build the clean, isolated library path
+	// Construct: [CompleteDir] + [Category] + RelPath
+	pathParts := []string{}
+	if cleanComplete != "" {
+		pathParts = append(pathParts, cleanComplete)
+	}
+	if cleanCategory != "" {
+		pathParts = append(pathParts, cleanCategory)
+	}
+	pathParts = append(pathParts, relPath)
+
+	finalPath := filepath.Join(pathParts...)
+	return filepath.ToSlash(filepath.Clean(finalPath))
 }
 
 // CheckFileDirectoryWritable checks if the directory containing a file path is writable.

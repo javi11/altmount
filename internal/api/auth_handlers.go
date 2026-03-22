@@ -472,7 +472,6 @@ func sameSiteToString(sameSite http.SameSite) string {
 	}
 }
 
-
 // resolveSecureFlag returns the Secure flag for a cookie, auto-detecting from the
 // request protocol when CookieSecureAutoDetect is enabled.
 func resolveSecureFlag(c *fiber.Ctx, cfg *auth.Config) bool {

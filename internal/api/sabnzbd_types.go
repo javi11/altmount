@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -489,9 +490,20 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, finalPath s
 		}
 
 	}
+	// Get series title from metadata if available
+	seriesTitle := ""
+	if item.Metadata != nil && *item.Metadata != "" {
+		var meta map[string]string
+		if err := json.Unmarshal([]byte(*item.Metadata), &meta); err == nil {
+			if title, ok := meta["series_title"]; ok && title != "" {
+				seriesTitle = title
+			} else if title, ok := meta["movie_title"]; ok && title != "" {
+				seriesTitle = title
+			}
+		}
+	}
 
 	return SABnzbdHistorySlot{
-
 		Index: index,
 
 		NzoID: fmt.Sprintf("%d", item.ID),
@@ -542,7 +554,7 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, finalPath s
 
 		Meta: []string{},
 
-		Series: "",
+		Series: seriesTitle,
 
 		Md5sum: "",
 

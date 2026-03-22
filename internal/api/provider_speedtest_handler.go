@@ -109,12 +109,12 @@ func (s *Server) handleTestProviderSpeed(c *fiber.Ctx) error {
 	}
 
 	if err := s.configManager.UpdateConfig(newConfig); err != nil {
-		slog.Error("Failed to update provider speed test result in config", "provider_id", providerID, "err", err)
+		slog.ErrorContext(c.Context(), "Failed to update provider speed test result in config", "provider_id", providerID, "err", err)
 		return RespondInternalError(c, "Failed to save speed test result", err.Error())
 	}
 
 	if err := s.configManager.SaveConfig(); err != nil {
-		slog.Error("Failed to persist config after speed test", "err", err)
+		slog.ErrorContext(c.Context(), "Failed to persist config after speed test", "err", err)
 	}
 
 	return RespondSuccess(c, ProviderSpeedTestResponse{

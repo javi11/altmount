@@ -2,11 +2,13 @@ package metadata
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -15,11 +17,11 @@ import (
 )
 
 type BackupWorker struct {
-	configGetter config.ConfigGetter
-	workerCtx    context.Context
-	workerCancel context.CancelFunc
-	workerWg     sync.WaitGroup
-	workerMu     sync.Mutex
+	configGetter  config.ConfigGetter
+	workerCtx     context.Context
+	workerCancel  context.CancelFunc
+	workerWg      sync.WaitGroup
+	workerMu      sync.Mutex
 	workerRunning bool
 }
 
@@ -72,12 +74,40 @@ func (w *BackupWorker) Stop(ctx context.Context) {
 func (w *BackupWorker) runWorker() {
 	defer w.workerWg.Done()
 
-	ticker := time.NewTicker(w.configGetter().GetMetadataBackupInterval())
-	defer ticker.Stop()
-
 	for {
+		cfg := w.configGetter()
+		var nextRun time.Duration
+
+		if cfg.Metadata.Backup.BackupTime != "" {
+			// Schedule based on specific time of day (HH:MM)
+			now := time.Now().UTC()
+			parts := strings.Split(cfg.Metadata.Backup.BackupTime, ":")
+			if len(parts) == 2 {
+				hour, errH := strconv.Atoi(parts[0])
+				minute, errM := strconv.Atoi(parts[1])
+				if errH != nil || errM != nil {
+					slog.WarnContext(w.workerCtx, "Invalid backup_time format, falling back to interval",
+						"backup_time", cfg.Metadata.Backup.BackupTime, "hour_err", errH, "minute_err", errM)
+				} else {
+					target := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, time.UTC)
+					if target.Before(now) || target.Equal(now) {
+						target = target.Add(24 * time.Hour)
+					}
+					nextRun = target.Sub(now)
+					slog.InfoContext(w.workerCtx, "Scheduled next metadata backup", "at", target.Format("2006-01-02 15:04:05 UTC"), "in", nextRun.String())
+				}
+			}
+		}
+
+		// Fallback to interval-based if BackupTime is empty or invalid
+		if nextRun <= 0 {
+			interval := w.configGetter().GetMetadataBackupInterval()
+			nextRun = interval
+			slog.InfoContext(w.workerCtx, "Scheduled next metadata backup (interval-based)", "in", nextRun.String())
+		}
+
 		select {
-		case <-ticker.C:
+		case <-time.After(nextRun):
 			w.performBackup()
 		case <-w.workerCtx.Done():
 			return
@@ -94,14 +124,22 @@ func (w *BackupWorker) performBackup() {
 	backupDir := filepath.Join(backupRoot, timestamp)
 
 	if err := os.MkdirAll(backupDir, 0755); err != nil {
-		slog.Error("Failed to create backup directory", "error", err, "path", backupDir)
+		slog.ErrorContext(w.workerCtx, "Failed to create backup directory", "error", err, "path", backupDir)
 		return
 	}
 
-	slog.Info("Starting metadata backup (copy)", "destination", backupDir)
+	slog.InfoContext(w.workerCtx, "Starting metadata backup (copy)", "destination", backupDir)
 
 	count := 0
 	err := filepath.Walk(metadataDir, func(path string, info os.FileInfo, err error) error {
+		if w.workerCtx != nil {
+			select {
+			case <-w.workerCtx.Done():
+				return w.workerCtx.Err()
+			default:
+			}
+		}
+
 		if err != nil {
 			return err
 		}
@@ -132,13 +170,17 @@ func (w *BackupWorker) performBackup() {
 	})
 
 	if err != nil {
-		slog.Error("Failed to complete metadata backup", "error", err)
+		if errors.Is(err, context.Canceled) {
+			slog.InfoContext(w.workerCtx, "Metadata backup canceled")
+		} else {
+			slog.ErrorContext(w.workerCtx, "Failed to complete metadata backup", "error", err)
+		}
 		// Cleanup failed partial backup
 		os.RemoveAll(backupDir)
 		return
 	}
 
-	slog.Info("Metadata backup completed successfully", "files_copied", count)
+	slog.InfoContext(w.workerCtx, "Metadata backup completed successfully", "files_copied", count)
 
 	w.cleanupOldBackups(backupRoot, cfg.GetMetadataBackupKeep())
 }
@@ -163,7 +205,7 @@ func (w *BackupWorker) copyFile(src, dst string) error {
 func (w *BackupWorker) cleanupOldBackups(backupRoot string, keep int) {
 	files, err := os.ReadDir(backupRoot)
 	if err != nil {
-		slog.Error("Failed to read backup directory for cleanup", "error", err)
+		slog.ErrorContext(w.workerCtx, "Failed to read backup directory for cleanup", "error", err)
 		return
 	}
 
@@ -195,9 +237,9 @@ func (w *BackupWorker) cleanupOldBackups(backupRoot string, keep int) {
 
 	for i := keep; i < len(backups); i++ {
 		path := filepath.Join(backupRoot, backups[i].name)
-		slog.Info("Deleting old backup directory", "path", path)
+		slog.InfoContext(w.workerCtx, "Deleting old backup directory", "path", path)
 		if err := os.RemoveAll(path); err != nil {
-			slog.Error("Failed to delete old backup directory", "error", err, "path", path)
+			slog.ErrorContext(w.workerCtx, "Failed to delete old backup directory", "error", err, "path", path)
 		}
 	}
 }

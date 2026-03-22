@@ -94,6 +94,7 @@ func (c *Config) GetMaxRepairRetries() int {
 	}
 	return c.Health.Repair.MaxRepairRetries
 }
+
 // Import config accessor methods.
 
 // GetMaxImportConnections returns max import connections with a default fallback.

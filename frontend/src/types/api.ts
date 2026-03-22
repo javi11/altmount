@@ -49,6 +49,7 @@ export interface QueueItem {
 	file_size?: number;
 	percentage?: number; // Progress percentage (0-100), only present for items being processed
 	stage?: string; // Human-readable stage label (e.g. "Validating segments"), injected client-side from live progress
+	storage_path?: string; // Internal FUSE mount path (populated after completion)
 }
 
 export interface ProgressUpdate {

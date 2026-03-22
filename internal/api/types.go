@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/javi11/altmount/internal/auth"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 )
@@ -251,7 +252,7 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 
 	downloadKey := ""
 	if apiKey != "" {
-		downloadKey = hashAPIKey(apiKey)
+		downloadKey = auth.HashAPIKey(apiKey)
 	}
 
 	return &ConfigAPIResponse{
@@ -346,7 +347,8 @@ type QueueItemResponse struct {
 	BatchID      *string                `json:"batch_id"`
 	Metadata     *string                `json:"metadata"`
 	FileSize     *int64                 `json:"file_size"`
-	Percentage   *int                   `json:"percentage,omitempty"` // Progress percentage (0-100), only for items being processed
+	Percentage   *int                   `json:"percentage,omitempty"`    // Progress percentage (0-100), only for items being processed
+	StoragePath  *string                `json:"storage_path,omitempty"` // Internal FUSE mount path (populated after completion)
 }
 
 // QueueListRequest represents request parameters for listing queue items
@@ -607,6 +609,7 @@ func ToQueueItemResponse(item *database.ImportQueueItem) *QueueItemResponse {
 		BatchID:      item.BatchID,
 		Metadata:     item.Metadata,
 		FileSize:     item.FileSize,
+		StoragePath:  item.StoragePath,
 	}
 }
 

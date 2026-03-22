@@ -174,10 +174,7 @@ func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string, pro
 		return nil, errors.NewNonRetryableError("NZB file contains no valid files. This can be caused because the file has missing segments in your providers.", nil)
 	}
 
-	maxParse := min(len(fileInfos), 20)
-	if maxParse < 1 {
-		maxParse = 1
-	}
+	maxParse := max(min(len(fileInfos), 20), 1)
 	concPool := concpool.NewWithResults[fileResult]().WithMaxGoroutines(maxParse).WithContext(ctx)
 
 	// Process files in parallel using conc pool
@@ -442,10 +439,7 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 		err        error
 	}
 
-	maxFetch := min(len(files), 20)
-	if maxFetch < 1 {
-		maxFetch = 1
-	}
+	maxFetch := max(min(len(files), 20), 1)
 	concPool := concpool.NewWithResults[fetchResult]().WithMaxGoroutines(maxFetch).WithContext(ctx)
 
 	// Atomic counter for progress tracking — incremented by each goroutine on completion
@@ -540,7 +534,6 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 				segResults := make([][]byte, len(segsNeeded))
 				g, gctx := errgroup.WithContext(ctx)
 				for i, seg := range segsNeeded {
-					i, seg := i, seg
 					g.Go(func() error {
 						segCtx, segCancel := context.WithTimeout(gctx, time.Second*30)
 						defer segCancel()

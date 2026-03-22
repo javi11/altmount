@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -163,6 +164,7 @@ func (m MetadataConfig) ShouldDeleteSourceNzb() bool {
 type MetadataBackupConfig struct {
 	Enabled       *bool  `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
 	IntervalHours int    `yaml:"interval_hours" mapstructure:"interval_hours" json:"interval_hours"`
+	BackupTime    string `yaml:"backup_time" mapstructure:"backup_time" json:"backup_time"` // HH:MM format
 	KeepBackups   int    `yaml:"keep_backups" mapstructure:"keep_backups" json:"keep_backups"`
 	Path          string `yaml:"path" mapstructure:"path" json:"path"`
 }
@@ -642,7 +644,7 @@ func (c *Config) Validate() error {
 			}
 			// Warn if API key is missing (but don't fail validation)
 			if c.SABnzbd.FallbackAPIKey == "" {
-				fmt.Printf("Warning: SABnzbd fallback_host is set but fallback_api_key is empty\n")
+				slog.Warn("SABnzbd fallback_host is set but fallback_api_key is empty")
 			}
 		}
 	}
@@ -1224,6 +1226,7 @@ func DefaultConfig(configDir ...string) *Config {
 			Backup: MetadataBackupConfig{
 				Enabled:       &metadataBackupEnabled,
 				IntervalHours: 24,
+				BackupTime:    "03:00",
 				KeepBackups:   1,
 				Path:          backupPath,
 			},
@@ -1427,8 +1430,7 @@ func LoadConfig(configFile string) (*Config, error) {
 			}
 
 			// Log that we created a default config
-			fmt.Printf("Created default configuration file: %s\n", targetConfigFile)
-			fmt.Printf("Please review and modify the configuration as needed.\n")
+			slog.Info("Created default configuration file — please review and modify as needed", "path", targetConfigFile)
 
 			// Now try to read the newly created file
 			viper.SetConfigFile(targetConfigFile)
@@ -1492,7 +1494,7 @@ func LoadConfig(configFile string) (*Config, error) {
 			return nil, fmt.Errorf("invalid PORT environment variable %d: must be between 1 and 65535", port)
 		}
 		config.WebDAV.Port = port
-		fmt.Printf("Using PORT from environment variable: %d\n", port)
+		slog.Info("Using PORT from environment variable", "port", port)
 	}
 
 	// Validate configuration

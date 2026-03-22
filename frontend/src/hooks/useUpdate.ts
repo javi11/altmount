@@ -13,6 +13,7 @@ export function useUpdateStatus(channel: UpdateChannel, enabled: boolean) {
 
 export function useApplyUpdate() {
 	return useMutation({
-		mutationFn: (channel: UpdateChannel) => apiClient.applyUpdate(channel),
+		mutationFn: ({ channel, force }: { channel: UpdateChannel; force?: boolean }) =>
+			apiClient.applyUpdate(channel, force),
 	});
 }

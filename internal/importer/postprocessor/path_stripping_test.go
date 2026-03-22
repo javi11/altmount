@@ -78,7 +78,7 @@ func TestCreateSymlinks_WithIsolation(t *testing.T) {
 
 	// Call CreateSymlinks
 	item := &database.ImportQueueItem{ID: 1}
-	
+
 	err = coord.CreateSymlinks(ctx, item, fullPath)
 	require.NoError(t, err)
 
@@ -172,7 +172,7 @@ func TestCreateStrmFiles_WithIsolation(t *testing.T) {
 	content, err := os.ReadFile(expectedStrmPath)
 	require.NoError(t, err)
 	url := string(content)
-	
+
 	// Check that the URL contains the ORIGINAL path (with /complete)
 	assert.Contains(t, url, "path=/complete/movies/test.mkv")
 }

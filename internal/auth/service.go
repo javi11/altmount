@@ -41,6 +41,8 @@ type Config struct {
 	// Application settings
 	Issuer   string // JWT issuer
 	Audience string // JWT audience
+	Host     string // Host for auth service
+	Port     int    // Port for auth service
 }
 
 // DefaultConfig returns default authentication configuration

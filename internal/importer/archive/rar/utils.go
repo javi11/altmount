@@ -33,8 +33,8 @@ func extractRarBaseName(filename string) string {
 		return m[1]
 	}
 	// Pattern 2: filename.rar (single part)
-	if strings.HasSuffix(lower, ".rar") {
-		return strings.TrimSuffix(lower, ".rar")
+	if before, ok := strings.CutSuffix(lower, ".rar"); ok {
+		return before
 	}
 	// Pattern 3: filename.r##
 	if m := rPattern.FindStringSubmatch(lower); len(m) > 1 {

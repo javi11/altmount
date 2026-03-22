@@ -84,7 +84,7 @@ func (t *StreamTracker) cleanupStale() {
 		if now.Sub(stream.StartedAt) > t.timeout {
 			t.Remove(key.(string))
 			removed++
-			slog.Debug("Cleaned up stale stream",
+			slog.DebugContext(context.Background(), "Cleaned up stale stream",
 				"stream_id", stream.ID,
 				"file_path", stream.FilePath,
 				"started_at", stream.StartedAt,
@@ -94,7 +94,7 @@ func (t *StreamTracker) cleanupStale() {
 	})
 
 	if removed > 0 {
-		slog.Info("Cleaned up stale streams", "count", removed)
+		slog.InfoContext(context.Background(), "Cleaned up stale streams", "count", removed)
 	}
 }
 

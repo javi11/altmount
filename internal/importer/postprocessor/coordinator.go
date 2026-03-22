@@ -6,6 +6,8 @@ package postprocessor
 import (
 	"context"
 	"log/slog"
+	"sync"
+	"time"
 
 	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/config"
@@ -17,6 +19,7 @@ import (
 
 // Coordinator orchestrates all post-import processing steps
 type Coordinator struct {
+	mu              sync.RWMutex
 	configGetter    config.ConfigGetter
 	metadataService *metadata.MetadataService
 	rcloneClient    rclonecli.RcloneRcClient
@@ -51,14 +54,17 @@ func NewCoordinator(cfg Config) *Coordinator {
 
 // SetRcloneClient updates the rclone client (called when config changes)
 func (c *Coordinator) SetRcloneClient(client rclonecli.RcloneRcClient) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.rcloneClient = client
 }
 
 // SetArrsService updates the ARRs service (called after initialization)
 func (c *Coordinator) SetArrsService(service *arrs.Service) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.arrsService = service
 }
-
 
 // ProcessingResult holds the result of post-processing operations
 type ProcessingResult struct {
@@ -72,11 +78,25 @@ type ProcessingResult struct {
 
 // HandleSuccess performs all post-processing for successful imports
 func (c *Coordinator) HandleSuccess(ctx context.Context, item *database.ImportQueueItem, resultingPath string) (*ProcessingResult, error) {
+	c.mu.RLock()
+	rcloneClient := c.rcloneClient
+	arrsService := c.arrsService
+	c.mu.RUnlock()
+
 	result := &ProcessingResult{}
 
 	// 1. Notify VFS (blocking to ensure visibility)
-	c.NotifyVFS(ctx, resultingPath, false)
+	c.notifyVFSWith(ctx, rcloneClient, resultingPath, false)
 	result.VFSNotified = true
+
+	// Small delay to allow FUSE mount propagation through kernel and into other containers
+	// This helps prevent race conditions where Sonarr tries to probe the file before it's visible.
+	select {
+	case <-ctx.Done():
+		return result, ctx.Err()
+	case <-time.After(1 * time.Second):
+		// Continue
+	}
 
 	// 2. Create symlinks if configured
 	if err := c.CreateSymlinks(ctx, item, resultingPath); err != nil {
@@ -114,7 +134,7 @@ func (c *Coordinator) HandleSuccess(ctx context.Context, item *database.ImportQu
 	}
 
 	// 6. Notify ARR applications
-	if err := c.NotifyARR(ctx, item, resultingPath); err != nil {
+	if err := c.notifyARRWith(ctx, arrsService, item, resultingPath); err != nil {
 		c.log.DebugContext(ctx, "ARR notification not sent",
 			"path", resultingPath,
 			"error", err)
@@ -127,7 +147,7 @@ func (c *Coordinator) HandleSuccess(ctx context.Context, item *database.ImportQu
 }
 
 // HandleFailure performs cleanup and fallback for failed imports
-func (c *Coordinator) HandleFailure(ctx context.Context, item *database.ImportQueueItem, processingErr error) error {
+func (c *Coordinator) HandleFailure(ctx context.Context, item *database.ImportQueueItem, _ error) error {
 	cfg := c.configGetter()
 
 	// Attempt SABnzbd fallback if configured

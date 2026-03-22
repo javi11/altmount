@@ -77,7 +77,7 @@ func ValidateSegmentsForFile(
 	}
 
 	selected := usenet.SelectSegmentsForValidation(segments, samplePercentage)
-	if err := usenet.ValidateSegmentList(ctx, selected, poolManager, maxGoroutines, progressTracker, timeout, false); err != nil {
+	if err := usenet.ValidateSegmentList(ctx, selected, poolManager, maxGoroutines, progressTracker, timeout); err != nil {
 		return err
 	}
 

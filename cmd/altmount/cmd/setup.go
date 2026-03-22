@@ -24,9 +24,9 @@ import (
 	"github.com/javi11/altmount/internal/nzbfilesystem"
 	"github.com/javi11/altmount/internal/nzbfilesystem/segcache"
 	"github.com/javi11/altmount/internal/pool"
-	"github.com/javi11/altmount/internal/usenet"
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/rclone"
+	"github.com/javi11/altmount/internal/usenet"
 	"github.com/javi11/altmount/internal/webdav"
 	"github.com/javi11/altmount/pkg/rclonecli"
 )
@@ -106,6 +106,7 @@ func initializeFilesystem(
 	ctx context.Context,
 	metadataService *metadata.MetadataService,
 	healthRepo *database.HealthRepository,
+	arrsService *arrs.Service,
 	poolManager pool.Manager,
 	configGetter config.ConfigGetter,
 	streamTracker nzbfilesystem.StreamTracker,
@@ -126,6 +127,7 @@ func initializeFilesystem(
 	metadataRemoteFile := nzbfilesystem.NewMetadataRemoteFile(
 		metadataService,
 		healthRepo,
+		arrsService,
 		poolManager,
 		configGetter,
 		streamTracker,
@@ -221,7 +223,7 @@ func setupRepositories(ctx context.Context, db *database.DB) *repositorySet {
 // setupAuthService creates and initializes the authentication service.
 // When loginRequired is true, JWT_SECRET must be set or an error is returned.
 // When loginRequired is false, a missing JWT_SECRET is logged as a warning and nil is returned.
-func setupAuthService(ctx context.Context, userRepo *database.UserRepository, loginRequired bool) (*auth.Service, error) {
+func setupAuthService(ctx context.Context, cfg *config.Config, userRepo *database.UserRepository, loginRequired bool) (*auth.Service, error) {
 	authConfig, err := auth.LoadConfigFromEnv()
 	if err != nil {
 		if loginRequired {
@@ -230,6 +232,10 @@ func setupAuthService(ctx context.Context, userRepo *database.UserRepository, lo
 		slog.WarnContext(ctx, "Auth configuration not loaded (login is disabled)", "err", err)
 		return nil, nil
 	}
+
+	// Override with values from config file
+	authConfig.Host = cfg.WebDAV.Host
+	authConfig.Port = cfg.WebDAV.Port
 
 	authService, err := auth.NewService(authConfig, userRepo)
 	if err != nil {

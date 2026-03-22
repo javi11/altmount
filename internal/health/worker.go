@@ -19,7 +19,7 @@ import (
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pathutil"
 	"github.com/javi11/altmount/internal/progress"
-	"github.com/sourcegraph/conc"
+	"github.com/sourcegraph/conc/pool"
 )
 
 // ARRsRepairService abstracts the ARR repair operations needed by HealthWorker.
@@ -697,15 +697,15 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 		"total", totalFiles,
 		"max_concurrent_jobs", maxJobs)
 
-	// Process files in parallel using conc
-	wg := conc.NewWaitGroup()
+	// Process files in parallel with bounded concurrency
+	p := pool.New().WithMaxGoroutines(maxJobs)
 	var results []database.HealthStatusUpdate
 	var resultsMu sync.Mutex
 
 	// Process health check files
 	for _, fileHealth := range unhealthyFiles {
 		fh := fileHealth // Capture for closure
-		wg.Go(func() {
+		p.Go(func() {
 			slog.InfoContext(ctx, "Checking unhealthy file", "file_path", fh.FilePath)
 
 			// Set checking status
@@ -749,7 +749,7 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 
 	for _, fileHealth := range repairFiles {
 		fh := fileHealth // Capture for closure
-		wg.Go(func() {
+		p.Go(func() {
 			slog.InfoContext(ctx, "Re-triggering repair for file", "file_path", fh.FilePath)
 
 			updatePtr, sideEffect := hw.prepareRepairNotificationUpdate(ctx, fh)
@@ -773,7 +773,7 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 	}
 
 	// Wait for all files to complete processing
-	wg.Wait()
+	p.Wait()
 
 	// Build list of protected directories (categories and complete dir)
 	cfg = hw.configGetter()
@@ -840,10 +840,10 @@ func (hw *HealthWorker) getMaxConcurrentJobs() int {
 type repairOutcome int
 
 const (
-	repairOutcomeTriggered  repairOutcome = iota // ARR accepted the repair; metadata moved to corrupted folder
-	repairOutcomeCorrupted                       // ARR failed with a generic error; mark file corrupted
-	repairOutcomeDeleted                         // Health record and/or metadata were deleted (zombie)
-	repairOutcomeRegenerated                     // Metadata was successfully regenerated from NZB
+	repairOutcomeTriggered   repairOutcome = iota // ARR accepted the repair; metadata moved to corrupted folder
+	repairOutcomeCorrupted                        // ARR failed with a generic error; mark file corrupted
+	repairOutcomeDeleted                          // Health record and/or metadata were deleted (zombie)
+	repairOutcomeRegenerated                      // Metadata was successfully regenerated from NZB
 )
 
 // applyRepairOutcome maps a repairOutcome to the corresponding fields on the HealthStatusUpdate.
@@ -866,12 +866,15 @@ func applyRepairOutcome(update *database.HealthStatusUpdate, outcome repairOutco
 }
 
 // resolvePathForRescan determines the absolute path that ARR should rescan for a given file.
-// It checks LibraryPath first, then ImportDir, and falls back to MountPath.
+// It checks LibraryPath first, then LibraryDir, then ImportDir, and falls back to MountPath.
 func (hw *HealthWorker) resolvePathForRescan(item *database.FileHealth) string {
 	if item.LibraryPath != nil && *item.LibraryPath != "" {
 		return *item.LibraryPath
 	}
 	cfg := hw.configGetter()
+	if cfg.Health.LibraryDir != nil && *cfg.Health.LibraryDir != "" {
+		return pathutil.JoinAbsPath(*cfg.Health.LibraryDir, item.FilePath)
+	}
 	if cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
 		return pathutil.JoinAbsPath(*cfg.Import.ImportDir, item.FilePath)
 	}
@@ -932,7 +935,7 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, item *database.Fi
 		}
 	}
 
-	// SPECIAL CASE: If metadata is corrupted AND we don't have a library path, 
+	// SPECIAL CASE: If metadata is corrupted AND we don't have a library path,
 	// we try to regenerate the metadata first before triggering a full ARR repair.
 	if metadataErr != nil && (item.LibraryPath == nil || *item.LibraryPath == "") {
 		slog.InfoContext(ctx, "Metadata corrupted and no library path found - attempting regeneration from NZB", "file_path", filePath)
@@ -970,13 +973,19 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, item *database.Fi
 		"path_for_rescan", pathForRescan)
 
 	// Move the metadata file to the corrupted folder so FUSE/WebDAV stops showing it.
-	// We do this AFTER ARR accepts the repair so the file stays visible if ARR cannot find a replacement.
-	cfg := hw.configGetter()
-	relativePath := strings.TrimPrefix(filePath, cfg.MountPath)
-	relativePath = strings.TrimPrefix(relativePath, "/")
-	slog.InfoContext(ctx, "Moving metadata file for corrupted item to safety folder to trigger replacement", "file_path", filePath)
-	if moveErr := hw.metadataService.MoveToCorrupted(ctx, relativePath); moveErr != nil {
-		slog.WarnContext(ctx, "Failed to move corrupted metadata file, proceeding with repair trigger status", "error", moveErr)
+	// CRITICAL: We only do this if the file has already been imported (has a LibraryPath).
+	// If it hasn't been imported yet, we keep it visible so ARR can see the "Missing File"
+	// or "Empty Folder" and report its own warning, which helps the repair cycle.
+	if item.LibraryPath != nil && *item.LibraryPath != "" {
+		cfg := hw.configGetter()
+		relativePath := strings.TrimPrefix(filePath, cfg.MountPath)
+		relativePath = strings.TrimPrefix(relativePath, "/")
+		slog.InfoContext(ctx, "Moving metadata file for corrupted item to safety folder to trigger replacement", "file_path", filePath)
+		if moveErr := hw.metadataService.MoveToCorrupted(ctx, relativePath); moveErr != nil {
+			slog.WarnContext(ctx, "Failed to move corrupted metadata file, proceeding with repair trigger status", "error", moveErr)
+		}
+	} else {
+		slog.InfoContext(ctx, "Skipping metadata move for corrupted item - file not yet imported by ARR", "file_path", filePath)
 	}
 
 	return repairOutcomeTriggered, nil

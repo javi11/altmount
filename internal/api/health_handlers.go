@@ -398,6 +398,11 @@ func (s *Server) handleRepairHealth(c *fiber.Ctx) error {
 		return RespondNotFound(c, "Health record", "")
 	}
 
+	// If already triggered, don't allow re-triggering to avoid redundancy
+	if item.Status == database.HealthStatusRepairTriggered {
+		return RespondConflict(c, "Repair already in progress", "This file is already in 'repair_triggered' status. Please wait for the ARR to complete the repair.")
+	}
+
 	// Determine the path to use for ARR rescan
 	// Step 1: Try to use library_path from database if available
 	// Step 2: If not in DB, search for library item using FindLibraryItem
@@ -413,6 +418,12 @@ func (s *Server) handleRepairHealth(c *fiber.Ctx) error {
 
 	// Determine final path for ARR rescan
 	pathForRescan := libraryPath
+	if pathForRescan == "" && cfg.Health.LibraryDir != nil && *cfg.Health.LibraryDir != "" {
+		pathForRescan = pathutil.JoinAbsPath(*cfg.Health.LibraryDir, item.FilePath)
+		slog.InfoContext(ctx, "Using library dir for manual repair",
+			"file_path", item.FilePath,
+			"library_path", pathForRescan)
+	}
 	if pathForRescan == "" && cfg.Import.ImportStrategy == config.ImportStrategySYMLINK && cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
 		pathForRescan = pathutil.JoinAbsPath(*cfg.Import.ImportDir, item.FilePath)
 		slog.InfoContext(ctx, "Using symlink import path for manual repair",
@@ -512,6 +523,11 @@ func (s *Server) handleRepairHealthBulk(c *fiber.Ctx) error {
 			continue
 		}
 
+		// Skip if already triggered
+		if item.Status == database.HealthStatusRepairTriggered {
+			continue // Silently skip items already being repaired
+		}
+
 		// Determine path for rescan
 		var libraryPath string
 		if item.LibraryPath != nil && *item.LibraryPath != "" {
@@ -519,6 +535,12 @@ func (s *Server) handleRepairHealthBulk(c *fiber.Ctx) error {
 		}
 
 		pathForRescan := libraryPath
+		if pathForRescan == "" && cfg.Health.LibraryDir != nil && *cfg.Health.LibraryDir != "" {
+			pathForRescan = pathutil.JoinAbsPath(*cfg.Health.LibraryDir, item.FilePath)
+		}
+		if pathForRescan == "" && cfg.Import.ImportStrategy == config.ImportStrategySYMLINK && cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
+			pathForRescan = pathutil.JoinAbsPath(*cfg.Import.ImportDir, item.FilePath)
+		}
 		if pathForRescan == "" {
 			pathForRescan = pathutil.JoinAbsPath(cfg.MountPath, item.FilePath)
 		}
@@ -1332,11 +1354,11 @@ func (s *Server) handleRegenerateLibraryFiles(c *fiber.Ctx) error {
 
 	if len(files) == 0 {
 		return RespondSuccess(c, fiber.Map{
-			"message":          "No library files found to process",
-			"files_processed":  0,
-			"success_count":    0,
-			"errors":           []string{},
-			"completed_at":     time.Now().Format(time.RFC3339),
+			"message":         "No library files found to process",
+			"files_processed": 0,
+			"success_count":   0,
+			"errors":          []string{},
+			"completed_at":    time.Now().Format(time.RFC3339),
 		})
 	}
 
@@ -1395,14 +1417,21 @@ func (s *Server) handleRegenerateLibraryFiles(c *fiber.Ctx) error {
 			}
 
 			// 3. Build the clean, isolated library path
-			importDir := cfg.MountPath
-			if cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
-				importDir = *cfg.Import.ImportDir
+			var baseDir string
+			useCompleteDir := true
+
+			if cfg.Health.LibraryDir != nil && *cfg.Health.LibraryDir != "" {
+				baseDir = *cfg.Health.LibraryDir
+				useCompleteDir = false // Omit CompleteDir if using dedicated LibraryDir
+			} else if cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
+				baseDir = *cfg.Import.ImportDir
+			} else {
+				baseDir = cfg.MountPath
 			}
 
-			// Construct: ImportDir + CompleteDir + Category + RelPath
-			pathParts := []string{importDir}
-			if cfg.SABnzbd.CompleteDir != "" {
+			// Construct path based on base directory
+			pathParts := []string{baseDir}
+			if useCompleteDir && cfg.SABnzbd.CompleteDir != "" {
 				pathParts = append(pathParts, strings.Trim(cfg.SABnzbd.CompleteDir, "/"))
 			}
 			pathParts = append(pathParts, category)
@@ -1467,12 +1496,12 @@ func (s *Server) handleRegenerateLibraryFiles(c *fiber.Ctx) error {
 	}
 
 	response := fiber.Map{
-		"message":          fmt.Sprintf("Successfully processed %d library files", successCount),
-		"files_processed":  len(files),
-		"success_count":    successCount,
-		"errors":           errors,
-		"error_count":      errorCount,
-		"completed_at":     time.Now().Format(time.RFC3339),
+		"message":         fmt.Sprintf("Successfully processed %d library files", successCount),
+		"files_processed": len(files),
+		"success_count":   successCount,
+		"errors":          errors,
+		"error_count":     errorCount,
+		"completed_at":    time.Now().Format(time.RFC3339),
 	}
 
 	if errorCount > 0 {

@@ -2,6 +2,7 @@ package api
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -347,10 +348,27 @@ func (s *Server) handleSABnzbdAddFile(c *fiber.Ctx) error {
 		return s.writeSABnzbdErrorFiber(c, "Importer service not available")
 	}
 
+	// Capture additional metadata from form
+	metadata := make(map[string]string)
+	if series := c.FormValue("series"); series != "" {
+		metadata["series_title"] = series
+	}
+	if movie := c.FormValue("movie"); movie != "" {
+		metadata["movie_title"] = movie
+	}
+
+	var metadataJSON *string
+	if len(metadata) > 0 {
+		if b, err := json.Marshal(metadata); err == nil {
+			s := string(b)
+			metadataJSON = &s
+		}
+	}
+
 	// Add the file to the processing queue using centralized method
 	completeDir := s.configManager.GetConfig().SABnzbd.CompleteDir
 	priority := s.parseSABnzbdPriority(c.FormValue("priority"))
-	item, err := s.importerService.AddToQueue(c.Context(), tempFile, &completeDir, &validatedCategory, &priority)
+	item, err := s.importerService.AddToQueue(c.Context(), tempFile, &completeDir, &validatedCategory, &priority, metadataJSON)
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to add to queue")
 	}
@@ -464,6 +482,23 @@ func (s *Server) handleSABnzbdAddUrl(c *fiber.Ctx) error {
 		return s.writeSABnzbdErrorFiber(c, "Failed to save downloaded file")
 	}
 
+	// Capture additional metadata from query parameters
+	metadata := make(map[string]string)
+	if series := c.Query("series"); series != "" {
+		metadata["series_title"] = series
+	}
+	if movie := c.Query("movie"); movie != "" {
+		metadata["movie_title"] = movie
+	}
+
+	var metadataJSON *string
+	if len(metadata) > 0 {
+		if b, err := json.Marshal(metadata); err == nil {
+			s := string(b)
+			metadataJSON = &s
+		}
+	}
+
 	// Add to queue
 	if s.importerService == nil {
 		return s.writeSABnzbdErrorFiber(c, "Importer service not available")
@@ -472,7 +507,7 @@ func (s *Server) handleSABnzbdAddUrl(c *fiber.Ctx) error {
 	// Add the file to the processing queue using centralized method
 	completeDir := s.configManager.GetConfig().SABnzbd.CompleteDir
 	priority := s.parseSABnzbdPriority(c.Query("priority"))
-	item, err := s.importerService.AddToQueue(c.Context(), tempFile, &completeDir, &validatedCategory, &priority)
+	item, err := s.importerService.AddToQueue(c.Context(), tempFile, &completeDir, &validatedCategory, &priority, metadataJSON)
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to add to queue")
 	}
@@ -608,8 +643,19 @@ func (s *Server) handleSABnzbdQueueDelete(c *fiber.Ctx) error {
 	// Delete from queue
 	err = s.queueRepo.RemoveFromQueue(c.Context(), id)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			// Item not found in queue, consider it "deleted" already
+			return s.writeSABnzbdResponseFiber(c, SABnzbdDeleteResponse{
+				Status: true,
+			})
+		}
 		return s.writeSABnzbdErrorFiber(c, "Failed to delete queue item")
 	}
+
+	// Also remove from history if it existed there (to prevent ghost items)
+	_, _ = s.queueRepo.RemoveFromHistoryByNzbID(c.Context(), id)
+	// Try direct ID as fallback in case nzoID was already a history ID
+	_, _ = s.queueRepo.RemoveFromHistory(c.Context(), id)
 
 	response := SABnzbdDeleteResponse{
 		Status: true,
@@ -777,20 +823,42 @@ func (s *Server) handleSABnzbdHistoryDelete(c *fiber.Ctx) error {
 	err = s.queueRepo.RemoveFromQueue(c.Context(), id)
 	if err != nil {
 		// If not in active queue, it might be in persistent history
-		histErr := s.queueRepo.RemoveFromHistoryByNzbID(c.Context(), id)
-
-		if errors.Is(err, sql.ErrNoRows) && histErr == nil {
+		// Try by original NzbID first
+		affected, histErr := s.queueRepo.RemoveFromHistoryByNzbID(c.Context(), id)
+		if histErr == nil && affected > 0 {
 			return s.writeSABnzbdResponseFiber(c, SABnzbdDeleteResponse{
 				Status: true,
 			})
 		}
 
-		if !errors.Is(err, sql.ErrNoRows) {
-			return s.writeSABnzbdErrorFiber(c, fmt.Sprintf("Failed to delete history item: %v", err))
+		// Try direct history ID fallback (in case NzoID was already a history ID)
+		affected, histErr = s.queueRepo.RemoveFromHistory(c.Context(), id)
+		if histErr == nil && affected > 0 {
+			return s.writeSABnzbdResponseFiber(c, SABnzbdDeleteResponse{
+				Status: true,
+			})
 		}
+
+		if errors.Is(err, sql.ErrNoRows) {
+			// Item not found in queue or history, consider it "deleted" already
+			return s.writeSABnzbdResponseFiber(c, SABnzbdDeleteResponse{
+				Status: true,
+			})
+		}
+
+		return s.writeSABnzbdErrorFiber(c, fmt.Sprintf("Failed to delete history item: %v", err))
 	} else {
-		// Also remove from history if it existed there
-		_ = s.queueRepo.RemoveFromHistoryByNzbID(c.Context(), id)
+		// If removed from queue, the foreign key ON DELETE SET NULL was triggered in import_history.
+		// We must now delete by original NzbID (if it wasn't nulled yet) OR search by title/nzb_name.
+		// Actually, since we have the ID, we can try to find it, but the ID was the NzbID.
+		// The most reliable way is to try deleting from history by THAT same ID as nzb_id.
+		_, _ = s.queueRepo.RemoveFromHistoryByNzbID(c.Context(), id)
+
+		// Fallback: If it was already nulled by FK, we can't easily find it by ID anymore without title.
+		// But usually we can just let the next poll handle it if it persists,
+		// or we could have fetched it before deleting from queue.
+		// For now, let's try to delete by ID as well just in case NzoID was a history ID.
+		_, _ = s.queueRepo.RemoveFromHistory(c.Context(), id)
 	}
 
 	response := SABnzbdDeleteResponse{

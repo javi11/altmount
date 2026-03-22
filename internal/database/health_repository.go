@@ -140,8 +140,8 @@ func (r *HealthRepository) GetFileHealthByID(ctx context.Context, id int64) (*Fi
 	return &health, nil
 }
 
-// IncrementStreamingFailureCount increments the streaming failure count and masks the file if threshold reached
-func (r *HealthRepository) IncrementStreamingFailureCount(ctx context.Context, filePath string, threshold int) (bool, error) {
+// IncrementStreamingFailureCount increments the streaming failure count and returns whether masking/repair threshold was reached
+func (r *HealthRepository) IncrementStreamingFailureCount(ctx context.Context, filePath string, threshold int) (bool, bool, error) {
 	filePath = strings.TrimPrefix(filePath, "/")
 	query := `
 		UPDATE file_health
@@ -149,16 +149,17 @@ func (r *HealthRepository) IncrementStreamingFailureCount(ctx context.Context, f
 		    is_masked = CASE WHEN streaming_failure_count + 1 >= ? THEN TRUE ELSE is_masked END,
 		    updated_at = datetime('now')
 		WHERE file_path = ?
-		RETURNING is_masked
+		RETURNING is_masked, (streaming_failure_count >= ?)
 	`
 
 	var isMasked bool
-	err := r.db.QueryRowContext(ctx, query, threshold, filePath).Scan(&isMasked)
+	var shouldRepair bool
+	err := r.db.QueryRowContext(ctx, query, threshold, filePath, threshold).Scan(&isMasked, &shouldRepair)
 	if err != nil {
-		return false, fmt.Errorf("failed to increment streaming failure count: %w", err)
+		return false, false, fmt.Errorf("failed to increment streaming failure count: %w", err)
 	}
 
-	return isMasked, nil
+	return isMasked, shouldRepair, nil
 }
 
 // UnmaskFile removes the mask from a file and resets the failure count
@@ -1451,8 +1452,8 @@ func (r *HealthRepository) batchInsertAutomaticHealthChecks(ctx context.Context,
 			scheduledCheckAtStr = record.ScheduledCheckAt.UTC().Format("2006-01-02 15:04:05")
 		}
 
-		args = append(args, 
-			record.FilePath, record.LibraryPath, HealthStatusHealthy, 
+		args = append(args,
+			record.FilePath, record.LibraryPath, HealthStatusHealthy,
 			record.MaxRetries, record.MaxRepairRetries,
 			record.SourceNzbPath, releaseDateStr, scheduledCheckAtStr)
 	}
@@ -1764,4 +1765,20 @@ func (r *HealthRepository) GetFilesForLibrarySync(ctx context.Context) ([]*FileH
 	}
 
 	return files, nil
+}
+
+// HasImportHistoryForPath checks if any import history record exists for the
+// given virtual path. Used to protect symlinks from deletion when an import
+// has been recorded by AltMount, regardless of current metadata state.
+func (r *HealthRepository) HasImportHistoryForPath(ctx context.Context, virtualPath string) (bool, error) {
+	query := `SELECT 1 FROM import_history WHERE TRIM(virtual_path, '/') = TRIM(?, '/') LIMIT 1`
+	var exists int
+	err := r.db.QueryRowContext(ctx, query, virtualPath).Scan(&exists)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to check import history for path: %w", err)
+	}
+	return true, nil
 }
