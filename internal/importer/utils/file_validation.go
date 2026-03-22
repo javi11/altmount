@@ -54,13 +54,17 @@ func IsAllowedFile(filename string, size int64, allowedExtensions []string, filt
 
 	ext := strings.ToLower(filepath.Ext(filename))
 
+	// Build the extension map once for both checks below
+	var extMap map[string]bool
+	if len(allowedExtensions) > 0 {
+		extMap = createExtensionMap(allowedExtensions)
+	}
+
 	// Always allow subtitle files
 	if whitelistedExtensions[ext] {
 		// Still check if the extension is in the allowed list if it's provided
-		if len(allowedExtensions) > 0 {
-			normalizedExt := strings.TrimPrefix(ext, ".")
-			extMap := createExtensionMap(allowedExtensions)
-			return extMap[normalizedExt]
+		if extMap != nil {
+			return extMap[strings.TrimPrefix(ext, ".")]
 		}
 		return true
 	}
@@ -71,13 +75,11 @@ func IsAllowedFile(filename string, size int64, allowedExtensions []string, filt
 	}
 
 	// Empty list = allow all files
-	if len(allowedExtensions) == 0 {
+	if extMap == nil {
 		return true
 	}
 
-	normalizedExt := strings.TrimPrefix(ext, ".")
-	extMap := createExtensionMap(allowedExtensions)
-	return extMap[normalizedExt]
+	return extMap[strings.TrimPrefix(ext, ".")]
 }
 
 // HasAllowedFilesInRegular checks if any regular (non-archive) files match allowed extensions

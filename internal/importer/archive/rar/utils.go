@@ -11,12 +11,12 @@ import (
 )
 
 var (
-	// filename.part###.rar (e.g., movie.part001.rar, movie.part01.rar)
-	partPattern = regexp.MustCompile(`^(.+)\.part(\d+)\.rar$`)
-	// filename.### (numeric extensions like .001, .002)
-	numericPattern = regexp.MustCompile(`^(.+)\.(\d+)$`)
-	//filename.r## or filename.r### (e.g., movie.r00, movie.r01)
-	rPattern             = regexp.MustCompile(`^(.+)\.r(\d+)$`)
+	// PartPattern matches filename.part###.rar (e.g., movie.part001.rar, movie.part01.rar)
+	PartPattern = regexp.MustCompile(`^(.+)\.part(\d+)\.rar$`)
+	// NumericPattern matches filename.### (numeric extensions like .001, .002)
+	NumericPattern = regexp.MustCompile(`^(.+)\.(\d+)$`)
+	// RPattern matches filename.r## or filename.r### (e.g., movie.r00, movie.r01)
+	RPattern             = regexp.MustCompile(`^(.+)\.r(\d+)$`)
 	partPatternNumber    = regexp.MustCompile(`\.part(\d+)\.rar$`)
 	rPatternNumber       = regexp.MustCompile(`\.r(\d+)$`)
 	numericPatternNumber = regexp.MustCompile(`\.(\d+)$`)
@@ -29,7 +29,7 @@ func extractRarBaseName(filename string) string {
 	lower := strings.ToLower(filepath.Base(filename))
 
 	// Pattern 1: filename.part###.rar
-	if m := partPattern.FindStringSubmatch(lower); len(m) > 1 {
+	if m := PartPattern.FindStringSubmatch(lower); len(m) > 1 {
 		return m[1]
 	}
 	// Pattern 2: filename.rar (single part)
@@ -37,20 +37,14 @@ func extractRarBaseName(filename string) string {
 		return before
 	}
 	// Pattern 3: filename.r##
-	if m := rPattern.FindStringSubmatch(lower); len(m) > 1 {
+	if m := RPattern.FindStringSubmatch(lower); len(m) > 1 {
 		return m[1]
 	}
 	// Pattern 4: filename.### (numeric)
-	if m := numericPattern.FindStringSubmatch(lower); len(m) > 1 {
+	if m := NumericPattern.FindStringSubmatch(lower); len(m) > 1 {
 		return m[1]
 	}
 	return lower
-}
-
-// hasExtension checks if a filename has an extension
-func hasExtension(filename string) bool {
-	ext := filepath.Ext(filename)
-	return ext != ""
 }
 
 // normalizeRarPartFilename normalizes RAR part numbers while preserving padding width
@@ -69,7 +63,7 @@ func normalizeRarPartFilename(filename string, index int, allFilesNoExt bool, to
 	// If all files have no extension, use baseFilename with .rXX extension
 	// This ensures all parts of the same archive have the same base filename
 	// Using RAR multi-volume convention: .r00, .r01, .r02, etc. (0-based)
-	if allFilesNoExt && !hasExtension(filename) && baseFilename != "" {
+	if allFilesNoExt && !archive.HasExtension(filename) && baseFilename != "" {
 		// Calculate padding width based on total number of files (0-based, so totalFiles-1)
 		width := len(strconv.Itoa(totalFiles - 1))
 		// Format with zero-padding (index is already 0-based from OriginalIndex)
