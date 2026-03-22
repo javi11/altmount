@@ -70,7 +70,6 @@ export function useProgressStream(options: UseProgressStreamOptions = {}): UsePr
 				eventSourceRef.current = eventSource;
 
 				eventSource.onopen = () => {
-					console.log("Progress stream connected");
 					setIsConnected(true);
 					setError(null);
 					reconnectAttemptsRef.current = 0; // Reset reconnect counter on successful connection
@@ -128,10 +127,6 @@ export function useProgressStream(options: UseProgressStreamOptions = {}): UsePr
 					if (reconnectAttemptsRef.current < maxReconnectAttempts) {
 						const backoffTime = Math.min(1000 * 2 ** reconnectAttemptsRef.current, 30000); // Max 30s
 						reconnectAttemptsRef.current += 1;
-
-						console.log(
-							`Reconnecting to progress stream (attempt ${reconnectAttemptsRef.current}/${maxReconnectAttempts}) in ${backoffTime}ms...`,
-						);
 
 						reconnectTimeoutRef.current = setTimeout(() => {
 							connect();

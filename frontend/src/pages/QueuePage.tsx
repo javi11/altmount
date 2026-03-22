@@ -539,7 +539,7 @@ export function QueuePage() {
 										Search
 									</h3>
 									<div className="relative">
-										<Search className="absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2 text-base-content/60" />
+										<Search className="-translate-y-1/2 absolute top-1/2 left-3 h-3.5 w-3.5 text-base-content/60" />
 										<input
 											type="text"
 											placeholder="Find item..."

@@ -34,7 +34,6 @@ import (
 // repositorySet holds all database repositories
 type repositorySet struct {
 	MainRepo   *database.Repository
-	MediaRepo  *database.MediaRepository
 	HealthRepo *database.HealthRepository
 	UserRepo   *database.UserRepository
 }
@@ -214,7 +213,6 @@ func setupRepositories(ctx context.Context, db *database.DB) *repositorySet {
 
 	return &repositorySet{
 		MainRepo:   database.NewRepository(dbConn, d),
-		MediaRepo:  database.NewMediaRepository(dbConn, d),
 		HealthRepo: database.NewHealthRepository(dbConn, d),
 		UserRepo:   database.NewUserRepository(dbConn, d),
 	}
@@ -285,7 +283,6 @@ func setupAPIServer(
 		apiConfig,
 		repos.MainRepo,
 		repos.HealthRepo,
-		repos.MediaRepo,
 		authService,
 		repos.UserRepo,
 		configManager,
