@@ -31,41 +31,25 @@ func NewRCloneHandlers(mountService *rclone.MountService, configGetter config.Co
 // GetMountStatus returns the current mount status
 func (h *RCloneHandlers) GetMountStatus(c *fiber.Ctx) error {
 	status := h.mountService.GetStatus()
-	return c.JSON(fiber.Map{
-		"success": true,
-		"data":    status,
-	})
+	return RespondSuccess(c, status)
 }
 
 // StartMount starts the rclone mount
 func (h *RCloneHandlers) StartMount(c *fiber.Ctx) error {
 	if err := h.mountService.Mount(c.Context()); err != nil {
-		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
-			"success": false,
-			"message": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to start mount", err.Error())
 	}
 
-	return c.JSON(fiber.Map{
-		"success": true,
-		"message": "Mount started successfully",
-		"data":    h.mountService.GetStatus(),
-	})
+	return RespondSuccess(c, h.mountService.GetStatus())
 }
 
 // StopMount stops the rclone mount
 func (h *RCloneHandlers) StopMount(c *fiber.Ctx) error {
 	if err := h.mountService.Unmount(c.Context()); err != nil {
-		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
-			"success": false,
-			"message": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to stop mount", err.Error())
 	}
 
-	return c.JSON(fiber.Map{
-		"success": true,
-		"message": "Mount stopped successfully",
-	})
+	return RespondMessage(c, "Mount stopped successfully")
 }
 
 // TestMountConfig tests the mount configuration
@@ -77,10 +61,7 @@ func (h *RCloneHandlers) TestMountConfig(c *fiber.Ctx) error {
 	}
 
 	if err := c.BodyParser(&testConfig); err != nil {
-		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
-			"success": false,
-			"message": "Invalid request body",
-		})
+		return RespondBadRequest(c, "Invalid request body", "")
 	}
 
 	// Create a test config based on current config
@@ -95,10 +76,7 @@ func (h *RCloneHandlers) TestMountConfig(c *fiber.Ctx) error {
 		testCfg.RClone.MountOptions = testConfig.MountOptions
 	}
 
-	return c.JSON(fiber.Map{
-		"success": true,
-		"message": "Mount configuration is valid",
-	})
+	return RespondMessage(c, "Mount configuration is valid")
 }
 
 // TestRCloneConnection tests the RClone RC connection
@@ -112,19 +90,11 @@ func (h *RCloneHandlers) TestRCloneConnection(c *fiber.Ctx) error {
 	}
 
 	if err := c.BodyParser(&testReq); err != nil {
-		return c.Status(422).JSON(fiber.Map{
-			"success": false,
-			"message": "Invalid JSON in request body",
-			"details": err.Error(),
-		})
+		return RespondValidationError(c, "Invalid JSON in request body", err.Error())
 	}
 
 	if testReq.RCUrl == "" {
-		return c.Status(422).JSON(fiber.Map{
-			"success": false,
-			"message": "RC URL is required",
-			"details": "MISSING_RC_URL",
-		})
+		return RespondValidationError(c, "RC URL is required", "MISSING_RC_URL")
 	}
 
 	// Try to connect with timeout
@@ -134,23 +104,17 @@ func (h *RCloneHandlers) TestRCloneConnection(c *fiber.Ctx) error {
 	// Test external RC server connection including VFS name verification
 	err := rclonecli.TestConnection(ctx, testReq.RCUrl, testReq.RCUser, testReq.RCPass, testReq.VFSName, http.DefaultClient)
 	if err != nil {
-		return c.Status(200).JSON(fiber.Map{
-			"success": true,
-			"data": fiber.Map{
-				"success":       false,
-				"error_message": fmt.Sprintf("Failed to connect to external RC server: %v", err),
-			},
+		return RespondSuccess(c, fiber.Map{
+			"success":       false,
+			"error_message": fmt.Sprintf("Failed to connect to external RC server: %v", err),
 		})
 	}
 
 	// Connection successful
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"data": fiber.Map{
-			"success":       true,
-			"error_message": "",
-			"message":       fmt.Sprintf("Connected to external RC server at %s", testReq.RCUrl),
-		},
+	return RespondSuccess(c, fiber.Map{
+		"success":       true,
+		"error_message": "",
+		"message":       fmt.Sprintf("Connected to external RC server at %s", testReq.RCUrl),
 	})
 }
 
