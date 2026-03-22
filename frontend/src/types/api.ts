@@ -9,14 +9,12 @@ export interface APIResponse<T = unknown> {
 				message: string;
 				details: string;
 		  };
-	meta?: APIMeta;
-}
-
-export interface APIMeta {
-	count: number;
-	limit: number;
-	offset: number;
-	total?: number;
+	meta?: {
+		count: number;
+		limit: number;
+		offset: number;
+		total?: number;
+	};
 }
 
 // Queue types
@@ -136,17 +134,8 @@ export interface ScanStatusResponse {
 }
 
 // Import Job types
-export const ImportJobStatus = {
-	IDLE: "idle",
-	RUNNING: "running",
-	CANCELING: "canceling",
-	COMPLETED: "completed",
-} as const;
-
-export type ImportJobStatus = (typeof ImportJobStatus)[keyof typeof ImportJobStatus];
-
 export interface ImportStatusResponse {
-	status: ImportJobStatus;
+	status: "idle" | "running" | "canceling" | "completed";
 	total: number;
 	added: number;
 	failed: number;
@@ -227,31 +216,6 @@ export interface HealthCleanupResponse {
 	warning?: string;
 }
 
-// System types
-export interface SystemInfo {
-	start_time: string;
-	uptime: string;
-	go_version: string;
-}
-
-export interface ComponentHealth {
-	status: "healthy" | "unhealthy" | "degraded";
-	message: string;
-	details?: string;
-}
-
-export interface SystemHealth {
-	status: "healthy" | "unhealthy" | "degraded";
-	timestamp: string;
-	components: Record<string, ComponentHealth>;
-}
-
-export interface SystemCleanupRequest {
-	queue_older_than?: string;
-	health_older_than?: string;
-	health_status?: HealthStatus;
-}
-
 // File metadata types
 export interface SegmentInfo {
 	message_id: string;
@@ -291,22 +255,6 @@ export interface FileMetadata {
 	nested_sources?: NestedSourceInfo[];
 }
 
-// Filter and pagination types
-export interface PaginationParams {
-	limit?: number;
-	offset?: number;
-}
-
-export interface QueueFilters extends PaginationParams {
-	status?: QueueStatus;
-	since?: string;
-}
-
-export interface HealthFilters extends PaginationParams {
-	status?: HealthStatus;
-	since?: string;
-}
-
 // Authentication types
 export interface User {
 	id: string;
@@ -325,23 +273,9 @@ export interface AuthResponse {
 	message?: string;
 }
 
-export interface LoginRequest {
-	provider: string;
-}
-
 export interface ChangeOwnPasswordRequest {
 	current_password: string;
 	new_password: string;
-}
-
-export interface ManualImportRequest {
-	file_path: string;
-	relative_path?: string;
-}
-
-export interface ManualImportResponse {
-	queue_id: number;
-	message: string;
 }
 
 // Health Worker types
@@ -447,11 +381,6 @@ export interface PoolMetrics {
 export interface SABnzbdAddResponse {
 	status: boolean;
 	nzo_ids: string[];
-}
-
-export interface SABnzbdResponse {
-	status: boolean;
-	error?: string;
 }
 
 // System Browse types

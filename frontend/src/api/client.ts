@@ -30,8 +30,6 @@ import type {
 	ConfigResponse,
 	ConfigSection,
 	ConfigUpdateRequest,
-	ConfigValidateRequest,
-	ConfigValidateResponse,
 	ProviderConfig,
 	ProviderCreateRequest,
 	ProviderReorderRequest,
@@ -695,13 +693,6 @@ export class APIClient {
 	async updateConfigSection(section: ConfigSection, config: ConfigUpdateRequest) {
 		return this.request<ConfigResponse>(`/config/${section}`, {
 			method: "PATCH",
-			body: JSON.stringify(config),
-		});
-	}
-
-	async validateConfig(config: ConfigValidateRequest) {
-		return this.request<ConfigValidateResponse>("/config/validate", {
-			method: "POST",
 			body: JSON.stringify(config),
 		});
 	}

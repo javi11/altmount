@@ -20,14 +20,6 @@ export const useQueue = (params?: {
 	});
 };
 
-export const useQueueItem = (id: number) => {
-	return useQuery({
-		queryKey: ["queue", id],
-		queryFn: () => apiClient.getQueueItem(id),
-		enabled: !!id,
-	});
-};
-
 export const useQueueStats = () => {
 	return useQuery({
 		queryKey: ["queue", "stats"],
@@ -176,21 +168,6 @@ export const useHealth = (params?: {
 	});
 };
 
-export const useHealthItem = (id: string) => {
-	return useQuery({
-		queryKey: ["health", id],
-		queryFn: () => apiClient.getHealthItem(id),
-		enabled: !!id,
-	});
-};
-
-export const useCorruptedFiles = (params?: { limit?: number; offset?: number }) => {
-	return useQuery({
-		queryKey: ["health", "corrupted", params],
-		queryFn: () => apiClient.getCorruptedFiles(params),
-	});
-};
-
 export const useHealthStats = () => {
 	return useQuery({
 		queryKey: ["health", "stats"],
@@ -276,18 +253,6 @@ export const useRepairBulkHealthItems = () => {
 
 	return useMutation({
 		mutationFn: (filePaths: string[]) => apiClient.repairBulkHealthItems(filePaths),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["health"] });
-		},
-	});
-};
-
-export const useRetryHealthItem = () => {
-	const queryClient = useQueryClient();
-
-	return useMutation({
-		mutationFn: ({ id, resetStatus }: { id: string; resetStatus?: boolean }) =>
-			apiClient.retryHealthItem(id, resetStatus),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["health"] });
 		},
@@ -474,21 +439,6 @@ export const useCancelNzbdavImport = () => {
 		onSuccess: () => {
 			// Invalidate scan status to update immediately
 			queryClient.invalidateQueries({ queryKey: ["import", "nzbdav", "status"] });
-		},
-	});
-};
-
-// NZB file upload hook (SABnzbd API)
-export const useUploadNzb = () => {
-	const queryClient = useQueryClient();
-
-	return useMutation({
-		mutationFn: ({ file, apiKey }: { file: File; apiKey: string }) =>
-			apiClient.uploadNzbFile(file, apiKey),
-		onSuccess: () => {
-			// Invalidate queue data to show newly uploaded files
-			queryClient.invalidateQueries({ queryKey: ["queue"] });
-			queryClient.invalidateQueries({ queryKey: ["queue", "stats"] });
 		},
 	});
 };

@@ -461,23 +461,6 @@ export interface SABnzbdUpdateRequest {
 	fallback_api_key?: string;
 }
 
-// Configuration validation request
-export interface ConfigValidateRequest {
-	config: unknown;
-}
-
-// Configuration validation response
-export interface ConfigValidateResponse {
-	valid: boolean;
-	errors?: ConfigValidationError[];
-}
-
-// Configuration validation error
-export interface ConfigValidationError {
-	field: string;
-	message: string;
-}
-
 // Configuration section names for PATCH requests
 export type ConfigSection =
 	| "webdav"
@@ -502,10 +485,6 @@ export interface WebDAVFormData {
 	user: string;
 	password: string;
 	host?: string;
-}
-
-export interface APIFormData {
-	prefix: string;
 }
 
 export interface ImportFormData {
@@ -676,11 +655,6 @@ export type ArrsType = "radarr" | "sonarr";
 // Sync status types
 export type SyncStatus = "idle" | "running" | "cancelling" | "completed" | "failed";
 
-export interface PathMappingConfig {
-	from_path: string;
-	to_path: string;
-}
-
 export interface ArrsInstanceConfig {
 	name: string;
 	url: string;
@@ -724,13 +698,6 @@ export interface ArrsConfig {
 }
 
 // Sync status and progress types
-export interface SyncProgressInfo {
-	processed_count: number;
-	error_count: number;
-	total_items?: number;
-	current_batch: string;
-}
-
 export interface SyncProgress {
 	instance_id: number;
 	status: SyncStatus;

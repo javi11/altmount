@@ -11,7 +11,7 @@ import type {
 import { configKeys } from "./useConfig";
 
 // Test provider connectivity
-export function useTestProvider() {
+function useTestProvider() {
 	const queryClient = useQueryClient();
 	return useMutation<ProviderTestResponse, Error, ProviderTestRequest>({
 		mutationFn: (data) => apiClient.testProvider(data),
@@ -23,7 +23,7 @@ export function useTestProvider() {
 }
 
 // Test provider speed
-export function useTestProviderSpeed() {
+function useTestProviderSpeed() {
 	const queryClient = useQueryClient();
 	return useMutation<{ speed_mbps: number; duration_seconds: number }, Error, string>({
 		mutationFn: (id) => apiClient.testProviderSpeed(id),
@@ -35,7 +35,7 @@ export function useTestProviderSpeed() {
 }
 
 // Create new provider
-export function useCreateProvider() {
+function useCreateProvider() {
 	const queryClient = useQueryClient();
 
 	return useMutation<ProviderConfig, Error, ProviderCreateRequest>({
@@ -51,7 +51,7 @@ export function useCreateProvider() {
 }
 
 // Update existing provider
-export function useUpdateProvider() {
+function useUpdateProvider() {
 	const queryClient = useQueryClient();
 
 	return useMutation<ProviderConfig, Error, { id: string; data: Partial<ProviderUpdateRequest> }>({
@@ -67,7 +67,7 @@ export function useUpdateProvider() {
 }
 
 // Delete provider
-export function useDeleteProvider() {
+function useDeleteProvider() {
 	const queryClient = useQueryClient();
 
 	return useMutation<{ message: string }, Error, string>({
@@ -83,7 +83,7 @@ export function useDeleteProvider() {
 }
 
 // Reorder providers
-export function useReorderProviders() {
+function useReorderProviders() {
 	const queryClient = useQueryClient();
 
 	return useMutation<ProviderConfig[], Error, ProviderReorderRequest>({
