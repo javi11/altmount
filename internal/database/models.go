@@ -127,19 +127,6 @@ type User struct {
 	LastLogin    *time.Time `db:"last_login"`    // Last login timestamp (nullable)
 }
 
-// MediaFile represents a media file tracked by scrapers
-type MediaFile struct {
-	ID           int64     `db:"id"`
-	InstanceName string    `db:"instance_name"` // Name from configuration
-	InstanceType string    `db:"instance_type"` // "radarr" or "sonarr"
-	ExternalID   int64     `db:"external_id"`   // Movie ID or Episode ID from API
-	FileID       int64     `db:"file_id"`       // Movie File ID or Episode File ID from API (nullable)
-	FilePath     string    `db:"file_path"`     // Full file path
-	FileSize     *int64    `db:"file_size"`     // File size in bytes (nullable)
-	CreatedAt    time.Time `db:"created_at"`    // When record was created
-	UpdatedAt    time.Time `db:"updated_at"`    // When record was last updated
-}
-
 // SystemStat represents a persistent system statistic
 type SystemStat struct {
 	Key       string    `db:"key"`

@@ -140,46 +140,6 @@ func (r *Repository) AddToQueue(ctx context.Context, item *ImportQueueItem) erro
 	return nil
 }
 
-// GetNextQueueItems retrieves the next batch of items to process from the queue
-// Uses optimized query with row-level locking for better concurrency
-func (r *Repository) GetNextQueueItems(ctx context.Context, limit int) ([]*ImportQueueItem, error) {
-	// Use a CTE to select items and immediately mark them as claimed to avoid race conditions
-	query := fmt.Sprintf(`
-		WITH selected_items AS (
-			SELECT id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
-			       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, target_path
-			FROM import_queue
-			WHERE status = 'pending'
-			  AND (started_at IS NULL OR %s < datetime('now'))
-			ORDER BY priority ASC, created_at ASC
-			LIMIT ?
-		)
-		SELECT * FROM selected_items
-	`, r.dialect.ColumnPlusMinutes("started_at", 10))
-
-	rows, err := r.db.QueryContext(ctx, query, limit)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get next queue items: %w", err)
-	}
-	defer rows.Close()
-
-	var items []*ImportQueueItem
-	for rows.Next() {
-		var item ImportQueueItem
-		err := rows.Scan(
-			&item.ID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
-			&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
-			&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.TargetPath,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan queue item: %w", err)
-		}
-		items = append(items, &item)
-	}
-
-	return items, rows.Err()
-}
-
 // ClaimNextQueueItem atomically claims and returns the next available queue item
 // This prevents multiple workers from processing the same item
 // Uses a single atomic UPDATE...RETURNING query to eliminate race conditions
@@ -362,31 +322,6 @@ func (r *Repository) GetQueueItem(ctx context.Context, id int64) (*ImportQueueIt
 	return &item, nil
 }
 
-// GetQueueItemByPath retrieves a queue item by NZB path
-func (r *Repository) GetQueueItemByPath(ctx context.Context, nzbPath string) (*ImportQueueItem, error) {
-	query := `
-		SELECT id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
-		       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path, target_path
-		FROM import_queue WHERE nzb_path = ?
-	`
-
-	var item ImportQueueItem
-	err := r.db.QueryRowContext(ctx, query, nzbPath).Scan(
-		&item.ID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
-		&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
-		&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath, &item.TargetPath,
-	)
-
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("failed to get queue item by path: %w", err)
-	}
-
-	return &item, nil
-}
-
 // RemoveFromQueue removes an item from the queue
 func (r *Repository) RemoveFromQueue(ctx context.Context, id int64) error {
 	query := `DELETE FROM import_queue WHERE id = ?`
@@ -440,17 +375,10 @@ func (r *Repository) RemoveFromHistoryByNzbID(ctx context.Context, nzbID int64) 
 	return rowsAffected, nil
 }
 
-// BulkDeleteResult contains the result of a bulk delete operation
-type BulkDeleteResult struct {
-	DeletedCount    int64
-	ProcessingCount int64
-	RequestedCount  int64
-}
-
 // RemoveFromQueueBulk removes multiple items from the queue, excluding those currently being processed
-func (r *Repository) RemoveFromQueueBulk(ctx context.Context, ids []int64) (*BulkDeleteResult, error) {
+func (r *Repository) RemoveFromQueueBulk(ctx context.Context, ids []int64) (*BulkOperationResult, error) {
 	if len(ids) == 0 {
-		return &BulkDeleteResult{RequestedCount: 0}, nil
+		return &BulkOperationResult{}, nil
 	}
 
 	// Build placeholders for the IN clause
@@ -473,10 +401,9 @@ func (r *Repository) RemoveFromQueueBulk(ctx context.Context, ids []int64) (*Bul
 
 	// If there are processing items, return error
 	if processingCount > 0 {
-		return &BulkDeleteResult{
+		return &BulkOperationResult{
 			DeletedCount:    0,
-			ProcessingCount: processingCount,
-			RequestedCount:  int64(len(ids)),
+			ProcessingCount: int(processingCount),
 		}, fmt.Errorf("cannot delete %d items that are currently being processed", processingCount)
 	}
 
@@ -494,10 +421,9 @@ func (r *Repository) RemoveFromQueueBulk(ctx context.Context, ids []int64) (*Bul
 		return nil, fmt.Errorf("failed to get rows affected: %w", err)
 	}
 
-	return &BulkDeleteResult{
-		DeletedCount:    rowsAffected,
-		ProcessingCount: processingCount,
-		RequestedCount:  int64(len(ids)),
+	return &BulkOperationResult{
+		DeletedCount:    int(rowsAffected),
+		ProcessingCount: 0,
 	}, nil
 }
 
@@ -1246,27 +1172,6 @@ func (r *Repository) IncrementHourlyStat(ctx context.Context, statType string) e
 // GetImportHistory retrieves historical import statistics for the last N days (Alias for GetImportDailyStats)
 func (r *Repository) GetImportHistory(ctx context.Context, days int) ([]*ImportDailyStat, error) {
 	return r.GetImportDailyStats(ctx, days)
-}
-
-// GetImportHistoryItem retrieves a specific import history item by ID
-func (r *Repository) GetImportHistoryItem(ctx context.Context, id int64) (*ImportHistory, error) {
-	query := `
-		SELECT h.id, h.nzb_id, h.nzb_name, h.file_name, h.file_size, h.virtual_path, f.library_path, h.category, h.completed_at
-		FROM import_history h
-		LEFT JOIN file_health f ON h.virtual_path = f.file_path
-		WHERE h.id = ?
-	`
-
-	var h ImportHistory
-	err := r.db.QueryRowContext(ctx, query, id).Scan(&h.ID, &h.NzbID, &h.NzbName, &h.FileName, &h.FileSize, &h.VirtualPath, &h.LibraryPath, &h.Category, &h.CompletedAt)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("failed to get import history item: %w", err)
-	}
-
-	return &h, nil
 }
 
 // GetSystemStats retrieves all system statistics as a map

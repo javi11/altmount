@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type APIError, apiClient } from "../api/client";
 import { useToast } from "../contexts/ToastContext";
-import type { ConfigSection, ConfigUpdateRequest, ConfigValidateRequest } from "../types/config";
+import type { ConfigSection, ConfigUpdateRequest } from "../types/config";
 
 // Query keys for React Query
 export const configKeys = {
@@ -56,16 +56,6 @@ export function useUpdateConfigSection() {
 				title: "Update Failed",
 				message: err.details,
 			});
-		},
-	});
-}
-
-// Hook to validate configuration
-export function useValidateConfig() {
-	return useMutation({
-		mutationFn: (config: ConfigValidateRequest) => apiClient.validateConfig(config),
-		onError: (error) => {
-			console.error("Failed to validate configuration:", error);
 		},
 	});
 }
