@@ -221,6 +221,110 @@ func TestHandle_Read_SeekError(t *testing.T) {
 	mockFile.AssertNotCalled(t, "Read", mock.Anything)
 }
 
+func TestHandle_Read_ContextCanceled(t *testing.T) {
+	logger := slog.Default()
+
+	// Use blockingFile so the goroutine doesn't panic on unexpected calls
+	bf := &blockingFile{readBlock: make(chan struct{})}
+	handle := NewHandle(bf, logger, "testfile", nil, nil)
+
+	// Pre-cancelled context — should return EINTR promptly
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	dest := make([]byte, 10)
+	_, status := handle.Read(ctx, dest, 0)
+	assert.Equal(t, syscall.EINTR, status)
+
+	// Unblock the orphaned goroutine
+	close(bf.readBlock)
+}
+
+func TestHandle_Read_BlockingReadContextCanceled(t *testing.T) {
+	logger := slog.Default()
+
+	// blockingFile blocks on Read until Close is called
+	bf := &blockingFile{readBlock: make(chan struct{})}
+
+	handle := NewHandle(bf, logger, "testfile", nil, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	dest := make([]byte, 10)
+
+	done := make(chan syscall.Errno, 1)
+	go func() {
+		_, status := handle.Read(ctx, dest, 0)
+		done <- status
+	}()
+
+	// Cancel context while Read is blocked
+	cancel()
+
+	status := <-done
+	assert.Equal(t, syscall.EINTR, status)
+
+	// Unblock the orphaned goroutine so it can complete
+	close(bf.readBlock)
+}
+
+func TestHandle_Read_BlockingSeekContextCanceled(t *testing.T) {
+	logger := slog.Default()
+
+	bf := &blockingFile{seekBlock: make(chan struct{})}
+
+	handle := NewHandle(bf, logger, "testfile", nil, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	dest := make([]byte, 10)
+
+	done := make(chan syscall.Errno, 1)
+	go func() {
+		// offset 100 != position 0, so Seek will be called
+		_, status := handle.Read(ctx, dest, 100)
+		done <- status
+	}()
+
+	cancel()
+
+	status := <-done
+	assert.Equal(t, syscall.EINTR, status)
+
+	close(bf.seekBlock)
+}
+
+// blockingFile is a minimal afero.File that blocks on Read/Seek until the
+// corresponding channel is closed. Used to test context cancellation.
+type blockingFile struct {
+	readBlock chan struct{} // if non-nil, Read blocks until closed
+	seekBlock chan struct{} // if non-nil, Seek blocks until closed
+}
+
+func (f *blockingFile) Read(p []byte) (int, error) {
+	if f.readBlock != nil {
+		<-f.readBlock
+	}
+	return 0, io.EOF
+}
+
+func (f *blockingFile) Seek(offset int64, whence int) (int64, error) {
+	if f.seekBlock != nil {
+		<-f.seekBlock
+	}
+	return offset, nil
+}
+
+func (f *blockingFile) Close() error                                 { return nil }
+func (f *blockingFile) ReadAt(p []byte, off int64) (int, error)      { return 0, nil }
+func (f *blockingFile) Write(p []byte) (int, error)                  { return 0, nil }
+func (f *blockingFile) WriteAt(p []byte, off int64) (int, error)     { return 0, nil }
+func (f *blockingFile) Name() string                                 { return "blocking" }
+func (f *blockingFile) Readdir(count int) ([]os.FileInfo, error)     { return nil, nil }
+func (f *blockingFile) Readdirnames(n int) ([]string, error)         { return nil, nil }
+func (f *blockingFile) Stat() (os.FileInfo, error)                   { return nil, nil }
+func (f *blockingFile) Sync() error                                  { return nil }
+func (f *blockingFile) Truncate(size int64) error                    { return nil }
+func (f *blockingFile) WriteString(s string) (int, error)            { return 0, nil }
+
 func TestHandle_Release_Idempotent(t *testing.T) {
 	mockFile := new(MockFile)
 	logger := slog.Default()
