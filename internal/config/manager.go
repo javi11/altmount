@@ -264,6 +264,8 @@ type ImportConfig struct {
 	WatchIntervalSeconds           *int           `yaml:"watch_interval_seconds" mapstructure:"watch_interval_seconds" json:"watch_interval_seconds,omitempty"`
 	AllowNestedRarExtraction       *bool          `yaml:"allow_nested_rar_extraction" mapstructure:"allow_nested_rar_extraction" json:"allow_nested_rar_extraction,omitempty"`
 	ExpandBlurayIso                *bool          `yaml:"expand_bluray_iso" mapstructure:"expand_bluray_iso" json:"expand_bluray_iso,omitempty"`
+	AllowFileRenaming              *bool          `yaml:"allow_file_renaming" mapstructure:"allow_file_renaming" json:"allow_file_renaming,omitempty"`
+	FilterSampleAndProof           *bool          `yaml:"filter_sample_and_proof" mapstructure:"filter_sample_and_proof" json:"filter_sample_and_proof,omitempty"`
 	FailedItemRetentionHours       *int           `yaml:"failed_item_retention_hours" mapstructure:"failed_item_retention_hours" json:"failed_item_retention_hours,omitempty"`
 }
 

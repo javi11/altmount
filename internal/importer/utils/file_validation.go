@@ -47,9 +47,15 @@ var whitelistedExtensions = map[string]bool{
 // IsAllowedFile checks if a filename has an allowed extension
 // If allowedExtensions is empty, all files are allowed
 // size is used to prevent false positives for sample/proof checks on large files
-func IsAllowedFile(filename string, size int64, allowedExtensions []string) bool {
+func IsAllowedFile(filename string, size int64, allowedExtensions []string, filterSampleAndProof ...bool) bool {
 	if filename == "" {
 		return false
+	}
+
+	// By default, we want to filter out sample/proof files
+	filterExtras := true
+	if len(filterSampleAndProof) > 0 {
+		filterExtras = filterSampleAndProof[0]
 	}
 
 	ext := strings.ToLower(filepath.Ext(filename))
@@ -65,9 +71,12 @@ func IsAllowedFile(filename string, size int64, allowedExtensions []string) bool
 		return true
 	}
 
-	// Check if file is a sample or proof
-	if isSampleOrProof(filename, size) {
-		return false
+	// only check for Sample and Proof if setting is enabled
+	if filterExtras {
+		// Check if file is a sample or proof
+		if isSampleOrProof(filename, size) {
+			return false
+		}
 	}
 
 	// Empty list = allow all files
