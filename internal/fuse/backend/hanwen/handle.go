@@ -53,6 +53,45 @@ func NewHandle(
 	}
 }
 
+// readWithContext wraps a blocking file.Read in a goroutine with context cancellation.
+// On context expiry, returns ctx.Err(); the goroutine completes when file is closed.
+func readWithContext(ctx context.Context, file afero.File, dest []byte) (int, error) {
+	type result struct {
+		n   int
+		err error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		n, err := file.Read(dest)
+		ch <- result{n, err}
+	}()
+	select {
+	case res := <-ch:
+		return res.n, res.err
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	}
+}
+
+// seekWithContext wraps a blocking file.Seek in a goroutine with context cancellation.
+func seekWithContext(ctx context.Context, file afero.File, offset int64, whence int) (int64, error) {
+	type result struct {
+		pos int64
+		err error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		pos, err := file.Seek(offset, whence)
+		ch <- result{pos, err}
+	}()
+	select {
+	case res := <-ch:
+		return res.pos, res.err
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	}
+}
+
 // Read handles a read request using Seek+Read.
 // This keeps the persistent UsenetReader alive across reads, allowing
 // the downloadManager prefetch pipeline to stay effective.
@@ -63,13 +102,17 @@ func (h *Handle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadRes
 
 	// Skip seek if already at the correct position (sequential read optimization)
 	if off != h.position.Load() {
-		if _, err := h.file.Seek(off, io.SeekStart); err != nil {
+		if _, err := seekWithContext(ctx, h.file, off, io.SeekStart); err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				h.logger.DebugContext(ctx, "Seek canceled", "path", h.path, "offset", off)
+				return nil, syscall.EINTR
+			}
 			h.logger.ErrorContext(ctx, "Seek failed", "path", h.path, "offset", off, "error", err)
 			return nil, syscall.EIO
 		}
 	}
 
-	n, err := h.file.Read(dest)
+	n, err := readWithContext(ctx, h.file, dest)
 
 	if n > 0 {
 		newPos := off + int64(n)
