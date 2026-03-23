@@ -1,4 +1,15 @@
-import { Eye, MoreHorizontal, PlayCircle, RefreshCw, Trash2, Wrench, X } from "lucide-react";
+import {
+	Download,
+	Eye,
+	MoreHorizontal,
+	PlayCircle,
+	RefreshCw,
+	Trash2,
+	Wrench,
+	X,
+} from "lucide-react";
+import { useState } from "react";
+import { apiClient } from "../../../../api/client";
 import type { FileHealth } from "../../../../types/api";
 
 interface HealthItemActionsMenuProps {
@@ -32,6 +43,27 @@ export function HealthItemActionsMenu({
 	onUnmask,
 	onRegenerate,
 }: HealthItemActionsMenuProps) {
+	const [isDownloadPending, setIsDownloadPending] = useState(false);
+
+	async function handleDownloadNZB() {
+		setIsDownloadPending(true);
+		try {
+			const blob = await apiClient.exportMetadataToNZB(item.file_path);
+			const baseName = item.file_path.split("/").pop() ?? item.file_path;
+			const nameWithoutExt = baseName.replace(/\.[^/.]+$/, "");
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement("a");
+			a.href = url;
+			a.download = `${nameWithoutExt}.nzb`;
+			document.body.appendChild(a);
+			a.click();
+			document.body.removeChild(a);
+			URL.revokeObjectURL(url);
+		} finally {
+			setIsDownloadPending(false);
+		}
+	}
+
 	return (
 		<div className="dropdown dropdown-end">
 			<button tabIndex={0} type="button" className="btn btn-ghost btn-sm">
@@ -95,6 +127,12 @@ export function HealthItemActionsMenu({
 					>
 						<Wrench className="h-4 w-4" />
 						Trigger Repair
+					</button>
+				</li>
+				<li>
+					<button type="button" onClick={handleDownloadNZB} disabled={isDownloadPending}>
+						<Download className="h-4 w-4" />
+						Download NZB
 					</button>
 				</li>
 				<li>
