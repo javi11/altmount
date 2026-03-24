@@ -15,7 +15,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -1277,19 +1276,4 @@ func (s *Server) findARRInstanceByURL(checkURL string) *arrs.ConfigInstance {
 	return nil
 }
 
-// getDiskSpace returns free and total disk space in bytes for the given path
-func getDiskSpace(path string) (free, total uint64) {
-	// For Linux/Unix
-	if runtime.GOOS != "windows" {
-		var stat syscall.Statfs_t
-		if err := syscall.Statfs(path, &stat); err == nil {
-			// Available blocks * size per block = available space in bytes
-			free = stat.Bavail * uint64(stat.Bsize)
-			total = stat.Blocks * uint64(stat.Bsize)
-			return
-		}
-	}
-
-	// Fallback/Default
-	return 0, 0
-}
+// getDiskSpace is defined in sabnzbd_disk_unix.go (non-Windows) and sabnzbd_disk_windows.go (Windows).
