@@ -152,10 +152,12 @@ jobs:
       - name: Setup WinFsp headers (Windows CGO)
         if: matrix.goos == 'windows'
         run: |
-          curl -fsSL -o winfsp.zip \
-            "https://github.com/winfsp/winfsp/releases/download/v2.0/winfsp-2.0.23075.zip"
-          unzip -q winfsp.zip "inc/fuse/*" -d winfsp-sdk
-          echo "CGO_CFLAGS=-I$(pwd)/winfsp-sdk/inc/fuse" >> "$GITHUB_ENV"
+          mkdir -p winfsp-sdk
+          for f in fuse.h fuse_common.h fuse_opt.h; do
+            curl -fsSL -o "winfsp-sdk/$f" \
+              "https://raw.githubusercontent.com/winfsp/winfsp/master/inc/fuse/$f"
+          done
+          echo "CGO_CFLAGS=-I$(pwd)/winfsp-sdk" >> "$GITHUB_ENV"
 
       # Extract version info
       - name: Extract version info
