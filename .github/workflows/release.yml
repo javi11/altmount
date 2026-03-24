@@ -148,16 +148,6 @@ jobs:
         if: matrix.goos == 'darwin'
         run: brew install --cask macfuse
 
-      # Install WinFsp headers for Windows CGO cross-compilation
-      - name: Setup WinFsp headers (Windows CGO)
-        if: matrix.goos == 'windows'
-        run: |
-          mkdir -p winfsp-sdk
-          for f in fuse.h fuse_common.h fuse_opt.h; do
-            curl -fsSL -o "winfsp-sdk/$f" \
-              "https://raw.githubusercontent.com/winfsp/winfsp/master/inc/fuse/$f"
-          done
-          echo "CGO_CFLAGS=-I$(pwd)/winfsp-sdk" >> "$GITHUB_ENV"
 
       # Extract version info
       - name: Extract version info
