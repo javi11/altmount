@@ -84,12 +84,16 @@ func Create(t Type, cfg Config) (Backend, error) {
 }
 
 // DefaultType returns the platform-default backend type.
-// Linux uses hanwen (pure Go, fastest). macOS/Windows use cgo (Fuse-T/WinFsp).
+// Linux uses hanwen (pure Go). macOS uses cgo (Fuse-T).
+// Windows FUSE support via WinFsp requires a native Windows build; cross-compiled
+// Windows binaries default to cgo but FUSE mounting is not supported without WinFsp.
 // Override with ALTMOUNT_FUSE_BACKEND env var (checked by caller).
 func DefaultType() Type {
 	switch runtime.GOOS {
 	case "linux":
 		return Hanwen
+	case "darwin":
+		return Cgo
 	default:
 		return Cgo
 	}
