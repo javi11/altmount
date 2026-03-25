@@ -332,8 +332,10 @@ type ProviderConfig struct {
 	ProxyURL          string     `yaml:"proxy_url" mapstructure:"proxy_url" json:"proxy_url,omitempty"`
 	Enabled           *bool      `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
 	IsBackupProvider  *bool      `yaml:"is_backup_provider" mapstructure:"is_backup_provider" json:"is_backup_provider,omitempty"`
-	SkipPing          bool       `yaml:"skip_ping" mapstructure:"skip_ping" json:"skip_ping,omitempty"`
-	LastRTTMs         int64      `yaml:"last_rtt_ms" mapstructure:"last_rtt_ms" json:"last_rtt_ms,omitempty"`
+	SkipPing                 bool       `yaml:"skip_ping" mapstructure:"skip_ping" json:"skip_ping,omitempty"`
+	KeepaliveIntervalSeconds int        `yaml:"keepalive_interval_seconds" mapstructure:"keepalive_interval_seconds" json:"keepalive_interval_seconds,omitempty"`
+	KeepaliveCommand         string     `yaml:"keepalive_command" mapstructure:"keepalive_command" json:"keepalive_command,omitempty"`
+	LastRTTMs                int64      `yaml:"last_rtt_ms" mapstructure:"last_rtt_ms" json:"last_rtt_ms,omitempty"`
 	LastSpeedTestMbps float64    `yaml:"last_speed_test_mbps" mapstructure:"last_speed_test_mbps" json:"last_speed_test_mbps,omitempty"`
 	LastSpeedTestTime *time.Time `yaml:"last_speed_test_time" mapstructure:"last_speed_test_time" json:"last_speed_test_time,omitempty"`
 }
@@ -761,14 +763,16 @@ func (p *ProviderConfig) ToNNTPProvider() nntppool.Provider {
 	}
 
 	return nntppool.Provider{
-		Host:        host,
-		TLSConfig:   tlsCfg,
-		Auth:        nntppool.Auth{Username: p.Username, Password: p.Password},
-		Connections: p.MaxConnections,
-		Backup:      isBackup,
-		Inflight:    inflight,
-		IdleTimeout: 60 * time.Second,
-		SkipPing:    p.SkipPing,
+		Host:              host,
+		TLSConfig:         tlsCfg,
+		Auth:              nntppool.Auth{Username: p.Username, Password: p.Password},
+		Connections:       p.MaxConnections,
+		Backup:            isBackup,
+		Inflight:          inflight,
+		IdleTimeout:       60 * time.Second,
+		SkipPing:          p.SkipPing,
+		KeepaliveInterval: time.Duration(p.KeepaliveIntervalSeconds) * time.Second,
+		KeepaliveCommand:  p.KeepaliveCommand,
 	}
 }
 
@@ -841,6 +845,8 @@ func providersFieldsEqual(a, b ProviderConfig) bool {
 		a.TLS == b.TLS &&
 		a.InsecureTLS == b.InsecureTLS &&
 		a.ProxyURL == b.ProxyURL &&
+		a.KeepaliveIntervalSeconds == b.KeepaliveIntervalSeconds &&
+		a.KeepaliveCommand == b.KeepaliveCommand &&
 		boolPtrEqual(a.Enabled, b.Enabled) &&
 		boolPtrEqual(a.IsBackupProvider, b.IsBackupProvider)
 }
