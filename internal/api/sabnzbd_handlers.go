@@ -1,9 +1,7 @@
 package api
 
 import (
-	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -153,18 +151,27 @@ func (s *Server) handleSABnzbdSwitch(c *fiber.Ctx) error {
 		return s.writeSABnzbdErrorFiber(c, "Missing parameters")
 	}
 
-	id, err := strconv.ParseInt(value, 10, 64)
-	if err != nil {
-		return s.writeSABnzbdErrorFiber(c, "Invalid ID")
-	}
-
 	priority := s.parseSABnzbdPriority(value2)
 
-	if err := s.queueRepo.UpdateQueueItemPriority(c.Context(), id, priority); err != nil {
-		return s.writeSABnzbdErrorFiber(c, "Failed to update priority")
+	// Attempt to parse as database ID first
+	id, err := strconv.ParseInt(value, 10, 64)
+	if err == nil {
+		if err := s.queueRepo.UpdateQueueItemPriority(c.Context(), id, priority); err == nil {
+			return s.writeSABnzbdResponseFiber(c, SABnzbdResponse{Status: true})
+		}
 	}
 
-	return s.writeSABnzbdResponseFiber(c, SABnzbdResponse{Status: true})
+	// Fallback to DownloadID lookup if parsing failed or ID not found in queue
+	if s.queueRepo != nil {
+		item, err := s.queueRepo.GetQueueItemByDownloadID(c.Context(), value)
+		if err == nil && item != nil {
+			if err := s.queueRepo.UpdateQueueItemPriority(c.Context(), item.ID, priority); err == nil {
+				return s.writeSABnzbdResponseFiber(c, SABnzbdResponse{Status: true})
+			}
+		}
+	}
+
+	return s.writeSABnzbdErrorFiber(c, "Failed to update priority or item not found")
 }
 
 // handleSABnzbdQueuePause handles pausing/resuming a queue item
@@ -173,12 +180,21 @@ func (s *Server) handleSABnzbdQueuePause(c *fiber.Ctx, pause bool) error {
 	if value == "" {
 		return s.writeSABnzbdErrorFiber(c, "Missing value parameter")
 	}
-	id, err := strconv.ParseInt(value, 10, 64)
-	if err != nil {
-		return s.writeSABnzbdErrorFiber(c, "Invalid value parameter")
+
+	var item *database.ImportQueueItem
+	var err error
+
+	// 1. Try numeric ID
+	id, parseErr := strconv.ParseInt(value, 10, 64)
+	if parseErr == nil {
+		item, err = s.queueRepo.GetQueueItem(c.Context(), id)
 	}
 
-	item, err := s.queueRepo.GetQueueItem(c.Context(), id)
+	// 2. Fallback to DownloadID if not found or not numeric
+	if item == nil && s.queueRepo != nil {
+		item, err = s.queueRepo.GetQueueItemByDownloadID(c.Context(), value)
+	}
+
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to get queue item")
 	}
@@ -188,13 +204,13 @@ func (s *Server) handleSABnzbdQueuePause(c *fiber.Ctx, pause bool) error {
 
 	if pause {
 		if item.Status == database.QueueStatusPending {
-			if err := s.queueRepo.UpdateQueueItemStatus(c.Context(), id, database.QueueStatusPaused, nil); err != nil {
+			if err := s.queueRepo.UpdateQueueItemStatus(c.Context(), item.ID, database.QueueStatusPaused, nil); err != nil {
 				return s.writeSABnzbdErrorFiber(c, "Failed to pause item")
 			}
 		}
 	} else {
 		if item.Status == database.QueueStatusPaused {
-			if err := s.queueRepo.UpdateQueueItemStatus(c.Context(), id, database.QueueStatusPending, nil); err != nil {
+			if err := s.queueRepo.UpdateQueueItemStatus(c.Context(), item.ID, database.QueueStatusPending, nil); err != nil {
 				return s.writeSABnzbdErrorFiber(c, "Failed to resume item")
 			}
 		}
@@ -649,38 +665,43 @@ func (s *Server) handleSABnzbdQueueDelete(c *fiber.Ctx) error {
 		return s.writeSABnzbdErrorFiber(c, "Missing nzo_id parameter")
 	}
 
-	// Convert nzo_id to database ID
-	id, err := strconv.ParseInt(nzoID, 10, 64)
-	if err != nil {
-		return s.writeSABnzbdErrorFiber(c, "Invalid nzo_id")
-	}
-
 	if s.importerService == nil {
 		return s.writeSABnzbdErrorFiber(c, "Importer service not available")
 	}
 
-	// Delete from queue
-	err = s.queueRepo.RemoveFromQueue(c.Context(), id)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			// Item not found in queue, consider it "deleted" already
-			return s.writeSABnzbdResponseFiber(c, SABnzbdDeleteResponse{
-				Status: true,
-			})
+	// 1. Try numeric ID
+	id, err := strconv.ParseInt(nzoID, 10, 64)
+	if err == nil {
+		// Delete from queue
+		err = s.queueRepo.RemoveFromQueue(c.Context(), id)
+		if err == nil {
+			// Also remove from history if it existed there (to prevent ghost items)
+			_, _ = s.queueRepo.RemoveFromHistoryByNzbID(c.Context(), id)
+			_, _ = s.queueRepo.RemoveFromHistory(c.Context(), id)
+
+			return s.writeSABnzbdResponseFiber(c, SABnzbdDeleteResponse{Status: true})
 		}
-		return s.writeSABnzbdErrorFiber(c, "Failed to delete queue item")
 	}
 
-	// Also remove from history if it existed there (to prevent ghost items)
-	_, _ = s.queueRepo.RemoveFromHistoryByNzbID(c.Context(), id)
-	// Try direct ID as fallback in case nzoID was already a history ID
-	_, _ = s.queueRepo.RemoveFromHistory(c.Context(), id)
+	// 2. Fallback to DownloadID if not found or not numeric
+	if s.queueRepo != nil {
+		// Try to find the item first to get its ID (for history cleanup)
+		item, _ := s.queueRepo.GetQueueItemByDownloadID(c.Context(), nzoID)
 
-	response := SABnzbdDeleteResponse{
-		Status: true,
+		err = s.queueRepo.RemoveFromQueueByDownloadID(c.Context(), nzoID)
+		if err == nil {
+			// Also remove from history by DownloadID
+			_, _ = s.queueRepo.RemoveFromHistoryByDownloadID(c.Context(), nzoID)
+
+			if item != nil {
+				_, _ = s.queueRepo.RemoveFromHistoryByNzbID(c.Context(), item.ID)
+			}
+
+			return s.writeSABnzbdResponseFiber(c, SABnzbdDeleteResponse{Status: true})
+		}
 	}
 
-	return s.writeSABnzbdResponseFiber(c, response)
+	return s.writeSABnzbdResponseFiber(c, SABnzbdDeleteResponse{Status: true}) // Always return true for delete consistency
 }
 
 // handleSABnzbdHistory handles history operations
@@ -873,63 +894,57 @@ func (s *Server) handleSABnzbdHistoryDelete(c *fiber.Ctx) error {
 		return s.writeSABnzbdErrorFiber(c, "Missing nzo_id parameter")
 	}
 
-	// Convert nzo_id to database ID
-	id, err := strconv.ParseInt(nzoID, 10, 64)
-	if err != nil {
-		return s.writeSABnzbdErrorFiber(c, "Invalid nzo_id")
-	}
-
 	if s.importerService == nil {
 		return s.writeSABnzbdErrorFiber(c, "Importer service not available")
 	}
 
-	// Delete from queue (history items are still queue items with completed/failed status)
-	err = s.queueRepo.RemoveFromQueue(c.Context(), id)
-	if err != nil {
+	// 1. Try numeric ID
+	id, err := strconv.ParseInt(nzoID, 10, 64)
+	if err == nil {
+		// Delete from queue (history items are still queue items with completed/failed status)
+		err = s.queueRepo.RemoveFromQueue(c.Context(), id)
+		if err == nil {
+			_, _ = s.queueRepo.RemoveFromHistoryByNzbID(c.Context(), id)
+			_, _ = s.queueRepo.RemoveFromHistory(c.Context(), id)
+			return s.writeSABnzbdResponseFiber(c, SABnzbdDeleteResponse{Status: true})
+		}
+
 		// If not in active queue, it might be in persistent history
 		// Try by original NzbID first
 		affected, histErr := s.queueRepo.RemoveFromHistoryByNzbID(c.Context(), id)
 		if histErr == nil && affected > 0 {
-			return s.writeSABnzbdResponseFiber(c, SABnzbdDeleteResponse{
-				Status: true,
-			})
+			return s.writeSABnzbdResponseFiber(c, SABnzbdDeleteResponse{Status: true})
 		}
 
-		// Try direct history ID fallback (in case NzoID was already a history ID)
 		affected, histErr = s.queueRepo.RemoveFromHistory(c.Context(), id)
 		if histErr == nil && affected > 0 {
-			return s.writeSABnzbdResponseFiber(c, SABnzbdDeleteResponse{
-				Status: true,
-			})
+			return s.writeSABnzbdResponseFiber(c, SABnzbdDeleteResponse{Status: true})
 		}
-
-		if errors.Is(err, sql.ErrNoRows) {
-			// Item not found in queue or history, consider it "deleted" already
-			return s.writeSABnzbdResponseFiber(c, SABnzbdDeleteResponse{
-				Status: true,
-			})
-		}
-
-		return s.writeSABnzbdErrorFiber(c, fmt.Sprintf("Failed to delete history item: %v", err))
-	} else {
-		// If removed from queue, the foreign key ON DELETE SET NULL was triggered in import_history.
-		// We must now delete by original NzbID (if it wasn't nulled yet) OR search by title/nzb_name.
-		// Actually, since we have the ID, we can try to find it, but the ID was the NzbID.
-		// The most reliable way is to try deleting from history by THAT same ID as nzb_id.
-		_, _ = s.queueRepo.RemoveFromHistoryByNzbID(c.Context(), id)
-
-		// Fallback: If it was already nulled by FK, we can't easily find it by ID anymore without title.
-		// But usually we can just let the next poll handle it if it persists,
-		// or we could have fetched it before deleting from queue.
-		// For now, let's try to delete by ID as well just in case NzoID was a history ID.
-		_, _ = s.queueRepo.RemoveFromHistory(c.Context(), id)
 	}
 
-	response := SABnzbdDeleteResponse{
-		Status: true,
+	// 2. Fallback to DownloadID if not found or not numeric
+	if s.queueRepo != nil {
+		// Try to find the item first to get its ID
+		item, _ := s.queueRepo.GetQueueItemByDownloadID(c.Context(), nzoID)
+
+		// Remove from queue and history by DownloadID
+		_ = s.queueRepo.RemoveFromQueueByDownloadID(c.Context(), nzoID)
+		affected, err := s.queueRepo.RemoveFromHistoryByDownloadID(c.Context(), nzoID)
+
+		if err == nil && affected > 0 {
+			if item != nil {
+				_, _ = s.queueRepo.RemoveFromHistoryByNzbID(c.Context(), item.ID)
+			}
+			return s.writeSABnzbdResponseFiber(c, SABnzbdDeleteResponse{Status: true})
+		}
+
+		// If item was found in queue but not in history, consider it handled
+		if item != nil {
+			return s.writeSABnzbdResponseFiber(c, SABnzbdDeleteResponse{Status: true})
+		}
 	}
 
-	return s.writeSABnzbdResponseFiber(c, response)
+	return s.writeSABnzbdResponseFiber(c, SABnzbdDeleteResponse{Status: true}) // Always return true for delete consistency
 }
 
 // handleSABnzbdStatus handles full status request
