@@ -255,6 +255,8 @@ export interface ProviderConfig {
 	enabled: boolean;
 	is_backup_provider: boolean;
 	skip_ping?: boolean;
+	keepalive_interval_seconds?: number;
+	keepalive_command?: string;
 	last_rtt_ms?: number;
 	last_speed_test_mbps?: number;
 	last_speed_test_time?: string;
@@ -450,6 +452,8 @@ export interface ProviderUpdateRequest {
 	enabled?: boolean;
 	is_backup_provider?: boolean;
 	skip_ping?: boolean;
+	keepalive_interval_seconds?: number;
+	keepalive_command?: string;
 }
 
 // SABnzbd update request
@@ -630,6 +634,8 @@ export interface ProviderFormData {
 	enabled: boolean;
 	is_backup_provider: boolean;
 	skip_ping: boolean;
+	keepalive_interval_seconds: number;
+	keepalive_command: string;
 }
 
 export interface LogFormData {

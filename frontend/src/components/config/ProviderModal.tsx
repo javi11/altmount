@@ -24,6 +24,8 @@ const defaultFormData: ProviderFormData = {
 	enabled: true,
 	is_backup_provider: false,
 	skip_ping: false,
+	keepalive_interval_seconds: 0,
+	keepalive_command: "",
 };
 
 export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderModalProps) {
@@ -55,6 +57,8 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 				enabled: provider.enabled,
 				is_backup_provider: provider.is_backup_provider,
 				skip_ping: provider.skip_ping ?? false,
+				keepalive_interval_seconds: provider.keepalive_interval_seconds ?? 0,
+				keepalive_command: provider.keepalive_command ?? "",
 			});
 			// For edit mode, allow saving without testing if only non-connection fields change
 			setCanSave(true);
@@ -158,6 +162,10 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 					updateData.is_backup_provider = formData.is_backup_provider;
 				if (formData.skip_ping !== (provider.skip_ping ?? false))
 					updateData.skip_ping = formData.skip_ping;
+				if (formData.keepalive_interval_seconds !== (provider.keepalive_interval_seconds ?? 0))
+					updateData.keepalive_interval_seconds = formData.keepalive_interval_seconds;
+				if (formData.keepalive_command !== (provider.keepalive_command ?? ""))
+					updateData.keepalive_command = formData.keepalive_command;
 
 				await updateProvider.mutateAsync({
 					id: provider.id,
@@ -384,6 +392,50 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 							placeholder="socks5://user:pass@host:port"
 						/>
 					</fieldset>
+
+					{/* Keep-Alive */}
+					<div className="space-y-4 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-5">
+						<h4 className="font-bold text-base-content/60 text-xs uppercase tracking-widest">
+							Keep-Alive
+						</h4>
+						<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend font-bold">Interval (seconds)</legend>
+								<input
+									id="keepalive_interval_seconds"
+									type="number"
+									className="input input-bordered w-full font-mono text-sm"
+									value={formData.keepalive_interval_seconds}
+									onChange={(e) =>
+										handleInputChange(
+											"keepalive_interval_seconds",
+											Number.parseInt(e.target.value, 10) || 0,
+										)
+									}
+									min={0}
+								/>
+								<p className="label mt-1 text-base-content/70 text-xs">
+									0 = disabled. Seconds between idle keepalive pings.
+								</p>
+							</fieldset>
+
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend font-bold">Command</legend>
+								<input
+									id="keepalive_command"
+									type="text"
+									className="input input-bordered w-full font-mono text-sm"
+									value={formData.keepalive_command}
+									onChange={(e) => handleInputChange("keepalive_command", e.target.value)}
+									placeholder="DATE"
+									disabled={formData.keepalive_interval_seconds === 0}
+								/>
+								<p className="label mt-1 text-base-content/70 text-xs">
+									NNTP command for the probe. Defaults to DATE.
+								</p>
+							</fieldset>
+						</div>
+					</div>
 
 					{/* Connection Test */}
 					<div className="space-y-4 border-base-300/50 border-t pt-4">
