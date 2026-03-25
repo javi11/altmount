@@ -3,9 +3,11 @@ package nzbdav
 import (
 	"database/sql"
 	"io"
+	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/klauspost/compress/zstd"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -63,7 +65,7 @@ func TestParser_Parse(t *testing.T) {
 	require.NoError(t, err)
 
 	// Run Parser
-	parser := NewParser(dbPath)
+	parser := NewParser(dbPath, "")
 	out, errChan := parser.Parse()
 
 	// Verify
@@ -109,6 +111,87 @@ func TestParser_Parse(t *testing.T) {
 			content, _ := io.ReadAll(res.Content)
 			assert.Contains(t, string(content), `<meta type="name">My.Release.1080p</meta>`)
 		}
+	case err := <-errChan:
+		require.NoError(t, err)
+	}
+
+	// Should be no more items
+	_, ok := <-out
+	assert.False(t, ok)
+}
+
+func TestParser_Parse_Blobs(t *testing.T) {
+	// Create temp dir and blobs folder
+	tmpDir := t.TempDir()
+	blobsDir := filepath.Join(tmpDir, "blobs")
+	require.NoError(t, os.MkdirAll(blobsDir, 0755))
+
+	dbPath := filepath.Join(tmpDir, "test_blobs.db")
+	db, err := sql.Open("sqlite3", dbPath)
+	require.NoError(t, err)
+	defer db.Close()
+
+	// Init Schema (alpha version)
+	_, err = db.Exec(`
+		CREATE TABLE DavItems (
+			Id TEXT PRIMARY KEY,
+			Name TEXT,
+			Path TEXT,
+			NzbBlobId TEXT,
+			SubType INTEGER
+		);
+		CREATE TABLE NzbNames (
+			Id TEXT PRIMARY KEY,
+			FileName TEXT
+		);
+	`)
+	require.NoError(t, err)
+
+	// Create a compressed blob
+	blobId := "a1b2c3d4e5f6g7h8"
+	shardedDir := filepath.Join(blobsDir, blobId[0:2], blobId[2:4])
+	require.NoError(t, os.MkdirAll(shardedDir, 0755))
+
+	nzbContent := `<?xml version="1.0" encoding="UTF-8"?>
+<nzb xmlns="http://www.newzbin.com/DTD/nzb/nzb-1.1.dtd">
+	<file poster="poster" date="12345" subject="subject">
+		<groups><group>alt.binaries.test</group></groups>
+		<segments><segment bytes="100" number="1">msgid@test</segment></segments>
+	</file>
+</nzb>`
+
+	blobPath := filepath.Join(shardedDir, blobId)
+	f, err := os.Create(blobPath)
+	require.NoError(t, err)
+
+	zw, err := zstd.NewWriter(f)
+	require.NoError(t, err)
+	_, err = zw.Write([]byte(nzbContent))
+	require.NoError(t, err)
+	require.NoError(t, zw.Close())
+	require.NoError(t, f.Close())
+
+	// Insert Data
+	_, err = db.Exec(`
+		INSERT INTO NzbNames (Id, FileName) VALUES ('a1b2c3d4e5f6g7h8', 'My Movie.nzb');
+		INSERT INTO DavItems (Id, Name, Path, NzbBlobId, SubType) VALUES 
+		('item1', 'My Movie', '/movies/My Movie', 'a1b2c3d4e5f6g7h8', 203);
+	`)
+	require.NoError(t, err)
+
+	// Run Parser
+	parser := NewParser(dbPath, blobsDir)
+	out, errChan := parser.Parse()
+
+	// Verify
+	select {
+	case res, ok := <-out:
+		require.True(t, ok)
+		assert.Equal(t, "item1", res.ID)
+		assert.Equal(t, "My Movie", res.Name)
+		assert.Equal(t, "movies", res.Category)
+		content, _ := io.ReadAll(res.Content)
+		assert.Equal(t, nzbContent, string(content))
 	case err := <-errChan:
 		require.NoError(t, err)
 	}

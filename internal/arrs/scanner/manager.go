@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/sync/singleflight"
 	"github.com/javi11/altmount/internal/arrs/clients"
 	"github.com/javi11/altmount/internal/arrs/data"
 	"github.com/javi11/altmount/internal/arrs/instances"
@@ -24,6 +25,7 @@ type Manager struct {
 	instances    *instances.Manager
 	clients      *clients.Manager
 	data         *data.Manager
+	sf           singleflight.Group
 }
 
 func NewManager(configGetter config.ConfigGetter, instances *instances.Manager, clients *clients.Manager, data *data.Manager) *Manager {
@@ -232,44 +234,54 @@ func (m *Manager) sonarrHasFile(ctx context.Context, client *sonarr.Sonarr, inst
 
 // TriggerFileRescan triggers a rescan for a specific file path through the appropriate ARR instance
 func (m *Manager) TriggerFileRescan(ctx context.Context, pathForRescan string, relativePath string) error {
-	slog.InfoContext(ctx, "Triggering ARR rescan", "path", pathForRescan, "relative_path", relativePath)
+	res, err, _ := m.sf.Do(fmt.Sprintf("rescan:%s", pathForRescan), func() (interface{}, error) {
+		slog.InfoContext(ctx, "Triggering ARR rescan", "path", pathForRescan, "relative_path", relativePath)
 
-	// Find which ARR instance manages this file path
-	instanceType, instanceName, err := m.findInstanceForFilePath(ctx, pathForRescan, relativePath)
-	if err != nil {
-		return fmt.Errorf("failed to find ARR instance for file path %s: %w", pathForRescan, err)
-	}
-
-	// Find the instance configuration
-	instanceConfig, err := m.instances.FindConfigInstance(instanceType, instanceName)
-	if err != nil {
-		return fmt.Errorf("failed to find instance config: %w", err)
-	}
-
-	// Check if instance is enabled
-	if !instanceConfig.Enabled {
-		return fmt.Errorf("instance %s/%s is disabled", instanceType, instanceName)
-	}
-
-	// Trigger rescan based on instance type
-	switch instanceType {
-	case "radarr":
-		client, err := m.clients.GetOrCreateRadarrClient(instanceName, instanceConfig.URL, instanceConfig.APIKey)
+		// Find which ARR instance manages this file path
+		instanceType, instanceName, err := m.findInstanceForFilePath(ctx, pathForRescan, relativePath)
 		if err != nil {
-			return fmt.Errorf("failed to create Radarr client: %w", err)
+			return nil, fmt.Errorf("failed to find ARR instance for file path %s: %w", pathForRescan, err)
 		}
-		return m.triggerRadarrRescanByPath(ctx, client, pathForRescan, relativePath, instanceName)
 
-	case "sonarr":
-		client, err := m.clients.GetOrCreateSonarrClient(instanceName, instanceConfig.URL, instanceConfig.APIKey)
+		// Find the instance configuration
+		instanceConfig, err := m.instances.FindConfigInstance(instanceType, instanceName)
 		if err != nil {
-			return fmt.Errorf("failed to create Sonarr client: %w", err)
+			return nil, fmt.Errorf("failed to find instance config: %w", err)
 		}
-		return m.triggerSonarrRescanByPath(ctx, client, pathForRescan, relativePath, instanceName)
 
-	default:
-		return fmt.Errorf("unsupported instance type: %s", instanceType)
+		// Check if instance is enabled
+		if !instanceConfig.Enabled {
+			return nil, fmt.Errorf("instance %s/%s is disabled", instanceType, instanceName)
+		}
+
+		// Trigger rescan based on instance type
+		switch instanceType {
+		case "radarr":
+			client, err := m.clients.GetOrCreateRadarrClient(instanceName, instanceConfig.URL, instanceConfig.APIKey)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create Radarr client: %w", err)
+			}
+			return nil, m.triggerRadarrRescanByPath(ctx, client, pathForRescan, relativePath, instanceName)
+
+		case "sonarr":
+			client, err := m.clients.GetOrCreateSonarrClient(instanceName, instanceConfig.URL, instanceConfig.APIKey)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create Sonarr client: %w", err)
+			}
+			return nil, m.triggerSonarrRescanByPath(ctx, client, pathForRescan, relativePath, instanceName)
+
+		default:
+			return nil, fmt.Errorf("unsupported instance type: %s", instanceType)
+		}
+	})
+
+	if err != nil {
+		return err
 	}
+	if res != nil {
+		return res.(error)
+	}
+	return nil
 }
 
 // TriggerScanForFile finds the ARR instance managing the file and triggers a download scan on it.
@@ -341,38 +353,41 @@ func (m *Manager) TriggerDownloadScan(ctx context.Context, instanceType string) 
 		slog.DebugContext(ctx, "Triggering download client scan", "instance", instance.Name, "type", instance.Type)
 
 		go func(inst *model.ConfigInstance) {
-			bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
+			_, _, _ = m.sf.Do(fmt.Sprintf("scan:%s", inst.Name), func() (interface{}, error) {
+				bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
 
-			switch inst.Type {
-			case "radarr":
-				client, err := m.clients.GetOrCreateRadarrClient(inst.Name, inst.URL, inst.APIKey)
-				if err != nil {
-					slog.ErrorContext(bgCtx, "Failed to create Radarr client for scan trigger", "instance", inst.Name, "error", err)
-					return
-				}
-				// Trigger RefreshMonitoredDownloads
-				_, err = client.SendCommandContext(bgCtx, &radarr.CommandRequest{Name: "RefreshMonitoredDownloads"})
-				if err != nil {
-					slog.ErrorContext(bgCtx, "Failed to trigger RefreshMonitoredDownloads", "instance", inst.Name, "error", err)
-				} else {
-					slog.InfoContext(bgCtx, "Triggered RefreshMonitoredDownloads", "instance", inst.Name)
-				}
+				switch inst.Type {
+				case "radarr":
+					client, err := m.clients.GetOrCreateRadarrClient(inst.Name, inst.URL, inst.APIKey)
+					if err != nil {
+						slog.ErrorContext(bgCtx, "Failed to create Radarr client for scan trigger", "instance", inst.Name, "error", err)
+						return nil, err
+					}
+					// Trigger RefreshMonitoredDownloads
+					_, err = client.SendCommandContext(bgCtx, &radarr.CommandRequest{Name: "RefreshMonitoredDownloads"})
+					if err != nil {
+						slog.ErrorContext(bgCtx, "Failed to trigger RefreshMonitoredDownloads", "instance", inst.Name, "error", err)
+					} else {
+						slog.InfoContext(bgCtx, "Triggered RefreshMonitoredDownloads", "instance", inst.Name)
+					}
 
-			case "sonarr":
-				client, err := m.clients.GetOrCreateSonarrClient(inst.Name, inst.URL, inst.APIKey)
-				if err != nil {
-					slog.ErrorContext(bgCtx, "Failed to create Sonarr client for scan trigger", "instance", inst.Name, "error", err)
-					return
+				case "sonarr":
+					client, err := m.clients.GetOrCreateSonarrClient(inst.Name, inst.URL, inst.APIKey)
+					if err != nil {
+						slog.ErrorContext(bgCtx, "Failed to create Sonarr client for scan trigger", "instance", inst.Name, "error", err)
+						return nil, err
+					}
+					// Trigger RefreshMonitoredDownloads
+					_, err = client.SendCommandContext(bgCtx, &sonarr.CommandRequest{Name: "RefreshMonitoredDownloads"})
+					if err != nil {
+						slog.ErrorContext(bgCtx, "Failed to trigger RefreshMonitoredDownloads", "instance", inst.Name, "error", err)
+					} else {
+						slog.InfoContext(bgCtx, "Triggered RefreshMonitoredDownloads", "instance", inst.Name)
+					}
 				}
-				// Trigger RefreshMonitoredDownloads
-				_, err = client.SendCommandContext(bgCtx, &sonarr.CommandRequest{Name: "RefreshMonitoredDownloads"})
-				if err != nil {
-					slog.ErrorContext(bgCtx, "Failed to trigger RefreshMonitoredDownloads", "instance", inst.Name, "error", err)
-				} else {
-					slog.InfoContext(bgCtx, "Triggered RefreshMonitoredDownloads", "instance", inst.Name)
-				}
-			}
+				return nil, nil
+			})
 		}(instance)
 	}
 }

@@ -905,6 +905,8 @@ type ProviderStatusResponse struct {
 	MissingCount            int64      `json:"missing_count"`
 	MissingRatePerMinute    float64    `json:"missing_rate_per_minute"`
 	MissingWarning          bool       `json:"missing_warning"`
+	ByteCount               int64      `json:"byte_count"`
+	ByteCount24h            int64      `json:"byte_count_24h"`
 }
 
 // PoolMetricsResponse represents NNTP pool metrics in API responses
@@ -916,6 +918,7 @@ type PoolMetricsResponse struct {
 	ArticlesPosted              int64                    `json:"articles_posted"`
 	TotalErrors                 int64                    `json:"total_errors"`
 	ProviderErrors              map[string]int64         `json:"provider_errors"`
+	ProviderBytes               map[string]int64         `json:"provider_bytes"`
 	DownloadSpeedBytesPerSec    float64                  `json:"download_speed_bytes_per_sec"`
 	MaxDownloadSpeedBytesPerSec float64                  `json:"max_download_speed_bytes_per_sec"`
 	UploadSpeedBytesPerSec      float64                  `json:"upload_speed_bytes_per_sec"`

@@ -395,7 +395,7 @@ func (s *Server) handleStremioAddonPlay(c *fiber.Ctx) error {
 
 	priority := database.QueuePriorityHigh
 	stremioCategory := "stremio"
-	item, err := s.importerService.AddToQueue(ctx, tempPath, basePath, &stremioCategory, &priority, nil)
+	item, err := s.importerService.AddToQueue(ctx, tempPath, basePath, &stremioCategory, &priority, nil, nil)
 	if err != nil {
 		os.Remove(tempPath)
 		slog.ErrorContext(ctx, "Failed to add Prowlarr NZB to queue", "error", err, "title", safeTitle)

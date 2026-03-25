@@ -307,6 +307,18 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 			}
 		}
 
+		// Redundant Deletion Guard: ensure the file is gone from the local mount
+		if s.configManager != nil {
+			cfg := s.configManager.GetConfig()
+			if cfg.MountPath != "" {
+				localPath := filepath.Join(cfg.MountPath, metadataPath)
+				if _, err := os.Stat(localPath); err == nil {
+					slog.InfoContext(c.Context(), "Redundant Deletion Guard: Manual removal of ghost file from mount", "path", localPath)
+					_ = os.Remove(localPath)
+				}
+			}
+		}
+
 	}
 
 	// Process Directory Deletions

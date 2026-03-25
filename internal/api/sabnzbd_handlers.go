@@ -20,6 +20,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/javi11/altmount/internal/arrs"
+	"github.com/google/uuid"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/httpclient"
@@ -365,10 +366,17 @@ func (s *Server) handleSABnzbdAddFile(c *fiber.Ctx) error {
 		}
 	}
 
+	// Generate a stable download ID (GUID) for Sonarr/Radarr tracking
+	// Some indexers provide a GUID in the 'nzbname' or 'name' parameter
+	downloadID := c.FormValue("nzbname")
+	if downloadID == "" {
+		downloadID = uuid.New().String()
+	}
+
 	// Add the file to the processing queue using centralized method
 	completeDir := s.configManager.GetConfig().SABnzbd.CompleteDir
 	priority := s.parseSABnzbdPriority(c.FormValue("priority"))
-	item, err := s.importerService.AddToQueue(c.Context(), tempFile, &completeDir, &validatedCategory, &priority, metadataJSON)
+	_, err = s.importerService.AddToQueue(c.Context(), tempFile, &completeDir, &validatedCategory, &priority, metadataJSON, &downloadID)
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to add to queue")
 	}
@@ -376,7 +384,7 @@ func (s *Server) handleSABnzbdAddFile(c *fiber.Ctx) error {
 	// Return success response
 	response := SABnzbdAddResponse{
 		Status: true,
-		NzoIds: []string{fmt.Sprintf("%d", item.ID)},
+		NzoIds: []string{downloadID},
 	}
 
 	return s.writeSABnzbdResponseFiber(c, response)
@@ -507,7 +515,19 @@ func (s *Server) handleSABnzbdAddUrl(c *fiber.Ctx) error {
 	// Add the file to the processing queue using centralized method
 	completeDir := s.configManager.GetConfig().SABnzbd.CompleteDir
 	priority := s.parseSABnzbdPriority(c.Query("priority"))
-	item, err := s.importerService.AddToQueue(c.Context(), tempFile, &completeDir, &validatedCategory, &priority, metadataJSON)
+
+	// Generate or extract stable download ID for tracking
+	// Some indexers provide a GUID in the 'nzbname' or 'name' parameter
+	downloadID := c.Query("nzbname")
+	if downloadID == "" {
+		// Use filename (without extension) as a fallback ID if it looks like a GUID
+		downloadID = strings.TrimSuffix(filename, filepath.Ext(filename))
+		if len(downloadID) < 20 { // Simple heuristic: GUIDs are usually long
+			downloadID = uuid.New().String()
+		}
+	}
+
+	_, err = s.importerService.AddToQueue(c.Context(), tempFile, &completeDir, &validatedCategory, &priority, metadataJSON, &downloadID)
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to add to queue")
 	}
@@ -515,7 +535,7 @@ func (s *Server) handleSABnzbdAddUrl(c *fiber.Ctx) error {
 	// Return success response
 	response := SABnzbdAddResponse{
 		Status: true,
-		NzoIds: []string{fmt.Sprintf("%d", item.ID)},
+		NzoIds: []string{downloadID},
 	}
 
 	return s.writeSABnzbdResponseFiber(c, response)
@@ -679,6 +699,14 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 	// Get category filter from query parameter
 	categoryFilter := s.normalizeCategoryFilter(c)
 
+	// Get specific job IDs if requested
+	nzoIDs := make(map[string]bool)
+	if ids := c.Query("nzo_ids"); ids != "" {
+		for _, id := range strings.Split(ids, ",") {
+			nzoIDs[strings.TrimSpace(id)] = true
+		}
+	}
+
 	// Get pagination parameters
 	start := 0
 	if s := c.Query("start"); s != "" {
@@ -686,16 +714,17 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 			start = val
 		}
 	}
-	limit := 50
+	limit := 0 // 0 means all items in SABnzbd
 	if l := c.Query("limit"); l != "" {
 		if val, err := strconv.Atoi(l); err == nil {
 			limit = val
 		}
 	}
 
-	// Get completed items from active queue (not yet deleted)
+	// Fetch items from active queue
+	// We use a larger set here to ensure we get everything for deduplication and combined history
 	completedStatus := database.QueueStatusCompleted
-	completedQueueItems, err := s.queueRepo.ListQueueItems(c.Context(), &completedStatus, "", categoryFilter, limit, start, "updated_at", "desc")
+	completedQueueItems, err := s.queueRepo.ListQueueItems(c.Context(), &completedStatus, "", categoryFilter, 10000, 0, "updated_at", "desc")
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to get completed items from queue")
 	}
@@ -714,6 +743,16 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 
 	for _, item := range completedQueueItems {
 		name := filepath.Base(item.NzbPath)
+		// Filter by nzo_ids if requested (check both integer ID and DownloadID)
+		if len(nzoIDs) > 0 {
+			match := nzoIDs[fmt.Sprintf("%d", item.ID)]
+			if !match && item.DownloadID != nil {
+				match = nzoIDs[*item.DownloadID]
+			}
+			if !match {
+				continue
+			}
+		}
 		if !seenNames[name] {
 			finalItems = append(finalItems, item)
 			seenNames[name] = true
@@ -727,13 +766,26 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 			continue
 		}
 
-		if !seenNames[item.NzbName] {
-			id := item.ID
-			if item.NzbID != nil {
-				id = *item.NzbID
+		id := item.ID
+		if item.NzbID != nil {
+			id = *item.NzbID
+		}
+
+		// Filter by nzo_ids if requested
+		if len(nzoIDs) > 0 {
+			match := nzoIDs[fmt.Sprintf("%d", id)]
+			if !match && item.DownloadID != nil {
+				match = nzoIDs[*item.DownloadID]
 			}
+			if !match {
+				continue
+			}
+		}
+
+		if !seenNames[item.NzbName] {
 			qItem := &database.ImportQueueItem{
 				ID:          id,
+				DownloadID:  item.DownloadID,
 				NzbPath:     item.NzbName,
 				Status:      database.QueueStatusCompleted,
 				FileSize:    &item.FileSize,
@@ -748,41 +800,54 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 
 	// Get failed items from active queue
 	failedStatus := database.QueueStatusFailed
-	failed, err := s.queueRepo.ListQueueItems(c.Context(), &failedStatus, "", categoryFilter, limit, start, "updated_at", "desc")
+	failed, err := s.queueRepo.ListQueueItems(c.Context(), &failedStatus, "", categoryFilter, 1000, 0, "updated_at", "desc")
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to get failed items")
 	}
 
-	// Get total failed count
-	totalFailed, err := s.queueRepo.CountQueueItems(c.Context(), &failedStatus, "", categoryFilter)
-	if err != nil {
-		totalFailed = len(failed)
+	// Combine failed items for noofslots calculation
+	for _, item := range failed {
+		name := filepath.Base(item.NzbPath)
+		// Filter by nzo_ids if requested
+		if len(nzoIDs) > 0 {
+			match := nzoIDs[fmt.Sprintf("%d", item.ID)]
+			if !match && item.DownloadID != nil {
+				match = nzoIDs[*item.DownloadID]
+			}
+			if !match {
+				continue
+			}
+		}
+		if !seenNames[name] {
+			finalItems = append(finalItems, item)
+			seenNames[name] = true
+		}
+	}
+
+	// Total available items before pagination
+	totalAvailableCount := len(finalItems)
+
+	// Apply pagination (start and limit)
+	if start < len(finalItems) {
+		finalItems = finalItems[start:]
+	} else {
+		finalItems = []*database.ImportQueueItem{}
+	}
+
+	if limit > 0 && len(finalItems) > limit {
+		finalItems = finalItems[:limit]
 	}
 
 	// Combine and convert to SABnzbd format
-	slots := make([]SABnzbdHistorySlot, 0, len(finalItems)+len(failed))
-	index := 0
+	slots := make([]SABnzbdHistorySlot, 0, len(finalItems))
 	var totalBytes int64
+	itemBasePath := s.calculateItemBasePath()
 
-	for _, item := range finalItems {
-		// Calculate category-specific base path
-		itemBasePath := s.calculateItemBasePath()
+	for i, item := range finalItems {
 		finalPath := s.calculateHistoryStoragePath(item, itemBasePath)
-
-		slot := ToSABnzbdHistorySlot(item, start+index, finalPath)
+		slot := ToSABnzbdHistorySlot(item, start+i, finalPath)
 		slots = append(slots, slot)
 		totalBytes += slot.Bytes
-		index++
-	}
-	for _, item := range failed {
-		// Calculate category-specific base path for this item
-		itemBasePath := s.calculateItemBasePath()
-		finalPath := s.calculateHistoryStoragePath(item, itemBasePath)
-
-		slot := ToSABnzbdHistorySlot(item, start+index, finalPath)
-		slots = append(slots, slot)
-		totalBytes += slot.Bytes
-		index++
 	}
 
 	// Create the proper history response structure using the new struct
@@ -794,7 +859,7 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 			WeekSize:  "0 B",
 			Version:   "4.5.0",
 			DaySize:   "0 B",
-			Noofslots: len(finalItems) + totalFailed,
+			Noofslots: totalAvailableCount,
 		},
 	}
 

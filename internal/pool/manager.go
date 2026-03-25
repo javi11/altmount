@@ -53,6 +53,8 @@ type StatsRepository interface {
 	BatchUpdateSystemStats(ctx context.Context, stats map[string]int64) error
 	GetSystemStats(ctx context.Context) (map[string]int64, error)
 	AddBytesDownloadedToDailyStat(ctx context.Context, bytes int64) error
+	AddProviderBytesToHourlyStat(ctx context.Context, providerID string, bytes int64) error
+	GetProviderHourlyStats(ctx context.Context, hours int) (map[string]int64, error)
 }
 
 // manager implements the Manager interface
