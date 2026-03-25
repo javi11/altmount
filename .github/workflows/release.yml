@@ -4,6 +4,15 @@ on:
   push:
     tags:
       - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v0.1.0)'
+        required: true
+      skip_docker:
+        description: 'Skip Docker image build (use when images already exist)'
+        type: boolean
+        default: false
 
 env:
   # Use docker.io for Docker Hub if empty
@@ -55,7 +64,12 @@ jobs:
       - name: Extract version info for frontend
         id: frontend-version
         run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+            VERSION="${TAG#v}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          fi
           COMMIT=$(git rev-parse --short HEAD)
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "commit=$COMMIT" >> $GITHUB_OUTPUT
@@ -134,11 +148,17 @@ jobs:
         if: matrix.goos == 'darwin'
         run: brew install --cask macfuse
 
+
       # Extract version info
       - name: Extract version info
         id: version
         run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+            VERSION="${TAG#v}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          fi
           COMMIT=$(git rev-parse --short HEAD)
           TIMESTAMP=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
           echo "version=$VERSION" >> $GITHUB_OUTPUT
@@ -212,7 +232,12 @@ jobs:
       - name: Extract version info
         id: version
         run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+            VERSION="${TAG#v}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       # Download darwin binaries
@@ -270,7 +295,12 @@ jobs:
       - name: Extract version info
         id: version
         run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+            VERSION="${TAG#v}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       # Download all artifacts
@@ -292,18 +322,20 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
           files: |
             artifacts/altmount-cli_v${{ steps.version.outputs.version }}_*.*
             artifacts/checksums-cli.txt
           draft: false
           prerelease: false
-          generate_release_notes: true
+          generate_release_notes: ${{ github.event_name != 'workflow_dispatch' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-image-amd64:
     runs-on: ubuntu-latest
     needs: [test, build-frontend]
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.skip_docker }}
     permissions:
       contents: write
       packages: write
@@ -366,6 +398,7 @@ jobs:
   build-image-arm64:
     runs-on: ubuntu-latest
     needs: [test, build-frontend]
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.skip_docker }}
     permissions:
       contents: write
       packages: write
@@ -428,6 +461,7 @@ jobs:
   create-manifest:
     runs-on: ubuntu-latest
     needs: [build-image-amd64, build-image-arm64]
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.skip_docker }}
     permissions:
       contents: write
       packages: write
@@ -455,7 +489,12 @@ jobs:
       - name: Extract version
         id: version
         run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+            VERSION="${TAG#v}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          fi
           MAJOR=$(echo $VERSION | cut -d. -f1)
           MINOR=$(echo $VERSION | cut -d. -f2)
           echo "version=$VERSION" >> $GITHUB_OUTPUT
