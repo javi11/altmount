@@ -7,6 +7,56 @@ import (
 	"github.com/javi11/altmount/internal/importer/parser"
 )
 
+func TestApplyNzbRename(t *testing.T) {
+	tests := []struct {
+		name             string
+		renameToNzbName  bool
+		nzbName          string
+		originalFilename string
+		expected         string
+	}{
+		{
+			name:             "false: single file not renamed",
+			renameToNzbName:  false,
+			nzbName:          "release.nzb",
+			originalFilename: "obfuscated.mkv",
+			expected:         "obfuscated.mkv",
+		},
+		{
+			name:             "true: single file renamed",
+			renameToNzbName:  true,
+			nzbName:          "release.nzb",
+			originalFilename: "obfuscated.mkv",
+			expected:         "release.mkv",
+		},
+		{
+			name:             "false: preserves path with subdirectory",
+			renameToNzbName:  false,
+			nzbName:          "movie.nzb",
+			originalFilename: "sub/file.mkv",
+			expected:         "sub/file.mkv",
+		},
+		{
+			name:             "true: renames leaf only, preserves subdirectory",
+			renameToNzbName:  true,
+			nzbName:          "movie.nzb",
+			originalFilename: "sub/file.mkv",
+			expected:         "sub/movie.mkv",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			files := []parser.ParsedFile{{Filename: tt.originalFilename}}
+			result := applyNzbRename(tt.renameToNzbName, tt.nzbName, files)
+			if result[0].Filename != tt.expected {
+				t.Fatalf("applyNzbRename(%v, %q, [{%q}]) = %q, want %q",
+					tt.renameToNzbName, tt.nzbName, tt.originalFilename, result[0].Filename, tt.expected)
+			}
+		})
+	}
+}
+
 func TestNormalizeReleaseFilename(t *testing.T) {
 	tests := []struct {
 		name             string
