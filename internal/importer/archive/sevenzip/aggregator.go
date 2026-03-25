@@ -137,6 +137,7 @@ func ProcessArchive(
 	readTimeout time.Duration,
 	expandBlurayIso bool,
 	filterSamples bool,
+	renameToNzbName bool,
 ) error {
 	if len(archiveFiles) == 0 {
 		return nil
@@ -194,7 +195,7 @@ func ProcessArchive(
 	}
 
 	nzbName := filepath.Base(nzbPath)
-	shouldNormalizeName := mediaFilesCount == 1
+	shouldNormalizeName := renameToNzbName && mediaFilesCount == 1
 
 	// Count ISO-expanded files so single-file ISOs omit the index suffix.
 	isoExpandedCount := 0
