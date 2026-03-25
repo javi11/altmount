@@ -149,16 +149,14 @@ func (p *Parser) parseBlobs(db *sql.DB, out chan<- *ParsedNzb, errChan chan<- er
 		category := p.deriveCategory(releasePath)
 		relPath := p.deriveRelPath(releasePath, category)
 
-		select {
-		case out <- &ParsedNzb{
+		out <- &ParsedNzb{
 			ID:       id,
 			Name:     strings.TrimSuffix(fileName, ".nzb"),
 			Category: category,
 			RelPath:  relPath,
 			Content:  pr,
-		}:
-			count++
 		}
+		count++
 	}
 	slog.InfoContext(context.Background(), "NZBDav blob import scan completed", "total_files", count)
 }
@@ -266,15 +264,13 @@ func (p *Parser) parseLegacy(db *sql.DB, out chan<- *ParsedNzb, errChan chan<- e
 			category := p.deriveCategory(releasePath)
 			relPath := p.deriveRelPath(releasePath, category)
 
-			select {
-			case out <- &ParsedNzb{
+			out <- &ParsedNzb{
 				ID:             releaseId,
 				Name:           releaseName,
 				Category:       category,
 				RelPath:        relPath,
 				Content:        pr,
 				ExtractedFiles: currentExtractedFiles,
-			}:
 			}
 
 			// Write NZB Header

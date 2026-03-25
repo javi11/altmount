@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS provider_hourly_stats (
     PRIMARY KEY (hour, provider_id)
 );
 
-CREATE INDEX idx_provider_hourly_stats_provider ON provider_hourly_stats(provider_id);
+CREATE INDEX IF NOT EXISTS idx_provider_hourly_stats_provider ON provider_hourly_stats(provider_id);
 -- +goose StatementEnd
 
 -- +goose Down
