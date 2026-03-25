@@ -605,6 +605,7 @@ func (proc *Processor) processRarArchive(
 			proc.readTimeout,
 			proc.expandBlurayIso,
 			proc.filterSampleFiles,
+			proc.renameToNzbName,
 		)
 		if err != nil {
 			return nzbFolder, writtenPaths, err
@@ -720,6 +721,7 @@ func (proc *Processor) processSevenZipArchive(
 			proc.readTimeout,
 			proc.expandBlurayIso,
 			proc.filterSampleFiles,
+			proc.renameToNzbName,
 		)
 		if err != nil {
 			return nzbFolder, writtenPaths, err
