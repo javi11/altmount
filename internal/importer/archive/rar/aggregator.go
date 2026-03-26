@@ -235,9 +235,25 @@ func ProcessArchive(
 			continue
 		}
 
-		// Flatten the internal path by extracting only the base filename
 		normalizedInternalPath := strings.ReplaceAll(rarContent.InternalPath, "\\", "/")
-		baseFilename := filepath.Base(normalizedInternalPath)
+
+		preserve_subdir_structure := true // TODO: add as config var, should default to "false" to keep current Altmount behaviour
+		baseFilename := func() string {
+			if preserve_subdir_structure {
+				// Flatten the internal path by extracting only the base filename
+				return filepath.Base(normalizedInternalPath)
+			}
+			// Keep the original internal path structure, but remove the root directory if the internal path starts with a root directory matching the NZB name (to avoid duplicate root dir in virtual path)
+			nzbNameWithoutExt := strings.TrimSuffix(nzbName, filepath.Ext(nzbName))
+			pathParts := strings.Split(normalizedInternalPath, "/")
+			rootDirMatches := len(pathParts) > 0 && strings.EqualFold(pathParts[0], nzbNameWithoutExt)
+
+			if rootDirMatches {
+				normalizedInternalPath = strings.Join(pathParts[1:], "/")
+			}
+
+			return normalizedInternalPath
+		}()
 
 		// Double check if this specific file is allowed
 		if !utils.IsAllowedFile(rarContent.InternalPath, rarContent.Size, allowedFileExtensions, filterSamples) &&
