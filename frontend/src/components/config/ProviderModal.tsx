@@ -104,6 +104,7 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 				tls: formData.tls,
 				insecure_tls: formData.insecure_tls,
 				proxy_url: formData.proxy_url || undefined,
+				skip_ping: formData.skip_ping,
 			});
 
 			setConnectionTestResult({
@@ -125,7 +126,7 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 	};
 
 	const handleSave = async () => {
-		if (mode === "create" && !canSave) {
+		if (mode === "create" && !canSave && !formData.skip_ping) {
 			showToast({
 				type: "warning",
 				title: "Connection Test Required",

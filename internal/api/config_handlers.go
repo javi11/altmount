@@ -369,6 +369,7 @@ func (s *Server) handleTestProvider(c *fiber.Ctx) error {
 		TLS         bool   `json:"tls"`
 		InsecureTLS bool   `json:"insecure_tls"`
 		ProxyURL    string `json:"proxy_url"`
+		SkipPing    bool   `json:"skip_ping"`
 	}
 
 	if err := c.BodyParser(&testReq); err != nil {
@@ -399,6 +400,7 @@ func (s *Server) handleTestProvider(c *fiber.Ctx) error {
 		Host:      host,
 		TLSConfig: tlsCfg,
 		Auth:      nntppool.Auth{Username: testReq.Username, Password: testReq.Password},
+		SkipPing:  testReq.SkipPing,
 	})
 
 	if result.Err != nil {
@@ -466,17 +468,20 @@ func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 
 	// Decode create request
 	var createReq struct {
-		Host             string `json:"host"`
-		Port             int    `json:"port"`
-		Username         string `json:"username"`
-		Password         string `json:"password"`
-		MaxConnections   int    `json:"max_connections"`
-		InflightRequests int    `json:"inflight_requests"`
-		TLS              bool   `json:"tls"`
-		InsecureTLS      bool   `json:"insecure_tls"`
-		ProxyURL         string `json:"proxy_url"`
-		Enabled          bool   `json:"enabled"`
-		IsBackupProvider bool   `json:"is_backup_provider"`
+		Host                    string `json:"host"`
+		Port                    int    `json:"port"`
+		Username                string `json:"username"`
+		Password                string `json:"password"`
+		MaxConnections          int    `json:"max_connections"`
+		InflightRequests        int    `json:"inflight_requests"`
+		TLS                     bool   `json:"tls"`
+		InsecureTLS             bool   `json:"insecure_tls"`
+		ProxyURL                string `json:"proxy_url"`
+		Enabled                 bool   `json:"enabled"`
+		IsBackupProvider        bool   `json:"is_backup_provider"`
+		SkipPing                bool   `json:"skip_ping"`
+		KeepaliveIntervalSeconds int   `json:"keepalive_interval_seconds"`
+		KeepaliveCommand        string `json:"keepalive_command"`
 	}
 
 	if err := c.BodyParser(&createReq); err != nil {
@@ -502,18 +507,21 @@ func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 
 	// Create new provider
 	newProvider := config.ProviderConfig{
-		ID:               newID,
-		Host:             createReq.Host,
-		Port:             createReq.Port,
-		Username:         createReq.Username,
-		Password:         createReq.Password,
-		MaxConnections:   createReq.MaxConnections,
-		InflightRequests: createReq.InflightRequests,
-		TLS:              createReq.TLS,
-		InsecureTLS:      createReq.InsecureTLS,
-		ProxyURL:         createReq.ProxyURL,
-		Enabled:          &createReq.Enabled,
-		IsBackupProvider: &createReq.IsBackupProvider,
+		ID:                       newID,
+		Host:                     createReq.Host,
+		Port:                     createReq.Port,
+		Username:                 createReq.Username,
+		Password:                 createReq.Password,
+		MaxConnections:           createReq.MaxConnections,
+		InflightRequests:         createReq.InflightRequests,
+		TLS:                      createReq.TLS,
+		InsecureTLS:              createReq.InsecureTLS,
+		ProxyURL:                 createReq.ProxyURL,
+		Enabled:                  &createReq.Enabled,
+		IsBackupProvider:         &createReq.IsBackupProvider,
+		SkipPing:                 createReq.SkipPing,
+		KeepaliveIntervalSeconds: createReq.KeepaliveIntervalSeconds,
+		KeepaliveCommand:         createReq.KeepaliveCommand,
 	}
 
 	// Add to config
@@ -535,19 +543,22 @@ func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 
 	// Return sanitized provider
 	response := ProviderAPIResponse{
-		ID:               newProvider.ID,
-		Host:             newProvider.Host,
-		Port:             newProvider.Port,
-		Username:         newProvider.Username,
-		MaxConnections:   newProvider.MaxConnections,
-		TLS:              newProvider.TLS,
-		InsecureTLS:      newProvider.InsecureTLS,
-		ProxyURL:         newProvider.ProxyURL,
-		PasswordSet:      newProvider.Password != "",
-		Enabled:          newProvider.Enabled != nil && *newProvider.Enabled,
-		IsBackupProvider: newProvider.IsBackupProvider != nil && *newProvider.IsBackupProvider,
-		InflightRequests: newProvider.InflightRequests,
-		LastRTTMs:        newProvider.LastRTTMs,
+		ID:                       newProvider.ID,
+		Host:                     newProvider.Host,
+		Port:                     newProvider.Port,
+		Username:                 newProvider.Username,
+		MaxConnections:           newProvider.MaxConnections,
+		TLS:                      newProvider.TLS,
+		InsecureTLS:              newProvider.InsecureTLS,
+		ProxyURL:                 newProvider.ProxyURL,
+		PasswordSet:              newProvider.Password != "",
+		Enabled:                  newProvider.Enabled != nil && *newProvider.Enabled,
+		IsBackupProvider:         newProvider.IsBackupProvider != nil && *newProvider.IsBackupProvider,
+		InflightRequests:         newProvider.InflightRequests,
+		LastRTTMs:                newProvider.LastRTTMs,
+		SkipPing:                 newProvider.SkipPing,
+		KeepaliveIntervalSeconds: newProvider.KeepaliveIntervalSeconds,
+		KeepaliveCommand:         newProvider.KeepaliveCommand,
 	}
 
 	return RespondSuccess(c, response)
@@ -600,17 +611,20 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 
 	// Decode update request (partial update)
 	var updateReq struct {
-		Host             *string `json:"host,omitempty"`
-		Port             *int    `json:"port,omitempty"`
-		Username         *string `json:"username,omitempty"`
-		Password         *string `json:"password,omitempty"`
-		MaxConnections   *int    `json:"max_connections,omitempty"`
-		InflightRequests *int    `json:"inflight_requests,omitempty"`
-		TLS              *bool   `json:"tls,omitempty"`
-		InsecureTLS      *bool   `json:"insecure_tls,omitempty"`
-		ProxyURL         *string `json:"proxy_url,omitempty"`
-		Enabled          *bool   `json:"enabled,omitempty"`
-		IsBackupProvider *bool   `json:"is_backup_provider,omitempty"`
+		Host                     *string `json:"host,omitempty"`
+		Port                     *int    `json:"port,omitempty"`
+		Username                 *string `json:"username,omitempty"`
+		Password                 *string `json:"password,omitempty"`
+		MaxConnections           *int    `json:"max_connections,omitempty"`
+		InflightRequests         *int    `json:"inflight_requests,omitempty"`
+		TLS                      *bool   `json:"tls,omitempty"`
+		InsecureTLS              *bool   `json:"insecure_tls,omitempty"`
+		ProxyURL                 *string `json:"proxy_url,omitempty"`
+		Enabled                  *bool   `json:"enabled,omitempty"`
+		IsBackupProvider         *bool   `json:"is_backup_provider,omitempty"`
+		SkipPing                 *bool   `json:"skip_ping,omitempty"`
+		KeepaliveIntervalSeconds *int    `json:"keepalive_interval_seconds,omitempty"`
+		KeepaliveCommand         *string `json:"keepalive_command,omitempty"`
 	}
 
 	if err := c.BodyParser(&updateReq); err != nil {
@@ -669,6 +683,15 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 	if updateReq.IsBackupProvider != nil {
 		provider.IsBackupProvider = updateReq.IsBackupProvider
 	}
+	if updateReq.SkipPing != nil {
+		provider.SkipPing = *updateReq.SkipPing
+	}
+	if updateReq.KeepaliveIntervalSeconds != nil {
+		provider.KeepaliveIntervalSeconds = *updateReq.KeepaliveIntervalSeconds
+	}
+	if updateReq.KeepaliveCommand != nil {
+		provider.KeepaliveCommand = *updateReq.KeepaliveCommand
+	}
 
 	// Assign the updated provider back to the slice
 	newConfig.Providers[providerIndex] = provider
@@ -688,19 +711,22 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 
 	// Return sanitized provider
 	response := ProviderAPIResponse{
-		ID:               provider.ID,
-		Host:             provider.Host,
-		Port:             provider.Port,
-		Username:         provider.Username,
-		MaxConnections:   provider.MaxConnections,
-		TLS:              provider.TLS,
-		InsecureTLS:      provider.InsecureTLS,
-		ProxyURL:         provider.ProxyURL,
-		PasswordSet:      provider.Password != "",
-		Enabled:          provider.Enabled != nil && *provider.Enabled,
-		IsBackupProvider: provider.IsBackupProvider != nil && *provider.IsBackupProvider,
-		InflightRequests: provider.InflightRequests,
-		LastRTTMs:        provider.LastRTTMs,
+		ID:                       provider.ID,
+		Host:                     provider.Host,
+		Port:                     provider.Port,
+		Username:                 provider.Username,
+		MaxConnections:           provider.MaxConnections,
+		TLS:                      provider.TLS,
+		InsecureTLS:              provider.InsecureTLS,
+		ProxyURL:                 provider.ProxyURL,
+		PasswordSet:              provider.Password != "",
+		Enabled:                  provider.Enabled != nil && *provider.Enabled,
+		IsBackupProvider:         provider.IsBackupProvider != nil && *provider.IsBackupProvider,
+		InflightRequests:         provider.InflightRequests,
+		LastRTTMs:                provider.LastRTTMs,
+		SkipPing:                 provider.SkipPing,
+		KeepaliveIntervalSeconds: provider.KeepaliveIntervalSeconds,
+		KeepaliveCommand:         provider.KeepaliveCommand,
 	}
 
 	return RespondSuccess(c, response)

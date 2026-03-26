@@ -774,6 +774,7 @@ export interface ProviderTestRequest {
 	tls: boolean;
 	insecure_tls: boolean;
 	proxy_url?: string;
+	skip_ping?: boolean;
 }
 
 export interface ProviderTestResponse {
@@ -795,6 +796,8 @@ export interface ProviderCreateRequest {
 	enabled: boolean;
 	is_backup_provider: boolean;
 	skip_ping?: boolean;
+	keepalive_interval_seconds?: number;
+	keepalive_command?: string;
 }
 
 export interface ProviderReorderRequest {
