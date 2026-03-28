@@ -356,15 +356,7 @@ func (proc *Processor) processSingleFile(
 
 	// Rename the file to match the NZB name to handle obfuscated filenames
 	// Keep NZB-provided subfolders but rename the leaf to the release name (preventing duplicate extensions)
-	if proc.renameToNzbName {
-		originalDir := filepath.Dir(regularFiles[0].Filename)
-		normalizedBase := normalizeReleaseFilename(nzbName, filepath.Base(regularFiles[0].Filename))
-		if originalDir != "." && originalDir != "" {
-			regularFiles[0].Filename = filepath.Join(originalDir, normalizedBase)
-		} else {
-			regularFiles[0].Filename = normalizedBase
-		}
-	}
+	regularFiles = applyNzbRename(proc.renameToNzbName, nzbName, regularFiles)
 
 	// Compute final parent/name, flattening only redundant nesting like file.mkv/file.mkv
 	parentPath, finalName := filesystem.DetermineFileLocation(regularFiles[0], virtualDir)
@@ -454,15 +446,7 @@ func (proc *Processor) processMultiFile(
 
 	if singleLike {
 		// Rename the leaf to the release name (prevents ext duplication) but keep NZB-provided subfolders.
-		if proc.renameToNzbName {
-			originalDir := filepath.Dir(regularFiles[0].Filename)
-			normalizedBase := normalizeReleaseFilename(nzbName, filepath.Base(regularFiles[0].Filename))
-			if originalDir != "." && originalDir != "" {
-				regularFiles[0].Filename = filepath.Join(originalDir, normalizedBase)
-			} else {
-				regularFiles[0].Filename = normalizedBase
-			}
-		}
+		regularFiles = applyNzbRename(proc.renameToNzbName, nzbName, regularFiles)
 
 		// Avoid nesting like /Season 02/<release>/<release>.mkv; drop the NZB-named folder here.
 		if err := filesystem.EnsureDirectoryExists(targetBaseDir, proc.metadataService); err != nil {
@@ -621,6 +605,7 @@ func (proc *Processor) processRarArchive(
 			proc.readTimeout,
 			proc.expandBlurayIso,
 			proc.filterSampleFiles,
+			proc.renameToNzbName,
 		)
 		if err != nil {
 			return nzbFolder, writtenPaths, err
@@ -736,6 +721,7 @@ func (proc *Processor) processSevenZipArchive(
 			proc.readTimeout,
 			proc.expandBlurayIso,
 			proc.filterSampleFiles,
+			proc.renameToNzbName,
 		)
 		if err != nil {
 			return nzbFolder, writtenPaths, err
@@ -765,6 +751,22 @@ func (proc *Processor) processSevenZipArchive(
 	}
 
 	return nzbFolder, writtenPaths, nil
+}
+
+// applyNzbRename renames the first file in files to match nzbName when renameToNzbName is true.
+// Returns the slice unchanged when renameToNzbName is false or files is empty.
+func applyNzbRename(renameToNzbName bool, nzbName string, files []parser.ParsedFile) []parser.ParsedFile {
+	if !renameToNzbName || len(files) == 0 {
+		return files
+	}
+	originalDir := filepath.Dir(files[0].Filename)
+	normalizedBase := normalizeReleaseFilename(nzbName, filepath.Base(files[0].Filename))
+	if originalDir != "." && originalDir != "" {
+		files[0].Filename = filepath.Join(originalDir, normalizedBase)
+	} else {
+		files[0].Filename = normalizedBase
+	}
+	return files
 }
 
 // normalizeReleaseFilename aligns the filename to the NZB basename while keeping the original extension.

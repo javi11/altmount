@@ -98,21 +98,24 @@ type RCloneAPIResponse struct {
 
 // ProviderAPIResponse sanitizes Provider config for API responses
 type ProviderAPIResponse struct {
-	ID                string     `json:"id"`
-	Host              string     `json:"host"`
-	Port              int        `json:"port"`
-	Username          string     `json:"username"`
-	MaxConnections    int        `json:"max_connections"`
-	TLS               bool       `json:"tls"`
-	InsecureTLS       bool       `json:"insecure_tls"`
-	ProxyURL          string     `json:"proxy_url,omitempty"`
-	PasswordSet       bool       `json:"password_set"`
-	Enabled           bool       `json:"enabled"`
-	IsBackupProvider  bool       `json:"is_backup_provider"`
-	InflightRequests  int        `json:"inflight_requests"`
-	LastRTTMs         int64      `json:"last_rtt_ms"`
-	LastSpeedTestMbps float64    `json:"last_speed_test_mbps"`
-	LastSpeedTestTime *time.Time `json:"last_speed_test_time,omitempty"`
+	ID                       string     `json:"id"`
+	Host                     string     `json:"host"`
+	Port                     int        `json:"port"`
+	Username                 string     `json:"username"`
+	MaxConnections           int        `json:"max_connections"`
+	TLS                      bool       `json:"tls"`
+	InsecureTLS              bool       `json:"insecure_tls"`
+	ProxyURL                 string     `json:"proxy_url,omitempty"`
+	PasswordSet              bool       `json:"password_set"`
+	Enabled                  bool       `json:"enabled"`
+	IsBackupProvider         bool       `json:"is_backup_provider"`
+	InflightRequests         int        `json:"inflight_requests"`
+	LastRTTMs                int64      `json:"last_rtt_ms"`
+	LastSpeedTestMbps        float64    `json:"last_speed_test_mbps"`
+	LastSpeedTestTime        *time.Time `json:"last_speed_test_time,omitempty"`
+	SkipPing                 bool       `json:"skip_ping"`
+	KeepaliveIntervalSeconds int        `json:"keepalive_interval_seconds"`
+	KeepaliveCommand         string     `json:"keepalive_command,omitempty"`
 }
 
 // ImportAPIResponse handles Import config for API responses
@@ -157,21 +160,24 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 	providers := make([]ProviderAPIResponse, len(cfg.Providers))
 	for i, p := range cfg.Providers {
 		providers[i] = ProviderAPIResponse{
-			ID:                p.ID,
-			Host:              p.Host,
-			Port:              p.Port,
-			Username:          p.Username,
-			MaxConnections:    p.MaxConnections,
-			TLS:               p.TLS,
-			InsecureTLS:       p.InsecureTLS,
-			ProxyURL:          p.ProxyURL,
-			PasswordSet:       p.Password != "",
-			Enabled:           p.Enabled != nil && *p.Enabled,
-			IsBackupProvider:  p.IsBackupProvider != nil && *p.IsBackupProvider,
-			InflightRequests:  p.InflightRequests,
-			LastRTTMs:         p.LastRTTMs,
-			LastSpeedTestMbps: p.LastSpeedTestMbps,
-			LastSpeedTestTime: p.LastSpeedTestTime,
+			ID:                       p.ID,
+			Host:                     p.Host,
+			Port:                     p.Port,
+			Username:                 p.Username,
+			MaxConnections:           p.MaxConnections,
+			TLS:                      p.TLS,
+			InsecureTLS:              p.InsecureTLS,
+			ProxyURL:                 p.ProxyURL,
+			PasswordSet:              p.Password != "",
+			Enabled:                  p.Enabled != nil && *p.Enabled,
+			IsBackupProvider:         p.IsBackupProvider != nil && *p.IsBackupProvider,
+			InflightRequests:         p.InflightRequests,
+			LastRTTMs:                p.LastRTTMs,
+			LastSpeedTestMbps:        p.LastSpeedTestMbps,
+			LastSpeedTestTime:        p.LastSpeedTestTime,
+			SkipPing:                 p.SkipPing,
+			KeepaliveIntervalSeconds: p.KeepaliveIntervalSeconds,
+			KeepaliveCommand:         p.KeepaliveCommand,
 		}
 	}
 
