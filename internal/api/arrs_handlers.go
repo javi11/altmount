@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"log/slog"
@@ -53,7 +54,10 @@ type ArrsDeletedFile struct {
 type ArrsDeletedFiles []ArrsDeletedFile
 
 func (df *ArrsDeletedFiles) UnmarshalJSON(data []byte) error {
-	if string(data) == "false" || string(data) == "null" {
+	trimmedData := bytes.TrimSpace(data)
+	if bytes.Equal(trimmedData, []byte("false")) ||
+		bytes.Equal(trimmedData, []byte("null")) ||
+		bytes.Equal(trimmedData, []byte("true")) {
 		*df = nil
 		return nil
 	}
@@ -121,12 +125,14 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 	var pathsToScan []string
 	var filesToDelete []string
 	var dirsToDelete []string
+	isScanEvent := false
 
 	switch req.EventType {
 	case "Test":
 		slog.InfoContext(c.Context(), "Received ARR test webhook")
 		return c.Status(200).JSON(fiber.Map{"success": true, "message": "Test successful"})
 	case "Download": // OnImport
+		isScanEvent = true
 		if req.EpisodeFile.Path != "" {
 			pathsToScan = append(pathsToScan, req.EpisodeFile.Path)
 		} else if req.MovieFile.Path != "" {
@@ -135,6 +141,7 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 			pathsToScan = append(pathsToScan, req.FilePath)
 		}
 	case "Rename":
+		isScanEvent = true
 		// For rename, we want to scan the new file
 		if req.EpisodeFile.Path != "" {
 			pathsToScan = append(pathsToScan, req.EpisodeFile.Path)
@@ -150,6 +157,7 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 			pathsToScan = append(pathsToScan, req.Movie.FolderPath)
 		}
 	case "Upgrade":
+		isScanEvent = true
 		// For upgrade, scan the new file
 		if req.EpisodeFile.Path != "" {
 			pathsToScan = append(pathsToScan, req.EpisodeFile.Path)
@@ -295,7 +303,11 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 			} else {
 				// Fall back to normalized file_path lookup
 				if err := s.healthRepo.DeleteHealthRecord(c.Context(), normalizedPath); err != nil {
-					slog.ErrorContext(c.Context(), "Failed to delete health record from webhook", "path", normalizedPath, "error", err)
+					if strings.Contains(err.Error(), "no health record found") {
+						slog.DebugContext(c.Context(), "No health record found to delete from webhook", "path", normalizedPath)
+					} else {
+						slog.ErrorContext(c.Context(), "Failed to delete health record from webhook", "path", normalizedPath, "error", err)
+					}
 				}
 			}
 		}
@@ -366,7 +378,9 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 	}
 
 	if len(pathsToScan) == 0 {
-		slog.WarnContext(c.Context(), "No file path found in webhook payload to scan")
+		if isScanEvent {
+			slog.WarnContext(c.Context(), "No file path found in webhook payload to scan")
+		}
 		return c.Status(200).JSON(fiber.Map{"success": true, "message": "No path to scan"})
 	}
 
