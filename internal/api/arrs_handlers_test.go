@@ -153,6 +153,18 @@ func TestArrsWebhookRequest_Unmarshal(t *testing.T) {
 		assert.Nil(t, req.DeletedFiles)
 	})
 
+	t.Run("deletedFiles is true", func(t *testing.T) {
+		jsonData := `{
+			"eventType": "Grab",
+			"deletedFiles": true
+		}`
+
+		var req ArrsWebhookRequest
+		err := json.Unmarshal([]byte(jsonData), &req)
+		assert.NoError(t, err)
+		assert.Nil(t, req.DeletedFiles)
+	})
+
 	t.Run("deletedFiles is array", func(t *testing.T) {
 		jsonData := `{
 			"eventType": "Upgrade",

@@ -43,7 +43,7 @@ func NewNzbDavImporter(batchAdder BatchQueueAdder) *NzbDavImporter {
 }
 
 // Start starts an asynchronous import from an NZBDav database
-func (n *NzbDavImporter) Start(dbPath string, rootFolder string, cleanupFile bool) error {
+func (n *NzbDavImporter) Start(dbPath string, blobsPath string, rootFolder string, cleanupFile bool) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
@@ -64,7 +64,7 @@ func (n *NzbDavImporter) Start(dbPath string, rootFolder string, cleanupFile boo
 		Skipped: 0,
 	}
 
-	go n.performImport(importCtx, dbPath, rootFolder, cleanupFile)
+	go n.performImport(importCtx, dbPath, blobsPath, rootFolder, cleanupFile)
 
 	return nil
 }
@@ -108,9 +108,9 @@ func (n *NzbDavImporter) Reset() {
 }
 
 // performImport performs the actual import work
-func (n *NzbDavImporter) performImport(ctx context.Context, dbPath string, rootFolder string, cleanupFile bool) {
+func (n *NzbDavImporter) performImport(ctx context.Context, dbPath string, blobsPath string, rootFolder string, cleanupFile bool) {
 	// Parse Database
-	parser := nzbdav.NewParser(dbPath)
+	parser := nzbdav.NewParser(dbPath, blobsPath)
 	nzbChan, errChan := parser.Parse()
 
 	defer func() {

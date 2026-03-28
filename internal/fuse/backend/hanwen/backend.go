@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os/exec"
-	"runtime"
 	"sync"
 	"time"
 
@@ -86,17 +85,6 @@ func (b *Backend) Mount(ctx context.Context, onReady func()) error {
 		NegativeTimeout: &entryTimeout,
 	}
 
-	// macOS-specific mount options
-	if runtime.GOOS == "darwin" {
-		opts.Options = append(opts.Options,
-			fmt.Sprintf("volname=%s", "altmount"),
-			"noapplexattr",
-			"noappledouble",
-			"iosize=1048576", // 1MB I/O size (macOS default is 64KB)
-		)
-		opts.DirectMount = false // not supported on macOS
-	}
-
 	// Mount with timeout
 	type mountResult struct {
 		server *fuse.Server
@@ -164,21 +152,11 @@ func (b *Backend) Unmount() error {
 
 // ForceUnmount attempts to lazy/force unmount using platform-specific commands.
 func (b *Backend) ForceUnmount() error {
-	var methods [][]string
-
-	if runtime.GOOS == "darwin" {
-		methods = [][]string{
-			{"umount", "-f", b.cfg.MountPoint},
-			{"diskutil", "unmount", "force", b.cfg.MountPoint},
-			{"umount", b.cfg.MountPoint},
-		}
-	} else {
-		methods = [][]string{
-			{"fusermount", "-uz", b.cfg.MountPoint},
-			{"umount", b.cfg.MountPoint},
-			{"umount", "-l", b.cfg.MountPoint},
-			{"fusermount3", "-uz", b.cfg.MountPoint},
-		}
+	methods := [][]string{
+		{"fusermount", "-uz", b.cfg.MountPoint},
+		{"umount", b.cfg.MountPoint},
+		{"umount", "-l", b.cfg.MountPoint},
+		{"fusermount3", "-uz", b.cfg.MountPoint},
 	}
 
 	for _, method := range methods {

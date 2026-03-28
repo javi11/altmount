@@ -206,6 +206,7 @@ func (s *Server) handleApplyUpdate(c *fiber.Ctx) error {
 
 		// 1. Pull the new image
 		cmd := exec.CommandContext(ctx, "docker", "pull", image)
+		cmd.Env = append(os.Environ(), "HOME=/config")
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			slog.ErrorContext(ctx, "Failed to pull latest image", "error", err, "output", string(output))

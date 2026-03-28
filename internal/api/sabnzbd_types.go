@@ -379,9 +379,15 @@ func ToSABnzbdQueueSlot(item *database.ImportQueueItem, index int, progressBroad
 
 	sizeLeftBytes := int64((100 - progressPercentage) * int(totalSizeBytes) / 100)
 
+	// Use DownloadID (GUID) as NzoID for stable tracking
+	nzoID := fmt.Sprintf("%d", item.ID)
+	if item.DownloadID != nil && *item.DownloadID != "" {
+		nzoID = *item.DownloadID
+	}
+
 	return SABnzbdQueueSlot{
 		Index:      index,
-		NzoID:      fmt.Sprintf("%d", item.ID),
+		NzoID:      nzoID,
 		Priority:   priority,
 		Filename:   jobName,
 		Cat:        category,
@@ -503,10 +509,16 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, finalPath s
 		}
 	}
 
+	// Use DownloadID (GUID) as NzoID for stable tracking
+	nzoID := fmt.Sprintf("%d", item.ID)
+	if item.DownloadID != nil && *item.DownloadID != "" {
+		nzoID = *item.DownloadID
+	}
+
 	return SABnzbdHistorySlot{
 		Index: index,
 
-		NzoID: fmt.Sprintf("%d", item.ID),
+		NzoID: nzoID,
 
 		Name: jobName,
 

@@ -7,18 +7,25 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"text/template"
 
+	"github.com/klauspost/compress/zstd"
 	_ "github.com/mattn/go-sqlite3"
 )
 
 type Parser struct {
-	dbPath string
+	dbPath    string
+	blobsPath string
 }
 
-func NewParser(dbPath string) *Parser {
-	return &Parser{dbPath: dbPath}
+func NewParser(dbPath, blobsPath string) *Parser {
+	return &Parser{
+		dbPath:    dbPath,
+		blobsPath: blobsPath,
+	}
 }
 
 // Parse streams NZBs from the database
@@ -60,149 +67,238 @@ func (p *Parser) Parse() (<-chan *ParsedNzb, <-chan error) {
 			slog.InfoContext(context.Background(), "NZBDav Database Tables", "tables", tables)
 		}
 
-		// Query ALL files, ordered by ParentId
-		// This groups files belonging to the same release together efficiently
-		rows, err := db.Query(`
-			SELECT 
-				COALESCE(p.Id, 'root') as ReleaseId,
-				COALESCE(p.Name, 'root') as ReleaseName,
-				COALESCE(p.Path, '/') as ReleasePath,
-				c.Id as FileId,
-				c.Name as FileName,
-				c.FileSize,
-				n.SegmentIds,
-				r.RarParts,
-				m.Metadata as MultipartMetadata
-			FROM DavItems c
-			LEFT JOIN DavItems p ON c.ParentId = p.Id
-			LEFT JOIN DavNzbFiles n ON n.Id = c.Id
-			LEFT JOIN DavRarFiles r ON r.Id = c.Id
-			LEFT JOIN DavMultipartFiles m ON m.Id = c.Id
-			WHERE (n.Id IS NOT NULL OR r.Id IS NOT NULL OR m.Id IS NOT NULL)
-			ORDER BY c.ParentId, c.Name
-		`)
+		// Check for blob-based storage (NzbDav alpha)
+		if p.blobsPath != "" {
+			// Check if NzbNames table exists
+			var nzbNamesExists bool
+			err = db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='NzbNames'").Scan(&nzbNamesExists)
+			if err == nil && nzbNamesExists {
+				slog.InfoContext(context.Background(), "Detected blob-based NZBDav storage")
+				p.parseBlobs(db, out, errChan)
+				return
+			}
+		}
+
+		// Fallback to legacy reconstruction approach
+		p.parseLegacy(db, out, errChan)
+	}()
+
+	return out, errChan
+}
+
+func (p *Parser) parseBlobs(db *sql.DB, out chan<- *ParsedNzb, errChan chan<- error) {
+	rows, err := db.Query(`
+		SELECT 
+			d.Id,
+			n.FileName,
+			COALESCE(d.Path, '/') as ReleasePath,
+			d.NzbBlobId
+		FROM DavItems d 
+		JOIN NzbNames n ON n.Id = d.NzbBlobId 
+		WHERE d.NzbBlobId IS NOT NULL 
+		AND d.NzbBlobId != '' 
+		AND d.NzbBlobId != '00000000-0000-0000-0000-000000000000'
+		AND d.SubType = 203
+	`)
+	if err != nil {
+		errChan <- fmt.Errorf("failed to query blob files: %w", err)
+		return
+	}
+	defer rows.Close()
+
+	count := 0
+	for rows.Next() {
+		var id, fileName, releasePath, blobId string
+		if err := rows.Scan(&id, &fileName, &releasePath, &blobId); err != nil {
+			slog.ErrorContext(context.Background(), "Failed to scan blob row", "error", err)
+			continue
+		}
+
+		// Resolve blob path: blobs/XX/YY/[uuid]
+		if len(blobId) < 4 {
+			slog.WarnContext(context.Background(), "Invalid blob ID", "id", blobId)
+			continue
+		}
+		blobPath := filepath.Join(p.blobsPath, blobId[0:2], blobId[2:4], blobId)
+
+		blobFile, err := os.Open(blobPath)
 		if err != nil {
-			errChan <- fmt.Errorf("failed to query files: %w", err)
-			return
+			slog.ErrorContext(context.Background(), "Failed to open blob file", "path", blobPath, "error", err)
+			continue
 		}
-		defer rows.Close()
-		slog.DebugContext(context.Background(), "NZBDav file query completed, starting iteration")
 
-		var currentParentId string
-		var currentWriter *io.PipeWriter
-		count := 0
-		var currentExtractedFiles []ExtractedFileInfo
+		// Decompress zstd blob
+		pr, pw := io.Pipe()
+		go func() {
+			defer blobFile.Close()
 
-		// cleanupCurrent ensures the current writer is properly closed
-		cleanupCurrent := func() {
-			if currentWriter != nil {
-				// Write NZB Footer
-				if _, err := currentWriter.Write([]byte("</nzb>")); err != nil {
-					slog.ErrorContext(context.Background(), "Failed to write NZB footer", "error", err)
-				}
-				currentWriter.Close()
-				currentWriter = nil
+			zr, err := zstd.NewReader(blobFile)
+			if err != nil {
+				pw.CloseWithError(err)
+				return
 			}
+			defer zr.Close()
+
+			if _, err := io.Copy(pw, zr); err != nil {
+				pw.CloseWithError(err)
+				return
+			}
+			pw.Close()
+		}()
+
+		category := p.deriveCategory(releasePath)
+		relPath := p.deriveRelPath(releasePath, category)
+
+		out <- &ParsedNzb{
+			ID:       id,
+			Name:     strings.TrimSuffix(fileName, ".nzb"),
+			Category: category,
+			RelPath:  relPath,
+			Content:  pr,
 		}
-		defer cleanupCurrent()
+		count++
+	}
+	slog.InfoContext(context.Background(), "NZBDav blob import scan completed", "total_files", count)
+}
 
-		for rows.Next() {
-			var releaseId, releaseName, releasePath string
-			var fileId, fileName string
-			var fileSize sql.NullInt64
-			var segmentIdsJSON, rarPartsJSON, multipartMetadataJSON sql.RawBytes
+func (p *Parser) parseLegacy(db *sql.DB, out chan<- *ParsedNzb, errChan chan<- error) {
+	// Query ALL files, ordered by ParentId
+	// This groups files belonging to the same release together efficiently
+	rows, err := db.Query(`
+		SELECT 
+			COALESCE(p.Id, 'root') as ReleaseId,
+			COALESCE(p.Name, 'root') as ReleaseName,
+			COALESCE(p.Path, '/') as ReleasePath,
+			c.Id as FileId,
+			c.Name as FileName,
+			c.FileSize,
+			n.SegmentIds,
+			r.RarParts,
+			m.Metadata as MultipartMetadata
+		FROM DavItems c
+		LEFT JOIN DavItems p ON c.ParentId = p.Id
+		LEFT JOIN DavNzbFiles n ON n.Id = c.Id
+		LEFT JOIN DavRarFiles r ON r.Id = c.Id
+		LEFT JOIN DavMultipartFiles m ON m.Id = c.Id
+		WHERE (n.Id IS NOT NULL OR r.Id IS NOT NULL OR m.Id IS NOT NULL)
+		ORDER BY c.ParentId, c.Name
+	`)
+	if err != nil {
+		errChan <- fmt.Errorf("failed to query files: %w", err)
+		return
+	}
+	defer rows.Close()
+	slog.DebugContext(context.Background(), "NZBDav file query completed, starting iteration")
 
-			if err := rows.Scan(&releaseId, &releaseName, &releasePath, &fileId, &fileName, &fileSize, &segmentIdsJSON, &rarPartsJSON, &multipartMetadataJSON); err != nil {
-				slog.ErrorContext(context.Background(), "Failed to scan row", "error", err)
-				continue
+	var currentParentId string
+	var currentWriter *io.PipeWriter
+	count := 0
+	var currentExtractedFiles []ExtractedFileInfo
+
+	// cleanupCurrent ensures the current writer is properly closed
+	cleanupCurrent := func() {
+		if currentWriter != nil {
+			// Write NZB Footer
+			if _, err := currentWriter.Write([]byte("</nzb>")); err != nil {
+				slog.ErrorContext(context.Background(), "Failed to write NZB footer", "error", err)
 			}
+			currentWriter.Close()
+			currentWriter = nil
+		}
+	}
+	defer cleanupCurrent()
 
-			// Improve release name if it's just "extracted"
-			if strings.EqualFold(releaseName, "extracted") {
-				// Try to get the name from the path
-				pathParts := strings.Split(strings.Trim(releasePath, "/"), "/")
-				if len(pathParts) > 0 {
-					// Use the last part of the path that isn't "extracted"
-					for i := len(pathParts) - 1; i >= 0; i-- {
-						if !strings.EqualFold(pathParts[i], "extracted") {
-							releaseName = pathParts[i]
-							break
-						}
+	for rows.Next() {
+		var releaseId, releaseName, releasePath string
+		var fileId, fileName string
+		var fileSize sql.NullInt64
+		var segmentIdsJSON, rarPartsJSON, multipartMetadataJSON sql.RawBytes
+
+		if err := rows.Scan(&releaseId, &releaseName, &releasePath, &fileId, &fileName, &fileSize, &segmentIdsJSON, &rarPartsJSON, &multipartMetadataJSON); err != nil {
+			slog.ErrorContext(context.Background(), "Failed to scan row", "error", err)
+			continue
+		}
+
+		// Improve release name if it's just "extracted"
+		if strings.EqualFold(releaseName, "extracted") {
+			// Try to get the name from the path
+			pathParts := strings.Split(strings.Trim(releasePath, "/"), "/")
+			if len(pathParts) > 0 {
+				// Use the last part of the path that isn't "extracted"
+				for i := len(pathParts) - 1; i >= 0; i-- {
+					if !strings.EqualFold(pathParts[i], "extracted") {
+						releaseName = pathParts[i]
+						break
 					}
 				}
 			}
+		}
 
-			// Check if this file is inside an "extracted" folder
-			isExtractedFile := strings.Contains(releasePath, "/extracted") || releaseName == "extracted"
-			if isExtractedFile && fileSize.Valid && fileSize.Int64 > 0 {
-				currentExtractedFiles = append(currentExtractedFiles, ExtractedFileInfo{
-					Name: fileName,
-					Size: fileSize.Int64,
-				})
+		// Check if this file is inside an "extracted" folder
+		isExtractedFile := strings.Contains(releasePath, "/extracted") || releaseName == "extracted"
+		if isExtractedFile && fileSize.Valid && fileSize.Int64 > 0 {
+			currentExtractedFiles = append(currentExtractedFiles, ExtractedFileInfo{
+				Name: fileName,
+				Size: fileSize.Int64,
+			})
+		}
+
+		count++
+		if count%100 == 0 {
+			slog.InfoContext(context.Background(), "NZBDav import progress", "files_scanned", count)
+		}
+
+		// Check if we switched to a new release
+		if releaseId != currentParentId || currentWriter == nil {
+			cleanupCurrent()
+
+			currentParentId = releaseId
+			currentExtractedFiles = nil // Reset for new release
+			slog.DebugContext(context.Background(), "Processing new release", "path", releasePath, "name", releaseName)
+
+			// Create new pipe for this release
+			pr, pw := io.Pipe()
+			currentWriter = pw
+
+			// Send ParsedNzb to output channel
+			category := p.deriveCategory(releasePath)
+			relPath := p.deriveRelPath(releasePath, category)
+
+			out <- &ParsedNzb{
+				ID:             releaseId,
+				Name:           releaseName,
+				Category:       category,
+				RelPath:        relPath,
+				Content:        pr,
+				ExtractedFiles: currentExtractedFiles,
 			}
 
-			count++
-			if count%100 == 0 {
-				slog.InfoContext(context.Background(), "NZBDav import progress", "files_scanned", count)
-			}
-
-			// Check if we switched to a new release
-			if releaseId != currentParentId || currentWriter == nil {
-				cleanupCurrent()
-
-				currentParentId = releaseId
-				currentExtractedFiles = nil // Reset for new release
-				slog.DebugContext(context.Background(), "Processing new release", "path", releasePath, "name", releaseName)
-
-				// Create new pipe for this release
-				pr, pw := io.Pipe()
-				currentWriter = pw
-
-				// Send ParsedNzb to output channel
-				category := p.deriveCategory(releasePath)
-				relPath := p.deriveRelPath(releasePath, category)
-
-				select {
-				case out <- &ParsedNzb{
-					ID:             releaseId,
-					Name:           releaseName,
-					Category:       category,
-					RelPath:        relPath,
-					Content:        pr,
-					ExtractedFiles: currentExtractedFiles,
-				}:
-				case <-errChan: // Context cancelled or error
-					return
-				}
-
-				// Write NZB Header
-				header := `<?xml version="1.0" encoding="UTF-8"?>
+			// Write NZB Header
+			header := `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE nzb PUBLIC "-//newzBin//DTD NZB 1.1//EN" "http://www.newzbin.com/DTD/nzb/nzb-1.1.dtd">
 <nzb xmlns="http://www.newzbin.com/DTD/nzb/nzb-1.1.dtd">
 	<head>
 		<meta type="name">` + template.HTMLEscapeString(releaseName) + `</meta>
 	</head>
 `
-				if _, err := currentWriter.Write([]byte(header)); err != nil {
-					slog.ErrorContext(context.Background(), "Failed to write NZB header", "release", releaseName, "error", err)
-					currentWriter.CloseWithError(err)
-					currentWriter = nil
-					continue
-				}
-			}
-
-			// Write File Entry
-			if err := p.writeFileEntry(currentWriter, fileId, fileName, fileSize, segmentIdsJSON, rarPartsJSON, multipartMetadataJSON); err != nil {
-				slog.ErrorContext(context.Background(), "Failed to write file entry", "file", fileName, "error", err)
+			if _, err := currentWriter.Write([]byte(header)); err != nil {
+				slog.ErrorContext(context.Background(), "Failed to write NZB header", "release", releaseName, "error", err)
 				currentWriter.CloseWithError(err)
 				currentWriter = nil
+				continue
 			}
 		}
-		slog.InfoContext(context.Background(), "NZBDav import scan completed", "total_files", count)
-	}()
 
-	return out, errChan
+		// Write File Entry
+		if err := p.writeFileEntry(currentWriter, fileId, fileName, fileSize, segmentIdsJSON, rarPartsJSON, multipartMetadataJSON); err != nil {
+			slog.ErrorContext(context.Background(), "Failed to write file entry", "file", fileName, "error", err)
+			currentWriter.CloseWithError(err)
+			currentWriter = nil
+		}
+	}
+	slog.InfoContext(context.Background(), "NZBDav import scan completed", "total_files", count)
 }
+
 
 func (p *Parser) deriveCategory(path string) string {
 	lowerPath := strings.ToLower(path)

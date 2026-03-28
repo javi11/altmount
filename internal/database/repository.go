@@ -103,9 +103,10 @@ func (r *Repository) withTransactionMode(ctx context.Context, mode string, fn fu
 func (r *Repository) AddToQueue(ctx context.Context, item *ImportQueueItem) error {
 	// Use UPSERT with immediate lock to prevent conflicts during concurrent inserts
 	query := `
-		INSERT INTO import_queue (nzb_path, relative_path, category, priority, status, retry_count, max_retries, batch_id, metadata, file_size, target_path, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+		INSERT INTO import_queue (download_id, nzb_path, relative_path, category, priority, status, retry_count, max_retries, batch_id, metadata, file_size, target_path, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
 		ON CONFLICT(nzb_path) DO UPDATE SET
+		download_id = COALESCE(excluded.download_id, import_queue.download_id),
 		priority = CASE WHEN excluded.priority < priority THEN excluded.priority ELSE priority END,
 		category = excluded.category,
 		batch_id = excluded.batch_id,
@@ -116,7 +117,7 @@ func (r *Repository) AddToQueue(ctx context.Context, item *ImportQueueItem) erro
 		WHERE status NOT IN ('processing', 'completed')
 	`
 
-	args := []any{item.NzbPath, item.RelativePath, item.Category, item.Priority, item.Status,
+	args := []any{item.DownloadID, item.NzbPath, item.RelativePath, item.Category, item.Priority, item.Status,
 		item.RetryCount, item.MaxRetries, item.BatchID, item.Metadata, item.FileSize, item.TargetPath}
 
 	if r.dialect.IsPostgres() {
@@ -162,14 +163,14 @@ func (r *Repository) ClaimNextQueueItem(ctx context.Context) (*ImportQueueItem, 
 				ORDER BY priority ASC, created_at ASC
 				LIMIT 1
 			) AND status = 'pending'
-			RETURNING id, nzb_path, relative_path, category, priority, status,
+			RETURNING id, download_id, nzb_path, relative_path, category, priority, status,
 			          created_at, updated_at, started_at, completed_at,
 			          retry_count, max_retries, error_message, batch_id, metadata, file_size, target_path
 		`, r.dialect.ColumnPlusMinutes("started_at", 10))
 
 		var item ImportQueueItem
 		err := txRepo.db.QueryRowContext(ctx, updateQuery).Scan(
-			&item.ID, &item.NzbPath, &item.RelativePath, &item.Category,
+			&item.ID, &item.DownloadID, &item.NzbPath, &item.RelativePath, &item.Category,
 			&item.Priority, &item.Status, &item.CreatedAt, &item.UpdatedAt,
 			&item.StartedAt, &item.CompletedAt, &item.RetryCount,
 			&item.MaxRetries, &item.ErrorMessage, &item.BatchID,
@@ -204,9 +205,10 @@ func (r *Repository) AddBatchToQueue(ctx context.Context, items []*ImportQueueIt
 	return r.WithImmediateTransaction(ctx, func(txRepo *Repository) error {
 		// Prepare batch insert statement
 		query := `
-			INSERT INTO import_queue (nzb_path, relative_path, category, priority, status, retry_count, max_retries, batch_id, metadata, file_size, target_path, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+			INSERT INTO import_queue (download_id, nzb_path, relative_path, category, priority, status, retry_count, max_retries, batch_id, metadata, file_size, target_path, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
 			ON CONFLICT(nzb_path) DO UPDATE SET
+			download_id = COALESCE(excluded.download_id, import_queue.download_id),
 			priority = CASE WHEN excluded.priority < priority THEN excluded.priority ELSE priority END,
 			category = excluded.category,
 			batch_id = excluded.batch_id,
@@ -219,7 +221,7 @@ func (r *Repository) AddBatchToQueue(ctx context.Context, items []*ImportQueueIt
 
 		now := time.Now()
 		for _, item := range items {
-			args := []any{item.NzbPath, item.RelativePath, item.Category, item.Priority, item.Status,
+			args := []any{item.DownloadID, item.NzbPath, item.RelativePath, item.Category, item.Priority, item.Status,
 				item.RetryCount, item.MaxRetries, item.BatchID, item.Metadata, item.FileSize, item.TargetPath}
 
 			if txRepo.dialect.IsPostgres() {
@@ -300,14 +302,14 @@ func (r *Repository) IncrementDailyStat(ctx context.Context, statType string) er
 // GetQueueItem retrieves a specific queue item by ID
 func (r *Repository) GetQueueItem(ctx context.Context, id int64) (*ImportQueueItem, error) {
 	query := `
-		SELECT id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
+		SELECT id, download_id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
 		       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path, target_path
 		FROM import_queue WHERE id = ?
 	`
 
 	var item ImportQueueItem
 	err := r.db.QueryRowContext(ctx, query, id).Scan(
-		&item.ID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
+		&item.ID, &item.DownloadID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
 		&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
 		&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath, &item.TargetPath,
 	)
@@ -320,6 +322,52 @@ func (r *Repository) GetQueueItem(ctx context.Context, id int64) (*ImportQueueIt
 	}
 
 	return &item, nil
+}
+
+// GetQueueItemByDownloadID retrieves a queue item by its DownloadID
+func (r *Repository) GetQueueItemByDownloadID(ctx context.Context, downloadID string) (*ImportQueueItem, error) {
+	query := `
+		SELECT id, download_id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
+		       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path, target_path
+		FROM import_queue WHERE download_id = ?
+	`
+
+	var item ImportQueueItem
+	err := r.db.QueryRowContext(ctx, query, downloadID).Scan(
+		&item.ID, &item.DownloadID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
+		&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
+		&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath, &item.TargetPath,
+	)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get queue item by download_id: %w", err)
+	}
+
+	return &item, nil
+}
+
+// RemoveFromQueueByDownloadID removes an item from the queue by its DownloadID
+func (r *Repository) RemoveFromQueueByDownloadID(ctx context.Context, downloadID string) error {
+	query := `DELETE FROM import_queue WHERE download_id = ?`
+
+	result, err := r.db.ExecContext(ctx, query, downloadID)
+	if err != nil {
+		return fmt.Errorf("failed to remove from queue by download_id: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return sql.ErrNoRows
+	}
+
+	return nil
 }
 
 // RemoveFromQueue removes an item from the queue
@@ -341,6 +389,22 @@ func (r *Repository) RemoveFromQueue(ctx context.Context, id int64) error {
 	}
 
 	return nil
+}
+
+// RemoveFromHistoryByDownloadID removes a record from import_history by its DownloadID
+func (r *Repository) RemoveFromHistoryByDownloadID(ctx context.Context, downloadID string) (int64, error) {
+	query := `DELETE FROM import_history WHERE download_id = ?`
+	result, err := r.db.ExecContext(ctx, query, downloadID)
+	if err != nil {
+		return 0, fmt.Errorf("failed to remove history record by download_id: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	return rowsAffected, nil
 }
 
 // RemoveFromHistory removes a record from import_history by its own ID
@@ -575,7 +639,7 @@ func (r *Repository) ListQueueItems(ctx context.Context, status *QueueStatus, se
 	var query string
 	var args []any
 
-	baseSelect := `SELECT id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
+	baseSelect := `SELECT id, download_id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
 	               started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path, target_path
 	               FROM import_queue`
 
@@ -594,7 +658,7 @@ func (r *Repository) ListQueueItems(ctx context.Context, status *QueueStatus, se
 	}
 
 	if category != "" {
-		conditions = append(conditions, "category = ?")
+		conditions = append(conditions, "LOWER(category) = LOWER(?)")
 		conditionArgs = append(conditionArgs, category)
 	}
 
@@ -637,7 +701,7 @@ func (r *Repository) ListQueueItems(ctx context.Context, status *QueueStatus, se
 	for rows.Next() {
 		var item ImportQueueItem
 		err := rows.Scan(
-			&item.ID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
+			&item.ID, &item.DownloadID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
 			&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
 			&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath, &item.TargetPath,
 		)
@@ -655,7 +719,7 @@ func (r *Repository) ListActiveQueueItems(ctx context.Context, search string, ca
 	var query string
 	var args []any
 
-	baseSelect := `SELECT id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
+	baseSelect := `SELECT id, download_id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
 	               started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path, target_path
 	               FROM import_queue`
 
@@ -669,7 +733,7 @@ func (r *Repository) ListActiveQueueItems(ctx context.Context, search string, ca
 	}
 
 	if category != "" {
-		conditions = append(conditions, "category = ?")
+		conditions = append(conditions, "LOWER(category) = LOWER(?)")
 		conditionArgs = append(conditionArgs, category)
 	}
 
@@ -708,7 +772,7 @@ func (r *Repository) ListActiveQueueItems(ctx context.Context, search string, ca
 	for rows.Next() {
 		var item ImportQueueItem
 		err := rows.Scan(
-			&item.ID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
+			&item.ID, &item.DownloadID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
 			&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
 			&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath, &item.TargetPath,
 		)
@@ -743,7 +807,7 @@ func (r *Repository) CountQueueItems(ctx context.Context, status *QueueStatus, s
 	}
 
 	if category != "" {
-		conditions = append(conditions, "category = ?")
+		conditions = append(conditions, "LOWER(category) = LOWER(?)")
 		conditionArgs = append(conditionArgs, category)
 	}
 
@@ -781,7 +845,7 @@ func (r *Repository) CountActiveQueueItems(ctx context.Context, search string, c
 	}
 
 	if category != "" {
-		conditions = append(conditions, "category = ?")
+		conditions = append(conditions, "LOWER(category) = LOWER(?)")
 		conditionArgs = append(conditionArgs, category)
 	}
 
@@ -944,11 +1008,11 @@ func (r *Repository) UpdateQueueItemPriority(ctx context.Context, id int64, prio
 // AddImportHistory records a successful file import in the persistent history table
 func (r *Repository) AddImportHistory(ctx context.Context, history *ImportHistory) error {
 	query := `
-		INSERT INTO import_history (nzb_id, nzb_name, file_name, file_size, virtual_path, category, completed_at)
-		VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+		INSERT INTO import_history (download_id, nzb_id, nzb_name, file_name, file_size, virtual_path, category, completed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
 	`
 	_, err := r.db.ExecContext(ctx, query,
-		history.NzbID, history.NzbName, history.FileName, history.FileSize,
+		history.DownloadID, history.NzbID, history.NzbName, history.FileName, history.FileSize,
 		history.VirtualPath, history.Category)
 	if err != nil {
 		return fmt.Errorf("failed to add import history: %w", err)
@@ -956,10 +1020,32 @@ func (r *Repository) AddImportHistory(ctx context.Context, history *ImportHistor
 	return nil
 }
 
+// GetImportHistoryByDownloadID retrieves an import history item by its DownloadID
+func (r *Repository) GetImportHistoryByDownloadID(ctx context.Context, downloadID string) (*ImportHistory, error) {
+	query := `
+		SELECT h.id, h.download_id, h.nzb_id, h.nzb_name, h.file_name, h.file_size, h.virtual_path, f.library_path, h.category, h.completed_at
+		FROM import_history h
+		LEFT JOIN file_health f ON TRIM(h.virtual_path, '/') = TRIM(f.file_path, '/')
+		WHERE h.download_id = ?
+		LIMIT 1
+	`
+
+	var h ImportHistory
+	err := r.db.QueryRowContext(ctx, query, downloadID).Scan(&h.ID, &h.DownloadID, &h.NzbID, &h.NzbName, &h.FileName, &h.FileSize, &h.VirtualPath, &h.LibraryPath, &h.Category, &h.CompletedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get import history by download_id: %w", err)
+	}
+
+	return &h, nil
+}
+
 // GetImportHistoryByPath retrieves an import history item by its virtual path
 func (r *Repository) GetImportHistoryByPath(ctx context.Context, virtualPath string) (*ImportHistory, error) {
 	query := `
-		SELECT h.id, h.nzb_id, h.nzb_name, h.file_name, h.file_size, h.virtual_path, f.library_path, h.category, h.completed_at
+		SELECT h.id, h.download_id, h.nzb_id, h.nzb_name, h.file_name, h.file_size, h.virtual_path, f.library_path, h.category, h.completed_at
 		FROM import_history h
 		LEFT JOIN file_health f ON TRIM(h.virtual_path, '/') = TRIM(f.file_path, '/')
 		WHERE TRIM(h.virtual_path, '/') = TRIM(?, '/')
@@ -967,7 +1053,7 @@ func (r *Repository) GetImportHistoryByPath(ctx context.Context, virtualPath str
 	`
 
 	var h ImportHistory
-	err := r.db.QueryRowContext(ctx, query, virtualPath).Scan(&h.ID, &h.NzbID, &h.NzbName, &h.FileName, &h.FileSize, &h.VirtualPath, &h.LibraryPath, &h.Category, &h.CompletedAt)
+	err := r.db.QueryRowContext(ctx, query, virtualPath).Scan(&h.ID, &h.DownloadID, &h.NzbID, &h.NzbName, &h.FileName, &h.FileSize, &h.VirtualPath, &h.LibraryPath, &h.Category, &h.CompletedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -981,11 +1067,11 @@ func (r *Repository) GetImportHistoryByPath(ctx context.Context, virtualPath str
 // ListImportHistory retrieves import history items with optional filtering and pagination
 func (r *Repository) ListImportHistory(ctx context.Context, limit, offset int, search string, category string) ([]*ImportHistory, error) {
 	query := `
-		SELECT h.id, h.nzb_id, h.nzb_name, h.file_name, h.file_size, h.virtual_path, f.library_path, h.category, h.completed_at
+		SELECT h.id, h.download_id, h.nzb_id, h.nzb_name, h.file_name, h.file_size, h.virtual_path, f.library_path, h.category, h.completed_at
 		FROM import_history h
 		LEFT JOIN file_health f ON h.virtual_path = f.file_path
 		WHERE (? = '' OR h.nzb_name LIKE ? OR h.file_name LIKE ? OR h.virtual_path LIKE ?)
-		  AND (? = '' OR h.category = ?)
+		  AND (? = '' OR LOWER(h.category) = LOWER(?))
 		ORDER BY h.completed_at DESC
 		LIMIT ? OFFSET ?
 	`
@@ -1000,7 +1086,7 @@ func (r *Repository) ListImportHistory(ctx context.Context, limit, offset int, s
 	var history []*ImportHistory
 	for rows.Next() {
 		var h ImportHistory
-		err := rows.Scan(&h.ID, &h.NzbID, &h.NzbName, &h.FileName, &h.FileSize, &h.VirtualPath, &h.LibraryPath, &h.Category, &h.CompletedAt)
+		err := rows.Scan(&h.ID, &h.DownloadID, &h.NzbID, &h.NzbName, &h.FileName, &h.FileSize, &h.VirtualPath, &h.LibraryPath, &h.Category, &h.CompletedAt)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan import history: %w", err)
 		}
@@ -1020,11 +1106,11 @@ func (r *Repository) ListRecentImportHistory(ctx context.Context, minutes int, c
 	}
 
 	query := fmt.Sprintf(`
-		SELECT h.id, h.nzb_id, h.nzb_name, h.file_name, h.file_size, h.virtual_path, f.library_path, h.category, h.completed_at
+		SELECT h.id, h.download_id, h.nzb_id, h.nzb_name, h.file_name, h.file_size, h.virtual_path, f.library_path, h.category, h.completed_at
 		FROM import_history h
 		LEFT JOIN file_health f ON TRIM(h.virtual_path, '/') = TRIM(f.file_path, '/')
 		WHERE h.completed_at >= %s
-		  AND (? = '' OR h.category = ?)
+		  AND (? = '' OR LOWER(h.category) = LOWER(?))
 		ORDER BY h.completed_at DESC
 	`, cutoffExpr)
 
@@ -1037,7 +1123,7 @@ func (r *Repository) ListRecentImportHistory(ctx context.Context, minutes int, c
 	var history []*ImportHistory
 	for rows.Next() {
 		var h ImportHistory
-		err := rows.Scan(&h.ID, &h.NzbID, &h.NzbName, &h.FileName, &h.FileSize, &h.VirtualPath, &h.LibraryPath, &h.Category, &h.CompletedAt)
+		err := rows.Scan(&h.ID, &h.DownloadID, &h.NzbID, &h.NzbName, &h.FileName, &h.FileSize, &h.VirtualPath, &h.LibraryPath, &h.Category, &h.CompletedAt)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan import history: %w", err)
 		}
@@ -1126,6 +1212,62 @@ func (r *Repository) AddBytesDownloadedToDailyStat(ctx context.Context, bytes in
 	return err
 }
 
+// AddProviderBytesToHourlyStat adds bytes downloaded to the current hour's stat for a specific provider
+func (r *Repository) AddProviderBytesToHourlyStat(ctx context.Context, providerID string, bytes int64) error {
+	// Current hour start
+	hour := time.Now().UTC().Truncate(time.Hour)
+
+	query := `
+		INSERT INTO provider_hourly_stats (hour, provider_id, bytes_downloaded, updated_at)
+		VALUES (?, ?, ?, datetime('now'))
+		ON CONFLICT(hour, provider_id) DO UPDATE SET
+			bytes_downloaded = bytes_downloaded + excluded.bytes_downloaded,
+			updated_at = datetime('now')
+	`
+
+	_, err := r.db.ExecContext(ctx, query, hour, providerID, bytes)
+	if err != nil {
+		return fmt.Errorf("failed to update provider hourly stats: %w", err)
+	}
+
+	return nil
+}
+
+// GetProviderHourlyStats retrieves provider download statistics for the last N hours
+func (r *Repository) GetProviderHourlyStats(ctx context.Context, hours int) (map[string]int64, error) {
+	var cutoffExpr string
+	if r.dialect.IsPostgres() {
+		cutoffExpr = fmt.Sprintf("NOW() - INTERVAL '%d hours'", hours)
+	} else {
+		cutoffExpr = fmt.Sprintf("datetime('now', '-%d hours')", hours)
+	}
+
+	query := fmt.Sprintf(`
+		SELECT provider_id, SUM(bytes_downloaded)
+		FROM provider_hourly_stats
+		WHERE hour >= %s
+		GROUP BY provider_id
+	`, cutoffExpr)
+
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query provider hourly stats: %w", err)
+	}
+	defer rows.Close()
+
+	results := make(map[string]int64)
+	for rows.Next() {
+		var providerID string
+		var bytes int64
+		if err := rows.Scan(&providerID, &bytes); err != nil {
+			return nil, fmt.Errorf("failed to scan provider hourly stat: %w", err)
+		}
+		results[providerID] = bytes
+	}
+
+	return results, rows.Err()
+}
+
 // AddBytesDownloadedToHourlyStat increments the bytes_downloaded counter for the current hour
 func (r *Repository) AddBytesDownloadedToHourlyStat(ctx context.Context, bytes int64) error {
 	if bytes <= 0 {
@@ -1172,6 +1314,27 @@ func (r *Repository) IncrementHourlyStat(ctx context.Context, statType string) e
 // GetImportHistory retrieves historical import statistics for the last N days (Alias for GetImportDailyStats)
 func (r *Repository) GetImportHistory(ctx context.Context, days int) ([]*ImportDailyStat, error) {
 	return r.GetImportDailyStats(ctx, days)
+}
+
+// GetImportHistoryItem retrieves a specific import history item by ID
+func (r *Repository) GetImportHistoryItem(ctx context.Context, id int64) (*ImportHistory, error) {
+	query := `
+		SELECT h.id, h.download_id, h.nzb_id, h.nzb_name, h.file_name, h.file_size, h.virtual_path, f.library_path, h.category, h.completed_at
+		FROM import_history h
+		LEFT JOIN file_health f ON h.virtual_path = f.file_path
+		WHERE h.id = ?
+	`
+
+	var h ImportHistory
+	err := r.db.QueryRowContext(ctx, query, id).Scan(&h.ID, &h.DownloadID, &h.NzbID, &h.NzbName, &h.FileName, &h.FileSize, &h.VirtualPath, &h.LibraryPath, &h.Category, &h.CompletedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get import history item: %w", err)
+	}
+
+	return &h, nil
 }
 
 // GetSystemStats retrieves all system statistics as a map
@@ -1449,7 +1612,7 @@ func (r *Repository) GetExpiredStremioQueueItems(ctx context.Context, ttlHours i
 	}
 
 	query := fmt.Sprintf(`
-		SELECT id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
+		SELECT id, download_id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
 		       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path, target_path
 		FROM import_queue
 		WHERE status = 'completed'
@@ -1469,7 +1632,7 @@ func (r *Repository) GetExpiredStremioQueueItems(ctx context.Context, ttlHours i
 	for rows.Next() {
 		var item ImportQueueItem
 		err := rows.Scan(
-			&item.ID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
+			&item.ID, &item.DownloadID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
 			&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
 			&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath, &item.TargetPath,
 		)

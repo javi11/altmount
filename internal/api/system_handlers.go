@@ -494,6 +494,26 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 			}
 		}
 
+		// Get byte count from metrics
+		byteCount := int64(0)
+		if metrics.ProviderBytes != nil {
+			if count, exists := metrics.ProviderBytes[ps.Name]; exists {
+				byteCount = count
+			} else if count, exists := metrics.ProviderBytes[providerID]; exists {
+				byteCount = count
+			}
+		}
+
+		// Get 24h byte count from metrics
+		byteCount24h := int64(0)
+		if metrics.ProviderBytes24h != nil {
+			if count, exists := metrics.ProviderBytes24h[ps.Name]; exists {
+				byteCount24h = count
+			} else if count, exists := metrics.ProviderBytes24h[providerID]; exists {
+				byteCount24h = count
+			}
+		}
+
 		// Get missing rate and warning from metrics snapshot
 		missingRate := metrics.ProviderMissingRates[ps.Name]
 		missingWarning := metrics.ProviderMissingWarning[ps.Name]
@@ -514,6 +534,8 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 			MaxConnections:          ps.MaxConnections,
 			State:                   "active",
 			ErrorCount:              errorCount,
+			ByteCount:               byteCount,
+			ByteCount24h:            byteCount24h,
 			CurrentSpeedBytesPerSec: currentProviderSpeed,
 			PingMs:                  ps.Ping.RTT.Milliseconds(),
 			LastSpeedTestMbps:       lastSpeedTestMbps,
@@ -558,6 +580,7 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 		ArticlesPosted:              metrics.ArticlesPosted,
 		TotalErrors:                 metrics.TotalErrors,
 		ProviderErrors:              metrics.ProviderErrors,
+		ProviderBytes:               metrics.ProviderBytes,
 		DownloadSpeedBytesPerSec:    metrics.DownloadSpeedBytesPerSec,
 		MaxDownloadSpeedBytesPerSec: metrics.MaxDownloadSpeedBytesPerSec,
 		UploadSpeedBytesPerSec:      metrics.UploadSpeedBytesPerSec,

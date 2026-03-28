@@ -14,6 +14,7 @@ func setupQueueSchema(t *testing.T, db *sql.DB) {
 	schema := `
 		CREATE TABLE import_queue (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			download_id TEXT DEFAULT NULL,
 			nzb_path TEXT NOT NULL,
 			relative_path TEXT DEFAULT NULL,
 			storage_path TEXT DEFAULT NULL,
@@ -34,6 +35,7 @@ func setupQueueSchema(t *testing.T, db *sql.DB) {
 			UNIQUE(nzb_path)
 		);
 
+		CREATE INDEX idx_queue_download_id ON import_queue(download_id);
 		CREATE INDEX idx_queue_status_priority ON import_queue(status, priority, created_at);
 		CREATE INDEX idx_queue_batch_id ON import_queue(batch_id);
 		CREATE INDEX idx_queue_status ON import_queue(status);

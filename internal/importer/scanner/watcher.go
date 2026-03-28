@@ -13,11 +13,12 @@ import (
 	"github.com/javi11/altmount/internal/database"
 )
 
-// WatchQueueAdder defines the interface for adding items to the queue with category support
+// WatchQueueAdder interface for adding items to the import queue from directory watcher
 type WatchQueueAdder interface {
-	AddToQueue(ctx context.Context, filePath string, relativePath *string, category *string, priority *database.QueuePriority, metadata *string) (*database.ImportQueueItem, error)
+	AddToQueue(ctx context.Context, filePath string, relativePath *string, category *string, priority *database.QueuePriority, metadata *string, downloadID *string) (*database.ImportQueueItem, error)
 	IsFileInQueue(ctx context.Context, filePath string) (bool, error)
 }
+
 
 // Watcher handles monitoring a directory for new NZB files
 type Watcher struct {
@@ -289,7 +290,7 @@ func (w *Watcher) processNzb(ctx context.Context, watchRoot, filePath string) er
 
 	// Add to queue
 	priority := database.QueuePriorityNormal
-	item, err := w.queueAdder.AddToQueue(ctx, filePath, relativePath, category, &priority, nil)
+	item, err := w.queueAdder.AddToQueue(ctx, filePath, relativePath, category, &priority, nil, nil)
 	if err != nil {
 		return fmt.Errorf("failed to add to queue: %w", err)
 	}
