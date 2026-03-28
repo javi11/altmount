@@ -495,7 +495,7 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 						type="button"
 						className="btn btn-primary px-8 shadow-lg shadow-primary/20"
 						onClick={handleSave}
-						disabled={isSaving || (mode === "create" && !canSave)}
+						disabled={isSaving || (mode === "create" && !canSave && !formData.skip_ping)}
 					>
 						{isSaving ? <Loader className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
 						{mode === "create" ? "Create Provider" : "Save Changes"}
