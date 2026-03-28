@@ -12,6 +12,7 @@ import (
 
 	"github.com/javi11/altmount/internal/importer/archive"
 	"github.com/javi11/altmount/internal/importer/archive/iso"
+	"github.com/javi11/altmount/internal/importer/filesystem"
 	"github.com/javi11/altmount/internal/importer/parser"
 	"github.com/javi11/altmount/internal/importer/utils"
 	"github.com/javi11/altmount/internal/importer/validation"
@@ -212,9 +213,10 @@ func ProcessArchive(
 			continue
 		}
 
-		// Flatten the internal path by extracting only the base filename
+		// Preserve the internal directory structure of the archive
 		normalizedInternalPath := strings.ReplaceAll(sevenZipContent.InternalPath, "\\", "/")
 		baseFilename := filepath.Base(normalizedInternalPath)
+		internalSubDir := filepath.ToSlash(filepath.Dir(normalizedInternalPath))
 
 		// Double check if this specific file is allowed
 		if !utils.IsAllowedFile(sevenZipContent.InternalPath, sevenZipContent.Size, allowedFileExtensions, filterSamples) &&
@@ -225,6 +227,7 @@ func ProcessArchive(
 		// Rename ISO-expanded files using the NZB release name.
 		// For multiple files: releaseName_1.ext (largest), releaseName_2.ext, ...
 		// For a single file: releaseName.ext (no index).
+		// ISO-expanded and single-file-renamed files are placed flat (no subdir).
 		if sevenZipContent.ISOExpansionIndex > 0 {
 			ext := filepath.Ext(sevenZipContent.Filename)
 			releaseName := strings.TrimSuffix(filepath.Base(nzbPath), filepath.Ext(filepath.Base(nzbPath)))
@@ -236,6 +239,7 @@ func ProcessArchive(
 			slog.InfoContext(ctx, "Renaming ISO-expanded file using NZB release name",
 				"original", sevenZipContent.Filename,
 				"renamed", baseFilename)
+			internalSubDir = "."
 		} else if shouldNormalizeName && (utils.IsAllowedFile(sevenZipContent.InternalPath, sevenZipContent.Size, allowedFileExtensions, filterSamples) ||
 			utils.IsAllowedFile(sevenZipContent.Filename, sevenZipContent.Size, allowedFileExtensions, filterSamples)) {
 			// Normalize filename to match NZB if it's the only media file (non-ISO archives)
@@ -243,10 +247,20 @@ func ProcessArchive(
 			slog.InfoContext(ctx, "Normalizing obfuscated filename in 7zip archive",
 				"original", sevenZipContent.Filename,
 				"normalized", baseFilename)
+			internalSubDir = "."
 		}
 
-		// Create the virtual file path directly in the 7zip directory (flattened)
-		virtualFilePath := filepath.Join(virtualDir, baseFilename)
+		// Build virtual file path, preserving internal subdirectory structure when present
+		var virtualFilePath string
+		if internalSubDir == "." || internalSubDir == "" {
+			virtualFilePath = filepath.Join(virtualDir, baseFilename)
+		} else {
+			subDir := strings.ReplaceAll(filepath.Join(virtualDir, internalSubDir), string(filepath.Separator), "/")
+			if err := filesystem.EnsureDirectoryExists(subDir, metadataService); err != nil {
+				return fmt.Errorf("failed to create archive subdirectory %s: %w", subDir, err)
+			}
+			virtualFilePath = filepath.Join(subDir, baseFilename)
+		}
 		virtualFilePath = strings.ReplaceAll(virtualFilePath, string(filepath.Separator), "/")
 
 		// Check if file already exists and is healthy
