@@ -41,6 +41,8 @@ func (s *Server) handleImportNzbdav(c *fiber.Ctx) error {
 		})
 	}
 
+	blobsPath := c.FormValue("blobsPath")
+
 	// 2. Handle File Source (Path or Upload)
 	dbPath := c.FormValue("dbPath")
 	var isTempFile bool
@@ -78,8 +80,13 @@ func (s *Server) handleImportNzbdav(c *fiber.Ctx) error {
 		isTempFile = true
 	}
 
+	// Default blobsPath if not provided
+	if blobsPath == "" {
+		blobsPath = filepath.Join(filepath.Dir(dbPath), "blobs")
+	}
+
 	// 3. Start Async Import
-	if err := s.importerService.StartNzbdavImport(dbPath, rootFolder, isTempFile); err != nil {
+	if err := s.importerService.StartNzbdavImport(dbPath, blobsPath, rootFolder, isTempFile); err != nil {
 		if isTempFile {
 			os.Remove(dbPath) // Clean up if start failed
 		}

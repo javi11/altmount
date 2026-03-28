@@ -701,16 +701,27 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 					// Use the configured mount path to build an absolute expected path
 					expectedPath := pathutil.JoinAbsPath(cfg.MountPath, path)
 					if _, err := os.Stat(expectedPath); err == nil {
-						// Found it! Use this recovered path
-						libStr := expectedPath
-						libraryPath = &libStr
-						slog.InfoContext(ctx, "Recovered broken library path",
-							"path", path, "new_location", expectedPath)
+						// Found it! Use this recovered path ONLY if it is absolute and NOT equal to the local mount path
+						// (since repairs MUST use the library path Sonarr/Radarr expects).
+						if filepath.IsAbs(expectedPath) && (lp == nil || *lp != expectedPath) {
+							// Check if the expected path is actually a library path (must contain libraryDir or be different from mountPath)
+							isLibraryPath := false
+							if cfg.Health.LibraryDir != nil && strings.HasPrefix(expectedPath, *cfg.Health.LibraryDir) {
+								isLibraryPath = true
+							}
 
-						// Update DB immediately for this recovered path
-						if err := lsw.healthRepo.UpdateLibraryPath(ctx, path, expectedPath); err != nil {
-							slog.ErrorContext(ctx, "Failed to update recovered library path",
-								"path", path, "error", err)
+							if isLibraryPath {
+								libStr := expectedPath
+								libraryPath = &libStr
+								slog.InfoContext(ctx, "Recovered broken library path",
+									"path", path, "new_location", expectedPath)
+
+								// Update DB immediately for this recovered path
+								if err := lsw.healthRepo.UpdateLibraryPath(ctx, path, expectedPath); err != nil {
+									slog.ErrorContext(ctx, "Failed to update recovered library path",
+										"path", path, "error", err)
+								}
+							}
 						}
 					}
 				}

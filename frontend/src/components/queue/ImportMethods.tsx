@@ -607,12 +607,14 @@ function StatusBadge({ status }: { status: string }) {
 function NzbDavImportSection() {
 	const [inputMethod, setInputMethod] = useState<"server" | "upload">("server");
 	const [selectedDbPath, setSelectedDbPath] = useState("");
+	const [blobsPath, setBlobsPath] = useState("");
 	const [selectedFile, setSelectedFile] = useState<File | null>(null);
 	const [rootFolder, setRootFolder] = useState("");
 	const [isLoading, setIsLoading] = useState(false);
 	const [error, setError] = useState<Error | null>(null);
 	const { showToast } = useToast();
 	const [isFileBrowserOpen, setIsFileBrowserOpen] = useState(false);
+	const [isBlobsBrowserOpen, setIsBlobsBrowserOpen] = useState(false);
 
 	const { data: importStatus } = useNzbdavImportStatus(2000);
 	const cancelImport = useCancelNzbdavImport();
@@ -639,6 +641,9 @@ function NzbDavImportSection() {
 
 		const formData = new FormData();
 		formData.append("rootFolder", rootFolder);
+		if (blobsPath) {
+			formData.append("blobsPath", blobsPath);
+		}
 
 		if (inputMethod === "server") {
 			formData.append("dbPath", selectedDbPath);
@@ -678,6 +683,10 @@ function NzbDavImportSection() {
 
 	const handleFileSelect = (path: string) => {
 		setSelectedDbPath(path);
+	};
+
+	const handleBlobsSelect = (path: string) => {
+		setBlobsPath(path);
 	};
 
 	const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -899,7 +908,7 @@ function NzbDavImportSection() {
 							<div className="h-px flex-1 bg-base-300" />
 						</div>
 
-						<div className="rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+						<div className="space-y-4 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 							{inputMethod === "server" ? (
 								<fieldset className="fieldset min-w-0">
 									<legend className="fieldset-legend font-semibold text-xs">
@@ -937,6 +946,32 @@ function NzbDavImportSection() {
 									/>
 								</fieldset>
 							)}
+
+							<fieldset className="fieldset min-w-0">
+								<legend className="fieldset-legend font-semibold text-xs">
+									Blobs Directory (Required for NzbDav alpha)
+								</legend>
+								<div className="join w-full">
+									<input
+										type="text"
+										placeholder="e.g. /data/nzbdav/blobs"
+										className="input join-item w-full bg-base-100 font-mono"
+										value={blobsPath}
+										onChange={(e) => setBlobsPath(e.target.value)}
+									/>
+									<button
+										type="button"
+										className="btn btn-primary join-item px-6"
+										onClick={() => setIsBlobsBrowserOpen(true)}
+									>
+										Browse
+									</button>
+								</div>
+								<p className="label text-base-content/60 text-xs">
+									If left empty, it will default to a "blobs" folder in the same directory as the
+									database.
+								</p>
+							</fieldset>
 						</div>
 					</section>
 
@@ -962,6 +997,14 @@ function NzbDavImportSection() {
 				onClose={() => setIsFileBrowserOpen(false)}
 				onSelect={handleFileSelect}
 				filterExtension=".sqlite"
+			/>
+
+			<FileBrowserModal
+				isOpen={isBlobsBrowserOpen}
+				onClose={() => setIsBlobsBrowserOpen(false)}
+				onSelect={handleBlobsSelect}
+				title="Select Blobs Directory"
+				allowDirectorySelection={true}
 			/>
 		</div>
 	);

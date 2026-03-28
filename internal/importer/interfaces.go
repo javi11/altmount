@@ -39,7 +39,7 @@ type DirectoryScanner interface {
 // NzbDavImporter handles bulk import from NzbDav databases
 type NzbDavImporter interface {
 	// StartNzbdavImport begins importing from an NzbDav database
-	StartNzbdavImport(dbPath string, rootFolder string, cleanupFile bool) error
+	StartNzbdavImport(dbPath string, blobsPath string, rootFolder string, cleanupFile bool) error
 	// GetImportStatus returns the current import status
 	GetImportStatus() ImportInfo
 	// CancelImport cancels an in-progress import
@@ -49,7 +49,7 @@ type NzbDavImporter interface {
 // QueueOperations provides queue manipulation operations
 type QueueOperations interface {
 	// AddToQueue adds an item to the import queue
-	AddToQueue(ctx context.Context, filePath string, relativePath *string, category *string, priority *database.QueuePriority, metadata *string) (*database.ImportQueueItem, error)
+	AddToQueue(ctx context.Context, filePath string, relativePath *string, category *string, priority *database.QueuePriority, metadata *string, downloadID *string) (*database.ImportQueueItem, error)
 	// GetQueueStats returns queue statistics
 	GetQueueStats(ctx context.Context) (*database.QueueStats, error)
 }

@@ -339,6 +339,8 @@ export interface ProviderStatus {
 	missing_count: number;
 	missing_rate_per_minute: number;
 	missing_warning: boolean;
+	byte_count: number;
+	byte_count_24h: number;
 }
 
 export interface ActiveStream {
@@ -370,6 +372,7 @@ export interface PoolMetrics {
 	articles_posted: number;
 	total_errors: number;
 	provider_errors: Record<string, number>;
+	provider_bytes: Record<string, number>;
 	download_speed_bytes_per_sec: number;
 	max_download_speed_bytes_per_sec: number;
 	upload_speed_bytes_per_sec: number;

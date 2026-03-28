@@ -23,6 +23,8 @@ type MetricsSnapshot struct {
 	ArticlesPosted              int64              `json:"articles_posted"`
 	TotalErrors                 int64              `json:"total_errors"`
 	ProviderErrors              map[string]int64   `json:"provider_errors"`
+	ProviderBytes               map[string]int64   `json:"provider_bytes"`
+	ProviderBytes24h            map[string]int64   `json:"provider_bytes_24h"`
 	DownloadSpeedBytesPerSec    float64            `json:"download_speed_bytes_per_sec"`
 	MaxDownloadSpeedBytesPerSec float64            `json:"max_download_speed_bytes_per_sec"`
 	UploadSpeedBytesPerSec      float64            `json:"upload_speed_bytes_per_sec"`
@@ -51,7 +53,9 @@ type MetricsTracker struct {
 	initialBytesUploaded      int64
 	initialArticlesPosted     int64
 	initialProviderErrors     map[string]int64
+	initialProviderBytes      map[string]int64
 	lastSavedBytesDownloaded  int64
+	lastSavedProviderBytes    map[string]int64
 	persistenceThreshold      int64 // Bytes to download before forcing a save
 	cancel                    context.CancelFunc
 	wg                        sync.WaitGroup
@@ -75,6 +79,8 @@ func NewMetricsTracker(pool *nntppool.Client, repo StatsRepository) *MetricsTrac
 		repo:                  repo,
 		samples:               make([]metricsample, 0, 60), // Preallocate for 60 samples
 		initialProviderErrors: make(map[string]int64),
+		initialProviderBytes:  make(map[string]int64),
+		lastSavedProviderBytes: make(map[string]int64),
 		sampleInterval:        2 * time.Second, // Match playback sampling for "live" feel
 		retentionPeriod:       60 * time.Second,
 		calculationWindow:     10 * time.Second,   // Use 10s window for more accurate real-time speeds
@@ -104,11 +110,15 @@ func (mt *MetricsTracker) Start(ctx context.Context) {
 			mt.maxDownloadSpeed = float64(stats["max_download_speed"])
 			mt.lastSavedBytesDownloaded = mt.initialBytesDownloaded
 
-			// Load provider errors (prefixed with provider_error:)
+			// Load provider stats (prefixed with provider_error: or provider_bytes:)
 			for k, v := range stats {
 				if after, ok := strings.CutPrefix(k, "provider_error:"); ok {
 					providerID := after
 					mt.initialProviderErrors[providerID] = v
+				} else if after, ok := strings.CutPrefix(k, "provider_bytes:"); ok {
+					providerID := after
+					mt.initialProviderBytes[providerID] = v
+					mt.lastSavedProviderBytes[providerID] = v
 				}
 			}
 			mt.mu.Unlock()
@@ -116,7 +126,8 @@ func (mt *MetricsTracker) Start(ctx context.Context) {
 			mt.logger.InfoContext(ctx, "Loaded persistent system stats",
 				"articles", mt.initialArticlesDownloaded,
 				"bytes", mt.initialBytesDownloaded,
-				"provider_stats", len(mt.initialProviderErrors))
+				"provider_errors", len(mt.initialProviderErrors),
+				"provider_bytes", len(mt.initialProviderBytes))
 		}
 	}
 
@@ -151,12 +162,14 @@ func (mt *MetricsTracker) GetSnapshot() MetricsSnapshot {
 }
 
 func (mt *MetricsTracker) getSnapshot(now time.Time, stats nntppool.ClientStats) MetricsSnapshot {
-	// Calculate total errors and provider errors from v4 stats
+	// Calculate total errors and provider errors/bytes from v4 stats
 	var totalErrors int64
 	providerErrors := make(map[string]int64)
+	providerBytes := make(map[string]int64)
 	for _, ps := range stats.Providers {
 		totalErrors += ps.Errors
 		providerErrors[ps.Name] = ps.Errors
+		providerBytes[ps.Name] = ps.BytesConsumed
 	}
 
 	// Use live counter for speed and totals
@@ -200,11 +213,17 @@ func (mt *MetricsTracker) getSnapshot(now time.Time, stats nntppool.ClientStats)
 		mt.maxDownloadSpeed = downloadSpeed
 	}
 
-	// Merge provider errors
+	// Merge provider errors and bytes
 	mergedProviderErrors := make(map[string]int64)
 	maps.Copy(mergedProviderErrors, mt.initialProviderErrors)
 	for k, v := range providerErrors {
 		mergedProviderErrors[k] += v
+	}
+
+	mergedProviderBytes := make(map[string]int64)
+	maps.Copy(mergedProviderBytes, mt.initialProviderBytes)
+	for k, v := range providerBytes {
+		mergedProviderBytes[k] += v
 	}
 
 	// Compute windowed missing article rates per provider
@@ -243,6 +262,17 @@ func (mt *MetricsTracker) getSnapshot(now time.Time, stats nntppool.ClientStats)
 		}
 	}
 
+	// Fetch 24h provider stats from DB if repo is available
+	providerBytes24h := make(map[string]int64)
+	if mt.repo != nil {
+		// We use a background context or a timeout context here to avoid blocking speed calcs?
+		// For now, simple call is fine as it's infrequent or cached by DB
+		stats24h, err := mt.repo.GetProviderHourlyStats(context.Background(), 24)
+		if err == nil {
+			providerBytes24h = stats24h
+		}
+	}
+
 	return MetricsSnapshot{
 		BytesDownloaded:             bytesDownloaded + mt.initialBytesDownloaded,
 		BytesUploaded:               mt.initialBytesUploaded,
@@ -250,6 +280,8 @@ func (mt *MetricsTracker) getSnapshot(now time.Time, stats nntppool.ClientStats)
 		ArticlesPosted:              mt.articlesPosted.Load() + mt.initialArticlesPosted,
 		TotalErrors:                 totalErrors,
 		ProviderErrors:              mergedProviderErrors,
+		ProviderBytes:               mergedProviderBytes,
+		ProviderBytes24h:            providerBytes24h,
 		DownloadSpeedBytesPerSec:    downloadSpeed,
 		MaxDownloadSpeedBytesPerSec: mt.maxDownloadSpeed,
 		UploadSpeedBytesPerSec:      0, // v4 doesn't track uploads
@@ -320,6 +352,11 @@ func (mt *MetricsTracker) saveStats(ctx context.Context) {
 		stats["provider_error:"+providerID] = errorCount
 	}
 
+	// Add provider bytes to batch
+	for providerID, byteCount := range snapshot.ProviderBytes {
+		stats["provider_bytes:"+providerID] = byteCount
+	}
+
 	if err := mt.repo.BatchUpdateSystemStats(ctx, stats); err != nil {
 		mt.logger.ErrorContext(ctx, "Failed to persist system stats", "error", err)
 	} else {
@@ -327,12 +364,29 @@ func (mt *MetricsTracker) saveStats(ctx context.Context) {
 		mt.mu.Lock()
 		delta := snapshot.BytesDownloaded - mt.lastSavedBytesDownloaded
 		mt.lastSavedBytesDownloaded = snapshot.BytesDownloaded
+
+		// Calculate deltas per provider for hourly stats
+		providerDeltas := make(map[string]int64)
+		for providerID, currentTotal := range snapshot.ProviderBytes {
+			lastTotal := mt.lastSavedProviderBytes[providerID]
+			if currentTotal > lastTotal {
+				providerDeltas[providerID] = currentTotal - lastTotal
+				mt.lastSavedProviderBytes[providerID] = currentTotal
+			}
+		}
 		mt.mu.Unlock()
 
 		// Update daily stats with the delta
 		if delta > 0 {
 			if err := mt.repo.AddBytesDownloadedToDailyStat(ctx, delta); err != nil {
 				mt.logger.ErrorContext(ctx, "Failed to update daily download volume", "error", err)
+			}
+		}
+
+		// Update per-provider hourly stats
+		for providerID, providerDelta := range providerDeltas {
+			if err := mt.repo.AddProviderBytesToHourlyStat(ctx, providerID, providerDelta); err != nil {
+				mt.logger.ErrorContext(ctx, "Failed to update provider hourly volume", "provider", providerID, "error", err)
 			}
 		}
 	}
@@ -352,6 +406,8 @@ func (mt *MetricsTracker) Reset(ctx context.Context, resetPeak bool, resetTotals
 		mt.articlesPosted.Store(0)
 		mt.liveBytesDownloaded.Store(0)
 		mt.initialProviderErrors = make(map[string]int64)
+		mt.initialProviderBytes = make(map[string]int64)
+		mt.lastSavedProviderBytes = make(map[string]int64)
 
 		// Clear samples to reset speed calculation
 		mt.samples = make([]metricsample, 0, 60)

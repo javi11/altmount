@@ -28,6 +28,7 @@ const (
 // ImportQueueItem represents a queued NZB file waiting for import
 type ImportQueueItem struct {
 	ID           int64         `db:"id"`
+	DownloadID   *string       `db:"download_id"` // GUID/String ID for external tracking (e.g. Sonarr/Radarr)
 	NzbPath      string        `db:"nzb_path"`
 	RelativePath *string       `db:"relative_path"`
 	StoragePath  *string       `db:"storage_path"`
@@ -155,6 +156,7 @@ type ImportHourlyStat struct {
 // ImportHistory represents a persistent record of a single imported file
 type ImportHistory struct {
 	ID          int64     `db:"id"`
+	DownloadID  *string   `db:"download_id"`
 	NzbID       *int64    `db:"nzb_id"` // Nullable if queue item deleted
 	NzbName     string    `db:"nzb_name"`
 	FileName    string    `db:"file_name"`

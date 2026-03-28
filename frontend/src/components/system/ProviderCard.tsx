@@ -1,6 +1,7 @@
 import { AlertTriangle } from "lucide-react";
 import { formatSpeed } from "../../lib/utils";
 import type { ProviderStatus } from "../../types/api";
+import { BytesDisplay } from "../ui/BytesDisplay";
 
 interface ProviderCardProps {
 	provider: ProviderStatus;
@@ -128,6 +129,22 @@ export function ProviderCard({ provider, className }: ProviderCardProps) {
 						>
 							{provider.error_count}
 						</div>
+					</div>
+				</div>
+
+				{/* Total Bytes per provider */}
+				<div className="mt-2 space-y-1 border-base-200 border-t pt-2">
+					<div className="flex items-center justify-between text-[10px]">
+						<span className="text-base-content/50 uppercase tracking-tight">Total Downloaded</span>
+						<span className="font-mono font-bold text-base-content/70">
+							<BytesDisplay bytes={provider.byte_count} />
+						</span>
+					</div>
+					<div className="flex items-center justify-between text-[10px]">
+						<span className="text-base-content/50 uppercase tracking-tight">Last 24h</span>
+						<span className="font-mono font-bold text-primary">
+							<BytesDisplay bytes={provider.byte_count_24h} />
+						</span>
 					</div>
 				</div>
 
