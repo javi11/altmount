@@ -219,6 +219,7 @@ func ProcessArchive(
 	}
 
 	nzbName := filepath.Base(nzbPath)
+	releaseName := strings.TrimSuffix(nzbName, filepath.Ext(nzbName))
 	shouldNormalizeName := renameToNzbName && mediaFilesCount == 1
 
 	// Count ISO-expanded files so single-file ISOs omit the index suffix.
@@ -253,7 +254,6 @@ func ProcessArchive(
 		// ISO-expanded and single-file-renamed files are placed flat (no subdir).
 		if rarContent.ISOExpansionIndex > 0 {
 			ext := filepath.Ext(rarContent.Filename)
-			releaseName := strings.TrimSuffix(filepath.Base(nzbPath), filepath.Ext(filepath.Base(nzbPath)))
 			if isoExpandedCount == 1 {
 				baseFilename = releaseName + ext
 			} else {
@@ -278,7 +278,7 @@ func ProcessArchive(
 		if internalSubDir == "." || internalSubDir == "" {
 			virtualFilePath = filepath.Join(virtualDir, baseFilename)
 		} else {
-			subDir := strings.ReplaceAll(filepath.Join(virtualDir, internalSubDir), string(filepath.Separator), "/")
+			subDir := filepath.Join(virtualDir, internalSubDir)
 			if err := filesystem.EnsureDirectoryExists(subDir, metadataService); err != nil {
 				return fmt.Errorf("failed to create archive subdirectory %s: %w", subDir, err)
 			}
