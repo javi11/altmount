@@ -780,12 +780,6 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 	}
 
 	for _, item := range recentHistory {
-		// Only include items that haven't been successfully moved to the library yet.
-		// Once library_path is populated, Sonarr has already finished its work.
-		if item.LibraryPath != nil && *item.LibraryPath != "" {
-			continue
-		}
-
 		id := item.ID
 		if item.NzbID != nil {
 			id = *item.NzbID
@@ -1239,7 +1233,7 @@ func (s *Server) normalizeCategoryFilter(c *fiber.Ctx) string {
 		return ""
 	}
 
-	return category
+	return lower
 }
 
 // calculateItemBasePath calculates the base path for an item based on the import strategy configuration

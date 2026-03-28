@@ -658,7 +658,7 @@ func (r *Repository) ListQueueItems(ctx context.Context, status *QueueStatus, se
 	}
 
 	if category != "" {
-		conditions = append(conditions, "category = ?")
+		conditions = append(conditions, "LOWER(category) = LOWER(?)")
 		conditionArgs = append(conditionArgs, category)
 	}
 
@@ -733,7 +733,7 @@ func (r *Repository) ListActiveQueueItems(ctx context.Context, search string, ca
 	}
 
 	if category != "" {
-		conditions = append(conditions, "category = ?")
+		conditions = append(conditions, "LOWER(category) = LOWER(?)")
 		conditionArgs = append(conditionArgs, category)
 	}
 
@@ -807,7 +807,7 @@ func (r *Repository) CountQueueItems(ctx context.Context, status *QueueStatus, s
 	}
 
 	if category != "" {
-		conditions = append(conditions, "category = ?")
+		conditions = append(conditions, "LOWER(category) = LOWER(?)")
 		conditionArgs = append(conditionArgs, category)
 	}
 
@@ -845,7 +845,7 @@ func (r *Repository) CountActiveQueueItems(ctx context.Context, search string, c
 	}
 
 	if category != "" {
-		conditions = append(conditions, "category = ?")
+		conditions = append(conditions, "LOWER(category) = LOWER(?)")
 		conditionArgs = append(conditionArgs, category)
 	}
 
@@ -1071,7 +1071,7 @@ func (r *Repository) ListImportHistory(ctx context.Context, limit, offset int, s
 		FROM import_history h
 		LEFT JOIN file_health f ON h.virtual_path = f.file_path
 		WHERE (? = '' OR h.nzb_name LIKE ? OR h.file_name LIKE ? OR h.virtual_path LIKE ?)
-		  AND (? = '' OR h.category = ?)
+		  AND (? = '' OR LOWER(h.category) = LOWER(?))
 		ORDER BY h.completed_at DESC
 		LIMIT ? OFFSET ?
 	`
@@ -1110,7 +1110,7 @@ func (r *Repository) ListRecentImportHistory(ctx context.Context, minutes int, c
 		FROM import_history h
 		LEFT JOIN file_health f ON TRIM(h.virtual_path, '/') = TRIM(f.file_path, '/')
 		WHERE h.completed_at >= %s
-		  AND (? = '' OR h.category = ?)
+		  AND (? = '' OR LOWER(h.category) = LOWER(?))
 		ORDER BY h.completed_at DESC
 	`, cutoffExpr)
 
