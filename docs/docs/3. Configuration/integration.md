@@ -118,6 +118,7 @@ No `import_dir` or `mount_path` is needed. Media is accessed directly via the mo
 Creates `.strm` files that contain WebDAV URLs. Useful when your media player can resolve HTTP URLs directly:
 
 ```yaml
+# Replace with your actual AltMount hostname/port if changed
 mount_path: http://altmount:8080
 
 import:
@@ -153,7 +154,7 @@ AltMount can automatically monitor ARR queues and remove failed imports to keep 
 ```yaml
 arrs:
   enabled: true
-  webhook_base_url: "http://altmount:8080" # Base URL for webhook callbacks (default)
+  webhook_base_url: "" # Base URL for webhook callbacks (defaults to http://<host>:<port>)
   queue_cleanup_enabled: true
   queue_cleanup_interval_seconds: 300
   queue_cleanup_grace_period_minutes: 10 # Wait before cleaning up (default: 10)
@@ -171,7 +172,7 @@ arrs:
 | `queue_cleanup_interval_seconds`     | How often to check ARR queues (in seconds)                                                              |
 | `queue_cleanup_grace_period_minutes` | Minimum age (in minutes) before a failed item is cleaned up (default: 10)                               |
 | `cleanup_automatic_import_failure`   | Clean up items with "Automatic import is not possible" errors                                           |
-| `webhook_base_url`                   | Base URL ARRs use to reach AltMount for webhooks (default: `http://altmount:8080`)                      |
+| `webhook_base_url`                   | Base URL ARRs use to reach AltMount for webhooks (default: `http://<host>:<port>`)                      |
 | `queue_cleanup_allowlist`            | Error messages to treat as safe for cleanup. Each entry has a `message` string and an `enabled` boolean |
 
 ## Verifying the Setup

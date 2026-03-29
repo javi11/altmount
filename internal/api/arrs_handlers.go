@@ -749,12 +749,12 @@ func (s *Server) handleRegisterArrsWebhooks(c *fiber.Ctx) error {
 	}
 
 	// Get configured base URL or use default
-	baseURL := "http://altmount:8080"
+	var baseURL string
 	if s.configManager != nil {
 		cfg := s.configManager.GetConfig()
-		if cfg.Arrs.WebhookBaseURL != "" {
-			baseURL = cfg.Arrs.WebhookBaseURL
-		}
+		baseURL = cfg.GetWebhookBaseURL()
+	} else {
+		baseURL = "http://altmount:8080" // Fallback if no config manager is available
 	}
 
 	if err := s.arrsService.EnsureWebhookRegistration(c.Context(), baseURL, apiKey); err != nil {
@@ -800,8 +800,7 @@ func (s *Server) handleRegisterArrsDownloadClients(c *fiber.Ctx) error {
 	}
 	urlBase := "sabnzbd"
 
-	if cfg.SABnzbd.DownloadClientBaseURL != "" {
-		rawURL := cfg.SABnzbd.DownloadClientBaseURL
+	if rawURL := cfg.GetDownloadClientBaseURL(); rawURL != "" {
 		if !strings.Contains(rawURL, "://") {
 			rawURL = "http://" + rawURL
 		}
@@ -873,8 +872,7 @@ func (s *Server) handleTestArrsDownloadClients(c *fiber.Ctx) error {
 	}
 	urlBase := "sabnzbd"
 
-	if cfg.SABnzbd.DownloadClientBaseURL != "" {
-		rawURL := cfg.SABnzbd.DownloadClientBaseURL
+	if rawURL := cfg.GetDownloadClientBaseURL(); rawURL != "" {
 		if !strings.Contains(rawURL, "://") {
 			rawURL = "http://" + rawURL
 		}

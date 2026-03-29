@@ -121,3 +121,106 @@ func TestConfig_Validate_MountPaths(t *testing.T) {
 		})
 	}
 }
+
+func TestConfig_GetWebhookBaseURL(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   Config
+		expected string
+	}{
+		{
+			name: "explicitly set",
+			config: Config{
+				Arrs: ArrsConfig{
+					WebhookBaseURL: "http://custom:1234",
+				},
+				WebDAV: WebDAVConfig{
+					Port: 8080,
+				},
+			},
+			expected: "http://custom:1234",
+		},
+		{
+			name: "default with port 8080",
+			config: Config{
+				Arrs: ArrsConfig{
+					WebhookBaseURL: "",
+				},
+				WebDAV: WebDAVConfig{
+					Port: 8080,
+				},
+			},
+			expected: "http://altmount:8080",
+		},
+		{
+			name: "default with port 8084",
+			config: Config{
+				Arrs: ArrsConfig{
+					WebhookBaseURL: "",
+				},
+				WebDAV: WebDAVConfig{
+					Port: 8084,
+				},
+			},
+			expected: "http://altmount:8084",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, tt.config.GetWebhookBaseURL())
+		})
+	}
+}
+
+func TestConfig_GetDownloadClientBaseURL(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   Config
+		expected string
+	}{
+		{
+			name: "explicitly set",
+			config: Config{
+				SABnzbd: SABnzbdConfig{
+					DownloadClientBaseURL: "http://custom:1234/sab",
+				},
+				WebDAV: WebDAVConfig{
+					Port: 8080,
+				},
+			},
+			expected: "http://custom:1234/sab",
+		},
+		{
+			name: "default with port 8080",
+			config: Config{
+				SABnzbd: SABnzbdConfig{
+					DownloadClientBaseURL: "",
+				},
+				WebDAV: WebDAVConfig{
+					Port: 8080,
+				},
+			},
+			expected: "http://altmount:8080/sabnzbd",
+		},
+		{
+			name: "default with port 8084",
+			config: Config{
+				SABnzbd: SABnzbdConfig{
+					DownloadClientBaseURL: "",
+				},
+				WebDAV: WebDAVConfig{
+					Port: 8084,
+				},
+			},
+			expected: "http://altmount:8084/sabnzbd",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, tt.config.GetDownloadClientBaseURL())
+		})
+	}
+}
+

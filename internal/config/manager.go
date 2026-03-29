@@ -407,6 +407,30 @@ func (c *Config) DeepCopy() *Config {
 	return copyCfg
 }
 
+// GetWebhookBaseURL returns the configured webhook base URL or a default one based on the current port.
+func (c *Config) GetWebhookBaseURL() string {
+	if c.Arrs.WebhookBaseURL != "" {
+		return c.Arrs.WebhookBaseURL
+	}
+	host := c.WebDAV.Host
+	if host == "" {
+		host = "altmount"
+	}
+	return fmt.Sprintf("http://%s:%d", host, c.WebDAV.Port)
+}
+
+// GetDownloadClientBaseURL returns the configured download client base URL or a default one based on the current port.
+func (c *Config) GetDownloadClientBaseURL() string {
+	if c.SABnzbd.DownloadClientBaseURL != "" {
+		return c.SABnzbd.DownloadClientBaseURL
+	}
+	host := c.WebDAV.Host
+	if host == "" {
+		host = "altmount"
+	}
+	return fmt.Sprintf("http://%s:%d/sabnzbd", host, c.WebDAV.Port)
+}
+
 // Validate validates the configuration
 func (c *Config) Validate() error {
 	if c.WebDAV.Port <= 0 || c.WebDAV.Port > 65535 {
@@ -1332,7 +1356,7 @@ func DefaultConfig(configDir ...string) *Config {
 		SABnzbd: SABnzbdConfig{
 			Enabled:               &sabnzbdEnabled,
 			CompleteDir:           "/complete",
-			DownloadClientBaseURL: "http://altmount:8080/sabnzbd",
+			DownloadClientBaseURL: "",
 			Categories: []SABnzbdCategory{
 				{
 					Name:     "movies",
@@ -1352,7 +1376,7 @@ func DefaultConfig(configDir ...string) *Config {
 		Arrs: ArrsConfig{
 			Enabled:                        &scrapperEnabled, // Disabled by default
 			MaxWorkers:                     5,                // Default to 5 concurrent workers
-			WebhookBaseURL:                 "http://altmount:8080",
+			WebhookBaseURL:                 "",
 			RadarrInstances:                []ArrsInstanceConfig{},
 			SonarrInstances:                []ArrsInstanceConfig{},
 			CleanupAutomaticImportFailure:  &cleanupAutomaticImportFailure,
