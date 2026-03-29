@@ -247,8 +247,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 
 		if apiKey != "" {
-			logger.InfoContext(bgCtx, "Triggering automatic ARR webhook registration")
-			if err := arrsService.EnsureWebhookRegistration(bgCtx, "http://altmount:8080", apiKey); err != nil {
+			logger.InfoContext(bgCtx, "Triggering automatic ARR webhook registration", "webhook_url", cfg.GetWebhookBaseURL())
+			if err := arrsService.EnsureWebhookRegistration(bgCtx, cfg.GetWebhookBaseURL(), apiKey); err != nil {
 				logger.ErrorContext(bgCtx, "Failed to register ARR webhooks on startup", "error", err)
 			}
 		} else {

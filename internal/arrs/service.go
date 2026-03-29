@@ -91,10 +91,7 @@ func (s *Service) RegisterInstance(ctx context.Context, arrURL, apiKey string) e
 			key := s.GetFirstAdminAPIKey(bgCtx)
 			if key != "" {
 				cfg := s.configGetter()
-				baseURL := cfg.Arrs.WebhookBaseURL
-				if baseURL == "" {
-					baseURL = "http://altmount:8080"
-				}
+				baseURL := cfg.GetWebhookBaseURL()
 				_ = s.registrar.EnsureWebhookRegistration(bgCtx, baseURL, key)
 			}
 		}()

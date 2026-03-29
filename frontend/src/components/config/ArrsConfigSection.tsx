@@ -48,6 +48,7 @@ export function ArrsConfigSection({
 	const [newIgnoreMessage, setNewIgnoreMessage] = useState("");
 
 	const registerWebhooks = useRegisterArrsWebhooks();
+	const defaultWebhookUrl = `http://${config.webdav.host || "altmount"}:${config.webdav.port}`;
 
 	// Sync form data when config changes from external sources (reload)
 	useEffect(() => {
@@ -282,9 +283,9 @@ export function ArrsConfigSection({
 									<input
 										type="url"
 										className="input input-bordered w-full bg-base-100 font-mono text-sm"
-										value={formData.webhook_base_url ?? "http://altmount:8080"}
+										value={formData.webhook_base_url ?? defaultWebhookUrl}
 										onChange={(e) => handleFormChange("webhook_base_url", e.target.value)}
-										placeholder="http://altmount:8080"
+										placeholder={defaultWebhookUrl}
 										disabled={isReadOnly}
 									/>
 								</fieldset>
