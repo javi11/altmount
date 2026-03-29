@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import { useToast } from "../../contexts/ToastContext";
 import { ToastComponent } from "./Toast";
 
@@ -8,9 +9,9 @@ export function ToastContainer() {
 		return null;
 	}
 
-	return (
+	return createPortal(
 		<div
-			className="pointer-events-none fixed top-4 right-4 z-50 w-full max-w-sm space-y-2"
+			className="pointer-events-none fixed top-4 right-4 z-[9999] w-full max-w-sm space-y-2"
 			aria-live="polite"
 		>
 			{toasts.map((toast) => (
@@ -18,6 +19,7 @@ export function ToastContainer() {
 					<ToastComponent toast={toast} onClose={removeToast} />
 				</div>
 			))}
-		</div>
+		</div>,
+		document.body,
 	);
 }
