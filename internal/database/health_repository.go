@@ -193,7 +193,7 @@ func (r *HealthRepository) GetUnhealthyFiles(ctx context.Context, limit int, str
 		WHERE scheduled_check_at IS NOT NULL
 		  AND scheduled_check_at <= datetime('now')
 		  AND retry_count < ?
-		  AND status NOT IN ('repair_triggered', 'corrupted', 'checking')
+		  AND status NOT IN ('repair_triggered', 'checking')
 		  AND (
 			  ? = 'NONE' 
 			  OR (library_path IS NOT NULL AND library_path LIKE ?)

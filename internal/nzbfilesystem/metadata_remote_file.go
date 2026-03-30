@@ -1600,9 +1600,8 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 	defer cancel()
 
 	// Any file with missing segments or corruption is marked as corrupted in metadata
-	// but set to pending in DB to trigger the repair cycle immediately
+	// and DB to trigger the repair cycle via the health worker.
 	metadataStatus := metapb.FileStatus_FILE_STATUS_CORRUPTED
-	var dbStatus database.HealthStatus
 
 	// Update metadata status (blocking with timeout)
 	if err := mvf.metadataService.UpdateFileStatus(mvf.name, metadataStatus); err != nil {
@@ -1620,10 +1619,10 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 	errorDetails := fmt.Sprintf(`{"missing_articles": %d, "total_articles": %d, "error_type": "ArticleNotFound"}`,
 		1, len(mvf.fileMeta.SegmentData))
 
-	// Mark as pending with high priority to trigger the health worker immediately
+	// Mark as corrupted with high priority to trigger the health worker immediately
 	// The health worker will then handle the repair logic in its own cycle.
-	slog.InfoContext(ctx, "Streaming failure detected, scheduling high-priority health check", "file", mvf.name)
-	dbStatus = database.HealthStatusPending
+	slog.InfoContext(ctx, "Streaming failure detected, scheduling high-priority health repair", "file", mvf.name)
+	dbStatus := database.HealthStatusCorrupted
 
 	// Update database with high priority
 	if err := mvf.healthRepository.UpdateFileHealthScheduled(ctx,
@@ -1638,11 +1637,6 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 		slog.WarnContext(ctx, "Failed to update health database for streaming failure", "file", mvf.name, "error", err)
 	}
 
-	// Move metadata to corrupted folder immediately so it's hidden from FUSE/WebDAV
-	if moveErr := mvf.metadataService.MoveToCorrupted(ctx, mvf.name); moveErr != nil {
-		slog.WarnContext(ctx, "Failed to move corrupted metadata file in real-time", "file", mvf.name, "error", moveErr)
-	}
-
 	// Increment failure count for tracking/masking if enabled
 	cfg := mvf.configGetter()
 	if cfg.Streaming.FailureMasking.Enabled == nil || *cfg.Streaming.FailureMasking.Enabled {
@@ -1652,18 +1646,6 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 		} else if isMasked {
 			slog.InfoContext(ctx, "File masked due to streaming failure", "file", mvf.name)
 		}
-	}
-
-	if err := mvf.healthRepository.UpdateFileHealth(
-		ctx,
-		mvf.name,
-		dbStatus,
-		&errorMsg,
-		sourceNzbPath,
-		&errorDetails,
-		noRetry,
-	); err != nil {
-		slog.WarnContext(ctx, "Failed to update file health", "file", mvf.name, "error", err)
 	}
 }
 
