@@ -57,6 +57,7 @@ export function SABnzbdConfigSection({
 
 	const registerDownloadClient = useRegisterArrsDownloadClients();
 	const testDownloadClient = useTestArrsDownloadClients();
+	const defaultDownloadClientUrl = `http://${config.webdav.host || "altmount"}:${config.webdav.port}/sabnzbd`;
 
 	// Sync form data when config changes from external sources (reload)
 	useEffect(() => {
@@ -234,9 +235,9 @@ export function SABnzbdConfigSection({
 									<input
 										type="url"
 										className="input input-bordered w-full bg-base-100 font-mono text-sm"
-										value={formData.download_client_base_url || ""}
+										value={formData.download_client_base_url || defaultDownloadClientUrl}
 										onChange={(e) => updateFormData({ download_client_base_url: e.target.value })}
-										placeholder="http://altmount:8080/sabnzbd"
+										placeholder={defaultDownloadClientUrl}
 										disabled={isReadOnly}
 									/>
 									<p className="label break-words text-base-content/70 text-xs">
