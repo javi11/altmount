@@ -1638,6 +1638,46 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 		slog.WarnContext(ctx, "Failed to update health database for streaming failure", "file", mvf.name, "error", err)
 	}
 
+	// Trigger immediate repair if ARR service is available
+	if mvf.arrsService != nil {
+		go func() {
+			// Use a fresh context for the async repair trigger
+			repairCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			// Get current health record to resolve path for rescan
+			fh, err := mvf.healthRepository.GetFileHealth(repairCtx, mvf.name)
+			if err == nil && fh != nil {
+				// Resolve path for rescan
+				pathForRescan := ""
+				if fh.LibraryPath != nil && *fh.LibraryPath != "" {
+					pathForRescan = *fh.LibraryPath
+				} else {
+					cfg := mvf.configGetter()
+					if cfg.Health.LibraryDir != nil && *cfg.Health.LibraryDir != "" {
+						pathForRescan = pathutil.JoinAbsPath(*cfg.Health.LibraryDir, mvf.name)
+					} else if cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
+						pathForRescan = pathutil.JoinAbsPath(*cfg.Import.ImportDir, mvf.name)
+					} else {
+						pathForRescan = pathutil.JoinAbsPath(cfg.MountPath, mvf.name)
+					}
+				}
+
+				if pathForRescan != "" {
+					slog.InfoContext(repairCtx, "Triggering immediate ARR rescan for streaming failure",
+						"file", mvf.name, "path_for_rescan", pathForRescan)
+					if err := mvf.arrsService.TriggerFileRescan(repairCtx, pathForRescan, mvf.name); err != nil {
+						slog.WarnContext(repairCtx, "Failed to trigger immediate ARR rescan",
+							"file", mvf.name, "error", err)
+					} else {
+						// If repair was triggered successfully, update status to repair_triggered
+						_ = mvf.healthRepository.UpdateFileHealth(repairCtx, mvf.name, database.HealthStatusRepairTriggered, &errorMsg, sourceNzbPath, &errorDetails, true)
+					}
+				}
+			}
+		}()
+	}
+
 	// Move metadata to corrupted folder immediately so it's hidden from FUSE/WebDAV
 	if moveErr := mvf.metadataService.MoveToCorrupted(ctx, mvf.name); moveErr != nil {
 		slog.WarnContext(ctx, "Failed to move corrupted metadata file in real-time", "file", mvf.name, "error", moveErr)
