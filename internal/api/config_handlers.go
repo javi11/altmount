@@ -208,7 +208,21 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 	// Decode into the specific section based on the URL parameter
 	var err error
 	switch section {
-	case "webdav", "api", "auth", "database", "metadata", "streaming", "health", "rclone", "import", "log", "sabnzbd", "arrs", "fuse", "segment_cache", "system", "mount_path", "mount", "providers", "stremio":
+	case "providers":
+		err = c.BodyParser(newConfig)
+		if err == nil {
+			// encoding/json updates slice elements in-place, preserving json:"-" fields
+			// (Password) from their original positions. When the order changes this mixes
+			// passwords across providers. Re-map each password to its correct provider by ID.
+			oldPwdByID := make(map[string]string, len(currentConfig.Providers))
+			for _, p := range currentConfig.Providers {
+				oldPwdByID[p.ID] = p.Password
+			}
+			for i := range newConfig.Providers {
+				newConfig.Providers[i].Password = oldPwdByID[newConfig.Providers[i].ID]
+			}
+		}
+	case "webdav", "api", "auth", "database", "metadata", "streaming", "health", "rclone", "import", "log", "sabnzbd", "arrs", "fuse", "segment_cache", "system", "mount_path", "mount", "stremio":
 		err = c.BodyParser(newConfig)
 		// BodyParser will map fields like "profiler_enabled" from JSON to the root of newConfig
 		// because Config struct has it with `json:"profiler_enabled"`.
