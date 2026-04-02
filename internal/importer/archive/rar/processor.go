@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/errors"
 	"github.com/javi11/altmount/internal/importer/archive"
 	"github.com/javi11/altmount/internal/importer/filesystem"
@@ -21,23 +22,17 @@ import (
 
 // rarProcessor handles RAR archive analysis and content extraction
 type rarProcessor struct {
-	log                      *slog.Logger
-	poolManager              pool.Manager
-	maxConcurrentVolumes     int
-	maxPrefetch              int
-	readTimeout              time.Duration
-	allowNestedRarExtraction bool
+	log          *slog.Logger
+	poolManager  pool.Manager
+	configGetter config.ConfigGetter
 }
 
 // NewProcessor creates a new RAR processor
-func NewProcessor(poolManager pool.Manager, maxConcurrentVolumes int, maxPrefetch int, readTimeout time.Duration, allowNestedRarExtraction bool) Processor {
+func NewProcessor(poolManager pool.Manager, configGetter config.ConfigGetter) Processor {
 	return &rarProcessor{
-		log:                      slog.Default().With("component", "rar-processor"),
-		poolManager:              poolManager,
-		maxConcurrentVolumes:     maxConcurrentVolumes,
-		maxPrefetch:              maxPrefetch,
-		readTimeout:              readTimeout,
-		allowNestedRarExtraction: allowNestedRarExtraction,
+		log:          slog.Default().With("component", "rar-processor"),
+		poolManager:  poolManager,
+		configGetter: configGetter,
 	}
 }
 
@@ -91,6 +86,18 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 		return nil, errors.NewNonRetryableError("no pool manager available", nil)
 	}
 
+	cfg := rh.configGetter()
+	maxConcurrentVolumes := cfg.Import.MaxImportConnections
+	maxPrefetch := cfg.Import.MaxDownloadPrefetch
+	readTimeout := time.Duration(cfg.Import.ReadTimeoutSeconds) * time.Second
+	if readTimeout == 0 {
+		readTimeout = 5 * time.Minute
+	}
+	allowNestedRarExtraction := true
+	if cfg.Import.AllowNestedRarExtraction != nil {
+		allowNestedRarExtraction = *cfg.Import.AllowNestedRarExtraction
+	}
+
 	// Normalize RAR part filenames (e.g., part010 -> part10) for consistent processing
 	// Check if ALL files have no extension - if so, we'll add .partXX.rar extensions
 	allFilesNoExt := true
@@ -123,7 +130,7 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 
 	// Create Usenet filesystem for RAR access - this enables the iterator to access
 	// RAR part files directly from Usenet without downloading
-	ufs := filesystem.NewUsenetFileSystem(ctx, rh.poolManager, normalizedFiles, rh.maxPrefetch, progressTracker, rh.readTimeout)
+	ufs := filesystem.NewUsenetFileSystem(ctx, rh.poolManager, normalizedFiles, maxPrefetch, progressTracker, readTimeout)
 
 	// Extract filenames for first part detection
 	fileNames := make([]string, len(normalizedFiles))
@@ -151,7 +158,7 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 	}
 
 	if len(normalizedFiles) > 1 {
-		opts = append(opts, rardecode.ParallelRead(true), rardecode.MaxConcurrentVolumes(rh.maxConcurrentVolumes))
+		opts = append(opts, rardecode.ParallelRead(true), rardecode.MaxConcurrentVolumes(maxConcurrentVolumes))
 	}
 
 	// Check context before expensive archive analysis operation
@@ -195,7 +202,7 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 	}
 
 	// Check for nested RAR archives and process them
-	if rh.allowNestedRarExtraction {
+	if allowNestedRarExtraction {
 		Contents, err = rh.detectAndProcessNestedRars(ctx, Contents)
 		if err != nil {
 			return nil, errors.NewNonRetryableError("failed to process nested RAR archives", err)
@@ -583,6 +590,14 @@ func (rh *rarProcessor) detectAndProcessNestedRars(ctx context.Context, outerCon
 // to outer RAR segments. For unencrypted outer RARs, it flattens segments directly.
 // For encrypted outer RARs, it creates NestedSource entries.
 func (rh *rarProcessor) processNestedRarContent(ctx context.Context, innerRarContents []Content) ([]Content, error) {
+	cfg := rh.configGetter()
+	maxConcurrentVolumes := cfg.Import.MaxImportConnections
+	maxPrefetch := cfg.Import.MaxDownloadPrefetch
+	readTimeout := time.Duration(cfg.Import.ReadTimeoutSeconds) * time.Second
+	if readTimeout == 0 {
+		readTimeout = 5 * time.Minute
+	}
+
 	// Determine if outer RAR is encrypted (check first volume)
 	outerEncrypted := len(innerRarContents[0].AesKey) > 0
 
@@ -606,7 +621,7 @@ func (rh *rarProcessor) processNestedRarContent(ctx context.Context, innerRarCon
 	}
 
 	// Create filesystem for reading inner RAR volumes
-	dfs := filesystem.NewDecryptingFileSystem(ctx, rh.poolManager, entries, rh.maxPrefetch, rh.readTimeout)
+	dfs := filesystem.NewDecryptingFileSystem(ctx, rh.poolManager, entries, maxPrefetch, readTimeout)
 
 	// Find the first inner RAR part
 	fileNames := make([]string, len(innerRarContents))
@@ -627,7 +642,7 @@ func (rh *rarProcessor) processNestedRarContent(ctx context.Context, innerRarCon
 	// Analyze inner RAR (no password — inner RAR is unencrypted)
 	opts := []rardecode.Option{rardecode.FileSystem(dfs), rardecode.SkipCheck}
 	if len(innerRarContents) > 1 {
-		opts = append(opts, rardecode.ParallelRead(true), rardecode.MaxConcurrentVolumes(rh.maxConcurrentVolumes))
+		opts = append(opts, rardecode.ParallelRead(true), rardecode.MaxConcurrentVolumes(maxConcurrentVolumes))
 	}
 
 	aggregatedFiles, err := rardecode.ListArchiveInfo(mainRarFile, opts...)
