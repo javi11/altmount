@@ -191,35 +191,8 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 		config.Workers = 2
 	}
 
-	// Get the initial config to pass import settings
-	currentConfig := configGetter()
-	maxImportConnections := currentConfig.Import.MaxImportConnections
-	segmentSamplePercentage := currentConfig.Import.SegmentSamplePercentage
-	allowedFileExtensions := currentConfig.Import.AllowedFileExtensions
-	maxDownloadPrefetch := currentConfig.Import.MaxDownloadPrefetch
-	readTimeout := time.Duration(currentConfig.Import.ReadTimeoutSeconds) * time.Second
-	if readTimeout == 0 {
-		readTimeout = 5 * time.Minute
-	}
-	allowNestedRarExtraction := true
-	if currentConfig.Import.AllowNestedRarExtraction != nil {
-		allowNestedRarExtraction = *currentConfig.Import.AllowNestedRarExtraction
-	}
-	expandBlurayIso := true
-	if currentConfig.Import.ExpandBlurayIso != nil {
-		expandBlurayIso = *currentConfig.Import.ExpandBlurayIso
-	}
-	renameToNzbName := true
-	if currentConfig.Import.RenameToNzbName != nil {
-		renameToNzbName = *currentConfig.Import.RenameToNzbName
-	}
-	filterSampleFiles := true
-	if currentConfig.Import.FilterSampleFiles != nil {
-		filterSampleFiles = *currentConfig.Import.FilterSampleFiles
-	}
-
 	// Create processor with poolManager for dynamic pool access
-	processor := NewProcessor(metadataService, poolManager, maxImportConnections, segmentSamplePercentage, allowedFileExtensions, maxDownloadPrefetch, readTimeout, broadcaster, configGetter, nil, allowNestedRarExtraction, expandBlurayIso, renameToNzbName, filterSampleFiles)
+	processor := NewProcessor(metadataService, poolManager, broadcaster, configGetter, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -386,9 +359,6 @@ func (s *Service) RegisterConfigChangeHandler(configManager any) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 
-		if s.processor != nil {
-			s.processor.SetSegmentSamplePercentage(newConfig.Import.SegmentSamplePercentage)
-		}
 		if s.postProcessor != nil {
 			s.postProcessor.SetRcloneClient(s.rcloneClient)
 		}

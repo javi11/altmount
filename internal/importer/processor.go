@@ -32,25 +32,17 @@ const (
 
 // Processor handles the processing and storage of parsed NZB files using metadata storage
 type Processor struct {
-	parser                  *parser.Parser
-	strmParser              *parser.StrmParser
-	metadataService         *metadata.MetadataService
-	rarProcessor            rar.Processor
-	sevenZipProcessor       sevenzip.Processor
-	poolManager             pool.Manager // Pool manager for dynamic pool access
-	configGetter            config.ConfigGetter
-	maxImportConnections    int // Maximum concurrent NNTP connections for validation and archive processing
-	segmentSamplePercentage int // Percentage of segments to check when sampling (1-100)
-	validationTimeout       time.Duration
-	maxDownloadPrefetch     int           // Prefetch depth for Usenet segment reads (used by ISO reader)
-	readTimeout             time.Duration // Read timeout for Usenet data (used by ISO reader)
-	allowedFileExtensions   []string
-	expandBlurayIso         bool // Whether to expand Bluray ISO files inside archives
-	renameToNzbName         bool // Whether to rename single-file imports to the NZB release name
-	filterSampleFiles       bool // Whether to filter out sample/proof files during import
-	log                     *slog.Logger
-	broadcaster             *progress.ProgressBroadcaster // WebSocket progress broadcaster
-	recorder                HistoryRecorder
+	parser            *parser.Parser
+	strmParser        *parser.StrmParser
+	metadataService   *metadata.MetadataService
+	rarProcessor      rar.Processor
+	sevenZipProcessor sevenzip.Processor
+	poolManager       pool.Manager // Pool manager for dynamic pool access
+	configGetter      config.ConfigGetter
+	validationTimeout time.Duration
+	log               *slog.Logger
+	broadcaster       *progress.ProgressBroadcaster // WebSocket progress broadcaster
+	recorder          HistoryRecorder
 
 	// Pre-compiled regex patterns for RAR file sorting
 	rarPartPattern  *regexp.Regexp // pattern.part###.rar
@@ -58,27 +50,19 @@ type Processor struct {
 }
 
 // NewProcessor creates a new NZB processor using metadata storage
-func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Manager, maxImportConnections int, segmentSamplePercentage int, allowedFileExtensions []string, maxDownloadPrefetch int, readTimeout time.Duration, broadcaster *progress.ProgressBroadcaster, configGetter config.ConfigGetter, recorder HistoryRecorder, allowNestedRarExtraction bool, expandBlurayIso bool, renameToNzbName bool, filterSampleFiles bool) *Processor {
+func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Manager, broadcaster *progress.ProgressBroadcaster, configGetter config.ConfigGetter, recorder HistoryRecorder) *Processor {
 	return &Processor{
-		parser:                  parser.NewParser(poolManager),
-		strmParser:              parser.NewStrmParser(),
-		metadataService:         metadataService,
-		rarProcessor:            rar.NewProcessor(poolManager, maxImportConnections, maxDownloadPrefetch, readTimeout, allowNestedRarExtraction),
-		sevenZipProcessor:       sevenzip.NewProcessor(poolManager, maxDownloadPrefetch, readTimeout, allowNestedRarExtraction),
-		poolManager:             poolManager,
-		configGetter:            configGetter,
-		maxImportConnections:    maxImportConnections,
-		segmentSamplePercentage: segmentSamplePercentage,
-		validationTimeout:       30 * time.Second, // Default validation timeout for imports
-		maxDownloadPrefetch:     maxDownloadPrefetch,
-		readTimeout:             readTimeout,
-		allowedFileExtensions:   allowedFileExtensions,
-		expandBlurayIso:         expandBlurayIso,
-		renameToNzbName:         renameToNzbName,
-		filterSampleFiles:       filterSampleFiles,
-		log:                     slog.Default().With("component", "nzb-processor"),
-		broadcaster:             broadcaster,
-		recorder:                recorder,
+		parser:            parser.NewParser(poolManager),
+		strmParser:        parser.NewStrmParser(),
+		metadataService:   metadataService,
+		rarProcessor:      rar.NewProcessor(poolManager, configGetter),
+		sevenZipProcessor: sevenzip.NewProcessor(poolManager, configGetter),
+		poolManager:       poolManager,
+		configGetter:      configGetter,
+		validationTimeout: 30 * time.Second, // Default validation timeout for imports
+		log:               slog.Default().With("component", "nzb-processor"),
+		broadcaster:       broadcaster,
+		recorder:          recorder,
 
 		// Initialize pre-compiled regex patterns for RAR file sorting
 		rarPartPattern:  regexp.MustCompile(`(?i)^(.+)\.part(\d+)\.rar$`), // filename.part001.rar
@@ -96,9 +80,6 @@ func (proc *Processor) getCleanNzbName(nzbPath string, queueID int) string {
 	return baseName
 }
 
-func (proc *Processor) SetSegmentSamplePercentage(percentage int) {
-	proc.segmentSamplePercentage = percentage
-}
 
 func (proc *Processor) SetRecorder(recorder HistoryRecorder) {
 	proc.recorder = recorder
@@ -181,11 +162,13 @@ func (proc *Processor) checkCancellation(ctx context.Context) error {
 // metadata files written to disk; it is populated even on partial failure so callers can clean up.
 // Paths prefixed with "DIR:" indicate a metadata directory that should be removed entirely.
 func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePath string, queueID int, allowedExtensionsOverride *[]string, virtualDirOverride *string, extractedFiles []parser.ExtractedFileInfo, category *string, metadata *string) (string, []string, error) {
+	cfg := proc.configGetter()
+
 	// Determine max connections to use
-	maxConnections := proc.maxImportConnections
+	maxConnections := cfg.Import.MaxImportConnections
 
 	// Determine allowed file extensions to use
-	allowedExtensions := proc.allowedFileExtensions
+	allowedExtensions := cfg.Import.AllowedFileExtensions
 	if allowedExtensionsOverride != nil {
 		allowedExtensions = *allowedExtensionsOverride
 	}
@@ -327,6 +310,17 @@ func (proc *Processor) processSingleFile(
 		return "", nil, fmt.Errorf("no regular files to process")
 	}
 
+	importCfg := proc.configGetter().Import
+	renameToNzbName := true
+	if importCfg.RenameToNzbName != nil {
+		renameToNzbName = *importCfg.RenameToNzbName
+	}
+	segmentSamplePercentage := importCfg.SegmentSamplePercentage
+	filterSampleFiles := true
+	if importCfg.FilterSampleFiles != nil {
+		filterSampleFiles = *importCfg.FilterSampleFiles
+	}
+
 	// Normalize virtualDir only for synthetic duplicate folders; skip if the NZB actually lives inside a
 	// real directory named like the release (e.g. .../Season 01/<file>/<file>.nzb).
 	nzbName := proc.getCleanNzbName(nzbPath, queueID)
@@ -356,7 +350,7 @@ func (proc *Processor) processSingleFile(
 
 	// Rename the file to match the NZB name to handle obfuscated filenames
 	// Keep NZB-provided subfolders but rename the leaf to the release name (preventing duplicate extensions)
-	regularFiles = applyNzbRename(proc.renameToNzbName, nzbName, regularFiles)
+	regularFiles = applyNzbRename(renameToNzbName, nzbName, regularFiles)
 
 	// Compute final parent/name, flattening only redundant nesting like file.mkv/file.mkv
 	parentPath, finalName := filesystem.DetermineFileLocation(regularFiles[0], virtualDir)
@@ -370,7 +364,7 @@ func (proc *Processor) processSingleFile(
 	regularFiles[0].Filename = finalName
 
 	// Use configured sample percentage for validation
-	samplePercentage := proc.segmentSamplePercentage
+	samplePercentage := segmentSamplePercentage
 
 	// Create a granular progress tracker covering the 30–100% range.
 	var fileTracker *progress.Tracker
@@ -393,7 +387,7 @@ func (proc *Processor) processSingleFile(
 		allowedExtensions,
 		timeout,
 		fileTracker,
-		proc.filterSampleFiles,
+		filterSampleFiles,
 	)
 	var writtenPaths []string
 	if writtenPath != "" {
@@ -440,13 +434,24 @@ func (proc *Processor) processMultiFile(
 	// provided virtual directory (preserving any subpaths inside the NZB).
 	// EXCEPTION: If the virtual directory is a category root (e.g. "movies"), we MUST create
 	// the NZB folder to ensure Radarr/Sonarr can find the job folder correctly.
+	importCfg := proc.configGetter().Import
+	renameToNzbName := true
+	if importCfg.RenameToNzbName != nil {
+		renameToNzbName = *importCfg.RenameToNzbName
+	}
+	samplePercentage := importCfg.SegmentSamplePercentage
+	filterSampleFiles := true
+	if importCfg.FilterSampleFiles != nil {
+		filterSampleFiles = *importCfg.FilterSampleFiles
+	}
+
 	singleLike := len(regularFiles) == 1 && !proc.isCategoryFolder(virtualDir)
 	targetBaseDir := virtualDir
 	nzbName := proc.getCleanNzbName(nzbPath, queueID)
 
 	if singleLike {
 		// Rename the leaf to the release name (prevents ext duplication) but keep NZB-provided subfolders.
-		regularFiles = applyNzbRename(proc.renameToNzbName, nzbName, regularFiles)
+		regularFiles = applyNzbRename(renameToNzbName, nzbName, regularFiles)
 
 		// Avoid nesting like /Season 02/<release>/<release>.mkv; drop the NZB-named folder here.
 		if err := filesystem.EnsureDirectoryExists(targetBaseDir, proc.metadataService); err != nil {
@@ -466,9 +471,6 @@ func (proc *Processor) processMultiFile(
 
 		targetBaseDir = nzbFolder
 	}
-
-	// Use configured sample percentage for validation
-	samplePercentage := proc.segmentSamplePercentage
 
 	// Create a granular progress tracker covering the 30–100% range.
 	var fileTracker *progress.Tracker
@@ -491,7 +493,7 @@ func (proc *Processor) processMultiFile(
 		allowedExtensions,
 		timeout,
 		fileTracker,
-		proc.filterSampleFiles,
+		filterSampleFiles,
 	)
 	if err != nil {
 		return "", writtenPaths, err
@@ -535,6 +537,26 @@ func (proc *Processor) processRarArchive(
 	category *string,
 	metadata *string,
 ) (string, []string, error) {
+	importCfg := proc.configGetter().Import
+	samplePercentage := importCfg.SegmentSamplePercentage
+	maxPrefetch := importCfg.MaxDownloadPrefetch
+	readTimeout := time.Duration(importCfg.ReadTimeoutSeconds) * time.Second
+	if readTimeout == 0 {
+		readTimeout = 5 * time.Minute
+	}
+	expandBlurayIso := true
+	if importCfg.ExpandBlurayIso != nil {
+		expandBlurayIso = *importCfg.ExpandBlurayIso
+	}
+	filterSampleFiles := true
+	if importCfg.FilterSampleFiles != nil {
+		filterSampleFiles = *importCfg.FilterSampleFiles
+	}
+	renameToNzbName := true
+	if importCfg.RenameToNzbName != nil {
+		renameToNzbName = *importCfg.RenameToNzbName
+	}
+
 	// Create NZB folder
 	nzbName := proc.getCleanNzbName(parsed.Path, queueID)
 	nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, nzbName, proc.metadataService)
@@ -561,11 +583,11 @@ func (proc *Processor) processRarArchive(
 			proc.metadataService,
 			proc.poolManager,
 			maxConnections,
-			proc.segmentSamplePercentage,
+			samplePercentage,
 			allowedExtensions,
 			proc.validationTimeout,
 			nil, // No progress tracker for pre-archive regular files
-			proc.filterSampleFiles,
+			filterSampleFiles,
 		); err != nil {
 			slog.DebugContext(ctx, "Failed to process regular files", "error", err)
 		}
@@ -582,7 +604,6 @@ func (proc *Processor) processRarArchive(
 		}
 
 		releaseDate := archiveFiles[0].ReleaseDate.Unix()
-		samplePercentage := proc.segmentSamplePercentage
 
 		err := rar.ProcessArchive(ctx, rar.ProcessArchiveOptions{
 			VirtualDir:                nzbFolder,
@@ -600,11 +621,11 @@ func (proc *Processor) processRarArchive(
 			AllowedFileExtensions:     allowedExtensions,
 			Timeout:                   timeout,
 			ExtractedFiles:            extractedFiles,
-			MaxPrefetch:               proc.maxDownloadPrefetch,
-			ReadTimeout:               proc.readTimeout,
-			ExpandBlurayIso:           proc.expandBlurayIso,
-			FilterSamples:             proc.filterSampleFiles,
-			RenameToNzbName:           proc.renameToNzbName,
+			MaxPrefetch:               maxPrefetch,
+			ReadTimeout:               readTimeout,
+			ExpandBlurayIso:           expandBlurayIso,
+			FilterSamples:             filterSampleFiles,
+			RenameToNzbName:           renameToNzbName,
 		})
 		if err != nil {
 			return nzbFolder, writtenPaths, err
@@ -651,6 +672,26 @@ func (proc *Processor) processSevenZipArchive(
 	category *string,
 	metadata *string,
 ) (string, []string, error) {
+	importCfg := proc.configGetter().Import
+	samplePercentage := importCfg.SegmentSamplePercentage
+	maxPrefetch := importCfg.MaxDownloadPrefetch
+	readTimeout := time.Duration(importCfg.ReadTimeoutSeconds) * time.Second
+	if readTimeout == 0 {
+		readTimeout = 5 * time.Minute
+	}
+	expandBlurayIso := true
+	if importCfg.ExpandBlurayIso != nil {
+		expandBlurayIso = *importCfg.ExpandBlurayIso
+	}
+	filterSampleFiles := true
+	if importCfg.FilterSampleFiles != nil {
+		filterSampleFiles = *importCfg.FilterSampleFiles
+	}
+	renameToNzbName := true
+	if importCfg.RenameToNzbName != nil {
+		renameToNzbName = *importCfg.RenameToNzbName
+	}
+
 	// Create NZB folder
 	nzbName := proc.getCleanNzbName(parsed.Path, queueID)
 	nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, nzbName, proc.metadataService)
@@ -677,11 +718,11 @@ func (proc *Processor) processSevenZipArchive(
 			proc.metadataService,
 			proc.poolManager,
 			maxConnections,
-			proc.segmentSamplePercentage,
+			samplePercentage,
 			allowedExtensions,
 			proc.validationTimeout,
 			nil, // No progress tracker for pre-archive regular files
-			proc.filterSampleFiles,
+			filterSampleFiles,
 		); err != nil {
 			slog.DebugContext(ctx, "Failed to process regular files", "error", err)
 		}
@@ -697,7 +738,6 @@ func (proc *Processor) processSevenZipArchive(
 		}
 
 		releaseDate := archiveFiles[0].ReleaseDate.Unix()
-		samplePercentage := proc.segmentSamplePercentage
 
 		err := sevenzip.ProcessArchive(ctx, sevenzip.ProcessArchiveOptions{
 			VirtualDir:                nzbFolder,
@@ -715,11 +755,11 @@ func (proc *Processor) processSevenZipArchive(
 			AllowedFileExtensions:     allowedExtensions,
 			Timeout:                   timeout,
 			ExtractedFiles:            extractedFiles,
-			MaxPrefetch:               proc.maxDownloadPrefetch,
-			ReadTimeout:               proc.readTimeout,
-			ExpandBlurayIso:           proc.expandBlurayIso,
-			FilterSamples:             proc.filterSampleFiles,
-			RenameToNzbName:           proc.renameToNzbName,
+			MaxPrefetch:               maxPrefetch,
+			ReadTimeout:               readTimeout,
+			ExpandBlurayIso:           expandBlurayIso,
+			FilterSamples:             filterSampleFiles,
+			RenameToNzbName:           renameToNzbName,
 		})
 		if err != nil {
 			return nzbFolder, writtenPaths, err

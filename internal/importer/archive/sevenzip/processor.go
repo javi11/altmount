@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/errors"
 	"github.com/javi11/altmount/internal/importer/archive"
 	"github.com/javi11/altmount/internal/importer/archive/rar"
@@ -28,21 +29,17 @@ import (
 
 // sevenZipProcessor handles 7zip archive analysis and content extraction
 type sevenZipProcessor struct {
-	log                      *slog.Logger
-	poolManager              pool.Manager
-	maxPrefetch              int
-	readTimeout              time.Duration
-	allowNestedRarExtraction bool
+	log          *slog.Logger
+	poolManager  pool.Manager
+	configGetter config.ConfigGetter
 }
 
 // NewProcessor creates a new 7zip processor
-func NewProcessor(poolManager pool.Manager, maxPrefetch int, readTimeout time.Duration, allowNestedRarExtraction bool) Processor {
+func NewProcessor(poolManager pool.Manager, configGetter config.ConfigGetter) Processor {
 	return &sevenZipProcessor{
-		log:                      slog.Default().With("component", "7z-processor"),
-		poolManager:              poolManager,
-		maxPrefetch:              maxPrefetch,
-		readTimeout:              readTimeout,
-		allowNestedRarExtraction: allowNestedRarExtraction,
+		log:          slog.Default().With("component", "7z-processor"),
+		poolManager:  poolManager,
+		configGetter: configGetter,
 	}
 }
 
@@ -145,12 +142,23 @@ func (sz *sevenZipProcessor) AnalyzeSevenZipContentFromNzb(ctx context.Context, 
 		return nil, errors.NewNonRetryableError("no pool manager available", nil)
 	}
 
+	cfg := sz.configGetter()
+	maxPrefetch := cfg.Import.MaxDownloadPrefetch
+	readTimeout := time.Duration(cfg.Import.ReadTimeoutSeconds) * time.Second
+	if readTimeout == 0 {
+		readTimeout = 5 * time.Minute
+	}
+	allowNestedRarExtraction := true
+	if cfg.Import.AllowNestedRarExtraction != nil {
+		allowNestedRarExtraction = *cfg.Import.AllowNestedRarExtraction
+	}
+
 	// Rename 7zip files to match the first file's base name and sort
 	sortedFiles := renameSevenZipFilesAndSort(sevenZipFiles)
 
 	// Create Usenet filesystem for 7zip access - this enables sevenzip to access
 	// 7zip part files directly from Usenet without downloading
-	ufs := filesystem.NewUsenetFileSystem(ctx, sz.poolManager, sortedFiles, sz.maxPrefetch, progressTracker, sz.readTimeout)
+	ufs := filesystem.NewUsenetFileSystem(ctx, sz.poolManager, sortedFiles, maxPrefetch, progressTracker, readTimeout)
 
 	// Extract filenames for first part detection
 	fileNames := make([]string, len(sortedFiles))
@@ -230,7 +238,7 @@ func (sz *sevenZipProcessor) AnalyzeSevenZipContentFromNzb(ctx context.Context, 
 	}
 
 	// Check for nested RAR archives and process them
-	if sz.allowNestedRarExtraction {
+	if allowNestedRarExtraction {
 		contents, err = sz.detectAndProcessNestedRars(ctx, contents)
 		if err != nil {
 			return nil, errors.NewNonRetryableError("failed to process nested RAR archives", err)
@@ -853,6 +861,13 @@ func (sz *sevenZipProcessor) detectAndProcessNestedRars(ctx context.Context, out
 // to outer 7zip segments. For unencrypted outer 7zips, it flattens segments directly.
 // For encrypted outer 7zips, it creates NestedSource entries.
 func (sz *sevenZipProcessor) processNestedRarContent(ctx context.Context, innerRarContents []Content) ([]Content, error) {
+	cfg := sz.configGetter()
+	maxPrefetch := cfg.Import.MaxDownloadPrefetch
+	readTimeout := time.Duration(cfg.Import.ReadTimeoutSeconds) * time.Second
+	if readTimeout == 0 {
+		readTimeout = 5 * time.Minute
+	}
+
 	// Determine if outer 7zip is encrypted (check first volume)
 	outerEncrypted := len(innerRarContents[0].AesKey) > 0
 
@@ -874,7 +889,7 @@ func (sz *sevenZipProcessor) processNestedRarContent(ctx context.Context, innerR
 	}
 
 	// Create filesystem for reading inner RAR volumes
-	dfs := filesystem.NewDecryptingFileSystem(ctx, sz.poolManager, entries, sz.maxPrefetch, sz.readTimeout)
+	dfs := filesystem.NewDecryptingFileSystem(ctx, sz.poolManager, entries, maxPrefetch, readTimeout)
 
 	// Find the first inner RAR part
 	fileNames := make([]string, len(innerRarContents))
