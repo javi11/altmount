@@ -5,6 +5,7 @@
 package segcache
 
 import (
+	"container/list"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -20,9 +21,10 @@ import (
 
 // Config holds segment cache storage settings.
 type Config struct {
-	CachePath      string
-	MaxSizeBytes   int64
-	ExpiryDuration time.Duration
+	CachePath        string
+	MaxSizeBytes     int64
+	ExpiryDuration   time.Duration
+	HotCacheMaxBytes int64 // in-memory LRU cap; 0 = disabled
 }
 
 type cacheEntry struct {
@@ -32,9 +34,18 @@ type cacheEntry struct {
 	Created    time.Time `json:"created"`
 }
 
+// hotEntry is the value stored in the hot LRU list.
+type hotEntry struct {
+	id   string
+	data []byte
+}
+
 // SegmentCache stores decoded segment bytes on disk, keyed by Usenet message ID.
 // The in-memory catalog (map[messageID]*cacheEntry) enables O(1) Has() without disk I/O.
 // Actual data is stored in per-segment files named by sha256(messageID).
+//
+// An optional in-memory LRU hot cache avoids repeated os.ReadFile allocations for
+// recently-written or recently-read segments (config.HotCacheMaxBytes > 0).
 type SegmentCache struct {
 	mu        sync.Mutex
 	items     map[string]*cacheEntry
@@ -42,6 +53,13 @@ type SegmentCache struct {
 	logger    *slog.Logger
 	totalSize int64
 	dirty     atomic.Bool
+
+	// Hot LRU cache: recently-accessed segment data kept in memory.
+	// hotItems maps messageID → list.Element; hotList is front=LRU, back=MRU.
+	// All hot cache fields are protected by mu.
+	hotItems map[string]*list.Element
+	hotList  *list.List
+	hotSize  int64
 }
 
 // NewSegmentCache creates a new segment cache, loading any existing catalog.
@@ -51,9 +69,11 @@ func NewSegmentCache(cfg Config, logger *slog.Logger) (*SegmentCache, error) {
 	}
 
 	c := &SegmentCache{
-		items:  make(map[string]*cacheEntry),
-		config: cfg,
-		logger: logger,
+		items:    make(map[string]*cacheEntry),
+		config:   cfg,
+		logger:   logger,
+		hotItems: make(map[string]*list.Element),
+		hotList:  list.New(),
 	}
 	c.loadCatalog()
 
@@ -69,6 +89,7 @@ func (c *SegmentCache) Has(messageID string) bool {
 }
 
 // Get returns the decoded segment bytes. Returns (nil, false) on miss.
+// Checks the in-memory hot cache before falling back to disk.
 func (c *SegmentCache) Get(messageID string) ([]byte, bool) {
 	c.mu.Lock()
 	e, ok := c.items[messageID]
@@ -80,6 +101,15 @@ func (c *SegmentCache) Get(messageID string) ([]byte, bool) {
 		e.LastAccess = time.Now()
 		c.dirty.Store(true)
 	}
+
+	// Hot cache hit: return data without disk I/O.
+	if el, hot := c.hotItems[messageID]; hot {
+		c.hotList.MoveToBack(el)
+		data := el.Value.(*hotEntry).data
+		c.mu.Unlock()
+		return data, true
+	}
+
 	path := e.DataPath
 	c.mu.Unlock()
 
@@ -91,6 +121,7 @@ func (c *SegmentCache) Get(messageID string) ([]byte, bool) {
 		return nil, false
 	}
 
+	c.addToHotCache(messageID, data)
 	return data, true
 }
 
@@ -127,8 +158,42 @@ func (c *SegmentCache) Put(messageID string, data []byte) error {
 	c.mu.Unlock()
 
 	c.dirty.Store(true)
+	c.addToHotCache(messageID, data)
 
 	return nil
+}
+
+// addToHotCache stores data in the in-memory LRU, evicting least-recently-used entries as
+// needed to stay within config.HotCacheMaxBytes. No-op when hot cache is disabled.
+func (c *SegmentCache) addToHotCache(id string, data []byte) {
+	if c.config.HotCacheMaxBytes <= 0 {
+		return
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// If already present, just promote to MRU position.
+	if el, exists := c.hotItems[id]; exists {
+		c.hotList.MoveToBack(el)
+		return
+	}
+
+	entry := &hotEntry{id: id, data: data}
+	el := c.hotList.PushBack(entry)
+	c.hotItems[id] = el
+	c.hotSize += int64(len(data))
+
+	// Evict LRU entries until within the size limit.
+	for c.hotSize > c.config.HotCacheMaxBytes {
+		front := c.hotList.Front()
+		if front == nil {
+			break
+		}
+		evicted := c.hotList.Remove(front).(*hotEntry)
+		delete(c.hotItems, evicted.id)
+		c.hotSize -= int64(len(evicted.data))
+	}
 }
 
 // Evict removes the oldest entries (by LastAccess) until total size is within MaxSizeBytes.

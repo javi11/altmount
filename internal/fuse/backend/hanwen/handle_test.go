@@ -97,7 +97,10 @@ func TestHandle_Read_SeekAndRead(t *testing.T) {
 	mockFile.On("Seek", int64(200), io.SeekStart).Return(int64(200), nil).Once()
 	mockFile.On("Read", mock.AnythingOfType("[]uint8")).Return(10, nil).Once()
 
+	mockFile.On("Close").Return(nil)
+
 	handle := NewHandle(mockFile, logger, "testfile", nil, nil)
+	defer handle.Release(context.Background())
 
 	ctx := context.Background()
 	dest := make([]byte, 10)
@@ -118,8 +121,10 @@ func TestHandle_Read_SequentialSkipsSeek(t *testing.T) {
 
 	// First read at offset 0: position starts at 0, so no Seek needed
 	mockFile.On("Read", mock.AnythingOfType("[]uint8")).Return(10, nil).Twice()
+	mockFile.On("Close").Return(nil)
 
 	handle := NewHandle(mockFile, logger, "testfile", nil, nil)
+	defer handle.Release(context.Background())
 
 	ctx := context.Background()
 	dest := make([]byte, 10)
@@ -140,11 +145,13 @@ func TestHandle_Read_Concurrency(t *testing.T) {
 	mockFile := new(MockFile)
 	logger := slog.Default()
 
-	// Concurrent reads are serialized by mutex — both will Seek+Read
+	// Concurrent reads are serialized by the IO worker — both will Seek+Read
 	mockFile.On("Seek", mock.AnythingOfType("int64"), io.SeekStart).Return(int64(0), nil)
 	mockFile.On("Read", mock.AnythingOfType("[]uint8")).Return(10, nil)
+	mockFile.On("Close").Return(nil)
 
 	handle := NewHandle(mockFile, logger, "testfile", nil, nil)
+	defer handle.Release(context.Background())
 
 	ctx := context.Background()
 
@@ -174,8 +181,10 @@ func TestHandle_Read_ReadError(t *testing.T) {
 	logger := slog.Default()
 
 	mockFile.On("Read", mock.AnythingOfType("[]uint8")).Return(0, os.ErrPermission).Once()
+	mockFile.On("Close").Return(nil)
 
 	handle := NewHandle(mockFile, logger, "testfile", nil, nil)
+	defer handle.Release(context.Background())
 
 	ctx := context.Background()
 	dest := make([]byte, 10)
@@ -191,8 +200,10 @@ func TestHandle_Read_EOF(t *testing.T) {
 	logger := slog.Default()
 
 	mockFile.On("Read", mock.AnythingOfType("[]uint8")).Return(5, io.EOF).Once()
+	mockFile.On("Close").Return(nil)
 
 	handle := NewHandle(mockFile, logger, "testfile", nil, nil)
+	defer handle.Release(context.Background())
 
 	ctx := context.Background()
 	dest := make([]byte, 10)
@@ -210,8 +221,10 @@ func TestHandle_Read_SeekError(t *testing.T) {
 
 	// Read at non-zero offset requires seek — which fails
 	mockFile.On("Seek", int64(500), io.SeekStart).Return(int64(0), os.ErrInvalid).Once()
+	mockFile.On("Close").Return(nil)
 
 	handle := NewHandle(mockFile, logger, "testfile", nil, nil)
+	defer handle.Release(context.Background())
 
 	ctx := context.Background()
 	dest := make([]byte, 10)
@@ -226,9 +239,10 @@ func TestHandle_Read_SeekError(t *testing.T) {
 func TestHandle_Read_ContextCanceled(t *testing.T) {
 	logger := slog.Default()
 
-	// Use blockingFile so the goroutine doesn't panic on unexpected calls
 	bf := &blockingFile{readBlock: make(chan struct{})}
 	handle := NewHandle(bf, logger, "testfile", nil, nil)
+	// Release will close bf (unblocking any blocked worker) and stop the worker.
+	defer handle.Release(context.Background())
 
 	// Pre-cancelled context — should return EINTR promptly
 	ctx, cancel := context.WithCancel(context.Background())
@@ -237,18 +251,16 @@ func TestHandle_Read_ContextCanceled(t *testing.T) {
 	dest := make([]byte, 10)
 	_, status := handle.Read(ctx, dest, 0)
 	assert.Equal(t, syscall.EINTR, status)
-
-	// Unblock the orphaned goroutine
-	close(bf.readBlock)
 }
 
 func TestHandle_Read_BlockingReadContextCanceled(t *testing.T) {
 	logger := slog.Default()
 
-	// blockingFile blocks on Read until Close is called
+	// blockingFile blocks on Read until Close is called (or readBlock is closed)
 	bf := &blockingFile{readBlock: make(chan struct{})}
-
 	handle := NewHandle(bf, logger, "testfile", nil, nil)
+	// Release closes bf.Close() which unblocks the worker, then waits for it.
+	defer handle.Release(context.Background())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	dest := make([]byte, 10)
@@ -259,22 +271,19 @@ func TestHandle_Read_BlockingReadContextCanceled(t *testing.T) {
 		done <- status
 	}()
 
-	// Cancel context while Read is blocked
+	// Cancel context while Read is blocked in the worker
 	cancel()
 
 	status := <-done
 	assert.Equal(t, syscall.EINTR, status)
-
-	// Unblock the orphaned goroutine so it can complete
-	close(bf.readBlock)
 }
 
 func TestHandle_Read_BlockingSeekContextCanceled(t *testing.T) {
 	logger := slog.Default()
 
 	bf := &blockingFile{seekBlock: make(chan struct{})}
-
 	handle := NewHandle(bf, logger, "testfile", nil, nil)
+	defer handle.Release(context.Background())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	dest := make([]byte, 10)
@@ -290,15 +299,14 @@ func TestHandle_Read_BlockingSeekContextCanceled(t *testing.T) {
 
 	status := <-done
 	assert.Equal(t, syscall.EINTR, status)
-
-	close(bf.seekBlock)
 }
 
-// blockingFile is a minimal afero.File that blocks on Read/Seek until the
-// corresponding channel is closed. Used to test context cancellation.
+// blockingFile is a minimal afero.File that blocks on Read/Seek until Close is called.
+// Used to test context cancellation while IO is in progress.
 type blockingFile struct {
 	readBlock chan struct{} // if non-nil, Read blocks until closed
 	seekBlock chan struct{} // if non-nil, Seek blocks until closed
+	closeOnce sync.Once
 }
 
 func (f *blockingFile) Read(p []byte) (int, error) {
@@ -315,7 +323,27 @@ func (f *blockingFile) Seek(offset int64, whence int) (int64, error) {
 	return offset, nil
 }
 
-func (f *blockingFile) Close() error                                 { return nil }
+// Close unblocks any goroutines waiting on readBlock or seekBlock, and is idempotent.
+func (f *blockingFile) Close() error {
+	f.closeOnce.Do(func() {
+		if f.readBlock != nil {
+			select {
+			case <-f.readBlock: // already closed — receive succeeds immediately
+			default:
+				close(f.readBlock)
+			}
+		}
+		if f.seekBlock != nil {
+			select {
+			case <-f.seekBlock:
+			default:
+				close(f.seekBlock)
+			}
+		}
+	})
+	return nil
+}
+
 func (f *blockingFile) ReadAt(p []byte, off int64) (int, error)      { return 0, nil }
 func (f *blockingFile) Write(p []byte) (int, error)                  { return 0, nil }
 func (f *blockingFile) WriteAt(p []byte, off int64) (int, error)     { return 0, nil }

@@ -10,19 +10,21 @@ import (
 
 // ManagerConfig holds the full segment-cache configuration.
 type ManagerConfig struct {
-	Enabled        bool
-	CachePath      string
-	MaxSizeBytes   int64
-	ExpiryDuration time.Duration
+	Enabled          bool
+	CachePath        string
+	MaxSizeBytes     int64
+	ExpiryDuration   time.Duration
+	HotCacheMaxBytes int64 // 0 = use default (256 MiB)
 }
 
 // DefaultManagerConfig returns a ManagerConfig with sensible defaults.
 func DefaultManagerConfig() ManagerConfig {
 	return ManagerConfig{
-		Enabled:        false,
-		CachePath:      "/tmp/altmount-segcache",
-		MaxSizeBytes:   10 * 1024 * 1024 * 1024, // 10 GB
-		ExpiryDuration: 24 * time.Hour,
+		Enabled:          false,
+		CachePath:        "/tmp/altmount-segcache",
+		MaxSizeBytes:     10 * 1024 * 1024 * 1024, // 10 GB
+		ExpiryDuration:   24 * time.Hour,
+		HotCacheMaxBytes: 256 * 1024 * 1024, // 256 MiB (~341 segments)
 	}
 }
 
@@ -37,6 +39,9 @@ func (cfg ManagerConfig) WithDefaults() ManagerConfig {
 	}
 	if cfg.ExpiryDuration <= 0 {
 		cfg.ExpiryDuration = defaults.ExpiryDuration
+	}
+	if cfg.HotCacheMaxBytes <= 0 {
+		cfg.HotCacheMaxBytes = defaults.HotCacheMaxBytes
 	}
 	return cfg
 }
@@ -65,9 +70,10 @@ type Manager struct {
 // NewManager creates a Manager and loads any existing on-disk catalog.
 func NewManager(cfg ManagerConfig, logger *slog.Logger) (*Manager, error) {
 	cacheCfg := Config{
-		CachePath:      cfg.CachePath,
-		MaxSizeBytes:   cfg.MaxSizeBytes,
-		ExpiryDuration: cfg.ExpiryDuration,
+		CachePath:        cfg.CachePath,
+		MaxSizeBytes:     cfg.MaxSizeBytes,
+		ExpiryDuration:   cfg.ExpiryDuration,
+		HotCacheMaxBytes: cfg.HotCacheMaxBytes,
 	}
 
 	cache, err := NewSegmentCache(cacheCfg, logger)
