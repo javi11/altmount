@@ -584,29 +584,28 @@ func (proc *Processor) processRarArchive(
 		releaseDate := archiveFiles[0].ReleaseDate.Unix()
 		samplePercentage := proc.segmentSamplePercentage
 
-		err := rar.ProcessArchive(
-			ctx,
-			nzbFolder,
-			archiveFiles,
-			parsed.GetPassword(),
-			releaseDate,
-			parsed.Path,
-			proc.rarProcessor,
-			proc.metadataService,
-			proc.poolManager,
-			archiveProgressTracker,
-			validationProgressTracker,
-			maxConnections,
-			samplePercentage,
-			allowedExtensions,
-			timeout,
-			extractedFiles,
-			proc.maxDownloadPrefetch,
-			proc.readTimeout,
-			proc.expandBlurayIso,
-			proc.filterSampleFiles,
-			proc.renameToNzbName,
-		)
+		err := rar.ProcessArchive(ctx, rar.ProcessArchiveOptions{
+			VirtualDir:                nzbFolder,
+			ArchiveFiles:              archiveFiles,
+			Password:                  parsed.GetPassword(),
+			ReleaseDate:               releaseDate,
+			NzbPath:                   parsed.Path,
+			Processor:                 proc.rarProcessor,
+			MetadataService:           proc.metadataService,
+			PoolManager:               proc.poolManager,
+			ArchiveProgressTracker:    archiveProgressTracker,
+			ValidationProgressTracker: validationProgressTracker,
+			MaxValidationGoroutines:   maxConnections,
+			SegmentSamplePercentage:   samplePercentage,
+			AllowedFileExtensions:     allowedExtensions,
+			Timeout:                   timeout,
+			ExtractedFiles:            extractedFiles,
+			MaxPrefetch:               proc.maxDownloadPrefetch,
+			ReadTimeout:               proc.readTimeout,
+			ExpandBlurayIso:           proc.expandBlurayIso,
+			FilterSamples:             proc.filterSampleFiles,
+			RenameToNzbName:           proc.renameToNzbName,
+		})
 		if err != nil {
 			return nzbFolder, writtenPaths, err
 		}
@@ -700,29 +699,28 @@ func (proc *Processor) processSevenZipArchive(
 		releaseDate := archiveFiles[0].ReleaseDate.Unix()
 		samplePercentage := proc.segmentSamplePercentage
 
-		err := sevenzip.ProcessArchive(
-			ctx,
-			nzbFolder,
-			archiveFiles,
-			parsed.GetPassword(),
-			releaseDate,
-			parsed.Path,
-			proc.sevenZipProcessor,
-			proc.metadataService,
-			proc.poolManager,
-			archiveProgressTracker,
-			validationProgressTracker,
-			maxConnections,
-			samplePercentage,
-			allowedExtensions,
-			timeout,
-			extractedFiles,
-			proc.maxDownloadPrefetch,
-			proc.readTimeout,
-			proc.expandBlurayIso,
-			proc.filterSampleFiles,
-			proc.renameToNzbName,
-		)
+		err := sevenzip.ProcessArchive(ctx, sevenzip.ProcessArchiveOptions{
+			VirtualDir:                nzbFolder,
+			ArchiveFiles:              archiveFiles,
+			Password:                  parsed.GetPassword(),
+			ReleaseDate:               releaseDate,
+			NzbPath:                   parsed.Path,
+			Processor:                 proc.sevenZipProcessor,
+			MetadataService:           proc.metadataService,
+			PoolManager:               proc.poolManager,
+			ArchiveProgressTracker:    archiveProgressTracker,
+			ValidationProgressTracker: validationProgressTracker,
+			MaxValidationGoroutines:   maxConnections,
+			SegmentSamplePercentage:   samplePercentage,
+			AllowedFileExtensions:     allowedExtensions,
+			Timeout:                   timeout,
+			ExtractedFiles:            extractedFiles,
+			MaxPrefetch:               proc.maxDownloadPrefetch,
+			ReadTimeout:               proc.readTimeout,
+			ExpandBlurayIso:           proc.expandBlurayIso,
+			FilterSamples:             proc.filterSampleFiles,
+			RenameToNzbName:           proc.renameToNzbName,
+		})
 		if err != nil {
 			return nzbFolder, writtenPaths, err
 		}

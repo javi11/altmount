@@ -7,16 +7,29 @@
 			"request": "launch",
 			"mode": "auto",
 			"program": "${workspaceFolder}/cmd/altmount",
-			"args": [
-				"serve",
-				"--config=/Users/javi/mio/altmount/example/config.yaml"
-			],
+			"args": ["serve", "--config=/Users/javi/mio/altmount/example/config.yaml"],
 			"env": {
 				"PORT": "8080",
 				"COOKIE_DOMAIN": "localhost",
 				"JWT_SECRET": "change-me-to-a-strong-random-secret"
 			},
 			"cwd": "${workspaceFolder}"
+		},
+		{
+			"name": "Frontend (bun dev)",
+			"type": "node",
+			"request": "launch",
+			"runtimeExecutable": "bun",
+			"runtimeArgs": ["run", "dev"],
+			"cwd": "${workspaceFolder}/frontend",
+			"console": "integratedTerminal",
+			"skipFiles": ["<node_internals>/**"]
+		}
+	],
+	"compounds": [
+		{
+			"name": "Full Stack",
+			"configurations": ["Debug altmount server", "Frontend (bun dev)"]
 		}
 	]
 }
