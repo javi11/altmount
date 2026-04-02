@@ -318,11 +318,10 @@ func initializeSegmentCache(ctx context.Context, cfg *config.Config) *segcache.M
 	}
 
 	mgrCfg := segcache.ManagerConfig{
-		Enabled:          true,
-		CachePath:        cfg.SegmentCache.CachePath,
-		MaxSizeBytes:     int64(cfg.SegmentCache.MaxSizeGB) * 1024 * 1024 * 1024,
-		ExpiryDuration:   time.Duration(cfg.SegmentCache.ExpiryHours) * time.Hour,
-		HotCacheMaxBytes: int64(cfg.SegmentCache.HotCacheMaxSizeMB) * 1024 * 1024,
+		Enabled:        true,
+		CachePath:      cfg.SegmentCache.CachePath,
+		MaxSizeBytes:   int64(cfg.SegmentCache.MaxSizeGB) * 1024 * 1024 * 1024,
+		ExpiryDuration: time.Duration(cfg.SegmentCache.ExpiryHours) * time.Hour,
 	}.WithDefaults()
 
 	mgr, err := segcache.NewManager(mgrCfg, slog.Default().With("component", "segcache"))
