@@ -94,6 +94,28 @@ func TestProcessArchivePreservesInternalFolderStructure(t *testing.T) {
 			},
 		},
 		{
+			name:       "nested RAR folder same as virtual dir base: deduplicated",
+			virtualDir: "movies/MyMovie",
+			nzbPath:    "movies/MyMovie.nzb",
+			contents: []Content{
+				{InternalPath: "MyMovie/video.mkv", Filename: "video.mkv", Size: 1000,
+					Segments: []*metapb.SegmentData{{Id: "seg1", StartOffset: 0, EndOffset: 999}}},
+			},
+			wantMetaPaths:    []string{"movies/MyMovie/video.mkv"},
+			notWantMetaPaths: []string{"movies/MyMovie/MyMovie/video.mkv"},
+		},
+		{
+			name:       "nested RAR folder same as virtual dir base with subfolder: prefix stripped",
+			virtualDir: "movies/MyMovie",
+			nzbPath:    "movies/MyMovie.nzb",
+			contents: []Content{
+				{InternalPath: "MyMovie/Extras/bonus.mkv", Filename: "bonus.mkv", Size: 500,
+					Segments: []*metapb.SegmentData{{Id: "seg1", StartOffset: 0, EndOffset: 499}}},
+			},
+			wantMetaPaths:    []string{"movies/MyMovie/Extras/bonus.mkv"},
+			notWantMetaPaths: []string{"movies/MyMovie/MyMovie/Extras/bonus.mkv"},
+		},
+		{
 			name:            "single file with rename: placed flat ignoring internal subdir",
 			virtualDir:      "movies/MyMovie",
 			nzbPath:         "movies/MyMovie.nzb",
