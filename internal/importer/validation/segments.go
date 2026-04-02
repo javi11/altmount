@@ -39,14 +39,6 @@ func ValidateSegmentsForFile(
 		return fmt.Errorf("no segments provided for file %s", filename)
 	}
 
-	usenetPool, err := poolManager.GetPool()
-	if err != nil {
-		return fmt.Errorf("cannot write metadata for %s: usenet connection pool unavailable: %w", filename, err)
-	}
-	if usenetPool == nil {
-		return fmt.Errorf("cannot write metadata for %s: usenet connection pool is nil", filename)
-	}
-
 	// Single pass: structural validation + size accumulation.
 	var totalSegmentSize int64
 	for i, segment := range segments {

@@ -8,7 +8,10 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
+
+	concpool "github.com/sourcegraph/conc/pool"
 
 	"github.com/javi11/altmount/internal/importer/archive"
 	"github.com/javi11/altmount/internal/importer/archive/iso"
@@ -115,31 +118,54 @@ func hasAllowedFiles(sevenZipContents []Content, allowedExtensions []string, fil
 	return false
 }
 
+// ProcessArchiveOptions holds all parameters for ProcessArchive.
+type ProcessArchiveOptions struct {
+	VirtualDir                string
+	ArchiveFiles              []parser.ParsedFile
+	Password                  string
+	ReleaseDate               int64
+	NzbPath                   string
+	Processor                 Processor
+	MetadataService           *metadata.MetadataService
+	PoolManager               pool.Manager
+	ArchiveProgressTracker    *progress.Tracker
+	ValidationProgressTracker *progress.Tracker
+	MaxValidationGoroutines   int
+	SegmentSamplePercentage   int
+	AllowedFileExtensions     []string
+	Timeout                   time.Duration
+	ExtractedFiles            []parser.ExtractedFileInfo
+	MaxPrefetch               int
+	ReadTimeout               time.Duration
+	ExpandBlurayIso           bool
+	FilterSamples             bool
+	RenameToNzbName           bool
+}
+
 // ProcessArchive analyzes and processes 7zip archive files, creating metadata for all extracted files.
 // This function handles the complete workflow: analysis → file processing → metadata creation.
-func ProcessArchive(
-	ctx context.Context,
-	virtualDir string,
-	archiveFiles []parser.ParsedFile,
-	password string,
-	releaseDate int64,
-	nzbPath string,
-	sevenZipProcessor Processor,
-	metadataService *metadata.MetadataService,
-	poolManager pool.Manager,
-	archiveProgressTracker *progress.Tracker,
-	validationProgressTracker *progress.Tracker,
-	maxValidationGoroutines int,
-	segmentSamplePercentage int,
-	allowedFileExtensions []string,
-	timeout time.Duration,
-	extractedFiles []parser.ExtractedFileInfo,
-	maxPrefetch int,
-	readTimeout time.Duration,
-	expandBlurayIso bool,
-	filterSamples bool,
-	renameToNzbName bool,
-) error {
+func ProcessArchive(ctx context.Context, opts ProcessArchiveOptions) error {
+	archiveFiles := opts.ArchiveFiles
+	virtualDir := opts.VirtualDir
+	password := opts.Password
+	releaseDate := opts.ReleaseDate
+	nzbPath := opts.NzbPath
+	sevenZipProcessor := opts.Processor
+	metadataService := opts.MetadataService
+	poolManager := opts.PoolManager
+	archiveProgressTracker := opts.ArchiveProgressTracker
+	validationProgressTracker := opts.ValidationProgressTracker
+	maxValidationGoroutines := opts.MaxValidationGoroutines
+	segmentSamplePercentage := opts.SegmentSamplePercentage
+	allowedFileExtensions := opts.AllowedFileExtensions
+	timeout := opts.Timeout
+	extractedFiles := opts.ExtractedFiles
+	maxPrefetch := opts.MaxPrefetch
+	readTimeout := opts.ReadTimeout
+	expandBlurayIso := opts.ExpandBlurayIso
+	filterSamples := opts.FilterSamples
+	renameToNzbName := opts.RenameToNzbName
+
 	if len(archiveFiles) == 0 {
 		return nil
 	}
@@ -174,16 +200,11 @@ func ProcessArchive(
 	// Calculate total segments to validate for accurate progress tracking
 	// This accounts for sampling mode if enabled
 	totalSegmentsToValidate := calculateSegmentsToValidate(sevenZipContents, segmentSamplePercentage)
-	validatedSegmentsCount := 0
 
 	slog.InfoContext(ctx, "Starting 7zip archive validation",
 		"total_files", len(sevenZipContents),
 		"total_segments_to_validate", totalSegmentsToValidate,
 		"sample_percentage", segmentSamplePercentage)
-
-	// Process extracted files with segment-based progress tracking
-	// 80-95% for validation loop, 95-100% for metadata finalization
-	filesProcessed := 0
 
 	// Determine if we should rename the file to match the NZB basename
 	// Only do this if there's exactly one media file in the archive
@@ -207,28 +228,35 @@ func ProcessArchive(
 		}
 	}
 
+	// Pre-pass: resolve paths, apply renames, and pre-compute per-file segment offsets so
+	// each goroutine can build its own OffsetTracker without any sequential shared state.
+	type fileToProcess struct {
+		content         Content
+		baseFilename    string
+		virtualFilePath string
+		isPreExtracted  bool
+		segmentOffset   int
+	}
+
+	var filesToProcess []fileToProcess
+	preProcessedCount := 0 // healthy files already counted as processed
+	cumulativeOffset := 0
+
 	for _, sevenZipContent := range sevenZipContents {
-		// Skip directories
 		if sevenZipContent.IsDirectory {
 			slog.DebugContext(ctx, "Skipping directory in 7zip archive", "path", sevenZipContent.InternalPath)
 			continue
 		}
 
-		// Preserve the internal directory structure of the archive
 		normalizedInternalPath := strings.ReplaceAll(sevenZipContent.InternalPath, "\\", "/")
 		baseFilename := filepath.Base(normalizedInternalPath)
 		internalSubDir := filepath.ToSlash(filepath.Dir(normalizedInternalPath))
 
-		// Double check if this specific file is allowed
 		if !utils.IsAllowedFile(sevenZipContent.InternalPath, sevenZipContent.Size, allowedFileExtensions, filterSamples) &&
 			!utils.IsAllowedFile(sevenZipContent.Filename, sevenZipContent.Size, allowedFileExtensions, filterSamples) {
 			continue
 		}
 
-		// Rename ISO-expanded files using the NZB release name.
-		// For multiple files: releaseName_1.ext (largest), releaseName_2.ext, ...
-		// For a single file: releaseName.ext (no index).
-		// ISO-expanded and single-file-renamed files are placed flat (no subdir).
 		if sevenZipContent.ISOExpansionIndex > 0 {
 			ext := filepath.Ext(sevenZipContent.Filename)
 			if isoExpandedCount == 1 {
@@ -242,7 +270,6 @@ func ProcessArchive(
 			internalSubDir = "."
 		} else if shouldNormalizeName && (utils.IsAllowedFile(sevenZipContent.InternalPath, sevenZipContent.Size, allowedFileExtensions, filterSamples) ||
 			utils.IsAllowedFile(sevenZipContent.Filename, sevenZipContent.Size, allowedFileExtensions, filterSamples)) {
-			// Normalize filename to match NZB if it's the only media file (non-ISO archives)
 			baseFilename = normalizeArchiveReleaseFilename(nzbName, baseFilename)
 			slog.InfoContext(ctx, "Normalizing obfuscated filename in 7zip archive",
 				"original", sevenZipContent.Filename,
@@ -250,7 +277,6 @@ func ProcessArchive(
 			internalSubDir = "."
 		}
 
-		// Build virtual file path, preserving internal subdirectory structure when present
 		var virtualFilePath string
 		if internalSubDir == "." || internalSubDir == "" {
 			virtualFilePath = filepath.Join(virtualDir, baseFilename)
@@ -263,18 +289,16 @@ func ProcessArchive(
 		}
 		virtualFilePath = strings.ReplaceAll(virtualFilePath, string(filepath.Separator), "/")
 
-		// Check if file already exists and is healthy
 		if existingMeta, err := metadataService.ReadFileMetadata(virtualFilePath); err == nil && existingMeta != nil {
 			if existingMeta.Status == metapb.FileStatus_FILE_STATUS_HEALTHY {
 				slog.InfoContext(ctx, "Skipping re-import of healthy 7zip-extracted file",
 					"file", baseFilename,
 					"virtual_path", virtualFilePath)
-				filesProcessed++
+				preProcessedCount++
 				continue
 			}
 		}
 
-		// Check if this file matches an already extracted file in the database
 		isPreExtracted := false
 		for _, extracted := range extractedFiles {
 			if extracted.Name == baseFilename && extracted.Size == sevenZipContent.Size {
@@ -283,121 +307,123 @@ func ProcessArchive(
 			}
 		}
 
-		if isPreExtracted {
-			slog.InfoContext(ctx, "Skipping validation for pre-extracted file (found in database)",
-				"file", baseFilename,
-				"size", sevenZipContent.Size)
-		} else {
-			// Perform segment integrity check before validation and metadata creation.
-			// This catches "born corrupted" files where the NZB does not provide enough segments
-			// to cover the expected file size.
-			if err := validateSegmentIntegrity(ctx, sevenZipContent); err != nil {
-				slog.ErrorContext(ctx, "Skipping SevenZip file due to segment integrity failure (missing segments in NZB)",
-					"file", baseFilename,
-					"error", err)
+		filesToProcess = append(filesToProcess, fileToProcess{
+			content:         sevenZipContent,
+			baseFilename:    baseFilename,
+			virtualFilePath: virtualFilePath,
+			isPreExtracted:  isPreExtracted,
+			segmentOffset:   cumulativeOffset,
+		})
 
-				continue
-			}
-
-			// Create offset tracker for real-time segment-level progress
-			// This maps individual file segment progress (0→N) to cumulative progress across all files
-			var offsetTracker *progress.OffsetTracker
-			if validationProgressTracker != nil && totalSegmentsToValidate > 0 {
-				offsetTracker = progress.NewOffsetTracker(
-					validationProgressTracker,
-					validatedSegmentsCount,  // Segments already validated in previous files
-					totalSegmentsToValidate, // Total segments across all files
-				)
-			}
-
-			// Get the segments to validate — for nested content, collect from all sources
-			validationSegments := getContentSegments(sevenZipContent)
-
-			// Compute validation size: for nested content with NestedSources, sum segment coverage
-			var validationSize int64
-			if len(sevenZipContent.NestedSources) > 0 {
-				for _, ns := range sevenZipContent.NestedSources {
-					sourceSize := int64(0)
-					for _, seg := range ns.Segments {
-						sourceSize += seg.EndOffset - seg.StartOffset + 1
-					}
-					validationSize += sourceSize
-				}
-			} else {
-				validationSize = sevenZipContent.Size
-				// For AES-encrypted files, the data in the archive is padded to 16-byte blocks
-				if len(sevenZipContent.AesKey) > 0 {
-					const aesBlockSize = 16
-					if validationSize%aesBlockSize != 0 {
-						validationSize = validationSize + (aesBlockSize - (validationSize % aesBlockSize))
-					}
-				}
-			}
-
-			// Validate segments with real-time progress updates
-			if err := validation.ValidateSegmentsForFile(
-				ctx,
-				baseFilename,
-				validationSize,
-				validationSegments,
-				metapb.Encryption_NONE,
-				poolManager,
-				maxValidationGoroutines,
-				segmentSamplePercentage,
-				offsetTracker, // Real-time segment progress with cumulative offset
-				timeout,
-			); err != nil {
-				slog.WarnContext(ctx, "Skipping 7zip file due to validation error", "error", err, "file", baseFilename)
-
-				continue
-			}
-		}
-
-		// Calculate and track segments validated for this file (for next file's offset)
-		segmentCount := getContentSegmentCount(sevenZipContent)
-		var fileSegmentsValidated int
+		// Accumulate the segment offset for the next file's OffsetTracker.
+		segCount := getContentSegmentCount(sevenZipContent)
 		if segmentSamplePercentage == 100 {
-			fileSegmentsValidated = segmentCount
+			cumulativeOffset += segCount
 		} else {
-			// Sampling mode: calculate same as helper function
 			minSegments := 5
-			if segmentCount <= minSegments {
-				fileSegmentsValidated = segmentCount
+			if segCount <= minSegments {
+				cumulativeOffset += segCount
 			} else {
 				fixedSegments := 5
-				middleSegmentCount := segmentCount - fixedSegments
+				middleSegmentCount := segCount - fixedSegments
 				sampledMiddle := (middleSegmentCount * segmentSamplePercentage) / 100
-				fileSegmentsValidated = fixedSegments + sampledMiddle
+				cumulativeOffset += fixedSegments + sampledMiddle
 			}
 		}
-
-		// Update cumulative segment count for next file's offset
-		validatedSegmentsCount += fileSegmentsValidated
-
-		// Create file metadata using the 7zip handler's helper function
-		fileMeta := sevenZipProcessor.CreateFileMetadataFromSevenZipContent(sevenZipContent, nzbPath, releaseDate, sevenZipContent.NzbdavID)
-
-		// Delete old metadata if exists (simple collision handling)
-		metadataPath := metadataService.GetMetadataFilePath(virtualFilePath)
-		if _, err := os.Stat(metadataPath); err == nil {
-			_ = metadataService.DeleteFileMetadata(virtualFilePath)
-		}
-
-		// Write file metadata to disk
-		if err := metadataService.WriteFileMetadata(virtualFilePath, fileMeta); err != nil {
-			return fmt.Errorf("failed to write metadata for 7zip file %s: %w", sevenZipContent.Filename, err)
-		}
-
-		slog.InfoContext(ctx, "Created metadata for 7zip extracted file",
-			"file", baseFilename,
-			"virtual_path", virtualFilePath,
-			"size", sevenZipContent.Size)
-
-		filesProcessed++
 	}
 
-	// If no files were processed but we had content, fail the import
-	if filesProcessed == 0 && len(sevenZipContents) > 0 {
+	// Parallel pass: validate segments and write metadata for each file concurrently.
+	var filesProcessed int32
+	p := concpool.New().WithErrors().WithFirstError().WithContext(ctx)
+
+	for _, item := range filesToProcess {
+		item := item
+		p.Go(func(ctx context.Context) error {
+			if item.isPreExtracted {
+				slog.InfoContext(ctx, "Skipping validation for pre-extracted file (found in database)",
+					"file", item.baseFilename,
+					"size", item.content.Size)
+			} else {
+				if err := validateSegmentIntegrity(ctx, item.content); err != nil {
+					slog.ErrorContext(ctx, "Skipping SevenZip file due to segment integrity failure (missing segments in NZB)",
+						"file", item.baseFilename,
+						"error", err)
+					return nil
+				}
+
+				var offsetTracker *progress.OffsetTracker
+				if validationProgressTracker != nil && totalSegmentsToValidate > 0 {
+					offsetTracker = progress.NewOffsetTracker(
+						validationProgressTracker,
+						item.segmentOffset,
+						totalSegmentsToValidate,
+					)
+				}
+
+				validationSegments := getContentSegments(item.content)
+
+				var validationSize int64
+				if len(item.content.NestedSources) > 0 {
+					for _, ns := range item.content.NestedSources {
+						sourceSize := int64(0)
+						for _, seg := range ns.Segments {
+							sourceSize += seg.EndOffset - seg.StartOffset + 1
+						}
+						validationSize += sourceSize
+					}
+				} else {
+					validationSize = item.content.Size
+					if len(item.content.AesKey) > 0 {
+						const aesBlockSize = 16
+						if validationSize%aesBlockSize != 0 {
+							validationSize = validationSize + (aesBlockSize - (validationSize % aesBlockSize))
+						}
+					}
+				}
+
+				if err := validation.ValidateSegmentsForFile(
+					ctx,
+					item.baseFilename,
+					validationSize,
+					validationSegments,
+					metapb.Encryption_NONE,
+					poolManager,
+					maxValidationGoroutines,
+					segmentSamplePercentage,
+					offsetTracker,
+					timeout,
+				); err != nil {
+					slog.WarnContext(ctx, "Skipping 7zip file due to validation error", "error", err, "file", item.baseFilename)
+					return nil
+				}
+			}
+
+			fileMeta := sevenZipProcessor.CreateFileMetadataFromSevenZipContent(item.content, nzbPath, releaseDate, item.content.NzbdavID)
+
+			metadataPath := metadataService.GetMetadataFilePath(item.virtualFilePath)
+			if _, err := os.Stat(metadataPath); err == nil {
+				_ = metadataService.DeleteFileMetadata(item.virtualFilePath)
+			}
+
+			if err := metadataService.WriteFileMetadata(item.virtualFilePath, fileMeta); err != nil {
+				return fmt.Errorf("failed to write metadata for 7zip file %s: %w", item.content.Filename, err)
+			}
+
+			slog.InfoContext(ctx, "Created metadata for 7zip extracted file",
+				"file", item.baseFilename,
+				"virtual_path", item.virtualFilePath,
+				"size", item.content.Size)
+
+			atomic.AddInt32(&filesProcessed, 1)
+			return nil
+		})
+	}
+
+	if err := p.Wait(); err != nil {
+		return err
+	}
+
+	if int(atomic.LoadInt32(&filesProcessed))+preProcessedCount == 0 && len(sevenZipContents) > 0 {
 		return ErrNoFilesProcessed
 	}
 
@@ -412,7 +438,8 @@ func ProcessArchive(
 		validationProgressTracker.UpdateAbsolute(100)
 	}
 
-	slog.InfoContext(ctx, "Successfully processed 7zip archive files", "files_processed", filesProcessed)
+	slog.InfoContext(ctx, "Successfully processed 7zip archive files",
+		"files_processed", int(atomic.LoadInt32(&filesProcessed))+preProcessedCount)
 
 	return nil
 }
