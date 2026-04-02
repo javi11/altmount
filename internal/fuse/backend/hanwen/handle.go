@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 	"syscall"
 
@@ -20,10 +21,43 @@ import (
 // ensure Handle implements fs.FileReleaser
 var _ fs.FileReleaser = (*Handle)(nil)
 
+const (
+	opRead = iota
+	opSeek
+)
+
+type ioReq struct {
+	op     int
+	dest   []byte
+	off    int64
+	whence int
+	resCh  chan ioResult
+}
+
+type ioResult struct {
+	n   int
+	pos int64
+	err error
+}
+
+// ioResultChanPool reuses buffered result channels to avoid per-operation allocations.
+// Channels are returned to the pool only when the caller successfully receives the result.
+// On context cancellation after dispatch, the in-flight channel is not returned to the
+// pool; it will be garbage-collected once the worker writes to it.
+var ioResultChanPool = sync.Pool{
+	New: func() any {
+		return make(chan ioResult, 1)
+	},
+}
+
 // Handle wraps an afero.File for Seek+Read-based reads.
-// Preserves the persistent reader's prefetch state in UsenetReader
-// (ReadAt creates a new reader per call). No mutex needed — FUSE
-// serializes reads per handle.
+// A single background IO worker goroutine serializes all file operations,
+// replacing the previous design that allocated a new goroutine and channel
+// on every FUSE read call.
+//
+// FUSE serializes reads per handle in production; the atomic position tracks
+// state for the sequential-read optimization and keeps the race detector happy
+// under concurrent tests.
 type Handle struct {
 	file          afero.File
 	closed        atomic.Bool
@@ -32,13 +66,16 @@ type Handle struct {
 	stream        *nzbfilesystem.ActiveStream
 	streamTracker backend.StreamTracker
 
-	// Position tracking for skip-seek optimization.
-	// FUSE serializes reads per handle in production, but atomic
-	// keeps the race detector happy in concurrent tests.
+	// Position tracking for the skip-seek sequential optimization.
 	position atomic.Int64
+
+	// Single background IO worker: reqCh feeds requests, wg tracks its lifetime.
+	// reqCh is buffered (1) so the caller can dispatch without stalling.
+	reqCh chan ioReq
+	wg    sync.WaitGroup
 }
 
-// NewHandle creates a new Handle for Seek+Read based access.
+// NewHandle creates a Handle and starts its background IO worker goroutine.
 func NewHandle(
 	file afero.File,
 	logger *slog.Logger,
@@ -46,65 +83,72 @@ func NewHandle(
 	stream *nzbfilesystem.ActiveStream,
 	st backend.StreamTracker,
 ) *Handle {
-	return &Handle{
+	h := &Handle{
 		file:          file,
 		logger:        logger,
 		path:          path,
 		stream:        stream,
 		streamTracker: st,
+		reqCh:         make(chan ioReq, 1),
+	}
+	h.wg.Add(1)
+	go h.ioWorker()
+	return h
+}
+
+// ioWorker is the single goroutine that performs all file IO for this handle.
+// It exits when reqCh is closed (triggered by Release).
+func (h *Handle) ioWorker() {
+	defer h.wg.Done()
+	for req := range h.reqCh {
+		var res ioResult
+		switch req.op {
+		case opRead:
+			res.n, res.err = h.file.Read(req.dest)
+		case opSeek:
+			res.pos, res.err = h.file.Seek(req.off, req.whence)
+		}
+		req.resCh <- res
 	}
 }
 
-// readWithContext wraps a blocking file.Read in a goroutine with context cancellation.
-// On context expiry, returns ctx.Err(); the goroutine completes when file is closed.
-func readWithContext(ctx context.Context, file afero.File, dest []byte) (int, error) {
-	type result struct {
-		n   int
-		err error
-	}
-	ch := make(chan result, 1)
-	go func() {
-		n, err := file.Read(dest)
-		ch <- result{n, err}
-	}()
+// execIO dispatches an IO request to the worker and waits for the result.
+// Returns (ioResult{}, ctx.Err()) on context cancellation.
+// If ctx fires after the request has already been dispatched, the in-flight
+// result channel is abandoned (not pooled) and GC'd once the worker writes.
+func (h *Handle) execIO(ctx context.Context, req ioReq) (ioResult, error) {
+	resCh := ioResultChanPool.Get().(chan ioResult)
+	req.resCh = resCh
+
 	select {
-	case res := <-ch:
-		return res.n, res.err
+	case h.reqCh <- req:
 	case <-ctx.Done():
-		return 0, ctx.Err()
+		ioResultChanPool.Put(resCh)
+		return ioResult{}, ctx.Err()
 	}
-}
 
-// seekWithContext wraps a blocking file.Seek in a goroutine with context cancellation.
-func seekWithContext(ctx context.Context, file afero.File, offset int64, whence int) (int64, error) {
-	type result struct {
-		pos int64
-		err error
-	}
-	ch := make(chan result, 1)
-	go func() {
-		pos, err := file.Seek(offset, whence)
-		ch <- result{pos, err}
-	}()
 	select {
-	case res := <-ch:
-		return res.pos, res.err
+	case res := <-resCh:
+		ioResultChanPool.Put(resCh)
+		return res, nil
 	case <-ctx.Done():
-		return 0, ctx.Err()
+		// Worker will write to resCh; do NOT return to pool.
+		return ioResult{}, ctx.Err()
 	}
 }
 
-// Read handles a read request using Seek+Read.
-// This keeps the persistent UsenetReader alive across reads, allowing
-// the downloadManager prefetch pipeline to stay effective.
+// Read handles a FUSE read request using the persistent IO worker.
+// This keeps the UsenetReader's prefetch pipeline alive across reads while
+// avoiding per-call goroutine and channel allocations.
 func (h *Handle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
 	if h.closed.Load() {
 		return nil, syscall.EIO
 	}
 
-	// Skip seek if already at the correct position (sequential read optimization)
+	// Skip seek when already at the correct position (sequential-read optimisation).
 	if off != h.position.Load() {
-		if _, err := seekWithContext(ctx, h.file, off, io.SeekStart); err != nil {
+		res, err := h.execIO(ctx, ioReq{op: opSeek, off: off, whence: io.SeekStart})
+		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				h.logger.DebugContext(ctx, "Seek canceled", "path", h.path, "offset", off)
 				return nil, syscall.EINTR
@@ -112,10 +156,23 @@ func (h *Handle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadRes
 			h.logger.ErrorContext(ctx, "Seek failed", "path", h.path, "offset", off, "error", err)
 			return nil, syscall.EIO
 		}
+		if res.err != nil {
+			h.logger.ErrorContext(ctx, "Seek failed", "path", h.path, "offset", off, "error", res.err)
+			return nil, syscall.EIO
+		}
 	}
 
-	n, err := readWithContext(ctx, h.file, dest)
+	res, err := h.execIO(ctx, ioReq{op: opRead, dest: dest})
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			h.logger.DebugContext(ctx, "Read canceled", "path", h.path, "offset", off)
+			return nil, syscall.EINTR
+		}
+		h.logger.ErrorContext(ctx, "Read failed", "path", h.path, "offset", off, "size", len(dest), "error", err)
+		return nil, syscall.EIO
+	}
 
+	n := res.n
 	if n > 0 {
 		newPos := off + int64(n)
 		h.position.Store(newPos)
@@ -125,13 +182,8 @@ func (h *Handle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadRes
 		}
 	}
 
-	if err != nil && err != io.EOF {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			h.logger.DebugContext(ctx, "Read canceled", "path", h.path, "offset", off)
-			return nil, syscall.EINTR
-		}
-
-		h.logger.ErrorContext(ctx, "Read failed", "path", h.path, "offset", off, "size", len(dest), "error", err)
+	if res.err != nil && res.err != io.EOF {
+		h.logger.ErrorContext(ctx, "Read failed", "path", h.path, "offset", off, "size", len(dest), "error", res.err)
 		return nil, syscall.EIO
 	}
 
@@ -148,7 +200,8 @@ func (h *Handle) Fsync(ctx context.Context, flags uint32) syscall.Errno {
 	return 0
 }
 
-// Release closes the file when the handle is released.
+// Release closes the file and stops the background IO worker.
+// It is idempotent.
 func (h *Handle) Release(ctx context.Context) syscall.Errno {
 	if !h.closed.CompareAndSwap(false, true) {
 		return 0
@@ -159,11 +212,16 @@ func (h *Handle) Release(ctx context.Context) syscall.Errno {
 		h.stream = nil
 	}
 
+	// Close the file first so any in-progress blocking IO in the worker fails fast.
 	if h.file != nil {
 		if err := h.file.Close(); err != nil {
 			h.logger.ErrorContext(ctx, "Close failed", "path", h.path, "error", err)
 		}
 	}
+
+	// Signal the worker to exit, then wait for it to finish.
+	close(h.reqCh)
+	h.wg.Wait()
 
 	return 0
 }
