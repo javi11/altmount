@@ -7,7 +7,7 @@
 			"request": "launch",
 			"mode": "auto",
 			"program": "${workspaceFolder}/cmd/altmount",
-			"args": ["serve", "--config=/Users/javi/mio/altmount/example/config.yaml"],
+			"args": ["serve", "--config=${workspaceFolder}//example/config.yaml"],
 			"env": {
 				"PORT": "8080",
 				"COOKIE_DOMAIN": "localhost",
