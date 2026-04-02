@@ -139,29 +139,28 @@ func TestProcessArchivePreservesInternalFolderStructure(t *testing.T) {
 				}
 			}
 
-			err := ProcessArchive(
-				ctx,
-				tt.virtualDir,
-				[]parser.ParsedFile{{Filename: "archive.rar"}},
-				"",        // password
-				0,         // releaseDate
-				tt.nzbPath,
-				proc,
-				svc,
-				nil, // poolManager — not needed when all files are pre-extracted
-				nil, // archiveProgressTracker
-				nil, // validationProgressTracker
-				1,   // maxValidationGoroutines
-				100, // segmentSamplePercentage
-				nil, // allowedFileExtensions — nil = allow all
-				30*time.Second,
-				extracted,
-				1,     // maxPrefetch
-				30*time.Second,
-				false, // expandBlurayIso
-				false, // filterSamples
-				tt.renameToNzbName,
-			)
+			err := ProcessArchive(ctx, ProcessArchiveOptions{
+				VirtualDir:              tt.virtualDir,
+				ArchiveFiles:            []parser.ParsedFile{{Filename: "archive.rar"}},
+				Password:                "",
+				ReleaseDate:             0,
+				NzbPath:                 tt.nzbPath,
+				Processor:               proc,
+				MetadataService:         svc,
+				PoolManager:             nil,
+				ArchiveProgressTracker:  nil,
+				ValidationProgressTracker: nil,
+				MaxValidationGoroutines: 1,
+				SegmentSamplePercentage: 100,
+				AllowedFileExtensions:   nil,
+				Timeout:                 30 * time.Second,
+				ExtractedFiles:          extracted,
+				MaxPrefetch:             1,
+				ReadTimeout:             30 * time.Second,
+				ExpandBlurayIso:         false,
+				FilterSamples:           false,
+				RenameToNzbName:         tt.renameToNzbName,
+			})
 			require.NoError(t, err)
 
 			for _, vp := range tt.wantMetaPaths {
