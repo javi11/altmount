@@ -34,6 +34,7 @@ import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { LoadingSpinner } from "../components/ui/LoadingSpinner";
 import { RestartRequiredBanner } from "../components/ui/RestartRequiredBanner";
 import { useConfirm } from "../contexts/ModalContext";
+import { useAuth } from "../hooks/useAuth";
 import {
 	useConfig,
 	useLibrarySyncNeeded,
@@ -103,6 +104,7 @@ export function ConfigurationPage() {
 	const reloadConfig = useReloadConfig();
 	const restartServer = useRestartServer();
 	const updateConfigSection = useUpdateConfigSection();
+	const { recheckAuth } = useAuth();
 	const { data: syncNeeded } = useLibrarySyncNeeded();
 	const triggerLibrarySync = useTriggerLibrarySync();
 	const { confirmAction } = useConfirm();
@@ -209,6 +211,8 @@ export function ConfigurationPage() {
 					section: "auth",
 					config: { auth: data as unknown as AuthConfig },
 				});
+				// Re-evaluate auth state so loginRequired reflects the new config immediately
+				await recheckAuth();
 			} else if (section === "streaming") {
 				await updateConfigSection.mutateAsync({
 					section: "streaming",
