@@ -111,6 +111,7 @@ func TestHandle_Read_SeekAndRead(t *testing.T) {
 	_, status = handle.Read(ctx, dest, 200)
 	assert.Equal(t, syscall.Errno(0), status)
 
+	handle.Release(ctx)
 	mockFile.AssertExpectations(t)
 	mockFile.AssertNotCalled(t, "ReadAt", mock.Anything, mock.Anything)
 }
@@ -137,6 +138,7 @@ func TestHandle_Read_SequentialSkipsSeek(t *testing.T) {
 	_, status = handle.Read(ctx, dest, 10)
 	assert.Equal(t, syscall.Errno(0), status)
 
+	handle.Release(ctx)
 	mockFile.AssertExpectations(t)
 	mockFile.AssertNotCalled(t, "Seek", mock.Anything, mock.Anything)
 }
@@ -173,6 +175,7 @@ func TestHandle_Read_Concurrency(t *testing.T) {
 	}()
 
 	wg.Wait()
+	handle.Release(ctx)
 	mockFile.AssertExpectations(t)
 }
 
@@ -192,6 +195,7 @@ func TestHandle_Read_ReadError(t *testing.T) {
 	_, status := handle.Read(ctx, dest, 0)
 	assert.Equal(t, syscall.EIO, status)
 
+	handle.Release(ctx)
 	mockFile.AssertExpectations(t)
 }
 
@@ -212,6 +216,7 @@ func TestHandle_Read_EOF(t *testing.T) {
 	assert.Equal(t, syscall.Errno(0), status)
 	assert.NotNil(t, result)
 
+	handle.Release(ctx)
 	mockFile.AssertExpectations(t)
 }
 
@@ -232,6 +237,7 @@ func TestHandle_Read_SeekError(t *testing.T) {
 	_, status := handle.Read(ctx, dest, 500)
 	assert.Equal(t, syscall.EIO, status)
 
+	handle.Release(ctx)
 	mockFile.AssertExpectations(t)
 	mockFile.AssertNotCalled(t, "Read", mock.Anything)
 }
