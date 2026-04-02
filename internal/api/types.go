@@ -471,10 +471,11 @@ type HealthCleanupRequest struct {
 
 // HealthCheckRequest represents request to add file for manual health checking
 type HealthCheckRequest struct {
-	FilePath   string                  `json:"file_path"`
-	MaxRetries *int                    `json:"max_retries,omitempty"`
-	SourceNzb  *string                 `json:"source_nzb_path,omitempty"`
-	Priority   database.HealthPriority `json:"priority,omitempty"`
+	FilePath    string                  `json:"file_path"`
+	LibraryPath *string                 `json:"library_path,omitempty"`
+	MaxRetries  *int                    `json:"max_retries,omitempty"`
+	SourceNzb   *string                 `json:"source_nzb_path,omitempty"`
+	Priority    database.HealthPriority `json:"priority,omitempty"`
 }
 
 // HealthWorkerStatusResponse represents the current status of the health worker

@@ -438,7 +438,7 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 
 	switch fh.Status {
 	case database.HealthStatusRepairTriggered:
-		if fh.RepairRetryCount >= hw.configGetter().GetMaxRepairRetries()-1 {
+		if fh.RepairRetryCount >= hw.configGetter().GetMaxRepairRetries() {
 			update.Type = database.UpdateTypeCorrupted
 			update.Status = database.HealthStatusCorrupted
 			sideEffect = func() error {
@@ -477,7 +477,7 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 
 	default:
 		// Regular health check phase
-		if fh.RetryCount >= hw.configGetter().GetMaxRetries()-1 {
+		if fh.RetryCount >= hw.configGetter().GetMaxRetries() {
 			update.Type = database.UpdateTypeRepairTrigger
 			update.Status = database.HealthStatusRepairTriggered
 			update.ScheduledCheckAt = time.Now().UTC().Add(hw.configGetter().GetRepairInterval())
@@ -518,7 +518,7 @@ func (hw *HealthWorker) prepareRepairNotificationUpdate(ctx context.Context, fh 
 		FilePath: fh.FilePath,
 	}
 
-	if fh.RepairRetryCount >= hw.configGetter().GetMaxRepairRetries()-1 {
+	if fh.RepairRetryCount >= hw.configGetter().GetMaxRepairRetries() {
 		// Retries exhausted — give up and mark corrupted.
 		update.Type = database.UpdateTypeCorrupted
 		update.Status = database.HealthStatusCorrupted
@@ -750,6 +750,13 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 	for _, fileHealth := range repairFiles {
 		fh := fileHealth // Capture for closure
 		p.Go(func() {
+			// Re-fetch the record to ensure we have the absolute latest library_path
+			// (in case a webhook updated it while we were waiting in the cycle)
+			latest, err := hw.healthRepo.GetFileHealth(ctx, fh.FilePath)
+			if err == nil && latest != nil {
+				fh = latest
+			}
+
 			slog.InfoContext(ctx, "Re-triggering repair for file", "file_path", fh.FilePath)
 
 			updatePtr, sideEffect := hw.prepareRepairNotificationUpdate(ctx, fh)
@@ -849,6 +856,8 @@ const (
 // applyRepairOutcome maps a repairOutcome to the corresponding fields on the HealthStatusUpdate.
 func applyRepairOutcome(update *database.HealthStatusUpdate, outcome repairOutcome, err error) {
 	switch outcome {
+	case repairOutcomeTriggered:
+		update.Type = database.UpdateTypeRepairRetry
 	case repairOutcomeDeleted:
 		update.Skip = true
 	case repairOutcomeRegenerated:
