@@ -275,6 +275,16 @@ func ProcessArchive(ctx context.Context, opts ProcessArchiveOptions) error {
 		baseFilename := filepath.Base(normalizedInternalPath)
 		internalSubDir := filepath.ToSlash(filepath.Dir(normalizedInternalPath))
 
+		// Deduplicate: if internalSubDir matches the base name of virtualDir, collapse it.
+		// e.g. virtualDir="movies/MyMovie", internalSubDir="MyMovie" → "."
+		//      virtualDir="movies/MyMovie", internalSubDir="MyMovie/Extras" → "Extras"
+		virtualDirBase := filepath.Base(virtualDir)
+		if internalSubDir == virtualDirBase {
+			internalSubDir = "."
+		} else if after, ok := strings.CutPrefix(internalSubDir, virtualDirBase+"/"); ok {
+			internalSubDir = after
+		}
+
 		if !utils.IsAllowedFile(rarContent.InternalPath, rarContent.Size, allowedFileExtensions, filterSamples) &&
 			!utils.IsAllowedFile(rarContent.Filename, rarContent.Size, allowedFileExtensions, filterSamples) {
 			continue
