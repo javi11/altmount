@@ -157,7 +157,9 @@ export function StreamingConfigSection({
 				</div>
 
 				{/* Cache Path */}
-				<div className={`space-y-3 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6 transition-opacity ${!cacheData.enabled ? "opacity-50" : ""}`}>
+				<div
+					className={`space-y-3 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6 transition-opacity ${!cacheData.enabled ? "opacity-50" : ""}`}
+				>
 					<div className="min-w-0">
 						<h4 className="font-bold text-base-content text-sm">Cache Path</h4>
 						<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
@@ -176,7 +178,9 @@ export function StreamingConfigSection({
 				</div>
 
 				{/* Max Size slider */}
-				<div className={`space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6 transition-opacity ${!cacheData.enabled ? "opacity-50" : ""}`}>
+				<div
+					className={`space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6 transition-opacity ${!cacheData.enabled ? "opacity-50" : ""}`}
+				>
 					<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 						<div className="min-w-0">
 							<h4 className="font-bold text-base-content text-sm">Maximum Cache Size</h4>
@@ -216,7 +220,9 @@ export function StreamingConfigSection({
 				</div>
 
 				{/* Expiry slider */}
-				<div className={`space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6 transition-opacity ${!cacheData.enabled ? "opacity-50" : ""}`}>
+				<div
+					className={`space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6 transition-opacity ${!cacheData.enabled ? "opacity-50" : ""}`}
+				>
 					<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 						<div className="min-w-0">
 							<h4 className="overflow-visible whitespace-normal font-bold text-base-content text-sm">

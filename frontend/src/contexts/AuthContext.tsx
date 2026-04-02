@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { createContext, useContext, useEffect, useReducer, useRef } from "react";
+import { createContext, useCallback, useContext, useEffect, useReducer, useRef } from "react";
 import { apiClient } from "../api/client";
 import type { User } from "../types/api";
 
@@ -104,6 +104,7 @@ interface AuthContextType extends AuthState {
 		registration_enabled: boolean;
 		user_count: number;
 	}>;
+	recheckAuth: () => Promise<void>;
 }
 
 // Create context
@@ -136,33 +137,36 @@ export function AuthProvider({ children }: AuthProviderProps) {
 		return () => window.removeEventListener("api:unauthorized", handleUnauthorized);
 	}, []);
 
-	// Check for existing authentication on mount
-	useEffect(() => {
-		const checkAuth = async () => {
-			try {
-				// First check if login is required
-				const authConfig = await apiClient.getAuthConfig();
-				dispatch({ type: "SET_LOGIN_REQUIRED", payload: authConfig.login_required });
+	// Check for existing authentication; also exposed as recheckAuth for use after config changes
+	const checkAuth = useCallback(async () => {
+		let loginRequired = true;
+		try {
+			const authConfig = await apiClient.getAuthConfig();
+			loginRequired = authConfig.login_required;
+			dispatch({ type: "SET_LOGIN_REQUIRED", payload: loginRequired });
+		} catch {
+			// Can't reach auth config endpoint — default to requiring auth
+			dispatch({ type: "SET_LOGIN_REQUIRED", payload: true });
+		}
 
-				// If login is not required, treat as authenticated anonymous admin
-				if (!authConfig.login_required) {
-					dispatch({ type: "AUTH_SKIP" });
-					return;
-				}
+		if (!loginRequired) {
+			dispatch({ type: "AUTH_SKIP" });
+			return;
+		}
 
-				// If login is required, check for existing authentication
-				dispatch({ type: "AUTH_START" });
-				const user = await apiClient.getCurrentUser();
-				dispatch({ type: "AUTH_SUCCESS", payload: user });
-			} catch (_error) {
-				// If getCurrentUser fails, user is not authenticated
-				// Don't dispatch error for this case since it's expected
-				dispatch({ type: "AUTH_LOGOUT" });
-			}
-		};
-
-		checkAuth();
+		try {
+			dispatch({ type: "AUTH_START" });
+			const user = await apiClient.getCurrentUser();
+			dispatch({ type: "AUTH_SUCCESS", payload: user });
+		} catch {
+			// Expected when user has no valid session
+			dispatch({ type: "AUTH_LOGOUT" });
+		}
 	}, []);
+
+	useEffect(() => {
+		checkAuth();
+	}, [checkAuth]);
 
 	// Login function (direct authentication)
 	const login = async (username: string, password: string): Promise<boolean> => {
@@ -255,6 +259,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 		refreshToken,
 		clearError,
 		checkRegistrationStatus,
+		recheckAuth: checkAuth,
 	};
 
 	return <AuthContext.Provider value={contextValue}>{children}</AuthContext.Provider>;
