@@ -477,9 +477,10 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 
 	default:
 		// Regular health check phase
-		if fh.RetryCount >= hw.configGetter().GetMaxRetries() {
+		if fh.RetryCount >= hw.configGetter().GetMaxRetries()-1 {
 			update.Type = database.UpdateTypeRepairTrigger
 			update.Status = database.HealthStatusRepairTriggered
+
 			update.ScheduledCheckAt = time.Now().UTC().Add(hw.configGetter().GetRepairInterval())
 
 			sideEffect = func() error {
