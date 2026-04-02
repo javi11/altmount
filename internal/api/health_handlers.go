@@ -1332,7 +1332,8 @@ func (s *Server) handleRegenerateLibraryFiles(c *fiber.Ctx) error {
 
 	// 1. Parse optional bulk request body
 	var req struct {
-		FilePaths []string `json:"file_paths"`
+		FilePaths     []string `json:"file_paths"`
+		UseImportPath bool     `json:"use_import_path"`
 	}
 	_ = c.BodyParser(&req)
 
@@ -1370,22 +1371,13 @@ func (s *Server) handleRegenerateLibraryFiles(c *fiber.Ctx) error {
 		// Build the library file path in the import directory
 		var libraryPath string
 
-		// SMART LOGIC: If we already have a valid library path that is in our library mount,
-		// we should preserve it exactly as is. This respects Sonarr's final renaming.
+		// SMART LOGIC: If we already have a valid library path and caller did not
+		// request the import path (queue / file-explorer callers set UseImportPath=true),
+		// preserve the stored path exactly as is. This respects Sonarr's final renaming.
 		preserveExistingPath := false
-		if file.LibraryPath != nil && *file.LibraryPath != "" {
-			lp := *file.LibraryPath
-			libraryDir := ""
-			if cfg.Health.LibraryDir != nil {
-				libraryDir = *cfg.Health.LibraryDir
-			}
-
-			// If it's already in the configured library mount, keep it!
-			// This includes both /tv/NiceName and /complete/IncomingName
-			if libraryDir != "" && strings.HasPrefix(lp, libraryDir) {
-				preserveExistingPath = true
-				libraryPath = lp
-			}
+		if !req.UseImportPath && file.LibraryPath != nil && *file.LibraryPath != "" {
+			preserveExistingPath = true
+			libraryPath = *file.LibraryPath
 		}
 
 		if !preserveExistingPath {
@@ -1420,9 +1412,9 @@ func (s *Server) handleRegenerateLibraryFiles(c *fiber.Ctx) error {
 			var baseDir string
 			useCompleteDir := true
 
-			if cfg.Health.LibraryDir != nil && *cfg.Health.LibraryDir != "" {
-				baseDir = *cfg.Health.LibraryDir
-				useCompleteDir = false // Omit CompleteDir if using dedicated LibraryDir
+			if cfg.Import.ImportStrategy == config.ImportStrategyNone {
+				baseDir = cfg.MountPath
+				useCompleteDir = false
 			} else if cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
 				baseDir = *cfg.Import.ImportDir
 			} else {

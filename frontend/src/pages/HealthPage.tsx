@@ -262,7 +262,7 @@ export function HealthPage() {
 
 		if (confirmed) {
 			try {
-				const result = await regenerateSymlinks.mutateAsync(filePaths);
+				const result = await regenerateSymlinks.mutateAsync({ filePaths });
 				showToast({
 					title: "Regeneration Complete",
 					message: result.message,

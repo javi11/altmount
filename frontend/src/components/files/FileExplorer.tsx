@@ -156,7 +156,7 @@ export function FileExplorer({
 	};
 
 	const handleRegenerateSymlink = (path: string) => {
-		regenerateSymlinks.mutate([path]);
+		regenerateSymlinks.mutate({ filePaths: [path], useImportPath: true });
 	};
 
 	const handleFileInfo = (path: string) => {

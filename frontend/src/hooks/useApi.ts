@@ -187,11 +187,17 @@ export const useResetAllHealthChecks = () => {
 	});
 };
 
+interface RegenerateSymlinksParams {
+	filePaths?: string[];
+	useImportPath?: boolean;
+}
+
 export const useRegenerateSymlinks = () => {
 	const queryClient = useQueryClient();
 
 	return useMutation({
-		mutationFn: (filePaths?: string[]) => apiClient.regenerateSymlinks(filePaths),
+		mutationFn: (params?: RegenerateSymlinksParams) =>
+			apiClient.regenerateSymlinks(params?.filePaths, params?.useImportPath),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["health"] });
 			queryClient.invalidateQueries({ queryKey: ["health", "stats"] });
