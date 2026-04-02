@@ -1353,6 +1353,18 @@ func (s *Server) handleRegenerateLibraryFiles(c *fiber.Ctx) error {
 		return RespondInternalError(c, "Failed to retrieve health records", err.Error())
 	}
 
+	trigger := "health-page"
+	if req.UseImportPath {
+		trigger = "queue-or-file-explorer"
+	}
+
+	slog.InfoContext(ctx, "Regenerating library files",
+		"trigger", trigger,
+		"use_import_path", req.UseImportPath,
+		"file_count", len(files),
+		"strategy", string(cfg.Import.ImportStrategy),
+	)
+
 	if len(files) == 0 {
 		return RespondSuccess(c, fiber.Map{
 			"message":         "No library files found to process",
@@ -1378,6 +1390,10 @@ func (s *Server) handleRegenerateLibraryFiles(c *fiber.Ctx) error {
 		if !req.UseImportPath && file.LibraryPath != nil && *file.LibraryPath != "" {
 			preserveExistingPath = true
 			libraryPath = *file.LibraryPath
+			slog.InfoContext(ctx, "Regenerating at existing library path",
+				"file_path", file.FilePath,
+				"library_path", libraryPath,
+			)
 		}
 
 		if !preserveExistingPath {
@@ -1436,6 +1452,13 @@ func (s *Server) handleRegenerateLibraryFiles(c *fiber.Ctx) error {
 				// STRM files have the .strm extension
 				libraryPath = filepath.ToSlash(filepath.Clean(fullPathStr + ".strm"))
 			}
+
+			slog.InfoContext(ctx, "Regenerating at computed import path",
+				"file_path", file.FilePath,
+				"library_path", libraryPath,
+				"base_dir", baseDir,
+				"category", category,
+			)
 		}
 
 		// Build the actual file path in the mount
@@ -1473,8 +1496,20 @@ func (s *Server) handleRegenerateLibraryFiles(c *fiber.Ctx) error {
 		if creationErr != nil {
 			errorCount++
 			errors = append(errors, fmt.Sprintf("%s: failed to recreate library file: %v", file.FilePath, creationErr))
+			slog.ErrorContext(ctx, "Failed to recreate library file",
+				"file_path", file.FilePath,
+				"library_path", libraryPath,
+				"error", creationErr,
+			)
 			continue
 		}
+
+		slog.InfoContext(ctx, "Library file recreated",
+			"file_path", file.FilePath,
+			"library_path", libraryPath,
+			"actual_path", actualPath,
+			"strategy", string(cfg.Import.ImportStrategy),
+		)
 
 		// Update the library path in the database
 		if err := s.healthRepo.UpdateLibraryPath(ctx, file.FilePath, libraryPath); err != nil {
@@ -1486,6 +1521,13 @@ func (s *Server) handleRegenerateLibraryFiles(c *fiber.Ctx) error {
 
 		successCount++
 	}
+
+	slog.InfoContext(ctx, "Library file regeneration complete",
+		"trigger", trigger,
+		"files_processed", len(files),
+		"success_count", successCount,
+		"error_count", errorCount,
+	)
 
 	response := fiber.Map{
 		"message":         fmt.Sprintf("Successfully processed %d library files", successCount),
