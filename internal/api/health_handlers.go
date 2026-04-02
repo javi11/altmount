@@ -1397,19 +1397,10 @@ func (s *Server) handleRegenerateLibraryFiles(c *fiber.Ctx) error {
 		}
 
 		if !preserveExistingPath {
-			// Determine category folder from path
-			category := config.DefaultCategoryName
-			cleanFilePath := strings.TrimPrefix(file.FilePath, "/")
-			if strings.HasPrefix(cleanFilePath, "tv/") || strings.Contains(cleanFilePath, "/tv/") {
-				category = "tv"
-			} else if strings.HasPrefix(cleanFilePath, "movies/") || strings.Contains(cleanFilePath, "/movies/") {
-				category = "movies"
-			}
-
 			// 1. Get the internal relative path (relative to FUSE mount)
 			relPath := strings.TrimPrefix(file.FilePath, "/")
 
-			// 2. Strip any existing /complete or /category prefix from the internal path to start clean
+			// 2. Strip CompleteDir prefix
 			if cfg.SABnzbd.CompleteDir != "" {
 				completeDir := strings.Trim(filepath.ToSlash(cfg.SABnzbd.CompleteDir), "/")
 				if after, ok := strings.CutPrefix(relPath, completeDir+"/"); ok {
@@ -1418,10 +1409,13 @@ func (s *Server) handleRegenerateLibraryFiles(c *fiber.Ctx) error {
 					relPath = ""
 				}
 			}
-			if after, ok := strings.CutPrefix(relPath, category+"/"); ok {
-				relPath = after
-			} else if relPath == category {
-				relPath = ""
+
+			// 3. Extract category dynamically as the first path component after CompleteDir.
+			// This handles any category name (sonarr, radarr, tv, movies, etc.).
+			category := config.DefaultCategoryName
+			if idx := strings.Index(relPath, "/"); idx > 0 {
+				category = relPath[:idx]
+				relPath = relPath[idx+1:]
 			}
 
 			// 3. Build the clean, isolated library path
