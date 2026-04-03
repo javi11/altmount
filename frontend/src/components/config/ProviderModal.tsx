@@ -190,12 +190,12 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 
 	return (
 		<div className="modal modal-open backdrop-blur-sm">
-			<div className="modal-box max-w-2xl rounded-2xl border border-base-300 shadow-2xl">
+			<div className="modal-box w-full min-w-0 max-w-none rounded-none border border-base-300 shadow-2xl sm:max-w-2xl sm:rounded-2xl">
 				<h3 className="mb-6 font-black text-xl uppercase tracking-tighter">
 					{mode === "create" ? "Add New Provider" : "Edit Provider"}
 				</h3>
 
-				<form className="space-y-6" onSubmit={(e) => e.preventDefault()}>
+				<form className="min-w-0 space-y-6" onSubmit={(e) => e.preventDefault()}>
 					{/* Host */}
 					<fieldset className="fieldset">
 						<legend className="fieldset-legend font-bold">NNTP Host *</legend>
@@ -295,23 +295,26 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 					</div>
 
 					{/* Security Settings */}
-					<div className="space-y-4 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-5">
+					<div className="min-w-0 space-y-4 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-5">
 						<h4 className="font-bold text-base-content/60 text-xs uppercase tracking-widest">
 							Options & Security
 						</h4>
 
-						<div className="flex flex-col gap-4">
-							<label htmlFor="tls" className="label cursor-pointer items-start justify-start gap-3">
+						<div className="flex min-w-0 flex-col gap-4">
+							<label
+								htmlFor="tls"
+								className="label w-full min-w-0 cursor-pointer items-start justify-start gap-3"
+							>
 								<input
 									id="tls"
 									type="checkbox"
-									className="checkbox checkbox-primary checkbox-sm mt-0.5"
+									className="checkbox checkbox-primary checkbox-sm mt-0.5 shrink-0"
 									checked={formData.tls}
 									onChange={(e) => handleInputChange("tls", e.target.checked)}
 								/>
 								<div className="min-w-0 flex-1">
 									<span className="label-text font-bold text-xs">Use SSL/TLS</span>
-									<span className="block text-base-content/70 text-xs">
+									<span className="block break-words text-base-content/70 text-xs">
 										Highly recommended for privacy.
 									</span>
 								</div>
@@ -320,12 +323,12 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 							{formData.tls && (
 								<label
 									htmlFor="insecure_tls"
-									className="label ml-7 cursor-pointer items-start justify-start gap-3"
+									className="label ml-0 w-full min-w-0 cursor-pointer items-start justify-start gap-3 border-base-300 border-l-2 pl-4 sm:ml-7 sm:border-l-0 sm:pl-0"
 								>
 									<input
 										id="insecure_tls"
 										type="checkbox"
-										className="checkbox checkbox-warning checkbox-sm mt-0.5"
+										className="checkbox checkbox-warning checkbox-sm mt-0.5 shrink-0"
 										checked={formData.insecure_tls}
 										onChange={(e) => handleInputChange("insecure_tls", e.target.checked)}
 									/>
@@ -333,7 +336,7 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 										<span className="label-text font-bold text-xs">
 											Insecure (Skip Verification)
 										</span>
-										<span className="block text-base-content/70 text-xs">
+										<span className="block break-words text-base-content/70 text-xs">
 											Only use for self-signed certs.
 										</span>
 									</div>
@@ -342,18 +345,18 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 
 							<label
 								htmlFor="is_backup_provider"
-								className="label cursor-pointer items-start justify-start gap-3"
+								className="label w-full min-w-0 cursor-pointer items-start justify-start gap-3"
 							>
 								<input
 									id="is_backup_provider"
 									type="checkbox"
-									className="checkbox checkbox-primary checkbox-sm mt-0.5"
+									className="checkbox checkbox-primary checkbox-sm mt-0.5 shrink-0"
 									checked={formData.is_backup_provider}
 									onChange={(e) => handleInputChange("is_backup_provider", e.target.checked)}
 								/>
 								<div className="min-w-0 flex-1">
 									<span className="label-text font-bold text-xs">Backup Only</span>
-									<span className="block text-base-content/70 text-xs">
+									<span className="block break-words text-base-content/70 text-xs">
 										Only use when primary providers fail.
 									</span>
 								</div>
@@ -361,18 +364,18 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 
 							<label
 								htmlFor="skip_ping"
-								className="label cursor-pointer items-start justify-start gap-3"
+								className="label w-full min-w-0 cursor-pointer items-start justify-start gap-3"
 							>
 								<input
 									id="skip_ping"
 									type="checkbox"
-									className="checkbox checkbox-primary checkbox-sm mt-0.5"
+									className="checkbox checkbox-primary checkbox-sm mt-0.5 shrink-0"
 									checked={formData.skip_ping}
 									onChange={(e) => handleInputChange("skip_ping", e.target.checked)}
 								/>
 								<div className="min-w-0 flex-1">
 									<span className="label-text font-bold text-xs">Skip server ping</span>
-									<span className="block text-base-content/70 text-xs">
+									<span className="block text-balance break-words text-base-content/70 text-xs">
 										Enable if the server doesn't support the DATE command and you get a date/ping
 										error when connecting.
 									</span>
@@ -439,9 +442,9 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 					</div>
 
 					{/* Connection Test */}
-					<div className="space-y-4 border-base-300/50 border-t pt-4">
-						<div className="flex items-center justify-between">
-							<h4 className="font-bold text-base-content/60 text-xs uppercase tracking-widest">
+					<div className="min-w-0 space-y-4 border-base-300/50 border-t pt-4">
+						<div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+							<h4 className="min-w-0 font-bold text-base-content/60 text-xs uppercase tracking-widest">
 								Connectivity Check
 							</h4>
 							<button
@@ -472,14 +475,16 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 								) : (
 									<AlertTriangle className="h-4 w-4" />
 								)}
-								<div>
+								<div className="min-w-0">
 									<div className="font-black text-xs uppercase tracking-widest">
 										{connectionTestResult.success
 											? `Success${connectionTestResult.rttMs !== undefined ? ` • ${connectionTestResult.rttMs}ms` : ""}`
 											: "Failed"}
 									</div>
 									{connectionTestResult.message && (
-										<div className="mt-0.5 font-medium">{connectionTestResult.message}</div>
+										<div className="mt-0.5 break-words font-medium">
+											{connectionTestResult.message}
+										</div>
 									)}
 								</div>
 							</div>

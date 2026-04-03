@@ -398,7 +398,7 @@ export function ConfigurationPage() {
 				{/* Modern Sidebar (Stacks on mobile, exactly like Import) */}
 				<div className="lg:col-span-3 xl:col-span-2">
 					{" "}
-					<div className="card sticky top-24 border border-base-200 bg-base-100/50 shadow-sm backdrop-blur-md">
+					<div className="card border border-base-200 bg-base-100/50 shadow-sm backdrop-blur-md sm:sticky sm:top-24">
 						<div className="card-body p-2 sm:p-4">
 							{SECTION_GROUPS.map((group) => (
 								<div key={group.title} className="mb-4 last:mb-0">
@@ -442,8 +442,8 @@ export function ConfigurationPage() {
 					</div>
 				</div>
 
-				{/* Modern Content Card */}
-				<div className="lg:col-span-9 xl:col-span-10">
+				{/* Modern Content Card — min-w-0 lets grid column shrink so long inputs don’t overflow on narrow viewports */}
+				<div className="min-w-0 lg:col-span-9 xl:col-span-10">
 					{" "}
 					<div className="card min-h-[600px] overflow-hidden rounded-2xl border-2 border-base-300/50 bg-base-100 shadow-md">
 						<div className="card-body p-4 sm:p-10">
@@ -467,7 +467,7 @@ export function ConfigurationPage() {
 								</div>
 							</div>
 
-							<div className="mx-auto w-full max-w-4xl">
+							<div className="mx-auto w-full min-w-0 max-w-4xl">
 								{activeSection === "webdav" && (
 									<WebDAVConfigSection
 										config={config}

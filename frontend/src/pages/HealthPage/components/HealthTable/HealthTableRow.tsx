@@ -1,7 +1,7 @@
 import { Clock, Heart, HeartCrack, Loader, Wrench } from "lucide-react";
 import { memo } from "react";
 import { HealthBadge } from "../../../../components/ui/StatusBadge";
-import { formatFutureTime, formatRelativeTime, truncateText } from "../../../../lib/utils";
+import { formatFutureTime, formatRelativeTime } from "../../../../lib/utils";
 import { type FileHealth, HealthPriority } from "../../../../types/api";
 import { HealthItemActionsMenu } from "./HealthItemActionsMenu";
 
@@ -97,19 +97,13 @@ export const HealthTableRow = memo(function HealthTableRow({
 				<div className="flex items-center space-x-3">
 					<span className={iconColorClass}>{statusIcon}</span>
 					<div>
-						<div className="font-bold">
-							{truncateText(item.file_path.split("/").pop() || "", 40)}
-						</div>
-						<div className="tooltip text-base-content/70 text-sm" data-tip={item.file_path}>
-							{truncateText(item.file_path, 60)}
-						</div>
+						<div className="break-all font-bold">{item.file_path.split("/").pop() || ""}</div>
+						<div className="break-all text-base-content/70 text-sm">{item.file_path}</div>
 					</div>
 				</div>
 			</td>
 			<td>
-				<div className="tooltip text-sm" data-tip={item.library_path}>
-					{truncateText(item.library_path?.split("/").pop() || "", 40)}
-				</div>
+				<div className="break-all text-sm">{item.library_path?.split("/").pop() || ""}</div>
 			</td>
 			<td>
 				<div className="flex items-center gap-2">
@@ -117,23 +111,11 @@ export const HealthTableRow = memo(function HealthTableRow({
 				</div>
 				{/* Show last_error for repair failures and general errors */}
 				{item.last_error && (
-					<div className="mt-1">
-						<div className="tooltip tooltip-bottom text-left" data-tip={item.last_error}>
-							<div className="cursor-help text-error text-xs">
-								{truncateText(item.last_error, 50)}
-							</div>
-						</div>
-					</div>
+					<div className="mt-1 break-all text-error text-xs">{item.last_error}</div>
 				)}
 				{/* Show error_details for additional technical details */}
 				{item.error_details && item.error_details !== item.last_error && (
-					<div className="mt-1">
-						<div className="tooltip tooltip-bottom text-left" data-tip={item.error_details}>
-							<div className="cursor-help text-warning text-xs">
-								Technical: {truncateText(item.error_details, 40)}
-							</div>
-						</div>
-					</div>
+					<div className="mt-1 break-all text-warning text-xs">Technical: {item.error_details}</div>
 				)}
 			</td>
 			<td>

@@ -65,8 +65,11 @@ export function UpdateSection() {
 	const dockerUnavailable = updateStatus && !updateStatus.docker_available;
 	const updateAvailable = updateStatus?.update_available ?? false;
 
+	/** Taller tap targets below md (touch-friendly ~48px min height) */
+	const updateActionBtnLayout = "max-md:min-h-12 max-md:py-2.5 max-md:leading-snug";
+
 	return (
-		<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+		<div className="min-w-0 space-y-6 overflow-hidden rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 			<div className="flex items-center gap-2">
 				<ArrowUpCircle className="h-4 w-4 text-base-content/60" />
 				<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
@@ -77,7 +80,7 @@ export function UpdateSection() {
 
 			{/* Version info */}
 			{updateStatus && (
-				<div className="flex flex-wrap gap-3">
+				<div className="flex min-w-0 flex-wrap gap-3">
 					<div className="rounded-lg border border-base-300 bg-base-100 px-3 py-2">
 						<span className="text-[10px] text-base-content/50 uppercase tracking-wider">
 							Current
@@ -103,45 +106,45 @@ export function UpdateSection() {
 				</div>
 			)}
 
-			{/* Channel selector */}
-			<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-				<fieldset className="fieldset">
+			{/* Row 1: channel · Row 2: check + apply/reinstall */}
+			<div className="flex min-w-0 flex-col gap-4">
+				<fieldset className="fieldset min-w-0">
 					<legend className="fieldset-legend font-semibold text-xs">Update Channel</legend>
-					<div className="join">
+					<div className="join w-full min-w-0">
 						<button
 							type="button"
-							className={`btn btn-sm join-item ${channel === "latest" ? "btn-primary" : "btn-ghost border-base-300"}`}
+							className={`btn btn-sm join-item min-w-0 flex-1 gap-1 px-2 sm:px-3 ${channel === "latest" ? "btn-primary" : "btn-ghost border-base-300"}`}
 							onClick={() => {
 								setChannel("latest");
 								setCheckEnabled(false);
 							}}
 						>
-							<CheckCircle className="h-3 w-3" />
-							Latest (stable)
+							<CheckCircle className="h-3 w-3 shrink-0" />
+							<span className="truncate">Latest (stable)</span>
 						</button>
 						<button
 							type="button"
-							className={`btn btn-sm join-item ${channel === "dev" ? "btn-primary" : "btn-ghost border-base-300"}`}
+							className={`btn btn-sm join-item min-w-0 flex-1 gap-1 px-2 sm:px-3 ${channel === "dev" ? "btn-primary" : "btn-ghost border-base-300"}`}
 							onClick={() => {
 								setChannel("dev");
 								setCheckEnabled(false);
 							}}
 						>
-							<Zap className="h-3 w-3" />
-							Dev (rolling)
+							<Zap className="h-3 w-3 shrink-0" />
+							<span className="truncate">Dev (rolling)</span>
 						</button>
 					</div>
-					<p className="label mt-1 text-[11px] text-base-content/50">
+					<p className="label mt-1 min-w-0 max-w-full whitespace-normal break-words text-[11px] text-base-content/50">
 						{channel === "latest"
 							? "Stable releases tagged as vX.Y.Z"
 							: "Rolling builds from the main branch — may be unstable"}
 					</p>
 				</fieldset>
 
-				<div className="flex gap-2 self-start sm:self-auto">
+				<div className="grid min-w-0 grid-cols-2 gap-2">
 					<button
 						type="button"
-						className="btn btn-sm btn-ghost border-base-300 bg-base-100 hover:bg-base-200"
+						className={`btn btn-sm btn-ghost min-w-0 border-base-300 bg-base-100 hover:bg-base-200 ${updateActionBtnLayout}`}
 						onClick={handleCheckForUpdates}
 						disabled={isChecking}
 					>
@@ -152,7 +155,7 @@ export function UpdateSection() {
 					{updateAvailable ? (
 						<button
 							type="button"
-							className="btn btn-sm btn-warning"
+							className={`btn btn-sm btn-warning min-w-0 ${updateActionBtnLayout}`}
 							onClick={() => handleApplyUpdate(false)}
 							disabled={applyUpdate.isPending || dockerUnavailable}
 						>
@@ -166,7 +169,7 @@ export function UpdateSection() {
 					) : (
 						<button
 							type="button"
-							className="btn btn-sm btn-ghost border-base-300 bg-base-100 hover:bg-base-200"
+							className={`btn btn-sm btn-ghost min-w-0 border-base-300 bg-base-100 hover:bg-base-200 ${updateActionBtnLayout}`}
 							onClick={() => handleApplyUpdate(true)}
 							disabled={applyUpdate.isPending || dockerUnavailable || isChecking}
 						>

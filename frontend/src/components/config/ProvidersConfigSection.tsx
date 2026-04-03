@@ -10,7 +10,7 @@ import {
 	Trash2,
 	Wifi,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useConfirm } from "../../contexts/ModalContext";
 import { useToast } from "../../contexts/ToastContext";
 import { useProviders } from "../../hooks/useProviders";
@@ -35,6 +35,10 @@ export function ProvidersConfigSection({
 	const [draggedProvider, setDraggedProvider] = useState<string | null>(null);
 	const [dragOverProvider, setDragOverProvider] = useState<string | null>(null);
 	const [deletingProviderId, setDeletingProviderId] = useState<string | null>(null);
+
+	// Touch drag state (mobile — HTML5 drag events don't fire on touch)
+	const touchDragRef = useRef<{ providerId: string } | null>(null);
+	const listRef = useRef<HTMLDivElement>(null);
 	const [testingSpeedProviderId, setTestingSpeedProviderId] = useState<string | null>(null);
 
 	const [formData, setFormData] = useState<ProviderConfig[]>(config.providers);
@@ -49,6 +53,57 @@ export function ProvidersConfigSection({
 		setFormData(config.providers);
 		setHasChanges(false);
 	}, [config.providers]);
+
+	// Attach non-passive touchmove on the list container so we can call
+	// preventDefault() and prevent page scroll while a touch-drag is active.
+	useEffect(() => {
+		const el = listRef.current;
+		if (!el) return;
+		const prevent = (e: TouchEvent) => {
+			if (touchDragRef.current) e.preventDefault();
+		};
+		el.addEventListener("touchmove", prevent, { passive: false });
+		return () => el.removeEventListener("touchmove", prevent);
+	}, []);
+
+	const handleTouchStart = (_e: React.TouchEvent, providerId: string) => {
+		touchDragRef.current = { providerId };
+		setDraggedProvider(providerId);
+	};
+
+	const handleTouchMove = (e: React.TouchEvent) => {
+		if (!touchDragRef.current) return;
+		const touch = e.touches[0];
+		const el = document.elementFromPoint(touch.clientX, touch.clientY);
+		const section = el?.closest("[data-provider-id]");
+		const targetId = section?.getAttribute("data-provider-id") ?? null;
+		setDragOverProvider(targetId && targetId !== touchDragRef.current.providerId ? targetId : null);
+	};
+
+	const handleTouchEnd = (e: React.TouchEvent) => {
+		if (!touchDragRef.current) return;
+		const { providerId } = touchDragRef.current;
+		const touch = e.changedTouches[0];
+		const el = document.elementFromPoint(touch.clientX, touch.clientY);
+		const section = el?.closest("[data-provider-id]");
+		const targetId = section?.getAttribute("data-provider-id");
+
+		if (targetId && targetId !== providerId) {
+			const draggedIndex = formData.findIndex((p) => p.id === providerId);
+			const targetIndex = formData.findIndex((p) => p.id === targetId);
+			if (draggedIndex !== -1 && targetIndex !== -1) {
+				const reordered = [...formData];
+				const [moved] = reordered.splice(draggedIndex, 1);
+				reordered.splice(targetIndex, 0, moved);
+				setFormData(reordered);
+				setHasChanges(JSON.stringify(reordered) !== JSON.stringify(config.providers));
+			}
+		}
+
+		touchDragRef.current = null;
+		setDraggedProvider(null);
+		setDragOverProvider(null);
+	};
 
 	const handleCreate = () => {
 		setEditingProvider(null);
@@ -229,11 +284,12 @@ export function ProvidersConfigSection({
 					</button>
 				</div>
 			) : (
-				<div className="relative">
+				<div ref={listRef} className="relative">
 					<div className="grid gap-4">
 						{formData.map((provider, index) => (
 							<section
 								key={provider.id}
+								data-provider-id={provider.id}
 								draggable
 								aria-label={`Provider ${provider.host}`}
 								onDragStart={(e) => handleDragStart(e, provider.id)}
@@ -241,6 +297,9 @@ export function ProvidersConfigSection({
 								onDragLeave={handleDragLeave}
 								onDrop={(e) => handleDrop(e, provider.id)}
 								onDragEnd={handleDragEnd}
+								onTouchStart={(e) => handleTouchStart(e, provider.id)}
+								onTouchMove={handleTouchMove}
+								onTouchEnd={handleTouchEnd}
 								className={`group relative cursor-move overflow-hidden rounded-2xl border-2 bg-base-100/50 transition-all duration-300 hover:shadow-md ${
 									provider.enabled
 										? provider.is_backup_provider

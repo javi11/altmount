@@ -471,7 +471,7 @@ export function QueuePage() {
 			) : (
 				<div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
 					{/* Sidebar Navigation */}
-					<div className="lg:col-span-3 xl:col-span-2">
+					<div className="min-w-0 lg:col-span-3 xl:col-span-2">
 						<div className="space-y-6">
 							<div className="card border-2 border-base-300/50 bg-base-100 shadow-md">
 								<div className="card-body p-2 sm:p-4">
@@ -554,7 +554,7 @@ export function QueuePage() {
 					</div>
 
 					{/* Content Area */}
-					<div className="lg:col-span-9 xl:col-span-10">
+					<div className="min-w-0 lg:col-span-9 xl:col-span-10">
 						<div className="space-y-6">
 							{/* Bulk Actions Toolbar */}
 							{selectedItems.size > 0 && (
@@ -625,8 +625,8 @@ export function QueuePage() {
 										</div>
 									) : queueData && queueData.length > 0 ? (
 										<>
-											{/* Mobile View (< 640px) */}
-											<div className="space-y-3 p-4 sm:hidden">
+											{/* Mobile View (< 768px) */}
+											<div className="min-w-0 space-y-3 p-4 md:hidden">
 												{enrichedQueueData?.map((item: QueueItem) => (
 													<QueueItemCard
 														key={item.id}
@@ -646,8 +646,8 @@ export function QueuePage() {
 												))}
 											</div>
 
-											{/* Desktop View (≥640px) - Keep Existing */}
-											<div className="hidden min-h-[450px] overflow-x-auto pb-24 sm:block">
+											{/* Desktop View (≥768px) */}
+											<div className="hidden min-h-[450px] overflow-x-auto pb-24 md:block">
 												{" "}
 												<table className="table-zebra table-sm sm:table-md table">
 													<thead className="bg-base-200/50">
@@ -722,11 +722,11 @@ export function QueuePage() {
 																		onChange={(e) => handleSelectItem(item.id, e.target.checked)}
 																	/>
 																</td>
-																<td>
+																<td className="min-w-0">
 																	<div className="flex min-w-0 flex-col">
-																		<div className="flex items-center gap-2">
+																		<div className="flex min-w-0 items-center gap-2">
 																			<FileCode className="h-3.5 w-3.5 shrink-0 text-base-content/60" />
-																			<div className="truncate font-bold text-sm">
+																			<div className="min-w-0 flex-1 font-bold text-sm">
 																				<PathDisplay
 																					path={item.nzb_path}
 																					maxLength={80}
@@ -734,10 +734,10 @@ export function QueuePage() {
 																				/>
 																			</div>
 																		</div>
-																		<div className="mt-1 truncate pl-5.5 text-base-content/40 text-xs">
+																		<div className="mt-1 min-w-0 pl-5.5 text-base-content/40 text-xs">
 																			{item.target_path ? (
-																				<span className="flex items-center gap-1">
-																					<Box className="h-2.5 w-2.5" />
+																				<span className="flex min-w-0 items-center gap-1">
+																					<Box className="h-2.5 w-2.5 shrink-0" />
 																					<PathDisplay path={item.target_path} maxLength={60} />
 																				</span>
 																			) : (

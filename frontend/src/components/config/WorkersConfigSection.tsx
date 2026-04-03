@@ -71,17 +71,17 @@ export function ImportConfigSection({
 	};
 
 	return (
-		<div className="space-y-10">
-			<div>
+		<div className="min-w-0 space-y-10">
+			<div className="min-w-0">
 				<h3 className="font-bold text-base-content text-lg tracking-tight">NZB Processor</h3>
 				<p className="break-words text-base-content/50 text-sm">
 					Configure how workers handle new imports and validation.
 				</p>
 			</div>
 
-			<div className="space-y-8">
+			<div className="min-w-0 space-y-8">
 				{/* Worker Core Configuration */}
-				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+				<div className="min-w-0 space-y-6 overflow-hidden rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="flex items-center gap-2">
 						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
 							Concurrency
@@ -89,12 +89,12 @@ export function ImportConfigSection({
 						<div className="h-px flex-1 bg-base-300/50" />
 					</div>
 
-					<div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-						<fieldset className="fieldset">
+					<div className="grid min-w-0 grid-cols-1 gap-6 sm:grid-cols-2">
+						<fieldset className="fieldset min-w-0">
 							<legend className="fieldset-legend font-semibold">Active Workers</legend>
 							<input
 								type="number"
-								className="input input-bordered w-full bg-base-100 font-mono text-sm"
+								className="input input-bordered w-full min-w-0 max-w-full bg-base-100 font-mono text-sm"
 								value={formData.max_processor_workers}
 								readOnly={isReadOnly}
 								min={1}
@@ -106,16 +106,16 @@ export function ImportConfigSection({
 									)
 								}
 							/>
-							<p className="label break-words text-base-content/70 text-xs">
+							<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/70 text-xs">
 								Concurrent NZB processing threads.
 							</p>
 						</fieldset>
 
-						<fieldset className="fieldset">
+						<fieldset className="fieldset min-w-0">
 							<legend className="fieldset-legend">Max Connections (per Worker)</legend>
 							<input
 								type="number"
-								className="input input-bordered w-full bg-base-100 font-mono text-sm"
+								className="input input-bordered w-full min-w-0 max-w-full bg-base-100 font-mono text-sm"
 								value={formData.max_import_connections}
 								readOnly={isReadOnly}
 								min={1}
@@ -126,18 +126,18 @@ export function ImportConfigSection({
 									)
 								}
 							/>
-							<p className="label break-words text-base-content/70 text-xs">
+							<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/70 text-xs">
 								Socket limit per active worker.
 							</p>
 						</fieldset>
 					</div>
 
-					<div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-						<fieldset className="fieldset">
+					<div className="grid min-w-0 grid-cols-1 gap-6 sm:grid-cols-2">
+						<fieldset className="fieldset min-w-0">
 							<legend className="fieldset-legend font-semibold">Max Download Prefetch</legend>
 							<input
 								type="number"
-								className="input input-bordered w-full bg-base-100 font-mono text-sm"
+								className="input input-bordered w-full min-w-0 max-w-full bg-base-100 font-mono text-sm"
 								value={formData.max_download_prefetch}
 								readOnly={isReadOnly}
 								min={1}
@@ -148,16 +148,16 @@ export function ImportConfigSection({
 									)
 								}
 							/>
-							<p className="label break-words text-base-content/70 text-xs">
+							<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/70 text-xs">
 								Segments prefetched ahead for archive analysis.
 							</p>
 						</fieldset>
 
-						<fieldset className="fieldset">
+						<fieldset className="fieldset min-w-0">
 							<legend className="fieldset-legend font-semibold">Read Timeout (Seconds)</legend>
 							<input
 								type="number"
-								className="input input-bordered w-full bg-base-100 font-mono text-sm"
+								className="input input-bordered w-full min-w-0 max-w-full bg-base-100 font-mono text-sm"
 								value={formData.read_timeout_seconds}
 								readOnly={isReadOnly}
 								min={1}
@@ -168,7 +168,7 @@ export function ImportConfigSection({
 									)
 								}
 							/>
-							<p className="label break-words text-base-content/70 text-xs">
+							<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/70 text-xs">
 								Usenet socket read timeout.
 							</p>
 						</fieldset>
@@ -176,7 +176,7 @@ export function ImportConfigSection({
 				</div>
 
 				{/* Validation Slider */}
-				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+				<div className="min-w-0 space-y-6 overflow-hidden rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="flex items-center gap-2">
 						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
 							Validation
@@ -185,8 +185,8 @@ export function ImportConfigSection({
 					</div>
 
 					<div className="space-y-6">
-						<div className="flex items-center justify-between">
-							<div className="min-w-0">
+						<div className="flex min-w-0 items-center justify-between gap-4">
+							<div className="min-w-0 flex-1">
 								<h5 className="font-bold text-sm">Segment Verification</h5>
 								<p className="mt-1 break-words text-[11px] text-base-content/50">
 									Percentage of Usenet segments to validate before import.
@@ -286,7 +286,7 @@ export function ImportConfigSection({
 				</div>
 
 				{/* Strategy Configuration */}
-				<div className="space-y-8 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+				<div className="min-w-0 space-y-8 overflow-hidden rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="flex items-center gap-2">
 						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
 							Library Strategy
@@ -294,11 +294,11 @@ export function ImportConfigSection({
 						<div className="h-px flex-1 bg-base-300/50" />
 					</div>
 
-					<div className="grid grid-cols-1 gap-8 md:grid-cols-2">
-						<fieldset className="fieldset">
+					<div className="grid min-w-0 grid-cols-1 gap-8 md:grid-cols-2">
+						<fieldset className="fieldset min-w-0">
 							<legend className="fieldset-legend font-semibold">Strategy Type</legend>
 							<select
-								className="select select-bordered w-full bg-base-100"
+								className="select select-bordered w-full min-w-0 max-w-full bg-base-100"
 								value={formData.import_strategy}
 								disabled={isReadOnly}
 								onChange={(e) => handleInputChange("import_strategy", e.target.value)}
@@ -307,7 +307,7 @@ export function ImportConfigSection({
 								<option value="SYMLINK">Physical Symlinks</option>
 								<option value="STRM">STRM URL Files</option>
 							</select>
-							<p className="label mt-2 break-words text-base-content/70 text-xs leading-relaxed">
+							<p className="label mt-2 min-w-0 max-w-full whitespace-normal break-words text-base-content/70 text-xs leading-relaxed">
 								{formData.import_strategy === "NONE" &&
 									"Files are only visible through the virtual FUSE/WebDAV mount."}
 								{formData.import_strategy === "SYMLINK" &&
@@ -318,19 +318,19 @@ export function ImportConfigSection({
 						</fieldset>
 
 						{formData.import_strategy !== "NONE" && (
-							<fieldset className="fieldset slide-in-from-right-2 animate-in">
+							<fieldset className="fieldset slide-in-from-right-2 min-w-0 animate-in">
 								<legend className="fieldset-legend font-semibold">
 									{formData.import_strategy === "SYMLINK" ? "Symlink Root" : "STRM Output Root"}
 								</legend>
 								<input
 									type="text"
-									className="input input-bordered w-full bg-base-100 font-mono text-sm"
+									className="input input-bordered w-full min-w-0 max-w-full bg-base-100 font-mono text-sm"
 									value={formData.import_dir || ""}
 									readOnly={isReadOnly}
 									placeholder="/path/to/media"
 									onChange={(e) => handleInputChange("import_dir", e.target.value)}
 								/>
-								<p className="label mt-2 break-words text-base-content/70 text-xs">
+								<p className="label mt-2 min-w-0 max-w-full whitespace-normal break-words text-base-content/70 text-xs">
 									Absolute path for strategy output.
 								</p>
 							</fieldset>
@@ -347,29 +347,29 @@ export function ImportConfigSection({
 							</p>
 						</div>
 
-						<div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-							<fieldset className="fieldset">
+						<div className="grid min-w-0 grid-cols-1 gap-6 md:grid-cols-2">
+							<fieldset className="fieldset min-w-0">
 								<legend className="fieldset-legend font-semibold">Watch Directory Path</legend>
 								<input
 									type="text"
-									className="input input-bordered w-full bg-base-100 font-mono text-sm"
+									className="input input-bordered w-full min-w-0 max-w-full bg-base-100 font-mono text-sm"
 									value={formData.watch_dir || ""}
 									readOnly={isReadOnly}
 									placeholder="/path/to/watch"
 									onChange={(e) => handleInputChange("watch_dir", e.target.value)}
 								/>
-								<p className="label mt-2 break-words text-base-content/70 text-xs">
+								<p className="label mt-2 min-w-0 max-w-full whitespace-normal break-words text-base-content/70 text-xs">
 									Absolute path to monitor.
 								</p>
 							</fieldset>
 
-							<fieldset className="fieldset">
+							<fieldset className="fieldset min-w-0">
 								<legend className="fieldset-legend font-semibold">
 									Polling Interval (Seconds)
 								</legend>
 								<input
 									type="number"
-									className="input input-bordered w-full bg-base-100 font-mono text-sm"
+									className="input input-bordered w-full min-w-0 max-w-full bg-base-100 font-mono text-sm"
 									value={formData.watch_interval_seconds || 10}
 									readOnly={isReadOnly}
 									min={1}
@@ -380,7 +380,7 @@ export function ImportConfigSection({
 										)
 									}
 								/>
-								<p className="label mt-2 break-words text-base-content/70 text-xs">
+								<p className="label mt-2 min-w-0 max-w-full whitespace-normal break-words text-base-content/70 text-xs">
 									How often to check for new files.
 								</p>
 							</fieldset>
@@ -389,7 +389,7 @@ export function ImportConfigSection({
 				</div>
 
 				{/* File Extensions */}
-				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+				<div className="min-w-0 space-y-6 overflow-hidden rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="flex items-center gap-2">
 						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
 							Filters
@@ -397,10 +397,10 @@ export function ImportConfigSection({
 						<div className="h-px flex-1 bg-base-300/50" />
 					</div>
 
-					<fieldset className="fieldset">
+					<fieldset className="fieldset min-w-0">
 						<legend className="fieldset-legend font-semibold">Allowed File Extensions</legend>
 
-						<div className="mb-4 flex min-h-[4rem] flex-wrap gap-2 rounded-xl border border-base-300 bg-base-100/50 p-3">
+						<div className="mb-4 flex min-h-[4rem] min-w-0 flex-wrap gap-2 rounded-xl border border-base-300 bg-base-100/50 p-3">
 							{formData.allowed_file_extensions.length === 0 ? (
 								<span className="w-full self-center text-center text-base-content/60 text-xs italic">
 									All file types are currently allowed
@@ -424,10 +424,10 @@ export function ImportConfigSection({
 						</div>
 
 						{!isReadOnly && (
-							<div className="join mb-4 w-full shadow-sm">
+							<div className="join mb-4 w-full min-w-0 shadow-sm">
 								<input
 									type="text"
-									className="input input-bordered join-item flex-1 bg-base-100 text-sm"
+									className="input input-bordered join-item min-w-0 flex-1 bg-base-100 text-sm"
 									placeholder="Add e.g. .mp4"
 									value={extensionInput}
 									onChange={(e) => setExtensionInput(e.target.value)}
@@ -500,7 +500,7 @@ export function ImportConfigSection({
 					</fieldset>
 				</div>
 				{/* Queue Maintenance */}
-				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+				<div className="min-w-0 space-y-6 overflow-hidden rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="flex items-center gap-2">
 						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
 							Queue Maintenance
@@ -508,11 +508,11 @@ export function ImportConfigSection({
 						<div className="h-px flex-1 bg-base-300/50" />
 					</div>
 
-					<fieldset className="fieldset">
+					<fieldset className="fieldset min-w-0">
 						<legend className="fieldset-legend font-semibold">Failed Item Retention (Hours)</legend>
 						<input
 							type="number"
-							className="input input-bordered w-full bg-base-100 font-mono text-sm"
+							className="input input-bordered w-full min-w-0 max-w-full bg-base-100 font-mono text-sm"
 							value={formData.failed_item_retention_hours ?? 24}
 							readOnly={isReadOnly}
 							min={0}
@@ -523,7 +523,7 @@ export function ImportConfigSection({
 								)
 							}
 						/>
-						<p className="label break-words text-base-content/70 text-xs">
+						<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/70 text-xs">
 							Auto-remove failed queue items and their NZB files after this many hours. Set to 0 to
 							disable.
 						</p>
