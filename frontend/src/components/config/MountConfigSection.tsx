@@ -13,6 +13,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { apiClient } from "../../api/client";
 import { useConfirm } from "../../contexts/ModalContext";
 import { useToast } from "../../contexts/ToastContext";
+import { useRegenerateSymlinks } from "../../hooks/useApi";
 import type { FuseStatus } from "../../types/api";
 import type {
 	ConfigResponse,
@@ -33,9 +34,12 @@ export function MountConfigSection({ config, onUpdate, isUpdating }: MountConfig
 	const [mountType, setMountType] = useState<MountType>(config.mount_type || "none");
 	const [mountPath, setMountPath] = useState(config.mount_path || "");
 	const [hasChanges, setHasChanges] = useState(false);
+	const [regenerateOnSave, setRegenerateOnSave] = useState(false);
 	const subSectionDataRef = useRef<Record<string, unknown>>({});
 	const { showToast } = useToast();
 	const { confirmAction } = useConfirm();
+	const regenerateMutation = useRegenerateSymlinks();
+	const mountPathChanged = mountPath !== config.mount_path;
 
 	// Mount status state (unified for rclone + fuse)
 	const [rcloneMountStatus, setRcloneMountStatus] = useState<MountStatus | null>(null);
@@ -47,6 +51,7 @@ export function MountConfigSection({ config, onUpdate, isUpdating }: MountConfig
 		setMountType(config.mount_type || "none");
 		setMountPath(config.mount_path || "");
 		setHasChanges(false);
+		setRegenerateOnSave(false);
 		// Initialize sub-section ref from config so save always has data
 		const type = config.mount_type || "none";
 		if (type === "rclone") {
@@ -174,6 +179,22 @@ export function MountConfigSection({ config, onUpdate, isUpdating }: MountConfig
 				title: "Mount configuration saved",
 				message: `Mount type set to ${mountType === "none" ? "disabled" : mountType}`,
 			});
+			if (regenerateOnSave && mountPathChanged) {
+				try {
+					await regenerateMutation.mutateAsync({ useImportPath: false });
+					showToast({
+						type: "success",
+						title: "Symlinks regenerated",
+						message: "All library symlinks have been updated to the new mount path",
+					});
+				} catch (regenErr) {
+					showToast({
+						type: "error",
+						title: "Symlink regeneration failed",
+						message: regenErr instanceof Error ? regenErr.message : "Unknown error",
+					});
+				}
+			}
 		} catch (err) {
 			showToast({
 				type: "error",
@@ -443,20 +464,33 @@ export function MountConfigSection({ config, onUpdate, isUpdating }: MountConfig
 
 			{/* Save Button */}
 			{mountType !== "none" && (
-				<div className="flex justify-end pt-4">
-					<button
-						type="button"
-						className={`btn btn-primary btn-md px-10 shadow-lg shadow-primary/20 ${!hasChanges && "btn-ghost border-base-300"}`}
-						onClick={handleSave}
-						disabled={!hasChanges || isUpdating || !mountPath}
-					>
-						{isUpdating ? (
-							<span className="loading loading-spinner loading-sm" />
-						) : (
-							<Save className="h-4 w-4" />
-						)}
-						{isUpdating ? "Saving..." : "Save Configuration"}
-					</button>
+				<div className="flex flex-col gap-2 pt-4">
+					{mountPathChanged && (
+						<label className="flex cursor-pointer items-center gap-2 self-end">
+							<input
+								type="checkbox"
+								className="checkbox checkbox-sm"
+								checked={regenerateOnSave}
+								onChange={(e) => setRegenerateOnSave(e.target.checked)}
+							/>
+							<span className="text-sm">Regenerate all library symlinks to the new mount path</span>
+						</label>
+					)}
+					<div className="flex justify-end">
+						<button
+							type="button"
+							className={`btn btn-primary btn-md px-10 shadow-lg shadow-primary/20 ${!hasChanges && "btn-ghost border-base-300"}`}
+							onClick={handleSave}
+							disabled={!hasChanges || isUpdating || !mountPath}
+						>
+							{isUpdating ? (
+								<span className="loading loading-spinner loading-sm" />
+							) : (
+								<Save className="h-4 w-4" />
+							)}
+							{isUpdating ? "Saving..." : "Save Configuration"}
+						</button>
+					</div>
 				</div>
 			)}
 
