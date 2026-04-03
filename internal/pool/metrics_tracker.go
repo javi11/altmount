@@ -411,6 +411,13 @@ func (mt *MetricsTracker) Reset(ctx context.Context, resetPeak bool, resetTotals
 
 		// Clear samples to reset speed calculation
 		mt.samples = make([]metricsample, 0, 60)
+
+		// Clear provider hourly stats if repository is available
+		if mt.repo != nil {
+			if err := mt.repo.ClearProviderHourlyStats(ctx); err != nil {
+				mt.logger.ErrorContext(ctx, "Failed to clear provider hourly stats during reset", "error", err)
+			}
+		}
 	}
 
 	if resetPeak {
