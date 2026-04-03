@@ -792,14 +792,18 @@ func (r *QueueRepository) ClearImportHistory(ctx context.Context) error {
 	return r.ClearDailyStats(ctx)
 }
 
-// ClearDailyStats deletes all records from the import_daily_stats and import_hourly_stats tables
+// ClearDailyStats deletes all records from the import_daily_stats, import_hourly_stats, and provider_hourly_stats tables
 func (r *QueueRepository) ClearDailyStats(ctx context.Context) error {
 	queryDaily := `DELETE FROM import_daily_stats`
 	if _, err := r.db.ExecContext(ctx, queryDaily); err != nil {
 		return fmt.Errorf("failed to clear daily stats: %w", err)
 	}
 
-	return r.ClearHourlyStats(ctx)
+	if err := r.ClearHourlyStats(ctx); err != nil {
+		return err
+	}
+
+	return r.ClearProviderHourlyStats(ctx)
 }
 
 // ClearHourlyStats deletes all records from the import_hourly_stats table
@@ -807,6 +811,15 @@ func (r *QueueRepository) ClearHourlyStats(ctx context.Context) error {
 	queryHourly := `DELETE FROM import_hourly_stats`
 	if _, err := r.db.ExecContext(ctx, queryHourly); err != nil {
 		return fmt.Errorf("failed to clear hourly stats: %w", err)
+	}
+	return nil
+}
+
+// ClearProviderHourlyStats deletes all records from the provider_hourly_stats table
+func (r *QueueRepository) ClearProviderHourlyStats(ctx context.Context) error {
+	queryProviderHourly := `DELETE FROM provider_hourly_stats`
+	if _, err := r.db.ExecContext(ctx, queryProviderHourly); err != nil {
+		return fmt.Errorf("failed to clear provider hourly stats: %w", err)
 	}
 	return nil
 }

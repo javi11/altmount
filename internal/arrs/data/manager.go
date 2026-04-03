@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -169,4 +170,29 @@ func (m *Manager) GetEpisodeFiles(ctx context.Context, client *sonarr.Sonarr, in
 	}
 
 	return v.([]*sonarr.EpisodeFile), nil
+}
+
+// ClearMoviesCache clears the movies cache for a specific instance
+func (m *Manager) ClearMoviesCache(instanceName string) {
+	m.cacheMu.Lock()
+	defer m.cacheMu.Unlock()
+	delete(m.movieCache, instanceName)
+	delete(m.cacheExpiry, instanceName)
+}
+
+// ClearSeriesCache clears the series and episode files cache for a specific instance
+func (m *Manager) ClearSeriesCache(instanceName string) {
+	m.cacheMu.Lock()
+	defer m.cacheMu.Unlock()
+	delete(m.seriesCache, instanceName)
+	delete(m.cacheExpiry, instanceName)
+
+	// Clear all episode file caches for this instance
+	prefix := "sonarr_episode_files_" + instanceName + "_"
+	for key := range m.episodeFilesCache {
+		if strings.HasPrefix(key, prefix) {
+			delete(m.episodeFilesCache, key)
+			delete(m.cacheExpiry, key)
+		}
+	}
 }
