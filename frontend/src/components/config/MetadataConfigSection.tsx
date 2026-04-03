@@ -1,3 +1,4 @@
+import { CronExpressionParser } from "cron-parser";
 import cronstrue from "cronstrue";
 import { Download, HardDrive, History, Save, ShieldAlert, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -24,28 +25,50 @@ interface ScheduleState {
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 function parseCronString(schedule: string): ScheduleState {
-	const parts = schedule.trim().split(/\s+/);
-	if (parts.length !== 5) {
-		return { type: "custom", time: "03:00", dayOfWeek: "1", customExpr: schedule };
-	}
-	const [min, hour, dom, month, dow] = parts;
-	if (dom === "*" && month === "*") {
-		if (min === "0" && hour === "*" && dow === "*") {
+	try {
+		const { fields } = CronExpressionParser.parse(schedule);
+		const { minute, hour, dayOfMonth, month, dayOfWeek } = fields;
+
+		// Only detect simple patterns when dom and month are wildcards
+		if (dayOfMonth.values.length !== 31 || month.values.length !== 12) {
+			return { type: "custom", time: "03:00", dayOfWeek: "1", customExpr: schedule };
+		}
+
+		const isDowWild = dayOfWeek.values.length === 8;
+
+		// Hourly: 0 * * * *
+		if (
+			minute.values.length === 1 &&
+			minute.values[0] === 0 &&
+			hour.values.length === 24 &&
+			isDowWild
+		) {
 			return { type: "hourly", time: "00:00", dayOfWeek: "1", customExpr: schedule };
 		}
-		const h = Number(hour);
-		const m = Number(min);
-		if (!Number.isNaN(h) && !Number.isNaN(m) && h >= 0 && h <= 23 && m >= 0 && m <= 59) {
-			const time = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-			if (/^[0-6]$/.test(dow)) {
-				return { type: "weekly", time, dayOfWeek: dow, customExpr: schedule };
-			}
-			if (dow === "*") {
+
+		// Daily or weekly: single hour + single minute
+		if (hour.values.length === 1 && minute.values.length === 1) {
+			const h = String(hour.values[0]).padStart(2, "0");
+			const m = String(minute.values[0]).padStart(2, "0");
+			const time = `${h}:${m}`;
+
+			if (isDowWild) {
 				return { type: "daily", time, dayOfWeek: "1", customExpr: schedule };
 			}
+			if (dayOfWeek.values.length === 1) {
+				return {
+					type: "weekly",
+					time,
+					dayOfWeek: String(dayOfWeek.values[0]),
+					customExpr: schedule,
+				};
+			}
 		}
+
+		return { type: "custom", time: "03:00", dayOfWeek: "1", customExpr: schedule };
+	} catch {
+		return { type: "custom", time: "03:00", dayOfWeek: "1", customExpr: schedule };
 	}
-	return { type: "custom", time: "03:00", dayOfWeek: "1", customExpr: schedule };
 }
 
 function buildCronString(state: ScheduleState): string {
