@@ -1,3 +1,4 @@
+import cronstrue from "cronstrue";
 import { Download, HardDrive, History, Save, ShieldAlert, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useBatchExportNZB } from "../../hooks/useConfig";
@@ -285,6 +286,18 @@ export function MetadataConfigSection({
 										</fieldset>
 									)}
 								</div>
+
+								{(() => {
+									try {
+										const desc = cronstrue.toString(buildCronString(scheduleState), {
+											use24HourTimeFormat: true,
+											throwExceptionOnParseError: true,
+										});
+										return <p className="text-[10px] text-base-content/40">Runs: {desc} (UTC)</p>;
+									} catch {
+										return <p className="text-[10px] text-error">Invalid cron expression</p>;
+									}
+								})()}
 
 								<fieldset className="fieldset">
 									<legend className="fieldset-legend font-semibold">Keep Last N Backups</legend>
