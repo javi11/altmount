@@ -3,24 +3,25 @@ package metadata
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/javi11/altmount/internal/config"
+	"github.com/robfig/cron/v3"
 )
 
 type BackupWorker struct {
 	configGetter  config.ConfigGetter
+	cronRunner    *cron.Cron
 	workerCtx     context.Context
 	workerCancel  context.CancelFunc
-	workerWg      sync.WaitGroup
 	workerMu      sync.Mutex
 	workerRunning bool
 }
@@ -45,13 +46,17 @@ func (w *BackupWorker) Start(ctx context.Context) error {
 	}
 
 	w.workerCtx, w.workerCancel = context.WithCancel(ctx)
+
+	w.cronRunner = cron.New(cron.WithLocation(time.UTC))
+	if _, err := w.cronRunner.AddFunc(cfg.Metadata.Backup.Schedule, w.performBackup); err != nil {
+		w.workerCancel()
+		return fmt.Errorf("invalid backup schedule %q: %w", cfg.Metadata.Backup.Schedule, err)
+	}
+	w.cronRunner.Start()
 	w.workerRunning = true
 
-	w.workerWg.Add(1)
-	go w.runWorker()
-
 	slog.InfoContext(ctx, "Metadata backup worker started",
-		"interval_hours", cfg.Metadata.Backup.IntervalHours,
+		"schedule", cfg.Metadata.Backup.Schedule,
 		"keep_backups", cfg.Metadata.Backup.KeepBackups,
 		"path", cfg.Metadata.Backup.Path)
 	return nil
@@ -66,53 +71,11 @@ func (w *BackupWorker) Stop(ctx context.Context) {
 	}
 
 	w.workerCancel()
-	w.workerWg.Wait()
+	cronCtx := w.cronRunner.Stop()
+	<-cronCtx.Done()
+	w.cronRunner = nil
 	w.workerRunning = false
 	slog.InfoContext(ctx, "Metadata backup worker stopped")
-}
-
-func (w *BackupWorker) runWorker() {
-	defer w.workerWg.Done()
-
-	for {
-		cfg := w.configGetter()
-		var nextRun time.Duration
-
-		if cfg.Metadata.Backup.BackupTime != "" {
-			// Schedule based on specific time of day (HH:MM)
-			now := time.Now().UTC()
-			parts := strings.Split(cfg.Metadata.Backup.BackupTime, ":")
-			if len(parts) == 2 {
-				hour, errH := strconv.Atoi(parts[0])
-				minute, errM := strconv.Atoi(parts[1])
-				if errH != nil || errM != nil {
-					slog.WarnContext(w.workerCtx, "Invalid backup_time format, falling back to interval",
-						"backup_time", cfg.Metadata.Backup.BackupTime, "hour_err", errH, "minute_err", errM)
-				} else {
-					target := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, time.UTC)
-					if target.Before(now) || target.Equal(now) {
-						target = target.Add(24 * time.Hour)
-					}
-					nextRun = target.Sub(now)
-					slog.InfoContext(w.workerCtx, "Scheduled next metadata backup", "at", target.Format("2006-01-02 15:04:05 UTC"), "in", nextRun.String())
-				}
-			}
-		}
-
-		// Fallback to interval-based if BackupTime is empty or invalid
-		if nextRun <= 0 {
-			interval := w.configGetter().GetMetadataBackupInterval()
-			nextRun = interval
-			slog.InfoContext(w.workerCtx, "Scheduled next metadata backup (interval-based)", "in", nextRun.String())
-		}
-
-		select {
-		case <-time.After(nextRun):
-			w.performBackup()
-		case <-w.workerCtx.Done():
-			return
-		}
-	}
 }
 
 func (w *BackupWorker) performBackup() {

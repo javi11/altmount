@@ -30,6 +30,7 @@ require (
 	github.com/natefinch/lumberjack v2.0.0+incompatible
 	github.com/pressly/goose/v3 v3.24.3
 	github.com/rfjakob/eme v1.1.2
+	github.com/robfig/cron/v3 v3.0.1
 	github.com/sethvargo/go-password v0.3.1
 	github.com/sourcegraph/conc v0.3.0
 	github.com/spf13/afero v1.15.0

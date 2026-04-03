@@ -39,10 +39,10 @@ func TestBackupWorker_performBackup(t *testing.T) {
 		Metadata: config.MetadataConfig{
 			RootPath: metadataDir,
 			Backup: config.MetadataBackupConfig{
-				Enabled:       &enabled,
-				IntervalHours: 24,
-				KeepBackups:   2,
-				Path:          backupRoot,
+				Enabled:     &enabled,
+				Schedule:    "0 3 * * *",
+				KeepBackups: 2,
+				Path:        backupRoot,
 			},
 		},
 	}

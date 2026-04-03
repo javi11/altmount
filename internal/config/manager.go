@@ -16,6 +16,7 @@ import (
 	"github.com/javi11/altmount/internal/pathutil"
 	"github.com/javi11/nntppool/v4"
 	"github.com/jinzhu/copier"
+	"github.com/robfig/cron/v3"
 	"github.com/spf13/viper"
 	"gopkg.in/yaml.v3"
 )
@@ -162,11 +163,10 @@ func (m MetadataConfig) ShouldDeleteSourceNzb() bool {
 
 // MetadataBackupConfig represents metadata backup configuration
 type MetadataBackupConfig struct {
-	Enabled       *bool  `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
-	IntervalHours int    `yaml:"interval_hours" mapstructure:"interval_hours" json:"interval_hours"`
-	BackupTime    string `yaml:"backup_time" mapstructure:"backup_time" json:"backup_time"` // HH:MM format
-	KeepBackups   int    `yaml:"keep_backups" mapstructure:"keep_backups" json:"keep_backups"`
-	Path          string `yaml:"path" mapstructure:"path" json:"path"`
+	Enabled     *bool  `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	Schedule    string `yaml:"schedule" mapstructure:"schedule" json:"schedule"` // cron expression (UTC)
+	KeepBackups int    `yaml:"keep_backups" mapstructure:"keep_backups" json:"keep_backups"`
+	Path        string `yaml:"path" mapstructure:"path" json:"path"`
 }
 
 // FailureMaskingConfig represents failure masking configuration
@@ -539,8 +539,11 @@ func (c *Config) Validate() error {
 
 	// Validate metadata backup configuration
 	if c.Metadata.Backup.Enabled != nil && *c.Metadata.Backup.Enabled {
-		if c.Metadata.Backup.IntervalHours <= 0 {
-			return fmt.Errorf("metadata backup interval_hours must be greater than 0")
+		if c.Metadata.Backup.Schedule == "" {
+			return fmt.Errorf("metadata backup schedule cannot be empty")
+		}
+		if _, err := cron.ParseStandard(c.Metadata.Backup.Schedule); err != nil {
+			return fmt.Errorf("metadata backup schedule is not a valid cron expression: %w", err)
 		}
 		if c.Metadata.Backup.KeepBackups <= 0 {
 			return fmt.Errorf("metadata backup keep_backups must be greater than 0")
@@ -1254,11 +1257,10 @@ func DefaultConfig(configDir ...string) *Config {
 			RootPath:                 metadataPath,
 			DeleteSourceNzbOnRemoval: &deleteSourceNzbOnRemoval,
 			Backup: MetadataBackupConfig{
-				Enabled:       &metadataBackupEnabled,
-				IntervalHours: 24,
-				BackupTime:    "03:00",
-				KeepBackups:   1,
-				Path:          backupPath,
+				Enabled:     &metadataBackupEnabled,
+				Schedule:    "0 3 * * *", // daily at 3 AM UTC
+				KeepBackups: 10,
+				Path:        backupPath,
 			},
 		},
 		Streaming: StreamingConfig{
