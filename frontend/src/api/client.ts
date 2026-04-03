@@ -434,18 +434,18 @@ export class APIClient {
 		});
 	}
 
-	async regenerateSymlinks(filePaths?: string[]) {
+	async regenerateSymlinks(filePaths?: string[], useImportPath?: boolean) {
 		return this.request<{
 			message: string;
 			files_processed: number;
-			symlinks_created: number;
+			success_count: number;
 			errors: string[];
 			error_count: number;
 			warning?: string;
 			completed_at: string;
 		}>("/health/regenerate-symlinks", {
 			method: "POST",
-			body: JSON.stringify({ file_paths: filePaths }),
+			body: JSON.stringify({ file_paths: filePaths, use_import_path: useImportPath ?? false }),
 		});
 	}
 

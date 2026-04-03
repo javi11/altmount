@@ -1332,7 +1332,8 @@ func (s *Server) handleRegenerateLibraryFiles(c *fiber.Ctx) error {
 
 	// 1. Parse optional bulk request body
 	var req struct {
-		FilePaths []string `json:"file_paths"`
+		FilePaths     []string `json:"file_paths"`
+		UseImportPath bool     `json:"use_import_path"`
 	}
 	_ = c.BodyParser(&req)
 
@@ -1352,6 +1353,18 @@ func (s *Server) handleRegenerateLibraryFiles(c *fiber.Ctx) error {
 		return RespondInternalError(c, "Failed to retrieve health records", err.Error())
 	}
 
+	trigger := "health-page"
+	if req.UseImportPath {
+		trigger = "queue-or-file-explorer"
+	}
+
+	slog.InfoContext(ctx, "Regenerating library files",
+		"trigger", trigger,
+		"use_import_path", req.UseImportPath,
+		"file_count", len(files),
+		"strategy", string(cfg.Import.ImportStrategy),
+	)
+
 	if len(files) == 0 {
 		return RespondSuccess(c, fiber.Map{
 			"message":         "No library files found to process",
@@ -1370,38 +1383,24 @@ func (s *Server) handleRegenerateLibraryFiles(c *fiber.Ctx) error {
 		// Build the library file path in the import directory
 		var libraryPath string
 
-		// SMART LOGIC: If we already have a valid library path that is in our library mount,
-		// we should preserve it exactly as is. This respects Sonarr's final renaming.
+		// SMART LOGIC: If we already have a valid library path and caller did not
+		// request the import path (queue / file-explorer callers set UseImportPath=true),
+		// preserve the stored path exactly as is. This respects Sonarr's final renaming.
 		preserveExistingPath := false
-		if file.LibraryPath != nil && *file.LibraryPath != "" {
-			lp := *file.LibraryPath
-			libraryDir := ""
-			if cfg.Health.LibraryDir != nil {
-				libraryDir = *cfg.Health.LibraryDir
-			}
-
-			// If it's already in the configured library mount, keep it!
-			// This includes both /tv/NiceName and /complete/IncomingName
-			if libraryDir != "" && strings.HasPrefix(lp, libraryDir) {
-				preserveExistingPath = true
-				libraryPath = lp
-			}
+		if !req.UseImportPath && file.LibraryPath != nil && *file.LibraryPath != "" {
+			preserveExistingPath = true
+			libraryPath = *file.LibraryPath
+			slog.InfoContext(ctx, "Regenerating at existing library path",
+				"file_path", file.FilePath,
+				"library_path", libraryPath,
+			)
 		}
 
 		if !preserveExistingPath {
-			// Determine category folder from path
-			category := config.DefaultCategoryName
-			cleanFilePath := strings.TrimPrefix(file.FilePath, "/")
-			if strings.HasPrefix(cleanFilePath, "tv/") || strings.Contains(cleanFilePath, "/tv/") {
-				category = "tv"
-			} else if strings.HasPrefix(cleanFilePath, "movies/") || strings.Contains(cleanFilePath, "/movies/") {
-				category = "movies"
-			}
-
 			// 1. Get the internal relative path (relative to FUSE mount)
 			relPath := strings.TrimPrefix(file.FilePath, "/")
 
-			// 2. Strip any existing /complete or /category prefix from the internal path to start clean
+			// 2. Strip CompleteDir prefix
 			if cfg.SABnzbd.CompleteDir != "" {
 				completeDir := strings.Trim(filepath.ToSlash(cfg.SABnzbd.CompleteDir), "/")
 				if after, ok := strings.CutPrefix(relPath, completeDir+"/"); ok {
@@ -1410,19 +1409,22 @@ func (s *Server) handleRegenerateLibraryFiles(c *fiber.Ctx) error {
 					relPath = ""
 				}
 			}
-			if after, ok := strings.CutPrefix(relPath, category+"/"); ok {
-				relPath = after
-			} else if relPath == category {
-				relPath = ""
+
+			// 3. Extract category dynamically as the first path component after CompleteDir.
+			// This handles any category name (sonarr, radarr, tv, movies, etc.).
+			category := config.DefaultCategoryName
+			if idx := strings.Index(relPath, "/"); idx > 0 {
+				category = relPath[:idx]
+				relPath = relPath[idx+1:]
 			}
 
 			// 3. Build the clean, isolated library path
 			var baseDir string
 			useCompleteDir := true
 
-			if cfg.Health.LibraryDir != nil && *cfg.Health.LibraryDir != "" {
-				baseDir = *cfg.Health.LibraryDir
-				useCompleteDir = false // Omit CompleteDir if using dedicated LibraryDir
+			if cfg.Import.ImportStrategy == config.ImportStrategyNone {
+				baseDir = cfg.MountPath
+				useCompleteDir = false
 			} else if cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
 				baseDir = *cfg.Import.ImportDir
 			} else {
@@ -1444,6 +1446,13 @@ func (s *Server) handleRegenerateLibraryFiles(c *fiber.Ctx) error {
 				// STRM files have the .strm extension
 				libraryPath = filepath.ToSlash(filepath.Clean(fullPathStr + ".strm"))
 			}
+
+			slog.InfoContext(ctx, "Regenerating at computed import path",
+				"file_path", file.FilePath,
+				"library_path", libraryPath,
+				"base_dir", baseDir,
+				"category", category,
+			)
 		}
 
 		// Build the actual file path in the mount
@@ -1481,8 +1490,20 @@ func (s *Server) handleRegenerateLibraryFiles(c *fiber.Ctx) error {
 		if creationErr != nil {
 			errorCount++
 			errors = append(errors, fmt.Sprintf("%s: failed to recreate library file: %v", file.FilePath, creationErr))
+			slog.ErrorContext(ctx, "Failed to recreate library file",
+				"file_path", file.FilePath,
+				"library_path", libraryPath,
+				"error", creationErr,
+			)
 			continue
 		}
+
+		slog.InfoContext(ctx, "Library file recreated",
+			"file_path", file.FilePath,
+			"library_path", libraryPath,
+			"actual_path", actualPath,
+			"strategy", string(cfg.Import.ImportStrategy),
+		)
 
 		// Update the library path in the database
 		if err := s.healthRepo.UpdateLibraryPath(ctx, file.FilePath, libraryPath); err != nil {
@@ -1494,6 +1515,13 @@ func (s *Server) handleRegenerateLibraryFiles(c *fiber.Ctx) error {
 
 		successCount++
 	}
+
+	slog.InfoContext(ctx, "Library file regeneration complete",
+		"trigger", trigger,
+		"files_processed", len(files),
+		"success_count", successCount,
+		"error_count", errorCount,
+	)
 
 	response := fiber.Map{
 		"message":         fmt.Sprintf("Successfully processed %d library files", successCount),
