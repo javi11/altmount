@@ -107,17 +107,19 @@ export function HealthItemActionsMenu({
 						</button>
 					</li>
 				)}
-				<li>
-					<button
-						type="button"
-						onClick={() => onRegenerate?.(item.file_path)}
-						disabled={isRegeneratePending}
-						className="text-primary"
-					>
-						<RefreshCw className="h-4 w-4" />
-						Regenerate File
-					</button>
-				</li>
+				{onRegenerate && (
+					<li>
+						<button
+							type="button"
+							onClick={() => onRegenerate(item.file_path)}
+							disabled={isRegeneratePending}
+							className="text-primary"
+						>
+							<RefreshCw className="h-4 w-4" />
+							Regenerate Symlink / STRM
+						</button>
+					</li>
+				)}
 				<li>
 					<button
 						type="button"

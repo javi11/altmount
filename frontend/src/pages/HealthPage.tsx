@@ -251,8 +251,10 @@ export function HealthPage() {
 	const handleRegenerateLibraryFiles = async (filePaths?: string[]) => {
 		const isBulk = filePaths && filePaths.length > 0;
 		const message = isBulk
-			? `This will regenerate library files for the ${filePaths.length} selected items. Are you sure?`
-			: "This will regenerate library files for all records in the database. Are you sure you want to continue?";
+			? filePaths.length === 1
+				? "Recreates the symlink or STRM file for this item at its stored library path (e.g. as renamed by Sonarr/Radarr). If no library path is stored, it will be created at the import directory."
+				: `Recreates the symlink or STRM file for ${filePaths.length} selected items at their stored library paths (e.g. as renamed by Sonarr/Radarr). Items without a stored path will be created at the import directory.`
+			: "Recreates symlinks or STRM files for all records at their stored library paths (e.g. as renamed by Sonarr/Radarr). Records without a stored path will be created at the import directory. This does not re-download any content.";
 
 		const confirmed = await confirmAction("Regenerate Library Files", message, {
 			type: "info",
@@ -262,7 +264,7 @@ export function HealthPage() {
 
 		if (confirmed) {
 			try {
-				const result = await regenerateSymlinks.mutateAsync(filePaths);
+				const result = await regenerateSymlinks.mutateAsync({ filePaths });
 				showToast({
 					title: "Regeneration Complete",
 					message: result.message,
@@ -639,15 +641,18 @@ export function HealthPage() {
 									<Trash2 className="h-4 w-4" /> Cleanup Records
 								</button>
 							</li>
-							<li>
-								<button
-									type="button"
-									onClick={() => handleRegenerateLibraryFiles()}
-									className="gap-2"
-								>
-									<RefreshCw className="h-4 w-4" /> Regenerate Library Files
-								</button>
-							</li>
+							{config?.import?.import_strategy !== "NONE" && (
+								<li>
+									<button
+										type="button"
+										onClick={() => handleRegenerateLibraryFiles()}
+										className="gap-2"
+										title="Recreates symlinks or STRM files for all records at their stored library paths. Records without a stored path are created at the import directory."
+									>
+										<RefreshCw className="h-4 w-4" /> Regenerate Library Files
+									</button>
+								</li>
+							)}
 						</ul>
 					</div>
 
@@ -775,7 +780,11 @@ export function HealthPage() {
 											onBulkRestart={handleBulkRestart}
 											onBulkDelete={handleBulkDelete}
 											onBulkRepair={handleBulkRepair}
-											onBulkRegenerate={handleBulkRegenerate}
+											onBulkRegenerate={
+												config?.import?.import_strategy !== "NONE"
+													? handleBulkRegenerate
+													: undefined
+											}
 										/>
 
 										<div className="mt-6">
@@ -801,8 +810,10 @@ export function HealthPage() {
 												onDelete={handleDelete}
 												onUnmask={handleUnmask}
 												onSetPriority={handleSetPriority}
-												onRegenerate={(filePath: string) =>
-													handleRegenerateLibraryFiles([filePath])
+												onRegenerate={
+													config?.import?.import_strategy !== "NONE"
+														? (filePath: string) => handleRegenerateLibraryFiles([filePath])
+														: undefined
 												}
 											/>
 										</div>

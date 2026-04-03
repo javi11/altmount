@@ -196,7 +196,7 @@ export function QueuePage() {
 				},
 			);
 			if (confirmed) {
-				await regenerateSymlinks.mutateAsync([storagePath]);
+				await regenerateSymlinks.mutateAsync({ filePaths: [storagePath], useImportPath: true });
 			}
 		},
 		[confirmAction, regenerateSymlinks],
