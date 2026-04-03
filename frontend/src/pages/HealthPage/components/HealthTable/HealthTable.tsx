@@ -69,8 +69,8 @@ export function HealthTable({
 					<LoadingTable columns={9} />
 				) : data && data.length > 0 ? (
 					<>
-						{/* Mobile View (< 640px) */}
-						<div className="space-y-3 p-4 sm:hidden">
+						{/* Mobile View (< 768px) */}
+						<div className="space-y-3 p-4 md:hidden">
 							{data.map((item: FileHealth) => (
 								<HealthItemCard
 									key={item.id}
@@ -94,8 +94,8 @@ export function HealthTable({
 							))}
 						</div>
 
-						{/* Desktop View (≥640px) - Keep Existing */}
-						<div className="hidden min-h-[450px] overflow-x-auto pb-24 sm:block">
+						{/* Desktop View (≥768px) */}
+						<div className="hidden min-h-[450px] overflow-x-auto pb-24 md:block">
 							{" "}
 							<table className="table-zebra table">
 								<HealthTableHeader

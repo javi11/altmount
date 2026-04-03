@@ -222,20 +222,20 @@ export function SystemConfigSection({
 	}, []);
 
 	return (
-		<div className="space-y-10">
-			<div>
+		<div className="min-w-0 space-y-10">
+			<div className="min-w-0">
 				<h3 className="font-bold text-base-content text-lg tracking-tight">System Core</h3>
 				<p className="break-words text-base-content/50 text-sm">
 					Manage global logging, security, and identity.
 				</p>
 			</div>
 
-			<div className="space-y-8">
+			<div className="min-w-0 space-y-8">
 				{/* Updates */}
 				<UpdateSection />
 
 				{/* Appearance */}
-				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+				<div className="min-w-0 space-y-6 overflow-hidden rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="flex items-center gap-2">
 						<Palette className="h-4 w-4 text-base-content/60" />
 						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
@@ -269,7 +269,7 @@ export function SystemConfigSection({
 						<p className="mb-2 font-semibold text-base-content/40 text-xs uppercase tracking-wider">
 							Light
 						</p>
-						<div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
+						<div className="grid min-w-0 grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
 							{LIGHT_THEMES.map((theme) => (
 								<ThemeSwatch
 									key={theme}
@@ -286,7 +286,7 @@ export function SystemConfigSection({
 						<p className="mb-2 font-semibold text-base-content/40 text-xs uppercase tracking-wider">
 							Dark
 						</p>
-						<div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
+						<div className="grid min-w-0 grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
 							{DARK_THEMES.map((theme) => (
 								<ThemeSwatch
 									key={theme}
@@ -300,7 +300,7 @@ export function SystemConfigSection({
 				</div>
 
 				{/* Logging Configuration */}
-				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+				<div className="min-w-0 space-y-6 overflow-hidden rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="flex items-center gap-2">
 						<Terminal className="h-4 w-4 text-base-content/60" />
 						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
@@ -309,11 +309,11 @@ export function SystemConfigSection({
 						<div className="h-px flex-1 bg-base-300/50" />
 					</div>
 
-					<div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-						<fieldset className="fieldset">
+					<div className="grid min-w-0 grid-cols-1 gap-6 sm:grid-cols-2">
+						<fieldset className="fieldset min-w-0">
 							<legend className="fieldset-legend font-semibold text-xs">Minimum Log Level</legend>
 							<select
-								className="select select-bordered w-full bg-base-100"
+								className="select select-bordered w-full min-w-0 max-w-full bg-base-100"
 								value={formData.level}
 								disabled={isReadOnly}
 								onChange={(e) => handleInputChange("level", e.target.value)}
@@ -323,16 +323,16 @@ export function SystemConfigSection({
 								<option value="warn">Warning (Alerts)</option>
 								<option value="error">Error (Critical)</option>
 							</select>
-							<p className="label mt-2 break-words text-base-content/70 text-xs">
+							<p className="label mt-2 min-w-0 max-w-full whitespace-normal break-words text-base-content/70 text-xs">
 								Determines how much information is stored in logs.
 							</p>
 						</fieldset>
 
-						<fieldset className="fieldset">
+						<fieldset className="fieldset min-w-0">
 							<legend className="fieldset-legend font-semibold text-xs">Max Log Size (MB)</legend>
 							<input
 								type="number"
-								className="input input-bordered w-full bg-base-100 font-mono text-sm"
+								className="input input-bordered w-full min-w-0 max-w-full bg-base-100 font-mono text-sm"
 								value={formData.max_size}
 								disabled={isReadOnly}
 								onChange={(e) =>
@@ -342,12 +342,12 @@ export function SystemConfigSection({
 						</fieldset>
 					</div>
 
-					<div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
-						<fieldset className="fieldset">
+					<div className="grid min-w-0 grid-cols-1 gap-6 sm:grid-cols-3">
+						<fieldset className="fieldset min-w-0">
 							<legend className="fieldset-legend font-semibold text-xs">Max Age (Days)</legend>
 							<input
 								type="number"
-								className="input input-bordered w-full bg-base-100 font-mono text-sm"
+								className="input input-bordered w-full min-w-0 max-w-full bg-base-100 font-mono text-sm"
 								value={formData.max_age}
 								disabled={isReadOnly}
 								onChange={(e) =>
@@ -355,11 +355,11 @@ export function SystemConfigSection({
 								}
 							/>
 						</fieldset>
-						<fieldset className="fieldset">
+						<fieldset className="fieldset min-w-0">
 							<legend className="fieldset-legend font-semibold text-xs">Max Backups</legend>
 							<input
 								type="number"
-								className="input input-bordered w-full bg-base-100 font-mono text-sm"
+								className="input input-bordered w-full min-w-0 max-w-full bg-base-100 font-mono text-sm"
 								value={formData.max_backups}
 								disabled={isReadOnly}
 								onChange={(e) =>
@@ -367,7 +367,7 @@ export function SystemConfigSection({
 								}
 							/>
 						</fieldset>
-						<fieldset className="fieldset">
+						<fieldset className="fieldset min-w-0">
 							<legend className="fieldset-legend font-semibold text-xs">Compress Logs</legend>
 							<div className="flex h-12 items-center">
 								<input
@@ -383,7 +383,7 @@ export function SystemConfigSection({
 				</div>
 
 				{/* Performance Profiler */}
-				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+				<div className="min-w-0 space-y-6 overflow-hidden rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="flex items-center gap-2">
 						<Terminal className="h-4 w-4 text-base-content/60" />
 						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
@@ -392,7 +392,7 @@ export function SystemConfigSection({
 						<div className="h-px flex-1 bg-base-300/50" />
 					</div>
 
-					<div className="flex items-start justify-between gap-4">
+					<div className="flex min-w-0 items-start justify-between gap-4">
 						<div className="min-w-0 flex-1">
 							<h5 className="font-bold text-sm">System Profiler (pprof)</h5>
 							<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
@@ -411,7 +411,7 @@ export function SystemConfigSection({
 				</div>
 
 				{/* Security Section */}
-				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+				<div className="min-w-0 space-y-6 overflow-hidden rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="flex items-center gap-2">
 						<ShieldCheck className="h-4 w-4 text-base-content/60" />
 						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
@@ -429,10 +429,10 @@ export function SystemConfigSection({
 						</div>
 
 						<div className="flex flex-col gap-4">
-							<div className="join w-full max-w-lg shadow-sm">
+							<div className="join w-full min-w-0 max-w-lg shadow-sm">
 								<input
 									type="text"
-									className="input input-bordered join-item flex-1 overflow-hidden bg-base-100 font-mono text-xs"
+									className="input input-bordered join-item min-w-0 flex-1 overflow-hidden bg-base-100 font-mono text-xs"
 									value={config.api_key || "Not Generated"}
 									readOnly
 								/>

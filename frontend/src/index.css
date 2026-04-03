@@ -38,6 +38,12 @@
 
 @plugin "@tailwindcss/typography";
 
+/* Fix for native <fieldset> min-inline-size: min-content default which causes
+   fieldset to be as wide as its <legend> text, overflowing containers on mobile */
+fieldset {
+	min-width: 0;
+}
+
 /* Fix for DaisyUI menu active state on buttons */
 .menu li > button.active {
 	@apply bg-primary text-primary-content;

@@ -52,7 +52,7 @@ export const QueueItemCard = memo(function QueueItemCard({
 		<div className="card border-2 border-base-300/50 bg-base-100 shadow-md">
 			<div className="card-body space-y-3 p-4">
 				{/* Header Row: Checkbox + Filename + Actions */}
-				<div className="flex items-start gap-3">
+				<div className="flex min-w-0 items-start gap-3">
 					<label className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center">
 						<input
 							type="checkbox"
@@ -62,10 +62,10 @@ export const QueueItemCard = memo(function QueueItemCard({
 						/>
 					</label>
 
-					<div className="min-w-0 flex-1">
-						<div className="flex items-center gap-2">
+					<div className="min-w-0 flex-1 overflow-hidden">
+						<div className="flex min-w-0 items-center gap-2">
 							<FileCode className="mt-0.5 h-4 w-4 shrink-0 text-base-content/60" />
-							<div className="break-words font-bold text-sm leading-tight">
+							<div className="min-w-0 flex-1 font-bold text-sm leading-tight">
 								<PathDisplay path={item.nzb_path} maxLength={80} showFileName />
 							</div>
 						</div>

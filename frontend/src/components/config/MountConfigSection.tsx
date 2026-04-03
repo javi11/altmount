@@ -422,18 +422,18 @@ export function MountConfigSection({ config, onUpdate, isUpdating }: MountConfig
 						<div className="h-px flex-1 bg-base-300/50" />
 					</div>
 
-					<div className="rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
-						<fieldset className="fieldset">
+					<div className="min-w-0 overflow-hidden rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+						<fieldset className="fieldset min-w-0">
 							<legend className="fieldset-legend font-semibold">Local Mount Path</legend>
-							<div className="flex flex-col gap-3">
+							<div className="flex min-w-0 flex-col gap-3">
 								<input
 									type="text"
-									className="input input-bordered w-full bg-base-100 font-mono text-sm"
+									className="input input-bordered w-full min-w-0 max-w-full bg-base-100 font-mono text-sm"
 									value={mountPath}
 									onChange={(e) => handleMountPathChange(e.target.value)}
 									placeholder="/mnt/remotes/altmount"
 								/>
-								<p className="label break-words text-base-content/50 text-xs">
+								<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/50 text-xs">
 									Path where the virtual filesystem will be attached to your system.
 									{mountType === "rclone_external" && " (Required for symlink resolution)"}
 								</p>
@@ -690,7 +690,7 @@ function RCloneMountSubSection({ config, onFormDataChange }: RCloneSubSectionPro
 							onChange={(e) => handleMountInputChange("timeout", e.target.value)}
 							placeholder="10m"
 						/>
-						<p className="label break-words text-base-content/70 text-xs">
+						<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/70 text-xs">
 							I/O timeout (e.g., 10m, 30s)
 						</p>
 					</fieldset>
