@@ -1361,12 +1361,12 @@ func DefaultConfig(configDir ...string) *Config {
 			DownloadClientBaseURL: "",
 			Categories: []SABnzbdCategory{
 				{
-					Name:     "movies",
+					Name:     "Movies",
 					Order:    1,
 					Priority: 0,
 				},
 				{
-					Name:     "tv",
+					Name:     "TV",
 					Order:    1,
 					Priority: 1,
 				},
