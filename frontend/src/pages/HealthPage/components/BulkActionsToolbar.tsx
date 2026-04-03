@@ -42,15 +42,17 @@ export function BulkActionsToolbar({
 						</button>
 					</div>
 					<div className="flex items-center gap-2">
-						<button
-							type="button"
-							className="btn btn-primary btn-sm"
-							onClick={onBulkRegenerate}
-							disabled={isRegeneratePending}
-						>
-							<RefreshCw className="h-4 w-4" />
-							Regenerate Selected
-						</button>
+						{onBulkRegenerate && (
+							<button
+								type="button"
+								className="btn btn-primary btn-sm"
+								onClick={onBulkRegenerate}
+								disabled={isRegeneratePending}
+							>
+								<RefreshCw className="h-4 w-4" />
+								Regenerate Selected
+							</button>
+						)}
 						<button
 							type="button"
 							className="btn btn-warning btn-sm"
