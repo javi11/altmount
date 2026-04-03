@@ -879,7 +879,7 @@ func (s *Server) handleAddHealthCheck(c *fiber.Ctx) error {
 	}
 
 	// Add file to health database
-	err := s.healthRepo.AddFileToHealthCheck(c.Context(), req.FilePath, maxRetries, cfg.GetMaxRepairRetries(), req.SourceNzb, req.Priority)
+	err := s.healthRepo.AddFileToHealthCheck(c.Context(), req.FilePath, req.LibraryPath, maxRetries, cfg.GetMaxRepairRetries(), req.SourceNzb, req.Priority)
 	if err != nil {
 		return RespondInternalError(c, "Failed to add file for health check", err.Error())
 	}

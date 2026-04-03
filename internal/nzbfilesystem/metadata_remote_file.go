@@ -24,6 +24,7 @@ import (
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/usenet"
 	"github.com/javi11/altmount/internal/utils"
+	"github.com/javi11/altmount/pkg/rclonecli"
 	"github.com/spf13/afero"
 )
 
@@ -32,13 +33,14 @@ type MetadataRemoteFile struct {
 	metadataService  *metadata.MetadataService
 	healthRepository *database.HealthRepository
 	arrsService      ARRsRepairService
-	poolManager      pool.Manager        // Pool manager for dynamic pool access
-	configGetter     config.ConfigGetter // Dynamic config access
-	rcloneCipher     *rclone.RcloneCrypt // For rclone encryption/decryption
-	aesCipher        *aes.AesCipher      // For AES encryption/decryption
-	streamTracker    StreamTracker       // Stream tracker for monitoring active streams
-	segmentStore     usenet.SegmentStore // Optional segment cache (nil = disabled)
-	renameMu         sync.Mutex          // Mutex to protect rename operations from race conditions
+	rcloneClient     rclonecli.RcloneRcClient // RClone RC client for VFS notifications
+	poolManager      pool.Manager             // Pool manager for dynamic pool access
+	configGetter     config.ConfigGetter      // Dynamic config access
+	rcloneCipher     *rclone.RcloneCrypt      // For rclone encryption/decryption
+	aesCipher        *aes.AesCipher           // For AES encryption/decryption
+	streamTracker    StreamTracker            // Stream tracker for monitoring active streams
+	segmentStore     usenet.SegmentStore      // Optional segment cache (nil = disabled)
+	renameMu         sync.Mutex               // Mutex to protect rename operations from race conditions
 }
 
 // Configuration is now accessed dynamically through config.ConfigGetter
@@ -49,6 +51,7 @@ func NewMetadataRemoteFile(
 	metadataService *metadata.MetadataService,
 	healthRepository *database.HealthRepository,
 	arrsService ARRsRepairService,
+	rcloneClient rclonecli.RcloneRcClient,
 	poolManager pool.Manager,
 	configGetter config.ConfigGetter,
 	streamTracker StreamTracker,
@@ -70,6 +73,7 @@ func NewMetadataRemoteFile(
 		metadataService:  metadataService,
 		healthRepository: healthRepository,
 		arrsService:      arrsService,
+		rcloneClient:     rcloneClient,
 		poolManager:      poolManager,
 		configGetter:     configGetter,
 		rcloneCipher:     rcloneCipher,
@@ -230,6 +234,7 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 		metadataService:  mrf.metadataService,
 		healthRepository: mrf.healthRepository,
 		arrsService:      mrf.arrsService,
+		rcloneClient:     mrf.rcloneClient,
 		configGetter:     mrf.configGetter,
 		poolManager:      mrf.poolManager,
 		ctx:              ctx,
@@ -752,6 +757,7 @@ type MetadataVirtualFile struct {
 	metadataService  *metadata.MetadataService
 	healthRepository *database.HealthRepository
 	arrsService      ARRsRepairService
+	rcloneClient     rclonecli.RcloneRcClient // RClone RC client for VFS notifications
 	configGetter     config.ConfigGetter
 	poolManager      pool.Manager // Pool manager for dynamic pool access
 	ctx              context.Context
@@ -1619,12 +1625,43 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 	errorDetails := fmt.Sprintf(`{"missing_articles": %d, "total_articles": %d, "error_type": "ArticleNotFound"}`,
 		1, len(mvf.fileMeta.SegmentData))
 
-	// Mark as corrupted with high priority to trigger the health worker immediately
-	// The health worker will then handle the repair logic in its own cycle.
-	slog.InfoContext(ctx, "Streaming failure detected, scheduling high-priority health repair", "file", mvf.name)
-	dbStatus := database.HealthStatusCorrupted
+	// Mark as repair_triggered with high priority to trigger the replacement immediately.
+	// We skip the re-verification phase because a streaming failure is a definitive indicator of corruption.
+	slog.InfoContext(ctx, "Streaming failure detected, triggering immediate ARR repair", "file", mvf.name)
+	dbStatus := database.HealthStatusRepairTriggered
 
-	// Update database with high priority
+	// If the file has already been imported (has a library path), move metadata to the safety folder
+	// so that the ARR rescan definitively sees the file as missing and triggers a redownload.
+	if health, err := mvf.healthRepository.GetFileHealth(ctx, mvf.name); err == nil && health != nil {
+		if health.LibraryPath != nil && *health.LibraryPath != "" {
+			cfg := mvf.configGetter()
+			relativePath := strings.TrimPrefix(mvf.name, cfg.MountPath)
+			relativePath = strings.TrimPrefix(relativePath, "/")
+			slog.InfoContext(ctx, "Moving metadata file for corrupted item to safety folder to trigger replacement", "file_path", mvf.name)
+			if moveErr := mvf.metadataService.MoveToCorrupted(ctx, relativePath); moveErr == nil {
+				// Successfully moved metadata, notify rclone VFS refresh
+				if mvf.rcloneClient != nil {
+					go func() {
+						virtualDir := filepath.Dir(mvf.name)
+						vfsName := cfg.RClone.VFSName
+						if vfsName == "" {
+							vfsName = config.MountProvider
+						}
+						// Increased timeout to 60 seconds as vfs/refresh can be slow
+						vfsCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+						defer cancel()
+						if refreshErr := mvf.rcloneClient.RefreshDir(vfsCtx, vfsName, []string{virtualDir}); refreshErr != nil {
+							slog.ErrorContext(vfsCtx, "Failed to notify rclone VFS about file status change after streaming failure", "file", mvf.name, "err", refreshErr)
+						}
+					}()
+				}
+			} else {
+				slog.WarnContext(ctx, "Failed to move corrupted metadata file, proceeding with repair trigger status", "error", moveErr)
+			}
+		}
+	}
+
+	// Update database with high priority (scheduled for immediate pick-up by HealthWorker)
 	if err := mvf.healthRepository.UpdateFileHealthScheduled(ctx,
 		mvf.name,
 		dbStatus,

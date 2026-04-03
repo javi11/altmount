@@ -252,3 +252,68 @@ func TestUpdateFileHealthScheduled_UpdatesExistingRecord(t *testing.T) {
 	assert.LessOrEqual(t, diff, time.Second,
 		"scheduled_check_at should be updated to %v, got %v", future, got)
 }
+
+// TestRelinkFileByFilename_UpdatesAnyStatus verifies that relinking works for any status,
+// especially including healthy files, to ensure they have a library path for future repairs.
+func TestRelinkFileByFilename_UpdatesAnyStatus(t *testing.T) {
+	repo := setupTestDB(t)
+	ctx := context.Background()
+
+	fileName := "Inception (2010).mkv"
+	oldPath := "complete/Inception (2010).mkv"
+	newPath := "Movies/Inception (2010)/Inception (2010).mkv"
+	libPath := "/mnt/library/Movies/Inception (2010)/Inception (2010).mkv"
+
+	// 1. Insert a HEALTHY record with no library path (typical for a new download before sync)
+	err := repo.UpdateFileHealth(ctx, oldPath, HealthStatusHealthy, nil, nil, nil, false)
+	require.NoError(t, err)
+
+	// 2. Perform Relink
+	relinked, err := repo.RelinkFileByFilename(ctx, fileName, newPath, libPath)
+	require.NoError(t, err)
+	assert.True(t, relinked, "Should have relinked the healthy record")
+
+	// 3. Verify the record was updated
+	h, err := repo.GetFileHealth(ctx, newPath)
+	require.NoError(t, err)
+	require.NotNil(t, h)
+	assert.Equal(t, libPath, *h.LibraryPath)
+	assert.Equal(t, HealthStatusPending, h.Status, "Status should be reset to pending for re-verification")
+
+	// Verify old path is gone (since it was updated)
+	oldH, err := repo.GetFileHealth(ctx, oldPath)
+	require.NoError(t, err)
+	assert.Nil(t, oldH)
+
+	// 4. Verify it ALSO works for corrupted records (classic repair flow)
+	corruptedFile := "Movies/Matrix.mkv"
+	err = repo.UpdateFileHealth(ctx, corruptedFile, HealthStatusCorrupted, nil, nil, nil, false)
+	require.NoError(t, err)
+
+	relinked, err = repo.RelinkFileByFilename(ctx, "Matrix.mkv", corruptedFile, "/lib/Matrix.mkv")
+	require.NoError(t, err)
+	assert.True(t, relinked)
+}
+
+// TestAddFileToHealthCheckWithMetadata_StoresLibraryPath verifies that new files
+// added to the health check correctly store their library path.
+func TestAddFileToHealthCheckWithMetadata_StoresLibraryPath(t *testing.T) {
+	repo := setupTestDB(t)
+	ctx := context.Background()
+
+	filePath := "Movies/Dune (2021)/Dune (2021).mkv"
+	libraryPath := "/mnt/library/Movies/Dune (2021)/Dune (2021).mkv"
+	sourceNzb := "Dune.nzb"
+
+	// Add the file
+	err := repo.AddFileToHealthCheckWithMetadata(ctx, filePath, &libraryPath, 3, 3, &sourceNzb, HealthPriorityNormal, nil)
+	require.NoError(t, err)
+
+	// Verify it was stored
+	h, err := repo.GetFileHealth(ctx, filePath)
+	require.NoError(t, err)
+	require.NotNil(t, h)
+	require.NotNil(t, h.LibraryPath)
+	assert.Equal(t, libraryPath, *h.LibraryPath)
+	assert.Equal(t, filePath, h.FilePath)
+}

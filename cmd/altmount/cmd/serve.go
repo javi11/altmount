@@ -131,7 +131,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		defer segcacheMgr.Stop()
 	}
 
-	fs := initializeFilesystem(ctx, metadataService, repos.HealthRepo, arrsService, poolManager, configManager.GetConfigGetter(), streamTracker, segcacheMgr)
+	fs := initializeFilesystem(ctx, metadataService, repos.HealthRepo, arrsService, rcloneRCClient, poolManager, configManager.GetConfigGetter(), streamTracker, segcacheMgr)
 
 	// 6. Setup web services
 	app, debugMode := createFiberApp(ctx, cfg)
