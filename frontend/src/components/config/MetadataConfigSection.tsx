@@ -1,7 +1,15 @@
+import cronstrue from "cronstrue";
 import { Download, HardDrive, History, Save, ShieldAlert, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useBatchExportNZB } from "../../hooks/useConfig";
 import type { ConfigResponse, MetadataBackupConfig, MetadataConfig } from "../../types/config";
+import {
+	buildCronString,
+	DAY_NAMES,
+	parseCronString,
+	type ScheduleState,
+	type ScheduleType,
+} from "../../utils/cronSchedule";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
 
 interface MetadataConfigSectionProps {
@@ -19,12 +27,15 @@ export function MetadataConfigSection({
 }: MetadataConfigSectionProps) {
 	const [formData, setFormData] = useState<MetadataConfig>(config.metadata);
 	const [hasChanges, setHasChanges] = useState(false);
+	const [scheduleState, setScheduleState] = useState<ScheduleState>(() =>
+		parseCronString(config.metadata.backup?.schedule ?? "0 3 * * *"),
+	);
 	const batchExport = useBatchExportNZB();
 
-	// Sync form data when config changes from external sources (reload)
 	useEffect(() => {
 		setFormData(config.metadata);
 		setHasChanges(false);
+		setScheduleState(parseCronString(config.metadata.backup?.schedule ?? "0 3 * * *"));
 	}, [config.metadata]);
 
 	const handleInputChange = (field: keyof MetadataConfig, value: string) => {
@@ -52,6 +63,12 @@ export function MetadataConfigSection({
 		};
 		setFormData(newData);
 		setHasChanges(JSON.stringify(newData) !== JSON.stringify(config.metadata));
+	};
+
+	const handleScheduleChange = (next: Partial<ScheduleState>) => {
+		const updated = { ...scheduleState, ...next };
+		setScheduleState(updated);
+		handleBackupChange("schedule", buildCronString(updated));
 	};
 
 	const handleSave = async () => {
@@ -117,7 +134,8 @@ export function MetadataConfigSection({
 							<div className="min-w-0 flex-1">
 								<h5 className="font-bold text-sm">Automatic Backups</h5>
 								<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
-									Mirrors all metadata files to an external directory for disaster recovery.
+									Periodically copies all metadata files to a separate directory. Useful for
+									recovery if your primary metadata storage is lost or corrupted.
 								</p>
 							</div>
 							<input
@@ -141,55 +159,123 @@ export function MetadataConfigSection({
 										onChange={(e) => handleBackupChange("path", e.target.value)}
 										placeholder="/path/to/backups"
 									/>
+									<div className="mt-1 text-[10px] text-base-content/40">
+										Store on a different disk or volume than the metadata path for meaningful
+										protection.
+									</div>
 								</fieldset>
 
-								<div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
+								{/* Schedule Picker */}
+								<div className="space-y-4">
+									<div className="font-semibold text-sm">Backup Schedule (UTC)</div>
+
 									<fieldset className="fieldset">
-										<legend className="fieldset-legend font-semibold">Interval (Hours)</legend>
-										<input
-											type="number"
-											className="input input-bordered w-full bg-base-100 font-mono text-sm"
-											value={formData.backup?.interval_hours ?? 24}
+										<legend className="fieldset-legend font-semibold">Frequency</legend>
+										<select
+											className="select select-bordered w-full bg-base-100 text-sm"
+											value={scheduleState.type}
 											disabled={isReadOnly}
 											onChange={(e) =>
-												handleBackupChange(
-													"interval_hours",
-													Number.parseInt(e.target.value, 10) || 24,
-												)
+												handleScheduleChange({ type: e.target.value as ScheduleType })
 											}
-											min="1"
-										/>
-										<div className="mt-1 text-[10px] text-base-content/40">Fallback interval</div>
+										>
+											<option value="hourly">Every hour</option>
+											<option value="daily">Daily</option>
+											<option value="weekly">Weekly</option>
+											<option value="custom">Custom (cron expression)</option>
+										</select>
 									</fieldset>
-									<fieldset className="fieldset">
-										<legend className="fieldset-legend font-semibold">Daily Schedule (UTC)</legend>
-										<input
-											type="text"
-											className="input input-bordered w-full bg-base-100 font-mono text-sm"
-											value={formData.backup?.backup_time ?? ""}
-											disabled={isReadOnly}
-											onChange={(e) => handleBackupChange("backup_time", e.target.value)}
-											placeholder="03:00"
-										/>
-										<div className="mt-1 text-[10px] text-base-content/40">HH:MM format</div>
-									</fieldset>
-									<fieldset className="fieldset">
-										<legend className="fieldset-legend font-semibold">Retention (Count)</legend>
-										<input
-											type="number"
-											className="input input-bordered w-full bg-base-100 font-mono text-sm"
-											value={formData.backup?.keep_backups ?? 10}
-											disabled={isReadOnly}
-											onChange={(e) =>
-												handleBackupChange(
-													"keep_backups",
-													Number.parseInt(e.target.value, 10) || 10,
-												)
-											}
-											min="1"
-										/>
-									</fieldset>
+
+									{scheduleState.type === "daily" && (
+										<fieldset className="fieldset">
+											<legend className="fieldset-legend font-semibold">Time (UTC)</legend>
+											<input
+												type="time"
+												className="input input-bordered w-full bg-base-100 font-mono text-sm"
+												value={scheduleState.time}
+												disabled={isReadOnly}
+												onChange={(e) => handleScheduleChange({ time: e.target.value })}
+											/>
+										</fieldset>
+									)}
+
+									{scheduleState.type === "weekly" && (
+										<div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+											<fieldset className="fieldset">
+												<legend className="fieldset-legend font-semibold">Day</legend>
+												<select
+													className="select select-bordered w-full bg-base-100 text-sm"
+													value={scheduleState.dayOfWeek}
+													disabled={isReadOnly}
+													onChange={(e) => handleScheduleChange({ dayOfWeek: e.target.value })}
+												>
+													{DAY_NAMES.map((name, i) => (
+														<option key={name} value={String(i)}>
+															{name}
+														</option>
+													))}
+												</select>
+											</fieldset>
+											<fieldset className="fieldset">
+												<legend className="fieldset-legend font-semibold">Time (UTC)</legend>
+												<input
+													type="time"
+													className="input input-bordered w-full bg-base-100 font-mono text-sm"
+													value={scheduleState.time}
+													disabled={isReadOnly}
+													onChange={(e) => handleScheduleChange({ time: e.target.value })}
+												/>
+											</fieldset>
+										</div>
+									)}
+
+									{scheduleState.type === "custom" && (
+										<fieldset className="fieldset">
+											<legend className="fieldset-legend font-semibold">Cron Expression</legend>
+											<input
+												type="text"
+												className="input input-bordered w-full bg-base-100 font-mono text-sm"
+												value={scheduleState.customExpr}
+												disabled={isReadOnly}
+												onChange={(e) => handleScheduleChange({ customExpr: e.target.value })}
+												placeholder="0 3 * * *"
+											/>
+											<div className="mt-1 text-[10px] text-base-content/40">
+												Standard 5-field cron (UTC). E.g. <code>0 3 * * 1</code> = every Monday at 3
+												AM.
+											</div>
+										</fieldset>
+									)}
 								</div>
+
+								{(() => {
+									try {
+										const desc = cronstrue.toString(buildCronString(scheduleState), {
+											use24HourTimeFormat: true,
+											throwExceptionOnParseError: true,
+										});
+										return <p className="text-[10px] text-base-content/40">Runs: {desc} (UTC)</p>;
+									} catch {
+										return <p className="text-[10px] text-error">Invalid cron expression</p>;
+									}
+								})()}
+
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend font-semibold">Keep Last N Backups</legend>
+									<input
+										type="number"
+										className="input input-bordered w-full bg-base-100 font-mono text-sm"
+										value={formData.backup?.keep_backups ?? 10}
+										disabled={isReadOnly}
+										onChange={(e) =>
+											handleBackupChange("keep_backups", Number.parseInt(e.target.value, 10) || 10)
+										}
+										min="1"
+									/>
+									<div className="mt-1 text-[10px] text-base-content/40">
+										Older snapshots are deleted automatically once this limit is reached.
+									</div>
+								</fieldset>
 							</div>
 						)}
 					</div>

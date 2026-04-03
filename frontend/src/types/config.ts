@@ -62,8 +62,7 @@ export interface MetadataConfig {
 
 export interface MetadataBackupConfig {
 	enabled?: boolean;
-	interval_hours: number;
-	backup_time: string;
+	schedule: string; // cron expression (UTC)
 	keep_backups: number;
 	path: string;
 }
