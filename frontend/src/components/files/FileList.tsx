@@ -23,9 +23,9 @@ interface FileListProps {
 }
 
 // Virtual scrolling constants - Responsive heights for better mobile UX
-const ITEM_HEIGHT_MOBILE = 240; // Taller for mobile touch targets
-const ITEM_HEIGHT_TABLET = 200;
-const ITEM_HEIGHT_DESKTOP = 180; // More compact on desktop
+const ITEM_HEIGHT_MOBILE = 280; // Taller for mobile touch targets
+const ITEM_HEIGHT_TABLET = 240;
+const ITEM_HEIGHT_DESKTOP = 220; // More compact on desktop
 
 const ITEMS_PER_ROW = {
 	sm: 1,
@@ -299,12 +299,12 @@ function FileCard({
 	onRegenerateSymlink,
 	isExportingNZB,
 	isRegenerateSymlinkPending,
-	itemHeight = 200,
+	itemHeight,
 }: FileCardProps) {
 	return (
 		<div
 			className="card cursor-pointer bg-base-100 shadow-md transition-shadow hover:shadow-lg"
-			style={{ height: itemHeight - 16 }} // Account for gap
+			style={itemHeight !== undefined ? { height: itemHeight - 16 } : undefined} // Account for gap
 		>
 			<div className="card-body p-4">
 				<div className="mb-2 flex items-start justify-between">
@@ -317,23 +317,22 @@ function FileCard({
 						{getFileIcon(file)}
 						<div className="min-w-0 flex-1 text-left">
 							<h3
-								className={`truncate font-medium ${
+								className={`break-all font-medium ${
 									file.type === "directory"
 										? "text-primary hover:text-primary-focus"
 										: "text-base-content"
 								}`}
-								title={file.basename}
 							>
 								{file.basename}
 							</h3>
 							{file.type === "file" && (
 								<div className="mt-1 flex flex-col text-base-content/50 text-xs">
-									<span className="truncate" title={`Virtual Path: ${file.filename}`}>
+									<span className="break-all" title={`Virtual Path: ${file.filename}`}>
 										{file.filename}
 									</span>
 									{file.library_path && (
 										<span
-											className="mt-0.5 truncate text-base-content/70"
+											className="mt-0.5 break-all text-base-content/70"
 											title={`Library Path: ${file.library_path}`}
 										>
 											↳ {file.library_path}

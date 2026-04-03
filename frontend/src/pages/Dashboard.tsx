@@ -94,7 +94,7 @@ export function Dashboard() {
 	if (hasError) {
 		return (
 			<div className="space-y-4">
-				<h1 className="font-bold text-3xl">Dashboard</h1>
+				<h1 className="font-bold text-xl sm:text-2xl md:text-3xl">Dashboard</h1>
 				<ErrorAlert error={hasError as Error} onRetry={() => window.location.reload()} />
 			</div>
 		);
@@ -103,7 +103,7 @@ export function Dashboard() {
 	return (
 		<div className="space-y-6">
 			<div className="flex items-center justify-between">
-				<h1 className="font-bold text-3xl">Dashboard</h1>
+				<h1 className="font-bold text-xl sm:text-2xl md:text-3xl">Dashboard</h1>
 				<div className="dropdown dropdown-end">
 					<button type="button" className="btn btn-outline btn-sm gap-2">
 						{resetStats.isPending ? (

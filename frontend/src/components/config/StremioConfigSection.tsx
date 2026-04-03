@@ -36,7 +36,7 @@ function TagInput({
 	}, [inputValue, addTag]);
 
 	return (
-		<div className="flex min-h-10 flex-wrap gap-2 rounded-box border border-base-300 bg-base-100 p-2">
+		<div className="flex min-h-10 min-w-0 flex-wrap gap-2 rounded-box border border-base-300 bg-base-100 p-2">
 			{tags.map((tag) => (
 				<span key={String(tag)} className="badge badge-neutral gap-1">
 					{String(tag)}
@@ -167,8 +167,8 @@ export function StremioConfigSection({
 	};
 
 	return (
-		<div className="space-y-10">
-			<div>
+		<div className="min-w-0 space-y-10">
+			<div className="min-w-0">
 				<h3 className="font-bold text-base-content text-lg tracking-tight">Stremio Integration</h3>
 				<p className="break-words text-base-content/50 text-sm">
 					Enable the Stremio addon to automatically search Prowlarr for NZBs by IMDB ID and stream
@@ -176,9 +176,9 @@ export function StremioConfigSection({
 				</p>
 			</div>
 
-			<div className="space-y-8">
+			<div className="min-w-0 space-y-8">
 				{/* Enable / Disable */}
-				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+				<div className="min-w-0 space-y-6 overflow-hidden rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="flex items-center gap-2">
 						<Tv className="h-4 w-4 text-base-content/60" />
 						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
@@ -207,17 +207,17 @@ export function StremioConfigSection({
 						/>
 					</div>
 
-					<fieldset className="fieldset">
+					<fieldset className="fieldset min-w-0">
 						<legend className="fieldset-legend">Public Base URL</legend>
 						<input
 							type="url"
-							className="input w-full"
+							className="input w-full min-w-0 max-w-full"
 							placeholder="https://altmount.example.com"
 							value={formData.base_url ?? ""}
 							disabled={isReadOnly}
 							onChange={(e) => update({ base_url: e.target.value })}
 						/>
-						<p className="label">
+						<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/50 text-xs">
 							Public base URL used when building stream links. Leave empty to auto-detect from the
 							request.
 						</p>
@@ -226,7 +226,7 @@ export function StremioConfigSection({
 
 				{/* Addon URL */}
 				{addonURL && (
-					<div className="space-y-4 rounded-2xl border-2 border-primary/30 bg-primary/5 p-6">
+					<div className="min-w-0 space-y-4 overflow-hidden rounded-2xl border-2 border-primary/30 bg-primary/5 p-6">
 						<div className="flex items-center gap-2">
 							<Tv className="h-4 w-4 text-primary" />
 							<h4 className="font-bold text-primary text-xs uppercase tracking-widest">
@@ -234,11 +234,11 @@ export function StremioConfigSection({
 							</h4>
 							<div className="h-px flex-1 bg-primary/20" />
 						</div>
-						<p className="break-words text-base-content/60 text-xs">
+						<p className="min-w-0 break-words text-base-content/60 text-xs">
 							Install this URL in Stremio to enable automatic Usenet streaming via Prowlarr.
 						</p>
-						<div className="flex items-center gap-2">
-							<code className="min-w-0 flex-1 truncate rounded-lg bg-base-300 px-3 py-2 font-mono text-[11px]">
+						<div className="flex min-w-0 flex-wrap items-center gap-2">
+							<code className="min-w-0 flex-1 basis-0 truncate rounded-lg bg-base-300 px-3 py-2 font-mono text-[11px]">
 								{addonURL}
 							</code>
 							<button
@@ -267,7 +267,7 @@ export function StremioConfigSection({
 				)}
 
 				{/* Cache TTL */}
-				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+				<div className="min-w-0 space-y-6 overflow-hidden rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="flex items-center gap-2">
 						<Info className="h-4 w-4 text-base-content/60" />
 						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
@@ -276,17 +276,17 @@ export function StremioConfigSection({
 						<div className="h-px flex-1 bg-base-300/50" />
 					</div>
 
-					<fieldset className="fieldset">
+					<fieldset className="fieldset min-w-0">
 						<legend className="fieldset-legend">NZB File Cache TTL (hours)</legend>
 						<input
 							type="number"
-							className="input w-32"
+							className="input w-32 max-w-full"
 							min={0}
 							value={formData.nzb_ttl_hours}
 							disabled={isReadOnly}
 							onChange={(e) => update({ nzb_ttl_hours: Math.max(0, Number(e.target.value)) })}
 						/>
-						<p className="label">
+						<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/50 text-xs">
 							How long AltMount keeps the cached NZB/meta file on disk. Set to <strong>0</strong> to
 							never delete.
 						</p>
@@ -294,7 +294,7 @@ export function StremioConfigSection({
 				</div>
 
 				{/* Prowlarr */}
-				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+				<div className="min-w-0 space-y-6 overflow-hidden rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="flex items-center gap-2">
 						<Tv className="h-4 w-4 text-base-content/60" />
 						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
@@ -320,11 +320,11 @@ export function StremioConfigSection({
 						/>
 					</div>
 
-					<fieldset className="fieldset">
+					<fieldset className="fieldset min-w-0">
 						<legend className="fieldset-legend">Prowlarr Host</legend>
 						<input
 							type="url"
-							className="input w-full"
+							className="input w-full min-w-0 max-w-full"
 							placeholder="http://localhost:9696"
 							value={formData.prowlarr?.host ?? ""}
 							disabled={isReadOnly}
@@ -332,11 +332,11 @@ export function StremioConfigSection({
 						/>
 					</fieldset>
 
-					<fieldset className="fieldset">
+					<fieldset className="fieldset min-w-0">
 						<legend className="fieldset-legend">API Key</legend>
 						<input
 							type="password"
-							className="input w-full"
+							className="input w-full min-w-0 max-w-full"
 							placeholder="Prowlarr API key"
 							value={formData.prowlarr?.api_key ?? ""}
 							disabled={isReadOnly}
@@ -344,7 +344,7 @@ export function StremioConfigSection({
 						/>
 					</fieldset>
 
-					<fieldset className="fieldset">
+					<fieldset className="fieldset min-w-0">
 						<legend className="fieldset-legend">Categories</legend>
 						<TagInput
 							tags={(formData.prowlarr?.categories ?? []).map(String)}
@@ -358,13 +358,13 @@ export function StremioConfigSection({
 								return Number.isNaN(n) ? null : String(n);
 							}}
 						/>
-						<p className="label">
+						<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/50 text-xs">
 							Newznab category IDs. Press Enter or comma to add. Defaults: 2000 (Movies), 2040
 							(Movies/HD), 2060 (Movies/4K), 5000 (TV), 5040 (TV/HD).
 						</p>
 					</fieldset>
 
-					<fieldset className="fieldset">
+					<fieldset className="fieldset min-w-0">
 						<legend className="fieldset-legend">Language Filter</legend>
 						<TagInput
 							tags={formData.prowlarr?.languages ?? []}
@@ -372,13 +372,13 @@ export function StremioConfigSection({
 							disabled={isReadOnly}
 							placeholder="Add keyword..."
 						/>
-						<p className="label">
+						<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/50 text-xs">
 							Only show releases whose title contains at least one of these keywords. Leave empty to
 							show all languages.
 						</p>
 					</fieldset>
 
-					<fieldset className="fieldset">
+					<fieldset className="fieldset min-w-0">
 						<legend className="fieldset-legend">Quality Filter</legend>
 						<TagInput
 							tags={formData.prowlarr?.qualities ?? []}
@@ -386,7 +386,7 @@ export function StremioConfigSection({
 							disabled={isReadOnly}
 							placeholder="Add keyword..."
 						/>
-						<p className="label">
+						<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/50 text-xs">
 							Only show releases whose title contains at least one of these keywords. Leave empty to
 							show all quality tiers.
 						</p>

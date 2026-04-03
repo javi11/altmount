@@ -197,7 +197,7 @@ export function LogsPage() {
 			</div>
 
 			{/* Controls */}
-			<div className="flex flex-wrap items-center gap-3">
+			<div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
 				{/* Level filter tabs */}
 				<div className="tabs tabs-boxed" role="tablist" aria-label="Log level filter">
 					{levels.map(({ label, value }) => (
@@ -218,7 +218,7 @@ export function LogsPage() {
 				<fieldset className="fieldset py-0">
 					<input
 						type="search"
-						className="input input-sm w-48"
+						className="input input-sm w-full sm:w-48"
 						placeholder="Search logs…"
 						value={search}
 						onChange={(e) => setSearch(e.target.value)}

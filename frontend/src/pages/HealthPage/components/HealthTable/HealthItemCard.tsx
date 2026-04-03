@@ -108,10 +108,12 @@ export const HealthItemCard = memo(function HealthItemCard({
 					</label>
 
 					<div className="min-w-0 flex-1">
-						<div className="flex items-center gap-2">
-							<span className={iconColorClass}>{statusIcon}</span>
-							<div className="truncate font-bold text-sm">
-								{truncateText(item.file_path.split("/").pop() || "", 40)}
+						<div className="flex min-w-0 items-center gap-2">
+							<span className="shrink-0">
+								{statusIcon && <span className={iconColorClass}>{statusIcon}</span>}
+							</span>
+							<div className="min-w-0 break-all font-bold text-sm">
+								{item.file_path.split("/").pop() || ""}
 							</div>
 						</div>
 

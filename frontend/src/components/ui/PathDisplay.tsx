@@ -8,15 +8,6 @@ interface PathDisplayProps {
 	className?: string;
 }
 
-function smartTruncate(text: string, maxLength: number): string {
-	if (text.length <= maxLength) return text;
-
-	const start = Math.floor(maxLength * 0.4);
-	const end = Math.floor(maxLength * 0.4);
-
-	return `${text.slice(0, start)}...${text.slice(-end)}`;
-}
-
 export function PathDisplay({
 	path,
 	maxLength = 40,
@@ -26,7 +17,6 @@ export function PathDisplay({
 	const [copied, setCopied] = useState(false);
 
 	const displayText = showFileName ? path.split("/").pop() || "" : path;
-	const truncatedText = smartTruncate(displayText, maxLength);
 	const isTextTruncated = displayText.length > maxLength;
 
 	const handleCopy = async () => {
@@ -40,13 +30,15 @@ export function PathDisplay({
 	};
 
 	return (
-		<div className={`flex items-center gap-2 ${className}`}>
-			<span className="text-sm">{truncatedText}</span>
+		<div
+			className={`flex w-full min-w-0 max-w-full items-center gap-2 overflow-hidden ${className}`}
+		>
+			<span className="block min-w-0 flex-1 break-all text-sm">{displayText}</span>
 
 			{isTextTruncated && (
 				<button
 					type="button"
-					className="btn btn-ghost btn-sm"
+					className="btn btn-ghost btn-sm shrink-0"
 					onClick={handleCopy}
 					aria-label={`Copy ${showFileName ? "file path" : "path"} to clipboard`}
 					title={copied ? "Copied!" : "Copy to clipboard"}

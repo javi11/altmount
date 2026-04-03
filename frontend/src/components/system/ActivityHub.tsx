@@ -86,36 +86,36 @@ export function ActivityHub() {
 	return (
 		<div className="card min-h-[400px] bg-base-100 shadow-lg">
 			<div className="card-body p-0">
-				<div className="tabs tabs-bordered grid w-full grid-cols-3">
+				<div className="tabs tabs-bordered grid w-full min-w-0 grid-cols-3">
 					<button
 						type="button"
-						className={`tab tab-lg gap-2 ${activeTab === "playback" ? "tab-active border-primary font-bold text-primary" : ""}`}
+						className={`tab tab-lg inline-flex flex-nowrap items-center justify-center gap-1 whitespace-nowrap px-1 py-2 text-xs sm:gap-2 sm:px-3 sm:text-sm ${activeTab === "playback" ? "tab-active border-primary font-bold text-primary" : ""}`}
 						onClick={() => setActiveTab("playback")}
 					>
-						<Play className="h-4 w-4" />
-						Playback
+						<Play className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" aria-hidden="true" />
+						<span className="leading-none">Playback</span>
 						{playbackCount > 0 && (
-							<span className="badge badge-sm badge-primary">{playbackCount}</span>
+							<span className="badge badge-xs badge-primary shrink-0">{playbackCount}</span>
 						)}
 					</button>
 					<button
 						type="button"
-						className={`tab tab-lg gap-2 ${activeTab === "imports" ? "tab-active border-secondary font-bold text-secondary" : ""}`}
+						className={`tab tab-lg inline-flex flex-nowrap items-center justify-center gap-1 whitespace-nowrap px-1 py-2 text-xs sm:gap-2 sm:px-3 sm:text-sm ${activeTab === "imports" ? "tab-active border-secondary font-bold text-secondary" : ""}`}
 						onClick={() => setActiveTab("imports")}
 					>
-						<Download className="h-4 w-4" />
-						Imports
+						<Download className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" aria-hidden="true" />
+						<span className="leading-none">Imports</span>
 						{importCount > 0 && (
-							<span className="badge badge-sm badge-secondary">{importCount}</span>
+							<span className="badge badge-xs badge-secondary shrink-0">{importCount}</span>
 						)}
 					</button>
 					<button
 						type="button"
-						className={`tab tab-lg gap-2 ${activeTab === "history" ? "tab-active border-accent font-bold text-accent" : ""}`}
+						className={`tab tab-lg inline-flex flex-nowrap items-center justify-center gap-1 whitespace-nowrap px-1 py-2 text-xs sm:gap-2 sm:px-3 sm:text-sm ${activeTab === "history" ? "tab-active border-accent font-bold text-accent" : ""}`}
 						onClick={() => setActiveTab("history")}
 					>
-						<History className="h-4 w-4" />
-						History
+						<History className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" aria-hidden="true" />
+						<span className="leading-none">History</span>
 					</button>
 				</div>
 
