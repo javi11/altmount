@@ -234,7 +234,8 @@ func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 		}
 		playURL := baseURL + "/stremio/" + key + "/play" +
 			"?url=" + url.QueryEscape(r.DownloadURL) +
-			"&title=" + url.QueryEscape(safeTitle)
+			"&title=" + url.QueryEscape(safeTitle) +
+			"&type=" + url.QueryEscape(streamType)
 
 		sizeGB := float64(r.Size) / 1e9
 		indexerLabel := r.Indexer
@@ -394,8 +395,14 @@ func (s *Server) handleStremioAddonPlay(c *fiber.Ctx) error {
 	}
 
 	priority := database.QueuePriorityHigh
-	stremioCategory := "stremio"
-	item, err := s.importerService.AddToQueue(ctx, tempPath, basePath, &stremioCategory, &priority, nil, nil)
+	// Map Stremio stream type to Newznab category name so downloads land in the
+	// correct folder (matches default SABnzbd category config).
+	category := "Movies"
+	switch c.Query("type") {
+	case "series":
+		category = "TV"
+	}
+	item, err := s.importerService.AddToQueue(ctx, tempPath, basePath, &category, &priority, nil, nil)
 	if err != nil {
 		os.Remove(tempPath)
 		slog.ErrorContext(ctx, "Failed to add Prowlarr NZB to queue", "error", err, "title", safeTitle)
