@@ -124,6 +124,12 @@ func (c *Coordinator) broadcastToARRType(ctx context.Context, arrsService *arrs.
 			arrType = "sonarr"
 		} else if category == "movies" || strings.Contains(category, "movie") || category == "radarr" {
 			arrType = "radarr"
+		} else if category == "music" || strings.Contains(category, "music") || category == "lidarr" {
+			arrType = "lidarr"
+		} else if category == "books" || strings.Contains(category, "book") || category == "readarr" {
+			arrType = "readarr"
+		} else if category == "adult" || category == "whisparr" {
+			arrType = "whisparr"
 		}
 	}
 

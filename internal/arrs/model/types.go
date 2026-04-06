@@ -15,7 +15,7 @@ var (
 // ConfigInstance represents an arrs instance from configuration
 type ConfigInstance struct {
 	Name     string `json:"name"`
-	Type     string `json:"type"` // "radarr" or "sonarr"
+	Type     string `json:"type"` // "radarr", "sonarr", "lidarr", "readarr", or "whisparr"
 	URL      string `json:"url"`
 	APIKey   string `json:"api_key"`
 	Category string `json:"category"`

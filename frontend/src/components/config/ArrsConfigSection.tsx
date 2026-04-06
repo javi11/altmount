@@ -30,6 +30,14 @@ const DEFAULT_NEW_INSTANCE: NewInstanceForm = {
 	enabled: true,
 };
 
+const ARR_TYPES: { type: ArrsType; label: string; color: string; defaultCategory: string }[] = [
+	{ type: "radarr", label: "Radarr", color: "bg-primary", defaultCategory: "movies" },
+	{ type: "sonarr", label: "Sonarr", color: "bg-secondary", defaultCategory: "tv" },
+	{ type: "lidarr", label: "Lidarr", color: "bg-accent", defaultCategory: "music" },
+	{ type: "readarr", label: "Readarr", color: "bg-info", defaultCategory: "books" },
+	{ type: "whisparr", label: "Whisparr", color: "bg-warning", defaultCategory: "movies" },
+];
+
 export function ArrsConfigSection({
 	config,
 	onUpdate,
@@ -79,32 +87,37 @@ export function ArrsConfigSection({
 					"Mount Path must be configured in General/System settings before enabling Arrs service",
 				);
 			}
-			const allInstanceNames = [
-				...data.radarr_instances.map((i) => ({ name: i.name, type: "Radarr" })),
-				...data.sonarr_instances.map((i) => ({ name: i.name, type: "Sonarr" })),
-			];
+
+			const allInstances: { instance: ArrsInstanceConfig; typeLabel: string }[] = [];
+			for (const { type, label } of ARR_TYPES) {
+				const instances = data[`${type}_instances` as keyof ArrsConfig] as ArrsInstanceConfig[];
+				if (instances) {
+					allInstances.push(...instances.map((i) => ({ instance: i, typeLabel: label })));
+				}
+			}
+
 			const nameCount: Record<string, number> = {};
-			allInstanceNames.forEach(({ name }) => {
-				nameCount[name] = (nameCount[name] || 0) + 1;
+			allInstances.forEach(({ instance }) => {
+				nameCount[instance.name] = (nameCount[instance.name] || 0) + 1;
 			});
 			Object.entries(nameCount).forEach(([name, count]) => {
 				if (count > 1) errors.push(`Instance name "${name}" is used multiple times`);
 			});
-			[...data.radarr_instances, ...data.sonarr_instances].forEach((instance, index) => {
-				const instanceType = data.radarr_instances.includes(instance) ? "Radarr" : "Sonarr";
+
+			allInstances.forEach(({ instance, typeLabel }, index) => {
 				if (!instance.name.trim())
-					errors.push(`${instanceType} instance #${index + 1}: Name is required`);
+					errors.push(`${typeLabel} instance #${index + 1}: Name is required`);
 				if (!instance.url.trim()) {
-					errors.push(`${instanceType} instance "${instance.name}": URL is required`);
+					errors.push(`${typeLabel} instance "${instance.name}": URL is required`);
 				} else {
 					try {
 						new URL(instance.url);
 					} catch {
-						errors.push(`${instanceType} instance "${instance.name}": Invalid URL format`);
+						errors.push(`${typeLabel} instance "${instance.name}": Invalid URL format`);
 					}
 				}
 				if (!instance.api_key.trim())
-					errors.push(`${instanceType} instance "${instance.name}": API key is required`);
+					errors.push(`${typeLabel} instance "${instance.name}": API key is required`);
 			});
 		}
 		return errors;
@@ -123,8 +136,8 @@ export function ArrsConfigSection({
 		field: keyof ArrsInstanceConfig,
 		value: ArrsInstanceConfig[keyof ArrsInstanceConfig],
 	) => {
-		const instancesKey = type === "radarr" ? "radarr_instances" : "sonarr_instances";
-		const instances = [...formData[instancesKey]];
+		const instancesKey = `${type}_instances` as keyof ArrsConfig;
+		const instances = [...(formData[instancesKey] as ArrsInstanceConfig[])];
 		instances[index] = { ...instances[index], [field]: value };
 		const newFormData = { ...formData, [instancesKey]: instances };
 		setFormData(newFormData);
@@ -133,8 +146,8 @@ export function ArrsConfigSection({
 	};
 
 	const removeInstance = (type: ArrsType, index: number) => {
-		const instancesKey = type === "radarr" ? "radarr_instances" : "sonarr_instances";
-		const instances = [...formData[instancesKey]];
+		const instancesKey = `${type}_instances` as keyof ArrsConfig;
+		const instances = [...(formData[instancesKey] as ArrsInstanceConfig[])];
 		instances.splice(index, 1);
 		const newFormData = { ...formData, [instancesKey]: instances };
 		setFormData(newFormData);
@@ -144,13 +157,14 @@ export function ArrsConfigSection({
 
 	const addInstance = () => {
 		if (!newInstance.name.trim() || !newInstance.url.trim() || !newInstance.api_key.trim()) return;
-		const instancesKey = newInstance.type === "radarr" ? "radarr_instances" : "sonarr_instances";
+		const instancesKey = `${newInstance.type}_instances` as keyof ArrsConfig;
 		let category = newInstance.category.trim();
 		if (!category) {
-			category = newInstance.type === "radarr" ? "movies" : "tv";
+			const arrTypeMeta = ARR_TYPES.find((t) => t.type === newInstance.type);
+			category = arrTypeMeta?.defaultCategory || "movies";
 		}
 		const instances = [
-			...formData[instancesKey],
+			...(formData[instancesKey] as ArrsInstanceConfig[]),
 			{
 				name: newInstance.name,
 				url: newInstance.url,
@@ -272,7 +286,7 @@ export function ArrsConfigSection({
 							<div>
 								<h5 className="font-bold text-sm">AltMount Webhooks</h5>
 								<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
-									Automatically configure hooks in Radarr/Sonarr to notify AltMount of upgrades and
+									Automatically configure hooks in ARR applications to notify AltMount of upgrades and
 									renames.
 								</p>
 							</div>
@@ -492,65 +506,39 @@ export function ArrsConfigSection({
 				{/* Instances Lists */}
 				{formData.enabled && (
 					<div className="fade-in slide-in-from-top-6 animate-in space-y-10">
-						{/* Radarr */}
-						<div className="space-y-6">
-							<div className="flex items-center justify-between gap-4">
-								<h4 className="flex items-center gap-2 font-bold text-sm">
-									<div className="h-2 w-2 rounded-full bg-primary" /> Radarr Instances
-								</h4>
-								<button
-									type="button"
-									className="btn btn-sm btn-primary px-4"
-									onClick={() => {
-										setNewInstance({ ...DEFAULT_NEW_INSTANCE, type: "radarr" });
-										setShowAddInstance(true);
-									}}
-									disabled={isReadOnly}
-								>
-									<Plus className="h-3 w-3" /> Add
-								</button>
-							</div>
-							<div className="grid grid-cols-1 gap-4">
-								{formData.radarr_instances.map((instance, index) =>
-									renderInstance(instance, "radarr", index),
-								)}
-								{formData.radarr_instances.length === 0 && (
-									<div className="rounded-2xl border-2 border-base-300 border-dashed p-8 text-center font-bold text-base-content/60 text-xs">
-										No Radarr configured
-									</div>
-								)}
-							</div>
-						</div>
+						{ARR_TYPES.map(({ type, label, color, defaultCategory }) => {
+							const instancesKey = `${type}_instances` as keyof ArrsConfig;
+							const instances = (formData[instancesKey] || []) as ArrsInstanceConfig[];
 
-						{/* Sonarr */}
-						<div className="space-y-6">
-							<div className="flex items-center justify-between gap-4">
-								<h4 className="flex items-center gap-2 font-bold text-sm">
-									<div className="h-2 w-2 rounded-full bg-secondary" /> Sonarr Instances
-								</h4>
-								<button
-									type="button"
-									className="btn btn-sm btn-primary px-4"
-									onClick={() => {
-										setNewInstance({ ...DEFAULT_NEW_INSTANCE, type: "sonarr", category: "tv" });
-										setShowAddInstance(true);
-									}}
-									disabled={isReadOnly}
-								>
-									<Plus className="h-3 w-3" /> Add
-								</button>
-							</div>
-							<div className="grid grid-cols-1 gap-4">
-								{formData.sonarr_instances.map((instance, index) =>
-									renderInstance(instance, "sonarr", index),
-								)}
-								{formData.sonarr_instances.length === 0 && (
-									<div className="rounded-2xl border-2 border-base-300 border-dashed p-8 text-center font-bold text-base-content/60 text-xs">
-										No Sonarr configured
+							return (
+								<div key={type} className="space-y-6">
+									<div className="flex items-center justify-between gap-4">
+										<h4 className="flex items-center gap-2 font-bold text-sm">
+											<div className={`h-2 w-2 rounded-full ${color}`} /> {label} Instances
+										</h4>
+										<button
+											type="button"
+											className="btn btn-sm btn-primary px-4"
+											onClick={() => {
+												setNewInstance({ ...DEFAULT_NEW_INSTANCE, type, category: defaultCategory });
+												setShowAddInstance(true);
+											}}
+											disabled={isReadOnly}
+										>
+											<Plus className="h-3 w-3" /> Add
+										</button>
 									</div>
-								)}
-							</div>
-						</div>
+									<div className="grid grid-cols-1 gap-4">
+										{instances.map((instance, index) => renderInstance(instance, type, index))}
+										{instances.length === 0 && (
+											<div className="rounded-2xl border-2 border-base-300 border-dashed p-8 text-center font-bold text-base-content/60 text-xs">
+												No {label} configured
+											</div>
+										)}
+									</div>
+								</div>
+							);
+						})}
 					</div>
 				)}
 			</div>
@@ -560,7 +548,7 @@ export function ArrsConfigSection({
 				<div className="modal modal-open backdrop-blur-sm">
 					<div className="modal-box rounded-2xl border border-base-300 shadow-2xl">
 						<h3 className="mb-6 font-black text-xl uppercase tracking-tighter">
-							Add {newInstance.type === "radarr" ? "Radarr" : "Sonarr"}
+							Add {ARR_TYPES.find((t) => t.type === newInstance.type)?.label || "ARR"}
 						</h3>
 						<div className="space-y-5">
 							<fieldset className="fieldset">

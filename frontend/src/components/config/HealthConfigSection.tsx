@@ -168,7 +168,7 @@ export function HealthConfigSection({
 											3
 										</span>
 										<span className="min-w-0 flex-1 break-words font-bold">
-											Unhealthy files are automatically replaced in Sonarr/Radarr.
+											Unhealthy files are automatically replaced in ARR applications.
 										</span>
 									</li>
 								</ul>
@@ -183,7 +183,7 @@ export function HealthConfigSection({
 						<div className="min-w-0 flex-1">
 							<h4 className="break-words font-bold text-base-content text-sm">Repair Engine</h4>
 							<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
-								Automatically trigger redownloads in Radarr/Sonarr for corrupted files.
+								Automatically trigger redownloads in ARR applications for corrupted files.
 							</p>
 						</div>
 						<input
@@ -311,7 +311,7 @@ export function HealthConfigSection({
 								onChange={(e) => handleInputChange("library_dir", e.target.value || undefined)}
 							/>
 							<div className="mt-2 whitespace-normal text-base-content/50 text-xs leading-relaxed">
-								Path where your permanent media folders (/movies, /tv) are located. Required for
+								Path where your permanent media folders are located. Required for
 								mapping virtual files to physical ARR library paths.
 							</div>
 						</div>

@@ -441,13 +441,13 @@ func (mrf *MetadataRemoteFile) isCategoryFolder(path string) bool {
 			return false
 		}
 
-		// Check exact match
-		if normalizedPath == name {
+		// Check exact match (case-insensitive)
+		if strings.EqualFold(normalizedPath, name) {
 			return true
 		}
 
 		// Check match with complete_dir prefix (e.g. complete/tv)
-		if completeDir != "" && normalizedPath == strings.Trim(completeDir+"/"+name, "/") {
+		if completeDir != "" && strings.EqualFold(normalizedPath, strings.Trim(completeDir+"/"+name, "/")) {
 			return true
 		}
 
@@ -455,7 +455,7 @@ func (mrf *MetadataRemoteFile) isCategoryFolder(path string) bool {
 	}
 
 	// Check complete_dir itself
-	if normalizedPath == completeDir {
+	if strings.EqualFold(normalizedPath, completeDir) {
 		return true
 	}
 

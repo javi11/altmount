@@ -73,14 +73,29 @@ export function ArrsInstanceCard({
 		[onInstanceChange],
 	);
 
+	const getBorderColor = () => {
+		switch (type) {
+			case "radarr":
+				return "bg-primary";
+			case "sonarr":
+				return "bg-secondary";
+			case "lidarr":
+				return "bg-accent";
+			case "readarr":
+				return "bg-info";
+			case "whisparr":
+				return "bg-warning";
+			default:
+				return "bg-base-300";
+		}
+	};
+
 	return (
 		<div
 			key={instanceKey}
 			className="group relative overflow-hidden rounded-2xl border border-base-300 bg-base-100/50 transition-all hover:shadow-md"
 		>
-			<div
-				className={`absolute top-0 bottom-0 left-0 w-1.5 ${type === "radarr" ? "bg-primary" : "bg-secondary"}`}
-			/>
+			<div className={`absolute top-0 bottom-0 left-0 w-1.5 ${getBorderColor()}`} />
 
 			<div className="space-y-6 p-5 pl-7">
 				{/* Header */}

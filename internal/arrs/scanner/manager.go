@@ -16,9 +16,11 @@ import (
 	"github.com/javi11/altmount/internal/arrs/model"
 	"github.com/javi11/altmount/internal/config"
 	"golift.io/starr"
+	"golift.io/starr/lidarr"
 	"golift.io/starr/radarr"
+	"golift.io/starr/readarr"
 	"golift.io/starr/sonarr"
-)
+	)
 
 type Manager struct {
 	configGetter config.ConfigGetter
@@ -109,33 +111,63 @@ func (m *Manager) findInstanceForFilePath(ctx context.Context, filePath string, 
 }
 
 func (m *Manager) managesFile(ctx context.Context, instanceType string, client any, filePath string) bool {
-	if instanceType == "radarr" {
+	switch instanceType {
+	case "radarr":
 		rc, ok := client.(*radarr.Radarr)
 		if !ok {
 			return false
 		}
 		return m.radarrManagesFile(ctx, rc, filePath)
-	}
-	sc, ok := client.(*sonarr.Sonarr)
-	if !ok {
+	case "sonarr":
+		sc, ok := client.(*sonarr.Sonarr)
+		if !ok {
+			return false
+		}
+		return m.sonarrManagesFile(ctx, sc, filePath)
+	case "lidarr":
+		lc, ok := client.(*lidarr.Lidarr)
+		if !ok {
+			return false
+		}
+		return m.lidarrManagesFile(ctx, lc, filePath)
+	case "readarr":
+		rc, ok := client.(*readarr.Readarr)
+		if !ok {
+			return false
+		}
+		return m.readarrManagesFile(ctx, rc, filePath)
+	case "whisparr":
+		wc, ok := client.(*radarr.Radarr)
+		if !ok {
+			return false
+		}
+		return m.radarrManagesFile(ctx, wc, filePath)
+	default:
 		return false
 	}
-	return m.sonarrManagesFile(ctx, sc, filePath)
 }
 
 func (m *Manager) hasFile(ctx context.Context, instanceType string, client any, instanceName, relativePath string) bool {
-	if instanceType == "radarr" {
+	switch instanceType {
+	case "radarr":
 		rc, ok := client.(*radarr.Radarr)
 		if !ok {
 			return false
 		}
 		return m.radarrHasFile(ctx, rc, instanceName, relativePath)
-	}
-	sc, ok := client.(*sonarr.Sonarr)
-	if !ok {
+	case "sonarr":
+		sc, ok := client.(*sonarr.Sonarr)
+		if !ok {
+			return false
+		}
+		return m.sonarrHasFile(ctx, sc, instanceName, relativePath)
+	case "lidarr", "readarr", "whisparr":
+		// For now, these don't have a slow path search implementation
+		// They rely on the Root Folder (Strategy 1) or Category (Strategy 2)
+		return false
+	default:
 		return false
 	}
-	return m.sonarrHasFile(ctx, sc, instanceName, relativePath)
 }
 
 // radarrManagesFile checks if Radarr manages the given file path using root folders (checkrr approach)
@@ -186,6 +218,38 @@ func (m *Manager) sonarrManagesFile(ctx context.Context, client *sonarr.Sonarr, 
 	}
 
 	slog.DebugContext(ctx, "File does not match any Sonarr root folders")
+	return false
+}
+
+// lidarrManagesFile checks if Lidarr manages the given file path using root folders
+func (m *Manager) lidarrManagesFile(ctx context.Context, client *lidarr.Lidarr, filePath string) bool {
+	slog.DebugContext(ctx, "Checking Lidarr root folders for file ownership", "file_path", filePath)
+	rootFolders, err := client.GetRootFoldersContext(ctx)
+	if err != nil {
+		slog.DebugContext(ctx, "Failed to get root folders from Lidarr", "error", err)
+		return false
+	}
+	for _, folder := range rootFolders {
+		if strings.HasPrefix(filePath, folder.Path) {
+			return true
+		}
+	}
+	return false
+}
+
+// readarrManagesFile checks if Readarr manages the given file path using root folders
+func (m *Manager) readarrManagesFile(ctx context.Context, client *readarr.Readarr, filePath string) bool {
+	slog.DebugContext(ctx, "Checking Readarr root folders for file ownership", "file_path", filePath)
+	rootFolders, err := client.GetRootFoldersContext(ctx)
+	if err != nil {
+		slog.DebugContext(ctx, "Failed to get root folders from Readarr", "error", err)
+		return false
+	}
+	for _, folder := range rootFolders {
+		if strings.HasPrefix(filePath, folder.Path) {
+			return true
+		}
+	}
 	return false
 }
 
@@ -270,6 +334,11 @@ func (m *Manager) TriggerFileRescan(ctx context.Context, pathForRescan string, r
 			}
 			return nil, m.triggerSonarrRescanByPath(ctx, client, pathForRescan, relativePath, instanceName)
 
+		case "lidarr", "readarr", "whisparr":
+			// For now, we only support RefreshMonitoredDownloads for these
+			m.TriggerScanForFile(ctx, pathForRescan)
+			return nil, nil
+
 		default:
 			return nil, fmt.Errorf("unsupported instance type: %s", instanceType)
 		}
@@ -336,6 +405,21 @@ func (m *Manager) TriggerScanForFile(ctx context.Context, filePath string) error
 			} else {
 				slog.InfoContext(bgCtx, "Triggered RefreshMonitoredDownloads", "instance", instance.Name)
 			}
+		case "lidarr":
+			client, err := m.clients.GetOrCreateLidarrClient(instance.Name, instance.URL, instance.APIKey)
+			if err == nil {
+				_, _ = client.SendCommandContext(bgCtx, &lidarr.CommandRequest{Name: "RefreshMonitoredDownloads"})
+			}
+		case "readarr":
+			client, err := m.clients.GetOrCreateReadarrClient(instance.Name, instance.URL, instance.APIKey)
+			if err == nil {
+				_, _ = client.SendCommandContext(bgCtx, &readarr.CommandRequest{Name: "RefreshMonitoredDownloads"})
+			}
+		case "whisparr":
+			client, err := m.clients.GetOrCreateWhisparrClient(instance.Name, instance.URL, instance.APIKey)
+			if err == nil {
+				_, _ = client.SendCommandContext(bgCtx, &radarr.CommandRequest{Name: "RefreshMonitoredDownloads"})
+			}
 		}
 	}()
 
@@ -384,6 +468,21 @@ func (m *Manager) TriggerDownloadScan(ctx context.Context, instanceType string) 
 						slog.ErrorContext(bgCtx, "Failed to trigger RefreshMonitoredDownloads", "instance", inst.Name, "error", err)
 					} else {
 						slog.InfoContext(bgCtx, "Triggered RefreshMonitoredDownloads", "instance", inst.Name)
+					}
+				case "lidarr":
+					client, err := m.clients.GetOrCreateLidarrClient(inst.Name, inst.URL, inst.APIKey)
+					if err == nil {
+						_, _ = client.SendCommandContext(bgCtx, &lidarr.CommandRequest{Name: "RefreshMonitoredDownloads"})
+					}
+				case "readarr":
+					client, err := m.clients.GetOrCreateReadarrClient(inst.Name, inst.URL, inst.APIKey)
+					if err == nil {
+						_, _ = client.SendCommandContext(bgCtx, &readarr.CommandRequest{Name: "RefreshMonitoredDownloads"})
+					}
+				case "whisparr":
+					client, err := m.clients.GetOrCreateWhisparrClient(inst.Name, inst.URL, inst.APIKey)
+					if err == nil {
+						_, _ = client.SendCommandContext(bgCtx, &radarr.CommandRequest{Name: "RefreshMonitoredDownloads"})
 					}
 				}
 				return nil, nil
