@@ -591,6 +591,196 @@ func TestSeekErrorCases(t *testing.T) {
 	}
 }
 
+// --- drain-forward Seek tests ---
+
+// mockDrainReader is a simple io.ReadCloser for testing drain behaviour.
+// It holds a byte buffer and reports when Close is called.
+type mockDrainReader struct {
+	data   []byte
+	pos    int
+	closed bool
+}
+
+func newMockDrainReader(size int) *mockDrainReader {
+	b := make([]byte, size)
+	for i := range b {
+		b[i] = byte(i)
+	}
+	return &mockDrainReader{data: b}
+}
+
+func (m *mockDrainReader) Read(p []byte) (int, error) {
+	if m.pos >= len(m.data) {
+		return 0, io.EOF
+	}
+	n := copy(p, m.data[m.pos:])
+	m.pos += n
+	return n, nil
+}
+
+func (m *mockDrainReader) Close() error {
+	m.closed = true
+	return nil
+}
+
+// TestSeekForwardSmallGapDrainsReader verifies that a forward Seek with a gap
+// within maxSeekDrainSize drains bytes instead of closing the current reader.
+// This is the WebDAV/FUSE streaming fix: small seeks keep the prefetch pipeline alive.
+func TestSeekForwardSmallGapDrainsReader(t *testing.T) {
+	const fileSize = int64(100 * 1024 * 1024)
+	const initialPos = int64(1024)
+	const gap = int64(4096) // small gap, well within maxSeekDrainSize
+
+	mock := newMockDrainReader(int(initialPos + gap + 1024))
+	mock.pos = int(initialPos) // simulate that we already read to initialPos
+
+	mvf := &MetadataVirtualFile{
+		fileMeta:          &metapb.FileMetadata{FileSize: fileSize},
+		reader:            mock,
+		readerInitialized: true,
+		position:          initialPos,
+		originalRangeEnd:  -1,
+	}
+
+	newPos, err := mvf.Seek(initialPos+gap, io.SeekStart)
+	if err != nil {
+		t.Fatalf("Seek() error = %v", err)
+	}
+	if newPos != initialPos+gap {
+		t.Errorf("Seek() position = %d, want %d", newPos, initialPos+gap)
+	}
+
+	// Reader must NOT have been closed — pipeline stays warm.
+	if mock.closed {
+		t.Error("reader was closed on small forward seek; expected drain instead")
+	}
+	// readerInitialized must still be true.
+	if !mvf.readerInitialized {
+		t.Error("readerInitialized was cleared on small forward seek; expected drain")
+	}
+	// reader pointer must still be set.
+	if mvf.reader == nil {
+		t.Error("reader was set to nil on small forward seek; expected drain")
+	}
+}
+
+// TestSeekForwardLargeGapClosesReader verifies that a forward Seek exceeding
+// maxSeekDrainSize closes and recreates the reader (original behaviour).
+func TestSeekForwardLargeGapClosesReader(t *testing.T) {
+	const fileSize = int64(100 * 1024 * 1024)
+	const initialPos = int64(0)
+	gap := int64(maxSeekDrainSize) + 1 // one byte beyond the threshold
+
+	mock := newMockDrainReader(1024) // reader only needs to exist, won't be drained
+
+	mvf := &MetadataVirtualFile{
+		fileMeta:          &metapb.FileMetadata{FileSize: fileSize},
+		reader:            mock,
+		readerInitialized: true,
+		position:          initialPos,
+		originalRangeEnd:  -1,
+	}
+
+	newPos, err := mvf.Seek(initialPos+gap, io.SeekStart)
+	if err != nil {
+		t.Fatalf("Seek() error = %v", err)
+	}
+	if newPos != initialPos+gap {
+		t.Errorf("Seek() position = %d, want %d", newPos, initialPos+gap)
+	}
+
+	// Reader MUST have been detached (closeCurrentReader sets reader=nil).
+	if mvf.reader != nil {
+		t.Error("reader was not nil after large forward seek; expected close")
+	}
+	if mvf.readerInitialized {
+		t.Error("readerInitialized still true after large forward seek; expected close")
+	}
+	// Wait for the background close goroutine.
+	mvf.closeWg.Wait()
+	if !mock.closed {
+		t.Error("reader.Close() was not called after large forward seek")
+	}
+}
+
+// TestSeekBackwardClosesReader verifies that a backward Seek always closes the reader.
+func TestSeekBackwardClosesReader(t *testing.T) {
+	const fileSize = int64(100 * 1024 * 1024)
+	const initialPos = int64(2048)
+
+	mock := newMockDrainReader(1024)
+
+	mvf := &MetadataVirtualFile{
+		fileMeta:          &metapb.FileMetadata{FileSize: fileSize},
+		reader:            mock,
+		readerInitialized: true,
+		position:          initialPos,
+		originalRangeEnd:  -1,
+	}
+
+	newPos, err := mvf.Seek(0, io.SeekStart) // backward to 0
+	if err != nil {
+		t.Fatalf("Seek() error = %v", err)
+	}
+	if newPos != 0 {
+		t.Errorf("Seek() position = %d, want 0", newPos)
+	}
+
+	if mvf.reader != nil {
+		t.Error("reader was not nil after backward seek; expected close")
+	}
+	if mvf.readerInitialized {
+		t.Error("readerInitialized still true after backward seek; expected close")
+	}
+	mvf.closeWg.Wait()
+	if !mock.closed {
+		t.Error("reader.Close() was not called after backward seek")
+	}
+}
+
+// TestSeekForwardDrainFailure verifies that if draining fails (e.g. reader at EOF),
+// Seek falls back to closing the reader and behaves correctly.
+func TestSeekForwardDrainFailure(t *testing.T) {
+	const fileSize = int64(100 * 1024 * 1024)
+	const initialPos = int64(100)
+
+	// Reader has no more data → drain will return EOF immediately.
+	mock := &mockDrainReader{data: []byte{}, pos: 0}
+
+	mvf := &MetadataVirtualFile{
+		fileMeta:          &metapb.FileMetadata{FileSize: fileSize},
+		reader:            mock,
+		readerInitialized: true,
+		position:          initialPos,
+		originalRangeEnd:  -1,
+	}
+
+	target := initialPos + 512 // small gap, but drain will fail
+	newPos, err := mvf.Seek(target, io.SeekStart)
+	if err != nil {
+		t.Fatalf("Seek() should not return error even on drain failure, got: %v", err)
+	}
+	if newPos != target {
+		t.Errorf("Seek() position = %d, want %d", newPos, target)
+	}
+
+	// Reader must have been closed (fallback path).
+	if mvf.reader != nil {
+		t.Error("reader was not nil after drain failure; expected fallback close")
+	}
+	if mvf.readerInitialized {
+		t.Error("readerInitialized still true after drain failure; expected fallback close")
+	}
+	mvf.closeWg.Wait()
+	if !mock.closed {
+		t.Error("reader.Close() was not called after drain failure")
+	}
+	// originalRangeEnd must be reset.
+	if mvf.originalRangeEnd != 0 {
+		t.Errorf("originalRangeEnd = %d after drain failure, want 0", mvf.originalRangeEnd)
+	}
+}
+
 // TestConcurrentSegmentIndexAccess tests thread safety of segment index
 func TestConcurrentSegmentIndexAccess(t *testing.T) {
 	segments := []*metapb.SegmentData{

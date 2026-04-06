@@ -1065,6 +1065,44 @@ func (mvf *MetadataVirtualFile) createEncryptedReaderAtOffset(start, end int64) 
 	}
 }
 
+// maxSeekDrainSize is the maximum forward gap in bytes that Seek will bridge by
+// draining (reading and discarding) the current reader rather than closing it.
+// Draining preserves the UsenetReader prefetch pipeline, which avoids the latency
+// spike that occurs when a cold reader must refetch already-prefetched segments.
+// 4 MiB covers typical video-player codec-buffering and HTTP multipart-range gaps.
+const maxSeekDrainSize = 4 * 1024 * 1024
+
+// seekDrainBufPool holds 64 KiB buffers used when draining small forward gaps.
+var seekDrainBufPool = sync.Pool{New: func() any { b := make([]byte, 64*1024); return &b }}
+
+// drainForwardLocked reads and discards exactly n bytes from the current reader.
+// Must be called with mvf.mu held and mvf.readerInitialized == true.
+// Returns nil on success, or the first error (including io.EOF if the reader
+// is exhausted before n bytes have been drained).
+func (mvf *MetadataVirtualFile) drainForwardLocked(n int64) error {
+	bufPtr := seekDrainBufPool.Get().(*[]byte)
+	defer seekDrainBufPool.Put(bufPtr)
+	buf := *bufPtr
+
+	remaining := n
+	for remaining > 0 {
+		want := int64(len(buf))
+		if want > remaining {
+			want = remaining
+		}
+		r, err := mvf.reader.Read(buf[:want])
+		remaining -= int64(r)
+		mvf.position += int64(r)
+		if remaining <= 0 {
+			return nil // fully drained (r > 0 && EOF is acceptable here)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Seek implements afero.File.Seek
 func (mvf *MetadataVirtualFile) Seek(offset int64, whence int) (int64, error) {
 	mvf.mu.Lock()
@@ -1091,10 +1129,18 @@ func (mvf *MetadataVirtualFile) Seek(offset int64, whence int) (int64, error) {
 		return 0, ErrSeekTooFar
 	}
 
-	// Close reader if position changes - UsenetReader is forward-only and cannot seek.
-	// Creating a new reader at the target position is faster than downloading and
-	// discarding data to catch up.
 	if mvf.readerInitialized && abs != mvf.position {
+		gap := abs - mvf.position
+		if gap > 0 && gap <= maxSeekDrainSize {
+			// Small forward gap: drain bytes to preserve the prefetch pipeline.
+			// Draining is cheap when data is already prefetched; restarting a cold
+			// reader would stall the stream (visible as a video glitch).
+			if err := mvf.drainForwardLocked(gap); err == nil {
+				mvf.position = abs // ensure exact alignment after drain
+				return abs, nil
+			}
+			// Drain failed (e.g. reader at EOF) — fall through to close+reopen.
+		}
 		mvf.closeCurrentReader()
 	}
 
