@@ -13,6 +13,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 // MockFile implements afero.File
@@ -360,6 +361,163 @@ func (f *blockingFile) Stat() (os.FileInfo, error)                   { return ni
 func (f *blockingFile) Sync() error                                  { return nil }
 func (f *blockingFile) Truncate(size int64) error                    { return nil }
 func (f *blockingFile) WriteString(s string) (int, error)            { return 0, nil }
+
+// TestHandle_Read_SmallForwardGapDoesNotSeek is the RED test for the forward-skip
+// optimization. It documents the desired behavior: when the requested offset is
+// slightly ahead of the current position (gap ≤ maxForwardSkip), the Handle should
+// bridge the gap by reading and discarding bytes instead of calling Seek.
+//
+// Calling Seek on MetadataVirtualFile destroys the UsenetReader prefetch pipeline,
+// causing intermittent video streaming glitches (the underlying bug).
+//
+// This test FAILS before the optimization is implemented and PASSES after.
+func TestHandle_Read_SmallForwardGapDoesNotSeek(t *testing.T) {
+	const firstReadSize = 512
+	const gap = 1024 // well within maxForwardSkip (4 MB)
+	const secondReadSize = 512
+
+	totalSize := int64(firstReadSize + gap + secondReadSize)
+	data := make([]byte, totalSize)
+	for i := range data {
+		data[i] = byte(i % 251)
+	}
+
+	f := &seekCountingFile{data: data}
+	handle := NewHandle(f, slog.Default(), "testfile", nil, nil)
+	defer handle.Release(context.Background())
+
+	ctx := context.Background()
+
+	// First read at offset 0 — sequential, no seek needed.
+	dest1 := make([]byte, firstReadSize)
+	_, status := handle.Read(ctx, dest1, 0)
+	require.Equal(t, syscall.Errno(0), status, "first read must succeed")
+
+	// Second read at offset firstReadSize+gap — small forward gap.
+	// After fix: gap bridged by Read (no Seek) → prefetch pipeline stays alive.
+	dest2 := make([]byte, secondReadSize)
+	_, status = handle.Read(ctx, dest2, int64(firstReadSize+gap))
+	require.Equal(t, syscall.Errno(0), status, "second read must succeed")
+
+	handle.Release(ctx)
+
+	f.mu.Lock()
+	seekCount := f.seekCount
+	f.mu.Unlock()
+
+	assert.Equal(t, 0, seekCount,
+		"Seek must not be called for a small forward gap (%d bytes); "+
+			"got %d call(s). Seek destroys the UsenetReader prefetch pipeline.",
+		gap, seekCount)
+}
+
+// TestHandle_Read_LargeForwardGapSeeks verifies that gaps larger than maxForwardSkip
+// still use Seek (draining many megabytes would be worse than a fresh reader).
+func TestHandle_Read_LargeForwardGapSeeks(t *testing.T) {
+	const firstReadSize = 512
+	const gap = maxForwardSkip + 1 // just over the threshold
+
+	totalSize := int64(firstReadSize + gap + 512)
+	data := make([]byte, totalSize)
+
+	f := &seekCountingFile{data: data}
+	handle := NewHandle(f, slog.Default(), "testfile", nil, nil)
+	defer handle.Release(context.Background())
+
+	ctx := context.Background()
+
+	dest1 := make([]byte, firstReadSize)
+	_, status := handle.Read(ctx, dest1, 0)
+	require.Equal(t, syscall.Errno(0), status)
+
+	dest2 := make([]byte, 512)
+	_, status = handle.Read(ctx, dest2, int64(firstReadSize+gap))
+	require.Equal(t, syscall.Errno(0), status)
+
+	handle.Release(ctx)
+
+	f.mu.Lock()
+	seekCount := f.seekCount
+	f.mu.Unlock()
+
+	assert.Equal(t, 1, seekCount,
+		"Seek must be called once for a large forward gap (%d bytes)", gap)
+}
+
+// TestHandle_Read_BackwardSeekAlwaysSeeks verifies backward seeks always use Seek
+// (there is no way to reverse a forward-only streaming reader).
+func TestHandle_Read_BackwardSeekAlwaysSeeks(t *testing.T) {
+	data := make([]byte, 4096)
+	f := &seekCountingFile{data: data}
+	handle := NewHandle(f, slog.Default(), "testfile", nil, nil)
+	defer handle.Release(context.Background())
+
+	ctx := context.Background()
+
+	// Read at offset 2000 first (requires initial seek from 0)
+	dest := make([]byte, 256)
+	_, status := handle.Read(ctx, dest, 2000)
+	require.Equal(t, syscall.Errno(0), status)
+
+	// Now read backward to offset 100 — must Seek
+	_, status = handle.Read(ctx, dest, 100)
+	require.Equal(t, syscall.Errno(0), status)
+
+	handle.Release(ctx)
+
+	f.mu.Lock()
+	seekCount := f.seekCount
+	f.mu.Unlock()
+
+	assert.GreaterOrEqual(t, seekCount, 1, "backward seek must call Seek at least once")
+}
+
+// seekCountingFile is a minimal in-memory afero.File that counts Seek calls.
+// Used to verify the forward-skip optimization bypasses Seek for small gaps.
+type seekCountingFile struct {
+	mu        sync.Mutex
+	seekCount int
+	data      []byte
+	pos       int64
+}
+
+func (f *seekCountingFile) Read(p []byte) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.pos >= int64(len(f.data)) {
+		return 0, io.EOF
+	}
+	n := copy(p, f.data[f.pos:])
+	f.pos += int64(n)
+	return n, nil
+}
+
+func (f *seekCountingFile) Seek(offset int64, whence int) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.seekCount++
+	switch whence {
+	case io.SeekStart:
+		f.pos = offset
+	case io.SeekCurrent:
+		f.pos += offset
+	case io.SeekEnd:
+		f.pos = int64(len(f.data)) + offset
+	}
+	return f.pos, nil
+}
+
+func (f *seekCountingFile) Close() error                             { return nil }
+func (f *seekCountingFile) ReadAt(p []byte, off int64) (int, error)  { return 0, nil }
+func (f *seekCountingFile) Write(p []byte) (int, error)              { return 0, nil }
+func (f *seekCountingFile) WriteAt(p []byte, off int64) (int, error) { return 0, nil }
+func (f *seekCountingFile) Name() string                             { return "seekcounting" }
+func (f *seekCountingFile) Readdir(count int) ([]os.FileInfo, error) { return nil, nil }
+func (f *seekCountingFile) Readdirnames(n int) ([]string, error)     { return nil, nil }
+func (f *seekCountingFile) Stat() (os.FileInfo, error)               { return nil, nil }
+func (f *seekCountingFile) Sync() error                              { return nil }
+func (f *seekCountingFile) Truncate(size int64) error                { return nil }
+func (f *seekCountingFile) WriteString(s string) (int, error)        { return 0, nil }
 
 func TestHandle_Release_Idempotent(t *testing.T) {
 	mockFile := new(MockFile)
