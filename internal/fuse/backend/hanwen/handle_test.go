@@ -90,12 +90,17 @@ func TestHandle_Read_SeekAndRead(t *testing.T) {
 	mockFile := new(MockFile)
 	logger := slog.Default()
 
-	// First read at offset 100: must Seek then Read
-	mockFile.On("Seek", int64(100), io.SeekStart).Return(int64(100), nil).Once()
+	// Offsets beyond maxForwardSkip force the Seek path.
+	// Small gaps (≤ maxForwardSkip) use drain-via-Read instead of Seek.
+	off1 := int64(maxForwardSkip + 100)
+	off2 := off1 + int64(maxForwardSkip) + 10 // large gap from first position
+
+	// First read: large gap from 0 → Seek then Read
+	mockFile.On("Seek", off1, io.SeekStart).Return(off1, nil).Once()
 	mockFile.On("Read", mock.AnythingOfType("[]uint8")).Return(10, nil).Once()
 
-	// Second read at offset 200: must Seek then Read (non-sequential)
-	mockFile.On("Seek", int64(200), io.SeekStart).Return(int64(200), nil).Once()
+	// Second read: large gap → Seek then Read
+	mockFile.On("Seek", off2, io.SeekStart).Return(off2, nil).Once()
 	mockFile.On("Read", mock.AnythingOfType("[]uint8")).Return(10, nil).Once()
 
 	mockFile.On("Close").Return(nil)
@@ -106,10 +111,10 @@ func TestHandle_Read_SeekAndRead(t *testing.T) {
 	ctx := context.Background()
 	dest := make([]byte, 10)
 
-	_, status := handle.Read(ctx, dest, 100)
+	_, status := handle.Read(ctx, dest, off1)
 	assert.Equal(t, syscall.Errno(0), status)
 
-	_, status = handle.Read(ctx, dest, 200)
+	_, status = handle.Read(ctx, dest, off2)
 	assert.Equal(t, syscall.Errno(0), status)
 
 	handle.Release(ctx)
@@ -225,8 +230,9 @@ func TestHandle_Read_SeekError(t *testing.T) {
 	mockFile := new(MockFile)
 	logger := slog.Default()
 
-	// Read at non-zero offset requires seek — which fails
-	mockFile.On("Seek", int64(500), io.SeekStart).Return(int64(0), os.ErrInvalid).Once()
+	// Offset beyond maxForwardSkip forces the Seek path (small gaps use drain instead).
+	off := int64(maxForwardSkip + 500)
+	mockFile.On("Seek", off, io.SeekStart).Return(int64(0), os.ErrInvalid).Once()
 	mockFile.On("Close").Return(nil)
 
 	handle := NewHandle(mockFile, logger, "testfile", nil, nil)
@@ -235,7 +241,7 @@ func TestHandle_Read_SeekError(t *testing.T) {
 	ctx := context.Background()
 	dest := make([]byte, 10)
 
-	_, status := handle.Read(ctx, dest, 500)
+	_, status := handle.Read(ctx, dest, off)
 	assert.Equal(t, syscall.EIO, status)
 
 	handle.Release(ctx)
@@ -297,8 +303,10 @@ func TestHandle_Read_BlockingSeekContextCanceled(t *testing.T) {
 
 	done := make(chan syscall.Errno, 1)
 	go func() {
-		// offset 100 != position 0, so Seek will be called
-		_, status := handle.Read(ctx, dest, 100)
+		// Offset beyond maxForwardSkip forces the Seek path (which blocks on seekBlock).
+		// Small gaps use drain-via-Read instead of Seek, which would return immediately
+		// on blockingFile (Read returns EOF instantly when readBlock is nil).
+		_, status := handle.Read(ctx, dest, maxForwardSkip+100)
 		done <- status
 	}()
 
