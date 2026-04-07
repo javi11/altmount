@@ -24,14 +24,7 @@ var _ fs.FileReleaser = (*Handle)(nil)
 const (
 	opRead = iota
 	opSeek
-	opDrain
 )
-
-// maxForwardSkip is the maximum gap (in bytes) that Read will bridge by draining
-// instead of calling Seek. Draining keeps the UsenetReader prefetch pipeline alive,
-// avoiding cold-start latency that causes video streaming glitches.
-// Gaps larger than this threshold, or any backward seek, still call Seek.
-const maxForwardSkip = 4 * 1024 * 1024 // 4 MB
 
 type ioReq struct {
 	op     int
@@ -103,9 +96,6 @@ func NewHandle(
 	return h
 }
 
-// hanwenDrainBufPool provides reusable 64 KB scratch buffers for forward-skip draining.
-var hanwenDrainBufPool = sync.Pool{New: func() any { b := make([]byte, 64*1024); return &b }}
-
 // ioWorker is the single goroutine that performs all file IO for this handle.
 // It exits when reqCh is closed (triggered by Release).
 func (h *Handle) ioWorker() {
@@ -117,26 +107,6 @@ func (h *Handle) ioWorker() {
 			res.n, res.err = h.file.Read(req.dest)
 		case opSeek:
 			res.pos, res.err = h.file.Seek(req.off, req.whence)
-		case opDrain:
-			// Drain req.off bytes via Read to bridge a small forward gap without
-			// calling Seek (which would destroy the UsenetReader prefetch pipeline).
-			bufp := hanwenDrainBufPool.Get().(*[]byte)
-			buf := *bufp
-			remaining := req.off
-			for remaining > 0 && res.err == nil {
-				size := int64(len(buf))
-				if remaining < size {
-					size = remaining
-				}
-				n, err := h.file.Read(buf[:size])
-				remaining -= int64(n)
-				res.n += n
-				if err != nil {
-					res.err = err
-					break
-				}
-			}
-			hanwenDrainBufPool.Put(bufp)
 		}
 		req.resCh <- res
 	}
@@ -168,9 +138,8 @@ func (h *Handle) execIO(ctx context.Context, req ioReq) (ioResult, error) {
 }
 
 // Read handles a FUSE read request using the persistent IO worker.
-// Small forward gaps (≤ maxForwardSkip) are bridged by draining bytes instead of
-// calling Seek, which keeps the UsenetReader prefetch pipeline alive and avoids the
-// cold-start latency that causes video streaming glitches.
+// Non-sequential reads call Seek on the underlying file; MetadataVirtualFile.Seek
+// handles the drain-forward optimization transparently for small gaps.
 func (h *Handle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
 	if h.closed.Load() {
 		return nil, syscall.EIO
@@ -178,47 +147,18 @@ func (h *Handle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadRes
 
 	curPos := h.position.Load()
 	if off != curPos {
-		gap := off - curPos
-		if gap > 0 && gap <= maxForwardSkip {
-			// Bridge small forward gap by draining bytes — keeps prefetch pipeline alive.
-			res, err := h.execIO(ctx, ioReq{op: opDrain, off: gap})
-			drained := err == nil && (res.err == nil || res.err == io.EOF)
-			if !drained {
-				// Drain failed; fall back to a normal Seek.
-				if err != nil {
-					if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-						h.logger.DebugContext(ctx, "Drain canceled", "path", h.path, "offset", off)
-						return nil, syscall.EINTR
-					}
-				}
-				res, err = h.execIO(ctx, ioReq{op: opSeek, off: off, whence: io.SeekStart})
-				if err != nil {
-					if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-						h.logger.DebugContext(ctx, "Seek canceled", "path", h.path, "offset", off)
-						return nil, syscall.EINTR
-					}
-					h.logger.ErrorContext(ctx, "Seek failed", "path", h.path, "offset", off, "error", err)
-					return nil, syscall.EIO
-				}
-				if res.err != nil {
-					h.logger.ErrorContext(ctx, "Seek failed", "path", h.path, "offset", off, "error", res.err)
-					return nil, syscall.EIO
-				}
+		res, err := h.execIO(ctx, ioReq{op: opSeek, off: off, whence: io.SeekStart})
+		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				h.logger.DebugContext(ctx, "Seek canceled", "path", h.path, "offset", off)
+				return nil, syscall.EINTR
 			}
-		} else {
-			res, err := h.execIO(ctx, ioReq{op: opSeek, off: off, whence: io.SeekStart})
-			if err != nil {
-				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-					h.logger.DebugContext(ctx, "Seek canceled", "path", h.path, "offset", off)
-					return nil, syscall.EINTR
-				}
-				h.logger.ErrorContext(ctx, "Seek failed", "path", h.path, "offset", off, "error", err)
-				return nil, syscall.EIO
-			}
-			if res.err != nil {
-				h.logger.ErrorContext(ctx, "Seek failed", "path", h.path, "offset", off, "error", res.err)
-				return nil, syscall.EIO
-			}
+			h.logger.ErrorContext(ctx, "Seek failed", "path", h.path, "offset", off, "error", err)
+			return nil, syscall.EIO
+		}
+		if res.err != nil {
+			h.logger.ErrorContext(ctx, "Seek failed", "path", h.path, "offset", off, "error", res.err)
+			return nil, syscall.EIO
 		}
 	}
 

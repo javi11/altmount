@@ -20,11 +20,6 @@ import (
 	"github.com/spf13/afero"
 )
 
-// maxForwardSkip is the maximum gap (in bytes) that Read will bridge by draining
-// instead of calling Seek. Draining keeps the UsenetReader prefetch pipeline alive,
-// avoiding cold-start latency that causes video streaming glitches.
-const maxForwardSkip = 4 * 1024 * 1024 // 4 MB
-
 // ensure FS implements cgofuse interfaces
 var _ cgofuse.FileSystemInterface = (*FS)(nil)
 var _ cgofuse.FileSystemOpenEx = (*FS)(nil)
@@ -77,28 +72,6 @@ func NewFS(cfg backend.Config, logger *slog.Logger) *FS {
 // Ready returns a channel that is closed when Init has been called.
 func (f *FS) Ready() <-chan struct{} {
 	return f.ready
-}
-
-// drainForward reads and discards n bytes from r using pooled 64 KB scratch buffers.
-// Used to bridge small forward gaps without calling Seek, keeping the underlying
-// UsenetReader prefetch pipeline alive.
-func drainForward(r io.Reader, n int64) error {
-	bufp := drainBufPool.Get().(*[]byte)
-	defer drainBufPool.Put(bufp)
-	buf := *bufp
-
-	for n > 0 {
-		size := int64(len(buf))
-		if n < size {
-			size = n
-		}
-		read, err := r.Read(buf[:size])
-		n -= int64(read)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // allocHandle assigns a file handle number and stores the handle.
@@ -336,13 +309,9 @@ func (f *FS) Open(path string, flags int) (int, uint64) {
 	return errc, fi.Fh
 }
 
-// drainBufPool provides reusable 64 KB scratch buffers for forward-skip draining.
-var drainBufPool = sync.Pool{New: func() any { b := make([]byte, 64*1024); return &b }}
-
 // Read reads data from an open file using mutex-protected Seek+Read.
-// Small forward gaps (≤ maxForwardSkip) are bridged by reading and discarding bytes
-// instead of calling Seek, which keeps the UsenetReader prefetch pipeline alive and
-// avoids the cold-start latency that causes video streaming glitches.
+// Non-sequential reads call Seek on the underlying file; MetadataVirtualFile.Seek
+// handles the drain-forward optimization transparently for small gaps.
 func (f *FS) Read(path string, buff []byte, ofst int64, fh uint64) int {
 	h := f.getHandle(fh)
 	if h == nil {
@@ -353,24 +322,9 @@ func (f *FS) Read(path string, buff []byte, ofst int64, fh uint64) int {
 	defer h.mu.Unlock()
 
 	if ofst != h.position {
-		gap := ofst - h.position
-		if gap > 0 && gap <= maxForwardSkip {
-			// Bridge small forward gap by draining bytes via Read.
-			// This keeps the UsenetReader and its prefetch pipeline alive.
-			if err := drainForward(h.file, gap); err != nil {
-				// Drain failed (e.g. EOF mid-gap); fall back to Seek.
-				if _, serr := h.file.Seek(ofst, io.SeekStart); serr != nil {
-					f.logger.Error("Read seek failed after drain error",
-						"path", path, "offset", ofst, "drain_error", err, "seek_error", serr)
-					return -cgofuse.EIO
-				}
-			}
-			h.position = ofst
-		} else {
-			if _, err := h.file.Seek(ofst, io.SeekStart); err != nil {
-				f.logger.Error("Read seek failed", "path", path, "offset", ofst, "error", err)
-				return -cgofuse.EIO
-			}
+		if _, err := h.file.Seek(ofst, io.SeekStart); err != nil {
+			f.logger.Error("Read seek failed", "path", path, "offset", ofst, "error", err)
+			return -cgofuse.EIO
 		}
 	}
 

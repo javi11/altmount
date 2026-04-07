@@ -90,17 +90,12 @@ func TestHandle_Read_SeekAndRead(t *testing.T) {
 	mockFile := new(MockFile)
 	logger := slog.Default()
 
-	// Offsets beyond maxForwardSkip force the Seek path.
-	// Small gaps (≤ maxForwardSkip) use drain-via-Read instead of Seek.
-	off1 := int64(maxForwardSkip + 100)
-	off2 := off1 + int64(maxForwardSkip) + 10 // large gap from first position
-
-	// First read: large gap from 0 → Seek then Read
-	mockFile.On("Seek", off1, io.SeekStart).Return(off1, nil).Once()
+	// First read at offset 100: must Seek then Read
+	mockFile.On("Seek", int64(100), io.SeekStart).Return(int64(100), nil).Once()
 	mockFile.On("Read", mock.AnythingOfType("[]uint8")).Return(10, nil).Once()
 
-	// Second read: large gap → Seek then Read
-	mockFile.On("Seek", off2, io.SeekStart).Return(off2, nil).Once()
+	// Second read at offset 200: must Seek then Read (non-sequential)
+	mockFile.On("Seek", int64(200), io.SeekStart).Return(int64(200), nil).Once()
 	mockFile.On("Read", mock.AnythingOfType("[]uint8")).Return(10, nil).Once()
 
 	mockFile.On("Close").Return(nil)
@@ -230,8 +225,7 @@ func TestHandle_Read_SeekError(t *testing.T) {
 	mockFile := new(MockFile)
 	logger := slog.Default()
 
-	// Offset beyond maxForwardSkip forces the Seek path (small gaps use drain instead).
-	off := int64(maxForwardSkip + 500)
+	off := int64(500)
 	mockFile.On("Seek", off, io.SeekStart).Return(int64(0), os.ErrInvalid).Once()
 	mockFile.On("Close").Return(nil)
 
@@ -303,10 +297,7 @@ func TestHandle_Read_BlockingSeekContextCanceled(t *testing.T) {
 
 	done := make(chan syscall.Errno, 1)
 	go func() {
-		// Offset beyond maxForwardSkip forces the Seek path (which blocks on seekBlock).
-		// Small gaps use drain-via-Read instead of Seek, which would return immediately
-		// on blockingFile (Read returns EOF instantly when readBlock is nil).
-		_, status := handle.Read(ctx, dest, maxForwardSkip+100)
+		_, status := handle.Read(ctx, dest, 100)
 		done <- status
 	}()
 
@@ -370,60 +361,12 @@ func (f *blockingFile) Sync() error                                  { return ni
 func (f *blockingFile) Truncate(size int64) error                    { return nil }
 func (f *blockingFile) WriteString(s string) (int, error)            { return 0, nil }
 
-// TestHandle_Read_SmallForwardGapDoesNotSeek is the RED test for the forward-skip
-// optimization. It documents the desired behavior: when the requested offset is
-// slightly ahead of the current position (gap ≤ maxForwardSkip), the Handle should
-// bridge the gap by reading and discarding bytes instead of calling Seek.
-//
-// Calling Seek on MetadataVirtualFile destroys the UsenetReader prefetch pipeline,
-// causing intermittent video streaming glitches (the underlying bug).
-//
-// This test FAILS before the optimization is implemented and PASSES after.
-func TestHandle_Read_SmallForwardGapDoesNotSeek(t *testing.T) {
+// TestHandle_Read_NonSequentialAlwaysSeeks verifies that any non-sequential read
+// calls Seek on the underlying file. The drain-forward optimization lives inside
+// MetadataVirtualFile.Seek and is transparent to the FUSE handle layer.
+func TestHandle_Read_NonSequentialAlwaysSeeks(t *testing.T) {
 	const firstReadSize = 512
-	const gap = 1024 // well within maxForwardSkip (4 MB)
-	const secondReadSize = 512
-
-	totalSize := int64(firstReadSize + gap + secondReadSize)
-	data := make([]byte, totalSize)
-	for i := range data {
-		data[i] = byte(i % 251)
-	}
-
-	f := &seekCountingFile{data: data}
-	handle := NewHandle(f, slog.Default(), "testfile", nil, nil)
-	defer handle.Release(context.Background())
-
-	ctx := context.Background()
-
-	// First read at offset 0 — sequential, no seek needed.
-	dest1 := make([]byte, firstReadSize)
-	_, status := handle.Read(ctx, dest1, 0)
-	require.Equal(t, syscall.Errno(0), status, "first read must succeed")
-
-	// Second read at offset firstReadSize+gap — small forward gap.
-	// After fix: gap bridged by Read (no Seek) → prefetch pipeline stays alive.
-	dest2 := make([]byte, secondReadSize)
-	_, status = handle.Read(ctx, dest2, int64(firstReadSize+gap))
-	require.Equal(t, syscall.Errno(0), status, "second read must succeed")
-
-	handle.Release(ctx)
-
-	f.mu.Lock()
-	seekCount := f.seekCount
-	f.mu.Unlock()
-
-	assert.Equal(t, 0, seekCount,
-		"Seek must not be called for a small forward gap (%d bytes); "+
-			"got %d call(s). Seek destroys the UsenetReader prefetch pipeline.",
-		gap, seekCount)
-}
-
-// TestHandle_Read_LargeForwardGapSeeks verifies that gaps larger than maxForwardSkip
-// still use Seek (draining many megabytes would be worse than a fresh reader).
-func TestHandle_Read_LargeForwardGapSeeks(t *testing.T) {
-	const firstReadSize = 512
-	const gap = maxForwardSkip + 1 // just over the threshold
+	const gap = 5 * 1024 * 1024 // 5 MiB non-sequential gap
 
 	totalSize := int64(firstReadSize + gap + 512)
 	data := make([]byte, totalSize)
@@ -449,7 +392,7 @@ func TestHandle_Read_LargeForwardGapSeeks(t *testing.T) {
 	f.mu.Unlock()
 
 	assert.Equal(t, 1, seekCount,
-		"Seek must be called once for a large forward gap (%d bytes)", gap)
+		"Seek must be called once for a non-sequential read (gap %d bytes)", gap)
 }
 
 // TestHandle_Read_BackwardSeekAlwaysSeeks verifies backward seeks always use Seek

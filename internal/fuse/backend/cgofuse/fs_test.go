@@ -32,60 +32,12 @@ func injectHandle(fs *FS, fh uint64, file afero.File) {
 	fs.mu.Unlock()
 }
 
-// TestFS_Read_SmallForwardGapDoesNotSeek is the RED test for the forward-skip
-// optimization in the cgofuse (macOS) backend.
-//
-// When the requested offset is slightly ahead of the current position (gap ≤
-// maxForwardSkip), Read should bridge the gap by reading and discarding bytes
-// instead of calling Seek.
-//
-// Calling Seek on MetadataVirtualFile destroys the UsenetReader prefetch
-// pipeline, causing intermittent video streaming glitches.
-//
-// Currently FAILING (RED): Read calls Seek for any offset mismatch.
-// Will pass (GREEN) after the forward-skip optimization is implemented.
-func TestFS_Read_SmallForwardGapDoesNotSeek(t *testing.T) {
+// TestFS_Read_NonSequentialAlwaysSeeks verifies that any non-sequential read
+// calls Seek on the underlying file. The drain-forward optimization lives inside
+// MetadataVirtualFile.Seek and is transparent to the FUSE handle layer.
+func TestFS_Read_NonSequentialAlwaysSeeks(t *testing.T) {
 	const firstReadSize = 512
-	const gap = 1024 // well within maxForwardSkip (4 MB)
-	const secondReadSize = 512
-
-	totalSize := int64(firstReadSize + gap + secondReadSize)
-	data := make([]byte, totalSize)
-	for i := range data {
-		data[i] = byte(i % 251)
-	}
-
-	f := &cgoSeekCountingFile{data: data}
-	fs := newTestFS()
-	const fh = uint64(1)
-	injectHandle(fs, fh, f)
-
-	// First read at offset 0 — sequential, no seek needed.
-	buf1 := make([]byte, firstReadSize)
-	n := fs.Read("testfile", buf1, 0, fh)
-	require.Equal(t, firstReadSize, n, "first read must succeed")
-
-	// Second read at offset firstReadSize+gap — small forward gap.
-	// After fix: gap drained via Read, no Seek called.
-	buf2 := make([]byte, secondReadSize)
-	n = fs.Read("testfile", buf2, int64(firstReadSize+gap), fh)
-	require.Equal(t, secondReadSize, n, "second read must succeed")
-
-	f.mu.Lock()
-	seekCount := f.seekCount
-	f.mu.Unlock()
-
-	assert.Equal(t, 0, seekCount,
-		"Seek must not be called for a small forward gap (%d bytes); "+
-			"got %d call(s). Seek destroys the UsenetReader prefetch pipeline.",
-		gap, seekCount)
-}
-
-// TestFS_Read_LargeForwardGapSeeks verifies that gaps larger than maxForwardSkip
-// still use Seek.
-func TestFS_Read_LargeForwardGapSeeks(t *testing.T) {
-	const firstReadSize = 512
-	const gap = maxForwardSkip + 1
+	const gap = 5 * 1024 * 1024 // 5 MiB non-sequential gap
 
 	totalSize := int64(firstReadSize + gap + 512)
 	data := make([]byte, totalSize)
@@ -108,7 +60,7 @@ func TestFS_Read_LargeForwardGapSeeks(t *testing.T) {
 	f.mu.Unlock()
 
 	assert.Equal(t, 1, seekCount,
-		"Seek must be called once for a large forward gap (%d bytes)", gap)
+		"Seek must be called once for a non-sequential read (gap %d bytes)", gap)
 }
 
 // TestFS_Read_BackwardSeekAlwaysSeeks verifies backward seeks always use Seek.
