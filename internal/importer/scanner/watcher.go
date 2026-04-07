@@ -264,17 +264,11 @@ func (w *Watcher) processNzb(ctx context.Context, watchRoot, filePath string) er
 		// CalculateVirtualDirectory handles it correctly after the NZB move.
 		relativePath = &relPath
 	} else if relPath != "." && relPath != "" {
-		// No configured category matched - don't set a category
-		// Just use the watch root as the relative path
-		// We use the absolute path to avoid issues with CWD changes or relative path calculations
-		absWatchRoot, err := filepath.Abs(watchRoot)
-		if err == nil {
-			relativePath = &absWatchRoot
-		} else {
-			relativePath = &watchRoot
-		}
+		// No configured category matched - preserve the subdirectory structure from watch root.
+		// Use relPath (same as when a category is detected) so the virtual path preserves the folder hierarchy.
+		relativePath = &relPath
 
-		w.log.DebugContext(ctx, "No category matched for path",
+		w.log.DebugContext(ctx, "No category matched for path, preserving subdir structure",
 			"file", filePath,
 			"relPath", relPath)
 	} else {
