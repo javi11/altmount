@@ -374,6 +374,8 @@ github.com/jackc/puddle/v2 v2.2.2 h1:PR8nw+E/1w0GLuRFSmiioY6UooMp6KJv0/61nB7icHo
 github.com/jackc/puddle/v2 v2.2.2/go.mod h1:vriiEXHvEE654aYKXXjOvZM39qJ0q+azkZFrfEOc3H4=
 github.com/javi11/nntppool/v4 v4.7.0 h1:Fve3Wwe02dMyRAVwTZXhPLlvbYwtSnNyQP6aGjDbMT8=
 github.com/javi11/nntppool/v4 v4.7.0/go.mod h1:+UtisJLDFLXBSkW9R6uCRgdp3lS/+6pLAk7L+Wt6LMw=
+github.com/javi11/nntppool/v4 v4.8.0 h1:IcZPTwXWu1fohTMMQoj6WkW+Gsz8rhuBWFtdFVIIDbk=
+github.com/javi11/nntppool/v4 v4.8.0/go.mod h1:+UtisJLDFLXBSkW9R6uCRgdp3lS/+6pLAk7L+Wt6LMw=
 github.com/javi11/nxg v0.1.0 h1:CTThldYlaVIPIhpkrMw0HcTD0NLrW1uYMoDILjjEOtM=
 github.com/javi11/nxg v0.1.0/go.mod h1:+GvYpp+y1oq+qBOWxFMvfTjtin/0zCeomWfjiPkiu8A=
 github.com/javi11/nzbparser v0.5.4 h1:0aYyORZipp7iX8eNpT/efnzCeVO+9C0sE2HWCGc/JaI=

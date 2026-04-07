@@ -18,7 +18,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/hanwen/go-fuse/v2 v2.9.0
 	github.com/jackc/pgx/v5 v5.8.0
-	github.com/javi11/nntppool/v4 v4.7.0
+	github.com/javi11/nntppool/v4 v4.8.0
 	github.com/javi11/nxg v0.1.0
 	github.com/javi11/nzbparser v0.5.4
 	github.com/javi11/rardecode/v2 v2.1.2-0.20260402111111-85298dd02bf6

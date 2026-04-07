@@ -21,6 +21,7 @@ export interface ConfigResponse {
 	arrs: ArrsConfig;
 	stremio: StremioConfig;
 	providers: ProviderConfig[];
+	nzblnk: NzblnkConfig;
 	mount_path: string;
 	mount_type: MountType;
 	api_key?: string;
@@ -256,9 +257,15 @@ export interface ProviderConfig {
 	skip_ping?: boolean;
 	keepalive_interval_seconds?: number;
 	keepalive_command?: string;
+	user_agent?: string;
 	last_rtt_ms?: number;
 	last_speed_test_mbps?: number;
 	last_speed_test_time?: string;
+}
+
+// NZBLNK resolver configuration
+export interface NzblnkConfig {
+	user_agent?: string;
 }
 
 // SABnzbd configuration
@@ -298,6 +305,7 @@ export interface ConfigUpdateRequest {
 	arrs?: ArrsConfig;
 	stremio?: Partial<StremioConfig>;
 	providers?: ProviderUpdateRequest[];
+	nzblnk?: NzblnkConfig;
 	mount_path?: string;
 	mount_type?: MountType;
 	profiler_enabled?: boolean;
@@ -453,6 +461,7 @@ export interface ProviderUpdateRequest {
 	skip_ping?: boolean;
 	keepalive_interval_seconds?: number;
 	keepalive_command?: string;
+	user_agent?: string;
 }
 
 // SABnzbd update request
@@ -480,6 +489,7 @@ export type ConfigSection =
 	| "sabnzbd"
 	| "arrs"
 	| "stremio"
+	| "nzblnk"
 	| "system";
 
 // Form data interfaces for UI components
@@ -635,6 +645,7 @@ export interface ProviderFormData {
 	skip_ping: boolean;
 	keepalive_interval_seconds: number;
 	keepalive_command: string;
+	user_agent: string;
 }
 
 export interface LogFormData {
@@ -797,6 +808,7 @@ export interface ProviderCreateRequest {
 	skip_ping?: boolean;
 	keepalive_interval_seconds?: number;
 	keepalive_command?: string;
+	user_agent?: string;
 }
 
 export interface ProviderReorderRequest {
@@ -890,6 +902,12 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		title: "Stremio",
 		description: "Stremio NZB stream endpoint — upload an NZB and receive instant stream URLs",
 		icon: "Tv",
+		canEdit: true,
+	},
+	nzblnk: {
+		title: "NZBLNK",
+		description: "Settings for resolving nzblnk:// links via public NZB indexers",
+		icon: "Link",
 		canEdit: true,
 	},
 	system: {

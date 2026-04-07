@@ -6,6 +6,7 @@ import {
 	Folder,
 	Globe,
 	HardDrive,
+	Link,
 	Radio,
 	RefreshCw,
 	Server,
@@ -23,6 +24,7 @@ import { ComingSoonSection } from "../components/config/ComingSoonSection";
 import { HealthConfigSection } from "../components/config/HealthConfigSection";
 import { MetadataConfigSection } from "../components/config/MetadataConfigSection";
 import { MountConfigSection } from "../components/config/MountConfigSection";
+import { NzblnkConfigSection } from "../components/config/NzblnkConfigSection";
 import { ProvidersConfigSection } from "../components/config/ProvidersConfigSection";
 import { SABnzbdConfigSection } from "../components/config/SABnzbdConfigSection";
 import { StreamingConfigSection } from "../components/config/StreamingConfigSection";
@@ -51,6 +53,7 @@ import type {
 	ImportConfig,
 	LogFormData,
 	MetadataConfig,
+	NzblnkConfig,
 	ProviderConfig,
 	SABnzbdConfig,
 	SegmentCacheConfig,
@@ -75,6 +78,7 @@ const getIconComponent = (iconName: string) => {
 		Wrench,
 		Server,
 		Tv,
+		Link,
 	};
 	return iconMap[iconName as keyof typeof iconMap] || Settings;
 };
@@ -91,7 +95,7 @@ const SECTION_GROUPS = [
 	},
 	{
 		title: "Automation",
-		sections: ["sabnzbd", "arrs", "health", "stremio", "import"],
+		sections: ["sabnzbd", "arrs", "health", "stremio", "import", "nzblnk"],
 	},
 	{
 		title: "System",
@@ -269,6 +273,11 @@ export function ConfigurationPage() {
 				await updateConfigSection.mutateAsync({
 					section: "providers",
 					config: { providers: data as unknown as ProviderConfig[] },
+				});
+			} else if (section === "nzblnk") {
+				await updateConfigSection.mutateAsync({
+					section: "nzblnk",
+					config: { nzblnk: data as unknown as NzblnkConfig },
 				});
 			} else if (section === "log") {
 				const logData = data as unknown as LogFormData & { profiler_enabled?: boolean };
@@ -555,6 +564,13 @@ export function ConfigurationPage() {
 										isUpdating={updateConfigSection.isPending}
 									/>
 								)}
+								{activeSection === "nzblnk" && (
+									<NzblnkConfigSection
+										config={config}
+										onUpdate={handleConfigUpdate}
+										isUpdating={updateConfigSection.isPending}
+									/>
+								)}
 								{![
 									"webdav",
 									"auth",
@@ -568,6 +584,7 @@ export function ConfigurationPage() {
 									"arrs",
 									"health",
 									"stremio",
+									"nzblnk",
 								].includes(activeSection) && (
 									<ComingSoonSection
 										sectionName={CONFIG_SECTIONS[activeSection]?.title || activeSection}
