@@ -85,7 +85,7 @@ func (proc *Processor) SetRecorder(recorder HistoryRecorder) {
 	proc.recorder = recorder
 }
 
-func (proc *Processor) isCategoryFolder(path string) bool {
+func (proc *Processor) isCategoryFolder(path string, category *string) bool {
 	cfg := proc.configGetter()
 	normalizedPath := strings.Trim(filepath.ToSlash(path), "/")
 	completeDir := strings.Trim(filepath.ToSlash(cfg.SABnzbd.CompleteDir), "/")
@@ -112,6 +112,13 @@ func (proc *Processor) isCategoryFolder(path string) bool {
 		}
 
 		return false
+	}
+
+	// Check if path matches the provided category (for auto-detected categories)
+	if category != nil && *category != "" {
+		if matchesCategory(*category) {
+			return true
+		}
 	}
 
 	// Check complete_dir itself
@@ -335,7 +342,7 @@ func (proc *Processor) processSingleFile(
 			// Only apply normalization if it doesn't result in a category root folder
 			// We want to avoid flattening 'movies/MovieName/Movie.mkv' into 'movies/Movie.mkv'
 			// because that confuses Sonarr/Radarr when they look for the job folder.
-			if !proc.isCategoryFolder(normalizedDir) {
+			if !proc.isCategoryFolder(normalizedDir, category) {
 				virtualDir = normalizedDir
 			}
 		}
@@ -343,7 +350,7 @@ func (proc *Processor) processSingleFile(
 
 	// Ensure we don't put the file directly into a category root folder
 	// We MUST create a release folder so Sonarr/Radarr can find the "Job Folder"
-	if proc.isCategoryFolder(virtualDir) {
+	if proc.isCategoryFolder(virtualDir, category) {
 		virtualDir = filepath.Join(virtualDir, releaseName)
 		virtualDir = strings.ReplaceAll(virtualDir, string(filepath.Separator), "/")
 	}
@@ -445,7 +452,7 @@ func (proc *Processor) processMultiFile(
 		filterSampleFiles = *importCfg.FilterSampleFiles
 	}
 
-	singleLike := len(regularFiles) == 1 && !proc.isCategoryFolder(virtualDir)
+	singleLike := len(regularFiles) == 1 && !proc.isCategoryFolder(virtualDir, category)
 	targetBaseDir := virtualDir
 	nzbName := proc.getCleanNzbName(nzbPath, queueID)
 

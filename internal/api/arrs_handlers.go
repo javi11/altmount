@@ -29,6 +29,19 @@ type ArrsInstanceRequest struct {
 
 // ArrsWebhookRequest represents a webhook payload from Radarr/Sonarr
 type ArrsWebhookRequest struct {
+	Artist struct {
+		Path string `json:"path"`
+	} `json:"artist"`
+	Album struct {
+		Title string `json:"title"`
+	} `json:"album"`
+	Author struct {
+		Path string `json:"path"`
+	} `json:"author"`
+	Book struct {
+		Title string `json:"title"`
+	} `json:"book"`
+
 	EventType string `json:"eventType"`
 	FilePath  string `json:"filePath,omitempty"`
 	// For upgrades/renames, the file path might be in other fields or need to be inferred
@@ -69,10 +82,10 @@ func (df *ArrsDeletedFiles) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// handleArrsWebhook handles webhooks from Radarr/Sonarr
+// handleArrsWebhook handles webhooks from Radarr/Sonarr/Lidarr/Readarr/Whisparr
 //
 //	@Summary		ARR webhook receiver
-//	@Description	Receives file-import webhook events from Sonarr/Radarr and triggers health checks. Authenticated via API key query parameter.
+//	@Description	Receives file-import webhook events from ARR instances and triggers health checks. Authenticated via API key query parameter.
 //	@Tags			ARRs
 //	@Accept			json
 //	@Produce		json
@@ -131,7 +144,7 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 	case "Test":
 		slog.InfoContext(c.Context(), "Received ARR test webhook")
 		return c.Status(200).JSON(fiber.Map{"success": true, "message": "Test successful"})
-	case "Download": // OnImport
+	case "Download", "AlbumImport", "BookImport": // OnImport
 		isScanEvent = true
 		if req.EpisodeFile.Path != "" {
 			pathsToScan = append(pathsToScan, req.EpisodeFile.Path)
@@ -173,9 +186,13 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 				filesToDelete = append(filesToDelete, deleted.Path)
 			}
 		}
-	case "MovieDelete":
+	case "MovieDelete", "ArtistDelete", "AuthorDelete":
 		if req.Movie.FolderPath != "" {
 			dirsToDelete = append(dirsToDelete, req.Movie.FolderPath)
+		} else if req.Artist.Path != "" {
+			dirsToDelete = append(dirsToDelete, req.Artist.Path)
+		} else if req.Author.Path != "" {
+			dirsToDelete = append(dirsToDelete, req.Author.Path)
 		}
 	case "SeriesDelete":
 		if req.Series.Path != "" {
@@ -464,6 +481,12 @@ type ArrsStatsResponse struct {
 	EnabledRadarr    int     `json:"enabled_radarr"`
 	TotalSonarr      int     `json:"total_sonarr"`
 	EnabledSonarr    int     `json:"enabled_sonarr"`
+	TotalLidarr      int     `json:"total_lidarr"`
+	EnabledLidarr    int     `json:"enabled_lidarr"`
+	TotalReadarr     int     `json:"total_readarr"`
+	EnabledReadarr   int     `json:"enabled_readarr"`
+	TotalWhisparr    int     `json:"total_whisparr"`
+	EnabledWhisparr  int     `json:"enabled_whisparr"`
 	DueForSync       int     `json:"due_for_sync"`
 	LastSync         *string `json:"last_sync"`
 }
@@ -512,7 +535,7 @@ type TestConnectionRequest struct {
 // handleListArrsInstances returns all arrs instances
 //
 //	@Summary		List ARR instances
-//	@Description	Returns all configured Sonarr/Radarr instances.
+//	@Description	Returns all configured ARR instances.
 //	@Tags			ARRs
 //	@Produce		json
 //	@Success		200	{object}	APIResponse
@@ -549,10 +572,10 @@ func (s *Server) handleListArrsInstances(c *fiber.Ctx) error {
 // handleGetArrsInstance returns a single arrs instance by type and name
 //
 //	@Summary		Get ARR instance
-//	@Description	Returns a specific Sonarr/Radarr instance by type and name.
+//	@Description	Returns a specific ARR instance by type and name.
 //	@Tags			ARRs
 //	@Produce		json
-//	@Param			type	path		string	true	"Instance type (sonarr or radarr)"
+//	@Param			type	path		string	true	"Instance type (sonarr, radarr, lidarr, readarr, or whisparr)"
 //	@Param			name	path		string	true	"Instance name"
 //	@Success		200		{object}	APIResponse
 //	@Failure		404		{object}	APIResponse
@@ -602,7 +625,7 @@ func (s *Server) handleGetArrsInstance(c *fiber.Ctx) error {
 // handleTestArrsConnection tests connection to an arrs instance
 //
 //	@Summary		Test ARR connection
-//	@Description	Tests connectivity to a Sonarr/Radarr instance with given credentials.
+//	@Description	Tests connectivity to an ARR instance with given credentials.
 //	@Tags			ARRs
 //	@Accept			json
 //	@Produce		json
@@ -666,6 +689,7 @@ func (s *Server) handleGetArrsStats(c *fiber.Ctx) error {
 
 	// Calculate stats from instances
 	var totalRadarr, enabledRadarr, totalSonarr, enabledSonarr int
+	var totalLidarr, enabledLidarr, totalReadarr, enabledReadarr, totalWhisparr, enabledWhisparr int
 	for _, instance := range instances {
 		switch instance.Type {
 		case "radarr":
@@ -678,16 +702,37 @@ func (s *Server) handleGetArrsStats(c *fiber.Ctx) error {
 			if instance.Enabled {
 				enabledSonarr++
 			}
+		case "lidarr":
+			totalLidarr++
+			if instance.Enabled {
+				enabledLidarr++
+			}
+		case "readarr":
+			totalReadarr++
+			if instance.Enabled {
+				enabledReadarr++
+			}
+		case "whisparr":
+			totalWhisparr++
+			if instance.Enabled {
+				enabledWhisparr++
+			}
 		}
 	}
 
 	response := &ArrsStatsResponse{
-		TotalInstances:   totalRadarr + totalSonarr,
-		EnabledInstances: enabledRadarr + enabledSonarr,
+		TotalInstances:   totalRadarr + totalSonarr + totalLidarr + totalReadarr + totalWhisparr,
+		EnabledInstances: enabledRadarr + enabledSonarr + enabledLidarr + enabledReadarr + enabledWhisparr,
 		TotalRadarr:      totalRadarr,
 		EnabledRadarr:    enabledRadarr,
 		TotalSonarr:      totalSonarr,
 		EnabledSonarr:    enabledSonarr,
+		TotalLidarr:      totalLidarr,
+		EnabledLidarr:    enabledLidarr,
+		TotalReadarr:     totalReadarr,
+		EnabledReadarr:   enabledReadarr,
+		TotalWhisparr:    totalWhisparr,
+		EnabledWhisparr:  enabledWhisparr,
 		DueForSync:       0, // Not applicable with config-first approach
 	}
 
@@ -700,7 +745,7 @@ func (s *Server) handleGetArrsStats(c *fiber.Ctx) error {
 // handleGetArrsHealth returns health checks from all ARR instances
 //
 //	@Summary		Get ARR health
-//	@Description	Returns health check results from all configured Sonarr/Radarr instances.
+//	@Description	Returns health check results from all configured ARR instances.
 //	@Tags			ARRs
 //	@Produce		json
 //	@Success		200	{object}	APIResponse
@@ -730,7 +775,7 @@ func (s *Server) handleGetArrsHealth(c *fiber.Ctx) error {
 // handleRegisterArrsWebhooks triggers automatic registration of webhooks in ARR instances
 //
 //	@Summary		Register ARR webhooks
-//	@Description	Automatically registers AltMount as a webhook connection in all configured Sonarr/Radarr instances.
+//	@Description	Automatically registers AltMount as a webhook connection in all configured ARR instances.
 //	@Tags			ARRs
 //	@Produce		json
 //	@Success		200	{object}	APIResponse

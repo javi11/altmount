@@ -8,7 +8,9 @@ import (
 	"github.com/javi11/altmount/internal/arrs/clients"
 	"github.com/javi11/altmount/internal/arrs/instances"
 	"golift.io/starr"
+	"golift.io/starr/lidarr"
 	"golift.io/starr/radarr"
+	"golift.io/starr/readarr"
 	"golift.io/starr/sonarr"
 )
 
@@ -40,7 +42,7 @@ func (m *Manager) EnsureWebhookRegistration(ctx context.Context, altmountURL str
 		slog.DebugContext(ctx, "Checking webhook for instance", "instance", instance.Name, "type", instance.Type)
 
 		switch instance.Type {
-		case "radarr":
+		case "radarr", "whisparr":
 			client, err := m.clients.GetOrCreateRadarrClient(instance.Name, instance.URL, instance.APIKey)
 			if err != nil {
 				slog.ErrorContext(ctx, "Failed to create Radarr client for webhook check", "instance", instance.Name, "error", err)
@@ -199,6 +201,162 @@ func (m *Manager) EnsureWebhookRegistration(ctx context.Context, altmountURL str
 					slog.InfoContext(ctx, "Added AltMount webhook to Sonarr", "instance", instance.Name)
 				}
 			}
+
+		case "lidarr":
+			client, err := m.clients.GetOrCreateLidarrClient(instance.Name, instance.URL, instance.APIKey)
+			if err != nil {
+				slog.ErrorContext(ctx, "Failed to create Lidarr client for webhook check", "instance", instance.Name, "error", err)
+				continue
+			}
+
+			notifications, err := client.GetNotificationsContext(ctx)
+			if err != nil {
+				slog.ErrorContext(ctx, "Failed to get Lidarr notifications", "instance", instance.Name, "error", err)
+				continue
+			}
+
+			var existing *lidarr.NotificationOutput
+			for _, n := range notifications {
+				if n.Name == webhookName {
+					existing = n
+					break
+				}
+			}
+
+			if existing != nil {
+				// Check if update is needed
+				currentURL := ""
+				for _, f := range existing.Fields {
+					if f.Name == "url" {
+						currentURL = f.Value.(string)
+						break
+					}
+				}
+
+				if currentURL != webhookURL {
+					slog.InfoContext(ctx, "Updating Lidarr webhook API key/URL", "instance", instance.Name)
+					notif := &lidarr.NotificationInput{
+						ID:              existing.ID,
+						Name:            webhookName,
+						Implementation:  "Webhook",
+						ConfigContract:  "WebhookSettings",
+						OnGrab:          false,
+						OnReleaseImport: true,
+						OnUpgrade:       true,
+						OnRename:        true,
+						Fields: []*starr.FieldInput{
+							{Name: "url", Value: webhookURL},
+							{Name: "method", Value: "1"}, // 1 = POST
+						},
+					}
+					_, err := client.UpdateNotificationContext(ctx, notif)
+					if err != nil {
+						slog.ErrorContext(ctx, "Failed to update Lidarr webhook", "instance", instance.Name, "error", err)
+					}
+				}
+			} else {
+				notif := &lidarr.NotificationInput{
+					Name:            webhookName,
+					Implementation:  "Webhook",
+					ConfigContract:  "WebhookSettings",
+					OnGrab:          false,
+					OnReleaseImport: true,
+					OnUpgrade:       true,
+					OnRename:        true,
+					Fields: []*starr.FieldInput{
+						{Name: "url", Value: webhookURL},
+						{Name: "method", Value: "1"}, // 1 = POST
+					},
+				}
+				_, err := client.AddNotificationContext(ctx, notif)
+				if err != nil {
+					slog.ErrorContext(ctx, "Failed to add Lidarr webhook", "instance", instance.Name, "error", err)
+				} else {
+					slog.InfoContext(ctx, "Added AltMount webhook to Lidarr", "instance", instance.Name)
+				}
+			}
+
+		case "readarr":
+			client, err := m.clients.GetOrCreateReadarrClient(instance.Name, instance.URL, instance.APIKey)
+			if err != nil {
+				slog.ErrorContext(ctx, "Failed to create Readarr client for webhook check", "instance", instance.Name, "error", err)
+				continue
+			}
+
+			notifications, err := client.GetNotificationsContext(ctx)
+			if err != nil {
+				slog.ErrorContext(ctx, "Failed to get Readarr notifications", "instance", instance.Name, "error", err)
+				continue
+			}
+
+			var existing *readarr.NotificationOutput
+			for _, n := range notifications {
+				if n.Name == webhookName {
+					existing = n
+					break
+				}
+			}
+
+			if existing != nil {
+				// Check if update is needed
+				currentURL := ""
+				for _, f := range existing.Fields {
+					if f.Name == "url" {
+						currentURL = f.Value.(string)
+						break
+					}
+				}
+
+				if currentURL != webhookURL {
+					slog.InfoContext(ctx, "Updating Readarr webhook API key/URL", "instance", instance.Name)
+					notif := &readarr.NotificationInput{
+						ID:                         existing.ID,
+						Name:                       webhookName,
+						Implementation:             "Webhook",
+						ConfigContract:             "WebhookSettings",
+						OnGrab:                     false,
+						OnReleaseImport:            true,
+						OnUpgrade:                  true,
+						OnRename:                   true,
+						OnAuthorDelete:             true,
+						OnBookDelete:               true,
+						OnBookFileDelete:           true,
+						OnBookFileDeleteForUpgrade: true,
+						Fields: []*starr.FieldInput{
+							{Name: "url", Value: webhookURL},
+							{Name: "method", Value: "1"}, // 1 = POST
+						},
+					}
+					_, err := client.UpdateNotificationContext(ctx, notif)
+					if err != nil {
+						slog.ErrorContext(ctx, "Failed to update Readarr webhook", "instance", instance.Name, "error", err)
+					}
+				}
+			} else {
+				notif := &readarr.NotificationInput{
+					Name:                       webhookName,
+					Implementation:             "Webhook",
+					ConfigContract:             "WebhookSettings",
+					OnGrab:                     false,
+					OnReleaseImport:            true,
+					OnUpgrade:                  true,
+					OnRename:                   true,
+					OnAuthorDelete:             true,
+					OnBookDelete:               true,
+					OnBookFileDelete:           true,
+					OnBookFileDeleteForUpgrade: true,
+					Fields: []*starr.FieldInput{
+						{Name: "url", Value: webhookURL},
+						{Name: "method", Value: "1"}, // 1 = POST
+					},
+				}
+				_, err := client.AddNotificationContext(ctx, notif)
+				if err != nil {
+					slog.ErrorContext(ctx, "Failed to add Readarr webhook", "instance", instance.Name, "error", err)
+				} else {
+					slog.InfoContext(ctx, "Added AltMount webhook to Readarr", "instance", instance.Name)
+				}
+			}
 		}
 	}
 
@@ -223,7 +381,7 @@ func (m *Manager) EnsureDownloadClientRegistration(ctx context.Context, altmount
 		slog.DebugContext(ctx, "Checking download client for instance", "instance", instance.Name, "type", instance.Type)
 
 		switch instance.Type {
-		case "radarr":
+		case "radarr", "whisparr":
 			client, err := m.clients.GetOrCreateRadarrClient(instance.Name, instance.URL, instance.APIKey)
 			if err != nil {
 				slog.ErrorContext(ctx, "Failed to create Radarr client for download client check", "instance", instance.Name, "error", err)
@@ -412,6 +570,194 @@ func (m *Manager) EnsureDownloadClientRegistration(ctx context.Context, altmount
 					slog.InfoContext(ctx, "Added AltMount download client to Sonarr", "instance", instance.Name)
 				}
 			}
+
+		case "lidarr":
+			client, err := m.clients.GetOrCreateLidarrClient(instance.Name, instance.URL, instance.APIKey)
+			if err != nil {
+				slog.ErrorContext(ctx, "Failed to create Lidarr client for download client check", "instance", instance.Name, "error", err)
+				continue
+			}
+
+			clients, err := client.GetDownloadClientsContext(ctx)
+			if err != nil {
+				slog.ErrorContext(ctx, "Failed to get Lidarr download clients", "instance", instance.Name, "error", err)
+				continue
+			}
+
+			var existing *lidarr.DownloadClientOutput
+			for _, c := range clients {
+				if c.Name == clientName {
+					existing = c
+					break
+				}
+			}
+
+			if existing != nil {
+				// Update if API key or Host changed
+				currentKey := ""
+				currentHost := ""
+				for _, f := range existing.Fields {
+					if f.Name == "apiKey" {
+						currentKey = f.Value.(string)
+					}
+					if f.Name == "host" {
+						currentHost = f.Value.(string)
+					}
+				}
+
+				if currentKey != apiKey || currentHost != altmountHost {
+					slog.InfoContext(ctx, "Updating Lidarr download client API key/Host", "instance", instance.Name)
+					category := instance.Category
+					if category == "" {
+						category = ""
+					}
+					dc := &lidarr.DownloadClientInput{
+						ID:                       existing.ID,
+						Name:                     clientName,
+						Implementation:           "SABnzbd",
+						ConfigContract:           "SABnzbdSettings",
+						Enable:                   true,
+						RemoveCompletedDownloads: true,
+						RemoveFailedDownloads:    true,
+						Priority:                 1,
+						Protocol:                 "Usenet",
+						Fields: []*starr.FieldInput{
+							{Name: "host", Value: altmountHost},
+							{Name: "port", Value: altmountPort},
+							{Name: "urlBase", Value: urlBase},
+							{Name: "apiKey", Value: apiKey},
+							{Name: "musicCategory", Value: category},
+							{Name: "useSsl", Value: false},
+						},
+					}
+					_, err := client.UpdateDownloadClientContext(ctx, dc, true)
+					if err != nil {
+						slog.ErrorContext(ctx, "Failed to update Lidarr download client", "instance", instance.Name, "error", err)
+					}
+				}
+			} else {
+				category := instance.Category
+				if category == "" {
+					category = ""
+				}
+				dc := &lidarr.DownloadClientInput{
+					Name:                     clientName,
+					Implementation:           "SABnzbd",
+					ConfigContract:           "SABnzbdSettings",
+					Enable:                   true,
+					RemoveCompletedDownloads: true,
+					RemoveFailedDownloads:    true,
+					Priority:                 1,
+					Protocol:                 "Usenet",
+					Fields: []*starr.FieldInput{
+						{Name: "host", Value: altmountHost},
+						{Name: "port", Value: altmountPort},
+						{Name: "urlBase", Value: urlBase},
+						{Name: "apiKey", Value: apiKey},
+						{Name: "musicCategory", Value: category},
+						{Name: "useSsl", Value: false},
+					},
+				}
+				_, err := client.AddDownloadClientContext(ctx, dc)
+				if err != nil {
+					slog.ErrorContext(ctx, "Failed to add Lidarr download client", "instance", instance.Name, "error", err)
+				} else {
+					slog.InfoContext(ctx, "Added AltMount download client to Lidarr", "instance", instance.Name)
+				}
+			}
+
+		case "readarr":
+			client, err := m.clients.GetOrCreateReadarrClient(instance.Name, instance.URL, instance.APIKey)
+			if err != nil {
+				slog.ErrorContext(ctx, "Failed to create Readarr client for download client check", "instance", instance.Name, "error", err)
+				continue
+			}
+
+			clients, err := client.GetDownloadClientsContext(ctx)
+			if err != nil {
+				slog.ErrorContext(ctx, "Failed to get Readarr download clients", "instance", instance.Name, "error", err)
+				continue
+			}
+
+			var existing *readarr.DownloadClientOutput
+			for _, c := range clients {
+				if c.Name == clientName {
+					existing = c
+					break
+				}
+			}
+
+			if existing != nil {
+				// Update if API key or Host changed
+				currentKey := ""
+				currentHost := ""
+				for _, f := range existing.Fields {
+					if f.Name == "apiKey" {
+						currentKey = f.Value.(string)
+					}
+					if f.Name == "host" {
+						currentHost = f.Value.(string)
+					}
+				}
+
+				if currentKey != apiKey || currentHost != altmountHost {
+					slog.InfoContext(ctx, "Updating Readarr download client API key/Host", "instance", instance.Name)
+					category := instance.Category
+					if category == "" {
+						category = ""
+					}
+					dc := &readarr.DownloadClientInput{
+						ID:             existing.ID,
+						Name:           clientName,
+						Implementation: "SABnzbd",
+						ConfigContract: "SABnzbdSettings",
+						Enable:         true,
+						Priority:       1,
+						Protocol:       "Usenet",
+						Fields: []*starr.FieldInput{
+							{Name: "host", Value: altmountHost},
+							{Name: "port", Value: altmountPort},
+							{Name: "urlBase", Value: urlBase},
+							{Name: "apiKey", Value: apiKey},
+							{Name: "musicCategory", Value: category},
+							{Name: "bookCategory", Value: category},
+							{Name: "useSsl", Value: false},
+						},
+					}
+					_, err := client.UpdateDownloadClientContext(ctx, dc, true)
+					if err != nil {
+						slog.ErrorContext(ctx, "Failed to update Readarr download client", "instance", instance.Name, "error", err)
+					}
+				}
+			} else {
+				category := instance.Category
+				if category == "" {
+					category = ""
+				}
+				dc := &readarr.DownloadClientInput{
+					Name:           clientName,
+					Implementation: "SABnzbd",
+					ConfigContract: "SABnzbdSettings",
+					Enable:         true,
+					Priority:       1,
+					Protocol:       "Usenet",
+					Fields: []*starr.FieldInput{
+						{Name: "host", Value: altmountHost},
+						{Name: "port", Value: altmountPort},
+						{Name: "urlBase", Value: urlBase},
+						{Name: "apiKey", Value: apiKey},
+						{Name: "musicCategory", Value: category},
+						{Name: "bookCategory", Value: category},
+						{Name: "useSsl", Value: false},
+					},
+				}
+				_, err := client.AddDownloadClientContext(ctx, dc)
+				if err != nil {
+					slog.ErrorContext(ctx, "Failed to add Readarr download client", "instance", instance.Name, "error", err)
+				} else {
+					slog.InfoContext(ctx, "Added AltMount download client to Readarr", "instance", instance.Name)
+				}
+			}
 		}
 	}
 
@@ -430,7 +776,7 @@ func (m *Manager) TestDownloadClientRegistration(ctx context.Context, altmountHo
 
 		var testErr error
 		switch instance.Type {
-		case "radarr":
+		case "radarr", "whisparr":
 			client, err := m.clients.GetOrCreateRadarrClient(instance.Name, instance.URL, instance.APIKey)
 			if err != nil {
 				results[instance.Name] = fmt.Sprintf("Failed to create client: %v", err)
@@ -443,12 +789,14 @@ func (m *Manager) TestDownloadClientRegistration(ctx context.Context, altmountHo
 			}
 
 			dc := &radarr.DownloadClientInput{
-				Name:           "AltMount Test",
-				Implementation: "SABnzbd",
-				ConfigContract: "SABnzbdSettings",
-				Enable:         true,
-				Priority:       1,
-				Protocol:       "Usenet",
+				Name:                     "AltMount Test",
+				Implementation:           "SABnzbd",
+				ConfigContract:           "SABnzbdSettings",
+				Enable:                   true,
+				RemoveCompletedDownloads: true,
+				RemoveFailedDownloads:    true,
+				Priority:                 1,
+				Protocol:                 "Usenet",
 				Fields: []*starr.FieldInput{
 					{Name: "host", Value: altmountHost},
 					{Name: "port", Value: altmountPort},
@@ -473,6 +821,70 @@ func (m *Manager) TestDownloadClientRegistration(ctx context.Context, altmountHo
 			}
 
 			dc := &sonarr.DownloadClientInput{
+				Name:                     "AltMount Test",
+				Implementation:           "SABnzbd",
+				ConfigContract:           "SABnzbdSettings",
+				Enable:                   true,
+				RemoveCompletedDownloads: true,
+				RemoveFailedDownloads:    true,
+				Priority:                 1,
+				Protocol:                 "Usenet",
+				Fields: []*starr.FieldInput{
+					{Name: "host", Value: altmountHost},
+					{Name: "port", Value: altmountPort},
+					{Name: "urlBase", Value: urlBase},
+					{Name: "apiKey", Value: apiKey},
+					{Name: "tvCategory", Value: category},
+					{Name: "useSsl", Value: false},
+				},
+			}
+			testErr = client.TestDownloadClientContext(ctx, dc)
+
+		case "lidarr":
+			client, err := m.clients.GetOrCreateLidarrClient(instance.Name, instance.URL, instance.APIKey)
+			if err != nil {
+				results[instance.Name] = fmt.Sprintf("Failed to create client: %v", err)
+				continue
+			}
+
+			category := instance.Category
+			if category == "" {
+				category = ""
+			}
+
+			dc := &lidarr.DownloadClientInput{
+				Name:                     "AltMount Test",
+				Implementation:           "SABnzbd",
+				ConfigContract:           "SABnzbdSettings",
+				Enable:                   true,
+				RemoveCompletedDownloads: true,
+				RemoveFailedDownloads:    true,
+				Priority:                 1,
+				Protocol:                 "Usenet",
+				Fields: []*starr.FieldInput{
+					{Name: "host", Value: altmountHost},
+					{Name: "port", Value: altmountPort},
+					{Name: "urlBase", Value: urlBase},
+					{Name: "apiKey", Value: apiKey},
+					{Name: "musicCategory", Value: category},
+					{Name: "useSsl", Value: false},
+				},
+			}
+			testErr = client.TestDownloadClientContext(ctx, dc)
+
+		case "readarr":
+			client, err := m.clients.GetOrCreateReadarrClient(instance.Name, instance.URL, instance.APIKey)
+			if err != nil {
+				results[instance.Name] = fmt.Sprintf("Failed to create client: %v", err)
+				continue
+			}
+
+			category := instance.Category
+			if category == "" {
+				category = ""
+			}
+
+			dc := &readarr.DownloadClientInput{
 				Name:           "AltMount Test",
 				Implementation: "SABnzbd",
 				ConfigContract: "SABnzbdSettings",
@@ -484,7 +896,8 @@ func (m *Manager) TestDownloadClientRegistration(ctx context.Context, altmountHo
 					{Name: "port", Value: altmountPort},
 					{Name: "urlBase", Value: urlBase},
 					{Name: "apiKey", Value: apiKey},
-					{Name: "tvCategory", Value: category},
+					{Name: "musicCategory", Value: category},
+					{Name: "bookCategory", Value: category},
 					{Name: "useSsl", Value: false},
 				},
 			}
