@@ -222,7 +222,7 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 				newConfig.Providers[i].Password = oldPwdByID[newConfig.Providers[i].ID]
 			}
 		}
-	case "webdav", "api", "auth", "database", "metadata", "streaming", "health", "rclone", "import", "log", "sabnzbd", "arrs", "fuse", "segment_cache", "system", "mount_path", "mount", "stremio":
+	case "webdav", "api", "auth", "database", "metadata", "streaming", "health", "rclone", "import", "log", "sabnzbd", "arrs", "fuse", "segment_cache", "system", "mount_path", "mount", "stremio", "nzblnk":
 		err = c.BodyParser(newConfig)
 		// BodyParser will map fields like "profiler_enabled" from JSON to the root of newConfig
 		// because Config struct has it with `json:"profiler_enabled"`.

@@ -21,6 +21,7 @@ export interface ConfigResponse {
 	arrs: ArrsConfig;
 	stremio: StremioConfig;
 	providers: ProviderConfig[];
+	nzblnk: NzblnkConfig;
 	mount_path: string;
 	mount_type: MountType;
 	api_key?: string;
@@ -256,9 +257,15 @@ export interface ProviderConfig {
 	skip_ping?: boolean;
 	keepalive_interval_seconds?: number;
 	keepalive_command?: string;
+	user_agent?: string;
 	last_rtt_ms?: number;
 	last_speed_test_mbps?: number;
 	last_speed_test_time?: string;
+}
+
+// NZBLNK resolver configuration
+export interface NzblnkConfig {
+	user_agent?: string;
 }
 
 // SABnzbd configuration
@@ -298,6 +305,7 @@ export interface ConfigUpdateRequest {
 	arrs?: ArrsConfig;
 	stremio?: Partial<StremioConfig>;
 	providers?: ProviderUpdateRequest[];
+	nzblnk?: NzblnkConfig;
 	mount_path?: string;
 	mount_type?: MountType;
 	profiler_enabled?: boolean;
@@ -453,6 +461,7 @@ export interface ProviderUpdateRequest {
 	skip_ping?: boolean;
 	keepalive_interval_seconds?: number;
 	keepalive_command?: string;
+	user_agent?: string;
 }
 
 // SABnzbd update request
@@ -480,6 +489,7 @@ export type ConfigSection =
 	| "sabnzbd"
 	| "arrs"
 	| "stremio"
+	| "nzblnk"
 	| "system";
 
 // Form data interfaces for UI components
@@ -635,6 +645,7 @@ export interface ProviderFormData {
 	skip_ping: boolean;
 	keepalive_interval_seconds: number;
 	keepalive_command: string;
+	user_agent: string;
 }
 
 export interface LogFormData {
@@ -655,7 +666,7 @@ export interface SABnzbdFormData {
 }
 
 // Arrs configuration types
-export type ArrsType = "radarr" | "sonarr";
+export type ArrsType = "radarr" | "sonarr" | "lidarr" | "readarr" | "whisparr";
 
 // Sync status types
 export type SyncStatus = "idle" | "running" | "cancelling" | "completed" | "failed";
@@ -695,6 +706,9 @@ export interface ArrsConfig {
 	webhook_base_url?: string;
 	radarr_instances: ArrsInstanceConfig[];
 	sonarr_instances: ArrsInstanceConfig[];
+	lidarr_instances: ArrsInstanceConfig[];
+	readarr_instances: ArrsInstanceConfig[];
+	whisparr_instances: ArrsInstanceConfig[];
 	queue_cleanup_enabled?: boolean;
 	queue_cleanup_interval_seconds?: number;
 	queue_cleanup_grace_period_minutes?: number;
@@ -729,6 +743,9 @@ export interface ArrsFormData {
 	webhook_base_url?: string;
 	radarr_instances: ArrsInstanceConfig[];
 	sonarr_instances: ArrsInstanceConfig[];
+	lidarr_instances: ArrsInstanceConfig[];
+	readarr_instances: ArrsInstanceConfig[];
+	whisparr_instances: ArrsInstanceConfig[];
 	queue_cleanup_enabled?: boolean;
 	queue_cleanup_interval_seconds?: number;
 	queue_cleanup_grace_period_minutes?: number;
@@ -797,6 +814,7 @@ export interface ProviderCreateRequest {
 	skip_ping?: boolean;
 	keepalive_interval_seconds?: number;
 	keepalive_command?: string;
+	user_agent?: string;
 }
 
 export interface ProviderReorderRequest {
@@ -880,9 +898,9 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		canEdit: true,
 	},
 	arrs: {
-		title: "Radarr/Sonarr Management",
+		title: "ARR Management",
 		description:
-			"Configure Radarr and Sonarr instances for movie and TV show file synchronization. This will allow to repair broken files by notifying the appropriate service.",
+			"Configure Radarr, Sonarr, Lidarr, Readarr, and Whisparr instances for media file synchronization and automatic repair.",
 		icon: "Cog",
 		canEdit: true,
 	},
@@ -890,6 +908,12 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		title: "Stremio",
 		description: "Stremio NZB stream endpoint — upload an NZB and receive instant stream URLs",
 		icon: "Tv",
+		canEdit: true,
+	},
+	nzblnk: {
+		title: "NZBLNK",
+		description: "Settings for resolving nzblnk:// links via public NZB indexers",
+		icon: "Link",
 		canEdit: true,
 	},
 	system: {

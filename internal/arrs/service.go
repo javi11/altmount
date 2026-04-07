@@ -28,7 +28,7 @@ var (
 	ErrInstanceNotFound        = model.ErrInstanceNotFound
 )
 
-// Service manages Radarr and Sonarr instances for health monitoring and file repair
+// Service manages Radarr, Sonarr, Lidarr, Readarr, and Whisparr instances for health monitoring and file repair
 type Service struct {
 	configGetter  config.ConfigGetter
 	configManager model.ConfigManager
@@ -222,28 +222,31 @@ func (s *Service) GetHealth(ctx context.Context) (map[string]any, error) {
 		switch instance.Type {
 		case "radarr":
 			client, err := s.clients.GetOrCreateRadarrClient(instance.Name, instance.URL, instance.APIKey)
-			if err != nil {
-				slog.ErrorContext(ctx, "Failed to create Radarr client for health check", "instance", instance.Name, "error", err)
-				continue
+			if err == nil {
+				_ = client.GetInto(ctx, starr.Request{URI: "/health"}, &health)
 			}
-			err = client.GetInto(ctx, starr.Request{URI: "/health"}, &health)
-			if err != nil {
-				slog.ErrorContext(ctx, "Failed to get Radarr health", "instance", instance.Name, "error", err)
-				continue
-			}
-			results[instance.Name] = health
-
 		case "sonarr":
 			client, err := s.clients.GetOrCreateSonarrClient(instance.Name, instance.URL, instance.APIKey)
-			if err != nil {
-				slog.ErrorContext(ctx, "Failed to create Sonarr client for health check", "instance", instance.Name, "error", err)
-				continue
+			if err == nil {
+				_ = client.GetInto(ctx, starr.Request{URI: "/health"}, &health)
 			}
-			err = client.GetInto(ctx, starr.Request{URI: "/health"}, &health)
-			if err != nil {
-				slog.ErrorContext(ctx, "Failed to get Sonarr health", "instance", instance.Name, "error", err)
-				continue
+		case "lidarr":
+			client, err := s.clients.GetOrCreateLidarrClient(instance.Name, instance.URL, instance.APIKey)
+			if err == nil {
+				_ = client.GetInto(ctx, starr.Request{URI: "/health"}, &health)
 			}
+		case "readarr":
+			client, err := s.clients.GetOrCreateReadarrClient(instance.Name, instance.URL, instance.APIKey)
+			if err == nil {
+				_ = client.GetInto(ctx, starr.Request{URI: "/health"}, &health)
+			}
+		case "whisparr":
+			client, err := s.clients.GetOrCreateWhisparrClient(instance.Name, instance.URL, instance.APIKey)
+			if err == nil {
+				_ = client.GetInto(ctx, starr.Request{URI: "/health"}, &health)
+			}
+		}
+		if health != nil {
 			results[instance.Name] = health
 		}
 	}

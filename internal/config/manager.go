@@ -53,9 +53,17 @@ type Config struct {
 	Fuse            FuseConfig         `yaml:"fuse" mapstructure:"fuse" json:"fuse"`
 	SegmentCache    SegmentCacheConfig `yaml:"segment_cache" mapstructure:"segment_cache" json:"segment_cache"`
 	Providers       []ProviderConfig   `yaml:"providers" mapstructure:"providers" json:"providers"`
+	Nzblnk          NzblnkConfig       `yaml:"nzblnk" mapstructure:"nzblnk" json:"nzblnk"`
 	MountPath       string             `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"`
 	MountType       MountType          `yaml:"mount_type" mapstructure:"mount_type" json:"mount_type"`
 	ProfilerEnabled bool               `yaml:"profiler_enabled" mapstructure:"profiler_enabled" json:"profiler_enabled" default:"false"`
+}
+
+// NzblnkConfig configures the NZBLNK resolver (used for nzblnk:// link resolution via public indexers).
+type NzblnkConfig struct {
+	// UserAgent is the HTTP User-Agent sent to indexers when resolving nzblnk:// links.
+	// Defaults to a browser-like string. Leave empty to use the default.
+	UserAgent string `yaml:"user_agent" mapstructure:"user_agent" json:"user_agent,omitempty"`
 }
 
 // SegmentCacheConfig configures the segment-aligned disk cache shared by FUSE and WebDAV.
@@ -335,6 +343,7 @@ type ProviderConfig struct {
 	SkipPing                 bool       `yaml:"skip_ping" mapstructure:"skip_ping" json:"skip_ping,omitempty"`
 	KeepaliveIntervalSeconds int        `yaml:"keepalive_interval_seconds" mapstructure:"keepalive_interval_seconds" json:"keepalive_interval_seconds,omitempty"`
 	KeepaliveCommand         string     `yaml:"keepalive_command" mapstructure:"keepalive_command" json:"keepalive_command,omitempty"`
+	UserAgent                string     `yaml:"user_agent" mapstructure:"user_agent" json:"user_agent,omitempty"`
 	LastRTTMs                int64      `yaml:"last_rtt_ms" mapstructure:"last_rtt_ms" json:"last_rtt_ms,omitempty"`
 	LastSpeedTestMbps float64    `yaml:"last_speed_test_mbps" mapstructure:"last_speed_test_mbps" json:"last_speed_test_mbps,omitempty"`
 	LastSpeedTestTime *time.Time `yaml:"last_speed_test_time" mapstructure:"last_speed_test_time" json:"last_speed_test_time,omitempty"`
@@ -373,6 +382,9 @@ type ArrsConfig struct {
 	WebhookBaseURL                 string               `yaml:"webhook_base_url" mapstructure:"webhook_base_url" json:"webhook_base_url,omitempty"`
 	RadarrInstances                []ArrsInstanceConfig `yaml:"radarr_instances" mapstructure:"radarr_instances" json:"radarr_instances"`
 	SonarrInstances                []ArrsInstanceConfig `yaml:"sonarr_instances" mapstructure:"sonarr_instances" json:"sonarr_instances"`
+	LidarrInstances                []ArrsInstanceConfig `yaml:"lidarr_instances" mapstructure:"lidarr_instances" json:"lidarr_instances"`
+	ReadarrInstances               []ArrsInstanceConfig `yaml:"readarr_instances" mapstructure:"readarr_instances" json:"readarr_instances"`
+	WhisparrInstances              []ArrsInstanceConfig `yaml:"whisparr_instances" mapstructure:"whisparr_instances" json:"whisparr_instances"`
 	QueueCleanupEnabled            *bool                `yaml:"queue_cleanup_enabled" mapstructure:"queue_cleanup_enabled" json:"queue_cleanup_enabled,omitempty"`
 	QueueCleanupIntervalSeconds    int                  `yaml:"queue_cleanup_interval_seconds" mapstructure:"queue_cleanup_interval_seconds" json:"queue_cleanup_interval_seconds,omitempty"`
 	CleanupAutomaticImportFailure  *bool                `yaml:"cleanup_automatic_import_failure" mapstructure:"cleanup_automatic_import_failure" json:"cleanup_automatic_import_failure,omitempty"`
@@ -800,6 +812,7 @@ func (p *ProviderConfig) ToNNTPProvider() nntppool.Provider {
 		SkipPing:          p.SkipPing,
 		KeepaliveInterval: time.Duration(p.KeepaliveIntervalSeconds) * time.Second,
 		KeepaliveCommand:  p.KeepaliveCommand,
+		UserAgent:         p.UserAgent,
 	}
 }
 
@@ -1194,7 +1207,8 @@ func DefaultConfig(configDir ...string) *Config {
 	loginRequired := true      // Require login by default
 	stremioEnabled := false    // Stremio endpoint disabled by default
 	prowlarrEnabled := false   // Prowlarr integration disabled by default
-	watchIntervalSeconds := 10 // Default watch interval
+	watchIntervalSeconds := 10        // Default watch interval
+	failedItemRetentionHours := 24    // Default: auto-remove failed items after 24 hours
 	cleanupAutomaticImportFailure := false
 	metadataBackupEnabled := false
 	failureMaskingEnabled := true
@@ -1317,9 +1331,10 @@ func DefaultConfig(configDir ...string) *Config {
 		Import: ImportConfig{
 			MaxProcessorWorkers:            2, // Default: 2 processor workers
 			QueueProcessingIntervalSeconds: 5, // Default: check for work every 5 seconds
-			AllowedFileExtensions: []string{ // Default: common video extensions
+			AllowedFileExtensions: []string{ // Default: common media extensions
 				".mkv", ".mp4", ".avi", ".ts", ".m4v", ".mov", ".wmv", ".mpg", ".mpeg",
 				".xvid", ".rm", ".rmvb", ".asf", ".asx", ".wtv", ".mk3d", ".dvr-ms",
+				".mp3", ".flac", ".m4a", ".epub", ".pdf", ".cbz",
 			},
 			MaxImportConnections:    5,                  // Default: 5 concurrent NNTP connections for validation and archive processing
 			MaxDownloadPrefetch:     10,                 // Default: 10 segments prefetched ahead for archive analysis
@@ -1329,6 +1344,7 @@ func DefaultConfig(configDir ...string) *Config {
 			ImportDir:               nil,                // No default import directory
 			WatchDir:                nil,
 			WatchIntervalSeconds:    &watchIntervalSeconds,
+			FailedItemRetentionHours: &failedItemRetentionHours,
 		},
 		Log: LogConfig{
 			File:       logPath, // Default log file path
@@ -1370,17 +1386,38 @@ func DefaultConfig(configDir ...string) *Config {
 					Order:    1,
 					Priority: 1,
 				},
+				{
+					Name:     "Music",
+					Order:    1,
+					Priority: 2,
+				},
+				{
+					Name:     "Books",
+					Order:    1,
+					Priority: 3,
+				},
+				{
+					Name:     "Adult",
+					Order:    1,
+					Priority: 4,
+				},
 			},
 			FallbackHost:   "",
 			FallbackAPIKey: "",
 		},
 		Providers: []ProviderConfig{},
+		Nzblnk: NzblnkConfig{
+			UserAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+		},
 		Arrs: ArrsConfig{
 			Enabled:                        &scrapperEnabled, // Disabled by default
 			MaxWorkers:                     5,                // Default to 5 concurrent workers
 			WebhookBaseURL:                 "",
 			RadarrInstances:                []ArrsInstanceConfig{},
 			SonarrInstances:                []ArrsInstanceConfig{},
+			LidarrInstances:                []ArrsInstanceConfig{},
+			ReadarrInstances:               []ArrsInstanceConfig{},
+			WhisparrInstances:              []ArrsInstanceConfig{},
 			CleanupAutomaticImportFailure:  &cleanupAutomaticImportFailure,
 			QueueCleanupGracePeriodMinutes: 10, // Default to 10 minutes
 			QueueCleanupAllowlist: []IgnoredMessage{

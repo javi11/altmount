@@ -513,7 +513,7 @@ export function ImportConfigSection({
 						<input
 							type="number"
 							className="input input-bordered w-full min-w-0 max-w-full bg-base-100 font-mono text-sm"
-							value={formData.failed_item_retention_hours ?? 24}
+							value={formData.failed_item_retention_hours ?? 0}
 							readOnly={isReadOnly}
 							min={0}
 							onChange={(e) =>

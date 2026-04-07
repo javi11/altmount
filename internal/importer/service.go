@@ -1125,7 +1125,7 @@ func (s *Service) runFailedItemCleanup(ctx context.Context) {
 // and removes their associated NZB files.
 func (s *Service) cleanupFailedItems(ctx context.Context) {
 	cfg := s.configGetter()
-	retentionHours := 24 // default
+	retentionHours := 0
 	if cfg.Import.FailedItemRetentionHours != nil {
 		retentionHours = *cfg.Import.FailedItemRetentionHours
 	}

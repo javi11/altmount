@@ -26,6 +26,7 @@ const defaultFormData: ProviderFormData = {
 	skip_ping: false,
 	keepalive_interval_seconds: 0,
 	keepalive_command: "",
+	user_agent: "",
 };
 
 export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderModalProps) {
@@ -59,6 +60,7 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 				skip_ping: provider.skip_ping ?? false,
 				keepalive_interval_seconds: provider.keepalive_interval_seconds ?? 0,
 				keepalive_command: provider.keepalive_command ?? "",
+				user_agent: provider.user_agent ?? "",
 			});
 			// For edit mode, allow saving without testing if only non-connection fields change
 			setCanSave(true);
@@ -167,6 +169,8 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 					updateData.keepalive_interval_seconds = formData.keepalive_interval_seconds;
 				if (formData.keepalive_command !== (provider.keepalive_command ?? ""))
 					updateData.keepalive_command = formData.keepalive_command;
+				if (formData.user_agent !== (provider.user_agent ?? ""))
+					updateData.user_agent = formData.user_agent;
 
 				await updateProvider.mutateAsync({
 					id: provider.id,
@@ -440,6 +444,22 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 							</fieldset>
 						</div>
 					</div>
+
+					{/* User-Agent */}
+					<fieldset className="fieldset">
+						<legend className="fieldset-legend font-bold">User-Agent (Optional)</legend>
+						<input
+							id="user_agent"
+							type="text"
+							className="input input-bordered w-full font-mono text-sm"
+							value={formData.user_agent}
+							onChange={(e) => handleInputChange("user_agent", e.target.value)}
+							placeholder="e.g. SABnzbd/4.5.5"
+						/>
+						<p className="label mt-1 text-base-content/70 text-xs">
+							Sent to the NNTP server. Leave empty to disable.
+						</p>
+					</fieldset>
 
 					{/* Connection Test */}
 					<div className="min-w-0 space-y-4 border-base-300/50 border-t pt-4">

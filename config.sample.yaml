@@ -112,7 +112,7 @@ rclone:
 import:
   max_processor_workers: 2 # Number of NZB processor workers
   queue_processing_interval_seconds: 5 # Queue processing interval in seconds
-  # Allowed file extensions for import (video formats)
+  # Allowed file extensions for import (video, audio, and book formats)
   allowed_file_extensions:
     - '.mp4'
     - '.mkv'
@@ -146,6 +146,12 @@ import:
     - '.wtv'
     - '.mk3d'
     - '.dvr-ms'
+    - '.mp3'
+    - '.flac'
+    - '.m4a'
+    - '.epub'
+    - '.pdf'
+    - '.cbz'
   max_import_connections: 5 # Number of concurrent NNTP connections for validation and archive processing
   import_cache_size_mb: 64 # Cache size in MB for archive analysis
   segment_sample_percentage: 1 # Percentage of segments to sample for validation (1-100)
@@ -190,16 +196,31 @@ sabnzbd:
       order: 2
       priority: 0
       dir: 'tv'
+    - name: 'music'
+      order: 3
+      priority: 0
+      dir: 'music'
+    - name: 'books'
+      order: 4
+      priority: 0
+      dir: 'books'
+    - name: 'adult'
+      order: 5
+      priority: 0
+      dir: 'adult'
   # Fallback configuration for sending failed imports to external SABnzbd
   fallback_host: '' # External SABnzbd URL (e.g., "http://localhost:8080")
   fallback_api_key: '' # External SABnzbd API key
 
-# Radarr/Sonarr arrs configuration
+# Radarr/Sonarr/Lidarr/Readarr/Whisparr arrs configuration
 arrs:
   enabled: false # Enable arrs service
   max_workers: 5 # Number of concurrent workers (default: 5)
   radarr_instances: [] # Radarr instances (configured via UI)
   sonarr_instances: [] # Sonarr instances (configured via UI)
+  lidarr_instances: [] # Lidarr instances (configured via UI)
+  readarr_instances: [] # Readarr instances (configured via UI)
+  whisparr_instances: [] # Whisparr instances (configured via UI)
   # Queue Cleanup Configuration
   queue_cleanup_enabled: true # Enable automatic queue cleanup for failed imports (default: true)
   queue_cleanup_interval_seconds: 10 # Interval in seconds to check for failed imports (default: 10)
