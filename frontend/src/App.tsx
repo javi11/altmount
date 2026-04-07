@@ -3,6 +3,7 @@ import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { ProtectedRoute } from "./components/auth/ProtectedRoute";
 import { Layout } from "./components/layout/Layout";
+import { PWAUpdatePrompt } from "./components/ui/PWAUpdatePrompt";
 import { ToastContainer } from "./components/ui/ToastContainer";
 import { AuthProvider } from "./contexts/AuthContext";
 import { ModalProvider } from "./contexts/ModalContext";
@@ -60,6 +61,7 @@ function App() {
 								</Routes>
 							</div>
 							<ToastContainer />
+							<PWAUpdatePrompt />
 						</BrowserRouter>
 					</AuthProvider>
 				</ModalProvider>

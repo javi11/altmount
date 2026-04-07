@@ -8,7 +8,8 @@
 		"build": "tsc -b && vite build",
 		"lint": "biome lint --write --unsafe ./src",
 		"check": "biome check --write --unsafe ./src",
-		"preview": "vite preview"
+		"preview": "vite preview",
+		"pwa-assets": "pwa-assets-generator --preset minimal public/logo.png"
 	},
 	"dependencies": {
 		"@tanstack/react-query": "^5.85.5",
@@ -34,10 +35,12 @@
 		"@types/node": "^24.3.1",
 		"@types/react": "^19.1.10",
 		"@types/react-dom": "^19.1.7",
+		"@vite-pwa/assets-generator": "^1.0.2",
 		"@vitejs/plugin-react": "^5.0.0",
 		"daisyui": "^5.0.50",
 		"tailwindcss": "^4.1.12",
 		"typescript": "~5.8.3",
-		"vite": "^7.1.2"
+		"vite": "^7.1.2",
+		"vite-plugin-pwa": "^1.2.0"
 	}
 }
