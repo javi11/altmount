@@ -252,9 +252,9 @@ export function HealthPage() {
 		const isBulk = filePaths && filePaths.length > 0;
 		const message = isBulk
 			? filePaths.length === 1
-				? "Recreates the symlink or STRM file for this item at its stored library path (e.g. as renamed by Sonarr/Radarr). If no library path is stored, it will be created at the import directory."
-				: `Recreates the symlink or STRM file for ${filePaths.length} selected items at their stored library paths (e.g. as renamed by Sonarr/Radarr). Items without a stored path will be created at the import directory.`
-			: "Recreates symlinks or STRM files for all records at their stored library paths (e.g. as renamed by Sonarr/Radarr). Records without a stored path will be created at the import directory. This does not re-download any content.";
+				? "Recreates the symlink or STRM file for this item at its stored library path (e.g. as renamed by ARR applications). If no library path is stored, it will be created at the import directory."
+				: `Recreates the symlink or STRM file for ${filePaths.length} selected items at their stored library paths (e.g. as renamed by ARR applications). Items without a stored path will be created at the import directory.`
+			: "Recreates symlinks or STRM files for all records at their stored library paths (e.g. as renamed by ARR applications). Records without a stored path will be created at the import directory. This does not re-download any content.";
 
 		const confirmed = await confirmAction("Regenerate Library Files", message, {
 			type: "info",
@@ -385,7 +385,7 @@ export function HealthPage() {
 					showToast({
 						title: "File Not Found in ARR",
 						message:
-							"This file is not managed by any configured Radarr or Sonarr instance. Please check your ARR configuration and ensure the file is in your media library.",
+							"This file is not managed by any configured ARR instance. Please check your ARR configuration and ensure the file is in your media library.",
 						type: "warning",
 					});
 					return;

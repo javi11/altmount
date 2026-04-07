@@ -10,9 +10,11 @@ import (
 	"github.com/javi11/altmount/internal/arrs/model"
 	"github.com/javi11/altmount/internal/config"
 	"golift.io/starr"
+	"golift.io/starr/lidarr"
 	"golift.io/starr/radarr"
+	"golift.io/starr/readarr"
 	"golift.io/starr/sonarr"
-)
+	)
 
 type Manager struct {
 	configGetter  config.ConfigGetter
@@ -56,6 +58,50 @@ func (m *Manager) GetAllInstances() []*model.ConfigInstance {
 				APIKey:   sonarrConfig.APIKey,
 				Category: sonarrConfig.Category,
 				Enabled:  sonarrConfig.Enabled != nil && *sonarrConfig.Enabled,
+			}
+			instances = append(instances, instance)
+		}
+	}
+	// Convert Lidarr instances
+	if len(cfg.Arrs.LidarrInstances) > 0 {
+		for _, lidarrConfig := range cfg.Arrs.LidarrInstances {
+			instance := &model.ConfigInstance{
+				Name:     lidarrConfig.Name,
+				Type:     "lidarr",
+				URL:      lidarrConfig.URL,
+				APIKey:   lidarrConfig.APIKey,
+				Category: lidarrConfig.Category,
+				Enabled:  lidarrConfig.Enabled != nil && *lidarrConfig.Enabled,
+			}
+			instances = append(instances, instance)
+		}
+	}
+
+	// Convert Readarr instances
+	if len(cfg.Arrs.ReadarrInstances) > 0 {
+		for _, readarrConfig := range cfg.Arrs.ReadarrInstances {
+			instance := &model.ConfigInstance{
+				Name:     readarrConfig.Name,
+				Type:     "readarr",
+				URL:      readarrConfig.URL,
+				APIKey:   readarrConfig.APIKey,
+				Category: readarrConfig.Category,
+				Enabled:  readarrConfig.Enabled != nil && *readarrConfig.Enabled,
+			}
+			instances = append(instances, instance)
+		}
+	}
+
+	// Convert Whisparr instances
+	if len(cfg.Arrs.WhisparrInstances) > 0 {
+		for _, whisparrConfig := range cfg.Arrs.WhisparrInstances {
+			instance := &model.ConfigInstance{
+				Name:     whisparrConfig.Name,
+				Type:     "whisparr",
+				URL:      whisparrConfig.URL,
+				APIKey:   whisparrConfig.APIKey,
+				Category: whisparrConfig.Category,
+				Enabled:  whisparrConfig.Enabled != nil && *whisparrConfig.Enabled,
 			}
 			instances = append(instances, instance)
 		}
@@ -113,6 +159,12 @@ func (m *Manager) RegisterInstance(ctx context.Context, arrURL, apiKey string) (
 		category = "movies"
 	case "sonarr":
 		category = "tv"
+	case "lidarr":
+		category = "music"
+	case "readarr":
+		category = "books"
+	case "whisparr":
+		category = "movies"
 	default:
 		return false, fmt.Errorf("unsupported ARR type: %s", arrType)
 	}
@@ -154,6 +206,12 @@ func (m *Manager) RegisterInstance(ctx context.Context, arrURL, apiKey string) (
 		newConfig.Arrs.RadarrInstances = append(newConfig.Arrs.RadarrInstances, newInstance)
 	case "sonarr":
 		newConfig.Arrs.SonarrInstances = append(newConfig.Arrs.SonarrInstances, newInstance)
+	case "lidarr":
+		newConfig.Arrs.LidarrInstances = append(newConfig.Arrs.LidarrInstances, newInstance)
+	case "readarr":
+		newConfig.Arrs.ReadarrInstances = append(newConfig.Arrs.ReadarrInstances, newInstance)
+	case "whisparr":
+		newConfig.Arrs.WhisparrInstances = append(newConfig.Arrs.WhisparrInstances, newInstance)
 	}
 
 	// Create category for this ARR type
@@ -192,6 +250,12 @@ func (m *Manager) detectARRType(ctx context.Context, arrURL, apiKey string) (str
 		case "Sonarr":
 			slog.DebugContext(ctx, "Detected Sonarr instance", "url", arrURL)
 			return "sonarr", nil
+		case "Lidarr":
+			return "lidarr", nil
+		case "Readarr":
+			return "readarr", nil
+		case "Whisparr":
+			return "whisparr", nil
 		default:
 			slog.DebugContext(ctx, "Unknown AppName from Radarr client", "app_name", radarrStatus.AppName, "url", arrURL)
 		}
@@ -208,12 +272,56 @@ func (m *Manager) detectARRType(ctx context.Context, arrURL, apiKey string) (str
 		case "Sonarr":
 			slog.DebugContext(ctx, "Detected Sonarr instance", "url", arrURL)
 			return "sonarr", nil
+		case "Lidarr":
+			return "lidarr", nil
+		case "Readarr":
+			return "readarr", nil
+		case "Whisparr":
+			return "whisparr", nil
 		default:
 			slog.DebugContext(ctx, "Unknown AppName from Sonarr client", "app_name", sonarrStatus.AppName, "url", arrURL)
 		}
 	}
+	// Try Lidarr
+	lidarrClient := lidarr.New(&starr.Config{URL: arrURL, APIKey: apiKey})
+	lidarrStatus, err := lidarrClient.GetSystemStatusContext(ctx)
+	if err == nil {
+		switch lidarrStatus.AppName {
+		case "Lidarr":
+			slog.DebugContext(ctx, "Detected Lidarr instance", "url", arrURL)
+			return "lidarr", nil
+		default:
+			slog.DebugContext(ctx, "Unknown AppName from Lidarr client", "app_name", lidarrStatus.AppName, "url", arrURL)
+		}
+	}
 
-	return "", fmt.Errorf("unable to detect ARR type for URL %s - neither Radarr nor Sonarr responded successfully", arrURL)
+	// Try Readarr
+	readarrClient := readarr.New(&starr.Config{URL: arrURL, APIKey: apiKey})
+	readarrStatus, err := readarrClient.GetSystemStatusContext(ctx)
+	if err == nil {
+		switch readarrStatus.AppName {
+		case "Readarr":
+			slog.DebugContext(ctx, "Detected Readarr instance", "url", arrURL)
+			return "readarr", nil
+		default:
+			slog.DebugContext(ctx, "Unknown AppName from Readarr client", "app_name", readarrStatus.AppName, "url", arrURL)
+		}
+	}
+
+	// Try Whisparr (using Radarr client)
+	whisparrClient := radarr.New(&starr.Config{URL: arrURL, APIKey: apiKey})
+	whisparrStatus, err := whisparrClient.GetSystemStatusContext(ctx)
+	if err == nil {
+		switch whisparrStatus.AppName {
+		case "Whisparr":
+			slog.DebugContext(ctx, "Detected Whisparr instance", "url", arrURL)
+			return "whisparr", nil
+		default:
+			slog.DebugContext(ctx, "Unknown AppName from Whisparr client", "app_name", whisparrStatus.AppName, "url", arrURL)
+		}
+	}
+
+	return "", fmt.Errorf("unable to detect ARR type for URL %s - no ARR responded successfully", arrURL)
 }
 
 // generateInstanceName generates an instance name from a URL
@@ -266,15 +374,28 @@ func (m *Manager) categoryUsedByOtherInstance(arrType, category string) bool {
 		instances = cfg.Arrs.RadarrInstances
 	case "sonarr":
 		instances = cfg.Arrs.SonarrInstances
+	case "lidarr":
+		instances = cfg.Arrs.LidarrInstances
+	case "readarr":
+		instances = cfg.Arrs.ReadarrInstances
+	case "whisparr":
+		instances = cfg.Arrs.WhisparrInstances
 	}
 
 	for _, instance := range instances {
 		instanceCat := instance.Category
 		if instanceCat == "" {
-			if arrType == "radarr" {
+			switch arrType {
+			case "radarr":
 				instanceCat = "movies"
-			} else {
+			case "sonarr":
 				instanceCat = "tv"
+			case "lidarr":
+				instanceCat = "music"
+			case "readarr":
+				instanceCat = "books"
+			case "whisparr":
+				instanceCat = "movies"
 			}
 		}
 
