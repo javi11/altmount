@@ -1194,7 +1194,8 @@ func DefaultConfig(configDir ...string) *Config {
 	loginRequired := true      // Require login by default
 	stremioEnabled := false    // Stremio endpoint disabled by default
 	prowlarrEnabled := false   // Prowlarr integration disabled by default
-	watchIntervalSeconds := 10 // Default watch interval
+	watchIntervalSeconds := 10        // Default watch interval
+	failedItemRetentionHours := 24    // Default: auto-remove failed items after 24 hours
 	cleanupAutomaticImportFailure := false
 	metadataBackupEnabled := false
 	failureMaskingEnabled := true
@@ -1329,6 +1330,7 @@ func DefaultConfig(configDir ...string) *Config {
 			ImportDir:               nil,                // No default import directory
 			WatchDir:                nil,
 			WatchIntervalSeconds:    &watchIntervalSeconds,
+			FailedItemRetentionHours: &failedItemRetentionHours,
 		},
 		Log: LogConfig{
 			File:       logPath, // Default log file path
