@@ -12,21 +12,19 @@ import (
 )
 
 const (
-	// User-Agent to use for indexer requests (browser-like)
-	userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-
 	// Maximum response size to prevent memory issues (10MB)
 	maxResponseSize = 10 * 1024 * 1024
 )
 
 // NZBKingIndexer searches nzbking.com for NZB files
 type NZBKingIndexer struct {
-	client *http.Client
+	client    *http.Client
+	userAgent string
 }
 
 // NewNZBKingIndexer creates a new NZBKing indexer
-func NewNZBKingIndexer(client *http.Client) *NZBKingIndexer {
-	return &NZBKingIndexer{client: client}
+func NewNZBKingIndexer(client *http.Client, userAgent string) *NZBKingIndexer {
+	return &NZBKingIndexer{client: client, userAgent: userAgent}
 }
 
 // Name returns the indexer name
@@ -45,7 +43,7 @@ func (n *NZBKingIndexer) Search(ctx context.Context, query string) (*SearchResul
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
-	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("User-Agent", n.userAgent)
 
 	resp, err := n.client.Do(req)
 	if err != nil {
@@ -92,7 +90,7 @@ func (n *NZBKingIndexer) DownloadNZB(ctx context.Context, id string) ([]byte, er
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
-	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("User-Agent", n.userAgent)
 
 	resp, err := n.client.Do(req)
 	if err != nil {
@@ -115,12 +113,13 @@ func (n *NZBKingIndexer) DownloadNZB(ctx context.Context, id string) ([]byte, er
 
 // NZBIndexIndexer searches nzbindex.com for NZB files
 type NZBIndexIndexer struct {
-	client *http.Client
+	client    *http.Client
+	userAgent string
 }
 
 // NewNZBIndexIndexer creates a new NZBIndex indexer
-func NewNZBIndexIndexer(client *http.Client) *NZBIndexIndexer {
-	return &NZBIndexIndexer{client: client}
+func NewNZBIndexIndexer(client *http.Client, userAgent string) *NZBIndexIndexer {
+	return &NZBIndexIndexer{client: client, userAgent: userAgent}
 }
 
 // Name returns the indexer name
@@ -139,7 +138,7 @@ func (n *NZBIndexIndexer) Search(ctx context.Context, query string) (*SearchResu
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
-	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("User-Agent", n.userAgent)
 
 	resp, err := n.client.Do(req)
 	if err != nil {
@@ -186,7 +185,7 @@ func (n *NZBIndexIndexer) DownloadNZB(ctx context.Context, id string) ([]byte, e
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
-	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("User-Agent", n.userAgent)
 
 	resp, err := n.client.Do(req)
 	if err != nil {
