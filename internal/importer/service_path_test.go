@@ -57,6 +57,12 @@ func TestCalculateProcessVirtualDir_FailedPath(t *testing.T) {
 			category:     "tv",
 			expectedPath: "/mnt/remotes/altmount/media/tv",
 		},
+		{
+			name:         "no category nzb in watch dir subdirectory",
+			nzbPath:      "/config/.nzbs/Show.S01E05.nzb",
+			basePath:     "Plex_Media/Series/Show (2026)/Season 01",
+			expectedPath: "/mnt/remotes/altmount/Plex_Media/Series/Show (2026)/Season 01",
+		},
 	}
 
 	for _, tt := range tests {
