@@ -70,12 +70,14 @@ func SeparateFiles(files []parser.ParsedFile, nzbType parser.NzbType) (regular, 
 
 	case parser.NzbType7zArchive:
 		for _, file := range files {
-			if file.Is7zArchive {
-				archive = append(archive, file)
-			} else if file.IsPar2Archive || IsPar2File(file.Filename) {
+			if file.IsPar2Archive || IsPar2File(file.Filename) {
 				par2 = append(par2, file)
 			} else {
-				regular = append(regular, file)
+				// When the NZB is a 7z archive, all non-par2 files are archive parts.
+				// Only the first split part (.7z.001) contains the 7z magic bytes; subsequent
+				// parts (.7z.002, .7z.003, …) do not, so per-file Is7zArchive detection is
+				// unreliable. Use the NZB-level type instead.
+				archive = append(archive, file)
 			}
 		}
 

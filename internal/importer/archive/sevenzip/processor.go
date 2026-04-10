@@ -625,27 +625,54 @@ func renameSevenZipFilesAndSort(sevenZipFiles []parser.ParsedFile) []parser.Pars
 	return normalizedFiles
 }
 
-// getPartSuffixSevenZip extracts the part suffix from a 7z filename
+// getPartSuffixSevenZip returns the canonical .7z.NNN suffix for a 7zip volume filename.
+// Handles two multi-volume naming conventions:
+//   - New format (.7z.001, .7z.002, …): preserved as-is
+//   - Old format (.7z for vol 1, .002/.016/… for subsequent vols): converted to .7z.NNN
 func getPartSuffixSevenZip(originalFileName string) string {
+	// Already in new format: .7z.NNN — preserve as-is
 	if matches := sevenZipPartNumberPattern.FindStringSubmatch(originalFileName); len(matches) > 1 {
-		// Keep the original number format with leading zeros (e.g., .001 stays .001)
+		return fmt.Sprintf(".7z.%s", matches[1])
+	}
+
+	lower := strings.ToLower(originalFileName)
+
+	// Old format first volume: name.7z → becomes name.7z.001
+	if strings.HasSuffix(lower, ".7z") {
+		return ".7z.001"
+	}
+
+	// Old format subsequent volumes: name.002, name.016 → become name.7z.002, name.7z.016
+	if matches := numericPatternNumber.FindStringSubmatch(originalFileName); len(matches) > 1 {
 		return fmt.Sprintf(".7z.%s", matches[1])
 	}
 
 	return filepath.Ext(originalFileName)
 }
 
-// extractSevenZipPartNumber extracts numeric part from 7z extension for sorting
+// extractSevenZipPartNumber extracts numeric part from 7z extension for sorting.
+// Handles two multi-volume conventions:
+//   - New format: name.7z.001, name.7z.002, ...  (sevenZipPartNumberPattern)
+//   - Old format: name.7z (vol 1), name.001 (vol 2), name.002 (vol 3), ...
 func extractSevenZipPartNumber(fileName string) int {
+	// New format: .7z.NNN
 	if matches := sevenZipPartNumberPattern.FindStringSubmatch(fileName); len(matches) > 1 {
 		if partNum := archive.ParseInt(matches[1]); partNum > 0 {
 			return partNum
 		}
 	}
 
-	// If it's a .7z file (no part number), it's the first part
+	// Old format first volume: .7z (no part number) → sort before all numbered parts
 	if strings.HasSuffix(strings.ToLower(fileName), ".7z") {
 		return 0
+	}
+
+	// Old format subsequent volumes: plain numeric extension (.001, .002, .016, ...)
+	// These follow the .7z volume so they get part numbers starting at 1.
+	if matches := numericPatternNumber.FindStringSubmatch(fileName); len(matches) > 1 {
+		if partNum := archive.ParseInt(matches[1]); partNum >= 0 {
+			return partNum
+		}
 	}
 
 	return 999999 // Unknown format goes last
