@@ -235,6 +235,27 @@ func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string, pro
 	// Determine NZB type based on content analysis
 	parsed.Type = p.determineNzbType(parsed.Files)
 
+	// Propagate archive type to all non-par2 files.
+	// For split archives only the first volume contains the magic-byte header, so
+	// Is7zArchive / IsRarArchive may be false on subsequent parts even though they
+	// are archive parts. Correct that now that we know the NZB type.
+	switch parsed.Type {
+	case NzbType7zArchive:
+		for i := range parsed.Files {
+			f := &parsed.Files[i]
+			if !f.IsPar2Archive && !fileinfo.IsPar2File(f.Filename) {
+				f.Is7zArchive = true
+			}
+		}
+	case NzbTypeRarArchive:
+		for i := range parsed.Files {
+			f := &parsed.Files[i]
+			if !f.IsPar2Archive && !fileinfo.IsPar2File(f.Filename) {
+				f.IsRarArchive = true
+			}
+		}
+	}
+
 	return parsed, nil
 }
 

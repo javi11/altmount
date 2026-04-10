@@ -91,11 +91,17 @@ func getFileInfo(
 		fileSize = &size
 	}
 
-	// Detect RAR archives (by magic bytes or extension)
-	isRar := HasRarMagic(file.First16KB) || IsRarFile(filename)
+	// Detect RAR archives (by magic bytes or extension).
+	// Also check subjectFilename: the obfuscation override (Gap 5) may reduce a compound
+	// extension like ".7z.002" to just ".002", losing the archive-type signal.
+	// subjectFilename is the raw NZB filename before any processing, so it is unaffected.
+	isRar := HasRarMagic(file.First16KB) || IsRarFile(filename) || IsRarFile(subjectFilename)
 
-	// Gap 3: Detect 7z archives by magic bytes or extension
-	is7z := Has7zMagic(file.First16KB) || Is7zFile(filename)
+	// Gap 3: Detect 7z archives by magic bytes or extension.
+	// Same reasoning: check subjectFilename alongside the processed filename so that
+	// split-archive parts beyond the first (.7z.002, .7z.003, …) are correctly identified
+	// even when the obfuscation override stripped the ".7z" component from the extension.
+	is7z := Has7zMagic(file.First16KB) || Is7zFile(filename) || Is7zFile(subjectFilename)
 
 	// Check selected, subject, and header filenames — yEnc headers often omit the .par2 extension
 	// (e.g. encoder stores "Movie.mkv" in the yEnc name= field for a "Movie.mkv.vol07+8.par2" segment)
