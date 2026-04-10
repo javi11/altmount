@@ -94,7 +94,19 @@ type FuseConfig struct {
 	EntryTimeoutSeconds int    `yaml:"entry_timeout_seconds" mapstructure:"entry_timeout_seconds" json:"entry_timeout_seconds"`
 	MaxCacheSizeMB      int    `yaml:"max_cache_size_mb" mapstructure:"max_cache_size_mb" json:"max_cache_size_mb"`
 	MaxReadAheadMB      int    `yaml:"max_read_ahead_mb" mapstructure:"max_read_ahead_mb" json:"max_read_ahead_mb"`
-	Backend             string `yaml:"backend" mapstructure:"backend" json:"backend"` // "hanwen" or "cgo" (empty = platform default)
+	// UseReadAt, when true, directs the FUSE read path to prefer io.ReaderAt when the opened file supports it
+	// (offset-native reads). Omitted or nil defaults to true after Validate.
+	UseReadAt *bool `yaml:"use_read_at" mapstructure:"use_read_at" json:"use_read_at,omitempty"`
+	Backend   string `yaml:"backend" mapstructure:"backend" json:"backend"` // "hanwen" or "cgo" (empty = platform default)
+}
+
+// UseReadAtEnabled reports whether FUSE should prefer ReadAt-based reads when the underlying file implements io.ReaderAt.
+// Nil means "use default" and is treated as true (matches post-Validate default).
+func (c FuseConfig) UseReadAtEnabled() bool {
+	if c.UseReadAt == nil {
+		return true
+	}
+	return *c.UseReadAt
 }
 
 // APIConfig represents REST API configuration
@@ -726,6 +738,10 @@ func (c *Config) Validate() error {
 	if c.Fuse.MaxReadAheadMB <= 0 {
 		c.Fuse.MaxReadAheadMB = 128 // Default 128MB
 	}
+	if c.Fuse.UseReadAt == nil {
+		v := true
+		c.Fuse.UseReadAt = &v
+	}
 
 	return nil
 }
@@ -1204,6 +1220,7 @@ func DefaultConfig(configDir ...string) *Config {
 	sabnzbdEnabled := false
 	scrapperEnabled := false
 	fuseEnabled := false
+	fuseUseReadAt := true // Prefer offset-native FUSE reads when supported (see fuse.use_read_at)
 	loginRequired := true      // Require login by default
 	stremioEnabled := false    // Stremio endpoint disabled by default
 	prowlarrEnabled := false   // Prowlarr integration disabled by default
@@ -1440,6 +1457,7 @@ func DefaultConfig(configDir ...string) *Config {
 			EntryTimeoutSeconds: 1,
 			MaxCacheSizeMB:      128,
 			MaxReadAheadMB:      128,
+			UseReadAt:           &fuseUseReadAt,
 		},
 		MountPath: "",            // Empty by default - required when ARRs is enabled
 		MountType: MountTypeNone, // No mount system active by default

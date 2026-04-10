@@ -134,6 +134,7 @@ fuse:
     entry_timeout_seconds: 1
     max_cache_size_mb: 128
     max_read_ahead_mb: 128
+    use_read_at: true
 providers: []
 mount_path: ''
 profiler_enabled: false

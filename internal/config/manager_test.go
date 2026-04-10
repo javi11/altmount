@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestConfig_Validate_MountPaths(t *testing.T) {
@@ -222,5 +223,24 @@ func TestConfig_GetDownloadClientBaseURL(t *testing.T) {
 			assert.Equal(t, tt.expected, tt.config.GetDownloadClientBaseURL())
 		})
 	}
+}
+
+func TestFuseConfig_UseReadAt_DefaultsAndHelper(t *testing.T) {
+	cfg := DefaultConfig("/tmp/altmount-test-fuse-use-read-at")
+	require.NoError(t, cfg.Validate())
+	require.NotNil(t, cfg.Fuse.UseReadAt)
+	assert.True(t, *cfg.Fuse.UseReadAt)
+	assert.True(t, cfg.Fuse.UseReadAtEnabled())
+
+	cfgOff := DefaultConfig("/tmp/altmount-test-fuse-use-read-at-off")
+	disabled := false
+	cfgOff.Fuse.UseReadAt = &disabled
+	require.NoError(t, cfgOff.Validate())
+	assert.False(t, cfgOff.Fuse.UseReadAtEnabled())
+
+	var unset FuseConfig
+	assert.True(t, unset.UseReadAtEnabled())
+	unset.UseReadAt = &disabled
+	assert.False(t, unset.UseReadAtEnabled())
 }
 

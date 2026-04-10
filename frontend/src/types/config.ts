@@ -205,6 +205,8 @@ export interface FuseConfig {
 	entry_timeout_seconds: number;
 	max_cache_size_mb: number;
 	max_read_ahead_mb: number;
+	/** Prefer offset-native FUSE reads (ReadAt) when the file supports it. Omitted defaults to true. */
+	use_read_at?: boolean;
 }
 
 // Import strategy type

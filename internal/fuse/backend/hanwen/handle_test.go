@@ -85,6 +85,40 @@ func (m *MockFile) WriteString(s string) (ret int, err error) {
 	return args.Int(0), args.Error(1)
 }
 
+// TestHandle_Read_InterleavedOffsets_BaselineSeekRead models kernel/player behavior: non-sequential
+// offsets (e.g. read-ahead far ahead, then metadata/index probes). Baseline path is Seek+Read per jump;
+// Phase 1+ will prefer io.ReaderAt when fuse.use_read_at is enabled.
+func TestHandle_Read_InterleavedOffsets_BaselineSeekRead(t *testing.T) {
+	mockFile := new(MockFile)
+	logger := slog.Default()
+
+	// First at 0: position already 0 — no Seek.
+	mockFile.On("Read", mock.AnythingOfType("[]uint8")).Return(16, nil).Once()
+	// Jump to 64 KiB (read-ahead), then back to 4 KiB (typical non-seq pattern).
+	mockFile.On("Seek", int64(65536), io.SeekStart).Return(int64(65536), nil).Once()
+	mockFile.On("Read", mock.AnythingOfType("[]uint8")).Return(16, nil).Once()
+	mockFile.On("Seek", int64(4096), io.SeekStart).Return(int64(4096), nil).Once()
+	mockFile.On("Read", mock.AnythingOfType("[]uint8")).Return(16, nil).Once()
+	mockFile.On("Close").Return(nil)
+
+	handle := NewHandle(mockFile, logger, "testfile", nil, nil)
+	defer handle.Release(context.Background())
+
+	ctx := context.Background()
+	dest := make([]byte, 16)
+
+	_, st := handle.Read(ctx, dest, 0)
+	assert.Equal(t, syscall.Errno(0), st)
+	_, st = handle.Read(ctx, dest, 65536)
+	assert.Equal(t, syscall.Errno(0), st)
+	_, st = handle.Read(ctx, dest, 4096)
+	assert.Equal(t, syscall.Errno(0), st)
+
+	handle.Release(ctx)
+	mockFile.AssertExpectations(t)
+	mockFile.AssertNotCalled(t, "ReadAt", mock.Anything, mock.Anything)
+}
+
 func TestHandle_Read_SeekAndRead(t *testing.T) {
 	mockFile := new(MockFile)
 	logger := slog.Default()

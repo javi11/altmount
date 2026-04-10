@@ -1105,6 +1105,9 @@ definitions:
         type: integer
       max_read_ahead_mb:
         type: integer
+      use_read_at:
+        description: Prefer offset-native FUSE reads (ReadAt) when the opened file supports it. Defaults to true when omitted.
+        type: boolean
       mount_path:
         type: string
     type: object
