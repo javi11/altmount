@@ -12,20 +12,31 @@ import (
 	"strings"
 	"time"
 
+	lru "github.com/hashicorp/golang-lru/v2"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pathutil"
 	"google.golang.org/protobuf/proto"
 )
 
+const (
+	// defaultMetadataCacheSize is the max number of file metadata entries to cache.
+	defaultMetadataCacheSize = 4096
+)
+
 // MetadataService provides low-level read/write operations for metadata files
 type MetadataService struct {
 	rootPath string
+	// fileCache caches parsed FileMetadata keyed by virtual path.
+	// Entries are evicted on LRU basis and invalidated on any write/delete/rename.
+	fileCache *lru.Cache[string, *metapb.FileMetadata]
 }
 
 // NewMetadataService creates a new metadata service
 func NewMetadataService(rootPath string) *MetadataService {
+	cache, _ := lru.New[string, *metapb.FileMetadata](defaultMetadataCacheSize)
 	return &MetadataService{
-		rootPath: rootPath,
+		rootPath:  rootPath,
+		fileCache: cache,
 	}
 }
 
@@ -98,11 +109,20 @@ func (ms *MetadataService) WriteFileMetadata(virtualPath string, metadata *metap
 
 	metadata.NzbdavId = nzbdavId // Restore for in-memory use
 
+	// Update cache with the written metadata
+	ms.fileCache.Add(virtualPath, metadata)
+
 	return nil
 }
 
-// ReadFileMetadata reads file metadata from disk
+// ReadFileMetadata reads file metadata from disk, using an in-memory LRU cache
+// to avoid repeated disk I/O and protobuf deserialization on hot FUSE paths.
 func (ms *MetadataService) ReadFileMetadata(virtualPath string) (*metapb.FileMetadata, error) {
+	// Check cache first
+	if cached, ok := ms.fileCache.Get(virtualPath); ok {
+		return cached, nil
+	}
+
 	// Create metadata file path
 	filename := filepath.Base(virtualPath)
 	metadataDir := filepath.Join(ms.rootPath, filepath.Dir(virtualPath))
@@ -128,6 +148,9 @@ func (ms *MetadataService) ReadFileMetadata(virtualPath string) (*metapb.FileMet
 	if idData, err := os.ReadFile(idPath); err == nil {
 		metadata.NzbdavId = string(idData)
 	}
+
+	// Store in cache
+	ms.fileCache.Add(virtualPath, metadata)
 
 	return metadata, nil
 }
@@ -266,6 +289,8 @@ func (ms *MetadataService) DeleteFileMetadata(virtualPath string) error {
 
 // DeleteFileMetadataWithSourceNzb deletes a metadata file and optionally its source NZB
 func (ms *MetadataService) DeleteFileMetadataWithSourceNzb(ctx context.Context, virtualPath string, deleteSourceNzb bool) error {
+	ms.fileCache.Remove(virtualPath)
+
 	filename := filepath.Base(virtualPath)
 	metadataDir := filepath.Join(ms.rootPath, filepath.Dir(virtualPath))
 	metadataPath := filepath.Join(metadataDir, filename+".meta")
@@ -319,6 +344,14 @@ func (ms *MetadataService) DeleteFileMetadataWithSourceNzb(ctx context.Context, 
 
 // DeleteDirectory deletes a metadata directory and all its contents
 func (ms *MetadataService) DeleteDirectory(virtualPath string) error {
+	// Purge all cached entries under this directory
+	prefix := virtualPath + string(filepath.Separator)
+	for _, key := range ms.fileCache.Keys() {
+		if key == virtualPath || strings.HasPrefix(key, prefix) {
+			ms.fileCache.Remove(key)
+		}
+	}
+
 	metadataDir := filepath.Join(ms.rootPath, virtualPath)
 
 	err := os.RemoveAll(metadataDir)
@@ -332,6 +365,9 @@ func (ms *MetadataService) DeleteDirectory(virtualPath string) error {
 // RenameFileMetadata atomically renames a metadata file (and its .id sidecar) from oldVirtualPath to newVirtualPath.
 // Uses os.Rename for atomicity on the same filesystem, falling back to read-write-delete for cross-device moves.
 func (ms *MetadataService) RenameFileMetadata(oldVirtualPath, newVirtualPath string) error {
+	ms.fileCache.Remove(oldVirtualPath)
+	ms.fileCache.Remove(newVirtualPath)
+
 	oldFilename := filepath.Base(oldVirtualPath)
 	oldDir := filepath.Join(ms.rootPath, filepath.Dir(oldVirtualPath))
 	oldMetaPath := filepath.Join(oldDir, oldFilename+".meta")
@@ -600,6 +636,8 @@ func (ms *MetadataService) cleanupEmptyDirsRecursive(path string, protected []st
 
 // MoveToCorrupted moves a metadata file to a special corrupted directory for safety
 func (ms *MetadataService) MoveToCorrupted(ctx context.Context, virtualPath string) error {
+	ms.fileCache.Remove(virtualPath)
+
 	// Normalize path and remove leading slashes to ensure it joins correctly
 	cleanPath := filepath.FromSlash(strings.TrimPrefix(virtualPath, "/"))
 	dir := filepath.Dir(cleanPath)
