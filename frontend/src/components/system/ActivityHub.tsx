@@ -257,9 +257,7 @@ export function ActivityHub() {
 													<div className="mt-1 flex items-center gap-2">
 														<span className="font-bold text-secondary text-xs">IMPORTING</span>
 														<span className="text-base-content/40 text-xs">•</span>
-														<span className="text-base-content/60 text-xs">
-															Queue #{item.id}
-														</span>
+														<span className="text-base-content/60 text-xs">Queue #{item.id}</span>
 														{item.file_size && (
 															<>
 																<span className="text-base-content/40 text-xs">•</span>

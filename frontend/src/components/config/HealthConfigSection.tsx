@@ -311,8 +311,8 @@ export function HealthConfigSection({
 								onChange={(e) => handleInputChange("library_dir", e.target.value || undefined)}
 							/>
 							<div className="mt-2 whitespace-normal text-base-content/50 text-xs leading-relaxed">
-								Path where your permanent media folders are located. Required for
-								mapping virtual files to physical ARR library paths.
+								Path where your permanent media folders are located. Required for mapping virtual
+								files to physical ARR library paths.
 							</div>
 						</div>
 					</fieldset>
