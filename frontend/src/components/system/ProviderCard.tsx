@@ -48,7 +48,11 @@ function QuotaResetCountdown({ resetAt }: { resetAt: string }) {
 	);
 }
 
-export function ProviderCard({ provider, className, onResetQuota }: ProviderCardProps) {
+export function ProviderCard({
+	provider,
+	className,
+	onResetQuota,
+}: ProviderCardProps) {
 	// Calculate connection usage percentage
 	const usagePercentage =
 		provider.max_connections > 0
@@ -108,54 +112,60 @@ export function ProviderCard({ provider, className, onResetQuota }: ProviderCard
 								className={`h-2 w-2 shrink-0 rounded-full ${
 									provider.state.toLowerCase() === "active"
 										? provider.error_count > 10
-											? "animate-pulse bg-warning"
+											? "bg-warning"
 											: "bg-success"
-										: provider.state.toLowerCase() === "failed"
-											? "bg-error"
-											: "bg-base-300"
+										: "bg-error"
 								}`}
 							/>
-							<h3
-								id={`provider-${provider.host}`}
-								className="card-title truncate font-medium text-sm"
-							>
+							<h3 className="truncate font-semibold text-sm leading-none" id={`provider-${provider.host}`}>
 								{provider.host}
 							</h3>
 						</div>
-						{provider.username && (
-							<p className="cursor-pointer truncate text-base-content/40 text-xs blur-[1px] transition-all hover:blur-none">
-								@{provider.username}
-							</p>
+						<div className="mt-1 flex items-center gap-2">
+							<span className={`badge badge-xs font-medium ${stateBadge.color}`}>
+								{stateBadge.text}
+							</span>
+							<span
+								className="cursor-pointer font-mono text-base-content/40 text-xs blur-sm transition-all hover:blur-none"
+								title="Click to unblur"
+							>
+								{provider.username || "anonymous"}
+							</span>
+						</div>
+					</div>
+
+					<div className="flex items-center gap-2">
+						{provider.last_speed_test_mbps > 0 && (
+							<div
+								className="badge badge-outline badge-sm gap-1 font-mono text-[10px]"
+								title={`Last tested ${provider.last_speed_test_time ? new Date(provider.last_speed_test_time).toLocaleString() : "unknown"}`}
+							>
+								<Gauge className="h-3 w-3" />
+								{Math.round(provider.last_speed_test_mbps)} Mbps
+							</div>
 						)}
 					</div>
-					<div className={`badge ${stateBadge.color} badge-xs font-bold uppercase`}>
-						{stateBadge.text}
-					</div>
 				</div>
 
-				{/* Connection usage */}
-				<div className="mt-2 space-y-1">
-					<div className="flex items-center justify-between text-xs">
-						<span className="text-base-content/50 uppercase tracking-tight">Pool Usage</span>
-						<span className="font-mono font-semibold">
-							{provider.used_connections} / {provider.max_connections}
-						</span>
-					</div>
-					<progress
-						className={`progress h-1 w-full ${getProgressColor()}`}
-						value={provider.used_connections}
-						max={provider.max_connections}
-					/>
+				{/* Connection Info */}
+				<div className="mt-4 flex items-center justify-between text-xs">
+					<span className="text-base-content/60">Connections</span>
+					<span className="font-bold">
+						{provider.used_connections} / {provider.max_connections}
+					</span>
 				</div>
+				<progress
+					className={`progress mt-1 w-full ${getProgressColor()}`}
+					value={usagePercentage}
+					max="100"
+				/>
 
-				{/* Performance Stats */}
-				<div className="mt-3 grid grid-cols-3 gap-1 border-base-200 border-t pt-3 text-center">
+				{/* Detailed Stats Grid */}
+				<div className="mt-4 grid grid-cols-3 gap-2 border-base-200 border-t pt-3">
 					<div className="space-y-0.5">
 						<div className="text-[8px] text-base-content/40 uppercase tracking-widest">Speed</div>
-						<div className="truncate font-bold font-mono text-primary text-xs">
-							{provider.current_speed_bytes_per_sec !== undefined
-								? formatSpeed(provider.current_speed_bytes_per_sec)
-								: "0 B/s"}
+						<div className="font-bold font-mono text-primary text-xs">
+							{formatSpeed(provider.current_speed_bytes_per_sec)}
 						</div>
 					</div>
 					<div className="space-y-0.5">
@@ -175,7 +185,16 @@ export function ProviderCard({ provider, className, onResetQuota }: ProviderCard
 				{/* Total Bytes per provider */}
 				<div className="mt-2 space-y-1 border-base-200 border-t pt-2">
 					<div className="flex items-center justify-between text-[10px]">
-						<span className="text-base-content/50 uppercase tracking-tight">Total Downloaded</span>
+						<div className="flex flex-col">
+							<span className="text-base-content/50 uppercase tracking-tight">
+								Total Downloaded
+							</span>
+							{provider.started_at && (
+								<span className="text-[8px] text-base-content/30 uppercase tracking-tighter">
+									Since {new Date(provider.started_at).toLocaleDateString()}
+								</span>
+							)}
+						</div>
 						<span className="font-bold font-mono text-base-content/70">
 							<BytesDisplay bytes={provider.byte_count} />
 						</span>
@@ -198,64 +217,45 @@ export function ProviderCard({ provider, className, onResetQuota }: ProviderCard
 								{onResetQuota && (
 									<button
 										type="button"
-										className="btn btn-ghost btn-xs ml-1 h-4 min-h-0 w-4 p-0"
-										title="Reset quota"
 										onClick={() => onResetQuota(provider.id)}
+										className="btn btn-ghost btn-xs min-h-0 h-4 p-0 text-base-content/30 hover:text-primary"
+										title="Reset Quota"
 									>
 										<RotateCcw className="h-2.5 w-2.5" />
 									</button>
 								)}
 							</span>
-							<span
-								className={`font-bold font-mono ${provider.quota_exceeded ? "text-error" : "text-base-content/70"}`}
-							>
-								<BytesDisplay bytes={provider.quota_used ?? 0} /> /{" "}
+							<span className="font-bold font-mono text-base-content/70">
+								<BytesDisplay bytes={provider.quota_used || 0} /> /{" "}
 								<BytesDisplay bytes={provider.quota_bytes} />
 							</span>
 						</div>
 						<progress
-							className={`progress h-1 w-full ${getQuotaProgressColor(provider)}`}
-							value={provider.quota_used ?? 0}
+							className={`progress w-full ${getQuotaProgressColor(provider)}`}
+							value={provider.quota_used || 0}
 							max={provider.quota_bytes}
 						/>
 						{provider.quota_reset_at && (
-							<div className="flex items-center justify-between text-[10px]">
-								<span className="text-base-content/40">Resets</span>
-								<span className="font-mono text-base-content/50">
-									<QuotaResetCountdown resetAt={provider.quota_reset_at} />
-								</span>
+							<div className="flex justify-end text-[8px] text-base-content/40 italic">
+								Resets <QuotaResetCountdown resetAt={provider.quota_reset_at} />
 							</div>
 						)}
 					</div>
 				)}
 
-				{/* Missing Articles */}
+				{/* Additional Info (Missing Rate) */}
 				{provider.missing_count > 0 && (
-					<div className="mt-2 border-base-200 border-t pt-2">
-						<div className="flex items-center justify-between text-xs">
-							<span className="text-base-content/50">Missing</span>
-							<div className="text-right">
-								<span
-									className={`font-mono font-semibold ${provider.missing_warning ? "text-error" : "text-warning"}`}
-								>
-									{provider.missing_count.toLocaleString()}
-								</span>
-								{provider.missing_rate_per_minute > 0 && (
-									<span className="ml-0.5 text-base-content/40 text-xs">
-										~{Math.round(provider.missing_rate_per_minute)}/min
-									</span>
-								)}
-							</div>
+					<div className="mt-3 flex items-center justify-between rounded-md bg-base-200/50 px-2 py-1 text-[10px]">
+						<div className="flex items-center gap-1.5 text-base-content/60">
+							<AlertTriangle
+								className={`h-3 w-3 ${provider.missing_warning ? "text-warning" : "text-base-content/30"}`}
+							/>
+							<span>Missing Articles</span>
 						</div>
-					</div>
-				)}
-
-				{/* Failure reason - only show if present */}
-				{provider.failure_reason && provider.failure_reason !== "" && (
-					<div className="mt-2">
-						<div className="alert alert-error rounded-md px-2 py-1.5">
-							<AlertTriangle className="h-3 w-3" />
-							<span className="text-xs">{provider.failure_reason}</span>
+						<div className="flex items-center gap-2">
+							<span className="font-bold font-mono">{provider.missing_count}</span>
+							<span className="text-base-content/30">•</span>
+							<span className="font-mono">{provider.missing_rate_per_minute.toFixed(1)}/min</span>
 						</div>
 					</div>
 				)}

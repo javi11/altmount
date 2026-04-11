@@ -918,6 +918,7 @@ type ProviderStatusResponse struct {
 	MissingWarning          bool       `json:"missing_warning"`
 	ByteCount               int64      `json:"byte_count"`
 	ByteCount24h            int64      `json:"byte_count_24h"`
+	StartedAt               time.Time  `json:"started_at"`
 	QuotaBytes              int64      `json:"quota_bytes,omitempty"`
 	QuotaUsed               int64      `json:"quota_used,omitempty"`
 	QuotaResetAt            *time.Time `json:"quota_reset_at,omitempty"`
@@ -938,6 +939,7 @@ type PoolMetricsResponse struct {
 	MaxDownloadSpeedBytesPerSec float64                  `json:"max_download_speed_bytes_per_sec"`
 	UploadSpeedBytesPerSec      float64                  `json:"upload_speed_bytes_per_sec"`
 	Timestamp                   time.Time                `json:"timestamp"`
+	StartedAt                   time.Time                `json:"started_at"`
 	Providers                   []ProviderStatusResponse `json:"providers"`
 }
 

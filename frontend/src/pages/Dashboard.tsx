@@ -242,7 +242,11 @@ export function Dashboard() {
 					</h2>
 					<div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
 						{poolMetrics.providers.map((provider) => (
-							<ProviderCard key={provider.id} provider={provider} onResetQuota={handleResetQuota} />
+							<ProviderCard
+								key={provider.id}
+								provider={provider}
+								onResetQuota={handleResetQuota}
+							/>
 						))}
 					</div>
 				</div>

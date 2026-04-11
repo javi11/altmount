@@ -412,6 +412,7 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 			DownloadSpeedBytesPerSec: 0.0,
 			UploadSpeedBytesPerSec:   0.0,
 			Timestamp:                time.Now(),
+			StartedAt:                time.Now(),
 			Providers:                []ProviderStatusResponse{},
 		}
 		return c.Status(200).JSON(fiber.Map{
@@ -536,6 +537,7 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 			ErrorCount:              errorCount,
 			ByteCount:               byteCount,
 			ByteCount24h:            byteCount24h,
+			StartedAt:               metrics.ProviderStartedAt[ps.Name],
 			CurrentSpeedBytesPerSec: currentProviderSpeed,
 			PingMs:                  ps.Ping.RTT.Milliseconds(),
 			LastSpeedTestMbps:       lastSpeedTestMbps,
@@ -597,6 +599,7 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 		MaxDownloadSpeedBytesPerSec: metrics.MaxDownloadSpeedBytesPerSec,
 		UploadSpeedBytesPerSec:      metrics.UploadSpeedBytesPerSec,
 		Timestamp:                   metrics.Timestamp,
+		StartedAt:                   metrics.StartedAt,
 		Providers:                   providers,
 	}
 

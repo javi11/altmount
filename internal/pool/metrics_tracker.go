@@ -33,11 +33,13 @@ type MetricsSnapshot struct {
 	ProviderErrors              map[string]int64                     `json:"provider_errors"`
 	ProviderBytes               map[string]int64                     `json:"provider_bytes"`
 	ProviderBytes24h            map[string]int64                     `json:"provider_bytes_24h"`
+	ProviderStartedAt           map[string]time.Time                 `json:"provider_started_at"`
 	ProviderQuotas              map[string]ProviderQuotaSnapshot     `json:"provider_quotas,omitempty"`
 	DownloadSpeedBytesPerSec    float64                              `json:"download_speed_bytes_per_sec"`
 	MaxDownloadSpeedBytesPerSec float64                              `json:"max_download_speed_bytes_per_sec"`
 	UploadSpeedBytesPerSec      float64                              `json:"upload_speed_bytes_per_sec"`
 	Timestamp                   time.Time                            `json:"timestamp"`
+	StartedAt                   time.Time                            `json:"started_at"`
 	ProviderMissingRates        map[string]float64                   `json:"provider_missing_rates"`
 	ProviderMissingWarning      map[string]bool                      `json:"provider_missing_warning"`
 }
@@ -47,7 +49,9 @@ type MetricsTracker struct {
 	pool              *nntppool.Client
 	repo              StatsRepository
 	mu                sync.RWMutex
+	startedAt         time.Time
 	samples           []metricsample
+
 	sampleInterval    time.Duration
 	retentionPeriod   time.Duration
 	calculationWindow time.Duration // Window for speed calculations (shorter than retention for accuracy)
@@ -63,6 +67,7 @@ type MetricsTracker struct {
 	initialArticlesPosted     int64
 	initialProviderErrors     map[string]int64
 	initialProviderBytes      map[string]int64
+	initialProviderStartedAt  map[string]time.Time
 	lastSavedBytesDownloaded  int64
 	lastSavedProviderBytes    map[string]int64
 	persistenceThreshold      int64 // Bytes to download before forcing a save
@@ -89,11 +94,13 @@ func NewMetricsTracker(pool *nntppool.Client, repo StatsRepository) *MetricsTrac
 		samples:               make([]metricsample, 0, 60), // Preallocate for 60 samples
 		initialProviderErrors: make(map[string]int64),
 		initialProviderBytes:  make(map[string]int64),
+		initialProviderStartedAt: make(map[string]time.Time),
 		lastSavedProviderBytes: make(map[string]int64),
 		sampleInterval:        2 * time.Second, // Match playback sampling for "live" feel
 		retentionPeriod:       60 * time.Second,
 		calculationWindow:     10 * time.Second,   // Use 10s window for more accurate real-time speeds
 		persistenceThreshold:  1024 * 1024 * 1024, // Save every 1GB downloaded
+		startedAt:             time.Now(),
 		logger:                slog.Default().With("component", "metrics-tracker"),
 	}
 
@@ -118,6 +125,49 @@ func (mt *MetricsTracker) Start(ctx context.Context) {
 			mt.initialArticlesPosted = stats["articles_posted"]
 			mt.maxDownloadSpeed = float64(stats["max_download_speed"])
 			mt.lastSavedBytesDownloaded = mt.initialBytesDownloaded
+			mt.mu.Unlock()
+
+			// Find the actual oldest record in daily stats/history
+			oldest, _ := mt.repo.GetOldestStatDate(ctx)
+
+			if startedAtUnix := stats["started_at"]; startedAtUnix > 0 {
+				mt.mu.Lock()
+				savedStartedAt := time.Unix(startedAtUnix, 0)
+
+				// If our saved date is more recent than our actual history,
+				// correct it to the oldest record found.
+				if oldest.Before(savedStartedAt) {
+					mt.startedAt = oldest
+					// Force a save to update the DB with the corrected date
+					go mt.saveStats(ctx)
+				} else {
+					mt.startedAt = savedStartedAt
+				}
+				mt.mu.Unlock()
+			} else {
+				// Fallback to the oldest record in daily stats
+				mt.mu.Lock()
+				mt.startedAt = oldest
+				mt.mu.Unlock()
+
+				// Save it immediately so we don't have to look it up again
+				go mt.saveStats(ctx)
+			}
+
+			// Fallback for providers: check provider_hourly_stats for each
+			providerOldest, err := mt.repo.GetOldestProviderStatDates(ctx)
+			mt.mu.Lock()
+			if err == nil {
+				for pid, oldestDate := range providerOldest {
+					savedDate, exists := mt.initialProviderStartedAt[pid]
+
+					// If no date exists OR if the saved date is more recent than actual history
+					if !exists || oldestDate.Before(savedDate) {
+						mt.initialProviderStartedAt[pid] = oldestDate
+					}
+				}
+			}
+			mt.mu.Unlock()
 
 			// Load provider stats (prefixed with provider_error: or provider_bytes:)
 			for k, v := range stats {
@@ -128,6 +178,9 @@ func (mt *MetricsTracker) Start(ctx context.Context) {
 					providerID := after
 					mt.initialProviderBytes[providerID] = v
 					mt.lastSavedProviderBytes[providerID] = v
+				} else if after, ok := strings.CutPrefix(k, "provider_started_at:"); ok {
+					providerID := after
+					mt.initialProviderStartedAt[providerID] = time.Unix(v, 0)
 				}
 			}
 			mt.mu.Unlock()
@@ -235,6 +288,14 @@ func (mt *MetricsTracker) getSnapshot(now time.Time, stats nntppool.ClientStats)
 		mergedProviderBytes[k] += v
 	}
 
+	mergedProviderStartedAt := make(map[string]time.Time)
+	maps.Copy(mergedProviderStartedAt, mt.initialProviderStartedAt)
+	for k := range mergedProviderBytes {
+		if _, ok := mergedProviderStartedAt[k]; !ok {
+			mergedProviderStartedAt[k] = now
+		}
+	}
+
 	// Compute windowed missing article rates per provider
 	missingRates := make(map[string]float64)
 	missingWarning := make(map[string]bool)
@@ -307,11 +368,13 @@ func (mt *MetricsTracker) getSnapshot(now time.Time, stats nntppool.ClientStats)
 		ProviderErrors:              mergedProviderErrors,
 		ProviderBytes:               mergedProviderBytes,
 		ProviderBytes24h:            providerBytes24h,
+		ProviderStartedAt:           mergedProviderStartedAt,
 		ProviderQuotas:              providerQuotas,
 		DownloadSpeedBytesPerSec:    downloadSpeed,
 		MaxDownloadSpeedBytesPerSec: mt.maxDownloadSpeed,
 		UploadSpeedBytesPerSec:      0, // v4 doesn't track uploads
 		Timestamp:                   now,
+		StartedAt:                   mt.startedAt,
 		ProviderMissingRates:        missingRates,
 		ProviderMissingWarning:      missingWarning,
 	}
@@ -371,6 +434,7 @@ func (mt *MetricsTracker) saveStats(ctx context.Context) {
 		"bytes_uploaded":      snapshot.BytesUploaded,
 		"articles_posted":     snapshot.ArticlesPosted,
 		"max_download_speed":  int64(snapshot.MaxDownloadSpeedBytesPerSec),
+		"started_at":          snapshot.StartedAt.Unix(),
 	}
 
 	// Add provider errors to batch
@@ -381,6 +445,11 @@ func (mt *MetricsTracker) saveStats(ctx context.Context) {
 	// Add provider bytes to batch
 	for providerID, byteCount := range snapshot.ProviderBytes {
 		stats["provider_bytes:"+providerID] = byteCount
+	}
+
+	// Add provider started at to batch
+	for providerID, startedAt := range snapshot.ProviderStartedAt {
+		stats["provider_started_at:"+providerID] = startedAt.Unix()
 	}
 
 	// Persist per-provider quota state for restore across restarts
@@ -442,8 +511,10 @@ func (mt *MetricsTracker) Reset(ctx context.Context, resetPeak bool, resetTotals
 		mt.articlesDownloaded.Store(0)
 		mt.articlesPosted.Store(0)
 		mt.liveBytesDownloaded.Store(0)
+		mt.startedAt = time.Now()
 		mt.initialProviderErrors = make(map[string]int64)
 		mt.initialProviderBytes = make(map[string]int64)
+		mt.initialProviderStartedAt = make(map[string]time.Time)
 		mt.lastSavedProviderBytes = make(map[string]int64)
 
 		// Clear samples to reset speed calculation

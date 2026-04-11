@@ -341,6 +341,7 @@ export interface ProviderStatus {
 	missing_warning: boolean;
 	byte_count: number;
 	byte_count_24h: number;
+	started_at: string;
 	quota_bytes?: number;
 	quota_used?: number;
 	quota_reset_at?: string;
@@ -381,6 +382,7 @@ export interface PoolMetrics {
 	max_download_speed_bytes_per_sec: number;
 	upload_speed_bytes_per_sec: number;
 	timestamp: string;
+	started_at: string;
 	providers: ProviderStatus[];
 }
 
