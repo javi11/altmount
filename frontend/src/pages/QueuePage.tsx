@@ -4,6 +4,7 @@ import {
 	AlertCircle,
 	ArrowDown,
 	ArrowUp,
+	ArrowUpDown,
 	Box,
 	CheckCircle2,
 	ChevronDown,
@@ -36,6 +37,7 @@ import { useConfirm } from "../contexts/ModalContext";
 import {
 	useAddTestQueueItem,
 	useBulkCancelQueueItems,
+	useBulkUpdateQueueItemPriority,
 	useCancelQueueItem,
 	useClearCompletedQueue,
 	useClearFailedQueue,
@@ -120,6 +122,7 @@ export function QueuePage() {
 	const retryItem = useRetryQueueItem();
 	const cancelItem = useCancelQueueItem();
 	const cancelBulk = useBulkCancelQueueItems();
+	const bulkUpdatePriority = useBulkUpdateQueueItemPriority();
 	const updatePriority = useUpdateQueueItemPriority();
 	const clearCompleted = useClearCompletedQueue();
 	const clearFailed = useClearFailedQueue();
@@ -318,6 +321,16 @@ export function QueuePage() {
 			} catch (error) {
 				console.error("Failed to cancel selected items:", error);
 			}
+		}
+	};
+
+	const handleBulkSetPriority = async (priority: 1 | 2 | 3) => {
+		if (selectedItems.size === 0) return;
+		try {
+			await bulkUpdatePriority.mutateAsync({ ids: Array.from(selectedItems), priority });
+			setSelectedItems(new Set());
+		} catch (error) {
+			console.error("Failed to update priority for selected items:", error);
 		}
 	};
 
@@ -592,6 +605,38 @@ export function QueuePage() {
 													)}
 													Restart
 												</button>
+												<div className="dropdown dropdown-bottom">
+													<button
+														type="button"
+														tabIndex={0}
+														className="btn btn-outline btn-sm px-4"
+														disabled={bulkUpdatePriority.isPending}
+													>
+														<ArrowUpDown className="h-3 w-3" />
+														Priority
+														<ChevronDown className="h-3 w-3" />
+													</button>
+													<ul
+														tabIndex={0}
+														className="dropdown-content menu z-10 w-40 rounded-box bg-base-100 p-2 shadow-md"
+													>
+														<li>
+															<button type="button" onClick={() => handleBulkSetPriority(1)}>
+																High
+															</button>
+														</li>
+														<li>
+															<button type="button" onClick={() => handleBulkSetPriority(2)}>
+																Normal
+															</button>
+														</li>
+														<li>
+															<button type="button" onClick={() => handleBulkSetPriority(3)}>
+																Low
+															</button>
+														</li>
+													</ul>
+												</div>
 												<button
 													type="button"
 													className="btn btn-outline btn-warning btn-sm px-4"

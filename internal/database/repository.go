@@ -1005,6 +1005,31 @@ func (r *Repository) UpdateQueueItemPriority(ctx context.Context, id int64, prio
 	return nil
 }
 
+// UpdateQueueItemsPriorityBulk updates the priority of multiple queue items, skipping any that are currently processing.
+// Returns the number of items updated and the number skipped.
+func (r *Repository) UpdateQueueItemsPriorityBulk(ctx context.Context, ids []int64, priority QueuePriority) (updated int, skipped int, err error) {
+	for _, id := range ids {
+		var status string
+		scanErr := r.db.QueryRowContext(ctx, `SELECT status FROM import_queue WHERE id = ?`, id).Scan(&status)
+		if scanErr == sql.ErrNoRows {
+			continue
+		}
+		if scanErr != nil {
+			return updated, skipped, fmt.Errorf("failed to check queue item status: %w", scanErr)
+		}
+		if status == string(QueueStatusProcessing) {
+			skipped++
+			continue
+		}
+		_, err = r.db.ExecContext(ctx, `UPDATE import_queue SET priority = ?, updated_at = datetime('now') WHERE id = ?`, priority, id)
+		if err != nil {
+			return updated, skipped, fmt.Errorf("failed to update queue item priority: %w", err)
+		}
+		updated++
+	}
+	return updated, skipped, nil
+}
+
 // AddImportHistory records a successful file import in the persistent history table
 func (r *Repository) AddImportHistory(ctx context.Context, history *ImportHistory) error {
 	query := `

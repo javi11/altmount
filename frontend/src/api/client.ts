@@ -258,6 +258,16 @@ export class APIClient {
 		});
 	}
 
+	async bulkUpdateQueueItemPriority(ids: number[], priority: 1 | 2 | 3) {
+		return this.request<{ updated_count: number; skipped_count: number; message: string }>(
+			"/queue/bulk/priority",
+			{
+				method: "PATCH",
+				body: JSON.stringify({ ids, priority }),
+			},
+		);
+	}
+
 	async cancelBulkQueueItems(ids: number[]) {
 		return this.request<{
 			cancelled_count: number;
