@@ -258,7 +258,7 @@ export function ActivityHub() {
 														<span className="font-bold text-secondary text-xs">IMPORTING</span>
 														<span className="text-base-content/40 text-xs">•</span>
 														<span className="text-base-content/60 text-xs">
-															Worker #{item.id % 10}
+															Queue #{item.id}
 														</span>
 														{item.file_size && (
 															<>
