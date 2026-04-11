@@ -116,6 +116,8 @@ type ProviderAPIResponse struct {
 	SkipPing                 bool       `json:"skip_ping"`
 	KeepaliveIntervalSeconds int        `json:"keepalive_interval_seconds"`
 	KeepaliveCommand         string     `json:"keepalive_command,omitempty"`
+	QuotaBytes               int64      `json:"quota_bytes"`
+	QuotaPeriodHours         int        `json:"quota_period_hours"`
 }
 
 // ImportAPIResponse handles Import config for API responses
@@ -178,6 +180,8 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 			SkipPing:                 p.SkipPing,
 			KeepaliveIntervalSeconds: p.KeepaliveIntervalSeconds,
 			KeepaliveCommand:         p.KeepaliveCommand,
+			QuotaBytes:               p.QuotaBytes,
+			QuotaPeriodHours:         p.QuotaPeriodHours,
 		}
 	}
 

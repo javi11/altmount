@@ -15,22 +15,31 @@ import (
 // MissingRateWarningThreshold is the missing articles per minute rate that triggers a warning.
 const MissingRateWarningThreshold = 10.0
 
+// ProviderQuotaSnapshot holds the quota state for a single provider.
+type ProviderQuotaSnapshot struct {
+	QuotaBytes    int64     `json:"quota_bytes"`
+	QuotaUsed     int64     `json:"quota_used"`
+	QuotaResetAt  time.Time `json:"quota_reset_at,omitempty"`
+	QuotaExceeded bool      `json:"quota_exceeded"`
+}
+
 // MetricsSnapshot represents pool metrics at a point in time with calculated values
 type MetricsSnapshot struct {
-	BytesDownloaded             int64              `json:"bytes_downloaded"`
-	BytesUploaded               int64              `json:"bytes_uploaded"`
-	ArticlesDownloaded          int64              `json:"articles_downloaded"`
-	ArticlesPosted              int64              `json:"articles_posted"`
-	TotalErrors                 int64              `json:"total_errors"`
-	ProviderErrors              map[string]int64   `json:"provider_errors"`
-	ProviderBytes               map[string]int64   `json:"provider_bytes"`
-	ProviderBytes24h            map[string]int64   `json:"provider_bytes_24h"`
-	DownloadSpeedBytesPerSec    float64            `json:"download_speed_bytes_per_sec"`
-	MaxDownloadSpeedBytesPerSec float64            `json:"max_download_speed_bytes_per_sec"`
-	UploadSpeedBytesPerSec      float64            `json:"upload_speed_bytes_per_sec"`
-	Timestamp                   time.Time          `json:"timestamp"`
-	ProviderMissingRates        map[string]float64 `json:"provider_missing_rates"`
-	ProviderMissingWarning      map[string]bool    `json:"provider_missing_warning"`
+	BytesDownloaded             int64                                `json:"bytes_downloaded"`
+	BytesUploaded               int64                                `json:"bytes_uploaded"`
+	ArticlesDownloaded          int64                                `json:"articles_downloaded"`
+	ArticlesPosted              int64                                `json:"articles_posted"`
+	TotalErrors                 int64                                `json:"total_errors"`
+	ProviderErrors              map[string]int64                     `json:"provider_errors"`
+	ProviderBytes               map[string]int64                     `json:"provider_bytes"`
+	ProviderBytes24h            map[string]int64                     `json:"provider_bytes_24h"`
+	ProviderQuotas              map[string]ProviderQuotaSnapshot     `json:"provider_quotas,omitempty"`
+	DownloadSpeedBytesPerSec    float64                              `json:"download_speed_bytes_per_sec"`
+	MaxDownloadSpeedBytesPerSec float64                              `json:"max_download_speed_bytes_per_sec"`
+	UploadSpeedBytesPerSec      float64                              `json:"upload_speed_bytes_per_sec"`
+	Timestamp                   time.Time                            `json:"timestamp"`
+	ProviderMissingRates        map[string]float64                   `json:"provider_missing_rates"`
+	ProviderMissingWarning      map[string]bool                      `json:"provider_missing_warning"`
 }
 
 // MetricsTracker tracks pool metrics over time and calculates rates
@@ -262,6 +271,22 @@ func (mt *MetricsTracker) getSnapshot(now time.Time, stats nntppool.ClientStats)
 		}
 	}
 
+	// Collect per-provider quota snapshots
+	var providerQuotas map[string]ProviderQuotaSnapshot
+	for _, ps := range stats.Providers {
+		if ps.QuotaBytes > 0 {
+			if providerQuotas == nil {
+				providerQuotas = make(map[string]ProviderQuotaSnapshot)
+			}
+			providerQuotas[ps.Name] = ProviderQuotaSnapshot{
+				QuotaBytes:    ps.QuotaBytes,
+				QuotaUsed:     ps.QuotaUsed,
+				QuotaResetAt:  ps.QuotaResetAt,
+				QuotaExceeded: ps.QuotaExceeded,
+			}
+		}
+	}
+
 	// Fetch 24h provider stats from DB if repo is available
 	providerBytes24h := make(map[string]int64)
 	if mt.repo != nil {
@@ -282,6 +307,7 @@ func (mt *MetricsTracker) getSnapshot(now time.Time, stats nntppool.ClientStats)
 		ProviderErrors:              mergedProviderErrors,
 		ProviderBytes:               mergedProviderBytes,
 		ProviderBytes24h:            providerBytes24h,
+		ProviderQuotas:              providerQuotas,
 		DownloadSpeedBytesPerSec:    downloadSpeed,
 		MaxDownloadSpeedBytesPerSec: mt.maxDownloadSpeed,
 		UploadSpeedBytesPerSec:      0, // v4 doesn't track uploads
@@ -355,6 +381,17 @@ func (mt *MetricsTracker) saveStats(ctx context.Context) {
 	// Add provider bytes to batch
 	for providerID, byteCount := range snapshot.ProviderBytes {
 		stats["provider_bytes:"+providerID] = byteCount
+	}
+
+	// Persist per-provider quota state for restore across restarts
+	poolStats := mt.pool.Stats()
+	for _, ps := range poolStats.Providers {
+		if ps.QuotaBytes > 0 {
+			stats["quota_used:"+ps.Name] = ps.QuotaUsed
+			if !ps.QuotaResetAt.IsZero() {
+				stats["quota_reset_at:"+ps.Name] = ps.QuotaResetAt.UnixNano()
+			}
+		}
 	}
 
 	if err := mt.repo.BatchUpdateSystemStats(ctx, stats); err != nil {
