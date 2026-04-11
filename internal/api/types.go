@@ -918,6 +918,10 @@ type ProviderStatusResponse struct {
 	MissingWarning          bool       `json:"missing_warning"`
 	ByteCount               int64      `json:"byte_count"`
 	ByteCount24h            int64      `json:"byte_count_24h"`
+	QuotaBytes              int64      `json:"quota_bytes,omitempty"`
+	QuotaUsed               int64      `json:"quota_used,omitempty"`
+	QuotaResetAt            *time.Time `json:"quota_reset_at,omitempty"`
+	QuotaExceeded           bool       `json:"quota_exceeded,omitempty"`
 }
 
 // PoolMetricsResponse represents NNTP pool metrics in API responses

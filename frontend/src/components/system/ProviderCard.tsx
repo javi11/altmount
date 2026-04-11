@@ -1,14 +1,54 @@
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Gauge, RotateCcw } from "lucide-react";
 import { formatSpeed } from "../../lib/utils";
 import type { ProviderStatus } from "../../types/api";
 import { BytesDisplay } from "../ui/BytesDisplay";
 
+function getQuotaProgressColor(provider: ProviderStatus): string {
+	if (provider.quota_exceeded) {
+		return "progress-error";
+	}
+	if ((provider.quota_used ?? 0) / (provider.quota_bytes ?? 1) >= 0.9) {
+		return "progress-warning";
+	}
+	return "progress-success";
+}
+
 interface ProviderCardProps {
 	provider: ProviderStatus;
 	className?: string;
+	onResetQuota?: (providerId: string) => void;
 }
 
-export function ProviderCard({ provider, className }: ProviderCardProps) {
+const MS_PER_MINUTE = 1000 * 60;
+const MS_PER_HOUR = MS_PER_MINUTE * 60;
+
+function QuotaResetCountdown({ resetAt }: { resetAt: string }) {
+	const diffMs = new Date(resetAt).getTime() - Date.now();
+
+	if (diffMs <= 0) {
+		return <span>resetting...</span>;
+	}
+
+	const hours = Math.floor(diffMs / MS_PER_HOUR);
+	const minutes = Math.floor((diffMs % MS_PER_HOUR) / MS_PER_MINUTE);
+
+	if (hours > 24) {
+		const days = Math.floor(hours / 24);
+		return (
+			<span>
+				in {days}d {hours % 24}h
+			</span>
+		);
+	}
+
+	return (
+		<span>
+			in {hours}h {minutes}m
+		</span>
+	);
+}
+
+export function ProviderCard({ provider, className, onResetQuota }: ProviderCardProps) {
 	// Calculate connection usage percentage
 	const usagePercentage =
 		provider.max_connections > 0
@@ -147,6 +187,47 @@ export function ProviderCard({ provider, className }: ProviderCardProps) {
 						</span>
 					</div>
 				</div>
+
+				{/* Download Quota */}
+				{provider.quota_bytes != null && provider.quota_bytes > 0 && (
+					<div className="mt-2 space-y-1 border-base-200 border-t pt-2">
+						<div className="flex items-center justify-between text-[10px]">
+							<span className="flex items-center gap-1 text-base-content/50 uppercase tracking-tight">
+								<Gauge className="h-3 w-3" />
+								Quota
+								{onResetQuota && (
+									<button
+										type="button"
+										className="btn btn-ghost btn-xs ml-1 h-4 min-h-0 w-4 p-0"
+										title="Reset quota"
+										onClick={() => onResetQuota(provider.id)}
+									>
+										<RotateCcw className="h-2.5 w-2.5" />
+									</button>
+								)}
+							</span>
+							<span
+								className={`font-bold font-mono ${provider.quota_exceeded ? "text-error" : "text-base-content/70"}`}
+							>
+								<BytesDisplay bytes={provider.quota_used ?? 0} /> /{" "}
+								<BytesDisplay bytes={provider.quota_bytes} />
+							</span>
+						</div>
+						<progress
+							className={`progress h-1 w-full ${getQuotaProgressColor(provider)}`}
+							value={provider.quota_used ?? 0}
+							max={provider.quota_bytes}
+						/>
+						{provider.quota_reset_at && (
+							<div className="flex items-center justify-between text-[10px]">
+								<span className="text-base-content/40">Resets</span>
+								<span className="font-mono text-base-content/50">
+									<QuotaResetCountdown resetAt={provider.quota_reset_at} />
+								</span>
+							</div>
+						)}
+					</div>
+				)}
 
 				{/* Missing Articles */}
 				{provider.missing_count > 0 && (

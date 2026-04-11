@@ -341,6 +341,10 @@ export interface ProviderStatus {
 	missing_warning: boolean;
 	byte_count: number;
 	byte_count_24h: number;
+	quota_bytes?: number;
+	quota_used?: number;
+	quota_reset_at?: string;
+	quota_exceeded?: boolean;
 }
 
 export interface ActiveStream {
