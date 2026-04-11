@@ -142,7 +142,7 @@ jobs:
           echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ steps.tag.outputs.tag }}"
 
   build-image-arm64:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     needs: build-frontend
     permissions:
       contents: read
