@@ -47,6 +47,10 @@ type Manager interface {
 	// RemoveProvider removes a provider by its nntppool name (host:port or host:port+username).
 	// If the last provider is removed, the pool is closed.
 	RemoveProvider(name string) error
+
+	// ResetProviderQuota resets the download quota counter for a provider by
+	// removing and re-adding it without restoring persisted quota state.
+	ResetProviderQuota(ctx context.Context, provider nntppool.Provider, poolName string) error
 }
 
 // StatsRepository defines the interface for persisting pool statistics
@@ -343,4 +347,38 @@ func (m *manager) RemoveProvider(name string) error {
 	}
 
 	return nil
+}
+
+// ResetProviderQuota resets the download quota counter for a provider by
+// removing it from the pool, clearing persisted quota state in the DB, and
+// re-adding it with QuotaUsed=0 so it starts fresh.
+func (m *manager) ResetProviderQuota(ctx context.Context, provider nntppool.Provider, poolName string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.pool == nil {
+		return fmt.Errorf("NNTP connection pool not available")
+	}
+
+	m.logger.InfoContext(ctx, "Resetting provider quota", "provider", poolName)
+
+	// Remove the provider from the pool
+	if err := m.pool.RemoveProvider(poolName); err != nil {
+		return fmt.Errorf("failed to remove provider for quota reset: %w", err)
+	}
+
+	// Clear persisted quota state in the DB
+	if m.repo != nil {
+		stats := map[string]int64{
+			"quota_used:" + poolName:     0,
+			"quota_reset_at:" + poolName: 0,
+		}
+		if err := m.repo.BatchUpdateSystemStats(ctx, stats); err != nil {
+			m.logger.ErrorContext(ctx, "Failed to clear persisted quota state", "err", err, "provider", poolName)
+		}
+	}
+
+	// Re-add without injecting old quota state — QuotaUsed stays 0
+	m.logger.InfoContext(ctx, "Re-adding provider with reset quota", "provider", provider.Host)
+	return m.pool.AddProvider(provider)
 }

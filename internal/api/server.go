@@ -321,6 +321,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/providers", s.handleCreateProvider)
 	api.Put("/providers/reorder", s.handleReorderProviders)
 	api.Put("/providers/:id", s.handleUpdateProvider)
+	api.Post("/providers/:id/reset-quota", s.handleResetProviderQuota)
 	api.Delete("/providers/:id", s.handleDeleteProvider)
 
 	// Configuration-based instance endpoints

@@ -11,6 +11,8 @@ interface ProviderModalProps {
 	onCancel: () => void;
 }
 
+const BYTES_PER_GB = 1_073_741_824;
+
 const defaultFormData: ProviderFormData = {
 	host: "",
 	port: 119,
@@ -40,6 +42,8 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 		rttMs?: number;
 	} | null>(null);
 	const [canSave, setCanSave] = useState(false);
+	const [quotaEnabled, setQuotaEnabled] = useState(false);
+	const [quotaGbInput, setQuotaGbInput] = useState("");
 
 	const { testProvider, createProvider, updateProvider } = useProviders();
 	const { showToast } = useToast();
@@ -66,10 +70,15 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 				quota_bytes: provider.quota_bytes ?? 0,
 				quota_period_hours: provider.quota_period_hours ?? 0,
 			});
+			const qb = provider.quota_bytes ?? 0;
+			setQuotaEnabled(qb > 0);
+			setQuotaGbInput(qb > 0 ? String(Math.round((qb / BYTES_PER_GB) * 100) / 100) : "1");
 			// For edit mode, allow saving without testing if only non-connection fields change
 			setCanSave(true);
 		} else {
 			setFormData(defaultFormData);
+			setQuotaEnabled(false);
+			setQuotaGbInput("1");
 			setCanSave(false);
 		}
 		setConnectionTestResult(null);
@@ -455,54 +464,81 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 
 					{/* Download Quota */}
 					<div className="space-y-4 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-5">
-						<h4 className="font-bold text-base-content/60 text-xs uppercase tracking-widest">
-							Download Quota
-						</h4>
-						<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-							<fieldset className="fieldset">
-								<legend className="fieldset-legend font-bold">Quota Limit (GB)</legend>
-								<input
-									id="quota_bytes"
-									type="number"
-									className="input input-bordered w-full font-mono text-sm"
-									value={
-										formData.quota_bytes > 0
-											? Math.round((formData.quota_bytes / 1_073_741_824) * 100) / 100
-											: 0
+						<label
+							htmlFor="quota_enabled"
+							className="label w-full min-w-0 cursor-pointer items-start justify-start gap-3"
+						>
+							<input
+								id="quota_enabled"
+								type="checkbox"
+								className="checkbox checkbox-primary checkbox-sm mt-0.5 shrink-0"
+								checked={quotaEnabled}
+								onChange={(e) => {
+									setQuotaEnabled(e.target.checked);
+									if (!e.target.checked) {
+										handleInputChange("quota_bytes", 0);
+										handleInputChange("quota_period_hours", 0);
+									} else {
+										const gb = Number.parseFloat(quotaGbInput) || 1;
+										setQuotaGbInput(String(gb));
+										handleInputChange("quota_bytes", Math.round(gb * BYTES_PER_GB));
 									}
-									onChange={(e) => {
-										const gb = Number.parseFloat(e.target.value) || 0;
-										handleInputChange("quota_bytes", Math.round(gb * 1_073_741_824));
-									}}
-									min={0}
-									step={1}
-								/>
-								<p className="label mt-1 text-base-content/70 text-xs">
-									0 = unlimited. Maximum bytes this provider may download per period.
-								</p>
-							</fieldset>
+								}}
+							/>
+							<div className="min-w-0 flex-1">
+								<span className="label-text font-bold text-xs">Download Quota</span>
+								<span className="block break-words text-base-content/70 text-xs">
+									Limit how much this provider can download per period.
+								</span>
+							</div>
+						</label>
 
-							<fieldset className="fieldset">
-								<legend className="fieldset-legend font-bold">Reset Period</legend>
-								<select
-									id="quota_period_hours"
-									className="select select-bordered w-full font-mono text-sm"
-									value={formData.quota_period_hours}
-									onChange={(e) =>
-										handleInputChange("quota_period_hours", Number.parseInt(e.target.value, 10))
-									}
-									disabled={formData.quota_bytes === 0}
-								>
-									<option value={0}>Lifetime (never resets)</option>
-									<option value={24}>Daily (24h)</option>
-									<option value={168}>Weekly (7d)</option>
-									<option value={720}>Monthly (30d)</option>
-								</select>
-								<p className="label mt-1 text-base-content/70 text-xs">
-									How often the quota counter resets.
-								</p>
-							</fieldset>
-						</div>
+						{quotaEnabled && (
+							<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend font-bold">Quota Limit (GB)</legend>
+									<input
+										id="quota_bytes"
+										type="number"
+										className="input input-bordered w-full font-mono text-sm"
+										value={quotaGbInput}
+										onChange={(e) => {
+											setQuotaGbInput(e.target.value);
+											const gb = Number.parseFloat(e.target.value);
+											if (!Number.isNaN(gb) && gb > 0) {
+												handleInputChange("quota_bytes", Math.round(gb * BYTES_PER_GB));
+											}
+										}}
+										onBlur={() => {
+											const gb = Number.parseFloat(quotaGbInput);
+											if (Number.isNaN(gb) || gb <= 0) {
+												setQuotaGbInput("1");
+												handleInputChange("quota_bytes", BYTES_PER_GB);
+											}
+										}}
+										min={0.01}
+										step={1}
+									/>
+								</fieldset>
+
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend font-bold">Reset Period</legend>
+									<select
+										id="quota_period_hours"
+										className="select select-bordered w-full font-mono text-sm"
+										value={formData.quota_period_hours}
+										onChange={(e) =>
+											handleInputChange("quota_period_hours", Number.parseInt(e.target.value, 10))
+										}
+									>
+										<option value={0}>Lifetime (never resets)</option>
+										<option value={24}>Daily (24h)</option>
+										<option value={168}>Weekly (7d)</option>
+										<option value={720}>Monthly (30d)</option>
+									</select>
+								</fieldset>
+							</div>
+						)}
 					</div>
 
 					{/* User-Agent */}

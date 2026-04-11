@@ -38,6 +38,9 @@ func (m *mockPoolManager) UpdateDownloadProgress(_ string, _ int64)        {}
 func (m *mockPoolManager) IncArticlesPosted()                              {}
 func (m *mockPoolManager) AddProvider(_ nntppool.Provider) error           { return nil }
 func (m *mockPoolManager) RemoveProvider(_ string) error                   { return nil }
+func (m *mockPoolManager) ResetProviderQuota(_ context.Context, _ nntppool.Provider, _ string) error {
+	return nil
+}
 
 // mockARRsService captures TriggerFileRescan calls and returns a configurable error.
 type mockARRsService struct {

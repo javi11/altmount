@@ -14,6 +14,7 @@ import {
 	useQueueStats,
 	useResetSystemStats,
 } from "../hooks/useApi";
+import { useProviders } from "../hooks/useProviders";
 
 export function Dashboard() {
 	const { error: queueError } = useQueueStats();
@@ -21,9 +22,27 @@ export function Dashboard() {
 	const { data: poolMetrics } = usePoolMetrics();
 	const { showToast } = useToast();
 	const resetStats = useResetSystemStats();
+	const { resetProviderQuota } = useProviders();
 	const warnedProvidersRef = useRef<Set<string>>(new Set());
 
 	const hasError = queueError || healthError;
+
+	const handleResetQuota = async (providerId: string) => {
+		try {
+			await resetProviderQuota.mutateAsync(providerId);
+			showToast({
+				type: "success",
+				title: "Quota Reset",
+				message: "Provider quota has been reset",
+			});
+		} catch {
+			showToast({
+				type: "error",
+				title: "Reset Failed",
+				message: "Failed to reset provider quota",
+			});
+		}
+	};
 
 	const handleResetStats = async (options: {
 		duration?: string;
@@ -223,7 +242,7 @@ export function Dashboard() {
 					</h2>
 					<div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
 						{poolMetrics.providers.map((provider) => (
-							<ProviderCard key={provider.id} provider={provider} />
+							<ProviderCard key={provider.id} provider={provider} onResetQuota={handleResetQuota} />
 						))}
 					</div>
 				</div>
