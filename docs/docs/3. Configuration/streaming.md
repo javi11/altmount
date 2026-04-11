@@ -57,7 +57,9 @@ fuse:
   attr_timeout_seconds: 30
   entry_timeout_seconds: 1
   max_cache_size_mb: 128
-  max_read_ahead_mb: 128
+  max_read_ahead_mb: 24
+  # Prefer offset-native reads (default true). Set false only for debugging legacy Seek+Read behavior.
+  use_read_at: true
 
 segment_cache:
   enabled: true
@@ -79,7 +81,20 @@ segment_cache:
 | `attr_timeout_seconds`  | `30`                      | How long the kernel caches file attributes (size, timestamps)                                        |
 | `entry_timeout_seconds` | `1`                       | How long the kernel caches directory entries — lower values refresh faster                            |
 | `max_cache_size_mb`     | `128`                     | Maximum kernel-level cache size in MB                                                                |
-| `max_read_ahead_mb`     | `128`                     | Kernel-level read-ahead buffer size in MB                                                            |
+| `max_read_ahead_mb`     | `24`                      | Kernel read-ahead buffer (MiB). Lower values reduce speculative reads far ahead of playback and improve FUSE stability for many clients; increase (e.g. 64–128) on very high-latency links if you see extra syscall overhead. |
+| `use_read_at`           | `true`                    | When true, FUSE uses offset-based reads (`ReadAt` / `ReadAtContext`) when the virtual file supports them, avoiding cursor `Seek` churn that can reset the streaming pipeline. |
+
+**Throughput note:** With `use_read_at: true`, sequential reads reuse one Usenet streaming pipeline per open file (offset-native, no per-syscall reader teardown), and the hanwen backend serializes `ReadAt` per file handle so prefetch stays coherent. Non-sequential offsets (probes, large backward jumps) still use short-lived range readers so correctness is preserved. The cgofuse backend already serialized reads per handle.
+
+#### Playback glitches on native FUSE
+
+If you see macroblocking or brief artifacts **only** on `mount_type: fuse` but not when using rclone against WebDAV, try:
+
+1. **Lower** `fuse.max_read_ahead_mb` (e.g. 16–32) — large read-ahead causes more non-sequential kernel reads.
+2. Ensure **`use_read_at: true`** (default) so reads stay offset-native.
+3. Keep **segment cache** enabled so repeated ranges hit disk instead of Usenet.
+
+Existing installs that relied on `max_read_ahead_mb: 128` can raise it again if throughput drops and playback is already stable.
 
 #### Segment Cache Options
 

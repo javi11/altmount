@@ -50,7 +50,7 @@ func (b *Backend) Type() backend.Type {
 func (b *Backend) Mount(ctx context.Context, onReady func()) error {
 	b.cleanup()
 
-	root := NewDir(b.cfg.NzbFs, "", b.logger, b.cfg.UID, b.cfg.GID, b.cfg.StreamTracker)
+	root := NewDir(b.cfg.NzbFs, "", b.logger, b.cfg.UID, b.cfg.GID, b.cfg.StreamTracker, b.cfg.FuseConfig.UseReadAtEnabled())
 
 	attrTimeout := time.Duration(b.cfg.FuseConfig.AttrTimeoutSeconds) * time.Second
 	entryTimeout := time.Duration(b.cfg.FuseConfig.EntryTimeoutSeconds) * time.Second
@@ -64,7 +64,7 @@ func (b *Backend) Mount(ctx context.Context, onReady func()) error {
 
 	maxReadAhead := b.cfg.FuseConfig.MaxReadAheadMB * 1024 * 1024
 	if maxReadAhead == 0 {
-		maxReadAhead = 128 * 1024 * 1024 // 128MB default
+		maxReadAhead = 24 * 1024 * 1024 // matches default fuse.max_read_ahead_mb when unset
 	}
 
 	opts := &fs.Options{

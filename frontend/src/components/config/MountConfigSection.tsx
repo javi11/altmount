@@ -947,7 +947,8 @@ function FuseMountSubSection({ config, isRunning, onFormDataChange }: FuseSubSec
 		attr_timeout_seconds: 30,
 		entry_timeout_seconds: 1,
 		max_cache_size_mb: 128,
-		max_read_ahead_mb: 128,
+		max_read_ahead_mb: 24,
+		use_read_at: true,
 	});
 
 	useEffect(() => {
@@ -1016,7 +1017,7 @@ function FuseMountSubSection({ config, isRunning, onFormDataChange }: FuseSubSec
 							<input
 								type="number"
 								className="input input-bordered join-item w-full bg-base-100 font-mono text-sm"
-								value={formData.max_read_ahead_mb ?? 128}
+								value={formData.max_read_ahead_mb ?? 24}
 								onChange={(e) =>
 									updateField({
 										max_read_ahead_mb: Number.parseInt(e.target.value, 10) || 0,
@@ -1028,6 +1029,26 @@ function FuseMountSubSection({ config, isRunning, onFormDataChange }: FuseSubSec
 								MB
 							</span>
 						</div>
+						<p className="label text-xs">
+							Lower values reduce speculative kernel read-ahead and can improve FUSE streaming
+							stability; raise toward 64–128 if you need more buffering on slow links.
+						</p>
+					</fieldset>
+					<fieldset className="fieldset sm:col-span-2">
+						<legend className="fieldset-legend">Offset-native reads (ReadAt)</legend>
+						<label className="label cursor-pointer justify-start gap-3">
+							<input
+								type="checkbox"
+								className="checkbox checkbox-primary checkbox-sm"
+								checked={formData.use_read_at ?? true}
+								onChange={(e) => updateField({ use_read_at: e.target.checked })}
+								disabled={isRunning}
+							/>
+							<span className="label-text text-xs">
+								Prefer ReadAt for FUSE file reads when supported (recommended; reduces seek churn on
+								media playback)
+							</span>
+						</label>
 					</fieldset>
 				</div>
 			</div>

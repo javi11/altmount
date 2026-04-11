@@ -4440,6 +4440,7 @@ components:
         max_cache_size_mb:
           type: integer
         max_read_ahead_mb:
+          description: Kernel FUSE read-ahead size in MiB. Default 24 after validation; lower reduces speculative read churn (see streaming docs).
           type: integer
         use_read_at:
           description: Prefer offset-native FUSE reads (ReadAt) when the opened file supports it. Defaults to true when omitted.

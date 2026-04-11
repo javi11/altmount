@@ -32,6 +32,7 @@ type File struct {
 	size          int64
 	uid           uint32
 	gid           uint32
+	useReadAt     bool
 }
 
 // Getattr implements fs.NodeGetattrer.
@@ -90,7 +91,7 @@ func (f *File) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, s
 		warmable.WarmUp()
 	}
 
-	handle := NewHandle(aferoFile, f.logger, f.path, stream, f.streamTracker)
+	handle := NewHandle(aferoFile, f.logger, f.path, stream, f.streamTracker, f.useReadAt)
 
 	// Use DIRECT_IO when file size is unknown/zero to prevent the kernel
 	// from caching pages with stale size metadata (rclone mount2 pattern).

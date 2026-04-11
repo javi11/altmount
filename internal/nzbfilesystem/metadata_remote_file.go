@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/javi11/altmount/internal/config"
@@ -784,6 +785,27 @@ type MetadataVirtualFile struct {
 
 	mu      sync.Mutex
 	closeWg sync.WaitGroup // tracks background reader closes during seek
+
+	// readAtSharedNext is the next file offset that may reuse mvf.reader in ReadAt
+	// (long-lived prefetch pipeline). -1 means the sequential cursor was invalidated
+	// (e.g. random ReadAt) and the next shared reuse must match mvf.position after
+	// a fresh ensureReader (typically following Seek).
+	readAtSharedNext int64
+}
+
+// readAtPathMetrics counts ReadAt routing for tests and tuning (optional observability).
+var (
+	readAtSharedPathInvocations  atomic.Uint64
+	readAtEphemeralInvocations  atomic.Uint64
+)
+
+func readAtPathMetricsForTest() (shared, ephemeral uint64) {
+	return readAtSharedPathInvocations.Load(), readAtEphemeralInvocations.Load()
+}
+
+func resetReadAtPathMetricsForTest() {
+	readAtSharedPathInvocations.Store(0)
+	readAtEphemeralInvocations.Store(0)
 }
 
 // segmentOffsetIndex provides O(1) lookup for offset→segment mapping using binary search
@@ -864,6 +886,15 @@ func (mvf *MetadataVirtualFile) GetStreamID() string {
 	return mvf.streamID
 }
 
+// fileContext returns the open-file context for reader construction and range parsing.
+// Callers may omit ctx in tests; nil is treated as context.Background so Value/WithTimeout never run on a nil Context.
+func (mvf *MetadataVirtualFile) fileContext() context.Context {
+	if mvf.ctx != nil {
+		return mvf.ctx
+	}
+	return context.Background()
+}
+
 // WarmUp triggers a background pre-fetch of the file start
 func (mvf *MetadataVirtualFile) WarmUp() {
 	go func() {
@@ -880,6 +911,8 @@ func (mvf *MetadataVirtualFile) WarmUp() {
 			// Just log/ignore, the actual Read will handle it later
 			return
 		}
+
+		mvf.readAtSharedNext = mvf.position
 
 		// If the reader supports manual starting (UsenetReader), trigger it
 		// This starts the background workers to fetch data into the cache
@@ -907,6 +940,9 @@ func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 		totalRead, readErr := mvf.reader.Read(p[n:])
 		n += totalRead
 		mvf.position += int64(totalRead)
+		if totalRead > 0 {
+			mvf.readAtSharedNext = mvf.position
+		}
 
 		if totalRead > 0 && mvf.streamTracker != nil && mvf.streamID != "" {
 			mvf.streamTracker.UpdateProgress(mvf.streamID, int64(totalRead))
@@ -922,6 +958,7 @@ func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 			if errors.Is(readErr, io.EOF) && mvf.hasMoreDataToRead() {
 				// Close current reader and try to get a new one for the next range in next iteration
 				mvf.closeCurrentReader()
+				mvf.readAtSharedNext = mvf.position
 				continue
 			}
 
@@ -942,15 +979,29 @@ func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 	return n, nil
 }
 
-// ReadAt implements afero.File.ReadAt with concurrent random access support.
-// Unlike Read(), this method creates an independent reader for each call,
-// allowing concurrent reads at different offsets without mutex serialization.
+// ReadAt implements afero.File.ReadAt.
+// Sequential reads at the tracked cursor reuse the shared mvf.reader so prefetch
+// can run ahead; other offsets use a short-lived range reader. All ReadAt calls
+// are serialized on mvf.mu so the shared path stays consistent under concurrency.
 func (mvf *MetadataVirtualFile) ReadAt(p []byte, off int64) (n int, err error) {
+	return mvf.readAtWithContext(mvf.fileContext(), p, off)
+}
+
+// ReadAtContext is like ReadAt but uses readCtx for cancellation while the byte
+// range is read (e.g. FUSE per-request context). Reader construction still uses
+// the open-file context.
+func (mvf *MetadataVirtualFile) ReadAtContext(readCtx context.Context, p []byte, off int64) (n int, err error) {
+	if readCtx == nil {
+		readCtx = mvf.fileContext()
+	}
+	return mvf.readAtWithContext(readCtx, p, off)
+}
+
+func (mvf *MetadataVirtualFile) readAtWithContext(readCtx context.Context, p []byte, off int64) (n int, err error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
 
-	// Validate offset bounds
 	if off < 0 {
 		return 0, ErrNegativeOffset
 	}
@@ -958,29 +1009,59 @@ func (mvf *MetadataVirtualFile) ReadAt(p []byte, off int64) (n int, err error) {
 		return 0, io.EOF
 	}
 
-	// Calculate end position (don't read beyond file size)
 	end := off + int64(len(p)) - 1
 	if end >= mvf.fileMeta.FileSize {
 		end = mvf.fileMeta.FileSize - 1
 	}
+	buf := p[:end-off+1]
 
-	// Create an independent reader for this specific offset range
-	// This reader is self-contained and doesn't affect the file's main position
+	mvf.mu.Lock()
+	defer mvf.mu.Unlock()
+
+	useShared := (mvf.readAtSharedNext >= 0 && off == mvf.readAtSharedNext) ||
+		(mvf.readAtSharedNext < 0 && !mvf.readerInitialized && off == mvf.position)
+
+	if useShared {
+		if err := mvf.ensureReader(); err != nil {
+			return 0, err
+		}
+		readAtSharedPathInvocations.Add(1)
+		n, err = readFullContext(readCtx, mvf.reader, buf)
+		if err == io.ErrUnexpectedEOF {
+			err = nil
+		}
+		if n > 0 {
+			mvf.readAtSharedNext = off + int64(n)
+		}
+		if n > 0 && mvf.streamTracker != nil && mvf.streamID != "" {
+			nextOff := off + int64(n)
+			mvf.streamTracker.UpdateProgress(mvf.streamID, int64(n))
+			mvf.streamTracker.UpdateCurrentOffset(mvf.streamID, nextOff)
+			if ur, ok := mvf.reader.(interface{ GetBufferedOffset() int64 }); ok {
+				mvf.streamTracker.UpdateBufferedOffset(mvf.streamID, ur.GetBufferedOffset())
+			}
+		}
+		return n, err
+	}
+
+	readAtEphemeralInvocations.Add(1)
+	if mvf.reader != nil {
+		mvf.closeCurrentReader()
+	}
+	mvf.readAtSharedNext = -1
+
 	reader, err := mvf.createReaderAtOffset(off, end)
 	if err != nil {
 		return 0, err
 	}
 	defer reader.Close()
 
-	// Read the requested data using a context-aware wrapper.
-	// This ensures reads are cancelled if the FUSE context expires,
-	// even if the underlying reader blocks.
-	ctx := mvf.ctx
-	buf := p[:end-off+1]
-	n, err = readFullContext(ctx, reader, buf)
+	n, err = readFullContext(readCtx, reader, buf)
 	if err == io.ErrUnexpectedEOF {
-		// Partial read is acceptable for ReadAt at end of file
 		err = nil
+	}
+	if err == nil && n > 0 {
+		mvf.readAtSharedNext = off + int64(n)
 	}
 
 	return n, err
@@ -1007,7 +1088,7 @@ func (mvf *MetadataVirtualFile) createReaderAtOffset(start, end int64) (io.ReadC
 		return mvf.createEncryptedReaderAtOffset(start, end)
 	}
 
-	return mvf.createUsenetReader(mvf.ctx, start, end)
+	return mvf.createUsenetReader(mvf.fileContext(), start, end)
 }
 
 // createEncryptedReaderAtOffset creates an encrypted reader for a specific offset range
@@ -1028,7 +1109,7 @@ func (mvf *MetadataVirtualFile) createEncryptedReaderAtOffset(start, end int64) 
 		}
 
 		return mvf.rcloneCipher.Open(
-			mvf.ctx,
+			mvf.fileContext(),
 			&utils.RangeHeader{Start: start, End: end},
 			mvf.fileMeta.FileSize,
 			password,
@@ -1050,7 +1131,7 @@ func (mvf *MetadataVirtualFile) createEncryptedReaderAtOffset(start, end int64) 
 		}
 
 		return mvf.aesCipher.Open(
-			mvf.ctx,
+			mvf.fileContext(),
 			&utils.RangeHeader{Start: start, End: end},
 			mvf.fileMeta.FileSize,
 			mvf.fileMeta.AesKey,
@@ -1108,6 +1189,7 @@ func (mvf *MetadataVirtualFile) Seek(offset int64, whence int) (int64, error) {
 	}
 
 	mvf.position = abs
+	mvf.readAtSharedNext = abs
 	return abs, nil
 }
 
@@ -1236,6 +1318,17 @@ func (mvf *MetadataVirtualFile) ensureReader() error {
 	// Get request range from args or use default range starting from current position
 	start, end := mvf.getRequestRange()
 
+	// Sequential ReadAt can advance readAtSharedNext while mvf.position stays at the
+	// Read/Seek cursor (ReadAt does not move position). Open the reader at the shared
+	// cursor when it lies within the same HTTP / logical byte window as getRequestRange.
+	if !mvf.readerInitialized &&
+		mvf.readAtSharedNext >= 0 &&
+		mvf.readAtSharedNext < mvf.fileMeta.FileSize &&
+		start < mvf.readAtSharedNext &&
+		(end < 0 || mvf.readAtSharedNext <= end) {
+		start = mvf.readAtSharedNext
+	}
+
 	if end == -1 {
 		end = mvf.fileMeta.FileSize - 1
 	}
@@ -1261,7 +1354,7 @@ func (mvf *MetadataVirtualFile) ensureReader() error {
 		mvf.reader = decryptedReader
 	} else {
 		// Create plain usenet reader
-		ur, err := mvf.createUsenetReader(mvf.ctx, start, end)
+		ur, err := mvf.createUsenetReader(mvf.fileContext(), start, end)
 		if err != nil {
 			return err
 		}
@@ -1278,7 +1371,7 @@ func (mvf *MetadataVirtualFile) getRequestRange() (start, end int64) {
 	// If this is the first read, check for HTTP range header and save original end
 	if !mvf.readerInitialized && mvf.originalRangeEnd == 0 {
 		// Extract range from context
-		if rangeStr, ok := mvf.ctx.Value(utils.RangeKey).(string); ok && rangeStr != "" {
+		if rangeStr, ok := mvf.fileContext().Value(utils.RangeKey).(string); ok && rangeStr != "" {
 			rangeHeader, err := utils.ParseRangeHeader(rangeStr)
 			if err == nil && rangeHeader != nil {
 				mvf.originalRangeEnd = rangeHeader.End
@@ -1433,7 +1526,7 @@ func (mvf *MetadataVirtualFile) createNestedSourceReader(
 		}
 
 		return mvf.aesCipher.Open(
-			mvf.ctx,
+			mvf.fileContext(),
 			rh,
 			src.InnerVolumeSize,
 			src.AesKey,
@@ -1445,7 +1538,7 @@ func (mvf *MetadataVirtualFile) createNestedSourceReader(
 	}
 
 	// Unencrypted source: read directly from segments at inner offset
-	return mvf.createUsenetReaderFromSegments(mvf.ctx, src.Segments, absoluteStart, absoluteStart+readLen-1)
+	return mvf.createUsenetReaderFromSegments(mvf.fileContext(), src.Segments, absoluteStart, absoluteStart+readLen-1)
 }
 
 // createUsenetReaderFromSegments creates a usenet reader from a specific set of segments
@@ -1550,7 +1643,7 @@ func (mvf *MetadataVirtualFile) wrapWithEncryption(start, end int64) (io.ReadClo
 
 		// Wrap with rclone decryption
 		decryptedReader, err := mvf.rcloneCipher.Open(
-			mvf.ctx,
+			mvf.fileContext(),
 			&utils.RangeHeader{Start: start, End: end},
 			mvf.fileMeta.FileSize,
 			password,
@@ -1578,7 +1671,7 @@ func (mvf *MetadataVirtualFile) wrapWithEncryption(start, end int64) (io.ReadClo
 
 		// Wrap with AES decryption - pass key and IV directly
 		decryptedReader, err := mvf.aesCipher.Open(
-			mvf.ctx,
+			mvf.fileContext(),
 			&utils.RangeHeader{Start: start, End: end},
 			mvf.fileMeta.FileSize,
 			mvf.fileMeta.AesKey,
@@ -1602,7 +1695,7 @@ func (mvf *MetadataVirtualFile) wrapWithEncryption(start, end int64) (io.ReadClo
 // Uses synchronous operations with timeout to prevent goroutine leaks.
 func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usenet.DataCorruptionError, noRetry bool) {
 	// Use a short timeout context to prevent blocking indefinitely
-	ctx, cancel := context.WithTimeout(mvf.ctx, 5*time.Second)
+	ctx, cancel := context.WithTimeout(mvf.fileContext(), 5*time.Second)
 	defer cancel()
 
 	// Any file with missing segments or corruption is marked as corrupted in metadata

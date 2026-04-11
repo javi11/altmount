@@ -6820,10 +6820,15 @@
                     "type": "integer"
                 },
                 "max_read_ahead_mb": {
+                    "description": "Kernel FUSE read-ahead size in MiB (default 24 when unset/invalid; tunable per environment)",
                     "type": "integer"
                 },
                 "mount_path": {
                     "type": "string"
+                },
+                "use_read_at": {
+                    "description": "Prefer offset-native FUSE reads (ReadAt) when the opened file supports it. Defaults to true when omitted.",
+                    "type": "boolean"
                 }
             }
         },

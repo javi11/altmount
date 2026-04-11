@@ -10,6 +10,7 @@ import (
 	"sync"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -32,6 +33,11 @@ func (m *MockFile) Read(p []byte) (n int, err error) {
 
 func (m *MockFile) ReadAt(p []byte, off int64) (n int, err error) {
 	args := m.Called(p, off)
+	return args.Int(0), args.Error(1)
+}
+
+func (m *MockFile) ReadAtContext(ctx context.Context, p []byte, off int64) (n int, err error) {
+	args := m.Called(ctx, p, off)
 	return args.Int(0), args.Error(1)
 }
 
@@ -101,7 +107,7 @@ func TestHandle_Read_InterleavedOffsets_BaselineSeekRead(t *testing.T) {
 	mockFile.On("Read", mock.AnythingOfType("[]uint8")).Return(16, nil).Once()
 	mockFile.On("Close").Return(nil)
 
-	handle := NewHandle(mockFile, logger, "testfile", nil, nil)
+	handle := NewHandle(mockFile, logger, "testfile", nil, nil, false)
 	defer handle.Release(context.Background())
 
 	ctx := context.Background()
@@ -116,6 +122,38 @@ func TestHandle_Read_InterleavedOffsets_BaselineSeekRead(t *testing.T) {
 
 	handle.Release(ctx)
 	mockFile.AssertExpectations(t)
+	mockFile.AssertNotCalled(t, "ReadAt", mock.Anything, mock.Anything)
+	mockFile.AssertNotCalled(t, "ReadAtContext", mock.Anything, mock.Anything, mock.Anything)
+}
+
+// TestHandle_Read_InterleavedOffsets_UsesReadAt verifies offset-native reads: no Seek,
+// and ReadAtContext is used (MetadataVirtualFile implements it; mocks may implement both).
+func TestHandle_Read_InterleavedOffsets_UsesReadAt(t *testing.T) {
+	mockFile := new(MockFile)
+	logger := slog.Default()
+
+	mockFile.On("ReadAtContext", mock.Anything, mock.AnythingOfType("[]uint8"), int64(0)).Return(16, nil).Once()
+	mockFile.On("ReadAtContext", mock.Anything, mock.AnythingOfType("[]uint8"), int64(65536)).Return(16, nil).Once()
+	mockFile.On("ReadAtContext", mock.Anything, mock.AnythingOfType("[]uint8"), int64(4096)).Return(16, nil).Once()
+	mockFile.On("Close").Return(nil)
+
+	handle := NewHandle(mockFile, logger, "testfile", nil, nil, true)
+	defer handle.Release(context.Background())
+
+	ctx := context.Background()
+	dest := make([]byte, 16)
+
+	_, st := handle.Read(ctx, dest, 0)
+	assert.Equal(t, syscall.Errno(0), st)
+	_, st = handle.Read(ctx, dest, 65536)
+	assert.Equal(t, syscall.Errno(0), st)
+	_, st = handle.Read(ctx, dest, 4096)
+	assert.Equal(t, syscall.Errno(0), st)
+
+	handle.Release(ctx)
+	mockFile.AssertExpectations(t)
+	mockFile.AssertNotCalled(t, "Seek", mock.Anything, mock.Anything)
+	mockFile.AssertNotCalled(t, "Read", mock.Anything)
 	mockFile.AssertNotCalled(t, "ReadAt", mock.Anything, mock.Anything)
 }
 
@@ -133,7 +171,7 @@ func TestHandle_Read_SeekAndRead(t *testing.T) {
 
 	mockFile.On("Close").Return(nil)
 
-	handle := NewHandle(mockFile, logger, "testfile", nil, nil)
+	handle := NewHandle(mockFile, logger, "testfile", nil, nil, false)
 	defer handle.Release(context.Background())
 
 	ctx := context.Background()
@@ -148,6 +186,7 @@ func TestHandle_Read_SeekAndRead(t *testing.T) {
 	handle.Release(ctx)
 	mockFile.AssertExpectations(t)
 	mockFile.AssertNotCalled(t, "ReadAt", mock.Anything, mock.Anything)
+	mockFile.AssertNotCalled(t, "ReadAtContext", mock.Anything, mock.Anything, mock.Anything)
 }
 
 func TestHandle_Read_SequentialSkipsSeek(t *testing.T) {
@@ -158,7 +197,7 @@ func TestHandle_Read_SequentialSkipsSeek(t *testing.T) {
 	mockFile.On("Read", mock.AnythingOfType("[]uint8")).Return(10, nil).Twice()
 	mockFile.On("Close").Return(nil)
 
-	handle := NewHandle(mockFile, logger, "testfile", nil, nil)
+	handle := NewHandle(mockFile, logger, "testfile", nil, nil, false)
 	defer handle.Release(context.Background())
 
 	ctx := context.Background()
@@ -177,6 +216,70 @@ func TestHandle_Read_SequentialSkipsSeek(t *testing.T) {
 	mockFile.AssertNotCalled(t, "Seek", mock.Anything, mock.Anything)
 }
 
+// readAtDepthFile counts overlapping ReadAtContext calls (no pool / MVF).
+type readAtDepthFile struct {
+	mu        sync.Mutex
+	inRead    int
+	maxInRead int
+}
+
+func (f *readAtDepthFile) ReadAtContext(ctx context.Context, p []byte, off int64) (int, error) {
+	f.mu.Lock()
+	f.inRead++
+	if f.inRead > f.maxInRead {
+		f.maxInRead = f.inRead
+	}
+	f.mu.Unlock()
+	time.Sleep(8 * time.Millisecond)
+	f.mu.Lock()
+	f.inRead--
+	f.mu.Unlock()
+	for i := range p {
+		p[i] = 0
+	}
+	return len(p), nil
+}
+
+func (f *readAtDepthFile) Close() error { return nil }
+func (f *readAtDepthFile) Read(p []byte) (int, error)                       { return 0, io.EOF }
+func (f *readAtDepthFile) ReadAt(p []byte, off int64) (int, error)          { return 0, nil }
+func (f *readAtDepthFile) Seek(offset int64, whence int) (int64, error)     { return 0, nil }
+func (f *readAtDepthFile) Write(p []byte) (int, error)                      { return 0, nil }
+func (f *readAtDepthFile) WriteAt(p []byte, off int64) (int, error)         { return 0, nil }
+func (f *readAtDepthFile) Name() string                                    { return "depth" }
+func (f *readAtDepthFile) Readdir(count int) ([]os.FileInfo, error)         { return nil, nil }
+func (f *readAtDepthFile) Readdirnames(n int) ([]string, error)             { return nil, nil }
+func (f *readAtDepthFile) Stat() (os.FileInfo, error)                      { return nil, nil }
+func (f *readAtDepthFile) Sync() error                                     { return nil }
+func (f *readAtDepthFile) Truncate(size int64) error                        { return nil }
+func (f *readAtDepthFile) WriteString(s string) (int, error)                { return 0, nil }
+
+func TestHandle_Read_ConcurrentReadAtSerialized(t *testing.T) {
+	df := &readAtDepthFile{}
+	logger := slog.Default()
+	handle := NewHandle(df, logger, "testfile", nil, nil, true)
+	defer handle.Release(context.Background())
+
+	ctx := context.Background()
+	dest := make([]byte, 16)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		_, st := handle.Read(ctx, dest, 0)
+		assert.Equal(t, syscall.Errno(0), st)
+	}()
+	go func() {
+		defer wg.Done()
+		_, st := handle.Read(ctx, dest, 100)
+		assert.Equal(t, syscall.Errno(0), st)
+	}()
+	wg.Wait()
+
+	assert.Equal(t, 1, df.maxInRead, "per-handle ReadAt mutex should prevent overlapping ReadAtContext")
+}
+
 func TestHandle_Read_Concurrency(t *testing.T) {
 	mockFile := new(MockFile)
 	logger := slog.Default()
@@ -186,7 +289,7 @@ func TestHandle_Read_Concurrency(t *testing.T) {
 	mockFile.On("Read", mock.AnythingOfType("[]uint8")).Return(10, nil)
 	mockFile.On("Close").Return(nil)
 
-	handle := NewHandle(mockFile, logger, "testfile", nil, nil)
+	handle := NewHandle(mockFile, logger, "testfile", nil, nil, false)
 	defer handle.Release(context.Background())
 
 	ctx := context.Background()
@@ -220,7 +323,7 @@ func TestHandle_Read_ReadError(t *testing.T) {
 	mockFile.On("Read", mock.AnythingOfType("[]uint8")).Return(0, os.ErrPermission).Once()
 	mockFile.On("Close").Return(nil)
 
-	handle := NewHandle(mockFile, logger, "testfile", nil, nil)
+	handle := NewHandle(mockFile, logger, "testfile", nil, nil, false)
 	defer handle.Release(context.Background())
 
 	ctx := context.Background()
@@ -240,7 +343,7 @@ func TestHandle_Read_EOF(t *testing.T) {
 	mockFile.On("Read", mock.AnythingOfType("[]uint8")).Return(5, io.EOF).Once()
 	mockFile.On("Close").Return(nil)
 
-	handle := NewHandle(mockFile, logger, "testfile", nil, nil)
+	handle := NewHandle(mockFile, logger, "testfile", nil, nil, false)
 	defer handle.Release(context.Background())
 
 	ctx := context.Background()
@@ -262,7 +365,7 @@ func TestHandle_Read_SeekError(t *testing.T) {
 	mockFile.On("Seek", int64(500), io.SeekStart).Return(int64(0), os.ErrInvalid).Once()
 	mockFile.On("Close").Return(nil)
 
-	handle := NewHandle(mockFile, logger, "testfile", nil, nil)
+	handle := NewHandle(mockFile, logger, "testfile", nil, nil, false)
 	defer handle.Release(context.Background())
 
 	ctx := context.Background()
@@ -280,7 +383,7 @@ func TestHandle_Read_ContextCanceled(t *testing.T) {
 	logger := slog.Default()
 
 	bf := &blockingFile{readBlock: make(chan struct{})}
-	handle := NewHandle(bf, logger, "testfile", nil, nil)
+	handle := NewHandle(bf, logger, "testfile", nil, nil, false)
 	// Release will close bf (unblocking any blocked worker) and stop the worker.
 	defer handle.Release(context.Background())
 
@@ -298,7 +401,7 @@ func TestHandle_Read_BlockingReadContextCanceled(t *testing.T) {
 
 	// blockingFile blocks on Read until Close is called (or readBlock is closed)
 	bf := &blockingFile{readBlock: make(chan struct{})}
-	handle := NewHandle(bf, logger, "testfile", nil, nil)
+	handle := NewHandle(bf, logger, "testfile", nil, nil, false)
 	// Release closes bf.Close() which unblocks the worker, then waits for it.
 	defer handle.Release(context.Background())
 
@@ -322,7 +425,7 @@ func TestHandle_Read_BlockingSeekContextCanceled(t *testing.T) {
 	logger := slog.Default()
 
 	bf := &blockingFile{seekBlock: make(chan struct{})}
-	handle := NewHandle(bf, logger, "testfile", nil, nil)
+	handle := NewHandle(bf, logger, "testfile", nil, nil, false)
 	defer handle.Release(context.Background())
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -401,7 +504,7 @@ func TestHandle_Release_Idempotent(t *testing.T) {
 
 	mockFile.On("Close").Return(nil).Once()
 
-	handle := NewHandle(mockFile, logger, "testfile", nil, nil)
+	handle := NewHandle(mockFile, logger, "testfile", nil, nil, false)
 
 	ctx := context.Background()
 

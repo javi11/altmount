@@ -1,6 +1,7 @@
 package nzbfilesystem
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"sync"
@@ -612,4 +613,93 @@ func TestConcurrentSegmentIndexAccess(t *testing.T) {
 		}(int64(i * 30))
 	}
 	wg.Wait()
+}
+
+// TestMetadataVirtualFile_ReadAt_SequentialReusesSharedReader verifies that
+// sequential ReadAt calls on an existing reader hit the shared path (metrics)
+// and return correct bytes without creating ephemeral range readers.
+func TestMetadataVirtualFile_ReadAt_SequentialReusesSharedReader(t *testing.T) {
+	resetReadAtPathMetricsForTest()
+	t.Cleanup(resetReadAtPathMetricsForTest)
+
+	data := make([]byte, 256)
+	for i := range data {
+		data[i] = byte(i)
+	}
+	br := bytes.NewReader(data)
+	mvf := &MetadataVirtualFile{
+		fileMeta: &metapb.FileMetadata{
+			FileSize: int64(len(data)),
+			SegmentData: []*metapb.SegmentData{
+				{StartOffset: 0, EndOffset: int64(len(data)) - 1, SegmentSize: int64(len(data))},
+			},
+		},
+		reader:              io.NopCloser(br),
+		readerInitialized: true,
+		readAtSharedNext:  0,
+	}
+
+	buf := make([]byte, 10)
+	n, err := mvf.ReadAtContext(context.Background(), buf, 0)
+	if err != nil || n != 10 {
+		t.Fatalf("ReadAtContext(0): n=%d err=%v", n, err)
+	}
+	for i := range 10 {
+		if buf[i] != byte(i) {
+			t.Fatalf("byte %d: got %d want %d", i, buf[i], i)
+		}
+	}
+
+	n2, err := mvf.ReadAtContext(context.Background(), buf, 10)
+	if err != nil || n2 != 10 {
+		t.Fatalf("ReadAtContext(10): n=%d err=%v", n2, err)
+	}
+	for i := range 10 {
+		if buf[i] != byte(10+i) {
+			t.Fatalf("offset 10 byte %d: got %d want %d", i, buf[i], 10+i)
+		}
+	}
+
+	shared, ephemeral := readAtPathMetricsForTest()
+	if shared != 2 {
+		t.Fatalf("shared path invocations = %d, want 2", shared)
+	}
+	if ephemeral != 0 {
+		t.Fatalf("ephemeral path invocations = %d, want 0", ephemeral)
+	}
+}
+
+// TestMetadataVirtualFile_ReadAt_OutOfOrderUsesEphemeral checks that a backward
+// jump records an ephemeral-path attempt (counted before pool allocation).
+func TestMetadataVirtualFile_ReadAt_OutOfOrderUsesEphemeral(t *testing.T) {
+	resetReadAtPathMetricsForTest()
+	t.Cleanup(resetReadAtPathMetricsForTest)
+
+	data := make([]byte, 256)
+	br := bytes.NewReader(data)
+	mvf := &MetadataVirtualFile{
+		fileMeta: &metapb.FileMetadata{
+			FileSize: int64(len(data)),
+			SegmentData: []*metapb.SegmentData{
+				{StartOffset: 0, EndOffset: int64(len(data)) - 1, SegmentSize: int64(len(data))},
+			},
+		},
+		reader:              io.NopCloser(br),
+		readerInitialized: true,
+		readAtSharedNext:  0,
+	}
+
+	buf := make([]byte, 10)
+	if _, err := mvf.ReadAtContext(context.Background(), buf, 0); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = mvf.ReadAtContext(context.Background(), buf, 0)
+
+	shared, ephemeral := readAtPathMetricsForTest()
+	if shared < 1 {
+		t.Fatalf("expected at least 1 shared read, got %d", shared)
+	}
+	if ephemeral < 1 {
+		t.Fatalf("expected at least 1 ephemeral read, got %d", ephemeral)
+	}
 }

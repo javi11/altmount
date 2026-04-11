@@ -50,41 +50,52 @@ var ioResultChanPool = sync.Pool{
 	},
 }
 
-// Handle wraps an afero.File for Seek+Read-based reads.
-// A single background IO worker goroutine serializes all file operations,
-// replacing the previous design that allocated a new goroutine and channel
-// on every FUSE read call.
+// readAtContexter is implemented by virtual files that honor per-read cancellation
+// (e.g. MetadataVirtualFile). Checked before io.ReaderAt.
+type readAtContexter interface {
+	ReadAtContext(ctx context.Context, p []byte, off int64) (n int, err error)
+}
+
+// Handle wraps an afero.File for FUSE reads.
+// When useReadAt is true and the file implements ReadAtContext or io.ReaderAt,
+// reads use offset-native APIs on the calling goroutine (no Seek cursor churn).
+// Otherwise a background IO worker serializes Seek+Read.
 //
-// FUSE serializes reads per handle in production; the atomic position tracks
-// state for the sequential-read optimization and keeps the race detector happy
-// under concurrent tests.
+// The atomic position tracks the last completed read end offset for logging and
+// stream tracking; it does not gate correctness when using ReadAt.
 type Handle struct {
 	file          afero.File
+	useReadAt     bool
 	closed        atomic.Bool
 	logger        *slog.Logger
 	path          string
 	stream        *nzbfilesystem.ActiveStream
 	streamTracker backend.StreamTracker
 
-	// Position tracking for the skip-seek sequential optimization.
 	position atomic.Int64
 
-	// Single background IO worker: reqCh feeds requests, wg tracks its lifetime.
-	// reqCh is buffered (1) so the caller can dispatch without stalling.
+	// readAtMu serializes offset-native reads per handle so MetadataVirtualFile can
+	// safely reuse a shared streaming reader without concurrent ReadAt corruption.
+	readAtMu sync.Mutex
+
 	reqCh chan ioReq
 	wg    sync.WaitGroup
 }
 
 // NewHandle creates a Handle and starts its background IO worker goroutine.
+// useReadAt selects the offset-native read path when the file supports it
+// (see config fuse.use_read_at).
 func NewHandle(
 	file afero.File,
 	logger *slog.Logger,
 	path string,
 	stream *nzbfilesystem.ActiveStream,
 	st backend.StreamTracker,
+	useReadAt bool,
 ) *Handle {
 	h := &Handle{
 		file:          file,
+		useReadAt:     useReadAt,
 		logger:        logger,
 		path:          path,
 		stream:        stream,
@@ -137,12 +148,66 @@ func (h *Handle) execIO(ctx context.Context, req ioReq) (ioResult, error) {
 	}
 }
 
-// Read handles a FUSE read request using the persistent IO worker.
-// This keeps the UsenetReader's prefetch pipeline alive across reads while
-// avoiding per-call goroutine and channel allocations.
+func (h *Handle) applyReadResult(off int64, n int, readErr error) syscall.Errno {
+	if n > 0 {
+		newPos := off + int64(n)
+		h.position.Store(newPos)
+		if h.stream != nil && h.streamTracker != nil {
+			h.streamTracker.UpdateProgress(h.stream.ID, int64(n))
+			atomic.StoreInt64(&h.stream.CurrentOffset, newPos)
+		}
+	}
+	if readErr != nil && readErr != io.EOF {
+		return syscall.EIO
+	}
+	return 0
+}
+
+// Read handles a FUSE read request.
 func (h *Handle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
 	if h.closed.Load() {
 		return nil, syscall.EIO
+	}
+
+	if h.useReadAt {
+		if rac, ok := h.file.(readAtContexter); ok {
+			h.readAtMu.Lock()
+			defer h.readAtMu.Unlock()
+			n, err := rac.ReadAtContext(ctx, dest, off)
+			if err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					h.logger.DebugContext(ctx, "ReadAtContext canceled", "path", h.path, "offset", off)
+					return nil, syscall.EINTR
+				}
+				if err != io.EOF {
+					h.logger.ErrorContext(ctx, "ReadAtContext failed", "path", h.path, "offset", off, "size", len(dest), "error", err)
+					return nil, syscall.EIO
+				}
+			}
+			if errno := h.applyReadResult(off, n, err); errno != 0 {
+				return nil, errno
+			}
+			return fuse.ReadResultData(dest[:n]), 0
+		}
+		if ra, ok := h.file.(io.ReaderAt); ok {
+			h.readAtMu.Lock()
+			defer h.readAtMu.Unlock()
+			n, err := ra.ReadAt(dest, off)
+			if err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					h.logger.DebugContext(ctx, "ReadAt canceled", "path", h.path, "offset", off)
+					return nil, syscall.EINTR
+				}
+				if err != io.EOF {
+					h.logger.ErrorContext(ctx, "ReadAt failed", "path", h.path, "offset", off, "size", len(dest), "error", err)
+					return nil, syscall.EIO
+				}
+			}
+			if errno := h.applyReadResult(off, n, err); errno != 0 {
+				return nil, errno
+			}
+			return fuse.ReadResultData(dest[:n]), 0
+		}
 	}
 
 	// Skip seek when already at the correct position (sequential-read optimisation).
@@ -173,20 +238,10 @@ func (h *Handle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadRes
 	}
 
 	n := res.n
-	if n > 0 {
-		newPos := off + int64(n)
-		h.position.Store(newPos)
-		if h.stream != nil {
-			h.streamTracker.UpdateProgress(h.stream.ID, int64(n))
-			atomic.StoreInt64(&h.stream.CurrentOffset, newPos)
-		}
-	}
-
-	if res.err != nil && res.err != io.EOF {
+	if errno := h.applyReadResult(off, n, res.err); errno != 0 {
 		h.logger.ErrorContext(ctx, "Read failed", "path", h.path, "offset", off, "size", len(dest), "error", res.err)
 		return nil, syscall.EIO
 	}
-
 	return fuse.ReadResultData(dest[:n]), 0
 }
 

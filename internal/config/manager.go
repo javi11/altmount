@@ -736,7 +736,7 @@ func (c *Config) Validate() error {
 		c.Fuse.MaxCacheSizeMB = 32 // Default
 	}
 	if c.Fuse.MaxReadAheadMB <= 0 {
-		c.Fuse.MaxReadAheadMB = 128 // Default 128MB
+		c.Fuse.MaxReadAheadMB = 24 // Default: moderate read-ahead for stable FUSE streaming (override for high-latency links)
 	}
 	if c.Fuse.UseReadAt == nil {
 		v := true
@@ -1456,7 +1456,7 @@ func DefaultConfig(configDir ...string) *Config {
 			AttrTimeoutSeconds:  30,
 			EntryTimeoutSeconds: 1,
 			MaxCacheSizeMB:      128,
-			MaxReadAheadMB:      128,
+			MaxReadAheadMB:      24,
 			UseReadAt:           &fuseUseReadAt,
 		},
 		MountPath: "",            // Empty by default - required when ARRs is enabled
