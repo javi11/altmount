@@ -31,15 +31,19 @@ func (f *FS) CreateEx(path string, mode uint32, fi *cgofuse.FileInfo_t) int {
 
 // openHandle tracks an open file and its associated stream.
 // Uses mutex-protected Seek+Read to preserve UsenetReader prefetch state.
+// readAtContexter matches nzbfilesystem.MetadataVirtualFile.ReadAtContext.
+type readAtContexter interface {
+	ReadAtContext(ctx context.Context, p []byte, off int64) (n int, err error)
+}
+
 type openHandle struct {
 	file   afero.File
 	stream *nzbfilesystem.ActiveStream
 	path   string
 	closed atomic.Bool
 
-	// Seek+Read serialization
-	mu       sync.Mutex
-	position int64
+	// Serializes ReadAt calls per handle so the shared reader stays coherent.
+	mu sync.Mutex
 }
 
 // FS implements cgofuse.FileSystemInterface using NzbFilesystem.
@@ -309,9 +313,9 @@ func (f *FS) Open(path string, flags int) (int, uint64) {
 	return errc, fi.Fh
 }
 
-// Read reads data from an open file using mutex-protected Seek+Read.
-// This keeps the persistent UsenetReader alive across reads, allowing
-// the downloadManager prefetch pipeline to stay effective.
+// Read reads data from an open file using offset-native ReadAtContext.
+// Calls are serialized per handle so the shared streaming reader in
+// MetadataVirtualFile stays coherent.
 func (f *FS) Read(path string, buff []byte, ofst int64, fh uint64) int {
 	h := f.getHandle(fh)
 	if h == nil {
@@ -319,23 +323,26 @@ func (f *FS) Read(path string, buff []byte, ofst int64, fh uint64) int {
 	}
 
 	h.mu.Lock()
-	defer h.mu.Unlock()
 
-	// Skip seek if already at the correct position (sequential read optimization)
-	if ofst != h.position {
-		if _, err := h.file.Seek(ofst, io.SeekStart); err != nil {
-			f.logger.Error("Read seek failed", "path", path, "offset", ofst, "error", err)
-			return -cgofuse.EIO
-		}
+	var n int
+	var err error
+	ctx := context.Background()
+
+	if rac, ok := h.file.(readAtContexter); ok {
+		n, err = rac.ReadAtContext(ctx, buff, ofst)
+	} else if ra, ok := h.file.(io.ReaderAt); ok {
+		n, err = ra.ReadAt(buff, ofst)
+	} else {
+		h.mu.Unlock()
+		f.logger.Error("file does not implement ReadAtContext or io.ReaderAt", "path", path)
+		return -cgofuse.EIO
 	}
-
-	n, err := h.file.Read(buff)
+	h.mu.Unlock()
 
 	if n > 0 {
-		h.position = ofst + int64(n)
 		if h.stream != nil && f.cfg.StreamTracker != nil {
 			f.cfg.StreamTracker.UpdateProgress(h.stream.ID, int64(n))
-			atomic.StoreInt64(&h.stream.CurrentOffset, h.position)
+			atomic.StoreInt64(&h.stream.CurrentOffset, ofst+int64(n))
 		}
 	}
 

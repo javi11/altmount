@@ -9,6 +9,7 @@
 			"program": "${workspaceFolder}/cmd/altmount",
 			"args": ["serve", "--config=${workspaceFolder}//example/config.yaml"],
 			"env": {
+				"PPROF_PORT": "6060",
 				"PORT": "8080",
 				"COOKIE_DOMAIN": "localhost",
 				"JWT_SECRET": "change-me-to-a-strong-random-secret"
