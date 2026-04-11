@@ -762,6 +762,62 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 	return RespondSuccess(c, response)
 }
 
+// handleResetProviderQuota resets the download quota counter for a provider.
+//
+//	@Summary		Reset provider download quota
+//	@Description	Resets the download quota counter for the specified provider, allowing it to download again.
+//	@Tags			Providers
+//	@Produce		json
+//	@Param			id	path	string	true	"Provider ID"
+//	@Success		200	{object}	APIResponse
+//	@Failure		404	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/providers/{id}/reset-quota [post]
+func (s *Server) handleResetProviderQuota(c *fiber.Ctx) error {
+	if s.configManager == nil {
+		return RespondServiceUnavailable(c, "Configuration management not available", "CONFIG_UNAVAILABLE")
+	}
+	if s.poolManager == nil {
+		return RespondServiceUnavailable(c, "Pool manager not available", "POOL_UNAVAILABLE")
+	}
+
+	providerID := c.Params("id")
+	if providerID == "" {
+		return RespondValidationError(c, "Provider ID is required", "MISSING_PROVIDER_ID")
+	}
+
+	currentConfig := s.configManager.GetConfig()
+	if currentConfig == nil {
+		return RespondInternalError(c, "Configuration not available", "CONFIG_NOT_FOUND")
+	}
+
+	// Find the provider in config
+	var provider *config.ProviderConfig
+	for i := range currentConfig.Providers {
+		if currentConfig.Providers[i].ID == providerID {
+			provider = &currentConfig.Providers[i]
+			break
+		}
+	}
+	if provider == nil {
+		return RespondNotFound(c, "Provider", "PROVIDER_NOT_FOUND")
+	}
+
+	if provider.QuotaBytes == 0 {
+		return RespondBadRequest(c, "Provider has no quota configured", "NO_QUOTA")
+	}
+
+	poolName := provider.NNTPPoolName()
+	nntpProvider := provider.ToNNTPProvider()
+
+	if err := s.poolManager.ResetProviderQuota(c.Context(), nntpProvider, poolName); err != nil {
+		return RespondInternalError(c, "Failed to reset provider quota", err.Error())
+	}
+
+	return RespondMessage(c, "Provider quota reset successfully")
+}
+
 // handleDeleteProvider removes an NNTP provider
 //
 //	@Summary		Delete NNTP provider

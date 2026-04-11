@@ -886,11 +886,15 @@ func providersFieldsEqual(a, b ProviderConfig) bool {
 		a.SkipPing == b.SkipPing &&
 		a.Password == b.Password &&
 		a.MaxConnections == b.MaxConnections &&
+		a.InflightRequests == b.InflightRequests &&
 		a.TLS == b.TLS &&
 		a.InsecureTLS == b.InsecureTLS &&
 		a.ProxyURL == b.ProxyURL &&
 		a.KeepaliveIntervalSeconds == b.KeepaliveIntervalSeconds &&
 		a.KeepaliveCommand == b.KeepaliveCommand &&
+		a.UserAgent == b.UserAgent &&
+		a.QuotaBytes == b.QuotaBytes &&
+		a.QuotaPeriodHours == b.QuotaPeriodHours &&
 		boolPtrEqual(a.Enabled, b.Enabled) &&
 		boolPtrEqual(a.IsBackupProvider, b.IsBackupProvider)
 }

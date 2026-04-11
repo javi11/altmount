@@ -786,6 +786,12 @@ export class APIClient {
 		});
 	}
 
+	async resetProviderQuota(id: string) {
+		return this.request<{ message: string }>(`/providers/${id}/reset-quota`, {
+			method: "POST",
+		});
+	}
+
 	async reorderProviders(data: ProviderReorderRequest) {
 		return this.request<ProviderConfig[]>("/providers/reorder", {
 			method: "PUT",
