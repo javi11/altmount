@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/javi11/nntppool/v4"
 )
@@ -77,6 +79,49 @@ func NewManager(ctx context.Context, repo StatsRepository) Manager {
 	}
 }
 
+// injectQuotaState loads persisted quota counters from the database and sets
+// QuotaUsed / QuotaResetAt on each provider so nntppool can resume quota
+// tracking across restarts.
+func (m *manager) injectQuotaState(providers []nntppool.Provider) {
+	if m.repo == nil {
+		return
+	}
+
+	stats, err := m.repo.GetSystemStats(m.ctx)
+	if err != nil {
+		m.logger.ErrorContext(m.ctx, "Failed to load quota state from database", "error", err)
+		return
+	}
+
+	// Build lookup maps from prefixed keys
+	quotaUsed := make(map[string]int64)
+	quotaResetAt := make(map[string]int64)
+	for k, v := range stats {
+		if after, ok := strings.CutPrefix(k, "quota_used:"); ok {
+			quotaUsed[after] = v
+		} else if after, ok := strings.CutPrefix(k, "quota_reset_at:"); ok {
+			quotaResetAt[after] = v
+		}
+	}
+
+	for i := range providers {
+		name := providers[i].Host
+		if providers[i].Auth.Username != "" {
+			name += "+" + providers[i].Auth.Username
+		}
+
+		if used, ok := quotaUsed[name]; ok && used > 0 {
+			providers[i].QuotaUsed = used
+		}
+		if resetNano, ok := quotaResetAt[name]; ok && resetNano > 0 {
+			t := time.Unix(0, resetNano)
+			if t.After(time.Now()) {
+				providers[i].QuotaResetAt = t
+			}
+		}
+	}
+}
+
 // GetPool returns the current connection pool or error if not available
 func (m *manager) GetPool() (*nntppool.Client, error) {
 	m.mu.RLock()
@@ -110,6 +155,9 @@ func (m *manager) SetProviders(providers []nntppool.Provider) error {
 		m.logger.InfoContext(m.ctx, "No NNTP providers configured - pool cleared")
 		return nil
 	}
+
+	// Restore quota state from DB before creating the pool
+	m.injectQuotaState(providers)
 
 	// Create new pool with providers
 	m.logger.InfoContext(m.ctx, "Creating NNTP connection pool", "provider_count", len(providers))
@@ -245,6 +293,11 @@ func (m *manager) IncArticlesPosted() {
 func (m *manager) AddProvider(provider nntppool.Provider) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// Restore quota state from DB
+	providers := []nntppool.Provider{provider}
+	m.injectQuotaState(providers)
+	provider = providers[0]
 
 	if m.pool == nil {
 		// No pool yet — create one with this single provider

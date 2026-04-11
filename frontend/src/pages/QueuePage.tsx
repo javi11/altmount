@@ -616,10 +616,7 @@ export function QueuePage() {
 														Priority
 														<ChevronDown className="h-3 w-3" />
 													</button>
-													<ul
-														tabIndex={0}
-														className="dropdown-content menu z-10 w-40 rounded-box bg-base-100 p-2 shadow-md"
-													>
+													<ul className="dropdown-content menu z-10 w-40 rounded-box bg-base-100 p-2 shadow-md">
 														<li>
 															<button type="button" onClick={() => handleBulkSetPriority(1)}>
 																High
