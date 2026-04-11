@@ -496,6 +496,8 @@ func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 		SkipPing                bool   `json:"skip_ping"`
 		KeepaliveIntervalSeconds int   `json:"keepalive_interval_seconds"`
 		KeepaliveCommand        string `json:"keepalive_command"`
+		QuotaBytes              int64  `json:"quota_bytes"`
+		QuotaPeriodHours        int    `json:"quota_period_hours"`
 	}
 
 	if err := c.BodyParser(&createReq); err != nil {
@@ -536,6 +538,8 @@ func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 		SkipPing:                 createReq.SkipPing,
 		KeepaliveIntervalSeconds: createReq.KeepaliveIntervalSeconds,
 		KeepaliveCommand:         createReq.KeepaliveCommand,
+		QuotaBytes:               createReq.QuotaBytes,
+		QuotaPeriodHours:         createReq.QuotaPeriodHours,
 	}
 
 	// Add to config
@@ -573,6 +577,8 @@ func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 		SkipPing:                 newProvider.SkipPing,
 		KeepaliveIntervalSeconds: newProvider.KeepaliveIntervalSeconds,
 		KeepaliveCommand:         newProvider.KeepaliveCommand,
+		QuotaBytes:               newProvider.QuotaBytes,
+		QuotaPeriodHours:         newProvider.QuotaPeriodHours,
 	}
 
 	return RespondSuccess(c, response)
@@ -639,6 +645,8 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 		SkipPing                 *bool   `json:"skip_ping,omitempty"`
 		KeepaliveIntervalSeconds *int    `json:"keepalive_interval_seconds,omitempty"`
 		KeepaliveCommand         *string `json:"keepalive_command,omitempty"`
+		QuotaBytes               *int64  `json:"quota_bytes,omitempty"`
+		QuotaPeriodHours         *int    `json:"quota_period_hours,omitempty"`
 	}
 
 	if err := c.BodyParser(&updateReq); err != nil {
@@ -706,6 +714,12 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 	if updateReq.KeepaliveCommand != nil {
 		provider.KeepaliveCommand = *updateReq.KeepaliveCommand
 	}
+	if updateReq.QuotaBytes != nil {
+		provider.QuotaBytes = *updateReq.QuotaBytes
+	}
+	if updateReq.QuotaPeriodHours != nil {
+		provider.QuotaPeriodHours = *updateReq.QuotaPeriodHours
+	}
 
 	// Assign the updated provider back to the slice
 	newConfig.Providers[providerIndex] = provider
@@ -741,6 +755,8 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 		SkipPing:                 provider.SkipPing,
 		KeepaliveIntervalSeconds: provider.KeepaliveIntervalSeconds,
 		KeepaliveCommand:         provider.KeepaliveCommand,
+		QuotaBytes:               provider.QuotaBytes,
+		QuotaPeriodHours:         provider.QuotaPeriodHours,
 	}
 
 	return RespondSuccess(c, response)
