@@ -1246,6 +1246,53 @@ func (s *Server) handleUpdateQueueItemPriority(c *fiber.Ctx) error {
 	return RespondSuccess(c, ToQueueItemResponse(updated))
 }
 
+// handleBulkUpdateQueuePriority handles PATCH /api/queue/bulk/priority
+//
+//	@Summary		Bulk update queue item priorities
+//	@Description	Updates the priority for multiple queue items at once. Items currently being processed are skipped.
+//	@Tags			Queue
+//	@Accept			json
+//	@Produce		json
+//	@Param			body	body		object{ids=[]int64,priority=int}	true	"IDs and priority: 1=high, 2=normal, 3=low"
+//	@Success		200		{object}	APIResponse{data=object{updated_count=int,skipped_count=int,message=string}}
+//	@Failure		400		{object}	APIResponse
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/queue/bulk/priority [patch]
+func (s *Server) handleBulkUpdateQueuePriority(c *fiber.Ctx) error {
+	var req struct {
+		IDs      []int64 `json:"ids"`
+		Priority int     `json:"priority"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return RespondBadRequest(c, "Invalid request body", err.Error())
+	}
+
+	if len(req.IDs) == 0 {
+		return RespondBadRequest(c, "No queue item IDs provided", "")
+	}
+
+	if req.Priority < 1 || req.Priority > 3 {
+		return RespondValidationError(c, "Invalid priority value", "Valid values: 1 (high), 2 (normal), 3 (low)")
+	}
+
+	updated, skipped, err := s.queueRepo.UpdateQueueItemsPriorityBulk(c.Context(), req.IDs, database.QueuePriority(req.Priority))
+	if err != nil {
+		return RespondInternalError(c, "Failed to update priorities", err.Error())
+	}
+
+	if s.progressBroadcaster != nil {
+		s.progressBroadcaster.BroadcastQueueChanged()
+	}
+
+	priorityLabels := map[int]string{1: "high", 2: "normal", 3: "low"}
+	return RespondSuccess(c, fiber.Map{
+		"updated_count": updated,
+		"skipped_count": skipped,
+		"message":       fmt.Sprintf("Successfully set %d items to %s priority (%d skipped — currently processing)", updated, priorityLabels[req.Priority], skipped),
+	})
+}
+
 // handleDownloadNZB handles GET /api/queue/{id}/download
 //
 //	@Summary		Download NZB file

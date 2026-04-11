@@ -105,6 +105,18 @@ export const useUpdateQueueItemPriority = () => {
 	});
 };
 
+export const useBulkUpdateQueueItemPriority = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: ({ ids, priority }: { ids: number[]; priority: 1 | 2 | 3 }) =>
+			apiClient.bulkUpdateQueueItemPriority(ids, priority),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["queue"] });
+		},
+	});
+};
+
 export const useBulkCancelQueueItems = () => {
 	const queryClient = useQueryClient();
 
