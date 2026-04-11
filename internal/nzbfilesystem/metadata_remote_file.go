@@ -779,6 +779,13 @@ type MetadataVirtualFile struct {
 	currentRangeEnd   int64 // End of current reader's range
 	originalRangeEnd  int64 // Original end requested by client (-1 for unbounded)
 
+	// readAtSharedNext is the next file offset that the shared reader can serve
+	// via ReadAtContext. Sequential ReadAt calls reuse mvf.reader when the
+	// requested offset matches this cursor; non-sequential calls use ephemeral
+	// readers and set this to -1 (invalidated). A value of 0 with
+	// !readerInitialized means the very first ReadAt at offset 0 is shared.
+	readAtSharedNext int64
+
 	// Segment offset index for O(1) offset→segment lookup
 	segmentIndex *segmentOffsetIndex
 
@@ -881,6 +888,9 @@ func (mvf *MetadataVirtualFile) WarmUp() {
 			return
 		}
 
+		// Align the ReadAt shared cursor with the warmed-up reader position
+		mvf.readAtSharedNext = mvf.position
+
 		// If the reader supports manual starting (UsenetReader), trigger it
 		// This starts the background workers to fetch data into the cache
 		// without consuming any bytes from the stream.
@@ -942,15 +952,26 @@ func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 	return n, nil
 }
 
-// ReadAt implements afero.File.ReadAt with concurrent random access support.
-// Unlike Read(), this method creates an independent reader for each call,
-// allowing concurrent reads at different offsets without mutex serialization.
+// ReadAt implements afero.File.ReadAt. It delegates to ReadAtContext using the
+// file-level context.
 func (mvf *MetadataVirtualFile) ReadAt(p []byte, off int64) (n int, err error) {
+	ctx := mvf.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return mvf.ReadAtContext(ctx, p, off)
+}
+
+// ReadAtContext serves offset-based reads. Sequential offsets reuse the shared
+// streaming reader (preserving the prefetch pipeline); non-sequential offsets
+// use a short-lived range reader so the shared pipeline is not disturbed.
+// All calls are serialized via mvf.mu — the caller (FUSE handle) must ensure
+// per-handle ordering.
+func (mvf *MetadataVirtualFile) ReadAtContext(readCtx context.Context, p []byte, off int64) (n int, err error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
 
-	// Validate offset bounds
 	if off < 0 {
 		return 0, ErrNegativeOffset
 	}
@@ -958,30 +979,81 @@ func (mvf *MetadataVirtualFile) ReadAt(p []byte, off int64) (n int, err error) {
 		return 0, io.EOF
 	}
 
-	// Calculate end position (don't read beyond file size)
+	mvf.mu.Lock()
+	defer mvf.mu.Unlock()
+
+	// Determine whether this offset can reuse the shared reader.
+	// Shared path: offset matches the next expected sequential position.
+	useShared := (mvf.readAtSharedNext >= 0 && off == mvf.readAtSharedNext) ||
+		(mvf.readAtSharedNext == 0 && !mvf.readerInitialized && off == mvf.position)
+
+	if useShared {
+		if err := mvf.ensureReader(); err != nil {
+			return 0, err
+		}
+
+		// Read from the shared reader (same logic as Read but bounded to len(p))
+		want := int64(len(p))
+		if off+want > mvf.fileMeta.FileSize {
+			want = mvf.fileMeta.FileSize - off
+		}
+		buf := p[:want]
+		for n < int(want) {
+			rn, readErr := mvf.reader.Read(buf[n:])
+			n += rn
+
+			if n > 0 && mvf.streamTracker != nil && mvf.streamID != "" {
+				mvf.streamTracker.UpdateProgress(mvf.streamID, int64(rn))
+				mvf.streamTracker.UpdateCurrentOffset(mvf.streamID, off+int64(n))
+				if ur, ok := mvf.reader.(interface{ GetBufferedOffset() int64 }); ok {
+					mvf.streamTracker.UpdateBufferedOffset(mvf.streamID, ur.GetBufferedOffset())
+				}
+			}
+
+			if readErr != nil {
+				if errors.Is(readErr, io.EOF) && mvf.hasMoreDataToRead() {
+					mvf.closeCurrentReader()
+					if err := mvf.ensureReader(); err != nil {
+						break
+					}
+					continue
+				}
+				break
+			}
+		}
+
+		// Advance the shared cursor so the next sequential call hits this path again.
+		mvf.readAtSharedNext = off + int64(n)
+		return n, nil
+	}
+
+	// --- Ephemeral path: non-sequential offset ---
+	// Invalidate the shared cursor and tear down the stale shared reader so
+	// that the next sequential run creates a fresh reader at the correct offset.
+	mvf.readAtSharedNext = -1
+	mvf.closeCurrentReader()
+
 	end := off + int64(len(p)) - 1
 	if end >= mvf.fileMeta.FileSize {
 		end = mvf.fileMeta.FileSize - 1
 	}
 
-	// Create an independent reader for this specific offset range
-	// This reader is self-contained and doesn't affect the file's main position
 	reader, err := mvf.createReaderAtOffset(off, end)
 	if err != nil {
 		return 0, err
 	}
 	defer reader.Close()
 
-	// Read the requested data using a context-aware wrapper.
-	// This ensures reads are cancelled if the FUSE context expires,
-	// even if the underlying reader blocks.
-	ctx := mvf.ctx
 	buf := p[:end-off+1]
-	n, err = readFullContext(ctx, reader, buf)
+	n, err = readFullContext(readCtx, reader, buf)
 	if err == io.ErrUnexpectedEOF {
-		// Partial read is acceptable for ReadAt at end of file
 		err = nil
 	}
+
+	// If this ephemeral read landed right after the shared reader's position,
+	// promote it: set readAtSharedNext so the next sequential call rebuilds
+	// a shared reader from here.
+	mvf.readAtSharedNext = off + int64(n)
 
 	return n, err
 }
@@ -1108,6 +1180,9 @@ func (mvf *MetadataVirtualFile) Seek(offset int64, whence int) (int64, error) {
 	}
 
 	mvf.position = abs
+	// Align ReadAt shared cursor with the new seek position so that the next
+	// ReadAtContext at this offset reuses the shared reader.
+	mvf.readAtSharedNext = abs
 	return abs, nil
 }
 
@@ -1238,6 +1313,16 @@ func (mvf *MetadataVirtualFile) ensureReader() error {
 
 	if end == -1 {
 		end = mvf.fileMeta.FileSize - 1
+	}
+
+	// When ReadAtContext has advanced the shared cursor past mvf.position (which
+	// ReadAt does not move), open the reader at the shared cursor so the next
+	// shared-path read picks up where the last one left off.
+	if mvf.readAtSharedNext > 0 &&
+		mvf.readAtSharedNext < mvf.fileMeta.FileSize &&
+		start < mvf.readAtSharedNext &&
+		(end < 0 || mvf.readAtSharedNext <= end) {
+		start = mvf.readAtSharedNext
 	}
 
 	// Track the current reader's range for progressive reading

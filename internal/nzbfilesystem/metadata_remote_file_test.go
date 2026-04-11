@@ -325,6 +325,7 @@ func TestReadAtNoSegments(t *testing.T) {
 			SegmentData: nil, // No segments
 		},
 		poolManager: &mockPoolManager{},
+		ctx:         context.Background(),
 	}
 
 	buf := make([]byte, 100)
