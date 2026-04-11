@@ -6,6 +6,7 @@ import {
 	Plus,
 	Power,
 	PowerOff,
+	RotateCcw,
 	Save,
 	Trash2,
 	Wifi,
@@ -44,7 +45,8 @@ export function ProvidersConfigSection({
 	const [formData, setFormData] = useState<ProviderConfig[]>(config.providers);
 	const [hasChanges, setHasChanges] = useState(false);
 
-	const { deleteProvider, testProviderSpeed } = useProviders();
+	const { deleteProvider, testProviderSpeed, resetProviderQuota } = useProviders();
+	const [resettingQuotaId, setResettingQuotaId] = useState<string | null>(null);
 	const { confirmDelete } = useConfirm();
 	const { showToast } = useToast();
 
@@ -143,6 +145,26 @@ export function ProvidersConfigSection({
 			});
 		} finally {
 			setTestingSpeedProviderId(null);
+		}
+	};
+
+	const handleResetQuota = async (provider: ProviderConfig) => {
+		setResettingQuotaId(provider.id);
+		try {
+			await resetProviderQuota.mutateAsync(provider.id);
+			showToast({
+				type: "success",
+				title: "Quota Reset",
+				message: `Download quota for ${provider.host} has been reset.`,
+			});
+		} catch {
+			showToast({
+				type: "error",
+				title: "Reset Failed",
+				message: "Failed to reset provider quota.",
+			});
+		} finally {
+			setResettingQuotaId(null);
 		}
 	};
 
@@ -382,6 +404,22 @@ export function ProvidersConfigSection({
 														)}
 													</button>
 												</div>
+												{(provider.quota_bytes ?? 0) > 0 && (
+													<div className="tooltip" data-tip="Reset download quota">
+														<button
+															type="button"
+															className="btn btn-sm sm:btn-sm join-item border-none bg-warning/10 text-warning hover:bg-warning/20"
+															onClick={() => handleResetQuota(provider)}
+															disabled={resettingQuotaId === provider.id}
+														>
+															{resettingQuotaId === provider.id ? (
+																<span className="loading loading-spinner loading-xs" />
+															) : (
+																<RotateCcw className="h-3.5 w-3.5" />
+															)}
+														</button>
+													</div>
+												)}
 												<div className="tooltip" data-tip="Edit provider">
 													<button
 														type="button"

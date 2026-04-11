@@ -82,6 +82,19 @@ function useDeleteProvider() {
 	});
 }
 
+// Reset provider quota
+function useResetProviderQuota() {
+	const queryClient = useQueryClient();
+
+	return useMutation<{ message: string }, Error, string>({
+		mutationFn: (id) => apiClient.resetProviderQuota(id),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: configKeys.current() });
+			queryClient.invalidateQueries({ queryKey: ["system", "pool", "metrics"] });
+		},
+	});
+}
+
 // Reorder providers
 function useReorderProviders() {
 	const queryClient = useQueryClient();
@@ -105,6 +118,7 @@ export function useProviders() {
 	const createProvider = useCreateProvider();
 	const updateProvider = useUpdateProvider();
 	const deleteProvider = useDeleteProvider();
+	const resetProviderQuota = useResetProviderQuota();
 	const reorderProviders = useReorderProviders();
 
 	return {
@@ -113,6 +127,7 @@ export function useProviders() {
 		createProvider,
 		updateProvider,
 		deleteProvider,
+		resetProviderQuota,
 		reorderProviders,
 	};
 }
