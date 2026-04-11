@@ -227,7 +227,7 @@ func (f *readAtDepthFile) Sync() error                             { return nil 
 func (f *readAtDepthFile) Truncate(int64) error                    { return nil }
 func (f *readAtDepthFile) WriteString(string) (int, error)         { return 0, nil }
 
-func TestHandle_Read_ConcurrentReadAtSerialized(t *testing.T) {
+func TestHandle_Read_ConcurrentReadsAllSucceed(t *testing.T) {
 	df := &readAtDepthFile{delay: 5 * time.Millisecond}
 	handle := NewHandle(df, slog.Default(), "testfile", nil, nil)
 	defer handle.Release(context.Background())
@@ -249,7 +249,9 @@ func TestHandle_Read_ConcurrentReadAtSerialized(t *testing.T) {
 	wg.Wait()
 
 	require.Equal(t, int32(n), successes.Load())
-	assert.Equal(t, 1, df.maxInRead, "per-handle mutex should prevent overlapping ReadAtContext")
+	// No per-handle mutex — concurrent reads are allowed at the FUSE handle level.
+	// Serialization happens inside ReadAtContext (mvf.mu), not here.
+	assert.Greater(t, df.maxInRead, 1, "concurrent reads should overlap at the handle level")
 }
 
 func TestHandle_Release_Idempotent(t *testing.T) {
