@@ -27,6 +27,8 @@ const defaultFormData: ProviderFormData = {
 	keepalive_interval_seconds: 0,
 	keepalive_command: "",
 	user_agent: "",
+	quota_bytes: 0,
+	quota_period_hours: 0,
 };
 
 export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderModalProps) {
@@ -61,6 +63,8 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 				keepalive_interval_seconds: provider.keepalive_interval_seconds ?? 0,
 				keepalive_command: provider.keepalive_command ?? "",
 				user_agent: provider.user_agent ?? "",
+				quota_bytes: provider.quota_bytes ?? 0,
+				quota_period_hours: provider.quota_period_hours ?? 0,
 			});
 			// For edit mode, allow saving without testing if only non-connection fields change
 			setCanSave(true);
@@ -171,6 +175,10 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 					updateData.keepalive_command = formData.keepalive_command;
 				if (formData.user_agent !== (provider.user_agent ?? ""))
 					updateData.user_agent = formData.user_agent;
+				if (formData.quota_bytes !== (provider.quota_bytes ?? 0))
+					updateData.quota_bytes = formData.quota_bytes;
+				if (formData.quota_period_hours !== (provider.quota_period_hours ?? 0))
+					updateData.quota_period_hours = formData.quota_period_hours;
 
 				await updateProvider.mutateAsync({
 					id: provider.id,
@@ -440,6 +448,58 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 								/>
 								<p className="label mt-1 text-base-content/70 text-xs">
 									NNTP command for the probe. Defaults to DATE.
+								</p>
+							</fieldset>
+						</div>
+					</div>
+
+					{/* Download Quota */}
+					<div className="space-y-4 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-5">
+						<h4 className="font-bold text-base-content/60 text-xs uppercase tracking-widest">
+							Download Quota
+						</h4>
+						<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend font-bold">Quota Limit (GB)</legend>
+								<input
+									id="quota_bytes"
+									type="number"
+									className="input input-bordered w-full font-mono text-sm"
+									value={
+										formData.quota_bytes > 0
+											? Math.round((formData.quota_bytes / 1_073_741_824) * 100) / 100
+											: 0
+									}
+									onChange={(e) => {
+										const gb = Number.parseFloat(e.target.value) || 0;
+										handleInputChange("quota_bytes", Math.round(gb * 1_073_741_824));
+									}}
+									min={0}
+									step={1}
+								/>
+								<p className="label mt-1 text-base-content/70 text-xs">
+									0 = unlimited. Maximum bytes this provider may download per period.
+								</p>
+							</fieldset>
+
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend font-bold">Reset Period</legend>
+								<select
+									id="quota_period_hours"
+									className="select select-bordered w-full font-mono text-sm"
+									value={formData.quota_period_hours}
+									onChange={(e) =>
+										handleInputChange("quota_period_hours", Number.parseInt(e.target.value, 10))
+									}
+									disabled={formData.quota_bytes === 0}
+								>
+									<option value={0}>Lifetime (never resets)</option>
+									<option value={24}>Daily (24h)</option>
+									<option value={168}>Weekly (7d)</option>
+									<option value={720}>Monthly (30d)</option>
+								</select>
+								<p className="label mt-1 text-base-content/70 text-xs">
+									How often the quota counter resets.
 								</p>
 							</fieldset>
 						</div>

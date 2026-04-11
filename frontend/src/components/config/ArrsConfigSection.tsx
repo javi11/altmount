@@ -286,8 +286,8 @@ export function ArrsConfigSection({
 							<div>
 								<h5 className="font-bold text-sm">AltMount Webhooks</h5>
 								<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
-									Automatically configure hooks in ARR applications to notify AltMount of upgrades and
-									renames.
+									Automatically configure hooks in ARR applications to notify AltMount of upgrades
+									and renames.
 								</p>
 							</div>
 
@@ -520,7 +520,11 @@ export function ArrsConfigSection({
 											type="button"
 											className="btn btn-sm btn-primary px-4"
 											onClick={() => {
-												setNewInstance({ ...DEFAULT_NEW_INSTANCE, type, category: defaultCategory });
+												setNewInstance({
+													...DEFAULT_NEW_INSTANCE,
+													type,
+													category: defaultCategory,
+												});
 												setShowAddInstance(true);
 											}}
 											disabled={isReadOnly}

@@ -344,6 +344,8 @@ type ProviderConfig struct {
 	KeepaliveIntervalSeconds int        `yaml:"keepalive_interval_seconds" mapstructure:"keepalive_interval_seconds" json:"keepalive_interval_seconds,omitempty"`
 	KeepaliveCommand         string     `yaml:"keepalive_command" mapstructure:"keepalive_command" json:"keepalive_command,omitempty"`
 	UserAgent                string     `yaml:"user_agent" mapstructure:"user_agent" json:"user_agent,omitempty"`
+	QuotaBytes               int64      `yaml:"quota_bytes" mapstructure:"quota_bytes" json:"quota_bytes,omitempty"`
+	QuotaPeriodHours         int        `yaml:"quota_period_hours" mapstructure:"quota_period_hours" json:"quota_period_hours,omitempty"`
 	LastRTTMs                int64      `yaml:"last_rtt_ms" mapstructure:"last_rtt_ms" json:"last_rtt_ms,omitempty"`
 	LastSpeedTestMbps float64    `yaml:"last_speed_test_mbps" mapstructure:"last_speed_test_mbps" json:"last_speed_test_mbps,omitempty"`
 	LastSpeedTestTime *time.Time `yaml:"last_speed_test_time" mapstructure:"last_speed_test_time" json:"last_speed_test_time,omitempty"`
@@ -813,6 +815,8 @@ func (p *ProviderConfig) ToNNTPProvider() nntppool.Provider {
 		KeepaliveInterval: time.Duration(p.KeepaliveIntervalSeconds) * time.Second,
 		KeepaliveCommand:  p.KeepaliveCommand,
 		UserAgent:         p.UserAgent,
+		QuotaBytes:        p.QuotaBytes,
+		QuotaPeriod:       time.Duration(p.QuotaPeriodHours) * time.Hour,
 	}
 }
 

@@ -258,6 +258,8 @@ export interface ProviderConfig {
 	keepalive_interval_seconds?: number;
 	keepalive_command?: string;
 	user_agent?: string;
+	quota_bytes?: number;
+	quota_period_hours?: number;
 	last_rtt_ms?: number;
 	last_speed_test_mbps?: number;
 	last_speed_test_time?: string;
@@ -462,6 +464,8 @@ export interface ProviderUpdateRequest {
 	keepalive_interval_seconds?: number;
 	keepalive_command?: string;
 	user_agent?: string;
+	quota_bytes?: number;
+	quota_period_hours?: number;
 }
 
 // SABnzbd update request
@@ -646,6 +650,8 @@ export interface ProviderFormData {
 	keepalive_interval_seconds: number;
 	keepalive_command: string;
 	user_agent: string;
+	quota_bytes: number;
+	quota_period_hours: number;
 }
 
 export interface LogFormData {
@@ -815,6 +821,8 @@ export interface ProviderCreateRequest {
 	keepalive_interval_seconds?: number;
 	keepalive_command?: string;
 	user_agent?: string;
+	quota_bytes?: number;
+	quota_period_hours?: number;
 }
 
 export interface ProviderReorderRequest {
