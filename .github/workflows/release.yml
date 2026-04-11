@@ -396,7 +396,7 @@ jobs:
           sbom: false
 
   build-image-arm64:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     needs: [test, build-frontend]
     if: ${{ github.event_name != 'workflow_dispatch' || !inputs.skip_docker }}
     permissions:

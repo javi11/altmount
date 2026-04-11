@@ -111,7 +111,7 @@ jobs:
 
   build-dev-arm64:
     name: Build Dev Image (ARM64)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     needs: build-frontend
     permissions:
       contents: read
