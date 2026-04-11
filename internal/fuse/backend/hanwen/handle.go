@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"sync"
 	"sync/atomic"
 	"syscall"
 
@@ -27,8 +26,7 @@ type readAtContexter interface {
 }
 
 // Handle wraps an afero.File and serves FUSE reads via ReadAtContext (preferred)
-// or io.ReaderAt. A per-handle mutex serializes reads so that the underlying
-// MetadataVirtualFile's shared streaming reader stays coherent.
+// or io.ReaderAt. No per-handle lock needed: ReadAtContext serializes internally.
 type Handle struct {
 	file   afero.File
 	closed atomic.Bool
@@ -37,9 +35,6 @@ type Handle struct {
 
 	stream        *nzbfilesystem.ActiveStream
 	streamTracker backend.StreamTracker
-
-	// mu serializes ReadAt calls per handle, keeping the shared reader coherent.
-	mu sync.Mutex
 }
 
 // NewHandle creates a Handle for the given file.
@@ -60,14 +55,12 @@ func NewHandle(
 }
 
 // Read handles a FUSE read request using offset-native ReadAtContext.
-// Calls are serialized per handle so the shared streaming reader in
-// MetadataVirtualFile is not accessed concurrently.
+// No per-handle lock needed: ReadAtContext serializes internally via mvf.mu.
 func (h *Handle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
 	if h.closed.Load() {
 		return nil, syscall.EIO
 	}
 
-	h.mu.Lock()
 	var n int
 	var err error
 
@@ -76,11 +69,9 @@ func (h *Handle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadRes
 	} else if ra, ok := h.file.(io.ReaderAt); ok {
 		n, err = ra.ReadAt(dest, off)
 	} else {
-		h.mu.Unlock()
 		h.logger.ErrorContext(ctx, "file does not implement ReadAtContext or io.ReaderAt", "path", h.path)
 		return nil, syscall.EIO
 	}
-	h.mu.Unlock()
 
 	if n > 0 {
 		newPos := off + int64(n)

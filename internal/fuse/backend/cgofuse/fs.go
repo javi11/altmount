@@ -41,9 +41,6 @@ type openHandle struct {
 	stream *nzbfilesystem.ActiveStream
 	path   string
 	closed atomic.Bool
-
-	// Serializes ReadAt calls per handle so the shared reader stays coherent.
-	mu sync.Mutex
 }
 
 // FS implements cgofuse.FileSystemInterface using NzbFilesystem.
@@ -314,15 +311,12 @@ func (f *FS) Open(path string, flags int) (int, uint64) {
 }
 
 // Read reads data from an open file using offset-native ReadAtContext.
-// Calls are serialized per handle so the shared streaming reader in
-// MetadataVirtualFile stays coherent.
+// No per-handle lock needed: ReadAtContext serializes internally via mvf.mu.
 func (f *FS) Read(path string, buff []byte, ofst int64, fh uint64) int {
 	h := f.getHandle(fh)
 	if h == nil {
 		return -cgofuse.EBADF
 	}
-
-	h.mu.Lock()
 
 	var n int
 	var err error
@@ -333,11 +327,9 @@ func (f *FS) Read(path string, buff []byte, ofst int64, fh uint64) int {
 	} else if ra, ok := h.file.(io.ReaderAt); ok {
 		n, err = ra.ReadAt(buff, ofst)
 	} else {
-		h.mu.Unlock()
 		f.logger.Error("file does not implement ReadAtContext or io.ReaderAt", "path", path)
 		return -cgofuse.EIO
 	}
-	h.mu.Unlock()
 
 	if n > 0 {
 		if h.stream != nil && f.cfg.StreamTracker != nil {
