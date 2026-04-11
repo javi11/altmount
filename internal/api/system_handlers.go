@@ -526,7 +526,7 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 			currentProviderSpeed = metrics.DownloadSpeedBytesPerSec * weight
 		}
 
-		providers = append(providers, ProviderStatusResponse{
+		prov := ProviderStatusResponse{
 			ID:                      providerID,
 			Host:                    host,
 			Username:                username,
@@ -543,7 +543,19 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 			MissingCount:            ps.Missing,
 			MissingRatePerMinute:    missingRate,
 			MissingWarning:          missingWarning,
-		})
+		}
+
+		if q, ok := metrics.ProviderQuotas[ps.Name]; ok {
+			prov.QuotaBytes = q.QuotaBytes
+			prov.QuotaUsed = q.QuotaUsed
+			if !q.QuotaResetAt.IsZero() {
+				t := q.QuotaResetAt
+				prov.QuotaResetAt = &t
+			}
+			prov.QuotaExceeded = q.QuotaExceeded
+		}
+
+		providers = append(providers, prov)
 
 		// Rate-limited warning logging (at most once per 60s per provider)
 		if missingWarning {
