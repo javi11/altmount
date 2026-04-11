@@ -26,8 +26,7 @@ runs:
 
     # Install Bun
     - name: Install Bun
-      shell: bash
-      run: npm install -g bun
+      uses: oven-sh/setup-bun@v2
 
     - name: Tests
       shell: bash
