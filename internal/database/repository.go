@@ -1384,6 +1384,40 @@ func (r *Repository) GetSystemStats(ctx context.Context) (map[string]int64, erro
 	return stats, nil
 }
 
+// parseSQLiteDate attempts to parse a date string from SQLite in various formats
+func parseSQLiteDate(raw string) (time.Time, bool) {
+	if raw == "" {
+		return time.Time{}, false
+	}
+
+	layouts := []string{
+		"2006-01-02 15:04:05-07:00",
+		"2006-01-02 15:04:05Z07:00",
+		"2006-01-02 15:04:05",
+		"2006-01-02",
+		time.RFC3339,
+		time.RFC3339Nano,
+	}
+
+	for _, layout := range layouts {
+		if t, err := time.Parse(layout, raw); err == nil {
+			return t, true
+		}
+	}
+
+	// Try with a space before the offset if it looks like +HH:MM
+	if len(raw) > 6 && (raw[len(raw)-6] == '+' || raw[len(raw)-6] == '-') {
+		modified := raw[:len(raw)-6] + " " + raw[len(raw)-6:]
+		for _, layout := range layouts {
+			if t, err := time.Parse(layout, modified); err == nil {
+				return t, true
+			}
+		}
+	}
+
+	return time.Time{}, false
+}
+
 // GetOldestStatDate returns the date of the oldest record in import_daily_stats or import_history
 func (r *Repository) GetOldestStatDate(ctx context.Context) (time.Time, error) {
 	// Check daily stats first (this tracks from the very beginning of the system stats feature)
@@ -1404,23 +1438,8 @@ func (r *Repository) GetOldestStatDate(ctx context.Context) (time.Time, error) {
 	now := time.Now()
 	var oldest time.Time
 
-	// Parse daily (format: YYYY-MM-DD)
-	if oldestDaily != "" {
-		if t, err := time.Parse("2006-01-02", oldestDaily); err == nil {
-			oldest = t
-		}
-	}
-
-	// Parse history and stats (format: YYYY-MM-DD HH:MM:SS or RFC3339)
-	for _, raw := range []string{oldestHistory, oldestStats} {
-		if raw == "" {
-			continue
-		}
-		if t, err := time.Parse("2006-01-02 15:04:05", raw); err == nil {
-			if oldest.IsZero() || t.Before(oldest) {
-				oldest = t
-			}
-		} else if t, err := time.Parse(time.RFC3339, raw); err == nil {
+	for _, raw := range []string{oldestDaily, oldestHistory, oldestStats} {
+		if t, ok := parseSQLiteDate(raw); ok {
 			if oldest.IsZero() || t.Before(oldest) {
 				oldest = t
 			}
@@ -1451,15 +1470,8 @@ func (r *Repository) GetOldestProviderStatDates(ctx context.Context) (map[string
 			return nil, fmt.Errorf("failed to scan oldest provider date: %w", err)
 		}
 
-		if oldestHourStr != "" {
-			// Format is YYYY-MM-DD HH:MM:SS or with timezone YYYY-MM-DD HH:MM:SS+00:00
-			if t, err := time.Parse("2006-01-02 15:04:05-07:00", oldestHourStr); err == nil {
-				dates[providerID] = t
-			} else if t, err := time.Parse("2006-01-02 15:04:05", oldestHourStr); err == nil {
-				dates[providerID] = t
-			} else if t, err := time.Parse(time.RFC3339, oldestHourStr); err == nil {
-				dates[providerID] = t
-			}
+		if t, ok := parseSQLiteDate(oldestHourStr); ok {
+			dates[providerID] = t
 		}
 	}
 

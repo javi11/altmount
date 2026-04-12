@@ -516,10 +516,15 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 		startedAt := metrics.ProviderStartedAt[ps.Name]
 		if providerID != ps.Name {
 			if oldStartedAt, exists := metrics.ProviderStartedAt[providerID]; exists {
-				if startedAt.IsZero() || oldStartedAt.Before(startedAt) {
+				if startedAt.IsZero() || (!oldStartedAt.IsZero() && oldStartedAt.Before(startedAt)) {
 					startedAt = oldStartedAt
 				}
 			}
+		}
+		
+		// Final fallback: if both are zero, use global startedAt
+		if startedAt.IsZero() {
+			startedAt = metrics.StartedAt
 		}
 
 		// Get missing rate and warning from metrics snapshot
