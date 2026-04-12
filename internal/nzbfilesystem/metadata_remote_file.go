@@ -39,8 +39,8 @@ type MetadataRemoteFile struct {
 	rcloneCipher     *rclone.RcloneCrypt      // For rclone encryption/decryption
 	aesCipher        *aes.AesCipher           // For AES encryption/decryption
 	streamTracker    StreamTracker            // Stream tracker for monitoring active streams
-	segmentStore     usenet.SegmentStore      // Optional segment cache (nil = disabled)
-	renameMu         sync.Mutex               // Mutex to protect rename operations from race conditions
+	segmentStoreGetter func() usenet.SegmentStore // Dynamic segment cache getter (returns nil = disabled)
+	renameMu           sync.Mutex                // Mutex to protect rename operations from race conditions
 }
 
 // Configuration is now accessed dynamically through config.ConfigGetter
@@ -55,7 +55,7 @@ func NewMetadataRemoteFile(
 	poolManager pool.Manager,
 	configGetter config.ConfigGetter,
 	streamTracker StreamTracker,
-	segmentStore usenet.SegmentStore,
+	segmentStoreGetter func() usenet.SegmentStore,
 ) *MetadataRemoteFile {
 	// Initialize rclone cipher with global credentials for encrypted files
 	cfg := configGetter()
@@ -79,7 +79,7 @@ func NewMetadataRemoteFile(
 		rcloneCipher:     rcloneCipher,
 		aesCipher:        aesCipher,
 		streamTracker:    streamTracker,
-		segmentStore:     segmentStore,
+		segmentStoreGetter: segmentStoreGetter,
 	}
 }
 
@@ -245,7 +245,7 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 		globalSalt:       mrf.getGlobalSalt(),
 		streamTracker:    mrf.streamTracker,
 		streamID:         streamID,
-		segmentStore:     mrf.segmentStore,
+		segmentStore:     mrf.segmentStoreGetter(),
 	}
 
 	return true, virtualFile, nil

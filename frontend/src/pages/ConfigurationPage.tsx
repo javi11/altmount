@@ -227,15 +227,11 @@ export function ConfigurationPage() {
 					section: "segment_cache",
 					config: { segment_cache: data as unknown as SegmentCacheConfig },
 				});
-			} else if (section === "import" && config) {
-				const importData = data as unknown as ImportConfig;
-				const workersChanged =
-					importData.max_processor_workers !== config.import.max_processor_workers;
+			} else if (section === "import") {
 				await updateConfigSection.mutateAsync({
 					section: "import",
-					config: { import: importData },
+					config: { import: data as unknown as ImportConfig },
 				});
-				if (workersChanged) addRestartRequiredConfig("Import Max Processor Workers");
 			} else if (section === "metadata" && config) {
 				const metadataData = data as unknown as MetadataConfig;
 				const rootPathChanged = metadataData.root_path !== config.metadata.root_path;

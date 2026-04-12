@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-pkgz/auth/v2/token"
@@ -110,17 +111,21 @@ func initializeFilesystem(
 	poolManager pool.Manager,
 	configGetter config.ConfigGetter,
 	streamTracker nzbfilesystem.StreamTracker,
-	segcacheMgr *segcache.Manager,
+	segcachePtr *atomic.Pointer[segcache.Manager],
 ) *nzbfilesystem.NzbFilesystem {
 	// Reset all in-progress file health checks on start up
 	if err := healthRepo.ResetFileAllChecking(ctx); err != nil {
 		slog.ErrorContext(ctx, "failed to reset in progress file health", "err", err)
 	}
 
-	// Build segment store from segment cache manager (nil if disabled)
-	var segmentStore usenet.SegmentStore
-	if segcacheMgr != nil {
-		segmentStore = segcacheMgr.Cache()
+	// Build a dynamic segment store getter so cache changes take effect without restart.
+	// The atomic pointer is swapped by the config change handler when cache settings change.
+	segmentStoreGetter := func() usenet.SegmentStore {
+		mgr := segcachePtr.Load()
+		if mgr == nil {
+			return nil
+		}
+		return mgr.Cache()
 	}
 
 	// Create metadata-based remote file handler
@@ -132,7 +137,7 @@ func initializeFilesystem(
 		poolManager,
 		configGetter,
 		streamTracker,
-		segmentStore,
+		segmentStoreGetter,
 	)
 
 	// Create filesystem backed by metadata
@@ -275,7 +280,7 @@ func setupAPIServer(
 	mountService *rclone.MountService,
 	progressBroadcaster *progress.ProgressBroadcaster,
 	streamTracker *api.StreamTracker,
-	segcacheMgr *segcache.Manager,
+	segcachePtr *atomic.Pointer[segcache.Manager],
 ) *api.Server {
 	apiConfig := &api.Config{
 		Prefix: "/api",
@@ -297,7 +302,7 @@ func setupAPIServer(
 		mountService,
 		progressBroadcaster,
 		streamTracker,
-		segcacheMgr,
+		segcachePtr,
 	)
 
 	apiServer.SetupRoutes(app)
@@ -452,7 +457,7 @@ func startMountService(ctx context.Context, cfg *config.Config, mountService *rc
 }
 
 // createHTTPServer creates the HTTP server with routing
-func createHTTPServer(apiServer *api.Server, app *fiber.App, webdavHandler *webdav.Handler, streamHandler *api.StreamHandler, port int, profilerEnabled bool) *http.Server {
+func createHTTPServer(apiServer *api.Server, app *fiber.App, webdavHandler *webdav.Handler, streamHandler *api.StreamHandler, port int, configGetter config.ConfigGetter) *http.Server {
 	// Mount WebDAV handler directly (no Fiber adapter needed)
 	webdavHTTPHandler := webdavHandler.GetHTTPHandler()
 
@@ -475,7 +480,7 @@ func createHTTPServer(apiServer *api.Server, app *fiber.App, webdavHandler *webd
 		}
 
 		// Route profiler requests if enabled
-		if profilerEnabled && strings.HasPrefix(path, "/debug/pprof") {
+		if configGetter().ProfilerEnabled && strings.HasPrefix(path, "/debug/pprof") {
 			http.DefaultServeMux.ServeHTTP(w, r)
 			return
 		}

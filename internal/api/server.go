@@ -61,7 +61,7 @@ type Server struct {
 	progressBroadcaster *progress.ProgressBroadcaster
 	streamTracker       *StreamTracker
 	fuseManager         *FuseManager
-	segcacheMgr         *segcache.Manager // nil if segment cache is disabled
+	segcachePtr         *atomic.Pointer[segcache.Manager] // atomic pointer for dynamic cache swap
 	logFilePath         string
 	ready               atomic.Bool
 }
@@ -83,7 +83,7 @@ func NewServer(
 	mountService *rclone.MountService,
 	progressBroadcaster *progress.ProgressBroadcaster,
 	streamTracker *StreamTracker,
-	segcacheMgr *segcache.Manager,
+	segcachePtr *atomic.Pointer[segcache.Manager],
 ) *Server {
 	if config == nil {
 		config = DefaultConfig()
@@ -106,7 +106,7 @@ func NewServer(
 		startTime:           time.Now(),
 		progressBroadcaster: progressBroadcaster,
 		streamTracker:       streamTracker,
-		segcacheMgr:         segcacheMgr,
+		segcachePtr:         segcachePtr,
 		fuseManager:         NewFuseManager(newMountFactory(nzbFilesystem, configManager, streamTracker)),
 	}
 

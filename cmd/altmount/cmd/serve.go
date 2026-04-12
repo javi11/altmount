@@ -7,6 +7,7 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/health"
 	"github.com/javi11/altmount/internal/metadata"
+	"github.com/javi11/altmount/internal/nzbfilesystem/segcache"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/rclone"
@@ -125,13 +127,18 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	// Initialize segment cache (shared between FUSE and WebDAV)
-	segcacheMgr := initializeSegmentCache(ctx, cfg)
-	if segcacheMgr != nil {
-		defer segcacheMgr.Stop()
+	// Initialize segment cache (shared between FUSE and WebDAV) with atomic pointer for dynamic swap
+	var segcachePtr atomic.Pointer[segcache.Manager]
+	if initialCache := initializeSegmentCache(ctx, cfg); initialCache != nil {
+		segcachePtr.Store(initialCache)
+		defer func() {
+			if mgr := segcachePtr.Load(); mgr != nil {
+				mgr.Stop()
+			}
+		}()
 	}
 
-	fs := initializeFilesystem(ctx, metadataService, repos.HealthRepo, arrsService, rcloneRCClient, poolManager, configManager.GetConfigGetter(), streamTracker, segcacheMgr)
+	fs := initializeFilesystem(ctx, metadataService, repos.HealthRepo, arrsService, rcloneRCClient, poolManager, configManager.GetConfigGetter(), streamTracker, &segcachePtr)
 
 	// 6. Setup web services
 	app, debugMode := createFiberApp(ctx, cfg)
@@ -147,7 +154,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	stremioCleanup := api.NewStremioCleanupService(repos.MainRepo, metadataService, configManager.GetConfigGetter())
 	stremioCleanup.StartCleanup(ctx)
 
-	apiServer := setupAPIServer(app, repos, authService, configManager, metadataReader, metadataService, fs, poolManager, importerService, arrsService, mountService, progressBroadcaster, streamTracker, segcacheMgr)
+	apiServer := setupAPIServer(app, repos, authService, configManager, metadataReader, metadataService, fs, poolManager, importerService, arrsService, mountService, progressBroadcaster, streamTracker, &segcachePtr)
 	apiServer.SetLogFilePath(slogutil.GetLogFilePath(cfg.Log))
 
 	webdavHandler, err := setupWebDAV(cfg, fs, authService, repos.UserRepo, configManager, streamTracker)
@@ -165,6 +172,38 @@ func runServe(cmd *cobra.Command, args []string) error {
 	pool.RegisterConfigHandlers(ctx, configManager, poolManager)
 	webdav.RegisterConfigHandlers(ctx, configManager, webdavHandler)
 	api.RegisterLogLevelHandler(ctx, configManager, debugMode)
+	apiServer.RegisterFuseConfigChangeHandler(configManager)
+
+	// Register segment cache config change handler for dynamic enable/disable/resize
+	configManager.OnConfigChange(func(oldConfig, newConfig *config.Config) {
+		oldEnabled := oldConfig.SegmentCache.Enabled != nil && *oldConfig.SegmentCache.Enabled
+		newEnabled := newConfig.SegmentCache.Enabled != nil && *newConfig.SegmentCache.Enabled
+		configChanged := oldEnabled != newEnabled ||
+			oldConfig.SegmentCache.CachePath != newConfig.SegmentCache.CachePath ||
+			oldConfig.SegmentCache.MaxSizeGB != newConfig.SegmentCache.MaxSizeGB ||
+			oldConfig.SegmentCache.ExpiryHours != newConfig.SegmentCache.ExpiryHours
+
+		if !configChanged {
+			return
+		}
+
+		// Stop old cache manager if present
+		if oldMgr := segcachePtr.Load(); oldMgr != nil {
+			oldMgr.Stop()
+			segcachePtr.Store(nil)
+		}
+
+		// Start new cache manager if enabled
+		if newEnabled {
+			newMgr := initializeSegmentCache(context.Background(), newConfig)
+			if newMgr != nil {
+				segcachePtr.Store(newMgr)
+				logger.InfoContext(ctx, "Segment cache reinitialized dynamically")
+			}
+		} else {
+			logger.InfoContext(ctx, "Segment cache disabled dynamically")
+		}
+	})
 
 	healthWorker, librarySyncWorker, err := startHealthWorker(ctx, cfg, repos.HealthRepo, poolManager, configManager, rcloneRCClient, arrsService, importerService, progressBroadcaster)
 	if err != nil {
@@ -207,7 +246,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	// 9. Create HTTP server
-	customServer := createHTTPServer(apiServer, app, webdavHandler, streamHandler, cfg.WebDAV.Port, cfg.ProfilerEnabled)
+	customServer := createHTTPServer(apiServer, app, webdavHandler, streamHandler, cfg.WebDAV.Port, configManager.GetConfigGetter())
 
 	logger.Info("AltMount server started",
 		"port", cfg.WebDAV.Port,
