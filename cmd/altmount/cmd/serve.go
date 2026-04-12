@@ -7,7 +7,6 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
-	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -127,18 +126,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	// Initialize segment cache (shared between FUSE and WebDAV) with atomic pointer for dynamic swap
-	var segcachePtr atomic.Pointer[segcache.Manager]
-	if initialCache := initializeSegmentCache(ctx, cfg); initialCache != nil {
-		segcachePtr.Store(initialCache)
-		defer func() {
-			if mgr := segcachePtr.Load(); mgr != nil {
-				mgr.Stop()
-			}
-		}()
+	// Initialize segment cache source — encapsulates atomic manager swap and enabled-flag check.
+	cacheSource := segcache.NewSource(configManager.GetConfigGetter())
+	if initialCache := initializeSegmentCache(ctx, cfg, cacheSource); initialCache != nil {
+		defer initialCache.Stop()
 	}
 
-	fs := initializeFilesystem(ctx, metadataService, repos.HealthRepo, arrsService, rcloneRCClient, poolManager, configManager.GetConfigGetter(), streamTracker, &segcachePtr)
+	fs := initializeFilesystem(ctx, metadataService, repos.HealthRepo, arrsService, rcloneRCClient, poolManager, configManager.GetConfigGetter(), streamTracker, cacheSource)
 
 	// 6. Setup web services
 	app, debugMode := createFiberApp(ctx, cfg)
@@ -154,7 +148,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	stremioCleanup := api.NewStremioCleanupService(repos.MainRepo, metadataService, configManager.GetConfigGetter())
 	stremioCleanup.StartCleanup(ctx)
 
-	apiServer := setupAPIServer(app, repos, authService, configManager, metadataReader, metadataService, fs, poolManager, importerService, arrsService, mountService, progressBroadcaster, streamTracker, &segcachePtr)
+	apiServer := setupAPIServer(app, repos, authService, configManager, metadataReader, metadataService, fs, poolManager, importerService, arrsService, mountService, progressBroadcaster, streamTracker, cacheSource)
 	apiServer.SetLogFilePath(slogutil.GetLogFilePath(cfg.Log))
 
 	webdavHandler, err := setupWebDAV(cfg, fs, authService, repos.UserRepo, configManager, streamTracker)
@@ -174,34 +168,26 @@ func runServe(cmd *cobra.Command, args []string) error {
 	api.RegisterLogLevelHandler(ctx, configManager, debugMode)
 	apiServer.RegisterFuseConfigChangeHandler(configManager)
 
-	// Register segment cache config change handler for dynamic enable/disable/resize
+	// Register segment cache config change handler for dynamic path/size/expiry changes.
+	// Enable/disable toggles take effect automatically via cacheSource.Store() at file-open time.
 	configManager.OnConfigChange(func(oldConfig, newConfig *config.Config) {
-		oldEnabled := oldConfig.SegmentCache.Enabled != nil && *oldConfig.SegmentCache.Enabled
-		newEnabled := newConfig.SegmentCache.Enabled != nil && *newConfig.SegmentCache.Enabled
-		configChanged := oldEnabled != newEnabled ||
-			oldConfig.SegmentCache.CachePath != newConfig.SegmentCache.CachePath ||
+		structuralChange := oldConfig.SegmentCache.CachePath != newConfig.SegmentCache.CachePath ||
 			oldConfig.SegmentCache.MaxSizeGB != newConfig.SegmentCache.MaxSizeGB ||
 			oldConfig.SegmentCache.ExpiryHours != newConfig.SegmentCache.ExpiryHours
 
-		if !configChanged {
+		if !structuralChange {
 			return
 		}
 
-		// Stop old cache manager if present
-		if oldMgr := segcachePtr.Load(); oldMgr != nil {
+		// Stop old manager and swap in a new one for path/size/expiry changes.
+		if oldMgr := cacheSource.Manager(); oldMgr != nil {
 			oldMgr.Stop()
-			segcachePtr.Store(nil)
+			cacheSource.Swap(nil)
 		}
 
-		// Start new cache manager if enabled
-		if newEnabled {
-			newMgr := initializeSegmentCache(context.Background(), newConfig)
-			if newMgr != nil {
-				segcachePtr.Store(newMgr)
-				logger.InfoContext(ctx, "Segment cache reinitialized dynamically")
-			}
-		} else {
-			logger.InfoContext(ctx, "Segment cache disabled dynamically")
+		newMgr := initializeSegmentCache(context.Background(), newConfig, cacheSource)
+		if newMgr != nil {
+			logger.InfoContext(ctx, "Segment cache reinitialized dynamically")
 		}
 	})
 

@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/go-pkgz/auth/v2/token"
@@ -27,7 +26,6 @@ import (
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/rclone"
-	"github.com/javi11/altmount/internal/usenet"
 	"github.com/javi11/altmount/internal/webdav"
 	"github.com/javi11/altmount/pkg/rclonecli"
 )
@@ -111,21 +109,11 @@ func initializeFilesystem(
 	poolManager pool.Manager,
 	configGetter config.ConfigGetter,
 	streamTracker nzbfilesystem.StreamTracker,
-	segcachePtr *atomic.Pointer[segcache.Manager],
+	cacheSource *segcache.Source,
 ) *nzbfilesystem.NzbFilesystem {
 	// Reset all in-progress file health checks on start up
 	if err := healthRepo.ResetFileAllChecking(ctx); err != nil {
 		slog.ErrorContext(ctx, "failed to reset in progress file health", "err", err)
-	}
-
-	// Build a dynamic segment store getter so cache changes take effect without restart.
-	// The atomic pointer is swapped by the config change handler when cache settings change.
-	segmentStoreGetter := func() usenet.SegmentStore {
-		mgr := segcachePtr.Load()
-		if mgr == nil {
-			return nil
-		}
-		return mgr.Cache()
 	}
 
 	// Create metadata-based remote file handler
@@ -137,7 +125,7 @@ func initializeFilesystem(
 		poolManager,
 		configGetter,
 		streamTracker,
-		segmentStoreGetter,
+		cacheSource,
 	)
 
 	// Create filesystem backed by metadata
@@ -280,7 +268,7 @@ func setupAPIServer(
 	mountService *rclone.MountService,
 	progressBroadcaster *progress.ProgressBroadcaster,
 	streamTracker *api.StreamTracker,
-	segcachePtr *atomic.Pointer[segcache.Manager],
+	cacheSource *segcache.Source,
 ) *api.Server {
 	apiConfig := &api.Config{
 		Prefix: "/api",
@@ -302,7 +290,7 @@ func setupAPIServer(
 		mountService,
 		progressBroadcaster,
 		streamTracker,
-		segcachePtr,
+		cacheSource,
 	)
 
 	apiServer.SetupRoutes(app)
@@ -317,15 +305,16 @@ func setupAPIServer(
 	return apiServer
 }
 
-// initializeSegmentCache creates and starts the segment cache manager if enabled
-func initializeSegmentCache(ctx context.Context, cfg *config.Config) *segcache.Manager {
-	if cfg.SegmentCache.Enabled == nil || !*cfg.SegmentCache.Enabled {
-		slog.InfoContext(ctx, "Segment cache disabled")
+// initializeSegmentCache creates and starts the segment cache manager, loading it into
+// source. Returns the manager so the caller can defer Stop(). Returns nil if CachePath
+// is not configured (enabled/disabled is checked at read-time via source.Store()).
+func initializeSegmentCache(ctx context.Context, cfg *config.Config, source *segcache.Source) *segcache.Manager {
+	if cfg.SegmentCache.CachePath == "" {
+		slog.InfoContext(ctx, "Segment cache not configured (no cache_path set)")
 		return nil
 	}
 
 	mgrCfg := segcache.ManagerConfig{
-		Enabled:        true,
 		CachePath:      cfg.SegmentCache.CachePath,
 		MaxSizeBytes:   int64(cfg.SegmentCache.MaxSizeGB) * 1024 * 1024 * 1024,
 		ExpiryDuration: time.Duration(cfg.SegmentCache.ExpiryHours) * time.Hour,
@@ -338,7 +327,8 @@ func initializeSegmentCache(ctx context.Context, cfg *config.Config) *segcache.M
 	}
 
 	mgr.Start(ctx)
-	slog.InfoContext(ctx, "Segment cache enabled",
+	source.Swap(mgr)
+	slog.InfoContext(ctx, "Segment cache initialized",
 		"cache_path", mgrCfg.CachePath,
 		"max_size_bytes", mgrCfg.MaxSizeBytes,
 		"expiry_duration", mgrCfg.ExpiryDuration)
