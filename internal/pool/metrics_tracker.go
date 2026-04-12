@@ -125,13 +125,11 @@ func (mt *MetricsTracker) Start(ctx context.Context) {
 			mt.initialArticlesPosted = stats["articles_posted"]
 			mt.maxDownloadSpeed = float64(stats["max_download_speed"])
 			mt.lastSavedBytesDownloaded = mt.initialBytesDownloaded
-			mt.mu.Unlock()
 
 			// Find the actual oldest record in daily stats/history
 			oldest, _ := mt.repo.GetOldestStatDate(ctx)
 
 			if startedAtUnix := stats["started_at"]; startedAtUnix > 0 {
-				mt.mu.Lock()
 				savedStartedAt := time.Unix(startedAtUnix, 0)
 
 				// If our saved date is more recent than our actual history,
@@ -143,12 +141,9 @@ func (mt *MetricsTracker) Start(ctx context.Context) {
 				} else {
 					mt.startedAt = savedStartedAt
 				}
-				mt.mu.Unlock()
 			} else {
 				// Fallback to the oldest record in daily stats
-				mt.mu.Lock()
 				mt.startedAt = oldest
-				mt.mu.Unlock()
 
 				// Save it immediately so we don't have to look it up again
 				go mt.saveStats(ctx)
@@ -156,7 +151,6 @@ func (mt *MetricsTracker) Start(ctx context.Context) {
 
 			// Fallback for providers: check provider_hourly_stats for each
 			providerOldest, err := mt.repo.GetOldestProviderStatDates(ctx)
-			mt.mu.Lock()
 			if err == nil {
 				for pid, oldestDate := range providerOldest {
 					savedDate, exists := mt.initialProviderStartedAt[pid]
@@ -167,7 +161,6 @@ func (mt *MetricsTracker) Start(ctx context.Context) {
 					}
 				}
 			}
-			mt.mu.Unlock()
 
 			// Load provider stats (prefixed with provider_error: or provider_bytes:)
 			for k, v := range stats {
