@@ -485,33 +485,40 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 			providerID = ps.Name
 		}
 
-		// Get error count from metrics
+		// Get error count from metrics (sum from both names if they differ)
 		errorCount := int64(0)
 		if metrics.ProviderErrors != nil {
-			if count, exists := metrics.ProviderErrors[ps.Name]; exists {
-				errorCount = count
-			} else if count, exists := metrics.ProviderErrors[providerID]; exists {
-				errorCount = count
+			errorCount += metrics.ProviderErrors[ps.Name]
+			if providerID != ps.Name {
+				errorCount += metrics.ProviderErrors[providerID]
 			}
 		}
 
-		// Get byte count from metrics
+		// Get byte count from metrics (sum from both names if they differ)
 		byteCount := int64(0)
 		if metrics.ProviderBytes != nil {
-			if count, exists := metrics.ProviderBytes[ps.Name]; exists {
-				byteCount = count
-			} else if count, exists := metrics.ProviderBytes[providerID]; exists {
-				byteCount = count
+			byteCount += metrics.ProviderBytes[ps.Name]
+			if providerID != ps.Name {
+				byteCount += metrics.ProviderBytes[providerID]
 			}
 		}
 
-		// Get 24h byte count from metrics
+		// Get 24h byte count from metrics (sum from both names if they differ)
 		byteCount24h := int64(0)
 		if metrics.ProviderBytes24h != nil {
-			if count, exists := metrics.ProviderBytes24h[ps.Name]; exists {
-				byteCount24h = count
-			} else if count, exists := metrics.ProviderBytes24h[providerID]; exists {
-				byteCount24h = count
+			byteCount24h += metrics.ProviderBytes24h[ps.Name]
+			if providerID != ps.Name {
+				byteCount24h += metrics.ProviderBytes24h[providerID]
+			}
+		}
+
+		// Get the earliest started_at date between the two names
+		startedAt := metrics.ProviderStartedAt[ps.Name]
+		if providerID != ps.Name {
+			if oldStartedAt, exists := metrics.ProviderStartedAt[providerID]; exists {
+				if startedAt.IsZero() || oldStartedAt.Before(startedAt) {
+					startedAt = oldStartedAt
+				}
 			}
 		}
 
@@ -537,7 +544,7 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 			ErrorCount:              errorCount,
 			ByteCount:               byteCount,
 			ByteCount24h:            byteCount24h,
-			StartedAt:               metrics.ProviderStartedAt[ps.Name],
+			StartedAt:               startedAt,
 			CurrentSpeedBytesPerSec: currentProviderSpeed,
 			PingMs:                  ps.Ping.RTT.Milliseconds(),
 			LastSpeedTestMbps:       lastSpeedTestMbps,
