@@ -1452,8 +1452,10 @@ func (r *Repository) GetOldestProviderStatDates(ctx context.Context) (map[string
 		}
 
 		if oldestHourStr != "" {
-			// Format is YYYY-MM-DD HH:MM:SS
-			if t, err := time.Parse("2006-01-02 15:04:05", oldestHourStr); err == nil {
+			// Format is YYYY-MM-DD HH:MM:SS or with timezone YYYY-MM-DD HH:MM:SS+00:00
+			if t, err := time.Parse("2006-01-02 15:04:05-07:00", oldestHourStr); err == nil {
+				dates[providerID] = t
+			} else if t, err := time.Parse("2006-01-02 15:04:05", oldestHourStr); err == nil {
 				dates[providerID] = t
 			} else if t, err := time.Parse(time.RFC3339, oldestHourStr); err == nil {
 				dates[providerID] = t
