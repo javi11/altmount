@@ -205,6 +205,7 @@ export interface FuseConfig {
 	entry_timeout_seconds: number;
 	max_cache_size_mb: number;
 	max_read_ahead_mb: number;
+	async_buffer_size: number;
 }
 
 // Import strategy type

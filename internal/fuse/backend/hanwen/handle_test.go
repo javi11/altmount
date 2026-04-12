@@ -67,7 +67,7 @@ func TestHandle_Read_UsesReadAtContext(t *testing.T) {
 	mockFile.On("ReadAtContext", mock.Anything, mock.AnythingOfType("[]uint8"), int64(4096)).Return(16, nil).Once()
 	mockFile.On("Close").Return(nil)
 
-	handle := NewHandle(mockFile, logger, "testfile", nil, nil)
+	handle := NewHandle(mockFile, logger, "testfile", nil, nil, nil)
 	ctx := context.Background()
 	dest := make([]byte, 16)
 
@@ -98,7 +98,7 @@ func TestHandle_Read_Concurrency(t *testing.T) {
 	mockFile.On("ReadAtContext", mock.Anything, mock.AnythingOfType("[]uint8"), mock.AnythingOfType("int64")).Return(10, nil)
 	mockFile.On("Close").Return(nil)
 
-	handle := NewHandle(mockFile, logger, "testfile", nil, nil)
+	handle := NewHandle(mockFile, logger, "testfile", nil, nil, nil)
 	defer handle.Release(context.Background())
 
 	ctx := context.Background()
@@ -132,7 +132,7 @@ func TestHandle_Read_ReadError(t *testing.T) {
 	mockFile.On("ReadAtContext", mock.Anything, mock.AnythingOfType("[]uint8"), int64(0)).Return(0, os.ErrPermission).Once()
 	mockFile.On("Close").Return(nil)
 
-	handle := NewHandle(mockFile, logger, "testfile", nil, nil)
+	handle := NewHandle(mockFile, logger, "testfile", nil, nil, nil)
 	defer handle.Release(context.Background())
 
 	ctx := context.Background()
@@ -152,7 +152,7 @@ func TestHandle_Read_EOF(t *testing.T) {
 	mockFile.On("ReadAtContext", mock.Anything, mock.AnythingOfType("[]uint8"), int64(0)).Return(5, io.EOF).Once()
 	mockFile.On("Close").Return(nil)
 
-	handle := NewHandle(mockFile, logger, "testfile", nil, nil)
+	handle := NewHandle(mockFile, logger, "testfile", nil, nil, nil)
 	defer handle.Release(context.Background())
 
 	ctx := context.Background()
@@ -174,7 +174,7 @@ func TestHandle_Read_ContextCanceled(t *testing.T) {
 		Return(0, context.Canceled).Once()
 	mockFile.On("Close").Return(nil)
 
-	handle := NewHandle(mockFile, logger, "testfile", nil, nil)
+	handle := NewHandle(mockFile, logger, "testfile", nil, nil, nil)
 	defer handle.Release(context.Background())
 
 	ctx := context.Background()
@@ -229,7 +229,7 @@ func (f *readAtDepthFile) WriteString(string) (int, error)         { return 0, n
 
 func TestHandle_Read_ConcurrentReadsAllSucceed(t *testing.T) {
 	df := &readAtDepthFile{delay: 5 * time.Millisecond}
-	handle := NewHandle(df, slog.Default(), "testfile", nil, nil)
+	handle := NewHandle(df, slog.Default(), "testfile", nil, nil, nil)
 	defer handle.Release(context.Background())
 
 	var wg sync.WaitGroup
@@ -260,7 +260,7 @@ func TestHandle_Release_Idempotent(t *testing.T) {
 
 	mockFile.On("Close").Return(nil).Once()
 
-	handle := NewHandle(mockFile, logger, "testfile", nil, nil)
+	handle := NewHandle(mockFile, logger, "testfile", nil, nil, nil)
 
 	ctx := context.Background()
 
