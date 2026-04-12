@@ -2,6 +2,7 @@ package pool
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"maps"
 	"strings"
@@ -126,43 +127,7 @@ func (mt *MetricsTracker) Start(ctx context.Context) {
 			mt.maxDownloadSpeed = float64(stats["max_download_speed"])
 			mt.lastSavedBytesDownloaded = mt.initialBytesDownloaded
 
-			// Find the actual oldest record in daily stats/history
-			oldest, _ := mt.repo.GetOldestStatDate(ctx)
-
-			if startedAtUnix := stats["started_at"]; startedAtUnix > 0 {
-				savedStartedAt := time.Unix(startedAtUnix, 0)
-
-				// If our saved date is more recent than our actual history,
-				// correct it to the oldest record found.
-				if oldest.Before(savedStartedAt) {
-					mt.startedAt = oldest
-					// Force a save to update the DB with the corrected date
-					go mt.saveStats(ctx)
-				} else {
-					mt.startedAt = savedStartedAt
-				}
-			} else {
-				// Fallback to the oldest record in daily stats
-				mt.startedAt = oldest
-
-				// Save it immediately so we don't have to look it up again
-				go mt.saveStats(ctx)
-			}
-
-			// Fallback for providers: check provider_hourly_stats for each
-			providerOldest, err := mt.repo.GetOldestProviderStatDates(ctx)
-			if err == nil {
-				for pid, oldestDate := range providerOldest {
-					savedDate, exists := mt.initialProviderStartedAt[pid]
-
-					// If no date exists OR if the saved date is more recent than actual history
-					if !exists || oldestDate.Before(savedDate) {
-						mt.initialProviderStartedAt[pid] = oldestDate
-					}
-				}
-			}
-
-			// Load provider stats (prefixed with provider_error: or provider_bytes:)
+			// 1. Load provider stats (prefixed with provider_error: or provider_bytes: or provider_started_at:)
 			for k, v := range stats {
 				if after, ok := strings.CutPrefix(k, "provider_error:"); ok {
 					providerID := after
@@ -176,6 +141,38 @@ func (mt *MetricsTracker) Start(ctx context.Context) {
 					mt.initialProviderStartedAt[providerID] = time.Unix(v, 0)
 				}
 			}
+
+			// 2. Load and verify global started_at date
+			oldest, _ := mt.repo.GetOldestStatDate(ctx)
+			if startedAtUnix := stats["started_at"]; startedAtUnix > 0 {
+				savedStartedAt := time.Unix(startedAtUnix, 0)
+				// If our saved date is more recent than our actual history,
+				// correct it to the oldest record found.
+				if oldest.Before(savedStartedAt) {
+					mt.startedAt = oldest
+				} else {
+					mt.startedAt = savedStartedAt
+				}
+			} else {
+				// Fallback to the oldest record in daily stats
+				mt.startedAt = oldest
+			}
+
+			// 3. Verify per-provider started_at dates against history (check provider_hourly_stats)
+			providerOldest, err := mt.repo.GetOldestProviderStatDates(ctx)
+			if err == nil {
+				for pid, oldestDate := range providerOldest {
+					savedDate, exists := mt.initialProviderStartedAt[pid]
+					// If no date exists OR if the saved date is more recent than actual history
+					if !exists || oldestDate.Before(savedDate) {
+						mt.initialProviderStartedAt[pid] = oldestDate
+					}
+				}
+			}
+
+			// 4. Trigger a save if any date was initialized or corrected
+			go mt.saveStats(ctx)
+
 			mt.mu.Unlock()
 
 			mt.logger.InfoContext(ctx, "Loaded persistent system stats",
