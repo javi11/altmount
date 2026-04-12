@@ -2,6 +2,7 @@ package webdav
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"sync/atomic"
 
@@ -27,13 +28,17 @@ func (m *monitoredFileSystem) OpenFile(ctx context.Context, name string, flag in
 	if streamVal := ctx.Value(utils.ActiveStreamKey); streamVal != nil {
 		if stream, ok := streamVal.(*nzbfilesystem.ActiveStream); ok {
 			// Update total size if available
+			var totalSize int64
 			if stat, err := f.Stat(); err == nil {
-				atomic.StoreInt64(&stream.TotalSize, stat.Size())
+				totalSize = stat.Size()
+				atomic.StoreInt64(&stream.TotalSize, totalSize)
 			}
+			slog.DebugContext(ctx, "WebDAV monitored OpenFile", "name", name, "monitored", true, "total_size", totalSize)
 			return &monitoredFile{File: f, stream: stream, ctx: ctx}, nil
 		}
 	}
 
+	slog.DebugContext(ctx, "WebDAV monitored OpenFile", "name", name, "monitored", false)
 	return f, nil
 }
 

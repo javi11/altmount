@@ -356,11 +356,25 @@ func (s *Service) RegisterConfigChangeHandler(configManager any) {
 		return
 	}
 	mgr.OnConfigChange(func(oldConfig, newConfig *config.Config) {
+		// Update rclone client reference
 		s.mu.Lock()
-		defer s.mu.Unlock()
-
 		if s.postProcessor != nil {
 			s.postProcessor.SetRcloneClient(s.rcloneClient)
+		}
+		s.mu.Unlock()
+
+		// Dynamically resize queue workers if count changed
+		oldWorkers := oldConfig.Import.MaxProcessorWorkers
+		newWorkers := newConfig.Import.MaxProcessorWorkers
+		if newWorkers > 0 && oldWorkers != newWorkers {
+			ctx := context.Background()
+			if err := s.queueManager.Resize(ctx, newWorkers); err != nil {
+				s.log.ErrorContext(ctx, "Failed to resize queue workers", "error", err)
+			} else {
+				s.database.UpdateConnectionPool(newWorkers)
+				s.log.InfoContext(ctx, "Queue workers resized dynamically",
+					"old_workers", oldWorkers, "new_workers", newWorkers)
+			}
 		}
 	})
 }

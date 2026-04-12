@@ -466,3 +466,54 @@ func newMountFactory(nzbfs *nzbfilesystem.NzbFilesystem, configManager ConfigMan
 		return fuse.NewServer(path, nzbfs, logger, cfg.Fuse, st)
 	}
 }
+
+// RegisterFuseConfigChangeHandler registers a config change handler that auto-remounts FUSE
+// when FUSE config options change and the mount is currently running.
+func (s *Server) RegisterFuseConfigChangeHandler(configManager *config.Manager) {
+	configManager.OnConfigChange(func(oldConfig, newConfig *config.Config) {
+		// Only act if FUSE was and still is the mount type
+		if oldConfig.MountType != config.MountTypeFuse && newConfig.MountType != config.MountTypeFuse {
+			return
+		}
+
+		fuseConfigChanged := oldConfig.Fuse.MountPath != newConfig.Fuse.MountPath ||
+			oldConfig.Fuse.Backend != newConfig.Fuse.Backend ||
+			fuseOptionsDiffer(oldConfig.Fuse, newConfig.Fuse)
+
+		mountTypeChanged := oldConfig.MountType != newConfig.MountType
+
+		if !fuseConfigChanged && !mountTypeChanged {
+			return
+		}
+
+		s.fuseManager.mu.Lock()
+		isRunning := s.fuseManager.status == "running"
+		s.fuseManager.mu.Unlock()
+
+		if mountTypeChanged && newConfig.MountType != config.MountTypeFuse {
+			// Mount type changed away from FUSE — stop if running
+			if isRunning {
+				slog.InfoContext(context.Background(), "Mount type changed from FUSE, unmounting")
+				s.fuseManager.Stop()
+			}
+			return
+		}
+
+		if isRunning && fuseConfigChanged {
+			slog.InfoContext(context.Background(), "FUSE config changed, remounting with new settings")
+			s.fuseManager.Stop()
+			// Re-mount with new config (AutoStartFuse reads fresh config)
+			s.AutoStartFuse()
+		}
+	})
+}
+
+// fuseOptionsDiffer compares FUSE config options that require remount.
+func fuseOptionsDiffer(old, new config.FuseConfig) bool {
+	return old.AllowOther != new.AllowOther ||
+		old.Debug != new.Debug ||
+		old.AttrTimeoutSeconds != new.AttrTimeoutSeconds ||
+		old.EntryTimeoutSeconds != new.EntryTimeoutSeconds ||
+		old.MaxCacheSizeMB != new.MaxCacheSizeMB ||
+		old.MaxReadAheadMB != new.MaxReadAheadMB
+}

@@ -2,6 +2,7 @@ package queue
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -49,6 +50,11 @@ type Manager struct {
 	cancel  context.CancelFunc
 	wg      sync.WaitGroup
 
+	// Per-worker loop-control contexts (separate from m.ctx used for item processing).
+	// Cancelling a worker's loopCancel stops its ticker loop without cancelling in-flight items.
+	workerCancels []context.CancelFunc
+	workerCount   int
+
 	// claimMu serialises DB claim transactions to avoid SQLite lock contention.
 	claimMu sync.Mutex
 
@@ -88,11 +94,15 @@ func (m *Manager) Start(ctx context.Context) error {
 		return nil
 	}
 
-	// Start worker pool
+	// Start worker pool with per-worker loop contexts
+	m.workerCancels = make([]context.CancelFunc, 0, m.config.Workers)
 	for i := 0; i < m.config.Workers; i++ {
+		loopCtx, loopCancel := context.WithCancel(m.ctx)
+		m.workerCancels = append(m.workerCancels, loopCancel)
 		m.wg.Add(1)
-		go m.workerLoop(i)
+		go m.workerLoop(i, loopCtx)
 	}
+	m.workerCount = m.config.Workers
 
 	m.running = true
 	m.log.InfoContext(ctx, "Queue manager started", "workers", m.config.Workers)
@@ -111,9 +121,14 @@ func (m *Manager) Stop(ctx context.Context) error {
 
 	m.log.InfoContext(ctx, "Stopping queue manager")
 
-	// Cancel all goroutines
+	// Cancel all worker loop contexts and the manager context
+	for _, cancel := range m.workerCancels {
+		cancel()
+	}
 	m.cancel()
 	m.running = false
+	m.workerCancels = nil
+	m.workerCount = 0
 	m.mu.Unlock()
 
 	// Wait for all goroutines to finish with timeout
@@ -187,8 +202,53 @@ func (m *Manager) CancelProcessing(itemID int64) error {
 	return nil
 }
 
-// workerLoop is the main worker loop
-func (m *Manager) workerLoop(workerID int) {
+// Resize dynamically adjusts the number of queue workers.
+// When scaling down, excess workers finish their current item before stopping.
+func (m *Manager) Resize(ctx context.Context, newCount int) error {
+	if newCount <= 0 {
+		return fmt.Errorf("worker count must be positive, got %d", newCount)
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !m.running {
+		// Not running — just update config for next Start()
+		m.config.Workers = newCount
+		return nil
+	}
+
+	oldCount := m.workerCount
+	if newCount == oldCount {
+		return nil
+	}
+
+	if newCount > oldCount {
+		// Scale up: start additional workers
+		for i := oldCount; i < newCount; i++ {
+			loopCtx, loopCancel := context.WithCancel(m.ctx)
+			m.workerCancels = append(m.workerCancels, loopCancel)
+			m.wg.Add(1)
+			go m.workerLoop(i, loopCtx)
+		}
+	} else {
+		// Scale down: cancel excess worker loop contexts
+		for i := newCount; i < oldCount; i++ {
+			m.workerCancels[i]()
+		}
+		m.workerCancels = m.workerCancels[:newCount]
+	}
+
+	m.workerCount = newCount
+	m.config.Workers = newCount
+	m.log.InfoContext(ctx, "Queue workers resized", "old_count", oldCount, "new_count", newCount)
+	return nil
+}
+
+// workerLoop is the main worker loop.
+// loopCtx controls this worker's lifecycle (cancelled on Resize shrink or Stop).
+// Item processing uses m.ctx so in-flight items are not cancelled when a worker is removed by Resize.
+func (m *Manager) workerLoop(workerID int, loopCtx context.Context) {
 	defer m.wg.Done()
 
 	log := m.log.With("worker_id", workerID)
@@ -208,7 +268,7 @@ func (m *Manager) workerLoop(workerID int) {
 				continue
 			}
 			m.processNextItem(m.ctx, workerID)
-		case <-m.ctx.Done():
+		case <-loopCtx.Done():
 			log.Info("Queue worker stopped")
 			return
 		}

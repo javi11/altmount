@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -33,6 +34,7 @@ func HandlePropfind(fs FS, w http.ResponseWriter, r *http.Request, prefix string
 	}
 
 	ctx := r.Context()
+	slog.DebugContext(ctx, "WebDAV PROPFIND", "path", reqPath, "depth", r.Header.Get("Depth"))
 	fi, err := fs.Stat(ctx, reqPath)
 	if err != nil {
 		if os.IsNotExist(err) {

@@ -65,6 +65,7 @@ type customErrorHandler struct {
 }
 
 func (c *customErrorHandler) OpenFile(ctx context.Context, name string, flag int, perm os.FileMode) (File, error) {
+	slog.DebugContext(ctx, "WebDAV opening file", "name", name)
 	file, err := c.FileSystem.OpenFile(ctx, name, flag, perm)
 	if err != nil {
 		return nil, c.mapError(err)
