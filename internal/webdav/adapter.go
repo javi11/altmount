@@ -95,6 +95,7 @@ func (h *webdavMethods) handleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	slog.DebugContext(ctx, "WebDAV GET", "path", reqPath)
 	fi, err := h.fs.Stat(ctx, reqPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -105,6 +106,7 @@ func (h *webdavMethods) handleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	slog.DebugContext(ctx, "WebDAV GET stat", "path", reqPath, "is_dir", fi.IsDir(), "size", fi.Size())
 	if fi.IsDir() {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
@@ -135,6 +137,7 @@ func (h *webdavMethods) handleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	slog.DebugContext(ctx, "WebDAV DELETE", "path", reqPath)
 	if err := h.fs.RemoveAll(ctx, reqPath); err != nil {
 		if os.IsNotExist(err) {
 			http.Error(w, "Not Found", http.StatusNotFound)
@@ -175,6 +178,7 @@ func (h *webdavMethods) handleMove(w http.ResponseWriter, r *http.Request) {
 
 	// Check if destination already exists to determine response code
 	_, statErr := h.fs.Stat(ctx, dst)
+	slog.DebugContext(ctx, "WebDAV MOVE parsed", "src", src, "dst", dst, "dest_exists", !os.IsNotExist(statErr))
 
 	if err := h.fs.Rename(ctx, src, dst); err != nil {
 		if os.IsNotExist(err) {
@@ -200,6 +204,7 @@ func (h *webdavMethods) handleMkcol(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	slog.DebugContext(ctx, "WebDAV MKCOL", "path", reqPath)
 	if r.ContentLength > 0 {
 		// RFC 4918: MKCOL request with a body must return 415 Unsupported Media Type
 		http.Error(w, "Unsupported Media Type", http.StatusUnsupportedMediaType)
@@ -228,6 +233,10 @@ func NewHandler(
 	configGetter config.ConfigGetter, // Dynamic config access
 	streamTracker *api.StreamTracker, // Optional stream tracker
 ) (*Handler, error) {
+	slog.DebugContext(context.Background(), "Creating WebDAV handler",
+		"prefix", config.Prefix,
+		"stream_tracking", streamTracker != nil)
+
 	// Create dynamic auth credentials with initial values
 	authCreds := NewAuthCredentials(config.User, config.Pass)
 
@@ -275,6 +284,7 @@ func NewHandler(
 							} else {
 								effectiveUser = user.UserID
 							}
+							slog.DebugContext(r.Context(), "WebDAV JWT auth succeeded", "user", effectiveUser)
 						}
 					}
 				}
@@ -285,10 +295,12 @@ func NewHandler(
 			if username == currentUser && password == currentPass {
 				authenticated = true
 				effectiveUser = username
+				slog.DebugContext(r.Context(), "WebDAV basic auth succeeded", "user", effectiveUser)
 			}
 		}
 
 		if !authenticated {
+			slog.DebugContext(r.Context(), "WebDAV auth failed", "method", r.Method, "path", r.URL.Path, "has_basic", hasBasicAuth)
 			w.Header().Set("WWW-Authenticate", `Basic realm="BASIC WebDAV REALM"`)
 			w.WriteHeader(http.StatusUnauthorized)
 			_, err := w.Write([]byte("401 Unauthorized"))
@@ -340,6 +352,7 @@ func NewHandler(
 			defer cancel()
 
 			stream := streamTracker.Add(r.URL.Path, "WebDAV", effectiveUser, r.RemoteAddr, r.UserAgent(), 0)
+			slog.DebugContext(r.Context(), "WebDAV stream registered", "path", r.URL.Path, "stream_id", stream)
 			defer streamTracker.Remove(stream)
 
 			streamTracker.SetCancelFunc(stream, cancel)
