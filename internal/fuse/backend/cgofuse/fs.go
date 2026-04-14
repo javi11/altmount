@@ -301,7 +301,6 @@ func (f *FS) OpenEx(path string, fi *cgofuse.FileInfo_t) int {
 	if asyncBufSize := f.cfg.FuseConfig.AsyncBufferSize; asyncBufSize > 0 && info.Size() > int64(asyncBufSize) {
 		if rac, ok := file.(readAtContexter); ok {
 			h.asyncBuf = backend.NewAsyncReadBuffer(ctx, rac, asyncBufSize, info.Size())
-			h.asyncBuf.StartFill() // begin filling immediately, don't wait for first read
 		}
 	}
 
