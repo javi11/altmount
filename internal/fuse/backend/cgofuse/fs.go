@@ -283,12 +283,6 @@ func (f *FS) OpenEx(path string, fi *cgofuse.FileInfo_t) int {
 		return -cgofuse.EIO
 	}
 
-	// Optimistic warm-up: pre-initialize reader so the first segment
-	// starts downloading before the first FUSE read arrives.
-	if warmable, ok := file.(interface{ WarmUp() }); ok {
-		warmable.WarmUp()
-	}
-
 	h := &openHandle{
 		file:   file,
 		stream: stream,
