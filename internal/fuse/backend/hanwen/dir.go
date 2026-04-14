@@ -37,6 +37,7 @@ type Dir struct {
 	isRootDir     bool
 	uid           uint32
 	gid           uint32
+	asyncBufSize  int
 }
 
 // NewDir creates a new directory node for the FUSE filesystem.
@@ -46,6 +47,7 @@ func NewDir(
 	logger *slog.Logger,
 	uid, gid uint32,
 	st backend.StreamTracker,
+	asyncBufSize int,
 ) *Dir {
 	return &Dir{
 		nzbfs:         nzbfs,
@@ -55,6 +57,7 @@ func NewDir(
 		isRootDir:     path == "" || path == "/",
 		uid:           uid,
 		gid:           gid,
+		asyncBufSize:  asyncBufSize,
 	}
 }
 
@@ -155,6 +158,7 @@ func (d *Dir) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.
 			logger:        d.logger,
 			uid:           d.uid,
 			gid:           d.gid,
+			asyncBufSize:  d.asyncBufSize,
 		}
 		return d.NewInode(ctx, node, fs.StableAttr{Mode: fuse.S_IFDIR}), 0
 	}
@@ -167,6 +171,7 @@ func (d *Dir) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.
 		size:          info.Size(),
 		uid:           d.uid,
 		gid:           d.gid,
+		asyncBufSize:  d.asyncBufSize,
 	}
 	return d.NewInode(ctx, node, fs.StableAttr{Mode: fuse.S_IFREG}), 0
 }

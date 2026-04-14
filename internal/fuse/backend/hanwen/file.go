@@ -32,6 +32,7 @@ type File struct {
 	size          int64
 	uid           uint32
 	gid           uint32
+	asyncBufSize  int
 }
 
 // Getattr implements fs.NodeGetattrer.
@@ -85,12 +86,17 @@ func (f *File) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, s
 		return nil, 0, syscall.EIO
 	}
 
-	// Optimistic warm-up for faster playback start
-	if warmable, ok := aferoFile.(interface{ WarmUp() }); ok {
-		warmable.WarmUp()
+	// Create async read-ahead buffer for smoother FUSE reads.
+	// Only for files larger than the buffer itself — skip small metadata reads
+	// that Finder/Spotlight trigger to avoid excessive memory usage.
+	var asyncBuf *backend.AsyncReadBuffer
+	if f.asyncBufSize > 0 && f.size > int64(f.asyncBufSize) {
+		if rac, ok := aferoFile.(readAtContexter); ok {
+			asyncBuf = backend.NewAsyncReadBuffer(ctx, rac, f.asyncBufSize, f.size)
+		}
 	}
 
-	handle := NewHandle(aferoFile, f.logger, f.path, stream, f.streamTracker)
+	handle := NewHandle(aferoFile, f.logger, f.path, stream, f.streamTracker, asyncBuf)
 
 	// Use DIRECT_IO when file size is unknown/zero to prevent the kernel
 	// from caching pages with stale size metadata (rclone mount2 pattern).

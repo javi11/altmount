@@ -37,10 +37,11 @@ type readAtContexter interface {
 }
 
 type openHandle struct {
-	file   afero.File
-	stream *nzbfilesystem.ActiveStream
-	path   string
-	closed atomic.Bool
+	file     afero.File
+	stream   *nzbfilesystem.ActiveStream
+	path     string
+	closed   atomic.Bool
+	asyncBuf *backend.AsyncReadBuffer // nil when async buffering is disabled
 }
 
 // FS implements cgofuse.FileSystemInterface using NzbFilesystem.
@@ -130,6 +131,9 @@ func (f *FS) Destroy() {
 func (f *FS) closeHandle(h *openHandle) {
 	if !h.closed.CompareAndSwap(false, true) {
 		return
+	}
+	if h.asyncBuf != nil {
+		h.asyncBuf.Close()
 	}
 	if h.stream != nil && f.cfg.StreamTracker != nil {
 		f.cfg.StreamTracker.Remove(h.stream.ID)
@@ -279,15 +283,19 @@ func (f *FS) OpenEx(path string, fi *cgofuse.FileInfo_t) int {
 		return -cgofuse.EIO
 	}
 
-	// Optimistic warm-up
-	if warmable, ok := file.(interface{ WarmUp() }); ok {
-		warmable.WarmUp()
-	}
-
 	h := &openHandle{
 		file:   file,
 		stream: stream,
 		path:   clean,
+	}
+
+	// Wrap with async read-ahead buffer for smoother FUSE reads.
+	// Only for files larger than the buffer itself — skip small metadata reads
+	// that Finder/Spotlight trigger to avoid excessive memory usage.
+	if asyncBufSize := f.cfg.FuseConfig.AsyncBufferSize; asyncBufSize > 0 && info.Size() > int64(asyncBufSize) {
+		if rac, ok := file.(readAtContexter); ok {
+			h.asyncBuf = backend.NewAsyncReadBuffer(ctx, rac, asyncBufSize, info.Size())
+		}
 	}
 
 	fi.Fh = f.allocHandle(h)
@@ -322,7 +330,9 @@ func (f *FS) Read(path string, buff []byte, ofst int64, fh uint64) int {
 	var err error
 	ctx := context.Background()
 
-	if rac, ok := h.file.(readAtContexter); ok {
+	if h.asyncBuf != nil {
+		n, err = h.asyncBuf.ReadAtContext(ctx, buff, ofst)
+	} else if rac, ok := h.file.(readAtContexter); ok {
 		n, err = rac.ReadAtContext(ctx, buff, ofst)
 	} else if ra, ok := h.file.(io.ReaderAt); ok {
 		n, err = ra.ReadAt(buff, ofst)

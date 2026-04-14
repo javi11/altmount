@@ -40,8 +40,8 @@ type MetadataRemoteFile struct {
 	rcloneCipher     *rclone.RcloneCrypt      // For rclone encryption/decryption
 	aesCipher        *aes.AesCipher           // For AES encryption/decryption
 	streamTracker    StreamTracker            // Stream tracker for monitoring active streams
-	cacheSource *segcache.Source // Segment cache source (nil = no cache configured)
-	renameMu    sync.Mutex      // Mutex to protect rename operations from race conditions
+	cacheSource      *segcache.Source         // Segment cache source (nil = no cache configured)
+	renameMu         sync.Mutex               // Mutex to protect rename operations from race conditions
 }
 
 // Configuration is now accessed dynamically through config.ConfigGetter
@@ -79,8 +79,8 @@ func NewMetadataRemoteFile(
 		configGetter:     configGetter,
 		rcloneCipher:     rcloneCipher,
 		aesCipher:        aesCipher,
-		streamTracker: streamTracker,
-		cacheSource:   cacheSource,
+		streamTracker:    streamTracker,
+		cacheSource:      cacheSource,
 	}
 }
 
@@ -879,35 +879,6 @@ func (idx *segmentOffsetIndex) getOffsetForSegment(segmentIndex int) int64 {
 // GetStreamID returns the active stream ID associated with this file handle
 func (mvf *MetadataVirtualFile) GetStreamID() string {
 	return mvf.streamID
-}
-
-// WarmUp triggers a background pre-fetch of the file start
-func (mvf *MetadataVirtualFile) WarmUp() {
-	go func() {
-		mvf.mu.Lock()
-		defer mvf.mu.Unlock()
-
-		// Skip if already initialized
-		if mvf.readerInitialized {
-			return
-		}
-
-		// Initialize reader for the beginning of the file
-		if err := mvf.ensureReader(); err != nil {
-			// Just log/ignore, the actual Read will handle it later
-			return
-		}
-
-		// Align the ReadAt shared cursor with the warmed-up reader position
-		mvf.readAtSharedNext = mvf.position
-
-		// If the reader supports manual starting (UsenetReader), trigger it
-		// This starts the background workers to fetch data into the cache
-		// without consuming any bytes from the stream.
-		if ur, ok := mvf.reader.(interface{ Start() }); ok {
-			ur.Start()
-		}
-	}()
 }
 
 // Read implements afero.File.Read

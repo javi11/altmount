@@ -94,7 +94,8 @@ type FuseConfig struct {
 	EntryTimeoutSeconds int    `yaml:"entry_timeout_seconds" mapstructure:"entry_timeout_seconds" json:"entry_timeout_seconds"`
 	MaxCacheSizeMB      int    `yaml:"max_cache_size_mb" mapstructure:"max_cache_size_mb" json:"max_cache_size_mb"`
 	MaxReadAheadMB      int    `yaml:"max_read_ahead_mb" mapstructure:"max_read_ahead_mb" json:"max_read_ahead_mb"`
-	Backend             string `yaml:"backend" mapstructure:"backend" json:"backend"` // "hanwen" or "cgo" (empty = platform default)
+	Backend             string `yaml:"backend" mapstructure:"backend" json:"backend"`             // "hanwen" or "cgo" (empty = platform default)
+	AsyncBufferSize     int    `yaml:"async_buffer_size" mapstructure:"async_buffer_size" json:"async_buffer_size"` // read-ahead buffer per open file (bytes), 0 = disabled
 }
 
 // APIConfig represents REST API configuration
@@ -452,7 +453,7 @@ func (c *Config) Validate() error {
 	}
 
 	if c.Streaming.MaxPrefetch <= 0 {
-		c.Streaming.MaxPrefetch = 60 // Default to 60 segments prefetched ahead if not set
+		c.Streaming.MaxPrefetch = 30 // Default to 30 segments prefetched ahead if not set
 	}
 
 	if c.Import.MaxProcessorWorkers <= 0 {
@@ -1286,7 +1287,7 @@ func DefaultConfig(configDir ...string) *Config {
 			},
 		},
 		Streaming: StreamingConfig{
-			MaxPrefetch: 60, // Default: 60 segments prefetched ahead
+			MaxPrefetch: 30, // Default: 30 segments prefetched ahead
 			FailureMasking: FailureMaskingConfig{
 				Enabled:   &failureMaskingEnabled,
 				Threshold: 3,
@@ -1448,6 +1449,7 @@ func DefaultConfig(configDir ...string) *Config {
 			EntryTimeoutSeconds: 1,
 			MaxCacheSizeMB:      128,
 			MaxReadAheadMB:      128,
+			AsyncBufferSize:     8 * 1024 * 1024, // 8MB read-ahead buffer per open file
 		},
 		MountPath: "",            // Empty by default - required when ARRs is enabled
 		MountType: MountTypeNone, // No mount system active by default
