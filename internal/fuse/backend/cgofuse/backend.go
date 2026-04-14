@@ -151,10 +151,17 @@ func (b *Backend) mountOptions() []string {
 
 	switch runtime.GOOS {
 	case "darwin":
+		attrTimeout := b.cfg.FuseConfig.AttrTimeoutSeconds
+		if attrTimeout == 0 {
+			attrTimeout = 30
+		}
 		opts = append(opts,
 			"-o", "volname=altmount",
 			"-o", "noapplexattr",
 			"-o", "noappledouble",
+			"-o", "local",              // Treat as local FS — enables aggressive UBC page caching
+			"-o", "daemon_timeout=600", // 10min timeout for slow network operations
+			"-o", fmt.Sprintf("attr_timeout=%d", attrTimeout),
 			"-o", "iosize=1048576", // 1MB I/O size (macOS default is 64KB)
 		)
 		if b.cfg.FuseConfig.AllowOther {
