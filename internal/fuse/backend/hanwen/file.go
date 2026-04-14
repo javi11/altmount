@@ -86,6 +86,12 @@ func (f *File) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, s
 		return nil, 0, syscall.EIO
 	}
 
+	// Optimistic warm-up: pre-initialize reader so the first segment
+	// starts downloading before the first FUSE read arrives.
+	if warmable, ok := aferoFile.(interface{ WarmUp() }); ok {
+		warmable.WarmUp()
+	}
+
 	// Create async read-ahead buffer for smoother FUSE reads.
 	// Only for files larger than the buffer itself — skip small metadata reads
 	// that Finder/Spotlight trigger to avoid excessive memory usage.
@@ -93,6 +99,7 @@ func (f *File) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, s
 	if f.asyncBufSize > 0 && f.size > int64(f.asyncBufSize) {
 		if rac, ok := aferoFile.(readAtContexter); ok {
 			asyncBuf = backend.NewAsyncReadBuffer(ctx, rac, f.asyncBufSize, f.size)
+			asyncBuf.StartFill() // begin filling immediately
 		}
 	}
 

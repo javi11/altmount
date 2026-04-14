@@ -72,6 +72,14 @@ func NewAsyncReadBuffer(ctx context.Context, src readAtContexter, bufSize int, f
 	return a
 }
 
+// StartFill eagerly launches the background fill goroutine so data starts
+// buffering before the first read. Safe to call multiple times.
+func (a *AsyncReadBuffer) StartFill() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.startFill()
+}
+
 // startFill launches the background fill goroutine. Must be called with a.mu held.
 func (a *AsyncReadBuffer) startFill() {
 	if a.started {
