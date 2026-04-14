@@ -261,30 +261,20 @@ func (a *AsyncReadBuffer) ReadAtContext(ctx context.Context, p []byte, off int64
 		return 0, err
 	}
 
-	// Non-sequential: reset the buffer and restart filling from this offset.
-	a.resetToOffset(off)
-
-	// Wait for data to arrive from the new offset.
-	for a.filled == 0 && !a.srcDone && ctx.Err() == nil {
-		a.cond.Wait()
+	// Non-sequential (seek): serve this read directly from the source to avoid
+	// the round-trip through the buffer (reset → wait for fill → copy).
+	// Reset the buffer to fill from *after* this read so subsequent sequential
+	// reads hit the pre-filled buffer.
+	afterRead := off + int64(len(p))
+	if a.fileSize > 0 && afterRead > a.fileSize {
+		afterRead = a.fileSize
 	}
-	if ctx.Err() != nil {
-		a.mu.Unlock()
-		return 0, ctx.Err()
-	}
-	if a.filled > 0 && off >= a.baseOff && off < a.baseOff+int64(a.filled) {
-		n := a.copyFromBuffer(p, off)
-		a.mu.Unlock()
-		return n, nil
-	}
-	if a.srcDone {
-		err := a.srcErr
-		a.mu.Unlock()
-		return 0, err
-	}
-
+	a.resetToOffset(afterRead)
 	a.mu.Unlock()
-	return 0, io.ErrUnexpectedEOF
+
+	// Direct read bypasses the buffer — one fewer hop on seek.
+	n, err := a.src.ReadAtContext(ctx, p, off)
+	return n, err
 }
 
 // copyFromBuffer copies data from the ring buffer into p starting at file offset off.

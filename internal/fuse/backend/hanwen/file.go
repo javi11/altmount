@@ -93,6 +93,7 @@ func (f *File) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, s
 	if f.asyncBufSize > 0 && f.size > int64(f.asyncBufSize) {
 		if rac, ok := aferoFile.(readAtContexter); ok {
 			asyncBuf = backend.NewAsyncReadBuffer(ctx, rac, f.asyncBufSize, f.size)
+			asyncBuf.StartFill() // Begin prefetching — kernel doesn't cache pages on macOS FUSE
 		}
 	}
 
