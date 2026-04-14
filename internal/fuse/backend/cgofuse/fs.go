@@ -271,12 +271,6 @@ func (f *FS) OpenEx(path string, fi *cgofuse.FileInfo_t) int {
 
 	ctx = context.WithValue(ctx, utils.SuppressStreamTrackingKey, true)
 
-	// When async buffer is active, reduce UsenetReader prefetch to save memory.
-	// The async buffer already provides read-ahead; 60 segments of prefetch is redundant.
-	if asyncBufSize := f.cfg.FuseConfig.AsyncBufferSize; asyncBufSize > 0 && info.Size() > int64(asyncBufSize) {
-		ctx = context.WithValue(ctx, utils.MaxPrefetchKey, 10)
-	}
-
 	file, err := f.cfg.NzbFs.Open(ctx, clean)
 	if err != nil {
 		if stream != nil {

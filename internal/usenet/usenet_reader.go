@@ -21,6 +21,12 @@ const (
 	defaultMaxPrefetch = 60 // Default to 60 segments prefetched ahead
 )
 
+// downloadBufPool reuses bytes.Buffer instances for segment downloads,
+// reducing allocation churn and GC pressure.
+var downloadBufPool = sync.Pool{
+	New: func() any { return new(bytes.Buffer) },
+}
+
 var (
 	_ io.ReadCloser = &UsenetReader{}
 )
@@ -336,11 +342,14 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 			attemptCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 			defer cancel()
 
-			buf := bytes.NewBuffer(make([]byte, 0, seg.SegmentSize))
+			buf := downloadBufPool.Get().(*bytes.Buffer)
+			buf.Reset()
+			buf.Grow(int(seg.SegmentSize))
 			fetchStart := time.Now()
 			result, err := cp.BodyStream(attemptCtx, seg.Id, buf)
 			fetchDur := time.Since(fetchStart)
 			if err != nil {
+				downloadBufPool.Put(buf)
 				if errors.Is(err, context.DeadlineExceeded) {
 					b.log.DebugContext(ctx, "segment download timed out after 15s",
 						"segment_id", seg.Id,
@@ -363,7 +372,10 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 				return err
 			}
 
-			resultBytes = buf.Bytes()
+			// Copy data out before returning buffer to pool.
+			resultBytes = make([]byte, buf.Len())
+			copy(resultBytes, buf.Bytes())
+			downloadBufPool.Put(buf)
 			b.metricsTracker.IncArticlesDownloaded()
 			b.metricsTracker.UpdateDownloadProgress(b.streamID, int64(len(resultBytes)))
 
