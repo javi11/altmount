@@ -197,6 +197,41 @@ func TestAsyncReadBuffer_ZeroLengthRead(t *testing.T) {
 	}
 }
 
+func TestAsyncReadBuffer_SeekThenSequential(t *testing.T) {
+	data := bytes.Repeat([]byte("abcdefgh"), 2048) // 16KB
+	src := &mockSource{data: data}
+	buf := NewAsyncReadBuffer(context.Background(), src, 4096, int64(len(data)))
+	defer buf.Close()
+
+	// Read first 1KB sequentially.
+	p := make([]byte, 1024)
+	n, err := buf.ReadAtContext(context.Background(), p, 0)
+	if err != nil || n != 1024 {
+		t.Fatalf("first read: n=%d err=%v", n, err)
+	}
+	if !bytes.Equal(p[:n], data[:1024]) {
+		t.Fatal("first read: data mismatch")
+	}
+
+	// Seek to offset 8000 (non-sequential — triggers reset).
+	n, err = buf.ReadAtContext(context.Background(), p, 8000)
+	if err != nil || n != 1024 {
+		t.Fatalf("seek read: n=%d err=%v", n, err)
+	}
+	if !bytes.Equal(p[:n], data[8000:9024]) {
+		t.Fatal("seek read: data mismatch")
+	}
+
+	// Continue reading sequentially from 9024 (should use buffer, not passthrough).
+	n, err = buf.ReadAtContext(context.Background(), p, 9024)
+	if err != nil || n != 1024 {
+		t.Fatalf("post-seek sequential read: n=%d err=%v", n, err)
+	}
+	if !bytes.Equal(p[:n], data[9024:10048]) {
+		t.Fatal("post-seek sequential read: data mismatch")
+	}
+}
+
 func TestAsyncReadBuffer_ConcurrentReadClose(t *testing.T) {
 	data := bytes.Repeat([]byte("x"), 1024*1024)
 	src := &mockSource{data: data, delay: time.Millisecond}

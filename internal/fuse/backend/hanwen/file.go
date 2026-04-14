@@ -71,6 +71,12 @@ func (f *File) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, s
 
 	ctx = context.WithValue(ctx, utils.SuppressStreamTrackingKey, true)
 
+	// When async buffer is active, reduce UsenetReader prefetch to save memory.
+	// The async buffer already provides read-ahead; 60 segments of prefetch is redundant.
+	if f.asyncBufSize > 0 && f.size > int64(f.asyncBufSize) {
+		ctx = context.WithValue(ctx, utils.MaxPrefetchKey, 10)
+	}
+
 	aferoFile, err := f.nzbfs.Open(ctx, f.path)
 	if err != nil {
 		if stream != nil {
@@ -84,11 +90,6 @@ func (f *File) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, s
 
 		f.logger.ErrorContext(ctx, "File Open failed", "path", f.path, "error", err)
 		return nil, 0, syscall.EIO
-	}
-
-	// Optimistic warm-up for faster playback start
-	if warmable, ok := aferoFile.(interface{ WarmUp() }); ok {
-		warmable.WarmUp()
 	}
 
 	// Create async read-ahead buffer for smoother FUSE reads.
