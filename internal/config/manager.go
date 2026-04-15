@@ -203,7 +203,7 @@ type RCloneConfig struct {
 	RCUrl     string            `yaml:"rc_url" mapstructure:"rc_url" json:"rc_url"`
 	RCPort    int               `yaml:"rc_port" mapstructure:"rc_port" json:"rc_port"`
 	RCUser    string            `yaml:"rc_user" mapstructure:"rc_user" json:"rc_user"`
-	RCPass    string            `yaml:"rc_pass" mapstructure:"rc_pass" json:"-"`
+	RCPass    string            `yaml:"rc_pass" mapstructure:"rc_pass" json:"rc_pass,omitempty"`
 	RCOptions map[string]string `yaml:"rc_options" mapstructure:"rc_options" json:"rc_options"`
 
 	// Mount Configuration

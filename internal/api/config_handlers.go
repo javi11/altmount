@@ -226,6 +226,12 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 		err = c.BodyParser(newConfig)
 		// BodyParser will map fields like "profiler_enabled" from JSON to the root of newConfig
 		// because Config struct has it with `json:"profiler_enabled"`.
+		// Preserve existing rc_pass when the request omits or sends an empty value.
+		// The frontend sends rc_pass: "" when the user hasn't entered a new password,
+		// so an empty value means "keep the existing password", not "clear it".
+		if err == nil && newConfig.RClone.RCPass == "" {
+			newConfig.RClone.RCPass = currentConfig.RClone.RCPass
+		}
 	default:
 		return RespondValidationError(c, fmt.Sprintf("Unknown configuration section: %s", section), "INVALID_SECTION")
 	}
