@@ -720,6 +720,9 @@ func (c *Config) Validate() error {
 		if provider.MaxConnections <= 0 {
 			return fmt.Errorf("provider %d: max_connections must be greater than 0", i)
 		}
+		if provider.InflightRequests <= 0 {
+			c.Providers[i].InflightRequests = 10
+		}
 	}
 
 	// Validate Fuse configuration

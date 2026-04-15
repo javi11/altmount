@@ -557,6 +557,9 @@ func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 		return RespondValidationError(c, "Configuration validation failed", err.Error())
 	}
 
+	// Refresh from normalized config (Validate may have applied defaults)
+	newProvider = newConfig.Providers[len(newConfig.Providers)-1]
+
 	if err := s.configManager.UpdateConfig(newConfig); err != nil {
 		return RespondInternalError(c, "Failed to update configuration", err.Error())
 	}
@@ -734,6 +737,9 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 	if err := s.configManager.ValidateConfigUpdate(newConfig); err != nil {
 		return RespondValidationError(c, "Configuration validation failed", err.Error())
 	}
+
+	// Refresh from normalized config (Validate may have applied defaults)
+	provider = newConfig.Providers[providerIndex]
 
 	if err := s.configManager.UpdateConfig(newConfig); err != nil {
 		return RespondInternalError(c, "Failed to update configuration", err.Error())
