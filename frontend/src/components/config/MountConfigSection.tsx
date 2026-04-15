@@ -142,7 +142,27 @@ export function MountConfigSection({ config, onUpdate, isUpdating }: MountConfig
 			}
 		}
 		setMountType(newType);
-		subSectionDataRef.current = {};
+		// Pre-populate sub-section data for the new type (mirrors useEffect([config]) logic)
+		// so that saving immediately after switching includes the correct rclone/fuse config.
+		if (newType === "rclone") {
+			subSectionDataRef.current = buildRCloneMountFormData(config) as unknown as Record<
+				string,
+				unknown
+			>;
+		} else if (newType === "fuse" && config.fuse) {
+			subSectionDataRef.current = config.fuse as unknown as Record<string, unknown>;
+		} else if (newType === "rclone_external") {
+			subSectionDataRef.current = {
+				rc_enabled: true,
+				rc_url: config.rclone.rc_url || "",
+				vfs_name: config.rclone.vfs_name || "altmount",
+				rc_port: config.rclone.rc_port || 5572,
+				rc_user: config.rclone.rc_user || "",
+				rc_pass: "",
+			};
+		} else {
+			subSectionDataRef.current = {};
+		}
 		setHasChanges(true);
 	};
 
