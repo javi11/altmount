@@ -279,11 +279,6 @@ func (f *FS) OpenEx(path string, fi *cgofuse.FileInfo_t) int {
 		return -cgofuse.EIO
 	}
 
-	// Optimistic warm-up
-	if warmable, ok := file.(interface{ WarmUp() }); ok {
-		warmable.WarmUp()
-	}
-
 	h := &openHandle{
 		file:   file,
 		stream: stream,

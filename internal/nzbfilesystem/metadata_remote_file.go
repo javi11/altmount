@@ -40,8 +40,8 @@ type MetadataRemoteFile struct {
 	rcloneCipher     *rclone.RcloneCrypt      // For rclone encryption/decryption
 	aesCipher        *aes.AesCipher           // For AES encryption/decryption
 	streamTracker    StreamTracker            // Stream tracker for monitoring active streams
-	cacheSource *segcache.Source // Segment cache source (nil = no cache configured)
-	renameMu    sync.Mutex      // Mutex to protect rename operations from race conditions
+	cacheSource      *segcache.Source         // Segment cache source (nil = no cache configured)
+	renameMu         sync.Mutex               // Mutex to protect rename operations from race conditions
 }
 
 // Configuration is now accessed dynamically through config.ConfigGetter
@@ -79,8 +79,8 @@ func NewMetadataRemoteFile(
 		configGetter:     configGetter,
 		rcloneCipher:     rcloneCipher,
 		aesCipher:        aesCipher,
-		streamTracker: streamTracker,
-		cacheSource:   cacheSource,
+		streamTracker:    streamTracker,
+		cacheSource:      cacheSource,
 	}
 }
 
@@ -881,35 +881,6 @@ func (mvf *MetadataVirtualFile) GetStreamID() string {
 	return mvf.streamID
 }
 
-// WarmUp triggers a background pre-fetch of the file start
-func (mvf *MetadataVirtualFile) WarmUp() {
-	go func() {
-		mvf.mu.Lock()
-		defer mvf.mu.Unlock()
-
-		// Skip if already initialized
-		if mvf.readerInitialized {
-			return
-		}
-
-		// Initialize reader for the beginning of the file
-		if err := mvf.ensureReader(); err != nil {
-			// Just log/ignore, the actual Read will handle it later
-			return
-		}
-
-		// Align the ReadAt shared cursor with the warmed-up reader position
-		mvf.readAtSharedNext = mvf.position
-
-		// If the reader supports manual starting (UsenetReader), trigger it
-		// This starts the background workers to fetch data into the cache
-		// without consuming any bytes from the stream.
-		if ur, ok := mvf.reader.(interface{ Start() }); ok {
-			ur.Start()
-		}
-	}()
-}
-
 // Read implements afero.File.Read
 func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 	if len(p) == 0 {
@@ -1446,7 +1417,17 @@ func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, e
 		}
 	}
 
-	return usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxPrefetch, mvf.streamTracker, mvf.streamID, mvf.segmentStore)
+	ur, err := usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxPrefetch, mvf.streamTracker, mvf.streamID, mvf.segmentStore)
+	if err != nil {
+		return nil, err
+	}
+
+	// Pre-trigger the download pipeline so the first segment starts fetching
+	// immediately, rather than waiting for the first Read() call. This overlaps
+	// NNTP fetch time with the media player's header parsing.
+	ur.Start()
+
+	return ur, nil
 }
 
 // createNestedReader creates a reader for files backed by nested RAR sources.
@@ -1564,7 +1545,12 @@ func (mvf *MetadataVirtualFile) createUsenetReaderFromSegments(ctx context.Conte
 		return nil, fmt.Errorf("no segments cover range [%d, %d]", start, end)
 	}
 
-	return usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxPrefetch, mvf.streamTracker, mvf.streamID, mvf.segmentStore)
+	ur, err := usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxPrefetch, mvf.streamTracker, mvf.streamID, mvf.segmentStore)
+	if err != nil {
+		return nil, err
+	}
+	ur.Start()
+	return ur, nil
 }
 
 // nestedSourceSpec holds the parameters needed to lazily open one inner-volume reader.

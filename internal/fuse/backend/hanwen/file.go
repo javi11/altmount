@@ -85,11 +85,6 @@ func (f *File) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, s
 		return nil, 0, syscall.EIO
 	}
 
-	// Optimistic warm-up for faster playback start
-	if warmable, ok := aferoFile.(interface{ WarmUp() }); ok {
-		warmable.WarmUp()
-	}
-
 	handle := NewHandle(aferoFile, f.logger, f.path, stream, f.streamTracker)
 
 	// Use DIRECT_IO when file size is unknown/zero to prevent the kernel
