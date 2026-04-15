@@ -968,7 +968,6 @@ function FuseMountSubSection({ config, isRunning, onFormDataChange }: FuseSubSec
 		entry_timeout_seconds: 1,
 		max_cache_size_mb: 128,
 		max_read_ahead_mb: 128,
-		async_buffer_size: 8 * 1024 * 1024,
 	});
 
 	useEffect(() => {
@@ -1077,29 +1076,6 @@ function FuseMountSubSection({ config, isRunning, onFormDataChange }: FuseSubSec
 								MB
 							</span>
 						</div>
-					</fieldset>
-					<fieldset className="fieldset">
-						<legend className="fieldset-legend">Async Read-Ahead Buffer (per file)</legend>
-						<div className="join w-full">
-							<input
-								type="number"
-								className="input input-bordered join-item w-full bg-base-100 font-mono text-sm"
-								value={Math.round((formData.async_buffer_size ?? 8 * 1024 * 1024) / (1024 * 1024))}
-								onChange={(e) =>
-									updateField({
-										async_buffer_size: (Number.parseInt(e.target.value, 10) || 0) * 1024 * 1024,
-									})
-								}
-								min={0}
-								disabled={isRunning}
-							/>
-							<span className="btn btn-ghost join-item pointer-events-none border-base-300 text-xs">
-								MB
-							</span>
-						</div>
-						<p className="label text-base-content/50 text-xs">
-							0 to disable. Buffers reads ahead to smooth FUSE throughput.
-						</p>
 					</fieldset>
 					<fieldset className="fieldset">
 						<legend className="fieldset-legend">Permissions</legend>
