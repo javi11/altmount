@@ -23,6 +23,10 @@ type readAtContexter interface {
 // AsyncReadBuffer wraps a readAtContexter and continuously reads ahead
 // into a ring buffer. FUSE reads pull from the pre-filled buffer instead
 // of blocking on the underlying (network-backed) reader.
+//
+// On non-sequential reads (seeks), the buffer is discarded and refilled
+// from the new offset — the fill goroutine is never competing with reads
+// at a different position.
 type AsyncReadBuffer struct {
 	src      readAtContexter
 	ctx      context.Context
@@ -37,8 +41,9 @@ type AsyncReadBuffer struct {
 	readPos int // read cursor in ring buffer
 	filled  int // bytes currently in buffer
 
-	baseOff int64 // absolute file offset corresponding to readPos
-	fillOff int64 // absolute file offset of next fill read
+	baseOff int64  // absolute file offset corresponding to readPos
+	fillOff int64  // absolute file offset of next fill read
+	gen     uint64 // generation counter — incremented on seek/reset
 
 	srcErr  error // terminal error from source
 	srcDone bool  // fill goroutine finished
@@ -67,15 +72,38 @@ func NewAsyncReadBuffer(ctx context.Context, src readAtContexter, bufSize int, f
 	return a
 }
 
+// StartFill eagerly launches the background fill goroutine so data starts
+// buffering before the first read. Safe to call multiple times.
+func (a *AsyncReadBuffer) StartFill() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.startFill()
+}
+
 // startFill launches the background fill goroutine. Must be called with a.mu held.
 func (a *AsyncReadBuffer) startFill() {
 	if a.started {
 		return
 	}
 	a.started = true
-	a.buf = make([]byte, a.bufSize)
+	if a.buf == nil {
+		a.buf = make([]byte, a.bufSize)
+	}
 	a.wg.Add(1)
 	go a.fill()
+}
+
+// resetToOffset discards all buffered data and restarts filling from newOff.
+// Must be called with a.mu held.
+func (a *AsyncReadBuffer) resetToOffset(newOff int64) {
+	a.baseOff = newOff
+	a.fillOff = newOff
+	a.readPos = 0
+	a.filled = 0
+	a.srcErr = nil
+	a.srcDone = false
+	a.gen++
+	a.cond.Broadcast() // wake fill goroutine if it's waiting on full buffer
 }
 
 // fill continuously reads from the source into the ring buffer.
@@ -93,9 +121,9 @@ func (a *AsyncReadBuffer) fill() {
 			return
 		}
 
-		// Wait if buffer is full.
+		// Wait if buffer is full or source is done.
 		a.mu.Lock()
-		for a.filled >= a.bufSize && a.ctx.Err() == nil {
+		for a.filled >= a.bufSize && !a.srcDone && a.ctx.Err() == nil {
 			a.cond.Wait()
 		}
 		if a.ctx.Err() != nil {
@@ -105,18 +133,38 @@ func (a *AsyncReadBuffer) fill() {
 			a.mu.Unlock()
 			return
 		}
+		// If srcDone was set by a reset, we need to re-check: reset clears srcDone
+		// and bumps gen. If srcDone is still true here, the source genuinely finished.
+		if a.srcDone {
+			a.mu.Unlock()
+			// After a reset, srcDone is cleared — loop back to check.
+			// If genuinely done, the fileSize check below will catch it.
+			continue
+		}
 		space := a.bufSize - a.filled
 		fillOff := a.fillOff
+		myGen := a.gen
 		a.mu.Unlock()
 
 		// Check if we've reached the end of the file.
 		if a.fileSize > 0 && fillOff >= a.fileSize {
 			a.mu.Lock()
-			a.srcErr = io.EOF
-			a.srcDone = true
-			a.cond.Broadcast()
+			if a.gen == myGen { // only if no reset happened
+				a.srcErr = io.EOF
+				a.srcDone = true
+				a.cond.Broadcast()
+			}
 			a.mu.Unlock()
-			return
+			// Don't return — a reset might restart us from a new offset.
+			a.mu.Lock()
+			for a.srcDone && a.gen == myGen && a.ctx.Err() == nil {
+				a.cond.Wait()
+			}
+			a.mu.Unlock()
+			if a.ctx.Err() != nil {
+				return
+			}
+			continue
 		}
 
 		// Read from source outside the lock — this is the potentially blocking call.
@@ -126,8 +174,13 @@ func (a *AsyncReadBuffer) fill() {
 		}
 		n, err := a.src.ReadAtContext(a.ctx, tmp[:toRead], fillOff)
 
-		// Copy into ring buffer.
+		// Copy into ring buffer — but only if generation hasn't changed (no reset).
 		a.mu.Lock()
+		if a.gen != myGen {
+			// A reset happened while we were reading — discard this data.
+			a.mu.Unlock()
+			continue
+		}
 		if n > 0 {
 			writePos := (a.readPos + a.filled) % a.bufSize
 			// Handle wrap-around: may need two copies.
@@ -147,14 +200,23 @@ func (a *AsyncReadBuffer) fill() {
 		a.mu.Unlock()
 
 		if err != nil {
-			return
+			// Wait for a potential reset instead of exiting.
+			a.mu.Lock()
+			for a.srcDone && a.gen == myGen && a.ctx.Err() == nil {
+				a.cond.Wait()
+			}
+			a.mu.Unlock()
+			if a.ctx.Err() != nil {
+				return
+			}
+			continue
 		}
 	}
 }
 
 // ReadAtContext reads from the async buffer at the given offset.
 // Sequential reads are served from the buffer. Non-sequential reads
-// that fall outside the buffer window pass through to the source directly.
+// reset the buffer and start filling from the new offset.
 func (a *AsyncReadBuffer) ReadAtContext(ctx context.Context, p []byte, off int64) (int, error) {
 	if len(p) == 0 {
 		return 0, nil
@@ -163,10 +225,9 @@ func (a *AsyncReadBuffer) ReadAtContext(ctx context.Context, p []byte, off int64
 	a.mu.Lock()
 	a.startFill()
 
-	// Check if the offset is within our buffer window.
+	// Check if the offset is within our buffer window [baseOff, baseOff+filled).
 	bufEnd := a.baseOff + int64(a.filled)
 	if off >= a.baseOff && off < bufEnd {
-		// Data is already in the buffer — serve it.
 		n := a.copyFromBuffer(p, off)
 		a.mu.Unlock()
 		return n, nil
@@ -186,7 +247,6 @@ func (a *AsyncReadBuffer) ReadAtContext(ctx context.Context, p []byte, off int64
 			a.mu.Unlock()
 			return n, nil
 		}
-		// Buffer is empty and source is done.
 		if a.srcDone {
 			err := a.srcErr
 			a.mu.Unlock()
@@ -201,10 +261,20 @@ func (a *AsyncReadBuffer) ReadAtContext(ctx context.Context, p []byte, off int64
 		return 0, err
 	}
 
+	// Non-sequential (seek): serve this read directly from the source to avoid
+	// the round-trip through the buffer (reset → wait for fill → copy).
+	// Reset the buffer to fill from *after* this read so subsequent sequential
+	// reads hit the pre-filled buffer.
+	afterRead := off + int64(len(p))
+	if a.fileSize > 0 && afterRead > a.fileSize {
+		afterRead = a.fileSize
+	}
+	a.resetToOffset(afterRead)
 	a.mu.Unlock()
 
-	// Non-sequential or out-of-range: pass through directly to source.
-	return a.src.ReadAtContext(ctx, p, off)
+	// Direct read bypasses the buffer — one fewer hop on seek.
+	n, err := a.src.ReadAtContext(ctx, p, off)
+	return n, err
 }
 
 // copyFromBuffer copies data from the ring buffer into p starting at file offset off.

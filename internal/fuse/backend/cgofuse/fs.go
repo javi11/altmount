@@ -283,11 +283,6 @@ func (f *FS) OpenEx(path string, fi *cgofuse.FileInfo_t) int {
 		return -cgofuse.EIO
 	}
 
-	// Optimistic warm-up
-	if warmable, ok := file.(interface{ WarmUp() }); ok {
-		warmable.WarmUp()
-	}
-
 	h := &openHandle{
 		file:   file,
 		stream: stream,
@@ -300,6 +295,7 @@ func (f *FS) OpenEx(path string, fi *cgofuse.FileInfo_t) int {
 	if asyncBufSize := f.cfg.FuseConfig.AsyncBufferSize; asyncBufSize > 0 && info.Size() > int64(asyncBufSize) {
 		if rac, ok := file.(readAtContexter); ok {
 			h.asyncBuf = backend.NewAsyncReadBuffer(ctx, rac, asyncBufSize, info.Size())
+				h.asyncBuf.StartFill() // Begin prefetching — kernel doesn't cache pages on macOS FUSE
 		}
 	}
 
@@ -307,10 +303,10 @@ func (f *FS) OpenEx(path string, fi *cgofuse.FileInfo_t) int {
 
 	// Use DIRECT_IO when file size is unknown/zero to prevent the kernel
 	// from caching pages with stale size metadata (rclone mount2 pattern).
+	// For normal files, let the kernel manage page cache naturally via
+	// the -o local mount option (no KeepCache needed).
 	if info.Size() <= 0 {
 		fi.DirectIo = true
-	} else {
-		fi.KeepCache = true
 	}
 
 	return 0
