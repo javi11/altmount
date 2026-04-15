@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	defaultMaxPrefetch = 60 // Default to 60 segments prefetched ahead
+	defaultMaxPrefetch = 30 // Default to 30 segments prefetched ahead
 )
 
 var (
