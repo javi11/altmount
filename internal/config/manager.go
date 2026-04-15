@@ -980,7 +980,7 @@ func (c *Config) ProvidersEqual(other *Config) bool {
 func (c *Config) ToNNTPProviders() []nntppool.Provider {
 	var providers []nntppool.Provider
 	for _, p := range c.Providers {
-		if *p.Enabled {
+		if p.Enabled != nil && *p.Enabled {
 			providers = append(providers, p.ToNNTPProvider())
 		}
 	}
