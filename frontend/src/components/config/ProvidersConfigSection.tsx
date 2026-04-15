@@ -359,7 +359,13 @@ export function ProvidersConfigSection({
 														className={`h-2 w-2 rounded-full ${provider.enabled ? "bg-success shadow-[0_0_8px_rgba(34,197,94,0.5)]" : "bg-base-300"}`}
 													/>
 													<span className="truncate font-bold text-base-content/70 text-xs uppercase tracking-wider">
-														{provider.port} • {provider.username}
+														{provider.port} •{" "}
+														<span
+															className="cursor-pointer blur-sm transition-all hover:blur-none"
+															title="Click to unblur"
+														>
+															{provider.username}
+														</span>
 													</span>
 												</div>
 											</div>
