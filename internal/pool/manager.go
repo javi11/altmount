@@ -62,6 +62,8 @@ type StatsRepository interface {
 	AddProviderBytesToHourlyStat(ctx context.Context, providerID string, bytes int64) error
 	GetProviderHourlyStats(ctx context.Context, hours int) (map[string]int64, error)
 	ClearProviderHourlyStats(ctx context.Context) error
+	GetOldestStatDate(ctx context.Context) (time.Time, error)
+	GetOldestProviderStatDates(ctx context.Context) (map[string]time.Time, error)
 }
 
 // manager implements the Manager interface

@@ -1384,6 +1384,100 @@ func (r *Repository) GetSystemStats(ctx context.Context) (map[string]int64, erro
 	return stats, nil
 }
 
+// parseSQLiteDate attempts to parse a date string from SQLite in various formats
+func parseSQLiteDate(raw string) (time.Time, bool) {
+	if raw == "" {
+		return time.Time{}, false
+	}
+
+	layouts := []string{
+		"2006-01-02 15:04:05-07:00",
+		"2006-01-02 15:04:05Z07:00",
+		"2006-01-02 15:04:05",
+		"2006-01-02",
+		time.RFC3339,
+		time.RFC3339Nano,
+	}
+
+	for _, layout := range layouts {
+		if t, err := time.Parse(layout, raw); err == nil {
+			return t, true
+		}
+	}
+
+	// Try with a space before the offset if it looks like +HH:MM
+	if len(raw) > 6 && (raw[len(raw)-6] == '+' || raw[len(raw)-6] == '-') {
+		modified := raw[:len(raw)-6] + " " + raw[len(raw)-6:]
+		for _, layout := range layouts {
+			if t, err := time.Parse(layout, modified); err == nil {
+				return t, true
+			}
+		}
+	}
+
+	return time.Time{}, false
+}
+
+// GetOldestStatDate returns the date of the oldest record in import_daily_stats or import_history
+func (r *Repository) GetOldestStatDate(ctx context.Context) (time.Time, error) {
+	// Check daily stats first (this tracks from the very beginning of the system stats feature)
+	queryDaily := `SELECT MIN(day) FROM import_daily_stats`
+	var oldestDaily string
+	_ = r.db.QueryRowContext(ctx, queryDaily).Scan(&oldestDaily)
+
+	// Check history (this tracks specific imported files)
+	queryHistory := `SELECT MIN(completed_at) FROM import_history`
+	var oldestHistory string
+	_ = r.db.QueryRowContext(ctx, queryHistory).Scan(&oldestHistory)
+
+	// Check system_stats itself (oldest entry updated_at)
+	queryStats := `SELECT MIN(updated_at) FROM system_stats`
+	var oldestStats string
+	_ = r.db.QueryRowContext(ctx, queryStats).Scan(&oldestStats)
+
+	now := time.Now()
+	var oldest time.Time
+
+	for _, raw := range []string{oldestDaily, oldestHistory, oldestStats} {
+		if t, ok := parseSQLiteDate(raw); ok {
+			if oldest.IsZero() || t.Before(oldest) {
+				oldest = t
+			}
+		}
+	}
+
+	if oldest.IsZero() {
+		return now, nil
+	}
+
+	return oldest, nil
+}
+
+// GetOldestProviderStatDates returns the date of the oldest record per provider in provider_hourly_stats
+func (r *Repository) GetOldestProviderStatDates(ctx context.Context) (map[string]time.Time, error) {
+	query := `SELECT provider_id, MIN(hour) FROM provider_hourly_stats GROUP BY provider_id`
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get oldest provider stats: %w", err)
+	}
+	defer rows.Close()
+
+	dates := make(map[string]time.Time)
+	for rows.Next() {
+		var providerID string
+		var oldestHourStr string
+		if err := rows.Scan(&providerID, &oldestHourStr); err != nil {
+			return nil, fmt.Errorf("failed to scan oldest provider date: %w", err)
+		}
+
+		if t, ok := parseSQLiteDate(oldestHourStr); ok {
+			dates[providerID] = t
+		}
+	}
+
+	return dates, nil
+}
+
 // UpdateSystemStat updates or inserts a single system statistic
 func (r *Repository) UpdateSystemStat(ctx context.Context, key string, value int64) error {
 	query := `

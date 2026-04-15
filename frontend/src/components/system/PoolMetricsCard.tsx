@@ -68,7 +68,12 @@ export function PoolMetricsCard({ className }: PoolMetricsCardProps) {
 
 						{/* Total Downloaded */}
 						<div className="flex items-center justify-between text-sm">
-							<span className="text-base-content/70">Total Bytes</span>
+							<div className="flex flex-col">
+								<span className="text-base-content/70">Total Bytes</span>
+								<span className="text-[10px] text-base-content/40 uppercase tracking-tighter">
+									Since {new Date(poolMetrics.started_at).toLocaleDateString()}
+								</span>
+							</div>
 							<span className="font-medium">
 								<BytesDisplay bytes={poolMetrics.bytes_downloaded} />
 							</span>

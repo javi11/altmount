@@ -110,7 +110,10 @@ export function ProviderHealth() {
 										<td className="font-medium">
 											<div className="flex flex-col">
 												<span>{provider.host}</span>
-												<span className="cursor-pointer font-mono text-base-content/50 text-xs blur-sm transition-all hover:blur-none">
+												<span
+													className="cursor-pointer font-mono text-base-content/50 text-xs blur-sm transition-all hover:blur-none"
+													title="Click to unblur"
+												>
 													{provider.username}
 												</span>
 											</div>
