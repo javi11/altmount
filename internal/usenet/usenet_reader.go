@@ -142,16 +142,30 @@ func (b *UsenetReader) Close() error {
 		// Wait for goroutines with timeout. The cancel() above ensures all
 		// goroutines will eventually terminate, so the waiter goroutine is
 		// not a permanent leak — it cleans up once downloads finish.
+		// A periodic Broadcast pokes goroutines that entered cond.Wait()
+		// after the initial Broadcast above.
 		done := make(chan struct{})
 		go func() {
 			b.wg.Wait()
 			close(done)
 		}()
 
-		select {
-		case <-done:
-		case <-time.After(30 * time.Second):
-			b.log.WarnContext(b.ctx, "Timeout waiting for downloads to complete during close")
+		deadline := time.NewTimer(30 * time.Second)
+		defer deadline.Stop()
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+
+	loop:
+		for {
+			select {
+			case <-done:
+				break loop
+			case <-deadline.C:
+				b.log.WarnContext(b.ctx, "Timeout waiting for downloads to complete during close")
+				break loop
+			case <-ticker.C:
+				b.cond.Broadcast()
+			}
 		}
 
 		b.mu.Lock()
@@ -161,7 +175,7 @@ func (b *UsenetReader) Close() error {
 		}
 		b.mu.Unlock()
 
-		// Wake any goroutines that entered cond.Wait() after the initial Broadcast
+		// Final wake for any goroutines that entered cond.Wait() after the loop
 		b.cond.Broadcast()
 	})
 

@@ -519,8 +519,8 @@ func (mrf *MetadataRemoteFile) Stat(ctx context.Context, name string) (bool, fs.
 		}
 	}
 
-	// Get file metadata using simplified schema
-	fileMeta, err := mrf.metadataService.ReadFileMetadata(normalizedName)
+	// Use lightweight metadata — Stat only needs size and modtime, not segments.
+	fileMeta, err := mrf.metadataService.ReadFileMetadataLite(normalizedName)
 	if err != nil {
 		return false, nil, fmt.Errorf("failed to read file metadata: %w", err)
 	}
@@ -639,11 +639,10 @@ func (mvd *MetadataVirtualDirectory) Name() string {
 
 // Readdir implements afero.File.Readdir
 func (mvd *MetadataVirtualDirectory) Readdir(count int) ([]fs.FileInfo, error) {
-	// Create metadata reader for directory operations
-	reader := metadata.NewMetadataReader(mvd.metadataService)
-
-	// Get directory contents - we only need the directory infos, not the file metadata
-	dirInfos, _, err := reader.ListDirectoryContents(mvd.normalizedPath)
+	// Single os.ReadDir call that returns both subdirectory infos and file names.
+	// Uses ReadFileMetadataLite for files so that full protos (with SegmentData,
+	// Par2Files, etc.) are NOT pulled into the main cache just for a listing.
+	dirInfos, fileNames, err := mvd.metadataService.ListDirectoryAll(mvd.normalizedPath)
 	if err != nil {
 		return nil, err
 	}
@@ -658,14 +657,6 @@ func (mvd *MetadataVirtualDirectory) Readdir(count int) ([]fs.FileInfo, error) {
 		}
 	}
 
-	// Add files - we need to get the virtual filename from the metadata path
-	// Since ListDirectoryContents already reads the metadata files, we need to get the filenames differently
-	// Let's use the metadata service directly to list files in the directory
-	fileNames, err := mvd.metadataService.ListDirectory(mvd.normalizedPath)
-	if err != nil {
-		return nil, err
-	}
-
 	// Check if failure masking is enabled
 	cfg := mvd.configGetter()
 	maskingEnabled := cfg.Streaming.FailureMasking.Enabled == nil || *cfg.Streaming.FailureMasking.Enabled
@@ -674,7 +665,7 @@ func (mvd *MetadataVirtualDirectory) Readdir(count int) ([]fs.FileInfo, error) {
 
 	for _, fileName := range fileNames {
 		virtualFilePath := filepath.Join(mvd.normalizedPath, fileName)
-		fileMeta, err := mvd.metadataService.ReadFileMetadata(virtualFilePath)
+		fileMeta, err := mvd.metadataService.ReadFileMetadataLite(virtualFilePath)
 		if err != nil || fileMeta == nil {
 			continue
 		}
@@ -693,7 +684,7 @@ func (mvd *MetadataVirtualDirectory) Readdir(count int) ([]fs.FileInfo, error) {
 		}
 
 		info := &MetadataFileInfo{
-			name:    fileName, // Use the actual virtual filename from the metadata filesystem
+			name:    fileName,
 			size:    fileMeta.FileSize,
 			mode:    0644,
 			modTime: time.Unix(fileMeta.ModifiedAt, 0),
@@ -1181,6 +1172,7 @@ func (mvf *MetadataVirtualFile) Close() error {
 		mvf.reader = nil
 		mvf.readerInitialized = false
 	}
+	mvf.segmentIndex = nil // Release segment offset index for GC
 	mvf.mu.Unlock()
 
 	// Wait for any background reader closes from previous seeks
@@ -1770,6 +1762,10 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 // readFullContext reads exactly len(buf) bytes from r, but returns early
 // if ctx is cancelled. This prevents io.ReadFull from blocking indefinitely
 // when the underlying reader is stuck (e.g., waiting for network data).
+//
+// On cancellation the reader is force-closed to unblock io.ReadFull, and the
+// goroutine is drained (with a 5 s safety timeout) so that it releases its
+// reference to buf before the function returns.
 func readFullContext(ctx context.Context, r io.Reader, buf []byte) (int, error) {
 	type result struct {
 		n   int
@@ -1784,8 +1780,17 @@ func readFullContext(ctx context.Context, r io.Reader, buf []byte) (int, error) 
 	case res := <-ch:
 		return res.n, res.err
 	case <-ctx.Done():
-		// Context cancelled — the goroutine will finish eventually when
-		// the reader is closed by the caller's defer reader.Close().
+		// Force-close the reader to unblock io.ReadFull.
+		// UsenetReader.Close() is idempotent (closeOnce), so the
+		// caller's defer reader.Close() becomes a safe no-op.
+		if c, ok := r.(io.Closer); ok {
+			c.Close()
+		}
+		// Drain the goroutine so it releases buf and the reader reference.
+		select {
+		case <-ch:
+		case <-time.After(5 * time.Second):
+		}
 		return 0, ctx.Err()
 	}
 }
