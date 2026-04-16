@@ -297,9 +297,9 @@ func (m *Manager) sonarrHasFile(ctx context.Context, client *sonarr.Sonarr, inst
 }
 
 // TriggerFileRescan triggers a rescan for a specific file path through the appropriate ARR instance
-func (m *Manager) TriggerFileRescan(ctx context.Context, pathForRescan string, relativePath string) error {
+func (m *Manager) TriggerFileRescan(ctx context.Context, pathForRescan string, relativePath string, downloadID string) error {
 	res, err, _ := m.sf.Do(fmt.Sprintf("rescan:%s", pathForRescan), func() (interface{}, error) {
-		slog.InfoContext(ctx, "Triggering ARR rescan", "path", pathForRescan, "relative_path", relativePath)
+		slog.InfoContext(ctx, "Triggering ARR rescan", "path", pathForRescan, "relative_path", relativePath, "download_id", downloadID)
 
 		// Find which ARR instance manages this file path
 		instanceType, instanceName, err := m.findInstanceForFilePath(ctx, pathForRescan, relativePath)
@@ -325,14 +325,14 @@ func (m *Manager) TriggerFileRescan(ctx context.Context, pathForRescan string, r
 			if err != nil {
 				return nil, fmt.Errorf("failed to create Radarr client: %w", err)
 			}
-			return nil, m.triggerRadarrRescanByPath(ctx, client, pathForRescan, relativePath, instanceName)
+			return nil, m.triggerRadarrRescanByPath(ctx, client, pathForRescan, relativePath, instanceName, downloadID)
 
 		case "sonarr":
 			client, err := m.clients.GetOrCreateSonarrClient(instanceName, instanceConfig.URL, instanceConfig.APIKey)
 			if err != nil {
 				return nil, fmt.Errorf("failed to create Sonarr client: %w", err)
 			}
-			return nil, m.triggerSonarrRescanByPath(ctx, client, pathForRescan, relativePath, instanceName)
+			return nil, m.triggerSonarrRescanByPath(ctx, client, pathForRescan, relativePath, instanceName, downloadID)
 
 		case "lidarr", "readarr", "whisparr":
 			// For now, we only support RefreshMonitoredDownloads for these
@@ -492,11 +492,12 @@ func (m *Manager) TriggerDownloadScan(ctx context.Context, instanceType string) 
 }
 
 // triggerRadarrRescanByPath triggers a rescan in Radarr for the given file path
-func (m *Manager) triggerRadarrRescanByPath(ctx context.Context, client *radarr.Radarr, filePath, relativePath, instanceName string) error {
+func (m *Manager) triggerRadarrRescanByPath(ctx context.Context, client *radarr.Radarr, filePath, relativePath, instanceName string, downloadID string) error {
 	slog.InfoContext(ctx, "Searching Radarr for matching movie",
 		"instance", instanceName,
 		"file_path", filePath,
-		"relative_path", relativePath)
+		"relative_path", relativePath,
+		"download_id", downloadID)
 
 	// Get all movies to find the one with matching file path
 	movies, err := m.data.GetMovies(ctx, client, instanceName)
@@ -573,7 +574,7 @@ func (m *Manager) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 	// But we can still trigger search
 	if targetMovie.HasFile && targetMovie.MovieFile != nil {
 		// Try to blocklist the release associated with this file
-		if err := m.blocklistRadarrMovieFile(ctx, client, targetMovie.ID, targetMovie.MovieFile.ID); err != nil {
+		if err := m.blocklistRadarrMovieFile(ctx, client, targetMovie.ID, targetMovie.MovieFile.ID, downloadID); err != nil {
 			slog.WarnContext(ctx, "Failed to blocklist Radarr release", "error", err)
 		}
 
@@ -611,7 +612,7 @@ func (m *Manager) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 }
 
 // triggerSonarrRescanByPath triggers a rescan in Sonarr for the given file path
-func (m *Manager) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.Sonarr, filePath, relativePath, instanceName string) error {
+func (m *Manager) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.Sonarr, filePath, relativePath, instanceName string, downloadID string) error {
 	cfg := m.configGetter()
 
 	// Get library directory from health config
@@ -624,7 +625,8 @@ func (m *Manager) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 		"instance", instanceName,
 		"file_path", filePath,
 		"relative_path", relativePath,
-		"library_dir", libraryDir)
+		"library_dir", libraryDir,
+		"download_id", downloadID)
 
 	// Get all series to find the one that contains this file path
 	series, err := m.data.GetSeries(ctx, client, instanceName)
@@ -738,7 +740,7 @@ func (m *Manager) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 				"episode_file_id", targetEpisodeFile.ID)
 
 			// Try to blocklist the release associated with this file
-			if err := m.blocklistSonarrEpisodeFile(ctx, client, targetSeries.ID, targetEpisodeFile.ID); err != nil {
+			if err := m.blocklistSonarrEpisodeFile(ctx, client, targetSeries.ID, targetEpisodeFile.ID, downloadID); err != nil {
 				slog.WarnContext(ctx, "Failed to blocklist Sonarr release", "error", err)
 			}
 
@@ -843,35 +845,50 @@ func (m *Manager) failSonarrQueueItemByPath(ctx context.Context, client *sonarr.
 }
 
 // blocklistRadarrMovieFile finds the history event for the given file and marks it as failed (blocklisting the release)
-func (m *Manager) blocklistRadarrMovieFile(ctx context.Context, client *radarr.Radarr, movieID int64, fileID int64) error {
-	slog.DebugContext(ctx, "Attempting to find and blocklist release for movie file", "movie_id", movieID, "file_id", fileID)
+func (m *Manager) blocklistRadarrMovieFile(ctx context.Context, client *radarr.Radarr, movieID int64, fileID int64, knownDownloadID string) error {
+	slog.DebugContext(ctx, "Attempting to find and blocklist release for movie file", "movie_id", movieID, "file_id", fileID, "known_download_id", knownDownloadID)
 
-	// Fetch history for this specific movie
-	req := &starr.PageReq{PageSize: 100, SortKey: "date", SortDir: starr.SortDescend}
-	req.Set("movieId", strconv.FormatInt(movieID, 10))
+	var downloadID string = knownDownloadID
+	var history *radarr.History
 
-	history, err := client.GetHistoryPageContext(ctx, req)
-	if err != nil {
-		return fmt.Errorf("failed to fetch Radarr history: %w", err)
-	}
+	if downloadID == "" {
+		// Fetch history for this specific movie
+		req := &starr.PageReq{PageSize: 1000, SortKey: "date", SortDir: starr.SortDescend}
+		req.Set("movieId", strconv.FormatInt(movieID, 10))
 
-	targetFileID := strconv.FormatInt(fileID, 10)
-	var downloadID string
+		var err error
+		history, err = client.GetHistoryPageContext(ctx, req)
+		if err != nil {
+			return fmt.Errorf("failed to fetch Radarr history: %w", err)
+		}
 
-	// 1. Find the import event to get the downloadId
-	for _, record := range history.Records {
-		if record.Data.FileID == targetFileID && (record.EventType == "movieFileImported" || record.EventType == "downloadFolderImported") {
-			downloadID = record.DownloadID
-			break
+		targetFileID := strconv.FormatInt(fileID, 10)
+
+		// 1. Find the import event to get the downloadId
+		for _, record := range history.Records {
+			if record.Data.FileID == targetFileID && (record.EventType == "movieFileImported" || record.EventType == "downloadFolderImported") {
+				downloadID = record.DownloadID
+				break
+			}
+		}
+
+		if downloadID == "" {
+			slog.WarnContext(ctx, "Could not find import event in Radarr history for file", "movie_id", movieID, "file_id", fileID)
+			return nil
 		}
 	}
 
-	if downloadID == "" {
-		slog.WarnContext(ctx, "Could not find import event in Radarr history for file", "movie_id", movieID, "file_id", fileID)
-		return nil
+	// 2. Find the original grab event using the downloadId
+	if history == nil {
+		req := &starr.PageReq{PageSize: 100, SortKey: "date", SortDir: starr.SortDescend}
+		req.Set("movieId", strconv.FormatInt(movieID, 10))
+		var err error
+		history, err = client.GetHistoryPageContext(ctx, req)
+		if err != nil {
+			return fmt.Errorf("failed to fetch Radarr history: %w", err)
+		}
 	}
 
-	// 2. Find the original grab event using the downloadId
 	for _, record := range history.Records {
 		if record.DownloadID == downloadID && record.EventType == "grabbed" {
 			slog.InfoContext(ctx, "Found grabbed history record, marking as failed to blocklist release",
@@ -888,35 +905,50 @@ func (m *Manager) blocklistRadarrMovieFile(ctx context.Context, client *radarr.R
 }
 
 // blocklistSonarrEpisodeFile finds the grabbed history event for the given file and marks it as failed (blocklisting the release)
-func (m *Manager) blocklistSonarrEpisodeFile(ctx context.Context, client *sonarr.Sonarr, seriesID int64, fileID int64) error {
-	slog.DebugContext(ctx, "Attempting to find and blocklist release for episode file", "series_id", seriesID, "file_id", fileID)
+func (m *Manager) blocklistSonarrEpisodeFile(ctx context.Context, client *sonarr.Sonarr, seriesID int64, fileID int64, knownDownloadID string) error {
+	slog.DebugContext(ctx, "Attempting to find and blocklist release for episode file", "series_id", seriesID, "file_id", fileID, "known_download_id", knownDownloadID)
 
-	// Fetch history for this specific series
-	req := &starr.PageReq{PageSize: 100, SortKey: "date", SortDir: starr.SortDescend}
-	req.Set("seriesId", strconv.FormatInt(seriesID, 10))
+	var downloadID string = knownDownloadID
+	var history *sonarr.History
 
-	history, err := client.GetHistoryPageContext(ctx, req)
-	if err != nil {
-		return fmt.Errorf("failed to fetch Sonarr history: %w", err)
-	}
+	if downloadID == "" {
+		// Fetch history for this specific series
+		req := &starr.PageReq{PageSize: 1000, SortKey: "date", SortDir: starr.SortDescend}
+		req.Set("seriesId", strconv.FormatInt(seriesID, 10))
 
-	targetFileID := strconv.FormatInt(fileID, 10)
-	var downloadID string
+		var err error
+		history, err = client.GetHistoryPageContext(ctx, req)
+		if err != nil {
+			return fmt.Errorf("failed to fetch Sonarr history: %w", err)
+		}
 
-	// 1. Find the import event to get the downloadId
-	for _, record := range history.Records {
-		if record.Data.FileID == targetFileID && record.EventType == "downloadFolderImported" {
-			downloadID = record.DownloadID
-			break
+		targetFileID := strconv.FormatInt(fileID, 10)
+
+		// 1. Find the import event to get the downloadId
+		for _, record := range history.Records {
+			if record.Data.FileID == targetFileID && record.EventType == "downloadFolderImported" {
+				downloadID = record.DownloadID
+				break
+			}
+		}
+
+		if downloadID == "" {
+			slog.WarnContext(ctx, "Could not find import event in Sonarr history for file", "series_id", seriesID, "file_id", fileID)
+			return nil
 		}
 	}
 
-	if downloadID == "" {
-		slog.WarnContext(ctx, "Could not find import event in Sonarr history for file", "series_id", seriesID, "file_id", fileID)
-		return nil
+	// 2. Find the original grab event using the downloadId
+	if history == nil {
+		req := &starr.PageReq{PageSize: 100, SortKey: "date", SortDir: starr.SortDescend}
+		req.Set("seriesId", strconv.FormatInt(seriesID, 10))
+		var err error
+		history, err = client.GetHistoryPageContext(ctx, req)
+		if err != nil {
+			return fmt.Errorf("failed to fetch Sonarr history: %w", err)
+		}
 	}
 
-	// 2. Find the original grab event using the downloadId
 	for _, record := range history.Records {
 		if record.DownloadID == downloadID && record.EventType == "grabbed" {
 			slog.InfoContext(ctx, "Found grabbed history record, marking as failed to blocklist release",

@@ -173,8 +173,8 @@ func (s *Service) CleanupQueue(ctx context.Context) error {
 }
 
 // TriggerFileRescan triggers a rescan for a specific file path through the appropriate ARR instance
-func (s *Service) TriggerFileRescan(ctx context.Context, pathForRescan string, relativePath string) error {
-	return s.scanner.TriggerFileRescan(ctx, pathForRescan, relativePath)
+func (s *Service) TriggerFileRescan(ctx context.Context, pathForRescan string, relativePath string, downloadID string) error {
+	return s.scanner.TriggerFileRescan(ctx, pathForRescan, relativePath, downloadID)
 }
 
 // TriggerScanForFile finds the ARR instance managing the file and triggers a download scan on it.

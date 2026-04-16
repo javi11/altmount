@@ -99,6 +99,7 @@ type FileHealth struct {
 	RepairRetryCount int          `db:"repair_retry_count"` // Repair retry count
 	MaxRepairRetries int          `db:"max_repair_retries"` // Max repair retries
 	SourceNzbPath    *string      `db:"source_nzb_path"`
+	DownloadID       string       `db:"download_id"`
 	ErrorDetails     *string      `db:"error_details"` // JSON error details
 	CreatedAt        time.Time    `db:"created_at"`
 	UpdatedAt        time.Time    `db:"updated_at"`

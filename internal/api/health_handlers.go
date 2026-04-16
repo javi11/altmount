@@ -439,7 +439,7 @@ func (s *Server) handleRepairHealth(c *fiber.Ctx) error {
 	}
 
 	// Trigger rescan with the resolved path
-	err = s.arrsService.TriggerFileRescan(ctx, pathForRescan, item.FilePath)
+	err = s.arrsService.TriggerFileRescan(ctx, pathForRescan, item.FilePath, "")
 	if err != nil {
 		// Check if this is a "no ARR instance found" error
 		if strings.Contains(err.Error(), "no ARR instance found") {
@@ -546,7 +546,7 @@ func (s *Server) handleRepairHealthBulk(c *fiber.Ctx) error {
 		}
 
 		// Trigger rescan
-		err = s.arrsService.TriggerFileRescan(ctx, pathForRescan, item.FilePath)
+		err = s.arrsService.TriggerFileRescan(ctx, pathForRescan, item.FilePath, "")
 		if err != nil {
 			failedCount++
 			errors[filePath] = fmt.Sprintf("Failed to trigger repair: %v", err)
@@ -879,7 +879,7 @@ func (s *Server) handleAddHealthCheck(c *fiber.Ctx) error {
 	}
 
 	// Add file to health database
-	err := s.healthRepo.AddFileToHealthCheck(c.Context(), req.FilePath, req.LibraryPath, maxRetries, cfg.GetMaxRepairRetries(), req.SourceNzb, req.Priority)
+	err := s.healthRepo.AddFileToHealthCheck(c.Context(), req.FilePath, req.LibraryPath, maxRetries, cfg.GetMaxRepairRetries(), req.SourceNzb, "", req.Priority)
 	if err != nil {
 		return RespondInternalError(c, "Failed to add file for health check", err.Error())
 	}

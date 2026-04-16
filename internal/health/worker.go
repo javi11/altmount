@@ -22,9 +22,9 @@ import (
 	"github.com/sourcegraph/conc/pool"
 )
 
-// ARRsRepairService abstracts the ARR repair operations needed by HealthWorker.
+// ARRsRepairService abstracts the ARR repair operations needed by the filesystem.
 type ARRsRepairService interface {
-	TriggerFileRescan(ctx context.Context, pathForRescan string, relativePath string) error
+	TriggerFileRescan(ctx context.Context, pathForRescan string, relativePath string, downloadID string) error
 }
 
 // WorkerStatus represents the current status of the health worker
@@ -961,7 +961,7 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, item *database.Fi
 
 	pathForRescan := hw.resolvePathForRescan(item)
 
-	err := hw.arrsService.TriggerFileRescan(ctx, pathForRescan, filePath)
+	err := hw.arrsService.TriggerFileRescan(ctx, pathForRescan, filePath, item.DownloadID)
 	if err != nil {
 		if errors.Is(err, arrs.ErrEpisodeAlreadySatisfied) || errors.Is(err, arrs.ErrPathMatchFailed) {
 			slog.WarnContext(ctx, "File no longer tracked by ARR, removing from AltMount",
@@ -1010,7 +1010,7 @@ func (hw *HealthWorker) retriggerFileRepair(ctx context.Context, item *database.
 
 	slog.InfoContext(ctx, "Re-triggering ARR rescan for file in repair", "file_path", filePath, "path_for_rescan", pathForRescan)
 
-	err := hw.arrsService.TriggerFileRescan(ctx, pathForRescan, filePath)
+	err := hw.arrsService.TriggerFileRescan(ctx, pathForRescan, filePath, item.DownloadID)
 	if err != nil {
 		if errors.Is(err, arrs.ErrEpisodeAlreadySatisfied) || errors.Is(err, arrs.ErrPathMatchFailed) {
 			slog.WarnContext(ctx, "File no longer tracked by ARR during re-trigger, removing from AltMount", "file_path", filePath)
