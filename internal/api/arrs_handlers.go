@@ -57,6 +57,9 @@ type ArrsWebhookRequest struct {
 	EpisodeFile struct {
 		Path string `json:"path"`
 	} `json:"episodeFile"`
+	Download struct {
+		ID string `json:"id"`
+	} `json:"download"`
 	DeletedFiles ArrsDeletedFiles `json:"deletedFiles,omitempty"`
 }
 
@@ -449,7 +452,7 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 
 			// Add to health check (pending status) with high priority (Next) to ensure it's processed right away
 			cfg := s.configManager.GetConfigGetter()()
-			err := s.healthRepo.AddFileToHealthCheckWithMetadata(c.Context(), normalizedPath, &path, cfg.GetMaxRetries(), cfg.GetMaxRepairRetries(), sourceNzb, database.HealthPriorityNext, releaseDate)
+			err := s.healthRepo.AddFileToHealthCheckWithMetadata(c.Context(), normalizedPath, &path, cfg.GetMaxRetries(), cfg.GetMaxRepairRetries(), sourceNzb, req.Download.ID, database.HealthPriorityNext, releaseDate)
 			if err != nil {
 				slog.ErrorContext(c.Context(), "Failed to add webhook file to health check", "path", normalizedPath, "error", err)
 			} else {

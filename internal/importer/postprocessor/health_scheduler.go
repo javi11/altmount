@@ -29,7 +29,7 @@ func (c *Coordinator) ScheduleHealthCheck(ctx context.Context, resultingPath str
 
 	// Add/Update health record with high priority
 	cfg := c.configGetter()
-	err = c.healthRepo.AddFileToHealthCheck(ctx, resultingPath, &resultingPath, cfg.GetMaxRetries(), cfg.GetMaxRepairRetries(), &fileMeta.SourceNzbPath, database.HealthPriorityNext)
+	err = c.healthRepo.AddFileToHealthCheck(ctx, resultingPath, &resultingPath, cfg.GetMaxRetries(), cfg.GetMaxRepairRetries(), &fileMeta.SourceNzbPath, "", database.HealthPriorityNext)
 	if err != nil {
 		slog.ErrorContext(ctx, "Failed to schedule immediate health check for imported file",
 			"path", resultingPath,

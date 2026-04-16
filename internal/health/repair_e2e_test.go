@@ -52,12 +52,13 @@ type mockARRsService struct {
 type triggerCall struct {
 	pathForRescan string
 	relativePath  string
+	downloadID    string
 }
 
-func (m *mockARRsService) TriggerFileRescan(_ context.Context, pathForRescan string, relativePath string) error {
+func (m *mockARRsService) TriggerFileRescan(_ context.Context, pathForRescan string, relativePath string, downloadID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.calls = append(m.calls, triggerCall{pathForRescan: pathForRescan, relativePath: relativePath})
+	m.calls = append(m.calls, triggerCall{pathForRescan: pathForRescan, relativePath: relativePath, downloadID: downloadID})
 	return m.returnErr
 }
 

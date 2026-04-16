@@ -681,23 +681,24 @@ func (r *HealthRepository) RegisterCorruptedFile(ctx context.Context, filePath s
 }
 
 // AddFileToHealthCheck adds a file to the health database for checking
-func (r *HealthRepository) AddFileToHealthCheck(ctx context.Context, filePath string, libraryPath *string, maxRetries int, maxRepairRetries int, sourceNzbPath *string, priority HealthPriority) error {
-	return r.AddFileToHealthCheckWithMetadata(ctx, filePath, libraryPath, maxRetries, maxRepairRetries, sourceNzbPath, priority, nil)
+func (r *HealthRepository) AddFileToHealthCheck(ctx context.Context, filePath string, libraryPath *string, maxRetries int, maxRepairRetries int, sourceNzbPath *string, downloadID string, priority HealthPriority) error {
+	return r.AddFileToHealthCheckWithMetadata(ctx, filePath, libraryPath, maxRetries, maxRepairRetries, sourceNzbPath, downloadID, priority, nil)
 }
 
 // AddFileToHealthCheckWithMetadata adds a file to the health database for checking with metadata
-func (r *HealthRepository) AddFileToHealthCheckWithMetadata(ctx context.Context, filePath string, libraryPath *string, maxRetries int, maxRepairRetries int, sourceNzbPath *string, priority HealthPriority, releaseDate *time.Time) error {
+func (r *HealthRepository) AddFileToHealthCheckWithMetadata(ctx context.Context, filePath string, libraryPath *string, maxRetries int, maxRepairRetries int, sourceNzbPath *string, downloadID string, priority HealthPriority, releaseDate *time.Time) error {
 	var releaseDateStr any = nil
 	if releaseDate != nil {
 		releaseDateStr = releaseDate.UTC().Format("2006-01-02 15:04:05")
 	}
 
 	query := `
-		INSERT INTO file_health (file_path, library_path, status, last_checked, retry_count, max_retries, repair_retry_count, max_repair_retries, source_nzb_path, priority, release_date, created_at, updated_at, scheduled_check_at)
-		VALUES (?, ?, ?, datetime('now'), 0, ?, 0, ?, ?, ?, ?, datetime('now'), datetime('now'), datetime('now'))
+		INSERT INTO file_health (file_path, library_path, status, last_checked, retry_count, max_retries, repair_retry_count, max_repair_retries, source_nzb_path, download_id, priority, release_date, created_at, updated_at, scheduled_check_at)
+		VALUES (?, ?, ?, datetime('now'), 0, ?, 0, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), datetime('now'))
 		ON CONFLICT(file_path) DO UPDATE SET
 
 		library_path = COALESCE(excluded.library_path, library_path),
+		download_id = COALESCE(excluded.download_id, download_id),
 		status = excluded.status,
 		retry_count = 0,
 		repair_retry_count = 0,
@@ -712,7 +713,7 @@ func (r *HealthRepository) AddFileToHealthCheckWithMetadata(ctx context.Context,
 		scheduled_check_at = datetime('now')
 	`
 
-	_, err := r.db.ExecContext(ctx, query, filePath, libraryPath, HealthStatusPending, maxRetries, maxRepairRetries, sourceNzbPath, priority, releaseDateStr)
+	_, err := r.db.ExecContext(ctx, query, filePath, libraryPath, HealthStatusPending, maxRetries, maxRepairRetries, sourceNzbPath, downloadID, priority, releaseDateStr)
 
 	if err != nil {
 		return fmt.Errorf("failed to add file to health check: %w", err)
