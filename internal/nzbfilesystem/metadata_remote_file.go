@@ -1181,6 +1181,7 @@ func (mvf *MetadataVirtualFile) Close() error {
 		mvf.reader = nil
 		mvf.readerInitialized = false
 	}
+	mvf.segmentIndex = nil // Release segment offset index for GC
 	mvf.mu.Unlock()
 
 	// Wait for any background reader closes from previous seeks
@@ -1770,6 +1771,10 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 // readFullContext reads exactly len(buf) bytes from r, but returns early
 // if ctx is cancelled. This prevents io.ReadFull from blocking indefinitely
 // when the underlying reader is stuck (e.g., waiting for network data).
+//
+// On cancellation the reader is force-closed to unblock io.ReadFull, and the
+// goroutine is drained (with a 5 s safety timeout) so that it releases its
+// reference to buf before the function returns.
 func readFullContext(ctx context.Context, r io.Reader, buf []byte) (int, error) {
 	type result struct {
 		n   int
@@ -1784,8 +1789,17 @@ func readFullContext(ctx context.Context, r io.Reader, buf []byte) (int, error) 
 	case res := <-ch:
 		return res.n, res.err
 	case <-ctx.Done():
-		// Context cancelled — the goroutine will finish eventually when
-		// the reader is closed by the caller's defer reader.Close().
+		// Force-close the reader to unblock io.ReadFull.
+		// UsenetReader.Close() is idempotent (closeOnce), so the
+		// caller's defer reader.Close() becomes a safe no-op.
+		if c, ok := r.(io.Closer); ok {
+			c.Close()
+		}
+		// Drain the goroutine so it releases buf and the reader reference.
+		select {
+		case <-ch:
+		case <-time.After(5 * time.Second):
+		}
 		return 0, ctx.Err()
 	}
 }

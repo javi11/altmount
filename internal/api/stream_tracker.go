@@ -142,7 +142,17 @@ func (t *StreamTracker) snapshotLoop() {
 					}
 				}
 				if keepIndex > 0 {
-					s.samples = s.samples[keepIndex:]
+					remaining := s.samples[keepIndex:]
+					// Compact: if the underlying array is much larger than what
+					// we need, copy into a right-sized slice to release excess
+					// backing memory that re-slicing would retain.
+					if cap(s.samples) > 2*len(remaining) {
+						compacted := make([]streamSample, len(remaining), len(remaining)+10)
+						copy(compacted, remaining)
+						s.samples = compacted
+					} else {
+						s.samples = remaining
+					}
 				}
 
 				// Calculate windowed speed (10 second window)
