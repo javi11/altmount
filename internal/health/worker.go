@@ -24,7 +24,8 @@ import (
 
 // ARRsRepairService abstracts the ARR repair operations needed by the filesystem.
 type ARRsRepairService interface {
-	TriggerFileRescan(ctx context.Context, pathForRescan string, relativePath string, downloadID string) error
+	TriggerFileRescan(ctx context.Context, pathForRescan string, relativePath string, downloadID string, sourceNzbPath *string, reason string) error
+	GetDownloadID(ctx context.Context, filePath, relativePath string) (string, error)
 }
 
 // WorkerStatus represents the current status of the health worker
@@ -263,6 +264,10 @@ func (hw *HealthWorker) run(ctx context.Context) {
 	ticker := time.NewTicker(hw.getCheckInterval())
 	defer ticker.Stop()
 
+	// Metadata enrichment ticker
+	enrichTicker := time.NewTicker(30 * time.Minute)
+	defer enrichTicker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -290,6 +295,20 @@ func (hw *HealthWorker) run(ctx context.Context) {
 					s.LastError = &errMsg
 				})
 			}
+		case <-enrichTicker.C:
+			hw.mu.RLock()
+			isCycleRunning := hw.cycleRunning
+			hw.mu.RUnlock()
+
+			if isCycleRunning {
+				continue
+			}
+
+			hw.wg.Add(1)
+			go func() {
+				defer hw.wg.Done()
+				hw.enrichMetadata(ctx)
+			}()
 		}
 	}
 }
@@ -961,7 +980,20 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, item *database.Fi
 
 	pathForRescan := hw.resolvePathForRescan(item)
 
-	err := hw.arrsService.TriggerFileRescan(ctx, pathForRescan, filePath, item.DownloadID)
+	reason := "AltMount: detected corruption"
+	if item.LastError != nil {
+		if strings.Contains(*item.LastError, "metadata gap") || strings.Contains(*item.LastError, "gap in metadata") {
+			reason = "AltMount: detected corruption (metadata gap)"
+		} else if strings.Contains(*item.LastError, "missing segments") {
+			reason = "AltMount: detected corruption (missing segments)"
+		} else if strings.Contains(*item.LastError, "zero-byte segments") {
+			reason = "AltMount: detected corruption (zero-byte segments)"
+		} else {
+			reason = fmt.Sprintf("AltMount: %s", *item.LastError)
+		}
+	}
+
+	err := hw.arrsService.TriggerFileRescan(ctx, pathForRescan, filePath, item.DownloadID, item.SourceNzbPath, reason)
 	if err != nil {
 		if errors.Is(err, arrs.ErrEpisodeAlreadySatisfied) || errors.Is(err, arrs.ErrPathMatchFailed) {
 			slog.WarnContext(ctx, "File no longer tracked by ARR, removing from AltMount",
@@ -1010,7 +1042,8 @@ func (hw *HealthWorker) retriggerFileRepair(ctx context.Context, item *database.
 
 	slog.InfoContext(ctx, "Re-triggering ARR rescan for file in repair", "file_path", filePath, "path_for_rescan", pathForRescan)
 
-	err := hw.arrsService.TriggerFileRescan(ctx, pathForRescan, filePath, item.DownloadID)
+	reason := "AltMount: manual repair re-trigger"
+	err := hw.arrsService.TriggerFileRescan(ctx, pathForRescan, filePath, item.DownloadID, item.SourceNzbPath, reason)
 	if err != nil {
 		if errors.Is(err, arrs.ErrEpisodeAlreadySatisfied) || errors.Is(err, arrs.ErrPathMatchFailed) {
 			slog.WarnContext(ctx, "File no longer tracked by ARR during re-trigger, removing from AltMount", "file_path", filePath)
@@ -1024,4 +1057,77 @@ func (hw *HealthWorker) retriggerFileRepair(ctx context.Context, item *database.
 
 	slog.InfoContext(ctx, "Successfully re-triggered ARR rescan", "file_path", filePath)
 	return repairOutcomeTriggered, nil
+}
+
+// enrichMetadata finds healthy records missing DownloadID and harvests them from ARR history
+func (hw *HealthWorker) enrichMetadata(ctx context.Context) {
+	hw.mu.Lock()
+	hw.cycleRunning = true
+	hw.mu.Unlock()
+
+	defer func() {
+		hw.mu.Lock()
+		hw.cycleRunning = false
+		hw.mu.Unlock()
+	}()
+
+	slog.DebugContext(ctx, "Starting proactive DownloadID enrichment cycle")
+
+	// Fetch up to 100 records missing DownloadID
+	records, err := hw.healthRepo.GetRecordsMissingDownloadID(ctx, 100)
+	if err != nil {
+		slog.ErrorContext(ctx, "Failed to fetch records for enrichment", "error", err)
+		return
+	}
+
+	if len(records) == 0 {
+		return
+	}
+
+	slog.InfoContext(ctx, "Found records missing DownloadID for enrichment", "count", len(records))
+
+	count := 0
+	for _, record := range records {
+		select {
+		case <-ctx.Done():
+			return
+		case <-hw.stopChan:
+			return
+		default:
+		}
+
+		if record.LibraryPath == nil || *record.LibraryPath == "" {
+			continue
+		}
+
+		// Try to harvest DownloadID
+		downloadID, err := hw.arrsService.GetDownloadID(ctx, record.FilePath, *record.LibraryPath)
+		if err != nil {
+			slog.DebugContext(ctx, "Could not harvest DownloadID for enrichment",
+				"file_path", record.FilePath,
+				"error", err)
+			continue
+		}
+
+		if downloadID != "" {
+			// Update the record
+			if err := hw.healthRepo.UpdateDownloadID(ctx, record.FilePath, downloadID); err != nil {
+				slog.ErrorContext(ctx, "Failed to update harvested DownloadID",
+					"file_path", record.FilePath,
+					"error", err)
+			} else {
+				slog.InfoContext(ctx, "Successfully harvested DownloadID for existing file",
+					"file_path", record.FilePath,
+					"download_id", downloadID)
+				count++
+			}
+		}
+		
+		// Small sleep to avoid hammering ARR APIs
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	if count > 0 {
+		slog.InfoContext(ctx, "Completed DownloadID enrichment cycle", "harvested_count", count)
+	}
 }

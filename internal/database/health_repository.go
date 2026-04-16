@@ -110,6 +110,60 @@ func (r *HealthRepository) GetFileHealth(ctx context.Context, filePath string) (
 	return &health, nil
 }
 
+// GetRecordsMissingDownloadID retrieves records that have a library path but no download ID
+func (r *HealthRepository) GetRecordsMissingDownloadID(ctx context.Context, limit int) ([]*FileHealth, error) {
+	query := `
+		SELECT id, file_path, library_path, status, last_checked, last_error, retry_count, max_retries,
+		       repair_retry_count, max_repair_retries, source_nzb_path, download_id,
+		       error_details, created_at, updated_at, release_date, priority,
+			   streaming_failure_count, is_masked
+		FROM file_health
+		WHERE (download_id IS NULL OR download_id = '')
+		  AND library_path IS NOT NULL
+		  AND library_path != ''
+		  AND status = 'healthy'
+		LIMIT ?
+	`
+
+	rows, err := r.db.QueryContext(ctx, query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query records missing download ID: %w", err)
+	}
+	defer rows.Close()
+
+	var results []*FileHealth
+	for rows.Next() {
+		var h FileHealth
+		err := rows.Scan(
+			&h.ID, &h.FilePath, &h.LibraryPath, &h.Status, &h.LastChecked,
+			&h.LastError, &h.RetryCount, &h.MaxRetries,
+			&h.RepairRetryCount, &h.MaxRepairRetries,
+			&h.SourceNzbPath, &h.DownloadID, &h.ErrorDetails,
+			&h.CreatedAt, &h.UpdatedAt, &h.ReleaseDate, &h.Priority,
+			&h.StreamingFailureCount, &h.IsMasked,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan health record: %w", err)
+		}
+		results = append(results, &h)
+	}
+
+	return results, nil
+}
+
+// UpdateDownloadID updates the download ID for a specific file health record
+func (r *HealthRepository) UpdateDownloadID(ctx context.Context, filePath string, downloadID string) error {
+	filePath = strings.TrimPrefix(filePath, "/")
+	query := `UPDATE file_health SET download_id = ?, updated_at = datetime('now') WHERE file_path = ?`
+
+	_, err := r.db.ExecContext(ctx, query, downloadID, filePath)
+	if err != nil {
+		return fmt.Errorf("failed to update download ID: %w", err)
+	}
+
+	return nil
+}
+
 // GetFileHealthByID retrieves health record for a specific file by ID
 func (r *HealthRepository) GetFileHealthByID(ctx context.Context, id int64) (*FileHealth, error) {
 	query := `

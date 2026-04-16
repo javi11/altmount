@@ -32,7 +32,7 @@ type ActiveStream struct {
 
 // ARRsRepairService abstracts the ARR repair operations needed by the filesystem.
 type ARRsRepairService interface {
-	TriggerFileRescan(ctx context.Context, pathForRescan string, relativePath string, downloadID string) error
+	TriggerFileRescan(ctx context.Context, pathForRescan string, relativePath string, downloadID string, sourceNzbPath *string, reason string) error
 }
 
 // StreamTracker interface for tracking active streams

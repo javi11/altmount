@@ -138,6 +138,43 @@ func (s *Server) IsReady() bool {
 	return s.ready.Load()
 }
 
+// requireAuth is a middleware helper that requires either JWT (if login is enabled)
+// or a valid API key (always accepted). This is used for sensitive endpoints
+// that should not be public even if Auth.LoginRequired is false.
+func (s *Server) requireAuth(handler fiber.Handler) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		// 1. Check if user is already authenticated via JWT (from locals)
+		if user := auth.GetUserFromContext(c); user != nil {
+			return handler(c)
+		}
+
+		// 2. Check for API key in query params, header, or bearer token
+		apiKey := c.Query("apikey")
+		if apiKey == "" {
+			apiKey = c.Get("X-API-Key")
+		}
+		if apiKey == "" {
+			// Check Authorization header for "Bearer <apikey>"
+			authHeader := c.Get("Authorization")
+			if strings.HasPrefix(authHeader, "Bearer ") {
+				apiKey = strings.TrimPrefix(authHeader, "Bearer ")
+			}
+		}
+
+		// 3. Validate API key
+		if apiKey != "" && s.validateAPIKey(c, apiKey) {
+			return handler(c)
+		}
+
+		// 4. Return unauthorized
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"success": false,
+			"message": "Authentication required",
+			"details": "Please provide a valid API key or login to your account",
+		})
+	}
+}
+
 // SetRcloneClient sets the rclone client reference for the server
 func (s *Server) SetRcloneClient(rcloneClient rclonecli.RcloneRcClient) {
 	s.rcloneClient = rcloneClient
@@ -217,11 +254,11 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 		}
 	}
 
-	// NZBDav Imports (now protected by JWT auth)
-	api.Post("/import/nzbdav", s.handleImportNzbdav)
-	api.Post("/import/nzbdav/reset", s.handleResetNzbdavImportStatus)
-	api.Get("/import/nzbdav/status", s.handleGetNzbdavImportStatus)
-	api.Delete("/import/nzbdav", s.handleCancelNzbdavImport)
+	// NZBDav Imports (now protected by JWT auth or API key)
+	api.Post("/import/nzbdav", s.requireAuth(s.handleImportNzbdav))
+	api.Post("/import/nzbdav/reset", s.requireAuth(s.handleResetNzbdavImportStatus))
+	api.Get("/import/nzbdav/status", s.requireAuth(s.handleGetNzbdavImportStatus))
+	api.Delete("/import/nzbdav", s.requireAuth(s.handleCancelNzbdavImport))
 
 	// Queue endpoints
 	api.Get("/queue", s.handleListQueue)
@@ -291,13 +328,13 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Get("/import/history", s.handleGetImportHistory)
 	api.Delete("/import/history", s.handleClearImportHistory)
 	// System endpoints
-	api.Get("/system/stats", s.handleGetSystemStats)
-	api.Get("/system/health", s.handleGetSystemHealth)
-	api.Get("/system/browse", s.handleSystemBrowse)
-	api.Get("/system/pool/metrics", s.handleGetPoolMetrics)
-	api.Post("/system/stats/reset", s.handleResetSystemStats)
-	api.Post("/system/cleanup", s.handleSystemCleanup)
-	api.Post("/system/restart", s.handleSystemRestart)
+	api.Get("/system/stats", s.requireAuth(s.handleGetSystemStats))
+	api.Get("/system/health", s.requireAuth(s.handleGetSystemHealth))
+	api.Get("/system/browse", s.requireAuth(s.handleSystemBrowse))
+	api.Get("/system/pool/metrics", s.requireAuth(s.handleGetPoolMetrics))
+	api.Post("/system/stats/reset", s.requireAuth(s.handleResetSystemStats))
+	api.Post("/system/cleanup", s.requireAuth(s.handleSystemCleanup))
+	api.Post("/system/restart", s.requireAuth(s.handleSystemRestart))
 
 	// Update endpoints
 	api.Get("/system/update/status", s.handleGetUpdateStatus)

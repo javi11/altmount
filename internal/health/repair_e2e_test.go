@@ -53,13 +53,25 @@ type triggerCall struct {
 	pathForRescan string
 	relativePath  string
 	downloadID    string
+	sourceNzbPath *string
+	reason        string
 }
 
-func (m *mockARRsService) TriggerFileRescan(_ context.Context, pathForRescan string, relativePath string, downloadID string) error {
+func (m *mockARRsService) TriggerFileRescan(_ context.Context, pathForRescan string, relativePath string, downloadID string, sourceNzbPath *string, reason string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.calls = append(m.calls, triggerCall{pathForRescan: pathForRescan, relativePath: relativePath, downloadID: downloadID})
+	m.calls = append(m.calls, triggerCall{
+		pathForRescan: pathForRescan,
+		relativePath:  relativePath,
+		downloadID:    downloadID,
+		sourceNzbPath: sourceNzbPath,
+		reason:        reason,
+	})
 	return m.returnErr
+}
+
+func (m *mockARRsService) GetDownloadID(_ context.Context, _, _ string) (string, error) {
+	return "", nil
 }
 
 // mockImportService implements importer.ImportService for testing.

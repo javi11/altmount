@@ -439,7 +439,7 @@ func (s *Server) handleRepairHealth(c *fiber.Ctx) error {
 	}
 
 	// Trigger rescan with the resolved path
-	err = s.arrsService.TriggerFileRescan(ctx, pathForRescan, item.FilePath, "")
+	err = s.arrsService.TriggerFileRescan(ctx, pathForRescan, item.FilePath, "", item.SourceNzbPath, "AltMount: manual repair via UI")
 	if err != nil {
 		// Check if this is a "no ARR instance found" error
 		if strings.Contains(err.Error(), "no ARR instance found") {
@@ -546,7 +546,7 @@ func (s *Server) handleRepairHealthBulk(c *fiber.Ctx) error {
 		}
 
 		// Trigger rescan
-		err = s.arrsService.TriggerFileRescan(ctx, pathForRescan, item.FilePath, "")
+		err = s.arrsService.TriggerFileRescan(ctx, pathForRescan, item.FilePath, "", item.SourceNzbPath, "AltMount: manual bulk repair via UI")
 		if err != nil {
 			failedCount++
 			errors[filePath] = fmt.Sprintf("Failed to trigger repair: %v", err)
