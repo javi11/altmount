@@ -519,8 +519,8 @@ func (mrf *MetadataRemoteFile) Stat(ctx context.Context, name string) (bool, fs.
 		}
 	}
 
-	// Get file metadata using simplified schema
-	fileMeta, err := mrf.metadataService.ReadFileMetadata(normalizedName)
+	// Use lightweight metadata — Stat only needs size and modtime, not segments.
+	fileMeta, err := mrf.metadataService.ReadFileMetadataLite(normalizedName)
 	if err != nil {
 		return false, nil, fmt.Errorf("failed to read file metadata: %w", err)
 	}
