@@ -639,11 +639,10 @@ func (mvd *MetadataVirtualDirectory) Name() string {
 
 // Readdir implements afero.File.Readdir
 func (mvd *MetadataVirtualDirectory) Readdir(count int) ([]fs.FileInfo, error) {
-	// Create metadata reader for directory operations
-	reader := metadata.NewMetadataReader(mvd.metadataService)
-
-	// Get directory contents - we only need the directory infos, not the file metadata
-	dirInfos, _, err := reader.ListDirectoryContents(mvd.normalizedPath)
+	// Single os.ReadDir call that returns both subdirectory infos and file names.
+	// Uses ReadFileMetadataLite for files so that full protos (with SegmentData,
+	// Par2Files, etc.) are NOT pulled into the main cache just for a listing.
+	dirInfos, fileNames, err := mvd.metadataService.ListDirectoryAll(mvd.normalizedPath)
 	if err != nil {
 		return nil, err
 	}
@@ -658,14 +657,6 @@ func (mvd *MetadataVirtualDirectory) Readdir(count int) ([]fs.FileInfo, error) {
 		}
 	}
 
-	// Add files - we need to get the virtual filename from the metadata path
-	// Since ListDirectoryContents already reads the metadata files, we need to get the filenames differently
-	// Let's use the metadata service directly to list files in the directory
-	fileNames, err := mvd.metadataService.ListDirectory(mvd.normalizedPath)
-	if err != nil {
-		return nil, err
-	}
-
 	// Check if failure masking is enabled
 	cfg := mvd.configGetter()
 	maskingEnabled := cfg.Streaming.FailureMasking.Enabled == nil || *cfg.Streaming.FailureMasking.Enabled
@@ -674,7 +665,7 @@ func (mvd *MetadataVirtualDirectory) Readdir(count int) ([]fs.FileInfo, error) {
 
 	for _, fileName := range fileNames {
 		virtualFilePath := filepath.Join(mvd.normalizedPath, fileName)
-		fileMeta, err := mvd.metadataService.ReadFileMetadata(virtualFilePath)
+		fileMeta, err := mvd.metadataService.ReadFileMetadataLite(virtualFilePath)
 		if err != nil || fileMeta == nil {
 			continue
 		}
@@ -693,7 +684,7 @@ func (mvd *MetadataVirtualDirectory) Readdir(count int) ([]fs.FileInfo, error) {
 		}
 
 		info := &MetadataFileInfo{
-			name:    fileName, // Use the actual virtual filename from the metadata filesystem
+			name:    fileName,
 			size:    fileMeta.FileSize,
 			mode:    0644,
 			modTime: time.Unix(fileMeta.ModifiedAt, 0),

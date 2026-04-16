@@ -23,20 +23,34 @@ const (
 	defaultMetadataCacheSize = 4096
 )
 
+// FileMetadataLite holds the minimal metadata needed for directory listings.
+// This avoids keeping full FileMetadata protos (with SegmentData, Par2Files, etc.)
+// in memory just for Readdir.
+type FileMetadataLite struct {
+	FileSize   int64
+	ModifiedAt int64
+	Status     metapb.FileStatus
+}
+
 // MetadataService provides low-level read/write operations for metadata files
 type MetadataService struct {
 	rootPath string
 	// fileCache caches parsed FileMetadata keyed by virtual path.
 	// Entries are evicted on LRU basis and invalidated on any write/delete/rename.
 	fileCache *lru.Cache[string, *metapb.FileMetadata]
+	// liteCache caches lightweight metadata for Readdir. Avoids deserializing
+	// full protos (with SegmentData, etc.) just to list a directory.
+	liteCache *lru.Cache[string, *FileMetadataLite]
 }
 
 // NewMetadataService creates a new metadata service
 func NewMetadataService(rootPath string) *MetadataService {
 	cache, _ := lru.New[string, *metapb.FileMetadata](defaultMetadataCacheSize)
+	liteCache, _ := lru.New[string, *FileMetadataLite](defaultMetadataCacheSize)
 	return &MetadataService{
 		rootPath:  rootPath,
 		fileCache: cache,
+		liteCache: liteCache,
 	}
 }
 
@@ -111,6 +125,11 @@ func (ms *MetadataService) WriteFileMetadata(virtualPath string, metadata *metap
 
 	// Update cache with the written metadata
 	ms.fileCache.Add(virtualPath, metadata)
+	ms.liteCache.Add(virtualPath, &FileMetadataLite{
+		FileSize:   metadata.FileSize,
+		ModifiedAt: metadata.ModifiedAt,
+		Status:     metadata.Status,
+	})
 
 	return nil
 }
@@ -151,8 +170,62 @@ func (ms *MetadataService) ReadFileMetadata(virtualPath string) (*metapb.FileMet
 
 	// Store in cache
 	ms.fileCache.Add(virtualPath, metadata)
+	ms.liteCache.Add(virtualPath, &FileMetadataLite{
+		FileSize:   metadata.FileSize,
+		ModifiedAt: metadata.ModifiedAt,
+		Status:     metadata.Status,
+	})
 
 	return metadata, nil
+}
+
+// ReadFileMetadataLite reads only the lightweight fields (size, modtime, status)
+// needed for directory listings. It uses a separate cache so that Readdir does not
+// pull full FileMetadata protos (with SegmentData, etc.) into the main cache.
+func (ms *MetadataService) ReadFileMetadataLite(virtualPath string) (*FileMetadataLite, error) {
+	// Check lite cache first
+	if cached, ok := ms.liteCache.Get(virtualPath); ok {
+		return cached, nil
+	}
+
+	// If the full metadata is already cached, extract from it
+	if full, ok := ms.fileCache.Get(virtualPath); ok {
+		lite := &FileMetadataLite{
+			FileSize:   full.FileSize,
+			ModifiedAt: full.ModifiedAt,
+			Status:     full.Status,
+		}
+		ms.liteCache.Add(virtualPath, lite)
+		return lite, nil
+	}
+
+	// Cache miss — read from disk and deserialize
+	filename := filepath.Base(virtualPath)
+	metadataDir := filepath.Join(ms.rootPath, filepath.Dir(virtualPath))
+	metadataPath := filepath.Join(metadataDir, filename+".meta")
+
+	data, err := os.ReadFile(metadataPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to read metadata file: %w", err)
+	}
+
+	metadata := &metapb.FileMetadata{}
+	if err := proto.Unmarshal(data, metadata); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
+	}
+
+	// Store only the lightweight version — let the full proto be GC'd
+	lite := &FileMetadataLite{
+		FileSize:   metadata.FileSize,
+		ModifiedAt: metadata.ModifiedAt,
+		Status:     metadata.Status,
+	}
+	ms.liteCache.Add(virtualPath, lite)
+
+	return lite, nil
 }
 
 // FileExists checks if a metadata file exists for the given virtual path
@@ -195,6 +268,34 @@ func (ms *MetadataService) ListDirectory(virtualPath string) ([]string, error) {
 	}
 
 	return files, nil
+}
+
+// ListDirectoryAll returns both subdirectory fs.FileInfo entries and virtual
+// file names from a single os.ReadDir call. This is used by Readdir to avoid
+// two separate directory reads.
+func (ms *MetadataService) ListDirectoryAll(virtualPath string) (dirs []fs.FileInfo, fileNames []string, err error) {
+	metadataDir := filepath.Join(ms.rootPath, virtualPath)
+
+	entries, err := os.ReadDir(metadataDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil, nil
+		}
+		return nil, nil, fmt.Errorf("failed to read directory: %w", err)
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			info, infoErr := entry.Info()
+			if infoErr == nil {
+				dirs = append(dirs, info)
+			}
+		} else if filepath.Ext(entry.Name()) == ".meta" {
+			virtualName := entry.Name()[:len(entry.Name())-5]
+			fileNames = append(fileNames, virtualName)
+		}
+	}
+	return dirs, fileNames, nil
 }
 
 // ListSubdirectories lists all subdirectories in a metadata directory
@@ -290,6 +391,7 @@ func (ms *MetadataService) DeleteFileMetadata(virtualPath string) error {
 // DeleteFileMetadataWithSourceNzb deletes a metadata file and optionally its source NZB
 func (ms *MetadataService) DeleteFileMetadataWithSourceNzb(ctx context.Context, virtualPath string, deleteSourceNzb bool) error {
 	ms.fileCache.Remove(virtualPath)
+	ms.liteCache.Remove(virtualPath)
 
 	filename := filepath.Base(virtualPath)
 	metadataDir := filepath.Join(ms.rootPath, filepath.Dir(virtualPath))
@@ -351,6 +453,11 @@ func (ms *MetadataService) DeleteDirectory(virtualPath string) error {
 			ms.fileCache.Remove(key)
 		}
 	}
+	for _, key := range ms.liteCache.Keys() {
+		if key == virtualPath || strings.HasPrefix(key, prefix) {
+			ms.liteCache.Remove(key)
+		}
+	}
 
 	metadataDir := filepath.Join(ms.rootPath, virtualPath)
 
@@ -367,6 +474,8 @@ func (ms *MetadataService) DeleteDirectory(virtualPath string) error {
 func (ms *MetadataService) RenameFileMetadata(oldVirtualPath, newVirtualPath string) error {
 	ms.fileCache.Remove(oldVirtualPath)
 	ms.fileCache.Remove(newVirtualPath)
+	ms.liteCache.Remove(oldVirtualPath)
+	ms.liteCache.Remove(newVirtualPath)
 
 	oldFilename := filepath.Base(oldVirtualPath)
 	oldDir := filepath.Join(ms.rootPath, filepath.Dir(oldVirtualPath))
@@ -637,6 +746,7 @@ func (ms *MetadataService) cleanupEmptyDirsRecursive(path string, protected []st
 // MoveToCorrupted moves a metadata file to a special corrupted directory for safety
 func (ms *MetadataService) MoveToCorrupted(ctx context.Context, virtualPath string) error {
 	ms.fileCache.Remove(virtualPath)
+	ms.liteCache.Remove(virtualPath)
 
 	// Normalize path and remove leading slashes to ensure it joins correctly
 	cleanPath := filepath.FromSlash(strings.TrimPrefix(virtualPath, "/"))
