@@ -237,10 +237,28 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 		}
 	}
 
+	// Extract only the fields the handle needs from the proto. The full
+	// *FileMetadata then falls out of scope and becomes eligible for GC,
+	// freeing the proto wrapper overhead (~protoimpl.MessageState +
+	// unknownFields + sizeCache + unused fields like NzbdavId). Slices are
+	// carried by reference; they stay alive only while the handle is open.
+	handleMeta := &fileHandleMeta{
+		FileSize:      fileMeta.FileSize,
+		ModifiedAt:    fileMeta.ModifiedAt,
+		SourceNzbPath: fileMeta.SourceNzbPath,
+		Encryption:    fileMeta.Encryption,
+		Password:      fileMeta.Password,
+		Salt:          fileMeta.Salt,
+		AesKey:        fileMeta.AesKey,
+		AesIv:         fileMeta.AesIv,
+		SegmentData:   fileMeta.SegmentData,
+		NestedSources: fileMeta.NestedSources,
+	}
+
 	// Create a metadata-based virtual file handle
 	virtualFile := &MetadataVirtualFile{
 		name:             name,
-		fileMeta:         fileMeta,
+		meta:             handleMeta,
 		metadataService:  mrf.metadataService,
 		healthRepository: mrf.healthRepository,
 		arrsService:      mrf.arrsService,
@@ -751,10 +769,29 @@ func (mvd *MetadataVirtualDirectory) Truncate(size int64) error {
 	return os.ErrPermission
 }
 
+// fileHandleMeta holds the subset of FileMetadata fields that an open
+// MetadataVirtualFile actually needs. Storing this lean struct instead of the
+// full protobuf lets the proto wrapper (protoimpl.MessageState, unknownFields,
+// sizeCache, and unused fields like NzbdavId) be collected immediately after
+// OpenFile returns. Segment and nested-source slices are carried by reference;
+// they remain live only while the handle is open and are released in Close().
+type fileHandleMeta struct {
+	FileSize      int64
+	ModifiedAt    int64
+	SourceNzbPath string
+	Encryption    metapb.Encryption
+	Password      string
+	Salt          string
+	AesKey        []byte
+	AesIv         []byte
+	SegmentData   []*metapb.SegmentData
+	NestedSources []*metapb.NestedSegmentSource
+}
+
 // MetadataVirtualFile implements afero.File for metadata-backed virtual files
 type MetadataVirtualFile struct {
 	name             string
-	fileMeta         *metapb.FileMetadata
+	meta             *fileHandleMeta
 	metadataService  *metadata.MetadataService
 	healthRepository *database.HealthRepository
 	arrsService      ARRsRepairService
@@ -912,7 +949,7 @@ func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 			if errors.As(readErr, &dataCorruptionErr) {
 				mvf.updateFileHealthOnError(dataCorruptionErr, dataCorruptionErr.NoRetry)
 				return n, &CorruptedFileError{
-					TotalExpected: mvf.fileMeta.FileSize,
+					TotalExpected: mvf.meta.FileSize,
 					UnderlyingErr: dataCorruptionErr,
 				}
 			}
@@ -947,7 +984,7 @@ func (mvf *MetadataVirtualFile) ReadAtContext(readCtx context.Context, p []byte,
 	if off < 0 {
 		return 0, ErrNegativeOffset
 	}
-	if off >= mvf.fileMeta.FileSize {
+	if off >= mvf.meta.FileSize {
 		return 0, io.EOF
 	}
 
@@ -966,8 +1003,8 @@ func (mvf *MetadataVirtualFile) ReadAtContext(readCtx context.Context, p []byte,
 
 		// Read from the shared reader (same logic as Read but bounded to len(p))
 		want := int64(len(p))
-		if off+want > mvf.fileMeta.FileSize {
-			want = mvf.fileMeta.FileSize - off
+		if off+want > mvf.meta.FileSize {
+			want = mvf.meta.FileSize - off
 		}
 		buf := p[:want]
 		for n < int(want) {
@@ -1006,8 +1043,8 @@ func (mvf *MetadataVirtualFile) ReadAtContext(readCtx context.Context, p []byte,
 	mvf.closeCurrentReader()
 
 	end := off + int64(len(p)) - 1
-	if end >= mvf.fileMeta.FileSize {
-		end = mvf.fileMeta.FileSize - 1
+	if end >= mvf.meta.FileSize {
+		end = mvf.meta.FileSize - 1
 	}
 
 	reader, err := mvf.createReaderAtOffset(off, end)
@@ -1038,16 +1075,16 @@ func (mvf *MetadataVirtualFile) createReaderAtOffset(start, end int64) (io.ReadC
 	}
 
 	// Nested sources take priority — each source has its own segments and AES credentials
-	if len(mvf.fileMeta.NestedSources) > 0 {
+	if len(mvf.meta.NestedSources) > 0 {
 		return mvf.createNestedReader(start, end)
 	}
 
-	if len(mvf.fileMeta.SegmentData) == 0 {
+	if len(mvf.meta.SegmentData) == 0 {
 		return nil, ErrMissmatchedSegments
 	}
 
 	// Create reader based on encryption type
-	if mvf.fileMeta.Encryption != metapb.Encryption_NONE {
+	if mvf.meta.Encryption != metapb.Encryption_NONE {
 		return mvf.createEncryptedReaderAtOffset(start, end)
 	}
 
@@ -1056,17 +1093,17 @@ func (mvf *MetadataVirtualFile) createReaderAtOffset(start, end int64) (io.ReadC
 
 // createEncryptedReaderAtOffset creates an encrypted reader for a specific offset range
 func (mvf *MetadataVirtualFile) createEncryptedReaderAtOffset(start, end int64) (io.ReadCloser, error) {
-	switch mvf.fileMeta.Encryption {
+	switch mvf.meta.Encryption {
 	case metapb.Encryption_RCLONE:
 		if mvf.rcloneCipher == nil {
 			return nil, ErrNoCipherConfig
 		}
 
-		password := mvf.fileMeta.Password
+		password := mvf.meta.Password
 		if password == "" {
 			password = mvf.globalPassword
 		}
-		salt := mvf.fileMeta.Salt
+		salt := mvf.meta.Salt
 		if salt == "" {
 			salt = mvf.globalSalt
 		}
@@ -1074,7 +1111,7 @@ func (mvf *MetadataVirtualFile) createEncryptedReaderAtOffset(start, end int64) 
 		return mvf.rcloneCipher.Open(
 			mvf.ctx,
 			&utils.RangeHeader{Start: start, End: end},
-			mvf.fileMeta.FileSize,
+			mvf.meta.FileSize,
 			password,
 			salt,
 			func(ctx context.Context, s, e int64) (io.ReadCloser, error) {
@@ -1086,26 +1123,26 @@ func (mvf *MetadataVirtualFile) createEncryptedReaderAtOffset(start, end int64) 
 		if mvf.aesCipher == nil {
 			return nil, ErrNoCipherConfig
 		}
-		if len(mvf.fileMeta.AesKey) == 0 {
+		if len(mvf.meta.AesKey) == 0 {
 			return nil, fmt.Errorf("missing AES key in metadata")
 		}
-		if len(mvf.fileMeta.AesIv) == 0 {
+		if len(mvf.meta.AesIv) == 0 {
 			return nil, fmt.Errorf("missing AES IV in metadata")
 		}
 
 		return mvf.aesCipher.Open(
 			mvf.ctx,
 			&utils.RangeHeader{Start: start, End: end},
-			mvf.fileMeta.FileSize,
-			mvf.fileMeta.AesKey,
-			mvf.fileMeta.AesIv,
+			mvf.meta.FileSize,
+			mvf.meta.AesKey,
+			mvf.meta.AesIv,
 			func(ctx context.Context, s, e int64) (io.ReadCloser, error) {
 				return mvf.createUsenetReader(ctx, s, e)
 			},
 		)
 
 	default:
-		return nil, fmt.Errorf("unsupported encryption type: %v", mvf.fileMeta.Encryption)
+		return nil, fmt.Errorf("unsupported encryption type: %v", mvf.meta.Encryption)
 	}
 }
 
@@ -1122,7 +1159,7 @@ func (mvf *MetadataVirtualFile) Seek(offset int64, whence int) (int64, error) {
 	case io.SeekCurrent: // Relative to the current offset
 		abs = mvf.position + offset
 	case io.SeekEnd: // Relative to the end
-		abs = mvf.fileMeta.FileSize + offset
+		abs = mvf.meta.FileSize + offset
 	default:
 		return 0, ErrInvalidWhence
 	}
@@ -1131,7 +1168,7 @@ func (mvf *MetadataVirtualFile) Seek(offset int64, whence int) (int64, error) {
 		return 0, ErrSeekNegative
 	}
 
-	if abs > mvf.fileMeta.FileSize {
+	if abs > mvf.meta.FileSize {
 		return 0, ErrSeekTooFar
 	}
 
@@ -1173,6 +1210,7 @@ func (mvf *MetadataVirtualFile) Close() error {
 		mvf.readerInitialized = false
 	}
 	mvf.segmentIndex = nil // Release segment offset index for GC
+	mvf.meta = nil         // Release segment/nested-source slices for GC
 	mvf.mu.Unlock()
 
 	// Wait for any background reader closes from previous seeks
@@ -1211,9 +1249,9 @@ func (mvf *MetadataVirtualFile) Readdirnames(n int) ([]string, error) {
 func (mvf *MetadataVirtualFile) Stat() (fs.FileInfo, error) {
 	info := &MetadataFileInfo{
 		name:    filepath.Base(mvf.name),
-		size:    mvf.fileMeta.FileSize,
+		size:    mvf.meta.FileSize,
 		mode:    0644,
-		modTime: time.Unix(mvf.fileMeta.ModifiedAt, 0),
+		modTime: time.Unix(mvf.meta.ModifiedAt, 0),
 		isDir:   false, // Files are never directories in simplified schema
 	}
 
@@ -1252,7 +1290,7 @@ func (mvf *MetadataVirtualFile) hasMoreDataToRead() bool {
 		return true
 	}
 	// If original range was unbounded (-1) and we haven't reached file end, there's more to read
-	if mvf.originalRangeEnd == -1 && mvf.position < mvf.fileMeta.FileSize {
+	if mvf.originalRangeEnd == -1 && mvf.position < mvf.meta.FileSize {
 		return true
 	}
 	return false
@@ -1285,14 +1323,14 @@ func (mvf *MetadataVirtualFile) ensureReader() error {
 	start, end := mvf.getRequestRange()
 
 	if end == -1 {
-		end = mvf.fileMeta.FileSize - 1
+		end = mvf.meta.FileSize - 1
 	}
 
 	// When ReadAtContext has advanced the shared cursor past mvf.position (which
 	// ReadAt does not move), open the reader at the shared cursor so the next
 	// shared-path read picks up where the last one left off.
 	if mvf.readAtSharedNext > 0 &&
-		mvf.readAtSharedNext < mvf.fileMeta.FileSize &&
+		mvf.readAtSharedNext < mvf.meta.FileSize &&
 		start < mvf.readAtSharedNext &&
 		(end < 0 || mvf.readAtSharedNext <= end) {
 		start = mvf.readAtSharedNext
@@ -1303,14 +1341,14 @@ func (mvf *MetadataVirtualFile) ensureReader() error {
 	mvf.currentRangeEnd = end
 
 	// Create reader for the calculated range using metadata segments
-	if len(mvf.fileMeta.NestedSources) > 0 {
+	if len(mvf.meta.NestedSources) > 0 {
 		// Nested RAR: use multi-source reader
 		reader, err := mvf.createNestedReader(start, end)
 		if err != nil {
 			return fmt.Errorf("failed to create nested reader: %w", err)
 		}
 		mvf.reader = reader
-	} else if mvf.fileMeta.Encryption != metapb.Encryption_NONE {
+	} else if mvf.meta.Encryption != metapb.Encryption_NONE {
 		// Wrap the usenet reader with encryption
 		decryptedReader, err := mvf.wrapWithEncryption(start, end)
 		if err != nil {
@@ -1364,16 +1402,16 @@ func (mvf *MetadataVirtualFile) getRequestRange() (start, end int64) {
 
 // createUsenetReader creates a new usenet reader for the specified range using metadata segments
 func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, end int64) (io.ReadCloser, error) {
-	if len(mvf.fileMeta.SegmentData) == 0 {
+	if len(mvf.meta.SegmentData) == 0 {
 		return nil, ErrMissmatchedSegments
 	}
 
 	// Build segment offset index lazily on first read (thread-safe via sync.Once)
 	mvf.segmentIndexOnce.Do(func() {
-		mvf.segmentIndex = buildSegmentIndex(mvf.fileMeta.SegmentData)
+		mvf.segmentIndex = buildSegmentIndex(mvf.meta.SegmentData)
 	})
 
-	loader := newMetadataSegmentLoader(mvf.fileMeta.SegmentData)
+	loader := newMetadataSegmentLoader(mvf.meta.SegmentData)
 
 	// segmentIndex is always non-nil here (built by segmentIndexOnce.Do above).
 	// Use O(log n) binary search to find segment boundaries, then create a lazy
@@ -1388,7 +1426,7 @@ func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, e
 
 	if !rg.HasSegments() {
 		var availableBytes int64
-		for _, seg := range mvf.fileMeta.SegmentData {
+		for _, seg := range mvf.meta.SegmentData {
 			availableBytes += seg.SegmentSize
 		}
 
@@ -1396,7 +1434,7 @@ func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, e
 			"start", start,
 			"end", end,
 			"available_bytes", availableBytes,
-			"expected_file_size", mvf.fileMeta.FileSize,
+			"expected_file_size", mvf.meta.FileSize,
 		)
 
 		mvf.updateFileHealthOnError(&usenet.DataCorruptionError{
@@ -1404,7 +1442,7 @@ func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, e
 		}, true)
 
 		return nil, &CorruptedFileError{
-			TotalExpected: mvf.fileMeta.FileSize,
+			TotalExpected: mvf.meta.FileSize,
 			UnderlyingErr: ErrMissmatchedSegments,
 		}
 	}
@@ -1428,7 +1466,7 @@ func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, e
 // This avoids opening all inner volumes simultaneously, which would cause all their
 // segments to be prefetched concurrently and spike memory usage.
 func (mvf *MetadataVirtualFile) createNestedReader(start, end int64) (io.ReadCloser, error) {
-	sources := mvf.fileMeta.NestedSources
+	sources := mvf.meta.NestedSources
 	if len(sources) == 0 {
 		return nil, fmt.Errorf("no nested sources available")
 	}
@@ -1601,22 +1639,22 @@ func (r *lazyNestedMultiReader) Close() error {
 
 // wrapWithEncryption wraps a usenet reader with encryption using metadata
 func (mvf *MetadataVirtualFile) wrapWithEncryption(start, end int64) (io.ReadCloser, error) {
-	if mvf.fileMeta.Encryption == metapb.Encryption_NONE {
+	if mvf.meta.Encryption == metapb.Encryption_NONE {
 		return nil, ErrNoEncryptionParams
 	}
 
-	switch mvf.fileMeta.Encryption {
+	switch mvf.meta.Encryption {
 	case metapb.Encryption_RCLONE:
 		if mvf.rcloneCipher == nil {
 			return nil, ErrNoCipherConfig
 		}
 
 		// Get password and salt from metadata, with global fallback
-		password := mvf.fileMeta.Password
+		password := mvf.meta.Password
 		if password == "" {
 			password = mvf.globalPassword
 		}
-		salt := mvf.fileMeta.Salt
+		salt := mvf.meta.Salt
 		if salt == "" {
 			salt = mvf.globalSalt
 		}
@@ -1625,7 +1663,7 @@ func (mvf *MetadataVirtualFile) wrapWithEncryption(start, end int64) (io.ReadClo
 		decryptedReader, err := mvf.rcloneCipher.Open(
 			mvf.ctx,
 			&utils.RangeHeader{Start: start, End: end},
-			mvf.fileMeta.FileSize,
+			mvf.meta.FileSize,
 			password,
 			salt,
 			func(ctx context.Context, start, end int64) (io.ReadCloser, error) {
@@ -1642,10 +1680,10 @@ func (mvf *MetadataVirtualFile) wrapWithEncryption(start, end int64) (io.ReadClo
 		if mvf.aesCipher == nil {
 			return nil, ErrNoCipherConfig
 		}
-		if len(mvf.fileMeta.AesKey) == 0 {
+		if len(mvf.meta.AesKey) == 0 {
 			return nil, fmt.Errorf("missing AES key in metadata")
 		}
-		if len(mvf.fileMeta.AesIv) == 0 {
+		if len(mvf.meta.AesIv) == 0 {
 			return nil, fmt.Errorf("missing AES IV in metadata")
 		}
 
@@ -1653,9 +1691,9 @@ func (mvf *MetadataVirtualFile) wrapWithEncryption(start, end int64) (io.ReadClo
 		decryptedReader, err := mvf.aesCipher.Open(
 			mvf.ctx,
 			&utils.RangeHeader{Start: start, End: end},
-			mvf.fileMeta.FileSize,
-			mvf.fileMeta.AesKey,
-			mvf.fileMeta.AesIv,
+			mvf.meta.FileSize,
+			mvf.meta.AesKey,
+			mvf.meta.AesIv,
 			func(ctx context.Context, s, e int64) (io.ReadCloser, error) {
 				// Create usenet reader first for encrypted data
 				return mvf.createUsenetReader(ctx, s, e)
@@ -1667,7 +1705,7 @@ func (mvf *MetadataVirtualFile) wrapWithEncryption(start, end int64) (io.ReadClo
 		return decryptedReader, nil
 
 	default:
-		return nil, fmt.Errorf("unsupported encryption type: %v", mvf.fileMeta.Encryption)
+		return nil, fmt.Errorf("unsupported encryption type: %v", mvf.meta.Encryption)
 	}
 }
 
@@ -1689,14 +1727,14 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 
 	// Update database health tracking (blocking with timeout)
 	errorMsg := dataCorruptionErr.Error()
-	sourceNzbPath := &mvf.fileMeta.SourceNzbPath
+	sourceNzbPath := &mvf.meta.SourceNzbPath
 	if *sourceNzbPath == "" {
 		sourceNzbPath = nil
 	}
 
 	// Create error details JSON
 	errorDetails := fmt.Sprintf(`{"missing_articles": %d, "total_articles": %d, "error_type": "ArticleNotFound"}`,
-		1, len(mvf.fileMeta.SegmentData))
+		1, len(mvf.meta.SegmentData))
 
 	// Mark as repair_triggered with high priority to trigger the replacement immediately.
 	// We skip the re-verification phase because a streaming failure is a definitive indicator of corruption.
