@@ -32,24 +32,28 @@ type FileMetadataLite struct {
 	Status     metapb.FileStatus
 }
 
-// MetadataService provides low-level read/write operations for metadata files
+// MetadataService provides low-level read/write operations for metadata files.
+//
+// Only a lightweight metadata projection (liteCache) is kept in memory. The
+// full FileMetadata proto — dominated by SegmentData/NestedSources slices
+// holding thousands of message-ID strings — is never cached. Callers that need
+// segments (Open, HealthChecker) re-read from disk each time; the proto then
+// lives only for the duration of the open handle or the health check. This
+// bounds steady-state memory at ~liteCache_entries × 40 bytes instead of the
+// previous unbounded segment retention.
 type MetadataService struct {
 	rootPath string
-	// fileCache caches parsed FileMetadata keyed by virtual path.
-	// Entries are evicted on LRU basis and invalidated on any write/delete/rename.
-	fileCache *lru.Cache[string, *metapb.FileMetadata]
-	// liteCache caches lightweight metadata for Readdir. Avoids deserializing
-	// full protos (with SegmentData, etc.) just to list a directory.
+	// liteCache caches lightweight metadata (size, modtime, status) used by
+	// Readdir/Stat/Getattr, and populated as a side effect of ReadFileMetadata
+	// so info-only callers still benefit.
 	liteCache *lru.Cache[string, *FileMetadataLite]
 }
 
 // NewMetadataService creates a new metadata service
 func NewMetadataService(rootPath string) *MetadataService {
-	cache, _ := lru.New[string, *metapb.FileMetadata](defaultMetadataCacheSize)
 	liteCache, _ := lru.New[string, *FileMetadataLite](defaultMetadataCacheSize)
 	return &MetadataService{
 		rootPath:  rootPath,
-		fileCache: cache,
 		liteCache: liteCache,
 	}
 }
@@ -123,8 +127,8 @@ func (ms *MetadataService) WriteFileMetadata(virtualPath string, metadata *metap
 
 	metadata.NzbdavId = nzbdavId // Restore for in-memory use
 
-	// Update cache with the written metadata
-	ms.fileCache.Add(virtualPath, metadata)
+	// Update only the lightweight cache; the full proto (with SegmentData) is
+	// never cached to avoid long-term retention of segment strings.
 	ms.liteCache.Add(virtualPath, &FileMetadataLite{
 		FileSize:   metadata.FileSize,
 		ModifiedAt: metadata.ModifiedAt,
@@ -134,14 +138,12 @@ func (ms *MetadataService) WriteFileMetadata(virtualPath string, metadata *metap
 	return nil
 }
 
-// ReadFileMetadata reads file metadata from disk, using an in-memory LRU cache
-// to avoid repeated disk I/O and protobuf deserialization on hot FUSE paths.
+// ReadFileMetadata reads file metadata from disk. The full proto (including
+// SegmentData and NestedSources) is returned to the caller but NOT cached —
+// those slices dominate heap usage and must not be retained beyond the
+// caller's handle. As a side effect, the lightweight projection is cached so
+// subsequent Readdir/Stat calls are fast without a disk read.
 func (ms *MetadataService) ReadFileMetadata(virtualPath string) (*metapb.FileMetadata, error) {
-	// Check cache first
-	if cached, ok := ms.fileCache.Get(virtualPath); ok {
-		return cached, nil
-	}
-
 	// Create metadata file path
 	filename := filepath.Base(virtualPath)
 	metadataDir := filepath.Join(ms.rootPath, filepath.Dir(virtualPath))
@@ -168,8 +170,7 @@ func (ms *MetadataService) ReadFileMetadata(virtualPath string) (*metapb.FileMet
 		metadata.NzbdavId = string(idData)
 	}
 
-	// Store in cache
-	ms.fileCache.Add(virtualPath, metadata)
+	// Populate only the lightweight cache — the full proto is never cached.
 	ms.liteCache.Add(virtualPath, &FileMetadataLite{
 		FileSize:   metadata.FileSize,
 		ModifiedAt: metadata.ModifiedAt,
@@ -186,17 +187,6 @@ func (ms *MetadataService) ReadFileMetadataLite(virtualPath string) (*FileMetada
 	// Check lite cache first
 	if cached, ok := ms.liteCache.Get(virtualPath); ok {
 		return cached, nil
-	}
-
-	// If the full metadata is already cached, extract from it
-	if full, ok := ms.fileCache.Get(virtualPath); ok {
-		lite := &FileMetadataLite{
-			FileSize:   full.FileSize,
-			ModifiedAt: full.ModifiedAt,
-			Status:     full.Status,
-		}
-		ms.liteCache.Add(virtualPath, lite)
-		return lite, nil
 	}
 
 	// Cache miss — read from disk and deserialize
@@ -390,7 +380,6 @@ func (ms *MetadataService) DeleteFileMetadata(virtualPath string) error {
 
 // DeleteFileMetadataWithSourceNzb deletes a metadata file and optionally its source NZB
 func (ms *MetadataService) DeleteFileMetadataWithSourceNzb(ctx context.Context, virtualPath string, deleteSourceNzb bool) error {
-	ms.fileCache.Remove(virtualPath)
 	ms.liteCache.Remove(virtualPath)
 
 	filename := filepath.Base(virtualPath)
@@ -448,11 +437,6 @@ func (ms *MetadataService) DeleteFileMetadataWithSourceNzb(ctx context.Context, 
 func (ms *MetadataService) DeleteDirectory(virtualPath string) error {
 	// Purge all cached entries under this directory
 	prefix := virtualPath + string(filepath.Separator)
-	for _, key := range ms.fileCache.Keys() {
-		if key == virtualPath || strings.HasPrefix(key, prefix) {
-			ms.fileCache.Remove(key)
-		}
-	}
 	for _, key := range ms.liteCache.Keys() {
 		if key == virtualPath || strings.HasPrefix(key, prefix) {
 			ms.liteCache.Remove(key)
@@ -472,8 +456,6 @@ func (ms *MetadataService) DeleteDirectory(virtualPath string) error {
 // RenameFileMetadata atomically renames a metadata file (and its .id sidecar) from oldVirtualPath to newVirtualPath.
 // Uses os.Rename for atomicity on the same filesystem, falling back to read-write-delete for cross-device moves.
 func (ms *MetadataService) RenameFileMetadata(oldVirtualPath, newVirtualPath string) error {
-	ms.fileCache.Remove(oldVirtualPath)
-	ms.fileCache.Remove(newVirtualPath)
 	ms.liteCache.Remove(oldVirtualPath)
 	ms.liteCache.Remove(newVirtualPath)
 
@@ -745,7 +727,6 @@ func (ms *MetadataService) cleanupEmptyDirsRecursive(path string, protected []st
 
 // MoveToCorrupted moves a metadata file to a special corrupted directory for safety
 func (ms *MetadataService) MoveToCorrupted(ctx context.Context, virtualPath string) error {
-	ms.fileCache.Remove(virtualPath)
 	ms.liteCache.Remove(virtualPath)
 
 	// Normalize path and remove leading slashes to ensure it joins correctly

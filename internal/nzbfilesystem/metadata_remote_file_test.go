@@ -14,7 +14,7 @@ import (
 // createTestVirtualFile creates a MetadataVirtualFile with default configuration for testing
 func createTestVirtualFile(fileSize int64) *MetadataVirtualFile {
 	return &MetadataVirtualFile{
-		fileMeta: &metapb.FileMetadata{
+		meta: &fileHandleMeta{
 			FileSize: fileSize,
 		},
 	}
@@ -24,12 +24,12 @@ func TestCreateTestVirtualFile(t *testing.T) {
 	fileSize := int64(100 * 1024 * 1024) // 100MB
 	mvf := createTestVirtualFile(fileSize)
 
-	if mvf.fileMeta.FileSize != fileSize {
-		t.Errorf("createTestVirtualFile() fileSize = %d, want %d", mvf.fileMeta.FileSize, fileSize)
+	if mvf.meta.FileSize != fileSize {
+		t.Errorf("createTestVirtualFile() fileSize = %d, want %d", mvf.meta.FileSize, fileSize)
 	}
 
-	if mvf.fileMeta == nil {
-		t.Error("createTestVirtualFile() fileMeta should not be nil")
+	if mvf.meta == nil {
+		t.Error("createTestVirtualFile() meta should not be nil")
 	}
 }
 
@@ -259,7 +259,7 @@ func TestSegmentIndexIntegration(t *testing.T) {
 // TestReadAtBoundsValidation tests ReadAt boundary validation
 func TestReadAtBoundsValidation(t *testing.T) {
 	mvf := &MetadataVirtualFile{
-		fileMeta: &metapb.FileMetadata{
+		meta: &fileHandleMeta{
 			FileSize: 1000,
 		},
 	}
@@ -301,7 +301,7 @@ func TestReadAtNoPoolManager(t *testing.T) {
 	}
 
 	mvf := &MetadataVirtualFile{
-		fileMeta: &metapb.FileMetadata{
+		meta: &fileHandleMeta{
 			FileSize:    1000,
 			SegmentData: segments,
 		},
@@ -320,7 +320,7 @@ func TestReadAtNoPoolManager(t *testing.T) {
 // TestReadAtNoSegments tests ReadAt when there are no segments
 func TestReadAtNoSegments(t *testing.T) {
 	mvf := &MetadataVirtualFile{
-		fileMeta: &metapb.FileMetadata{
+		meta: &fileHandleMeta{
 			FileSize:    1000,
 			SegmentData: nil, // No segments
 		},
@@ -390,7 +390,7 @@ func (m *mockPoolManager) ResetProviderQuota(_ context.Context, _ nntppool.Provi
 func TestSeekResetsOriginalRangeEnd(t *testing.T) {
 	fileSize := int64(100 * 1024 * 1024) // 100MB
 	mvf := &MetadataVirtualFile{
-		fileMeta: &metapb.FileMetadata{
+		meta: &fileHandleMeta{
 			FileSize: fileSize,
 		},
 		position:          0,
@@ -418,7 +418,7 @@ func TestSeekResetsOriginalRangeEnd(t *testing.T) {
 func TestSeekSamePositionDoesNotResetRange(t *testing.T) {
 	fileSize := int64(100 * 1024 * 1024) // 100MB
 	mvf := &MetadataVirtualFile{
-		fileMeta: &metapb.FileMetadata{
+		meta: &fileHandleMeta{
 			FileSize: fileSize,
 		},
 		position:          1024,
@@ -442,7 +442,7 @@ func TestSeekSamePositionDoesNotResetRange(t *testing.T) {
 func TestMultipleConsecutiveSeeks(t *testing.T) {
 	fileSize := int64(100 * 1024 * 1024) // 100MB
 	mvf := &MetadataVirtualFile{
-		fileMeta: &metapb.FileMetadata{
+		meta: &fileHandleMeta{
 			FileSize: fileSize,
 		},
 		position:          0,
@@ -508,7 +508,7 @@ func TestSeekWithWhenceModes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mvf := &MetadataVirtualFile{
-				fileMeta: &metapb.FileMetadata{
+				meta: &fileHandleMeta{
 					FileSize: fileSize,
 				},
 				position:          tt.initialPos,
@@ -570,7 +570,7 @@ func TestSeekErrorCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mvf := &MetadataVirtualFile{
-				fileMeta: &metapb.FileMetadata{
+				meta: &fileHandleMeta{
 					FileSize: fileSize,
 				},
 				position:          tt.initialPos,

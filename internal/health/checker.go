@@ -69,6 +69,18 @@ func NewHealthChecker(
 	}
 }
 
+// healthCheckInput holds the fields extracted from FileMetadata that the
+// health check path actually needs. Passing this lean struct — instead of the
+// full *metapb.FileMetadata — lets the proto wrapper be GC'd while
+// ValidateSegmentAvailabilityDetailed performs long-running NNTP stat
+// round-trips. Only SegmentData must remain referenced for the validation
+// window (it holds the message IDs being checked); everything else is scalar.
+type healthCheckInput struct {
+	fileSize      int64
+	sourceNzbPath string
+	segments      []*metapb.SegmentData
+}
+
 // CheckFile checks the health of a specific file
 func (hc *HealthChecker) CheckFile(ctx context.Context, filePath string, opts ...CheckOptions) HealthEvent {
 	// Get file metadata
@@ -100,19 +112,34 @@ func (hc *HealthChecker) CheckFile(ctx context.Context, filePath string, opts ..
 		}
 	}
 
+	// Extract only the fields needed for validation. The local fileMeta pointer
+	// then falls out of scope and becomes eligible for GC — its proto wrapper
+	// (MessageState, unknownFields, sizeCache, Par2Files, NestedSources, etc.)
+	// is freed before NNTP stat round-trips begin.
+	input := healthCheckInput{
+		fileSize:      fileMeta.FileSize,
+		sourceNzbPath: fileMeta.SourceNzbPath,
+		segments:      fileMeta.SegmentData,
+	}
+	fileMeta = nil //nolint:ineffassign // explicit drop so the proto can be collected
+
 	// Perform the health check
-	return hc.checkSingleFile(ctx, filePath, fileMeta, opts...)
+	return hc.checkSingleFile(ctx, filePath, input, opts...)
 }
 
 // checkSingleFile performs a health check on a single file
-func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, fileMeta *metapb.FileMetadata, opts ...CheckOptions) HealthEvent {
+func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, input healthCheckInput, opts ...CheckOptions) HealthEvent {
+	// Copy SourceNzbPath to an independent string so HealthEvent does not
+	// retain a pointer into the original proto (which would keep the whole
+	// message alive through any downstream consumer of the event).
+	sourceNzb := input.sourceNzbPath
 	event := HealthEvent{
 		FilePath:  filePath,
 		Timestamp: time.Now(),
-		SourceNzb: &fileMeta.SourceNzbPath,
+		SourceNzb: &sourceNzb,
 	}
 
-	if len(fileMeta.SegmentData) == 0 {
+	if len(input.segments) == 0 {
 		event.Type = EventTypeCheckFailed
 		event.Status = database.HealthStatusCorrupted
 		event.Error = fmt.Errorf("no segment data available")
@@ -134,12 +161,12 @@ func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, f
 
 	slog.InfoContext(ctx, "Checking segment availability",
 		"file_path", filePath,
-		"total_segments", len(fileMeta.SegmentData),
+		"total_segments", len(input.segments),
 		"sample_percentage", samplePercentage)
 
 	// 1. Metadata integrity check - Verify the entire file map is complete
-	loader := &metadataSegmentLoader{segments: fileMeta.SegmentData}
-	if err := usenet.CheckMetadataIntegrity(fileMeta.FileSize, loader); err != nil {
+	loader := &metadataSegmentLoader{segments: input.segments}
+	if err := usenet.CheckMetadataIntegrity(input.fileSize, loader); err != nil {
 		event.Type = EventTypeFileCorrupted
 		event.Status = database.HealthStatusCorrupted
 		event.Error = fmt.Errorf("metadata corruption: %w", err)
@@ -151,7 +178,7 @@ func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, f
 	// 2. Network availability check - Validate segment availability using detailed validation logic
 	result, err := usenet.ValidateSegmentAvailabilityDetailed(
 		ctx,
-		fileMeta.SegmentData,
+		input.segments,
 		hc.poolManager,
 		cfg.GetMaxConnectionsForHealthChecks(),
 		samplePercentage,
