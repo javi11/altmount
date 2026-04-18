@@ -337,17 +337,23 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 		}
 
 		// Redundant Deletion Guard: ensure the file is gone from the local mount
-		if s.configManager != nil {
+		if s.configManager != nil && metadataPath != "" && metadataPath != "." && metadataPath != "/" {
 			cfg := s.configManager.GetConfig()
 			if cfg.MountPath != "" {
 				localPath := filepath.Join(cfg.MountPath, metadataPath)
+
+				// HARD SAFETY: Never delete the mount root or critical system paths
+				cleanLocal := filepath.Clean(localPath)
+				if cleanLocal == "/" || cleanLocal == "." || cleanLocal == filepath.Clean(cfg.MountPath) {
+					slog.WarnContext(c.Context(), "Safety Guard: Blocked attempt to delete root mount path", "path", cleanLocal)
+					continue
+				}
 				if _, err := os.Stat(localPath); err == nil {
 					slog.InfoContext(c.Context(), "Redundant Deletion Guard: Manual removal of ghost file from mount", "path", localPath)
 					_ = os.Remove(localPath)
 				}
 			}
 		}
-
 	}
 
 	// Process Directory Deletions

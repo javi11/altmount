@@ -445,6 +445,12 @@ func (ms *MetadataService) DeleteDirectory(virtualPath string) error {
 
 	metadataDir := filepath.Join(ms.rootPath, virtualPath)
 
+	// HARD SAFETY: Never delete the root metadata path
+	cleanMetadataDir := filepath.Clean(metadataDir)
+	if cleanMetadataDir == filepath.Clean(ms.rootPath) || cleanMetadataDir == "/" || cleanMetadataDir == "." {
+		return fmt.Errorf("safety block: refusing to remove root metadata directory: %s", cleanMetadataDir)
+	}
+
 	err := os.RemoveAll(metadataDir)
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to delete metadata directory: %w", err)
