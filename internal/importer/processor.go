@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -182,8 +181,8 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 
 	// Update progress: starting
 	proc.updateProgressWithStage(queueID, 0, "Parsing NZB")
-	// Step 1: Open and parse the file
-	file, err := os.Open(filePath)
+	// Step 1: Open and parse the file (handles .nzb and .nzb.gz transparently)
+	file, err := openNzbFile(filePath)
 	if err != nil {
 		return "", nil, NewNonRetryableError("failed to open file", err)
 	}

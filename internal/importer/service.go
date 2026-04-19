@@ -1235,17 +1235,21 @@ func (s *Service) ProcessItemInBackground(ctx context.Context, itemID int64) {
 // CalculateFileSizeOnly calculates the total file size from NZB/STRM segments
 // This is a lightweight parser that only extracts size information without full processing
 func (s *Service) CalculateFileSizeOnly(filePath string) (int64, error) {
-	file, err := os.Open(filePath)
+	if strings.HasSuffix(strings.ToLower(filePath), ".strm") {
+		file, err := os.Open(filePath)
+		if err != nil {
+			return 0, NewNonRetryableError("failed to open file for size calculation", err)
+		}
+		defer file.Close()
+		return s.calculateStrmFileSize(file)
+	}
+
+	file, err := openNzbFile(filePath)
 	if err != nil {
 		return 0, NewNonRetryableError("failed to open file for size calculation", err)
 	}
 	defer file.Close()
-
-	if strings.HasSuffix(strings.ToLower(filePath), ".strm") {
-		return s.calculateStrmFileSize(file)
-	} else {
-		return s.calculateNzbFileSize(file)
-	}
+	return s.calculateNzbFileSize(file)
 }
 
 // calculateNzbFileSize calculates the total size from NZB file segments
