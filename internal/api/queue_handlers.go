@@ -1,6 +1,7 @@
 package api
 
 import (
+	"compress/gzip"
 	"fmt"
 	"html"
 	"io"
@@ -1333,11 +1334,34 @@ func (s *Server) handleDownloadNZB(c *fiber.Ctx) error {
 		return RespondNotFound(c, "NZB file", "The NZB file no longer exists on disk")
 	}
 
-	// Set headers for file download
+	// Strip .gz suffix from the download filename so clients receive a plain .nzb
 	filename := filepath.Base(item.NzbPath)
+	if strings.HasSuffix(strings.ToLower(filename), ".nzb.gz") {
+		filename = strings.TrimSuffix(filename, ".gz")
+	}
 	c.Set("Content-Type", "application/x-nzb")
 	c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
 
-	// Send the file
+	// For gzip-compressed NZBs, decompress on-the-fly before sending
+	if strings.HasSuffix(strings.ToLower(item.NzbPath), ".nzb.gz") {
+		f, err := os.Open(item.NzbPath)
+		if err != nil {
+			return RespondInternalError(c, "Failed to open NZB file", err.Error())
+		}
+		defer f.Close()
+
+		gr, err := gzip.NewReader(f)
+		if err != nil {
+			return RespondInternalError(c, "Failed to decompress NZB file", err.Error())
+		}
+		defer gr.Close()
+
+		data, err := io.ReadAll(gr)
+		if err != nil {
+			return RespondInternalError(c, "Failed to read NZB content", err.Error())
+		}
+		return c.Send(data)
+	}
+
 	return c.SendFile(item.NzbPath)
 }
