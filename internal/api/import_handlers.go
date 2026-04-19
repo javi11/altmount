@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -265,24 +264,15 @@ func (s *Server) handleManualImportFile(c *fiber.Ctx) error {
 
 	// Add the file to the processing queue
 	item := &database.ImportQueueItem{
-		NzbPath:      req.FilePath,
-		Priority:     database.QueuePriorityNormal,
-		Status:       database.QueueStatusPending,
-		RetryCount:   0,
-		MaxRetries:   3,
-		CreatedAt:    time.Now(),
-		RelativePath: req.RelativePath,
-		TargetPath:   targetPath,
-	}
-
-	if req.SkipArrNotification {
-		b, err := json.Marshal(database.ImportQueueMetadata{SkipARRNotification: true})
-		if err != nil {
-			slog.WarnContext(c.Context(), "Failed to marshal skip_arr_notification metadata", "error", err)
-		} else {
-			meta := string(b)
-			item.Metadata = &meta
-		}
+		NzbPath:             req.FilePath,
+		Priority:            database.QueuePriorityNormal,
+		Status:              database.QueueStatusPending,
+		RetryCount:          0,
+		MaxRetries:          3,
+		CreatedAt:           time.Now(),
+		RelativePath:        req.RelativePath,
+		TargetPath:          targetPath,
+		SkipArrNotification: req.SkipArrNotification,
 	}
 
 	slog.DebugContext(c.Context(), "Adding file to queue", "file", req.FilePath, "relative_path", req.RelativePath, "target_path", targetPath)
