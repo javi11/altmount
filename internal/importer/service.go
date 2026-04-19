@@ -1349,11 +1349,20 @@ func (s *Service) RegenerateMetadata(ctx context.Context, mountRelativePath stri
 		}
 
 		filename := d.Name()
-		// Match release name (ignoring .nzb extension and queue ID prefix)
-		// NZBs are stored as "ID_ReleaseName.nzb" or just "ReleaseName.nzb"
-		cleanName := strings.TrimSuffix(filename, ".nzb")
+		lname := strings.ToLower(filename)
+		if !strings.HasSuffix(lname, ".nzb") && !strings.HasSuffix(lname, nzbGzExtension) {
+			return nil
+		}
+		// Strip .nzb.gz or .nzb to get the bare name for matching
+		var cleanName string
+		switch {
+		case strings.HasSuffix(lname, nzbGzExtension):
+			cleanName = filename[:len(filename)-len(nzbGzExtension)]
+		default:
+			cleanName = strings.TrimSuffix(filename, ".nzb")
+		}
 		if _, after, ok := strings.Cut(cleanName, "_"); ok {
-			// Check both with and without prefix
+			// Check both with and without queue ID prefix
 			if after == releaseName || cleanName == releaseName {
 				foundNzbPath = path
 				return filepath.SkipAll
