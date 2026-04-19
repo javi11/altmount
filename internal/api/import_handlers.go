@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -272,6 +273,19 @@ func (s *Server) handleManualImportFile(c *fiber.Ctx) error {
 		CreatedAt:    time.Now(),
 		RelativePath: req.RelativePath,
 		TargetPath:   targetPath,
+	}
+
+	if req.SkipArrNotification {
+		type importMeta struct {
+			SkipARRNotification bool `json:"skip_arr_notification"`
+		}
+		b, err := json.Marshal(importMeta{SkipARRNotification: true})
+		if err != nil {
+			slog.WarnContext(c.Context(), "Failed to marshal skip_arr_notification metadata", "error", err)
+		} else {
+			meta := string(b)
+			item.Metadata = &meta
+		}
 	}
 
 	slog.DebugContext(c.Context(), "Adding file to queue", "file", req.FilePath, "relative_path", req.RelativePath, "target_path", targetPath)
