@@ -299,6 +299,9 @@ func (s *Service) Start(ctx context.Context) error {
 	// Start background cleanup of stale failed queue items
 	go s.runFailedItemCleanup(ctx)
 
+	// Run one-time migration to compress legacy plain .nzb files
+	go s.runNzbCompressionMigration(s.ctx)
+
 	s.running = true
 	s.log.InfoContext(ctx, fmt.Sprintf("NZB import service started successfully with %d workers", s.config.Workers))
 
