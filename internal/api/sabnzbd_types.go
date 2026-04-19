@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/javi11/altmount/internal/database"
@@ -315,12 +314,10 @@ func ToSABnzbdQueueSlot(item *database.ImportQueueItem, index int, progressBroad
 		}
 
 		if isGeneric {
-			nzbName := filepath.Base(item.NzbPath)
-			jobName = strings.TrimSuffix(nzbName, filepath.Ext(nzbName))
+			jobName = nzbJobName(item.NzbPath)
 		}
 	} else {
-		nzbName := filepath.Base(item.NzbPath)
-		jobName = strings.TrimSuffix(nzbName, filepath.Ext(nzbName))
+		jobName = nzbJobName(item.NzbPath)
 	}
 
 	// Get category, default to "default" if not set
@@ -436,13 +433,11 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, finalPath s
 
 		if isGeneric {
 			// It's a flattened import (media file sitting directly in category root)
-			nzbName := filepath.Base(item.NzbPath)
-			jobName = strings.TrimSuffix(nzbName, filepath.Ext(nzbName))
+			jobName = nzbJobName(item.NzbPath)
 		}
 	} else {
 		// Fallback to NZB name if no storage path yet
-		nzbName := filepath.Base(item.NzbPath)
-		jobName = strings.TrimSuffix(nzbName, filepath.Ext(nzbName))
+		jobName = nzbJobName(item.NzbPath)
 	}
 
 	// Ensure nzb_name is just the filename

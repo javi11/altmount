@@ -11,6 +11,20 @@ import (
 	"github.com/javi11/altmount/internal/database"
 )
 
+// nzbJobName returns the display name for an NZB job by stripping the .nzb or .nzb.gz
+// extension from the base filename, accounting for compressed storage.
+func nzbJobName(nzbPath string) string {
+	name := filepath.Base(nzbPath)
+	lower := strings.ToLower(name)
+	switch {
+	case strings.HasSuffix(lower, ".nzb.gz"):
+		name = name[:len(name)-len(".nzb.gz")]
+	case strings.HasSuffix(lower, ".nzb"):
+		name = name[:len(name)-len(".nzb")]
+	}
+	return name
+}
+
 // API Response Wrappers for sensitive data masking
 
 // ConfigAPIResponse wraps config.Config with sensitive data handling
@@ -585,11 +599,8 @@ func ToQueueItemResponse(item *database.ImportQueueItem) *QueueItemResponse {
 		return nil
 	}
 
-	// Generate target_path by removing .nzb extension and ID prefix if present
-	targetPath := filepath.Base(item.NzbPath)
-	if strings.HasSuffix(strings.ToLower(targetPath), ".nzb") {
-		targetPath = targetPath[:len(targetPath)-4]
-	}
+	// Generate target_path by removing .nzb/.nzb.gz extension and ID prefix if present
+	targetPath := nzbJobName(item.NzbPath)
 
 	// Remove ID prefix (e.g. "123_filename")
 	parts := strings.SplitN(targetPath, "_", 2)
