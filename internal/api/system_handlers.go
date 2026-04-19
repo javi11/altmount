@@ -278,9 +278,10 @@ func (s *Server) handleResetSystemStats(c *fiber.Ctx) error {
 	resetTotals := c.Query("reset_totals") == "true"
 	resetHistory := c.Query("reset_history") == "true"
 	resetQueue := c.Query("reset_queue") == "true"
+	resetProviderErrors := c.Query("reset_provider_errors") == "true"
 
 	// If no flags are provided, default to full reset
-	if !resetPeak && !resetTotals && !resetHistory && !resetQueue && durationStr == "" {
+	if !resetPeak && !resetTotals && !resetHistory && !resetQueue && !resetProviderErrors && durationStr == "" {
 		resetPeak = true
 		resetTotals = true
 		resetHistory = true
@@ -313,6 +314,13 @@ func (s *Server) handleResetSystemStats(c *fiber.Ctx) error {
 	if s.poolManager != nil && (resetTotals || resetPeak) {
 		if err := s.poolManager.ResetMetrics(ctx, resetPeak, resetTotals); err != nil {
 			return RespondInternalError(c, "Failed to reset pool metrics", err.Error())
+		}
+	}
+
+	// Reset only provider error counts
+	if s.poolManager != nil && resetProviderErrors {
+		if err := s.poolManager.ResetProviderErrors(ctx); err != nil {
+			return RespondInternalError(c, "Failed to reset provider error counts", err.Error())
 		}
 	}
 
