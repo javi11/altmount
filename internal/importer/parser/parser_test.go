@@ -155,3 +155,38 @@ func TestDetermineNzbType_ExcludesPar2Files(t *testing.T) {
 		})
 	}
 }
+
+// TestPropagateArchiveType_SkipsTxtSidecar is the regression test for
+// Fresh.Off.the.Boat.S01E12 where a .txt sidecar was incorrectly marked
+// IsRarArchive=true by the archive-type propagation loop.
+//
+// Post-PAR2 state modelled here: all RAR volumes already have real names and
+// IsRarArchive=true; the .txt sidecar has IsRarArchive=false and must not be
+// touched by propagation.
+func TestPropagateArchiveType_SkipsTxtSidecar(t *testing.T) {
+	release := "Fresh.Off.the.Boat.S01E12.Dribbling.Tiger.Bounce.Pass.Dragon.1080p.DSNP.WEB-DL.DD5.1.H.264-playWEB"
+	parsed := &ParsedNzb{
+		Type: NzbTypeRarArchive,
+		Files: []ParsedFile{
+			{Filename: release + ".part01.rar", IsRarArchive: true},
+			{Filename: release + ".part02.rar", IsRarArchive: true},
+			{Filename: release + ".part03.rar", IsRarArchive: true},
+			{Filename: "5a3ae665828fe76b0bb904e41d4d2429.txt", IsRarArchive: false},
+			{Filename: "5a3ae665828fe76b0bb904e41d4d2429.par2", IsPar2Archive: true},
+		},
+	}
+
+	p := &Parser{}
+	p.propagateArchiveType(parsed)
+
+	for _, f := range parsed.Files {
+		switch {
+		case strings.HasSuffix(f.Filename, ".rar"):
+			assert.True(t, f.IsRarArchive, "%s must stay IsRarArchive=true", f.Filename)
+		case strings.HasSuffix(f.Filename, ".txt"):
+			assert.False(t, f.IsRarArchive, ".txt sidecar must NOT be marked IsRarArchive=true")
+		case strings.HasSuffix(f.Filename, ".par2"):
+			assert.False(t, f.IsRarArchive, "PAR2 file must NOT be marked IsRarArchive=true")
+		}
+	}
+}

@@ -235,26 +235,13 @@ func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string, pro
 	// Determine NZB type based on content analysis
 	parsed.Type = p.determineNzbType(parsed.Files)
 
-	// Propagate archive type to all non-par2 files.
+	// Propagate archive type to confirmed archive parts only.
 	// For split archives only the first volume contains the magic-byte header, so
 	// Is7zArchive / IsRarArchive may be false on subsequent parts even though they
 	// are archive parts. Correct that now that we know the NZB type.
-	switch parsed.Type {
-	case NzbType7zArchive:
-		for i := range parsed.Files {
-			f := &parsed.Files[i]
-			if !f.IsPar2Archive && !fileinfo.IsPar2File(f.Filename) {
-				f.Is7zArchive = true
-			}
-		}
-	case NzbTypeRarArchive:
-		for i := range parsed.Files {
-			f := &parsed.Files[i]
-			if !f.IsPar2Archive && !fileinfo.IsPar2File(f.Filename) {
-				f.IsRarArchive = true
-			}
-		}
-	}
+	// Propagation is gated on existing detection (magic bytes or extension) so that
+	// non-archive sidecars (.txt, .nfo, etc.) are never wrongly classified.
+	p.propagateArchiveType(parsed)
 
 	return parsed, nil
 }
@@ -873,6 +860,31 @@ func (p *Parser) determineNzbType(files []ParsedFile) NzbType {
 	}
 
 	return NzbTypeMultiFile
+}
+
+// propagateArchiveType sets the archive-type flag on non-PAR2 files that are
+// confirmed archive parts. Propagation is gated on the file already being
+// detected as an archive (via magic bytes or extension), preventing non-archive
+// sidecars (.txt, .nfo, etc.) from being wrongly classified.
+func (p *Parser) propagateArchiveType(parsed *ParsedNzb) {
+	switch parsed.Type {
+	case NzbType7zArchive:
+		for i := range parsed.Files {
+			f := &parsed.Files[i]
+			if !f.IsPar2Archive && !fileinfo.IsPar2File(f.Filename) &&
+				(f.Is7zArchive || fileinfo.Is7zFile(f.Filename)) {
+				f.Is7zArchive = true
+			}
+		}
+	case NzbTypeRarArchive:
+		for i := range parsed.Files {
+			f := &parsed.Files[i]
+			if !f.IsPar2Archive && !fileinfo.IsPar2File(f.Filename) &&
+				(f.IsRarArchive || fileinfo.IsRarFile(f.Filename)) {
+				f.IsRarArchive = true
+			}
+		}
+	}
 }
 
 // GetMetadata extracts metadata from the NZB head section
