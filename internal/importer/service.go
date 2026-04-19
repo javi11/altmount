@@ -843,9 +843,12 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 		return nil
 	}
 
-	// Generate new filename with sanitized name
+	// Generate new filename with sanitized name, always stored compressed
 	filename := filepath.Base(item.NzbPath)
 	newFilename := sanitizeFilename(filename)
+	if !strings.HasSuffix(strings.ToLower(newFilename), nzbGzExtension) {
+		newFilename = strings.TrimSuffix(newFilename, filepath.Ext(newFilename)) + nzbGzExtension
+	}
 	newPath := filepath.Join(nzbDir, newFilename)
 
 	// If a file with the same name already exists, append a numeric counter suffix
@@ -863,38 +866,27 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 		s.log.DebugContext(ctx, "NZB name collision, using alternate path", "path", newPath)
 	}
 
-	s.log.DebugContext(ctx, "Moving NZB to persistent storage", "old_path", item.NzbPath, "new_path", newPath)
+	s.log.DebugContext(ctx, "Moving and compressing NZB to persistent storage", "old_path", item.NzbPath, "new_path", newPath)
 
-	// Move or Copy
-	// Try Rename first
-	err := os.Rename(item.NzbPath, newPath)
-	if err != nil {
-		// If rename fails (e.g. cross-device link), try copy
-		s.log.DebugContext(ctx, "Rename failed, trying copy", "error", err, "src", item.NzbPath, "dst", newPath)
-
-		// Copy logic
-		srcFile, err := os.Open(item.NzbPath)
-		if err != nil {
-			return fmt.Errorf("failed to open source NZB: %w", err)
+	// Try rename to a temp path first (works only on same filesystem), then compress.
+	// For cross-device moves, compress directly from source.
+	tmpPath := newPath + ".tmp"
+	err := os.Rename(item.NzbPath, tmpPath)
+	if err == nil {
+		// Same filesystem: compress the tmp file to the final .nzb.gz path
+		if compErr := compressNzbToGz(tmpPath, newPath); compErr != nil {
+			_ = os.Rename(tmpPath, item.NzbPath) // attempt to restore on failure
+			return fmt.Errorf("failed to compress NZB: %w", compErr)
 		}
-		defer srcFile.Close()
-
-		dstFile, err := os.Create(newPath)
-		if err != nil {
-			return fmt.Errorf("failed to create destination NZB: %w", err)
+		_ = os.Remove(tmpPath)
+	} else {
+		// Cross-device: compress directly from source to destination
+		s.log.DebugContext(ctx, "Rename failed, compressing directly from source", "error", err, "src", item.NzbPath, "dst", newPath)
+		if compErr := compressNzbToGz(item.NzbPath, newPath); compErr != nil {
+			return fmt.Errorf("failed to compress NZB: %w", compErr)
 		}
-		defer dstFile.Close()
-
-		if _, err := io.Copy(dstFile, srcFile); err != nil {
-			return fmt.Errorf("failed to copy NZB content: %w", err)
-		}
-
-		// Close files explicitly to allow deletion
-		srcFile.Close()
-		dstFile.Close()
-
 		if err := os.Remove(item.NzbPath); err != nil {
-			s.log.WarnContext(ctx, "Failed to remove source NZB after copy", "path", item.NzbPath, "error", err)
+			s.log.WarnContext(ctx, "Failed to remove source NZB after compression", "path", item.NzbPath, "error", err)
 		}
 	}
 
