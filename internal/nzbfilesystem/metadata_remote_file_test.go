@@ -366,6 +366,10 @@ func (m *mockPoolManager) ResetMetrics(_ context.Context, _, _ bool) error {
 	return nil
 }
 
+func (m *mockPoolManager) ResetProviderErrors(_ context.Context) error {
+	return nil
+}
+
 func (m *mockPoolManager) IncArticlesDownloaded() {}
 
 func (m *mockPoolManager) UpdateDownloadProgress(_ string, _ int64) {}
