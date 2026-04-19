@@ -5,6 +5,7 @@ package postprocessor
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"sync"
 	"time"
@@ -134,7 +135,11 @@ func (c *Coordinator) HandleSuccess(ctx context.Context, item *database.ImportQu
 	}
 
 	// 6. Notify ARR applications
-	if err := c.notifyARRWith(ctx, arrsService, item, resultingPath); err != nil {
+	if shouldSkipARRNotification(item) {
+		c.log.DebugContext(ctx, "ARR notification skipped (requested by caller)",
+			"queue_id", item.ID,
+			"path", resultingPath)
+	} else if err := c.notifyARRWith(ctx, arrsService, item, resultingPath); err != nil {
 		c.log.DebugContext(ctx, "ARR notification not sent",
 			"path", resultingPath,
 			"error", err)
@@ -156,4 +161,19 @@ func (c *Coordinator) HandleFailure(ctx context.Context, item *database.ImportQu
 	}
 
 	return errors.ErrFallbackNotConfigured
+}
+
+// shouldSkipARRNotification decodes the item metadata and returns true when
+// the caller explicitly requested that ARR notifications be suppressed.
+func shouldSkipARRNotification(item *database.ImportQueueItem) bool {
+	if item.Metadata == nil || *item.Metadata == "" {
+		return false
+	}
+	var meta struct {
+		SkipARRNotification bool `json:"skip_arr_notification"`
+	}
+	if err := json.Unmarshal([]byte(*item.Metadata), &meta); err != nil {
+		return false
+	}
+	return meta.SkipARRNotification
 }
