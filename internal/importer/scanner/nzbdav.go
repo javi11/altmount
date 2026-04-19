@@ -43,7 +43,7 @@ func NewNzbDavImporter(batchAdder BatchQueueAdder) *NzbDavImporter {
 }
 
 // Start starts an asynchronous import from an NZBDav database
-func (n *NzbDavImporter) Start(dbPath string, blobsPath string, rootFolder string, cleanupFile bool) error {
+func (n *NzbDavImporter) Start(dbPath string, blobsPath string, cleanupFile bool) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
@@ -64,7 +64,7 @@ func (n *NzbDavImporter) Start(dbPath string, blobsPath string, rootFolder strin
 		Skipped: 0,
 	}
 
-	go n.performImport(importCtx, dbPath, blobsPath, rootFolder, cleanupFile)
+	go n.performImport(importCtx, dbPath, blobsPath, cleanupFile)
 
 	return nil
 }
@@ -108,7 +108,7 @@ func (n *NzbDavImporter) Reset() {
 }
 
 // performImport performs the actual import work
-func (n *NzbDavImporter) performImport(ctx context.Context, dbPath string, blobsPath string, rootFolder string, cleanupFile bool) {
+func (n *NzbDavImporter) performImport(ctx context.Context, dbPath string, blobsPath string, cleanupFile bool) {
 	// Parse Database
 	parser := nzbdav.NewParser(dbPath, blobsPath)
 	nzbChan, errChan := parser.Parse()
@@ -185,7 +185,7 @@ func (n *NzbDavImporter) performImport(ctx context.Context, dbPath string, blobs
 					n.info.Total++
 					n.mu.Unlock()
 
-					item, err := n.createNzbFileAndPrepareItem(ctx, res, rootFolder, nzbTempDir)
+					item, err := n.createNzbFileAndPrepareItem(ctx, res, nzbTempDir)
 					if err != nil {
 						n.log.ErrorContext(ctx, "Failed to prepare item", "file", res.Name, "error", err)
 						n.mu.Lock()
@@ -349,7 +349,7 @@ func (n *NzbDavImporter) processBatch(ctx context.Context, batchChan <-chan *dat
 }
 
 // createNzbFileAndPrepareItem creates an NZB file and prepares a queue item
-func (n *NzbDavImporter) createNzbFileAndPrepareItem(ctx context.Context, res *nzbdav.ParsedNzb, rootFolder, nzbTempDir string) (*database.ImportQueueItem, error) {
+func (n *NzbDavImporter) createNzbFileAndPrepareItem(ctx context.Context, res *nzbdav.ParsedNzb, nzbTempDir string) (*database.ImportQueueItem, error) {
 	// Check context before file operations
 	select {
 	case <-ctx.Done():
@@ -381,20 +381,17 @@ func (n *NzbDavImporter) createNzbFileAndPrepareItem(ctx context.Context, res *n
 		return nil, fmt.Errorf("failed to write temp NZB file content: %w", err)
 	}
 
-	// Determine Category and Relative Path
-	targetCategory := "other"
-	lowerCat := strings.ToLower(res.Category)
-	if strings.Contains(lowerCat, "movie") {
-		targetCategory = "movies"
-	} else if strings.Contains(lowerCat, "tv") || strings.Contains(lowerCat, "series") {
-		targetCategory = "tv"
+	// Preserve nzbdav's folder layout verbatim so the imported mount mirrors
+	// the source tree. Parser supplies (Category, RelPath) as the two halves
+	// of the release's parent path.
+	targetCategory := res.Category
+	if targetCategory == "" {
+		targetCategory = "other"
 	}
-
 	if res.RelPath != "" {
 		targetCategory = filepath.Join(targetCategory, res.RelPath)
 	}
 
-	relPath := rootFolder
 	priority := database.QueuePriorityNormal
 
 	// Store original ID and extracted files in metadata
@@ -408,11 +405,11 @@ func (n *NzbDavImporter) createNzbFileAndPrepareItem(ctx context.Context, res *n
 	metaBytes, _ := json.Marshal(metaMap)
 	metaJSON := string(metaBytes)
 
-	// Prepare item struct
+	// Prepare item struct. RelativePath is left nil so the import mirrors the
+	// nzbdav folder structure under Category without an extra user-supplied prefix.
 	item := &database.ImportQueueItem{
-		NzbPath:      nzbPath,
-		RelativePath: &relPath,
-		Category:     &targetCategory,
+		NzbPath:  nzbPath,
+		Category: &targetCategory,
 		Priority:     priority,
 		Status:       database.QueueStatusPending,
 		RetryCount:   0,

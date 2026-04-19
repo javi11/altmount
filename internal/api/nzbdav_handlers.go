@@ -33,14 +33,6 @@ func (s *Server) handleImportNzbdav(c *fiber.Ctx) error {
 	}
 
 	// 1. Get Form Data
-	rootFolder := c.FormValue("rootFolder")
-	if rootFolder == "" {
-		return c.Status(400).JSON(fiber.Map{
-			"success": false,
-			"message": "rootFolder is required",
-		})
-	}
-
 	blobsPath := c.FormValue("blobsPath")
 
 	// 2. Handle File Source (Path or Upload)
@@ -86,7 +78,7 @@ func (s *Server) handleImportNzbdav(c *fiber.Ctx) error {
 	}
 
 	// 3. Start Async Import
-	if err := s.importerService.StartNzbdavImport(dbPath, blobsPath, rootFolder, isTempFile); err != nil {
+	if err := s.importerService.StartNzbdavImport(dbPath, blobsPath, isTempFile); err != nil {
 		if isTempFile {
 			os.Remove(dbPath) // Clean up if start failed
 		}
