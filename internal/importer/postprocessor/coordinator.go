@@ -169,9 +169,7 @@ func shouldSkipARRNotification(item *database.ImportQueueItem) bool {
 	if item.Metadata == nil || *item.Metadata == "" {
 		return false
 	}
-	var meta struct {
-		SkipARRNotification bool `json:"skip_arr_notification"`
-	}
+	var meta database.ImportQueueMetadata
 	if err := json.Unmarshal([]byte(*item.Metadata), &meta); err != nil {
 		return false
 	}

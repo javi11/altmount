@@ -276,10 +276,7 @@ func (s *Server) handleManualImportFile(c *fiber.Ctx) error {
 	}
 
 	if req.SkipArrNotification {
-		type importMeta struct {
-			SkipARRNotification bool `json:"skip_arr_notification"`
-		}
-		b, err := json.Marshal(importMeta{SkipARRNotification: true})
+		b, err := json.Marshal(database.ImportQueueMetadata{SkipARRNotification: true})
 		if err != nil {
 			slog.WarnContext(c.Context(), "Failed to marshal skip_arr_notification metadata", "error", err)
 		} else {

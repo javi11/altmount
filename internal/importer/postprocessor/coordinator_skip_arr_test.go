@@ -32,17 +32,13 @@ func TestSkipARRNotificationFromMetadata(t *testing.T) {
 		},
 		{
 			name:     "flag false → do not skip",
-			metadata: jsonMeta(struct {
-				SkipARRNotification bool `json:"skip_arr_notification"`
-			}{SkipARRNotification: false}),
-			want: false,
+			metadata: jsonMeta(database.ImportQueueMetadata{SkipARRNotification: false}),
+			want:     false,
 		},
 		{
 			name:     "flag true → skip",
-			metadata: jsonMeta(struct {
-				SkipARRNotification bool `json:"skip_arr_notification"`
-			}{SkipARRNotification: true}),
-			want: true,
+			metadata: jsonMeta(database.ImportQueueMetadata{SkipARRNotification: true}),
+			want:     true,
 		},
 		{
 			name:     "other metadata fields, no flag → do not skip",
