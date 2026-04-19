@@ -23,6 +23,11 @@ func (m *MockPoolManager) ResetMetrics(ctx context.Context, resetPeak bool, rese
 	return args.Error(0)
 }
 
+func (m *MockPoolManager) ResetProviderErrors(ctx context.Context) error {
+	args := m.Called(ctx)
+	return args.Error(0)
+}
+
 // MockQueueRepository is a mock for database.Repository
 type MockQueueRepository struct {
 	mock.Mock
@@ -64,6 +69,26 @@ func TestHandleResetSystemStats_Granular(t *testing.T) {
 	req = httptest.NewRequest("POST", "/reset", nil)
 	resp, _ = app.Test(req)
 	assert.Equal(t, 200, resp.StatusCode)
+}
+
+func TestHandleResetSystemStats_ProviderErrors(t *testing.T) {
+	app := fiber.New()
+	mockPool := new(MockPoolManager)
+	s := &Server{
+		poolManager: mockPool,
+	}
+
+	app.Post("/reset", s.handleResetSystemStats)
+
+	mockPool.On("ResetProviderErrors", mock.Anything).Return(nil)
+
+	req := httptest.NewRequest("POST", "/reset?reset_provider_errors=true", nil)
+	resp, err := app.Test(req)
+	assert.NoError(t, err)
+	assert.Equal(t, 200, resp.StatusCode)
+
+	mockPool.AssertCalled(t, "ResetProviderErrors", mock.Anything)
+	mockPool.AssertNotCalled(t, "ResetMetrics", mock.Anything, mock.Anything, mock.Anything)
 }
 
 func TestHandleGetSystemHealth_Unhealthy(t *testing.T) {

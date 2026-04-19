@@ -110,3 +110,32 @@ func TestMetricsTracker_Reset(t *testing.T) {
 	assert.Equal(t, int64(0), mt.articlesDownloaded.Load())
 	assert.Len(t, mt.samples, 0)
 }
+
+func TestMetricsTracker_ResetProviderErrors(t *testing.T) {
+	mt := &MetricsTracker{
+		samples:               make([]metricsample, 0),
+		initialProviderErrors: map[string]int64{"provider-a": 50, "provider-b": 30},
+		logger:                slog.Default(),
+	}
+
+	poolStats := nntppool.ClientStats{
+		Providers: []nntppool.ProviderStats{
+			{Name: "provider-a", Errors: 10},
+			{Name: "provider-b", Errors: 5},
+		},
+	}
+
+	// Before reset: provider-a = 50+10 = 60, provider-b = 30+5 = 35
+	snapshot := mt.getSnapshot(time.Now(), poolStats)
+	assert.Equal(t, int64(60), snapshot.ProviderErrors["provider-a"])
+	assert.Equal(t, int64(35), snapshot.ProviderErrors["provider-b"])
+
+	// Simulate the offset that ResetProviderErrors applies:
+	// initialProviderErrors[id] = -liveErrors[id], so merged = 0
+	mt.initialProviderErrors["provider-a"] = -poolStats.Providers[0].Errors
+	mt.initialProviderErrors["provider-b"] = -poolStats.Providers[1].Errors
+
+	snapshot = mt.getSnapshot(time.Now(), poolStats)
+	assert.Equal(t, int64(0), snapshot.ProviderErrors["provider-a"])
+	assert.Equal(t, int64(0), snapshot.ProviderErrors["provider-b"])
+}
