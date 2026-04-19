@@ -143,6 +143,27 @@ func TestResetStaleItems_VeryOldItems(t *testing.T) {
 	assert.Equal(t, 0, processingCount, "No items should remain in processing")
 }
 
+func TestGetQueueItemByNzbPath(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	require.NoError(t, err)
+	defer db.Close()
+
+	setupQueueSchema(t, db)
+	repo := NewQueueRepository(db, DialectSQLite)
+	ctx := context.Background()
+
+	insertQueueItemWithTime(t, db, 1, "/some/path/test.nzb.gz", "pending", time.Now())
+
+	found, err := repo.GetQueueItemByNzbPath(ctx, "/some/path/test.nzb.gz")
+	require.NoError(t, err)
+	require.NotNil(t, found)
+	assert.Equal(t, "/some/path/test.nzb.gz", found.NzbPath)
+
+	notFound, err := repo.GetQueueItemByNzbPath(ctx, "/no/such/file.nzb")
+	require.NoError(t, err)
+	assert.Nil(t, notFound)
+}
+
 func TestResetStaleItems_UpdatedAtFieldUpdated(t *testing.T) {
 	// Setup
 	db, err := sql.Open("sqlite3", ":memory:")

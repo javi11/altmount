@@ -299,6 +299,9 @@ func (s *Service) Start(ctx context.Context) error {
 	// Start background cleanup of stale failed queue items
 	go s.runFailedItemCleanup(ctx)
 
+	// Run one-time migration to compress legacy plain .nzb files
+	go s.runNzbCompressionMigration(s.ctx)
+
 	s.running = true
 	s.log.InfoContext(ctx, fmt.Sprintf("NZB import service started successfully with %d workers", s.config.Workers))
 
@@ -843,9 +846,12 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 		return nil
 	}
 
-	// Generate new filename with sanitized name
+	// Generate new filename with sanitized name, always stored compressed
 	filename := filepath.Base(item.NzbPath)
 	newFilename := sanitizeFilename(filename)
+	if !strings.HasSuffix(strings.ToLower(newFilename), nzbGzExtension) {
+		newFilename = strings.TrimSuffix(newFilename, filepath.Ext(newFilename)) + nzbGzExtension
+	}
 	newPath := filepath.Join(nzbDir, newFilename)
 
 	// If a file with the same name already exists, append a numeric counter suffix
@@ -863,38 +869,27 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 		s.log.DebugContext(ctx, "NZB name collision, using alternate path", "path", newPath)
 	}
 
-	s.log.DebugContext(ctx, "Moving NZB to persistent storage", "old_path", item.NzbPath, "new_path", newPath)
+	s.log.DebugContext(ctx, "Moving and compressing NZB to persistent storage", "old_path", item.NzbPath, "new_path", newPath)
 
-	// Move or Copy
-	// Try Rename first
-	err := os.Rename(item.NzbPath, newPath)
-	if err != nil {
-		// If rename fails (e.g. cross-device link), try copy
-		s.log.DebugContext(ctx, "Rename failed, trying copy", "error", err, "src", item.NzbPath, "dst", newPath)
-
-		// Copy logic
-		srcFile, err := os.Open(item.NzbPath)
-		if err != nil {
-			return fmt.Errorf("failed to open source NZB: %w", err)
+	// Try rename to a temp path first (works only on same filesystem), then compress.
+	// For cross-device moves, compress directly from source.
+	tmpPath := newPath + ".tmp"
+	err := os.Rename(item.NzbPath, tmpPath)
+	if err == nil {
+		// Same filesystem: compress the tmp file to the final .nzb.gz path
+		if compErr := compressNzbToGz(tmpPath, newPath); compErr != nil {
+			_ = os.Rename(tmpPath, item.NzbPath) // attempt to restore on failure
+			return fmt.Errorf("failed to compress NZB: %w", compErr)
 		}
-		defer srcFile.Close()
-
-		dstFile, err := os.Create(newPath)
-		if err != nil {
-			return fmt.Errorf("failed to create destination NZB: %w", err)
+		_ = os.Remove(tmpPath)
+	} else {
+		// Cross-device: compress directly from source to destination
+		s.log.DebugContext(ctx, "Rename failed, compressing directly from source", "error", err, "src", item.NzbPath, "dst", newPath)
+		if compErr := compressNzbToGz(item.NzbPath, newPath); compErr != nil {
+			return fmt.Errorf("failed to compress NZB: %w", compErr)
 		}
-		defer dstFile.Close()
-
-		if _, err := io.Copy(dstFile, srcFile); err != nil {
-			return fmt.Errorf("failed to copy NZB content: %w", err)
-		}
-
-		// Close files explicitly to allow deletion
-		srcFile.Close()
-		dstFile.Close()
-
 		if err := os.Remove(item.NzbPath); err != nil {
-			s.log.WarnContext(ctx, "Failed to remove source NZB after copy", "path", item.NzbPath, "error", err)
+			s.log.WarnContext(ctx, "Failed to remove source NZB after compression", "path", item.NzbPath, "error", err)
 		}
 	}
 
@@ -1243,17 +1238,21 @@ func (s *Service) ProcessItemInBackground(ctx context.Context, itemID int64) {
 // CalculateFileSizeOnly calculates the total file size from NZB/STRM segments
 // This is a lightweight parser that only extracts size information without full processing
 func (s *Service) CalculateFileSizeOnly(filePath string) (int64, error) {
-	file, err := os.Open(filePath)
+	if strings.HasSuffix(strings.ToLower(filePath), ".strm") {
+		file, err := os.Open(filePath)
+		if err != nil {
+			return 0, NewNonRetryableError("failed to open file for size calculation", err)
+		}
+		defer file.Close()
+		return s.calculateStrmFileSize(file)
+	}
+
+	file, err := openNzbFile(filePath)
 	if err != nil {
 		return 0, NewNonRetryableError("failed to open file for size calculation", err)
 	}
 	defer file.Close()
-
-	if strings.HasSuffix(strings.ToLower(filePath), ".strm") {
-		return s.calculateStrmFileSize(file)
-	} else {
-		return s.calculateNzbFileSize(file)
-	}
+	return s.calculateNzbFileSize(file)
 }
 
 // calculateNzbFileSize calculates the total size from NZB file segments
@@ -1353,11 +1352,20 @@ func (s *Service) RegenerateMetadata(ctx context.Context, mountRelativePath stri
 		}
 
 		filename := d.Name()
-		// Match release name (ignoring .nzb extension and queue ID prefix)
-		// NZBs are stored as "ID_ReleaseName.nzb" or just "ReleaseName.nzb"
-		cleanName := strings.TrimSuffix(filename, ".nzb")
+		lname := strings.ToLower(filename)
+		if !strings.HasSuffix(lname, ".nzb") && !strings.HasSuffix(lname, nzbGzExtension) {
+			return nil
+		}
+		// Strip .nzb.gz or .nzb to get the bare name for matching
+		var cleanName string
+		switch {
+		case strings.HasSuffix(lname, nzbGzExtension):
+			cleanName = filename[:len(filename)-len(nzbGzExtension)]
+		default:
+			cleanName = strings.TrimSuffix(filename, ".nzb")
+		}
 		if _, after, ok := strings.Cut(cleanName, "_"); ok {
-			// Check both with and without prefix
+			// Check both with and without queue ID prefix
 			if after == releaseName || cleanName == releaseName {
 				foundNzbPath = path
 				return filepath.SkipAll

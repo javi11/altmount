@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -539,6 +540,29 @@ func (r *QueueRepository) UpdateQueueItemNzbPath(ctx context.Context, id int64, 
 		return fmt.Errorf("failed to update queue item nzb path: %w", err)
 	}
 	return nil
+}
+
+// GetQueueItemByNzbPath returns the queue item with the given NZB path, or nil if not found.
+func (r *QueueRepository) GetQueueItemByNzbPath(ctx context.Context, nzbPath string) (*ImportQueueItem, error) {
+	query := `
+		SELECT id, download_id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
+		       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path, target_path
+		FROM import_queue WHERE nzb_path = ? LIMIT 1
+	`
+
+	var item ImportQueueItem
+	err := r.db.QueryRowContext(ctx, query, nzbPath).Scan(
+		&item.ID, &item.DownloadID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
+		&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
+		&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath, &item.TargetPath,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get queue item by nzb path: %w", err)
+	}
+	return &item, nil
 }
 
 // GetQueueStats returns current queue statistics
