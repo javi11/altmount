@@ -116,6 +116,7 @@ type ProviderAPIResponse struct {
 	SkipPing                 bool       `json:"skip_ping"`
 	KeepaliveIntervalSeconds int        `json:"keepalive_interval_seconds"`
 	KeepaliveCommand         string     `json:"keepalive_command,omitempty"`
+	UserAgent                string     `json:"user_agent,omitempty"`
 	QuotaBytes               int64      `json:"quota_bytes"`
 	QuotaPeriodHours         int        `json:"quota_period_hours"`
 }
