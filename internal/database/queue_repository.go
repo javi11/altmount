@@ -110,8 +110,8 @@ func (r *QueueRepository) RestartQueueItemsBulk(ctx context.Context, ids []int64
 // AddToQueue adds a new NZB file to the import queue
 func (r *QueueRepository) AddToQueue(ctx context.Context, item *ImportQueueItem) error {
 	query := `
-		INSERT INTO import_queue (download_id, nzb_path, relative_path, category, priority, status, retry_count, max_retries, batch_id, metadata, file_size, target_path, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+		INSERT INTO import_queue (download_id, nzb_path, relative_path, category, priority, status, retry_count, max_retries, batch_id, metadata, file_size, target_path, skip_arr_notification, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
 		ON CONFLICT(nzb_path) DO UPDATE SET
 		download_id = COALESCE(excluded.download_id, import_queue.download_id),
 		priority = CASE WHEN excluded.priority < priority THEN excluded.priority ELSE priority END,
@@ -129,7 +129,7 @@ func (r *QueueRepository) AddToQueue(ctx context.Context, item *ImportQueueItem)
 	`
 
 	args := []any{item.DownloadID, item.NzbPath, item.RelativePath, item.Category, item.Priority, item.Status,
-		item.RetryCount, item.MaxRetries, item.BatchID, item.Metadata, item.FileSize, item.TargetPath}
+		item.RetryCount, item.MaxRetries, item.BatchID, item.Metadata, item.FileSize, item.TargetPath, item.SkipArrNotification}
 
 	if r.dialect.IsPostgres() {
 		err := r.db.QueryRowContext(ctx, query+" RETURNING id", args...).Scan(&item.ID)
@@ -232,7 +232,7 @@ func (r *QueueRepository) ClaimNextQueueItem(ctx context.Context) (*ImportQueueI
 		// Get the complete claimed item data
 		getQuery := `
 			SELECT id, download_id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
-			       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, target_path
+			       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, target_path, skip_arr_notification
 			FROM import_queue
 			WHERE id = ?
 		`
@@ -241,7 +241,7 @@ func (r *QueueRepository) ClaimNextQueueItem(ctx context.Context) (*ImportQueueI
 		err = txRepo.db.QueryRowContext(ctx, getQuery, itemID).Scan(
 			&item.ID, &item.DownloadID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
 			&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
-			&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.TargetPath,
+			&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.TargetPath, &item.SkipArrNotification,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to get claimed item: %w", err)
@@ -546,7 +546,7 @@ func (r *QueueRepository) UpdateQueueItemNzbPath(ctx context.Context, id int64, 
 func (r *QueueRepository) GetQueueItemByNzbPath(ctx context.Context, nzbPath string) (*ImportQueueItem, error) {
 	query := `
 		SELECT id, download_id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
-		       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path, target_path
+		       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path, target_path, skip_arr_notification
 		FROM import_queue WHERE nzb_path = ? LIMIT 1
 	`
 
@@ -554,7 +554,7 @@ func (r *QueueRepository) GetQueueItemByNzbPath(ctx context.Context, nzbPath str
 	err := r.db.QueryRowContext(ctx, query, nzbPath).Scan(
 		&item.ID, &item.DownloadID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
 		&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
-		&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath, &item.TargetPath,
+		&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath, &item.TargetPath, &item.SkipArrNotification,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -633,8 +633,8 @@ func (r *QueueRepository) AddBatchToQueue(ctx context.Context, items []*ImportQu
 	return r.withQueueTransaction(ctx, func(txRepo *QueueRepository) error {
 		// Prepare batch insert statement
 		query := `
-			INSERT INTO import_queue (download_id, nzb_path, relative_path, category, priority, status, retry_count, max_retries, batch_id, metadata, file_size, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+			INSERT INTO import_queue (download_id, nzb_path, relative_path, category, priority, status, retry_count, max_retries, batch_id, metadata, file_size, skip_arr_notification, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
 			ON CONFLICT(nzb_path) DO UPDATE SET
 			download_id = COALESCE(excluded.download_id, import_queue.download_id),
 			priority = CASE WHEN excluded.priority < priority THEN excluded.priority ELSE priority END,
@@ -649,7 +649,7 @@ func (r *QueueRepository) AddBatchToQueue(ctx context.Context, items []*ImportQu
 		now := time.Now()
 		for _, item := range items {
 			args := []any{item.DownloadID, item.NzbPath, item.RelativePath, item.Category, item.Priority, item.Status,
-				item.RetryCount, item.MaxRetries, item.BatchID, item.Metadata, item.FileSize}
+				item.RetryCount, item.MaxRetries, item.BatchID, item.Metadata, item.FileSize, item.SkipArrNotification}
 
 			if txRepo.dialect.IsPostgres() {
 				err := txRepo.db.QueryRowContext(ctx, query+" RETURNING id", args...).Scan(&item.ID)
@@ -678,7 +678,7 @@ func (r *QueueRepository) AddBatchToQueue(ctx context.Context, items []*ImportQu
 func (r *QueueRepository) GetQueueItem(ctx context.Context, id int64) (*ImportQueueItem, error) {
 	query := `
 		SELECT id, download_id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
-		       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path, target_path
+		       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path, target_path, skip_arr_notification
 		FROM import_queue WHERE id = ?
 	`
 
@@ -686,7 +686,7 @@ func (r *QueueRepository) GetQueueItem(ctx context.Context, id int64) (*ImportQu
 	err := r.db.QueryRowContext(ctx, query, id).Scan(
 		&item.ID, &item.DownloadID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
 		&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
-		&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath, &item.TargetPath,
+		&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath, &item.TargetPath, &item.SkipArrNotification,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -736,7 +736,7 @@ func (r *QueueRepository) DeleteFailedItemsOlderThan(ctx context.Context, olderT
 	err := r.withQueueTransaction(ctx, func(txRepo *QueueRepository) error {
 		// Select failed items older than the threshold
 		selectQuery := `SELECT id, download_id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
-			started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path, target_path
+			started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path, target_path, skip_arr_notification
 			FROM import_queue WHERE status = 'failed' AND updated_at < ?`
 
 		rows, err := txRepo.db.QueryContext(ctx, selectQuery, olderThan)
@@ -750,7 +750,7 @@ func (r *QueueRepository) DeleteFailedItemsOlderThan(ctx context.Context, olderT
 			if err := rows.Scan(
 				&item.ID, &item.DownloadID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
 				&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
-				&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath, &item.TargetPath,
+				&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath, &item.TargetPath, &item.SkipArrNotification,
 			); err != nil {
 				return fmt.Errorf("failed to scan failed queue item: %w", err)
 			}
