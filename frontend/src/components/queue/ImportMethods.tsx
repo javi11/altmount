@@ -6,7 +6,6 @@ import {
 	FileCode,
 	FileIcon,
 	FileText,
-	FolderInput,
 	FolderOpen,
 	Link,
 	Play,
@@ -609,7 +608,6 @@ function NzbDavImportSection() {
 	const [selectedDbPath, setSelectedDbPath] = useState("");
 	const [blobsPath, setBlobsPath] = useState("");
 	const [selectedFile, setSelectedFile] = useState<File | null>(null);
-	const [rootFolder, setRootFolder] = useState("");
 	const [isLoading, setIsLoading] = useState(false);
 	const [error, setError] = useState<Error | null>(null);
 	const { showToast } = useToast();
@@ -632,7 +630,6 @@ function NzbDavImportSection() {
 
 	const handleSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
-		if (!rootFolder) return;
 		if (inputMethod === "server" && !selectedDbPath) return;
 		if (inputMethod === "upload" && !selectedFile) return;
 
@@ -640,7 +637,6 @@ function NzbDavImportSection() {
 		setError(null);
 
 		const formData = new FormData();
-		formData.append("rootFolder", rootFolder);
 		if (blobsPath) {
 			formData.append("blobsPath", blobsPath);
 		}
@@ -849,28 +845,8 @@ function NzbDavImportSection() {
 							<div className="h-px flex-1 bg-base-300" />
 						</div>
 
-						<div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-							<fieldset className="fieldset min-w-0">
-								<legend className="fieldset-legend font-semibold">Target Directory Name</legend>
-								<div className="flex items-center gap-3">
-									<div className="rounded-lg bg-base-200 p-2.5">
-										<FolderInput className="h-5 w-5 text-base-content/60" />
-									</div>
-									<input
-										type="text"
-										placeholder="e.g. MyLibrary"
-										className="input w-full bg-base-200/50 font-mono"
-										value={rootFolder}
-										onChange={(e) => setRootFolder(e.target.value)}
-										required
-									/>
-								</div>
-								<p className="label text-base-content/80 text-xs">
-									This will create /movies and /tv subdirectories under this name.
-								</p>
-							</fieldset>
-
-							<div className="flex flex-col justify-center space-y-3">
+						<div className="space-y-6">
+							<div className="flex flex-col space-y-3">
 								<div className="label mb-1 font-semibold text-base-content/80 text-xs">
 									Input Method
 								</div>
@@ -979,11 +955,7 @@ function NzbDavImportSection() {
 						<button
 							type="submit"
 							className="btn btn-primary btn-md px-10 shadow-lg shadow-primary/20"
-							disabled={
-								isLoading ||
-								!rootFolder ||
-								(inputMethod === "server" ? !selectedDbPath : !selectedFile)
-							}
+							disabled={isLoading || (inputMethod === "server" ? !selectedDbPath : !selectedFile)}
 						>
 							{isLoading ? <LoadingSpinner size="sm" /> : <Upload className="h-4 w-4" />}
 							Start Import

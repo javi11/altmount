@@ -39,7 +39,7 @@ type DirectoryScanner interface {
 // NzbDavImporter handles bulk import from NzbDav databases
 type NzbDavImporter interface {
 	// StartNzbdavImport begins importing from an NzbDav database
-	StartNzbdavImport(dbPath string, blobsPath string, rootFolder string, cleanupFile bool) error
+	StartNzbdavImport(dbPath string, blobsPath string, cleanupFile bool) error
 	// GetImportStatus returns the current import status
 	GetImportStatus() ImportInfo
 	// CancelImport cancels an in-progress import

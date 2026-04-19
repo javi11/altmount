@@ -48,11 +48,7 @@ function QuotaResetCountdown({ resetAt }: { resetAt: string }) {
 	);
 }
 
-export function ProviderCard({
-	provider,
-	className,
-	onResetQuota,
-}: ProviderCardProps) {
+export function ProviderCard({ provider, className, onResetQuota }: ProviderCardProps) {
 	// Calculate connection usage percentage
 	const usagePercentage =
 		provider.max_connections > 0
@@ -117,7 +113,10 @@ export function ProviderCard({
 										: "bg-error"
 								}`}
 							/>
-							<h3 className="truncate font-semibold text-sm leading-none" id={`provider-${provider.host}`}>
+							<h3
+								className="truncate font-semibold text-sm leading-none"
+								id={`provider-${provider.host}`}
+							>
 								{provider.host}
 							</h3>
 						</div>
@@ -218,7 +217,7 @@ export function ProviderCard({
 									<button
 										type="button"
 										onClick={() => onResetQuota(provider.id)}
-										className="btn btn-ghost btn-xs min-h-0 h-4 p-0 text-base-content/30 hover:text-primary"
+										className="btn btn-ghost btn-xs h-4 min-h-0 p-0 text-base-content/30 hover:text-primary"
 										title="Reset Quota"
 									>
 										<RotateCcw className="h-2.5 w-2.5" />
