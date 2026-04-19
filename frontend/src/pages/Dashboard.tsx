@@ -1,5 +1,4 @@
 import { ChevronDown, Network, RotateCcw } from "lucide-react";
-import { useEffect, useRef } from "react";
 import { QueueHistoricalStatsCard } from "../components/queue/QueueHistoricalStatsCard";
 import { ActivityHub } from "../components/system/ActivityHub";
 import { HealthStatusCard } from "../components/system/HealthStatusCard";
@@ -23,7 +22,6 @@ export function Dashboard() {
 	const { showToast } = useToast();
 	const resetStats = useResetSystemStats();
 	const { resetProviderQuota } = useProviders();
-	const warnedProvidersRef = useRef<Set<string>>(new Set());
 
 	const hasError = queueError || healthError;
 
@@ -89,26 +87,6 @@ export function Dashboard() {
 			});
 		}
 	};
-
-	// Fire warning toast when server reports missing_warning for a provider
-	useEffect(() => {
-		if (!poolMetrics?.providers) return;
-		const warned = warnedProvidersRef.current;
-
-		for (const provider of poolMetrics.providers) {
-			if (provider.missing_warning && !warned.has(provider.id)) {
-				warned.add(provider.id);
-				showToast({
-					type: "warning",
-					title: "High Missing Article Rate",
-					message: `${provider.host} has ~${Math.round(provider.missing_rate_per_minute)}/min missing articles. Consider using a backup provider.`,
-					duration: 10000,
-				});
-			} else if (!provider.missing_warning && warned.has(provider.id)) {
-				warned.delete(provider.id);
-			}
-		}
-	}, [poolMetrics?.providers, showToast]);
 
 	if (hasError) {
 		return (
@@ -242,11 +220,7 @@ export function Dashboard() {
 					</h2>
 					<div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
 						{poolMetrics.providers.map((provider) => (
-							<ProviderCard
-								key={provider.id}
-								provider={provider}
-								onResetQuota={handleResetQuota}
-							/>
+							<ProviderCard key={provider.id} provider={provider} onResetQuota={handleResetQuota} />
 						))}
 					</div>
 				</div>
