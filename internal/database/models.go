@@ -44,8 +44,9 @@ type ImportQueueItem struct {
 	ErrorMessage *string       `db:"error_message"`
 	BatchID      *string       `db:"batch_id"`
 	Metadata     *string       `db:"metadata"`    // JSON metadata
-	FileSize     *int64        `db:"file_size"`   // Total size in bytes calculated from segments
-	TargetPath   *string       `db:"target_path"` // Optional forced symlink destination path
+	FileSize             *int64        `db:"file_size"`             // Total size in bytes calculated from segments
+	TargetPath           *string       `db:"target_path"`           // Optional forced symlink destination path
+	SkipArrNotification  bool          `db:"skip_arr_notification"`
 }
 
 // BulkOperationResult represents the result of a bulk queue operation
@@ -171,6 +172,5 @@ type ImportHistory struct {
 // ImportQueueMetadata is the JSON payload stored in ImportQueueItem.Metadata.
 // Fields are omitempty so partial writes don't clobber unrelated keys.
 type ImportQueueMetadata struct {
-	NzbdavID            string `json:"nzbdav_id,omitempty"`
-	SkipARRNotification bool   `json:"skip_arr_notification,omitempty"`
+	NzbdavID string `json:"nzbdav_id,omitempty"`
 }
