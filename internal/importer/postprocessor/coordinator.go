@@ -5,7 +5,6 @@ package postprocessor
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"sync"
 	"time"
@@ -163,15 +162,8 @@ func (c *Coordinator) HandleFailure(ctx context.Context, item *database.ImportQu
 	return errors.ErrFallbackNotConfigured
 }
 
-// shouldSkipARRNotification decodes the item metadata and returns true when
-// the caller explicitly requested that ARR notifications be suppressed.
+// shouldSkipARRNotification returns true when the caller explicitly requested
+// that ARR notifications be suppressed.
 func shouldSkipARRNotification(item *database.ImportQueueItem) bool {
-	if item.Metadata == nil || *item.Metadata == "" {
-		return false
-	}
-	var meta database.ImportQueueMetadata
-	if err := json.Unmarshal([]byte(*item.Metadata), &meta); err != nil {
-		return false
-	}
-	return meta.SkipARRNotification
+	return item.SkipArrNotification
 }
