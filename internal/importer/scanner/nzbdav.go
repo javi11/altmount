@@ -21,10 +21,17 @@ type BatchQueueAdder interface {
 	AddBatchToQueue(ctx context.Context, items []*database.ImportQueueItem) error
 }
 
+// MigrationRecorder defines the interface for recording import migrations
+type MigrationRecorder interface {
+	UpsertMigration(ctx context.Context, source, externalID, relativePath string) (int64, error)
+	IsMigrationCompleted(ctx context.Context, source, externalID string) (bool, error)
+}
+
 // NzbDavImporter handles importing from NZBDav databases
 type NzbDavImporter struct {
-	batchAdder BatchQueueAdder
-	log        *slog.Logger
+	batchAdder        BatchQueueAdder
+	migrationRecorder MigrationRecorder
+	log               *slog.Logger
 
 	// State management
 	mu         sync.RWMutex
@@ -33,11 +40,12 @@ type NzbDavImporter struct {
 }
 
 // NewNzbDavImporter creates a new NZBDav importer
-func NewNzbDavImporter(batchAdder BatchQueueAdder) *NzbDavImporter {
+func NewNzbDavImporter(batchAdder BatchQueueAdder, migrationRecorder MigrationRecorder) *NzbDavImporter {
 	return &NzbDavImporter{
-		batchAdder: batchAdder,
-		log:        slog.Default().With("component", "nzbdav-importer"),
-		info:       ImportInfo{Status: ImportStatusIdle},
+		batchAdder:        batchAdder,
+		migrationRecorder: migrationRecorder,
+		log:               slog.Default().With("component", "nzbdav-importer"),
+		info:              ImportInfo{Status: ImportStatusIdle},
 	}
 }
 
@@ -222,7 +230,9 @@ func (n *NzbDavImporter) performImport(ctx context.Context, dbPath string, blobs
 	}
 }
 
-// processBatch batches queue items and adds them to the queue
+// processBatch batches queue items and adds them to the queue.
+// It uses migrationRecorder to deduplicate already-completed items and to
+// record new items before enqueueing them.
 func (n *NzbDavImporter) processBatch(ctx context.Context, batchChan <-chan *database.ImportQueueItem) {
 	var batch []*database.ImportQueueItem
 	ticker := time.NewTicker(500 * time.Millisecond)
@@ -244,6 +254,43 @@ func (n *NzbDavImporter) processBatch(ctx context.Context, batchChan <-chan *dat
 		}
 	}
 
+	// extractNzbdavID reads nzbdav_id from the item metadata JSON.
+	extractNzbdavID := func(item *database.ImportQueueItem) string {
+		if item.Metadata == nil {
+			return ""
+		}
+		var meta struct {
+			NzbdavID string `json:"nzbdav_id"`
+		}
+		if err := json.Unmarshal([]byte(*item.Metadata), &meta); err != nil {
+			return ""
+		}
+		return meta.NzbdavID
+	}
+
+	// stripNzbdavIDFromMetadata rewrites the metadata JSON removing the nzbdav_id key,
+	// retaining only other keys (e.g. extracted_files).
+	stripNzbdavIDFromMetadata := func(item *database.ImportQueueItem) {
+		if item.Metadata == nil {
+			return
+		}
+		var metaMap map[string]any
+		if err := json.Unmarshal([]byte(*item.Metadata), &metaMap); err != nil {
+			return
+		}
+		delete(metaMap, "nzbdav_id")
+		if len(metaMap) == 0 {
+			item.Metadata = nil
+			return
+		}
+		b, err := json.Marshal(metaMap)
+		if err != nil {
+			return
+		}
+		s := string(b)
+		item.Metadata = &s
+	}
+
 	for {
 		select {
 		case item, ok := <-batchChan:
@@ -252,6 +299,35 @@ func (n *NzbDavImporter) processBatch(ctx context.Context, batchChan <-chan *dat
 				insertBatch()
 				return
 			}
+
+			nzbdavID := extractNzbdavID(item)
+
+			// Dedup: skip items already successfully imported.
+			if nzbdavID != "" {
+				completed, err := n.migrationRecorder.IsMigrationCompleted(ctx, "nzbdav", nzbdavID)
+				if err != nil {
+					n.log.ErrorContext(ctx, "Failed to check migration status", "nzbdav_id", nzbdavID, "error", err)
+				} else if completed {
+					n.mu.Lock()
+					n.info.Skipped++
+					n.mu.Unlock()
+					continue
+				}
+
+				// Record migration row before enqueueing.
+				relativePath := ""
+				if item.Category != nil {
+					relativePath = *item.Category
+				}
+				if _, err := n.migrationRecorder.UpsertMigration(ctx, "nzbdav", nzbdavID, relativePath); err != nil {
+					n.log.ErrorContext(ctx, "Failed to upsert migration", "nzbdav_id", nzbdavID, "error", err)
+				}
+			}
+
+			// Strip nzbdav_id from the queue item metadata — it lives in
+			// import_migrations now. Keep extracted_files if present.
+			stripNzbdavIDFromMetadata(item)
+
 			batch = append(batch, item)
 			if len(batch) >= 100 { // Batch size
 				insertBatch()
@@ -324,15 +400,18 @@ func (n *NzbDavImporter) createNzbFileAndPrepareItem(ctx context.Context, res *n
 
 	// Prepare item struct. RelativePath is left nil so the import mirrors the
 	// nzbdav folder structure under Category without an extra user-supplied prefix.
+	// SkipArrNotification is true because nzbdav imports are migration jobs — ARR
+	// scans should not be triggered for each individual item.
 	item := &database.ImportQueueItem{
-		NzbPath:  nzbPath,
-		Category: &targetCategory,
-		Priority:     priority,
-		Status:       database.QueueStatusPending,
-		RetryCount:   0,
-		MaxRetries:   3,
-		CreatedAt:    time.Now(),
-		Metadata:     &metaJSON,
+		NzbPath:             nzbPath,
+		Category:            &targetCategory,
+		Priority:            priority,
+		Status:              database.QueueStatusPending,
+		RetryCount:          0,
+		MaxRetries:          3,
+		CreatedAt:           time.Now(),
+		Metadata:            &metaJSON,
+		SkipArrNotification: true,
 	}
 
 	return item, nil
