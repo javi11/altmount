@@ -150,6 +150,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	apiServer := setupAPIServer(app, repos, authService, configManager, metadataReader, metadataService, fs, poolManager, importerService, arrsService, mountService, progressBroadcaster, streamTracker, cacheSource)
 	apiServer.SetLogFilePath(slogutil.GetLogFilePath(cfg.Log))
+	apiServer.SetMigrationRepo(db.MigrationRepo)
 
 	webdavHandler, err := setupWebDAV(cfg, fs, authService, repos.UserRepo, configManager, streamTracker)
 	if err != nil {

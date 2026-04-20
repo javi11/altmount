@@ -63,6 +63,7 @@ type Server struct {
 	fuseManager         *FuseManager
 	cacheSource         *segcache.Source
 	logFilePath         string
+	migrationRepo       *database.ImportMigrationRepository
 	ready               atomic.Bool
 }
 
@@ -126,6 +127,11 @@ func (s *Server) SetLibrarySyncWorker(librarySyncWorker *health.LibrarySyncWorke
 // SetLogFilePath sets the path to the JSON log file used by the logs endpoints.
 func (s *Server) SetLogFilePath(path string) {
 	s.logFilePath = path
+}
+
+// SetMigrationRepo sets the migration repository used by the migrate-symlinks endpoint.
+func (s *Server) SetMigrationRepo(repo *database.ImportMigrationRepository) {
+	s.migrationRepo = repo
 }
 
 // SetReady sets the server as ready to accept requests
@@ -222,6 +228,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/import/nzbdav/reset", s.handleResetNzbdavImportStatus)
 	api.Get("/import/nzbdav/status", s.handleGetNzbdavImportStatus)
 	api.Delete("/import/nzbdav", s.handleCancelNzbdavImport)
+	api.Post("/import/nzbdav/migrate-symlinks", s.handleMigrateNzbdavSymlinks)
 
 	// Queue endpoints
 	api.Get("/queue", s.handleListQueue)
