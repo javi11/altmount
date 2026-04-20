@@ -150,16 +150,10 @@ func TestRewriteLibrarySymlinks(t *testing.T) {
 			name:  "context cancellation stops walk",
 			setup: func(t *testing.T, dir string) {
 				t.Helper()
-				// Create several symlinks so the walk has entries to process.
-				for i := 0; i < 5; i++ {
-					target := sourceMountPath + "/.ids/guid-cancel"
-					link := filepath.Join(dir, "file")
-					// Only create the first one to keep setup simple.
-					if i == 0 {
-						if err := os.Symlink(target, link); err != nil {
-							t.Fatalf("setup: %v", err)
-						}
-					}
+				// Create one symlink so the walk has an entry to process.
+				target := sourceMountPath + "/.ids/guid-cancel"
+				if err := os.Symlink(target, filepath.Join(dir, "file")); err != nil {
+					t.Fatalf("setup: %v", err)
 				}
 			},
 			lookup: &mockLookup{paths: map[string]string{"guid-cancel": "/movies/x.mkv"}},
@@ -167,7 +161,6 @@ func TestRewriteLibrarySymlinks(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 

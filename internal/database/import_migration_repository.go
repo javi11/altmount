@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 )
 
 // ImportMigrationRepository handles database operations for import_migrations.
@@ -98,11 +97,10 @@ func (r *ImportMigrationRepository) MarkSymlinksMigrated(ctx context.Context, id
 	}
 
 	placeholders := make([]string, len(ids))
-	args := make([]any, len(ids)+1)
-	args[0] = time.Now()
+	args := make([]any, len(ids))
 	for i, id := range ids {
 		placeholders[i] = "?"
-		args[i+1] = id
+		args[i] = id
 	}
 
 	query := fmt.Sprintf(`
@@ -111,7 +109,7 @@ func (r *ImportMigrationRepository) MarkSymlinksMigrated(ctx context.Context, id
 		WHERE id IN (%s)
 	`, strings.Join(placeholders, ", "))
 
-	_, err := r.db.ExecContext(ctx, query, args[1:]...)
+	_, err := r.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("mark import_migrations symlinks_migrated: %w", err)
 	}
@@ -170,10 +168,10 @@ func (r *ImportMigrationRepository) Stats(ctx context.Context, source string) (*
 	query := `
 		SELECT
 			COUNT(*) AS total,
-			SUM(CASE WHEN status = 'pending'           THEN 1 ELSE 0 END) AS pending,
-			SUM(CASE WHEN status = 'imported'          THEN 1 ELSE 0 END) AS imported,
-			SUM(CASE WHEN status = 'failed'            THEN 1 ELSE 0 END) AS failed,
-			SUM(CASE WHEN status = 'symlinks_migrated' THEN 1 ELSE 0 END) AS symlinks_migrated
+			COALESCE(SUM(CASE WHEN status = 'pending'           THEN 1 ELSE 0 END), 0) AS pending,
+			COALESCE(SUM(CASE WHEN status = 'imported'          THEN 1 ELSE 0 END), 0) AS imported,
+			COALESCE(SUM(CASE WHEN status = 'failed'            THEN 1 ELSE 0 END), 0) AS failed,
+			COALESCE(SUM(CASE WHEN status = 'symlinks_migrated' THEN 1 ELSE 0 END), 0) AS symlinks_migrated
 		FROM import_migrations
 		WHERE source = ?
 	`
@@ -242,6 +240,20 @@ func (r *ImportMigrationRepository) BackfillFromImportQueue(ctx context.Context)
 		NzbdavID string `json:"nzbdav_id"`
 	}
 
+	insertQuery := `
+		INSERT OR IGNORE INTO import_migrations
+			(source, external_id, queue_item_id, relative_path, final_path, status, created_at, updated_at)
+		VALUES ('nzbdav', ?, ?, ?, ?, 'imported', datetime('now'), datetime('now'))
+	`
+	if r.dialect.IsPostgres() {
+		insertQuery = `
+			INSERT INTO import_migrations
+				(source, external_id, queue_item_id, relative_path, final_path, status, created_at, updated_at)
+			VALUES ('nzbdav', $1, $2, $3, $4, 'imported', NOW(), NOW())
+			ON CONFLICT (source, external_id) DO NOTHING
+		`
+	}
+
 	inserted := 0
 	for _, c := range candidates {
 		if err := json.Unmarshal([]byte(c.metadata), &nzbdavIDStruct); err != nil {
@@ -257,28 +269,9 @@ func (r *ImportMigrationRepository) BackfillFromImportQueue(ctx context.Context)
 			relativePath = *c.relativePath
 		}
 
-		insertQuery := `
-			INSERT OR IGNORE INTO import_migrations
-				(source, external_id, queue_item_id, relative_path, final_path, status, created_at, updated_at)
-			VALUES ('nzbdav', ?, ?, ?, ?, 'imported', datetime('now'), datetime('now'))
-		`
-		if r.dialect.IsPostgres() {
-			insertQuery = `
-				INSERT INTO import_migrations
-					(source, external_id, queue_item_id, relative_path, final_path, status, created_at, updated_at)
-				VALUES ('nzbdav', $1, $2, $3, $4, 'imported', NOW(), NOW())
-				ON CONFLICT (source, external_id) DO NOTHING
-			`
-		}
-
-		var res sql.Result
-		if r.dialect.IsPostgres() {
-			res, err = r.db.ExecContext(ctx, insertQuery, nzbdavIDStruct.NzbdavID, c.id, relativePath, c.storagePath)
-		} else {
-			res, err = r.db.ExecContext(ctx, insertQuery, nzbdavIDStruct.NzbdavID, c.id, relativePath, c.storagePath)
-		}
-		if err != nil {
-			return inserted, fmt.Errorf("backfill: insert import_migration (external_id=%s): %w", nzbdavIDStruct.NzbdavID, err)
+		res, execErr := r.db.ExecContext(ctx, insertQuery, nzbdavIDStruct.NzbdavID, c.id, relativePath, c.storagePath)
+		if execErr != nil {
+			return inserted, fmt.Errorf("backfill: insert import_migration (external_id=%s): %w", nzbdavIDStruct.NzbdavID, execErr)
 		}
 		if n, _ := res.RowsAffected(); n > 0 {
 			inserted++

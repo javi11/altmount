@@ -461,6 +461,22 @@ export const useCancelNzbdavImport = () => {
 	});
 };
 
+export const useMigrateNzbdavSymlinks = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: (req: { libraryPath: string; sourceMountPath: string; dryRun: boolean }) =>
+			apiClient.migrateNzbdavSymlinks({
+				library_path: req.libraryPath,
+				source_mount_path: req.sourceMountPath,
+				dry_run: req.dryRun,
+			}),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["import", "nzbdav", "status"] });
+		},
+	});
+};
+
 // Native upload hook (using JWT authentication)
 export const useUploadToQueue = () => {
 	const queryClient = useQueryClient();

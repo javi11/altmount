@@ -134,6 +134,14 @@ export interface ScanStatusResponse {
 }
 
 // Import Job types
+export interface MigrationStats {
+	pending: number;
+	imported: number;
+	failed: number;
+	symlinks_migrated: number;
+	total: number;
+}
+
 export interface ImportStatusResponse {
 	status: "idle" | "running" | "canceling" | "completed";
 	total: number;
@@ -141,6 +149,22 @@ export interface ImportStatusResponse {
 	failed: number;
 	skipped?: number;
 	last_error?: string;
+	migration_stats?: MigrationStats;
+}
+
+export interface NzbdavMigrateSymlinksRequest {
+	library_path: string;
+	source_mount_path: string;
+	dry_run: boolean;
+}
+
+export interface NzbdavMigrateSymlinksResponse {
+	scanned: number;
+	matched: number;
+	rewritten: number;
+	unmatched: string[];
+	errors: string[];
+	dry_run: boolean;
 }
 
 // Health types

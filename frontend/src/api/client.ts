@@ -16,6 +16,8 @@ import type {
 	ImportStatusResponse,
 	LibrarySyncStatus,
 	ManualScanRequest,
+	NzbdavMigrateSymlinksRequest,
+	NzbdavMigrateSymlinksResponse,
 	PoolMetrics,
 	QueueHistoricalStatsResponse,
 	QueueItem,
@@ -841,6 +843,14 @@ export class APIClient {
 	async cancelNzbdavImport() {
 		return this.request<{ message: string }>("/import/nzbdav", {
 			method: "DELETE",
+		});
+	}
+
+	async migrateNzbdavSymlinks(req: NzbdavMigrateSymlinksRequest) {
+		return this.request<NzbdavMigrateSymlinksResponse>("/import/nzbdav/migrate-symlinks", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify(req),
 		});
 	}
 

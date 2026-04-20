@@ -1,5 +1,6 @@
 import {
 	AlertCircle,
+	ArrowRight,
 	CheckCircle2,
 	Database,
 	Download,
@@ -20,6 +21,7 @@ import { useToast } from "../../contexts/ToastContext";
 import {
 	useCancelNzbdavImport,
 	useCancelScan,
+	useMigrateNzbdavSymlinks,
 	useNzbdavImportStatus,
 	useResetNzbdavImportStatus,
 	useScanStatus,
@@ -29,6 +31,7 @@ import {
 	useUploadToQueue,
 } from "../../hooks/useApi";
 import { useConfig } from "../../hooks/useConfig";
+import type { NzbdavMigrateSymlinksResponse } from "../../types/api";
 import { ScanStatus } from "../../types/api";
 import { FileBrowserModal } from "../files/FileBrowserModal";
 import { ErrorAlert } from "../ui/ErrorAlert";
@@ -712,6 +715,12 @@ function NzbDavImportSection() {
 		}
 	};
 
+	const migrationStats = importStatus?.migration_stats;
+	const showPhase2 =
+		isCompleted ||
+		(migrationStats !== undefined &&
+			(migrationStats.imported > 0 || migrationStats.symlinks_migrated > 0));
+
 	return (
 		<div className="space-y-8">
 			{error && <ErrorAlert error={error} />}
@@ -964,6 +973,8 @@ function NzbDavImportSection() {
 				</form>
 			)}
 
+			{showPhase2 && <NzbdavPhase2Section migrationStats={migrationStats} />}
+
 			<FileBrowserModal
 				isOpen={isFileBrowserOpen}
 				onClose={() => setIsFileBrowserOpen(false)}
@@ -979,6 +990,234 @@ function NzbDavImportSection() {
 				allowDirectorySelection={true}
 			/>
 		</div>
+	);
+}
+
+interface NzbdavPhase2SectionProps {
+	migrationStats?: {
+		pending: number;
+		imported: number;
+		failed: number;
+		symlinks_migrated: number;
+		total: number;
+	};
+}
+
+function NzbdavPhase2Section({ migrationStats }: NzbdavPhase2SectionProps) {
+	const [libraryPath, setLibraryPath] = useState("");
+	const [sourceMountPath, setSourceMountPath] = useState("");
+	const [dryRun, setDryRun] = useState(true);
+	const [lastReport, setLastReport] = useState<NzbdavMigrateSymlinksResponse | null>(null);
+	const migrate = useMigrateNzbdavSymlinks();
+	const { showToast } = useToast();
+
+	const handleSubmit = async (e: React.FormEvent) => {
+		e.preventDefault();
+		try {
+			const report = await migrate.mutateAsync({ libraryPath, sourceMountPath, dryRun });
+			setLastReport(report);
+			showToast({
+				title: dryRun ? "Dry Run Complete" : "Migration Complete",
+				message: dryRun
+					? `Would rewrite ${report.matched} of ${report.scanned} symlinks.`
+					: `Rewrote ${report.rewritten} of ${report.scanned} symlinks.`,
+				type: "success",
+			});
+		} catch (err) {
+			showToast({
+				title: "Migration Failed",
+				message: err instanceof Error ? err.message : "An error occurred",
+				type: "error",
+			});
+		}
+	};
+
+	const handleApply = async () => {
+		try {
+			const report = await migrate.mutateAsync({ libraryPath, sourceMountPath, dryRun: false });
+			setLastReport(report);
+			showToast({
+				title: "Migration Complete",
+				message: `Rewrote ${report.rewritten} of ${report.scanned} symlinks.`,
+				type: "success",
+			});
+		} catch (err) {
+			showToast({
+				title: "Migration Failed",
+				message: err instanceof Error ? err.message : "An error occurred",
+				type: "error",
+			});
+		}
+	};
+
+	return (
+		<section className="space-y-6">
+			<div className="flex items-center gap-2">
+				<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
+					Phase 2 — Migrate Library Symlinks
+				</h4>
+				<div className="h-px flex-1 bg-base-300" />
+			</div>
+
+			<div className="space-y-6 rounded-2xl border-2 border-primary/20 bg-primary/5 p-6">
+				<div className="flex items-start gap-3">
+					<ArrowRight className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+					<p className="text-base-content/70 text-sm">
+						Rewrite your arr library symlinks from the nzbdav mount to AltMount. Run a{" "}
+						<strong>dry run</strong> first to preview changes, then apply.
+					</p>
+				</div>
+
+				{migrationStats && migrationStats.total > 0 && (
+					<div className="grid grid-cols-3 gap-3">
+						<div className="rounded-xl bg-base-100 p-3 text-center shadow-sm">
+							<span className="block font-bold text-base-content/40 text-xs uppercase tracking-wider">
+								Imported
+							</span>
+							<span className="font-bold font-mono text-success text-xl">
+								{migrationStats.imported}
+							</span>
+						</div>
+						<div className="rounded-xl bg-base-100 p-3 text-center shadow-sm">
+							<span className="block font-bold text-base-content/40 text-xs uppercase tracking-wider">
+								Migrated
+							</span>
+							<span className="font-bold font-mono text-primary text-xl">
+								{migrationStats.symlinks_migrated}
+							</span>
+						</div>
+						<div className="rounded-xl bg-base-100 p-3 text-center shadow-sm">
+							<span className="block font-bold text-base-content/40 text-xs uppercase tracking-wider">
+								Failed
+							</span>
+							<span className="font-bold font-mono text-error text-xl">
+								{migrationStats.failed}
+							</span>
+						</div>
+					</div>
+				)}
+
+				<form onSubmit={handleSubmit} className="space-y-4">
+					<fieldset className="fieldset min-w-0">
+						<legend className="fieldset-legend font-semibold text-xs">Library Path</legend>
+						<input
+							type="text"
+							placeholder="/mnt/media/movies"
+							className="input w-full bg-base-100 font-mono"
+							value={libraryPath}
+							onChange={(e) => setLibraryPath(e.target.value)}
+							required
+						/>
+						<p className="label text-base-content/60 text-xs">
+							The directory containing your arr library symlinks.
+						</p>
+					</fieldset>
+
+					<fieldset className="fieldset min-w-0">
+						<legend className="fieldset-legend font-semibold text-xs">NZBDav Mount Path</legend>
+						<input
+							type="text"
+							placeholder="/mnt/remote/nzbdav"
+							className="input w-full bg-base-100 font-mono"
+							value={sourceMountPath}
+							onChange={(e) => setSourceMountPath(e.target.value)}
+							required
+						/>
+						<p className="label text-base-content/60 text-xs">
+							The root path of your nzbdav mount (symlinks currently point here).
+						</p>
+					</fieldset>
+
+					<label className="flex cursor-pointer items-center gap-3">
+						<input
+							type="checkbox"
+							className="checkbox checkbox-primary checkbox-sm"
+							checked={dryRun}
+							onChange={(e) => setDryRun(e.target.checked)}
+						/>
+						<span className="text-sm">Dry run (preview only, no changes)</span>
+					</label>
+
+					<div className="flex items-center gap-3 pt-2">
+						<button
+							type="submit"
+							className="btn btn-primary btn-sm px-6"
+							disabled={migrate.isPending || !libraryPath || !sourceMountPath}
+						>
+							{migrate.isPending ? <LoadingSpinner size="sm" /> : <Play className="h-4 w-4" />}
+							{dryRun ? "Preview" : "Migrate"}
+						</button>
+
+						{lastReport?.dry_run && lastReport.matched > 0 && (
+							<button
+								type="button"
+								className="btn btn-success btn-sm px-6"
+								onClick={handleApply}
+								disabled={migrate.isPending}
+							>
+								<ArrowRight className="h-4 w-4" />
+								Apply ({lastReport.matched} symlinks)
+							</button>
+						)}
+					</div>
+				</form>
+
+				{lastReport && (
+					<div className="space-y-3 rounded-xl border border-base-300 bg-base-100 p-4">
+						<div className="flex items-center gap-2">
+							<CheckCircle2 className="h-4 w-4 text-success" />
+							<span className="font-semibold text-sm">
+								{lastReport.dry_run ? "Dry Run Results" : "Migration Results"}
+							</span>
+						</div>
+						<div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+							<div className="text-center">
+								<div className="font-bold font-mono text-lg">{lastReport.scanned}</div>
+								<div className="text-base-content/50 text-xs uppercase">Scanned</div>
+							</div>
+							<div className="text-center">
+								<div className="font-bold font-mono text-lg text-primary">{lastReport.matched}</div>
+								<div className="text-base-content/50 text-xs uppercase">Matched</div>
+							</div>
+							<div className="text-center">
+								<div className="font-bold font-mono text-lg text-success">
+									{lastReport.rewritten}
+								</div>
+								<div className="text-base-content/50 text-xs uppercase">
+									{lastReport.dry_run ? "Would Rewrite" : "Rewritten"}
+								</div>
+							</div>
+							<div className="text-center">
+								<div className="font-bold font-mono text-lg text-warning">
+									{lastReport.unmatched.length}
+								</div>
+								<div className="text-base-content/50 text-xs uppercase">Unmatched</div>
+							</div>
+						</div>
+						{lastReport.unmatched.length > 0 && (
+							<details className="mt-2">
+								<summary className="cursor-pointer text-warning text-xs">
+									{lastReport.unmatched.length} unmatched GUIDs
+								</summary>
+								<ul className="mt-2 max-h-32 overflow-y-auto font-mono text-xs">
+									{lastReport.unmatched.map((guid) => (
+										<li key={guid} className="text-base-content/60">
+											{guid}
+										</li>
+									))}
+								</ul>
+							</details>
+						)}
+						{lastReport.errors.length > 0 && (
+							<div className="alert alert-error mt-2 text-xs">
+								<AlertCircle className="h-4 w-4" />
+								<span>{lastReport.errors.length} error(s) — check server logs</span>
+							</div>
+						)}
+					</div>
+				)}
+			</div>
+		</section>
 	);
 }
 
