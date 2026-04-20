@@ -384,16 +384,6 @@ func (mrf *MetadataRemoteFile) RenameFile(ctx context.Context, oldName, newName 
 			}
 		}
 
-		// Update ID symlinks for all files with NzbdavId under the renamed directory
-		_ = mrf.metadataService.WalkDirectoryFiles(normalizedNew, func(fileVirtualPath string, meta *metapb.FileMetadata) error {
-			if meta.NzbdavId != "" {
-				if err := mrf.metadataService.UpdateIDSymlink(meta.NzbdavId, fileVirtualPath); err != nil {
-					slog.WarnContext(ctx, "Failed to update ID symlink after directory rename", "id", meta.NzbdavId, "path", fileVirtualPath, "error", err)
-				}
-			}
-			return nil
-		})
-
 		return true, nil
 	}
 
@@ -404,22 +394,9 @@ func (mrf *MetadataRemoteFile) RenameFile(ctx context.Context, oldName, newName 
 		return false, nil
 	}
 
-	// Read metadata first to get NzbdavId before rename
-	fileMeta, err := mrf.metadataService.ReadFileMetadata(normalizedOld)
-	if err != nil {
-		return false, fmt.Errorf("failed to read old metadata: %w", err)
-	}
-
 	// Use atomic rename instead of read-write-delete
 	if err := mrf.metadataService.RenameFileMetadata(normalizedOld, normalizedNew); err != nil {
 		return false, fmt.Errorf("failed to rename metadata: %w", err)
-	}
-
-	// Update ID symlink if file has a NzbdavId
-	if fileMeta != nil && fileMeta.NzbdavId != "" {
-		if err := mrf.metadataService.UpdateIDSymlink(fileMeta.NzbdavId, normalizedNew); err != nil {
-			slog.WarnContext(ctx, "Failed to update ID symlink during MOVE", "id", fileMeta.NzbdavId, "error", err)
-		}
 	}
 
 	// Update health records and resolve pending repairs

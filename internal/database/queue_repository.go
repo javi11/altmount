@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 )
 
@@ -468,58 +467,6 @@ func (r *QueueRepository) IncrementRetryCountAndResetStatus(ctx context.Context,
 	}
 
 	return rowsAffected > 0, nil
-}
-
-// FilterExistingNzbdavIds checks a list of nzbdav IDs and returns those that already exist in the queue
-func (r *QueueRepository) FilterExistingNzbdavIds(ctx context.Context, ids []string) ([]string, error) {
-	if len(ids) == 0 {
-		return nil, nil
-	}
-
-	// We can't pass too many parameters at once, so we batch the query
-	batchSize := 500
-	existingIds := make([]string, 0)
-
-	for i := 0; i < len(ids); i += batchSize {
-		end := min(i+batchSize, len(ids))
-
-		batchIds := ids[i:end]
-
-		// Build placeholders for the IN clause
-		placeholders := make([]string, len(batchIds))
-		args := make([]any, len(batchIds))
-		for j, id := range batchIds {
-			placeholders[j] = "?"
-			args[j] = id
-		}
-
-		// Query using json_extract (SQLite) or ->>'key' (PostgreSQL) to find matching IDs
-		jsonExpr := r.dialect.JSONExtract("metadata", "nzbdav_id")
-		query := fmt.Sprintf(`
-			SELECT DISTINCT %s
-			FROM import_queue
-			WHERE %s IN (%s)
-		`, jsonExpr, jsonExpr, strings.Join(placeholders, ","))
-
-		rows, err := r.db.QueryContext(ctx, query, args...)
-		if err != nil {
-			return nil, fmt.Errorf("failed to check existing nzbdav IDs: %w", err)
-		}
-
-		for rows.Next() {
-			var id sql.NullString
-			if err := rows.Scan(&id); err != nil {
-				rows.Close()
-				return nil, fmt.Errorf("failed to scan matching id: %w", err)
-			}
-			if id.Valid {
-				existingIds = append(existingIds, id.String)
-			}
-		}
-		rows.Close()
-	}
-
-	return existingIds, nil
 }
 
 // UpdateQueueItemPriority updates the priority of a queue item

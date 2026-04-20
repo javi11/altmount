@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -111,18 +110,6 @@ func (ms *MetadataService) WriteFileMetadata(virtualPath string, metadata *metap
 		metadata.NzbdavId = nzbdavId // Restore on error
 		_ = os.Remove(tmpPath)       // Clean up
 		return fmt.Errorf("failed to rename metadata file: %w", err)
-	}
-
-	// Handle ID sidecar file
-	idPath := metadataPath + ".id"
-	if nzbdavId != "" {
-		if err := os.WriteFile(idPath, []byte(nzbdavId), 0644); err != nil {
-			// Log error but don't fail the operation
-			slog.WarnContext(context.Background(), "Failed to write ID sidecar file", "path", idPath, "error", err)
-		}
-	} else {
-		// Clean up existing ID file if present
-		_ = os.Remove(idPath)
 	}
 
 	metadata.NzbdavId = nzbdavId // Restore for in-memory use
@@ -395,11 +382,6 @@ func (ms *MetadataService) DeleteFileMetadataWithSourceNzb(ctx context.Context, 
 		}
 	}
 
-	// Remove .ids/ symlink before deletion
-	if idData, readErr := os.ReadFile(metadataPath + ".id"); readErr == nil && len(idData) > 0 {
-		_ = ms.RemoveIDSymlink(string(idData))
-	}
-
 	// Delete the metadata file
 	err := os.Remove(metadataPath)
 	if err != nil && !os.IsNotExist(err) {
@@ -498,56 +480,6 @@ func (ms *MetadataService) RenameFileMetadata(oldVirtualPath, newVirtualPath str
 		}
 	}
 
-	return nil
-}
-
-// UpdateIDSymlink creates or updates an ID-based symlink in the .ids/ sharded directory.
-// On Windows, symlinks are not supported and this operation is skipped gracefully.
-func (ms *MetadataService) UpdateIDSymlink(nzbdavID, virtualPath string) error {
-	if runtime.GOOS == "windows" {
-		return nil // Symlinks not supported on Windows; ID-based lookup via symlinks is skipped
-	}
-
-	id := strings.ToLower(nzbdavID)
-	if len(id) < 5 {
-		return nil // Invalid ID for sharding
-	}
-
-	shardPath := filepath.Join(".ids", string(id[0]), string(id[1]), string(id[2]), string(id[3]), string(id[4]))
-	fullShardDir := filepath.Join(ms.rootPath, shardPath)
-
-	if err := os.MkdirAll(fullShardDir, 0755); err != nil {
-		return err
-	}
-
-	targetMetaPath := ms.GetMetadataFilePath(virtualPath)
-	linkPath := filepath.Join(fullShardDir, id+".meta")
-
-	// Remove existing symlink if present
-	os.Remove(linkPath)
-
-	// Create relative symlink
-	relTarget, err := filepath.Rel(fullShardDir, targetMetaPath)
-	if err != nil {
-		return os.Symlink(targetMetaPath, linkPath)
-	}
-
-	return os.Symlink(relTarget, linkPath)
-}
-
-// RemoveIDSymlink removes an ID-based symlink from the .ids/ sharded directory.
-func (ms *MetadataService) RemoveIDSymlink(nzbdavID string) error {
-	id := strings.ToLower(nzbdavID)
-	if len(id) < 5 {
-		return nil
-	}
-
-	shardPath := filepath.Join(".ids", string(id[0]), string(id[1]), string(id[2]), string(id[3]), string(id[4]))
-	linkPath := filepath.Join(ms.rootPath, shardPath, id+".meta")
-
-	if err := os.Remove(linkPath); err != nil && !os.IsNotExist(err) {
-		return err
-	}
 	return nil
 }
 
@@ -752,11 +684,6 @@ func (ms *MetadataService) MoveToCorrupted(ctx context.Context, virtualPath stri
 	}
 
 	targetPath := filepath.Join(targetDir, truncatedFilename+".meta")
-
-	// Remove .ids/ symlink before moving to corrupted
-	if idData, readErr := os.ReadFile(metadataPath + ".id"); readErr == nil && len(idData) > 0 {
-		_ = ms.RemoveIDSymlink(string(idData))
-	}
 
 	// Move the .meta file
 	if err := os.Rename(metadataPath, targetPath); err != nil {

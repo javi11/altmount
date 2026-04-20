@@ -102,10 +102,6 @@ func (a *batchQueueAdapterForImporter) AddBatchToQueue(ctx context.Context, item
 	return a.repo.AddBatchToQueue(ctx, items)
 }
 
-func (a *batchQueueAdapterForImporter) FilterExistingNzbdavIds(ctx context.Context, ids []string) ([]string, error) {
-	return a.repo.FilterExistingNzbdavIds(ctx, ids)
-}
-
 // isFileAlreadyProcessed checks if a file has already been processed by checking metadata
 func isFileAlreadyProcessed(metadataService *metadata.MetadataService, filePath string, scanRoot string) bool {
 	// Calculate virtual path
