@@ -899,8 +899,9 @@ type ScanStatusResponse struct {
 
 // ManualImportRequest represents a request to manually import a file by path
 type ManualImportRequest struct {
-	FilePath     string  `json:"file_path"`
-	RelativePath *string `json:"relative_path,omitempty"`
+	FilePath            string  `json:"file_path"`
+	RelativePath        *string `json:"relative_path,omitempty"`
+	SkipArrNotification bool    `json:"skip_arr_notification,omitempty"`
 }
 
 // ManualImportResponse represents the response from manually importing a file

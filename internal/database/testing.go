@@ -32,6 +32,7 @@ func setupQueueSchema(t *testing.T, db *sql.DB) {
 			category TEXT DEFAULT NULL,
 			file_size BIGINT DEFAULT NULL,
 			target_path TEXT DEFAULT NULL,
+			skip_arr_notification BOOLEAN NOT NULL DEFAULT FALSE,
 			UNIQUE(nzb_path)
 		);
 

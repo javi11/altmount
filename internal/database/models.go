@@ -44,8 +44,9 @@ type ImportQueueItem struct {
 	ErrorMessage *string       `db:"error_message"`
 	BatchID      *string       `db:"batch_id"`
 	Metadata     *string       `db:"metadata"`    // JSON metadata
-	FileSize     *int64        `db:"file_size"`   // Total size in bytes calculated from segments
-	TargetPath   *string       `db:"target_path"` // Optional forced symlink destination path
+	FileSize             *int64        `db:"file_size"`             // Total size in bytes calculated from segments
+	TargetPath           *string       `db:"target_path"`           // Optional forced symlink destination path
+	SkipArrNotification  bool          `db:"skip_arr_notification"`
 }
 
 // BulkOperationResult represents the result of a bulk queue operation
@@ -167,3 +168,4 @@ type ImportHistory struct {
 	Metadata    *string   `db:"metadata"`
 	CompletedAt time.Time `db:"completed_at"`
 }
+
