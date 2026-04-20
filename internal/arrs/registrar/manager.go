@@ -470,9 +470,9 @@ func (m *Manager) EnsureDownloadClientRegistration(ctx context.Context, altmount
 				}
 				_, err := client.AddDownloadClientContext(ctx, dc)
 				if err != nil {
-					slog.ErrorContext(ctx, "Failed to add Radarr download client", "instance", instance.Name, "error", err)
+					slog.ErrorContext(ctx, "Failed to add download client to "+instance.Type, "instance", instance.Name, "error", err)
 				} else {
-					slog.InfoContext(ctx, "Added AltMount download client to Radarr", "instance", instance.Name)
+					slog.InfoContext(ctx, "Added AltMount download client to "+instance.Type, "instance", instance.Name, "category", category)
 				}
 			}
 
