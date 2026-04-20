@@ -419,7 +419,7 @@ func (m *Manager) EnsureDownloadClientRegistration(ctx context.Context, altmount
 					slog.InfoContext(ctx, "Updating Radarr download client API key/Host", "instance", instance.Name)
 					category := instance.Category
 					if category == "" {
-						category = "movies"
+						slog.WarnContext(ctx, "No category found in configuration for instance, using empty string", "instance", instance.Name)
 					}
 					dc := &radarr.DownloadClientInput{
 						ID:                       existing.ID,
@@ -442,13 +442,13 @@ func (m *Manager) EnsureDownloadClientRegistration(ctx context.Context, altmount
 					}
 					_, err := client.UpdateDownloadClientContext(ctx, dc, true)
 					if err != nil {
-						slog.ErrorContext(ctx, "Failed to update Radarr download client", "instance", instance.Name, "error", err)
+						slog.ErrorContext(ctx, "Failed to update download client", "instance", instance.Name, "error", err)
 					}
 				}
 			} else {
 				category := instance.Category
 				if category == "" {
-					category = "movies"
+					slog.WarnContext(ctx, "No category found in configuration for instance, using empty string", "instance", instance.Name)
 				}
 				dc := &radarr.DownloadClientInput{
 					Name:                     clientName,
@@ -514,7 +514,7 @@ func (m *Manager) EnsureDownloadClientRegistration(ctx context.Context, altmount
 					slog.InfoContext(ctx, "Updating Sonarr download client API key/Host", "instance", instance.Name)
 					category := instance.Category
 					if category == "" {
-						category = "tv"
+						slog.WarnContext(ctx, "No category found in configuration for instance, using empty string", "instance", instance.Name)
 					}
 					dc := &sonarr.DownloadClientInput{
 						ID:                       existing.ID,
@@ -537,13 +537,13 @@ func (m *Manager) EnsureDownloadClientRegistration(ctx context.Context, altmount
 					}
 					_, err := client.UpdateDownloadClientContext(ctx, dc, true)
 					if err != nil {
-						slog.ErrorContext(ctx, "Failed to update Sonarr download client", "instance", instance.Name, "error", err)
+						slog.ErrorContext(ctx, "Failed to update download client", "instance", instance.Name, "error", err)
 					}
 				}
 			} else {
 				category := instance.Category
 				if category == "" {
-					category = "tv"
+					slog.WarnContext(ctx, "No category found in configuration for instance, using empty string", "instance", instance.Name)
 				}
 				dc := &sonarr.DownloadClientInput{
 					Name:                     clientName,
