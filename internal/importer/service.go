@@ -1003,6 +1003,15 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 		return err
 	}
 
+	// Update import_migrations row if this was a nzbdav migration import
+	if s.database.MigrationRepo != nil {
+		if err := s.database.MigrationRepo.MarkImported(ctx, item.ID, resultingPath); err != nil {
+			// Non-fatal: log but don't fail
+			s.log.WarnContext(ctx, "Failed to mark import_migration as imported",
+				"queue_id", item.ID, "error", err)
+		}
+	}
+
 	// Notify completion and clear progress tracking
 	if s.broadcaster != nil {
 		s.broadcaster.NotifyComplete(int(item.ID), "completed")
@@ -1086,6 +1095,14 @@ func (s *Service) handleProcessingFailure(ctx context.Context, item *database.Im
 		s.log.ErrorContext(ctx, "Item failed",
 			"queue_id", item.ID,
 			"file", item.NzbPath)
+	}
+
+	// Update import_migrations row if this was a nzbdav migration import
+	if s.database.MigrationRepo != nil {
+		if err := s.database.MigrationRepo.MarkFailed(ctx, item.ID, errorMessage); err != nil {
+			s.log.WarnContext(ctx, "Failed to mark import_migration as failed",
+				"queue_id", item.ID, "error", err)
+		}
 	}
 
 	// Notify failure and clear progress tracking
