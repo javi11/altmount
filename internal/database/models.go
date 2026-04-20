@@ -169,8 +169,3 @@ type ImportHistory struct {
 	CompletedAt time.Time `db:"completed_at"`
 }
 
-// ImportQueueMetadata is the JSON payload stored in ImportQueueItem.Metadata.
-// Fields are omitempty so partial writes don't clobber unrelated keys.
-type ImportQueueMetadata struct {
-	NzbdavID string `json:"nzbdav_id,omitempty"`
-}
