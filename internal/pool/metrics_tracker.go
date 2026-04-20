@@ -2,6 +2,7 @@ package pool
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"maps"
 	"strings"
@@ -554,6 +555,43 @@ func (mt *MetricsTracker) Reset(ctx context.Context, resetPeak bool, resetTotals
 	}
 
 	mt.logger.InfoContext(ctx, "Pool metrics have been reset", "reset_peak", resetPeak, "reset_totals", resetTotals)
+	return nil
+}
+
+// ResetProviderErrors zeroes out all per-provider error counts by offsetting
+// the live pool error counts. Bytes, speed, and history are untouched.
+func (mt *MetricsTracker) ResetProviderErrors(ctx context.Context) error {
+	mt.mu.Lock()
+	defer mt.mu.Unlock()
+
+	// Negate the live error counts so that displayed = initial + live = 0.
+	poolStats := mt.pool.Stats()
+	for _, ps := range poolStats.Providers {
+		mt.initialProviderErrors[ps.Name] = -ps.Errors
+	}
+
+	// Persist zeros for all provider_error:* keys in the database.
+	if mt.repo != nil {
+		currentStats, err := mt.repo.GetSystemStats(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to fetch stats for provider error reset: %w", err)
+		}
+
+		resetMap := make(map[string]int64)
+		for k := range currentStats {
+			if strings.HasPrefix(k, "provider_error:") {
+				resetMap[k] = 0
+			}
+		}
+
+		if len(resetMap) > 0 {
+			if err := mt.repo.BatchUpdateSystemStats(ctx, resetMap); err != nil {
+				return fmt.Errorf("failed to persist provider error reset: %w", err)
+			}
+		}
+	}
+
+	mt.logger.InfoContext(ctx, "Provider error counts reset")
 	return nil
 }
 

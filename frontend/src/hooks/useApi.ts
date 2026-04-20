@@ -562,6 +562,7 @@ export const useResetSystemStats = () => {
 			reset_totals?: boolean;
 			reset_history?: boolean;
 			reset_queue?: boolean;
+			reset_provider_errors?: boolean;
 		}) => apiClient.resetSystemStats(params),
 		onSuccess: () => {
 			// Invalidate all relevant metrics and history to show reset values

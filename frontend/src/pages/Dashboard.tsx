@@ -48,6 +48,7 @@ export function Dashboard() {
 		reset_totals?: boolean;
 		reset_history?: boolean;
 		reset_queue?: boolean;
+		reset_provider_errors?: boolean;
 		label: string;
 	}) => {
 		if (confirm(`Are you sure you want to reset ${options.label}?`)) {
@@ -58,6 +59,7 @@ export function Dashboard() {
 					reset_totals: options.reset_totals,
 					reset_history: options.reset_history,
 					reset_queue: options.reset_queue,
+					reset_provider_errors: options.reset_provider_errors,
 				});
 				showToast({
 					type: "success",
@@ -131,6 +133,19 @@ export function Dashboard() {
 								}
 							>
 								Reset Download Totals
+							</button>
+						</li>
+						<li>
+							<button
+								type="button"
+								onClick={() =>
+									handleResetStats({
+										reset_provider_errors: true,
+										label: "provider error counts",
+									})
+								}
+							>
+								Reset Provider Errors
 							</button>
 						</li>
 						<div className="divider my-1" />

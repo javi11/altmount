@@ -606,7 +606,7 @@ func (s *Server) handleSABnzbdQueue(c *fiber.Ctx) error {
 	var totalMbLeft float64
 
 	for i, item := range items {
-		if item.Status == database.QueueStatusFallback {
+		if item.Status == database.QueueStatusFallback || item.SkipArrNotification {
 			continue
 		}
 
@@ -762,6 +762,9 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 	finalItems := make([]*database.ImportQueueItem, 0)
 
 	for _, item := range completedQueueItems {
+		if item.SkipArrNotification {
+			continue
+		}
 		name := filepath.Base(item.NzbPath)
 		// Filter by nzo_ids if requested (check both integer ID and DownloadID)
 		if len(nzoIDs) > 0 {
@@ -821,6 +824,9 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 
 	// Combine failed items for noofslots calculation
 	for _, item := range failed {
+		if item.SkipArrNotification {
+			continue
+		}
 		name := filepath.Base(item.NzbPath)
 		// Filter by nzo_ids if requested
 		if len(nzoIDs) > 0 {

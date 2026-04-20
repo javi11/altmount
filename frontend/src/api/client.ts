@@ -735,6 +735,7 @@ export class APIClient {
 		reset_totals?: boolean;
 		reset_history?: boolean;
 		reset_queue?: boolean;
+		reset_provider_errors?: boolean;
 	}) {
 		const searchParams = new URLSearchParams();
 		if (params?.duration) searchParams.set("duration", params.duration);
@@ -742,6 +743,7 @@ export class APIClient {
 		if (params?.reset_totals) searchParams.set("reset_totals", "true");
 		if (params?.reset_history) searchParams.set("reset_history", "true");
 		if (params?.reset_queue) searchParams.set("reset_queue", "true");
+		if (params?.reset_provider_errors) searchParams.set("reset_provider_errors", "true");
 
 		const query = searchParams.toString();
 		return this.request<{ message: string }>(`/system/stats/reset${query ? `?${query}` : ""}`, {

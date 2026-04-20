@@ -264,14 +264,15 @@ func (s *Server) handleManualImportFile(c *fiber.Ctx) error {
 
 	// Add the file to the processing queue
 	item := &database.ImportQueueItem{
-		NzbPath:      req.FilePath,
-		Priority:     database.QueuePriorityNormal,
-		Status:       database.QueueStatusPending,
-		RetryCount:   0,
-		MaxRetries:   3,
-		CreatedAt:    time.Now(),
-		RelativePath: req.RelativePath,
-		TargetPath:   targetPath,
+		NzbPath:             req.FilePath,
+		Priority:            database.QueuePriorityNormal,
+		Status:              database.QueueStatusPending,
+		RetryCount:          0,
+		MaxRetries:          3,
+		CreatedAt:           time.Now(),
+		RelativePath:        req.RelativePath,
+		TargetPath:          targetPath,
+		SkipArrNotification: req.SkipArrNotification,
 	}
 
 	slog.DebugContext(c.Context(), "Adding file to queue", "file", req.FilePath, "relative_path", req.RelativePath, "target_path", targetPath)
