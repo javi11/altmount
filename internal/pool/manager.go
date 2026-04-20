@@ -31,6 +31,10 @@ type Manager interface {
 	// ResetMetrics resets specific cumulative metrics
 	ResetMetrics(ctx context.Context, resetPeak bool, resetTotals bool) error
 
+	// ResetProviderErrors zeroes all per-provider error counts without
+	// affecting bytes downloaded, peak speed, or history.
+	ResetProviderErrors(ctx context.Context) error
+
 	// IncArticlesDownloaded increments the count of articles successfully downloaded
 	IncArticlesDownloaded()
 
@@ -262,6 +266,18 @@ func (m *manager) ResetMetrics(ctx context.Context, resetPeak bool, resetTotals 
 	}
 
 	return nil
+}
+
+// ResetProviderErrors zeroes per-provider error counts without affecting other metrics.
+func (m *manager) ResetProviderErrors(ctx context.Context) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if m.metricsTracker == nil {
+		return nil
+	}
+
+	return m.metricsTracker.ResetProviderErrors(ctx)
 }
 
 // IncArticlesDownloaded increments the count of articles successfully downloaded
