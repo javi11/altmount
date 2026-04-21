@@ -24,6 +24,7 @@ import (
 	"github.com/javi11/altmount/internal/importer/postprocessor"
 	"github.com/javi11/altmount/internal/importer/queue"
 	"github.com/javi11/altmount/internal/importer/scanner"
+	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
@@ -119,7 +120,7 @@ func isFileAlreadyProcessed(metadataService *metadata.MetadataService, filePath 
 
 	// Normalize filename (remove .nzb extension)
 	fileName := filepath.Base(filePath)
-	baseName := strings.TrimSuffix(fileName, filepath.Ext(fileName))
+	baseName := nzbtrim.TrimNzbExtension(fileName)
 
 	// Check if a directory exists with the release name
 	releaseDir := filepath.Join(virtualPath, baseName)
@@ -850,7 +851,7 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 	filename := filepath.Base(item.NzbPath)
 	newFilename := sanitizeFilename(filename)
 	if !strings.HasSuffix(strings.ToLower(newFilename), nzbGzExtension) {
-		newFilename = strings.TrimSuffix(newFilename, filepath.Ext(newFilename)) + nzbGzExtension
+		newFilename = nzbtrim.TrimNzbExtension(newFilename) + nzbGzExtension
 	}
 	newPath := filepath.Join(nzbDir, newFilename)
 
@@ -1339,7 +1340,7 @@ func (s *Service) RegenerateMetadata(ctx context.Context, mountRelativePath stri
 	if releaseName == "" {
 		// Fallback: use the filename without extension
 		releaseName = filepath.Base(mountRelativePath)
-		releaseName = strings.TrimSuffix(releaseName, filepath.Ext(releaseName))
+		releaseName = nzbtrim.TrimNzbExtension(releaseName)
 	}
 
 	s.log.InfoContext(ctx, "Attempting to regenerate metadata", "path", mountRelativePath, "release_name", releaseName)

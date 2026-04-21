@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/javi11/altmount/internal/importer/parser"
+	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
 	"github.com/javi11/altmount/internal/metadata"
 )
 
@@ -117,7 +118,7 @@ func EnsureDirectoryExists(virtualDir string, metadataService *metadata.Metadata
 
 // CreateNzbFolder creates a folder named after the NZB file
 func CreateNzbFolder(virtualDir, nzbFilename string, metadataService *metadata.MetadataService) (string, error) {
-	nzbBaseName := strings.TrimSuffix(nzbFilename, filepath.Ext(nzbFilename))
+	nzbBaseName := nzbtrim.TrimNzbExtension(nzbFilename)
 	// Now, also strip the media file extension if it exists
 	// Common media extensions: .mkv, .mp4, .avi, .flv, .wmv, .mov, .webm
 	// This is not exhaustive, but covers common cases.

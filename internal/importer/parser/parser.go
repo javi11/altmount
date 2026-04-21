@@ -21,6 +21,7 @@ import (
 	"github.com/javi11/altmount/internal/errors"
 	"github.com/javi11/altmount/internal/importer/parser/fileinfo"
 	"github.com/javi11/altmount/internal/importer/parser/par2"
+	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
@@ -354,7 +355,7 @@ func (p *Parser) parseFile(ctx context.Context, meta map[string]string, nzbFilen
 		if metaFilename, ok := meta["file_name"]; ok && metaFilename != "" {
 			if fSize, ok := meta["file_size"]; ok {
 				// This is a usenet-drive nzb with one file
-				metaFilename = strings.TrimSuffix(nzbFilename, filepath.Ext(nzbFilename))
+				metaFilename = nzbtrim.TrimNzbExtension(nzbFilename)
 
 				if fe, ok := meta["file_extension"]; ok {
 					metaFilename = metaFilename + fe

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/javi11/altmount/internal/importer/parser/par2"
+	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
 )
 
 var (
@@ -24,7 +25,7 @@ func GetFileInfos(
 	nzbFilename string,
 ) []*FileInfo {
 	// Strip .nzb extension for use as last-resort filename stem
-	nzbStem := strings.TrimSuffix(nzbFilename, filepath.Ext(nzbFilename))
+	nzbStem := nzbtrim.TrimNzbExtension(nzbFilename)
 
 	fileInfos := make([]*FileInfo, 0, len(files))
 	for _, file := range files {
