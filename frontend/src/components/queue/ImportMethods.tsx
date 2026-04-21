@@ -37,13 +37,18 @@ import { FileBrowserModal } from "../files/FileBrowserModal";
 import { ErrorAlert } from "../ui/ErrorAlert";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
 
-type ImportTab = "nzbdav" | "directory" | "upload";
+type ImportTab = "nzbdav" | "directory" | "upload" | "nzbdav-symlinks";
 
 const IMPORT_SECTIONS = {
 	nzbdav: {
 		title: "From NZBDav",
 		description: "Import your existing NZBDav database to populate the library.",
 		icon: Database,
+	},
+	"nzbdav-symlinks": {
+		title: "Migrate Symlinks",
+		description: "Rewrite arr library symlinks from the nzbdav mount to AltMount.",
+		icon: Link,
 	},
 	directory: {
 		title: "From Directory",
@@ -129,6 +134,7 @@ export function ImportMethods() {
 
 						<div className="max-w-4xl">
 							{activeTab === "nzbdav" && <NzbDavImportSection />}
+							{activeTab === "nzbdav-symlinks" && <NzbdavPhase2StandaloneSection />}
 							{activeTab === "directory" && <DirectoryScanSection />}
 							{activeTab === "upload" && <EnhancedUploadSection />}
 						</div>
@@ -1218,6 +1224,17 @@ function NzbdavPhase2Section({ migrationStats }: NzbdavPhase2SectionProps) {
 				)}
 			</div>
 		</section>
+	);
+}
+
+function NzbdavPhase2StandaloneSection() {
+	const { data: importStatus } = useNzbdavImportStatus(10000);
+	const migrationStats = importStatus?.migration_stats;
+
+	return (
+		<div className="space-y-8">
+			<NzbdavPhase2Section migrationStats={migrationStats} />
+		</div>
 	);
 }
 
