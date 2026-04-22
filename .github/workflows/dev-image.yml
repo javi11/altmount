@@ -59,6 +59,67 @@ jobs:
           path: frontend/dist
           retention-days: 1
 
+  prepare-dev-release:
+    name: Ensure Dev Prerelease Exists
+    runs-on: ubuntu-latest
+    needs: build-frontend
+    permissions:
+      contents: write
+    outputs:
+      short_sha: ${{ steps.sha.outputs.short_sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute short SHA
+        id: sha
+        run: echo "short_sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Ensure rolling dev prerelease
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create dev \
+            --prerelease \
+            --title "Dev Build" \
+            --notes "Rolling development build from main branch" \
+            --target main 2>/dev/null \
+            || gh release edit dev \
+                --prerelease \
+                --target main \
+                --title "Dev Build" \
+                --notes "Rolling development build from main branch (commit ${{ github.sha }})"
+
+      - name: Delete previous dev assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          assets=$(gh release view dev --json assets -q '.assets[].name' || true)
+          if [ -n "$assets" ]; then
+            echo "$assets" | while read -r asset; do
+              [ -z "$asset" ] && continue
+              echo "Deleting asset: $asset"
+              gh release delete-asset dev "$asset" --yes || true
+            done
+          else
+            echo "No existing assets on dev release"
+          fi
+
+  publish-dev-binaries:
+    name: Publish Dev CLI Binaries
+    needs: prepare-dev-release
+    permissions:
+      contents: write
+    uses: ./.github/workflows/build-cli.yml
+    with:
+      version: dev-${{ github.sha }}
+      commit: ${{ needs.prepare-dev-release.outputs.short_sha }}
+      upload-to-release: true
+      release-tag: dev
+      prerelease: true
+
   build-dev-amd64:
     name: Build Dev Image (AMD64)
     runs-on: ubuntu-latest

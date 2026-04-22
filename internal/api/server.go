@@ -23,6 +23,7 @@ import (
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/rclone"
+	"github.com/javi11/altmount/internal/updater"
 	"github.com/javi11/altmount/internal/version"
 	"github.com/javi11/altmount/pkg/rclonecli"
 )
@@ -64,6 +65,7 @@ type Server struct {
 	cacheSource         *segcache.Source
 	logFilePath         string
 	migrationRepo       *database.ImportMigrationRepository
+	updater             updater.Updater
 	ready               atomic.Bool
 }
 
@@ -109,6 +111,7 @@ func NewServer(
 		streamTracker:       streamTracker,
 		cacheSource:         cacheSource,
 		fuseManager:         NewFuseManager(newMountFactory(nzbFilesystem, configManager, streamTracker)),
+		updater:             updater.Default(),
 	}
 
 	return server
@@ -117,6 +120,12 @@ func NewServer(
 // SetHealthWorker sets the health worker reference for the server
 func (s *Server) SetHealthWorker(healthWorker *health.HealthWorker) {
 	s.healthWorker = healthWorker
+}
+
+// SetUpdater overrides the binary updater used for self-update operations.
+// Primarily intended for tests that need to substitute a fake implementation.
+func (s *Server) SetUpdater(u updater.Updater) {
+	s.updater = u
 }
 
 // SetLibrarySyncWorker sets the library sync worker reference for the server
