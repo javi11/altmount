@@ -18,6 +18,7 @@ import (
 	"github.com/javi11/altmount/internal/importer/filesystem"
 	"github.com/javi11/altmount/internal/importer/parser"
 	"github.com/javi11/altmount/internal/importer/utils"
+	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
 	"github.com/javi11/altmount/internal/importer/validation"
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
@@ -217,7 +218,7 @@ func ProcessArchive(ctx context.Context, opts ProcessArchiveOptions) error {
 	}
 
 	nzbName := filepath.Base(nzbPath)
-	releaseName := strings.TrimSuffix(nzbName, filepath.Ext(nzbName))
+	releaseName := nzbtrim.TrimNzbExtension(nzbName)
 	shouldNormalizeName := renameToNzbName && mediaFilesCount == 1
 
 	// Count ISO-expanded files so single-file ISOs omit the index suffix.
@@ -521,7 +522,7 @@ func expandISOContents(
 
 // normalizeArchiveReleaseFilename aligns the filename to the NZB basename while keeping the original extension.
 func normalizeArchiveReleaseFilename(nzbFilename, originalFilename string) string {
-	releaseName := strings.TrimSuffix(nzbFilename, filepath.Ext(nzbFilename))
+	releaseName := nzbtrim.TrimNzbExtension(nzbFilename)
 	fileExt := filepath.Ext(originalFilename)
 
 	if fileExt == "" {

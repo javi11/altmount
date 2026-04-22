@@ -20,6 +20,7 @@ import (
 	"github.com/javi11/altmount/internal/importer/multifile"
 	"github.com/javi11/altmount/internal/importer/parser"
 	"github.com/javi11/altmount/internal/importer/singlefile"
+	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
@@ -330,7 +331,7 @@ func (proc *Processor) processSingleFile(
 	// Normalize virtualDir only for synthetic duplicate folders; skip if the NZB actually lives inside a
 	// real directory named like the release (e.g. .../Season 01/<file>/<file>.nzb).
 	nzbName := proc.getCleanNzbName(nzbPath, queueID)
-	releaseName := strings.TrimSuffix(nzbName, filepath.Ext(nzbName))
+	releaseName := nzbtrim.TrimNzbExtension(nzbName)
 	nzbDirBase := filepath.Base(filepath.Dir(nzbPath))
 	fileDir := filepath.Dir(regularFiles[0].Filename)
 	if fileDir == "." || fileDir == "" {
@@ -816,7 +817,7 @@ func applyNzbRename(renameToNzbName bool, nzbName string, files []parser.ParsedF
 // normalizeReleaseFilename aligns the filename to the NZB basename while keeping the original extension.
 // It avoids generating duplicate extensions like ".mp4.mp4" when the NZB name already contains the suffix.
 func normalizeReleaseFilename(nzbFilename, originalFilename string) string {
-	releaseName := strings.TrimSuffix(nzbFilename, filepath.Ext(nzbFilename))
+	releaseName := nzbtrim.TrimNzbExtension(nzbFilename)
 	fileExt := filepath.Ext(originalFilename)
 
 	if fileExt == "" {

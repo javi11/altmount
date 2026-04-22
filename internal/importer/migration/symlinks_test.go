@@ -38,15 +38,16 @@ func TestRewriteLibrarySymlinks(t *testing.T) {
 	)
 
 	tests := []struct {
-		name          string
-		setup         func(t *testing.T, dir string) // create symlinks inside dir
-		lookup        *mockLookup
-		dryRun        bool
-		wantScanned   int
-		wantMatched   int
-		wantRewritten int
-		wantUnmatched int
-		wantErrors    int
+		name                   string
+		setup                  func(t *testing.T, dir string) // create symlinks inside dir
+		lookup                 *mockLookup
+		dryRun                 bool
+		wantScanned            int
+		wantMatched            int
+		wantRewritten          int
+		wantUnmatched          int
+		wantErrors             int
+		wantSkippedWrongPrefix int
 		// optional post-check on filesystem state
 		postCheck func(t *testing.T, dir string)
 	}{
@@ -63,7 +64,8 @@ func TestRewriteLibrarySymlinks(t *testing.T) {
 			},
 			lookup: &mockLookup{
 				paths: map[string]string{
-					"abc123": "/movies/Movie (2020)/Movie (2020).mkv",
+					// GUID is normalised to uppercase before lookup.
+					"ABC123": "/movies/Movie (2020)/Movie (2020).mkv",
 				},
 			},
 			dryRun:        false,
@@ -107,11 +109,12 @@ func TestRewriteLibrarySymlinks(t *testing.T) {
 					t.Fatalf("setup: %v", err)
 				}
 			},
-			lookup:        &mockLookup{paths: map[string]string{}},
-			wantScanned:   1,
-			wantMatched:   0,
-			wantRewritten: 0,
-			wantUnmatched: 0,
+			lookup:                 &mockLookup{paths: map[string]string{}},
+			wantScanned:            1,
+			wantMatched:             0,
+			wantRewritten:           0,
+			wantUnmatched:           0,
+			wantSkippedWrongPrefix: 1,
 		},
 		{
 			name: "dry run - no filesystem change",
@@ -125,7 +128,7 @@ func TestRewriteLibrarySymlinks(t *testing.T) {
 			},
 			lookup: &mockLookup{
 				paths: map[string]string{
-					"dryrun-guid": "/movies/Dry/Dry.mkv",
+					"DRYRUN-GUID": "/movies/Dry/Dry.mkv",
 				},
 			},
 			dryRun:        true,
@@ -147,19 +150,79 @@ func TestRewriteLibrarySymlinks(t *testing.T) {
 			},
 		},
 		{
+			name: "rclonelink match and rewrite",
+			setup: func(t *testing.T, dir string) {
+				t.Helper()
+				// Simulate rclone .rclonelink file: plain text containing the symlink target.
+				// nzbdav .ids/ paths use lowercase UUIDs; the lookup normalises to uppercase.
+				content := sourceMountPath + "/.ids/8/c/0/9/b/8c09b35b-2868-4fb0-9ce3-35e6abbca785"
+				err := os.WriteFile(filepath.Join(dir, "episode.mkv.rclonelink"), []byte(content), 0o644)
+				if err != nil {
+					t.Fatalf("setup: %v", err)
+				}
+			},
+			lookup: &mockLookup{
+				paths: map[string]string{
+					// Key must be uppercase — that's how import_migrations stores the DavItem ID.
+					"8C09B35B-2868-4FB0-9CE3-35E6ABBCA785": "/tv/Show S01/Show.S01E01.mkv",
+				},
+			},
+			dryRun:        false,
+			wantScanned:   1,
+			wantMatched:   1,
+			wantRewritten: 1,
+			postCheck: func(t *testing.T, dir string) {
+				t.Helper()
+				content, err := os.ReadFile(filepath.Join(dir, "episode.mkv.rclonelink"))
+				if err != nil {
+					t.Fatalf("readfile after rewrite: %v", err)
+				}
+				want := filepath.Join(altmountPath, "tv/Show S01/Show.S01E01.mkv")
+				if string(content) != want {
+					t.Errorf("rclonelink content: got %q, want %q", string(content), want)
+				}
+			},
+		},
+		{
+			name: "rclonelink dry run - no filesystem change",
+			setup: func(t *testing.T, dir string) {
+				t.Helper()
+				// Use a realistic lowercase UUID as nzbdav .ids/ paths contain.
+				content := sourceMountPath + "/.ids/d/r/y/r/c/dryrc1one-0000-4fb0-9ce3-35e6abbca785"
+				err := os.WriteFile(filepath.Join(dir, "movie.mkv.rclonelink"), []byte(content), 0o644)
+				if err != nil {
+					t.Fatalf("setup: %v", err)
+				}
+			},
+			lookup: &mockLookup{
+				paths: map[string]string{
+					"DRYRC1ONE-0000-4FB0-9CE3-35E6ABBCA785": "/movies/Dry/Dry.mkv",
+				},
+			},
+			dryRun:        true,
+			wantScanned:   1,
+			wantMatched:   1,
+			wantRewritten: 0,
+			postCheck: func(t *testing.T, dir string) {
+				t.Helper()
+				content, err := os.ReadFile(filepath.Join(dir, "movie.mkv.rclonelink"))
+				if err != nil {
+					t.Fatalf("readfile after dry run: %v", err)
+				}
+				want := sourceMountPath + "/.ids/d/r/y/r/c/dryrc1one-0000-4fb0-9ce3-35e6abbca785"
+				if string(content) != want {
+					t.Errorf("dry run: rclonelink changed: got %q, want %q", string(content), want)
+				}
+			},
+		},
+		{
 			name:  "context cancellation stops walk",
 			setup: func(t *testing.T, dir string) {
 				t.Helper()
-				// Create several symlinks so the walk has entries to process.
-				for i := 0; i < 5; i++ {
-					target := sourceMountPath + "/.ids/guid-cancel"
-					link := filepath.Join(dir, "file")
-					// Only create the first one to keep setup simple.
-					if i == 0 {
-						if err := os.Symlink(target, link); err != nil {
-							t.Fatalf("setup: %v", err)
-						}
-					}
+				// Create one symlink so the walk has an entry to process.
+				target := sourceMountPath + "/.ids/guid-cancel"
+				if err := os.Symlink(target, filepath.Join(dir, "file")); err != nil {
+					t.Fatalf("setup: %v", err)
 				}
 			},
 			lookup: &mockLookup{paths: map[string]string{"guid-cancel": "/movies/x.mkv"}},
@@ -167,7 +230,6 @@ func TestRewriteLibrarySymlinks(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -218,6 +280,9 @@ func TestRewriteLibrarySymlinks(t *testing.T) {
 			}
 			if len(report.Errors) != tc.wantErrors {
 				t.Errorf("Errors: got %d, want %d (entries: %v)", len(report.Errors), tc.wantErrors, report.Errors)
+			}
+			if report.SkippedWrongPrefix != tc.wantSkippedWrongPrefix {
+				t.Errorf("SkippedWrongPrefix: got %d, want %d", report.SkippedWrongPrefix, tc.wantSkippedWrongPrefix)
 			}
 
 			if tc.postCheck != nil {

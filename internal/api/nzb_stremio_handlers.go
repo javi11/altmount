@@ -12,6 +12,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
 )
 
 // mediaExtensions lists common video/media file extensions for Stremio stream filtering.
@@ -120,7 +121,7 @@ func (s *Server) handleNzbStreams(c *fiber.Ctx) error {
 	// --- Derive stable names before touching the filesystem ---
 	uploadDir := filepath.Join(os.TempDir(), "altmount-uploads")
 	safeFilename := filepath.Base(file.Filename)
-	nzbName := strings.TrimSuffix(safeFilename, filepath.Ext(safeFilename))
+	nzbName := nzbtrim.TrimNzbExtension(safeFilename)
 	tempPath := filepath.Join(uploadDir, safeFilename)
 
 	// --- Short-circuit: return cached streams if NZB was already processed ---
