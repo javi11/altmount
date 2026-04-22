@@ -253,7 +253,8 @@ func (p *Parser) parseBlobs(db *sql.DB, tree *davTree, out chan<- *ParsedNzb, er
 		parentPath := trimLastSegment(releaseParentPath)
 		category, relPath := p.splitPath(parentPath)
 
-		blobPath := filepath.Join(p.blobsPath, blobId[0:2], blobId[2:4], blobId)
+		lowerBlobID := strings.ToLower(blobId)
+		blobPath := filepath.Join(p.blobsPath, lowerBlobID[0:2], lowerBlobID[2:4], lowerBlobID)
 		blobFile, err := os.Open(blobPath)
 		if err != nil {
 			slog.ErrorContext(context.Background(), "Failed to open blob file", "path", blobPath, "error", err)

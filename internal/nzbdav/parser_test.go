@@ -235,6 +235,68 @@ func TestParser_Parse_Blobs(t *testing.T) {
 	assert.Equal(t, nzbContent, string(body))
 }
 
+// TestParser_Parse_Blobs_UppercaseUUID verifies that blob IDs stored uppercase in
+// the SQLite database (real nzbdav format, e.g. "0AA2BD24-B90C-4E06-A301-DD0D296AD86C")
+// are matched against their lowercase on-disk layout, since nzbdav's C# BlobStore
+// writes paths using Guid.ToString("N") which is always lowercase.
+func TestParser_Parse_Blobs_UppercaseUUID(t *testing.T) {
+	tmpDir := t.TempDir()
+	blobsDir := filepath.Join(tmpDir, "blobs")
+	dbPath := filepath.Join(tmpDir, "blobs_upper.db")
+	db, err := sql.Open("sqlite3", dbPath)
+	require.NoError(t, err)
+	defer db.Close()
+
+	_, err = db.Exec(`
+		CREATE TABLE DavItems (
+			Id TEXT PRIMARY KEY,
+			ParentId TEXT,
+			Name TEXT,
+			FileSize INTEGER,
+			Path TEXT,
+			NzbBlobId TEXT,
+			SubType INTEGER
+		);
+		CREATE TABLE NzbNames (
+			Id TEXT PRIMARY KEY,
+			FileName TEXT
+		);
+	`)
+	require.NoError(t, err)
+
+	// DB stores the UUID uppercase with hyphens (default EF Core Guid TEXT format).
+	dbBlobID := "0AA2BD24-B90C-4E06-A301-DD0D296AD86C"
+	// Disk stores it lowercase (Guid.ToString("N") / Guid.ToString()).
+	diskBlobID := "0aa2bd24-b90c-4e06-a301-dd0d296ad86c"
+	blobPath := filepath.Join(blobsDir, diskBlobID[0:2], diskBlobID[2:4], diskBlobID)
+	nzbContent := `<?xml version="1.0" encoding="UTF-8"?>
+<nzb xmlns="http://www.newzbin.com/DTD/nzb/nzb-1.1.dtd">
+	<file poster="poster" date="12345" subject="subject">
+		<groups><group>alt.binaries.test</group></groups>
+		<segments><segment bytes="100" number="1">msgid@test</segment></segments>
+	</file>
+</nzb>`
+	writeZstdBlob(t, blobPath, []byte(nzbContent))
+
+	_, err = db.Exec(`
+		INSERT INTO NzbNames (Id, FileName) VALUES (?, 'My Movie.nzb');
+		INSERT INTO DavItems (Id, ParentId, Name, Path, NzbBlobId, SubType) VALUES
+		('root',   NULL,      '/',                     '/',                             NULL, 1),
+		('movies', 'root',    'movies',                '/movies',                       NULL, 1),
+		('folder', 'movies',  'My Movie',              '/movies/My Movie',              NULL, 1),
+		('item1',  'folder',  'My Movie.mkv',          '/movies/My Movie/My Movie.mkv', ?,    203);
+	`, dbBlobID, dbBlobID)
+	require.NoError(t, err)
+
+	out, errChan := NewParser(dbPath, blobsDir).Parse()
+	got := collect(t, out, errChan)
+
+	require.Len(t, got, 1)
+	assert.Equal(t, "item1", got[0].ID)
+	body, _ := io.ReadAll(got[0].Content)
+	assert.Equal(t, nzbContent, string(body))
+}
+
 func TestParser_Parse_Blobs_Uncompressed(t *testing.T) {
 	tmpDir := t.TempDir()
 	blobsDir := filepath.Join(tmpDir, "blobs")
