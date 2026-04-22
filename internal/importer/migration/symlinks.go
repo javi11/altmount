@@ -17,16 +17,18 @@ type SymlinkLookup interface {
 
 // RewriteReport summarizes results of a symlink rewrite operation.
 type RewriteReport struct {
-	Scanned   int
-	Matched   int
-	Rewritten int
-	Unmatched []string // symlink paths that had no matching migration row
-	Errors    []string // errors encountered (non-fatal)
+	Scanned             int
+	Matched             int
+	Rewritten           int
+	SkippedWrongPrefix  int      // symlinks whose target didn't point at sourceMountPath/.ids/ — usually a misconfigured mount path
+	Unmatched           []string // symlink paths that had no matching migration row
+	Errors              []string // errors encountered (non-fatal)
 }
 
-// RewriteLibrarySymlinks walks libraryPath, finds symlinks whose target starts
-// with sourceMountPath+"/.ids/", looks up the GUID in the lookup, and rewrites
-// the symlink target to filepath.Join(altmountPath, finalPath).
+// RewriteLibrarySymlinks walks libraryPath, finds symlinks (real OS symlinks or
+// rclone .rclonelink text files) whose target starts with sourceMountPath+"/.ids/",
+// looks up the GUID in the lookup, and rewrites the target to
+// filepath.Join(altmountPath, finalPath).
 //
 // If dryRun is true, no filesystem changes are made but the report is populated.
 func RewriteLibrarySymlinks(
@@ -38,7 +40,10 @@ func RewriteLibrarySymlinks(
 	lookup SymlinkLookup,
 	dryRun bool,
 ) (*RewriteReport, error) {
-	report := &RewriteReport{}
+	report := &RewriteReport{
+		Unmatched: []string{},
+		Errors:    []string{},
+	}
 
 	// Normalise source mount prefix used for matching.
 	prefix := filepath.Clean(sourceMountPath) + "/.ids/"
@@ -55,26 +60,44 @@ func RewriteLibrarySymlinks(
 			return err
 		}
 
-		// Only process symlinks.
-		if d.Type()&fs.ModeSymlink == 0 {
+		isSymlink := d.Type()&fs.ModeSymlink != 0
+		isRcloneLink := !d.IsDir() && strings.HasSuffix(d.Name(), ".rclonelink")
+
+		// Only process real OS symlinks and rclone .rclonelink text files.
+		if !isSymlink && !isRcloneLink {
 			return nil
 		}
 
 		report.Scanned++
 
-		target, err := os.Readlink(path)
-		if err != nil {
-			report.Errors = append(report.Errors, fmt.Sprintf("readlink %s: %v", path, err))
-			return nil
+		var target string
+		if isSymlink {
+			var err error
+			target, err = os.Readlink(path)
+			if err != nil {
+				report.Errors = append(report.Errors, fmt.Sprintf("readlink %s: %v", path, err))
+				return nil
+			}
+		} else {
+			// .rclonelink: file content is the symlink target path.
+			content, err := os.ReadFile(path)
+			if err != nil {
+				report.Errors = append(report.Errors, fmt.Sprintf("read rclonelink %s: %v", path, err))
+				return nil
+			}
+			target = strings.TrimRight(string(content), "\r\n")
 		}
 
 		// Must target our source mount's .ids directory.
 		if !strings.HasPrefix(target, prefix) {
+			report.SkippedWrongPrefix++
 			return nil
 		}
 
 		// Extract GUID: last path component of the target.
-		guid := filepath.Base(target)
+		// Normalise to upper-case: nzbdav .ids/ paths use lowercase UUIDs but
+		// import_migrations stores the DavItem ID in the original uppercase form.
+		guid := strings.ToUpper(filepath.Base(target))
 
 		finalPath, found, err := lookup.LookupFinalPath(ctx, source, guid)
 		if err != nil {
@@ -95,17 +118,24 @@ func RewriteLibrarySymlinks(
 		// Build the new target path.
 		newTarget := filepath.Join(altmountPath, strings.TrimPrefix(finalPath, "/"))
 
-		// Atomic rewrite: write to a temp name then rename.
-		tmpPath := path + ".new"
-		if err := os.Symlink(newTarget, tmpPath); err != nil {
-			report.Errors = append(report.Errors, fmt.Sprintf("create temp symlink %s -> %s: %v", tmpPath, newTarget, err))
-			return nil
-		}
-		if err := os.Rename(tmpPath, path); err != nil {
-			// Clean up the temp file on rename failure.
-			_ = os.Remove(tmpPath)
-			report.Errors = append(report.Errors, fmt.Sprintf("rename %s -> %s: %v", tmpPath, path, err))
-			return nil
+		if isSymlink {
+			// Atomic rewrite via temp file + rename.
+			tmpPath := path + ".new"
+			if err := os.Symlink(newTarget, tmpPath); err != nil {
+				report.Errors = append(report.Errors, fmt.Sprintf("create temp symlink %s -> %s: %v", tmpPath, newTarget, err))
+				return nil
+			}
+			if err := os.Rename(tmpPath, path); err != nil {
+				_ = os.Remove(tmpPath)
+				report.Errors = append(report.Errors, fmt.Sprintf("rename %s -> %s: %v", tmpPath, path, err))
+				return nil
+			}
+		} else {
+			// .rclonelink: overwrite file content with the new target path.
+			if err := os.WriteFile(path, []byte(newTarget), 0o644); err != nil {
+				report.Errors = append(report.Errors, fmt.Sprintf("write rclonelink %s: %v", path, err))
+				return nil
+			}
 		}
 
 		report.Rewritten++

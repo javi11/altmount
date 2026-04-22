@@ -124,6 +124,10 @@ func (a *batchQueueAdapterForImporter) IsMigrationCompleted(ctx context.Context,
 	return row.Status == database.ImportMigrationStatusImported || row.Status == database.ImportMigrationStatusSymlinksMigrated, nil
 }
 
+func (a *batchQueueAdapterForImporter) LinkQueueItemID(ctx context.Context, source string, externalIDs []string, queueItemID int64) error {
+	return a.migrationRepo.LinkQueueItemID(ctx, source, externalIDs, queueItemID)
+}
+
 // isFileAlreadyProcessed checks if a file has already been processed by checking metadata
 func isFileAlreadyProcessed(metadataService *metadata.MetadataService, filePath string, scanRoot string) bool {
 	// Calculate virtual path

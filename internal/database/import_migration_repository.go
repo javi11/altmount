@@ -90,6 +90,38 @@ func (r *ImportMigrationRepository) MarkFailed(ctx context.Context, queueItemID 
 	return nil
 }
 
+// LinkQueueItemID sets queue_item_id for all migration rows matching (source, externalIDs).
+// Unconditionally overwrites any existing queue_item_id so that re-imports after a
+// cancelled/failed first attempt can re-link to the new queue item. This is safe because
+// IsMigrationCompleted already short-circuits rows with status=imported before we get here.
+func (r *ImportMigrationRepository) LinkQueueItemID(ctx context.Context, source string, externalIDs []string, queueItemID int64) error {
+	if len(externalIDs) == 0 {
+		return nil
+	}
+
+	placeholders := make([]string, len(externalIDs))
+	args := make([]any, 0, len(externalIDs)+2)
+	args = append(args, queueItemID)
+	for i, id := range externalIDs {
+		placeholders[i] = "?"
+		args = append(args, id)
+	}
+	args = append(args, source)
+
+	query := fmt.Sprintf(`
+		UPDATE import_migrations
+		SET queue_item_id = ?, updated_at = datetime('now')
+		WHERE external_id IN (%s)
+		AND source = ?
+	`, strings.Join(placeholders, ", "))
+
+	_, err := r.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("link queue_item_id (source=%s, queueItemID=%d): %w", source, queueItemID, err)
+	}
+	return nil
+}
+
 // MarkSymlinksMigrated sets status=symlinks_migrated for the given row IDs.
 func (r *ImportMigrationRepository) MarkSymlinksMigrated(ctx context.Context, ids []int64) error {
 	if len(ids) == 0 {
@@ -187,6 +219,37 @@ func (r *ImportMigrationRepository) Stats(ctx context.Context, source string) (*
 		return nil, fmt.Errorf("stats import_migrations (source=%s): %w", source, err)
 	}
 	return &stats, nil
+}
+
+// DeletePendingBySource removes all migration rows for a source that have
+// status='pending'. Returns the number of rows deleted. Use this to clear
+// orphaned rows from a previous import attempt so a fresh import starts clean
+// (imported/symlinks_migrated rows are preserved).
+func (r *ImportMigrationRepository) DeletePendingBySource(ctx context.Context, source string) (int64, error) {
+	res, err := r.db.ExecContext(ctx, `DELETE FROM import_migrations WHERE source = ? AND status = 'pending'`, source)
+	if err != nil {
+		return 0, fmt.Errorf("delete pending import_migrations (source=%s): %w", source, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("delete pending import_migrations rows affected: %w", err)
+	}
+	return n, nil
+}
+
+// DeleteAllBySource removes every migration row for a source regardless of
+// status. Returns the number of rows deleted. Use to force a full re-import
+// after the imported files have been deleted from AltMount.
+func (r *ImportMigrationRepository) DeleteAllBySource(ctx context.Context, source string) (int64, error) {
+	res, err := r.db.ExecContext(ctx, `DELETE FROM import_migrations WHERE source = ?`, source)
+	if err != nil {
+		return 0, fmt.Errorf("delete all import_migrations (source=%s): %w", source, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("delete all import_migrations rows affected: %w", err)
+	}
+	return n, nil
 }
 
 // ExistsForSource returns true if any rows exist for the given source.

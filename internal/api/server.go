@@ -228,6 +228,8 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/import/nzbdav/reset", s.handleResetNzbdavImportStatus)
 	api.Get("/import/nzbdav/status", s.handleGetNzbdavImportStatus)
 	api.Delete("/import/nzbdav", s.handleCancelNzbdavImport)
+	api.Delete("/import/nzbdav/pending-migrations", s.handleClearPendingNzbdavMigrations)
+	api.Delete("/import/nzbdav/migrations", s.handleClearAllNzbdavMigrations)
 	api.Post("/import/nzbdav/migrate-symlinks", s.handleMigrateNzbdavSymlinks)
 
 	// Queue endpoints

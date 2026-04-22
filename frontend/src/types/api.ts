@@ -162,6 +162,7 @@ export interface NzbdavMigrateSymlinksResponse {
 	scanned: number;
 	matched: number;
 	rewritten: number;
+	skipped_wrong_prefix?: number;
 	unmatched: string[];
 	errors: string[];
 	dry_run: boolean;

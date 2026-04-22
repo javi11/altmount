@@ -21,8 +21,11 @@ import { useToast } from "../../contexts/ToastContext";
 import {
 	useCancelNzbdavImport,
 	useCancelScan,
+	useClearAllNzbdavMigrations,
+	useClearPendingNzbdavMigrations,
 	useMigrateNzbdavSymlinks,
 	useNzbdavImportStatus,
+	useQueueStats,
 	useResetNzbdavImportStatus,
 	useScanStatus,
 	useSearchNZBByName,
@@ -37,18 +40,14 @@ import { FileBrowserModal } from "../files/FileBrowserModal";
 import { ErrorAlert } from "../ui/ErrorAlert";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
 
-type ImportTab = "nzbdav" | "directory" | "upload" | "nzbdav-symlinks";
+type ImportTab = "nzbdav" | "directory" | "upload";
 
 const IMPORT_SECTIONS = {
 	nzbdav: {
 		title: "From NZBDav",
-		description: "Import your existing NZBDav database to populate the library.",
+		description:
+			"Import your existing NZBDav database, then migrate arr library symlinks to point at AltMount.",
 		icon: Database,
-	},
-	"nzbdav-symlinks": {
-		title: "Migrate Symlinks",
-		description: "Rewrite arr library symlinks from the nzbdav mount to AltMount.",
-		icon: Link,
 	},
 	directory: {
 		title: "From Directory",
@@ -134,7 +133,6 @@ export function ImportMethods() {
 
 						<div className="max-w-4xl">
 							{activeTab === "nzbdav" && <NzbDavImportSection />}
-							{activeTab === "nzbdav-symlinks" && <NzbdavPhase2StandaloneSection />}
 							{activeTab === "directory" && <DirectoryScanSection />}
 							{activeTab === "upload" && <EnhancedUploadSection />}
 						</div>
@@ -613,6 +611,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 function NzbDavImportSection() {
+	const [nzbdavTab, setNzbdavTab] = useState<"import" | "migrate">("import");
 	const [inputMethod, setInputMethod] = useState<"server" | "upload">("server");
 	const [selectedDbPath, setSelectedDbPath] = useState("");
 	const [blobsPath, setBlobsPath] = useState("");
@@ -624,8 +623,11 @@ function NzbDavImportSection() {
 	const [isBlobsBrowserOpen, setIsBlobsBrowserOpen] = useState(false);
 
 	const { data: importStatus } = useNzbdavImportStatus(2000);
+	const { data: queueStats } = useQueueStats(2000);
 	const cancelImport = useCancelNzbdavImport();
 	const resetImport = useResetNzbdavImportStatus();
+	const clearPending = useClearPendingNzbdavMigrations();
+	const clearAllMigrations = useClearAllNzbdavMigrations();
 
 	const isRunning = importStatus?.status === "running";
 	const isCanceling = importStatus?.status === "canceling";
@@ -721,12 +723,204 @@ function NzbDavImportSection() {
 		}
 	};
 
-	const migrationStats = importStatus?.migration_stats;
-	const showPhase2 =
-		isCompleted ||
-		(migrationStats !== undefined &&
-			(migrationStats.imported > 0 || migrationStats.symlinks_migrated > 0));
+	const handleClearAllMigrations = async () => {
+		const total = importStatus?.migration_stats?.total ?? 0;
+		const confirmed = window.confirm(
+			`Delete ALL ${total} NZBDav migration row(s)?\n\nThis will force a full re-import of every blob on the next scan. Use this only if you've deleted the imported files from AltMount and want to start over.`,
+		);
+		if (!confirmed) return;
+		try {
+			const res = await clearAllMigrations.mutateAsync();
+			await resetImport.mutateAsync();
+			showToast({
+				title: "Cleared",
+				message: `Deleted ${res.data?.deleted ?? 0} migration rows and reset scanner.`,
+				type: "success",
+			});
+		} catch (err) {
+			showToast({
+				title: "Clear Failed",
+				message: err instanceof Error ? err.message : "Could not clear migrations",
+				type: "error",
+			});
+		}
+	};
 
+	const handleClearPendingAndReset = async () => {
+		const pendingCount = importStatus?.migration_stats?.pending ?? 0;
+		const confirmed = window.confirm(
+			`Delete ${pendingCount} pending migration row(s) and reset the scanner?\n\nImported and migrated rows are preserved. Use this to start fresh after a cancelled or stuck import.`,
+		);
+		if (!confirmed) return;
+		try {
+			const res = await clearPending.mutateAsync();
+			await resetImport.mutateAsync();
+			showToast({
+				title: "Cleared",
+				message: `Deleted ${res.data?.deleted ?? 0} pending migration rows and reset scanner.`,
+				type: "success",
+			});
+		} catch (err) {
+			showToast({
+				title: "Clear Failed",
+				message: err instanceof Error ? err.message : "Could not clear pending migrations",
+				type: "error",
+			});
+		}
+	};
+
+	const migrationStats = importStatus?.migration_stats;
+	const queueProcessing = queueStats?.total_processing ?? 0;
+	const queueQueued = queueStats?.total_queued ?? 0;
+	const queueDrained = queueProcessing === 0 && queueQueued === 0;
+	const showPhase2 = isCompleted || (migrationStats?.symlinks_migrated ?? 0) > 0;
+
+	return (
+		<div className="space-y-8">
+			<div role="tablist" className="tabs tabs-boxed mb-2 max-w-md">
+				<button
+					type="button"
+					role="tab"
+					className={`tab ${nzbdavTab === "import" ? "tab-active" : ""}`}
+					onClick={() => setNzbdavTab("import")}
+				>
+					<Database className="mr-2 h-4 w-4" />
+					Import
+				</button>
+				<button
+					type="button"
+					role="tab"
+					className={`tab ${nzbdavTab === "migrate" ? "tab-active" : ""}`}
+					onClick={() => setNzbdavTab("migrate")}
+				>
+					<ArrowRight className="mr-2 h-4 w-4" />
+					Migrate Symlinks
+				</button>
+			</div>
+
+			{nzbdavTab === "migrate" ? (
+				<MigrateSymlinksSection />
+			) : (
+				<NzbDavImportTabContent
+					error={error}
+					isRunning={isRunning}
+					isCanceling={isCanceling}
+					isCompleted={isCompleted}
+					hasResults={hasResults}
+					importStatus={importStatus}
+					progressPercent={progressPercent}
+					inputMethod={inputMethod}
+					setInputMethod={setInputMethod}
+					selectedDbPath={selectedDbPath}
+					setSelectedDbPath={setSelectedDbPath}
+					blobsPath={blobsPath}
+					setBlobsPath={setBlobsPath}
+					selectedFile={selectedFile}
+					isLoading={isLoading}
+					handleSubmit={handleSubmit}
+					handleFileUpload={handleFileUpload}
+					handleCancel={handleCancel}
+					handleReset={handleReset}
+					handleClearPendingAndReset={handleClearPendingAndReset}
+					isFileBrowserOpen={isFileBrowserOpen}
+					setIsFileBrowserOpen={setIsFileBrowserOpen}
+					isBlobsBrowserOpen={isBlobsBrowserOpen}
+					setIsBlobsBrowserOpen={setIsBlobsBrowserOpen}
+					handleFileSelect={handleFileSelect}
+					handleBlobsSelect={handleBlobsSelect}
+					cancelImport={cancelImport}
+					resetImport={resetImport}
+					clearPending={clearPending}
+					clearAllMigrations={clearAllMigrations}
+					handleClearAllMigrations={handleClearAllMigrations}
+					showPhase2={showPhase2}
+					migrationStats={migrationStats}
+					queueDrained={queueDrained}
+					queueProcessing={queueProcessing}
+					queueQueued={queueQueued}
+				/>
+			)}
+		</div>
+	);
+}
+
+type NzbdavImportTabContentProps = {
+	error: Error | null;
+	isRunning: boolean;
+	isCanceling: boolean;
+	isCompleted: boolean;
+	hasResults: boolean;
+	importStatus: ReturnType<typeof useNzbdavImportStatus>["data"];
+	progressPercent: number;
+	inputMethod: "server" | "upload";
+	setInputMethod: (v: "server" | "upload") => void;
+	selectedDbPath: string;
+	setSelectedDbPath: (v: string) => void;
+	blobsPath: string;
+	setBlobsPath: (v: string) => void;
+	selectedFile: File | null;
+	isLoading: boolean;
+	handleSubmit: (e: React.FormEvent) => Promise<void>;
+	handleFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+	handleCancel: () => Promise<void>;
+	handleReset: () => Promise<void>;
+	handleClearPendingAndReset: () => Promise<void>;
+	isFileBrowserOpen: boolean;
+	setIsFileBrowserOpen: (v: boolean) => void;
+	isBlobsBrowserOpen: boolean;
+	setIsBlobsBrowserOpen: (v: boolean) => void;
+	handleFileSelect: (path: string) => void;
+	handleBlobsSelect: (path: string) => void;
+	cancelImport: ReturnType<typeof useCancelNzbdavImport>;
+	resetImport: ReturnType<typeof useResetNzbdavImportStatus>;
+	clearPending: ReturnType<typeof useClearPendingNzbdavMigrations>;
+	clearAllMigrations: ReturnType<typeof useClearAllNzbdavMigrations>;
+	handleClearAllMigrations: () => Promise<void>;
+	showPhase2: boolean;
+	migrationStats?: MigrationStats;
+	queueDrained: boolean;
+	queueProcessing: number;
+	queueQueued: number;
+};
+
+function NzbDavImportTabContent({
+	error,
+	isRunning,
+	isCanceling,
+	isCompleted,
+	hasResults,
+	importStatus,
+	progressPercent,
+	inputMethod,
+	setInputMethod,
+	selectedDbPath,
+	setSelectedDbPath,
+	blobsPath,
+	setBlobsPath,
+	selectedFile,
+	isLoading,
+	handleSubmit,
+	handleFileUpload,
+	handleCancel,
+	handleReset,
+	handleClearPendingAndReset,
+	isFileBrowserOpen,
+	setIsFileBrowserOpen,
+	isBlobsBrowserOpen,
+	setIsBlobsBrowserOpen,
+	handleFileSelect,
+	handleBlobsSelect,
+	cancelImport,
+	resetImport,
+	clearPending,
+	clearAllMigrations,
+	handleClearAllMigrations,
+	showPhase2,
+	migrationStats,
+	queueDrained,
+	queueProcessing,
+	queueQueued,
+}: NzbdavImportTabContentProps) {
 	return (
 		<div className="space-y-8">
 			{error && <ErrorAlert error={error} />}
@@ -779,6 +973,17 @@ function NzbDavImportSection() {
 										disabled={cancelImport.isPending}
 									>
 										Stop Import
+									</button>
+								)}
+								{(isRunning || isCanceling) && (
+									<button
+										type="button"
+										className="btn btn-error btn-sm px-4"
+										onClick={handleReset}
+										disabled={resetImport.isPending}
+										title="Force-clear import state (use if the import is stuck)"
+									>
+										Force Reset
 									</button>
 								)}
 								{!isRunning && !isCanceling && (
@@ -852,6 +1057,47 @@ function NzbDavImportSection() {
 				</section>
 			) : (
 				<form onSubmit={handleSubmit} className="space-y-8">
+					{(importStatus?.migration_stats?.pending ?? 0) > 0 && (
+						<div className="flex items-center justify-between rounded-xl border border-warning/30 bg-warning/5 p-3">
+							<div className="flex items-center gap-2 text-sm">
+								<AlertCircle className="h-4 w-4 text-warning" />
+								<span>
+									<strong>{importStatus?.migration_stats?.pending}</strong> pending migration row(s)
+									from a previous run. Clear them to start fresh.
+								</span>
+							</div>
+							<button
+								type="button"
+								className="btn btn-warning btn-sm"
+								onClick={handleClearPendingAndReset}
+								disabled={clearPending.isPending || resetImport.isPending}
+							>
+								<X className="h-4 w-4" /> Clear Pending & Reset
+							</button>
+						</div>
+					)}
+
+					{(importStatus?.migration_stats?.total ?? 0) > 0 && (
+						<div className="flex flex-col gap-3 rounded-xl border border-error/30 bg-error/5 p-3 sm:flex-row sm:items-center sm:justify-between">
+							<div className="flex items-start gap-2 text-sm">
+								<AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-error" />
+								<span>
+									<strong>{importStatus?.migration_stats?.total}</strong> migration row(s) exist
+									from previous imports. Clear all to force a full re-import (use after deleting the
+									imported files from AltMount).
+								</span>
+							</div>
+							<button
+								type="button"
+								className="btn btn-error btn-sm"
+								onClick={handleClearAllMigrations}
+								disabled={clearAllMigrations.isPending || resetImport.isPending}
+							>
+								<X className="h-4 w-4" /> Clear All Migrations
+							</button>
+						</div>
+					)}
+
 					<section className="space-y-6">
 						<div className="flex items-center gap-2">
 							<h4 className="font-bold text-base-content/40 text-xs text-xs uppercase tracking-widest">
@@ -979,7 +1225,14 @@ function NzbDavImportSection() {
 				</form>
 			)}
 
-			{showPhase2 && <NzbdavPhase2Section migrationStats={migrationStats} />}
+			{showPhase2 && (
+				<NzbdavPhase2Section
+					migrationStats={migrationStats}
+					queueDrained={queueDrained}
+					queueProcessing={queueProcessing}
+					queueQueued={queueQueued}
+				/>
+			)}
 
 			<FileBrowserModal
 				isOpen={isFileBrowserOpen}
@@ -999,17 +1252,27 @@ function NzbDavImportSection() {
 	);
 }
 
-interface NzbdavPhase2SectionProps {
-	migrationStats?: {
-		pending: number;
-		imported: number;
-		failed: number;
-		symlinks_migrated: number;
-		total: number;
-	};
+interface MigrationStats {
+	pending: number;
+	imported: number;
+	failed: number;
+	symlinks_migrated: number;
+	total: number;
 }
 
-function NzbdavPhase2Section({ migrationStats }: NzbdavPhase2SectionProps) {
+interface SymlinkMigrationFormProps {
+	migrationStats?: MigrationStats;
+	intro?: React.ReactNode;
+	disabled?: boolean;
+	disabledBanner?: React.ReactNode;
+}
+
+function SymlinkMigrationForm({
+	migrationStats,
+	intro,
+	disabled = false,
+	disabledBanner,
+}: SymlinkMigrationFormProps) {
 	const [libraryPath, setLibraryPath] = useState("");
 	const [sourceMountPath, setSourceMountPath] = useState("");
 	const [dryRun, setDryRun] = useState(true);
@@ -1057,52 +1320,44 @@ function NzbdavPhase2Section({ migrationStats }: NzbdavPhase2SectionProps) {
 	};
 
 	return (
-		<section className="space-y-6">
-			<div className="flex items-center gap-2">
-				<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
-					Phase 2 — Migrate Library Symlinks
-				</h4>
-				<div className="h-px flex-1 bg-base-300" />
-			</div>
-
-			<div className="space-y-6 rounded-2xl border-2 border-primary/20 bg-primary/5 p-6">
+		<div className="space-y-6 rounded-2xl border-2 border-primary/20 bg-primary/5 p-6">
+			{intro && (
 				<div className="flex items-start gap-3">
 					<ArrowRight className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
-					<p className="text-base-content/70 text-sm">
-						Rewrite your arr library symlinks from the nzbdav mount to AltMount. Run a{" "}
-						<strong>dry run</strong> first to preview changes, then apply.
-					</p>
+					<div className="text-base-content/70 text-sm">{intro}</div>
 				</div>
+			)}
 
-				{migrationStats && migrationStats.total > 0 && (
-					<div className="grid grid-cols-3 gap-3">
-						<div className="rounded-xl bg-base-100 p-3 text-center shadow-sm">
-							<span className="block font-bold text-base-content/40 text-xs uppercase tracking-wider">
-								Imported
-							</span>
-							<span className="font-bold font-mono text-success text-xl">
-								{migrationStats.imported}
-							</span>
-						</div>
-						<div className="rounded-xl bg-base-100 p-3 text-center shadow-sm">
-							<span className="block font-bold text-base-content/40 text-xs uppercase tracking-wider">
-								Migrated
-							</span>
-							<span className="font-bold font-mono text-primary text-xl">
-								{migrationStats.symlinks_migrated}
-							</span>
-						</div>
-						<div className="rounded-xl bg-base-100 p-3 text-center shadow-sm">
-							<span className="block font-bold text-base-content/40 text-xs uppercase tracking-wider">
-								Failed
-							</span>
-							<span className="font-bold font-mono text-error text-xl">
-								{migrationStats.failed}
-							</span>
-						</div>
+			{migrationStats && migrationStats.total > 0 && (
+				<div className="grid grid-cols-3 gap-3">
+					<div className="rounded-xl bg-base-100 p-3 text-center shadow-sm">
+						<span className="block font-bold text-base-content/40 text-xs uppercase tracking-wider">
+							Imported
+						</span>
+						<span className="font-bold font-mono text-success text-xl">
+							{migrationStats.imported}
+						</span>
 					</div>
-				)}
+					<div className="rounded-xl bg-base-100 p-3 text-center shadow-sm">
+						<span className="block font-bold text-base-content/40 text-xs uppercase tracking-wider">
+							Migrated
+						</span>
+						<span className="font-bold font-mono text-primary text-xl">
+							{migrationStats.symlinks_migrated}
+						</span>
+					</div>
+					<div className="rounded-xl bg-base-100 p-3 text-center shadow-sm">
+						<span className="block font-bold text-base-content/40 text-xs uppercase tracking-wider">
+							Failed
+						</span>
+						<span className="font-bold font-mono text-error text-xl">{migrationStats.failed}</span>
+					</div>
+				</div>
+			)}
 
+			{disabled ? (
+				disabledBanner
+			) : (
 				<form onSubmit={handleSubmit} className="space-y-4">
 					<fieldset className="fieldset min-w-0">
 						<legend className="fieldset-legend font-semibold text-xs">Library Path</legend>
@@ -1167,73 +1422,139 @@ function NzbdavPhase2Section({ migrationStats }: NzbdavPhase2SectionProps) {
 						)}
 					</div>
 				</form>
+			)}
 
-				{lastReport && (
-					<div className="space-y-3 rounded-xl border border-base-300 bg-base-100 p-4">
-						<div className="flex items-center gap-2">
-							<CheckCircle2 className="h-4 w-4 text-success" />
-							<span className="font-semibold text-sm">
-								{lastReport.dry_run ? "Dry Run Results" : "Migration Results"}
+			{lastReport && (
+				<div className="space-y-3 rounded-xl border border-base-300 bg-base-100 p-4">
+					<div className="flex items-center gap-2">
+						<CheckCircle2 className="h-4 w-4 text-success" />
+						<span className="font-semibold text-sm">
+							{lastReport.dry_run ? "Dry Run Results" : "Migration Results"}
+						</span>
+					</div>
+					<div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+						<div className="text-center">
+							<div className="font-bold font-mono text-lg">{lastReport.scanned}</div>
+							<div className="text-base-content/50 text-xs uppercase">Scanned</div>
+						</div>
+						<div className="text-center">
+							<div className="font-bold font-mono text-lg text-primary">{lastReport.matched}</div>
+							<div className="text-base-content/50 text-xs uppercase">Matched</div>
+						</div>
+						<div className="text-center">
+							<div className="font-bold font-mono text-lg text-success">{lastReport.rewritten}</div>
+							<div className="text-base-content/50 text-xs uppercase">
+								{lastReport.dry_run ? "Would Rewrite" : "Rewritten"}
+							</div>
+						</div>
+						<div className="text-center">
+							<div className="font-bold font-mono text-lg text-warning">
+								{(lastReport.unmatched ?? []).length}
+							</div>
+							<div className="text-base-content/50 text-xs uppercase">Unmatched</div>
+						</div>
+					</div>
+					{(lastReport.unmatched ?? []).length > 0 && (
+						<details className="mt-2">
+							<summary className="cursor-pointer text-warning text-xs">
+								{(lastReport.unmatched ?? []).length} unmatched GUIDs
+							</summary>
+							<ul className="mt-2 max-h-32 overflow-y-auto font-mono text-xs">
+								{(lastReport.unmatched ?? []).map((guid) => (
+									<li key={guid} className="text-base-content/60">
+										{guid}
+									</li>
+								))}
+							</ul>
+						</details>
+					)}
+					{(lastReport.skipped_wrong_prefix ?? 0) > 0 && (
+						<div className="alert alert-warning mt-2 text-xs">
+							<AlertCircle className="h-4 w-4" />
+							<span>
+								<strong>{lastReport.skipped_wrong_prefix}</strong> symlink(s) skipped — their target
+								doesn't point at the configured NZBDav Mount Path. Check that the path is correct.
 							</span>
 						</div>
-						<div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-							<div className="text-center">
-								<div className="font-bold font-mono text-lg">{lastReport.scanned}</div>
-								<div className="text-base-content/50 text-xs uppercase">Scanned</div>
-							</div>
-							<div className="text-center">
-								<div className="font-bold font-mono text-lg text-primary">{lastReport.matched}</div>
-								<div className="text-base-content/50 text-xs uppercase">Matched</div>
-							</div>
-							<div className="text-center">
-								<div className="font-bold font-mono text-lg text-success">
-									{lastReport.rewritten}
-								</div>
-								<div className="text-base-content/50 text-xs uppercase">
-									{lastReport.dry_run ? "Would Rewrite" : "Rewritten"}
-								</div>
-							</div>
-							<div className="text-center">
-								<div className="font-bold font-mono text-lg text-warning">
-									{lastReport.unmatched.length}
-								</div>
-								<div className="text-base-content/50 text-xs uppercase">Unmatched</div>
-							</div>
+					)}
+					{(lastReport.errors ?? []).length > 0 && (
+						<div className="alert alert-error mt-2 text-xs">
+							<AlertCircle className="h-4 w-4" />
+							<span>{(lastReport.errors ?? []).length} error(s) — check server logs</span>
 						</div>
-						{lastReport.unmatched.length > 0 && (
-							<details className="mt-2">
-								<summary className="cursor-pointer text-warning text-xs">
-									{lastReport.unmatched.length} unmatched GUIDs
-								</summary>
-								<ul className="mt-2 max-h-32 overflow-y-auto font-mono text-xs">
-									{lastReport.unmatched.map((guid) => (
-										<li key={guid} className="text-base-content/60">
-											{guid}
-										</li>
-									))}
-								</ul>
-							</details>
-						)}
-						{lastReport.errors.length > 0 && (
-							<div className="alert alert-error mt-2 text-xs">
-								<AlertCircle className="h-4 w-4" />
-								<span>{lastReport.errors.length} error(s) — check server logs</span>
-							</div>
-						)}
-					</div>
-				)}
+					)}
+				</div>
+			)}
+		</div>
+	);
+}
+
+interface NzbdavPhase2SectionProps {
+	migrationStats?: MigrationStats;
+	queueDrained: boolean;
+	queueProcessing: number;
+	queueQueued: number;
+}
+
+function NzbdavPhase2Section({
+	migrationStats,
+	queueDrained,
+	queueProcessing,
+	queueQueued,
+}: NzbdavPhase2SectionProps) {
+	const disabledBanner = (
+		<div className="rounded-xl border border-warning/30 bg-warning/5 p-4">
+			<div className="mb-2 flex items-center gap-2">
+				<LoadingSpinner size="sm" />
+				<span className="font-semibold text-sm">Waiting for queue to finish</span>
 			</div>
+			<p className="text-base-content/70 text-sm">
+				Symlink rewrite runs after all imported NZBs finish processing in the queue.
+			</p>
+			<p className="mt-2 font-mono text-base-content/60 text-xs">
+				<strong>{queueProcessing}</strong> processing · <strong>{queueQueued}</strong> queued
+				remaining
+			</p>
+		</div>
+	);
+
+	return (
+		<section className="space-y-6">
+			<div className="flex items-center gap-2">
+				<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
+					Phase 2 — Migrate Library Symlinks
+				</h4>
+				<div className="h-px flex-1 bg-base-300" />
+			</div>
+
+			<SymlinkMigrationForm
+				migrationStats={migrationStats}
+				intro={
+					<p>
+						Rewrite your arr library symlinks from the nzbdav mount to AltMount. Available once the
+						import queue drains. Run a <strong>dry run</strong> first to preview changes, then
+						apply.
+					</p>
+				}
+				disabled={!queueDrained}
+				disabledBanner={disabledBanner}
+			/>
 		</section>
 	);
 }
 
-function NzbdavPhase2StandaloneSection() {
-	const { data: importStatus } = useNzbdavImportStatus(10000);
-	const migrationStats = importStatus?.migration_stats;
-
+function MigrateSymlinksSection() {
 	return (
-		<div className="space-y-8">
-			<NzbdavPhase2Section migrationStats={migrationStats} />
+		<div className="space-y-6">
+			<SymlinkMigrationForm
+				intro={
+					<p>
+						Use this if you've already imported NZBs (either through AltMount or a previous NZBDav
+						setup) and just need to rewrite your arr library symlinks to point at AltMount. Only
+						rows already marked as imported will be matched.
+					</p>
+				}
+			/>
 		</div>
 	);
 }

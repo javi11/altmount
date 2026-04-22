@@ -320,6 +320,51 @@ func TestParser_Parse_Blobs_PreservesArbitraryFolderStructure(t *testing.T) {
 	assert.Equal(t, "uncategorized", got[0].RelPath)
 }
 
+// TestParser_Parse_Blobs_DeduplicateNestedSubType203 reproduces the real-world
+// nzbdav bug where a release with many subfiles produces two SubType=203
+// DavItems (e.g. RUNE release): one as a direct child of the release folder,
+// and a second nested under the first. Without deduplication both would be
+// emitted as separate ParsedNzb values, causing a double import.
+func TestParser_Parse_Blobs_DeduplicateNestedSubType203(t *testing.T) {
+	tmpDir := t.TempDir()
+	blobsDir := filepath.Join(tmpDir, "blobs")
+	dbPath := filepath.Join(tmpDir, "dedup.db")
+	db, err := sql.Open("sqlite3", dbPath)
+	require.NoError(t, err)
+	defer db.Close()
+
+	_, err = db.Exec(`
+		CREATE TABLE DavItems (
+			Id TEXT PRIMARY KEY, ParentId TEXT, Name TEXT, FileSize INTEGER,
+			Path TEXT, NzbBlobId TEXT, SubType INTEGER
+		);
+		CREATE TABLE NzbNames (Id TEXT PRIMARY KEY, FileName TEXT);
+	`)
+	require.NoError(t, err)
+
+	blobId := "aabbccddee001122"
+	writeZstdBlob(t, filepath.Join(blobsDir, "aa", "bb", blobId), []byte("<nzb/>"))
+
+	// Two SubType=203 rows for the same release/blob — the second is nested
+	// under the first, mirroring the malformed nzbdav DB structure.
+	_, err = db.Exec(`
+		INSERT INTO NzbNames (Id, FileName) VALUES ('aabbccddee001122', 'Big.Release.nzb');
+		INSERT INTO DavItems (Id, ParentId, Name, Path, NzbBlobId, SubType) VALUES
+		('root',    NULL,      '/',                                 '/',                                    NULL,               1),
+		('uncat',   'root',    'uncategorized',                     '/uncategorized',                       NULL,               1),
+		('folder',  'uncat',   'Big.Release',                       '/uncategorized/Big.Release',           NULL,               1),
+		('item1',   'folder',  'Big.Release',                       '/uncategorized/Big.Release/Big.Release',           'aabbccddee001122', 203),
+		('item2',   'item1',   'Big.Release',                       '/uncategorized/Big.Release/Big.Release/Big.Release','aabbccddee001122', 203);
+	`)
+	require.NoError(t, err)
+
+	out, errChan := NewParser(dbPath, blobsDir).Parse()
+	got := collect(t, out, errChan)
+
+	require.Len(t, got, 1, "expected exactly one ParsedNzb despite two SubType=203 rows for the same release")
+	assert.Equal(t, "Big.Release", got[0].Name)
+}
+
 func TestParser_Parse_Blobs_WithExtracted(t *testing.T) {
 	tmpDir := t.TempDir()
 	blobsDir := filepath.Join(tmpDir, "blobs")

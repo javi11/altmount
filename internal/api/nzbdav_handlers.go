@@ -230,12 +230,13 @@ func (s *Server) handleMigrateNzbdavSymlinks(c *fiber.Ctx) error {
 	return c.Status(200).JSON(fiber.Map{
 		"success": true,
 		"data": fiber.Map{
-			"scanned":   report.Scanned,
-			"matched":   report.Matched,
-			"rewritten": report.Rewritten,
-			"unmatched": report.Unmatched,
-			"errors":    report.Errors,
-			"dry_run":   req.DryRun,
+			"scanned":              report.Scanned,
+			"matched":              report.Matched,
+			"rewritten":            report.Rewritten,
+			"skipped_wrong_prefix": report.SkippedWrongPrefix,
+			"unmatched":            report.Unmatched,
+			"errors":               report.Errors,
+			"dry_run":              req.DryRun,
 		},
 	})
 }
@@ -295,6 +296,78 @@ func (s *Server) handleResetNzbdavImportStatus(c *fiber.Ctx) error {
 	return c.Status(200).JSON(fiber.Map{
 		"success": true,
 		"message": "Import status reset",
+	})
+}
+
+// handleClearPendingNzbdavMigrations handles DELETE /import/nzbdav/pending-migrations
+//
+//	@Summary		Clear pending NZBDav migration rows
+//	@Description	Deletes all import_migrations rows with status='pending' for source='nzbdav'. Keeps imported/symlinks_migrated rows untouched. Use to remove orphaned rows from a cancelled/failed import before re-importing.
+//	@Tags			Import
+//	@Produce		json
+//	@Success		200	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/import/nzbdav/pending-migrations [delete]
+func (s *Server) handleClearPendingNzbdavMigrations(c *fiber.Ctx) error {
+	if s.migrationRepo == nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Migration repository not available",
+		})
+	}
+
+	deleted, err := s.migrationRepo.DeletePendingBySource(c.Context(), "nzbdav")
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to clear pending migrations",
+			"details": err.Error(),
+		})
+	}
+
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"message": fmt.Sprintf("Cleared %d pending migration rows", deleted),
+		"data": fiber.Map{
+			"deleted": deleted,
+		},
+	})
+}
+
+// handleClearAllNzbdavMigrations handles DELETE /import/nzbdav/migrations
+//
+//	@Summary		Clear ALL NZBDav migration rows
+//	@Description	Deletes every import_migrations row for source='nzbdav' regardless of status. Use to force a full re-import after the imported files have been deleted from AltMount. This will cause the scanner to re-process every blob on the next import.
+//	@Tags			Import
+//	@Produce		json
+//	@Success		200	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/import/nzbdav/migrations [delete]
+func (s *Server) handleClearAllNzbdavMigrations(c *fiber.Ctx) error {
+	if s.migrationRepo == nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Migration repository not available",
+		})
+	}
+
+	deleted, err := s.migrationRepo.DeleteAllBySource(c.Context(), "nzbdav")
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to clear migrations",
+			"details": err.Error(),
+		})
+	}
+
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"message": fmt.Sprintf("Cleared %d migration rows", deleted),
+		"data": fiber.Map{
+			"deleted": deleted,
+		},
 	})
 }
 
