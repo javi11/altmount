@@ -98,26 +98,31 @@ func (c *Coordinator) HandleSuccess(ctx context.Context, item *database.ImportQu
 		// Continue
 	}
 
-	// 2. Create symlinks if configured
-	if err := c.CreateSymlinks(ctx, item, resultingPath); err != nil {
-		c.log.WarnContext(ctx, "Failed to create symlinks",
+	// 2 & 3. Create symlinks and STRM files if configured
+	if shouldSkipPostImportLinks(item) {
+		c.log.DebugContext(ctx, "Skipping symlink/STRM creation (post-import links disabled)",
 			"queue_id", item.ID,
-			"path", resultingPath,
-			"error", err)
-		result.Errors = append(result.Errors, err)
+			"path", resultingPath)
 	} else {
-		result.SymlinksCreated = true
-	}
+		if err := c.CreateSymlinks(ctx, item, resultingPath); err != nil {
+			c.log.WarnContext(ctx, "Failed to create symlinks",
+				"queue_id", item.ID,
+				"path", resultingPath,
+				"error", err)
+			result.Errors = append(result.Errors, err)
+		} else {
+			result.SymlinksCreated = true
+		}
 
-	// 3. Create STRM files if configured
-	if err := c.CreateStrmFiles(ctx, item, resultingPath); err != nil {
-		c.log.WarnContext(ctx, "Failed to create STRM files",
-			"queue_id", item.ID,
-			"path", resultingPath,
-			"error", err)
-		result.Errors = append(result.Errors, err)
-	} else {
-		result.StrmCreated = true
+		if err := c.CreateStrmFiles(ctx, item, resultingPath); err != nil {
+			c.log.WarnContext(ctx, "Failed to create STRM files",
+				"queue_id", item.ID,
+				"path", resultingPath,
+				"error", err)
+			result.Errors = append(result.Errors, err)
+		} else {
+			result.StrmCreated = true
+		}
 	}
 
 	// 4. Schedule health check
@@ -163,4 +168,10 @@ func (c *Coordinator) HandleFailure(ctx context.Context, item *database.ImportQu
 // that ARR notifications be suppressed.
 func shouldSkipARRNotification(item *database.ImportQueueItem) bool {
 	return item.SkipArrNotification
+}
+
+// shouldSkipPostImportLinks returns true when the caller explicitly requested
+// that post-import link creation (symlinks, STRM files) be suppressed.
+func shouldSkipPostImportLinks(item *database.ImportQueueItem) bool {
+	return item != nil && item.SkipPostImportLinks
 }
