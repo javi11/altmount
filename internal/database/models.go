@@ -47,6 +47,7 @@ type ImportQueueItem struct {
 	FileSize             *int64        `db:"file_size"`             // Total size in bytes calculated from segments
 	TargetPath           *string       `db:"target_path"`           // Optional forced symlink destination path
 	SkipArrNotification  bool          `db:"skip_arr_notification"`
+	SkipPostImportLinks  bool          `db:"skip_post_import_links"`
 }
 
 // BulkOperationResult represents the result of a bulk queue operation

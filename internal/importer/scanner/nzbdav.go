@@ -497,8 +497,9 @@ func (n *NzbDavImporter) createNzbFileAndPrepareItem(ctx context.Context, res *n
 
 	// Prepare item struct. RelativePath is left nil so the import mirrors the
 	// nzbdav folder structure under Category without an extra user-supplied prefix.
-	// SkipArrNotification is true because nzbdav imports are migration jobs — ARR
-	// scans should not be triggered for each individual item.
+	// Migration jobs: skip ARR scans (per-item notifications are noisy) and skip
+	// post-import link creation (symlinks/STRM). Library symlinks are rewritten
+	// separately by Phase 2 (RewriteLibrarySymlinks).
 	item := &database.ImportQueueItem{
 		NzbPath:             nzbPath,
 		Category:            &targetCategory,
@@ -509,6 +510,7 @@ func (n *NzbDavImporter) createNzbFileAndPrepareItem(ctx context.Context, res *n
 		CreatedAt:           time.Now(),
 		Metadata:            &metaJSON,
 		SkipArrNotification: true,
+		SkipPostImportLinks: true,
 	}
 
 	return item, nil

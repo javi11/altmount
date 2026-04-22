@@ -8,6 +8,7 @@ import {
 	FileIcon,
 	FileText,
 	FolderOpen,
+	Info,
 	Link,
 	Play,
 	Search,
@@ -777,6 +778,19 @@ function NzbDavImportSection() {
 
 	return (
 		<div className="space-y-8">
+			<div className="rounded-xl border border-info/30 bg-info/5 p-4">
+				<div className="mb-3 flex items-center gap-2">
+					<Info className="h-4 w-4 text-info" />
+					<h4 className="font-bold text-sm">Migration Steps</h4>
+				</div>
+				<ol className="list-decimal space-y-1.5 pl-5 text-sm">
+					<li>Import the files</li>
+					<li className="font-semibold text-warning">Backup library symlinks (very important)</li>
+					<li>Make sure AltMount mount is there</li>
+					<li>Run the symlink migration</li>
+				</ol>
+			</div>
+
 			<div role="tablist" className="tabs tabs-boxed mb-2 max-w-md">
 				<button
 					type="button"
