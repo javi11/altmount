@@ -109,10 +109,7 @@ func (c *Coordinator) HandleSuccess(ctx context.Context, item *database.ImportQu
 		result.SymlinksCreated = true
 	}
 
-	// 3. Create ID metadata links
-	c.HandleIDMetadataLinks(ctx, item, resultingPath)
-
-	// 4. Create STRM files if configured
+	// 3. Create STRM files if configured
 	if err := c.CreateStrmFiles(ctx, item, resultingPath); err != nil {
 		c.log.WarnContext(ctx, "Failed to create STRM files",
 			"queue_id", item.ID,
@@ -123,7 +120,7 @@ func (c *Coordinator) HandleSuccess(ctx context.Context, item *database.ImportQu
 		result.StrmCreated = true
 	}
 
-	// 5. Schedule health check
+	// 4. Schedule health check
 	if err := c.ScheduleHealthCheck(ctx, resultingPath); err != nil {
 		c.log.WarnContext(ctx, "Failed to schedule health check",
 			"path", resultingPath,
@@ -133,7 +130,7 @@ func (c *Coordinator) HandleSuccess(ctx context.Context, item *database.ImportQu
 		result.HealthScheduled = true
 	}
 
-	// 6. Notify ARR applications
+	// 5. Notify ARR applications
 	if shouldSkipARRNotification(item) {
 		c.log.DebugContext(ctx, "ARR notification skipped (requested by caller)",
 			"queue_id", item.ID,

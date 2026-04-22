@@ -169,3 +169,36 @@ type ImportHistory struct {
 	CompletedAt time.Time `db:"completed_at"`
 }
 
+// ImportMigrationStatus represents the status of a migration item
+type ImportMigrationStatus string
+
+const (
+	ImportMigrationStatusPending          ImportMigrationStatus = "pending"
+	ImportMigrationStatusImported         ImportMigrationStatus = "imported"
+	ImportMigrationStatusFailed           ImportMigrationStatus = "failed"
+	ImportMigrationStatusSymlinksMigrated ImportMigrationStatus = "symlinks_migrated"
+)
+
+// ImportMigration tracks progress of two-phase migrations (e.g. nzbdav → altmount)
+type ImportMigration struct {
+	ID           int64                 `db:"id"`
+	Source       string                `db:"source"`        // e.g. "nzbdav"
+	ExternalID   string                `db:"external_id"`   // source-specific ID (nzbdav GUID)
+	QueueItemID  *int64                `db:"queue_item_id"` // FK → import_queue.id (nullable)
+	RelativePath string                `db:"relative_path"` // virtual path when enqueued
+	FinalPath    *string               `db:"final_path"`    // storage_path after import
+	Status       ImportMigrationStatus `db:"status"`
+	Error        *string               `db:"error"`
+	CreatedAt    time.Time             `db:"created_at"`
+	UpdatedAt    time.Time             `db:"updated_at"`
+}
+
+// ImportMigrationStats holds aggregate counts for a source
+type ImportMigrationStats struct {
+	Pending          int
+	Imported         int
+	Failed           int
+	SymlinksMigrated int
+	Total            int
+}
+

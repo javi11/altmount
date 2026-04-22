@@ -184,11 +184,17 @@ func (t *davTree) extractedFilesUnder(releaseID string) []ExtractedFileInfo {
 	return out
 }
 
+// blobRow holds one row from the parseBlobs query.
+type blobRow struct {
+	id, fileName, davName, releasePath, blobId string
+}
+
 func (p *Parser) parseBlobs(db *sql.DB, tree *davTree, out chan<- *ParsedNzb, errChan chan<- error) {
 	rows, err := db.Query(`
 		SELECT
 			d.Id,
 			n.FileName,
+			COALESCE(d.Name, '') as DavName,
 			COALESCE(d.Path, '/') as ReleasePath,
 			d.NzbBlobId
 		FROM DavItems d
@@ -204,20 +210,50 @@ func (p *Parser) parseBlobs(db *sql.DB, tree *davTree, out chan<- *ParsedNzb, er
 	}
 	defer rows.Close()
 
-	count := 0
+	// Pass 1: collect all rows grouped by blobId, preserving first-seen order.
+	var blobOrder []string
+	rowsByBlob := make(map[string][]blobRow)
 	for rows.Next() {
-		var id, fileName, releasePath, blobId string
-		if err := rows.Scan(&id, &fileName, &releasePath, &blobId); err != nil {
+		var r blobRow
+		if err := rows.Scan(&r.id, &r.fileName, &r.davName, &r.releasePath, &r.blobId); err != nil {
 			slog.ErrorContext(context.Background(), "Failed to scan blob row", "error", err)
 			continue
 		}
+		if _, seen := rowsByBlob[r.blobId]; !seen {
+			blobOrder = append(blobOrder, r.blobId)
+		}
+		rowsByBlob[r.blobId] = append(rowsByBlob[r.blobId], r)
+	}
+
+	// Pass 2: emit one ParsedNzb per blob group.
+	// The first row in each group becomes the canonical item; additional rows
+	// become ParsedNzbAlias entries so the scanner can register migration rows
+	// for every DavItem ID that shares the blob.
+	count := 0
+	for _, blobId := range blobOrder {
+		group := rowsByBlob[blobId]
+		canonical := group[0]
 
 		if len(blobId) < 4 {
 			slog.WarnContext(context.Background(), "Invalid blob ID", "id", blobId)
 			continue
 		}
-		blobPath := filepath.Join(p.blobsPath, blobId[0:2], blobId[2:4], blobId)
 
+		release := tree.releaseFor(canonical.id)
+		releaseName := strings.TrimSuffix(canonical.fileName, ".nzb")
+		releaseParentPath := canonical.releasePath
+		releaseID := canonical.id
+		if release != nil {
+			releaseID = release.ID
+			if release.Name != "" {
+				releaseName = release.Name
+			}
+			releaseParentPath = release.Path
+		}
+		parentPath := trimLastSegment(releaseParentPath)
+		category, relPath := p.splitPath(parentPath)
+
+		blobPath := filepath.Join(p.blobsPath, blobId[0:2], blobId[2:4], blobId)
 		blobFile, err := os.Open(blobPath)
 		if err != nil {
 			slog.ErrorContext(context.Background(), "Failed to open blob file", "path", blobPath, "error", err)
@@ -250,31 +286,23 @@ func (p *Parser) parseBlobs(db *sql.DB, tree *davTree, out chan<- *ParsedNzb, er
 			pw.Close()
 		}()
 
-		// The SubType=203 item is the virtual "output" file. Its parent folder
-		// is the release directory in nzbdav's tree; we want AltMount's mount
-		// layout to match that directory layout exactly.
-		release := tree.releaseFor(id)
-		releaseName := strings.TrimSuffix(fileName, ".nzb")
-		releaseParentPath := releasePath
-		releaseID := id
-		if release != nil {
-			releaseID = release.ID
-			if release.Name != "" {
-				releaseName = release.Name
-			}
-			releaseParentPath = release.Path
+		// Build alias list from remaining rows. Rows with the same DavName as the
+		// canonical are duplicates (nzbdav nested-folder bug); rows with distinct
+		// DavNames represent individual episode files within a season-pack blob.
+		var aliases []ParsedNzbAlias
+		for _, r := range group[1:] {
+			aliases = append(aliases, ParsedNzbAlias{ID: r.id, Name: r.davName})
 		}
-		// Strip the release folder name to get its parent path.
-		parentPath := trimLastSegment(releaseParentPath)
-		category, relPath := p.splitPath(parentPath)
 
 		out <- &ParsedNzb{
-			ID:             id,
+			ID:             canonical.id,
 			Name:           releaseName,
 			Category:       category,
 			RelPath:        relPath,
 			Content:        pr,
 			ExtractedFiles: tree.extractedFilesUnder(releaseID),
+			DavItemName:    canonical.davName,
+			AliasDavItems:  aliases,
 		}
 		count++
 	}

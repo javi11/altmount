@@ -93,17 +93,39 @@ func (a *queueAdapterForScanner) IsFileProcessed(filePath string, scanRoot strin
 	return isFileAlreadyProcessed(a.metadataService, filePath, scanRoot)
 }
 
-// batchQueueAdapterForImporter adapts database repository for scanner.BatchQueueAdder interface
+// batchQueueAdapterForImporter adapts database repository for scanner.BatchQueueAdder and
+// scanner.MigrationRecorder interfaces.
 type batchQueueAdapterForImporter struct {
-	repo *database.QueueRepository
+	repo          *database.QueueRepository
+	migrationRepo *database.ImportMigrationRepository
 }
 
 func (a *batchQueueAdapterForImporter) AddBatchToQueue(ctx context.Context, items []*database.ImportQueueItem) error {
 	return a.repo.AddBatchToQueue(ctx, items)
 }
 
-func (a *batchQueueAdapterForImporter) FilterExistingNzbdavIds(ctx context.Context, ids []string) ([]string, error) {
-	return a.repo.FilterExistingNzbdavIds(ctx, ids)
+func (a *batchQueueAdapterForImporter) UpsertMigration(ctx context.Context, source, externalID, relativePath string) (int64, error) {
+	return a.migrationRepo.Upsert(ctx, &database.ImportMigration{
+		Source:       source,
+		ExternalID:   externalID,
+		RelativePath: relativePath,
+		Status:       database.ImportMigrationStatusPending,
+	})
+}
+
+func (a *batchQueueAdapterForImporter) IsMigrationCompleted(ctx context.Context, source, externalID string) (bool, error) {
+	row, err := a.migrationRepo.LookupByExternalID(ctx, source, externalID)
+	if err != nil {
+		return false, err
+	}
+	if row == nil {
+		return false, nil
+	}
+	return row.Status == database.ImportMigrationStatusImported || row.Status == database.ImportMigrationStatusSymlinksMigrated, nil
+}
+
+func (a *batchQueueAdapterForImporter) LinkQueueItemID(ctx context.Context, source string, externalIDs []string, queueItemID int64) error {
+	return a.migrationRepo.LinkQueueItemID(ctx, source, externalIDs, queueItemID)
 }
 
 // isFileAlreadyProcessed checks if a file has already been processed by checking metadata
@@ -237,9 +259,10 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 
 	// Create adapter for NZBDav imports
 	importerAdapter := &batchQueueAdapterForImporter{
-		repo: database.Repository,
+		repo:          database.Repository,
+		migrationRepo: database.MigrationRepo,
 	}
-	service.nzbdavImporter = scanner.NewNzbDavImporter(importerAdapter)
+	service.nzbdavImporter = scanner.NewNzbDavImporter(importerAdapter, importerAdapter)
 
 	// Create directory watcher (Service implements WatchQueueAdder)
 	service.watcher = scanner.NewWatcher(service, configGetter)
@@ -984,6 +1007,15 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 		return err
 	}
 
+	// Update import_migrations row if this was a nzbdav migration import
+	if s.database.MigrationRepo != nil {
+		if err := s.database.MigrationRepo.MarkImported(ctx, item.ID, resultingPath); err != nil {
+			// Non-fatal: log but don't fail
+			s.log.WarnContext(ctx, "Failed to mark import_migration as imported",
+				"queue_id", item.ID, "error", err)
+		}
+	}
+
 	// Notify completion and clear progress tracking
 	if s.broadcaster != nil {
 		s.broadcaster.NotifyComplete(int(item.ID), "completed")
@@ -1067,6 +1099,14 @@ func (s *Service) handleProcessingFailure(ctx context.Context, item *database.Im
 		s.log.ErrorContext(ctx, "Item failed",
 			"queue_id", item.ID,
 			"file", item.NzbPath)
+	}
+
+	// Update import_migrations row if this was a nzbdav migration import
+	if s.database.MigrationRepo != nil {
+		if err := s.database.MigrationRepo.MarkFailed(ctx, item.ID, errorMessage); err != nil {
+			s.log.WarnContext(ctx, "Failed to mark import_migration as failed",
+				"queue_id", item.ID, "error", err)
+		}
 	}
 
 	// Notify failure and clear progress tracking
