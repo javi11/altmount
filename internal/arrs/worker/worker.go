@@ -13,6 +13,7 @@ import (
 	"github.com/javi11/altmount/internal/arrs/clients"
 	"github.com/javi11/altmount/internal/arrs/instances"
 	"github.com/javi11/altmount/internal/arrs/model"
+	"github.com/javi11/altmount/internal/arrs/registrar"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"golift.io/starr"
@@ -179,6 +180,13 @@ func (w *Worker) cleanupRadarrQueue(ctx context.Context, instance *model.ConfigI
 
 	var idsToRemove []int64
 	for _, q := range queue.Records {
+		// Only operate on queue items owned by AltMount's registered download client.
+		// Items from other clients (qBittorrent, real SABnzbd, etc.) may reference
+		// paths AltMount cannot see and must never be touched — see issue #523.
+		if q.DownloadClient != registrar.AltmountDownloadClientName {
+			continue
+		}
+
 		// Strategy 1: Ghost detection — cleanup already-imported files
 		if w.checkGhostByImportHistory(ctx, q.OutputPath, cfg, instance.Name, q.Title) {
 			idsToRemove = append(idsToRemove, q.ID)
@@ -301,6 +309,13 @@ func (w *Worker) cleanupSonarrQueue(ctx context.Context, instance *model.ConfigI
 
 	var idsToRemove []int64
 	for _, q := range queue.Records {
+		// Only operate on queue items owned by AltMount's registered download client.
+		// Items from other clients (qBittorrent, real SABnzbd, etc.) may reference
+		// paths AltMount cannot see and must never be touched — see issue #523.
+		if q.DownloadClient != registrar.AltmountDownloadClientName {
+			continue
+		}
+
 		// Strategy 1: Immediate cleanup for already imported files
 		if w.checkGhostByImportHistory(ctx, q.OutputPath, cfg, instance.Name, q.Title) {
 			idsToRemove = append(idsToRemove, q.ID)

@@ -14,6 +14,12 @@ import (
 	"golift.io/starr/sonarr"
 )
 
+// AltmountDownloadClientName is the name AltMount registers itself under as a
+// SABnzbd-compatible download client in Radarr/Sonarr/Lidarr/etc. Other code
+// (e.g. the queue cleanup worker) imports this to distinguish AltMount's own
+// queue items from those owned by other download clients.
+const AltmountDownloadClientName = "AltMount (SABnzbd)"
+
 type Manager struct {
 	instances *instances.Manager
 	clients   *clients.Manager
@@ -366,7 +372,7 @@ func (m *Manager) EnsureWebhookRegistration(ctx context.Context, altmountURL str
 // EnsureDownloadClientRegistration ensures that AltMount is registered as a SABnzbd download client in all enabled ARR instances
 func (m *Manager) EnsureDownloadClientRegistration(ctx context.Context, altmountHost string, altmountPort int, urlBase string, apiKey string) error {
 	allInstances := m.instances.GetAllInstances()
-	clientName := "AltMount (SABnzbd)"
+	clientName := AltmountDownloadClientName
 
 	slog.InfoContext(ctx, "Ensuring AltMount download client registration in ARR instances",
 		"host", altmountHost,
