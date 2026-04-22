@@ -47,6 +47,11 @@ func (w *BackupWorker) Start(ctx context.Context) error {
 
 	w.workerCtx, w.workerCancel = context.WithCancel(ctx)
 
+	// Catch-up logic
+	if w.shouldTriggerImmediateBackup(cfg.Metadata.Backup.Path) {
+		go w.performBackup()
+	}
+
 	w.cronRunner = cron.New(cron.WithLocation(time.UTC))
 	if _, err := w.cronRunner.AddFunc(cfg.Metadata.Backup.Schedule, w.performBackup); err != nil {
 		w.workerCancel()
@@ -60,6 +65,27 @@ func (w *BackupWorker) Start(ctx context.Context) error {
 		"keep_backups", cfg.Metadata.Backup.KeepBackups,
 		"path", cfg.Metadata.Backup.Path)
 	return nil
+}
+
+func (w *BackupWorker) shouldTriggerImmediateBackup(backupRoot string) bool {
+	files, err := os.ReadDir(backupRoot)
+	if err != nil {
+		return false
+	}
+
+	var latestModTime time.Time
+	for _, f := range files {
+		if f.IsDir() {
+			info, err := f.Info()
+			if err == nil {
+				if info.ModTime().After(latestModTime) {
+					latestModTime = info.ModTime()
+				}
+			}
+		}
+	}
+
+	return time.Since(latestModTime) > 24*time.Hour
 }
 
 func (w *BackupWorker) Stop(ctx context.Context) {
@@ -94,53 +120,69 @@ func (w *BackupWorker) performBackup() {
 	slog.InfoContext(w.workerCtx, "Starting metadata backup (copy)", "destination", backupDir)
 
 	count := 0
-	err := filepath.Walk(metadataDir, func(path string, info os.FileInfo, err error) error {
-		if w.workerCtx != nil {
-			select {
-			case <-w.workerCtx.Done():
-				return w.workerCtx.Err()
-			default:
+
+	// Paths to back up
+	pathsToBackup := []string{metadataDir}
+	if cfg.Health.LibraryDir != nil && *cfg.Health.LibraryDir != "" {
+		pathsToBackup = append(pathsToBackup, *cfg.Health.LibraryDir)
+	}
+
+	for _, root := range pathsToBackup {
+		err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+			if w.workerCtx != nil {
+				select {
+				case <-w.workerCtx.Done():
+					return w.workerCtx.Err()
+				default:
+				}
 			}
-		}
+
+			if err != nil {
+				return err
+			}
+
+			if info.IsDir() {
+				return nil
+			}
+
+			if !strings.HasSuffix(info.Name(), ".meta") {
+				return nil
+			}
+
+			relPath, err := filepath.Rel(root, path)
+			if err != nil {
+				return err
+			}
+
+			// Add subdir prefix to avoid collisions
+			var destPath string
+			if root == metadataDir {
+				destPath = filepath.Join(backupDir, relPath)
+			} else {
+				destPath = filepath.Join(backupDir, filepath.Base(root), relPath)
+			}
+
+			if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+				return err
+			}
+
+			if err := w.copyFile(path, destPath); err != nil {
+				return err
+			}
+			count++
+			return nil
+		})
 
 		if err != nil {
-			return err
+			if errors.Is(err, context.Canceled) {
+				slog.InfoContext(w.workerCtx, "Metadata backup canceled")
+			} else {
+				slog.ErrorContext(w.workerCtx, "Failed to complete metadata backup", "error", err)
+			}
+			// Cleanup failed partial backup
+			os.RemoveAll(backupDir)
+			return
 		}
-
-		if info.IsDir() {
-			return nil
-		}
-
-		if !strings.HasSuffix(info.Name(), ".meta") {
-			return nil
-		}
-
-		relPath, err := filepath.Rel(metadataDir, path)
-		if err != nil {
-			return err
-		}
-
-		destPath := filepath.Join(backupDir, relPath)
-		if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
-			return err
-		}
-
-		if err := w.copyFile(path, destPath); err != nil {
-			return err
-		}
-		count++
-		return nil
-	})
-
-	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			slog.InfoContext(w.workerCtx, "Metadata backup canceled")
-		} else {
-			slog.ErrorContext(w.workerCtx, "Failed to complete metadata backup", "error", err)
-		}
-		// Cleanup failed partial backup
-		os.RemoveAll(backupDir)
-		return
 	}
 
 	slog.InfoContext(w.workerCtx, "Metadata backup completed successfully", "files_copied", count)
@@ -149,20 +191,38 @@ func (w *BackupWorker) performBackup() {
 }
 
 func (w *BackupWorker) copyFile(src, dst string) error {
-	sourceFile, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer sourceFile.Close()
+	const maxRetries = 3
+	var lastErr error
 
-	destFile, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer destFile.Close()
+	for i := 0; i < maxRetries; i++ {
+		sourceFile, err := os.Open(src)
+		if err != nil {
+			lastErr = err
+			time.Sleep(time.Duration(i+1) * time.Second)
+			continue
+		}
 
-	_, err = io.Copy(destFile, sourceFile)
-	return err
+		destFile, err := os.Create(dst)
+		if err != nil {
+			sourceFile.Close()
+			lastErr = err
+			time.Sleep(time.Duration(i+1) * time.Second)
+			continue
+		}
+
+		_, err = io.Copy(destFile, sourceFile)
+		sourceFile.Close()
+		destFile.Close()
+
+		if err == nil {
+			return nil
+		}
+
+		lastErr = err
+		time.Sleep(time.Duration(i+1) * time.Second)
+	}
+
+	return fmt.Errorf("failed to copy file after %d attempts: %w", maxRetries, lastErr)
 }
 
 func (w *BackupWorker) cleanupOldBackups(backupRoot string, keep int) {

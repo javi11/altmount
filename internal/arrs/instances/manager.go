@@ -154,19 +154,33 @@ func (m *Manager) RegisterInstance(ctx context.Context, arrURL, apiKey string) (
 
 	// Determine category based on ARR type
 	var category string
-	switch arrType {
-	case "radarr":
-		category = "movies"
-	case "sonarr":
-		category = "tv"
-	case "lidarr":
-		category = "music"
-	case "readarr":
-		category = "books"
-	case "whisparr":
-		category = "movies"
-	default:
-		return false, fmt.Errorf("unsupported ARR type: %s", arrType)
+	
+	// Check if instance already exists in config to respect pre-configured category
+	existingInstances := m.GetAllInstances()
+	found := false
+	for _, inst := range existingInstances {
+		if normalizeURL(inst.URL) == normalizeURL(arrURL) {
+			category = inst.Category
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		switch arrType {
+		case "radarr":
+			category = "movies"
+		case "sonarr":
+			category = "tv"
+		case "lidarr":
+			category = "music"
+		case "readarr":
+			category = "books"
+		case "whisparr":
+			category = "movies"
+		default:
+			return false, fmt.Errorf("unsupported ARR type: %s", arrType)
+		}
 	}
 
 	// Generate instance name

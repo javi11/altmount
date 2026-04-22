@@ -16,6 +16,8 @@ import type {
 	ImportStatusResponse,
 	LibrarySyncStatus,
 	ManualScanRequest,
+	NzbdavMigrateSymlinksRequest,
+	NzbdavMigrateSymlinksResponse,
 	PoolMetrics,
 	QueueHistoricalStatsResponse,
 	QueueItem,
@@ -86,7 +88,13 @@ export class APIClient {
 				if (response.status === 401) {
 					window.dispatchEvent(new CustomEvent("api:unauthorized"));
 				}
-				const errorData = await response.json();
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+				let errorData: any = {};
+				try {
+					errorData = await response.json();
+				} catch {
+					// empty or non-JSON error body — fall through to status-based message
+				}
 				const errorMessage =
 					(typeof errorData.error === "object" ? errorData.error?.message : errorData.error) ||
 					errorData.message ||
@@ -841,6 +849,28 @@ export class APIClient {
 	async cancelNzbdavImport() {
 		return this.request<{ message: string }>("/import/nzbdav", {
 			method: "DELETE",
+		});
+	}
+
+	async clearPendingNzbdavMigrations() {
+		return this.request<{ message: string; data: { deleted: number } }>(
+			"/import/nzbdav/pending-migrations",
+			{ method: "DELETE" },
+		);
+	}
+
+	async clearAllNzbdavMigrations() {
+		return this.request<{ message: string; data: { deleted: number } }>(
+			"/import/nzbdav/migrations",
+			{ method: "DELETE" },
+		);
+	}
+
+	async migrateNzbdavSymlinks(req: NzbdavMigrateSymlinksRequest) {
+		return this.request<NzbdavMigrateSymlinksResponse>("/import/nzbdav/migrate-symlinks", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify(req),
 		});
 	}
 

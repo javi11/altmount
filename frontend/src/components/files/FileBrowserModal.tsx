@@ -133,7 +133,8 @@ export function FileBrowserModal({
 						<table className="table-zebra table-sm table">
 							<thead className="sticky top-0 z-10 bg-base-100">
 								<tr>
-									<th /> {/* Icon */}
+									<th />
+									{/* Icon */}
 									<th>Name</th>
 									<th>Size</th>
 									<th>Modified</th>

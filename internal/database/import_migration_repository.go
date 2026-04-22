@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 )
 
 // ImportMigrationRepository handles database operations for import_migrations.
@@ -91,6 +90,38 @@ func (r *ImportMigrationRepository) MarkFailed(ctx context.Context, queueItemID 
 	return nil
 }
 
+// LinkQueueItemID sets queue_item_id for all migration rows matching (source, externalIDs).
+// Unconditionally overwrites any existing queue_item_id so that re-imports after a
+// cancelled/failed first attempt can re-link to the new queue item. This is safe because
+// IsMigrationCompleted already short-circuits rows with status=imported before we get here.
+func (r *ImportMigrationRepository) LinkQueueItemID(ctx context.Context, source string, externalIDs []string, queueItemID int64) error {
+	if len(externalIDs) == 0 {
+		return nil
+	}
+
+	placeholders := make([]string, len(externalIDs))
+	args := make([]any, 0, len(externalIDs)+2)
+	args = append(args, queueItemID)
+	for i, id := range externalIDs {
+		placeholders[i] = "?"
+		args = append(args, id)
+	}
+	args = append(args, source)
+
+	query := fmt.Sprintf(`
+		UPDATE import_migrations
+		SET queue_item_id = ?, updated_at = datetime('now')
+		WHERE external_id IN (%s)
+		AND source = ?
+	`, strings.Join(placeholders, ", "))
+
+	_, err := r.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("link queue_item_id (source=%s, queueItemID=%d): %w", source, queueItemID, err)
+	}
+	return nil
+}
+
 // MarkSymlinksMigrated sets status=symlinks_migrated for the given row IDs.
 func (r *ImportMigrationRepository) MarkSymlinksMigrated(ctx context.Context, ids []int64) error {
 	if len(ids) == 0 {
@@ -98,11 +129,10 @@ func (r *ImportMigrationRepository) MarkSymlinksMigrated(ctx context.Context, id
 	}
 
 	placeholders := make([]string, len(ids))
-	args := make([]any, len(ids)+1)
-	args[0] = time.Now()
+	args := make([]any, len(ids))
 	for i, id := range ids {
 		placeholders[i] = "?"
-		args[i+1] = id
+		args[i] = id
 	}
 
 	query := fmt.Sprintf(`
@@ -111,7 +141,7 @@ func (r *ImportMigrationRepository) MarkSymlinksMigrated(ctx context.Context, id
 		WHERE id IN (%s)
 	`, strings.Join(placeholders, ", "))
 
-	_, err := r.db.ExecContext(ctx, query, args[1:]...)
+	_, err := r.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("mark import_migrations symlinks_migrated: %w", err)
 	}
@@ -170,10 +200,10 @@ func (r *ImportMigrationRepository) Stats(ctx context.Context, source string) (*
 	query := `
 		SELECT
 			COUNT(*) AS total,
-			SUM(CASE WHEN status = 'pending'           THEN 1 ELSE 0 END) AS pending,
-			SUM(CASE WHEN status = 'imported'          THEN 1 ELSE 0 END) AS imported,
-			SUM(CASE WHEN status = 'failed'            THEN 1 ELSE 0 END) AS failed,
-			SUM(CASE WHEN status = 'symlinks_migrated' THEN 1 ELSE 0 END) AS symlinks_migrated
+			COALESCE(SUM(CASE WHEN status = 'pending'           THEN 1 ELSE 0 END), 0) AS pending,
+			COALESCE(SUM(CASE WHEN status = 'imported'          THEN 1 ELSE 0 END), 0) AS imported,
+			COALESCE(SUM(CASE WHEN status = 'failed'            THEN 1 ELSE 0 END), 0) AS failed,
+			COALESCE(SUM(CASE WHEN status = 'symlinks_migrated' THEN 1 ELSE 0 END), 0) AS symlinks_migrated
 		FROM import_migrations
 		WHERE source = ?
 	`
@@ -189,6 +219,37 @@ func (r *ImportMigrationRepository) Stats(ctx context.Context, source string) (*
 		return nil, fmt.Errorf("stats import_migrations (source=%s): %w", source, err)
 	}
 	return &stats, nil
+}
+
+// DeletePendingBySource removes all migration rows for a source that have
+// status='pending'. Returns the number of rows deleted. Use this to clear
+// orphaned rows from a previous import attempt so a fresh import starts clean
+// (imported/symlinks_migrated rows are preserved).
+func (r *ImportMigrationRepository) DeletePendingBySource(ctx context.Context, source string) (int64, error) {
+	res, err := r.db.ExecContext(ctx, `DELETE FROM import_migrations WHERE source = ? AND status = 'pending'`, source)
+	if err != nil {
+		return 0, fmt.Errorf("delete pending import_migrations (source=%s): %w", source, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("delete pending import_migrations rows affected: %w", err)
+	}
+	return n, nil
+}
+
+// DeleteAllBySource removes every migration row for a source regardless of
+// status. Returns the number of rows deleted. Use to force a full re-import
+// after the imported files have been deleted from AltMount.
+func (r *ImportMigrationRepository) DeleteAllBySource(ctx context.Context, source string) (int64, error) {
+	res, err := r.db.ExecContext(ctx, `DELETE FROM import_migrations WHERE source = ?`, source)
+	if err != nil {
+		return 0, fmt.Errorf("delete all import_migrations (source=%s): %w", source, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("delete all import_migrations rows affected: %w", err)
+	}
+	return n, nil
 }
 
 // ExistsForSource returns true if any rows exist for the given source.
@@ -242,6 +303,20 @@ func (r *ImportMigrationRepository) BackfillFromImportQueue(ctx context.Context)
 		NzbdavID string `json:"nzbdav_id"`
 	}
 
+	insertQuery := `
+		INSERT OR IGNORE INTO import_migrations
+			(source, external_id, queue_item_id, relative_path, final_path, status, created_at, updated_at)
+		VALUES ('nzbdav', ?, ?, ?, ?, 'imported', datetime('now'), datetime('now'))
+	`
+	if r.dialect.IsPostgres() {
+		insertQuery = `
+			INSERT INTO import_migrations
+				(source, external_id, queue_item_id, relative_path, final_path, status, created_at, updated_at)
+			VALUES ('nzbdav', $1, $2, $3, $4, 'imported', NOW(), NOW())
+			ON CONFLICT (source, external_id) DO NOTHING
+		`
+	}
+
 	inserted := 0
 	for _, c := range candidates {
 		if err := json.Unmarshal([]byte(c.metadata), &nzbdavIDStruct); err != nil {
@@ -257,28 +332,9 @@ func (r *ImportMigrationRepository) BackfillFromImportQueue(ctx context.Context)
 			relativePath = *c.relativePath
 		}
 
-		insertQuery := `
-			INSERT OR IGNORE INTO import_migrations
-				(source, external_id, queue_item_id, relative_path, final_path, status, created_at, updated_at)
-			VALUES ('nzbdav', ?, ?, ?, ?, 'imported', datetime('now'), datetime('now'))
-		`
-		if r.dialect.IsPostgres() {
-			insertQuery = `
-				INSERT INTO import_migrations
-					(source, external_id, queue_item_id, relative_path, final_path, status, created_at, updated_at)
-				VALUES ('nzbdav', $1, $2, $3, $4, 'imported', NOW(), NOW())
-				ON CONFLICT (source, external_id) DO NOTHING
-			`
-		}
-
-		var res sql.Result
-		if r.dialect.IsPostgres() {
-			res, err = r.db.ExecContext(ctx, insertQuery, nzbdavIDStruct.NzbdavID, c.id, relativePath, c.storagePath)
-		} else {
-			res, err = r.db.ExecContext(ctx, insertQuery, nzbdavIDStruct.NzbdavID, c.id, relativePath, c.storagePath)
-		}
-		if err != nil {
-			return inserted, fmt.Errorf("backfill: insert import_migration (external_id=%s): %w", nzbdavIDStruct.NzbdavID, err)
+		res, execErr := r.db.ExecContext(ctx, insertQuery, nzbdavIDStruct.NzbdavID, c.id, relativePath, c.storagePath)
+		if execErr != nil {
+			return inserted, fmt.Errorf("backfill: insert import_migration (external_id=%s): %w", nzbdavIDStruct.NzbdavID, execErr)
 		}
 		if n, _ := res.RowsAffected(); n > 0 {
 			inserted++

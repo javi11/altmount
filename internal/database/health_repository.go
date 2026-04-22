@@ -206,7 +206,7 @@ func (r *HealthRepository) GetUnhealthyFiles(ctx context.Context, limit int, str
 		LIMIT ?
 	`
 
-	// Build the library directory prefix filter (e.g. /mnt/usenet-rclone/%)
+	// Build the library directory prefix filter (e.g. /my/library/path/%)
 	libraryPrefix := libraryDir
 	if !strings.HasSuffix(libraryPrefix, "/") {
 		libraryPrefix += "/"

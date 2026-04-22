@@ -20,10 +20,11 @@ export const useQueue = (params?: {
 	});
 };
 
-export const useQueueStats = () => {
+export const useQueueStats = (refetchInterval?: number) => {
 	return useQuery({
 		queryKey: ["queue", "stats"],
 		queryFn: () => apiClient.getQueueStats(),
+		refetchInterval,
 	});
 };
 
@@ -456,6 +457,44 @@ export const useCancelNzbdavImport = () => {
 		mutationFn: () => apiClient.cancelNzbdavImport(),
 		onSuccess: () => {
 			// Invalidate scan status to update immediately
+			queryClient.invalidateQueries({ queryKey: ["import", "nzbdav", "status"] });
+		},
+	});
+};
+
+export const useClearPendingNzbdavMigrations = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: () => apiClient.clearPendingNzbdavMigrations(),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["import", "nzbdav", "status"] });
+		},
+	});
+};
+
+export const useClearAllNzbdavMigrations = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: () => apiClient.clearAllNzbdavMigrations(),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["import", "nzbdav", "status"] });
+		},
+	});
+};
+
+export const useMigrateNzbdavSymlinks = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: (req: { libraryPath: string; sourceMountPath: string; dryRun: boolean }) =>
+			apiClient.migrateNzbdavSymlinks({
+				library_path: req.libraryPath,
+				source_mount_path: req.sourceMountPath,
+				dry_run: req.dryRun,
+			}),
+		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["import", "nzbdav", "status"] });
 		},
 	});
