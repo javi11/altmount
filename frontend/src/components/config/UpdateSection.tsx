@@ -33,11 +33,18 @@ export function UpdateSection() {
 		refetch();
 	};
 
+	const dockerMode = updateStatus?.docker_available ?? false;
+	const binaryMode = !dockerMode && (updateStatus?.binary_update_available ?? false);
+	const updateUnavailable = updateStatus !== undefined && !dockerMode && !binaryMode;
+
 	const handleApplyUpdate = async (force = false) => {
 		const actionTitle = force ? "Force Reinstall" : "Apply Update";
+		const baseAction = dockerMode
+			? `pull the ${channel} image and restart the container`
+			: `download the ${channel} binary and restart`;
 		const actionMessage = force
-			? `This will force-pull the ${channel} image and restart the container, even if the version hasn't changed. Continue?`
-			: `This will pull the latest ${channel} image and restart the container. The service will be briefly unavailable. Continue?`;
+			? `This will force-${baseAction}, even if the version hasn't changed. Continue?`
+			: `This will ${baseAction}. The service will be briefly unavailable. Continue?`;
 
 		const confirmed = await confirmAction(actionTitle, actionMessage, {
 			type: force ? "error" : "warning",
@@ -51,7 +58,9 @@ export function UpdateSection() {
 			showToast({
 				type: "success",
 				title: force ? "Reinstall started" : "Update started",
-				message: "Pulling image. The container will restart automatically.",
+				message: dockerMode
+					? "Pulling image. The container will restart automatically."
+					: "Downloading binary. The service will restart automatically.",
 			});
 		} catch (err) {
 			showToast({
@@ -62,7 +71,6 @@ export function UpdateSection() {
 		}
 	};
 
-	const dockerUnavailable = updateStatus && !updateStatus.docker_available;
 	const updateAvailable = updateStatus?.update_available ?? false;
 
 	/** Taller tap targets below md (touch-friendly ~48px min height) */
@@ -157,7 +165,7 @@ export function UpdateSection() {
 							type="button"
 							className={`btn btn-sm btn-warning min-w-0 ${updateActionBtnLayout}`}
 							onClick={() => handleApplyUpdate(false)}
-							disabled={applyUpdate.isPending || dockerUnavailable}
+							disabled={applyUpdate.isPending || updateUnavailable}
 						>
 							{applyUpdate.isPending ? (
 								<LoadingSpinner size="sm" />
@@ -171,7 +179,7 @@ export function UpdateSection() {
 							type="button"
 							className={`btn btn-sm btn-ghost min-w-0 border-base-300 bg-base-100 hover:bg-base-200 ${updateActionBtnLayout}`}
 							onClick={() => handleApplyUpdate(true)}
-							disabled={applyUpdate.isPending || dockerUnavailable || isChecking}
+							disabled={applyUpdate.isPending || updateUnavailable || isChecking}
 						>
 							{applyUpdate.isPending ? (
 								<LoadingSpinner size="sm" />
@@ -214,15 +222,24 @@ export function UpdateSection() {
 						</div>
 					) : null}
 
-					{dockerUnavailable && (
+					{updateUnavailable && (
 						<div className="alert alert-warning">
 							<AlertTriangle className="h-5 w-5 shrink-0" />
 							<div>
 								<div className="font-semibold">Auto-update unavailable</div>
 								<div className="text-sm">
-									Mount <code className="font-mono">/var/run/docker.sock</code> into the container
-									to enable one-click updates.
+									For Docker installs, mount <code className="font-mono">/var/run/docker.sock</code>{" "}
+									into the container to enable one-click updates. For standalone binaries, ensure
+									the executable file is writable by this process.
 								</div>
+							</div>
+						</div>
+					)}
+					{binaryMode && (
+						<div className="alert alert-info">
+							<ArrowUpCircle className="h-5 w-5 shrink-0" />
+							<div className="text-sm">
+								Running as standalone binary — updates download the new binary and restart.
 							</div>
 						</div>
 					)}

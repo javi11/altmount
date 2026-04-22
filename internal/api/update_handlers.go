@@ -16,6 +16,19 @@ import (
 	"github.com/javi11/altmount/internal/version"
 )
 
+// insideContainer reports whether the current process is running inside a
+// Docker or Kubernetes container. When true, the Docker-based update path is
+// preferred over the binary self-update path.
+func insideContainer() bool {
+	if _, err := os.Stat("/.dockerenv"); err == nil {
+		return true
+	}
+	if os.Getenv("KUBERNETES_SERVICE_HOST") != "" {
+		return true
+	}
+	return false
+}
+
 const (
 	ghAPIBase   = "https://api.github.com"
 	ghRepoOwner = "javi11"
@@ -115,10 +128,11 @@ func (s *Server) handleGetUpdateStatus(c *fiber.Ctx) error {
 	}
 
 	resp := UpdateStatusResponse{
-		CurrentVersion:  version.Version,
-		GitCommit:       version.GitCommit,
-		Channel:         channel,
-		DockerAvailable: isDockerAvailable(),
+		CurrentVersion:        version.Version,
+		GitCommit:             version.GitCommit,
+		Channel:               channel,
+		DockerAvailable:       isDockerAvailable(),
+		BinaryUpdateAvailable: s.updater != nil && s.updater.CanSelfUpdate(),
 	}
 
 	ctx, cancel := context.WithTimeout(c.Context(), 10*time.Second)
@@ -175,10 +189,6 @@ func (s *Server) handleApplyUpdate(c *fiber.Ctx) error {
 		return RespondForbidden(c, "Admin privileges required", "Only administrators can perform system updates.")
 	}
 
-	if !isDockerAvailable() {
-		return RespondBadRequest(c, "Auto-update is not available. Mount docker.sock into the container and ensure docker CLI is installed.", "")
-	}
-
 	var req struct {
 		Channel UpdateChannel `json:"channel"`
 		Force   bool          `json:"force"`
@@ -196,33 +206,68 @@ func (s *Server) handleApplyUpdate(c *fiber.Ctx) error {
 		return RespondBadRequest(c, "Invalid channel. Use 'latest' or 'dev'", "")
 	}
 
-	// Use goroutine to avoid blocking the API response
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-		defer cancel()
+	// Prefer the Docker-based update path when running inside a container
+	// with docker.sock mounted. Fall back to in-place binary self-update for
+	// standalone installs.
+	dockerPath := insideContainer() && isDockerAvailable()
+	binaryPath := !dockerPath && s.updater != nil && s.updater.CanSelfUpdate()
 
-		image := fmt.Sprintf("ghcr.io/%s/%s:%s", ghRepoOwner, ghRepoName, channel)
-		slog.InfoContext(ctx, "Starting auto-update", "channel", channel, "image", image, "force", req.Force)
+	switch {
+	case dockerPath:
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			defer cancel()
 
-		// 1. Pull the new image
-		cmd := exec.CommandContext(ctx, "docker", "pull", image)
-		cmd.Env = append(os.Environ(), "HOME=/config")
-		output, err := cmd.CombinedOutput()
-		if err != nil {
-			slog.ErrorContext(ctx, "Failed to pull latest image", "error", err, "output", string(output))
-			return
-		}
-		slog.InfoContext(ctx, "Successfully pulled latest image", "output", string(output))
+			image := fmt.Sprintf("ghcr.io/%s/%s:%s", ghRepoOwner, ghRepoName, channel)
+			slog.InfoContext(ctx, "Starting docker auto-update",
+				"channel", channel,
+				"image", image,
+				"force", req.Force)
 
-		// 2. Trigger restart
-		// Note: performRestart only restarts the process. To pick up the new image,
-		// the container needs to be recreated. However, if the user has a setup
-		// that handles image updates on restart (like Watchtower or similar), this will work.
-		// For many users, a simple process restart is the first step.
-		s.performRestart(ctx)
-	}()
+			cmd := exec.CommandContext(ctx, "docker", "pull", image)
+			cmd.Env = append(os.Environ(), "HOME=/config")
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				slog.ErrorContext(ctx, "Failed to pull latest image",
+					"error", err,
+					"output", string(output))
+				return
+			}
+			slog.InfoContext(ctx, "Successfully pulled latest image",
+				"output", string(output))
 
-	return RespondSuccess(c, fiber.Map{
-		"message": "Update initiated. The image is being pulled and the server will restart automatically.",
-	})
+			s.performRestart(ctx)
+		}()
+
+		return RespondSuccess(c, fiber.Map{
+			"message": "Update initiated. The image is being pulled and the server will restart automatically.",
+		})
+
+	case binaryPath:
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			defer cancel()
+
+			slog.InfoContext(ctx, "Starting binary auto-update",
+				"channel", channel,
+				"force", req.Force)
+
+			if err := s.updater.ApplyBinaryUpdate(ctx, string(channel)); err != nil {
+				slog.ErrorContext(ctx, "Failed to apply binary update", "error", err)
+				return
+			}
+			slog.InfoContext(ctx, "Binary update applied, restarting")
+			s.performRestart(ctx)
+		}()
+
+		return RespondSuccess(c, fiber.Map{
+			"message": "Update initiated. Downloading the new binary and restarting automatically.",
+		})
+
+	default:
+		return RespondBadRequest(c,
+			"Auto-update is not available. For Docker installs, mount /var/run/docker.sock and install the docker CLI. For standalone binaries, ensure the executable file is writable by this process.",
+			"")
+	}
 }
+

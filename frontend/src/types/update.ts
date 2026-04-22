@@ -8,4 +8,5 @@ export interface UpdateStatusResponse {
 	update_available: boolean;
 	release_url?: string;
 	docker_available?: boolean;
+	binary_update_available?: boolean;
 }

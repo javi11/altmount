@@ -542,13 +542,14 @@ const (
 
 // UpdateStatusResponse represents the current update status.
 type UpdateStatusResponse struct {
-	CurrentVersion  string        `json:"current_version"`
-	GitCommit       string        `json:"git_commit,omitempty"`
-	Channel         UpdateChannel `json:"channel"`
-	LatestVersion   string        `json:"latest_version,omitempty"`
-	UpdateAvailable bool          `json:"update_available"`
-	ReleaseURL      string        `json:"release_url,omitempty"`
-	DockerAvailable bool          `json:"docker_available"`
+	CurrentVersion         string        `json:"current_version"`
+	GitCommit              string        `json:"git_commit,omitempty"`
+	Channel                UpdateChannel `json:"channel"`
+	LatestVersion          string        `json:"latest_version,omitempty"`
+	UpdateAvailable        bool          `json:"update_available"`
+	ReleaseURL             string        `json:"release_url,omitempty"`
+	DockerAvailable        bool          `json:"docker_available"`
+	BinaryUpdateAvailable  bool          `json:"binary_update_available"`
 }
 
 // SystemHealthResponse represents system health check result
