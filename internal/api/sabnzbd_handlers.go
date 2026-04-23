@@ -22,6 +22,7 @@ import (
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/httpclient"
 	"github.com/javi11/altmount/internal/importer/utils"
+	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
 	"github.com/javi11/altmount/internal/pathutil"
 )
 
@@ -319,8 +320,8 @@ func (s *Server) handleSABnzbdAddFile(c *fiber.Ctx) error {
 	}
 
 	// Validate file extension
-	if !strings.HasSuffix(strings.ToLower(file.Filename), ".nzb") {
-		return s.writeSABnzbdErrorFiber(c, "Invalid file type, must be .nzb")
+	if !nzbtrim.HasNzbExtension(file.Filename) {
+		return s.writeSABnzbdErrorFiber(c, "Invalid file type, must be .nzb or .nzb.gz")
 	}
 
 	// Get and validate category from form first
@@ -475,8 +476,8 @@ func (s *Server) handleSABnzbdAddUrl(c *fiber.Ctx) error {
 		filename = "downloaded.nzb"
 	}
 
-	// Ensure .nzb extension
-	if !strings.HasSuffix(strings.ToLower(filename), ".nzb") {
+	// Ensure .nzb or .nzb.gz extension
+	if !nzbtrim.HasNzbExtension(filename) {
 		filename += ".nzb"
 	}
 
