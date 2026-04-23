@@ -11,6 +11,7 @@ import (
 
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
 )
 
 // WatchQueueAdder interface for adding items to the import queue from directory watcher
@@ -113,7 +114,7 @@ func (w *Watcher) scanDirectory(ctx context.Context, watchDir string) {
 		}
 
 		// Check extension
-		if !strings.HasSuffix(strings.ToLower(d.Name()), ".nzb") {
+		if !nzbtrim.HasNzbExtension(d.Name()) {
 			return nil
 		}
 

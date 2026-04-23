@@ -18,6 +18,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/javi11/altmount/internal/database"
 	internalerrors "github.com/javi11/altmount/internal/errors"
+	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
 	"github.com/javi11/altmount/internal/nzblnk"
 )
 
@@ -576,8 +577,8 @@ func (s *Server) handleUploadToQueue(c *fiber.Ctx) error {
 	}
 
 	// Validate file extension
-	if !strings.HasSuffix(strings.ToLower(file.Filename), ".nzb") {
-		return RespondValidationError(c, "Invalid file type", "Only .nzb files are allowed")
+	if !nzbtrim.HasNzbExtension(file.Filename) {
+		return RespondValidationError(c, "Invalid file type", "Only .nzb or .nzb.gz files are allowed")
 	}
 
 	// Validate file size (100MB limit)

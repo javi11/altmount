@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
 )
 
 // QueueAdder defines the interface for adding items to the queue
@@ -176,8 +178,7 @@ func (d *DirectoryScanner) performScan(ctx context.Context, scanPath string) {
 		d.info.FilesFound++
 		d.mu.Unlock()
 
-		ext := strings.ToLower(path)
-		if !strings.HasSuffix(ext, ".nzb") && !strings.HasSuffix(ext, ".strm") {
+		if !nzbtrim.HasNzbExtension(path) && !strings.HasSuffix(strings.ToLower(path), ".strm") {
 			return nil
 		}
 

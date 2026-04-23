@@ -97,8 +97,8 @@ func (s *Server) handleNzbStreams(c *fiber.Ctx) error {
 		return RespondBadRequest(c, "No file provided", "A .nzb file must be uploaded")
 	}
 
-	if !strings.HasSuffix(strings.ToLower(file.Filename), ".nzb") {
-		return RespondValidationError(c, "Invalid file type", "Only .nzb files are allowed")
+	if !nzbtrim.HasNzbExtension(file.Filename) {
+		return RespondValidationError(c, "Invalid file type", "Only .nzb or .nzb.gz files are allowed")
 	}
 
 	const maxUploadSize = 100 * 1024 * 1024 // 100 MB

@@ -180,7 +180,9 @@ function EnhancedUploadSection() {
 	const categories = config?.sabnzbd?.categories ?? [];
 
 	const validateFile = useCallback((file: File): string | null => {
-		if (!file.name.toLowerCase().endsWith(".nzb")) return "Only .nzb files are allowed";
+		const name = file.name.toLowerCase();
+		if (!name.endsWith(".nzb") && !name.endsWith(".nzb.gz"))
+			return "Only .nzb or .nzb.gz files are allowed";
 		if (file.size > 100 * 1024 * 1024) return "File size must be less than 100MB";
 		return null;
 	}, []);
@@ -482,7 +484,7 @@ function EnhancedUploadSection() {
 						<input
 							type="file"
 							multiple
-							accept=".nzb"
+							accept=".nzb,.nzb.gz"
 							onChange={handleFileInput}
 							className="hidden"
 						/>
