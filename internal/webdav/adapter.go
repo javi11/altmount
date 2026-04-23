@@ -49,6 +49,22 @@ type webdavMethods struct {
 	prefix string
 }
 
+// headerTracker wraps http.ResponseWriter to track whether headers have been committed.
+type headerTracker struct {
+	http.ResponseWriter
+	written bool
+}
+
+func (h *headerTracker) WriteHeader(status int) {
+	h.written = true
+	h.ResponseWriter.WriteHeader(status)
+}
+
+func (h *headerTracker) Write(b []byte) (int, error) {
+	h.written = true
+	return h.ResponseWriter.Write(b)
+}
+
 func (h *webdavMethods) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "OPTIONS":
@@ -56,8 +72,14 @@ func (h *webdavMethods) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodHead, http.MethodGet:
 		h.handleGet(w, r)
 	case "PROPFIND":
-		status, err := propfind.HandlePropfind(propfindFS{h.fs}, w, r, h.prefix)
+		tracker := &headerTracker{ResponseWriter: w}
+		status, err := propfind.HandlePropfind(propfindFS{h.fs}, tracker, r, h.prefix)
 		if status != 0 {
+			if tracker.written {
+				// Headers already committed (207 sent); log the underlying error.
+				slog.ErrorContext(r.Context(), "PROPFIND error after headers sent", "status", status, "err", err)
+				return
+			}
 			w.WriteHeader(status)
 			if status != http.StatusNoContent {
 				_, _ = w.Write([]byte(http.StatusText(status)))
