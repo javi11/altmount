@@ -14,12 +14,27 @@ import (
 // QueueAdder defines the interface for adding items to the queue
 type QueueAdder interface {
 	AddToQueue(ctx context.Context, filePath string, relativePath *string, metadata *string) error
+	// AddBatchToQueue inserts multiple pending items in a single DB transaction.
+	// Used by the directory scanner to amortise per-file insert overhead.
+	AddBatchToQueue(ctx context.Context, items []QueueBatchItem) error
 	IsFileInQueue(ctx context.Context, filePath string) bool
 	IsFileProcessed(filePath string, scanRoot string) bool
 }
 
+// QueueBatchItem describes a pending queue insertion discovered during a scan.
+type QueueBatchItem struct {
+	FilePath     string
+	RelativePath *string
+	Metadata     *string
+}
+
 // defaultMaxScanDepth prevents runaway traversal of deep or cyclically-linked trees.
 const defaultMaxScanDepth = 10
+
+// scanBatchSize is the number of discovered files accumulated before flushing
+// to the database as a single batch insert. Bigger batches improve throughput
+// but hold the transaction longer and delay visibility to queue workers.
+const scanBatchSize = 100
 
 // DirectoryScanner handles manual directory scanning for NZB/STRM files
 type DirectoryScanner struct {
@@ -136,6 +151,22 @@ func (d *DirectoryScanner) performScan(ctx context.Context, scanPath string) {
 
 	d.log.DebugContext(ctx, "Scanning directory for NZB files", "dir", scanPath)
 
+	pending := make([]QueueBatchItem, 0, scanBatchSize)
+	flush := func() {
+		if len(pending) == 0 {
+			return
+		}
+		if err := d.queueAdder.AddBatchToQueue(ctx, pending); err != nil {
+			d.log.ErrorContext(ctx, "Failed to add batch to queue during scan",
+				"batch_size", len(pending), "error", err)
+		} else {
+			d.mu.Lock()
+			d.info.FilesAdded += len(pending)
+			d.mu.Unlock()
+		}
+		pending = pending[:0]
+	}
+
 	err := filepath.WalkDir(scanPath, func(path string, entry fs.DirEntry, err error) error {
 		// Check for cancellation
 		select {
@@ -186,20 +217,22 @@ func (d *DirectoryScanner) performScan(ctx context.Context, scanPath string) {
 		}
 
 		if d.queueAdder.IsFileProcessed(path, scanPath) {
-			d.log.DebugContext(ctx, "Skipping file - already processed", "file", path)
 			return nil
 		}
 
-		if err := d.queueAdder.AddToQueue(ctx, path, &scanPath, nil); err != nil {
-			d.log.ErrorContext(ctx, "Failed to add file to queue during scan", "file", path, "error", err)
+		pending = append(pending, QueueBatchItem{
+			FilePath:     path,
+			RelativePath: &scanPath,
+		})
+		if len(pending) >= scanBatchSize {
+			flush()
 		}
-
-		d.mu.Lock()
-		d.info.FilesAdded++
-		d.mu.Unlock()
 
 		return nil
 	})
+
+	// Flush any remaining items accumulated before walk end or early return.
+	flush()
 
 	if err != nil && !strings.Contains(err.Error(), "scan cancelled") {
 		d.log.ErrorContext(ctx, "Failed to scan directory", "dir", scanPath, "error", err)
