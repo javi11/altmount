@@ -29,6 +29,7 @@ func setupTestDB(t *testing.T) *HealthRepository {
 			max_repair_retries INTEGER DEFAULT 3,
 			source_nzb_path TEXT,
 			error_details TEXT,
+			metadata TEXT,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			release_date DATETIME,
@@ -269,7 +270,7 @@ func TestRelinkFileByFilename_UpdatesAnyStatus(t *testing.T) {
 	require.NoError(t, err)
 
 	// 2. Perform Relink
-	relinked, err := repo.RelinkFileByFilename(ctx, fileName, newPath, libPath)
+	relinked, err := repo.RelinkFileByFilename(ctx, fileName, newPath, libPath, nil)
 	require.NoError(t, err)
 	assert.True(t, relinked, "Should have relinked the healthy record")
 
@@ -290,7 +291,7 @@ func TestRelinkFileByFilename_UpdatesAnyStatus(t *testing.T) {
 	err = repo.UpdateFileHealth(ctx, corruptedFile, HealthStatusCorrupted, nil, nil, nil, false)
 	require.NoError(t, err)
 
-	relinked, err = repo.RelinkFileByFilename(ctx, "Matrix.mkv", corruptedFile, "/lib/Matrix.mkv")
+	relinked, err = repo.RelinkFileByFilename(ctx, "Matrix.mkv", corruptedFile, "/lib/Matrix.mkv", nil)
 	require.NoError(t, err)
 	assert.True(t, relinked)
 }
@@ -306,7 +307,7 @@ func TestAddFileToHealthCheckWithMetadata_StoresLibraryPath(t *testing.T) {
 	sourceNzb := "Dune.nzb"
 
 	// Add the file
-	err := repo.AddFileToHealthCheckWithMetadata(ctx, filePath, &libraryPath, 3, 3, &sourceNzb, HealthPriorityNormal, nil)
+	err := repo.AddFileToHealthCheckWithMetadata(ctx, filePath, &libraryPath, 3, 3, &sourceNzb, HealthPriorityNormal, nil, nil)
 	require.NoError(t, err)
 
 	// Verify it was stored

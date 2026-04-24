@@ -36,6 +36,7 @@ func setupWorkerTestDB(t *testing.T) (*database.HealthRepository, *sql.DB) {
 			max_repair_retries INTEGER DEFAULT 3,
 			source_nzb_path TEXT,
 			error_details TEXT,
+			metadata TEXT,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			release_date DATETIME,

@@ -173,8 +173,13 @@ func (s *Service) CleanupQueue(ctx context.Context) error {
 }
 
 // TriggerFileRescan triggers a rescan for a specific file path through the appropriate ARR instance
-func (s *Service) TriggerFileRescan(ctx context.Context, pathForRescan string, relativePath string) error {
-	return s.scanner.TriggerFileRescan(ctx, pathForRescan, relativePath)
+func (s *Service) TriggerFileRescan(ctx context.Context, pathForRescan string, relativePath string, metadataStr *string) error {
+	return s.scanner.TriggerFileRescan(ctx, pathForRescan, relativePath, metadataStr)
+}
+
+// DiscoverFileMetadata attempts to discover the rich metadata for a file through the appropriate ARR instance
+func (s *Service) DiscoverFileMetadata(ctx context.Context, filePath, relativePath, nzbName, libraryPath string) (*model.WebhookMetadata, error) {
+	return s.scanner.DiscoverFileMetadata(ctx, filePath, relativePath, nzbName, libraryPath)
 }
 
 // TriggerScanForFile finds the ARR instance managing the file and triggers a download scan on it.
