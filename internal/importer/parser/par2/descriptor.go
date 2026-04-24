@@ -104,9 +104,11 @@ func readFileDescriptors(
 		return descriptors, fmt.Errorf("PAR2 file has no segments")
 	}
 
-	// Create context with timeout (30 seconds per segment should be enough)
-	// For multi-segment files, this gives adequate time
-	ctx, cancel := context.WithTimeout(ctx, time.Second*30*time.Duration(len(par2File.Segments)))
+	// Create context with timeout (30s per segment, capped at 90s ceiling).
+	// Capping prevents runaway waits on large index files where the real cost
+	// is dominated by latency, not sequential segment fetches.
+	timeout := min(time.Second*30*time.Duration(len(par2File.Segments)), 90*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	// Build segment loader and compute total size
@@ -132,6 +134,11 @@ func readFileDescriptors(
 	// Increase limit to accommodate larger PAR2 files with many FileDesc packets
 	maxPackets := 1000 // Limit the number of packets to process
 	packetCount := 0
+	// Once FileDesc packets stop appearing, PAR2 index files typically have no
+	// more ahead. Break after a window of non-FileDesc packets past the last
+	// descriptor to avoid draining the entire index unnecessarily.
+	const noNewDescWindow = 50
+	packetsSinceLastDesc := 0
 	var lastError error
 
 	for packetCount < maxPackets {
@@ -168,6 +175,7 @@ func readFileDescriptors(
 			}
 
 			descriptors = append(descriptors, *desc)
+			packetsSinceLastDesc = 0
 		} else {
 			// Skip non-FileDesc packets
 			if err := packetReader.SkipPacketBody(header); err != nil {
@@ -176,6 +184,15 @@ func readFileDescriptors(
 				}
 				slog.DebugContext(ctx, "Corrupted packet body encountered, returning partial PAR2 descriptors", "error", err, "descriptors_found", len(descriptors))
 				break
+			}
+			if len(descriptors) > 0 {
+				packetsSinceLastDesc++
+				if packetsSinceLastDesc >= noNewDescWindow {
+					slog.DebugContext(ctx, "No new FileDesc packets in window, ending PAR2 scan early",
+						"descriptors_found", len(descriptors),
+						"window", noNewDescWindow)
+					break
+				}
 			}
 		}
 	}
