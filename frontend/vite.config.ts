@@ -65,6 +65,19 @@ export default defineConfig({
 			workbox: {
 				globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
 				runtimeCaching: [
+					// NetworkFirst for navigation so auth proxies (e.g. Authelia) can
+					// redirect unauthenticated requests before the SW serves cached HTML.
+					{
+						urlPattern: ({ request }) => request.mode === "navigate",
+						handler: "NetworkFirst",
+						options: {
+							cacheName: "navigation-cache",
+							networkTimeoutSeconds: 10,
+							cacheableResponse: {
+								statuses: [200],
+							},
+						},
+					},
 					{
 						urlPattern: /^\/api\/.*/i,
 						handler: "NetworkFirst",
@@ -78,8 +91,6 @@ export default defineConfig({
 						},
 					},
 				],
-				navigateFallback: "index.html",
-				navigateFallbackDenylist: [/^\/webdav/, /^\/sabnzbd/],
 			},
 		}),
 	],
