@@ -634,21 +634,6 @@ func sanitizeFilename(name string) string {
 	return strings.ReplaceAll(name, "/", "_")
 }
 
-// nextCollisionPath returns a path in dir whose basename is filename with a
-// numeric suffix inserted before its NZB extension, skipping any names that
-// already exist on disk. The compound ".nzb.gz" suffix is preserved so the
-// resulting filename remains a valid NZB (e.g. "movie.nzb.gz" → "movie_1.nzb.gz").
-func nextCollisionPath(dir, filename string) string {
-	base := nzbtrim.TrimNzbExtension(filename)
-	ext := strings.TrimPrefix(filename, base)
-	for i := 1; ; i++ {
-		candidate := filepath.Join(dir, fmt.Sprintf("%s_%d%s", base, i, ext))
-		if _, err := os.Stat(candidate); os.IsNotExist(err) {
-			return candidate
-		}
-	}
-}
-
 // AddToQueue adds a new NZB file to the import queue with optional category and priority
 func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath *string, category *string, priority *database.QueuePriority, metadata *string, downloadID *string) (*database.ImportQueueItem, error) {
 	// Check context before proceeding
@@ -688,15 +673,21 @@ func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath 
 		CreatedAt:    time.Now(),
 	}
 
-	// Ensure NZB is in a persistent location immediately to prevent data loss if /tmp is cleaned on restart
-	if err := s.ensurePersistentNzb(ctx, item); err != nil {
-		s.log.ErrorContext(ctx, "Failed to ensure persistent NZB during queue addition", "file", filePath, "error", err)
-		return nil, fmt.Errorf("failed to make NZB persistent: %w", err)
-	}
-
+	// Insert the DB row first so item.ID is available for the persistent filename
+	// (which uses the queue ID as a uniqueness suffix). If persisting the NZB to
+	// disk fails afterwards, roll back the row so the queue doesn't leak an orphan.
 	if err := s.database.Repository.AddToQueue(ctx, item); err != nil {
 		s.log.ErrorContext(ctx, "Failed to add file to queue", "file", item.NzbPath, "error", err)
 		return nil, err
+	}
+
+	if err := s.ensurePersistentNzb(ctx, item); err != nil {
+		s.log.ErrorContext(ctx, "Failed to ensure persistent NZB during queue addition", "file", filePath, "error", err)
+		if rmErr := s.database.Repository.RemoveFromQueue(ctx, item.ID); rmErr != nil {
+			s.log.WarnContext(ctx, "Failed to roll back queue row after persistence failure",
+				"queue_id", item.ID, "error", rmErr)
+		}
+		return nil, fmt.Errorf("failed to make NZB persistent: %w", err)
 	}
 
 	if s.broadcaster != nil {
@@ -886,20 +877,13 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 		return nil
 	}
 
-	// Generate new filename with sanitized name, always stored compressed
-	filename := filepath.Base(item.NzbPath)
-	newFilename := sanitizeFilename(filename)
-	if !strings.HasSuffix(strings.ToLower(newFilename), nzbfile.GzExtension) {
-		newFilename = nzbtrim.TrimNzbExtension(newFilename) + nzbfile.GzExtension
+	// Persistent filename uses the queue ID as a suffix to guarantee uniqueness
+	// across concurrent imports without filesystem collision checks.
+	if item.ID == 0 {
+		return fmt.Errorf("cannot persist NZB without queue ID (row must be inserted first)")
 	}
-	newPath := filepath.Join(nzbDir, newFilename)
-
-	// If a file with the same name already exists, append a numeric counter suffix
-	// (e.g. movie.nzb.gz → movie_1.nzb.gz) to avoid silently overwriting a different item.
-	if _, err := os.Stat(newPath); err == nil {
-		newPath = nextCollisionPath(nzbDir, newFilename)
-		s.log.DebugContext(ctx, "NZB name collision, using alternate path", "path", newPath)
-	}
+	base := nzbtrim.TrimNzbExtension(sanitizeFilename(filepath.Base(item.NzbPath)))
+	newPath := filepath.Join(nzbDir, fmt.Sprintf("%s_%d%s", base, item.ID, nzbfile.GzExtension))
 
 	s.log.DebugContext(ctx, "Moving and compressing NZB to persistent storage", "old_path", item.NzbPath, "new_path", newPath)
 
