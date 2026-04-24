@@ -275,6 +275,21 @@ type ImportConfig struct {
 	RenameToNzbName                *bool          `yaml:"rename_to_nzb_name" mapstructure:"rename_to_nzb_name" json:"rename_to_nzb_name,omitempty"`
 	FilterSampleFiles              *bool          `yaml:"filter_sample_files" mapstructure:"filter_sample_files" json:"filter_sample_files,omitempty"`
 	FailedItemRetentionHours       *int           `yaml:"failed_item_retention_hours" mapstructure:"failed_item_retention_hours" json:"failed_item_retention_hours,omitempty"`
+	DeleteCompletedNzb             *bool          `yaml:"delete_completed_nzb" mapstructure:"delete_completed_nzb" json:"delete_completed_nzb,omitempty"`
+}
+
+// ShouldDeleteCompletedNzb returns whether the NZB file should be removed from
+// disk after a successful import. Reads from ImportConfig first, falling back
+// to the legacy MetadataConfig field for back-compatibility with older config
+// files (the setting was moved from metadata.* to import.*).
+func (c *Config) ShouldDeleteCompletedNzb() bool {
+	if c.Import.DeleteCompletedNzb != nil {
+		return *c.Import.DeleteCompletedNzb
+	}
+	if c.Metadata.DeleteCompletedNzb != nil {
+		return *c.Metadata.DeleteCompletedNzb
+	}
+	return false
 }
 
 // LogConfig represents logging configuration with rotation support

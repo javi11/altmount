@@ -1017,11 +1017,14 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 
 	s.log.InfoContext(ctx, "Successfully processed queue item", "queue_id", item.ID, "file", item.NzbPath)
 
-	// Handle cleanup of completed NZB if configured
+	// Handle cleanup of completed NZB if configured. The path is kept in the DB
+	// so the UI can still display the original filename; download requests will
+	// 404 and the frontend surfaces an "already removed" message for completed
+	// items.
 	cfg := s.configGetter()
-	if cfg.Metadata.DeleteCompletedNzb != nil && *cfg.Metadata.DeleteCompletedNzb {
+	if cfg.ShouldDeleteCompletedNzb() {
 		s.log.InfoContext(ctx, "Deleting completed NZB (per config)", "file", item.NzbPath)
-		if err := os.Remove(item.NzbPath); err != nil {
+		if err := os.Remove(item.NzbPath); err != nil && !os.IsNotExist(err) {
 			s.log.WarnContext(ctx, "Failed to delete completed NZB", "file", item.NzbPath, "error", err)
 		}
 	}
