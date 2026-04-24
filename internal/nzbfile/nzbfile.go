@@ -63,7 +63,7 @@ func Compress(srcPath, dstPath string) error {
 	}
 	defer dst.Close()
 
-	gw, err := gzip.NewWriterLevel(dst, gzip.BestSpeed)
+	gw, err := gzip.NewWriterLevel(dst, gzip.BestCompression)
 	if err != nil {
 		_ = os.Remove(dstPath)
 		return err

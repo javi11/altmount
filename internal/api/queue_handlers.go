@@ -22,6 +22,21 @@ import (
 	"github.com/javi11/altmount/internal/nzblnk"
 )
 
+// removeQueueNzbFiles deletes the on-disk NZB files for every non-empty path.
+// Missing files are ignored; other errors are logged so the caller can still
+// report the DB deletion as successful.
+func (s *Server) removeQueueNzbFiles(c *fiber.Ctx, paths []string) {
+	for _, p := range paths {
+		if p == "" {
+			continue
+		}
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+			slog.WarnContext(c.Context(), "Failed to delete NZB file after queue removal",
+				"path", p, "error", err)
+		}
+	}
+}
+
 // transformQueueError transforms specific errors to user-friendly messages
 func transformQueueError(err *string) string {
 	if err == nil {
@@ -232,6 +247,8 @@ func (s *Server) handleDeleteQueue(c *fiber.Ctx) error {
 		return RespondInternalError(c, "Failed to delete queue item", err.Error())
 	}
 
+	s.removeQueueNzbFiles(c, []string{item.NzbPath})
+
 	if s.progressBroadcaster != nil {
 		s.progressBroadcaster.BroadcastQueueChanged()
 	}
@@ -439,11 +456,12 @@ func (s *Server) handleGetQueueHistoricalStats(c *fiber.Ctx) error {
 //	@Security		ApiKeyAuth
 //	@Router			/queue/completed [delete]
 func (s *Server) handleClearCompletedQueue(c *fiber.Ctx) error {
-	// Clear completed items
-	count, err := s.queueRepo.ClearCompletedQueueItems(c.Context())
+	paths, count, err := s.queueRepo.ClearCompletedQueueItems(c.Context())
 	if err != nil {
 		return RespondInternalError(c, "Failed to clear completed queue items", err.Error())
 	}
+
+	s.removeQueueNzbFiles(c, paths)
 
 	if s.progressBroadcaster != nil {
 		s.progressBroadcaster.BroadcastQueueChanged()
@@ -464,11 +482,12 @@ func (s *Server) handleClearCompletedQueue(c *fiber.Ctx) error {
 //	@Security		ApiKeyAuth
 //	@Router			/queue/failed [delete]
 func (s *Server) handleClearFailedQueue(c *fiber.Ctx) error {
-	// Clear failed items
-	count, err := s.queueRepo.ClearFailedQueueItems(c.Context())
+	paths, count, err := s.queueRepo.ClearFailedQueueItems(c.Context())
 	if err != nil {
 		return RespondInternalError(c, "Failed to clear failed queue items", err.Error())
 	}
+
+	s.removeQueueNzbFiles(c, paths)
 
 	if s.progressBroadcaster != nil {
 		s.progressBroadcaster.BroadcastQueueChanged()
@@ -489,11 +508,12 @@ func (s *Server) handleClearFailedQueue(c *fiber.Ctx) error {
 //	@Security		ApiKeyAuth
 //	@Router			/queue/pending [delete]
 func (s *Server) handleClearPendingQueue(c *fiber.Ctx) error {
-	// Clear pending items
-	count, err := s.queueRepo.ClearPendingQueueItems(c.Context())
+	paths, count, err := s.queueRepo.ClearPendingQueueItems(c.Context())
 	if err != nil {
 		return RespondInternalError(c, "Failed to clear pending queue items", err.Error())
 	}
+
+	s.removeQueueNzbFiles(c, paths)
 
 	if s.progressBroadcaster != nil {
 		s.progressBroadcaster.BroadcastQueueChanged()
@@ -541,6 +561,8 @@ func (s *Server) handleDeleteQueueBulk(c *fiber.Ctx) error {
 
 		return RespondInternalError(c, "Failed to delete queue items", err.Error())
 	}
+
+	s.removeQueueNzbFiles(c, result.DeletedPaths)
 
 	if s.progressBroadcaster != nil {
 		s.progressBroadcaster.BroadcastQueueChanged()

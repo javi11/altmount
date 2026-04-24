@@ -55,6 +55,9 @@ type BulkOperationResult struct {
 	DeletedCount    int
 	ProcessingCount int
 	FailedIDs       []int64
+	// DeletedPaths holds the nzb_path values for rows that were actually removed,
+	// so callers can clean up the corresponding files on disk.
+	DeletedPaths []string
 }
 
 // QueueStats represents statistics about the import queue
