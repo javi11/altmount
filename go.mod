@@ -22,7 +22,7 @@ require (
 	github.com/javi11/nntppool/v4 v4.10.0
 	github.com/javi11/nxg v0.1.0
 	github.com/javi11/nzbparser v0.5.4
-	github.com/javi11/rardecode/v2 v2.1.2-0.20260402111111-85298dd02bf6
+	github.com/javi11/rardecode/v2 v2.1.2-0.20260424080037-11b2fa852f05
 	github.com/javi11/sevenzip v1.6.2-0.20251026160715-ca961b7f1239
 	github.com/jinzhu/copier v0.4.0
 	github.com/klauspost/compress v1.18.0
