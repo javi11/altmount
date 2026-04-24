@@ -22,6 +22,7 @@ import (
 	"github.com/javi11/altmount/internal/importer/singlefile"
 	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
 	"github.com/javi11/altmount/internal/metadata"
+	"github.com/javi11/altmount/internal/nzbfile"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
 )
@@ -180,10 +181,8 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 		allowedExtensions = *allowedExtensionsOverride
 	}
 
-	// Update progress: starting
 	proc.updateProgressWithStage(queueID, 0, "Parsing NZB")
-	// Step 1: Open and parse the file (handles .nzb and .nzb.gz transparently)
-	file, err := openNzbFile(filePath)
+	file, err := nzbfile.Open(filePath)
 	if err != nil {
 		return "", nil, NewNonRetryableError("failed to open file", err)
 	}

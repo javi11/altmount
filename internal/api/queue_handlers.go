@@ -1,7 +1,6 @@
 package api
 
 import (
-	"compress/gzip"
 	"fmt"
 	"html"
 	"io"
@@ -19,6 +18,7 @@ import (
 	"github.com/javi11/altmount/internal/database"
 	internalerrors "github.com/javi11/altmount/internal/errors"
 	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
+	"github.com/javi11/altmount/internal/nzbfile"
 	"github.com/javi11/altmount/internal/nzblnk"
 )
 
@@ -1330,39 +1330,26 @@ func (s *Server) handleDownloadNZB(c *fiber.Ctx) error {
 		return RespondNotFound(c, "Queue item", "")
 	}
 
-	// Check if NZB file exists
-	if _, err := os.Stat(item.NzbPath); os.IsNotExist(err) {
+	resolved, err := nzbfile.ResolveOnDisk(item.NzbPath)
+	if err != nil {
 		return RespondNotFound(c, "NZB file", "The NZB file no longer exists on disk")
 	}
 
-	// Strip .gz suffix from the download filename so clients receive a plain .nzb
-	filename := filepath.Base(item.NzbPath)
-	if strings.HasSuffix(strings.ToLower(filename), ".nzb.gz") {
-		filename = strings.TrimSuffix(filename, ".gz")
-	}
 	c.Set("Content-Type", "application/x-nzb")
-	c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+	c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", nzbfile.PlainFilename(resolved)))
 
-	// For gzip-compressed NZBs, decompress on-the-fly before sending
-	if strings.HasSuffix(strings.ToLower(item.NzbPath), ".nzb.gz") {
-		f, err := os.Open(item.NzbPath)
+	if nzbfile.IsGzipped(resolved) {
+		rc, err := nzbfile.Open(resolved)
 		if err != nil {
 			return RespondInternalError(c, "Failed to open NZB file", err.Error())
 		}
-		defer f.Close()
+		defer rc.Close()
 
-		gr, err := gzip.NewReader(f)
-		if err != nil {
-			return RespondInternalError(c, "Failed to decompress NZB file", err.Error())
-		}
-		defer gr.Close()
-
-		data, err := io.ReadAll(gr)
-		if err != nil {
+		if _, err := io.Copy(c.Response().BodyWriter(), rc); err != nil {
 			return RespondInternalError(c, "Failed to read NZB content", err.Error())
 		}
-		return c.Send(data)
+		return nil
 	}
 
-	return c.SendFile(item.NzbPath)
+	return c.SendFile(resolved)
 }

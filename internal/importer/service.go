@@ -26,6 +26,7 @@ import (
 	"github.com/javi11/altmount/internal/importer/scanner"
 	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
 	"github.com/javi11/altmount/internal/metadata"
+	"github.com/javi11/altmount/internal/nzbfile"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/sabnzbd"
@@ -633,6 +634,21 @@ func sanitizeFilename(name string) string {
 	return strings.ReplaceAll(name, "/", "_")
 }
 
+// nextCollisionPath returns a path in dir whose basename is filename with a
+// numeric suffix inserted before its NZB extension, skipping any names that
+// already exist on disk. The compound ".nzb.gz" suffix is preserved so the
+// resulting filename remains a valid NZB (e.g. "movie.nzb.gz" → "movie_1.nzb.gz").
+func nextCollisionPath(dir, filename string) string {
+	base := nzbtrim.TrimNzbExtension(filename)
+	ext := strings.TrimPrefix(filename, base)
+	for i := 1; ; i++ {
+		candidate := filepath.Join(dir, fmt.Sprintf("%s_%d%s", base, i, ext))
+		if _, err := os.Stat(candidate); os.IsNotExist(err) {
+			return candidate
+		}
+	}
+}
+
 // AddToQueue adds a new NZB file to the import queue with optional category and priority
 func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath *string, category *string, priority *database.QueuePriority, metadata *string, downloadID *string) (*database.ImportQueueItem, error) {
 	// Check context before proceeding
@@ -873,23 +889,15 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 	// Generate new filename with sanitized name, always stored compressed
 	filename := filepath.Base(item.NzbPath)
 	newFilename := sanitizeFilename(filename)
-	if !strings.HasSuffix(strings.ToLower(newFilename), nzbGzExtension) {
-		newFilename = nzbtrim.TrimNzbExtension(newFilename) + nzbGzExtension
+	if !strings.HasSuffix(strings.ToLower(newFilename), nzbfile.GzExtension) {
+		newFilename = nzbtrim.TrimNzbExtension(newFilename) + nzbfile.GzExtension
 	}
 	newPath := filepath.Join(nzbDir, newFilename)
 
 	// If a file with the same name already exists, append a numeric counter suffix
-	// (e.g. movie.nzb → movie_1.nzb) to avoid silently overwriting a different item.
+	// (e.g. movie.nzb.gz → movie_1.nzb.gz) to avoid silently overwriting a different item.
 	if _, err := os.Stat(newPath); err == nil {
-		ext := filepath.Ext(newFilename)
-		base := strings.TrimSuffix(newFilename, ext)
-		for i := 1; ; i++ {
-			candidate := filepath.Join(nzbDir, fmt.Sprintf("%s_%d%s", base, i, ext))
-			if _, statErr := os.Stat(candidate); os.IsNotExist(statErr) {
-				newPath = candidate
-				break
-			}
-		}
+		newPath = nextCollisionPath(nzbDir, newFilename)
 		s.log.DebugContext(ctx, "NZB name collision, using alternate path", "path", newPath)
 	}
 
@@ -901,7 +909,7 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 	err := os.Rename(item.NzbPath, tmpPath)
 	if err == nil {
 		// Same filesystem: compress the tmp file to the final .nzb.gz path
-		if compErr := compressNzbToGz(tmpPath, newPath); compErr != nil {
+		if compErr := nzbfile.Compress(tmpPath, newPath); compErr != nil {
 			_ = os.Rename(tmpPath, item.NzbPath) // attempt to restore on failure
 			return fmt.Errorf("failed to compress NZB: %w", compErr)
 		}
@@ -909,7 +917,7 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 	} else {
 		// Cross-device: compress directly from source to destination
 		s.log.DebugContext(ctx, "Rename failed, compressing directly from source", "error", err, "src", item.NzbPath, "dst", newPath)
-		if compErr := compressNzbToGz(item.NzbPath, newPath); compErr != nil {
+		if compErr := nzbfile.Compress(item.NzbPath, newPath); compErr != nil {
 			return fmt.Errorf("failed to compress NZB: %w", compErr)
 		}
 		if err := os.Remove(item.NzbPath); err != nil {
@@ -1288,7 +1296,7 @@ func (s *Service) CalculateFileSizeOnly(filePath string) (int64, error) {
 		return s.calculateStrmFileSize(file)
 	}
 
-	file, err := openNzbFile(filePath)
+	file, err := nzbfile.Open(filePath)
 	if err != nil {
 		return 0, NewNonRetryableError("failed to open file for size calculation", err)
 	}
@@ -1393,18 +1401,10 @@ func (s *Service) RegenerateMetadata(ctx context.Context, mountRelativePath stri
 		}
 
 		filename := d.Name()
-		lname := strings.ToLower(filename)
-		if !strings.HasSuffix(lname, ".nzb") && !strings.HasSuffix(lname, nzbGzExtension) {
+		if !nzbtrim.HasNzbExtension(filename) {
 			return nil
 		}
-		// Strip .nzb.gz or .nzb to get the bare name for matching
-		var cleanName string
-		switch {
-		case strings.HasSuffix(lname, nzbGzExtension):
-			cleanName = filename[:len(filename)-len(nzbGzExtension)]
-		default:
-			cleanName = strings.TrimSuffix(filename, ".nzb")
-		}
+		cleanName := nzbtrim.TrimNzbExtension(filename)
 		if _, after, ok := strings.Cut(cleanName, "_"); ok {
 			// Check both with and without queue ID prefix
 			if after == releaseName || cleanName == releaseName {

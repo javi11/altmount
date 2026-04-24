@@ -7,9 +7,14 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/javi11/altmount/internal/nzbfile"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+const testNzbContent = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE nzb PUBLIC "-//newzBin//DTD NZB 1.1//EN" "http://www.newzbin.com/DTD/nzb/nzb-1.1.dtd">
+<nzb xmlns="http://www.newzbin.com/DTD/2003/nzb"></nzb>`
 
 func TestNzbCompressionMigration(t *testing.T) {
 	dir := t.TempDir()
@@ -27,7 +32,7 @@ func TestNzbCompressionMigration(t *testing.T) {
 
 	// Compressed version should exist and be readable
 	gzPath := filepath.Join(dir, "movie.nzb.gz")
-	rc, err := openNzbFile(gzPath)
+	rc, err := nzbfile.Open(gzPath)
 	require.NoError(t, err)
 	data, err := io.ReadAll(rc)
 	rc.Close()
@@ -62,7 +67,7 @@ func TestNzbCompressionMigration_AlreadyGzFiles(t *testing.T) {
 	srcNzb := filepath.Join(dir, "src.nzb")
 	gzPath := filepath.Join(dir, "existing.nzb.gz")
 	require.NoError(t, os.WriteFile(srcNzb, []byte(testNzbContent), 0644))
-	require.NoError(t, compressNzbToGz(srcNzb, gzPath))
+	require.NoError(t, nzbfile.Compress(srcNzb, gzPath))
 	require.NoError(t, os.Remove(srcNzb))
 
 	err := migrateNzbsToGz(context.Background(), dir, sentinelPath, nil)
