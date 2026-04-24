@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/javi11/altmount/internal/nzbfile"
 )
 
 const migrationSentinelFile = ".migration_nzb_compressed_v1"
@@ -33,7 +35,7 @@ func migrateNzbsToGz(ctx context.Context, nzbDir, sentinelPath string, updater f
 		}
 
 		gzPath := path + ".gz"
-		if compErr := compressNzbToGz(path, gzPath); compErr != nil {
+		if compErr := nzbfile.Compress(path, gzPath); compErr != nil {
 			slog.WarnContext(ctx, "NZB migration: failed to compress file",
 				"path", path, "error", compErr)
 			return nil

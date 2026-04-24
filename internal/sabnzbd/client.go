@@ -10,10 +10,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/javi11/altmount/internal/httpclient"
+	"github.com/javi11/altmount/internal/nzbfile"
 )
 
 // SABnzbdClient handles communication with external SABnzbd instances
@@ -72,25 +72,24 @@ func (c *SABnzbdClient) SendNZBFile(ctx context.Context, host, apiKey, nzbPath s
 		return "", fmt.Errorf("NZB path is a directory, not a file")
 	}
 
-	// Open the NZB file
-	file, err := os.Open(nzbPath)
+	// Open the NZB, transparently decompressing .nzb.gz so external SABnzbd
+	// receives plain XML regardless of on-disk storage format.
+	rc, err := nzbfile.Open(nzbPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to open NZB file: %w", err)
 	}
-	defer file.Close()
+	defer rc.Close()
 
 	// Create multipart form data
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 
-	// Add the file
-	filename := filepath.Base(nzbPath)
-	part, err := writer.CreateFormFile("nzbfile", filename)
+	part, err := writer.CreateFormFile("nzbfile", nzbfile.PlainFilename(nzbPath))
 	if err != nil {
 		return "", fmt.Errorf("failed to create form file: %w", err)
 	}
 
-	if _, err := io.Copy(part, file); err != nil {
+	if _, err := io.Copy(part, rc); err != nil {
 		return "", fmt.Errorf("failed to copy file data: %w", err)
 	}
 

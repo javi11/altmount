@@ -866,64 +866,69 @@ func (r *Repository) CountActiveQueueItems(ctx context.Context, search string, c
 	return count, nil
 }
 
-// ClearCompletedQueueItems removes completed and failed items from the queue
-func (r *Repository) ClearCompletedQueueItems(ctx context.Context) (int, error) {
-	query := `
-		DELETE FROM import_queue 
-		WHERE status IN ('completed')
-	`
-
-	result, err := r.db.ExecContext(ctx, query)
-	if err != nil {
-		return 0, fmt.Errorf("failed to clear completed queue items: %w", err)
+// clearQueueItemsByStatus removes queue rows matching the given statuses and
+// returns the nzb_path values of every deleted row so the caller can clean up
+// files on disk.
+func (r *Repository) clearQueueItemsByStatus(ctx context.Context, statuses ...QueueStatus) ([]string, int, error) {
+	if len(statuses) == 0 {
+		return nil, 0, nil
+	}
+	placeholders := strings.Repeat("?,", len(statuses))
+	placeholders = placeholders[:len(placeholders)-1]
+	args := make([]any, 0, len(statuses))
+	for _, s := range statuses {
+		args = append(args, s)
 	}
 
+	paths := []string{}
+	selectQuery := fmt.Sprintf(`SELECT nzb_path FROM import_queue WHERE status IN (%s)`, placeholders)
+	rows, err := r.db.QueryContext(ctx, selectQuery, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to list queue paths: %w", err)
+	}
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			rows.Close()
+			return nil, 0, fmt.Errorf("failed to scan queue path: %w", err)
+		}
+		if p != "" {
+			paths = append(paths, p)
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+
+	deleteQuery := fmt.Sprintf(`DELETE FROM import_queue WHERE status IN (%s)`, placeholders)
+	result, err := r.db.ExecContext(ctx, deleteQuery, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to clear queue items: %w", err)
+	}
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		return 0, fmt.Errorf("failed to get rows affected: %w", err)
+		return nil, 0, fmt.Errorf("failed to get rows affected: %w", err)
 	}
-
-	return int(rowsAffected), nil
+	return paths, int(rowsAffected), nil
 }
 
-// ClearFailedQueueItems removes failed items from the queue
-func (r *Repository) ClearFailedQueueItems(ctx context.Context) (int, error) {
-	query := `
-		DELETE FROM import_queue
-		WHERE status = 'failed'
-	`
-
-	result, err := r.db.ExecContext(ctx, query)
-	if err != nil {
-		return 0, fmt.Errorf("failed to clear failed queue items: %w", err)
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return 0, fmt.Errorf("failed to get rows affected: %w", err)
-	}
-
-	return int(rowsAffected), nil
+// ClearCompletedQueueItems removes completed items from the queue and returns
+// the paths of deleted rows.
+func (r *Repository) ClearCompletedQueueItems(ctx context.Context) ([]string, int, error) {
+	return r.clearQueueItemsByStatus(ctx, QueueStatusCompleted)
 }
 
-// ClearPendingQueueItems removes pending items from the queue
-func (r *Repository) ClearPendingQueueItems(ctx context.Context) (int, error) {
-	query := `
-		DELETE FROM import_queue
-		WHERE status = 'pending'
-	`
+// ClearFailedQueueItems removes failed items from the queue and returns the
+// paths of deleted rows.
+func (r *Repository) ClearFailedQueueItems(ctx context.Context) ([]string, int, error) {
+	return r.clearQueueItemsByStatus(ctx, QueueStatusFailed)
+}
 
-	result, err := r.db.ExecContext(ctx, query)
-	if err != nil {
-		return 0, fmt.Errorf("failed to clear pending queue items: %w", err)
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return 0, fmt.Errorf("failed to get rows affected: %w", err)
-	}
-
-	return int(rowsAffected), nil
+// ClearPendingQueueItems removes pending items from the queue and returns the
+// paths of deleted rows.
+func (r *Repository) ClearPendingQueueItems(ctx context.Context) ([]string, int, error) {
+	return r.clearQueueItemsByStatus(ctx, QueueStatusPending)
 }
 
 // IsFileInQueue checks if a file is already in the queue (pending or processing)
