@@ -42,10 +42,11 @@ func (r *QueueRepository) RemoveFromQueueBulk(ctx context.Context, ids []int64) 
 
 	err := r.withQueueTransaction(ctx, func(txRepo *QueueRepository) error {
 		for _, id := range ids {
-			// Check status first - we can't delete processing items
+			// Check status + path in a single query - we can't delete processing items
 			var status QueueStatus
-			checkQuery := `SELECT status FROM import_queue WHERE id = ?`
-			err := txRepo.db.QueryRowContext(ctx, checkQuery, id).Scan(&status)
+			var nzbPath string
+			checkQuery := `SELECT status, nzb_path FROM import_queue WHERE id = ?`
+			err := txRepo.db.QueryRowContext(ctx, checkQuery, id).Scan(&status, &nzbPath)
 			if err != nil {
 				if err == sql.ErrNoRows {
 					continue // Already gone, ignore
@@ -66,6 +67,9 @@ func (r *QueueRepository) RemoveFromQueueBulk(ctx context.Context, ids []int64) 
 				return fmt.Errorf("failed to delete item %d: %w", id, err)
 			}
 			result.DeletedCount++
+			if nzbPath != "" {
+				result.DeletedPaths = append(result.DeletedPaths, nzbPath)
+			}
 		}
 		return nil
 	})

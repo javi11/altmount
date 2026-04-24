@@ -315,30 +315,6 @@ export function MetadataConfigSection({
 								</span>
 							</div>
 						</label>
-
-						<label className="label cursor-pointer items-start justify-start gap-4">
-							<input
-								type="checkbox"
-								className="checkbox checkbox-error checkbox-sm mt-1 shrink-0"
-								checked={formData.delete_completed_nzb ?? false}
-								disabled={isReadOnly}
-								onChange={(e) => handleCheckboxChange("delete_completed_nzb", e.target.checked)}
-							/>
-							<div className="min-w-0 flex-1">
-								<div className="flex items-center gap-2">
-									<span className="whitespace-normal break-words font-bold text-xs">
-										Aggressive Cleanup
-									</span>
-									<div className="badge badge-error badge-xs shrink-0 font-black text-[8px] uppercase">
-										Dangerous
-									</div>
-								</div>
-								<span className="mt-1 block whitespace-normal break-words text-base-content/50 text-xs leading-relaxed">
-									Delete original NZB immediately after metadata generation. Cannot re-scan without
-									re-upload.
-								</span>
-							</div>
-						</label>
 					</div>
 				</div>
 

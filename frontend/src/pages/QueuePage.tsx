@@ -34,6 +34,7 @@ import { Pagination } from "../components/ui/Pagination";
 import { PathDisplay } from "../components/ui/PathDisplay";
 import { StatusBadge } from "../components/ui/StatusBadge";
 import { useConfirm } from "../contexts/ModalContext";
+import { useToast } from "../contexts/ToastContext";
 import {
 	useAddTestQueueItem,
 	useBulkCancelQueueItems,
@@ -130,6 +131,7 @@ export function QueuePage() {
 	const addTestQueueItem = useAddTestQueueItem();
 	const regenerateSymlinks = useRegenerateSymlinks();
 	const { confirmDelete, confirmAction } = useConfirm();
+	const { showToast } = useToast();
 
 	const handleDelete = useCallback(
 		async (id: number) => {
@@ -166,10 +168,36 @@ export function QueuePage() {
 		[confirmAction, cancelItem],
 	);
 
-	const handleDownload = async (id: number) => {
+	const handleDownload = async (id: number, status?: string) => {
 		try {
 			const response = await fetch(`/api/queue/${id}/download`);
-			if (!response.ok) throw new Error("Failed to download NZB file");
+			if (!response.ok) {
+				let title = "Download Failed";
+				let message = `Server returned ${response.status} ${response.statusText}`;
+				try {
+					const body = (await response.json()) as {
+						error?: { message?: string; details?: string };
+					};
+					if (body?.error?.message) {
+						title = body.error.message;
+						message = body.error.details || "";
+					}
+				} catch {
+					// Non-JSON error body — fall back to status text.
+				}
+				// For completed items, a missing file almost always means the server
+				// cleaned it up post-import (delete_completed_nzb). Soften the toast.
+				if (response.status === 404 && status === "completed") {
+					showToast({
+						type: "info",
+						title: "NZB file already removed",
+						message: "This NZB was cleaned up after successful import.",
+					});
+					return;
+				}
+				showToast({ type: "error", title, message });
+				return;
+			}
 			const contentDisposition = response.headers.get("Content-Disposition");
 			const filenameMatch = contentDisposition?.match(/filename[^;=\n]*=["']?([^"'\n]*)["']?/);
 			const filename = filenameMatch?.[1] || `queue-${id}.nzb`;
@@ -184,6 +212,11 @@ export function QueuePage() {
 			document.body.removeChild(a);
 		} catch (error) {
 			console.error("Failed to download NZB:", error);
+			showToast({
+				type: "error",
+				title: "Download Failed",
+				message: error instanceof Error ? error.message : "Network error",
+			});
 		}
 	};
 
@@ -944,7 +977,7 @@ export function QueuePage() {
 																			<li>
 																				<button
 																					type="button"
-																					onClick={() => handleDownload(item.id)}
+																					onClick={() => handleDownload(item.id, item.status)}
 																				>
 																					<Download className="h-4 w-4" />
 																					Download NZB

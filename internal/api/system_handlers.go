@@ -180,7 +180,8 @@ func (s *Server) handleSystemCleanup(c *fiber.Ctx) error {
 
 	// Clean up queue items
 	if !req.DryRun {
-		queueItemsRemoved, err = s.queueRepo.ClearCompletedQueueItems(c.Context())
+		var paths []string
+		paths, queueItemsRemoved, err = s.queueRepo.ClearCompletedQueueItems(c.Context())
 		if err != nil {
 			return c.Status(500).JSON(fiber.Map{
 				"success": false,
@@ -188,6 +189,7 @@ func (s *Server) handleSystemCleanup(c *fiber.Ctx) error {
 				"details": err.Error(),
 			})
 		}
+		s.removeQueueNzbFiles(c, paths)
 	} else {
 		// For dry run, we could count what would be removed
 		// For now, we'll just return 0
@@ -335,11 +337,17 @@ func (s *Server) handleResetSystemStats(c *fiber.Ctx) error {
 
 		// Optional: Clear completed/failed queue items too if requested
 		if resetQueue {
-			if _, err := s.queueRepo.ClearCompletedQueueItems(ctx); err != nil {
+			completedPaths, _, err := s.queueRepo.ClearCompletedQueueItems(ctx)
+			if err != nil {
 				slog.ErrorContext(ctx, "Failed to clear completed queue items during reset", "error", err)
+			} else {
+				s.removeQueueNzbFiles(c, completedPaths)
 			}
-			if _, err := s.queueRepo.ClearFailedQueueItems(ctx); err != nil {
+			failedPaths, _, err := s.queueRepo.ClearFailedQueueItems(ctx)
+			if err != nil {
 				slog.ErrorContext(ctx, "Failed to clear failed queue items during reset", "error", err)
+			} else {
+				s.removeQueueNzbFiles(c, failedPaths)
 			}
 		}
 	}
