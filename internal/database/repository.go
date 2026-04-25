@@ -1083,9 +1083,8 @@ func (r *Repository) ListRecentImportHistory(ctx context.Context, minutes int, c
 	}
 
 	query := fmt.Sprintf(`
-		SELECT h.id, h.download_id, h.nzb_id, h.nzb_name, h.file_name, h.file_size, h.virtual_path, f.library_path, h.category, h.completed_at
+		SELECT h.id, h.download_id, h.nzb_id, h.nzb_name, h.file_name, h.file_size, h.virtual_path, '' AS library_path, h.category, h.completed_at
 		FROM import_history h
-		LEFT JOIN file_health f ON TRIM(h.virtual_path, '/') = TRIM(f.file_path, '/')
 		WHERE h.completed_at >= %s
 		  AND (? = '' OR LOWER(h.category) = LOWER(?))
 		ORDER BY h.completed_at DESC
