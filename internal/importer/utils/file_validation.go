@@ -9,10 +9,11 @@ import (
 )
 
 // sampleProofPattern matches filenames containing "sample" or "proof" as a standalone word.
-// Uses leading non-alphanumeric boundary (including underscore) and trailing word boundary.
-// Examples matched: "movie.sample.mkv", "_sample.mkv", "movie_sample.mkv"
+// Uses symmetric non-alphanumeric boundaries (underscore, digits, punctuation, end-of-string)
+// on both sides. Letters prevent matching, so "samplemovie.mkv" is allowed.
+// Examples matched: "movie.sample.mkv", "_sample.mkv", "movie_sample.mkv", "_sample_clip.mkv"
 // Examples not matched: "samplemovie.mkv", "Free.Samples.mkv" (plural)
-var sampleProofPattern = regexp.MustCompile(`(?i)(^|[^a-zA-Z0-9])(sample|proof)\b`)
+var sampleProofPattern = regexp.MustCompile(`(?i)(^|[^a-zA-Z0-9])(sample|proof)(?:[^a-zA-Z0-9]|$)`)
 
 // isSampleOrProof checks if a filename looks like a sample or proof file
 func isSampleOrProof(filename string, size int64) bool {
