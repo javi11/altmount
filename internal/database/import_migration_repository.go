@@ -299,45 +299,73 @@ func (r *ImportMigrationRepository) BackfillFromImportQueue(ctx context.Context)
 		return 0, fmt.Errorf("backfill: iterate import_queue: %w", err)
 	}
 
-	var nzbdavIDStruct struct {
-		NzbdavID string `json:"nzbdav_id"`
+	type insertRow struct {
+		externalID   string
+		queueItemID  int64
+		relativePath string
+		storagePath  *string
 	}
 
-	insertQuery := `
-		INSERT OR IGNORE INTO import_migrations
-			(source, external_id, queue_item_id, relative_path, final_path, status, created_at, updated_at)
-		VALUES ('nzbdav', ?, ?, ?, ?, 'imported', datetime('now'), datetime('now'))
-	`
-	if r.dialect.IsPostgres() {
-		insertQuery = `
-			INSERT INTO import_migrations
-				(source, external_id, queue_item_id, relative_path, final_path, status, created_at, updated_at)
-			VALUES ('nzbdav', $1, $2, $3, $4, 'imported', NOW(), NOW())
-			ON CONFLICT (source, external_id) DO NOTHING
-		`
-	}
-
-	inserted := 0
+	var pending []insertRow
 	for _, c := range candidates {
+		var nzbdavIDStruct struct {
+			NzbdavID string `json:"nzbdav_id"`
+		}
 		if err := json.Unmarshal([]byte(c.metadata), &nzbdavIDStruct); err != nil {
-			// Row has metadata but no parseable nzbdav_id — skip silently.
 			continue
 		}
 		if nzbdavIDStruct.NzbdavID == "" {
 			continue
 		}
-
 		relativePath := ""
 		if c.relativePath != nil {
 			relativePath = *c.relativePath
 		}
+		pending = append(pending, insertRow{
+			externalID:   nzbdavIDStruct.NzbdavID,
+			queueItemID:  c.id,
+			relativePath: relativePath,
+			storagePath:  c.storagePath,
+		})
+	}
 
-		res, execErr := r.db.ExecContext(ctx, insertQuery, nzbdavIDStruct.NzbdavID, c.id, relativePath, c.storagePath)
+	// Chunk to stay under SQLite's parameter limit (4 params per row × 100 = 400).
+	const backfillChunk = 100
+	inserted := 0
+	for start := 0; start < len(pending); start += backfillChunk {
+		end := min(start+backfillChunk, len(pending))
+		chunk := pending[start:end]
+
+		args := make([]any, 0, len(chunk)*4)
+		valuePlaceholders := make([]string, len(chunk))
+		for i, p := range chunk {
+			if r.dialect.IsPostgres() {
+				base := i*4 + 1
+				valuePlaceholders[i] = fmt.Sprintf("('nzbdav', $%d, $%d, $%d, $%d, 'imported', NOW(), NOW())", base, base+1, base+2, base+3)
+			} else {
+				valuePlaceholders[i] = "('nzbdav', ?, ?, ?, ?, 'imported', datetime('now'), datetime('now'))"
+			}
+			args = append(args, p.externalID, p.queueItemID, p.relativePath, p.storagePath)
+		}
+
+		var query string
+		if r.dialect.IsPostgres() {
+			query = `INSERT INTO import_migrations
+				(source, external_id, queue_item_id, relative_path, final_path, status, created_at, updated_at)
+				VALUES ` + strings.Join(valuePlaceholders, ", ") + `
+				ON CONFLICT (source, external_id) DO NOTHING`
+		} else {
+			query = `INSERT OR IGNORE INTO import_migrations
+				(source, external_id, queue_item_id, relative_path, final_path, status, created_at, updated_at)
+				VALUES ` + strings.Join(valuePlaceholders, ", ")
+		}
+
+		res, execErr := r.db.ExecContext(ctx, query, args...)
 		if execErr != nil {
-			return inserted, fmt.Errorf("backfill: insert import_migration (external_id=%s): %w", nzbdavIDStruct.NzbdavID, execErr)
+			return inserted, fmt.Errorf("backfill: bulk insert import_migrations: %w", execErr)
 		}
 		if n, _ := res.RowsAffected(); n > 0 {
-			inserted++
+			inserted += int(n)
 		}
 	}
 
