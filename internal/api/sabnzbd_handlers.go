@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -717,6 +718,9 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 		return s.writeSABnzbdErrorFiber(c, "Importer service not available")
 	}
 
+	ctx, cancel := context.WithTimeout(c.Context(), 10*time.Second)
+	defer cancel()
+
 	// Get category filter from query parameter
 	categoryFilter := s.normalizeCategoryFilter(c)
 
@@ -745,14 +749,14 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 	// Fetch items from active queue
 	// We use a larger set here to ensure we get everything for deduplication and combined history
 	completedStatus := database.QueueStatusCompleted
-	completedQueueItems, err := s.queueRepo.ListQueueItems(c.Context(), &completedStatus, "", categoryFilter, 10000, 0, "updated_at", "desc")
+	completedQueueItems, err := s.queueRepo.ListQueueItems(ctx, &completedStatus, "", categoryFilter, 500, 0, "updated_at", "desc")
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to get completed items from queue")
 	}
 
 	// Get recent items from persistent history (buffer for Sonarr)
 	// We look back 24 hours to be safe
-	recentHistory, err := s.queueRepo.ListRecentImportHistory(c.Context(), 1440, categoryFilter)
+	recentHistory, err := s.queueRepo.ListRecentImportHistory(ctx, 1440, categoryFilter)
 	if err != nil {
 		recentHistory = []*database.ImportHistory{} // Fallback
 	}
@@ -818,7 +822,7 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 
 	// Get failed items from active queue
 	failedStatus := database.QueueStatusFailed
-	failed, err := s.queueRepo.ListQueueItems(c.Context(), &failedStatus, "", categoryFilter, 1000, 0, "updated_at", "desc")
+	failed, err := s.queueRepo.ListQueueItems(ctx, &failedStatus, "", categoryFilter, 1000, 0, "updated_at", "desc")
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to get failed items")
 	}
@@ -1319,6 +1323,14 @@ func (s *Server) calculateHistoryStoragePath(item *database.ImportQueueItem, bas
 
 	fullStoragePath := filepath.Join(pathParts...)
 	fullStoragePath = filepath.ToSlash(filepath.Clean(fullStoragePath))
+
+	if _, err := os.Stat(fullStoragePath); os.IsNotExist(err) {
+		slog.WarnContext(context.Background(), "sabnzbd history: reported path does not exist on disk",
+			"item_id", item.ID,
+			"storage_path", *item.StoragePath,
+			"reported_path", fullStoragePath,
+		)
+	}
 
 	// Return the full file path for SYMLINK/STRM to help Arrs find it immediately.
 	// Otherwise return directory.
