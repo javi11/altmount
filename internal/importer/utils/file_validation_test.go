@@ -281,9 +281,9 @@ func TestIsAllowedFile_SampleProofPatterns(t *testing.T) {
 			expected: false,
 		},
 		{
-			name:     "proof at start of filename with underscore is allowed (word char)",
+			name:     "proof at start of filename with underscore is rejected",
 			filename: "proof_test.mkv",
-			expected: true,
+			expected: false,
 		},
 		{
 			name:     "sample merged with word is allowed",
@@ -336,9 +336,29 @@ func TestIsAllowedFile_SampleProofPatterns(t *testing.T) {
 			expected: false,
 		},
 		{
-			name:     "sample followed by underscore is allowed",
+			name:     "sample followed by underscore is rejected",
 			filename: "sample_test.mkv",
-			expected: true,
+			expected: false,
+		},
+		{
+			name:     "underscore-sandwiched sample is rejected",
+			filename: "_sample_clip.mkv",
+			expected: false,
+		},
+		{
+			name:     "sample before digit is rejected",
+			filename: "sample_720p.mkv",
+			expected: false,
+		},
+		{
+			name:     "proof before digit is rejected",
+			filename: "proof_720p.mkv",
+			expected: false,
+		},
+		{
+			name:     "sample embedded with underscores is rejected",
+			filename: "movie._sample_hd.mkv",
+			expected: false,
 		},
 		{
 			name:     "sample in directory path is rejected",
