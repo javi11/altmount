@@ -1,6 +1,6 @@
 -- +goose Up
 -- +goose StatementBegin
-ALTER TABLE file_health ADD COLUMN metadata TEXT DEFAULT NULL;
+ALTER TABLE file_health ADD COLUMN metadata JSONB DEFAULT NULL;
 -- +goose StatementEnd
 
 -- +goose Down
