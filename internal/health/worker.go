@@ -445,7 +445,7 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 						slog.InfoContext(ctx, "Successfully discovered metadata during health check",
 							"file_path", fh.FilePath,
 							"instance", metadata.InstanceName)
-						if err := hw.healthRepo.UpdateFileMetadata(ctx, fh.ID, string(metaBytes)); err != nil {
+						if err := hw.healthRepo.UpdateFileMetadata(ctx, fh.ID, metaBytes); err != nil {
 							slog.ErrorContext(ctx, "Failed to save discovered metadata", "error", err)
 						}
 					}
@@ -1082,7 +1082,7 @@ func (hw *HealthWorker) ensureMetadata(ctx context.Context, item *database.FileH
 			slog.InfoContext(ctx, "Successfully discovered metadata during emergency discovery",
 				"file_path", item.FilePath,
 				"instance", metadata.InstanceName)
-			if err := hw.healthRepo.UpdateFileMetadata(ctx, item.ID, str); err != nil {
+			if err := hw.healthRepo.UpdateFileMetadata(ctx, item.ID, metaBytes); err != nil {
 				slog.ErrorContext(ctx, "Failed to save discovered metadata during emergency discovery", "error", err)
 			}
 			return &str

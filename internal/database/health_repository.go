@@ -1809,7 +1809,7 @@ func (r *HealthRepository) HasImportHistoryForPath(ctx context.Context, virtualP
 }
 
 // UpdateFileMetadata updates the metadata column for a health record
-func (r *HealthRepository) UpdateFileMetadata(ctx context.Context, id int64, metadata string) error {
+func (r *HealthRepository) UpdateFileMetadata(ctx context.Context, id int64, metadata []byte) error {
 	query := `
 		UPDATE file_health
 		SET metadata = ?,
