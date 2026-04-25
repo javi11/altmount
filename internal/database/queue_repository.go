@@ -5,8 +5,22 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
+
+// chunkSize is the maximum number of bound parameters per IN-clause batch.
+// Stays well under SQLite's default SQLITE_MAX_VARIABLE_NUMBER (999) and
+// PostgreSQL's 65535 parameter limit.
+const bulkChunkSize = 500
+
+// inPlaceholders builds an IN-clause body of n "?" placeholders.
+func inPlaceholders(n int) string {
+	if n == 0 {
+		return ""
+	}
+	return strings.Repeat("?,", n-1) + "?"
+}
 
 // QueueRepository handles queue-specific database operations
 type QueueRepository struct {
@@ -41,35 +55,69 @@ func (r *QueueRepository) RemoveFromQueueBulk(ctx context.Context, ids []int64) 
 	}
 
 	err := r.withQueueTransaction(ctx, func(txRepo *QueueRepository) error {
-		for _, id := range ids {
-			// Check status + path in a single query - we can't delete processing items
-			var status QueueStatus
-			var nzbPath string
-			checkQuery := `SELECT status, nzb_path FROM import_queue WHERE id = ?`
-			err := txRepo.db.QueryRowContext(ctx, checkQuery, id).Scan(&status, &nzbPath)
-			if err != nil {
-				if err == sql.ErrNoRows {
-					continue // Already gone, ignore
-				}
-				return fmt.Errorf("failed to check status for item %d: %w", id, err)
+		// Process in chunks to stay under SQL parameter limits.
+		for start := 0; start < len(ids); start += bulkChunkSize {
+			end := min(start+bulkChunkSize, len(ids))
+			chunk := ids[start:end]
+
+			args := make([]any, len(chunk))
+			for i, id := range chunk {
+				args[i] = id
 			}
 
-			if status == QueueStatusProcessing {
-				result.ProcessingCount++
-				result.FailedIDs = append(result.FailedIDs, id)
+			// One query: fetch id, status, nzb_path for the chunk.
+			selectQuery := fmt.Sprintf(
+				`SELECT id, status, nzb_path FROM import_queue WHERE id IN (%s)`,
+				inPlaceholders(len(chunk)),
+			)
+			rows, err := txRepo.db.QueryContext(ctx, selectQuery, args...)
+			if err != nil {
+				return fmt.Errorf("failed to fetch queue items for bulk remove: %w", err)
+			}
+
+			deleteIDs := make([]any, 0, len(chunk))
+			deletePaths := make([]string, 0, len(chunk))
+			func() {
+				defer rows.Close()
+				for rows.Next() {
+					var id int64
+					var status QueueStatus
+					var nzbPath string
+					if err = rows.Scan(&id, &status, &nzbPath); err != nil {
+						return
+					}
+					if status == QueueStatusProcessing {
+						result.ProcessingCount++
+						result.FailedIDs = append(result.FailedIDs, id)
+						continue
+					}
+					deleteIDs = append(deleteIDs, id)
+					if nzbPath != "" {
+						deletePaths = append(deletePaths, nzbPath)
+					}
+				}
+				if err == nil {
+					err = rows.Err()
+				}
+			}()
+			if err != nil {
+				return fmt.Errorf("failed to scan queue items for bulk remove: %w", err)
+			}
+
+			if len(deleteIDs) == 0 {
 				continue
 			}
 
-			// Perform deletion
-			deleteQuery := `DELETE FROM import_queue WHERE id = ?`
-			_, err = txRepo.db.ExecContext(ctx, deleteQuery, id)
-			if err != nil {
-				return fmt.Errorf("failed to delete item %d: %w", id, err)
+			// One query: delete all eligible ids in the chunk.
+			deleteQuery := fmt.Sprintf(
+				`DELETE FROM import_queue WHERE id IN (%s)`,
+				inPlaceholders(len(deleteIDs)),
+			)
+			if _, err := txRepo.db.ExecContext(ctx, deleteQuery, deleteIDs...); err != nil {
+				return fmt.Errorf("failed to bulk delete queue items: %w", err)
 			}
-			result.DeletedCount++
-			if nzbPath != "" {
-				result.DeletedPaths = append(result.DeletedPaths, nzbPath)
-			}
+			result.DeletedCount += len(deleteIDs)
+			result.DeletedPaths = append(result.DeletedPaths, deletePaths...)
 		}
 		return nil
 	})
@@ -94,16 +142,23 @@ func (r *QueueRepository) RestartQueueItemsBulk(ctx context.Context, ids []int64
 	}
 
 	return r.withQueueTransaction(ctx, func(txRepo *QueueRepository) error {
-		for _, id := range ids {
-			// Only allow restart of failed or completed items
-			query := `
-				UPDATE import_queue 
+		for start := 0; start < len(ids); start += bulkChunkSize {
+			end := min(start+bulkChunkSize, len(ids))
+			chunk := ids[start:end]
+
+			args := make([]any, len(chunk))
+			for i, id := range chunk {
+				args[i] = id
+			}
+
+			query := fmt.Sprintf(`
+				UPDATE import_queue
 				SET status = 'pending', started_at = NULL, completed_at = NULL, error_message = NULL, updated_at = datetime('now')
-				WHERE id = ? AND status != 'processing'
-			`
-			_, err := txRepo.db.ExecContext(ctx, query, id)
-			if err != nil {
-				return fmt.Errorf("failed to restart item %d: %w", id, err)
+				WHERE id IN (%s) AND status != 'processing'
+			`, inPlaceholders(len(chunk)))
+
+			if _, err := txRepo.db.ExecContext(ctx, query, args...); err != nil {
+				return fmt.Errorf("failed to bulk restart queue items: %w", err)
 			}
 		}
 		return nil
@@ -518,40 +573,46 @@ func (r *QueueRepository) GetQueueItemByNzbPath(ctx context.Context, nzbPath str
 
 // GetQueueStats returns current queue statistics
 func (r *QueueRepository) GetQueueStats(ctx context.Context) (*QueueStats, error) {
-	// Count items by status
-	queries := []struct {
-		status string
-		query  string
-	}{
-		{"pending", "SELECT COUNT(*) FROM import_queue WHERE status = 'pending'"},
-		{"processing", "SELECT COUNT(*) FROM import_queue WHERE status = 'processing'"},
-		{"completed", "SELECT COUNT(*) FROM import_queue WHERE status = 'completed'"},
-		{"failed", "SELECT COUNT(*) FROM import_queue WHERE status = 'failed'"},
-	}
+	// Aggregate counts by status in a single index scan over idx_queue_status.
+	const countsQuery = `
+		SELECT status, COUNT(*)
+		FROM import_queue
+		WHERE status IN ('pending', 'processing', 'completed', 'failed', 'paused')
+		GROUP BY status
+	`
 
 	stats := &QueueStats{}
-	var counts []int
-
-	for _, q := range queries {
-		var count int
-		err := r.db.QueryRowContext(ctx, q.query).Scan(&count)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get count for %s items: %w", q.status, err)
-		}
-		counts = append(counts, count)
-	}
-
-	// Include paused items in TotalQueued
-	var pausedCount int
-	err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM import_queue WHERE status = 'paused'").Scan(&pausedCount)
+	rows, err := r.db.QueryContext(ctx, countsQuery)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get count for paused items: %w", err)
+		return nil, fmt.Errorf("failed to get queue status counts: %w", err)
+	}
+	defer rows.Close()
+
+	var pendingCount, pausedCount int
+	for rows.Next() {
+		var status string
+		var count int
+		if err := rows.Scan(&status, &count); err != nil {
+			return nil, fmt.Errorf("failed to scan queue status count: %w", err)
+		}
+		switch status {
+		case "pending":
+			pendingCount = count
+		case "paused":
+			pausedCount = count
+		case "processing":
+			stats.TotalProcessing = count
+		case "completed":
+			stats.TotalCompleted = count
+		case "failed":
+			stats.TotalFailed = count
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate queue status counts: %w", err)
 	}
 
-	stats.TotalQueued = counts[0] + pausedCount // pending + paused
-	stats.TotalProcessing = counts[1]           // processing
-	stats.TotalCompleted = counts[2]            // completed
-	stats.TotalFailed = counts[3]               // failed
+	stats.TotalQueued = pendingCount + pausedCount // pending + paused
 
 	// Calculate average processing time for completed items
 	var avgProcessingTimeFloat sql.NullFloat64
@@ -560,8 +621,7 @@ func (r *QueueRepository) GetQueueStats(ctx context.Context) (*QueueStats, error
 		FROM import_queue
 		WHERE status = 'completed' AND started_at IS NOT NULL AND completed_at IS NOT NULL
 	`, r.dialect.AvgProcessingTimeMS("started_at", "completed_at"))
-	err = r.db.QueryRowContext(ctx, avgQuery).Scan(&avgProcessingTimeFloat)
-	if err != nil {
+	if err := r.db.QueryRowContext(ctx, avgQuery).Scan(&avgProcessingTimeFloat); err != nil {
 		return nil, fmt.Errorf("failed to calculate average processing time: %w", err)
 	}
 
@@ -715,12 +775,10 @@ func (r *QueueRepository) DeleteFailedItemsOlderThan(ctx context.Context, olderT
 			return nil
 		}
 
-		// Delete the selected items
-		for _, item := range deletedItems {
-			deleteQuery := `DELETE FROM import_queue WHERE id = ?`
-			if _, err := txRepo.db.ExecContext(ctx, deleteQuery, item.ID); err != nil {
-				return fmt.Errorf("failed to delete failed item %d: %w", item.ID, err)
-			}
+		// Single ranged DELETE — uses idx_queue_status_updated.
+		const deleteQuery = `DELETE FROM import_queue WHERE status = 'failed' AND updated_at < ?`
+		if _, err := txRepo.db.ExecContext(ctx, deleteQuery, olderThan); err != nil {
+			return fmt.Errorf("failed to delete failed queue items: %w", err)
 		}
 
 		return nil
