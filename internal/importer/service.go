@@ -863,11 +863,6 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 		nzbDir = filepath.Join(nzbDir, *item.Category)
 	}
 
-	// Create .nzbs directory if not exists
-	if err := os.MkdirAll(nzbDir, 0755); err != nil {
-		return fmt.Errorf("failed to create persistent NZB directory: %w", err)
-	}
-
 	// Check if current path is already in the persistent directory
 	absNzbPath, _ := filepath.Abs(item.NzbPath)
 	absNzbDir, _ := filepath.Abs(nzbDir)
@@ -877,13 +872,19 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 		return nil
 	}
 
-	// Persistent filename uses the queue ID as a suffix to guarantee uniqueness
-	// across concurrent imports without filesystem collision checks.
+	// Store each NZB in a per-ID subfolder to guarantee uniqueness without
+	// polluting the user-visible filename (which is exposed via the SABnzbd
+	// history API and parsed by Sonarr/Radarr — a trailing `_<id>` would
+	// break their release-group parser).
 	if item.ID == 0 {
 		return fmt.Errorf("cannot persist NZB without queue ID (row must be inserted first)")
 	}
+	nzbDir = filepath.Join(nzbDir, strconv.FormatInt(item.ID, 10))
+	if err := os.MkdirAll(nzbDir, 0755); err != nil {
+		return fmt.Errorf("failed to create persistent NZB directory: %w", err)
+	}
 	base := nzbtrim.TrimNzbExtension(sanitizeFilename(filepath.Base(item.NzbPath)))
-	newPath := filepath.Join(nzbDir, fmt.Sprintf("%s_%d%s", base, item.ID, nzbfile.GzExtension))
+	newPath := filepath.Join(nzbDir, base+nzbfile.GzExtension)
 
 	s.log.DebugContext(ctx, "Moving and compressing NZB to persistent storage", "old_path", item.NzbPath, "new_path", newPath)
 
