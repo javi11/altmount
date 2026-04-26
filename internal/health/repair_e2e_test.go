@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/javi11/altmount/internal/arrs"
+	"github.com/javi11/altmount/internal/arrs/model"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/importer"
@@ -55,11 +56,15 @@ type triggerCall struct {
 	relativePath  string
 }
 
-func (m *mockARRsService) TriggerFileRescan(_ context.Context, pathForRescan string, relativePath string) error {
+func (m *mockARRsService) TriggerFileRescan(_ context.Context, pathForRescan string, relativePath string, _ *string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.calls = append(m.calls, triggerCall{pathForRescan: pathForRescan, relativePath: relativePath})
 	return m.returnErr
+}
+
+func (m *mockARRsService) DiscoverFileMetadata(_ context.Context, _, _, _, _ string) (*model.WebhookMetadata, error) {
+	return nil, nil
 }
 
 // mockImportService implements importer.ImportService for testing.
@@ -102,6 +107,7 @@ func newRepairTestEnv(t *testing.T, tempDir string, arrsErr error) *repairTestEn
 			max_repair_retries INTEGER DEFAULT 3,
 			source_nzb_path TEXT,
 			error_details TEXT,
+			metadata TEXT,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			release_date DATETIME,

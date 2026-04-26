@@ -137,11 +137,73 @@ func runMigrations(db *sql.DB, d Dialect) error {
 		return fmt.Errorf("failed to set goose dialect: %w", err)
 	}
 
+	fixDevBranchMigrationConflict(db, d)
+
 	if err := goose.Up(db, migrationsDir); err != nil {
 		return fmt.Errorf("failed to run migrations: %w", err)
 	}
 
 	return nil
+}
+
+// fixDevBranchMigrationConflict fixes an issue for users who applied the metadata migration as version 26
+// before it was renamed to 27, causing a conflict with the perf_indexes migration.
+func fixDevBranchMigrationConflict(db *sql.DB, d Dialect) {
+	var tableExists bool
+	if d == DialectPostgres {
+		db.QueryRow("SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'goose_db_version')").Scan(&tableExists)
+	} else {
+		var exists int
+		db.QueryRow("SELECT 1 FROM sqlite_master WHERE type='table' AND name='goose_db_version'").Scan(&exists)
+		tableExists = exists == 1
+	}
+
+	if !tableExists {
+		return
+	}
+
+	var has26, has27 bool
+	if d == DialectPostgres {
+		db.QueryRow("SELECT EXISTS(SELECT 1 FROM goose_db_version WHERE version_id = 26 AND is_applied = true)").Scan(&has26)
+		db.QueryRow("SELECT EXISTS(SELECT 1 FROM goose_db_version WHERE version_id = 27 AND is_applied = true)").Scan(&has27)
+	} else {
+		db.QueryRow("SELECT EXISTS(SELECT 1 FROM goose_db_version WHERE version_id = 26 AND is_applied = 1)").Scan(&has26)
+		db.QueryRow("SELECT EXISTS(SELECT 1 FROM goose_db_version WHERE version_id = 27 AND is_applied = 1)").Scan(&has27)
+	}
+
+	if has26 && !has27 {
+		hasMetadata := false
+		if d == DialectPostgres {
+			db.QueryRow("SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='file_health' AND column_name='metadata')").Scan(&hasMetadata)
+		} else {
+			rows, err := db.Query("PRAGMA table_info(file_health)")
+			if err == nil {
+				defer rows.Close()
+				for rows.Next() {
+					var cid int
+					var name, ctype string
+					var notnull int
+					var dfltValue *string
+					var pk int
+					if err := rows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &pk); err == nil {
+						if name == "metadata" {
+							hasMetadata = true
+							break
+						}
+					}
+				}
+			}
+		}
+
+		if hasMetadata {
+			db.Exec("CREATE INDEX IF NOT EXISTS idx_queue_status_updated ON import_queue(status, updated_at)")
+			if d == DialectPostgres {
+				db.Exec("INSERT INTO goose_db_version (version_id, is_applied, tstamp) VALUES (27, true, CURRENT_TIMESTAMP)")
+			} else {
+				db.Exec("INSERT INTO goose_db_version (version_id, is_applied, tstamp) VALUES (27, 1, CURRENT_TIMESTAMP)")
+			}
+		}
+	}
 }
 
 // Dialect returns the dialect helper for this database.

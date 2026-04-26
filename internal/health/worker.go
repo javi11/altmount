@@ -2,6 +2,7 @@ package health
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/javi11/altmount/internal/arrs"
+	"github.com/javi11/altmount/internal/arrs/model"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/importer"
@@ -24,7 +26,8 @@ import (
 
 // ARRsRepairService abstracts the ARR repair operations needed by HealthWorker.
 type ARRsRepairService interface {
-	TriggerFileRescan(ctx context.Context, pathForRescan string, relativePath string) error
+	TriggerFileRescan(ctx context.Context, pathForRescan string, relativePath string, metadataStr *string) error
+	DiscoverFileMetadata(ctx context.Context, filePath, relativePath, nzbName, libraryPath string) (*model.WebhookMetadata, error)
 }
 
 // WorkerStatus represents the current status of the health worker
@@ -421,6 +424,34 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 
 		sideEffect = func() error {
 			slog.InfoContext(ctx, "File is healthy", "file_path", fh.FilePath)
+
+			// Discovery: If the file is healthy but missing rich metadata (IDs), attempt to discover it now.
+			// This gradually backfills your library as health checks occur.
+			if fh.Metadata == nil || *fh.Metadata == "" {
+				slog.DebugContext(ctx, "Missing metadata for healthy file, attempting discovery", "file_path", fh.FilePath)
+				relativePath := strings.TrimPrefix(fh.FilePath, "complete/")
+				nzbName := ""
+				if fh.SourceNzbPath != nil {
+					nzbName = filepath.Base(*fh.SourceNzbPath)
+				}
+				libPath := ""
+				if fh.LibraryPath != nil {
+					libPath = *fh.LibraryPath
+				}
+				metadata, err := hw.arrsService.DiscoverFileMetadata(ctx, fh.FilePath, relativePath, nzbName, libPath)
+				if err == nil && metadata != nil {
+					metaBytes, err := json.Marshal(metadata)
+					if err == nil {
+						slog.InfoContext(ctx, "Successfully discovered metadata during health check",
+							"file_path", fh.FilePath,
+							"instance", metadata.InstanceName)
+						if err := hw.healthRepo.UpdateFileMetadata(ctx, fh.ID, metaBytes); err != nil {
+							slog.ErrorContext(ctx, "Failed to save discovered metadata", "error", err)
+						}
+					}
+				}
+			}
+
 			return hw.metadataService.UpdateFileStatus(fh.FilePath, metapb.FileStatus_FILE_STATUS_HEALTHY)
 		}
 
@@ -960,8 +991,9 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, item *database.Fi
 	slog.InfoContext(ctx, "Triggering file repair using direct ARR API approach", "file_path", filePath)
 
 	pathForRescan := hw.resolvePathForRescan(item)
+	metadataStr := hw.ensureMetadata(ctx, item)
 
-	err := hw.arrsService.TriggerFileRescan(ctx, pathForRescan, filePath)
+	err := hw.arrsService.TriggerFileRescan(ctx, pathForRescan, filePath, metadataStr)
 	if err != nil {
 		if errors.Is(err, arrs.ErrEpisodeAlreadySatisfied) || errors.Is(err, arrs.ErrPathMatchFailed) {
 			slog.WarnContext(ctx, "File no longer tracked by ARR, removing from AltMount",
@@ -1007,10 +1039,11 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, item *database.Fi
 func (hw *HealthWorker) retriggerFileRepair(ctx context.Context, item *database.FileHealth) (repairOutcome, error) {
 	filePath := item.FilePath
 	pathForRescan := hw.resolvePathForRescan(item)
+	metadataStr := hw.ensureMetadata(ctx, item)
 
 	slog.InfoContext(ctx, "Re-triggering ARR rescan for file in repair", "file_path", filePath, "path_for_rescan", pathForRescan)
 
-	err := hw.arrsService.TriggerFileRescan(ctx, pathForRescan, filePath)
+	err := hw.arrsService.TriggerFileRescan(ctx, pathForRescan, filePath, metadataStr)
 	if err != nil {
 		if errors.Is(err, arrs.ErrEpisodeAlreadySatisfied) || errors.Is(err, arrs.ErrPathMatchFailed) {
 			slog.WarnContext(ctx, "File no longer tracked by ARR during re-trigger, removing from AltMount", "file_path", filePath)
@@ -1024,4 +1057,38 @@ func (hw *HealthWorker) retriggerFileRepair(ctx context.Context, item *database.
 
 	slog.InfoContext(ctx, "Successfully re-triggered ARR rescan", "file_path", filePath)
 	return repairOutcomeTriggered, nil
+}
+
+func (hw *HealthWorker) ensureMetadata(ctx context.Context, item *database.FileHealth) *string {
+	if item.Metadata != nil && *item.Metadata != "" {
+		return item.Metadata
+	}
+
+	slog.InfoContext(ctx, "Emergency ID discovery: Missing metadata for corrupted file, attempting discovery before repair", "file_path", item.FilePath)
+	relativePath := strings.TrimPrefix(item.FilePath, "complete/")
+	nzbName := ""
+	if item.SourceNzbPath != nil {
+		nzbName = filepath.Base(*item.SourceNzbPath)
+	}
+	libPath := ""
+	if item.LibraryPath != nil {
+		libPath = *item.LibraryPath
+	}
+	metadata, err := hw.arrsService.DiscoverFileMetadata(ctx, item.FilePath, relativePath, nzbName, libPath)
+	if err == nil && metadata != nil {
+		metaBytes, err := json.Marshal(metadata)
+		if err == nil {
+			str := string(metaBytes)
+			slog.InfoContext(ctx, "Successfully discovered metadata during emergency discovery",
+				"file_path", item.FilePath,
+				"instance", metadata.InstanceName)
+			if err := hw.healthRepo.UpdateFileMetadata(ctx, item.ID, metaBytes); err != nil {
+				slog.ErrorContext(ctx, "Failed to save discovered metadata during emergency discovery", "error", err)
+			}
+			return &str
+		}
+	}
+
+	slog.WarnContext(ctx, "Emergency ID discovery failed, falling back to path-based repair", "file_path", item.FilePath)
+	return nil
 }

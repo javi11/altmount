@@ -105,6 +105,7 @@ type FileHealth struct {
 	MaxRepairRetries int          `db:"max_repair_retries"` // Max repair retries
 	SourceNzbPath    *string      `db:"source_nzb_path"`
 	ErrorDetails     *string      `db:"error_details"` // JSON error details
+	Metadata         *string      `db:"metadata"`      // JSON metadata
 	CreatedAt        time.Time    `db:"created_at"`
 	UpdatedAt        time.Time    `db:"updated_at"`
 	// Health check scheduling fields
