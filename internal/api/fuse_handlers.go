@@ -123,9 +123,27 @@ func (m *FuseManager) recoverMount(ctx context.Context) {
 	m.mu.Unlock()
 
 	if attempt > fuseMaxRecoveryAttempts {
-		slog.ErrorContext(ctx, "FUSE recovery exhausted, staying in error state",
+		// Recovery has failed. Detach the kernel-side FUSE mount so consumers
+		// (Sonarr/Radarr/Plex/ffprobe etc.) stop blocking indefinitely on dead
+		// reads — leaving a "ghost" mount accumulates D-state processes and can
+		// take down the host (see issue #539). ForceUnmount runs
+		// `fusermount(3) -uz` / `umount -lf` under the hood.
+		slog.ErrorContext(ctx, "FUSE recovery exhausted, force-unmounting to release kernel mount",
 			"attempts", attempt-1,
 			"path", path)
+
+		if server != nil {
+			if err := server.ForceUnmount(); err != nil {
+				slog.ErrorContext(ctx, "Force unmount on recovery exhaustion failed",
+					"path", path,
+					"error", err)
+			}
+		}
+
+		m.mu.Lock()
+		m.server = nil
+		m.status = "failed"
+		m.mu.Unlock()
 		return
 	}
 
