@@ -52,9 +52,9 @@ type Manager interface {
 	// If the last provider is removed, the pool is closed.
 	RemoveProvider(name string) error
 
-	// ResetProviderQuota resets the download quota counter for a provider by
-	// removing and re-adding it without restoring persisted quota state.
-	ResetProviderQuota(ctx context.Context, provider nntppool.Provider, poolName string) error
+	// ResetProviderQuota resets the download quota counter for a provider,
+	// clearing its consumed-bytes counter and exceeded flag in-place.
+	ResetProviderQuota(ctx context.Context, poolName string) error
 }
 
 // StatsRepository defines the interface for persisting pool statistics
@@ -78,7 +78,6 @@ type manager struct {
 	repo             StatsRepository
 	ctx              context.Context
 	logger           *slog.Logger
-	providersByName  map[string]nntppool.Provider // keyed by pool name (host or host+user)
 	quotaWatchCancel context.CancelFunc
 }
 
@@ -186,12 +185,6 @@ func (m *manager) SetProviders(providers []nntppool.Provider) error {
 
 	m.pool = pool
 
-	// Rebuild the provider lookup map
-	m.providersByName = make(map[string]nntppool.Provider, len(providers))
-	for _, p := range providers {
-		m.providersByName[providerPoolName(p)] = p
-	}
-
 	// Start metrics tracker
 	m.metricsTracker = NewMetricsTracker(pool, m.repo)
 	m.metricsTracker.Start(m.ctx)
@@ -216,7 +209,6 @@ func (m *manager) ClearPool() error {
 		}
 		m.pool.Close()
 		m.pool = nil
-		m.providersByName = nil
 	}
 
 	return nil
@@ -339,10 +331,6 @@ func (m *manager) AddProvider(provider nntppool.Provider) error {
 	m.injectQuotaState(providers)
 	provider = providers[0]
 
-	if m.providersByName == nil {
-		m.providersByName = make(map[string]nntppool.Provider)
-	}
-
 	if m.pool == nil {
 		// No pool yet — create one with this single provider
 		m.logger.InfoContext(m.ctx, "Creating NNTP connection pool for first provider", "provider", provider.Host)
@@ -360,7 +348,6 @@ func (m *manager) AddProvider(provider nntppool.Provider) error {
 		}
 	}
 
-	m.providersByName[providerPoolName(provider)] = provider
 	m.startQuotaWatcher()
 	return nil
 }
@@ -380,8 +367,6 @@ func (m *manager) RemoveProvider(name string) error {
 		return err
 	}
 
-	delete(m.providersByName, name)
-
 	// If no providers remain, tear down the pool entirely
 	if m.pool.NumProviders() == 0 {
 		m.logger.InfoContext(m.ctx, "Last provider removed - shutting down NNTP connection pool")
@@ -392,22 +377,21 @@ func (m *manager) RemoveProvider(name string) error {
 		}
 		m.pool.Close()
 		m.pool = nil
-		m.providersByName = nil
 	}
 
 	return nil
 }
 
 // resetProviderQuotaLocked performs the quota reset with m.mu already held.
-func (m *manager) resetProviderQuotaLocked(ctx context.Context, provider nntppool.Provider, poolName string) error {
+func (m *manager) resetProviderQuotaLocked(ctx context.Context, poolName string) error {
 	if m.pool == nil {
 		return fmt.Errorf("NNTP connection pool not available")
 	}
 
 	m.logger.InfoContext(ctx, "Resetting provider quota", "provider", poolName)
 
-	if err := m.pool.RemoveProvider(poolName); err != nil {
-		return fmt.Errorf("failed to remove provider for quota reset: %w", err)
+	if err := m.pool.ResetProviderQuota(poolName); err != nil {
+		return fmt.Errorf("failed to reset provider quota: %w", err)
 	}
 
 	if m.repo != nil {
@@ -420,20 +404,16 @@ func (m *manager) resetProviderQuotaLocked(ctx context.Context, provider nntppoo
 		}
 	}
 
-	m.logger.InfoContext(ctx, "Re-adding provider with reset quota", "provider", provider.Host)
-	provider.QuotaUsed = 0
-	provider.QuotaResetAt = time.Time{}
-	return m.pool.AddProvider(provider)
+	return nil
 }
 
-// ResetProviderQuota resets the download quota counter for a provider by
-// removing it from the pool, clearing persisted quota state in the DB, and
-// re-adding it with QuotaUsed=0 so it starts fresh.
-func (m *manager) ResetProviderQuota(ctx context.Context, provider nntppool.Provider, poolName string) error {
+// ResetProviderQuota resets the download quota counter for a provider,
+// clearing its consumed-bytes counter and exceeded flag in-place.
+func (m *manager) ResetProviderQuota(ctx context.Context, poolName string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	return m.resetProviderQuotaLocked(ctx, provider, poolName)
+	return m.resetProviderQuotaLocked(ctx, poolName)
 }
 
 // startQuotaWatcher starts the background quota watcher if not already running.
@@ -491,14 +471,9 @@ func (m *manager) checkAndResetExpiredQuotas(ctx context.Context) {
 			continue
 		}
 
-		provider, ok := m.providersByName[ps.Name]
-		if !ok {
-			continue
-		}
-
 		m.logger.InfoContext(ctx, "Auto-resetting expired provider quota",
 			"provider", ps.Name, "reset_at", ps.QuotaResetAt)
-		if err := m.resetProviderQuotaLocked(ctx, provider, ps.Name); err != nil {
+		if err := m.resetProviderQuotaLocked(ctx, ps.Name); err != nil {
 			m.logger.ErrorContext(ctx, "Failed to auto-reset provider quota",
 				"provider", ps.Name, "error", err)
 		}

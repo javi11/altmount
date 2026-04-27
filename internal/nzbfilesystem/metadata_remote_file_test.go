@@ -384,7 +384,7 @@ func (m *mockPoolManager) RemoveProvider(_ string) error {
 	return nil
 }
 
-func (m *mockPoolManager) ResetProviderQuota(_ context.Context, _ nntppool.Provider, _ string) error {
+func (m *mockPoolManager) ResetProviderQuota(_ context.Context, _ string) error {
 	return nil
 }
 

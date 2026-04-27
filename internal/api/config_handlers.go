@@ -829,9 +829,8 @@ func (s *Server) handleResetProviderQuota(c *fiber.Ctx) error {
 	}
 
 	poolName := provider.NNTPPoolName()
-	nntpProvider := provider.ToNNTPProvider()
 
-	if err := s.poolManager.ResetProviderQuota(c.Context(), nntpProvider, poolName); err != nil {
+	if err := s.poolManager.ResetProviderQuota(c.Context(), poolName); err != nil {
 		return RespondInternalError(c, "Failed to reset provider quota", err.Error())
 	}
 
