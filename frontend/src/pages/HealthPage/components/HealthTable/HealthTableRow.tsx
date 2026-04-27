@@ -156,12 +156,16 @@ export const HealthTableRow = memo(function HealthTableRow({
 			</td>
 			<td>
 				<div className="flex flex-col text-xs">
-					<span className="text-base-content/70" title="Last Checked">
-						L: {item.last_checked ? formatRelativeTime(item.last_checked) : "Never"}
-					</span>
-					<span className="text-base-content/50" title="Next Check">
-						N: {item.scheduled_check_at ? formatFutureTime(item.scheduled_check_at) : "None"}
-					</span>
+					<div className="tooltip tooltip-left" data-tip="Last checked time">
+						<span className="text-base-content/70">
+							L: {item.last_checked ? formatRelativeTime(item.last_checked) : "Never"}
+						</span>
+					</div>
+					<div className="tooltip tooltip-left" data-tip="Next scheduled check">
+						<span className="text-base-content/50">
+							N: {item.scheduled_check_at ? formatFutureTime(item.scheduled_check_at) : "None"}
+						</span>
+					</div>
 				</div>
 			</td>
 			<td>
