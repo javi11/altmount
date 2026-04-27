@@ -41,6 +41,7 @@ type MetadataRemoteFile struct {
 	aesCipher        *aes.AesCipher           // For AES encryption/decryption
 	streamTracker    StreamTracker            // Stream tracker for monitoring active streams
 	cacheSource      *segcache.Source         // Segment cache source (nil = no cache configured)
+	repairCoalescer  *RepairCoalescer         // Throttles streaming-failure repair triggers and rclone VFS refreshes
 	renameMu         sync.Mutex               // Mutex to protect rename operations from race conditions
 }
 
@@ -81,6 +82,7 @@ func NewMetadataRemoteFile(
 		aesCipher:        aesCipher,
 		streamTracker:    streamTracker,
 		cacheSource:      cacheSource,
+		repairCoalescer:  NewRepairCoalescer(rcloneClient, configGetter),
 	}
 }
 
@@ -263,6 +265,7 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 		healthRepository: mrf.healthRepository,
 		arrsService:      mrf.arrsService,
 		rcloneClient:     mrf.rcloneClient,
+		repairCoalescer:  mrf.repairCoalescer,
 		configGetter:     mrf.configGetter,
 		poolManager:      mrf.poolManager,
 		ctx:              ctx,
@@ -773,6 +776,7 @@ type MetadataVirtualFile struct {
 	healthRepository *database.HealthRepository
 	arrsService      ARRsRepairService
 	rcloneClient     rclonecli.RcloneRcClient // RClone RC client for VFS notifications
+	repairCoalescer  *RepairCoalescer         // Throttles repair triggers; may be nil in tests
 	configGetter     config.ConfigGetter
 	poolManager      pool.Manager // Pool manager for dynamic pool access
 	ctx              context.Context
@@ -1688,7 +1692,21 @@ func (mvf *MetadataVirtualFile) wrapWithEncryption(start, end int64) (io.ReadClo
 
 // updateFileHealthOnError updates both metadata and database health status when corruption is detected.
 // Uses synchronous operations with timeout to prevent goroutine leaks.
+//
+// A streaming-failure repair trigger for the same path is debounced through the
+// shared RepairCoalescer so that repeated corrupt reads of one file (or a batch
+// of corrupt files) cannot fan out into one DB write + one rclone VFS refresh
+// per call. See issue #539 for the failure mode this guards against.
 func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usenet.DataCorruptionError, noRetry bool) {
+	// Per-path debounce: short-circuit if this file already triggered a repair
+	// inside the debounce window. ShouldTrigger handles a nil coalescer
+	// (test harness) by returning true.
+	if !mvf.repairCoalescer.ShouldTrigger(mvf.name) {
+		slog.DebugContext(mvf.ctx, "Streaming failure repair already triggered recently, debouncing",
+			"file", mvf.name)
+		return
+	}
+
 	// Use a short timeout context to prevent blocking indefinitely
 	ctx, cancel := context.WithTimeout(mvf.ctx, 5*time.Second)
 	defer cancel()
@@ -1727,22 +1745,12 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 			relativePath = strings.TrimPrefix(relativePath, "/")
 			slog.InfoContext(ctx, "Moving metadata file for corrupted item to safety folder to trigger replacement", "file_path", mvf.name)
 			if moveErr := mvf.metadataService.MoveToCorrupted(ctx, relativePath); moveErr == nil {
-				// Successfully moved metadata, notify rclone VFS refresh
-				if mvf.rcloneClient != nil {
-					go func() {
-						virtualDir := filepath.Dir(mvf.name)
-						vfsName := cfg.RClone.VFSName
-						if vfsName == "" {
-							vfsName = config.MountProvider
-						}
-						// Increased timeout to 60 seconds as vfs/refresh can be slow
-						vfsCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-						defer cancel()
-						if refreshErr := mvf.rcloneClient.RefreshDir(vfsCtx, vfsName, []string{virtualDir}); refreshErr != nil {
-							slog.ErrorContext(vfsCtx, "Failed to notify rclone VFS about file status change after streaming failure", "file", mvf.name, "err", refreshErr)
-						}
-					}()
-				}
+				// Successfully moved metadata, enqueue a coalesced rclone VFS
+				// refresh. Multiple files in the same directory collapse into a
+				// single RC call; concurrent failures across directories are
+				// batched into one call as well. EnqueueRefresh is a no-op on a
+				// nil coalescer (test harness).
+				mvf.repairCoalescer.EnqueueRefresh(filepath.Dir(mvf.name))
 			} else {
 				slog.WarnContext(ctx, "Failed to move corrupted metadata file, proceeding with repair trigger status", "error", moveErr)
 			}
