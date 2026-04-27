@@ -161,12 +161,20 @@ export function useWebDAVFileOperations() {
 		mutationFn: async (path: string) => {
 			await webdavClient.deleteFile(path);
 		},
-		onSuccess: (_, path) => {
-			// Invalidate the directory containing this file
+		onMutate: async (path) => {
 			const dirPath = path.substring(0, path.lastIndexOf("/")) || "/";
-			queryClient.invalidateQueries({
-				queryKey: ["webdav", "directory", dirPath],
-			});
+			await queryClient.cancelQueries({ queryKey: ["webdav", "directory", dirPath] });
+			queryClient.setQueriesData<WebDAVDirectory>(
+				{ queryKey: ["webdav", "directory", dirPath] },
+				(old) => {
+					if (!old) return old;
+					return { ...old, files: old.files.filter((f) => f.filename !== path) };
+				},
+			);
+		},
+		onSettled: (_, _err, path) => {
+			const dirPath = path.substring(0, path.lastIndexOf("/")) || "/";
+			queryClient.invalidateQueries({ queryKey: ["webdav", "directory", dirPath] });
 		},
 	});
 

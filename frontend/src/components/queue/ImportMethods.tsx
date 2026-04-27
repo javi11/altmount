@@ -63,7 +63,7 @@ const IMPORT_SECTIONS = {
 };
 
 export function ImportMethods() {
-	const [activeTab, setActiveTab] = useState<ImportTab>("nzbdav");
+	const [activeTab, setActiveTab] = useState<ImportTab>("upload");
 
 	return (
 		<div className="grid grid-cols-1 gap-6 lg:grid-cols-4">
@@ -231,48 +231,50 @@ function EnhancedUploadSection() {
 			});
 
 			setUploadedFiles((prev) => [...prev, ...validatedFiles]);
+		},
+		[validateFile, category],
+	);
 
-			validatedFiles.forEach(async (uploadFile) => {
-				if (uploadFile.status === "error") return;
+	const handleUploadAll = useCallback(async () => {
+		const pendingFiles = uploadedFiles.filter((f) => f.status === "pending");
+
+		for (const uploadFile of pendingFiles) {
+			setUploadedFiles((prev) =>
+				prev.map((f) => (f.id === uploadFile.id ? { ...f, status: "uploading" as const } : f)),
+			);
+
+			try {
+				const response = await uploadMutation.mutateAsync({
+					file: uploadFile.file,
+					category: uploadFile.category,
+				});
 
 				setUploadedFiles((prev) =>
-					prev.map((f) => (f.id === uploadFile.id ? { ...f, status: "uploading" as const } : f)),
+					prev.map((f) =>
+						f.id === uploadFile.id
+							? {
+									...f,
+									status: "success" as const,
+									queueId: response.data?.id.toString(),
+								}
+							: f,
+					),
 				);
-
-				try {
-					const response = await uploadMutation.mutateAsync({
-						file: uploadFile.file,
-						category: uploadFile.category,
-					});
-
-					setUploadedFiles((prev) =>
-						prev.map((f) =>
-							f.id === uploadFile.id
-								? {
-										...f,
-										status: "success" as const,
-										queueId: response.data?.id.toString(),
-									}
-								: f,
-						),
-					);
-				} catch (error) {
-					setUploadedFiles((prev) =>
-						prev.map((f) =>
-							f.id === uploadFile.id
-								? {
-										...f,
-										status: "error" as const,
-										errorMessage: error instanceof Error ? error.message : "Upload failed",
-									}
-								: f,
-						),
-					);
-				}
-			});
-		},
-		[uploadMutation, validateFile, category],
-	);
+			} catch (error) {
+				setUploadedFiles((prev) =>
+					prev.map((f) =>
+						f.id === uploadFile.id
+							? {
+									...f,
+									status: "error" as const,
+									errorMessage: error instanceof Error ? error.message : "Upload failed",
+								}
+							: f,
+					),
+				);
+			}
+		}
+	}, [uploadedFiles, uploadMutation]);
 
 	const handleLinkSubmit = useCallback(async () => {
 		const links = parseLinks(linkInput);
@@ -562,13 +564,33 @@ function EnhancedUploadSection() {
 						<h4 className="font-bold text-base-content/60 text-xs uppercase tracking-widest">
 							Status
 						</h4>
-						<button
-							type="button"
-							className="btn btn-ghost btn-sm"
-							onClick={uploadTab === "files" ? clearAllFiles : clearAllLinks}
-						>
-							Clear All
-						</button>
+						<div className="flex items-center gap-2">
+							{uploadTab === "files" && (
+								<button
+									type="button"
+									className="btn btn-primary btn-sm"
+									onClick={handleUploadAll}
+									disabled={
+										uploadMutation.isPending ||
+										uploadedFiles.filter((f) => f.status === "pending").length === 0
+									}
+								>
+									{uploadMutation.isPending ? (
+										<LoadingSpinner size="sm" />
+									) : (
+										<Upload className="h-4 w-4" />
+									)}
+									Add to Queue
+								</button>
+							)}
+							<button
+								type="button"
+								className="btn btn-ghost btn-sm"
+								onClick={uploadTab === "files" ? clearAllFiles : clearAllLinks}
+							>
+								Clear All
+							</button>
+						</div>
 					</div>
 					<div className="max-h-60 space-y-2 overflow-y-auto rounded-xl border border-base-300 p-2">
 						{uploadTab === "files"
