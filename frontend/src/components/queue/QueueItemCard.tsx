@@ -66,7 +66,7 @@ export const QueueItemCard = memo(function QueueItemCard({
 						<div className="flex min-w-0 items-center gap-2">
 							<FileCode className="mt-0.5 h-4 w-4 shrink-0 text-base-content/60" />
 							<div className="min-w-0 flex-1 font-bold text-sm leading-tight">
-								<PathDisplay path={item.nzb_path} maxLength={80} showFileName />
+								<PathDisplay path={item.nzb_display_name} maxLength={80} showFileName />
 							</div>
 						</div>
 

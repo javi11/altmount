@@ -74,7 +74,7 @@ export function ImportStatusCard({ className }: ImportStatusCardProps) {
 			const stage = count === 1 ? topEntry?.stage : undefined;
 			const displayName = topItem.target_path
 				? topItem.target_path.split("/").pop()
-				: topItem.nzb_path.split("/").pop();
+				: topItem.nzb_display_name;
 
 			return {
 				title: "Queue Import",

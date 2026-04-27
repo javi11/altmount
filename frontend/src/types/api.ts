@@ -30,6 +30,7 @@ export type QueueStatus = (typeof QueueStatus)[keyof typeof QueueStatus];
 export interface QueueItem {
 	id: number;
 	nzb_path: string;
+	nzb_display_name: string;
 	target_path: string;
 	category?: string;
 	relative_path?: string;

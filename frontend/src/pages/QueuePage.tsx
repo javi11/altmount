@@ -803,7 +803,7 @@ export function QueuePage() {
 																			<FileCode className="h-3.5 w-3.5 shrink-0 text-base-content/60" />
 																			<div className="min-w-0 flex-1 font-bold text-sm">
 																				<PathDisplay
-																					path={item.nzb_path}
+																					path={item.nzb_display_name}
 																					maxLength={80}
 																					showFileName={true}
 																				/>

@@ -356,9 +356,10 @@ func DefaultPagination() Pagination {
 
 // QueueItemResponse represents a queue item in API responses
 type QueueItemResponse struct {
-	ID           int64                  `json:"id"`
-	NzbPath      string                 `json:"nzb_path"`
-	TargetPath   string                 `json:"target_path"`
+	ID             int64                  `json:"id"`
+	NzbPath        string                 `json:"nzb_path"`
+	NzbDisplayName string                 `json:"nzb_display_name"`
+	TargetPath     string                 `json:"target_path"`
 	Category     *string                `json:"category"`
 	Priority     database.QueuePriority `json:"priority"`
 	Status       database.QueueStatus   `json:"status"`
@@ -613,13 +614,19 @@ func ToQueueItemResponse(item *database.ImportQueueItem) *QueueItemResponse {
 		}
 	}
 
+	nzbDisplayName := filepath.Base(item.NzbPath)
+	if strings.HasSuffix(strings.ToLower(nzbDisplayName), ".gz") {
+		nzbDisplayName = nzbDisplayName[:len(nzbDisplayName)-3]
+	}
+
 	// Transform error message for better user understanding
 	errorMessage := transformQueueError(item.ErrorMessage)
 
 	return &QueueItemResponse{
-		ID:           item.ID,
-		NzbPath:      item.NzbPath,
-		TargetPath:   targetPath,
+		ID:             item.ID,
+		NzbPath:        item.NzbPath,
+		NzbDisplayName: nzbDisplayName,
+		TargetPath:     targetPath,
 		Category:     item.Category,
 		Priority:     item.Priority,
 		Status:       item.Status,
