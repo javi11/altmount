@@ -1,9 +1,15 @@
 package filesystem
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/javi11/altmount/internal/importer/parser"
+	"github.com/javi11/altmount/internal/metadata"
+	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // ---------------------------------------------------------------------------
@@ -168,4 +174,62 @@ func TestSeparateFiles_MultiFile(t *testing.T) {
 	if len(par2) != 1 {
 		t.Errorf("expected 1 par2, got %d", len(par2))
 	}
+}
+
+// ---------------------------------------------------------------------------
+// EnsureUniqueVirtualPath
+// ---------------------------------------------------------------------------
+
+func newTestMetadataService(t *testing.T) *metadata.MetadataService {
+	t.Helper()
+	return metadata.NewMetadataService(t.TempDir())
+}
+
+func writeHealthyMeta(t *testing.T, ms *metadata.MetadataService, virtualPath string) {
+	t.Helper()
+	dir := filepath.Dir(virtualPath)
+	if dir != "" && dir != "/" && dir != "." {
+		require.NoError(t, os.MkdirAll(ms.GetMetadataDirectoryPath(dir), 0755))
+	}
+	fileMeta := ms.CreateFileMetadata(
+		1000, "/fake/nzb.nzb.gz",
+		metapb.FileStatus_FILE_STATUS_HEALTHY,
+		nil, metapb.Encryption_NONE, "", "", nil, nil, 0, nil, "",
+	)
+	require.NoError(t, ms.WriteFileMetadata(virtualPath, fileMeta))
+}
+
+func TestEnsureUniqueVirtualPath_NoConflict(t *testing.T) {
+	ms := newTestMetadataService(t)
+	result := EnsureUniqueVirtualPath("/complete/tv/show.S01E01.mkv", ms)
+	assert.Equal(t, "/complete/tv/show.S01E01.mkv", result)
+}
+
+func TestEnsureUniqueVirtualPath_OneConflict(t *testing.T) {
+	ms := newTestMetadataService(t)
+	writeHealthyMeta(t, ms, "/complete/tv/show.S01E01.mkv")
+	result := EnsureUniqueVirtualPath("/complete/tv/show.S01E01.mkv", ms)
+	assert.Equal(t, "/complete/tv/show.S01E01_1.mkv", result)
+}
+
+func TestEnsureUniqueVirtualPath_TwoConflicts(t *testing.T) {
+	ms := newTestMetadataService(t)
+	writeHealthyMeta(t, ms, "/complete/tv/show.S01E01.mkv")
+	writeHealthyMeta(t, ms, "/complete/tv/show.S01E01_1.mkv")
+	result := EnsureUniqueVirtualPath("/complete/tv/show.S01E01.mkv", ms)
+	assert.Equal(t, "/complete/tv/show.S01E01_2.mkv", result)
+}
+
+func TestEnsureUniqueVirtualPath_UnhealthyNotDeduplicated(t *testing.T) {
+	ms := newTestMetadataService(t)
+	dir := "/complete/tv"
+	require.NoError(t, os.MkdirAll(ms.GetMetadataDirectoryPath(dir), 0755))
+	fileMeta := ms.CreateFileMetadata(
+		1000, "/fake/nzb.nzb.gz",
+		metapb.FileStatus_FILE_STATUS_CORRUPTED,
+		nil, metapb.Encryption_NONE, "", "", nil, nil, 0, nil, "",
+	)
+	require.NoError(t, ms.WriteFileMetadata("/complete/tv/show.S01E01.mkv", fileMeta))
+	result := EnsureUniqueVirtualPath("/complete/tv/show.S01E01.mkv", ms)
+	assert.Equal(t, "/complete/tv/show.S01E01.mkv", result)
 }

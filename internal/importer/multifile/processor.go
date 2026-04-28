@@ -93,14 +93,9 @@ func ProcessRegularFiles(
 			virtualPath := filepath.Join(parentPath, filename)
 			virtualPath = strings.ReplaceAll(virtualPath, string(filepath.Separator), "/")
 
-			if existingMeta, err := metadataService.ReadFileMetadata(virtualPath); err == nil && existingMeta != nil {
-				if existingMeta.Status == metapb.FileStatus_FILE_STATUS_HEALTHY {
-					slog.InfoContext(ctx, "Skipping re-import of healthy file",
-						"file", filename,
-						"virtual_path", virtualPath)
-					return nil
-				}
-			}
+			// If a healthy file already exists, generate a unique path (_1, _2, …)
+			// so the new import lands alongside the existing one.
+			virtualPath = filesystem.EnsureUniqueVirtualPath(virtualPath, metadataService)
 
 			if !utils.IsAllowedFile(filename, file.Size, allowedFileExtensions, filterSamples) {
 				return nil

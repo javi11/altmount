@@ -29,6 +29,7 @@ func TestCalculateProcessVirtualDir_FailedPath(t *testing.T) {
 		nzbPath      string
 		basePath     string
 		category     string
+		itemID       int64
 		expectedPath string
 	}{
 		{
@@ -63,12 +64,44 @@ func TestCalculateProcessVirtualDir_FailedPath(t *testing.T) {
 			basePath:     "Plex_Media/Series/Show (2026)/Season 01",
 			expectedPath: "/mnt/remotes/altmount/Plex_Media/Series/Show (2026)/Season 01",
 		},
+		{
+			name:         "nzb in queue_id subfolder (no basePath)",
+			nzbPath:      "/config/.nzbs/tv/22/Show.S01E01.nzb.gz",
+			basePath:     "",
+			category:     "tv",
+			itemID:       22,
+			expectedPath: "/mnt/remotes/altmount/tv",
+		},
+		{
+			name:         "nzb in queue_id subfolder with basePath",
+			nzbPath:      "/config/.nzbs/tv/22/Show.S01E01.nzb.gz",
+			basePath:     "media",
+			category:     "tv",
+			itemID:       22,
+			expectedPath: "/mnt/remotes/altmount/media/tv",
+		},
+		{
+			name:         "failed nzb in queue_id subfolder",
+			nzbPath:      "/config/.nzbs/failed/tv/22/Show.S01E01.nzb.gz",
+			basePath:     "",
+			category:     "tv",
+			itemID:       22,
+			expectedPath: "/mnt/remotes/altmount/tv",
+		},
+		{
+			name:         "nzb in queue_id subfolder no category",
+			nzbPath:      "/config/.nzbs/22/Show.S01E01.nzb.gz",
+			basePath:     "",
+			itemID:       22,
+			expectedPath: "/mnt/remotes/altmount",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			item := &database.ImportQueueItem{
 				NzbPath: filepath.FromSlash(tt.nzbPath),
+				ID:      tt.itemID,
 			}
 			if tt.category != "" {
 				item.Category = &tt.category

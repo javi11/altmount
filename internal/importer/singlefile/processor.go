@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/javi11/altmount/internal/importer/filesystem"
 	"github.com/javi11/altmount/internal/importer/parser"
 	"github.com/javi11/altmount/internal/importer/utils"
 	"github.com/javi11/altmount/internal/importer/validation"
@@ -43,19 +44,13 @@ func ProcessSingleFile(
 		return "", "", fmt.Errorf("file '%s' does not match allowed extensions (allowed: %v)", file.Filename, allowedFileExtensions)
 	}
 
-	// Create virtual file path
+	// Create virtual file path, then ensure it is unique.
+	// If a healthy file already exists at this path, a _1, _2, … suffix is
+	// appended to the stem so the new import lands alongside the existing one
+	// rather than being silently skipped.
 	virtualFilePath := filepath.Join(virtualDir, file.Filename)
 	virtualFilePath = strings.ReplaceAll(virtualFilePath, string(filepath.Separator), "/")
-
-	// Check if file already exists and is healthy
-	if existingMeta, err := metadataService.ReadFileMetadata(virtualFilePath); err == nil && existingMeta != nil {
-		if existingMeta.Status == metapb.FileStatus_FILE_STATUS_HEALTHY {
-			slog.InfoContext(ctx, "Skipping re-import of healthy file",
-				"file", file.Filename,
-				"virtual_path", virtualFilePath)
-			return virtualDir, "", nil
-		}
-	}
+	virtualFilePath = filesystem.EnsureUniqueVirtualPath(virtualFilePath, metadataService)
 
 	// Double check if this specific file is allowed
 	if !utils.IsAllowedFile(file.Filename, file.Size, allowedFileExtensions, filterSamples) {

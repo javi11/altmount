@@ -770,6 +770,18 @@ func (s *Service) calculateProcessVirtualDir(item *database.ImportQueueItem, bas
 					cleanRel = ""
 				}
 
+				// Strip the queue_id subfolder added by ensurePersistentNzb.
+				// Storage structure: .nzbs/{category}/{queue_id}/filename.nzb.gz
+				// The numeric ID must not leak into the virtual destination path.
+				if item.ID != 0 {
+					queueIDStr := strconv.FormatInt(item.ID, 10)
+					if cleanRel == queueIDStr {
+						cleanRel = ""
+					} else if after, ok := strings.CutSuffix(cleanRel, "/"+queueIDStr); ok {
+						cleanRel = after
+					}
+				}
+
 				cleanBase := filepath.ToSlash(*basePath)
 				// Avoid duplication if basePath already starts with relDir (common with Watcher or manual imports)
 				// We only apply this reconstruction if basePath is empty or root, otherwise we trust basePath
