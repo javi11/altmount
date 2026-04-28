@@ -9,6 +9,7 @@ import (
 	"github.com/javi11/altmount/internal/importer/parser"
 	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
 	"github.com/javi11/altmount/internal/metadata"
+	metapb "github.com/javi11/altmount/internal/metadata/proto"
 )
 
 // CalculateVirtualDirectory determines the virtual directory path based on NZB file location
@@ -219,4 +220,28 @@ func DetermineFileLocation(file parser.ParsedFile, baseDir string) (parentPath, 
 	virtualPath := filepath.Join(baseDir, dir)
 	virtualPath = strings.ReplaceAll(virtualPath, string(filepath.Separator), "/")
 	return virtualPath, name
+}
+
+// EnsureUniqueVirtualPath returns a path that is safe to write to.
+// If a healthy metadata file already exists at virtualPath, appends _1, _2, …
+// to the stem (before the extension) until an unused slot is found.
+// Non-healthy metadata is treated as available to overwrite, so the original
+// path is returned unchanged.
+func EnsureUniqueVirtualPath(virtualPath string, ms *metadata.MetadataService) string {
+	if !isHealthyMetadata(virtualPath, ms) {
+		return virtualPath
+	}
+	ext := filepath.Ext(virtualPath)
+	stem := strings.TrimSuffix(virtualPath, ext)
+	for i := 1; ; i++ {
+		candidate := fmt.Sprintf("%s_%d%s", stem, i, ext)
+		if !isHealthyMetadata(candidate, ms) {
+			return candidate
+		}
+	}
+}
+
+func isHealthyMetadata(virtualPath string, ms *metadata.MetadataService) bool {
+	meta, err := ms.ReadFileMetadata(virtualPath)
+	return err == nil && meta != nil && meta.Status == metapb.FileStatus_FILE_STATUS_HEALTHY
 }
