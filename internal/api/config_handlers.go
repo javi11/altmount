@@ -232,6 +232,11 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 		if err == nil && newConfig.RClone.RCPass == "" {
 			newConfig.RClone.RCPass = currentConfig.RClone.RCPass
 		}
+		// Preserve existing WebDAV password when the request omits or sends an empty value.
+		// The frontend sends password: "" when the user hasn't entered a new password.
+		if err == nil && newConfig.WebDAV.Password == "" {
+			newConfig.WebDAV.Password = currentConfig.WebDAV.Password
+		}
 	default:
 		return RespondValidationError(c, fmt.Sprintf("Unknown configuration section: %s", section), "INVALID_SECTION")
 	}

@@ -23,6 +23,7 @@ export function WebDAVConfigSection({
 }: WebDAVConfigSectionProps) {
 	const [formData, setFormData] = useState<WebDAVFormData>({
 		...config.webdav,
+		password: "",
 		mount_path: config.mount_path,
 	});
 	const [hasChanges, setHasChanges] = useState(false);
@@ -30,6 +31,7 @@ export function WebDAVConfigSection({
 	useEffect(() => {
 		setFormData({
 			...config.webdav,
+			password: "",
 			mount_path: config.mount_path,
 		});
 		setHasChanges(false);
@@ -40,6 +42,7 @@ export function WebDAVConfigSection({
 		setFormData(newData);
 		const currentConfig = {
 			...config.webdav,
+			password: "",
 			mount_path: config.mount_path,
 		};
 		setHasChanges(JSON.stringify(newData) !== JSON.stringify(currentConfig));
@@ -144,6 +147,7 @@ export function WebDAVConfigSection({
 								value={formData.password}
 								readOnly={isReadOnly}
 								onChange={(e) => handleInputChange("password", e.target.value)}
+								placeholder="Leave blank to keep current password"
 							/>
 						</fieldset>
 					</div>
