@@ -474,7 +474,7 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 		return cache, notFoundIDs, nil
 	}
 
-	cp, err := p.poolManager.GetPool()
+	cp, err := p.poolManager.GetImportPool()
 	if err != nil {
 		p.log.DebugContext(context.Background(), "Failed to get connection pool for first segment fetching", "error", err)
 		return cache, notFoundIDs, nil
@@ -531,7 +531,7 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 			defer cancel()
 
 			// Get body for the first segment (v4 returns decoded bytes + YEnc metadata)
-			result, err := cp.BodyPriority(ctx, firstSegment.ID)
+			result, err := cp.Body(ctx, firstSegment.ID)
 			if err != nil {
 				notFound := stderrors.Is(err, nntppool.ErrArticleNotFound)
 				return fetchResult{
@@ -690,7 +690,7 @@ func (p *Parser) complete16KBReads(ctx context.Context, cache []*FirstSegmentDat
 	if p.poolManager == nil || !p.poolManager.HasPool() {
 		return
 	}
-	cp, err := p.poolManager.GetPool()
+	cp, err := p.poolManager.GetImportPool()
 	if err != nil {
 		return
 	}
@@ -731,7 +731,7 @@ func (p *Parser) complete16KBReads(ctx context.Context, cache []*FirstSegmentDat
 				g.Go(func() error {
 					segCtx, segCancel := context.WithTimeout(gctx, time.Second*30)
 					defer segCancel()
-					sr, err := cp.BodyPriority(segCtx, seg.ID)
+					sr, err := cp.Body(segCtx, seg.ID)
 					if err != nil {
 						return nil // best-effort
 					}
@@ -769,7 +769,7 @@ func (p *Parser) fetchYencHeaders(ctx context.Context, segment nzbparser.NzbSegm
 		return nntppool.YEncMeta{}, errors.NewNonRetryableError("no pool manager available", nil)
 	}
 
-	cp, err := p.poolManager.GetPool()
+	cp, err := p.poolManager.GetImportPool()
 	if err != nil {
 		return nntppool.YEncMeta{}, errors.NewNonRetryableError("no connection pool available", err)
 	}

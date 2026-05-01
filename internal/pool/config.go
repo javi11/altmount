@@ -13,6 +13,7 @@ func RegisterConfigHandlers(ctx context.Context, configManager *config.Manager, 
 		slog.InfoContext(ctx, "Configuration updated")
 
 		handleProviderChanges(ctx, oldConfig, newConfig, poolManager)
+		handleImportProviderChanges(ctx, oldConfig, newConfig, poolManager)
 
 		// Log changes that still require restart
 		if oldConfig.Metadata.RootPath != newConfig.Metadata.RootPath {
@@ -55,6 +56,31 @@ func handleProviderChanges(ctx context.Context, oldConfig, newConfig *config.Con
 		case config.ProviderModified:
 			applyProviderModified(ctx, change, poolManager)
 		}
+	}
+}
+
+// handleImportProviderChanges recreates the import pool whenever the enabled
+// import providers differ from the previous configuration.
+func handleImportProviderChanges(ctx context.Context, oldConfig, newConfig *config.Config, poolManager Manager) {
+	oldImport := oldConfig.ToImportNNTPProviders()
+	newImport := newConfig.ToImportNNTPProviders()
+
+	if len(oldImport) == len(newImport) {
+		same := true
+		for i := range oldImport {
+			if oldImport[i].Host != newImport[i].Host {
+				same = false
+				break
+			}
+		}
+		if same {
+			return
+		}
+	}
+
+	slog.InfoContext(ctx, "Import NNTP providers changed - recreating import pool")
+	if err := poolManager.SetImportProviders(newImport); err != nil {
+		slog.ErrorContext(ctx, "Failed to recreate import NNTP pool", "err", err)
 	}
 }
 
