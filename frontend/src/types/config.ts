@@ -309,6 +309,7 @@ export interface ConfigUpdateRequest {
 	arrs?: ArrsConfig;
 	stremio?: Partial<StremioConfig>;
 	providers?: ProviderUpdateRequest[];
+	import_providers?: ProviderUpdateRequest[];
 	nzblnk?: NzblnkConfig;
 	mount_path?: string;
 	mount_type?: MountType;
