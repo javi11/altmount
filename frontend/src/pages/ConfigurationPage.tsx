@@ -118,8 +118,9 @@ export function ConfigurationPage() {
 	// Get active section from URL parameter, default to webdav
 	const activeSection = (() => {
 		if (!section) return "webdav";
-		// Redirect legacy rclone/fuse paths to mount
+		// Redirect legacy paths
 		if (section === "rclone" || section === "fuse") return "mount" as ConfigSection;
+		if (section === "import_providers") return "providers" as ConfigSection;
 		const validSections = Object.keys(CONFIG_SECTIONS) as (ConfigSection | "system")[];
 		return validSections.includes(section as ConfigSection | "system")
 			? (section as ConfigSection | "system")
@@ -132,6 +133,8 @@ export function ConfigurationPage() {
 			navigate("/config/webdav", { replace: true });
 		} else if (section === "rclone" || section === "fuse") {
 			navigate("/config/mount", { replace: true });
+		} else if (section === "import_providers") {
+			navigate("/config/providers", { replace: true });
 		}
 	}, [section, navigate]);
 
@@ -524,19 +527,24 @@ export function ConfigurationPage() {
 									/>
 								)}
 								{activeSection === "providers" && (
-									<ProvidersConfigSection
-										config={config}
-										onUpdate={handleConfigUpdate}
-										isUpdating={updateConfigSection.isPending}
-									/>
-								)}
-								{activeSection === "import_providers" && (
-									<ProvidersConfigSection
-										config={config}
-										onUpdate={handleConfigUpdate}
-										isUpdating={updateConfigSection.isPending}
-										variant="import_providers"
-									/>
+									<div className="space-y-10">
+										<ProvidersConfigSection
+											config={config}
+											onUpdate={handleConfigUpdate}
+											isUpdating={updateConfigSection.isPending}
+											title="Download Providers"
+											description="Primary pool used for all downloads. Drag cards to adjust priority order."
+										/>
+										<div className="divider" />
+										<ProvidersConfigSection
+											config={config}
+											onUpdate={handleConfigUpdate}
+											isUpdating={updateConfigSection.isPending}
+											variant="import_providers"
+											title="Import & Health-Check Providers"
+											description="Secondary pool used exclusively for imports and health checks. Drag cards to adjust priority order."
+										/>
+									</div>
 								)}
 								{activeSection === "mount" && (
 									<MountConfigSection
@@ -588,7 +596,6 @@ export function ConfigurationPage() {
 									"streaming",
 									"system",
 									"providers",
-									"import_providers",
 									"mount",
 									"sabnzbd",
 									"arrs",

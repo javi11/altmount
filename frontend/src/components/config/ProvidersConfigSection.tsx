@@ -25,6 +25,8 @@ interface ProvidersConfigSectionProps {
 	onUpdate?: (section: string, data: ProviderConfig[]) => Promise<void>;
 	isUpdating?: boolean;
 	variant?: "providers" | "import_providers";
+	title?: string;
+	description?: string;
 }
 
 export function ProvidersConfigSection({
@@ -32,6 +34,8 @@ export function ProvidersConfigSection({
 	onUpdate,
 	isUpdating = false,
 	variant = "providers",
+	title,
+	description,
 }: ProvidersConfigSectionProps) {
 	const [isModalOpen, setIsModalOpen] = useState(false);
 	const [editingProvider, setEditingProvider] = useState<ProviderConfig | null>(null);
@@ -294,8 +298,12 @@ export function ProvidersConfigSection({
 			{/* Header */}
 			<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 				<div>
-					<h3 className="font-bold text-base-content text-xl tracking-tight">NNTP Providers</h3>
-					<p className="mt-1 text-base-content/50 text-xs">Drag cards to adjust priority order.</p>
+					<h3 className="font-bold text-base-content text-xl tracking-tight">
+						{title ?? "NNTP Providers"}
+					</h3>
+					<p className="mt-1 text-base-content/50 text-xs">
+						{description ?? "Drag cards to adjust priority order."}
+					</p>
 				</div>
 				<button
 					type="button"
@@ -313,7 +321,9 @@ export function ProvidersConfigSection({
 					<Wifi className="mx-auto mb-4 h-12 w-12 text-base-content/20" />
 					<h4 className="font-bold text-base-content/80 text-lg">No Providers Configured</h4>
 					<p className="mb-6 text-base-content/60 text-sm">
-						Add a Usenet provider to enable downloading.
+						{variant === "import_providers"
+							? "Add a provider to use for imports and health checks."
+							: "Add a Usenet provider to enable downloading."}
 					</p>
 					<button type="button" className="btn btn-primary px-8" onClick={handleCreate}>
 						Add First Provider
