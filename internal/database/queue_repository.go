@@ -813,6 +813,18 @@ func (r *QueueRepository) ResetStaleItems(ctx context.Context) error {
 	return nil
 }
 
+// DeleteImportHistoryOlderThan removes rows from import_history with completed_at older than cutoff.
+// Returns the number of rows deleted. import_daily_stats is intentionally NOT modified — it stores
+// pre-aggregated stats meant to outlive raw history rows.
+func (r *QueueRepository) DeleteImportHistoryOlderThan(ctx context.Context, cutoff time.Time) (int64, error) {
+	res, err := r.db.ExecContext(ctx, `DELETE FROM import_history WHERE completed_at < ?`, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete old import history: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
 // ClearImportHistory deletes all records from the import_history and import_daily_stats tables
 func (r *QueueRepository) ClearImportHistory(ctx context.Context) error {
 	// Clear history records

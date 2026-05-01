@@ -227,7 +227,7 @@ export interface ImportConfig {
 	allow_nested_rar_extraction?: boolean;
 	rename_to_nzb_name?: boolean;
 	filter_sample_files?: boolean;
-	failed_item_retention_hours?: number | null;
+	import_retention_hours?: number | null;
 	delete_completed_nzb?: boolean;
 }
 

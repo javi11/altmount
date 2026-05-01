@@ -536,23 +536,23 @@ export function ImportConfigSection({
 					</div>
 
 					<fieldset className="fieldset min-w-0">
-						<legend className="fieldset-legend font-semibold">Failed Item Retention (Hours)</legend>
+						<legend className="fieldset-legend font-semibold">Import Retention (Hours)</legend>
 						<input
 							type="number"
 							className="input input-bordered w-full min-w-0 max-w-full bg-base-100 font-mono text-sm"
-							value={formData.failed_item_retention_hours ?? 0}
+							value={formData.import_retention_hours ?? 0}
 							readOnly={isReadOnly}
 							min={0}
 							onChange={(e) =>
 								handleInputChange(
-									"failed_item_retention_hours",
+									"import_retention_hours",
 									Number.parseInt(e.target.value, 10) || 0,
 								)
 							}
 						/>
 						<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/70 text-xs">
-							Auto-remove failed queue items and their NZB files after this many hours. Set to 0 to
-							disable.
+							Auto-remove failed queue items (and their NZB files) and old import history rows after
+							this many hours. Set to 0 to disable.
 						</p>
 					</fieldset>
 				</div>

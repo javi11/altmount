@@ -274,7 +274,9 @@ type ImportConfig struct {
 	ExpandBlurayIso                *bool          `yaml:"expand_bluray_iso" mapstructure:"expand_bluray_iso" json:"expand_bluray_iso,omitempty"`
 	RenameToNzbName                *bool          `yaml:"rename_to_nzb_name" mapstructure:"rename_to_nzb_name" json:"rename_to_nzb_name,omitempty"`
 	FilterSampleFiles              *bool          `yaml:"filter_sample_files" mapstructure:"filter_sample_files" json:"filter_sample_files,omitempty"`
-	FailedItemRetentionHours       *int           `yaml:"failed_item_retention_hours" mapstructure:"failed_item_retention_hours" json:"failed_item_retention_hours,omitempty"`
+	// ImportRetentionHours controls how long failed import_queue items AND import_history
+	// rows are kept before being auto-deleted. <=0 (or nil) disables both cleanups.
+	ImportRetentionHours           *int           `yaml:"import_retention_hours" mapstructure:"import_retention_hours" json:"import_retention_hours,omitempty"`
 	DeleteCompletedNzb             *bool          `yaml:"delete_completed_nzb" mapstructure:"delete_completed_nzb" json:"delete_completed_nzb,omitempty"`
 }
 
@@ -1244,7 +1246,7 @@ func DefaultConfig(configDir ...string) *Config {
 	stremioEnabled := false    // Stremio endpoint disabled by default
 	prowlarrEnabled := false   // Prowlarr integration disabled by default
 	watchIntervalSeconds := 10        // Default watch interval
-	failedItemRetentionHours := 24    // Default: auto-remove failed items after 24 hours
+	importRetentionHours := 24        // Default: auto-remove failed items + import history after 24 hours
 	cleanupAutomaticImportFailure := false
 	metadataBackupEnabled := false
 	failureMaskingEnabled := true
@@ -1380,7 +1382,7 @@ func DefaultConfig(configDir ...string) *Config {
 			ImportDir:               nil,                // No default import directory
 			WatchDir:                nil,
 			WatchIntervalSeconds:    &watchIntervalSeconds,
-			FailedItemRetentionHours: &failedItemRetentionHours,
+			ImportRetentionHours:    &importRetentionHours,
 		},
 		Log: LogConfig{
 			File:       logPath, // Default log file path

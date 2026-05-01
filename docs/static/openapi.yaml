@@ -4492,10 +4492,10 @@ components:
           type: array
         expand_bluray_iso:
           type: boolean
-        failed_item_retention_hours:
-          type: integer
         import_dir:
           type: string
+        import_retention_hours:
+          type: integer
         import_strategy:
           $ref: "#/components/schemas/config.ImportStrategy"
         max_download_prefetch:
