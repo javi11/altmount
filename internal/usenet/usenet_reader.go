@@ -1,7 +1,6 @@
 package usenet
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -350,9 +349,8 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 			attemptCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 			defer cancel()
 
-			buf := bytes.NewBuffer(make([]byte, 0, seg.SegmentSize))
 			fetchStart := time.Now()
-			result, err := cp.BodyStream(attemptCtx, seg.Id, buf)
+			result, err := cp.BodyPriority(attemptCtx, seg.Id)
 			fetchDur := time.Since(fetchStart)
 			if err != nil {
 				if errors.Is(err, context.DeadlineExceeded) {
@@ -377,7 +375,7 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 				return err
 			}
 
-			resultBytes = buf.Bytes()
+			resultBytes = result.Bytes
 			b.metricsTracker.IncArticlesDownloaded()
 			b.metricsTracker.UpdateDownloadProgress(b.streamID, int64(len(resultBytes)))
 
