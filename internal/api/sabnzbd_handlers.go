@@ -746,17 +746,35 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 		}
 	}
 
+	// When *arr asks for specific nzo_ids, look them up directly so the response
+	// is independent of the bulk retention window. This is the path Sonarr/Radarr
+	// use to confirm a known download by id, and it must succeed regardless of
+	// how old the entry is — see issue #543.
+	if len(nzoIDs) > 0 {
+		return s.respondSABnzbdHistoryByIDs(c, ctx, nzoIDs, categoryFilter, start, limit)
+	}
+
+	// Determine how far back to look in persistent history. Default to 7 days
+	// (10080 minutes) and allow operators to widen further via config. Clients
+	// rebuilding large libraries with multiple *arrs can otherwise outrun the
+	// previous 24h window and lose visibility of completed imports.
+	historyMinutes := 10080
+	if s.configManager != nil {
+		if v := s.configManager.GetConfig().SABnzbd.HistoryRetentionMinutes; v > 0 {
+			historyMinutes = v
+		}
+	}
+
 	// Fetch items from active queue
 	// We use a larger set here to ensure we get everything for deduplication and combined history
 	completedStatus := database.QueueStatusCompleted
-	completedQueueItems, err := s.queueRepo.ListQueueItems(ctx, &completedStatus, "", categoryFilter, 500, 0, "updated_at", "desc")
+	completedQueueItems, err := s.queueRepo.ListQueueItems(ctx, &completedStatus, "", categoryFilter, 2000, 0, "updated_at", "desc")
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to get completed items from queue")
 	}
 
 	// Get recent items from persistent history (buffer for Sonarr)
-	// We look back 24 hours to be safe
-	recentHistory, err := s.queueRepo.ListRecentImportHistory(ctx, 1440, categoryFilter)
+	recentHistory, err := s.queueRepo.ListRecentImportHistory(ctx, historyMinutes, categoryFilter)
 	if err != nil {
 		recentHistory = []*database.ImportHistory{} // Fallback
 	}
@@ -889,6 +907,128 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 	}
 
 	return s.writeSABnzbdResponseFiber(c, response)
+}
+
+// respondSABnzbdHistoryByIDs returns a SABnzbd history response containing only
+// the rows that match the supplied nzo_ids. It looks each id up directly in the
+// queue and persistent history tables, bypassing the bulk retention window so
+// *arr clients can always reconcile a download they previously saw — even days
+// or weeks later. See issue #543.
+func (s *Server) respondSABnzbdHistoryByIDs(
+	c *fiber.Ctx,
+	ctx context.Context,
+	nzoIDs map[string]bool,
+	categoryFilter string,
+	start, limit int,
+) error {
+	finalItems := make([]*database.ImportQueueItem, 0, len(nzoIDs))
+	seen := make(map[int64]bool, len(nzoIDs))
+
+	categoryMatches := func(cat *string) bool {
+		if categoryFilter == "" {
+			return true
+		}
+		if cat == nil {
+			return false
+		}
+		return strings.EqualFold(*cat, categoryFilter)
+	}
+
+	for raw := range nzoIDs {
+		id := strings.TrimSpace(raw)
+		if id == "" {
+			continue
+		}
+
+		// 1. Numeric id → queue first, then history.nzb_id.
+		if numericID, err := strconv.ParseInt(id, 10, 64); err == nil {
+			if item, err := s.queueRepo.GetQueueItem(ctx, numericID); err == nil && item != nil {
+				if !item.SkipArrNotification && categoryMatches(item.Category) && !seen[item.ID] {
+					finalItems = append(finalItems, item)
+					seen[item.ID] = true
+				}
+				continue
+			}
+			if h, err := s.queueRepo.GetImportHistoryByNzbID(ctx, numericID); err == nil && h != nil {
+				if categoryMatches(h.Category) && !seen[h.ID] {
+					finalItems = append(finalItems, importHistoryToQueueItem(h))
+					seen[h.ID] = true
+				}
+				continue
+			}
+		}
+
+		// 2. String id → queue.download_id, then history.download_id.
+		if item, err := s.queueRepo.GetQueueItemByDownloadID(ctx, id); err == nil && item != nil {
+			if !item.SkipArrNotification && categoryMatches(item.Category) && !seen[item.ID] {
+				finalItems = append(finalItems, item)
+				seen[item.ID] = true
+			}
+			continue
+		}
+		if h, err := s.queueRepo.GetImportHistoryByDownloadID(ctx, id); err == nil && h != nil {
+			if categoryMatches(h.Category) && !seen[h.ID] {
+				finalItems = append(finalItems, importHistoryToQueueItem(h))
+				seen[h.ID] = true
+			}
+		}
+	}
+
+	totalAvailableCount := len(finalItems)
+
+	if start < len(finalItems) {
+		finalItems = finalItems[start:]
+	} else {
+		finalItems = []*database.ImportQueueItem{}
+	}
+	if limit > 0 && len(finalItems) > limit {
+		finalItems = finalItems[:limit]
+	}
+
+	slots := make([]SABnzbdHistorySlot, 0, len(finalItems))
+	var totalBytes int64
+	itemBasePath := s.calculateItemBasePath()
+	for i, item := range finalItems {
+		finalPath := s.calculateHistoryStoragePath(item, itemBasePath)
+		slot := ToSABnzbdHistorySlot(item, start+i, finalPath)
+		slots = append(slots, slot)
+		totalBytes += slot.Bytes
+	}
+
+	response := SABnzbdCompleteHistoryResponse{
+		History: SABnzbdHistoryObject{
+			Slots:     slots,
+			TotalSize: formatHumanSize(totalBytes),
+			MonthSize: "0 B",
+			WeekSize:  "0 B",
+			Version:   "4.5.0",
+			DaySize:   "0 B",
+			Noofslots: totalAvailableCount,
+		},
+	}
+	return s.writeSABnzbdResponseFiber(c, response)
+}
+
+// importHistoryToQueueItem adapts a persistent ImportHistory row into the
+// ImportQueueItem shape used by ToSABnzbdHistorySlot.
+func importHistoryToQueueItem(h *database.ImportHistory) *database.ImportQueueItem {
+	id := h.ID
+	if h.NzbID != nil {
+		id = *h.NzbID
+	}
+	completedAt := h.CompletedAt
+	fileSize := h.FileSize
+	virtualPath := h.VirtualPath
+	return &database.ImportQueueItem{
+		ID:          id,
+		DownloadID:  h.DownloadID,
+		NzbPath:     h.NzbName,
+		Status:      database.QueueStatusCompleted,
+		FileSize:    &fileSize,
+		CompletedAt: &completedAt,
+		Category:    h.Category,
+		StoragePath: &virtualPath,
+	}
 }
 
 // handleSABnzbdHistoryDelete handles deleting items from history

@@ -372,6 +372,11 @@ type SABnzbdConfig struct {
 	CompleteDir           string            `yaml:"complete_dir" mapstructure:"complete_dir" json:"complete_dir"`
 	DownloadClientBaseURL string            `yaml:"download_client_base_url" mapstructure:"download_client_base_url" json:"download_client_base_url,omitempty"`
 	Categories            []SABnzbdCategory `yaml:"categories" mapstructure:"categories" json:"categories"`
+	// HistoryRetentionMinutes controls how far back the SABnzbd-emulating history
+	// endpoint looks into import_history when *arr clients poll without a specific
+	// nzo_id filter. Older entries are still returned when *arr asks for them by
+	// nzo_id. Defaults to 10080 (7 days).
+	HistoryRetentionMinutes int `yaml:"history_retention_minutes" mapstructure:"history_retention_minutes" json:"history_retention_minutes,omitempty"`
 	// Fallback configuration for sending failed imports to external SABnzbd
 	FallbackHost   string `yaml:"fallback_host" mapstructure:"fallback_host" json:"fallback_host"`
 	FallbackAPIKey string `yaml:"fallback_api_key" mapstructure:"fallback_api_key" json:"fallback_api_key"` // Masked in API responses
@@ -663,6 +668,11 @@ func (c *Config) Validate() error {
 		c.Fuse.Enabled = &falseVal
 	default:
 		return fmt.Errorf("invalid mount_type: %s (must be none, rclone, fuse, or rclone_external)", c.MountType)
+	}
+
+	// Apply default history retention for older configs that pre-date the field.
+	if c.SABnzbd.HistoryRetentionMinutes <= 0 {
+		c.SABnzbd.HistoryRetentionMinutes = 10080
 	}
 
 	// Validate SABnzbd configuration
@@ -1428,8 +1438,9 @@ func DefaultConfig(configDir ...string) *Config {
 					Priority: 4,
 				},
 			},
-			FallbackHost:   "",
-			FallbackAPIKey: "",
+			FallbackHost:            "",
+			FallbackAPIKey:          "",
+			HistoryRetentionMinutes: 10080,
 		},
 		Providers: []ProviderConfig{},
 		Nzblnk: NzblnkConfig{

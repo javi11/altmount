@@ -1019,6 +1019,30 @@ func (r *Repository) GetImportHistoryByDownloadID(ctx context.Context, downloadI
 	return &h, nil
 }
 
+// GetImportHistoryByNzbID retrieves an import history item by its original NZB ID
+// (the integer ID of the queue row that produced this history entry). Returns
+// (nil, nil) when no matching row exists.
+func (r *Repository) GetImportHistoryByNzbID(ctx context.Context, nzbID int64) (*ImportHistory, error) {
+	query := `
+		SELECT h.id, h.download_id, h.nzb_id, h.nzb_name, h.file_name, h.file_size, h.virtual_path, f.library_path, h.category, h.completed_at
+		FROM import_history h
+		LEFT JOIN file_health f ON TRIM(h.virtual_path, '/') = TRIM(f.file_path, '/')
+		WHERE h.nzb_id = ?
+		LIMIT 1
+	`
+
+	var h ImportHistory
+	err := r.db.QueryRowContext(ctx, query, nzbID).Scan(&h.ID, &h.DownloadID, &h.NzbID, &h.NzbName, &h.FileName, &h.FileSize, &h.VirtualPath, &h.LibraryPath, &h.Category, &h.CompletedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get import history by nzb_id: %w", err)
+	}
+
+	return &h, nil
+}
+
 // GetImportHistoryByPath retrieves an import history item by its virtual path
 func (r *Repository) GetImportHistoryByPath(ctx context.Context, virtualPath string) (*ImportHistory, error) {
 	query := `
