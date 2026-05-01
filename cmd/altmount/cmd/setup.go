@@ -144,6 +144,16 @@ func setupNNTPPool(ctx context.Context, cfg *config.Config, poolManager pool.Man
 	} else {
 		slog.InfoContext(ctx, "Starting server without NNTP providers - configure via API to enable downloads")
 	}
+
+	if len(cfg.ImportProviders) > 0 {
+		importProviders := cfg.ToImportNNTPProviders()
+		if err := poolManager.SetImportProviders(importProviders); err != nil {
+			slog.ErrorContext(ctx, "failed to create import NNTP pool", "err", err)
+			return err
+		}
+		slog.InfoContext(ctx, "Import NNTP connection pool initialized", "provider_count", len(cfg.ImportProviders))
+	}
+
 	return nil
 }
 

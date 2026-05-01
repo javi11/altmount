@@ -342,6 +342,13 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/providers/:id/reset-quota", s.handleResetProviderQuota)
 	api.Delete("/providers/:id", s.handleDeleteProvider)
 
+	// Import provider management endpoints (secondary pool for health checks and imports)
+	api.Post("/import-providers/:id/speedtest", s.handleTestImportProviderSpeed)
+	api.Post("/import-providers", s.handleCreateImportProvider)
+	api.Put("/import-providers/reorder", s.handleReorderImportProviders)
+	api.Put("/import-providers/:id", s.handleUpdateImportProvider)
+	api.Delete("/import-providers/:id", s.handleDeleteImportProvider)
+
 	// Configuration-based instance endpoints
 	api.Get("/arrs/instances", s.handleListArrsInstances)
 	api.Get("/arrs/instances/:type/:name", s.handleGetArrsInstance)

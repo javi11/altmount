@@ -16,6 +16,15 @@ type Manager interface {
 	// GetPool returns the current connection pool or error if not available
 	GetPool() (*nntppool.Client, error)
 
+	// GetImportPool returns the import connection pool (for imports and health checks).
+	// Falls back to the main pool if no import providers are configured.
+	GetImportPool() (*nntppool.Client, error)
+
+	// SetImportProviders creates/replaces the import pool with the given providers.
+	// Passing an empty slice clears the import pool and makes GetImportPool fall back
+	// to the main pool.
+	SetImportProviders(providers []nntppool.Provider) error
+
 	// SetProviders creates/recreates the pool with new providers
 	SetProviders(providers []nntppool.Provider) error
 
@@ -74,6 +83,7 @@ type StatsRepository interface {
 type manager struct {
 	mu               sync.RWMutex
 	pool             *nntppool.Client
+	importPool       *nntppool.Client // optional secondary pool for imports/health checks
 	metricsTracker   *MetricsTracker
 	repo             StatsRepository
 	ctx              context.Context
@@ -149,6 +159,49 @@ func (m *manager) GetPool() (*nntppool.Client, error) {
 	}
 
 	return m.pool, nil
+}
+
+// GetImportPool returns the import pool if configured, else falls back to the main pool.
+func (m *manager) GetImportPool() (*nntppool.Client, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if m.importPool != nil {
+		return m.importPool, nil
+	}
+
+	if m.pool == nil {
+		return nil, fmt.Errorf("NNTP connection pool not available - no providers configured")
+	}
+	return m.pool, nil
+}
+
+// SetImportProviders creates/replaces the secondary NNTP pool used for imports
+// and health checks. An empty slice clears the pool so GetImportPool falls back
+// to the main pool.
+func (m *manager) SetImportProviders(providers []nntppool.Provider) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.importPool != nil {
+		m.importPool.Close()
+		m.importPool = nil
+	}
+
+	if len(providers) == 0 {
+		m.logger.InfoContext(m.ctx, "No import NNTP providers configured - imports/health will use main pool")
+		return nil
+	}
+
+	m.logger.InfoContext(m.ctx, "Creating import NNTP connection pool", "provider_count", len(providers))
+	p, err := nntppool.NewClient(m.ctx, providers)
+	if err != nil {
+		return fmt.Errorf("failed to create import NNTP pool: %w", err)
+	}
+
+	m.importPool = p
+	m.logger.InfoContext(m.ctx, "Import NNTP connection pool created successfully")
+	return nil
 }
 
 // SetProviders creates/recreates the pool with new providers

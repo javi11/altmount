@@ -14,6 +14,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { useConfirm } from "../../contexts/ModalContext";
 import { useToast } from "../../contexts/ToastContext";
+import { useImportProviders } from "../../hooks/useImportProviders";
 import { useProviders } from "../../hooks/useProviders";
 import type { ConfigResponse, ProviderConfig } from "../../types/config";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
@@ -23,12 +24,14 @@ interface ProvidersConfigSectionProps {
 	config: ConfigResponse;
 	onUpdate?: (section: string, data: ProviderConfig[]) => Promise<void>;
 	isUpdating?: boolean;
+	variant?: "providers" | "import_providers";
 }
 
 export function ProvidersConfigSection({
 	config,
 	onUpdate,
 	isUpdating = false,
+	variant = "providers",
 }: ProvidersConfigSectionProps) {
 	const [isModalOpen, setIsModalOpen] = useState(false);
 	const [editingProvider, setEditingProvider] = useState<ProviderConfig | null>(null);
@@ -42,19 +45,29 @@ export function ProvidersConfigSection({
 	const listRef = useRef<HTMLDivElement>(null);
 	const [testingSpeedProviderId, setTestingSpeedProviderId] = useState<string | null>(null);
 
-	const [formData, setFormData] = useState<ProviderConfig[]>(config.providers);
+	const configProviders =
+		variant === "import_providers" ? config.import_providers : config.providers;
+	const [formData, setFormData] = useState<ProviderConfig[]>(configProviders ?? []);
 	const [hasChanges, setHasChanges] = useState(false);
 
-	const { deleteProvider, testProviderSpeed, resetProviderQuota } = useProviders();
+	const regularHooks = useProviders();
+	const importHooks = useImportProviders();
+	const { deleteProvider, testProviderSpeed, resetProviderQuota } =
+		variant === "import_providers"
+			? {
+					...importHooks,
+					resetProviderQuota: undefined as typeof regularHooks.resetProviderQuota | undefined,
+				}
+			: regularHooks;
 	const [resettingQuotaId, setResettingQuotaId] = useState<string | null>(null);
 	const { confirmDelete } = useConfirm();
 	const { showToast } = useToast();
 
 	// Sync with config when it changes
 	useEffect(() => {
-		setFormData(config.providers);
+		setFormData(configProviders ?? []);
 		setHasChanges(false);
-	}, [config.providers]);
+	}, [configProviders]);
 
 	// Attach non-passive touchmove on the list container so we can call
 	// preventDefault() and prevent page scroll while a touch-drag is active.
@@ -98,7 +111,7 @@ export function ProvidersConfigSection({
 				const [moved] = reordered.splice(draggedIndex, 1);
 				reordered.splice(targetIndex, 0, moved);
 				setFormData(reordered);
-				setHasChanges(JSON.stringify(reordered) !== JSON.stringify(config.providers));
+				setHasChanges(JSON.stringify(reordered) !== JSON.stringify(configProviders));
 			}
 		}
 
@@ -149,6 +162,7 @@ export function ProvidersConfigSection({
 	};
 
 	const handleResetQuota = async (provider: ProviderConfig) => {
+		if (!resetProviderQuota) return;
 		setResettingQuotaId(provider.id);
 		try {
 			await resetProviderQuota.mutateAsync(provider.id);
@@ -204,13 +218,13 @@ export function ProvidersConfigSection({
 			return p;
 		});
 		setFormData(newFormData);
-		setHasChanges(JSON.stringify(newFormData) !== JSON.stringify(config.providers));
+		setHasChanges(JSON.stringify(newFormData) !== JSON.stringify(configProviders));
 	};
 
 	const handleSave = async () => {
 		if (onUpdate && hasChanges) {
 			try {
-				await onUpdate("providers", formData);
+				await onUpdate(variant, formData);
 				setHasChanges(false);
 				showToast({
 					type: "success",
@@ -267,7 +281,7 @@ export function ProvidersConfigSection({
 		const [draggedProviderObj] = reorderedProviders.splice(draggedIndex, 1);
 		reorderedProviders.splice(targetIndex, 0, draggedProviderObj);
 		setFormData(reorderedProviders);
-		setHasChanges(JSON.stringify(reorderedProviders) !== JSON.stringify(config.providers));
+		setHasChanges(JSON.stringify(reorderedProviders) !== JSON.stringify(configProviders));
 	};
 
 	const handleDragEnd = () => {
@@ -560,6 +574,7 @@ export function ProvidersConfigSection({
 					provider={editingProvider}
 					onSuccess={handleModalSuccess}
 					onCancel={() => setIsModalOpen(false)}
+					variant={variant}
 				/>
 			)}
 		</div>

@@ -244,7 +244,7 @@ export function ActivityHub() {
 														className={`h-8 w-8 shrink-0 ${progress > 0 ? "text-secondary" : "text-base-content/20"}`}
 													/>
 													{progress > 0 && (
-														<span className="absolute -top-1 -right-1 flex h-3 w-3">
+														<span className="-top-1 -right-1 absolute flex h-3 w-3">
 															<span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-secondary opacity-75" />
 															<span className="relative inline-flex h-3 w-3 rounded-full bg-secondary" />
 														</span>

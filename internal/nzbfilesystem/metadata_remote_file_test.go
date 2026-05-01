@@ -388,6 +388,14 @@ func (m *mockPoolManager) ResetProviderQuota(_ context.Context, _ string) error 
 	return nil
 }
 
+func (m *mockPoolManager) GetImportPool() (*nntppool.Client, error) {
+	return nil, nil
+}
+
+func (m *mockPoolManager) SetImportProviders(_ []nntppool.Provider) error {
+	return nil
+}
+
 // TestSeekResetsOriginalRangeEnd tests that Seek properly resets originalRangeEnd
 // This is critical for video playback - without this fix, seeking causes stale range
 // information to be reused, breaking subsequent reads

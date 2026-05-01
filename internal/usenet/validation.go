@@ -63,7 +63,7 @@ func ValidateSegmentList(
 		return nil
 	}
 
-	usenetPool, err := poolManager.GetPool()
+	usenetPool, err := poolManager.GetImportPool()
 	if err != nil {
 		return fmt.Errorf("cannot validate segments: usenet connection pool unavailable: %w", err)
 	}
@@ -136,7 +136,7 @@ func ValidateSegmentAvailabilityDetailed(
 		return result, nil
 	}
 
-	usenetPool, err := poolManager.GetPool()
+	usenetPool, err := poolManager.GetImportPool()
 	if err != nil {
 		return result, fmt.Errorf("cannot validate segments: usenet connection pool unavailable: %w", err)
 	}
