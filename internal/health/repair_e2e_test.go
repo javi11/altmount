@@ -43,11 +43,6 @@ func (m *mockPoolManager) RemoveProvider(_ string) error                   { ret
 func (m *mockPoolManager) ResetProviderQuota(_ context.Context, _ string) error {
 	return nil
 }
-func (m *mockPoolManager) GetImportPool() (*nntppool.Client, error) {
-	return nil, errors.New("no import pool (test mock)")
-}
-func (m *mockPoolManager) SetImportProviders(_ []nntppool.Provider) error { return nil }
-
 // mockARRsService captures TriggerFileRescan calls and returns a configurable error.
 type mockARRsService struct {
 	mu        sync.Mutex

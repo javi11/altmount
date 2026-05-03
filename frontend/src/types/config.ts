@@ -21,7 +21,6 @@ export interface ConfigResponse {
 	arrs: ArrsConfig;
 	stremio: StremioConfig;
 	providers: ProviderConfig[];
-	import_providers: ProviderConfig[];
 	nzblnk: NzblnkConfig;
 	mount_path: string;
 	mount_type: MountType;
@@ -309,7 +308,6 @@ export interface ConfigUpdateRequest {
 	arrs?: ArrsConfig;
 	stremio?: Partial<StremioConfig>;
 	providers?: ProviderUpdateRequest[];
-	import_providers?: ProviderUpdateRequest[];
 	nzblnk?: NzblnkConfig;
 	mount_path?: string;
 	mount_type?: MountType;
@@ -490,7 +488,6 @@ export type ConfigSection =
 	| "health"
 	| "import"
 	| "providers"
-	| "import_providers"
 	| "mount"
 	| "rclone"
 	| "fuse"
@@ -886,12 +883,6 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 	providers: {
 		title: "NNTP Providers",
 		description: "Usenet provider configuration for downloads",
-		icon: "Radio",
-		canEdit: true,
-	},
-	import_providers: {
-		title: "Import Providers",
-		description: "Secondary NNTP providers dedicated to health checks and NZB imports",
 		icon: "Radio",
 		canEdit: true,
 	},

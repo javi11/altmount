@@ -1,7 +1,6 @@
 import { AlertTriangle, Check, Loader, Save, Wifi } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useToast } from "../../contexts/ToastContext";
-import { useImportProviders } from "../../hooks/useImportProviders";
 import { useProviders } from "../../hooks/useProviders";
 import type { ProviderConfig, ProviderFormData } from "../../types/config";
 
@@ -10,7 +9,6 @@ interface ProviderModalProps {
 	provider?: ProviderConfig | null;
 	onSuccess: () => void;
 	onCancel: () => void;
-	variant?: "providers" | "import_providers";
 }
 
 const BYTES_PER_GB = 1_073_741_824;
@@ -35,13 +33,7 @@ const defaultFormData: ProviderFormData = {
 	quota_period_hours: 0,
 };
 
-export function ProviderModal({
-	mode,
-	provider,
-	onSuccess,
-	onCancel,
-	variant = "providers",
-}: ProviderModalProps) {
+export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderModalProps) {
 	const [formData, setFormData] = useState<ProviderFormData>(defaultFormData);
 	const [isTestingConnection, setIsTestingConnection] = useState(false);
 	const [connectionTestResult, setConnectionTestResult] = useState<{
@@ -53,11 +45,7 @@ export function ProviderModal({
 	const [quotaEnabled, setQuotaEnabled] = useState(false);
 	const [quotaGbInput, setQuotaGbInput] = useState("");
 
-	const regularHooks = useProviders();
-	const importHooks = useImportProviders();
-	const { testProvider } = regularHooks;
-	const { createProvider, updateProvider } =
-		variant === "import_providers" ? importHooks : regularHooks;
+	const { testProvider, createProvider, updateProvider } = useProviders();
 	const { showToast } = useToast();
 
 	// Initialize form data when provider changes

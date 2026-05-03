@@ -53,7 +53,6 @@ type Config struct {
 	Fuse            FuseConfig         `yaml:"fuse" mapstructure:"fuse" json:"fuse"`
 	SegmentCache    SegmentCacheConfig `yaml:"segment_cache" mapstructure:"segment_cache" json:"segment_cache"`
 	Providers       []ProviderConfig   `yaml:"providers" mapstructure:"providers" json:"providers"`
-	ImportProviders []ProviderConfig   `yaml:"import_providers" mapstructure:"import_providers" json:"import_providers"`
 	Nzblnk          NzblnkConfig       `yaml:"nzblnk" mapstructure:"nzblnk" json:"nzblnk"`
 	MountPath       string             `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"`
 	MountType       MountType          `yaml:"mount_type" mapstructure:"mount_type" json:"mount_type"`
@@ -1008,17 +1007,6 @@ func (c *Config) ProvidersEqual(other *Config) bool {
 func (c *Config) ToNNTPProviders() []nntppool.Provider {
 	var providers []nntppool.Provider
 	for _, p := range c.Providers {
-		if p.Enabled != nil && *p.Enabled {
-			providers = append(providers, p.ToNNTPProvider())
-		}
-	}
-	return providers
-}
-
-// ToImportNNTPProviders converts ImportProviders to an nntppool.Provider slice (enabled only).
-func (c *Config) ToImportNNTPProviders() []nntppool.Provider {
-	var providers []nntppool.Provider
-	for _, p := range c.ImportProviders {
 		if p.Enabled != nil && *p.Enabled {
 			providers = append(providers, p.ToNNTPProvider())
 		}

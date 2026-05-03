@@ -35,7 +35,6 @@ type ConfigAPIResponse struct {
 	RClone          RCloneAPIResponse     `json:"rclone"`
 	SABnzbd         SABnzbdAPIResponse    `json:"sabnzbd"`
 	Providers       []ProviderAPIResponse `json:"providers"`
-	ImportProviders []ProviderAPIResponse `json:"import_providers"`
 	APIKey          string                `json:"api_key,omitempty"`      // User's API key for authentication
 	DownloadKey     string                `json:"download_key,omitempty"` // SHA256 of the API key, used for download/stream URLs
 	ProfilerEnabled bool                  `json:"profiler_enabled"`
@@ -201,33 +200,6 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 		}
 	}
 
-	// Convert import providers with password masking
-	importProviders := make([]ProviderAPIResponse, len(cfg.ImportProviders))
-	for i, p := range cfg.ImportProviders {
-		importProviders[i] = ProviderAPIResponse{
-			ID:                       p.ID,
-			Host:                     p.Host,
-			Port:                     p.Port,
-			Username:                 p.Username,
-			MaxConnections:           p.MaxConnections,
-			TLS:                      p.TLS,
-			InsecureTLS:              p.InsecureTLS,
-			ProxyURL:                 p.ProxyURL,
-			PasswordSet:              p.Password != "",
-			Enabled:                  p.Enabled != nil && *p.Enabled,
-			IsBackupProvider:         p.IsBackupProvider != nil && *p.IsBackupProvider,
-			InflightRequests:         p.InflightRequests,
-			LastRTTMs:                p.LastRTTMs,
-			LastSpeedTestMbps:        p.LastSpeedTestMbps,
-			LastSpeedTestTime:        p.LastSpeedTestTime,
-			SkipPing:                 p.SkipPing,
-			KeepaliveIntervalSeconds: p.KeepaliveIntervalSeconds,
-			KeepaliveCommand:         p.KeepaliveCommand,
-			QuotaBytes:               p.QuotaBytes,
-			QuotaPeriodHours:         p.QuotaPeriodHours,
-		}
-	}
-
 	// Create RClone response with all configuration fields
 	rcloneResp := RCloneAPIResponse{
 		PasswordSet:  cfg.RClone.Password != "",
@@ -315,7 +287,6 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 		RClone:          rcloneResp,
 		SABnzbd:         sabnzbdResp,
 		Providers:       providers,
-		ImportProviders: importProviders,
 		APIKey:          apiKey,
 		DownloadKey:     downloadKey,
 		ProfilerEnabled: cfg.ProfilerEnabled,

@@ -270,11 +270,6 @@ export function ConfigurationPage() {
 					section: "providers",
 					config: { providers: data as unknown as ProviderConfig[] },
 				});
-			} else if (section === "import_providers") {
-				await updateConfigSection.mutateAsync({
-					section: "import_providers",
-					config: { import_providers: data as unknown as ProviderConfig[] },
-				});
 			} else if (section === "nzblnk") {
 				await updateConfigSection.mutateAsync({
 					section: "nzblnk",
@@ -530,14 +525,6 @@ export function ConfigurationPage() {
 										isUpdating={updateConfigSection.isPending}
 									/>
 								)}
-								{activeSection === "import_providers" && (
-									<ProvidersConfigSection
-										config={config}
-										onUpdate={handleConfigUpdate}
-										isUpdating={updateConfigSection.isPending}
-										variant="import_providers"
-									/>
-								)}
 								{activeSection === "mount" && (
 									<MountConfigSection
 										config={config}
@@ -588,7 +575,6 @@ export function ConfigurationPage() {
 									"streaming",
 									"system",
 									"providers",
-									"import_providers",
 									"mount",
 									"sabnzbd",
 									"arrs",
