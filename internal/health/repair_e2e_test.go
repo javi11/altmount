@@ -43,6 +43,7 @@ func (m *mockPoolManager) RemoveProvider(_ string) error                   { ret
 func (m *mockPoolManager) ResetProviderQuota(_ context.Context, _ string) error {
 	return nil
 }
+func (m *mockPoolManager) SetProviderIDs(_ map[string]string) {}
 // mockARRsService captures TriggerFileRescan calls and returns a configurable error.
 type mockARRsService struct {
 	mu        sync.Mutex

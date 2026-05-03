@@ -1268,6 +1268,176 @@ func (r *Repository) GetProviderHourlyStats(ctx context.Context, hours int) (map
 	return results, rows.Err()
 }
 
+// GetProviderHistoricalStats retrieves aggregated data usage per provider over the given number of days.
+// The data is grouped by the specified interval.
+func (r *Repository) GetProviderHistoricalStats(ctx context.Context, days int, interval string) ([]*ProviderHistoricalStat, error) {
+	var cutoffExpr string
+	if r.dialect.IsPostgres() {
+		cutoffExpr = fmt.Sprintf("NOW() - INTERVAL '%d days'", days)
+	} else {
+		cutoffExpr = fmt.Sprintf("datetime('now', '-%d days')", days)
+	}
+
+	var timeCol string
+	switch interval {
+	case "yearly":
+		if r.dialect.IsPostgres() {
+			timeCol = "date_trunc('year', hour)"
+		} else {
+			timeCol = "strftime('%Y-01-01 00:00:00', hour)"
+		}
+	case "monthly":
+		if r.dialect.IsPostgres() {
+			timeCol = "date_trunc('month', hour)"
+		} else {
+			timeCol = "strftime('%Y-%m-01 00:00:00', hour)"
+		}
+	case "weekly":
+		if r.dialect.IsPostgres() {
+			timeCol = "date_trunc('week', hour)"
+		} else {
+			// SQLite: Adjust to start of the week (Sunday)
+			timeCol = "date(hour, 'weekday 0', '-6 days')"
+		}
+	default: // daily
+		if r.dialect.IsPostgres() {
+			timeCol = "date_trunc('day', hour)"
+		} else {
+			timeCol = "date(hour)"
+		}
+	}
+
+	query := fmt.Sprintf(`
+		SELECT %[1]s as ts, provider_id, SUM(bytes_downloaded)
+		FROM provider_hourly_stats
+		WHERE hour >= %[2]s
+		GROUP BY ts, provider_id
+		ORDER BY ts ASC
+	`, timeCol, cutoffExpr)
+
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query provider historical stats: %w", err)
+	}
+	defer rows.Close()
+
+	var stats []*ProviderHistoricalStat
+	for rows.Next() {
+		var stat ProviderHistoricalStat
+		var tsRaw interface{}
+		if err := rows.Scan(&tsRaw, &stat.ProviderID, &stat.BytesDownloaded); err != nil {
+			return nil, fmt.Errorf("failed to scan provider historical stat: %w", err)
+		}
+		
+		switch v := tsRaw.(type) {
+		case time.Time:
+			stat.Timestamp = v
+		case []byte:
+			t, err := time.Parse("2006-01-02 15:04:05", string(v))
+			if err == nil {
+				stat.Timestamp = t
+			} else if t, err := time.Parse("2006-01-02", string(v)); err == nil {
+				stat.Timestamp = t
+			} else {
+				t, _ = time.Parse(time.RFC3339, string(v))
+				stat.Timestamp = t
+			}
+		case string:
+			t, err := time.Parse("2006-01-02 15:04:05", v)
+			if err == nil {
+				stat.Timestamp = t
+			} else if t, err := time.Parse("2006-01-02", v); err == nil {
+				stat.Timestamp = t
+			} else {
+				t, _ = time.Parse(time.RFC3339, v)
+				stat.Timestamp = t
+			}
+		}
+
+		stats = append(stats, &stat)
+	}
+
+	return stats, rows.Err()
+}
+
+// RecordProviderSpeedTest saves a speed test result for a provider
+func (r *Repository) RecordProviderSpeedTest(ctx context.Context, providerID string, speedMbps float64) error {
+	query := `
+		INSERT INTO provider_speed_tests_history (provider_id, speed_mbps, created_at)
+		VALUES (?, ?, datetime('now'))
+	`
+	if r.dialect.IsPostgres() {
+		query = `
+			INSERT INTO provider_speed_tests_history (provider_id, speed_mbps, created_at)
+			VALUES ($1, $2, NOW())
+		`
+	}
+
+	_, err := r.db.ExecContext(ctx, query, providerID, speedMbps)
+	if err != nil {
+		return fmt.Errorf("failed to record provider speed test: %w", err)
+	}
+
+	return nil
+}
+
+// GetProviderSpeedTestHistory retrieves the speed test history over the given number of days
+func (r *Repository) GetProviderSpeedTestHistory(ctx context.Context, days int) ([]*ProviderSpeedTestStat, error) {
+	var cutoffExpr string
+	if r.dialect.IsPostgres() {
+		cutoffExpr = fmt.Sprintf("NOW() - INTERVAL '%d days'", days)
+	} else {
+		cutoffExpr = fmt.Sprintf("datetime('now', '-%d days')", days)
+	}
+
+	query := fmt.Sprintf(`
+		SELECT id, provider_id, speed_mbps, created_at
+		FROM provider_speed_tests_history
+		WHERE created_at >= %s
+		ORDER BY created_at ASC
+	`, cutoffExpr)
+
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query provider speed test history: %w", err)
+	}
+	defer rows.Close()
+
+	var stats []*ProviderSpeedTestStat
+	for rows.Next() {
+		var stat ProviderSpeedTestStat
+		var tsRaw interface{}
+		if err := rows.Scan(&stat.ID, &stat.ProviderID, &stat.SpeedMbps, &tsRaw); err != nil {
+			return nil, fmt.Errorf("failed to scan provider speed test history: %w", err)
+		}
+
+		switch v := tsRaw.(type) {
+		case time.Time:
+			stat.CreatedAt = v
+		case []byte:
+			t, err := time.Parse("2006-01-02 15:04:05", string(v))
+			if err == nil {
+				stat.CreatedAt = t
+			} else {
+				t, _ = time.Parse(time.RFC3339, string(v))
+				stat.CreatedAt = t
+			}
+		case string:
+			t, err := time.Parse("2006-01-02 15:04:05", v)
+			if err == nil {
+				stat.CreatedAt = t
+			} else {
+				t, _ = time.Parse(time.RFC3339, v)
+				stat.CreatedAt = t
+			}
+		}
+
+		stats = append(stats, &stat)
+	}
+
+	return stats, rows.Err()
+}
+
 // AddBytesDownloadedToHourlyStat increments the bytes_downloaded counter for the current hour
 func (r *Repository) AddBytesDownloadedToHourlyStat(ctx context.Context, bytes int64) error {
 	if bytes <= 0 {

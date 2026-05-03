@@ -970,6 +970,27 @@ type TestProviderResponse struct {
 	RTTMs        int64  `json:"rtt_ms,omitempty"`
 }
 
+type ProviderHistoricalStatResponse struct {
+	Timestamp       time.Time `json:"timestamp"`
+	ProviderID      string    `json:"provider_id"`
+	BytesDownloaded int64     `json:"bytes_downloaded"`
+}
+
+type ProviderHistoricalStatsResponse struct {
+	Stats []ProviderHistoricalStatResponse `json:"stats"`
+}
+
+type ProviderSpeedTestHistoryStat struct {
+	ID         int64     `json:"id"`
+	ProviderID string    `json:"provider_id"`
+	SpeedMbps  float64   `json:"speed_mbps"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+type ProviderSpeedTestHistoryResponse struct {
+	History []ProviderSpeedTestHistoryStat `json:"history"`
+}
+
 // Library Sync API Types
 
 // DryRunSyncResult represents the results of a library sync dry run

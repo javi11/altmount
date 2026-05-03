@@ -207,3 +207,19 @@ type ImportMigrationStats struct {
 	Total            int
 }
 
+// ProviderHistoricalStat represents aggregated data usage for a provider over a time period
+type ProviderHistoricalStat struct {
+	Timestamp       time.Time `db:"timestamp"`
+	ProviderID      string    `db:"provider_id"`
+	BytesDownloaded int64     `db:"bytes_downloaded"`
+}
+
+// ProviderSpeedTestStat represents a historical speed test result for a provider
+type ProviderSpeedTestStat struct {
+	ID         int64     `db:"id"`
+	ProviderID string    `db:"provider_id"`
+	SpeedMbps  float64   `db:"speed_mbps"`
+	CreatedAt  time.Time `db:"created_at"`
+}
+
+

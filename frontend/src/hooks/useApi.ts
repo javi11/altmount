@@ -330,6 +330,45 @@ export const usePoolMetrics = () => {
 	});
 };
 
+export const useProviderHistoricalStats = (days = 30, interval = "daily") => {
+	return useQuery({
+		queryKey: ["system", "provider-stats", days, interval],
+		queryFn: () => apiClient.getProviderHistoricalStats(days, interval),
+		refetchInterval: 60000, // Refetch every minute
+	});
+};
+
+export const useProviderSpeedHistory = (days = 30) => {
+	return useQuery({
+		queryKey: ["system", "provider-speed-history", days],
+		queryFn: () => apiClient.getProviderSpeedHistory(days),
+		refetchInterval: 60000, // Refetch every minute
+	});
+};
+
+export const useResetProviderQuota = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: (id: string) => apiClient.resetProviderQuota(id),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["system", "pool", "metrics"] });
+		},
+	});
+};
+
+export const useTestProviderSpeed = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: (id: string) => apiClient.testProviderSpeed(id),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["system", "provider-speed-history"] });
+			queryClient.invalidateQueries({ queryKey: ["system", "pool", "metrics"] });
+		},
+	});
+};
+
 export const useActiveStreams = () => {
 	return useQuery({
 		queryKey: ["files", "active-streams"],

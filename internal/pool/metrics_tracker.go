@@ -43,6 +43,7 @@ type MetricsSnapshot struct {
 	StartedAt                   time.Time                            `json:"started_at"`
 	ProviderMissingRates        map[string]float64                   `json:"provider_missing_rates"`
 	ProviderMissingWarning      map[string]bool                      `json:"provider_missing_warning"`
+	ProviderSpeeds              map[string]float64                   `json:"provider_speeds"`
 }
 
 // MetricsTracker tracks pool metrics over time and calculates rates
@@ -52,6 +53,7 @@ type MetricsTracker struct {
 	mu                sync.RWMutex
 	startedAt         time.Time
 	samples           []metricsample
+	providerIDMap     map[string]string
 
 	sampleInterval    time.Duration
 	retentionPeriod   time.Duration
@@ -349,6 +351,23 @@ func (mt *MetricsTracker) getSnapshot(now time.Time, stats nntppool.ClientStats)
 		}
 	}
 
+	// Compute per-provider speeds
+	providerSpeeds := make(map[string]float64)
+	var totalPoolAvgSpeed float64
+	for _, ps := range stats.Providers {
+		totalPoolAvgSpeed += ps.AvgSpeed
+	}
+
+	for _, ps := range stats.Providers {
+		// Calculate proportional speed using our accurate global speed distributed by pool's relative speeds
+		currentProviderSpeed := ps.AvgSpeed
+		if totalPoolAvgSpeed > 0 && downloadSpeed > 0 {
+			weight := ps.AvgSpeed / totalPoolAvgSpeed
+			currentProviderSpeed = downloadSpeed * weight
+		}
+		providerSpeeds[ps.Name] = currentProviderSpeed
+	}
+
 	return MetricsSnapshot{
 		BytesDownloaded:             bytesDownloaded + mt.initialBytesDownloaded,
 		BytesUploaded:               mt.initialBytesUploaded,
@@ -367,6 +386,7 @@ func (mt *MetricsTracker) getSnapshot(now time.Time, stats nntppool.ClientStats)
 		StartedAt:                   mt.startedAt,
 		ProviderMissingRates:        missingRates,
 		ProviderMissingWarning:      missingWarning,
+		ProviderSpeeds:              providerSpeeds,
 	}
 }
 
@@ -485,6 +505,25 @@ func (mt *MetricsTracker) saveStats(ctx context.Context) {
 				mt.logger.ErrorContext(ctx, "Failed to update provider hourly volume", "provider", providerID, "error", err)
 			}
 		}
+
+		// Record current speed to history for charting (MBps)
+		for poolName, speedBytes := range snapshot.ProviderSpeeds {
+			if speedBytes > 1024*1024 { // Only record if speed > 1MB/s to show active performance
+				speedMbps := speedBytes / (1024 * 1024)
+				
+				// Map pool name to config ID
+				id := poolName
+				mt.mu.RLock()
+				if mappedID, ok := mt.providerIDMap[poolName]; ok {
+					id = mappedID
+				}
+				mt.mu.RUnlock()
+
+				if err := mt.repo.RecordProviderSpeedTest(ctx, id, speedMbps); err != nil {
+					mt.logger.ErrorContext(ctx, "Failed to record provider speed history", "provider", id, "error", err)
+				}
+			}
+		}
 	}
 }
 
@@ -593,6 +632,13 @@ func (mt *MetricsTracker) ResetProviderErrors(ctx context.Context) error {
 
 	mt.logger.InfoContext(ctx, "Provider error counts reset")
 	return nil
+}
+
+// SetProviderIDs sets the mapping from pool names to config IDs
+func (mt *MetricsTracker) SetProviderIDs(mapping map[string]string) {
+	mt.mu.Lock()
+	defer mt.mu.Unlock()
+	mt.providerIDMap = mapping
 }
 
 // takeSample captures a metrics snapshot and stores it

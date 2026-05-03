@@ -440,3 +440,24 @@ export interface FuseStatus {
 	healthy?: boolean;
 	health_error?: string;
 }
+
+export interface ProviderHistoricalStat {
+	timestamp: string;
+	provider_id: string;
+	bytes_downloaded: number;
+}
+
+export interface ProviderHistoricalStatsResponse {
+	stats: ProviderHistoricalStat[];
+}
+
+export interface ProviderSpeedTestHistoryStat {
+	id: number;
+	provider_id: string;
+	speed_mbps: number;
+	created_at: string;
+}
+
+export interface ProviderSpeedTestHistoryResponse {
+	history: ProviderSpeedTestHistoryStat[];
+}

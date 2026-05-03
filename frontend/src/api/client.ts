@@ -19,6 +19,8 @@ import type {
 	NzbdavMigrateSymlinksRequest,
 	NzbdavMigrateSymlinksResponse,
 	PoolMetrics,
+	ProviderHistoricalStatsResponse,
+	ProviderSpeedTestHistoryResponse,
 	QueueHistoricalStatsResponse,
 	QueueItem,
 	QueueStats,
@@ -89,18 +91,18 @@ export class APIClient {
 					window.dispatchEvent(new CustomEvent("api:unauthorized"));
 				}
 				// eslint-disable-next-line @typescript-eslint/no-explicit-any
-				let errorData: any = {};
+				let errorData: Record<string, unknown> = {};
 				try {
 					errorData = await response.json();
 				} catch {
 					// empty or non-JSON error body — fall through to status-based message
 				}
 				const errorMessage =
-					(typeof errorData.error === "object" ? errorData.error?.message : errorData.error) ||
+					(typeof errorData.error === "object" ? (errorData.error as any)?.message : errorData.error) ||
 					errorData.message ||
 					`HTTP ${response.status}: ${response.statusText}`;
 				const errorDetails =
-					(typeof errorData.error === "object" ? errorData.error?.details : "") ||
+					(typeof errorData.error === "object" ? (errorData.error as any)?.details : "") ||
 					errorData.details ||
 					"";
 
@@ -114,7 +116,7 @@ export class APIClient {
 				const errorMessage =
 					(typeof data.error === "object" ? data.error?.message : data.error) ||
 					"API request failed";
-				const errorDetails = (typeof data.error === "object" ? data.error?.details : "") || "";
+				const errorDetails = (typeof data.error === "object" ? (data.error as any)?.details : "") || "";
 				throw new APIError(response.status, errorMessage, errorDetails);
 			}
 
@@ -154,11 +156,11 @@ export class APIClient {
 				try {
 					const errorData = await response.json();
 					const errorMessage =
-						(typeof errorData.error === "object" ? errorData.error?.message : errorData.error) ||
+						(typeof errorData.error === "object" ? (errorData.error as any)?.message : errorData.error) ||
 						errorData.message ||
 						`HTTP ${response.status}: ${response.statusText}`;
 					const errorDetails =
-						(typeof errorData.error === "object" ? errorData.error?.details : "") ||
+						(typeof errorData.error === "object" ? (errorData.error as any)?.details : "") ||
 						errorData.details ||
 						"";
 
@@ -183,7 +185,7 @@ export class APIClient {
 				const errorMessage =
 					(typeof data.error === "object" ? data.error?.message : data.error) ||
 					"API request failed";
-				const errorDetails = (typeof data.error === "object" ? data.error?.details : "") || "";
+				const errorDetails = (typeof data.error === "object" ? (data.error as any)?.details : "") || "";
 				throw new APIError(response.status, errorMessage, errorDetails);
 			}
 
@@ -503,6 +505,14 @@ export class APIClient {
 
 	async getPoolMetrics() {
 		return this.request<PoolMetrics>("/system/pool/metrics");
+	}
+
+	async getProviderHistoricalStats(days = 30, interval = "daily") {
+		return this.request<ProviderHistoricalStatsResponse>(`/system/provider-stats?days=${days}&interval=${interval}`);
+	}
+
+	async getProviderSpeedHistory(days = 30) {
+		return this.request<ProviderSpeedTestHistoryResponse>(`/system/provider-speed-history?days=${days}`);
 	}
 
 	async directHealthCheck(id: number) {

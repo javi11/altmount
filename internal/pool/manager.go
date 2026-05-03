@@ -55,6 +55,9 @@ type Manager interface {
 	// ResetProviderQuota resets the download quota counter for a provider,
 	// clearing its consumed-bytes counter and exceeded flag in-place.
 	ResetProviderQuota(ctx context.Context, poolName string) error
+
+	// SetProviderIDs sets a mapping between pool names and configuration IDs.
+	SetProviderIDs(mapping map[string]string)
 }
 
 // StatsRepository defines the interface for persisting pool statistics
@@ -64,6 +67,7 @@ type StatsRepository interface {
 	GetSystemStats(ctx context.Context) (map[string]int64, error)
 	AddBytesDownloadedToDailyStat(ctx context.Context, bytes int64) error
 	AddProviderBytesToHourlyStat(ctx context.Context, providerID string, bytes int64) error
+	RecordProviderSpeedTest(ctx context.Context, providerID string, speedMbps float64) error
 	GetProviderHourlyStats(ctx context.Context, hours int) (map[string]int64, error)
 	ClearProviderHourlyStats(ctx context.Context) error
 	GetOldestStatDate(ctx context.Context) (time.Time, error)
@@ -75,6 +79,7 @@ type manager struct {
 	mu               sync.RWMutex
 	pool             *nntppool.Client
 	metricsTracker   *MetricsTracker
+	providerIDMap    map[string]string
 	repo             StatsRepository
 	ctx              context.Context
 	logger           *slog.Logger
@@ -187,6 +192,9 @@ func (m *manager) SetProviders(providers []nntppool.Provider) error {
 
 	// Start metrics tracker
 	m.metricsTracker = NewMetricsTracker(pool, m.repo)
+	if m.providerIDMap != nil {
+		m.metricsTracker.SetProviderIDs(m.providerIDMap)
+	}
 	m.metricsTracker.Start(m.ctx)
 
 	m.startQuotaWatcher()
@@ -340,6 +348,9 @@ func (m *manager) AddProvider(provider nntppool.Provider) error {
 		}
 		m.pool = pool
 		m.metricsTracker = NewMetricsTracker(pool, m.repo)
+		if m.providerIDMap != nil {
+			m.metricsTracker.SetProviderIDs(m.providerIDMap)
+		}
 		m.metricsTracker.Start(m.ctx)
 	} else {
 		m.logger.InfoContext(m.ctx, "Adding provider to NNTP connection pool", "provider", provider.Host)
@@ -414,6 +425,17 @@ func (m *manager) ResetProviderQuota(ctx context.Context, poolName string) error
 	defer m.mu.Unlock()
 
 	return m.resetProviderQuotaLocked(ctx, poolName)
+}
+
+// SetProviderIDs sets a mapping between pool names and configuration IDs
+func (m *manager) SetProviderIDs(mapping map[string]string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.providerIDMap = mapping
+	if m.metricsTracker != nil {
+		m.metricsTracker.SetProviderIDs(mapping)
+	}
 }
 
 // startQuotaWatcher starts the background quota watcher if not already running.

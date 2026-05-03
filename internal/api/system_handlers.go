@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -394,6 +395,121 @@ func (s *Server) performRestart(ctx context.Context) {
 		// Exit the current process
 		os.Exit(0)
 	}
+}
+
+// handleGetProviderHistoricalStats returns historical data usage per provider
+//
+//	@Summary		Get provider historical data usage stats
+//	@Description	Returns aggregated data usage per provider over the given number of days.
+//	@Tags			System
+//	@Produce		json
+//	@Param			days	query		int	false	"Number of days to fetch data for (default: 30)"
+//	@Param			interval query		string false "Aggregation interval (daily, weekly, monthly, yearly)"
+//	@Success		200		{object}	APIResponse{data=ProviderHistoricalStatsResponse}
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/system/provider-stats [get]
+func (s *Server) handleGetProviderHistoricalStats(c *fiber.Ctx) error {
+	daysStr := c.Query("days", "30")
+	days, err := strconv.Atoi(daysStr)
+	if err != nil || days <= 0 {
+		days = 30
+	}
+
+	interval := c.Query("interval", "daily")
+	switch interval {
+	case "daily", "weekly", "monthly", "yearly":
+		// Valid
+	default:
+		interval = "daily"
+	}
+
+	// Maximum 5 years to prevent excessive querying
+	if days > 1825 {
+		days = 1825
+	}
+
+	stats, err := s.queueRepo.GetProviderHistoricalStats(c.Context(), days, interval)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to get provider historical stats",
+			"details": err.Error(),
+		})
+	}
+
+	var responseStats []ProviderHistoricalStatResponse
+	for _, stat := range stats {
+		responseStats = append(responseStats, ProviderHistoricalStatResponse{
+			Timestamp:       stat.Timestamp,
+			ProviderID:      stat.ProviderID,
+			BytesDownloaded: stat.BytesDownloaded,
+		})
+	}
+	
+	if responseStats == nil {
+		responseStats = make([]ProviderHistoricalStatResponse, 0)
+	}
+
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data": ProviderHistoricalStatsResponse{
+			Stats: responseStats,
+		},
+	})
+}
+
+// handleGetProviderSpeedHistory returns historical speed test results per provider
+//
+//	@Summary		Get provider speed test history
+//	@Description	Returns speed test history per provider over the given number of days.
+//	@Tags			System
+//	@Produce		json
+//	@Param			days	query		int	false	"Number of days to fetch data for (default: 30)"
+//	@Success		200		{object}	APIResponse{data=ProviderSpeedTestHistoryResponse}
+//	@Security		BearerAuth
+//	@Security		ApiKeyAuth
+//	@Router			/system/provider-speed-history [get]
+func (s *Server) handleGetProviderSpeedHistory(c *fiber.Ctx) error {
+	daysStr := c.Query("days", "30")
+	days, err := strconv.Atoi(daysStr)
+	if err != nil || days <= 0 {
+		days = 30
+	}
+
+	if days > 1825 {
+		days = 1825
+	}
+
+	stats, err := s.queueRepo.GetProviderSpeedTestHistory(c.Context(), days)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to get provider speed history",
+			"details": err.Error(),
+		})
+	}
+
+	var history []ProviderSpeedTestHistoryStat
+	for _, stat := range stats {
+		history = append(history, ProviderSpeedTestHistoryStat{
+			ID:         stat.ID,
+			ProviderID: stat.ProviderID,
+			SpeedMbps:  stat.SpeedMbps,
+			CreatedAt:  stat.CreatedAt,
+		})
+	}
+	
+	if history == nil {
+		history = make([]ProviderSpeedTestHistoryStat, 0)
+	}
+
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data": ProviderSpeedTestHistoryResponse{
+			History: history,
+		},
+	})
 }
 
 // handleGetPoolMetrics handles GET /api/system/pool/metrics
