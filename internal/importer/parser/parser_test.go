@@ -5,11 +5,17 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/nzbparser"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
+
+func testConfigGetter() config.ConfigGetter {
+	cfg := config.DefaultConfig()
+	return func() *config.Config { return cfg }
+}
 
 type mockPoolManager struct {
 	mock.Mock
@@ -23,7 +29,7 @@ func (m *mockPoolManager) HasPool() bool {
 
 func TestParseFile_EmptySegments(t *testing.T) {
 	m := &mockPoolManager{}
-	p := NewParser(m)
+	p := NewParser(m, testConfigGetter())
 
 	nzbXML := `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE nzb PUBLIC "-//newzBin//DTD NZB 1.1//EN" "http://www.newzbin.com/DTD/nzb-1.1.dtd">
@@ -52,7 +58,7 @@ func TestParseFile_EmptySegments(t *testing.T) {
 
 func TestParseFile_MixedSegments(t *testing.T) {
 	m := &mockPoolManager{}
-	p := NewParser(m)
+	p := NewParser(m, testConfigGetter())
 
 	nzbXML := `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE nzb PUBLIC "-//newzBin//DTD NZB 1.1//EN" "http://www.newzbin.com/DTD/nzb-1.1.dtd">
@@ -88,7 +94,7 @@ func TestParseFile_MixedSegments(t *testing.T) {
 }
 
 func TestFallbackGetFileInfos_EmptySegments(t *testing.T) {
-	p := NewParser(nil)
+	p := NewParser(nil, testConfigGetter())
 
 	files := []nzbparser.NzbFile{
 		{
@@ -112,7 +118,7 @@ func TestFallbackGetFileInfos_EmptySegments(t *testing.T) {
 // TestDetermineNzbType_ExcludesPar2Files verifies that PAR2 recovery files
 // are excluded when determining NZB type, so 1 media + N PAR2 = SingleFile.
 func TestDetermineNzbType_ExcludesPar2Files(t *testing.T) {
-	p := NewParser(nil)
+	p := NewParser(nil, testConfigGetter())
 
 	tests := []struct {
 		name     string
