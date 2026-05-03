@@ -16,6 +16,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/encryption"
 	"github.com/javi11/altmount/internal/encryption/rclone"
 	"github.com/javi11/altmount/internal/errors"
@@ -44,8 +45,9 @@ type FirstSegmentData struct {
 
 // Parser handles NZB file parsing
 type Parser struct {
-	poolManager pool.Manager // Pool manager for dynamic pool access
-	log         *slog.Logger // Logger for debug/error messages
+	poolManager pool.Manager        // Pool manager for dynamic pool access
+	getConfig   config.ConfigGetter // Returns current config for connection limits
+	log         *slog.Logger        // Logger for debug/error messages
 }
 
 // Use conc pool for parallel processing with proper error handling
@@ -55,9 +57,10 @@ type fileResult struct {
 }
 
 // NewParser creates a new NZB parser
-func NewParser(poolManager pool.Manager) *Parser {
+func NewParser(poolManager pool.Manager, getConfig config.ConfigGetter) *Parser {
 	return &Parser{
 		poolManager: poolManager,
+		getConfig:   getConfig,
 		log:         slog.Default().With("component", "nzb-parser"),
 	}
 }
@@ -488,7 +491,7 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 		err        error
 	}
 
-	maxFetch := max(min(len(files), 20), 1)
+	maxFetch := max(min(len(files), p.getConfig().GetMaxImportConnections()), 1)
 	concPool := concpool.NewWithResults[fetchResult]().WithMaxGoroutines(maxFetch).WithContext(ctx)
 
 	// Atomic counter for progress tracking — incremented by each goroutine on completion
@@ -705,7 +708,7 @@ func (p *Parser) complete16KBReads(ctx context.Context, cache []*FirstSegmentDat
 		return
 	}
 
-	maxFetch := max(min(len(targets), 20), 1)
+	maxFetch := max(min(len(targets), p.getConfig().GetMaxImportConnections()), 1)
 	pool := concpool.New().WithMaxGoroutines(maxFetch).WithContext(ctx)
 	for _, d := range targets {
 		pool.Go(func(ctx context.Context) error {

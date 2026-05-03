@@ -53,7 +53,7 @@ type Processor struct {
 // NewProcessor creates a new NZB processor using metadata storage
 func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Manager, broadcaster *progress.ProgressBroadcaster, configGetter config.ConfigGetter, recorder HistoryRecorder) *Processor {
 	return &Processor{
-		parser:            parser.NewParser(poolManager),
+		parser:            parser.NewParser(poolManager, configGetter),
 		strmParser:        parser.NewStrmParser(),
 		metadataService:   metadataService,
 		rarProcessor:      rar.NewProcessor(poolManager, configGetter),
