@@ -809,41 +809,6 @@ export class APIClient {
 		});
 	}
 
-	// Import provider endpoints (secondary pool for health checks and imports)
-	async testImportProviderSpeed(id: string) {
-		return this.request<{ speed_mbps: number; duration_seconds: number }>(
-			`/import-providers/${id}/speedtest`,
-			{ method: "POST" },
-		);
-	}
-
-	async createImportProvider(data: ProviderCreateRequest) {
-		return this.request<ProviderConfig>("/import-providers", {
-			method: "POST",
-			body: JSON.stringify(data),
-		});
-	}
-
-	async updateImportProvider(id: string, data: Partial<ProviderUpdateRequest>) {
-		return this.request<ProviderConfig>(`/import-providers/${id}`, {
-			method: "PUT",
-			body: JSON.stringify(data),
-		});
-	}
-
-	async deleteImportProvider(id: string) {
-		return this.request<{ message: string }>(`/import-providers/${id}`, {
-			method: "DELETE",
-		});
-	}
-
-	async reorderImportProviders(data: ProviderReorderRequest) {
-		return this.request<ProviderConfig[]>("/import-providers/reorder", {
-			method: "PUT",
-			body: JSON.stringify(data),
-		});
-	}
-
 	// Manual Scan endpoints
 	async startManualScan(data: ManualScanRequest) {
 		return this.request<ScanStatusResponse>("/import/scan", {
