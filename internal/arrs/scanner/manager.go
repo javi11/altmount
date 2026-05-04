@@ -534,7 +534,7 @@ func (m *Manager) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 	var err error
 
 	// ID-Based Precision: If we have the exact movie ID and file ID from metadata, use them directly
-	if metadata != nil && metadata.Movie.Id > 0 && metadata.MovieFile.Id > 0 {
+	if metadata != nil && metadata.Movie != nil && metadata.MovieFile != nil && metadata.Movie.Id > 0 && metadata.MovieFile.Id > 0 {
 		slog.InfoContext(ctx, "ID-Based Precision: Using metadata IDs for Radarr repair",
 			"movie_id", metadata.Movie.Id,
 			"movie_file_id", metadata.MovieFile.Id)
@@ -694,7 +694,7 @@ func (m *Manager) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 	var err error
 
 	// ID-Based Precision: If we have exact IDs from metadata, use them
-	if metadata != nil && metadata.Series.Id > 0 && metadata.EpisodeFile.Id > 0 {
+	if metadata != nil && metadata.Series != nil && metadata.EpisodeFile != nil && metadata.Series.Id > 0 && metadata.EpisodeFile.Id > 0 {
 		slog.InfoContext(ctx, "ID-Based Precision: Using metadata IDs for Sonarr repair",
 			"series_id", metadata.Series.Id,
 			"episode_file_id", metadata.EpisodeFile.Id)
