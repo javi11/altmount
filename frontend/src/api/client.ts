@@ -84,6 +84,15 @@ export class APIClient {
 		try {
 			const response = await fetch(url, config);
 
+			// Auth proxy (e.g. Authelia) issues a 302 to the login page. With
+			// redirect: "manual" in the service worker the SW returns an opaque
+			// redirect here instead of following it cross-origin (which would
+			// CORS-fail). Reload so the browser navigates through Authelia.
+			if (response.type === "opaqueredirect") {
+				window.location.reload();
+				throw new APIError(302, "Session expired, redirecting to login", "");
+			}
+
 			if (!response.ok) {
 				if (response.status === 401) {
 					window.dispatchEvent(new CustomEvent("api:unauthorized"));
@@ -145,6 +154,15 @@ export class APIClient {
 
 		try {
 			const response = await fetch(url, config);
+
+			// Auth proxy (e.g. Authelia) issues a 302 to the login page. With
+			// redirect: "manual" in the service worker the SW returns an opaque
+			// redirect here instead of following it cross-origin (which would
+			// CORS-fail). Reload so the browser navigates through Authelia.
+			if (response.type === "opaqueredirect") {
+				window.location.reload();
+				throw new APIError(302, "Session expired, redirecting to login", "");
+			}
 
 			if (!response.ok) {
 				if (response.status === 401) {

@@ -63,26 +63,39 @@ export default defineConfig({
 				],
 			},
 			workbox: {
-				globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
+				// Exclude html: index.html must NOT be precached so every navigation
+				// reaches the network (and Authelia can check the session).
+				globPatterns: ["**/*.{js,css,ico,png,svg,woff2}"],
 				runtimeCaching: [
-					// NetworkFirst for navigation so auth proxies (e.g. Authelia) can
-					// redirect unauthenticated requests before the SW serves cached HTML.
+					// redirect: "manual" prevents the SW from following Authelia's 302
+					// cross-origin to login.kipsi.top. The opaque redirect is passed back
+					// to the browser which follows it as a normal navigation to the login page.
+					// When the session is valid, the 200 HTML response is cached as usual.
 					{
 						urlPattern: ({ request }) => request.mode === "navigate",
 						handler: "NetworkFirst",
 						options: {
 							cacheName: "navigation-cache",
 							networkTimeoutSeconds: 10,
+							fetchOptions: {
+								redirect: "manual",
+							},
 							cacheableResponse: {
 								statuses: [200],
 							},
 						},
 					},
+					// redirect: "manual" prevents the SW from following auth-proxy 302s
+					// cross-origin (which would CORS-fail). The opaque redirect is passed
+					// to the page; client.ts detects it and reloads through Authelia.
 					{
 						urlPattern: /^\/api\/.*/i,
 						handler: "NetworkFirst",
 						options: {
 							cacheName: "api-cache",
+							fetchOptions: {
+								redirect: "manual",
+							},
 							expiration: {
 								maxEntries: 50,
 								maxAgeSeconds: 60 * 5,
