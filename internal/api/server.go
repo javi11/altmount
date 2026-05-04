@@ -313,6 +313,8 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Get("/system/health", s.handleGetSystemHealth)
 	api.Get("/system/browse", s.handleSystemBrowse)
 	api.Get("/system/pool/metrics", s.handleGetPoolMetrics)
+	api.Get("/system/provider-stats", s.handleGetProviderHistoricalStats)
+	api.Get("/system/provider-speed-history", s.handleGetProviderSpeedHistory)
 	api.Post("/system/stats/reset", s.handleResetSystemStats)
 	api.Post("/system/cleanup", s.handleSystemCleanup)
 	api.Post("/system/restart", s.handleSystemRestart)

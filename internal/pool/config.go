@@ -9,9 +9,13 @@ import (
 
 // RegisterConfigHandlers registers handlers for pool-related configuration changes
 func RegisterConfigHandlers(ctx context.Context, configManager *config.Manager, poolManager Manager) {
+	// Initial ID mapping
+	updateProviderIDMap(configManager.GetConfig(), poolManager)
+
 	configManager.OnConfigChange(func(oldConfig, newConfig *config.Config) {
 		slog.InfoContext(ctx, "Configuration updated")
 
+		updateProviderIDMap(newConfig, poolManager)
 		handleProviderChanges(ctx, oldConfig, newConfig, poolManager)
 
 		// Log changes that still require restart
@@ -21,6 +25,15 @@ func RegisterConfigHandlers(ctx context.Context, configManager *config.Manager, 
 				"new", newConfig.Metadata.RootPath)
 		}
 	})
+}
+
+// updateProviderIDMap provides a mapping of pool names to config IDs to the pool manager
+func updateProviderIDMap(cfg *config.Config, poolManager Manager) {
+	idMap := make(map[string]string)
+	for _, p := range cfg.Providers {
+		idMap[p.NNTPPoolName()] = p.ID
+	}
+	poolManager.SetProviderIDs(idMap)
 }
 
 // handleProviderChanges applies incremental provider changes to the pool.

@@ -117,6 +117,11 @@ func (s *Server) handleTestProviderSpeed(c *fiber.Ctx) error {
 		slog.ErrorContext(c.Context(), "Failed to persist config after speed test", "err", err)
 	}
 
+	// Record to database
+	if err := s.queueRepo.RecordProviderSpeedTest(c.Context(), providerID, speed); err != nil {
+		slog.ErrorContext(c.Context(), "Failed to record speed test history", "provider_id", providerID, "err", err)
+	}
+
 	return RespondSuccess(c, ProviderSpeedTestResponse{
 		SpeedMBps: speed,
 		Duration:  result.Elapsed.Seconds(),
