@@ -1,9 +1,11 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"embed"
 	"fmt"
+	"log/slog"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -219,6 +221,32 @@ func (db *DB) Close() error {
 // Connection returns the underlying database connection.
 func (db *DB) Connection() *sql.DB {
 	return db.conn
+}
+
+// StartCheckpointLoop starts a background goroutine that periodically forces a WAL checkpoint
+// (SQLite only). Call once after opening the DB; stops when ctx is cancelled.
+func (db *DB) StartCheckpointLoop(ctx context.Context, interval time.Duration) {
+	if db.dialect.d != DialectSQLite {
+		return
+	}
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				var busy, log, checkpointed int
+				row := db.conn.QueryRowContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)")
+				if err := row.Scan(&busy, &log, &checkpointed); err != nil {
+					slog.WarnContext(ctx, "WAL checkpoint failed", "err", err)
+				} else {
+					slog.DebugContext(ctx, "WAL checkpoint complete", "busy", busy, "log", log, "checkpointed", checkpointed)
+				}
+			}
+		}
+	}()
 }
 
 // UpdateConnectionPool adjusts the database connection pool settings based on worker count.
