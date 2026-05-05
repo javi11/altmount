@@ -15,6 +15,7 @@ import (
 	"github.com/javi11/altmount/frontend"
 	"github.com/javi11/altmount/internal/api"
 	"github.com/javi11/altmount/internal/arrs"
+	"github.com/javi11/altmount/internal/stremio"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/health"
 	"github.com/javi11/altmount/internal/metadata"
@@ -147,7 +148,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	streamTracker.StartCleanup(ctx) // Periodic cleanup of stale streams
 
-	stremioCleanup := api.NewStremioCleanupService(repos.MainRepo, metadataService, configManager.GetConfigGetter())
+	stremioCleanup := stremio.NewStremioCleanupService(repos.MainRepo, metadataService, configManager.GetConfigGetter())
 	stremioCleanup.StartCleanup(ctx)
 
 	apiServer := setupAPIServer(app, repos, authService, configManager, metadataReader, metadataService, fs, poolManager, importerService, arrsService, mountService, progressBroadcaster, streamTracker, cacheSource)
