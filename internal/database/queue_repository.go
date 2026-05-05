@@ -791,6 +791,16 @@ func (r *QueueRepository) DeleteFailedItemsOlderThan(ctx context.Context, olderT
 	return deletedItems, nil
 }
 
+// DeleteImportHistoryOlderThan deletes import_history records completed before olderThan.
+func (r *QueueRepository) DeleteImportHistoryOlderThan(ctx context.Context, olderThan time.Time) error {
+	_, err := r.db.ExecContext(ctx,
+		`DELETE FROM import_history WHERE completed_at < ?`, olderThan)
+	if err != nil {
+		return fmt.Errorf("failed to delete old import history: %w", err)
+	}
+	return nil
+}
+
 // ResetStaleItems resets processing items back to pending on service startup
 func (r *QueueRepository) ResetStaleItems(ctx context.Context) error {
 	// Reset all items that are in 'processing' status
