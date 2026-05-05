@@ -19,7 +19,7 @@ import (
 	"github.com/javi11/altmount/internal/importer"
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/pathutil"
+	"github.com/javi11/altmount/internal/utils"
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/sourcegraph/conc/pool"
 )
@@ -914,12 +914,12 @@ func (hw *HealthWorker) resolvePathForRescan(item *database.FileHealth) string {
 	}
 	cfg := hw.configGetter()
 	if cfg.Health.LibraryDir != nil && *cfg.Health.LibraryDir != "" {
-		return pathutil.JoinAbsPath(*cfg.Health.LibraryDir, item.FilePath)
+		return utils.JoinAbsPath(*cfg.Health.LibraryDir, item.FilePath)
 	}
 	if cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
-		return pathutil.JoinAbsPath(*cfg.Import.ImportDir, item.FilePath)
+		return utils.JoinAbsPath(*cfg.Import.ImportDir, item.FilePath)
 	}
-	return pathutil.JoinAbsPath(cfg.MountPath, item.FilePath)
+	return utils.JoinAbsPath(cfg.MountPath, item.FilePath)
 }
 
 // cleanupZombieRecord deletes the health record and associated metadata for a file that is

@@ -1,5 +1,4 @@
-// Package pathutil provides path validation utilities.
-package pathutil
+package utils
 
 import (
 	"fmt"

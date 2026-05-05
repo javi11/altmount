@@ -21,7 +21,7 @@ import (
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/nzbfilesystem/segcache"
-	"github.com/javi11/altmount/internal/pathutil"
+
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/usenet"
 	"github.com/javi11/altmount/internal/utils"
@@ -343,7 +343,7 @@ func (mrf *MetadataRemoteFile) RemoveFile(ctx context.Context, fileName string) 
 		}
 
 		if rootPath != "" {
-			pathutil.RemoveEmptyDirs(rootPath, filepath.Dir(physicalPath))
+			utils.RemoveEmptyDirs(rootPath, filepath.Dir(physicalPath))
 		}
 	}
 

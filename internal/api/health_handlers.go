@@ -14,7 +14,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/pathutil"
+	"github.com/javi11/altmount/internal/utils"
 )
 
 // handleListHealth handles GET /api/health
@@ -419,20 +419,20 @@ func (s *Server) handleRepairHealth(c *fiber.Ctx) error {
 	// Determine final path for ARR rescan
 	pathForRescan := libraryPath
 	if pathForRescan == "" && cfg.Health.LibraryDir != nil && *cfg.Health.LibraryDir != "" {
-		pathForRescan = pathutil.JoinAbsPath(*cfg.Health.LibraryDir, item.FilePath)
+		pathForRescan = utils.JoinAbsPath(*cfg.Health.LibraryDir, item.FilePath)
 		slog.InfoContext(ctx, "Using library dir for manual repair",
 			"file_path", item.FilePath,
 			"library_path", pathForRescan)
 	}
 	if pathForRescan == "" && cfg.Import.ImportStrategy == config.ImportStrategySYMLINK && cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
-		pathForRescan = pathutil.JoinAbsPath(*cfg.Import.ImportDir, item.FilePath)
+		pathForRescan = utils.JoinAbsPath(*cfg.Import.ImportDir, item.FilePath)
 		slog.InfoContext(ctx, "Using symlink import path for manual repair",
 			"file_path", item.FilePath,
 			"symlink_path", pathForRescan)
 	}
 	if pathForRescan == "" {
 		// Fallback to mount path if no library path found
-		pathForRescan = pathutil.JoinAbsPath(cfg.MountPath, item.FilePath)
+		pathForRescan = utils.JoinAbsPath(cfg.MountPath, item.FilePath)
 		slog.InfoContext(ctx, "Using mount path fallback for manual repair",
 			"file_path", item.FilePath,
 			"mount_path", pathForRescan)
@@ -536,13 +536,13 @@ func (s *Server) handleRepairHealthBulk(c *fiber.Ctx) error {
 
 		pathForRescan := libraryPath
 		if pathForRescan == "" && cfg.Health.LibraryDir != nil && *cfg.Health.LibraryDir != "" {
-			pathForRescan = pathutil.JoinAbsPath(*cfg.Health.LibraryDir, item.FilePath)
+			pathForRescan = utils.JoinAbsPath(*cfg.Health.LibraryDir, item.FilePath)
 		}
 		if pathForRescan == "" && cfg.Import.ImportStrategy == config.ImportStrategySYMLINK && cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
-			pathForRescan = pathutil.JoinAbsPath(*cfg.Import.ImportDir, item.FilePath)
+			pathForRescan = utils.JoinAbsPath(*cfg.Import.ImportDir, item.FilePath)
 		}
 		if pathForRescan == "" {
-			pathForRescan = pathutil.JoinAbsPath(cfg.MountPath, item.FilePath)
+			pathForRescan = utils.JoinAbsPath(cfg.MountPath, item.FilePath)
 		}
 
 		// Trigger rescan
@@ -785,7 +785,7 @@ func (s *Server) cleanupHealthRecords(ctx context.Context, olderThan time.Time, 
 				pathToDelete = *item.LibraryPath
 			} else {
 				// Fallback to mount path
-				pathToDelete = pathutil.JoinAbsPath(mountPath, item.FilePath)
+				pathToDelete = utils.JoinAbsPath(mountPath, item.FilePath)
 			}
 
 			// Attempt to delete the physical file using os.Remove
@@ -810,7 +810,7 @@ func (s *Server) cleanupHealthRecords(ctx context.Context, olderThan time.Time, 
 				}
 
 				if rootPath != "" {
-					pathutil.RemoveEmptyDirs(rootPath, filepath.Dir(pathToDelete))
+					utils.RemoveEmptyDirs(rootPath, filepath.Dir(pathToDelete))
 				}
 			}
 		}
@@ -1456,7 +1456,7 @@ func (s *Server) handleRegenerateLibraryFiles(c *fiber.Ctx) error {
 		}
 
 		// Build the actual file path in the mount
-		actualPath := pathutil.JoinAbsPath(cfg.MountPath, file.FilePath)
+		actualPath := utils.JoinAbsPath(cfg.MountPath, file.FilePath)
 
 		// Create directory if needed
 		baseDir := filepath.Dir(libraryPath)
@@ -1546,7 +1546,7 @@ func deleteLibraryFile(ctx context.Context, cfg *config.Config, item *database.F
 	if item.LibraryPath != nil && *item.LibraryPath != "" {
 		pathToDelete = *item.LibraryPath
 	} else {
-		pathToDelete = pathutil.JoinAbsPath(cfg.MountPath, item.FilePath)
+		pathToDelete = utils.JoinAbsPath(cfg.MountPath, item.FilePath)
 	}
 
 	if err := os.Remove(pathToDelete); err != nil {
@@ -1566,7 +1566,7 @@ func deleteLibraryFile(ctx context.Context, cfg *config.Config, item *database.F
 		rootPath = cfg.MountPath
 	}
 	if rootPath != "" {
-		pathutil.RemoveEmptyDirs(rootPath, filepath.Dir(pathToDelete))
+		utils.RemoveEmptyDirs(rootPath, filepath.Dir(pathToDelete))
 	}
 
 	return true

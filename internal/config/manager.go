@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/javi11/altmount/internal/pathutil"
+	"github.com/javi11/altmount/internal/utils"
 	"github.com/javi11/nntppool/v4"
 	"github.com/jinzhu/copier"
 	"github.com/robfig/cron/v3"
@@ -764,17 +764,17 @@ func (c *Config) Validate() error {
 // This performs actual filesystem checks and may create directories if needed
 func (c *Config) ValidateDirectories() error {
 	// Check metadata directory
-	if err := pathutil.CheckDirectoryWritable(c.Metadata.RootPath); err != nil {
+	if err := utils.CheckDirectoryWritable(c.Metadata.RootPath); err != nil {
 		return fmt.Errorf("metadata directory validation failed: %w", err)
 	}
 
 	// Check database directory
-	if err := pathutil.CheckFileDirectoryWritable(c.Database.Path, "database"); err != nil {
+	if err := utils.CheckFileDirectoryWritable(c.Database.Path, "database"); err != nil {
 		return err
 	}
 
 	// Check log file directory (only if log file is configured)
-	if err := pathutil.CheckFileDirectoryWritable(c.Log.File, "log"); err != nil {
+	if err := utils.CheckFileDirectoryWritable(c.Log.File, "log"); err != nil {
 		return err
 	}
 

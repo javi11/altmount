@@ -19,7 +19,7 @@ import (
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/metadata"
-	"github.com/javi11/altmount/internal/pathutil"
+	"github.com/javi11/altmount/internal/utils"
 	"github.com/javi11/altmount/pkg/rclonecli"
 	"github.com/sourcegraph/conc/pool"
 )
@@ -699,7 +699,7 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 
 				if needsRecovery {
 					// Use the configured mount path to build an absolute expected path
-					expectedPath := pathutil.JoinAbsPath(cfg.MountPath, path)
+					expectedPath := utils.JoinAbsPath(cfg.MountPath, path)
 					if _, err := os.Stat(expectedPath); err == nil {
 						// Found it! Use this recovered path ONLY if it is absolute and NOT equal to the local mount path
 						// (since repairs MUST use the library path Sonarr/Radarr expects).
@@ -1506,7 +1506,7 @@ func (lsw *LibrarySyncWorker) getAllImportDirFiles(ctx context.Context, oldMount
 // It checks both the full mount path and the relative path (for STRM files)
 func (lsw *LibrarySyncWorker) getLibraryPath(metaPath string, filesInUse map[string]string) *string {
 	cfg := lsw.configGetter()
-	mountPath := pathutil.JoinAbsPath(cfg.MountPath, metaPath)
+	mountPath := utils.JoinAbsPath(cfg.MountPath, metaPath)
 
 	if libPath, ok := filesInUse[mountPath]; ok {
 		return &libPath
