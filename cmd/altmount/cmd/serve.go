@@ -77,6 +77,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
+	db.StartCheckpointLoop(ctx, 5*time.Minute)
+
 	repos := setupRepositories(ctx, db)
 	poolManager := pool.NewManager(ctx, repos.MainRepo)
 
