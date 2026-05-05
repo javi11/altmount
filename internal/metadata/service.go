@@ -13,7 +13,7 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/pathutil"
+	"github.com/javi11/altmount/internal/utils"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -395,7 +395,7 @@ func (ms *MetadataService) DeleteFileMetadataWithSourceNzb(ctx context.Context, 
 	}
 
 	// Clean up empty parent directories in metadata path
-	pathutil.RemoveEmptyDirs(ms.rootPath, metadataDir)
+	utils.RemoveEmptyDirs(ms.rootPath, metadataDir)
 
 	// Optionally delete the source NZB file (error-tolerant)
 	if deleteSourceNzb && sourceNzbPath != "" {
@@ -765,7 +765,7 @@ func (ms *MetadataService) CleanupOrphanedIDSymlinks(ctx context.Context) (int, 
 	}
 
 	// Clean empty shard directories bottom-up
-	pathutil.RemoveEmptyDirs(ms.rootPath, idsRoot)
+	utils.RemoveEmptyDirs(ms.rootPath, idsRoot)
 
 	return removed, nil
 }
