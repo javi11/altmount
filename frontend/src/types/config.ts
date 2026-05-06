@@ -228,6 +228,7 @@ export interface ImportConfig {
 	rename_to_nzb_name?: boolean;
 	filter_sample_files?: boolean;
 	failed_item_retention_hours?: number | null;
+	history_retention_days?: number | null;
 	delete_completed_nzb?: boolean;
 }
 

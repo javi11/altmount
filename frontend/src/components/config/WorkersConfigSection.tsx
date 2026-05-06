@@ -555,6 +555,27 @@ export function ImportConfigSection({
 							disable.
 						</p>
 					</fieldset>
+
+					<fieldset className="fieldset min-w-0">
+						<legend className="fieldset-legend font-semibold">History Retention (Days)</legend>
+						<input
+							type="number"
+							className="input input-bordered w-full min-w-0 max-w-full bg-base-100 font-mono text-sm"
+							value={formData.history_retention_days ?? 90}
+							readOnly={isReadOnly}
+							min={0}
+							onChange={(e) =>
+								handleInputChange(
+									"history_retention_days",
+									Number.parseInt(e.target.value, 10) || 0,
+								)
+							}
+						/>
+						<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/70 text-xs">
+							Auto-remove completed import history records older than this many days. Set to 0 to
+							keep forever. Default: 90 days (3 months).
+						</p>
+					</fieldset>
 				</div>
 			</div>
 

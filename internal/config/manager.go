@@ -275,6 +275,7 @@ type ImportConfig struct {
 	RenameToNzbName                *bool          `yaml:"rename_to_nzb_name" mapstructure:"rename_to_nzb_name" json:"rename_to_nzb_name,omitempty"`
 	FilterSampleFiles              *bool          `yaml:"filter_sample_files" mapstructure:"filter_sample_files" json:"filter_sample_files,omitempty"`
 	FailedItemRetentionHours       *int           `yaml:"failed_item_retention_hours" mapstructure:"failed_item_retention_hours" json:"failed_item_retention_hours,omitempty"`
+	HistoryRetentionDays           *int           `yaml:"history_retention_days" mapstructure:"history_retention_days" json:"history_retention_days,omitempty"`
 	DeleteCompletedNzb             *bool          `yaml:"delete_completed_nzb" mapstructure:"delete_completed_nzb" json:"delete_completed_nzb,omitempty"`
 }
 
@@ -1245,6 +1246,7 @@ func DefaultConfig(configDir ...string) *Config {
 	prowlarrEnabled := false   // Prowlarr integration disabled by default
 	watchIntervalSeconds := 10        // Default watch interval
 	failedItemRetentionHours := 24    // Default: auto-remove failed items after 24 hours
+	historyRetentionDays := 90        // Default: auto-remove import history after 90 days (3 months)
 	cleanupAutomaticImportFailure := false
 	metadataBackupEnabled := false
 	failureMaskingEnabled := true
@@ -1381,6 +1383,7 @@ func DefaultConfig(configDir ...string) *Config {
 			WatchDir:                nil,
 			WatchIntervalSeconds:    &watchIntervalSeconds,
 			FailedItemRetentionHours: &failedItemRetentionHours,
+			HistoryRetentionDays:     &historyRetentionDays,
 		},
 		Log: LogConfig{
 			File:       logPath, // Default log file path
