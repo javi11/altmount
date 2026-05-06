@@ -374,6 +374,7 @@ type QueueItemResponse struct {
 	Metadata     *string                `json:"metadata"`
 	FileSize     *int64                 `json:"file_size"`
 	Percentage   *int                   `json:"percentage,omitempty"`    // Progress percentage (0-100), only for items being processed
+	Stage        string                 `json:"stage,omitempty"`         // Progress stage (e.g. "Validating segments")
 	StoragePath  *string                `json:"storage_path,omitempty"` // Internal FUSE mount path (populated after completion)
 }
 
@@ -411,6 +412,7 @@ type ImportHistoryResponse struct {
 	VirtualPath string    `json:"virtual_path"`
 	LibraryPath *string   `json:"library_path,omitempty"`
 	Category    *string   `json:"category"`
+	Metadata    *string   `json:"metadata,omitempty"`
 	CompletedAt time.Time `json:"completed_at"`
 }
 
@@ -742,6 +744,7 @@ func ToImportHistoryResponse(h *database.ImportHistory) *ImportHistoryResponse {
 		VirtualPath: h.VirtualPath,
 		LibraryPath: h.LibraryPath,
 		Category:    h.Category,
+		Metadata:    h.Metadata,
 		CompletedAt: h.CompletedAt,
 	}
 }
