@@ -1,4 +1,16 @@
-import { CheckCircle2, Download, FileVideo, History, Play } from "lucide-react";
+import {
+	ChevronDown,
+	ChevronUp,
+	CheckCircle2,
+	Download,
+	FileVideo,
+	History,
+	Info,
+	Monitor,
+	Play,
+	Smartphone,
+	User,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 import { useActiveStreams, useImportHistory, useQueue } from "../../hooks/useApi";
 import { useProgressStream } from "../../hooks/useProgressStream";
@@ -8,6 +20,8 @@ import { LoadingSpinner } from "../ui/LoadingSpinner";
 
 export function ActivityHub() {
 	const [activeTab, setActiveTab] = useState<"playback" | "imports" | "history">("playback");
+	const [expandedHistory, setExpandedHistory] = useState<Record<number, boolean>>({});
+
 	const { data: allStreams, isLoading: streamsLoading } = useActiveStreams();
 
 	const { data: queueResponse, isLoading: queueLoading } = useQueue({
@@ -23,14 +37,43 @@ export function ActivityHub() {
 	const hasProcessingItems = (queueItems?.length || 0) > 0;
 	const { progress: liveProgress } = useProgressStream({ enabled: hasProcessingItems });
 
-	// Enrich queue items with live progress
+	const toggleHistory = (id: number) => {
+		setExpandedHistory((prev) => ({ ...prev, [id]: !prev[id] }));
+	};
+
+	// Enrich queue items with live progress and stages
 	const enrichedQueueItems = useMemo(() => {
 		if (!queueItems) return [];
 		return queueItems.map((item) => ({
 			...item,
 			percentage: liveProgress[item.id]?.percentage ?? item.percentage,
+			stage: liveProgress[item.id]?.stage ?? item.stage,
 		}));
 	}, [queueItems, liveProgress]);
+
+	// Helper to parse user agent for better display
+	const getClientApp = (ua?: string) => {
+		if (!ua) return { name: "Unknown Client", icon: User };
+		const lowUA = ua.toLowerCase();
+		if (lowUA.includes("plex")) return { name: "Plex", icon: Play };
+		if (lowUA.includes("infuse")) return { name: "Infuse", icon: Play };
+		if (lowUA.includes("vlc")) return { name: "VLC", icon: FileVideo };
+		if (lowUA.includes("kodi")) return { name: "Kodi", icon: Play };
+		if (lowUA.includes("android") || lowUA.includes("iphone"))
+			return { name: "Mobile App", icon: Smartphone };
+		if (lowUA.includes("mozilla") || lowUA.includes("chrome"))
+			return { name: "Web Browser", icon: Monitor };
+		return { name: "Media Player", icon: User };
+	};
+
+	const getCategoryColor = (category?: string) => {
+		if (!category) return "badge-ghost";
+		const cat = category.toLowerCase();
+		if (cat.includes("movie")) return "badge-primary";
+		if (cat.includes("tv")) return "badge-secondary";
+		if (cat.includes("audio")) return "badge-accent";
+		return "badge-ghost";
+	};
 
 	// Group streams by file_path to show "unique playback sessions"
 	const groupedStreams = useMemo(() => {
@@ -42,17 +85,14 @@ export function ActivityHub() {
 			const isStreaming = s.status === "Streaming";
 
 			// Heuristic: Filter out metadata probes and very short system scans
-			// 1. If reading the very end of the file (last 5MB), it's likely a probe
 			const isAtEnd = s.total_size > 0 && s.current_offset > s.total_size - 5 * 1024 * 1024;
-			// 2. If it's very new and hasn't sent much data yet, hide it briefly
-			// (Reduced thresholds to show streams faster)
 			const isTooNew = s.bytes_sent < 5 * 1024 * 1024;
 			const ageSeconds = (Date.now() - new Date(s.started_at).getTime()) / 1000;
 
 			if (isAtEnd) return false;
 			if (isTooNew && ageSeconds < 5) return false;
 
-			return isSystemSource && (isStreaming || s.status === "Buffering");
+			return isSystemSource && (isStreaming || s.status === "Buffering" || s.status === "Stalled");
 		});
 
 		const groups: Record<string, ActiveStream> = {};
@@ -137,23 +177,46 @@ export function ActivityHub() {
 											? Math.round((stream.buffered_offset / stream.total_size) * 100)
 											: 0;
 
+									const isStalled =
+										stream.status === "Stalled" ||
+										(stream.bytes_per_second === 0 && stream.status !== "Buffering");
+									const clientApp = getClientApp(stream.user_agent);
+
 									return (
 										<div
 											key={stream.id}
-											className="group flex flex-col gap-2 rounded-lg bg-base-200/30 p-3"
+											className="group flex flex-col gap-2 rounded-lg bg-base-200/30 p-3 transition-colors hover:bg-base-200/50"
 										>
 											<div className="flex items-center gap-3">
-												<FileVideo className="h-8 w-8 shrink-0 text-primary/70" />
+												<div className="relative">
+													<FileVideo
+														className={`h-8 w-8 shrink-0 ${isStalled ? "text-warning animate-pulse" : "text-primary/70"}`}
+													/>
+													{!isStalled && (
+														<span className="-bottom-0.5 -right-0.5 absolute flex h-2 w-2">
+															<span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-75" />
+															<span className="relative inline-flex h-2 w-2 rounded-full bg-success" />
+														</span>
+													)}
+												</div>
 												<div className="min-w-0 flex-1">
 													<div className="truncate font-medium text-sm" title={stream.file_path}>
 														{stream.file_path.split("/").pop()}
 													</div>
-													<div className="mt-1 flex items-center gap-2">
-														<span className="font-bold text-success text-xs">STREAMING</span>
-														<span className="text-base-content/40 text-xs">•</span>
-														<span className="text-base-content/60 text-xs">
-															{formatBytes(stream.total_size)}
+													<div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+														<span
+															className={`font-bold text-xs ${isStalled ? "text-warning" : "text-success"}`}
+														>
+															{stream.status.toUpperCase()}
 														</span>
+														<span className="text-base-content/40 text-xs">•</span>
+														<div className="flex items-center gap-1 text-base-content/60 text-xs">
+															<clientApp.icon className="h-3 w-3" />
+															<span>{clientApp.name}</span>
+															{stream.client_ip && (
+																<span className="opacity-50">({stream.client_ip})</span>
+															)}
+														</div>
 													</div>
 												</div>
 												<div className="shrink-0 text-right">
@@ -161,11 +224,6 @@ export function ActivityHub() {
 														<div className="flex items-center gap-1 font-bold text-info text-xs">
 															<span className="text-[8px] text-base-content/80">IN:</span>
 															{formatSpeed(stream.download_speed)}
-															{stream.download_speed > 0 && stream.download_speed < 1024 * 1024 && (
-																<div className="badge badge-warning badge-xs h-3 px-1 text-[8px]">
-																	SLOW
-																</div>
-															)}
 														</div>
 														<div className="flex items-center gap-1 font-bold font-mono text-primary text-xs">
 															<span className="text-[8px] text-base-content/80 text-success">
@@ -174,7 +232,7 @@ export function ActivityHub() {
 															{formatSpeed(stream.bytes_per_second)}
 														</div>
 													</div>
-													{stream.eta > 0 && (
+													{stream.eta > 0 && !isStalled && (
 														<div className="font-mono text-base-content/40 text-xs">
 															{formatDuration(stream.eta)} left
 														</div>
@@ -187,10 +245,7 @@ export function ActivityHub() {
 													<div className="flex items-center gap-2">
 														<span className="font-medium text-primary">{progress}%</span>
 														<span className="text-base-content/40">•</span>
-														<span
-															className="text-base-content/40"
-															title="Total downloaded from Usenet for this session"
-														>
+														<span className="text-base-content/40">
 															DL: {formatBytes(stream.bytes_downloaded)}
 														</span>
 													</div>
@@ -232,18 +287,19 @@ export function ActivityHub() {
 							) : enrichedQueueItems.length > 0 ? (
 								enrichedQueueItems.map((item) => {
 									const progress = item.percentage ?? 0;
+									const isProcessing = progress > 0 && progress < 100;
 
 									return (
 										<div
 											key={item.id}
-											className="group flex flex-col gap-2 rounded-lg bg-base-200/30 p-3"
+											className="group flex flex-col gap-2 rounded-lg bg-base-200/30 p-3 transition-colors hover:bg-base-200/50"
 										>
 											<div className="flex items-center gap-3">
 												<div className="relative">
 													<Download
-														className={`h-8 w-8 shrink-0 ${progress > 0 ? "text-secondary" : "text-base-content/20"}`}
+														className={`h-8 w-8 shrink-0 ${isProcessing ? "text-secondary" : "text-base-content/20"}`}
 													/>
-													{progress > 0 && (
+													{isProcessing && (
 														<span className="-top-1 -right-1 absolute flex h-3 w-3">
 															<span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-secondary opacity-75" />
 															<span className="relative inline-flex h-3 w-3 rounded-full bg-secondary" />
@@ -258,14 +314,18 @@ export function ActivityHub() {
 														{item.target_path || item.nzb_display_name}
 													</div>
 													<div className="mt-1 flex items-center gap-2">
-														<span className="font-bold text-secondary text-xs">IMPORTING</span>
+														<span className="font-bold text-secondary text-xs">
+															{item.stage?.toUpperCase() || "IMPORTING"}
+														</span>
 														<span className="text-base-content/40 text-xs">•</span>
 														<span className="text-base-content/60 text-xs">Queue #{item.id}</span>
-														{item.file_size && (
+														{item.category && (
 															<>
 																<span className="text-base-content/40 text-xs">•</span>
-																<span className="text-base-content/60 text-xs">
-																	{formatBytes(item.file_size)}
+																<span
+																	className={`badge badge-xs ${getCategoryColor(item.category)} border-none`}
+																>
+																	{item.category}
 																</span>
 															</>
 														)}
@@ -300,33 +360,135 @@ export function ActivityHub() {
 					)}
 
 					{activeTab === "history" && (
-						<div className="max-h-64 space-y-3 overflow-y-auto">
+						<div className="max-h-80 space-y-2 overflow-y-auto">
 							{historyLoading ? (
 								<div className="flex justify-center py-10">
 									<LoadingSpinner />
 								</div>
 							) : importHistory && importHistory.length > 0 ? (
-								importHistory.map((item) => (
-									<div
-										key={item.id}
-										className="flex items-center justify-between gap-4 rounded-lg border-success border-l-4 bg-base-200/30 p-2 text-sm"
-									>
-										<div className="flex min-w-0 items-center gap-3 truncate">
-											<CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
-											<div className="flex flex-col truncate">
-												<span className="truncate font-medium" title={item.file_name}>
-													{item.file_name}
-												</span>
-												<span className="truncate text-base-content/50 text-xs">
-													{item.category || "No Category"} • {formatBytes(item.file_size)}
-												</span>
-											</div>
+								importHistory.map((item) => {
+									const isExpanded = expandedHistory[item.id];
+									return (
+										<div
+											key={item.id}
+											className={`flex flex-col overflow-hidden rounded-lg border-l-4 border-success bg-base-200/30 transition-all ${isExpanded ? "ring-1 ring-success/20" : ""}`}
+										>
+											<button
+												type="button"
+												onClick={() => toggleHistory(item.id)}
+												className="flex items-center justify-between gap-4 p-2 text-left text-sm transition-colors hover:bg-base-200/50"
+											>
+												<div className="flex min-w-0 items-center gap-3 truncate">
+													<CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
+													<div className="flex flex-col truncate">
+														<span className="truncate font-medium" title={item.file_name}>
+															{item.file_name}
+														</span>
+														<div className="flex items-center gap-2 truncate text-base-content/50 text-xs">
+															<span
+																className={`badge badge-xs ${getCategoryColor(item.category)} border-none text-[10px]`}
+															>
+																{item.category || "General"}
+															</span>
+															<span>•</span>
+															<span>{formatBytes(item.file_size)}</span>
+														</div>
+													</div>
+												</div>
+												<div className="flex shrink-0 items-center gap-2">
+													<span className="whitespace-nowrap text-base-content/40 text-[11px]">
+														{formatRelativeTime(item.completed_at)}
+													</span>
+													{isExpanded ? (
+														<ChevronUp className="h-3 w-3 opacity-30" />
+													) : (
+														<ChevronDown className="h-3 w-3 opacity-30" />
+													)}
+												</div>
+											</button>
+
+											{isExpanded && (
+												<div className="border-base-300 border-t bg-base-300/20 p-3 text-xs">
+													<div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2">
+														<div className="flex items-center gap-1.5 font-semibold text-base-content/60">
+															<History className="h-3 w-3" />
+															<span>NZB:</span>
+														</div>
+														<div className="break-all font-mono opacity-80">{item.nzb_name}</div>
+
+														<div className="flex items-center gap-1.5 font-semibold text-base-content/60">
+															<Play className="h-3 w-3" />
+															<span>Dest:</span>
+														</div>
+														<div className="break-all font-mono opacity-80">{item.virtual_path}</div>
+
+														{item.library_path && (
+															<>
+																<div className="flex items-center gap-1.5 font-semibold text-base-content/60">
+																	<CheckCircle2 className="h-3 w-3" />
+																	<span>Library:</span>
+																</div>
+																<div className="break-all font-mono opacity-80 text-success">
+																	{item.library_path}
+																</div>
+															</>
+														)}
+
+														<div className="flex items-center gap-1.5 font-semibold text-base-content/60">
+															<Info className="h-3 w-3" />
+															<span>Size:</span>
+														</div>
+														<div className="opacity-80">
+															{formatBytes(item.file_size)} ({item.file_size.toLocaleString()}{" "}
+															bytes)
+														</div>
+
+														{item.metadata && (
+															<>
+																<div className="col-span-2 mt-1 border-base-content/10 border-t pt-2 font-bold opacity-40 uppercase tracking-widest">
+																	Technical Details
+																</div>
+																{(() => {
+																	try {
+																		const meta = JSON.parse(item.metadata);
+																		return (
+																			<>
+																				{meta.segment_count && (
+																					<>
+																						<div className="flex items-center gap-1.5 font-semibold text-base-content/60">
+																							<Info className="h-3 w-3" />
+																							<span>Segments:</span>
+																						</div>
+																						<div className="opacity-80">
+																							{meta.segment_count} articles
+																						</div>
+																					</>
+																				)}
+																				{meta.encryption && (
+																					<>
+																						<div className="flex items-center gap-1.5 font-semibold text-base-content/60">
+																							<Info className="h-3 w-3" />
+																							<span>Encryption:</span>
+																						</div>
+																						<div className="opacity-80 uppercase">
+																							{meta.encryption}
+																						</div>
+																					</>
+																				)}
+																			</>
+																		);
+																	} catch (e) {
+																		return null;
+																	}
+																})()}
+															</>
+														)}
+													</div>
+												</div>
+											)}
 										</div>
-										<span className="shrink-0 whitespace-nowrap text-base-content/40 text-xs">
-											{formatRelativeTime(item.completed_at)}
-										</span>
-									</div>
-								))
+									);
+								})
 							) : (
 								<div className="py-10 text-center text-base-content/50">
 									<History className="mx-auto mb-2 h-8 w-8 opacity-20" />
@@ -340,3 +502,4 @@ export function ActivityHub() {
 		</div>
 	);
 }
+
