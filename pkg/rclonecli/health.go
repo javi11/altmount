@@ -65,6 +65,24 @@ func (m *Manager) RecoverMount(ctx context.Context, provider string) error {
 
 	m.logger.WarnContext(ctx, "Attempting to recover mount", "provider", provider)
 
+	// Pre-recovery rcd liveness probe. If the rcd subprocess has wedged,
+	// every subsequent RPC (mount/unmount, config/create, mount/mount) will
+	// hang on context deadline exceeded. Kill+respawn rcd before issuing
+	// recovery RPCs to break out of that wedge.
+	if !m.pingServerWithTimeout(ctx, 5*time.Second) {
+		m.logger.WarnContext(ctx, "rcd unresponsive during recovery, restarting subprocess", "provider", provider)
+		if err := m.restartServer(ctx); err != nil {
+			return fmt.Errorf("failed to restart wedged rcd: %w", err)
+		}
+		// After restart there is nothing to RC-unmount; skip straight to Mount,
+		// which will recreate the rclone config and FUSE mount on the fresh rcd.
+		if err := m.Mount(ctx, provider, mountInfo.LocalPath, mountInfo.WebDAVURL); err != nil {
+			return fmt.Errorf("failed to recover mount for %s after rcd restart: %w", provider, err)
+		}
+		m.logger.InfoContext(ctx, "Successfully recovered mount after rcd restart", "provider", provider)
+		return nil
+	}
+
 	// First try to unmount cleanly
 	if err := m.unmount(ctx, provider); err != nil {
 		m.logger.ErrorContext(ctx, "Failed to unmount during recovery", "err", err, "provider", provider)
@@ -105,6 +123,37 @@ func (m *Manager) MonitorMounts(ctx context.Context) {
 // performMountHealthCheck checks and attempts to recover unhealthy mounts
 func (m *Manager) performMountHealthCheck() {
 	if !m.IsReady() {
+		return
+	}
+
+	// IsReady() only reflects startup state. Probe the rcd subprocess with a
+	// bounded timeout so a wedged rcd is detected even when no individual
+	// mount has failed yet.
+	if !m.pingServerWithTimeout(m.ctx, 5*time.Second) {
+		m.logger.WarnContext(m.ctx, "rcd unresponsive during health check, restarting subprocess")
+		if err := m.restartServer(m.ctx); err != nil {
+			m.logger.ErrorContext(m.ctx, "Failed to restart wedged rcd", "err", err)
+			return
+		}
+		// restartServer marked all mounts as unmounted. Re-establish each one
+		// against the fresh rcd; each Mount call is independent.
+		m.mountsMutex.RLock()
+		toRemount := make([]*MountInfo, 0, len(m.mounts))
+		for _, mount := range m.mounts {
+			toRemount = append(toRemount, mount)
+		}
+		m.mountsMutex.RUnlock()
+
+		for _, mount := range toRemount {
+			info := mount
+			go func() {
+				if err := m.Mount(m.ctx, info.Provider, info.LocalPath, info.WebDAVURL); err != nil {
+					m.logger.ErrorContext(m.ctx, "Failed to remount after rcd restart", "err", err, "provider", info.Provider)
+				}
+			}()
+		}
+		// Don't fall through to per-mount recovery on this tick; remounts are
+		// in flight and the next tick will assess health.
 		return
 	}
 

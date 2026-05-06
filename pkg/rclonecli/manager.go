@@ -29,11 +29,12 @@ type Manager struct {
 	logger        *slog.Logger
 	ctx           context.Context
 	cancel        context.CancelFunc
-	httpClient    *http.Client
-	serverReady   chan struct{}
-	serverStarted bool
-	mu            sync.RWMutex
-	cfg           *config.Manager
+	httpClient     *http.Client
+	serverReady    chan struct{}
+	processExited  chan struct{}
+	serverStarted  bool
+	mu             sync.RWMutex
+	cfg            *config.Manager
 }
 
 type MountInfo struct {
@@ -79,8 +80,9 @@ func NewManager(cfm *config.Manager) *Manager {
 		logger:      logger,
 		ctx:         ctx,
 		cancel:      cancel,
-		httpClient:  httpclient.NewDefault(),
-		serverReady: make(chan struct{}),
+		httpClient:    httpclient.NewDefault(),
+		serverReady:   make(chan struct{}),
+		processExited: make(chan struct{}),
 	}
 }
 
@@ -151,6 +153,12 @@ func (m *Manager) Start(ctx context.Context) error {
 	}
 	m.serverStarted = true
 
+	// Capture references owned by this lifecycle so a future restart that
+	// swaps these channels under m.mu cannot race with the goroutine below.
+	cmd := m.cmd
+	serverReady := m.serverReady
+	processExited := m.processExited
+
 	// Wait for server to be ready in a goroutine
 	go func() {
 		defer func() {
@@ -160,7 +168,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		}()
 
 		m.waitForServer()
-		close(m.serverReady)
+		close(serverReady)
 
 		// Start mount monitoring once server is ready
 		go func() {
@@ -173,7 +181,14 @@ func (m *Manager) Start(ctx context.Context) error {
 		}()
 
 		// Wait for command to finish and log output
-		err := m.cmd.Wait()
+		err := cmd.Wait()
+		// Signal that the subprocess has exited so restartServer can proceed.
+		select {
+		case <-processExited:
+			// already closed (defensive)
+		default:
+			close(processExited)
+		}
 		switch {
 		case err == nil:
 			m.logger.InfoContext(m.ctx, "Rclone RC server exited normally")
@@ -406,4 +421,96 @@ func (m *Manager) WaitForReady(timeout time.Duration) error {
 
 func (m *Manager) GetLogger() *slog.Logger {
 	return m.logger
+}
+
+// pingServerWithTimeout probes the rcd server with a bounded timeout so a
+// wedged subprocess fails fast instead of hanging the recovery path.
+// Returns true if rcd answers core/version within the timeout.
+func (m *Manager) pingServerWithTimeout(ctx context.Context, timeout time.Duration) bool {
+	probeCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	body, err := json.Marshal(map[string]any{})
+	if err != nil {
+		return false
+	}
+
+	url := fmt.Sprintf("http://localhost:%s/core/version", m.rcPort)
+	req, err := http.NewRequestWithContext(probeCtx, http.MethodPost, url, bytes.NewBuffer(body))
+	if err != nil {
+		return false
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := m.httpClient.Do(req)
+	if err != nil {
+		return false
+	}
+	defer func() {
+		if cerr := resp.Body.Close(); cerr != nil {
+			m.logger.DebugContext(probeCtx, "Failed to close ping response body", "err", cerr)
+		}
+	}()
+	return resp.StatusCode == http.StatusOK
+}
+
+// restartServer force-kills the rcd subprocess and starts a fresh one.
+// Used by recovery paths when the rcd has wedged and is not responding to RPCs.
+// The mount map is preserved; callers are expected to re-establish mounts
+// against the fresh rcd via Mount(...).
+func (m *Manager) restartServer(ctx context.Context) error {
+	m.mu.Lock()
+	cmd := m.cmd
+	exited := m.processExited
+	wasStarted := m.serverStarted
+	m.mu.Unlock()
+
+	if !wasStarted || cmd == nil || cmd.Process == nil {
+		return fmt.Errorf("rcd subprocess not running, cannot restart")
+	}
+
+	m.logger.WarnContext(ctx, "Killing wedged rcd subprocess", "pid", cmd.Process.Pid)
+	if err := cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+		m.logger.ErrorContext(ctx, "Failed to kill rcd process", "err", err)
+		// Continue anyway — the Wait goroutine may still close processExited
+		// if the process eventually dies on its own.
+	}
+
+	// Wait for the existing Start goroutine to observe the exit, with a hard
+	// cap so a stuck Wait doesn't block recovery indefinitely.
+	select {
+	case <-exited:
+	case <-time.After(10 * time.Second):
+		m.logger.WarnContext(ctx, "Timed out waiting for rcd subprocess to exit; proceeding with restart")
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
+	// Reset lifecycle state so Start() will spawn a new subprocess.
+	m.mu.Lock()
+	m.serverStarted = false
+	m.cmd = nil
+	m.serverReady = make(chan struct{})
+	m.processExited = make(chan struct{})
+	m.mu.Unlock()
+
+	if err := m.Start(ctx); err != nil {
+		return fmt.Errorf("failed to restart rcd: %w", err)
+	}
+
+	if err := m.WaitForReady(30 * time.Second); err != nil {
+		return fmt.Errorf("rcd did not become ready after restart: %w", err)
+	}
+
+	// Mark all known mounts as unmounted so the next health-check tick
+	// re-establishes them against the fresh rcd.
+	m.mountsMutex.Lock()
+	for _, mount := range m.mounts {
+		mount.Mounted = false
+		mount.Error = "rcd subprocess restarted; awaiting remount"
+	}
+	m.mountsMutex.Unlock()
+
+	m.logger.InfoContext(ctx, "rcd subprocess restarted successfully")
+	return nil
 }
