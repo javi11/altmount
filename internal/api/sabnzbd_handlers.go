@@ -145,9 +145,8 @@ func (s *Server) handleSABnzbdResume(c *fiber.Ctx) error {
 }
 
 // handleSABnzbdSwitch handles queue position switching.
-// value2 is a 0-based queue position (0 = top) per the SABnzbd API spec.
-// Some clients also send text-based priority tokens ("high", "force", etc.).
-// Position 0 (move to top) maps to High priority; any other numeric position maps to Normal.
+// value2 is a 0-based queue position (0 = top) per the SABnzbd API spec,
+// but some clients send text-based priority tokens instead.
 func (s *Server) handleSABnzbdSwitch(c *fiber.Ctx) error {
 	value := c.Query("value")
 	value2 := c.Query("value2")
@@ -156,19 +155,10 @@ func (s *Server) handleSABnzbdSwitch(c *fiber.Ctx) error {
 		return s.writeSABnzbdErrorFiber(c, "Missing parameters")
 	}
 
-	// Map queue position or legacy priority token to AltMount priority.
-	var priority database.QueuePriority
-	switch strings.ToLower(value2) {
-	case "force", "2", "high", "1":
+	priority := s.parseSABnzbdPriority(value2)
+	// Position 0 = "move to top of queue" — override to High regardless of token mapping.
+	if value2 == "0" {
 		priority = database.QueuePriorityHigh
-	case "low", "-1", "paused", "-2":
-		priority = database.QueuePriorityLow
-	case "0":
-		// Position 0 = move to top of queue → highest priority.
-		priority = database.QueuePriorityHigh
-	default:
-		// Any other numeric position → normal priority.
-		priority = database.QueuePriorityNormal
 	}
 
 	// Attempt to parse as database ID first
