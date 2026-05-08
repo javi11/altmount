@@ -1878,9 +1878,9 @@ func (r *Repository) ClearHourlyStatsSince(ctx context.Context, since time.Time)
 }
 
 // GetExpiredStremioQueueItems returns completed Stremio queue items whose completed_at
-// is older than ttlHours. Items are identified as Stremio-originated by their nzb_path
-// containing tempUploadDir (typically os.TempDir()+"/altmount-uploads").
-func (r *Repository) GetExpiredStremioQueueItems(ctx context.Context, ttlHours int, tempUploadDir string) ([]*ImportQueueItem, error) {
+// is older than ttlHours. Items are identified as Stremio-originated by their download_id
+// having the "stremio:" prefix set when the addon enqueues an import.
+func (r *Repository) GetExpiredStremioQueueItems(ctx context.Context, ttlHours int) ([]*ImportQueueItem, error) {
 	var cutoffExpr string
 	if r.dialect.IsPostgres() {
 		cutoffExpr = fmt.Sprintf("NOW() - INTERVAL '%d hours'", ttlHours)
@@ -1894,12 +1894,12 @@ func (r *Repository) GetExpiredStremioQueueItems(ctx context.Context, ttlHours i
 		FROM import_queue
 		WHERE status = 'completed'
 		  AND completed_at < %s
-		  AND nzb_path LIKE ?
+		  AND download_id LIKE 'stremio:%%'
 		ORDER BY completed_at ASC
 		LIMIT 100
 	`, cutoffExpr)
 
-	rows, err := r.db.QueryContext(ctx, query, "%"+tempUploadDir+"%")
+	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query expired stremio queue items: %w", err)
 	}

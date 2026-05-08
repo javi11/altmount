@@ -13,11 +13,16 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 	"github.com/javi11/altmount/internal/auth"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/prowlarr"
 )
+
+// stremioDownloadIDPrefix marks queue items originating from the Stremio addon.
+// Used by the cleanup service to identify and expire those items.
+const stremioDownloadIDPrefix = "stremio:"
 
 // stremioManifest is the Stremio addon manifest response.
 type stremioManifest struct {
@@ -402,7 +407,8 @@ func (s *Server) handleStremioAddonPlay(c *fiber.Ctx) error {
 	case "series":
 		category = "TV"
 	}
-	item, err := s.importerService.AddToQueue(ctx, tempPath, basePath, &category, &priority, nil, nil)
+	stremioDownloadID := stremioDownloadIDPrefix + uuid.NewString()
+	item, err := s.importerService.AddToQueue(ctx, tempPath, basePath, &category, &priority, nil, &stremioDownloadID)
 	if err != nil {
 		os.Remove(tempPath)
 		slog.ErrorContext(ctx, "Failed to add Prowlarr NZB to queue", "error", err, "title", safeTitle)
