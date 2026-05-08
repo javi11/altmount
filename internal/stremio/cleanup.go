@@ -13,7 +13,7 @@ import (
 )
 
 // StremioCleanupService periodically removes expired Stremio-originated queue items
-// along with their associated .meta files and temp NZB files.
+// along with their associated .meta files, storage directory, and persistent NZB files.
 type StremioCleanupService struct {
 	queueRepo       *database.Repository
 	metadataService *metadata.MetadataService
@@ -50,9 +50,6 @@ func (s *StremioCleanupService) StartCleanup(ctx context.Context) {
 	}()
 }
 
-// tempUploadDir is the directory where Stremio-originated NZB files are stored.
-var tempUploadDir = filepath.Join(os.TempDir(), "altmount-uploads")
-
 func (s *StremioCleanupService) cleanupExpired(ctx context.Context) {
 	cfg := s.configGetter()
 	ttlHours := cfg.Stremio.NzbTTLHours
@@ -60,7 +57,7 @@ func (s *StremioCleanupService) cleanupExpired(ctx context.Context) {
 		return
 	}
 
-	items, err := s.queueRepo.GetExpiredStremioQueueItems(ctx, ttlHours, tempUploadDir)
+	items, err := s.queueRepo.GetExpiredStremioQueueItems(ctx, ttlHours)
 	if err != nil {
 		slog.ErrorContext(ctx, "StremioCleanup: failed to query expired items", "error", err)
 		return
@@ -79,33 +76,35 @@ func (s *StremioCleanupService) deleteItem(ctx context.Context, item *database.I
 	if item.StoragePath != nil && *item.StoragePath != "" {
 		storagePath := *item.StoragePath
 		if s.metadataService.DirectoryExists(storagePath) {
-			// Directory: delete each .meta file inside
-			files, err := s.metadataService.ListDirectory(storagePath)
-			if err != nil {
-				slog.ErrorContext(ctx, "StremioCleanup: failed to list directory", "path", storagePath, "error", err)
-			} else {
-				for _, filename := range files {
-					virtualPath := filepath.Join(storagePath, filename)
-					if err := s.metadataService.DeleteFileMetadataWithSourceNzb(ctx, virtualPath, false); err != nil {
-						slog.ErrorContext(ctx, "StremioCleanup: failed to delete meta", "path", virtualPath, "error", err)
-					}
-				}
+			// Multi-file: remove the entire metadata subtree (including nested .meta files)
+			if err := s.metadataService.DeleteDirectory(storagePath); err != nil {
+				slog.ErrorContext(ctx, "StremioCleanup: failed to delete storage directory",
+					"path", storagePath, "error", err)
 			}
-			// Delete the temp NZB manually (source NZB not tracked per-file in directory case)
+			// Remove the persistent NZB file (one source NZB shared by all files in the dir)
 			if err := os.Remove(item.NzbPath); err != nil && !os.IsNotExist(err) {
-				slog.ErrorContext(ctx, "StremioCleanup: failed to delete temp NZB", "path", item.NzbPath, "error", err)
+				slog.ErrorContext(ctx, "StremioCleanup: failed to delete persistent NZB",
+					"path", item.NzbPath, "error", err)
 			}
 		} else {
 			// Single file: delete .meta + source NZB together
 			if err := s.metadataService.DeleteFileMetadataWithSourceNzb(ctx, storagePath, true); err != nil {
-				slog.ErrorContext(ctx, "StremioCleanup: failed to delete meta+nzb", "path", storagePath, "error", err)
+				slog.ErrorContext(ctx, "StremioCleanup: failed to delete meta+nzb",
+					"path", storagePath, "error", err)
 			}
 		}
 	} else {
-		// No storage path recorded — just delete the temp NZB if it still exists
+		// No storage path recorded — just delete the persistent NZB if it still exists
 		if err := os.Remove(item.NzbPath); err != nil && !os.IsNotExist(err) {
-			slog.ErrorContext(ctx, "StremioCleanup: failed to delete temp NZB", "path", item.NzbPath, "error", err)
+			slog.ErrorContext(ctx, "StremioCleanup: failed to delete persistent NZB",
+				"path", item.NzbPath, "error", err)
 		}
+	}
+
+	// Best-effort: prune the per-id parent folder under .nzbs (e.g. /config/.nzbs/Movies/123/)
+	// once it is empty. os.Remove only succeeds on empty directories, so this is safe.
+	if parent := filepath.Dir(item.NzbPath); parent != "" && parent != "." && parent != "/" {
+		_ = os.Remove(parent)
 	}
 
 	// Remove queue DB entry regardless of file deletion outcome
