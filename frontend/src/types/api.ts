@@ -63,6 +63,7 @@ export interface ImportHistoryItem {
 	virtual_path: string;
 	library_path?: string;
 	category?: string;
+	metadata?: string;
 	file_size: number;
 	completed_at: string;
 }

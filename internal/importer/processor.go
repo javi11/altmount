@@ -406,7 +406,7 @@ func (proc *Processor) processSingleFile(
 	// Record history
 	if proc.recorder != nil {
 		nzbID := int64(queueID)
-		_ = proc.recorder.AddImportHistory(ctx, &database.ImportHistory{
+		if err := proc.recorder.AddImportHistory(ctx, &database.ImportHistory{
 			NzbID:       &nzbID,
 			NzbName:     nzbName,
 			FileName:    finalName,
@@ -415,7 +415,9 @@ func (proc *Processor) processSingleFile(
 			Category:    category,
 			Metadata:    metadata,
 			CompletedAt: time.Now(),
-		})
+		}); err != nil {
+			proc.log.ErrorContext(ctx, "Failed to add import history", "error", err, "nzb_name", nzbName)
+		}
 	}
 
 	return result, writtenPaths, nil
@@ -508,12 +510,13 @@ func (proc *Processor) processMultiFile(
 	// Record history
 	if proc.recorder != nil {
 		nzbID := int64(queueID)
+
 		var totalSize int64
 		for _, f := range regularFiles {
 			totalSize += f.Size
 		}
 
-		_ = proc.recorder.AddImportHistory(ctx, &database.ImportHistory{
+		if err := proc.recorder.AddImportHistory(ctx, &database.ImportHistory{
 			NzbID:       &nzbID,
 			NzbName:     nzbName,
 			FileName:    filepath.Base(targetBaseDir),
@@ -522,7 +525,9 @@ func (proc *Processor) processMultiFile(
 			Category:    category,
 			Metadata:    metadata,
 			CompletedAt: time.Now(),
-		})
+		}); err != nil {
+			proc.log.ErrorContext(ctx, "Failed to add import history", "error", err, "nzb_name", nzbName)
+		}
 	}
 
 	return targetBaseDir, writtenPaths, nil
@@ -648,7 +653,7 @@ func (proc *Processor) processRarArchive(
 			totalSize += f.Size
 		}
 
-		_ = proc.recorder.AddImportHistory(ctx, &database.ImportHistory{
+		if err := proc.recorder.AddImportHistory(ctx, &database.ImportHistory{
 			NzbID:       &nzbID,
 			NzbName:     nzbName,
 			FileName:    filepath.Base(nzbFolder),
@@ -657,7 +662,9 @@ func (proc *Processor) processRarArchive(
 			Category:    category,
 			Metadata:    metadata,
 			CompletedAt: time.Now(),
-		})
+		}); err != nil {
+			proc.log.ErrorContext(ctx, "Failed to add import history", "error", err, "nzb_name", nzbName)
+		}
 	}
 
 	return nzbFolder, writtenPaths, nil
@@ -782,7 +789,7 @@ func (proc *Processor) processSevenZipArchive(
 			totalSize += f.Size
 		}
 
-		_ = proc.recorder.AddImportHistory(ctx, &database.ImportHistory{
+		if err := proc.recorder.AddImportHistory(ctx, &database.ImportHistory{
 			NzbID:       &nzbID,
 			NzbName:     nzbName,
 			FileName:    filepath.Base(nzbFolder),
@@ -791,7 +798,9 @@ func (proc *Processor) processSevenZipArchive(
 			Category:    category,
 			Metadata:    metadata,
 			CompletedAt: time.Now(),
-		})
+		}); err != nil {
+			proc.log.ErrorContext(ctx, "Failed to add import history", "error", err, "nzb_name", nzbName)
+		}
 	}
 
 	return nzbFolder, writtenPaths, nil
