@@ -259,7 +259,7 @@ func (s *Server) handleDeleteQueue(c *fiber.Ctx) error {
 // handleRetryQueue handles POST /api/queue/{id}/retry
 //
 //	@Summary		Retry queue item
-//	@Description	Resets a failed, pending, or completed queue item to pending and triggers processing.
+//	@Description	Resets a failed, pending, or completed queue item to pending so it is picked up by the worker pool.
 //	@Tags			Queue
 //	@Produce		json
 //	@Param			id	path		int	true	"Queue item ID"
@@ -301,11 +301,6 @@ func (s *Server) handleRetryQueue(c *fiber.Ctx) error {
 	err = s.queueRepo.UpdateQueueItemStatus(c.Context(), id, database.QueueStatusPending, nil)
 	if err != nil {
 		return RespondInternalError(c, "Failed to retry queue item", err.Error())
-	}
-
-	// Trigger background processing immediately
-	if s.importerService != nil {
-		s.importerService.ProcessItemInBackground(c.Context(), id)
 	}
 
 	if s.progressBroadcaster != nil {
