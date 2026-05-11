@@ -10,12 +10,61 @@ AltMount provides a comprehensive REST API for programmatic integration and auto
 
 ## Authentication
 
-AltMount supports two authentication methods:
+Almost every endpoint under `/api/*` requires a **JWT** issued by `POST /api/auth/login`. The `?apikey=...` query parameter is **not** accepted on most endpoints — it only works on the small set of compatibility routes listed below. Requests without a valid JWT receive:
 
-- **Bearer token** (JWT): `Authorization: Bearer <token>` — obtained via `POST /api/auth/login`
-- **API key** (query parameter): `?apikey=YOUR_API_KEY` — found in System → Settings
+```json
+{ "success": false, "message": "Authentication required" }
+```
 
-Most endpoints accept either method.
+### Obtain a JWT
+
+`POST /api/auth/login` accepts a JSON body of `{ "username": "...", "password": "..." }`. On success the server sets an **HTTP-only `JWT` cookie** — the token is **not** included in the response body, so you must either keep the cookie or read the `Set-Cookie` header.
+
+**Option A — use a cookie jar (recommended for scripts):**
+
+```bash
+# 1. Log in and store the cookie
+curl -c cookies.txt -X POST 'http://altmount.local:8585/api/auth/login' \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"yourpassword"}'
+
+# 2. Reuse the cookie on subsequent requests
+curl -b cookies.txt -X POST 'http://altmount.local:8585/api/health/bulk/restart' \
+  -H 'Content-Type: application/json' \
+  -d '{"ids":[0]}'
+```
+
+**Option B — extract the token and send it as a Bearer header:**
+
+```bash
+TOKEN=$(curl -s -i -X POST 'http://altmount.local:8585/api/auth/login' \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"yourpassword"}' \
+  | awk -F'[=;]' '/^[Ss]et-[Cc]ookie: JWT=/ {print $2}')
+
+curl -X POST 'http://altmount.local:8585/api/health/bulk/restart' \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"ids":[0]}'
+```
+
+The JWT can be presented in any of these ways: the `JWT` cookie, an `Authorization: Bearer <token>` header, or the `X-JWT` header.
+
+### Endpoints that accept the API key query parameter
+
+The per-user **API key** (visible in **System → Settings**) is only honoured by routes that read it explicitly. Sending `?apikey=` to any other endpoint will return “Authentication required”. The currently supported endpoints are:
+
+| Endpoint | Accepts |
+|----------|---------|
+| `/api/sabnzbd/*` — SABnzbd-compatible API | `?apikey=` or `ma_username` + `ma_password` |
+| `POST /api/arrs/webhook` — Sonarr/Radarr webhook | `?apikey=` (required) |
+| `POST /api/import/nzbdav` and related `/api/import/nzbdav/*` routes | `?apikey=` |
+
+For everything else (queue, health, files, config, providers, system, FUSE, user, etc.) use the JWT flow above.
+
+### Stremio addon
+
+The Stremio addon is **not** authenticated with the API key. It uses a separate `download_key` (the SHA-256 of your API key) embedded in the URL: `/stremio/:key/manifest.json` and `/stremio/:key/stream/:type/:id.json`. The exact key is shown in the AltMount UI on the Stremio configuration page.
 
 ## Endpoint Categories
 
