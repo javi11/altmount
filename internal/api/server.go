@@ -400,7 +400,6 @@ func (s *Server) Shutdown(ctx context.Context) {
 //	@Param			type	query		string	false	"Filter by source type (e.g. file)"
 //	@Success		200		{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/files/active-streams [get]
 func (s *Server) handleGetActiveStreams(c *fiber.Ctx) error {
 	if s.streamTracker == nil {
@@ -499,7 +498,6 @@ func (s *Server) checkSystemHealth(ctx context.Context) SystemHealthResponse {
 //	@Success		200	{object}	APIResponse
 //	@Failure		503	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/health/library-sync/status [get]
 func (s *Server) handleGetLibrarySyncStatus(c *fiber.Ctx) error {
 	if s.librarySyncWorker == nil {
@@ -521,7 +519,6 @@ func (s *Server) handleGetLibrarySyncStatus(c *fiber.Ctx) error {
 //	@Success		200	{object}	APIResponse
 //	@Failure		503	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/health/library-sync/start [post]
 func (s *Server) handleStartLibrarySync(c *fiber.Ctx) error {
 	if s.librarySyncWorker == nil {
@@ -543,7 +540,6 @@ func (s *Server) handleStartLibrarySync(c *fiber.Ctx) error {
 //	@Success		200	{object}	APIResponse
 //	@Failure		503	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/health/library-sync/cancel [post]
 func (s *Server) handleCancelLibrarySync(c *fiber.Ctx) error {
 	if s.librarySyncWorker == nil {
@@ -565,7 +561,6 @@ func (s *Server) handleCancelLibrarySync(c *fiber.Ctx) error {
 //	@Success		200	{object}	APIResponse{data=DryRunSyncResult}
 //	@Failure		503	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/health/library-sync/dry-run [post]
 func (s *Server) handleDryRunLibrarySync(c *fiber.Ctx) error {
 	if s.librarySyncWorker == nil {
@@ -586,7 +581,6 @@ func (s *Server) handleDryRunLibrarySync(c *fiber.Ctx) error {
 //	@Produce		json
 //	@Success		200	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/health/library-sync/needed [get]
 func (s *Server) handleGetSyncNeeded(c *fiber.Ctx) error {
 	handlers := NewLibrarySyncHandlers(s.librarySyncWorker, s.configManager)
@@ -603,7 +597,6 @@ func (s *Server) handleGetSyncNeeded(c *fiber.Ctx) error {
 //	@Success		200	{object}	APIResponse
 //	@Failure		404	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/files/active-streams/{id} [delete]
 func (s *Server) handleKillStream(c *fiber.Ctx) error {
 	id := c.Params("id")
@@ -635,7 +628,6 @@ func (s *Server) handleKillStream(c *fiber.Ctx) error {
 //	@Produce		json
 //	@Success		200	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/files/streams/history [get]
 func (s *Server) handleGetStreamHistory(c *fiber.Ctx) error {
 	if s.streamTracker == nil {

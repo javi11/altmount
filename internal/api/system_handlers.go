@@ -27,7 +27,6 @@ var lastMissingWarnTime sync.Map
 //	@Success		200	{object}	APIResponse{data=SystemStatsResponse}
 //	@Failure		500	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/system/stats [get]
 func (s *Server) handleGetSystemStats(c *fiber.Ctx) error {
 	// Get queue statistics
@@ -71,7 +70,6 @@ func (s *Server) handleGetSystemStats(c *fiber.Ctx) error {
 //	@Produce		json
 //	@Success		200	{object}	APIResponse{data=SystemHealthResponse}
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/system/health [get]
 func (s *Server) handleGetSystemHealth(c *fiber.Ctx) error {
 	// Perform health checks
@@ -117,7 +115,6 @@ func (s *Server) handleGetSystemHealth(c *fiber.Ctx) error {
 //	@Success		200		{object}	APIResponse{data=SystemCleanupResponse}
 //	@Failure		400		{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/system/cleanup [post]
 func (s *Server) handleSystemCleanup(c *fiber.Ctx) error {
 	// Parse request body
@@ -229,7 +226,6 @@ func (s *Server) handleSystemCleanup(c *fiber.Ctx) error {
 //	@Param			body	body		SystemRestartRequest	false	"Restart options"
 //	@Success		200		{object}	APIResponse{data=SystemRestartResponse}
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/system/restart [post]
 func (s *Server) handleSystemRestart(c *fiber.Ctx) error {
 	// Parse request body if present
@@ -272,7 +268,6 @@ func (s *Server) handleSystemRestart(c *fiber.Ctx) error {
 //	@Produce		json
 //	@Success		200	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/system/stats/reset [post]
 func (s *Server) handleResetSystemStats(c *fiber.Ctx) error {
 	ctx := c.Context()
@@ -407,7 +402,6 @@ func (s *Server) performRestart(ctx context.Context) {
 //	@Param			interval query		string false "Aggregation interval (daily, weekly, monthly, yearly)"
 //	@Success		200		{object}	APIResponse{data=ProviderHistoricalStatsResponse}
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/system/provider-stats [get]
 func (s *Server) handleGetProviderHistoricalStats(c *fiber.Ctx) error {
 	daysStr := c.Query("days", "30")
@@ -468,7 +462,6 @@ func (s *Server) handleGetProviderHistoricalStats(c *fiber.Ctx) error {
 //	@Param			days	query		int	false	"Number of days to fetch data for (default: 30)"
 //	@Success		200		{object}	APIResponse{data=ProviderSpeedTestHistoryResponse}
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/system/provider-speed-history [get]
 func (s *Server) handleGetProviderSpeedHistory(c *fiber.Ctx) error {
 	daysStr := c.Query("days", "30")
@@ -520,7 +513,6 @@ func (s *Server) handleGetProviderSpeedHistory(c *fiber.Ctx) error {
 //	@Produce		json
 //	@Success		200	{object}	APIResponse{data=PoolMetricsResponse}
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/system/pool/metrics [get]
 func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 	// Check if pool manager is available
@@ -772,7 +764,6 @@ type FileEntry struct {
 //	@Success		200		{object}	APIResponse
 //	@Failure		400		{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/system/browse [get]
 func (s *Server) handleSystemBrowse(c *fiber.Ctx) error {
 	path := c.Query("path")

@@ -33,7 +33,6 @@ import (
 //	@Success		200			{object}	APIResponse{data=[]HealthItemResponse,meta=APIMeta}
 //	@Failure		400			{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/health [get]
 func (s *Server) handleListHealth(c *fiber.Ctx) error {
 	// Parse pagination
@@ -135,7 +134,6 @@ func (s *Server) countHealthItems(ctx context.Context, statusFilter *database.He
 //	@Failure		400	{object}	APIResponse
 //	@Failure		404	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/health/{id} [get]
 func (s *Server) handleGetHealth(c *fiber.Ctx) error {
 	// Extract ID from path parameter
@@ -176,7 +174,6 @@ func (s *Server) handleGetHealth(c *fiber.Ctx) error {
 //	@Failure		400				{object}	APIResponse
 //	@Failure		404				{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/health/{id} [delete]
 func (s *Server) handleDeleteHealth(c *fiber.Ctx) error {
 	// Extract ID from path parameter
@@ -270,7 +267,6 @@ func (s *Server) handleDeleteHealth(c *fiber.Ctx) error {
 //	@Success		200		{object}	APIResponse
 //	@Failure		400		{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/health/bulk/delete [post]
 func (s *Server) handleDeleteHealthBulk(c *fiber.Ctx) error {
 	// Parse request body
@@ -365,7 +361,6 @@ func (s *Server) handleDeleteHealthBulk(c *fiber.Ctx) error {
 //	@Failure		400		{object}	APIResponse
 //	@Failure		404		{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/health/{id}/repair [post]
 func (s *Server) handleRepairHealth(c *fiber.Ctx) error {
 	// Extract ID from path parameter
@@ -481,7 +476,6 @@ func (s *Server) handleRepairHealth(c *fiber.Ctx) error {
 //	@Success		200		{object}	APIResponse
 //	@Failure		400		{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/health/bulk/repair [post]
 func (s *Server) handleRepairHealthBulk(c *fiber.Ctx) error {
 	// Parse request body
@@ -583,7 +577,6 @@ func (s *Server) handleRepairHealthBulk(c *fiber.Ctx) error {
 //	@Success		200		{object}	APIResponse{data=[]HealthItemResponse,meta=APIMeta}
 //	@Failure		500		{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/health/corrupted [get]
 func (s *Server) handleListCorrupted(c *fiber.Ctx) error {
 	// Parse pagination
@@ -642,7 +635,6 @@ func (s *Server) handleListCorrupted(c *fiber.Ctx) error {
 //	@Success		200	{object}	APIResponse{data=HealthStatsResponse}
 //	@Failure		500	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/health/stats [get]
 func (s *Server) handleGetHealthStats(c *fiber.Ctx) error {
 	stats, err := s.healthRepo.GetHealthStats(c.Context())
@@ -665,7 +657,6 @@ func (s *Server) handleGetHealthStats(c *fiber.Ctx) error {
 //	@Success		200		{object}	APIResponse
 //	@Failure		400		{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/health/cleanup [delete]
 func (s *Server) handleCleanupHealth(c *fiber.Ctx) error {
 	// Parse request body
@@ -854,7 +845,6 @@ func (s *Server) cleanupHealthRecords(ctx context.Context, olderThan time.Time, 
 //	@Success		201		{object}	APIResponse{data=HealthItemResponse}
 //	@Failure		400		{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/health/check [post]
 func (s *Server) handleAddHealthCheck(c *fiber.Ctx) error {
 	// Parse request body
@@ -902,7 +892,6 @@ func (s *Server) handleAddHealthCheck(c *fiber.Ctx) error {
 //	@Produce		json
 //	@Success		200	{object}	APIResponse{data=HealthWorkerStatusResponse}
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/health/worker/status [get]
 func (s *Server) handleGetHealthWorkerStatus(c *fiber.Ctx) error {
 	if s.healthWorker == nil {
@@ -938,7 +927,6 @@ func (s *Server) handleGetHealthWorkerStatus(c *fiber.Ctx) error {
 //	@Failure		400	{object}	APIResponse
 //	@Failure		404	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/health/{id}/check-now [post]
 func (s *Server) handleDirectHealthCheck(c *fiber.Ctx) error {
 	// Extract ID from path parameter
@@ -1044,7 +1032,6 @@ type SegmentsInfo struct {
 //	@Success		200		{object}	APIResponse
 //	@Failure		400		{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/health/bulk/restart [post]
 func (s *Server) handleRestartHealthChecksBulk(c *fiber.Ctx) error {
 	// Parse request body
@@ -1107,7 +1094,6 @@ func (s *Server) handleRestartHealthChecksBulk(c *fiber.Ctx) error {
 //	@Failure		400	{object}	APIResponse
 //	@Failure		404	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/health/{id}/cancel [post]
 func (s *Server) handleCancelHealthCheck(c *fiber.Ctx) error {
 	// Extract ID from path parameter
@@ -1178,7 +1164,6 @@ func (s *Server) handleCancelHealthCheck(c *fiber.Ctx) error {
 //	@Failure		400	{object}	APIResponse
 //	@Failure		404	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/health/{id}/unmask [post]
 func (s *Server) handleUnmaskHealth(c *fiber.Ctx) error {
 	// Extract ID from path parameter
@@ -1239,7 +1224,6 @@ func (s *Server) handleUnmaskHealth(c *fiber.Ctx) error {
 //	@Failure		400		{object}	APIResponse
 //	@Failure		404		{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/health/{id}/priority [post]
 func (s *Server) handleSetHealthPriority(c *fiber.Ctx) error {
 	// Extract ID from path parameter
@@ -1306,7 +1290,6 @@ func (s *Server) handleSetHealthPriority(c *fiber.Ctx) error {
 //	@Success		200	{object}	APIResponse
 //	@Failure		500	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/health/reset-all [post]
 func (s *Server) handleResetAllHealthChecks(c *fiber.Ctx) error {
 	// Reset all items to pending status using repository method

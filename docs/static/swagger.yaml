@@ -1606,7 +1606,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Register ARR download clients
       tags:
       - ARRs
@@ -1623,7 +1622,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Test ARR download clients
       tags:
       - ARRs
@@ -1640,7 +1638,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Get ARR health
       tags:
       - ARRs
@@ -1656,7 +1653,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: List ARR instances
       tags:
       - ARRs
@@ -1687,7 +1683,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Get ARR instance
       tags:
       - ARRs
@@ -1716,7 +1711,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Test ARR connection
       tags:
       - ARRs
@@ -1732,7 +1726,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Get ARR statistics
       tags:
       - ARRs
@@ -1787,7 +1780,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Register ARR webhooks
       tags:
       - ARRs
@@ -1917,7 +1909,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Get configuration
       tags:
       - Config
@@ -1946,7 +1937,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Update configuration
       tags:
       - Config
@@ -1981,7 +1971,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Patch configuration section
       tags:
       - Config
@@ -2021,7 +2010,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Test provider download speed
       tags:
       - Providers
@@ -2041,7 +2029,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Reload configuration
       tags:
       - Config
@@ -2070,7 +2057,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Validate configuration
       tags:
       - Config
@@ -2092,7 +2078,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: List active streams
       tags:
       - Files
@@ -2118,7 +2103,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Kill active stream
       tags:
       - Files
@@ -2154,7 +2138,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Batch export files as NZBs
       tags:
       - Files
@@ -2183,7 +2166,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Export file metadata as NZB
       tags:
       - Files
@@ -2219,7 +2201,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Get file metadata
       tags:
       - Files
@@ -2235,7 +2216,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Get stream history
       tags:
       - Files
@@ -2252,7 +2232,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Force stop FUSE mount
       tags:
       - FUSE
@@ -2288,7 +2267,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Start FUSE mount
       tags:
       - FUSE
@@ -2305,7 +2283,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Get FUSE status
       tags:
       - FUSE
@@ -2325,7 +2302,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Stop FUSE mount
       tags:
       - FUSE
@@ -2400,7 +2376,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: List health records
       tags:
       - Health
@@ -2433,7 +2408,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Delete health record
       tags:
       - Health
@@ -2467,7 +2441,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Get health record
       tags:
       - Health
@@ -2497,7 +2470,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Cancel health check
       tags:
       - Health
@@ -2532,7 +2504,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Trigger immediate health check
       tags:
       - Health
@@ -2578,7 +2549,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Set health check priority
       tags:
       - Health
@@ -2620,7 +2590,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Trigger health repair
       tags:
       - Health
@@ -2656,7 +2625,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Unmask health record
       tags:
       - Health
@@ -2690,7 +2658,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Bulk delete health records
       tags:
       - Health
@@ -2724,7 +2691,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Bulk trigger health repair
       tags:
       - Health
@@ -2758,7 +2724,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Bulk restart health checks
       tags:
       - Health
@@ -2792,7 +2757,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Add file for health check
       tags:
       - Health
@@ -2821,7 +2785,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Cleanup health records
       tags:
       - Health
@@ -2859,7 +2822,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: List corrupted files
       tags:
       - Health
@@ -2879,7 +2841,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Cancel library sync
       tags:
       - Health
@@ -2905,7 +2866,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Dry-run library sync
       tags:
       - Health
@@ -2922,7 +2882,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Check if library sync is needed
       tags:
       - Health
@@ -2943,7 +2902,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Start library sync
       tags:
       - Health
@@ -2963,7 +2921,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Get library sync status
       tags:
       - Health
@@ -2984,7 +2941,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Regenerate library symlinks
       tags:
       - Health
@@ -3005,7 +2961,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Reset all health checks
       tags:
       - Health
@@ -3030,7 +2985,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Get health statistics
       tags:
       - Health
@@ -3052,7 +3006,6 @@ paths:
               type: object
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Get health worker status
       tags:
       - Health
@@ -3114,7 +3067,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Clear import history
       tags:
       - Import
@@ -3151,7 +3103,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Get import history
       tags:
       - Import
@@ -3167,7 +3118,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Cancel NZBDav import
       tags:
       - Import
@@ -3195,7 +3145,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Import from NZBDav source
       tags:
       - Import
@@ -3211,7 +3160,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Reset NZBDav import status
       tags:
       - Import
@@ -3227,7 +3175,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Get NZBDav import status
       tags:
       - Import
@@ -3243,7 +3190,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Cancel directory scan
       tags:
       - Import
@@ -3271,7 +3217,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Start manual directory scan
       tags:
       - Import
@@ -3292,7 +3237,6 @@ paths:
               type: object
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Get scan status
       tags:
       - Import
@@ -3375,7 +3319,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Create NNTP provider
       tags:
       - Providers
@@ -3399,7 +3342,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Delete NNTP provider
       tags:
       - Providers
@@ -3441,7 +3383,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Update NNTP provider
       tags:
       - Providers
@@ -3470,7 +3411,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Reorder NNTP providers
       tags:
       - Providers
@@ -3505,7 +3445,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Test NNTP provider
       tags:
       - Providers
@@ -3581,7 +3520,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: List queue items
       tags:
       - Queue
@@ -3614,7 +3552,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Delete queue item
       tags:
       - Queue
@@ -3648,7 +3585,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Get queue item
       tags:
       - Queue
@@ -3682,7 +3618,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Cancel queue item
       tags:
       - Queue
@@ -3710,7 +3645,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Download NZB file
       tags:
       - Queue
@@ -3760,7 +3694,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Update queue item priority
       tags:
       - Queue
@@ -3800,7 +3733,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Retry queue item
       tags:
       - Queue
@@ -3839,7 +3771,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Bulk delete queue items
       tags:
       - Queue
@@ -3873,7 +3804,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Bulk cancel queue items
       tags:
       - Queue
@@ -3911,7 +3841,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Bulk restart queue items
       tags:
       - Queue
@@ -3931,7 +3860,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Clear completed queue items
       tags:
       - Queue
@@ -3951,7 +3879,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Clear failed queue items
       tags:
       - Queue
@@ -3971,7 +3898,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Clear pending queue items
       tags:
       - Queue
@@ -3997,7 +3923,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Get queue statistics
       tags:
       - Queue
@@ -4028,7 +3953,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Get historical queue statistics
       tags:
       - Queue
@@ -4070,7 +3994,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Add test download to queue
       tags:
       - Queue
@@ -4119,7 +4042,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Upload NZB file to queue
       tags:
       - Queue
@@ -4168,7 +4090,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Search NZB by name and add to queue
       tags:
       - Queue
@@ -4213,7 +4134,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Add NZBLnk links to queue
       tags:
       - Queue
@@ -4339,7 +4259,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Browse filesystem
       tags:
       - System
@@ -4373,7 +4292,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: System cleanup
       tags:
       - System
@@ -4395,7 +4313,6 @@ paths:
               type: object
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Get system health
       tags:
       - System
@@ -4417,7 +4334,6 @@ paths:
               type: object
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Get NNTP pool metrics
       tags:
       - System
@@ -4447,7 +4363,6 @@ paths:
               type: object
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Restart system
       tags:
       - System
@@ -4472,7 +4387,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Get system statistics
       tags:
       - System
@@ -4489,7 +4403,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Reset system statistics
       tags:
       - System
@@ -4525,7 +4438,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Apply update
       tags:
       - System
@@ -4559,7 +4471,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Get update status
       tags:
       - System
@@ -4584,7 +4495,6 @@ paths:
             $ref: '#/definitions/api.APIResponse'
       security:
       - BearerAuth: []
-      - ApiKeyAuth: []
       summary: Get current user
       tags:
       - User

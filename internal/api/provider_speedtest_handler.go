@@ -29,7 +29,6 @@ type ProviderSpeedTestResponse struct {
 //	@Failure		404	{object}	APIResponse
 //	@Failure		500	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/config/providers/{id}/speedtest [post]
 func (s *Server) handleTestProviderSpeed(c *fiber.Ctx) error {
 	providerID := c.Params("id")

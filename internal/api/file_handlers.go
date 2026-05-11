@@ -30,7 +30,6 @@ import (
 //	@Failure		400		{object}	APIResponse
 //	@Failure		500		{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/files/info [get]
 func (s *Server) handleGetFileMetadata(c *fiber.Ctx) error {
 	// Get path from query parameters
@@ -205,7 +204,6 @@ type nzbHead struct {
 //	@Failure		400	{object}	APIResponse
 //	@Failure		500	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/files/export-nzb [get]
 func (s *Server) handleExportMetadataToNZB(c *fiber.Ctx) error {
 	// Get path from query parameters
@@ -395,7 +393,6 @@ func shouldExcludeFile(filename string, excludeArchives bool) bool {
 //	@Failure		400	{object}	APIResponse
 //	@Failure		500	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/files/export-batch [post]
 func (s *Server) handleBatchExportNZB(c *fiber.Ctx) error {
 	ctx := context.Background()

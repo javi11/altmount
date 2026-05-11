@@ -58,7 +58,7 @@ The per-user **API key** (visible in **System → Settings**) is only honoured b
 |----------|---------|
 | `/api/sabnzbd/*` — SABnzbd-compatible API | `?apikey=` or `ma_username` + `ma_password` |
 | `POST /api/arrs/webhook` — Sonarr/Radarr webhook | `?apikey=` (required) |
-| `POST /api/import/nzbdav` and related `/api/import/nzbdav/*` routes | `?apikey=` |
+| `POST /api/import/file` — manual NZB file import | `?apikey=` (required) |
 
 For everything else (queue, health, files, config, providers, system, FUSE, user, etc.) use the JWT flow above.
 

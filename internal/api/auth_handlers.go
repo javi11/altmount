@@ -204,7 +204,6 @@ func (s *Server) handleGetAuthConfig(c *fiber.Ctx) error {
 //	@Success		200	{object}	APIResponse{data=UserResponse}
 //	@Failure		401	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/user [get]
 func (s *Server) handleAuthUser(c *fiber.Ctx) error {
 	user := auth.GetUserFromContext(c)

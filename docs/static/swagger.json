@@ -21,9 +21,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Automatically registers AltMount as a download client (SABnzbd-compatible) in all configured ARR instances.",
@@ -55,9 +52,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Tests whether AltMount is reachable as a download client from all configured ARR instances.",
@@ -83,9 +77,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Returns health check results from all configured Sonarr/Radarr instances.",
@@ -111,9 +102,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Returns all configured Sonarr/Radarr instances.",
@@ -139,9 +127,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Tests connectivity to a Sonarr/Radarr instance with given credentials.",
@@ -187,9 +172,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Returns a specific Sonarr/Radarr instance by type and name.",
@@ -237,9 +219,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Returns sync statistics for all configured ARR instances.",
@@ -317,9 +296,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Automatically registers AltMount as a webhook connection in all configured Sonarr/Radarr instances.",
@@ -513,9 +489,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Returns the current AltMount configuration with sensitive values masked.",
@@ -557,9 +530,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Replaces the entire AltMount configuration. Triggers restart if required.",
@@ -605,9 +575,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Runs a speed test against the specified NNTP provider and saves the result to config.",
@@ -672,9 +639,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Reloads the AltMount configuration from disk without restarting.",
@@ -706,9 +670,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Validates a configuration object without saving it.",
@@ -754,9 +715,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Updates a specific named section of the configuration (e.g. import, sabnzbd, rclone).",
@@ -809,9 +767,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Returns all currently active NZB file streams. Optionally filter by type=file.",
@@ -845,9 +800,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Terminates an active NZB file stream by ID.",
@@ -888,9 +840,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Exports multiple mounted files as NZBs packed in a single ZIP archive.",
@@ -947,9 +896,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Exports the metadata of a mounted file back to a downloadable NZB file.",
@@ -993,9 +939,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Returns metadata for a mounted NZB file including segment info, encryption, and status.",
@@ -1054,9 +997,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Returns a history of recently completed NZB file streams.",
@@ -1082,9 +1022,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Force-unmounts the FUSE filesystem using platform-specific commands (fusermount/umount).",
@@ -1110,9 +1047,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Mounts the NZB filesystem at the given path using FUSE.",
@@ -1169,9 +1103,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Returns the current status of the FUSE mount (stopped, starting, running, error).",
@@ -1197,9 +1128,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Gracefully unmounts the FUSE filesystem.",
@@ -1231,9 +1159,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Returns a paginated list of file health records with optional status/search filters.",
@@ -1346,9 +1271,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Deletes multiple health records by ID.",
@@ -1402,9 +1324,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Triggers repair attempts for multiple corrupted files.",
@@ -1458,9 +1377,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Resets multiple health records to pending status for re-checking.",
@@ -1514,9 +1430,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Adds a file to the health monitoring queue for checking.",
@@ -1574,9 +1487,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Removes old health records based on age, status, or both. Optionally deletes physical files.",
@@ -1621,9 +1531,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Returns a paginated list of health records with corrupted status.",
@@ -1687,9 +1594,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Cancels an in-progress library sync operation.",
@@ -1721,9 +1625,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Simulates a library sync and returns what would be changed without applying it.",
@@ -1767,9 +1668,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Returns whether a library sync is needed based on current configuration state.",
@@ -1795,9 +1693,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Triggers a library sync operation to reconcile the file system with the database.",
@@ -1829,9 +1724,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Returns the current status of the library sync worker.",
@@ -1863,9 +1755,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Regenerates all library symlinks and STRM files for files that already have metadata.",
@@ -1897,9 +1786,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Resets all health records to pending status for a full re-check cycle.",
@@ -1931,9 +1817,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Returns counts of health records grouped by status.",
@@ -1977,9 +1860,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Returns the current status and statistics of the background health check worker.",
@@ -2017,9 +1897,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Returns a single health record by ID.",
@@ -2076,9 +1953,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Deletes a health record and optionally the associated physical file.",
@@ -2128,9 +2002,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Cancels an in-progress health check for a file.",
@@ -2177,9 +2048,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Triggers an immediate health check for a file, bypassing the queue.",
@@ -2238,9 +2106,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Sets the checking priority for a health record.",
@@ -2316,9 +2181,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Triggers a repair attempt for a corrupted file.",
@@ -2388,9 +2250,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Clears the streaming-failure mask on a health record so it can be checked again.",
@@ -2518,9 +2377,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Returns a paginated list of completed import records.",
@@ -2582,9 +2438,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Removes all completed import history records.",
@@ -2616,9 +2469,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Starts an import from a WebDAV/NZBDav source, fetching NZBs from the remote.",
@@ -2661,9 +2511,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Cancels the currently running NZBDav import operation.",
@@ -2689,9 +2536,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Resets the NZBDav import state so a new import can be started.",
@@ -2717,9 +2561,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Returns the current status of the NZBDav import operation.",
@@ -2745,9 +2586,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Scans a directory for NZB files and adds them to the import queue.",
@@ -2791,9 +2629,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Cancels the currently running manual directory scan.",
@@ -2819,9 +2654,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Returns the current status of the manual directory scan operation.",
@@ -2928,9 +2760,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Adds a new NNTP provider to the configuration.",
@@ -2988,9 +2817,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Sets the priority order of NNTP providers.",
@@ -3036,9 +2862,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Tests NNTP provider connectivity with given credentials, returning RTT on success.",
@@ -3096,9 +2919,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Updates an existing NNTP provider by ID.",
@@ -3167,9 +2987,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Removes an NNTP provider by ID from the configuration.",
@@ -3207,9 +3024,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Returns a paginated list of NZB download queue items with optional filters.",
@@ -3325,9 +3139,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Deletes multiple queue items by ID. Cannot delete items currently being processed.",
@@ -3387,9 +3198,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Requests cancellation of multiple currently-processing queue items.",
@@ -3443,9 +3251,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Resets multiple queue items to pending status for reprocessing.",
@@ -3505,9 +3310,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Removes all completed items from the queue.",
@@ -3539,9 +3341,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Removes all failed items from the queue.",
@@ -3573,9 +3372,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Removes all pending items from the queue.",
@@ -3607,9 +3403,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Returns current queue statistics (counts by status, average processing time).",
@@ -3653,9 +3446,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Returns historical import statistics over a rolling window (last 24h, 7d, 30d, 365d).",
@@ -3707,9 +3497,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Downloads a test NZB from sabnzbd.org and adds it to the queue for connectivity testing.",
@@ -3778,9 +3565,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Uploads an NZB file and adds it to the download queue.",
@@ -3860,9 +3644,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Searches for an NZB by name via the configured indexer and adds the result to the queue.",
@@ -3937,9 +3718,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Resolves one or more nzblnk:// links and adds the resulting NZBs to the queue.",
@@ -4008,9 +3786,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Returns a single queue item by ID.",
@@ -4067,9 +3842,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Deletes a queue item by ID. Cannot delete items currently being processed.",
@@ -4119,9 +3891,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Requests cancellation of a queue item that is currently being processed.",
@@ -4174,9 +3943,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Downloads the original NZB file associated with a queue item.",
@@ -4220,9 +3986,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Changes the priority of a pending or failed queue item.",
@@ -4304,9 +4067,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Resets a failed, pending, or completed queue item to pending and triggers processing.",
@@ -4515,9 +4275,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Lists filesystem entries at a given path for directory/file picker UIs.",
@@ -4557,9 +4314,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Removes old queue items and health records based on age. Supports dry-run mode.",
@@ -4616,9 +4370,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Returns health status of all system components (database, workers, etc.).",
@@ -4656,9 +4407,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Returns download/upload metrics, speed, and per-provider connection statistics.",
@@ -4696,9 +4444,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Schedules a graceful system restart. Use force=true to skip safety checks.",
@@ -4749,9 +4494,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Returns combined queue, health, and system information statistics.",
@@ -4795,9 +4537,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Resets accumulated system statistics counters (pool metrics, download counters).",
@@ -4823,9 +4562,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Pulls the latest Docker image and restarts the container to apply the update.",
@@ -4881,9 +4617,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Checks Docker Hub for the latest available version and returns whether an update is available.",
@@ -4939,9 +4672,6 @@
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Returns information about the currently authenticated user.",

@@ -625,7 +625,6 @@ type TestConnectionRequest struct {
 //	@Produce		json
 //	@Success		200	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/arrs/instances [get]
 func (s *Server) handleListArrsInstances(c *fiber.Ctx) error {
 	if s.arrsService == nil {
@@ -665,7 +664,6 @@ func (s *Server) handleListArrsInstances(c *fiber.Ctx) error {
 //	@Success		200		{object}	APIResponse
 //	@Failure		404		{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/arrs/instances/{type}/{name} [get]
 func (s *Server) handleGetArrsInstance(c *fiber.Ctx) error {
 	if s.arrsService == nil {
@@ -718,7 +716,6 @@ func (s *Server) handleGetArrsInstance(c *fiber.Ctx) error {
 //	@Success		200		{object}	APIResponse
 //	@Failure		400		{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/arrs/instances/test [post]
 func (s *Server) handleTestArrsConnection(c *fiber.Ctx) error {
 	if s.arrsService == nil {
@@ -762,7 +759,6 @@ func (s *Server) handleTestArrsConnection(c *fiber.Ctx) error {
 //	@Produce		json
 //	@Success		200	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/arrs/stats [get]
 func (s *Server) handleGetArrsStats(c *fiber.Ctx) error {
 	if s.arrsService == nil {
@@ -835,7 +831,6 @@ func (s *Server) handleGetArrsStats(c *fiber.Ctx) error {
 //	@Produce		json
 //	@Success		200	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/arrs/health [get]
 func (s *Server) handleGetArrsHealth(c *fiber.Ctx) error {
 	if s.arrsService == nil {
@@ -866,7 +861,6 @@ func (s *Server) handleGetArrsHealth(c *fiber.Ctx) error {
 //	@Success		200	{object}	APIResponse
 //	@Failure		500	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/arrs/webhook/register [post]
 func (s *Server) handleRegisterArrsWebhooks(c *fiber.Ctx) error {
 	if s.arrsService == nil {
@@ -903,7 +897,6 @@ func (s *Server) handleRegisterArrsWebhooks(c *fiber.Ctx) error {
 //	@Success		200	{object}	APIResponse
 //	@Failure		500	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/arrs/download-client/register [post]
 func (s *Server) handleRegisterArrsDownloadClients(c *fiber.Ctx) error {
 	if s.arrsService == nil {
@@ -975,7 +968,6 @@ func (s *Server) handleRegisterArrsDownloadClients(c *fiber.Ctx) error {
 //	@Produce		json
 //	@Success		200	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/arrs/download-client/test [post]
 func (s *Server) handleTestArrsDownloadClients(c *fiber.Ctx) error {
 	if s.arrsService == nil {
