@@ -66,11 +66,13 @@ func (m *Manager) mountWithRetry(ctx context.Context, provider, mountPath, webda
 func (m *Manager) performMount(ctx context.Context, provider, mountPath, webdavURL string) error {
 	cfg := m.cfg.GetConfig()
 
-	m.logger.InfoContext(ctx, "Creating mount directory", "provider", provider, "path", mountPath)
-	// Create mount directory
-	if err := os.MkdirAll(mountPath, 0755); err != nil {
-		if !os.IsExist(err) {
-			return fmt.Errorf("failed to create mount directory %s: %w", mountPath, err)
+	// Create mount directory (skip on Windows: WinFSP requires the mount point to NOT exist)
+	if runtime.GOOS != "windows" {
+		m.logger.InfoContext(ctx, "Creating mount directory", "provider", provider, "path", mountPath)
+		if err := os.MkdirAll(mountPath, 0755); err != nil {
+			if !os.IsExist(err) {
+				return fmt.Errorf("failed to create mount directory %s: %w", mountPath, err)
+			}
 		}
 	}
 

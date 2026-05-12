@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"runtime"
 	"sync"
 	"time"
 
@@ -240,13 +241,15 @@ func (s *Server) handleStartFuseMount(c *fiber.Ctx) error {
 	s.fuseManager.path = req.Path
 	s.fuseManager.mu.Unlock()
 
-	// Ensure directory exists
-	if _, err := os.Stat(req.Path); os.IsNotExist(err) {
-		if err := os.MkdirAll(req.Path, 0755); err != nil {
-			s.fuseManager.mu.Lock()
-			s.fuseManager.status = "error"
-			s.fuseManager.mu.Unlock()
-			return RespondInternalError(c, "Failed to create mount directory", err.Error())
+	// Ensure directory exists (skip on Windows: WinFSP requires the mount point to NOT exist)
+	if runtime.GOOS != "windows" {
+		if _, err := os.Stat(req.Path); os.IsNotExist(err) {
+			if err := os.MkdirAll(req.Path, 0755); err != nil {
+				s.fuseManager.mu.Lock()
+				s.fuseManager.status = "error"
+				s.fuseManager.mu.Unlock()
+				return RespondInternalError(c, "Failed to create mount directory", err.Error())
+			}
 		}
 	}
 
@@ -428,13 +431,16 @@ func (s *Server) AutoStartFuse() {
 	s.fuseManager.path = cfg.Fuse.MountPath
 	s.fuseManager.mu.Unlock()
 
-	if _, err := os.Stat(cfg.Fuse.MountPath); os.IsNotExist(err) {
-		if err := os.MkdirAll(cfg.Fuse.MountPath, 0755); err != nil {
-			slog.ErrorContext(context.Background(), "Failed to create auto-mount directory", "path", cfg.Fuse.MountPath, "error", err)
-			s.fuseManager.mu.Lock()
-			s.fuseManager.status = "error"
-			s.fuseManager.mu.Unlock()
-			return
+	// Skip on Windows: WinFSP requires the mount point to NOT exist
+	if runtime.GOOS != "windows" {
+		if _, err := os.Stat(cfg.Fuse.MountPath); os.IsNotExist(err) {
+			if err := os.MkdirAll(cfg.Fuse.MountPath, 0755); err != nil {
+				slog.ErrorContext(context.Background(), "Failed to create auto-mount directory", "path", cfg.Fuse.MountPath, "error", err)
+				s.fuseManager.mu.Lock()
+				s.fuseManager.status = "error"
+				s.fuseManager.mu.Unlock()
+				return
+			}
 		}
 	}
 
