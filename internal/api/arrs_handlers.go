@@ -17,6 +17,13 @@ import (
 	"github.com/javi11/altmount/internal/database"
 )
 
+// arrWebhookDeleteGrace is how long after a queue item completes its
+// storage_path is still considered "in use" by the arr webhook directory
+// deletion handler. Within this window the handler skips deleting the
+// metadata/symlink tree so a freshly written release folder is not wiped
+// out by a stale Download webhook from a previous grab.
+const arrWebhookDeleteGrace = 10 * time.Minute
+
 // ArrsInstanceRequest represents a request to create/update an arrs instance
 type ArrsInstanceRequest struct {
 	Name              string `json:"name"`
@@ -409,6 +416,28 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 		slog.InfoContext(c.Context(), "Processing webhook directory deletion",
 			"original_path", path,
 			"normalized_path", normalizedPath)
+
+		// Race guard: skip deletion if another import_queue row references this
+		// storage path and is still active (pending/processing/paused) or was
+		// completed within the recent grace window. This prevents arr "Download"
+		// webhooks for a previous grab from wiping the metadata/symlink tree
+		// that a sibling re-grab/upgrade just wrote into the same release dir.
+		if s.queueRepo != nil {
+			busy, err := s.queueRepo.HasActiveOrRecentQueueItemForStoragePath(
+				c.Context(), normalizedPath, arrWebhookDeleteGrace,
+			)
+			if err != nil {
+				slog.WarnContext(c.Context(), "Failed to check active queue items before webhook directory deletion; proceeding cautiously and skipping deletion",
+					"path", normalizedPath, "error", err)
+				continue
+			}
+			if busy {
+				slog.InfoContext(c.Context(), "Skipping webhook directory deletion: active or recently-completed queue item references this storage path",
+					"path", normalizedPath,
+					"grace", arrWebhookDeleteGrace.String())
+				continue
+			}
+		}
 
 		// Delete health records — try by library_path first, fall back to file_path prefix
 		var metadataPaths []string

@@ -370,6 +370,60 @@ func (r *Repository) RemoveFromQueueByDownloadID(ctx context.Context, downloadID
 	return nil
 }
 
+// HasActiveOrRecentQueueItemForStoragePath reports whether any import_queue
+// row references a storage_path equal to (or nested under) the given relative
+// path and is either still active (pending/processing/paused/retrying) or was
+// completed within the supplied grace window. It is used to guard against arr
+// webhook directory deletions racing a sibling import that just wrote into
+// the same release folder.
+//
+// relPath is matched as a path prefix; both "<relPath>" and "/<relPath>" are
+// considered (storage_path is typically absolute, e.g. "/moviesHQ/release/...",
+// while webhook-normalized paths are relative).
+func (r *Repository) HasActiveOrRecentQueueItemForStoragePath(
+	ctx context.Context,
+	relPath string,
+	completedGrace time.Duration,
+) (bool, error) {
+	relPath = strings.Trim(relPath, "/")
+	if relPath == "" {
+		return false, nil
+	}
+
+	cutoff := time.Now().Add(-completedGrace)
+	withSlash := "/" + relPath
+	prefixWithSlash := withSlash + "/"
+	prefixNoSlash := relPath + "/"
+
+	query := `
+		SELECT 1 FROM import_queue
+		WHERE storage_path IS NOT NULL
+		  AND (
+		        storage_path = ? OR storage_path LIKE ?
+		     OR storage_path = ? OR storage_path LIKE ?
+		      )
+		  AND (
+		        status IN ('pending', 'processing', 'paused')
+		     OR (status = 'completed' AND completed_at IS NOT NULL AND completed_at > ?)
+		      )
+		LIMIT 1
+	`
+
+	var exists int
+	err := r.db.QueryRowContext(ctx, query,
+		withSlash, prefixWithSlash+"%",
+		relPath, prefixNoSlash+"%",
+		cutoff,
+	).Scan(&exists)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to check active queue items for storage path: %w", err)
+	}
+	return true, nil
+}
+
 // RemoveFromQueue removes an item from the queue
 func (r *Repository) RemoveFromQueue(ctx context.Context, id int64) error {
 	query := `DELETE FROM import_queue WHERE id = ?`
