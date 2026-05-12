@@ -23,7 +23,6 @@ import (
 //	@Success		200		{object}	APIResponse
 //	@Failure		500		{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/import/nzbdav [post]
 func (s *Server) handleImportNzbdav(c *fiber.Ctx) error {
 	// Check if importer service is available
@@ -105,7 +104,6 @@ func (s *Server) handleImportNzbdav(c *fiber.Ctx) error {
 //	@Produce		json
 //	@Success		200	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/import/nzbdav/status [get]
 func (s *Server) handleGetNzbdavImportStatus(c *fiber.Ctx) error {
 	if s.importerService == nil {
@@ -149,7 +147,6 @@ func (s *Server) handleGetNzbdavImportStatus(c *fiber.Ctx) error {
 //	@Failure		400		{object}	APIResponse
 //	@Failure		500		{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/import/nzbdav/migrate-symlinks [post]
 func (s *Server) handleMigrateNzbdavSymlinks(c *fiber.Ctx) error {
 	var req struct {
@@ -249,7 +246,6 @@ func (s *Server) handleMigrateNzbdavSymlinks(c *fiber.Ctx) error {
 //	@Produce		json
 //	@Success		200	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/import/nzbdav [delete]
 func (s *Server) handleCancelNzbdavImport(c *fiber.Ctx) error {
 	if s.importerService == nil {
@@ -281,7 +277,6 @@ func (s *Server) handleCancelNzbdavImport(c *fiber.Ctx) error {
 //	@Produce		json
 //	@Success		200	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/import/nzbdav/reset [post]
 func (s *Server) handleResetNzbdavImportStatus(c *fiber.Ctx) error {
 	if s.importerService == nil {
@@ -307,7 +302,6 @@ func (s *Server) handleResetNzbdavImportStatus(c *fiber.Ctx) error {
 //	@Produce		json
 //	@Success		200	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/import/nzbdav/pending-migrations [delete]
 func (s *Server) handleClearPendingNzbdavMigrations(c *fiber.Ctx) error {
 	if s.migrationRepo == nil {
@@ -343,7 +337,6 @@ func (s *Server) handleClearPendingNzbdavMigrations(c *fiber.Ctx) error {
 //	@Produce		json
 //	@Success		200	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/import/nzbdav/migrations [delete]
 func (s *Server) handleClearAllNzbdavMigrations(c *fiber.Ctx) error {
 	if s.migrationRepo == nil {

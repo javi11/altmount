@@ -119,7 +119,6 @@ func fetchLatestGitHubCommit(ctx context.Context) (string, error) {
 //	@Success		200		{object}	APIResponse{data=UpdateStatusResponse}
 //	@Failure		400		{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/system/update/status [get]
 func (s *Server) handleGetUpdateStatus(c *fiber.Ctx) error {
 	channel := UpdateChannel(c.Query("channel", string(UpdateChannelLatest)))
@@ -181,7 +180,6 @@ func (s *Server) handleGetUpdateStatus(c *fiber.Ctx) error {
 //	@Failure		400		{object}	APIResponse
 //	@Failure		503		{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/system/update/apply [post]
 func (s *Server) handleApplyUpdate(c *fiber.Ctx) error {
 	user := auth.GetUserFromContext(c)

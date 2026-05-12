@@ -23,7 +23,6 @@ import (
 //	@Success		200		{object}	APIResponse
 //	@Failure		400		{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/import/scan [post]
 func (s *Server) handleStartManualScan(c *fiber.Ctx) error {
 	// Check if importer service is available
@@ -78,7 +77,6 @@ func (s *Server) handleStartManualScan(c *fiber.Ctx) error {
 //	@Produce		json
 //	@Success		200	{object}	APIResponse{data=ScanStatusResponse}
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/import/scan/status [get]
 func (s *Server) handleGetScanStatus(c *fiber.Ctx) error {
 	// Check if importer service is available
@@ -106,7 +104,6 @@ func (s *Server) handleGetScanStatus(c *fiber.Ctx) error {
 //	@Produce		json
 //	@Success		200	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/import/scan [delete]
 func (s *Server) handleCancelScan(c *fiber.Ctx) error {
 	// Check if importer service is available
@@ -311,7 +308,6 @@ func (s *Server) handleManualImportFile(c *fiber.Ctx) error {
 //	@Success		200		{object}	APIResponse{data=[]ImportHistoryResponse,meta=APIMeta}
 //	@Failure		500		{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/import/history [get]
 func (s *Server) handleGetImportHistory(c *fiber.Ctx) error {
 	limit := 50
@@ -356,7 +352,6 @@ func toScanStatusResponse(scanInfo importer.ScanInfo) *ScanStatusResponse {
 //	@Success		200	{object}	APIResponse
 //	@Failure		500	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/import/history [delete]
 func (s *Server) handleClearImportHistory(c *fiber.Ctx) error {
 	if err := s.queueRepo.ClearImportHistory(c.Context()); err != nil {

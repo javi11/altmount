@@ -92,7 +92,6 @@ func RegisterLogLevelHandler(ctx context.Context, configManager *config.Manager,
 //	@Success		200	{object}	APIResponse{data=ConfigAPIResponse}
 //	@Failure		503	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/config [get]
 func (s *Server) handleGetConfig(c *fiber.Ctx) error {
 	if s.configManager == nil {
@@ -122,7 +121,6 @@ func (s *Server) handleGetConfig(c *fiber.Ctx) error {
 //	@Success		200		{object}	APIResponse
 //	@Failure		400		{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/config [put]
 func (s *Server) handleUpdateConfig(c *fiber.Ctx) error {
 	if s.configManager == nil {
@@ -183,7 +181,6 @@ func (s *Server) handleUpdateConfig(c *fiber.Ctx) error {
 //	@Success		200		{object}	APIResponse
 //	@Failure		400		{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/config/{section} [patch]
 func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 	if s.configManager == nil {
@@ -292,7 +289,6 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 //	@Success		200	{object}	APIResponse
 //	@Failure		500	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/config/reload [post]
 func (s *Server) handleReloadConfig(c *fiber.Ctx) error {
 	if s.configManager == nil {
@@ -323,7 +319,6 @@ func (s *Server) handleReloadConfig(c *fiber.Ctx) error {
 //	@Success		200		{object}	APIResponse
 //	@Failure		400		{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/config/validate [post]
 func (s *Server) handleValidateConfig(c *fiber.Ctx) error {
 	if s.configManager == nil {
@@ -377,7 +372,6 @@ func (s *Server) handleValidateConfig(c *fiber.Ctx) error {
 //	@Success		200		{object}	APIResponse{data=TestProviderResponse}
 //	@Failure		400		{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/providers/test [post]
 func (s *Server) handleTestProvider(c *fiber.Ctx) error {
 	if s.configManager == nil {
@@ -478,7 +472,6 @@ func (s *Server) handleTestProvider(c *fiber.Ctx) error {
 //	@Success		201		{object}	APIResponse{data=ProviderAPIResponse}
 //	@Failure		400		{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/providers [post]
 func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 	if s.configManager == nil {
@@ -614,7 +607,6 @@ func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 //	@Failure		400		{object}	APIResponse
 //	@Failure		404		{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/providers/{id} [put]
 func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 	if s.configManager == nil {
@@ -797,7 +789,6 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 //	@Success		200	{object}	APIResponse
 //	@Failure		404	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/providers/{id}/reset-quota [post]
 func (s *Server) handleResetProviderQuota(c *fiber.Ctx) error {
 	if s.configManager == nil {
@@ -852,7 +843,6 @@ func (s *Server) handleResetProviderQuota(c *fiber.Ctx) error {
 //	@Success		204
 //	@Failure		404	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/providers/{id} [delete]
 func (s *Server) handleDeleteProvider(c *fiber.Ctx) error {
 	if s.configManager == nil {
@@ -922,7 +912,6 @@ func (s *Server) handleDeleteProvider(c *fiber.Ctx) error {
 //	@Success		200		{object}	APIResponse
 //	@Failure		400		{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/providers/reorder [put]
 func (s *Server) handleReorderProviders(c *fiber.Ctx) error {
 	if s.configManager == nil {

@@ -217,7 +217,6 @@ func (m *FuseManager) recoverMount(ctx context.Context) {
 //	@Failure		400		{object}	APIResponse
 //	@Failure		409		{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/fuse/start [post]
 func (s *Server) handleStartFuseMount(c *fiber.Ctx) error {
 	var req struct {
@@ -299,7 +298,6 @@ func (s *Server) handleStartFuseMount(c *fiber.Ctx) error {
 //	@Success		200	{object}	APIResponse
 //	@Failure		409	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/fuse/stop [post]
 func (s *Server) handleStopFuseMount(c *fiber.Ctx) error {
 	s.fuseManager.mu.Lock()
@@ -333,7 +331,6 @@ func (s *Server) handleStopFuseMount(c *fiber.Ctx) error {
 //	@Produce		json
 //	@Success		200	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/fuse/force-stop [post]
 func (s *Server) handleForceStopFuseMount(c *fiber.Ctx) error {
 	s.fuseManager.mu.Lock()
@@ -374,7 +371,6 @@ func (s *Server) handleForceStopFuseMount(c *fiber.Ctx) error {
 //	@Produce		json
 //	@Success		200	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/fuse/status [get]
 func (s *Server) handleGetFuseStatus(c *fiber.Ctx) error {
 	s.fuseManager.mu.Lock()

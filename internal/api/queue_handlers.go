@@ -69,7 +69,6 @@ func transformQueueError(err *string) string {
 //	@Failure		400			{object}	APIResponse
 //	@Failure		401			{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/queue [get]
 func (s *Server) handleListQueue(c *fiber.Ctx) error {
 	// Parse pagination
@@ -171,7 +170,6 @@ func (s *Server) handleListQueue(c *fiber.Ctx) error {
 //	@Failure		400	{object}	APIResponse
 //	@Failure		404	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/queue/{id} [get]
 func (s *Server) handleGetQueue(c *fiber.Ctx) error {
 	// Extract ID from path parameter
@@ -212,7 +210,6 @@ func (s *Server) handleGetQueue(c *fiber.Ctx) error {
 //	@Failure		404	{object}	APIResponse
 //	@Failure		409	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/queue/{id} [delete]
 func (s *Server) handleDeleteQueue(c *fiber.Ctx) error {
 	// Extract ID from path parameter
@@ -268,7 +265,6 @@ func (s *Server) handleDeleteQueue(c *fiber.Ctx) error {
 //	@Failure		404	{object}	APIResponse
 //	@Failure		409	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/queue/{id}/retry [post]
 func (s *Server) handleRetryQueue(c *fiber.Ctx) error {
 	// Extract ID from path parameter
@@ -329,7 +325,6 @@ func (s *Server) handleRetryQueue(c *fiber.Ctx) error {
 //	@Failure		404	{object}	APIResponse
 //	@Failure		409	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/queue/{id}/cancel [post]
 func (s *Server) handleCancelQueue(c *fiber.Ctx) error {
 	// Extract ID from path parameter
@@ -386,7 +381,6 @@ func (s *Server) handleCancelQueue(c *fiber.Ctx) error {
 //	@Success		200	{object}	APIResponse{data=QueueStatsResponse}
 //	@Failure		500	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/queue/stats [get]
 func (s *Server) handleGetQueueStats(c *fiber.Ctx) error {
 	stats, err := s.queueRepo.GetQueueStats(c.Context())
@@ -408,7 +402,6 @@ func (s *Server) handleGetQueueStats(c *fiber.Ctx) error {
 //	@Success		200		{object}	APIResponse{data=QueueHistoricalStatsResponse}
 //	@Failure		500		{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/queue/stats/history [get]
 func (s *Server) handleGetQueueHistoricalStats(c *fiber.Ctx) error {
 	// Get optional days parameter, default to 1 (24h)
@@ -448,7 +441,6 @@ func (s *Server) handleGetQueueHistoricalStats(c *fiber.Ctx) error {
 //	@Success		200	{object}	APIResponse
 //	@Failure		500	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/queue/completed [delete]
 func (s *Server) handleClearCompletedQueue(c *fiber.Ctx) error {
 	paths, count, err := s.queueRepo.ClearCompletedQueueItems(c.Context())
@@ -474,7 +466,6 @@ func (s *Server) handleClearCompletedQueue(c *fiber.Ctx) error {
 //	@Success		200	{object}	APIResponse
 //	@Failure		500	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/queue/failed [delete]
 func (s *Server) handleClearFailedQueue(c *fiber.Ctx) error {
 	paths, count, err := s.queueRepo.ClearFailedQueueItems(c.Context())
@@ -500,7 +491,6 @@ func (s *Server) handleClearFailedQueue(c *fiber.Ctx) error {
 //	@Success		200	{object}	APIResponse
 //	@Failure		500	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/queue/pending [delete]
 func (s *Server) handleClearPendingQueue(c *fiber.Ctx) error {
 	paths, count, err := s.queueRepo.ClearPendingQueueItems(c.Context())
@@ -529,7 +519,6 @@ func (s *Server) handleClearPendingQueue(c *fiber.Ctx) error {
 //	@Failure		400		{object}	APIResponse
 //	@Failure		409		{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/queue/bulk [delete]
 func (s *Server) handleDeleteQueueBulk(c *fiber.Ctx) error {
 	// Parse request body
@@ -584,7 +573,6 @@ func (s *Server) handleDeleteQueueBulk(c *fiber.Ctx) error {
 //	@Failure		400				{object}	APIResponse
 //	@Failure		503				{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/queue/upload [post]
 func (s *Server) handleUploadToQueue(c *fiber.Ctx) error {
 	// Get uploaded file
@@ -690,7 +678,6 @@ func (s *Server) handleUploadToQueue(c *fiber.Ctx) error {
 //	@Failure		400		{object}	APIResponse
 //	@Failure		503		{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/queue/upload-nzblnk [post]
 func (s *Server) handleUploadNZBLnk(c *fiber.Ctx) error {
 	// Parse request body
@@ -877,7 +864,6 @@ func embedPasswordInNZB(nzbContent []byte, password string) []byte {
 //	@Failure		404		{object}	APIResponse
 //	@Failure		503		{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/queue/upload-by-name [post]
 func (s *Server) handleSearchNZBByName(c *fiber.Ctx) error {
 	var req struct {
@@ -967,7 +953,6 @@ func (s *Server) handleSearchNZBByName(c *fiber.Ctx) error {
 //	@Failure		400		{object}	APIResponse
 //	@Failure		409		{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/queue/bulk/restart [post]
 func (s *Server) handleRestartQueueBulk(c *fiber.Ctx) error {
 	// Parse request body
@@ -1038,7 +1023,6 @@ func (s *Server) handleRestartQueueBulk(c *fiber.Ctx) error {
 //	@Success		202		{object}	APIResponse
 //	@Failure		400		{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/queue/bulk/cancel [post]
 func (s *Server) handleCancelQueueBulk(c *fiber.Ctx) error {
 	// Parse request body
@@ -1118,7 +1102,6 @@ func (s *Server) handleCancelQueueBulk(c *fiber.Ctx) error {
 //	@Failure		400		{object}	APIResponse
 //	@Failure		502		{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/queue/test [post]
 func (s *Server) handleAddTestQueueItem(c *fiber.Ctx) error {
 	// Parse request body
@@ -1213,7 +1196,6 @@ func (s *Server) handleAddTestQueueItem(c *fiber.Ctx) error {
 //	@Failure		404		{object}	APIResponse
 //	@Failure		409		{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/queue/{id}/priority [patch]
 func (s *Server) handleUpdateQueueItemPriority(c *fiber.Ctx) error {
 	idStr := c.Params("id")
@@ -1276,7 +1258,6 @@ func (s *Server) handleUpdateQueueItemPriority(c *fiber.Ctx) error {
 //	@Success		200		{object}	APIResponse{data=object{updated_count=int,skipped_count=int,message=string}}
 //	@Failure		400		{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/queue/bulk/priority [patch]
 func (s *Server) handleBulkUpdateQueuePriority(c *fiber.Ctx) error {
 	var req struct {
@@ -1323,7 +1304,6 @@ func (s *Server) handleBulkUpdateQueuePriority(c *fiber.Ctx) error {
 //	@Failure		400	{object}	APIResponse
 //	@Failure		404	{object}	APIResponse
 //	@Security		BearerAuth
-//	@Security		ApiKeyAuth
 //	@Router			/queue/{id}/download [get]
 func (s *Server) handleDownloadNZB(c *fiber.Ctx) error {
 	// Extract ID from path parameter
