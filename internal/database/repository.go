@@ -257,6 +257,13 @@ func (r *Repository) UpdateQueueItemStatus(ctx context.Context, id int64, status
 	case QueueStatusProcessing:
 		query = `UPDATE import_queue SET status = ?, started_at = ?, updated_at = ? WHERE id = ?`
 		args = []any{status, now, now, id}
+	case QueueStatusPending:
+		// Reset lifecycle columns so the worker can claim the item immediately.
+		// ClaimNextQueueItem skips pending rows whose started_at is within the
+		// last 10 minutes (orphan-recovery gate), so we must clear started_at
+		// when transitioning back to pending via retry.
+		query = `UPDATE import_queue SET status = ?, started_at = NULL, completed_at = NULL, error_message = NULL, retry_count = 0, updated_at = ? WHERE id = ?`
+		args = []any{status, now, id}
 	case QueueStatusCompleted:
 		query = `UPDATE import_queue SET status = ?, completed_at = ?, updated_at = ?, error_message = NULL WHERE id = ?`
 		args = []any{status, now, now, id}
