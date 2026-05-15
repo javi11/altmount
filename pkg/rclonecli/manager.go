@@ -108,10 +108,15 @@ func (m *Manager) Start(ctx context.Context) error {
 	}
 	logFile := filepath.Join(logDir, "rclone.log")
 
-	// Delete old log file if it exists
+	// Delete old log file if it exists. If removal fails (e.g. another process
+	// still holds the file open on Windows after an unclean shutdown), fall
+	// back to a timestamped log file so startup is not blocked.
 	if _, err := os.Stat(logFile); err == nil {
 		if err := os.Remove(logFile); err != nil {
-			return fmt.Errorf("failed to remove old rclone log file: %w", err)
+			fallback := filepath.Join(logDir, fmt.Sprintf("rclone-%d.log", time.Now().UnixNano()))
+			m.logger.WarnContext(ctx, "Failed to remove old rclone log file, falling back to a new log file",
+				"err", err, "original_log_file", logFile, "fallback_log_file", fallback)
+			logFile = fallback
 		}
 	}
 

@@ -361,6 +361,23 @@ func (s *Server) performRestart(ctx context.Context) {
 	// Give a moment for the HTTP response to be sent
 	time.Sleep(100 * time.Millisecond)
 
+	// Stop the rclone mount service before re-execing so the child rclone
+	// subprocess is terminated cleanly and releases its log file. This is
+	// critical on Windows where syscall.Exec is unavailable: the fallback
+	// path calls os.Exit, which skips the SIGINT shutdown sequence and would
+	// otherwise orphan the rclone process (keeping rclone.log locked and
+	// breaking the next startup). Use a fresh context with its own timeout
+	// because the request context is already canceled by this point.
+	if s.mountService != nil {
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		if err := s.mountService.Stop(stopCtx); err != nil {
+			slog.WarnContext(stopCtx, "Failed to stop mount service before restart", "error", err)
+		} else {
+			slog.InfoContext(stopCtx, "Mount service stopped for restart")
+		}
+		stopCancel()
+	}
+
 	// Get the current executable path
 	executable, err := os.Executable()
 	if err != nil {
