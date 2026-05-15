@@ -230,6 +230,7 @@ export interface ImportConfig {
 	failed_item_retention_hours?: number | null;
 	history_retention_days?: number | null;
 	delete_completed_nzb?: boolean;
+	allow_symlinks_on_windows?: boolean;
 }
 
 // Log configuration
@@ -436,6 +437,7 @@ export interface ImportUpdateRequest {
 	allow_nested_rar_extraction?: boolean;
 	rename_to_nzb_name?: boolean;
 	filter_sample_files?: boolean;
+	allow_symlinks_on_windows?: boolean;
 }
 
 // Log update request
