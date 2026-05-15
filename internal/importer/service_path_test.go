@@ -118,3 +118,42 @@ func TestCalculateProcessVirtualDir_FailedPath(t *testing.T) {
 		})
 	}
 }
+
+func TestCalculateProcessVirtualDir_WindowsDriveLetterStripped(t *testing.T) {
+	s := &Service{
+		configGetter: func() *config.Config {
+			return &config.Config{
+				Database: config.DatabaseConfig{Path: "/config/altmount.db"},
+				SABnzbd:  config.SABnzbdConfig{CompleteDir: "/complete"},
+			}
+		},
+	}
+
+	// Simulates the Windows CLI case where the watcher previously passed the
+	// absolute watch directory (drive-lettered) as basePath. The virtual path
+	// must NOT carry the drive letter or colon into the metadata layer.
+	item := &database.ImportQueueItem{NzbPath: filepath.FromSlash("/config/.nzbs/test1.nzb")}
+	basePath := `C:\rclone\altmount\nzb`
+
+	got := s.calculateProcessVirtualDir(item, &basePath)
+
+	assert.NotContains(t, got, ":", "virtual path must not leak Windows drive letters")
+	assert.Equal(t, "/complete/rclone/altmount/nzb", filepath.ToSlash(got))
+}
+
+func TestSanitizeVirtualPath(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"/complete/foo/bar", "/complete/foo/bar"},
+		{`C:\rclone\altmount\nzb`, "/rclone/altmount/nzb"},
+		{"/C:/rclone/altmount/nzb", "/rclone/altmount/nzb"},
+		{"/complete/C:/x", "/complete/x"},
+		{"plain/no/slash", "/plain/no/slash"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			assert.Equal(t, tc.want, sanitizeVirtualPath(tc.in))
+		})
+	}
+}
