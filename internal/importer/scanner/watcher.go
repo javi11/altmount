@@ -273,14 +273,13 @@ func (w *Watcher) processNzb(ctx context.Context, watchRoot, filePath string) er
 			"file", filePath,
 			"relPath", relPath)
 	} else {
-		// relPath is "." (root of watch dir)
-		// Use absolute watchRoot as base path
-		absWatchRoot, err := filepath.Abs(watchRoot)
-		if err == nil {
-			relativePath = &absWatchRoot
-		} else {
-			relativePath = &watchRoot
-		}
+		// relPath is "." → file sits directly in the watch root. Leave
+		// relativePath nil so downstream virtual-path computation places the
+		// NZB under the configured CompleteDir (plus category if any) instead
+		// of leaking the host filesystem path — which on Windows would inject
+		// a drive letter like "C:" into the virtual path and break
+		// metadata directory creation.
+		relativePath = nil
 	}
 
 	// Add to queue

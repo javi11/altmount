@@ -159,3 +159,69 @@ func TestFindFilesToDelete_RepairTriggered(t *testing.T) {
 	require.Len(t, toDelete, 1)
 	assert.Equal(t, "deleted.mkv", toDelete[0])
 }
+
+func TestMetaPathToMountRelativePath(t *testing.T) {
+	sep := string(filepath.Separator)
+
+	cases := []struct {
+		name     string
+		rootPath string
+		metaPath string
+		want     string
+	}{
+		{
+			name:     "simple_root_no_trailing_sep",
+			rootPath: "metadata",
+			metaPath: filepath.Join("metadata", "complete", "foo", "bar.meta"),
+			want:     "complete/foo/bar",
+		},
+		{
+			name:     "root_with_trailing_sep",
+			rootPath: "metadata" + sep,
+			metaPath: filepath.Join("metadata", "complete", "foo", "bar.meta"),
+			want:     "complete/foo/bar",
+		},
+		{
+			name:     "root_with_dot_prefix",
+			rootPath: "." + sep + "metadata",
+			metaPath: filepath.Join("metadata", "complete", "foo", "bar.meta"),
+			want:     "complete/foo/bar",
+		},
+		{
+			name:     "absolute_root",
+			rootPath: filepath.Join(string(filepath.Separator), "var", "lib", "metadata"),
+			metaPath: filepath.Join(string(filepath.Separator), "var", "lib", "metadata", "complete", "foo", "bar.meta"),
+			want:     "complete/foo/bar",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &config.Config{Metadata: config.MetadataConfig{RootPath: tc.rootPath}}
+			worker := &LibrarySyncWorker{
+				configGetter: func() *config.Config { return cfg },
+			}
+			got := worker.metaPathToMountRelativePath(tc.metaPath)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestFindFilesToDelete_NormalizesBackslashes(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("filepath.ToSlash only translates backslashes on Windows")
+	}
+	worker := &LibrarySyncWorker{}
+
+	dbRecords := []database.AutomaticHealthCheckRecord{
+		{FilePath: "complete\\foo\\bar.mkv", Status: database.HealthStatusHealthy},
+		{FilePath: "complete/orphan.mkv", Status: database.HealthStatusHealthy},
+	}
+	metaFileSet := map[string]string{
+		"complete/foo/bar.mkv": "metadata/complete/foo/bar.mkv.meta",
+	}
+
+	toDelete := worker.findFilesToDelete(context.Background(), dbRecords, metaFileSet, nil)
+	require.Len(t, toDelete, 1)
+	assert.Equal(t, "complete/orphan.mkv", toDelete[0])
+}

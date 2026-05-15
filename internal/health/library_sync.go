@@ -306,8 +306,10 @@ func (lsw *LibrarySyncWorker) findFilesToDelete(
 		default:
 		}
 
-		// Check if metadata file exists
-		if _, exists := metaFileSet[dbRecord.FilePath]; !exists {
+		// Check if metadata file exists. Normalize to forward slashes so the
+		// lookup matches the canonical keys built in buildSyncMaps.
+		key := filepath.ToSlash(dbRecord.FilePath)
+		if _, exists := metaFileSet[key]; !exists {
 			filesToDelete = append(filesToDelete, dbRecord.FilePath)
 			continue
 		}
@@ -319,7 +321,7 @@ func (lsw *LibrarySyncWorker) findFilesToDelete(
 				continue
 			}
 
-			if !filesInLibrary[dbRecord.FilePath] {
+			if !filesInLibrary[key] {
 				filesToDelete = append(filesToDelete, dbRecord.FilePath)
 			}
 		}
@@ -432,8 +434,9 @@ func (lsw *LibrarySyncWorker) buildSyncMaps(metadataFiles []string, dbRecords []
 	// Convert database records to map for efficient lookup
 	dbPathSet := make(map[string]database.AutomaticHealthCheckRecord, len(dbRecords))
 	for _, record := range dbRecords {
-		// Use mount relative path as the key
-		dbPathSet[record.FilePath] = record
+		// Normalize to forward slashes so Windows-stored paths match the
+		// canonical mount-relative keys produced above.
+		dbPathSet[filepath.ToSlash(record.FilePath)] = record
 	}
 
 	return syncMaps{
@@ -1082,17 +1085,20 @@ func (lsw *LibrarySyncWorker) getAllMetadataFiles(ctx context.Context) ([]string
 	return metaFiles, nil
 }
 
-// metaPathToMountRelativePath converts a metadata file path to a mount relative file path
+// metaPathToMountRelativePath converts a metadata file path to a mount relative file path.
+// Uses filepath.Rel + filepath.ToSlash so the result is canonical (forward slashes) and
+// tolerant to differences in how the metadata root is spelled in config (./prefix,
+// trailing separator, mixed separators on Windows, etc).
 func (lsw *LibrarySyncWorker) metaPathToMountRelativePath(metaPath string) string {
-	cfg := lsw.configGetter()
-	rootPath := cfg.Metadata.RootPath
+	rootPath := lsw.configGetter().Metadata.RootPath
 
-	// Remove root path and .meta extension
-	relativePath := strings.TrimPrefix(metaPath, rootPath)
-	relativePath = strings.TrimPrefix(relativePath, string(filepath.Separator))
-	mountRelativePath := strings.TrimSuffix(relativePath, ".meta")
-
-	return mountRelativePath
+	rel, err := filepath.Rel(rootPath, metaPath)
+	if err != nil {
+		rel = strings.TrimPrefix(metaPath, rootPath)
+		rel = strings.TrimPrefix(rel, string(filepath.Separator))
+	}
+	rel = strings.TrimSuffix(rel, ".meta")
+	return filepath.ToSlash(rel)
 }
 
 // processMetadataForSync reads metadata and creates an AutomaticHealthCheckRecord.

@@ -859,7 +859,32 @@ func (s *Service) calculateProcessVirtualDir(item *database.ImportQueueItem, bas
 		}
 	}
 
-	return filepath.ToSlash(virtualDir)
+	return sanitizeVirtualPath(virtualDir)
+}
+
+// sanitizeVirtualPath canonicalizes a virtual path to forward slashes and strips
+// any filesystem-specific syntax that is invalid as a virtual path component —
+// most importantly Windows drive letters (e.g. "C:") which would otherwise leak
+// into metadata directory creation and fail with mkdir errors.
+// driveLetterRe matches a single Windows drive letter path component (e.g. "C:")
+// anywhere it appears as its own segment.
+var driveLetterRe = regexp.MustCompile(`(?i)(^|/)[a-z]:(?:/|$)`)
+
+func sanitizeVirtualPath(p string) string {
+	// Virtual paths always use forward slashes regardless of host OS.
+	p = strings.ReplaceAll(p, `\`, "/")
+	// Drop any "<letter>:" segment (typically a Windows drive letter that
+	// leaked through from a filesystem path).
+	for driveLetterRe.MatchString(p) {
+		p = driveLetterRe.ReplaceAllString(p, "$1")
+	}
+	// Strip any remaining colons (defensive — not valid in path components
+	// on Windows and meaningless in our virtual namespace).
+	p = strings.ReplaceAll(p, ":", "")
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	return p
 }
 
 // ensurePersistentNzb moves the NZB file to a persistent location in the metadata directory
