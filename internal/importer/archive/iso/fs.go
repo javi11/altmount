@@ -373,7 +373,8 @@ func udfReadDirEntries(rs io.ReadSeeker, physSect uint32, metaMap []udfMetaSpan,
 			if rerr != nil {
 				return nil, rerr
 			}
-			dirData = append(dirData, sector[:ad.length]...)
+			take := min(int(ad.length), len(sector))
+			dirData = append(dirData, sector[:take]...)
 		}
 	case 1: // long_ad
 		for off := 0; off+16 <= allocDescLen; off += 16 {
