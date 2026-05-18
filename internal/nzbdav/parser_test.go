@@ -1,10 +1,13 @@
 package nzbdav
 
 import (
+	"bytes"
 	"database/sql"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -425,6 +428,157 @@ func TestParser_Parse_Blobs_DeduplicateNestedSubType203(t *testing.T) {
 
 	require.Len(t, got, 1, "expected exactly one ParsedNzb despite two SubType=203 rows for the same release")
 	assert.Equal(t, "Big.Release", got[0].Name)
+}
+
+// TestParser_Parse_Blobs_SubType201_BackfillsAndDiscovers covers two real-world
+// nzbdav DB shapes the importer previously dropped:
+//
+//   - A release folder (SubType=101) containing per-file children with
+//     SubType=201 instead of 203. The discovery query restricted to SubType=203
+//     missed them entirely.
+//   - A SubType=201/203 row with a non-empty NzbBlobId but no matching NzbNames
+//     row. The discovery INNER JOIN on NzbNames silently dropped them.
+//
+// The fix expands discovery to SubType IN (201, 203) and backfills missing
+// NzbNames rows before discovery runs.
+func TestParser_Parse_Blobs_SubType201_BackfillsAndDiscovers(t *testing.T) {
+	tmpDir := t.TempDir()
+	blobsDir := filepath.Join(tmpDir, "blobs")
+	dbPath := filepath.Join(tmpDir, "subtype201.db")
+	db, err := sql.Open("sqlite3", dbPath)
+	require.NoError(t, err)
+
+	_, err = db.Exec(`
+		CREATE TABLE DavItems (
+			Id TEXT PRIMARY KEY, ParentId TEXT, Name TEXT, FileSize INTEGER,
+			Path TEXT, NzbBlobId TEXT, SubType INTEGER
+		);
+		CREATE TABLE NzbNames (Id TEXT PRIMARY KEY, FileName TEXT);
+	`)
+	require.NoError(t, err)
+
+	blob201 := "1111aaaa2222bbbb"
+	blob203 := "3333cccc4444dddd"
+	writeZstdBlob(t, filepath.Join(blobsDir, "11", "11", blob201), []byte("<nzb id=\"201\"/>"))
+	writeZstdBlob(t, filepath.Join(blobsDir, "33", "33", blob203), []byte("<nzb id=\"203\"/>"))
+
+	// item201 is a SubType=201 row with NO NzbNames entry — represents the
+	// release-folder-child shape the importer used to drop. item203 has a
+	// NzbNames row pre-seeded so the test also covers the existing happy path.
+	_, err = db.Exec(`
+		INSERT INTO NzbNames (Id, FileName) VALUES ('3333cccc4444dddd', 'Already.Named.nzb');
+		INSERT INTO DavItems (Id, ParentId, Name, Path, NzbBlobId, SubType) VALUES
+		('root',     NULL,       '/',                          '/',                                          NULL,               1),
+		('uncat',    'root',     'uncategorized',              '/uncategorized',                             NULL,               1),
+		('rel201',   'uncat',    'Release.With.201.Children',  '/uncategorized/Release.With.201.Children',   NULL,               101),
+		('item201',  'rel201',   'episode1.mkv',               '/uncategorized/Release.With.201.Children/episode1.mkv', '1111aaaa2222bbbb', 201),
+		('rel203',   'uncat',    'Release.With.203.Standalone','/uncategorized/Release.With.203.Standalone', NULL,               101),
+		('item203',  'rel203',   'movie.mkv',                  '/uncategorized/Release.With.203.Standalone/movie.mkv',  '3333cccc4444dddd', 203);
+	`)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+
+	// Snapshot the source DB so we can prove the import doesn't mutate it.
+	srcBefore, err := os.ReadFile(dbPath)
+	require.NoError(t, err)
+
+	out, errChan := NewParser(dbPath, blobsDir).Parse()
+	got := collect(t, out, errChan)
+
+	require.Len(t, got, 2, "expected both SubType=201 and SubType=203 items to be discovered")
+
+	byID := map[string]*ParsedNzb{}
+	for _, n := range got {
+		byID[n.ID] = n
+	}
+
+	// The 201 row had no NzbNames entry on disk; without backfill the
+	// discovery JOIN would have dropped it. With backfill it's discovered and
+	// resolves to its parent release folder's name.
+	rel201, ok := byID["item201"]
+	require.True(t, ok, "SubType=201 item was not discovered (got IDs: %v)", slices.Sorted(maps.Keys(byID)))
+	assert.Equal(t, "Release.With.201.Children", rel201.Name)
+
+	rel203, ok := byID["item203"]
+	require.True(t, ok, "SubType=203 item was not discovered (got IDs: %v)", slices.Sorted(maps.Keys(byID)))
+	assert.Equal(t, "Release.With.203.Standalone", rel203.Name)
+
+	// Source DB must be byte-identical — backfill should land in a temp copy,
+	// never the user's file.
+	srcAfter, err := os.ReadFile(dbPath)
+	require.NoError(t, err)
+	assert.True(t, bytes.Equal(srcBefore, srcAfter), "source DB was mutated by import")
+}
+
+// TestParser_Parse_Blobs_TempDBCleanedBeforeStreaming verifies that the temp
+// DB copy used for backfill is deleted from disk before parseBlobs starts
+// emitting onto the channel. Without this, a slow consumer would pin the
+// temp file on disk for the entire import duration.
+func TestParser_Parse_Blobs_TempDBCleanedBeforeStreaming(t *testing.T) {
+	// Redirect os.CreateTemp to a dir we own so we can inspect it without
+	// false positives from other processes.
+	tmpRoot := t.TempDir()
+	t.Setenv("TMPDIR", tmpRoot)
+
+	srcDir := t.TempDir()
+	blobsDir := filepath.Join(srcDir, "blobs")
+	dbPath := filepath.Join(srcDir, "src.db")
+	db, err := sql.Open("sqlite3", dbPath)
+	require.NoError(t, err)
+
+	_, err = db.Exec(`
+		CREATE TABLE DavItems (
+			Id TEXT PRIMARY KEY, ParentId TEXT, Name TEXT, FileSize INTEGER,
+			Path TEXT, NzbBlobId TEXT, SubType INTEGER
+		);
+		CREATE TABLE NzbNames (Id TEXT PRIMARY KEY, FileName TEXT);
+	`)
+	require.NoError(t, err)
+
+	blobId := "aaaa1111bbbb2222"
+	writeZstdBlob(t, filepath.Join(blobsDir, "aa", "aa", blobId), []byte("<nzb/>"))
+	_, err = db.Exec(`
+		INSERT INTO NzbNames (Id, FileName) VALUES ('aaaa1111bbbb2222', 'M.nzb');
+		INSERT INTO DavItems (Id, ParentId, Name, Path, NzbBlobId, SubType) VALUES
+		('root',   NULL,   '/',         '/',               NULL,               1),
+		('movies', 'root', 'movies',    '/movies',         NULL,               1),
+		('rel',    'movies','M',        '/movies/M',       NULL,               101),
+		('item',   'rel',  'M.mkv',     '/movies/M/M.mkv', 'aaaa1111bbbb2222', 203);
+	`)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+
+	countTempDBs := func() int {
+		entries, err := os.ReadDir(tmpRoot)
+		require.NoError(t, err)
+		n := 0
+		for _, e := range entries {
+			if strings.HasPrefix(e.Name(), "altmount-nzbdav-") {
+				n++
+			}
+		}
+		return n
+	}
+
+	out, errChan := NewParser(dbPath, blobsDir).Parse()
+
+	// Don't drain immediately. Receive the first ParsedNzb so we know the
+	// goroutine has reached the streaming phase, then check that the temp
+	// DB is already gone from disk while the channel still has work to
+	// flush (Content pipe + close of channel).
+	first, ok := <-out
+	require.True(t, ok, "expected at least one ParsedNzb")
+	require.NotNil(t, first)
+
+	assert.Equal(t, 0, countTempDBs(),
+		"temp DB copy should be removed before streaming begins; found %d altmount-nzbdav-* files in %s", countTempDBs(), tmpRoot)
+
+	// Drain the rest so the goroutine exits cleanly.
+	_, _ = io.ReadAll(first.Content)
+	for range out {
+	}
+	for range errChan {
+	}
 }
 
 func TestParser_Parse_Blobs_WithExtracted(t *testing.T) {

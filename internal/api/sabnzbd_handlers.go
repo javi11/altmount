@@ -591,10 +591,10 @@ func (s *Server) handleSABnzbdQueue(c *fiber.Ctx) error {
 	limit := 100
 	if l := c.Query("limit"); l != "" {
 		if val, err := strconv.Atoi(l); err == nil {
-			if val == 0 {
-				limit = 10000
-			} else {
+			if val > 0 {
 				limit = val
+			} else {
+				limit = 10000
 			}
 		}
 	}
