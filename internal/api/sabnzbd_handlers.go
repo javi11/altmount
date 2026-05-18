@@ -12,13 +12,14 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/javi11/altmount/internal/arrs"
 	"github.com/google/uuid"
+	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/httpclient"
@@ -590,7 +591,11 @@ func (s *Server) handleSABnzbdQueue(c *fiber.Ctx) error {
 	limit := 100
 	if l := c.Query("limit"); l != "" {
 		if val, err := strconv.Atoi(l); err == nil {
-			limit = val
+			if val > 0 {
+				limit = val
+			} else {
+				limit = 10000
+			}
 		}
 	}
 
@@ -873,6 +878,10 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 		}
 	}
 
+	sort.SliceStable(finalItems, func(i, j int) bool {
+		return sabnzbdHistorySortTime(finalItems[i]).After(sabnzbdHistorySortTime(finalItems[j]))
+	})
+
 	// Total available items before pagination
 	totalAvailableCount := len(finalItems)
 
@@ -1031,10 +1040,25 @@ func importHistoryToQueueItem(h *database.ImportHistory) *database.ImportQueueIt
 		NzbPath:     h.NzbName,
 		Status:      database.QueueStatusCompleted,
 		FileSize:    &fileSize,
+		CreatedAt:   completedAt,
+		UpdatedAt:   completedAt,
 		CompletedAt: &completedAt,
 		Category:    h.Category,
 		StoragePath: &virtualPath,
 	}
+}
+
+func sabnzbdHistorySortTime(item *database.ImportQueueItem) time.Time {
+	if item == nil {
+		return time.Time{}
+	}
+	if !item.UpdatedAt.IsZero() {
+		return item.UpdatedAt
+	}
+	if item.CompletedAt != nil {
+		return *item.CompletedAt
+	}
+	return item.CreatedAt
 }
 
 // handleSABnzbdHistoryDelete handles deleting items from history
