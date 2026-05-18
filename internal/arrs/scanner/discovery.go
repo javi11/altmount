@@ -66,8 +66,12 @@ func (m *Manager) DiscoverFileMetadata(ctx context.Context, filePath, relativePa
 func (m *Manager) runStrictDiscovery(ctx context.Context, inst *model.ConfigInstance, filePath, cleanNzbName, libraryPath string) (*model.WebhookMetadata, error) {
 	if inst.Type == "radarr" {
 		return m.discoverRadarrStrict(ctx, filePath, cleanNzbName, libraryPath, inst.Name)
-	} else if inst.Type == "sonarr" {
+	} else if inst.Type == "sonarr" || inst.Type == "whisparr" {
 		return m.discoverSonarrStrict(ctx, filePath, cleanNzbName, libraryPath, inst.Name)
+	} else if inst.Type == "lidarr" {
+		return m.discoverLidarrStrict(ctx, filePath, cleanNzbName, libraryPath, inst.Name)
+	} else if inst.Type == "readarr" {
+		return m.discoverReadarrStrict(ctx, filePath, cleanNzbName, libraryPath, inst.Name)
 	}
 	return nil, fmt.Errorf("unsupported type")
 }
@@ -185,4 +189,12 @@ func (m *Manager) discoverSonarrStrict(ctx context.Context, filePath, cleanNzbNa
 	}
 
 	return nil, fmt.Errorf("not found")
+}
+
+func (m *Manager) discoverLidarrStrict(ctx context.Context, filePath, cleanNzbName, libraryPath, instanceName string) (*model.WebhookMetadata, error) {
+	return nil, fmt.Errorf("lidarr strict discovery not implemented")
+}
+
+func (m *Manager) discoverReadarrStrict(ctx context.Context, filePath, cleanNzbName, libraryPath, instanceName string) (*model.WebhookMetadata, error) {
+	return nil, fmt.Errorf("readarr strict discovery not implemented")
 }

@@ -50,7 +50,9 @@ export interface AuthConfig {
 
 // Database configuration
 export interface DatabaseConfig {
+	type: string;
 	path: string;
+	dsn: string;
 }
 
 // Metadata configuration
@@ -68,9 +70,16 @@ export interface MetadataBackupConfig {
 	path: string;
 }
 
+// Failure masking configuration
+export interface FailureMaskingConfig {
+	enabled: boolean;
+	threshold: number;
+}
+
 // Streaming configuration
 export interface StreamingConfig {
 	max_prefetch: number;
+	failure_masking: FailureMaskingConfig;
 }
 
 // Segment cache configuration
@@ -176,10 +185,11 @@ export interface RCloneConfig {
 	// VFS Cache Settings
 	cache_dir: string;
 	vfs_cache_mode: string;
+	vfs_cache_poll_interval: string;
+	vfs_read_chunk_size: string;
+	vfs_read_chunk_size_limit: string;
 	vfs_cache_max_size: string;
 	vfs_cache_max_age: string;
-	read_chunk_size: string;
-	read_chunk_size_limit: string;
 	vfs_read_ahead: string;
 	dir_cache_time: string;
 	vfs_cache_min_free_space: string;
@@ -221,7 +231,6 @@ export interface ImportConfig {
 	read_timeout_seconds: number;
 	import_strategy: ImportStrategy;
 	import_dir?: string | null;
-	skip_health_check?: boolean;
 	watch_dir?: string | null;
 	watch_interval_seconds?: number | null;
 	allow_nested_rar_extraction?: boolean;
@@ -279,6 +288,7 @@ export interface SABnzbdConfig {
 	complete_dir: string;
 	download_client_base_url?: string;
 	categories: SABnzbdCategory[];
+	history_retention_minutes: number;
 	fallback_host?: string;
 	fallback_api_key?: string; // Obfuscated when returned from API
 	fallback_api_key_set?: boolean; // For display purposes only
@@ -337,7 +347,9 @@ export interface AuthUpdateRequest {
 
 // Database update request
 export interface DatabaseUpdateRequest {
+	type?: string;
 	path?: string;
+	dsn?: string;
 }
 
 // Metadata update request
@@ -350,6 +362,7 @@ export interface MetadataUpdateRequest {
 // Streaming update request
 export interface StreamingUpdateRequest {
 	max_prefetch?: number;
+	failure_masking?: Partial<FailureMaskingConfig>;
 }
 
 // Health update request
@@ -405,10 +418,11 @@ export interface RCloneUpdateRequest {
 	// VFS Cache Settings
 	cache_dir?: string;
 	vfs_cache_mode?: string;
+	vfs_cache_poll_interval?: string;
 	vfs_cache_max_size?: string;
 	vfs_cache_max_age?: string;
-	read_chunk_size?: string;
-	read_chunk_size_limit?: string;
+	vfs_read_chunk_size?: string;
+	vfs_read_chunk_size_limit?: string;
 	vfs_read_ahead?: string;
 	dir_cache_time?: string;
 	vfs_cache_min_free_space?: string;
@@ -431,7 +445,6 @@ export interface ImportUpdateRequest {
 	allowed_file_extensions?: string[];
 	import_strategy?: ImportStrategy;
 	import_dir?: string | null;
-	skip_health_check?: boolean;
 	watch_dir?: string | null;
 	watch_interval_seconds?: number | null;
 	allow_nested_rar_extraction?: boolean;
@@ -477,6 +490,7 @@ export interface SABnzbdUpdateRequest {
 	enabled?: boolean;
 	complete_dir?: string;
 	categories?: SABnzbdCategory[];
+	history_retention_minutes?: number;
 	fallback_host?: string;
 	fallback_api_key?: string;
 }
@@ -527,6 +541,7 @@ export interface MetadataFormData {
 
 export interface StreamingFormData {
 	max_prefetch: number;
+	failure_masking: FailureMaskingConfig;
 }
 
 export interface RCloneFormData {
@@ -560,10 +575,11 @@ export interface RCloneFormData {
 	// VFS Cache Settings
 	cache_dir: string;
 	vfs_cache_mode: string;
+	vfs_cache_poll_interval: string;
+	vfs_read_chunk_size: string;
+	vfs_read_chunk_size_limit: string;
 	vfs_cache_max_size: string;
 	vfs_cache_max_age: string;
-	read_chunk_size: string;
-	read_chunk_size_limit: string;
 	vfs_read_ahead: string;
 	dir_cache_time: string;
 	vfs_cache_min_free_space: string;
@@ -612,10 +628,11 @@ export interface RCloneMountFormData {
 	// VFS Cache Settings
 	cache_dir: string;
 	vfs_cache_mode: string;
+	vfs_cache_poll_interval: string;
+	vfs_read_chunk_size: string;
+	vfs_read_chunk_size_limit: string;
 	vfs_cache_max_size: string;
 	vfs_cache_max_age: string;
-	read_chunk_size: string;
-	read_chunk_size_limit: string;
 	vfs_read_ahead: string;
 	dir_cache_time: string;
 	vfs_cache_min_free_space: string;
@@ -671,6 +688,7 @@ export interface SABnzbdFormData {
 	enabled: boolean;
 	complete_dir: string;
 	categories: SABnzbdCategory[];
+	history_retention_minutes: number;
 	fallback_host: string;
 	fallback_api_key: string;
 }

@@ -411,6 +411,7 @@ export function ProviderHealth() {
 										<td>
 											<div className="flex items-center gap-2">
 												<button 
+													type="button"
 													className="btn btn-ghost btn-xs gap-1"
 													onClick={() => handleRunSpeedTest(provider.id, provider.host)}
 													disabled={testingId === provider.id}

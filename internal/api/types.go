@@ -90,17 +90,18 @@ type RCloneAPIResponse struct {
 	Transfers   int    `json:"transfers"`
 
 	// VFS Cache Settings
-	CacheDir             string `json:"cache_dir"`
-	VFSCacheMode         string `json:"vfs_cache_mode"`
-	VFSCacheMaxSize      string `json:"vfs_cache_max_size"`
-	VFSCacheMaxAge       string `json:"vfs_cache_max_age"`
-	ReadChunkSize        string `json:"read_chunk_size"`
-	ReadChunkSizeLimit   string `json:"read_chunk_size_limit"`
-	VFSReadAhead         string `json:"vfs_read_ahead"`
-	DirCacheTime         string `json:"dir_cache_time"`
-	VFSCacheMinFreeSpace string `json:"vfs_cache_min_free_space"`
-	VFSDiskSpaceTotal    string `json:"vfs_disk_space_total"`
-	VFSReadChunkStreams  int    `json:"vfs_read_chunk_streams"`
+	CacheDir              string `json:"cache_dir"`
+	VFSCacheMode          string `json:"vfs_cache_mode"`
+	VFSCachePollInterval  string `json:"vfs_cache_poll_interval"`
+	VFSReadChunkSize      string `json:"vfs_read_chunk_size"`
+	VFSReadChunkSizeLimit string `json:"vfs_read_chunk_size_limit"`
+	VFSCacheMaxSize       string `json:"vfs_cache_max_size"`
+	VFSCacheMaxAge        string `json:"vfs_cache_max_age"`
+	VFSReadAhead          string `json:"vfs_read_ahead"`
+	DirCacheTime          string `json:"dir_cache_time"`
+	VFSCacheMinFreeSpace  string `json:"vfs_cache_min_free_space"`
+	VFSDiskSpaceTotal     string `json:"vfs_disk_space_total"`
+	VFSReadChunkStreams   int    `json:"vfs_read_chunk_streams"`
 
 	// Advanced Settings
 	NoModTime          bool `json:"no_mod_time"`
@@ -156,13 +157,14 @@ type ImportAPIResponse struct {
 
 // SABnzbdAPIResponse sanitizes SABnzbd config for API responses
 type SABnzbdAPIResponse struct {
-	Enabled               bool                     `json:"enabled"`
-	CompleteDir           string                   `json:"complete_dir"`
-	DownloadClientBaseURL string                   `json:"download_client_base_url"`
-	Categories            []config.SABnzbdCategory `json:"categories"`
-	FallbackHost          string                   `json:"fallback_host"`
-	FallbackAPIKey        string                   `json:"fallback_api_key"`     // Obfuscated if set
-	FallbackAPIKeySet     bool                     `json:"fallback_api_key_set"` // Indicates if API key is set
+	Enabled                 bool                     `json:"enabled"`
+	CompleteDir             string                   `json:"complete_dir"`
+	DownloadClientBaseURL   string                   `json:"download_client_base_url"`
+	Categories              []config.SABnzbdCategory `json:"categories"`
+	HistoryRetentionMinutes int                      `json:"history_retention_minutes"`
+	FallbackHost            string                   `json:"fallback_host"`
+	FallbackAPIKey          string                   `json:"fallback_api_key"`     // Obfuscated if set
+	FallbackAPIKeySet       bool                     `json:"fallback_api_key_set"` // Indicates if API key is set
 }
 
 // Helper functions to create API responses from core config types
@@ -232,17 +234,18 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 		Transfers:   cfg.RClone.Transfers,
 
 		// VFS Cache Settings
-		CacheDir:             cfg.RClone.CacheDir,
-		VFSCacheMode:         cfg.RClone.VFSCacheMode,
-		VFSCacheMaxSize:      cfg.RClone.VFSCacheMaxSize,
-		VFSCacheMaxAge:       cfg.RClone.VFSCacheMaxAge,
-		ReadChunkSize:        cfg.RClone.ReadChunkSize,
-		ReadChunkSizeLimit:   cfg.RClone.ReadChunkSizeLimit,
-		VFSReadAhead:         cfg.RClone.VFSReadAhead,
-		DirCacheTime:         cfg.RClone.DirCacheTime,
-		VFSCacheMinFreeSpace: cfg.RClone.VFSCacheMinFreeSpace,
-		VFSDiskSpaceTotal:    cfg.RClone.VFSDiskSpaceTotal,
-		VFSReadChunkStreams:  cfg.RClone.VFSReadChunkStreams,
+		CacheDir:              cfg.RClone.CacheDir,
+		VFSCacheMode:          cfg.RClone.VFSCacheMode,
+		VFSCachePollInterval:  cfg.RClone.VFSCachePollInterval,
+		VFSReadChunkSize:      cfg.RClone.VFSReadChunkSize,
+		VFSReadChunkSizeLimit: cfg.RClone.VFSReadChunkSizeLimit,
+		VFSCacheMaxSize:       cfg.RClone.VFSCacheMaxSize,
+		VFSCacheMaxAge:        cfg.RClone.VFSCacheMaxAge,
+		VFSReadAhead:          cfg.RClone.VFSReadAhead,
+		DirCacheTime:          cfg.RClone.DirCacheTime,
+		VFSCacheMinFreeSpace:  cfg.RClone.VFSCacheMinFreeSpace,
+		VFSDiskSpaceTotal:     cfg.RClone.VFSDiskSpaceTotal,
+		VFSReadChunkStreams:   cfg.RClone.VFSReadChunkStreams,
 
 		// Advanced Settings
 		NoModTime:          cfg.RClone.NoModTime,
@@ -259,13 +262,14 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 	}
 
 	sabnzbdResp := SABnzbdAPIResponse{
-		Enabled:               cfg.SABnzbd.Enabled != nil && *cfg.SABnzbd.Enabled,
-		CompleteDir:           cfg.SABnzbd.CompleteDir,
-		DownloadClientBaseURL: cfg.SABnzbd.DownloadClientBaseURL,
-		Categories:            cfg.SABnzbd.Categories,
-		FallbackHost:          cfg.SABnzbd.FallbackHost,
-		FallbackAPIKey:        fallbackAPIKey,
-		FallbackAPIKeySet:     cfg.SABnzbd.FallbackAPIKey != "",
+		Enabled:                 cfg.SABnzbd.Enabled != nil && *cfg.SABnzbd.Enabled,
+		CompleteDir:             cfg.SABnzbd.CompleteDir,
+		DownloadClientBaseURL:   cfg.SABnzbd.DownloadClientBaseURL,
+		Categories:              cfg.SABnzbd.Categories,
+		HistoryRetentionMinutes: cfg.SABnzbd.HistoryRetentionMinutes,
+		FallbackHost:            cfg.SABnzbd.FallbackHost,
+		FallbackAPIKey:          fallbackAPIKey,
+		FallbackAPIKeySet:       cfg.SABnzbd.FallbackAPIKey != "",
 	}
 
 	webdavResp := WebDAVAPIResponse{

@@ -38,17 +38,27 @@ type ArrsInstanceRequest struct {
 // ArrsWebhookRequest represents a webhook payload from Radarr/Sonarr
 type ArrsWebhookRequest struct {
 	Artist struct {
+		Id   int64  `json:"id"`
 		Path string `json:"path"`
 	} `json:"artist"`
 	Album struct {
+		Id    int64  `json:"id"`
 		Title string `json:"title"`
 	} `json:"album"`
+	TrackFile struct {
+		Id int64 `json:"id"`
+	} `json:"trackFile"`
 	Author struct {
+		Id   int64  `json:"id"`
 		Path string `json:"path"`
 	} `json:"author"`
 	Book struct {
+		Id    int64  `json:"id"`
 		Title string `json:"title"`
 	} `json:"book"`
+	BookFile struct {
+		Id int64 `json:"id"`
+	} `json:"bookFile"`
 
 	EventType string `json:"eventType"`
 	InstanceName string `json:"instanceName,omitempty"`
@@ -108,6 +118,42 @@ func (req ArrsWebhookRequest) ToMetadata() model.WebhookMetadata {
 		meta.EpisodeFile = &model.EpisodeFileMetadata{
 			Id:        req.EpisodeFile.Id,
 			SceneName: req.EpisodeFile.SceneName,
+		}
+	}
+
+	if req.Artist.Id > 0 {
+		meta.Artist = &model.ArtistMetadata{
+			Id: req.Artist.Id,
+		}
+	}
+
+	if req.Album.Id > 0 {
+		meta.Album = &model.AlbumMetadata{
+			Id: req.Album.Id,
+		}
+	}
+
+	if req.TrackFile.Id > 0 {
+		meta.TrackFile = &model.TrackFileMetadata{
+			Id: req.TrackFile.Id,
+		}
+	}
+
+	if req.Author.Id > 0 {
+		meta.Author = &model.AuthorMetadata{
+			Id: req.Author.Id,
+		}
+	}
+
+	if req.Book.Id > 0 {
+		meta.Book = &model.BookMetadata{
+			Id: req.Book.Id,
+		}
+	}
+
+	if req.BookFile.Id > 0 {
+		meta.BookFile = &model.BookFileMetadata{
+			Id: req.BookFile.Id,
 		}
 	}
 
@@ -392,19 +438,44 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 
 		// Redundant Deletion Guard: ensure the file is gone from the local mount
 		if s.configManager != nil && metadataPath != "" && metadataPath != "." && metadataPath != "/" {
-			cfg := s.configManager.GetConfig()
-			if cfg.MountPath != "" {
-				localPath := filepath.Join(cfg.MountPath, metadataPath)
-
-				// HARD SAFETY: Never delete the mount root or critical system paths
-				cleanLocal := filepath.Clean(localPath)
-				if cleanLocal == "/" || cleanLocal == "." || cleanLocal == filepath.Clean(cfg.MountPath) {
-					slog.WarnContext(c.Context(), "Safety Guard: Blocked attempt to delete root mount path", "path", cleanLocal)
-					continue
+			// HEALTH-AWARE CHECK: If we find a healthy record recently imported, skip deletion.
+			isHealthy := false
+			if s.healthRepo != nil {
+				health, err := s.healthRepo.GetFileHealthByLibraryPath(c.Context(), path)
+				if err == nil && health != nil && health.Status == database.HealthStatusHealthy {
+					// Check if imported recently (within 5 minutes)
+					if time.Since(health.UpdatedAt) < 5*time.Minute {
+						isHealthy = true
+					}
 				}
-				if _, err := os.Stat(localPath); err == nil {
-					slog.InfoContext(c.Context(), "Redundant Deletion Guard: Manual removal of ghost file from mount", "path", localPath)
-					_ = os.Remove(localPath)
+			}
+
+			if isHealthy {
+				slog.InfoContext(c.Context(), "Redundant Deletion Guard: Skipping deletion of healthy/recently imported file", "path", path)
+			} else {
+				cfg := s.configManager.GetConfig()
+				if cfg.MountPath != "" {
+					localPath := filepath.Join(cfg.MountPath, metadataPath)
+
+					// HARD SAFETY: Never delete the mount root or critical system paths
+					cleanLocal := filepath.Clean(localPath)
+					if cleanLocal == "/" || cleanLocal == "." || cleanLocal == filepath.Clean(cfg.MountPath) {
+						slog.WarnContext(c.Context(), "Safety Guard: Blocked attempt to delete root mount path", "path", cleanLocal)
+						continue
+					}
+					if _, err := os.Stat(localPath); err == nil {
+						slog.InfoContext(c.Context(), "Redundant Deletion Guard: Manual removal of ghost file from mount", "path", localPath)
+						_ = os.Remove(localPath)
+
+						// INSTANT CLEANUP: Remove from the import queue database immediately upon confirmed import
+						if s.queueRepo != nil {
+							if err := s.queueRepo.DeleteQueueItemsByPath(c.Context(), metadataPath); err != nil {
+								slog.ErrorContext(c.Context(), "Failed to delete item from queue by webhook path", "path", metadataPath, "error", err)
+							} else {
+								slog.InfoContext(c.Context(), "Queue item automatically removed by webhook", "path", metadataPath)
+							}
+						}
+					}
 				}
 			}
 		}

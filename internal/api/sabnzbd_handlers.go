@@ -750,10 +750,14 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 			start = val
 		}
 	}
-	limit := 0 // 0 means all items in SABnzbd
+	limit := 100
 	if l := c.Query("limit"); l != "" {
 		if val, err := strconv.Atoi(l); err == nil {
-			limit = val
+			if val > 0 {
+				limit = val
+			} else {
+				limit = 10000
+			}
 		}
 	}
 
@@ -776,18 +780,18 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 		}
 	}
 
+	// Get recent items from persistent history (buffer for Sonarr)
+	recentHistory, err := s.queueRepo.ListRecentImportHistory(ctx, historyMinutes, categoryFilter)
+	if err != nil {
+		recentHistory = []*database.ImportHistory{} // Fallback
+	}
+
 	// Fetch items from active queue
 	// We use a larger set here to ensure we get everything for deduplication and combined history
 	completedStatus := database.QueueStatusCompleted
 	completedQueueItems, err := s.queueRepo.ListQueueItems(ctx, &completedStatus, "", categoryFilter, 2000, 0, "updated_at", "desc")
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to get completed items from queue")
-	}
-
-	// Get recent items from persistent history (buffer for Sonarr)
-	recentHistory, err := s.queueRepo.ListRecentImportHistory(ctx, historyMinutes, categoryFilter)
-	if err != nil {
-		recentHistory = []*database.ImportHistory{} // Fallback
 	}
 
 	// Combine and deduplicate by NZB Name

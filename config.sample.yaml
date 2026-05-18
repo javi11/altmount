@@ -91,8 +91,9 @@ rclone:
   vfs_cache_mode: 'full' # VFS cache mode: off|minimal|writes|full (--vfs-cache-mode=full)
   vfs_cache_max_size: '50G' # Maximum cache size (--vfs-cache-max-size=50G)
   vfs_cache_max_age: '504h' # Maximum cache age (--vfs-cache-max-age=504h, 21 days)
-  read_chunk_size: '32M' # VFS read chunk size (--vfs-read-chunk-size=32M)
-  read_chunk_size_limit: '2G' # Read chunk size limit (--vfs-read-chunk-size-limit=2G)
+  vfs_cache_poll_interval: '1m' # How often to poll for remote changes (--vfs-cache-poll-interval=1m)
+  vfs_read_chunk_size: '32M' # VFS read chunk size (--vfs-read-chunk-size=32M)
+  vfs_read_chunk_size_limit: '2G' # Read chunk size limit (--vfs-read-chunk-size-limit=2G)
   vfs_read_ahead: '128M' # VFS read-ahead size (--vfs-read-ahead=128M)
   dir_cache_time: '10m' # Directory cache time (--dir-cache-time=10m)
 
@@ -153,14 +154,12 @@ import:
     - '.pdf'
     - '.cbz'
   max_import_connections: 5 # Number of concurrent NNTP connections for validation and archive processing
-  import_cache_size_mb: 64 # Cache size in MB for archive analysis
   segment_sample_percentage: 1 # Percentage of segments to sample for validation (1-100)
   import_strategy: 'NONE' # Import strategy: NONE (direct import), SYMLINK (create symlinks), STRM (create .strm files)
                           # NOTE: SYMLINK on Windows requires `allow_symlinks_on_windows: true` AND Windows Developer Mode enabled. Otherwise use STRM.
   import_dir: '' # Import directory (required when import_strategy is SYMLINK or STRM, must be absolute path)
                  # Windows example: 'C:\Users\user\Videos'
   allow_symlinks_on_windows: false # Permit symlink creation on Windows (requires Developer Mode in Windows Settings → For developers). No effect on Linux/macOS. Default: false.
-  skip_health_check: true # Bypass Usenet article validation during import (default: true)
   failed_item_retention_hours: 24 # Auto-remove failed queue items and NZB files after this many hours (0 to disable, default: 24)
 
 # Health monitoring configuration

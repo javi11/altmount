@@ -798,6 +798,16 @@ function RCloneMountSubSection({ config, onFormDataChange }: RCloneSubSectionPro
 								placeholder="50G"
 							/>
 						</fieldset>
+						<fieldset className="fieldset">
+							<legend className="fieldset-legend">Cache Poll Interval</legend>
+							<input
+								type="text"
+								className="input input-bordered w-full bg-base-100 font-mono text-sm"
+								value={mountFormData.vfs_cache_poll_interval}
+								onChange={(e) => handleMountInputChange("vfs_cache_poll_interval", e.target.value)}
+								placeholder="1m"
+							/>
+						</fieldset>
 					</div>
 					<fieldset className="fieldset">
 						<legend className="fieldset-legend">Cache Max Age</legend>
@@ -845,8 +855,8 @@ function RCloneMountSubSection({ config, onFormDataChange }: RCloneSubSectionPro
 						<input
 							type="text"
 							className="input input-bordered w-full bg-base-100 font-mono text-sm"
-							value={mountFormData.read_chunk_size}
-							onChange={(e) => handleMountInputChange("read_chunk_size", e.target.value)}
+							value={mountFormData.vfs_read_chunk_size}
+							onChange={(e) => handleMountInputChange("vfs_read_chunk_size", e.target.value)}
 							placeholder="32M"
 						/>
 					</fieldset>
@@ -855,8 +865,8 @@ function RCloneMountSubSection({ config, onFormDataChange }: RCloneSubSectionPro
 						<input
 							type="text"
 							className="input input-bordered w-full bg-base-100 font-mono text-sm"
-							value={mountFormData.read_chunk_size_limit}
-							onChange={(e) => handleMountInputChange("read_chunk_size_limit", e.target.value)}
+							value={mountFormData.vfs_read_chunk_size_limit}
+							onChange={(e) => handleMountInputChange("vfs_read_chunk_size_limit", e.target.value)}
 							placeholder="2G"
 						/>
 					</fieldset>
@@ -1324,10 +1334,11 @@ function buildRCloneMountFormData(config: ConfigResponse): RCloneMountFormData {
 		transfers: config.rclone.transfers || 4,
 		cache_dir: config.rclone.cache_dir || "",
 		vfs_cache_mode: config.rclone.vfs_cache_mode || "full",
+		vfs_cache_poll_interval: config.rclone.vfs_cache_poll_interval || "1m",
 		vfs_cache_max_size: config.rclone.vfs_cache_max_size || "50G",
 		vfs_cache_max_age: config.rclone.vfs_cache_max_age || "504h",
-		read_chunk_size: config.rclone.read_chunk_size || "32M",
-		read_chunk_size_limit: config.rclone.read_chunk_size_limit || "2G",
+		vfs_read_chunk_size: config.rclone.vfs_read_chunk_size || "32M",
+		vfs_read_chunk_size_limit: config.rclone.vfs_read_chunk_size_limit || "2G",
 		vfs_read_ahead: config.rclone.vfs_read_ahead || "128M",
 		dir_cache_time: config.rclone.dir_cache_time || "10m",
 		vfs_cache_min_free_space: config.rclone.vfs_cache_min_free_space || "1G",

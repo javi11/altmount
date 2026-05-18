@@ -431,6 +431,16 @@ func (r *Repository) HasActiveOrRecentQueueItemForStoragePath(
 	return true, nil
 }
 
+// DeleteQueueItemsByPath removes items from the queue matching the given path
+func (r *Repository) DeleteQueueItemsByPath(ctx context.Context, path string) error {
+	_, err := r.db.ExecContext(ctx,
+		`DELETE FROM import_queue WHERE storage_path = ? OR nzb_path = ?`, path, path)
+	if err != nil {
+		return fmt.Errorf("failed to delete queue items by path: %w", err)
+	}
+	return nil
+}
+
 // RemoveFromQueue removes an item from the queue
 func (r *Repository) RemoveFromQueue(ctx context.Context, id int64) error {
 	query := `DELETE FROM import_queue WHERE id = ?`
