@@ -63,41 +63,120 @@ func (p *Parser) Parse() (<-chan *ParsedNzb, <-chan error) {
 	errChan := make(chan error, 1)
 
 	go func() {
-		db, err := sql.Open("sqlite3", p.dbPath+"?mode=ro&_journal_mode=WAL")
+		defer close(out)
+		defer close(errChan)
+
+		// Open read-only first to detect storage flavor. The blob-based path
+		// needs writes (NzbNames backfill — see backfillNzbNames), so it
+		// re-opens against a temp copy. Legacy storage stays on the read-only
+		// handle to avoid ever touching the source DB.
+		//
+		// immutable=1 promises SQLite the file won't change underneath it, and
+		// in return SQLite never writes anything (no WAL/SHM sidecars, no
+		// header rewrites). mode=ro alone still mutates the header on open
+		// because go-sqlite3 issues PRAGMAs that touch the file.
+		roDB, err := sql.Open("sqlite3", p.dbPath+"?mode=ro&immutable=1")
 		if err != nil {
 			errChan <- fmt.Errorf("failed to open database: %w", err)
-			close(out)
-			close(errChan)
+			return
+		}
+		defer roDB.Close()
+		roDB.SetMaxOpenConns(25)
+		roDB.SetMaxIdleConns(10)
+
+		// Blob-based (alpha) storage is detected by presence of the NzbNames
+		// table and a configured blobs directory.
+		isBlobStorage := p.blobsPath != "" && hasTable(roDB, "NzbNames")
+
+		if isBlobStorage {
+			slog.InfoContext(context.Background(), "Detected blob-based NZBDav storage")
+
+			// All DB-bound work (backfill, tree load, discovery scan) is done
+			// inside this helper. The temp DB copy and its handle are released
+			// as soon as the helper returns — before any blob streaming or
+			// channel sends happen — so the temp file doesn't sit on disk for
+			// the (potentially long) duration of the consumer draining.
+			tree, blobOrder, rowsByBlob, err := p.prepareBlobImport()
+			if err != nil {
+				errChan <- err
+				return
+			}
+			p.parseBlobs(tree, blobOrder, rowsByBlob, out)
 			return
 		}
 
-		defer func() {
-			db.Close()
-			close(out)
-			close(errChan)
-		}()
-
-		db.SetMaxOpenConns(25)
-		db.SetMaxIdleConns(10)
-
-		tree, err := loadDavTree(db)
+		tree, err := loadDavTree(roDB)
 		if err != nil {
 			errChan <- fmt.Errorf("failed to load DavItems tree: %w", err)
 			return
 		}
-
-		// Blob-based (alpha) storage is detected by presence of the NzbNames table
-		// and a configured blobs directory.
-		if p.blobsPath != "" && hasTable(db, "NzbNames") {
-			slog.InfoContext(context.Background(), "Detected blob-based NZBDav storage")
-			p.parseBlobs(db, tree, out, errChan)
-			return
-		}
-
-		p.parseLegacy(db, tree, out, errChan)
+		p.parseLegacy(roDB, tree, out, errChan)
 	}()
 
 	return out, errChan
+}
+
+// copyDBToTemp duplicates the SQLite file at src to a sibling temp file the
+// caller owns. Returns the temp path and a cleanup func that removes both the
+// copy and any -wal/-shm sidecars that SQLite may create during use.
+func copyDBToTemp(src string) (string, func(), error) {
+	in, err := os.Open(src)
+	if err != nil {
+		return "", nil, err
+	}
+	defer in.Close()
+
+	tmp, err := os.CreateTemp("", "altmount-nzbdav-*.db")
+	if err != nil {
+		return "", nil, err
+	}
+	tmpPath := tmp.Name()
+
+	if _, err := io.Copy(tmp, in); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return "", nil, err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return "", nil, err
+	}
+
+	cleanup := func() {
+		os.Remove(tmpPath)
+		os.Remove(tmpPath + "-wal")
+		os.Remove(tmpPath + "-shm")
+	}
+	return tmpPath, cleanup, nil
+}
+
+// backfillNzbNames materializes a NzbNames row for every DavItem that points
+// at a non-empty NzbBlobId but has no matching name entry. nzbdav can land
+// rows in this half-populated state for release-folder children (SubType=201)
+// and the discovery query's INNER JOIN drops them on the floor.
+//
+// The synthetic FileName is the DavItem's Name with a .nzb suffix (stripping
+// a common media extension first to avoid double-suffix files like
+// "Foo.mkv.nzb" reading awkwardly).
+func backfillNzbNames(db *sql.DB) error {
+	_, err := db.Exec(`
+		INSERT OR IGNORE INTO NzbNames (Id, FileName)
+		SELECT DISTINCT
+			d.NzbBlobId,
+			CASE
+				WHEN d.Name LIKE '%.mkv' OR d.Name LIKE '%.mp4' OR d.Name LIKE '%.avi'
+					THEN substr(d.Name, 1, length(d.Name) - 4) || '.nzb'
+				ELSE d.Name || '.nzb'
+			END
+		FROM DavItems d
+		LEFT JOIN NzbNames n ON n.Id = d.NzbBlobId
+		WHERE d.SubType IN (201, 203)
+			AND d.NzbBlobId IS NOT NULL
+			AND d.NzbBlobId != ''
+			AND d.NzbBlobId != '00000000-0000-0000-0000-000000000000'
+			AND n.Id IS NULL
+	`)
+	return err
 }
 
 func hasTable(db *sql.DB, name string) bool {
@@ -189,8 +268,37 @@ type blobRow struct {
 	id, fileName, davName, releasePath, blobId string
 }
 
-func (p *Parser) parseBlobs(db *sql.DB, tree *davTree, out chan<- *ParsedNzb, errChan chan<- error) {
-	rows, err := db.Query(`
+// prepareBlobImport does every DB-touching step for the blob-storage path —
+// stages a temp DB copy, runs the NzbNames backfill, loads the DavItems tree,
+// and buffers the full discovery result set into memory. All resources tied to
+// the temp DB (handle + on-disk file + WAL/SHM sidecars) are released before
+// this function returns, so the subsequent (potentially long) blob streaming
+// phase doesn't pin them.
+func (p *Parser) prepareBlobImport() (*davTree, []string, map[string][]blobRow, error) {
+	copyPath, cleanup, err := copyDBToTemp(p.dbPath)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to stage temp DB copy: %w", err)
+	}
+	defer cleanup()
+
+	rwDB, err := sql.Open("sqlite3", copyPath+"?_journal_mode=WAL")
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to open temp DB copy: %w", err)
+	}
+	defer rwDB.Close()
+	rwDB.SetMaxOpenConns(25)
+	rwDB.SetMaxIdleConns(10)
+
+	if err := backfillNzbNames(rwDB); err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to backfill NzbNames: %w", err)
+	}
+
+	tree, err := loadDavTree(rwDB)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to load DavItems tree: %w", err)
+	}
+
+	rows, err := rwDB.Query(`
 		SELECT
 			d.Id,
 			n.FileName,
@@ -202,15 +310,16 @@ func (p *Parser) parseBlobs(db *sql.DB, tree *davTree, out chan<- *ParsedNzb, er
 		WHERE d.NzbBlobId IS NOT NULL
 		AND d.NzbBlobId != ''
 		AND d.NzbBlobId != '00000000-0000-0000-0000-000000000000'
-		AND d.SubType = 203
+		AND d.SubType IN (201, 203)
 	`)
 	if err != nil {
-		errChan <- fmt.Errorf("failed to query blob files: %w", err)
-		return
+		return nil, nil, nil, fmt.Errorf("failed to query blob files: %w", err)
 	}
 	defer rows.Close()
 
-	// Pass 1: collect all rows grouped by blobId, preserving first-seen order.
+	// Buffer all rows grouped by blobId, preserving first-seen order. Once
+	// this loop ends and the deferred Close/cleanup chain unwinds, the temp
+	// DB is gone from disk.
 	var blobOrder []string
 	rowsByBlob := make(map[string][]blobRow)
 	for rows.Next() {
@@ -224,8 +333,15 @@ func (p *Parser) parseBlobs(db *sql.DB, tree *davTree, out chan<- *ParsedNzb, er
 		}
 		rowsByBlob[r.blobId] = append(rowsByBlob[r.blobId], r)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to iterate blob files: %w", err)
+	}
 
-	// Pass 2: emit one ParsedNzb per blob group.
+	return tree, blobOrder, rowsByBlob, nil
+}
+
+func (p *Parser) parseBlobs(tree *davTree, blobOrder []string, rowsByBlob map[string][]blobRow, out chan<- *ParsedNzb) {
+	// Emit one ParsedNzb per blob group.
 	// The first row in each group becomes the canonical item; additional rows
 	// become ParsedNzbAlias entries so the scanner can register migration rows
 	// for every DavItem ID that shares the blob.
