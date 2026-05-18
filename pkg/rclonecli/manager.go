@@ -143,6 +143,16 @@ func (m *Manager) Start(ctx context.Context) error {
 		}
 	}
 
+	// Add custom RC options as flags
+	for k, v := range cfg.RClone.RCOptions {
+		flag := "--" + k
+		if v == "true" {
+			args = append(args, flag)
+		} else if v != "false" {
+			args = append(args, flag, v)
+		}
+	}
+
 	m.logger.InfoContext(ctx, "Starting rclone RC server", "args", args)
 
 	m.cmd = exec.CommandContext(ctx, "rclone", args...)

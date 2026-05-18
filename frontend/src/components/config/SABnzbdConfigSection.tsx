@@ -244,6 +244,24 @@ export function SABnzbdConfigSection({
 										The URL ARR instances use to reach this API.
 									</p>
 								</fieldset>
+
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend font-semibold">History Retention (minutes)</legend>
+									<input
+										type="number"
+										className="input input-bordered w-full bg-base-100 font-mono text-sm"
+										value={formData.history_retention_minutes}
+										readOnly={isReadOnly}
+										onChange={(e) =>
+											updateFormData({
+												history_retention_minutes: Number.parseInt(e.target.value, 10) || 0,
+											})
+										}
+									/>
+									<p className="label break-words text-base-content/70 text-xs">
+										How far back the emulated history goes when polled by Arrs.
+									</p>
+								</fieldset>
 							</div>
 						</div>
 

@@ -433,11 +433,22 @@ func (w *Worker) checkGhostByImportHistory(ctx context.Context, outputPath strin
 		return false
 	}
 
-	mountPath := cfg.MountPath
-	virtualPath := strings.TrimPrefix(filepath.ToSlash(outputPath), filepath.ToSlash(mountPath))
+	outPathSlash := filepath.ToSlash(outputPath)
+	virtualPath := outPathSlash
+
+	mountPathSlash := filepath.ToSlash(cfg.MountPath)
+	if strings.HasPrefix(outPathSlash, mountPathSlash) {
+		virtualPath = strings.TrimPrefix(outPathSlash, mountPathSlash)
+	} else if cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
+		importDirSlash := filepath.ToSlash(*cfg.Import.ImportDir)
+		if strings.HasPrefix(outPathSlash, importDirSlash) {
+			virtualPath = strings.TrimPrefix(outPathSlash, importDirSlash)
+		}
+	}
+
 	virtualPath = strings.TrimPrefix(virtualPath, "/")
 
-	if virtualPath == "" {
+	if virtualPath == outPathSlash || virtualPath == "" {
 		return false
 	}
 

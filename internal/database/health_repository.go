@@ -112,7 +112,38 @@ func (r *HealthRepository) GetFileHealth(ctx context.Context, filePath string) (
 	return &health, nil
 }
 
-// GetFileHealthByID retrieves health record for a specific file by ID
+// GetFileHealthByLibraryPath retrieves health record for a specific file by its library path
+func (r *HealthRepository) GetFileHealthByLibraryPath(ctx context.Context, libraryPath string) (*FileHealth, error) {
+	query := `
+		SELECT id, file_path, library_path, status, last_checked, last_error, retry_count, max_retries,
+		       repair_retry_count, max_repair_retries, source_nzb_path,
+		       error_details, created_at, updated_at, release_date, priority,
+			   streaming_failure_count, is_masked
+		, metadata
+		FROM file_health
+		WHERE library_path = ?
+	`
+
+	var health FileHealth
+	err := r.db.QueryRowContext(ctx, query, libraryPath).Scan(
+		&health.ID, &health.FilePath, &health.LibraryPath, &health.Status, &health.LastChecked,
+		&health.LastError, &health.RetryCount, &health.MaxRetries,
+		&health.RepairRetryCount, &health.MaxRepairRetries,
+		&health.SourceNzbPath, &health.ErrorDetails,
+		&health.CreatedAt, &health.UpdatedAt, &health.ReleaseDate, &health.Priority,
+		&health.StreamingFailureCount, &health.IsMasked,
+		&health.Metadata,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get file health by library path: %w", err)
+	}
+
+	return &health, nil
+}
+
 func (r *HealthRepository) GetFileHealthByID(ctx context.Context, id int64) (*FileHealth, error) {
 	query := `
 		SELECT id, file_path, library_path, status, last_checked, last_error, retry_count, max_retries,

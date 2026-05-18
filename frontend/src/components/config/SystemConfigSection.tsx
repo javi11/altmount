@@ -1,6 +1,7 @@
 import {
 	Check,
 	Copy,
+	HardDrive,
 	Monitor,
 	Palette,
 	RefreshCw,
@@ -378,6 +379,45 @@ export function SystemConfigSection({
 									onChange={(e) => handleInputChange("compress", e.target.checked)}
 								/>
 							</div>
+						</fieldset>
+					</div>
+				</div>
+
+				{/* Database Storage */}
+				<div className="min-w-0 space-y-6 overflow-hidden rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+					<div className="flex items-center gap-2">
+						<HardDrive className="h-4 w-4 text-base-content/60" />
+						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
+							Database Storage
+						</h4>
+						<div className="h-px flex-1 bg-base-300/50" />
+					</div>
+
+					<div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+						<fieldset className="fieldset min-w-0">
+							<legend className="fieldset-legend font-semibold text-xs">Database Type</legend>
+							<select
+								className="select select-bordered w-full min-w-0 max-w-full bg-base-100"
+								value={config.database.type}
+								disabled={isReadOnly}
+								onChange={(_e) => {
+									// Placeholder for database update handler
+								}}
+							>
+								<option value="sqlite">SQLite (Default)</option>
+								<option value="postgres">PostgreSQL</option>
+							</select>
+						</fieldset>
+
+						<fieldset className="fieldset min-w-0">
+							<legend className="fieldset-legend font-semibold text-xs">Connection DSN</legend>
+							<input
+								type="text"
+								className="input input-bordered w-full min-w-0 max-w-full bg-base-100 font-mono text-sm"
+								value={config.database.dsn}
+								placeholder="postgres://user:pass@localhost:5432/altmount"
+								disabled={isReadOnly || config.database.type !== "postgres"}
+							/>
 						</fieldset>
 					</div>
 				</div>

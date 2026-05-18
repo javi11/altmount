@@ -146,6 +146,9 @@ func (m *Manager) performMount(ctx context.Context, provider, mountPath, webdavU
 		if cfg.RClone.VFSReadChunkSize != "" {
 			vfsOpt["ChunkSize"] = cfg.RClone.VFSReadChunkSize
 		}
+		if cfg.RClone.VFSReadChunkSizeLimit != "" {
+			vfsOpt["ChunkSizeLimit"] = cfg.RClone.VFSReadChunkSizeLimit
+		}
 		if cfg.RClone.VFSReadAhead != "" {
 			vfsOpt["ReadAhead"] = cfg.RClone.VFSReadAhead
 		}
@@ -168,6 +171,11 @@ func (m *Manager) performMount(ctx context.Context, provider, mountPath, webdavU
 		if attrTimeout, e := time.ParseDuration(cfg.RClone.AttrTimeout); e == nil {
 			mountOpt["AttrTimeout"] = attrTimeout.Nanoseconds()
 		}
+	}
+
+	// Merge custom mount options (can override any of the above)
+	for k, v := range cfg.RClone.MountOptions {
+		mountOpt[k] = v
 	}
 
 	if cfg.RClone.Links {

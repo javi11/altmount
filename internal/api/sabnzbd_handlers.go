@@ -12,13 +12,14 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/javi11/altmount/internal/arrs"
 	"github.com/google/uuid"
+	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/httpclient"
@@ -590,7 +591,11 @@ func (s *Server) handleSABnzbdQueue(c *fiber.Ctx) error {
 	limit := 100
 	if l := c.Query("limit"); l != "" {
 		if val, err := strconv.Atoi(l); err == nil {
-			limit = val
+			if val == 0 {
+				limit = 10000
+			} else {
+				limit = val
+			}
 		}
 	}
 
@@ -745,10 +750,14 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 			start = val
 		}
 	}
-	limit := 0 // 0 means all items in SABnzbd
+	limit := 100
 	if l := c.Query("limit"); l != "" {
 		if val, err := strconv.Atoi(l); err == nil {
-			limit = val
+			if val > 0 {
+				limit = val
+			} else {
+				limit = 10000
+			}
 		}
 	}
 
@@ -771,18 +780,18 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 		}
 	}
 
+	// Get recent items from persistent history (buffer for Sonarr)
+	recentHistory, err := s.queueRepo.ListRecentImportHistory(ctx, historyMinutes, categoryFilter)
+	if err != nil {
+		recentHistory = []*database.ImportHistory{} // Fallback
+	}
+
 	// Fetch items from active queue
 	// We use a larger set here to ensure we get everything for deduplication and combined history
 	completedStatus := database.QueueStatusCompleted
 	completedQueueItems, err := s.queueRepo.ListQueueItems(ctx, &completedStatus, "", categoryFilter, 2000, 0, "updated_at", "desc")
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to get completed items from queue")
-	}
-
-	// Get recent items from persistent history (buffer for Sonarr)
-	recentHistory, err := s.queueRepo.ListRecentImportHistory(ctx, historyMinutes, categoryFilter)
-	if err != nil {
-		recentHistory = []*database.ImportHistory{} // Fallback
 	}
 
 	// Combine and deduplicate by NZB Name
@@ -872,6 +881,10 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 			seenNames[name] = true
 		}
 	}
+
+	sort.SliceStable(finalItems, func(i, j int) bool {
+		return sabnzbdHistorySortTime(finalItems[i]).After(sabnzbdHistorySortTime(finalItems[j]))
+	})
 
 	// Total available items before pagination
 	totalAvailableCount := len(finalItems)
@@ -1031,10 +1044,25 @@ func importHistoryToQueueItem(h *database.ImportHistory) *database.ImportQueueIt
 		NzbPath:     h.NzbName,
 		Status:      database.QueueStatusCompleted,
 		FileSize:    &fileSize,
+		CreatedAt:   completedAt,
+		UpdatedAt:   completedAt,
 		CompletedAt: &completedAt,
 		Category:    h.Category,
 		StoragePath: &virtualPath,
 	}
+}
+
+func sabnzbdHistorySortTime(item *database.ImportQueueItem) time.Time {
+	if item == nil {
+		return time.Time{}
+	}
+	if !item.UpdatedAt.IsZero() {
+		return item.UpdatedAt
+	}
+	if item.CompletedAt != nil {
+		return *item.CompletedAt
+	}
+	return item.CreatedAt
 }
 
 // handleSABnzbdHistoryDelete handles deleting items from history

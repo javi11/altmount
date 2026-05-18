@@ -138,11 +138,11 @@ func (m *Manager) managesFile(ctx context.Context, instanceType string, client a
 		}
 		return m.readarrManagesFile(ctx, rc, filePath)
 	case "whisparr":
-		wc, ok := client.(*radarr.Radarr)
+		wc, ok := client.(*sonarr.Sonarr)
 		if !ok {
 			return false
 		}
-		return m.radarrManagesFile(ctx, wc, filePath)
+		return m.sonarrManagesFile(ctx, wc, filePath)
 	default:
 		return false
 	}
@@ -365,10 +365,26 @@ func (m *Manager) TriggerFileRescan(ctx context.Context, pathForRescan string, r
 			}
 			return nil, m.triggerSonarrRescanByPath(ctx, client, pathForRescan, relativePath, instanceName, metadata)
 
-		case "lidarr", "readarr", "whisparr":
-			// For now, we only support RefreshMonitoredDownloads for these
-			m.TriggerScanForFile(ctx, pathForRescan)
-			return nil, nil
+		case "lidarr":
+			client, err := m.clients.GetOrCreateLidarrClient(instanceName, instanceConfig.URL, instanceConfig.APIKey)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create Lidarr client: %w", err)
+			}
+			return nil, m.triggerLidarrRescanByPath(ctx, client, pathForRescan, relativePath, instanceName, metadata)
+
+		case "readarr":
+			client, err := m.clients.GetOrCreateReadarrClient(instanceName, instanceConfig.URL, instanceConfig.APIKey)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create Readarr client: %w", err)
+			}
+			return nil, m.triggerReadarrRescanByPath(ctx, client, pathForRescan, relativePath, instanceName, metadata)
+
+		case "whisparr":
+			client, err := m.clients.GetOrCreateWhisparrClient(instanceName, instanceConfig.URL, instanceConfig.APIKey)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create Whisparr client: %w", err)
+			}
+			return nil, m.triggerSonarrRescanByPath(ctx, client, pathForRescan, relativePath, instanceName, metadata)
 
 		default:
 			return nil, fmt.Errorf("unsupported instance type: %s", instanceType)
@@ -449,7 +465,7 @@ func (m *Manager) TriggerScanForFile(ctx context.Context, filePath string) error
 		case "whisparr":
 			client, err := m.clients.GetOrCreateWhisparrClient(instance.Name, instance.URL, instance.APIKey)
 			if err == nil {
-				_, _ = client.SendCommandContext(bgCtx, &radarr.CommandRequest{Name: "RefreshMonitoredDownloads"})
+				_, _ = client.SendCommandContext(bgCtx, &sonarr.CommandRequest{Name: "RefreshMonitoredDownloads"})
 			}
 		}
 	}()
@@ -513,7 +529,7 @@ func (m *Manager) TriggerDownloadScan(ctx context.Context, instanceType string) 
 				case "whisparr":
 					client, err := m.clients.GetOrCreateWhisparrClient(inst.Name, inst.URL, inst.APIKey)
 					if err == nil {
-						_, _ = client.SendCommandContext(bgCtx, &radarr.CommandRequest{Name: "RefreshMonitoredDownloads"})
+						_, _ = client.SendCommandContext(bgCtx, &sonarr.CommandRequest{Name: "RefreshMonitoredDownloads"})
 					}
 				}
 				return nil, nil
@@ -1047,7 +1063,143 @@ func (m *Manager) blocklistSonarrEpisodeFile(ctx context.Context, client *sonarr
 			return nil
 		}
 	}
-
 	slog.WarnContext(ctx, "Could not find grab event in Sonarr history for download", "download_id", downloadID)
 	return nil
 }
+
+// triggerLidarrRescanByPath triggers a rescan in Lidarr
+func (m *Manager) triggerLidarrRescanByPath(ctx context.Context, client *lidarr.Lidarr, filePath, relativePath, instanceName string, metadata *model.WebhookMetadata) error {
+	slog.InfoContext(ctx, "Searching Lidarr for matching track", "instance", instanceName, "file_path", filePath)
+
+	var targetAlbumID int64
+	var targetTrackFileID int64
+
+	if metadata != nil && metadata.Album != nil && metadata.TrackFile != nil && metadata.Album.Id > 0 && metadata.TrackFile.Id > 0 {
+		targetAlbumID = metadata.Album.Id
+		targetTrackFileID = metadata.TrackFile.Id
+	}
+
+	if targetAlbumID == 0 {
+		m.TriggerScanForFile(ctx, filePath)
+		return nil
+	}
+
+	if targetTrackFileID > 0 {
+		if err := m.blocklistLidarrTrackFile(ctx, client, targetAlbumID, targetTrackFileID); err != nil {
+			slog.WarnContext(ctx, "Failed to blocklist Lidarr release", "error", err)
+		}
+		_ = client.DeleteTrackFileContext(ctx, targetTrackFileID)
+	}
+
+	searchCmd := &lidarr.CommandRequest{
+		Name:     "AlbumSearch",
+		AlbumIDs: []int64{targetAlbumID},
+	}
+	_, err := client.SendCommandContext(ctx, searchCmd)
+	if err != nil {
+		return fmt.Errorf("failed to trigger Lidarr search: %w", err)
+	}
+
+	return nil
+}
+
+// blocklistLidarrTrackFile marks a track file as failed
+func (m *Manager) blocklistLidarrTrackFile(ctx context.Context, client *lidarr.Lidarr, albumID int64, fileID int64) error {
+	req := &starr.PageReq{PageSize: 100, SortKey: "date", SortDir: starr.SortDescend}
+	req.Set("albumId", strconv.FormatInt(albumID, 10))
+
+	history, err := client.GetHistoryPageContext(ctx, req)
+	if err != nil {
+		return err
+	}
+
+	var downloadID string
+
+	for _, record := range history.Records {
+		// Attempting Data.TrackFileId or fallback if needed
+		if record.EventType == "trackFileImported" {
+			// Without knowing exact starr mapping, checking DownloadID is safer if it's there
+			downloadID = record.DownloadID
+			break
+		}
+	}
+
+	if downloadID == "" {
+		return nil
+	}
+
+	for _, record := range history.Records {
+		if record.DownloadID == downloadID && record.EventType == "grabbed" {
+			return client.FailContext(ctx, record.ID)
+		}
+	}
+	return nil
+}
+
+// triggerReadarrRescanByPath triggers a rescan in Readarr
+func (m *Manager) triggerReadarrRescanByPath(ctx context.Context, client *readarr.Readarr, filePath, relativePath, instanceName string, metadata *model.WebhookMetadata) error {
+	slog.InfoContext(ctx, "Searching Readarr for matching book", "instance", instanceName, "file_path", filePath)
+
+	var targetBookID int64
+	var targetBookFileID int64
+
+	if metadata != nil && metadata.Book != nil && metadata.BookFile != nil && metadata.Book.Id > 0 && metadata.BookFile.Id > 0 {
+		targetBookID = metadata.Book.Id
+		targetBookFileID = metadata.BookFile.Id
+	}
+
+	if targetBookID == 0 {
+		m.TriggerScanForFile(ctx, filePath)
+		return nil
+	}
+
+	if targetBookFileID > 0 {
+		if err := m.blocklistReadarrBookFile(ctx, client, targetBookID, targetBookFileID); err != nil {
+			slog.WarnContext(ctx, "Failed to blocklist Readarr release", "error", err)
+		}
+		_ = client.DeleteBookFileContext(ctx, targetBookFileID)
+	}
+
+	searchCmd := &readarr.CommandRequest{
+		Name:    "BookSearch",
+		BookIDs: []int64{targetBookID},
+	}
+	_, err := client.SendCommandContext(ctx, searchCmd)
+	if err != nil {
+		return fmt.Errorf("failed to trigger Readarr search: %w", err)
+	}
+
+	return nil
+}
+
+// blocklistReadarrBookFile marks a book file as failed
+func (m *Manager) blocklistReadarrBookFile(ctx context.Context, client *readarr.Readarr, bookID int64, fileID int64) error {
+	req := &starr.PageReq{PageSize: 100, SortKey: "date", SortDir: starr.SortDescend}
+	req.Set("bookId", strconv.FormatInt(bookID, 10))
+
+	history, err := client.GetHistoryPageContext(ctx, req)
+	if err != nil {
+		return err
+	}
+
+	var downloadID string
+
+	for _, record := range history.Records {
+		if record.EventType == "bookFileImported" {
+			downloadID = record.DownloadID
+			break
+		}
+	}
+
+	if downloadID == "" {
+		return nil
+	}
+
+	for _, record := range history.Records {
+		if record.DownloadID == downloadID && record.EventType == "grabbed" {
+			return client.FailContext(ctx, record.ID)
+		}
+	}
+	return nil
+}
+

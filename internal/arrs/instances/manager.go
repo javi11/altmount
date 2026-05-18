@@ -322,9 +322,9 @@ func (m *Manager) detectARRType(ctx context.Context, arrURL, apiKey string) (str
 		}
 	}
 
-	// Try Whisparr (using Radarr client)
-	whisparrClient := radarr.New(&starr.Config{URL: arrURL, APIKey: apiKey})
-	whisparrStatus, err := whisparrClient.GetSystemStatusContext(ctx)
+	// Try Whisparr (using Sonarr client)
+	whisparrClient := sonarr.New(&starr.Config{URL: arrURL, APIKey: apiKey})
+	whisparrStatus, err := whisparrClient.GetSystemStatus()
 	if err == nil {
 		switch whisparrStatus.AppName {
 		case "Whisparr":

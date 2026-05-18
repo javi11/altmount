@@ -221,11 +221,10 @@ type RCloneConfig struct {
 	CacheDir             string `yaml:"cache_dir" mapstructure:"cache_dir" json:"cache_dir"`
 	VFSCacheMode         string `yaml:"vfs_cache_mode" mapstructure:"vfs_cache_mode" json:"vfs_cache_mode"`
 	VFSCachePollInterval string `yaml:"vfs_cache_poll_interval" mapstructure:"vfs_cache_poll_interval" json:"vfs_cache_poll_interval"`
-	VFSReadChunkSize     string `yaml:"vfs_read_chunk_size" mapstructure:"vfs_read_chunk_size" json:"vfs_read_chunk_size"`
-	VFSCacheMaxSize      string `yaml:"vfs_cache_max_size" mapstructure:"vfs_cache_max_size" json:"vfs_cache_max_size"`
-	VFSCacheMaxAge       string `yaml:"vfs_cache_max_age" mapstructure:"vfs_cache_max_age" json:"vfs_cache_max_age"`
-	ReadChunkSize        string `yaml:"read_chunk_size" mapstructure:"read_chunk_size" json:"read_chunk_size"`
-	ReadChunkSizeLimit   string `yaml:"read_chunk_size_limit" mapstructure:"read_chunk_size_limit" json:"read_chunk_size_limit"`
+	VFSReadChunkSize      string `yaml:"vfs_read_chunk_size" mapstructure:"vfs_read_chunk_size" json:"vfs_read_chunk_size"`
+	VFSReadChunkSizeLimit string `yaml:"vfs_read_chunk_size_limit" mapstructure:"vfs_read_chunk_size_limit" json:"vfs_read_chunk_size_limit"`
+	VFSCacheMaxSize       string `yaml:"vfs_cache_max_size" mapstructure:"vfs_cache_max_size" json:"vfs_cache_max_size"`
+	VFSCacheMaxAge        string `yaml:"vfs_cache_max_age" mapstructure:"vfs_cache_max_age" json:"vfs_cache_max_age"`
 	VFSReadAhead         string `yaml:"vfs_read_ahead" mapstructure:"vfs_read_ahead" json:"vfs_read_ahead"`
 	DirCacheTime         string `yaml:"dir_cache_time" mapstructure:"dir_cache_time" json:"dir_cache_time"`
 	VFSCacheMinFreeSpace string `yaml:"vfs_cache_min_free_space" mapstructure:"vfs_cache_min_free_space" json:"vfs_cache_min_free_space"`
@@ -1250,7 +1249,7 @@ func DefaultConfig(configDir ...string) *Config {
 	historyRetentionDays := 90        // Default: auto-remove import history after 90 days (3 months)
 	cleanupAutomaticImportFailure := false
 	metadataBackupEnabled := false
-	failureMaskingEnabled := true
+	failureMaskingEnabled := false
 	repairEnabled := true
 	repairExponentialBackoff := true
 
@@ -1353,14 +1352,15 @@ func DefaultConfig(configDir ...string) *Config {
 			Syslog:        true,  // --syslog
 
 			// VFS Cache Settings - matching your command
-			CacheDir:           cachePath, // VFS cache directory (defaults to <rclone_path>/cache)
-			VFSCacheMode:       "full",    // --vfs-cache-mode=full
-			VFSCacheMaxSize:    "50G",     // --vfs-cache-max-size=50G (changed from 100G)
-			VFSCacheMaxAge:     "504h",    // --vfs-cache-max-age=504h (changed from 100h)
-			ReadChunkSize:      "32M",     // --vfs-read-chunk-size=32M (changed from 128M)
-			ReadChunkSizeLimit: "2G",      // --vfs-read-chunk-size-limit=2G
-			VFSReadAhead:       "128M",    // --vfs-read-ahead=128M (changed from 128k)
-			DirCacheTime:       "10m",     // --dir-cache-time=10m (changed from 5m)
+			CacheDir:              cachePath, // VFS cache directory (defaults to <rclone_path>/cache)
+			VFSCacheMode:          "full",    // --vfs-cache-mode=full
+			VFSCacheMaxSize:       "50G",     // --vfs-cache-max-size=50G (changed from 100G)
+			VFSCacheMaxAge:        "504h",    // --vfs-cache-max-age=504h (changed from 100h)
+			VFSCachePollInterval:  "1m",      // --vfs-cache-poll-interval=1m
+			VFSReadChunkSize:      "32M",     // --vfs-read-chunk-size=32M (changed from 128M)
+			VFSReadChunkSizeLimit: "2G",      // --vfs-read-chunk-size-limit=2G
+			VFSReadAhead:          "128M",    // --vfs-read-ahead=128M (changed from 128k)
+			DirCacheTime:          "10m",     // --dir-cache-time=10m (changed from 5m)
 
 			// Additional VFS Settings (not specified in your command, using sensible defaults)
 			VFSCacheMinFreeSpace: "1G",

@@ -19,7 +19,7 @@ type Manager struct {
 	sonarrClients   map[string]*sonarr.Sonarr     // key: instance name
 	lidarrClients   map[string]*lidarr.Lidarr     // key: instance name
 	readarrClients  map[string]*readarr.Readarr   // key: instance name
-	whisparrClients map[string]*radarr.Radarr // key: instance name
+	whisparrClients map[string]*sonarr.Sonarr // key: instance name
 }
 
 func NewManager() *Manager {
@@ -28,7 +28,7 @@ func NewManager() *Manager {
 		sonarrClients:   make(map[string]*sonarr.Sonarr),
 		lidarrClients:   make(map[string]*lidarr.Lidarr),
 		readarrClients:  make(map[string]*readarr.Readarr),
-		whisparrClients: make(map[string]*radarr.Radarr),
+		whisparrClients: make(map[string]*sonarr.Sonarr),
 	}
 }
 
@@ -88,8 +88,8 @@ func (m *Manager) GetOrCreateReadarrClient(instanceName, url, apiKey string) (*r
 	return client, nil
 }
 
-// GetOrCreateWhisparrClient gets or creates a Whisparr client for an instance (using Radarr client)
-func (m *Manager) GetOrCreateWhisparrClient(instanceName, url, apiKey string) (*radarr.Radarr, error) {
+// GetOrCreateWhisparrClient gets or creates a Whisparr client for an instance (using Sonarr client)
+func (m *Manager) GetOrCreateWhisparrClient(instanceName, url, apiKey string) (*sonarr.Sonarr, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -97,7 +97,7 @@ func (m *Manager) GetOrCreateWhisparrClient(instanceName, url, apiKey string) (*
 		return client, nil
 	}
 
-	client := radarr.New(&starr.Config{URL: url, APIKey: apiKey})
+	client := sonarr.New(&starr.Config{URL: url, APIKey: apiKey})
 	m.whisparrClients[instanceName] = client
 	return client, nil
 }
@@ -156,8 +156,8 @@ func (m *Manager) TestConnection(ctx context.Context, instanceType, url, apiKey 
 		return nil
 
 	case "whisparr":
-		client := radarr.New(&starr.Config{URL: url, APIKey: apiKey})
-		_, err := client.GetSystemStatusContext(ctx)
+		client := sonarr.New(&starr.Config{URL: url, APIKey: apiKey})
+		_, err := client.GetSystemStatus()
 		if err != nil {
 			return fmt.Errorf("failed to connect to Whisparr: %w", err)
 		}

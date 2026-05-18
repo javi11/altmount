@@ -169,7 +169,7 @@ func (proc *Processor) checkCancellation(ctx context.Context) error {
 // Returns (resultPath, writtenMetadataPaths, error). writtenMetadataPaths contains all virtual paths of
 // metadata files written to disk; it is populated even on partial failure so callers can clean up.
 // Paths prefixed with "DIR:" indicate a metadata directory that should be removed entirely.
-func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePath string, queueID int, allowedExtensionsOverride *[]string, virtualDirOverride *string, extractedFiles []parser.ExtractedFileInfo, category *string, metadata *string) (string, []string, error) {
+func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePath string, queueID int, allowedExtensionsOverride *[]string, virtualDirOverride *string, extractedFiles []parser.ExtractedFileInfo, category *string, metadata *string, downloadID *string) (string, []string, error) {
 	cfg := proc.configGetter()
 
 	// Determine max connections to use
@@ -266,23 +266,23 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 	switch parsed.Type {
 	case parser.NzbTypeSingleFile:
 		proc.updateProgressWithStage(queueID, 30, "Validating segments")
-		result, writtenPaths, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, queueID, maxConnections, allowedExtensions, proc.validationTimeout, category, metadata)
+		result, writtenPaths, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, queueID, maxConnections, allowedExtensions, proc.validationTimeout, category, metadata, downloadID)
 
 	case parser.NzbTypeMultiFile:
 		proc.updateProgressWithStage(queueID, 30, "Validating segments")
-		result, writtenPaths, err = proc.processMultiFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, queueID, maxConnections, allowedExtensions, proc.validationTimeout, category, metadata)
+		result, writtenPaths, err = proc.processMultiFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, queueID, maxConnections, allowedExtensions, proc.validationTimeout, category, metadata, downloadID)
 
 	case parser.NzbTypeRarArchive:
 		proc.updateProgressWithStage(queueID, 15, "Analyzing archive")
-		result, writtenPaths, err = proc.processRarArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, maxConnections, allowedExtensions, proc.validationTimeout, parsed.ExtractedFiles, category, metadata)
+		result, writtenPaths, err = proc.processRarArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, maxConnections, allowedExtensions, proc.validationTimeout, parsed.ExtractedFiles, category, metadata, downloadID)
 
 	case parser.NzbType7zArchive:
 		proc.updateProgressWithStage(queueID, 15, "Analyzing archive")
-		result, writtenPaths, err = proc.processSevenZipArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, maxConnections, allowedExtensions, proc.validationTimeout, parsed.ExtractedFiles, category, metadata)
+		result, writtenPaths, err = proc.processSevenZipArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, maxConnections, allowedExtensions, proc.validationTimeout, parsed.ExtractedFiles, category, metadata, downloadID)
 
 	case parser.NzbTypeStrm:
 		proc.updateProgressWithStage(queueID, 30, "Validating segments")
-		result, writtenPaths, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, queueID, maxConnections, allowedExtensions, proc.validationTimeout, category, metadata)
+		result, writtenPaths, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, queueID, maxConnections, allowedExtensions, proc.validationTimeout, category, metadata, downloadID)
 
 	default:
 		return "", nil, NewNonRetryableError(fmt.Sprintf("unknown file type: %s", parsed.Type), nil)
@@ -311,6 +311,7 @@ func (proc *Processor) processSingleFile(
 	timeout time.Duration,
 	category *string,
 	metadata *string,
+	downloadID *string,
 ) (string, []string, error) {
 	if len(regularFiles) == 0 {
 		return "", nil, fmt.Errorf("no regular files to process")
@@ -407,6 +408,7 @@ func (proc *Processor) processSingleFile(
 	if proc.recorder != nil {
 		nzbID := int64(queueID)
 		if err := proc.recorder.AddImportHistory(ctx, &database.ImportHistory{
+			DownloadID:  downloadID,
 			NzbID:       &nzbID,
 			NzbName:     nzbName,
 			FileName:    finalName,
@@ -436,6 +438,7 @@ func (proc *Processor) processMultiFile(
 	timeout time.Duration,
 	category *string,
 	metadata *string,
+	downloadID *string,
 ) (string, []string, error) {
 	// If there's only one regular file (and the rest are likely PAR2s), avoid creating a redundant
 	// NZB-named directory that matches the file itself. Instead, keep the file directly under the
@@ -517,6 +520,7 @@ func (proc *Processor) processMultiFile(
 		}
 
 		if err := proc.recorder.AddImportHistory(ctx, &database.ImportHistory{
+			DownloadID:  downloadID,
 			NzbID:       &nzbID,
 			NzbName:     nzbName,
 			FileName:    filepath.Base(targetBaseDir),
@@ -547,6 +551,7 @@ func (proc *Processor) processRarArchive(
 	extractedFiles []parser.ExtractedFileInfo,
 	category *string,
 	metadata *string,
+	downloadID *string,
 ) (string, []string, error) {
 	importCfg := proc.configGetter().Import
 	samplePercentage := importCfg.SegmentSamplePercentage
@@ -654,6 +659,7 @@ func (proc *Processor) processRarArchive(
 		}
 
 		if err := proc.recorder.AddImportHistory(ctx, &database.ImportHistory{
+			DownloadID:  downloadID,
 			NzbID:       &nzbID,
 			NzbName:     nzbName,
 			FileName:    filepath.Base(nzbFolder),
@@ -684,6 +690,7 @@ func (proc *Processor) processSevenZipArchive(
 	extractedFiles []parser.ExtractedFileInfo,
 	category *string,
 	metadata *string,
+	downloadID *string,
 ) (string, []string, error) {
 	importCfg := proc.configGetter().Import
 	samplePercentage := importCfg.SegmentSamplePercentage
@@ -790,6 +797,7 @@ func (proc *Processor) processSevenZipArchive(
 		}
 
 		if err := proc.recorder.AddImportHistory(ctx, &database.ImportHistory{
+			DownloadID:  downloadID,
 			NzbID:       &nzbID,
 			NzbName:     nzbName,
 			FileName:    filepath.Base(nzbFolder),
