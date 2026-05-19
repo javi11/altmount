@@ -286,26 +286,9 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 				filesToDelete = append(filesToDelete, deleted.Path)
 			}
 		}
-	case "MovieDelete", "ArtistDelete", "AuthorDelete":
-		if req.Movie.FolderPath != "" {
-			dirsToDelete = append(dirsToDelete, req.Movie.FolderPath)
-		} else if req.Artist.Path != "" {
-			dirsToDelete = append(dirsToDelete, req.Artist.Path)
-		} else if req.Author.Path != "" {
-			dirsToDelete = append(dirsToDelete, req.Author.Path)
-		}
-	case "SeriesDelete":
-		if req.Series.Path != "" {
-			dirsToDelete = append(dirsToDelete, req.Series.Path)
-		}
-	case "MovieFileDelete":
-		if req.MovieFile.Path != "" {
-			filesToDelete = append(filesToDelete, req.MovieFile.Path)
-		}
-	case "EpisodeFileDelete":
-		if req.EpisodeFile.Path != "" {
-			filesToDelete = append(filesToDelete, req.EpisodeFile.Path)
-		}
+	case "MovieDelete", "ArtistDelete", "AuthorDelete", "SeriesDelete", "MovieFileDelete", "EpisodeFileDelete", "BookFileDelete":
+		slog.InfoContext(c.Context(), "Ignoring ARR deletion webhook event", "event_type", req.EventType)
+		return c.Status(200).JSON(fiber.Map{"success": true, "message": "Ignored"})
 	default:
 		slog.DebugContext(c.Context(), "Ignoring unhandled webhook event", "event_type", req.EventType)
 		return c.Status(200).JSON(fiber.Map{"success": true, "message": "Ignored"})
