@@ -1256,6 +1256,12 @@ func (s *Service) CancelProcessing(itemID int64) error {
 	return s.queueManager.CancelProcessing(itemID)
 }
 
+// ExecuteItem manually triggers processing for a specific queue item, bypassing concurrency limits.
+func (s *Service) ExecuteItem(ctx context.Context, itemID int64) error {
+	s.ProcessItemInBackground(ctx, itemID)
+	return nil
+}
+
 // ProcessItemInBackground processes a specific queue item in the background.
 // NOTE: This intentionally runs outside the worker pool — it is used for manual retries
 // of specific items and should not compete with the normal import queue workers.

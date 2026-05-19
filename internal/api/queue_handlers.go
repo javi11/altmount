@@ -294,7 +294,7 @@ func (s *Server) handleRetryQueue(c *fiber.Ctx) error {
 	}
 
 	// Update status to pending for manual retry
-	err = s.queueRepo.UpdateQueueItemStatus(c.Context(), id, database.QueueStatusPending, nil)
+	err = s.importerService.ExecuteItem(c.Context(), id)
 	if err != nil {
 		return RespondInternalError(c, "Failed to retry queue item", err.Error())
 	}

@@ -202,6 +202,49 @@ func (m *Manager) CancelProcessing(itemID int64) error {
 	return nil
 }
 
+// ExecuteItem manually triggers processing for a specific queue item, bypassing concurrency limits.
+func (m *Manager) ExecuteItem(ctx context.Context, itemID int64) error {
+	item, err := m.repository.GetQueueItem(ctx, itemID)
+	if err != nil {
+		return err
+	}
+	if item == nil {
+		return fmt.Errorf("queue item %d not found", itemID)
+	}
+
+	// Set status to processing before running
+	err = m.repository.UpdateQueueItemStatus(ctx, itemID, database.QueueStatusProcessing, nil)
+	if err != nil {
+		return err
+	}
+
+	m.log.InfoContext(ctx, "Manually triggering processing for queue item", "queue_id", itemID)
+
+	go func() {
+		// Use a separate context for the execution to avoid early termination
+		itemCtx, cancel := context.WithCancel(context.Background())
+		m.cancelMu.Lock()
+		m.cancelFuncs[item.ID] = cancel
+		m.cancelMu.Unlock()
+
+		defer func() {
+			m.cancelMu.Lock()
+			delete(m.cancelFuncs, item.ID)
+			m.cancelMu.Unlock()
+		}()
+
+		resultingPath, processingErr := m.processor.ProcessItem(itemCtx, item)
+
+		if processingErr != nil {
+			m.processor.HandleFailure(itemCtx, item, processingErr)
+		} else {
+			m.processor.HandleSuccess(itemCtx, item, resultingPath)
+		}
+	}()
+
+	return nil
+}
+
 // Resize dynamically adjusts the number of queue workers.
 // When scaling down, excess workers finish their current item before stopping.
 func (m *Manager) Resize(ctx context.Context, newCount int) error {

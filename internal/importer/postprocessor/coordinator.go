@@ -6,8 +6,6 @@ package postprocessor
 import (
 	"context"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -93,40 +91,12 @@ func (c *Coordinator) HandleSuccess(ctx context.Context, item *database.ImportQu
 
 	// Small delay to allow FUSE mount propagation through kernel and into other containers
 	// This helps prevent race conditions where Sonarr tries to probe the file before it's visible.
-	ticker := time.NewTicker(500 * time.Millisecond)
-	refreshTicker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-	defer refreshTicker.Stop()
-	timeout := time.After(10 * time.Second)
-
-	for {
-		select {
-		case <-ctx.Done():
-			return result, ctx.Err()
-		case <-timeout:
-			c.log.WarnContext(ctx, "Timed out waiting for file to appear on VFS mount", "path", resultingPath)
-			goto continue_processing
-		case <-refreshTicker.C:
-			// Aggressively refresh the directory
-			cfg := c.configGetter()
-			vfsName := cfg.RClone.VFSName
-			if vfsName == "" {
-				vfsName = config.MountProvider
-			}
-			parentDir := filepath.Dir(resultingPath)
-			if rcloneClient != nil {
-				if err := rcloneClient.RefreshDir(ctx, vfsName, []string{parentDir}); err != nil {
-					c.log.DebugContext(ctx, "Failed to refresh VFS directory during polling", "path", parentDir, "error", err)
-				}
-			}
-		case <-ticker.C:
-			if _, err := os.Stat(resultingPath); err == nil {
-				c.log.DebugContext(ctx, "File verified on VFS mount", "path", resultingPath)
-				goto continue_processing
-			}
-		}
+	select {
+	case <-ctx.Done():
+		return result, ctx.Err()
+	case <-time.After(1 * time.Second):
+		// Continue
 	}
-continue_processing:
 
 	// 2 & 3. Create symlinks and STRM files if configured
 	if shouldSkipPostImportLinks(item) {
