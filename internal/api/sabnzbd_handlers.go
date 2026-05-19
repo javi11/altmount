@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"mime"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -417,6 +418,7 @@ func (s *Server) handleSABnzbdAddFile(c *fiber.Ctx) error {
 // handleSABnzbdAddUrl handles adding NZB from URL
 func (s *Server) handleSABnzbdAddUrl(c *fiber.Ctx) error {
 	nzbUrl := c.Query("name")
+	log.Printf("Received NZB download request for URL: %s", nzbUrl)
 
 	if nzbUrl == "" {
 		return s.writeSABnzbdErrorFiber(c, "URL parameter 'name' required")
