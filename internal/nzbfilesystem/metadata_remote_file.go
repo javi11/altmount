@@ -11,7 +11,10 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
+
+	lru "github.com/hashicorp/golang-lru/v2"
 
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
@@ -809,7 +812,66 @@ type MetadataVirtualFile struct {
 	segmentIndex *segmentOffsetIndex
 
 	mu      sync.Mutex
-	closeWg sync.WaitGroup // tracks background reader closes during seek
+	closeWg sync.WaitGroup // tracks the bounded closer-worker pool
+
+	// closerCh is the per-file bounded closer queue. Lazy-initialized
+	// on first closeCurrentReader; closed in mvf.Close so the worker
+	// goroutines exit. See enqueueCloser / closerWorkerCount.
+	closerCh chan io.Closer
+
+	// interruptHandle tracks the latest reader for cancellation from Close
+	// without taking mvf.mu. Read can hold mvf.mu for the full segment
+	// download latency, so Close must be able to fire ctx-cancel on the
+	// in-flight reader before contending for the lock. Stores a
+	// readerInterrupter; an empty value (Load returns nil) means no
+	// interruptible reader is set.
+	interruptHandle atomic.Value
+
+	// randomReadCache coalesces small random ReadAts within the same
+	// segment. Lazily initialized; held under mvf.mu.
+	randomReadCache *lru.Cache[int, []byte]
+}
+
+// randomReadCacheSize bounds the per-file ephemeral-read cache. 8
+// segments × default segment size (~768 KB) ≈ 6 MB per open file,
+// keeping the worst-case footprint bounded under library-scan loads.
+const randomReadCacheSize = 8
+
+// readerInterrupter is the interface implemented by readers that can
+// abort their in-flight downloads by canceling their internal context.
+// UsenetReader (and wrappers that own a UsenetReader) implement this so
+// MetadataVirtualFile.Close can interrupt them without holding mvf.mu.
+type readerInterrupter interface {
+	Interrupt()
+}
+
+// interruptSlot wraps a readerInterrupter so we can store a nil-valued
+// entry in atomic.Value without panicking (Value.Store rejects untyped
+// nil and rejects type changes between calls).
+type interruptSlot struct{ i readerInterrupter }
+
+// setReader assigns a new reader and refreshes the interrupt handle.
+// Callers must hold mvf.mu. Pass nil to clear.
+func (mvf *MetadataVirtualFile) setReader(r io.ReadCloser) {
+	mvf.reader = r
+	slot := interruptSlot{}
+	if i, ok := r.(readerInterrupter); ok {
+		slot.i = i
+	}
+	mvf.interruptHandle.Store(slot)
+}
+
+// interruptCurrentReader fires a non-blocking cancel on the in-flight
+// reader if one is set. Safe to call without holding mvf.mu.
+func (mvf *MetadataVirtualFile) interruptCurrentReader() {
+	v := mvf.interruptHandle.Load()
+	if v == nil {
+		return
+	}
+	slot, _ := v.(interruptSlot)
+	if slot.i != nil {
+		slot.i.Interrupt()
+	}
 }
 
 // segmentOffsetIndex provides O(1) lookup for offset→segment mapping using binary search
@@ -1028,6 +1090,17 @@ func (mvf *MetadataVirtualFile) ReadAtContext(readCtx context.Context, p []byte,
 		end = mvf.meta.FileSize - 1
 	}
 
+	// Coalesce small random reads through a per-file LRU of full segment
+	// bytes. Plex/Jellyfin scrubbing produces bursts of small ReadAts
+	// across a handful of segments; without this every call hit the wire
+	// (storm S5). Only viable for plain (unencrypted, non-nested)
+	// segments — encrypted streams don't map cleanly to segment
+	// boundaries.
+	if n, served := mvf.tryServeFromRandomReadCache(readCtx, p, off, end); served {
+		mvf.readAtSharedNext = off + int64(n)
+		return n, nil
+	}
+
 	reader, err := mvf.createReaderAtOffset(off, end)
 	if err != nil {
 		return 0, err
@@ -1046,6 +1119,96 @@ func (mvf *MetadataVirtualFile) ReadAtContext(readCtx context.Context, p []byte,
 	mvf.readAtSharedNext = off + int64(n)
 
 	return n, err
+}
+
+// tryServeFromRandomReadCache attempts to satisfy a single-segment
+// ephemeral ReadAt from the per-file LRU. On miss it downloads the
+// full containing segment, caches it, then serves the requested
+// window. Returns (bytesCopied, true) on success or (0, false) when
+// the caller must fall back to the normal ephemeral path. Caller must
+// hold mvf.mu.
+//
+// Skipped for encrypted and nested-source files because their segment
+// boundaries don't align with plaintext byte ranges.
+func (mvf *MetadataVirtualFile) tryServeFromRandomReadCache(readCtx context.Context, p []byte, off, end int64) (int, bool) {
+	if mvf.meta == nil ||
+		mvf.meta.Encryption != metapb.Encryption_NONE ||
+		len(mvf.meta.NestedSources) > 0 ||
+		len(mvf.meta.SegmentData) == 0 {
+		return 0, false
+	}
+	mvf.segmentIndexOnce.Do(func() {
+		mvf.segmentIndex = buildSegmentIndex(mvf.meta.SegmentData)
+	})
+	if mvf.segmentIndex == nil {
+		return 0, false
+	}
+	segIdx := mvf.segmentIndex.findSegmentForOffset(off)
+	if segIdx < 0 {
+		return 0, false
+	}
+	segStart := mvf.segmentIndex.getOffsetForSegment(segIdx)
+	segSize := mvf.segmentIndex.sizes[segIdx]
+	segEnd := segStart + segSize - 1
+	// Only single-segment reads benefit from the per-segment cache.
+	if end > segEnd {
+		return 0, false
+	}
+
+	if mvf.randomReadCache == nil {
+		c, err := lru.New[int, []byte](randomReadCacheSize)
+		if err != nil {
+			return 0, false
+		}
+		mvf.randomReadCache = c
+	}
+
+	// At end-of-file the caller's buffer may be larger than the readable
+	// remainder of the segment — the ephemeral path clamps `end` to
+	// FileSize-1 but `len(p)` is not clamped. Use the clamped window
+	// (off..end inclusive) as the source of truth for how many bytes we're
+	// actually allowed to copy out of the cached segment.
+	want := int(end - off + 1)
+	if want <= 0 {
+		return 0, false
+	}
+	if want > len(p) {
+		want = len(p)
+	}
+
+	if data, ok := mvf.randomReadCache.Get(segIdx); ok {
+		rel := off - segStart
+		if rel < 0 || rel >= int64(len(data)) {
+			return 0, false
+		}
+		n := copy(p[:want], data[rel:])
+		return n, true
+	}
+
+	// Miss: fetch the whole segment via an ephemeral reader so the next
+	// small read in the same segment is a cache hit.
+	reader, err := mvf.createReaderAtOffset(segStart, segEnd)
+	if err != nil {
+		return 0, false
+	}
+	defer reader.Close()
+
+	full := make([]byte, segSize)
+	rn, err := readFullContext(readCtx, reader, full)
+	if err != nil && err != io.ErrUnexpectedEOF {
+		return 0, false
+	}
+	rel := off - segStart
+	if int64(rn) <= rel {
+		return 0, false
+	}
+	// Only cache when we got the whole segment; partial data is more
+	// trouble than it's worth.
+	if int64(rn) == segSize {
+		mvf.randomReadCache.Add(segIdx, full)
+	}
+	n := copy(p[:want], full[rel:rn])
+	return n, true
 }
 
 // createReaderAtOffset creates an independent reader for reading at a specific offset.
@@ -1178,23 +1341,37 @@ func (mvf *MetadataVirtualFile) Seek(offset int64, whence int) (int64, error) {
 
 // Close implements afero.File.Close
 func (mvf *MetadataVirtualFile) Close() error {
-	// Remove from stream tracker if applicable
+	// Cancel the in-flight reader before taking mvf.mu — a concurrent
+	// Read can hold the lock for the full segment-download latency.
+	mvf.interruptCurrentReader()
+	mvf.mu.Lock()
+	// Remove from stream tracker under the same lock that Read / ReadAtContext
+	// use to read streamID. Without this, the race detector flags an
+	// unsynchronized read/write between Close and a concurrent Read.
 	if mvf.streamTracker != nil && mvf.streamID != "" {
 		mvf.streamTracker.Remove(mvf.streamID)
 		mvf.streamID = ""
 	}
-
-	mvf.mu.Lock()
 	if mvf.reader != nil {
 		mvf.reader.Close()
-		mvf.reader = nil
+		mvf.setReader(nil)
 		mvf.readerInitialized = false
 	}
 	mvf.segmentIndex = nil // Release segment offset index for GC
 	mvf.meta = nil         // Release segment/nested-source slices for GC
+	if mvf.randomReadCache != nil {
+		mvf.randomReadCache.Purge()
+		mvf.randomReadCache = nil
+	}
+	// Signal the bounded closer workers to drain remaining queued
+	// closes and exit. Workers are tracked by closeWg.
+	if mvf.closerCh != nil {
+		close(mvf.closerCh)
+		mvf.closerCh = nil
+	}
 	mvf.mu.Unlock()
 
-	// Wait for any background reader closes from previous seeks
+	// Wait for the closer-worker pool to finish draining.
 	mvf.closeWg.Wait()
 
 	return nil
@@ -1277,17 +1454,46 @@ func (mvf *MetadataVirtualFile) hasMoreDataToRead() bool {
 	return false
 }
 
-// closeCurrentReader detaches the current reader and closes it in the background.
-// This avoids blocking Seek on UsenetReader.Close() which may wait for in-flight downloads.
+// closeCurrentReader hands the current reader to the bounded closer
+// pool so Seek doesn't block on UsenetReader.Close. Runs inline as
+// backpressure when the pool's queue is full.
 func (mvf *MetadataVirtualFile) closeCurrentReader() {
 	if mvf.reader != nil {
 		reader := mvf.reader
-		mvf.reader = nil
-		mvf.closeWg.Go(func() {
-			reader.Close()
-		})
+		mvf.setReader(nil)
+		mvf.enqueueCloser(reader)
 	}
 	mvf.readerInitialized = false
+}
+
+// closerWorkerCount bounds the number of background reader-Close
+// goroutines that a single MetadataVirtualFile keeps in flight at
+// once. Tuned to absorb normal Seek bursts (e.g. video-scrubbing in
+// 4-direction probes) without producing the storm S6 fan-out.
+const closerWorkerCount = 4
+
+// enqueueCloser hands a reader to the per-file bounded closer pool.
+// Lazy-starts the worker goroutines on first call. Caller must hold
+// mvf.mu (so the lazy init is safe).
+func (mvf *MetadataVirtualFile) enqueueCloser(r io.Closer) {
+	if mvf.closerCh == nil {
+		mvf.closerCh = make(chan io.Closer, closerWorkerCount)
+		for i := 0; i < closerWorkerCount; i++ {
+			mvf.closeWg.Go(func() {
+				for c := range mvf.closerCh {
+					_ = c.Close()
+				}
+			})
+		}
+	}
+	select {
+	case mvf.closerCh <- r:
+	default:
+		// Queue full — apply backpressure inline rather than letting
+		// the closer fan-out grow unbounded. This is the rare path; a
+		// real Seek burst stays under closerWorkerCount.
+		_ = r.Close()
+	}
 }
 
 // ensureReader ensures we have a reader initialized for the current position with range support
@@ -1328,21 +1534,21 @@ func (mvf *MetadataVirtualFile) ensureReader() error {
 		if err != nil {
 			return fmt.Errorf("failed to create nested reader: %w", err)
 		}
-		mvf.reader = reader
+		mvf.setReader(reader)
 	} else if mvf.meta.Encryption != metapb.Encryption_NONE {
 		// Wrap the usenet reader with encryption
 		decryptedReader, err := mvf.wrapWithEncryption(start, end)
 		if err != nil {
 			return fmt.Errorf(ErrMsgFailedWrapEncryption, err)
 		}
-		mvf.reader = decryptedReader
+		mvf.setReader(decryptedReader)
 	} else {
 		// Create plain usenet reader
 		ur, err := mvf.createUsenetReader(mvf.ctx, start, end)
 		if err != nil {
 			return err
 		}
-		mvf.reader = ur
+		mvf.setReader(ur)
 	}
 
 	mvf.readerInitialized = true
