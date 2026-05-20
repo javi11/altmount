@@ -2,8 +2,6 @@ package api
 
 import (
 	"context"
-	"crypto/tls"
-	"fmt"
 	"log/slog"
 	"time"
 
@@ -53,45 +51,16 @@ func (s *Server) handleTestProviderSpeed(c *fiber.Ctx) error {
 		return RespondNotFound(c, "Provider", "")
 	}
 
-	host := fmt.Sprintf("%s:%d", targetProvider.Host, targetProvider.Port)
-	var tlsCfg *tls.Config
-	if targetProvider.TLS {
-		tlsCfg = &tls.Config{
-			InsecureSkipVerify: targetProvider.InsecureTLS,
-			ServerName:         targetProvider.Host,
-		}
-	}
-
-	pool, err := nntppool.NewClient(c.Context(), []nntppool.Provider{
-		{
-			Host:        host,
-			TLSConfig:   tlsCfg,
-			Auth:        nntppool.Auth{Username: targetProvider.Username, Password: targetProvider.Password},
-			Connections: targetProvider.MaxConnections,
-			IdleTimeout: 60 * time.Second,
-		},
-	})
-	if err != nil {
-		return RespondInternalError(c, "Failed to create connection pool", err.Error())
-	}
-	defer pool.Close()
-
-	// Resolve provider name matching nntppool's resolveProviderName logic
-	providerName := host
-	if targetProvider.Username != "" {
-		providerName = host + "+" + targetProvider.Username
-	}
-
 	testCtx, cancel := context.WithTimeout(c.Context(), 5*time.Minute)
 	defer cancel()
 
-	result, err := pool.SpeedTest(testCtx, nntppool.SpeedTestOptions{
-		ProviderName: providerName,
-	})
+	// Prefer the production pool when this provider is already part of
+	// it; otherwise fall back to the singleton coordinator so we never
+	// create a fresh nntppool.Client per request.
+	result, err := s.runProviderSpeedTest(testCtx, targetProvider)
 	if err != nil {
 		return RespondInternalError(c, "Speed test failed", err.Error())
 	}
-
 	speed := result.WireSpeedBps / 1024 / 1024 // bytes/sec → MB/s
 
 	// Update provider config with speed test result
@@ -125,4 +94,51 @@ func (s *Server) handleTestProviderSpeed(c *fiber.Ctx) error {
 		SpeedMBps: speed,
 		Duration:  result.Elapsed.Seconds(),
 	})
+}
+
+// runProviderSpeedTest executes the speed test against the given
+// provider, preferring the production pool when the provider is part
+// of it. Falls back to the per-request speedtest coordinator (cached
+// nntppool client + singleflight dedupe) when the provider isn't in
+// the active pool.
+func (s *Server) runProviderSpeedTest(ctx context.Context, p *config.ProviderConfig) (*nntppool.SpeedTestResult, error) {
+	// Always consult the pool manager so a provider already in the
+	// running pool reuses its connections rather than dialing fresh.
+	// pool.Manager is required wiring; in tests it may return nil/err.
+	if s.poolManager != nil {
+		if cp, err := s.poolManager.GetPool(); err == nil && cp != nil {
+			if real, ok := cp.(*nntppool.Client); ok {
+				providerName := p.Host
+				if p.Username != "" {
+					providerName = p.Host + "+" + p.Username
+				}
+				// Try the production pool first. If the provider isn't
+				// in it, nntppool returns an error and we fall through
+				// to the coordinator.
+				if result, sterr := real.SpeedTest(ctx, nntppool.SpeedTestOptions{
+					ProviderName: providerName,
+				}); sterr == nil {
+					return result, nil
+				}
+			}
+		}
+	}
+
+	// Fall back to the dedicated speed-test client (cached + dedupe).
+	// Lazy-construct the coordinator if Server was assembled outside
+	// NewServer (e.g. in tests). speedtestOnce makes this safe under
+	// concurrent calls.
+	s.speedtestOnce.Do(func() {
+		if s.speedtest == nil {
+			s.speedtest = newSpeedtestCoordinator()
+		}
+	})
+	v, err := s.speedtest.run(ctx, p, func(client *nntppool.Client, providerName string) (any, error) {
+		return client.SpeedTest(ctx, nntppool.SpeedTestOptions{ProviderName: providerName})
+	})
+	if err != nil {
+		return nil, err
+	}
+	result, _ := v.(*nntppool.SpeedTestResult)
+	return result, nil
 }

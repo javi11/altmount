@@ -342,7 +342,7 @@ var _ pool.Manager = (*mockPoolManager)(nil)
 // mockPoolManager implements pool.Manager for testing
 type mockPoolManager struct{}
 
-func (m *mockPoolManager) GetPool() (*nntppool.Client, error) {
+func (m *mockPoolManager) GetPool() (pool.NntpClient, error) {
 	return nil, nil
 }
 
@@ -389,7 +389,6 @@ func (m *mockPoolManager) ResetProviderQuota(_ context.Context, _ string) error 
 }
 
 func (m *mockPoolManager) SetProviderIDs(_ map[string]string) {}
-
 
 // TestSeekResetsOriginalRangeEnd tests that Seek properly resets originalRangeEnd
 // This is critical for video playback - without this fix, seeking causes stale range
