@@ -105,6 +105,25 @@ func (c *Config) GetMaxImportConnections() int {
 	return c.Import.MaxImportConnections
 }
 
+// GetMaxConcurrentImports returns the global cap on concurrent NZB imports
+// when no stream is active. 0 means unlimited (current default behaviour).
+func (c *Config) GetMaxConcurrentImports() int {
+	if c.Import.MaxConcurrentImports < 0 {
+		return 0
+	}
+	return c.Import.MaxConcurrentImports
+}
+
+// GetMaxConcurrentImportsWhileStreaming returns the cap on concurrent NZB
+// imports while at least one stream is active. 0 means unlimited (current
+// default behaviour).
+func (c *Config) GetMaxConcurrentImportsWhileStreaming() int {
+	if c.Import.MaxConcurrentImportsWhileStreaming < 0 {
+		return 0
+	}
+	return c.Import.MaxConcurrentImportsWhileStreaming
+}
+
 // GetMaxDownloadPrefetch returns max download prefetch with a default fallback.
 func (c *Config) GetMaxDownloadPrefetch() int {
 	if c.Import.MaxDownloadPrefetch <= 0 {
