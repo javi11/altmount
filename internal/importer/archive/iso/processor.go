@@ -11,61 +11,80 @@ import (
 	"github.com/javi11/altmount/internal/pool"
 )
 
-// AnalyzeISOContent enumerates all allowed media files inside the given ISO source
-// and returns ISOFileContent entries with Usenet segment mappings.
-func AnalyzeISOContent(
+// AnalyzeISO inspects the given ISO source and returns:
+//   - the volume label (for multi-disc grouping),
+//   - the filtered list of inner files (Files),
+//   - the ordered MainFeature M2TS list when the ISO is a Blu-ray with a
+//     resolvable playlist (nil otherwise).
+//
+// allowedExtensions only filters Files. MainFeature is always returned for
+// BDMV discs regardless of the extension list — its existence is the
+// signal callers use to opt into virtual concatenation.
+func AnalyzeISO(
 	ctx context.Context,
 	src ISOSource,
 	poolManager pool.Manager,
 	maxPrefetch int,
 	readTimeout time.Duration,
 	allowedExtensions []string,
-) ([]ISOFileContent, error) {
+) (*AnalyzedISO, error) {
 	rs, closer, err := NewISOReadSeeker(ctx, src, poolManager, maxPrefetch, readTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("iso: creating read seeker for %q: %w", src.Filename, err)
 	}
 	defer closer.Close()
 
-	files, err := ListISOFiles(rs)
+	entries, err := ListISOFiles(rs)
 	if err != nil {
 		return nil, fmt.Errorf("iso: listing files in %q: %w", src.Filename, err)
 	}
 
-	var result []ISOFileContent
-	for _, entry := range files {
-		if !isAllowedFile(entry.path, int64(entry.size), allowedExtensions) {
+	out := &AnalyzedISO{VolumeLabel: ReadVolumeLabel(rs)}
+
+	for _, e := range entries {
+		if !isAllowedFile(e.path, int64(e.size), allowedExtensions) {
 			continue
 		}
-
-		isoOffset := int64(entry.lba) * iso9660SectorSize
-
-		fc := ISOFileContent{
-			InternalPath: entry.path,
-			Filename:     filepath.Base(entry.path),
-			Size:         int64(entry.size),
-		}
-
-		if len(src.AesKey) == 0 {
-			// Unencrypted: slice segments to cover exactly this file's bytes
-			sliced, _ := sliceSegmentsForRange(src.Segments, isoOffset, int64(entry.size))
-			fc.Segments = sliced
-		} else {
-			// Encrypted: create a NestedSource so the VFS can decrypt and seek
-			fc.NestedSource = &ISONestedSource{
-				Segments:        src.Segments,
-				AesKey:          src.AesKey,
-				AesIV:           src.AesIV,
-				InnerOffset:     isoOffset,
-				InnerLength:     int64(entry.size),
-				InnerVolumeSize: src.Size,
-			}
-		}
-
-		result = append(result, fc)
+		out.Files = append(out.Files, buildFileContent(src, e))
 	}
 
-	return result, nil
+	if mf := ResolveMainFeature(rs, entries); mf != nil {
+		out.DurationTicks = mf.DurationTicks
+		for _, e := range mf.Streams {
+			out.MainFeature = append(out.MainFeature, buildFileContent(src, e))
+		}
+	}
+
+	return out, nil
+}
+
+// buildFileContent turns one ISO directory entry into an ISOFileContent,
+// slicing or referencing the source's Usenet segments according to whether
+// the ISO is encrypted.
+func buildFileContent(src ISOSource, e isoFileEntry) ISOFileContent {
+	isoOffset := int64(e.lba) * iso9660SectorSize
+	fc := ISOFileContent{
+		InternalPath: e.path,
+		Filename:     filepath.Base(e.path),
+		Size:         int64(e.size),
+	}
+	if len(src.AesKey) == 0 {
+		// Unencrypted: pre-slice segments so this content stands alone.
+		sliced, _ := sliceSegmentsForRange(src.Segments, isoOffset, int64(e.size))
+		fc.Segments = sliced
+	} else {
+		// Encrypted: AES-CBC requires the full inner volume + offset so
+		// the cipher can chain IVs from the start of the ISO.
+		fc.NestedSource = &ISONestedSource{
+			Segments:        src.Segments,
+			AesKey:          src.AesKey,
+			AesIV:           src.AesIV,
+			InnerOffset:     isoOffset,
+			InnerLength:     int64(e.size),
+			InnerVolumeSize: src.Size,
+		}
+	}
+	return fc
 }
 
 // isAllowedFile returns true if the file extension is in the allowed list.

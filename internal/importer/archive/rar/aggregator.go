@@ -16,7 +16,6 @@ import (
 
 	"github.com/javi11/altmount/internal/encryption/aes"
 	"github.com/javi11/altmount/internal/importer/archive"
-	"github.com/javi11/altmount/internal/importer/archive/iso"
 	"github.com/javi11/altmount/internal/importer/filesystem"
 	"github.com/javi11/altmount/internal/importer/parser"
 	"github.com/javi11/altmount/internal/importer/utils"
@@ -209,7 +208,7 @@ func ProcessArchive(ctx context.Context, opts ProcessArchiveOptions) error {
 	}
 
 	// Expand ISO files found inside the RAR archive into their inner media files
-	rarContents, err := expandISOContents(ctx, expandBlurayIso, rarContents, poolManager, maxPrefetch, readTimeout, allowedFileExtensions)
+	rarContents, err := archive.ExpandISOContents(ctx, expandBlurayIso, rarContents, poolManager, maxPrefetch, readTimeout, allowedFileExtensions)
 	if err != nil {
 		slog.WarnContext(ctx, "ISO expansion failed, proceeding without ISO contents", "error", err)
 	}
@@ -472,81 +471,6 @@ func ProcessArchive(ctx context.Context, opts ProcessArchiveOptions) error {
 		"files_processed", int(atomic.LoadInt32(&filesProcessed))+preProcessedCount)
 
 	return nil
-}
-
-// expandISOContents replaces any .iso Content entries with the media files found
-// inside them. Non-ISO entries are passed through unchanged. Per-file errors are
-// non-fatal: on failure the original ISO Content is kept.
-func expandISOContents(
-	ctx context.Context,
-	expand bool,
-	contents []Content,
-	poolManager pool.Manager,
-	maxPrefetch int,
-	readTimeout time.Duration,
-	allowedExtensions []string,
-) ([]Content, error) {
-	if !expand {
-		return contents, nil
-	}
-	var result []Content
-	for _, c := range contents {
-		if c.IsDirectory || strings.ToLower(filepath.Ext(c.Filename)) != ".iso" {
-			result = append(result, c)
-			continue
-		}
-
-		src := iso.ISOSource{
-			Filename: c.Filename,
-			Segments: c.Segments,
-			AesKey:   c.AesKey,
-			AesIV:    c.AesIV,
-			Size:     c.Size,
-		}
-
-		isoFiles, err := iso.AnalyzeISOContent(ctx, src, poolManager, maxPrefetch, readTimeout, allowedExtensions)
-		if err != nil {
-			slog.WarnContext(ctx, "Failed to analyze ISO content, keeping ISO as-is",
-				"file", c.Filename, "error", err)
-			result = append(result, c)
-			continue
-		}
-
-		if len(isoFiles) == 0 {
-			result = append(result, c)
-			continue
-		}
-
-		// Sort ISO files by size descending so the largest (main feature) gets index 1.
-		sort.Slice(isoFiles, func(i, j int) bool {
-			return isoFiles[i].Size > isoFiles[j].Size
-		})
-
-		// Keep only the largest file (index 0 after sort); discard smaller streams.
-		f := isoFiles[0]
-		nc := Content{
-			InternalPath:      f.InternalPath,
-			Filename:          f.Filename,
-			Size:              f.Size,
-			PackedSize:        f.Size, // raw ISO data — packed == unpacked
-			NzbdavID:          c.NzbdavID,
-			ISOExpansionIndex: 1,
-		}
-		if f.NestedSource != nil {
-			nc.NestedSources = []NestedSource{{
-				Segments:        f.NestedSource.Segments,
-				AesKey:          f.NestedSource.AesKey,
-				AesIV:           f.NestedSource.AesIV,
-				InnerOffset:     f.NestedSource.InnerOffset,
-				InnerLength:     f.NestedSource.InnerLength,
-				InnerVolumeSize: f.NestedSource.InnerVolumeSize,
-			}}
-		} else {
-			nc.Segments = f.Segments
-		}
-		result = append(result, nc)
-	}
-	return result, nil
 }
 
 // GroupArchivesByBaseName groups ParsedFiles by their RAR base name (case-insensitive).

@@ -33,3 +33,16 @@ type ISONestedSource struct {
 	InnerLength     int64 // file size
 	InnerVolumeSize int64 // ISO total decrypted size
 }
+
+// AnalyzedISO is the full result of inspecting one ISO image. Files mirrors
+// what AnalyzeISOContent has always returned (all media files with extension
+// filtering applied). MainFeature, when non-nil, is the ordered M2TS list
+// that forms the Blu-ray main feature according to BDMV/PLAYLIST/*.mpls —
+// this is the slice callers should concatenate to produce a single playable
+// virtual file.
+type AnalyzedISO struct {
+	VolumeLabel   string
+	Files         []ISOFileContent
+	MainFeature   []ISOFileContent // nil for non-BDMV / unparseable playlists
+	DurationTicks int64            // sum of (OUT-IN) of MainFeature at 45 kHz
+}
