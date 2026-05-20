@@ -246,7 +246,7 @@ function EnhancedUploadSection() {
 			try {
 				const response = await uploadMutation.mutateAsync({
 					file: uploadFile.file,
-					category: uploadFile.category,
+					category: category || undefined,
 				});
 
 				setUploadedFiles((prev) =>
@@ -274,7 +274,7 @@ function EnhancedUploadSection() {
 				);
 			}
 		}
-	}, [uploadedFiles, uploadMutation]);
+	}, [uploadedFiles, uploadMutation, category]);
 
 	const handleLinkSubmit = useCallback(async () => {
 		const links = parseLinks(linkInput);
