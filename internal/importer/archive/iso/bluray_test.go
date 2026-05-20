@@ -102,6 +102,88 @@ func TestResolveMainFeature(t *testing.T) {
 		}
 	})
 
+	t.Run("3D BD: playlist resolves against SSIF when M2TS missing", func(t *testing.T) {
+		t.Parallel()
+		// Avatar-2-style 3D-only release: BDMV/STREAM/*.M2TS holds only
+		// extras (tiny). The real main feature lives in BDMV/STREAM/SSIF/
+		// and is referenced by its own MPLS. The resolver must index SSIF
+		// so the long playlist resolves and wins.
+		extras := buildMPLS(t, "0200", []MPLSPlayItem{
+			{ClipName: "00010", InTime: 0, OutTime: 90 * 45000}, // 90s extra
+		}, nil)
+		mainFeature3D := buildMPLS(t, "0200", []MPLSPlayItem{
+			{ClipName: "00100", InTime: 0, OutTime: 60 * 60 * 45000},
+			{ClipName: "00101", InTime: 0, OutTime: 60 * 60 * 45000},
+			{ClipName: "00102", InTime: 0, OutTime: 12 * 60 * 45000}, // 132 min total
+		}, nil)
+
+		rs := makeImage(t, map[uint32][]byte{
+			100: extras,
+			110: mainFeature3D,
+		})
+
+		files := []isoFileEntry{
+			{path: "BDMV/PLAYLIST/00001.MPLS", lba: 100, size: uint64(len(extras))},
+			{path: "BDMV/PLAYLIST/00800.MPLS", lba: 110, size: uint64(len(mainFeature3D))},
+			// Only the extras live as M2TS:
+			{path: "BDMV/STREAM/00010.M2TS", lba: 200, size: 50_000_000},
+			// Main feature is SSIF only:
+			{path: "BDMV/STREAM/SSIF/00100.SSIF", lba: 300, size: 25_000_000_000},
+			{path: "BDMV/STREAM/SSIF/00101.SSIF", lba: 400, size: 25_000_000_000},
+			{path: "BDMV/STREAM/SSIF/00102.SSIF", lba: 500, size: 5_000_000_000},
+		}
+
+		got := ResolveMainFeature(rs, files)
+		if got == nil {
+			t.Fatal("ResolveMainFeature returned nil — SSIF index missing?")
+		}
+		if got.PlaylistName != "BDMV/PLAYLIST/00800.MPLS" {
+			t.Errorf("PlaylistName = %q, want 00800.MPLS (3D main feature)", got.PlaylistName)
+		}
+		if len(got.Streams) != 3 {
+			t.Fatalf("Streams len = %d, want 3 SSIF clips", len(got.Streams))
+		}
+		wantOrder := []string{
+			"BDMV/STREAM/SSIF/00100.SSIF",
+			"BDMV/STREAM/SSIF/00101.SSIF",
+			"BDMV/STREAM/SSIF/00102.SSIF",
+		}
+		for i, s := range got.Streams {
+			if s.path != wantOrder[i] {
+				t.Errorf("Streams[%d].path = %q, want %q", i, s.path, wantOrder[i])
+			}
+		}
+	})
+
+	t.Run("hybrid 3D BD: prefers M2TS over SSIF when both exist", func(t *testing.T) {
+		t.Parallel()
+		// Both 2D MPLS (refs M2TS) and 3D MPLS (refs SSIF) point at clips
+		// of the same name. With both files present, the M2TS version is
+		// the right pick: smaller bytes, universal playback. The resolver
+		// should select it even if the 3D playlist is marginally longer.
+		mainFeature := buildMPLS(t, "0200", []MPLSPlayItem{
+			{ClipName: "00100", InTime: 0, OutTime: 60 * 60 * 45000},
+		}, nil)
+		rs := makeImage(t, map[uint32][]byte{100: mainFeature})
+
+		files := []isoFileEntry{
+			{path: "BDMV/PLAYLIST/00800.MPLS", lba: 100, size: uint64(len(mainFeature))},
+			{path: "BDMV/STREAM/00100.M2TS", lba: 200, size: 20_000_000_000},
+			{path: "BDMV/STREAM/SSIF/00100.SSIF", lba: 300, size: 40_000_000_000},
+		}
+
+		got := ResolveMainFeature(rs, files)
+		if got == nil {
+			t.Fatal("ResolveMainFeature returned nil")
+		}
+		if len(got.Streams) != 1 {
+			t.Fatalf("Streams len = %d, want 1", len(got.Streams))
+		}
+		if got.Streams[0].path != "BDMV/STREAM/00100.M2TS" {
+			t.Errorf("picked %q, want M2TS over SSIF", got.Streams[0].path)
+		}
+	})
+
 	t.Run("playlist referencing missing M2TS yields nil", func(t *testing.T) {
 		t.Parallel()
 		// Playlist references a clip that has no corresponding M2TS entry.

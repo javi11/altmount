@@ -29,22 +29,31 @@ type MainFeaturePlaylist struct {
 // keep evaluating the rest, mirroring how every Blu-ray player tolerates
 // malformed entries in BDMV/PLAYLIST/.
 func ResolveMainFeature(rs io.ReadSeeker, files []isoFileEntry) *MainFeaturePlaylist {
-	// Build an index of all M2TS streams by their 5-digit clip stem (the
-	// part MPLS references). M2TS files live at BDMV/STREAM/<NNNNN>.M2TS
-	// case-insensitively.
-	streamByClip := make(map[string]isoFileEntry)
+	// Build per-clip indexes. M2TS streams live at BDMV/STREAM/<NNNNN>.M2TS
+	// and carry the 2D version (or the only version on a 2D disc). SSIF
+	// streams live at BDMV/STREAM/SSIF/<NNNNN>.SSIF and carry the
+	// stereoscopic interleaved 3D version — on 3D-only Blu-ray releases
+	// the main feature playlist references SSIF clips, while the M2TS
+	// directory holds only extras. We prefer M2TS when both exist (smaller
+	// bytes, universal playback) and fall back to SSIF when only it
+	// resolves the playlist's clip names.
+	m2tsByClip := make(map[string]isoFileEntry)
+	ssifByClip := make(map[string]isoFileEntry)
 	var playlistEntries []isoFileEntry
 	for _, f := range files {
 		up := strings.ToUpper(f.path)
 		switch {
 		case strings.HasPrefix(up, "BDMV/PLAYLIST/") && strings.HasSuffix(up, ".MPLS"):
 			playlistEntries = append(playlistEntries, f)
+		case strings.HasPrefix(up, "BDMV/STREAM/SSIF/") && strings.HasSuffix(up, ".SSIF"):
+			base := up[len("BDMV/STREAM/SSIF/") : len(up)-len(".SSIF")]
+			ssifByClip[base] = f
 		case strings.HasPrefix(up, "BDMV/STREAM/") && strings.HasSuffix(up, ".M2TS"):
 			base := up[len("BDMV/STREAM/") : len(up)-len(".M2TS")]
-			streamByClip[base] = f
+			m2tsByClip[base] = f
 		}
 	}
-	if len(playlistEntries) == 0 || len(streamByClip) == 0 {
+	if len(playlistEntries) == 0 || (len(m2tsByClip) == 0 && len(ssifByClip) == 0) {
 		return nil
 	}
 
@@ -65,14 +74,17 @@ func ResolveMainFeature(rs io.ReadSeeker, files []isoFileEntry) *MainFeaturePlay
 			continue
 		}
 
-		// Resolve clip names → M2TS entries, in playlist order.
+		// Resolve clip names in playlist order, preferring M2TS over SSIF.
 		streams := make([]isoFileEntry, 0, len(pl.PlayItems))
 		for _, it := range pl.PlayItems {
-			entry, ok := streamByClip[strings.ToUpper(it.ClipName)]
-			if !ok {
+			name := strings.ToUpper(it.ClipName)
+			if entry, ok := m2tsByClip[name]; ok {
+				streams = append(streams, entry)
 				continue
 			}
-			streams = append(streams, entry)
+			if entry, ok := ssifByClip[name]; ok {
+				streams = append(streams, entry)
+			}
 		}
 		if len(streams) == 0 {
 			continue
