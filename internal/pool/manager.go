@@ -11,10 +11,13 @@ import (
 	"github.com/javi11/nntppool/v4"
 )
 
-// Manager provides centralized NNTP connection pool management
+// Manager provides centralized NNTP connection pool management.
 type Manager interface {
-	// GetPool returns the current connection pool or error if not available
-	GetPool() (*nntppool.Client, error)
+	// GetPool returns the current connection pool or error if not available.
+	// The returned client exposes the narrow NntpClient surface so tests can
+	// substitute a fake (see internal/testsupport/fakepool). In production it
+	// is backed by *nntppool.Client.
+	GetPool() (NntpClient, error)
 
 	// SetProviders creates/recreates the pool with new providers
 	SetProviders(providers []nntppool.Provider) error
@@ -144,8 +147,9 @@ func (m *manager) injectQuotaState(providers []nntppool.Provider) {
 	}
 }
 
-// GetPool returns the current connection pool or error if not available
-func (m *manager) GetPool() (*nntppool.Client, error) {
+// GetPool returns the current connection pool or error if not available.
+// The concrete return type is *nntppool.Client which satisfies NntpClient.
+func (m *manager) GetPool() (NntpClient, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
