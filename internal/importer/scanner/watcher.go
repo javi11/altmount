@@ -245,11 +245,17 @@ func (w *Watcher) processNzb(ctx context.Context, watchRoot, filePath string) er
 		return nil
 	}
 
-	// Calculate relative path from watch root to file's directory
+	// Calculate relative path from watch root to file's directory.
+	// Normalise to forward slashes so the value stored in
+	// ImportQueueItem.RelativePath is virtual-path-shaped on every OS — on
+	// Windows filepath.Rel returns backslashes which downstream consumers
+	// (calculateProcessVirtualDir, sanitizeVirtualPath, postprocessor stripping)
+	// would otherwise see in inconsistent form. See issue #585.
 	relPath, err := filepath.Rel(watchRoot, filepath.Dir(filePath))
 	if err != nil {
 		return fmt.Errorf("failed to calculate relative path: %w", err)
 	}
+	relPath = filepath.ToSlash(relPath)
 
 	var category *string
 	var relativePath *string

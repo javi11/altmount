@@ -29,44 +29,14 @@ func (c *Coordinator) CreateStrmFiles(ctx context.Context, item *database.Import
 	// Keep the original resulting path for metadata and streaming URL
 	originalResultingPath := resultingPath
 
-	// 1. Get the internal relative path (relative to FUSE mount)
-	relPath := strings.TrimPrefix(resultingPath, "/")
-
-	// 2. Strip any existing /complete or /category prefix from the internal path to start clean
 	category := ""
-	if item.Category != nil && *item.Category != "" {
-		category = strings.Trim(*item.Category, "/")
+	if item.Category != nil {
+		category = *item.Category
 	}
 
-	if cfg.SABnzbd.CompleteDir != "" {
-		completeDir := strings.Trim(filepath.ToSlash(cfg.SABnzbd.CompleteDir), "/")
-		if after, ok := strings.CutPrefix(relPath, completeDir+"/"); ok {
-			relPath = after
-		} else if relPath == completeDir {
-			relPath = ""
-		}
-	}
-	if category != "" {
-		if after, ok := strings.CutPrefix(relPath, category+"/"); ok {
-			relPath = after
-		} else if relPath == category {
-			relPath = ""
-		}
-	}
-
-	// 3. Build the clean, isolated library path
-	// Construct: [CompleteDir] + [Category] + RelPath
-	pathParts := []string{}
-	if cfg.SABnzbd.CompleteDir != "" {
-		pathParts = append(pathParts, strings.Trim(cfg.SABnzbd.CompleteDir, "/"))
-	}
-	if category != "" {
-		pathParts = append(pathParts, category)
-	}
-	pathParts = append(pathParts, relPath)
-
-	resultingPath = filepath.Join(pathParts...)
-	resultingPath = filepath.ToSlash(filepath.Clean(resultingPath))
+	// Build the clean, isolated library path: [CompleteDir]/[Category]/<remainder>,
+	// stripping any of those prefixes that are already present in the source path.
+	resultingPath = buildLibraryRelPath(resultingPath, cfg.SABnzbd.CompleteDir, category)
 
 	// Check the metadata directory to determine if this is a file or directory
 	metadataPath := filepath.Join(cfg.Metadata.RootPath, strings.TrimPrefix(originalResultingPath, "/"))
@@ -114,44 +84,15 @@ func (c *Coordinator) CreateStrmFiles(ctx context.Context, item *database.Import
 		// Remove .meta extension
 		relPath := strings.TrimSuffix(relPathWithMeta, ".meta")
 
-		// 1. Get the internal relative path (relative to FUSE mount)
-		relPath = strings.TrimPrefix(relPath, "/")
-
-		// 2. Strip any existing /complete or /category prefix from the internal path to start clean
 		category := ""
-		if item.Category != nil && *item.Category != "" {
-			category = strings.Trim(*item.Category, "/")
+		if item.Category != nil {
+			category = *item.Category
 		}
 
-		if cfg.SABnzbd.CompleteDir != "" {
-			completeDir := strings.Trim(filepath.ToSlash(cfg.SABnzbd.CompleteDir), "/")
-			if after, ok := strings.CutPrefix(relPath, completeDir+"/"); ok {
-				relPath = after
-			} else if relPath == completeDir {
-				relPath = ""
-			}
-		}
-		if category != "" {
-			if after, ok := strings.CutPrefix(relPath, category+"/"); ok {
-				relPath = after
-			} else if relPath == category {
-				relPath = ""
-			}
-		}
-
-		// 3. Build the clean, isolated library path
-		// Construct: [CompleteDir] + [Category] + RelPath
-		pathParts := []string{}
-		if cfg.SABnzbd.CompleteDir != "" {
-			pathParts = append(pathParts, strings.Trim(cfg.SABnzbd.CompleteDir, "/"))
-		}
-		if category != "" {
-			pathParts = append(pathParts, category)
-		}
-		pathParts = append(pathParts, relPath)
-
-		strmResultingPath := filepath.Join(pathParts...)
-		strmResultingPath = filepath.ToSlash(filepath.Clean(strmResultingPath))
+		// filepath.Rel returns OS-native separators (backslashes on Windows);
+		// buildLibraryRelPath normalises them before stripping so we don't
+		// double-prefix the category/CompleteDir on Windows (issue #585).
+		strmResultingPath := buildLibraryRelPath(relPath, cfg.SABnzbd.CompleteDir, category)
 
 		if err := c.CreateSingleStrmFile(ctx, strmResultingPath, relPathWithMeta, cfg.WebDAV.Port); err != nil {
 			c.log.ErrorContext(ctx, "Failed to create STRM file",
