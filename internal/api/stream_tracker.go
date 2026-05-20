@@ -16,6 +16,13 @@ import (
 // Default timeout for stale streams (4 hours - covers most movie lengths)
 const defaultStreamTimeout = 4 * time.Hour
 
+// StreamChangeNotifier is notified whenever the active stream count changes.
+// Implemented by pool.Manager; declared here to avoid an api -> pool import
+// dependency for the StreamTracker itself.
+type StreamChangeNotifier interface {
+	NotifyStreamChange()
+}
+
 // StreamTracker tracks active streams
 type StreamTracker struct {
 	streams        sync.Map
@@ -24,6 +31,15 @@ type StreamTracker struct {
 	mu             sync.Mutex // For history protection
 	timeout        time.Duration
 	metricsTracker usenet.MetricsTracker
+
+	// activeCount is the exact number of entries currently in the streams map.
+	// Maintained as an int64 counter so ActiveStreams() is O(1) and safe to
+	// call from hot paths (e.g. the pool admission gate).
+	activeCount atomic.Int64
+
+	// notifier, when set, is notified after every stream add/remove so the
+	// import-admission cap can react to streams starting/stopping.
+	notifier StreamChangeNotifier
 }
 
 type streamSample struct {
@@ -253,7 +269,27 @@ func (t *StreamTracker) AddStream(filePath, source, userName, clientIP, userAgen
 		samples:      make([]streamSample, 0, 30), // Preallocate for 1 minute of samples (every 2s)
 	}
 	t.streams.Store(id, internal)
+	t.activeCount.Add(1)
+	t.notifyChange()
 	return stream
+}
+
+// SetChangeNotifier wires a notifier (typically a pool.Manager) that will be
+// signalled whenever the active stream count changes. Pass nil to clear.
+func (t *StreamTracker) SetChangeNotifier(n StreamChangeNotifier) {
+	t.notifier = n
+}
+
+// ActiveStreams returns the current number of tracked streams.
+// Implements pool.StreamActivitySource (structurally).
+func (t *StreamTracker) ActiveStreams() int {
+	return int(t.activeCount.Load())
+}
+
+func (t *StreamTracker) notifyChange() {
+	if t.notifier != nil {
+		t.notifier.NotifyStreamChange()
+	}
 }
 
 // Add adds a new stream and returns its ID (implements nzbfilesystem.StreamTracker)
@@ -344,6 +380,8 @@ func (t *StreamTracker) Remove(id string) {
 		t.mu.Unlock()
 
 		t.streams.Delete(id)
+		t.activeCount.Add(-1)
+		t.notifyChange()
 	}
 }
 
