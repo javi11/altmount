@@ -194,6 +194,16 @@ func (s *Server) handleMigrateNzbdavSymlinks(c *fiber.Ctx) error {
 		})
 	}
 
+	// healthRepo is required: rewritten files must be registered in file_health
+	// so the VFS / health checker know about them, mirroring the regular import
+	// post-processor's ScheduleHealthCheck behavior.
+	if s.healthRepo == nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Health repository not available",
+		})
+	}
+
 	ctx := c.Context()
 
 	// Backfill idempotently before walking.
@@ -205,7 +215,7 @@ func (s *Server) handleMigrateNzbdavSymlinks(c *fiber.Ctx) error {
 		})
 	}
 
-	lookup := database.NewDBSymlinkLookup(migRepo)
+	lookup := database.NewDBSymlinkLookup(migRepo, s.healthRepo, s.queueRepo, s.configManager.GetConfigGetter())
 
 	report, err := migration.RewriteLibrarySymlinks(
 		ctx,
