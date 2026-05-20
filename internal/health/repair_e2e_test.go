@@ -24,7 +24,7 @@ import (
 // mockPoolManager implements pool.Manager and always fails GetPool so segment validation fails.
 type mockPoolManager struct{}
 
-func (m *mockPoolManager) GetPool() (*nntppool.Client, error) {
+func (m *mockPoolManager) GetPool() (pool.NntpClient, error) {
 	return nil, errors.New("no pool available (test mock)")
 }
 func (m *mockPoolManager) SetProviders(_ []nntppool.Provider) error { return nil }
