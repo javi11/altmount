@@ -908,8 +908,11 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 	itemBasePath := s.calculateItemBasePath()
 
 	for i, item := range finalItems {
-		finalPath := s.calculateHistoryStoragePath(item, itemBasePath)
+		finalPath, exists := s.calculateHistoryStoragePath(item, itemBasePath)
 		slot := ToSABnzbdHistorySlot(item, start+i, finalPath)
+		if !exists {
+			markHistorySlotMissing(&slot, finalPath)
+		}
 		slots = append(slots, slot)
 		totalBytes += slot.Bytes
 	}
@@ -1010,8 +1013,11 @@ func (s *Server) respondSABnzbdHistoryByIDs(
 	var totalBytes int64
 	itemBasePath := s.calculateItemBasePath()
 	for i, item := range finalItems {
-		finalPath := s.calculateHistoryStoragePath(item, itemBasePath)
+		finalPath, exists := s.calculateHistoryStoragePath(item, itemBasePath)
 		slot := ToSABnzbdHistorySlot(item, start+i, finalPath)
+		if !exists {
+			markHistorySlotMissing(&slot, finalPath)
+		}
 		slots = append(slots, slot)
 		totalBytes += slot.Bytes
 	}
@@ -1448,9 +1454,15 @@ func (s *Server) calculateItemBasePath() string {
 }
 
 // calculateHistoryStoragePath calculates the final storage path to report to SABnzbd history for Sonarr/Radarr.
-func (s *Server) calculateHistoryStoragePath(item *database.ImportQueueItem, basePath string) string {
+//
+// The second return value reports whether the path that altmount is about to
+// hand back to the ARR client exists on disk. Callers should treat items
+// where exists=false as failed downloads (see markHistorySlotMissing), to
+// stop Sonarr/Radarr from looping on FileNotFoundException for items whose
+// symlink under Import.ImportDir was never created (issue #596).
+func (s *Server) calculateHistoryStoragePath(item *database.ImportQueueItem, basePath string) (string, bool) {
 	if s.configManager == nil || item.StoragePath == nil || *item.StoragePath == "" {
-		return basePath
+		return basePath, true
 	}
 
 	cfg := s.configManager.GetConfig()
@@ -1501,7 +1513,9 @@ func (s *Server) calculateHistoryStoragePath(item *database.ImportQueueItem, bas
 	fullStoragePath := filepath.Join(pathParts...)
 	fullStoragePath = filepath.ToSlash(filepath.Clean(fullStoragePath))
 
+	exists := true
 	if _, err := os.Stat(fullStoragePath); os.IsNotExist(err) {
+		exists = false
 		slog.WarnContext(context.Background(), "sabnzbd history: reported path does not exist on disk",
 			"item_id", item.ID,
 			"storage_path", *item.StoragePath,
@@ -1512,14 +1526,14 @@ func (s *Server) calculateHistoryStoragePath(item *database.ImportQueueItem, bas
 	// Return the full file path for SYMLINK/STRM to help Arrs find it immediately.
 	// Otherwise return directory.
 	if cfg.Import.ImportStrategy == config.ImportStrategySYMLINK || cfg.Import.ImportStrategy == config.ImportStrategySTRM {
-		return fullStoragePath
+		return fullStoragePath, exists
 	}
 
 	if utils.HasPopularExtension(fullStoragePath) {
-		return filepath.Dir(fullStoragePath)
+		return filepath.Dir(fullStoragePath), exists
 	}
 
-	return fullStoragePath
+	return fullStoragePath, exists
 }
 
 // normalizeURL normalizes a URL for comparison by removing trailing slashes
