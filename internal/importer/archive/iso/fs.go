@@ -10,11 +10,32 @@ import (
 
 const iso9660SectorSize = 2048
 
-// isoFileEntry is one non-directory file returned by ListISOFiles.
+// isoFileEntry is one non-directory file returned by ListISOFiles. The
+// file's data on disc may be split across multiple contiguous extents
+// — Blu-ray main-feature M2TS files routinely use hundreds of extents
+// chained via Allocation Extent Descriptors. extents is in disc order;
+// concatenating their bytes yields the complete file.
 type isoFileEntry struct {
-	path string // full path within ISO (e.g. "BDMV/STREAM/00001.M2TS")
-	lba  uint32
-	size uint64
+	path    string
+	size    uint64
+	extents []isoExtent
+}
+
+// firstLBA returns the start LBA of the file's first extent. Callers
+// that only need a starting sector (e.g. reading a small MPLS file
+// known to be single-extent) can use this.
+func (e isoFileEntry) firstLBA() uint32 {
+	if len(e.extents) == 0 {
+		return 0
+	}
+	return e.extents[0].lba
+}
+
+// isoExtent is one contiguous run of sectors on disc that contributes
+// length bytes to the logical file.
+type isoExtent struct {
+	lba    uint32
+	length uint64
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -100,7 +121,13 @@ func iso9660WalkAll(rs io.ReadSeeker, dirLBA uint32, dirSize uint64, prefix stri
 			}
 			result = append(result, sub...)
 		} else {
-			result = append(result, isoFileEntry{path: entryPath, lba: e.lba, size: e.size})
+			// ISO 9660 stores file data in a single contiguous extent.
+			// (Interleave mode exists but is essentially never used.)
+			result = append(result, isoFileEntry{
+				path:    entryPath,
+				size:    e.size,
+				extents: []isoExtent{{lba: e.lba, length: e.size}},
+			})
 		}
 	}
 	return result, nil
@@ -605,24 +632,155 @@ func udfWalkAll(rs io.ReadSeeker, dirICB udfLongAD, metaMap []udfMetaSpan, partS
 			allocDescLen = len(feBuf) - allocDescOff
 		}
 
-		var fileLBA uint32
-		switch allocType {
-		case 0:
-			if allocDescLen >= 8 {
-				ad := udfParseShortAD(feBuf[allocDescOff:], 0)
-				fileLBA = partStart + ad.block
-			}
-		case 1:
-			if allocDescLen >= 16 {
-				ad := udfParseLongAD(feBuf[allocDescOff:], 0)
-				fileLBA, _ = udfResolveICB(ad.loc, metaMap, partStart)
-			}
+		extents := collectFileExtents(rs, feBuf[allocDescOff:allocDescOff+allocDescLen], allocType, metaMap, partStart, infoLen, fePhys)
+		if len(extents) == 0 {
+			continue
 		}
-		if fileLBA > 0 {
-			result = append(result, isoFileEntry{path: entryPath, lba: fileLBA, size: infoLen})
-		}
+		result = append(result, isoFileEntry{
+			path:    entryPath,
+			size:    infoLen,
+			extents: extents,
+		})
 	}
 	return result, nil
+}
+
+// collectFileExtents walks the allocation descriptors of a UDF File Entry
+// (or Extended File Entry), following Allocation Extent Descriptor chains
+// when the inline AD area is exhausted, and returns one isoExtent per
+// recorded data extent in disc order.
+//
+// allocType is the lower 3 bits of the FE's ICBTag flags:
+//
+//	0 → short_ad (8 bytes each)
+//	1 → long_ad  (16 bytes each)
+//	2 → extended ad (20 bytes; rare, treated as short_ad-prefix here)
+//	3 → file data embedded in the FE itself (small files)
+//
+// The high 2 bits of each AD's length field encode the AD "type":
+//
+//	0 → recorded & allocated extent (real data — emit)
+//	1 → not recorded, allocated (sparse — skip, file should not see this on BD)
+//	2 → not recorded, not allocated (hole — skip)
+//	3 → next AD points at a continuation Allocation Extent Descriptor
+//	    (tag 258) holding more ADs; chase the chain
+//
+// embeddedFEPhys is only meaningful for allocType 3 (it's the FE's own
+// physical sector — the file data is inline at allocDescOff of that
+// sector, so we materialise a single synthetic extent pointing at it).
+func collectFileExtents(rs io.ReadSeeker, inlineADs []byte, allocType byte, metaMap []udfMetaSpan, partStart uint32, infoLen uint64, embeddedFEPhys uint32) []isoExtent {
+	if allocType == 3 {
+		// Embedded data — a single "extent" pointing at the FE sector
+		// itself with the inline-AD area treated as the file data. We
+		// can't emit a usable LBA for slicing because the data isn't
+		// sector-aligned. Skip for now; BD streams never use embedded.
+		return nil
+	}
+	var step int
+	switch allocType {
+	case 0:
+		step = 8
+	case 1:
+		step = 16
+	case 2:
+		step = 20 // first 16 bytes are a long_ad; trailing 4 bytes are impl-use
+	default:
+		return nil
+	}
+
+	var extents []isoExtent
+	chase := inlineADs
+	safety := 0
+	for {
+		safety++
+		if safety > 4096 {
+			break // pathological — bail to avoid runaway IO
+		}
+		var chain *udfLongAD
+		for off := 0; off+step <= len(chase); off += step {
+			lenField := binary.LittleEndian.Uint32(chase[off:])
+			adType := lenField >> 30
+			adLen := lenField & 0x3FFFFFFF
+			if adLen == 0 && adType != 3 {
+				break
+			}
+			if adType == 3 {
+				var loc udfLongAD
+				switch step {
+				case 8:
+					// short_ad continuation: the 4 bytes after length
+					// are the next AED's logical block; partition is
+					// implicit (same as parent).
+					loc = udfLongAD{length: adLen, loc: udfLBA{block: binary.LittleEndian.Uint32(chase[off+4:])}}
+				default:
+					loc = udfParseLongAD(chase, off)
+				}
+				chain = &loc
+				break
+			}
+			if adType != 0 {
+				// Type 1 (allocated but not recorded) and type 2 (hole)
+				// don't carry real bytes. Skip — BD streams shouldn't
+				// have these in practice.
+				continue
+			}
+			var lba uint32
+			switch step {
+			case 8:
+				ad := udfParseShortAD(chase, off)
+				resolved, err := udfResolveMetaBlock(ad.block, metaMap, partStart)
+				if err != nil {
+					continue
+				}
+				lba = resolved
+			default:
+				ad := udfParseLongAD(chase, off)
+				resolved, err := udfResolveICB(ad.loc, metaMap, partStart)
+				if err != nil {
+					continue
+				}
+				lba = resolved
+			}
+			extents = append(extents, isoExtent{lba: lba, length: uint64(adLen)})
+		}
+		if chain == nil {
+			break
+		}
+		ps, err := udfResolveICB(chain.loc, metaMap, partStart)
+		if err != nil {
+			break
+		}
+		_, aedBuf, err := udfReadTag(rs, ps)
+		if err != nil {
+			break
+		}
+		// Allocation Extent Descriptor layout: 16-byte tag + 4-byte
+		// previous-AED pointer + 4-byte length-of-allocation-descriptors,
+		// then the ADs themselves.
+		if len(aedBuf) < 24 {
+			break
+		}
+		nextLen := int(binary.LittleEndian.Uint32(aedBuf[20:24]))
+		if nextLen <= 0 || 24+nextLen > len(aedBuf) {
+			break
+		}
+		chase = aedBuf[24 : 24+nextLen]
+	}
+
+	// Defensive: cap the total extent bytes at the FE's info_length so a
+	// malformed disc with mis-sized ADs can't return more bytes than the
+	// file legitimately contains.
+	var total uint64
+	for i := range extents {
+		if total+extents[i].length > infoLen {
+			extents[i].length = infoLen - total
+			extents = extents[:i+1]
+			break
+		}
+		total += extents[i].length
+	}
+	_ = embeddedFEPhys
+	return extents
 }
 
 // ListISOFiles walks the ISO 9660/UDF filesystem and returns all non-directory

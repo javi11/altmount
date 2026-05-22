@@ -66,29 +66,43 @@ func AnalyzeISO(
 }
 
 // buildFileContent turns one ISO directory entry into an ISOFileContent,
-// slicing or referencing the source's Usenet segments according to whether
-// the ISO is encrypted.
+// emitting one ISONestedSource per on-disc extent. Concatenating the
+// sources' byte ranges yields the complete file. This is the path that
+// previously fed BAD bytes for multi-extent files like Avatar's 17 GiB
+// 00022.m2ts (945 extents) — only the first extent's data was correct.
 func buildFileContent(src ISOSource, e isoFileEntry) ISOFileContent {
-	isoOffset := int64(e.lba) * iso9660SectorSize
 	fc := ISOFileContent{
 		InternalPath: e.path,
 		Filename:     filepath.Base(e.path),
 		Size:         int64(e.size),
+		Sources:      make([]ISONestedSource, 0, len(e.extents)),
 	}
-	if len(src.AesKey) == 0 {
-		// Unencrypted: pre-slice segments so this content stands alone.
-		sliced, _ := sliceSegmentsForRange(src.Segments, isoOffset, int64(e.size))
-		fc.Segments = sliced
-	} else {
-		// Encrypted: AES-CBC requires the full inner volume + offset so
-		// the cipher can chain IVs from the start of the ISO.
-		fc.NestedSource = &ISONestedSource{
-			Segments:        src.Segments,
-			AesKey:          src.AesKey,
-			AesIV:           src.AesIV,
-			InnerOffset:     isoOffset,
-			InnerLength:     int64(e.size),
-			InnerVolumeSize: src.Size,
+	for _, ext := range e.extents {
+		isoOffset := int64(ext.lba) * iso9660SectorSize
+		extLen := int64(ext.length)
+		if len(src.AesKey) == 0 {
+			// Unencrypted: pre-slice outer segments to cover this extent
+			// only. The downstream nested reader treats InnerOffset as
+			// an offset within the (already-sliced) segment chain.
+			sliced, _ := sliceSegmentsForRange(src.Segments, isoOffset, extLen)
+			fc.Sources = append(fc.Sources, ISONestedSource{
+				Segments:        sliced,
+				InnerOffset:     0,
+				InnerLength:     extLen,
+				InnerVolumeSize: extLen,
+			})
+		} else {
+			// Encrypted: AES-CBC needs the IV chain from byte 0 of the
+			// outer ISO, so every source gets the full outer segments
+			// and the cipher seeks via InnerOffset.
+			fc.Sources = append(fc.Sources, ISONestedSource{
+				Segments:        src.Segments,
+				AesKey:          src.AesKey,
+				AesIV:           src.AesIV,
+				InnerOffset:     isoOffset,
+				InnerLength:     extLen,
+				InnerVolumeSize: src.Size,
+			})
 		}
 	}
 	return fc

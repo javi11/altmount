@@ -145,12 +145,13 @@ func buildMainFeatureContent(ctx context.Context, groupKey string, g []analyzedI
 			nzbdavID = e.src.NzbdavID
 		}
 		for _, fc := range e.analyzed.MainFeature {
-			ns := isoFileContentToNestedSource(fc)
-			if ns.InnerLength <= 0 {
-				continue
+			for _, ns := range isoFileContentToNestedSources(fc) {
+				if ns.InnerLength <= 0 {
+					continue
+				}
+				sources = append(sources, ns)
+				totalSize += ns.InnerLength
 			}
-			sources = append(sources, ns)
-			totalSize += ns.InnerLength
 		}
 	}
 	if len(sources) == 0 {
@@ -194,36 +195,30 @@ func buildLargestFileContent(src Content, files []iso.ISOFileContent) (Content, 
 		NzbdavID:          src.NzbdavID,
 		ISOExpansionIndex: 1,
 	}
-	if f.NestedSource != nil {
-		nc.NestedSources = []NestedSource{isoFileContentToNestedSource(f)}
-	} else {
-		nc.Segments = f.Segments
+	nc.NestedSources = isoFileContentToNestedSources(f)
+	if len(nc.NestedSources) == 0 {
+		return Content{}, false
 	}
 	return nc, true
 }
 
-// isoFileContentToNestedSource converts an ISOFileContent into a
-// NestedSource. For unencrypted ISOs the segments are already sliced to
-// cover exactly this file, so InnerOffset is 0 and InnerVolumeSize equals
-// the file size (unused when AesKey is empty — see
-// MetadataVirtualFile.createNestedSourceReader).
-func isoFileContentToNestedSource(fc iso.ISOFileContent) NestedSource {
-	if fc.NestedSource != nil {
-		return NestedSource{
-			Segments:        fc.NestedSource.Segments,
-			AesKey:          fc.NestedSource.AesKey,
-			AesIV:           fc.NestedSource.AesIV,
-			InnerOffset:     fc.NestedSource.InnerOffset,
-			InnerLength:     fc.NestedSource.InnerLength,
-			InnerVolumeSize: fc.NestedSource.InnerVolumeSize,
-		}
+// isoFileContentToNestedSources fans an ISOFileContent's on-disc extents
+// out into one NestedSource per extent, preserving disc order. Concating
+// the resulting sources yields the file's bytes — the multi-extent fix
+// for Blu-ray main-feature M2TS files lives here.
+func isoFileContentToNestedSources(fc iso.ISOFileContent) []NestedSource {
+	out := make([]NestedSource, 0, len(fc.Sources))
+	for _, s := range fc.Sources {
+		out = append(out, NestedSource{
+			Segments:        s.Segments,
+			AesKey:          s.AesKey,
+			AesIV:           s.AesIV,
+			InnerOffset:     s.InnerOffset,
+			InnerLength:     s.InnerLength,
+			InnerVolumeSize: s.InnerVolumeSize,
+		})
 	}
-	return NestedSource{
-		Segments:        fc.Segments,
-		InnerOffset:     0,
-		InnerLength:     fc.Size,
-		InnerVolumeSize: fc.Size,
-	}
+	return out
 }
 
 // discSuffixPattern matches volume labels like "AVATAR_FIRE_AND_ASH_DISC_1",

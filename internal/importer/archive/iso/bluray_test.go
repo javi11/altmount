@@ -7,6 +7,15 @@ import (
 	"testing"
 )
 
+// mkEntry builds a single-extent isoFileEntry — the common case for tests.
+func mkEntry(path string, lba uint32, size uint64) isoFileEntry {
+	return isoFileEntry{
+		path:    path,
+		size:    size,
+		extents: []isoExtent{{lba: lba, length: size}},
+	}
+}
+
 // makeImage assembles an in-memory disc image by placing each piece of
 // data at the sector index given in its key. The returned reader can be
 // used as if it were a real ISO read-seeker.
@@ -53,12 +62,12 @@ func TestResolveMainFeature(t *testing.T) {
 
 		// File listing: two playlists and four M2TS clips (one extra).
 		files := []isoFileEntry{
-			{path: "BDMV/PLAYLIST/00001.MPLS", lba: 100, size: uint64(len(short))},
-			{path: "BDMV/PLAYLIST/00800.MPLS", lba: 110, size: uint64(len(long))},
-			{path: "BDMV/STREAM/00001.M2TS", lba: 200, size: 1_000_000},
-			{path: "BDMV/STREAM/00002.M2TS", lba: 300, size: 2_000_000},
-			{path: "BDMV/STREAM/00003.M2TS", lba: 400, size: 3_000_000},
-			{path: "BDMV/STREAM/00010.M2TS", lba: 500, size: 500_000},
+			mkEntry("BDMV/PLAYLIST/00001.MPLS", 100, uint64(len(short))),
+			mkEntry("BDMV/PLAYLIST/00800.MPLS", 110, uint64(len(long))),
+			mkEntry("BDMV/STREAM/00001.M2TS", 200, 1_000_000),
+			mkEntry("BDMV/STREAM/00002.M2TS", 300, 2_000_000),
+			mkEntry("BDMV/STREAM/00003.M2TS", 400, 3_000_000),
+			mkEntry("BDMV/STREAM/00010.M2TS", 500, 500_000),
 		}
 
 		got := ResolveMainFeature(context.Background(), rs, files)
@@ -82,7 +91,7 @@ func TestResolveMainFeature(t *testing.T) {
 	t.Run("non-BDMV disc returns nil", func(t *testing.T) {
 		t.Parallel()
 		files := []isoFileEntry{
-			{path: "movie.mkv", lba: 100, size: 1_000_000},
+			mkEntry("movie.mkv", 100, 1_000_000),
 		}
 		if got := ResolveMainFeature(context.Background(), bytes.NewReader(make([]byte, 16*iso9660SectorSize)), files); got != nil {
 			t.Errorf("expected nil for non-BDMV disc, got %+v", got)
@@ -95,8 +104,8 @@ func TestResolveMainFeature(t *testing.T) {
 			100: []byte("not a real mpls"),
 		})
 		files := []isoFileEntry{
-			{path: "BDMV/PLAYLIST/00001.MPLS", lba: 100, size: 15},
-			{path: "BDMV/STREAM/00001.M2TS", lba: 200, size: 1_000_000},
+			mkEntry("BDMV/PLAYLIST/00001.MPLS", 100, 15),
+			mkEntry("BDMV/STREAM/00001.M2TS", 200, 1_000_000),
 		}
 		if got := ResolveMainFeature(context.Background(), rs, files); got != nil {
 			t.Errorf("expected nil for unparseable MPLS, got %+v", got)
@@ -124,14 +133,14 @@ func TestResolveMainFeature(t *testing.T) {
 		})
 
 		files := []isoFileEntry{
-			{path: "BDMV/PLAYLIST/00001.MPLS", lba: 100, size: uint64(len(extras))},
-			{path: "BDMV/PLAYLIST/00800.MPLS", lba: 110, size: uint64(len(mainFeature3D))},
+			mkEntry("BDMV/PLAYLIST/00001.MPLS", 100, uint64(len(extras))),
+			mkEntry("BDMV/PLAYLIST/00800.MPLS", 110, uint64(len(mainFeature3D))),
 			// Only the extras live as M2TS:
-			{path: "BDMV/STREAM/00010.M2TS", lba: 200, size: 50_000_000},
+			mkEntry("BDMV/STREAM/00010.M2TS", 200, 50_000_000),
 			// Main feature is SSIF only:
-			{path: "BDMV/STREAM/SSIF/00100.SSIF", lba: 300, size: 25_000_000_000},
-			{path: "BDMV/STREAM/SSIF/00101.SSIF", lba: 400, size: 25_000_000_000},
-			{path: "BDMV/STREAM/SSIF/00102.SSIF", lba: 500, size: 5_000_000_000},
+			mkEntry("BDMV/STREAM/SSIF/00100.SSIF", 300, 25_000_000_000),
+			mkEntry("BDMV/STREAM/SSIF/00101.SSIF", 400, 25_000_000_000),
+			mkEntry("BDMV/STREAM/SSIF/00102.SSIF", 500, 5_000_000_000),
 		}
 
 		got := ResolveMainFeature(context.Background(), rs, files)
@@ -168,9 +177,9 @@ func TestResolveMainFeature(t *testing.T) {
 		rs := makeImage(t, map[uint32][]byte{100: mainFeature})
 
 		files := []isoFileEntry{
-			{path: "BDMV/PLAYLIST/00800.MPLS", lba: 100, size: uint64(len(mainFeature))},
-			{path: "BDMV/STREAM/00100.M2TS", lba: 200, size: 20_000_000_000},
-			{path: "BDMV/STREAM/SSIF/00100.SSIF", lba: 300, size: 40_000_000_000},
+			mkEntry("BDMV/PLAYLIST/00800.MPLS", 100, uint64(len(mainFeature))),
+			mkEntry("BDMV/STREAM/00100.M2TS", 200, 20_000_000_000),
+			mkEntry("BDMV/STREAM/SSIF/00100.SSIF", 300, 40_000_000_000),
 		}
 
 		got := ResolveMainFeature(context.Background(), rs, files)
@@ -195,8 +204,8 @@ func TestResolveMainFeature(t *testing.T) {
 			100: data,
 		})
 		files := []isoFileEntry{
-			{path: "BDMV/PLAYLIST/00001.MPLS", lba: 100, size: uint64(len(data))},
-			{path: "BDMV/STREAM/00001.M2TS", lba: 200, size: 1_000_000},
+			mkEntry("BDMV/PLAYLIST/00001.MPLS", 100, uint64(len(data))),
+			mkEntry("BDMV/STREAM/00001.M2TS", 200, 1_000_000),
 		}
 		if got := ResolveMainFeature(context.Background(), rs, files); got != nil {
 			t.Errorf("expected nil when MPLS references unknown clip, got %+v", got)

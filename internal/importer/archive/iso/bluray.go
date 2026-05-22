@@ -123,15 +123,21 @@ func isBetterPlaylist(cand, best *MainFeaturePlaylist, candItems, bestItems int)
 	return candItems > bestItems
 }
 
-// readISOFile reads the full contents of one isoFileEntry from rs.
-// MPLS files are tiny (~KBs), so a one-shot read is fine.
+// readISOFile reads the full contents of one isoFileEntry from rs,
+// concatenating bytes across every on-disc extent. MPLS files are tiny
+// (~KBs) and almost always single-extent, but multi-extent MPLS is
+// legal so we iterate.
 func readISOFile(rs io.ReadSeeker, e isoFileEntry) ([]byte, error) {
-	if _, err := rs.Seek(int64(e.lba)*iso9660SectorSize, io.SeekStart); err != nil {
-		return nil, err
+	out := make([]byte, 0, e.size)
+	for _, ext := range e.extents {
+		if _, err := rs.Seek(int64(ext.lba)*iso9660SectorSize, io.SeekStart); err != nil {
+			return nil, err
+		}
+		chunk := make([]byte, ext.length)
+		if _, err := io.ReadFull(rs, chunk); err != nil {
+			return nil, err
+		}
+		out = append(out, chunk...)
 	}
-	buf := make([]byte, e.size)
-	if _, err := io.ReadFull(rs, buf); err != nil {
-		return nil, err
-	}
-	return buf, nil
+	return out, nil
 }

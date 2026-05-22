@@ -11,27 +11,34 @@ type ISOSource struct {
 	Size     int64 // Decrypted ISO size
 }
 
-// ISOFileContent represents one file found inside the ISO.
+// ISOFileContent represents one file found inside the ISO. The file's
+// data may be split across multiple on-disc extents (Blu-ray main-feature
+// M2TS files routinely use hundreds), so Sources is a slice of inner
+// sources in disc order. Concatenating their byte ranges yields the
+// complete file content.
 type ISOFileContent struct {
 	InternalPath string // e.g. "BDMV/STREAM/00001.m2ts"
 	Filename     string // Base filename
-	Size         int64  // File size in bytes
+	Size         int64  // Total file size in bytes (sum of Sources.InnerLength)
 	NzbdavID     string // Carried from parent archive Content
-	// Unencrypted case: Segments sliced to cover exactly this file
-	Segments []*metapb.SegmentData
-	// Encrypted case: nil Segments + populated NestedSource
-	NestedSource *ISONestedSource
+	Sources      []ISONestedSource
 }
 
-// ISONestedSource holds everything needed to decrypt and seek into the ISO
-// for a single inner file.
+// ISONestedSource is one extent of an inner file. For unencrypted ISOs,
+// Segments is pre-sliced to cover exactly this extent and AesKey is nil
+// (InnerOffset is 0, InnerLength equals the extent length). For encrypted
+// ISOs, AesKey/AesIV are populated, Segments cover the full outer ISO,
+// InnerOffset is the byte offset of this extent within the decrypted
+// ISO, and InnerVolumeSize is the full decrypted ISO size — the cipher
+// chain needs to start at byte 0 so multi-extent encrypted reads use
+// the same outer-ISO data with different inner offsets.
 type ISONestedSource struct {
 	Segments        []*metapb.SegmentData
 	AesKey          []byte
 	AesIV           []byte
-	InnerOffset     int64 // lba * 2048
-	InnerLength     int64 // file size
-	InnerVolumeSize int64 // ISO total decrypted size
+	InnerOffset     int64
+	InnerLength     int64
+	InnerVolumeSize int64
 }
 
 // AnalyzedISO is the full result of inspecting one ISO image. Files mirrors

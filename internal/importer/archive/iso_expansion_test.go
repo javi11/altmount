@@ -63,50 +63,78 @@ func TestParseDiscNumber(t *testing.T) {
 	}
 }
 
-func TestIsoFileContentToNestedSource(t *testing.T) {
+func TestIsoFileContentToNestedSources(t *testing.T) {
 	t.Parallel()
 
-	t.Run("unencrypted uses pre-sliced segments", func(t *testing.T) {
+	t.Run("single unencrypted extent → one NestedSource", func(t *testing.T) {
 		t.Parallel()
-		segs := []*metapb.SegmentData{
-			{Id: "a", StartOffset: 0, EndOffset: 99, SegmentSize: 100},
-		}
 		fc := iso.ISOFileContent{
 			Filename: "00001.m2ts",
 			Size:     100,
-			Segments: segs,
+			Sources: []iso.ISONestedSource{{
+				Segments:        []*metapb.SegmentData{{Id: "a", StartOffset: 0, EndOffset: 99, SegmentSize: 100}},
+				InnerOffset:     0,
+				InnerLength:     100,
+				InnerVolumeSize: 100,
+			}},
 		}
-		ns := isoFileContentToNestedSource(fc)
-		if len(ns.Segments) != 1 || ns.InnerLength != 100 || ns.InnerOffset != 0 {
-			t.Fatalf("unexpected NestedSource: %+v", ns)
+		got := isoFileContentToNestedSources(fc)
+		if len(got) != 1 {
+			t.Fatalf("want 1 source, got %d", len(got))
 		}
-		if len(ns.AesKey) != 0 {
-			t.Errorf("AesKey should be empty, got %v", ns.AesKey)
+		if got[0].InnerLength != 100 || got[0].InnerOffset != 0 || len(got[0].AesKey) != 0 {
+			t.Fatalf("unexpected NestedSource: %+v", got[0])
 		}
 	})
 
-	t.Run("encrypted carries offset and key", func(t *testing.T) {
+	t.Run("multi-extent file → one NestedSource per extent in order", func(t *testing.T) {
 		t.Parallel()
-		segs := []*metapb.SegmentData{
-			{Id: "outer", StartOffset: 0, EndOffset: 99999, SegmentSize: 100000},
+		// The bug we just fixed: a 17 GiB M2TS spans hundreds of extents.
+		// Each extent must become its own NestedSource so the downstream
+		// concat reader stitches them in disc order.
+		fc := iso.ISOFileContent{
+			Filename: "00022.m2ts",
+			Size:     30,
+			Sources: []iso.ISONestedSource{
+				{Segments: []*metapb.SegmentData{{Id: "e1"}}, InnerLength: 10},
+				{Segments: []*metapb.SegmentData{{Id: "e2"}}, InnerLength: 10},
+				{Segments: []*metapb.SegmentData{{Id: "e3"}}, InnerLength: 10},
+			},
 		}
+		got := isoFileContentToNestedSources(fc)
+		if len(got) != 3 {
+			t.Fatalf("want 3 sources, got %d", len(got))
+		}
+		wantIDs := []string{"e1", "e2", "e3"}
+		for i, ns := range got {
+			if len(ns.Segments) != 1 || ns.Segments[0].Id != wantIDs[i] {
+				t.Errorf("source %d: want segment id %q, got %+v", i, wantIDs[i], ns.Segments)
+			}
+		}
+	})
+
+	t.Run("encrypted source carries key + IV through", func(t *testing.T) {
+		t.Parallel()
 		fc := iso.ISOFileContent{
 			Filename: "00001.m2ts",
 			Size:     2048,
-			NestedSource: &iso.ISONestedSource{
-				Segments:        segs,
+			Sources: []iso.ISONestedSource{{
+				Segments:        []*metapb.SegmentData{{Id: "outer", StartOffset: 0, EndOffset: 99999, SegmentSize: 100000}},
 				AesKey:          []byte("0123456789abcdef0123456789abcdef"),
 				AesIV:           []byte("0123456789abcdef"),
 				InnerOffset:     1024,
 				InnerLength:     2048,
 				InnerVolumeSize: 99999,
-			},
+			}},
 		}
-		ns := isoFileContentToNestedSource(fc)
-		if ns.InnerOffset != 1024 || ns.InnerLength != 2048 || ns.InnerVolumeSize != 99999 {
-			t.Fatalf("unexpected NestedSource offsets: %+v", ns)
+		got := isoFileContentToNestedSources(fc)
+		if len(got) != 1 {
+			t.Fatalf("want 1 source, got %d", len(got))
 		}
-		if len(ns.AesKey) == 0 {
+		if got[0].InnerOffset != 1024 || got[0].InnerLength != 2048 || got[0].InnerVolumeSize != 99999 {
+			t.Fatalf("offsets mangled: %+v", got[0])
+		}
+		if len(got[0].AesKey) == 0 {
 			t.Error("AesKey should be carried through for encrypted source")
 		}
 	})
@@ -123,9 +151,13 @@ func TestBuildMainFeatureContent_TwoDiscs(t *testing.T) {
 		return iso.ISOFileContent{
 			Filename: name,
 			Size:     size,
-			Segments: []*metapb.SegmentData{
-				{Id: name, StartOffset: 0, EndOffset: size - 1, SegmentSize: size},
-			},
+			Sources: []iso.ISONestedSource{{
+				Segments: []*metapb.SegmentData{
+					{Id: name, StartOffset: 0, EndOffset: size - 1, SegmentSize: size},
+				},
+				InnerLength:     size,
+				InnerVolumeSize: size,
+			}},
 		}
 	}
 
@@ -188,13 +220,20 @@ func TestBuildMainFeatureContent_TwoDiscs(t *testing.T) {
 func TestBuildLargestFileContent(t *testing.T) {
 	t.Parallel()
 
+	mkFile := func(name string, size int64, segID string) iso.ISOFileContent {
+		return iso.ISOFileContent{
+			Filename: name,
+			Size:     size,
+			Sources: []iso.ISONestedSource{{
+				Segments:        []*metapb.SegmentData{{Id: segID, StartOffset: 0, EndOffset: size - 1, SegmentSize: size}},
+				InnerLength:     size,
+				InnerVolumeSize: size,
+			}},
+		}
+	}
 	files := []iso.ISOFileContent{
-		{Filename: "small.mkv", Size: 500, Segments: []*metapb.SegmentData{
-			{Id: "s", StartOffset: 0, EndOffset: 499, SegmentSize: 500},
-		}},
-		{Filename: "big.mkv", Size: 5_000_000, Segments: []*metapb.SegmentData{
-			{Id: "b", StartOffset: 0, EndOffset: 4_999_999, SegmentSize: 5_000_000},
-		}},
+		mkFile("small.mkv", 500, "s"),
+		mkFile("big.mkv", 5_000_000, "b"),
 	}
 	src := Content{Filename: "thing.iso", NzbdavID: "id-1"}
 
