@@ -2,7 +2,6 @@ package iso
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"log/slog"
 	"sort"
@@ -56,34 +55,6 @@ func ResolveMainFeature(ctx context.Context, rs io.ReadSeeker, files []isoFileEn
 			m2tsByClip[base] = f
 		}
 	}
-	// [DEBUG-isobd] One-shot summary of what the resolver actually sees in
-	// this ISO. Distinct prefix lets us confirm the live binary includes
-	// this instrumentation and lets users grep their logs cleanly.
-	var (
-		allSum, m2tsSum, ssifSum int64
-		biggest                  = topNBySize(files, 6)
-	)
-	for _, f := range files {
-		allSum += int64(f.size)
-	}
-	for _, f := range m2tsByClip {
-		m2tsSum += int64(f.size)
-	}
-	for _, f := range ssifByClip {
-		ssifSum += int64(f.size)
-	}
-	slog.InfoContext(ctx, "[DEBUG-isobd] bdmv scan",
-		"total_files", len(files),
-		"playlists", len(playlistEntries),
-		"m2ts_clips", len(m2tsByClip),
-		"ssif_clips", len(ssifByClip),
-		"all_files_sum_bytes", allSum,
-		"m2ts_sum_bytes", m2tsSum,
-		"ssif_sum_bytes", ssifSum,
-		"top6_largest", biggest,
-		"sample_paths", samplePaths(files, 12),
-	)
-
 	if len(playlistEntries) == 0 || (len(m2tsByClip) == 0 && len(ssifByClip) == 0) {
 		return nil
 	}
@@ -117,21 +88,6 @@ func ResolveMainFeature(ctx context.Context, rs io.ReadSeeker, files []isoFileEn
 				streams = append(streams, entry)
 			}
 		}
-		// [DEBUG-isobd] Per-playlist evaluation so we can see which mpls
-		// resolved how many clips and why a given candidate won or lost.
-		var totalSize int64
-		for _, s := range streams {
-			totalSize += int64(s.size)
-		}
-		slog.InfoContext(ctx, "[DEBUG-isobd] mpls evaluated",
-			"name", pe.path,
-			"items", len(pl.PlayItems),
-			"resolved_clips", len(streams),
-			"unresolved", len(pl.PlayItems)-len(streams),
-			"duration_ticks", pl.DurationTicks(),
-			"streams_total_bytes", totalSize,
-		)
-
 		if len(streams) == 0 {
 			continue
 		}
@@ -146,58 +102,13 @@ func ResolveMainFeature(ctx context.Context, rs io.ReadSeeker, files []isoFileEn
 		}
 	}
 	if best != nil {
-		slog.InfoContext(ctx, "[DEBUG-isobd] main feature picked",
+		slog.InfoContext(ctx, "Blu-ray main feature playlist resolved",
 			"playlist", best.PlaylistName,
 			"clips", len(best.Streams),
-			"duration_ticks", best.DurationTicks,
+			"duration_seconds", best.DurationTicks/45000,
 		)
 	}
 	return best
-}
-
-// samplePaths returns up to max paths from files, intended for diagnostic
-// logging. The list is taken in iteration order — not sorted — so the user
-// sees what ListISOFiles actually emitted.
-func samplePaths(files []isoFileEntry, max int) []string {
-	n := min(len(files), max)
-	out := make([]string, 0, n)
-	for i := range n {
-		out = append(out, files[i].path)
-	}
-	return out
-}
-
-// topNBySize returns "path=size" entries for the n largest files. Used by
-// diagnostic logging to reveal whether the ISO actually contains the
-// multi-GB clips a real Blu-ray main feature would have.
-func topNBySize(files []isoFileEntry, n int) []string {
-	if len(files) == 0 || n <= 0 {
-		return nil
-	}
-	cp := make([]isoFileEntry, len(files))
-	copy(cp, files)
-	sort.Slice(cp, func(i, j int) bool { return cp[i].size > cp[j].size })
-	k := min(len(cp), n)
-	out := make([]string, 0, k)
-	for i := range k {
-		out = append(out, cp[i].path+"="+formatBytes(int64(cp[i].size)))
-	}
-	return out
-}
-
-// formatBytes renders a byte count compactly for log readability.
-// Uses base-2 units (KiB, MiB, GiB) for clarity.
-func formatBytes(b int64) string {
-	const unit = 1024
-	if b < unit {
-		return fmt.Sprintf("%dB", b)
-	}
-	div, exp := int64(unit), 0
-	for n := b / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f%ciB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
 // isBetterPlaylist returns true when cand should replace best.

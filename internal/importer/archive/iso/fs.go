@@ -328,6 +328,66 @@ func udfResolveICB(loc udfLBA, metaMap []udfMetaSpan, partStart uint32) (uint32,
 	return udfResolveMetaBlock(loc.block, metaMap, partStart)
 }
 
+// readMetaExtent reads a contiguous extent of `length` bytes starting at
+// logical metadata block `startBlock`, walking sector by sector through
+// the metaMap so multi-sector extents (e.g. a 26 KiB directory) are
+// returned in full. Without this, callers that read only the first
+// 2048-byte sector silently lose every entry past the first sector — the
+// root cause of the "main-feature M2TS files missing from listing" bug.
+func readMetaExtent(rs io.ReadSeeker, startBlock uint32, length int, metaMap []udfMetaSpan, partStart uint32) ([]byte, error) {
+	if length <= 0 {
+		return nil, nil
+	}
+	out := make([]byte, 0, length)
+	remaining := length
+	for b := uint32(0); remaining > 0; b++ {
+		ps, err := udfResolveMetaBlock(startBlock+b, metaMap, partStart)
+		if err != nil {
+			return nil, err
+		}
+		_, sector, err := udfReadTag(rs, ps)
+		if err != nil {
+			// Malformed image (e.g. extent claims more sectors than exist):
+			// return what we successfully read rather than failing the
+			// entire walk. Callers parse partial directory data correctly.
+			return out, nil
+		}
+		take := min(remaining, len(sector))
+		out = append(out, sector[:take]...)
+		remaining -= take
+	}
+	return out, nil
+}
+
+// readICBExtent is the long_ad analogue of readMetaExtent: walks blocks
+// by incrementing the logical-block field inside the ICB long_ad.
+func readICBExtent(rs io.ReadSeeker, loc udfLBA, length int, metaMap []udfMetaSpan, partStart uint32) ([]byte, error) {
+	if length <= 0 {
+		return nil, nil
+	}
+	out := make([]byte, 0, length)
+	remaining := length
+	cur := loc
+	for remaining > 0 {
+		ps, err := udfResolveICB(cur, metaMap, partStart)
+		if err != nil {
+			return nil, err
+		}
+		_, sector, err := udfReadTag(rs, ps)
+		if err != nil {
+			// Malformed image (e.g. extent claims more sectors than exist):
+			// return what we successfully read rather than failing the
+			// entire walk. Callers parse partial directory data correctly.
+			return out, nil
+		}
+		take := min(remaining, len(sector))
+		out = append(out, sector[:take]...)
+		remaining -= take
+		cur.block++
+	}
+	return out, nil
+}
+
 // udfReadDirEntries reads all File Identifier Descriptor records from a
 // File Entry at physSect.
 func udfReadDirEntries(rs io.ReadSeeker, physSect uint32, metaMap []udfMetaSpan, partStart uint32) ([]udfDirEntry, error) {
@@ -360,21 +420,22 @@ func udfReadDirEntries(rs io.ReadSeeker, physSect uint32, metaMap []udfMetaSpan,
 	case 3: // inline
 		dirData = buf[allocDescOff : allocDescOff+allocDescLen]
 	case 0: // short_ad
+		// A single allocation descriptor describes an extent that can span
+		// many 2048-byte sectors. The previous version of this code read
+		// only the first sector and truncated the rest of the extent,
+		// silently dropping every directory entry past ~30 FIDs — which is
+		// why BDMV/STREAM/ on a real Blu-ray (~300 entries, ~26 KiB) lost
+		// every main-feature M2TS clip. We now walk the full extent.
 		for off := 0; off+8 <= allocDescLen; off += 8 {
 			ad := udfParseShortAD(buf[allocDescOff:], off)
 			if ad.length == 0 {
 				break
 			}
-			ps, rerr := udfResolveMetaBlock(ad.block, metaMap, partStart)
+			data, rerr := readMetaExtent(rs, ad.block, int(ad.length), metaMap, partStart)
 			if rerr != nil {
 				return nil, rerr
 			}
-			_, sector, rerr := udfReadTag(rs, ps)
-			if rerr != nil {
-				return nil, rerr
-			}
-			take := min(int(ad.length), len(sector))
-			dirData = append(dirData, sector[:take]...)
+			dirData = append(dirData, data...)
 		}
 	case 1: // long_ad
 		for off := 0; off+16 <= allocDescLen; off += 16 {
@@ -382,16 +443,11 @@ func udfReadDirEntries(rs io.ReadSeeker, physSect uint32, metaMap []udfMetaSpan,
 			if ad.length == 0 {
 				break
 			}
-			ps, rerr := udfResolveICB(ad.loc, metaMap, partStart)
+			data, rerr := readICBExtent(rs, ad.loc, int(ad.length), metaMap, partStart)
 			if rerr != nil {
 				return nil, rerr
 			}
-			_, sector, rerr := udfReadTag(rs, ps)
-			if rerr != nil {
-				return nil, rerr
-			}
-			take := min(int(ad.length), len(sector))
-			dirData = append(dirData, sector[:take]...)
+			dirData = append(dirData, data...)
 		}
 	}
 
