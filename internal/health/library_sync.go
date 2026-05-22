@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -1185,9 +1184,6 @@ func updateSymlinkForMountChange(
 	}
 
 	// Create new symlink
-	if runtime.GOOS == "windows" {
-		return currentTarget, false, fmt.Errorf("symlinks are not supported on Windows")
-	}
 	if err := os.Symlink(newTarget, symlinkPath); err != nil {
 		slog.ErrorContext(ctx, "Failed to create updated symlink",
 			"path", symlinkPath,

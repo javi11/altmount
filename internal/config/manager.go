@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -542,10 +541,6 @@ func (c *Config) Validate() error {
 	if !validStrategies[c.Import.ImportStrategy] {
 		return fmt.Errorf("import_strategy must be one of: NONE, SYMLINK, STRM")
 	}
-	if runtime.GOOS == "windows" && c.Import.ImportStrategy == ImportStrategySYMLINK {
-		return fmt.Errorf("import_strategy SYMLINK is not supported on Windows; use STRM instead")
-	}
-
 	// Validate import directory when strategy requires it
 	if c.Import.ImportStrategy == ImportStrategySYMLINK || c.Import.ImportStrategy == ImportStrategySTRM {
 		if c.Import.ImportDir == nil || *c.Import.ImportDir == "" {
