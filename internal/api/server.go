@@ -114,6 +114,14 @@ func NewServer(
 		updater:             updater.Default(),
 	}
 
+	// Wire stream-activity ↔ pool admission. Streams notify the pool when they
+	// start/stop; the pool reads the active stream count to pick its
+	// adaptive import cap.
+	if poolManager != nil && streamTracker != nil {
+		streamTracker.SetChangeNotifier(poolManager)
+		poolManager.SetStreamSource(streamTracker)
+	}
+
 	return server
 }
 

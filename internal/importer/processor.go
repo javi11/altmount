@@ -81,7 +81,6 @@ func (proc *Processor) getCleanNzbName(nzbPath string, queueID int) string {
 	return baseName
 }
 
-
 func (proc *Processor) SetRecorder(recorder HistoryRecorder) {
 	proc.recorder = recorder
 }
@@ -170,6 +169,17 @@ func (proc *Processor) checkCancellation(ctx context.Context) error {
 // metadata files written to disk; it is populated even on partial failure so callers can clean up.
 // Paths prefixed with "DIR:" indicate a metadata directory that should be removed entirely.
 func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePath string, queueID int, allowedExtensionsOverride *[]string, virtualDirOverride *string, extractedFiles []parser.ExtractedFileInfo, category *string, metadata *string, downloadID *string) (string, []string, error) {
+	// Gate this import behind the pool admission controller so we can cap how
+	// many NZB imports run concurrently end-to-end and yield to streams under
+	// load. The Acquire is a no-op when no caps are configured.
+	if proc.poolManager != nil {
+		release, err := proc.poolManager.AcquireImportSlot(ctx)
+		if err != nil {
+			return "", nil, fmt.Errorf("import admission cancelled: %w", err)
+		}
+		defer release()
+	}
+
 	cfg := proc.configGetter()
 
 	// Determine max connections to use
