@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/httpclient"
 	"github.com/javi11/altmount/internal/sabnzbd"
 )
 
@@ -29,8 +30,8 @@ func (c *Coordinator) AttemptFallback(ctx context.Context, item *database.Import
 	// Convert priority to SABnzbd format
 	priority := convertPriorityToSABnzbd(item.Priority)
 
-	// Create client and send
-	client := sabnzbd.NewSABnzbdClient()
+	// Create client and send (proxy-aware per current network config)
+	client := sabnzbd.NewSABnzbdClient(httpclient.NewForExternal(cfg.Network, httpclient.LongTimeout))
 	nzoID, err := client.SendNZBFile(
 		ctx,
 		cfg.SABnzbd.FallbackHost,

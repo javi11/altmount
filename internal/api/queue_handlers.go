@@ -17,6 +17,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/javi11/altmount/internal/database"
 	internalerrors "github.com/javi11/altmount/internal/errors"
+	"github.com/javi11/altmount/internal/httpclient"
 	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
 	"github.com/javi11/altmount/internal/nzbfile"
 	"github.com/javi11/altmount/internal/nzblnk"
@@ -707,7 +708,8 @@ func (s *Server) handleUploadNZBLnk(c *fiber.Ctx) error {
 	}
 
 	// Create resolver
-	resolver := nzblnk.NewResolver(s.configManager.GetConfig().Nzblnk.UserAgent)
+	cfg := s.configManager.GetConfig()
+	resolver := nzblnk.NewResolver(cfg.Nzblnk.UserAgent, httpclient.NewForExternal(cfg.Network, 30*time.Second))
 
 	// Process each link
 	type linkResult struct {
@@ -889,7 +891,8 @@ func (s *Server) handleSearchNZBByName(c *fiber.Ctx) error {
 		syntheticLink += "&p=" + url.QueryEscape(req.Password)
 	}
 
-	resolver := nzblnk.NewResolver(s.configManager.GetConfig().Nzblnk.UserAgent)
+	cfg := s.configManager.GetConfig()
+	resolver := nzblnk.NewResolver(cfg.Nzblnk.UserAgent, httpclient.NewForExternal(cfg.Network, 30*time.Second))
 	resolved, err := resolver.Resolve(c.Context(), syntheticLink)
 	if err != nil {
 		return RespondNotFound(c, "NZB", "Could not find NZB for name '"+req.Name+"': "+err.Error())

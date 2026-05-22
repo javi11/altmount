@@ -1,13 +1,4 @@
-import { KeyValueEditor } from "../ui/KeyValueEditor";
-import {
-	Eye,
-	EyeOff,
-	HardDrive,
-	Play,
-	Save,
-	Square,
-	TestTube,
-} from "lucide-react";
+import { Eye, EyeOff, HardDrive, Play, Save, Square, TestTube } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useConfirm } from "../../contexts/ModalContext";
 import { useToast } from "../../contexts/ToastContext";
@@ -17,6 +8,7 @@ import type {
 	RCloneMountFormData,
 	RCloneRCFormData,
 } from "../../types/config";
+import { KeyValueEditor } from "../ui/KeyValueEditor";
 
 interface RCloneConfigSectionProps {
 	config: ConfigResponse;
@@ -92,9 +84,7 @@ export function RCloneConfigSection({
 	});
 
 	// Separate state for mount path since it's a root-level config
-	const [mountPath, setMountPath] = useState(
-		config.mount_path || "/mnt/remotes/altmount",
-	);
+	const [mountPath, setMountPath] = useState(config.mount_path || "/mnt/remotes/altmount");
 
 	const [mountStatus, setMountStatus] = useState<MountStatus | null>(null);
 	const [hasChanges, setHasChanges] = useState(false);
@@ -210,9 +200,7 @@ export function RCloneConfigSection({
 			rc_pass: "",
 			rc_options: config.rclone.rc_options,
 		};
-		setHasChanges(
-			JSON.stringify(newFormData) !== JSON.stringify(initialFormData),
-		);
+		setHasChanges(JSON.stringify(newFormData) !== JSON.stringify(initialFormData));
 	};
 
 	const handleMountInputChange = (
@@ -265,9 +253,7 @@ export function RCloneConfigSection({
 			use_mmap: config.rclone.use_mmap || false,
 			links: config.rclone.links || false,
 		};
-		setHasMountChanges(
-			JSON.stringify(newMountFormData) !== JSON.stringify(initialMountFormData),
-		);
+		setHasMountChanges(JSON.stringify(newMountFormData) !== JSON.stringify(initialMountFormData));
 	};
 
 	const handleMountPathChange = (value: string) => {
@@ -423,9 +409,7 @@ export function RCloneConfigSection({
 	return (
 		<div className="space-y-10">
 			<div className="min-w-0">
-				<h3 className="font-bold text-base-content text-lg tracking-tight">
-					RClone Filesystem
-				</h3>
+				<h3 className="font-bold text-base-content text-lg tracking-tight">RClone Filesystem</h3>
 				<p className="break-words text-base-content/50 text-sm">
 					Manage the virtual mount and Remote Control (RC) interface.
 				</p>
@@ -492,9 +476,7 @@ export function RCloneConfigSection({
 										className="select"
 										value={mountFormData.log_level}
 										disabled={isReadOnly}
-										onChange={(e) =>
-											handleMountInputChange("log_level", e.target.value)
-										}
+										onChange={(e) => handleMountInputChange("log_level", e.target.value)}
 									>
 										<option value="DEBUG">DEBUG (Verbose)</option>
 										<option value="INFO">INFO (Standard)</option>
@@ -514,10 +496,7 @@ export function RCloneConfigSection({
 										value={mountFormData.uid}
 										disabled={isReadOnly}
 										onChange={(e) =>
-											handleMountInputChange(
-												"uid",
-												Number.parseInt(e.target.value, 10) || 1000,
-											)
+											handleMountInputChange("uid", Number.parseInt(e.target.value, 10) || 1000)
 										}
 										placeholder="1000"
 									/>
@@ -532,10 +511,7 @@ export function RCloneConfigSection({
 										value={mountFormData.gid}
 										disabled={isReadOnly}
 										onChange={(e) =>
-											handleMountInputChange(
-												"gid",
-												Number.parseInt(e.target.value, 10) || 1000,
-											)
+											handleMountInputChange("gid", Number.parseInt(e.target.value, 10) || 1000)
 										}
 										placeholder="1000"
 									/>
@@ -549,9 +525,7 @@ export function RCloneConfigSection({
 										className="input"
 										value={mountFormData.umask}
 										disabled={isReadOnly}
-										onChange={(e) =>
-											handleMountInputChange("umask", e.target.value)
-										}
+										onChange={(e) => handleMountInputChange("umask", e.target.value)}
 										placeholder="002"
 									/>
 									<p className="label text-xs">File permission mask.</p>
@@ -559,9 +533,7 @@ export function RCloneConfigSection({
 							</div>
 
 							<div className="space-y-4">
-								<h5 className="font-medium text-base-content/70 text-sm">
-									Security & Flags
-								</h5>
+								<h5 className="font-medium text-base-content/70 text-sm">Security & Flags</h5>
 								<div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
 									<fieldset className="fieldset">
 										<legend className="fieldset-legend">Allow Other</legend>
@@ -572,9 +544,7 @@ export function RCloneConfigSection({
 												className="checkbox"
 												checked={mountFormData.allow_other}
 												disabled={isReadOnly}
-												onChange={(e) =>
-													handleMountInputChange("allow_other", e.target.checked)
-												}
+												onChange={(e) => handleMountInputChange("allow_other", e.target.checked)}
 											/>
 										</label>
 									</fieldset>
@@ -589,10 +559,7 @@ export function RCloneConfigSection({
 												checked={mountFormData.allow_non_empty}
 												disabled={isReadOnly}
 												onChange={(e) =>
-													handleMountInputChange(
-														"allow_non_empty",
-														e.target.checked,
-													)
+													handleMountInputChange("allow_non_empty", e.target.checked)
 												}
 											/>
 										</label>
@@ -607,9 +574,7 @@ export function RCloneConfigSection({
 												className="checkbox"
 												checked={mountFormData.read_only}
 												disabled={isReadOnly}
-												onChange={(e) =>
-													handleMountInputChange("read_only", e.target.checked)
-												}
+												onChange={(e) => handleMountInputChange("read_only", e.target.checked)}
 											/>
 										</label>
 									</fieldset>
@@ -617,9 +582,7 @@ export function RCloneConfigSection({
 							</div>
 
 							<div className="space-y-4">
-								<h5 className="font-medium text-base-content/70 text-sm">
-									VFS Cache Settings
-								</h5>
+								<h5 className="font-medium text-base-content/70 text-sm">VFS Cache Settings</h5>
 								<div className="grid grid-cols-1 gap-6 md:grid-cols-2">
 									<fieldset className="fieldset">
 										<legend className="fieldset-legend">Cache Mode</legend>
@@ -627,18 +590,14 @@ export function RCloneConfigSection({
 											className="select"
 											value={mountFormData.vfs_cache_mode}
 											disabled={isReadOnly}
-											onChange={(e) =>
-												handleMountInputChange("vfs_cache_mode", e.target.value)
-											}
+											onChange={(e) => handleMountInputChange("vfs_cache_mode", e.target.value)}
 										>
 											<option value="off">off (No cache)</option>
 											<option value="minimal">minimal (Metadata only)</option>
 											<option value="writes">writes (Only modified files)</option>
 											<option value="full">full (Read & Write cache)</option>
 										</select>
-										<p className="label text-xs">
-											Determines how much data RClone caches locally.
-										</p>
+										<p className="label text-xs">Determines how much data RClone caches locally.</p>
 									</fieldset>
 
 									<fieldset className="fieldset">
@@ -648,9 +607,7 @@ export function RCloneConfigSection({
 											className="input"
 											value={mountFormData.cache_dir}
 											disabled={isReadOnly}
-											onChange={(e) =>
-												handleMountInputChange("cache_dir", e.target.value)
-											}
+											onChange={(e) => handleMountInputChange("cache_dir", e.target.value)}
 											placeholder="/config/cache"
 										/>
 										<p className="label text-xs">
@@ -667,17 +624,10 @@ export function RCloneConfigSection({
 											className="input"
 											value={mountFormData.vfs_cache_max_size}
 											disabled={isReadOnly}
-											onChange={(e) =>
-												handleMountInputChange(
-													"vfs_cache_max_size",
-													e.target.value,
-												)
-											}
+											onChange={(e) => handleMountInputChange("vfs_cache_max_size", e.target.value)}
 											placeholder="50G"
 										/>
-										<p className="label text-xs">
-											Maximum cache size (e.g., 50G, 1T).
-										</p>
+										<p className="label text-xs">Maximum cache size (e.g., 50G, 1T).</p>
 									</fieldset>
 
 									<fieldset className="fieldset">
@@ -687,32 +637,23 @@ export function RCloneConfigSection({
 											className="input"
 											value={mountFormData.vfs_cache_max_age}
 											disabled={isReadOnly}
-											onChange={(e) =>
-												handleMountInputChange("vfs_cache_max_age", e.target.value)
-											}
+											onChange={(e) => handleMountInputChange("vfs_cache_max_age", e.target.value)}
 											placeholder="504h"
 										/>
-										<p className="label text-xs">
-											Maximum cache age (e.g., 504h, 7d).
-										</p>
+										<p className="label text-xs">Maximum cache age (e.g., 504h, 7d).</p>
 									</fieldset>
 								</div>
 
 								<div className="grid grid-cols-1 gap-6 md:grid-cols-2">
 									<fieldset className="fieldset">
-										<legend className="fieldset-legend">
-											Cache Poll Interval
-										</legend>
+										<legend className="fieldset-legend">Cache Poll Interval</legend>
 										<input
 											type="text"
 											className="input"
 											value={mountFormData.vfs_cache_poll_interval}
 											disabled={isReadOnly}
 											onChange={(e) =>
-												handleMountInputChange(
-													"vfs_cache_poll_interval",
-													e.target.value,
-												)
+												handleMountInputChange("vfs_cache_poll_interval", e.target.value)
 											}
 											placeholder="1m"
 										/>
@@ -728,22 +669,16 @@ export function RCloneConfigSection({
 											className="input"
 											value={mountFormData.vfs_read_ahead}
 											disabled={isReadOnly}
-											onChange={(e) =>
-												handleMountInputChange("vfs_read_ahead", e.target.value)
-											}
+											onChange={(e) => handleMountInputChange("vfs_read_ahead", e.target.value)}
 											placeholder="128M"
 										/>
-										<p className="label text-xs">
-											Read ahead size (e.g., 128M, 256M).
-										</p>
+										<p className="label text-xs">Read ahead size (e.g., 128M, 256M).</p>
 									</fieldset>
 								</div>
 							</div>
 
 							<div className="space-y-4">
-								<h5 className="font-medium text-base-content/70 text-sm">
-									Performance Settings
-								</h5>
+								<h5 className="font-medium text-base-content/70 text-sm">Performance Settings</h5>
 								<div className="grid grid-cols-1 gap-6 md:grid-cols-2">
 									<fieldset className="fieldset">
 										<legend className="fieldset-legend">Read Chunk Size</legend>
@@ -757,52 +692,37 @@ export function RCloneConfigSection({
 											}
 											placeholder="32M"
 										/>
-										<p className="label text-xs">
-											Initial read chunk size (e.g., 32M, 64M).
-										</p>
+										<p className="label text-xs">Initial read chunk size (e.g., 32M, 64M).</p>
 									</fieldset>
 
 									<fieldset className="fieldset">
-										<legend className="fieldset-legend">
-											Read Chunk Size Limit
-										</legend>
+										<legend className="fieldset-legend">Read Chunk Size Limit</legend>
 										<input
 											type="text"
 											className="input"
 											value={mountFormData.vfs_read_chunk_size_limit}
 											disabled={isReadOnly}
 											onChange={(e) =>
-												handleMountInputChange(
-													"vfs_read_chunk_size_limit",
-													e.target.value,
-												)
+												handleMountInputChange("vfs_read_chunk_size_limit", e.target.value)
 											}
 											placeholder="2G"
 										/>
-										<p className="label text-xs">
-											Maximum read chunk size (e.g., 2G, 4G).
-										</p>
+										<p className="label text-xs">Maximum read chunk size (e.g., 2G, 4G).</p>
 									</fieldset>
 								</div>
 
 								<div className="grid grid-cols-1 gap-6 md:grid-cols-2">
 									<fieldset className="fieldset">
-										<legend className="fieldset-legend">
-											Directory Cache Time
-										</legend>
+										<legend className="fieldset-legend">Directory Cache Time</legend>
 										<input
 											type="text"
 											className="input"
 											value={mountFormData.dir_cache_time}
 											disabled={isReadOnly}
-											onChange={(e) =>
-												handleMountInputChange("dir_cache_time", e.target.value)
-											}
+											onChange={(e) => handleMountInputChange("dir_cache_time", e.target.value)}
 											placeholder="10m"
 										/>
-										<p className="label text-xs">
-											Directory cache time (e.g., 10m, 1h).
-										</p>
+										<p className="label text-xs">Directory cache time (e.g., 10m, 1h).</p>
 									</fieldset>
 
 									<fieldset className="fieldset">
@@ -821,32 +741,24 @@ export function RCloneConfigSection({
 											min="1"
 											max="32"
 										/>
-										<p className="label text-xs">
-											Number of parallel transfers (1-32).
-										</p>
+										<p className="label text-xs">Number of parallel transfers (1-32).</p>
 									</fieldset>
 								</div>
 							</div>
 
 							<div className="space-y-4">
-								<h5 className="font-medium text-base-content/70 text-sm">
-									Advanced Flags
-								</h5>
+								<h5 className="font-medium text-base-content/70 text-sm">Advanced Flags</h5>
 								<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
 									<fieldset className="fieldset">
 										<legend className="fieldset-legend">Async Read</legend>
 										<label className="label cursor-pointer">
-											<span className="label-text">
-												Enable async read operations
-											</span>
+											<span className="label-text">Enable async read operations</span>
 											<input
 												type="checkbox"
 												className="checkbox"
 												checked={mountFormData.async_read}
 												disabled={isReadOnly}
-												onChange={(e) =>
-													handleMountInputChange("async_read", e.target.checked)
-												}
+												onChange={(e) => handleMountInputChange("async_read", e.target.checked)}
 											/>
 										</label>
 									</fieldset>
@@ -860,9 +772,7 @@ export function RCloneConfigSection({
 												className="checkbox"
 												checked={mountFormData.no_mod_time}
 												disabled={isReadOnly}
-												onChange={(e) =>
-													handleMountInputChange("no_mod_time", e.target.checked)
-												}
+												onChange={(e) => handleMountInputChange("no_mod_time", e.target.checked)}
 											/>
 										</label>
 									</fieldset>
@@ -871,9 +781,7 @@ export function RCloneConfigSection({
 
 							{/* Custom Mount Options */}
 							<div className="space-y-4">
-								<h5 className="font-medium text-base-content/70 text-sm">
-									Custom Mount Options
-								</h5>
+								<h5 className="font-medium text-base-content/70 text-sm">Custom Mount Options</h5>
 								<p className="text-[11px] text-base-content/50">
 									Arbitrary flags to pass to the rclone mount command. (e.g.,{" "}
 									<code>no-modtime: true</code>)
@@ -881,9 +789,7 @@ export function RCloneConfigSection({
 								<KeyValueEditor
 									value={mountFormData.mount_options}
 									disabled={isReadOnly}
-									onChange={(val) =>
-										handleMountInputChange("mount_options", val)
-									}
+									onChange={(val) => handleMountInputChange("mount_options", val)}
 									keyPlaceholder="Flag (e.g. no-modtime)"
 									valuePlaceholder="Value (e.g. true)"
 								/>
@@ -893,22 +799,16 @@ export function RCloneConfigSection({
 							<div className="divider opacity-50" />
 
 							{mountStatus && (
-								<div
-									className={`alert ${mountStatus.mounted ? "alert-success" : "alert-warning"}`}
-								>
+								<div className={`alert ${mountStatus.mounted ? "alert-success" : "alert-warning"}`}>
 									<HardDrive className="h-6 w-6" />
 									<div>
 										<div className="font-bold">
 											{mountStatus.mounted ? "Mounted" : "Not Mounted"}
 										</div>
 										{mountStatus.mounted && mountStatus.mount_point && (
-											<div className="text-sm">
-												Mount point: {mountStatus.mount_point}
-											</div>
+											<div className="text-sm">Mount point: {mountStatus.mount_point}</div>
 										)}
-										{mountStatus.error && (
-											<div className="text-sm">{mountStatus.error}</div>
-										)}
+										{mountStatus.error && <div className="text-sm">{mountStatus.error}</div>}
 									</div>
 									<div className="flex gap-2">
 										{mountStatus.mounted ? (
@@ -951,9 +851,7 @@ export function RCloneConfigSection({
 										className={`btn btn-primary px-10 ${hasMountChanges || hasMountPathChanges ? "shadow-lg shadow-primary/20" : "btn-ghost"}`}
 										onClick={handleSaveMount}
 										disabled={
-											(!hasMountChanges && !hasMountPathChanges) ||
-											isUpdating ||
-											isMountLoading
+											(!hasMountChanges && !hasMountPathChanges) || isUpdating || isMountLoading
 										}
 									>
 										{isUpdating ? (
@@ -985,18 +883,14 @@ export function RCloneConfigSection({
 							<span className="label-text">
 								Enable connection for cache refresh notifications
 								{mountFormData.mount_enabled && (
-									<span className="badge badge-info badge-sm ml-2">
-										Managed by mount
-									</span>
+									<span className="badge badge-info badge-sm ml-2">Managed by mount</span>
 								)}
 							</span>
 							<input
 								type="checkbox"
 								className="checkbox checkbox-primary"
 								checked={mountFormData.mount_enabled || formData.rc_enabled}
-								disabled={
-									isReadOnly || mountFormData.mount_enabled || isRCToggleSaving
-								}
+								disabled={isReadOnly || mountFormData.mount_enabled || isRCToggleSaving}
 								onChange={(e) => handleRCEnabledChange(e.target.checked)}
 							/>
 						</label>
@@ -1029,10 +923,7 @@ export function RCloneConfigSection({
 										value={formData.rc_port}
 										disabled={isReadOnly || mountFormData.mount_enabled}
 										onChange={(e) =>
-											handleInputChange(
-												"rc_port",
-												Number.parseInt(e.target.value, 10) || 5572,
-											)
+											handleInputChange("rc_port", Number.parseInt(e.target.value, 10) || 5572)
 										}
 									/>
 								</fieldset>
@@ -1059,9 +950,7 @@ export function RCloneConfigSection({
 											value={formData.rc_pass}
 											disabled={isReadOnly || mountFormData.mount_enabled}
 											onChange={(e) => handleInputChange("rc_pass", e.target.value)}
-											placeholder={
-												config.rclone.rc_pass_set ? "********" : "admin"
-											}
+											placeholder={config.rclone.rc_pass_set ? "********" : "admin"}
 										/>
 										<button
 											type="button"
@@ -1080,9 +969,7 @@ export function RCloneConfigSection({
 
 							{/* Custom RC Options */}
 							<div className="space-y-4">
-								<h5 className="font-medium text-base-content/70 text-sm">
-									Custom RC Options
-								</h5>
+								<h5 className="font-medium text-base-content/70 text-sm">Custom RC Options</h5>
 								<KeyValueEditor
 									value={formData.rc_options || {}}
 									disabled={isReadOnly || mountFormData.mount_enabled}
@@ -1100,9 +987,7 @@ export function RCloneConfigSection({
 										onClick={handleTestConnection}
 										disabled={isTestingConnection}
 									>
-										{isTestingConnection && (
-											<span className="loading loading-spinner loading-xs" />
-										)}
+										{isTestingConnection && <span className="loading loading-spinner loading-xs" />}
 										Test Connection
 									</button>
 									<button
@@ -1111,9 +996,7 @@ export function RCloneConfigSection({
 										onClick={handleSave}
 										disabled={!hasChanges || isUpdating}
 									>
-										{isUpdating && (
-											<span className="loading loading-spinner loading-sm" />
-										)}
+										{isUpdating && <span className="loading loading-spinner loading-sm" />}
 										Save RC Changes
 									</button>
 								</div>

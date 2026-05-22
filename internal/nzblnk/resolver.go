@@ -39,17 +39,18 @@ type Resolver struct {
 	indexers   []Indexer
 }
 
-// NewResolver creates a new NZBLNK resolver with the given user-agent for indexer requests.
-func NewResolver(userAgent string) *Resolver {
-	client := &http.Client{
-		Timeout: 30 * time.Second,
+// NewResolver creates a new NZBLNK resolver. The supplied httpClient carries
+// the desired Timeout + proxy Transport (typically built via
+// httpclient.NewForExternal). Passing nil yields a no-proxy 30s default.
+func NewResolver(userAgent string, httpClient *http.Client) *Resolver {
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: 30 * time.Second}
 	}
-
 	return &Resolver{
-		httpClient: client,
+		httpClient: httpClient,
 		indexers: []Indexer{
-			NewNZBKingIndexer(client, userAgent),
-			NewNZBIndexIndexer(client, userAgent),
+			NewNZBKingIndexer(httpClient, userAgent),
+			NewNZBIndexIndexer(httpClient, userAgent),
 		},
 	}
 }

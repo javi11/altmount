@@ -107,7 +107,9 @@ export class APIClient {
 					// empty or non-JSON error body — fall through to status-based message
 				}
 				const errorMessage =
-					(typeof errorData.error === "object" ? (errorData.error as any)?.message : errorData.error) ||
+					(typeof errorData.error === "object"
+						? (errorData.error as any)?.message
+						: errorData.error) ||
 					errorData.message ||
 					`HTTP ${response.status}: ${response.statusText}`;
 				const errorDetails =
@@ -125,7 +127,8 @@ export class APIClient {
 				const errorMessage =
 					(typeof data.error === "object" ? data.error?.message : data.error) ||
 					"API request failed";
-				const errorDetails = (typeof data.error === "object" ? (data.error as any)?.details : "") || "";
+				const errorDetails =
+					(typeof data.error === "object" ? (data.error as any)?.details : "") || "";
 				throw new APIError(response.status, errorMessage, errorDetails);
 			}
 
@@ -174,7 +177,9 @@ export class APIClient {
 				try {
 					const errorData = await response.json();
 					const errorMessage =
-						(typeof errorData.error === "object" ? (errorData.error as any)?.message : errorData.error) ||
+						(typeof errorData.error === "object"
+							? (errorData.error as any)?.message
+							: errorData.error) ||
 						errorData.message ||
 						`HTTP ${response.status}: ${response.statusText}`;
 					const errorDetails =
@@ -203,7 +208,8 @@ export class APIClient {
 				const errorMessage =
 					(typeof data.error === "object" ? data.error?.message : data.error) ||
 					"API request failed";
-				const errorDetails = (typeof data.error === "object" ? (data.error as any)?.details : "") || "";
+				const errorDetails =
+					(typeof data.error === "object" ? (data.error as any)?.details : "") || "";
 				throw new APIError(response.status, errorMessage, errorDetails);
 			}
 
@@ -526,11 +532,15 @@ export class APIClient {
 	}
 
 	async getProviderHistoricalStats(days = 30, interval = "daily") {
-		return this.request<ProviderHistoricalStatsResponse>(`/system/provider-stats?days=${days}&interval=${interval}`);
+		return this.request<ProviderHistoricalStatsResponse>(
+			`/system/provider-stats?days=${days}&interval=${interval}`,
+		);
 	}
 
 	async getProviderSpeedHistory(days = 30) {
-		return this.request<ProviderSpeedTestHistoryResponse>(`/system/provider-speed-history?days=${days}`);
+		return this.request<ProviderSpeedTestHistoryResponse>(
+			`/system/provider-speed-history?days=${days}`,
+		);
 	}
 
 	async directHealthCheck(id: number) {

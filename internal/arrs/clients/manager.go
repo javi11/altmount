@@ -3,7 +3,9 @@ package clients
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"sync"
+	"time"
 
 	"github.com/javi11/altmount/internal/arrs/model"
 	"golift.io/starr"
@@ -11,25 +13,40 @@ import (
 	"golift.io/starr/radarr"
 	"golift.io/starr/readarr"
 	"golift.io/starr/sonarr"
-	)
+)
 
 type Manager struct {
 	mu              sync.RWMutex
-	radarrClients   map[string]*radarr.Radarr     // key: instance name
-	sonarrClients   map[string]*sonarr.Sonarr     // key: instance name
-	lidarrClients   map[string]*lidarr.Lidarr     // key: instance name
-	readarrClients  map[string]*readarr.Readarr   // key: instance name
-	whisparrClients map[string]*sonarr.Sonarr // key: instance name
+	httpClient      *http.Client
+	radarrClients   map[string]*radarr.Radarr   // key: instance name
+	sonarrClients   map[string]*sonarr.Sonarr   // key: instance name
+	lidarrClients   map[string]*lidarr.Lidarr   // key: instance name
+	readarrClients  map[string]*readarr.Readarr // key: instance name
+	whisparrClients map[string]*sonarr.Sonarr   // key: instance name
 }
 
-func NewManager() *Manager {
+// NewManager creates an arrs client manager. httpClient is shared with every
+// starr.Config, so its Transport (incl. proxy) and Timeout apply to all
+// Radarr/Sonarr/Lidarr/Readarr/Whisparr requests. When nil, a no-proxy 30s
+// default client is used.
+func NewManager(httpClient *http.Client) *Manager {
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: 30 * time.Second}
+	}
 	return &Manager{
+		httpClient:      httpClient,
 		radarrClients:   make(map[string]*radarr.Radarr),
 		sonarrClients:   make(map[string]*sonarr.Sonarr),
 		lidarrClients:   make(map[string]*lidarr.Lidarr),
 		readarrClients:  make(map[string]*readarr.Readarr),
 		whisparrClients: make(map[string]*sonarr.Sonarr),
 	}
+}
+
+// starrConfig builds a starr.Config that reuses the manager's shared
+// *http.Client so proxy + timeout settings apply uniformly.
+func (m *Manager) starrConfig(url, apiKey string) *starr.Config {
+	return &starr.Config{URL: url, APIKey: apiKey, Client: m.httpClient}
 }
 
 // GetOrCreateRadarrClient gets or creates a Radarr client for an instance
@@ -41,7 +58,7 @@ func (m *Manager) GetOrCreateRadarrClient(instanceName, url, apiKey string) (*ra
 		return client, nil
 	}
 
-	client := radarr.New(&starr.Config{URL: url, APIKey: apiKey})
+	client := radarr.New(m.starrConfig(url, apiKey))
 	m.radarrClients[instanceName] = client
 	return client, nil
 }
@@ -55,7 +72,7 @@ func (m *Manager) GetOrCreateSonarrClient(instanceName, url, apiKey string) (*so
 		return client, nil
 	}
 
-	client := sonarr.New(&starr.Config{URL: url, APIKey: apiKey})
+	client := sonarr.New(m.starrConfig(url, apiKey))
 	m.sonarrClients[instanceName] = client
 	return client, nil
 }
@@ -69,7 +86,7 @@ func (m *Manager) GetOrCreateLidarrClient(instanceName, url, apiKey string) (*li
 		return client, nil
 	}
 
-	client := lidarr.New(&starr.Config{URL: url, APIKey: apiKey})
+	client := lidarr.New(m.starrConfig(url, apiKey))
 	m.lidarrClients[instanceName] = client
 	return client, nil
 }
@@ -83,7 +100,7 @@ func (m *Manager) GetOrCreateReadarrClient(instanceName, url, apiKey string) (*r
 		return client, nil
 	}
 
-	client := readarr.New(&starr.Config{URL: url, APIKey: apiKey})
+	client := readarr.New(m.starrConfig(url, apiKey))
 	m.readarrClients[instanceName] = client
 	return client, nil
 }
@@ -97,7 +114,7 @@ func (m *Manager) GetOrCreateWhisparrClient(instanceName, url, apiKey string) (*
 		return client, nil
 	}
 
-	client := sonarr.New(&starr.Config{URL: url, APIKey: apiKey})
+	client := sonarr.New(m.starrConfig(url, apiKey))
 	m.whisparrClients[instanceName] = client
 	return client, nil
 }
@@ -124,7 +141,7 @@ func (m *Manager) GetOrCreateClient(instance *model.ConfigInstance) (any, error)
 func (m *Manager) TestConnection(ctx context.Context, instanceType, url, apiKey string) error {
 	switch instanceType {
 	case "radarr":
-		client := radarr.New(&starr.Config{URL: url, APIKey: apiKey})
+		client := radarr.New(m.starrConfig(url, apiKey))
 		_, err := client.GetSystemStatusContext(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to connect to Radarr: %w", err)
@@ -132,7 +149,7 @@ func (m *Manager) TestConnection(ctx context.Context, instanceType, url, apiKey 
 		return nil
 
 	case "sonarr":
-		client := sonarr.New(&starr.Config{URL: url, APIKey: apiKey})
+		client := sonarr.New(m.starrConfig(url, apiKey))
 		_, err := client.GetSystemStatus()
 		if err != nil {
 			return fmt.Errorf("failed to connect to Sonarr: %w", err)
@@ -140,7 +157,7 @@ func (m *Manager) TestConnection(ctx context.Context, instanceType, url, apiKey 
 		return nil
 
 	case "lidarr":
-		client := lidarr.New(&starr.Config{URL: url, APIKey: apiKey})
+		client := lidarr.New(m.starrConfig(url, apiKey))
 		_, err := client.GetSystemStatusContext(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to connect to Lidarr: %w", err)
@@ -148,7 +165,7 @@ func (m *Manager) TestConnection(ctx context.Context, instanceType, url, apiKey 
 		return nil
 
 	case "readarr":
-		client := readarr.New(&starr.Config{URL: url, APIKey: apiKey})
+		client := readarr.New(m.starrConfig(url, apiKey))
 		_, err := client.GetSystemStatusContext(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to connect to Readarr: %w", err)
@@ -156,7 +173,7 @@ func (m *Manager) TestConnection(ctx context.Context, instanceType, url, apiKey 
 		return nil
 
 	case "whisparr":
-		client := sonarr.New(&starr.Config{URL: url, APIKey: apiKey})
+		client := sonarr.New(m.starrConfig(url, apiKey))
 		_, err := client.GetSystemStatus()
 		if err != nil {
 			return fmt.Errorf("failed to connect to Whisparr: %w", err)
