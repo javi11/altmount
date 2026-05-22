@@ -1,7 +1,9 @@
 package iso
 
 import (
+	"context"
 	"io"
+	"log/slog"
 	"sort"
 	"strings"
 )
@@ -28,7 +30,7 @@ type MainFeaturePlaylist struct {
 // Failures parsing individual playlists are non-fatal — we skip them and
 // keep evaluating the rest, mirroring how every Blu-ray player tolerates
 // malformed entries in BDMV/PLAYLIST/.
-func ResolveMainFeature(rs io.ReadSeeker, files []isoFileEntry) *MainFeaturePlaylist {
+func ResolveMainFeature(ctx context.Context, rs io.ReadSeeker, files []isoFileEntry) *MainFeaturePlaylist {
 	// Build per-clip indexes. M2TS streams live at BDMV/STREAM/<NNNNN>.M2TS
 	// and carry the 2D version (or the only version on a 2D disc). SSIF
 	// streams live at BDMV/STREAM/SSIF/<NNNNN>.SSIF and carry the
@@ -53,6 +55,17 @@ func ResolveMainFeature(rs io.ReadSeeker, files []isoFileEntry) *MainFeaturePlay
 			m2tsByClip[base] = f
 		}
 	}
+	// [DEBUG-isobd] One-shot summary of what the resolver actually sees in
+	// this ISO. Distinct prefix lets us confirm the live binary includes
+	// this instrumentation and lets users grep their logs cleanly.
+	slog.InfoContext(ctx, "[DEBUG-isobd] bdmv scan",
+		"total_files", len(files),
+		"playlists", len(playlistEntries),
+		"m2ts_clips", len(m2tsByClip),
+		"ssif_clips", len(ssifByClip),
+		"sample_paths", samplePaths(files, 12),
+	)
+
 	if len(playlistEntries) == 0 || (len(m2tsByClip) == 0 && len(ssifByClip) == 0) {
 		return nil
 	}
@@ -86,6 +99,21 @@ func ResolveMainFeature(rs io.ReadSeeker, files []isoFileEntry) *MainFeaturePlay
 				streams = append(streams, entry)
 			}
 		}
+		// [DEBUG-isobd] Per-playlist evaluation so we can see which mpls
+		// resolved how many clips and why a given candidate won or lost.
+		var totalSize int64
+		for _, s := range streams {
+			totalSize += int64(s.size)
+		}
+		slog.InfoContext(ctx, "[DEBUG-isobd] mpls evaluated",
+			"name", pe.path,
+			"items", len(pl.PlayItems),
+			"resolved_clips", len(streams),
+			"unresolved", len(pl.PlayItems)-len(streams),
+			"duration_ticks", pl.DurationTicks(),
+			"streams_total_bytes", totalSize,
+		)
+
 		if len(streams) == 0 {
 			continue
 		}
@@ -99,7 +127,26 @@ func ResolveMainFeature(rs io.ReadSeeker, files []isoFileEntry) *MainFeaturePlay
 			best = cand
 		}
 	}
+	if best != nil {
+		slog.InfoContext(ctx, "[DEBUG-isobd] main feature picked",
+			"playlist", best.PlaylistName,
+			"clips", len(best.Streams),
+			"duration_ticks", best.DurationTicks,
+		)
+	}
 	return best
+}
+
+// samplePaths returns up to max paths from files, intended for diagnostic
+// logging. The list is taken in iteration order — not sorted — so the user
+// sees what ListISOFiles actually emitted.
+func samplePaths(files []isoFileEntry, max int) []string {
+	n := min(len(files), max)
+	out := make([]string, 0, n)
+	for i := range n {
+		out = append(out, files[i].path)
+	}
+	return out
 }
 
 // isBetterPlaylist returns true when cand should replace best.

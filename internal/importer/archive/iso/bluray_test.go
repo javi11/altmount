@@ -2,6 +2,7 @@ package iso
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"testing"
 )
@@ -60,7 +61,7 @@ func TestResolveMainFeature(t *testing.T) {
 			{path: "BDMV/STREAM/00010.M2TS", lba: 500, size: 500_000},
 		}
 
-		got := ResolveMainFeature(rs, files)
+		got := ResolveMainFeature(context.Background(), rs, files)
 		if got == nil {
 			t.Fatal("ResolveMainFeature returned nil")
 		}
@@ -83,7 +84,7 @@ func TestResolveMainFeature(t *testing.T) {
 		files := []isoFileEntry{
 			{path: "movie.mkv", lba: 100, size: 1_000_000},
 		}
-		if got := ResolveMainFeature(bytes.NewReader(make([]byte, 16*iso9660SectorSize)), files); got != nil {
+		if got := ResolveMainFeature(context.Background(), bytes.NewReader(make([]byte, 16*iso9660SectorSize)), files); got != nil {
 			t.Errorf("expected nil for non-BDMV disc, got %+v", got)
 		}
 	})
@@ -97,7 +98,7 @@ func TestResolveMainFeature(t *testing.T) {
 			{path: "BDMV/PLAYLIST/00001.MPLS", lba: 100, size: 15},
 			{path: "BDMV/STREAM/00001.M2TS", lba: 200, size: 1_000_000},
 		}
-		if got := ResolveMainFeature(rs, files); got != nil {
+		if got := ResolveMainFeature(context.Background(), rs, files); got != nil {
 			t.Errorf("expected nil for unparseable MPLS, got %+v", got)
 		}
 	})
@@ -133,7 +134,7 @@ func TestResolveMainFeature(t *testing.T) {
 			{path: "BDMV/STREAM/SSIF/00102.SSIF", lba: 500, size: 5_000_000_000},
 		}
 
-		got := ResolveMainFeature(rs, files)
+		got := ResolveMainFeature(context.Background(), rs, files)
 		if got == nil {
 			t.Fatal("ResolveMainFeature returned nil — SSIF index missing?")
 		}
@@ -172,7 +173,7 @@ func TestResolveMainFeature(t *testing.T) {
 			{path: "BDMV/STREAM/SSIF/00100.SSIF", lba: 300, size: 40_000_000_000},
 		}
 
-		got := ResolveMainFeature(rs, files)
+		got := ResolveMainFeature(context.Background(), rs, files)
 		if got == nil {
 			t.Fatal("ResolveMainFeature returned nil")
 		}
@@ -197,7 +198,7 @@ func TestResolveMainFeature(t *testing.T) {
 			{path: "BDMV/PLAYLIST/00001.MPLS", lba: 100, size: uint64(len(data))},
 			{path: "BDMV/STREAM/00001.M2TS", lba: 200, size: 1_000_000},
 		}
-		if got := ResolveMainFeature(rs, files); got != nil {
+		if got := ResolveMainFeature(context.Background(), rs, files); got != nil {
 			t.Errorf("expected nil when MPLS references unknown clip, got %+v", got)
 		}
 	})

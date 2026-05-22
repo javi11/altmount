@@ -48,7 +48,7 @@ func AnalyzeISO(
 		out.Files = append(out.Files, buildFileContent(src, e))
 	}
 
-	if mf := ResolveMainFeature(rs, entries); mf != nil {
+	if mf := ResolveMainFeature(ctx, rs, entries); mf != nil {
 		out.DurationTicks = mf.DurationTicks
 		for _, e := range mf.Streams {
 			out.MainFeature = append(out.MainFeature, buildFileContent(src, e))
