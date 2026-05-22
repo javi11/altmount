@@ -20,9 +20,15 @@ type ResolvedSymlink struct {
 
 // RewrittenItem describes one symlink that was successfully rewritten on disk
 // and now needs its DB side-effects committed.
+//
+// LibraryPath is the on-disk path of the library symlink (or .rclonelink file)
+// that was rewritten — needed by the scoped library sync so file_health rows
+// get the correct library_path (the arr-visible symlink), not the
+// mount-relative final_path.
 type RewrittenItem struct {
 	RowID       int64
 	FinalPath   string
+	LibraryPath string
 	QueueItemID *int64
 }
 
@@ -43,9 +49,10 @@ type RewriteReport struct {
 	Scanned            int
 	Matched            int
 	Rewritten          int
-	SkippedWrongPrefix int      // symlinks whose target didn't point at sourceMountPath/.ids/ — usually a misconfigured mount path
-	Unmatched          []string // symlink paths that had no matching migration row
-	Errors             []string // errors encountered (non-fatal)
+	SkippedWrongPrefix int             // symlinks whose target didn't point at sourceMountPath/.ids/ — usually a misconfigured mount path
+	Unmatched          []string        // symlink paths that had no matching migration row
+	Errors             []string        // errors encountered (non-fatal)
+	RewrittenItems     []RewrittenItem // populated only on non-dry-run; one entry per successfully rewritten symlink, for scoped post-processing (e.g. file_health registration)
 }
 
 // RewriteLibrarySymlinks walks libraryPath, finds symlinks (real OS symlinks or
@@ -75,11 +82,6 @@ func RewriteLibrarySymlinks(
 
 	// Normalise source mount prefix used for matching.
 	prefix := filepath.Clean(sourceMountPath) + "/.ids/"
-
-	// rewritten accumulates items whose symlink was actually rewritten on disk.
-	// CommitRewrites is invoked once after the walk so a single batched DB
-	// update covers the whole run.
-	var rewritten []RewrittenItem
 
 	err := filepath.WalkDir(libraryPath, func(path string, d fs.DirEntry, walkErr error) error {
 		// Propagate hard walk errors.
@@ -172,9 +174,10 @@ func RewriteLibrarySymlinks(
 		}
 
 		report.Rewritten++
-		rewritten = append(rewritten, RewrittenItem{
+		report.RewrittenItems = append(report.RewrittenItems, RewrittenItem{
 			RowID:       resolved.RowID,
 			FinalPath:   resolved.FinalPath,
+			LibraryPath: path,
 			QueueItemID: resolved.QueueItemID,
 		})
 		return nil
@@ -186,12 +189,12 @@ func RewriteLibrarySymlinks(
 	// Commit DB side-effects once for the whole batch. Filesystem rewrites
 	// already happened, so a commit error is logged but not propagated as a
 	// fatal walk error — the caller still gets the full report.
-	if !dryRun && len(rewritten) > 0 {
-		if err := lookup.CommitRewrites(ctx, rewritten); err != nil {
+	if !dryRun && len(report.RewrittenItems) > 0 {
+		if err := lookup.CommitRewrites(ctx, report.RewrittenItems); err != nil {
 			report.Errors = append(report.Errors, fmt.Sprintf("commit rewrites: %v", err))
 			slog.WarnContext(ctx, "Failed to commit symlink rewrite DB side-effects",
 				"source", source,
-				"rewritten_count", len(rewritten),
+				"rewritten_count", len(report.RewrittenItems),
 				"error", err)
 		}
 	}

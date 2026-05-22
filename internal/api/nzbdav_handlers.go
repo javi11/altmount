@@ -2,12 +2,14 @@ package api
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/health"
 	"github.com/javi11/altmount/internal/importer"
 	"github.com/javi11/altmount/internal/importer/migration"
 )
@@ -194,16 +196,6 @@ func (s *Server) handleMigrateNzbdavSymlinks(c *fiber.Ctx) error {
 		})
 	}
 
-	// healthRepo is required: rewritten files must be registered in file_health
-	// so the VFS / health checker know about them, mirroring the regular import
-	// post-processor's ScheduleHealthCheck behavior.
-	if s.healthRepo == nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Health repository not available",
-		})
-	}
-
 	ctx := c.Context()
 
 	// Backfill idempotently before walking.
@@ -215,7 +207,7 @@ func (s *Server) handleMigrateNzbdavSymlinks(c *fiber.Ctx) error {
 		})
 	}
 
-	lookup := database.NewDBSymlinkLookup(migRepo, s.healthRepo, s.queueRepo, s.configManager.GetConfigGetter())
+	lookup := database.NewDBSymlinkLookup(migRepo)
 
 	report, err := migration.RewriteLibrarySymlinks(
 		ctx,
@@ -234,16 +226,43 @@ func (s *Server) handleMigrateNzbdavSymlinks(c *fiber.Ctx) error {
 		})
 	}
 
+	// Register each rewritten symlink in file_health via the scoped sync.
+	// This reads each file's .meta to fill in source_nzb_path / release_date
+	// and uses the on-disk library symlink path as library_path. Non-fatal:
+	// the symlink rewrites + migration-status update are already persisted;
+	// on failure we just log and report partial counts to the caller.
+	libraryFilesAttempted := 0
+	libraryFilesRegistered := 0
+	if !req.DryRun && len(report.RewrittenItems) > 0 && s.librarySyncWorker != nil {
+		syncItems := make([]health.FileSyncRequest, len(report.RewrittenItems))
+		for i, it := range report.RewrittenItems {
+			syncItems[i] = health.FileSyncRequest{
+				MountRelativePath: it.FinalPath,
+				LibraryPath:       it.LibraryPath,
+			}
+		}
+		libraryFilesAttempted = len(syncItems)
+		registered, err := s.librarySyncWorker.SyncFiles(ctx, syncItems)
+		if err != nil {
+			slog.WarnContext(ctx, "SyncFiles failed after nzbdav symlink rewrite",
+				"attempted", libraryFilesAttempted,
+				"error", err)
+		}
+		libraryFilesRegistered = registered
+	}
+
 	return c.Status(200).JSON(fiber.Map{
 		"success": true,
 		"data": fiber.Map{
-			"scanned":              report.Scanned,
-			"matched":              report.Matched,
-			"rewritten":            report.Rewritten,
-			"skipped_wrong_prefix": report.SkippedWrongPrefix,
-			"unmatched":            report.Unmatched,
-			"errors":               report.Errors,
-			"dry_run":              req.DryRun,
+			"scanned":                  report.Scanned,
+			"matched":                  report.Matched,
+			"rewritten":                report.Rewritten,
+			"skipped_wrong_prefix":     report.SkippedWrongPrefix,
+			"unmatched":                report.Unmatched,
+			"errors":                   report.Errors,
+			"dry_run":                  req.DryRun,
+			"library_files_attempted":  libraryFilesAttempted,
+			"library_files_registered": libraryFilesRegistered,
 		},
 	})
 }

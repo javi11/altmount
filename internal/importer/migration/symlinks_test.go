@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/javi11/altmount/internal/importer/migration"
@@ -333,6 +334,23 @@ func TestRewriteLibrarySymlinks(t *testing.T) {
 						}
 					}
 				}
+			}
+
+			// Every committed item must carry the on-disk library symlink
+			// path that was rewritten — required by the scoped library sync.
+			for _, it := range tc.lookup.committed {
+				if it.LibraryPath == "" {
+					t.Errorf("committed item RowID=%d has empty LibraryPath", it.RowID)
+					continue
+				}
+				if !strings.HasPrefix(it.LibraryPath, dir) {
+					t.Errorf("committed LibraryPath %q is not within walk dir %q", it.LibraryPath, dir)
+				}
+			}
+
+			// RewriteReport.RewrittenItems mirrors what CommitRewrites saw.
+			if len(report.RewrittenItems) != tc.wantRewritten {
+				t.Errorf("report.RewrittenItems length: got %d, want %d", len(report.RewrittenItems), tc.wantRewritten)
 			}
 
 			if tc.postCheck != nil {

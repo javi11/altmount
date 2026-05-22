@@ -2,44 +2,27 @@ package database
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"log/slog"
 	"path/filepath"
 	"strings"
 
-	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/importer/migration"
 )
 
-// DBSymlinkLookup adapts ImportMigrationRepository + HealthRepository to
-// migration.SymlinkLookup. After a successful symlink rewrite batch it:
+// DBSymlinkLookup adapts ImportMigrationRepository to migration.SymlinkLookup.
 //
-//  1. advances import_migrations.status to 'symlinks_migrated' for every
-//     matched row, and
-//  2. registers each rewritten final_path in file_health so the health
-//     checker and VFS know about it.
-//
-// healthRepo and queueRepo may be nil; the lookup still resolves paths but
-// CommitRewrites becomes a partial no-op for the missing side.
+// CommitRewrites only advances import_migrations.status to 'symlinks_migrated'.
+// Registration of the rewritten files in file_health is delegated to the
+// library sync worker (triggered by the handler after a successful rewrite);
+// that worker walks the library, reads each .meta file, and inserts file_health
+// rows with proper library_path / source_nzb_path / release_date.
 type DBSymlinkLookup struct {
-	migRepo    *ImportMigrationRepository
-	healthRepo *HealthRepository
-	queueRepo  *Repository
-	cfg        config.ConfigGetter
+	migRepo *ImportMigrationRepository
 }
 
-// NewDBSymlinkLookup creates a new DBSymlinkLookup. healthRepo and cfg are
-// required to register rewritten files in file_health; queueRepo is used to
-// resolve source_nzb_path from queue_item_id. Pass nil to skip those side
-// effects.
-func NewDBSymlinkLookup(migRepo *ImportMigrationRepository, healthRepo *HealthRepository, queueRepo *Repository, cfg config.ConfigGetter) *DBSymlinkLookup {
-	return &DBSymlinkLookup{
-		migRepo:    migRepo,
-		healthRepo: healthRepo,
-		queueRepo:  queueRepo,
-		cfg:        cfg,
-	}
+// NewDBSymlinkLookup creates a new DBSymlinkLookup wrapping the given repository.
+func NewDBSymlinkLookup(migRepo *ImportMigrationRepository) *DBSymlinkLookup {
+	return &DBSymlinkLookup{migRepo: migRepo}
 }
 
 // Resolve returns the migration row info for the given source and externalID.
@@ -68,17 +51,12 @@ func (l *DBSymlinkLookup) Resolve(ctx context.Context, source, externalID string
 	}, true, nil
 }
 
-// CommitRewrites advances every matched row to status=symlinks_migrated and
-// registers each rewritten path in file_health. Individual file_health failures
-// are collected and joined, never aborted, because partial registration is
-// better than none — the migration status update is already a single bulk
-// statement.
+// CommitRewrites bulk-advances every matched row to status=symlinks_migrated.
+// Idempotent (WHERE id IN (...)). Re-runs are safe.
 func (l *DBSymlinkLookup) CommitRewrites(ctx context.Context, items []migration.RewrittenItem) error {
 	if len(items) == 0 {
 		return nil
 	}
-
-	// 1. Bulk-advance migration status. Idempotent (WHERE id IN (...)).
 	ids := make([]int64, len(items))
 	for i, it := range items {
 		ids[i] = it.RowID
@@ -86,61 +64,5 @@ func (l *DBSymlinkLookup) CommitRewrites(ctx context.Context, items []migration.
 	if err := l.migRepo.MarkSymlinksMigrated(ctx, ids); err != nil {
 		return fmt.Errorf("advance import_migrations to symlinks_migrated: %w", err)
 	}
-
-	// 2. Register each rewritten file in file_health. Skip silently when the
-	// caller didn't wire a health repo or config — the migration status update
-	// is still valuable on its own.
-	if l.healthRepo == nil || l.cfg == nil {
-		return nil
-	}
-
-	cfg := l.cfg()
-	if cfg == nil {
-		return nil
-	}
-	maxRetries := cfg.GetMaxRetries()
-	maxRepairRetries := cfg.GetMaxRepairRetries()
-
-	var healthErrs []error
-	for _, it := range items {
-		sourceNzbPath := l.resolveSourceNzbPath(ctx, it.QueueItemID)
-		filePath := it.FinalPath
-		if err := l.healthRepo.AddFileToHealthCheck(
-			ctx,
-			filePath,
-			&filePath,
-			maxRetries,
-			maxRepairRetries,
-			sourceNzbPath,
-			HealthPriorityNext,
-		); err != nil {
-			healthErrs = append(healthErrs, fmt.Errorf("register file_health for %s: %w", filePath, err))
-			continue
-		}
-	}
-
-	if len(healthErrs) > 0 {
-		return errors.Join(healthErrs...)
-	}
 	return nil
-}
-
-// resolveSourceNzbPath looks up the import_queue row referenced by queueItemID
-// and returns its nzb_path. Returns nil when queueItemID is nil, the queueRepo
-// is unavailable, or the lookup fails — health rows can be created without it.
-func (l *DBSymlinkLookup) resolveSourceNzbPath(ctx context.Context, queueItemID *int64) *string {
-	if queueItemID == nil || l.queueRepo == nil {
-		return nil
-	}
-	item, err := l.queueRepo.GetQueueItem(ctx, *queueItemID)
-	if err != nil {
-		slog.WarnContext(ctx, "Failed to look up queue item for source_nzb_path",
-			"queue_item_id", *queueItemID, "error", err)
-		return nil
-	}
-	if item == nil || item.NzbPath == "" {
-		return nil
-	}
-	p := item.NzbPath
-	return &p
 }

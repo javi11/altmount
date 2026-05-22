@@ -218,6 +218,83 @@ func (lsw *LibrarySyncWorker) TriggerManualSync(ctx context.Context) error {
 	}
 }
 
+// FileSyncRequest describes a single file that should be registered in
+// file_health by SyncFiles. MountRelativePath is the canonical mount-relative
+// file path (matching how SyncLibrary keys its DB rows). LibraryPath is the
+// on-disk path of the library symlink / .strm / .rclonelink that points at
+// the mount file — used as the file_health.library_path so arrs see the
+// right path.
+type FileSyncRequest struct {
+	MountRelativePath string
+	LibraryPath       string
+}
+
+// SyncFiles registers a scoped set of files in file_health, mirroring what
+// SyncLibrary does for an arbitrary list — without walking the library or
+// running any orphan-deletion logic.
+//
+// For each item it reads the .meta file via processMetadataForSync, builds an
+// AutomaticHealthCheckRecord, and batch-upserts the resulting set. Items
+// whose .meta is unreadable are registered as corrupted (via
+// RegisterCorruptedFile) and excluded from the returned count.
+//
+// Returns the number of items that produced a successful file_health upsert
+// and any error from the batch insert. Per-item failures (corrupted meta,
+// missing meta) are logged but not surfaced as the function's error — the
+// caller still gets a partial count.
+func (lsw *LibrarySyncWorker) SyncFiles(ctx context.Context, items []FileSyncRequest) (int, error) {
+	if len(items) == 0 {
+		return 0, nil
+	}
+
+	records := make([]database.AutomaticHealthCheckRecord, 0, len(items))
+	for _, item := range items {
+		select {
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		default:
+		}
+
+		libraryPath := item.LibraryPath
+		var libraryPathPtr *string
+		if libraryPath != "" {
+			libraryPathPtr = &libraryPath
+		}
+
+		record, err := lsw.processMetadataForSync(ctx, item.MountRelativePath, libraryPathPtr)
+		if err != nil {
+			slog.WarnContext(ctx, "SyncFiles: metadata read failed, registering as corrupted",
+				"path", item.MountRelativePath, "error", err)
+			if regErr := lsw.healthRepo.RegisterCorruptedFile(ctx, item.MountRelativePath, libraryPathPtr, err.Error()); regErr != nil {
+				slog.ErrorContext(ctx, "SyncFiles: failed to register corrupted file",
+					"path", item.MountRelativePath, "error", regErr)
+			}
+			continue
+		}
+		if record == nil {
+			// processMetadataForSync returns nil when the metadata file
+			// exists but is empty/unparseable into a usable form.
+			slog.DebugContext(ctx, "SyncFiles: metadata returned nil, skipping",
+				"path", item.MountRelativePath)
+			continue
+		}
+
+		records = append(records, *record)
+	}
+
+	if len(records) == 0 {
+		return 0, nil
+	}
+
+	if err := lsw.healthRepo.BatchAddAutomaticHealthChecks(ctx, records); err != nil {
+		return 0, fmt.Errorf("batch add automatic health checks: %w", err)
+	}
+
+	slog.InfoContext(ctx, "SyncFiles: registered files in file_health",
+		"requested", len(items), "registered", len(records))
+	return len(records), nil
+}
+
 // run is the main library sync loop
 func (lsw *LibrarySyncWorker) run(ctx context.Context) {
 	defer func() {
