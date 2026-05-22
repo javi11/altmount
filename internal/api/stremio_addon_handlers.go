@@ -17,6 +17,7 @@ import (
 	"github.com/javi11/altmount/internal/auth"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/httpclient"
 	"github.com/javi11/altmount/internal/prowlarr"
 )
 
@@ -177,7 +178,11 @@ func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 	prowlarrCfg := cfg.Stremio.Prowlarr
 
 	// Search Prowlarr -- return play-URL options immediately, no download yet
-	client := prowlarr.NewClient(prowlarrCfg.Host, prowlarrCfg.APIKey)
+	client := prowlarr.NewClient(
+		prowlarrCfg.Host,
+		prowlarrCfg.APIKey,
+		httpclient.NewForExternal(cfg.Network, 30*time.Second),
+	)
 	var (
 		results []prowlarr.NZBResult
 		err     error
@@ -374,7 +379,11 @@ func (s *Server) handleStremioAddonPlay(c *fiber.Ctx) error {
 
 	// Download NZB from Prowlarr
 	prowlarrCfg := cfg.Stremio.Prowlarr
-	client := prowlarr.NewClient(prowlarrCfg.Host, prowlarrCfg.APIKey)
+	client := prowlarr.NewClient(
+		prowlarrCfg.Host,
+		prowlarrCfg.APIKey,
+		httpclient.NewForExternal(cfg.Network, httpclient.LongTimeout),
+	)
 	nzbData, err := client.DownloadNZB(ctx, downloadURL)
 	if err != nil {
 		slog.WarnContext(ctx, "Failed to download NZB from Prowlarr",

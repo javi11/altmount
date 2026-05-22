@@ -54,6 +54,7 @@ type Config struct {
 	SegmentCache    SegmentCacheConfig `yaml:"segment_cache" mapstructure:"segment_cache" json:"segment_cache"`
 	Providers       []ProviderConfig   `yaml:"providers" mapstructure:"providers" json:"providers"`
 	Nzblnk          NzblnkConfig       `yaml:"nzblnk" mapstructure:"nzblnk" json:"nzblnk"`
+	Network         NetworkConfig      `yaml:"network" mapstructure:"network" json:"network"`
 	MountPath       string             `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"`
 	MountType       MountType          `yaml:"mount_type" mapstructure:"mount_type" json:"mount_type"`
 	ProfilerEnabled bool               `yaml:"profiler_enabled" mapstructure:"profiler_enabled" json:"profiler_enabled" default:"false"`
@@ -65,6 +66,28 @@ type NzblnkConfig struct {
 	// Defaults to a browser-like string. Leave empty to use the default.
 	UserAgent string `yaml:"user_agent" mapstructure:"user_agent" json:"user_agent,omitempty"`
 }
+
+// NetworkConfig holds outbound HTTP routing options applied to every external
+// client (indexers, arrs, SABnzbd fallback, NZBLNK resolver). Internal
+// endpoints (RC server, self-loopback) are unaffected.
+//
+// Semantics mirror Go's standard HTTP_PROXY/HTTPS_PROXY/NO_PROXY env vars.
+// Empty strings disable proxying for that scheme.
+type NetworkConfig struct {
+	HTTPProxy  string `yaml:"http_proxy" mapstructure:"http_proxy" json:"http_proxy,omitempty"`
+	HTTPSProxy string `yaml:"https_proxy" mapstructure:"https_proxy" json:"https_proxy,omitempty"`
+	NoProxy    string `yaml:"no_proxy" mapstructure:"no_proxy" json:"no_proxy,omitempty"`
+}
+
+// GetHTTPProxy returns the configured HTTP proxy URL. Implements the
+// httpclient.NetworkProxyConfig interface to avoid config↔httpclient import cycles.
+func (n NetworkConfig) GetHTTPProxy() string { return n.HTTPProxy }
+
+// GetHTTPSProxy returns the configured HTTPS proxy URL.
+func (n NetworkConfig) GetHTTPSProxy() string { return n.HTTPSProxy }
+
+// GetNoProxy returns the comma-separated bypass list.
+func (n NetworkConfig) GetNoProxy() string { return n.NoProxy }
 
 // SegmentCacheConfig configures the segment-aligned disk cache shared by FUSE and WebDAV.
 // When enabled, this cache replaces the FUSE VFS disk cache and additionally benefits WebDAV.

@@ -19,6 +19,7 @@ import (
 	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/httpclient"
 	"github.com/javi11/altmount/internal/importer/filesystem"
 	"github.com/javi11/altmount/internal/importer/parser"
 	"github.com/javi11/altmount/internal/importer/postprocessor"
@@ -238,7 +239,7 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 		rcloneClient:    rcloneClient,
 		configGetter:    configGetter,
 		healthRepo:      healthRepo,
-		sabnzbdClient:   sabnzbd.NewSABnzbdClient(),
+		sabnzbdClient:   sabnzbd.NewSABnzbdClient(httpclient.NewForExternal(configGetter().Network, httpclient.LongTimeout)),
 		broadcaster:     broadcaster,
 		userRepo:        userRepo,
 		log:             slog.Default().With("component", "importer-service"),

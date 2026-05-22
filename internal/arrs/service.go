@@ -15,6 +15,7 @@ import (
 	"github.com/javi11/altmount/internal/arrs/worker"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/httpclient"
 	"golift.io/starr"
 )
 
@@ -45,7 +46,7 @@ type Service struct {
 // NewService creates a new arrs service for health monitoring and file repair
 func NewService(configGetter config.ConfigGetter, configManager model.ConfigManager, userRepo *database.UserRepository, queueRepo *database.Repository) *Service {
 	instManager := instances.NewManager(configGetter, configManager)
-	clientManager := clients.NewManager()
+	clientManager := clients.NewManager(httpclient.NewForExternal(configGetter().Network, 30*time.Second))
 	dataManager := data.NewManager()
 	scannerManager := scanner.NewManager(configGetter, instManager, clientManager, dataManager)
 	workerManager := worker.NewWorker(configGetter, instManager, clientManager, queueRepo)

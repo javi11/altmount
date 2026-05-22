@@ -374,9 +374,7 @@ export function ImportConfigSection({
 									className="toggle toggle-primary toggle-sm mt-1 shrink-0"
 									checked={formData.allow_symlinks_on_windows ?? false}
 									disabled={isReadOnly}
-									onChange={(e) =>
-										handleInputChange("allow_symlinks_on_windows", e.target.checked)
-									}
+									onChange={(e) => handleInputChange("allow_symlinks_on_windows", e.target.checked)}
 								/>
 								<div className="min-w-0 flex-1">
 									<span className="block whitespace-normal break-words font-bold text-xs">
