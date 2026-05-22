@@ -5,6 +5,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -67,6 +68,9 @@ type Server struct {
 	migrationRepo       *database.ImportMigrationRepository
 	updater             updater.Updater
 	ready               atomic.Bool
+
+	speedtest     *speedtestCoordinator
+	speedtestOnce sync.Once
 }
 
 // NewServer creates a new API server that can optionally register routes on the provided mux (for backwards compatibility)
@@ -110,6 +114,7 @@ func NewServer(
 		progressBroadcaster: progressBroadcaster,
 		streamTracker:       streamTracker,
 		cacheSource:         cacheSource,
+		speedtest:           newSpeedtestCoordinator(),
 		fuseManager:         NewFuseManager(newMountFactory(nzbFilesystem, configManager, streamTracker)),
 		updater:             updater.Default(),
 	}
@@ -396,6 +401,9 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 func (s *Server) Shutdown(ctx context.Context) {
 	if s.fuseManager != nil {
 		s.fuseManager.Stop()
+	}
+	if s.speedtest != nil {
+		s.speedtest.shutdown()
 	}
 }
 

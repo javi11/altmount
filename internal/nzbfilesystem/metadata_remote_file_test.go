@@ -342,7 +342,7 @@ var _ pool.Manager = (*mockPoolManager)(nil)
 // mockPoolManager implements pool.Manager for testing
 type mockPoolManager struct{}
 
-func (m *mockPoolManager) GetPool() (*nntppool.Client, error) {
+func (m *mockPoolManager) GetPool() (pool.NntpClient, error) {
 	return nil, nil
 }
 
