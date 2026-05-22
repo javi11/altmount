@@ -3,6 +3,7 @@ package iso
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"strings"
 	"time"
@@ -39,6 +40,25 @@ func AnalyzeISO(
 		return nil, fmt.Errorf("iso: listing files in %q: %w", src.Filename, err)
 	}
 
+	// [DEBUG-isobd] Compare the ISO's claimed size (from the outer archive)
+	// against the sum of every file ListISOFiles returned. A huge ratio
+	// difference means the walker is silently skipping big files —
+	// almost certainly the multi-GB BDMV main-feature clips whose UDF
+	// allocation descriptors use a type our walker doesn't decode.
+	var listedSum int64
+	for _, e := range entries {
+		listedSum += int64(e.size)
+	}
+	slog.InfoContext(ctx, "[DEBUG-isobd] iso analyse",
+		"filename", src.Filename,
+		"iso_size_bytes", src.Size,
+		"iso_size", formatBytes(src.Size),
+		"listed_files", len(entries),
+		"listed_sum_bytes", listedSum,
+		"listed_sum", formatBytes(listedSum),
+		"coverage_pct", coveragePercent(listedSum, src.Size),
+	)
+
 	out := &AnalyzedISO{VolumeLabel: ReadVolumeLabel(rs)}
 
 	for _, e := range entries {
@@ -56,6 +76,23 @@ func AnalyzeISO(
 	}
 
 	return out, nil
+}
+
+// coveragePercent returns (listed/total)*100, clamped to [0, 999]. Used
+// only by diagnostic logging so the user can see at a glance whether
+// ListISOFiles is enumerating the whole ISO or only a fraction.
+func coveragePercent(listed, total int64) int64 {
+	if total <= 0 {
+		return -1
+	}
+	pct := listed * 100 / total
+	if pct < 0 {
+		return 0
+	}
+	if pct > 999 {
+		return 999
+	}
+	return pct
 }
 
 // buildFileContent turns one ISO directory entry into an ISOFileContent,
