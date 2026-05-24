@@ -98,6 +98,9 @@ func expandBareISOFiles(
 	for i, c := range expanded {
 		if c.ISOExpansionIndex == 0 && len(c.NestedSources) == 0 {
 			// Untransformed — fall back to standard processing.
+			// len(expanded) <= len(isos) is guaranteed by archive.ExpandISOContents:
+			// it appends one Content per input ISO on passthrough and ≤ one per
+			// group on success. Index isos[i] is therefore safe here.
 			remaining = append(remaining, isos[i])
 			continue
 		}

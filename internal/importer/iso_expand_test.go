@@ -137,7 +137,7 @@ func TestExpandBareISOFiles_Disabled_StillPeelsButFallsBack(t *testing.T) {
 		enabled: false,
 		expand: func(ctx context.Context, enabled bool, in []archive.Content) ([]archive.Content, error) {
 			if enabled {
-				t.Error("expand should be called with enabled=false")
+				t.Error("expand was called with enabled=true; want enabled=false")
 			}
 			// archive.ExpandISOContents with expand=false returns input unchanged.
 			return in, nil
