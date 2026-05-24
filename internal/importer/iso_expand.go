@@ -21,7 +21,7 @@ func parsedFileToISOContent(pf parser.ParsedFile) archive.Content {
 		NzbdavID:   pf.NzbdavID,
 		Segments:   pf.Segments,
 		AesKey:     pf.AesKey,
-		AesIV:      pf.AesIv,
+		AesIV:      pf.AesIv, // parser uses AesIv (lowercase v); archive.Content uses AesIV
 	}
 }
 
