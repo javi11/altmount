@@ -779,8 +779,43 @@ func collectFileExtents(rs io.ReadSeeker, inlineADs []byte, allocType byte, meta
 		}
 		total += extents[i].length
 	}
+
+	// Coalesce physically contiguous extents — many BD3D SSIF files have
+	// dozens of small ADs that sit right next to each other on disc. The
+	// underlying bytes are one contiguous run; merging the ADs collapses
+	// the NestedSources count proportionally (Avatar SSIF: 23 → 2) and
+	// shrinks both the metadata proto and the validation surface.
+	extents = coalesceExtents(extents)
 	_ = embeddedFEPhys
 	return extents
+}
+
+// coalesceExtents merges adjacent extents whose physical sectors are
+// contiguous (next.lba == prev.lba + prev.length/sector). Returns the
+// possibly-shorter slice in disc order. A file whose extents are
+// physically scattered (typical for BD M2TS clips interleaved with SSIF
+// dependent-view data) is returned unchanged.
+func coalesceExtents(in []isoExtent) []isoExtent {
+	if len(in) <= 1 {
+		return in
+	}
+	out := make([]isoExtent, 0, len(in))
+	cur := in[0]
+	for i := 1; i < len(in); i++ {
+		next := in[i]
+		// length must be a whole number of sectors for the contiguity
+		// arithmetic to apply; if it isn't (final partial sector of a
+		// file), fall through and start a new run after.
+		if cur.length%iso9660SectorSize == 0 &&
+			next.lba == cur.lba+uint32(cur.length/iso9660SectorSize) {
+			cur.length += next.length
+			continue
+		}
+		out = append(out, cur)
+		cur = next
+	}
+	out = append(out, cur)
+	return out
 }
 
 // ListISOFiles walks the ISO 9660/UDF filesystem and returns all non-directory

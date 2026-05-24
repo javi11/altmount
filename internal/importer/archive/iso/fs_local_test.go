@@ -270,3 +270,53 @@ func TestLocalISO_CountExtentsForBigFiles(t *testing.T) {
 		t.Logf("CONCLUSION: fragmentation present — single-LBA walker yields WRONG bytes past extent 1")
 	}
 }
+
+// TestLocalISO_CountAdjacentExtents checks whether multi-extent files have
+// physically contiguous extents that could be coalesced. If yes, segment
+// count downstream can be reduced dramatically — the importer hit
+// total_segments_to_validate=888,903 on this NZB precisely because every
+// AD became its own NestedSource even when adjacent ADs sat next to each
+// other on disc.
+func TestLocalISO_CountAdjacentExtents(t *testing.T) {
+	path := os.Getenv("ALTMOUNT_LOCAL_ISO")
+	if path == "" {
+		t.Skip("ALTMOUNT_LOCAL_ISO not set")
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer f.Close()
+
+	entries, err := ListISOFiles(f)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].size > entries[j].size })
+
+	const lookAt = 15
+	for i, e := range entries {
+		if i >= lookAt {
+			break
+		}
+		if len(e.extents) <= 1 {
+			continue
+		}
+		// Count adjacent runs (where next.lba == this.lba + this.length/sector).
+		adjacent := 0
+		distinctRuns := 1
+		for j := 1; j < len(e.extents); j++ {
+			prev := e.extents[j-1]
+			next := e.extents[j]
+			expectedNextLBA := prev.lba + uint32(prev.length/iso9660SectorSize)
+			if next.lba == expectedNextLBA {
+				adjacent++
+			} else {
+				distinctRuns++
+			}
+		}
+		t.Logf("  %s: extents=%d adjacent_pairs=%d distinct_runs=%d coalesce_ratio=%.1fx",
+			e.path, len(e.extents), adjacent, distinctRuns,
+			float64(len(e.extents))/float64(distinctRuns))
+	}
+}
