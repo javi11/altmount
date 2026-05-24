@@ -511,9 +511,9 @@ func patchMissingSegment(segments []*metapb.SegmentData, expectedSize, coveredSi
 	lastSeg := segments[len(segments)-1]
 	patchSeg := &metapb.SegmentData{
 		Id:          lastSeg.Id,
-		StartOffset: lastSeg.StartOffset,
-		EndOffset:   lastSeg.StartOffset + shortfall - 1,
-		SegmentSize: lastSeg.SegmentSize,
+		StartOffset: lastSeg.EndOffset + 1,
+		EndOffset:   lastSeg.EndOffset + shortfall,
+		SegmentSize: shortfall,
 	}
 
 	patchedSegments := append(segments, patchSeg)

@@ -112,15 +112,18 @@ func ValidateSegmentIntegrity(ctx context.Context, content Content) error {
 			}
 		}
 	} else {
-		// For standard files, validate total segment coverage against PackedSize (if available)
+		// For standard files, validate total segment coverage against Size (uncompressed).
+		// Size comes from the first RAR volume header and is the correct full file size.
+		// PackedSize is the sum of actual parts found and can be truncated when volumes
+		// are missing, so we must validate against Size to detect incomplete archives.
 		var totalCovered int64
 		for _, seg := range content.Segments {
 			totalCovered += (seg.EndOffset - seg.StartOffset + 1)
 		}
 
-		expectedSize := content.PackedSize
+		expectedSize := content.Size
 		if expectedSize <= 0 {
-			expectedSize = content.Size
+			expectedSize = content.PackedSize
 		}
 
 		if expectedSize > 0 {

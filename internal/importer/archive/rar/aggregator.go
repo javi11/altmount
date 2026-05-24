@@ -252,6 +252,23 @@ func ProcessArchive(ctx context.Context, opts ProcessArchiveOptions) error {
 		}
 	}
 
+	// Compute total archive size and a critical-file threshold.
+	// Validation failures on files below the threshold are logged and skipped
+	// (e.g. .nfo, .srt, .jpg sidecars in a missing last volume) so that the
+	// import does not fail when only a tiny sidecar is incomplete.
+	// Validation failures on files at or above the threshold fail the archive.
+	var totalArchiveSize int64
+	for _, c := range rarContents {
+		if !c.IsDirectory {
+			totalArchiveSize += c.Size
+		}
+	}
+	const minCriticalSizeAbsolute = 1 * 1024 * 1024 // 1 MB floor
+	minCriticalSize := totalArchiveSize / 100
+	if minCriticalSize < minCriticalSizeAbsolute {
+		minCriticalSize = minCriticalSizeAbsolute
+	}
+
 	// Pre-pass: resolve paths, apply renames, and pre-compute per-file segment offsets so
 	// each goroutine can build its own OffsetTracker without any sequential shared state.
 	type fileToProcess struct {
@@ -377,12 +394,18 @@ func ProcessArchive(ctx context.Context, opts ProcessArchiveOptions) error {
 					"file", item.baseFilename,
 					"size", item.content.Size)
 			} else {
-				if err := validateSegmentIntegrity(ctx, item.content); err != nil {
-					slog.ErrorContext(ctx, "Skipping RAR file due to segment integrity failure (missing segments in NZB)",
+			if err := validateSegmentIntegrity(ctx, item.content); err != nil {
+				if isSidecarFile(item.baseFilename) {
+					slog.WarnContext(ctx, "Skipping sidecar file with segment integrity failure",
 						"file", item.baseFilename,
 						"error", err)
 					return nil
 				}
+				slog.ErrorContext(ctx, "RAR file failed segment integrity validation",
+					"file", item.baseFilename,
+					"error", err)
+				return err
+			}
 
 				var offsetTracker *progress.OffsetTracker
 				if validationProgressTracker != nil && totalSegmentsToValidate > 0 {
@@ -411,21 +434,29 @@ func ProcessArchive(ctx context.Context, opts ProcessArchiveOptions) error {
 					}
 				}
 
-				if err := validation.ValidateSegmentsForFile(
-					ctx,
-					item.baseFilename,
-					validationSize,
-					validationSegments,
-					metapb.Encryption_NONE,
-					poolManager,
-					maxValidationGoroutines,
-					segmentSamplePercentage,
-					offsetTracker,
-					timeout,
-				); err != nil {
-					slog.WarnContext(ctx, "Skipping RAR file due to validation error", "error", err, "file", item.baseFilename)
+			if err := validation.ValidateSegmentsForFile(
+				ctx,
+				item.baseFilename,
+				validationSize,
+				validationSegments,
+				metapb.Encryption_NONE,
+				poolManager,
+				maxValidationGoroutines,
+				segmentSamplePercentage,
+				offsetTracker,
+				timeout,
+			); err != nil {
+				if isSidecarFile(item.baseFilename) {
+					slog.WarnContext(ctx, "Skipping sidecar file with segment availability failure",
+						"file", item.baseFilename,
+						"error", err)
 					return nil
 				}
+				slog.ErrorContext(ctx, "RAR file failed segment availability validation",
+					"file", item.baseFilename,
+					"error", err)
+				return err
+			}
 			}
 
 			fileMeta := rarProcessor.CreateFileMetadataFromRarContent(item.content, nzbPath, releaseDate, item.content.NzbdavID)
@@ -547,6 +578,18 @@ func expandISOContents(
 		result = append(result, nc)
 	}
 	return result, nil
+}
+
+// isSidecarFile returns true for subtitle, cover-art, and info files that can be
+// safely skipped if their segments are missing, without failing the entire archive.
+func isSidecarFile(filename string) bool {
+	ext := strings.ToLower(filepath.Ext(filename))
+	switch ext {
+	case ".srt", ".sub", ".idx", ".vtt", ".ass", ".ssa",
+		".jpg", ".jpeg", ".png", ".nfo", ".tbn":
+		return true
+	}
+	return false
 }
 
 // GroupArchivesByBaseName groups ParsedFiles by their RAR base name (case-insensitive).
