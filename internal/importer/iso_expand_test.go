@@ -1,8 +1,10 @@
 package importer
 
 import (
+	"context"
 	"testing"
 
+	"github.com/javi11/altmount/internal/importer/archive"
 	"github.com/javi11/altmount/internal/importer/parser"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 )
@@ -59,5 +61,100 @@ func TestPartitionISOFiles_SeparatesISOFromRest(t *testing.T) {
 	}
 	if len(rest) != 2 || rest[0].Filename != "readme.txt" || rest[1].Filename != "extras.mkv" {
 		t.Errorf("rest = %+v", rest)
+	}
+}
+
+func TestExpandBareISOFiles_NoISOs_ReturnsInputUntouched(t *testing.T) {
+	files := []parser.ParsedFile{{Filename: "a.mkv"}, {Filename: "b.mp4"}}
+	written, rest, err := expandBareISOFiles(context.Background(), expandBareISODeps{
+		expand: func(ctx context.Context, _ bool, _ []archive.Content) ([]archive.Content, error) {
+			t.Fatal("expand should not be called when no .iso present")
+			return nil, nil
+		},
+	}, files, "vdir", "movie")
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if len(written) != 0 {
+		t.Errorf("written = %v, want []", written)
+	}
+	if len(rest) != 2 {
+		t.Errorf("rest = %d, want 2", len(rest))
+	}
+}
+
+func TestExpandBareISOFiles_OneISO_BluRayPath_WritesMergedMetadata(t *testing.T) {
+	files := []parser.ParsedFile{
+		{Filename: "movie.iso", Size: 25_000_000_000},
+		{Filename: "readme.txt"},
+	}
+	expandCalled := false
+	deps := expandBareISODeps{
+		expand: func(ctx context.Context, enabled bool, in []archive.Content) ([]archive.Content, error) {
+			expandCalled = true
+			if !enabled {
+				t.Error("expand called with enabled=false")
+			}
+			if len(in) != 1 || in[0].Filename != "movie.iso" {
+				t.Errorf("unexpected expand input: %+v", in)
+			}
+			return []archive.Content{{
+				Filename: "MOVIE.m2ts",
+				Size:     20_000_000_000,
+				NestedSources: []archive.NestedSource{
+					{InnerOffset: 0, InnerLength: 10_000_000_000},
+					{InnerOffset: 0, InnerLength: 10_000_000_000},
+				},
+			}}, nil
+		},
+		writeMetadata: func(virtualPath string, _ *metapb.FileMetadata) error {
+			if virtualPath != "vdir/MOVIE.m2ts" {
+				t.Errorf("virtualPath = %q, want vdir/MOVIE.m2ts", virtualPath)
+			}
+			return nil
+		},
+		enabled: true,
+	}
+
+	written, rest, err := expandBareISOFiles(context.Background(), deps, files, "vdir", "movie")
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if !expandCalled {
+		t.Error("expand was never called")
+	}
+	if len(written) != 1 || written[0] != "vdir/MOVIE.m2ts" {
+		t.Errorf("written = %v", written)
+	}
+	if len(rest) != 1 || rest[0].Filename != "readme.txt" {
+		t.Errorf("rest = %v", rest)
+	}
+}
+
+func TestExpandBareISOFiles_Disabled_StillPeelsButFallsBack(t *testing.T) {
+	files := []parser.ParsedFile{{Filename: "movie.iso", Size: 1000}}
+	deps := expandBareISODeps{
+		enabled: false,
+		expand: func(ctx context.Context, enabled bool, in []archive.Content) ([]archive.Content, error) {
+			if enabled {
+				t.Error("expand should be called with enabled=false")
+			}
+			// archive.ExpandISOContents with expand=false returns input unchanged.
+			return in, nil
+		},
+		writeMetadata: func(string, *metapb.FileMetadata) error {
+			t.Fatal("writeMetadata should not be called when bare ISO is unchanged")
+			return nil
+		},
+	}
+	written, rest, err := expandBareISOFiles(context.Background(), deps, files, "vdir", "movie")
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if len(written) != 0 {
+		t.Errorf("written = %v, want [] (no metadata should be written when expansion is gated off)", written)
+	}
+	if len(rest) != 1 || rest[0].Filename != "movie.iso" {
+		t.Errorf("rest = %+v, want the original .iso pushed back for normal dispatch", rest)
 	}
 }
