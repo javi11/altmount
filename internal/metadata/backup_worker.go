@@ -138,7 +138,16 @@ func (w *BackupWorker) performBackup() {
 			}
 
 			if err != nil {
-				return err
+				// Tolerate per-entry errors (e.g. Windows system folders like
+				// "System Volume Information" / "WindowsApps", or restricted
+				// dirs on Linux) so a single permission failure doesn't abort
+				// the entire backup.
+				slog.WarnContext(w.workerCtx, "Skipping entry during metadata backup",
+					"path", path, "error", err)
+				if info != nil && info.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
 			}
 
 			if info.IsDir() {
