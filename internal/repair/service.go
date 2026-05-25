@@ -202,52 +202,29 @@ func (s *Service) RepairFile(ctx context.Context, virtualPath string) (*Outcome,
 		return nil, ErrPar2Mismatch
 	}
 
-	// 3. Probe every segment once, classifying present vs. permanently missing
-	// and caching present (decoded) bytes for reconstruction. This is the
-	// whole-file read that Reed-Solomon recovery inherently requires.
-	cache := make(map[string][]byte, len(segs))
-	missing := make(map[string]bool)
-	for _, seg := range segs {
-		data, miss, err := s.fetch.Fetch(ctx, seg.MessageID)
-		if err != nil {
-			return nil, fmt.Errorf("repair: fetch segment %s: %w", seg.MessageID, err)
-		}
-		if miss {
-			missing[seg.MessageID] = true
-			continue
-		}
-		// A present-but-wrong-size article is unusable: scattering it into the
-		// PAR2 slice grid would either corrupt reconstruction or (without the
-		// engine's guard) panic. Treat it as a hole so PAR2 covers it.
-		expected := seg.End - seg.Start
-		if int64(len(data)) != expected {
-			s.log.WarnContext(ctx, "present segment has unexpected size; treating as missing",
-				"segment", seg.MessageID, "got", len(data), "want", expected)
-			missing[seg.MessageID] = true
-			continue
-		}
-		cache[seg.MessageID] = data
+	// 3. Reconstruct and sink in a single streaming pass. The engine fetches
+	// each segment once, scatters present bodies straight into the PAR2 slice
+	// grid (peak ~1× the file size, not the ~2× a separate body cache would
+	// add), classifies holes (permanently-missing or wrong-sized articles), and
+	// verifies every rebuilt slice before sinking. s.fetch satisfies par2.Fetcher
+	// directly, so no intermediate cache is materialised.
+	res, err := par2.RepairFileSegments(ctx, rs, segs, s.fetch, s.sink)
+	if err != nil {
+		return nil, err
 	}
-	if len(missing) == 0 {
+	if len(res.Recovered) == 0 {
 		// Nothing actually missing — the original failure may have been
 		// transient. Report a no-op so the caller can simply retry the read.
 		return &Outcome{}, nil
 	}
-
-	// 4. Reconstruct and sink.
-	res, err := par2.RepairFileSegments(ctx, rs, segs, missing, cachedFetcher{cache}, s.sink)
-	if err != nil {
-		return nil, err
-	}
 	s.log.InfoContext(ctx, "PAR2 self-heal succeeded",
 		"file", virtualPath,
-		"missing_segments", len(missing),
 		"recovered_segments", len(res.Recovered),
 		"slices_fixed", res.SlicesFixed)
 	return &Outcome{
 		RecoveredSegments: res.Recovered,
 		SlicesFixed:       res.SlicesFixed,
-		MissingSegments:   len(missing),
+		MissingSegments:   len(res.Recovered),
 	}, nil
 }
 
@@ -359,15 +336,4 @@ func buildSegments(in []*metapb.SegmentData) []par2.Segment {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Start < out[j].Start })
 	return out
-}
-
-// cachedFetcher serves the already-fetched present segments to the engine.
-type cachedFetcher struct{ m map[string][]byte }
-
-func (c cachedFetcher) Fetch(_ context.Context, messageID string) ([]byte, error) {
-	d, ok := c.m[messageID]
-	if !ok {
-		return nil, fmt.Errorf("repair: present segment %s not cached", messageID)
-	}
-	return d, nil
 }

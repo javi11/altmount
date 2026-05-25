@@ -8,20 +8,22 @@ import (
 	"testing"
 )
 
-// mapFetcher serves present segment bytes straight from the original file.
+// mapFetcher serves present segment bytes straight from the original file. Any
+// segment not in segs is reported as a permanently-missing hole, so the engine
+// reconstructs it without ever seeing its bytes.
 type mapFetcher struct {
 	data []byte
 	segs map[string]Segment
 	hits int
 }
 
-func (m *mapFetcher) Fetch(_ context.Context, id string) ([]byte, error) {
+func (m *mapFetcher) Fetch(_ context.Context, id string) ([]byte, bool, error) {
 	m.hits++
 	s, ok := m.segs[id]
 	if !ok {
-		return nil, fmt.Errorf("unknown segment %s", id)
+		return nil, true, nil // hole
 	}
-	return m.data[s.Start:s.End], nil
+	return m.data[s.Start:s.End], false, nil
 }
 
 // mapSink collects reconstructed segments.
@@ -93,9 +95,9 @@ func TestRepairFileSegments(t *testing.T) {
 		missing[id] = true
 	}
 
-	// The fetcher only knows about PRESENT segments: if the engine ever tries
-	// to fetch a missing one, Fetch errors and the test fails — proving repair
-	// never depends on the data it is supposed to reconstruct.
+	// The fetcher only knows about PRESENT segments; for the dropped ones it
+	// returns a hole (no bytes). Reconstruction must still be byte-exact —
+	// proving repair never depends on the data it is supposed to reconstruct.
 	presentByID := make(map[string]Segment)
 	for _, s := range segs {
 		if !missing[s.MessageID] {
@@ -105,7 +107,7 @@ func TestRepairFileSegments(t *testing.T) {
 	fetch := &mapFetcher{data: data, segs: presentByID}
 	sink := &mapSink{got: map[string][]byte{}}
 
-	res, err := RepairFileSegments(context.Background(), rs, segs, missing, fetch, sink)
+	res, err := RepairFileSegments(context.Background(), rs, segs, fetch, sink)
 	if err != nil {
 		t.Fatalf("RepairFileSegments: %v", err)
 	}
@@ -136,37 +138,51 @@ type shortFetcher struct {
 	shortID string
 }
 
-func (f *shortFetcher) Fetch(_ context.Context, id string) ([]byte, error) {
+func (f *shortFetcher) Fetch(_ context.Context, id string) ([]byte, bool, error) {
 	s, ok := f.segs[id]
 	if !ok {
-		return nil, fmt.Errorf("unknown segment %s", id)
+		return nil, true, nil // hole
 	}
 	full := f.data[s.Start:s.End]
 	if id == f.shortID {
-		return full[:len(full)/2], nil // truncated body
+		return full[:len(full)/2], false, nil // present but truncated
 	}
-	return full, nil
+	return full, false, nil
 }
 
-// A present article shorter than its declared range must produce an error, not
-// a panic (the scatter loop runs in a background goroutine with no recover()).
+// A present-but-truncated article must be treated as a hole and reconstructed —
+// never scattered as-is, which would corrupt the slice or panic the scatter
+// loop (it runs in a background goroutine with no recover()). Here segs[0] comes
+// back short and segs[1] is absent; both are healed from PAR2.
 func TestRepairFileSegmentsShortBody(t *testing.T) {
 	rs, data := loadFixture(t)
 	segs := makeSegments(len(data), 5000)
-	missing := map[string]bool{segs[1].MessageID: true}
 
 	presentByID := make(map[string]Segment)
 	for _, s := range segs {
-		if !missing[s.MessageID] {
-			presentByID[s.MessageID] = s
-		}
+		presentByID[s.MessageID] = s
 	}
+	delete(presentByID, segs[1].MessageID) // segs[1] is a genuine hole
 	fetch := &shortFetcher{data: data, segs: presentByID, shortID: segs[0].MessageID}
 	sink := &mapSink{got: map[string][]byte{}}
 
-	_, err := RepairFileSegments(context.Background(), rs, segs, missing, fetch, sink)
-	if err == nil {
-		t.Fatal("expected an error for a short article body, got nil")
+	res, err := RepairFileSegments(context.Background(), rs, segs, fetch, sink)
+	if err != nil {
+		t.Fatalf("expected truncated+absent articles to heal, got error: %v", err)
+	}
+
+	segByID := make(map[string]Segment, len(segs))
+	for _, s := range segs {
+		segByID[s.MessageID] = s
+	}
+	for _, id := range []string{segs[0].MessageID, segs[1].MessageID} {
+		s := segByID[id]
+		if !bytes.Equal(sink.got[id], data[s.Start:s.End]) {
+			t.Fatalf("segment %s reconstructed incorrectly", id)
+		}
+	}
+	if len(res.Recovered) != 2 {
+		t.Fatalf("recovered %d segments, want 2", len(res.Recovered))
 	}
 }
 
@@ -196,7 +212,7 @@ func TestRepairFileSegmentsVerificationFailure(t *testing.T) {
 	fetch := &mapFetcher{data: data, segs: presentByID}
 	sink := &mapSink{got: map[string][]byte{}}
 
-	_, err := RepairFileSegments(context.Background(), rs, segs, missing, fetch, sink)
+	_, err := RepairFileSegments(context.Background(), rs, segs, fetch, sink)
 	if !errors.Is(err, ErrVerificationFailed) {
 		t.Fatalf("got %v, want ErrVerificationFailed", err)
 	}
@@ -206,13 +222,11 @@ func TestRepairFileSegmentsInsufficient(t *testing.T) {
 	rs, data := loadFixture(t)
 	// Tiny segments so that dropping many of them needs more than 8 slices.
 	segs := makeSegments(len(data), 2048)
-	missing := map[string]bool{}
-	for i := 0; i < len(segs); i++ { // drop everything → far exceeds recovery
-		missing[segs[i].MessageID] = true
-	}
+	// An empty present set makes the fetcher report every segment as a hole →
+	// far more missing slices than the recovery set can cover.
 	fetch := &mapFetcher{data: data, segs: map[string]Segment{}}
 	sink := &mapSink{got: map[string][]byte{}}
-	if _, err := RepairFileSegments(context.Background(), rs, segs, missing, fetch, sink); err != ErrInsufficientRecovery {
+	if _, err := RepairFileSegments(context.Background(), rs, segs, fetch, sink); err != ErrInsufficientRecovery {
 		t.Fatalf("got %v, want ErrInsufficientRecovery", err)
 	}
 }

@@ -255,7 +255,10 @@ type Par2StreamingHealConfig struct {
 	// segment fails the read as before (mark-corrupted + ARR re-download).
 	Enabled *bool `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
 	// ProactiveOnOpen probes segment availability at stream start and begins
-	// reconstruction before playback reaches a hole. Default true (when Enabled).
+	// reconstruction before playback reaches a hole. Default false: heal is
+	// reactive (triggered only when a read hits a missing segment) so opening a
+	// stream never pre-downloads the whole file. Opt in for the lowest-latency
+	// recovery on files you expect to be damaged.
 	ProactiveOnOpen *bool `yaml:"proactive_on_open" mapstructure:"proactive_on_open" json:"proactive_on_open"`
 	// BlockOnRepairSeconds caps how long a read that hit a missing segment waits
 	// for self-heal before falling back to the failure path. Keep it below the

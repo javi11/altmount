@@ -2101,7 +2101,10 @@ func (mvf *MetadataVirtualFile) streamingHealEnabled() (enabled, proactive bool)
 	if h == nil || h.Enabled == nil || !*h.Enabled {
 		return false, false
 	}
-	proactive = h.ProactiveOnOpen == nil || *h.ProactiveOnOpen
+	// Reactive by default: clicking a stream does nothing heavy. The whole-file
+	// reconstruction fires only when a read actually hits a missing segment
+	// (tryBlockingHeal). Opt in to proactive-on-open explicitly.
+	proactive = h.ProactiveOnOpen != nil && *h.ProactiveOnOpen
 	return true, proactive
 }
 

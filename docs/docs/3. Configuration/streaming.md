@@ -175,7 +175,7 @@ streaming:
     expiry_minutes: 60 # Drop recovered segments older than this
   par2_streaming_heal:
     enabled: true # Seamless mid-stream heal (requires par2_repair)
-    proactive_on_open: true # Probe + start repair at stream open
+    proactive_on_open: false # Default: reactive — heal only when a read hits a hole
     block_on_repair_seconds: 90 # Max a failing read waits for an in-flight heal
     min_file_size_mb: 50 # Skip proactive heal for files below this
     media_only: true # Limit proactive heal to recognised media containers
@@ -186,9 +186,10 @@ streaming:
 | Parameter                      | Default | Description                                                                 |
 | ------------------------------ | ------- | --------------------------------------------------------------------------- |
 | `par2_repair`                  | `false` | Enables PAR2 self-heal. Does **not** require the on-disk segment cache.      |
-| `par2_max_concurrent_repairs`  | `1`     | Bounds peak repair RAM — each reconstruction buffers the whole file (~2×).   |
+| `par2_max_concurrent_repairs`  | `1`     | Bounds peak repair RAM — each reconstruction buffers the whole file (~1×).   |
 | `par2_max_repair_file_size_mb` | `0`     | Files larger than this fall back to ARR. `0` = unlimited.                    |
 | `par2_streaming_heal.enabled`  | `false` | Seamless mid-stream heal on top of `par2_repair`.                            |
+| `par2_streaming_heal.proactive_on_open` | `false` | When off (default), heal is **reactive**: the whole-file reconstruction runs only when a read hits a missing segment. Turn on to begin reconstruction at stream open. |
 
 ### Supported recovery sets
 
@@ -204,8 +205,13 @@ not line up with the stream — AltMount **does not** self-heal them and correct
 falls back to the ARR re-download path. This is a safety gate, not a bug: it is
 what keeps AltMount from reconstructing and serving garbage.
 
-:::note RAM cost
-A reconstruction holds the whole file in memory while it runs. Keep
+:::note RAM and timing
+Reed-Solomon recovery is all-or-nothing: to rebuild *any* missing slice it must
+read *every* surviving slice, so a heal always reads the whole file (minus the
+holes) once. There is no partial repair. By default this happens **reactively** —
+only when playback reaches a missing segment — so simply opening a stream costs
+nothing. The reconstruction streams those surviving bytes directly into the PAR2
+slice grid, holding ~1× the file size in memory while it runs. Keep
 `par2_max_concurrent_repairs` low (default `1`) and consider
 `par2_max_repair_file_size_mb` if you stream very large files on a
 memory-constrained host.
