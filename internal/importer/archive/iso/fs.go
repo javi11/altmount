@@ -207,17 +207,22 @@ func udfReadTag(rs io.ReadSeeker, sectorNum uint32) (udfTag, []byte, error) {
 	return t, buf, nil
 }
 
+// udfMaxIndirectDepth caps how many Indirect Entry (tag 248) hops
+// udfFollowIndirect will traverse before declaring a malformed chain.
+// 16 matches Linux kernel UDF (fs/udf/inode.c) and libisofs convention.
+const udfMaxIndirectDepth = 16
+
 // udfFollowIndirect resolves a chain of Indirect Entries (tag 248)
 // starting at physSect and returns the physical sector of the real
 // File Entry plus its tag and raw buffer. Per UDF §14.7 an Indirect
 // Entry is a 16-byte descriptor tag + 20-byte ICBTag + 16-byte
-// long_ad at offset 36. Depth-capped at 16 to bound runaway on a
-// malformed disc that points an Indirect Entry chain back at itself.
+// long_ad at offset 36. Depth-capped to bound runaway on a malformed
+// disc that points an Indirect Entry chain back at itself.
 func udfFollowIndirect(ctx context.Context, rs io.ReadSeeker, physSect uint32, metaMap []udfMetaSpan, partStart uint32) (uint32, udfTag, []byte, error) {
-	for depth := 0; depth < 16; depth++ {
+	for depth := range udfMaxIndirectDepth {
 		tag, buf, err := udfReadTag(rs, physSect)
 		if err != nil {
-			return 0, udfTag{}, nil, err
+			return 0, udfTag{}, nil, fmt.Errorf("udf: reading indirect entry at sector %d: %w", physSect, err)
 		}
 		if tag.id != 248 {
 			return physSect, tag, buf, nil
@@ -233,7 +238,7 @@ func udfFollowIndirect(ctx context.Context, rs io.ReadSeeker, physSect uint32, m
 		slog.DebugContext(ctx, "UDF: followed Indirect Entry", "from", physSect, "to", resolved, "depth", depth)
 		physSect = resolved
 	}
-	return 0, udfTag{}, nil, fmt.Errorf("udf: indirect entry chain exceeds depth cap (16)")
+	return 0, udfTag{}, nil, fmt.Errorf("udf: indirect entry chain exceeds depth cap (%d)", udfMaxIndirectDepth)
 }
 
 // udfParseLongAD parses a long_ad from buf[off:].

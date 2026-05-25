@@ -84,7 +84,7 @@ func TestUDFWalk_LogsWhenFileICBHasUnknownTag(t *testing.T) {
 	// Inspect captured slog output. Parse line by line as JSON and count
 	// matches; the test fails if not exactly one matching WARN was emitted.
 	var matches int
-	for _, line := range strings.Split(strings.TrimRight(buf.String(), "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.TrimRight(buf.String(), "\n"), "\n") {
 		if line == "" {
 			continue
 		}
@@ -136,14 +136,9 @@ func TestUDFWalk_FollowsIndirectEntryChain(t *testing.T) {
 		t.Helper()
 		const dirSector = 10
 		// Size the image to comfortably cover all referenced sectors.
-		maxSector := feSector
-		if dataSector > maxSector {
-			maxSector = dataSector
-		}
+		maxSector := max(feSector, dataSector)
 		for _, h := range hops {
-			if h > maxSector {
-				maxSector = h
-			}
+			maxSector = max(maxSector, h)
 		}
 		image := make([]byte, iso9660SectorSize*int(maxSector+2))
 
