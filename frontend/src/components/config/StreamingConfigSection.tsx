@@ -304,8 +304,9 @@ export function StreamingConfigSection({
 					<div className="min-w-0">
 						<h4 className="font-bold text-base-content text-sm">Max Concurrent Repairs</h4>
 						<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
-							Each reconstruction holds the whole file in memory (~2× its size). This caps how many
-							run at once to bound peak RAM. Default 1.
+							Each reconstruction streams the file straight into the PAR2 recovery grid, holding
+							about its full size in memory (~1×). This caps how many run at once to bound peak RAM.
+							Default 1.
 						</p>
 					</div>
 					<input
