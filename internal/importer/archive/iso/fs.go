@@ -207,6 +207,35 @@ func udfReadTag(rs io.ReadSeeker, sectorNum uint32) (udfTag, []byte, error) {
 	return t, buf, nil
 }
 
+// udfFollowIndirect resolves a chain of Indirect Entries (tag 248)
+// starting at physSect and returns the physical sector of the real
+// File Entry plus its tag and raw buffer. Per UDF §14.7 an Indirect
+// Entry is a 16-byte descriptor tag + 20-byte ICBTag + 16-byte
+// long_ad at offset 36. Depth-capped at 16 to bound runaway on a
+// malformed disc that points an Indirect Entry chain back at itself.
+func udfFollowIndirect(ctx context.Context, rs io.ReadSeeker, physSect uint32, metaMap []udfMetaSpan, partStart uint32) (uint32, udfTag, []byte, error) {
+	for depth := 0; depth < 16; depth++ {
+		tag, buf, err := udfReadTag(rs, physSect)
+		if err != nil {
+			return 0, udfTag{}, nil, err
+		}
+		if tag.id != 248 {
+			return physSect, tag, buf, nil
+		}
+		if len(buf) < 36+16 {
+			return 0, udfTag{}, nil, fmt.Errorf("udf: indirect entry at sector %d too short", physSect)
+		}
+		next := udfParseLongAD(buf, 36)
+		resolved, err := udfResolveICB(next.loc, metaMap, partStart)
+		if err != nil {
+			return 0, udfTag{}, nil, fmt.Errorf("udf: resolving indirect ICB: %w", err)
+		}
+		slog.DebugContext(ctx, "UDF: followed Indirect Entry", "from", physSect, "to", resolved, "depth", depth)
+		physSect = resolved
+	}
+	return 0, udfTag{}, nil, fmt.Errorf("udf: indirect entry chain exceeds depth cap (16)")
+}
+
 // udfParseLongAD parses a long_ad from buf[off:].
 func udfParseLongAD(buf []byte, off int) udfLongAD {
 	length := binary.LittleEndian.Uint32(buf[off:])
@@ -422,8 +451,9 @@ func readICBExtent(rs io.ReadSeeker, loc udfLBA, length int, metaMap []udfMetaSp
 // (tag 248) follow logic that will emit a debug log on each redirect,
 // and as a hook for future warn-log additions in this function.
 func udfReadDirEntries(ctx context.Context, rs io.ReadSeeker, physSect uint32, metaMap []udfMetaSpan, partStart uint32) ([]udfDirEntry, error) {
-	_ = ctx
-	tag, buf, err := udfReadTag(rs, physSect)
+	// Transparently traverse any Indirect Entry (tag 248) chain on a
+	// directory ICB. udfFollowIndirect emits a Debug log per redirect.
+	physSect, tag, buf, err := udfFollowIndirect(ctx, rs, physSect, metaMap, partStart)
 	if err != nil {
 		return nil, fmt.Errorf("reading dir ICB at %d: %w", physSect, err)
 	}
@@ -618,7 +648,11 @@ func udfWalkAll(ctx context.Context, rs io.ReadSeeker, dirICB udfLongAD, metaMap
 				"path", entryPath, "icb_block", e.icb.loc.block, "error", rerr)
 			continue
 		}
-		feTag, feBuf, rerr := udfReadTag(rs, fePhys)
+		// Transparently follow any Indirect Entry (tag 248) chain. fePhys
+		// is reassigned to the resolved post-redirect sector so the
+		// downstream collectFileExtents call uses the real FE for any
+		// embedded-data ("embeddedFEPhys") accounting.
+		fePhys, feTag, feBuf, rerr := udfFollowIndirect(ctx, rs, fePhys, metaMap, partStart)
 		if rerr != nil {
 			slog.WarnContext(ctx, "UDF: file ICB read failed, dropping file from listing",
 				"path", entryPath, "phys_sector", fePhys, "error", rerr)

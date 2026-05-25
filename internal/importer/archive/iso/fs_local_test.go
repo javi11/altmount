@@ -112,6 +112,140 @@ func TestUDFWalk_LogsWhenFileICBHasUnknownTag(t *testing.T) {
 	}
 }
 
+// TestUDFWalk_FollowsIndirectEntryChain drives a synthetic UDF blob where
+// a file's ICB points at a chain of Indirect Entries (tag 248, per UDF
+// §14.7 Strategy Type 4 multi-FE indirection) before reaching the real
+// File Entry. The walker must transparently follow the chain and surface
+// the file with its real size and extents.
+//
+// Two sub-cases:
+//   - "single_hop":   FID → IE(248) → FE(261)
+//   - "multi_hop":    FID → IE(248) → IE(248) → FE(261)
+//
+// Each Indirect Entry is laid out per UDF §14.7:
+//
+//	bytes  0..15  descriptor tag (id = 248)
+//	bytes 16..35  ICBTag (20 bytes; zeros here, strategy etc. not validated)
+//	bytes 36..51  long_ad (16 bytes) → next ICB in chain
+func TestUDFWalk_FollowsIndirectEntryChain(t *testing.T) {
+	// buildImage constructs an in-memory UDF blob and returns it along with
+	// the directory ICB. The chain layout:
+	//   FID(MOVIE.M2TS) → IE@hops[0] → IE@hops[1] → ... → FE@feSector
+	// where the file's data extent lives at dataSector with size dataSize.
+	buildImage := func(t *testing.T, hops []uint32, feSector, dataSector uint32, dataSize uint32) ([]byte, udfLongAD) {
+		t.Helper()
+		const dirSector = 10
+		// Size the image to comfortably cover all referenced sectors.
+		maxSector := feSector
+		if dataSector > maxSector {
+			maxSector = dataSector
+		}
+		for _, h := range hops {
+			if h > maxSector {
+				maxSector = h
+			}
+		}
+		image := make([]byte, iso9660SectorSize*int(maxSector+2))
+
+		// Directory FE at dirSector — same pattern as the test above:
+		// tag 261, allocType 3 (inline), one FID for MOVIE.M2TS.
+		dir := image[dirSector*iso9660SectorSize : (dirSector+1)*iso9660SectorSize]
+		binary.LittleEndian.PutUint16(dir[0:2], 261) // File Entry
+		dir[34] = 3                                  // inline alloc type
+		binary.LittleEndian.PutUint32(dir[168:172], 0)
+		binary.LittleEndian.PutUint32(dir[172:176], 52) // one padded FID
+
+		fid := dir[176:]
+		name := "MOVIE.M2TS"                            // 10 ASCII bytes → recLen 38+11=49 → padded 52
+		binary.LittleEndian.PutUint16(fid[0:2], 257)    // FID
+		fid[18] = 0                                     // regular file
+		fid[19] = byte(1 + len(name))                   // L_FI
+		binary.LittleEndian.PutUint32(fid[20:24], 2048) // long_ad.length → hops[0] sector
+		binary.LittleEndian.PutUint32(fid[24:28], hops[0])
+		binary.LittleEndian.PutUint16(fid[28:30], 0) // partition 0 → partStart-relative
+		binary.LittleEndian.PutUint16(fid[36:38], 0) // L_IU
+		fid[38] = 8                                  // CS0 ASCII
+		copy(fid[39:39+len(name)], name)
+
+		// Indirect Entries: each tag-248 sector points to the next.
+		for i, hop := range hops {
+			ie := image[hop*iso9660SectorSize : (hop+1)*iso9660SectorSize]
+			binary.LittleEndian.PutUint16(ie[0:2], 248) // Indirect Entry tag
+			// bytes 16..35 are ICBTag — leave zeroed (not validated).
+			// long_ad at offset 36: length(4)+block(4)+part(2)+implUse(2)
+			var nextSector uint32
+			if i+1 < len(hops) {
+				nextSector = hops[i+1]
+			} else {
+				nextSector = feSector
+			}
+			binary.LittleEndian.PutUint32(ie[36:40], 2048)        // length
+			binary.LittleEndian.PutUint32(ie[40:44], nextSector)  // block
+			binary.LittleEndian.PutUint16(ie[44:46], 0)           // partition
+		}
+
+		// Real File Entry at feSector: tag 261, allocType 0 (short_ad),
+		// one short_ad pointing at dataSector with the file size.
+		fe := image[feSector*iso9660SectorSize : (feSector+1)*iso9660SectorSize]
+		binary.LittleEndian.PutUint16(fe[0:2], 261) // File Entry
+		fe[34] = 0                                  // allocType 0 = short_ad
+		binary.LittleEndian.PutUint64(fe[56:64], uint64(dataSize))
+		binary.LittleEndian.PutUint32(fe[168:172], 0)    // L_EA
+		binary.LittleEndian.PutUint32(fe[172:176], 8)    // L_AD = one short_ad
+		binary.LittleEndian.PutUint32(fe[176:180], dataSize)    // short_ad.length (adType 0 in high 2 bits)
+		binary.LittleEndian.PutUint32(fe[180:184], dataSector)  // short_ad.block
+
+		dirICB := udfLongAD{length: iso9660SectorSize, loc: udfLBA{block: dirSector, part: 0}}
+		return image, dirICB
+	}
+
+	assertFound := func(t *testing.T, entries []isoFileEntry, wantSize uint64, wantLBA uint32) {
+		t.Helper()
+		if len(entries) != 1 {
+			t.Fatalf("want exactly 1 entry, got %d: %+v", len(entries), entries)
+		}
+		got := entries[0]
+		if got.path != "MOVIE.M2TS" {
+			t.Errorf("path: want MOVIE.M2TS, got %q", got.path)
+		}
+		if got.size != wantSize {
+			t.Errorf("size: want %d, got %d", wantSize, got.size)
+		}
+		if len(got.extents) != 1 {
+			t.Fatalf("extents: want 1, got %d (%+v)", len(got.extents), got.extents)
+		}
+		if got.extents[0].lba != wantLBA {
+			t.Errorf("extents[0].lba: want %d, got %d", wantLBA, got.extents[0].lba)
+		}
+	}
+
+	t.Run("single_hop", func(t *testing.T) {
+		const ieSector = 20
+		const feSector = 30
+		const dataSector = 40
+		const dataSize = 4096
+		image, dirICB := buildImage(t, []uint32{ieSector}, feSector, dataSector, dataSize)
+		entries, err := udfWalkAll(context.Background(), bytes.NewReader(image), dirICB, nil, 0, "")
+		if err != nil {
+			t.Fatalf("udfWalkAll: %v", err)
+		}
+		assertFound(t, entries, dataSize, dataSector)
+	})
+
+	t.Run("multi_hop", func(t *testing.T) {
+		// FID → IE@20 → IE@25 → FE@30 → data@40
+		const feSector = 30
+		const dataSector = 40
+		const dataSize = 4096
+		image, dirICB := buildImage(t, []uint32{20, 25}, feSector, dataSector, dataSize)
+		entries, err := udfWalkAll(context.Background(), bytes.NewReader(image), dirICB, nil, 0, "")
+		if err != nil {
+			t.Fatalf("udfWalkAll: %v", err)
+		}
+		assertFound(t, entries, dataSize, dataSector)
+	})
+}
+
 // TestLocalISO_DiscoverBigFiles is a manual integration test: it walks a
 // real Blu-ray ISO from local disk and dumps a size-sorted summary. Skipped
 // unless ALTMOUNT_LOCAL_ISO is set, so CI stays unaffected.
