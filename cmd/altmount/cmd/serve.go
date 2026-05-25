@@ -156,6 +156,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 			storeSink{repairStore},
 			poolManager,
 			logger,
+			repair.WithMaxConcurrentRepairs(par2MaxConcurrentRepairs(cfg)),
+			repair.WithMaxRepairFileBytes(par2MaxRepairFileBytes(cfg)),
 		)
 		fs.SetRepairService(par2RepairAdapter{repairSvc})
 		fs.SetRepairStore(repairStore)
@@ -443,6 +445,23 @@ func par2RepairStoreTTL(cfg *config.Config) time.Duration {
 		return time.Duration(*rs.ExpiryMinutes) * time.Minute
 	}
 	return segstore.DefaultMemStoreTTL
+}
+
+// par2MaxConcurrentRepairs / par2MaxRepairFileBytes resolve the reconstruction
+// RAM bounds from config. < 1 / 0 let the repair package apply its defaults
+// (concurrency 1, unlimited size).
+func par2MaxConcurrentRepairs(cfg *config.Config) int {
+	if cfg.Streaming.Par2MaxConcurrentRepairs != nil {
+		return *cfg.Streaming.Par2MaxConcurrentRepairs
+	}
+	return 0
+}
+
+func par2MaxRepairFileBytes(cfg *config.Config) int64 {
+	if mb := cfg.Streaming.Par2MaxRepairFileSizeMB; mb != nil && *mb > 0 {
+		return int64(*mb) << 20
+	}
+	return 0
 }
 
 // waitForListener blocks until the HTTP server is accepting TCP connections on

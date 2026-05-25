@@ -107,6 +107,8 @@ export interface StreamingConfig {
 	max_prefetch: number;
 	failure_masking: FailureMaskingConfig;
 	par2_repair?: boolean;
+	par2_max_concurrent_repairs?: number;
+	par2_max_repair_file_size_mb?: number;
 	par2_repair_store?: Par2RepairStoreConfig;
 	par2_streaming_heal?: Par2StreamingHealConfig;
 }
@@ -393,6 +395,8 @@ export interface StreamingUpdateRequest {
 	max_prefetch?: number;
 	failure_masking?: Partial<FailureMaskingConfig>;
 	par2_repair?: boolean;
+	par2_max_concurrent_repairs?: number;
+	par2_max_repair_file_size_mb?: number;
 	par2_streaming_heal?: Par2StreamingHealConfig;
 }
 
@@ -574,6 +578,8 @@ export interface StreamingFormData {
 	max_prefetch: number;
 	failure_masking: FailureMaskingConfig;
 	par2_repair?: boolean;
+	par2_max_concurrent_repairs?: number;
+	par2_max_repair_file_size_mb?: number;
 	par2_streaming_heal?: Par2StreamingHealConfig;
 }
 

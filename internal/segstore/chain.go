@@ -32,6 +32,12 @@ func NewChain(cache, repair usenet.SegmentStore) usenet.SegmentStore {
 	return &chain{write: cache, read: read}
 }
 
+// Get returns the first hit across the read stores, in order. Invariant: the
+// cache is consulted before the repair store, which is safe only because
+// missing/corrupt segments are never written to the cache — so a cache hit can
+// never shadow a reconstructed segment in the repair store. If that invariant
+// ever changes (e.g. the cache starts holding partial/corrupt entries), this
+// ordering must be revisited or the cache entry invalidated on repair.
 func (c *chain) Get(id string) ([]byte, bool) {
 	for _, s := range c.read {
 		if b, ok := s.Get(id); ok {

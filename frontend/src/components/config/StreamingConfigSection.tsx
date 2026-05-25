@@ -281,6 +281,52 @@ export function StreamingConfigSection({
 					/>
 				</div>
 
+				{/* RAM bounds: concurrency + max file size */}
+				<div
+					className={`space-y-3 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6 transition-opacity ${!par2RepairEnabled ? "opacity-50" : ""}`}
+				>
+					<div className="min-w-0">
+						<h4 className="font-bold text-base-content text-sm">Max Concurrent Repairs</h4>
+						<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
+							Each reconstruction holds the whole file in memory (~2× its size). This caps how many
+							run at once to bound peak RAM. Default 1.
+						</p>
+					</div>
+					<input
+						type="number"
+						min="1"
+						className="input input-bordered w-full"
+						value={streamingData.par2_max_concurrent_repairs ?? 1}
+						disabled={isReadOnly || !par2RepairEnabled}
+						onChange={(e) =>
+							handleStreamingChange(
+								"par2_max_concurrent_repairs",
+								Number.parseInt(e.target.value, 10) || 1,
+							)
+						}
+					/>
+					<div className="min-w-0 pt-2">
+						<h4 className="font-bold text-base-content text-sm">Max Repair File Size (MB)</h4>
+						<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
+							Skip self-heal (fall back to a re-download) for files larger than this, so a few huge
+							files can't exhaust RAM. 0 means unlimited.
+						</p>
+					</div>
+					<input
+						type="number"
+						min="0"
+						className="input input-bordered w-full"
+						value={streamingData.par2_max_repair_file_size_mb ?? 0}
+						disabled={isReadOnly || !par2RepairEnabled}
+						onChange={(e) =>
+							handleStreamingChange(
+								"par2_max_repair_file_size_mb",
+								Number.parseInt(e.target.value, 10) || 0,
+							)
+						}
+					/>
+				</div>
+
 				{/* Mid-stream heal toggle */}
 				<div
 					className={`flex items-center justify-between rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6 transition-opacity ${!par2RepairEnabled ? "opacity-50" : ""}`}

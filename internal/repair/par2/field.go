@@ -65,7 +65,9 @@ func gfPow(base uint16, exp int) uint16 {
 	if base == 0 {
 		return 0
 	}
-	e := (int(gfLog[base]) * exp) % gfMax
+	// Use int64 for the product: gfLog[base] (< 65536) × exp can exceed 2^31 for
+	// large exponents on 32-bit platforms, where int is 32-bit.
+	e := (int64(gfLog[base]) * int64(exp)) % int64(gfMax)
 	return gfExp[e]
 }
 

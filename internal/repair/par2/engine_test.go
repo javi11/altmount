@@ -3,6 +3,7 @@ package par2
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 )
@@ -123,6 +124,81 @@ func TestRepairFileSegments(t *testing.T) {
 		if !bytes.Equal(got, want) {
 			t.Fatalf("segment %s reconstructed incorrectly (len got=%d want=%d)", id, len(got), len(want))
 		}
+	}
+}
+
+// shortFetcher returns a correct body for every present segment except one,
+// for which it returns a truncated body — simulating a present-but-corrupt
+// article that is shorter than its declared byte range.
+type shortFetcher struct {
+	data    []byte
+	segs    map[string]Segment
+	shortID string
+}
+
+func (f *shortFetcher) Fetch(_ context.Context, id string) ([]byte, error) {
+	s, ok := f.segs[id]
+	if !ok {
+		return nil, fmt.Errorf("unknown segment %s", id)
+	}
+	full := f.data[s.Start:s.End]
+	if id == f.shortID {
+		return full[:len(full)/2], nil // truncated body
+	}
+	return full, nil
+}
+
+// A present article shorter than its declared range must produce an error, not
+// a panic (the scatter loop runs in a background goroutine with no recover()).
+func TestRepairFileSegmentsShortBody(t *testing.T) {
+	rs, data := loadFixture(t)
+	segs := makeSegments(len(data), 5000)
+	missing := map[string]bool{segs[1].MessageID: true}
+
+	presentByID := make(map[string]Segment)
+	for _, s := range segs {
+		if !missing[s.MessageID] {
+			presentByID[s.MessageID] = s
+		}
+	}
+	fetch := &shortFetcher{data: data, segs: presentByID, shortID: segs[0].MessageID}
+	sink := &mapSink{got: map[string][]byte{}}
+
+	_, err := RepairFileSegments(context.Background(), rs, segs, missing, fetch, sink)
+	if err == nil {
+		t.Fatal("expected an error for a short article body, got nil")
+	}
+}
+
+// A reconstructed slice that fails its IFSC checksum must surface as
+// ErrVerificationFailed so the caller falls back instead of serving garbage.
+func TestRepairFileSegmentsVerificationFailure(t *testing.T) {
+	rs, data := loadFixture(t)
+	segs := makeSegments(len(data), 5000)
+	missing := map[string]bool{segs[1].MessageID: true}
+
+	// Tamper with the IFSC checksums for the slices the missing segment spans, so
+	// the (correctly) reconstructed bytes no longer match the recorded sums.
+	fid := rs.RecoveryFileIDs[0]
+	ss := int64(rs.SliceSize)
+	first := segs[1].Start / ss
+	last := (segs[1].End - 1) / ss
+	for s := first; s <= last; s++ {
+		rs.SliceCRCs[fid][s].CRC32 ^= 0xFFFFFFFF
+	}
+
+	presentByID := make(map[string]Segment)
+	for _, s := range segs {
+		if !missing[s.MessageID] {
+			presentByID[s.MessageID] = s
+		}
+	}
+	fetch := &mapFetcher{data: data, segs: presentByID}
+	sink := &mapSink{got: map[string][]byte{}}
+
+	_, err := RepairFileSegments(context.Background(), rs, segs, missing, fetch, sink)
+	if !errors.Is(err, ErrVerificationFailed) {
+		t.Fatalf("got %v, want ErrVerificationFailed", err)
 	}
 }
 

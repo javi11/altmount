@@ -3,6 +3,7 @@ package repair
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -139,6 +140,21 @@ func TestServiceRepairFile(t *testing.T) {
 		if !bytes.Equal(sink.got[id], data[start:end]) {
 			t.Fatalf("segment %s reconstructed incorrectly", id)
 		}
+	}
+}
+
+func TestServiceMaxFileSize(t *testing.T) {
+	data, par2Bytes := loadPar2Fixture(t)
+	meta, present, ids := buildFixtureMeta(data, par2Bytes, 5000)
+	missing := map[string]bool{ids[1]: true}
+	delete(present, ids[1])
+
+	// Ceiling one byte below the file size → fall back before fetching anything.
+	svc := NewService(fakeMeta{meta}, fakeFetcher{present: present, missing: missing},
+		&mapSink{got: map[string][]byte{}}, nil, nil,
+		WithMaxRepairFileBytes(meta.FileSize-1))
+	if _, err := svc.RepairFile(context.Background(), "/x"); !errors.Is(err, ErrFileTooLarge) {
+		t.Fatalf("got %v, want ErrFileTooLarge", err)
 	}
 }
 

@@ -155,6 +155,62 @@ rclone mount altmount: /mnt/remotes/altmount \
 - If playback still freezes, try increasing `--vfs-read-chunk-size` and `--vfs-read-ahead`.
 - Use `--allow-other` if media players run as a different user than the rclone mount process.
 
+## PAR2 Self-Heal
+
+When a stream hits a missing or corrupt segment, AltMount can reconstruct it on
+the fly from the file's PAR2 recovery data instead of forcing a full ARR
+re-download. Recovered segments are written to a small **independent in-memory
+repair store** that the reader consults transparently — so self-heal works even
+when the on-disk segment cache is disabled (e.g. rclone-VFS-cache deployments).
+Every reconstructed slice is verified against the PAR2 IFSC checksums before it
+is served; on any mismatch AltMount discards the result and falls back to ARR.
+
+```yaml
+streaming:
+  par2_repair: true # Enable PAR2-backed self-healing (default: off)
+  par2_max_concurrent_repairs: 1 # Cap simultaneous reconstructions (RAM bound)
+  par2_max_repair_file_size_mb: 0 # Skip self-heal above this size; 0 = unlimited
+  par2_repair_store:
+    max_size_mb: 512 # In-memory landing zone for recovered segments
+    expiry_minutes: 60 # Drop recovered segments older than this
+  par2_streaming_heal:
+    enabled: true # Seamless mid-stream heal (requires par2_repair)
+    proactive_on_open: true # Probe + start repair at stream open
+    block_on_repair_seconds: 90 # Max a failing read waits for an in-flight heal
+    min_file_size_mb: 50 # Skip proactive heal for files below this
+    media_only: true # Limit proactive heal to recognised media containers
+```
+
+### Parameters
+
+| Parameter                      | Default | Description                                                                 |
+| ------------------------------ | ------- | --------------------------------------------------------------------------- |
+| `par2_repair`                  | `false` | Enables PAR2 self-heal. Does **not** require the on-disk segment cache.      |
+| `par2_max_concurrent_repairs`  | `1`     | Bounds peak repair RAM — each reconstruction buffers the whole file (~2×).   |
+| `par2_max_repair_file_size_mb` | `0`     | Files larger than this fall back to ARR. `0` = unlimited.                    |
+| `par2_streaming_heal.enabled`  | `false` | Seamless mid-stream heal on top of `par2_repair`.                            |
+
+### Supported recovery sets
+
+Self-heal currently supports **single-file PAR2 sets that protect the decoded
+stream directly** — e.g. a `.mkv` posted alongside its own `.par2` files, where
+the PAR2 slice grid lines up with the file's segments. AltMount enforces this:
+the recovery set must contain exactly one file whose length equals the streamed
+file's size.
+
+Most typical Usenet releases ship **multi-file PAR2 over RAR volumes**. Those
+recovery sets protect the RAR parts, not the decoded media, so their offsets do
+not line up with the stream — AltMount **does not** self-heal them and correctly
+falls back to the ARR re-download path. This is a safety gate, not a bug: it is
+what keeps AltMount from reconstructing and serving garbage.
+
+:::note RAM cost
+A reconstruction holds the whole file in memory while it runs. Keep
+`par2_max_concurrent_repairs` low (default `1`) and consider
+`par2_max_repair_file_size_mb` if you stream very large files on a
+memory-constrained host.
+:::
+
 ## Next Steps
 
 With streaming configured:

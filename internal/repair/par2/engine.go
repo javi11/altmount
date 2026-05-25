@@ -120,6 +120,15 @@ func RepairFileSegments(
 			}
 			if s >= 0 && s < total && present[s] != nil {
 				srcOff := off - seg.Start
+				// Defense in depth: a present-but-truncated article (shorter than
+				// its declared byte range) would make this slice expression panic
+				// with "slice bounds out of range". Since reconstruction runs in a
+				// background goroutine with no recover(), that would crash the whole
+				// process. Fail with a diagnosable error instead so the caller can
+				// fall back. Callers should also reject short bodies at fetch time.
+				if srcOff < 0 || srcOff+int64(n) > int64(len(data)) {
+					return nil, fmt.Errorf("par2: segment %s shorter than its declared range (have %d bytes)", seg.MessageID, len(data))
+				}
 				copy(present[s][within:within+n], data[srcOff:srcOff+int64(n)])
 			}
 			off += int64(n)
@@ -132,14 +141,25 @@ func RepairFileSegments(
 		return nil, err
 	}
 
-	// Extract each missing segment's exact byte range from the reconstructed
-	// stream and hand it to the sink.
-	result := &RepairResult{}
-	for s := range sliceMissing {
+	// Verify the reconstructed slices against the PAR2 IFSC checksums before
+	// emitting anything. If any assumption broke (offset convention, ordering,
+	// padding, a foreign recovery set) the math can still "succeed" yet produce
+	// garbage; serving it would be worse than the ARR fallback because we'd
+	// silently cache and stream corruption. On mismatch, fail so the caller
+	// re-downloads.
+	fixed := make([]int, 0)
+	for s := 0; s < total; s++ {
 		if sliceMissing[s] {
-			result.SlicesFixed++
+			fixed = append(fixed, s)
 		}
 	}
+	if bad := rs.verifySlices(layout[0].ID, out, fixed); bad >= 0 {
+		return nil, fmt.Errorf("%w: slice %d", ErrVerificationFailed, bad)
+	}
+
+	// Extract each missing segment's exact byte range from the reconstructed
+	// stream and hand it to the sink.
+	result := &RepairResult{SlicesFixed: len(fixed)}
 	for _, seg := range segments {
 		if !missing[seg.MessageID] {
 			continue

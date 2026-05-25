@@ -290,10 +290,16 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 		NestedSources: fileMeta.NestedSources,
 	}
 
+	// Per-handle close signal so Close() can interrupt a blocking mid-stream
+	// heal without waiting out its budget.
+	closeCtx, closeCancel := context.WithCancel(context.Background())
+
 	// Create a metadata-based virtual file handle
 	virtualFile := &MetadataVirtualFile{
 		name:             name,
 		meta:             handleMeta,
+		closeCtx:         closeCtx,
+		closeCancel:      closeCancel,
 		metadataService:  mrf.metadataService,
 		healthRepository: mrf.healthRepository,
 		arrsService:      mrf.arrsService,
@@ -832,6 +838,12 @@ type MetadataVirtualFile struct {
 	configGetter     config.ConfigGetter
 	poolManager      pool.Manager // Pool manager for dynamic pool access
 	ctx              context.Context
+	// closeCtx is cancelled by Close() before it contends for mvf.mu, so a
+	// blocking mid-stream heal (which can hold mvf.mu for up to the configured
+	// budget) unblocks promptly when the client disconnects. closeCancel may be
+	// nil in handles built outside OpenFile (e.g. tests).
+	closeCtx         context.Context
+	closeCancel      context.CancelFunc
 	maxPrefetch      int // Maximum segments prefetched ahead of current read position
 	rcloneCipher     *rclone.RcloneCrypt
 	aesCipher        *aes.AesCipher
@@ -1413,8 +1425,13 @@ func (mvf *MetadataVirtualFile) Seek(offset int64, whence int) (int64, error) {
 
 // Close implements afero.File.Close
 func (mvf *MetadataVirtualFile) Close() error {
-	// Cancel the in-flight reader before taking mvf.mu — a concurrent
-	// Read can hold the lock for the full segment-download latency.
+	// Cancel the in-flight reader and any blocking mid-stream heal before
+	// taking mvf.mu — a concurrent Read can hold the lock for the full
+	// segment-download latency, and tryBlockingHeal can hold it for the whole
+	// repair budget. Both must be unblockable without contending for the lock.
+	if mvf.closeCancel != nil {
+		mvf.closeCancel()
+	}
 	mvf.interruptCurrentReader()
 	mvf.mu.Lock()
 	// Remove from stream tracker under the same lock that Read / ReadAtContext
@@ -2202,6 +2219,12 @@ func (mvf *MetadataVirtualFile) tryBlockingHeal() bool {
 	}
 	waitCtx, cancel := context.WithTimeout(ctx, mvf.blockOnRepairTimeout())
 	defer cancel()
+	// Close() holds no lock when it fires closeCancel; bridge it into the wait
+	// so a client disconnecting mid-heal doesn't hang Close for the full budget.
+	if mvf.closeCtx != nil {
+		stop := context.AfterFunc(mvf.closeCtx, cancel)
+		defer stop()
+	}
 
 	if err := mvf.repairManager.Wait(waitCtx, mvf.repairManager.Start(mvf.name)); err != nil {
 		slog.InfoContext(ctx, "Mid-stream PAR2 self-heal did not complete; falling back",

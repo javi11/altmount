@@ -210,22 +210,28 @@ type StreamingConfig struct {
 	MaxPrefetch    int                  `yaml:"max_prefetch" mapstructure:"max_prefetch" json:"max_prefetch"`
 	FailureMasking FailureMaskingConfig `yaml:"failure_masking" mapstructure:"failure_masking" json:"failure_masking"`
 	// Par2Repair enables PAR2-backed self-healing: on a streaming failure,
-	// missing segments are reconstructed from the file's PAR2 recovery data and
-	// written to the segment cache, avoiding a full ARR re-download. Requires
-	// missing segments are reconstructed from the file's PAR2 recovery data.
-	// Recovered segments are written to an independent in-memory repair store
-	// (see Par2RepairStore) that the reader consults, so self-heal no longer
-	// requires the on-disk segment cache and works with an rclone VFS cache.
-	// Defaults to off (nil).
+	// missing segments are reconstructed from the file's PAR2 recovery data
+	// instead of forcing a full ARR re-download. Recovered segments are written
+	// to an independent in-memory repair store (see Par2RepairStore) that the
+	// reader consults, so self-heal does NOT require the on-disk segment cache
+	// and works in rclone-VFS-cache deployments. Defaults to off (nil).
 	Par2Repair *bool `yaml:"par2_repair" mapstructure:"par2_repair" json:"par2_repair"`
 	// Par2RepairStore tunes the small in-memory landing zone for reconstructed
 	// segments. Optional; nil uses the documented defaults.
 	Par2RepairStore *Par2RepairStoreConfig `yaml:"par2_repair_store" mapstructure:"par2_repair_store" json:"par2_repair_store"`
+	// Par2MaxConcurrentRepairs caps how many PAR2 reconstructions run at once.
+	// Each holds the whole file in RAM (~2× its size), so this bounds peak repair
+	// memory across concurrent streams. < 1 uses the repair-package default (1).
+	Par2MaxConcurrentRepairs *int `yaml:"par2_max_concurrent_repairs" mapstructure:"par2_max_concurrent_repairs" json:"par2_max_concurrent_repairs"`
+	// Par2MaxRepairFileSizeMB skips self-heal (falling back to ARR) for files
+	// larger than this, bounding worst-case per-repair RAM. 0 or nil == unlimited.
+	Par2MaxRepairFileSizeMB *int `yaml:"par2_max_repair_file_size_mb" mapstructure:"par2_max_repair_file_size_mb" json:"par2_max_repair_file_size_mb"`
 	// Par2StreamingHeal configures seamless mid-stream self-heal on top of
 	// par2_repair: instead of failing a read that hits a missing segment,
 	// AltMount can proactively reconstruct the file at stream start and/or block
 	// the failing read briefly for an in-flight repair, so playback isn't
-	// interrupted. Requires par2_repair (and the segment cache) enabled. Off by
+	// interrupted. Requires par2_repair enabled (it reuses the same independent
+	// repair store, so the on-disk segment cache is NOT required). Off by
 	// default; nil falls back to documented defaults once enabled.
 	Par2StreamingHeal *Par2StreamingHealConfig `yaml:"par2_streaming_heal" mapstructure:"par2_streaming_heal" json:"par2_streaming_heal"`
 }

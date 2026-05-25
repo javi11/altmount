@@ -34,6 +34,10 @@ var (
 	// ErrProbeUnsupported is returned by ProbeRepairable when the configured
 	// ArticleFetcher cannot perform a cheap existence check (NNTP STAT).
 	ErrProbeUnsupported = errors.New("repair: article prober not available")
+	// ErrFileTooLarge is returned when a file exceeds the configured self-heal
+	// size ceiling. Reconstruction buffers the whole file in RAM, so very large
+	// files fall back to ARR re-download instead.
+	ErrFileTooLarge = errors.New("repair: file exceeds self-heal size limit")
 )
 
 // ArticleProber optionally reports article existence without downloading the
@@ -69,22 +73,63 @@ type SlotAcquirer interface {
 	AcquireImportSlot(ctx context.Context) (release func(), err error)
 }
 
+// DefaultMaxConcurrentRepairs bounds in-flight reconstructions when the caller
+// does not configure a limit. A reconstruction buffers the whole file in RAM
+// (~2× file size: the present-segment map plus the parallel slice array), so an
+// unbounded count of concurrent large-file heals could OOM the host.
+const DefaultMaxConcurrentRepairs = 1
+
 // Service performs PAR2 self-healing for individual virtual files.
 type Service struct {
-	meta  MetadataReader
-	fetch ArticleFetcher
-	sink  Sink
-	slots SlotAcquirer
-	log   *slog.Logger
+	meta         MetadataReader
+	fetch        ArticleFetcher
+	sink         Sink
+	slots        SlotAcquirer
+	log          *slog.Logger
+	sem          chan struct{} // bounds concurrent reconstructions (peak RAM)
+	maxFileBytes int64         // skip self-heal above this size; 0 == unlimited
+}
+
+// Option customises a Service. Unset options keep the documented defaults.
+type Option func(*Service)
+
+// WithMaxConcurrentRepairs caps how many reconstructions may run at once. Values
+// < 1 fall back to DefaultMaxConcurrentRepairs.
+func WithMaxConcurrentRepairs(n int) Option {
+	return func(s *Service) {
+		if n < 1 {
+			n = DefaultMaxConcurrentRepairs
+		}
+		s.sem = make(chan struct{}, n)
+	}
+}
+
+// WithMaxRepairFileBytes refuses self-heal for files larger than maxBytes,
+// falling back to ARR so a few multi-GB heals can't exhaust RAM. <= 0 means
+// unlimited (the default).
+func WithMaxRepairFileBytes(maxBytes int64) Option {
+	return func(s *Service) {
+		if maxBytes < 0 {
+			maxBytes = 0
+		}
+		s.maxFileBytes = maxBytes
+	}
 }
 
 // NewService constructs a repair Service. slots may be nil to skip admission
 // budgeting; log defaults to slog.Default() if nil.
-func NewService(meta MetadataReader, fetch ArticleFetcher, sink Sink, slots SlotAcquirer, log *slog.Logger) *Service {
+func NewService(meta MetadataReader, fetch ArticleFetcher, sink Sink, slots SlotAcquirer, log *slog.Logger, opts ...Option) *Service {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Service{meta: meta, fetch: fetch, sink: sink, slots: slots, log: log.With("component", "par2-repair")}
+	s := &Service{meta: meta, fetch: fetch, sink: sink, slots: slots, log: log.With("component", "par2-repair")}
+	for _, o := range opts {
+		o(s)
+	}
+	if s.sem == nil {
+		s.sem = make(chan struct{}, DefaultMaxConcurrentRepairs)
+	}
+	return s
 }
 
 // Outcome reports the result of a successful repair.
@@ -113,6 +158,21 @@ func (s *Service) RepairFile(ctx context.Context, virtualPath string) (*Outcome,
 	segs := buildSegments(meta.GetSegmentData())
 	if len(segs) == 0 {
 		return nil, ErrNoSegments
+	}
+
+	// Refuse oversize files up front: reconstruction holds the whole file in RAM
+	// (~2× its size), so above the ceiling we fall back to ARR re-download.
+	if s.maxFileBytes > 0 && meta.GetFileSize() > s.maxFileBytes {
+		return nil, fmt.Errorf("%w: %d bytes > %d", ErrFileTooLarge, meta.GetFileSize(), s.maxFileBytes)
+	}
+
+	// Bound concurrent reconstructions so N simultaneous large-file heals can't
+	// OOM the host. This is separate from the connection-admission slot below.
+	select {
+	case s.sem <- struct{}{}:
+		defer func() { <-s.sem }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
 
 	if s.slots != nil {
@@ -153,6 +213,16 @@ func (s *Service) RepairFile(ctx context.Context, virtualPath string) (*Outcome,
 			return nil, fmt.Errorf("repair: fetch segment %s: %w", seg.MessageID, err)
 		}
 		if miss {
+			missing[seg.MessageID] = true
+			continue
+		}
+		// A present-but-wrong-size article is unusable: scattering it into the
+		// PAR2 slice grid would either corrupt reconstruction or (without the
+		// engine's guard) panic. Treat it as a hole so PAR2 covers it.
+		expected := seg.End - seg.Start
+		if int64(len(data)) != expected {
+			s.log.WarnContext(ctx, "present segment has unexpected size; treating as missing",
+				"segment", seg.MessageID, "got", len(data), "want", expected)
 			missing[seg.MessageID] = true
 			continue
 		}
