@@ -24,6 +24,7 @@ import (
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/nzbfilesystem/segcache"
+	"github.com/javi11/altmount/internal/segstore"
 
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/usenet"
@@ -46,6 +47,8 @@ type MetadataRemoteFile struct {
 	cacheSource      *segcache.Source         // Segment cache source (nil = no cache configured)
 	repairCoalescer  *RepairCoalescer         // Throttles streaming-failure repair triggers and rclone VFS refreshes
 	repairService    RepairService            // Optional PAR2 self-heal (nil = disabled; falls back to ARR re-download)
+	repairManager    *RepairManager           // Coordinates/dedups self-heal jobs across handles (nil when repair off)
+	repairStore      usenet.SegmentStore      // Independent store for reconstructed segments (nil = none); consulted by the reader
 	renameMu         sync.Mutex               // Mutex to protect rename operations from race conditions
 }
 
@@ -54,6 +57,19 @@ type MetadataRemoteFile struct {
 // back to the ARR re-download path. Safe to leave unset (the default).
 func (mrf *MetadataRemoteFile) SetRepairService(rs RepairService) {
 	mrf.repairService = rs
+	if rs != nil {
+		mrf.repairManager = NewRepairManager(rs, slog.Default())
+	} else {
+		mrf.repairManager = nil
+	}
+}
+
+// SetRepairStore registers the store that holds reconstructed segments. The
+// reader consults it (after the segment cache) so recovered bytes are served on
+// re-read even when the on-disk segment cache is disabled. Set once at startup
+// before serving begins.
+func (mrf *MetadataRemoteFile) SetRepairStore(store usenet.SegmentStore) {
+	mrf.repairStore = store
 }
 
 // Configuration is now accessed dynamically through config.ConfigGetter
@@ -102,13 +118,17 @@ func (mrf *MetadataRemoteFile) getMaxPrefetch() int {
 	return mrf.configGetter().Streaming.MaxPrefetch
 }
 
-// resolveSegmentStore returns the active SegmentStore for a new reader, or nil if
-// the cache is disabled or not configured. Called once per file-open.
+// resolveSegmentStore returns the SegmentStore a new reader should use, chaining
+// the on-disk segment cache (if enabled) and the PAR2 repair store (if wired) so
+// reconstructed segments are served even when the cache is off. Returns nil when
+// neither is active, preserving the reader's "no store" fast path. Called once
+// per file-open.
 func (mrf *MetadataRemoteFile) resolveSegmentStore() usenet.SegmentStore {
-	if mrf.cacheSource == nil {
-		return nil
+	var cacheStore usenet.SegmentStore
+	if mrf.cacheSource != nil {
+		cacheStore = mrf.cacheSource.Store()
 	}
-	return mrf.cacheSource.Store()
+	return segstore.NewChain(cacheStore, mrf.repairStore)
 }
 
 func (mrf *MetadataRemoteFile) getGlobalPassword() string {
@@ -282,6 +302,7 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 		configGetter:     mrf.configGetter,
 		poolManager:      mrf.poolManager,
 		repairService:    mrf.repairService,
+		repairManager:    mrf.repairManager,
 		ctx:              ctx,
 		maxPrefetch:      maxPrefetch,
 		rcloneCipher:     mrf.rcloneCipher,
@@ -806,6 +827,8 @@ type MetadataVirtualFile struct {
 	rcloneClient     rclonecli.RcloneRcClient // RClone RC client for VFS notifications
 	repairCoalescer  *RepairCoalescer         // Throttles repair triggers; may be nil in tests
 	repairService    RepairService            // Optional PAR2 self-heal; may be nil
+	repairManager    *RepairManager           // Shared self-heal coordinator; may be nil
+	proactiveOnce    sync.Once                // Guards the one-shot proactive-heal trigger per handle
 	configGetter     config.ConfigGetter
 	poolManager      pool.Manager // Pool manager for dynamic pool access
 	ctx              context.Context
@@ -987,6 +1010,8 @@ func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 	mvf.mu.Lock()
 	defer mvf.mu.Unlock()
 
+	mvf.maybeStartProactiveHeal()
+
 	for n < len(p) {
 		if err := mvf.ensureReader(); err != nil {
 			return n, err
@@ -1013,9 +1038,17 @@ func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 				continue
 			}
 
-			// For data corruption errors, report and mark as corrupted
+			// For data corruption errors, try seamless self-heal before failing:
+			// block briefly for an in-flight/started PAR2 repair, then retry the
+			// read (recovered bytes are served from the segment store). Only if
+			// that's disabled or doesn't deliver in time do we mark corrupted and
+			// fall back to the ARR re-download path.
 			var dataCorruptionErr *usenet.DataCorruptionError
 			if errors.As(readErr, &dataCorruptionErr) {
+				if !dataCorruptionErr.NoRetry && mvf.tryBlockingHeal() {
+					mvf.closeCurrentReader()
+					continue
+				}
 				mvf.updateFileHealthOnError(dataCorruptionErr, dataCorruptionErr.NoRetry)
 				return n, &CorruptedFileError{
 					TotalExpected: mvf.meta.FileSize,
@@ -1060,6 +1093,8 @@ func (mvf *MetadataVirtualFile) ReadAtContext(readCtx context.Context, p []byte,
 	mvf.mu.Lock()
 	defer mvf.mu.Unlock()
 
+	mvf.maybeStartProactiveHeal()
+
 	// Determine whether this offset can reuse the shared reader.
 	// Shared path: offset matches the next expected sequential position.
 	useShared := (mvf.readAtSharedNext >= 0 && off == mvf.readAtSharedNext) ||
@@ -1090,6 +1125,17 @@ func (mvf *MetadataVirtualFile) ReadAtContext(readCtx context.Context, p []byte,
 
 			if readErr != nil {
 				if errors.Is(readErr, io.EOF) && mvf.hasMoreDataToRead() {
+					mvf.closeCurrentReader()
+					if err := mvf.ensureReader(); err != nil {
+						break
+					}
+					continue
+				}
+				// Seamless self-heal on the sequential ReadAt path: if a missing
+				// segment surfaced, block briefly for an in-flight repair and
+				// retry from the (now-healed) store before giving up.
+				var dataCorruptionErr *usenet.DataCorruptionError
+				if errors.As(readErr, &dataCorruptionErr) && !dataCorruptionErr.NoRetry && mvf.tryBlockingHeal() {
 					mvf.closeCurrentReader()
 					if err := mvf.ensureReader(); err != nil {
 						break
@@ -1922,6 +1968,16 @@ func (mvf *MetadataVirtualFile) wrapWithEncryption(start, end int64) (io.ReadClo
 	}
 }
 
+// fileFailureSnapshot carries the metadata the (possibly background) failure
+// path needs, captured while mvf.mu is held. The background self-heal goroutine
+// can outlive the handle: Close() nils mvf.meta under the lock, so reading
+// mvf.meta from the goroutine would race and panic. Snapshotting the few fields
+// up front decouples the fallback from the live handle entirely.
+type fileFailureSnapshot struct {
+	sourceNzbPath string
+	segmentCount  int
+}
+
 // updateFileHealthOnError updates both metadata and database health status when corruption is detected.
 // Uses synchronous operations with timeout to prevent goroutine leaks.
 //
@@ -1929,6 +1985,9 @@ func (mvf *MetadataVirtualFile) wrapWithEncryption(start, end int64) (io.ReadClo
 // shared RepairCoalescer so that repeated corrupt reads of one file (or a batch
 // of corrupt files) cannot fan out into one DB write + one rclone VFS refresh
 // per call. See issue #539 for the failure mode this guards against.
+//
+// Must be called with mvf.mu held (every caller is on the read path, which holds
+// it): the snapshot below reads mvf.meta, which Close() nils under the lock.
 func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usenet.DataCorruptionError, noRetry bool) {
 	// Per-path debounce: short-circuit if this file already triggered a repair
 	// inside the debounce window. ShouldTrigger handles a nil coalescer
@@ -1939,6 +1998,16 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 		return
 	}
 
+	// Snapshot the metadata the fallback needs while we still hold mvf.mu and
+	// mvf.meta is alive, so the background goroutine never touches it.
+	var snap fileFailureSnapshot
+	if mvf.meta != nil {
+		snap = fileFailureSnapshot{
+			sourceNzbPath: mvf.meta.SourceNzbPath,
+			segmentCount:  len(mvf.meta.SegmentData),
+		}
+	}
+
 	// PAR2 self-heal (opt-in): when a repair service is wired, try to
 	// reconstruct the missing segments from recovery data before declaring the
 	// file corrupt and forcing a full ARR re-download. This runs in the
@@ -1946,14 +2015,14 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 	// subsequent reads. Only if reconstruction is impossible do we fall back to
 	// the mark-corrupted + ARR path.
 	if mvf.repairService != nil {
-		go mvf.selfHealOrFallback(dataCorruptionErr, noRetry)
+		go mvf.selfHealOrFallback(dataCorruptionErr, noRetry, snap)
 		return
 	}
 
 	// Use a short timeout context to prevent blocking indefinitely
 	ctx, cancel := context.WithTimeout(mvf.ctx, 5*time.Second)
 	defer cancel()
-	mvf.markCorruptedAndTriggerArr(ctx, dataCorruptionErr, noRetry)
+	mvf.markCorruptedAndTriggerArr(ctx, dataCorruptionErr, noRetry, snap)
 }
 
 // defaultSelfHealTimeout bounds a background PAR2 reconstruction. Recovery must
@@ -1963,17 +2032,29 @@ const defaultSelfHealTimeout = 5 * time.Minute
 
 // selfHealOrFallback attempts PAR2 reconstruction in the background and, on
 // failure, performs the existing mark-corrupted + ARR re-download. It uses a
-// fresh context because the originating read may already be cancelled.
-func (mvf *MetadataVirtualFile) selfHealOrFallback(dataCorruptionErr *usenet.DataCorruptionError, noRetry bool) {
-	ctx, cancel := context.WithTimeout(context.Background(), defaultSelfHealTimeout)
-	defer cancel()
+// fresh context because the originating read may already be cancelled. When a
+// RepairManager is present the work is deduplicated against any in-flight job
+// (including one a blocking read already started) so the file is reconstructed
+// at most once at a time.
+func (mvf *MetadataVirtualFile) selfHealOrFallback(dataCorruptionErr *usenet.DataCorruptionError, noRetry bool, snap fileFailureSnapshot) {
+	ctx := context.Background()
 
-	if err := mvf.repairService.RepairFile(ctx, mvf.name); err != nil {
+	var err error
+	if mvf.repairManager != nil {
+		err = mvf.repairManager.Wait(ctx, mvf.repairManager.Start(mvf.name))
+	} else {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, defaultSelfHealTimeout)
+		defer cancel()
+		err = mvf.repairService.RepairFile(ctx, mvf.name)
+	}
+
+	if err != nil {
 		slog.InfoContext(ctx, "PAR2 self-heal unavailable, falling back to re-download",
 			"file", mvf.name, "reason", err)
 		mctx, mcancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer mcancel()
-		mvf.markCorruptedAndTriggerArr(mctx, dataCorruptionErr, noRetry)
+		mvf.markCorruptedAndTriggerArr(mctx, dataCorruptionErr, noRetry, snap)
 		return
 	}
 
@@ -1983,10 +2064,161 @@ func (mvf *MetadataVirtualFile) selfHealOrFallback(dataCorruptionErr *usenet.Dat
 	mvf.repairCoalescer.EnqueueRefresh(filepath.Dir(mvf.name))
 }
 
+// defaultBlockOnRepairTimeout caps how long a streaming read blocks for an
+// in-flight self-heal before falling back to the failure path. Kept under
+// typical client/VFS read timeouts so we surface a clean error rather than
+// letting the player hang to its own deadline.
+const defaultBlockOnRepairTimeout = 90 * time.Second
+
+// defaultProactiveMinFileSize is the smallest file proactively healed by
+// default (bytes). Below this the STAT sweep + whole-file fetch isn't worth it.
+const defaultProactiveMinFileSize = 50 << 20 // 50 MiB
+
+// streamingHealEnabled reports whether mid-stream self-heal is configured, and
+// whether proactive-on-open is active. Both require a wired repair manager.
+func (mvf *MetadataVirtualFile) streamingHealEnabled() (enabled, proactive bool) {
+	if mvf.repairManager == nil || mvf.configGetter == nil {
+		return false, false
+	}
+	h := mvf.configGetter().Streaming.Par2StreamingHeal
+	if h == nil || h.Enabled == nil || !*h.Enabled {
+		return false, false
+	}
+	proactive = h.ProactiveOnOpen == nil || *h.ProactiveOnOpen
+	return true, proactive
+}
+
+// blockOnRepairTimeout returns the configured (or default) maximum a failing
+// read waits for self-heal.
+func (mvf *MetadataVirtualFile) blockOnRepairTimeout() time.Duration {
+	if mvf.configGetter != nil {
+		if h := mvf.configGetter().Streaming.Par2StreamingHeal; h != nil &&
+			h.BlockOnRepairSeconds != nil && *h.BlockOnRepairSeconds > 0 {
+			return time.Duration(*h.BlockOnRepairSeconds) * time.Second
+		}
+	}
+	return defaultBlockOnRepairTimeout
+}
+
+// proactiveHealParams returns the gating thresholds for proactive heal.
+func (mvf *MetadataVirtualFile) proactiveHealParams() (minSize int64, mediaOnly bool) {
+	minSize, mediaOnly = int64(defaultProactiveMinFileSize), true
+	if mvf.configGetter == nil {
+		return
+	}
+	if h := mvf.configGetter().Streaming.Par2StreamingHeal; h != nil {
+		if h.MinFileSizeMB != nil && *h.MinFileSizeMB >= 0 {
+			minSize = int64(*h.MinFileSizeMB) << 20
+		}
+		if h.MediaOnly != nil {
+			mediaOnly = *h.MediaOnly
+		}
+	}
+	return
+}
+
+// mediaExtensions are the container formats proactive heal targets when
+// media_only is set. Sidecars (subs, nfo) and archives are intentionally absent.
+var mediaExtensions = map[string]struct{}{
+	".mkv": {}, ".mp4": {}, ".avi": {}, ".mov": {}, ".m4v": {}, ".ts": {},
+	".m2ts": {}, ".wmv": {}, ".flv": {}, ".webm": {}, ".mpg": {}, ".mpeg": {},
+}
+
+func isMediaFile(name string) bool {
+	_, ok := mediaExtensions[strings.ToLower(filepath.Ext(name))]
+	return ok
+}
+
+// eligibleForProactiveHeal applies the size/media gates that keep proactive
+// heal from STAT-storming during library scans of small or non-media files.
+func (mvf *MetadataVirtualFile) eligibleForProactiveHeal() bool {
+	if mvf.meta == nil {
+		return false
+	}
+	minSize, mediaOnly := mvf.proactiveHealParams()
+	if mvf.meta.FileSize < minSize {
+		return false
+	}
+	if mediaOnly && !isMediaFile(mvf.name) {
+		return false
+	}
+	return true
+}
+
+// maybeStartProactiveHeal fires once per open handle. When mid-stream self-heal
+// is enabled with proactive-on-open and this is an eligible (sizeable, media)
+// file, it probes segment availability with a cheap STAT sweep in the
+// background and, if the file has repairable holes, starts the whole-file
+// reconstruction so playback can reach the hole already healed. Healthy files
+// cost only the STAT sweep.
+func (mvf *MetadataVirtualFile) maybeStartProactiveHeal() {
+	mvf.proactiveOnce.Do(func() {
+		enabled, proactive := mvf.streamingHealEnabled()
+		if !enabled || !proactive || mvf.repairService == nil {
+			return
+		}
+		if !mvf.eligibleForProactiveHeal() {
+			return
+		}
+		path := mvf.name
+		ctx := mvf.ctx
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		go func() {
+			needs, repairable, err := mvf.repairService.ProbeRepairable(ctx, path)
+			if err != nil {
+				slog.DebugContext(ctx, "Proactive self-heal probe skipped", "file", path, "reason", err)
+				return
+			}
+			if !needs || !repairable {
+				return
+			}
+			slog.InfoContext(ctx, "Proactive PAR2 self-heal starting", "file", path)
+			mvf.repairManager.Start(path)
+		}()
+	})
+}
+
+// tryBlockingHeal joins (or starts) the file's repair job and waits up to the
+// configured budget for the missing data to be restored. It returns true when
+// the file is healed — the caller should drop its stale reader and retry, since
+// recovered segments are now served from the segment store — and false when
+// self-heal is disabled, unavailable, or did not finish in time (the caller
+// then falls back to the existing failure path). Must be called with mvf.mu
+// held by the read path; the wait is bounded and unblocks on ctx cancellation.
+func (mvf *MetadataVirtualFile) tryBlockingHeal() bool {
+	enabled, _ := mvf.streamingHealEnabled()
+	if !enabled {
+		return false
+	}
+	if mvf.repairManager.HealedRecently(mvf.name) {
+		return true // already restored within the reuse window; just retry
+	}
+
+	ctx := mvf.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, mvf.blockOnRepairTimeout())
+	defer cancel()
+
+	if err := mvf.repairManager.Wait(waitCtx, mvf.repairManager.Start(mvf.name)); err != nil {
+		slog.InfoContext(ctx, "Mid-stream PAR2 self-heal did not complete; falling back",
+			"file", mvf.name, "reason", err)
+		return false
+	}
+	slog.InfoContext(ctx, "Mid-stream PAR2 self-heal restored file", "file", mvf.name)
+	return true
+}
+
 // markCorruptedAndTriggerArr marks the file corrupted in metadata and the
 // health DB and kicks off the ARR re-download cycle. This is the fallback when
 // PAR2 self-heal is disabled or unsuccessful.
-func (mvf *MetadataVirtualFile) markCorruptedAndTriggerArr(ctx context.Context, dataCorruptionErr *usenet.DataCorruptionError, noRetry bool) {
+// markCorruptedAndTriggerArr operates on the snapshot captured by
+// updateFileHealthOnError rather than mvf.meta, so it is safe to run from the
+// background self-heal goroutine after Close() has nilled mvf.meta.
+func (mvf *MetadataVirtualFile) markCorruptedAndTriggerArr(ctx context.Context, dataCorruptionErr *usenet.DataCorruptionError, noRetry bool, snap fileFailureSnapshot) {
 	// Any file with missing segments or corruption is marked as corrupted in metadata
 	// and DB to trigger the repair cycle via the health worker.
 	metadataStatus := metapb.FileStatus_FILE_STATUS_CORRUPTED
@@ -1998,14 +2230,14 @@ func (mvf *MetadataVirtualFile) markCorruptedAndTriggerArr(ctx context.Context, 
 
 	// Update database health tracking (blocking with timeout)
 	errorMsg := dataCorruptionErr.Error()
-	sourceNzbPath := &mvf.meta.SourceNzbPath
-	if *sourceNzbPath == "" {
-		sourceNzbPath = nil
+	var sourceNzbPath *string
+	if snap.sourceNzbPath != "" {
+		sourceNzbPath = &snap.sourceNzbPath
 	}
 
 	// Create error details JSON
 	errorDetails := fmt.Sprintf(`{"missing_articles": %d, "total_articles": %d, "error_type": "ArticleNotFound"}`,
-		1, len(mvf.meta.SegmentData))
+		1, snap.segmentCount)
 
 	// Mark as repair_triggered with high priority to trigger the replacement immediately.
 	// We skip the re-verification phase because a streaming failure is a definitive indicator of corruption.

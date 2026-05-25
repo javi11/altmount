@@ -55,6 +55,31 @@ export function StreamingConfigSection({
 		checkChanges(newData, cacheData);
 	};
 
+	const handlePar2RepairChange = (value: boolean) => {
+		const newData = { ...streamingData, par2_repair: value };
+		setStreamingData(newData);
+		checkChanges(newData, cacheData);
+	};
+
+	const handleHealChange = (
+		field: keyof NonNullable<StreamingConfig["par2_streaming_heal"]>,
+		value: boolean | number,
+	) => {
+		const newData = {
+			...streamingData,
+			par2_streaming_heal: {
+				...streamingData.par2_streaming_heal,
+				[field]: value,
+			},
+		};
+		setStreamingData(newData);
+		checkChanges(newData, cacheData);
+	};
+
+	const heal = streamingData.par2_streaming_heal ?? {};
+	const par2RepairEnabled = streamingData.par2_repair === true;
+	const healEnabled = heal.enabled === true;
+
 	const handleCacheChange = (field: keyof SegmentCacheConfig, value: boolean | string | number) => {
 		const newData = { ...cacheData, [field]: value };
 		setCacheData(newData);
@@ -222,6 +247,148 @@ export function StreamingConfigSection({
 							Masking a file makes it appear as "missing" to your mount. This triggers Sonarr or
 							Radarr to attempt a repair or redownload. The threshold protects against one-off
 							network glitches.
+						</div>
+					</div>
+				</div>
+			</div>
+
+			{/* PAR2 Self-Heal */}
+			<div className="border-base-200 border-t pt-10">
+				<h3 className="font-bold text-base-content text-lg">PAR2 Self-Heal</h3>
+				<p className="text-base-content/50 text-sm">
+					Reconstruct missing Usenet segments from the file's PAR2 recovery data instead of
+					re-downloading the whole release. Recovered segments go to a small independent in-memory
+					store, so this works without the segment cache — including rclone VFS cache setups.
+				</p>
+			</div>
+
+			<div className="space-y-8">
+				{/* PAR2 repair toggle */}
+				<div className="flex items-center justify-between rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+					<div className="min-w-0">
+						<h4 className="font-bold text-base-content text-sm">Enable PAR2 Self-Heal</h4>
+						<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
+							On a streaming failure, rebuild the missing segments from PAR2 recovery data in the
+							background before falling back to a Sonarr/Radarr re-download.
+						</p>
+					</div>
+					<input
+						type="checkbox"
+						className="toggle toggle-primary"
+						checked={par2RepairEnabled}
+						disabled={isReadOnly}
+						onChange={(e) => handlePar2RepairChange(e.target.checked)}
+					/>
+				</div>
+
+				{/* Mid-stream heal toggle */}
+				<div
+					className={`flex items-center justify-between rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6 transition-opacity ${!par2RepairEnabled ? "opacity-50" : ""}`}
+				>
+					<div className="min-w-0">
+						<h4 className="font-bold text-base-content text-sm">Seamless Mid-Stream Heal</h4>
+						<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
+							Instead of failing a read that hits a missing segment, block briefly for the repair
+							and keep playing. Best paired with proactive repair below.
+						</p>
+					</div>
+					<input
+						type="checkbox"
+						className="toggle toggle-primary"
+						checked={healEnabled}
+						disabled={isReadOnly || !par2RepairEnabled}
+						onChange={(e) => handleHealChange("enabled", e.target.checked)}
+					/>
+				</div>
+
+				{/* Proactive on open */}
+				<div
+					className={`flex items-center justify-between rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6 transition-opacity ${!healEnabled ? "opacity-50" : ""}`}
+				>
+					<div className="min-w-0">
+						<h4 className="font-bold text-base-content text-sm">Proactive Repair on Open</h4>
+						<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
+							Probe segment availability when a stream starts and begin reconstruction early, so
+							playback reaches the gap already healed. PAR2 needs the whole file, so starting early
+							is what makes playback seamless.
+						</p>
+					</div>
+					<input
+						type="checkbox"
+						className="toggle toggle-primary"
+						checked={heal.proactive_on_open !== false}
+						disabled={isReadOnly || !healEnabled}
+						onChange={(e) => handleHealChange("proactive_on_open", e.target.checked)}
+					/>
+				</div>
+
+				{/* Block-on-repair seconds */}
+				<div
+					className={`space-y-3 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6 transition-opacity ${!healEnabled ? "opacity-50" : ""}`}
+				>
+					<div className="min-w-0">
+						<h4 className="font-bold text-base-content text-sm">
+							Block-on-Repair Timeout (seconds)
+						</h4>
+						<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
+							Maximum time a stalled read waits for self-heal before falling back to the failure
+							path. Keep it below your player/VFS read timeout. Default 90.
+						</p>
+					</div>
+					<input
+						type="number"
+						min="1"
+						max="600"
+						className="input input-bordered w-full"
+						value={heal.block_on_repair_seconds ?? 90}
+						disabled={isReadOnly || !healEnabled}
+						onChange={(e) =>
+							handleHealChange("block_on_repair_seconds", Number.parseInt(e.target.value, 10) || 0)
+						}
+					/>
+				</div>
+
+				{/* Min file size + media only */}
+				<div
+					className={`space-y-3 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6 transition-opacity ${!healEnabled ? "opacity-50" : ""}`}
+				>
+					<div className="min-w-0">
+						<h4 className="font-bold text-base-content text-sm">Minimum File Size (MB)</h4>
+						<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
+							Skip proactive heal for files smaller than this. Default 50.
+						</p>
+					</div>
+					<input
+						type="number"
+						min="0"
+						className="input input-bordered w-full"
+						value={heal.min_file_size_mb ?? 50}
+						disabled={isReadOnly || !healEnabled}
+						onChange={(e) =>
+							handleHealChange("min_file_size_mb", Number.parseInt(e.target.value, 10) || 0)
+						}
+					/>
+					<label className="flex cursor-pointer items-center justify-between pt-2">
+						<span className="font-bold text-base-content text-sm">Media files only</span>
+						<input
+							type="checkbox"
+							className="toggle toggle-primary"
+							checked={heal.media_only !== false}
+							disabled={isReadOnly || !healEnabled}
+							onChange={(e) => handleHealChange("media_only", e.target.checked)}
+						/>
+					</label>
+				</div>
+
+				{/* Info box */}
+				<div className="alert items-start rounded-2xl border border-info/20 bg-info/5 p-4 shadow-sm">
+					<Info className="mt-0.5 h-5 w-5 shrink-0 text-info" />
+					<div className="min-w-0 flex-1">
+						<div className="font-bold text-info text-xs uppercase tracking-wider">Limitations</div>
+						<div className="mt-1 break-words text-[11px] leading-relaxed opacity-80">
+							PAR2 reconstruction needs the whole surviving file, so a hole can only be filled after
+							that data is fetched. Sequential playback with proactive repair is usually seamless;
+							random seeks into an unhealed region, or very large files, may still pause or fail.
 						</div>
 					</div>
 				</div>

@@ -3,6 +3,7 @@ package repair
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/nntppool/v4"
@@ -35,5 +36,30 @@ func (p *PoolFetcher) Fetch(ctx context.Context, messageID string) ([]byte, bool
 		}
 		return nil, false, err
 	}
+	if body == nil {
+		// Defensive: nntppool guards its own (body != nil) accesses, so a nil
+		// body with a nil error is not contractually impossible. Treat it as a
+		// transient fault rather than panicking on body.Bytes.
+		return nil, false, fmt.Errorf("repair: nil article body for %s", messageID)
+	}
 	return body.Bytes, false, nil
+}
+
+// Probe reports whether messageID exists on any provider without downloading
+// the body (NNTP STAT). A (false, nil) result means the article is permanently
+// missing across all providers; a non-nil error is transient/operational and
+// must NOT be interpreted as "missing". This backs the cheap availability sweep
+// that gates proactive self-heal at stream start.
+func (p *PoolFetcher) Probe(ctx context.Context, messageID string) (bool, error) {
+	cp, err := p.mgr.GetPool()
+	if err != nil {
+		return false, err
+	}
+	if _, err := cp.Stat(ctx, messageID); err != nil {
+		if errors.Is(err, nntppool.ErrArticleNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }

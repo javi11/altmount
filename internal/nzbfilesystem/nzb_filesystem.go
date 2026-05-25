@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/javi11/altmount/internal/slogutil"
+	"github.com/javi11/altmount/internal/usenet"
 	"github.com/javi11/altmount/internal/utils"
 	"github.com/spf13/afero"
 )
@@ -27,6 +28,13 @@ func NewNzbFilesystem(remoteFile *MetadataRemoteFile) *NzbFilesystem {
 // MetadataRemoteFile.SetRepairService). Safe to leave unset.
 func (nfs *NzbFilesystem) SetRepairService(rs RepairService) {
 	nfs.remoteFile.SetRepairService(rs)
+}
+
+// SetRepairStore registers the independent store holding reconstructed segments
+// so the reader serves recovered bytes even when the on-disk segment cache is
+// disabled (see MetadataRemoteFile.SetRepairStore).
+func (nfs *NzbFilesystem) SetRepairStore(store usenet.SegmentStore) {
+	nfs.remoteFile.SetRepairStore(store)
 }
 
 // Name returns the filesystem name

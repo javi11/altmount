@@ -25,8 +25,10 @@ import (
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/rclone"
 	"github.com/javi11/altmount/internal/repair"
+	"github.com/javi11/altmount/internal/segstore"
 	"github.com/javi11/altmount/internal/slogutil"
 	"github.com/javi11/altmount/internal/stremio"
+	"github.com/javi11/altmount/internal/usenet"
 	"github.com/javi11/altmount/internal/webdav"
 	"github.com/spf13/cobra"
 )
@@ -140,25 +142,25 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	fs := initializeFilesystem(ctx, metadataService, repos.HealthRepo, arrsService, rcloneRCClient, poolManager, configManager.GetConfigGetter(), streamTracker, cacheSource)
 
-	// Optional: PAR2-backed self-healing. On a streaming failure, reconstruct
-	// the missing segments from the file's PAR2 recovery data and write them to
-	// the segment cache (the repair sink) instead of forcing a full ARR
-	// re-download. Requires the segment cache as the sink, so only wire it when
-	// both are enabled.
+	// Optional: PAR2-backed self-healing. On a streaming failure, reconstruct the
+	// missing segments from the file's PAR2 recovery data and write them to an
+	// independent in-memory repair store that the reader consults, instead of
+	// forcing a full ARR re-download. Because the repair store is separate from
+	// the on-disk segment cache, this works in rclone-VFS-cache deployments where
+	// the segment cache is intentionally disabled.
 	if cfg.Streaming.Par2Repair != nil && *cfg.Streaming.Par2Repair {
-		if cfg.SegmentCache.Enabled != nil && *cfg.SegmentCache.Enabled {
-			repairSvc := repair.NewService(
-				metadataService,
-				repair.NewPoolFetcher(poolManager),
-				cacheSink{cacheSource},
-				poolManager,
-				logger,
-			)
-			fs.SetRepairService(par2RepairAdapter{repairSvc})
-			logger.Info("PAR2 self-heal enabled")
-		} else {
-			logger.Warn("streaming.par2_repair is enabled but segment_cache is disabled; PAR2 self-heal needs the cache as its sink — skipping")
-		}
+		repairStore := segstore.NewMemStore(par2RepairStoreBytes(cfg), par2RepairStoreTTL(cfg))
+		repairSvc := repair.NewService(
+			metadataService,
+			repair.NewPoolFetcher(poolManager),
+			storeSink{repairStore},
+			poolManager,
+			logger,
+		)
+		fs.SetRepairService(par2RepairAdapter{repairSvc})
+		fs.SetRepairStore(repairStore)
+		logger.Info("PAR2 self-heal enabled",
+			"segment_cache_enabled", cfg.SegmentCache.Enabled != nil && *cfg.SegmentCache.Enabled)
 	}
 
 	// 6. Setup web services
@@ -410,17 +412,37 @@ func (a par2RepairAdapter) RepairFile(ctx context.Context, virtualPath string) e
 	return err
 }
 
-// cacheSink writes reconstructed segments into the active segment cache — the
-// same store the reader consults on its cache-hit path, so recovered segments
-// are served transparently. A disabled cache makes Put a no-op.
-type cacheSink struct{ src *segcache.Source }
+func (a par2RepairAdapter) ProbeRepairable(ctx context.Context, virtualPath string) (bool, bool, error) {
+	return a.svc.ProbeRepairable(ctx, virtualPath)
+}
 
-func (c cacheSink) Put(messageID string, data []byte) error {
-	store := c.src.Store()
-	if store == nil {
+// storeSink writes reconstructed segments into the PAR2 repair store — the same
+// store the reader consults (via the chain) on its read-through path, so
+// recovered segments are served transparently regardless of whether the on-disk
+// segment cache is enabled.
+type storeSink struct{ store usenet.SegmentStore }
+
+func (s storeSink) Put(messageID string, data []byte) error {
+	if s.store == nil {
 		return nil
 	}
-	return store.Put(messageID, data)
+	return s.store.Put(messageID, data)
+}
+
+// par2RepairStoreBytes / par2RepairStoreTTL resolve the in-memory repair store
+// bounds from config, falling back to the segstore defaults.
+func par2RepairStoreBytes(cfg *config.Config) int64 {
+	if rs := cfg.Streaming.Par2RepairStore; rs != nil && rs.MaxSizeMB != nil && *rs.MaxSizeMB > 0 {
+		return int64(*rs.MaxSizeMB) << 20
+	}
+	return segstore.DefaultMemStoreBytes
+}
+
+func par2RepairStoreTTL(cfg *config.Config) time.Duration {
+	if rs := cfg.Streaming.Par2RepairStore; rs != nil && rs.ExpiryMinutes != nil && *rs.ExpiryMinutes > 0 {
+		return time.Duration(*rs.ExpiryMinutes) * time.Minute
+	}
+	return segstore.DefaultMemStoreTTL
 }
 
 // waitForListener blocks until the HTTP server is accepting TCP connections on

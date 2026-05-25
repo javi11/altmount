@@ -35,6 +35,12 @@ func (f fakeFetcher) Fetch(_ context.Context, id string) ([]byte, bool, error) {
 	return nil, false, fmt.Errorf("unexpected fetch for %s", id)
 }
 
+// Probe implements ArticleProber: a configured-missing article reports absent,
+// everything else present (the fake never has transient STAT failures).
+func (f fakeFetcher) Probe(_ context.Context, id string) (bool, error) {
+	return !f.missing[id], nil
+}
+
 type mapSink struct{ got map[string][]byte }
 
 func (m *mapSink) Put(id string, data []byte) error {
@@ -133,6 +139,46 @@ func TestServiceRepairFile(t *testing.T) {
 		if !bytes.Equal(sink.got[id], data[start:end]) {
 			t.Fatalf("segment %s reconstructed incorrectly", id)
 		}
+	}
+}
+
+func TestServiceProbeRepairable(t *testing.T) {
+	data, par2Bytes := loadPar2Fixture(t)
+
+	// Healthy file: STAT sweep finds nothing missing.
+	meta, present, ids := buildFixtureMeta(data, par2Bytes, 5000)
+	svc := NewService(fakeMeta{meta}, fakeFetcher{present: present}, &mapSink{got: map[string][]byte{}}, nil, nil)
+	needs, repairable, err := svc.ProbeRepairable(context.Background(), "/x")
+	if err != nil || needs {
+		t.Fatalf("healthy: needs=%v repairable=%v err=%v, want needs=false err=nil", needs, repairable, err)
+	}
+
+	// Two segments missing, well within the recovery set's capacity (same drop
+	// the byte-identical RepairFile test recovers from).
+	meta2, present2, _ := buildFixtureMeta(data, par2Bytes, 5000)
+	missing := map[string]bool{ids[1]: true, ids[5]: true}
+	for id := range missing {
+		delete(present2, id)
+	}
+	svc2 := NewService(fakeMeta{meta2}, fakeFetcher{present: present2, missing: missing}, &mapSink{got: map[string][]byte{}}, nil, nil)
+	needs, repairable, err = svc2.ProbeRepairable(context.Background(), "/x")
+	if err != nil || !needs || !repairable {
+		t.Fatalf("missing-recoverable: needs=%v repairable=%v err=%v, want needs=true repairable=true", needs, repairable, err)
+	}
+}
+
+func TestServiceProbeNoPar2NotRepairable(t *testing.T) {
+	// A missing segment with no PAR2 data: needs repair, but not repairable here.
+	meta := &metapb.FileMetadata{
+		FileSize: 10,
+		SegmentData: []*metapb.SegmentData{
+			{Id: "<a@altmount>", StartOffset: 0, EndOffset: 9, SegmentSize: 10},
+		},
+	}
+	svc := NewService(fakeMeta{meta}, fakeFetcher{missing: map[string]bool{"<a@altmount>": true}}, &mapSink{got: map[string][]byte{}}, nil, nil)
+	needs, repairable, err := svc.ProbeRepairable(context.Background(), "/x")
+	if err != nil || !needs || repairable {
+		t.Fatalf("no-par2: needs=%v repairable=%v err=%v, want needs=true repairable=false", needs, repairable, err)
 	}
 }
 

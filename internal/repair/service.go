@@ -31,7 +31,18 @@ var (
 	// the decoded stream). Segment offsets would not line up with PAR2 slices,
 	// so we refuse rather than reconstruct garbage.
 	ErrPar2Mismatch = errors.New("repair: PAR2 recovery set does not match this file")
+	// ErrProbeUnsupported is returned by ProbeRepairable when the configured
+	// ArticleFetcher cannot perform a cheap existence check (NNTP STAT).
+	ErrProbeUnsupported = errors.New("repair: article prober not available")
 )
+
+// ArticleProber optionally reports article existence without downloading the
+// body (NNTP STAT). When the configured ArticleFetcher also implements this,
+// ProbeRepairable can decide whether a file needs — and can be — repaired
+// without pulling the whole file over the wire.
+type ArticleProber interface {
+	Probe(ctx context.Context, messageID string) (exists bool, err error)
+}
 
 // MetadataReader reads the full proto metadata (segments + PAR2 references) for
 // a virtual file.
@@ -168,6 +179,72 @@ func (s *Service) RepairFile(ctx context.Context, virtualPath string) (*Outcome,
 		SlicesFixed:       res.SlicesFixed,
 		MissingSegments:   len(missing),
 	}, nil
+}
+
+// ProbeRepairable cheaply determines, via NNTP STAT, whether virtualPath has
+// missing segments and whether its PAR2 recovery data can cover them — without
+// downloading any article bodies (the PAR2 files themselves are small and are
+// fetched to count recovery slices). It gates proactive self-heal at stream
+// start so that healthy files cost only a STAT sweep.
+//
+// needsRepair is true when at least one data segment is permanently missing.
+// repairable is true when a single-file PAR2 set matches the file and carries
+// at least as many recovery slices as the missing-slice count. A nil error with
+// needsRepair == false means the file is healthy.
+func (s *Service) ProbeRepairable(ctx context.Context, virtualPath string) (needsRepair, repairable bool, err error) {
+	prober, ok := s.fetch.(ArticleProber)
+	if !ok {
+		return false, false, ErrProbeUnsupported
+	}
+
+	meta, err := s.meta.ReadFileMetadata(virtualPath)
+	if err != nil {
+		return false, false, fmt.Errorf("repair: read metadata: %w", err)
+	}
+	if meta == nil {
+		return false, false, ErrNoMetadata
+	}
+	segs := buildSegments(meta.GetSegmentData())
+	if len(segs) == 0 {
+		return false, false, ErrNoSegments
+	}
+
+	// STAT every data segment. A transient probe error aborts the decision
+	// (caller skips proactive heal) rather than mislabelling articles missing.
+	missing := make(map[string]bool)
+	for _, seg := range segs {
+		exists, perr := prober.Probe(ctx, seg.MessageID)
+		if perr != nil {
+			return false, false, fmt.Errorf("repair: probe segment %s: %w", seg.MessageID, perr)
+		}
+		if !exists {
+			missing[seg.MessageID] = true
+		}
+	}
+	if len(missing) == 0 {
+		return false, true, nil // healthy: nothing to do
+	}
+
+	// Holes exist — can PAR2 cover them? Anything that disqualifies the set
+	// (no PAR2, unparseable, multi-file, length mismatch, insufficient recovery)
+	// reports needsRepair=true, repairable=false so the caller falls back.
+	if len(meta.GetPar2Files()) == 0 {
+		return true, false, nil
+	}
+	rs, err := s.loadRecoverySet(ctx, meta.GetPar2Files())
+	if err != nil {
+		return true, false, nil
+	}
+	if len(rs.RecoveryFileIDs) != 1 {
+		return true, false, nil
+	}
+	fd := rs.Files[rs.RecoveryFileIDs[0]]
+	if fd == nil || int64(fd.Length) != meta.GetFileSize() {
+		return true, false, nil
+	}
+	missingSlices, _ := par2.MissingSlices(rs, segs, missing)
+	repairable = missingSlices > 0 && len(rs.Recovery) >= missingSlices
+	return true, repairable, nil
 }
 
 // loadRecoverySet fetches the Usenet segments backing each PAR2 file, in offset

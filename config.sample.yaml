@@ -40,7 +40,20 @@ streaming:
     threshold: 3 # Number of streaming failures before masking a file
   par2_repair: false # Reconstruct missing segments from PAR2 recovery data on a
     # streaming failure (self-heal) instead of forcing a full ARR re-download.
-    # Requires segment_cache.enabled: true (recovered segments are written there).
+    # Recovered segments go to an independent in-memory store the reader consults,
+    # so this works without the segment cache (e.g. with an rclone VFS cache).
+  par2_repair_store: # Tuning for the in-memory repair landing zone (optional).
+    max_size_mb: 512 # Cap on reconstructed-segment bytes held in memory.
+    expiry_minutes: 60 # Drop recovered segments older than this.
+  par2_streaming_heal: # Seamless mid-stream self-heal (requires par2_repair above).
+    enabled: false # Block a read that hits a missing segment for an in-flight
+      # repair and retry, instead of failing the stream. Off by default.
+    proactive_on_open: true # Probe availability at stream start and begin repair
+      # early so playback reaches the gap already healed (PAR2 needs the whole file).
+    block_on_repair_seconds: 90 # Max time a stalled read waits before falling back.
+      # Keep below your player/VFS read timeout.
+    min_file_size_mb: 50 # Skip proactive heal for files smaller than this.
+    media_only: true # Limit proactive heal to recognised media extensions.
 
 # RClone configuration (optional)
 rclone:

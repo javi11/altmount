@@ -121,6 +121,16 @@ func Parse(data []byte) (*RecoverySet, error) {
 	if rs.SliceSize == 0 || rs.SliceSize%4 != 0 {
 		return nil, ErrNoSliceSize
 	}
+	// Every recovery slice must be exactly SliceSize bytes. A truncated or
+	// malformed recovery packet (that still passed its own MD5) would otherwise
+	// surface much later as a singular-matrix error or, worse, silently skew
+	// reconstruction. Fail fast with a diagnosable error instead.
+	for _, r := range rs.Recovery {
+		if uint64(len(r.Data)) != rs.SliceSize {
+			return nil, fmt.Errorf("par2: recovery slice (exponent %d) length %d != slice size %d",
+				r.Exponent, len(r.Data), rs.SliceSize)
+		}
+	}
 	return rs, nil
 }
 

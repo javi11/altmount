@@ -42,6 +42,10 @@ type ARRsRepairService interface {
 // was not possible and the caller should fall back to the ARR rescan path.
 type RepairService interface {
 	RepairFile(ctx context.Context, virtualPath string) error
+	// ProbeRepairable cheaply reports (via NNTP STAT, no body downloads) whether
+	// the file has missing segments and whether its PAR2 data can cover them.
+	// Used to gate proactive self-heal at stream start.
+	ProbeRepairable(ctx context.Context, virtualPath string) (needsRepair, repairable bool, err error)
 }
 
 // StreamTracker interface for tracking active streams

@@ -72,19 +72,7 @@ func RepairFileSegments(
 	// Decide, per PAR2 slice, whether it is fully covered by present segments.
 	// A slice that overlaps any missing segment cannot be assembled and must be
 	// reconstructed.
-	sliceMissing := make([]bool, total)
-	for _, seg := range segments {
-		if !missing[seg.MessageID] {
-			continue
-		}
-		first := int(seg.Start / int64(ss))
-		last := int((seg.End - 1) / int64(ss))
-		for s := first; s <= last && s < total; s++ {
-			if s >= 0 {
-				sliceMissing[s] = true
-			}
-		}
-	}
+	sliceMissing, _ := markMissingSlices(rs, segments, missing)
 
 	// Assemble the surviving slices from present segments. Fetch each present
 	// segment once.
@@ -167,6 +155,47 @@ func RepairFileSegments(
 		result.Recovered = append(result.Recovered, seg.MessageID)
 	}
 	return result, nil
+}
+
+// markMissingSlices returns, per global input-block index, whether the slice
+// overlaps any missing segment (and so must be reconstructed), plus the total
+// slice count from the recovery-set layout. A slice that any missing segment
+// touches is unrecoverable from present data and is marked missing wholesale.
+func markMissingSlices(rs *RecoverySet, segments []Segment, missing map[string]bool) (sliceMissing []bool, total int) {
+	_, total = rs.Layout()
+	sliceMissing = make([]bool, total)
+	ss := int64(rs.SliceSize)
+	if ss <= 0 {
+		return sliceMissing, total
+	}
+	for _, seg := range segments {
+		if !missing[seg.MessageID] {
+			continue
+		}
+		first := int(seg.Start / ss)
+		last := int((seg.End - 1) / ss)
+		for s := first; s <= last && s < total; s++ {
+			if s >= 0 {
+				sliceMissing[s] = true
+			}
+		}
+	}
+	return sliceMissing, total
+}
+
+// MissingSlices reports how many PAR2 input slices are affected by the given
+// missing segments, and the recovery set's total slice count. It is a cheap,
+// allocation-light way to decide whether reconstruction is even possible
+// (recovery-slice count >= missing-slice count) before committing to the
+// whole-file fetch that reconstruction requires.
+func MissingSlices(rs *RecoverySet, segments []Segment, missing map[string]bool) (missingCount, total int) {
+	sliceMissing, total := markMissingSlices(rs, segments, missing)
+	for _, m := range sliceMissing {
+		if m {
+			missingCount++
+		}
+	}
+	return missingCount, total
 }
 
 // readRange concatenates bytes [start,end) from slice-aligned blocks.

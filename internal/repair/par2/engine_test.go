@@ -49,6 +49,30 @@ func makeSegments(n, segSize int) []Segment {
 	return segs
 }
 
+func TestMissingSlices(t *testing.T) {
+	rs, data := loadFixture(t)
+	ss := int(rs.SliceSize)
+	segs := makeSegments(len(data), 5000)
+	_, total := rs.Layout()
+
+	// Nothing missing → no missing slices, total preserved.
+	if mc, tot := MissingSlices(rs, segs, nil); mc != 0 || tot != total {
+		t.Fatalf("no-missing: got (%d,%d), want (0,%d)", mc, tot, total)
+	}
+
+	// One missing segment affects exactly the slices spanning its byte range.
+	missing := map[string]bool{segs[1].MessageID: true}
+	mc, tot := MissingSlices(rs, segs, missing)
+	if tot != total {
+		t.Fatalf("total = %d, want %d", tot, total)
+	}
+	first := int(segs[1].Start) / ss
+	last := int(segs[1].End-1) / ss
+	if want := last - first + 1; mc != want {
+		t.Fatalf("missing slices = %d, want %d", mc, want)
+	}
+}
+
 func TestRepairFileSegments(t *testing.T) {
 	rs, data := loadFixture(t)
 
