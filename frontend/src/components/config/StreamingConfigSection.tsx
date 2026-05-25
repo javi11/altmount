@@ -351,8 +351,9 @@ export function StreamingConfigSection({
 					<div className="min-w-0">
 						<h4 className="font-bold text-base-content text-sm">Seamless Mid-Stream Heal</h4>
 						<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
-							Instead of failing a read that hits a missing segment, block briefly for the repair
-							and keep playing. Best paired with proactive repair below.
+							Instead of failing a read that hits a missing segment, block briefly while the file is
+							reconstructed from PAR2, then keep playing. Reconstruction is reactive — it runs only
+							when a read actually reaches a hole, so opening a stream never pre-downloads the file.
 						</p>
 					</div>
 					<input
@@ -361,28 +362,6 @@ export function StreamingConfigSection({
 						checked={healEnabled}
 						disabled={isReadOnly || !par2RepairEnabled}
 						onChange={(e) => handleHealChange("enabled", e.target.checked)}
-					/>
-				</div>
-
-				{/* Proactive on open */}
-				<div
-					className={`flex items-center justify-between rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6 transition-opacity ${!healEnabled ? "opacity-50" : ""}`}
-				>
-					<div className="min-w-0">
-						<h4 className="font-bold text-base-content text-sm">Proactive Repair on Open</h4>
-						<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
-							Off by default: repair is reactive — the whole-file reconstruction runs only when
-							playback actually hits a missing segment, so opening a stream never pre-downloads the
-							file. Enable this to probe availability at stream start and begin reconstruction early
-							(lowest latency on files you expect to be damaged), at the cost of work up front.
-						</p>
-					</div>
-					<input
-						type="checkbox"
-						className="toggle toggle-primary"
-						checked={heal.proactive_on_open === true}
-						disabled={isReadOnly || !healEnabled}
-						onChange={(e) => handleHealChange("proactive_on_open", e.target.checked)}
 					/>
 				</div>
 
