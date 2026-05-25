@@ -26,7 +26,11 @@ import (
 // site in udfWalkAll / collectFileExtents now logs at WARN level before
 // continuing or breaking.
 func TestUDFWalk_LogsWhenFileICBHasUnknownTag(t *testing.T) {
-	// Capture default slog output into a buffer for assertions.
+	// Capture default slog output into a buffer for assertions. NOTE: this
+	// test mutates the process-wide default slog logger. Do NOT call
+	// t.Parallel() here, and do not parallelise any other test in this
+	// package that touches slog output, or log lines will bleed between
+	// tests and the matches==1 assertion below will flake.
 	var buf bytes.Buffer
 	prev := slog.Default()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))

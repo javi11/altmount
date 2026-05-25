@@ -418,9 +418,9 @@ func readICBExtent(rs io.ReadSeeker, loc udfLBA, length int, metaMap []udfMetaSp
 }
 
 // udfReadDirEntries reads all File Identifier Descriptor records from a
-// File Entry at physSect. ctx is threaded purely for symmetry with the
-// rest of the UDF walk so future warn-log hooks can use it without
-// changing the signature again.
+// File Entry at physSect. ctx is threaded for upcoming Indirect Entry
+// (tag 248) follow logic that will emit a debug log on each redirect,
+// and as a hook for future warn-log additions in this function.
 func udfReadDirEntries(ctx context.Context, rs io.ReadSeeker, physSect uint32, metaMap []udfMetaSpan, partStart uint32) ([]udfDirEntry, error) {
 	_ = ctx
 	tag, buf, err := udfReadTag(rs, physSect)
