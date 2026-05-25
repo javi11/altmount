@@ -1,9 +1,11 @@
 package iso
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 	"unicode/utf16"
 )
@@ -416,8 +418,11 @@ func readICBExtent(rs io.ReadSeeker, loc udfLBA, length int, metaMap []udfMetaSp
 }
 
 // udfReadDirEntries reads all File Identifier Descriptor records from a
-// File Entry at physSect.
-func udfReadDirEntries(rs io.ReadSeeker, physSect uint32, metaMap []udfMetaSpan, partStart uint32) ([]udfDirEntry, error) {
+// File Entry at physSect. ctx is threaded purely for symmetry with the
+// rest of the UDF walk so future warn-log hooks can use it without
+// changing the signature again.
+func udfReadDirEntries(ctx context.Context, rs io.ReadSeeker, physSect uint32, metaMap []udfMetaSpan, partStart uint32) ([]udfDirEntry, error) {
+	_ = ctx
 	tag, buf, err := udfReadTag(rs, physSect)
 	if err != nil {
 		return nil, fmt.Errorf("reading dir ICB at %d: %w", physSect, err)
@@ -587,12 +592,12 @@ func udfSetup(rs io.ReadSeeker) (partStart uint32, metaMap []udfMetaSpan, rootIC
 }
 
 // udfWalkAll recursively lists all non-directory files in a UDF filesystem.
-func udfWalkAll(rs io.ReadSeeker, dirICB udfLongAD, metaMap []udfMetaSpan, partStart uint32, prefix string) ([]isoFileEntry, error) {
+func udfWalkAll(ctx context.Context, rs io.ReadSeeker, dirICB udfLongAD, metaMap []udfMetaSpan, partStart uint32, prefix string) ([]isoFileEntry, error) {
 	physSect, err := udfResolveICB(dirICB.loc, metaMap, partStart)
 	if err != nil {
 		return nil, err
 	}
-	entries, err := udfReadDirEntries(rs, physSect, metaMap, partStart)
+	entries, err := udfReadDirEntries(ctx, rs, physSect, metaMap, partStart)
 	if err != nil {
 		return nil, err
 	}
@@ -603,16 +608,25 @@ func udfWalkAll(rs io.ReadSeeker, dirICB udfLongAD, metaMap []udfMetaSpan, partS
 			entryPath = prefix + "/" + e.name
 		}
 		if e.isDir {
-			sub, _ := udfWalkAll(rs, e.icb, metaMap, partStart, entryPath)
+			sub, _ := udfWalkAll(ctx, rs, e.icb, metaMap, partStart, entryPath)
 			result = append(result, sub...)
 			continue
 		}
 		fePhys, rerr := udfResolveICB(e.icb.loc, metaMap, partStart)
 		if rerr != nil {
+			slog.WarnContext(ctx, "UDF: ICB resolve failed, dropping file from listing",
+				"path", entryPath, "icb_block", e.icb.loc.block, "error", rerr)
 			continue
 		}
 		feTag, feBuf, rerr := udfReadTag(rs, fePhys)
-		if rerr != nil || (feTag.id != 261 && feTag.id != 266) {
+		if rerr != nil {
+			slog.WarnContext(ctx, "UDF: file ICB read failed, dropping file from listing",
+				"path", entryPath, "phys_sector", fePhys, "error", rerr)
+			continue
+		}
+		if feTag.id != 261 && feTag.id != 266 {
+			slog.WarnContext(ctx, "UDF: file ICB has unexpected tag, dropping file from listing",
+				"path", entryPath, "tag_id", feTag.id)
 			continue
 		}
 		infoLen := binary.LittleEndian.Uint64(feBuf[56:64])
@@ -632,8 +646,10 @@ func udfWalkAll(rs io.ReadSeeker, dirICB udfLongAD, metaMap []udfMetaSpan, partS
 			allocDescLen = len(feBuf) - allocDescOff
 		}
 
-		extents := collectFileExtents(rs, feBuf[allocDescOff:allocDescOff+allocDescLen], allocType, metaMap, partStart, infoLen, fePhys)
+		extents := collectFileExtents(ctx, rs, feBuf[allocDescOff:allocDescOff+allocDescLen], allocType, metaMap, partStart, infoLen, fePhys)
 		if len(extents) == 0 {
+			slog.WarnContext(ctx, "UDF: collectFileExtents returned 0 extents, dropping file from listing",
+				"path", entryPath, "info_length", infoLen, "alloc_type", allocType)
 			continue
 		}
 		result = append(result, isoFileEntry{
@@ -668,7 +684,7 @@ func udfWalkAll(rs io.ReadSeeker, dirICB udfLongAD, metaMap []udfMetaSpan, partS
 // embeddedFEPhys is only meaningful for allocType 3 (it's the FE's own
 // physical sector — the file data is inline at allocDescOff of that
 // sector, so we materialise a single synthetic extent pointing at it).
-func collectFileExtents(rs io.ReadSeeker, inlineADs []byte, allocType byte, metaMap []udfMetaSpan, partStart uint32, infoLen uint64, embeddedFEPhys uint32) []isoExtent {
+func collectFileExtents(ctx context.Context, rs io.ReadSeeker, inlineADs []byte, allocType byte, metaMap []udfMetaSpan, partStart uint32, infoLen uint64, embeddedFEPhys uint32) []isoExtent {
 	if allocType == 3 {
 		// Embedded data — a single "extent" pointing at the FE sector
 		// itself with the inline-AD area treated as the file data. We
@@ -748,20 +764,37 @@ func collectFileExtents(rs io.ReadSeeker, inlineADs []byte, allocType byte, meta
 		}
 		ps, err := udfResolveICB(chain.loc, metaMap, partStart)
 		if err != nil {
+			slog.WarnContext(ctx, "UDF: AED chain truncated",
+				"reason", "icb resolve failed",
+				"extents_so_far", len(extents),
+				"error", err)
 			break
 		}
 		_, aedBuf, err := udfReadTag(rs, ps)
 		if err != nil {
+			slog.WarnContext(ctx, "UDF: AED chain truncated",
+				"reason", "tag read failed",
+				"extents_so_far", len(extents),
+				"error", err)
 			break
 		}
 		// Allocation Extent Descriptor layout: 16-byte tag + 4-byte
 		// previous-AED pointer + 4-byte length-of-allocation-descriptors,
 		// then the ADs themselves.
 		if len(aedBuf) < 24 {
+			slog.WarnContext(ctx, "UDF: AED chain truncated",
+				"reason", "aed buffer too short",
+				"extents_so_far", len(extents),
+				"buf_len", len(aedBuf))
 			break
 		}
 		nextLen := int(binary.LittleEndian.Uint32(aedBuf[20:24]))
 		if nextLen <= 0 || 24+nextLen > len(aedBuf) {
+			slog.WarnContext(ctx, "UDF: AED chain truncated",
+				"reason", "aed length out of range",
+				"extents_so_far", len(extents),
+				"next_len", nextLen,
+				"buf_len", len(aedBuf))
 			break
 		}
 		chase = aedBuf[24 : 24+nextLen]
@@ -820,11 +853,13 @@ func coalesceExtents(in []isoExtent) []isoExtent {
 
 // ListISOFiles walks the ISO 9660/UDF filesystem and returns all non-directory
 // entries. It tries UDF first (correct 64-bit sizes, authoritative for Blu-ray)
-// and falls back to ISO 9660 for plain discs without UDF.
-func ListISOFiles(rs io.ReadSeeker) ([]isoFileEntry, error) {
+// and falls back to ISO 9660 for plain discs without UDF. ctx is threaded
+// through the UDF walk so silent-drop sites can emit slog.WarnContext logs
+// for diagnosis without polluting the io.ReadSeeker signature.
+func ListISOFiles(ctx context.Context, rs io.ReadSeeker) ([]isoFileEntry, error) {
 	// Try UDF first (handles Blu-ray and modern discs with correct 64-bit sizes)
 	if partStart, metaMap, rootICB, err := udfSetup(rs); err == nil {
-		files, err := udfWalkAll(rs, rootICB, metaMap, partStart, "")
+		files, err := udfWalkAll(ctx, rs, rootICB, metaMap, partStart, "")
 		if err == nil && len(files) > 0 {
 			return files, nil
 		}

@@ -2,6 +2,7 @@ package iso
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"testing"
 )
@@ -26,7 +27,7 @@ func TestUDFReadDirEntriesTruncatedExtent(t *testing.T) {
 	binary.LittleEndian.PutUint32(dirICBSector[176:180], 2796)
 	binary.LittleEndian.PutUint32(dirICBSector[180:184], 20)
 
-	entries, err := udfReadDirEntries(bytes.NewReader(image), 10, nil, 0)
+	entries, err := udfReadDirEntries(context.Background(), bytes.NewReader(image), 10, nil, 0)
 	if err != nil {
 		t.Fatalf("udfReadDirEntries() error = %v", err)
 	}

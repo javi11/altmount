@@ -1,12 +1,112 @@
 package iso
 
 import (
+	"bytes"
+	"context"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"sort"
+	"strings"
 	"testing"
 )
+
+// TestUDFWalk_LogsWhenFileICBHasUnknownTag drives a synthetic UDF blob with
+// one directory containing one File Identifier Descriptor (BOGUS.M2TS) whose
+// ICB points at a sector containing an invalid descriptor tag (id=999, not
+// 261/266). The walker must:
+//
+//  1. drop the file from its returned listing (silent today, kept silent);
+//  2. emit exactly one slog.WarnContext line naming the file and the bogus
+//     tag id so operators can see why a file vanished.
+//
+// This locks in the diagnostic behavior added by Task 6: every silent drop
+// site in udfWalkAll / collectFileExtents now logs at WARN level before
+// continuing or breaking.
+func TestUDFWalk_LogsWhenFileICBHasUnknownTag(t *testing.T) {
+	// Capture default slog output into a buffer for assertions.
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	// Build a minimal in-memory blob: 32 sectors of zeros, with custom
+	// content at sector 10 (directory FE) and sector 20 (bogus tag).
+	const dirSector = 10
+	const bogusSector = 20
+	image := make([]byte, iso9660SectorSize*32)
+
+	// Sector 10: a UDF File Entry (tag 261) acting as a directory whose
+	// allocation type is 3 (inline), so udfReadDirEntries reads the FID
+	// straight out of buf[allocDescOff : allocDescOff+allocDescLen].
+	dir := image[dirSector*iso9660SectorSize : (dirSector+1)*iso9660SectorSize]
+	binary.LittleEndian.PutUint16(dir[0:2], 261) // tag.id = 261 (File Entry)
+	dir[34] = 3                                  // icbtag.flags lower 3 bits = 3 (inline)
+	// FE plain (tag 261) AD-area header at buf[168..176].
+	binary.LittleEndian.PutUint32(dir[168:172], 0)  // L_EA (extended attrs length)
+	binary.LittleEndian.PutUint32(dir[172:176], 52) // L_AD (alloc-desc length, == one padded FID)
+
+	// FID at dir[176..]: file identifier descriptor for BOGUS.M2TS
+	// pointing its ICB long_ad at sector `bogusSector`.
+	fid := dir[176:]
+	name := "BOGUS.M2TS"                            // 10 ASCII bytes
+	binary.LittleEndian.PutUint16(fid[0:2], 257)    // FID tag id
+	fid[18] = 0                                     // file characteristics: regular file, neither parent nor deleted
+	fid[19] = byte(1 + len(name))                   // L_FI (comp byte + ASCII chars)
+	binary.LittleEndian.PutUint32(fid[20:24], 2048) // long_ad.length
+	binary.LittleEndian.PutUint32(fid[24:28], bogusSector)
+	binary.LittleEndian.PutUint16(fid[28:30], 0)   // long_ad.partition (0 → partStart-relative)
+	binary.LittleEndian.PutUint16(fid[36:38], 0)   // L_IU (impl-use length)
+	fid[38] = 8                                    // CS0 compression code (8 = ASCII)
+	copy(fid[39:39+len(name)], name)
+	// Padded record length (38 header + 11 name = 49, padded to 52). We
+	// leave the trailing 3 bytes as zeros from the make().
+
+	// Sector 20: descriptor tag with the deliberately-bogus id 999.
+	bogus := image[bogusSector*iso9660SectorSize : (bogusSector+1)*iso9660SectorSize]
+	binary.LittleEndian.PutUint16(bogus[0:2], 999)
+
+	dirICB := udfLongAD{length: iso9660SectorSize, loc: udfLBA{block: dirSector, part: 0}}
+	entries, err := udfWalkAll(context.Background(), bytes.NewReader(image), dirICB, nil, 0, "")
+	if err != nil {
+		t.Fatalf("udfWalkAll: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected empty listing (bogus file should be dropped); got %d entries: %+v", len(entries), entries)
+	}
+
+	// Inspect captured slog output. Parse line by line as JSON and count
+	// matches; the test fails if not exactly one matching WARN was emitted.
+	var matches int
+	for _, line := range strings.Split(strings.TrimRight(buf.String(), "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		var rec map[string]any
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("non-JSON log line %q: %v", line, err)
+		}
+		if rec["level"] != "WARN" {
+			continue
+		}
+		// Both path and tag_id must be set to disambiguate from any
+		// other (future) WARN site in the walk.
+		if rec["path"] != "BOGUS.M2TS" {
+			continue
+		}
+		// JSON-decoded numbers come back as float64; compare via that.
+		if v, ok := rec["tag_id"].(float64); !ok || int(v) != 999 {
+			continue
+		}
+		matches++
+	}
+	if matches != 1 {
+		t.Fatalf("want exactly 1 matching WARN line (path=BOGUS.M2TS tag_id=999), got %d. Full log:\n%s",
+			matches, buf.String())
+	}
+}
 
 // TestLocalISO_DiscoverBigFiles is a manual integration test: it walks a
 // real Blu-ray ISO from local disk and dumps a size-sorted summary. Skipped
@@ -30,7 +130,7 @@ func TestLocalISO_DiscoverBigFiles(t *testing.T) {
 	stat, _ := f.Stat()
 	t.Logf("ISO: %s  size=%d (%.2f GiB)", path, stat.Size(), float64(stat.Size())/(1<<30))
 
-	entries, err := ListISOFiles(f)
+	entries, err := ListISOFiles(context.Background(), f)
 	if err != nil {
 		t.Fatalf("ListISOFiles: %v", err)
 	}
@@ -131,7 +231,7 @@ func TestLocalISO_CountExtentsForBigFiles(t *testing.T) {
 		if e != nil {
 			return
 		}
-		entries, e := udfReadDirEntries(f, physSect, metaMap, partStart)
+		entries, e := udfReadDirEntries(context.Background(), f, physSect, metaMap, partStart)
 		if e != nil {
 			return
 		}
@@ -288,7 +388,7 @@ func TestLocalISO_CountAdjacentExtents(t *testing.T) {
 	}
 	defer f.Close()
 
-	entries, err := ListISOFiles(f)
+	entries, err := ListISOFiles(context.Background(), f)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}

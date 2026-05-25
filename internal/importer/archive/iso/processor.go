@@ -35,7 +35,7 @@ func AnalyzeISO(
 	}
 	defer closer.Close()
 
-	entries, err := ListISOFiles(rs)
+	entries, err := ListISOFiles(ctx, rs)
 	if err != nil {
 		return nil, fmt.Errorf("iso: listing files in %q: %w", src.Filename, err)
 	}
