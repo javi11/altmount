@@ -138,6 +138,13 @@ func (h *webdavMethods) handleGet(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var httpErr *HTTPError
 		if errors.As(err, &httpErr) {
+			// Surface a machine-readable marker so callers (UI, ARRs, operators)
+			// can distinguish a corrupt/partial file from a generic failure.
+			if httpErr.StatusCode == http.StatusUnprocessableEntity {
+				w.Header().Set("X-AltMount-File-Status", "corrupted")
+			} else if httpErr.StatusCode == http.StatusPartialContent {
+				w.Header().Set("X-AltMount-File-Status", "partial")
+			}
 			http.Error(w, httpErr.Message, httpErr.StatusCode)
 		} else if os.IsNotExist(err) {
 			http.Error(w, "Not Found", http.StatusNotFound)
@@ -147,6 +154,14 @@ func (h *webdavMethods) handleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer f.Close()
+
+	// The virtual file is backed by a forward-only Usenet reader, so
+	// http.ServeContent cannot sniff the content type (it would need to seek
+	// back to 0). Set it from the extension up front; otherwise everything is
+	// served as application/octet-stream, which breaks some media clients.
+	if ctype := mime.TypeByExtension(filepath.Ext(fi.Name())); ctype != "" {
+		w.Header().Set("Content-Type", ctype)
+	}
 
 	http.ServeContent(w, r, fi.Name(), fi.ModTime(), f)
 }

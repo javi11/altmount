@@ -96,9 +96,13 @@ func (c *customErrorHandler) mapError(err error) error {
 	}
 
 	if errors.As(err, &corruptedErr) || errors.Is(err, nzbfilesystem.ErrFileIsCorrupted) {
+		// 422 Unprocessable Entity distinguishes "the file exists but its content
+		// cannot be reconstructed (missing/corrupt articles)" from a genuine 404
+		// not-found. This lets clients, the UI and logs tell the two apart and
+		// avoids the futile retry loop a 5xx would trigger for a permanent fault.
 		return &HTTPError{
-			StatusCode: http.StatusNotFound,
-			Message:    "File unavailable due to missing articles",
+			StatusCode: http.StatusUnprocessableEntity,
+			Message:    "File unavailable due to missing or corrupt articles",
 			Err:        err,
 		}
 	}
@@ -133,9 +137,13 @@ func (f *errorHandlingFile) Read(p []byte) (int, error) {
 			slog.ErrorContext(f.ctx, "File corrupted",
 				"total_expected", corruptedErr.TotalExpected,
 				"error", corruptedErr.UnderlyingErr)
+			// 422 rather than 503: a corrupt/missing-article fault is permanent
+			// until repaired, so it must not be presented as a transient,
+			// retry-worthy server error. (Note: once ServeContent has written
+			// response headers mid-stream this status is advisory only.)
 			return n, &HTTPError{
-				StatusCode: http.StatusServiceUnavailable,
-				Message:    "File unavailable due to missing articles",
+				StatusCode: http.StatusUnprocessableEntity,
+				Message:    "File unavailable due to missing or corrupt articles",
 				Err:        err,
 			}
 		}

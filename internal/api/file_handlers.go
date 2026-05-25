@@ -75,6 +75,13 @@ func (s *Server) convertToFileMetadataResponse(metadata *metapb.FileMetadata) *F
 	// Convert encryption enum to string
 	encryptionStr := s.convertEncryptionToString(metadata.Encryption)
 
+	// Availability is tracked at the file level (via health status), not
+	// per-segment, and this endpoint must not issue a live NNTP Stat per
+	// segment. A healthy file is considered fully available; once a file is
+	// marked corrupted we no longer know which specific segments are missing,
+	// so availability is reported as false / unknown rather than guessed.
+	fileAvailable := metadata.Status == metapb.FileStatus_FILE_STATUS_HEALTHY
+
 	// Convert segments
 	segments := make([]SegmentInfoResponse, len(metadata.SegmentData))
 	for i, segment := range metadata.SegmentData {
@@ -83,7 +90,7 @@ func (s *Server) convertToFileMetadataResponse(metadata *metapb.FileMetadata) *F
 			StartOffset: segment.StartOffset,
 			EndOffset:   segment.EndOffset,
 			MessageID:   segment.Id,
-			Available:   true, // TODO: Implement actual availability check
+			Available:   fileAvailable,
 		}
 	}
 
@@ -114,6 +121,15 @@ func (s *Server) convertToFileMetadataResponse(metadata *metapb.FileMetadata) *F
 	// Total segment count includes nested source segments
 	segmentCount := len(metadata.SegmentData) + nestedSegmentCount
 
+	// Report the available-segment count only when we can state it truthfully:
+	// a healthy file has all segments, a corrupted file's per-segment breakdown
+	// is unknown (left nil).
+	var availableSegments *int
+	if fileAvailable {
+		n := segmentCount
+		availableSegments = &n
+	}
+
 	// Convert timestamps
 	createdAt := time.Unix(metadata.CreatedAt, 0).Format(time.RFC3339)
 	modifiedAt := time.Unix(metadata.ModifiedAt, 0).Format(time.RFC3339)
@@ -123,7 +139,7 @@ func (s *Server) convertToFileMetadataResponse(metadata *metapb.FileMetadata) *F
 		SourceNzbPath:     metadata.SourceNzbPath,
 		Status:            statusStr,
 		SegmentCount:      segmentCount,
-		AvailableSegments: nil, // TODO: Implement actual available segment count
+		AvailableSegments: availableSegments,
 		Encryption:        encryptionStr,
 		CreatedAt:         createdAt,
 		ModifiedAt:        modifiedAt,

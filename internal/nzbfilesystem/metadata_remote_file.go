@@ -45,7 +45,15 @@ type MetadataRemoteFile struct {
 	streamTracker    StreamTracker            // Stream tracker for monitoring active streams
 	cacheSource      *segcache.Source         // Segment cache source (nil = no cache configured)
 	repairCoalescer  *RepairCoalescer         // Throttles streaming-failure repair triggers and rclone VFS refreshes
+	repairService    RepairService            // Optional PAR2 self-heal (nil = disabled; falls back to ARR re-download)
 	renameMu         sync.Mutex               // Mutex to protect rename operations from race conditions
+}
+
+// SetRepairService enables PAR2 self-healing for corrupt files. When set, a
+// streaming failure triggers a background reconstruction attempt before falling
+// back to the ARR re-download path. Safe to leave unset (the default).
+func (mrf *MetadataRemoteFile) SetRepairService(rs RepairService) {
+	mrf.repairService = rs
 }
 
 // Configuration is now accessed dynamically through config.ConfigGetter
@@ -143,6 +151,7 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 			healthRepository: mrf.healthRepository,
 			configGetter:     mrf.configGetter,
 			showCorrupted:    showCorrupted,
+			ctx:              ctx,
 		}
 		return true, virtualDir, nil
 	}
@@ -172,6 +181,7 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 					healthRepository: mrf.healthRepository,
 					configGetter:     mrf.configGetter,
 					showCorrupted:    showCorrupted,
+					ctx:              ctx,
 				}
 				return true, virtualDir, nil
 			}
@@ -271,6 +281,7 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 		repairCoalescer:  mrf.repairCoalescer,
 		configGetter:     mrf.configGetter,
 		poolManager:      mrf.poolManager,
+		repairService:    mrf.repairService,
 		ctx:              ctx,
 		maxPrefetch:      maxPrefetch,
 		rcloneCipher:     mrf.rcloneCipher,
@@ -611,6 +622,9 @@ type MetadataVirtualDirectory struct {
 	healthRepository *database.HealthRepository
 	configGetter     config.ConfigGetter
 	showCorrupted    bool
+	// ctx carries the caller's context (e.g. the WebDAV/FUSE request) captured
+	// at open time so directory listings honour cancellation and deadlines.
+	ctx context.Context
 }
 
 // Read implements afero.File.Read (not supported for directories)
@@ -662,9 +676,20 @@ func (mvd *MetadataVirtualDirectory) Readdir(count int) ([]fs.FileInfo, error) {
 	cfg := mvd.configGetter()
 	maskingEnabled := cfg.Streaming.FailureMasking.Enabled == nil || *cfg.Streaming.FailureMasking.Enabled
 
-	ctx := context.Background()
+	// Honour the caller's context (captured at open time) so large listings can
+	// be cancelled and respect deadlines. Fall back to Background if a handle
+	// was constructed without one (e.g. older callers or tests).
+	ctx := mvd.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
 	for _, fileName := range fileNames {
+		// Abort early if the caller cancelled (e.g. client disconnected during
+		// a PROPFIND over a very large directory).
+		if err := ctx.Err(); err != nil {
+			return infos, err
+		}
 		virtualFilePath := filepath.Join(mvd.normalizedPath, fileName)
 		fileMeta, err := mvd.metadataService.ReadFileMetadataLite(virtualFilePath)
 		if err != nil || fileMeta == nil {
@@ -780,6 +805,7 @@ type MetadataVirtualFile struct {
 	arrsService      ARRsRepairService
 	rcloneClient     rclonecli.RcloneRcClient // RClone RC client for VFS notifications
 	repairCoalescer  *RepairCoalescer         // Throttles repair triggers; may be nil in tests
+	repairService    RepairService            // Optional PAR2 self-heal; may be nil
 	configGetter     config.ConfigGetter
 	poolManager      pool.Manager // Pool manager for dynamic pool access
 	ctx              context.Context
@@ -1913,10 +1939,54 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 		return
 	}
 
+	// PAR2 self-heal (opt-in): when a repair service is wired, try to
+	// reconstruct the missing segments from recovery data before declaring the
+	// file corrupt and forcing a full ARR re-download. This runs in the
+	// background so the failing read returns promptly; the file heals for
+	// subsequent reads. Only if reconstruction is impossible do we fall back to
+	// the mark-corrupted + ARR path.
+	if mvf.repairService != nil {
+		go mvf.selfHealOrFallback(dataCorruptionErr, noRetry)
+		return
+	}
+
 	// Use a short timeout context to prevent blocking indefinitely
 	ctx, cancel := context.WithTimeout(mvf.ctx, 5*time.Second)
 	defer cancel()
+	mvf.markCorruptedAndTriggerArr(ctx, dataCorruptionErr, noRetry)
+}
 
+// defaultSelfHealTimeout bounds a background PAR2 reconstruction. Recovery must
+// read the surviving blocks, so a generous cap is used; on timeout the file
+// falls back to the ARR re-download path.
+const defaultSelfHealTimeout = 5 * time.Minute
+
+// selfHealOrFallback attempts PAR2 reconstruction in the background and, on
+// failure, performs the existing mark-corrupted + ARR re-download. It uses a
+// fresh context because the originating read may already be cancelled.
+func (mvf *MetadataVirtualFile) selfHealOrFallback(dataCorruptionErr *usenet.DataCorruptionError, noRetry bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultSelfHealTimeout)
+	defer cancel()
+
+	if err := mvf.repairService.RepairFile(ctx, mvf.name); err != nil {
+		slog.InfoContext(ctx, "PAR2 self-heal unavailable, falling back to re-download",
+			"file", mvf.name, "reason", err)
+		mctx, mcancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer mcancel()
+		mvf.markCorruptedAndTriggerArr(mctx, dataCorruptionErr, noRetry)
+		return
+	}
+
+	slog.InfoContext(ctx, "PAR2 self-heal restored file, refreshing VFS", "file", mvf.name)
+	// The recovered segments are now in the cache; nudge the VFS so a re-read
+	// sees the healthy file.
+	mvf.repairCoalescer.EnqueueRefresh(filepath.Dir(mvf.name))
+}
+
+// markCorruptedAndTriggerArr marks the file corrupted in metadata and the
+// health DB and kicks off the ARR re-download cycle. This is the fallback when
+// PAR2 self-heal is disabled or unsuccessful.
+func (mvf *MetadataVirtualFile) markCorruptedAndTriggerArr(ctx context.Context, dataCorruptionErr *usenet.DataCorruptionError, noRetry bool) {
 	// Any file with missing segments or corruption is marked as corrupted in metadata
 	// and DB to trigger the repair cycle via the health worker.
 	metadataStatus := metapb.FileStatus_FILE_STATUS_CORRUPTED

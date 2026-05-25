@@ -38,6 +38,9 @@ streaming:
   failure_masking:
     enabled: true # Automatically hide files from mounts after repeated failures
     threshold: 3 # Number of streaming failures before masking a file
+  par2_repair: false # Reconstruct missing segments from PAR2 recovery data on a
+    # streaming failure (self-heal) instead of forcing a full ARR re-download.
+    # Requires segment_cache.enabled: true (recovered segments are written there).
 
 # RClone configuration (optional)
 rclone:

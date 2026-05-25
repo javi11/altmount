@@ -35,6 +35,15 @@ type ARRsRepairService interface {
 	TriggerFileRescan(ctx context.Context, pathForRescan string, relativePath string, metadataStr *string) error
 }
 
+// RepairService attempts to self-heal a corrupt virtual file (e.g. by
+// reconstructing missing segments from PAR2 recovery data). A nil error means
+// the file's missing data has been restored — or nothing was actually missing —
+// so the read can be retried without a full re-download. Any error means repair
+// was not possible and the caller should fall back to the ARR rescan path.
+type RepairService interface {
+	RepairFile(ctx context.Context, virtualPath string) error
+}
+
 // StreamTracker interface for tracking active streams
 type StreamTracker interface {
 	Add(filePath, source, userName, clientIP, userAgent string, totalSize int64) string

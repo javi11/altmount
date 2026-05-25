@@ -209,6 +209,11 @@ type FailureMaskingConfig struct {
 type StreamingConfig struct {
 	MaxPrefetch    int                  `yaml:"max_prefetch" mapstructure:"max_prefetch" json:"max_prefetch"`
 	FailureMasking FailureMaskingConfig `yaml:"failure_masking" mapstructure:"failure_masking" json:"failure_masking"`
+	// Par2Repair enables PAR2-backed self-healing: on a streaming failure,
+	// missing segments are reconstructed from the file's PAR2 recovery data and
+	// written to the segment cache, avoiding a full ARR re-download. Requires
+	// the segment cache to be enabled. Defaults to off (nil).
+	Par2Repair *bool `yaml:"par2_repair" mapstructure:"par2_repair" json:"par2_repair"`
 }
 
 // RCloneConfig represents rclone configuration

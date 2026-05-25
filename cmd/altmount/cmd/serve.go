@@ -3,10 +3,12 @@ package cmd
 import (
 	"context"
 	"log/slog"
+	"net"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -15,7 +17,6 @@ import (
 	"github.com/javi11/altmount/frontend"
 	"github.com/javi11/altmount/internal/api"
 	"github.com/javi11/altmount/internal/arrs"
-	"github.com/javi11/altmount/internal/stremio"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/health"
 	"github.com/javi11/altmount/internal/metadata"
@@ -23,7 +24,9 @@ import (
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/rclone"
+	"github.com/javi11/altmount/internal/repair"
 	"github.com/javi11/altmount/internal/slogutil"
+	"github.com/javi11/altmount/internal/stremio"
 	"github.com/javi11/altmount/internal/webdav"
 	"github.com/spf13/cobra"
 )
@@ -136,6 +139,27 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	fs := initializeFilesystem(ctx, metadataService, repos.HealthRepo, arrsService, rcloneRCClient, poolManager, configManager.GetConfigGetter(), streamTracker, cacheSource)
+
+	// Optional: PAR2-backed self-healing. On a streaming failure, reconstruct
+	// the missing segments from the file's PAR2 recovery data and write them to
+	// the segment cache (the repair sink) instead of forcing a full ARR
+	// re-download. Requires the segment cache as the sink, so only wire it when
+	// both are enabled.
+	if cfg.Streaming.Par2Repair != nil && *cfg.Streaming.Par2Repair {
+		if cfg.SegmentCache.Enabled != nil && *cfg.SegmentCache.Enabled {
+			repairSvc := repair.NewService(
+				metadataService,
+				repair.NewPoolFetcher(poolManager),
+				cacheSink{cacheSource},
+				poolManager,
+				logger,
+			)
+			fs.SetRepairService(par2RepairAdapter{repairSvc})
+			logger.Info("PAR2 self-heal enabled")
+		} else {
+			logger.Warn("streaming.par2_repair is enabled but segment_cache is disabled; PAR2 self-heal needs the cache as its sink — skipping")
+		}
+	}
 
 	// 6. Setup web services
 	app, debugMode := createFiberApp(ctx, cfg)
@@ -299,6 +323,15 @@ func runServe(cmd *cobra.Command, args []string) error {
 		apiServer.AutoStartFuse()
 	}()
 
+	// Confirm the HTTP listener is actually accepting connections before
+	// advertising readiness. SetReady used to be called the instant the serving
+	// goroutine was spawned, so readiness probes (and dependent startup steps)
+	// could race ahead of the listener being up. We deliberately do NOT gate on
+	// the embedded rclone mount here: that mount connects back to this very
+	// WebDAV server, so it must observe readiness first (gating on it would
+	// deadlock).
+	waitForListener(ctx, cfg.WebDAV.Port, logger)
+
 	// Signal that the server is ready
 	apiServer.SetReady(true)
 
@@ -366,6 +399,52 @@ func handleFiberHealth(c *fiber.Ctx) error {
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	}
 	return c.JSON(response)
+}
+
+// par2RepairAdapter adapts *repair.Service to the nzbfilesystem.RepairService
+// interface (which only needs a success/failure signal).
+type par2RepairAdapter struct{ svc *repair.Service }
+
+func (a par2RepairAdapter) RepairFile(ctx context.Context, virtualPath string) error {
+	_, err := a.svc.RepairFile(ctx, virtualPath)
+	return err
+}
+
+// cacheSink writes reconstructed segments into the active segment cache — the
+// same store the reader consults on its cache-hit path, so recovered segments
+// are served transparently. A disabled cache makes Put a no-op.
+type cacheSink struct{ src *segcache.Source }
+
+func (c cacheSink) Put(messageID string, data []byte) error {
+	store := c.src.Store()
+	if store == nil {
+		return nil
+	}
+	return store.Put(messageID, data)
+}
+
+// waitForListener blocks until the HTTP server is accepting TCP connections on
+// port, the context is cancelled, or a short timeout elapses. It is used to
+// avoid advertising readiness before the listener is actually up.
+func waitForListener(ctx context.Context, port int, logger *slog.Logger) {
+	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
+		if err == nil {
+			_ = conn.Close()
+			return
+		}
+		if time.Now().After(deadline) {
+			logger.WarnContext(ctx, "HTTP listener not confirmed before readiness timeout; advertising readiness anyway", "addr", addr)
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
 }
 
 // setupSPARoutes configures Fiber SPA routing for the frontend

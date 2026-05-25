@@ -23,6 +23,12 @@ func NewNzbFilesystem(remoteFile *MetadataRemoteFile) *NzbFilesystem {
 	}
 }
 
+// SetRepairService enables PAR2 self-healing for corrupt files (see
+// MetadataRemoteFile.SetRepairService). Safe to leave unset.
+func (nfs *NzbFilesystem) SetRepairService(rs RepairService) {
+	nfs.remoteFile.SetRepairService(rs)
+}
+
 // Name returns the filesystem name
 func (nfs *NzbFilesystem) Name() string {
 	return "altmount"

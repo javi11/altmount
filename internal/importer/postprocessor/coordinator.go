@@ -6,6 +6,9 @@ package postprocessor
 import (
 	"context"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -89,13 +92,19 @@ func (c *Coordinator) HandleSuccess(ctx context.Context, item *database.ImportQu
 	c.notifyVFSWith(ctx, rcloneClient, resultingPath, false)
 	result.VFSNotified = true
 
-	// Small delay to allow FUSE mount propagation through kernel and into other containers
-	// This helps prevent race conditions where Sonarr tries to probe the file before it's visible.
-	select {
-	case <-ctx.Done():
-		return result, ctx.Err()
-	case <-time.After(1 * time.Second):
-		// Continue
+	// Wait until the imported path is actually reachable through the backing
+	// mount before creating symlinks and notifying ARRs. A fixed sleep used to
+	// stand in for FUSE/rclone propagation, but it was simultaneously too short
+	// under load (Sonarr/Radarr would import a symlink whose target was not yet
+	// visible — issue #612) and wastefully long on a fast mount. Polling returns
+	// as soon as the path appears and only blocks longer when propagation is
+	// genuinely slow.
+	if visible, err := c.waitForPathVisible(ctx, resultingPath); err != nil {
+		return result, err
+	} else if !visible {
+		c.log.WarnContext(ctx, "Imported path not visible on mount before notifying downstream; proceeding best-effort",
+			"queue_id", item.ID,
+			"path", resultingPath)
 	}
 
 	// 2 & 3. Create symlinks and STRM files if configured
@@ -174,4 +183,46 @@ func shouldSkipARRNotification(item *database.ImportQueueItem) bool {
 // that post-import link creation (symlinks, STRM files) be suppressed.
 func shouldSkipPostImportLinks(item *database.ImportQueueItem) bool {
 	return item != nil && item.SkipPostImportLinks
+}
+
+const (
+	// mountVisibilityTimeout bounds how long HandleSuccess waits for an imported
+	// path to become visible on the backing mount before proceeding anyway.
+	mountVisibilityTimeout = 10 * time.Second
+	// mountVisibilityPoll is the interval between visibility probes.
+	mountVisibilityPoll = 100 * time.Millisecond
+)
+
+// waitForPathVisible polls the backing mount until resultingPath is reachable,
+// the context is cancelled, or mountVisibilityTimeout elapses. It returns
+// (true, nil) once the path is visible and (false, nil) if the timeout is hit
+// (callers proceed best-effort, matching the previous fixed-sleep behaviour).
+// A non-nil error is returned only when the context is cancelled.
+//
+// When no local mount is configured (e.g. WebDAV-only deployments) there is
+// nothing to probe, so it returns immediately.
+func (c *Coordinator) waitForPathVisible(ctx context.Context, resultingPath string) (bool, error) {
+	cfg := c.configGetter()
+	if cfg.MountPath == "" {
+		return true, nil
+	}
+	actualPath := filepath.Join(cfg.MountPath, strings.TrimPrefix(resultingPath, "/"))
+
+	deadline := time.NewTimer(mountVisibilityTimeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(mountVisibilityPoll)
+	defer ticker.Stop()
+
+	for {
+		if _, err := os.Stat(actualPath); err == nil {
+			return true, nil
+		}
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-deadline.C:
+			return false, nil
+		case <-ticker.C:
+		}
+	}
 }

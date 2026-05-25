@@ -28,13 +28,18 @@ type RepairCoalescer struct {
 	rclone       rclonecli.RcloneRcClient
 	configGetter config.ConfigGetter
 
-	debounceTTL  time.Duration
-	flushDelay   time.Duration
-	refreshTO    time.Duration
+	debounceTTL time.Duration
+	flushDelay  time.Duration
+	refreshTO   time.Duration
 
 	mu      sync.Mutex
 	seen    map[string]time.Time
 	pending map[string]struct{}
+
+	// baseCtx is cancelled by Close so in-flight RefreshDir calls are torn down
+	// at shutdown instead of running against a detached context.Background().
+	baseCtx    context.Context
+	baseCancel context.CancelFunc
 
 	wakeCh chan struct{}
 	stopCh chan struct{}
@@ -51,6 +56,7 @@ const (
 // The worker runs for the lifetime of the process; call Close to stop it in
 // tests or during graceful shutdown.
 func NewRepairCoalescer(rclone rclonecli.RcloneRcClient, configGetter config.ConfigGetter) *RepairCoalescer {
+	baseCtx, baseCancel := context.WithCancel(context.Background())
 	c := &RepairCoalescer{
 		rclone:       rclone,
 		configGetter: configGetter,
@@ -59,6 +65,8 @@ func NewRepairCoalescer(rclone rclonecli.RcloneRcClient, configGetter config.Con
 		refreshTO:    defaultRefreshTimeout,
 		seen:         make(map[string]time.Time),
 		pending:      make(map[string]struct{}),
+		baseCtx:      baseCtx,
+		baseCancel:   baseCancel,
 		wakeCh:       make(chan struct{}, 1),
 		stopCh:       make(chan struct{}),
 	}
@@ -123,6 +131,9 @@ func (c *RepairCoalescer) Close() {
 	default:
 	}
 	close(c.stopCh)
+	if c.baseCancel != nil {
+		c.baseCancel()
+	}
 	c.stopWg.Wait()
 }
 
@@ -167,7 +178,11 @@ func (c *RepairCoalescer) flush() {
 		vfsName = config.MountProvider
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), c.refreshTO)
+	base := c.baseCtx
+	if base == nil {
+		base = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(base, c.refreshTO)
 	defer cancel()
 
 	if err := c.rclone.RefreshDir(ctx, vfsName, dirs); err != nil {

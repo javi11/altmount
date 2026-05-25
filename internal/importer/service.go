@@ -948,7 +948,14 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 	if err == nil {
 		// Same filesystem: compress the tmp file to the final .nzb.gz path
 		if compErr := nzbfile.Compress(tmpPath, newPath); compErr != nil {
-			_ = os.Rename(tmpPath, item.NzbPath) // attempt to restore on failure
+			if restoreErr := os.Rename(tmpPath, item.NzbPath); restoreErr != nil {
+				// The source NZB is now stranded at tmpPath while item.NzbPath
+				// points at the (now missing) original. Surface both failures so
+				// the file can be recovered rather than silently lost.
+				s.log.ErrorContext(ctx, "Failed to restore NZB after compression failure; source left at temp path",
+					"temp_path", tmpPath, "original_path", item.NzbPath, "restore_error", restoreErr)
+				return fmt.Errorf("failed to compress NZB (%w) and failed to restore original from %s: %v", compErr, tmpPath, restoreErr)
+			}
 			return fmt.Errorf("failed to compress NZB: %w", compErr)
 		}
 		_ = os.Remove(tmpPath)
