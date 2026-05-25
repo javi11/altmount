@@ -24,7 +24,7 @@ jobs:
     steps:
       # Checkout specified branch
       - name: Checkout ${{ inputs.branch }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ inputs.branch }}
           fetch-depth: 0
@@ -74,7 +74,7 @@ jobs:
     steps:
       # Checkout specified branch
       - name: Checkout ${{ inputs.branch }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ inputs.branch }}
           fetch-depth: 0
@@ -150,7 +150,7 @@ jobs:
     steps:
       # Checkout specified branch
       - name: Checkout ${{ inputs.branch }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ inputs.branch }}
           fetch-depth: 0
@@ -226,7 +226,7 @@ jobs:
     steps:
       # Checkout specified branch
       - name: Checkout ${{ inputs.branch }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ inputs.branch }}
           fetch-depth: 0
