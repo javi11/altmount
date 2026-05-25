@@ -397,6 +397,7 @@ export interface StreamingUpdateRequest {
 	par2_repair?: boolean;
 	par2_max_concurrent_repairs?: number;
 	par2_max_repair_file_size_mb?: number;
+	par2_repair_store?: Par2RepairStoreConfig;
 	par2_streaming_heal?: Par2StreamingHealConfig;
 }
 
@@ -580,6 +581,7 @@ export interface StreamingFormData {
 	par2_repair?: boolean;
 	par2_max_concurrent_repairs?: number;
 	par2_max_repair_file_size_mb?: number;
+	par2_repair_store?: Par2RepairStoreConfig;
 	par2_streaming_heal?: Par2StreamingHealConfig;
 }
 

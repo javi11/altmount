@@ -76,7 +76,23 @@ export function StreamingConfigSection({
 		checkChanges(newData, cacheData);
 	};
 
+	const handleRepairStoreChange = (
+		field: keyof NonNullable<StreamingConfig["par2_repair_store"]>,
+		value: number,
+	) => {
+		const newData = {
+			...streamingData,
+			par2_repair_store: {
+				...streamingData.par2_repair_store,
+				[field]: value,
+			},
+		};
+		setStreamingData(newData);
+		checkChanges(newData, cacheData);
+	};
+
 	const heal = streamingData.par2_streaming_heal ?? {};
+	const store = streamingData.par2_repair_store ?? {};
 	const par2RepairEnabled = streamingData.par2_repair === true;
 	const healEnabled = heal.enabled === true;
 
@@ -288,8 +304,9 @@ export function StreamingConfigSection({
 					<div className="min-w-0">
 						<h4 className="font-bold text-base-content text-sm">Max Concurrent Repairs</h4>
 						<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
-							Each reconstruction holds the whole file in memory (~2× its size). This caps how many
-							run at once to bound peak RAM. Default 1.
+							Each reconstruction streams the file straight into the PAR2 recovery grid, holding
+							about its full size in memory (~1×). This caps how many run at once to bound peak RAM.
+							Default 1.
 						</p>
 					</div>
 					<input
@@ -334,8 +351,9 @@ export function StreamingConfigSection({
 					<div className="min-w-0">
 						<h4 className="font-bold text-base-content text-sm">Seamless Mid-Stream Heal</h4>
 						<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
-							Instead of failing a read that hits a missing segment, block briefly for the repair
-							and keep playing. Best paired with proactive repair below.
+							Instead of failing a read that hits a missing segment, block briefly while the file is
+							reconstructed from PAR2, then keep playing. Reconstruction is reactive — it runs only
+							when a read actually reaches a hole, so opening a stream never pre-downloads the file.
 						</p>
 					</div>
 					<input
@@ -344,28 +362,6 @@ export function StreamingConfigSection({
 						checked={healEnabled}
 						disabled={isReadOnly || !par2RepairEnabled}
 						onChange={(e) => handleHealChange("enabled", e.target.checked)}
-					/>
-				</div>
-
-				{/* Proactive on open */}
-				<div
-					className={`flex items-center justify-between rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6 transition-opacity ${!healEnabled ? "opacity-50" : ""}`}
-				>
-					<div className="min-w-0">
-						<h4 className="font-bold text-base-content text-sm">Proactive Repair on Open</h4>
-						<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
-							Off by default: repair is reactive — the whole-file reconstruction runs only when
-							playback actually hits a missing segment, so opening a stream never pre-downloads the
-							file. Enable this to probe availability at stream start and begin reconstruction early
-							(lowest latency on files you expect to be damaged), at the cost of work up front.
-						</p>
-					</div>
-					<input
-						type="checkbox"
-						className="toggle toggle-primary"
-						checked={heal.proactive_on_open === true}
-						disabled={isReadOnly || !healEnabled}
-						onChange={(e) => handleHealChange("proactive_on_open", e.target.checked)}
 					/>
 				</div>
 
@@ -436,6 +432,78 @@ export function StreamingConfigSection({
 							PAR2 reconstruction needs the whole surviving file, so a hole can only be filled after
 							that data is fetched. Sequential playback with proactive repair is usually seamless;
 							random seeks into an unhealed region, or very large files, may still pause or fail.
+						</div>
+					</div>
+				</div>
+			</div>
+
+			{/* PAR2 Repair Store */}
+			<div className="border-base-200 border-t pt-10">
+				<h3 className="font-bold text-base-content text-lg">PAR2 Repair Store</h3>
+				<p className="text-base-content/50 text-sm">
+					The independent in-memory landing zone for reconstructed segments. The reader serves
+					recovered bytes from here, so self-heal works even when the on-disk segment cache is
+					disabled (e.g. rclone VFS cache setups). It is kept small on purpose — recovered segments
+					only need to live long enough for the client to re-read the healed range.
+				</p>
+			</div>
+
+			<div className="space-y-8">
+				{/* Max store size */}
+				<div
+					className={`space-y-3 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6 transition-opacity ${!par2RepairEnabled ? "opacity-50" : ""}`}
+				>
+					<div className="min-w-0">
+						<h4 className="font-bold text-base-content text-sm">Max Store Size (MB)</h4>
+						<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
+							Caps the total reconstructed-segment bytes held in memory. When full, the oldest
+							recovered segments are evicted first (LRU). Default 512.
+						</p>
+					</div>
+					<input
+						type="number"
+						min="1"
+						className="input input-bordered w-full"
+						value={store.max_size_mb ?? 512}
+						disabled={isReadOnly || !par2RepairEnabled}
+						onChange={(e) =>
+							handleRepairStoreChange("max_size_mb", Number.parseInt(e.target.value, 10) || 512)
+						}
+					/>
+				</div>
+
+				{/* Expiry minutes */}
+				<div
+					className={`space-y-3 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6 transition-opacity ${!par2RepairEnabled ? "opacity-50" : ""}`}
+				>
+					<div className="min-w-0">
+						<h4 className="font-bold text-base-content text-sm">Segment Expiry (minutes)</h4>
+						<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
+							Drop recovered segments older than this. They only need to survive long enough for the
+							player to re-read the freshly healed range. Default 60.
+						</p>
+					</div>
+					<input
+						type="number"
+						min="1"
+						className="input input-bordered w-full"
+						value={store.expiry_minutes ?? 60}
+						disabled={isReadOnly || !par2RepairEnabled}
+						onChange={(e) =>
+							handleRepairStoreChange("expiry_minutes", Number.parseInt(e.target.value, 10) || 60)
+						}
+					/>
+				</div>
+
+				{/* Info box */}
+				<div className="alert items-start rounded-2xl border border-info/20 bg-info/5 p-4 shadow-sm">
+					<Info className="mt-0.5 h-5 w-5 shrink-0 text-info" />
+					<div className="min-w-0 flex-1">
+						<div className="font-bold text-info text-xs uppercase tracking-wider">Sizing</div>
+						<div className="mt-1 break-words text-[11px] leading-relaxed opacity-80">
+							This store only holds the handful of segments PAR2 reconstructs for an actively
+							streaming file — not the whole file. The defaults suit most setups; raise the size
+							only if you heal many large files concurrently.
 						</div>
 					</div>
 				</div>
