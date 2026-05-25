@@ -652,11 +652,7 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 		close(done)
 	}()
 
-	// Get concurrency setting (default to 10 if not set)
-	concurrency := cfg.Health.LibrarySyncConcurrency
-	if concurrency <= 0 {
-		concurrency = 10
-	}
+	concurrency := cfg.GetLibrarySyncConcurrency()
 
 	// Create a worker pool for parallel metadata reading
 	p := pool.New().WithMaxGoroutines(concurrency)
@@ -1744,11 +1740,7 @@ func (lsw *LibrarySyncWorker) syncMetadataOnly(ctx context.Context, startTime ti
 	var filesToAdd []database.AutomaticHealthCheckRecord
 	var filesToAddMu sync.Mutex
 
-	// Get concurrency setting (default to 10 if not set)
-	concurrency := cfg.Health.LibrarySyncConcurrency
-	if concurrency <= 0 {
-		concurrency = 10
-	}
+	concurrency := cfg.GetLibrarySyncConcurrency()
 
 	// Create a worker pool for parallel metadata reading
 	p := pool.New().WithMaxGoroutines(concurrency)
