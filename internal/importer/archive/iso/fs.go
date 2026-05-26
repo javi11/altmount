@@ -638,6 +638,9 @@ func udfWalkAll(ctx context.Context, rs io.ReadSeeker, dirICB udfLongAD, metaMap
 	}
 	var result []isoFileEntry
 	for _, e := range entries {
+		if err := ctx.Err(); err != nil {
+			return result, err
+		}
 		entryPath := e.name
 		if prefix != "" {
 			entryPath = prefix + "/" + e.name
@@ -747,6 +750,13 @@ func collectFileExtents(ctx context.Context, rs io.ReadSeeker, inlineADs []byte,
 	chase := inlineADs
 	safety := 0
 	for {
+		if err := ctx.Err(); err != nil {
+			slog.WarnContext(ctx, "UDF: AED chain truncated",
+				"reason", "context canceled",
+				"extents_so_far", len(extents),
+				"error", err)
+			break
+		}
 		safety++
 		if safety > 4096 {
 			break // pathological — bail to avoid runaway IO

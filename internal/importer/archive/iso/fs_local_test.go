@@ -5,12 +5,14 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestUDFWalk_LogsWhenFileICBHasUnknownTag drives a synthetic UDF blob with
@@ -576,5 +578,74 @@ func TestListISOFiles_PreservesBothUnderlyingErrors(t *testing.T) {
 	}
 	if !strings.Contains(msg, "iso9660:") {
 		t.Errorf("error must mention the underlying ISO 9660 failure (substring \"iso9660:\") — got: %q", msg)
+	}
+}
+
+// TestUDFWalk_StopsWhenContextCanceled builds a synthetic UDF blob whose
+// directory contains 3 regular FIDs, then calls udfWalkAll with an
+// already-canceled context. The walker must:
+//
+//  1. observe ctx.Err() before processing any file's ICB,
+//  2. return context.Canceled (or a wrapping error) within 100 ms,
+//  3. return an empty result slice (no file processed past the check).
+//
+// This locks in Task 11 behavior: cancellation propagates immediately
+// from the entries-loop, instead of waiting for the next sector read
+// to time out at the NNTP layer.
+func TestUDFWalk_StopsWhenContextCanceled(t *testing.T) {
+	const dirSector = 10
+	// Three FIDs of 52 bytes each = 156 bytes of allocation descriptors.
+	const fidLen = 52
+	const numFiles = 3
+	image := make([]byte, iso9660SectorSize*32)
+
+	dir := image[dirSector*iso9660SectorSize : (dirSector+1)*iso9660SectorSize]
+	binary.LittleEndian.PutUint16(dir[0:2], 261) // tag.id = 261 (File Entry)
+	dir[34] = 3                                  // inline alloc type
+	binary.LittleEndian.PutUint32(dir[168:172], 0)
+	binary.LittleEndian.PutUint32(dir[172:176], fidLen*numFiles) // L_AD = 3 padded FIDs
+
+	// Write 3 FIDs back-to-back at dir[176..]. Each points at a unique
+	// sector containing a tag-261 FE with a single short_ad; that the
+	// walker NEVER reads these is exactly what this test asserts.
+	for i := 0; i < numFiles; i++ {
+		off := 176 + i*fidLen
+		fid := dir[off : off+fidLen]
+		name := fmt.Sprintf("FILE%d.M2TS", i) // 10-11 ASCII bytes
+		binary.LittleEndian.PutUint16(fid[0:2], 257)
+		fid[18] = 0
+		fid[19] = byte(1 + len(name))
+		binary.LittleEndian.PutUint32(fid[20:24], 2048)
+		binary.LittleEndian.PutUint32(fid[24:28], uint32(20+i)) // points at sectors 20,21,22
+		binary.LittleEndian.PutUint16(fid[28:30], 0)
+		binary.LittleEndian.PutUint16(fid[36:38], 0)
+		fid[38] = 8
+		copy(fid[39:39+len(name)], name)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // canceled before the call — ctx.Err() != nil on entry
+
+	dirICB := udfLongAD{length: iso9660SectorSize, loc: udfLBA{block: dirSector, part: 0}}
+
+	done := make(chan struct{})
+	var entries []isoFileEntry
+	var err error
+	go func() {
+		entries, err = udfWalkAll(ctx, bytes.NewReader(image), dirICB, nil, 0, "")
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("udfWalkAll did not return within 100ms of a canceled ctx — cancellation is not being honored at the entries-loop")
+	}
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("want err wrapping context.Canceled, got: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("want empty result on cancel before any file processed, got %d entries: %+v", len(entries), entries)
 	}
 }
