@@ -27,8 +27,25 @@ func AnalyzeISO(
 	poolManager pool.Manager,
 	maxPrefetch int,
 	readTimeout time.Duration,
+	analyzeTimeout time.Duration,
 	allowedExtensions []string,
 ) (*AnalyzedISO, error) {
+	start := time.Now()
+	// Hard cap the whole walk. A degraded NNTP provider can otherwise stall
+	// AnalyzeISO for minutes per ISO. analyzeTimeout <= 0 disables the cap
+	// (used by tests that exercise other paths).
+	if analyzeTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, analyzeTimeout)
+		defer cancel()
+	}
+	// Fail fast when the deadline is already exceeded (e.g. caller passed a
+	// past deadline, or analyzeTimeout fired between WithTimeout and the
+	// first NNTP read).
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("iso: analysing %q: %w", src.Filename, err)
+	}
+
 	rs, closer, err := NewISOReadSeeker(ctx, src, poolManager, maxPrefetch, readTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("iso: creating read seeker for %q: %w", src.Filename, err)
@@ -61,6 +78,13 @@ func AnalyzeISO(
 			out.MainFeature = append(out.MainFeature, buildFileContent(src, e))
 		}
 	}
+
+	slog.InfoContext(ctx, "ISO analyse complete",
+		"filename", src.Filename,
+		"duration_seconds", time.Since(start).Seconds(),
+		"files", len(out.Files),
+		"main_feature_clips", len(out.MainFeature),
+	)
 
 	return out, nil
 }

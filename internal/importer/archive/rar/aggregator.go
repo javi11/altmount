@@ -139,6 +139,7 @@ type ProcessArchiveOptions struct {
 	ExtractedFiles            []parser.ExtractedFileInfo
 	MaxPrefetch               int
 	ReadTimeout               time.Duration
+	IsoAnalyzeTimeout         time.Duration
 	ExpandBlurayIso           bool
 	FilterSamples             bool
 	RenameToNzbName           bool
@@ -164,6 +165,7 @@ func ProcessArchive(ctx context.Context, opts ProcessArchiveOptions) error {
 	extractedFiles := opts.ExtractedFiles
 	maxPrefetch := opts.MaxPrefetch
 	readTimeout := opts.ReadTimeout
+	analyzeTimeout := opts.IsoAnalyzeTimeout
 	expandBlurayIso := opts.ExpandBlurayIso
 	filterSamples := opts.FilterSamples
 	renameToNzbName := opts.RenameToNzbName
@@ -208,7 +210,7 @@ func ProcessArchive(ctx context.Context, opts ProcessArchiveOptions) error {
 	}
 
 	// Expand ISO files found inside the RAR archive into their inner media files
-	rarContents, err := archive.ExpandISOContents(ctx, expandBlurayIso, rarContents, poolManager, maxPrefetch, readTimeout, allowedFileExtensions)
+	rarContents, err := archive.ExpandISOContents(ctx, expandBlurayIso, rarContents, poolManager, maxPrefetch, readTimeout, analyzeTimeout, allowedFileExtensions)
 	if err != nil {
 		slog.WarnContext(ctx, "ISO expansion failed, proceeding without ISO contents", "error", err)
 	}

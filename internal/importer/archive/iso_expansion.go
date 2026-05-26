@@ -45,6 +45,7 @@ func ExpandISOContents(
 	poolManager pool.Manager,
 	maxPrefetch int,
 	readTimeout time.Duration,
+	analyzeTimeout time.Duration,
 	allowedExtensions []string,
 ) ([]Content, error) {
 	if !expand {
@@ -70,7 +71,7 @@ func ExpandISOContents(
 			AesIV:    c.AesIV,
 			Size:     c.Size,
 		}
-		a, err := iso.AnalyzeISO(ctx, src, poolManager, maxPrefetch, readTimeout, allowedExtensions)
+		a, err := iso.AnalyzeISO(ctx, src, poolManager, maxPrefetch, readTimeout, analyzeTimeout, allowedExtensions)
 		if err != nil {
 			slog.WarnContext(ctx, "Failed to analyze ISO content, keeping ISO as-is",
 				"file", c.Filename, "error", err)

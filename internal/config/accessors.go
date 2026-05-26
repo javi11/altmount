@@ -126,6 +126,16 @@ func (c *Config) GetReadTimeout() time.Duration {
 	return time.Duration(c.GetReadTimeoutSeconds()) * time.Second
 }
 
+// GetIsoAnalyzeTimeout returns the per-ISO analyse deadline with a 120s
+// default fallback. This bounds the entire iso.AnalyzeISO walk so a
+// degraded NNTP provider cannot stall the importer indefinitely.
+func (c *Config) GetIsoAnalyzeTimeout() time.Duration {
+	if c.Import.IsoAnalyzeTimeoutSeconds == nil || *c.Import.IsoAnalyzeTimeoutSeconds <= 0 {
+		return 120 * time.Second
+	}
+	return time.Duration(*c.Import.IsoAnalyzeTimeoutSeconds) * time.Second
+}
+
 // GetMetadataBackupKeep returns the number of metadata backups to keep with a default fallback.
 func (c *Config) GetMetadataBackupKeep() int {
 	if c.Metadata.Backup.KeepBackups <= 0 {
