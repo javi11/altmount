@@ -272,6 +272,15 @@ func (s *Service) GetHealth(ctx context.Context) (map[string]any, error) {
 			if err == nil {
 				_ = client.GetInto(ctx, starr.Request{URI: "/health"}, &health)
 			}
+		case "sportarr":
+			// Sportarr is not starr-compatible; report reachability via its native
+			// status endpoint rather than a starr /health call.
+			client, err := s.clients.GetOrCreateSportarrClient(instance.Name, instance.URL, instance.APIKey)
+			if err == nil {
+				if hErr := client.Health(ctx); hErr == nil {
+					health = []any{} // healthy: no issues reported
+				}
+			}
 		}
 		if health != nil {
 			results[instance.Name] = health

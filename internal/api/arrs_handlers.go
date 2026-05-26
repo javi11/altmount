@@ -655,6 +655,8 @@ type ArrsStatsResponse struct {
 	EnabledReadarr   int     `json:"enabled_readarr"`
 	TotalWhisparr    int     `json:"total_whisparr"`
 	EnabledWhisparr  int     `json:"enabled_whisparr"`
+	TotalSportarr    int     `json:"total_sportarr"`
+	EnabledSportarr  int     `json:"enabled_sportarr"`
 	DueForSync       int     `json:"due_for_sync"`
 	LastSync         *string `json:"last_sync"`
 }
@@ -742,7 +744,7 @@ func (s *Server) handleListArrsInstances(c *fiber.Ctx) error {
 //	@Description	Returns a specific ARR instance by type and name.
 //	@Tags			ARRs
 //	@Produce		json
-//	@Param			type	path		string	true	"Instance type (sonarr, radarr, lidarr, readarr, or whisparr)"
+//	@Param			type	path		string	true	"Instance type (sonarr, radarr, lidarr, readarr, whisparr, or sportarr)"
 //	@Param			name	path		string	true	"Instance name"
 //	@Success		200		{object}	APIResponse
 //	@Failure		404		{object}	APIResponse
@@ -854,6 +856,7 @@ func (s *Server) handleGetArrsStats(c *fiber.Ctx) error {
 	// Calculate stats from instances
 	var totalRadarr, enabledRadarr, totalSonarr, enabledSonarr int
 	var totalLidarr, enabledLidarr, totalReadarr, enabledReadarr, totalWhisparr, enabledWhisparr int
+	var totalSportarr, enabledSportarr int
 	for _, instance := range instances {
 		switch instance.Type {
 		case "radarr":
@@ -881,12 +884,17 @@ func (s *Server) handleGetArrsStats(c *fiber.Ctx) error {
 			if instance.Enabled {
 				enabledWhisparr++
 			}
+		case "sportarr":
+			totalSportarr++
+			if instance.Enabled {
+				enabledSportarr++
+			}
 		}
 	}
 
 	response := &ArrsStatsResponse{
-		TotalInstances:   totalRadarr + totalSonarr + totalLidarr + totalReadarr + totalWhisparr,
-		EnabledInstances: enabledRadarr + enabledSonarr + enabledLidarr + enabledReadarr + enabledWhisparr,
+		TotalInstances:   totalRadarr + totalSonarr + totalLidarr + totalReadarr + totalWhisparr + totalSportarr,
+		EnabledInstances: enabledRadarr + enabledSonarr + enabledLidarr + enabledReadarr + enabledWhisparr + enabledSportarr,
 		TotalRadarr:      totalRadarr,
 		EnabledRadarr:    enabledRadarr,
 		TotalSonarr:      totalSonarr,
@@ -897,6 +905,8 @@ func (s *Server) handleGetArrsStats(c *fiber.Ctx) error {
 		EnabledReadarr:   enabledReadarr,
 		TotalWhisparr:    totalWhisparr,
 		EnabledWhisparr:  enabledWhisparr,
+		TotalSportarr:    totalSportarr,
+		EnabledSportarr:  enabledSportarr,
 		DueForSync:       0, // Not applicable with config-first approach
 	}
 

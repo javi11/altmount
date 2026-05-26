@@ -176,6 +176,11 @@ func (w *Worker) CleanupQueue(ctx context.Context) error {
 				slog.WarnContext(ctx, "Failed to cleanup Sonarr queue",
 					"instance", instance.Name, "error", err)
 			}
+		case "sportarr":
+			if err := w.cleanupSportarrQueue(ctx, instance, cfg); err != nil {
+				slog.WarnContext(ctx, "Failed to cleanup Sportarr queue",
+					"instance", instance.Name, "error", err)
+			}
 		}
 	}
 
@@ -435,6 +440,125 @@ func (w *Worker) cleanupSonarrQueue(ctx context.Context, instance *model.ConfigI
 			}
 		}
 		slog.InfoContext(ctx, "Cleaned up Sonarr queue items",
+			"instance", instance.Name, "count", len(idsToRemove))
+	}
+	return nil
+}
+
+// cleanupSportarrQueue mirrors cleanupSonarrQueue but talks to Sportarr's native
+// API via the thin client (Sportarr is not starr-compatible). It reuses the same
+// ghost-detection, allowlist and grace-period logic.
+func (w *Worker) cleanupSportarrQueue(ctx context.Context, instance *model.ConfigInstance, cfg *config.Config) error {
+	client, err := w.clients.GetOrCreateSportarrClient(instance.Name, instance.URL, instance.APIKey)
+	if err != nil {
+		return fmt.Errorf("failed to get Sportarr client: %w", err)
+	}
+
+	queue, err := client.GetQueue(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get Sportarr queue: %w", err)
+	}
+
+	var idsToRemove []int64
+	for _, q := range queue {
+		// Only operate on queue items owned by AltMount's registered download client.
+		// Items from other clients may reference paths AltMount cannot see and must
+		// never be touched — see issue #523.
+		if q.DownloadClient != registrar.AltmountDownloadClientName {
+			continue
+		}
+
+		// Strategy 1: Immediate cleanup for already imported files
+		if w.checkGhostByImportHistory(ctx, q.OutputPath, cfg, instance.Name, q.Title) {
+			idsToRemove = append(idsToRemove, q.ID)
+			continue
+		}
+
+		// Fallback: path-gone check with safety guards
+		if w.isGhostByPathGone(ctx, q.OutputPath, q.ID, cfg, instance.Name, q.Title) {
+			idsToRemove = append(idsToRemove, q.ID)
+			continue
+		}
+
+		// Strategy 2: Graceful cleanup for blocked/failed imports
+		if q.Status != "completed" || q.TrackedDownloadStatus != "warning" || (q.TrackedDownloadState != "importPending" && q.TrackedDownloadState != "importBlocked") {
+			continue
+		}
+
+		// Check if path is within managed directories (import_dir, mount_path, or complete_dir)
+		if !w.isPathManaged(q.OutputPath, cfg) {
+			continue
+		}
+
+		// Check status messages for known issues
+		shouldCleanup := false
+		for _, msg := range q.StatusMessages {
+			allMessages := strings.Join(msg.Messages, " ")
+
+			// Automatic import failure cleanup (configurable)
+			if cfg.Arrs.CleanupAutomaticImportFailure != nil && *cfg.Arrs.CleanupAutomaticImportFailure &&
+				strings.Contains(allMessages, "Automatic import is not possible") {
+				shouldCleanup = true
+				break
+			}
+
+			// Check configured allowlist
+			for _, allowedMsg := range cfg.Arrs.QueueCleanupAllowlist {
+				if allowedMsg.Enabled && (strings.Contains(allMessages, allowedMsg.Message) || strings.Contains(msg.Title, allowedMsg.Message)) {
+					shouldCleanup = true
+					break
+				}
+			}
+
+			if shouldCleanup {
+				break
+			}
+		}
+
+		key := fmt.Sprintf("%s|%d", instance.Name, q.ID)
+		if shouldCleanup {
+			w.firstSeenMu.Lock()
+			seenTime, exists := w.firstSeen[key]
+			if !exists {
+				w.firstSeen[key] = time.Now()
+				w.firstSeenMu.Unlock()
+				slog.DebugContext(ctx, "First saw failed import pending item, starting grace period",
+					"path", q.OutputPath, "title", q.Title, "instance", instance.Name)
+				continue
+			}
+			w.firstSeenMu.Unlock()
+
+			gracePeriod := time.Duration(cfg.Arrs.QueueCleanupGracePeriodMinutes) * time.Minute
+			if time.Since(seenTime) < gracePeriod {
+				continue
+			}
+
+			slog.InfoContext(ctx, "Found failed import pending item after grace period",
+				"path", q.OutputPath, "title", q.Title, "instance", instance.Name)
+			idsToRemove = append(idsToRemove, q.ID)
+
+			w.firstSeenMu.Lock()
+			delete(w.firstSeen, key)
+			w.firstSeenMu.Unlock()
+		} else {
+			w.firstSeenMu.Lock()
+			delete(w.firstSeen, key)
+			w.firstSeenMu.Unlock()
+		}
+	}
+
+	if len(idsToRemove) > 0 {
+		for _, id := range idsToRemove {
+			if err := client.DeleteQueueItem(ctx, id); err != nil {
+				if strings.Contains(err.Error(), "404") {
+					slog.DebugContext(ctx, "Queue item already removed from Sportarr", "id", id)
+				} else {
+					slog.ErrorContext(ctx, "Failed to delete queue item",
+						"id", id, "error", err)
+				}
+			}
+		}
+		slog.InfoContext(ctx, "Cleaned up Sportarr queue items",
 			"instance", instance.Name, "count", len(idsToRemove))
 	}
 	return nil

@@ -436,6 +436,7 @@ type ArrsConfig struct {
 	LidarrInstances                []ArrsInstanceConfig `yaml:"lidarr_instances" mapstructure:"lidarr_instances" json:"lidarr_instances"`
 	ReadarrInstances               []ArrsInstanceConfig `yaml:"readarr_instances" mapstructure:"readarr_instances" json:"readarr_instances"`
 	WhisparrInstances              []ArrsInstanceConfig `yaml:"whisparr_instances" mapstructure:"whisparr_instances" json:"whisparr_instances"`
+	SportarrInstances              []ArrsInstanceConfig `yaml:"sportarr_instances" mapstructure:"sportarr_instances" json:"sportarr_instances"`
 	QueueCleanupEnabled            *bool                `yaml:"queue_cleanup_enabled" mapstructure:"queue_cleanup_enabled" json:"queue_cleanup_enabled,omitempty"`
 	QueueCleanupIntervalSeconds    int                  `yaml:"queue_cleanup_interval_seconds" mapstructure:"queue_cleanup_interval_seconds" json:"queue_cleanup_interval_seconds,omitempty"`
 	CleanupAutomaticImportFailure  *bool                `yaml:"cleanup_automatic_import_failure" mapstructure:"cleanup_automatic_import_failure" json:"cleanup_automatic_import_failure,omitempty"`
@@ -1483,6 +1484,7 @@ func DefaultConfig(configDir ...string) *Config {
 			LidarrInstances:                []ArrsInstanceConfig{},
 			ReadarrInstances:               []ArrsInstanceConfig{},
 			WhisparrInstances:              []ArrsInstanceConfig{},
+			SportarrInstances:              []ArrsInstanceConfig{},
 			CleanupAutomaticImportFailure:  &cleanupAutomaticImportFailure,
 			QueueCleanupGracePeriodMinutes: 10, // Default to 10 minutes
 			QueueCleanupAllowlist: []IgnoredMessage{
