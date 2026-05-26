@@ -57,12 +57,6 @@ func AnalyzeISO(
 		return nil, fmt.Errorf("iso: listing files in %q: %w", src.Filename, err)
 	}
 
-	slog.InfoContext(ctx, "ISO analysed",
-		"filename", src.Filename,
-		"iso_size_bytes", src.Size,
-		"files", len(entries),
-	)
-
 	out := &AnalyzedISO{VolumeLabel: ReadVolumeLabel(rs)}
 
 	for _, e := range entries {
@@ -79,11 +73,17 @@ func AnalyzeISO(
 		}
 	}
 
-	slog.InfoContext(ctx, "ISO analyse complete",
+	// Single completion log: raw entry count, filtered file count, BD clip
+	// count, and total time. Previously this function emitted two separate
+	// INFO lines per successful analysis ("ISO analysed" + "ISO analyse
+	// complete"); they're consolidated here.
+	slog.InfoContext(ctx, "ISO analysed",
 		"filename", src.Filename,
-		"duration_seconds", time.Since(start).Seconds(),
+		"iso_size_bytes", src.Size,
+		"entries", len(entries),
 		"files", len(out.Files),
 		"main_feature_clips", len(out.MainFeature),
+		"duration_seconds", time.Since(start).Seconds(),
 	)
 
 	return out, nil
