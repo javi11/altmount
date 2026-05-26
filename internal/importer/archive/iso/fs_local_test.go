@@ -553,3 +553,28 @@ func TestLocalISO_CountAdjacentExtents(t *testing.T) {
 			float64(len(e.extents))/float64(distinctRuns))
 	}
 }
+
+// TestListISOFiles_PreservesBothUnderlyingErrors drives ListISOFiles with a
+// blob that is neither a valid UDF nor a valid ISO 9660 image. The function
+// historically returned a single opaque "not a valid ISO 9660 or UDF image"
+// error which hid the actual cause — Task 9 changed it to wrap both the
+// underlying UDF error and the ISO 9660 fallback error so operators can
+// distinguish transient network failures from genuine structural problems.
+func TestListISOFiles_PreservesBothUnderlyingErrors(t *testing.T) {
+	// 600 KB of zeros — large enough to satisfy reads at both the UDF
+	// AVDP sector (256 → byte 524288) and the ISO 9660 PVD sector
+	// (16 → byte 32768), but the bytes don't form valid descriptors
+	// for either format.
+	blob := make([]byte, 600*1024)
+	_, err := ListISOFiles(context.Background(), bytes.NewReader(blob))
+	if err == nil {
+		t.Fatal("expected error from ListISOFiles on an invalid blob")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "udf:") {
+		t.Errorf("error must mention the underlying UDF failure (substring \"udf:\") — got: %q", msg)
+	}
+	if !strings.Contains(msg, "iso9660:") {
+		t.Errorf("error must mention the underlying ISO 9660 failure (substring \"iso9660:\") — got: %q", msg)
+	}
+}

@@ -896,24 +896,40 @@ func coalesceExtents(in []isoExtent) []isoExtent {
 // through the UDF walk so silent-drop sites can emit slog.WarnContext logs
 // for diagnosis without polluting the io.ReadSeeker signature.
 func ListISOFiles(ctx context.Context, rs io.ReadSeeker) ([]isoFileEntry, error) {
-	// Try UDF first (handles Blu-ray and modern discs with correct 64-bit sizes)
-	if partStart, metaMap, rootICB, err := udfSetup(rs); err == nil {
+	// Track the underlying reason both layers failed so the combined-failure
+	// error message can point an operator at the actual cause (transient
+	// network read, malformed structure, unrecognised version, ...).
+	var udfErr, isoErr error
+
+	// Try UDF first (handles Blu-ray and modern discs with correct 64-bit sizes).
+	if partStart, metaMap, rootICB, err := udfSetup(rs); err != nil {
+		udfErr = err
+	} else {
 		files, err := udfWalkAll(ctx, rs, rootICB, metaMap, partStart, "")
-		if err == nil && len(files) > 0 {
+		switch {
+		case err != nil:
+			udfErr = fmt.Errorf("walk: %w", err)
+		case len(files) == 0:
+			udfErr = fmt.Errorf("walk returned no files")
+		default:
 			return files, nil
 		}
 	}
-	// Fall back to ISO 9660
+
+	// Fall back to ISO 9660.
 	pvd := make([]byte, iso9660SectorSize)
-	if _, err := rs.Seek(16*iso9660SectorSize, io.SeekStart); err == nil {
-		if _, err := io.ReadFull(rs, pvd); err == nil {
-			if pvd[0] == 1 && string(pvd[1:6]) == "CD001" {
-				rootRec := pvd[156:]
-				dirLBA := binary.LittleEndian.Uint32(rootRec[2:6])
-				dirSize := uint64(binary.LittleEndian.Uint32(rootRec[10:14]))
-				return iso9660WalkAll(rs, dirLBA, dirSize, "")
-			}
-		}
+	if _, err := rs.Seek(16*iso9660SectorSize, io.SeekStart); err != nil {
+		isoErr = fmt.Errorf("seek PVD: %w", err)
+	} else if _, err := io.ReadFull(rs, pvd); err != nil {
+		isoErr = fmt.Errorf("read PVD: %w", err)
+	} else if pvd[0] != 1 || string(pvd[1:6]) != "CD001" {
+		isoErr = fmt.Errorf("invalid PVD header (type=%d magic=%q)", pvd[0], pvd[1:6])
+	} else {
+		rootRec := pvd[156:]
+		dirLBA := binary.LittleEndian.Uint32(rootRec[2:6])
+		dirSize := uint64(binary.LittleEndian.Uint32(rootRec[10:14]))
+		return iso9660WalkAll(rs, dirLBA, dirSize, "")
 	}
-	return nil, fmt.Errorf("iso: not a valid ISO 9660 or UDF image")
+
+	return nil, fmt.Errorf("iso: not a valid ISO 9660 or UDF image (udf: %v; iso9660: %v)", udfErr, isoErr)
 }
