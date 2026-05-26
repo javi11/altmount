@@ -168,6 +168,27 @@ func (s *Service) StopWorker(ctx context.Context) {
 	s.worker.Stop(ctx)
 }
 
+// RegisterConfigChangeHandler subscribes to config changes and starts/stops
+// the queue cleanup worker when arrs.enabled or arrs.queue_cleanup_enabled flips.
+func (s *Service) RegisterConfigChangeHandler(ctx context.Context, configManager *config.Manager) {
+	configManager.OnConfigChange(func(oldConfig, newConfig *config.Config) {
+		oldOn := worker.IsQueueCleanupEnabled(oldConfig)
+		newOn := worker.IsQueueCleanupEnabled(newConfig)
+		if oldOn == newOn {
+			return
+		}
+		if newOn {
+			slog.InfoContext(ctx, "ARR worker enabled via config change, starting")
+			if err := s.worker.Start(ctx); err != nil {
+				slog.ErrorContext(ctx, "Failed to start ARR worker", "error", err)
+			}
+			return
+		}
+		slog.InfoContext(ctx, "ARR worker disabled via config change, stopping")
+		s.worker.Stop(ctx)
+	})
+}
+
 // CleanupQueue checks all ARR instances for importPending items with empty folders
 func (s *Service) CleanupQueue(ctx context.Context) error {
 	return s.worker.CleanupQueue(ctx)

@@ -139,10 +139,25 @@ func (w *Worker) safeCleanup() {
 	}
 }
 
+// IsQueueCleanupEnabled reports whether the queue cleanup feature should be
+// active based on the global arrs.enabled and arrs.queue_cleanup_enabled flags.
+func IsQueueCleanupEnabled(cfg *config.Config) bool {
+	if cfg.Arrs.Enabled == nil || !*cfg.Arrs.Enabled {
+		return false
+	}
+	if cfg.Arrs.QueueCleanupEnabled != nil && !*cfg.Arrs.QueueCleanupEnabled {
+		return false
+	}
+	return true
+}
+
 // CleanupQueue checks all ARR instances for importPending items with empty folders
 // and removes them from the queue after deleting the empty folder
 func (w *Worker) CleanupQueue(ctx context.Context) error {
 	cfg := w.configGetter()
+	if !IsQueueCleanupEnabled(cfg) {
+		return nil
+	}
 	instances := w.instances.GetAllInstances()
 
 	for _, instance := range instances {

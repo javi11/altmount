@@ -221,6 +221,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if err := arrsService.StartWorker(ctx); err != nil {
 		logger.ErrorContext(ctx, "Failed to start ARR queue cleanup worker", "error", err)
 	}
+	arrsService.RegisterConfigChangeHandler(ctx, configManager)
 
 	// Start metadata backup worker
 	metadataBackupWorker := metadata.NewBackupWorker(configManager.GetConfigGetter())
