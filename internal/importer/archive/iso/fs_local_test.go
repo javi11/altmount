@@ -608,7 +608,7 @@ func TestUDFWalk_StopsWhenContextCanceled(t *testing.T) {
 	// Write 3 FIDs back-to-back at dir[176..]. Each points at a unique
 	// sector containing a tag-261 FE with a single short_ad; that the
 	// walker NEVER reads these is exactly what this test asserts.
-	for i := 0; i < numFiles; i++ {
+	for i := range numFiles {
 		off := 176 + i*fidLen
 		fid := dir[off : off+fidLen]
 		name := fmt.Sprintf("FILE%d.M2TS", i) // 10-11 ASCII bytes
@@ -636,15 +636,25 @@ func TestUDFWalk_StopsWhenContextCanceled(t *testing.T) {
 		close(done)
 	}()
 
+	// 1-second deadline: the function should return in microseconds since
+	// ctx.Err() is checked before any I/O, but goroutine scheduling on a
+	// loaded CI runner can add tens of milliseconds. 1s is plenty of
+	// headroom while still failing fast if the cancellation check is
+	// genuinely missing.
 	select {
 	case <-done:
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("udfWalkAll did not return within 100ms of a canceled ctx — cancellation is not being honored at the entries-loop")
+	case <-time.After(1 * time.Second):
+		t.Fatal("udfWalkAll did not return within 1s of a canceled ctx — cancellation is not being honored at the entries-loop")
 	}
 
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("want err wrapping context.Canceled, got: %v", err)
 	}
+	// The ctx check fires at the top of the loop BEFORE any FID is
+	// processed, so result is empty here. If cancel had happened
+	// mid-walk a non-empty partial result would also be valid — the
+	// production contract (udfWalkAll returns "what was collected so
+	// far" plus the cancel error) tolerates both shapes.
 	if len(entries) != 0 {
 		t.Fatalf("want empty result on cancel before any file processed, got %d entries: %+v", len(entries), entries)
 	}

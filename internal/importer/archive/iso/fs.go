@@ -638,6 +638,11 @@ func udfWalkAll(ctx context.Context, rs io.ReadSeeker, dirICB udfLongAD, metaMap
 	}
 	var result []isoFileEntry
 	for _, e := range entries {
+		// Return whatever was collected so far along with the cancel error.
+		// The caller (AnalyzeISO -> iso_expansion.go) treats any non-nil
+		// error as "keep ISO as-is", so partial vs nil doesn't change the
+		// outcome — but preserving the slice gives downstream debug logs
+		// an accurate count of what was enumerated before the cancel.
 		if err := ctx.Err(); err != nil {
 			return result, err
 		}
@@ -751,7 +756,12 @@ func collectFileExtents(ctx context.Context, rs io.ReadSeeker, inlineADs []byte,
 	safety := 0
 	for {
 		if err := ctx.Err(); err != nil {
-			slog.WarnContext(ctx, "UDF: AED chain truncated",
+			// Cancellation is a normal operator-initiated event (shutdown,
+			// per-ISO deadline, user-cancelled import) — log at Debug so
+			// it doesn't pollute monitoring dashboards. The peer WARN sites
+			// in this loop stay at WARN because they indicate genuinely
+			// corrupt or unreachable AEDs.
+			slog.DebugContext(ctx, "UDF: AED chain truncated",
 				"reason", "context canceled",
 				"extents_so_far", len(extents),
 				"error", err)
