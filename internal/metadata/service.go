@@ -152,6 +152,14 @@ func (ms *MetadataService) ReadFileMetadata(virtualPath string) (*metapb.FileMet
 		return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
 	}
 
+	// Resolve shared_outer_source_index references on nested sources.
+	// Files imported with the dedupe writer store outer segments once at
+	// the FileMetadata level; we re-populate per-source slice headers
+	// here so the rest of the read path is unaware of the difference.
+	if err := ExpandSharedOuterSources(metadata); err != nil {
+		return nil, fmt.Errorf("failed to expand shared outer sources: %w", err)
+	}
+
 	// Read ID from sidecar file (compatibility mode)
 	idPath := metadataPath + ".id"
 	if idData, err := os.ReadFile(idPath); err == nil {

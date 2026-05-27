@@ -42,6 +42,14 @@ message NestedSegmentSource {
   int64 inner_offset = 4;               // Offset within decrypted inner volume where file data starts
   int64 inner_length = 5;               // Bytes of target file in this source
   int64 inner_volume_size = 6;          // Total decrypted size of inner volume (for AES cipher)
+
+  // When > 0 the `segments`, `aes_key`, `aes_iv`, `inner_volume_size`
+  // fields above are intentionally left empty on disk and inherit from
+  // FileMetadata.shared_outer_sources[shared_outer_source_index - 1].
+  // Only `inner_offset` and `inner_length` are stored per-extent. 0
+  // (proto default) means "no sharing" — identical to the legacy on-disk
+  // layout, so old .meta files keep working without migration.
+  int32 shared_outer_source_index = 7;
 }
 
 // FileMetadata represents a single virtual file in the filesystem
@@ -62,5 +70,15 @@ message FileMetadata {
   repeated Par2FileReference par2_files = 13;  // Associated PAR2 repair files
   string nzbdav_id = 14; // ID to maintain compatibility with nzbdav
   repeated NestedSegmentSource nested_sources = 15; // Nested RAR sources (when file is inside inner RAR within outer RAR)
+
+  // Outer sources shared by groups of NestedSegmentSource entries.
+  // Used for multi-extent encrypted volumes — e.g. a Blu-ray main feature
+  // with hundreds of extents that all read from the same encrypted RAR.
+  // Each entry holds the full Segments + AesKey + AesIv + InnerVolumeSize
+  // once; the corresponding NestedSegmentSource entries reference it by
+  // 1-based index via shared_outer_source_index, storing only
+  // inner_offset + inner_length per-extent. Cuts the on-disk .meta size
+  // from O(extents * segments) to O(extents + segments) for these files.
+  repeated NestedSegmentSource shared_outer_sources = 16;
 }
   

@@ -263,8 +263,15 @@ type NestedSegmentSource struct {
 	InnerOffset     int64                  `protobuf:"varint,4,opt,name=inner_offset,json=innerOffset,proto3" json:"inner_offset,omitempty"`               // Offset within decrypted inner volume where file data starts
 	InnerLength     int64                  `protobuf:"varint,5,opt,name=inner_length,json=innerLength,proto3" json:"inner_length,omitempty"`               // Bytes of target file in this source
 	InnerVolumeSize int64                  `protobuf:"varint,6,opt,name=inner_volume_size,json=innerVolumeSize,proto3" json:"inner_volume_size,omitempty"` // Total decrypted size of inner volume (for AES cipher)
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// When > 0 the `segments`, `aes_key`, `aes_iv`, `inner_volume_size`
+	// fields above are intentionally left empty on disk and inherit from
+	// FileMetadata.shared_outer_sources[shared_outer_source_index - 1].
+	// Only `inner_offset` and `inner_length` are stored per-extent. 0
+	// (proto default) means "no sharing" — identical to the legacy on-disk
+	// layout, so old .meta files keep working without migration.
+	SharedOuterSourceIndex int32 `protobuf:"varint,7,opt,name=shared_outer_source_index,json=sharedOuterSourceIndex,proto3" json:"shared_outer_source_index,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *NestedSegmentSource) Reset() {
@@ -339,6 +346,13 @@ func (x *NestedSegmentSource) GetInnerVolumeSize() int64 {
 	return 0
 }
 
+func (x *NestedSegmentSource) GetSharedOuterSourceIndex() int32 {
+	if x != nil {
+		return x.SharedOuterSourceIndex
+	}
+	return 0
+}
+
 // FileMetadata represents a single virtual file in the filesystem
 // The filename comes from the actual metadata filename on disk
 type FileMetadata struct {
@@ -358,8 +372,17 @@ type FileMetadata struct {
 	Par2Files     []*Par2FileReference   `protobuf:"bytes,13,rep,name=par2_files,json=par2Files,proto3" json:"par2_files,omitempty"`              // Associated PAR2 repair files
 	NzbdavId      string                 `protobuf:"bytes,14,opt,name=nzbdav_id,json=nzbdavId,proto3" json:"nzbdav_id,omitempty"`                 // ID to maintain compatibility with nzbdav
 	NestedSources []*NestedSegmentSource `protobuf:"bytes,15,rep,name=nested_sources,json=nestedSources,proto3" json:"nested_sources,omitempty"`  // Nested RAR sources (when file is inside inner RAR within outer RAR)
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// Outer sources shared by groups of NestedSegmentSource entries.
+	// Used for multi-extent encrypted volumes — e.g. a Blu-ray main feature
+	// with hundreds of extents that all read from the same encrypted RAR.
+	// Each entry holds the full Segments + AesKey + AesIv + InnerVolumeSize
+	// once; the corresponding NestedSegmentSource entries reference it by
+	// 1-based index via shared_outer_source_index, storing only
+	// inner_offset + inner_length per-extent. Cuts the on-disk .meta size
+	// from O(extents * segments) to O(extents + segments) for these files.
+	SharedOuterSources []*NestedSegmentSource `protobuf:"bytes,16,rep,name=shared_outer_sources,json=sharedOuterSources,proto3" json:"shared_outer_sources,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *FileMetadata) Reset() {
@@ -497,6 +520,13 @@ func (x *FileMetadata) GetNestedSources() []*NestedSegmentSource {
 	return nil
 }
 
+func (x *FileMetadata) GetSharedOuterSources() []*NestedSegmentSource {
+	if x != nil {
+		return x.SharedOuterSources
+	}
+	return nil
+}
+
 var File_internal_metadata_proto_metadata_proto protoreflect.FileDescriptor
 
 const file_internal_metadata_proto_metadata_proto_rawDesc = "" +
@@ -511,14 +541,15 @@ const file_internal_metadata_proto_metadata_proto_rawDesc = "" +
 	"\x11Par2FileReference\x12\x1a\n" +
 	"\bfilename\x18\x01 \x01(\tR\bfilename\x12\x1b\n" +
 	"\tfile_size\x18\x02 \x01(\x03R\bfileSize\x128\n" +
-	"\fsegment_data\x18\x03 \x03(\v2\x15.metadata.SegmentDataR\vsegmentData\"\xea\x01\n" +
+	"\fsegment_data\x18\x03 \x03(\v2\x15.metadata.SegmentDataR\vsegmentData\"\xa5\x02\n" +
 	"\x13NestedSegmentSource\x121\n" +
 	"\bsegments\x18\x01 \x03(\v2\x15.metadata.SegmentDataR\bsegments\x12\x17\n" +
 	"\aaes_key\x18\x02 \x01(\fR\x06aesKey\x12\x15\n" +
 	"\x06aes_iv\x18\x03 \x01(\fR\x05aesIv\x12!\n" +
 	"\finner_offset\x18\x04 \x01(\x03R\vinnerOffset\x12!\n" +
 	"\finner_length\x18\x05 \x01(\x03R\vinnerLength\x12*\n" +
-	"\x11inner_volume_size\x18\x06 \x01(\x03R\x0finnerVolumeSize\"\xd3\x04\n" +
+	"\x11inner_volume_size\x18\x06 \x01(\x03R\x0finnerVolumeSize\x129\n" +
+	"\x19shared_outer_source_index\x18\a \x01(\x05R\x16sharedOuterSourceIndex\"\xa4\x05\n" +
 	"\fFileMetadata\x12\x1b\n" +
 	"\tfile_size\x18\x01 \x01(\x03R\bfileSize\x12&\n" +
 	"\x0fsource_nzb_path\x18\x02 \x01(\tR\rsourceNzbPath\x12,\n" +
@@ -540,7 +571,8 @@ const file_internal_metadata_proto_metadata_proto_rawDesc = "" +
 	"\n" +
 	"par2_files\x18\r \x03(\v2\x1b.metadata.Par2FileReferenceR\tpar2Files\x12\x1b\n" +
 	"\tnzbdav_id\x18\x0e \x01(\tR\bnzbdavId\x12D\n" +
-	"\x0enested_sources\x18\x0f \x03(\v2\x1d.metadata.NestedSegmentSourceR\rnestedSources*8\n" +
+	"\x0enested_sources\x18\x0f \x03(\v2\x1d.metadata.NestedSegmentSourceR\rnestedSources\x12O\n" +
+	"\x14shared_outer_sources\x18\x10 \x03(\v2\x1d.metadata.NestedSegmentSourceR\x12sharedOuterSources*8\n" +
 	"\n" +
 	"Encryption\x12\b\n" +
 	"\x04NONE\x10\x00\x12\n" +
@@ -584,11 +616,12 @@ var file_internal_metadata_proto_metadata_proto_depIdxs = []int32{
 	2, // 4: metadata.FileMetadata.segment_data:type_name -> metadata.SegmentData
 	3, // 5: metadata.FileMetadata.par2_files:type_name -> metadata.Par2FileReference
 	4, // 6: metadata.FileMetadata.nested_sources:type_name -> metadata.NestedSegmentSource
-	7, // [7:7] is the sub-list for method output_type
-	7, // [7:7] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	4, // 7: metadata.FileMetadata.shared_outer_sources:type_name -> metadata.NestedSegmentSource
+	8, // [8:8] is the sub-list for method output_type
+	8, // [8:8] is the sub-list for method input_type
+	8, // [8:8] is the sub-list for extension type_name
+	8, // [8:8] is the sub-list for extension extendee
+	0, // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_internal_metadata_proto_metadata_proto_init() }
