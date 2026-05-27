@@ -797,6 +797,32 @@ export class APIClient {
 		});
 	}
 
+	async getIndexerStats() {
+		return this.request<
+			{
+				indexer: string;
+				total_imports: number;
+				success_count: number;
+				failed_count: number;
+				success_rate: number;
+				last_seen_at: string;
+			}[]
+		>("/system/indexer-stats");
+	}
+
+	async cleanupIndexerStats(params: { hours?: number; indexer?: string }) {
+		const queryParams = new URLSearchParams();
+		if (params.hours !== undefined) queryParams.append("hours", params.hours.toString());
+		if (params.indexer !== undefined) queryParams.append("indexer", params.indexer);
+
+		return this.request<{ success: boolean; pruned_rows: number; hours: number }>(
+			`/system/indexer-stats/cleanup?${queryParams.toString()}`,
+			{
+				method: "DELETE",
+			},
+		);
+	}
+
 	// Provider endpoints
 	async testProvider(data: ProviderTestRequest) {
 		return this.request<ProviderTestResponse>("/providers/test", {

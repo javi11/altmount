@@ -5,6 +5,7 @@ import {
 	ChevronUp,
 	Download,
 	FileCode,
+	Globe,
 	Link2,
 	MoreVertical,
 	PlayCircle,
@@ -69,6 +70,13 @@ export const QueueItemCard = memo(function QueueItemCard({
 								<PathDisplay path={item.nzb_display_name} maxLength={80} showFileName />
 							</div>
 						</div>
+
+						{item.indexer && (
+							<div className="mt-1 flex items-center gap-1 text-xs text-base-content/50">
+								<Globe className="h-3 w-3 shrink-0" />
+								<span className="truncate">{item.indexer}</span>
+							</div>
+						)}
 
 						{/* Quick Info Pills */}
 						<div className="mt-2 flex flex-wrap gap-2">

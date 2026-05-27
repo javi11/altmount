@@ -46,11 +46,12 @@ import { HealthFilters } from "./HealthPage/components/HealthFilters";
 import { HealthStatsCards } from "./HealthPage/components/HealthStatsCards";
 import { HealthStatusAlert } from "./HealthPage/components/HealthStatusAlert";
 import { HealthTable } from "./HealthPage/components/HealthTable/HealthTable";
+import { IndexerHealth } from "./HealthPage/components/IndexerHealth";
 import { LibraryScanStatus } from "./HealthPage/components/LibraryScanStatus";
 import { ProviderHealth } from "./HealthPage/components/ProviderHealth/ProviderHealth";
 import type { CleanupConfig, SortBy, SortOrder } from "./HealthPage/types";
 
-type HealthTab = "files" | "providers";
+type HealthTab = "files" | "providers" | "indexers";
 
 const HEALTH_SECTIONS = {
 	files: {
@@ -62,6 +63,11 @@ const HEALTH_SECTIONS = {
 		title: "Provider Health",
 		description: "Check Usenet provider connectivity and speed",
 		icon: Server,
+	},
+	indexers: {
+		title: "Indexer Health",
+		description: "View success and failure rates of Usenet indexers",
+		icon: ShieldCheck,
 	},
 };
 
@@ -858,10 +864,16 @@ export function HealthPage() {
 									onConfirm={handleDeleteConfirm}
 								/>
 							</div>
-						) : (
+						) : activeTab === "providers" ? (
 							<div className="card border-2 border-base-300/50 bg-base-100 shadow-md">
 								<div className="card-body p-4 sm:p-8">
 									<ProviderHealth />
+								</div>
+							</div>
+						) : (
+							<div className="card border-2 border-base-300/50 bg-base-100 shadow-md">
+								<div className="card-body p-4 sm:p-8">
+									<IndexerHealth />
 								</div>
 							</div>
 						)}
