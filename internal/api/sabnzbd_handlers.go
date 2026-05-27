@@ -48,6 +48,18 @@ func (s *Server) getDefaultCategory() config.SABnzbdCategory {
 	}
 }
 
+// qf returns a request parameter from the query string, falling back to the
+// form body when absent. AltMount historically read auth/mode from the query
+// string only; some SABnzbd clients (e.g. Sportarr) send these as multipart
+// form fields, which is also valid per the SABnzbd API. Query takes precedence
+// so existing query-string clients (Sonarr/Radarr) are unaffected.
+func qf(c *fiber.Ctx, key string) string {
+	if v := c.Query(key); v != "" {
+		return v
+	}
+	return c.FormValue(key)
+}
+
 // handleSABnzbd is the main handler for SABnzbd API endpoints
 func (s *Server) handleSABnzbd(c *fiber.Ctx) error {
 	// Check if SABnzbd API is enabled
@@ -59,9 +71,9 @@ func (s *Server) handleSABnzbd(c *fiber.Ctx) error {
 	}
 
 	// Extract authentication parameters
-	apiKey := c.Query("apikey")
-	maUsername := c.Query("ma_username") // ARR URL
-	maPassword := c.Query("ma_password") // ARR API key
+	apiKey := qf(c, "apikey")
+	maUsername := qf(c, "ma_username") // ARR URL
+	maPassword := qf(c, "ma_password") // ARR API key
 
 	// Determine authentication method
 	authenticated := false
@@ -101,7 +113,7 @@ func (s *Server) handleSABnzbd(c *fiber.Ctx) error {
 	}
 
 	// Get mode parameter to determine which API method to call
-	mode := c.Query("mode")
+	mode := qf(c, "mode")
 	switch mode {
 	case "addfile":
 		return s.handleSABnzbdAddFile(c)

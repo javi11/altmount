@@ -23,6 +23,7 @@ type Manager struct {
 	lidarrClients   map[string]*lidarr.Lidarr   // key: instance name
 	readarrClients  map[string]*readarr.Readarr // key: instance name
 	whisparrClients map[string]*sonarr.Sonarr   // key: instance name
+	sportarrClients map[string]*Sportarr        // key: instance name (native client)
 }
 
 // NewManager creates an arrs client manager. httpClient is shared with every
@@ -40,6 +41,7 @@ func NewManager(httpClient *http.Client) *Manager {
 		lidarrClients:   make(map[string]*lidarr.Lidarr),
 		readarrClients:  make(map[string]*readarr.Readarr),
 		whisparrClients: make(map[string]*sonarr.Sonarr),
+		sportarrClients: make(map[string]*Sportarr),
 	}
 }
 
@@ -119,6 +121,20 @@ func (m *Manager) GetOrCreateWhisparrClient(instanceName, url, apiKey string) (*
 	return client, nil
 }
 
+// GetOrCreateSportarrClient gets or creates a native Sportarr client for an instance
+func (m *Manager) GetOrCreateSportarrClient(instanceName, url, apiKey string) (*Sportarr, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if client, exists := m.sportarrClients[instanceName]; exists {
+		return client, nil
+	}
+
+	client := NewSportarr(url, apiKey, m.httpClient)
+	m.sportarrClients[instanceName] = client
+	return client, nil
+}
+
 // GetOrCreateClient is a helper to get or create the appropriate client
 func (m *Manager) GetOrCreateClient(instance *model.ConfigInstance) (any, error) {
 	switch instance.Type {
@@ -132,6 +148,8 @@ func (m *Manager) GetOrCreateClient(instance *model.ConfigInstance) (any, error)
 		return m.GetOrCreateReadarrClient(instance.Name, instance.URL, instance.APIKey)
 	case "whisparr":
 		return m.GetOrCreateWhisparrClient(instance.Name, instance.URL, instance.APIKey)
+	case "sportarr":
+		return m.GetOrCreateSportarrClient(instance.Name, instance.URL, instance.APIKey)
 	default:
 		return nil, fmt.Errorf("unsupported instance type: %s", instance.Type)
 	}
@@ -179,6 +197,10 @@ func (m *Manager) TestConnection(ctx context.Context, instanceType, url, apiKey 
 			return fmt.Errorf("failed to connect to Whisparr: %w", err)
 		}
 		return nil
+
+	case "sportarr":
+		// Sportarr is not starr-compatible; use the native client's health check.
+		return NewSportarr(url, apiKey, m.httpClient).Health(ctx)
 
 	default:
 		return fmt.Errorf("unsupported instance type: %s", instanceType)

@@ -705,7 +705,7 @@ export interface SABnzbdFormData {
 }
 
 // Arrs configuration types
-export type ArrsType = "radarr" | "sonarr" | "lidarr" | "readarr" | "whisparr";
+export type ArrsType = "radarr" | "sonarr" | "lidarr" | "readarr" | "whisparr" | "sportarr";
 
 // Sync status types
 export type SyncStatus = "idle" | "running" | "cancelling" | "completed" | "failed";
@@ -748,6 +748,7 @@ export interface ArrsConfig {
 	lidarr_instances: ArrsInstanceConfig[];
 	readarr_instances: ArrsInstanceConfig[];
 	whisparr_instances: ArrsInstanceConfig[];
+	sportarr_instances: ArrsInstanceConfig[];
 	queue_cleanup_enabled?: boolean;
 	queue_cleanup_interval_seconds?: number;
 	queue_cleanup_grace_period_minutes?: number;
@@ -785,6 +786,7 @@ export interface ArrsFormData {
 	lidarr_instances: ArrsInstanceConfig[];
 	readarr_instances: ArrsInstanceConfig[];
 	whisparr_instances: ArrsInstanceConfig[];
+	sportarr_instances: ArrsInstanceConfig[];
 	queue_cleanup_enabled?: boolean;
 	queue_cleanup_interval_seconds?: number;
 	queue_cleanup_grace_period_minutes?: number;
