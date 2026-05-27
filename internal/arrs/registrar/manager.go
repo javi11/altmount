@@ -74,19 +74,21 @@ func (m *Manager) EnsureWebhookRegistration(ctx context.Context, altmountURL str
 				currentURL := ""
 				for _, f := range existing.Fields {
 					if f.Name == "url" {
-						currentURL = f.Value.(string)
+						if val, ok := f.Value.(string); ok {
+							currentURL = val
+						}
 						break
 					}
 				}
 
-				if currentURL != webhookURL {
-					slog.InfoContext(ctx, "Updating Radarr webhook API key/URL", "instance", instance.Name)
+				if currentURL != webhookURL || !existing.OnGrab || !existing.OnDownload {
+					slog.InfoContext(ctx, "Updating Radarr webhook configuration (enabling Grab and Import notifications)", "instance", instance.Name)
 					notif := &radarr.NotificationInput{
 						ID:                          existing.ID,
 						Name:                        webhookName,
 						Implementation:              "Webhook",
 						ConfigContract:              "WebhookSettings",
-						OnGrab:                      false,
+						OnGrab:                      true,
 						OnDownload:                  true,
 						OnUpgrade:                   true,
 						OnRename:                    true,
@@ -108,7 +110,7 @@ func (m *Manager) EnsureWebhookRegistration(ctx context.Context, altmountURL str
 					Name:                        webhookName,
 					Implementation:              "Webhook",
 					ConfigContract:              "WebhookSettings",
-					OnGrab:                      false,
+					OnGrab:                      true,
 					OnDownload:                  true, // OnImport
 					OnUpgrade:                   true,
 					OnRename:                    true,
@@ -154,19 +156,21 @@ func (m *Manager) EnsureWebhookRegistration(ctx context.Context, altmountURL str
 				currentURL := ""
 				for _, f := range existing.Fields {
 					if f.Name == "url" {
-						currentURL = f.Value.(string)
+						if val, ok := f.Value.(string); ok {
+							currentURL = val
+						}
 						break
 					}
 				}
 
-				if currentURL != webhookURL {
-					slog.InfoContext(ctx, "Updating Sonarr webhook API key/URL", "instance", instance.Name)
+				if currentURL != webhookURL || !existing.OnGrab || !existing.OnDownload {
+					slog.InfoContext(ctx, "Updating Sonarr webhook configuration (enabling Grab and Import notifications)", "instance", instance.Name)
 					notif := &sonarr.NotificationInput{
 						ID:                            existing.ID,
 						Name:                          webhookName,
 						Implementation:                "Webhook",
 						ConfigContract:                "WebhookSettings",
-						OnGrab:                        false,
+						OnGrab:                        true,
 						OnDownload:                    true,
 						OnUpgrade:                     true,
 						OnRename:                      true,
@@ -188,7 +192,7 @@ func (m *Manager) EnsureWebhookRegistration(ctx context.Context, altmountURL str
 					Name:                          webhookName,
 					Implementation:                "Webhook",
 					ConfigContract:                "WebhookSettings",
-					OnGrab:                        false,
+					OnGrab:                        true,
 					OnDownload:                    true, // OnImport
 					OnUpgrade:                     true,
 					OnRename:                      true,
@@ -234,19 +238,21 @@ func (m *Manager) EnsureWebhookRegistration(ctx context.Context, altmountURL str
 				currentURL := ""
 				for _, f := range existing.Fields {
 					if f.Name == "url" {
-						currentURL = f.Value.(string)
+						if val, ok := f.Value.(string); ok {
+							currentURL = val
+						}
 						break
 					}
 				}
 
-				if currentURL != webhookURL {
-					slog.InfoContext(ctx, "Updating Lidarr webhook API key/URL", "instance", instance.Name)
+				if currentURL != webhookURL || !existing.OnGrab || !existing.OnReleaseImport {
+					slog.InfoContext(ctx, "Updating Lidarr webhook configuration (enabling Grab and Import notifications)", "instance", instance.Name)
 					notif := &lidarr.NotificationInput{
 						ID:              existing.ID,
 						Name:            webhookName,
 						Implementation:  "Webhook",
 						ConfigContract:  "WebhookSettings",
-						OnGrab:          false,
+						OnGrab:          true,
 						OnReleaseImport: true,
 						OnUpgrade:       true,
 						OnRename:        true,
@@ -265,7 +271,7 @@ func (m *Manager) EnsureWebhookRegistration(ctx context.Context, altmountURL str
 					Name:            webhookName,
 					Implementation:  "Webhook",
 					ConfigContract:  "WebhookSettings",
-					OnGrab:          false,
+					OnGrab:          true,
 					OnReleaseImport: true,
 					OnUpgrade:       true,
 					OnRename:        true,
@@ -308,19 +314,21 @@ func (m *Manager) EnsureWebhookRegistration(ctx context.Context, altmountURL str
 				currentURL := ""
 				for _, f := range existing.Fields {
 					if f.Name == "url" {
-						currentURL = f.Value.(string)
+						if val, ok := f.Value.(string); ok {
+							currentURL = val
+						}
 						break
 					}
 				}
 
-				if currentURL != webhookURL {
-					slog.InfoContext(ctx, "Updating Readarr webhook API key/URL", "instance", instance.Name)
+				if currentURL != webhookURL || !existing.OnGrab || !existing.OnReleaseImport {
+					slog.InfoContext(ctx, "Updating Readarr webhook configuration (enabling Grab and Import notifications)", "instance", instance.Name)
 					notif := &readarr.NotificationInput{
 						ID:                         existing.ID,
 						Name:                       webhookName,
 						Implementation:             "Webhook",
 						ConfigContract:             "WebhookSettings",
-						OnGrab:                     false,
+						OnGrab:                     true,
 						OnReleaseImport:            true,
 						OnUpgrade:                  true,
 						OnRename:                   true,
@@ -343,7 +351,7 @@ func (m *Manager) EnsureWebhookRegistration(ctx context.Context, altmountURL str
 					Name:                       webhookName,
 					Implementation:             "Webhook",
 					ConfigContract:             "WebhookSettings",
-					OnGrab:                     false,
+					OnGrab:                     true,
 					OnReleaseImport:            true,
 					OnUpgrade:                  true,
 					OnRename:                   true,
@@ -414,10 +422,14 @@ func (m *Manager) EnsureDownloadClientRegistration(ctx context.Context, altmount
 				currentHost := ""
 				for _, f := range existing.Fields {
 					if f.Name == "apiKey" {
-						currentKey = f.Value.(string)
+						if val, ok := f.Value.(string); ok {
+							currentKey = val
+						}
 					}
 					if f.Name == "host" {
-						currentHost = f.Value.(string)
+						if val, ok := f.Value.(string); ok {
+							currentHost = val
+						}
 					}
 				}
 
@@ -509,10 +521,14 @@ func (m *Manager) EnsureDownloadClientRegistration(ctx context.Context, altmount
 				currentHost := ""
 				for _, f := range existing.Fields {
 					if f.Name == "apiKey" {
-						currentKey = f.Value.(string)
+						if val, ok := f.Value.(string); ok {
+							currentKey = val
+						}
 					}
 					if f.Name == "host" {
-						currentHost = f.Value.(string)
+						if val, ok := f.Value.(string); ok {
+							currentHost = val
+						}
 					}
 				}
 
@@ -604,10 +620,14 @@ func (m *Manager) EnsureDownloadClientRegistration(ctx context.Context, altmount
 				currentHost := ""
 				for _, f := range existing.Fields {
 					if f.Name == "apiKey" {
-						currentKey = f.Value.(string)
+						if val, ok := f.Value.(string); ok {
+							currentKey = val
+						}
 					}
 					if f.Name == "host" {
-						currentHost = f.Value.(string)
+						if val, ok := f.Value.(string); ok {
+							currentHost = val
+						}
 					}
 				}
 
@@ -699,10 +719,14 @@ func (m *Manager) EnsureDownloadClientRegistration(ctx context.Context, altmount
 				currentHost := ""
 				for _, f := range existing.Fields {
 					if f.Name == "apiKey" {
-						currentKey = f.Value.(string)
+						if val, ok := f.Value.(string); ok {
+							currentKey = val
+						}
 					}
 					if f.Name == "host" {
-						currentHost = f.Value.(string)
+						if val, ok := f.Value.(string); ok {
+							currentHost = val
+						}
 					}
 				}
 
