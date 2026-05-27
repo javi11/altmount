@@ -156,9 +156,16 @@ func (c *Coordinator) HandleSuccess(ctx context.Context, item *database.ImportQu
 func (c *Coordinator) HandleFailure(ctx context.Context, item *database.ImportQueueItem, _ error) error {
 	cfg := c.configGetter()
 
-	// Notify ARR applications so they check for the failed download when they
-	// next query the SABnzbd history, rather than waiting for their periodic
-	// poll to discover it.
+	// Attempt SABnzbd fallback if configured — the download is transferred to
+	// an external SABnzbd instance so we must NOT notify ARR of a failure here
+	// (the download is still in progress elsewhere).
+	if cfg.SABnzbd.FallbackHost != "" && cfg.SABnzbd.FallbackAPIKey != "" {
+		return c.AttemptFallback(ctx, item)
+	}
+
+	// No fallback configured — the import has genuinely failed. Notify ARR
+	// applications so they check the SABnzbd history on their next poll and
+	// discover the failure sooner rather than waiting for their periodic cycle.
 	if !shouldSkipARRNotification(item) {
 		c.mu.RLock()
 		arrsService := c.arrsService
@@ -174,11 +181,6 @@ func (c *Coordinator) HandleFailure(ctx context.Context, item *database.ImportQu
 					"queue_id", item.ID)
 			}
 		}
-	}
-
-	// Attempt SABnzbd fallback if configured
-	if cfg.SABnzbd.FallbackHost != "" && cfg.SABnzbd.FallbackAPIKey != "" {
-		return c.AttemptFallback(ctx, item)
 	}
 
 	return errors.ErrFallbackNotConfigured
