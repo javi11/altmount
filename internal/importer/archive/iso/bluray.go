@@ -13,9 +13,11 @@ import (
 // form the main feature; the slice is empty if no parseable playlist
 // was found.
 type MainFeaturePlaylist struct {
-	PlaylistName  string         // e.g. "00800.MPLS" — for logging only
-	DurationTicks int64          // sum of (OUT-IN) at 45 kHz
-	Streams       []isoFileEntry // ordered M2TS entries
+	PlaylistName    string         // e.g. "00800.MPLS" — for logging only
+	DurationTicks   int64          // sum of (OUT-IN) at 45 kHz — informational, not used for selection
+	Streams         []isoFileEntry // ordered M2TS entries (duplicates preserved if the playlist legitimately repeats a clip)
+	UniqueClipBytes uint64         // sum of file sizes of UNIQUE clips referenced; the primary scoring metric
+	UniqueClipCount int            // number of distinct clips referenced; scoring tiebreaker
 }
 
 // ResolveMainFeature inspects the entries returned by ListISOFiles for a
@@ -77,15 +79,29 @@ func ResolveMainFeature(ctx context.Context, rs io.ReadSeeker, files []isoFileEn
 		}
 
 		// Resolve clip names in playlist order, preferring M2TS over SSIF.
+		// Build the ordered streams slice (duplicates preserved — a real BD
+		// feature may legitimately repeat a clip, and the output virtual
+		// file must follow the playlist order faithfully) AND a separate
+		// dedupe-by-name byte sum that drives playlist selection. Without
+		// the dedupe, a menu-navigation playlist that points 200+ times at
+		// the same ~80s menu M2TS would score higher than a real 30-chapter
+		// main feature, and we'd serve 30+ GB of looped menu.
 		streams := make([]isoFileEntry, 0, len(pl.PlayItems))
+		seenClips := make(map[string]struct{}, len(pl.PlayItems))
+		var uniqueClipBytes uint64
 		for _, it := range pl.PlayItems {
 			name := strings.ToUpper(it.ClipName)
-			if entry, ok := m2tsByClip[name]; ok {
-				streams = append(streams, entry)
+			entry, ok := m2tsByClip[name]
+			if !ok {
+				entry, ok = ssifByClip[name]
+			}
+			if !ok {
 				continue
 			}
-			if entry, ok := ssifByClip[name]; ok {
-				streams = append(streams, entry)
+			streams = append(streams, entry)
+			if _, dup := seenClips[name]; !dup {
+				seenClips[name] = struct{}{}
+				uniqueClipBytes += entry.size
 			}
 		}
 		if len(streams) == 0 {
@@ -93,11 +109,21 @@ func ResolveMainFeature(ctx context.Context, rs io.ReadSeeker, files []isoFileEn
 		}
 
 		cand := &MainFeaturePlaylist{
-			PlaylistName:  pe.path,
-			DurationTicks: pl.DurationTicks(),
-			Streams:       streams,
+			PlaylistName:    pe.path,
+			DurationTicks:   pl.DurationTicks(),
+			Streams:         streams,
+			UniqueClipBytes: uniqueClipBytes,
+			UniqueClipCount: len(seenClips),
 		}
-		if best == nil || isBetterPlaylist(cand, best, len(pl.PlayItems), len(best.Streams)) {
+		slog.DebugContext(ctx, "Blu-ray playlist candidate",
+			"playlist", pe.path,
+			"play_items", len(pl.PlayItems),
+			"resolved_streams", len(streams),
+			"unique_clips", len(seenClips),
+			"unique_clip_bytes", uniqueClipBytes,
+			"duration_seconds", cand.DurationTicks/45000,
+		)
+		if best == nil || isBetterPlaylist(cand, best) {
 			best = cand
 		}
 	}
@@ -105,22 +131,27 @@ func ResolveMainFeature(ctx context.Context, rs io.ReadSeeker, files []isoFileEn
 		slog.InfoContext(ctx, "Blu-ray main feature playlist resolved",
 			"playlist", best.PlaylistName,
 			"clips", len(best.Streams),
+			"unique_clips", best.UniqueClipCount,
+			"unique_clip_bytes", best.UniqueClipBytes,
 			"duration_seconds", best.DurationTicks/45000,
 		)
 	}
 	return best
 }
 
-// isBetterPlaylist returns true when cand should replace best.
-// Comparison: longer duration > more PlayItems > earlier filename.
-// The filename tie-break relies on playlistEntries being sorted before
-// iteration so the smaller path is seen first; we therefore only swap
-// when strictly better.
-func isBetterPlaylist(cand, best *MainFeaturePlaylist, candItems, bestItems int) bool {
-	if cand.DurationTicks != best.DurationTicks {
-		return cand.DurationTicks > best.DurationTicks
+// isBetterPlaylist returns true when cand should replace best. Score by
+// total bytes of unique clips referenced — a real main feature pulls in
+// ~30 distinct chapter clips totalling tens of GB, while a Blu-ray menu
+// navigation playlist references one small clip repeatedly and therefore
+// always loses on this metric regardless of how many PlayItems it
+// inflates the raw duration with. Final tie: earlier filename wins,
+// relying on playlistEntries being lex-sorted before iteration so we
+// only swap when strictly better.
+func isBetterPlaylist(cand, best *MainFeaturePlaylist) bool {
+	if cand.UniqueClipBytes != best.UniqueClipBytes {
+		return cand.UniqueClipBytes > best.UniqueClipBytes
 	}
-	return candItems > bestItems
+	return cand.UniqueClipCount > best.UniqueClipCount
 }
 
 // readISOFile reads the full contents of one isoFileEntry from rs,

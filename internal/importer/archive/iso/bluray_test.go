@@ -3,6 +3,7 @@ package iso
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"testing"
 )
@@ -209,6 +210,162 @@ func TestResolveMainFeature(t *testing.T) {
 		}
 		if got := ResolveMainFeature(context.Background(), rs, files); got != nil {
 			t.Errorf("expected nil when MPLS references unknown clip, got %+v", got)
+		}
+	})
+
+	t.Run("prefers feature over menu when menu has more PlayItems", func(t *testing.T) {
+		t.Parallel()
+		// The Avatar 3D regression: a menu navigation playlist with 201
+		// PlayItems all pointing at the same ~80s menu clip would beat the
+		// real main feature under the old duration-sum scoring because
+		// 201 × 80s > 30 × 6min. The fix scores by unique-clip bytes,
+		// where the menu's single 100MB clip loses to the feature's
+		// 30 × 600MB chapter clips totalling 18 GB.
+		menuItems := make([]MPLSPlayItem, 201)
+		for i := range menuItems {
+			// All 201 PlayItems reference the SAME menu clip — exactly the
+			// pattern observed in the user's failing case.
+			menuItems[i] = MPLSPlayItem{
+				ClipName: "00149",
+				InTime:   0,
+				OutTime:  80 * 45000, // 80s, so total raw duration is 201 × 80s = 16200s ≈ 4.5h
+			}
+		}
+		menu := buildMPLS(t, "0200", menuItems, nil)
+
+		featureItems := make([]MPLSPlayItem, 30)
+		for i := range featureItems {
+			featureItems[i] = MPLSPlayItem{
+				ClipName: fmt.Sprintf("%05d", 1+i), // 30 distinct clips: 00001..00030
+				InTime:   0,
+				OutTime:  6 * 60 * 45000, // 6 min/chapter → 30 × 6 = 180 min total raw duration
+			}
+		}
+		feature := buildMPLS(t, "0200", featureItems, nil)
+
+		rs := makeImage(t, map[uint32][]byte{
+			100: menu,
+			110: feature,
+		})
+
+		files := []isoFileEntry{
+			mkEntry("BDMV/PLAYLIST/00000.MPLS", 100, uint64(len(menu))),
+			mkEntry("BDMV/PLAYLIST/00800.MPLS", 110, uint64(len(feature))),
+			// Menu clip: ~100 MB, one entry.
+			mkEntry("BDMV/STREAM/00149.M2TS", 1000, 100_000_000),
+		}
+		// 30 distinct feature clips, ~600 MB each → ~18 GB total unique bytes.
+		for i := range featureItems {
+			files = append(files, mkEntry(
+				fmt.Sprintf("BDMV/STREAM/%05d.M2TS", 1+i),
+				2000+uint32(i)*10,
+				600_000_000,
+			))
+		}
+
+		got := ResolveMainFeature(context.Background(), rs, files)
+		if got == nil {
+			t.Fatal("ResolveMainFeature returned nil — feature playlist should have won")
+		}
+		if got.PlaylistName != "BDMV/PLAYLIST/00800.MPLS" {
+			t.Fatalf("PlaylistName = %q, want 00800.MPLS (the real feature). The menu's 201 PlayItems must not be allowed to beat the feature's 30 distinct chapters.", got.PlaylistName)
+		}
+		if got.UniqueClipCount != 30 {
+			t.Errorf("UniqueClipCount = %d, want 30 (one per feature chapter)", got.UniqueClipCount)
+		}
+		if got.UniqueClipBytes != 30*600_000_000 {
+			t.Errorf("UniqueClipBytes = %d, want %d", got.UniqueClipBytes, uint64(30*600_000_000))
+		}
+		if len(got.Streams) != 30 {
+			t.Errorf("Streams len = %d, want 30 (the playlist's actual playback order)", len(got.Streams))
+		}
+	})
+
+	t.Run("preserves legitimate clip repetition in output streams", func(t *testing.T) {
+		t.Parallel()
+		// A real BD playlist may legitimately repeat a clip (e.g., a
+		// "previously on..." recap at the start of each chapter). The fix
+		// dedupes only for scoring; the output Streams slice must retain
+		// the playlist's actual playback order, including duplicates.
+		data := buildMPLS(t, "0200", []MPLSPlayItem{
+			{ClipName: "00001", InTime: 0, OutTime: 30 * 45000},  // A
+			{ClipName: "00002", InTime: 0, OutTime: 60 * 45000},  // B
+			{ClipName: "00001", InTime: 0, OutTime: 30 * 45000},  // A again
+			{ClipName: "00003", InTime: 0, OutTime: 90 * 45000},  // C
+		}, nil)
+		rs := makeImage(t, map[uint32][]byte{100: data})
+
+		files := []isoFileEntry{
+			mkEntry("BDMV/PLAYLIST/00800.MPLS", 100, uint64(len(data))),
+			mkEntry("BDMV/STREAM/00001.M2TS", 200, 100),
+			mkEntry("BDMV/STREAM/00002.M2TS", 300, 200),
+			mkEntry("BDMV/STREAM/00003.M2TS", 400, 300),
+		}
+
+		got := ResolveMainFeature(context.Background(), rs, files)
+		if got == nil {
+			t.Fatal("ResolveMainFeature returned nil")
+		}
+
+		// Output preserves [A, B, A, C] exactly.
+		if len(got.Streams) != 4 {
+			t.Fatalf("Streams len = %d, want 4 (dedupe must not collapse the output)", len(got.Streams))
+		}
+		wantPaths := []string{
+			"BDMV/STREAM/00001.M2TS",
+			"BDMV/STREAM/00002.M2TS",
+			"BDMV/STREAM/00001.M2TS",
+			"BDMV/STREAM/00003.M2TS",
+		}
+		for i, s := range got.Streams {
+			if s.path != wantPaths[i] {
+				t.Errorf("Streams[%d].path = %q, want %q", i, s.path, wantPaths[i])
+			}
+		}
+
+		// Scoring metrics use dedupe: 3 unique clips totalling 100+200+300.
+		if got.UniqueClipCount != 3 {
+			t.Errorf("UniqueClipCount = %d, want 3", got.UniqueClipCount)
+		}
+		if got.UniqueClipBytes != 600 {
+			t.Errorf("UniqueClipBytes = %d, want 600 (100+200+300, A counted once)", got.UniqueClipBytes)
+		}
+	})
+
+	t.Run("when all playlists are menus, picks the largest deterministically", func(t *testing.T) {
+		t.Parallel()
+		// Degenerate disc: every MPLS is a menu-style single-clip
+		// repetition. Algorithm must still return *something* without
+		// crashing and must be deterministic across runs. Picks the one
+		// with the largest unique-clip bytes (i.e., the largest target
+		// clip, since each playlist has only one unique clip).
+		menuA := buildMPLS(t, "0200", []MPLSPlayItem{
+			{ClipName: "00100", InTime: 0, OutTime: 80 * 45000},
+			{ClipName: "00100", InTime: 0, OutTime: 80 * 45000},
+		}, nil)
+		menuB := buildMPLS(t, "0200", []MPLSPlayItem{
+			{ClipName: "00200", InTime: 0, OutTime: 80 * 45000},
+			{ClipName: "00200", InTime: 0, OutTime: 80 * 45000},
+			{ClipName: "00200", InTime: 0, OutTime: 80 * 45000},
+		}, nil)
+
+		rs := makeImage(t, map[uint32][]byte{
+			100: menuA,
+			110: menuB,
+		})
+		files := []isoFileEntry{
+			mkEntry("BDMV/PLAYLIST/00001.MPLS", 100, uint64(len(menuA))),
+			mkEntry("BDMV/PLAYLIST/00002.MPLS", 110, uint64(len(menuB))),
+			mkEntry("BDMV/STREAM/00100.M2TS", 200, 50_000_000),  // 50 MB
+			mkEntry("BDMV/STREAM/00200.M2TS", 300, 100_000_000), // 100 MB — larger
+		}
+
+		got := ResolveMainFeature(context.Background(), rs, files)
+		if got == nil {
+			t.Fatal("ResolveMainFeature returned nil for a disc full of menus — should still pick one")
+		}
+		if got.PlaylistName != "BDMV/PLAYLIST/00002.MPLS" {
+			t.Errorf("PlaylistName = %q, want 00002.MPLS (its unique clip is 100 MB vs 50 MB)", got.PlaylistName)
 		}
 	})
 }
