@@ -156,6 +156,26 @@ func (c *Coordinator) HandleSuccess(ctx context.Context, item *database.ImportQu
 func (c *Coordinator) HandleFailure(ctx context.Context, item *database.ImportQueueItem, _ error) error {
 	cfg := c.configGetter()
 
+	// Notify ARR applications so they check for the failed download when they
+	// next query the SABnzbd history, rather than waiting for their periodic
+	// poll to discover it.
+	if !shouldSkipARRNotification(item) {
+		c.mu.RLock()
+		arrsService := c.arrsService
+		c.mu.RUnlock()
+
+		if arrsService != nil {
+			if err := c.broadcastToARRType(ctx, arrsService, item); err != nil {
+				c.log.DebugContext(ctx, "ARR failure notification not sent",
+					"queue_id", item.ID,
+					"error", err)
+			} else {
+				c.log.InfoContext(ctx, "ARR notified of failed import",
+					"queue_id", item.ID)
+			}
+		}
+	}
+
 	// Attempt SABnzbd fallback if configured
 	if cfg.SABnzbd.FallbackHost != "" && cfg.SABnzbd.FallbackAPIKey != "" {
 		return c.AttemptFallback(ctx, item)
