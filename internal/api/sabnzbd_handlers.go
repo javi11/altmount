@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"log/slog"
 	"mime"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -179,6 +179,10 @@ func (s *Server) handleSABnzbdSwitch(c *fiber.Ctx) error {
 	id, err := strconv.ParseInt(value, 10, 64)
 	if err == nil {
 		if err := s.queueRepo.UpdateQueueItemPriority(c.Context(), id, priority); err == nil {
+			// When priority is updated by ID, notify web UI of queue change
+			if s.progressBroadcaster != nil {
+				s.progressBroadcaster.BroadcastQueueChanged()
+			}
 			return s.writeSABnzbdResponseFiber(c, SABnzbdResponse{Status: true})
 		}
 	}
@@ -188,6 +192,10 @@ func (s *Server) handleSABnzbdSwitch(c *fiber.Ctx) error {
 		item, err := s.queueRepo.GetQueueItemByDownloadID(c.Context(), value)
 		if err == nil && item != nil {
 			if err := s.queueRepo.UpdateQueueItemPriority(c.Context(), item.ID, priority); err == nil {
+				// When priority is updated by DownloadID, notify web UI of queue change
+				if s.progressBroadcaster != nil {
+					s.progressBroadcaster.BroadcastQueueChanged()
+				}
 				return s.writeSABnzbdResponseFiber(c, SABnzbdResponse{Status: true})
 			}
 		}
@@ -238,6 +246,10 @@ func (s *Server) handleSABnzbdQueuePause(c *fiber.Ctx, pause bool) error {
 		}
 	}
 
+	// When an item is paused or resumed, notify web UI of queue change
+	if s.progressBroadcaster != nil {
+		s.progressBroadcaster.BroadcastQueueChanged()
+	}
 	return s.writeSABnzbdResponseFiber(c, SABnzbdResponse{Status: true})
 }
 
@@ -706,6 +718,10 @@ func (s *Server) handleSABnzbdQueueDelete(c *fiber.Ctx) error {
 			_, _ = s.queueRepo.RemoveFromHistoryByNzbID(c.Context(), id)
 			_, _ = s.queueRepo.RemoveFromHistory(c.Context(), id)
 
+			// When a queue item is deleted by ID, notify web UI of queue change
+			if s.progressBroadcaster != nil {
+				s.progressBroadcaster.BroadcastQueueChanged()
+			}
 			return s.writeSABnzbdResponseFiber(c, SABnzbdDeleteResponse{Status: true})
 		}
 	}
@@ -724,6 +740,10 @@ func (s *Server) handleSABnzbdQueueDelete(c *fiber.Ctx) error {
 				_, _ = s.queueRepo.RemoveFromHistoryByNzbID(c.Context(), item.ID)
 			}
 
+			// When a queue item is deleted by DownloadID, notify web UI of queue change
+			if s.progressBroadcaster != nil {
+				s.progressBroadcaster.BroadcastQueueChanged()
+			}
 			return s.writeSABnzbdResponseFiber(c, SABnzbdDeleteResponse{Status: true})
 		}
 	}
@@ -1099,6 +1119,10 @@ func (s *Server) handleSABnzbdHistoryDelete(c *fiber.Ctx) error {
 		if err == nil {
 			_, _ = s.queueRepo.RemoveFromHistoryByNzbID(c.Context(), id)
 			_, _ = s.queueRepo.RemoveFromHistory(c.Context(), id)
+			// When a history item is deleted by queue ID, notify web UI of queue change
+			if s.progressBroadcaster != nil {
+				s.progressBroadcaster.BroadcastQueueChanged()
+			}
 			return s.writeSABnzbdResponseFiber(c, SABnzbdDeleteResponse{Status: true})
 		}
 
@@ -1106,11 +1130,19 @@ func (s *Server) handleSABnzbdHistoryDelete(c *fiber.Ctx) error {
 		// Try by original NzbID first
 		affected, histErr := s.queueRepo.RemoveFromHistoryByNzbID(c.Context(), id)
 		if histErr == nil && affected > 0 {
+			// When a history item is deleted by NZB ID, notify web UI of queue change
+			if s.progressBroadcaster != nil {
+				s.progressBroadcaster.BroadcastQueueChanged()
+			}
 			return s.writeSABnzbdResponseFiber(c, SABnzbdDeleteResponse{Status: true})
 		}
 
 		affected, histErr = s.queueRepo.RemoveFromHistory(c.Context(), id)
 		if histErr == nil && affected > 0 {
+			// When a history item is deleted by history ID, notify web UI of queue change
+			if s.progressBroadcaster != nil {
+				s.progressBroadcaster.BroadcastQueueChanged()
+			}
 			return s.writeSABnzbdResponseFiber(c, SABnzbdDeleteResponse{Status: true})
 		}
 	}
@@ -1128,11 +1160,19 @@ func (s *Server) handleSABnzbdHistoryDelete(c *fiber.Ctx) error {
 			if item != nil {
 				_, _ = s.queueRepo.RemoveFromHistoryByNzbID(c.Context(), item.ID)
 			}
+			// When a history item is deleted by DownloadID, notify web UI of queue change
+			if s.progressBroadcaster != nil {
+				s.progressBroadcaster.BroadcastQueueChanged()
+			}
 			return s.writeSABnzbdResponseFiber(c, SABnzbdDeleteResponse{Status: true})
 		}
 
 		// If item was found in queue but not in history, consider it handled
 		if item != nil {
+			// When a queue item is removed by DownloadID during history delete, notify web UI
+			if s.progressBroadcaster != nil {
+				s.progressBroadcaster.BroadcastQueueChanged()
+			}
 			return s.writeSABnzbdResponseFiber(c, SABnzbdDeleteResponse{Status: true})
 		}
 	}
