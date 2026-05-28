@@ -37,7 +37,13 @@ const ChartTooltip = ({
 	const isExcellent = val >= 90;
 	const isGood = val >= 75 && val < 90;
 	const isPoor = val >= 50 && val < 75;
-	const statusText = isExcellent ? "Excellent" : isGood ? "Good" : isPoor ? "Moderate" : "Operational";
+	const statusText = isExcellent
+		? "Excellent"
+		: isGood
+			? "Good"
+			: isPoor
+				? "Moderate"
+				: "Operational";
 	const badgeColor = isExcellent
 		? "bg-teal-500/10 text-teal-400 border-teal-500/20"
 		: isGood
@@ -47,7 +53,7 @@ const ChartTooltip = ({
 				: "bg-blue-500/10 text-blue-400 border-blue-500/20";
 
 	return (
-		<div className="z-50 rounded-xl border border-base-200 bg-base-100/95 p-3 text-xs shadow-2xl backdrop-blur-md text-base-content">
+		<div className="z-50 rounded-xl border border-base-200 bg-base-100/95 p-3 text-base-content text-xs shadow-2xl backdrop-blur-md">
 			<p className="mb-1.5 font-extrabold leading-tight">{name}</p>
 			<div className="flex items-center gap-2">
 				<span
@@ -61,8 +67,6 @@ const ChartTooltip = ({
 	);
 };
 
-
-
 export function IndexerHealth() {
 	const { data: stats, isLoading, error, refetch } = useIndexerStats();
 	const cleanupStats = useCleanupIndexerStats();
@@ -71,9 +75,9 @@ export function IndexerHealth() {
 
 	const [showChart, setShowChart] = useState(false);
 	const [searchQuery, setSearchQuery] = useState("");
-	const [statusFilter, setStatusFilter] = useState<"all" | "excellent" | "good" | "moderate" | "operational">(
-		"all",
-	);
+	const [statusFilter, setStatusFilter] = useState<
+		"all" | "excellent" | "good" | "moderate" | "operational"
+	>("all");
 
 	const [showPruneModal, setShowPruneModal] = useState(false);
 	const [pruneOption, setPruneOption] = useState<"24h" | "7d" | "30d" | "custom">("24h");
@@ -134,7 +138,12 @@ export function IndexerHealth() {
 		const confirmed = await confirmAction(
 			"Delete Indexer Stats",
 			`Are you sure you want to delete all statistics for "${indexer}"? This action cannot be undone.`,
-			{ type: "error", confirmText: "Delete", confirmButtonClass: "btn-error", verificationText: indexer },
+			{
+				type: "error",
+				confirmText: "Delete",
+				confirmButtonClass: "btn-error",
+				verificationText: indexer,
+			},
 		);
 		if (!confirmed) return;
 		try {
@@ -293,8 +302,11 @@ export function IndexerHealth() {
 			{/* ── Top Header ── */}
 			<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 				<div>
-					<h3 className="flex items-center gap-2 font-extrabold text-lg text-base-content tracking-tight">
-						<Radio className="h-5 w-5 animate-pulse text-teal-500 dark:text-teal-400" aria-hidden="true" />
+					<h3 className="flex items-center gap-2 font-extrabold text-base-content text-lg tracking-tight">
+						<Radio
+							className="h-5 w-5 animate-pulse text-teal-500 dark:text-teal-400"
+							aria-hidden="true"
+						/>
 						Usenet Indexers Health HUD
 					</h3>
 					<p className="font-medium text-base-content/50 text-xs sm:text-sm">
@@ -327,7 +339,7 @@ export function IndexerHealth() {
 					</button>
 					<button
 						type="button"
-						className="btn btn-warning btn-sm gap-1.5 border-white/5 shadow-[0_2px_12px_rgba(217,119,6,0.2)] transition-all duration-200"
+						className="btn btn-warning btn-sm gap-1.5 shadow-[0_2px_12px_rgba(217,119,6,0.2)] transition-all duration-200"
 						onClick={() => setShowPruneModal(true)}
 						disabled={!hasStats}
 						aria-label="Prune indexer statistics history"
@@ -343,8 +355,11 @@ export function IndexerHealth() {
 				<div className="card overflow-hidden border border-base-200 bg-base-100/60 p-5 shadow-xl backdrop-blur-md transition-all duration-300">
 					<div className="mb-4 flex items-center justify-between border-base-200 border-b pb-2">
 						<div>
-							<h4 className="flex items-center gap-2 font-bold text-sm text-base-content">
-								<BarChart2 className="h-4 w-4 animate-pulse text-teal-500 dark:text-teal-400" aria-hidden="true" />
+							<h4 className="flex items-center gap-2 font-bold text-base-content text-sm">
+								<BarChart2
+									className="h-4 w-4 animate-pulse text-teal-500 dark:text-teal-400"
+									aria-hidden="true"
+								/>
 								Usenet Indexer Success Comparison
 							</h4>
 							<p className="font-medium text-[10px] text-base-content/50">
@@ -385,7 +400,13 @@ export function IndexerHealth() {
 										const isExcellent = entry.success_rate >= 90;
 										const isGood = entry.success_rate >= 75 && entry.success_rate < 90;
 										const isPoor = entry.success_rate >= 50 && entry.success_rate < 75;
-										const color = isExcellent ? "#0d9488" : isGood ? "#059669" : isPoor ? "#d97706" : "#e11d48";
+										const color = isExcellent
+											? "#0d9488"
+											: isGood
+												? "#059669"
+												: isPoor
+													? "#d97706"
+													: "#e11d48";
 										return <Cell key={`cell-${index}`} fill={color} />;
 									})}
 								</Bar>
@@ -404,7 +425,7 @@ export function IndexerHealth() {
 							<span className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
 								Tracked Indexers
 							</span>
-							<div className="font-extrabold font-mono text-2xl text-teal-600 dark:text-teal-400 tracking-tight">
+							<div className="font-extrabold font-mono text-2xl text-teal-600 tracking-tight dark:text-teal-400">
 								{stats?.length ?? 0}
 							</div>
 							<div className="font-semibold text-[10px] text-base-content/50">
@@ -443,10 +464,10 @@ export function IndexerHealth() {
 						<div
 							className={`relative z-10 ${
 								summary.overallRate >= 85
-									? "text-teal-600 dark:text-teal-400 shadow-[0_0_12px_rgba(13,148,136,0.3)]"
+									? "text-teal-600 shadow-[0_0_12px_rgba(13,148,136,0.3)] dark:text-teal-400"
 									: summary.overallRate >= 60
-										? "text-amber-600 dark:text-amber-500 shadow-[0_0_12px_rgba(245,158,11,0.3)]"
-										: "text-rose-600 dark:text-rose-400 shadow-[0_0_12px_rgba(225,29,72,0.3)]"
+										? "text-amber-600 shadow-[0_0_12px_rgba(245,158,11,0.3)] dark:text-amber-500"
+										: "text-rose-600 shadow-[0_0_12px_rgba(225,29,72,0.3)] dark:text-rose-400"
 							}`}
 						>
 							<BarChart2 className="h-8 w-8 opacity-50" />
@@ -459,7 +480,7 @@ export function IndexerHealth() {
 							<span className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
 								Successful Imports
 							</span>
-							<div className="font-extrabold font-mono text-2xl text-emerald-600 dark:text-emerald-400 tracking-tight">
+							<div className="font-extrabold font-mono text-2xl text-emerald-600 tracking-tight dark:text-emerald-400">
 								{summary.totalSuccess.toLocaleString()}
 							</div>
 							<div className="font-semibold text-[10px] text-base-content/50">
@@ -477,7 +498,7 @@ export function IndexerHealth() {
 							<span className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
 								Failed Imports
 							</span>
-							<div className="font-extrabold font-mono text-2xl text-rose-600 dark:text-rose-400 tracking-tight">
+							<div className="font-extrabold font-mono text-2xl text-rose-600 tracking-tight dark:text-rose-400">
 								{summary.totalFailed.toLocaleString()}
 							</div>
 							<div className="font-semibold text-[10px] text-base-content/50">
@@ -532,7 +553,7 @@ export function IndexerHealth() {
 							className="input input-bordered input-sm w-full border-base-300 bg-base-200/50 pl-8 font-medium text-base-content placeholder-base-content/40 focus:border-teal-500/50"
 							aria-label="Search indexers"
 						/>
-						<div className="-translate-y-1/2 absolute top-1/2 left-2.5 text-base-content/40">
+						<div className="absolute top-1/2 left-2.5 -translate-y-1/2 text-base-content/40">
 							<svg
 								xmlns="http://www.w3.org/2000/svg"
 								className="h-4 w-4"
@@ -563,7 +584,7 @@ export function IndexerHealth() {
 						{(["all", "excellent", "good", "moderate", "operational"] as const).map((filter) => {
 							const active = statusFilter === filter;
 							let btnClass =
-								"btn-ghost text-base-content/60 hover:text-base-content hover:bg-white/5 border-transparent";
+								"btn-ghost text-base-content/60 hover:text-base-content hover:bg-base-content/5 border-transparent";
 							if (active) {
 								if (filter === "excellent")
 									btnClass =
@@ -603,7 +624,7 @@ export function IndexerHealth() {
 						Sort by
 					</span>
 					<div
-						className="join rounded-xl border border-white/5 bg-white/5 p-0.5"
+						className="join rounded-xl border border-base-200 bg-base-200/30 p-0.5"
 						role="group"
 						aria-label="Sort options"
 					>
@@ -615,7 +636,7 @@ export function IndexerHealth() {
 								className={`btn btn-xs join-item border-none font-bold capitalize tracking-wide transition-all duration-200 ${
 									sortKey === key
 										? "btn-primary shadow-[0_0_8px_rgba(59,130,246,0.25)]"
-										: "btn-ghost text-base-content/60 hover:bg-white/5 hover:text-base-content"
+										: "btn-ghost text-base-content/60 hover:bg-base-content/5 hover:text-base-content"
 								}`}
 								aria-label={`Sort by ${key === "health" ? "Health" : key === "total" ? "Volume" : "Name"}`}
 							>
@@ -637,7 +658,7 @@ export function IndexerHealth() {
 				<div className="hero rounded-2xl border border-base-300 border-dashed bg-base-200/50 py-16 backdrop-blur-md">
 					<div className="hero-content text-center">
 						<div className="max-w-md space-y-4">
-							<div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl border border-teal-500/20 bg-teal-500/5 text-teal-500 dark:text-teal-400 shadow-sm">
+							<div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl border border-teal-500/20 bg-teal-500/5 text-teal-500 shadow-sm dark:text-teal-400">
 								<BarChart2 className="h-8 w-8 animate-pulse" aria-hidden="true" />
 							</div>
 							<h3 className="font-bold text-base-content text-xl tracking-tight">
@@ -704,12 +725,18 @@ export function IndexerHealth() {
 									? "bg-amber-500/10 text-amber-500 border-amber-500/20"
 									: "bg-slate-500/10 text-slate-400 border-slate-500/20";
 
-						const statusText = isExcellent ? "EXCELLENT" : isGood ? "GOOD" : isPoor ? "MODERATE" : "OPERATIONAL";
+						const statusText = isExcellent
+							? "EXCELLENT"
+							: isGood
+								? "GOOD"
+								: isPoor
+									? "MODERATE"
+									: "OPERATIONAL";
 
 						return (
 							<div
 								key={item.indexer}
-								className={`group card relative overflow-hidden border ${accentColor} hover:-translate-y-1.5 bg-base-100/60 shadow-md backdrop-blur-md transition-all duration-500 ease-out hover:scale-[1.01]`}
+								className={`group card relative overflow-hidden border ${accentColor} bg-base-100/60 shadow-md backdrop-blur-md transition-all duration-500 ease-out hover:-translate-y-1.5 hover:scale-[1.01]`}
 							>
 								{/* Premium matte glowing top bar */}
 								<div
@@ -720,7 +747,7 @@ export function IndexerHealth() {
 								<div className="absolute top-3 right-3 z-10">
 									<button
 										type="button"
-										className="btn btn-ghost btn-xs p-1 text-rose-500 opacity-0 transition-all duration-200 hover:bg-rose-500/20 hover:text-rose-600 dark:hover:text-rose-300 group-hover:opacity-100"
+										className="btn btn-ghost btn-xs p-1 text-rose-500 opacity-0 transition-all duration-200 hover:bg-rose-500/20 hover:text-rose-600 group-hover:opacity-100 dark:hover:text-rose-300"
 										onClick={() => handleDeleteIndexer(item.indexer)}
 										aria-label={`Delete statistics for ${item.indexer}`}
 									>
@@ -733,7 +760,7 @@ export function IndexerHealth() {
 									<div className="flex items-center justify-between gap-3">
 										{/* Details */}
 										<div className="min-w-0 flex-1 space-y-2 py-0.5">
-											<h4 className="truncate font-extrabold text-[17px] sm:text-lg text-base-content leading-tight tracking-tight pr-6">
+											<h4 className="truncate pr-6 font-extrabold text-[17px] text-base-content leading-tight tracking-tight sm:text-lg">
 												{item.indexer}
 											</h4>
 											<div className="flex flex-wrap items-center gap-2">
@@ -750,14 +777,24 @@ export function IndexerHealth() {
 										</div>
 
 										{/* Maximized Percentage on the Right */}
-										<div className="flex flex-col items-end shrink-0 pl-2">
-											<span className={`text-[17px] sm:text-lg font-black font-mono leading-none tracking-tight flex items-baseline ${
-												isExcellent ? "text-teal-600 dark:text-teal-400" : isGood ? "text-emerald-600 dark:text-emerald-400" : isPoor ? "text-amber-600 dark:text-amber-500" : "text-slate-600 dark:text-slate-400"
-											}`}>
+										<div className="flex shrink-0 flex-col items-end pl-2">
+											<span
+												className={`flex items-baseline font-black font-mono text-[17px] leading-none tracking-tight sm:text-lg ${
+													isExcellent
+														? "text-teal-600 dark:text-teal-400"
+														: isGood
+															? "text-emerald-600 dark:text-emerald-400"
+															: isPoor
+																? "text-amber-600 dark:text-amber-500"
+																: "text-slate-600 dark:text-slate-400"
+												}`}
+											>
 												{item.success_rate.toFixed(1)}
-												<span className="text-[9px] sm:text-[10px] font-semibold opacity-50 ml-0.5">%</span>
+												<span className="ml-0.5 font-semibold text-[9px] opacity-50 sm:text-[10px]">
+													%
+												</span>
 											</span>
-											<span className="text-[8px] font-black text-base-content/40 tracking-widest mt-1.5 uppercase">
+											<span className="mt-1.5 font-black text-[8px] text-base-content/40 uppercase tracking-widest">
 												SUCCESS
 											</span>
 										</div>
@@ -765,7 +802,7 @@ export function IndexerHealth() {
 
 									{/* Sleek Gradient Split progress bar */}
 									<div className="mt-4 space-y-1">
-										<div className="relative flex h-2 w-full overflow-hidden rounded-full border border-white/5 bg-white/5">
+										<div className="relative flex h-2 w-full overflow-hidden rounded-full border border-base-200 bg-base-200/40">
 											<div
 												className="h-full bg-gradient-to-r from-teal-500/80 to-teal-400/80 shadow-[0_0_8px_rgba(20,184,166,0.3)] transition-all duration-700"
 												style={{ width: `${barSuccessWidth}%` }}
@@ -807,14 +844,14 @@ export function IndexerHealth() {
 													dot === "success"
 														? "bg-teal-500/80 hover:bg-teal-400 shadow-[0_0_6px_rgba(20,184,166,0.4)]"
 														: dot === "failed"
-														? "bg-rose-500/80 hover:bg-rose-400 shadow-[0_0_6px_rgba(239,68,68,0.4)]"
-														: "bg-base-200/30 border border-base-200";
+															? "bg-rose-500/80 hover:bg-rose-400 shadow-[0_0_6px_rgba(239,68,68,0.4)]"
+															: "bg-base-200/30 border border-base-200";
 												const dotTip =
 													dot === "success"
 														? "Import OK"
 														: dot === "failed"
-														? "Import Failed"
-														: "No Activity";
+															? "Import Failed"
+															: "No Activity";
 												return (
 													<div
 														key={idx}
@@ -829,7 +866,7 @@ export function IndexerHealth() {
 									{/* Telemetry Grid */}
 									<div className="mt-4 grid grid-cols-3 gap-1.5 rounded-xl border border-base-200 bg-base-200/50 p-3 text-center">
 										<div className="space-y-0.5">
-											<div className="font-extrabold text-sm text-base-content tabular-nums">
+											<div className="font-extrabold text-base-content text-sm tabular-nums">
 												{item.total_imports.toLocaleString()}
 											</div>
 											<div className="font-bold text-[8px] text-base-content/40 uppercase tracking-wider">
@@ -837,7 +874,7 @@ export function IndexerHealth() {
 											</div>
 										</div>
 										<div className="space-y-0.5">
-											<div className="flex items-center justify-center gap-0.5 font-extrabold text-sm text-teal-600 dark:text-teal-400 tabular-nums">
+											<div className="flex items-center justify-center gap-0.5 font-extrabold text-sm text-teal-600 tabular-nums dark:text-teal-400">
 												<CheckCircle2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
 												{item.success_count.toLocaleString()}
 											</div>
@@ -846,7 +883,7 @@ export function IndexerHealth() {
 											</div>
 										</div>
 										<div className="space-y-0.5">
-											<div className="flex items-center justify-center gap-0.5 font-extrabold text-rose-600 dark:text-rose-400 text-sm tabular-nums">
+											<div className="flex items-center justify-center gap-0.5 font-extrabold text-rose-600 text-sm tabular-nums dark:text-rose-400">
 												<XCircle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
 												{item.failed_count.toLocaleString()}
 											</div>
@@ -911,7 +948,7 @@ export function IndexerHealth() {
 											}`}
 										/>
 										<div className="flex-1">
-											<span className="font-bold text-sm text-base-content">
+											<span className="font-bold text-base-content text-sm">
 												{opt === "24h"
 													? "Delete Last 24 Hours"
 													: opt === "7d"
