@@ -21,7 +21,7 @@ import {
 	useProviderSpeedHistory,
 	useTestProviderSpeed,
 } from "../../../../hooks/useApi";
-import { formatBytes, formatRelativeTime } from "../../../../lib/utils";
+import { formatBytes, formatRelativeTime, getProviderBrandName } from "../../../../lib/utils";
 import type { ProviderSpeedTestHistoryStat, ProviderStatus } from "../../../../types/api";
 import { ProviderChart } from "./ProviderChart";
 import { ProviderQuota } from "./ProviderQuota";
@@ -138,6 +138,45 @@ const SpeedHistorySparkline = ({
 	);
 };
 
+function ConnectionPoolGrid({ used, max }: { used: number; max: number }) {
+	if (max > 20) {
+		const percent = Math.round((used / max) * 100);
+		return (
+			<div className="flex items-center gap-2">
+				<div className="flex h-2.5 w-16 overflow-hidden rounded-full border border-base-content/10 bg-base-200/50">
+					<div
+						className="h-full rounded-full bg-primary shadow-[0_0_8px_rgba(59,130,246,0.5)] transition-all duration-500"
+						style={{ width: `${percent}%` }}
+					/>
+				</div>
+				<span className="font-mono text-base-content/80 text-xs">
+					{used}/{max}
+				</span>
+			</div>
+		);
+	}
+
+	return (
+		<div className="flex items-center gap-2">
+			<div className="flex max-w-[80px] flex-wrap gap-0.5">
+				{Array.from({ length: max }).map((_, i) => (
+					<span
+						key={i}
+						className={`h-3 w-1 rounded-sm transition-all duration-300 ${
+							i < used
+								? "bg-primary shadow-[0_0_6px_rgba(59,130,246,0.6)]"
+								: "border border-base-200 bg-base-200/50"
+						}`}
+					/>
+				))}
+			</div>
+			<span className="font-mono text-base-content/85 text-xs">
+				{used}/{max}
+			</span>
+		</div>
+	);
+}
+
 export function ProviderHealth() {
 	const { data, isLoading, error } = usePoolMetrics();
 	const { data: speedHistoryResponse } = useProviderSpeedHistory(7); // Last 7 days
@@ -211,7 +250,7 @@ export function ProviderHealth() {
 			showToast({
 				type: "success",
 				title: "Speed Test Completed",
-				message: `${host}: ${result.speed_mbps.toFixed(2)} Mbps`,
+				message: `${host}: ${result.speed_mbps.toFixed(2)} MB/s`,
 			});
 		} catch (err) {
 			showToast({
@@ -278,59 +317,111 @@ export function ProviderHealth() {
 
 			{/* Global Metrics Cards */}
 			<div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-				<div className="stat rounded-box bg-base-100 shadow">
-					<div className="stat-figure text-primary">
-						<Activity className="h-8 w-8" />
+				{/* Download Traffic Card */}
+				<div className="card group relative flex flex-row items-center justify-between overflow-hidden border border-base-200/40 bg-base-100/20 p-5 shadow-xl backdrop-blur-md transition-all hover:border-primary/20">
+					{data.download_speed_bytes_per_sec > 0 && (
+						<div className="absolute inset-0 bg-gradient-to-tr from-primary/5 via-transparent to-transparent opacity-60" />
+					)}
+					<div className="relative z-10 space-y-1">
+						<span className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+							Download Traffic
+						</span>
+						<div className="font-extrabold font-mono text-2xl text-primary tracking-tight">
+							{formatBytes(data.bytes_downloaded)}
+						</div>
+						<div className="font-mono text-base-content/65 text-xs">
+							{formatBytes(data.download_speed_bytes_per_sec)}/s
+						</div>
 					</div>
-					<div className="stat-title">Download Traffic</div>
-					<div className="stat-value text-2xl text-primary">
-						{formatBytes(data.bytes_downloaded)}
+					<div className="relative z-10 text-primary">
+						<Activity
+							className={`h-8 w-8 ${data.download_speed_bytes_per_sec > 0 ? "animate-pulse text-primary shadow-[0_0_12px_rgba(59,130,246,0.3)]" : "opacity-45"}`}
+						/>
 					</div>
-					<div className="stat-desc font-mono">
-						{formatBytes(data.download_speed_bytes_per_sec)}/s
+					{/* Active wave line on bottom of the card */}
+					{data.download_speed_bytes_per_sec > 0 && (
+						<div className="absolute right-0 bottom-0 left-0 h-1 overflow-hidden opacity-30">
+							<svg
+								viewBox="0 0 100 10"
+								className="h-full w-full fill-primary"
+								preserveAspectRatio="none"
+							>
+								<title>Download Speed Wave</title>
+								<path
+									d="M0,5 C30,8 70,2 100,5 L100,10 L0,10 Z"
+									style={{ animation: "speed-wave 2s ease-in-out infinite" }}
+								/>
+							</svg>
+						</div>
+					)}
+				</div>
+
+				{/* Articles Card */}
+				<div className="card group relative flex flex-row items-center justify-between overflow-hidden border border-base-200/40 bg-base-100/20 p-5 shadow-xl backdrop-blur-md transition-all hover:border-secondary/20">
+					<div className="z-10 space-y-1">
+						<span className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+							Articles
+						</span>
+						<div className="font-extrabold font-mono text-2xl text-secondary tracking-tight">
+							{data.articles_downloaded.toLocaleString()}
+						</div>
+						<div className="text-base-content/50 text-xs">Downloaded</div>
+					</div>
+					<div className="z-10 text-secondary">
+						<ActivitySquare className="h-8 w-8 opacity-45 transition-opacity group-hover:opacity-85" />
 					</div>
 				</div>
 
-				<div className="stat rounded-box bg-base-100 shadow">
-					<div className="stat-figure text-secondary">
-						<ActivitySquare className="h-8 w-8" />
+				{/* Total Errors Card */}
+				<div className="card group relative flex flex-row items-center justify-between overflow-hidden border border-base-200/40 bg-base-100/20 p-5 shadow-xl backdrop-blur-md transition-all hover:border-error/20">
+					{data.total_errors > 0 && (
+						<div className="absolute inset-0 bg-gradient-to-tr from-error/5 via-transparent to-transparent opacity-60" />
+					)}
+					<div className="z-10 space-y-1">
+						<span className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+							Total Errors
+						</span>
+						<div className="font-extrabold font-mono text-2xl text-error tracking-tight">
+							{data.total_errors.toLocaleString()}
+						</div>
+						<div className="text-base-content/50 text-xs">Across all providers</div>
 					</div>
-					<div className="stat-title">Articles</div>
-					<div className="stat-value text-2xl text-secondary">
-						{data.articles_downloaded.toLocaleString()}
+					<div className="z-10 text-error">
+						<AlertTriangle
+							className={`h-8 w-8 ${data.total_errors > 0 ? "animate-bounce text-error" : "opacity-45"}`}
+						/>
 					</div>
-					<div className="stat-desc">Downloaded</div>
 				</div>
 
-				<div className="stat rounded-box bg-base-100 shadow">
-					<div className="stat-figure text-error">
-						<AlertTriangle className="h-8 w-8" />
+				{/* Active Connections Card */}
+				<div className="card group relative flex flex-row items-center justify-between overflow-hidden border border-base-200/40 bg-base-100/20 p-5 shadow-xl backdrop-blur-md transition-all hover:border-info/20">
+					<div className="z-10 space-y-1">
+						<span className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+							Active Connections
+						</span>
+						<div className="font-extrabold font-mono text-2xl text-info tracking-tight">
+							{totalUsedConnections}
+							<span className="font-medium text-base-content/40 text-sm">
+								{" "}
+								/ {totalMaxConnections}
+							</span>
+						</div>
+						<div className="text-base-content/50 text-xs">Across active pools</div>
 					</div>
-					<div className="stat-title">Total Errors</div>
-					<div className="stat-value text-2xl text-error">{data.total_errors.toLocaleString()}</div>
-					<div className="stat-desc">Across all providers</div>
-				</div>
-
-				<div className="stat rounded-box bg-base-100 shadow">
-					<div className="stat-figure text-info">
+					<div className="z-10 text-info">
 						<div
-							className="radial-progress border-4 border-base-200 text-info"
+							className="radial-progress border-2 border-base-content/10 text-info shadow-[0_0_8px_rgba(6,182,212,0.15)]"
 							style={
 								{
 									"--value": connectionPercent,
-									"--size": "3.5rem",
-									"--thickness": "0.4rem",
+									"--size": "3rem",
+									"--thickness": "0.3rem",
 								} as React.CSSProperties
 							}
 							role="progressbar"
 						>
-							<span className="font-bold text-xs">{connectionPercent}%</span>
+							<span className="font-bold font-mono text-[10px]">{connectionPercent}%</span>
 						</div>
-					</div>
-					<div className="stat-title">Active Connections</div>
-					<div className="stat-value text-2xl text-info">
-						{totalUsedConnections}
-						<span className="text-base-content/50 text-lg"> / {totalMaxConnections}</span>
 					</div>
 				</div>
 			</div>
@@ -343,17 +434,21 @@ export function ProviderHealth() {
 			</div>
 
 			{/* Provider Table */}
-			<div className="card bg-base-100 shadow-xl">
+			<div className="card overflow-hidden border border-base-200/40 bg-base-100/20 shadow-2xl backdrop-blur-md">
 				<div className="card-body p-0">
-					<div className="flex items-center justify-between border-base-200 border-b p-4">
-						<h2 className="card-title text-lg">Provider Status</h2>
-						<div className="badge badge-outline gap-2 py-3">
+					<div className="flex items-center justify-between border-base-200/50 border-b bg-base-200/30 p-4">
+						<h2 className="flex items-center gap-2 font-bold text-base text-base-content/90">
+							Provider Status
+						</h2>
+						<div className="badge badge-outline gap-2 border-base-200/60 bg-base-100/30 py-3">
 							<Info className="h-3.5 w-3.5" />
-							<span className="text-xs">Real-time stats updated every 5s</span>
+							<span className="text-[11px] text-base-content/66">
+								Real-time metrics updated every 5s
+							</span>
 						</div>
 					</div>
 					<div className="overflow-x-auto">
-						<table className="table-zebra table">
+						<table className="table-zebra table border-collapse">
 							<thead>
 								<tr>
 									<th
@@ -470,10 +565,18 @@ export function ProviderHealth() {
 							</thead>
 							<tbody>
 								{sortedProviders.map((provider) => (
-									<tr key={provider.id}>
-										<td className="font-medium">
+									<tr
+										key={provider.id}
+										className="border-base-200/30 border-b transition-colors hover:bg-base-content/5"
+									>
+										<td>
 											<div className="flex flex-col">
-												<span>{provider.host}</span>
+												<span className="font-bold text-base-content text-sm tracking-wide">
+													{getProviderBrandName(provider.host)}
+												</span>
+												<span className="mt-0.5 font-mono text-[10px] text-base-content/40">
+													{provider.host}
+												</span>
 											</div>
 										</td>
 										<td>
@@ -482,75 +585,98 @@ export function ProviderHealth() {
 										<td>
 											<div className="flex items-center gap-2">
 												{provider.state === "connected" || provider.state === "active" ? (
-													<span className="badge badge-success badge-sm gap-1">
+													<span className="badge badge-sm gap-1 border-emerald-500/20 bg-emerald-500/10 font-bold text-emerald-400">
 														<Wifi className="h-3 w-3" /> Connected
 													</span>
 												) : provider.state === "disconnected" ? (
-													<span className="badge badge-ghost badge-sm gap-1">
+													<span className="badge badge-sm gap-1 border-base-content/20 bg-base-content/5 font-bold text-base-content/60">
 														<WifiOff className="h-3 w-3" /> Disconnected
 													</span>
 												) : (
-													<span className="badge badge-warning badge-sm">{provider.state}</span>
+													<span className="badge badge-sm border-amber-500/20 bg-amber-500/10 font-bold text-amber-400">
+														{provider.state}
+													</span>
 												)}
 											</div>
 										</td>
 										<td>
-											<div className="flex items-center gap-2">
-												<progress
-													className="progress progress-primary w-16"
-													value={provider.used_connections}
-													max={provider.max_connections}
-												/>
-												<span className="font-mono text-sm">
-													{provider.used_connections}/{provider.max_connections}
-												</span>
+											<ConnectionPoolGrid
+												used={provider.used_connections}
+												max={provider.max_connections}
+											/>
+										</td>
+										<td>
+											<div className="flex items-center gap-1.5 font-medium font-mono text-xs">
+												{provider.ping_ms > 0 ? (
+													<>
+														<span
+															className={`h-1.5 w-1.5 rounded-full ${
+																provider.ping_ms > 500
+																	? "bg-rose-500 shadow-[0_0_6px_rgba(244,63,94,0.6)]"
+																	: provider.ping_ms > 200
+																		? "bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.6)]"
+																		: "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.6)]"
+															}`}
+														/>
+														<span
+															className={
+																provider.ping_ms > 500
+																	? "font-bold text-error"
+																	: provider.ping_ms > 200
+																		? "font-bold text-warning"
+																		: "text-base-content/70"
+															}
+														>
+															{provider.ping_ms}ms
+														</span>
+													</>
+												) : (
+													<span className="text-base-content/30">-</span>
+												)}
 											</div>
 										</td>
 										<td>
-											<span
-												className={`font-mono text-sm ${provider.ping_ms > 200 ? "text-warning" : provider.ping_ms > 500 ? "text-error" : ""}`}
-											>
-												{provider.ping_ms > 0 ? `${provider.ping_ms}ms` : "-"}
-											</span>
-										</td>
-										<td>
-											<span
-												className={`font-mono text-sm ${provider.error_count > 0 ? "text-error" : ""}`}
-											>
-												{provider.error_count}
-											</span>
+											{provider.error_count > 0 ? (
+												<span className="badge badge-sm border-rose-500/20 bg-rose-500/10 font-bold font-mono text-rose-400 shadow-[0_0_6px_rgba(244,63,94,0.15)]">
+													{provider.error_count}
+												</span>
+											) : (
+												<span className="font-mono text-base-content/30 text-xs">0</span>
+											)}
 										</td>
 										<td>
 											{provider.missing_count > 0 ? (
-												<div className="flex flex-col">
-													<span
-														className={`font-medium ${provider.missing_warning ? "text-error" : "text-warning"}`}
-													>
-														{provider.missing_count.toLocaleString()}
-													</span>
-												</div>
+												<span
+													className={`badge badge-sm font-bold font-mono shadow-[0_0_6px_rgba(251,191,36,0.15)] ${
+														provider.missing_warning
+															? "border-rose-500/20 bg-rose-500/10 text-rose-400"
+															: "border-amber-500/20 bg-amber-500/10 text-amber-400"
+													}`}
+												>
+													{provider.missing_count.toLocaleString()}
+												</span>
 											) : (
-												<span className="text-base-content/50">0</span>
+												<span className="font-mono text-base-content/30 text-xs">0</span>
 											)}
 										</td>
 										<td>
 											{provider.current_speed_bytes_per_sec > 0 ? (
-												<span className="font-medium font-mono text-info">
+												<span className="animate-pulse font-mono font-semibold text-info text-xs">
 													{formatBytes(provider.current_speed_bytes_per_sec)}/s
 												</span>
 											) : (
-												<span className="text-base-content/50">-</span>
+												<span className="font-mono text-base-content/30 text-xs">-</span>
 											)}
 										</td>
 										<td>
 											{provider.last_speed_test_mbps > 0 ? (
 												<div className="flex items-center gap-3">
 													<div className="flex min-w-[70px] flex-col">
-														<span className="font-medium text-success">
-															{provider.last_speed_test_mbps.toFixed(2)} Mbps
+														<span className="font-bold font-mono text-success text-xs">
+															{provider.last_speed_test_mbps.toFixed(2)} MB/s
 														</span>
 														{provider.last_speed_test_time && (
-															<span className="text-base-content/50 text-xs">
+															<span className="font-mono text-[9px] text-base-content/40">
 																{formatRelativeTime(provider.last_speed_test_time)}
 															</span>
 														)}
@@ -563,22 +689,22 @@ export function ProviderHealth() {
 													)}
 												</div>
 											) : (
-												<span className="text-base-content/50">-</span>
+												<span className="font-mono text-base-content/30 text-xs">-</span>
 											)}
 										</td>
 										<td>
 											<div className="flex items-center gap-2">
 												<button
 													type="button"
-													className="btn btn-ghost btn-xs gap-1"
+													className="btn btn-ghost btn-sm gap-1 border border-base-200 font-semibold text-xs hover:bg-base-200/40"
 													onClick={() => handleRunSpeedTest(provider.id, provider.host)}
 													disabled={testingId === provider.id}
 													title="Run Speed Test"
 												>
 													{testingId === provider.id ? (
-														<RefreshCw className="h-3.5 w-3.5 animate-spin" />
+														<RefreshCw className="h-3.5 w-3.5 animate-spin text-primary" />
 													) : (
-														<Gauge className="h-3.5 w-3.5" />
+														<Gauge className="h-3.5 w-3.5 text-primary group-hover:animate-pulse" />
 													)}
 													<span>Test</span>
 												</button>

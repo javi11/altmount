@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/sync/singleflight"
 	"github.com/javi11/altmount/internal/arrs/clients"
 	"github.com/javi11/altmount/internal/arrs/data"
 	"github.com/javi11/altmount/internal/arrs/instances"
@@ -21,7 +20,8 @@ import (
 	"golift.io/starr/radarr"
 	"golift.io/starr/readarr"
 	"golift.io/starr/sonarr"
-	)
+	"golang.org/x/sync/singleflight"
+)
 
 type Manager struct {
 	configGetter config.ConfigGetter
@@ -62,13 +62,12 @@ func (m *Manager) findInstanceForFilePath(ctx context.Context, filePath string, 
 	// Strategy 2: Category Match - Check if file is in the staging/complete folder
 	cfg := m.configGetter()
 	if cfg.SABnzbd.CompleteDir != "" {
-		// Normalize completeDir to a segment like "/complete/"
 		completeDir := strings.Trim(filepath.ToSlash(cfg.SABnzbd.CompleteDir), "/")
 		completeSegment := "/" + completeDir + "/"
 		normalizedPath := filepath.ToSlash(filePath)
 
 		// Check if path contains the complete directory as a segment
-		if _, after, ok := strings.Cut(normalizedPath, completeSegment); ok {
+		if _, after, found := strings.Cut(normalizedPath, completeSegment); found {
 			// Extract everything after the complete directory segment (e.g., "tv/show/file.mkv")
 			afterPrefix := after
 			parts := strings.Split(afterPrefix, "/")
@@ -930,9 +929,9 @@ func (m *Manager) failRadarrQueueItemByPath(ctx context.Context, client *radarr.
 	}
 
 	for _, q := range queue.Records {
-		// Try exact match, suffix match, or filename match
+		// Try exact match, prefix match (if queue item is parent dir), or filename match
 		if q.OutputPath == path ||
-			(q.OutputPath != "" && strings.HasSuffix(filepath.ToSlash(path), filepath.ToSlash(q.OutputPath))) ||
+			(q.OutputPath != "" && strings.HasPrefix(filepath.ToSlash(path), filepath.ToSlash(q.OutputPath))) ||
 			(q.OutputPath != "" && filepath.Base(q.OutputPath) == filepath.Base(path)) {
 			slog.InfoContext(ctx, "Found matching item in Radarr download queue, marking as failed",
 				"queue_id", q.ID, "path", path, "output_path", q.OutputPath)
@@ -958,9 +957,9 @@ func (m *Manager) failSonarrQueueItemByPath(ctx context.Context, client *sonarr.
 	}
 
 	for _, q := range queue.Records {
-		// Try exact match, suffix match, or filename match
+		// Try exact match, prefix match (if queue item is parent dir), or filename match
 		if q.OutputPath == path ||
-			(q.OutputPath != "" && strings.HasSuffix(filepath.ToSlash(path), filepath.ToSlash(q.OutputPath))) ||
+			(q.OutputPath != "" && strings.HasPrefix(filepath.ToSlash(path), filepath.ToSlash(q.OutputPath))) ||
 			(q.OutputPath != "" && filepath.Base(q.OutputPath) == filepath.Base(path)) {
 			slog.InfoContext(ctx, "Found matching item in Sonarr download queue, marking as failed",
 				"queue_id", q.ID, "path", path, "output_path", q.OutputPath)

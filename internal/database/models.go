@@ -48,6 +48,7 @@ type ImportQueueItem struct {
 	TargetPath           *string       `db:"target_path"`           // Optional forced symlink destination path
 	SkipArrNotification  bool          `db:"skip_arr_notification"`
 	SkipPostImportLinks  bool          `db:"skip_post_import_links"`
+	Indexer              *string       `db:"indexer"`
 }
 
 // BulkOperationResult represents the result of a bulk queue operation
@@ -115,6 +116,7 @@ type FileHealth struct {
 	// Failure masking fields
 	StreamingFailureCount int  `db:"streaming_failure_count"`
 	IsMasked              bool `db:"is_masked"`
+	Indexer              *string `db:"indexer"`
 }
 
 // User represents a user account in the system
@@ -171,6 +173,7 @@ type ImportHistory struct {
 	LibraryPath *string   `db:"library_path"` // Added to show final location from file_health
 	Category    *string   `db:"category"`
 	Metadata    *string   `db:"metadata"`
+	Indexer     *string   `db:"indexer"`
 	CompletedAt time.Time `db:"completed_at"`
 }
 

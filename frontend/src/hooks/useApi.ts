@@ -672,3 +672,24 @@ export const useTestArrsDownloadClients = () => {
 		mutationFn: () => apiClient.testArrsDownloadClients(),
 	});
 };
+
+// Indexer health hooks
+export const useIndexerStats = () => {
+	return useQuery({
+		queryKey: ["system", "indexer-stats"],
+		queryFn: () => apiClient.getIndexerStats(),
+		refetchInterval: 10 * 1000, // Refetch every 10 seconds
+	});
+};
+
+export const useCleanupIndexerStats = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: (params: { hours?: number; indexer?: string }) =>
+			apiClient.cleanupIndexerStats(params),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["system", "indexer-stats"] });
+		},
+	});
+};

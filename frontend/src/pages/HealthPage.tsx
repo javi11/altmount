@@ -9,6 +9,7 @@ import {
 	Trash2,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { Pagination } from "../components/ui/Pagination";
 import { useConfirm } from "../contexts/ModalContext";
@@ -46,11 +47,12 @@ import { HealthFilters } from "./HealthPage/components/HealthFilters";
 import { HealthStatsCards } from "./HealthPage/components/HealthStatsCards";
 import { HealthStatusAlert } from "./HealthPage/components/HealthStatusAlert";
 import { HealthTable } from "./HealthPage/components/HealthTable/HealthTable";
+import { IndexerHealth } from "./HealthPage/components/IndexerHealth";
 import { LibraryScanStatus } from "./HealthPage/components/LibraryScanStatus";
 import { ProviderHealth } from "./HealthPage/components/ProviderHealth/ProviderHealth";
 import type { CleanupConfig, SortBy, SortOrder } from "./HealthPage/types";
 
-type HealthTab = "files" | "providers";
+type HealthTab = "files" | "providers" | "indexers";
 
 const HEALTH_SECTIONS = {
 	files: {
@@ -63,10 +65,30 @@ const HEALTH_SECTIONS = {
 		description: "Check Usenet provider connectivity and speed",
 		icon: Server,
 	},
+	indexers: {
+		title: "Indexer Health",
+		description: "View success and failure rates of Usenet indexers",
+		icon: ShieldCheck,
+	},
 };
 
 export function HealthPage() {
-	const [activeTab, setActiveTab] = useState<HealthTab>("files");
+	const { tab } = useParams<{ tab?: string }>();
+	const navigate = useNavigate();
+
+	const activeTab = useMemo<HealthTab>(() => {
+		if (!tab) return "files";
+		const validTabs = ["files", "providers", "indexers"];
+		return validTabs.includes(tab) ? (tab as HealthTab) : "files";
+	}, [tab]);
+
+	useEffect(() => {
+		if (!tab) {
+			navigate("/health/files", { replace: true });
+		} else if (tab !== "files" && tab !== "providers" && tab !== "indexers") {
+			navigate("/health/files", { replace: true });
+		}
+	}, [tab, navigate]);
 	const [page, setPage] = useState(0);
 	const [searchTerm, setSearchTerm] = useState("");
 	const [statusFilter, setStatusFilter] = useState("");
@@ -698,7 +720,7 @@ export function HealthPage() {
 																? "bg-primary font-semibold text-primary-content shadow-md shadow-primary/20"
 																: "hover:bg-base-200"
 														}`}
-														onClick={() => setActiveTab(key)}
+														onClick={() => navigate(`/health/${key}`)}
 													>
 														<IconComponent
 															className={`h-5 w-5 ${isActive ? "" : "text-base-content/60"}`}
@@ -858,10 +880,16 @@ export function HealthPage() {
 									onConfirm={handleDeleteConfirm}
 								/>
 							</div>
-						) : (
+						) : activeTab === "providers" ? (
 							<div className="card border-2 border-base-300/50 bg-base-100 shadow-md">
 								<div className="card-body p-4 sm:p-8">
 									<ProviderHealth />
+								</div>
+							</div>
+						) : (
+							<div className="card border-2 border-base-300/50 bg-base-100 shadow-md">
+								<div className="card-body p-4 sm:p-8">
+									<IndexerHealth />
 								</div>
 							</div>
 						)}

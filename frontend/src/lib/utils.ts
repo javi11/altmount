@@ -139,3 +139,44 @@ export function debounce<T extends (...args: unknown[]) => unknown>(
 export function isNil(value: unknown): value is null | undefined {
 	return value === null || value === undefined;
 }
+
+export function getProviderBrandName(host: string): string {
+	if (!host) return "Unknown";
+
+	// Check if it's an IP address
+	const parts = host.toLowerCase().split(".");
+	if (parts.every((part) => /^\d+$/.test(part)) && parts.length === 4) {
+		return host;
+	}
+
+	const subdomainsToStrip = new Set([
+		"news",
+		"reader",
+		"eu",
+		"us",
+		"ssl",
+		"secure",
+		"ln",
+		"news-us",
+		"news-eu",
+		"text",
+		"free",
+		"ports",
+		"port",
+		"ipv6",
+		"www",
+		"upload",
+	]);
+
+	// Filter out common subdomains
+	const filteredParts = parts.filter((part) => !subdomainsToStrip.has(part));
+
+	// If we filtered out too much and have nothing left (or just 1 part), fall back to original parts
+	const finalParts = filteredParts.length >= 2 ? filteredParts : parts;
+
+	// Join back the remaining domain parts
+	const brand = finalParts.join(".");
+
+	// Capitalize the first character of the resulting domain
+	return brand.charAt(0).toUpperCase() + brand.slice(1);
+}

@@ -1,5 +1,5 @@
 import { AlertTriangle, CheckCircle, Info, X, XCircle } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export interface ConfirmModalProps {
 	isOpen: boolean;
@@ -9,6 +9,7 @@ export interface ConfirmModalProps {
 	confirmText?: string;
 	cancelText?: string;
 	confirmButtonClass?: string;
+	verificationText?: string;
 	onConfirm: () => void;
 	onCancel: () => void;
 }
@@ -44,16 +45,19 @@ export function ConfirmModal({
 	confirmText = "Confirm",
 	cancelText = "Cancel",
 	confirmButtonClass = "btn-primary",
+	verificationText,
 	onConfirm,
 	onCancel,
 }: ConfirmModalProps) {
 	const modalRef = useRef<HTMLDialogElement>(null);
 	const confirmButtonRef = useRef<HTMLButtonElement>(null);
+	const [inputValue, setInputValue] = useState("");
 
 	useEffect(() => {
 		const modal = modalRef.current;
 		if (modal) {
 			if (isOpen) {
+				setInputValue("");
 				modal.showModal();
 				// Focus the confirm button for accessibility
 				setTimeout(() => {
@@ -108,6 +112,23 @@ export function ConfirmModal({
 					</div>
 				</div>
 
+				{verificationText && (
+					<div className="mb-6 form-control">
+						<label className="label">
+							<span className="label-text">
+								Please type <span className="font-bold select-all text-base-content">{verificationText}</span> to confirm.
+							</span>
+						</label>
+						<input
+							type="text"
+							className="input input-bordered w-full"
+							value={inputValue}
+							onChange={(e) => setInputValue(e.target.value)}
+							placeholder={verificationText}
+						/>
+					</div>
+				)}
+
 				{/* Actions */}
 				<div className="modal-action">
 					<button type="button" className="btn btn-ghost" onClick={onCancel}>
@@ -118,6 +139,7 @@ export function ConfirmModal({
 						type="button"
 						className={`btn ${confirmButtonClass}`}
 						onClick={onConfirm}
+						disabled={verificationText ? inputValue !== verificationText : false}
 					>
 						{confirmText}
 					</button>

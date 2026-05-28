@@ -168,8 +168,8 @@ func (r *QueueRepository) RestartQueueItemsBulk(ctx context.Context, ids []int64
 // AddToQueue adds a new NZB file to the import queue
 func (r *QueueRepository) AddToQueue(ctx context.Context, item *ImportQueueItem) error {
 	query := `
-		INSERT INTO import_queue (download_id, nzb_path, relative_path, category, priority, status, retry_count, max_retries, batch_id, metadata, file_size, target_path, skip_arr_notification, skip_post_import_links, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+		INSERT INTO import_queue (download_id, nzb_path, relative_path, category, priority, status, retry_count, max_retries, batch_id, metadata, file_size, target_path, skip_arr_notification, skip_post_import_links, indexer, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
 		ON CONFLICT(nzb_path) DO UPDATE SET
 		download_id = COALESCE(excluded.download_id, import_queue.download_id),
 		priority = CASE WHEN excluded.priority < priority THEN excluded.priority ELSE priority END,
@@ -179,6 +179,7 @@ func (r *QueueRepository) AddToQueue(ctx context.Context, item *ImportQueueItem)
 		file_size = excluded.file_size,
 		target_path = excluded.target_path,
 		status = excluded.status,
+		indexer = COALESCE(excluded.indexer, import_queue.indexer),
 		retry_count = 0,
 		started_at = NULL,
 		updated_at = datetime('now'),
@@ -187,7 +188,7 @@ func (r *QueueRepository) AddToQueue(ctx context.Context, item *ImportQueueItem)
 	`
 
 	args := []any{item.DownloadID, item.NzbPath, item.RelativePath, item.Category, item.Priority, item.Status,
-		item.RetryCount, item.MaxRetries, item.BatchID, item.Metadata, item.FileSize, item.TargetPath, item.SkipArrNotification, item.SkipPostImportLinks}
+		item.RetryCount, item.MaxRetries, item.BatchID, item.Metadata, item.FileSize, item.TargetPath, item.SkipArrNotification, item.SkipPostImportLinks, item.Indexer}
 
 	if r.dialect.IsPostgres() {
 		err := r.db.QueryRowContext(ctx, query+" RETURNING id", args...).Scan(&item.ID)
@@ -290,7 +291,7 @@ func (r *QueueRepository) ClaimNextQueueItem(ctx context.Context) (*ImportQueueI
 		// Get the complete claimed item data
 		getQuery := `
 			SELECT id, download_id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
-			       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, target_path, skip_arr_notification, skip_post_import_links
+			       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path, target_path, skip_arr_notification, skip_post_import_links, indexer
 			FROM import_queue
 			WHERE id = ?
 		`
@@ -299,7 +300,7 @@ func (r *QueueRepository) ClaimNextQueueItem(ctx context.Context) (*ImportQueueI
 		err = txRepo.db.QueryRowContext(ctx, getQuery, itemID).Scan(
 			&item.ID, &item.DownloadID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
 			&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
-			&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.TargetPath, &item.SkipArrNotification, &item.SkipPostImportLinks,
+			&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath, &item.TargetPath, &item.SkipArrNotification, &item.SkipPostImportLinks, &item.Indexer,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to get claimed item: %w", err)
@@ -469,12 +470,12 @@ func (r *QueueRepository) GetImportHistory(ctx context.Context, days int) ([]*Im
 // AddImportHistory records a successful file import in the persistent history table
 func (r *QueueRepository) AddImportHistory(ctx context.Context, history *ImportHistory) error {
 	query := `
-		INSERT INTO import_history (download_id, nzb_id, nzb_name, file_name, file_size, virtual_path, category, metadata, completed_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+		INSERT INTO import_history (download_id, nzb_id, nzb_name, file_name, file_size, virtual_path, category, metadata, indexer, completed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
 	`
 	_, err := r.db.ExecContext(ctx, query,
 		history.DownloadID, history.NzbID, history.NzbName, history.FileName, history.FileSize,
-		history.VirtualPath, history.Category, history.Metadata)
+		history.VirtualPath, history.Category, history.Metadata, history.Indexer)
 	if err != nil {
 		return fmt.Errorf("failed to add import history: %w", err)
 	}
@@ -484,7 +485,7 @@ func (r *QueueRepository) AddImportHistory(ctx context.Context, history *ImportH
 // ListImportHistory retrieves the last N successful imports from the persistent history
 func (r *QueueRepository) ListImportHistory(ctx context.Context, limit int) ([]*ImportHistory, error) {
 	query := `
-		SELECT h.id, h.download_id, h.nzb_id, h.nzb_name, h.file_name, h.file_size, h.virtual_path, f.library_path, h.category, h.metadata, h.completed_at
+		SELECT h.id, h.download_id, h.nzb_id, h.nzb_name, h.file_name, h.file_size, h.virtual_path, f.library_path, h.category, h.metadata, h.indexer, h.completed_at
 		FROM import_history h
 		LEFT JOIN file_health f ON h.virtual_path = f.file_path
 		ORDER BY h.completed_at DESC
@@ -499,7 +500,7 @@ func (r *QueueRepository) ListImportHistory(ctx context.Context, limit int) ([]*
 	var history []*ImportHistory
 	for rows.Next() {
 		var h ImportHistory
-		err := rows.Scan(&h.ID, &h.DownloadID, &h.NzbID, &h.NzbName, &h.FileName, &h.FileSize, &h.VirtualPath, &h.LibraryPath, &h.Category, &h.Metadata, &h.CompletedAt)
+		err := rows.Scan(&h.ID, &h.DownloadID, &h.NzbID, &h.NzbName, &h.FileName, &h.FileSize, &h.VirtualPath, &h.LibraryPath, &h.Category, &h.Metadata, &h.Indexer, &h.CompletedAt)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan import history: %w", err)
 		}
@@ -552,7 +553,7 @@ func (r *QueueRepository) UpdateQueueItemNzbPath(ctx context.Context, id int64, 
 func (r *QueueRepository) GetQueueItemByNzbPath(ctx context.Context, nzbPath string) (*ImportQueueItem, error) {
 	query := `
 		SELECT id, download_id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
-		       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path, target_path, skip_arr_notification, skip_post_import_links
+		       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path, target_path, skip_arr_notification, skip_post_import_links, indexer
 		FROM import_queue WHERE nzb_path = ? LIMIT 1
 	`
 
@@ -560,7 +561,7 @@ func (r *QueueRepository) GetQueueItemByNzbPath(ctx context.Context, nzbPath str
 	err := r.db.QueryRowContext(ctx, query, nzbPath).Scan(
 		&item.ID, &item.DownloadID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
 		&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
-		&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath, &item.TargetPath, &item.SkipArrNotification, &item.SkipPostImportLinks,
+		&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath, &item.TargetPath, &item.SkipArrNotification, &item.SkipPostImportLinks, &item.Indexer,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -689,7 +690,7 @@ func (r *QueueRepository) AddBatchToQueue(ctx context.Context, items []*ImportQu
 func (r *QueueRepository) GetQueueItem(ctx context.Context, id int64) (*ImportQueueItem, error) {
 	query := `
 		SELECT id, download_id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
-		       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path, target_path, skip_arr_notification, skip_post_import_links
+		       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path, target_path, skip_arr_notification, skip_post_import_links, indexer
 		FROM import_queue WHERE id = ?
 	`
 
@@ -697,7 +698,7 @@ func (r *QueueRepository) GetQueueItem(ctx context.Context, id int64) (*ImportQu
 	err := r.db.QueryRowContext(ctx, query, id).Scan(
 		&item.ID, &item.DownloadID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
 		&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
-		&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath, &item.TargetPath, &item.SkipArrNotification, &item.SkipPostImportLinks,
+		&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath, &item.TargetPath, &item.SkipArrNotification, &item.SkipPostImportLinks, &item.Indexer,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -708,6 +709,31 @@ func (r *QueueRepository) GetQueueItem(ctx context.Context, id int64) (*ImportQu
 
 	return &item, nil
 }
+
+// GetQueueItemByDownloadID retrieves a queue item by its DownloadID
+func (r *QueueRepository) GetQueueItemByDownloadID(ctx context.Context, downloadID string) (*ImportQueueItem, error) {
+	query := `
+		SELECT id, download_id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
+		       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path, target_path, skip_arr_notification, skip_post_import_links, indexer
+		FROM import_queue WHERE download_id = ?
+	`
+
+	var item ImportQueueItem
+	err := r.db.QueryRowContext(ctx, query, downloadID).Scan(
+		&item.ID, &item.DownloadID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
+		&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
+		&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath, &item.TargetPath, &item.SkipArrNotification, &item.SkipPostImportLinks, &item.Indexer,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil // Item not found
+		}
+		return nil, fmt.Errorf("failed to get queue item by download_id: %w", err)
+	}
+
+	return &item, nil
+}
+
 
 // withQueueTransaction executes a function within a queue database transaction
 func (r *QueueRepository) withQueueTransaction(ctx context.Context, fn func(*QueueRepository) error) error {
@@ -747,7 +773,7 @@ func (r *QueueRepository) DeleteFailedItemsOlderThan(ctx context.Context, olderT
 	err := r.withQueueTransaction(ctx, func(txRepo *QueueRepository) error {
 		// Select failed items older than the threshold
 		selectQuery := `SELECT id, download_id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
-			started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path, target_path, skip_arr_notification, skip_post_import_links
+			started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path, target_path, skip_arr_notification, skip_post_import_links, indexer
 			FROM import_queue WHERE status = 'failed' AND updated_at < ?`
 
 		rows, err := txRepo.db.QueryContext(ctx, selectQuery, olderThan)
@@ -761,7 +787,7 @@ func (r *QueueRepository) DeleteFailedItemsOlderThan(ctx context.Context, olderT
 			if err := rows.Scan(
 				&item.ID, &item.DownloadID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
 				&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
-				&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath, &item.TargetPath, &item.SkipArrNotification, &item.SkipPostImportLinks,
+				&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath, &item.TargetPath, &item.SkipArrNotification, &item.SkipPostImportLinks, &item.Indexer,
 			); err != nil {
 				return fmt.Errorf("failed to scan failed queue item: %w", err)
 			}
