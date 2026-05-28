@@ -27,7 +27,6 @@ import { ProviderChart } from "./ProviderChart";
 import { ProviderQuota } from "./ProviderQuota";
 import { ProviderSpeedChart } from "./ProviderSpeedChart";
 
-
 type SortField =
 	| "host"
 	| "state"
@@ -144,7 +143,7 @@ function ConnectionPoolGrid({ used, max }: { used: number; max: number }) {
 		const percent = Math.round((used / max) * 100);
 		return (
 			<div className="flex items-center gap-2">
-				<div className="flex h-2.5 w-16 overflow-hidden rounded-full border border-white/5 bg-black/40">
+				<div className="flex h-2.5 w-16 overflow-hidden rounded-full border border-base-content/10 bg-base-200/50">
 					<div
 						className="h-full rounded-full bg-primary shadow-[0_0_8px_rgba(59,130,246,0.5)] transition-all duration-500"
 						style={{ width: `${percent}%` }}
@@ -166,7 +165,7 @@ function ConnectionPoolGrid({ used, max }: { used: number; max: number }) {
 						className={`h-3 w-1 rounded-sm transition-all duration-300 ${
 							i < used
 								? "bg-primary shadow-[0_0_6px_rgba(59,130,246,0.6)]"
-								: "border border-white/5 bg-white/5"
+								: "border border-base-200 bg-base-200/50"
 						}`}
 					/>
 				))}
@@ -411,7 +410,7 @@ export function ProviderHealth() {
 					</div>
 					<div className="z-10 text-info">
 						<div
-							className="radial-progress border-2 border-white/5 text-info shadow-[0_0_8px_rgba(6,182,212,0.15)]"
+							className="radial-progress border-2 border-base-content/10 text-info shadow-[0_0_8px_rgba(6,182,212,0.15)]"
 							style={
 								{
 									"--value": connectionPercent,
@@ -426,8 +425,6 @@ export function ProviderHealth() {
 					</div>
 				</div>
 			</div>
-
-
 
 			{/* Data Usage & Speed History section */}
 			<div className="flex flex-col gap-6">
@@ -570,11 +567,11 @@ export function ProviderHealth() {
 								{sortedProviders.map((provider) => (
 									<tr
 										key={provider.id}
-										className="border-base-200/30 border-b transition-colors hover:bg-white/5"
+										className="border-base-200/30 border-b transition-colors hover:bg-base-content/5"
 									>
 										<td>
 											<div className="flex flex-col">
-												<span className="font-bold text-sm text-white tracking-wide">
+												<span className="font-bold text-base-content text-sm tracking-wide">
 													{getProviderBrandName(provider.host)}
 												</span>
 												<span className="mt-0.5 font-mono text-[10px] text-base-content/40">
@@ -592,7 +589,7 @@ export function ProviderHealth() {
 														<Wifi className="h-3 w-3" /> Connected
 													</span>
 												) : provider.state === "disconnected" ? (
-													<span className="badge badge-sm gap-1 border-white/10 bg-white/5 font-bold text-slate-400">
+													<span className="badge badge-sm gap-1 border-base-content/20 bg-base-content/5 font-bold text-base-content/60">
 														<WifiOff className="h-3 w-3" /> Disconnected
 													</span>
 												) : (
@@ -627,7 +624,7 @@ export function ProviderHealth() {
 																	? "font-bold text-error"
 																	: provider.ping_ms > 200
 																		? "font-bold text-warning"
-																		: "text-slate-300"
+																		: "text-base-content/70"
 															}
 														>
 															{provider.ping_ms}ms
@@ -699,7 +696,7 @@ export function ProviderHealth() {
 											<div className="flex items-center gap-2">
 												<button
 													type="button"
-													className="btn btn-ghost btn-sm gap-1 border border-white/5 font-semibold text-xs hover:bg-base-200/40"
+													className="btn btn-ghost btn-sm gap-1 border border-base-200 font-semibold text-xs hover:bg-base-200/40"
 													onClick={() => handleRunSpeedTest(provider.id, provider.host)}
 													disabled={testingId === provider.id}
 													title="Run Speed Test"
