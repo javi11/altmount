@@ -9,6 +9,7 @@ import {
 	Trash2,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { Pagination } from "../components/ui/Pagination";
 import { useConfirm } from "../contexts/ModalContext";
@@ -72,7 +73,22 @@ const HEALTH_SECTIONS = {
 };
 
 export function HealthPage() {
-	const [activeTab, setActiveTab] = useState<HealthTab>("files");
+	const { tab } = useParams<{ tab?: string }>();
+	const navigate = useNavigate();
+
+	const activeTab = useMemo<HealthTab>(() => {
+		if (!tab) return "files";
+		const validTabs = ["files", "providers", "indexers"];
+		return validTabs.includes(tab) ? (tab as HealthTab) : "files";
+	}, [tab]);
+
+	useEffect(() => {
+		if (!tab) {
+			navigate("/health/files", { replace: true });
+		} else if (tab !== "files" && tab !== "providers" && tab !== "indexers") {
+			navigate("/health/files", { replace: true });
+		}
+	}, [tab, navigate]);
 	const [page, setPage] = useState(0);
 	const [searchTerm, setSearchTerm] = useState("");
 	const [statusFilter, setStatusFilter] = useState("");
@@ -704,7 +720,7 @@ export function HealthPage() {
 																? "bg-primary font-semibold text-primary-content shadow-md shadow-primary/20"
 																: "hover:bg-base-200"
 														}`}
-														onClick={() => setActiveTab(key)}
+														onClick={() => navigate(`/health/${key}`)}
 													>
 														<IconComponent
 															className={`h-5 w-5 ${isActive ? "" : "text-base-content/60"}`}

@@ -26,14 +26,18 @@ func (s *Server) handleGetIndexerStats(c *fiber.Ctx) error {
 func (s *Server) handleCleanupIndexerStats(c *fiber.Ctx) error {
 	indexer := c.Query("indexer")
 	if indexer != "" {
-		if err := s.queueRepo.DeleteIndexerStats(c.Context(), indexer); err != nil {
+		affectedRows, err := s.queueRepo.DeleteIndexerStats(c.Context(), indexer)
+		if err != nil {
 			slog.ErrorContext(c.Context(), "Failed to delete indexer stats", "indexer", indexer, "error", err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error": "Failed to delete indexer stats",
 			})
 		}
-		slog.InfoContext(c.Context(), "Deleted indexer stats successfully", "indexer", indexer)
-		return c.JSON(fiber.Map{"success": true})
+		slog.InfoContext(c.Context(), "Deleted indexer stats successfully", "indexer", indexer, "pruned_rows", affectedRows)
+		return c.JSON(fiber.Map{
+			"success":     true,
+			"pruned_rows": affectedRows,
+		})
 	}
 
 	hoursStr := c.Query("hours")

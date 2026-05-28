@@ -815,7 +815,7 @@ export class APIClient {
 		if (params.hours !== undefined) queryParams.append("hours", params.hours.toString());
 		if (params.indexer !== undefined) queryParams.append("indexer", params.indexer);
 
-		return this.request<{ success: boolean; pruned_rows: number; hours: number }>(
+		return this.request<{ success: boolean; pruned_rows: number; hours?: number }>(
 			`/system/indexer-stats/cleanup?${queryParams.toString()}`,
 			{
 				method: "DELETE",

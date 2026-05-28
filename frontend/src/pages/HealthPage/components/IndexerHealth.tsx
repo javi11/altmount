@@ -47,15 +47,15 @@ const ChartTooltip = ({
 				: "bg-blue-500/10 text-blue-400 border-blue-500/20";
 
 	return (
-		<div className="z-50 rounded-xl border border-white/5 bg-[#0f1117]/90 p-3 text-xs shadow-2xl backdrop-blur-md">
-			<p className="mb-1.5 font-extrabold text-white leading-tight">{name}</p>
+		<div className="z-50 rounded-xl border border-base-200 bg-base-100/95 p-3 text-xs shadow-2xl backdrop-blur-md text-base-content">
+			<p className="mb-1.5 font-extrabold leading-tight">{name}</p>
 			<div className="flex items-center gap-2">
 				<span
 					className={`badge badge-xs border ${badgeColor} py-1.5 font-bold uppercase tracking-wider`}
 				>
 					{statusText}
 				</span>
-				<span className="font-extrabold font-mono text-sm text-white">{val.toFixed(1)}%</span>
+				<span className="font-extrabold font-mono text-sm">{val.toFixed(1)}%</span>
 			</div>
 		</div>
 	);
@@ -293,8 +293,8 @@ export function IndexerHealth() {
 			{/* ── Top Header ── */}
 			<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 				<div>
-					<h3 className="flex items-center gap-2 font-extrabold text-lg text-white tracking-tight">
-						<Radio className="h-5 w-5 animate-pulse text-teal-400" aria-hidden="true" />
+					<h3 className="flex items-center gap-2 font-extrabold text-lg text-base-content tracking-tight">
+						<Radio className="h-5 w-5 animate-pulse text-teal-500 dark:text-teal-400" aria-hidden="true" />
 						Usenet Indexers Health HUD
 					</h3>
 					<p className="font-medium text-base-content/50 text-xs sm:text-sm">
@@ -304,10 +304,10 @@ export function IndexerHealth() {
 				<div className="flex flex-wrap items-center gap-2">
 					<button
 						type="button"
-						className={`btn btn-sm gap-1.5 border-white/5 transition-all duration-200 ${
+						className={`btn btn-sm gap-1.5 border-base-200 transition-all duration-200 ${
 							showChart
 								? "btn-primary shadow-[0_0_12px_rgba(59,130,246,0.3)]"
-								: "btn-ghost border border-white/5 bg-white/5 hover:bg-white/10"
+								: "btn-ghost border border-base-200 bg-base-200/50 hover:bg-base-200"
 						}`}
 						onClick={() => setShowChart(!showChart)}
 						disabled={!hasStats}
@@ -318,7 +318,7 @@ export function IndexerHealth() {
 					</button>
 					<button
 						type="button"
-						className="btn btn-ghost btn-sm gap-1.5 border border-white/5 bg-white/5 transition-all duration-200 hover:scale-[1.02] hover:bg-white/10 active:scale-[0.98]"
+						className="btn btn-ghost btn-sm gap-1.5 border border-base-200 bg-base-200/50 transition-all duration-200 hover:scale-[1.02] hover:bg-base-200 active:scale-[0.98]"
 						onClick={() => void refetch()}
 						aria-label="Refresh indexer statistics"
 					>
@@ -340,11 +340,11 @@ export function IndexerHealth() {
 
 			{/* ── Collapsible Comparative Success Benchmark Chart ── */}
 			{hasStats && showChart && (
-				<div className="card overflow-hidden border border-white/5 bg-white/5 p-5 shadow-xl backdrop-blur-md transition-all duration-300">
-					<div className="mb-4 flex items-center justify-between border-white/5 border-b pb-2">
+				<div className="card overflow-hidden border border-base-200 bg-base-100/60 p-5 shadow-xl backdrop-blur-md transition-all duration-300">
+					<div className="mb-4 flex items-center justify-between border-base-200 border-b pb-2">
 						<div>
-							<h4 className="flex items-center gap-2 font-bold text-sm text-white">
-								<BarChart2 className="h-4 w-4 animate-pulse text-teal-400" aria-hidden="true" />
+							<h4 className="flex items-center gap-2 font-bold text-sm text-base-content">
+								<BarChart2 className="h-4 w-4 animate-pulse text-teal-500 dark:text-teal-400" aria-hidden="true" />
 								Usenet Indexer Success Comparison
 							</h4>
 							<p className="font-medium text-[10px] text-base-content/50">
@@ -399,25 +399,25 @@ export function IndexerHealth() {
 			{summary && (
 				<div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
 					{/* Total Indexers Card */}
-					<div className="card group relative flex flex-row items-center justify-between overflow-hidden border border-white/5 bg-white/5 p-5 shadow-xl backdrop-blur-md transition-all hover:border-teal-500/20">
+					<div className="card group relative flex flex-row items-center justify-between overflow-hidden border border-base-200 bg-base-100 p-5 shadow-xl backdrop-blur-md transition-all hover:border-teal-500/20">
 						<div className="relative z-10 space-y-1">
 							<span className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
 								Tracked Indexers
 							</span>
-							<div className="font-extrabold font-mono text-2xl text-teal-400 tracking-tight">
+							<div className="font-extrabold font-mono text-2xl text-teal-600 dark:text-teal-400 tracking-tight">
 								{stats?.length ?? 0}
 							</div>
 							<div className="font-semibold text-[10px] text-base-content/50">
 								Active Integrations
 							</div>
 						</div>
-						<div className="relative z-10 text-teal-400">
+						<div className="relative z-10 text-teal-500 dark:text-teal-400">
 							<Activity className="h-8 w-8 opacity-45 transition-opacity group-hover:opacity-85" />
 						</div>
 					</div>
 
 					{/* Overall Health Card */}
-					<div className="card group relative flex flex-row items-center justify-between overflow-hidden border border-white/5 bg-white/5 p-5 shadow-xl backdrop-blur-md transition-all hover:border-primary/20">
+					<div className="card group relative flex flex-row items-center justify-between overflow-hidden border border-base-200 bg-base-100 p-5 shadow-xl backdrop-blur-md transition-all hover:border-primary/20">
 						{summary.overallRate >= 85 && (
 							<div className="absolute inset-0 animate-pulse bg-gradient-to-tr from-teal-500/5 via-transparent to-transparent opacity-60" />
 						)}
@@ -428,10 +428,10 @@ export function IndexerHealth() {
 							<div
 								className={`font-black font-mono text-3xl tracking-tight ${
 									summary.overallRate >= 85
-										? "text-teal-400"
+										? "text-teal-600 dark:text-teal-400"
 										: summary.overallRate >= 60
-											? "text-amber-500"
-											: "text-rose-400"
+											? "text-amber-600 dark:text-amber-500"
+											: "text-rose-600 dark:text-rose-400"
 								}`}
 							>
 								{summary.overallRate.toFixed(1)}%
@@ -443,10 +443,10 @@ export function IndexerHealth() {
 						<div
 							className={`relative z-10 ${
 								summary.overallRate >= 85
-									? "text-teal-400 shadow-[0_0_12px_rgba(13,148,136,0.3)]"
+									? "text-teal-600 dark:text-teal-400 shadow-[0_0_12px_rgba(13,148,136,0.3)]"
 									: summary.overallRate >= 60
-										? "text-amber-500 shadow-[0_0_12px_rgba(245,158,11,0.3)]"
-										: "text-rose-400 shadow-[0_0_12px_rgba(225,29,72,0.3)]"
+										? "text-amber-600 dark:text-amber-500 shadow-[0_0_12px_rgba(245,158,11,0.3)]"
+										: "text-rose-600 dark:text-rose-400 shadow-[0_0_12px_rgba(225,29,72,0.3)]"
 							}`}
 						>
 							<BarChart2 className="h-8 w-8 opacity-50" />
@@ -454,37 +454,37 @@ export function IndexerHealth() {
 					</div>
 
 					{/* Successful Imports Card */}
-					<div className="card group relative flex flex-row items-center justify-between overflow-hidden border border-white/5 bg-white/5 p-5 shadow-xl backdrop-blur-md transition-all hover:border-emerald-500/20">
+					<div className="card group relative flex flex-row items-center justify-between overflow-hidden border border-base-200 bg-base-100 p-5 shadow-xl backdrop-blur-md transition-all hover:border-emerald-500/20">
 						<div className="relative z-10 space-y-1">
 							<span className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
 								Successful Imports
 							</span>
-							<div className="font-extrabold font-mono text-2xl text-emerald-400 tracking-tight">
+							<div className="font-extrabold font-mono text-2xl text-emerald-600 dark:text-emerald-400 tracking-tight">
 								{summary.totalSuccess.toLocaleString()}
 							</div>
 							<div className="font-semibold text-[10px] text-base-content/50">
 								Imports completed
 							</div>
 						</div>
-						<div className="relative z-10 text-emerald-400">
+						<div className="relative z-10 text-emerald-600 dark:text-emerald-400">
 							<CheckCircle2 className="h-8 w-8 opacity-45 transition-opacity group-hover:opacity-85" />
 						</div>
 					</div>
 
 					{/* Failed Imports Card */}
-					<div className="card group relative flex flex-row items-center justify-between overflow-hidden border border-white/5 bg-white/5 p-5 shadow-xl backdrop-blur-md transition-all hover:border-rose-500/20">
+					<div className="card group relative flex flex-row items-center justify-between overflow-hidden border border-base-200 bg-base-100 p-5 shadow-xl backdrop-blur-md transition-all hover:border-rose-500/20">
 						<div className="relative z-10 space-y-1">
 							<span className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
 								Failed Imports
 							</span>
-							<div className="font-extrabold font-mono text-2xl text-rose-400 tracking-tight">
+							<div className="font-extrabold font-mono text-2xl text-rose-600 dark:text-rose-400 tracking-tight">
 								{summary.totalFailed.toLocaleString()}
 							</div>
 							<div className="font-semibold text-[10px] text-base-content/50">
 								Verification failures
 							</div>
 						</div>
-						<div className="relative z-10 text-rose-400">
+						<div className="relative z-10 text-rose-600 dark:text-rose-400">
 							<XCircle className="h-8 w-8 opacity-45 transition-opacity group-hover:opacity-85" />
 						</div>
 					</div>
@@ -521,7 +521,7 @@ export function IndexerHealth() {
 
 			{/* ── Search & Filter Toolbar ── */}
 			{hasStats && (
-				<div className="flex flex-col gap-3 rounded-2xl border border-white/5 bg-white/5 p-3 backdrop-blur-md md:flex-row md:items-center md:justify-between">
+				<div className="flex flex-col gap-3 rounded-2xl border border-base-200 bg-base-100 p-3 backdrop-blur-md md:flex-row md:items-center md:justify-between">
 					{/* Search Input */}
 					<div className="relative max-w-sm flex-1">
 						<input
@@ -529,7 +529,7 @@ export function IndexerHealth() {
 							placeholder="Search indexers..."
 							value={searchQuery}
 							onChange={(e) => setSearchQuery(e.target.value)}
-							className="input input-bordered input-sm w-full border-white/10 bg-[#0f1117]/20 pl-8 font-medium text-white placeholder-base-content/40 focus:border-teal-500/50"
+							className="input input-bordered input-sm w-full border-base-300 bg-base-200/50 pl-8 font-medium text-base-content placeholder-base-content/40 focus:border-teal-500/50"
 							aria-label="Search indexers"
 						/>
 						<div className="-translate-y-1/2 absolute top-1/2 left-2.5 text-base-content/40">
@@ -634,13 +634,13 @@ export function IndexerHealth() {
 
 			{/* ── Cards Grid ── */}
 			{!hasStats ? (
-				<div className="hero rounded-2xl border border-white/10 border-dashed bg-white/5 py-16 backdrop-blur-md">
+				<div className="hero rounded-2xl border border-base-300 border-dashed bg-base-200/50 py-16 backdrop-blur-md">
 					<div className="hero-content text-center">
 						<div className="max-w-md space-y-4">
-							<div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl border border-teal-500/20 bg-teal-500/5 text-teal-400 shadow-sm">
+							<div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl border border-teal-500/20 bg-teal-500/5 text-teal-500 dark:text-teal-400 shadow-sm">
 								<BarChart2 className="h-8 w-8 animate-pulse" aria-hidden="true" />
 							</div>
-							<h3 className="font-bold text-white text-xl tracking-tight">
+							<h3 className="font-bold text-base-content text-xl tracking-tight">
 								No Indexer History Yet
 							</h3>
 							<p className="text-base-content/50 text-sm">
@@ -651,7 +651,7 @@ export function IndexerHealth() {
 					</div>
 				</div>
 			) : filtered.length === 0 ? (
-				<div className="hero rounded-2xl border border-white/10 border-dashed bg-white/5 py-12 text-center">
+				<div className="hero rounded-2xl border border-base-300 border-dashed bg-base-200/50 py-12 text-center">
 					<div className="max-w-xs space-y-2">
 						<h3 className="font-bold text-base text-base-content/70">No Indexers Found</h3>
 						<p className="text-base-content/40 text-xs">
@@ -709,7 +709,7 @@ export function IndexerHealth() {
 						return (
 							<div
 								key={item.indexer}
-								className={`group card relative overflow-hidden border ${accentColor} hover:-translate-y-1.5 bg-white/5 shadow-md backdrop-blur-md transition-all duration-500 ease-out hover:scale-[1.01]`}
+								className={`group card relative overflow-hidden border ${accentColor} hover:-translate-y-1.5 bg-base-100/60 shadow-md backdrop-blur-md transition-all duration-500 ease-out hover:scale-[1.01]`}
 							>
 								{/* Premium matte glowing top bar */}
 								<div
@@ -720,7 +720,7 @@ export function IndexerHealth() {
 								<div className="absolute top-3 right-3 z-10">
 									<button
 										type="button"
-										className="btn btn-ghost btn-xs p-1 text-rose-400 opacity-0 transition-all duration-200 hover:bg-rose-500/20 hover:text-rose-300 group-hover:opacity-100"
+										className="btn btn-ghost btn-xs p-1 text-rose-500 opacity-0 transition-all duration-200 hover:bg-rose-500/20 hover:text-rose-600 dark:hover:text-rose-300 group-hover:opacity-100"
 										onClick={() => handleDeleteIndexer(item.indexer)}
 										aria-label={`Delete statistics for ${item.indexer}`}
 									>
@@ -733,7 +733,7 @@ export function IndexerHealth() {
 									<div className="flex items-center justify-between gap-3">
 										{/* Details */}
 										<div className="min-w-0 flex-1 space-y-2 py-0.5">
-											<h4 className="truncate font-extrabold text-[17px] sm:text-lg text-white leading-tight tracking-tight pr-6">
+											<h4 className="truncate font-extrabold text-[17px] sm:text-lg text-base-content leading-tight tracking-tight pr-6">
 												{item.indexer}
 											</h4>
 											<div className="flex flex-wrap items-center gap-2">
@@ -752,7 +752,7 @@ export function IndexerHealth() {
 										{/* Maximized Percentage on the Right */}
 										<div className="flex flex-col items-end shrink-0 pl-2">
 											<span className={`text-[17px] sm:text-lg font-black font-mono leading-none tracking-tight flex items-baseline ${
-												isExcellent ? "text-teal-400" : isGood ? "text-emerald-400" : isPoor ? "text-amber-500" : "text-slate-400"
+												isExcellent ? "text-teal-600 dark:text-teal-400" : isGood ? "text-emerald-600 dark:text-emerald-400" : isPoor ? "text-amber-600 dark:text-amber-500" : "text-slate-600 dark:text-slate-400"
 											}`}>
 												{item.success_rate.toFixed(1)}
 												<span className="text-[9px] sm:text-[10px] font-semibold opacity-50 ml-0.5">%</span>
@@ -797,7 +797,7 @@ export function IndexerHealth() {
 											<Radio className="h-3 w-3 animate-pulse text-teal-400" />
 											Import Pulse Stream (Last 24)
 										</div>
-										<div className="flex flex-wrap items-center gap-1 rounded-xl border border-white/5 bg-[#0f1117]/20 p-2">
+										<div className="flex flex-wrap items-center gap-1 rounded-xl border border-base-200 bg-base-200/50 p-2">
 											{generatePulseMatrix(
 												item.success_count,
 												item.failed_count,
@@ -807,14 +807,14 @@ export function IndexerHealth() {
 													dot === "success"
 														? "bg-teal-500/80 hover:bg-teal-400 shadow-[0_0_6px_rgba(20,184,166,0.4)]"
 														: dot === "failed"
-															? "bg-rose-500/80 hover:bg-rose-400 shadow-[0_0_6px_rgba(239,68,68,0.4)]"
-															: "bg-white/5 border border-white/5";
+														? "bg-rose-500/80 hover:bg-rose-400 shadow-[0_0_6px_rgba(239,68,68,0.4)]"
+														: "bg-base-200/30 border border-base-200";
 												const dotTip =
 													dot === "success"
 														? "Import OK"
 														: dot === "failed"
-															? "Import Failed"
-															: "No Activity";
+														? "Import Failed"
+														: "No Activity";
 												return (
 													<div
 														key={idx}
@@ -827,9 +827,9 @@ export function IndexerHealth() {
 									</div>
 
 									{/* Telemetry Grid */}
-									<div className="mt-4 grid grid-cols-3 gap-1.5 rounded-xl border border-white/5 bg-[#0f1117]/20 p-3 text-center">
+									<div className="mt-4 grid grid-cols-3 gap-1.5 rounded-xl border border-base-200 bg-base-200/50 p-3 text-center">
 										<div className="space-y-0.5">
-											<div className="font-extrabold text-sm text-white tabular-nums">
+											<div className="font-extrabold text-sm text-base-content tabular-nums">
 												{item.total_imports.toLocaleString()}
 											</div>
 											<div className="font-bold text-[8px] text-base-content/40 uppercase tracking-wider">
@@ -837,7 +837,7 @@ export function IndexerHealth() {
 											</div>
 										</div>
 										<div className="space-y-0.5">
-											<div className="flex items-center justify-center gap-0.5 font-extrabold text-sm text-teal-400 tabular-nums">
+											<div className="flex items-center justify-center gap-0.5 font-extrabold text-sm text-teal-600 dark:text-teal-400 tabular-nums">
 												<CheckCircle2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
 												{item.success_count.toLocaleString()}
 											</div>
@@ -846,7 +846,7 @@ export function IndexerHealth() {
 											</div>
 										</div>
 										<div className="space-y-0.5">
-											<div className="flex items-center justify-center gap-0.5 font-extrabold text-rose-400 text-sm tabular-nums">
+											<div className="flex items-center justify-center gap-0.5 font-extrabold text-rose-600 dark:text-rose-400 text-sm tabular-nums">
 												<XCircle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
 												{item.failed_count.toLocaleString()}
 											</div>
@@ -870,10 +870,10 @@ export function IndexerHealth() {
 					aria-modal="true"
 					aria-labelledby="prune-modal-title"
 				>
-					<div className="modal-box max-w-md border border-white/5 bg-[#161821] p-6 shadow-2xl sm:p-8">
+					<div className="modal-box max-w-md border border-base-300 bg-base-100 p-6 shadow-2xl sm:p-8">
 						<h3
 							id="prune-modal-title"
-							className="flex items-center gap-2 font-bold text-white text-xl"
+							className="flex items-center gap-2 font-bold text-base-content text-xl"
 						>
 							<Trash2 className="h-6 w-6 text-amber-500" aria-hidden="true" />
 							Prune Statistics
@@ -888,10 +888,10 @@ export function IndexerHealth() {
 								return (
 									<label
 										key={opt}
-										className={`label cursor-pointer justify-start gap-3 rounded-xl border p-4 transition-all duration-200 hover:bg-white/5 ${
+										className={`label cursor-pointer justify-start gap-3 rounded-xl border p-4 transition-all duration-200 hover:bg-base-200 ${
 											isSelected
 												? "border-primary bg-primary/5 shadow-sm"
-												: "border-white/5 bg-white/5"
+												: "border-base-200 bg-base-200/30"
 										}`}
 									>
 										<input
@@ -911,7 +911,7 @@ export function IndexerHealth() {
 											}`}
 										/>
 										<div className="flex-1">
-											<span className="font-bold text-sm text-white">
+											<span className="font-bold text-sm text-base-content">
 												{opt === "24h"
 													? "Delete Last 24 Hours"
 													: opt === "7d"
@@ -933,7 +933,7 @@ export function IndexerHealth() {
 												<div className="mt-3 flex items-center gap-3">
 													<input
 														type="number"
-														className="input input-bordered input-sm w-24 border-white/10 bg-[#0f1117]/40 text-center font-bold text-white"
+														className="input input-bordered input-sm w-24 border-base-300 bg-base-100 text-center font-bold text-base-content"
 														value={customDays}
 														onChange={(e) =>
 															setCustomDays(Number.parseInt(e.target.value, 10) || 0)
@@ -955,7 +955,7 @@ export function IndexerHealth() {
 						<div className="modal-action mt-6 gap-2">
 							<button
 								type="button"
-								className="btn btn-ghost text-white"
+								className="btn btn-ghost text-base-content/70 hover:text-base-content"
 								onClick={() => setShowPruneModal(false)}
 								disabled={cleanupStats.isPending}
 							>
