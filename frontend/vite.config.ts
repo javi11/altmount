@@ -63,6 +63,7 @@ export default defineConfig({
 				],
 			},
 			workbox: {
+				navigateFallback: null,
 				// Exclude html: index.html must NOT be precached so every navigation
 				// reaches the network (and Authelia can check the session).
 				globPatterns: ["**/*.{js,css,ico,png,svg,woff2}"],

@@ -34,6 +34,7 @@ func setupQueueSchema(t *testing.T, db *sql.DB) {
 			target_path TEXT DEFAULT NULL,
 			skip_arr_notification BOOLEAN NOT NULL DEFAULT FALSE,
 			skip_post_import_links BOOLEAN NOT NULL DEFAULT FALSE,
+			indexer TEXT DEFAULT NULL,
 			UNIQUE(nzb_path)
 		);
 

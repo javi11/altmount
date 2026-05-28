@@ -51,6 +51,7 @@ export interface QueueItem {
 	failure_category?: string; // Categorized failure reason for failed items
 	eta?: number; // Seconds remaining, only present during processing
 	storage_path?: string; // Internal FUSE mount path (populated after completion)
+	indexer?: string;
 }
 
 export interface ProgressUpdate {
@@ -68,6 +69,7 @@ export interface ImportHistoryItem {
 	metadata?: string;
 	file_size: number;
 	completed_at: string;
+	indexer?: string;
 }
 
 export interface QueueStats {
@@ -211,6 +213,7 @@ export interface FileHealth {
 	// Failure masking fields
 	streaming_failure_count: number;
 	is_masked: boolean;
+	indexer?: string;
 }
 
 export interface HealthStats {

@@ -9,6 +9,7 @@ interface ModalState {
 	confirmText?: string;
 	cancelText?: string;
 	confirmButtonClass?: string;
+	verificationText?: string;
 	onConfirm?: () => void;
 	onCancel?: () => void;
 }
@@ -21,6 +22,7 @@ interface ModalContextValue {
 		confirmText?: string;
 		cancelText?: string;
 		confirmButtonClass?: string;
+		verificationText?: string;
 	}) => Promise<boolean>;
 }
 
@@ -46,6 +48,7 @@ export function ModalProvider({ children }: ModalProviderProps) {
 			confirmText?: string;
 			cancelText?: string;
 			confirmButtonClass?: string;
+			verificationText?: string;
 		}): Promise<boolean> => {
 			return new Promise((resolve) => {
 				setModalState({
@@ -56,6 +59,7 @@ export function ModalProvider({ children }: ModalProviderProps) {
 					confirmText: options.confirmText,
 					cancelText: options.cancelText,
 					confirmButtonClass: options.confirmButtonClass,
+					verificationText: options.verificationText,
 					onConfirm: () => {
 						setModalState((prev) => ({ ...prev, isOpen: false }));
 						resolve(true);
@@ -93,6 +97,7 @@ export function ModalProvider({ children }: ModalProviderProps) {
 				confirmText={modalState.confirmText}
 				cancelText={modalState.cancelText}
 				confirmButtonClass={modalState.confirmButtonClass}
+				verificationText={modalState.verificationText}
 				onConfirm={modalState.onConfirm || (() => {})}
 				onCancel={modalState.onCancel || handleClose}
 			/>
@@ -134,6 +139,7 @@ export function useConfirm() {
 				type?: "info" | "warning" | "error" | "success";
 				confirmText?: string;
 				confirmButtonClass?: string;
+				verificationText?: string;
 			},
 		) =>
 			confirm({
@@ -142,6 +148,7 @@ export function useConfirm() {
 				type: options?.type || "warning",
 				confirmText: options?.confirmText || "Confirm",
 				confirmButtonClass: options?.confirmButtonClass || "btn-primary",
+				verificationText: options?.verificationText,
 			}),
 		[confirm],
 	);
