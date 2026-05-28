@@ -13,6 +13,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/javi11/altmount/internal/auth"
 	"github.com/javi11/altmount/internal/config"
+	"github.com/javi11/altmount/internal/slogutil"
 	"github.com/javi11/nntppool/v4"
 )
 
@@ -45,13 +46,6 @@ func parseLogLevel(level string) slog.Level {
 	}
 }
 
-// ApplyLogLevel applies the log level to the global logger
-func ApplyLogLevel(level string) {
-	if level != "" {
-		slog.SetLogLoggerLevel(parseLogLevel(level))
-	}
-}
-
 // getEffectiveLogLevel returns the effective log level, preferring new config over legacy
 func getEffectiveLogLevel(newLevel, legacyLevel string) string {
 	if newLevel != "" {
@@ -64,7 +58,7 @@ func getEffectiveLogLevel(newLevel, legacyLevel string) string {
 }
 
 // RegisterLogLevelHandler registers handler for log level configuration changes
-func RegisterLogLevelHandler(ctx context.Context, configManager *config.Manager, debugMode *bool) {
+func RegisterLogLevelHandler(ctx context.Context, configManager *config.Manager, debugMode *bool, dynamicLeveler *slogutil.DynamicLeveler) {
 	configManager.OnConfigChange(func(oldConfig, newConfig *config.Config) {
 		// Determine old and new log levels
 		oldLevel := getEffectiveLogLevel(oldConfig.Log.Level, oldConfig.Log.Level)
@@ -72,7 +66,7 @@ func RegisterLogLevelHandler(ctx context.Context, configManager *config.Manager,
 
 		// Apply log level change if it changed
 		if oldLevel != newLevel {
-			ApplyLogLevel(newLevel)
+			dynamicLeveler.SetLevel(parseLogLevel(newLevel))
 			// Update Fiber logger debug mode
 			*debugMode = newLevel == "debug"
 			slog.InfoContext(ctx, "Log level updated dynamically",
