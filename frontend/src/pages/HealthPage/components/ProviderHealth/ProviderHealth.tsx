@@ -26,7 +26,7 @@ import type { ProviderSpeedTestHistoryStat, ProviderStatus } from "../../../../t
 import { ProviderChart } from "./ProviderChart";
 import { ProviderQuota } from "./ProviderQuota";
 import { ProviderSpeedChart } from "./ProviderSpeedChart";
-import { ProviderTopologyMap } from "./ProviderTopologyMap";
+
 
 type SortField =
 	| "host"
@@ -427,11 +427,7 @@ export function ProviderHealth() {
 				</div>
 			</div>
 
-			{/* Network Constellation Topology Map */}
-			<ProviderTopologyMap
-				providers={sortedProviders}
-				totalSpeed={data.download_speed_bytes_per_sec}
-			/>
+
 
 			{/* Data Usage & Speed History section */}
 			<div className="flex flex-col gap-6">
