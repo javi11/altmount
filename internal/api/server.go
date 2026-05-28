@@ -71,6 +71,7 @@ type Server struct {
 
 	speedtest     *speedtestCoordinator
 	speedtestOnce sync.Once
+	grabbedIndexers sync.Map
 }
 
 // NewServer creates a new API server that can optionally register routes on the provided mux (for backwards compatibility)
@@ -328,6 +329,8 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Get("/system/pool/metrics", s.handleGetPoolMetrics)
 	api.Get("/system/provider-stats", s.handleGetProviderHistoricalStats)
 	api.Get("/system/provider-speed-history", s.handleGetProviderSpeedHistory)
+	api.Get("/system/indexer-stats", s.handleGetIndexerStats)
+	api.Delete("/system/indexer-stats/cleanup", s.handleCleanupIndexerStats)
 	api.Post("/system/stats/reset", s.handleResetSystemStats)
 	api.Post("/system/cleanup", s.handleSystemCleanup)
 	api.Post("/system/restart", s.handleSystemRestart)

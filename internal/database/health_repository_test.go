@@ -36,7 +36,8 @@ func setupTestDB(t *testing.T) *HealthRepository {
 			scheduled_check_at DATETIME,
 			priority INTEGER DEFAULT 0,
 			streaming_failure_count INTEGER DEFAULT 0,
-			is_masked BOOLEAN DEFAULT FALSE
+			is_masked BOOLEAN DEFAULT FALSE,
+			indexer TEXT DEFAULT NULL
 		);
 	`)
 	require.NoError(t, err)
@@ -307,7 +308,7 @@ func TestAddFileToHealthCheckWithMetadata_StoresLibraryPath(t *testing.T) {
 	sourceNzb := "Dune.nzb"
 
 	// Add the file
-	err := repo.AddFileToHealthCheckWithMetadata(ctx, filePath, &libraryPath, 3, 3, &sourceNzb, HealthPriorityNormal, nil, nil)
+	err := repo.AddFileToHealthCheckWithMetadata(ctx, filePath, &libraryPath, 3, 3, &sourceNzb, HealthPriorityNormal, nil, nil, nil)
 	require.NoError(t, err)
 
 	// Verify it was stored

@@ -49,6 +49,7 @@ export interface QueueItem {
 	percentage?: number; // Progress percentage (0-100), only present for items being processed
 	stage?: string; // Human-readable stage label (e.g. "Validating segments"), injected client-side from live progress
 	storage_path?: string; // Internal FUSE mount path (populated after completion)
+	indexer?: string;
 }
 
 export interface ProgressUpdate {
@@ -66,6 +67,7 @@ export interface ImportHistoryItem {
 	metadata?: string;
 	file_size: number;
 	completed_at: string;
+	indexer?: string;
 }
 
 export interface QueueStats {
@@ -209,6 +211,7 @@ export interface FileHealth {
 	// Failure masking fields
 	streaming_failure_count: number;
 	is_masked: boolean;
+	indexer?: string;
 }
 
 export interface HealthStats {
