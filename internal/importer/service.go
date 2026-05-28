@@ -208,6 +208,7 @@ type Service struct {
 	// HandleFailure can clean them up without changing the ItemProcessor interface.
 	// Keys are item.ID (int64), values are []string.
 	writtenPathsCache sync.Map
+	grabbedIndexers   sync.Map
 }
 
 // NewService creates a new NZB import service with manual scanning and queue processing capabilities
@@ -684,6 +685,14 @@ func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath 
 		itemPriority = *priority
 	}
 
+	// Lookup indexer from grabbedIndexers (Webhook-provided)
+	var indexerName *string = nil
+	if downloadID != nil && *downloadID != "" {
+		if name, ok := s.GetGrabbedIndexer(*downloadID, filepath.Base(filePath)); ok {
+			indexerName = &name
+		}
+	}
+
 	item := &database.ImportQueueItem{
 		DownloadID:   downloadID,
 		NzbPath:      filePath,
@@ -695,6 +704,7 @@ func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath 
 		MaxRetries:   3,
 		FileSize:     fileSize,
 		Metadata:     metadata,
+		Indexer:      indexerName,
 		CreatedAt:    time.Now(),
 	}
 
@@ -1022,6 +1032,22 @@ func (s *Service) resolveCategoryPath(category string) string {
 
 // handleProcessingSuccess handles all steps after successful NZB processing
 func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.ImportQueueItem, resultingPath string) error {
+	// Log persistent indexer statistic
+	indexerName := "Unknown"
+	if item.Indexer != nil && *item.Indexer != "" {
+		indexerName = *item.Indexer
+	}
+	if (indexerName == "Unknown" || indexerName == "") && item.DownloadID != nil && *item.DownloadID != "" {
+		if latestItem, err := s.database.Repository.GetQueueItemByDownloadID(ctx, *item.DownloadID); err == nil && latestItem != nil && latestItem.Indexer != nil && *latestItem.Indexer != "" {
+			indexerName = *latestItem.Indexer
+		} else if name, ok := s.GetGrabbedIndexer(*item.DownloadID, filepath.Base(item.NzbPath)); ok {
+			indexerName = name
+		}
+	}
+	if err := s.database.Repository.LogIndexerImport(ctx, indexerName, "success", "", item.DownloadID); err != nil {
+		s.log.WarnContext(ctx, "Failed to log indexer success statistic", "indexer", indexerName, "error", err)
+	}
+
 	// Add storage path to database
 	if err := s.database.Repository.AddStoragePath(ctx, item.ID, resultingPath); err != nil {
 		s.log.ErrorContext(ctx, "Failed to add storage path", "queue_id", item.ID, "error", err)
@@ -1128,6 +1154,25 @@ func (s *Service) cleanupWrittenPaths(ctx context.Context, itemID int64, paths [
 // handleProcessingFailure handles when processing fails
 func (s *Service) handleProcessingFailure(ctx context.Context, item *database.ImportQueueItem, processingErr error) {
 	errorMessage := processingErr.Error()
+
+	// Log persistent indexer statistic
+	indexerName := "Unknown"
+	if item.Indexer != nil && *item.Indexer != "" {
+		indexerName = *item.Indexer
+	}
+	if (indexerName == "Unknown" || indexerName == "") && item.DownloadID != nil && *item.DownloadID != "" {
+		if latestItem, err := s.database.Repository.GetQueueItemByDownloadID(ctx, *item.DownloadID); err == nil && latestItem != nil && latestItem.Indexer != nil && *latestItem.Indexer != "" {
+			indexerName = *latestItem.Indexer
+		} else if name, ok := s.GetGrabbedIndexer(*item.DownloadID, filepath.Base(item.NzbPath)); ok {
+			indexerName = name
+		}
+	}
+	// Don't log if it was just cancelled by the user
+	if !strings.Contains(errorMessage, "context canceled") && !strings.Contains(errorMessage, "processing cancelled") {
+		if err := s.database.Repository.LogIndexerImport(ctx, indexerName, "failed", errorMessage, item.DownloadID); err != nil {
+			s.log.WarnContext(ctx, "Failed to log indexer failure statistic", "indexer", indexerName, "error", err)
+		}
+	}
 
 	// Check if the error was due to cancellation
 	if strings.Contains(errorMessage, "context canceled") || strings.Contains(errorMessage, "processing cancelled") {
@@ -1503,4 +1548,64 @@ func (s *Service) RegenerateMetadata(ctx context.Context, mountRelativePath stri
 
 	s.log.InfoContext(ctx, "Successfully regenerated metadata", "path", mountRelativePath)
 	return nil
+}
+
+type grabbedIndexerInfo struct {
+	indexer   string
+	timestamp time.Time
+}
+
+// StoreGrabbedIndexer stores a downloadID to indexer mapping in-memory
+func (s *Service) StoreGrabbedIndexer(downloadID string, releaseTitle string, indexer string) {
+	info := grabbedIndexerInfo{
+		indexer:   indexer,
+		timestamp: time.Now(),
+	}
+
+	if downloadID != "" {
+		s.grabbedIndexers.Store(downloadID, info)
+	}
+	// Sanitize and use release title as an alternative fallback key
+	if releaseTitle != "" {
+		cleanTitle := strings.TrimSpace(strings.ToLower(releaseTitle))
+		cleanTitle = strings.TrimSuffix(cleanTitle, ".gz")
+		cleanTitle = strings.TrimSuffix(cleanTitle, ".nzb")
+		s.grabbedIndexers.Store(cleanTitle, info)
+	}
+}
+
+// GetGrabbedIndexer retrieves a grabbed indexer by download ID or release title
+// It only returns a match if it was stored within the last 15 seconds.
+func (s *Service) GetGrabbedIndexer(downloadID string, releaseTitle string) (string, bool) {
+	now := time.Now()
+
+	check := func(key string) (string, bool) {
+		if val, ok := s.grabbedIndexers.Load(key); ok {
+			if info, isInfo := val.(grabbedIndexerInfo); isInfo {
+				if now.Sub(info.timestamp) < 15*time.Second {
+					return info.indexer, true
+				}
+				// Cleanup expired entry
+				s.grabbedIndexers.Delete(key)
+			}
+		}
+		return "", false
+	}
+
+	if downloadID != "" {
+		if name, ok := check(downloadID); ok {
+			return name, true
+		}
+	}
+
+	if releaseTitle != "" {
+		cleanTitle := strings.TrimSpace(strings.ToLower(releaseTitle))
+		cleanTitle = strings.TrimSuffix(cleanTitle, ".gz")
+		cleanTitle = strings.TrimSuffix(cleanTitle, ".nzb")
+		if name, ok := check(cleanTitle); ok {
+			return name, true
+		}
+	}
+
+	return "", false
 }
