@@ -12,22 +12,24 @@ import (
 type ProgressUpdate struct {
 	QueueID    int       `json:"queue_id"`
 	Percentage int       `json:"percentage"`
-	Stage      string    `json:"stage,omitempty"`  // e.g. "Parsing NZB", "Validating segments"
-	Status     string    `json:"status,omitempty"` // "completed" or "failed" on terminal events
+	Stage      string    `json:"stage,omitempty"`        // e.g. "Parsing NZB", "Validating segments"
+	TimeLeft   int64     `json:"time_left_seconds,omitempty"` // estimated seconds remaining, 0 or omitted when unknown
+	Status     string    `json:"status,omitempty"`       // "completed" or "failed" on terminal events
 	Timestamp  time.Time `json:"timestamp"`
 }
 
 // ProgressEntry holds the current progress state for a single queue item.
-// It is returned by GetAllProgress for the SSE initial payload.
 type ProgressEntry struct {
 	Percentage int    `json:"percentage"`
 	Stage      string `json:"stage,omitempty"`
+	TimeLeft   int64  `json:"time_left_seconds,omitempty"`
 }
 
 // progressState is the internal progress record (unexported).
 type progressState struct {
 	percentage int
 	stage      string
+	timeLeft   int64
 }
 
 // ProgressBroadcaster manages progress tracking for queue items
@@ -61,14 +63,18 @@ func (pb *ProgressBroadcaster) Close() error {
 	return nil
 }
 
-// UpdateProgress updates the progress for a queue item (no stage label).
+// UpdateProgress updates the progress for a queue item (no stage label or ETA).
 func (pb *ProgressBroadcaster) UpdateProgress(queueID int, percentage int) {
 	pb.UpdateProgressWithStage(queueID, percentage, "")
 }
 
 // UpdateProgressWithStage updates the progress for a queue item with an optional stage label.
 func (pb *ProgressBroadcaster) UpdateProgressWithStage(queueID int, percentage int, stage string) {
-	// Clamp percentage to 0-100 range
+	pb.UpdateProgressWithETA(queueID, percentage, stage, 0)
+}
+
+// UpdateProgressWithETA updates the progress for a queue item with stage label and estimated seconds remaining.
+func (pb *ProgressBroadcaster) UpdateProgressWithETA(queueID int, percentage int, stage string, timeLeft int64) {
 	if percentage < 0 {
 		percentage = 0
 	}
@@ -78,18 +84,17 @@ func (pb *ProgressBroadcaster) UpdateProgressWithStage(queueID int, percentage i
 
 	pb.mu.Lock()
 	if percentage >= 100 {
-		// Remove progress when complete (100%)
 		delete(pb.progress, queueID)
 	} else {
-		pb.progress[queueID] = progressState{percentage: percentage, stage: stage}
+		pb.progress[queueID] = progressState{percentage: percentage, stage: stage, timeLeft: timeLeft}
 	}
 	pb.mu.Unlock()
 
-	// Broadcast update to all SSE subscribers
 	update := ProgressUpdate{
 		QueueID:    queueID,
 		Percentage: percentage,
 		Stage:      stage,
+		TimeLeft:   timeLeft,
 		Timestamp:  time.Now(),
 	}
 
@@ -152,7 +157,7 @@ func (pb *ProgressBroadcaster) GetAllProgress() map[int]ProgressEntry {
 
 	result := make(map[int]ProgressEntry, len(pb.progress))
 	for id, state := range pb.progress {
-		result[id] = ProgressEntry{Percentage: state.percentage, Stage: state.stage}
+		result[id] = ProgressEntry{Percentage: state.percentage, Stage: state.stage, TimeLeft: state.timeLeft}
 	}
 	return result
 }

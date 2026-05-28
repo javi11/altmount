@@ -48,6 +48,8 @@ export interface QueueItem {
 	file_size?: number;
 	percentage?: number; // Progress percentage (0-100), only present for items being processed
 	stage?: string; // Human-readable stage label (e.g. "Validating segments"), injected client-side from live progress
+	failure_category?: string; // Categorized failure reason for failed items
+	eta?: number; // Seconds remaining, only present during processing
 	storage_path?: string; // Internal FUSE mount path (populated after completion)
 }
 

@@ -3,12 +3,14 @@ import { useEffect, useRef, useState } from "react";
 export interface ProgressEntry {
 	percentage: number;
 	stage?: string;
+	time_left_seconds?: number;
 }
 
 interface ProgressUpdate {
 	queue_id: number;
 	percentage: number;
 	stage?: string;
+	time_left_seconds?: number;
 	status?: string;
 	timestamp: string;
 }
@@ -110,6 +112,7 @@ export function useQueueStream(options: UseQueueStreamOptions = {}): UseQueueStr
 									next[update.queue_id] = {
 										percentage: update.percentage,
 										stage: update.stage,
+										time_left_seconds: update.time_left_seconds,
 									};
 								}
 								return next;

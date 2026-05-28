@@ -19,6 +19,7 @@ import (
 	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	internalerrors "github.com/javi11/altmount/internal/errors"
 	"github.com/javi11/altmount/internal/httpclient"
 	"github.com/javi11/altmount/internal/importer/filesystem"
 	"github.com/javi11/altmount/internal/importer/parser"
@@ -1127,6 +1128,9 @@ func (s *Service) cleanupWrittenPaths(ctx context.Context, itemID int64, paths [
 
 // handleProcessingFailure handles when processing fails
 func (s *Service) handleProcessingFailure(ctx context.Context, item *database.ImportQueueItem, processingErr error) {
+	// Categorize the error before manipulating the message
+	failureCategory := internalerrors.CategoryFromError(processingErr)
+
 	errorMessage := processingErr.Error()
 
 	// Check if the error was due to cancellation
@@ -1134,12 +1138,14 @@ func (s *Service) handleProcessingFailure(ctx context.Context, item *database.Im
 		errorMessage = "Processing cancelled by user request"
 		s.log.InfoContext(ctx, "Processing cancelled by user",
 			"queue_id", item.ID,
-			"file", item.NzbPath)
+			"file", item.NzbPath,
+			"category", failureCategory)
 	} else {
 		s.log.WarnContext(ctx, "Processing failed",
 			"queue_id", item.ID,
 			"file", item.NzbPath,
-			"error", processingErr)
+			"error", processingErr,
+			"category", failureCategory)
 	}
 
 	// Mark as failed in queue database (no automatic retry)

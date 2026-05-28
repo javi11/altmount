@@ -53,7 +53,7 @@ import {
 	useUpdateQueueItemPriority,
 } from "../hooks/useApi";
 import { useQueueStream } from "../hooks/useQueueStream";
-import { formatBytes, formatRelativeTime, truncateText } from "../lib/utils";
+import { formatBytes, formatDuration, formatRelativeTime, truncateText } from "../lib/utils";
 import { type QueueItem, QueueStatus } from "../types/api";
 
 type QueueFilter = "" | "pending" | "processing" | "completed" | "failed";
@@ -113,6 +113,7 @@ export function QueuePage() {
 			...item,
 			percentage: liveProgress[item.id]?.percentage ?? item.percentage,
 			stage: liveProgress[item.id]?.stage,
+			eta: liveProgress[item.id]?.time_left_seconds,
 		}));
 	}, [queueData, liveProgress]);
 
@@ -853,9 +854,9 @@ export function QueuePage() {
 																			</div>
 																		) : item.status === QueueStatus.PROCESSING &&
 																			item.percentage != null ? (
-																			<div className="flex w-24 flex-col gap-1">
+																			<div className="flex w-28 flex-col gap-1">
 																				<div className="flex justify-between font-bold font-mono text-base-content/80 text-xs">
-																					<span>{item.stage ?? "PROGRESS"}</span>
+																					<span>{item.stage ?? "Downloading"}</span>
 																					<span>{item.percentage}%</span>
 																				</div>
 																				<progress
@@ -863,6 +864,11 @@ export function QueuePage() {
 																					value={item.percentage}
 																					max={100}
 																				/>
+																				{item.eta != null && item.eta > 0 && (
+																					<span className="text-[11px] text-base-content/50">
+																						{formatDuration(item.eta)} remaining
+																					</span>
+																				)}
 																			</div>
 																		) : (
 																			<StatusBadge status={item.status} />

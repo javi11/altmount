@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/javi11/altmount/internal/auth"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	internalerrors "github.com/javi11/altmount/internal/errors"
 )
 
 // nzbJobName returns the display name for an NZB job by stripping the .nzb or .nzb.gz
@@ -379,7 +381,8 @@ type QueueItemResponse struct {
 	FileSize     *int64                 `json:"file_size"`
 	Percentage   *int                   `json:"percentage,omitempty"`    // Progress percentage (0-100), only for items being processed
 	Stage        string                 `json:"stage,omitempty"`         // Progress stage (e.g. "Validating segments")
-	StoragePath  *string                `json:"storage_path,omitempty"` // Internal FUSE mount path (populated after completion)
+	StoragePath      *string                `json:"storage_path,omitempty"`       // Internal FUSE mount path (populated after completion)
+	FailureCategory  *string                `json:"failure_category,omitempty"`  // Error category when status is failed
 }
 
 // QueueListRequest represents request parameters for listing queue items
@@ -628,6 +631,13 @@ func ToQueueItemResponse(item *database.ImportQueueItem) *QueueItemResponse {
 	// Transform error message for better user understanding
 	errorMessage := transformQueueError(item.ErrorMessage)
 
+	// Derive failure category from the error message
+	var failureCategory *string
+	if item.Status == database.QueueStatusFailed && errorMessage != "" {
+		cat := string(internalerrors.CategoryFromError(fmt.Errorf("%s", errorMessage)))
+		failureCategory = &cat
+	}
+
 	return &QueueItemResponse{
 		ID:             item.ID,
 		NzbPath:        item.NzbPath,
@@ -646,7 +656,8 @@ func ToQueueItemResponse(item *database.ImportQueueItem) *QueueItemResponse {
 		BatchID:      item.BatchID,
 		Metadata:     item.Metadata,
 		FileSize:     item.FileSize,
-		StoragePath:  item.StoragePath,
+		StoragePath:      item.StoragePath,
+		FailureCategory:  failureCategory,
 	}
 }
 

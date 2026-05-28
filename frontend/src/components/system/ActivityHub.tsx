@@ -315,7 +315,7 @@ export function ActivityHub() {
 													</div>
 													<div className="mt-1 flex items-center gap-2">
 														<span className="font-bold text-secondary text-xs">
-															{item.stage?.toUpperCase() || "IMPORTING"}
+															{item.stage?.toUpperCase() || "DOWNLOADING"}
 														</span>
 														<span className="text-base-content/40 text-xs">•</span>
 														<span className="text-base-content/60 text-xs">Queue #{item.id}</span>

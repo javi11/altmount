@@ -1,5 +1,4 @@
 import {
-	AlertCircle,
 	Box,
 	ChevronDown,
 	ChevronUp,
@@ -12,10 +11,12 @@ import {
 	XCircle,
 } from "lucide-react";
 import { memo, useState } from "react";
-import { formatBytes, formatRelativeTime, truncateText } from "../../lib/utils";
+import { formatBytes, formatDuration, formatRelativeTime } from "../../lib/utils";
 import { type QueueItem, QueueStatus } from "../../types/api";
 import { PathDisplay } from "../ui/PathDisplay";
 import { StatusBadge } from "../ui/StatusBadge";
+import { CategorizedErrorAlert } from "./CategorizedErrorAlert";
+import { PipelineStepper } from "./PipelineStepper";
 
 interface QueueItemCardProps {
 	item: QueueItem;
@@ -167,25 +168,27 @@ export const QueueItemCard = memo(function QueueItemCard({
 				<div className="space-y-2">
 					{item.status === QueueStatus.PROCESSING && item.percentage != null ? (
 						<div>
-							<div className="mb-1 flex justify-between text-xs">
-								<StatusBadge status={item.status} />
-								<span className="font-bold font-mono opacity-70">{item.percentage}%</span>
+							<PipelineStepper stage={item.stage} percentage={item.percentage} />
+							<div className="mt-1 flex items-center justify-between">
+								<span className="font-medium text-base-content/60 text-xs">
+									{item.stage ?? "Downloading"}
+								</span>
+								{item.eta != null && item.eta > 0 && (
+									<span className="text-[11px] text-base-content/50">
+										{formatDuration(item.eta)} remaining
+									</span>
+								)}
 							</div>
-							<progress
-								className="progress progress-primary h-2 w-full"
-								value={item.percentage}
-								max={100}
-							/>
 						</div>
 					) : (
 						<StatusBadge status={item.status} />
 					)}
 
-					{item.status === QueueStatus.FAILED && item.error_message && (
-						<div className="alert alert-error px-3 py-2">
-							<AlertCircle className="h-4 w-4 shrink-0" />
-							<span className="text-xs">{truncateText(item.error_message, 100)}</span>
-						</div>
+					{item.status === QueueStatus.FAILED && (
+						<CategorizedErrorAlert
+							category={item.failure_category ?? "internal"}
+							errorMessage={item.error_message}
+						/>
 					)}
 				</div>
 
