@@ -336,14 +336,10 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 	toArrsInstances := func(instances []config.ArrsInstanceConfig) []ArrsInstanceAPIResponse {
 		var resp []ArrsInstanceAPIResponse
 		for _, inst := range instances {
-			maskedKey := ""
-			if inst.APIKey != "" {
-				maskedKey = "********"
-			}
 			resp = append(resp, ArrsInstanceAPIResponse{
 				Name:              inst.Name,
 				URL:               inst.URL,
-				APIKey:            maskedKey,
+				APIKey:            inst.APIKey,
 				APIKeySet:         inst.APIKey != "",
 				Category:          inst.Category,
 				Enabled:           inst.Enabled != nil && *inst.Enabled,
@@ -372,11 +368,6 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 		QueueCleanupAllowlist:          cfg.Arrs.QueueCleanupAllowlist,
 	}
 
-	prowlarrMaskedKey := ""
-	if cfg.Stremio.Prowlarr.APIKey != "" {
-		prowlarrMaskedKey = "********"
-	}
-
 	stremioResp := StremioAPIResponse{
 		Enabled:     cfg.Stremio.Enabled != nil && *cfg.Stremio.Enabled,
 		NzbTTLHours: cfg.Stremio.NzbTTLHours,
@@ -384,7 +375,7 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 		Prowlarr: ProwlarrAPIResponse{
 			Enabled:    cfg.Stremio.Prowlarr.Enabled != nil && *cfg.Stremio.Prowlarr.Enabled,
 			Host:       cfg.Stremio.Prowlarr.Host,
-			APIKey:     prowlarrMaskedKey,
+			APIKey:     cfg.Stremio.Prowlarr.APIKey,
 			APIKeySet:  cfg.Stremio.Prowlarr.APIKey != "",
 			Categories: cfg.Stremio.Prowlarr.Categories,
 			Languages:  cfg.Stremio.Prowlarr.Languages,
