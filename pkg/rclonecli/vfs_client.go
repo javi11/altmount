@@ -117,81 +117,90 @@ func (c *rcloneRcClient) RefreshDir(ctx context.Context, provider string, dirs [
 		return fmt.Errorf("invalid RC URL configuration: %w", err)
 	}
 
-	// Use similar logic to Manager's RefreshDir but with vfs/refresh endpoint
-	refreshArgs := map[string]any{
-		"_async":    "false", // Use async refresh
-		"recursive": "false", // Non-recursive by default
-	}
+	var errs []error
 
-	// Add filesystem specification if provider is provided
-	if provider != "" {
-		refreshArgs["fs"] = fmt.Sprintf("%s:", provider)
-	}
-
-	// Add directories to refresh
-	for i, dir := range dirs {
-		if dir != "" {
-			if i == 0 {
-				refreshArgs["dir"] = dir
-			} else {
-				refreshArgs[fmt.Sprintf("dir%d", i+1)] = dir
-			}
+	// Issue a vfs/forget call for each directory to ensure all parents/children are forgotten
+	for _, dir := range dirs {
+		if dir == "" {
+			continue
 		}
-	}
-
-	forgetArgs := make(map[string]any)
-	for k, v := range refreshArgs {
-		if k != "recursive" {
-			forgetArgs[k] = v
+		forgetArgs := map[string]any{
+			"dir": dir,
 		}
-	}
+		if provider != "" {
+			forgetArgs["fs"] = fmt.Sprintf("%s:", provider)
+		}
 
-	forgetPayload, err := json.Marshal(forgetArgs)
-	if err != nil {
-		return err
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", baseUrl+"/vfs/forget", bytes.NewBuffer(forgetPayload))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, err := io.ReadAll(resp.Body)
+		forgetPayload, err := json.Marshal(forgetArgs)
 		if err != nil {
-			return err
+			errs = append(errs, err)
+			continue
 		}
-		return fmt.Errorf("unexpected status code: %d, error: %s", resp.StatusCode, string(body))
-	}
 
-	refreshPayload, err := json.Marshal(refreshArgs)
-	if err != nil {
-		return err
-	}
-
-	req, err = http.NewRequestWithContext(ctx, "POST", baseUrl+"/vfs/refresh", bytes.NewBuffer(refreshPayload))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err = c.httpClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, err := io.ReadAll(resp.Body)
+		req, err := http.NewRequestWithContext(ctx, "POST", baseUrl+"/vfs/forget", bytes.NewBuffer(forgetPayload))
 		if err != nil {
-			return err
+			errs = append(errs, err)
+			continue
 		}
-		return fmt.Errorf("unexpected status code: %d, error: %s", resp.StatusCode, string(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			errs = append(errs, fmt.Errorf("vfs/forget failed for %s: status %d, error: %s", dir, resp.StatusCode, string(body)))
+			continue
+		}
+		resp.Body.Close()
+	}
+
+	// Issue a vfs/refresh call for each directory to ensure all parents/children are refreshed
+	for _, dir := range dirs {
+		if dir == "" {
+			continue
+		}
+		refreshArgs := map[string]any{
+			"dir":       dir,
+			"_async":    "false", // Run synchronously to ensure cache is ready
+			"recursive": "false", // Non-recursive by default
+		}
+		if provider != "" {
+			refreshArgs["fs"] = fmt.Sprintf("%s:", provider)
+		}
+
+		refreshPayload, err := json.Marshal(refreshArgs)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "POST", baseUrl+"/vfs/refresh", bytes.NewBuffer(refreshPayload))
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			errs = append(errs, fmt.Errorf("vfs/refresh failed for %s: status %d, error: %s", dir, resp.StatusCode, string(body)))
+			continue
+		}
+		resp.Body.Close()
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("VFS sync completed with %d errors; first error: %w", len(errs), errs[0])
 	}
 
 	return nil
