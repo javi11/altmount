@@ -74,14 +74,24 @@ func ResolveMainFeature(ctx context.Context, rs io.ReadSeeker, files []isoFileEn
 		return playlistEntries[i].path < playlistEntries[j].path
 	})
 
+	// Read every playlist up front in as few sequential passes as possible.
+	// Reading one .mpls at a time costs a reader teardown + a fresh NNTP
+	// fetch of the segment(s) covering it (the backing DecryptingFile
+	// discards its reader on every Seek). Playlists cluster contiguously in
+	// BDMV/PLAYLIST/, so coalescing their reads lets the reader prefetch
+	// across the whole directory at once instead of re-fetching overlapping
+	// segments once per file. See readPlaylistsCoalesced.
+	playlistData := readPlaylistsCoalesced(rs, playlistEntries)
+
 	var best *MainFeaturePlaylist
 	for idx, pe := range playlistEntries {
-		// Report progress per playlist examined. Reading and parsing each
-		// .mpls is an NNTP round-trip, so this is the granular signal that
-		// keeps the queue item's bar moving during BD analysis. nil-safe.
+		// Report progress per playlist examined — the granular signal that
+		// keeps the queue item's bar moving during BD analysis. Network I/O
+		// is now front-loaded into readPlaylistsCoalesced, so this loop only
+		// parses already-buffered bytes. nil-safe.
 		progressTracker.Update(idx+1, len(playlistEntries))
-		data, err := readISOFile(rs, pe)
-		if err != nil {
+		data, ok := playlistData[pe.path]
+		if !ok {
 			continue
 		}
 		pl, err := ParseMPLS(data)
@@ -175,6 +185,140 @@ func isBetterPlaylist(cand, best *MainFeaturePlaylist) bool {
 		return cand.UniqueClipBytes > best.UniqueClipBytes
 	}
 	return cand.UniqueClipCount > best.UniqueClipCount
+}
+
+const (
+	// playlistRunGapThreshold bounds how far apart two playlist extents may
+	// sit on disc before readPlaylistsCoalesced splits them into separate
+	// sequential reads. Bridging a small gap reads a few extra contiguous
+	// bytes (prefetched in the background) but avoids the reader teardown +
+	// fresh NNTP fetch a separate run costs (1-5s on Usenet). 4 MiB ≈ 6 NNTP
+	// segments — comfortably larger than typical inter-file padding, so a
+	// real PLAYLIST directory collapses to a single run.
+	playlistRunGapThreshold = 4 << 20
+
+	// playlistRunSizeCeiling caps a single coalesced read so a malformed
+	// on-disc extent table cannot make us allocate gigabytes. A contiguous
+	// run that would exceed this is split. No real PLAYLIST directory (a few
+	// MB of tiny files) approaches it.
+	playlistRunSizeCeiling = 64 << 20
+)
+
+// byteRun is one contiguous span of disc bytes read in a single pass. buf is
+// the span's bytes once read, or nil if the read failed (callers skip any
+// playlist whose extents fall in a failed run).
+type byteRun struct {
+	start int64 // inclusive byte offset
+	end   int64 // exclusive byte offset
+	buf   []byte
+}
+
+// findRun returns the run fully containing [off, end), or nil. Every extent
+// passed to readPlaylistsCoalesced is contained in exactly one run by
+// construction, so this only returns nil when the matching run's read failed
+// (buf == nil) — which the caller treats the same as "not found".
+func findRun(runs []byteRun, off, end int64) *byteRun {
+	for i := range runs {
+		if runs[i].buf != nil && runs[i].start <= off && end <= runs[i].end {
+			return &runs[i]
+		}
+	}
+	return nil
+}
+
+// readPlaylistsCoalesced reads every entry's bytes using as few sequential
+// streaming reads as possible, returning a map keyed by entry.path. Entries
+// that cannot be fully read (seek/read error in their run, or zero usable
+// bytes) are simply absent — the caller skips them, mirroring the per-file
+// error handling readISOFile drove previously.
+//
+// Reconstruction is byte-identical to readISOFile: each entry's extents are
+// concatenated in disc order, taking each extent's bytes from the run buffer
+// that covers it.
+func readPlaylistsCoalesced(rs io.ReadSeeker, entries []isoFileEntry) map[string][]byte {
+	// Flatten all non-empty extents and sort by disc offset so we can group
+	// neighbours into runs.
+	type flatExtent struct {
+		offset int64
+		length int64
+	}
+	var exts []flatExtent
+	for _, e := range entries {
+		for _, x := range e.extents {
+			if x.length == 0 {
+				continue
+			}
+			exts = append(exts, flatExtent{
+				offset: int64(x.lba) * iso9660SectorSize,
+				length: int64(x.length),
+			})
+		}
+	}
+	if len(exts) == 0 {
+		return map[string][]byte{}
+	}
+	sort.Slice(exts, func(i, j int) bool { return exts[i].offset < exts[j].offset })
+
+	// Group extents into runs, starting a new run when the gap to the next
+	// extent exceeds the threshold or the run would grow past the ceiling.
+	// runEnd tracks the max end so overlapping/duplicate extents merge.
+	var runs []byteRun
+	cur := byteRun{start: exts[0].offset, end: exts[0].offset + exts[0].length}
+	for _, x := range exts[1:] {
+		xEnd := x.offset + x.length
+		if x.offset-cur.end > playlistRunGapThreshold || xEnd-cur.start > playlistRunSizeCeiling {
+			runs = append(runs, cur)
+			cur = byteRun{start: x.offset, end: xEnd}
+			continue
+		}
+		if xEnd > cur.end {
+			cur.end = xEnd
+		}
+	}
+	runs = append(runs, cur)
+
+	// One Seek + one ReadFull per run. A failed run keeps buf == nil.
+	for i := range runs {
+		r := &runs[i]
+		if _, err := rs.Seek(r.start, io.SeekStart); err != nil {
+			continue
+		}
+		buf := make([]byte, r.end-r.start)
+		if _, err := io.ReadFull(rs, buf); err != nil {
+			continue
+		}
+		r.buf = buf
+	}
+
+	// Reconstruct each entry from the run buffers, preserving extent order.
+	out := make(map[string][]byte, len(entries))
+	for _, e := range entries {
+		data := make([]byte, 0, e.size)
+		ok := true
+		for _, x := range e.extents {
+			if x.length == 0 {
+				continue
+			}
+			off := int64(x.lba) * iso9660SectorSize
+			length := int64(x.length)
+			r := findRun(runs, off, off+length)
+			if r == nil {
+				ok = false
+				break
+			}
+			lo := off - r.start
+			hi := lo + length
+			if lo < 0 || hi > int64(len(r.buf)) {
+				ok = false
+				break
+			}
+			data = append(data, r.buf[lo:hi]...)
+		}
+		if ok && len(data) > 0 {
+			out[e.path] = data
+		}
+	}
+	return out
 }
 
 // readISOFile reads the full contents of one isoFileEntry from rs,
