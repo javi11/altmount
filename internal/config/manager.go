@@ -294,6 +294,7 @@ type ImportConfig struct {
 	MaxDownloadPrefetch            int            `yaml:"max_download_prefetch" mapstructure:"max_download_prefetch" json:"max_download_prefetch"`
 	SegmentSamplePercentage        int            `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage"`
 	ReadTimeoutSeconds             int            `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds"`
+	IsoAnalyzeTimeoutSeconds       *int           `yaml:"iso_analyze_timeout_seconds" mapstructure:"iso_analyze_timeout_seconds" json:"iso_analyze_timeout_seconds,omitempty"`
 	ImportStrategy                 ImportStrategy `yaml:"import_strategy" mapstructure:"import_strategy" json:"import_strategy"`
 	ImportDir                      *string        `yaml:"import_dir" mapstructure:"import_dir" json:"import_dir,omitempty"`
 	WatchDir                       *string        `yaml:"watch_dir" mapstructure:"watch_dir" json:"watch_dir,omitempty"`
@@ -1272,6 +1273,7 @@ func DefaultConfig(configDir ...string) *Config {
 	watchIntervalSeconds := 10        // Default watch interval
 	failedItemRetentionHours := 24    // Default: auto-remove failed items after 24 hours
 	historyRetentionDays := 90        // Default: auto-remove import history after 90 days (3 months)
+	isoAnalyzeTimeoutSeconds := 120   // Default: 120s hard cap per ISO analyse (prevents stuck NNTP from stalling import for 9+ minutes)
 	cleanupAutomaticImportFailure := false
 	metadataBackupEnabled := false
 	failureMaskingEnabled := false
@@ -1403,7 +1405,8 @@ func DefaultConfig(configDir ...string) *Config {
 			MaxImportConnections:    5,                  // Default: 5 concurrent NNTP connections for validation and archive processing
 			MaxDownloadPrefetch:     10,                 // Default: 10 segments prefetched ahead for archive analysis
 			SegmentSamplePercentage: 1,                  // Default: 1% segment sampling
-			ReadTimeoutSeconds:      300,                // Default: 5 minutes read timeout
+			ReadTimeoutSeconds:       300,                // Default: 5 minutes read timeout
+			IsoAnalyzeTimeoutSeconds: &isoAnalyzeTimeoutSeconds,
 			ImportStrategy:          ImportStrategyNone, // Default: no import strategy (direct import)
 			ImportDir:               nil,                // No default import directory
 			WatchDir:                nil,
