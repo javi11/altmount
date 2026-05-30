@@ -263,8 +263,15 @@ type NestedSegmentSource struct {
 	InnerOffset     int64                  `protobuf:"varint,4,opt,name=inner_offset,json=innerOffset,proto3" json:"inner_offset,omitempty"`               // Offset within decrypted inner volume where file data starts
 	InnerLength     int64                  `protobuf:"varint,5,opt,name=inner_length,json=innerLength,proto3" json:"inner_length,omitempty"`               // Bytes of target file in this source
 	InnerVolumeSize int64                  `protobuf:"varint,6,opt,name=inner_volume_size,json=innerVolumeSize,proto3" json:"inner_volume_size,omitempty"` // Total decrypted size of inner volume (for AES cipher)
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// When > 0 the `segments`, `aes_key`, `aes_iv`, `inner_volume_size`
+	// fields above are intentionally left empty on disk and inherit from
+	// FileMetadata.shared_outer_sources[shared_outer_source_index - 1].
+	// Only `inner_offset` and `inner_length` are stored per-extent. 0
+	// (proto default) means "no sharing" — identical to the legacy on-disk
+	// layout, so old .meta files keep working without migration.
+	SharedOuterSourceIndex int32 `protobuf:"varint,7,opt,name=shared_outer_source_index,json=sharedOuterSourceIndex,proto3" json:"shared_outer_source_index,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *NestedSegmentSource) Reset() {
@@ -339,6 +346,70 @@ func (x *NestedSegmentSource) GetInnerVolumeSize() int64 {
 	return 0
 }
 
+func (x *NestedSegmentSource) GetSharedOuterSourceIndex() int32 {
+	if x != nil {
+		return x.SharedOuterSourceIndex
+	}
+	return 0
+}
+
+// ClipBoundary is one clip in a byte-concatenated multi-clip BD main feature.
+// byte_len is the clip's size in the virtual file (a whole number of 192-byte
+// BDAV source packets). delta_90k is the signed 90 kHz offset added to PTS/DTS
+// (and delta_90k to the 90 kHz-equivalent of PCR base) for packets inside this
+// clip's byte range, lifting the clip onto the unified continuous timeline.
+type ClipBoundary struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ByteLen       int64                  `protobuf:"varint,1,opt,name=byte_len,json=byteLen,proto3" json:"byte_len,omitempty"`
+	Delta_90K     int64                  `protobuf:"varint,2,opt,name=delta_90k,json=delta90k,proto3" json:"delta_90k,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ClipBoundary) Reset() {
+	*x = ClipBoundary{}
+	mi := &file_internal_metadata_proto_metadata_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ClipBoundary) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ClipBoundary) ProtoMessage() {}
+
+func (x *ClipBoundary) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_metadata_proto_metadata_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ClipBoundary.ProtoReflect.Descriptor instead.
+func (*ClipBoundary) Descriptor() ([]byte, []int) {
+	return file_internal_metadata_proto_metadata_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *ClipBoundary) GetByteLen() int64 {
+	if x != nil {
+		return x.ByteLen
+	}
+	return 0
+}
+
+func (x *ClipBoundary) GetDelta_90K() int64 {
+	if x != nil {
+		return x.Delta_90K
+	}
+	return 0
+}
+
 // FileMetadata represents a single virtual file in the filesystem
 // The filename comes from the actual metadata filename on disk
 type FileMetadata struct {
@@ -358,13 +429,30 @@ type FileMetadata struct {
 	Par2Files     []*Par2FileReference   `protobuf:"bytes,13,rep,name=par2_files,json=par2Files,proto3" json:"par2_files,omitempty"`              // Associated PAR2 repair files
 	NzbdavId      string                 `protobuf:"bytes,14,opt,name=nzbdav_id,json=nzbdavId,proto3" json:"nzbdav_id,omitempty"`                 // ID to maintain compatibility with nzbdav
 	NestedSources []*NestedSegmentSource `protobuf:"bytes,15,rep,name=nested_sources,json=nestedSources,proto3" json:"nested_sources,omitempty"`  // Nested RAR sources (when file is inside inner RAR within outer RAR)
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// Per-clip timeline table for Blu-ray main-feature virtual files that
+	// byte-concatenate multiple M2TS clips (each with its own independent
+	// PTS/DTS/PCR base). At read time a TS-aware filter adds each clip's
+	// delta_90k to the timestamps inside that clip's byte range, producing a
+	// single continuous timeline so ffprobe/players report the correct
+	// duration and seek accurately. Empty for every other file type, which
+	// disables the filter entirely (zero overhead, total safety).
+	ClipBoundaries []*ClipBoundary `protobuf:"bytes,17,rep,name=clip_boundaries,json=clipBoundaries,proto3" json:"clip_boundaries,omitempty"`
+	// Outer sources shared by groups of NestedSegmentSource entries.
+	// Used for multi-extent encrypted volumes — e.g. a Blu-ray main feature
+	// with hundreds of extents that all read from the same encrypted RAR.
+	// Each entry holds the full Segments + AesKey + AesIv + InnerVolumeSize
+	// once; the corresponding NestedSegmentSource entries reference it by
+	// 1-based index via shared_outer_source_index, storing only
+	// inner_offset + inner_length per-extent. Cuts the on-disk .meta size
+	// from O(extents * segments) to O(extents + segments) for these files.
+	SharedOuterSources []*NestedSegmentSource `protobuf:"bytes,16,rep,name=shared_outer_sources,json=sharedOuterSources,proto3" json:"shared_outer_sources,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *FileMetadata) Reset() {
 	*x = FileMetadata{}
-	mi := &file_internal_metadata_proto_metadata_proto_msgTypes[3]
+	mi := &file_internal_metadata_proto_metadata_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -376,7 +464,7 @@ func (x *FileMetadata) String() string {
 func (*FileMetadata) ProtoMessage() {}
 
 func (x *FileMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_metadata_proto_metadata_proto_msgTypes[3]
+	mi := &file_internal_metadata_proto_metadata_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -389,7 +477,7 @@ func (x *FileMetadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FileMetadata.ProtoReflect.Descriptor instead.
 func (*FileMetadata) Descriptor() ([]byte, []int) {
-	return file_internal_metadata_proto_metadata_proto_rawDescGZIP(), []int{3}
+	return file_internal_metadata_proto_metadata_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *FileMetadata) GetFileSize() int64 {
@@ -497,6 +585,20 @@ func (x *FileMetadata) GetNestedSources() []*NestedSegmentSource {
 	return nil
 }
 
+func (x *FileMetadata) GetClipBoundaries() []*ClipBoundary {
+	if x != nil {
+		return x.ClipBoundaries
+	}
+	return nil
+}
+
+func (x *FileMetadata) GetSharedOuterSources() []*NestedSegmentSource {
+	if x != nil {
+		return x.SharedOuterSources
+	}
+	return nil
+}
+
 var File_internal_metadata_proto_metadata_proto protoreflect.FileDescriptor
 
 const file_internal_metadata_proto_metadata_proto_rawDesc = "" +
@@ -511,14 +613,18 @@ const file_internal_metadata_proto_metadata_proto_rawDesc = "" +
 	"\x11Par2FileReference\x12\x1a\n" +
 	"\bfilename\x18\x01 \x01(\tR\bfilename\x12\x1b\n" +
 	"\tfile_size\x18\x02 \x01(\x03R\bfileSize\x128\n" +
-	"\fsegment_data\x18\x03 \x03(\v2\x15.metadata.SegmentDataR\vsegmentData\"\xea\x01\n" +
+	"\fsegment_data\x18\x03 \x03(\v2\x15.metadata.SegmentDataR\vsegmentData\"\xa5\x02\n" +
 	"\x13NestedSegmentSource\x121\n" +
 	"\bsegments\x18\x01 \x03(\v2\x15.metadata.SegmentDataR\bsegments\x12\x17\n" +
 	"\aaes_key\x18\x02 \x01(\fR\x06aesKey\x12\x15\n" +
 	"\x06aes_iv\x18\x03 \x01(\fR\x05aesIv\x12!\n" +
 	"\finner_offset\x18\x04 \x01(\x03R\vinnerOffset\x12!\n" +
 	"\finner_length\x18\x05 \x01(\x03R\vinnerLength\x12*\n" +
-	"\x11inner_volume_size\x18\x06 \x01(\x03R\x0finnerVolumeSize\"\xd3\x04\n" +
+	"\x11inner_volume_size\x18\x06 \x01(\x03R\x0finnerVolumeSize\x129\n" +
+	"\x19shared_outer_source_index\x18\a \x01(\x05R\x16sharedOuterSourceIndex\"F\n" +
+	"\fClipBoundary\x12\x19\n" +
+	"\bbyte_len\x18\x01 \x01(\x03R\abyteLen\x12\x1b\n" +
+	"\tdelta_90k\x18\x02 \x01(\x03R\bdelta90k\"\xe5\x05\n" +
 	"\fFileMetadata\x12\x1b\n" +
 	"\tfile_size\x18\x01 \x01(\x03R\bfileSize\x12&\n" +
 	"\x0fsource_nzb_path\x18\x02 \x01(\tR\rsourceNzbPath\x12,\n" +
@@ -540,7 +646,9 @@ const file_internal_metadata_proto_metadata_proto_rawDesc = "" +
 	"\n" +
 	"par2_files\x18\r \x03(\v2\x1b.metadata.Par2FileReferenceR\tpar2Files\x12\x1b\n" +
 	"\tnzbdav_id\x18\x0e \x01(\tR\bnzbdavId\x12D\n" +
-	"\x0enested_sources\x18\x0f \x03(\v2\x1d.metadata.NestedSegmentSourceR\rnestedSources*8\n" +
+	"\x0enested_sources\x18\x0f \x03(\v2\x1d.metadata.NestedSegmentSourceR\rnestedSources\x12?\n" +
+	"\x0fclip_boundaries\x18\x11 \x03(\v2\x16.metadata.ClipBoundaryR\x0eclipBoundaries\x12O\n" +
+	"\x14shared_outer_sources\x18\x10 \x03(\v2\x1d.metadata.NestedSegmentSourceR\x12sharedOuterSources*8\n" +
 	"\n" +
 	"Encryption\x12\b\n" +
 	"\x04NONE\x10\x00\x12\n" +
@@ -567,14 +675,15 @@ func file_internal_metadata_proto_metadata_proto_rawDescGZIP() []byte {
 }
 
 var file_internal_metadata_proto_metadata_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_internal_metadata_proto_metadata_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_internal_metadata_proto_metadata_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_internal_metadata_proto_metadata_proto_goTypes = []any{
 	(Encryption)(0),             // 0: metadata.Encryption
 	(FileStatus)(0),             // 1: metadata.FileStatus
 	(*SegmentData)(nil),         // 2: metadata.SegmentData
 	(*Par2FileReference)(nil),   // 3: metadata.Par2FileReference
 	(*NestedSegmentSource)(nil), // 4: metadata.NestedSegmentSource
-	(*FileMetadata)(nil),        // 5: metadata.FileMetadata
+	(*ClipBoundary)(nil),        // 5: metadata.ClipBoundary
+	(*FileMetadata)(nil),        // 6: metadata.FileMetadata
 }
 var file_internal_metadata_proto_metadata_proto_depIdxs = []int32{
 	2, // 0: metadata.Par2FileReference.segment_data:type_name -> metadata.SegmentData
@@ -584,11 +693,13 @@ var file_internal_metadata_proto_metadata_proto_depIdxs = []int32{
 	2, // 4: metadata.FileMetadata.segment_data:type_name -> metadata.SegmentData
 	3, // 5: metadata.FileMetadata.par2_files:type_name -> metadata.Par2FileReference
 	4, // 6: metadata.FileMetadata.nested_sources:type_name -> metadata.NestedSegmentSource
-	7, // [7:7] is the sub-list for method output_type
-	7, // [7:7] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	5, // 7: metadata.FileMetadata.clip_boundaries:type_name -> metadata.ClipBoundary
+	4, // 8: metadata.FileMetadata.shared_outer_sources:type_name -> metadata.NestedSegmentSource
+	9, // [9:9] is the sub-list for method output_type
+	9, // [9:9] is the sub-list for method input_type
+	9, // [9:9] is the sub-list for extension type_name
+	9, // [9:9] is the sub-list for extension extendee
+	0, // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_internal_metadata_proto_metadata_proto_init() }
@@ -602,7 +713,7 @@ func file_internal_metadata_proto_metadata_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_metadata_proto_metadata_proto_rawDesc), len(file_internal_metadata_proto_metadata_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   4,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

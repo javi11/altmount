@@ -14,6 +14,7 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/utils"
+	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -151,6 +152,14 @@ func (ms *MetadataService) ReadFileMetadata(virtualPath string) (*metapb.FileMet
 		return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
 	}
 
+	// Resolve shared_outer_source_index references on nested sources.
+	// Files imported with the dedupe writer store outer segments once at
+	// the FileMetadata level; we re-populate per-source slice headers
+	// here so the rest of the read path is unaware of the difference.
+	if err := ExpandSharedOuterSources(metadata); err != nil {
+		return nil, fmt.Errorf("failed to expand shared outer sources: %w", err)
+	}
+
 	// Read ID from sidecar file (compatibility mode)
 	idPath := metadataPath + ".id"
 	if idData, err := os.ReadFile(idPath); err == nil {
@@ -167,16 +176,129 @@ func (ms *MetadataService) ReadFileMetadata(virtualPath string) (*metapb.FileMet
 	return metadata, nil
 }
 
+// liteScanBytes is how much of a .meta file we read up front when serving a
+// directory listing. The lite fields (file_size=1, status=3, modified_at=5)
+// are all varints near the start of the proto; the only intervening field
+// that can be large is source_nzb_path=2 (a string). 4 KiB is comfortable
+// headroom — virtually every real-world .meta has all three within the first
+// ~200 bytes. Avoids reading and unmarshalling the full proto (which can be
+// MBs for files with many NestedSources or SegmentData entries — the exact
+// pattern that caused a 7.94 GB allocation spike during FileBrowser
+// recursive PROPFIND walks).
+const liteScanBytes = 4096
+
 // ReadFileMetadataLite reads only the lightweight fields (size, modtime, status)
-// needed for directory listings. It uses a separate cache so that Readdir does not
-// pull full FileMetadata protos (with SegmentData, etc.) into the main cache.
+// needed for directory listings. On cache miss it reads at most liteScanBytes
+// from the .meta file and scans the proto wire format for the three lite
+// fields, never instantiating the full FileMetadata proto or its
+// NestedSources/SegmentData slices. Falls back to a full read in the rare
+// case the partial buffer doesn't cover the lite fields.
 func (ms *MetadataService) ReadFileMetadataLite(virtualPath string) (*FileMetadataLite, error) {
 	// Check lite cache first
 	if cached, ok := ms.liteCache.Get(virtualPath); ok {
 		return cached, nil
 	}
 
-	// Cache miss — read from disk and deserialize
+	// Cache miss — read the head of the file and scan wire-format fields.
+	filename := filepath.Base(virtualPath)
+	metadataDir := filepath.Join(ms.rootPath, filepath.Dir(virtualPath))
+	metadataPath := filepath.Join(metadataDir, filename+".meta")
+
+	f, err := os.Open(metadataPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to open metadata file: %w", err)
+	}
+	defer f.Close()
+
+	buf := make([]byte, liteScanBytes)
+	n, err := io.ReadFull(f, buf)
+	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+		return nil, fmt.Errorf("failed to read metadata head: %w", err)
+	}
+	buf = buf[:n]
+
+	lite, ok := parseLiteFields(buf)
+	if !ok {
+		// Lite fields not located within liteScanBytes (extreme/unusual
+		// source_nzb_path length, future schema reordering, etc). Fall back
+		// to the full read so the listing is correct even at the cost of
+		// transient allocation.
+		return ms.readFileMetadataLiteFull(virtualPath)
+	}
+	ms.liteCache.Add(virtualPath, lite)
+	return lite, nil
+}
+
+// parseLiteFields walks proto wire format inside buf and extracts the lite
+// fields without allocating a full FileMetadata struct. Returns (lite, true)
+// once both file_size (field 1) and status (field 3) are seen — modified_at
+// (field 5) is best-effort within the same buffer. Returns (nil, false) if
+// the buffer is exhausted without the required fields, signalling the
+// caller to fall back to a full read.
+//
+// Field numbers must match metadata.proto. Tested via TestReadFileMetadataLite_*
+// in service_test.go.
+func parseLiteFields(buf []byte) (*FileMetadataLite, bool) {
+	var lite FileMetadataLite
+	var sawFileSize, sawStatus bool
+	for len(buf) > 0 {
+		num, typ, tagLen := protowire.ConsumeTag(buf)
+		if tagLen < 0 {
+			return nil, false
+		}
+		buf = buf[tagLen:]
+		switch num {
+		case 1: // file_size int64 (varint)
+			v, l := protowire.ConsumeVarint(buf)
+			if l < 0 {
+				return nil, false
+			}
+			lite.FileSize = int64(v)
+			sawFileSize = true
+			buf = buf[l:]
+		case 3: // status FileStatus (varint enum)
+			v, l := protowire.ConsumeVarint(buf)
+			if l < 0 {
+				return nil, false
+			}
+			lite.Status = metapb.FileStatus(v)
+			sawStatus = true
+			buf = buf[l:]
+		case 5: // modified_at int64 (varint)
+			v, l := protowire.ConsumeVarint(buf)
+			if l < 0 {
+				return nil, false
+			}
+			lite.ModifiedAt = int64(v)
+			buf = buf[l:]
+		default:
+			l := protowire.ConsumeFieldValue(num, typ, buf)
+			if l < 0 {
+				return nil, false
+			}
+			buf = buf[l:]
+		}
+		// Early exit once required fields are captured. modified_at is
+		// best-effort within the partial buffer; if it sits past
+		// liteScanBytes it stays zero and the listing still renders.
+		if sawFileSize && sawStatus && lite.ModifiedAt != 0 {
+			return &lite, true
+		}
+	}
+	if sawFileSize && sawStatus {
+		return &lite, true
+	}
+	return nil, false
+}
+
+// readFileMetadataLiteFull is the legacy slow path: read the entire .meta
+// file and unmarshal the full proto. Only used as a fallback when the
+// partial-read scan in ReadFileMetadataLite fails to locate the lite
+// fields within liteScanBytes.
+func (ms *MetadataService) readFileMetadataLiteFull(virtualPath string) (*FileMetadataLite, error) {
 	filename := filepath.Base(virtualPath)
 	metadataDir := filepath.Join(ms.rootPath, filepath.Dir(virtualPath))
 	metadataPath := filepath.Join(metadataDir, filename+".meta")
@@ -194,14 +316,12 @@ func (ms *MetadataService) ReadFileMetadataLite(virtualPath string) (*FileMetada
 		return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
 	}
 
-	// Store only the lightweight version — let the full proto be GC'd
 	lite := &FileMetadataLite{
 		FileSize:   metadata.FileSize,
 		ModifiedAt: metadata.ModifiedAt,
 		Status:     metadata.Status,
 	}
 	ms.liteCache.Add(virtualPath, lite)
-
 	return lite, nil
 }
 

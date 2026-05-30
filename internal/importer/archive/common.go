@@ -62,6 +62,20 @@ type Content struct {
 	// are sorted by size descending (1 = largest / main feature).
 	// Zero means this Content did not come from an ISO.
 	ISOExpansionIndex int `json:"iso_expansion_index,omitempty"`
+	// ClipBoundaries is the per-clip timeline table for a byte-concatenated
+	// multi-clip Blu-ray main feature. Empty for everything else. At read
+	// time a TS filter adds each clip's Delta90k to the timestamps inside
+	// its byte range to build one continuous timeline.
+	ClipBoundaries []ClipBoundary `json:"clip_boundaries,omitempty"`
+}
+
+// ClipBoundary mirrors metapb.ClipBoundary at the archive layer: one clip in a
+// concatenated multi-clip BD main feature. ByteLen is the clip's size in the
+// virtual file; Delta90k is the signed 90 kHz timeline offset for packets
+// inside this clip's byte range.
+type ClipBoundary struct {
+	ByteLen  int64 `json:"byte_len"`
+	Delta90k int64 `json:"delta_90k"`
 }
 
 // GetContentSegmentCount returns the total number of segments for a Content,

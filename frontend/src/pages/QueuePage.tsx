@@ -74,9 +74,9 @@ export function QueuePage() {
 	const [searchTerm, setSearchTerm] = useState("");
 	const [selectedItems, setSelectedItems] = useState<Set<number>>(new Set());
 	const [sortBy, setSortBy] = useState<"created_at" | "updated_at" | "status" | "nzb_path">(
-		"updated_at",
+		"created_at",
 	);
-	const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+	const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
 
 	const queryClient = useQueryClient();
 
@@ -372,10 +372,17 @@ export function QueuePage() {
 	}, []);
 
 	const handleSort = (column: "created_at" | "updated_at" | "status" | "nzb_path") => {
-		if (sortBy === column) setSortOrder(sortOrder === "asc" ? "desc" : "asc");
-		else {
+		if (sortBy === column) {
+			setSortOrder(sortOrder === "asc" ? "desc" : "asc");
+		} else {
 			setSortBy(column);
-			setSortOrder(column === "updated_at" || column === "created_at" ? "desc" : "asc");
+			if (column === "created_at") {
+				setSortOrder("asc");
+			} else if (column === "updated_at") {
+				setSortOrder("desc");
+			} else {
+				setSortOrder("asc");
+			}
 		}
 		setPage(0);
 		clearSelection();
@@ -769,10 +776,10 @@ export function QueuePage() {
 																<button
 																	type="button"
 																	className="flex items-center gap-1 font-bold text-base-content/80 text-xs uppercase tracking-widest hover:text-primary"
-																	onClick={() => handleSort("updated_at")}
+																	onClick={() => handleSort("created_at")}
 																>
-																	Updated
-																	{sortBy === "updated_at" &&
+																	Created
+																	{sortBy === "created_at" &&
 																		(sortOrder === "asc" ? (
 																			<ChevronUp className="h-3 w-3" />
 																		) : (
@@ -926,7 +933,7 @@ export function QueuePage() {
 																<td>
 																	<div className="flex flex-col">
 																		<span className="text-xs opacity-70">
-																			{formatRelativeTime(item.updated_at)}
+																			{formatRelativeTime(item.created_at)}
 																		</span>
 																		{item.retry_count > 0 && (
 																			<span className="mt-0.5 font-bold text-warning text-xs uppercase tracking-tighter">
