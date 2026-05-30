@@ -1424,7 +1424,7 @@ func (r *HealthRepository) BackfillReleaseDates(ctx context.Context, updates []B
 	stmt, err := tx.PrepareContext(ctx, `
 		UPDATE file_health
 		SET release_date = ?,
-		    scheduled_check_at = ?,
+		    scheduled_check_at = CASE WHEN status = 'healthy' THEN ? ELSE scheduled_check_at END,
 		    updated_at = datetime('now')
 		WHERE id = ?
 	`)
