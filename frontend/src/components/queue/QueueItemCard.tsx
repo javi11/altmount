@@ -83,7 +83,7 @@ export const QueueItemCard = memo(function QueueItemCard({
 								</span>
 							)}
 							<span className="badge badge-ghost badge-xs">
-								{formatRelativeTime(item.updated_at)}
+								{formatRelativeTime(item.created_at)}
 							</span>
 							{item.retry_count > 0 && (
 								<span className="badge badge-warning badge-xs font-bold uppercase tracking-tighter">
