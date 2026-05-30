@@ -140,31 +140,69 @@ func buildMainFeatureContent(ctx context.Context, groupKey string, g []analyzedI
 		firstISOName string
 		nzbdavID     string
 	)
+	// Per-clip timeline table for the continuous-timeline remux. We walk
+	// clips in output order across every disc, building a running 90 kHz
+	// timeline: clip 0 keeps its native base (delta 0); each later clip is
+	// lifted to start where the cumulative authored duration places it.
+	//   timeline_start_90k[k] = base0_90k + 2 * Σ_{j<k} durationTicks[j]
+	//   delta_90k[k]          = timeline_start_90k[k] − inTime[k]*2
+	// All from MPLS data already in hand — no extra import-time reads.
+	var (
+		clipBoundaries []ClipBoundary
+		base0_90k      int64 = -1
+		cum90k         int64
+		anyTiming      bool
+	)
 	for _, e := range g {
 		if firstISOName == "" {
 			firstISOName = e.src.Filename
 			nzbdavID = e.src.NzbdavID
 		}
 		for _, fc := range e.analyzed.MainFeature {
+			var clipByteLen int64
 			for _, ns := range isoFileContentToNestedSources(fc) {
 				if ns.InnerLength <= 0 {
 					continue
 				}
 				sources = append(sources, ns)
 				totalSize += ns.InnerLength
+				clipByteLen += ns.InnerLength
 			}
+			if clipByteLen == 0 {
+				continue
+			}
+			inBase90k := fc.InTimeTicks * 2
+			if base0_90k < 0 {
+				base0_90k = inBase90k
+			}
+			timelineStart90k := base0_90k + cum90k
+			clipBoundaries = append(clipBoundaries, ClipBoundary{
+				ByteLen:  clipByteLen,
+				Delta90k: timelineStart90k - inBase90k,
+			})
+			if fc.InTimeTicks != 0 || fc.DurationTicks != 0 {
+				anyTiming = true
+			}
+			cum90k += fc.DurationTicks * 2
 		}
 	}
 	if len(sources) == 0 {
 		return Content{}, false
+	}
+	// Only attach the timeline table when we actually have MPLS timing;
+	// without it the remux filter must stay disabled (empty → bypassed).
+	if !anyTiming {
+		clipBoundaries = nil
 	}
 
 	filename := mainFeatureFilename(groupKey, firstISOName)
 	slog.InfoContext(ctx, "Built Blu-ray main-feature virtual file",
 		"group", groupKey,
 		"discs", len(g),
-		"clips", len(sources),
+		"clips", len(clipBoundaries),
+		"extents", len(sources),
 		"size_bytes", totalSize,
+		"timeline_seconds", cum90k/90000,
 		"filename", filename,
 	)
 
@@ -176,6 +214,7 @@ func buildMainFeatureContent(ctx context.Context, groupKey string, g []analyzedI
 		NzbdavID:          nzbdavID,
 		NestedSources:     sources,
 		ISOExpansionIndex: 1,
+		ClipBoundaries:    clipBoundaries,
 	}, true
 }
 

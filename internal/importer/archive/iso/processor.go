@@ -68,8 +68,15 @@ func AnalyzeISO(
 
 	if mf := ResolveMainFeature(ctx, rs, entries); mf != nil {
 		out.DurationTicks = mf.DurationTicks
-		for _, e := range mf.Streams {
-			out.MainFeature = append(out.MainFeature, buildFileContent(src, e))
+		for i, e := range mf.Streams {
+			fc := buildFileContent(src, e)
+			// Carry per-clip MPLS timing (45 kHz) for the continuous-timeline
+			// remux. ClipInTimes/ClipDurations are parallel to Streams.
+			if i < len(mf.ClipInTimes) {
+				fc.InTimeTicks = mf.ClipInTimes[i]
+				fc.DurationTicks = mf.ClipDurations[i]
+			}
+			out.MainFeature = append(out.MainFeature, fc)
 		}
 	}
 

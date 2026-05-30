@@ -18,6 +18,11 @@ type MainFeaturePlaylist struct {
 	Streams         []isoFileEntry // ordered M2TS entries (duplicates preserved if the playlist legitimately repeats a clip)
 	UniqueClipBytes uint64         // sum of file sizes of UNIQUE clips referenced; the primary scoring metric
 	UniqueClipCount int            // number of distinct clips referenced; scoring tiebreaker
+	// ClipInTimes and ClipDurations are parallel to Streams: the MPLS
+	// PlayItem IN_time and (OUT−IN) for each stream, in 45 kHz ticks. They
+	// drive the continuous-timeline remux of the concatenated clips.
+	ClipInTimes   []int64
+	ClipDurations []int64
 }
 
 // ResolveMainFeature inspects the entries returned by ListISOFiles for a
@@ -87,6 +92,8 @@ func ResolveMainFeature(ctx context.Context, rs io.ReadSeeker, files []isoFileEn
 		// the same ~80s menu M2TS would score higher than a real 30-chapter
 		// main feature, and we'd serve 30+ GB of looped menu.
 		streams := make([]isoFileEntry, 0, len(pl.PlayItems))
+		inTimes := make([]int64, 0, len(pl.PlayItems))
+		durations := make([]int64, 0, len(pl.PlayItems))
 		seenClips := make(map[string]struct{}, len(pl.PlayItems))
 		var uniqueClipBytes uint64
 		for _, it := range pl.PlayItems {
@@ -99,6 +106,14 @@ func ResolveMainFeature(ctx context.Context, rs io.ReadSeeker, files []isoFileEn
 				continue
 			}
 			streams = append(streams, entry)
+			// Per-clip timing, parallel to streams (45 kHz). OUT may be < IN
+			// on malformed entries; clamp the span to 0 in that case.
+			var dur int64
+			if it.OutTime > it.InTime {
+				dur = int64(it.OutTime - it.InTime)
+			}
+			inTimes = append(inTimes, int64(it.InTime))
+			durations = append(durations, dur)
 			if _, dup := seenClips[name]; !dup {
 				seenClips[name] = struct{}{}
 				uniqueClipBytes += entry.size
@@ -114,6 +129,8 @@ func ResolveMainFeature(ctx context.Context, rs io.ReadSeeker, files []isoFileEn
 			Streams:         streams,
 			UniqueClipBytes: uniqueClipBytes,
 			UniqueClipCount: len(seenClips),
+			ClipInTimes:     inTimes,
+			ClipDurations:   durations,
 		}
 		slog.DebugContext(ctx, "Blu-ray playlist candidate",
 			"playlist", pe.path,

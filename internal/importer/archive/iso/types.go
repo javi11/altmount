@@ -22,6 +22,13 @@ type ISOFileContent struct {
 	Size         int64  // Total file size in bytes (sum of Sources.InnerLength)
 	NzbdavID     string // Carried from parent archive Content
 	Sources      []ISONestedSource
+	// InTimeTicks and DurationTicks are the MPLS PlayItem IN_time and
+	// (OUT−IN) for this clip, in 45 kHz ticks. Populated only for
+	// MainFeature clips; zero otherwise. They drive the continuous-timeline
+	// remux: InTimeTicks is the clip's own PTS base (×2 → 90 kHz),
+	// DurationTicks is its authored span.
+	InTimeTicks   int64
+	DurationTicks int64
 }
 
 // ISONestedSource is one extent of an inner file. For unencrypted ISOs,

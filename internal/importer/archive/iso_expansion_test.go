@@ -217,6 +217,105 @@ func TestBuildMainFeatureContent_TwoDiscs(t *testing.T) {
 	}
 }
 
+// TestBuildMainFeatureContent_ClipBoundaries verifies the continuous-timeline
+// table: each clip's Delta90k lifts its native PTS base (InTimeTicks*2) onto a
+// running 90 kHz timeline that advances by each clip's authored span
+// (DurationTicks*2), with clip 0 keeping its native base (delta 0). The table
+// spans both discs in output order.
+func TestBuildMainFeatureContent_ClipBoundaries(t *testing.T) {
+	t.Parallel()
+
+	// mkTimed builds a one-extent clip with MPLS timing (45 kHz).
+	mkTimed := func(name string, size, inTime, durTicks int64) iso.ISOFileContent {
+		return iso.ISOFileContent{
+			Filename: name,
+			Size:     size,
+			Sources: []iso.ISONestedSource{{
+				Segments:    []*metapb.SegmentData{{Id: name, EndOffset: size - 1, SegmentSize: size}},
+				InnerLength: size,
+			}},
+			InTimeTicks:   inTime,
+			DurationTicks: durTicks,
+		}
+	}
+
+	disc1 := analyzedISO{
+		src:      Content{Filename: "M_DISC_1.iso", NzbdavID: "nzb-1"},
+		groupKey: "M", discNum: 1,
+		analyzed: &iso.AnalyzedISO{MainFeature: []iso.ISOFileContent{
+			mkTimed("00001.m2ts", 10_000_000, 1000, 45000), // base90k 2000, span90k 90000
+			mkTimed("00002.m2ts", 20_000_000, 500, 90000),  // base90k 1000, span90k 180000
+		}},
+	}
+	disc2 := analyzedISO{
+		src:      Content{Filename: "M_DISC_2.iso", NzbdavID: "nzb-2"},
+		groupKey: "M", discNum: 2,
+		analyzed: &iso.AnalyzedISO{MainFeature: []iso.ISOFileContent{
+			mkTimed("00003.m2ts", 30_000_000, 0, 45000), // base90k 0, span90k 90000
+		}},
+	}
+
+	got, ok := buildMainFeatureContent(context.Background(), "M", []analyzedISO{disc1, disc2})
+	if !ok {
+		t.Fatal("ok=false")
+	}
+	if len(got.ClipBoundaries) != 3 {
+		t.Fatalf("ClipBoundaries = %d, want 3", len(got.ClipBoundaries))
+	}
+
+	// base0_90k = 2000.
+	// clip0: tlStart 2000, delta 0;          cum→90000
+	// clip1: tlStart 2000+90000=92000, delta 92000-1000=91000; cum→270000
+	// clip2: tlStart 2000+270000=272000, delta 272000-0=272000
+	wantByteLen := []int64{10_000_000, 20_000_000, 30_000_000}
+	wantDelta := []int64{0, 91000, 272000}
+	for i, cb := range got.ClipBoundaries {
+		if cb.ByteLen != wantByteLen[i] {
+			t.Errorf("clip %d ByteLen = %d, want %d", i, cb.ByteLen, wantByteLen[i])
+		}
+		if cb.Delta90k != wantDelta[i] {
+			t.Errorf("clip %d Delta90k = %d, want %d", i, cb.Delta90k, wantDelta[i])
+		}
+	}
+
+	// Σ ByteLen must equal the file size, so the boundary prefix-sums align
+	// exactly with the flattened NestedSources byte layout.
+	var sumBytes int64
+	for _, cb := range got.ClipBoundaries {
+		sumBytes += cb.ByteLen
+	}
+	if sumBytes != got.Size {
+		t.Errorf("Σ ClipBoundaries.ByteLen = %d, want file size %d", sumBytes, got.Size)
+	}
+}
+
+// TestBuildMainFeatureContent_NoTimingNoBoundaries: when MPLS timing is absent
+// (all zero), no clip-boundary table is attached, so the read-path remux
+// filter stays disabled and the file is served as a plain byte concatenation.
+func TestBuildMainFeatureContent_NoTimingNoBoundaries(t *testing.T) {
+	t.Parallel()
+	mkClip := func(name string, size int64) iso.ISOFileContent {
+		return iso.ISOFileContent{
+			Filename: name, Size: size,
+			Sources: []iso.ISONestedSource{{
+				Segments:    []*metapb.SegmentData{{Id: name, EndOffset: size - 1, SegmentSize: size}},
+				InnerLength: size,
+			}},
+		}
+	}
+	d := analyzedISO{
+		src: Content{Filename: "X.iso"}, groupKey: "X",
+		analyzed: &iso.AnalyzedISO{MainFeature: []iso.ISOFileContent{mkClip("a", 100), mkClip("b", 200)}},
+	}
+	got, ok := buildMainFeatureContent(context.Background(), "X", []analyzedISO{d})
+	if !ok {
+		t.Fatal("ok=false")
+	}
+	if len(got.ClipBoundaries) != 0 {
+		t.Errorf("ClipBoundaries = %d, want 0 when no MPLS timing present", len(got.ClipBoundaries))
+	}
+}
+
 func TestBuildLargestFileContent(t *testing.T) {
 	t.Parallel()
 

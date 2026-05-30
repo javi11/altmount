@@ -44,6 +44,16 @@ func NewFileMetadataFromContent(
 		meta.AesIv = content.AesIV
 	}
 
+	// Carry the per-clip timeline table for multi-clip BD main features.
+	// Empty for everything else, which keeps the read-path remux filter
+	// disabled for all other files.
+	for _, cb := range content.ClipBoundaries {
+		meta.ClipBoundaries = append(meta.ClipBoundaries, &metapb.ClipBoundary{
+			ByteLen:   cb.ByteLen,
+			Delta_90K: cb.Delta90k,
+		})
+	}
+
 	// Populate nested sources. For multi-extent encrypted volumes (e.g. a
 	// Blu-ray main feature with hundreds of extents that all read from the
 	// same encrypted RAR) every NestedSource shares the same Segments slice
