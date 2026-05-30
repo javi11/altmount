@@ -13,6 +13,7 @@ import (
 
 	"github.com/javi11/altmount/internal/importer/archive/iso"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/progress"
 )
 
 // analyzedISO bundles an ISO Content with its inspection result and its
@@ -47,6 +48,7 @@ func ExpandISOContents(
 	readTimeout time.Duration,
 	analyzeTimeout time.Duration,
 	allowedExtensions []string,
+	progressTracker *progress.Tracker,
 ) ([]Content, error) {
 	if !expand {
 		return contents, nil
@@ -57,6 +59,16 @@ func ExpandISOContents(
 		groups    = make(map[string][]analyzedISO)
 		groupKeys []string
 	)
+
+	// Count the ISO entries up front so each can be given an equal slice of
+	// the progress tracker's range; isoIdx walks the ISOs as we process them.
+	numISOs := 0
+	for _, c := range contents {
+		if !c.IsDirectory && strings.ToLower(filepath.Ext(c.Filename)) == ".iso" {
+			numISOs++
+		}
+	}
+	isoIdx := 0
 
 	for _, c := range contents {
 		if c.IsDirectory || strings.ToLower(filepath.Ext(c.Filename)) != ".iso" {
@@ -71,7 +83,13 @@ func ExpandISOContents(
 			AesIV:    c.AesIV,
 			Size:     c.Size,
 		}
-		a, err := iso.AnalyzeISO(ctx, src, poolManager, maxPrefetch, readTimeout, analyzeTimeout, allowedExtensions)
+		// Give this ISO its slice of the overall range so per-playlist
+		// updates inside AnalyzeISO stay within [isoIdx, isoIdx+1] of the
+		// band; bump the parent to the slice boundary once it completes so
+		// even non-BDMV ISOs (no playlist loop) advance the bar.
+		a, err := iso.AnalyzeISO(ctx, src, poolManager, maxPrefetch, readTimeout, analyzeTimeout, allowedExtensions, progressTracker.Slice(isoIdx, numISOs))
+		isoIdx++
+		progressTracker.Update(isoIdx, numISOs)
 		if err != nil {
 			slog.WarnContext(ctx, "Failed to analyze ISO content, keeping ISO as-is",
 				"file", c.Filename, "error", err)

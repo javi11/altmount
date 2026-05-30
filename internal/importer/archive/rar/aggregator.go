@@ -209,8 +209,18 @@ func ProcessArchive(ctx context.Context, opts ProcessArchiveOptions) error {
 		rarContents = append(rarContents, r.contents...)
 	}
 
-	// Expand ISO files found inside the RAR archive into their inner media files
-	rarContents, err := archive.ExpandISOContents(ctx, expandBlurayIso, rarContents, poolManager, maxPrefetch, readTimeout, analyzeTimeout, allowedFileExtensions)
+	// Expand ISO files found inside the RAR archive into their inner media
+	// files. ISO analysis (filesystem walk + Blu-ray playlist resolution over
+	// NNTP) can take tens of seconds, so it gets its own progress label.
+	// Slice(0,1) copies the archive tracker at the same range without mutating
+	// it (RAR header analysis above is already done); WithStage relabels the
+	// copy. For archives with no ISO, ExpandISOContents emits no updates, so
+	// the common case is unaffected.
+	var isoProgressTracker *progress.Tracker
+	if archiveProgressTracker != nil {
+		isoProgressTracker = archiveProgressTracker.Slice(0, 1).WithStage("Analyzing ISO")
+	}
+	rarContents, err := archive.ExpandISOContents(ctx, expandBlurayIso, rarContents, poolManager, maxPrefetch, readTimeout, analyzeTimeout, allowedFileExtensions, isoProgressTracker)
 	if err != nil {
 		slog.WarnContext(ctx, "ISO expansion failed, proceeding without ISO contents", "error", err)
 	}

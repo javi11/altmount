@@ -40,6 +40,24 @@ func (pt *Tracker) WithStage(stage string) *Tracker {
 	return pt
 }
 
+// Slice returns a child tracker covering segment idx of count equal slices of
+// this tracker's [min,max] range. Useful for dividing a range across a known
+// number of sequential sub-operations (e.g. one slice per ISO across a
+// multi-disc group). Safe on a nil receiver (returns nil).
+func (pt *Tracker) Slice(idx, count int) *Tracker {
+	if pt == nil || count <= 0 {
+		return nil
+	}
+	span := pt.maxPercent - pt.minPercent
+	return &Tracker{
+		queueID:     pt.queueID,
+		broadcaster: pt.broadcaster,
+		minPercent:  pt.minPercent + idx*span/count,
+		maxPercent:  pt.minPercent + (idx+1)*span/count,
+		stage:       pt.stage,
+	}
+}
+
 // Update reports progress within the configured percentage range.
 // Safe to call on a nil receiver (no-op).
 func (pt *Tracker) Update(current, total int) {

@@ -30,6 +30,7 @@ func TestAnalyzeISO_HonorsTimeout(t *testing.T) {
 		0,
 		1*time.Nanosecond, // analyzeTimeout
 		nil,
+		nil, // progressTracker
 	)
 	elapsed := time.Since(start)
 
@@ -65,6 +66,7 @@ func TestAnalyzeISO_HonorsTimeout_PreCanceled(t *testing.T) {
 		0,
 		0, // analyzeTimeout=0 → cap disabled, parent ctx still canceled
 		nil,
+		nil, // progressTracker
 	)
 	elapsed := time.Since(start)
 

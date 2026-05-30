@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+
+	"github.com/javi11/altmount/internal/progress"
 )
 
 // MainFeaturePlaylist is the result of analysing a Blu-ray's BDMV.
@@ -37,7 +39,7 @@ type MainFeaturePlaylist struct {
 // Failures parsing individual playlists are non-fatal — we skip them and
 // keep evaluating the rest, mirroring how every Blu-ray player tolerates
 // malformed entries in BDMV/PLAYLIST/.
-func ResolveMainFeature(ctx context.Context, rs io.ReadSeeker, files []isoFileEntry) *MainFeaturePlaylist {
+func ResolveMainFeature(ctx context.Context, rs io.ReadSeeker, files []isoFileEntry, progressTracker *progress.Tracker) *MainFeaturePlaylist {
 	// Build per-clip indexes. M2TS streams live at BDMV/STREAM/<NNNNN>.M2TS
 	// and carry the 2D version (or the only version on a 2D disc). SSIF
 	// streams live at BDMV/STREAM/SSIF/<NNNNN>.SSIF and carry the
@@ -73,7 +75,11 @@ func ResolveMainFeature(ctx context.Context, rs io.ReadSeeker, files []isoFileEn
 	})
 
 	var best *MainFeaturePlaylist
-	for _, pe := range playlistEntries {
+	for idx, pe := range playlistEntries {
+		// Report progress per playlist examined. Reading and parsing each
+		// .mpls is an NNTP round-trip, so this is the granular signal that
+		// keeps the queue item's bar moving during BD analysis. nil-safe.
+		progressTracker.Update(idx+1, len(playlistEntries))
 		data, err := readISOFile(rs, pe)
 		if err != nil {
 			continue

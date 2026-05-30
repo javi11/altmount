@@ -10,6 +10,7 @@ import (
 
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/progress"
 )
 
 // AnalyzeISO inspects the given ISO source and returns:
@@ -29,6 +30,7 @@ func AnalyzeISO(
 	readTimeout time.Duration,
 	analyzeTimeout time.Duration,
 	allowedExtensions []string,
+	progressTracker *progress.Tracker,
 ) (*AnalyzedISO, error) {
 	start := time.Now()
 	// Hard cap the whole walk. A degraded NNTP provider can otherwise stall
@@ -66,7 +68,7 @@ func AnalyzeISO(
 		out.Files = append(out.Files, buildFileContent(src, e))
 	}
 
-	if mf := ResolveMainFeature(ctx, rs, entries); mf != nil {
+	if mf := ResolveMainFeature(ctx, rs, entries, progressTracker); mf != nil {
 		out.DurationTicks = mf.DurationTicks
 		for i, e := range mf.Streams {
 			fc := buildFileContent(src, e)

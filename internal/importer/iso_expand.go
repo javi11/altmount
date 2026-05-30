@@ -79,6 +79,8 @@ func expandBareISOFiles(
 	regularFiles []parser.ParsedFile,
 	virtualDir string,
 	releaseName string,
+	sourceNzbPath string,
+	releaseDate int64,
 ) (written []string, remaining []parser.ParsedFile, err error) {
 	isos, rest := partitionISOFiles(regularFiles)
 	if len(isos) == 0 {
@@ -104,10 +106,7 @@ func expandBareISOFiles(
 			remaining = append(remaining, isos[i])
 			continue
 		}
-		// Task 4 wiring will supply real sourceNzbPath/releaseDate values;
-		// for now plumb empty strings/zero — see archive.NewFileMetadataFromContent
-		// signature.
-		meta := archive.NewFileMetadataFromContent(c, "", 0, c.NzbdavID)
+		meta := archive.NewFileMetadataFromContent(c, sourceNzbPath, releaseDate, c.NzbdavID)
 		virtualPath := path.Join(virtualDir, c.Filename)
 		if err := deps.writeMetadata(virtualPath, meta); err != nil {
 			return written, nil, fmt.Errorf("write metadata %q: %w", virtualPath, err)

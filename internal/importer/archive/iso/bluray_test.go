@@ -6,7 +6,25 @@ import (
 	"fmt"
 	"io"
 	"testing"
+
+	"github.com/javi11/altmount/internal/progress"
 )
+
+// recordingBroadcaster captures progress updates for assertions in tests.
+type recordingBroadcaster struct {
+	percentages []int
+	stages      []string
+}
+
+func (rb *recordingBroadcaster) UpdateProgress(_ int, percentage int) {
+	rb.percentages = append(rb.percentages, percentage)
+	rb.stages = append(rb.stages, "")
+}
+
+func (rb *recordingBroadcaster) UpdateProgressWithStage(_ int, percentage int, stage string) {
+	rb.percentages = append(rb.percentages, percentage)
+	rb.stages = append(rb.stages, stage)
+}
 
 // mkEntry builds a single-extent isoFileEntry — the common case for tests.
 func mkEntry(path string, lba uint32, size uint64) isoFileEntry {
@@ -71,7 +89,7 @@ func TestResolveMainFeature(t *testing.T) {
 			mkEntry("BDMV/STREAM/00010.M2TS", 500, 500_000),
 		}
 
-		got := ResolveMainFeature(context.Background(), rs, files)
+		got := ResolveMainFeature(context.Background(), rs, files, nil)
 		if got == nil {
 			t.Fatal("ResolveMainFeature returned nil")
 		}
@@ -89,12 +107,57 @@ func TestResolveMainFeature(t *testing.T) {
 		}
 	})
 
+	t.Run("reports progress per playlist", func(t *testing.T) {
+		t.Parallel()
+		short := buildMPLS(t, "0200", []MPLSPlayItem{
+			{ClipName: "00010", InTime: 0, OutTime: 45000},
+		}, nil)
+		long := buildMPLS(t, "0200", []MPLSPlayItem{
+			{ClipName: "00001", InTime: 0, OutTime: 90 * 45000},
+			{ClipName: "00002", InTime: 0, OutTime: 60 * 45000},
+		}, nil)
+		rs := makeImage(t, map[uint32][]byte{100: short, 110: long})
+		files := []isoFileEntry{
+			mkEntry("BDMV/PLAYLIST/00001.MPLS", 100, uint64(len(short))),
+			mkEntry("BDMV/PLAYLIST/00800.MPLS", 110, uint64(len(long))),
+			mkEntry("BDMV/STREAM/00001.M2TS", 200, 1_000_000),
+			mkEntry("BDMV/STREAM/00002.M2TS", 300, 2_000_000),
+			mkEntry("BDMV/STREAM/00010.M2TS", 500, 500_000),
+		}
+
+		rb := &recordingBroadcaster{}
+		tracker := progress.NewTracker(rb, 7, 10, 30).WithStage("Analyzing ISO")
+
+		if got := ResolveMainFeature(context.Background(), rs, files, tracker); got == nil {
+			t.Fatal("ResolveMainFeature returned nil")
+		}
+
+		// Two playlists → at least one update; every update must carry the
+		// stage, stay inside [10,30], and be non-decreasing.
+		if len(rb.percentages) == 0 {
+			t.Fatal("expected progress updates, got none")
+		}
+		prev := -1
+		for i, p := range rb.percentages {
+			if rb.stages[i] != "Analyzing ISO" {
+				t.Errorf("update %d stage = %q, want %q", i, rb.stages[i], "Analyzing ISO")
+			}
+			if p < 10 || p > 30 {
+				t.Errorf("update %d percentage = %d, want within [10,30]", i, p)
+			}
+			if p < prev {
+				t.Errorf("update %d percentage = %d decreased from %d", i, p, prev)
+			}
+			prev = p
+		}
+	})
+
 	t.Run("non-BDMV disc returns nil", func(t *testing.T) {
 		t.Parallel()
 		files := []isoFileEntry{
 			mkEntry("movie.mkv", 100, 1_000_000),
 		}
-		if got := ResolveMainFeature(context.Background(), bytes.NewReader(make([]byte, 16*iso9660SectorSize)), files); got != nil {
+		if got := ResolveMainFeature(context.Background(), bytes.NewReader(make([]byte, 16*iso9660SectorSize)), files, nil); got != nil {
 			t.Errorf("expected nil for non-BDMV disc, got %+v", got)
 		}
 	})
@@ -108,7 +171,7 @@ func TestResolveMainFeature(t *testing.T) {
 			mkEntry("BDMV/PLAYLIST/00001.MPLS", 100, 15),
 			mkEntry("BDMV/STREAM/00001.M2TS", 200, 1_000_000),
 		}
-		if got := ResolveMainFeature(context.Background(), rs, files); got != nil {
+		if got := ResolveMainFeature(context.Background(), rs, files, nil); got != nil {
 			t.Errorf("expected nil for unparseable MPLS, got %+v", got)
 		}
 	})
@@ -144,7 +207,7 @@ func TestResolveMainFeature(t *testing.T) {
 			mkEntry("BDMV/STREAM/SSIF/00102.SSIF", 500, 5_000_000_000),
 		}
 
-		got := ResolveMainFeature(context.Background(), rs, files)
+		got := ResolveMainFeature(context.Background(), rs, files, nil)
 		if got == nil {
 			t.Fatal("ResolveMainFeature returned nil — SSIF index missing?")
 		}
@@ -183,7 +246,7 @@ func TestResolveMainFeature(t *testing.T) {
 			mkEntry("BDMV/STREAM/SSIF/00100.SSIF", 300, 40_000_000_000),
 		}
 
-		got := ResolveMainFeature(context.Background(), rs, files)
+		got := ResolveMainFeature(context.Background(), rs, files, nil)
 		if got == nil {
 			t.Fatal("ResolveMainFeature returned nil")
 		}
@@ -208,7 +271,7 @@ func TestResolveMainFeature(t *testing.T) {
 			mkEntry("BDMV/PLAYLIST/00001.MPLS", 100, uint64(len(data))),
 			mkEntry("BDMV/STREAM/00001.M2TS", 200, 1_000_000),
 		}
-		if got := ResolveMainFeature(context.Background(), rs, files); got != nil {
+		if got := ResolveMainFeature(context.Background(), rs, files, nil); got != nil {
 			t.Errorf("expected nil when MPLS references unknown clip, got %+v", got)
 		}
 	})
@@ -263,7 +326,7 @@ func TestResolveMainFeature(t *testing.T) {
 			))
 		}
 
-		got := ResolveMainFeature(context.Background(), rs, files)
+		got := ResolveMainFeature(context.Background(), rs, files, nil)
 		if got == nil {
 			t.Fatal("ResolveMainFeature returned nil — feature playlist should have won")
 		}
@@ -302,7 +365,7 @@ func TestResolveMainFeature(t *testing.T) {
 			mkEntry("BDMV/STREAM/00003.M2TS", 400, 300),
 		}
 
-		got := ResolveMainFeature(context.Background(), rs, files)
+		got := ResolveMainFeature(context.Background(), rs, files, nil)
 		if got == nil {
 			t.Fatal("ResolveMainFeature returned nil")
 		}
@@ -360,7 +423,7 @@ func TestResolveMainFeature(t *testing.T) {
 			mkEntry("BDMV/STREAM/00200.M2TS", 300, 100_000_000), // 100 MB — larger
 		}
 
-		got := ResolveMainFeature(context.Background(), rs, files)
+		got := ResolveMainFeature(context.Background(), rs, files, nil)
 		if got == nil {
 			t.Fatal("ResolveMainFeature returned nil for a disc full of menus — should still pick one")
 		}

@@ -71,7 +71,7 @@ func TestExpandBareISOFiles_NoISOs_ReturnsInputUntouched(t *testing.T) {
 			t.Fatal("expand should not be called when no .iso present")
 			return nil, nil
 		},
-	}, files, "vdir", "movie")
+	}, files, "vdir", "movie", "", 0)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -116,7 +116,7 @@ func TestExpandBareISOFiles_OneISO_BluRayPath_WritesMergedMetadata(t *testing.T)
 		enabled: true,
 	}
 
-	written, rest, err := expandBareISOFiles(context.Background(), deps, files, "vdir", "movie")
+	written, rest, err := expandBareISOFiles(context.Background(), deps, files, "vdir", "movie", "", 0)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -147,7 +147,7 @@ func TestExpandBareISOFiles_Disabled_StillPeelsButFallsBack(t *testing.T) {
 			return nil
 		},
 	}
-	written, rest, err := expandBareISOFiles(context.Background(), deps, files, "vdir", "movie")
+	written, rest, err := expandBareISOFiles(context.Background(), deps, files, "vdir", "movie", "", 0)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -156,5 +156,55 @@ func TestExpandBareISOFiles_Disabled_StillPeelsButFallsBack(t *testing.T) {
 	}
 	if len(rest) != 1 || rest[0].Filename != "movie.iso" {
 		t.Errorf("rest = %+v, want the original .iso pushed back for normal dispatch", rest)
+	}
+}
+
+// TestExpandBareISOFiles_PropagatesSourceNzbPathAndReleaseDate asserts the
+// orchestrator threads sourceNzbPath and releaseDate through to the
+// FileMetadata produced via archive.NewFileMetadataFromContent. Without
+// this, downstream consumers (history, repair, etc.) lose the link back
+// to the originating NZB post.
+func TestExpandBareISOFiles_PropagatesSourceNzbPathAndReleaseDate(t *testing.T) {
+	files := []parser.ParsedFile{{Filename: "movie.iso", Size: 1000}}
+
+	const wantSourceNzbPath = "/incoming/Movie.1080p.BluRay.nzb"
+	const wantReleaseDate int64 = 1_234_567_890
+
+	var capturedMeta *metapb.FileMetadata
+	deps := expandBareISODeps{
+		enabled: true,
+		expand: func(ctx context.Context, _ bool, _ []archive.Content) ([]archive.Content, error) {
+			return []archive.Content{{
+				Filename: "MOVIE.m2ts",
+				Size:     900,
+				NestedSources: []archive.NestedSource{
+					{InnerOffset: 0, InnerLength: 900},
+				},
+			}}, nil
+		},
+		writeMetadata: func(_ string, meta *metapb.FileMetadata) error {
+			capturedMeta = meta
+			return nil
+		},
+	}
+
+	written, _, err := expandBareISOFiles(
+		context.Background(), deps, files, "vdir", "movie",
+		wantSourceNzbPath, wantReleaseDate,
+	)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if len(written) != 1 {
+		t.Fatalf("written = %v, want 1 entry", written)
+	}
+	if capturedMeta == nil {
+		t.Fatal("writeMetadata was never invoked")
+	}
+	if capturedMeta.SourceNzbPath != wantSourceNzbPath {
+		t.Errorf("SourceNzbPath = %q, want %q", capturedMeta.SourceNzbPath, wantSourceNzbPath)
+	}
+	if capturedMeta.ReleaseDate != wantReleaseDate {
+		t.Errorf("ReleaseDate = %d, want %d", capturedMeta.ReleaseDate, wantReleaseDate)
 	}
 }
