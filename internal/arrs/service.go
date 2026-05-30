@@ -15,6 +15,7 @@ import (
 	"github.com/javi11/altmount/internal/arrs/worker"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/httpclient"
 	"golift.io/starr"
 )
 
@@ -45,7 +46,7 @@ type Service struct {
 // NewService creates a new arrs service for health monitoring and file repair
 func NewService(configGetter config.ConfigGetter, configManager model.ConfigManager, userRepo *database.UserRepository, queueRepo *database.Repository) *Service {
 	instManager := instances.NewManager(configGetter, configManager)
-	clientManager := clients.NewManager()
+	clientManager := clients.NewManager(httpclient.NewForExternal(configGetter().Network, 30*time.Second))
 	dataManager := data.NewManager()
 	scannerManager := scanner.NewManager(configGetter, instManager, clientManager, dataManager)
 	workerManager := worker.NewWorker(configGetter, instManager, clientManager, queueRepo)
@@ -167,6 +168,27 @@ func (s *Service) StopWorker(ctx context.Context) {
 	s.worker.Stop(ctx)
 }
 
+// RegisterConfigChangeHandler subscribes to config changes and starts/stops
+// the queue cleanup worker when arrs.enabled or arrs.queue_cleanup_enabled flips.
+func (s *Service) RegisterConfigChangeHandler(ctx context.Context, configManager *config.Manager) {
+	configManager.OnConfigChange(func(oldConfig, newConfig *config.Config) {
+		oldOn := worker.IsQueueCleanupEnabled(oldConfig)
+		newOn := worker.IsQueueCleanupEnabled(newConfig)
+		if oldOn == newOn {
+			return
+		}
+		if newOn {
+			slog.InfoContext(ctx, "ARR worker enabled via config change, starting")
+			if err := s.worker.Start(ctx); err != nil {
+				slog.ErrorContext(ctx, "Failed to start ARR worker", "error", err)
+			}
+			return
+		}
+		slog.InfoContext(ctx, "ARR worker disabled via config change, stopping")
+		s.worker.Stop(ctx)
+	})
+}
+
 // CleanupQueue checks all ARR instances for importPending items with empty folders
 func (s *Service) CleanupQueue(ctx context.Context) error {
 	return s.worker.CleanupQueue(ctx)
@@ -249,6 +271,15 @@ func (s *Service) GetHealth(ctx context.Context) (map[string]any, error) {
 			client, err := s.clients.GetOrCreateWhisparrClient(instance.Name, instance.URL, instance.APIKey)
 			if err == nil {
 				_ = client.GetInto(ctx, starr.Request{URI: "/health"}, &health)
+			}
+		case "sportarr":
+			// Sportarr is not starr-compatible; report reachability via its native
+			// status endpoint rather than a starr /health call.
+			client, err := s.clients.GetOrCreateSportarrClient(instance.Name, instance.URL, instance.APIKey)
+			if err == nil {
+				if hErr := client.Health(ctx); hErr == nil {
+					health = []any{} // healthy: no issues reported
+				}
 			}
 		}
 		if health != nil {

@@ -19,6 +19,7 @@ import (
 	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/httpclient"
 	"github.com/javi11/altmount/internal/importer/filesystem"
 	"github.com/javi11/altmount/internal/importer/parser"
 	"github.com/javi11/altmount/internal/importer/postprocessor"
@@ -186,6 +187,7 @@ type Service struct {
 	healthRepo      *database.HealthRepository    // Health repository for updating health status
 	broadcaster     *progress.ProgressBroadcaster // WebSocket progress broadcaster
 	userRepo        *database.UserRepository      // User repository for API key lookup
+	poolManager     pool.Manager                  // Pool manager — used to push admission caps on config change
 	log             *slog.Logger
 
 	// Runtime state
@@ -238,14 +240,26 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 		rcloneClient:    rcloneClient,
 		configGetter:    configGetter,
 		healthRepo:      healthRepo,
-		sabnzbdClient:   sabnzbd.NewSABnzbdClient(),
+		sabnzbdClient:   sabnzbd.NewSABnzbdClient(httpclient.NewForExternal(configGetter().Network, httpclient.LongTimeout)),
 		broadcaster:     broadcaster,
 		userRepo:        userRepo,
+		poolManager:     poolManager,
 		log:             slog.Default().With("component", "importer-service"),
 		ctx:             ctx,
 		cancel:          cancel,
 		cancelFuncs:     make(map[int64]context.CancelFunc),
 		paused:          false,
+	}
+
+	// Push initial admission caps to the pool so imports are gated from the
+	// start. Zero values keep the controller disabled, matching prior behaviour.
+	if poolManager != nil && configGetter != nil {
+		if cfg := configGetter(); cfg != nil {
+			poolManager.SetAdmissionCaps(
+				cfg.GetMaxConcurrentImports(),
+				cfg.GetMaxConcurrentImportsWhileStreaming(),
+			)
+		}
 	}
 
 	// Set recorder for processor
@@ -403,6 +417,17 @@ func (s *Service) RegisterConfigChangeHandler(configManager any) {
 				s.log.InfoContext(ctx, "Queue workers resized dynamically",
 					"old_workers", oldWorkers, "new_workers", newWorkers)
 			}
+		}
+
+		// Push updated import-admission caps to the pool. Zero values keep
+		// the admission gate disabled (unlimited).
+		if s.poolManager != nil {
+			capIdle := newConfig.GetMaxConcurrentImports()
+			capWhileStreaming := newConfig.GetMaxConcurrentImportsWhileStreaming()
+			s.poolManager.SetAdmissionCaps(capIdle, capWhileStreaming)
+			s.log.InfoContext(s.ctx, "Import admission caps updated",
+				"max_concurrent_imports", capIdle,
+				"max_concurrent_imports_while_streaming", capWhileStreaming)
 		}
 	})
 }

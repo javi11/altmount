@@ -121,5 +121,14 @@ build-cli-windows: build-frontend
 #   WinFsp must be installed on the target machine: https://winfsp.dev/
 #   WinFsp headers for cgofuse (if building natively): C:\Program Files (x86)\WinFsp\inc\fuse
 
+# Regenerate the Windows resource (.syso) files from versioninfo.json + altmount.exe.manifest.
+# The generated cmd/altmount/resource_windows_*.syso files are committed and the Go linker
+# picks them up automatically for GOOS=windows builds — embedding the long-path-aware
+# manifest. Re-run this target after editing versioninfo.json or altmount.exe.manifest.
+# Requires: go install github.com/josephspurrier/goversioninfo/cmd/goversioninfo@latest
+.PHONY: windows-resources
+windows-resources:
+	cd cmd/altmount && goversioninfo -platform-specific versioninfo.json
+
 .PHONY: build
 build: build-cli

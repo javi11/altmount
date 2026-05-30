@@ -5,6 +5,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -67,6 +68,9 @@ type Server struct {
 	migrationRepo       *database.ImportMigrationRepository
 	updater             updater.Updater
 	ready               atomic.Bool
+
+	speedtest     *speedtestCoordinator
+	speedtestOnce sync.Once
 }
 
 // NewServer creates a new API server that can optionally register routes on the provided mux (for backwards compatibility)
@@ -110,8 +114,17 @@ func NewServer(
 		progressBroadcaster: progressBroadcaster,
 		streamTracker:       streamTracker,
 		cacheSource:         cacheSource,
+		speedtest:           newSpeedtestCoordinator(),
 		fuseManager:         NewFuseManager(newMountFactory(nzbFilesystem, configManager, streamTracker)),
 		updater:             updater.Default(),
+	}
+
+	// Wire stream-activity ↔ pool admission. Streams notify the pool when they
+	// start/stop; the pool reads the active stream count to pick its
+	// adaptive import cap.
+	if poolManager != nil && streamTracker != nil {
+		streamTracker.SetChangeNotifier(poolManager)
+		poolManager.SetStreamSource(streamTracker)
 	}
 
 	return server
@@ -388,6 +401,9 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 func (s *Server) Shutdown(ctx context.Context) {
 	if s.fuseManager != nil {
 		s.fuseManager.Stop()
+	}
+	if s.speedtest != nil {
+		s.speedtest.shutdown()
 	}
 }
 

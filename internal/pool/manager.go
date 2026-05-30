@@ -11,10 +11,13 @@ import (
 	"github.com/javi11/nntppool/v4"
 )
 
-// Manager provides centralized NNTP connection pool management
+// Manager provides centralized NNTP connection pool management.
 type Manager interface {
-	// GetPool returns the current connection pool or error if not available
-	GetPool() (*nntppool.Client, error)
+	// GetPool returns the current connection pool or error if not available.
+	// The returned client exposes the narrow NntpClient surface so tests can
+	// substitute a fake (see internal/testsupport/fakepool). In production it
+	// is backed by *nntppool.Client.
+	GetPool() (NntpClient, error)
 
 	// SetProviders creates/recreates the pool with new providers
 	SetProviders(providers []nntppool.Provider) error
@@ -58,6 +61,25 @@ type Manager interface {
 
 	// SetProviderIDs sets a mapping between pool names and configuration IDs.
 	SetProviderIDs(mapping map[string]string)
+
+	// AcquireImportSlot blocks until an admission slot is available for an
+	// NZB import to start, or ctx is cancelled. The returned release function
+	// must be called exactly once when the import has finished (success or
+	// failure). When admission caps are unconfigured (both 0) it is a no-op.
+	AcquireImportSlot(ctx context.Context) (release func(), err error)
+
+	// SetAdmissionCaps configures the two import-concurrency caps:
+	// capIdle applies when no stream is active; capWhileStreaming applies
+	// while any stream is active. A cap of 0 means unlimited.
+	SetAdmissionCaps(capIdle, capWhileStreaming int)
+
+	// SetStreamSource wires the activity signal so admission can adapt to
+	// whether any stream is currently active.
+	SetStreamSource(src StreamActivitySource)
+
+	// NotifyStreamChange must be called by the stream source whenever its
+	// active stream count changes, so the admission gate can re-evaluate.
+	NotifyStreamChange()
 }
 
 // StatsRepository defines the interface for persisting pool statistics
@@ -84,14 +106,16 @@ type manager struct {
 	ctx              context.Context
 	logger           *slog.Logger
 	quotaWatchCancel context.CancelFunc
+	admission        *ImportAdmission
 }
 
 // NewManager creates a new pool manager
 func NewManager(ctx context.Context, repo StatsRepository) Manager {
 	return &manager{
-		ctx:    ctx,
-		repo:   repo,
-		logger: slog.Default().With("component", "pool"),
+		ctx:       ctx,
+		repo:      repo,
+		logger:    slog.Default().With("component", "pool"),
+		admission: NewImportAdmission(),
 	}
 }
 
@@ -144,8 +168,9 @@ func (m *manager) injectQuotaState(providers []nntppool.Provider) {
 	}
 }
 
-// GetPool returns the current connection pool or error if not available
-func (m *manager) GetPool() (*nntppool.Client, error) {
+// GetPool returns the current connection pool or error if not available.
+// The concrete return type is *nntppool.Client which satisfies NntpClient.
+func (m *manager) GetPool() (NntpClient, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -425,6 +450,31 @@ func (m *manager) ResetProviderQuota(ctx context.Context, poolName string) error
 	defer m.mu.Unlock()
 
 	return m.resetProviderQuotaLocked(ctx, poolName)
+}
+
+// AcquireImportSlot blocks until an import admission slot is available or ctx
+// is cancelled. See ImportAdmission.Acquire.
+func (m *manager) AcquireImportSlot(ctx context.Context) (func(), error) {
+	return m.admission.Acquire(ctx)
+}
+
+// SetAdmissionCaps configures the import-concurrency caps. capIdle applies
+// when no stream is active; capWhileStreaming applies while any stream is
+// active. A cap of 0 means unlimited.
+func (m *manager) SetAdmissionCaps(capIdle, capWhileStreaming int) {
+	m.admission.SetCaps(capIdle, capWhileStreaming)
+}
+
+// SetStreamSource wires the source used to determine whether streams are
+// currently active.
+func (m *manager) SetStreamSource(src StreamActivitySource) {
+	m.admission.SetStreamSource(src)
+}
+
+// NotifyStreamChange forwards a stream-count change to the admission gate so
+// it can wake or hold waiters according to the new effective cap.
+func (m *manager) NotifyStreamChange() {
+	m.admission.NotifyStreamChange()
 }
 
 // SetProviderIDs sets a mapping between pool names and configuration IDs

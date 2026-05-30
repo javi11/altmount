@@ -1,7 +1,7 @@
 import {
+	CheckCircle2,
 	ChevronDown,
 	ChevronUp,
-	CheckCircle2,
 	Download,
 	FileVideo,
 	History,
@@ -190,7 +190,7 @@ export function ActivityHub() {
 											<div className="flex items-center gap-3">
 												<div className="relative">
 													<FileVideo
-														className={`h-8 w-8 shrink-0 ${isStalled ? "text-warning animate-pulse" : "text-primary/70"}`}
+														className={`h-8 w-8 shrink-0 ${isStalled ? "animate-pulse text-warning" : "text-primary/70"}`}
 													/>
 													{!isStalled && (
 														<span className="-bottom-0.5 -right-0.5 absolute flex h-2 w-2">
@@ -371,7 +371,7 @@ export function ActivityHub() {
 									return (
 										<div
 											key={item.id}
-											className={`flex flex-col overflow-hidden rounded-lg border-l-4 border-success bg-base-200/30 transition-all ${isExpanded ? "ring-1 ring-success/20" : ""}`}
+											className={`flex flex-col overflow-hidden rounded-lg border-success border-l-4 bg-base-200/30 transition-all ${isExpanded ? "ring-1 ring-success/20" : ""}`}
 										>
 											<button
 												type="button"
@@ -396,7 +396,7 @@ export function ActivityHub() {
 													</div>
 												</div>
 												<div className="flex shrink-0 items-center gap-2">
-													<span className="whitespace-nowrap text-base-content/40 text-[11px]">
+													<span className="whitespace-nowrap text-[11px] text-base-content/40">
 														{formatRelativeTime(item.completed_at)}
 													</span>
 													{isExpanded ? (
@@ -420,7 +420,9 @@ export function ActivityHub() {
 															<Play className="h-3 w-3" />
 															<span>Dest:</span>
 														</div>
-														<div className="break-all font-mono opacity-80">{item.virtual_path}</div>
+														<div className="break-all font-mono opacity-80">
+															{item.virtual_path}
+														</div>
 
 														{item.library_path && (
 															<>
@@ -428,7 +430,7 @@ export function ActivityHub() {
 																	<CheckCircle2 className="h-3 w-3" />
 																	<span>Library:</span>
 																</div>
-																<div className="break-all font-mono opacity-80 text-success">
+																<div className="break-all font-mono text-success opacity-80">
 																	{item.library_path}
 																</div>
 															</>
@@ -445,7 +447,7 @@ export function ActivityHub() {
 
 														{item.metadata && (
 															<>
-																<div className="col-span-2 mt-1 border-base-content/10 border-t pt-2 font-bold opacity-40 uppercase tracking-widest">
+																<div className="col-span-2 mt-1 border-base-content/10 border-t pt-2 font-bold uppercase tracking-widest opacity-40">
 																	Technical Details
 																</div>
 																{(() => {
@@ -470,14 +472,14 @@ export function ActivityHub() {
 																							<Info className="h-3 w-3" />
 																							<span>Encryption:</span>
 																						</div>
-																						<div className="opacity-80 uppercase">
+																						<div className="uppercase opacity-80">
 																							{meta.encryption}
 																						</div>
 																					</>
 																				)}
 																			</>
 																		);
-																	} catch (e) {
+																	} catch (_e) {
 																		return null;
 																	}
 																})()}
@@ -502,4 +504,3 @@ export function ActivityHub() {
 		</div>
 	);
 }
-

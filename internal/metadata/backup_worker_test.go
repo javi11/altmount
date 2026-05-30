@@ -3,6 +3,7 @@ package metadata
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -78,4 +79,62 @@ func TestBackupWorker_performBackup(t *testing.T) {
 	dirs, err = os.ReadDir(backupRoot)
 	assert.NoError(t, err)
 	assert.Len(t, dirs, 2) // Should keep only 2 latest folders
+}
+
+// TestBackupWorker_performBackup_SkipsUnreadableDirs verifies that a single
+// inaccessible subdirectory (mimicking Windows "System Volume Information" or
+// a chmod-000 dir on Linux) does not abort the entire backup. Regression test
+// for https://github.com/javi11/altmount/issues/609.
+func TestBackupWorker_performBackup_SkipsUnreadableDirs(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod-based permission denial is unreliable on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("running as root bypasses directory permissions")
+	}
+
+	tempDir, err := os.MkdirTemp("", "metadata-test-skip-*")
+	assert.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	metadataDir := filepath.Join(tempDir, "metadata")
+	backupRoot := filepath.Join(tempDir, "backups")
+	assert.NoError(t, os.MkdirAll(metadataDir, 0755))
+
+	// Readable .meta file at the root.
+	assert.NoError(t, os.WriteFile(filepath.Join(metadataDir, "readable.meta"), []byte("ok"), 0644))
+
+	// Unreadable subdirectory containing a .meta file that should be skipped.
+	denied := filepath.Join(metadataDir, "denied")
+	assert.NoError(t, os.MkdirAll(denied, 0755))
+	assert.NoError(t, os.WriteFile(filepath.Join(denied, "hidden.meta"), []byte("x"), 0644))
+	assert.NoError(t, os.Chmod(denied, 0))
+	// Restore perms so cleanup can succeed.
+	defer os.Chmod(denied, 0755) //nolint:errcheck
+
+	enabled := true
+	cfg := &config.Config{
+		Metadata: config.MetadataConfig{
+			RootPath: metadataDir,
+			Backup: config.MetadataBackupConfig{
+				Enabled:     &enabled,
+				Schedule:    "0 3 * * *",
+				KeepBackups: 2,
+				Path:        backupRoot,
+			},
+		},
+	}
+
+	worker := NewBackupWorker(func() *config.Config { return cfg })
+	worker.performBackup()
+
+	// Backup directory should exist (proving the walk did not abort and
+	// cleanup-on-error did not RemoveAll it).
+	dirs, err := os.ReadDir(backupRoot)
+	assert.NoError(t, err)
+	assert.Len(t, dirs, 1)
+
+	backupDir := filepath.Join(backupRoot, dirs[0].Name())
+	assert.FileExists(t, filepath.Join(backupDir, "readable.meta"))
+	assert.NoFileExists(t, filepath.Join(backupDir, "denied", "hidden.meta"))
 }

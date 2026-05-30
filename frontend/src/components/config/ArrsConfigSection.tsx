@@ -36,6 +36,7 @@ const ARR_TYPES: { type: ArrsType; label: string; color: string; defaultCategory
 	{ type: "lidarr", label: "Lidarr", color: "bg-accent", defaultCategory: "music" },
 	{ type: "readarr", label: "Readarr", color: "bg-info", defaultCategory: "books" },
 	{ type: "whisparr", label: "Whisparr", color: "bg-warning", defaultCategory: "movies" },
+	{ type: "sportarr", label: "Sportarr", color: "bg-success", defaultCategory: "sports" },
 ];
 
 export function ArrsConfigSection({
@@ -164,7 +165,7 @@ export function ArrsConfigSection({
 			category = arrTypeMeta?.defaultCategory || "movies";
 		}
 		const instances = [
-			...(formData[instancesKey] as ArrsInstanceConfig[]),
+			...((formData[instancesKey] as ArrsInstanceConfig[]) || []),
 			{
 				name: newInstance.name,
 				url: newInstance.url,

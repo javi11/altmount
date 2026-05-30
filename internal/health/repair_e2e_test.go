@@ -24,7 +24,7 @@ import (
 // mockPoolManager implements pool.Manager and always fails GetPool so segment validation fails.
 type mockPoolManager struct{}
 
-func (m *mockPoolManager) GetPool() (*nntppool.Client, error) {
+func (m *mockPoolManager) GetPool() (pool.NntpClient, error) {
 	return nil, errors.New("no pool available (test mock)")
 }
 func (m *mockPoolManager) SetProviders(_ []nntppool.Provider) error { return nil }
@@ -33,9 +33,9 @@ func (m *mockPoolManager) HasPool() bool                            { return fal
 func (m *mockPoolManager) GetMetrics() (pool.MetricsSnapshot, error) {
 	return pool.MetricsSnapshot{}, nil
 }
-func (m *mockPoolManager) ResetMetrics(_ context.Context, _, _ bool) error        { return nil }
-func (m *mockPoolManager) ResetProviderErrors(_ context.Context) error             { return nil }
-func (m *mockPoolManager) IncArticlesDownloaded()                                  {}
+func (m *mockPoolManager) ResetMetrics(_ context.Context, _, _ bool) error { return nil }
+func (m *mockPoolManager) ResetProviderErrors(_ context.Context) error     { return nil }
+func (m *mockPoolManager) IncArticlesDownloaded()                          {}
 func (m *mockPoolManager) UpdateDownloadProgress(_ string, _ int64)        {}
 func (m *mockPoolManager) IncArticlesPosted()                              {}
 func (m *mockPoolManager) AddProvider(_ nntppool.Provider) error           { return nil }
@@ -44,6 +44,13 @@ func (m *mockPoolManager) ResetProviderQuota(_ context.Context, _ string) error 
 	return nil
 }
 func (m *mockPoolManager) SetProviderIDs(_ map[string]string) {}
+func (m *mockPoolManager) AcquireImportSlot(_ context.Context) (func(), error) {
+	return func() {}, nil
+}
+func (m *mockPoolManager) SetAdmissionCaps(_ int, _ int)               {}
+func (m *mockPoolManager) SetStreamSource(_ pool.StreamActivitySource) {}
+func (m *mockPoolManager) NotifyStreamChange()                         {}
+
 // mockARRsService captures TriggerFileRescan calls and returns a configurable error.
 type mockARRsService struct {
 	mu        sync.Mutex

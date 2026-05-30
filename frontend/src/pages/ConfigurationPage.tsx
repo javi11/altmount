@@ -24,6 +24,7 @@ import { ComingSoonSection } from "../components/config/ComingSoonSection";
 import { HealthConfigSection } from "../components/config/HealthConfigSection";
 import { MetadataConfigSection } from "../components/config/MetadataConfigSection";
 import { MountConfigSection } from "../components/config/MountConfigSection";
+import { NetworkConfigSection } from "../components/config/NetworkConfigSection";
 import { NzblnkConfigSection } from "../components/config/NzblnkConfigSection";
 import { ProvidersConfigSection } from "../components/config/ProvidersConfigSection";
 import { SABnzbdConfigSection } from "../components/config/SABnzbdConfigSection";
@@ -53,6 +54,7 @@ import type {
 	ImportConfig,
 	LogFormData,
 	MetadataConfig,
+	NetworkConfig,
 	NzblnkConfig,
 	ProviderConfig,
 	SABnzbdConfig,
@@ -99,7 +101,7 @@ const SECTION_GROUPS = [
 	},
 	{
 		title: "System",
-		sections: ["auth", "system"],
+		sections: ["auth", "network", "system"],
 	},
 ];
 
@@ -274,6 +276,11 @@ export function ConfigurationPage() {
 				await updateConfigSection.mutateAsync({
 					section: "nzblnk",
 					config: { nzblnk: data as unknown as NzblnkConfig },
+				});
+			} else if (section === "network") {
+				await updateConfigSection.mutateAsync({
+					section: "network",
+					config: { network: data as unknown as NetworkConfig },
 				});
 			} else if (section === "log") {
 				const logData = data as unknown as LogFormData & { profiler_enabled?: boolean };
@@ -567,6 +574,13 @@ export function ConfigurationPage() {
 										isUpdating={updateConfigSection.isPending}
 									/>
 								)}
+								{activeSection === "network" && (
+									<NetworkConfigSection
+										config={config}
+										onUpdate={handleConfigUpdate}
+										isUpdating={updateConfigSection.isPending}
+									/>
+								)}
 								{![
 									"webdav",
 									"auth",
@@ -581,6 +595,7 @@ export function ConfigurationPage() {
 									"health",
 									"stremio",
 									"nzblnk",
+									"network",
 								].includes(activeSection) && (
 									<ComingSoonSection
 										sectionName={CONFIG_SECTIONS[activeSection]?.title || activeSection}

@@ -1,7 +1,7 @@
+import { HardDrive, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { usePoolMetrics, useResetProviderQuota } from "../../../../hooks/useApi";
 import { formatBytes, formatRelativeTime } from "../../../../lib/utils";
-import { HardDrive, RefreshCw } from "lucide-react";
 import type { ProviderStatus } from "../../../../types/api";
 
 export function ProviderQuota() {
@@ -11,7 +11,9 @@ export function ProviderQuota() {
 
 	if (isLoading || !data) return null;
 
-	const providersWithQuota = data.providers.filter((p: ProviderStatus) => p.quota_bytes && p.quota_bytes > 0);
+	const providersWithQuota = data.providers.filter(
+		(p: ProviderStatus) => p.quota_bytes && p.quota_bytes > 0,
+	);
 
 	if (providersWithQuota.length === 0) {
 		return null; // Don't show the section if no providers have quotas
@@ -40,16 +42,16 @@ export function ProviderQuota() {
 						<p className="text-base-content/60 text-sm">Provider data usage vs limits</p>
 					</div>
 				</div>
-				
+
 				<div className="space-y-6">
 					{providersWithQuota.map((provider: ProviderStatus) => {
 						const used = provider.quota_used || 0;
 						const total = provider.quota_bytes || 0;
 						const percentage = total > 0 ? Math.min(100, Math.round((used / total) * 100)) : 0;
-						
+
 						const isWarning = percentage >= 80 && percentage < 95;
 						const isError = percentage >= 95;
-						
+
 						let progressClass = "progress-primary";
 						if (isError) progressClass = "progress-error";
 						else if (isWarning) progressClass = "progress-warning";
@@ -68,7 +70,9 @@ export function ProviderQuota() {
 													disabled={resettingId === provider.id}
 													title="Reset Quota"
 												>
-													<RefreshCw className={`h-3 w-3 ${resettingId === provider.id ? "animate-spin" : ""}`} />
+													<RefreshCw
+														className={`h-3 w-3 ${resettingId === provider.id ? "animate-spin" : ""}`}
+													/>
 												</button>
 											)}
 										</div>
@@ -85,12 +89,14 @@ export function ProviderQuota() {
 									</div>
 								</div>
 								<div className="flex items-center gap-3">
-									<progress 
-										className={`progress h-3 w-full ${progressClass}`} 
-										value={percentage} 
+									<progress
+										className={`progress h-3 w-full ${progressClass}`}
+										value={percentage}
 										max="100"
 									/>
-									<span className={`w-10 text-right font-mono text-sm ${isError ? 'font-bold text-error' : isWarning ? 'font-bold text-warning' : ''}`}>
+									<span
+										className={`w-10 text-right font-mono text-sm ${isError ? "font-bold text-error" : isWarning ? "font-bold text-warning" : ""}`}
+									>
 										{percentage}%
 									</span>
 								</div>

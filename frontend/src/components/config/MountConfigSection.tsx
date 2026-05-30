@@ -483,36 +483,34 @@ export function MountConfigSection({ config, onUpdate, isUpdating }: MountConfig
 			)}
 
 			{/* Save Button */}
-			{mountType !== "none" && (
-				<div className="flex flex-col gap-2 pt-4">
-					{mountPathChanged && (
-						<label className="flex cursor-pointer items-center gap-2 self-end">
-							<input
-								type="checkbox"
-								className="checkbox checkbox-sm"
-								checked={regenerateOnSave}
-								onChange={(e) => setRegenerateOnSave(e.target.checked)}
-							/>
-							<span className="text-sm">Regenerate all library symlinks to the new mount path</span>
-						</label>
-					)}
-					<div className="flex justify-end">
-						<button
-							type="button"
-							className={`btn btn-primary btn-md px-10 shadow-lg shadow-primary/20 ${!hasChanges && "btn-ghost border-base-300"}`}
-							onClick={handleSave}
-							disabled={!hasChanges || isUpdating || !mountPath}
-						>
-							{isUpdating ? (
-								<span className="loading loading-spinner loading-sm" />
-							) : (
-								<Save className="h-4 w-4" />
-							)}
-							{isUpdating ? "Saving..." : "Save Configuration"}
-						</button>
-					</div>
+			<div className="flex flex-col gap-2 pt-4">
+				{mountType !== "none" && mountPathChanged && (
+					<label className="flex cursor-pointer items-center gap-2 self-end">
+						<input
+							type="checkbox"
+							className="checkbox checkbox-sm"
+							checked={regenerateOnSave}
+							onChange={(e) => setRegenerateOnSave(e.target.checked)}
+						/>
+						<span className="text-sm">Regenerate all library symlinks to the new mount path</span>
+					</label>
+				)}
+				<div className="flex justify-end">
+					<button
+						type="button"
+						className={`btn btn-primary btn-md px-10 shadow-lg shadow-primary/20 ${!hasChanges && "btn-ghost border-base-300"}`}
+						onClick={handleSave}
+						disabled={!hasChanges || isUpdating || (mountType !== "none" && !mountPath)}
+					>
+						{isUpdating ? (
+							<span className="loading loading-spinner loading-sm" />
+						) : (
+							<Save className="h-4 w-4" />
+						)}
+						{isUpdating ? "Saving..." : "Save Configuration"}
+					</button>
 				</div>
-			)}
+			</div>
 
 			{/* Status & Control Bar */}
 			{showMountControls && (

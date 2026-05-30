@@ -1,83 +1,137 @@
+import {
+	Activity,
+	ActivitySquare,
+	AlertTriangle,
+	ArrowDown,
+	ArrowUp,
+	ArrowUpDown,
+	CheckCircle2,
+	Gauge,
+	Info,
+	RefreshCw,
+	Wifi,
+	WifiOff,
+	XCircle,
+} from "lucide-react";
 import { useState } from "react";
-import { Activity, AlertTriangle, Wifi, WifiOff, ActivitySquare, ArrowUpDown, ArrowUp, ArrowDown, CheckCircle2, XCircle, Info, Gauge, RefreshCw } from "lucide-react";
-import { usePoolMetrics, useProviderSpeedHistory, useTestProviderSpeed } from "../../../../hooks/useApi";
+import { Line, LineChart, ResponsiveContainer, YAxis } from "recharts";
+import { useToast } from "../../../../contexts/ToastContext";
+import {
+	usePoolMetrics,
+	useProviderSpeedHistory,
+	useTestProviderSpeed,
+} from "../../../../hooks/useApi";
 import { formatBytes, formatRelativeTime } from "../../../../lib/utils";
+import type { ProviderSpeedTestHistoryStat, ProviderStatus } from "../../../../types/api";
 import { ProviderChart } from "./ProviderChart";
 import { ProviderQuota } from "./ProviderQuota";
 import { ProviderSpeedChart } from "./ProviderSpeedChart";
-import { LineChart, Line, ResponsiveContainer, YAxis } from "recharts";
-import type { ProviderSpeedTestHistoryStat, ProviderStatus } from "../../../../types/api";
-import { useToast } from "../../../../contexts/ToastContext";
 
-type SortField = 'host' | 'state' | 'used_connections' | 'missing_count' | 'current_speed_bytes_per_sec' | 'last_speed_test_mbps' | 'ping_ms' | 'error_count' | 'health_score';
-type SortDirection = 'asc' | 'desc';
+type SortField =
+	| "host"
+	| "state"
+	| "used_connections"
+	| "missing_count"
+	| "current_speed_bytes_per_sec"
+	| "last_speed_test_mbps"
+	| "ping_ms"
+	| "error_count"
+	| "health_score";
+type SortDirection = "asc" | "desc";
 
-const SortIcon = ({ field, sortField, sortDirection }: { field: SortField, sortField: SortField, sortDirection: SortDirection }) => {
+const SortIcon = ({
+	field,
+	sortField,
+	sortDirection,
+}: {
+	field: SortField;
+	sortField: SortField;
+	sortDirection: SortDirection;
+}) => {
 	if (sortField !== field) return <ArrowUpDown className="h-3 w-3 opacity-30" />;
-	return sortDirection === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />;
+	return sortDirection === "asc" ? (
+		<ArrowUp className="h-3 w-3" />
+	) : (
+		<ArrowDown className="h-3 w-3" />
+	);
 };
 
 const calculateHealthScore = (provider: ProviderStatus) => {
-    let score = 100;
-    
-    // State penalty
-    if (provider.state !== 'connected' && provider.state !== 'active') {
-        return 0; // If disconnected, health is 0
-    }
-    
-    // Ping penalty
-    if (provider.ping_ms > 1000) score -= 40;
-    else if (provider.ping_ms > 500) score -= 25;
-    else if (provider.ping_ms > 200) score -= 10;
-    else if (provider.ping_ms > 100) score -= 5;
-    
-    // Error penalty
-    score -= Math.min(30, provider.error_count * 5);
-    
-    // Missing count penalty (warning indicator)
-    if (provider.missing_warning) {
-        score -= 20;
-    }
-    if (provider.missing_count > 5000) score -= 15;
-    else if (provider.missing_count > 1000) score -= 10;
-    
-    return Math.max(0, score);
+	let score = 100;
+
+	// State penalty
+	if (provider.state !== "connected" && provider.state !== "active") {
+		return 0; // If disconnected, health is 0
+	}
+
+	// Ping penalty
+	if (provider.ping_ms > 1000) score -= 40;
+	else if (provider.ping_ms > 500) score -= 25;
+	else if (provider.ping_ms > 200) score -= 10;
+	else if (provider.ping_ms > 100) score -= 5;
+
+	// Error penalty
+	score -= Math.min(30, provider.error_count * 5);
+
+	// Missing count penalty (warning indicator)
+	if (provider.missing_warning) {
+		score -= 20;
+	}
+	if (provider.missing_count > 5000) score -= 15;
+	else if (provider.missing_count > 1000) score -= 10;
+
+	return Math.max(0, score);
 };
 
 const HealthIndicator = ({ score }: { score: number }) => {
-    let colorClass = "text-success";
-    let icon = <CheckCircle2 className="h-4 w-4" />;
-    
-    if (score < 50) {
-        colorClass = "text-error";
-        icon = <XCircle className="h-4 w-4" />;
-    } else if (score < 85) {
-        colorClass = "text-warning";
-        icon = <AlertTriangle className="h-4 w-4" />;
-    }
-    
-    return (
-        <div className={`flex items-center gap-1.5 font-bold ${colorClass}`}>
-            {icon}
-            <span>{score}%</span>
-        </div>
-    );
+	let colorClass = "text-success";
+	let icon = <CheckCircle2 className="h-4 w-4" />;
+
+	if (score < 50) {
+		colorClass = "text-error";
+		icon = <XCircle className="h-4 w-4" />;
+	} else if (score < 85) {
+		colorClass = "text-warning";
+		icon = <AlertTriangle className="h-4 w-4" />;
+	}
+
+	return (
+		<div className={`flex items-center gap-1.5 font-bold ${colorClass}`}>
+			{icon}
+			<span>{score}%</span>
+		</div>
+	);
 };
 
 // Sparkline component for speed history
-const SpeedHistorySparkline = ({ providerId, historyData }: { providerId: string, historyData: ProviderSpeedTestHistoryStat[] }) => {
-	const providerHistory = historyData?.filter(h => h.provider_id === providerId) || [];
+const SpeedHistorySparkline = ({
+	providerId,
+	historyData,
+}: {
+	providerId: string;
+	historyData: ProviderSpeedTestHistoryStat[];
+}) => {
+	const providerHistory = historyData?.filter((h) => h.provider_id === providerId) || [];
 	// sort by created_at asc
-	const sortedHistory = [...providerHistory].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-	
+	const sortedHistory = [...providerHistory].sort(
+		(a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+	);
+
 	if (sortedHistory.length < 2) return <span className="text-base-content/50" />;
 
 	return (
 		<div className="h-8 w-20 opacity-80 transition-opacity hover:opacity-100">
 			<ResponsiveContainer width="100%" height="100%">
 				<LineChart data={sortedHistory}>
-					<YAxis domain={['dataMin', 'dataMax']} hide />
-					<Line type="stepAfter" dataKey="speed_mbps" stroke="#10b981" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+					<YAxis domain={["dataMin", "dataMax"]} hide />
+					<Line
+						type="stepAfter"
+						dataKey="speed_mbps"
+						stroke="#10b981"
+						strokeWidth={1.5}
+						dot={false}
+						isAnimationActive={false}
+					/>
 				</LineChart>
 			</ResponsiveContainer>
 		</div>
@@ -90,8 +144,8 @@ export function ProviderHealth() {
 	const testSpeed = useTestProviderSpeed();
 	const { showToast } = useToast();
 
-	const [sortField, setSortField] = useState<SortField>('host');
-	const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
+	const [sortField, setSortField] = useState<SortField>("host");
+	const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
 	const [testingId, setTestingId] = useState<string | null>(null);
 
 	if (isLoading) {
@@ -126,17 +180,27 @@ export function ProviderHealth() {
 		return sum;
 	}, 0);
 
-	const connectionPercent = totalMaxConnections > 0 ? Math.round((totalUsedConnections / totalMaxConnections) * 100) : 0;
+	const connectionPercent =
+		totalMaxConnections > 0 ? Math.round((totalUsedConnections / totalMaxConnections) * 100) : 0;
 
-	const maxedProviders = data.providers.filter(p => p.quota_bytes && p.quota_bytes > 0 && p.quota_used && p.quota_used >= p.quota_bytes);
-	const nearMaxProviders = data.providers.filter(p => p.quota_bytes && p.quota_bytes > 0 && p.quota_used && p.quota_used >= p.quota_bytes * 0.85 && p.quota_used < p.quota_bytes);
+	const maxedProviders = data.providers.filter(
+		(p) => p.quota_bytes && p.quota_bytes > 0 && p.quota_used && p.quota_used >= p.quota_bytes,
+	);
+	const nearMaxProviders = data.providers.filter(
+		(p) =>
+			p.quota_bytes &&
+			p.quota_bytes > 0 &&
+			p.quota_used &&
+			p.quota_used >= p.quota_bytes * 0.85 &&
+			p.quota_used < p.quota_bytes,
+	);
 
 	const handleSort = (field: SortField) => {
 		if (sortField === field) {
-			setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+			setSortDirection(sortDirection === "asc" ? "desc" : "asc");
 		} else {
 			setSortField(field);
-			setSortDirection('desc'); // Default to desc for most metrics
+			setSortDirection("desc"); // Default to desc for most metrics
 		}
 	};
 
@@ -160,25 +224,27 @@ export function ProviderHealth() {
 		}
 	};
 
-	const sortedProviders = [...data.providers].map(p => ({ ...p, health_score: calculateHealthScore(p) })).sort((a, b) => {
-		const aRaw = a[sortField as keyof typeof a];
-		const bRaw = b[sortField as keyof typeof b];
+	const sortedProviders = [...data.providers]
+		.map((p) => ({ ...p, health_score: calculateHealthScore(p) }))
+		.sort((a, b) => {
+			const aRaw = a[sortField as keyof typeof a];
+			const bRaw = b[sortField as keyof typeof b];
 
-		let aValue: string | number = 0;
-		let bValue: string | number = 0;
+			let aValue: string | number = 0;
+			let bValue: string | number = 0;
 
-		if (sortField === 'host' || sortField === 'state') {
-			aValue = aRaw?.toString().toLowerCase() || '';
-			bValue = bRaw?.toString().toLowerCase() || '';
-		} else {
-			aValue = Number(aRaw) || 0;
-			bValue = Number(bRaw) || 0;
-		}
+			if (sortField === "host" || sortField === "state") {
+				aValue = aRaw?.toString().toLowerCase() || "";
+				bValue = bRaw?.toString().toLowerCase() || "";
+			} else {
+				aValue = Number(aRaw) || 0;
+				bValue = Number(bRaw) || 0;
+			}
 
-		if (aValue < bValue) return sortDirection === 'asc' ? -1 : 1;
-		if (aValue > bValue) return sortDirection === 'asc' ? 1 : -1;
-		return 0;
-	});
+			if (aValue < bValue) return sortDirection === "asc" ? -1 : 1;
+			if (aValue > bValue) return sortDirection === "asc" ? 1 : -1;
+			return 0;
+		});
 
 	return (
 		<div className="space-y-6">
@@ -188,10 +254,10 @@ export function ProviderHealth() {
 					<div>
 						<h3 className="font-bold">Quota Exceeded</h3>
 						<div className="text-sm">
-							{maxedProviders.length === 1 
+							{maxedProviders.length === 1
 								? `${maxedProviders[0].host} has reached its data limit. Downloads from this provider are paused.`
-								: `${maxedProviders.length} providers have reached their data limits. Downloads from these providers are paused.`}
-							{" "}You can reset the quota manually below.
+								: `${maxedProviders.length} providers have reached their data limits. Downloads from these providers are paused.`}{" "}
+							You can reset the quota manually below.
 						</div>
 					</div>
 				</div>
@@ -202,7 +268,7 @@ export function ProviderHealth() {
 					<div>
 						<h3 className="font-bold">Quota Warning</h3>
 						<div className="text-sm">
-							{nearMaxProviders.length === 1 
+							{nearMaxProviders.length === 1
 								? `${nearMaxProviders[0].host} is approaching its data limit.`
 								: `${nearMaxProviders.length} providers are approaching their data limits.`}
 						</div>
@@ -247,9 +313,15 @@ export function ProviderHealth() {
 
 				<div className="stat rounded-box bg-base-100 shadow">
 					<div className="stat-figure text-info">
-						<div 
-							className="radial-progress border-4 border-base-200 text-info" 
-							style={{"--value": connectionPercent, "--size": "3.5rem", "--thickness": "0.4rem"} as React.CSSProperties}
+						<div
+							className="radial-progress border-4 border-base-200 text-info"
+							style={
+								{
+									"--value": connectionPercent,
+									"--size": "3.5rem",
+									"--thickness": "0.4rem",
+								} as React.CSSProperties
+							}
 							role="progressbar"
 						>
 							<span className="font-bold text-xs">{connectionPercent}%</span>
@@ -275,41 +347,123 @@ export function ProviderHealth() {
 				<div className="card-body p-0">
 					<div className="flex items-center justify-between border-base-200 border-b p-4">
 						<h2 className="card-title text-lg">Provider Status</h2>
-                        <div className="badge badge-outline gap-2 py-3">
-                            <Info className="h-3.5 w-3.5" />
-                            <span className="text-xs">Real-time stats updated every 5s</span>
-                        </div>
+						<div className="badge badge-outline gap-2 py-3">
+							<Info className="h-3.5 w-3.5" />
+							<span className="text-xs">Real-time stats updated every 5s</span>
+						</div>
 					</div>
 					<div className="overflow-x-auto">
 						<table className="table-zebra table">
 							<thead>
 								<tr>
-									<th className="cursor-pointer transition-colors hover:bg-base-200" onClick={() => handleSort('host')}>
-										<div className="flex items-center gap-1">Provider Host <SortIcon sortField={sortField} sortDirection={sortDirection} field="host" /></div>
+									<th
+										className="cursor-pointer transition-colors hover:bg-base-200"
+										onClick={() => handleSort("host")}
+									>
+										<div className="flex items-center gap-1">
+											Provider Host{" "}
+											<SortIcon sortField={sortField} sortDirection={sortDirection} field="host" />
+										</div>
 									</th>
-									<th className="cursor-pointer transition-colors hover:bg-base-200" onClick={() => handleSort('health_score')}>
-										<div className="flex items-center gap-1">Health <SortIcon sortField={sortField} sortDirection={sortDirection} field="health_score" /></div>
+									<th
+										className="cursor-pointer transition-colors hover:bg-base-200"
+										onClick={() => handleSort("health_score")}
+									>
+										<div className="flex items-center gap-1">
+											Health{" "}
+											<SortIcon
+												sortField={sortField}
+												sortDirection={sortDirection}
+												field="health_score"
+											/>
+										</div>
 									</th>
-									<th className="cursor-pointer transition-colors hover:bg-base-200" onClick={() => handleSort('state')}>
-										<div className="flex items-center gap-1">State <SortIcon sortField={sortField} sortDirection={sortDirection} field="state" /></div>
+									<th
+										className="cursor-pointer transition-colors hover:bg-base-200"
+										onClick={() => handleSort("state")}
+									>
+										<div className="flex items-center gap-1">
+											State{" "}
+											<SortIcon sortField={sortField} sortDirection={sortDirection} field="state" />
+										</div>
 									</th>
-									<th className="cursor-pointer transition-colors hover:bg-base-200" onClick={() => handleSort('used_connections')}>
-										<div className="flex items-center gap-1">Connections <SortIcon sortField={sortField} sortDirection={sortDirection} field="used_connections" /></div>
+									<th
+										className="cursor-pointer transition-colors hover:bg-base-200"
+										onClick={() => handleSort("used_connections")}
+									>
+										<div className="flex items-center gap-1">
+											Connections{" "}
+											<SortIcon
+												sortField={sortField}
+												sortDirection={sortDirection}
+												field="used_connections"
+											/>
+										</div>
 									</th>
-									<th className="cursor-pointer transition-colors hover:bg-base-200" onClick={() => handleSort('ping_ms')}>
-										<div className="flex items-center gap-1">Ping <SortIcon sortField={sortField} sortDirection={sortDirection} field="ping_ms" /></div>
+									<th
+										className="cursor-pointer transition-colors hover:bg-base-200"
+										onClick={() => handleSort("ping_ms")}
+									>
+										<div className="flex items-center gap-1">
+											Ping{" "}
+											<SortIcon
+												sortField={sortField}
+												sortDirection={sortDirection}
+												field="ping_ms"
+											/>
+										</div>
 									</th>
-									<th className="cursor-pointer transition-colors hover:bg-base-200" onClick={() => handleSort('error_count')}>
-										<div className="flex items-center gap-1">Errors <SortIcon sortField={sortField} sortDirection={sortDirection} field="error_count" /></div>
+									<th
+										className="cursor-pointer transition-colors hover:bg-base-200"
+										onClick={() => handleSort("error_count")}
+									>
+										<div className="flex items-center gap-1">
+											Errors{" "}
+											<SortIcon
+												sortField={sortField}
+												sortDirection={sortDirection}
+												field="error_count"
+											/>
+										</div>
 									</th>
-									<th className="cursor-pointer transition-colors hover:bg-base-200" onClick={() => handleSort('missing_count')}>
-										<div className="flex items-center gap-1">Missing <SortIcon sortField={sortField} sortDirection={sortDirection} field="missing_count" /></div>
+									<th
+										className="cursor-pointer transition-colors hover:bg-base-200"
+										onClick={() => handleSort("missing_count")}
+									>
+										<div className="flex items-center gap-1">
+											Missing{" "}
+											<SortIcon
+												sortField={sortField}
+												sortDirection={sortDirection}
+												field="missing_count"
+											/>
+										</div>
 									</th>
-									<th className="cursor-pointer transition-colors hover:bg-base-200" onClick={() => handleSort('current_speed_bytes_per_sec')}>
-										<div className="flex items-center gap-1">Current Speed <SortIcon sortField={sortField} sortDirection={sortDirection} field="current_speed_bytes_per_sec" /></div>
+									<th
+										className="cursor-pointer transition-colors hover:bg-base-200"
+										onClick={() => handleSort("current_speed_bytes_per_sec")}
+									>
+										<div className="flex items-center gap-1">
+											Current Speed{" "}
+											<SortIcon
+												sortField={sortField}
+												sortDirection={sortDirection}
+												field="current_speed_bytes_per_sec"
+											/>
+										</div>
 									</th>
-									<th className="cursor-pointer transition-colors hover:bg-base-200" onClick={() => handleSort('last_speed_test_mbps')}>
-										<div className="flex items-center gap-1">Top Speed <SortIcon sortField={sortField} sortDirection={sortDirection} field="last_speed_test_mbps" /></div>
+									<th
+										className="cursor-pointer transition-colors hover:bg-base-200"
+										onClick={() => handleSort("last_speed_test_mbps")}
+									>
+										<div className="flex items-center gap-1">
+											Top Speed{" "}
+											<SortIcon
+												sortField={sortField}
+												sortDirection={sortDirection}
+												field="last_speed_test_mbps"
+											/>
+										</div>
 									</th>
 									<th>Actions</th>
 								</tr>
@@ -323,7 +477,7 @@ export function ProviderHealth() {
 											</div>
 										</td>
 										<td>
-                                            <HealthIndicator score={provider.health_score} />
+											<HealthIndicator score={provider.health_score} />
 										</td>
 										<td>
 											<div className="flex items-center gap-2">
@@ -353,12 +507,16 @@ export function ProviderHealth() {
 											</div>
 										</td>
 										<td>
-											<span className={`font-mono text-sm ${provider.ping_ms > 200 ? 'text-warning' : provider.ping_ms > 500 ? 'text-error' : ''}`}>
-												{provider.ping_ms > 0 ? `${provider.ping_ms}ms` : '-'}
+											<span
+												className={`font-mono text-sm ${provider.ping_ms > 200 ? "text-warning" : provider.ping_ms > 500 ? "text-error" : ""}`}
+											>
+												{provider.ping_ms > 0 ? `${provider.ping_ms}ms` : "-"}
 											</span>
 										</td>
 										<td>
-											<span className={`font-mono text-sm ${provider.error_count > 0 ? 'text-error' : ''}`}>
+											<span
+												className={`font-mono text-sm ${provider.error_count > 0 ? "text-error" : ""}`}
+											>
 												{provider.error_count}
 											</span>
 										</td>
@@ -398,9 +556,9 @@ export function ProviderHealth() {
 														)}
 													</div>
 													{speedHistoryResponse?.history && (
-														<SpeedHistorySparkline 
-															providerId={provider.id} 
-															historyData={speedHistoryResponse.history} 
+														<SpeedHistorySparkline
+															providerId={provider.id}
+															historyData={speedHistoryResponse.history}
 														/>
 													)}
 												</div>
@@ -410,7 +568,7 @@ export function ProviderHealth() {
 										</td>
 										<td>
 											<div className="flex items-center gap-2">
-												<button 
+												<button
 													type="button"
 													className="btn btn-ghost btn-xs gap-1"
 													onClick={() => handleRunSpeedTest(provider.id, provider.host)}

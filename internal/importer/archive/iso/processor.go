@@ -3,69 +3,142 @@ package iso
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"strings"
 	"time"
 
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/progress"
 )
 
-// AnalyzeISOContent enumerates all allowed media files inside the given ISO source
-// and returns ISOFileContent entries with Usenet segment mappings.
-func AnalyzeISOContent(
+// AnalyzeISO inspects the given ISO source and returns:
+//   - the volume label (for multi-disc grouping),
+//   - the filtered list of inner files (Files),
+//   - the ordered MainFeature M2TS list when the ISO is a Blu-ray with a
+//     resolvable playlist (nil otherwise).
+//
+// allowedExtensions only filters Files. MainFeature is always returned for
+// BDMV discs regardless of the extension list — its existence is the
+// signal callers use to opt into virtual concatenation.
+func AnalyzeISO(
 	ctx context.Context,
 	src ISOSource,
 	poolManager pool.Manager,
 	maxPrefetch int,
 	readTimeout time.Duration,
+	analyzeTimeout time.Duration,
 	allowedExtensions []string,
-) ([]ISOFileContent, error) {
+	progressTracker *progress.Tracker,
+) (*AnalyzedISO, error) {
+	start := time.Now()
+	// Hard cap the whole walk. A degraded NNTP provider can otherwise stall
+	// AnalyzeISO for minutes per ISO. analyzeTimeout <= 0 disables the cap
+	// (used by tests that exercise other paths).
+	if analyzeTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, analyzeTimeout)
+		defer cancel()
+	}
+	// Fail fast when the deadline is already exceeded (e.g. caller passed a
+	// past deadline, or analyzeTimeout fired between WithTimeout and the
+	// first NNTP read).
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("iso: analysing %q: %w", src.Filename, err)
+	}
+
 	rs, closer, err := NewISOReadSeeker(ctx, src, poolManager, maxPrefetch, readTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("iso: creating read seeker for %q: %w", src.Filename, err)
 	}
 	defer closer.Close()
 
-	files, err := ListISOFiles(rs)
+	entries, err := ListISOFiles(ctx, rs)
 	if err != nil {
 		return nil, fmt.Errorf("iso: listing files in %q: %w", src.Filename, err)
 	}
 
-	var result []ISOFileContent
-	for _, entry := range files {
-		if !isAllowedFile(entry.path, int64(entry.size), allowedExtensions) {
+	out := &AnalyzedISO{VolumeLabel: ReadVolumeLabel(rs)}
+
+	for _, e := range entries {
+		if !isAllowedFile(e.path, int64(e.size), allowedExtensions) {
 			continue
 		}
+		out.Files = append(out.Files, buildFileContent(src, e))
+	}
 
-		isoOffset := int64(entry.lba) * iso9660SectorSize
-
-		fc := ISOFileContent{
-			InternalPath: entry.path,
-			Filename:     filepath.Base(entry.path),
-			Size:         int64(entry.size),
+	if mf := ResolveMainFeature(ctx, rs, entries, progressTracker); mf != nil {
+		out.DurationTicks = mf.DurationTicks
+		for i, e := range mf.Streams {
+			fc := buildFileContent(src, e)
+			// Carry per-clip MPLS timing (45 kHz) for the continuous-timeline
+			// remux. ClipInTimes/ClipDurations are parallel to Streams.
+			if i < len(mf.ClipInTimes) {
+				fc.InTimeTicks = mf.ClipInTimes[i]
+				fc.DurationTicks = mf.ClipDurations[i]
+			}
+			out.MainFeature = append(out.MainFeature, fc)
 		}
+	}
 
+	// Single completion log: raw entry count, filtered file count, BD clip
+	// count, and total time. Previously this function emitted two separate
+	// INFO lines per successful analysis ("ISO analysed" + "ISO analyse
+	// complete"); they're consolidated here.
+	slog.InfoContext(ctx, "ISO analysed",
+		"filename", src.Filename,
+		"iso_size_bytes", src.Size,
+		"entries", len(entries),
+		"files", len(out.Files),
+		"main_feature_clips", len(out.MainFeature),
+		"duration_seconds", time.Since(start).Seconds(),
+	)
+
+	return out, nil
+}
+
+// buildFileContent turns one ISO directory entry into an ISOFileContent,
+// emitting one ISONestedSource per on-disc extent. Concatenating the
+// sources' byte ranges yields the complete file. This is the path that
+// previously fed BAD bytes for multi-extent files like Avatar's 17 GiB
+// 00022.m2ts (945 extents) — only the first extent's data was correct.
+func buildFileContent(src ISOSource, e isoFileEntry) ISOFileContent {
+	fc := ISOFileContent{
+		InternalPath: e.path,
+		Filename:     filepath.Base(e.path),
+		Size:         int64(e.size),
+		Sources:      make([]ISONestedSource, 0, len(e.extents)),
+	}
+	for _, ext := range e.extents {
+		isoOffset := int64(ext.lba) * iso9660SectorSize
+		extLen := int64(ext.length)
 		if len(src.AesKey) == 0 {
-			// Unencrypted: slice segments to cover exactly this file's bytes
-			sliced, _ := sliceSegmentsForRange(src.Segments, isoOffset, int64(entry.size))
-			fc.Segments = sliced
+			// Unencrypted: pre-slice outer segments to cover this extent
+			// only. The downstream nested reader treats InnerOffset as
+			// an offset within the (already-sliced) segment chain.
+			sliced, _ := sliceSegmentsForRange(src.Segments, isoOffset, extLen)
+			fc.Sources = append(fc.Sources, ISONestedSource{
+				Segments:        sliced,
+				InnerOffset:     0,
+				InnerLength:     extLen,
+				InnerVolumeSize: extLen,
+			})
 		} else {
-			// Encrypted: create a NestedSource so the VFS can decrypt and seek
-			fc.NestedSource = &ISONestedSource{
+			// Encrypted: AES-CBC needs the IV chain from byte 0 of the
+			// outer ISO, so every source gets the full outer segments
+			// and the cipher seeks via InnerOffset.
+			fc.Sources = append(fc.Sources, ISONestedSource{
 				Segments:        src.Segments,
 				AesKey:          src.AesKey,
 				AesIV:           src.AesIV,
 				InnerOffset:     isoOffset,
-				InnerLength:     int64(entry.size),
+				InnerLength:     extLen,
 				InnerVolumeSize: src.Size,
-			}
+			})
 		}
-
-		result = append(result, fc)
 	}
-
-	return result, nil
+	return fc
 }
 
 // isAllowedFile returns true if the file extension is in the allowed list.

@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -730,11 +729,7 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 		close(done)
 	}()
 
-	// Get concurrency setting (default to 10 if not set)
-	concurrency := cfg.Health.LibrarySyncConcurrency
-	if concurrency <= 0 {
-		concurrency = 10
-	}
+	concurrency := cfg.GetLibrarySyncConcurrency()
 
 	// Create a worker pool for parallel metadata reading
 	p := pool.New().WithMaxGoroutines(concurrency)
@@ -1262,9 +1257,6 @@ func updateSymlinkForMountChange(
 	}
 
 	// Create new symlink
-	if runtime.GOOS == "windows" {
-		return currentTarget, false, fmt.Errorf("symlinks are not supported on Windows")
-	}
 	if err := os.Symlink(newTarget, symlinkPath); err != nil {
 		slog.ErrorContext(ctx, "Failed to create updated symlink",
 			"path", symlinkPath,
@@ -1603,6 +1595,61 @@ func (lsw *LibrarySyncWorker) getLibraryPath(metaPath string, filesInUse map[str
 	return nil
 }
 
+// buildProtectedImportDirs returns the set of clean absolute paths under
+// ImportDir that must never be deleted by removeEmptyDirectories. This
+// covers ImportDir itself, the optional CompleteDir level, and every
+// configured SABnzbd category dir (plus the default category when no
+// categories are configured). Without this protection, transiently-empty
+// category folders get pruned between imports and arrs (Radarr v6+) raise
+// a permanent RemotePathMappingCheck health error.
+func buildProtectedImportDirs(cfg *config.Config) map[string]struct{} {
+	protected := map[string]struct{}{}
+	if cfg == nil || cfg.Import.ImportDir == nil || *cfg.Import.ImportDir == "" {
+		return protected
+	}
+
+	importDir := filepath.Clean(*cfg.Import.ImportDir)
+	protected[importDir] = struct{}{}
+
+	base := importDir
+	if cfg.SABnzbd.CompleteDir != "" {
+		base = filepath.Join(importDir, cfg.SABnzbd.CompleteDir)
+		protected[filepath.Clean(base)] = struct{}{}
+	}
+
+	addCategory := func(dir string) {
+		if dir == "" {
+			return
+		}
+		full := filepath.Clean(filepath.Join(base, dir))
+		protected[full] = struct{}{}
+		// Also protect every parent up to (but not including) the base level,
+		// so nested category Dirs like "media/movies" keep their "media"
+		// ancestor as well.
+		for parent := filepath.Dir(full); parent != filepath.Clean(base) && parent != "." && parent != string(filepath.Separator); parent = filepath.Dir(parent) {
+			protected[parent] = struct{}{}
+		}
+	}
+
+	if len(cfg.SABnzbd.Categories) == 0 {
+		addCategory(config.DefaultCategoryDir)
+		return protected
+	}
+
+	for _, cat := range cfg.SABnzbd.Categories {
+		dir := cat.Dir
+		if dir == "" {
+			if cat.Name == config.DefaultCategoryName {
+				dir = config.DefaultCategoryDir
+			} else {
+				dir = cat.Name
+			}
+		}
+		addCategory(dir)
+	}
+	return protected
+}
+
 // removeEmptyDirectories removes empty directories from the library, import, and metadata directories
 func (lsw *LibrarySyncWorker) removeEmptyDirectories(ctx context.Context) (int, error) {
 	cfg := lsw.configGetter()
@@ -1674,6 +1721,7 @@ func (lsw *LibrarySyncWorker) removeEmptyDirectories(ctx context.Context) (int, 
 	// Iteratively remove empty directories
 	deletedCount := 0
 	maxIterations := 5 // Reduced iterations, sorting by depth usually handles it in 1-2
+	protectedImportDirs := buildProtectedImportDirs(cfg)
 	for range maxIterations {
 		removedThisIteration := 0
 
@@ -1696,6 +1744,9 @@ func (lsw *LibrarySyncWorker) removeEmptyDirectories(ctx context.Context) (int, 
 			}
 
 			if cleanDir == cleanMount || cleanDir == cleanLibDir || cleanDir == "/" || cleanDir == "." {
+				continue
+			}
+			if _, ok := protectedImportDirs[cleanDir]; ok {
 				continue
 			}
 
@@ -1766,11 +1817,7 @@ func (lsw *LibrarySyncWorker) syncMetadataOnly(ctx context.Context, startTime ti
 	var filesToAdd []database.AutomaticHealthCheckRecord
 	var filesToAddMu sync.Mutex
 
-	// Get concurrency setting (default to 10 if not set)
-	concurrency := cfg.Health.LibrarySyncConcurrency
-	if concurrency <= 0 {
-		concurrency = 10
-	}
+	concurrency := cfg.GetLibrarySyncConcurrency()
 
 	// Create a worker pool for parallel metadata reading
 	p := pool.New().WithMaxGoroutines(concurrency)

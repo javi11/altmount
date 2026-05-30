@@ -246,7 +246,9 @@ export function SABnzbdConfigSection({
 								</fieldset>
 
 								<fieldset className="fieldset">
-									<legend className="fieldset-legend font-semibold">History Retention (minutes)</legend>
+									<legend className="fieldset-legend font-semibold">
+										History Retention (minutes)
+									</legend>
 									<input
 										type="number"
 										className="input input-bordered w-full bg-base-100 font-mono text-sm"

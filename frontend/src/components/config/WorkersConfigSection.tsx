@@ -364,62 +364,6 @@ export function ImportConfigSection({
 						)}
 					</div>
 
-					{formData.import_strategy === "SYMLINK" && (
-						<>
-							<div className="divider text-base-content/70" />
-
-							<label className="label cursor-pointer items-start justify-start gap-4">
-								<input
-									type="checkbox"
-									className="toggle toggle-primary toggle-sm mt-1 shrink-0"
-									checked={formData.allow_symlinks_on_windows ?? false}
-									disabled={isReadOnly}
-									onChange={(e) =>
-										handleInputChange("allow_symlinks_on_windows", e.target.checked)
-									}
-								/>
-								<div className="min-w-0 flex-1">
-									<span className="block whitespace-normal break-words font-bold text-xs">
-										Allow Symlinks on Windows
-									</span>
-									<span className="mt-1 block whitespace-normal break-words text-base-content/50 text-xs leading-relaxed">
-										Allow symlink creation on Windows. By default, symlinks are blocked on Windows
-										because they require elevated privileges. Has no effect on Linux/macOS.
-									</span>
-								</div>
-							</label>
-
-							{formData.allow_symlinks_on_windows && (
-								<div className="alert alert-warning mt-2">
-									<svg
-										xmlns="http://www.w3.org/2000/svg"
-										className="h-5 w-5 shrink-0"
-										fill="none"
-										viewBox="0 0 24 24"
-										stroke="currentColor"
-										aria-hidden="true"
-									>
-										<title>Warning</title>
-										<path
-											strokeLinecap="round"
-											strokeLinejoin="round"
-											strokeWidth={2}
-											d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"
-										/>
-									</svg>
-									<div className="text-xs">
-										<div className="font-bold">Windows Developer Mode required</div>
-										<div className="mt-1">
-											To create symlinks without admin rights, enable Developer Mode in Windows
-											Settings → Privacy &amp; security → For developers → Developer Mode. Without
-											it, imports will fail with an OS permission error.
-										</div>
-									</div>
-								</div>
-							)}
-						</>
-					)}
-
 					<div className="divider text-base-content/70" />
 
 					<div className="space-y-6">

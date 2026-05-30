@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -54,6 +53,7 @@ type Config struct {
 	SegmentCache    SegmentCacheConfig `yaml:"segment_cache" mapstructure:"segment_cache" json:"segment_cache"`
 	Providers       []ProviderConfig   `yaml:"providers" mapstructure:"providers" json:"providers"`
 	Nzblnk          NzblnkConfig       `yaml:"nzblnk" mapstructure:"nzblnk" json:"nzblnk"`
+	Network         NetworkConfig      `yaml:"network" mapstructure:"network" json:"network"`
 	MountPath       string             `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"`
 	MountType       MountType          `yaml:"mount_type" mapstructure:"mount_type" json:"mount_type"`
 	ProfilerEnabled bool               `yaml:"profiler_enabled" mapstructure:"profiler_enabled" json:"profiler_enabled" default:"false"`
@@ -65,6 +65,28 @@ type NzblnkConfig struct {
 	// Defaults to a browser-like string. Leave empty to use the default.
 	UserAgent string `yaml:"user_agent" mapstructure:"user_agent" json:"user_agent,omitempty"`
 }
+
+// NetworkConfig holds outbound HTTP routing options applied to every external
+// client (indexers, arrs, SABnzbd fallback, NZBLNK resolver). Internal
+// endpoints (RC server, self-loopback) are unaffected.
+//
+// Semantics mirror Go's standard HTTP_PROXY/HTTPS_PROXY/NO_PROXY env vars.
+// Empty strings disable proxying for that scheme.
+type NetworkConfig struct {
+	HTTPProxy  string `yaml:"http_proxy" mapstructure:"http_proxy" json:"http_proxy,omitempty"`
+	HTTPSProxy string `yaml:"https_proxy" mapstructure:"https_proxy" json:"https_proxy,omitempty"`
+	NoProxy    string `yaml:"no_proxy" mapstructure:"no_proxy" json:"no_proxy,omitempty"`
+}
+
+// GetHTTPProxy returns the configured HTTP proxy URL. Implements the
+// httpclient.NetworkProxyConfig interface to avoid config↔httpclient import cycles.
+func (n NetworkConfig) GetHTTPProxy() string { return n.HTTPProxy }
+
+// GetHTTPSProxy returns the configured HTTPS proxy URL.
+func (n NetworkConfig) GetHTTPSProxy() string { return n.HTTPSProxy }
+
+// GetNoProxy returns the comma-separated bypass list.
+func (n NetworkConfig) GetNoProxy() string { return n.NoProxy }
 
 // SegmentCacheConfig configures the segment-aligned disk cache shared by FUSE and WebDAV.
 // When enabled, this cache replaces the FUSE VFS disk cache and additionally benefits WebDAV.
@@ -262,9 +284,17 @@ type ImportConfig struct {
 	QueueProcessingIntervalSeconds int            `yaml:"queue_processing_interval_seconds" mapstructure:"queue_processing_interval_seconds" json:"queue_processing_interval_seconds"`
 	AllowedFileExtensions          []string       `yaml:"allowed_file_extensions" mapstructure:"allowed_file_extensions" json:"allowed_file_extensions"`
 	MaxImportConnections           int            `yaml:"max_import_connections" mapstructure:"max_import_connections" json:"max_import_connections"`
+	// MaxConcurrentImports caps the number of NZB imports that may run
+	// end-to-end at the same time when no stream is active. 0 = unlimited.
+	MaxConcurrentImports int `yaml:"max_concurrent_imports" mapstructure:"max_concurrent_imports" json:"max_concurrent_imports"`
+	// MaxConcurrentImportsWhileStreaming caps concurrent imports while at
+	// least one stream is active, so streams are not starved by imports.
+	// 0 = unlimited.
+	MaxConcurrentImportsWhileStreaming int `yaml:"max_concurrent_imports_while_streaming" mapstructure:"max_concurrent_imports_while_streaming" json:"max_concurrent_imports_while_streaming"`
 	MaxDownloadPrefetch            int            `yaml:"max_download_prefetch" mapstructure:"max_download_prefetch" json:"max_download_prefetch"`
 	SegmentSamplePercentage        int            `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage"`
 	ReadTimeoutSeconds             int            `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds"`
+	IsoAnalyzeTimeoutSeconds       *int           `yaml:"iso_analyze_timeout_seconds" mapstructure:"iso_analyze_timeout_seconds" json:"iso_analyze_timeout_seconds,omitempty"`
 	ImportStrategy                 ImportStrategy `yaml:"import_strategy" mapstructure:"import_strategy" json:"import_strategy"`
 	ImportDir                      *string        `yaml:"import_dir" mapstructure:"import_dir" json:"import_dir,omitempty"`
 	WatchDir                       *string        `yaml:"watch_dir" mapstructure:"watch_dir" json:"watch_dir,omitempty"`
@@ -276,7 +306,6 @@ type ImportConfig struct {
 	FailedItemRetentionHours       *int           `yaml:"failed_item_retention_hours" mapstructure:"failed_item_retention_hours" json:"failed_item_retention_hours,omitempty"`
 	HistoryRetentionDays           *int           `yaml:"history_retention_days" mapstructure:"history_retention_days" json:"history_retention_days,omitempty"`
 	DeleteCompletedNzb             *bool          `yaml:"delete_completed_nzb" mapstructure:"delete_completed_nzb" json:"delete_completed_nzb,omitempty"`
-	AllowSymlinksOnWindows         *bool          `yaml:"allow_symlinks_on_windows" mapstructure:"allow_symlinks_on_windows" json:"allow_symlinks_on_windows,omitempty"`
 }
 
 // ShouldDeleteCompletedNzb returns whether the NZB file should be removed from
@@ -408,6 +437,7 @@ type ArrsConfig struct {
 	LidarrInstances                []ArrsInstanceConfig `yaml:"lidarr_instances" mapstructure:"lidarr_instances" json:"lidarr_instances"`
 	ReadarrInstances               []ArrsInstanceConfig `yaml:"readarr_instances" mapstructure:"readarr_instances" json:"readarr_instances"`
 	WhisparrInstances              []ArrsInstanceConfig `yaml:"whisparr_instances" mapstructure:"whisparr_instances" json:"whisparr_instances"`
+	SportarrInstances              []ArrsInstanceConfig `yaml:"sportarr_instances" mapstructure:"sportarr_instances" json:"sportarr_instances"`
 	QueueCleanupEnabled            *bool                `yaml:"queue_cleanup_enabled" mapstructure:"queue_cleanup_enabled" json:"queue_cleanup_enabled,omitempty"`
 	QueueCleanupIntervalSeconds    int                  `yaml:"queue_cleanup_interval_seconds" mapstructure:"queue_cleanup_interval_seconds" json:"queue_cleanup_interval_seconds,omitempty"`
 	CleanupAutomaticImportFailure  *bool                `yaml:"cleanup_automatic_import_failure" mapstructure:"cleanup_automatic_import_failure" json:"cleanup_automatic_import_failure,omitempty"`
@@ -513,10 +543,6 @@ func (c *Config) Validate() error {
 	if !validStrategies[c.Import.ImportStrategy] {
 		return fmt.Errorf("import_strategy must be one of: NONE, SYMLINK, STRM")
 	}
-	if runtime.GOOS == "windows" && c.Import.ImportStrategy == ImportStrategySYMLINK {
-		return fmt.Errorf("import_strategy SYMLINK is not supported on Windows; use STRM instead")
-	}
-
 	// Validate import directory when strategy requires it
 	if c.Import.ImportStrategy == ImportStrategySYMLINK || c.Import.ImportStrategy == ImportStrategySTRM {
 		if c.Import.ImportDir == nil || *c.Import.ImportDir == "" {
@@ -1247,6 +1273,7 @@ func DefaultConfig(configDir ...string) *Config {
 	watchIntervalSeconds := 10        // Default watch interval
 	failedItemRetentionHours := 24    // Default: auto-remove failed items after 24 hours
 	historyRetentionDays := 90        // Default: auto-remove import history after 90 days (3 months)
+	isoAnalyzeTimeoutSeconds := 120   // Default: 120s hard cap per ISO analyse (prevents stuck NNTP from stalling import for 9+ minutes)
 	cleanupAutomaticImportFailure := false
 	metadataBackupEnabled := false
 	failureMaskingEnabled := false
@@ -1378,7 +1405,8 @@ func DefaultConfig(configDir ...string) *Config {
 			MaxImportConnections:    5,                  // Default: 5 concurrent NNTP connections for validation and archive processing
 			MaxDownloadPrefetch:     10,                 // Default: 10 segments prefetched ahead for archive analysis
 			SegmentSamplePercentage: 1,                  // Default: 1% segment sampling
-			ReadTimeoutSeconds:      300,                // Default: 5 minutes read timeout
+			ReadTimeoutSeconds:       300,                // Default: 5 minutes read timeout
+			IsoAnalyzeTimeoutSeconds: &isoAnalyzeTimeoutSeconds,
 			ImportStrategy:          ImportStrategyNone, // Default: no import strategy (direct import)
 			ImportDir:               nil,                // No default import directory
 			WatchDir:                nil,
@@ -1459,6 +1487,7 @@ func DefaultConfig(configDir ...string) *Config {
 			LidarrInstances:                []ArrsInstanceConfig{},
 			ReadarrInstances:               []ArrsInstanceConfig{},
 			WhisparrInstances:              []ArrsInstanceConfig{},
+			SportarrInstances:              []ArrsInstanceConfig{},
 			CleanupAutomaticImportFailure:  &cleanupAutomaticImportFailure,
 			QueueCleanupGracePeriodMinutes: 10, // Default to 10 minutes
 			QueueCleanupAllowlist: []IgnoredMessage{

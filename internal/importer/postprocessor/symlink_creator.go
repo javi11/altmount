@@ -6,7 +6,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/javi11/altmount/internal/config"
@@ -36,44 +35,14 @@ func (c *Coordinator) CreateSymlinks(ctx context.Context, item *database.ImportQ
 	// Keep the original resulting path for metadata and actual mount path lookups
 	originalResultingPath := resultingPath
 
-	// 1. Get the internal relative path (relative to FUSE mount)
-	relPath := strings.TrimPrefix(resultingPath, "/")
-
-	// 2. Strip any existing /complete or /category prefix from the internal path to start clean
 	category := ""
-	if item.Category != nil && *item.Category != "" {
-		category = strings.Trim(*item.Category, "/")
+	if item.Category != nil {
+		category = *item.Category
 	}
 
-	if cfg.SABnzbd.CompleteDir != "" {
-		completeDir := strings.Trim(filepath.ToSlash(cfg.SABnzbd.CompleteDir), "/")
-		if after, ok := strings.CutPrefix(relPath, completeDir+"/"); ok {
-			relPath = after
-		} else if relPath == completeDir {
-			relPath = ""
-		}
-	}
-	if category != "" {
-		if after, ok := strings.CutPrefix(relPath, category+"/"); ok {
-			relPath = after
-		} else if relPath == category {
-			relPath = ""
-		}
-	}
-
-	// 3. Build the clean, isolated library path
-	// Construct: [CompleteDir] + [Category] + RelPath
-	pathParts := []string{}
-	if cfg.SABnzbd.CompleteDir != "" {
-		pathParts = append(pathParts, strings.Trim(cfg.SABnzbd.CompleteDir, "/"))
-	}
-	if category != "" {
-		pathParts = append(pathParts, category)
-	}
-	pathParts = append(pathParts, relPath)
-
-	resultingPath = filepath.Join(pathParts...)
-	resultingPath = filepath.ToSlash(filepath.Clean(resultingPath))
+	// Build the clean, isolated library path: [CompleteDir]/[Category]/<remainder>,
+	// stripping any of those prefixes that are already present in the source path.
+	resultingPath = buildLibraryRelPath(resultingPath, cfg.SABnzbd.CompleteDir, category)
 
 	// Get the actual metadata/mount path (where the content actually lives)
 	actualPath := filepath.Join(cfg.MountPath, strings.TrimPrefix(originalResultingPath, "/"))
@@ -127,44 +96,15 @@ func (c *Coordinator) CreateSymlinks(ctx context.Context, item *database.ImportQ
 		// Build the actual file path in the mount
 		actualFilePath := filepath.Join(cfg.MountPath, strings.TrimPrefix(relPath, "/"))
 
-		// 1. Get the internal relative path (relative to FUSE mount)
-		relPath = strings.TrimPrefix(relPath, "/")
-
-		// 2. Strip any existing /complete or /category prefix from the internal path to start clean
 		category := ""
-		if item.Category != nil && *item.Category != "" {
-			category = strings.Trim(*item.Category, "/")
+		if item.Category != nil {
+			category = *item.Category
 		}
 
-		if cfg.SABnzbd.CompleteDir != "" {
-			completeDir := strings.Trim(filepath.ToSlash(cfg.SABnzbd.CompleteDir), "/")
-			if after, ok := strings.CutPrefix(relPath, completeDir+"/"); ok {
-				relPath = after
-			} else if relPath == completeDir {
-				relPath = ""
-			}
-		}
-		if category != "" {
-			if after, ok := strings.CutPrefix(relPath, category+"/"); ok {
-				relPath = after
-			} else if relPath == category {
-				relPath = ""
-			}
-		}
-
-		// 3. Build the clean, isolated library path
-		// Construct: [CompleteDir] + [Category] + RelPath
-		pathParts := []string{}
-		if cfg.SABnzbd.CompleteDir != "" {
-			pathParts = append(pathParts, strings.Trim(cfg.SABnzbd.CompleteDir, "/"))
-		}
-		if category != "" {
-			pathParts = append(pathParts, category)
-		}
-		pathParts = append(pathParts, relPath)
-
-		symlinkResultingPath := filepath.Join(pathParts...)
-		symlinkResultingPath = filepath.ToSlash(filepath.Clean(symlinkResultingPath))
+		// filepath.Rel returns OS-native separators (backslashes on Windows);
+		// buildLibraryRelPath normalises them before stripping so we don't
+		// double-prefix the category/CompleteDir on Windows (issue #585).
+		symlinkResultingPath := buildLibraryRelPath(relPath, cfg.SABnzbd.CompleteDir, category)
 
 		if err := c.createSingleSymlink(actualFilePath, symlinkResultingPath); err != nil {
 			c.log.ErrorContext(ctx, "Failed to create symlink",
@@ -206,10 +146,6 @@ func (c *Coordinator) createAbsoluteSymlink(actualPath, destPath string) error {
 		}
 	}
 
-	if err := windowsSymlinkAllowed(c.configGetter()); err != nil {
-		return err
-	}
-
 	if err := os.Symlink(actualPath, destPath); err != nil {
 		return fmt.Errorf("failed to create symlink at target path: %w", err)
 	}
@@ -237,27 +173,9 @@ func (c *Coordinator) createSingleSymlink(actualPath, resultingPath string) erro
 	}
 
 	// Create the symlink using the absolute actual path
-	if err := windowsSymlinkAllowed(c.configGetter()); err != nil {
-		return err
-	}
 	if err := os.Symlink(actualPath, symlinkPath); err != nil {
 		return fmt.Errorf("failed to create symlink: %w", err)
 	}
 
 	return nil
-}
-
-// windowsSymlinkAllowed returns an error when running on Windows and the
-// AllowSymlinksOnWindows opt-in flag is not enabled. On non-Windows platforms
-// it always returns nil. When the flag is enabled on Windows, callers proceed
-// to os.Symlink which will only succeed if the process has the required
-// privilege (typically granted by enabling Developer Mode).
-func windowsSymlinkAllowed(cfg *config.Config) error {
-	if runtime.GOOS != "windows" {
-		return nil
-	}
-	if cfg != nil && cfg.Import.AllowSymlinksOnWindows != nil && *cfg.Import.AllowSymlinksOnWindows {
-		return nil
-	}
-	return fmt.Errorf("symlinks are not supported on Windows by default; enable 'Allow symlinks on Windows' in config (requires Windows Developer Mode) or use STRM import strategy instead")
 }
