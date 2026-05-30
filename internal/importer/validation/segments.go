@@ -3,6 +3,7 @@ package validation
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/javi11/altmount/internal/encryption/rclone"
@@ -69,9 +70,23 @@ func ValidateSegmentsForFile(
 	}
 
 	selected := usenet.SelectSegmentsForValidation(segments, samplePercentage)
+	slog.DebugContext(ctx, "Starting segment validation",
+		"file", filename,
+		"total_segments", len(segments),
+		"selected_segments", len(selected),
+		"sample_percentage", samplePercentage,
+		"max_goroutines", maxGoroutines,
+		"timeout", timeout)
 	if err := usenet.ValidateSegmentList(ctx, selected, poolManager, maxGoroutines, progressTracker, timeout); err != nil {
+		slog.WarnContext(ctx, "Segment validation failed",
+			"file", filename,
+			"error", err,
+			"selected_segments", len(selected))
 		return err
 	}
+	slog.DebugContext(ctx, "Segment validation completed",
+		"file", filename,
+		"selected_segments", len(selected))
 
 	expectedSize := fileSize
 	switch encryption {

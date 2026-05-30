@@ -3,6 +3,7 @@ package usenet
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math/rand"
 	"sync/atomic"
 	"time"
@@ -73,7 +74,13 @@ func ValidateSegmentList(
 	}
 
 	totalToValidate := len(segments)
-	var validatedCount int32
+	var completedCount int32
+	var successCount int32
+
+	slog.DebugContext(ctx, "Starting segment list validation",
+		"total_segments", totalToValidate,
+		"max_connections", maxConnections,
+		"timeout", timeout)
 
 	pl := concpool.New().WithErrors().WithFirstError().WithMaxGoroutines(maxConnections)
 	for _, seg := range segments {
@@ -86,21 +93,34 @@ func ValidateSegmentList(
 			if err == nil {
 				poolManager.IncArticlesDownloaded()
 				poolManager.UpdateDownloadProgress("", 100)
-			}
-			if err != nil {
-				return fmt.Errorf("segment with ID %s unreachable: %w", seg.Id, err)
+				atomic.AddInt32(&successCount, 1)
+				slog.DebugContext(ctx, "Segment validated successfully", "segment_id", seg.Id)
+			} else {
+				slog.DebugContext(ctx, "Segment validation failed",
+					"segment_id", seg.Id,
+					"error", err)
 			}
 
 			if progressTracker != nil {
-				count := atomic.AddInt32(&validatedCount, 1)
+				count := atomic.AddInt32(&completedCount, 1)
 				progressTracker.Update(int(count), totalToValidate)
+			}
+
+			if err != nil {
+				return fmt.Errorf("segment with ID %s unreachable: %w", seg.Id, err)
 			}
 
 			return nil
 		})
 	}
 
-	return pl.Wait()
+	err = pl.Wait()
+	slog.DebugContext(ctx, "Segment list validation finished",
+		"total_segments", totalToValidate,
+		"completed", atomic.LoadInt32(&completedCount),
+		"successful", atomic.LoadInt32(&successCount),
+		"error", err)
+	return err
 }
 
 // SelectSegmentsForValidation is the exported form of the sampling selector.

@@ -58,6 +58,11 @@ func ProcessSingleFile(
 	}
 
 	// Validate segments
+	slog.DebugContext(ctx, "Validating segments for single file",
+		"file", file.Filename,
+		"segments", len(file.Segments),
+		"sample_percentage", segmentSamplePercentage,
+		"timeout", timeout)
 	if err := validation.ValidateSegmentsForFile(
 		ctx,
 		file.Filename,
@@ -70,8 +75,12 @@ func ProcessSingleFile(
 		tracker,
 		timeout,
 	); err != nil {
+		slog.WarnContext(ctx, "Single file segment validation failed",
+			"file", file.Filename,
+			"error", err)
 		return "", "", err
 	}
+	slog.DebugContext(ctx, "Single file segment validation succeeded", "file", file.Filename)
 
 	// Convert PAR2 files to metadata format
 	var par2Refs []*metapb.Par2FileReference

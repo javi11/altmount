@@ -101,20 +101,28 @@ func ProcessRegularFiles(
 				return nil
 			}
 
-			if err := validation.ValidateSegmentsForFile(
-				ctx,
-				filename,
-				file.Size,
-				file.Segments,
-				file.Encryption,
-				poolManager,
-				maxValidationGoroutines,
-				segmentSamplePercentage,
-				fileTracker,
-				timeout,
-			); err != nil {
-				return err
-			}
+		slog.DebugContext(ctx, "Validating segments for multi-file item",
+			"file", filename,
+			"segments", len(file.Segments),
+			"sample_percentage", segmentSamplePercentage,
+			"timeout", timeout)
+		if err := validation.ValidateSegmentsForFile(
+			ctx,
+			filename,
+			file.Size,
+			file.Segments,
+			file.Encryption,
+			poolManager,
+			maxValidationGoroutines,
+			segmentSamplePercentage,
+			fileTracker,
+			timeout,
+		); err != nil {
+			slog.WarnContext(ctx, "Multi-file segment validation failed",
+				"file", filename,
+				"error", err)
+			return err
+		}
 
 			fileMeta := metadataService.CreateFileMetadata(
 				file.Size,
