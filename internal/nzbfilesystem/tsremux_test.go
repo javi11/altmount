@@ -1,4 +1,4 @@
-package iso
+package nzbfilesystem
 
 import "testing"
 

@@ -253,8 +253,9 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 		Salt:          fileMeta.Salt,
 		AesKey:        fileMeta.AesKey,
 		AesIv:         fileMeta.AesIv,
-		SegmentData:   fileMeta.SegmentData,
-		NestedSources: fileMeta.NestedSources,
+		SegmentData:    fileMeta.SegmentData,
+		NestedSources:  fileMeta.NestedSources,
+		ClipBoundaries: fileMeta.ClipBoundaries,
 	}
 
 	// Create a metadata-based virtual file handle
@@ -766,6 +767,10 @@ type fileHandleMeta struct {
 	AesIv         []byte
 	SegmentData   []*metapb.SegmentData
 	NestedSources []*metapb.NestedSegmentSource
+	// ClipBoundaries is the per-clip timeline table for a multi-clip BD main
+	// feature. Non-empty enables the continuous-timeline TS remux on reads;
+	// empty (every other file) bypasses it entirely.
+	ClipBoundaries []*metapb.ClipBoundary
 }
 
 // MetadataVirtualFile implements afero.File for metadata-backed virtual files
@@ -789,6 +794,11 @@ type MetadataVirtualFile struct {
 	streamID         string
 	segmentStore     usenet.SegmentStore // optional segment cache
 	segmentIndexOnce sync.Once           // guards lazy init of segmentIndex
+
+	// clipSpans is the lazily-built absolute byte-range + delta table for the
+	// continuous-timeline remux, derived once from meta.ClipBoundaries.
+	clipSpans     []clipSpan
+	clipSpansOnce sync.Once
 
 	// Reader state and position tracking
 	reader            io.ReadCloser
@@ -1051,6 +1061,16 @@ func (mvf *MetadataVirtualFile) ReadAtContext(readCtx context.Context, p []byte,
 // createReaderAtOffset creates an independent reader for reading at a specific offset.
 // This reader is self-contained and can be used concurrently with other readers.
 func (mvf *MetadataVirtualFile) createReaderAtOffset(start, end int64) (io.ReadCloser, error) {
+	reader, err := mvf.createRawReaderAtOffset(start, end)
+	if err != nil {
+		return nil, err
+	}
+	return mvf.maybeWrapRemux(reader, start), nil
+}
+
+// createRawReaderAtOffset builds the underlying reader for [start,end] without
+// the continuous-timeline remux wrapper.
+func (mvf *MetadataVirtualFile) createRawReaderAtOffset(start, end int64) (io.ReadCloser, error) {
 	if mvf.poolManager == nil {
 		return nil, ErrNoUsenetPool
 	}
@@ -1070,6 +1090,23 @@ func (mvf *MetadataVirtualFile) createReaderAtOffset(start, end int64) (io.ReadC
 	}
 
 	return mvf.createUsenetReader(mvf.ctx, start, end)
+}
+
+// maybeWrapRemux wraps reader in a continuous-timeline TS remux when the file
+// carries a per-clip boundary table (multi-clip BD main feature). startOff is
+// the absolute file offset of reader's first byte. For every other file the
+// table is empty and reader is returned unchanged (zero overhead).
+func (mvf *MetadataVirtualFile) maybeWrapRemux(reader io.ReadCloser, startOff int64) io.ReadCloser {
+	if len(mvf.meta.ClipBoundaries) == 0 {
+		return reader
+	}
+	mvf.clipSpansOnce.Do(func() {
+		mvf.clipSpans = buildClipSpans(mvf.meta.ClipBoundaries)
+	})
+	if len(mvf.clipSpans) == 0 {
+		return reader
+	}
+	return newTSRemuxReader(reader, mvf.clipSpans, startOff)
 }
 
 // createEncryptedReaderAtOffset creates an encrypted reader for a specific offset range
@@ -1344,6 +1381,12 @@ func (mvf *MetadataVirtualFile) ensureReader() error {
 		}
 		mvf.reader = ur
 	}
+
+	// Apply the continuous-timeline remux for multi-clip BD main features.
+	// No-op (returns the same reader) for every other file. The reader yields
+	// bytes from absolute offset `start`, which the wrapper needs for packet
+	// framing and per-clip delta selection.
+	mvf.reader = mvf.maybeWrapRemux(mvf.reader, start)
 
 	mvf.readerInitialized = true
 	return nil
