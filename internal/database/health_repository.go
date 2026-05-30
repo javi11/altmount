@@ -703,7 +703,7 @@ func (r *HealthRepository) RegisterCorruptedFile(ctx context.Context, filePath s
 			status = 'pending',
 			last_error = excluded.last_error,
 			error_details = excluded.error_details,
-			retry_count = CASE WHEN max_retries > 0 THEN max_retries - 1 ELSE 0 END,
+			retry_count = 0,
 			scheduled_check_at = datetime('now'),
 			last_checked = datetime('now'),
 			updated_at = datetime('now'),
@@ -1680,12 +1680,13 @@ func (r *HealthRepository) RelinkFileByFilename(ctx context.Context, filename, f
 		UPDATE file_health
 		SET file_path = ?,
 		    library_path = ?,
-		    status = 'pending',
-		    last_error = NULL,
-		    error_details = NULL,
+		    status = CASE WHEN status IN ('repair_triggered', 'corrupted') THEN status ELSE 'pending' END,
+		    retry_count = CASE WHEN status IN ('repair_triggered', 'corrupted') THEN retry_count ELSE 0 END,
+		    last_error = CASE WHEN status IN ('repair_triggered', 'corrupted') THEN last_error ELSE NULL END,
+		    error_details = CASE WHEN status IN ('repair_triggered', 'corrupted') THEN error_details ELSE NULL END,
 		    metadata = COALESCE(?, metadata),
 		    updated_at = datetime('now'),
-		    scheduled_check_at = datetime('now')
+		    scheduled_check_at = CASE WHEN status IN ('repair_triggered', 'corrupted') THEN scheduled_check_at ELSE datetime('now') END
 		WHERE (file_path LIKE ? OR file_path = ? OR library_path LIKE ? OR library_path = ?)
 	`
 
