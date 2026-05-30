@@ -51,13 +51,13 @@ func buildClipSpans(boundaries []*metapb.ClipBoundary) []clipSpan {
 // any, live in the packet header before startOff); every fully-streamed packet
 // is rewritten.
 type tsRemuxReader struct {
-	inner      io.ReadCloser
-	spans      []clipSpan
-	absPos     int64        // absolute offset of the next byte to pull from inner
-	packetSize int          // 192 (BDAV) or 188; 0 until detected
-	disabled   bool         // true if the stream isn't recognisable TS → pure passthrough
-	out        bytes.Buffer // rewritten bytes ready to deliver
-	probe      []byte       // bytes read for packet-size detection, not yet framed
+	inner       io.ReadCloser
+	spans       []clipSpan
+	absPos      int64        // absolute offset of the next byte to pull from inner
+	packetSize  int          // 192 (BDAV); fixed for BD main features
+	disabled    bool         // true if the stream isn't recognisable TS → pure passthrough
+	syncChecked bool         // whether the first aligned packet's sync byte was validated
+	out         bytes.Buffer // rewritten bytes ready to deliver
 }
 
 // newTSRemuxReader wraps inner. startOff is the absolute file offset of inner's
@@ -106,23 +106,23 @@ func (r *tsRemuxReader) Read(p []byte) (int, error) {
 	return r.out.Read(p)
 }
 
-// fill pulls the next chunk from inner, rewrites it if it is a complete
-// packet aligned within its clip, and appends it to out. Returns io.EOF when
-// inner is exhausted.
+// fill pulls the next chunk from inner, rewrites it if it is a complete packet
+// aligned within its clip, and appends it to out. Returns io.EOF when inner is
+// exhausted.
+//
+// Packet framing is derived from the CLIP grid (each clip's bytes start at
+// clip.start and are a whole number of 192-byte BDAV source packets), NOT from
+// probing the stream head. This is what makes the wrapper correct for reads
+// that begin at an arbitrary (unaligned) offset — e.g. ffprobe seeking to
+// near-EOF to estimate duration. A start that lands mid-packet emits the
+// leading partial bytes raw, then frames full packets from the next boundary.
 func (r *tsRemuxReader) fill() error {
-	// Detect packet size once from the head of the stream.
-	if r.packetSize == 0 && !r.disabled {
-		if err := r.detect(); err != nil {
-			return err
-		}
-		if r.disabled {
-			// detect() already moved any probed bytes into out as passthrough.
-			return nil
-		}
-	}
-
 	if r.disabled {
 		return r.passthrough()
+	}
+	if r.packetSize == 0 {
+		// BD main features (the only files with a clip table) are BDAV-192.
+		r.packetSize = bdavPacketLen
 	}
 
 	clip := r.clipFor(r.absPos)
@@ -148,7 +148,18 @@ func (r *tsRemuxReader) fill() error {
 	chunk = chunk[:nr]
 	if nr > 0 {
 		if aligned && nr == r.packetSize {
-			rewritePacket(chunk, r.packetSize, clip.delta)
+			// Validate the first aligned packet looks like BDAV TS; if not,
+			// the stream isn't what we expect (wrong decryption, plain TS,
+			// non-media) so disable rewriting rather than corrupt bytes.
+			if !r.syncChecked {
+				r.syncChecked = true
+				if chunk[4] != tsSync {
+					r.disabled = true
+				}
+			}
+			if !r.disabled {
+				rewritePacket(chunk, r.packetSize, clip.delta)
+			}
 		}
 		r.out.Write(chunk)
 		r.absPos += int64(nr)
@@ -168,71 +179,4 @@ func (r *tsRemuxReader) passthrough() error {
 		r.absPos += int64(nr)
 	}
 	return err
-}
-
-// detect reads up to two packets' worth from inner to determine the packet
-// size, then frames from there. If the stream isn't recognisable TS, it sets
-// disabled and emits whatever was probed as passthrough so no bytes are lost.
-func (r *tsRemuxReader) detect() error {
-	// Read enough to cover two BDAV packets for a confident detection.
-	const probeLen = 2 * bdavPacketLen
-	buf := make([]byte, probeLen)
-	nr, err := io.ReadFull(r.inner, buf)
-	buf = buf[:nr]
-	r.probe = buf
-	if nr == 0 {
-		if err == io.ErrUnexpectedEOF {
-			err = io.EOF
-		}
-		return err
-	}
-
-	ps := detectTSPacketSize(buf)
-	if ps == 0 {
-		// Not TS we understand — disable rewriting, stream raw.
-		r.disabled = true
-		r.out.Write(buf)
-		r.absPos += int64(nr)
-		r.probe = nil
-		return nil
-	}
-	r.packetSize = ps
-
-	// Frame the probed bytes packet-by-packet (they begin at r.absPos, which
-	// is the reader's start — assumed packet-aligned for the head read; if it
-	// isn't, the leading mid-packet bytes are emitted raw by the generic path).
-	consumed := 0
-	for consumed+ps <= len(buf) {
-		clip := r.clipFor(r.absPos)
-		pkt := buf[consumed : consumed+ps]
-		intoClip := r.absPos - clipStartOrZero(clip)
-		if clip != nil && intoClip%int64(ps) == 0 && r.absPos+int64(ps) <= clip.end+1 {
-			rewritePacket(pkt, ps, clip.delta)
-		}
-		r.out.Write(pkt)
-		r.absPos += int64(ps)
-		consumed += ps
-	}
-	// Any trailing partial-packet bytes from the probe: stash so the next
-	// fill() reads the rest of that packet and frames correctly. Simplest:
-	// emit them raw (they are at most ps-1 bytes; a real stream's next read
-	// continues the packet, but to keep framing simple at the probe seam we
-	// pass these through). For BDAV with a packet-aligned start this branch
-	// is never taken (probeLen is a multiple of 192).
-	if consumed < len(buf) {
-		r.out.Write(buf[consumed:])
-		r.absPos += int64(len(buf) - consumed)
-	}
-	r.probe = nil
-	if err == io.ErrUnexpectedEOF {
-		err = nil // partial probe is fine; more may follow
-	}
-	return err
-}
-
-func clipStartOrZero(c *clipSpan) int64 {
-	if c == nil {
-		return 0
-	}
-	return c.start
 }

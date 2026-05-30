@@ -29,40 +29,6 @@ const (
 	ptsModulus = int64(1) << 33
 )
 
-// detectTSPacketSize inspects a buffer that begins at a packet boundary and
-// returns 192 (BDAV, sync byte at offset 4), 188 (plain TS, sync at offset 0),
-// or 0 when neither layout is recognised. Blu-ray .m2ts on disc is BDAV
-// (192-byte source packets); plain 188 is handled for completeness/tests.
-func detectTSPacketSize(buf []byte) int {
-	if len(buf) >= bdavPacketLen && buf[4] == tsSync {
-		// Confirm with a second packet when available to avoid a chance 0x47.
-		if len(buf) >= 2*bdavPacketLen {
-			if buf[4+bdavPacketLen] == tsSync {
-				return bdavPacketLen
-			}
-		} else {
-			return bdavPacketLen
-		}
-	}
-	if len(buf) >= tsPacketLen && buf[0] == tsSync {
-		if len(buf) >= 2*tsPacketLen {
-			if buf[tsPacketLen] == tsSync {
-				return tsPacketLen
-			}
-		} else {
-			return tsPacketLen
-		}
-	}
-	// Fall back to BDAV if only its sync matched on a short buffer.
-	if len(buf) >= bdavPacketLen && buf[4] == tsSync {
-		return bdavPacketLen
-	}
-	if len(buf) >= tsPacketLen && buf[0] == tsSync {
-		return tsPacketLen
-	}
-	return 0
-}
-
 // addMod33 returns (v + delta) wrapped into the 33-bit timestamp space.
 // delta may be negative (when a clip's pts_base exceeds its timeline_start).
 func addMod33(v, delta int64) int64 {

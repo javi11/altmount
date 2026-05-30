@@ -119,17 +119,39 @@ func TestTSRemuxReader_RangeDeterminism(t *testing.T) {
 	raw, spans, _ := buildTwoClipStream(t)
 	full, _ := io.ReadAll(newTSRemuxReader(newMem(raw), spans, 0))
 
+	// Packet-aligned starts.
 	for startPkt := 0; startPkt*bdavPacketLen < len(raw); startPkt++ {
 		startOff := int64(startPkt * bdavPacketLen)
-		// Underlying reader yields bytes from startOff onward.
 		r := newTSRemuxReader(newMem(raw[startOff:]), spans, startOff)
 		got, err := io.ReadAll(r)
 		if err != nil {
-			t.Fatalf("startOff %d: %v", startOff, err)
+			t.Fatalf("aligned startOff %d: %v", startOff, err)
 		}
-		want := full[startOff:]
-		if !bytes.Equal(got, want) {
-			t.Errorf("startOff %d: range read differs from full-rewrite slice", startOff)
+		if want := full[startOff:]; !bytes.Equal(got, want) {
+			t.Errorf("aligned startOff %d: range read differs from full-rewrite slice", startOff)
+		}
+	}
+
+	// UNALIGNED starts in packet payload — this is what ffprobe does when it
+	// seeks to near-EOF to estimate duration. The OLD code disabled rewriting
+	// on any unaligned start, leaving the tail (and thus the measured
+	// duration) wrong; this is the regression guard. The leading mid-packet
+	// bytes are payload (rewrite only touches header timestamp fields), so the
+	// output must still byte-match the full-rewrite slice.
+	for startPkt := 0; startPkt*bdavPacketLen < len(raw); startPkt++ {
+		for _, intoPkt := range []int64{100, 150, 188} { // all past the PTS field
+			startOff := int64(startPkt*bdavPacketLen) + intoPkt
+			if startOff >= int64(len(raw)) {
+				continue
+			}
+			r := newTSRemuxReader(newMem(raw[startOff:]), spans, startOff)
+			got, err := io.ReadAll(r)
+			if err != nil {
+				t.Fatalf("unaligned startOff %d: %v", startOff, err)
+			}
+			if want := full[startOff:]; !bytes.Equal(got, want) {
+				t.Errorf("unaligned startOff %d: range read differs from full-rewrite slice (tail left un-rewritten?)", startOff)
+			}
 		}
 	}
 }
