@@ -976,6 +976,8 @@ function FuseMountSubSection({ config, isRunning, onFormDataChange }: FuseSubSec
 		entry_timeout_seconds: 1,
 		max_cache_size_mb: 128,
 		max_read_ahead_mb: 128,
+		async_buffer_size_mb: 16,
+		async_buffer_max_total_mb: 256,
 	});
 
 	useEffect(() => {
@@ -1084,6 +1086,46 @@ function FuseMountSubSection({ config, isRunning, onFormDataChange }: FuseSubSec
 								MB
 							</span>
 						</div>
+					</fieldset>
+					<fieldset className="fieldset">
+						<legend className="fieldset-legend">Read-Ahead Buffer (per stream)</legend>
+						<div className="join w-full">
+							<input
+								type="number"
+								className="input input-bordered join-item w-full bg-base-100 font-mono text-sm"
+								value={formData.async_buffer_size_mb ?? 16}
+								onChange={(e) =>
+									updateField({
+										async_buffer_size_mb: Number.parseInt(e.target.value, 10) || 0,
+									})
+								}
+								disabled={isRunning}
+							/>
+							<span className="btn btn-ghost join-item pointer-events-none border-base-300 text-xs">
+								MB
+							</span>
+						</div>
+						<p className="label">0 disables read-ahead (direct passthrough)</p>
+					</fieldset>
+					<fieldset className="fieldset">
+						<legend className="fieldset-legend">Read-Ahead Memory Cap (total)</legend>
+						<div className="join w-full">
+							<input
+								type="number"
+								className="input input-bordered join-item w-full bg-base-100 font-mono text-sm"
+								value={formData.async_buffer_max_total_mb ?? 256}
+								onChange={(e) =>
+									updateField({
+										async_buffer_max_total_mb: Number.parseInt(e.target.value, 10) || 0,
+									})
+								}
+								disabled={isRunning}
+							/>
+							<span className="btn btn-ghost join-item pointer-events-none border-base-300 text-xs">
+								MB
+							</span>
+						</div>
+						<p className="label">0 = unlimited; caps read-ahead across all streams</p>
 					</fieldset>
 					<fieldset className="fieldset">
 						<legend className="fieldset-legend">Permissions</legend>

@@ -37,10 +37,11 @@ type readAtContexter interface {
 }
 
 type openHandle struct {
-	file   afero.File
-	stream *nzbfilesystem.ActiveStream
-	path   string
-	closed atomic.Bool
+	file     afero.File
+	stream   *nzbfilesystem.ActiveStream
+	path     string
+	closed   atomic.Bool
+	asyncBuf *backend.AsyncReadBuffer // nil when async read-ahead is disabled
 }
 
 // FS implements cgofuse.FileSystemInterface using NzbFilesystem.
@@ -133,6 +134,11 @@ func (f *FS) closeHandle(h *openHandle) {
 	}
 	if h.stream != nil && f.cfg.StreamTracker != nil {
 		f.cfg.StreamTracker.Remove(h.stream.ID)
+	}
+	// Stop read-ahead before closing the underlying file so the fill goroutine
+	// is drained first.
+	if h.asyncBuf != nil {
+		h.asyncBuf.Close()
 	}
 	if h.file != nil {
 		_ = h.file.Close()
@@ -285,6 +291,15 @@ func (f *FS) OpenEx(path string, fi *cgofuse.FileInfo_t) int {
 		path:   clean,
 	}
 
+	// Attach a read-ahead buffer for sufficiently large files. The buffer
+	// stays in passthrough mode until sustained sequential reads are observed,
+	// so header probes and seek/scrub bursts never allocate it.
+	if bufBytes := f.cfg.FuseConfig.AsyncBufferSizeMB * 1024 * 1024; bufBytes > 0 && info.Size() > int64(bufBytes) {
+		if rac, ok := file.(readAtContexter); ok {
+			h.asyncBuf = backend.NewAsyncReadBuffer(ctx, rac, bufBytes, info.Size(), f.logger)
+		}
+	}
+
 	fi.Fh = f.allocHandle(h)
 
 	// Use DIRECT_IO when file size is unknown/zero to prevent the kernel
@@ -317,7 +332,9 @@ func (f *FS) Read(path string, buff []byte, ofst int64, fh uint64) int {
 	var err error
 	ctx := context.Background()
 
-	if rac, ok := h.file.(readAtContexter); ok {
+	if h.asyncBuf != nil {
+		n, err = h.asyncBuf.ReadAtContext(ctx, buff, ofst)
+	} else if rac, ok := h.file.(readAtContexter); ok {
 		n, err = rac.ReadAtContext(ctx, buff, ofst)
 	} else if ra, ok := h.file.(io.ReaderAt); ok {
 		n, err = ra.ReadAt(buff, ofst)

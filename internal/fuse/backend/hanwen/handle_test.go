@@ -48,15 +48,15 @@ func (m *MockFile) Seek(offset int64, whence int) (int64, error) {
 	return args.Get(0).(int64), args.Error(1)
 }
 
-func (m *MockFile) Write(p []byte) (n int, err error)                  { return 0, nil }
-func (m *MockFile) WriteAt(p []byte, off int64) (n int, err error)     { return 0, nil }
-func (m *MockFile) Name() string                                       { return "mock" }
-func (m *MockFile) Readdir(count int) ([]os.FileInfo, error)           { return nil, nil }
-func (m *MockFile) Readdirnames(n int) ([]string, error)               { return nil, nil }
-func (m *MockFile) Stat() (os.FileInfo, error)                         { return nil, nil }
-func (m *MockFile) Sync() error                                        { return nil }
-func (m *MockFile) Truncate(size int64) error                          { return nil }
-func (m *MockFile) WriteString(s string) (ret int, err error)          { return 0, nil }
+func (m *MockFile) Write(p []byte) (n int, err error)              { return 0, nil }
+func (m *MockFile) WriteAt(p []byte, off int64) (n int, err error) { return 0, nil }
+func (m *MockFile) Name() string                                   { return "mock" }
+func (m *MockFile) Readdir(count int) ([]os.FileInfo, error)       { return nil, nil }
+func (m *MockFile) Readdirnames(n int) ([]string, error)           { return nil, nil }
+func (m *MockFile) Stat() (os.FileInfo, error)                     { return nil, nil }
+func (m *MockFile) Sync() error                                    { return nil }
+func (m *MockFile) Truncate(size int64) error                      { return nil }
+func (m *MockFile) WriteString(s string) (ret int, err error)      { return 0, nil }
 
 func TestHandle_Read_UsesReadAtContext(t *testing.T) {
 	mockFile := new(MockFile)
@@ -67,7 +67,7 @@ func TestHandle_Read_UsesReadAtContext(t *testing.T) {
 	mockFile.On("ReadAtContext", mock.Anything, mock.AnythingOfType("[]uint8"), int64(4096)).Return(16, nil).Once()
 	mockFile.On("Close").Return(nil)
 
-	handle := NewHandle(mockFile, logger, "testfile", nil, nil)
+	handle := NewHandle(mockFile, logger, "testfile", nil, nil, nil)
 	ctx := context.Background()
 	dest := make([]byte, 16)
 
@@ -98,7 +98,7 @@ func TestHandle_Read_Concurrency(t *testing.T) {
 	mockFile.On("ReadAtContext", mock.Anything, mock.AnythingOfType("[]uint8"), mock.AnythingOfType("int64")).Return(10, nil)
 	mockFile.On("Close").Return(nil)
 
-	handle := NewHandle(mockFile, logger, "testfile", nil, nil)
+	handle := NewHandle(mockFile, logger, "testfile", nil, nil, nil)
 	defer handle.Release(context.Background())
 
 	ctx := context.Background()
@@ -132,7 +132,7 @@ func TestHandle_Read_ReadError(t *testing.T) {
 	mockFile.On("ReadAtContext", mock.Anything, mock.AnythingOfType("[]uint8"), int64(0)).Return(0, os.ErrPermission).Once()
 	mockFile.On("Close").Return(nil)
 
-	handle := NewHandle(mockFile, logger, "testfile", nil, nil)
+	handle := NewHandle(mockFile, logger, "testfile", nil, nil, nil)
 	defer handle.Release(context.Background())
 
 	ctx := context.Background()
@@ -152,7 +152,7 @@ func TestHandle_Read_EOF(t *testing.T) {
 	mockFile.On("ReadAtContext", mock.Anything, mock.AnythingOfType("[]uint8"), int64(0)).Return(5, io.EOF).Once()
 	mockFile.On("Close").Return(nil)
 
-	handle := NewHandle(mockFile, logger, "testfile", nil, nil)
+	handle := NewHandle(mockFile, logger, "testfile", nil, nil, nil)
 	defer handle.Release(context.Background())
 
 	ctx := context.Background()
@@ -174,7 +174,7 @@ func TestHandle_Read_ContextCanceled(t *testing.T) {
 		Return(0, context.Canceled).Once()
 	mockFile.On("Close").Return(nil)
 
-	handle := NewHandle(mockFile, logger, "testfile", nil, nil)
+	handle := NewHandle(mockFile, logger, "testfile", nil, nil, nil)
 	defer handle.Release(context.Background())
 
 	ctx := context.Background()
@@ -219,17 +219,17 @@ func (f *readAtDepthFile) Write(p []byte) (int, error)             { return 0, n
 func (f *readAtDepthFile) WriteAt(p []byte, off int64) (int, error) {
 	return 0, nil
 }
-func (f *readAtDepthFile) Name() string                            { return "depth" }
-func (f *readAtDepthFile) Readdir(int) ([]os.FileInfo, error)      { return nil, nil }
-func (f *readAtDepthFile) Readdirnames(int) ([]string, error)      { return nil, nil }
-func (f *readAtDepthFile) Stat() (os.FileInfo, error)              { return nil, nil }
-func (f *readAtDepthFile) Sync() error                             { return nil }
-func (f *readAtDepthFile) Truncate(int64) error                    { return nil }
-func (f *readAtDepthFile) WriteString(string) (int, error)         { return 0, nil }
+func (f *readAtDepthFile) Name() string                       { return "depth" }
+func (f *readAtDepthFile) Readdir(int) ([]os.FileInfo, error) { return nil, nil }
+func (f *readAtDepthFile) Readdirnames(int) ([]string, error) { return nil, nil }
+func (f *readAtDepthFile) Stat() (os.FileInfo, error)         { return nil, nil }
+func (f *readAtDepthFile) Sync() error                        { return nil }
+func (f *readAtDepthFile) Truncate(int64) error               { return nil }
+func (f *readAtDepthFile) WriteString(string) (int, error)    { return 0, nil }
 
 func TestHandle_Read_ConcurrentReadsAllSucceed(t *testing.T) {
 	df := &readAtDepthFile{delay: 5 * time.Millisecond}
-	handle := NewHandle(df, slog.Default(), "testfile", nil, nil)
+	handle := NewHandle(df, slog.Default(), "testfile", nil, nil, nil)
 	defer handle.Release(context.Background())
 
 	var wg sync.WaitGroup
@@ -260,7 +260,7 @@ func TestHandle_Release_Idempotent(t *testing.T) {
 
 	mockFile.On("Close").Return(nil).Once()
 
-	handle := NewHandle(mockFile, logger, "testfile", nil, nil)
+	handle := NewHandle(mockFile, logger, "testfile", nil, nil, nil)
 
 	ctx := context.Background()
 

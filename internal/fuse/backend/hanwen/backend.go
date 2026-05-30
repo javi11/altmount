@@ -50,7 +50,8 @@ func (b *Backend) Type() backend.Type {
 func (b *Backend) Mount(ctx context.Context, onReady func()) error {
 	b.cleanup()
 
-	root := NewDir(b.cfg.NzbFs, "", b.logger, b.cfg.UID, b.cfg.GID, b.cfg.StreamTracker)
+	asyncBufSize := b.cfg.FuseConfig.AsyncBufferSizeMB * 1024 * 1024
+	root := NewDir(b.cfg.NzbFs, "", b.logger, b.cfg.UID, b.cfg.GID, b.cfg.StreamTracker, asyncBufSize)
 
 	attrTimeout := time.Duration(b.cfg.FuseConfig.AttrTimeoutSeconds) * time.Second
 	entryTimeout := time.Duration(b.cfg.FuseConfig.EntryTimeoutSeconds) * time.Second
