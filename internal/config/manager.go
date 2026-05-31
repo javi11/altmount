@@ -127,6 +127,10 @@ type FuseConfig struct {
 	// cap, additional streams run unbuffered. 0 = unlimited.
 	AsyncBufferMaxTotalMB int    `yaml:"async_buffer_max_total_mb" mapstructure:"async_buffer_max_total_mb" json:"async_buffer_max_total_mb"`
 	Backend               string `yaml:"backend" mapstructure:"backend" json:"backend"` // "hanwen" or "cgo" (empty = platform default)
+	// NoModTime reports epoch for all timestamps (mtime, ctime, atime); prevents
+	// media servers re-scanning on unstable VFS mtimes. Note: tools like find -atime
+	// will not see meaningful access times on this mount.
+	NoModTime bool `yaml:"no_mod_time" mapstructure:"no_mod_time" json:"no_mod_time"`
 }
 
 // APIConfig represents REST API configuration

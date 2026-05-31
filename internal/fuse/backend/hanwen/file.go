@@ -32,7 +32,8 @@ type File struct {
 	size          int64
 	uid           uint32
 	gid           uint32
-	asyncBufSize  int // per-handle read-ahead buffer size in bytes; 0 = disabled
+	asyncBufSize  int  // per-handle read-ahead buffer size in bytes; 0 = disabled
+	noModTime     bool
 }
 
 // Getattr implements fs.NodeGetattrer.
@@ -45,7 +46,7 @@ func (f *File) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.AttrOut)
 		return translateError(err)
 	}
 
-	fillAttr(info, &out.Attr, f.uid, f.gid)
+	fillAttr(info, &out.Attr, f.uid, f.gid, f.noModTime)
 	out.Ino = f.Inode.StableAttr().Ino
 	return 0
 }

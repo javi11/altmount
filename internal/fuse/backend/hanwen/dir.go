@@ -37,7 +37,8 @@ type Dir struct {
 	isRootDir     bool
 	uid           uint32
 	gid           uint32
-	asyncBufSize  int // read-ahead buffer size in bytes, propagated to File nodes
+	asyncBufSize  int  // read-ahead buffer size in bytes, propagated to File nodes
+	noModTime     bool
 }
 
 // NewDir creates a new directory node for the FUSE filesystem.
@@ -48,6 +49,7 @@ func NewDir(
 	uid, gid uint32,
 	st backend.StreamTracker,
 	asyncBufSize int,
+	noModTime bool,
 ) *Dir {
 	return &Dir{
 		nzbfs:         nzbfs,
@@ -58,6 +60,7 @@ func NewDir(
 		uid:           uid,
 		gid:           gid,
 		asyncBufSize:  asyncBufSize,
+		noModTime:     noModTime,
 	}
 }
 
@@ -82,7 +85,7 @@ func (d *Dir) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.AttrOut) 
 		return translateError(err)
 	}
 
-	fillAttr(info, &out.Attr, d.uid, d.gid)
+	fillAttr(info, &out.Attr, d.uid, d.gid, d.noModTime)
 	out.Ino = d.Inode.StableAttr().Ino
 	return 0
 }
@@ -122,7 +125,7 @@ func (d *Dir) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.Ent
 		return nil, syscall.EIO
 	}
 
-	fillAttr(info, &out.Attr, d.uid, d.gid)
+	fillAttr(info, &out.Attr, d.uid, d.gid, d.noModTime)
 
 	node := &Dir{
 		nzbfs:         d.nzbfs,
@@ -132,6 +135,7 @@ func (d *Dir) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.Ent
 		uid:           d.uid,
 		gid:           d.gid,
 		asyncBufSize:  d.asyncBufSize,
+		noModTime:     d.noModTime,
 	}
 
 	return d.NewInode(ctx, node, fs.StableAttr{Mode: fuse.S_IFDIR}), 0
@@ -149,7 +153,7 @@ func (d *Dir) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.
 		return nil, translateError(err)
 	}
 
-	fillAttr(info, &out.Attr, d.uid, d.gid)
+	fillAttr(info, &out.Attr, d.uid, d.gid, d.noModTime)
 
 	if info.IsDir() {
 		node := &Dir{
@@ -160,6 +164,7 @@ func (d *Dir) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.
 			uid:           d.uid,
 			gid:           d.gid,
 			asyncBufSize:  d.asyncBufSize,
+			noModTime:     d.noModTime,
 		}
 		return d.NewInode(ctx, node, fs.StableAttr{Mode: fuse.S_IFDIR}), 0
 	}
@@ -173,6 +178,7 @@ func (d *Dir) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.
 		uid:           d.uid,
 		gid:           d.gid,
 		asyncBufSize:  d.asyncBufSize,
+		noModTime:     d.noModTime,
 	}
 	return d.NewInode(ctx, node, fs.StableAttr{Mode: fuse.S_IFREG}), 0
 }

@@ -228,6 +228,7 @@ export interface FuseConfig {
 	max_read_ahead_mb: number;
 	async_buffer_size_mb: number;
 	async_buffer_max_total_mb: number;
+	no_mod_time: boolean;
 }
 
 // Import strategy type
