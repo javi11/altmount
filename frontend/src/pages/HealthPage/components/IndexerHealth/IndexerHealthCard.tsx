@@ -44,8 +44,7 @@ export function IndexerHealthCard({ item, onDelete }: IndexerHealthCardProps) {
 
 	const barSuccessWidth =
 		item.total_imports > 0 ? (item.success_count / item.total_imports) * 100 : 0;
-	const barFailWidth =
-		item.total_imports > 0 ? (item.failed_count / item.total_imports) * 100 : 0;
+	const barFailWidth = item.total_imports > 0 ? (item.failed_count / item.total_imports) * 100 : 0;
 
 	const topLineGradient = isExcellent
 		? "from-teal-500/40 to-teal-600/10"
@@ -81,9 +80,11 @@ export function IndexerHealthCard({ item, onDelete }: IndexerHealthCardProps) {
 
 	return (
 		<div
-			className={`group card relative overflow-hidden border ${accentColor} bg-base-100/60 shadow-md backdrop-blur-md transition-all duration-500 ease-out hover:-translate-y-1.5 hover:scale-[1.01]`}
+			className={`group card relative overflow-hidden border ${accentColor} hover:-translate-y-1.5 bg-base-100/60 shadow-md backdrop-blur-md transition-all duration-500 ease-out hover:scale-[1.01]`}
 		>
-			<div className={`absolute top-0 right-0 left-0 h-[2px] bg-gradient-to-r ${topLineGradient}`} />
+			<div
+				className={`absolute top-0 right-0 left-0 h-[2px] bg-gradient-to-r ${topLineGradient}`}
+			/>
 
 			<div className="absolute top-3 right-3 z-10">
 				<button

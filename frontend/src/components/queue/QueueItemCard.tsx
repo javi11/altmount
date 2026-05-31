@@ -72,7 +72,7 @@ export const QueueItemCard = memo(function QueueItemCard({
 						</div>
 
 						{item.indexer && (
-							<div className="mt-1 flex items-center gap-1 text-xs text-base-content/50">
+							<div className="mt-1 flex items-center gap-1 text-base-content/50 text-xs">
 								<Globe className="h-3 w-3 shrink-0" />
 								<span className="truncate">{item.indexer}</span>
 							</div>

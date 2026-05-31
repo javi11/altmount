@@ -658,18 +658,37 @@ func (r *QueueRepository) AddBatchToQueue(ctx context.Context, items []*ImportQu
 			WHERE status NOT IN ('processing', 'completed')
 		`
 
+		// The statement is identical for every item, so prepare it once and reuse
+		// it across the batch instead of re-parsing (and re-rewriting the dialect)
+		// on every row.
+		txTx, ok := txRepo.db.(*dialectAwareTx)
+		if !ok {
+			return fmt.Errorf("batch queue insert requires a transaction")
+		}
+
+		isPostgres := txRepo.dialect.IsPostgres()
+		stmtQuery := query
+		if isPostgres {
+			stmtQuery = query + " RETURNING id"
+		}
+
+		stmt, err := txTx.PrepareContext(ctx, stmtQuery)
+		if err != nil {
+			return fmt.Errorf("failed to prepare batch queue insert: %w", err)
+		}
+		defer stmt.Close()
+
 		now := time.Now()
 		for _, item := range items {
 			args := []any{item.DownloadID, item.NzbPath, item.RelativePath, item.Category, item.Priority, item.Status,
 				item.RetryCount, item.MaxRetries, item.BatchID, item.Metadata, item.FileSize, item.SkipArrNotification, item.SkipPostImportLinks}
 
-			if txRepo.dialect.IsPostgres() {
-				err := txRepo.db.QueryRowContext(ctx, query+" RETURNING id", args...).Scan(&item.ID)
-				if err != nil && err != sql.ErrNoRows {
+			if isPostgres {
+				if err := stmt.QueryRowContext(ctx, args...).Scan(&item.ID); err != nil && err != sql.ErrNoRows {
 					return fmt.Errorf("failed to insert queue item %s: %w", item.NzbPath, err)
 				}
 			} else {
-				result, err := txRepo.db.ExecContext(ctx, query, args...)
+				result, err := stmt.ExecContext(ctx, args...)
 				if err != nil {
 					return fmt.Errorf("failed to insert queue item %s: %w", item.NzbPath, err)
 				}

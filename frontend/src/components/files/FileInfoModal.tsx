@@ -3,7 +3,7 @@ import { Archive, Clock, Database, FileText, HardDrive, Info, Lock, Shield, X } 
 import { useEffect, useRef, useState } from "react";
 import { useToast } from "../../contexts/ToastContext";
 import { useAddHealthCheck } from "../../hooks/useApi";
-import { isNil } from "../../lib/utils";
+import { formatBytes, isNil } from "../../lib/utils";
 import type {
 	FileMetadata,
 	NestedSegmentInfo,
@@ -11,7 +11,7 @@ import type {
 	SegmentInfo,
 } from "../../types/api";
 import type { WebDAVFile } from "../../types/webdav";
-import { formatFileSize, getFormatLabel } from "../../utils/fileUtils";
+import { getFormatLabel } from "../../utils/fileUtils";
 import { HealthBadge } from "../ui/StatusBadge";
 
 interface FileInfoModalProps {
@@ -117,7 +117,7 @@ export function FileInfoModal({
 						<div className="grid grid-cols-2 gap-4 text-left">
 							<div>
 								<span className="text-base-content/70">Size:</span>
-								<span className="ml-2 font-mono">{formatFileSize(file.size)}</span>
+								<span className="ml-2 font-mono">{formatBytes(file.size, 1, true)}</span>
 							</div>
 							<div>
 								<span className="text-base-content/70">Modified:</span>
@@ -251,7 +251,7 @@ export function FileInfoModal({
 						<div className="space-y-2 text-sm">
 							<div className="flex justify-between">
 								<span className="text-base-content/70">Size:</span>
-								<span className="font-mono">{formatFileSize(metadata.file_size)}</span>
+								<span className="font-mono">{formatBytes(metadata.file_size, 1, true)}</span>
 							</div>
 							<div className="flex justify-between">
 								<span className="text-base-content/70">Segments:</span>
@@ -416,7 +416,7 @@ export function FileInfoModal({
 									<td>
 										<code className="text-xs">{segment.message_id}</code>
 									</td>
-									<td>{formatFileSize(segment.segment_size)}</td>
+									<td>{formatBytes(segment.segment_size, 1, true)}</td>
 									<td className="font-mono text-xs">
 										{segment.start_offset.toLocaleString()} - {segment.end_offset.toLocaleString()}
 									</td>
@@ -488,11 +488,11 @@ export function FileInfoModal({
 							<div className="mb-3 grid grid-cols-2 gap-2 text-sm md:grid-cols-4">
 								<div>
 									<div className="text-base-content/70">Inner Length</div>
-									<div className="font-mono">{formatFileSize(ns.inner_length)}</div>
+									<div className="font-mono">{formatBytes(ns.inner_length, 1, true)}</div>
 								</div>
 								<div>
 									<div className="text-base-content/70">Volume Size</div>
-									<div className="font-mono">{formatFileSize(ns.inner_volume_size)}</div>
+									<div className="font-mono">{formatBytes(ns.inner_volume_size, 1, true)}</div>
 								</div>
 								<div>
 									<div className="text-base-content/70">Segments</div>
@@ -517,7 +517,7 @@ export function FileInfoModal({
 													<td>
 														<code className="text-xs">{seg.message_id}</code>
 													</td>
-													<td>{formatFileSize(seg.segment_size)}</td>
+													<td>{formatBytes(seg.segment_size, 1, true)}</td>
 													<td className="font-mono text-xs">
 														{seg.start_offset.toLocaleString()} - {seg.end_offset.toLocaleString()}
 													</td>
@@ -641,7 +641,7 @@ export function FileInfoModal({
 						<div className="min-w-0 flex-1">
 							<h3 className="font-semibold text-lg">{file.basename}</h3>
 							<p className="text-base-content/70 text-sm">
-								{formatFileSize(file.size)} • {file.type}
+								{formatBytes(file.size, 1, true)} • {file.type}
 							</p>
 						</div>
 					</div>

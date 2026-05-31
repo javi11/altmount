@@ -248,14 +248,14 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 	// unknownFields + sizeCache + unused fields like NzbdavId). Slices are
 	// carried by reference; they stay alive only while the handle is open.
 	handleMeta := &fileHandleMeta{
-		FileSize:      fileMeta.FileSize,
-		ModifiedAt:    fileMeta.ModifiedAt,
-		SourceNzbPath: fileMeta.SourceNzbPath,
-		Encryption:    fileMeta.Encryption,
-		Password:      fileMeta.Password,
-		Salt:          fileMeta.Salt,
-		AesKey:        fileMeta.AesKey,
-		AesIv:         fileMeta.AesIv,
+		FileSize:       fileMeta.FileSize,
+		ModifiedAt:     fileMeta.ModifiedAt,
+		SourceNzbPath:  fileMeta.SourceNzbPath,
+		Encryption:     fileMeta.Encryption,
+		Password:       fileMeta.Password,
+		Salt:           fileMeta.Salt,
+		AesKey:         fileMeta.AesKey,
+		AesIv:          fileMeta.AesIv,
 		SegmentData:    fileMeta.SegmentData,
 		NestedSources:  fileMeta.NestedSources,
 		ClipBoundaries: fileMeta.ClipBoundaries,
@@ -804,7 +804,12 @@ type MetadataVirtualFile struct {
 	clipSpansOnce sync.Once
 
 	// Reader state and position tracking
-	reader            io.ReadCloser
+	reader io.ReadCloser
+	// bufOffReader is mvf.reader pre-asserted to the GetBufferedOffset interface
+	// (nil when the active reader doesn't implement it), so the hot Read/ReadAt
+	// loops avoid repeating the type assertion every iteration. Kept in sync by
+	// setReader and the remux-wrap step; guarded by mvf.mu like reader.
+	bufOffReader      interface{ GetBufferedOffset() int64 }
 	readerInitialized bool
 	position          int64 // File position (what client sees after Seek)
 	currentRangeStart int64 // Start of current reader's range
@@ -864,6 +869,7 @@ type interruptSlot struct{ i readerInterrupter }
 // Callers must hold mvf.mu. Pass nil to clear.
 func (mvf *MetadataVirtualFile) setReader(r io.ReadCloser) {
 	mvf.reader = r
+	mvf.bufOffReader, _ = r.(interface{ GetBufferedOffset() int64 })
 	slot := interruptSlot{}
 	if i, ok := r.(readerInterrupter); ok {
 		slot.i = i
@@ -985,8 +991,8 @@ func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 			mvf.streamTracker.UpdateCurrentOffset(mvf.streamID, mvf.position)
 
 			// Update buffered offset if available
-			if ur, ok := mvf.reader.(interface{ GetBufferedOffset() int64 }); ok {
-				mvf.streamTracker.UpdateBufferedOffset(mvf.streamID, ur.GetBufferedOffset())
+			if mvf.bufOffReader != nil {
+				mvf.streamTracker.UpdateBufferedOffset(mvf.streamID, mvf.bufOffReader.GetBufferedOffset())
 			}
 		}
 
@@ -1067,8 +1073,8 @@ func (mvf *MetadataVirtualFile) ReadAtContext(readCtx context.Context, p []byte,
 			if n > 0 && mvf.streamTracker != nil && mvf.streamID != "" {
 				mvf.streamTracker.UpdateProgress(mvf.streamID, int64(rn))
 				mvf.streamTracker.UpdateCurrentOffset(mvf.streamID, off+int64(n))
-				if ur, ok := mvf.reader.(interface{ GetBufferedOffset() int64 }); ok {
-					mvf.streamTracker.UpdateBufferedOffset(mvf.streamID, ur.GetBufferedOffset())
+				if mvf.bufOffReader != nil {
+					mvf.streamTracker.UpdateBufferedOffset(mvf.streamID, mvf.bufOffReader.GetBufferedOffset())
 				}
 			}
 
@@ -1593,6 +1599,7 @@ func (mvf *MetadataVirtualFile) ensureReader() error {
 	// bytes from absolute offset `start`, which the wrapper needs for packet
 	// framing and per-clip delta selection.
 	mvf.reader = mvf.maybeWrapRemux(mvf.reader, start)
+	mvf.bufOffReader, _ = mvf.reader.(interface{ GetBufferedOffset() int64 })
 
 	mvf.readerInitialized = true
 	return nil

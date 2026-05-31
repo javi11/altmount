@@ -63,6 +63,33 @@ export class APIError extends Error {
 	}
 }
 
+/**
+ * Shape of the JSON error envelope returned by the server. The `error` field
+ * may be a structured object ({ message, details }) or a plain string, with
+ * top-level `message`/`details` used as fallbacks.
+ */
+interface ApiErrorEnvelope {
+	error?: { message?: string; details?: string } | string;
+	message?: string;
+	details?: string;
+}
+
+/**
+ * Builds an APIError from a parsed error response body, applying the standard
+ * fallback chain: nested error.message → top-level message → HTTP status text;
+ * details similarly (nested error.details → top-level details → "").
+ */
+function extractApiError(status: number, statusText: string, body: ApiErrorEnvelope): APIError {
+	const nestedError = typeof body.error === "object" ? body.error : undefined;
+	const errorMessage =
+		(typeof body.error === "object" ? nestedError?.message : body.error) ||
+		body.message ||
+		`HTTP ${status}: ${statusText}`;
+	const errorDetails = nestedError?.details || body.details || "";
+
+	return new APIError(status, errorMessage, errorDetails);
+}
+
 export class APIClient {
 	private baseURL: string;
 
@@ -99,25 +126,14 @@ export class APIClient {
 				if (response.status === 401) {
 					window.dispatchEvent(new CustomEvent("api:unauthorized"));
 				}
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
-				let errorData: Record<string, unknown> = {};
+				let errorData: ApiErrorEnvelope = {};
 				try {
 					errorData = await response.json();
 				} catch {
 					// empty or non-JSON error body — fall through to status-based message
 				}
-				const errorMessage =
-					(typeof errorData.error === "object"
-						? (errorData.error as any)?.message
-						: errorData.error) ||
-					errorData.message ||
-					`HTTP ${response.status}: ${response.statusText}`;
-				const errorDetails =
-					(typeof errorData.error === "object" ? (errorData.error as any)?.details : "") ||
-					errorData.details ||
-					"";
 
-				throw new APIError(response.status, errorMessage, errorDetails);
+				throw extractApiError(response.status, response.statusText, errorData);
 			}
 
 			const data: APIResponse<T> = await response.json();
@@ -127,8 +143,7 @@ export class APIClient {
 				const errorMessage =
 					(typeof data.error === "object" ? data.error?.message : data.error) ||
 					"API request failed";
-				const errorDetails =
-					(typeof data.error === "object" ? (data.error as any)?.details : "") || "";
+				const errorDetails = typeof data.error === "object" ? data.error?.details || "" : "";
 				throw new APIError(response.status, errorMessage, errorDetails);
 			}
 
@@ -175,19 +190,8 @@ export class APIClient {
 				}
 				// Try to parse error response
 				try {
-					const errorData = await response.json();
-					const errorMessage =
-						(typeof errorData.error === "object"
-							? (errorData.error as any)?.message
-							: errorData.error) ||
-						errorData.message ||
-						`HTTP ${response.status}: ${response.statusText}`;
-					const errorDetails =
-						(typeof errorData.error === "object" ? (errorData.error as any)?.details : "") ||
-						errorData.details ||
-						"";
-
-					throw new APIError(response.status, errorMessage, errorDetails);
+					const errorData: ApiErrorEnvelope = await response.json();
+					throw extractApiError(response.status, response.statusText, errorData);
 				} catch (e) {
 					if (e instanceof APIError) {
 						throw e;
@@ -208,8 +212,7 @@ export class APIClient {
 				const errorMessage =
 					(typeof data.error === "object" ? data.error?.message : data.error) ||
 					"API request failed";
-				const errorDetails =
-					(typeof data.error === "object" ? (data.error as any)?.details : "") || "";
+				const errorDetails = typeof data.error === "object" ? data.error?.details || "" : "";
 				throw new APIError(response.status, errorMessage, errorDetails);
 			}
 

@@ -32,21 +32,13 @@ func (s *Server) handleGetSystemStats(c *fiber.Ctx) error {
 	// Get queue statistics
 	queueStats, err := s.queueRepo.GetQueueStats(c.Context())
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to retrieve queue statistics",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to retrieve queue statistics", err.Error())
 	}
 
 	// Get health statistics
 	healthStatsMap, err := s.healthRepo.GetHealthStats(c.Context())
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to retrieve health statistics",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to retrieve health statistics", err.Error())
 	}
 
 	// Convert to response format
@@ -56,10 +48,7 @@ func (s *Server) handleGetSystemStats(c *fiber.Ctx) error {
 		System: s.getSystemInfo(),
 	}
 
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"data":    response,
-	})
+	return RespondSuccess(c, response)
 }
 
 // handleGetSystemHealth handles GET /api/system/health
@@ -78,16 +67,10 @@ func (s *Server) handleGetSystemHealth(c *fiber.Ctx) error {
 	// Set appropriate HTTP status code based on health
 	switch healthCheck.Status {
 	case "healthy":
-		return c.Status(200).JSON(fiber.Map{
-			"success": true,
-			"data":    healthCheck,
-		})
+		return RespondSuccess(c, healthCheck)
 	case "degraded":
 		// Return 200 but indicate degraded status
-		return c.Status(200).JSON(fiber.Map{
-			"success": true,
-			"data":    healthCheck,
-		})
+		return RespondSuccess(c, healthCheck)
 	case "unhealthy":
 		// Return 503 Service Unavailable for unhealthy status
 		c.Set("Retry-After", "10")
@@ -98,10 +81,7 @@ func (s *Server) handleGetSystemHealth(c *fiber.Ctx) error {
 	}
 
 	// Default case (shouldn't reach here)
-	return c.Status(500).JSON(fiber.Map{
-		"success": false,
-		"message": "Unknown health status",
-	})
+	return RespondInternalError(c, "Unknown health status", "")
 }
 
 // handleSystemCleanup handles POST /api/system/cleanup
@@ -121,22 +101,14 @@ func (s *Server) handleSystemCleanup(c *fiber.Ctx) error {
 	var req SystemCleanupRequest
 	if len(c.Body()) > 0 {
 		if err := c.BodyParser(&req); err != nil {
-			return c.Status(400).JSON(fiber.Map{
-				"success": false,
-				"message": "Invalid request body",
-				"details": err.Error(),
-			})
+			return RespondBadRequest(c, "Invalid request body", err.Error())
 		}
 	}
 
 	// Parse parameters from query string if not in body
 	if req.QueueOlderThan == nil {
 		if queueOlderThan, err := ParseTimeParamFiber(c, "queue_older_than"); err != nil {
-			return c.Status(422).JSON(fiber.Map{
-				"success": false,
-				"message": "Invalid queue_older_than parameter",
-				"details": err.Error(),
-			})
+			return RespondError(c, 422, "VALIDATION_ERROR", "Invalid queue_older_than parameter", err.Error())
 		} else if queueOlderThan != nil {
 			req.QueueOlderThan = queueOlderThan
 		}
@@ -144,11 +116,7 @@ func (s *Server) handleSystemCleanup(c *fiber.Ctx) error {
 
 	if req.HealthOlderThan == nil {
 		if healthOlderThan, err := ParseTimeParamFiber(c, "health_older_than"); err != nil {
-			return c.Status(422).JSON(fiber.Map{
-				"success": false,
-				"message": "Invalid health_older_than parameter",
-				"details": err.Error(),
-			})
+			return RespondError(c, 422, "VALIDATION_ERROR", "Invalid health_older_than parameter", err.Error())
 		} else if healthOlderThan != nil {
 			req.HealthOlderThan = healthOlderThan
 		}
@@ -181,11 +149,7 @@ func (s *Server) handleSystemCleanup(c *fiber.Ctx) error {
 		var paths []string
 		paths, queueItemsRemoved, err = s.queueRepo.ClearCompletedQueueItems(c.Context())
 		if err != nil {
-			return c.Status(500).JSON(fiber.Map{
-				"success": false,
-				"message": "Failed to cleanup queue items",
-				"details": err.Error(),
-			})
+			return RespondInternalError(c, "Failed to cleanup queue items", err.Error())
 		}
 		s.removeQueueNzbFiles(c, paths)
 	} else {
@@ -210,10 +174,7 @@ func (s *Server) handleSystemCleanup(c *fiber.Ctx) error {
 		DryRun:               req.DryRun,
 	}
 
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"data":    response,
-	})
+	return RespondSuccess(c, response)
 }
 
 // handleSystemRestart handles POST /api/system/restart
@@ -232,11 +193,7 @@ func (s *Server) handleSystemRestart(c *fiber.Ctx) error {
 	var req SystemRestartRequest
 	if len(c.Body()) > 0 {
 		if err := c.BodyParser(&req); err != nil {
-			return c.Status(400).JSON(fiber.Map{
-				"success": false,
-				"message": "Invalid request body",
-				"details": err.Error(),
-			})
+			return RespondBadRequest(c, "Invalid request body", err.Error())
 		}
 	}
 
@@ -249,10 +206,7 @@ func (s *Server) handleSystemRestart(c *fiber.Ctx) error {
 	}
 
 	// Send response immediately before restart
-	result := c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"data":    response,
-	})
+	result := RespondSuccess(c, response)
 
 	// Start restart process in a goroutine to allow response to be sent
 	go s.performRestart(c.Context())
@@ -301,10 +255,7 @@ func (s *Server) handleResetSystemStats(c *fiber.Ctx) error {
 			}
 		}
 
-		return c.Status(200).JSON(fiber.Map{
-			"success": true,
-			"message": fmt.Sprintf("Dashboard statistics for last %s reset successfully", durationStr),
-		})
+		return RespondMessage(c, fmt.Sprintf("Dashboard statistics for last %s reset successfully", durationStr))
 	}
 
 	// Full/Granular reset
@@ -348,10 +299,7 @@ func (s *Server) handleResetSystemStats(c *fiber.Ctx) error {
 		}
 	}
 
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"message": "System statistics reset successfully",
-	})
+	return RespondMessage(c, "System statistics reset successfully")
 }
 
 // performRestart performs the actual server restart
@@ -442,11 +390,7 @@ func (s *Server) handleGetProviderHistoricalStats(c *fiber.Ctx) error {
 
 	stats, err := s.queueRepo.GetProviderHistoricalStats(c.Context(), days, interval)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to get provider historical stats",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to get provider historical stats", err.Error())
 	}
 
 	var responseStats []ProviderHistoricalStatResponse
@@ -457,16 +401,13 @@ func (s *Server) handleGetProviderHistoricalStats(c *fiber.Ctx) error {
 			BytesDownloaded: stat.BytesDownloaded,
 		})
 	}
-	
+
 	if responseStats == nil {
 		responseStats = make([]ProviderHistoricalStatResponse, 0)
 	}
 
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"data": ProviderHistoricalStatsResponse{
-			Stats: responseStats,
-		},
+	return RespondSuccess(c, ProviderHistoricalStatsResponse{
+		Stats: responseStats,
 	})
 }
 
@@ -493,11 +434,7 @@ func (s *Server) handleGetProviderSpeedHistory(c *fiber.Ctx) error {
 
 	stats, err := s.queueRepo.GetProviderSpeedTestHistory(c.Context(), days)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to get provider speed history",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to get provider speed history", err.Error())
 	}
 
 	var history []ProviderSpeedTestHistoryStat
@@ -509,16 +446,13 @@ func (s *Server) handleGetProviderSpeedHistory(c *fiber.Ctx) error {
 			CreatedAt:  stat.CreatedAt,
 		})
 	}
-	
+
 	if history == nil {
 		history = make([]ProviderSpeedTestHistoryStat, 0)
 	}
 
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"data": ProviderSpeedTestHistoryResponse{
-			History: history,
-		},
+	return RespondSuccess(c, ProviderSpeedTestHistoryResponse{
+		History: history,
 	})
 }
 
@@ -534,11 +468,7 @@ func (s *Server) handleGetProviderSpeedHistory(c *fiber.Ctx) error {
 func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 	// Check if pool manager is available
 	if s.poolManager == nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Pool manager not available",
-			"details": "NNTP pool manager not configured",
-		})
+		return RespondInternalError(c, "Pool manager not available", "NNTP pool manager not configured")
 	}
 
 	// Check if pool is available
@@ -556,30 +486,19 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 			StartedAt:                time.Now(),
 			Providers:                []ProviderStatusResponse{},
 		}
-		return c.Status(200).JSON(fiber.Map{
-			"success": true,
-			"data":    response,
-		})
+		return RespondSuccess(c, response)
 	}
 
 	// Get metrics from the pool manager (includes calculated speeds)
 	metrics, err := s.poolManager.GetMetrics()
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to get NNTP pool metrics",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to get NNTP pool metrics", err.Error())
 	}
 
 	// Get the pool to fetch provider stats
 	pool, err := s.poolManager.GetPool()
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to get NNTP pool",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to get NNTP pool", err.Error())
 	}
 
 	// Get provider stats from pool (v4 API)
@@ -662,7 +581,7 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 				}
 			}
 		}
-		
+
 		// Final fallback: if both are zero, use global startedAt
 		if startedAt.IsZero() {
 			startedAt = metrics.StartedAt
@@ -756,10 +675,7 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 		Providers:                   providers,
 	}
 
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"data":    response,
-	})
+	return RespondSuccess(c, response)
 }
 
 // FileEntry represents a file or directory in the system browser
@@ -796,20 +712,13 @@ func (s *Server) handleSystemBrowse(c *fiber.Ctx) error {
 	// Sanitize and validate the path to prevent path traversal
 	path = filepath.Clean(path)
 	if !filepath.IsAbs(path) {
-		return c.Status(400).JSON(fiber.Map{
-			"success": false,
-			"message": "Path must be absolute",
-		})
+		return RespondBadRequest(c, "Path must be absolute", "")
 	}
 
 	// Read directory
 	entries, err := os.ReadDir(path)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to read directory",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to read directory", err.Error())
 	}
 
 	var files []FileEntry
@@ -831,12 +740,9 @@ func (s *Server) handleSystemBrowse(c *fiber.Ctx) error {
 		})
 	}
 
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"data": fiber.Map{
-			"current_path": path,
-			"parent_path":  filepath.Dir(path),
-			"files":        files,
-		},
+	return RespondSuccess(c, fiber.Map{
+		"current_path": path,
+		"parent_path":  filepath.Dir(path),
+		"files":        files,
 	})
 }

@@ -270,41 +270,49 @@ export function HealthPage() {
 		}
 	};
 
-	const handleRegenerateLibraryFiles = async (filePaths?: string[]) => {
-		const isBulk = filePaths && filePaths.length > 0;
-		const message = isBulk
-			? filePaths.length === 1
-				? "Recreates the symlink or STRM file for this item at its stored library path (e.g. as renamed by ARR applications). If no library path is stored, it will be created at the import directory."
-				: `Recreates the symlink or STRM file for ${filePaths.length} selected items at their stored library paths (e.g. as renamed by ARR applications). Items without a stored path will be created at the import directory.`
-			: "Recreates symlinks or STRM files for all records at their stored library paths (e.g. as renamed by ARR applications). Records without a stored path will be created at the import directory. This does not re-download any content.";
+	const handleRegenerateLibraryFiles = useCallback(
+		async (filePaths?: string[]) => {
+			const isBulk = filePaths && filePaths.length > 0;
+			const message = isBulk
+				? filePaths.length === 1
+					? "Recreates the symlink or STRM file for this item at its stored library path (e.g. as renamed by ARR applications). If no library path is stored, it will be created at the import directory."
+					: `Recreates the symlink or STRM file for ${filePaths.length} selected items at their stored library paths (e.g. as renamed by ARR applications). Items without a stored path will be created at the import directory.`
+				: "Recreates symlinks or STRM files for all records at their stored library paths (e.g. as renamed by ARR applications). Records without a stored path will be created at the import directory. This does not re-download any content.";
 
-		const confirmed = await confirmAction("Regenerate Library Files", message, {
-			type: "info",
-			confirmText: "Regenerate",
-			confirmButtonClass: "btn-primary",
-		});
+			const confirmed = await confirmAction("Regenerate Library Files", message, {
+				type: "info",
+				confirmText: "Regenerate",
+				confirmButtonClass: "btn-primary",
+			});
 
-		if (confirmed) {
-			try {
-				const result = await regenerateSymlinks.mutateAsync({ filePaths });
-				showToast({
-					title: "Regeneration Complete",
-					message: result.message,
-					type: result.error_count > 0 ? "warning" : "success",
-				});
-				if (isBulk) {
-					setSelectedItems(new Set());
+			if (confirmed) {
+				try {
+					const result = await regenerateSymlinks.mutateAsync({ filePaths });
+					showToast({
+						title: "Regeneration Complete",
+						message: result.message,
+						type: result.error_count > 0 ? "warning" : "success",
+					});
+					if (isBulk) {
+						setSelectedItems(new Set());
+					}
+				} catch (error) {
+					console.error("Failed to regenerate library files:", error);
+					showToast({
+						title: "Regeneration Failed",
+						message: error instanceof Error ? error.message : "Failed to regenerate library files",
+						type: "error",
+					});
 				}
-			} catch (error) {
-				console.error("Failed to regenerate library files:", error);
-				showToast({
-					title: "Regeneration Failed",
-					message: error instanceof Error ? error.message : "Failed to regenerate library files",
-					type: "error",
-				});
 			}
-		}
-	};
+		},
+		[confirmAction, regenerateSymlinks, showToast],
+	);
+
+	const handleRegenerateSingle = useCallback(
+		(filePath: string) => handleRegenerateLibraryFiles([filePath]),
+		[handleRegenerateLibraryFiles],
+	);
 
 	const handleBulkRegenerate = () => {
 		if (selectedItems.size === 0) return;
@@ -348,81 +356,90 @@ export function HealthPage() {
 		}
 	};
 
-	const handleManualCheck = async (id: number) => {
-		try {
-			await directHealthCheck.mutateAsync(id);
-		} catch (err) {
-			console.error("Failed to perform direct health check:", err);
-		}
-	};
-
-	const handleCancelCheck = async (id: number) => {
-		const confirmed = await confirmAction(
-			"Cancel Health Check",
-			"Are you sure you want to cancel this health check?",
-			{
-				type: "warning",
-				confirmText: "Cancel Check",
-				confirmButtonClass: "btn-warning",
-			},
-		);
-		if (confirmed) {
+	const handleManualCheck = useCallback(
+		async (id: number) => {
 			try {
-				await cancelHealthCheck.mutateAsync(id);
+				await directHealthCheck.mutateAsync(id);
 			} catch (err) {
-				console.error("Failed to cancel health check:", err);
+				console.error("Failed to perform direct health check:", err);
 			}
-		}
-	};
+		},
+		[directHealthCheck],
+	);
 
-	const handleRepair = async (id: number) => {
-		const confirmed = await confirmAction(
-			"Trigger Repair",
-			"This will attempt to ask the ARR to redownload the corrupted file from your media library. THIS FILE WILL BE DELETED IF THE REPAIR IS SUCCESSFUL. Are you sure you want to proceed?",
-			{
-				type: "info",
-				confirmText: "Trigger Repair",
-				confirmButtonClass: "btn-info",
-			},
-		);
-		if (confirmed) {
-			try {
-				await repairHealthItem.mutateAsync({
-					id,
-					resetRepairRetryCount: false,
-				});
-				showToast({
-					title: "Repair Triggered",
-					message: "Repair triggered successfully",
-					type: "success",
-				});
-			} catch (err: unknown) {
-				const error = err as {
-					message?: string;
-					code?: string;
-				};
-				console.error("Failed to trigger repair:", err);
-
-				if (error.code === "NOT_FOUND") {
-					showToast({
-						title: "File Not Found in ARR",
-						message:
-							"This file is not managed by any configured ARR instance. Please check your ARR configuration and ensure the file is in your media library.",
-						type: "warning",
-					});
-					return;
+	const handleCancelCheck = useCallback(
+		async (id: number) => {
+			const confirmed = await confirmAction(
+				"Cancel Health Check",
+				"Are you sure you want to cancel this health check?",
+				{
+					type: "warning",
+					confirmText: "Cancel Check",
+					confirmButtonClass: "btn-warning",
+				},
+			);
+			if (confirmed) {
+				try {
+					await cancelHealthCheck.mutateAsync(id);
+				} catch (err) {
+					console.error("Failed to cancel health check:", err);
 				}
-
-				const errorMessage = error.message || "Unknown error";
-
-				showToast({
-					title: "Failed to trigger repair",
-					message: errorMessage,
-					type: "error",
-				});
 			}
-		}
-	};
+		},
+		[confirmAction, cancelHealthCheck],
+	);
+
+	const handleRepair = useCallback(
+		async (id: number) => {
+			const confirmed = await confirmAction(
+				"Trigger Repair",
+				"This will attempt to ask the ARR to redownload the corrupted file from your media library. THIS FILE WILL BE DELETED IF THE REPAIR IS SUCCESSFUL. Are you sure you want to proceed?",
+				{
+					type: "info",
+					confirmText: "Trigger Repair",
+					confirmButtonClass: "btn-info",
+				},
+			);
+			if (confirmed) {
+				try {
+					await repairHealthItem.mutateAsync({
+						id,
+						resetRepairRetryCount: false,
+					});
+					showToast({
+						title: "Repair Triggered",
+						message: "Repair triggered successfully",
+						type: "success",
+					});
+				} catch (err: unknown) {
+					const error = err as {
+						message?: string;
+						code?: string;
+					};
+					console.error("Failed to trigger repair:", err);
+
+					if (error.code === "NOT_FOUND") {
+						showToast({
+							title: "File Not Found in ARR",
+							message:
+								"This file is not managed by any configured ARR instance. Please check your ARR configuration and ensure the file is in your media library.",
+							type: "warning",
+						});
+						return;
+					}
+
+					const errorMessage = error.message || "Unknown error";
+
+					showToast({
+						title: "Failed to trigger repair",
+						message: errorMessage,
+						type: "error",
+					});
+				}
+			}
+		},
+		[confirmAction, repairHealthItem, showToast],
+	);
 
 	const handleStartLibrarySync = async () => {
 		try {
@@ -834,7 +851,7 @@ export function HealthPage() {
 												onSetPriority={handleSetPriority}
 												onRegenerate={
 													config?.import?.import_strategy !== "NONE"
-														? (filePath: string) => handleRegenerateLibraryFiles([filePath])
+														? handleRegenerateSingle
 														: undefined
 												}
 											/>

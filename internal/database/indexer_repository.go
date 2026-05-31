@@ -99,11 +99,6 @@ func deleteIndexerStats(ctx context.Context, db DBQuerier, indexer string) (int6
 	return res.RowsAffected()
 }
 
-func updateIndexerStatsByDownloadID(ctx context.Context, db DBQuerier, downloadID string, indexer string) error {
-	// No-op: we keep upstream schemas clean and already associate download_ids in queue/history tables
-	return nil
-}
-
 func updateImportHistoryIndexerByDownloadID(ctx context.Context, db DBQuerier, downloadID string, indexer string) error {
 	query := `UPDATE import_history SET indexer = ? WHERE download_id = ? AND (indexer = 'Unknown' OR indexer IS NULL)`
 	_, err := db.ExecContext(ctx, query, indexer, downloadID)
@@ -172,15 +167,6 @@ func (r *QueueRepository) UpdateQueueItemIndexerByDownloadID(ctx context.Context
 		return fmt.Errorf("failed to update queue item indexer by download_id: %w", err)
 	}
 	return nil
-}
-
-// UpdateIndexerStatsByDownloadID updates the indexer name for a stat record if it was logged as Unknown
-func (r *Repository) UpdateIndexerStatsByDownloadID(ctx context.Context, downloadID string, indexer string) error {
-	return updateIndexerStatsByDownloadID(ctx, r.db, downloadID, indexer)
-}
-
-func (r *QueueRepository) UpdateIndexerStatsByDownloadID(ctx context.Context, downloadID string, indexer string) error {
-	return updateIndexerStatsByDownloadID(ctx, r.db, downloadID, indexer)
 }
 
 // UpdateImportHistoryIndexerByDownloadID updates the indexer for an import history item by its DownloadID

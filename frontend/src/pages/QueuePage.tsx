@@ -13,10 +13,10 @@ import {
 	Download,
 	FileCode,
 	Filter,
+	Globe,
 	Import,
 	Link2,
 	List,
-	Globe,
 	MoreVertical,
 	PlayCircle,
 	RefreshCw,
@@ -169,57 +169,60 @@ export function QueuePage() {
 		[confirmAction, cancelItem],
 	);
 
-	const handleDownload = async (id: number, status?: string) => {
-		try {
-			const response = await fetch(`/api/queue/${id}/download`);
-			if (!response.ok) {
-				let title = "Download Failed";
-				let message = `Server returned ${response.status} ${response.statusText}`;
-				try {
-					const body = (await response.json()) as {
-						error?: { message?: string; details?: string };
-					};
-					if (body?.error?.message) {
-						title = body.error.message;
-						message = body.error.details || "";
+	const handleDownload = useCallback(
+		async (id: number, status?: string) => {
+			try {
+				const response = await fetch(`/api/queue/${id}/download`);
+				if (!response.ok) {
+					let title = "Download Failed";
+					let message = `Server returned ${response.status} ${response.statusText}`;
+					try {
+						const body = (await response.json()) as {
+							error?: { message?: string; details?: string };
+						};
+						if (body?.error?.message) {
+							title = body.error.message;
+							message = body.error.details || "";
+						}
+					} catch {
+						// Non-JSON error body — fall back to status text.
 					}
-				} catch {
-					// Non-JSON error body — fall back to status text.
-				}
-				// For completed items, a missing file almost always means the server
-				// cleaned it up post-import (delete_completed_nzb). Soften the toast.
-				if (response.status === 404 && status === "completed") {
-					showToast({
-						type: "info",
-						title: "NZB file already removed",
-						message: "This NZB was cleaned up after successful import.",
-					});
+					// For completed items, a missing file almost always means the server
+					// cleaned it up post-import (delete_completed_nzb). Soften the toast.
+					if (response.status === 404 && status === "completed") {
+						showToast({
+							type: "info",
+							title: "NZB file already removed",
+							message: "This NZB was cleaned up after successful import.",
+						});
+						return;
+					}
+					showToast({ type: "error", title, message });
 					return;
 				}
-				showToast({ type: "error", title, message });
-				return;
+				const contentDisposition = response.headers.get("Content-Disposition");
+				const filenameMatch = contentDisposition?.match(/filename[^;=\n]*=["']?([^"'\n]*)["']?/);
+				const filename = filenameMatch?.[1] || `queue-${id}.nzb`;
+				const blob = await response.blob();
+				const url = window.URL.createObjectURL(blob);
+				const a = document.createElement("a");
+				a.href = url;
+				a.download = filename;
+				document.body.appendChild(a);
+				a.click();
+				window.URL.revokeObjectURL(url);
+				document.body.removeChild(a);
+			} catch (error) {
+				console.error("Failed to download NZB:", error);
+				showToast({
+					type: "error",
+					title: "Download Failed",
+					message: error instanceof Error ? error.message : "Network error",
+				});
 			}
-			const contentDisposition = response.headers.get("Content-Disposition");
-			const filenameMatch = contentDisposition?.match(/filename[^;=\n]*=["']?([^"'\n]*)["']?/);
-			const filename = filenameMatch?.[1] || `queue-${id}.nzb`;
-			const blob = await response.blob();
-			const url = window.URL.createObjectURL(blob);
-			const a = document.createElement("a");
-			a.href = url;
-			a.download = filename;
-			document.body.appendChild(a);
-			a.click();
-			window.URL.revokeObjectURL(url);
-			document.body.removeChild(a);
-		} catch (error) {
-			console.error("Failed to download NZB:", error);
-			showToast({
-				type: "error",
-				title: "Download Failed",
-				message: error instanceof Error ? error.message : "Network error",
-			});
-		}
-	};
+		},
+		[showToast],
+	);
 
 	const handleRegenerateSymlink = useCallback(
 		async (storagePath: string) => {
@@ -818,7 +821,7 @@ export function QueuePage() {
 																			</div>
 																		</div>
 																		{item.indexer && (
-																			<div className="mt-1 min-w-0 pl-5.5 text-base-content/50 text-xs flex items-center gap-1">
+																			<div className="mt-1 flex min-w-0 items-center gap-1 pl-5.5 text-base-content/50 text-xs">
 																				<Globe className="h-3 w-3 shrink-0" />
 																				<span className="truncate">{item.indexer}</span>
 																			</div>

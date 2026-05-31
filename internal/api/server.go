@@ -377,13 +377,8 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 			return c.IP()
 		},
 		LimitReached: func(c *fiber.Ctx) error {
-			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{
-				"success": false,
-				"error": fiber.Map{
-					"code":    "TOO_MANY_REQUESTS",
-					"message": "Too many login attempts. Please wait a minute before trying again.",
-				},
-			})
+			return RespondError(c, fiber.StatusTooManyRequests, "TOO_MANY_REQUESTS",
+				"Too many login attempts. Please wait a minute before trying again.", "")
 		},
 	})
 	api.Post("/auth/login", authLimiter, s.handleDirectLogin)
@@ -421,10 +416,7 @@ func (s *Server) Shutdown(ctx context.Context) {
 //	@Router			/files/active-streams [get]
 func (s *Server) handleGetActiveStreams(c *fiber.Ctx) error {
 	if s.streamTracker == nil {
-		return c.Status(200).JSON(fiber.Map{
-			"success": true,
-			"data":    []nzbfilesystem.ActiveStream{},
-		})
+		return RespondSuccess(c, []nzbfilesystem.ActiveStream{})
 	}
 
 	streams := s.streamTracker.GetAll()
@@ -443,10 +435,7 @@ func (s *Server) handleGetActiveStreams(c *fiber.Ctx) error {
 		streams = filteredStreams
 	}
 
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"data":    streams,
-	})
+	return RespondSuccess(c, streams)
 }
 
 // getSystemInfo returns current system information

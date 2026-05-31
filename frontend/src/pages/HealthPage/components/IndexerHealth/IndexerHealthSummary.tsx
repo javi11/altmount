@@ -18,9 +18,7 @@ export function IndexerHealthSummary({ stats, summary }: IndexerHealthSummaryPro
 					<div className="font-extrabold font-mono text-2xl text-teal-600 tracking-tight dark:text-teal-400">
 						{stats.length}
 					</div>
-					<div className="font-semibold text-[10px] text-base-content/50">
-						Active Integrations
-					</div>
+					<div className="font-semibold text-[10px] text-base-content/50">Active Integrations</div>
 				</div>
 				<div className="relative z-10 text-teal-500 dark:text-teal-400">
 					<Activity className="h-8 w-8 opacity-45 transition-opacity group-hover:opacity-85" />
@@ -47,9 +45,7 @@ export function IndexerHealthSummary({ stats, summary }: IndexerHealthSummaryPro
 					>
 						{summary.overallRate.toFixed(1)}%
 					</div>
-					<div className="font-semibold text-[10px] text-base-content/50">
-						Average success rate
-					</div>
+					<div className="font-semibold text-[10px] text-base-content/50">Average success rate</div>
 				</div>
 				<div
 					className={`relative z-10 ${
@@ -73,9 +69,7 @@ export function IndexerHealthSummary({ stats, summary }: IndexerHealthSummaryPro
 					<div className="font-extrabold font-mono text-2xl text-emerald-600 tracking-tight dark:text-emerald-400">
 						{summary.totalSuccess.toLocaleString()}
 					</div>
-					<div className="font-semibold text-[10px] text-base-content/50">
-						Imports completed
-					</div>
+					<div className="font-semibold text-[10px] text-base-content/50">Imports completed</div>
 				</div>
 				<div className="relative z-10 text-emerald-600 dark:text-emerald-400">
 					<CheckCircle2 className="h-8 w-8 opacity-45 transition-opacity group-hover:opacity-85" />
@@ -106,9 +100,7 @@ export function IndexerHealthSummary({ stats, summary }: IndexerHealthSummaryPro
 					<div className="col-span-1 flex items-center gap-3 rounded-xl border border-teal-500/10 bg-teal-500/5 px-3 py-2.5 transition-all duration-300 hover:bg-teal-500/10 md:col-span-2">
 						<TrendingUp className="h-4 w-4 shrink-0 text-teal-400" aria-hidden="true" />
 						<div className="min-w-0">
-							<div className="truncate font-bold text-teal-400 text-xs">
-								{summary.best.indexer}
-							</div>
+							<div className="truncate font-bold text-teal-400 text-xs">{summary.best.indexer}</div>
 							<div className="mt-0.5 font-semibold text-[10px] text-base-content/50">
 								Highest efficiency rating · {summary.best.success_rate.toFixed(1)}%
 							</div>

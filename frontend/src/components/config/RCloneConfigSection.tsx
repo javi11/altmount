@@ -15,8 +15,8 @@ interface RCloneConfigSectionProps {
 	onUpdate?: (
 		section: string,
 		data:
-			| RCloneRCFormData
-			| RCloneMountFormData
+			| Partial<RCloneRCFormData>
+			| Partial<RCloneMountFormData>
 			| { mount_path: string }
 			| { rclone: RCloneMountFormData; mount_path: string },
 	) => Promise<void>;
@@ -263,12 +263,12 @@ export function RCloneConfigSection({
 
 	const handleSave = async () => {
 		if (onUpdate && hasChanges) {
-			const saveDelta: RCloneRCFormData = { ...formData };
+			const saveDelta: Partial<RCloneRCFormData> = { ...formData };
 			// Don't send empty password if it hasn't changed
 			if (saveDelta.rc_pass === "") {
-				delete (saveDelta as any).rc_pass;
+				delete saveDelta.rc_pass;
 			}
-			await onUpdate("rclone", saveDelta as any);
+			await onUpdate("rclone", saveDelta);
 			setHasChanges(false);
 		}
 	};
@@ -279,7 +279,7 @@ export function RCloneConfigSection({
 			await onUpdate("rclone", {
 				rclone: mountFormData,
 				mount_path: mountPath,
-			} as any);
+			});
 			setHasMountChanges(false);
 			setHasMountPathChanges(false);
 		}
@@ -289,7 +289,7 @@ export function RCloneConfigSection({
 		if (onUpdate) {
 			setIsRCToggleSaving(true);
 			try {
-				await onUpdate("rclone", { rc_enabled: enabled } as any);
+				await onUpdate("rclone", { rc_enabled: enabled });
 			} finally {
 				setIsRCToggleSaving(false);
 			}
@@ -300,7 +300,7 @@ export function RCloneConfigSection({
 		if (onUpdate) {
 			setIsMountToggleSaving(true);
 			try {
-				await onUpdate("rclone", { mount_enabled: enabled } as any);
+				await onUpdate("rclone", { mount_enabled: enabled });
 			} finally {
 				setIsMountToggleSaving(false);
 			}
