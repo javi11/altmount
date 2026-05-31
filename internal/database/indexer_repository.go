@@ -77,9 +77,12 @@ func getIndexerHealthStats(ctx context.Context, db DBQuerier) ([]*IndexerAggrega
 	return stats, rows.Err()
 }
 
+// pruneIndexerStats deletes records created within the last N hours (recent data, not old stale data).
+// Uses >= cutoff so that records newer than (now - hours) are removed — this intentionally clears
+// the most recent window, matching the "Delete Last N hours" UI action.
 func pruneIndexerStats(ctx context.Context, db DBQuerier, hours int) (int64, error) {
 	cutoff := time.Now().Add(-time.Duration(hours) * time.Hour)
-	query := `DELETE FROM indexer_import_stats WHERE created_at >= ?`
+	query := `DELETE FROM indexer_import_stats WHERE created_at >= ?` // >= removes records newer than cutoff
 	res, err := db.ExecContext(ctx, query, cutoff)
 	if err != nil {
 		return 0, err

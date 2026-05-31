@@ -734,7 +734,6 @@ func (r *QueueRepository) GetQueueItemByDownloadID(ctx context.Context, download
 	return &item, nil
 }
 
-
 // withQueueTransaction executes a function within a queue database transaction
 func (r *QueueRepository) withQueueTransaction(ctx context.Context, fn func(*QueueRepository) error) error {
 	ddb, ok := r.db.(*dialectAwareDB)

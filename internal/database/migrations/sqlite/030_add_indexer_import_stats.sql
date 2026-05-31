@@ -5,11 +5,13 @@ CREATE TABLE indexer_import_stats (
     indexer TEXT NOT NULL,
     status TEXT NOT NULL CHECK(status IN ('success', 'failed')),
     error_message TEXT DEFAULT NULL,
+    download_id TEXT DEFAULT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX idx_indexer_stats_name ON indexer_import_stats(indexer);
 CREATE INDEX idx_indexer_stats_created ON indexer_import_stats(created_at);
+CREATE INDEX idx_indexer_stats_download_id ON indexer_import_stats(download_id);
 
 -- Add indexer columns to existing tables to track indexers for active items
 ALTER TABLE import_queue ADD COLUMN indexer TEXT DEFAULT NULL;
@@ -29,6 +31,7 @@ ALTER TABLE file_health DROP COLUMN indexer;
 ALTER TABLE import_history DROP COLUMN indexer;
 ALTER TABLE import_queue DROP COLUMN indexer;
 
+DROP INDEX IF EXISTS idx_indexer_stats_download_id;
 DROP INDEX IF EXISTS idx_indexer_stats_created;
 DROP INDEX IF EXISTS idx_indexer_stats_name;
 DROP TABLE indexer_import_stats;

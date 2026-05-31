@@ -75,7 +75,6 @@ func (c *Coordinator) notifyARRWith(ctx context.Context, arrsService *arrs.Servi
 		}
 	}
 
-
 	// 3. Build the clean path using the determined base
 	pathParts := []string{basePath}
 	if cfg.SABnzbd.CompleteDir != "" {

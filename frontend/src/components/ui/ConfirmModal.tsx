@@ -113,20 +113,20 @@ export function ConfirmModal({
 				</div>
 
 				{verificationText && (
-					<div className="mb-6 form-control">
-						<label className="label">
-							<span className="label-text">
-								Please type <span className="font-bold select-all text-base-content">{verificationText}</span> to confirm.
-							</span>
-						</label>
+					<fieldset className="fieldset mb-6">
+						<legend className="fieldset-legend">
+							Please type{" "}
+							<span className="font-bold select-all text-base-content">{verificationText}</span>{" "}
+							to confirm.
+						</legend>
 						<input
 							type="text"
-							className="input input-bordered w-full"
+							className="input w-full"
 							value={inputValue}
 							onChange={(e) => setInputValue(e.target.value)}
 							placeholder={verificationText}
 						/>
-					</div>
+					</fieldset>
 				)}
 
 				{/* Actions */}

@@ -1532,7 +1532,6 @@ func (s *Server) calculateHistoryStoragePath(item *database.ImportQueueItem, bas
 		relPath = ""
 	}
 
-
 	// 3. Determine the base path for reporting
 	// For NONE, use MountPath. For others, use ImportDir.
 	finalBasePath := cfg.MountPath

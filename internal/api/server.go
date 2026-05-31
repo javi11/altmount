@@ -71,7 +71,6 @@ type Server struct {
 
 	speedtest     *speedtestCoordinator
 	speedtestOnce sync.Once
-	grabbedIndexers sync.Map
 }
 
 // NewServer creates a new API server that can optionally register routes on the provided mux (for backwards compatibility)

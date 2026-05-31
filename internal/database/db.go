@@ -282,9 +282,7 @@ func ensureSchemaIntegrity(db *sql.DB, d Dialect) {
 			}
 		}
 	}
-
 }
-
 
 // fixDevBranchMigrationConflict fixes an issue for users who applied the metadata migration as version 26
 // before it was renamed to 27, causing a conflict with the perf_indexes migration.

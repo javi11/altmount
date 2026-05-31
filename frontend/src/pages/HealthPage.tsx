@@ -47,7 +47,7 @@ import { HealthFilters } from "./HealthPage/components/HealthFilters";
 import { HealthStatsCards } from "./HealthPage/components/HealthStatsCards";
 import { HealthStatusAlert } from "./HealthPage/components/HealthStatusAlert";
 import { HealthTable } from "./HealthPage/components/HealthTable/HealthTable";
-import { IndexerHealth } from "./HealthPage/components/IndexerHealth";
+import { IndexerHealth } from "./HealthPage/components/IndexerHealth/IndexerHealth";
 import { LibraryScanStatus } from "./HealthPage/components/LibraryScanStatus";
 import { ProviderHealth } from "./HealthPage/components/ProviderHealth/ProviderHealth";
 import type { CleanupConfig, SortBy, SortOrder } from "./HealthPage/types";
