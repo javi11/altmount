@@ -61,9 +61,9 @@ func mapError(err error, logger *slog.Logger, ctx context.Context, msg string, a
 }
 
 // fillAttr populates FUSE attributes from os.FileInfo.
-// When noModTime is true all timestamps are reported as Unix epoch so that
-// media servers (e.g. Jellyfin 10.11.x) never see a file as "modified" due
-// to unstable mtimes on virtual/cloud filesystems.
+// When noModTime is true all three timestamps (mtime, ctime, atime) are reported
+// as Unix epoch so that media servers (e.g. Jellyfin 10.11.x) never see a file
+// as "modified" due to unstable mtimes on virtual/cloud filesystems.
 func fillAttr(info os.FileInfo, out *fuse.Attr, uid, gid uint32, noModTime bool) {
 	out.Size = uint64(info.Size())
 	if noModTime {
