@@ -530,11 +530,11 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 			firstSegment := fileToFetch.Segments[0]
 
 			// Create context with timeout
-			ctx, cancel := context.WithTimeout(ctx, time.Second*30)
+			c, cancel := context.WithTimeout(ctx, time.Second*30)
 			defer cancel()
 
 			// Get body for the first segment (v4 returns decoded bytes + YEnc metadata)
-			result, err := cp.Body(ctx, firstSegment.ID)
+			result, err := cp.Body(c, firstSegment.ID)
 			if err != nil {
 				notFound := stderrors.Is(err, nntppool.ErrArticleNotFound)
 				return fetchResult{
