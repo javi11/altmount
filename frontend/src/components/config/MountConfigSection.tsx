@@ -978,6 +978,7 @@ function FuseMountSubSection({ config, isRunning, onFormDataChange }: FuseSubSec
 		max_read_ahead_mb: 128,
 		async_buffer_size_mb: 16,
 		async_buffer_max_total_mb: 256,
+		no_mod_time: false,
 	});
 
 	useEffect(() => {
@@ -1139,6 +1140,20 @@ function FuseMountSubSection({ config, isRunning, onFormDataChange }: FuseSubSec
 							/>
 							<span className="label-text text-xs">Allow other users to access mount</span>
 						</label>
+					</fieldset>
+					<fieldset className="fieldset">
+						<legend className="fieldset-legend">Compatibility</legend>
+						<label className="label cursor-pointer justify-start gap-3">
+							<input
+								type="checkbox"
+								className="checkbox checkbox-primary checkbox-sm"
+								checked={formData.no_mod_time ?? false}
+								onChange={(e) => updateField({ no_mod_time: e.target.checked })}
+								disabled={isRunning}
+							/>
+							<span className="label-text text-xs">Suppress modification times (report epoch for all files)</span>
+						</label>
+						<p className="label">Enable when media servers misinterpret virtual filesystem mtimes as file changes</p>
 					</fieldset>
 				</div>
 			</div>
