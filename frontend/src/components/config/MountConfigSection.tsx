@@ -1151,9 +1151,8 @@ function FuseMountSubSection({ config, isRunning, onFormDataChange }: FuseSubSec
 								onChange={(e) => updateField({ no_mod_time: e.target.checked })}
 								disabled={isRunning}
 							/>
-							<span className="label-text text-xs">Suppress modification times (report epoch for all files)</span>
+							<span className="label-text text-xs">Suppress modification times</span>
 						</label>
-						<p className="label">Enable when media servers misinterpret virtual filesystem mtimes as file changes</p>
 					</fieldset>
 				</div>
 			</div>
