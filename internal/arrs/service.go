@@ -70,6 +70,40 @@ func (s *Service) GetAllInstances() []*model.ConfigInstance {
 	return s.instances.GetAllInstances()
 }
 
+// ResolveIndexerByDownloadID looks up which indexer a download came from by
+// querying the native queue of each configured Sportarr instance for the given
+// download-client ID. Sportarr is not starr-compatible and never fires an OnGrab
+// webhook, so this on-demand lookup (used at import time) is how its imports get
+// attributed instead of falling back to "Unknown" in indexer health. Only Sportarr
+// instances are queried — the other *arrs supply the indexer via webhook. Returns
+// ("", false) when no Sportarr instance knows the ID.
+func (s *Service) ResolveIndexerByDownloadID(ctx context.Context, downloadID string) (string, bool) {
+	if downloadID == "" {
+		return "", false
+	}
+	for _, instance := range s.instances.GetAllInstances() {
+		if instance == nil || !instance.Enabled || instance.Type != "sportarr" {
+			continue
+		}
+		client, err := s.clients.GetOrCreateSportarrClient(instance.Name, instance.URL, instance.APIKey)
+		if err != nil {
+			continue
+		}
+		queue, err := client.GetQueue(ctx)
+		if err != nil {
+			slog.DebugContext(ctx, "Sportarr indexer lookup: failed to read queue",
+				"instance", instance.Name, "download_id", downloadID, "error", err)
+			continue
+		}
+		for _, q := range queue {
+			if q.DownloadID == downloadID && q.Indexer != "" {
+				return q.Indexer, true
+			}
+		}
+	}
+	return "", false
+}
+
 // GetInstance returns a specific instance by type and name
 func (s *Service) GetInstance(instanceType, instanceName string) *model.ConfigInstance {
 	return s.instances.GetInstance(instanceType, instanceName)

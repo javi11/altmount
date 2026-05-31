@@ -492,7 +492,7 @@ func (w *Worker) cleanupSportarrQueue(ctx context.Context, instance *model.Confi
 		// Only operate on queue items owned by AltMount's registered download client.
 		// Items from other clients may reference paths AltMount cannot see and must
 		// never be touched — see issue #523.
-		if q.DownloadClient != registrar.AltmountDownloadClientName {
+		if q.DownloadClient.Name != registrar.AltmountDownloadClientName {
 			continue
 		}
 
