@@ -42,6 +42,8 @@ type SportarrQueueItem struct {
 	Status                string                  `json:"status"`
 	Protocol              string                  `json:"protocol"`
 	DownloadClient        string                  `json:"downloadClient"`
+	DownloadID            string                  `json:"downloadId"`
+	Indexer               string                  `json:"indexer"`
 	OutputPath            string                  `json:"outputPath"`
 	TrackedDownloadStatus string                  `json:"trackedDownloadStatus"`
 	TrackedDownloadState  string                  `json:"trackedDownloadState"`
