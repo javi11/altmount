@@ -269,7 +269,7 @@ func (r *HealthRepository) GetUnhealthyFiles(ctx context.Context, limit int, str
 			&health.Priority,
 			&health.StreamingFailureCount,
 			&health.IsMasked,
-		&health.Metadata, &health.Indexer,
+			&health.Metadata, &health.Indexer,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan file health: %w", err)
@@ -836,7 +836,7 @@ func (r *HealthRepository) ListHealthItems(ctx context.Context, statusFilter *He
 			&health.SourceNzbPath, &health.ErrorDetails,
 			&health.CreatedAt, &health.UpdatedAt, &health.ScheduledCheckAt,
 			&health.LibraryPath, &health.StreamingFailureCount, &health.IsMasked,
-		&health.Metadata, &health.Indexer,
+			&health.Metadata, &health.Indexer,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan health item: %w", err)
@@ -1616,7 +1616,7 @@ func (r *HealthRepository) GetFilesWithoutLibraryPath(ctx context.Context) ([]*F
 			&health.RepairRetryCount, &health.MaxRepairRetries,
 			&health.SourceNzbPath, &health.ErrorDetails,
 			&health.CreatedAt, &health.UpdatedAt, &health.ReleaseDate, &health.Priority,
-		&health.Metadata,
+			&health.Metadata,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan file health: %w", err)
@@ -1790,7 +1790,7 @@ func (r *HealthRepository) GetFilesByPaths(ctx context.Context, filePaths []stri
 			&health.LastError, &health.RetryCount, &health.MaxRetries,
 			&health.RepairRetryCount, &health.MaxRepairRetries, &health.SourceNzbPath,
 			&health.ErrorDetails, &health.CreatedAt, &health.UpdatedAt, &health.ReleaseDate, &health.Priority,
-		&health.Metadata,
+			&health.Metadata,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan file health: %w", err)
@@ -1827,7 +1827,7 @@ func (r *HealthRepository) GetFilesForLibrarySync(ctx context.Context) ([]*FileH
 			&health.RepairRetryCount, &health.MaxRepairRetries,
 			&health.SourceNzbPath, &health.ErrorDetails,
 			&health.CreatedAt, &health.UpdatedAt, &health.ReleaseDate, &health.Priority,
-		&health.Metadata,
+			&health.Metadata,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan file health: %w", err)
@@ -1868,4 +1868,9 @@ func (r *HealthRepository) UpdateFileMetadata(ctx context.Context, id int64, met
 	`
 	_, err := r.db.ExecContext(ctx, query, metadata, id)
 	return err
+}
+
+// LogIndexerImport records a success or failure for an indexer persistently.
+func (r *HealthRepository) LogIndexerImport(ctx context.Context, indexer string, status string, errMsg string) error {
+	return logIndexerImport(ctx, r.db, indexer, status, errMsg)
 }

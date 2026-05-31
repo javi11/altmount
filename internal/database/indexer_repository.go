@@ -25,16 +25,16 @@ type IndexerAggregatedHealth struct {
 
 // --- Consolidated Helper Functions ---
 
-func logIndexerImport(ctx context.Context, db DBQuerier, indexer string, status string, errMsg string, downloadID *string) error {
+func logIndexerImport(ctx context.Context, db DBQuerier, indexer string, status string, errMsg string) error {
 	var errDetails any = nil
 	if errMsg != "" {
 		errDetails = errMsg
 	}
 	query := `
-		INSERT INTO indexer_import_stats (indexer, status, error_message, download_id, created_at)
-		VALUES (?, ?, ?, ?, datetime('now'))
+		INSERT INTO indexer_import_stats (indexer, status, error_message, created_at)
+		VALUES (?, ?, ?, datetime('now'))
 	`
-	_, err := db.ExecContext(ctx, query, indexer, status, errDetails, downloadID)
+	_, err := db.ExecContext(ctx, query, indexer, status, errDetails)
 	return err
 }
 
@@ -100,9 +100,8 @@ func deleteIndexerStats(ctx context.Context, db DBQuerier, indexer string) (int6
 }
 
 func updateIndexerStatsByDownloadID(ctx context.Context, db DBQuerier, downloadID string, indexer string) error {
-	query := `UPDATE indexer_import_stats SET indexer = ? WHERE download_id = ? AND indexer = 'Unknown'`
-	_, err := db.ExecContext(ctx, query, indexer, downloadID)
-	return err
+	// No-op: we keep upstream schemas clean and already associate download_ids in queue/history tables
+	return nil
 }
 
 func updateImportHistoryIndexerByDownloadID(ctx context.Context, db DBQuerier, downloadID string, indexer string) error {
@@ -114,8 +113,8 @@ func updateImportHistoryIndexerByDownloadID(ctx context.Context, db DBQuerier, d
 // --- Repository Methods ---
 
 // LogIndexerImport records a success or failure for an indexer persistently.
-func (r *Repository) LogIndexerImport(ctx context.Context, indexer string, status string, errMsg string, downloadID *string) error {
-	return logIndexerImport(ctx, r.db, indexer, status, errMsg, downloadID)
+func (r *Repository) LogIndexerImport(ctx context.Context, indexer string, status string, errMsg string) error {
+	return logIndexerImport(ctx, r.db, indexer, status, errMsg)
 }
 
 // GetIndexerHealthStats aggregates all historical records to calculate success/failure rates.
@@ -136,8 +135,8 @@ func (r *Repository) DeleteIndexerStats(ctx context.Context, indexer string) (in
 // --- QueueRepository Methods ---
 
 // LogIndexerImport records a success or failure for an indexer persistently.
-func (r *QueueRepository) LogIndexerImport(ctx context.Context, indexer string, status string, errMsg string, downloadID *string) error {
-	return logIndexerImport(ctx, r.db, indexer, status, errMsg, downloadID)
+func (r *QueueRepository) LogIndexerImport(ctx context.Context, indexer string, status string, errMsg string) error {
+	return logIndexerImport(ctx, r.db, indexer, status, errMsg)
 }
 
 // GetIndexerHealthStats aggregates all historical records to calculate success/failure rates.

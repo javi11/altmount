@@ -60,9 +60,9 @@ type ArrsWebhookRequest struct {
 		Id int64 `json:"id"`
 	} `json:"bookFile"`
 
-	EventType string `json:"eventType"`
+	EventType    string `json:"eventType"`
 	InstanceName string `json:"instanceName,omitempty"`
-	FilePath  string `json:"filePath,omitempty"`
+	FilePath     string `json:"filePath,omitempty"`
 	// For upgrades/renames, the file path might be in other fields or need to be inferred
 	Movie struct {
 		Id         int64  `json:"id"`
@@ -85,6 +85,11 @@ type ArrsWebhookRequest struct {
 		Path      string `json:"path"`
 	} `json:"episodeFile"`
 	DeletedFiles ArrsDeletedFiles `json:"deletedFiles,omitempty"`
+	DownloadId   string           `json:"downloadId,omitempty"`
+	Release      *struct {
+		Indexer      string `json:"indexer,omitempty"`
+		ReleaseTitle string `json:"releaseTitle,omitempty"`
+	} `json:"release,omitempty"`
 }
 
 func (req ArrsWebhookRequest) ToMetadata() model.WebhookMetadata {
@@ -244,6 +249,22 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 	case "Test":
 		slog.InfoContext(c.Context(), "Received ARR test webhook")
 		return c.Status(200).JSON(fiber.Map{"success": true, "message": "Test successful"})
+	case "Grab":
+		if req.DownloadId != "" && req.Release != nil && req.Release.Indexer != "" {
+			indexerName := req.Release.Indexer
+			releaseTitle := req.Release.ReleaseTitle
+			s.importerService.StoreGrabbedIndexer(req.DownloadId, releaseTitle, indexerName)
+			slog.InfoContext(c.Context(), "Logged grabbed indexer from webhook", "download_id", req.DownloadId, "release_title", releaseTitle, "indexer", indexerName)
+			// Proactively update any existing queue item with this download ID
+			if err := s.queueRepo.UpdateQueueItemIndexerByDownloadID(c.Context(), req.DownloadId, indexerName); err != nil {
+				slog.WarnContext(c.Context(), "Failed to update indexer for existing queue item", "download_id", req.DownloadId, "indexer", indexerName, "error", err)
+			}
+			// In case the import already completed or failed (e.g. race condition), update history
+			if err := s.queueRepo.UpdateImportHistoryIndexerByDownloadID(c.Context(), req.DownloadId, indexerName); err != nil {
+				slog.DebugContext(c.Context(), "Failed to update indexer for import history (expected if not yet complete)", "download_id", req.DownloadId, "indexer", indexerName, "error", err)
+			}
+		}
+		return c.Status(200).JSON(fiber.Map{"success": true, "message": "Grab logged successfully"})
 	case "Download", "AlbumImport", "BookImport": // OnImport
 		isScanEvent = true
 		if req.EpisodeFile.Path != "" {
@@ -252,6 +273,22 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 			pathsToScan = append(pathsToScan, req.MovieFile.Path)
 		} else if req.FilePath != "" {
 			pathsToScan = append(pathsToScan, req.FilePath)
+		}
+
+		// Update indexer name in database tables if present in webhook
+		if req.DownloadId != "" && req.Release != nil && req.Release.Indexer != "" {
+			indexerName := req.Release.Indexer
+			slog.InfoContext(c.Context(), "Logged indexer from OnImport webhook", "download_id", req.DownloadId, "indexer", indexerName)
+
+			// 1. Update queue if it still exists
+			if err := s.queueRepo.UpdateQueueItemIndexerByDownloadID(c.Context(), req.DownloadId, indexerName); err != nil {
+				slog.DebugContext(c.Context(), "Failed to update indexer for queue item", "download_id", req.DownloadId, "indexer", indexerName, "error", err)
+			}
+
+			// 2. Update import history if it has already completed
+			if err := s.queueRepo.UpdateImportHistoryIndexerByDownloadID(c.Context(), req.DownloadId, indexerName); err != nil {
+				slog.DebugContext(c.Context(), "Failed to update indexer for import history", "download_id", req.DownloadId, "indexer", indexerName, "error", err)
+			}
 		}
 	case "Rename":
 		isScanEvent = true
@@ -615,9 +652,18 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 				metadataStr = &str
 			}
 
+			var indexer *string = nil
+			if req.Release != nil && req.Release.Indexer != "" {
+				indexer = &req.Release.Indexer
+			} else if req.DownloadId != "" {
+				if idxName, ok := s.importerService.GetGrabbedIndexer(req.DownloadId, ""); ok {
+					indexer = &idxName
+				}
+			}
+
 			// Add to health check (pending status) with high priority (Next) to ensure it's processed right away
 			cfg := s.configManager.GetConfigGetter()()
-			err = s.healthRepo.AddFileToHealthCheckWithMetadata(c.Context(), normalizedPath, &path, cfg.GetMaxRetries(), cfg.GetMaxRepairRetries(), sourceNzb, database.HealthPriorityNext, releaseDate, metadataStr, nil)
+			err = s.healthRepo.AddFileToHealthCheckWithMetadata(c.Context(), normalizedPath, &path, cfg.GetMaxRetries(), cfg.GetMaxRepairRetries(), sourceNzb, database.HealthPriorityNext, releaseDate, metadataStr, indexer)
 			if err != nil {
 				slog.ErrorContext(c.Context(), "Failed to add webhook file to health check", "path", normalizedPath, "error", err)
 			} else {
