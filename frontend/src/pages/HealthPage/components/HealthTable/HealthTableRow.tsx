@@ -97,7 +97,14 @@ export const HealthTableRow = memo(function HealthTableRow({
 				<div className="flex items-center space-x-3">
 					<span className={iconColorClass}>{statusIcon}</span>
 					<div>
-						<div className="break-all font-bold">{item.file_path.split("/").pop() || ""}</div>
+						<div className="flex flex-wrap items-center gap-2">
+							<div className="break-all font-bold">{item.file_path.split("/").pop() || ""}</div>
+							{item.indexer && (
+								<span className="badge badge-primary badge-xs shrink-0 border-primary/30 bg-primary/20 py-1.5 font-bold text-primary tracking-tight">
+									{item.indexer}
+								</span>
+							)}
+						</div>
 						<div className="break-all text-base-content/70 text-sm">{item.file_path}</div>
 					</div>
 				</div>

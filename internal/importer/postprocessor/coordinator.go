@@ -126,7 +126,7 @@ func (c *Coordinator) HandleSuccess(ctx context.Context, item *database.ImportQu
 	}
 
 	// 4. Schedule health check
-	if err := c.ScheduleHealthCheck(ctx, resultingPath); err != nil {
+	if err := c.ScheduleHealthCheck(ctx, item, resultingPath); err != nil {
 		c.log.WarnContext(ctx, "Failed to schedule health check",
 			"path", resultingPath,
 			"error", err)

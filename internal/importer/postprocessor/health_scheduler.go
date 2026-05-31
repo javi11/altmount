@@ -9,7 +9,7 @@ import (
 )
 
 // ScheduleHealthCheck schedules a health check for an imported file
-func (c *Coordinator) ScheduleHealthCheck(ctx context.Context, resultingPath string) error {
+func (c *Coordinator) ScheduleHealthCheck(ctx context.Context, item *database.ImportQueueItem, resultingPath string) error {
 	if c.healthRepo == nil {
 		return nil // Health checks not configured
 	}
@@ -29,7 +29,11 @@ func (c *Coordinator) ScheduleHealthCheck(ctx context.Context, resultingPath str
 
 	// Add/Update health record with high priority
 	cfg := c.configGetter()
-	err = c.healthRepo.AddFileToHealthCheck(ctx, resultingPath, &resultingPath, cfg.GetMaxRetries(), cfg.GetMaxRepairRetries(), &fileMeta.SourceNzbPath, database.HealthPriorityNext)
+	var indexer *string = nil
+	if item != nil {
+		indexer = item.Indexer
+	}
+	err = c.healthRepo.AddFileToHealthCheckWithMetadata(ctx, resultingPath, &resultingPath, cfg.GetMaxRetries(), cfg.GetMaxRepairRetries(), &fileMeta.SourceNzbPath, database.HealthPriorityNext, nil, nil, indexer)
 	if err != nil {
 		slog.ErrorContext(ctx, "Failed to schedule immediate health check for imported file",
 			"path", resultingPath,

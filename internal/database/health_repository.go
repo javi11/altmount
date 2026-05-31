@@ -87,7 +87,7 @@ func (r *HealthRepository) GetFileHealth(ctx context.Context, filePath string) (
 		       repair_retry_count, max_repair_retries, source_nzb_path,
 		       error_details, created_at, updated_at, release_date, priority,
 			   streaming_failure_count, is_masked
-		, metadata
+		, metadata, indexer
 		FROM file_health
 		WHERE file_path = ?
 	`
@@ -100,7 +100,7 @@ func (r *HealthRepository) GetFileHealth(ctx context.Context, filePath string) (
 		&health.SourceNzbPath, &health.ErrorDetails,
 		&health.CreatedAt, &health.UpdatedAt, &health.ReleaseDate, &health.Priority,
 		&health.StreamingFailureCount, &health.IsMasked,
-		&health.Metadata,
+		&health.Metadata, &health.Indexer,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -119,7 +119,7 @@ func (r *HealthRepository) GetFileHealthByLibraryPath(ctx context.Context, libra
 		       repair_retry_count, max_repair_retries, source_nzb_path,
 		       error_details, created_at, updated_at, release_date, priority,
 			   streaming_failure_count, is_masked
-		, metadata
+		, metadata, indexer
 		FROM file_health
 		WHERE library_path = ?
 	`
@@ -132,7 +132,7 @@ func (r *HealthRepository) GetFileHealthByLibraryPath(ctx context.Context, libra
 		&health.SourceNzbPath, &health.ErrorDetails,
 		&health.CreatedAt, &health.UpdatedAt, &health.ReleaseDate, &health.Priority,
 		&health.StreamingFailureCount, &health.IsMasked,
-		&health.Metadata,
+		&health.Metadata, &health.Indexer,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -150,7 +150,7 @@ func (r *HealthRepository) GetFileHealthByID(ctx context.Context, id int64) (*Fi
 		       repair_retry_count, max_repair_retries, source_nzb_path,
 		       error_details, created_at, updated_at, release_date, priority,
 			   streaming_failure_count, is_masked
-		, metadata
+		, metadata, indexer
 		FROM file_health
 		WHERE id = ?
 	`
@@ -163,7 +163,7 @@ func (r *HealthRepository) GetFileHealthByID(ctx context.Context, id int64) (*Fi
 		&health.SourceNzbPath, &health.ErrorDetails,
 		&health.CreatedAt, &health.UpdatedAt, &health.ReleaseDate, &health.Priority,
 		&health.StreamingFailureCount, &health.IsMasked,
-		&health.Metadata,
+		&health.Metadata, &health.Indexer,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -224,7 +224,7 @@ func (r *HealthRepository) GetUnhealthyFiles(ctx context.Context, limit int, str
 		       repair_retry_count, max_repair_retries, source_nzb_path,
 		       error_details, created_at, updated_at, release_date, scheduled_check_at,
 			   library_path, priority, streaming_failure_count, is_masked
-		, metadata
+		, metadata, indexer
 		FROM file_health
 		WHERE scheduled_check_at IS NOT NULL
 		  AND scheduled_check_at <= datetime('now')
@@ -269,7 +269,7 @@ func (r *HealthRepository) GetUnhealthyFiles(ctx context.Context, limit int, str
 			&health.Priority,
 			&health.StreamingFailureCount,
 			&health.IsMasked,
-		&health.Metadata,
+		&health.Metadata, &health.Indexer,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan file health: %w", err)
@@ -720,19 +720,19 @@ func (r *HealthRepository) RegisterCorruptedFile(ctx context.Context, filePath s
 
 // AddFileToHealthCheck adds a file to the health database for checking
 func (r *HealthRepository) AddFileToHealthCheck(ctx context.Context, filePath string, libraryPath *string, maxRetries int, maxRepairRetries int, sourceNzbPath *string, priority HealthPriority) error {
-	return r.AddFileToHealthCheckWithMetadata(ctx, filePath, libraryPath, maxRetries, maxRepairRetries, sourceNzbPath, priority, nil, nil)
+	return r.AddFileToHealthCheckWithMetadata(ctx, filePath, libraryPath, maxRetries, maxRepairRetries, sourceNzbPath, priority, nil, nil, nil)
 }
 
 // AddFileToHealthCheckWithMetadata adds a file to the health database for checking with metadata
-func (r *HealthRepository) AddFileToHealthCheckWithMetadata(ctx context.Context, filePath string, libraryPath *string, maxRetries int, maxRepairRetries int, sourceNzbPath *string, priority HealthPriority, releaseDate *time.Time, metadata *string) error {
+func (r *HealthRepository) AddFileToHealthCheckWithMetadata(ctx context.Context, filePath string, libraryPath *string, maxRetries int, maxRepairRetries int, sourceNzbPath *string, priority HealthPriority, releaseDate *time.Time, metadata *string, indexer *string) error {
 	var releaseDateStr any = nil
 	if releaseDate != nil {
 		releaseDateStr = releaseDate.UTC().Format("2006-01-02 15:04:05")
 	}
 
 	query := `
-		INSERT INTO file_health (file_path, library_path, status, last_checked, retry_count, max_retries, repair_retry_count, max_repair_retries, source_nzb_path, priority, release_date, metadata, created_at, updated_at, scheduled_check_at)
-		VALUES (?, ?, ?, datetime('now'), 0, ?, 0, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), datetime('now'))
+		INSERT INTO file_health (file_path, library_path, status, last_checked, retry_count, max_retries, repair_retry_count, max_repair_retries, source_nzb_path, priority, release_date, metadata, indexer, created_at, updated_at, scheduled_check_at)
+		VALUES (?, ?, ?, datetime('now'), 0, ?, 0, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), datetime('now'))
 		ON CONFLICT(file_path) DO UPDATE SET
 
 		library_path = COALESCE(excluded.library_path, library_path),
@@ -747,11 +747,12 @@ func (r *HealthRepository) AddFileToHealthCheckWithMetadata(ctx context.Context,
 		priority = excluded.priority,
 		release_date = COALESCE(excluded.release_date, release_date),
 		metadata = COALESCE(excluded.metadata, metadata),
+		indexer = COALESCE(excluded.indexer, indexer),
 		updated_at = datetime('now'),
 		scheduled_check_at = datetime('now')
 	`
 
-	_, err := r.db.ExecContext(ctx, query, filePath, libraryPath, HealthStatusPending, maxRetries, maxRepairRetries, sourceNzbPath, priority, releaseDateStr, metadata)
+	_, err := r.db.ExecContext(ctx, query, filePath, libraryPath, HealthStatusPending, maxRetries, maxRepairRetries, sourceNzbPath, priority, releaseDateStr, metadata, indexer)
 
 	if err != nil {
 		return fmt.Errorf("failed to add file to health check: %w", err)
@@ -789,7 +790,7 @@ func (r *HealthRepository) ListHealthItems(ctx context.Context, statusFilter *He
 		       repair_retry_count, max_repair_retries, source_nzb_path,
 		       error_details, created_at, updated_at, scheduled_check_at,
 			   library_path, streaming_failure_count, is_masked
-		, metadata
+		, metadata, indexer
 		FROM file_health
 		WHERE (? IS NULL OR status = ?)
 		  AND (? IS NULL OR created_at >= ?)
@@ -835,7 +836,7 @@ func (r *HealthRepository) ListHealthItems(ctx context.Context, statusFilter *He
 			&health.SourceNzbPath, &health.ErrorDetails,
 			&health.CreatedAt, &health.UpdatedAt, &health.ScheduledCheckAt,
 			&health.LibraryPath, &health.StreamingFailureCount, &health.IsMasked,
-		&health.Metadata,
+		&health.Metadata, &health.Indexer,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan health item: %w", err)
@@ -948,27 +949,36 @@ func (r *HealthRepository) DeleteHealthRecordsBulk(ctx context.Context, filePath
 		return nil
 	}
 
-	// Build placeholders for the IN clause
-	placeholders := make([]string, len(filePaths))
-	args := make([]any, len(filePaths))
-	for i, path := range filePaths {
-		placeholders[i] = "?"
-		args[i] = strings.TrimPrefix(path, "/")
+	// SQLite parameter limit typically is 999. Batch delete in chunks of 500.
+	const batchSize = 500
+	var totalRowsAffected int64
+
+	for i := 0; i < len(filePaths); i += batchSize {
+		end := min(i+batchSize, len(filePaths))
+		chunk := filePaths[i:end]
+
+		placeholders := make([]string, len(chunk))
+		args := make([]any, len(chunk))
+		for j, path := range chunk {
+			placeholders[j] = "?"
+			args[j] = strings.TrimPrefix(path, "/")
+		}
+
+		query := fmt.Sprintf(`DELETE FROM file_health WHERE file_path IN (%s)`, strings.Join(placeholders, ","))
+
+		result, err := r.db.ExecContext(ctx, query, args...)
+		if err != nil {
+			return fmt.Errorf("failed to delete health records batch starting at %d: %w", i, err)
+		}
+
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("failed to get rows affected for batch starting at %d: %w", i, err)
+		}
+		totalRowsAffected += rowsAffected
 	}
 
-	query := fmt.Sprintf(`DELETE FROM file_health WHERE file_path IN (%s)`, strings.Join(placeholders, ","))
-
-	result, err := r.db.ExecContext(ctx, query, args...)
-	if err != nil {
-		return fmt.Errorf("failed to delete health records: %w", err)
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to get rows affected: %w", err)
-	}
-
-	if rowsAffected == 0 {
+	if totalRowsAffected == 0 {
 		return fmt.Errorf("no health records found to delete")
 	}
 
@@ -981,38 +991,47 @@ func (r *HealthRepository) ResetHealthChecksBulk(ctx context.Context, filePaths 
 		return 0, nil
 	}
 
-	// Build placeholders for the IN clause; prepend the status value as first arg
-	placeholders := make([]string, len(filePaths))
-	args := make([]any, 0, len(filePaths)+1)
-	args = append(args, string(HealthStatusPending))
-	for i, path := range filePaths {
-		placeholders[i] = "?"
-		args = append(args, path)
+	// SQLite parameter limit typically is 999. Batch reset in chunks of 500.
+	const batchSize = 500
+	var totalRowsAffected int64
+
+	for i := 0; i < len(filePaths); i += batchSize {
+		end := min(i+batchSize, len(filePaths))
+		chunk := filePaths[i:end]
+
+		placeholders := make([]string, len(chunk))
+		args := make([]any, 0, len(chunk)+1)
+		args = append(args, string(HealthStatusPending))
+		for j, path := range chunk {
+			placeholders[j] = "?"
+			args = append(args, path)
+		}
+
+		query := fmt.Sprintf(`
+			UPDATE file_health
+			SET status = ?,
+			    retry_count = 0,
+			    repair_retry_count = 0,
+			    last_error = NULL,
+			    error_details = NULL,
+			    updated_at = datetime('now'),
+				scheduled_check_at = datetime('now')
+			WHERE file_path IN (%s)
+		`, strings.Join(placeholders, ","))
+
+		result, err := r.db.ExecContext(ctx, query, args...)
+		if err != nil {
+			return 0, fmt.Errorf("failed to reset health records batch starting at %d: %w", i, err)
+		}
+
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			return 0, fmt.Errorf("failed to get rows affected for batch starting at %d: %w", i, err)
+		}
+		totalRowsAffected += rowsAffected
 	}
 
-	query := fmt.Sprintf(`
-		UPDATE file_health
-		SET status = ?,
-		    retry_count = 0,
-		    repair_retry_count = 0,
-		    last_error = NULL,
-		    error_details = NULL,
-		    updated_at = datetime('now'),
-			scheduled_check_at = datetime('now')
-		WHERE file_path IN (%s)
-	`, strings.Join(placeholders, ","))
-
-	result, err := r.db.ExecContext(ctx, query, args...)
-	if err != nil {
-		return 0, fmt.Errorf("failed to reset health records: %w", err)
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return 0, fmt.Errorf("failed to get rows affected: %w", err)
-	}
-
-	return int(rowsAffected), nil
+	return int(totalRowsAffected), nil
 }
 
 // ResetAllHealthChecks resets all health records to pending status

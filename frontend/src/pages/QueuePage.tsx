@@ -16,6 +16,7 @@ import {
 	Import,
 	Link2,
 	List,
+	Globe,
 	MoreVertical,
 	PlayCircle,
 	RefreshCw,
@@ -816,6 +817,12 @@ export function QueuePage() {
 																				/>
 																			</div>
 																		</div>
+																		{item.indexer && (
+																			<div className="mt-1 min-w-0 pl-5.5 text-base-content/50 text-xs flex items-center gap-1">
+																				<Globe className="h-3 w-3 shrink-0" />
+																				<span className="truncate">{item.indexer}</span>
+																			</div>
+																		)}
 																		<div className="mt-1 min-w-0 pl-5.5 text-base-content/40 text-xs">
 																			{item.target_path ? (
 																				<span className="flex min-w-0 items-center gap-1">
