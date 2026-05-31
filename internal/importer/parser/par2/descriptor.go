@@ -104,10 +104,10 @@ func readFileDescriptors(
 		return descriptors, fmt.Errorf("PAR2 file has no segments")
 	}
 
-	// Create context with timeout (30s per segment, capped at 90s ceiling).
+	// Create context with timeout (2s per segment, capped at 90s ceiling).
 	// Capping prevents runaway waits on large index files where the real cost
 	// is dominated by latency, not sequential segment fetches.
-	timeout := min(time.Second*30*time.Duration(len(par2File.Segments)), 90*time.Second)
+	timeout := min(time.Second*2*time.Duration(len(par2File.Segments)), 90*time.Second)
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 

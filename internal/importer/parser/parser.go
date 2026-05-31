@@ -32,6 +32,11 @@ import (
 	concpool "github.com/sourcegraph/conc/pool"
 )
 
+// segmentFetchTimeout bounds a single NNTP article fetch during parsing so a
+// slow or flaky provider fallback cannot stall the import. Per-segment budget,
+// not per-NZB (that is the 10-minute ParseFile context).
+const segmentFetchTimeout = 2 * time.Second
+
 // FirstSegmentData holds cached data from the first segment of an NZB file
 // This avoids redundant fetching when both PAR2 extraction and file parsing need the same data
 type FirstSegmentData struct {
@@ -530,7 +535,7 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 			firstSegment := fileToFetch.Segments[0]
 
 			// Create context with timeout
-			ctx, cancel := context.WithTimeout(ctx, time.Second*30)
+			ctx, cancel := context.WithTimeout(ctx, segmentFetchTimeout)
 			defer cancel()
 
 			// Get body for the first segment (v4 returns decoded bytes + YEnc metadata)
@@ -732,7 +737,7 @@ func (p *Parser) complete16KBReads(ctx context.Context, cache []*FirstSegmentDat
 			g, gctx := errgroup.WithContext(ctx)
 			for i, seg := range segsNeeded {
 				g.Go(func() error {
-					segCtx, segCancel := context.WithTimeout(gctx, time.Second*30)
+					segCtx, segCancel := context.WithTimeout(gctx, segmentFetchTimeout)
 					defer segCancel()
 					sr, err := cp.Body(segCtx, seg.ID)
 					if err != nil {
@@ -776,6 +781,10 @@ func (p *Parser) fetchYencHeaders(ctx context.Context, segment nzbparser.NzbSegm
 	if err != nil {
 		return nntppool.YEncMeta{}, errors.NewNonRetryableError("no connection pool available", err)
 	}
+
+	// Bound the fetch so a slow/flaky provider fallback can't stall the import.
+	ctx, cancel := context.WithTimeout(ctx, segmentFetchTimeout)
+	defer cancel()
 
 	// onMeta fires after =ybegin/=ypart parsing (~first 2 lines),
 	// while the body continues draining to io.Discard in the background.
