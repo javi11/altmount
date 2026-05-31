@@ -432,3 +432,194 @@ func TestResolveMainFeature(t *testing.T) {
 		}
 	})
 }
+
+// countingReadSeeker wraps an io.ReadSeeker and counts Seek calls so tests can
+// pin the "one Seek per run" performance property of readPlaylistsCoalesced.
+type countingReadSeeker struct {
+	rs    io.ReadSeeker
+	seeks int
+}
+
+func (c *countingReadSeeker) Read(p []byte) (int, error) { return c.rs.Read(p) }
+
+func (c *countingReadSeeker) Seek(offset int64, whence int) (int64, error) {
+	c.seeks++
+	return c.rs.Seek(offset, whence)
+}
+
+// secByte returns n bytes all set to v — a distinguishable per-sector pattern.
+func secByte(v byte, n int) []byte { return bytes.Repeat([]byte{v}, n) }
+
+func TestReadPlaylistsCoalesced(t *testing.T) {
+	t.Parallel()
+
+	t.Run("single run, multiple files reconstruct byte-exact", func(t *testing.T) {
+		t.Parallel()
+		a := secByte(0xA1, 100)
+		b := secByte(0xB2, 200)
+		rs := makeImage(t, map[uint32][]byte{10: a, 11: b})
+		entries := []isoFileEntry{
+			mkEntry("BDMV/PLAYLIST/00001.MPLS", 10, uint64(len(a))),
+			mkEntry("BDMV/PLAYLIST/00002.MPLS", 11, uint64(len(b))),
+		}
+		got := readPlaylistsCoalesced(rs, entries)
+		if !bytes.Equal(got["BDMV/PLAYLIST/00001.MPLS"], a) {
+			t.Errorf("entry 00001 bytes mismatch")
+		}
+		if !bytes.Equal(got["BDMV/PLAYLIST/00002.MPLS"], b) {
+			t.Errorf("entry 00002 bytes mismatch")
+		}
+	})
+
+	t.Run("gap beyond threshold splits into two runs", func(t *testing.T) {
+		t.Parallel()
+		a := secByte(0xA1, 100)
+		b := secByte(0xB2, 100)
+		// sector 5000 is 5000*2048 ≈ 10 MiB in, well past the 4 MiB gap
+		// threshold from sector 10, forcing a second run.
+		far := uint32(5000)
+		rs := &countingReadSeeker{rs: makeImage(t, map[uint32][]byte{10: a, far: b})}
+		entries := []isoFileEntry{
+			mkEntry("near.MPLS", 10, uint64(len(a))),
+			mkEntry("far.MPLS", far, uint64(len(b))),
+		}
+		got := readPlaylistsCoalesced(rs, entries)
+		if !bytes.Equal(got["near.MPLS"], a) {
+			t.Errorf("near bytes mismatch")
+		}
+		if !bytes.Equal(got["far.MPLS"], b) {
+			t.Errorf("far bytes mismatch")
+		}
+		if rs.seeks != 2 {
+			t.Errorf("seeks = %d, want 2 (two runs)", rs.seeks)
+		}
+	})
+
+	t.Run("multi-extent entry concatenates in disc order regardless of layout", func(t *testing.T) {
+		t.Parallel()
+		// Extent[0] lives AFTER extent[1] on disc; reconstruction must still
+		// emit extent[0] bytes first.
+		hi := secByte(0x50, 100) // at sector 50
+		lo := secByte(0x10, 100) // at sector 10
+		rs := makeImage(t, map[uint32][]byte{10: lo, 50: hi})
+		entry := isoFileEntry{
+			path: "multi.MPLS",
+			size: 200,
+			extents: []isoExtent{
+				{lba: 50, length: 100}, // first in file order
+				{lba: 10, length: 100}, // second in file order
+			},
+		}
+		got := readPlaylistsCoalesced(rs, []isoFileEntry{entry})
+		want := append(append([]byte{}, hi...), lo...)
+		if !bytes.Equal(got["multi.MPLS"], want) {
+			t.Errorf("multi-extent concat order wrong")
+		}
+	})
+
+	t.Run("overlapping extents both reconstruct", func(t *testing.T) {
+		t.Parallel()
+		// Two single-byte-pattern sectors; entry A spans both sectors,
+		// entry B only the first. They overlap in the same run buffer.
+		s10 := secByte(0xAA, iso9660SectorSize)
+		s11 := secByte(0xBB, iso9660SectorSize)
+		rs := makeImage(t, map[uint32][]byte{10: s10, 11: s11})
+		entryA := isoFileEntry{path: "A", size: 2 * iso9660SectorSize, extents: []isoExtent{{lba: 10, length: 2 * iso9660SectorSize}}}
+		entryB := mkEntry("B", 10, iso9660SectorSize)
+		got := readPlaylistsCoalesced(rs, []isoFileEntry{entryA, entryB})
+		wantA := append(append([]byte{}, s10...), s11...)
+		if !bytes.Equal(got["A"], wantA) {
+			t.Errorf("entry A (overlapping span) mismatch")
+		}
+		if !bytes.Equal(got["B"], s10) {
+			t.Errorf("entry B (overlapping span) mismatch")
+		}
+	})
+
+	t.Run("zero-extent entry is absent", func(t *testing.T) {
+		t.Parallel()
+		a := secByte(0xA1, 100)
+		rs := makeImage(t, map[uint32][]byte{10: a})
+		entries := []isoFileEntry{
+			mkEntry("real.MPLS", 10, uint64(len(a))),
+			{path: "empty.MPLS", size: 0, extents: nil},
+			{path: "zerolen.MPLS", size: 0, extents: []isoExtent{{lba: 20, length: 0}}},
+		}
+		got := readPlaylistsCoalesced(rs, entries)
+		if _, ok := got["empty.MPLS"]; ok {
+			t.Errorf("empty.MPLS should be absent")
+		}
+		if _, ok := got["zerolen.MPLS"]; ok {
+			t.Errorf("zerolen.MPLS should be absent")
+		}
+		if !bytes.Equal(got["real.MPLS"], a) {
+			t.Errorf("real.MPLS mismatch")
+		}
+	})
+
+	t.Run("read error skips only the affected run", func(t *testing.T) {
+		t.Parallel()
+		good := secByte(0xA1, 100)
+		// "bad" entry points far past the end of the image (no backing piece),
+		// so its run's ReadFull fails. It lives in its own run (gap > threshold)
+		// so the good entry is unaffected.
+		rs := makeImage(t, map[uint32][]byte{10: good})
+		entries := []isoFileEntry{
+			mkEntry("good.MPLS", 10, uint64(len(good))),
+			mkEntry("bad.MPLS", 5000, 4096),
+		}
+		got := readPlaylistsCoalesced(rs, entries)
+		if !bytes.Equal(got["good.MPLS"], good) {
+			t.Errorf("good.MPLS should still be present and correct")
+		}
+		if _, ok := got["bad.MPLS"]; ok {
+			t.Errorf("bad.MPLS should be absent after read error")
+		}
+	})
+
+	t.Run("differential: matches readISOFile byte-for-byte", func(t *testing.T) {
+		t.Parallel()
+		a := secByte(0xA1, 137)
+		b := secByte(0xB2, 901)
+		c := secByte(0xC3, 100)
+		d := secByte(0xD4, 100)
+		rs := makeImage(t, map[uint32][]byte{10: a, 11: b, 12: c, 13: d})
+		entries := []isoFileEntry{
+			mkEntry("one.MPLS", 10, uint64(len(a))),
+			mkEntry("two.MPLS", 11, uint64(len(b))),
+			// multi-extent file pulling from sectors 12 and 13
+			{path: "three.MPLS", size: 200, extents: []isoExtent{{lba: 12, length: 100}, {lba: 13, length: 100}}},
+		}
+		got := readPlaylistsCoalesced(rs, entries)
+		for _, e := range entries {
+			want, err := readISOFile(rs, e)
+			if err != nil {
+				t.Fatalf("readISOFile(%s): %v", e.path, err)
+			}
+			if !bytes.Equal(got[e.path], want) {
+				t.Errorf("%s: coalesced bytes differ from readISOFile", e.path)
+			}
+		}
+	})
+
+	t.Run("contiguous playlists trigger a single Seek", func(t *testing.T) {
+		t.Parallel()
+		pieces := map[uint32][]byte{}
+		var entries []isoFileEntry
+		// 50 adjacent small playlists in one contiguous region.
+		for i := 0; i < 50; i++ {
+			sect := uint32(100 + i)
+			data := secByte(byte(i), 64)
+			pieces[sect] = data
+			entries = append(entries, mkEntry(fmt.Sprintf("BDMV/PLAYLIST/%05d.MPLS", i), sect, uint64(len(data))))
+		}
+		rs := &countingReadSeeker{rs: makeImage(t, pieces)}
+		got := readPlaylistsCoalesced(rs, entries)
+		if len(got) != 50 {
+			t.Fatalf("got %d playlists, want 50", len(got))
+		}
+		if rs.seeks != 1 {
+			t.Errorf("seeks = %d, want 1 (single coalesced run for contiguous playlists)", rs.seeks)
+		}
+	})
+}
