@@ -19,7 +19,7 @@ import (
 //
 // The function uses a single combined pass for structural validation + size accumulation + segment
 // selection, then validates only the selected subset via the network. This avoids iterating the
-// full segment list twice (once here and once inside ValidateSegmentAvailability).
+// full segment list twice (once here and once inside ValidateSegmentList).
 //
 // The optional progressTracker is passed through to segment availability validation for real-time
 // progress updates during concurrent validation.

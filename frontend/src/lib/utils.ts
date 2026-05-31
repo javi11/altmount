@@ -4,12 +4,15 @@ export function cn(...inputs: ClassValue[]) {
 	return clsx(inputs);
 }
 
-export function formatBytes(bytes: number, decimals = 2) {
-	if (bytes === 0) return "0 Bytes";
+export function formatBytes(bytes: number, decimals = 2, shortUnit = false) {
+	const sizes = shortUnit
+		? ["B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"]
+		: ["Bytes", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"];
+
+	if (bytes === 0) return `0 ${sizes[0]}`;
 
 	const k = 1024;
 	const dm = decimals < 0 ? 0 : decimals;
-	const sizes = ["Bytes", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"];
 
 	const i = Math.floor(Math.log(bytes) / Math.log(k));
 

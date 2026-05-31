@@ -27,46 +27,29 @@ import (
 func (s *Server) handleStartManualScan(c *fiber.Ctx) error {
 	// Check if importer service is available
 	if s.importerService == nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Importer service not available",
-		})
+		return RespondInternalError(c, "Importer service not available", "")
 	}
 
 	// Parse request body
 	var req ManualScanRequest
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"success": false,
-			"message": "Invalid request body",
-			"details": err.Error(),
-		})
+		return RespondBadRequest(c, "Invalid request body", err.Error())
 	}
 
 	// Validate request
 	if req.Path == "" {
-		return c.Status(422).JSON(fiber.Map{
-			"success": false,
-			"message": "Path is required",
-		})
+		return RespondError(c, 422, "VALIDATION_ERROR", "Path is required", "")
 	}
 
 	// Start manual scan
 	if err := s.importerService.StartManualScan(req.Path); err != nil {
-		return c.Status(409).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to start scan",
-			"details": err.Error(),
-		})
+		return RespondConflict(c, "Failed to start scan", err.Error())
 	}
 
 	// Return current scan status
 	scanInfo := s.importerService.GetScanStatus()
 	response := toScanStatusResponse(scanInfo)
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"data":    response,
-	})
+	return RespondSuccess(c, response)
 }
 
 // handleGetScanStatus handles GET /import/scan/status
@@ -81,19 +64,13 @@ func (s *Server) handleStartManualScan(c *fiber.Ctx) error {
 func (s *Server) handleGetScanStatus(c *fiber.Ctx) error {
 	// Check if importer service is available
 	if s.importerService == nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Importer service not available",
-		})
+		return RespondInternalError(c, "Importer service not available", "")
 	}
 
 	// Get current scan status
 	scanInfo := s.importerService.GetScanStatus()
 	response := toScanStatusResponse(scanInfo)
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"data":    response,
-	})
+	return RespondSuccess(c, response)
 }
 
 // handleCancelScan handles DELETE /import/scan
@@ -108,28 +85,18 @@ func (s *Server) handleGetScanStatus(c *fiber.Ctx) error {
 func (s *Server) handleCancelScan(c *fiber.Ctx) error {
 	// Check if importer service is available
 	if s.importerService == nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Importer service not available",
-		})
+		return RespondInternalError(c, "Importer service not available", "")
 	}
 
 	// Cancel the scan
 	if err := s.importerService.CancelScan(); err != nil {
-		return c.Status(409).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to cancel scan",
-			"details": err.Error(),
-		})
+		return RespondConflict(c, "Failed to cancel scan", err.Error())
 	}
 
 	// Return updated scan status
 	scanInfo := s.importerService.GetScanStatus()
 	response := toScanStatusResponse(scanInfo)
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"data":    response,
-	})
+	return RespondSuccess(c, response)
 }
 
 // handleManualImportFile handles POST /import/file
@@ -150,100 +117,59 @@ func (s *Server) handleManualImportFile(c *fiber.Ctx) error {
 	// Check for API key authentication
 	apiKey := c.Query("apikey")
 	if apiKey == "" {
-		return c.Status(401).JSON(fiber.Map{
-			"success": false,
-			"message": "API key required",
-			"details": "Please provide an API key via 'apikey' query parameter",
-		})
+		return RespondUnauthorized(c, "API key required", "Please provide an API key via 'apikey' query parameter")
 	}
 
 	// Validate API key using the refactored validation function
 	if !s.validateAPIKey(c, apiKey) {
-		return c.Status(401).JSON(fiber.Map{
-			"success": false,
-			"message": "Invalid API key",
-			"details": "The provided API key is not valid",
-		})
+		return RespondUnauthorized(c, "Invalid API key", "The provided API key is not valid")
 	}
 
 	// Check if importer service is available
 	if s.importerService == nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Importer service not available",
-		})
+		return RespondInternalError(c, "Importer service not available", "")
 	}
 
 	// Parse request body
 	var req ManualImportRequest
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"success": false,
-			"message": "Invalid request body",
-			"details": err.Error(),
-		})
+		return RespondBadRequest(c, "Invalid request body", err.Error())
 	}
 
 	// Validate request
 	if req.FilePath == "" {
-		return c.Status(422).JSON(fiber.Map{
-			"success": false,
-			"message": "File path is required",
-		})
+		return RespondError(c, 422, "VALIDATION_ERROR", "File path is required", "")
 	}
 
 	// Sanitize and validate the path to prevent path traversal
 	req.FilePath = filepath.Clean(req.FilePath)
 	if !filepath.IsAbs(req.FilePath) {
-		return c.Status(422).JSON(fiber.Map{
-			"success": false,
-			"message": "File path must be absolute",
-		})
+		return RespondError(c, 422, "VALIDATION_ERROR", "File path must be absolute", "")
 	}
 
 	// Check if file exists and is accessible
 	fileInfo, err := os.Stat(req.FilePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return c.Status(422).JSON(fiber.Map{
-				"success": false,
-				"message": "File not found",
-				"details": fmt.Sprintf("File does not exist: %s", req.FilePath),
-			})
+			return RespondError(c, 422, "VALIDATION_ERROR", "File not found", fmt.Sprintf("File does not exist: %s", req.FilePath))
 		} else {
-			return c.Status(422).JSON(fiber.Map{
-				"success": false,
-				"message": "Cannot access file",
-				"details": err.Error(),
-			})
+			return RespondError(c, 422, "VALIDATION_ERROR", "Cannot access file", err.Error())
 		}
 	}
 
 	// Check if it's a regular file (not directory)
 	if fileInfo.IsDir() {
-		return c.Status(422).JSON(fiber.Map{
-			"success": false,
-			"message": "Path is a directory",
-			"details": "Expected a file, not a directory",
-		})
+		return RespondError(c, 422, "VALIDATION_ERROR", "Path is a directory", "Expected a file, not a directory")
 	}
 
 	// Check if file is already in queue
 	inQueue, err := s.queueRepo.IsFileInQueue(c.Context(), req.FilePath)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to check queue status",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to check queue status", err.Error())
 	}
 
 	if inQueue {
-		return c.Status(409).JSON(fiber.Map{
-			"success": false,
-			"message": "File already in queue",
-			"details": fmt.Sprintf("File %s is already queued for processing", req.FilePath),
-		})
+		return RespondConflict(c, "File already in queue", fmt.Sprintf("File %s is already queued for processing", req.FilePath))
 	}
 
 	// Read optional target_path query param (forced symlink destination)
@@ -251,10 +177,7 @@ func (s *Server) handleManualImportFile(c *fiber.Ctx) error {
 	if tp := c.Query("target_path"); tp != "" {
 		tp = filepath.Clean(tp)
 		if !filepath.IsAbs(tp) {
-			return c.Status(422).JSON(fiber.Map{
-				"success": false,
-				"message": "target_path must be absolute",
-			})
+			return RespondError(c, 422, "VALIDATION_ERROR", "target_path must be absolute", "")
 		}
 		targetPath = &tp
 	}
@@ -276,11 +199,7 @@ func (s *Server) handleManualImportFile(c *fiber.Ctx) error {
 
 	err = s.queueRepo.AddToQueue(c.Context(), item)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to add file to queue",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to add file to queue", err.Error())
 	}
 
 	slog.DebugContext(c.Context(), "File added to queue", "file", req.FilePath, "queue_id", item.ID)
@@ -291,10 +210,7 @@ func (s *Server) handleManualImportFile(c *fiber.Ctx) error {
 		Message: fmt.Sprintf("File successfully added to import queue with ID %d", item.ID),
 	}
 
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"data":    response,
-	})
+	return RespondSuccess(c, response)
 }
 
 // handleGetImportHistory handles GET /api/import/history

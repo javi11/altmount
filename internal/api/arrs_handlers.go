@@ -248,7 +248,7 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 	switch req.EventType {
 	case "Test":
 		slog.InfoContext(c.Context(), "Received ARR test webhook")
-		return c.Status(200).JSON(fiber.Map{"success": true, "message": "Test successful"})
+		return RespondMessage(c, "Test successful")
 	case "Grab":
 		if req.DownloadId != "" && req.Release != nil && req.Release.Indexer != "" {
 			indexerName := req.Release.Indexer
@@ -264,7 +264,7 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 				slog.DebugContext(c.Context(), "Failed to update indexer for import history (expected if not yet complete)", "download_id", req.DownloadId, "indexer", indexerName, "error", err)
 			}
 		}
-		return c.Status(200).JSON(fiber.Map{"success": true, "message": "Grab logged successfully"})
+		return RespondMessage(c, "Grab logged successfully")
 	case "Download", "AlbumImport", "BookImport": // OnImport
 		isScanEvent = true
 		if req.EpisodeFile.Path != "" {
@@ -325,10 +325,10 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 		}
 	case "MovieDelete", "ArtistDelete", "AuthorDelete", "SeriesDelete", "MovieFileDelete", "EpisodeFileDelete", "BookFileDelete":
 		slog.InfoContext(c.Context(), "Ignoring ARR deletion webhook event", "event_type", req.EventType)
-		return c.Status(200).JSON(fiber.Map{"success": true, "message": "Ignored"})
+		return RespondMessage(c, "Ignored")
 	default:
 		slog.DebugContext(c.Context(), "Ignoring unhandled webhook event", "event_type", req.EventType)
-		return c.Status(200).JSON(fiber.Map{"success": true, "message": "Ignored"})
+		return RespondMessage(c, "Ignored")
 	}
 
 	// Trigger scan for each path
@@ -571,7 +571,7 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 		if isScanEvent {
 			slog.WarnContext(c.Context(), "No file path found in webhook payload to scan")
 		}
-		return c.Status(200).JSON(fiber.Map{"success": true, "message": "No path to scan"})
+		return RespondMessage(c, "No path to scan")
 	}
 
 	for _, path := range pathsToScan {

@@ -5,7 +5,14 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"sync"
 )
+
+// pgQueryCache memoizes the PostgreSQL rewrite of each (static) query string.
+// Query strings are compile-time literals, so the rewrite is deterministic and
+// the cache keeps Exec/Query/QueryRow off the repeated ReplaceAll + placeholder
+// scan + Builder allocation on every call.
+var pgQueryCache sync.Map // map[string]string
 
 // Dialect identifies the database backend.
 type Dialect string
@@ -83,9 +90,14 @@ func (h dialectHelper) q(query string) string {
 	if !h.IsPostgres() {
 		return query
 	}
-	query = strings.ReplaceAll(query, "datetime('now')", "NOW()")
-	query = strings.ReplaceAll(query, "date('now')", "CURRENT_DATE")
-	return rewritePostgresPlaceholders(query)
+	if cached, ok := pgQueryCache.Load(query); ok {
+		return cached.(string)
+	}
+	rewritten := strings.ReplaceAll(query, "datetime('now')", "NOW()")
+	rewritten = strings.ReplaceAll(rewritten, "date('now')", "CURRENT_DATE")
+	rewritten = rewritePostgresPlaceholders(rewritten)
+	pgQueryCache.Store(query, rewritten)
+	return rewritten
 }
 
 // rewritePostgresPlaceholders converts ? placeholders to $1, $2, … while

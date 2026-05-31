@@ -6,10 +6,6 @@ type CipherType string
 const (
 	// RCloneCipherType is the rclone crypt cipher type, which encrypts files using a password and salt
 	RCloneCipherType CipherType = "rclone"
-	// NoneCipherType represents no encryption
-	NoneCipherType CipherType = "none"
-	// AesCipherType is for AES-CBC encrypted archives (RAR, 7z, etc.)
-	AesCipherType CipherType = "aes"
 )
 
 // Config contains encryption configuration
