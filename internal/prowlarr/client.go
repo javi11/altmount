@@ -2,6 +2,7 @@ package prowlarr
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -279,7 +280,15 @@ func (c *Client) DownloadNZB(ctx context.Context, downloadURL string) ([]byte, e
 	// User-Agent reaches the indexer, which may 403 unrecognized clients.
 	req.Header.Set("User-Agent", sabnzbd.SABnzbdUserAgent())
 
-	resp, err := c.http.Do(req)
+	// Most indexers require Prowlarr "redirect" downloads: Prowlarr answers with
+	// a 302 to the real indexer. On that cross-host hop, drop the Prowlarr API
+	// key so the indexer sees exactly the headers a real SABnzbd sends
+	// (User-Agent + gzip, plus URL-embedded basic auth) and the key never leaks
+	// to a third party. A copy of the shared client carries the redirect policy
+	// without affecting other callers of c.http.
+	client := *c.http
+	client.CheckRedirect = dropAPIKeyOnHostChange
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("prowlarr: download request failed: %w", err)
 	}
@@ -291,4 +300,18 @@ func (c *Client) DownloadNZB(ctx context.Context, downloadURL string) ([]byte, e
 	}
 
 	return io.ReadAll(io.LimitReader(resp.Body, 50*1024*1024))
+}
+
+// dropAPIKeyOnHostChange is an http.Client.CheckRedirect policy that strips the
+// Prowlarr X-Api-Key header once a redirect leaves the original host (i.e. when
+// Prowlarr hands off to the indexer), while preserving Go's default limit of 10
+// redirects. The key stays attached for same-host hops within Prowlarr.
+func dropAPIKeyOnHostChange(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	if len(via) > 0 && req.URL.Host != via[0].URL.Host {
+		req.Header.Del("X-Api-Key")
+	}
+	return nil
 }

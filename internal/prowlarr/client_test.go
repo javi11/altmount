@@ -46,12 +46,13 @@ func TestDownloadNZBSendsSABnzbdUserAgent(t *testing.T) {
 // require. Prowlarr returns the real indexer URL in a redirect; the HTTP client
 // follows it and must still present SABnzbd/<version> to the indexer.
 func TestDownloadNZBPreservesUserAgentAcrossRedirect(t *testing.T) {
-	var indexerUA string
+	var indexerUA, indexerKey string
 	indexerHit := false
 	// Final destination: the actual indexer Prowlarr redirects to.
 	indexer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		indexerHit = true
 		indexerUA = r.Header.Get("User-Agent")
+		indexerKey = r.Header.Get("X-Api-Key")
 		w.Header().Set("Content-Type", "application/x-nzb")
 		_, _ = w.Write([]byte(`<?xml version="1.0"?><nzb></nzb>`))
 	}))
@@ -59,7 +60,9 @@ func TestDownloadNZBPreservesUserAgentAcrossRedirect(t *testing.T) {
 
 	// Prowlarr: responds with a 302 redirect to the indexer, as it does when an
 	// indexer is configured with redirect download.
+	var prowlarrKey string
 	prowlarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		prowlarrKey = r.Header.Get("X-Api-Key")
 		http.Redirect(w, r, indexer.URL+"/getnzb/abc", http.StatusFound)
 	}))
 	defer prowlarr.Close()
@@ -76,7 +79,17 @@ func TestDownloadNZBPreservesUserAgentAcrossRedirect(t *testing.T) {
 	if !indexerHit {
 		t.Fatal("redirect was not followed to the indexer")
 	}
+	// SABnzbd identity must survive the redirect to the indexer.
 	if want := sabnzbd.SABnzbdUserAgent(); indexerUA != want {
 		t.Fatalf("indexer (post-redirect) saw User-Agent %q, want %q", indexerUA, want)
+	}
+	// Prowlarr (first hop) must receive the API key...
+	if prowlarrKey != "test-key" {
+		t.Fatalf("prowlarr saw X-Api-Key %q, want %q", prowlarrKey, "test-key")
+	}
+	// ...but the indexer must NOT — SABnzbd never sends X-Api-Key, and the key
+	// must not leak to a third party.
+	if indexerKey != "" {
+		t.Fatalf("indexer received X-Api-Key %q, want it stripped on the cross-host redirect", indexerKey)
 	}
 }
