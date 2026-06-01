@@ -62,7 +62,8 @@ type Config struct {
 // NzblnkConfig configures the NZBLNK resolver (used for nzblnk:// link resolution via public indexers).
 type NzblnkConfig struct {
 	// UserAgent is the HTTP User-Agent sent to indexers when resolving nzblnk:// links.
-	// Defaults to a browser-like string. Leave empty to use the default.
+	// Leave empty to send a current SABnzbd/<version> User-Agent (auto-updated to
+	// match the latest SABnzbd release); set a value to override.
 	UserAgent string `yaml:"user_agent" mapstructure:"user_agent" json:"user_agent,omitempty"`
 }
 
@@ -1498,7 +1499,10 @@ func DefaultConfig(configDir ...string) *Config {
 		},
 		Providers: []ProviderConfig{},
 		Nzblnk: NzblnkConfig{
-			UserAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+			// Empty by default so the resolver falls back to a current
+			// SABnzbd/<version> User-Agent (see queue_handlers.go). Set a value
+			// here to override and send a custom User-Agent instead.
+			UserAgent: "",
 		},
 		Arrs: ArrsConfig{
 			Enabled:                        &scrapperEnabled, // Disabled by default

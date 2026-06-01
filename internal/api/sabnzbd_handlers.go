@@ -26,6 +26,7 @@ import (
 	"github.com/javi11/altmount/internal/httpclient"
 	"github.com/javi11/altmount/internal/importer/utils"
 	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
+	"github.com/javi11/altmount/internal/sabnzbd"
 	apputils "github.com/javi11/altmount/internal/utils"
 )
 
@@ -689,7 +690,7 @@ func (s *Server) handleSABnzbdQueue(c *fiber.Ctx) error {
 			Mb:        fmt.Sprintf("%.2f", totalMb),
 			Kbpersec:  kbpersec,
 			Speed:     speed,
-			Version:   "4.5.0",
+			Version:   sabnzbd.SABnzbdVersion(),
 		},
 	}
 
@@ -953,7 +954,7 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 			TotalSize: formatHumanSize(totalBytes),
 			MonthSize: "0 B",
 			WeekSize:  "0 B",
-			Version:   "4.5.0",
+			Version:   sabnzbd.SABnzbdVersion(),
 			DaySize:   "0 B",
 			Noofslots: totalAvailableCount,
 		},
@@ -1054,7 +1055,7 @@ func (s *Server) respondSABnzbdHistoryByIDs(
 			TotalSize: formatHumanSize(totalBytes),
 			MonthSize: "0 B",
 			WeekSize:  "0 B",
-			Version:   "4.5.0",
+			Version:   sabnzbd.SABnzbdVersion(),
 			DaySize:   "0 B",
 			Noofslots: totalAvailableCount,
 		},
@@ -1210,7 +1211,7 @@ func (s *Server) handleSABnzbdStatus(c *fiber.Ctx) error {
 
 	response := SABnzbdStatusResponse{
 		Status:          true,
-		Version:         "4.5.0",
+		Version:         sabnzbd.SABnzbdVersion(),
 		Uptime:          time.Since(s.startTime).String(),
 		Color:           "green",
 		Darwin:          runtime.GOOS == "darwin",
@@ -1318,7 +1319,7 @@ func (s *Server) handleSABnzbdGetConfig(c *fiber.Ctx) error {
 
 	response := SABnzbdConfigResponse{
 		Status:  true,
-		Version: "4.5.0",
+		Version: sabnzbd.SABnzbdVersion(),
 		Config:  sabnzbdConfig,
 	}
 
@@ -1329,7 +1330,7 @@ func (s *Server) handleSABnzbdGetConfig(c *fiber.Ctx) error {
 func (s *Server) handleSABnzbdVersion(c *fiber.Ctx) error {
 	response := SABnzbdVersionResponse{
 		Status:  true,
-		Version: "4.5.0",
+		Version: sabnzbd.SABnzbdVersion(),
 	}
 
 	return s.writeSABnzbdResponseFiber(c, response)

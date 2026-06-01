@@ -21,7 +21,17 @@ import (
 	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
 	"github.com/javi11/altmount/internal/nzbfile"
 	"github.com/javi11/altmount/internal/nzblnk"
+	"github.com/javi11/altmount/internal/sabnzbd"
 )
+
+// nzblnkUserAgent returns the configured nzblnk User-Agent, falling back to a
+// current SABnzbd/<version> string when no override is set.
+func nzblnkUserAgent(configured string) string {
+	if configured != "" {
+		return configured
+	}
+	return sabnzbd.SABnzbdUserAgent()
+}
 
 // removeQueueNzbFiles deletes the on-disk NZB files for every non-empty path.
 // Missing files are ignored; other errors are logged so the caller can still
@@ -709,7 +719,7 @@ func (s *Server) handleUploadNZBLnk(c *fiber.Ctx) error {
 
 	// Create resolver
 	cfg := s.configManager.GetConfig()
-	resolver := nzblnk.NewResolver(cfg.Nzblnk.UserAgent, httpclient.NewForExternal(cfg.Network, 30*time.Second))
+	resolver := nzblnk.NewResolver(nzblnkUserAgent(cfg.Nzblnk.UserAgent), httpclient.NewForExternal(cfg.Network, 30*time.Second))
 
 	// Process each link
 	type linkResult struct {
@@ -892,7 +902,7 @@ func (s *Server) handleSearchNZBByName(c *fiber.Ctx) error {
 	}
 
 	cfg := s.configManager.GetConfig()
-	resolver := nzblnk.NewResolver(cfg.Nzblnk.UserAgent, httpclient.NewForExternal(cfg.Network, 30*time.Second))
+	resolver := nzblnk.NewResolver(nzblnkUserAgent(cfg.Nzblnk.UserAgent), httpclient.NewForExternal(cfg.Network, 30*time.Second))
 	resolved, err := resolver.Resolve(c.Context(), syntheticLink)
 	if err != nil {
 		return RespondNotFound(c, "NZB", "Could not find NZB for name '"+req.Name+"': "+err.Error())
