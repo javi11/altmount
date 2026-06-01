@@ -17,8 +17,9 @@ import (
 const FallbackVersion = "5.0.3"
 
 const (
-	// versionRefreshTTL bounds how often the latest version is re-fetched.
-	versionRefreshTTL = 24 * time.Hour
+	// versionRefreshTTL bounds how often the latest version is re-fetched
+	// (at most once per week).
+	versionRefreshTTL = 7 * 24 * time.Hour
 	// releasesURL returns the latest non-prerelease SABnzbd release.
 	releasesURL = "https://api.github.com/repos/sabnzbd/sabnzbd/releases/latest"
 )

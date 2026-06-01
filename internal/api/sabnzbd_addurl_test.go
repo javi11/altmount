@@ -54,6 +54,46 @@ func TestHandleSABnzbdAddUrlSendsSABnzbdUserAgent(t *testing.T) {
 	}
 }
 
+// TestHandleSABnzbdAddUrlPreservesUserAgentAcrossRedirect mirrors the common
+// real-world flow: Sonarr/Radarr hand AltMount a Prowlarr download URL, the
+// indexer is configured for redirect download, so Prowlarr answers with a 302
+// to the real indexer. AltMount must keep presenting SABnzbd/<version> after
+// following that redirect.
+func TestHandleSABnzbdAddUrlPreservesUserAgentAcrossRedirect(t *testing.T) {
+	var indexerUA string
+	indexerHit := false
+	indexer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		indexerHit = true
+		indexerUA = r.Header.Get("User-Agent")
+		w.Header().Set("Content-Type", "application/x-nzb")
+		_, _ = w.Write([]byte(`<?xml version="1.0"?><nzb></nzb>`))
+	}))
+	defer indexer.Close()
+
+	prowlarr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, indexer.URL+"/getnzb/abc", http.StatusFound)
+	}))
+	defer prowlarr.Close()
+
+	s := &Server{configManager: &mockConfigManager{cfg: &config.Config{}}}
+	app := fiber.New()
+	app.Get("/addurl", s.handleSABnzbdAddUrl)
+
+	req := httptest.NewRequest("GET", "/addurl?name="+url.QueryEscape(prowlarr.URL+"/download"), nil)
+	resp, err := app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("app.Test returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if !indexerHit {
+		t.Fatal("redirect was not followed to the indexer")
+	}
+	if want := sabnzbd.SABnzbdUserAgent(); indexerUA != want {
+		t.Fatalf("indexer (post-redirect) saw User-Agent %q, want %q", indexerUA, want)
+	}
+}
+
 // TestNzblnkUserAgentDefault verifies the resolver falls back to the current
 // SABnzbd identity when no override is configured, and respects an override.
 func TestNzblnkUserAgentDefault(t *testing.T) {
