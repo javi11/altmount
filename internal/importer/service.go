@@ -1071,7 +1071,11 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 			indexerName = name
 		}
 	}
-	if err := s.database.Repository.LogIndexerImport(ctx, indexerName, "success", ""); err != nil {
+	downloadID := ""
+	if item.DownloadID != nil {
+		downloadID = *item.DownloadID
+	}
+	if err := s.database.Repository.LogIndexerImport(ctx, indexerName, "success", "", downloadID); err != nil {
 		s.log.WarnContext(ctx, "Failed to log indexer success statistic", "indexer", indexerName, "error", err)
 	}
 
@@ -1202,7 +1206,11 @@ func (s *Service) handleProcessingFailure(ctx context.Context, item *database.Im
 	}
 	// Don't log if it was just cancelled by the user
 	if !strings.Contains(errorMessage, "context canceled") && !strings.Contains(errorMessage, "processing cancelled") {
-		if err := s.database.Repository.LogIndexerImport(ctx, indexerName, "failed", errorMessage); err != nil {
+		downloadID := ""
+		if item.DownloadID != nil {
+			downloadID = *item.DownloadID
+		}
+		if err := s.database.Repository.LogIndexerImport(ctx, indexerName, "failed", errorMessage, downloadID); err != nil {
 			s.log.WarnContext(ctx, "Failed to log indexer failure statistic", "indexer", indexerName, "error", err)
 		}
 	}

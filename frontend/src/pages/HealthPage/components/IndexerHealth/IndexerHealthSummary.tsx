@@ -106,17 +106,45 @@ export function IndexerHealthSummary({ stats, summary }: IndexerHealthSummaryPro
 							</div>
 						</div>
 					</div>
-					<div className="col-span-1 flex items-center gap-3 rounded-xl border border-rose-500/10 bg-rose-500/5 px-3 py-2.5 transition-all duration-300 hover:bg-rose-500/10 md:col-span-2">
-						<TrendingDown className="h-4 w-4 shrink-0 text-rose-400" aria-hidden="true" />
-						<div className="min-w-0">
-							<div className="truncate font-bold text-rose-400 text-xs">
-								{summary.worst.indexer}
-							</div>
-							<div className="mt-0.5 font-semibold text-[10px] text-base-content/50">
-								Needs telemetry inspection · {summary.worst.success_rate.toFixed(1)}%
+					{summary.worst.success_rate < 50 ? (
+						<div className="col-span-1 flex items-center gap-3 rounded-xl border border-rose-500/10 bg-rose-500/5 px-3 py-2.5 transition-all duration-300 hover:bg-rose-500/10 md:col-span-2">
+							<TrendingDown className="h-4 w-4 shrink-0 text-rose-400" aria-hidden="true" />
+							<div className="min-w-0">
+								<div className="truncate font-bold text-rose-400 text-xs">
+									{summary.worst.indexer}
+								</div>
+								<div className="mt-0.5 font-semibold text-[10px] text-base-content/50">
+									Review failure logs · {summary.worst.success_rate.toFixed(1)}%
+								</div>
 							</div>
 						</div>
-					</div>
+					) : summary.worst.success_rate < 85 ? (
+						<div className="col-span-1 flex items-center gap-3 rounded-xl border border-amber-500/10 bg-amber-500/5 px-3 py-2.5 transition-all duration-300 hover:bg-amber-500/10 md:col-span-2">
+							<TrendingDown className="h-4 w-4 shrink-0 text-amber-500" aria-hidden="true" />
+							<div className="min-w-0">
+								<div className="truncate font-bold text-amber-500 text-xs">
+									{summary.worst.indexer}
+								</div>
+								<div className="mt-0.5 font-semibold text-[10px] text-base-content/50">
+									Moderate performance · {summary.worst.success_rate.toFixed(1)}%
+								</div>
+							</div>
+						</div>
+					) : (
+						<div className="col-span-1 flex items-center gap-3 rounded-xl border border-teal-500/10 bg-teal-500/5 px-3 py-2.5 transition-all duration-300 hover:bg-teal-500/10 md:col-span-2">
+							<CheckCircle2 className="h-4 w-4 shrink-0 text-teal-400" aria-hidden="true" />
+							<div className="min-w-0">
+								<div className="truncate font-bold text-teal-400 text-xs">
+									All indexers performing excellently
+								</div>
+								<div className="mt-0.5 font-semibold text-[10px] text-base-content/50">
+									{summary.worst.success_rate >= 100
+										? "100% success rate across all integrations"
+										: `Highest-stability operations · lowest is ${summary.worst.success_rate.toFixed(1)}%`}
+								</div>
+							</div>
+						</div>
+					)}
 				</>
 			)}
 		</div>

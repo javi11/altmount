@@ -14,23 +14,18 @@ const ChartTooltip = ({
 	const val = data.value;
 	const name = data.payload.name;
 
-	const isExcellent = val >= 90;
-	const isGood = val >= 75 && val < 90;
-	const isPoor = val >= 50 && val < 75;
+	const isExcellent = val >= 85;
+	const isModerate = val >= 50 && val < 85;
 	const statusText = isExcellent
 		? "Excellent"
-		: isGood
-			? "Good"
-			: isPoor
-				? "Moderate"
-				: "Operational";
+		: isModerate
+			? "Moderate"
+			: "Poor";
 	const badgeColor = isExcellent
 		? "bg-teal-500/10 text-teal-400 border-teal-500/20"
-		: isGood
-			? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-			: isPoor
-				? "bg-amber-500/10 text-amber-500 border-amber-500/20"
-				: "bg-blue-500/10 text-blue-400 border-blue-500/20";
+		: isModerate
+			? "bg-amber-500/10 text-amber-500 border-amber-500/20"
+			: "bg-rose-500/10 text-rose-400 border-rose-500/20";
 
 	return (
 		<div className="z-50 rounded-xl border border-base-200 bg-base-100/95 p-3 text-base-content text-xs shadow-2xl backdrop-blur-md">
@@ -81,6 +76,7 @@ export function IndexerHealthChart({ sorted }: IndexerHealthChartProps) {
 							dataKey="name"
 							stroke="currentColor"
 							className="text-[10px] text-base-content/40"
+							tick={false}
 							tickLine={false}
 							axisLine={false}
 						/>
@@ -98,16 +94,13 @@ export function IndexerHealthChart({ sorted }: IndexerHealthChartProps) {
 						/>
 						<Bar dataKey="health" radius={[4, 4, 0, 0]} barSize={36}>
 							{sorted.map((entry, index) => {
-								const isExcellent = entry.success_rate >= 90;
-								const isGood = entry.success_rate >= 75 && entry.success_rate < 90;
-								const isPoor = entry.success_rate >= 50 && entry.success_rate < 75;
+								const isExcellent = entry.success_rate >= 85;
+								const isModerate = entry.success_rate >= 50 && entry.success_rate < 85;
 								const color = isExcellent
 									? "#0d9488"
-									: isGood
-										? "#059669"
-										: isPoor
-											? "#d97706"
-											: "#e11d48";
+									: isModerate
+										? "#d97706"
+										: "#e11d48";
 								return <Cell key={`cell-${index}`} fill={color} />;
 							})}
 						</Bar>

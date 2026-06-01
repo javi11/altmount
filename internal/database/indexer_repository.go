@@ -25,16 +25,20 @@ type IndexerAggregatedHealth struct {
 
 // --- Consolidated Helper Functions ---
 
-func logIndexerImport(ctx context.Context, db DBQuerier, indexer string, status string, errMsg string) error {
+func logIndexerImport(ctx context.Context, db DBQuerier, indexer string, status string, errMsg string, downloadID string) error {
 	var errDetails any = nil
 	if errMsg != "" {
 		errDetails = errMsg
 	}
+	var dlID any = nil
+	if downloadID != "" {
+		dlID = downloadID
+	}
 	query := `
-		INSERT INTO indexer_import_stats (indexer, status, error_message, created_at)
-		VALUES (?, ?, ?, datetime('now'))
+		INSERT INTO indexer_import_stats (indexer, status, error_message, download_id, created_at)
+		VALUES (?, ?, ?, ?, datetime('now'))
 	`
-	_, err := db.ExecContext(ctx, query, indexer, status, errDetails)
+	_, err := db.ExecContext(ctx, query, indexer, status, errDetails, dlID)
 	return err
 }
 
@@ -99,6 +103,12 @@ func deleteIndexerStats(ctx context.Context, db DBQuerier, indexer string) (int6
 	return res.RowsAffected()
 }
 
+func updateIndexerStatsByDownloadID(ctx context.Context, db DBQuerier, downloadID string, indexer string) error {
+	query := `UPDATE indexer_import_stats SET indexer = ? WHERE download_id = ? AND indexer = 'Unknown'`
+	_, err := db.ExecContext(ctx, query, indexer, downloadID)
+	return err
+}
+
 func updateImportHistoryIndexerByDownloadID(ctx context.Context, db DBQuerier, downloadID string, indexer string) error {
 	query := `UPDATE import_history SET indexer = ? WHERE download_id = ? AND (indexer = 'Unknown' OR indexer IS NULL)`
 	_, err := db.ExecContext(ctx, query, indexer, downloadID)
@@ -108,8 +118,8 @@ func updateImportHistoryIndexerByDownloadID(ctx context.Context, db DBQuerier, d
 // --- Repository Methods ---
 
 // LogIndexerImport records a success or failure for an indexer persistently.
-func (r *Repository) LogIndexerImport(ctx context.Context, indexer string, status string, errMsg string) error {
-	return logIndexerImport(ctx, r.db, indexer, status, errMsg)
+func (r *Repository) LogIndexerImport(ctx context.Context, indexer string, status string, errMsg string, downloadID string) error {
+	return logIndexerImport(ctx, r.db, indexer, status, errMsg, downloadID)
 }
 
 // GetIndexerHealthStats aggregates all historical records to calculate success/failure rates.
@@ -130,8 +140,8 @@ func (r *Repository) DeleteIndexerStats(ctx context.Context, indexer string) (in
 // --- QueueRepository Methods ---
 
 // LogIndexerImport records a success or failure for an indexer persistently.
-func (r *QueueRepository) LogIndexerImport(ctx context.Context, indexer string, status string, errMsg string) error {
-	return logIndexerImport(ctx, r.db, indexer, status, errMsg)
+func (r *QueueRepository) LogIndexerImport(ctx context.Context, indexer string, status string, errMsg string, downloadID string) error {
+	return logIndexerImport(ctx, r.db, indexer, status, errMsg, downloadID)
 }
 
 // GetIndexerHealthStats aggregates all historical records to calculate success/failure rates.
@@ -169,6 +179,15 @@ func (r *QueueRepository) UpdateQueueItemIndexerByDownloadID(ctx context.Context
 	return nil
 }
 
+// UpdateIndexerStatsByDownloadID updates the indexer for a success or failure record in indexer_import_stats by its DownloadID
+func (r *Repository) UpdateIndexerStatsByDownloadID(ctx context.Context, downloadID string, indexer string) error {
+	return updateIndexerStatsByDownloadID(ctx, r.db, downloadID, indexer)
+}
+
+func (r *QueueRepository) UpdateIndexerStatsByDownloadID(ctx context.Context, downloadID string, indexer string) error {
+	return updateIndexerStatsByDownloadID(ctx, r.db, downloadID, indexer)
+}
+
 // UpdateImportHistoryIndexerByDownloadID updates the indexer for an import history item by its DownloadID
 func (r *Repository) UpdateImportHistoryIndexerByDownloadID(ctx context.Context, downloadID string, indexer string) error {
 	return updateImportHistoryIndexerByDownloadID(ctx, r.db, downloadID, indexer)
@@ -176,4 +195,31 @@ func (r *Repository) UpdateImportHistoryIndexerByDownloadID(ctx context.Context,
 
 func (r *QueueRepository) UpdateImportHistoryIndexerByDownloadID(ctx context.Context, downloadID string, indexer string) error {
 	return updateImportHistoryIndexerByDownloadID(ctx, r.db, downloadID, indexer)
+}
+
+func getUnknownIndexerStatsDownloadIDs(ctx context.Context, db DBQuerier) ([]string, error) {
+	query := `SELECT DISTINCT download_id FROM indexer_import_stats WHERE indexer = 'Unknown' AND download_id IS NOT NULL AND download_id != ''`
+	rows, err := db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// GetUnknownIndexerStatsDownloadIDs gets all unique download_ids that have indexer = 'Unknown' in the stats table.
+func (r *Repository) GetUnknownIndexerStatsDownloadIDs(ctx context.Context) ([]string, error) {
+	return getUnknownIndexerStatsDownloadIDs(ctx, r.db)
+}
+
+func (r *QueueRepository) GetUnknownIndexerStatsDownloadIDs(ctx context.Context) ([]string, error) {
+	return getUnknownIndexerStatsDownloadIDs(ctx, r.db)
 }

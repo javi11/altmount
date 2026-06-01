@@ -19,7 +19,7 @@ export function IndexerHealth() {
 	const [showChart, setShowChart] = useState(false);
 	const [searchQuery, setSearchQuery] = useState("");
 	const [statusFilter, setStatusFilter] = useState<
-		"all" | "excellent" | "good" | "moderate" | "operational"
+		"all" | "excellent" | "moderate" | "poor"
 	>("all");
 	const [showPruneModal, setShowPruneModal] = useState(false);
 	const [sortKey, setSortKey] = useState<SortKey>("health");
@@ -76,7 +76,7 @@ export function IndexerHealth() {
 
 	const handleSort = (key: SortKey) => {
 		if (sortKey === key) {
-			setSortAsc((a) => !a);
+			setSortAsc(!sortAsc);
 		} else {
 			setSortKey(key);
 			setSortAsc(key !== "health");
@@ -99,10 +99,9 @@ export function IndexerHealth() {
 			const matchesSearch = item.indexer.toLowerCase().includes(searchQuery.toLowerCase());
 			const rate = item.success_rate;
 			let matchesFilter = true;
-			if (statusFilter === "excellent") matchesFilter = rate >= 90;
-			else if (statusFilter === "good") matchesFilter = rate >= 75 && rate < 90;
-			else if (statusFilter === "moderate") matchesFilter = rate >= 50 && rate < 75;
-			else if (statusFilter === "operational") matchesFilter = rate < 50;
+			if (statusFilter === "excellent") matchesFilter = rate >= 85;
+			else if (statusFilter === "moderate") matchesFilter = rate >= 50 && rate < 85;
+			else if (statusFilter === "poor") matchesFilter = rate < 50;
 			return matchesSearch && matchesFilter;
 		});
 	}, [sorted, searchQuery, statusFilter]);

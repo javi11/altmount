@@ -263,6 +263,10 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 			if err := s.queueRepo.UpdateImportHistoryIndexerByDownloadID(c.Context(), req.DownloadId, indexerName); err != nil {
 				slog.DebugContext(c.Context(), "Failed to update indexer for import history (expected if not yet complete)", "download_id", req.DownloadId, "indexer", indexerName, "error", err)
 			}
+			// Update indexer stats table retroactively
+			if err := s.queueRepo.UpdateIndexerStatsByDownloadID(c.Context(), req.DownloadId, indexerName); err != nil {
+				slog.DebugContext(c.Context(), "Failed to update indexer for stats (expected if not yet complete)", "download_id", req.DownloadId, "indexer", indexerName, "error", err)
+			}
 		}
 		return RespondMessage(c, "Grab logged successfully")
 	case "Download", "AlbumImport", "BookImport": // OnImport
@@ -288,6 +292,11 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 			// 2. Update import history if it has already completed
 			if err := s.queueRepo.UpdateImportHistoryIndexerByDownloadID(c.Context(), req.DownloadId, indexerName); err != nil {
 				slog.DebugContext(c.Context(), "Failed to update indexer for import history", "download_id", req.DownloadId, "indexer", indexerName, "error", err)
+			}
+
+			// 3. Update indexer stats table retroactively
+			if err := s.queueRepo.UpdateIndexerStatsByDownloadID(c.Context(), req.DownloadId, indexerName); err != nil {
+				slog.DebugContext(c.Context(), "Failed to update indexer for stats", "download_id", req.DownloadId, "indexer", indexerName, "error", err)
 			}
 		}
 	case "Rename":

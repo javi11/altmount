@@ -36,6 +36,10 @@ type Worker struct {
 	// key: instanceName|queueID
 	firstSeen   map[string]time.Time
 	firstSeenMu sync.RWMutex
+
+	// History sync tracking
+	lastHistorySync   time.Time
+	lastHistorySyncMu sync.Mutex
 }
 
 func NewWorker(configGetter config.ConfigGetter, instances *instances.Manager, clients *clients.Manager, repo *database.Repository) *Worker {
@@ -47,6 +51,7 @@ func NewWorker(configGetter config.ConfigGetter, instances *instances.Manager, c
 		firstSeen:    make(map[string]time.Time),
 	}
 }
+
 
 // Start starts the queue cleanup worker
 func (w *Worker) Start(ctx context.Context) error {
@@ -136,6 +141,18 @@ func (w *Worker) safeCleanup() {
 	}()
 	if err := w.CleanupQueue(w.workerCtx); err != nil {
 		slog.Error("Queue cleanup failed", "error", err)
+	}
+
+	// Trigger history sync periodically (e.g. every 15 minutes)
+	w.lastHistorySyncMu.Lock()
+	shouldSync := time.Since(w.lastHistorySync) >= 15*time.Minute
+	if shouldSync {
+		w.lastHistorySync = time.Now()
+	}
+	w.lastHistorySyncMu.Unlock()
+
+	if shouldSync {
+		w.safeHistorySync()
 	}
 }
 
@@ -742,3 +759,113 @@ func (w *Worker) isPathManaged(path string, cfg *config.Config) bool {
 
 	return false
 }
+
+func (w *Worker) safeHistorySync() {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("Panic in indexer stats history sync", "panic", r)
+		}
+	}()
+	if err := w.SyncUnknownIndexerStats(w.workerCtx); err != nil {
+		slog.Error("Indexer stats history sync failed", "error", err)
+	}
+}
+
+func (w *Worker) SyncUnknownIndexerStats(ctx context.Context) error {
+	cfg := w.configGetter()
+	// ARRs must be enabled
+	if cfg.Arrs.Enabled == nil || !*cfg.Arrs.Enabled {
+		return nil
+	}
+
+	// Get all download IDs that are Unknown
+	downloadIDs, err := w.repo.GetUnknownIndexerStatsDownloadIDs(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get unknown indexer download IDs: %w", err)
+	}
+
+	if len(downloadIDs) == 0 {
+		return nil
+	}
+
+	slog.InfoContext(ctx, "Starting ARR history sync for unknown indexer stats", "count", len(downloadIDs))
+
+	resolvedCount := 0
+	for _, downloadID := range downloadIDs {
+		// Respect context cancel
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		indexer, err := w.resolveIndexerFromArrs(ctx, downloadID)
+		if err != nil {
+			slog.DebugContext(ctx, "Failed to resolve indexer for download from ARRs", "download_id", downloadID, "error", err)
+			continue
+		}
+
+		if indexer != "" {
+			slog.InfoContext(ctx, "Successfully resolved unknown indexer from ARR history", "download_id", downloadID, "resolved_indexer", indexer)
+			
+			// Update indexer stats
+			if err := w.repo.UpdateIndexerStatsByDownloadID(ctx, downloadID, indexer); err != nil {
+				slog.ErrorContext(ctx, "Failed to update indexer stats in DB", "download_id", downloadID, "indexer", indexer, "error", err)
+			}
+			
+			// Update import history indexer
+			if err := w.repo.UpdateImportHistoryIndexerByDownloadID(ctx, downloadID, indexer); err != nil {
+				slog.ErrorContext(ctx, "Failed to update import history indexer in DB", "download_id", downloadID, "indexer", indexer, "error", err)
+			}
+			resolvedCount++
+		}
+	}
+
+	if resolvedCount > 0 {
+		slog.InfoContext(ctx, "Completed ARR history sync for unknown indexer stats", "resolved_count", resolvedCount)
+	}
+
+	return nil
+}
+
+func (w *Worker) resolveIndexerFromArrs(ctx context.Context, downloadID string) (string, error) {
+	instances := w.instances.GetAllInstances()
+	for _, instance := range instances {
+		if !instance.Enabled {
+			continue
+		}
+		if instance.Type == "sonarr" {
+			client, err := w.clients.GetOrCreateSonarrClient(instance.Name, instance.URL, instance.APIKey)
+			if err != nil {
+				continue
+			}
+			req := &starr.PageReq{PageSize: 50, SortKey: "date", SortDir: starr.SortDescend}
+			req.Set("downloadId", downloadID)
+			history, err := client.GetHistoryPageContext(ctx, req)
+			if err == nil && history != nil {
+				for _, record := range history.Records {
+					if record.DownloadID == downloadID && record.Data.Indexer != "" {
+						return record.Data.Indexer, nil
+					}
+				}
+			}
+		} else if instance.Type == "radarr" {
+			client, err := w.clients.GetOrCreateRadarrClient(instance.Name, instance.URL, instance.APIKey)
+			if err != nil {
+				continue
+			}
+			req := &starr.PageReq{PageSize: 50, SortKey: "date", SortDir: starr.SortDescend}
+			req.Set("downloadId", downloadID)
+			history, err := client.GetHistoryPageContext(ctx, req)
+			if err == nil && history != nil {
+				for _, record := range history.Records {
+					if record.DownloadID == downloadID && record.Data.Indexer != "" {
+						return record.Data.Indexer, nil
+					}
+				}
+			}
+		}
+	}
+	return "", fmt.Errorf("not found in any starr instance")
+}
+

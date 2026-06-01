@@ -481,7 +481,7 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 					if errorMsg != nil {
 						errMsg = *errorMsg
 					}
-					_ = hw.healthRepo.LogIndexerImport(ctx, *fh.Indexer, "failed", fmt.Sprintf("Health check permanently corrupted: %s", errMsg))
+					_ = hw.healthRepo.LogIndexerImport(ctx, *fh.Indexer, "failed", fmt.Sprintf("Health check permanently corrupted: %s", errMsg), "")
 				}
 
 				return nil
@@ -533,7 +533,7 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 					if errorMsg != nil {
 						errMsg = *errorMsg
 					}
-					_ = hw.healthRepo.LogIndexerImport(ctx, *fh.Indexer, "failed", fmt.Sprintf("Health check failed (repair triggered): %s", errMsg))
+					_ = hw.healthRepo.LogIndexerImport(ctx, *fh.Indexer, "failed", fmt.Sprintf("Health check failed (repair triggered): %s", errMsg), "")
 				}
 
 				outcome, err := hw.triggerFileRepair(ctx, fh, errorMsg, event.Details)
