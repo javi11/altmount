@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/javi11/altmount/internal/sabnzbd"
 	parsetorrentname "github.com/middelink/go-parse-torrent-name"
 	"golift.io/starr"
 	starrprowlarr "golift.io/starr/prowlarr"
@@ -272,6 +273,11 @@ func (c *Client) DownloadNZB(ctx context.Context, downloadURL string) ([]byte, e
 		return nil, fmt.Errorf("prowlarr: create download request: %w", err)
 	}
 	req.Header.Set("X-Api-Key", c.apiKey)
+	// Identify as SABnzbd so the request matches what a real download client
+	// sends. Prowlarr usually proxies the indexer fetch itself, but when an
+	// indexer is configured to hand back a direct/redirect download link this
+	// User-Agent reaches the indexer, which may 403 unrecognized clients.
+	req.Header.Set("User-Agent", sabnzbd.SABnzbdUserAgent())
 
 	resp, err := c.http.Do(req)
 	if err != nil {

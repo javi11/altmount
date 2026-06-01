@@ -61,12 +61,14 @@ export function NzblnkConfigSection({
 						className="input input-bordered w-full min-w-0 max-w-full bg-base-100 font-mono text-sm"
 						value={formData.user_agent ?? ""}
 						readOnly={isReadOnly}
-						placeholder="Mozilla/5.0 ... (leave empty for default)"
+						placeholder="SABnzbd/<version> (leave empty for default)"
 						onChange={(e) => handleInputChange("user_agent", e.target.value)}
 					/>
 					<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/70 text-xs">
 						HTTP User-Agent sent when searching and downloading from public NZB indexers (e.g.
-						nzbking.com, nzbindex.com). Leave empty to use the built-in default.
+						nzbking.com, nzbindex.com). Leave empty to identify as a current SABnzbd release
+						(SABnzbd/&lt;version&gt;), matching the download client AltMount emulates so indexers
+						don't reject the request. Override only if a specific indexer requires it.
 					</p>
 				</fieldset>
 			</div>

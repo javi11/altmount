@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"log/slog"
 	"mime"
 	"net/http"
@@ -407,7 +406,7 @@ func (s *Server) handleSABnzbdAddFile(c *fiber.Ctx) error {
 	if movie := c.FormValue("movie"); movie != "" {
 		metadata["movie_title"] = movie
 	}
-	
+
 	var metadataJSON *string
 	if len(metadata) > 0 {
 		if b, err := json.Marshal(metadata); err == nil {
@@ -440,23 +439,43 @@ func (s *Server) handleSABnzbdAddFile(c *fiber.Ctx) error {
 	return s.writeSABnzbdResponseFiber(c, response)
 }
 
+// redactDownloadURL strips the query string and fragment from an NZB download
+// URL before logging. Indexer download links routinely carry an apikey query
+// parameter, which must never be written to logs.
+func redactDownloadURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "<redacted>"
+	}
+	u.RawQuery = ""
+	u.Fragment = ""
+	return u.String()
+}
+
 // handleSABnzbdAddUrl handles adding NZB from URL
 func (s *Server) handleSABnzbdAddUrl(c *fiber.Ctx) error {
 	nzbUrl := c.Query("name")
-	log.Printf("Received NZB download request for URL: %s", nzbUrl)
-
 	if nzbUrl == "" {
 		return s.writeSABnzbdErrorFiber(c, "URL parameter 'name' required")
 	}
 
-	// Download NZB file from URL using a proper HTTP client with a User-Agent header.
-	// Some indexers (e.g. NZBHydra2) return 403 on redirect if User-Agent is missing.
+	slog.InfoContext(c.Context(), "Received NZB download request", "url", redactDownloadURL(nzbUrl))
+
+	// Fetch the NZB exactly as a real SABnzbd would: present a SABnzbd/<version>
+	// User-Agent and honor the configured proxy. Some indexers (e.g. NZBHydra2)
+	// return 403 — including on redirects — when the request does not look like a
+	// recognized download client.
 	req, err := http.NewRequestWithContext(c.Context(), http.MethodGet, nzbUrl, nil)
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to build NZB download request")
 	}
-	req.Header.Set("User-Agent", "altmount")
-	resp, err := httpclient.NewLong().Do(req)
+	req.Header.Set("User-Agent", sabnzbd.SABnzbdUserAgent())
+
+	var netCfg httpclient.NetworkProxyConfig
+	if s.configManager != nil {
+		netCfg = s.configManager.GetConfig().Network
+	}
+	resp, err := httpclient.NewForExternal(netCfg, httpclient.LongTimeout).Do(req)
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to download NZB from URL")
 	}
