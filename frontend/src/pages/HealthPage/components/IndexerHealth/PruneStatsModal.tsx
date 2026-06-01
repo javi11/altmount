@@ -93,15 +93,11 @@ export function PruneStatsModal({ isPending, onClose, onPrune }: PruneStatsModal
 												type="number"
 												className="input input-bordered input-sm w-24 border-base-300 bg-base-100 text-center font-bold text-base-content"
 												value={customDays}
-												onChange={(e) =>
-													setCustomDays(Number.parseInt(e.target.value, 10) || 0)
-												}
+												onChange={(e) => setCustomDays(Number.parseInt(e.target.value, 10) || 0)}
 												min="1"
 												aria-label="Custom prune period in days"
 											/>
-											<span className="font-bold text-base-content/60 text-xs">
-												Days of data
-											</span>
+											<span className="font-bold text-base-content/60 text-xs">Days of data</span>
 										</div>
 									)}
 								</div>

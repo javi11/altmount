@@ -37,7 +37,7 @@ export function IndexerHealthFilters({
 						className="input input-bordered input-sm w-full border-base-300 bg-base-200/50 pl-8 font-medium text-base-content placeholder-base-content/40 focus:border-teal-500/50"
 						aria-label="Search indexers"
 					/>
-					<div className="absolute top-1/2 left-2.5 -translate-y-1/2 text-base-content/40">
+					<div className="-translate-y-1/2 absolute top-1/2 left-2.5 text-base-content/40">
 						<Search className="h-4 w-4" aria-hidden="true" />
 					</div>
 				</div>

@@ -82,36 +82,6 @@ func IterAttrs(ctx context.Context) func(func(attr slog.Attr) bool) {
 	}
 }
 
-// Attrs returns the attributes in the context.
-func Attrs(ctx context.Context) []slog.Attr {
-	d, ok := ctx.Value(dataKey{}).(data)
-	if !ok {
-		return nil
-	}
-
-	attrs := make([]slog.Attr, 0, len(d))
-	for _, v := range d {
-		attrs = append(attrs, v)
-	}
-
-	return attrs
-}
-
-// Data returns the attributes in the context as a map.
-func Data(ctx context.Context) map[string]any {
-	d, ok := ctx.Value(dataKey{}).(data)
-	if !ok {
-		return nil
-	}
-
-	m := make(map[string]any, len(d))
-	for k, v := range d {
-		m[k] = v.Value.Any()
-	}
-
-	return m
-}
-
 type dataHook struct{}
 
 func (dataHook) Run(ctx context.Context, r *slog.Record) {

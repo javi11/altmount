@@ -1033,6 +1033,22 @@ func (s *Service) resolveCategoryPath(category string) string {
 	return category
 }
 
+// resolveIndexerFromArrs asks the ARRs service to resolve the indexer for a
+// download ID on demand. This is the reliable path for Sportarr, which can't
+// push its indexer via webhook (it's not starr-compatible and never fires an
+// OnGrab event); the lookup runs at import time so the indexer stat is recorded
+// correctly instead of as "Unknown". Returns ("", false) when the ARRs service
+// is unset or has no match.
+func (s *Service) resolveIndexerFromArrs(ctx context.Context, downloadID string) (string, bool) {
+	s.mu.Lock()
+	as := s.arrsService
+	s.mu.Unlock()
+	if as == nil {
+		return "", false
+	}
+	return as.ResolveIndexerByDownloadID(ctx, downloadID)
+}
+
 // handleProcessingSuccess handles all steps after successful NZB processing
 func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.ImportQueueItem, resultingPath string) error {
 	// Log persistent indexer statistic
@@ -1044,6 +1060,14 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 		if latestItem, err := s.database.Repository.GetQueueItemByDownloadID(ctx, *item.DownloadID); err == nil && latestItem != nil && latestItem.Indexer != nil && *latestItem.Indexer != "" {
 			indexerName = *latestItem.Indexer
 		} else if name, ok := s.GetGrabbedIndexer(*item.DownloadID, filepath.Base(item.NzbPath)); ok {
+			indexerName = name
+		}
+	}
+	// Final fallback: query the ARRs directly. Covers Sportarr, whose indexer is
+	// only available from its native queue (no webhook), resolved on demand here
+	// so the stat is attributed correctly rather than logged as "Unknown".
+	if (indexerName == database.IndexerUnknown || indexerName == "") && item.DownloadID != nil && *item.DownloadID != "" {
+		if name, ok := s.resolveIndexerFromArrs(ctx, *item.DownloadID); ok {
 			indexerName = name
 		}
 	}
@@ -1167,6 +1191,12 @@ func (s *Service) handleProcessingFailure(ctx context.Context, item *database.Im
 		if latestItem, err := s.database.Repository.GetQueueItemByDownloadID(ctx, *item.DownloadID); err == nil && latestItem != nil && latestItem.Indexer != nil && *latestItem.Indexer != "" {
 			indexerName = *latestItem.Indexer
 		} else if name, ok := s.GetGrabbedIndexer(*item.DownloadID, filepath.Base(item.NzbPath)); ok {
+			indexerName = name
+		}
+	}
+	// Final fallback: query the ARRs directly (covers Sportarr, which has no webhook).
+	if (indexerName == database.IndexerUnknown || indexerName == "") && item.DownloadID != nil && *item.DownloadID != "" {
+		if name, ok := s.resolveIndexerFromArrs(ctx, *item.DownloadID); ok {
 			indexerName = name
 		}
 	}

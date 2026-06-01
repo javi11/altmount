@@ -64,13 +64,14 @@ func (m *Manager) DiscoverFileMetadata(ctx context.Context, filePath, relativePa
 }
 
 func (m *Manager) runStrictDiscovery(ctx context.Context, inst *model.ConfigInstance, filePath, cleanNzbName, libraryPath string) (*model.WebhookMetadata, error) {
-	if inst.Type == "radarr" {
+	switch inst.Type {
+	case "radarr":
 		return m.discoverRadarrStrict(ctx, filePath, cleanNzbName, libraryPath, inst.Name)
-	} else if inst.Type == "sonarr" || inst.Type == "whisparr" {
+	case "sonarr", "whisparr":
 		return m.discoverSonarrStrict(ctx, filePath, cleanNzbName, libraryPath, inst.Name)
-	} else if inst.Type == "lidarr" {
+	case "lidarr":
 		return m.discoverLidarrStrict(ctx, filePath, cleanNzbName, libraryPath, inst.Name)
-	} else if inst.Type == "readarr" {
+	case "readarr":
 		return m.discoverReadarrStrict(ctx, filePath, cleanNzbName, libraryPath, inst.Name)
 	}
 	return nil, fmt.Errorf("unsupported type")

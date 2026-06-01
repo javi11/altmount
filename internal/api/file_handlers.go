@@ -35,36 +35,22 @@ func (s *Server) handleGetFileMetadata(c *fiber.Ctx) error {
 	// Get path from query parameters
 	path := c.Query("path")
 	if path == "" {
-		return c.Status(400).JSON(fiber.Map{
-			"success": false,
-			"message": "Path parameter is required",
-			"details": "MISSING_PATH",
-		})
+		return RespondBadRequest(c, "Path parameter is required", "MISSING_PATH")
 	}
 
 	// Get metadata from the reader
 	metadata, err := s.metadataReader.GetFileMetadata(path)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to read metadata",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to read metadata", err.Error())
 	}
 
 	if metadata == nil {
-		return c.Status(404).JSON(fiber.Map{
-			"success": false,
-			"message": "File metadata not found",
-		})
+		return RespondNotFound(c, "File metadata", "")
 	}
 
 	// Convert protobuf metadata to API response
 	response := s.convertToFileMetadataResponse(metadata)
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"data":    response,
-	})
+	return RespondSuccess(c, response)
 }
 
 // convertToFileMetadataResponse converts protobuf FileMetadata to API response
@@ -209,38 +195,23 @@ func (s *Server) handleExportMetadataToNZB(c *fiber.Ctx) error {
 	// Get path from query parameters
 	path := c.Query("path")
 	if path == "" {
-		return c.Status(400).JSON(fiber.Map{
-			"success": false,
-			"message": "Path parameter is required",
-			"details": "MISSING_PATH",
-		})
+		return RespondBadRequest(c, "Path parameter is required", "MISSING_PATH")
 	}
 
 	// Get metadata from the reader
 	metadata, err := s.metadataReader.GetFileMetadata(path)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to read metadata",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to read metadata", err.Error())
 	}
 
 	if metadata == nil {
-		return c.Status(404).JSON(fiber.Map{
-			"success": false,
-			"message": "File metadata not found",
-		})
+		return RespondNotFound(c, "File metadata", "")
 	}
 
 	// Generate NZB from metadata
 	nzbContent, err := s.generateNZBFromMetadata(metadata, path)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to generate NZB",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to generate NZB", err.Error())
 	}
 
 	// Extract filename from path
@@ -400,11 +371,7 @@ func (s *Server) handleBatchExportNZB(c *fiber.Ctx) error {
 	// Parse request body
 	var req BatchExportRequest
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"success": false,
-			"message": "Invalid request body",
-			"details": err.Error(),
-		})
+		return RespondBadRequest(c, "Invalid request body", err.Error())
 	}
 
 	slog.InfoContext(ctx, "Batch NZB export requested")
@@ -441,18 +408,11 @@ func (s *Server) handleBatchExportNZB(c *fiber.Ctx) error {
 		slog.ErrorContext(ctx, "Failed to walk metadata directory",
 			"error", err,
 			"path", metadataRootPath)
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to collect metadata files",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to collect metadata files", err.Error())
 	}
 
 	if len(metadataFiles) == 0 {
-		return c.Status(404).JSON(fiber.Map{
-			"success": false,
-			"message": "No metadata files found",
-		})
+		return RespondError(c, fiber.StatusNotFound, ErrCodeNotFound, "No metadata files found", "")
 	}
 
 	slog.InfoContext(ctx, "Collected metadata files",
@@ -547,19 +507,11 @@ func (s *Server) handleBatchExportNZB(c *fiber.Ctx) error {
 	if err := zipWriter.Close(); err != nil {
 		slog.ErrorContext(ctx, "Failed to close ZIP writer",
 			"error", err)
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to finalize ZIP archive",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to finalize ZIP archive", err.Error())
 	}
 
 	if exportedCount == 0 {
-		return c.Status(404).JSON(fiber.Map{
-			"success": false,
-			"message": "No files were exported",
-			"details": fmt.Sprintf("Skipped %d files (archives or AES-encrypted)", skippedCount),
-		})
+		return RespondError(c, fiber.StatusNotFound, ErrCodeNotFound, "No files were exported", fmt.Sprintf("Skipped %d files (archives or AES-encrypted)", skippedCount))
 	}
 
 	slog.InfoContext(ctx, "Batch export completed",

@@ -48,7 +48,7 @@ func validateSegmentIntegrity(ctx context.Context, content Content) error {
 
 // calculateSegmentsToValidate calculates the actual number of segments that will be validated
 // based on the validation mode (full or sampling) and sample percentage.
-// This mirrors the logic in usenet.ValidateSegmentAvailability which uses selectSegmentsForValidation.
+// This mirrors the logic in usenet.SelectSegmentsForValidation.
 func calculateSegmentsToValidate(sevenZipContents []Content, samplePercentage int) int {
 	total := 0
 	for _, content := range sevenZipContents {

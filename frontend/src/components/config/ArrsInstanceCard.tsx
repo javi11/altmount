@@ -230,5 +230,3 @@ export function ArrsInstanceCard({
 		</div>
 	);
 }
-
-export default ArrsInstanceCard;

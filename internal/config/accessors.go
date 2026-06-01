@@ -140,11 +140,6 @@ func (c *Config) GetReadTimeoutSeconds() int {
 	return c.Import.ReadTimeoutSeconds
 }
 
-// GetReadTimeout returns read timeout as a duration with a default fallback.
-func (c *Config) GetReadTimeout() time.Duration {
-	return time.Duration(c.GetReadTimeoutSeconds()) * time.Second
-}
-
 // GetIsoAnalyzeTimeout returns the per-ISO analyse deadline with a 120s
 // default fallback. This bounds the entire iso.AnalyzeISO walk so a
 // degraded NNTP provider cannot stall the importer indefinitely.

@@ -445,6 +445,34 @@ func (w *Worker) cleanupSonarrQueue(ctx context.Context, instance *model.ConfigI
 	return nil
 }
 
+// captureSportarrIndexer persists the indexer reported by a Sportarr queue record
+// against its download ID, so completed/failed imports are attributed correctly in
+// indexer health instead of falling back to "Unknown". The queue row is only written
+// when its indexer is still unset (avoiding per-poll churn and clobbering); the
+// import-history UPDATE is self-guarded to Unknown/NULL rows, covering downloads that
+// already imported before this poll observed them.
+func (w *Worker) captureSportarrIndexer(ctx context.Context, downloadID, indexer string) {
+	item, err := w.repo.GetQueueItemByDownloadID(ctx, downloadID)
+	if err != nil {
+		slog.DebugContext(ctx, "Failed to look up queue item for Sportarr indexer capture",
+			"download_id", downloadID, "error", err)
+	}
+	if item != nil && (item.Indexer == nil || *item.Indexer == "" || *item.Indexer == database.IndexerUnknown) {
+		if err := w.repo.UpdateQueueItemIndexerByDownloadID(ctx, downloadID, indexer); err != nil {
+			slog.DebugContext(ctx, "Failed to set Sportarr indexer on queue item",
+				"download_id", downloadID, "indexer", indexer, "error", err)
+		} else {
+			slog.InfoContext(ctx, "Captured Sportarr indexer for download",
+				"download_id", downloadID, "indexer", indexer)
+		}
+	}
+
+	if err := w.repo.UpdateImportHistoryIndexerByDownloadID(ctx, downloadID, indexer); err != nil {
+		slog.DebugContext(ctx, "Failed to set Sportarr indexer on import history",
+			"download_id", downloadID, "indexer", indexer, "error", err)
+	}
+}
+
 // cleanupSportarrQueue mirrors cleanupSonarrQueue but talks to Sportarr's native
 // API via the thin client (Sportarr is not starr-compatible). It reuses the same
 // ghost-detection, allowlist and grace-period logic.
@@ -464,8 +492,18 @@ func (w *Worker) cleanupSportarrQueue(ctx context.Context, instance *model.Confi
 		// Only operate on queue items owned by AltMount's registered download client.
 		// Items from other clients may reference paths AltMount cannot see and must
 		// never be touched — see issue #523.
-		if q.DownloadClient != registrar.AltmountDownloadClientName {
+		if q.DownloadClient.Name != registrar.AltmountDownloadClientName {
 			continue
+		}
+
+		// Capture the indexer from Sportarr's native queue. Sportarr is not
+		// starr-compatible, so AltMount cannot auto-register its Grab/Import
+		// webhook (the path that supplies the indexer for Radarr/Sonarr/etc.).
+		// Its native queue record is the only place the indexer is exposed, so
+		// persist it here against the download ID — otherwise these imports show
+		// up in indexer health as "Unknown".
+		if q.DownloadID != "" && q.Indexer != "" {
+			w.captureSportarrIndexer(ctx, q.DownloadID, q.Indexer)
 		}
 
 		// Strategy 1: Immediate cleanup for already imported files

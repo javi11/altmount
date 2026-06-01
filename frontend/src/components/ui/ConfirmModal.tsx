@@ -116,8 +116,8 @@ export function ConfirmModal({
 					<fieldset className="fieldset mb-6">
 						<legend className="fieldset-legend">
 							Please type{" "}
-							<span className="font-bold select-all text-base-content">{verificationText}</span>{" "}
-							to confirm.
+							<span className="select-all font-bold text-base-content">{verificationText}</span> to
+							confirm.
 						</legend>
 						<input
 							type="text"

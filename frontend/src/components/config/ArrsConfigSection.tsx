@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useRegisterArrsWebhooks } from "../../hooks/useApi";
 import type { ArrsConfig, ArrsInstanceConfig, ArrsType, ConfigResponse } from "../../types/config";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
-import ArrsInstanceCard from "./ArrsInstanceCard";
+import { ArrsInstanceCard } from "./ArrsInstanceCard";
 
 interface ArrsConfigSectionProps {
 	config: ConfigResponse;

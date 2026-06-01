@@ -10,9 +10,9 @@ import (
 // clipSpan is one clip's absolute byte range in the virtual file plus the
 // 90 kHz timeline delta to add to every timestamp inside it.
 type clipSpan struct {
-	start  int64 // inclusive absolute byte offset
-	end    int64 // inclusive absolute byte offset (start + byteLen - 1)
-	delta  int64 // 90 kHz offset added to PTS/DTS/PCR-base of packets in this clip
+	start int64 // inclusive absolute byte offset
+	end   int64 // inclusive absolute byte offset (start + byteLen - 1)
+	delta int64 // 90 kHz offset added to PTS/DTS/PCR-base of packets in this clip
 }
 
 // buildClipSpans turns the proto ClipBoundary table (byte_len + delta per clip,
@@ -58,6 +58,21 @@ type tsRemuxReader struct {
 	disabled    bool         // true if the stream isn't recognisable TS → pure passthrough
 	syncChecked bool         // whether the first aligned packet's sync byte was validated
 	out         bytes.Buffer // rewritten bytes ready to deliver
+	scratch     []byte       // reusable read buffer for fill()/passthrough() (avoids per-call alloc)
+}
+
+// readBuf returns a reusable scratch slice of length n. n is always small
+// (≤ packetSize for fill, 64 KiB for passthrough), so a single lazily-allocated
+// 64 KiB buffer backs every read and no allocation happens on the streaming path.
+func (r *tsRemuxReader) readBuf(n int) []byte {
+	if cap(r.scratch) < n {
+		size := 64 * 1024
+		if n > size {
+			size = n
+		}
+		r.scratch = make([]byte, size)
+	}
+	return r.scratch[:n]
 }
 
 // newTSRemuxReader wraps inner. startOff is the absolute file offset of inner's
@@ -143,7 +158,7 @@ func (r *tsRemuxReader) fill() error {
 		aligned = false // a clip whose length isn't a packet multiple: tail passthrough
 	}
 
-	chunk := make([]byte, want)
+	chunk := r.readBuf(want)
 	nr, err := io.ReadFull(r.inner, chunk)
 	chunk = chunk[:nr]
 	if nr > 0 {
@@ -172,7 +187,7 @@ func (r *tsRemuxReader) fill() error {
 
 // passthrough copies a chunk from inner to out without rewriting.
 func (r *tsRemuxReader) passthrough() error {
-	chunk := make([]byte, 64*1024)
+	chunk := r.readBuf(64 * 1024)
 	nr, err := r.inner.Read(chunk)
 	if nr > 0 {
 		r.out.Write(chunk[:nr])
