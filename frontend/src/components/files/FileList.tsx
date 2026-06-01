@@ -2,6 +2,7 @@ import { formatDistanceToNow } from "date-fns";
 import { File, FileArchive, FileImage, FileText, FileVideo, Folder, Music } from "lucide-react";
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { formatBytes } from "../../lib/utils";
 import type { WebDAVFile } from "../../types/webdav";
 import { getFormatLabel } from "../../utils/fileUtils";
 import { FileActions } from "./FileActions";
@@ -153,13 +154,7 @@ export function FileList({
 		}
 	};
 
-	const formatFileSize = (bytes: number): string => {
-		if (bytes === 0) return "0 B";
-		const k = 1024;
-		const sizes = ["B", "KB", "MB", "GB", "TB"];
-		const i = Math.floor(Math.log(bytes) / Math.log(k));
-		return `${Number.parseFloat((bytes / k ** i).toFixed(1))} ${sizes[i]}`;
-	};
+	const formatFileSize = (bytes: number): string => formatBytes(bytes, 1, true);
 
 	const handleItemClick = (file: WebDAVFile) => {
 		if (file.type === "directory") {

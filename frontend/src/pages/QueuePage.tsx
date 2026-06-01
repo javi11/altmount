@@ -13,6 +13,7 @@ import {
 	Download,
 	FileCode,
 	Filter,
+	Globe,
 	Import,
 	Link2,
 	List,
@@ -74,9 +75,9 @@ export function QueuePage() {
 	const [searchTerm, setSearchTerm] = useState("");
 	const [selectedItems, setSelectedItems] = useState<Set<number>>(new Set());
 	const [sortBy, setSortBy] = useState<"created_at" | "updated_at" | "status" | "nzb_path">(
-		"updated_at",
+		"created_at",
 	);
-	const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+	const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
 
 	const queryClient = useQueryClient();
 
@@ -168,57 +169,60 @@ export function QueuePage() {
 		[confirmAction, cancelItem],
 	);
 
-	const handleDownload = async (id: number, status?: string) => {
-		try {
-			const response = await fetch(`/api/queue/${id}/download`);
-			if (!response.ok) {
-				let title = "Download Failed";
-				let message = `Server returned ${response.status} ${response.statusText}`;
-				try {
-					const body = (await response.json()) as {
-						error?: { message?: string; details?: string };
-					};
-					if (body?.error?.message) {
-						title = body.error.message;
-						message = body.error.details || "";
+	const handleDownload = useCallback(
+		async (id: number, status?: string) => {
+			try {
+				const response = await fetch(`/api/queue/${id}/download`);
+				if (!response.ok) {
+					let title = "Download Failed";
+					let message = `Server returned ${response.status} ${response.statusText}`;
+					try {
+						const body = (await response.json()) as {
+							error?: { message?: string; details?: string };
+						};
+						if (body?.error?.message) {
+							title = body.error.message;
+							message = body.error.details || "";
+						}
+					} catch {
+						// Non-JSON error body — fall back to status text.
 					}
-				} catch {
-					// Non-JSON error body — fall back to status text.
-				}
-				// For completed items, a missing file almost always means the server
-				// cleaned it up post-import (delete_completed_nzb). Soften the toast.
-				if (response.status === 404 && status === "completed") {
-					showToast({
-						type: "info",
-						title: "NZB file already removed",
-						message: "This NZB was cleaned up after successful import.",
-					});
+					// For completed items, a missing file almost always means the server
+					// cleaned it up post-import (delete_completed_nzb). Soften the toast.
+					if (response.status === 404 && status === "completed") {
+						showToast({
+							type: "info",
+							title: "NZB file already removed",
+							message: "This NZB was cleaned up after successful import.",
+						});
+						return;
+					}
+					showToast({ type: "error", title, message });
 					return;
 				}
-				showToast({ type: "error", title, message });
-				return;
+				const contentDisposition = response.headers.get("Content-Disposition");
+				const filenameMatch = contentDisposition?.match(/filename[^;=\n]*=["']?([^"'\n]*)["']?/);
+				const filename = filenameMatch?.[1] || `queue-${id}.nzb`;
+				const blob = await response.blob();
+				const url = window.URL.createObjectURL(blob);
+				const a = document.createElement("a");
+				a.href = url;
+				a.download = filename;
+				document.body.appendChild(a);
+				a.click();
+				window.URL.revokeObjectURL(url);
+				document.body.removeChild(a);
+			} catch (error) {
+				console.error("Failed to download NZB:", error);
+				showToast({
+					type: "error",
+					title: "Download Failed",
+					message: error instanceof Error ? error.message : "Network error",
+				});
 			}
-			const contentDisposition = response.headers.get("Content-Disposition");
-			const filenameMatch = contentDisposition?.match(/filename[^;=\n]*=["']?([^"'\n]*)["']?/);
-			const filename = filenameMatch?.[1] || `queue-${id}.nzb`;
-			const blob = await response.blob();
-			const url = window.URL.createObjectURL(blob);
-			const a = document.createElement("a");
-			a.href = url;
-			a.download = filename;
-			document.body.appendChild(a);
-			a.click();
-			window.URL.revokeObjectURL(url);
-			document.body.removeChild(a);
-		} catch (error) {
-			console.error("Failed to download NZB:", error);
-			showToast({
-				type: "error",
-				title: "Download Failed",
-				message: error instanceof Error ? error.message : "Network error",
-			});
-		}
-	};
+		},
+		[showToast],
+	);
 
 	const handleRegenerateSymlink = useCallback(
 		async (storagePath: string) => {
@@ -372,10 +376,17 @@ export function QueuePage() {
 	}, []);
 
 	const handleSort = (column: "created_at" | "updated_at" | "status" | "nzb_path") => {
-		if (sortBy === column) setSortOrder(sortOrder === "asc" ? "desc" : "asc");
-		else {
+		if (sortBy === column) {
+			setSortOrder(sortOrder === "asc" ? "desc" : "asc");
+		} else {
 			setSortBy(column);
-			setSortOrder(column === "updated_at" || column === "created_at" ? "desc" : "asc");
+			if (column === "created_at") {
+				setSortOrder("asc");
+			} else if (column === "updated_at") {
+				setSortOrder("desc");
+			} else {
+				setSortOrder("asc");
+			}
 		}
 		setPage(0);
 		clearSelection();
@@ -769,10 +780,10 @@ export function QueuePage() {
 																<button
 																	type="button"
 																	className="flex items-center gap-1 font-bold text-base-content/80 text-xs uppercase tracking-widest hover:text-primary"
-																	onClick={() => handleSort("updated_at")}
+																	onClick={() => handleSort("created_at")}
 																>
-																	Updated
-																	{sortBy === "updated_at" &&
+																	Created
+																	{sortBy === "created_at" &&
 																		(sortOrder === "asc" ? (
 																			<ChevronUp className="h-3 w-3" />
 																		) : (
@@ -809,6 +820,12 @@ export function QueuePage() {
 																				/>
 																			</div>
 																		</div>
+																		{item.indexer && (
+																			<div className="mt-1 flex min-w-0 items-center gap-1 pl-5.5 text-base-content/50 text-xs">
+																				<Globe className="h-3 w-3 shrink-0" />
+																				<span className="truncate">{item.indexer}</span>
+																			</div>
+																		)}
 																		<div className="mt-1 min-w-0 pl-5.5 text-base-content/40 text-xs">
 																			{item.target_path ? (
 																				<span className="flex min-w-0 items-center gap-1">
@@ -926,7 +943,7 @@ export function QueuePage() {
 																<td>
 																	<div className="flex flex-col">
 																		<span className="text-xs opacity-70">
-																			{formatRelativeTime(item.updated_at)}
+																			{formatRelativeTime(item.created_at)}
 																		</span>
 																		{item.retry_count > 0 && (
 																			<span className="mt-0.5 font-bold text-warning text-xs uppercase tracking-tighter">

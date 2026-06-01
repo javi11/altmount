@@ -32,6 +32,8 @@ type File struct {
 	size          int64
 	uid           uint32
 	gid           uint32
+	asyncBufSize  int  // per-handle read-ahead buffer size in bytes; 0 = disabled
+	noModTime     bool
 }
 
 // Getattr implements fs.NodeGetattrer.
@@ -44,7 +46,7 @@ func (f *File) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.AttrOut)
 		return translateError(err)
 	}
 
-	fillAttr(info, &out.Attr, f.uid, f.gid)
+	fillAttr(info, &out.Attr, f.uid, f.gid, f.noModTime)
 	out.Ino = f.Inode.StableAttr().Ino
 	return 0
 }
@@ -85,7 +87,17 @@ func (f *File) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, s
 		return nil, 0, syscall.EIO
 	}
 
-	handle := NewHandle(aferoFile, f.logger, f.path, stream, f.streamTracker)
+	// Attach a read-ahead buffer for sufficiently large files. The buffer
+	// stays in passthrough mode until sustained sequential reads are observed,
+	// so header probes and seek/scrub bursts never allocate it.
+	var asyncBuf *backend.AsyncReadBuffer
+	if f.asyncBufSize > 0 && f.size > int64(f.asyncBufSize) {
+		if rac, ok := aferoFile.(readAtContexter); ok {
+			asyncBuf = backend.NewAsyncReadBuffer(ctx, rac, f.asyncBufSize, f.size, f.logger)
+		}
+	}
+
+	handle := NewHandle(aferoFile, f.logger, f.path, stream, f.streamTracker, asyncBuf)
 
 	// Use DIRECT_IO when file size is unknown/zero to prevent the kernel
 	// from caching pages with stale size metadata (rclone mount2 pattern).

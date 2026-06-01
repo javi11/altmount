@@ -140,9 +140,21 @@ func (c *Config) GetReadTimeoutSeconds() int {
 	return c.Import.ReadTimeoutSeconds
 }
 
-// GetReadTimeout returns read timeout as a duration with a default fallback.
-func (c *Config) GetReadTimeout() time.Duration {
-	return time.Duration(c.GetReadTimeoutSeconds()) * time.Second
+// GetIsoAnalyzeTimeout returns the per-ISO analyse deadline with a 120s
+// default fallback. This bounds the entire iso.AnalyzeISO walk so a
+// degraded NNTP provider cannot stall the importer indefinitely.
+//
+// Sentinel handling:
+//   - nil (config field unset)        → 120s default
+//   - 0 or negative (explicit "none") → 120s default; users cannot disable
+//     the cap — the whole purpose of this knob is to prevent unbounded
+//     waits. To approximate "unlimited", set a very large value (e.g.
+//     86400 for a one-day budget).
+func (c *Config) GetIsoAnalyzeTimeout() time.Duration {
+	if c.Import.IsoAnalyzeTimeoutSeconds == nil || *c.Import.IsoAnalyzeTimeoutSeconds <= 0 {
+		return 120 * time.Second
+	}
+	return time.Duration(*c.Import.IsoAnalyzeTimeoutSeconds) * time.Second
 }
 
 // GetIsoAnalyzeTimeout returns the per-ISO analyse deadline with a 120s

@@ -80,6 +80,8 @@ func Create(t Type, cfg Config) (Backend, error) {
 	if !ok {
 		return nil, fmt.Errorf("unknown FUSE backend type: %s", t)
 	}
+	// Apply the global async read-ahead memory budget (0 = unlimited).
+	SetAsyncBufferBudget(int64(cfg.FuseConfig.AsyncBufferMaxTotalMB) * 1024 * 1024)
 	return f(cfg)
 }
 

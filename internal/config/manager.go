@@ -116,7 +116,21 @@ type FuseConfig struct {
 	EntryTimeoutSeconds int    `yaml:"entry_timeout_seconds" mapstructure:"entry_timeout_seconds" json:"entry_timeout_seconds"`
 	MaxCacheSizeMB      int    `yaml:"max_cache_size_mb" mapstructure:"max_cache_size_mb" json:"max_cache_size_mb"`
 	MaxReadAheadMB      int    `yaml:"max_read_ahead_mb" mapstructure:"max_read_ahead_mb" json:"max_read_ahead_mb"`
-	Backend             string `yaml:"backend" mapstructure:"backend" json:"backend"` // "hanwen" or "cgo" (empty = platform default)
+	// AsyncBufferSizeMB is the per-open-file read-ahead buffer size (MB). A
+	// background goroutine fills it ahead of the player so reads are served
+	// from memory instead of blocking on the network, mirroring the buffering
+	// rclone's VFS provides over WebDAV. 0 disables read-ahead (every read is a
+	// direct passthrough — the previous behavior).
+	AsyncBufferSizeMB int `yaml:"async_buffer_size_mb" mapstructure:"async_buffer_size_mb" json:"async_buffer_size_mb"`
+	// AsyncBufferMaxTotalMB caps total read-ahead memory across all open files
+	// (MB). Buffers reserve their size only while actively streaming; over the
+	// cap, additional streams run unbuffered. 0 = unlimited.
+	AsyncBufferMaxTotalMB int    `yaml:"async_buffer_max_total_mb" mapstructure:"async_buffer_max_total_mb" json:"async_buffer_max_total_mb"`
+	Backend               string `yaml:"backend" mapstructure:"backend" json:"backend"` // "hanwen" or "cgo" (empty = platform default)
+	// NoModTime reports epoch for all timestamps (mtime, ctime, atime); prevents
+	// media servers re-scanning on unstable VFS mtimes. Note: tools like find -atime
+	// will not see meaningful access times on this mount.
+	NoModTime bool `yaml:"no_mod_time" mapstructure:"no_mod_time" json:"no_mod_time"`
 }
 
 // APIConfig represents REST API configuration
@@ -240,18 +254,18 @@ type RCloneConfig struct {
 	Transfers    int               `yaml:"transfers" mapstructure:"transfers" json:"transfers"`
 
 	// VFS Cache Settings
-	CacheDir             string `yaml:"cache_dir" mapstructure:"cache_dir" json:"cache_dir"`
-	VFSCacheMode         string `yaml:"vfs_cache_mode" mapstructure:"vfs_cache_mode" json:"vfs_cache_mode"`
-	VFSCachePollInterval string `yaml:"vfs_cache_poll_interval" mapstructure:"vfs_cache_poll_interval" json:"vfs_cache_poll_interval"`
+	CacheDir              string `yaml:"cache_dir" mapstructure:"cache_dir" json:"cache_dir"`
+	VFSCacheMode          string `yaml:"vfs_cache_mode" mapstructure:"vfs_cache_mode" json:"vfs_cache_mode"`
+	VFSCachePollInterval  string `yaml:"vfs_cache_poll_interval" mapstructure:"vfs_cache_poll_interval" json:"vfs_cache_poll_interval"`
 	VFSReadChunkSize      string `yaml:"vfs_read_chunk_size" mapstructure:"vfs_read_chunk_size" json:"vfs_read_chunk_size"`
 	VFSReadChunkSizeLimit string `yaml:"vfs_read_chunk_size_limit" mapstructure:"vfs_read_chunk_size_limit" json:"vfs_read_chunk_size_limit"`
 	VFSCacheMaxSize       string `yaml:"vfs_cache_max_size" mapstructure:"vfs_cache_max_size" json:"vfs_cache_max_size"`
 	VFSCacheMaxAge        string `yaml:"vfs_cache_max_age" mapstructure:"vfs_cache_max_age" json:"vfs_cache_max_age"`
-	VFSReadAhead         string `yaml:"vfs_read_ahead" mapstructure:"vfs_read_ahead" json:"vfs_read_ahead"`
-	DirCacheTime         string `yaml:"dir_cache_time" mapstructure:"dir_cache_time" json:"dir_cache_time"`
-	VFSCacheMinFreeSpace string `yaml:"vfs_cache_min_free_space" mapstructure:"vfs_cache_min_free_space" json:"vfs_cache_min_free_space"`
-	VFSDiskSpaceTotal    string `yaml:"vfs_disk_space_total" mapstructure:"vfs_disk_space_total" json:"vfs_disk_space_total"`
-	VFSReadChunkStreams  int    `yaml:"vfs_read_chunk_streams" mapstructure:"vfs_read_chunk_streams" json:"vfs_read_chunk_streams"`
+	VFSReadAhead          string `yaml:"vfs_read_ahead" mapstructure:"vfs_read_ahead" json:"vfs_read_ahead"`
+	DirCacheTime          string `yaml:"dir_cache_time" mapstructure:"dir_cache_time" json:"dir_cache_time"`
+	VFSCacheMinFreeSpace  string `yaml:"vfs_cache_min_free_space" mapstructure:"vfs_cache_min_free_space" json:"vfs_cache_min_free_space"`
+	VFSDiskSpaceTotal     string `yaml:"vfs_disk_space_total" mapstructure:"vfs_disk_space_total" json:"vfs_disk_space_total"`
+	VFSReadChunkStreams   int    `yaml:"vfs_read_chunk_streams" mapstructure:"vfs_read_chunk_streams" json:"vfs_read_chunk_streams"`
 
 	// Mount-Specific Settings
 	AllowOther    bool   `yaml:"allow_other" mapstructure:"allow_other" json:"allow_other"`
@@ -280,32 +294,32 @@ const (
 
 // ImportConfig represents import processing configuration
 type ImportConfig struct {
-	MaxProcessorWorkers            int            `yaml:"max_processor_workers" mapstructure:"max_processor_workers" json:"max_processor_workers"`
-	QueueProcessingIntervalSeconds int            `yaml:"queue_processing_interval_seconds" mapstructure:"queue_processing_interval_seconds" json:"queue_processing_interval_seconds"`
-	AllowedFileExtensions          []string       `yaml:"allowed_file_extensions" mapstructure:"allowed_file_extensions" json:"allowed_file_extensions"`
-	MaxImportConnections           int            `yaml:"max_import_connections" mapstructure:"max_import_connections" json:"max_import_connections"`
+	MaxProcessorWorkers            int      `yaml:"max_processor_workers" mapstructure:"max_processor_workers" json:"max_processor_workers"`
+	QueueProcessingIntervalSeconds int      `yaml:"queue_processing_interval_seconds" mapstructure:"queue_processing_interval_seconds" json:"queue_processing_interval_seconds"`
+	AllowedFileExtensions          []string `yaml:"allowed_file_extensions" mapstructure:"allowed_file_extensions" json:"allowed_file_extensions"`
+	MaxImportConnections           int      `yaml:"max_import_connections" mapstructure:"max_import_connections" json:"max_import_connections"`
 	// MaxConcurrentImports caps the number of NZB imports that may run
 	// end-to-end at the same time when no stream is active. 0 = unlimited.
 	MaxConcurrentImports int `yaml:"max_concurrent_imports" mapstructure:"max_concurrent_imports" json:"max_concurrent_imports"`
 	// MaxConcurrentImportsWhileStreaming caps concurrent imports while at
 	// least one stream is active, so streams are not starved by imports.
 	// 0 = unlimited.
-	MaxConcurrentImportsWhileStreaming int `yaml:"max_concurrent_imports_while_streaming" mapstructure:"max_concurrent_imports_while_streaming" json:"max_concurrent_imports_while_streaming"`
-	MaxDownloadPrefetch            int            `yaml:"max_download_prefetch" mapstructure:"max_download_prefetch" json:"max_download_prefetch"`
-	SegmentSamplePercentage        int            `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage"`
-	ReadTimeoutSeconds             int            `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds"`
-	IsoAnalyzeTimeoutSeconds       *int           `yaml:"iso_analyze_timeout_seconds" mapstructure:"iso_analyze_timeout_seconds" json:"iso_analyze_timeout_seconds,omitempty"`
-	ImportStrategy                 ImportStrategy `yaml:"import_strategy" mapstructure:"import_strategy" json:"import_strategy"`
-	ImportDir                      *string        `yaml:"import_dir" mapstructure:"import_dir" json:"import_dir,omitempty"`
-	WatchDir                       *string        `yaml:"watch_dir" mapstructure:"watch_dir" json:"watch_dir,omitempty"`
-	WatchIntervalSeconds           *int           `yaml:"watch_interval_seconds" mapstructure:"watch_interval_seconds" json:"watch_interval_seconds,omitempty"`
-	AllowNestedRarExtraction       *bool          `yaml:"allow_nested_rar_extraction" mapstructure:"allow_nested_rar_extraction" json:"allow_nested_rar_extraction,omitempty"`
-	ExpandBlurayIso                *bool          `yaml:"expand_bluray_iso" mapstructure:"expand_bluray_iso" json:"expand_bluray_iso,omitempty"`
-	RenameToNzbName                *bool          `yaml:"rename_to_nzb_name" mapstructure:"rename_to_nzb_name" json:"rename_to_nzb_name,omitempty"`
-	FilterSampleFiles              *bool          `yaml:"filter_sample_files" mapstructure:"filter_sample_files" json:"filter_sample_files,omitempty"`
-	FailedItemRetentionHours       *int           `yaml:"failed_item_retention_hours" mapstructure:"failed_item_retention_hours" json:"failed_item_retention_hours,omitempty"`
-	HistoryRetentionDays           *int           `yaml:"history_retention_days" mapstructure:"history_retention_days" json:"history_retention_days,omitempty"`
-	DeleteCompletedNzb             *bool          `yaml:"delete_completed_nzb" mapstructure:"delete_completed_nzb" json:"delete_completed_nzb,omitempty"`
+	MaxConcurrentImportsWhileStreaming int            `yaml:"max_concurrent_imports_while_streaming" mapstructure:"max_concurrent_imports_while_streaming" json:"max_concurrent_imports_while_streaming"`
+	MaxDownloadPrefetch                int            `yaml:"max_download_prefetch" mapstructure:"max_download_prefetch" json:"max_download_prefetch"`
+	SegmentSamplePercentage            int            `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage"`
+	ReadTimeoutSeconds                 int            `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds"`
+	IsoAnalyzeTimeoutSeconds           *int           `yaml:"iso_analyze_timeout_seconds" mapstructure:"iso_analyze_timeout_seconds" json:"iso_analyze_timeout_seconds,omitempty"`
+	ImportStrategy                     ImportStrategy `yaml:"import_strategy" mapstructure:"import_strategy" json:"import_strategy"`
+	ImportDir                          *string        `yaml:"import_dir" mapstructure:"import_dir" json:"import_dir,omitempty"`
+	WatchDir                           *string        `yaml:"watch_dir" mapstructure:"watch_dir" json:"watch_dir,omitempty"`
+	WatchIntervalSeconds               *int           `yaml:"watch_interval_seconds" mapstructure:"watch_interval_seconds" json:"watch_interval_seconds,omitempty"`
+	AllowNestedRarExtraction           *bool          `yaml:"allow_nested_rar_extraction" mapstructure:"allow_nested_rar_extraction" json:"allow_nested_rar_extraction,omitempty"`
+	ExpandBlurayIso                    *bool          `yaml:"expand_bluray_iso" mapstructure:"expand_bluray_iso" json:"expand_bluray_iso,omitempty"`
+	RenameToNzbName                    *bool          `yaml:"rename_to_nzb_name" mapstructure:"rename_to_nzb_name" json:"rename_to_nzb_name,omitempty"`
+	FilterSampleFiles                  *bool          `yaml:"filter_sample_files" mapstructure:"filter_sample_files" json:"filter_sample_files,omitempty"`
+	FailedItemRetentionHours           *int           `yaml:"failed_item_retention_hours" mapstructure:"failed_item_retention_hours" json:"failed_item_retention_hours,omitempty"`
+	HistoryRetentionDays               *int           `yaml:"history_retention_days" mapstructure:"history_retention_days" json:"history_retention_days,omitempty"`
+	DeleteCompletedNzb                 *bool          `yaml:"delete_completed_nzb" mapstructure:"delete_completed_nzb" json:"delete_completed_nzb,omitempty"`
 }
 
 // ShouldDeleteCompletedNzb returns whether the NZB file should be removed from
@@ -373,18 +387,18 @@ func GenerateProviderID(host string, port int, username string) string {
 
 // ProviderConfig represents a single NNTP provider configuration
 type ProviderConfig struct {
-	ID                string     `yaml:"id" mapstructure:"id" json:"id"`
-	Host              string     `yaml:"host" mapstructure:"host" json:"host"`
-	Port              int        `yaml:"port" mapstructure:"port" json:"port"`
-	Username          string     `yaml:"username" mapstructure:"username" json:"username"`
-	Password          string     `yaml:"password" mapstructure:"password" json:"-"`
-	MaxConnections    int        `yaml:"max_connections" mapstructure:"max_connections" json:"max_connections"`
-	InflightRequests  int        `yaml:"inflight_requests" mapstructure:"inflight_requests" json:"inflight_requests"`
-	TLS               bool       `yaml:"tls" mapstructure:"tls" json:"tls"`
-	InsecureTLS       bool       `yaml:"insecure_tls" mapstructure:"insecure_tls" json:"insecure_tls"`
-	ProxyURL          string     `yaml:"proxy_url" mapstructure:"proxy_url" json:"proxy_url,omitempty"`
-	Enabled           *bool      `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
-	IsBackupProvider  *bool      `yaml:"is_backup_provider" mapstructure:"is_backup_provider" json:"is_backup_provider,omitempty"`
+	ID                       string     `yaml:"id" mapstructure:"id" json:"id"`
+	Host                     string     `yaml:"host" mapstructure:"host" json:"host"`
+	Port                     int        `yaml:"port" mapstructure:"port" json:"port"`
+	Username                 string     `yaml:"username" mapstructure:"username" json:"username"`
+	Password                 string     `yaml:"password" mapstructure:"password" json:"-"`
+	MaxConnections           int        `yaml:"max_connections" mapstructure:"max_connections" json:"max_connections"`
+	InflightRequests         int        `yaml:"inflight_requests" mapstructure:"inflight_requests" json:"inflight_requests"`
+	TLS                      bool       `yaml:"tls" mapstructure:"tls" json:"tls"`
+	InsecureTLS              bool       `yaml:"insecure_tls" mapstructure:"insecure_tls" json:"insecure_tls"`
+	ProxyURL                 string     `yaml:"proxy_url" mapstructure:"proxy_url" json:"proxy_url,omitempty"`
+	Enabled                  *bool      `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
+	IsBackupProvider         *bool      `yaml:"is_backup_provider" mapstructure:"is_backup_provider" json:"is_backup_provider,omitempty"`
 	SkipPing                 bool       `yaml:"skip_ping" mapstructure:"skip_ping" json:"skip_ping,omitempty"`
 	KeepaliveIntervalSeconds int        `yaml:"keepalive_interval_seconds" mapstructure:"keepalive_interval_seconds" json:"keepalive_interval_seconds,omitempty"`
 	KeepaliveCommand         string     `yaml:"keepalive_command" mapstructure:"keepalive_command" json:"keepalive_command,omitempty"`
@@ -392,8 +406,8 @@ type ProviderConfig struct {
 	QuotaBytes               int64      `yaml:"quota_bytes" mapstructure:"quota_bytes" json:"quota_bytes,omitempty"`
 	QuotaPeriodHours         int        `yaml:"quota_period_hours" mapstructure:"quota_period_hours" json:"quota_period_hours,omitempty"`
 	LastRTTMs                int64      `yaml:"last_rtt_ms" mapstructure:"last_rtt_ms" json:"last_rtt_ms,omitempty"`
-	LastSpeedTestMbps float64    `yaml:"last_speed_test_mbps" mapstructure:"last_speed_test_mbps" json:"last_speed_test_mbps,omitempty"`
-	LastSpeedTestTime *time.Time `yaml:"last_speed_test_time" mapstructure:"last_speed_test_time" json:"last_speed_test_time,omitempty"`
+	LastSpeedTestMbps        float64    `yaml:"last_speed_test_mbps" mapstructure:"last_speed_test_mbps" json:"last_speed_test_mbps,omitempty"`
+	LastSpeedTestTime        *time.Time `yaml:"last_speed_test_time" mapstructure:"last_speed_test_time" json:"last_speed_test_time,omitempty"`
 }
 
 // SABnzbdConfig represents SABnzbd-compatible API configuration
@@ -782,6 +796,14 @@ func (c *Config) Validate() error {
 	}
 	if c.Fuse.MaxReadAheadMB <= 0 {
 		c.Fuse.MaxReadAheadMB = 128 // Default 128MB
+	}
+	// AsyncBufferSizeMB: 0 means disabled (passthrough). Clamp negatives.
+	if c.Fuse.AsyncBufferSizeMB < 0 {
+		c.Fuse.AsyncBufferSizeMB = 0
+	}
+	// AsyncBufferMaxTotalMB: 0 means unlimited. Clamp negatives.
+	if c.Fuse.AsyncBufferMaxTotalMB < 0 {
+		c.Fuse.AsyncBufferMaxTotalMB = 0
 	}
 
 	return nil
@@ -1267,13 +1289,13 @@ func DefaultConfig(configDir ...string) *Config {
 	sabnzbdEnabled := false
 	scrapperEnabled := false
 	fuseEnabled := false
-	loginRequired := true      // Require login by default
-	stremioEnabled := false    // Stremio endpoint disabled by default
-	prowlarrEnabled := false   // Prowlarr integration disabled by default
-	watchIntervalSeconds := 10        // Default watch interval
-	failedItemRetentionHours := 24    // Default: auto-remove failed items after 24 hours
-	historyRetentionDays := 90        // Default: auto-remove import history after 90 days (3 months)
-	isoAnalyzeTimeoutSeconds := 120   // Default: 120s hard cap per ISO analyse (prevents stuck NNTP from stalling import for 9+ minutes)
+	loginRequired := true           // Require login by default
+	stremioEnabled := false         // Stremio endpoint disabled by default
+	prowlarrEnabled := false        // Prowlarr integration disabled by default
+	watchIntervalSeconds := 10      // Default watch interval
+	failedItemRetentionHours := 24  // Default: auto-remove failed items after 24 hours
+	historyRetentionDays := 90      // Default: auto-remove import history after 90 days (3 months)
+	isoAnalyzeTimeoutSeconds := 120 // Default: 120s hard cap per ISO analyse (prevents stuck NNTP from stalling import for 9+ minutes)
 	cleanupAutomaticImportFailure := false
 	metadataBackupEnabled := false
 	failureMaskingEnabled := false
@@ -1402,15 +1424,15 @@ func DefaultConfig(configDir ...string) *Config {
 				".xvid", ".rm", ".rmvb", ".asf", ".asx", ".wtv", ".mk3d", ".dvr-ms",
 				".mp3", ".flac", ".m4a", ".epub", ".pdf", ".cbz",
 			},
-			MaxImportConnections:    5,                  // Default: 5 concurrent NNTP connections for validation and archive processing
-			MaxDownloadPrefetch:     10,                 // Default: 10 segments prefetched ahead for archive analysis
-			SegmentSamplePercentage: 1,                  // Default: 1% segment sampling
-			ReadTimeoutSeconds:       300,                // Default: 5 minutes read timeout
+			MaxImportConnections:     5,   // Default: 5 concurrent NNTP connections for validation and archive processing
+			MaxDownloadPrefetch:      10,  // Default: 10 segments prefetched ahead for archive analysis
+			SegmentSamplePercentage:  1,   // Default: 1% segment sampling
+			ReadTimeoutSeconds:       300, // Default: 5 minutes read timeout
 			IsoAnalyzeTimeoutSeconds: &isoAnalyzeTimeoutSeconds,
-			ImportStrategy:          ImportStrategyNone, // Default: no import strategy (direct import)
-			ImportDir:               nil,                // No default import directory
-			WatchDir:                nil,
-			WatchIntervalSeconds:    &watchIntervalSeconds,
+			ImportStrategy:           ImportStrategyNone, // Default: no import strategy (direct import)
+			ImportDir:                nil,                // No default import directory
+			WatchDir:                 nil,
+			WatchIntervalSeconds:     &watchIntervalSeconds,
 			FailedItemRetentionHours: &failedItemRetentionHours,
 			HistoryRetentionDays:     &historyRetentionDays,
 		},
@@ -1502,14 +1524,16 @@ func DefaultConfig(configDir ...string) *Config {
 			},
 		},
 		Fuse: FuseConfig{
-			Enabled:             &fuseEnabled,
-			MountPath:           "",
-			AllowOther:          true,
-			Debug:               false,
-			AttrTimeoutSeconds:  30,
-			EntryTimeoutSeconds: 1,
-			MaxCacheSizeMB:      128,
-			MaxReadAheadMB:      128,
+			Enabled:               &fuseEnabled,
+			MountPath:             "",
+			AllowOther:            true,
+			Debug:                 false,
+			AttrTimeoutSeconds:    30,
+			EntryTimeoutSeconds:   1,
+			MaxCacheSizeMB:        128,
+			MaxReadAheadMB:        128,
+			AsyncBufferSizeMB:     16,  // 16MB per-stream read-ahead (rclone-VFS-like smoothing)
+			AsyncBufferMaxTotalMB: 256, // cap total read-ahead memory across all streams
 		},
 		MountPath: "",            // Empty by default - required when ARRs is enabled
 		MountType: MountTypeNone, // No mount system active by default

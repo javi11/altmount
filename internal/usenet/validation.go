@@ -16,42 +16,11 @@ import (
 
 var randPerm = rand.Perm
 
-// ValidateSegmentAvailability validates that segments are available on Usenet servers.
-// It uses a strategic sampling approach for efficiency when fullValidation is false:
-// - Validates first 3 segments (DMCA/takedown detection)
-// - Validates last 2 segments (incomplete upload detection)
-// - Validates random middle segments based on samplePercentage (general integrity check)
-// The samplePercentage parameter controls how many segments to check (1-100%).
-//
-// For fullValidation=true, all segments are validated regardless of samplePercentage.
-// A minimum of 5 segments are always validated for statistical validity when sampling.
-//
-// The optional progressTracker updates progress after each segment validation completes,
-// providing real-time progress updates during concurrent validation.
-//
-// Returns an error if any segment is unreachable or if the pool is unavailable.
-func ValidateSegmentAvailability(
-	ctx context.Context,
-	segments []*metapb.SegmentData,
-	poolManager pool.Manager,
-	maxConnections int,
-	samplePercentage int,
-	progressTracker progress.ProgressTracker,
-	timeout time.Duration,
-) error {
-	if len(segments) == 0 {
-		return nil
-	}
-
-	selected := selectSegmentsForValidation(segments, samplePercentage)
-	return ValidateSegmentList(ctx, selected, poolManager, maxConnections, progressTracker, timeout)
-}
-
 // ValidateSegmentList validates a pre-selected list of segments via Usenet.
-// Unlike ValidateSegmentAvailability, no additional sampling/selection is performed —
-// every segment in the list is checked. Callers that pre-compute their own selection
-// (e.g. after combining structural validation + selection in a single pass) should use
-// this function to avoid a redundant iteration over the full segment slice.
+// No sampling/selection is performed — every segment in the list is checked.
+// Callers that pre-compute their own selection (e.g. after combining structural
+// validation + selection in a single pass) should use this function to avoid a
+// redundant iteration over the full segment slice.
 func ValidateSegmentList(
 	ctx context.Context,
 	segments []*metapb.SegmentData,

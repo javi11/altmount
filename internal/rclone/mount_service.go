@@ -146,15 +146,6 @@ func (s *MountService) Stop(ctx context.Context) error {
 	return s.manager.Stop()
 }
 
-// RefreshPath refreshes a path in the VFS cache
-func (s *MountService) RefreshPath(ctx context.Context, path string) error {
-	if s.mount == nil {
-		return fmt.Errorf("mount not active")
-	}
-
-	return s.mount.RefreshDir(ctx, []string{path})
-}
-
 // StartRCServer starts the RC server if RClone is enabled but doesn't create a mount
 func (s *MountService) StartRCServer(ctx context.Context) error {
 	cfg := s.cfm.GetConfig()

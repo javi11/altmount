@@ -5,6 +5,7 @@ import {
 	ChevronUp,
 	Download,
 	FileCode,
+	Globe,
 	Link2,
 	MoreVertical,
 	PlayCircle,
@@ -70,6 +71,13 @@ export const QueueItemCard = memo(function QueueItemCard({
 							</div>
 						</div>
 
+						{item.indexer && (
+							<div className="mt-1 flex items-center gap-1 text-base-content/50 text-xs">
+								<Globe className="h-3 w-3 shrink-0" />
+								<span className="truncate">{item.indexer}</span>
+							</div>
+						)}
+
 						{/* Quick Info Pills */}
 						<div className="mt-2 flex flex-wrap gap-2">
 							{item.category && (
@@ -83,7 +91,7 @@ export const QueueItemCard = memo(function QueueItemCard({
 								</span>
 							)}
 							<span className="badge badge-ghost badge-xs">
-								{formatRelativeTime(item.updated_at)}
+								{formatRelativeTime(item.created_at)}
 							</span>
 							{item.retry_count > 0 && (
 								<span className="badge badge-warning badge-xs font-bold uppercase tracking-tighter">

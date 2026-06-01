@@ -27,10 +27,7 @@ import (
 func (s *Server) handleImportNzbdav(c *fiber.Ctx) error {
 	// Check if importer service is available
 	if s.importerService == nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Importer service not available",
-		})
+		return RespondInternalError(c, "Importer service not available", "")
 	}
 
 	// 1. Get Form Data
@@ -43,32 +40,20 @@ func (s *Server) handleImportNzbdav(c *fiber.Ctx) error {
 	if dbPath != "" {
 		// Use server-side file path
 		if _, err := os.Stat(dbPath); err != nil {
-			return c.Status(422).JSON(fiber.Map{
-				"success": false,
-				"message": "Database file not found on server",
-				"details": fmt.Sprintf("Path: %s, Error: %v", dbPath, err),
-			})
+			return RespondError(c, 422, ErrCodeValidation, "Database file not found on server", fmt.Sprintf("Path: %s, Error: %v", dbPath, err))
 		}
 	} else {
 		// Fallback to file upload
 		file, err := c.FormFile("file")
 		if err != nil {
-			return c.Status(400).JSON(fiber.Map{
-				"success": false,
-				"message": "Database file is required (provide 'dbPath' or upload 'file')",
-				"details": err.Error(),
-			})
+			return RespondBadRequest(c, "Database file is required (provide 'dbPath' or upload 'file')", err.Error())
 		}
 
 		// Save file to temp location
 		tempDir := os.TempDir()
 		dbPath = filepath.Join(tempDir, fmt.Sprintf("nzbdav_%d.sqlite", time.Now().UnixNano()))
 		if err := c.SaveFile(file, dbPath); err != nil {
-			return c.Status(500).JSON(fiber.Map{
-				"success": false,
-				"message": "Failed to save uploaded file",
-				"details": err.Error(),
-			})
+			return RespondInternalError(c, "Failed to save uploaded file", err.Error())
 		}
 		isTempFile = true
 	}
@@ -83,11 +68,7 @@ func (s *Server) handleImportNzbdav(c *fiber.Ctx) error {
 		if isTempFile {
 			os.Remove(dbPath) // Clean up if start failed
 		}
-		return c.Status(409).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to start import",
-			"details": err.Error(),
-		})
+		return RespondConflict(c, "Failed to start import", err.Error())
 	}
 
 	return c.Status(202).JSON(fiber.Map{
@@ -107,10 +88,7 @@ func (s *Server) handleImportNzbdav(c *fiber.Ctx) error {
 //	@Router			/import/nzbdav/status [get]
 func (s *Server) handleGetNzbdavImportStatus(c *fiber.Ctx) error {
 	if s.importerService == nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Importer service not available",
-		})
+		return RespondInternalError(c, "Importer service not available", "")
 	}
 
 	status := s.importerService.GetImportStatus()
@@ -129,10 +107,7 @@ func (s *Server) handleGetNzbdavImportStatus(c *fiber.Ctx) error {
 		}
 	}
 
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"data":    resp,
-	})
+	return RespondSuccess(c, resp)
 }
 
 // handleMigrateNzbdavSymlinks handles POST /import/nzbdav/migrate-symlinks
@@ -155,32 +130,19 @@ func (s *Server) handleMigrateNzbdavSymlinks(c *fiber.Ctx) error {
 		DryRun          bool   `json:"dry_run"`
 	}
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"success": false,
-			"message": "Invalid request body",
-			"details": err.Error(),
-		})
+		return RespondBadRequest(c, "Invalid request body", err.Error())
 	}
 
 	if req.LibraryPath == "" || !filepath.IsAbs(req.LibraryPath) {
-		return c.Status(400).JSON(fiber.Map{
-			"success": false,
-			"message": "library_path must be a non-empty absolute path",
-		})
+		return RespondBadRequest(c, "library_path must be a non-empty absolute path", "")
 	}
 	if req.SourceMountPath == "" || !filepath.IsAbs(req.SourceMountPath) {
-		return c.Status(400).JSON(fiber.Map{
-			"success": false,
-			"message": "source_mount_path must be a non-empty absolute path",
-		})
+		return RespondBadRequest(c, "source_mount_path must be a non-empty absolute path", "")
 	}
 
 	cfg := s.configManager.GetConfig()
 	if cfg == nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Configuration not available",
-		})
+		return RespondInternalError(c, "Configuration not available", "")
 	}
 
 	// Determine which migration repo to use — prefer the dedicated field, fall back
@@ -188,21 +150,14 @@ func (s *Server) handleMigrateNzbdavSymlinks(c *fiber.Ctx) error {
 	// gracefully rather than panic.
 	migRepo := s.migrationRepo
 	if migRepo == nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Migration repository not available",
-		})
+		return RespondInternalError(c, "Migration repository not available", "")
 	}
 
 	ctx := c.Context()
 
 	// Backfill idempotently before walking.
 	if _, err := migRepo.BackfillFromImportQueue(ctx); err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to backfill migration data",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to backfill migration data", err.Error())
 	}
 
 	lookup := database.NewDBSymlinkLookup(migRepo)
@@ -217,24 +172,17 @@ func (s *Server) handleMigrateNzbdavSymlinks(c *fiber.Ctx) error {
 		req.DryRun,
 	)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Symlink migration failed",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Symlink migration failed", err.Error())
 	}
 
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"data": fiber.Map{
-			"scanned":              report.Scanned,
-			"matched":              report.Matched,
-			"rewritten":            report.Rewritten,
-			"skipped_wrong_prefix": report.SkippedWrongPrefix,
-			"unmatched":            report.Unmatched,
-			"errors":               report.Errors,
-			"dry_run":              req.DryRun,
-		},
+	return RespondSuccess(c, fiber.Map{
+		"scanned":              report.Scanned,
+		"matched":              report.Matched,
+		"rewritten":            report.Rewritten,
+		"skipped_wrong_prefix": report.SkippedWrongPrefix,
+		"unmatched":            report.Unmatched,
+		"errors":               report.Errors,
+		"dry_run":              req.DryRun,
 	})
 }
 
@@ -249,24 +197,14 @@ func (s *Server) handleMigrateNzbdavSymlinks(c *fiber.Ctx) error {
 //	@Router			/import/nzbdav [delete]
 func (s *Server) handleCancelNzbdavImport(c *fiber.Ctx) error {
 	if s.importerService == nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Importer service not available",
-		})
+		return RespondInternalError(c, "Importer service not available", "")
 	}
 
 	if err := s.importerService.CancelImport(); err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to cancel import",
-			"details": err.Error(),
-		})
+		return RespondBadRequest(c, "Failed to cancel import", err.Error())
 	}
 
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"message": "Import cancellation requested",
-	})
+	return RespondMessage(c, "Import cancellation requested")
 }
 
 // handleResetNzbdavImportStatus handles POST /import/nzbdav/reset
@@ -280,18 +218,12 @@ func (s *Server) handleCancelNzbdavImport(c *fiber.Ctx) error {
 //	@Router			/import/nzbdav/reset [post]
 func (s *Server) handleResetNzbdavImportStatus(c *fiber.Ctx) error {
 	if s.importerService == nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Importer service not available",
-		})
+		return RespondInternalError(c, "Importer service not available", "")
 	}
 
 	s.importerService.ResetNzbdavImportStatus()
 
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"message": "Import status reset",
-	})
+	return RespondMessage(c, "Import status reset")
 }
 
 // handleClearPendingNzbdavMigrations handles DELETE /import/nzbdav/pending-migrations
@@ -305,19 +237,12 @@ func (s *Server) handleResetNzbdavImportStatus(c *fiber.Ctx) error {
 //	@Router			/import/nzbdav/pending-migrations [delete]
 func (s *Server) handleClearPendingNzbdavMigrations(c *fiber.Ctx) error {
 	if s.migrationRepo == nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Migration repository not available",
-		})
+		return RespondInternalError(c, "Migration repository not available", "")
 	}
 
 	deleted, err := s.migrationRepo.DeletePendingBySource(c.Context(), "nzbdav")
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to clear pending migrations",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to clear pending migrations", err.Error())
 	}
 
 	return c.Status(200).JSON(fiber.Map{
@@ -340,19 +265,12 @@ func (s *Server) handleClearPendingNzbdavMigrations(c *fiber.Ctx) error {
 //	@Router			/import/nzbdav/migrations [delete]
 func (s *Server) handleClearAllNzbdavMigrations(c *fiber.Ctx) error {
 	if s.migrationRepo == nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Migration repository not available",
-		})
+		return RespondInternalError(c, "Migration repository not available", "")
 	}
 
 	deleted, err := s.migrationRepo.DeleteAllBySource(c.Context(), "nzbdav")
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to clear migrations",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to clear migrations", err.Error())
 	}
 
 	return c.Status(200).JSON(fiber.Map{

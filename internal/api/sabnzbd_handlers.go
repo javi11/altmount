@@ -406,7 +406,7 @@ func (s *Server) handleSABnzbdAddFile(c *fiber.Ctx) error {
 	if movie := c.FormValue("movie"); movie != "" {
 		metadata["movie_title"] = movie
 	}
-
+	
 	var metadataJSON *string
 	if len(metadata) > 0 {
 		if b, err := json.Marshal(metadata); err == nil {
@@ -1554,7 +1554,7 @@ func (s *Server) calculateHistoryStoragePath(item *database.ImportQueueItem, bas
 	fullStoragePath = filepath.ToSlash(filepath.Clean(fullStoragePath))
 
 	if _, err := os.Stat(fullStoragePath); os.IsNotExist(err) {
-		slog.WarnContext(context.Background(), "sabnzbd history: reported path does not exist on disk",
+		slog.DebugContext(context.Background(), "sabnzbd history: reported path does not exist on disk",
 			"item_id", item.ID,
 			"storage_path", *item.StoragePath,
 			"reported_path", fullStoragePath,
