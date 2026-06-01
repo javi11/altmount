@@ -1,6 +1,7 @@
 package clients
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -33,6 +34,34 @@ type SportarrStatusMessage struct {
 	Messages []string `json:"messages"`
 }
 
+// sportarrRef holds a Sportarr API reference value that, depending on the
+// Sportarr build, serializes either as a bare string (older) or as an object
+// like {"id":1,"name":"AltMount",...} (current). Only the name is needed.
+// A custom unmarshaller keeps the queue decode from failing outright when the
+// shape changes between versions.
+type sportarrRef struct {
+	Name string
+}
+
+func (r *sportarrRef) UnmarshalJSON(b []byte) error {
+	b = bytes.TrimSpace(b)
+	if len(b) == 0 || string(b) == "null" {
+		r.Name = ""
+		return nil
+	}
+	if b[0] == '"' {
+		return json.Unmarshal(b, &r.Name)
+	}
+	var obj struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(b, &obj); err != nil {
+		return err
+	}
+	r.Name = obj.Name
+	return nil
+}
+
 // SportarrQueueItem maps the fields of a Sportarr native queue record that the
 // queue-cleanup worker needs. Field names follow the Servarr convention; unknown
 // fields are ignored by the JSON decoder.
@@ -41,7 +70,7 @@ type SportarrQueueItem struct {
 	Title                 string                  `json:"title"`
 	Status                string                  `json:"status"`
 	Protocol              string                  `json:"protocol"`
-	DownloadClient        string                  `json:"downloadClient"`
+	DownloadClient        sportarrRef             `json:"downloadClient"`
 	DownloadID            string                  `json:"downloadId"`
 	Indexer               string                  `json:"indexer"`
 	OutputPath            string                  `json:"outputPath"`
