@@ -62,21 +62,92 @@ func (r *sportarrRef) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// sportarrStatusNames maps the Sportarr DownloadStatus enum (serialized as an
+// integer by current builds, which register no JsonStringEnumConverter) to its
+// lowercased name. Order must match the enum declaration in Sportarr.
+var sportarrStatusNames = []string{
+	"queued", "downloading", "paused", "completed", "failed",
+	"warning", "importing", "imported", "importpending", "importwarning",
+}
+
+// sportarrStatus accepts the download status whether the API serializes it as a
+// string (older builds) or the numeric enum (current builds), normalizing to the
+// lowercased status name so the cleanup comparisons keep working.
+type sportarrStatus string
+
+func (s *sportarrStatus) UnmarshalJSON(b []byte) error {
+	b = bytes.TrimSpace(b)
+	if len(b) == 0 || string(b) == "null" {
+		*s = ""
+		return nil
+	}
+	if b[0] == '"' {
+		var str string
+		if err := json.Unmarshal(b, &str); err != nil {
+			return err
+		}
+		*s = sportarrStatus(strings.ToLower(str))
+		return nil
+	}
+	var n int
+	if err := json.Unmarshal(b, &n); err != nil {
+		return err
+	}
+	if n >= 0 && n < len(sportarrStatusNames) {
+		*s = sportarrStatus(sportarrStatusNames[n])
+	} else {
+		*s = sportarrStatus(fmt.Sprintf("%d", n))
+	}
+	return nil
+}
+
+// sportarrStatusMessages accepts either the Servarr object shape
+// [{title,messages}] (older builds) or a bare string array (current Sportarr),
+// so the queue decode doesn't fail outright when the shape changes.
+type sportarrStatusMessages []SportarrStatusMessage
+
+func (m *sportarrStatusMessages) UnmarshalJSON(b []byte) error {
+	b = bytes.TrimSpace(b)
+	if len(b) == 0 || string(b) == "null" {
+		*m = nil
+		return nil
+	}
+	// Object shape first.
+	var objs []SportarrStatusMessage
+	if err := json.Unmarshal(b, &objs); err == nil {
+		*m = objs
+		return nil
+	}
+	// Fall back to a bare string array.
+	var strs []string
+	if err := json.Unmarshal(b, &strs); err != nil {
+		return err
+	}
+	out := make([]SportarrStatusMessage, 0, len(strs))
+	for _, s := range strs {
+		out = append(out, SportarrStatusMessage{Messages: []string{s}})
+	}
+	*m = out
+	return nil
+}
+
 // SportarrQueueItem maps the fields of a Sportarr native queue record that the
 // queue-cleanup worker needs. Field names follow the Servarr convention; unknown
-// fields are ignored by the JSON decoder.
+// fields are ignored by the JSON decoder. status, statusMessages and
+// downloadClient use tolerant types because their wire shapes differ between
+// Sportarr builds and a mismatch would otherwise fail the whole queue decode.
 type SportarrQueueItem struct {
-	ID                    int64                   `json:"id"`
-	Title                 string                  `json:"title"`
-	Status                string                  `json:"status"`
-	Protocol              string                  `json:"protocol"`
-	DownloadClient        sportarrRef             `json:"downloadClient"`
-	DownloadID            string                  `json:"downloadId"`
-	Indexer               string                  `json:"indexer"`
-	OutputPath            string                  `json:"outputPath"`
-	TrackedDownloadStatus string                  `json:"trackedDownloadStatus"`
-	TrackedDownloadState  string                  `json:"trackedDownloadState"`
-	StatusMessages        []SportarrStatusMessage `json:"statusMessages"`
+	ID                    int64                  `json:"id"`
+	Title                 string                 `json:"title"`
+	Status                sportarrStatus         `json:"status"`
+	Protocol              string                 `json:"protocol"`
+	DownloadClient        sportarrRef            `json:"downloadClient"`
+	DownloadID            string                 `json:"downloadId"`
+	Indexer               string                 `json:"indexer"`
+	OutputPath            string                 `json:"outputPath"`
+	TrackedDownloadStatus string                 `json:"trackedDownloadStatus"`
+	TrackedDownloadState  string                 `json:"trackedDownloadState"`
+	StatusMessages        sportarrStatusMessages `json:"statusMessages"`
 }
 
 // NewSportarr builds a native Sportarr client. The shared *http.Client carries
