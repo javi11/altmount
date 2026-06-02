@@ -509,17 +509,20 @@ func migrateArrsCleanup(config *Config) {
 	}
 
 	// Rebuild the unified rules from the legacy config: the stuck rules verbatim,
-	// then allowlist entries as plain "remove" rules (skipping duplicate messages).
+	// then allowlist entries as plain "remove" rules. Rule matching is substring-based
+	// (see matchStuckRule), so skip any allowlist entry already covered by an existing
+	// rule whose message is a substring of it — e.g. an allowlist "Sample file" is dead
+	// next to a "Sample" rule, and would just be a confusing duplicate.
 	rules := append([]StuckCleanupRule(nil), a.StuckCleanupRules...)
 	for _, m := range a.QueueCleanupAllowlist {
-		exists := false
+		covered := false
 		for _, r := range rules {
-			if r.Message == m.Message {
-				exists = true
+			if r.Message == m.Message || (r.Message != "" && strings.Contains(m.Message, r.Message)) {
+				covered = true
 				break
 			}
 		}
-		if !exists {
+		if !covered {
 			rules = append(rules, StuckCleanupRule{
 				Message: m.Message,
 				Enabled: m.Enabled,
@@ -1637,7 +1640,8 @@ func DefaultConfig(configDir ...string) *Config {
 				{Message: "is reporting an error", Enabled: false, Action: StuckActionRemove},
 				{Message: "Import failed, path does not exist", Enabled: false, Action: StuckActionRemove},
 				// Folded from the former queue-cleanup allowlist — remove from queue only.
-				{Message: "Sample file", Enabled: true, Action: StuckActionRemove},
+				// ("Sample file" is intentionally omitted: the "Sample" rule above already
+				// substring-matches it.)
 				{Message: "No video files were found in the selected folder", Enabled: true, Action: StuckActionRemove},
 				{Message: "Could not find file", Enabled: true, Action: StuckActionRemove},
 				{Message: "Download doesn't contain intermediate path", Enabled: true, Action: StuckActionRemove},

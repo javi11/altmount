@@ -179,6 +179,7 @@ type ArrsAPIResponse struct {
 	LidarrInstances                []ArrsInstanceAPIResponse `json:"lidarr_instances"`
 	ReadarrInstances               []ArrsInstanceAPIResponse `json:"readarr_instances"`
 	WhisparrInstances              []ArrsInstanceAPIResponse `json:"whisparr_instances"`
+	SportarrInstances              []ArrsInstanceAPIResponse `json:"sportarr_instances"`
 	QueueCleanupEnabled            bool                      `json:"queue_cleanup_enabled,omitempty"`
 	QueueCleanupIntervalSeconds    int                       `json:"queue_cleanup_interval_seconds,omitempty"`
 	CleanupAutomaticImportFailure  bool                      `json:"cleanup_automatic_import_failure,omitempty"`
@@ -361,6 +362,7 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 		LidarrInstances:                toArrsInstances(cfg.Arrs.LidarrInstances),
 		ReadarrInstances:               toArrsInstances(cfg.Arrs.ReadarrInstances),
 		WhisparrInstances:              toArrsInstances(cfg.Arrs.WhisparrInstances),
+		SportarrInstances:              toArrsInstances(cfg.Arrs.SportarrInstances),
 		QueueCleanupEnabled:            cfg.Arrs.QueueCleanupEnabled != nil && *cfg.Arrs.QueueCleanupEnabled,
 		QueueCleanupIntervalSeconds:    cfg.Arrs.QueueCleanupIntervalSeconds,
 		CleanupAutomaticImportFailure:  cfg.Arrs.CleanupAutomaticImportFailure != nil && *cfg.Arrs.CleanupAutomaticImportFailure,

@@ -265,8 +265,11 @@ func TestMigrateArrsCleanup_FoldsLegacyConfig(t *testing.T) {
 			},
 			QueueCleanupAllowlist: []IgnoredMessage{
 				{Message: "Could not find file", Enabled: true},
-				// Duplicate of an existing rule message — must not be added twice.
+				// Exact duplicate of an existing rule message — must not be added twice.
 				{Message: "is not a valid video file", Enabled: false},
+				// Substring-covered by the "is not a valid video file" rule above
+				// (matching is substring-based) — must be skipped as a dead duplicate.
+				{Message: "is not a valid video file (sample)", Enabled: true},
 			},
 		},
 	}
@@ -274,7 +277,8 @@ func TestMigrateArrsCleanup_FoldsLegacyConfig(t *testing.T) {
 	migrateArrsCleanup(cfg)
 	a := cfg.Arrs
 
-	// Stuck rule kept; unique allowlist entry folded in as a remove rule; dup skipped.
+	// Stuck rule kept; unique allowlist entry folded in as a remove rule; exact and
+	// substring-covered duplicates skipped.
 	assert.Equal(t, []StuckCleanupRule{
 		{Message: "is not a valid video file", Enabled: true, Action: StuckActionBlocklistSearch},
 		{Message: "Could not find file", Enabled: true, Action: StuckActionRemove},
