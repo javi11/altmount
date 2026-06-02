@@ -4,7 +4,6 @@ import { useConfirm } from "../../../../contexts/ModalContext";
 import { useToast } from "../../../../contexts/ToastContext";
 import { useCleanupIndexerStats, useIndexerStats } from "../../../../hooks/useApi";
 import { IndexerHealthCard } from "./IndexerHealthCard";
-import { IndexerHealthChart } from "./IndexerHealthChart";
 import { IndexerHealthFilters } from "./IndexerHealthFilters";
 import { IndexerHealthSummary } from "./IndexerHealthSummary";
 import { PruneStatsModal } from "./PruneStatsModal";
@@ -16,7 +15,6 @@ export function IndexerHealth() {
 	const { showToast } = useToast();
 	const { confirmAction } = useConfirm();
 
-	const [showChart, setShowChart] = useState(false);
 	const [searchQuery, setSearchQuery] = useState("");
 	const [statusFilter, setStatusFilter] = useState<
 		"all" | "excellent" | "good" | "moderate" | "operational"
@@ -198,20 +196,6 @@ export function IndexerHealth() {
 				<div className="flex flex-wrap items-center gap-2">
 					<button
 						type="button"
-						className={`btn btn-sm gap-1.5 border-base-200 transition-all duration-200 ${
-							showChart
-								? "btn-primary shadow-[0_0_12px_rgba(59,130,246,0.3)]"
-								: "btn-ghost border border-base-200 bg-base-200/50 hover:bg-base-200"
-						}`}
-						onClick={() => setShowChart(!showChart)}
-						disabled={!hasStats}
-						aria-label="Toggle success benchmark comparative analytics chart"
-					>
-						<BarChart3 className="h-4 w-4" aria-hidden="true" />
-						{showChart ? "Hide HUD Chart" : "Show HUD Chart"}
-					</button>
-					<button
-						type="button"
 						className="btn btn-ghost btn-sm gap-1.5 border border-base-200 bg-base-200/50 transition-all duration-200 hover:scale-[1.02] hover:bg-base-200 active:scale-[0.98]"
 						onClick={() => void refetch()}
 						aria-label="Refresh indexer statistics"
@@ -231,8 +215,6 @@ export function IndexerHealth() {
 					</button>
 				</div>
 			</div>
-
-			{hasStats && showChart && <IndexerHealthChart sorted={sorted} />}
 
 			{summary && <IndexerHealthSummary stats={stats!} summary={summary} />}
 
