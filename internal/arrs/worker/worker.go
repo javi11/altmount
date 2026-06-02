@@ -211,7 +211,7 @@ func (w *Worker) cleanupRadarrQueue(ctx context.Context, instance *model.ConfigI
 		// Only operate on queue items owned by AltMount's registered download client.
 		// Items from other clients (qBittorrent, real SABnzbd, etc.) may reference
 		// paths AltMount cannot see and must never be touched — see issue #523.
-		if q.DownloadClient != registrar.AltmountDownloadClientName {
+		if !registrar.IsAltmountDownloadClient(q.DownloadClient) {
 			continue
 		}
 
@@ -244,9 +244,10 @@ func (w *Worker) cleanupRadarrQueue(ctx context.Context, instance *model.ConfigI
 			allMessages := strings.Join(msg.Messages, " ")
 
 			// Automatic import failure cleanup (configurable). Message-based rules are
-			// handled separately by CleanupStuckQueue.
+			// handled separately by CleanupStuckQueue. Match case-insensitively: *arrs
+			// emit the phrase mid-sentence (e.g. "...automatic import is not possible.").
 			if cfg.Arrs.CleanupAutomaticImportFailure != nil && *cfg.Arrs.CleanupAutomaticImportFailure &&
-				strings.Contains(allMessages, "Automatic import is not possible") {
+				strings.Contains(strings.ToLower(allMessages), "automatic import is not possible") {
 				shouldCleanup = true
 				break
 			}
@@ -329,7 +330,7 @@ func (w *Worker) cleanupSonarrQueue(ctx context.Context, instance *model.ConfigI
 		// Only operate on queue items owned by AltMount's registered download client.
 		// Items from other clients (qBittorrent, real SABnzbd, etc.) may reference
 		// paths AltMount cannot see and must never be touched — see issue #523.
-		if q.DownloadClient != registrar.AltmountDownloadClientName {
+		if !registrar.IsAltmountDownloadClient(q.DownloadClient) {
 			continue
 		}
 
@@ -362,9 +363,10 @@ func (w *Worker) cleanupSonarrQueue(ctx context.Context, instance *model.ConfigI
 			allMessages := strings.Join(msg.Messages, " ")
 
 			// Automatic import failure cleanup (configurable). Message-based rules are
-			// handled separately by CleanupStuckQueue.
+			// handled separately by CleanupStuckQueue. Match case-insensitively: *arrs
+			// emit the phrase mid-sentence (e.g. "...automatic import is not possible.").
 			if cfg.Arrs.CleanupAutomaticImportFailure != nil && *cfg.Arrs.CleanupAutomaticImportFailure &&
-				strings.Contains(allMessages, "Automatic import is not possible") {
+				strings.Contains(strings.ToLower(allMessages), "automatic import is not possible") {
 				shouldCleanup = true
 				break
 			}
@@ -478,7 +480,7 @@ func (w *Worker) cleanupSportarrQueue(ctx context.Context, instance *model.Confi
 		// Only operate on queue items owned by AltMount's registered download client.
 		// Items from other clients may reference paths AltMount cannot see and must
 		// never be touched — see issue #523.
-		if q.DownloadClient.Name != registrar.AltmountDownloadClientName {
+		if !registrar.IsAltmountDownloadClient(q.DownloadClient.Name) {
 			continue
 		}
 
@@ -520,9 +522,10 @@ func (w *Worker) cleanupSportarrQueue(ctx context.Context, instance *model.Confi
 			allMessages := strings.Join(msg.Messages, " ")
 
 			// Automatic import failure cleanup (configurable). Message-based rules are
-			// handled separately by CleanupStuckQueue.
+			// handled separately by CleanupStuckQueue. Match case-insensitively: *arrs
+			// emit the phrase mid-sentence (e.g. "...automatic import is not possible.").
 			if cfg.Arrs.CleanupAutomaticImportFailure != nil && *cfg.Arrs.CleanupAutomaticImportFailure &&
-				strings.Contains(allMessages, "Automatic import is not possible") {
+				strings.Contains(strings.ToLower(allMessages), "automatic import is not possible") {
 				shouldCleanup = true
 				break
 			}

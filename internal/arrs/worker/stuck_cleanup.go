@@ -147,7 +147,7 @@ func (w *Worker) selectStuckActions(ctx context.Context, instance *model.ConfigI
 	for _, item := range items {
 		// Only ever touch items owned by AltMount's download client — other
 		// clients may reference paths AltMount cannot see (see issue #523).
-		if item.DownloadClient != registrar.AltmountDownloadClientName {
+		if !registrar.IsAltmountDownloadClient(item.DownloadClient) {
 			continue
 		}
 
