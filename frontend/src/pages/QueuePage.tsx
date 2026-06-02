@@ -26,7 +26,7 @@ import {
 	XCircle,
 	XOctagon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { ImportMethods } from "../components/queue/ImportMethods";
 import { QueueItemCard } from "../components/queue/QueueItemCard";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
@@ -285,7 +285,7 @@ export function QueuePage() {
 		if (confirmed) await clearPending.mutateAsync("");
 	};
 
-	const handleAddTestFile = async (size: "100MB" | "1GB" | "10GB") => {
+	const handleAddTestFile = async (size: "100MB" | "1GB") => {
 		try {
 			await addTestQueueItem.mutateAsync(size);
 		} catch (error) {
@@ -395,13 +395,6 @@ export function QueuePage() {
 	const isAllSelected =
 		queueData && queueData.length > 0 && queueData.every((item) => selectedItems.has(item.id));
 	const isIndeterminate = queueData && selectedItems.size > 0 && !isAllSelected;
-
-	useEffect(() => {
-		setPage(0);
-	}, []);
-	useEffect(() => {
-		clearSelection();
-	}, [clearSelection]);
 
 	if (error) {
 		return (

@@ -1,7 +1,6 @@
 package config
 
 import (
-	"crypto/sha256"
 	"crypto/tls"
 	"fmt"
 	"log/slog"
@@ -374,13 +373,6 @@ type HealthConfig struct {
 	ReadTimeoutSeconds                  int          `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds,omitempty"`
 	AcceptableMissingSegmentsPercentage float64      `yaml:"acceptable_missing_segments_percentage" mapstructure:"acceptable_missing_segments_percentage" json:"acceptable_missing_segments_percentage,omitempty"`
 	Repair                              RepairConfig `yaml:"repair" mapstructure:"repair" json:"repair"`
-}
-
-// GenerateProviderID creates a unique ID based on host, port, and username
-func GenerateProviderID(host string, port int, username string) string {
-	input := fmt.Sprintf("%s:%d@%s", host, port, username)
-	hash := sha256.Sum256([]byte(input))
-	return fmt.Sprintf("%x", hash)[:8] // First 8 characters for readability
 }
 
 // Path validation functions have been moved to internal/utils/path.go
@@ -1732,9 +1724,4 @@ func LoadConfig(configFile string) (*Config, error) {
 	}
 
 	return config, nil
-}
-
-// GetConfigFilePath returns the configuration file path used by viper
-func GetConfigFilePath() string {
-	return viper.ConfigFileUsed()
 }

@@ -24,7 +24,6 @@ import type {
 	QueueHistoricalStatsResponse,
 	QueueItem,
 	QueueStats,
-	SABnzbdAddResponse,
 	ScanStatusResponse,
 	SystemBrowseResponse,
 	UploadNZBLnkResponse,
@@ -248,10 +247,6 @@ export class APIClient {
 		return this.requestWithMeta<QueueItem[]>(`/queue${query ? `?${query}` : ""}`);
 	}
 
-	async getQueueItem(id: number) {
-		return this.request<QueueItem>(`/queue/${id}`);
-	}
-
 	async deleteQueueItem(id: number) {
 		return this.request<QueueItem>(`/queue/${id}`, { method: "DELETE" });
 	}
@@ -385,10 +380,6 @@ export class APIClient {
 		return this.requestWithMeta<FileHealth[]>(`/health${query ? `?${query}` : ""}`);
 	}
 
-	async getHealthItem(id: string) {
-		return this.request<FileHealth>(`/health/${encodeURIComponent(id)}`);
-	}
-
 	async deleteHealthItem(id: number, options?: { deleteMeta?: boolean; deleteSymlink?: boolean }) {
 		const searchParams = new URLSearchParams();
 		if (options?.deleteMeta) searchParams.set("delete_meta", "true");
@@ -444,27 +435,11 @@ export class APIClient {
 		});
 	}
 
-	async retryHealthItem(id: string, resetStatus?: boolean) {
-		return this.request<FileHealth>(`/health/${encodeURIComponent(id)}/retry`, {
-			method: "POST",
-			body: JSON.stringify({ reset_status: resetStatus }),
-		});
-	}
-
 	async repairHealthItem(id: number, resetRepairRetryCount?: boolean) {
 		return this.request<FileHealth>(`/health/${id}/repair`, {
 			method: "POST",
 			body: JSON.stringify({ reset_repair_retry_count: resetRepairRetryCount }),
 		});
-	}
-
-	async getCorruptedFiles(params?: { limit?: number; offset?: number }) {
-		const searchParams = new URLSearchParams();
-		if (params?.limit) searchParams.set("limit", params.limit.toString());
-		if (params?.offset) searchParams.set("offset", params.offset.toString());
-
-		const query = searchParams.toString();
-		return this.request<FileHealth[]>(`/health/corrupted${query ? `?${query}` : ""}`);
 	}
 
 	async getHealthStats() {
@@ -686,10 +661,6 @@ export class APIClient {
 		});
 	}
 
-	async getArrsHealth() {
-		return this.request<Record<string, unknown>>("/arrs/health");
-	}
-
 	async registerArrsWebhooks() {
 		return this.request<{ message: string }>("/arrs/webhook/register", {
 			method: "POST",
@@ -740,13 +711,6 @@ export class APIClient {
 	// Configuration endpoints
 	async getConfig() {
 		return this.request<ConfigResponse>("/config");
-	}
-
-	async updateConfig(config: ConfigUpdateRequest) {
-		return this.request<ConfigResponse>("/config", {
-			method: "PUT",
-			body: JSON.stringify(config),
-		});
 	}
 
 	async updateConfigSection(section: ConfigSection, config: ConfigUpdateRequest) {
@@ -939,32 +903,6 @@ export class APIClient {
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify(req),
 		});
-	}
-
-	// SABnzbd file upload endpoint
-	async uploadNzbFile(file: File, apiKey: string): Promise<SABnzbdAddResponse> {
-		const formData = new FormData();
-		formData.append("nzbfile", file);
-
-		const url = `/sabnzbd?mode=addfile&apikey=${encodeURIComponent(apiKey)}`;
-
-		const response = await fetch(url, {
-			method: "POST",
-			body: formData,
-			credentials: "include", // Include cookies for Safari compatibility
-		});
-
-		if (!response.ok) {
-			throw new APIError(response.status, `Upload failed: ${response.statusText}`, "");
-		}
-
-		const data = await response.json();
-		if (!data.status) {
-			const err = data as APIError;
-			throw new APIError(response.status, err.message || "Upload failed", err.details || "");
-		}
-
-		return data;
 	}
 
 	// Native upload endpoint using JWT authentication

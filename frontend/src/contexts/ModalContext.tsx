@@ -105,7 +105,7 @@ export function ModalProvider({ children }: ModalProviderProps) {
 	);
 }
 
-export function useModal() {
+function useModal() {
 	const context = useContext(ModalContext);
 	if (context === undefined) {
 		throw new Error("useModal must be used within a ModalProvider");

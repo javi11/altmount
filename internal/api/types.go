@@ -490,13 +490,6 @@ type QueueItemResponse struct {
 	StoragePath  *string                `json:"storage_path,omitempty"` // Internal FUSE mount path (populated after completion)
 }
 
-// QueueListRequest represents request parameters for listing queue items
-type QueueListRequest struct {
-	Status *database.QueueStatus `json:"status"`
-	Since  *time.Time            `json:"since"`
-	Pagination
-}
-
 // QueueStatsResponse represents queue statistics in API responses
 type QueueStatsResponse struct {
 	TotalQueued         int       `json:"total_queued"`
@@ -571,13 +564,6 @@ type HealthItemResponse struct {
 	IsMasked              bool `json:"is_masked"`
 }
 
-// HealthListRequest represents request parameters for listing health records
-type HealthListRequest struct {
-	Status *database.HealthStatus `json:"status"`
-	Since  *time.Time             `json:"since"`
-	Pagination
-}
-
 // HealthStatsResponse represents health statistics in API responses
 type HealthStatsResponse struct {
 	Total           int `json:"total"`
@@ -586,11 +572,6 @@ type HealthStatsResponse struct {
 	Healthy         int `json:"healthy"`
 	RepairTriggered int `json:"repair_triggered"`
 	Checking        int `json:"checking"`
-}
-
-// HealthRetryRequest represents request to retry a corrupted file
-type HealthRetryRequest struct {
-	ResetRetryCount bool `json:"reset_retry_count,omitempty"`
 }
 
 // HealthRepairRequest represents request to trigger repair for a corrupted file
