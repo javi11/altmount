@@ -223,11 +223,6 @@ func (s *Service) RegisterConfigChangeHandler(ctx context.Context, configManager
 	})
 }
 
-// CleanupQueue checks all ARR instances for importPending items with empty folders
-func (s *Service) CleanupQueue(ctx context.Context) error {
-	return s.worker.CleanupQueue(ctx)
-}
-
 // TriggerFileRescan triggers a rescan for a specific file path through the appropriate ARR instance
 func (s *Service) TriggerFileRescan(ctx context.Context, pathForRescan string, relativePath string, metadataStr *string) error {
 	return s.scanner.TriggerFileRescan(ctx, pathForRescan, relativePath, metadataStr)

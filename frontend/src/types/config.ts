@@ -640,7 +640,6 @@ export interface ArrsConfig {
 	queue_cleanup_enabled?: boolean;
 	queue_cleanup_interval_seconds?: number;
 	queue_cleanup_grace_period_minutes?: number;
-	cleanup_automatic_import_failure?: boolean;
 	queue_cleanup_rules?: StuckCleanupRule[];
 }
 

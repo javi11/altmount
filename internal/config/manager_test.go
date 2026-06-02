@@ -321,3 +321,98 @@ func TestMigrateArrsCleanup_NoLegacyNoop(t *testing.T) {
 	assert.Equal(t, rules, cfg.Arrs.QueueCleanupRules)
 }
 
+func TestMigrateArrsCleanup_AutoFailureFlag_SeedsRemoveRule(t *testing.T) {
+	enabled := true
+	cfg := &Config{
+		Arrs: ArrsConfig{
+			// A modern config: it already has custom rules AND the legacy toggle on,
+			// with none of the legacy split-cleanup fields. The rules must be preserved
+			// (not rebuilt/wiped) and the auto-failure rule appended.
+			QueueCleanupRules: []StuckCleanupRule{
+				{Message: "Sample", Enabled: true, Action: StuckActionBlocklistSearch},
+			},
+			CleanupAutomaticImportFailure: &enabled,
+		},
+	}
+
+	migrateArrsCleanup(cfg)
+	a := cfg.Arrs
+
+	assert.Equal(t, []StuckCleanupRule{
+		{Message: "Sample", Enabled: true, Action: StuckActionBlocklistSearch},
+		{Message: "automatic import is not possible", Enabled: true, Action: StuckActionRemove},
+	}, a.QueueCleanupRules)
+
+	// Legacy flag cleared so it drops out of saved YAML.
+	assert.Nil(t, a.CleanupAutomaticImportFailure)
+
+	// Idempotent: a second pass changes nothing.
+	before := a.QueueCleanupRules
+	migrateArrsCleanup(cfg)
+	assert.Equal(t, before, cfg.Arrs.QueueCleanupRules)
+
+	b, err := yaml.Marshal(cfg.Arrs)
+	assert.NoError(t, err)
+	assert.NotContains(t, string(b), "cleanup_automatic_import_failure")
+}
+
+func TestMigrateArrsCleanup_AutoFailureFlag_EnablesExistingRule(t *testing.T) {
+	enabled := true
+	cfg := &Config{
+		Arrs: ArrsConfig{
+			// Mirrors a fresh-install config (the seeded rule loads disabled) whose owner
+			// had the legacy toggle on: the existing rule is enabled in place, not duplicated.
+			QueueCleanupRules: []StuckCleanupRule{
+				{Message: "automatic import is not possible", Enabled: false, Action: StuckActionRemove},
+			},
+			CleanupAutomaticImportFailure: &enabled,
+		},
+	}
+
+	migrateArrsCleanup(cfg)
+
+	assert.Equal(t, []StuckCleanupRule{
+		{Message: "automatic import is not possible", Enabled: true, Action: StuckActionRemove},
+	}, cfg.Arrs.QueueCleanupRules)
+	assert.Nil(t, cfg.Arrs.CleanupAutomaticImportFailure)
+}
+
+func TestMigrateArrsCleanup_AutoFailureFlag_EnablesSubstringRule(t *testing.T) {
+	enabled := true
+	cfg := &Config{
+		Arrs: ArrsConfig{
+			// A rule whose message is a substring of the phrase already covers it (matching
+			// is substring-based), so it is enabled rather than a duplicate appended.
+			QueueCleanupRules: []StuckCleanupRule{
+				{Message: "Automatic import", Enabled: false, Action: StuckActionBlocklistSearch},
+			},
+			CleanupAutomaticImportFailure: &enabled,
+		},
+	}
+
+	migrateArrsCleanup(cfg)
+
+	assert.Equal(t, []StuckCleanupRule{
+		{Message: "Automatic import", Enabled: true, Action: StuckActionBlocklistSearch},
+	}, cfg.Arrs.QueueCleanupRules)
+	assert.Nil(t, cfg.Arrs.CleanupAutomaticImportFailure)
+}
+
+func TestMigrateArrsCleanup_AutoFailureFlag_FalseClearsOnly(t *testing.T) {
+	disabled := false
+	rules := []StuckCleanupRule{
+		{Message: "Sample", Enabled: true, Action: StuckActionBlocklistSearch},
+	}
+	cfg := &Config{
+		Arrs: ArrsConfig{
+			QueueCleanupRules:             rules,
+			CleanupAutomaticImportFailure: &disabled,
+		},
+	}
+
+	migrateArrsCleanup(cfg)
+
+	// Flag off: no rule seeded, existing rules untouched, flag cleared.
+	assert.Equal(t, rules, cfg.Arrs.QueueCleanupRules)
+	assert.Nil(t, cfg.Arrs.CleanupAutomaticImportFailure)
+}

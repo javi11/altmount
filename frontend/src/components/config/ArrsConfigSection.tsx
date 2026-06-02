@@ -379,33 +379,33 @@ export function ArrsConfigSection({
 
 						{(formData.queue_cleanup_enabled ?? true) && (
 							<div className="fade-in zoom-in-95 animate-in space-y-6">
-								<fieldset className="fieldset max-w-xs">
-									<legend className="fieldset-legend font-semibold">Cleanup Interval</legend>
-									<div className="join w-full">
-										<input
-											type="number"
-											className="input input-bordered join-item w-full bg-base-100 font-mono text-sm"
-											value={formData.queue_cleanup_interval_seconds ?? 10}
-											onChange={(e) =>
-												handleFormChange(
-													"queue_cleanup_interval_seconds",
-													Number.parseInt(e.target.value, 10) || 10,
-												)
-											}
-											min={1}
-											max={3600}
-											disabled={isReadOnly}
-										/>
-										<span className="btn btn-ghost join-item pointer-events-none border-base-300 text-xs">
-											sec
-										</span>
-									</div>
-									<div className="mt-2 whitespace-normal text-base-content/70 text-xs">
-										How often the *arr queues are checked.
-									</div>
-								</fieldset>
-
 								<div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+									<fieldset className="fieldset">
+										<legend className="fieldset-legend font-semibold">Cleanup Interval</legend>
+										<div className="join w-full">
+											<input
+												type="number"
+												className="input input-bordered join-item w-full bg-base-100 font-mono text-sm"
+												value={formData.queue_cleanup_interval_seconds ?? 10}
+												onChange={(e) =>
+													handleFormChange(
+														"queue_cleanup_interval_seconds",
+														Number.parseInt(e.target.value, 10) || 10,
+													)
+												}
+												min={1}
+												max={3600}
+												disabled={isReadOnly}
+											/>
+											<span className="btn btn-ghost join-item pointer-events-none border-base-300 text-xs">
+												sec
+											</span>
+										</div>
+										<div className="mt-2 whitespace-normal text-base-content/70 text-xs">
+											How often the *arr queues are checked.
+										</div>
+									</fieldset>
+
 									<fieldset className="fieldset">
 										<legend className="fieldset-legend whitespace-normal font-semibold md:whitespace-nowrap">
 											Cleanup Grace Period
@@ -431,30 +431,6 @@ export function ArrsConfigSection({
 										<div className="mt-2 whitespace-normal text-base-content/70 text-xs">
 											How long a stuck or failed import must persist before cleanup acts on it.
 											Brief errors that clear on their own are ignored.
-										</div>
-									</fieldset>
-
-									<fieldset className="fieldset">
-										<legend className="fieldset-legend whitespace-normal font-semibold md:whitespace-nowrap">
-											Import Failure Cleanup
-										</legend>
-										<label className="label h-12 cursor-pointer items-center justify-start gap-4">
-											<input
-												type="checkbox"
-												className="toggle toggle-primary toggle-sm shrink-0"
-												checked={formData.cleanup_automatic_import_failure ?? false}
-												onChange={(e) =>
-													handleFormChange("cleanup_automatic_import_failure", e.target.checked)
-												}
-												disabled={isReadOnly}
-											/>
-											<span className="whitespace-normal break-words font-bold text-xs">
-												Purge Automatic Failures
-											</span>
-										</label>
-										<div className="mt-1 whitespace-normal text-base-content/70 text-xs">
-											Automatically remove items from queue that failed with "Automatic Import"
-											errors.
 										</div>
 									</fieldset>
 								</div>

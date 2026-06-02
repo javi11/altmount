@@ -36,6 +36,7 @@ type stuckItem struct {
 	TrackedDownloadStatus string
 	TrackedDownloadState  string // empty when the *arr does not report it (e.g. Lidarr)
 	DownloadClient        string
+	OutputPath            string // download path; used for ghost detection (may be empty)
 	Messages              []string
 }
 
@@ -136,10 +137,12 @@ func stuckRuleFor(item stuckItem, cfg *config.Config) *config.StuckCleanupRule {
 }
 
 // selectStuckActions filters AltMount-owned queue items to those that should be
-// cleaned now, carrying each item's blocklist decision. With force, all matching
-// items are returned immediately. Otherwise an item must have been observed stuck
-// for the configured grace period; first observations and items the *arr has since
-// resolved are tracked/cleared via the shared firstSeen map.
+// cleaned now, carrying each item's action. Ghost/empty-folder items (already
+// imported, or source path gone) are removed first, grace-free. The remainder are
+// matched against the message rules: with force, all matching items are returned
+// immediately; otherwise an item must have been observed stuck for the configured
+// grace period. First observations and items the *arr has since resolved are
+// tracked/cleared via the shared firstSeen map.
 func (w *Worker) selectStuckActions(ctx context.Context, instance *model.ConfigInstance, cfg *config.Config, items []stuckItem, force bool) []stuckAction {
 	var actions []stuckAction
 	gracePeriod := time.Duration(cfg.Arrs.QueueCleanupGracePeriodMinutes) * time.Minute
@@ -152,6 +155,20 @@ func (w *Worker) selectStuckActions(ctx context.Context, instance *model.ConfigI
 		}
 
 		key := fmt.Sprintf("stuck|%s|%d", instance.Name, item.ID)
+
+		// Ghost detection runs before rule matching and is grace-free: an item whose
+		// file is already in the library (import history) or whose source path is gone
+		// is removed immediately. isGhostByPathGone keeps its own observation window via
+		// firstSeen. Ghosts are always removed (never blocklisted) — the release was not
+		// bad, the queue entry is just stale.
+		if w.checkGhostByImportHistory(ctx, item.OutputPath, cfg, instance.Name, item.Title) ||
+			w.isGhostByPathGone(ctx, item.OutputPath, item.ID, cfg, instance.Name, item.Title) {
+			actions = append(actions, stuckAction{ID: item.ID, Action: config.StuckActionRemove})
+			w.firstSeenMu.Lock()
+			delete(w.firstSeen, key)
+			w.firstSeenMu.Unlock()
+			continue
+		}
 
 		rule := stuckRuleFor(item, cfg)
 		if rule == nil {
@@ -264,6 +281,7 @@ func (w *Worker) cleanupStuckRadarr(ctx context.Context, instance *model.ConfigI
 			TrackedDownloadStatus: q.TrackedDownloadStatus,
 			TrackedDownloadState:  q.TrackedDownloadState,
 			DownloadClient:        q.DownloadClient,
+			OutputPath:            q.OutputPath,
 			Messages:              flattenStarrMessages(q.StatusMessages),
 		})
 	}
@@ -299,6 +317,7 @@ func (w *Worker) cleanupStuckSonarr(ctx context.Context, instance *model.ConfigI
 			TrackedDownloadStatus: q.TrackedDownloadStatus,
 			TrackedDownloadState:  q.TrackedDownloadState,
 			DownloadClient:        q.DownloadClient,
+			OutputPath:            q.OutputPath,
 			Messages:              flattenStarrMessages(q.StatusMessages),
 		})
 	}
@@ -326,6 +345,7 @@ func (w *Worker) cleanupStuckLidarr(ctx context.Context, instance *model.ConfigI
 			Title:                 q.Title,
 			TrackedDownloadStatus: q.TrackedDownloadStatus,
 			DownloadClient:        q.DownloadClient,
+			OutputPath:            q.OutputPath,
 			Messages:              flattenStarrMessages(q.StatusMessages),
 		})
 	}
@@ -352,6 +372,7 @@ func (w *Worker) cleanupStuckReadarr(ctx context.Context, instance *model.Config
 			TrackedDownloadStatus: q.TrackedDownloadStatus,
 			TrackedDownloadState:  q.TrackedDownloadState,
 			DownloadClient:        q.DownloadClient,
+			OutputPath:            q.OutputPath,
 			Messages:              flattenStarrMessages(q.StatusMessages),
 		})
 	}
@@ -374,6 +395,16 @@ func (w *Worker) cleanupStuckSportarr(ctx context.Context, instance *model.Confi
 
 	items := make([]stuckItem, 0, len(queue))
 	for _, q := range queue {
+		// Capture the indexer from Sportarr's native queue. Sportarr is not
+		// starr-compatible, so AltMount cannot auto-register its Grab/Import webhook
+		// (the path that supplies the indexer for Radarr/Sonarr/etc.). Its native queue
+		// record is the only place the indexer is exposed, so persist it here against
+		// the download ID — otherwise these imports show up in indexer health as
+		// "Unknown".
+		if q.DownloadID != "" && q.Indexer != "" {
+			w.captureSportarrIndexer(ctx, q.DownloadID, q.Indexer)
+		}
+
 		var messages []string
 		for _, m := range q.StatusMessages {
 			if m.Title != "" {
@@ -387,6 +418,7 @@ func (w *Worker) cleanupStuckSportarr(ctx context.Context, instance *model.Confi
 			TrackedDownloadStatus: q.TrackedDownloadStatus,
 			TrackedDownloadState:  q.TrackedDownloadState,
 			DownloadClient:        q.DownloadClient.Name,
+			OutputPath:            q.OutputPath,
 			Messages:              messages,
 		})
 	}
