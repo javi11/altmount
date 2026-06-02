@@ -16,6 +16,7 @@ import (
 // was found.
 type MainFeaturePlaylist struct {
 	PlaylistName    string         // e.g. "00800.MPLS" — for logging only
+	SourceKind      string         // "m2ts" or "ssif" — selected source family
 	DurationTicks   int64          // sum of (OUT-IN) at 45 kHz — informational, not used for selection
 	Streams         []isoFileEntry // ordered M2TS entries (duplicates preserved if the playlist legitimately repeats a clip)
 	UniqueClipBytes uint64         // sum of file sizes of UNIQUE clips referenced; the primary scoring metric
@@ -99,61 +100,34 @@ func ResolveMainFeature(ctx context.Context, rs io.ReadSeeker, files []isoFileEn
 			continue
 		}
 
-		// Resolve clip names in playlist order, preferring M2TS over SSIF.
-		// Build the ordered streams slice (duplicates preserved — a real BD
-		// feature may legitimately repeat a clip, and the output virtual
-		// file must follow the playlist order faithfully) AND a separate
-		// dedupe-by-name byte sum that drives playlist selection. Without
-		// the dedupe, a menu-navigation playlist that points 200+ times at
-		// the same ~80s menu M2TS would score higher than a real 30-chapter
-		// main feature, and we'd serve 30+ GB of looped menu.
-		streams := make([]isoFileEntry, 0, len(pl.PlayItems))
-		inTimes := make([]int64, 0, len(pl.PlayItems))
-		durations := make([]int64, 0, len(pl.PlayItems))
-		seenClips := make(map[string]struct{}, len(pl.PlayItems))
-		var uniqueClipBytes uint64
-		for _, it := range pl.PlayItems {
-			name := strings.ToUpper(it.ClipName)
-			entry, ok := m2tsByClip[name]
-			if !ok {
-				entry, ok = ssifByClip[name]
-			}
-			if !ok {
-				continue
-			}
-			streams = append(streams, entry)
-			// Per-clip timing, parallel to streams (45 kHz). OUT may be < IN
-			// on malformed entries; clamp the span to 0 in that case.
-			var dur int64
-			if it.OutTime > it.InTime {
-				dur = int64(it.OutTime - it.InTime)
-			}
-			inTimes = append(inTimes, int64(it.InTime))
-			durations = append(durations, dur)
-			if _, dup := seenClips[name]; !dup {
-				seenClips[name] = struct{}{}
-				uniqueClipBytes += entry.size
-			}
+		// Resolve every PlayItem against one source family. Do not mix M2TS
+		// and SSIF within one virtual file: Plex accepts the resulting stream
+		// list but can fail once byte ranges and timestamps cross families.
+		resolved, ok := resolvePlaylistStreams(pl, m2tsByClip, "m2ts")
+		if !ok {
+			resolved, ok = resolvePlaylistStreams(pl, ssifByClip, "ssif")
 		}
-		if len(streams) == 0 {
+		if !ok {
 			continue
 		}
 
 		cand := &MainFeaturePlaylist{
 			PlaylistName:    pe.path,
+			SourceKind:      resolved.sourceKind,
 			DurationTicks:   pl.DurationTicks(),
-			Streams:         streams,
-			UniqueClipBytes: uniqueClipBytes,
-			UniqueClipCount: len(seenClips),
-			ClipInTimes:     inTimes,
-			ClipDurations:   durations,
+			Streams:         resolved.streams,
+			UniqueClipBytes: resolved.uniqueClipBytes,
+			UniqueClipCount: resolved.uniqueClipCount,
+			ClipInTimes:     resolved.inTimes,
+			ClipDurations:   resolved.durations,
 		}
 		slog.DebugContext(ctx, "Blu-ray playlist candidate",
 			"playlist", pe.path,
+			"source_kind", cand.SourceKind,
 			"play_items", len(pl.PlayItems),
-			"resolved_streams", len(streams),
-			"unique_clips", len(seenClips),
-			"unique_clip_bytes", uniqueClipBytes,
+			"resolved_streams", len(cand.Streams),
+			"unique_clips", cand.UniqueClipCount,
+			"unique_clip_bytes", cand.UniqueClipBytes,
 			"duration_seconds", cand.DurationTicks/45000,
 		)
 		if best == nil || isBetterPlaylist(cand, best) {
@@ -163,6 +137,7 @@ func ResolveMainFeature(ctx context.Context, rs io.ReadSeeker, files []isoFileEn
 	if best != nil {
 		slog.InfoContext(ctx, "Blu-ray main feature playlist resolved",
 			"playlist", best.PlaylistName,
+			"source_kind", best.SourceKind,
 			"clips", len(best.Streams),
 			"unique_clips", best.UniqueClipCount,
 			"unique_clip_bytes", best.UniqueClipBytes,
@@ -170,6 +145,51 @@ func ResolveMainFeature(ctx context.Context, rs io.ReadSeeker, files []isoFileEn
 		)
 	}
 	return best
+}
+
+type resolvedPlaylistStreams struct {
+	sourceKind      string
+	streams         []isoFileEntry
+	inTimes         []int64
+	durations       []int64
+	uniqueClipBytes uint64
+	uniqueClipCount int
+}
+
+// resolvePlaylistStreams resolves a playlist only if every PlayItem exists in
+// one source family. It preserves playlist order, including legitimate repeats,
+// while deduping only the scoring metrics.
+func resolvePlaylistStreams(pl *MPLSPlayList, byClip map[string]isoFileEntry, sourceKind string) (resolvedPlaylistStreams, bool) {
+	if len(pl.PlayItems) == 0 || len(byClip) == 0 {
+		return resolvedPlaylistStreams{}, false
+	}
+	out := resolvedPlaylistStreams{
+		sourceKind: sourceKind,
+		streams:    make([]isoFileEntry, 0, len(pl.PlayItems)),
+		inTimes:    make([]int64, 0, len(pl.PlayItems)),
+		durations:  make([]int64, 0, len(pl.PlayItems)),
+	}
+	seenClips := make(map[string]struct{}, len(pl.PlayItems))
+	for _, it := range pl.PlayItems {
+		name := strings.ToUpper(it.ClipName)
+		entry, ok := byClip[name]
+		if !ok {
+			return resolvedPlaylistStreams{}, false
+		}
+		out.streams = append(out.streams, entry)
+		var dur int64
+		if it.OutTime > it.InTime {
+			dur = int64(it.OutTime - it.InTime)
+		}
+		out.inTimes = append(out.inTimes, int64(it.InTime))
+		out.durations = append(out.durations, dur)
+		if _, dup := seenClips[name]; !dup {
+			seenClips[name] = struct{}{}
+			out.uniqueClipBytes += entry.size
+		}
+	}
+	out.uniqueClipCount = len(seenClips)
+	return out, true
 }
 
 // isBetterPlaylist returns true when cand should replace best. Score by

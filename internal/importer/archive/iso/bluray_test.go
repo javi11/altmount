@@ -256,6 +256,61 @@ func TestResolveMainFeature(t *testing.T) {
 		if got.Streams[0].path != "BDMV/STREAM/00100.M2TS" {
 			t.Errorf("picked %q, want M2TS over SSIF", got.Streams[0].path)
 		}
+		if got.SourceKind != "m2ts" {
+			t.Errorf("SourceKind = %q, want m2ts", got.SourceKind)
+		}
+	})
+
+	t.Run("playlist falls back to SSIF only when M2TS set incomplete", func(t *testing.T) {
+		t.Parallel()
+		data := buildMPLS(t, "0200", []MPLSPlayItem{
+			{ClipName: "00100", InTime: 0, OutTime: 60 * 45000},
+			{ClipName: "00101", InTime: 0, OutTime: 60 * 45000},
+		}, nil)
+		rs := makeImage(t, map[uint32][]byte{100: data})
+
+		files := []isoFileEntry{
+			mkEntry("BDMV/PLAYLIST/00800.MPLS", 100, uint64(len(data))),
+			mkEntry("BDMV/STREAM/00100.M2TS", 200, 10_000_000),
+			mkEntry("BDMV/STREAM/SSIF/00100.SSIF", 300, 20_000_000),
+			mkEntry("BDMV/STREAM/SSIF/00101.SSIF", 400, 20_000_000),
+		}
+
+		got := ResolveMainFeature(context.Background(), rs, files, nil)
+		if got == nil {
+			t.Fatal("ResolveMainFeature returned nil")
+		}
+		if got.SourceKind != "ssif" {
+			t.Errorf("SourceKind = %q, want ssif", got.SourceKind)
+		}
+		wantOrder := []string{
+			"BDMV/STREAM/SSIF/00100.SSIF",
+			"BDMV/STREAM/SSIF/00101.SSIF",
+		}
+		for i, s := range got.Streams {
+			if s.path != wantOrder[i] {
+				t.Errorf("Streams[%d].path = %q, want %q", i, s.path, wantOrder[i])
+			}
+		}
+	})
+
+	t.Run("playlist with only mixed partial M2TS and SSIF is skipped", func(t *testing.T) {
+		t.Parallel()
+		data := buildMPLS(t, "0200", []MPLSPlayItem{
+			{ClipName: "00100", InTime: 0, OutTime: 60 * 45000},
+			{ClipName: "00101", InTime: 0, OutTime: 60 * 45000},
+		}, nil)
+		rs := makeImage(t, map[uint32][]byte{100: data})
+
+		files := []isoFileEntry{
+			mkEntry("BDMV/PLAYLIST/00800.MPLS", 100, uint64(len(data))),
+			mkEntry("BDMV/STREAM/00100.M2TS", 200, 10_000_000),
+			mkEntry("BDMV/STREAM/SSIF/00101.SSIF", 400, 20_000_000),
+		}
+
+		if got := ResolveMainFeature(context.Background(), rs, files, nil); got != nil {
+			t.Fatalf("ResolveMainFeature returned mixed candidate %+v, want nil", got)
+		}
 	})
 
 	t.Run("playlist referencing missing M2TS yields nil", func(t *testing.T) {

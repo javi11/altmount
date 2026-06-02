@@ -170,6 +170,7 @@ func buildMainFeatureContent(ctx context.Context, groupKey string, g []analyzedI
 		base0_90k      int64 = -1
 		cum90k         int64
 		anyTiming      bool
+		byteMismatch   bool
 	)
 	for _, e := range g {
 		if firstISOName == "" {
@@ -188,6 +189,9 @@ func buildMainFeatureContent(ctx context.Context, groupKey string, g []analyzedI
 			}
 			if clipByteLen == 0 {
 				continue
+			}
+			if fc.Size != 0 && fc.Size != clipByteLen {
+				byteMismatch = true
 			}
 			inBase90k := fc.InTimeTicks * 2
 			if base0_90k < 0 {
@@ -211,6 +215,19 @@ func buildMainFeatureContent(ctx context.Context, groupKey string, g []analyzedI
 	// without it the remux filter must stay disabled (empty → bypassed).
 	if !anyTiming {
 		clipBoundaries = nil
+	} else {
+		var boundaryBytes int64
+		for _, cb := range clipBoundaries {
+			boundaryBytes += cb.ByteLen
+		}
+		if byteMismatch || boundaryBytes != totalSize {
+			slog.WarnContext(ctx, "Disabling Blu-ray timeline remux due to clip boundary byte mismatch",
+				"group", groupKey,
+				"boundary_bytes", boundaryBytes,
+				"size_bytes", totalSize,
+			)
+			clipBoundaries = nil
+		}
 	}
 
 	filename := mainFeatureFilename(groupKey, firstISOName)
