@@ -253,3 +253,67 @@ func TestConfig_NetworkDefaultsEmpty(t *testing.T) {
 	assert.Empty(t, cfg.Network.NoProxy)
 }
 
+func TestMigrateArrsCleanup_FoldsLegacyConfig(t *testing.T) {
+	legacyEnabled := true
+	cfg := &Config{
+		Arrs: ArrsConfig{
+			// No unified rules or enable flag / grace yet — simulate a pre-merge config.
+			StuckCleanupEnabled:            &legacyEnabled,
+			StuckCleanupGracePeriodMinutes: 7,
+			StuckCleanupRules: []StuckCleanupRule{
+				{Message: "is not a valid video file", Enabled: true, Action: StuckActionBlocklistSearch},
+			},
+			QueueCleanupAllowlist: []IgnoredMessage{
+				{Message: "Could not find file", Enabled: true},
+				// Duplicate of an existing rule message — must not be added twice.
+				{Message: "is not a valid video file", Enabled: false},
+			},
+		},
+	}
+
+	migrateArrsCleanup(cfg)
+	a := cfg.Arrs
+
+	// Stuck rule kept; unique allowlist entry folded in as a remove rule; dup skipped.
+	assert.Equal(t, []StuckCleanupRule{
+		{Message: "is not a valid video file", Enabled: true, Action: StuckActionBlocklistSearch},
+		{Message: "Could not find file", Enabled: true, Action: StuckActionRemove},
+	}, a.QueueCleanupRules)
+
+	// Legacy enable + grace carried over.
+	assert.NotNil(t, a.QueueCleanupEnabled)
+	assert.True(t, *a.QueueCleanupEnabled)
+	assert.Equal(t, 7, a.QueueCleanupGracePeriodMinutes)
+
+	// Legacy fields cleared so they drop out of saved YAML.
+	assert.Nil(t, a.QueueCleanupAllowlist)
+	assert.Nil(t, a.StuckCleanupEnabled)
+	assert.Nil(t, a.StuckCleanupRules)
+	assert.Zero(t, a.StuckCleanupGracePeriodMinutes)
+
+	// Idempotent: a second pass changes nothing.
+	before := a.QueueCleanupRules
+	migrateArrsCleanup(cfg)
+	assert.Equal(t, before, cfg.Arrs.QueueCleanupRules)
+
+	// Saved YAML must not emit any legacy keys.
+	b, err := yaml.Marshal(cfg.Arrs)
+	assert.NoError(t, err)
+	out := string(b)
+	assert.Contains(t, out, "queue_cleanup_rules:")
+	assert.NotContains(t, out, "queue_cleanup_allowlist")
+	assert.NotContains(t, out, "stuck_cleanup_enabled")
+	assert.NotContains(t, out, "stuck_cleanup_grace_period_minutes")
+	assert.NotContains(t, out, "stuck_cleanup_rules")
+}
+
+func TestMigrateArrsCleanup_NoLegacyNoop(t *testing.T) {
+	rules := []StuckCleanupRule{
+		{Message: "Sample", Enabled: true, Action: StuckActionBlocklistSearch},
+	}
+	cfg := &Config{Arrs: ArrsConfig{QueueCleanupRules: rules}}
+	migrateArrsCleanup(cfg)
+	// Unified-only config is left untouched.
+	assert.Equal(t, rules, cfg.Arrs.QueueCleanupRules)
+}
+

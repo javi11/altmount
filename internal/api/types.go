@@ -183,10 +183,7 @@ type ArrsAPIResponse struct {
 	QueueCleanupIntervalSeconds    int                       `json:"queue_cleanup_interval_seconds,omitempty"`
 	CleanupAutomaticImportFailure  bool                      `json:"cleanup_automatic_import_failure,omitempty"`
 	QueueCleanupGracePeriodMinutes int                       `json:"queue_cleanup_grace_period_minutes,omitempty"`
-	QueueCleanupAllowlist          []config.IgnoredMessage   `json:"queue_cleanup_allowlist,omitempty"`
-	StuckCleanupEnabled            bool                      `json:"stuck_cleanup_enabled"`
-	StuckCleanupGracePeriodMinutes int                       `json:"stuck_cleanup_grace_period_minutes,omitempty"`
-	StuckCleanupRules              []config.StuckCleanupRule `json:"stuck_cleanup_rules,omitempty"`
+	QueueCleanupRules              []config.StuckCleanupRule `json:"queue_cleanup_rules,omitempty"`
 }
 
 // ArrsInstanceAPIResponse sanitizes ArrsInstance config for API responses
@@ -368,10 +365,7 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 		QueueCleanupIntervalSeconds:    cfg.Arrs.QueueCleanupIntervalSeconds,
 		CleanupAutomaticImportFailure:  cfg.Arrs.CleanupAutomaticImportFailure != nil && *cfg.Arrs.CleanupAutomaticImportFailure,
 		QueueCleanupGracePeriodMinutes: cfg.Arrs.QueueCleanupGracePeriodMinutes,
-		QueueCleanupAllowlist:          cfg.Arrs.QueueCleanupAllowlist,
-		StuckCleanupEnabled:            cfg.Arrs.StuckCleanupEnabled != nil && *cfg.Arrs.StuckCleanupEnabled,
-		StuckCleanupGracePeriodMinutes: cfg.Arrs.StuckCleanupGracePeriodMinutes,
-		StuckCleanupRules:              cfg.Arrs.StuckCleanupRules,
+		QueueCleanupRules:              cfg.Arrs.QueueCleanupRules,
 	}
 
 	stremioResp := StremioAPIResponse{

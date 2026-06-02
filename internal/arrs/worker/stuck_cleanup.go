@@ -39,15 +39,6 @@ type stuckItem struct {
 	Messages              []string
 }
 
-// IsStuckCleanupEnabled reports whether the background stuck-import cleanup pass
-// should run, based on arrs.enabled and arrs.stuck_cleanup_enabled.
-func IsStuckCleanupEnabled(cfg *config.Config) bool {
-	if cfg.Arrs.Enabled == nil || !*cfg.Arrs.Enabled {
-		return false
-	}
-	return cfg.Arrs.StuckCleanupEnabled != nil && *cfg.Arrs.StuckCleanupEnabled
-}
-
 // CleanupStuckQueue scans every enabled *arr instance for items AltMount sent that
 // are stuck importing for a known reason, then removes and blocklists them so the
 // release is not grabbed again and the *arr searches for a replacement.
@@ -57,7 +48,7 @@ func IsStuckCleanupEnabled(cfg *config.Config) bool {
 // resolves on its own are left alone). When force is true the grace period is
 // bypassed and everything currently matching is blocklisted immediately.
 //
-// The automatic periodic run is gated by IsStuckCleanupEnabled at the caller
+// The automatic periodic run is gated by IsQueueCleanupEnabled at the caller
 // (the worker tick); this method itself only requires arrs to be enabled, so the
 // manual trigger works regardless of the periodic toggle.
 func (w *Worker) CleanupStuckQueue(ctx context.Context, force bool) (*StuckCleanupResult, error) {
@@ -141,7 +132,7 @@ func stuckRuleFor(item stuckItem, cfg *config.Config) *config.StuckCleanupRule {
 	if !strings.EqualFold(item.TrackedDownloadStatus, "warning") {
 		return nil
 	}
-	return matchStuckRule(item.Messages, cfg.Arrs.StuckCleanupRules)
+	return matchStuckRule(item.Messages, cfg.Arrs.QueueCleanupRules)
 }
 
 // selectStuckActions filters AltMount-owned queue items to those that should be
@@ -151,7 +142,7 @@ func stuckRuleFor(item stuckItem, cfg *config.Config) *config.StuckCleanupRule {
 // resolved are tracked/cleared via the shared firstSeen map.
 func (w *Worker) selectStuckActions(ctx context.Context, instance *model.ConfigInstance, cfg *config.Config, items []stuckItem, force bool) []stuckAction {
 	var actions []stuckAction
-	gracePeriod := time.Duration(cfg.Arrs.StuckCleanupGracePeriodMinutes) * time.Minute
+	gracePeriod := time.Duration(cfg.Arrs.QueueCleanupGracePeriodMinutes) * time.Minute
 
 	for _, item := range items {
 		// Only ever touch items owned by AltMount's download client — other

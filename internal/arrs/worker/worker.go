@@ -65,9 +65,9 @@ func (w *Worker) Start(ctx context.Context) error {
 		return nil
 	}
 
-	// The worker runs when either the ghost/import cleanup or the stuck-import
-	// blocklist cleanup is enabled. Ghost cleanup is on by default (nil or true).
-	if !IsQueueCleanupEnabled(cfg) && !IsStuckCleanupEnabled(cfg) {
+	// Queue cleanup covers ghost/empty-folder detection, the automatic-import-failure
+	// purge and the message-rule pass. Enabled by default (nil or true).
+	if !IsQueueCleanupEnabled(cfg) {
 		slog.InfoContext(ctx, "ARR queue cleanup disabled")
 		return nil
 	}
@@ -138,9 +138,9 @@ func (w *Worker) safeCleanup() {
 	if err := w.CleanupQueue(w.workerCtx); err != nil {
 		slog.Error("Queue cleanup failed", "error", err)
 	}
-	// Stuck-import cleanup runs on the same tick when enabled. force=false so it
-	// observes items over time and only blocklists those stuck past the grace period.
-	if IsStuckCleanupEnabled(w.configGetter()) {
+	// The message-rule pass runs on the same tick. force=false so it observes items
+	// over time and only acts on those stuck past the grace period.
+	if IsQueueCleanupEnabled(w.configGetter()) {
 		if _, err := w.CleanupStuckQueue(w.workerCtx, false); err != nil {
 			slog.Error("Stuck import cleanup failed", "error", err)
 		}
@@ -243,22 +243,11 @@ func (w *Worker) cleanupRadarrQueue(ctx context.Context, instance *model.ConfigI
 		for _, msg := range q.StatusMessages {
 			allMessages := strings.Join(msg.Messages, " ")
 
-			// Automatic import failure cleanup (configurable)
+			// Automatic import failure cleanup (configurable). Message-based rules are
+			// handled separately by CleanupStuckQueue.
 			if cfg.Arrs.CleanupAutomaticImportFailure != nil && *cfg.Arrs.CleanupAutomaticImportFailure &&
 				strings.Contains(allMessages, "Automatic import is not possible") {
 				shouldCleanup = true
-				break
-			}
-
-			// Check configured allowlist
-			for _, allowedMsg := range cfg.Arrs.QueueCleanupAllowlist {
-				if allowedMsg.Enabled && (strings.Contains(allMessages, allowedMsg.Message) || strings.Contains(msg.Title, allowedMsg.Message)) {
-					shouldCleanup = true
-					break
-				}
-			}
-
-			if shouldCleanup {
 				break
 			}
 		}
@@ -372,22 +361,11 @@ func (w *Worker) cleanupSonarrQueue(ctx context.Context, instance *model.ConfigI
 		for _, msg := range q.StatusMessages {
 			allMessages := strings.Join(msg.Messages, " ")
 
-			// Automatic import failure cleanup (configurable)
+			// Automatic import failure cleanup (configurable). Message-based rules are
+			// handled separately by CleanupStuckQueue.
 			if cfg.Arrs.CleanupAutomaticImportFailure != nil && *cfg.Arrs.CleanupAutomaticImportFailure &&
 				strings.Contains(allMessages, "Automatic import is not possible") {
 				shouldCleanup = true
-				break
-			}
-
-			// Check configured allowlist
-			for _, allowedMsg := range cfg.Arrs.QueueCleanupAllowlist {
-				if allowedMsg.Enabled && (strings.Contains(allMessages, allowedMsg.Message) || strings.Contains(msg.Title, allowedMsg.Message)) {
-					shouldCleanup = true
-					break
-				}
-			}
-
-			if shouldCleanup {
 				break
 			}
 		}
@@ -541,22 +519,11 @@ func (w *Worker) cleanupSportarrQueue(ctx context.Context, instance *model.Confi
 		for _, msg := range q.StatusMessages {
 			allMessages := strings.Join(msg.Messages, " ")
 
-			// Automatic import failure cleanup (configurable)
+			// Automatic import failure cleanup (configurable). Message-based rules are
+			// handled separately by CleanupStuckQueue.
 			if cfg.Arrs.CleanupAutomaticImportFailure != nil && *cfg.Arrs.CleanupAutomaticImportFailure &&
 				strings.Contains(allMessages, "Automatic import is not possible") {
 				shouldCleanup = true
-				break
-			}
-
-			// Check configured allowlist
-			for _, allowedMsg := range cfg.Arrs.QueueCleanupAllowlist {
-				if allowedMsg.Enabled && (strings.Contains(allMessages, allowedMsg.Message) || strings.Contains(msg.Title, allowedMsg.Message)) {
-					shouldCleanup = true
-					break
-				}
-			}
-
-			if shouldCleanup {
 				break
 			}
 		}

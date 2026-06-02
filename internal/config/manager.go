@@ -448,17 +448,22 @@ type ArrsConfig struct {
 	QueueCleanupIntervalSeconds    int                  `yaml:"queue_cleanup_interval_seconds" mapstructure:"queue_cleanup_interval_seconds" json:"queue_cleanup_interval_seconds,omitempty"`
 	CleanupAutomaticImportFailure  *bool                `yaml:"cleanup_automatic_import_failure" mapstructure:"cleanup_automatic_import_failure" json:"cleanup_automatic_import_failure,omitempty"`
 	QueueCleanupGracePeriodMinutes int                  `yaml:"queue_cleanup_grace_period_minutes" mapstructure:"queue_cleanup_grace_period_minutes" json:"queue_cleanup_grace_period_minutes,omitempty"`
-	QueueCleanupAllowlist          []IgnoredMessage     `yaml:"queue_cleanup_allowlist" mapstructure:"queue_cleanup_allowlist" json:"queue_cleanup_allowlist,omitempty"`
 
-	// Stuck import cleanup. When an item AltMount sent to an *arr gets stuck
-	// importing for a known reason (matched by StuckCleanupRules), this removes it
-	// from the queue once it has been stuck for the grace period. Rules flagged
-	// blocklist also block the release so the same NZB is not grabbed again and the
-	// *arr searches for a replacement; non-blocklist rules just clear the queue.
-	// Only items owned by AltMount's download client are touched (see issue #523).
-	StuckCleanupEnabled            *bool              `yaml:"stuck_cleanup_enabled" mapstructure:"stuck_cleanup_enabled" json:"stuck_cleanup_enabled,omitempty"`
-	StuckCleanupGracePeriodMinutes int                `yaml:"stuck_cleanup_grace_period_minutes" mapstructure:"stuck_cleanup_grace_period_minutes" json:"stuck_cleanup_grace_period_minutes,omitempty"`
-	StuckCleanupRules              []StuckCleanupRule `yaml:"stuck_cleanup_rules" mapstructure:"stuck_cleanup_rules" json:"stuck_cleanup_rules,omitempty"`
+	// QueueCleanupRules matches an *arr status message for a stuck/failed import and
+	// decides the action (remove / blocklist / blocklist+search). This is the single
+	// message-rule list for queue cleanup; ghost/empty-folder detection and the
+	// CleanupAutomaticImportFailure toggle run alongside it. Only items owned by
+	// AltMount's download client are touched (see issue #523).
+	QueueCleanupRules []StuckCleanupRule `yaml:"queue_cleanup_rules,omitempty" mapstructure:"queue_cleanup_rules" json:"queue_cleanup_rules,omitempty"`
+
+	// Deprecated: the fields below are read from existing config files for one-time
+	// migration into the unified queue-cleanup model (see migrateArrsCleanup) and are
+	// cleared afterwards. They are hidden from the API (json:"-") and dropped from
+	// saved YAML once empty (yaml omitempty). Do not use in new code.
+	QueueCleanupAllowlist          []IgnoredMessage   `yaml:"queue_cleanup_allowlist,omitempty" mapstructure:"queue_cleanup_allowlist" json:"-"`
+	StuckCleanupEnabled            *bool              `yaml:"stuck_cleanup_enabled,omitempty" mapstructure:"stuck_cleanup_enabled" json:"-"`
+	StuckCleanupGracePeriodMinutes int                `yaml:"stuck_cleanup_grace_period_minutes,omitempty" mapstructure:"stuck_cleanup_grace_period_minutes" json:"-"`
+	StuckCleanupRules              []StuckCleanupRule `yaml:"stuck_cleanup_rules,omitempty" mapstructure:"stuck_cleanup_rules" json:"-"`
 }
 
 // Stuck cleanup actions decide what happens to a matched stuck import.
@@ -480,6 +485,66 @@ type StuckCleanupRule struct {
 	Message string `yaml:"message" mapstructure:"message" json:"message"`
 	Enabled bool   `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
 	Action  string `yaml:"action" mapstructure:"action" json:"action"`
+}
+
+// migrateArrsCleanup folds the legacy split cleanup config (separate stuck-rules
+// list, allowlist, enable flag and grace period) into the unified QueueCleanupRules
+// model, then clears the legacy fields so they are dropped from saved YAML.
+//
+// A config predates the merge when any legacy field is present. In that case the
+// unified rules are rebuilt from the legacy values (the user's actual settings),
+// overriding the defaults DefaultConfig pre-populated — otherwise a legacy config
+// loaded on top of fresh defaults would silently keep the defaults and discard the
+// user's customizations. The function is idempotent: once the legacy fields are
+// empty it does nothing.
+func migrateArrsCleanup(config *Config) {
+	a := &config.Arrs
+
+	legacyPresent := len(a.StuckCleanupRules) > 0 ||
+		len(a.QueueCleanupAllowlist) > 0 ||
+		a.StuckCleanupEnabled != nil ||
+		a.StuckCleanupGracePeriodMinutes > 0
+	if !legacyPresent {
+		return
+	}
+
+	// Rebuild the unified rules from the legacy config: the stuck rules verbatim,
+	// then allowlist entries as plain "remove" rules (skipping duplicate messages).
+	rules := append([]StuckCleanupRule(nil), a.StuckCleanupRules...)
+	for _, m := range a.QueueCleanupAllowlist {
+		exists := false
+		for _, r := range rules {
+			if r.Message == m.Message {
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			rules = append(rules, StuckCleanupRule{
+				Message: m.Message,
+				Enabled: m.Enabled,
+				Action:  StuckActionRemove,
+			})
+		}
+	}
+	a.QueueCleanupRules = rules
+
+	// Enable unified cleanup if only the legacy stuck toggle was on.
+	if a.QueueCleanupEnabled == nil && a.StuckCleanupEnabled != nil && *a.StuckCleanupEnabled {
+		enabled := true
+		a.QueueCleanupEnabled = &enabled
+	}
+
+	// Prefer the legacy stuck grace period when no queue grace period is configured.
+	if a.QueueCleanupGracePeriodMinutes == 0 && a.StuckCleanupGracePeriodMinutes > 0 {
+		a.QueueCleanupGracePeriodMinutes = a.StuckCleanupGracePeriodMinutes
+	}
+
+	// Clear legacy fields so SaveConfig no longer emits them.
+	a.QueueCleanupAllowlist = nil
+	a.StuckCleanupEnabled = nil
+	a.StuckCleanupGracePeriodMinutes = 0
+	a.StuckCleanupRules = nil
 }
 
 // ArrsInstanceConfig represents a single arrs instance configuration
@@ -1235,6 +1300,9 @@ func (m *Manager) ReloadConfig() error {
 		}
 	}
 
+	// Migrate: fold legacy stuck/allowlist cleanup config into the unified rules.
+	migrateArrsCleanup(config)
+
 	// Validate configuration
 	if err := config.Validate(); err != nil {
 		return fmt.Errorf("config validation failed: %w", err)
@@ -1534,23 +1602,12 @@ func DefaultConfig(configDir ...string) *Config {
 			WhisparrInstances:              []ArrsInstanceConfig{},
 			SportarrInstances:              []ArrsInstanceConfig{},
 			CleanupAutomaticImportFailure:  &cleanupAutomaticImportFailure,
-			QueueCleanupGracePeriodMinutes: 10, // Default to 10 minutes
-			QueueCleanupAllowlist: []IgnoredMessage{
-				{Message: "No files found are eligible", Enabled: true},
-				{Message: "One or more episodes expected in this release were not imported or missing", Enabled: true},
-				{Message: "is not a valid video file", Enabled: true},
-				{Message: "Sample file", Enabled: true},
-				{Message: "No video files were found in the selected folder", Enabled: true},
-				{Message: "Could not find file", Enabled: true},
-				{Message: "Unexpected error processing file", Enabled: true},
-				{Message: "Download doesn't contain intermediate path", Enabled: true},
-			},
-			StuckCleanupGracePeriodMinutes: 5, // Default to 5 minutes stuck before acting
+			QueueCleanupGracePeriodMinutes: 5, // Default to 5 minutes stuck before acting
 			// Rule table modeled on wArrden's queue cleanup. Action decides what to do:
 			// blocklist_search (bad release → block + re-search), blocklist (block but
 			// don't search), or remove (just clear the queue: transient/environmental
 			// errors or files that are already satisfied).
-			StuckCleanupRules: []StuckCleanupRule{
+			QueueCleanupRules: []StuckCleanupRule{
 				// Bad release — blocklist and search for a replacement.
 				{Message: "Sample", Enabled: true, Action: StuckActionBlocklistSearch},
 				{Message: "Unable to determine if file is a sample", Enabled: true, Action: StuckActionBlocklistSearch},
@@ -1579,6 +1636,11 @@ func DefaultConfig(configDir ...string) *Config {
 				{Message: "Locked file, try again later", Enabled: false, Action: StuckActionRemove},
 				{Message: "is reporting an error", Enabled: false, Action: StuckActionRemove},
 				{Message: "Import failed, path does not exist", Enabled: false, Action: StuckActionRemove},
+				// Folded from the former queue-cleanup allowlist — remove from queue only.
+				{Message: "Sample file", Enabled: true, Action: StuckActionRemove},
+				{Message: "No video files were found in the selected folder", Enabled: true, Action: StuckActionRemove},
+				{Message: "Could not find file", Enabled: true, Action: StuckActionRemove},
+				{Message: "Download doesn't contain intermediate path", Enabled: true, Action: StuckActionRemove},
 			},
 		},
 		Fuse: FuseConfig{
@@ -1690,6 +1752,9 @@ func LoadConfig(configFile string) (*Config, error) {
 			config.MountType = MountTypeNone
 		}
 	}
+
+	// Migrate: fold legacy stuck/allowlist cleanup config into the unified rules.
+	migrateArrsCleanup(config)
 
 	// If log file was not explicitly set in the config file and we have a specific config file path,
 	// derive log file path from config file location

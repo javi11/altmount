@@ -627,11 +627,6 @@ export interface ArrsInstanceConfig {
 	sync_interval_hours: number;
 }
 
-export interface IgnoredMessage {
-	message: string;
-	enabled: boolean;
-}
-
 export interface ArrsConfig {
 	enabled: boolean;
 	max_workers: number;
@@ -645,11 +640,8 @@ export interface ArrsConfig {
 	queue_cleanup_enabled?: boolean;
 	queue_cleanup_interval_seconds?: number;
 	queue_cleanup_grace_period_minutes?: number;
-	queue_cleanup_allowlist?: IgnoredMessage[];
 	cleanup_automatic_import_failure?: boolean;
-	stuck_cleanup_enabled?: boolean;
-	stuck_cleanup_grace_period_minutes?: number;
-	stuck_cleanup_rules?: StuckCleanupRule[];
+	queue_cleanup_rules?: StuckCleanupRule[];
 }
 
 export type StuckCleanupAction = "remove" | "blocklist" | "blocklist_search";

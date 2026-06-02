@@ -61,7 +61,6 @@ export function ArrsConfigSection({
 	const [webhookSuccess, setWebhookSuccess] = useState<string | null>(null);
 	const [webhookError, setWebhookError] = useState<string | null>(null);
 	const [saveError, setSaveError] = useState<string | null>(null);
-	const [newIgnoreMessage, setNewIgnoreMessage] = useState("");
 	const [newStuckPattern, setNewStuckPattern] = useState("");
 
 	const registerWebhooks = useRegisterArrsWebhooks();
@@ -191,35 +190,9 @@ export function ArrsConfigSection({
 		setShowAddInstance(false);
 	};
 
-	const handleAddIgnoreMessage = () => {
-		if (!newIgnoreMessage.trim()) return;
-		const currentList = formData.queue_cleanup_allowlist || [];
-		if (currentList.some((m) => m.message === newIgnoreMessage.trim())) {
-			setNewIgnoreMessage("");
-			return;
-		}
-		const newList = [...currentList, { message: newIgnoreMessage.trim(), enabled: true }];
-		handleFormChange("queue_cleanup_allowlist", newList);
-		setNewIgnoreMessage("");
-	};
-
-	const handleRemoveIgnoreMessage = (index: number) => {
-		const currentList = formData.queue_cleanup_allowlist || [];
-		const newList = [...currentList];
-		newList.splice(index, 1);
-		handleFormChange("queue_cleanup_allowlist", newList);
-	};
-
-	const handleToggleIgnoreMessage = (index: number) => {
-		const currentList = formData.queue_cleanup_allowlist || [];
-		const newList = [...currentList];
-		newList[index] = { ...newList[index], enabled: !newList[index].enabled };
-		handleFormChange("queue_cleanup_allowlist", newList);
-	};
-
 	const handleAddStuckPattern = () => {
 		if (!newStuckPattern.trim()) return;
-		const currentList = formData.stuck_cleanup_rules || [];
+		const currentList = formData.queue_cleanup_rules || [];
 		if (currentList.some((m) => m.message === newStuckPattern.trim())) {
 			setNewStuckPattern("");
 			return;
@@ -228,26 +201,26 @@ export function ArrsConfigSection({
 			...currentList,
 			{ message: newStuckPattern.trim(), enabled: true, action: "blocklist_search" },
 		];
-		handleFormChange("stuck_cleanup_rules", newList);
+		handleFormChange("queue_cleanup_rules", newList);
 		setNewStuckPattern("");
 	};
 
 	const handleRemoveStuckPattern = (index: number) => {
-		const newList = [...(formData.stuck_cleanup_rules || [])];
+		const newList = [...(formData.queue_cleanup_rules || [])];
 		newList.splice(index, 1);
-		handleFormChange("stuck_cleanup_rules", newList);
+		handleFormChange("queue_cleanup_rules", newList);
 	};
 
 	const handleToggleStuckPattern = (index: number) => {
-		const newList = [...(formData.stuck_cleanup_rules || [])];
+		const newList = [...(formData.queue_cleanup_rules || [])];
 		newList[index] = { ...newList[index], enabled: !newList[index].enabled };
-		handleFormChange("stuck_cleanup_rules", newList);
+		handleFormChange("queue_cleanup_rules", newList);
 	};
 
 	const handleSetStuckRuleAction = (index: number, action: StuckCleanupAction) => {
-		const newList = [...(formData.stuck_cleanup_rules || [])];
+		const newList = [...(formData.queue_cleanup_rules || [])];
 		newList[index] = { ...newList[index], action };
-		handleFormChange("stuck_cleanup_rules", newList);
+		handleFormChange("queue_cleanup_rules", newList);
 	};
 
 	const handleSave = async () => {
@@ -483,133 +456,13 @@ export function ArrsConfigSection({
 								</div>
 
 								<div className="space-y-4">
-									<h5 className="font-bold text-base-content/60 text-xs uppercase">
-										Allowlist (Ignore Errors)
-									</h5>
-									<div className="custom-scrollbar max-h-48 space-y-2 overflow-y-auto pr-2">
-										{(formData.queue_cleanup_allowlist || []).map((msg, index) => (
-											<div
-												key={index}
-												className="flex items-center justify-between rounded-xl border border-base-300/50 bg-base-100/50 p-2 pl-3"
-											>
-												<div className="flex min-w-0 flex-1 items-center gap-3">
-													<input
-														type="checkbox"
-														className="checkbox checkbox-sm checkbox-primary"
-														checked={msg.enabled}
-														onChange={() => handleToggleIgnoreMessage(index)}
-														disabled={isReadOnly}
-													/>
-													<span
-														className={`truncate font-mono text-xs ${!msg.enabled ? "text-base-content/50 line-through" : ""}`}
-														title={msg.message}
-													>
-														{msg.message}
-													</span>
-												</div>
-												<button
-													type="button"
-													className="btn btn-ghost btn-sm text-error hover:bg-error/10"
-													onClick={() => handleRemoveIgnoreMessage(index)}
-													disabled={isReadOnly}
-												>
-													<Trash2 className="h-3 w-3" />
-												</button>
-											</div>
-										))}
-									</div>
-
-									{!isReadOnly && (
-										<div className="join w-full shadow-sm">
-											<input
-												type="text"
-												className="input input-bordered join-item flex-1 bg-base-100 text-xs"
-												placeholder="Add error message to ignore..."
-												value={newIgnoreMessage}
-												onChange={(e) => setNewIgnoreMessage(e.target.value)}
-												onKeyDown={(e) => e.key === "Enter" && handleAddIgnoreMessage()}
-											/>
-											<button
-												type="button"
-												className="btn btn-primary join-item px-4"
-												onClick={handleAddIgnoreMessage}
-												disabled={!newIgnoreMessage.trim()}
-											>
-												<Plus className="h-4 w-4" />
-											</button>
-										</div>
-									)}
-								</div>
-							</div>
-						)}
-
-						<div className="h-px bg-base-300/50" />
-
-						{/* Stuck Import Cleanup — own section */}
-						<div className="flex items-center gap-2">
-							<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
-								Queue Cleanup
-							</h4>
-							<div className="h-px flex-1 bg-base-300/50" />
-						</div>
-
-						<div className="flex items-start justify-between gap-4">
-							<div className="min-w-0 flex-1">
-								<h5 className="break-words font-bold text-base-content text-sm">
-									Auto-Resolve Stuck Imports
-								</h5>
-								<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
-									Automatically clears imports that get stuck for a known reason — runs on a
-									schedule or on demand from the Queue page.
-								</p>
-							</div>
-							<input
-								type="checkbox"
-								className="checkbox checkbox-primary checkbox-sm mt-1 shrink-0"
-								checked={formData.stuck_cleanup_enabled ?? false}
-								onChange={(e) => handleFormChange("stuck_cleanup_enabled", e.target.checked)}
-								disabled={isReadOnly}
-							/>
-						</div>
-
-						{(formData.stuck_cleanup_enabled ?? false) && (
-							<div className="fade-in zoom-in-95 animate-in space-y-6">
-								<fieldset className="fieldset max-w-xs">
-									<legend className="fieldset-legend whitespace-normal font-semibold md:whitespace-nowrap">
-										Stuck Grace Period
-									</legend>
-									<div className="join w-full">
-										<input
-											type="number"
-											className="input input-bordered join-item w-full bg-base-100 font-mono text-sm"
-											value={formData.stuck_cleanup_grace_period_minutes ?? 5}
-											onChange={(e) =>
-												handleFormChange(
-													"stuck_cleanup_grace_period_minutes",
-													Number.parseInt(e.target.value, 10) || 5,
-												)
-											}
-											min={1}
-											disabled={isReadOnly}
-										/>
-										<span className="btn btn-ghost join-item pointer-events-none border-base-300 text-xs">
-											min
-										</span>
-									</div>
-									<div className="mt-2 whitespace-normal text-base-content/70 text-xs">
-										How long an import must stay stuck before a rule kicks in. Short-lived errors
-										that resolve on their own are left alone.
-									</div>
-								</fieldset>
-
-								<div className="space-y-4">
 									<h5 className="font-bold text-base-content/60 text-xs uppercase">Error Rules</h5>
 									<p className="whitespace-normal text-base-content/70 text-xs">
 										When a stuck import's error matches one of these, run the chosen action: remove,
 										blocklist, or blocklist + search.
 									</p>
 									<div className="custom-scrollbar max-h-72 space-y-2 overflow-y-auto pr-2">
-										{(formData.stuck_cleanup_rules || []).map((rule, index) => (
+										{(formData.queue_cleanup_rules || []).map((rule, index) => (
 											<div
 												key={index}
 												className="flex items-center gap-2 rounded-xl border border-base-300/50 bg-base-100/50 p-2 pl-3"
