@@ -400,6 +400,9 @@ export function ArrsConfigSection({
 											sec
 										</span>
 									</div>
+									<div className="mt-2 whitespace-normal text-base-content/70 text-xs">
+										How often the *arr queues are checked.
+									</div>
 								</fieldset>
 
 								<div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
@@ -411,11 +414,11 @@ export function ArrsConfigSection({
 											<input
 												type="number"
 												className="input input-bordered join-item w-full bg-base-100 font-mono text-sm"
-												value={formData.queue_cleanup_grace_period_minutes ?? 10}
+												value={formData.queue_cleanup_grace_period_minutes ?? 5}
 												onChange={(e) =>
 													handleFormChange(
 														"queue_cleanup_grace_period_minutes",
-														Number.parseInt(e.target.value, 10) || 10,
+														Number.parseInt(e.target.value, 10) || 5,
 													)
 												}
 												min={0}
@@ -426,7 +429,8 @@ export function ArrsConfigSection({
 											</span>
 										</div>
 										<div className="mt-2 whitespace-normal text-base-content/70 text-xs">
-											Wait time before considering a failed item "stuck" and eligible for cleanup.
+											How long a stuck or failed import must persist before cleanup acts on it.
+											Brief errors that clear on their own are ignored.
 										</div>
 									</fieldset>
 
