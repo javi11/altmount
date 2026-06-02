@@ -7,6 +7,7 @@ import type {
 	ArrsType,
 	ConfigResponse,
 	StuckCleanupAction,
+	StuckCleanupRule,
 } from "../../types/config";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
 import { ArrsInstanceCard } from "./ArrsInstanceCard";
@@ -61,6 +62,7 @@ export function ArrsConfigSection({
 	const [webhookError, setWebhookError] = useState<string | null>(null);
 	const [saveError, setSaveError] = useState<string | null>(null);
 	const [newIgnoreMessage, setNewIgnoreMessage] = useState("");
+	const [newStuckPattern, setNewStuckPattern] = useState("");
 
 	const registerWebhooks = useRegisterArrsWebhooks();
 	const defaultWebhookUrl = `http://${config.webdav.host || "altmount"}:${config.webdav.port}`;
@@ -213,6 +215,21 @@ export function ArrsConfigSection({
 		const newList = [...currentList];
 		newList[index] = { ...newList[index], enabled: !newList[index].enabled };
 		handleFormChange("queue_cleanup_allowlist", newList);
+	};
+
+	const handleAddStuckPattern = () => {
+		if (!newStuckPattern.trim()) return;
+		const currentList = formData.stuck_cleanup_rules || [];
+		if (currentList.some((m) => m.message === newStuckPattern.trim())) {
+			setNewStuckPattern("");
+			return;
+		}
+		const newList: StuckCleanupRule[] = [
+			...currentList,
+			{ message: newStuckPattern.trim(), enabled: true, action: "blocklist_search" },
+		];
+		handleFormChange("stuck_cleanup_rules", newList);
+		setNewStuckPattern("");
 	};
 
 	const handleRemoveStuckPattern = (index: number) => {
@@ -580,18 +597,16 @@ export function ArrsConfigSection({
 										</span>
 									</div>
 									<div className="mt-2 whitespace-normal text-base-content/70 text-xs">
-										Minutes an import must stay stuck before a rule acts (e.g. 1–5). Brief errors
-										the *arr clears on its own are ignored.
+										How long an import must stay stuck before a rule kicks in. Short-lived errors
+										that resolve on their own are left alone.
 									</div>
 								</fieldset>
 
 								<div className="space-y-4">
-									<h5 className="font-bold text-base-content/60 text-xs uppercase">
-										Stuck Error Rules
-									</h5>
+									<h5 className="font-bold text-base-content/60 text-xs uppercase">Error Rules</h5>
 									<p className="whitespace-normal text-base-content/70 text-xs">
-										Match an *arr error message to an action: remove, blocklist, or blocklist +
-										search.
+										When a stuck import's error matches one of these, run the chosen action: remove,
+										blocklist, or blocklist + search.
 									</p>
 									<div className="custom-scrollbar max-h-72 space-y-2 overflow-y-auto pr-2">
 										{(formData.stuck_cleanup_rules || []).map((rule, index) => (
@@ -635,6 +650,27 @@ export function ArrsConfigSection({
 											</div>
 										))}
 									</div>
+
+									{!isReadOnly && (
+										<div className="join w-full shadow-sm">
+											<input
+												type="text"
+												className="input input-bordered join-item flex-1 bg-base-100 text-xs"
+												placeholder="Add an *arr error message... (defaults to blocklist + search)"
+												value={newStuckPattern}
+												onChange={(e) => setNewStuckPattern(e.target.value)}
+												onKeyDown={(e) => e.key === "Enter" && handleAddStuckPattern()}
+											/>
+											<button
+												type="button"
+												className="btn btn-primary join-item px-4"
+												onClick={handleAddStuckPattern}
+												disabled={!newStuckPattern.trim()}
+											>
+												<Plus className="h-4 w-4" />
+											</button>
+										</div>
+									)}
 								</div>
 							</div>
 						)}
