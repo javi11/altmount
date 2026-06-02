@@ -3,6 +3,7 @@ package backend
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"runtime"
 	"sync"
@@ -247,6 +248,42 @@ func TestAsyncReadBuffer_CloseDuringFill(t *testing.T) {
 	case <-done:
 	case <-time.After(3 * time.Second):
 		t.Fatal("Close() hung")
+	}
+}
+
+func TestAsyncReadBuffer_CanceledFillContextDoesNotHangFrontierRead(t *testing.T) {
+	SetAsyncBufferBudget(0)
+	data := testData(4 * 1024 * 1024)
+	parentCtx, cancel := context.WithCancel(context.Background())
+	src := &countingSource{data: data}
+	a := NewAsyncReadBuffer(parentCtx, src, 256*1024, int64(len(data)), nil)
+	defer a.Close()
+
+	p := make([]byte, 1024)
+	for i := range armThreshold {
+		off := int64(i * len(p))
+		if _, err := a.ReadAtContext(context.Background(), p, off); err != nil {
+			t.Fatalf("seed read %d: %v", i, err)
+		}
+	}
+
+	cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		readCtx, readCancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer readCancel()
+		_, err := a.ReadAtContext(readCtx, p, int64(armThreshold*len(p)))
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("frontier read after fill cancellation returned %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("frontier read hung after fill context cancellation")
 	}
 }
 

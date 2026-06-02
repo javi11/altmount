@@ -187,6 +187,37 @@ func TestHandle_Read_ContextCanceled(t *testing.T) {
 	mockFile.AssertExpectations(t)
 }
 
+func TestNewHandleAsyncBufferIgnoresOpenContextCancellation(t *testing.T) {
+	openCtx, cancelOpen := context.WithCancel(context.Background())
+	cancelOpen()
+
+	src := &readAtDepthFile{}
+	asyncBuf := newHandleAsyncBuffer(openCtx, src, 256*1024, 4*1024*1024, slog.Default())
+	require.NotNil(t, asyncBuf)
+	defer asyncBuf.Close()
+
+	p := make([]byte, 1024)
+	for i := 0; i < 3; i++ {
+		off := int64(i * len(p))
+		if _, err := asyncBuf.ReadAtContext(context.Background(), p, off); err != nil {
+			t.Fatalf("seed read %d: %v", i, err)
+		}
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := asyncBuf.ReadAtContext(context.Background(), p, 3*int64(len(p)))
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("async buffer was tied to the canceled open context")
+	}
+}
+
 // readAtDepthFile counts overlapping ReadAtContext calls to verify serialization.
 type readAtDepthFile struct {
 	mu        sync.Mutex
