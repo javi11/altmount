@@ -123,6 +123,48 @@ func TestConfig_Validate_MountPaths(t *testing.T) {
 	}
 }
 
+func TestConfig_Validate_QueueCleanupRuleAction(t *testing.T) {
+	// Build an otherwise-valid config carrying a single rule with the given action.
+	// The action check runs at the end of Validate(), so everything else must pass.
+	newValidConfig := func(action string) *Config {
+		return &Config{
+			MountType: MountTypeNone,
+			Metadata:  MetadataConfig{RootPath: "/metadata"},
+			WebDAV:    WebDAVConfig{Port: 8080},
+			Streaming: StreamingConfig{MaxPrefetch: 30},
+			Import: ImportConfig{
+				MaxProcessorWorkers:            2,
+				QueueProcessingIntervalSeconds: 5,
+				MaxImportConnections:           5,
+				MaxDownloadPrefetch:            3,
+				SegmentSamplePercentage:        1,
+				ImportStrategy:                 ImportStrategyNone,
+			},
+			Health: HealthConfig{
+				CheckIntervalSeconds:          5,
+				MaxConnectionsForHealthChecks: 5,
+				MaxConcurrentJobs:             1,
+				SegmentSamplePercentage:       5,
+			},
+			Arrs: ArrsConfig{
+				QueueCleanupRules: []StuckCleanupRule{
+					{Message: "Sample", Enabled: true, Action: action},
+				},
+			},
+		}
+	}
+
+	// Known actions — and empty, which safely degrades to "remove" at runtime — pass.
+	for _, action := range []string{"", StuckActionRemove, StuckActionBlocklist, StuckActionBlocklistSearch} {
+		assert.NoError(t, newValidConfig(action).Validate(), "action %q should be valid", action)
+	}
+
+	// An unknown action is rejected.
+	err := newValidConfig("delete_everything").Validate()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid action")
+}
+
 func TestConfig_GetWebhookBaseURL(t *testing.T) {
 	tests := []struct {
 		name     string

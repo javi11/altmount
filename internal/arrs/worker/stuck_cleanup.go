@@ -14,20 +14,6 @@ import (
 	"golift.io/starr/sonarr"
 )
 
-// StuckCleanupResult summarizes a stuck-import cleanup run across all instances.
-type StuckCleanupResult struct {
-	Instances    []InstanceCleanupResult `json:"instances"`
-	TotalBlocked int                     `json:"total_blocked"`
-}
-
-// InstanceCleanupResult is the per-instance outcome of a stuck-import cleanup run.
-type InstanceCleanupResult struct {
-	Instance string `json:"instance"`
-	Type     string `json:"type"`
-	Blocked  int    `json:"blocked"`
-	Error    string `json:"error,omitempty"`
-}
-
 // stuckItem is a normalized view of an *arr queue record across all client types,
 // holding only the fields the stuck-import detection needs.
 type stuckItem struct {
@@ -44,22 +30,19 @@ type stuckItem struct {
 // are stuck importing for a known reason, then removes and blocklists them so the
 // release is not grabbed again and the *arr searches for a replacement.
 //
-// When force is false an item is only acted on after it has been continuously
-// observed stuck for the configured grace period (transient errors that the *arr
-// resolves on its own are left alone). When force is true the grace period is
-// bypassed and everything currently matching is blocklisted immediately.
-//
-// The automatic periodic run is gated by IsQueueCleanupEnabled at the caller
-// (the worker tick); this method itself only requires arrs to be enabled, so the
-// manual trigger works regardless of the periodic toggle.
-func (w *Worker) CleanupStuckQueue(ctx context.Context, force bool) (*StuckCleanupResult, error) {
+// An item is only acted on after it has been continuously observed stuck for the
+// configured grace period (transient errors that the *arr resolves on its own are
+// left alone); ghost/empty-folder items are removed grace-free. The periodic run is
+// gated by IsQueueCleanupEnabled at the caller (the worker tick); this method itself
+// only requires arrs to be enabled.
+func (w *Worker) CleanupStuckQueue(ctx context.Context) error {
 	cfg := w.configGetter()
-	result := &StuckCleanupResult{Instances: []InstanceCleanupResult{}}
 
 	if cfg.Arrs.Enabled == nil || !*cfg.Arrs.Enabled {
-		return result, nil
+		return nil
 	}
 
+	totalBlocked := 0
 	for _, instance := range w.instances.GetAllInstances() {
 		if instance == nil || !instance.Enabled {
 			continue
@@ -69,36 +52,32 @@ func (w *Worker) CleanupStuckQueue(ctx context.Context, force bool) (*StuckClean
 		var err error
 		switch instance.Type {
 		case "radarr":
-			blocked, err = w.cleanupStuckRadarr(ctx, instance, cfg, force)
+			blocked, err = w.cleanupStuckRadarr(ctx, instance, cfg)
 		case "sonarr":
-			blocked, err = w.cleanupStuckSonarr(ctx, instance, cfg, force, false)
+			blocked, err = w.cleanupStuckSonarr(ctx, instance, cfg, false)
 		case "whisparr":
-			blocked, err = w.cleanupStuckSonarr(ctx, instance, cfg, force, true)
+			blocked, err = w.cleanupStuckSonarr(ctx, instance, cfg, true)
 		case "lidarr":
-			blocked, err = w.cleanupStuckLidarr(ctx, instance, cfg, force)
+			blocked, err = w.cleanupStuckLidarr(ctx, instance, cfg)
 		case "readarr":
-			blocked, err = w.cleanupStuckReadarr(ctx, instance, cfg, force)
+			blocked, err = w.cleanupStuckReadarr(ctx, instance, cfg)
 		case "sportarr":
-			blocked, err = w.cleanupStuckSportarr(ctx, instance, cfg, force)
+			blocked, err = w.cleanupStuckSportarr(ctx, instance, cfg)
 		default:
 			continue
 		}
 
-		res := InstanceCleanupResult{Instance: instance.Name, Type: instance.Type, Blocked: blocked}
 		if err != nil {
-			res.Error = err.Error()
 			slog.WarnContext(ctx, "Failed to clean up stuck imports",
 				"instance", instance.Name, "type", instance.Type, "error", err)
 		}
-		result.Instances = append(result.Instances, res)
-		result.TotalBlocked += blocked
+		totalBlocked += blocked
 	}
 
-	if result.TotalBlocked > 0 {
-		slog.InfoContext(ctx, "Stuck import cleanup acted on releases",
-			"count", result.TotalBlocked, "force", force)
+	if totalBlocked > 0 {
+		slog.InfoContext(ctx, "Stuck import cleanup acted on releases", "count", totalBlocked)
 	}
-	return result, nil
+	return nil
 }
 
 // stuckAction is a queue item selected for cleanup plus how to act on it
@@ -139,11 +118,11 @@ func stuckRuleFor(item stuckItem, cfg *config.Config) *config.StuckCleanupRule {
 // selectStuckActions filters AltMount-owned queue items to those that should be
 // cleaned now, carrying each item's action. Ghost/empty-folder items (already
 // imported, or source path gone) are removed first, grace-free. The remainder are
-// matched against the message rules: with force, all matching items are returned
-// immediately; otherwise an item must have been observed stuck for the configured
-// grace period. First observations and items the *arr has since resolved are
+// matched against the message rules: an item must have been observed stuck for the
+// configured grace period before it is acted on (or immediately when no grace period
+// is configured). First observations and items the *arr has since resolved are
 // tracked/cleared via the shared firstSeen map.
-func (w *Worker) selectStuckActions(ctx context.Context, instance *model.ConfigInstance, cfg *config.Config, items []stuckItem, force bool) []stuckAction {
+func (w *Worker) selectStuckActions(ctx context.Context, instance *model.ConfigInstance, cfg *config.Config, items []stuckItem) []stuckAction {
 	var actions []stuckAction
 	gracePeriod := time.Duration(cfg.Arrs.QueueCleanupGracePeriodMinutes) * time.Minute
 
@@ -178,7 +157,7 @@ func (w *Worker) selectStuckActions(ctx context.Context, instance *model.ConfigI
 			continue
 		}
 
-		if force || gracePeriod <= 0 {
+		if gracePeriod <= 0 {
 			actions = append(actions, stuckAction{ID: item.ID, Action: rule.Action})
 			w.firstSeenMu.Lock()
 			delete(w.firstSeen, key)
@@ -263,7 +242,7 @@ func flattenStarrMessages(msgs []*starr.StatusMessage) []string {
 	return out
 }
 
-func (w *Worker) cleanupStuckRadarr(ctx context.Context, instance *model.ConfigInstance, cfg *config.Config, force bool) (int, error) {
+func (w *Worker) cleanupStuckRadarr(ctx context.Context, instance *model.ConfigInstance, cfg *config.Config) (int, error) {
 	client, err := w.clients.GetOrCreateRadarrClient(instance.Name, instance.URL, instance.APIKey)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get Radarr client: %w", err)
@@ -286,12 +265,12 @@ func (w *Worker) cleanupStuckRadarr(ctx context.Context, instance *model.ConfigI
 		})
 	}
 
-	actions := w.selectStuckActions(ctx, instance, cfg, items, force)
+	actions := w.selectStuckActions(ctx, instance, cfg, items)
 	return w.deleteStarrQueue(ctx, instance, actions, client.DeleteQueueContext), nil
 }
 
 // cleanupStuckSonarr handles Sonarr and Whisparr (both use the Sonarr client).
-func (w *Worker) cleanupStuckSonarr(ctx context.Context, instance *model.ConfigInstance, cfg *config.Config, force bool, whisparr bool) (int, error) {
+func (w *Worker) cleanupStuckSonarr(ctx context.Context, instance *model.ConfigInstance, cfg *config.Config, whisparr bool) (int, error) {
 	var (
 		client *sonarr.Sonarr
 		err    error
@@ -322,11 +301,11 @@ func (w *Worker) cleanupStuckSonarr(ctx context.Context, instance *model.ConfigI
 		})
 	}
 
-	actions := w.selectStuckActions(ctx, instance, cfg, items, force)
+	actions := w.selectStuckActions(ctx, instance, cfg, items)
 	return w.deleteStarrQueue(ctx, instance, actions, client.DeleteQueueContext), nil
 }
 
-func (w *Worker) cleanupStuckLidarr(ctx context.Context, instance *model.ConfigInstance, cfg *config.Config, force bool) (int, error) {
+func (w *Worker) cleanupStuckLidarr(ctx context.Context, instance *model.ConfigInstance, cfg *config.Config) (int, error) {
 	client, err := w.clients.GetOrCreateLidarrClient(instance.Name, instance.URL, instance.APIKey)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get Lidarr client: %w", err)
@@ -350,11 +329,11 @@ func (w *Worker) cleanupStuckLidarr(ctx context.Context, instance *model.ConfigI
 		})
 	}
 
-	actions := w.selectStuckActions(ctx, instance, cfg, items, force)
+	actions := w.selectStuckActions(ctx, instance, cfg, items)
 	return w.deleteStarrQueue(ctx, instance, actions, client.DeleteQueueContext), nil
 }
 
-func (w *Worker) cleanupStuckReadarr(ctx context.Context, instance *model.ConfigInstance, cfg *config.Config, force bool) (int, error) {
+func (w *Worker) cleanupStuckReadarr(ctx context.Context, instance *model.ConfigInstance, cfg *config.Config) (int, error) {
 	client, err := w.clients.GetOrCreateReadarrClient(instance.Name, instance.URL, instance.APIKey)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get Readarr client: %w", err)
@@ -377,13 +356,13 @@ func (w *Worker) cleanupStuckReadarr(ctx context.Context, instance *model.Config
 		})
 	}
 
-	actions := w.selectStuckActions(ctx, instance, cfg, items, force)
+	actions := w.selectStuckActions(ctx, instance, cfg, items)
 	return w.deleteStarrQueue(ctx, instance, actions, client.DeleteQueueContext), nil
 }
 
 // cleanupStuckSportarr mirrors the starr path but uses Sportarr's native client,
 // which is not starr-compatible.
-func (w *Worker) cleanupStuckSportarr(ctx context.Context, instance *model.ConfigInstance, cfg *config.Config, force bool) (int, error) {
+func (w *Worker) cleanupStuckSportarr(ctx context.Context, instance *model.ConfigInstance, cfg *config.Config) (int, error) {
 	client, err := w.clients.GetOrCreateSportarrClient(instance.Name, instance.URL, instance.APIKey)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get Sportarr client: %w", err)
@@ -423,7 +402,7 @@ func (w *Worker) cleanupStuckSportarr(ctx context.Context, instance *model.Confi
 		})
 	}
 
-	actions := w.selectStuckActions(ctx, instance, cfg, items, force)
+	actions := w.selectStuckActions(ctx, instance, cfg, items)
 	cleaned := 0
 	for _, a := range actions {
 		var err error

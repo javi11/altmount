@@ -933,6 +933,18 @@ func (c *Config) Validate() error {
 		c.Fuse.AsyncBufferMaxTotalMB = 0
 	}
 
+	// Validate arrs queue-cleanup rule actions: an explicitly set action must be a
+	// known value. An empty action is allowed and treated as "remove" at runtime
+	// (see starrDeleteOpts), so it is not rejected here.
+	for i, rule := range c.Arrs.QueueCleanupRules {
+		switch rule.Action {
+		case "", StuckActionRemove, StuckActionBlocklist, StuckActionBlocklistSearch:
+		default:
+			return fmt.Errorf("arrs queue_cleanup_rules[%d]: invalid action %q (must be %q, %q, or %q)",
+				i, rule.Action, StuckActionRemove, StuckActionBlocklist, StuckActionBlocklistSearch)
+		}
+	}
+
 	return nil
 }
 

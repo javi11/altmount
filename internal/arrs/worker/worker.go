@@ -136,9 +136,9 @@ func (w *Worker) safeCleanup() {
 		return
 	}
 	// One unified pass per tick covers all six *arr types: ghost/empty-folder removal,
-	// then the message-rule actions. force=false so items are observed over time and
-	// only acted on once stuck past the grace period (ghost removal stays grace-free).
-	if _, err := w.CleanupStuckQueue(w.workerCtx, false); err != nil {
+	// then the message-rule actions. Items are observed over time and only acted on
+	// once stuck past the grace period (ghost removal stays grace-free).
+	if err := w.CleanupStuckQueue(w.workerCtx); err != nil {
 		slog.Error("Queue cleanup failed", "error", err)
 	}
 }
