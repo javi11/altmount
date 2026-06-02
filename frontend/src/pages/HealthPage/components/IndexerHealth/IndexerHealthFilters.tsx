@@ -34,7 +34,7 @@ export function IndexerHealthFilters({
 						placeholder="Search indexers..."
 						value={searchQuery}
 						onChange={(e) => onSearchChange(e.target.value)}
-						className="input input-bordered input-sm w-full border-base-300 bg-base-200/50 pl-8 font-medium text-base-content placeholder-base-content/40 focus:border-teal-500/50"
+						className="input input-bordered input-sm w-full border-base-300 bg-base-200/50 pl-8 font-medium text-base-content placeholder-base-content/40 focus:border-primary/50"
 						aria-label="Search indexers"
 					/>
 					<div className="-translate-y-1/2 absolute top-1/2 left-2.5 text-base-content/40">
@@ -42,11 +42,7 @@ export function IndexerHealthFilters({
 					</div>
 				</div>
 
-				<div
-					className="flex flex-wrap items-center gap-1.5"
-					role="group"
-					aria-label="Status Filters"
-				>
+				<fieldset className="flex flex-wrap items-center gap-1.5" aria-label="Status Filters">
 					<span className="mr-1 font-bold text-[10px] text-base-content/40 uppercase tracking-wider">
 						Filter
 					</span>
@@ -55,21 +51,13 @@ export function IndexerHealthFilters({
 						let btnClass =
 							"btn-ghost text-base-content/60 hover:text-base-content hover:bg-base-content/5 border-transparent";
 						if (active) {
-							if (filter === "excellent")
-								btnClass =
-									"bg-teal-500/15 border-teal-500/30 text-teal-400 shadow-[0_0_8px_rgba(20,184,166,0.25)]";
-							else if (filter === "good")
-								btnClass =
-									"bg-emerald-500/15 border-emerald-500/30 text-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.25)]";
+							if (filter === "excellent" || filter === "good")
+								btnClass = "bg-success/15 border-success/30 text-success";
 							else if (filter === "moderate")
-								btnClass =
-									"bg-amber-500/15 border-amber-500/30 text-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.25)]";
+								btnClass = "bg-warning/15 border-warning/30 text-warning";
 							else if (filter === "operational")
-								btnClass =
-									"bg-slate-500/15 border-slate-500/30 text-slate-400 shadow-[0_0_8px_rgba(148,163,184,0.25)]";
-							else
-								btnClass =
-									"bg-primary/15 border-primary/30 text-primary shadow-[0_0_8px_rgba(59,130,246,0.25)]";
+								btnClass = "bg-error/15 border-error/30 text-error";
+							else btnClass = "bg-primary/15 border-primary/30 text-primary";
 						}
 						return (
 							<button
@@ -82,7 +70,7 @@ export function IndexerHealthFilters({
 							</button>
 						);
 					})}
-				</div>
+				</fieldset>
 			</div>
 
 			{/* Sort Toolbar */}
@@ -90,9 +78,8 @@ export function IndexerHealthFilters({
 				<span className="font-bold text-[10px] text-base-content/50 uppercase tracking-wider">
 					Sort by
 				</span>
-				<div
+				<fieldset
 					className="join rounded-xl border border-base-200 bg-base-200/30 p-0.5"
-					role="group"
 					aria-label="Sort options"
 				>
 					{(["health", "total", "name"] as SortKey[]).map((key) => (
@@ -102,7 +89,7 @@ export function IndexerHealthFilters({
 							onClick={() => onSort(key)}
 							className={`btn btn-xs join-item border-none font-bold capitalize tracking-wide transition-all duration-200 ${
 								sortKey === key
-									? "btn-primary shadow-[0_0_8px_rgba(59,130,246,0.25)]"
+									? "btn-primary"
 									: "btn-ghost text-base-content/60 hover:bg-base-content/5 hover:text-base-content"
 							}`}
 							aria-label={`Sort by ${key === "health" ? "Health" : key === "total" ? "Volume" : "Name"}`}
@@ -113,7 +100,7 @@ export function IndexerHealthFilters({
 							)}
 						</button>
 					))}
-				</div>
+				</fieldset>
 				<span className="ml-auto font-semibold text-base-content/40 text-xs">
 					{filteredCount} Indexer{filteredCount !== 1 ? "s" : ""} active
 				</span>

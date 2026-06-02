@@ -34,33 +34,33 @@ export function IndexerHealthCard({ item, onDelete }: IndexerHealthCardProps) {
 	const isGood = item.success_rate >= 75 && item.success_rate < 90;
 	const isPoor = item.success_rate >= 50 && item.success_rate < 75;
 
-	const accentColor = isExcellent
-		? "border-teal-500/15 hover:border-teal-500/40 hover:shadow-[0_0_15px_rgba(20,184,166,0.1)]"
-		: isGood
-			? "border-emerald-500/15 hover:border-emerald-500/40 hover:shadow-[0_0_15px_rgba(16,185,129,0.1)]"
+	// Map the four performance tiers onto AltMount's daisyUI theme tokens so the
+	// colors follow the active theme: success (excellent/good), warning (moderate),
+	// error (operational/low).
+	const accentColor =
+		isExcellent || isGood
+			? "border-success/15 hover:border-success/40"
 			: isPoor
-				? "border-amber-500/15 hover:border-amber-500/40 hover:shadow-[0_0_15px_rgba(245,158,11,0.1)]"
-				: "border-slate-500/15 hover:border-slate-500/40 hover:shadow-[0_0_15px_rgba(148,163,184,0.1)]";
+				? "border-warning/15 hover:border-warning/40"
+				: "border-error/15 hover:border-error/40";
 
 	const barSuccessWidth =
 		item.total_imports > 0 ? (item.success_count / item.total_imports) * 100 : 0;
 	const barFailWidth = item.total_imports > 0 ? (item.failed_count / item.total_imports) * 100 : 0;
 
-	const topLineGradient = isExcellent
-		? "from-teal-500/40 to-teal-600/10"
-		: isGood
-			? "from-emerald-500/40 to-emerald-600/10"
+	const topLineGradient =
+		isExcellent || isGood
+			? "from-success/40 to-success/10"
 			: isPoor
-				? "from-amber-500/40 to-amber-600/10"
-				: "from-slate-500/40 to-slate-600/10";
+				? "from-warning/40 to-warning/10"
+				: "from-error/40 to-error/10";
 
-	const statusBadgeColor = isExcellent
-		? "bg-teal-500/10 text-teal-400 border-teal-500/20"
-		: isGood
-			? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+	const statusBadgeColor =
+		isExcellent || isGood
+			? "bg-success/10 text-success border-success/20"
 			: isPoor
-				? "bg-amber-500/10 text-amber-500 border-amber-500/20"
-				: "bg-slate-500/10 text-slate-400 border-slate-500/20";
+				? "bg-warning/10 text-warning border-warning/20"
+				: "bg-error/10 text-error border-error/20";
 
 	const statusText = isExcellent
 		? "EXCELLENT"
@@ -70,13 +70,8 @@ export function IndexerHealthCard({ item, onDelete }: IndexerHealthCardProps) {
 				? "MODERATE"
 				: "OPERATIONAL";
 
-	const percentColor = isExcellent
-		? "text-teal-600 dark:text-teal-400"
-		: isGood
-			? "text-emerald-600 dark:text-emerald-400"
-			: isPoor
-				? "text-amber-600 dark:text-amber-500"
-				: "text-slate-600 dark:text-slate-400";
+	const percentColor =
+		isExcellent || isGood ? "text-success" : isPoor ? "text-warning" : "text-error";
 
 	return (
 		<div
@@ -89,7 +84,7 @@ export function IndexerHealthCard({ item, onDelete }: IndexerHealthCardProps) {
 			<div className="absolute top-3 right-3 z-10">
 				<button
 					type="button"
-					className="btn btn-ghost btn-xs p-1 text-rose-500 opacity-0 transition-all duration-200 hover:bg-rose-500/20 hover:text-rose-600 group-hover:opacity-100 dark:hover:text-rose-300"
+					className="btn btn-ghost btn-xs p-1 text-error opacity-0 transition-all duration-200 hover:bg-error/20 group-hover:opacity-100"
 					onClick={() => onDelete(item.indexer)}
 					aria-label={`Delete statistics for ${item.indexer}`}
 				>
@@ -133,7 +128,7 @@ export function IndexerHealthCard({ item, onDelete }: IndexerHealthCardProps) {
 				<div className="mt-4 space-y-1">
 					<div className="relative flex h-2 w-full overflow-hidden rounded-full border border-base-200 bg-base-200/40">
 						<div
-							className="h-full bg-gradient-to-r from-teal-500/80 to-teal-400/80 shadow-[0_0_8px_rgba(20,184,166,0.3)] transition-all duration-700"
+							className="h-full bg-success transition-all duration-700"
 							style={{ width: `${barSuccessWidth}%` }}
 							role="progressbar"
 							aria-valuenow={barSuccessWidth}
@@ -142,7 +137,7 @@ export function IndexerHealthCard({ item, onDelete }: IndexerHealthCardProps) {
 							aria-label="Success rate percentage"
 						/>
 						<div
-							className="h-full bg-gradient-to-r from-rose-500/80 to-pink-600/80 shadow-[0_0_8px_rgba(239,68,68,0.3)] transition-all duration-700"
+							className="h-full bg-error transition-all duration-700"
 							style={{ width: `${barFailWidth}%` }}
 							role="progressbar"
 							aria-valuenow={barFailWidth}
@@ -152,15 +147,15 @@ export function IndexerHealthCard({ item, onDelete }: IndexerHealthCardProps) {
 						/>
 					</div>
 					<div className="flex justify-between font-bold text-[9px] uppercase tracking-wide">
-						<span className="text-teal-400/90">{item.success_count} OK</span>
-						<span className="text-rose-400/90">{item.failed_count} FAILED</span>
+						<span className="text-success">{item.success_count} OK</span>
+						<span className="text-error">{item.failed_count} FAILED</span>
 					</div>
 				</div>
 
 				{/* Import Pulse Stream */}
 				<div className="mt-4 space-y-1.5">
 					<div className="flex items-center gap-1.5 font-bold text-[9px] text-base-content/40 uppercase tracking-wider">
-						<Radio className="h-3 w-3 animate-pulse text-teal-400" />
+						<Radio className="h-3 w-3 animate-pulse text-primary" />
 						Import Pulse Stream (Last 24)
 					</div>
 					<div className="flex flex-wrap items-center gap-1 rounded-xl border border-base-200 bg-base-200/50 p-2">
@@ -168,9 +163,9 @@ export function IndexerHealthCard({ item, onDelete }: IndexerHealthCardProps) {
 							(dot, idx) => {
 								const dotColor =
 									dot === "success"
-										? "bg-teal-500/80 hover:bg-teal-400 shadow-[0_0_6px_rgba(20,184,166,0.4)]"
+										? "bg-success/80 hover:bg-success"
 										: dot === "failed"
-											? "bg-rose-500/80 hover:bg-rose-400 shadow-[0_0_6px_rgba(239,68,68,0.4)]"
+											? "bg-error/80 hover:bg-error"
 											: "bg-base-200/30 border border-base-200";
 								const dotTip =
 									dot === "success"
@@ -201,7 +196,7 @@ export function IndexerHealthCard({ item, onDelete }: IndexerHealthCardProps) {
 						</div>
 					</div>
 					<div className="space-y-0.5">
-						<div className="flex items-center justify-center gap-0.5 font-extrabold text-sm text-teal-600 tabular-nums dark:text-teal-400">
+						<div className="flex items-center justify-center gap-0.5 font-extrabold text-sm text-success tabular-nums">
 							<CheckCircle2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
 							{item.success_count.toLocaleString()}
 						</div>
@@ -210,7 +205,7 @@ export function IndexerHealthCard({ item, onDelete }: IndexerHealthCardProps) {
 						</div>
 					</div>
 					<div className="space-y-0.5">
-						<div className="flex items-center justify-center gap-0.5 font-extrabold text-rose-600 text-sm tabular-nums dark:text-rose-400">
+						<div className="flex items-center justify-center gap-0.5 font-extrabold text-error text-sm tabular-nums">
 							<XCircle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
 							{item.failed_count.toLocaleString()}
 						</div>
