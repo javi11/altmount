@@ -757,6 +757,17 @@ export interface ArrsConfig {
 	queue_cleanup_grace_period_minutes?: number;
 	queue_cleanup_allowlist?: IgnoredMessage[];
 	cleanup_automatic_import_failure?: boolean;
+	stuck_cleanup_enabled?: boolean;
+	stuck_cleanup_grace_period_minutes?: number;
+	stuck_cleanup_rules?: StuckCleanupRule[];
+}
+
+export type StuckCleanupAction = "remove" | "blocklist" | "blocklist_search";
+
+export interface StuckCleanupRule {
+	message: string;
+	enabled: boolean;
+	action: StuckCleanupAction;
 }
 
 // Sync status and progress types

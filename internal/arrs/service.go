@@ -206,8 +206,8 @@ func (s *Service) StopWorker(ctx context.Context) {
 // the queue cleanup worker when arrs.enabled or arrs.queue_cleanup_enabled flips.
 func (s *Service) RegisterConfigChangeHandler(ctx context.Context, configManager *config.Manager) {
 	configManager.OnConfigChange(func(oldConfig, newConfig *config.Config) {
-		oldOn := worker.IsQueueCleanupEnabled(oldConfig)
-		newOn := worker.IsQueueCleanupEnabled(newConfig)
+		oldOn := worker.IsQueueCleanupEnabled(oldConfig) || worker.IsStuckCleanupEnabled(oldConfig)
+		newOn := worker.IsQueueCleanupEnabled(newConfig) || worker.IsStuckCleanupEnabled(newConfig)
 		if oldOn == newOn {
 			return
 		}

@@ -457,6 +457,37 @@ type ArrsConfig struct {
 	CleanupAutomaticImportFailure  *bool                `yaml:"cleanup_automatic_import_failure" mapstructure:"cleanup_automatic_import_failure" json:"cleanup_automatic_import_failure,omitempty"`
 	QueueCleanupGracePeriodMinutes int                  `yaml:"queue_cleanup_grace_period_minutes" mapstructure:"queue_cleanup_grace_period_minutes" json:"queue_cleanup_grace_period_minutes,omitempty"`
 	QueueCleanupAllowlist          []IgnoredMessage     `yaml:"queue_cleanup_allowlist" mapstructure:"queue_cleanup_allowlist" json:"queue_cleanup_allowlist,omitempty"`
+
+	// Stuck import cleanup. When an item AltMount sent to an *arr gets stuck
+	// importing for a known reason (matched by StuckCleanupRules), this removes it
+	// from the queue once it has been stuck for the grace period. Rules flagged
+	// blocklist also block the release so the same NZB is not grabbed again and the
+	// *arr searches for a replacement; non-blocklist rules just clear the queue.
+	// Only items owned by AltMount's download client are touched (see issue #523).
+	StuckCleanupEnabled            *bool              `yaml:"stuck_cleanup_enabled" mapstructure:"stuck_cleanup_enabled" json:"stuck_cleanup_enabled,omitempty"`
+	StuckCleanupGracePeriodMinutes int                `yaml:"stuck_cleanup_grace_period_minutes" mapstructure:"stuck_cleanup_grace_period_minutes" json:"stuck_cleanup_grace_period_minutes,omitempty"`
+	StuckCleanupRules              []StuckCleanupRule `yaml:"stuck_cleanup_rules" mapstructure:"stuck_cleanup_rules" json:"stuck_cleanup_rules,omitempty"`
+}
+
+// Stuck cleanup actions decide what happens to a matched stuck import.
+const (
+	// StuckActionRemove removes the item from the queue only (no blocklist, no
+	// re-search) — for transient/environmental errors or already-satisfied files.
+	StuckActionRemove = "remove"
+	// StuckActionBlocklist removes the item and blocklists the release so the same
+	// NZB is not grabbed again, but does NOT trigger a new search.
+	StuckActionBlocklist = "blocklist"
+	// StuckActionBlocklistSearch blocklists the release and triggers the *arr to
+	// search for a replacement.
+	StuckActionBlocklistSearch = "blocklist_search"
+)
+
+// StuckCleanupRule matches a stuck-import status message and decides the action
+// (one of StuckActionRemove, StuckActionBlocklist, StuckActionBlocklistSearch).
+type StuckCleanupRule struct {
+	Message string `yaml:"message" mapstructure:"message" json:"message"`
+	Enabled bool   `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	Action  string `yaml:"action" mapstructure:"action" json:"action"`
 }
 
 // ArrsInstanceConfig represents a single arrs instance configuration
@@ -1521,6 +1552,41 @@ func DefaultConfig(configDir ...string) *Config {
 				{Message: "Could not find file", Enabled: true},
 				{Message: "Unexpected error processing file", Enabled: true},
 				{Message: "Download doesn't contain intermediate path", Enabled: true},
+			},
+			StuckCleanupGracePeriodMinutes: 5, // Default to 5 minutes stuck before acting
+			// Rule table modeled on wArrden's queue cleanup. Action decides what to do:
+			// blocklist_search (bad release → block + re-search), blocklist (block but
+			// don't search), or remove (just clear the queue: transient/environmental
+			// errors or files that are already satisfied).
+			StuckCleanupRules: []StuckCleanupRule{
+				// Bad release — blocklist and search for a replacement.
+				{Message: "Sample", Enabled: true, Action: StuckActionBlocklistSearch},
+				{Message: "Unable to determine if file is a sample", Enabled: true, Action: StuckActionBlocklistSearch},
+				{Message: "is not a valid video file", Enabled: true, Action: StuckActionBlocklistSearch},
+				{Message: "No files found are eligible", Enabled: true, Action: StuckActionBlocklistSearch},
+				{Message: "No audio tracks detected", Enabled: true, Action: StuckActionBlocklistSearch},
+				{Message: "Found archive file", Enabled: true, Action: StuckActionBlocklistSearch},
+				{Message: "Unable to parse file", Enabled: true, Action: StuckActionBlocklistSearch},
+				{Message: "Unexpected error processing file", Enabled: true, Action: StuckActionBlocklistSearch},
+				{Message: "unsupported extension", Enabled: true, Action: StuckActionBlocklistSearch},
+				{Message: "potentially dangerous file", Enabled: true, Action: StuckActionBlocklistSearch},
+				{Message: "Found executable file", Enabled: true, Action: StuckActionBlocklistSearch},
+				{Message: "was not found in the grabbed release", Enabled: true, Action: StuckActionBlocklistSearch},
+				{Message: "Invalid season or episode", Enabled: true, Action: StuckActionBlocklistSearch},
+				{Message: "One or more episodes expected in this release were not imported or missing", Enabled: true, Action: StuckActionBlocklistSearch},
+				// Already satisfied — remove from queue only (don't re-search).
+				{Message: "Not a Custom Format upgrade", Enabled: true, Action: StuckActionRemove},
+				{Message: "Not an upgrade for existing", Enabled: true, Action: StuckActionRemove},
+				{Message: "Not a quality revision upgrade", Enabled: true, Action: StuckActionRemove},
+				{Message: "Movie file already imported", Enabled: true, Action: StuckActionRemove},
+				{Message: "Episode file already imported", Enabled: true, Action: StuckActionRemove},
+				{Message: "Album already imported", Enabled: true, Action: StuckActionRemove},
+				// Transient/environmental — disabled by default (enable if desired).
+				{Message: "Not enough free space", Enabled: false, Action: StuckActionRemove},
+				{Message: "File is still being unpacked", Enabled: false, Action: StuckActionRemove},
+				{Message: "Locked file, try again later", Enabled: false, Action: StuckActionRemove},
+				{Message: "is reporting an error", Enabled: false, Action: StuckActionRemove},
+				{Message: "Import failed, path does not exist", Enabled: false, Action: StuckActionRemove},
 			},
 		},
 		Fuse: FuseConfig{

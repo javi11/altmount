@@ -65,8 +65,9 @@ func (w *Worker) Start(ctx context.Context) error {
 		return nil
 	}
 
-	// Queue cleanup is enabled by default (when nil or true)
-	if cfg.Arrs.QueueCleanupEnabled != nil && !*cfg.Arrs.QueueCleanupEnabled {
+	// The worker runs when either the ghost/import cleanup or the stuck-import
+	// blocklist cleanup is enabled. Ghost cleanup is on by default (nil or true).
+	if !IsQueueCleanupEnabled(cfg) && !IsStuckCleanupEnabled(cfg) {
 		slog.InfoContext(ctx, "ARR queue cleanup disabled")
 		return nil
 	}
@@ -136,6 +137,13 @@ func (w *Worker) safeCleanup() {
 	}()
 	if err := w.CleanupQueue(w.workerCtx); err != nil {
 		slog.Error("Queue cleanup failed", "error", err)
+	}
+	// Stuck-import cleanup runs on the same tick when enabled. force=false so it
+	// observes items over time and only blocklists those stuck past the grace period.
+	if IsStuckCleanupEnabled(w.configGetter()) {
+		if _, err := w.CleanupStuckQueue(w.workerCtx, false); err != nil {
+			slog.Error("Stuck import cleanup failed", "error", err)
+		}
 	}
 }
 
