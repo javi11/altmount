@@ -943,7 +943,13 @@ export function QueuePage() {
 																<td>
 																	<div className="flex flex-col">
 																		<span className="text-xs opacity-70">
-																			{formatRelativeTime(item.created_at)}
+																			{item.status === QueueStatus.PROCESSING && item.started_at
+																				? `Started ${formatRelativeTime(item.started_at)}`
+																				: item.status === QueueStatus.COMPLETED && item.completed_at
+																				? `Finished ${formatRelativeTime(item.completed_at)}`
+																				: item.status === QueueStatus.FAILED && (item.completed_at || item.updated_at)
+																				? `Failed ${formatRelativeTime(item.completed_at || item.updated_at)}`
+																				: `Added ${formatRelativeTime(item.created_at)}`}
 																		</span>
 																		{item.retry_count > 0 && (
 																			<span className="mt-0.5 font-bold text-warning text-xs uppercase tracking-tighter">
