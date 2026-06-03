@@ -149,12 +149,21 @@ func (sc *speedtestCoordinator) getOrBuildClient(ctx context.Context, p *config.
 		}
 	}
 
+	// Mirror the production pool (ToNNTPProvider): without Inflight the
+	// nntppool client defaults to depth 1, making the fallback path
+	// latency-bound (one BODY per RTT) instead of pipelined.
+	inflight := p.InflightRequests
+	if inflight <= 0 {
+		inflight = 10
+	}
+
 	client, err := nntppool.NewClient(ctx, []nntppool.Provider{
 		{
 			Host:        host,
 			TLSConfig:   tlsCfg,
 			Auth:        nntppool.Auth{Username: p.Username, Password: p.Password},
 			Connections: p.MaxConnections,
+			Inflight:    inflight,
 			IdleTimeout: 60 * time.Second,
 		},
 	})
