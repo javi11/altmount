@@ -30,53 +30,48 @@ interface IndexerHealthCardProps {
 }
 
 export function IndexerHealthCard({ item, onDelete }: IndexerHealthCardProps) {
-	const isExcellent = item.success_rate >= 90;
-	const isGood = item.success_rate >= 75 && item.success_rate < 90;
-	const isPoor = item.success_rate >= 50 && item.success_rate < 75;
+	const isExcellent = item.success_rate >= 85;
+	const isModerate = item.success_rate >= 50 && item.success_rate < 85;
 
 	const accentColor = isExcellent
 		? "border-teal-500/15 hover:border-teal-500/40 hover:shadow-[0_0_15px_rgba(20,184,166,0.1)]"
-		: isGood
-			? "border-emerald-500/15 hover:border-emerald-500/40 hover:shadow-[0_0_15px_rgba(16,185,129,0.1)]"
-			: isPoor
-				? "border-amber-500/15 hover:border-amber-500/40 hover:shadow-[0_0_15px_rgba(245,158,11,0.1)]"
-				: "border-slate-500/15 hover:border-slate-500/40 hover:shadow-[0_0_15px_rgba(148,163,184,0.1)]";
+		: isModerate
+			? "border-amber-500/15 hover:border-amber-500/40 hover:shadow-[0_0_15px_rgba(245,158,11,0.1)]"
+			: "border-rose-500/15 hover:border-rose-500/40 hover:shadow-[0_0_15px_rgba(244,63,94,0.1)]";
 
 	const barSuccessWidth =
 		item.total_imports > 0 ? (item.success_count / item.total_imports) * 100 : 0;
 	const barFailWidth = item.total_imports > 0 ? (item.failed_count / item.total_imports) * 100 : 0;
 
+	const barFailClass = isExcellent
+		? "h-full bg-slate-500/20 transition-all duration-700"
+		: isModerate
+			? "h-full bg-gradient-to-r from-amber-500/80 to-yellow-600/80 shadow-[0_0_8px_rgba(245,158,11,0.3)] transition-all duration-700"
+			: "h-full bg-gradient-to-r from-rose-500/80 to-pink-600/80 shadow-[0_0_8px_rgba(239,68,68,0.3)] transition-all duration-700";
+
 	const topLineGradient = isExcellent
 		? "from-teal-500/40 to-teal-600/10"
-		: isGood
-			? "from-emerald-500/40 to-emerald-600/10"
-			: isPoor
-				? "from-amber-500/40 to-amber-600/10"
-				: "from-slate-500/40 to-slate-600/10";
+		: isModerate
+			? "from-amber-500/40 to-amber-600/10"
+			: "from-rose-500/40 to-rose-600/10";
 
 	const statusBadgeColor = isExcellent
 		? "bg-teal-500/10 text-teal-400 border-teal-500/20"
-		: isGood
-			? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-			: isPoor
-				? "bg-amber-500/10 text-amber-500 border-amber-500/20"
-				: "bg-slate-500/10 text-slate-400 border-slate-500/20";
+		: isModerate
+			? "bg-amber-500/10 text-amber-500 border-amber-500/20"
+			: "bg-rose-500/10 text-rose-400 border-rose-500/20";
 
 	const statusText = isExcellent
 		? "EXCELLENT"
-		: isGood
-			? "GOOD"
-			: isPoor
-				? "MODERATE"
-				: "OPERATIONAL";
+		: isModerate
+			? "MODERATE"
+			: "POOR";
 
 	const percentColor = isExcellent
 		? "text-teal-600 dark:text-teal-400"
-		: isGood
-			? "text-emerald-600 dark:text-emerald-400"
-			: isPoor
-				? "text-amber-600 dark:text-amber-500"
-				: "text-slate-600 dark:text-slate-400";
+		: isModerate
+			? "text-amber-600 dark:text-amber-500"
+			: "text-rose-600 dark:text-rose-400";
 
 	return (
 		<div
@@ -142,7 +137,7 @@ export function IndexerHealthCard({ item, onDelete }: IndexerHealthCardProps) {
 							aria-label="Success rate percentage"
 						/>
 						<div
-							className="h-full bg-gradient-to-r from-rose-500/80 to-pink-600/80 shadow-[0_0_8px_rgba(239,68,68,0.3)] transition-all duration-700"
+							className={barFailClass}
 							style={{ width: `${barFailWidth}%` }}
 							role="progressbar"
 							aria-valuenow={barFailWidth}

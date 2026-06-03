@@ -1,7 +1,7 @@
 import { ArrowUpDown, Search } from "lucide-react";
 import type { SortKey } from "./types";
 
-type StatusFilter = "all" | "excellent" | "good" | "moderate" | "operational";
+type StatusFilter = "all" | "excellent" | "moderate" | "poor";
 
 interface IndexerHealthFiltersProps {
 	searchQuery: string;
@@ -50,7 +50,7 @@ export function IndexerHealthFilters({
 					<span className="mr-1 font-bold text-[10px] text-base-content/40 uppercase tracking-wider">
 						Filter
 					</span>
-					{(["all", "excellent", "good", "moderate", "operational"] as const).map((filter) => {
+					{(["all", "excellent", "moderate", "poor"] as const).map((filter) => {
 						const active = statusFilter === filter;
 						let btnClass =
 							"btn-ghost text-base-content/60 hover:text-base-content hover:bg-base-content/5 border-transparent";
@@ -58,15 +58,12 @@ export function IndexerHealthFilters({
 							if (filter === "excellent")
 								btnClass =
 									"bg-teal-500/15 border-teal-500/30 text-teal-400 shadow-[0_0_8px_rgba(20,184,166,0.25)]";
-							else if (filter === "good")
-								btnClass =
-									"bg-emerald-500/15 border-emerald-500/30 text-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.25)]";
 							else if (filter === "moderate")
 								btnClass =
 									"bg-amber-500/15 border-amber-500/30 text-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.25)]";
-							else if (filter === "operational")
+							else if (filter === "poor")
 								btnClass =
-									"bg-slate-500/15 border-slate-500/30 text-slate-400 shadow-[0_0_8px_rgba(148,163,184,0.25)]";
+									"bg-rose-500/15 border-rose-500/30 text-rose-400 shadow-[0_0_8px_rgba(244,63,94,0.25)]";
 							else
 								btnClass =
 									"bg-primary/15 border-primary/30 text-primary shadow-[0_0_8px_rgba(59,130,246,0.25)]";
