@@ -165,6 +165,7 @@ func (a *AsyncReadBuffer) ReadAtContext(ctx context.Context, p []byte, off int64
 	}
 
 	a.mu.Lock()
+	a.markSourceDoneIfCanceledLocked()
 	if a.closed {
 		a.mu.Unlock()
 		return a.src.ReadAtContext(ctx, p, off)
@@ -298,6 +299,7 @@ func (a *AsyncReadBuffer) fill() {
 			a.cond.Wait()
 		}
 		if a.closed || a.ctx.Err() != nil {
+			a.markSourceDoneIfCanceledLocked()
 			a.mu.Unlock()
 			return
 		}
@@ -306,6 +308,7 @@ func (a *AsyncReadBuffer) fill() {
 			a.cond.Wait()
 		}
 		if a.closed || a.ctx.Err() != nil {
+			a.markSourceDoneIfCanceledLocked()
 			a.mu.Unlock()
 			return
 		}
@@ -357,6 +360,14 @@ func (a *AsyncReadBuffer) fill() {
 		}
 		a.cond.Broadcast()
 		a.mu.Unlock()
+	}
+}
+
+func (a *AsyncReadBuffer) markSourceDoneIfCanceledLocked() {
+	if err := a.ctx.Err(); err != nil && a.streaming && !a.srcDone {
+		a.srcErr = err
+		a.srcDone = true
+		a.cond.Broadcast()
 	}
 }
 
