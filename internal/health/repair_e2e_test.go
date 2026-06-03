@@ -359,7 +359,10 @@ func TestE2E_FileRepairTriggered_ARRReturnsAlreadySatisfied(t *testing.T) {
 }
 
 // TestE2E_FileRepairTriggered_ARRReturnsPathNotFound verifies that when ARR returns
-// ErrPathMatchFailed the health record is deleted (orphan cleanup).
+// ErrPathMatchFailed (an ambiguous path miss — e.g. an ARR-renamed/reorganized library)
+// the file is NOT destroyed: the health record is kept (marked corrupted) and its metadata
+// is preserved, so the user's library symlink and the underlying virtual file survive.
+// Genuine orphans are removed separately by the guarded library-sync orphan pass.
 func TestE2E_FileRepairTriggered_ARRReturnsPathNotFound(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlinks not supported on Windows")
@@ -384,8 +387,15 @@ func TestE2E_FileRepairTriggered_ARRReturnsPathNotFound(t *testing.T) {
 	env.mockARRs.mu.Unlock()
 	assert.Equal(t, 1, callCount)
 
-	// Health record must be deleted, not set to repair_triggered.
+	// Health record must be preserved (not deleted) and marked corrupted: a path-match miss
+	// is not a reliable orphan signal, so the file must never be destroyed on this path.
 	fh, err := env.healthRepo.GetFileHealth(ctx, filePath)
 	require.NoError(t, err)
-	assert.Nil(t, fh, "health record should be deleted when ARR returns ErrPathMatchFailed")
+	require.NotNil(t, fh, "health record must NOT be deleted when ARR returns ErrPathMatchFailed")
+	assert.Equal(t, database.HealthStatusCorrupted, fh.Status)
+
+	// Metadata must be preserved (not deleted) so the underlying file/symlink survives.
+	original, readErr := env.metadataService.ReadFileMetadata(filePath)
+	require.NoError(t, readErr)
+	assert.NotNil(t, original, "metadata must be preserved when ARR returns ErrPathMatchFailed")
 }

@@ -1001,11 +1001,27 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, item *database.Fi
 
 	err := hw.arrsService.TriggerFileRescan(ctx, pathForRescan, filePath, metadataStr)
 	if err != nil {
-		if errors.Is(err, arrs.ErrEpisodeAlreadySatisfied) || errors.Is(err, arrs.ErrPathMatchFailed) {
-			slog.WarnContext(ctx, "File no longer tracked by ARR, removing from AltMount",
+		// ErrEpisodeAlreadySatisfied is an ID-based confirmation from the ARR (Smart Repair
+		// Guard) that this title was upgraded/replaced by a *different* file, so the AltMount
+		// copy is genuinely redundant and safe to remove.
+		if errors.Is(err, arrs.ErrEpisodeAlreadySatisfied) {
+			slog.WarnContext(ctx, "File replaced by a different file in ARR, removing redundant copy from AltMount",
 				"file_path", filePath, "arr_error", err)
 			hw.cleanupZombieRecord(ctx, item)
 			return repairOutcomeDeleted, nil
+		}
+
+		// ErrPathMatchFailed only means AltMount could not match its rescan path against the
+		// ARR library/queue. The ARR routinely renames and reorganizes imported files (symlink
+		// libraries, custom naming), so a path miss is NOT a reliable orphan signal: treating
+		// it as one deletes the user's library symlink and the underlying virtual file. Leave
+		// the file in place — genuine orphans are removed safely by the library-sync orphan
+		// pass (two consecutive misses + ratio guard + import-history check). Mark corrupted so
+		// it follows the normal repair retry/back-off instead of being destroyed.
+		if errors.Is(err, arrs.ErrPathMatchFailed) {
+			slog.WarnContext(ctx, "ARR rescan path did not match library; leaving file in place (library-sync handles real orphans)",
+				"file_path", filePath, "path_for_rescan", pathForRescan, "arr_error", err)
+			return repairOutcomeCorrupted, err
 		}
 
 		slog.ErrorContext(ctx, "Failed to trigger ARR rescan",
@@ -1051,10 +1067,20 @@ func (hw *HealthWorker) retriggerFileRepair(ctx context.Context, item *database.
 
 	err := hw.arrsService.TriggerFileRescan(ctx, pathForRescan, filePath, metadataStr)
 	if err != nil {
-		if errors.Is(err, arrs.ErrEpisodeAlreadySatisfied) || errors.Is(err, arrs.ErrPathMatchFailed) {
-			slog.WarnContext(ctx, "File no longer tracked by ARR during re-trigger, removing from AltMount", "file_path", filePath)
+		// See triggerFileRepair: only an ID-confirmed replacement (ErrEpisodeAlreadySatisfied)
+		// justifies deleting the AltMount copy. ErrPathMatchFailed is an ambiguous path miss
+		// (e.g. an ARR-renamed library) and must not delete the user's library file.
+		if errors.Is(err, arrs.ErrEpisodeAlreadySatisfied) {
+			slog.WarnContext(ctx, "File replaced by a different file in ARR, removing redundant copy from AltMount",
+				"file_path", filePath, "arr_error", err)
 			hw.cleanupZombieRecord(ctx, item)
 			return repairOutcomeDeleted, nil
+		}
+
+		if errors.Is(err, arrs.ErrPathMatchFailed) {
+			slog.WarnContext(ctx, "ARR rescan path did not match library on re-trigger; leaving file in place (library-sync handles real orphans)",
+				"file_path", filePath, "path_for_rescan", pathForRescan, "arr_error", err)
+			return repairOutcomeCorrupted, err
 		}
 
 		slog.ErrorContext(ctx, "Failed to re-trigger ARR rescan", "file_path", filePath, "error", err)
