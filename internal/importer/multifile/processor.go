@@ -2,6 +2,7 @@ package multifile
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -25,6 +26,8 @@ import (
 // overwhelming the NNTP connection pool (each file uses up to maxValidationGoroutines connections).
 const maxConcurrentFileValidations = 4
 
+var ErrNoFilesProcessed = errors.New("no regular files were successfully processed (all files failed validation)")
+
 // ProcessRegularFiles processes multiple regular files.
 // Returns the virtual paths of all metadata files successfully written, plus any error.
 // writtenPaths is populated even on partial failure (first-error mode).
@@ -42,6 +45,7 @@ func ProcessRegularFiles(
 	timeout time.Duration,
 	tracker *progress.Tracker,
 	filterSamples bool,
+	fastFailSegmentChecks int,
 ) ([]string, error) {
 	if len(files) == 0 {
 		return nil, nil
@@ -101,6 +105,21 @@ func ProcessRegularFiles(
 				return nil
 			}
 
+			if err := validation.FastFailSegmentCheck(
+				ctx,
+				[]validation.FastFailFile{{
+					Filename: filename,
+					Segments: file.Segments,
+				}},
+				poolManager,
+				fastFailSegmentChecks,
+				maxValidationGoroutines,
+				timeout,
+			); err != nil {
+				slog.WarnContext(ctx, "Skipping file due to fast-fail segment check error", "error", err, "file", filename)
+				return nil
+			}
+
 			if err := validation.ValidateSegmentsForFile(
 				ctx,
 				filename,
@@ -113,7 +132,8 @@ func ProcessRegularFiles(
 				fileTracker,
 				timeout,
 			); err != nil {
-				return err
+				slog.WarnContext(ctx, "Skipping file due to segment validation error", "error", err, "file", filename)
+				return nil
 			}
 
 			fileMeta := metadataService.CreateFileMetadata(
@@ -154,6 +174,10 @@ func ProcessRegularFiles(
 
 	if err := pl.Wait(); err != nil {
 		return writtenPaths, err
+	}
+
+	if len(writtenPaths) == 0 {
+		return writtenPaths, ErrNoFilesProcessed
 	}
 
 	slog.InfoContext(ctx, "Successfully processed regular files",

@@ -22,6 +22,7 @@ import (
 	"github.com/javi11/altmount/internal/importer/parser"
 	"github.com/javi11/altmount/internal/importer/singlefile"
 	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
+	"github.com/javi11/altmount/internal/importer/validation"
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/nzbfile"
@@ -166,6 +167,29 @@ func (proc *Processor) checkCancellation(ctx context.Context) error {
 	}
 }
 
+func (proc *Processor) fastFailImportSegments(ctx context.Context, files []parser.ParsedFile, maxConnections, count int) error {
+	if count <= 0 {
+		return nil
+	}
+
+	fastFailFiles := make([]validation.FastFailFile, 0, len(files))
+	for _, file := range files {
+		fastFailFiles = append(fastFailFiles, validation.FastFailFile{
+			Filename: file.Filename,
+			Segments: file.Segments,
+		})
+	}
+
+	return validation.FastFailSegmentCheck(
+		ctx,
+		fastFailFiles,
+		proc.poolManager,
+		count,
+		maxConnections,
+		proc.validationTimeout,
+	)
+}
+
 // ProcessNzbFile processes an NZB or STRM file maintaining the folder structure relative to relative path.
 // Returns (resultPath, writtenMetadataPaths, error). writtenMetadataPaths contains all virtual paths of
 // metadata files written to disk; it is populated even on partial failure so callers can clean up.
@@ -269,6 +293,12 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 			proc.log.WarnContext(ctx, "No NNTP providers configured, deferring item processing",
 				"file_path", filePath, "queue_id", queueID)
 			return "", nil, fmt.Errorf("no NNTP providers configured - item will be retried when providers are added")
+		}
+
+		if parsed.Type != parser.NzbTypeMultiFile {
+			if err := proc.fastFailImportSegments(ctx, parsed.Files, maxConnections, cfg.Import.FastFailSegmentChecks); err != nil {
+				return "", nil, NewNonRetryableError("fast-fail segment check failed", err)
+			}
 		}
 	}
 
@@ -585,6 +615,7 @@ func (proc *Processor) processMultiFile(
 		timeout,
 		fileTracker,
 		filterSampleFiles,
+		importCfg.FastFailSegmentChecks,
 	)
 	if err != nil {
 		return "", writtenPaths, err
@@ -684,6 +715,7 @@ func (proc *Processor) processRarArchive(
 			proc.validationTimeout,
 			nil, // No progress tracker for pre-archive regular files
 			filterSampleFiles,
+			0,
 		); err != nil {
 			slog.DebugContext(ctx, "Failed to process regular files", "error", err)
 		}
@@ -824,6 +856,7 @@ func (proc *Processor) processSevenZipArchive(
 			proc.validationTimeout,
 			nil, // No progress tracker for pre-archive regular files
 			filterSampleFiles,
+			0,
 		); err != nil {
 			slog.DebugContext(ctx, "Failed to process regular files", "error", err)
 		}

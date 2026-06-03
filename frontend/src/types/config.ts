@@ -242,6 +242,7 @@ export interface ImportConfig {
 	max_import_connections: number;
 	max_download_prefetch: number;
 	segment_sample_percentage: number; // Percentage of segments to check (1-100)
+	fast_fail_segment_checks: number;
 	read_timeout_seconds: number;
 	import_strategy: ImportStrategy;
 	import_dir?: string | null;
