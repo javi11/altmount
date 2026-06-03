@@ -475,6 +475,9 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 			sideEffect = func() error {
 				slog.ErrorContext(ctx, "File permanently marked as corrupted after repair retries exhausted", "file_path", fh.FilePath)
 
+				// Ensure metadata is hidden in the safety folder
+				hw.moveMetadataToSafetyFolder(ctx, fh)
+
 				// Log failure against the indexer if known
 				if fh.Indexer != nil && *fh.Indexer != "" && *fh.Indexer != database.IndexerUnknown {
 					errMsg := "Permanently corrupted"
@@ -1039,13 +1042,7 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, item *database.Fi
 	// If it hasn't been imported yet, we keep it visible so ARR can see the "Missing File"
 	// or "Empty Folder" and report its own warning, which helps the repair cycle.
 	if item.LibraryPath != nil && *item.LibraryPath != "" {
-		cfg := hw.configGetter()
-		relativePath := strings.TrimPrefix(filePath, cfg.MountPath)
-		relativePath = strings.TrimPrefix(relativePath, "/")
-		slog.InfoContext(ctx, "Moving metadata file for corrupted item to safety folder to trigger replacement", "file_path", filePath)
-		if moveErr := hw.metadataService.MoveToCorrupted(ctx, relativePath); moveErr != nil {
-			slog.WarnContext(ctx, "Failed to move corrupted metadata file, proceeding with repair trigger status", "error", moveErr)
-		}
+		hw.moveMetadataToSafetyFolder(ctx, item)
 	} else {
 		slog.InfoContext(ctx, "Skipping metadata move for corrupted item - file not yet imported by ARR", "file_path", filePath)
 	}
@@ -1054,7 +1051,7 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, item *database.Fi
 }
 
 // retriggerFileRepair re-triggers the ARR rescan for a file already in repair_triggered state.
-// Unlike triggerFileRepair it does NOT move metadata (already moved) and does NOT write to the DB.
+// Unlike triggerFileRepair it does NOT write to the DB.
 // Callers must apply the returned outcome to the HealthStatusUpdate before the bulk DB write.
 func (hw *HealthWorker) retriggerFileRepair(ctx context.Context, item *database.FileHealth) (repairOutcome, error) {
 	filePath := item.FilePath
@@ -1062,6 +1059,9 @@ func (hw *HealthWorker) retriggerFileRepair(ctx context.Context, item *database.
 	metadataStr := hw.ensureMetadata(ctx, item)
 
 	slog.InfoContext(ctx, "Re-triggering ARR rescan for file in repair", "file_path", filePath, "path_for_rescan", pathForRescan)
+
+	// Ensure metadata is moved to safety folder if the file has now been imported
+	hw.moveMetadataToSafetyFolder(ctx, item)
 
 	err := hw.arrsService.TriggerFileRescan(ctx, pathForRescan, filePath, metadataStr)
 	if err != nil {
@@ -1111,4 +1111,17 @@ func (hw *HealthWorker) ensureMetadata(ctx context.Context, item *database.FileH
 
 	slog.WarnContext(ctx, "Emergency ID discovery failed, falling back to path-based repair", "file_path", item.FilePath)
 	return nil
+}
+
+func (hw *HealthWorker) moveMetadataToSafetyFolder(ctx context.Context, item *database.FileHealth) {
+	if item.LibraryPath == nil || *item.LibraryPath == "" {
+		return
+	}
+	cfg := hw.configGetter()
+	relativePath := strings.TrimPrefix(item.FilePath, cfg.MountPath)
+	relativePath = strings.TrimPrefix(relativePath, "/")
+	slog.InfoContext(ctx, "Moving metadata file for corrupted item to safety folder to trigger replacement", "file_path", item.FilePath)
+	if moveErr := hw.metadataService.MoveToCorrupted(ctx, relativePath); moveErr != nil {
+		slog.WarnContext(ctx, "Failed to move corrupted metadata file", "error", moveErr)
+	}
 }
