@@ -16,14 +16,16 @@ import {
 	YAxis,
 } from "recharts";
 
-export const CHART_COLORS = [
-	"#3b82f6",
-	"#10b981",
-	"#f59e0b",
-	"#ef4444",
-	"#8b5cf6",
-	"#ec4899",
-	"#06b6d4",
+// Multi-series palette sourced from the active daisyUI theme so chart colors
+// follow the selected theme instead of fixed hex values.
+const CHART_COLORS = [
+	"var(--color-primary)",
+	"var(--color-success)",
+	"var(--color-warning)",
+	"var(--color-error)",
+	"var(--color-secondary)",
+	"var(--color-accent)",
+	"var(--color-info)",
 ];
 
 export type ChartDatum = Record<string, string | number>;
@@ -33,7 +35,7 @@ export interface TimeRangeTab {
 	value: number;
 }
 
-export interface TooltipPayloadItem {
+interface TooltipPayloadItem {
 	value: number;
 	dataKey: string;
 	stroke: string;
@@ -47,7 +49,7 @@ interface CustomTooltipProps {
 	totalClassName: string;
 }
 
-export function CustomTooltip({
+function CustomTooltip({
 	active,
 	payload,
 	label,
@@ -89,7 +91,7 @@ export function CustomTooltip({
  * Keeps an active/inactive toggle map in sync with the available providers,
  * defaulting newly seen providers to active.
  */
-export function useActiveProviders(providers: string[]) {
+function useActiveProviders(providers: string[]) {
 	const [activeProviders, setActiveProviders] = useState<Record<string, boolean>>({});
 
 	useEffect(() => {
@@ -125,7 +127,7 @@ interface TimeRangeTabsProps {
 	activeClassName: string;
 }
 
-export function TimeRangeTabs({ tabs, value, onChange, activeClassName }: TimeRangeTabsProps) {
+function TimeRangeTabs({ tabs, value, onChange, activeClassName }: TimeRangeTabsProps) {
 	return (
 		<div className="join rounded-xl border border-base-200/40 bg-base-200/50 p-0.5">
 			{tabs.map((tab) => (
@@ -272,7 +274,11 @@ export function ProviderAreaChart({
 											totalClassName={tooltipTotalClassName}
 										/>
 									}
-									cursor={{ stroke: "rgba(255,255,255,0.08)", strokeWidth: 1 }}
+									cursor={{
+										stroke: "var(--color-base-content)",
+										strokeOpacity: 0.1,
+										strokeWidth: 1,
+									}}
 								/>
 								<Legend
 									onClick={(e) => {
@@ -293,7 +299,8 @@ export function ProviderAreaChart({
 											formatter={(value, entry) => (
 												<span
 													style={{
-														color: !entry?.inactive ? "inherit" : "#666",
+														color: "inherit",
+														opacity: entry?.inactive ? 0.4 : 1,
 														textDecoration: !entry?.inactive ? "none" : "line-through",
 														paddingRight: "8px",
 													}}
@@ -349,8 +356,10 @@ export function ProviderAreaChart({
 									formatter={(value: number) => formatValue(value)}
 									contentStyle={{
 										borderRadius: "12px",
-										border: "1px solid hsl(var(--bc) / 0.1)",
-										backgroundColor: "hsl(var(--b1) / 0.95)",
+										border:
+											"1px solid color-mix(in oklch, var(--color-base-content) 10%, transparent)",
+										backgroundColor: "color-mix(in oklch, var(--color-base-100) 95%, transparent)",
+										color: "var(--color-base-content)",
 										fontSize: "11px",
 										backdropFilter: "blur(8px)",
 										boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.3)",

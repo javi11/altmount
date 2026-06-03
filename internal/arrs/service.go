@@ -8,6 +8,7 @@ import (
 
 	"github.com/javi11/altmount/internal/arrs/clients"
 	"github.com/javi11/altmount/internal/arrs/data"
+	"github.com/javi11/altmount/internal/arrs/failures"
 	"github.com/javi11/altmount/internal/arrs/instances"
 	"github.com/javi11/altmount/internal/arrs/model"
 	"github.com/javi11/altmount/internal/arrs/registrar"
@@ -48,8 +49,12 @@ func NewService(configGetter config.ConfigGetter, configManager model.ConfigMana
 	instManager := instances.NewManager(configGetter, configManager)
 	clientManager := clients.NewManager(httpclient.NewForExternal(configGetter().Network, 30*time.Second))
 	dataManager := data.NewManager()
-	scannerManager := scanner.NewManager(configGetter, instManager, clientManager, dataManager)
-	workerManager := worker.NewWorker(configGetter, instManager, clientManager, queueRepo)
+	// One failure tracker shared by every AltMount→arr re-acquire producer: the
+	// queue-cleanup worker and the scanner (repair re-triggers) count the same
+	// per-target keys.
+	failureTracker := failures.NewTracker()
+	scannerManager := scanner.NewManager(configGetter, instManager, clientManager, dataManager, failureTracker)
+	workerManager := worker.NewWorker(configGetter, instManager, clientManager, queueRepo, failureTracker)
 	registrarManager := registrar.NewManager(instManager, clientManager)
 
 	return &Service{
@@ -192,6 +197,29 @@ func (s *Service) GetFirstAdminAPIKey(ctx context.Context) string {
 	return ""
 }
 
+// SetArrsPaused engages or releases the Force Stop brake. While paused, AltMount
+// issues no outbound *arr requests: the queue-cleanup worker skips its ticks and
+// the health-repair re-trigger early-returns. The flag is in-memory only and
+// clears on restart.
+func (s *Service) SetArrsPaused(paused bool) {
+	s.worker.SetPaused(paused)
+}
+
+// IsArrsPaused reports whether the Force Stop brake is engaged.
+func (s *Service) IsArrsPaused() bool {
+	return s.worker.IsPaused()
+}
+
+// NoteImportFailure runs the importer-side failure breaker for a permanently
+// failed *arr-originated download: counts the failure per target against the
+// shared tracker and, at the queue_cleanup_max_failures threshold, unmonitors
+// the target and removes the *arr queue record with blocklist-without-re-search
+// (before the *arr's own failed-download handling can auto-re-search). See
+// worker.HandleImportFailure.
+func (s *Service) NoteImportFailure(ctx context.Context, downloadID, category string) {
+	s.worker.HandleImportFailure(ctx, downloadID, category)
+}
+
 // StartWorker starts the queue cleanup worker
 func (s *Service) StartWorker(ctx context.Context) error {
 	return s.worker.Start(ctx)
@@ -221,11 +249,6 @@ func (s *Service) RegisterConfigChangeHandler(ctx context.Context, configManager
 		slog.InfoContext(ctx, "ARR worker disabled via config change, stopping")
 		s.worker.Stop(ctx)
 	})
-}
-
-// CleanupQueue checks all ARR instances for importPending items with empty folders
-func (s *Service) CleanupQueue(ctx context.Context) error {
-	return s.worker.CleanupQueue(ctx)
 }
 
 // TriggerFileRescan triggers a rescan for a specific file path through the appropriate ARR instance

@@ -1134,7 +1134,7 @@ func (lsw *LibrarySyncWorker) processMetadataForSync(
 	releaseDateAsTime := time.Unix(releaseDate, 0)
 
 	// Calculate initial check time
-	scheduledCheckAt := calculateInitialCheck(releaseDateAsTime)
+	scheduledCheckAt := calculateInitialCheck()
 
 	cfg := lsw.configGetter()
 

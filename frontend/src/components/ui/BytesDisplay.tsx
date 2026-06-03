@@ -49,6 +49,3 @@ export function BytesDisplay({ bytes, mode = "inline" }: BytesDisplayProps) {
 			return <span className="text-base-content/70 text-sm">{humanReadable}</span>;
 	}
 }
-
-// Export the utility functions for use in other components
-export { formatBytes, formatNumber };

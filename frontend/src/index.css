@@ -100,11 +100,11 @@ fieldset {
 	width: 60px;
 	height: 120px;
 	border-radius: 30px;
-	background: rgba(0, 0, 0, 0.35);
-	border: 2px solid rgba(255, 255, 255, 0.12);
+	background: color-mix(in oklch, var(--color-base-300) 55%, transparent);
+	border: 2px solid color-mix(in oklch, var(--color-base-content) 12%, transparent);
 	box-shadow:
-		inset 0 0 16px rgba(0, 0, 0, 0.6),
-		0 8px 32px rgba(0, 0, 0, 0.4);
+		inset 0 0 16px rgba(0, 0, 0, 0.4),
+		0 8px 32px rgba(0, 0, 0, 0.25);
 	overflow: hidden;
 }
 
@@ -113,31 +113,47 @@ fieldset {
 	bottom: 0;
 	left: 0;
 	right: 0;
-	background: linear-gradient(180deg, rgba(16, 185, 129, 0.8) 0%, rgba(4, 120, 87, 0.95) 100%);
+	background: linear-gradient(
+		180deg,
+		color-mix(in oklch, var(--color-success) 80%, transparent) 0%,
+		var(--color-success) 100%
+	);
 	box-shadow:
-		0 0 20px rgba(16, 185, 129, 0.4),
+		0 0 20px color-mix(in oklch, var(--color-success) 40%, transparent),
 		inset 0 8px 12px rgba(255, 255, 255, 0.25);
 	transition: height 1.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .vial-liquid.excellent {
-	background: linear-gradient(180deg, rgba(20, 184, 166, 0.8) 0%, rgba(15, 118, 110, 0.95) 100%);
+	background: linear-gradient(
+		180deg,
+		color-mix(in oklch, var(--color-success) 80%, transparent) 0%,
+		var(--color-success) 100%
+	);
 	box-shadow:
-		0 0 20px rgba(20, 184, 166, 0.4),
+		0 0 20px color-mix(in oklch, var(--color-success) 40%, transparent),
 		inset 0 8px 12px rgba(255, 255, 255, 0.25);
 }
 
 .vial-liquid.warning {
-	background: linear-gradient(180deg, rgba(245, 158, 11, 0.8) 0%, rgba(180, 83, 9, 0.95) 100%);
+	background: linear-gradient(
+		180deg,
+		color-mix(in oklch, var(--color-warning) 80%, transparent) 0%,
+		var(--color-warning) 100%
+	);
 	box-shadow:
-		0 0 20px rgba(245, 158, 11, 0.4),
+		0 0 20px color-mix(in oklch, var(--color-warning) 40%, transparent),
 		inset 0 8px 12px rgba(255, 255, 255, 0.25);
 }
 
 .vial-liquid.error {
-	background: linear-gradient(180deg, rgba(239, 68, 68, 0.85) 0%, rgba(185, 28, 28, 0.95) 100%);
+	background: linear-gradient(
+		180deg,
+		color-mix(in oklch, var(--color-error) 85%, transparent) 0%,
+		var(--color-error) 100%
+	);
 	box-shadow:
-		0 0 20px rgba(239, 68, 68, 0.45),
+		0 0 20px color-mix(in oklch, var(--color-error) 45%, transparent),
 		inset 0 8px 12px rgba(255, 255, 255, 0.25);
 }
 
@@ -148,7 +164,7 @@ fieldset {
 	width: 140px;
 	height: 140px;
 	border-radius: 44%;
-	background: rgba(15, 17, 23, 0.95);
+	background: var(--color-base-300);
 	animation: liquid-wave 8s linear infinite;
 	transform-origin: 50% 50%;
 }

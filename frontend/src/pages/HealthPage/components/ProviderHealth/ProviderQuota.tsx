@@ -58,12 +58,12 @@ export function ProviderQuota() {
 						return (
 							<div
 								key={provider.id}
-								className="group relative flex flex-col items-center justify-between rounded-xl border border-base-200/30 bg-black/25 p-4 shadow-lg transition-all duration-300 hover:border-primary/20"
+								className="group relative flex flex-col items-center justify-between rounded-xl border border-base-200/30 bg-base-300/30 p-4 shadow-lg transition-all duration-300 hover:border-primary/20"
 							>
 								{/* Card Header with Host and Reset button */}
 								<div className="mb-4 flex w-full items-center justify-between border-base-200/30 border-b pb-2">
 									<span
-										className="max-w-[130px] truncate font-bold text-slate-100 text-sm tracking-wide"
+										className="max-w-[130px] truncate font-bold text-base-content text-sm tracking-wide"
 										title={provider.host}
 									>
 										{getProviderBrandName(provider.host)}
@@ -71,7 +71,7 @@ export function ProviderQuota() {
 									{percentage > 0 && (
 										<button
 											type="button"
-											className="btn btn-xs btn-ghost btn-circle text-slate-400 hover:text-white"
+											className="btn btn-xs btn-ghost btn-circle text-base-content/60 hover:text-base-content"
 											onClick={() => handleReset(provider.id)}
 											disabled={resettingId === provider.id}
 											title="Reset Quota"
@@ -88,7 +88,7 @@ export function ProviderQuota() {
 								{/* Physical Cylinder/Vial with Tick Marks */}
 								<div className="relative flex h-[150px] w-full items-center justify-center py-4">
 									{/* Left Tick Marks */}
-									<div className="pointer-events-none absolute left-[15%] flex h-[120px] select-none flex-col justify-between pr-2 text-right font-mono text-[8px] text-slate-500">
+									<div className="pointer-events-none absolute left-[15%] flex h-[120px] select-none flex-col justify-between pr-2 text-right font-mono text-[8px] text-base-content/40">
 										<span>100%</span>
 										<span>75%</span>
 										<span>50%</span>
@@ -124,16 +124,16 @@ export function ProviderQuota() {
 									</div>
 
 									{/* Numeric Percentage display rotated */}
-									<div className="pointer-events-none absolute right-[15%] select-none pl-2 font-bold font-mono text-[9px] text-slate-400">
+									<div className="pointer-events-none absolute right-[15%] select-none pl-2 font-bold font-mono text-[9px] text-base-content/60">
 										<div className="flex flex-col items-center">
 											<span
 												className={
-													isError ? "text-error" : isWarning ? "text-warning" : "text-emerald-400"
+													isError ? "text-error" : isWarning ? "text-warning" : "text-success"
 												}
 											>
 												{remainingPercent}%
 											</span>
-											<span className="mt-0.5 text-[7px] text-slate-500 uppercase tracking-wider">
+											<span className="mt-0.5 text-[7px] text-base-content/40 uppercase tracking-wider">
 												Left
 											</span>
 										</div>
@@ -142,7 +142,7 @@ export function ProviderQuota() {
 
 								{/* Numerical stats at the bottom */}
 								<div className="mt-4 w-full space-y-1 text-center">
-									<div className="font-mono font-semibold text-slate-300 text-xs">
+									<div className="font-mono font-semibold text-base-content/70 text-xs">
 										{formatBytes(used)} / {formatBytes(total)}
 									</div>
 									<div className="font-mono text-[10px] text-base-content/40">
@@ -155,7 +155,7 @@ export function ProviderQuota() {
 												Resets {formatRelativeTime(provider.quota_reset_at)}
 											</div>
 										) : (
-											<div className="py-1 font-mono text-[9px] text-slate-500">
+											<div className="py-1 font-mono text-[9px] text-base-content/40">
 												No schedule reset
 											</div>
 										)}
