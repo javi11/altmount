@@ -25,25 +25,3 @@ export function ErrorAlert({ error, onRetry, className }: ErrorAlertProps) {
 		</div>
 	);
 }
-
-export function ErrorCard({ error, onRetry }: ErrorAlertProps) {
-	return (
-		<div className="card bg-base-100 shadow-lg">
-			<div className="card-body">
-				<h2 className="card-title text-error">
-					<AlertCircle className="h-6 w-6" />
-					Error
-				</h2>
-				<p>{error.message}</p>
-				{onRetry && (
-					<div className="card-actions justify-end">
-						<button type="button" className="btn btn-primary" onClick={onRetry}>
-							<RefreshCw className="h-4 w-4" />
-							Try Again
-						</button>
-					</div>
-				)}
-			</div>
-		</div>
-	);
-}

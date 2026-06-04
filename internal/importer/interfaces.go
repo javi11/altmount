@@ -54,66 +54,6 @@ type QueueOperations interface {
 	GetQueueStats(ctx context.Context) (*database.QueueStats, error)
 }
 
-// SymlinkCreator handles symlink creation for imported files
-type SymlinkCreator interface {
-	// CreateSymlinks creates symlinks for an imported item
-	CreateSymlinks(item *database.ImportQueueItem, resultingPath string) error
-}
-
-// StrmGenerator handles STRM file generation
-type StrmGenerator interface {
-	// CreateStrmFiles creates STRM files for an imported item
-	CreateStrmFiles(item *database.ImportQueueItem, resultingPath string) error
-}
-
-// VFSNotifier handles rclone VFS cache notifications
-type VFSNotifier interface {
-	// NotifyVFS notifies rclone VFS about file changes
-	NotifyVFS(ctx context.Context, resultingPath string, async bool)
-	// RefreshMountPathIfNeeded refreshes the mount path cache if required
-	RefreshMountPathIfNeeded(ctx context.Context, resultingPath string, itemID int64)
-}
-
-// HealthScheduler handles health check scheduling for imported files
-type HealthScheduler interface {
-	// ScheduleHealthCheck schedules a health check for an imported file
-	ScheduleHealthCheck(ctx context.Context, filePath string, sourceNzb string, priority database.HealthPriority) error
-}
-
-// ARRNotifier handles notifications to ARR applications (Sonarr/Radarr)
-type ARRNotifier interface {
-	// NotifyARR notifies ARR applications about imported content
-	NotifyARR(ctx context.Context, item *database.ImportQueueItem, resultingPath string) error
-}
-
-// SABnzbdFallback handles fallback to external SABnzbd for failed imports
-type SABnzbdFallback interface {
-	// AttemptFallback tries to send a failed import to external SABnzbd
-	AttemptFallback(ctx context.Context, item *database.ImportQueueItem) error
-}
-
-// IDMetadataLinker handles NzbDav ID metadata linking
-type IDMetadataLinker interface {
-	// HandleIDMetadataLinks creates ID-based metadata links
-	HandleIDMetadataLinks(item *database.ImportQueueItem, resultingPath string)
-}
-
-// PostProcessor coordinates all post-import processing steps
-type PostProcessor interface {
-	SymlinkCreator
-	StrmGenerator
-	VFSNotifier
-	HealthScheduler
-	ARRNotifier
-	SABnzbdFallback
-	IDMetadataLinker
-
-	// HandleSuccess performs all post-processing for successful imports
-	HandleSuccess(ctx context.Context, item *database.ImportQueueItem, resultingPath string) error
-	// HandleFailure performs all cleanup for failed imports
-	HandleFailure(ctx context.Context, item *database.ImportQueueItem, processingErr error) error
-}
-
 // ImportService is the main interface combining all importer capabilities
 type ImportService interface {
 	QueueManager
@@ -131,12 +71,6 @@ type ImportService interface {
 	RegisterConfigChangeHandler(configManager any)
 	// RegenerateMetadata attempts to rebuild metadata for a file by finding its original NZB
 	RegenerateMetadata(ctx context.Context, mountRelativePath string) error
-}
-
-// FileSizeCalculator calculates file sizes for different file types
-type FileSizeCalculator interface {
-	// CalculateFileSizeOnly calculates the size of a file without full processing
-	CalculateFileSizeOnly(filePath string) (int64, error)
 }
 
 // HistoryRecorder records successful import events in persistent storage

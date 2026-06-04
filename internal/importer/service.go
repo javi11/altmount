@@ -361,8 +361,13 @@ func (s *Service) ProcessItem(ctx context.Context, item *database.ImportQueueIte
 
 // HandleSuccess implements queue.ItemProcessor - handles successful processing
 func (s *Service) HandleSuccess(ctx context.Context, item *database.ImportQueueItem, resultingPath string) error {
-	s.writtenPathsCache.Delete(item.ID)
-	return s.handleProcessingSuccess(ctx, item, resultingPath)
+	// The written virtual paths are carried over from ProcessItem so multi-file
+	// imports (season packs) can schedule a per-episode post-import health check.
+	var writtenPaths []string
+	if paths, ok := s.writtenPathsCache.LoadAndDelete(item.ID); ok {
+		writtenPaths, _ = paths.([]string)
+	}
+	return s.handleProcessingSuccess(ctx, item, resultingPath, writtenPaths)
 }
 
 // HandleFailure implements queue.ItemProcessor - handles failed processing
@@ -1049,8 +1054,10 @@ func (s *Service) resolveIndexerFromArrs(ctx context.Context, downloadID string)
 	return as.ResolveIndexerByDownloadID(ctx, downloadID)
 }
 
-// handleProcessingSuccess handles all steps after successful NZB processing
-func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.ImportQueueItem, resultingPath string) error {
+// handleProcessingSuccess handles all steps after successful NZB processing.
+// writtenPaths lists every virtual file the import wrote (may be nil for legacy
+// callers); multi-file imports use it to health-check each file individually.
+func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.ImportQueueItem, resultingPath string, writtenPaths []string) error {
 	// Log persistent indexer statistic
 	indexerName := database.IndexerUnknown
 	if item.Indexer != nil && *item.Indexer != "" {
@@ -1090,7 +1097,7 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 
 	// Delegate all post-processing to the coordinator
 	// This handles: VFS notification, symlinks, ID links, STRM files, health checks, ARR notifications
-	result, err := s.postProcessor.HandleSuccess(ctx, item, resultingPath)
+	result, err := s.postProcessor.HandleSuccess(ctx, item, resultingPath, writtenPaths)
 	if err != nil {
 		s.log.ErrorContext(ctx, "Post-processing failed", "queue_id", item.ID, "error", err)
 		return err
@@ -1427,7 +1434,7 @@ func (s *Service) ProcessItemInBackground(ctx context.Context, itemID int64) {
 			s.handleProcessingFailure(ctx, item, processingErr)
 		} else {
 			// Handle success (storage path, VFS notification, symlinks, status update)
-			s.handleProcessingSuccess(ctx, item, resultingPath)
+			s.handleProcessingSuccess(ctx, item, resultingPath, writtenPaths)
 		}
 	}()
 }

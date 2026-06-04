@@ -137,7 +137,6 @@ export function ConfigurationPage() {
 		}
 	}, [section, navigate]);
 
-	const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 	const [restartRequiredConfigs, setRestartRequiredConfigs] = useState<string[]>([]);
 	const [isRestartBannerDismissed, setIsRestartBannerDismissed] = useState(() => {
 		// Initialize from session storage on component mount
@@ -159,7 +158,6 @@ export function ConfigurationPage() {
 	const handleReloadConfig = async () => {
 		try {
 			await reloadConfig.mutateAsync();
-			setHasUnsavedChanges(false);
 			setRestartRequiredConfigs([]);
 			setIsRestartBannerDismissed(false);
 			sessionStorage.removeItem("restartBannerDismissed");
@@ -186,7 +184,6 @@ export function ConfigurationPage() {
 		try {
 			await restartServer.mutateAsync(false);
 			// Clear local state since server is restarting
-			setHasUnsavedChanges(false);
 			setRestartRequiredConfigs([]);
 			setIsRestartBannerDismissed(false);
 			sessionStorage.removeItem("restartBannerDismissed");
@@ -350,12 +347,6 @@ export function ConfigurationPage() {
 				</div>
 
 				<div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
-					{hasUnsavedChanges && (
-						<div className="badge badge-warning badge-sm animate-pulse gap-1 py-3 font-bold">
-							<AlertTriangle className="h-3 w-3" /> UNSAVED
-						</div>
-					)}
-
 					<button
 						type="button"
 						className="btn btn-ghost btn-sm border-base-300 bg-base-100 hover:bg-base-200"

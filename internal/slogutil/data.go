@@ -8,12 +8,6 @@ import (
 
 type data map[string]slog.Attr
 
-func (d data) append(attrs ...slog.Attr) {
-	for _, attr := range attrs {
-		d[attr.Key] = attr
-	}
-}
-
 type dataKey struct{}
 
 func cloneData(ctx context.Context) data {
@@ -23,18 +17,6 @@ func cloneData(ctx context.Context) data {
 	}
 
 	return maps.Clone(d)
-}
-
-// WithAttrs returns a new context with the given attributes.
-func WithAttrs(ctx context.Context, attrs ...slog.Attr) context.Context {
-	if len(attrs) == 0 {
-		return ctx
-	}
-
-	d := cloneData(ctx)
-	d.append(attrs...)
-
-	return context.WithValue(ctx, dataKey{}, d)
 }
 
 // With returns a new context with the given key-value pairs.

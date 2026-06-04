@@ -673,6 +673,35 @@ export const useTestArrsDownloadClients = () => {
 	});
 };
 
+// ARR Force Stop (pause) hooks
+export const useArrsPaused = () => {
+	return useQuery({
+		queryKey: ["arrs", "pause"],
+		queryFn: () => apiClient.getArrsPaused(),
+		refetchInterval: 15000,
+	});
+};
+
+export const useSetArrsPaused = () => {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: () => apiClient.setArrsPaused(),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["arrs", "pause"] });
+		},
+	});
+};
+
+export const useResumeArrs = () => {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: () => apiClient.resumeArrs(),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["arrs", "pause"] });
+		},
+	});
+};
+
 // Indexer health hooks
 export const useIndexerStats = () => {
 	return useQuery({

@@ -5,7 +5,9 @@ package postprocessor
 
 import (
 	"context"
+	stderrors "errors"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -76,8 +78,10 @@ type ProcessingResult struct {
 	Errors          []error
 }
 
-// HandleSuccess performs all post-processing for successful imports
-func (c *Coordinator) HandleSuccess(ctx context.Context, item *database.ImportQueueItem, resultingPath string) (*ProcessingResult, error) {
+// HandleSuccess performs all post-processing for successful imports.
+// writtenPaths lists every virtual file the import wrote (nil falls back to
+// resultingPath); multi-file imports (season packs) get a per-file health check.
+func (c *Coordinator) HandleSuccess(ctx context.Context, item *database.ImportQueueItem, resultingPath string, writtenPaths []string) (*ProcessingResult, error) {
 	c.mu.RLock()
 	rcloneClient := c.rcloneClient
 	arrsService := c.arrsService
@@ -126,7 +130,7 @@ func (c *Coordinator) HandleSuccess(ctx context.Context, item *database.ImportQu
 	}
 
 	// 4. Schedule health check
-	if err := c.ScheduleHealthCheck(ctx, item, resultingPath); err != nil {
+	if err := c.ScheduleHealthCheck(ctx, item, resultingPath, writtenPaths); err != nil {
 		c.log.WarnContext(ctx, "Failed to schedule health check",
 			"path", resultingPath,
 			"error", err)
@@ -153,7 +157,7 @@ func (c *Coordinator) HandleSuccess(ctx context.Context, item *database.ImportQu
 }
 
 // HandleFailure performs cleanup and fallback for failed imports
-func (c *Coordinator) HandleFailure(ctx context.Context, item *database.ImportQueueItem, _ error) error {
+func (c *Coordinator) HandleFailure(ctx context.Context, item *database.ImportQueueItem, processingErr error) error {
 	cfg := c.configGetter()
 
 	// Attempt SABnzbd fallback if configured — the download is transferred to
@@ -172,6 +176,19 @@ func (c *Coordinator) HandleFailure(ctx context.Context, item *database.ImportQu
 		c.mu.RUnlock()
 
 		if arrsService != nil {
+			// Importer-side failure breaker: count this failure per target and, at
+			// the threshold, unmonitor + blocklist-without-re-search in the *arr.
+			// Must run BEFORE the failure notification below so the *arr's
+			// failed-download handling can't auto-re-search a given-up target.
+			// User cancellations are not failures and never count.
+			if item.DownloadID != nil && *item.DownloadID != "" && !isCancellation(processingErr) {
+				category := ""
+				if item.Category != nil {
+					category = *item.Category
+				}
+				arrsService.NoteImportFailure(ctx, *item.DownloadID, category)
+			}
+
 			if err := c.broadcastToARRType(ctx, arrsService, item); err != nil {
 				c.log.DebugContext(ctx, "ARR failure notification not sent",
 					"queue_id", item.ID,
@@ -184,6 +201,20 @@ func (c *Coordinator) HandleFailure(ctx context.Context, item *database.ImportQu
 	}
 
 	return errors.ErrFallbackNotConfigured
+}
+
+// isCancellation reports whether a processing error represents a user-initiated
+// cancellation rather than a genuine import failure (mirrors the importer's own
+// cancellation detection).
+func isCancellation(err error) bool {
+	if err == nil {
+		return false
+	}
+	if stderrors.Is(err, context.Canceled) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "context canceled") || strings.Contains(msg, "processing cancelled")
 }
 
 // shouldSkipARRNotification returns true when the caller explicitly requested

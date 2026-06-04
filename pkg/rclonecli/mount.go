@@ -79,23 +79,6 @@ func (m *Mount) IsMounted() bool {
 	return m.rcManager.IsMounted(m.Provider)
 }
 
-// RefreshDir refreshes directories in the mount
-func (m *Mount) RefreshDir(ctx context.Context, dirs []string) error {
-	if m.rcManager == nil {
-		return fmt.Errorf("rclone manager is not available")
-	}
-
-	if !m.IsMounted() {
-		return fmt.Errorf("provider %s not properly mounted. Skipping refreshes", m.Provider)
-	}
-
-	if err := m.rcManager.RefreshDir(ctx, m.Provider, dirs); err != nil {
-		return fmt.Errorf("failed to refresh directories for %s: %w", m.Provider, err)
-	}
-
-	return nil
-}
-
 // GetMountInfo returns mount information
 func (m *Mount) GetMountInfo() (*MountInfo, bool) {
 	if m.rcManager == nil {

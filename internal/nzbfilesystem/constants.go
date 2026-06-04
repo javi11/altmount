@@ -53,41 +53,19 @@ func (e *CorruptedFileError) Unwrap() error {
 
 // Error message constants
 var (
-	ErrCannotRemoveRoot     = errors.New("cannot remove root directory")
-	ErrCannotRenameRoot     = errors.New("cannot rename root directory")
-	ErrCannotRenameToRoot   = errors.New("cannot rename to root directory")
-	ErrDestinationExists    = errors.New("destination already exists")
-	ErrNotDirectory         = errors.New("not a directory")
-	ErrCannotReadDirectory  = errors.New("cannot read from directory")
-	ErrNegativeOffset       = errors.New("negative offset")
-	ErrVirtualFileNotInit   = errors.New("virtual file not initialized")
-	ErrMissmatchedSegments  = errors.New("missmatched segments for file size")
-	ErrNoUsenetPool         = errors.New("usenet connection pool not configured")
-	ErrNoCipherConfig       = errors.New("no cipher configured for encryption")
-	ErrNoEncryptionParams   = errors.New("no NZB data available for encryption parameters")
-	ErrTruncateNotSupported = errors.New("truncate not supported for virtual files")
-	ErrWriteNotSupported    = errors.New("write not supported for virtual files")
-	ErrFailedListDirectory  = errors.New("failed to list directory contents")
-	ErrFileIsCorrupted      = errors.New("file is corrupted, there are some missing segments")
+	ErrCannotRemoveRoot    = errors.New("cannot remove root directory")
+	ErrNotDirectory        = errors.New("not a directory")
+	ErrCannotReadDirectory = errors.New("cannot read from directory")
+	ErrNegativeOffset      = errors.New("negative offset")
+	ErrMissmatchedSegments = errors.New("missmatched segments for file size")
+	ErrNoUsenetPool        = errors.New("usenet connection pool not configured")
+	ErrNoCipherConfig      = errors.New("no cipher configured for encryption")
+	ErrNoEncryptionParams  = errors.New("no NZB data available for encryption parameters")
+	ErrFileIsCorrupted     = errors.New("file is corrupted, there are some missing segments")
 )
 
 // Database operation error message templates
 const (
-	ErrMsgFailedQueryVirtualFile    = "failed to query virtual file: %w"
-	ErrMsgFailedDeleteVirtualFile   = "failed to delete virtual file: %w"
-	ErrMsgFailedCheckDestination    = "failed to check destination: %w"
-	ErrMsgFailedFindParent          = "failed to find parent directory: %w"
-	ErrMsgFailedMoveFile            = "failed to move file: %w"
-	ErrMsgFailedUpdateFilename      = "failed to update filename: %w"
-	ErrMsgFailedGetDescendants      = "failed to get descendants: %w"
-	ErrMsgFailedUpdateDescPath      = "failed to update descendant path: %w"
-	ErrMsgFailedListDirectory       = "failed to list directory contents: %w"
-	ErrMsgFailedCreateUsenetReader  = "failed to create usenet reader: %w"
 	ErrMsgFailedCreateDecryptReader = "failed to create decrypt reader: %w"
 	ErrMsgFailedWrapEncryption      = "failed to wrap reader with encryption: %w"
-)
-
-// Range validation error message templates
-const (
-	ErrMsgReadOutsideRange = "read offset %d is outside requested range %d-%d"
 )

@@ -15,7 +15,7 @@ const (
 )
 
 // calculateInitialCheck calculates the first check time for a newly discovered file
-func calculateInitialCheck(releaseDate time.Time) time.Time {
+func calculateInitialCheck() time.Time {
 	// Spread initial checks over the next 24 hours to avoid thundering herd on bulk imports
 	jitterMinutes := rand.Intn(1440)
 	return time.Now().UTC().Add(time.Duration(jitterMinutes) * time.Minute)

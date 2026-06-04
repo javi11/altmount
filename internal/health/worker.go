@@ -28,6 +28,9 @@ import (
 type ARRsRepairService interface {
 	TriggerFileRescan(ctx context.Context, pathForRescan string, relativePath string, metadataStr *string) error
 	DiscoverFileMetadata(ctx context.Context, filePath, relativePath, nzbName, libraryPath string) (*model.WebhookMetadata, error)
+	// IsArrsPaused reports whether the Force Stop brake is engaged. When true the
+	// worker must not issue any *arr request (repair re-triggers are deferred).
+	IsArrsPaused() bool
 }
 
 // WorkerStatus represents the current status of the health worker
@@ -202,13 +205,6 @@ func (hw *HealthWorker) IsRunning() bool {
 	return hw.running
 }
 
-// GetStatus returns the current worker status
-func (hw *HealthWorker) GetStatus() WorkerStatus {
-	hw.mu.RLock()
-	defer hw.mu.RUnlock()
-	return hw.status
-}
-
 // GetStats returns current worker statistics
 func (hw *HealthWorker) GetStats() WorkerStats {
 	hw.statsMu.RLock()
@@ -252,13 +248,6 @@ func (hw *HealthWorker) IsCheckActive(filePath string) bool {
 
 	_, exists := hw.activeChecks[filePath]
 	return exists
-}
-
-// IsCycleRunning returns whether a health check cycle is currently running
-func (hw *HealthWorker) IsCycleRunning() bool {
-	hw.mu.RLock()
-	defer hw.mu.RUnlock()
-	return hw.cycleRunning
 }
 
 // run is the main worker loop
@@ -906,6 +895,7 @@ const (
 	repairOutcomeCorrupted                        // ARR failed with a generic error; mark file corrupted
 	repairOutcomeDeleted                          // Health record and/or metadata were deleted (zombie)
 	repairOutcomeRegenerated                      // Metadata was successfully regenerated from NZB
+	repairOutcomePaused                           // Force Stop active; leave the record untouched and retry later
 )
 
 // applyRepairOutcome maps a repairOutcome to the corresponding fields on the HealthStatusUpdate.
@@ -913,6 +903,11 @@ func applyRepairOutcome(update *database.HealthStatusUpdate, outcome repairOutco
 	switch outcome {
 	case repairOutcomeTriggered:
 		update.Type = database.UpdateTypeRepairRetry
+	case repairOutcomePaused:
+		// Force Stop is active: leave the record exactly as it was so it is
+		// re-evaluated on a later cycle once the brake is released. No retry is
+		// consumed and no status change is written.
+		update.Skip = true
 	case repairOutcomeDeleted:
 		update.Skip = true
 	case repairOutcomeRegenerated:
@@ -977,6 +972,13 @@ func (hw *HealthWorker) cleanupZombieRecord(ctx context.Context, item *database.
 func (hw *HealthWorker) triggerFileRepair(ctx context.Context, item *database.FileHealth, errorMsg *string, errorDetails *string) (repairOutcome, error) {
 	filePath := item.FilePath
 
+	// Force Stop brake: don't issue any *arr request while paused. Leave the record
+	// untouched so it is retried on a later cycle once the brake is released.
+	if hw.arrsService.IsArrsPaused() {
+		slog.InfoContext(ctx, "Force Stop active, deferring ARR repair trigger", "file_path", filePath)
+		return repairOutcomePaused, nil
+	}
+
 	// Check if file metadata still exists. If not, the file is gone (likely upgraded/deleted by Sonarr already)
 	// and this health record is a zombie.
 	var metadataErr error
@@ -1018,11 +1020,27 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, item *database.Fi
 
 	err := hw.arrsService.TriggerFileRescan(ctx, pathForRescan, filePath, metadataStr)
 	if err != nil {
-		if errors.Is(err, arrs.ErrEpisodeAlreadySatisfied) || errors.Is(err, arrs.ErrPathMatchFailed) {
-			slog.WarnContext(ctx, "File no longer tracked by ARR, removing from AltMount",
+		// ErrEpisodeAlreadySatisfied is an ID-based confirmation from the ARR (Smart Repair
+		// Guard) that this title was upgraded/replaced by a *different* file, so the AltMount
+		// copy is genuinely redundant and safe to remove.
+		if errors.Is(err, arrs.ErrEpisodeAlreadySatisfied) {
+			slog.WarnContext(ctx, "File replaced by a different file in ARR, removing redundant copy from AltMount",
 				"file_path", filePath, "arr_error", err)
 			hw.cleanupZombieRecord(ctx, item)
 			return repairOutcomeDeleted, nil
+		}
+
+		// ErrPathMatchFailed only means AltMount could not match its rescan path against the
+		// ARR library/queue. The ARR routinely renames and reorganizes imported files (symlink
+		// libraries, custom naming), so a path miss is NOT a reliable orphan signal: treating
+		// it as one deletes the user's library symlink and the underlying virtual file. Leave
+		// the file in place — genuine orphans are removed safely by the library-sync orphan
+		// pass (two consecutive misses + ratio guard + import-history check). Mark corrupted so
+		// it follows the normal repair retry/back-off instead of being destroyed.
+		if errors.Is(err, arrs.ErrPathMatchFailed) {
+			slog.WarnContext(ctx, "ARR rescan path did not match library; leaving file in place (library-sync handles real orphans)",
+				"file_path", filePath, "path_for_rescan", pathForRescan, "arr_error", err)
+			return repairOutcomeCorrupted, err
 		}
 
 		slog.ErrorContext(ctx, "Failed to trigger ARR rescan",
@@ -1055,6 +1073,13 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, item *database.Fi
 // Callers must apply the returned outcome to the HealthStatusUpdate before the bulk DB write.
 func (hw *HealthWorker) retriggerFileRepair(ctx context.Context, item *database.FileHealth) (repairOutcome, error) {
 	filePath := item.FilePath
+
+	// Force Stop brake: defer the re-trigger while paused (see triggerFileRepair).
+	if hw.arrsService.IsArrsPaused() {
+		slog.InfoContext(ctx, "Force Stop active, deferring ARR repair re-trigger", "file_path", filePath)
+		return repairOutcomePaused, nil
+	}
+
 	pathForRescan := hw.resolvePathForRescan(item)
 	metadataStr := hw.ensureMetadata(ctx, item)
 
@@ -1065,10 +1090,20 @@ func (hw *HealthWorker) retriggerFileRepair(ctx context.Context, item *database.
 
 	err := hw.arrsService.TriggerFileRescan(ctx, pathForRescan, filePath, metadataStr)
 	if err != nil {
-		if errors.Is(err, arrs.ErrEpisodeAlreadySatisfied) || errors.Is(err, arrs.ErrPathMatchFailed) {
-			slog.WarnContext(ctx, "File no longer tracked by ARR during re-trigger, removing from AltMount", "file_path", filePath)
+		// See triggerFileRepair: only an ID-confirmed replacement (ErrEpisodeAlreadySatisfied)
+		// justifies deleting the AltMount copy. ErrPathMatchFailed is an ambiguous path miss
+		// (e.g. an ARR-renamed library) and must not delete the user's library file.
+		if errors.Is(err, arrs.ErrEpisodeAlreadySatisfied) {
+			slog.WarnContext(ctx, "File replaced by a different file in ARR, removing redundant copy from AltMount",
+				"file_path", filePath, "arr_error", err)
 			hw.cleanupZombieRecord(ctx, item)
 			return repairOutcomeDeleted, nil
+		}
+
+		if errors.Is(err, arrs.ErrPathMatchFailed) {
+			slog.WarnContext(ctx, "ARR rescan path did not match library on re-trigger; leaving file in place (library-sync handles real orphans)",
+				"file_path", filePath, "path_for_rescan", pathForRescan, "arr_error", err)
+			return repairOutcomeCorrupted, err
 		}
 
 		slog.ErrorContext(ctx, "Failed to re-trigger ARR rescan", "file_path", filePath, "error", err)

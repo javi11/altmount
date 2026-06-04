@@ -40,7 +40,6 @@ func TestFindInstanceForFilePath_CategoryMatch(t *testing.T) {
 			wantType:    "sonarr",
 			wantName:    "sonarr_instance",
 		},
-
 	}
 
 	for _, tt := range tests {
@@ -76,7 +75,7 @@ func TestFindInstanceForFilePath_CategoryMatch(t *testing.T) {
 
 			instMgr := instances.NewManager(configGetter, nil)
 			clientMgr := clients.NewManager(nil)
-			mgr := NewManager(configGetter, instMgr, clientMgr, nil)
+			mgr := NewManager(configGetter, instMgr, clientMgr, nil, nil)
 
 			gotType, gotName, err := mgr.findInstanceForFilePath(context.Background(), tt.filePath, "")
 			if (err != nil) != tt.wantErr {

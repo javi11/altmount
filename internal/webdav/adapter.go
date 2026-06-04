@@ -434,11 +434,6 @@ func (h *Handler) GetHTTPHandler() http.Handler {
 	return h.handler
 }
 
-// GetAuthCredentials returns the auth credentials for dynamic updates
-func (h *Handler) GetAuthCredentials() *AuthCredentials {
-	return h.authCreds
-}
-
 // SyncAuthCredentials updates auth credentials from current config
 func (h *Handler) SyncAuthCredentials() {
 	if h.configGetter != nil {

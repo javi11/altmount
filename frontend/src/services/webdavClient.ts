@@ -77,10 +77,6 @@ export class WebDAVClient {
 		this.client = createClient("/webdav", clientOptions);
 	}
 
-	isConnected(): boolean {
-		return this.client !== null;
-	}
-
 	async listDirectory(path = "/", showCorrupted = false): Promise<WebDAVDirectory> {
 		if (!this.client) {
 			throw new Error("WebDAV client not connected");
@@ -164,28 +160,6 @@ export class WebDAVClient {
 		} catch (error) {
 			console.error("Failed to get file contents:", error);
 			throw this.parseError(error, "get file contents", path);
-		}
-	}
-
-	async getFileInfo(path: string): Promise<WebDAVFile> {
-		if (!this.client) {
-			throw new Error("WebDAV client not connected");
-		}
-
-		try {
-			const stat = (await this.client.stat(path)) as FileStat;
-			return {
-				filename: stat.filename,
-				basename: stat.basename,
-				lastmod: stat.lastmod,
-				size: stat.size || 0,
-				type: stat.type as "file" | "directory",
-				etag: stat.etag ?? undefined,
-				mime: stat.mime,
-			};
-		} catch (error) {
-			console.error("Failed to get file info:", error);
-			throw this.parseError(error, "get file info", path);
 		}
 	}
 

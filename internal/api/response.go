@@ -119,13 +119,3 @@ func RespondServiceUnavailable(c *fiber.Ctx, message, details string) error {
 	c.Set("Retry-After", "10")
 	return RespondError(c, fiber.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", message, details)
 }
-
-// Helper function to check for admin privileges and respond with error if not admin.
-// Returns true if user is admin, false otherwise (and sends error response).
-func RequireAdminPrivileges(c *fiber.Ctx, user interface{ IsAdminUser() bool }) bool {
-	if user == nil || !user.IsAdminUser() {
-		RespondForbidden(c, "Admin privileges required", "This endpoint requires admin access")
-		return false
-	}
-	return true
-}
