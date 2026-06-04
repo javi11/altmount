@@ -309,6 +309,11 @@ export function ProviderAreaChart({
 										strokeOpacity: 0.1,
 										strokeWidth: 1,
 									}}
+									isAnimationActive={false}
+									// z-index must live on the recharts wrapper: it's positioned
+									// with transform (own stacking context), so the legend would
+									// otherwise paint over the tooltip and clip the Total row.
+									wrapperStyle={{ zIndex: 50 }}
 								/>
 								<Legend
 									onClick={(e) => {
@@ -382,7 +387,11 @@ export function ProviderAreaChart({
 										/>
 									))}
 								</Pie>
-								<Tooltip content={<PieTooltip formatValue={formatValue} />} />
+								<Tooltip
+									content={<PieTooltip formatValue={formatValue} />}
+									isAnimationActive={false}
+									wrapperStyle={{ zIndex: 50 }}
+								/>
 							</PieChart>
 						</ResponsiveContainer>
 					</div>
