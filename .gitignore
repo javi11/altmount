@@ -42,5 +42,4 @@ db.sqlite
 config/config.yaml
 *.log
 build-test-image.sh
-/nntppool
 .claude/worktrees/
