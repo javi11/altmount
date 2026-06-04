@@ -42,28 +42,31 @@ func ValidateSegmentList(
 	}
 
 	totalToValidate := len(segments)
-	var validatedCount int32
+	var checkedCount int32
 
 	pl := concpool.New().WithErrors().WithFirstError().WithMaxGoroutines(maxConnections)
 	for _, seg := range segments {
 		pl.Go(func() error {
+			// Advance progress for every segment checked, pass or fail, so the
+			// bar reflects validation throughput instead of freezing at the
+			// stage floor (e.g. 30%) when a file is incomplete and no segment
+			// succeeds.
+			if progressTracker != nil {
+				defer func() {
+					count := atomic.AddInt32(&checkedCount, 1)
+					progressTracker.Update(int(count), totalToValidate)
+				}()
+			}
+
 			checkCtx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
 
-			var err error
-			_, err = usenetPool.Stat(checkCtx, seg.Id)
-			if err == nil {
-				poolManager.IncArticlesDownloaded()
-				poolManager.UpdateDownloadProgress("", 100)
-			}
-			if err != nil {
+			if _, err := usenetPool.Stat(checkCtx, seg.Id); err != nil {
 				return fmt.Errorf("segment with ID %s unreachable: %w", seg.Id, err)
 			}
 
-			if progressTracker != nil {
-				count := atomic.AddInt32(&validatedCount, 1)
-				progressTracker.Update(int(count), totalToValidate)
-			}
+			poolManager.IncArticlesDownloaded()
+			poolManager.UpdateDownloadProgress("", 100)
 
 			return nil
 		})
