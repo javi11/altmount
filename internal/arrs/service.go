@@ -197,19 +197,6 @@ func (s *Service) GetFirstAdminAPIKey(ctx context.Context) string {
 	return ""
 }
 
-// SetArrsPaused engages or releases the Force Stop brake. While paused, AltMount
-// issues no outbound *arr requests: the queue-cleanup worker skips its ticks and
-// the health-repair re-trigger early-returns. The flag is in-memory only and
-// clears on restart.
-func (s *Service) SetArrsPaused(paused bool) {
-	s.worker.SetPaused(paused)
-}
-
-// IsArrsPaused reports whether the Force Stop brake is engaged.
-func (s *Service) IsArrsPaused() bool {
-	return s.worker.IsPaused()
-}
-
 // NoteImportFailure runs the importer-side failure breaker for a permanently
 // failed *arr-originated download: counts the failure per target against the
 // shared tracker and, at the queue_cleanup_max_failures threshold, unmonitors

@@ -679,24 +679,6 @@ export class APIClient {
 		});
 	}
 
-	// Force Stop: halts all AltMount→arr requests (queue cleanup + health repair).
-	// In-memory only on the backend, so it auto-resumes on restart.
-	async getArrsPaused() {
-		return this.request<{ paused: boolean }>("/arrs/pause");
-	}
-
-	async setArrsPaused() {
-		return this.request<{ paused: boolean }>("/arrs/pause", {
-			method: "POST",
-		});
-	}
-
-	async resumeArrs() {
-		return this.request<{ paused: boolean }>("/arrs/pause", {
-			method: "DELETE",
-		});
-	}
-
 	// Direct authentication methods
 	async login(username: string, password: string) {
 		return this.request<AuthResponse>("/auth/login", {

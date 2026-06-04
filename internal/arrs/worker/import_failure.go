@@ -46,12 +46,6 @@ func (w *Worker) HandleImportFailure(ctx context.Context, downloadID, category s
 	if maxFailures <= 0 {
 		return
 	}
-	// Force Stop brake: no AltMount→arr requests while engaged. The failure is
-	// not counted either — without queue access the targets are unknown.
-	if w.IsPaused() {
-		slog.DebugContext(ctx, "Import-failure breaker skipped (Force Stop active)", "download_id", downloadID)
-		return
-	}
 
 	// Prefer instances whose category matches the download's; fall back to the
 	// rest. The downloadID match below is the authoritative filter — category
