@@ -223,14 +223,6 @@ export interface HealthStats {
 	checking: number;
 }
 
-export interface HealthRetryRequest {
-	reset_status?: boolean;
-}
-
-export interface HealthRepairRequest {
-	reset_repair_retry_count?: boolean;
-}
-
 export interface HealthCleanupRequest {
 	older_than?: string;
 	status?: HealthStatus;

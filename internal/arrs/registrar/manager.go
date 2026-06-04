@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/javi11/altmount/internal/arrs/clients"
 	"github.com/javi11/altmount/internal/arrs/instances"
@@ -19,6 +20,16 @@ import (
 // (e.g. the queue cleanup worker) imports this to distinguish AltMount's own
 // queue items from those owned by other download clients.
 const AltmountDownloadClientName = "AltMount (SABnzbd)"
+
+// IsAltmountDownloadClient reports whether a download client name belongs to
+// AltMount. AltMount auto-registers under AltmountDownloadClientName, but users
+// frequently add the SABnzbd client manually under a different name (e.g.
+// "Altmount"), so queue cleanup matches case-insensitively on the "altmount"
+// token rather than requiring the exact registered name — otherwise it would
+// never recognize, and never clean up, items owned by a renamed client.
+func IsAltmountDownloadClient(name string) bool {
+	return strings.Contains(strings.ToLower(name), "altmount")
+}
 
 type Manager struct {
 	instances *instances.Manager

@@ -26,7 +26,6 @@ import (
 	"github.com/javi11/altmount/internal/rclone"
 	"github.com/javi11/altmount/internal/updater"
 	"github.com/javi11/altmount/internal/version"
-	"github.com/javi11/altmount/pkg/rclonecli"
 )
 
 // Config represents API server configuration
@@ -57,7 +56,6 @@ type Server struct {
 	importerService     *importer.Service
 	poolManager         pool.Manager
 	arrsService         *arrs.Service
-	rcloneClient        rclonecli.RcloneRcClient
 	mountService        *rclone.MountService
 	startTime           time.Time
 	progressBroadcaster *progress.ProgressBroadcaster
@@ -135,12 +133,6 @@ func (s *Server) SetHealthWorker(healthWorker *health.HealthWorker) {
 	s.healthWorker = healthWorker
 }
 
-// SetUpdater overrides the binary updater used for self-update operations.
-// Primarily intended for tests that need to substitute a fake implementation.
-func (s *Server) SetUpdater(u updater.Updater) {
-	s.updater = u
-}
-
 // SetLibrarySyncWorker sets the library sync worker reference for the server
 func (s *Server) SetLibrarySyncWorker(librarySyncWorker *health.LibrarySyncWorker) {
 	s.librarySyncWorker = librarySyncWorker
@@ -164,16 +156,6 @@ func (s *Server) SetReady(ready bool) {
 // IsReady returns true if the server is ready to accept requests
 func (s *Server) IsReady() bool {
 	return s.ready.Load()
-}
-
-// SetRcloneClient sets the rclone client reference for the server
-func (s *Server) SetRcloneClient(rcloneClient rclonecli.RcloneRcClient) {
-	s.rcloneClient = rcloneClient
-}
-
-// GetProgressBroadcaster returns the progress broadcaster for use by the importer service
-func (s *Server) GetProgressBroadcaster() *progress.ProgressBroadcaster {
-	return s.progressBroadcaster
 }
 
 // SetupFiberRoutes configures API routes directly on the Fiber app
@@ -368,6 +350,9 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/arrs/webhook/register", s.handleRegisterArrsWebhooks)
 	api.Post("/arrs/download-client/register", s.handleRegisterArrsDownloadClients)
 	api.Post("/arrs/download-client/test", s.handleTestArrsDownloadClients)
+	api.Get("/arrs/pause", s.handleGetArrsPause)
+	api.Post("/arrs/pause", s.handleSetArrsPause)
+	api.Delete("/arrs/pause", s.handleResumeArrs)
 
 	// Direct authentication endpoints — rate-limited to prevent brute-force attacks
 	authLimiter := limiter.New(limiter.Config{

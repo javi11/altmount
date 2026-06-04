@@ -1,14 +1,32 @@
 import { AlertTriangle, BarChart3, Radio, RefreshCw, Trash2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useConfirm } from "../../../../contexts/ModalContext";
 import { useToast } from "../../../../contexts/ToastContext";
 import { useCleanupIndexerStats, useIndexerStats } from "../../../../hooks/useApi";
 import { IndexerHealthCard } from "./IndexerHealthCard";
-import { IndexerHealthChart } from "./IndexerHealthChart";
 import { IndexerHealthFilters } from "./IndexerHealthFilters";
 import { IndexerHealthSummary } from "./IndexerHealthSummary";
 import { PruneStatsModal } from "./PruneStatsModal";
 import type { IndexerSummary, SortKey } from "./types";
+
+const SORT_STORAGE_KEY = "altmount.indexerHealth.sort";
+
+// Persisted sort preference so the chosen order survives a page refresh instead
+// of resetting to health-descending.
+function loadSortPref(): { key: SortKey; asc: boolean } {
+	try {
+		const raw = localStorage.getItem(SORT_STORAGE_KEY);
+		if (raw) {
+			const p = JSON.parse(raw) as { key?: unknown; asc?: unknown };
+			const key: SortKey = p.key === "total" || p.key === "name" ? p.key : "health";
+			const asc = typeof p.asc === "boolean" ? p.asc : false;
+			return { key, asc };
+		}
+	} catch {
+		// ignore malformed/unavailable storage
+	}
+	return { key: "health", asc: false };
+}
 
 export function IndexerHealth() {
 	const { data: stats, isLoading, error, refetch } = useIndexerStats();
@@ -16,14 +34,22 @@ export function IndexerHealth() {
 	const { showToast } = useToast();
 	const { confirmAction } = useConfirm();
 
-	const [showChart, setShowChart] = useState(false);
 	const [searchQuery, setSearchQuery] = useState("");
-	const [statusFilter, setStatusFilter] = useState<
-		"all" | "excellent" | "good" | "moderate" | "operational"
-	>("all");
+	const [statusFilter, setStatusFilter] = useState<"all" | "excellent" | "moderate" | "poor">(
+		"all",
+	);
 	const [showPruneModal, setShowPruneModal] = useState(false);
-	const [sortKey, setSortKey] = useState<SortKey>("health");
-	const [sortAsc, setSortAsc] = useState(false);
+	const [sortKey, setSortKey] = useState<SortKey>(() => loadSortPref().key);
+	const [sortAsc, setSortAsc] = useState(() => loadSortPref().asc);
+
+	// Persist the sort preference whenever it changes.
+	useEffect(() => {
+		try {
+			localStorage.setItem(SORT_STORAGE_KEY, JSON.stringify({ key: sortKey, asc: sortAsc }));
+		} catch {
+			// ignore storage write failures
+		}
+	}, [sortKey, sortAsc]);
 
 	const handlePrune = async (hours: number) => {
 		try {
@@ -76,7 +102,7 @@ export function IndexerHealth() {
 
 	const handleSort = (key: SortKey) => {
 		if (sortKey === key) {
-			setSortAsc((a) => !a);
+			setSortAsc(!sortAsc);
 		} else {
 			setSortKey(key);
 			setSortAsc(key !== "health");
@@ -99,10 +125,9 @@ export function IndexerHealth() {
 			const matchesSearch = item.indexer.toLowerCase().includes(searchQuery.toLowerCase());
 			const rate = item.success_rate;
 			let matchesFilter = true;
-			if (statusFilter === "excellent") matchesFilter = rate >= 90;
-			else if (statusFilter === "good") matchesFilter = rate >= 75 && rate < 90;
-			else if (statusFilter === "moderate") matchesFilter = rate >= 50 && rate < 75;
-			else if (statusFilter === "operational") matchesFilter = rate < 50;
+			if (statusFilter === "excellent") matchesFilter = rate >= 85;
+			else if (statusFilter === "moderate") matchesFilter = rate >= 50 && rate < 85;
+			else if (statusFilter === "poor") matchesFilter = rate < 50;
 			return matchesSearch && matchesFilter;
 		});
 	}, [sorted, searchQuery, statusFilter]);
@@ -113,9 +138,7 @@ export function IndexerHealth() {
 		const totalSuccess = stats.reduce((s, x) => s + x.success_count, 0);
 		const totalFailed = stats.reduce((s, x) => s + x.failed_count, 0);
 		const overallRate = totalImports > 0 ? (totalSuccess / totalImports) * 100 : 0;
-		const best = [...stats].sort((a, b) => b.success_rate - a.success_rate)[0];
-		const worst = [...stats].sort((a, b) => a.success_rate - b.success_rate)[0];
-		return { totalImports, totalSuccess, totalFailed, overallRate, best, worst };
+		return { totalImports, totalSuccess, totalFailed, overallRate };
 	}, [stats]);
 
 	if (isLoading) {
@@ -185,10 +208,7 @@ export function IndexerHealth() {
 			<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 				<div>
 					<h3 className="flex items-center gap-2 font-extrabold text-base-content text-lg tracking-tight">
-						<Radio
-							className="h-5 w-5 animate-pulse text-teal-500 dark:text-teal-400"
-							aria-hidden="true"
-						/>
+						<Radio className="h-5 w-5 animate-pulse text-primary" aria-hidden="true" />
 						Usenet Indexers Health HUD
 					</h3>
 					<p className="font-medium text-base-content/50 text-xs sm:text-sm">
@@ -196,20 +216,6 @@ export function IndexerHealth() {
 					</p>
 				</div>
 				<div className="flex flex-wrap items-center gap-2">
-					<button
-						type="button"
-						className={`btn btn-sm gap-1.5 border-base-200 transition-all duration-200 ${
-							showChart
-								? "btn-primary shadow-[0_0_12px_rgba(59,130,246,0.3)]"
-								: "btn-ghost border border-base-200 bg-base-200/50 hover:bg-base-200"
-						}`}
-						onClick={() => setShowChart(!showChart)}
-						disabled={!hasStats}
-						aria-label="Toggle success benchmark comparative analytics chart"
-					>
-						<BarChart3 className="h-4 w-4" aria-hidden="true" />
-						{showChart ? "Hide HUD Chart" : "Show HUD Chart"}
-					</button>
 					<button
 						type="button"
 						className="btn btn-ghost btn-sm gap-1.5 border border-base-200 bg-base-200/50 transition-all duration-200 hover:scale-[1.02] hover:bg-base-200 active:scale-[0.98]"
@@ -221,7 +227,7 @@ export function IndexerHealth() {
 					</button>
 					<button
 						type="button"
-						className="btn btn-warning btn-sm gap-1.5 shadow-[0_2px_12px_rgba(217,119,6,0.2)] transition-all duration-200"
+						className="btn btn-warning btn-sm gap-1.5 transition-all duration-200"
 						onClick={() => setShowPruneModal(true)}
 						disabled={!hasStats}
 						aria-label="Prune indexer statistics history"
@@ -231,8 +237,6 @@ export function IndexerHealth() {
 					</button>
 				</div>
 			</div>
-
-			{hasStats && showChart && <IndexerHealthChart sorted={sorted} />}
 
 			{summary && <IndexerHealthSummary stats={stats!} summary={summary} />}
 
@@ -254,7 +258,7 @@ export function IndexerHealth() {
 				<div className="hero rounded-2xl border border-base-300 border-dashed bg-base-200/50 py-16 backdrop-blur-md">
 					<div className="hero-content text-center">
 						<div className="max-w-md space-y-4">
-							<div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl border border-teal-500/20 bg-teal-500/5 text-teal-500 shadow-sm dark:text-teal-400">
+							<div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl border border-primary/20 bg-primary/5 text-primary shadow-sm">
 								<BarChart3 className="h-8 w-8 animate-pulse" aria-hidden="true" />
 							</div>
 							<h3 className="font-bold text-base-content text-xl tracking-tight">

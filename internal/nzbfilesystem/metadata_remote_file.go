@@ -812,8 +812,6 @@ type MetadataVirtualFile struct {
 	bufOffReader      interface{ GetBufferedOffset() int64 }
 	readerInitialized bool
 	position          int64 // File position (what client sees after Seek)
-	currentRangeStart int64 // Start of current reader's range
-	currentRangeEnd   int64 // End of current reader's range
 	originalRangeEnd  int64 // Original end requested by client (-1 for unbounded)
 
 	// readAtSharedNext is the next file offset that the shared reader can serve
@@ -1565,10 +1563,6 @@ func (mvf *MetadataVirtualFile) ensureReader() error {
 		(end < 0 || mvf.readAtSharedNext <= end) {
 		start = mvf.readAtSharedNext
 	}
-
-	// Track the current reader's range for progressive reading
-	mvf.currentRangeStart = start
-	mvf.currentRangeEnd = end
 
 	// Create reader for the calculated range using metadata segments
 	if len(mvf.meta.NestedSources) > 0 {

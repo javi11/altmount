@@ -149,7 +149,11 @@ With this layout, both containers see the same paths, so `import_dir: /mnt/symli
 
 ## Step 6: Configure Queue Cleanup
 
-AltMount can automatically monitor ARR queues and remove failed imports to keep things tidy:
+AltMount can automatically monitor ARR queues and clean up stuck or failed imports to keep
+things tidy. One pass covers all *arr types (Radarr, Sonarr, Whisparr, Lidarr, Readarr,
+Sportarr): it removes ghost/empty-folder entries (already imported, or the source path is
+gone) and applies your message rules to stuck imports. Only queue items owned by AltMount's
+download client are ever touched.
 
 ```yaml
 arrs:
@@ -157,23 +161,28 @@ arrs:
   webhook_base_url: "" # Base URL for webhook callbacks (defaults to http://<host>:<port>)
   queue_cleanup_enabled: true
   queue_cleanup_interval_seconds: 300
-  queue_cleanup_grace_period_minutes: 10 # Wait before cleaning up (default: 10)
-  cleanup_automatic_import_failure: true
-  queue_cleanup_allowlist:
+  queue_cleanup_grace_period_minutes: 5 # Wait before cleaning up (default: 5)
+  # Message rules: when a stuck import's *arr status message matches a rule, run its
+  # action (remove | blocklist | blocklist_search). Manage these in the web UI.
+  queue_cleanup_rules:
+    - message: "Sample"
+      enabled: true
+      action: blocklist_search
     - message: "Not a Custom Format upgrade"
       enabled: true
-    - message: "No files found are eligible"
-      enabled: true
+      action: remove
+    - message: "automatic import is not possible"
+      enabled: false
+      action: remove
 ```
 
-| Field                                | Description                                                                                             |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------- |
-| `queue_cleanup_enabled`              | Enable or disable automatic queue cleanup                                                               |
-| `queue_cleanup_interval_seconds`     | How often to check ARR queues (in seconds)                                                              |
-| `queue_cleanup_grace_period_minutes` | Minimum age (in minutes) before a failed item is cleaned up (default: 10)                               |
-| `cleanup_automatic_import_failure`   | Clean up items with "Automatic import is not possible" errors                                           |
-| `webhook_base_url`                   | Base URL ARRs use to reach AltMount for webhooks (default: `http://<host>:<port>`)                      |
-| `queue_cleanup_allowlist`            | Error messages to treat as safe for cleanup. Each entry has a `message` string and an `enabled` boolean |
+| Field                                | Description                                                                                                                                            |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `queue_cleanup_enabled`              | Enable or disable automatic queue cleanup                                                                                                             |
+| `queue_cleanup_interval_seconds`     | How often to check ARR queues (in seconds)                                                                                                            |
+| `queue_cleanup_grace_period_minutes` | Minimum age (in minutes) a stuck/failed item must persist before it is cleaned up (default: 5). Ghost/empty-folder removal is immediate.              |
+| `webhook_base_url`                   | Base URL ARRs use to reach AltMount for webhooks (default: `http://<host>:<port>`)                                                                    |
+| `queue_cleanup_rules`                | Message rules for stuck imports. Each rule has a `message` substring (case-insensitive), an `enabled` boolean, and an `action`: `remove`, `blocklist`, or `blocklist_search`. |
 
 ## Verifying the Setup
 

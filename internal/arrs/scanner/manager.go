@@ -12,15 +12,16 @@ import (
 
 	"github.com/javi11/altmount/internal/arrs/clients"
 	"github.com/javi11/altmount/internal/arrs/data"
+	"github.com/javi11/altmount/internal/arrs/failures"
 	"github.com/javi11/altmount/internal/arrs/instances"
 	"github.com/javi11/altmount/internal/arrs/model"
 	"github.com/javi11/altmount/internal/config"
+	"golang.org/x/sync/singleflight"
 	"golift.io/starr"
 	"golift.io/starr/lidarr"
 	"golift.io/starr/radarr"
 	"golift.io/starr/readarr"
 	"golift.io/starr/sonarr"
-	"golang.org/x/sync/singleflight"
 )
 
 type Manager struct {
@@ -28,15 +29,21 @@ type Manager struct {
 	instances    *instances.Manager
 	clients      *clients.Manager
 	data         *data.Manager
-	sf           singleflight.Group
+	// failures is the shared per-target circuit breaker (see arrs/failures). The
+	// scanner bumps it on every targeted re-search it issues; at the configured
+	// queue_cleanup_max_failures threshold it stops searching and unmonitors the
+	// target instead, so a dead release can't drive an endless re-grab storm.
+	failures *failures.Tracker
+	sf       singleflight.Group
 }
 
-func NewManager(configGetter config.ConfigGetter, instances *instances.Manager, clients *clients.Manager, data *data.Manager) *Manager {
+func NewManager(configGetter config.ConfigGetter, instances *instances.Manager, clients *clients.Manager, data *data.Manager, failureTracker *failures.Tracker) *Manager {
 	return &Manager{
 		configGetter: configGetter,
 		instances:    instances,
 		clients:      clients,
 		data:         data,
+		failures:     failureTracker,
 	}
 }
 
@@ -553,7 +560,7 @@ func (m *Manager) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 		slog.InfoContext(ctx, "ID-Based Precision: Using metadata IDs for Radarr repair",
 			"movie_id", metadata.Movie.Id,
 			"movie_file_id", metadata.MovieFile.Id)
-		
+
 		movies, err := m.data.GetMovies(ctx, client, instanceName)
 		if err != nil {
 			return fmt.Errorf("failed to get movies from Radarr for ID lookup: %w", err)
@@ -561,7 +568,7 @@ func (m *Manager) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 		for _, movie := range movies {
 			if movie.ID == metadata.Movie.Id {
 				targetMovie = movie
-				
+
 				// Smart Repair Guard: Check if the movie already has a newer/different healthy file
 				if movie.HasFile && movie.MovieFile != nil {
 					if movie.MovieFile.ID != metadata.MovieFile.Id {
@@ -677,6 +684,14 @@ func (m *Manager) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 			"movie", targetMovie.Title)
 	}
 
+	// Failure breaker: every targeted re-search counts one failure-driven action
+	// against the movie. At the threshold the movie is unmonitored instead of
+	// re-searched so a dead release can't drive an endless re-grab storm.
+	if m.movieBreakerTripped(instanceName, targetMovie.ID) {
+		unmonitorRadarrMovie(ctx, client, instanceName, targetMovie.ID)
+		return nil
+	}
+
 	// Step 3: Trigger targeted search for the missing movie
 	searchCmd := &radarr.CommandRequest{
 		Name:     "MoviesSearch",
@@ -713,7 +728,7 @@ func (m *Manager) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 		slog.InfoContext(ctx, "ID-Based Precision: Using metadata IDs for Sonarr repair",
 			"series_id", metadata.Series.Id,
 			"episode_file_id", metadata.EpisodeFile.Id)
-		
+
 		targetSeriesID = metadata.Series.Id
 		targetEpisodeFileID = metadata.EpisodeFile.Id
 		targetSeriesTitle = "Known Series (ID Based)" // Title is just for logging
@@ -722,7 +737,7 @@ func (m *Manager) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 	// Fallback to path-based guessing if ID-based precision failed or metadata was missing
 	if targetSeriesID == 0 {
 		slog.DebugContext(ctx, "Falling back to path-based guessing for Sonarr", "file_path", filePath)
-		
+
 		// Get library directory from health config
 		libraryDir := m.configGetter().MountPath
 		cfg := m.configGetter()
@@ -852,7 +867,7 @@ func (m *Manager) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 		if len(episodeIDs) == 0 {
 			slog.InfoContext(ctx, "Smart Repair Guard: Episode file ID is no longer active. Checking for newer replacements.",
 				"old_file_id", targetEpisodeFileID)
-			
+
 			// Try to find if any episode currently has a different file at the same path or with same scene name
 			episodeFiles, err := m.data.GetEpisodeFiles(ctx, client, instanceName, targetSeriesID)
 			if err == nil {
@@ -901,10 +916,19 @@ func (m *Manager) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 		return fmt.Errorf("no episodes found for file in library or queue: %s: %w", filePath, model.ErrPathMatchFailed)
 	}
 
-	// Trigger targeted episode search for all episodes in this file
+	// Failure breaker: every targeted re-search counts one failure-driven action
+	// against each episode. Episodes at the threshold are unmonitored instead of
+	// re-searched so a dead release can't drive an endless re-grab storm.
+	searchIDs, giveUpIDs := m.splitEpisodesByBreaker(instanceName, episodeIDs)
+	unmonitorSonarrEpisodes(ctx, client, instanceName, giveUpIDs)
+	if len(searchIDs) == 0 {
+		return nil
+	}
+
+	// Trigger targeted episode search for the remaining episodes in this file
 	searchCmd := &sonarr.CommandRequest{
 		Name:       "EpisodeSearch",
-		EpisodeIDs: episodeIDs,
+		EpisodeIDs: searchIDs,
 	}
 
 	response, err := client.SendCommandContext(ctx, searchCmd)
@@ -915,7 +939,7 @@ func (m *Manager) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 	slog.InfoContext(ctx, "Successfully triggered Sonarr targeted episode search for re-download",
 		"instance", instanceName,
 		"series_title", targetSeriesTitle,
-		"episode_ids", episodeIDs,
+		"episode_ids", searchIDs,
 		"command_id", response.ID)
 
 	return nil
@@ -1201,4 +1225,3 @@ func (m *Manager) blocklistReadarrBookFile(ctx context.Context, client *readarr.
 	}
 	return nil
 }
-

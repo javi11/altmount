@@ -8,12 +8,12 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/javi11/altmount/internal/arrs/clients"
+	"github.com/javi11/altmount/internal/arrs/failures"
 	"github.com/javi11/altmount/internal/arrs/instances"
-	"github.com/javi11/altmount/internal/arrs/model"
-	"github.com/javi11/altmount/internal/arrs/registrar"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"golift.io/starr"
@@ -36,16 +36,60 @@ type Worker struct {
 	// key: instanceName|queueID
 	firstSeen   map[string]time.Time
 	firstSeenMu sync.RWMutex
+
+	// paused is the Force Stop emergency brake. When set, the worker skips every
+	// cleanup tick and the health-repair re-trigger also early-returns (see
+	// Service.IsArrsPaused). It is in-memory only and clears on restart.
+	paused atomic.Bool
+
+	// breaker counts how many times AltMount has acted on a given target (an
+	// episode/movie/album/book that keeps failing import), keyed by a stable
+	// identity that survives re-grabs. The tracker is shared with the scanner so
+	// queue-cleanup actions and repair re-triggers accumulate one combined count.
+	// Once a target reaches the configured queue_cleanup_max_failures, cleanup
+	// gives up on it (blocklist without re-search + unmonitor). In-memory only;
+	// resets on restart and when the target later imports healthy.
+	breaker *failures.Tracker
+
+	// History sync tracking
+	lastHistorySync   time.Time
+	lastHistorySyncMu sync.Mutex
 }
 
-func NewWorker(configGetter config.ConfigGetter, instances *instances.Manager, clients *clients.Manager, repo *database.Repository) *Worker {
+func NewWorker(configGetter config.ConfigGetter, instances *instances.Manager, clients *clients.Manager, repo *database.Repository, breaker *failures.Tracker) *Worker {
+	if breaker == nil {
+		breaker = failures.NewTracker()
+	}
 	return &Worker{
 		configGetter: configGetter,
 		instances:    instances,
 		clients:      clients,
 		repo:         repo,
 		firstSeen:    make(map[string]time.Time),
+		breaker:      breaker,
 	}
+}
+
+// SetPaused toggles the Force Stop brake. When paused, the worker stops issuing
+// any *arr requests from its cleanup tick.
+func (w *Worker) SetPaused(paused bool) {
+	w.paused.Store(paused)
+}
+
+// IsPaused reports whether the Force Stop brake is engaged.
+func (w *Worker) IsPaused() bool {
+	return w.paused.Load()
+}
+
+// bumpBreaker records one more cleanup action against a target and returns the
+// new running count.
+func (w *Worker) bumpBreaker(key string) int {
+	return w.breaker.Bump(key)
+}
+
+// resetBreaker clears a target's failure count (e.g. after it imports healthy).
+func (w *Worker) resetBreaker(key string) {
+	w.breaker.Reset(key)
 }
 
 // Start starts the queue cleanup worker
@@ -65,8 +109,9 @@ func (w *Worker) Start(ctx context.Context) error {
 		return nil
 	}
 
-	// Queue cleanup is enabled by default (when nil or true)
-	if cfg.Arrs.QueueCleanupEnabled != nil && !*cfg.Arrs.QueueCleanupEnabled {
+	// Queue cleanup covers ghost/empty-folder detection, the automatic-import-failure
+	// purge and the message-rule pass. Enabled by default (nil or true).
+	if !IsQueueCleanupEnabled(cfg) {
 		slog.InfoContext(ctx, "ARR queue cleanup disabled")
 		return nil
 	}
@@ -134,8 +179,31 @@ func (w *Worker) safeCleanup() {
 			slog.Error("Panic in queue cleanup", "panic", r)
 		}
 	}()
-	if err := w.CleanupQueue(w.workerCtx); err != nil {
+	if !IsQueueCleanupEnabled(w.configGetter()) {
+		return
+	}
+	// Force Stop brake: skip the whole tick so no *arr requests are issued.
+	if w.IsPaused() {
+		slog.DebugContext(w.workerCtx, "Queue cleanup paused (Force Stop active), skipping tick")
+		return
+	}
+	// One unified pass per tick covers all six *arr types: ghost/empty-folder removal,
+	// then the message-rule actions. Items are observed over time and only acted on
+	// once stuck past the grace period (ghost removal stays grace-free).
+	if err := w.CleanupStuckQueue(w.workerCtx); err != nil {
 		slog.Error("Queue cleanup failed", "error", err)
+	}
+
+	// Trigger history sync periodically (e.g. every 15 minutes)
+	w.lastHistorySyncMu.Lock()
+	shouldSync := time.Since(w.lastHistorySync) >= 15*time.Minute
+	if shouldSync {
+		w.lastHistorySync = time.Now()
+	}
+	w.lastHistorySyncMu.Unlock()
+
+	if shouldSync {
+		w.safeHistorySync()
 	}
 }
 
@@ -149,300 +217,6 @@ func IsQueueCleanupEnabled(cfg *config.Config) bool {
 		return false
 	}
 	return true
-}
-
-// CleanupQueue checks all ARR instances for importPending items with empty folders
-// and removes them from the queue after deleting the empty folder
-func (w *Worker) CleanupQueue(ctx context.Context) error {
-	cfg := w.configGetter()
-	if !IsQueueCleanupEnabled(cfg) {
-		return nil
-	}
-	instances := w.instances.GetAllInstances()
-
-	for _, instance := range instances {
-		if !instance.Enabled {
-			continue
-		}
-
-		switch instance.Type {
-		case "radarr":
-			if err := w.cleanupRadarrQueue(ctx, instance, cfg); err != nil {
-				slog.WarnContext(ctx, "Failed to cleanup Radarr queue",
-					"instance", instance.Name, "error", err)
-			}
-		case "sonarr":
-			if err := w.cleanupSonarrQueue(ctx, instance, cfg); err != nil {
-				slog.WarnContext(ctx, "Failed to cleanup Sonarr queue",
-					"instance", instance.Name, "error", err)
-			}
-		case "sportarr":
-			if err := w.cleanupSportarrQueue(ctx, instance, cfg); err != nil {
-				slog.WarnContext(ctx, "Failed to cleanup Sportarr queue",
-					"instance", instance.Name, "error", err)
-			}
-		}
-	}
-
-	return nil
-}
-
-func (w *Worker) cleanupRadarrQueue(ctx context.Context, instance *model.ConfigInstance, cfg *config.Config) error {
-	client, err := w.clients.GetOrCreateRadarrClient(instance.Name, instance.URL, instance.APIKey)
-	if err != nil {
-		return fmt.Errorf("failed to get Radarr client: %w", err)
-	}
-
-	queue, err := client.GetQueueContext(ctx, 0, 500)
-	if err != nil {
-		return fmt.Errorf("failed to get Radarr queue: %w", err)
-	}
-
-	var idsToRemove []int64
-	for _, q := range queue.Records {
-		// Only operate on queue items owned by AltMount's registered download client.
-		// Items from other clients (qBittorrent, real SABnzbd, etc.) may reference
-		// paths AltMount cannot see and must never be touched — see issue #523.
-		if q.DownloadClient != registrar.AltmountDownloadClientName {
-			continue
-		}
-
-		// Strategy 1: Ghost detection — cleanup already-imported files
-		if w.checkGhostByImportHistory(ctx, q.OutputPath, cfg, instance.Name, q.Title) {
-			idsToRemove = append(idsToRemove, q.ID)
-			continue
-		}
-
-		// Fallback: path-gone check with safety guards
-		if w.isGhostByPathGone(ctx, q.OutputPath, q.ID, cfg, instance.Name, q.Title) {
-			idsToRemove = append(idsToRemove, q.ID)
-			continue
-		}
-
-		// Strategy 2: Graceful cleanup for blocked/failed imports
-		// Check for completed items with warning status that are pending import
-		if q.Status != "completed" || q.TrackedDownloadStatus != "warning" || (q.TrackedDownloadState != "importPending" && q.TrackedDownloadState != "importBlocked") {
-			continue
-		}
-
-		// Check if path is within managed directories (import_dir, mount_path, or complete_dir)
-		if !w.isPathManaged(q.OutputPath, cfg) {
-			continue
-		}
-
-		// Check status messages for known issues
-		shouldCleanup := false
-		for _, msg := range q.StatusMessages {
-			allMessages := strings.Join(msg.Messages, " ")
-
-			// Automatic import failure cleanup (configurable)
-			if cfg.Arrs.CleanupAutomaticImportFailure != nil && *cfg.Arrs.CleanupAutomaticImportFailure &&
-				strings.Contains(allMessages, "Automatic import is not possible") {
-				shouldCleanup = true
-				break
-			}
-
-			// Check configured allowlist
-			for _, allowedMsg := range cfg.Arrs.QueueCleanupAllowlist {
-				if allowedMsg.Enabled && (strings.Contains(allMessages, allowedMsg.Message) || strings.Contains(msg.Title, allowedMsg.Message)) {
-					shouldCleanup = true
-					break
-				}
-			}
-
-			if shouldCleanup {
-				break
-			}
-		}
-
-		if shouldCleanup {
-			key := fmt.Sprintf("%s|%d", instance.Name, q.ID)
-			w.firstSeenMu.Lock()
-			seenTime, exists := w.firstSeen[key]
-			if !exists {
-				w.firstSeen[key] = time.Now()
-				w.firstSeenMu.Unlock()
-				slog.DebugContext(ctx, "First saw failed import pending item, starting grace period",
-					"path", q.OutputPath, "title", q.Title, "instance", instance.Name)
-				continue
-			}
-			w.firstSeenMu.Unlock()
-
-			gracePeriod := time.Duration(cfg.Arrs.QueueCleanupGracePeriodMinutes) * time.Minute
-			if time.Since(seenTime) < gracePeriod {
-				slog.DebugContext(ctx, "Item still in grace period",
-					"path", q.OutputPath, "title", q.Title, "instance", instance.Name,
-					"remaining", gracePeriod-time.Since(seenTime))
-				continue
-			}
-
-			slog.InfoContext(ctx, "Found failed import pending item after grace period",
-				"path", q.OutputPath, "title", q.Title, "instance", instance.Name)
-			idsToRemove = append(idsToRemove, q.ID)
-
-			w.firstSeenMu.Lock()
-			delete(w.firstSeen, key)
-			w.firstSeenMu.Unlock()
-		} else {
-			// If it's no longer matching failure criteria, remove from tracking
-			key := fmt.Sprintf("%s|%d", instance.Name, q.ID)
-			w.firstSeenMu.Lock()
-			delete(w.firstSeen, key)
-			w.firstSeenMu.Unlock()
-		}
-	}
-
-	// Remove from ARR queue with removeFromClient and blocklist flags
-	if len(idsToRemove) > 0 {
-		removeFromClient := true
-		opts := &starr.QueueDeleteOpts{
-			RemoveFromClient: &removeFromClient,
-			BlockList:        false,
-			SkipRedownload:   false,
-		}
-		for _, id := range idsToRemove {
-			if err := client.DeleteQueueContext(ctx, id, opts); err != nil {
-				if strings.Contains(err.Error(), "404") {
-					slog.DebugContext(ctx, "Queue item already removed from Radarr", "id", id)
-				} else {
-					slog.ErrorContext(ctx, "Failed to delete queue item",
-						"id", id, "error", err)
-				}
-			}
-		}
-		slog.InfoContext(ctx, "Cleaned up Radarr queue items",
-			"instance", instance.Name, "count", len(idsToRemove))
-	}
-	return nil
-}
-
-func (w *Worker) cleanupSonarrQueue(ctx context.Context, instance *model.ConfigInstance, cfg *config.Config) error {
-	client, err := w.clients.GetOrCreateSonarrClient(instance.Name, instance.URL, instance.APIKey)
-	if err != nil {
-		return fmt.Errorf("failed to get Sonarr client: %w", err)
-	}
-
-	queue, err := client.GetQueueContext(ctx, 0, 500)
-	if err != nil {
-		return fmt.Errorf("failed to get Sonarr queue: %w", err)
-	}
-
-	var idsToRemove []int64
-	for _, q := range queue.Records {
-		// Only operate on queue items owned by AltMount's registered download client.
-		// Items from other clients (qBittorrent, real SABnzbd, etc.) may reference
-		// paths AltMount cannot see and must never be touched — see issue #523.
-		if q.DownloadClient != registrar.AltmountDownloadClientName {
-			continue
-		}
-
-		// Strategy 1: Immediate cleanup for already imported files
-		if w.checkGhostByImportHistory(ctx, q.OutputPath, cfg, instance.Name, q.Title) {
-			idsToRemove = append(idsToRemove, q.ID)
-			continue
-		}
-
-		// Fallback: path-gone check with safety guards
-		if w.isGhostByPathGone(ctx, q.OutputPath, q.ID, cfg, instance.Name, q.Title) {
-			idsToRemove = append(idsToRemove, q.ID)
-			continue
-		}
-
-		// Strategy 2: Graceful cleanup for blocked/failed imports
-		// Check for completed items with warning status that are pending import
-		if q.Protocol != "usenet" || q.Status != "completed" || q.TrackedDownloadStatus != "warning" || (q.TrackedDownloadState != "importPending" && q.TrackedDownloadState != "importBlocked") {
-			continue
-		}
-
-		// Check if path is within managed directories (import_dir, mount_path, or complete_dir)
-		if !w.isPathManaged(q.OutputPath, cfg) {
-			continue
-		}
-
-		// Check status messages for known issues
-		shouldCleanup := false
-		for _, msg := range q.StatusMessages {
-			allMessages := strings.Join(msg.Messages, " ")
-
-			// Automatic import failure cleanup (configurable)
-			if cfg.Arrs.CleanupAutomaticImportFailure != nil && *cfg.Arrs.CleanupAutomaticImportFailure &&
-				strings.Contains(allMessages, "Automatic import is not possible") {
-				shouldCleanup = true
-				break
-			}
-
-			// Check configured allowlist
-			for _, allowedMsg := range cfg.Arrs.QueueCleanupAllowlist {
-				if allowedMsg.Enabled && (strings.Contains(allMessages, allowedMsg.Message) || strings.Contains(msg.Title, allowedMsg.Message)) {
-					shouldCleanup = true
-					break
-				}
-			}
-
-			if shouldCleanup {
-				break
-			}
-		}
-
-		if shouldCleanup {
-			key := fmt.Sprintf("%s|%d", instance.Name, q.ID)
-			w.firstSeenMu.Lock()
-			seenTime, exists := w.firstSeen[key]
-			if !exists {
-				w.firstSeen[key] = time.Now()
-				w.firstSeenMu.Unlock()
-				slog.DebugContext(ctx, "First saw failed import pending item, starting grace period",
-					"path", q.OutputPath, "title", q.Title, "instance", instance.Name)
-				continue
-			}
-			w.firstSeenMu.Unlock()
-
-			gracePeriod := time.Duration(cfg.Arrs.QueueCleanupGracePeriodMinutes) * time.Minute
-			if time.Since(seenTime) < gracePeriod {
-				slog.DebugContext(ctx, "Item still in grace period",
-					"path", q.OutputPath, "title", q.Title, "instance", instance.Name,
-					"remaining", gracePeriod-time.Since(seenTime))
-				continue
-			}
-
-			slog.InfoContext(ctx, "Found failed import pending item after grace period",
-				"path", q.OutputPath, "title", q.Title, "instance", instance.Name)
-			idsToRemove = append(idsToRemove, q.ID)
-
-			w.firstSeenMu.Lock()
-			delete(w.firstSeen, key)
-			w.firstSeenMu.Unlock()
-		} else {
-			// If it's no longer matching failure criteria, remove from tracking
-			key := fmt.Sprintf("%s|%d", instance.Name, q.ID)
-			w.firstSeenMu.Lock()
-			delete(w.firstSeen, key)
-			w.firstSeenMu.Unlock()
-		}
-	}
-
-	// Remove from ARR queue with removeFromClient and blocklist flags
-	if len(idsToRemove) > 0 {
-		removeFromClient := true
-		opts := &starr.QueueDeleteOpts{
-			RemoveFromClient: &removeFromClient,
-			BlockList:        false,
-			SkipRedownload:   false,
-		}
-		for _, id := range idsToRemove {
-			if err := client.DeleteQueueContext(ctx, id, opts); err != nil {
-				if strings.Contains(err.Error(), "404") {
-					slog.DebugContext(ctx, "Queue item already removed from Sonarr", "id", id)
-				} else {
-					slog.ErrorContext(ctx, "Failed to delete queue item",
-						"id", id, "error", err)
-				}
-			}
-		}
-		slog.InfoContext(ctx, "Cleaned up Sonarr queue items",
-			"instance", instance.Name, "count", len(idsToRemove))
-	}
-	return nil
 }
 
 // captureSportarrIndexer persists the indexer reported by a Sportarr queue record
@@ -471,135 +245,6 @@ func (w *Worker) captureSportarrIndexer(ctx context.Context, downloadID, indexer
 		slog.DebugContext(ctx, "Failed to set Sportarr indexer on import history",
 			"download_id", downloadID, "indexer", indexer, "error", err)
 	}
-}
-
-// cleanupSportarrQueue mirrors cleanupSonarrQueue but talks to Sportarr's native
-// API via the thin client (Sportarr is not starr-compatible). It reuses the same
-// ghost-detection, allowlist and grace-period logic.
-func (w *Worker) cleanupSportarrQueue(ctx context.Context, instance *model.ConfigInstance, cfg *config.Config) error {
-	client, err := w.clients.GetOrCreateSportarrClient(instance.Name, instance.URL, instance.APIKey)
-	if err != nil {
-		return fmt.Errorf("failed to get Sportarr client: %w", err)
-	}
-
-	queue, err := client.GetQueue(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get Sportarr queue: %w", err)
-	}
-
-	var idsToRemove []int64
-	for _, q := range queue {
-		// Only operate on queue items owned by AltMount's registered download client.
-		// Items from other clients may reference paths AltMount cannot see and must
-		// never be touched — see issue #523.
-		if q.DownloadClient.Name != registrar.AltmountDownloadClientName {
-			continue
-		}
-
-		// Capture the indexer from Sportarr's native queue. Sportarr is not
-		// starr-compatible, so AltMount cannot auto-register its Grab/Import
-		// webhook (the path that supplies the indexer for Radarr/Sonarr/etc.).
-		// Its native queue record is the only place the indexer is exposed, so
-		// persist it here against the download ID — otherwise these imports show
-		// up in indexer health as "Unknown".
-		if q.DownloadID != "" && q.Indexer != "" {
-			w.captureSportarrIndexer(ctx, q.DownloadID, q.Indexer)
-		}
-
-		// Strategy 1: Immediate cleanup for already imported files
-		if w.checkGhostByImportHistory(ctx, q.OutputPath, cfg, instance.Name, q.Title) {
-			idsToRemove = append(idsToRemove, q.ID)
-			continue
-		}
-
-		// Fallback: path-gone check with safety guards
-		if w.isGhostByPathGone(ctx, q.OutputPath, q.ID, cfg, instance.Name, q.Title) {
-			idsToRemove = append(idsToRemove, q.ID)
-			continue
-		}
-
-		// Strategy 2: Graceful cleanup for blocked/failed imports
-		if q.Status != "completed" || q.TrackedDownloadStatus != "warning" || (q.TrackedDownloadState != "importPending" && q.TrackedDownloadState != "importBlocked") {
-			continue
-		}
-
-		// Check if path is within managed directories (import_dir, mount_path, or complete_dir)
-		if !w.isPathManaged(q.OutputPath, cfg) {
-			continue
-		}
-
-		// Check status messages for known issues
-		shouldCleanup := false
-		for _, msg := range q.StatusMessages {
-			allMessages := strings.Join(msg.Messages, " ")
-
-			// Automatic import failure cleanup (configurable)
-			if cfg.Arrs.CleanupAutomaticImportFailure != nil && *cfg.Arrs.CleanupAutomaticImportFailure &&
-				strings.Contains(allMessages, "Automatic import is not possible") {
-				shouldCleanup = true
-				break
-			}
-
-			// Check configured allowlist
-			for _, allowedMsg := range cfg.Arrs.QueueCleanupAllowlist {
-				if allowedMsg.Enabled && (strings.Contains(allMessages, allowedMsg.Message) || strings.Contains(msg.Title, allowedMsg.Message)) {
-					shouldCleanup = true
-					break
-				}
-			}
-
-			if shouldCleanup {
-				break
-			}
-		}
-
-		key := fmt.Sprintf("%s|%d", instance.Name, q.ID)
-		if shouldCleanup {
-			w.firstSeenMu.Lock()
-			seenTime, exists := w.firstSeen[key]
-			if !exists {
-				w.firstSeen[key] = time.Now()
-				w.firstSeenMu.Unlock()
-				slog.DebugContext(ctx, "First saw failed import pending item, starting grace period",
-					"path", q.OutputPath, "title", q.Title, "instance", instance.Name)
-				continue
-			}
-			w.firstSeenMu.Unlock()
-
-			gracePeriod := time.Duration(cfg.Arrs.QueueCleanupGracePeriodMinutes) * time.Minute
-			if time.Since(seenTime) < gracePeriod {
-				continue
-			}
-
-			slog.InfoContext(ctx, "Found failed import pending item after grace period",
-				"path", q.OutputPath, "title", q.Title, "instance", instance.Name)
-			idsToRemove = append(idsToRemove, q.ID)
-
-			w.firstSeenMu.Lock()
-			delete(w.firstSeen, key)
-			w.firstSeenMu.Unlock()
-		} else {
-			w.firstSeenMu.Lock()
-			delete(w.firstSeen, key)
-			w.firstSeenMu.Unlock()
-		}
-	}
-
-	if len(idsToRemove) > 0 {
-		for _, id := range idsToRemove {
-			if err := client.DeleteQueueItem(ctx, id); err != nil {
-				if strings.Contains(err.Error(), "404") {
-					slog.DebugContext(ctx, "Queue item already removed from Sportarr", "id", id)
-				} else {
-					slog.ErrorContext(ctx, "Failed to delete queue item",
-						"id", id, "error", err)
-				}
-			}
-		}
-		slog.InfoContext(ctx, "Cleaned up Sportarr queue items",
-			"instance", instance.Name, "count", len(idsToRemove))
-	}
-	return nil
 }
 
 // checkGhostByImportHistory checks if a queue item has already been imported
@@ -709,36 +354,111 @@ func (w *Worker) isGhostByPathGone(ctx context.Context, outputPath string, queue
 	return true
 }
 
-func (w *Worker) isPathManaged(path string, cfg *config.Config) bool {
-	if path == "" {
-		return false
+func (w *Worker) safeHistorySync() {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("Panic in indexer stats history sync", "panic", r)
+		}
+	}()
+	if err := w.SyncUnknownIndexerStats(w.workerCtx); err != nil {
+		slog.Error("Indexer stats history sync failed", "error", err)
+	}
+}
+
+func (w *Worker) SyncUnknownIndexerStats(ctx context.Context) error {
+	cfg := w.configGetter()
+	// ARRs must be enabled
+	if cfg.Arrs.Enabled == nil || !*cfg.Arrs.Enabled {
+		return nil
 	}
 
-	cleanPath := filepath.Clean(path)
+	// Get all download IDs that are Unknown
+	downloadIDs, err := w.repo.GetUnknownIndexerStatsDownloadIDs(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get unknown indexer download IDs: %w", err)
+	}
 
-	// Check import_dir
-	if cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
-		importDir := filepath.Clean(*cfg.Import.ImportDir)
-		if strings.HasPrefix(cleanPath, importDir) {
-			return true
+	if len(downloadIDs) == 0 {
+		return nil
+	}
+
+	slog.InfoContext(ctx, "Starting ARR history sync for unknown indexer stats", "count", len(downloadIDs))
+
+	resolvedCount := 0
+	for _, downloadID := range downloadIDs {
+		// Respect context cancel
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		indexer, err := w.resolveIndexerFromArrs(ctx, downloadID)
+		if err != nil {
+			slog.DebugContext(ctx, "Failed to resolve indexer for download from ARRs", "download_id", downloadID, "error", err)
+			continue
+		}
+
+		if indexer != "" {
+			slog.InfoContext(ctx, "Successfully resolved unknown indexer from ARR history", "download_id", downloadID, "resolved_indexer", indexer)
+
+			// Update indexer stats
+			if err := w.repo.UpdateIndexerStatsByDownloadID(ctx, downloadID, indexer); err != nil {
+				slog.ErrorContext(ctx, "Failed to update indexer stats in DB", "download_id", downloadID, "indexer", indexer, "error", err)
+			}
+
+			// Update import history indexer
+			if err := w.repo.UpdateImportHistoryIndexerByDownloadID(ctx, downloadID, indexer); err != nil {
+				slog.ErrorContext(ctx, "Failed to update import history indexer in DB", "download_id", downloadID, "indexer", indexer, "error", err)
+			}
+			resolvedCount++
 		}
 	}
 
-	// Check mount_path
-	if cfg.MountPath != "" {
-		mountPath := filepath.Clean(cfg.MountPath)
-		if strings.HasPrefix(cleanPath, mountPath) {
-			return true
-		}
+	if resolvedCount > 0 {
+		slog.InfoContext(ctx, "Completed ARR history sync for unknown indexer stats", "resolved_count", resolvedCount)
 	}
 
-	// Check sabnzbd complete_dir
-	if cfg.SABnzbd.Enabled != nil && *cfg.SABnzbd.Enabled && cfg.SABnzbd.CompleteDir != "" {
-		completeDir := filepath.Clean(cfg.SABnzbd.CompleteDir)
-		if strings.HasPrefix(cleanPath, completeDir) {
-			return true
+	return nil
+}
+
+func (w *Worker) resolveIndexerFromArrs(ctx context.Context, downloadID string) (string, error) {
+	instances := w.instances.GetAllInstances()
+	for _, instance := range instances {
+		if !instance.Enabled {
+			continue
+		}
+		if instance.Type == "sonarr" {
+			client, err := w.clients.GetOrCreateSonarrClient(instance.Name, instance.URL, instance.APIKey)
+			if err != nil {
+				continue
+			}
+			req := &starr.PageReq{PageSize: 50, SortKey: "date", SortDir: starr.SortDescend}
+			req.Set("downloadId", downloadID)
+			history, err := client.GetHistoryPageContext(ctx, req)
+			if err == nil && history != nil {
+				for _, record := range history.Records {
+					if record.DownloadID == downloadID && record.Data.Indexer != "" {
+						return record.Data.Indexer, nil
+					}
+				}
+			}
+		} else if instance.Type == "radarr" {
+			client, err := w.clients.GetOrCreateRadarrClient(instance.Name, instance.URL, instance.APIKey)
+			if err != nil {
+				continue
+			}
+			req := &starr.PageReq{PageSize: 50, SortKey: "date", SortDir: starr.SortDescend}
+			req.Set("downloadId", downloadID)
+			history, err := client.GetHistoryPageContext(ctx, req)
+			if err == nil && history != nil {
+				for _, record := range history.Records {
+					if record.DownloadID == downloadID && record.Data.Indexer != "" {
+						return record.Data.Indexer, nil
+					}
+				}
+			}
 		}
 	}
-
-	return false
+	return "", fmt.Errorf("not found in any starr instance")
 }

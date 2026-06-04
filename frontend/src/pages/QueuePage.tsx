@@ -26,7 +26,7 @@ import {
 	XCircle,
 	XOctagon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { ImportMethods } from "../components/queue/ImportMethods";
 import { QueueItemCard } from "../components/queue/QueueItemCard";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
@@ -38,6 +38,7 @@ import { useConfirm } from "../contexts/ModalContext";
 import { useToast } from "../contexts/ToastContext";
 import {
 	useAddTestQueueItem,
+	useArrsPaused,
 	useBulkCancelQueueItems,
 	useBulkUpdateQueueItemPriority,
 	useCancelQueueItem,
@@ -50,7 +51,9 @@ import {
 	useQueueStats,
 	useRegenerateSymlinks,
 	useRestartBulkQueueItems,
+	useResumeArrs,
 	useRetryQueueItem,
+	useSetArrsPaused,
 	useUpdateQueueItemPriority,
 } from "../hooks/useApi";
 import { useQueueStream } from "../hooks/useQueueStream";
@@ -131,6 +134,10 @@ export function QueuePage() {
 	const clearPending = useClearPendingQueue();
 	const addTestQueueItem = useAddTestQueueItem();
 	const regenerateSymlinks = useRegenerateSymlinks();
+	const { data: arrsPauseState } = useArrsPaused();
+	const forceStopArrs = useSetArrsPaused();
+	const resumeArrs = useResumeArrs();
+	const isArrsPaused = arrsPauseState?.paused ?? false;
 	const { confirmDelete, confirmAction } = useConfirm();
 	const { showToast } = useToast();
 
@@ -285,7 +292,7 @@ export function QueuePage() {
 		if (confirmed) await clearPending.mutateAsync("");
 	};
 
-	const handleAddTestFile = async (size: "100MB" | "1GB" | "10GB") => {
+	const handleAddTestFile = async (size: "100MB" | "1GB") => {
 		try {
 			await addTestQueueItem.mutateAsync(size);
 		} catch (error) {
@@ -396,13 +403,6 @@ export function QueuePage() {
 		queueData && queueData.length > 0 && queueData.every((item) => selectedItems.has(item.id));
 	const isIndeterminate = queueData && selectedItems.size > 0 && !isAllSelected;
 
-	useEffect(() => {
-		setPage(0);
-	}, []);
-	useEffect(() => {
-		clearSelection();
-	}, [clearSelection]);
-
 	if (error) {
 		return (
 			<div className="space-y-4">
@@ -453,7 +453,32 @@ export function QueuePage() {
 									<Settings className="h-3.5 w-3.5" />
 									Cleanup
 								</button>
-								<ul className="dropdown-content menu z-[1] mt-2 w-52 rounded-box border border-base-200 bg-base-100 p-2 shadow-lg">
+								<ul className="dropdown-content menu z-[1] mt-2 w-56 rounded-box border border-base-200 bg-base-100 p-2 shadow-lg">
+									<li className="menu-title px-4 py-2 font-bold text-base-content/40 text-xs uppercase tracking-widest">
+										ARR Requests
+									</li>
+									<li>
+										{isArrsPaused ? (
+											<button
+												type="button"
+												onClick={() => resumeArrs.mutate()}
+												className="text-success"
+												disabled={resumeArrs.isPending}
+											>
+												<PlayCircle className="h-4 w-4" /> Resume ARR Requests
+											</button>
+										) : (
+											<button
+												type="button"
+												onClick={() => forceStopArrs.mutate()}
+												className="text-warning"
+												disabled={forceStopArrs.isPending}
+											>
+												<XOctagon className="h-4 w-4" /> Force Stop
+											</button>
+										)}
+									</li>
+									<div className="divider my-1 text-base-content/70" />
 									<li>
 										<button
 											type="button"
@@ -943,7 +968,13 @@ export function QueuePage() {
 																<td>
 																	<div className="flex flex-col">
 																		<span className="text-xs opacity-70">
-																			{formatRelativeTime(item.created_at)}
+																			{item.status === QueueStatus.PROCESSING && item.started_at
+																				? `Started ${formatRelativeTime(item.started_at)}`
+																				: item.status === QueueStatus.COMPLETED && item.completed_at
+																				? `Finished ${formatRelativeTime(item.completed_at)}`
+																				: item.status === QueueStatus.FAILED && (item.completed_at || item.updated_at)
+																				? `Failed ${formatRelativeTime(item.completed_at || item.updated_at)}`
+																				: `Added ${formatRelativeTime(item.created_at)}`}
 																		</span>
 																		{item.retry_count > 0 && (
 																			<span className="mt-0.5 font-bold text-warning text-xs uppercase tracking-tighter">

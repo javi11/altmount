@@ -537,89 +537,6 @@ export interface WebDAVFormData {
 	host?: string;
 }
 
-export interface ImportFormData {
-	max_processor_workers: number;
-	queue_processing_interval_seconds: number; // Interval in seconds for queue processing
-	max_download_prefetch: number;
-	read_timeout_seconds: number;
-	import_strategy: ImportStrategy;
-	import_dir: string;
-	watch_dir?: string;
-	watch_interval_seconds?: number;
-}
-
-export interface MetadataFormData {
-	root_path: string;
-	delete_source_nzb_on_removal?: boolean;
-	backup: MetadataBackupConfig;
-}
-
-export interface StreamingFormData {
-	max_prefetch: number;
-	failure_masking: FailureMaskingConfig;
-}
-
-export interface RCloneFormData {
-	password: string;
-	rc_enabled: boolean;
-	rc_url: string;
-	vfs_name: string;
-	rc_port: number;
-	rc_user: string;
-	rc_pass: string;
-	rc_options: Record<string, string>;
-	mount_enabled: boolean;
-	mount_options: Record<string, string>;
-
-	// Mount-Specific Settings
-	allow_other: boolean;
-	allow_non_empty: boolean;
-	read_only: boolean;
-	timeout: string;
-	syslog: boolean;
-
-	// System and filesystem options
-	log_level: string;
-	uid: number;
-	gid: number;
-	umask: string;
-	buffer_size: string;
-	attr_timeout: string;
-	transfers: number;
-
-	// VFS Cache Settings
-	cache_dir: string;
-	vfs_cache_mode: string;
-	vfs_cache_poll_interval: string;
-	vfs_read_chunk_size: string;
-	vfs_read_chunk_size_limit: string;
-	vfs_cache_max_size: string;
-	vfs_cache_max_age: string;
-	vfs_read_ahead: string;
-	dir_cache_time: string;
-	vfs_cache_min_free_space: string;
-	vfs_disk_space_total: string;
-	vfs_read_chunk_streams: number;
-
-	// Advanced Settings
-	no_mod_time: boolean;
-	no_checksum: boolean;
-	async_read: boolean;
-	vfs_fast_fingerprint: boolean;
-	use_mmap: boolean;
-	links: boolean;
-}
-
-export interface RCloneRCFormData {
-	rc_enabled: boolean;
-	rc_url: string;
-	vfs_name: string;
-	rc_port: number;
-	rc_user: string;
-	rc_pass: string;
-	rc_options: Record<string, string>;
-}
-
 export interface RCloneMountFormData {
 	mount_enabled: boolean;
 	mount_options: Record<string, string>;
@@ -699,20 +616,8 @@ export interface LogFormData {
 	compress: boolean;
 }
 
-export interface SABnzbdFormData {
-	enabled: boolean;
-	complete_dir: string;
-	categories: SABnzbdCategory[];
-	history_retention_minutes: number;
-	fallback_host: string;
-	fallback_api_key: string;
-}
-
 // Arrs configuration types
 export type ArrsType = "radarr" | "sonarr" | "lidarr" | "readarr" | "whisparr" | "sportarr";
-
-// Sync status types
-export type SyncStatus = "idle" | "running" | "cancelling" | "completed" | "failed";
 
 export interface ArrsInstanceConfig {
 	name: string;
@@ -721,26 +626,6 @@ export interface ArrsInstanceConfig {
 	category?: string;
 	enabled: boolean;
 	sync_interval_hours: number;
-}
-
-// Database-backed arrs instance (includes real ID from database)
-export interface ArrsInstance {
-	id: number;
-	name: string;
-	type: ArrsType;
-	url: string;
-	api_key: string;
-	category?: string;
-	enabled: boolean;
-	sync_interval_hours: number;
-	last_sync_at?: string;
-	created_at: string;
-	updated_at: string;
-}
-
-export interface IgnoredMessage {
-	message: string;
-	enabled: boolean;
 }
 
 export interface ArrsConfig {
@@ -756,45 +641,16 @@ export interface ArrsConfig {
 	queue_cleanup_enabled?: boolean;
 	queue_cleanup_interval_seconds?: number;
 	queue_cleanup_grace_period_minutes?: number;
-	queue_cleanup_allowlist?: IgnoredMessage[];
-	cleanup_automatic_import_failure?: boolean;
+	queue_cleanup_max_failures?: number;
+	queue_cleanup_rules?: StuckCleanupRule[];
 }
 
-// Sync status and progress types
-export interface SyncProgress {
-	instance_id: number;
-	status: SyncStatus;
-	started_at: string;
-	processed_count: number;
-	error_count: number;
-	total_items?: number;
-	current_batch: string;
-}
+export type StuckCleanupAction = "remove" | "blocklist" | "blocklist_search";
 
-export interface SyncResult {
-	instance_id: number;
-	status: SyncStatus;
-	started_at: string;
-	completed_at: string;
-	processed_count: number;
-	error_count: number;
-	error_message?: string;
-}
-
-export interface ArrsFormData {
+export interface StuckCleanupRule {
+	message: string;
 	enabled: boolean;
-	max_workers: number;
-	webhook_base_url?: string;
-	radarr_instances: ArrsInstanceConfig[];
-	sonarr_instances: ArrsInstanceConfig[];
-	lidarr_instances: ArrsInstanceConfig[];
-	readarr_instances: ArrsInstanceConfig[];
-	whisparr_instances: ArrsInstanceConfig[];
-	sportarr_instances: ArrsInstanceConfig[];
-	queue_cleanup_enabled?: boolean;
-	queue_cleanup_interval_seconds?: number;
-	queue_cleanup_grace_period_minutes?: number;
-	cleanup_automatic_import_failure?: boolean;
+	action: StuckCleanupAction;
 }
 
 // Prowlarr indexer configuration (nested inside StremioConfig)

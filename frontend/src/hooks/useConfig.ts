@@ -19,22 +19,6 @@ export function useConfig() {
 	});
 }
 
-// Hook to update entire configuration
-export function useUpdateConfig() {
-	const queryClient = useQueryClient();
-
-	return useMutation({
-		mutationFn: (config: ConfigUpdateRequest) => apiClient.updateConfig(config),
-		onSuccess: (data) => {
-			// Update the cache with new configuration
-			queryClient.setQueryData(configKeys.current(), data);
-		},
-		onError: (error) => {
-			console.error("Failed to update configuration:", error);
-		},
-	});
-}
-
 // Hook to update specific configuration section
 export function useUpdateConfigSection() {
 	const queryClient = useQueryClient();

@@ -263,6 +263,10 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 			if err := s.queueRepo.UpdateImportHistoryIndexerByDownloadID(c.Context(), req.DownloadId, indexerName); err != nil {
 				slog.DebugContext(c.Context(), "Failed to update indexer for import history (expected if not yet complete)", "download_id", req.DownloadId, "indexer", indexerName, "error", err)
 			}
+			// Update indexer stats table retroactively
+			if err := s.queueRepo.UpdateIndexerStatsByDownloadID(c.Context(), req.DownloadId, indexerName); err != nil {
+				slog.DebugContext(c.Context(), "Failed to update indexer for stats (expected if not yet complete)", "download_id", req.DownloadId, "indexer", indexerName, "error", err)
+			}
 		}
 		return RespondMessage(c, "Grab logged successfully")
 	case "Download", "AlbumImport", "BookImport": // OnImport
@@ -288,6 +292,11 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 			// 2. Update import history if it has already completed
 			if err := s.queueRepo.UpdateImportHistoryIndexerByDownloadID(c.Context(), req.DownloadId, indexerName); err != nil {
 				slog.DebugContext(c.Context(), "Failed to update indexer for import history", "download_id", req.DownloadId, "indexer", indexerName, "error", err)
+			}
+
+			// 3. Update indexer stats table retroactively
+			if err := s.queueRepo.UpdateIndexerStatsByDownloadID(c.Context(), req.DownloadId, indexerName); err != nil {
+				slog.DebugContext(c.Context(), "Failed to update indexer for stats", "download_id", req.DownloadId, "indexer", indexerName, "error", err)
 			}
 		}
 	case "Rename":
@@ -1169,4 +1178,59 @@ func (s *Server) handleTestArrsDownloadClients(c *fiber.Ctx) error {
 		"success": true,
 		"data":    results,
 	})
+}
+
+// handleGetArrsPause reports whether the Force Stop brake is engaged.
+//
+//	@Summary		Get ARR Force Stop state
+//	@Description	Reports whether AltMount's outbound *arr requests are paused (Force Stop). The flag is in-memory and clears on restart.
+//	@Tags			ARRs
+//	@Produce		json
+//	@Success		200	{object}	APIResponse
+//	@Failure		503	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Router			/arrs/pause [get]
+func (s *Server) handleGetArrsPause(c *fiber.Ctx) error {
+	if s.arrsService == nil {
+		return RespondServiceUnavailable(c, "Arrs not available", "")
+	}
+	return RespondSuccess(c, fiber.Map{"paused": s.arrsService.IsArrsPaused()})
+}
+
+// handleSetArrsPause engages the Force Stop brake (halts all AltMount→arr requests).
+//
+//	@Summary		Engage ARR Force Stop
+//	@Description	Halts all AltMount→arr requests: the queue-cleanup worker skips its ticks and health-repair re-triggers are deferred. In-memory only; auto-resumes on restart.
+//	@Tags			ARRs
+//	@Produce		json
+//	@Success		200	{object}	APIResponse
+//	@Failure		503	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Router			/arrs/pause [post]
+func (s *Server) handleSetArrsPause(c *fiber.Ctx) error {
+	if s.arrsService == nil {
+		return RespondServiceUnavailable(c, "Arrs not available", "")
+	}
+	s.arrsService.SetArrsPaused(true)
+	slog.InfoContext(c.Context(), "ARR Force Stop engaged")
+	return RespondSuccess(c, fiber.Map{"paused": true})
+}
+
+// handleResumeArrs releases the Force Stop brake.
+//
+//	@Summary		Release ARR Force Stop
+//	@Description	Resumes AltMount→arr requests after a Force Stop.
+//	@Tags			ARRs
+//	@Produce		json
+//	@Success		200	{object}	APIResponse
+//	@Failure		503	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Router			/arrs/pause [delete]
+func (s *Server) handleResumeArrs(c *fiber.Ctx) error {
+	if s.arrsService == nil {
+		return RespondServiceUnavailable(c, "Arrs not available", "")
+	}
+	s.arrsService.SetArrsPaused(false)
+	slog.InfoContext(c.Context(), "ARR Force Stop released")
+	return RespondSuccess(c, fiber.Map{"paused": false})
 }

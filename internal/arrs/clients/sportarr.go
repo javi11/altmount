@@ -229,7 +229,17 @@ func (s *Sportarr) GetQueue(ctx context.Context) ([]SportarrQueueItem, error) {
 // DeleteQueueItem removes a queue item, also instructing Sportarr to remove the
 // download from the (AltMount) download client. It does not blocklist.
 func (s *Sportarr) DeleteQueueItem(ctx context.Context, id int64) error {
-	path := fmt.Sprintf("/api/queue/%d?removeFromClient=true&blocklist=false", id)
+	return s.deleteQueueItem(ctx, id, false)
+}
+
+// DeleteQueueItemBlocklist removes a queue item and blocklists the release so the
+// same NZB is not grabbed again, prompting Sportarr to search for a replacement.
+func (s *Sportarr) DeleteQueueItemBlocklist(ctx context.Context, id int64) error {
+	return s.deleteQueueItem(ctx, id, true)
+}
+
+func (s *Sportarr) deleteQueueItem(ctx context.Context, id int64, blocklist bool) error {
+	path := fmt.Sprintf("/api/queue/%d?removeFromClient=true&blocklist=%t", id, blocklist)
 	req, err := s.newRequest(ctx, http.MethodDelete, path)
 	if err != nil {
 		return err

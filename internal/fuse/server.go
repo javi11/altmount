@@ -157,18 +157,3 @@ func (s *Server) ValidateMount() (bool, error) {
 	}
 }
 
-// RefreshDirectory invalidates the kernel cache for a named directory entry.
-// Only works with backends that implement backend.Refresher (e.g. hanwen).
-func (s *Server) RefreshDirectory(name string) {
-	if r, ok := s.be.(backend.Refresher); ok {
-		r.RefreshDirectory(name)
-	}
-}
-
-// BackendType returns the active backend type.
-func (s *Server) BackendType() backend.Type {
-	if s.be != nil {
-		return s.be.Type()
-	}
-	return s.backendType
-}
