@@ -57,3 +57,31 @@ fieldset {
 .dropdown-content {
 	@apply border border-base-300 shadow-2xl;
 }
+
+/* Custom Keyframe Animations & Utilities */
+@keyframes constellation-dash {
+	to {
+		stroke-dashoffset: -40;
+	}
+}
+
+@keyframes speed-wave {
+	0%,
+	100% {
+		transform: translateY(0) scaleY(1);
+	}
+	50% {
+		transform: translateY(-4px) scaleY(1.15);
+	}
+}
+
+.animate-dash {
+	animation: constellation-dash 4s linear infinite;
+}
+
+/* Glassmorphic Utilities */
+.glass-frosted {
+	background: rgba(15, 17, 23, 0.35);
+	border: 1px solid rgba(255, 255, 255, 0.05);
+	backdrop-filter: blur(16px);
+}

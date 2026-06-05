@@ -57,7 +57,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	// Setup logging
-	logger := slogutil.SetupLogRotationWithFallback(cfg.Log, cfg.Log.Level)
+	logger, dynamicLeveler := slogutil.SetupLogRotationWithFallback(cfg.Log, cfg.Log.Level)
 	slog.SetDefault(logger)
 
 	// 2. Create context and managers
@@ -169,7 +169,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// 7. Register config change handlers
 	pool.RegisterConfigHandlers(ctx, configManager, poolManager)
 	webdav.RegisterConfigHandlers(ctx, configManager, webdavHandler)
-	api.RegisterLogLevelHandler(ctx, configManager, debugMode)
+	api.RegisterLogLevelHandler(ctx, configManager, debugMode, dynamicLeveler)
 	apiServer.RegisterFuseConfigChangeHandler(configManager)
 
 	// Register segment cache config change handler for dynamic path/size/expiry changes.
@@ -221,6 +221,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if err := arrsService.StartWorker(ctx); err != nil {
 		logger.ErrorContext(ctx, "Failed to start ARR queue cleanup worker", "error", err)
 	}
+	arrsService.RegisterConfigChangeHandler(ctx, configManager)
 
 	// Start metadata backup worker
 	metadataBackupWorker := metadata.NewBackupWorker(configManager.GetConfigGetter())

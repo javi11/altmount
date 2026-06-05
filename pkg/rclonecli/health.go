@@ -6,38 +6,6 @@ import (
 	"time"
 )
 
-// HealthCheck performs comprehensive health checks on the rclone system
-func (m *Manager) HealthCheck(ctx context.Context) error {
-	if !m.serverStarted {
-		return fmt.Errorf("rclone RC server is not started")
-	}
-
-	if !m.IsReady() {
-		return fmt.Errorf("rclone RC server is not ready")
-	}
-
-	// Check if we can communicate with the server
-	if !m.pingServer() {
-		return fmt.Errorf("rclone RC server is not responding")
-	}
-
-	// Check mounts health
-	m.mountsMutex.RLock()
-	unhealthyMounts := make([]string, 0)
-	for provider, mount := range m.mounts {
-		if mount.Mounted && !m.checkMountHealth(provider) {
-			unhealthyMounts = append(unhealthyMounts, provider)
-		}
-	}
-	m.mountsMutex.RUnlock()
-
-	if len(unhealthyMounts) > 0 {
-		return fmt.Errorf("unhealthy mounts detected: %v", unhealthyMounts)
-	}
-
-	return nil
-}
-
 // checkMountHealth checks if a specific mount is healthy
 func (m *Manager) checkMountHealth(provider string) bool {
 	// Try to list the root directory of the mount

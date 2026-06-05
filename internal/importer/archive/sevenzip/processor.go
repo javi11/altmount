@@ -58,46 +58,16 @@ var (
 	rarNumericPattern = rar.NumericPattern
 )
 
-// CreateFileMetadataFromSevenZipContent creates FileMetadata from SevenZipContent for the metadata system
+// CreateFileMetadataFromSevenZipContent creates FileMetadata from SevenZipContent for the metadata system.
+// Delegates to archive.NewFileMetadataFromContent so the mapping stays shared with
+// non-7z callers (e.g. ISO expansion).
 func (sz *sevenZipProcessor) CreateFileMetadataFromSevenZipContent(
 	content Content,
 	sourceNzbPath string,
 	releaseDate int64,
 	nzbdavId string,
 ) *metapb.FileMetadata {
-	now := time.Now().Unix()
-
-	meta := &metapb.FileMetadata{
-		FileSize:      content.Size,
-		SourceNzbPath: sourceNzbPath,
-		Status:        metapb.FileStatus_FILE_STATUS_HEALTHY,
-		CreatedAt:     now,
-		ModifiedAt:    now,
-		SegmentData:   content.Segments,
-		ReleaseDate:   releaseDate,
-		NzbdavId:      nzbdavId,
-	}
-
-	// Set AES encryption if keys are present
-	if len(content.AesKey) > 0 {
-		meta.Encryption = metapb.Encryption_AES
-		meta.AesKey = content.AesKey
-		meta.AesIv = content.AesIV
-	}
-
-	// Populate nested sources for encrypted nested RAR files
-	for _, ns := range content.NestedSources {
-		meta.NestedSources = append(meta.NestedSources, &metapb.NestedSegmentSource{
-			Segments:        ns.Segments,
-			AesKey:          ns.AesKey,
-			AesIv:           ns.AesIV,
-			InnerOffset:     ns.InnerOffset,
-			InnerLength:     ns.InnerLength,
-			InnerVolumeSize: ns.InnerVolumeSize,
-		})
-	}
-
-	return meta
+	return archive.NewFileMetadataFromContent(content, sourceNzbPath, releaseDate, nzbdavId)
 }
 
 // deriveAESKey derives the AES encryption key from a password using the 7-zip algorithm

@@ -1,9 +1,16 @@
 import { AlertTriangle, Plus, Save, Trash2, Webhook } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useRegisterArrsWebhooks } from "../../hooks/useApi";
-import type { ArrsConfig, ArrsInstanceConfig, ArrsType, ConfigResponse } from "../../types/config";
+import type {
+	ArrsConfig,
+	ArrsInstanceConfig,
+	ArrsType,
+	ConfigResponse,
+	StuckCleanupAction,
+	StuckCleanupRule,
+} from "../../types/config";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
-import ArrsInstanceCard from "./ArrsInstanceCard";
+import { ArrsInstanceCard } from "./ArrsInstanceCard";
 
 interface ArrsConfigSectionProps {
 	config: ConfigResponse;
@@ -36,6 +43,7 @@ const ARR_TYPES: { type: ArrsType; label: string; color: string; defaultCategory
 	{ type: "lidarr", label: "Lidarr", color: "bg-accent", defaultCategory: "music" },
 	{ type: "readarr", label: "Readarr", color: "bg-info", defaultCategory: "books" },
 	{ type: "whisparr", label: "Whisparr", color: "bg-warning", defaultCategory: "movies" },
+	{ type: "sportarr", label: "Sportarr", color: "bg-success", defaultCategory: "sports" },
 ];
 
 export function ArrsConfigSection({
@@ -53,7 +61,7 @@ export function ArrsConfigSection({
 	const [webhookSuccess, setWebhookSuccess] = useState<string | null>(null);
 	const [webhookError, setWebhookError] = useState<string | null>(null);
 	const [saveError, setSaveError] = useState<string | null>(null);
-	const [newIgnoreMessage, setNewIgnoreMessage] = useState("");
+	const [newStuckPattern, setNewStuckPattern] = useState("");
 
 	const registerWebhooks = useRegisterArrsWebhooks();
 	const defaultWebhookUrl = `http://${config.webdav.host || "altmount"}:${config.webdav.port}`;
@@ -164,7 +172,7 @@ export function ArrsConfigSection({
 			category = arrTypeMeta?.defaultCategory || "movies";
 		}
 		const instances = [
-			...(formData[instancesKey] as ArrsInstanceConfig[]),
+			...((formData[instancesKey] as ArrsInstanceConfig[]) || []),
 			{
 				name: newInstance.name,
 				url: newInstance.url,
@@ -182,30 +190,37 @@ export function ArrsConfigSection({
 		setShowAddInstance(false);
 	};
 
-	const handleAddIgnoreMessage = () => {
-		if (!newIgnoreMessage.trim()) return;
-		const currentList = formData.queue_cleanup_allowlist || [];
-		if (currentList.some((m) => m.message === newIgnoreMessage.trim())) {
-			setNewIgnoreMessage("");
+	const handleAddStuckPattern = () => {
+		if (!newStuckPattern.trim()) return;
+		const currentList = formData.queue_cleanup_rules || [];
+		if (currentList.some((m) => m.message === newStuckPattern.trim())) {
+			setNewStuckPattern("");
 			return;
 		}
-		const newList = [...currentList, { message: newIgnoreMessage.trim(), enabled: true }];
-		handleFormChange("queue_cleanup_allowlist", newList);
-		setNewIgnoreMessage("");
+		const newList: StuckCleanupRule[] = [
+			...currentList,
+			{ message: newStuckPattern.trim(), enabled: true, action: "blocklist_search" },
+		];
+		handleFormChange("queue_cleanup_rules", newList);
+		setNewStuckPattern("");
 	};
 
-	const handleRemoveIgnoreMessage = (index: number) => {
-		const currentList = formData.queue_cleanup_allowlist || [];
-		const newList = [...currentList];
+	const handleRemoveStuckPattern = (index: number) => {
+		const newList = [...(formData.queue_cleanup_rules || [])];
 		newList.splice(index, 1);
-		handleFormChange("queue_cleanup_allowlist", newList);
+		handleFormChange("queue_cleanup_rules", newList);
 	};
 
-	const handleToggleIgnoreMessage = (index: number) => {
-		const currentList = formData.queue_cleanup_allowlist || [];
-		const newList = [...currentList];
+	const handleToggleStuckPattern = (index: number) => {
+		const newList = [...(formData.queue_cleanup_rules || [])];
 		newList[index] = { ...newList[index], enabled: !newList[index].enabled };
-		handleFormChange("queue_cleanup_allowlist", newList);
+		handleFormChange("queue_cleanup_rules", newList);
+	};
+
+	const handleSetStuckRuleAction = (index: number, action: StuckCleanupAction) => {
+		const newList = [...(formData.queue_cleanup_rules || [])];
+		newList[index] = { ...newList[index], action };
+		handleFormChange("queue_cleanup_rules", newList);
 	};
 
 	const handleSave = async () => {
@@ -364,30 +379,33 @@ export function ArrsConfigSection({
 
 						{(formData.queue_cleanup_enabled ?? true) && (
 							<div className="fade-in zoom-in-95 animate-in space-y-6">
-								<fieldset className="fieldset max-w-xs">
-									<legend className="fieldset-legend font-semibold">Cleanup Interval</legend>
-									<div className="join w-full">
-										<input
-											type="number"
-											className="input input-bordered join-item w-full bg-base-100 font-mono text-sm"
-											value={formData.queue_cleanup_interval_seconds ?? 10}
-											onChange={(e) =>
-												handleFormChange(
-													"queue_cleanup_interval_seconds",
-													Number.parseInt(e.target.value, 10) || 10,
-												)
-											}
-											min={1}
-											max={3600}
-											disabled={isReadOnly}
-										/>
-										<span className="btn btn-ghost join-item pointer-events-none border-base-300 text-xs">
-											sec
-										</span>
-									</div>
-								</fieldset>
+								<div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+									<fieldset className="fieldset">
+										<legend className="fieldset-legend font-semibold">Cleanup Interval</legend>
+										<div className="join w-full">
+											<input
+												type="number"
+												className="input input-bordered join-item w-full bg-base-100 font-mono text-sm"
+												value={formData.queue_cleanup_interval_seconds ?? 10}
+												onChange={(e) =>
+													handleFormChange(
+														"queue_cleanup_interval_seconds",
+														Number.parseInt(e.target.value, 10) || 10,
+													)
+												}
+												min={1}
+												max={3600}
+												disabled={isReadOnly}
+											/>
+											<span className="btn btn-ghost join-item pointer-events-none border-base-300 text-xs">
+												sec
+											</span>
+										</div>
+										<div className="mt-2 whitespace-normal text-base-content/70 text-xs">
+											How often the *arr queues are checked.
+										</div>
+									</fieldset>
 
-								<div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
 									<fieldset className="fieldset">
 										<legend className="fieldset-legend whitespace-normal font-semibold md:whitespace-nowrap">
 											Cleanup Grace Period
@@ -396,11 +414,11 @@ export function ArrsConfigSection({
 											<input
 												type="number"
 												className="input input-bordered join-item w-full bg-base-100 font-mono text-sm"
-												value={formData.queue_cleanup_grace_period_minutes ?? 10}
+												value={formData.queue_cleanup_grace_period_minutes ?? 5}
 												onChange={(e) =>
 													handleFormChange(
 														"queue_cleanup_grace_period_minutes",
-														Number.parseInt(e.target.value, 10) || 10,
+														Number.parseInt(e.target.value, 10) || 5,
 													)
 												}
 												min={0}
@@ -411,64 +429,81 @@ export function ArrsConfigSection({
 											</span>
 										</div>
 										<div className="mt-2 whitespace-normal text-base-content/70 text-xs">
-											Wait time before considering a failed item "stuck" and eligible for cleanup.
+											How long a stuck or failed import must persist before cleanup acts on it.
+											Brief errors that clear on their own are ignored.
 										</div>
 									</fieldset>
 
 									<fieldset className="fieldset">
 										<legend className="fieldset-legend whitespace-normal font-semibold md:whitespace-nowrap">
-											Import Failure Cleanup
+											Failure Limit
 										</legend>
-										<label className="label h-12 cursor-pointer items-center justify-start gap-4">
+										<div className="join w-full">
 											<input
-												type="checkbox"
-												className="toggle toggle-primary toggle-sm shrink-0"
-												checked={formData.cleanup_automatic_import_failure ?? false}
+												type="number"
+												className="input input-bordered join-item w-full bg-base-100 font-mono text-sm"
+												value={formData.queue_cleanup_max_failures ?? 0}
 												onChange={(e) =>
-													handleFormChange("cleanup_automatic_import_failure", e.target.checked)
+													handleFormChange(
+														"queue_cleanup_max_failures",
+														Math.max(0, Number.parseInt(e.target.value, 10) || 0),
+													)
 												}
+												min={0}
 												disabled={isReadOnly}
 											/>
-											<span className="whitespace-normal break-words font-bold text-xs">
-												Purge Automatic Failures
+											<span className="btn btn-ghost join-item pointer-events-none border-base-300 text-xs">
+												tries
 											</span>
-										</label>
-										<div className="mt-1 whitespace-normal text-base-content/70 text-xs">
-											Automatically remove items from queue that failed with "Automatic Import"
-											errors.
+										</div>
+										<div className="mt-2 whitespace-normal text-base-content/70 text-xs">
+											After cleanup acts on the same movie/episode this many times, give up:
+											blocklist without re-searching and unmonitor it in the *arr. 0 disables this.
 										</div>
 									</fieldset>
 								</div>
 
 								<div className="space-y-4">
-									<h5 className="font-bold text-base-content/60 text-xs uppercase">
-										Allowlist (Ignore Errors)
-									</h5>
-									<div className="custom-scrollbar max-h-48 space-y-2 overflow-y-auto pr-2">
-										{(formData.queue_cleanup_allowlist || []).map((msg, index) => (
+									<h5 className="font-bold text-base-content/60 text-xs uppercase">Error Rules</h5>
+									<p className="whitespace-normal text-base-content/70 text-xs">
+										When a stuck import's error matches one of these, run the chosen action: remove,
+										blocklist, or blocklist + search.
+									</p>
+									<div className="custom-scrollbar max-h-72 space-y-2 overflow-y-auto pr-2">
+										{(formData.queue_cleanup_rules || []).map((rule, index) => (
 											<div
 												key={index}
-												className="flex items-center justify-between rounded-xl border border-base-300/50 bg-base-100/50 p-2 pl-3"
+												className="flex items-center gap-2 rounded-xl border border-base-300/50 bg-base-100/50 p-2 pl-3"
 											>
-												<div className="flex min-w-0 flex-1 items-center gap-3">
-													<input
-														type="checkbox"
-														className="checkbox checkbox-sm checkbox-primary"
-														checked={msg.enabled}
-														onChange={() => handleToggleIgnoreMessage(index)}
-														disabled={isReadOnly}
-													/>
-													<span
-														className={`truncate font-mono text-xs ${!msg.enabled ? "text-base-content/50 line-through" : ""}`}
-														title={msg.message}
-													>
-														{msg.message}
-													</span>
-												</div>
+												<input
+													type="checkbox"
+													className="checkbox checkbox-sm checkbox-primary shrink-0"
+													checked={rule.enabled}
+													onChange={() => handleToggleStuckPattern(index)}
+													disabled={isReadOnly}
+												/>
+												<span
+													className={`min-w-0 flex-1 truncate font-mono text-xs ${!rule.enabled ? "text-base-content/50 line-through" : ""}`}
+													title={rule.message}
+												>
+													{rule.message}
+												</span>
+												<select
+													className="select select-bordered select-xs w-44 shrink-0 bg-base-100 text-xs"
+													value={rule.action}
+													onChange={(e) =>
+														handleSetStuckRuleAction(index, e.target.value as StuckCleanupAction)
+													}
+													disabled={isReadOnly || !rule.enabled}
+												>
+													<option value="remove">Remove only</option>
+													<option value="blocklist">Blocklist</option>
+													<option value="blocklist_search">Blocklist + search</option>
+												</select>
 												<button
 													type="button"
-													className="btn btn-ghost btn-sm text-error hover:bg-error/10"
-													onClick={() => handleRemoveIgnoreMessage(index)}
+													className="btn btn-ghost btn-sm shrink-0 text-error hover:bg-error/10"
+													onClick={() => handleRemoveStuckPattern(index)}
 													disabled={isReadOnly}
 												>
 													<Trash2 className="h-3 w-3" />
@@ -482,16 +517,16 @@ export function ArrsConfigSection({
 											<input
 												type="text"
 												className="input input-bordered join-item flex-1 bg-base-100 text-xs"
-												placeholder="Add error message to ignore..."
-												value={newIgnoreMessage}
-												onChange={(e) => setNewIgnoreMessage(e.target.value)}
-												onKeyDown={(e) => e.key === "Enter" && handleAddIgnoreMessage()}
+												placeholder="Add an *arr error message... (defaults to blocklist + search)"
+												value={newStuckPattern}
+												onChange={(e) => setNewStuckPattern(e.target.value)}
+												onKeyDown={(e) => e.key === "Enter" && handleAddStuckPattern()}
 											/>
 											<button
 												type="button"
 												className="btn btn-primary join-item px-4"
-												onClick={handleAddIgnoreMessage}
-												disabled={!newIgnoreMessage.trim()}
+												onClick={handleAddStuckPattern}
+												disabled={!newStuckPattern.trim()}
 											>
 												<Plus className="h-4 w-4" />
 											</button>

@@ -60,9 +60,9 @@ type ArrsWebhookRequest struct {
 		Id int64 `json:"id"`
 	} `json:"bookFile"`
 
-	EventType string `json:"eventType"`
+	EventType    string `json:"eventType"`
 	InstanceName string `json:"instanceName,omitempty"`
-	FilePath  string `json:"filePath,omitempty"`
+	FilePath     string `json:"filePath,omitempty"`
 	// For upgrades/renames, the file path might be in other fields or need to be inferred
 	Movie struct {
 		Id         int64  `json:"id"`
@@ -85,6 +85,11 @@ type ArrsWebhookRequest struct {
 		Path      string `json:"path"`
 	} `json:"episodeFile"`
 	DeletedFiles ArrsDeletedFiles `json:"deletedFiles,omitempty"`
+	DownloadId   string           `json:"downloadId,omitempty"`
+	Release      *struct {
+		Indexer      string `json:"indexer,omitempty"`
+		ReleaseTitle string `json:"releaseTitle,omitempty"`
+	} `json:"release,omitempty"`
 }
 
 func (req ArrsWebhookRequest) ToMetadata() model.WebhookMetadata {
@@ -243,7 +248,27 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 	switch req.EventType {
 	case "Test":
 		slog.InfoContext(c.Context(), "Received ARR test webhook")
-		return c.Status(200).JSON(fiber.Map{"success": true, "message": "Test successful"})
+		return RespondMessage(c, "Test successful")
+	case "Grab":
+		if req.DownloadId != "" && req.Release != nil && req.Release.Indexer != "" {
+			indexerName := req.Release.Indexer
+			releaseTitle := req.Release.ReleaseTitle
+			s.importerService.StoreGrabbedIndexer(req.DownloadId, releaseTitle, indexerName)
+			slog.InfoContext(c.Context(), "Logged grabbed indexer from webhook", "download_id", req.DownloadId, "release_title", releaseTitle, "indexer", indexerName)
+			// Proactively update any existing queue item with this download ID
+			if err := s.queueRepo.UpdateQueueItemIndexerByDownloadID(c.Context(), req.DownloadId, indexerName); err != nil {
+				slog.WarnContext(c.Context(), "Failed to update indexer for existing queue item", "download_id", req.DownloadId, "indexer", indexerName, "error", err)
+			}
+			// In case the import already completed or failed (e.g. race condition), update history
+			if err := s.queueRepo.UpdateImportHistoryIndexerByDownloadID(c.Context(), req.DownloadId, indexerName); err != nil {
+				slog.DebugContext(c.Context(), "Failed to update indexer for import history (expected if not yet complete)", "download_id", req.DownloadId, "indexer", indexerName, "error", err)
+			}
+			// Update indexer stats table retroactively
+			if err := s.queueRepo.UpdateIndexerStatsByDownloadID(c.Context(), req.DownloadId, indexerName); err != nil {
+				slog.DebugContext(c.Context(), "Failed to update indexer for stats (expected if not yet complete)", "download_id", req.DownloadId, "indexer", indexerName, "error", err)
+			}
+		}
+		return RespondMessage(c, "Grab logged successfully")
 	case "Download", "AlbumImport", "BookImport": // OnImport
 		isScanEvent = true
 		if req.EpisodeFile.Path != "" {
@@ -252,6 +277,27 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 			pathsToScan = append(pathsToScan, req.MovieFile.Path)
 		} else if req.FilePath != "" {
 			pathsToScan = append(pathsToScan, req.FilePath)
+		}
+
+		// Update indexer name in database tables if present in webhook
+		if req.DownloadId != "" && req.Release != nil && req.Release.Indexer != "" {
+			indexerName := req.Release.Indexer
+			slog.InfoContext(c.Context(), "Logged indexer from OnImport webhook", "download_id", req.DownloadId, "indexer", indexerName)
+
+			// 1. Update queue if it still exists
+			if err := s.queueRepo.UpdateQueueItemIndexerByDownloadID(c.Context(), req.DownloadId, indexerName); err != nil {
+				slog.DebugContext(c.Context(), "Failed to update indexer for queue item", "download_id", req.DownloadId, "indexer", indexerName, "error", err)
+			}
+
+			// 2. Update import history if it has already completed
+			if err := s.queueRepo.UpdateImportHistoryIndexerByDownloadID(c.Context(), req.DownloadId, indexerName); err != nil {
+				slog.DebugContext(c.Context(), "Failed to update indexer for import history", "download_id", req.DownloadId, "indexer", indexerName, "error", err)
+			}
+
+			// 3. Update indexer stats table retroactively
+			if err := s.queueRepo.UpdateIndexerStatsByDownloadID(c.Context(), req.DownloadId, indexerName); err != nil {
+				slog.DebugContext(c.Context(), "Failed to update indexer for stats", "download_id", req.DownloadId, "indexer", indexerName, "error", err)
+			}
 		}
 	case "Rename":
 		isScanEvent = true
@@ -288,10 +334,10 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 		}
 	case "MovieDelete", "ArtistDelete", "AuthorDelete", "SeriesDelete", "MovieFileDelete", "EpisodeFileDelete", "BookFileDelete":
 		slog.InfoContext(c.Context(), "Ignoring ARR deletion webhook event", "event_type", req.EventType)
-		return c.Status(200).JSON(fiber.Map{"success": true, "message": "Ignored"})
+		return RespondMessage(c, "Ignored")
 	default:
 		slog.DebugContext(c.Context(), "Ignoring unhandled webhook event", "event_type", req.EventType)
-		return c.Status(200).JSON(fiber.Map{"success": true, "message": "Ignored"})
+		return RespondMessage(c, "Ignored")
 	}
 
 	// Trigger scan for each path
@@ -534,7 +580,7 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 		if isScanEvent {
 			slog.WarnContext(c.Context(), "No file path found in webhook payload to scan")
 		}
-		return c.Status(200).JSON(fiber.Map{"success": true, "message": "No path to scan"})
+		return RespondMessage(c, "No path to scan")
 	}
 
 	for _, path := range pathsToScan {
@@ -615,9 +661,18 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 				metadataStr = &str
 			}
 
+			var indexer *string = nil
+			if req.Release != nil && req.Release.Indexer != "" {
+				indexer = &req.Release.Indexer
+			} else if req.DownloadId != "" {
+				if idxName, ok := s.importerService.GetGrabbedIndexer(req.DownloadId, ""); ok {
+					indexer = &idxName
+				}
+			}
+
 			// Add to health check (pending status) with high priority (Next) to ensure it's processed right away
 			cfg := s.configManager.GetConfigGetter()()
-			err = s.healthRepo.AddFileToHealthCheckWithMetadata(c.Context(), normalizedPath, &path, cfg.GetMaxRetries(), cfg.GetMaxRepairRetries(), sourceNzb, database.HealthPriorityNext, releaseDate, metadataStr)
+			err = s.healthRepo.AddFileToHealthCheckWithMetadata(c.Context(), normalizedPath, &path, cfg.GetMaxRetries(), cfg.GetMaxRepairRetries(), sourceNzb, database.HealthPriorityNext, releaseDate, metadataStr, indexer)
 			if err != nil {
 				slog.ErrorContext(c.Context(), "Failed to add webhook file to health check", "path", normalizedPath, "error", err)
 			} else {
@@ -655,6 +710,8 @@ type ArrsStatsResponse struct {
 	EnabledReadarr   int     `json:"enabled_readarr"`
 	TotalWhisparr    int     `json:"total_whisparr"`
 	EnabledWhisparr  int     `json:"enabled_whisparr"`
+	TotalSportarr    int     `json:"total_sportarr"`
+	EnabledSportarr  int     `json:"enabled_sportarr"`
 	DueForSync       int     `json:"due_for_sync"`
 	LastSync         *string `json:"last_sync"`
 }
@@ -742,7 +799,7 @@ func (s *Server) handleListArrsInstances(c *fiber.Ctx) error {
 //	@Description	Returns a specific ARR instance by type and name.
 //	@Tags			ARRs
 //	@Produce		json
-//	@Param			type	path		string	true	"Instance type (sonarr, radarr, lidarr, readarr, or whisparr)"
+//	@Param			type	path		string	true	"Instance type (sonarr, radarr, lidarr, readarr, whisparr, or sportarr)"
 //	@Param			name	path		string	true	"Instance name"
 //	@Success		200		{object}	APIResponse
 //	@Failure		404		{object}	APIResponse
@@ -854,6 +911,7 @@ func (s *Server) handleGetArrsStats(c *fiber.Ctx) error {
 	// Calculate stats from instances
 	var totalRadarr, enabledRadarr, totalSonarr, enabledSonarr int
 	var totalLidarr, enabledLidarr, totalReadarr, enabledReadarr, totalWhisparr, enabledWhisparr int
+	var totalSportarr, enabledSportarr int
 	for _, instance := range instances {
 		switch instance.Type {
 		case "radarr":
@@ -881,12 +939,17 @@ func (s *Server) handleGetArrsStats(c *fiber.Ctx) error {
 			if instance.Enabled {
 				enabledWhisparr++
 			}
+		case "sportarr":
+			totalSportarr++
+			if instance.Enabled {
+				enabledSportarr++
+			}
 		}
 	}
 
 	response := &ArrsStatsResponse{
-		TotalInstances:   totalRadarr + totalSonarr + totalLidarr + totalReadarr + totalWhisparr,
-		EnabledInstances: enabledRadarr + enabledSonarr + enabledLidarr + enabledReadarr + enabledWhisparr,
+		TotalInstances:   totalRadarr + totalSonarr + totalLidarr + totalReadarr + totalWhisparr + totalSportarr,
+		EnabledInstances: enabledRadarr + enabledSonarr + enabledLidarr + enabledReadarr + enabledWhisparr + enabledSportarr,
 		TotalRadarr:      totalRadarr,
 		EnabledRadarr:    enabledRadarr,
 		TotalSonarr:      totalSonarr,
@@ -897,6 +960,8 @@ func (s *Server) handleGetArrsStats(c *fiber.Ctx) error {
 		EnabledReadarr:   enabledReadarr,
 		TotalWhisparr:    totalWhisparr,
 		EnabledWhisparr:  enabledWhisparr,
+		TotalSportarr:    totalSportarr,
+		EnabledSportarr:  enabledSportarr,
 		DueForSync:       0, // Not applicable with config-first approach
 	}
 
@@ -1114,3 +1179,4 @@ func (s *Server) handleTestArrsDownloadClients(c *fiber.Ctx) error {
 		"data":    results,
 	})
 }
+

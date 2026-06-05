@@ -28,10 +28,11 @@ type readAtContexter interface {
 // Handle wraps an afero.File and serves FUSE reads via ReadAtContext (preferred)
 // or io.ReaderAt. No per-handle lock needed: ReadAtContext serializes internally.
 type Handle struct {
-	file   afero.File
-	closed atomic.Bool
-	logger *slog.Logger
-	path   string
+	file     afero.File
+	closed   atomic.Bool
+	logger   *slog.Logger
+	path     string
+	asyncBuf *backend.AsyncReadBuffer // nil when async read-ahead is disabled
 
 	stream        *nzbfilesystem.ActiveStream
 	streamTracker backend.StreamTracker
@@ -44,6 +45,7 @@ func NewHandle(
 	path string,
 	stream *nzbfilesystem.ActiveStream,
 	st backend.StreamTracker,
+	asyncBuf *backend.AsyncReadBuffer,
 ) *Handle {
 	return &Handle{
 		file:          file,
@@ -51,6 +53,7 @@ func NewHandle(
 		path:          path,
 		stream:        stream,
 		streamTracker: st,
+		asyncBuf:      asyncBuf,
 	}
 }
 
@@ -64,7 +67,9 @@ func (h *Handle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadRes
 	var n int
 	var err error
 
-	if rac, ok := h.file.(readAtContexter); ok {
+	if h.asyncBuf != nil {
+		n, err = h.asyncBuf.ReadAtContext(ctx, dest, off)
+	} else if rac, ok := h.file.(readAtContexter); ok {
 		n, err = rac.ReadAtContext(ctx, dest, off)
 	} else if ra, ok := h.file.(io.ReaderAt); ok {
 		n, err = ra.ReadAt(dest, off)
@@ -112,6 +117,12 @@ func (h *Handle) Release(ctx context.Context) syscall.Errno {
 	if h.stream != nil && h.streamTracker != nil {
 		h.streamTracker.Remove(h.stream.ID)
 		h.stream = nil
+	}
+
+	// Stop read-ahead before closing the underlying file so the fill goroutine
+	// is drained first.
+	if h.asyncBuf != nil {
+		h.asyncBuf.Close()
 	}
 
 	if h.file != nil {

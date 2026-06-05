@@ -44,6 +44,7 @@ func GetSegmentsInRangeFromIndex(ctx context.Context, start, end int64, ml Segme
 
 	requestedLen := end - start + 1
 	segments := make([]*segment, 0, 4)
+	var accumulatedLen int64 // running sum of readable bytes across appended segments
 
 	// logicalFilePos tracks the starting file offset of the next loader segment's usable data
 	// Start from the provided position to skip O(n) iteration
@@ -104,6 +105,7 @@ func GetSegmentsInRangeFromIndex(ctx context.Context, start, end int64, ml Segme
 
 		seg := newSegment(src.Id, readStart, readEnd, src.Size, groups)
 		segments = append(segments, seg)
+		accumulatedLen += readEnd - readStart + 1
 
 		logicalFilePos += usableLen
 
@@ -114,7 +116,7 @@ func GetSegmentsInRangeFromIndex(ctx context.Context, start, end int64, ml Segme
 		}
 
 		// If we've already accumulated requestedLen bytes across segments we could also break early
-		if int64AccumulatedLen(segments) >= requestedLen { // redundancy safeguard
+		if accumulatedLen >= requestedLen { // redundancy safeguard
 			break
 		}
 	}
@@ -167,16 +169,6 @@ func BuildSegmentRange(ctx context.Context, start, end int64, ml SegmentLoader,
 		startFilePos = 0
 	}
 	return GetSegmentsInRangeFromIndex(ctx, start, end, ml, startSegIdx, startFilePos)
-}
-
-// int64AccumulatedLen calculates total bytes represented by current slice of segments
-// based on (End-Start+1) for each.
-func int64AccumulatedLen(segs []*segment) int64 {
-	var total int64
-	for _, s := range segs {
-		total += (s.End - s.Start + 1)
-	}
-	return total
 }
 
 // CheckMetadataIntegrity verifies that the segments provided by the loader

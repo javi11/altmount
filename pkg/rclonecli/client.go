@@ -341,38 +341,46 @@ func (m *Manager) RefreshDir(ctx context.Context, provider string, dirs []string
 	if len(dirs) == 0 {
 		dirs = []string{"/"}
 	}
-	args := map[string]any{
-		"fs": fmt.Sprintf("%s:", provider),
-	}
-	for i, dir := range dirs {
-		if dir != "" {
-			if i == 0 {
-				args["dir"] = dir
-			} else {
-				args[fmt.Sprintf("dir%d", i+1)] = dir
-			}
+	// Issue a vfs/forget call for each directory to ensure all parents/children are forgotten
+	for _, dir := range dirs {
+		if dir == "" {
+			continue
+		}
+		forgetArgs := map[string]any{
+			"fs":  fmt.Sprintf("%s:", provider),
+			"dir": dir,
+		}
+		req := RCRequest{
+			Command: "vfs/forget",
+			Args:    forgetArgs,
+		}
+		_, err := m.makeRequest(req, true)
+		if err != nil {
+			m.logger.ErrorContext(ctx, "Failed to forget directory", "err", err, "provider", provider, "dir", dir)
+			return fmt.Errorf("failed to forget directory %s for provider %s: %w", dir, provider, err)
 		}
 	}
-	req := RCRequest{
-		Command: "vfs/forget",
-		Args:    args,
-	}
 
-	_, err := m.makeRequest(req, true)
-	if err != nil {
-		m.logger.ErrorContext(ctx, "Failed to refresh directory", "err", err, "provider", provider)
-		return fmt.Errorf("failed to refresh directory %s for provider %s: %w", dirs, provider, err)
-	}
-
-	req = RCRequest{
-		Command: "vfs/refresh",
-		Args:    args,
-	}
-
-	_, err = m.makeRequest(req, true)
-	if err != nil {
-		m.logger.ErrorContext(ctx, "Failed to refresh directory", "err", err, "provider", provider)
-		return fmt.Errorf("failed to refresh directory %s for provider %s: %w", dirs, provider, err)
+	// Issue a vfs/refresh call for each directory individually
+	for _, dir := range dirs {
+		if dir == "" {
+			continue
+		}
+		refreshArgs := map[string]any{
+			"fs":        fmt.Sprintf("%s:", provider),
+			"dir":       dir,
+			"_async":    "false",
+			"recursive": "false",
+		}
+		req := RCRequest{
+			Command: "vfs/refresh",
+			Args:    refreshArgs,
+		}
+		_, err := m.makeRequest(req, true)
+		if err != nil {
+			m.logger.ErrorContext(ctx, "Failed to refresh directory", "err", err, "provider", provider, "dir", dir)
+			return fmt.Errorf("failed to refresh directory %s for provider %s: %w", dir, provider, err)
+		}
 	}
 	return nil
 }

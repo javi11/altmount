@@ -8,12 +8,6 @@ import (
 
 type data map[string]slog.Attr
 
-func (d data) append(attrs ...slog.Attr) {
-	for _, attr := range attrs {
-		d[attr.Key] = attr
-	}
-}
-
 type dataKey struct{}
 
 func cloneData(ctx context.Context) data {
@@ -23,18 +17,6 @@ func cloneData(ctx context.Context) data {
 	}
 
 	return maps.Clone(d)
-}
-
-// WithAttrs returns a new context with the given attributes.
-func WithAttrs(ctx context.Context, attrs ...slog.Attr) context.Context {
-	if len(attrs) == 0 {
-		return ctx
-	}
-
-	d := cloneData(ctx)
-	d.append(attrs...)
-
-	return context.WithValue(ctx, dataKey{}, d)
 }
 
 // With returns a new context with the given key-value pairs.
@@ -80,36 +62,6 @@ func IterAttrs(ctx context.Context) func(func(attr slog.Attr) bool) {
 			}
 		}
 	}
-}
-
-// Attrs returns the attributes in the context.
-func Attrs(ctx context.Context) []slog.Attr {
-	d, ok := ctx.Value(dataKey{}).(data)
-	if !ok {
-		return nil
-	}
-
-	attrs := make([]slog.Attr, 0, len(d))
-	for _, v := range d {
-		attrs = append(attrs, v)
-	}
-
-	return attrs
-}
-
-// Data returns the attributes in the context as a map.
-func Data(ctx context.Context) map[string]any {
-	d, ok := ctx.Value(dataKey{}).(data)
-	if !ok {
-		return nil
-	}
-
-	m := make(map[string]any, len(d))
-	for k, v := range d {
-		m[k] = v.Value.Any()
-	}
-
-	return m
 }
 
 type dataHook struct{}

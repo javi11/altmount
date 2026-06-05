@@ -1,9 +1,6 @@
 package webdav
 
 import (
-	"context"
-	"fmt"
-	"log/slog"
 	"sync"
 )
 
@@ -35,36 +32,4 @@ func (ac *AuthCredentials) UpdateCredentials(username, password string) {
 	defer ac.mu.Unlock()
 	ac.username = username
 	ac.password = password
-}
-
-// AuthUpdater provides methods to update WebDAV authentication
-type AuthUpdater struct {
-	credentials *AuthCredentials
-	logger      *slog.Logger
-}
-
-// NewAuthUpdater creates a new WebDAV auth updater
-func NewAuthUpdater() *AuthUpdater {
-	return &AuthUpdater{
-		logger: slog.Default().With("component", "webdav-auth-updater"),
-	}
-}
-
-// SetAuthCredentials sets the auth credentials reference for dynamic updates
-func (u *AuthUpdater) SetAuthCredentials(credentials *AuthCredentials) {
-	u.credentials = credentials
-}
-
-// UpdateAuth updates WebDAV authentication credentials
-func (u *AuthUpdater) UpdateAuth(username, password string) error {
-	if u.credentials == nil {
-		return fmt.Errorf("auth credentials not initialized")
-	}
-
-	ctx := context.Background()
-	u.logger.InfoContext(ctx, "Updating WebDAV authentication credentials")
-	u.credentials.UpdateCredentials(username, password)
-	u.logger.InfoContext(ctx, "WebDAV authentication credentials updated successfully")
-
-	return nil
 }

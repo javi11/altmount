@@ -34,7 +34,6 @@ type HealthEvent struct {
 	Error      error
 	Details    *string
 	Timestamp  time.Time
-	RetryCount int
 	SourceNzb  *string
 }
 
@@ -251,11 +250,6 @@ func (hc *HealthChecker) notifyRcloneVFS(filePath string, event HealthEvent) {
 			slog.ErrorContext(ctx, "Failed to notify rclone VFS about file status change", "file", filePath, "event", event.Type, "err", err)
 		}
 	}()
-}
-
-// GetHealthStats returns current health statistics
-func (hc *HealthChecker) GetHealthStats(ctx context.Context) (map[database.HealthStatus]int, error) {
-	return hc.healthRepo.GetHealthStats(ctx)
 }
 
 type metadataSegmentLoader struct {

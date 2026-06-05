@@ -156,10 +156,8 @@ import:
   max_import_connections: 5 # Number of concurrent NNTP connections for validation and archive processing
   segment_sample_percentage: 1 # Percentage of segments to sample for validation (1-100)
   import_strategy: 'NONE' # Import strategy: NONE (direct import), SYMLINK (create symlinks), STRM (create .strm files)
-                          # NOTE: SYMLINK on Windows requires `allow_symlinks_on_windows: true` AND Windows Developer Mode enabled. Otherwise use STRM.
   import_dir: '' # Import directory (required when import_strategy is SYMLINK or STRM, must be absolute path)
                  # Windows example: 'C:\Users\user\Videos'
-  allow_symlinks_on_windows: false # Permit symlink creation on Windows (requires Developer Mode in Windows Settings → For developers). No effect on Linux/macOS. Default: false.
   failed_item_retention_hours: 24 # Auto-remove failed queue items and NZB files after this many hours (0 to disable, default: 24)
 
 # Health monitoring configuration
@@ -172,7 +170,7 @@ health:
   segment_sample_percentage: 5 # Percentage of segments to sample for health validation (1-100, default: 5)
   acceptable_missing_segments_percentage: 0 # Percentage of missing segments allowed before a file is marked as corrupted (0-100, default: 0)
   library_sync_interval_minutes: 360 # Library synchronization interval in minutes (default: 360 = 6 hours)
-  library_sync_concurrency: 1 # Number of concurrent library sync operations (default: 1)
+  library_sync_concurrency: 5 # Number of concurrent library sync operations (default: 5)
   resolve_repair_on_import: false # Automatically resolve pending repairs in the same directory when a new file is imported (default: false)
 
 # WebDAV mount path configuration
@@ -221,15 +219,22 @@ arrs:
   lidarr_instances: [] # Lidarr instances (configured via UI)
   readarr_instances: [] # Readarr instances (configured via UI)
   whisparr_instances: [] # Whisparr instances (configured via UI)
-  # Queue Cleanup Configuration
-  queue_cleanup_enabled: true # Enable automatic queue cleanup for failed imports (default: true)
-  queue_cleanup_interval_seconds: 10 # Interval in seconds to check for failed imports (default: 10)
-  cleanup_automatic_import_failure: false # Enable cleanup of "Automatic import is not possible" errors (default: false)
-  queue_cleanup_allowlist: [] # List of additional error messages to treat as safe for cleanup
+  # Queue Cleanup Configuration (covers ghost/empty-folder removal + message rules for
+  # all *arr types: radarr/sonarr/whisparr/lidarr/readarr/sportarr)
+  queue_cleanup_enabled: true # Enable automatic queue cleanup for failed/stuck imports (default: true)
+  queue_cleanup_interval_seconds: 10 # Interval in seconds to check the *arr queues (default: 10)
+  queue_cleanup_grace_period_minutes: 5 # Minutes an item must stay stuck before cleanup acts (default: 5)
+  # Message rules: when a stuck import's *arr status message matches a rule, run its
+  # action (action: remove | blocklist | blocklist_search). Manage these in the web UI.
+  queue_cleanup_rules: []
   # Example:
-  # queue_cleanup_allowlist:
-  #   - "Not a Custom Format upgrade"
-  #   - "Ignored Message 2"
+  # queue_cleanup_rules:
+  #   - message: "Sample"
+  #     enabled: true
+  #     action: blocklist_search
+  #   - message: "automatic import is not possible"
+  #     enabled: false
+  #     action: remove
   # Example instance configuration (use the web UI instead):
   # radarr_instances:
   #   - name: "radarr-main"

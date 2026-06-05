@@ -36,46 +36,16 @@ func NewProcessor(poolManager pool.Manager, configGetter config.ConfigGetter) Pr
 	}
 }
 
-// CreateFileMetadataFromRarContent creates FileMetadata from RarContent for the metadata system
+// CreateFileMetadataFromRarContent creates FileMetadata from RarContent for the metadata system.
+// Delegates to archive.NewFileMetadataFromContent so the mapping stays shared with
+// non-RAR callers (e.g. ISO expansion).
 func (rh *rarProcessor) CreateFileMetadataFromRarContent(
 	Content Content,
 	sourceNzbPath string,
 	releaseDate int64,
 	nzbdavId string,
 ) *metapb.FileMetadata {
-	now := time.Now().Unix()
-
-	meta := &metapb.FileMetadata{
-		FileSize:      Content.Size,
-		SourceNzbPath: sourceNzbPath,
-		Status:        metapb.FileStatus_FILE_STATUS_HEALTHY,
-		CreatedAt:     now,
-		ModifiedAt:    now,
-		SegmentData:   Content.Segments,
-		ReleaseDate:   releaseDate,
-		NzbdavId:      nzbdavId,
-	}
-
-	// Set AES encryption if keys are present (single-layer encrypted RAR)
-	if len(Content.AesKey) > 0 {
-		meta.Encryption = metapb.Encryption_AES
-		meta.AesKey = Content.AesKey
-		meta.AesIv = Content.AesIV
-	}
-
-	// Populate nested sources for encrypted nested RAR files
-	for _, ns := range Content.NestedSources {
-		meta.NestedSources = append(meta.NestedSources, &metapb.NestedSegmentSource{
-			Segments:        ns.Segments,
-			AesKey:          ns.AesKey,
-			AesIv:           ns.AesIV,
-			InnerOffset:     ns.InnerOffset,
-			InnerLength:     ns.InnerLength,
-			InnerVolumeSize: ns.InnerVolumeSize,
-		})
-	}
-
-	return meta
+	return archive.NewFileMetadataFromContent(Content, sourceNzbPath, releaseDate, nzbdavId)
 }
 
 // AnalyzeRarContentFromNzb analyzes a RAR archive directly from NZB data without downloading

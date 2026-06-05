@@ -30,9 +30,8 @@ type Server struct {
 	be backend.Backend
 
 	// ValidateMount goroutine leak guard
-	validating   atomic.Int32
-	lastHealthy  atomic.Bool
-	lastHealthTS atomic.Int64
+	validating  atomic.Int32
+	lastHealthy atomic.Bool
 }
 
 // NewServer creates a new FUSE server instance.
@@ -148,36 +147,13 @@ func (s *Server) ValidateMount() (bool, error) {
 	case result := <-ch:
 		if result.err != nil {
 			s.lastHealthy.Store(false)
-			s.lastHealthTS.Store(time.Now().UnixNano())
 			return false, fmt.Errorf("mount point stat failed: %w", result.err)
 		}
 		s.lastHealthy.Store(true)
-		s.lastHealthTS.Store(time.Now().UnixNano())
 		return true, nil
 	case <-time.After(5 * time.Second):
 		s.lastHealthy.Store(false)
-		s.lastHealthTS.Store(time.Now().UnixNano())
 		return false, fmt.Errorf("mount point not responding (stat timed out after 5s)")
 	}
 }
 
-// CleanupMount checks for and cleans up stale mounts at the mountpoint.
-func (s *Server) CleanupMount() {
-	_ = s.ForceUnmount()
-}
-
-// RefreshDirectory invalidates the kernel cache for a named directory entry.
-// Only works with backends that implement backend.Refresher (e.g. hanwen).
-func (s *Server) RefreshDirectory(name string) {
-	if r, ok := s.be.(backend.Refresher); ok {
-		r.RefreshDirectory(name)
-	}
-}
-
-// BackendType returns the active backend type.
-func (s *Server) BackendType() backend.Type {
-	if s.be != nil {
-		return s.be.Type()
-	}
-	return s.backendType
-}

@@ -5,6 +5,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -25,7 +26,6 @@ import (
 	"github.com/javi11/altmount/internal/rclone"
 	"github.com/javi11/altmount/internal/updater"
 	"github.com/javi11/altmount/internal/version"
-	"github.com/javi11/altmount/pkg/rclonecli"
 )
 
 // Config represents API server configuration
@@ -56,7 +56,6 @@ type Server struct {
 	importerService     *importer.Service
 	poolManager         pool.Manager
 	arrsService         *arrs.Service
-	rcloneClient        rclonecli.RcloneRcClient
 	mountService        *rclone.MountService
 	startTime           time.Time
 	progressBroadcaster *progress.ProgressBroadcaster
@@ -67,6 +66,9 @@ type Server struct {
 	migrationRepo       *database.ImportMigrationRepository
 	updater             updater.Updater
 	ready               atomic.Bool
+
+	speedtest     *speedtestCoordinator
+	speedtestOnce sync.Once
 }
 
 // NewServer creates a new API server that can optionally register routes on the provided mux (for backwards compatibility)
@@ -110,8 +112,17 @@ func NewServer(
 		progressBroadcaster: progressBroadcaster,
 		streamTracker:       streamTracker,
 		cacheSource:         cacheSource,
+		speedtest:           newSpeedtestCoordinator(),
 		fuseManager:         NewFuseManager(newMountFactory(nzbFilesystem, configManager, streamTracker)),
 		updater:             updater.Default(),
+	}
+
+	// Wire stream-activity ↔ pool admission. Streams notify the pool when they
+	// start/stop; the pool reads the active stream count to pick its
+	// adaptive import cap.
+	if poolManager != nil && streamTracker != nil {
+		streamTracker.SetChangeNotifier(poolManager)
+		poolManager.SetStreamSource(streamTracker)
 	}
 
 	return server
@@ -120,12 +131,6 @@ func NewServer(
 // SetHealthWorker sets the health worker reference for the server
 func (s *Server) SetHealthWorker(healthWorker *health.HealthWorker) {
 	s.healthWorker = healthWorker
-}
-
-// SetUpdater overrides the binary updater used for self-update operations.
-// Primarily intended for tests that need to substitute a fake implementation.
-func (s *Server) SetUpdater(u updater.Updater) {
-	s.updater = u
 }
 
 // SetLibrarySyncWorker sets the library sync worker reference for the server
@@ -151,16 +156,6 @@ func (s *Server) SetReady(ready bool) {
 // IsReady returns true if the server is ready to accept requests
 func (s *Server) IsReady() bool {
 	return s.ready.Load()
-}
-
-// SetRcloneClient sets the rclone client reference for the server
-func (s *Server) SetRcloneClient(rcloneClient rclonecli.RcloneRcClient) {
-	s.rcloneClient = rcloneClient
-}
-
-// GetProgressBroadcaster returns the progress broadcaster for use by the importer service
-func (s *Server) GetProgressBroadcaster() *progress.ProgressBroadcaster {
-	return s.progressBroadcaster
 }
 
 // SetupFiberRoutes configures API routes directly on the Fiber app
@@ -315,6 +310,8 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Get("/system/pool/metrics", s.handleGetPoolMetrics)
 	api.Get("/system/provider-stats", s.handleGetProviderHistoricalStats)
 	api.Get("/system/provider-speed-history", s.handleGetProviderSpeedHistory)
+	api.Get("/system/indexer-stats", s.handleGetIndexerStats)
+	api.Delete("/system/indexer-stats/cleanup", s.handleCleanupIndexerStats)
 	api.Post("/system/stats/reset", s.handleResetSystemStats)
 	api.Post("/system/cleanup", s.handleSystemCleanup)
 	api.Post("/system/restart", s.handleSystemRestart)
@@ -362,13 +359,8 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 			return c.IP()
 		},
 		LimitReached: func(c *fiber.Ctx) error {
-			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{
-				"success": false,
-				"error": fiber.Map{
-					"code":    "TOO_MANY_REQUESTS",
-					"message": "Too many login attempts. Please wait a minute before trying again.",
-				},
-			})
+			return RespondError(c, fiber.StatusTooManyRequests, "TOO_MANY_REQUESTS",
+				"Too many login attempts. Please wait a minute before trying again.", "")
 		},
 	})
 	api.Post("/auth/login", authLimiter, s.handleDirectLogin)
@@ -389,6 +381,9 @@ func (s *Server) Shutdown(ctx context.Context) {
 	if s.fuseManager != nil {
 		s.fuseManager.Stop()
 	}
+	if s.speedtest != nil {
+		s.speedtest.shutdown()
+	}
 }
 
 // handleGetActiveStreams handles GET /api/files/active-streams
@@ -403,10 +398,7 @@ func (s *Server) Shutdown(ctx context.Context) {
 //	@Router			/files/active-streams [get]
 func (s *Server) handleGetActiveStreams(c *fiber.Ctx) error {
 	if s.streamTracker == nil {
-		return c.Status(200).JSON(fiber.Map{
-			"success": true,
-			"data":    []nzbfilesystem.ActiveStream{},
-		})
+		return RespondSuccess(c, []nzbfilesystem.ActiveStream{})
 	}
 
 	streams := s.streamTracker.GetAll()
@@ -425,10 +417,7 @@ func (s *Server) handleGetActiveStreams(c *fiber.Ctx) error {
 		streams = filteredStreams
 	}
 
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"data":    streams,
-	})
+	return RespondSuccess(c, streams)
 }
 
 // getSystemInfo returns current system information

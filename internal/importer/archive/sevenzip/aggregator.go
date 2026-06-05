@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -14,7 +13,6 @@ import (
 	concpool "github.com/sourcegraph/conc/pool"
 
 	"github.com/javi11/altmount/internal/importer/archive"
-	"github.com/javi11/altmount/internal/importer/archive/iso"
 	"github.com/javi11/altmount/internal/importer/filesystem"
 	"github.com/javi11/altmount/internal/importer/parser"
 	"github.com/javi11/altmount/internal/importer/utils"
@@ -50,7 +48,7 @@ func validateSegmentIntegrity(ctx context.Context, content Content) error {
 
 // calculateSegmentsToValidate calculates the actual number of segments that will be validated
 // based on the validation mode (full or sampling) and sample percentage.
-// This mirrors the logic in usenet.ValidateSegmentAvailability which uses selectSegmentsForValidation.
+// This mirrors the logic in usenet.SelectSegmentsForValidation.
 func calculateSegmentsToValidate(sevenZipContents []Content, samplePercentage int) int {
 	total := 0
 	for _, content := range sevenZipContents {
@@ -138,6 +136,7 @@ type ProcessArchiveOptions struct {
 	ExtractedFiles            []parser.ExtractedFileInfo
 	MaxPrefetch               int
 	ReadTimeout               time.Duration
+	IsoAnalyzeTimeout         time.Duration
 	ExpandBlurayIso           bool
 	FilterSamples             bool
 	RenameToNzbName           bool
@@ -163,6 +162,7 @@ func ProcessArchive(ctx context.Context, opts ProcessArchiveOptions) error {
 	extractedFiles := opts.ExtractedFiles
 	maxPrefetch := opts.MaxPrefetch
 	readTimeout := opts.ReadTimeout
+	analyzeTimeout := opts.IsoAnalyzeTimeout
 	expandBlurayIso := opts.ExpandBlurayIso
 	filterSamples := opts.FilterSamples
 	renameToNzbName := opts.RenameToNzbName
@@ -185,8 +185,18 @@ func ProcessArchive(ctx context.Context, opts ProcessArchiveOptions) error {
 
 	slog.InfoContext(ctx, "Successfully analyzed 7zip archive content", "files_in_archive", len(sevenZipContents))
 
-	// Expand ISO files found inside the 7zip archive into their inner media files
-	sevenZipContents, err = expandISOContents(ctx, expandBlurayIso, sevenZipContents, poolManager, maxPrefetch, readTimeout, allowedFileExtensions)
+	// Expand ISO files found inside the 7zip archive into their inner media
+	// files. ISO analysis (filesystem walk + Blu-ray playlist resolution over
+	// NNTP) can take tens of seconds, so it gets its own progress label.
+	// Slice(0,1) copies the archive tracker at the same range without mutating
+	// it (7z header analysis above is already done); WithStage relabels the
+	// copy. For archives with no ISO, ExpandISOContents emits no updates, so
+	// the common case is unaffected.
+	var isoProgressTracker *progress.Tracker
+	if archiveProgressTracker != nil {
+		isoProgressTracker = archiveProgressTracker.Slice(0, 1).WithStage("Analyzing ISO")
+	}
+	sevenZipContents, err = archive.ExpandISOContents(ctx, expandBlurayIso, sevenZipContents, poolManager, maxPrefetch, readTimeout, analyzeTimeout, allowedFileExtensions, isoProgressTracker)
 	if err != nil {
 		slog.WarnContext(ctx, "ISO expansion failed, proceeding without ISO contents", "error", err)
 	}
@@ -443,81 +453,6 @@ func ProcessArchive(ctx context.Context, opts ProcessArchiveOptions) error {
 		"files_processed", int(atomic.LoadInt32(&filesProcessed))+preProcessedCount)
 
 	return nil
-}
-
-// expandISOContents replaces any .iso Content entries with the media files found
-// inside them. Non-ISO entries are passed through unchanged. Per-file errors are
-// non-fatal: on failure the original ISO Content is kept.
-func expandISOContents(
-	ctx context.Context,
-	expand bool,
-	contents []Content,
-	poolManager pool.Manager,
-	maxPrefetch int,
-	readTimeout time.Duration,
-	allowedExtensions []string,
-) ([]Content, error) {
-	if !expand {
-		return contents, nil
-	}
-	var result []Content
-	for _, c := range contents {
-		if c.IsDirectory || strings.ToLower(filepath.Ext(c.Filename)) != ".iso" {
-			result = append(result, c)
-			continue
-		}
-
-		src := iso.ISOSource{
-			Filename: c.Filename,
-			Segments: c.Segments,
-			AesKey:   c.AesKey,
-			AesIV:    c.AesIV,
-			Size:     c.Size,
-		}
-
-		isoFiles, err := iso.AnalyzeISOContent(ctx, src, poolManager, maxPrefetch, readTimeout, allowedExtensions)
-		if err != nil {
-			slog.WarnContext(ctx, "Failed to analyze ISO content, keeping ISO as-is",
-				"file", c.Filename, "error", err)
-			result = append(result, c)
-			continue
-		}
-
-		if len(isoFiles) == 0 {
-			result = append(result, c)
-			continue
-		}
-
-		// Sort ISO files by size descending so the largest (main feature) gets index 1.
-		sort.Slice(isoFiles, func(i, j int) bool {
-			return isoFiles[i].Size > isoFiles[j].Size
-		})
-
-		// Keep only the largest file (index 0 after sort); discard smaller streams.
-		f := isoFiles[0]
-		nc := Content{
-			InternalPath:      f.InternalPath,
-			Filename:          f.Filename,
-			Size:              f.Size,
-			PackedSize:        f.Size, // raw ISO data — packed == unpacked
-			NzbdavID:          c.NzbdavID,
-			ISOExpansionIndex: 1,
-		}
-		if f.NestedSource != nil {
-			nc.NestedSources = []NestedSource{{
-				Segments:        f.NestedSource.Segments,
-				AesKey:          f.NestedSource.AesKey,
-				AesIV:           f.NestedSource.AesIV,
-				InnerOffset:     f.NestedSource.InnerOffset,
-				InnerLength:     f.NestedSource.InnerLength,
-				InnerVolumeSize: f.NestedSource.InnerVolumeSize,
-			}}
-		} else {
-			nc.Segments = f.Segments
-		}
-		result = append(result, nc)
-	}
-	return result, nil
 }
 
 // normalizeArchiveReleaseFilename aligns the filename to the NZB basename while keeping the original extension.

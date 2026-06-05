@@ -4,7 +4,6 @@ import (
 	"context"
 	"io/fs"
 	"os"
-	"time"
 
 	"github.com/javi11/altmount/internal/slogutil"
 	"github.com/javi11/altmount/internal/utils"
@@ -118,11 +117,6 @@ func (nfs *NzbFilesystem) Rename(ctx context.Context, oldName, newName string) e
 	return nil
 }
 
-// Create creates a new file (not supported - read-only filesystem)
-func (nfs *NzbFilesystem) Create(name string) (afero.File, error) {
-	return nil, os.ErrPermission
-}
-
 // Mkdir creates a directory (not supported - read-only filesystem)
 func (nfs *NzbFilesystem) Mkdir(ctx context.Context, name string, perm os.FileMode) error {
 	return nfs.remoteFile.Mkdir(ctx, name, perm)
@@ -133,22 +127,3 @@ func (nfs *NzbFilesystem) MkdirAll(ctx context.Context, name string, perm os.Fil
 	return nfs.remoteFile.MkdirAll(ctx, name, perm)
 }
 
-// Chmod changes file permissions (not supported)
-func (nfs *NzbFilesystem) Chmod(name string, mode os.FileMode) error {
-	return os.ErrPermission
-}
-
-// Chown changes file ownership (not supported)
-func (nfs *NzbFilesystem) Chown(name string, uid, gid int) error {
-	return os.ErrPermission
-}
-
-// Chtimes changes file times (not supported)
-func (nfs *NzbFilesystem) Chtimes(name string, atime, mtime time.Time) error {
-	return os.ErrPermission
-}
-
-// GetRemoteFile returns the underlying MetadataRemoteFile for configuration updates
-func (nfs *NzbFilesystem) GetRemoteFile() *MetadataRemoteFile {
-	return nfs.remoteFile
-}

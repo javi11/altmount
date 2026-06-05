@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -1463,11 +1462,7 @@ func (s *Server) handleRegenerateLibraryFiles(c *fiber.Ctx) error {
 				creationErr = fmt.Errorf("importer service or post-processor not available")
 			}
 		} else {
-			if runtime.GOOS == "windows" {
-				creationErr = fmt.Errorf("symlinks not supported on Windows")
-			} else {
-				creationErr = os.Symlink(actualPath, libraryPath)
-			}
+			creationErr = os.Symlink(actualPath, libraryPath)
 		}
 
 		if creationErr != nil {

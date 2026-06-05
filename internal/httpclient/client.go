@@ -13,9 +13,6 @@ const (
 
 	// LongTimeout is for operations that may take longer (60s).
 	LongTimeout = 60 * time.Second
-
-	// FileUploadTimeout is for file upload operations (2 minutes).
-	FileUploadTimeout = 2 * time.Minute
 )
 
 // Options configures an HTTP client.
@@ -31,13 +28,6 @@ type Option func(*Options)
 func WithTimeout(d time.Duration) Option {
 	return func(o *Options) {
 		o.Timeout = d
-	}
-}
-
-// WithTransport sets a custom transport.
-func WithTransport(t *http.Transport) Option {
-	return func(o *Options) {
-		o.Transport = t
 	}
 }
 
@@ -71,9 +61,4 @@ func NewDefault() *http.Client {
 // Suitable for operations that may take longer, such as external API calls.
 func NewLong() *http.Client {
 	return New(WithTimeout(LongTimeout))
-}
-
-// NewFileUpload creates a new HTTP client for file upload operations (2 minutes).
-func NewFileUpload() *http.Client {
-	return New(WithTimeout(FileUploadTimeout))
 }

@@ -24,6 +24,7 @@ import { ComingSoonSection } from "../components/config/ComingSoonSection";
 import { HealthConfigSection } from "../components/config/HealthConfigSection";
 import { MetadataConfigSection } from "../components/config/MetadataConfigSection";
 import { MountConfigSection } from "../components/config/MountConfigSection";
+import { NetworkConfigSection } from "../components/config/NetworkConfigSection";
 import { NzblnkConfigSection } from "../components/config/NzblnkConfigSection";
 import { ProvidersConfigSection } from "../components/config/ProvidersConfigSection";
 import { SABnzbdConfigSection } from "../components/config/SABnzbdConfigSection";
@@ -53,6 +54,7 @@ import type {
 	ImportConfig,
 	LogFormData,
 	MetadataConfig,
+	NetworkConfig,
 	NzblnkConfig,
 	ProviderConfig,
 	SABnzbdConfig,
@@ -99,7 +101,7 @@ const SECTION_GROUPS = [
 	},
 	{
 		title: "System",
-		sections: ["auth", "system"],
+		sections: ["auth", "network", "system"],
 	},
 ];
 
@@ -135,7 +137,6 @@ export function ConfigurationPage() {
 		}
 	}, [section, navigate]);
 
-	const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 	const [restartRequiredConfigs, setRestartRequiredConfigs] = useState<string[]>([]);
 	const [isRestartBannerDismissed, setIsRestartBannerDismissed] = useState(() => {
 		// Initialize from session storage on component mount
@@ -157,7 +158,6 @@ export function ConfigurationPage() {
 	const handleReloadConfig = async () => {
 		try {
 			await reloadConfig.mutateAsync();
-			setHasUnsavedChanges(false);
 			setRestartRequiredConfigs([]);
 			setIsRestartBannerDismissed(false);
 			sessionStorage.removeItem("restartBannerDismissed");
@@ -184,7 +184,6 @@ export function ConfigurationPage() {
 		try {
 			await restartServer.mutateAsync(false);
 			// Clear local state since server is restarting
-			setHasUnsavedChanges(false);
 			setRestartRequiredConfigs([]);
 			setIsRestartBannerDismissed(false);
 			sessionStorage.removeItem("restartBannerDismissed");
@@ -275,6 +274,11 @@ export function ConfigurationPage() {
 					section: "nzblnk",
 					config: { nzblnk: data as unknown as NzblnkConfig },
 				});
+			} else if (section === "network") {
+				await updateConfigSection.mutateAsync({
+					section: "network",
+					config: { network: data as unknown as NetworkConfig },
+				});
 			} else if (section === "log") {
 				const logData = data as unknown as LogFormData & { profiler_enabled?: boolean };
 				const { profiler_enabled, ...logConfig } = logData;
@@ -343,12 +347,6 @@ export function ConfigurationPage() {
 				</div>
 
 				<div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
-					{hasUnsavedChanges && (
-						<div className="badge badge-warning badge-sm animate-pulse gap-1 py-3 font-bold">
-							<AlertTriangle className="h-3 w-3" /> UNSAVED
-						</div>
-					)}
-
 					<button
 						type="button"
 						className="btn btn-ghost btn-sm border-base-300 bg-base-100 hover:bg-base-200"
@@ -567,6 +565,13 @@ export function ConfigurationPage() {
 										isUpdating={updateConfigSection.isPending}
 									/>
 								)}
+								{activeSection === "network" && (
+									<NetworkConfigSection
+										config={config}
+										onUpdate={handleConfigUpdate}
+										isUpdating={updateConfigSection.isPending}
+									/>
+								)}
 								{![
 									"webdav",
 									"auth",
@@ -581,6 +586,7 @@ export function ConfigurationPage() {
 									"health",
 									"stremio",
 									"nzblnk",
+									"network",
 								].includes(activeSection) && (
 									<ComingSoonSection
 										sectionName={CONFIG_SECTIONS[activeSection]?.title || activeSection}

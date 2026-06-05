@@ -24,7 +24,7 @@ import (
 // mockPoolManager implements pool.Manager and always fails GetPool so segment validation fails.
 type mockPoolManager struct{}
 
-func (m *mockPoolManager) GetPool() (*nntppool.Client, error) {
+func (m *mockPoolManager) GetPool() (pool.NntpClient, error) {
 	return nil, errors.New("no pool available (test mock)")
 }
 func (m *mockPoolManager) SetProviders(_ []nntppool.Provider) error { return nil }
@@ -33,9 +33,9 @@ func (m *mockPoolManager) HasPool() bool                            { return fal
 func (m *mockPoolManager) GetMetrics() (pool.MetricsSnapshot, error) {
 	return pool.MetricsSnapshot{}, nil
 }
-func (m *mockPoolManager) ResetMetrics(_ context.Context, _, _ bool) error        { return nil }
-func (m *mockPoolManager) ResetProviderErrors(_ context.Context) error             { return nil }
-func (m *mockPoolManager) IncArticlesDownloaded()                                  {}
+func (m *mockPoolManager) ResetMetrics(_ context.Context, _, _ bool) error { return nil }
+func (m *mockPoolManager) ResetProviderErrors(_ context.Context) error     { return nil }
+func (m *mockPoolManager) IncArticlesDownloaded()                          {}
 func (m *mockPoolManager) UpdateDownloadProgress(_ string, _ int64)        {}
 func (m *mockPoolManager) IncArticlesPosted()                              {}
 func (m *mockPoolManager) AddProvider(_ nntppool.Provider) error           { return nil }
@@ -44,6 +44,13 @@ func (m *mockPoolManager) ResetProviderQuota(_ context.Context, _ string) error 
 	return nil
 }
 func (m *mockPoolManager) SetProviderIDs(_ map[string]string) {}
+func (m *mockPoolManager) AcquireImportSlot(_ context.Context) (func(), error) {
+	return func() {}, nil
+}
+func (m *mockPoolManager) SetAdmissionCaps(_ int, _ int)               {}
+func (m *mockPoolManager) SetStreamSource(_ pool.StreamActivitySource) {}
+func (m *mockPoolManager) NotifyStreamChange()                         {}
+
 // mockARRsService captures TriggerFileRescan calls and returns a configurable error.
 type mockARRsService struct {
 	mu        sync.Mutex
@@ -114,7 +121,8 @@ func newRepairTestEnv(t *testing.T, tempDir string, arrsErr error) *repairTestEn
 			scheduled_check_at DATETIME,
 			priority INTEGER NOT NULL DEFAULT 0,
 			streaming_failure_count INTEGER DEFAULT 0,
-			is_masked BOOLEAN DEFAULT FALSE
+			is_masked BOOLEAN DEFAULT FALSE,
+			indexer TEXT DEFAULT NULL
 		);
 
 		CREATE TABLE IF NOT EXISTS system_state (
@@ -351,7 +359,10 @@ func TestE2E_FileRepairTriggered_ARRReturnsAlreadySatisfied(t *testing.T) {
 }
 
 // TestE2E_FileRepairTriggered_ARRReturnsPathNotFound verifies that when ARR returns
-// ErrPathMatchFailed the health record is deleted (orphan cleanup).
+// ErrPathMatchFailed (an ambiguous path miss — e.g. an ARR-renamed/reorganized library)
+// the file is NOT destroyed: the health record is kept (marked corrupted) and its metadata
+// is preserved, so the user's library symlink and the underlying virtual file survive.
+// Genuine orphans are removed separately by the guarded library-sync orphan pass.
 func TestE2E_FileRepairTriggered_ARRReturnsPathNotFound(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlinks not supported on Windows")
@@ -376,8 +387,15 @@ func TestE2E_FileRepairTriggered_ARRReturnsPathNotFound(t *testing.T) {
 	env.mockARRs.mu.Unlock()
 	assert.Equal(t, 1, callCount)
 
-	// Health record must be deleted, not set to repair_triggered.
+	// Health record must be preserved (not deleted) and marked corrupted: a path-match miss
+	// is not a reliable orphan signal, so the file must never be destroyed on this path.
 	fh, err := env.healthRepo.GetFileHealth(ctx, filePath)
 	require.NoError(t, err)
-	assert.Nil(t, fh, "health record should be deleted when ARR returns ErrPathMatchFailed")
+	require.NotNil(t, fh, "health record must NOT be deleted when ARR returns ErrPathMatchFailed")
+	assert.Equal(t, database.HealthStatusCorrupted, fh.Status)
+
+	// Metadata must be preserved (not deleted) so the underlying file/symlink survives.
+	original, readErr := env.metadataService.ReadFileMetadata(filePath)
+	require.NoError(t, readErr)
+	assert.NotNil(t, original, "metadata must be preserved when ARR returns ErrPathMatchFailed")
 }

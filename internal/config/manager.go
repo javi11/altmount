@@ -1,13 +1,11 @@
 package config
 
 import (
-	"crypto/sha256"
 	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -54,6 +52,7 @@ type Config struct {
 	SegmentCache    SegmentCacheConfig `yaml:"segment_cache" mapstructure:"segment_cache" json:"segment_cache"`
 	Providers       []ProviderConfig   `yaml:"providers" mapstructure:"providers" json:"providers"`
 	Nzblnk          NzblnkConfig       `yaml:"nzblnk" mapstructure:"nzblnk" json:"nzblnk"`
+	Network         NetworkConfig      `yaml:"network" mapstructure:"network" json:"network"`
 	MountPath       string             `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"`
 	MountType       MountType          `yaml:"mount_type" mapstructure:"mount_type" json:"mount_type"`
 	ProfilerEnabled bool               `yaml:"profiler_enabled" mapstructure:"profiler_enabled" json:"profiler_enabled" default:"false"`
@@ -65,6 +64,28 @@ type NzblnkConfig struct {
 	// Defaults to a browser-like string. Leave empty to use the default.
 	UserAgent string `yaml:"user_agent" mapstructure:"user_agent" json:"user_agent,omitempty"`
 }
+
+// NetworkConfig holds outbound HTTP routing options applied to every external
+// client (indexers, arrs, SABnzbd fallback, NZBLNK resolver). Internal
+// endpoints (RC server, self-loopback) are unaffected.
+//
+// Semantics mirror Go's standard HTTP_PROXY/HTTPS_PROXY/NO_PROXY env vars.
+// Empty strings disable proxying for that scheme.
+type NetworkConfig struct {
+	HTTPProxy  string `yaml:"http_proxy" mapstructure:"http_proxy" json:"http_proxy,omitempty"`
+	HTTPSProxy string `yaml:"https_proxy" mapstructure:"https_proxy" json:"https_proxy,omitempty"`
+	NoProxy    string `yaml:"no_proxy" mapstructure:"no_proxy" json:"no_proxy,omitempty"`
+}
+
+// GetHTTPProxy returns the configured HTTP proxy URL. Implements the
+// httpclient.NetworkProxyConfig interface to avoid config↔httpclient import cycles.
+func (n NetworkConfig) GetHTTPProxy() string { return n.HTTPProxy }
+
+// GetHTTPSProxy returns the configured HTTPS proxy URL.
+func (n NetworkConfig) GetHTTPSProxy() string { return n.HTTPSProxy }
+
+// GetNoProxy returns the comma-separated bypass list.
+func (n NetworkConfig) GetNoProxy() string { return n.NoProxy }
 
 // SegmentCacheConfig configures the segment-aligned disk cache shared by FUSE and WebDAV.
 // When enabled, this cache replaces the FUSE VFS disk cache and additionally benefits WebDAV.
@@ -94,7 +115,21 @@ type FuseConfig struct {
 	EntryTimeoutSeconds int    `yaml:"entry_timeout_seconds" mapstructure:"entry_timeout_seconds" json:"entry_timeout_seconds"`
 	MaxCacheSizeMB      int    `yaml:"max_cache_size_mb" mapstructure:"max_cache_size_mb" json:"max_cache_size_mb"`
 	MaxReadAheadMB      int    `yaml:"max_read_ahead_mb" mapstructure:"max_read_ahead_mb" json:"max_read_ahead_mb"`
-	Backend             string `yaml:"backend" mapstructure:"backend" json:"backend"` // "hanwen" or "cgo" (empty = platform default)
+	// AsyncBufferSizeMB is the per-open-file read-ahead buffer size (MB). A
+	// background goroutine fills it ahead of the player so reads are served
+	// from memory instead of blocking on the network, mirroring the buffering
+	// rclone's VFS provides over WebDAV. 0 disables read-ahead (every read is a
+	// direct passthrough — the previous behavior).
+	AsyncBufferSizeMB int `yaml:"async_buffer_size_mb" mapstructure:"async_buffer_size_mb" json:"async_buffer_size_mb"`
+	// AsyncBufferMaxTotalMB caps total read-ahead memory across all open files
+	// (MB). Buffers reserve their size only while actively streaming; over the
+	// cap, additional streams run unbuffered. 0 = unlimited.
+	AsyncBufferMaxTotalMB int    `yaml:"async_buffer_max_total_mb" mapstructure:"async_buffer_max_total_mb" json:"async_buffer_max_total_mb"`
+	Backend               string `yaml:"backend" mapstructure:"backend" json:"backend"` // "hanwen" or "cgo" (empty = platform default)
+	// NoModTime reports epoch for all timestamps (mtime, ctime, atime); prevents
+	// media servers re-scanning on unstable VFS mtimes. Note: tools like find -atime
+	// will not see meaningful access times on this mount.
+	NoModTime bool `yaml:"no_mod_time" mapstructure:"no_mod_time" json:"no_mod_time"`
 }
 
 // APIConfig represents REST API configuration
@@ -218,18 +253,18 @@ type RCloneConfig struct {
 	Transfers    int               `yaml:"transfers" mapstructure:"transfers" json:"transfers"`
 
 	// VFS Cache Settings
-	CacheDir             string `yaml:"cache_dir" mapstructure:"cache_dir" json:"cache_dir"`
-	VFSCacheMode         string `yaml:"vfs_cache_mode" mapstructure:"vfs_cache_mode" json:"vfs_cache_mode"`
-	VFSCachePollInterval string `yaml:"vfs_cache_poll_interval" mapstructure:"vfs_cache_poll_interval" json:"vfs_cache_poll_interval"`
+	CacheDir              string `yaml:"cache_dir" mapstructure:"cache_dir" json:"cache_dir"`
+	VFSCacheMode          string `yaml:"vfs_cache_mode" mapstructure:"vfs_cache_mode" json:"vfs_cache_mode"`
+	VFSCachePollInterval  string `yaml:"vfs_cache_poll_interval" mapstructure:"vfs_cache_poll_interval" json:"vfs_cache_poll_interval"`
 	VFSReadChunkSize      string `yaml:"vfs_read_chunk_size" mapstructure:"vfs_read_chunk_size" json:"vfs_read_chunk_size"`
 	VFSReadChunkSizeLimit string `yaml:"vfs_read_chunk_size_limit" mapstructure:"vfs_read_chunk_size_limit" json:"vfs_read_chunk_size_limit"`
 	VFSCacheMaxSize       string `yaml:"vfs_cache_max_size" mapstructure:"vfs_cache_max_size" json:"vfs_cache_max_size"`
 	VFSCacheMaxAge        string `yaml:"vfs_cache_max_age" mapstructure:"vfs_cache_max_age" json:"vfs_cache_max_age"`
-	VFSReadAhead         string `yaml:"vfs_read_ahead" mapstructure:"vfs_read_ahead" json:"vfs_read_ahead"`
-	DirCacheTime         string `yaml:"dir_cache_time" mapstructure:"dir_cache_time" json:"dir_cache_time"`
-	VFSCacheMinFreeSpace string `yaml:"vfs_cache_min_free_space" mapstructure:"vfs_cache_min_free_space" json:"vfs_cache_min_free_space"`
-	VFSDiskSpaceTotal    string `yaml:"vfs_disk_space_total" mapstructure:"vfs_disk_space_total" json:"vfs_disk_space_total"`
-	VFSReadChunkStreams  int    `yaml:"vfs_read_chunk_streams" mapstructure:"vfs_read_chunk_streams" json:"vfs_read_chunk_streams"`
+	VFSReadAhead          string `yaml:"vfs_read_ahead" mapstructure:"vfs_read_ahead" json:"vfs_read_ahead"`
+	DirCacheTime          string `yaml:"dir_cache_time" mapstructure:"dir_cache_time" json:"dir_cache_time"`
+	VFSCacheMinFreeSpace  string `yaml:"vfs_cache_min_free_space" mapstructure:"vfs_cache_min_free_space" json:"vfs_cache_min_free_space"`
+	VFSDiskSpaceTotal     string `yaml:"vfs_disk_space_total" mapstructure:"vfs_disk_space_total" json:"vfs_disk_space_total"`
+	VFSReadChunkStreams   int    `yaml:"vfs_read_chunk_streams" mapstructure:"vfs_read_chunk_streams" json:"vfs_read_chunk_streams"`
 
 	// Mount-Specific Settings
 	AllowOther    bool   `yaml:"allow_other" mapstructure:"allow_other" json:"allow_other"`
@@ -258,25 +293,32 @@ const (
 
 // ImportConfig represents import processing configuration
 type ImportConfig struct {
-	MaxProcessorWorkers            int            `yaml:"max_processor_workers" mapstructure:"max_processor_workers" json:"max_processor_workers"`
-	QueueProcessingIntervalSeconds int            `yaml:"queue_processing_interval_seconds" mapstructure:"queue_processing_interval_seconds" json:"queue_processing_interval_seconds"`
-	AllowedFileExtensions          []string       `yaml:"allowed_file_extensions" mapstructure:"allowed_file_extensions" json:"allowed_file_extensions"`
-	MaxImportConnections           int            `yaml:"max_import_connections" mapstructure:"max_import_connections" json:"max_import_connections"`
-	MaxDownloadPrefetch            int            `yaml:"max_download_prefetch" mapstructure:"max_download_prefetch" json:"max_download_prefetch"`
-	SegmentSamplePercentage        int            `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage"`
-	ReadTimeoutSeconds             int            `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds"`
-	ImportStrategy                 ImportStrategy `yaml:"import_strategy" mapstructure:"import_strategy" json:"import_strategy"`
-	ImportDir                      *string        `yaml:"import_dir" mapstructure:"import_dir" json:"import_dir,omitempty"`
-	WatchDir                       *string        `yaml:"watch_dir" mapstructure:"watch_dir" json:"watch_dir,omitempty"`
-	WatchIntervalSeconds           *int           `yaml:"watch_interval_seconds" mapstructure:"watch_interval_seconds" json:"watch_interval_seconds,omitempty"`
-	AllowNestedRarExtraction       *bool          `yaml:"allow_nested_rar_extraction" mapstructure:"allow_nested_rar_extraction" json:"allow_nested_rar_extraction,omitempty"`
-	ExpandBlurayIso                *bool          `yaml:"expand_bluray_iso" mapstructure:"expand_bluray_iso" json:"expand_bluray_iso,omitempty"`
-	RenameToNzbName                *bool          `yaml:"rename_to_nzb_name" mapstructure:"rename_to_nzb_name" json:"rename_to_nzb_name,omitempty"`
-	FilterSampleFiles              *bool          `yaml:"filter_sample_files" mapstructure:"filter_sample_files" json:"filter_sample_files,omitempty"`
-	FailedItemRetentionHours       *int           `yaml:"failed_item_retention_hours" mapstructure:"failed_item_retention_hours" json:"failed_item_retention_hours,omitempty"`
-	HistoryRetentionDays           *int           `yaml:"history_retention_days" mapstructure:"history_retention_days" json:"history_retention_days,omitempty"`
-	DeleteCompletedNzb             *bool          `yaml:"delete_completed_nzb" mapstructure:"delete_completed_nzb" json:"delete_completed_nzb,omitempty"`
-	AllowSymlinksOnWindows         *bool          `yaml:"allow_symlinks_on_windows" mapstructure:"allow_symlinks_on_windows" json:"allow_symlinks_on_windows,omitempty"`
+	MaxProcessorWorkers            int      `yaml:"max_processor_workers" mapstructure:"max_processor_workers" json:"max_processor_workers"`
+	QueueProcessingIntervalSeconds int      `yaml:"queue_processing_interval_seconds" mapstructure:"queue_processing_interval_seconds" json:"queue_processing_interval_seconds"`
+	AllowedFileExtensions          []string `yaml:"allowed_file_extensions" mapstructure:"allowed_file_extensions" json:"allowed_file_extensions"`
+	MaxImportConnections           int      `yaml:"max_import_connections" mapstructure:"max_import_connections" json:"max_import_connections"`
+	// MaxConcurrentImports caps the number of NZB imports that may run
+	// end-to-end at the same time when no stream is active. 0 = unlimited.
+	MaxConcurrentImports int `yaml:"max_concurrent_imports" mapstructure:"max_concurrent_imports" json:"max_concurrent_imports"`
+	// MaxConcurrentImportsWhileStreaming caps concurrent imports while at
+	// least one stream is active, so streams are not starved by imports.
+	// 0 = unlimited.
+	MaxConcurrentImportsWhileStreaming int            `yaml:"max_concurrent_imports_while_streaming" mapstructure:"max_concurrent_imports_while_streaming" json:"max_concurrent_imports_while_streaming"`
+	MaxDownloadPrefetch                int            `yaml:"max_download_prefetch" mapstructure:"max_download_prefetch" json:"max_download_prefetch"`
+	SegmentSamplePercentage            int            `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage"`
+	ReadTimeoutSeconds                 int            `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds"`
+	IsoAnalyzeTimeoutSeconds           *int           `yaml:"iso_analyze_timeout_seconds" mapstructure:"iso_analyze_timeout_seconds" json:"iso_analyze_timeout_seconds,omitempty"`
+	ImportStrategy                     ImportStrategy `yaml:"import_strategy" mapstructure:"import_strategy" json:"import_strategy"`
+	ImportDir                          *string        `yaml:"import_dir" mapstructure:"import_dir" json:"import_dir,omitempty"`
+	WatchDir                           *string        `yaml:"watch_dir" mapstructure:"watch_dir" json:"watch_dir,omitempty"`
+	WatchIntervalSeconds               *int           `yaml:"watch_interval_seconds" mapstructure:"watch_interval_seconds" json:"watch_interval_seconds,omitempty"`
+	AllowNestedRarExtraction           *bool          `yaml:"allow_nested_rar_extraction" mapstructure:"allow_nested_rar_extraction" json:"allow_nested_rar_extraction,omitempty"`
+	ExpandBlurayIso                    *bool          `yaml:"expand_bluray_iso" mapstructure:"expand_bluray_iso" json:"expand_bluray_iso,omitempty"`
+	RenameToNzbName                    *bool          `yaml:"rename_to_nzb_name" mapstructure:"rename_to_nzb_name" json:"rename_to_nzb_name,omitempty"`
+	FilterSampleFiles                  *bool          `yaml:"filter_sample_files" mapstructure:"filter_sample_files" json:"filter_sample_files,omitempty"`
+	FailedItemRetentionHours           *int           `yaml:"failed_item_retention_hours" mapstructure:"failed_item_retention_hours" json:"failed_item_retention_hours,omitempty"`
+	HistoryRetentionDays               *int           `yaml:"history_retention_days" mapstructure:"history_retention_days" json:"history_retention_days,omitempty"`
+	DeleteCompletedNzb                 *bool          `yaml:"delete_completed_nzb" mapstructure:"delete_completed_nzb" json:"delete_completed_nzb,omitempty"`
 }
 
 // ShouldDeleteCompletedNzb returns whether the NZB file should be removed from
@@ -333,29 +375,22 @@ type HealthConfig struct {
 	Repair                              RepairConfig `yaml:"repair" mapstructure:"repair" json:"repair"`
 }
 
-// GenerateProviderID creates a unique ID based on host, port, and username
-func GenerateProviderID(host string, port int, username string) string {
-	input := fmt.Sprintf("%s:%d@%s", host, port, username)
-	hash := sha256.Sum256([]byte(input))
-	return fmt.Sprintf("%x", hash)[:8] // First 8 characters for readability
-}
-
 // Path validation functions have been moved to internal/utils/path.go
 
 // ProviderConfig represents a single NNTP provider configuration
 type ProviderConfig struct {
-	ID                string     `yaml:"id" mapstructure:"id" json:"id"`
-	Host              string     `yaml:"host" mapstructure:"host" json:"host"`
-	Port              int        `yaml:"port" mapstructure:"port" json:"port"`
-	Username          string     `yaml:"username" mapstructure:"username" json:"username"`
-	Password          string     `yaml:"password" mapstructure:"password" json:"-"`
-	MaxConnections    int        `yaml:"max_connections" mapstructure:"max_connections" json:"max_connections"`
-	InflightRequests  int        `yaml:"inflight_requests" mapstructure:"inflight_requests" json:"inflight_requests"`
-	TLS               bool       `yaml:"tls" mapstructure:"tls" json:"tls"`
-	InsecureTLS       bool       `yaml:"insecure_tls" mapstructure:"insecure_tls" json:"insecure_tls"`
-	ProxyURL          string     `yaml:"proxy_url" mapstructure:"proxy_url" json:"proxy_url,omitempty"`
-	Enabled           *bool      `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
-	IsBackupProvider  *bool      `yaml:"is_backup_provider" mapstructure:"is_backup_provider" json:"is_backup_provider,omitempty"`
+	ID                       string     `yaml:"id" mapstructure:"id" json:"id"`
+	Host                     string     `yaml:"host" mapstructure:"host" json:"host"`
+	Port                     int        `yaml:"port" mapstructure:"port" json:"port"`
+	Username                 string     `yaml:"username" mapstructure:"username" json:"username"`
+	Password                 string     `yaml:"password" mapstructure:"password" json:"-"`
+	MaxConnections           int        `yaml:"max_connections" mapstructure:"max_connections" json:"max_connections"`
+	InflightRequests         int        `yaml:"inflight_requests" mapstructure:"inflight_requests" json:"inflight_requests"`
+	TLS                      bool       `yaml:"tls" mapstructure:"tls" json:"tls"`
+	InsecureTLS              bool       `yaml:"insecure_tls" mapstructure:"insecure_tls" json:"insecure_tls"`
+	ProxyURL                 string     `yaml:"proxy_url" mapstructure:"proxy_url" json:"proxy_url,omitempty"`
+	Enabled                  *bool      `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
+	IsBackupProvider         *bool      `yaml:"is_backup_provider" mapstructure:"is_backup_provider" json:"is_backup_provider,omitempty"`
 	SkipPing                 bool       `yaml:"skip_ping" mapstructure:"skip_ping" json:"skip_ping,omitempty"`
 	KeepaliveIntervalSeconds int        `yaml:"keepalive_interval_seconds" mapstructure:"keepalive_interval_seconds" json:"keepalive_interval_seconds,omitempty"`
 	KeepaliveCommand         string     `yaml:"keepalive_command" mapstructure:"keepalive_command" json:"keepalive_command,omitempty"`
@@ -363,8 +398,8 @@ type ProviderConfig struct {
 	QuotaBytes               int64      `yaml:"quota_bytes" mapstructure:"quota_bytes" json:"quota_bytes,omitempty"`
 	QuotaPeriodHours         int        `yaml:"quota_period_hours" mapstructure:"quota_period_hours" json:"quota_period_hours,omitempty"`
 	LastRTTMs                int64      `yaml:"last_rtt_ms" mapstructure:"last_rtt_ms" json:"last_rtt_ms,omitempty"`
-	LastSpeedTestMbps float64    `yaml:"last_speed_test_mbps" mapstructure:"last_speed_test_mbps" json:"last_speed_test_mbps,omitempty"`
-	LastSpeedTestTime *time.Time `yaml:"last_speed_test_time" mapstructure:"last_speed_test_time" json:"last_speed_test_time,omitempty"`
+	LastSpeedTestMbps        float64    `yaml:"last_speed_test_mbps" mapstructure:"last_speed_test_mbps" json:"last_speed_test_mbps,omitempty"`
+	LastSpeedTestTime        *time.Time `yaml:"last_speed_test_time" mapstructure:"last_speed_test_time" json:"last_speed_test_time,omitempty"`
 }
 
 // SABnzbdConfig represents SABnzbd-compatible API configuration
@@ -408,11 +443,155 @@ type ArrsConfig struct {
 	LidarrInstances                []ArrsInstanceConfig `yaml:"lidarr_instances" mapstructure:"lidarr_instances" json:"lidarr_instances"`
 	ReadarrInstances               []ArrsInstanceConfig `yaml:"readarr_instances" mapstructure:"readarr_instances" json:"readarr_instances"`
 	WhisparrInstances              []ArrsInstanceConfig `yaml:"whisparr_instances" mapstructure:"whisparr_instances" json:"whisparr_instances"`
+	SportarrInstances              []ArrsInstanceConfig `yaml:"sportarr_instances" mapstructure:"sportarr_instances" json:"sportarr_instances"`
 	QueueCleanupEnabled            *bool                `yaml:"queue_cleanup_enabled" mapstructure:"queue_cleanup_enabled" json:"queue_cleanup_enabled,omitempty"`
 	QueueCleanupIntervalSeconds    int                  `yaml:"queue_cleanup_interval_seconds" mapstructure:"queue_cleanup_interval_seconds" json:"queue_cleanup_interval_seconds,omitempty"`
-	CleanupAutomaticImportFailure  *bool                `yaml:"cleanup_automatic_import_failure" mapstructure:"cleanup_automatic_import_failure" json:"cleanup_automatic_import_failure,omitempty"`
 	QueueCleanupGracePeriodMinutes int                  `yaml:"queue_cleanup_grace_period_minutes" mapstructure:"queue_cleanup_grace_period_minutes" json:"queue_cleanup_grace_period_minutes,omitempty"`
-	QueueCleanupAllowlist          []IgnoredMessage     `yaml:"queue_cleanup_allowlist" mapstructure:"queue_cleanup_allowlist" json:"queue_cleanup_allowlist,omitempty"`
+
+	// QueueCleanupMaxFailures is the per-target failure circuit breaker. After
+	// AltMount has acted on the same target (a Radarr movie or Sonarr/Whisparr
+	// episode that keeps failing import) this many times — via queue cleanup,
+	// health-repair re-searches or the partial-pack reconcile — it gives up:
+	// it blocklists without re-searching and unmonitors the item in the *arr so it
+	// stops being automatically re-grabbed. 0 (the default) disables the breaker.
+	QueueCleanupMaxFailures int `yaml:"queue_cleanup_max_failures" mapstructure:"queue_cleanup_max_failures" json:"queue_cleanup_max_failures,omitempty"`
+
+	// QueueCleanupRules matches an *arr status message for a stuck/failed import and
+	// decides the action (remove / blocklist / blocklist+search). This is the single
+	// message-rule list for queue cleanup; ghost/empty-folder detection runs alongside
+	// it in the same pass. Only items owned by AltMount's download client are touched
+	// (see issue #523).
+	QueueCleanupRules []StuckCleanupRule `yaml:"queue_cleanup_rules,omitempty" mapstructure:"queue_cleanup_rules" json:"queue_cleanup_rules,omitempty"`
+
+	// Deprecated: the fields below are read from existing config files for one-time
+	// migration into the unified queue-cleanup model (see migrateArrsCleanup) and are
+	// cleared afterwards. They are hidden from the API (json:"-") and dropped from
+	// saved YAML once empty (yaml omitempty). Do not use in new code.
+	QueueCleanupAllowlist          []IgnoredMessage   `yaml:"queue_cleanup_allowlist,omitempty" mapstructure:"queue_cleanup_allowlist" json:"-"`
+	StuckCleanupEnabled            *bool              `yaml:"stuck_cleanup_enabled,omitempty" mapstructure:"stuck_cleanup_enabled" json:"-"`
+	StuckCleanupGracePeriodMinutes int                `yaml:"stuck_cleanup_grace_period_minutes,omitempty" mapstructure:"stuck_cleanup_grace_period_minutes" json:"-"`
+	StuckCleanupRules              []StuckCleanupRule `yaml:"stuck_cleanup_rules,omitempty" mapstructure:"stuck_cleanup_rules" json:"-"`
+	// Deprecated: the hardcoded "automatic import is not possible" purge has been
+	// folded into the unified QueueCleanupRules (see migrateArrsCleanup). Read for
+	// one-time migration only, then cleared. Do not use in new code.
+	CleanupAutomaticImportFailure *bool `yaml:"cleanup_automatic_import_failure,omitempty" mapstructure:"cleanup_automatic_import_failure" json:"-"`
+}
+
+// Stuck cleanup actions decide what happens to a matched stuck import.
+const (
+	// StuckActionRemove removes the item from the queue only (no blocklist, no
+	// re-search) — for transient/environmental errors or already-satisfied files.
+	StuckActionRemove = "remove"
+	// StuckActionBlocklist removes the item and blocklists the release so the same
+	// NZB is not grabbed again, but does NOT trigger a new search.
+	StuckActionBlocklist = "blocklist"
+	// StuckActionBlocklistSearch blocklists the release and triggers the *arr to
+	// search for a replacement.
+	StuckActionBlocklistSearch = "blocklist_search"
+)
+
+// StuckCleanupRule matches a stuck-import status message and decides the action
+// (one of StuckActionRemove, StuckActionBlocklist, StuckActionBlocklistSearch).
+type StuckCleanupRule struct {
+	Message string `yaml:"message" mapstructure:"message" json:"message"`
+	Enabled bool   `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	Action  string `yaml:"action" mapstructure:"action" json:"action"`
+}
+
+// migrateArrsCleanup folds the legacy split cleanup config (separate stuck-rules
+// list, allowlist, enable flag and grace period) into the unified QueueCleanupRules
+// model, then clears the legacy fields so they are dropped from saved YAML.
+//
+// A config predates the merge when any legacy field is present. In that case the
+// unified rules are rebuilt from the legacy values (the user's actual settings),
+// overriding the defaults DefaultConfig pre-populated — otherwise a legacy config
+// loaded on top of fresh defaults would silently keep the defaults and discard the
+// user's customizations. The function is idempotent: once the legacy fields are
+// empty it does nothing.
+func migrateArrsCleanup(config *Config) {
+	a := &config.Arrs
+
+	// The legacy split-cleanup model (separate stuck rules / allowlist / enable flag /
+	// grace period) predated the unified queue_cleanup_rules and coexisted with no
+	// queue_cleanup_rules at all. When present, rebuild the unified list from it so the
+	// user's actual settings override the defaults DefaultConfig pre-populated.
+	legacySplitPresent := len(a.StuckCleanupRules) > 0 ||
+		len(a.QueueCleanupAllowlist) > 0 ||
+		a.StuckCleanupEnabled != nil ||
+		a.StuckCleanupGracePeriodMinutes > 0
+	if legacySplitPresent {
+		// Rebuild the unified rules from the legacy config: the stuck rules verbatim,
+		// then allowlist entries as plain "remove" rules. Rule matching is substring-based
+		// (see matchStuckRule), so skip any allowlist entry already covered by an existing
+		// rule whose message is a substring of it — e.g. an allowlist "Sample file" is dead
+		// next to a "Sample" rule, and would just be a confusing duplicate.
+		rules := append([]StuckCleanupRule(nil), a.StuckCleanupRules...)
+		for _, m := range a.QueueCleanupAllowlist {
+			covered := false
+			for _, r := range rules {
+				if r.Message == m.Message || (r.Message != "" && strings.Contains(m.Message, r.Message)) {
+					covered = true
+					break
+				}
+			}
+			if !covered {
+				rules = append(rules, StuckCleanupRule{
+					Message: m.Message,
+					Enabled: m.Enabled,
+					Action:  StuckActionRemove,
+				})
+			}
+		}
+		a.QueueCleanupRules = rules
+
+		// Enable unified cleanup if only the legacy stuck toggle was on.
+		if a.QueueCleanupEnabled == nil && a.StuckCleanupEnabled != nil && *a.StuckCleanupEnabled {
+			enabled := true
+			a.QueueCleanupEnabled = &enabled
+		}
+
+		// Prefer the legacy stuck grace period when no queue grace period is configured.
+		if a.QueueCleanupGracePeriodMinutes == 0 && a.StuckCleanupGracePeriodMinutes > 0 {
+			a.QueueCleanupGracePeriodMinutes = a.StuckCleanupGracePeriodMinutes
+		}
+
+		// Clear legacy fields so SaveConfig no longer emits them.
+		a.QueueCleanupAllowlist = nil
+		a.StuckCleanupEnabled = nil
+		a.StuckCleanupGracePeriodMinutes = 0
+		a.StuckCleanupRules = nil
+	}
+
+	// Fold the legacy "Import Failure Cleanup" toggle (cleanup_automatic_import_failure)
+	// into the unified rules. Unlike the split-cleanup fields, this toggle coexisted with
+	// queue_cleanup_rules, so operate on the already-loaded rules (never rebuild them) to
+	// avoid wiping the user's customizations. When it was on, preserve the prior purge by
+	// enabling an existing rule that matches "automatic import is not possible" (e.g. the
+	// seeded default, which loads disabled) or appending one; matching mirrors
+	// matchStuckRule (a rule's message is a case-insensitive substring of the phrase).
+	if a.CleanupAutomaticImportFailure != nil {
+		if *a.CleanupAutomaticImportFailure {
+			const phrase = "automatic import is not possible"
+			found := false
+			for i := range a.QueueCleanupRules {
+				r := &a.QueueCleanupRules[i]
+				if r.Message != "" && strings.Contains(phrase, strings.ToLower(r.Message)) {
+					r.Enabled = true
+					found = true
+					break
+				}
+			}
+			if !found {
+				a.QueueCleanupRules = append(a.QueueCleanupRules, StuckCleanupRule{
+					Message: phrase,
+					Enabled: true,
+					Action:  StuckActionRemove,
+				})
+			}
+		}
+		// Clear the legacy flag so SaveConfig no longer emits it.
+		a.CleanupAutomaticImportFailure = nil
+	}
 }
 
 // ArrsInstanceConfig represents a single arrs instance configuration
@@ -513,10 +692,6 @@ func (c *Config) Validate() error {
 	if !validStrategies[c.Import.ImportStrategy] {
 		return fmt.Errorf("import_strategy must be one of: NONE, SYMLINK, STRM")
 	}
-	if runtime.GOOS == "windows" && c.Import.ImportStrategy == ImportStrategySYMLINK {
-		return fmt.Errorf("import_strategy SYMLINK is not supported on Windows; use STRM instead")
-	}
-
 	// Validate import directory when strategy requires it
 	if c.Import.ImportStrategy == ImportStrategySYMLINK || c.Import.ImportStrategy == ImportStrategySTRM {
 		if c.Import.ImportDir == nil || *c.Import.ImportDir == "" {
@@ -756,6 +931,32 @@ func (c *Config) Validate() error {
 	}
 	if c.Fuse.MaxReadAheadMB <= 0 {
 		c.Fuse.MaxReadAheadMB = 128 // Default 128MB
+	}
+	// AsyncBufferSizeMB: 0 means disabled (passthrough). Clamp negatives.
+	if c.Fuse.AsyncBufferSizeMB < 0 {
+		c.Fuse.AsyncBufferSizeMB = 0
+	}
+	// AsyncBufferMaxTotalMB: 0 means unlimited. Clamp negatives.
+	if c.Fuse.AsyncBufferMaxTotalMB < 0 {
+		c.Fuse.AsyncBufferMaxTotalMB = 0
+	}
+
+	// Validate arrs queue-cleanup rule actions: an explicitly set action must be a
+	// known value. An empty action is allowed and treated as "remove" at runtime
+	// (see starrDeleteOpts), so it is not rejected here.
+	for i, rule := range c.Arrs.QueueCleanupRules {
+		switch rule.Action {
+		case "", StuckActionRemove, StuckActionBlocklist, StuckActionBlocklistSearch:
+		default:
+			return fmt.Errorf("arrs queue_cleanup_rules[%d]: invalid action %q (must be %q, %q, or %q)",
+				i, rule.Action, StuckActionRemove, StuckActionBlocklist, StuckActionBlocklistSearch)
+		}
+	}
+
+	// The failure circuit breaker counts up to a positive threshold; 0 disables it.
+	if c.Arrs.QueueCleanupMaxFailures < 0 {
+		return fmt.Errorf("arrs queue_cleanup_max_failures must be >= 0 (0 disables the breaker), got %d",
+			c.Arrs.QueueCleanupMaxFailures)
 	}
 
 	return nil
@@ -1164,6 +1365,9 @@ func (m *Manager) ReloadConfig() error {
 		}
 	}
 
+	// Migrate: fold legacy stuck/allowlist cleanup config into the unified rules.
+	migrateArrsCleanup(config)
+
 	// Validate configuration
 	if err := config.Validate(); err != nil {
 		return fmt.Errorf("config validation failed: %w", err)
@@ -1241,13 +1445,13 @@ func DefaultConfig(configDir ...string) *Config {
 	sabnzbdEnabled := false
 	scrapperEnabled := false
 	fuseEnabled := false
-	loginRequired := true      // Require login by default
-	stremioEnabled := false    // Stremio endpoint disabled by default
-	prowlarrEnabled := false   // Prowlarr integration disabled by default
-	watchIntervalSeconds := 10        // Default watch interval
-	failedItemRetentionHours := 24    // Default: auto-remove failed items after 24 hours
-	historyRetentionDays := 90        // Default: auto-remove import history after 90 days (3 months)
-	cleanupAutomaticImportFailure := false
+	loginRequired := true           // Require login by default
+	stremioEnabled := false         // Stremio endpoint disabled by default
+	prowlarrEnabled := false        // Prowlarr integration disabled by default
+	watchIntervalSeconds := 10      // Default watch interval
+	failedItemRetentionHours := 24  // Default: auto-remove failed items after 24 hours
+	historyRetentionDays := 90      // Default: auto-remove import history after 90 days (3 months)
+	isoAnalyzeTimeoutSeconds := 120 // Default: 120s hard cap per ISO analyse (prevents stuck NNTP from stalling import for 9+ minutes)
 	metadataBackupEnabled := false
 	failureMaskingEnabled := false
 	repairEnabled := true
@@ -1375,14 +1579,15 @@ func DefaultConfig(configDir ...string) *Config {
 				".xvid", ".rm", ".rmvb", ".asf", ".asx", ".wtv", ".mk3d", ".dvr-ms",
 				".mp3", ".flac", ".m4a", ".epub", ".pdf", ".cbz",
 			},
-			MaxImportConnections:    5,                  // Default: 5 concurrent NNTP connections for validation and archive processing
-			MaxDownloadPrefetch:     10,                 // Default: 10 segments prefetched ahead for archive analysis
-			SegmentSamplePercentage: 1,                  // Default: 1% segment sampling
-			ReadTimeoutSeconds:      300,                // Default: 5 minutes read timeout
-			ImportStrategy:          ImportStrategyNone, // Default: no import strategy (direct import)
-			ImportDir:               nil,                // No default import directory
-			WatchDir:                nil,
-			WatchIntervalSeconds:    &watchIntervalSeconds,
+			MaxImportConnections:     5,   // Default: 5 concurrent NNTP connections for validation and archive processing
+			MaxDownloadPrefetch:      10,  // Default: 10 segments prefetched ahead for archive analysis
+			SegmentSamplePercentage:  1,   // Default: 1% segment sampling
+			ReadTimeoutSeconds:       300, // Default: 5 minutes read timeout
+			IsoAnalyzeTimeoutSeconds: &isoAnalyzeTimeoutSeconds,
+			ImportStrategy:           ImportStrategyNone, // Default: no import strategy (direct import)
+			ImportDir:                nil,                // No default import directory
+			WatchDir:                 nil,
+			WatchIntervalSeconds:     &watchIntervalSeconds,
 			FailedItemRetentionHours: &failedItemRetentionHours,
 			HistoryRetentionDays:     &historyRetentionDays,
 		},
@@ -1459,28 +1664,67 @@ func DefaultConfig(configDir ...string) *Config {
 			LidarrInstances:                []ArrsInstanceConfig{},
 			ReadarrInstances:               []ArrsInstanceConfig{},
 			WhisparrInstances:              []ArrsInstanceConfig{},
-			CleanupAutomaticImportFailure:  &cleanupAutomaticImportFailure,
-			QueueCleanupGracePeriodMinutes: 10, // Default to 10 minutes
-			QueueCleanupAllowlist: []IgnoredMessage{
-				{Message: "No files found are eligible", Enabled: true},
-				{Message: "One or more episodes expected in this release were not imported or missing", Enabled: true},
-				{Message: "is not a valid video file", Enabled: true},
-				{Message: "Sample file", Enabled: true},
-				{Message: "No video files were found in the selected folder", Enabled: true},
-				{Message: "Could not find file", Enabled: true},
-				{Message: "Unexpected error processing file", Enabled: true},
-				{Message: "Download doesn't contain intermediate path", Enabled: true},
+			SportarrInstances:              []ArrsInstanceConfig{},
+			QueueCleanupGracePeriodMinutes: 5,     // Default to 5 minutes stuck before acting
+			QueueCleanupMaxFailures:        0, // Failure circuit breaker disabled by default
+			// Rule table modeled on wArrden's queue cleanup. Action decides what to do:
+			// blocklist_search (bad release → block + re-search), blocklist (block but
+			// don't search), or remove (just clear the queue: transient/environmental
+			// errors or files that are already satisfied).
+			QueueCleanupRules: []StuckCleanupRule{
+				// Bad release — blocklist and search for a replacement.
+				{Message: "Sample", Enabled: true, Action: StuckActionBlocklistSearch},
+				{Message: "Unable to determine if file is a sample", Enabled: true, Action: StuckActionBlocklistSearch},
+				{Message: "is not a valid video file", Enabled: true, Action: StuckActionBlocklistSearch},
+				{Message: "No files found are eligible", Enabled: true, Action: StuckActionBlocklistSearch},
+				{Message: "No audio tracks detected", Enabled: true, Action: StuckActionBlocklistSearch},
+				{Message: "Found archive file", Enabled: true, Action: StuckActionBlocklistSearch},
+				{Message: "Unable to parse file", Enabled: true, Action: StuckActionBlocklistSearch},
+				{Message: "Unexpected error processing file", Enabled: true, Action: StuckActionBlocklistSearch},
+				{Message: "unsupported extension", Enabled: true, Action: StuckActionBlocklistSearch},
+				{Message: "potentially dangerous file", Enabled: true, Action: StuckActionBlocklistSearch},
+				{Message: "Found executable file", Enabled: true, Action: StuckActionBlocklistSearch},
+				{Message: "was not found in the grabbed release", Enabled: true, Action: StuckActionBlocklistSearch},
+				{Message: "Invalid season or episode", Enabled: true, Action: StuckActionBlocklistSearch},
+				{Message: "One or more episodes expected in this release were not imported or missing", Enabled: true, Action: StuckActionBlocklistSearch},
+				// Already satisfied — remove from queue only (don't re-search).
+				{Message: "Not a Custom Format upgrade", Enabled: true, Action: StuckActionRemove},
+				{Message: "Not an upgrade for existing", Enabled: true, Action: StuckActionRemove},
+				{Message: "Not a quality revision upgrade", Enabled: true, Action: StuckActionRemove},
+				{Message: "Movie file already imported", Enabled: true, Action: StuckActionRemove},
+				{Message: "Episode file already imported", Enabled: true, Action: StuckActionRemove},
+				{Message: "Album already imported", Enabled: true, Action: StuckActionRemove},
+				// Transient/environmental — disabled by default (enable if desired).
+				{Message: "Not enough free space", Enabled: false, Action: StuckActionRemove},
+				{Message: "File is still being unpacked", Enabled: false, Action: StuckActionRemove},
+				{Message: "Locked file, try again later", Enabled: false, Action: StuckActionRemove},
+				{Message: "is reporting an error", Enabled: false, Action: StuckActionRemove},
+				{Message: "Import failed, path does not exist", Enabled: false, Action: StuckActionRemove},
+				// Folded from the former queue-cleanup allowlist — remove from queue only.
+				// ("Sample file" is intentionally omitted: the "Sample" rule above already
+				// substring-matches it.)
+				{Message: "No video files were found in the selected folder", Enabled: true, Action: StuckActionRemove},
+				{Message: "Could not find file", Enabled: true, Action: StuckActionRemove},
+				{Message: "Download doesn't contain intermediate path", Enabled: true, Action: StuckActionRemove},
+				// Folded from the former "Import Failure Cleanup" toggle (cleanup_automatic_import_failure).
+				// Seeded disabled to match the toggle's default-off behavior, but discoverable so
+				// users can switch it on (and pick blocklist/blocklist_search if they prefer). A
+				// migrated config that had the toggle enabled gets this rule enabled automatically
+				// (see migrateArrsCleanup).
+				{Message: "automatic import is not possible", Enabled: false, Action: StuckActionRemove},
 			},
 		},
 		Fuse: FuseConfig{
-			Enabled:             &fuseEnabled,
-			MountPath:           "",
-			AllowOther:          true,
-			Debug:               false,
-			AttrTimeoutSeconds:  30,
-			EntryTimeoutSeconds: 1,
-			MaxCacheSizeMB:      128,
-			MaxReadAheadMB:      128,
+			Enabled:               &fuseEnabled,
+			MountPath:             "",
+			AllowOther:            true,
+			Debug:                 false,
+			AttrTimeoutSeconds:    30,
+			EntryTimeoutSeconds:   1,
+			MaxCacheSizeMB:        128,
+			MaxReadAheadMB:        128,
+			AsyncBufferSizeMB:     16,  // 16MB per-stream read-ahead (rclone-VFS-like smoothing)
+			AsyncBufferMaxTotalMB: 256, // cap total read-ahead memory across all streams
 		},
 		MountPath: "",            // Empty by default - required when ARRs is enabled
 		MountType: MountTypeNone, // No mount system active by default
@@ -1580,6 +1824,9 @@ func LoadConfig(configFile string) (*Config, error) {
 		}
 	}
 
+	// Migrate: fold legacy stuck/allowlist cleanup config into the unified rules.
+	migrateArrsCleanup(config)
+
 	// If log file was not explicitly set in the config file and we have a specific config file path,
 	// derive log file path from config file location
 	if configFile != "" && !viper.IsSet("log.file") {
@@ -1613,9 +1860,4 @@ func LoadConfig(configFile string) (*Config, error) {
 	}
 
 	return config, nil
-}
-
-// GetConfigFilePath returns the configuration file path used by viper
-func GetConfigFilePath() string {
-	return viper.ConfigFileUsed()
 }

@@ -43,7 +43,7 @@ func TestCoordinator_HandleSuccess_SkipsARRNotification(t *testing.T) {
 		MetadataService: metaSvc,
 	})
 
-	result, err := coord.HandleSuccess(context.Background(), item, "/some/path")
+	result, err := coord.HandleSuccess(context.Background(), item, "/some/path", nil)
 	if err != nil {
 		t.Fatalf("HandleSuccess returned unexpected error: %v", err)
 	}

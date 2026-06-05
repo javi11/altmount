@@ -4,12 +4,15 @@ export function cn(...inputs: ClassValue[]) {
 	return clsx(inputs);
 }
 
-export function formatBytes(bytes: number, decimals = 2) {
-	if (bytes === 0) return "0 Bytes";
+export function formatBytes(bytes: number, decimals = 2, shortUnit = false) {
+	const sizes = shortUnit
+		? ["B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"]
+		: ["Bytes", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"];
+
+	if (bytes === 0) return `0 ${sizes[0]}`;
 
 	const k = 1024;
 	const dm = decimals < 0 ? 0 : decimals;
-	const sizes = ["Bytes", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"];
 
 	const i = Math.floor(Math.log(bytes) / Math.log(k));
 
@@ -62,7 +65,8 @@ export function formatRelativeTime(date: string | Date) {
 	const target = new Date(date);
 	const diffInSeconds = Math.floor((now.getTime() - target.getTime()) / 1000);
 
-	if (diffInSeconds < 60) return "just now";
+	if (diffInSeconds < 5) return "just now";
+	if (diffInSeconds < 60) return `${diffInSeconds}s ago`;
 	if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)}m ago`;
 	if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)}h ago`;
 	if (diffInSeconds < 2592000) return `${Math.floor(diffInSeconds / 86400)}d ago`;
@@ -138,4 +142,45 @@ export function debounce<T extends (...args: unknown[]) => unknown>(
 
 export function isNil(value: unknown): value is null | undefined {
 	return value === null || value === undefined;
+}
+
+export function getProviderBrandName(host: string): string {
+	if (!host) return "Unknown";
+
+	// Check if it's an IP address
+	const parts = host.toLowerCase().split(".");
+	if (parts.every((part) => /^\d+$/.test(part)) && parts.length === 4) {
+		return host;
+	}
+
+	const subdomainsToStrip = new Set([
+		"news",
+		"reader",
+		"eu",
+		"us",
+		"ssl",
+		"secure",
+		"ln",
+		"news-us",
+		"news-eu",
+		"text",
+		"free",
+		"ports",
+		"port",
+		"ipv6",
+		"www",
+		"upload",
+	]);
+
+	// Filter out common subdomains
+	const filteredParts = parts.filter((part) => !subdomainsToStrip.has(part));
+
+	// If we filtered out too much and have nothing left (or just 1 part), fall back to original parts
+	const finalParts = filteredParts.length >= 2 ? filteredParts : parts;
+
+	// Join back the remaining domain parts
+	const brand = finalParts.join(".");
+
+	// Capitalize the first character of the resulting domain
+	return brand.charAt(0).toUpperCase() + brand.slice(1);
 }

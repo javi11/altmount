@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -37,6 +38,22 @@ type ProgressBroadcaster struct {
 	log         *slog.Logger
 	subscribers map[string]chan ProgressUpdate
 	subMu       sync.RWMutex
+	subSeq      atomic.Uint64
+}
+
+// broadcast delivers update to every subscriber without blocking. If a
+// subscriber's buffered channel is full the update is dropped for that
+// subscriber and dropMsg is logged. Shared by all the broadcast entry points.
+func (pb *ProgressBroadcaster) broadcast(update ProgressUpdate, dropMsg string) {
+	pb.subMu.RLock()
+	defer pb.subMu.RUnlock()
+	for subID, ch := range pb.subscribers {
+		select {
+		case ch <- update:
+		default:
+			pb.log.WarnContext(context.Background(), dropMsg, "subscriber_id", subID, "queue_id", update.QueueID)
+		}
+	}
 }
 
 // NewProgressBroadcaster creates a new progress broadcaster
@@ -93,15 +110,7 @@ func (pb *ProgressBroadcaster) UpdateProgressWithStage(queueID int, percentage i
 		Timestamp:  time.Now(),
 	}
 
-	pb.subMu.RLock()
-	for subID, ch := range pb.subscribers {
-		select {
-		case ch <- update:
-		default:
-			pb.log.WarnContext(context.Background(), "subscriber channel full, skipping update", "subscriber_id", subID, "queue_id", queueID)
-		}
-	}
-	pb.subMu.RUnlock()
+	pb.broadcast(update, "subscriber channel full, skipping update")
 }
 
 // NotifyComplete broadcasts a terminal completion or failure event for a queue item
@@ -117,16 +126,7 @@ func (pb *ProgressBroadcaster) NotifyComplete(queueID int, status string) {
 		Timestamp: time.Now(),
 	}
 
-	pb.subMu.RLock()
-	for subID, ch := range pb.subscribers {
-		select {
-		case ch <- update:
-		default:
-			pb.log.WarnContext(context.Background(), "subscriber channel full, skipping completion event",
-				"subscriber_id", subID, "queue_id", queueID)
-		}
-	}
-	pb.subMu.RUnlock()
+	pb.broadcast(update, "subscriber channel full, skipping completion event")
 }
 
 // ClearProgress removes progress tracking for a completed or failed queue item
@@ -167,7 +167,7 @@ func (pb *ProgressBroadcaster) Subscribe() (string, <-chan ProgressUpdate) {
 	pb.subMu.Lock()
 	defer pb.subMu.Unlock()
 
-	subID := fmt.Sprintf("sub-%d", time.Now().UnixNano())
+	subID := fmt.Sprintf("sub-%d", pb.subSeq.Add(1))
 	ch := make(chan ProgressUpdate, 10)
 	pb.subscribers[subID] = ch
 
@@ -200,16 +200,7 @@ func (pb *ProgressBroadcaster) BroadcastHealthChanged() {
 		Status:    "health_changed",
 		Timestamp: time.Now(),
 	}
-	pb.subMu.RLock()
-	defer pb.subMu.RUnlock()
-	for subID, ch := range pb.subscribers {
-		select {
-		case ch <- update:
-		default:
-			pb.log.WarnContext(context.Background(),
-				"subscriber channel full, skipping health_changed", "subscriber_id", subID)
-		}
-	}
+	pb.broadcast(update, "subscriber channel full, skipping health_changed")
 }
 
 // BroadcastQueueChanged sends a queue-change notification to all SSE subscribers.
@@ -220,14 +211,5 @@ func (pb *ProgressBroadcaster) BroadcastQueueChanged() {
 		Status:    "queue_changed",
 		Timestamp: time.Now(),
 	}
-	pb.subMu.RLock()
-	defer pb.subMu.RUnlock()
-	for subID, ch := range pb.subscribers {
-		select {
-		case ch <- update:
-		default:
-			pb.log.WarnContext(context.Background(),
-				"subscriber channel full, skipping queue_changed", "subscriber_id", subID)
-		}
-	}
+	pb.broadcast(update, "subscriber channel full, skipping queue_changed")
 }

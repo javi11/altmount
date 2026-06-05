@@ -37,6 +37,7 @@ function App() {
 										<Route index element={<Dashboard />} />
 										<Route path="queue" element={<QueuePage />} />
 										<Route path="health" element={<HealthPage />} />
+										<Route path="health/:tab" element={<HealthPage />} />
 										<Route path="files" element={<FilesPage />} />
 										<Route path="logs" element={<LogsPage />} />
 

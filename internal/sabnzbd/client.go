@@ -21,11 +21,15 @@ type SABnzbdClient struct {
 	httpClient *http.Client
 }
 
-// NewSABnzbdClient creates a new SABnzbd client with reasonable timeouts
-func NewSABnzbdClient() *SABnzbdClient {
-	return &SABnzbdClient{
-		httpClient: httpclient.NewLong(), // 60 second timeout for file uploads
+// NewSABnzbdClient creates a new SABnzbd client. The supplied httpClient
+// carries the desired Timeout + proxy Transport — typically built via
+// httpclient.NewForExternal so outbound requests respect the configured proxy.
+// When nil, a no-proxy 60s client is used.
+func NewSABnzbdClient(httpClient *http.Client) *SABnzbdClient {
+	if httpClient == nil {
+		httpClient = httpclient.NewLong()
 	}
+	return &SABnzbdClient{httpClient: httpClient}
 }
 
 // SABnzbdAPIResponse represents a response from SABnzbd API

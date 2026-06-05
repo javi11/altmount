@@ -85,6 +85,8 @@ export function ArrsInstanceCard({
 				return "bg-info";
 			case "whisparr":
 				return "bg-warning";
+			case "sportarr":
+				return "bg-success";
 			default:
 				return "bg-base-300";
 		}
@@ -228,5 +230,3 @@ export function ArrsInstanceCard({
 		</div>
 	);
 }
-
-export default ArrsInstanceCard;

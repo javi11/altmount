@@ -107,6 +107,21 @@ func (m *Manager) GetAllInstances() []*model.ConfigInstance {
 		}
 	}
 
+	// Convert Sportarr instances (native API, not starr-compatible)
+	if len(cfg.Arrs.SportarrInstances) > 0 {
+		for _, sportarrConfig := range cfg.Arrs.SportarrInstances {
+			instance := &model.ConfigInstance{
+				Name:     sportarrConfig.Name,
+				Type:     "sportarr",
+				URL:      sportarrConfig.URL,
+				APIKey:   sportarrConfig.APIKey,
+				Category: sportarrConfig.Category,
+				Enabled:  sportarrConfig.Enabled != nil && *sportarrConfig.Enabled,
+			}
+			instances = append(instances, instance)
+		}
+	}
+
 	return instances
 }
 
@@ -226,6 +241,8 @@ func (m *Manager) RegisterInstance(ctx context.Context, arrURL, apiKey string) (
 		newConfig.Arrs.ReadarrInstances = append(newConfig.Arrs.ReadarrInstances, newInstance)
 	case "whisparr":
 		newConfig.Arrs.WhisparrInstances = append(newConfig.Arrs.WhisparrInstances, newInstance)
+	case "sportarr":
+		newConfig.Arrs.SportarrInstances = append(newConfig.Arrs.SportarrInstances, newInstance)
 	}
 
 	// Create category for this ARR type
@@ -394,6 +411,8 @@ func (m *Manager) categoryUsedByOtherInstance(arrType, category string) bool {
 		instances = cfg.Arrs.ReadarrInstances
 	case "whisparr":
 		instances = cfg.Arrs.WhisparrInstances
+	case "sportarr":
+		instances = cfg.Arrs.SportarrInstances
 	}
 
 	for _, instance := range instances {
@@ -410,6 +429,8 @@ func (m *Manager) categoryUsedByOtherInstance(arrType, category string) bool {
 				instanceCat = "books"
 			case "whisparr":
 				instanceCat = "movies"
+			case "sportarr":
+				instanceCat = "sports"
 			}
 		}
 

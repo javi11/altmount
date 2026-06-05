@@ -6,7 +6,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/javi11/altmount/internal/config"
@@ -147,10 +146,6 @@ func (c *Coordinator) createAbsoluteSymlink(actualPath, destPath string) error {
 		}
 	}
 
-	if err := windowsSymlinkAllowed(c.configGetter()); err != nil {
-		return err
-	}
-
 	if err := os.Symlink(actualPath, destPath); err != nil {
 		return fmt.Errorf("failed to create symlink at target path: %w", err)
 	}
@@ -178,27 +173,9 @@ func (c *Coordinator) createSingleSymlink(actualPath, resultingPath string) erro
 	}
 
 	// Create the symlink using the absolute actual path
-	if err := windowsSymlinkAllowed(c.configGetter()); err != nil {
-		return err
-	}
 	if err := os.Symlink(actualPath, symlinkPath); err != nil {
 		return fmt.Errorf("failed to create symlink: %w", err)
 	}
 
 	return nil
-}
-
-// windowsSymlinkAllowed returns an error when running on Windows and the
-// AllowSymlinksOnWindows opt-in flag is not enabled. On non-Windows platforms
-// it always returns nil. When the flag is enabled on Windows, callers proceed
-// to os.Symlink which will only succeed if the process has the required
-// privilege (typically granted by enabling Developer Mode).
-func windowsSymlinkAllowed(cfg *config.Config) error {
-	if runtime.GOOS != "windows" {
-		return nil
-	}
-	if cfg != nil && cfg.Import.AllowSymlinksOnWindows != nil && *cfg.Import.AllowSymlinksOnWindows {
-		return nil
-	}
-	return fmt.Errorf("symlinks are not supported on Windows by default; enable 'Allow symlinks on Windows' in config (requires Windows Developer Mode) or use STRM import strategy instead")
 }

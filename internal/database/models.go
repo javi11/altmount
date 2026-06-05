@@ -4,6 +4,8 @@ import (
 	"time"
 )
 
+const IndexerUnknown = "Unknown"
+
 // QueueStatus represents the status of a queued import
 type QueueStatus string
 
@@ -27,27 +29,28 @@ const (
 
 // ImportQueueItem represents a queued NZB file waiting for import
 type ImportQueueItem struct {
-	ID           int64         `db:"id"`
-	DownloadID   *string       `db:"download_id"` // GUID/String ID for external tracking (e.g. Sonarr/Radarr)
-	NzbPath      string        `db:"nzb_path"`
-	RelativePath *string       `db:"relative_path"`
-	StoragePath  *string       `db:"storage_path"`
-	Category     *string       `db:"category"` // SABnzbd-compatible category
-	Priority     QueuePriority `db:"priority"`
-	Status       QueueStatus   `db:"status"`
-	CreatedAt    time.Time     `db:"created_at"`
-	UpdatedAt    time.Time     `db:"updated_at"`
-	StartedAt    *time.Time    `db:"started_at"`
-	CompletedAt  *time.Time    `db:"completed_at"`
-	RetryCount   int           `db:"retry_count"`
-	MaxRetries   int           `db:"max_retries"`
-	ErrorMessage *string       `db:"error_message"`
-	BatchID      *string       `db:"batch_id"`
-	Metadata     *string       `db:"metadata"`    // JSON metadata
-	FileSize             *int64        `db:"file_size"`             // Total size in bytes calculated from segments
-	TargetPath           *string       `db:"target_path"`           // Optional forced symlink destination path
-	SkipArrNotification  bool          `db:"skip_arr_notification"`
-	SkipPostImportLinks  bool          `db:"skip_post_import_links"`
+	ID                  int64         `db:"id"`
+	DownloadID          *string       `db:"download_id"` // GUID/String ID for external tracking (e.g. Sonarr/Radarr)
+	NzbPath             string        `db:"nzb_path"`
+	RelativePath        *string       `db:"relative_path"`
+	StoragePath         *string       `db:"storage_path"`
+	Category            *string       `db:"category"` // SABnzbd-compatible category
+	Priority            QueuePriority `db:"priority"`
+	Status              QueueStatus   `db:"status"`
+	CreatedAt           time.Time     `db:"created_at"`
+	UpdatedAt           time.Time     `db:"updated_at"`
+	StartedAt           *time.Time    `db:"started_at"`
+	CompletedAt         *time.Time    `db:"completed_at"`
+	RetryCount          int           `db:"retry_count"`
+	MaxRetries          int           `db:"max_retries"`
+	ErrorMessage        *string       `db:"error_message"`
+	BatchID             *string       `db:"batch_id"`
+	Metadata            *string       `db:"metadata"`    // JSON metadata
+	FileSize            *int64        `db:"file_size"`   // Total size in bytes calculated from segments
+	TargetPath          *string       `db:"target_path"` // Optional forced symlink destination path
+	SkipArrNotification bool          `db:"skip_arr_notification"`
+	SkipPostImportLinks bool          `db:"skip_post_import_links"`
+	Indexer             *string       `db:"indexer"`
 }
 
 // BulkOperationResult represents the result of a bulk queue operation
@@ -113,8 +116,9 @@ type FileHealth struct {
 	ScheduledCheckAt *time.Time     `db:"scheduled_check_at"` // Next check time
 	Priority         HealthPriority `db:"priority"`           // Priority level for health checks
 	// Failure masking fields
-	StreamingFailureCount int  `db:"streaming_failure_count"`
-	IsMasked              bool `db:"is_masked"`
+	StreamingFailureCount int     `db:"streaming_failure_count"`
+	IsMasked              bool    `db:"is_masked"`
+	Indexer               *string `db:"indexer"`
 }
 
 // User represents a user account in the system
@@ -171,6 +175,7 @@ type ImportHistory struct {
 	LibraryPath *string   `db:"library_path"` // Added to show final location from file_health
 	Category    *string   `db:"category"`
 	Metadata    *string   `db:"metadata"`
+	Indexer     *string   `db:"indexer"`
 	CompletedAt time.Time `db:"completed_at"`
 }
 
@@ -221,5 +226,3 @@ type ProviderSpeedTestStat struct {
 	SpeedMbps  float64   `db:"speed_mbps"`
 	CreatedAt  time.Time `db:"created_at"`
 }
-
-

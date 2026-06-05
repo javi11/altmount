@@ -16,18 +16,6 @@ export function LoadingSpinner({ size = "md", className }: LoadingSpinnerProps) 
 	return <span className={cn("loading loading-spinner", sizeClasses[size], className)} />;
 }
 
-export function LoadingCard({ children }: { children?: React.ReactNode }) {
-	return (
-		<div className="card bg-base-100 shadow-lg">
-			<div className="card-body items-center text-center">
-				<LoadingSpinner size="lg" />
-				<h2 className="card-title">Loading...</h2>
-				{children}
-			</div>
-		</div>
-	);
-}
-
 export function LoadingTable({ columns }: { columns: number }) {
 	return (
 		<div className="overflow-x-auto">

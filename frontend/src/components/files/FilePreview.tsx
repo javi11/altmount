@@ -1,8 +1,8 @@
 import { AlertTriangle, Download, FileText, Image, Music, RefreshCw, Video, X } from "lucide-react";
 import { useEffect, useRef } from "react";
+import { formatBytes } from "../../lib/utils";
 import type { WebDAVFile } from "../../types/webdav";
 import {
-	formatFileSize,
 	getCodeLanguage,
 	getFileTypeInfo,
 	isAudioFile,
@@ -287,7 +287,7 @@ export function FilePreview({
 						<div className="min-w-0 flex-1">
 							<h3 className="truncate font-semibold text-lg">{file.basename}</h3>
 							<p className="text-base-content/70 text-sm">
-								{formatFileSize(file.size)} • {fileInfo.category}
+								{formatBytes(file.size, 1, true)} • {fileInfo.category}
 							</p>
 						</div>
 					</div>

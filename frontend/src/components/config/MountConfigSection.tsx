@@ -483,36 +483,34 @@ export function MountConfigSection({ config, onUpdate, isUpdating }: MountConfig
 			)}
 
 			{/* Save Button */}
-			{mountType !== "none" && (
-				<div className="flex flex-col gap-2 pt-4">
-					{mountPathChanged && (
-						<label className="flex cursor-pointer items-center gap-2 self-end">
-							<input
-								type="checkbox"
-								className="checkbox checkbox-sm"
-								checked={regenerateOnSave}
-								onChange={(e) => setRegenerateOnSave(e.target.checked)}
-							/>
-							<span className="text-sm">Regenerate all library symlinks to the new mount path</span>
-						</label>
-					)}
-					<div className="flex justify-end">
-						<button
-							type="button"
-							className={`btn btn-primary btn-md px-10 shadow-lg shadow-primary/20 ${!hasChanges && "btn-ghost border-base-300"}`}
-							onClick={handleSave}
-							disabled={!hasChanges || isUpdating || !mountPath}
-						>
-							{isUpdating ? (
-								<span className="loading loading-spinner loading-sm" />
-							) : (
-								<Save className="h-4 w-4" />
-							)}
-							{isUpdating ? "Saving..." : "Save Configuration"}
-						</button>
-					</div>
+			<div className="flex flex-col gap-2 pt-4">
+				{mountType !== "none" && mountPathChanged && (
+					<label className="flex cursor-pointer items-center gap-2 self-end">
+						<input
+							type="checkbox"
+							className="checkbox checkbox-sm"
+							checked={regenerateOnSave}
+							onChange={(e) => setRegenerateOnSave(e.target.checked)}
+						/>
+						<span className="text-sm">Regenerate all library symlinks to the new mount path</span>
+					</label>
+				)}
+				<div className="flex justify-end">
+					<button
+						type="button"
+						className={`btn btn-primary btn-md px-10 shadow-lg shadow-primary/20 ${!hasChanges && "btn-ghost border-base-300"}`}
+						onClick={handleSave}
+						disabled={!hasChanges || isUpdating || (mountType !== "none" && !mountPath)}
+					>
+						{isUpdating ? (
+							<span className="loading loading-spinner loading-sm" />
+						) : (
+							<Save className="h-4 w-4" />
+						)}
+						{isUpdating ? "Saving..." : "Save Configuration"}
+					</button>
 				</div>
-			)}
+			</div>
 
 			{/* Status & Control Bar */}
 			{showMountControls && (
@@ -978,6 +976,9 @@ function FuseMountSubSection({ config, isRunning, onFormDataChange }: FuseSubSec
 		entry_timeout_seconds: 1,
 		max_cache_size_mb: 128,
 		max_read_ahead_mb: 128,
+		async_buffer_size_mb: 16,
+		async_buffer_max_total_mb: 256,
+		no_mod_time: false,
 	});
 
 	useEffect(() => {
@@ -1088,6 +1089,46 @@ function FuseMountSubSection({ config, isRunning, onFormDataChange }: FuseSubSec
 						</div>
 					</fieldset>
 					<fieldset className="fieldset">
+						<legend className="fieldset-legend">Read-Ahead Buffer (per stream)</legend>
+						<div className="join w-full">
+							<input
+								type="number"
+								className="input input-bordered join-item w-full bg-base-100 font-mono text-sm"
+								value={formData.async_buffer_size_mb ?? 16}
+								onChange={(e) =>
+									updateField({
+										async_buffer_size_mb: Number.parseInt(e.target.value, 10) || 0,
+									})
+								}
+								disabled={isRunning}
+							/>
+							<span className="btn btn-ghost join-item pointer-events-none border-base-300 text-xs">
+								MB
+							</span>
+						</div>
+						<p className="label">0 disables read-ahead (direct passthrough)</p>
+					</fieldset>
+					<fieldset className="fieldset">
+						<legend className="fieldset-legend">Read-Ahead Memory Cap (total)</legend>
+						<div className="join w-full">
+							<input
+								type="number"
+								className="input input-bordered join-item w-full bg-base-100 font-mono text-sm"
+								value={formData.async_buffer_max_total_mb ?? 256}
+								onChange={(e) =>
+									updateField({
+										async_buffer_max_total_mb: Number.parseInt(e.target.value, 10) || 0,
+									})
+								}
+								disabled={isRunning}
+							/>
+							<span className="btn btn-ghost join-item pointer-events-none border-base-300 text-xs">
+								MB
+							</span>
+						</div>
+						<p className="label">0 = unlimited; caps read-ahead across all streams</p>
+					</fieldset>
+					<fieldset className="fieldset">
 						<legend className="fieldset-legend">Permissions</legend>
 						<label className="label cursor-pointer justify-start gap-3">
 							<input
@@ -1098,6 +1139,19 @@ function FuseMountSubSection({ config, isRunning, onFormDataChange }: FuseSubSec
 								disabled={isRunning}
 							/>
 							<span className="label-text text-xs">Allow other users to access mount</span>
+						</label>
+					</fieldset>
+					<fieldset className="fieldset">
+						<legend className="fieldset-legend">Compatibility</legend>
+						<label className="label cursor-pointer justify-start gap-3">
+							<input
+								type="checkbox"
+								className="checkbox checkbox-primary checkbox-sm"
+								checked={formData.no_mod_time ?? false}
+								onChange={(e) => updateField({ no_mod_time: e.target.checked })}
+								disabled={isRunning}
+							/>
+							<span className="label-text text-xs">Suppress modification times</span>
 						</label>
 					</fieldset>
 				</div>

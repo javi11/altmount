@@ -140,7 +140,7 @@ export function ProviderCard({ provider, className, onResetQuota }: ProviderCard
 								title={`Last tested ${provider.last_speed_test_time ? new Date(provider.last_speed_test_time).toLocaleString() : "unknown"}`}
 							>
 								<Gauge className="h-3 w-3" />
-								{Math.round(provider.last_speed_test_mbps)} Mbps
+								{Math.round(provider.last_speed_test_mbps)} MB/s
 							</div>
 						)}
 					</div>

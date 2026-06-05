@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/avast/retry-go/v4"
+	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/slogutil"
 	"github.com/javi11/nntppool/v4"
 )
@@ -62,7 +63,7 @@ type UsenetReader struct {
 	initDownload   sync.Once
 	closeOnce      sync.Once
 	totalBytesRead int64
-	poolGetter     func() (*nntppool.Client, error) // Dynamic pool getter
+	poolGetter     func() (pool.NntpClient, error) // Dynamic pool getter
 	metricsTracker MetricsTracker
 	streamID       string
 	segmentStore   SegmentStore // optional, nil = no caching
@@ -79,7 +80,7 @@ type UsenetReader struct {
 
 func NewUsenetReader(
 	ctx context.Context,
-	poolGetter func() (*nntppool.Client, error),
+	poolGetter func() (pool.NntpClient, error),
 	rg *segmentRange,
 	maxPrefetch int,
 	metricsTracker MetricsTracker,
@@ -124,6 +125,23 @@ func (b *UsenetReader) Start() {
 		default:
 		}
 	})
+}
+
+// Interrupt cancels the reader's context and signals any blocked Read
+// to return. Non-blocking and idempotent; safe to call concurrently
+// with Read or Close. The caller is still responsible for invoking
+// Close to release goroutines and resources. Used by callers (like
+// MetadataVirtualFile.Close) that need to abort an in-flight download
+// without taking the file's own lock.
+func (b *UsenetReader) Interrupt() {
+	b.cancel()
+	b.cond.Broadcast()
+	b.mu.Lock()
+	rg := b.rg
+	b.mu.Unlock()
+	if rg != nil {
+		rg.CloseSegments()
+	}
 }
 
 func (b *UsenetReader) Close() error {
@@ -381,18 +399,22 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 
 			return nil
 		},
-		// Fix A: differentiated retry strategy
-		// - ErrArticleNotFound: never retry (article is permanently gone)
-		// - DeadlineExceeded (timeout): retry immediately, no backoff — a fresh
-		//   nntppool connection is available immediately via round-robin
-		// - Other errors: reduced attempts with fixed short delay
-		retry.Attempts(5),
-		retry.Delay(20*time.Millisecond),
+		// Retry strategy (post-S1/S3 fix):
+		// - ErrArticleNotFound: never retry (article is permanently gone).
+		// - DeadlineExceeded: retry immediately, no backoff — a fresh
+		//   nntppool connection is available via round-robin.
+		// - Other errors: at most one retry (Attempts=2 total wire calls
+		//   per failure), with exponential backoff + jitter to break
+		//   thundering-herd synchronization across readers. Base=50ms,
+		//   max jitter=100ms → first retry delay drawn from [50, 150]ms.
+		retry.Attempts(2),
+		retry.Delay(50*time.Millisecond),
+		retry.MaxJitter(100*time.Millisecond),
 		retry.DelayType(func(n uint, err error, config *retry.Config) time.Duration {
 			if errors.Is(err, context.DeadlineExceeded) {
-				return 0 // retry timeouts immediately
+				return 0
 			}
-			return retry.FixedDelay(n, err, config)
+			return retry.CombineDelay(retry.BackOffDelay, retry.RandomDelay)(n, err, config)
 		}),
 		retry.RetryIf(func(err error) bool {
 			if errors.Is(err, nntppool.ErrArticleNotFound) {

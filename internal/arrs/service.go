@@ -8,6 +8,7 @@ import (
 
 	"github.com/javi11/altmount/internal/arrs/clients"
 	"github.com/javi11/altmount/internal/arrs/data"
+	"github.com/javi11/altmount/internal/arrs/failures"
 	"github.com/javi11/altmount/internal/arrs/instances"
 	"github.com/javi11/altmount/internal/arrs/model"
 	"github.com/javi11/altmount/internal/arrs/registrar"
@@ -15,6 +16,7 @@ import (
 	"github.com/javi11/altmount/internal/arrs/worker"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/httpclient"
 	"golift.io/starr"
 )
 
@@ -45,10 +47,14 @@ type Service struct {
 // NewService creates a new arrs service for health monitoring and file repair
 func NewService(configGetter config.ConfigGetter, configManager model.ConfigManager, userRepo *database.UserRepository, queueRepo *database.Repository) *Service {
 	instManager := instances.NewManager(configGetter, configManager)
-	clientManager := clients.NewManager()
+	clientManager := clients.NewManager(httpclient.NewForExternal(configGetter().Network, 30*time.Second))
 	dataManager := data.NewManager()
-	scannerManager := scanner.NewManager(configGetter, instManager, clientManager, dataManager)
-	workerManager := worker.NewWorker(configGetter, instManager, clientManager, queueRepo)
+	// One failure tracker shared by every AltMount→arr re-acquire producer: the
+	// queue-cleanup worker and the scanner (repair re-triggers) count the same
+	// per-target keys.
+	failureTracker := failures.NewTracker()
+	scannerManager := scanner.NewManager(configGetter, instManager, clientManager, dataManager, failureTracker)
+	workerManager := worker.NewWorker(configGetter, instManager, clientManager, queueRepo, failureTracker)
 	registrarManager := registrar.NewManager(instManager, clientManager)
 
 	return &Service{
@@ -67,6 +73,40 @@ func NewService(configGetter config.ConfigGetter, configManager model.ConfigMana
 // GetAllInstances returns all arrs instances from configuration
 func (s *Service) GetAllInstances() []*model.ConfigInstance {
 	return s.instances.GetAllInstances()
+}
+
+// ResolveIndexerByDownloadID looks up which indexer a download came from by
+// querying the native queue of each configured Sportarr instance for the given
+// download-client ID. Sportarr is not starr-compatible and never fires an OnGrab
+// webhook, so this on-demand lookup (used at import time) is how its imports get
+// attributed instead of falling back to "Unknown" in indexer health. Only Sportarr
+// instances are queried — the other *arrs supply the indexer via webhook. Returns
+// ("", false) when no Sportarr instance knows the ID.
+func (s *Service) ResolveIndexerByDownloadID(ctx context.Context, downloadID string) (string, bool) {
+	if downloadID == "" {
+		return "", false
+	}
+	for _, instance := range s.instances.GetAllInstances() {
+		if instance == nil || !instance.Enabled || instance.Type != "sportarr" {
+			continue
+		}
+		client, err := s.clients.GetOrCreateSportarrClient(instance.Name, instance.URL, instance.APIKey)
+		if err != nil {
+			continue
+		}
+		queue, err := client.GetQueue(ctx)
+		if err != nil {
+			slog.DebugContext(ctx, "Sportarr indexer lookup: failed to read queue",
+				"instance", instance.Name, "download_id", downloadID, "error", err)
+			continue
+		}
+		for _, q := range queue {
+			if q.DownloadID == downloadID && q.Indexer != "" {
+				return q.Indexer, true
+			}
+		}
+	}
+	return "", false
 }
 
 // GetInstance returns a specific instance by type and name
@@ -157,6 +197,16 @@ func (s *Service) GetFirstAdminAPIKey(ctx context.Context) string {
 	return ""
 }
 
+// NoteImportFailure runs the importer-side failure breaker for a permanently
+// failed *arr-originated download: counts the failure per target against the
+// shared tracker and, at the queue_cleanup_max_failures threshold, unmonitors
+// the target and removes the *arr queue record with blocklist-without-re-search
+// (before the *arr's own failed-download handling can auto-re-search). See
+// worker.HandleImportFailure.
+func (s *Service) NoteImportFailure(ctx context.Context, downloadID, category string) {
+	s.worker.HandleImportFailure(ctx, downloadID, category)
+}
+
 // StartWorker starts the queue cleanup worker
 func (s *Service) StartWorker(ctx context.Context) error {
 	return s.worker.Start(ctx)
@@ -167,9 +217,25 @@ func (s *Service) StopWorker(ctx context.Context) {
 	s.worker.Stop(ctx)
 }
 
-// CleanupQueue checks all ARR instances for importPending items with empty folders
-func (s *Service) CleanupQueue(ctx context.Context) error {
-	return s.worker.CleanupQueue(ctx)
+// RegisterConfigChangeHandler subscribes to config changes and starts/stops
+// the queue cleanup worker when arrs.enabled or arrs.queue_cleanup_enabled flips.
+func (s *Service) RegisterConfigChangeHandler(ctx context.Context, configManager *config.Manager) {
+	configManager.OnConfigChange(func(oldConfig, newConfig *config.Config) {
+		oldOn := worker.IsQueueCleanupEnabled(oldConfig)
+		newOn := worker.IsQueueCleanupEnabled(newConfig)
+		if oldOn == newOn {
+			return
+		}
+		if newOn {
+			slog.InfoContext(ctx, "ARR worker enabled via config change, starting")
+			if err := s.worker.Start(ctx); err != nil {
+				slog.ErrorContext(ctx, "Failed to start ARR worker", "error", err)
+			}
+			return
+		}
+		slog.InfoContext(ctx, "ARR worker disabled via config change, stopping")
+		s.worker.Stop(ctx)
+	})
 }
 
 // TriggerFileRescan triggers a rescan for a specific file path through the appropriate ARR instance
@@ -249,6 +315,15 @@ func (s *Service) GetHealth(ctx context.Context) (map[string]any, error) {
 			client, err := s.clients.GetOrCreateWhisparrClient(instance.Name, instance.URL, instance.APIKey)
 			if err == nil {
 				_ = client.GetInto(ctx, starr.Request{URI: "/health"}, &health)
+			}
+		case "sportarr":
+			// Sportarr is not starr-compatible; report reachability via its native
+			// status endpoint rather than a starr /health call.
+			client, err := s.clients.GetOrCreateSportarrClient(instance.Name, instance.URL, instance.APIKey)
+			if err == nil {
+				if hErr := client.Health(ctx); hErr == nil {
+					health = []any{} // healthy: no issues reported
+				}
 			}
 		}
 		if health != nil {

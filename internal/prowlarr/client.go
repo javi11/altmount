@@ -22,13 +22,24 @@ type Client struct {
 	http     *http.Client
 }
 
-// NewClient creates a new Prowlarr client.
-func NewClient(host, apiKey string) *Client {
-	cfg := starr.New(apiKey, strings.TrimRight(host, "/"), 30*time.Second)
+// NewClient creates a new Prowlarr client. The supplied httpClient is reused
+// for both the starr API and direct NZB downloads, so its Transport (incl. any
+// proxy configuration) and Timeout apply to every outbound call. When nil, a
+// default 30s no-proxy client is used.
+func NewClient(host, apiKey string, httpClient *http.Client) *Client {
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: 30 * time.Second}
+	}
+	timeout := httpClient.Timeout
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	cfg := starr.New(apiKey, strings.TrimRight(host, "/"), timeout)
+	cfg.Client = httpClient
 	return &Client{
 		prowlarr: starrprowlarr.New(cfg),
 		apiKey:   apiKey,
-		http:     &http.Client{Timeout: 30 * time.Second},
+		http:     httpClient,
 	}
 }
 

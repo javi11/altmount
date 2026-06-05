@@ -51,49 +51,6 @@ func (m multiHandler) WithGroup(name string) slog.Handler {
 	return multiHandler{handlers: handlers}
 }
 
-type Format string
-
-type ReplaceAttrFunc func(groups []string, a slog.Attr) slog.Attr
-
-type Config struct {
-	Level       slog.Leveler
-	ReplaceAttr ReplaceAttrFunc
-	Hooks       []Hook
-	AddSource   bool
-	LogPath     string
-}
-
-var defaultConfig = Config{
-	Level:   defaultLevel(),
-	LogPath: "activity.log",
-}
-
-func mergeConfig(config ...Config) Config {
-	if len(config) == 0 {
-		return defaultConfig
-	}
-
-	cfg := config[0]
-
-	if cfg.Level == nil {
-		cfg.Level = defaultConfig.Level
-	}
-
-	if cfg.LogPath == "" {
-		cfg.LogPath = defaultConfig.LogPath
-	}
-
-	return cfg
-}
-
-func defaultLevel() slog.Leveler {
-	if v := os.Getenv("LOG_LEVEL"); v != "" {
-		return parseLevel(v)
-	}
-
-	return slog.LevelInfo
-}
-
 func parseLevel(level string) slog.Leveler {
 	switch strings.ToLower(level) {
 	case "debug":
@@ -119,7 +76,8 @@ func GetLogFilePath(logConfig config.LogConfig) string {
 // SetupLogRotation configures slog with log rotation using lumberjack.
 // Always logs to both stdout (text format) and a file (JSON format).
 // The file path defaults to "activity.log" if logConfig.File is empty.
-func SetupLogRotation(logConfig config.LogConfig) *slog.Logger {
+// Returns the logger and a DynamicLeveler for runtime level changes.
+func SetupLogRotation(logConfig config.LogConfig) (*slog.Logger, *DynamicLeveler) {
 	logFile := GetLogFilePath(logConfig)
 
 	fileWriter := &lumberjack.Logger{
@@ -136,8 +94,11 @@ func SetupLogRotation(logConfig config.LogConfig) *slog.Logger {
 		level = "info"
 	}
 
+	dynamicLeveler := &DynamicLeveler{}
+	dynamicLeveler.SetLevel(parseLevel(level).Level())
+
 	opts := &slog.HandlerOptions{
-		Level: parseLevel(level),
+		Level: dynamicLeveler,
 	}
 
 	// Text handler for human-readable stdout, JSON handler for machine-readable file.
@@ -146,12 +107,12 @@ func SetupLogRotation(logConfig config.LogConfig) *slog.Logger {
 
 	combined := multiHandler{handlers: []slog.Handler{textHandler, jsonHandler}}
 
-	return slog.New(WrapHandler(combined))
+	return slog.New(WrapHandler(combined)), dynamicLeveler
 }
 
 // SetupLogRotationWithFallback sets up log rotation with backward compatibility
 // It checks both new log config and legacy log_level setting
-func SetupLogRotationWithFallback(logConfig config.LogConfig, legacyLogLevel string) *slog.Logger {
+func SetupLogRotationWithFallback(logConfig config.LogConfig, legacyLogLevel string) (*slog.Logger, *DynamicLeveler) {
 	// Use legacy log level if new config level is empty
 	if logConfig.Level == "" && legacyLogLevel != "" {
 		logConfig.Level = legacyLogLevel

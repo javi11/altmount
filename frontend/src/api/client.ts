@@ -24,7 +24,6 @@ import type {
 	QueueHistoricalStatsResponse,
 	QueueItem,
 	QueueStats,
-	SABnzbdAddResponse,
 	ScanStatusResponse,
 	SystemBrowseResponse,
 	UploadNZBLnkResponse,
@@ -63,6 +62,33 @@ export class APIError extends Error {
 	}
 }
 
+/**
+ * Shape of the JSON error envelope returned by the server. The `error` field
+ * may be a structured object ({ message, details }) or a plain string, with
+ * top-level `message`/`details` used as fallbacks.
+ */
+interface ApiErrorEnvelope {
+	error?: { message?: string; details?: string } | string;
+	message?: string;
+	details?: string;
+}
+
+/**
+ * Builds an APIError from a parsed error response body, applying the standard
+ * fallback chain: nested error.message → top-level message → HTTP status text;
+ * details similarly (nested error.details → top-level details → "").
+ */
+function extractApiError(status: number, statusText: string, body: ApiErrorEnvelope): APIError {
+	const nestedError = typeof body.error === "object" ? body.error : undefined;
+	const errorMessage =
+		(typeof body.error === "object" ? nestedError?.message : body.error) ||
+		body.message ||
+		`HTTP ${status}: ${statusText}`;
+	const errorDetails = nestedError?.details || body.details || "";
+
+	return new APIError(status, errorMessage, errorDetails);
+}
+
 export class APIClient {
 	private baseURL: string;
 
@@ -99,23 +125,14 @@ export class APIClient {
 				if (response.status === 401) {
 					window.dispatchEvent(new CustomEvent("api:unauthorized"));
 				}
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
-				let errorData: Record<string, unknown> = {};
+				let errorData: ApiErrorEnvelope = {};
 				try {
 					errorData = await response.json();
 				} catch {
 					// empty or non-JSON error body — fall through to status-based message
 				}
-				const errorMessage =
-					(typeof errorData.error === "object" ? (errorData.error as any)?.message : errorData.error) ||
-					errorData.message ||
-					`HTTP ${response.status}: ${response.statusText}`;
-				const errorDetails =
-					(typeof errorData.error === "object" ? (errorData.error as any)?.details : "") ||
-					errorData.details ||
-					"";
 
-				throw new APIError(response.status, errorMessage, errorDetails);
+				throw extractApiError(response.status, response.statusText, errorData);
 			}
 
 			const data: APIResponse<T> = await response.json();
@@ -125,7 +142,7 @@ export class APIClient {
 				const errorMessage =
 					(typeof data.error === "object" ? data.error?.message : data.error) ||
 					"API request failed";
-				const errorDetails = (typeof data.error === "object" ? (data.error as any)?.details : "") || "";
+				const errorDetails = typeof data.error === "object" ? data.error?.details || "" : "";
 				throw new APIError(response.status, errorMessage, errorDetails);
 			}
 
@@ -172,17 +189,8 @@ export class APIClient {
 				}
 				// Try to parse error response
 				try {
-					const errorData = await response.json();
-					const errorMessage =
-						(typeof errorData.error === "object" ? (errorData.error as any)?.message : errorData.error) ||
-						errorData.message ||
-						`HTTP ${response.status}: ${response.statusText}`;
-					const errorDetails =
-						(typeof errorData.error === "object" ? (errorData.error as any)?.details : "") ||
-						errorData.details ||
-						"";
-
-					throw new APIError(response.status, errorMessage, errorDetails);
+					const errorData: ApiErrorEnvelope = await response.json();
+					throw extractApiError(response.status, response.statusText, errorData);
 				} catch (e) {
 					if (e instanceof APIError) {
 						throw e;
@@ -203,7 +211,7 @@ export class APIClient {
 				const errorMessage =
 					(typeof data.error === "object" ? data.error?.message : data.error) ||
 					"API request failed";
-				const errorDetails = (typeof data.error === "object" ? (data.error as any)?.details : "") || "";
+				const errorDetails = typeof data.error === "object" ? data.error?.details || "" : "";
 				throw new APIError(response.status, errorMessage, errorDetails);
 			}
 
@@ -237,10 +245,6 @@ export class APIClient {
 
 		const query = searchParams.toString();
 		return this.requestWithMeta<QueueItem[]>(`/queue${query ? `?${query}` : ""}`);
-	}
-
-	async getQueueItem(id: number) {
-		return this.request<QueueItem>(`/queue/${id}`);
 	}
 
 	async deleteQueueItem(id: number) {
@@ -376,10 +380,6 @@ export class APIClient {
 		return this.requestWithMeta<FileHealth[]>(`/health${query ? `?${query}` : ""}`);
 	}
 
-	async getHealthItem(id: string) {
-		return this.request<FileHealth>(`/health/${encodeURIComponent(id)}`);
-	}
-
 	async deleteHealthItem(id: number, options?: { deleteMeta?: boolean; deleteSymlink?: boolean }) {
 		const searchParams = new URLSearchParams();
 		if (options?.deleteMeta) searchParams.set("delete_meta", "true");
@@ -435,27 +435,11 @@ export class APIClient {
 		});
 	}
 
-	async retryHealthItem(id: string, resetStatus?: boolean) {
-		return this.request<FileHealth>(`/health/${encodeURIComponent(id)}/retry`, {
-			method: "POST",
-			body: JSON.stringify({ reset_status: resetStatus }),
-		});
-	}
-
 	async repairHealthItem(id: number, resetRepairRetryCount?: boolean) {
 		return this.request<FileHealth>(`/health/${id}/repair`, {
 			method: "POST",
 			body: JSON.stringify({ reset_repair_retry_count: resetRepairRetryCount }),
 		});
-	}
-
-	async getCorruptedFiles(params?: { limit?: number; offset?: number }) {
-		const searchParams = new URLSearchParams();
-		if (params?.limit) searchParams.set("limit", params.limit.toString());
-		if (params?.offset) searchParams.set("offset", params.offset.toString());
-
-		const query = searchParams.toString();
-		return this.request<FileHealth[]>(`/health/corrupted${query ? `?${query}` : ""}`);
 	}
 
 	async getHealthStats() {
@@ -526,11 +510,15 @@ export class APIClient {
 	}
 
 	async getProviderHistoricalStats(days = 30, interval = "daily") {
-		return this.request<ProviderHistoricalStatsResponse>(`/system/provider-stats?days=${days}&interval=${interval}`);
+		return this.request<ProviderHistoricalStatsResponse>(
+			`/system/provider-stats?days=${days}&interval=${interval}`,
+		);
 	}
 
 	async getProviderSpeedHistory(days = 30) {
-		return this.request<ProviderSpeedTestHistoryResponse>(`/system/provider-speed-history?days=${days}`);
+		return this.request<ProviderSpeedTestHistoryResponse>(
+			`/system/provider-speed-history?days=${days}`,
+		);
 	}
 
 	async directHealthCheck(id: number) {
@@ -673,10 +661,6 @@ export class APIClient {
 		});
 	}
 
-	async getArrsHealth() {
-		return this.request<Record<string, unknown>>("/arrs/health");
-	}
-
 	async registerArrsWebhooks() {
 		return this.request<{ message: string }>("/arrs/webhook/register", {
 			method: "POST",
@@ -729,13 +713,6 @@ export class APIClient {
 		return this.request<ConfigResponse>("/config");
 	}
 
-	async updateConfig(config: ConfigUpdateRequest) {
-		return this.request<ConfigResponse>("/config", {
-			method: "PUT",
-			body: JSON.stringify(config),
-		});
-	}
-
 	async updateConfigSection(section: ConfigSection, config: ConfigUpdateRequest) {
 		return this.request<ConfigResponse>(`/config/${section}`, {
 			method: "PATCH",
@@ -785,6 +762,32 @@ export class APIClient {
 		return this.request<{ message: string }>(`/system/stats/reset${query ? `?${query}` : ""}`, {
 			method: "POST",
 		});
+	}
+
+	async getIndexerStats() {
+		return this.request<
+			{
+				indexer: string;
+				total_imports: number;
+				success_count: number;
+				failed_count: number;
+				success_rate: number;
+				last_seen_at: string;
+			}[]
+		>("/system/indexer-stats");
+	}
+
+	async cleanupIndexerStats(params: { hours?: number; indexer?: string }) {
+		const queryParams = new URLSearchParams();
+		if (params.hours !== undefined) queryParams.append("hours", params.hours.toString());
+		if (params.indexer !== undefined) queryParams.append("indexer", params.indexer);
+
+		return this.request<{ pruned_rows: number; hours?: number }>(
+			`/system/indexer-stats/cleanup?${queryParams.toString()}`,
+			{
+				method: "DELETE",
+			},
+		);
 	}
 
 	// Provider endpoints
@@ -900,32 +903,6 @@ export class APIClient {
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify(req),
 		});
-	}
-
-	// SABnzbd file upload endpoint
-	async uploadNzbFile(file: File, apiKey: string): Promise<SABnzbdAddResponse> {
-		const formData = new FormData();
-		formData.append("nzbfile", file);
-
-		const url = `/sabnzbd?mode=addfile&apikey=${encodeURIComponent(apiKey)}`;
-
-		const response = await fetch(url, {
-			method: "POST",
-			body: formData,
-			credentials: "include", // Include cookies for Safari compatibility
-		});
-
-		if (!response.ok) {
-			throw new APIError(response.status, `Upload failed: ${response.statusText}`, "");
-		}
-
-		const data = await response.json();
-		if (!data.status) {
-			const err = data as APIError;
-			throw new APIError(response.status, err.message || "Upload failed", err.details || "");
-		}
-
-		return data;
 	}
 
 	// Native upload endpoint using JWT authentication

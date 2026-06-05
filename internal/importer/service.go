@@ -19,6 +19,7 @@ import (
 	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/httpclient"
 	"github.com/javi11/altmount/internal/importer/filesystem"
 	"github.com/javi11/altmount/internal/importer/parser"
 	"github.com/javi11/altmount/internal/importer/postprocessor"
@@ -186,6 +187,7 @@ type Service struct {
 	healthRepo      *database.HealthRepository    // Health repository for updating health status
 	broadcaster     *progress.ProgressBroadcaster // WebSocket progress broadcaster
 	userRepo        *database.UserRepository      // User repository for API key lookup
+	poolManager     pool.Manager                  // Pool manager — used to push admission caps on config change
 	log             *slog.Logger
 
 	// Runtime state
@@ -206,6 +208,7 @@ type Service struct {
 	// HandleFailure can clean them up without changing the ItemProcessor interface.
 	// Keys are item.ID (int64), values are []string.
 	writtenPathsCache sync.Map
+	grabbedIndexers   sync.Map
 }
 
 // NewService creates a new NZB import service with manual scanning and queue processing capabilities
@@ -238,14 +241,26 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 		rcloneClient:    rcloneClient,
 		configGetter:    configGetter,
 		healthRepo:      healthRepo,
-		sabnzbdClient:   sabnzbd.NewSABnzbdClient(),
+		sabnzbdClient:   sabnzbd.NewSABnzbdClient(httpclient.NewForExternal(configGetter().Network, httpclient.LongTimeout)),
 		broadcaster:     broadcaster,
 		userRepo:        userRepo,
+		poolManager:     poolManager,
 		log:             slog.Default().With("component", "importer-service"),
 		ctx:             ctx,
 		cancel:          cancel,
 		cancelFuncs:     make(map[int64]context.CancelFunc),
 		paused:          false,
+	}
+
+	// Push initial admission caps to the pool so imports are gated from the
+	// start. Zero values keep the controller disabled, matching prior behaviour.
+	if poolManager != nil && configGetter != nil {
+		if cfg := configGetter(); cfg != nil {
+			poolManager.SetAdmissionCaps(
+				cfg.GetMaxConcurrentImports(),
+				cfg.GetMaxConcurrentImportsWhileStreaming(),
+			)
+		}
 	}
 
 	// Set recorder for processor
@@ -324,6 +339,9 @@ func (s *Service) Start(ctx context.Context) error {
 	// Start background cleanup of stale failed queue items
 	go s.runFailedItemCleanup(ctx)
 
+	// Start background sweeper for grabbed indexers cache
+	go s.runGrabbedIndexerSweeper(s.ctx)
+
 	// Run one-time migration to compress legacy plain .nzb files
 	go s.runNzbCompressionMigration(s.ctx)
 
@@ -343,8 +361,13 @@ func (s *Service) ProcessItem(ctx context.Context, item *database.ImportQueueIte
 
 // HandleSuccess implements queue.ItemProcessor - handles successful processing
 func (s *Service) HandleSuccess(ctx context.Context, item *database.ImportQueueItem, resultingPath string) error {
-	s.writtenPathsCache.Delete(item.ID)
-	return s.handleProcessingSuccess(ctx, item, resultingPath)
+	// The written virtual paths are carried over from ProcessItem so multi-file
+	// imports (season packs) can schedule a per-episode post-import health check.
+	var writtenPaths []string
+	if paths, ok := s.writtenPathsCache.LoadAndDelete(item.ID); ok {
+		writtenPaths, _ = paths.([]string)
+	}
+	return s.handleProcessingSuccess(ctx, item, resultingPath, writtenPaths)
 }
 
 // HandleFailure implements queue.ItemProcessor - handles failed processing
@@ -403,6 +426,17 @@ func (s *Service) RegisterConfigChangeHandler(configManager any) {
 				s.log.InfoContext(ctx, "Queue workers resized dynamically",
 					"old_workers", oldWorkers, "new_workers", newWorkers)
 			}
+		}
+
+		// Push updated import-admission caps to the pool. Zero values keep
+		// the admission gate disabled (unlimited).
+		if s.poolManager != nil {
+			capIdle := newConfig.GetMaxConcurrentImports()
+			capWhileStreaming := newConfig.GetMaxConcurrentImportsWhileStreaming()
+			s.poolManager.SetAdmissionCaps(capIdle, capWhileStreaming)
+			s.log.InfoContext(s.ctx, "Import admission caps updated",
+				"max_concurrent_imports", capIdle,
+				"max_concurrent_imports_while_streaming", capWhileStreaming)
 		}
 	})
 }
@@ -659,6 +693,14 @@ func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath 
 		itemPriority = *priority
 	}
 
+	// Lookup indexer from grabbedIndexers (Webhook-provided)
+	var indexerName *string = nil
+	if downloadID != nil && *downloadID != "" {
+		if name, ok := s.GetGrabbedIndexer(*downloadID, filepath.Base(filePath)); ok {
+			indexerName = &name
+		}
+	}
+
 	item := &database.ImportQueueItem{
 		DownloadID:   downloadID,
 		NzbPath:      filePath,
@@ -670,6 +712,7 @@ func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath 
 		MaxRetries:   3,
 		FileSize:     fileSize,
 		Metadata:     metadata,
+		Indexer:      indexerName,
 		CreatedAt:    time.Now(),
 	}
 
@@ -995,8 +1038,54 @@ func (s *Service) resolveCategoryPath(category string) string {
 	return category
 }
 
-// handleProcessingSuccess handles all steps after successful NZB processing
-func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.ImportQueueItem, resultingPath string) error {
+// resolveIndexerFromArrs asks the ARRs service to resolve the indexer for a
+// download ID on demand. This is the reliable path for Sportarr, which can't
+// push its indexer via webhook (it's not starr-compatible and never fires an
+// OnGrab event); the lookup runs at import time so the indexer stat is recorded
+// correctly instead of as "Unknown". Returns ("", false) when the ARRs service
+// is unset or has no match.
+func (s *Service) resolveIndexerFromArrs(ctx context.Context, downloadID string) (string, bool) {
+	s.mu.Lock()
+	as := s.arrsService
+	s.mu.Unlock()
+	if as == nil {
+		return "", false
+	}
+	return as.ResolveIndexerByDownloadID(ctx, downloadID)
+}
+
+// handleProcessingSuccess handles all steps after successful NZB processing.
+// writtenPaths lists every virtual file the import wrote (may be nil for legacy
+// callers); multi-file imports use it to health-check each file individually.
+func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.ImportQueueItem, resultingPath string, writtenPaths []string) error {
+	// Log persistent indexer statistic
+	indexerName := database.IndexerUnknown
+	if item.Indexer != nil && *item.Indexer != "" {
+		indexerName = *item.Indexer
+	}
+	if (indexerName == database.IndexerUnknown || indexerName == "") && item.DownloadID != nil && *item.DownloadID != "" {
+		if latestItem, err := s.database.Repository.GetQueueItemByDownloadID(ctx, *item.DownloadID); err == nil && latestItem != nil && latestItem.Indexer != nil && *latestItem.Indexer != "" {
+			indexerName = *latestItem.Indexer
+		} else if name, ok := s.GetGrabbedIndexer(*item.DownloadID, filepath.Base(item.NzbPath)); ok {
+			indexerName = name
+		}
+	}
+	// Final fallback: query the ARRs directly. Covers Sportarr, whose indexer is
+	// only available from its native queue (no webhook), resolved on demand here
+	// so the stat is attributed correctly rather than logged as "Unknown".
+	if (indexerName == database.IndexerUnknown || indexerName == "") && item.DownloadID != nil && *item.DownloadID != "" {
+		if name, ok := s.resolveIndexerFromArrs(ctx, *item.DownloadID); ok {
+			indexerName = name
+		}
+	}
+	downloadID := ""
+	if item.DownloadID != nil {
+		downloadID = *item.DownloadID
+	}
+	if err := s.database.Repository.LogIndexerImport(ctx, indexerName, "success", "", downloadID); err != nil {
+		s.log.WarnContext(ctx, "Failed to log indexer success statistic", "indexer", indexerName, "error", err)
+	}
+
 	// Add storage path to database
 	if err := s.database.Repository.AddStoragePath(ctx, item.ID, resultingPath); err != nil {
 		s.log.ErrorContext(ctx, "Failed to add storage path", "queue_id", item.ID, "error", err)
@@ -1008,7 +1097,7 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 
 	// Delegate all post-processing to the coordinator
 	// This handles: VFS notification, symlinks, ID links, STRM files, health checks, ARR notifications
-	result, err := s.postProcessor.HandleSuccess(ctx, item, resultingPath)
+	result, err := s.postProcessor.HandleSuccess(ctx, item, resultingPath, writtenPaths)
 	if err != nil {
 		s.log.ErrorContext(ctx, "Post-processing failed", "queue_id", item.ID, "error", err)
 		return err
@@ -1103,6 +1192,35 @@ func (s *Service) cleanupWrittenPaths(ctx context.Context, itemID int64, paths [
 // handleProcessingFailure handles when processing fails
 func (s *Service) handleProcessingFailure(ctx context.Context, item *database.ImportQueueItem, processingErr error) {
 	errorMessage := processingErr.Error()
+
+	// Log persistent indexer statistic
+	indexerName := database.IndexerUnknown
+	if item.Indexer != nil && *item.Indexer != "" {
+		indexerName = *item.Indexer
+	}
+	if (indexerName == database.IndexerUnknown || indexerName == "") && item.DownloadID != nil && *item.DownloadID != "" {
+		if latestItem, err := s.database.Repository.GetQueueItemByDownloadID(ctx, *item.DownloadID); err == nil && latestItem != nil && latestItem.Indexer != nil && *latestItem.Indexer != "" {
+			indexerName = *latestItem.Indexer
+		} else if name, ok := s.GetGrabbedIndexer(*item.DownloadID, filepath.Base(item.NzbPath)); ok {
+			indexerName = name
+		}
+	}
+	// Final fallback: query the ARRs directly (covers Sportarr, which has no webhook).
+	if (indexerName == database.IndexerUnknown || indexerName == "") && item.DownloadID != nil && *item.DownloadID != "" {
+		if name, ok := s.resolveIndexerFromArrs(ctx, *item.DownloadID); ok {
+			indexerName = name
+		}
+	}
+	// Don't log if it was just cancelled by the user
+	if !strings.Contains(errorMessage, "context canceled") && !strings.Contains(errorMessage, "processing cancelled") {
+		downloadID := ""
+		if item.DownloadID != nil {
+			downloadID = *item.DownloadID
+		}
+		if err := s.database.Repository.LogIndexerImport(ctx, indexerName, "failed", errorMessage, downloadID); err != nil {
+			s.log.WarnContext(ctx, "Failed to log indexer failure statistic", "indexer", indexerName, "error", err)
+		}
+	}
 
 	// Check if the error was due to cancellation
 	if strings.Contains(errorMessage, "context canceled") || strings.Contains(errorMessage, "processing cancelled") {
@@ -1316,7 +1434,7 @@ func (s *Service) ProcessItemInBackground(ctx context.Context, itemID int64) {
 			s.handleProcessingFailure(ctx, item, processingErr)
 		} else {
 			// Handle success (storage path, VFS notification, symlinks, status update)
-			s.handleProcessingSuccess(ctx, item, resultingPath)
+			s.handleProcessingSuccess(ctx, item, resultingPath, writtenPaths)
 		}
 	}()
 }
@@ -1478,4 +1596,93 @@ func (s *Service) RegenerateMetadata(ctx context.Context, mountRelativePath stri
 
 	s.log.InfoContext(ctx, "Successfully regenerated metadata", "path", mountRelativePath)
 	return nil
+}
+
+type grabbedIndexerInfo struct {
+	indexer   string
+	timestamp time.Time
+}
+
+// StoreGrabbedIndexer stores a downloadID to indexer mapping in-memory
+func (s *Service) StoreGrabbedIndexer(downloadID string, releaseTitle string, indexer string) {
+	info := grabbedIndexerInfo{
+		indexer:   indexer,
+		timestamp: time.Now(),
+	}
+
+	if downloadID != "" {
+		s.grabbedIndexers.Store(downloadID, info)
+	}
+	// Sanitize and use release title as an alternative fallback key
+	if releaseTitle != "" {
+		cleanTitle := strings.TrimSpace(strings.ToLower(releaseTitle))
+		cleanTitle = strings.TrimSuffix(cleanTitle, ".gz")
+		cleanTitle = strings.TrimSuffix(cleanTitle, ".nzb")
+		s.grabbedIndexers.Store(cleanTitle, info)
+	}
+}
+
+// GetGrabbedIndexer retrieves a grabbed indexer by download ID or release title
+// It only returns a match if it was stored within the last 24 hours.
+func (s *Service) GetGrabbedIndexer(downloadID string, releaseTitle string) (string, bool) {
+	now := time.Now()
+
+	check := func(key string) (string, bool) {
+		if val, ok := s.grabbedIndexers.Load(key); ok {
+			if info, isInfo := val.(grabbedIndexerInfo); isInfo {
+				if now.Sub(info.timestamp) < 24*time.Hour {
+					return info.indexer, true
+				}
+				// Cleanup expired entry
+				s.grabbedIndexers.Delete(key)
+			}
+		}
+		return "", false
+	}
+
+	if downloadID != "" {
+		if name, ok := check(downloadID); ok {
+			return name, true
+		}
+	}
+
+	if releaseTitle != "" {
+		cleanTitle := strings.TrimSpace(strings.ToLower(releaseTitle))
+		cleanTitle = strings.TrimSuffix(cleanTitle, ".gz")
+		cleanTitle = strings.TrimSuffix(cleanTitle, ".nzb")
+		if name, ok := check(cleanTitle); ok {
+			return name, true
+		}
+	}
+
+	return "", false
+}
+
+// runGrabbedIndexerSweeper runs in the background to clean up stale grabbed indexer mappings older than 24h
+func (s *Service) runGrabbedIndexerSweeper(ctx context.Context) {
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.pruneGrabbedIndexers()
+		}
+	}
+}
+
+func (s *Service) pruneGrabbedIndexers() {
+	now := time.Now()
+	s.grabbedIndexers.Range(func(key, val any) bool {
+		if info, isInfo := val.(grabbedIndexerInfo); isInfo {
+			if now.Sub(info.timestamp) >= 24*time.Hour {
+				s.grabbedIndexers.Delete(key)
+			}
+		} else {
+			s.grabbedIndexers.Delete(key)
+		}
+		return true
+	})
 }
