@@ -832,6 +832,12 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 	// Priority goes to items still in the queue (as they have more metadata)
 	seenNames := make(map[string]bool)
 	finalItems := make([]*database.ImportQueueItem, 0)
+	// Track items sourced from the live queue with status=Completed. Only these
+	// are eligible to be rewritten as Failed when their reported path is
+	// missing on disk (#596). Persistent-history rows represent past successful
+	// imports whose files may have been legitimately deleted later (e.g. ARR
+	// upgrade/cleanup), so they must not be retroactively marked Failed.
+	liveCompleted := make(map[*database.ImportQueueItem]bool)
 
 	for _, item := range completedQueueItems {
 		if item.SkipArrNotification {
@@ -850,6 +856,7 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 		}
 		if !seenNames[name] {
 			finalItems = append(finalItems, item)
+			liveCompleted[item] = true
 			seenNames[name] = true
 		}
 	}
@@ -940,8 +947,11 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 	itemBasePath := s.calculateItemBasePath()
 
 	for i, item := range finalItems {
-		finalPath := s.calculateHistoryStoragePath(item, itemBasePath)
+		finalPath, exists := s.calculateHistoryStoragePath(item, itemBasePath)
 		slot := ToSABnzbdHistorySlot(item, start+i, finalPath)
+		if !exists && liveCompleted[item] {
+			markHistorySlotMissing(&slot, finalPath)
+		}
 		slots = append(slots, slot)
 		totalBytes += slot.Bytes
 	}
@@ -976,6 +986,11 @@ func (s *Server) respondSABnzbdHistoryByIDs(
 ) error {
 	finalItems := make([]*database.ImportQueueItem, 0, len(nzoIDs))
 	seen := make(map[int64]bool, len(nzoIDs))
+	// See note in respondSABnzbdHistory: only items still in the live queue
+	// with status=Completed should be rewritten to Failed when their reported
+	// path is missing. Rows reconstructed from persistent history represent
+	// past successful imports.
+	liveCompleted := make(map[*database.ImportQueueItem]bool)
 
 	categoryMatches := func(cat *string) bool {
 		if categoryFilter == "" {
@@ -998,6 +1013,9 @@ func (s *Server) respondSABnzbdHistoryByIDs(
 			if item, err := s.queueRepo.GetQueueItem(ctx, numericID); err == nil && item != nil {
 				if !item.SkipArrNotification && categoryMatches(item.Category) && !seen[item.ID] {
 					finalItems = append(finalItems, item)
+					if item.Status == database.QueueStatusCompleted {
+						liveCompleted[item] = true
+					}
 					seen[item.ID] = true
 				}
 				continue
@@ -1015,6 +1033,9 @@ func (s *Server) respondSABnzbdHistoryByIDs(
 		if item, err := s.queueRepo.GetQueueItemByDownloadID(ctx, id); err == nil && item != nil {
 			if !item.SkipArrNotification && categoryMatches(item.Category) && !seen[item.ID] {
 				finalItems = append(finalItems, item)
+				if item.Status == database.QueueStatusCompleted {
+					liveCompleted[item] = true
+				}
 				seen[item.ID] = true
 			}
 			continue
@@ -1042,8 +1063,11 @@ func (s *Server) respondSABnzbdHistoryByIDs(
 	var totalBytes int64
 	itemBasePath := s.calculateItemBasePath()
 	for i, item := range finalItems {
-		finalPath := s.calculateHistoryStoragePath(item, itemBasePath)
+		finalPath, exists := s.calculateHistoryStoragePath(item, itemBasePath)
 		slot := ToSABnzbdHistorySlot(item, start+i, finalPath)
+		if !exists && liveCompleted[item] {
+			markHistorySlotMissing(&slot, finalPath)
+		}
 		slots = append(slots, slot)
 		totalBytes += slot.Bytes
 	}
@@ -1500,9 +1524,15 @@ func (s *Server) calculateItemBasePath() string {
 }
 
 // calculateHistoryStoragePath calculates the final storage path to report to SABnzbd history for Sonarr/Radarr.
-func (s *Server) calculateHistoryStoragePath(item *database.ImportQueueItem, basePath string) string {
+//
+// The second return value reports whether the path that altmount is about to
+// hand back to the ARR client exists on disk. Callers should treat items
+// where exists=false as failed downloads (see markHistorySlotMissing), to
+// stop Sonarr/Radarr from looping on FileNotFoundException for items whose
+// symlink under Import.ImportDir was never created (issue #596).
+func (s *Server) calculateHistoryStoragePath(item *database.ImportQueueItem, basePath string) (string, bool) {
 	if s.configManager == nil || item.StoragePath == nil || *item.StoragePath == "" {
-		return basePath
+		return basePath, true
 	}
 
 	cfg := s.configManager.GetConfig()
@@ -1553,6 +1583,7 @@ func (s *Server) calculateHistoryStoragePath(item *database.ImportQueueItem, bas
 	fullStoragePath := filepath.Join(pathParts...)
 	fullStoragePath = filepath.ToSlash(filepath.Clean(fullStoragePath))
 
+	exists := true
 	if _, err := os.Stat(fullStoragePath); os.IsNotExist(err) {
 		slog.DebugContext(context.Background(), "sabnzbd history: reported path does not exist on disk",
 			"item_id", item.ID,
@@ -1564,14 +1595,14 @@ func (s *Server) calculateHistoryStoragePath(item *database.ImportQueueItem, bas
 	// Return the full file path for SYMLINK/STRM to help Arrs find it immediately.
 	// Otherwise return directory.
 	if cfg.Import.ImportStrategy == config.ImportStrategySYMLINK || cfg.Import.ImportStrategy == config.ImportStrategySTRM {
-		return fullStoragePath
+		return fullStoragePath, exists
 	}
 
 	if utils.HasPopularExtension(fullStoragePath) {
-		return filepath.Dir(fullStoragePath)
+		return filepath.Dir(fullStoragePath), exists
 	}
 
-	return fullStoragePath
+	return fullStoragePath, exists
 }
 
 // normalizeURL normalizes a URL for comparison by removing trailing slashes

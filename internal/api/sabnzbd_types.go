@@ -579,3 +579,20 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, finalPath s
 	}
 
 }
+
+// markHistorySlotMissing rewrites a history slot to look like a failed
+// download. It is applied when calculateHistoryStoragePath determines the
+// reported path does not exist on disk (e.g. symlink under Import.ImportDir
+// was never created). Without this, Sonarr/Radarr keep treating the slot as
+// Completed and loop on FileNotFoundException at import time. See #596.
+func markHistorySlotMissing(slot *SABnzbdHistorySlot, missingPath string) {
+	if slot == nil {
+		return
+	}
+	slot.Status = "Failed"
+	slot.ActionLine = "Failed: reported path missing on disk"
+	if slot.Fail_message == "" {
+		slot.Fail_message = fmt.Sprintf("altmount: reported path does not exist on disk (%s)", missingPath)
+	}
+	slot.Downloaded = 0
+}
