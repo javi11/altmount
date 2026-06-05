@@ -3,7 +3,6 @@ package validation
 import (
 	"context"
 	"fmt"
-	"math/rand"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -11,10 +10,9 @@ import (
 
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/usenet"
 	concpool "github.com/sourcegraph/conc/pool"
 )
-
-var fastFailRandPerm = rand.Perm
 
 var (
 	fastFailRarPattern      = regexp.MustCompile(`(?i)\.r(ar|\d+)$|\.part\d+\.rar$`)
@@ -38,17 +36,18 @@ type FastFailFile struct {
 }
 
 // FastFailSegmentCheck stats a random sample of segments from eligible media/archive files.
-// A count of 0 disables the check. The selected segment count is capped by the number of
-// eligible segments in the NZB.
+// When disabled, no segments are checked. When enabled, segmentSamplePercentage
+// uses the same selection strategy as regular segment validation.
 func FastFailSegmentCheck(
 	ctx context.Context,
 	files []FastFailFile,
 	poolManager pool.Manager,
-	count int,
+	enabled bool,
+	segmentSamplePercentage int,
 	maxConnections int,
 	timeout time.Duration,
 ) error {
-	if count <= 0 {
+	if !enabled {
 		return nil
 	}
 
@@ -57,7 +56,7 @@ func FastFailSegmentCheck(
 		return nil
 	}
 
-	selected := selectRandomFastFailSegments(segments, count)
+	selected := usenet.SelectSegmentsForValidation(segments, segmentSamplePercentage)
 	if len(selected) == 0 {
 		return nil
 	}
@@ -103,19 +102,6 @@ func collectFastFailSegments(files []FastFailFile) []*metapb.SegmentData {
 		}
 	}
 	return segments
-}
-
-func selectRandomFastFailSegments(segments []*metapb.SegmentData, count int) []*metapb.SegmentData {
-	if count >= len(segments) {
-		return segments
-	}
-
-	perm := fastFailRandPerm(len(segments))
-	selected := make([]*metapb.SegmentData, 0, count)
-	for i := range count {
-		selected = append(selected, segments[perm[i]])
-	}
-	return selected
 }
 
 func isFastFailEligibleFile(filename string) bool {

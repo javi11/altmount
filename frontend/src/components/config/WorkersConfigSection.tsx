@@ -222,25 +222,24 @@ export function ImportConfigSection({
 
 						<div className="divider text-base-content/70" />
 
-						<fieldset className="fieldset min-w-0">
-							<legend className="fieldset-legend font-semibold">Fast Fail Segment Checks</legend>
+						<label className="label cursor-pointer items-start justify-start gap-4">
 							<input
-								type="number"
-								className="input input-bordered w-full min-w-0 max-w-full bg-base-100 font-mono text-sm"
-								value={formData.fast_fail_segment_checks}
-								readOnly={isReadOnly}
-								min={0}
-								onChange={(e) =>
-									handleInputChange(
-										"fast_fail_segment_checks",
-										Number.parseInt(e.target.value, 10) || 0,
-									)
-								}
+								type="checkbox"
+								className="toggle toggle-primary toggle-sm mt-1 shrink-0"
+								checked={formData.fast_fail_enabled ?? false}
+								disabled={isReadOnly}
+								onChange={(e) => handleInputChange("fast_fail_enabled", e.target.checked)}
 							/>
-							<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/70 text-xs">
-								Random RAR, 7zip, audio, or video segments to stat before import. Use 0 to disable.
-							</p>
-						</fieldset>
+							<div className="min-w-0 flex-1">
+								<span className="block whitespace-normal break-words font-bold text-xs">
+									Fast Fail Segment Check
+								</span>
+								<span className="mt-1 block whitespace-normal break-words text-base-content/50 text-xs leading-relaxed">
+									Stat sampled RAR, 7zip, audio, or video segments before import using the segment
+									verification percentage above.
+								</span>
+							</div>
+						</label>
 
 						<div className="divider text-base-content/70" />
 

@@ -3,6 +3,7 @@ package validation
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -42,21 +43,12 @@ func (m fastFailPoolManager) SetAdmissionCaps(int, int)                 {}
 func (m fastFailPoolManager) SetStreamSource(pool.StreamActivitySource) {}
 func (m fastFailPoolManager) NotifyStreamChange()                       {}
 
-func TestFastFailSegmentCheckStatsOnlyEligibleMediaAndArchiveFiles(t *testing.T) {
-	previousRandPerm := fastFailRandPerm
-	fastFailRandPerm = func(n int) []int { return []int{1, 3, 0, 2} }
-	t.Cleanup(func() { fastFailRandPerm = previousRandPerm })
-
+func TestFastFailSegmentCheckUsesSegmentSamplePercentageForEligibleFiles(t *testing.T) {
 	client := fakepool.New()
 	files := []FastFailFile{
 		{
 			Filename: "movie.mkv",
-			Segments: []*metapb.SegmentData{
-				{Id: "video-0"},
-				{Id: "video-1"},
-				{Id: "video-2"},
-				{Id: "video-3"},
-			},
+			Segments: makeTestSegments("video", 100),
 		},
 		{
 			Filename: "book.pdf",
@@ -70,7 +62,8 @@ func TestFastFailSegmentCheckStatsOnlyEligibleMediaAndArchiveFiles(t *testing.T)
 		context.Background(),
 		files,
 		fastFailPoolManager{client: client},
-		2,
+		true,
+		10,
 		1,
 		100*time.Millisecond,
 	)
@@ -78,13 +71,8 @@ func TestFastFailSegmentCheckStatsOnlyEligibleMediaAndArchiveFiles(t *testing.T)
 		t.Fatalf("FastFailSegmentCheck returned error: %v", err)
 	}
 
-	if got := client.StatCalls(); got != 2 {
-		t.Fatalf("StatCalls = %d, want 2", got)
-	}
-	for _, id := range []string{"video-1", "video-3"} {
-		if got := client.PerMessageCalls(id); got != 1 {
-			t.Errorf("PerMessageCalls(%q) = %d, want 1", id, got)
-		}
+	if got := client.StatCalls(); got != 10 {
+		t.Fatalf("StatCalls = %d, want 10", got)
 	}
 	if got := client.PerMessageCalls("pdf-0"); got != 0 {
 		t.Errorf("PerMessageCalls(pdf-0) = %d, want 0", got)
@@ -92,10 +80,6 @@ func TestFastFailSegmentCheckStatsOnlyEligibleMediaAndArchiveFiles(t *testing.T)
 }
 
 func TestFastFailSegmentCheckFailsOnUnreachableSelectedSegment(t *testing.T) {
-	previousRandPerm := fastFailRandPerm
-	fastFailRandPerm = func(n int) []int { return []int{2, 0, 1} }
-	t.Cleanup(func() { fastFailRandPerm = previousRandPerm })
-
 	client := fakepool.New()
 	client.SetBehavior("rar-2", fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
 
@@ -114,7 +98,8 @@ func TestFastFailSegmentCheckFailsOnUnreachableSelectedSegment(t *testing.T) {
 		context.Background(),
 		files,
 		fastFailPoolManager{client: client},
-		1,
+		true,
+		100,
 		1,
 		100*time.Millisecond,
 	)
@@ -123,7 +108,7 @@ func TestFastFailSegmentCheckFailsOnUnreachableSelectedSegment(t *testing.T) {
 	}
 }
 
-func TestFastFailSegmentCheckDisabledWhenCountIsZero(t *testing.T) {
+func TestFastFailSegmentCheckDisabledWhenToggleIsFalse(t *testing.T) {
 	client := fakepool.New()
 
 	err := FastFailSegmentCheck(
@@ -132,7 +117,8 @@ func TestFastFailSegmentCheckDisabledWhenCountIsZero(t *testing.T) {
 			{Filename: "movie.mp4", Segments: []*metapb.SegmentData{{Id: "video-0"}}},
 		},
 		fastFailPoolManager{client: client},
-		0,
+		false,
+		100,
 		1,
 		100*time.Millisecond,
 	)
@@ -142,4 +128,12 @@ func TestFastFailSegmentCheckDisabledWhenCountIsZero(t *testing.T) {
 	if got := client.StatCalls(); got != 0 {
 		t.Fatalf("StatCalls = %d, want 0", got)
 	}
+}
+
+func makeTestSegments(prefix string, count int) []*metapb.SegmentData {
+	segments := make([]*metapb.SegmentData, count)
+	for i := range count {
+		segments[i] = &metapb.SegmentData{Id: fmt.Sprintf("%s-%d", prefix, i)}
+	}
+	return segments
 }

@@ -167,8 +167,8 @@ func (proc *Processor) checkCancellation(ctx context.Context) error {
 	}
 }
 
-func (proc *Processor) fastFailImportSegments(ctx context.Context, files []parser.ParsedFile, maxConnections, count int) error {
-	if count <= 0 {
+func (proc *Processor) fastFailImportSegments(ctx context.Context, files []parser.ParsedFile, maxConnections int, enabled bool, segmentSamplePercentage int) error {
+	if !enabled {
 		return nil
 	}
 
@@ -184,7 +184,8 @@ func (proc *Processor) fastFailImportSegments(ctx context.Context, files []parse
 		ctx,
 		fastFailFiles,
 		proc.poolManager,
-		count,
+		enabled,
+		segmentSamplePercentage,
 		maxConnections,
 		proc.validationTimeout,
 	)
@@ -296,7 +297,7 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 		}
 
 		if parsed.Type != parser.NzbTypeMultiFile {
-			if err := proc.fastFailImportSegments(ctx, parsed.Files, maxConnections, cfg.Import.FastFailSegmentChecks); err != nil {
+			if err := proc.fastFailImportSegments(ctx, parsed.Files, maxConnections, cfg.Import.FastFailEnabled, cfg.Import.SegmentSamplePercentage); err != nil {
 				return "", nil, NewNonRetryableError("fast-fail segment check failed", err)
 			}
 		}
@@ -615,7 +616,7 @@ func (proc *Processor) processMultiFile(
 		timeout,
 		fileTracker,
 		filterSampleFiles,
-		importCfg.FastFailSegmentChecks,
+		importCfg.FastFailEnabled,
 	)
 	if err != nil {
 		return "", writtenPaths, err
@@ -715,7 +716,7 @@ func (proc *Processor) processRarArchive(
 			proc.validationTimeout,
 			nil, // No progress tracker for pre-archive regular files
 			filterSampleFiles,
-			0,
+			false,
 		); err != nil {
 			slog.DebugContext(ctx, "Failed to process regular files", "error", err)
 		}
@@ -856,7 +857,7 @@ func (proc *Processor) processSevenZipArchive(
 			proc.validationTimeout,
 			nil, // No progress tracker for pre-archive regular files
 			filterSampleFiles,
-			0,
+			false,
 		); err != nil {
 			slog.DebugContext(ctx, "Failed to process regular files", "error", err)
 		}

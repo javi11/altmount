@@ -306,7 +306,7 @@ type ImportConfig struct {
 	MaxConcurrentImportsWhileStreaming int            `yaml:"max_concurrent_imports_while_streaming" mapstructure:"max_concurrent_imports_while_streaming" json:"max_concurrent_imports_while_streaming"`
 	MaxDownloadPrefetch                int            `yaml:"max_download_prefetch" mapstructure:"max_download_prefetch" json:"max_download_prefetch"`
 	SegmentSamplePercentage            int            `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage"`
-	FastFailSegmentChecks              int            `yaml:"fast_fail_segment_checks" mapstructure:"fast_fail_segment_checks" json:"fast_fail_segment_checks"`
+	FastFailEnabled                    bool           `yaml:"fast_fail_enabled" mapstructure:"fast_fail_enabled" json:"fast_fail_enabled"`
 	ReadTimeoutSeconds                 int            `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds"`
 	IsoAnalyzeTimeoutSeconds           *int           `yaml:"iso_analyze_timeout_seconds" mapstructure:"iso_analyze_timeout_seconds" json:"iso_analyze_timeout_seconds,omitempty"`
 	ImportStrategy                     ImportStrategy `yaml:"import_strategy" mapstructure:"import_strategy" json:"import_strategy"`
@@ -678,10 +678,6 @@ func (c *Config) Validate() error {
 
 	if c.Import.SegmentSamplePercentage < 1 || c.Import.SegmentSamplePercentage > 100 {
 		return fmt.Errorf("import segment_sample_percentage must be between 1 and 100")
-	}
-
-	if c.Import.FastFailSegmentChecks < 0 {
-		return fmt.Errorf("import fast_fail_segment_checks must be greater than or equal to 0")
 	}
 
 	if c.Import.ReadTimeoutSeconds <= 0 {
@@ -1587,7 +1583,7 @@ func DefaultConfig(configDir ...string) *Config {
 			MaxImportConnections:     5,   // Default: 5 concurrent NNTP connections for validation and archive processing
 			MaxDownloadPrefetch:      10,  // Default: 10 segments prefetched ahead for archive analysis
 			SegmentSamplePercentage:  1,   // Default: 1% segment sampling
-			FastFailSegmentChecks:    0,   // Default: disabled
+			FastFailEnabled:          false,
 			ReadTimeoutSeconds:       300, // Default: 5 minutes read timeout
 			IsoAnalyzeTimeoutSeconds: &isoAnalyzeTimeoutSeconds,
 			ImportStrategy:           ImportStrategyNone, // Default: no import strategy (direct import)

@@ -45,7 +45,7 @@ func ProcessRegularFiles(
 	timeout time.Duration,
 	tracker *progress.Tracker,
 	filterSamples bool,
-	fastFailSegmentChecks int,
+	fastFailEnabled bool,
 ) ([]string, error) {
 	if len(files) == 0 {
 		return nil, nil
@@ -112,7 +112,8 @@ func ProcessRegularFiles(
 					Segments: file.Segments,
 				}},
 				poolManager,
-				fastFailSegmentChecks,
+				fastFailEnabled,
+				segmentSamplePercentage,
 				maxValidationGoroutines,
 				timeout,
 			); err != nil {
