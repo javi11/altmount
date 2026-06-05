@@ -62,7 +62,7 @@ function CustomTooltip({
 	const sum = payload.reduce((acc, p) => acc + p.value, 0);
 
 	return (
-		<div className="z-50 min-w-[220px] rounded-xl border border-base-200/50 bg-base-100/90 p-4 text-xs shadow-2xl backdrop-blur-md">
+		<div className="z-50 min-w-[220px] rounded-xl border border-base-200/50 bg-base-100 p-4 text-xs shadow-2xl">
 			<p className="mb-2 border-base-200/30 border-b pb-1.5 font-bold text-base-content/80">
 				{label}
 			</p>
@@ -83,6 +83,36 @@ function CustomTooltip({
 				<span className="text-base-content/70">Total:</span>
 				<span className={`font-mono ${totalClassName}`}>{formatValue(sum)}</span>
 			</div>
+		</div>
+	);
+}
+
+interface PieTooltipProps {
+	active?: boolean;
+	payload?: Array<{ name?: string; value?: number; payload?: { fill?: string } }>;
+	formatValue: (value: number) => string;
+}
+
+/** Breakdown pie tooltip — text tinted with the hovered slice's color. */
+function PieTooltip({ active, payload, formatValue }: PieTooltipProps) {
+	const item = payload?.[0];
+	if (!active || !item || typeof item.value !== "number") return null;
+
+	return (
+		<div
+			style={{
+				borderRadius: "12px",
+				border: "1px solid color-mix(in oklch, var(--color-base-content) 10%, transparent)",
+				backgroundColor: "color-mix(in oklch, var(--color-base-100) 95%, transparent)",
+				fontSize: "11px",
+				backdropFilter: "blur(8px)",
+				boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.3)",
+				padding: "8px 12px",
+			}}
+		>
+			<span style={{ color: item.payload?.fill ?? "var(--color-base-content)" }}>
+				{item.name} : {formatValue(item.value)}
+			</span>
 		</div>
 	);
 }
@@ -279,6 +309,11 @@ export function ProviderAreaChart({
 										strokeOpacity: 0.1,
 										strokeWidth: 1,
 									}}
+									isAnimationActive={false}
+									// z-index must live on the recharts wrapper: it's positioned
+									// with transform (own stacking context), so the legend would
+									// otherwise paint over the tooltip and clip the Total row.
+									wrapperStyle={{ zIndex: 50 }}
 								/>
 								<Legend
 									onClick={(e) => {
@@ -353,17 +388,9 @@ export function ProviderAreaChart({
 									))}
 								</Pie>
 								<Tooltip
-									formatter={(value: number) => formatValue(value)}
-									contentStyle={{
-										borderRadius: "12px",
-										border:
-											"1px solid color-mix(in oklch, var(--color-base-content) 10%, transparent)",
-										backgroundColor: "color-mix(in oklch, var(--color-base-100) 95%, transparent)",
-										color: "var(--color-base-content)",
-										fontSize: "11px",
-										backdropFilter: "blur(8px)",
-										boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.3)",
-									}}
+									content={<PieTooltip formatValue={formatValue} />}
+									isAnimationActive={false}
+									wrapperStyle={{ zIndex: 50 }}
 								/>
 							</PieChart>
 						</ResponsiveContainer>

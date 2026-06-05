@@ -24,7 +24,6 @@ import {
 import { formatBytes, formatRelativeTime, getProviderBrandName } from "../../../../lib/utils";
 import type { ProviderSpeedTestHistoryStat, ProviderStatus } from "../../../../types/api";
 import { ProviderChart } from "./ProviderChart";
-import { ProviderQuota } from "./ProviderQuota";
 import { ProviderSpeedChart } from "./ProviderSpeedChart";
 
 type SortField =
@@ -333,7 +332,7 @@ export function ProviderHealth() {
 					</div>
 					<div className="relative z-10 text-primary">
 						<Activity
-							className={`h-8 w-8 ${data.download_speed_bytes_per_sec > 0 ? "animate-pulse text-primary" : "opacity-45"}`}
+							className={`h-8 w-8 ${data.download_speed_bytes_per_sec > 0 ? "animate-pulse text-primary" : "opacity-45 transition-opacity group-hover:opacity-85"}`}
 						/>
 					</div>
 					{/* Active wave line on bottom of the card */}
@@ -385,9 +384,7 @@ export function ProviderHealth() {
 						<div className="text-base-content/50 text-xs">Across all providers</div>
 					</div>
 					<div className="z-10 text-error">
-						<AlertTriangle
-							className={`h-8 w-8 ${data.total_errors > 0 ? "animate-bounce text-error" : "opacity-45"}`}
-						/>
+						<AlertTriangle className="h-8 w-8 opacity-45 transition-opacity group-hover:opacity-85" />
 					</div>
 				</div>
 
@@ -408,7 +405,7 @@ export function ProviderHealth() {
 					</div>
 					<div className="z-10 text-info">
 						<div
-							className="radial-progress border-2 border-base-content/10 text-info"
+							className="radial-progress border-2 border-base-content/10 text-info opacity-45 transition-opacity group-hover:opacity-85"
 							style={
 								{
 									"--value": connectionPercent,
@@ -428,7 +425,6 @@ export function ProviderHealth() {
 			<div className="flex flex-col gap-6">
 				<ProviderChart />
 				<ProviderSpeedChart />
-				<ProviderQuota />
 			</div>
 
 			{/* Provider Table */}

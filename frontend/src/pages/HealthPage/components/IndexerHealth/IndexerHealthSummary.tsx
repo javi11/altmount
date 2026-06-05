@@ -44,7 +44,7 @@ export function IndexerHealthSummary({ stats, summary }: IndexerHealthSummaryPro
 					<div className="font-semibold text-[10px] text-base-content/50">Average success rate</div>
 				</div>
 				<div className={`relative z-10 ${overallColor}`}>
-					<BarChart2 className="h-8 w-8 opacity-50" />
+					<BarChart2 className="h-8 w-8 opacity-45 transition-opacity group-hover:opacity-85" />
 				</div>
 			</div>
 

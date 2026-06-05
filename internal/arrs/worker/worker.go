@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/javi11/altmount/internal/arrs/clients"
@@ -37,11 +36,6 @@ type Worker struct {
 	firstSeen   map[string]time.Time
 	firstSeenMu sync.RWMutex
 
-	// paused is the Force Stop emergency brake. When set, the worker skips every
-	// cleanup tick and the health-repair re-trigger also early-returns (see
-	// Service.IsArrsPaused). It is in-memory only and clears on restart.
-	paused atomic.Bool
-
 	// breaker counts how many times AltMount has acted on a given target (an
 	// episode/movie/album/book that keeps failing import), keyed by a stable
 	// identity that survives re-grabs. The tracker is shared with the scanner so
@@ -68,17 +62,6 @@ func NewWorker(configGetter config.ConfigGetter, instances *instances.Manager, c
 		firstSeen:    make(map[string]time.Time),
 		breaker:      breaker,
 	}
-}
-
-// SetPaused toggles the Force Stop brake. When paused, the worker stops issuing
-// any *arr requests from its cleanup tick.
-func (w *Worker) SetPaused(paused bool) {
-	w.paused.Store(paused)
-}
-
-// IsPaused reports whether the Force Stop brake is engaged.
-func (w *Worker) IsPaused() bool {
-	return w.paused.Load()
 }
 
 // bumpBreaker records one more cleanup action against a target and returns the
@@ -180,11 +163,6 @@ func (w *Worker) safeCleanup() {
 		}
 	}()
 	if !IsQueueCleanupEnabled(w.configGetter()) {
-		return
-	}
-	// Force Stop brake: skip the whole tick so no *arr requests are issued.
-	if w.IsPaused() {
-		slog.DebugContext(w.workerCtx, "Queue cleanup paused (Force Stop active), skipping tick")
 		return
 	}
 	// One unified pass per tick covers all six *arr types: ghost/empty-folder removal,

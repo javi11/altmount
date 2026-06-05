@@ -350,9 +350,6 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/arrs/webhook/register", s.handleRegisterArrsWebhooks)
 	api.Post("/arrs/download-client/register", s.handleRegisterArrsDownloadClients)
 	api.Post("/arrs/download-client/test", s.handleTestArrsDownloadClients)
-	api.Get("/arrs/pause", s.handleGetArrsPause)
-	api.Post("/arrs/pause", s.handleSetArrsPause)
-	api.Delete("/arrs/pause", s.handleResumeArrs)
 
 	// Direct authentication endpoints — rate-limited to prevent brute-force attacks
 	authLimiter := limiter.New(limiter.Config{

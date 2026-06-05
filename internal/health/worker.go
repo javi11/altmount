@@ -28,9 +28,6 @@ import (
 type ARRsRepairService interface {
 	TriggerFileRescan(ctx context.Context, pathForRescan string, relativePath string, metadataStr *string) error
 	DiscoverFileMetadata(ctx context.Context, filePath, relativePath, nzbName, libraryPath string) (*model.WebhookMetadata, error)
-	// IsArrsPaused reports whether the Force Stop brake is engaged. When true the
-	// worker must not issue any *arr request (repair re-triggers are deferred).
-	IsArrsPaused() bool
 }
 
 // WorkerStatus represents the current status of the health worker
@@ -895,7 +892,6 @@ const (
 	repairOutcomeCorrupted                        // ARR failed with a generic error; mark file corrupted
 	repairOutcomeDeleted                          // Health record and/or metadata were deleted (zombie)
 	repairOutcomeRegenerated                      // Metadata was successfully regenerated from NZB
-	repairOutcomePaused                           // Force Stop active; leave the record untouched and retry later
 )
 
 // applyRepairOutcome maps a repairOutcome to the corresponding fields on the HealthStatusUpdate.
@@ -903,11 +899,6 @@ func applyRepairOutcome(update *database.HealthStatusUpdate, outcome repairOutco
 	switch outcome {
 	case repairOutcomeTriggered:
 		update.Type = database.UpdateTypeRepairRetry
-	case repairOutcomePaused:
-		// Force Stop is active: leave the record exactly as it was so it is
-		// re-evaluated on a later cycle once the brake is released. No retry is
-		// consumed and no status change is written.
-		update.Skip = true
 	case repairOutcomeDeleted:
 		update.Skip = true
 	case repairOutcomeRegenerated:
@@ -971,13 +962,6 @@ func (hw *HealthWorker) cleanupZombieRecord(ctx context.Context, item *database.
 // Callers must apply the returned outcome to the HealthStatusUpdate before the bulk DB write.
 func (hw *HealthWorker) triggerFileRepair(ctx context.Context, item *database.FileHealth, errorMsg *string, errorDetails *string) (repairOutcome, error) {
 	filePath := item.FilePath
-
-	// Force Stop brake: don't issue any *arr request while paused. Leave the record
-	// untouched so it is retried on a later cycle once the brake is released.
-	if hw.arrsService.IsArrsPaused() {
-		slog.InfoContext(ctx, "Force Stop active, deferring ARR repair trigger", "file_path", filePath)
-		return repairOutcomePaused, nil
-	}
 
 	// Check if file metadata still exists. If not, the file is gone (likely upgraded/deleted by Sonarr already)
 	// and this health record is a zombie.
@@ -1073,12 +1057,6 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, item *database.Fi
 // Callers must apply the returned outcome to the HealthStatusUpdate before the bulk DB write.
 func (hw *HealthWorker) retriggerFileRepair(ctx context.Context, item *database.FileHealth) (repairOutcome, error) {
 	filePath := item.FilePath
-
-	// Force Stop brake: defer the re-trigger while paused (see triggerFileRepair).
-	if hw.arrsService.IsArrsPaused() {
-		slog.InfoContext(ctx, "Force Stop active, deferring ARR repair re-trigger", "file_path", filePath)
-		return repairOutcomePaused, nil
-	}
 
 	pathForRescan := hw.resolvePathForRescan(item)
 	metadataStr := hw.ensureMetadata(ctx, item)

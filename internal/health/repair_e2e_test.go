@@ -74,10 +74,6 @@ func (m *mockARRsService) DiscoverFileMetadata(_ context.Context, _, _, _, _ str
 	return nil, nil
 }
 
-func (m *mockARRsService) IsArrsPaused() bool {
-	return false
-}
-
 // mockImportService implements importer.ImportService for testing.
 type mockImportService struct {
 	importer.ImportService

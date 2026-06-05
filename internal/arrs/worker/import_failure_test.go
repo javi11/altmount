@@ -167,18 +167,6 @@ func TestHandleImportFailure_Gates(t *testing.T) {
 		}
 	})
 
-	t.Run("force stop: no arr requests", func(t *testing.T) {
-		fake := &fakeSonarrQueue{}
-		srv := httptest.NewServer(fake.handler())
-		defer srv.Close()
-		w := newImportFailureTestWorker(srv.URL, 1)
-		w.SetPaused(true)
-		w.HandleImportFailure(context.Background(), "SABnzbd_nzo_abc", "tv")
-		if fake.queueGets != 0 {
-			t.Fatalf("Force Stop must block the breaker, got %d queue fetches", fake.queueGets)
-		}
-	})
-
 	t.Run("unknown download id: counted nothing, deleted nothing", func(t *testing.T) {
 		fake := &fakeSonarrQueue{records: []map[string]any{
 			queueRecord(101, 42, "SABnzbd_nzo_other", "AltMount"),
