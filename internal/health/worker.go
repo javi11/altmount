@@ -456,25 +456,7 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 	switch fh.Status {
 	case database.HealthStatusRepairTriggered:
 		if fh.RepairRetryCount >= hw.configGetter().GetMaxRepairRetries() {
-			update.Type = database.UpdateTypeCorrupted
-			update.Status = database.HealthStatusCorrupted
-			sideEffect = func() error {
-				slog.ErrorContext(ctx, "File permanently marked as corrupted after repair retries exhausted", "file_path", fh.FilePath)
-
-				// Ensure metadata is hidden in the safety folder
-				hw.moveMetadataToSafetyFolder(ctx, fh)
-
-				// Log failure against the indexer if known
-				if fh.Indexer != nil && *fh.Indexer != "" && *fh.Indexer != database.IndexerUnknown {
-					errMsg := "Permanently corrupted"
-					if errorMsg != nil {
-						errMsg = *errorMsg
-					}
-					_ = hw.healthRepo.LogIndexerImport(ctx, *fh.Indexer, "failed", fmt.Sprintf("Health check permanently corrupted: %s", errMsg), "")
-				}
-
-				return nil
-			}
+			sideEffect = hw.markCorruptedRepairExhausted(ctx, fh, update, errorMsg)
 		} else {
 			// Calculate repair back-off
 			interval := hw.configGetter().GetRepairInterval()
@@ -508,6 +490,15 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 	default:
 		// Regular health check phase
 		if fh.RetryCount >= hw.configGetter().GetMaxRetries()-1 {
+			// Repair budget exhausted: this title was already re-downloaded
+			// max_repair_retries times (the counter survives webhook relinks and
+			// re-import upserts by design). Triggering yet another rescan would
+			// re-download the same broken release forever, so finalize as corrupted.
+			if fh.RepairRetryCount >= hw.configGetter().GetMaxRepairRetries() {
+				sideEffect = hw.markCorruptedRepairExhausted(ctx, fh, update, errorMsg)
+				return update, sideEffect
+			}
+
 			update.Type = database.UpdateTypeRepairTrigger
 			update.Status = database.HealthStatusRepairTriggered
 
@@ -551,6 +542,32 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 	return update, sideEffect
 }
 
+// markCorruptedRepairExhausted fills update with the terminal corrupted state for a file
+// whose repair budget is spent after a failed health check, and returns the side effect
+// (hide metadata in the safety folder, log the failure against the indexer).
+func (hw *HealthWorker) markCorruptedRepairExhausted(ctx context.Context, fh *database.FileHealth, update *database.HealthStatusUpdate, errorMsg *string) func() error {
+	update.Type = database.UpdateTypeCorrupted
+	update.Status = database.HealthStatusCorrupted
+
+	return func() error {
+		slog.ErrorContext(ctx, "File permanently marked as corrupted after repair retries exhausted", "file_path", fh.FilePath)
+
+		// Ensure metadata is hidden in the safety folder
+		hw.moveMetadataToSafetyFolder(ctx, fh)
+
+		// Log failure against the indexer if known
+		if fh.Indexer != nil && *fh.Indexer != "" && *fh.Indexer != database.IndexerUnknown {
+			errMsg := "Permanently corrupted"
+			if errorMsg != nil {
+				errMsg = *errorMsg
+			}
+			_ = hw.healthRepo.LogIndexerImport(ctx, *fh.Indexer, "failed", fmt.Sprintf("Health check permanently corrupted: %s", errMsg), "")
+		}
+
+		return nil
+	}
+}
+
 // prepareRepairNotificationUpdate builds the update and side effect for a file already in
 // repair_triggered state. It re-triggers ARR directly without calling CheckFile, since the
 // metadata has already been moved to the corrupted folder.
@@ -560,7 +577,10 @@ func (hw *HealthWorker) prepareRepairNotificationUpdate(ctx context.Context, fh 
 	}
 
 	if fh.RepairRetryCount >= hw.configGetter().GetMaxRepairRetries() {
-		// Retries exhausted — give up and mark corrupted.
+		// Retries exhausted — give up and mark corrupted. Deliberately no metadata
+		// move here: unlike the failed-check path, this sweep has not re-validated
+		// the file's content, and a re-import may have just landed a good copy. The
+		// user can recheck from the Health page; a failed check will then hide it.
 		update.Type = database.UpdateTypeCorrupted
 		update.Status = database.HealthStatusCorrupted
 		sideEffect := func() error {
