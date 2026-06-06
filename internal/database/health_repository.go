@@ -3,10 +3,13 @@ package database
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
 	"time"
+
+	"github.com/javi11/altmount/internal/arrs/model"
 )
 
 // HealthRepository handles file health database operations
@@ -1528,13 +1531,14 @@ func (r *HealthRepository) RelinkFileByFilename(ctx context.Context, filename, f
 		UPDATE file_health
 		SET file_path = ?,
 		    library_path = ?,
-		    status = CASE WHEN status IN ('repair_triggered', 'corrupted') THEN status ELSE 'pending' END,
-		    retry_count = CASE WHEN status IN ('repair_triggered', 'corrupted') THEN retry_count ELSE 0 END,
-		    last_error = CASE WHEN status IN ('repair_triggered', 'corrupted') THEN last_error ELSE NULL END,
-		    error_details = CASE WHEN status IN ('repair_triggered', 'corrupted') THEN error_details ELSE NULL END,
+		    status = 'pending',
+		    retry_count = 0,
+		    repair_retry_count = 0,
+		    last_error = NULL,
+		    error_details = NULL,
 		    metadata = COALESCE(?, metadata),
 		    updated_at = datetime('now'),
-		    scheduled_check_at = CASE WHEN status IN ('repair_triggered', 'corrupted') THEN scheduled_check_at ELSE datetime('now') END
+		    scheduled_check_at = datetime('now')
 		WHERE (file_path LIKE ? OR file_path = ? OR library_path LIKE ? OR library_path = ?)
 	`
 
@@ -1704,3 +1708,127 @@ func (r *HealthRepository) UpdateFileMetadata(ctx context.Context, id int64, met
 func (r *HealthRepository) LogIndexerImport(ctx context.Context, indexer string, status string, errMsg string, downloadID string) error {
 	return logIndexerImport(ctx, r.db, indexer, status, errMsg, downloadID)
 }
+
+// RelinkFileByMetadata matches repair_triggered or corrupted records by metadata and updates them to pending.
+func (r *HealthRepository) RelinkFileByMetadata(ctx context.Context, webMeta *model.WebhookMetadata, filePath, libraryPath string, metadataStr *string) (bool, error) {
+	filePath = strings.TrimPrefix(filePath, "/")
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, file_path, library_path, status, metadata
+		FROM file_health
+		WHERE status IN ('pending', 'repair_triggered', 'corrupted')
+		  AND metadata IS NOT NULL
+	`)
+	if err != nil {
+		return false, fmt.Errorf("failed to query non-healthy records: %w", err)
+	}
+	defer rows.Close()
+
+	var matchedIDs []int64
+	for rows.Next() {
+		var id int64
+		var dbFP, dbLP, dbStatus string
+		var dbMetaStr string
+		if err := rows.Scan(&id, &dbFP, &dbLP, &dbStatus, &dbMetaStr); err != nil {
+			continue
+		}
+
+		var dbMeta model.WebhookMetadata
+		if err := json.Unmarshal([]byte(dbMetaStr), &dbMeta); err != nil {
+			continue
+		}
+
+		if r.matchMetadata(&dbMeta, webMeta) {
+			matchedIDs = append(matchedIDs, id)
+		}
+	}
+
+	if len(matchedIDs) == 0 {
+		return false, nil
+	}
+
+	// Update each matched record
+	for _, id := range matchedIDs {
+		query := `
+			UPDATE file_health
+			SET file_path = ?,
+			    library_path = ?,
+			    status = 'pending',
+			    retry_count = 0,
+			    repair_retry_count = 0,
+			    last_error = NULL,
+			    error_details = NULL,
+			    metadata = COALESCE(?, metadata),
+			    updated_at = datetime('now'),
+			    scheduled_check_at = datetime('now')
+			WHERE id = ?
+		`
+		_, err := r.db.ExecContext(ctx, query, filePath, libraryPath, metadataStr, id)
+		if err != nil {
+			slog.ErrorContext(ctx, "Failed to update matched health record", "id", id, "error", err)
+		}
+	}
+	return true, nil
+}
+
+// matchMetadata matches two WebhookMetadata objects by their IDs.
+func (r *HealthRepository) matchMetadata(dbMeta, webMeta *model.WebhookMetadata) bool {
+	if dbMeta == nil || webMeta == nil {
+		return false
+	}
+
+	// 1. Check if both are Movie/Radarr
+	if dbMeta.Movie != nil && webMeta.Movie != nil {
+		if dbMeta.Movie.Id > 0 && webMeta.Movie.Id > 0 && dbMeta.Movie.Id == webMeta.Movie.Id {
+			return true
+		}
+		if dbMeta.Movie.TmdbId > 0 && webMeta.Movie.TmdbId > 0 && dbMeta.Movie.TmdbId == webMeta.Movie.TmdbId {
+			return true
+		}
+	}
+
+	// 2. Check if both are Series/Sonarr
+	if dbMeta.Series != nil && webMeta.Series != nil {
+		seriesMatch := false
+		if dbMeta.Series.Id > 0 && webMeta.Series.Id > 0 && dbMeta.Series.Id == webMeta.Series.Id {
+			seriesMatch = true
+		} else if dbMeta.Series.TvdbId > 0 && webMeta.Series.TvdbId > 0 && dbMeta.Series.TvdbId == webMeta.Series.TvdbId {
+			seriesMatch = true
+		}
+
+		if seriesMatch {
+			// Check if EpisodeFile matches
+			if dbMeta.EpisodeFile != nil && webMeta.EpisodeFile != nil {
+				if dbMeta.EpisodeFile.Id > 0 && webMeta.EpisodeFile.Id > 0 && dbMeta.EpisodeFile.Id == webMeta.EpisodeFile.Id {
+					return true
+				}
+			}
+			// Check if any Episode ID matches
+			if len(dbMeta.Episodes) > 0 && len(webMeta.Episodes) > 0 {
+				for _, dbEp := range dbMeta.Episodes {
+					for _, webEp := range webMeta.Episodes {
+						if dbEp.Id > 0 && webEp.Id > 0 && dbEp.Id == webEp.Id {
+							return true
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 3. Check if both are Album/Lidarr
+	if dbMeta.Album != nil && webMeta.Album != nil {
+		if dbMeta.Album.Id > 0 && webMeta.Album.Id > 0 && dbMeta.Album.Id == webMeta.Album.Id {
+			return true
+		}
+	}
+
+	// 4. Check if both are Book/Readarr
+	if dbMeta.Book != nil && webMeta.Book != nil {
+		if dbMeta.Book.Id > 0 && webMeta.Book.Id > 0 && dbMeta.Book.Id == webMeta.Book.Id {
+			return true
+		}
+	}
+
+	return false
+}
+

@@ -413,8 +413,20 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 
 			// Discovery: If the file is healthy but missing rich metadata (IDs), attempt to discover it now.
 			// This gradually backfills your library as health checks occur.
+			needsDiscovery := false
 			if fh.Metadata == nil || *fh.Metadata == "" {
-				slog.DebugContext(ctx, "Missing metadata for healthy file, attempting discovery", "file_path", fh.FilePath)
+				needsDiscovery = true
+			} else {
+				var dbMeta model.WebhookMetadata
+				if err := json.Unmarshal([]byte(*fh.Metadata), &dbMeta); err == nil {
+					if dbMeta.Series != nil && len(dbMeta.Episodes) == 0 {
+						needsDiscovery = true
+					}
+				}
+			}
+
+			if needsDiscovery {
+				slog.DebugContext(ctx, "Missing metadata or episode IDs for healthy file, attempting discovery", "file_path", fh.FilePath)
 				relativePath := strings.TrimPrefix(fh.FilePath, "complete/")
 				nzbName := ""
 				if fh.SourceNzbPath != nil {
@@ -1093,7 +1105,19 @@ func (hw *HealthWorker) retriggerFileRepair(ctx context.Context, item *database.
 }
 
 func (hw *HealthWorker) ensureMetadata(ctx context.Context, item *database.FileHealth) *string {
-	if item.Metadata != nil && *item.Metadata != "" {
+	needsDiscovery := false
+	if item.Metadata == nil || *item.Metadata == "" {
+		needsDiscovery = true
+	} else {
+		var dbMeta model.WebhookMetadata
+		if err := json.Unmarshal([]byte(*item.Metadata), &dbMeta); err == nil {
+			if dbMeta.Series != nil && len(dbMeta.Episodes) == 0 {
+				needsDiscovery = true
+			}
+		}
+	}
+
+	if !needsDiscovery {
 		return item.Metadata
 	}
 

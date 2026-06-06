@@ -9,6 +9,7 @@ import (
 
 	"github.com/javi11/altmount/internal/arrs/model"
 	"golift.io/starr"
+	"golift.io/starr/sonarr"
 )
 
 var (
@@ -153,6 +154,20 @@ func (m *Manager) discoverSonarrStrict(ctx context.Context, filePath, cleanNzbNa
 				if (libraryPath != "" && ef.Path == libraryPath) ||
 					(cleanNzbName != "" && strings.EqualFold(ef.SceneName, cleanNzbName)) ||
 					(ef.Path == filePath) {
+					var episodes []model.EpisodeMetadata
+					eps, err := client.GetSeriesEpisodesContext(ctx, &sonarr.GetEpisode{
+						SeriesID: show.ID,
+					})
+					if err == nil {
+						for _, ep := range eps {
+							if ep.EpisodeFileID == ef.ID {
+								episodes = append(episodes, model.EpisodeMetadata{
+									Id: ep.ID,
+								})
+							}
+						}
+					}
+
 					metadata := &model.WebhookMetadata{
 						EventType:    "StrictDiscovery",
 						InstanceName: instanceName,
@@ -164,6 +179,7 @@ func (m *Manager) discoverSonarrStrict(ctx context.Context, filePath, cleanNzbNa
 							Id:        ef.ID,
 							SceneName: ef.SceneName,
 						},
+						Episodes: episodes,
 					}
 					return metadata, nil
 				}

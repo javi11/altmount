@@ -88,6 +88,9 @@ func (s *Server) handleTestProviderSpeed(c *fiber.Ctx) error {
 		}
 	}
 	speed := wireBps / 1024 / 1024 // bytes/sec → MB/s
+	if speed < 0 {
+		speed = 0
+	}
 
 	// Update provider config with speed test result
 	now := time.Now()

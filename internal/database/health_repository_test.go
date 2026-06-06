@@ -3,9 +3,11 @@ package database
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"testing"
 	"time"
 
+	"github.com/javi11/altmount/internal/arrs/model"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -319,3 +321,62 @@ func TestAddFileToHealthCheckWithMetadata_StoresLibraryPath(t *testing.T) {
 	assert.Equal(t, libraryPath, *h.LibraryPath)
 	assert.Equal(t, filePath, h.FilePath)
 }
+
+func TestRelinkFileByMetadata(t *testing.T) {
+	repo := setupTestDB(t)
+	ctx := context.Background()
+
+	// 1. Set up a record with status repair_triggered and metadata JSON
+	oldPath := "complete/tv/show.S01E01.mkv"
+	libraryPath := "/mnt/library/tv/show.S01E01.mkv"
+	dbMeta := `{"eventType":"Download","instanceName":"Sonarr","series":{"id":100,"tvdbId":200},"episodeFile":{"id":300},"episodes":[{"id":400}]}`
+
+	err := repo.AddFileToHealthCheckWithMetadata(ctx, oldPath, &libraryPath, 3, 3, nil, HealthPriorityNormal, nil, &dbMeta, nil)
+	require.NoError(t, err)
+
+	// Update its status to repair_triggered
+	err = repo.UpdateFileHealth(ctx, oldPath, HealthStatusRepairTriggered, nil, nil, nil, false)
+	require.NoError(t, err)
+
+	// Verify it's repair_triggered
+	hOld, err := repo.GetFileHealth(ctx, oldPath)
+	require.NoError(t, err)
+	assert.Equal(t, HealthStatusRepairTriggered, hOld.Status)
+
+	// 2. Perform Relink by Metadata
+	newPath := "tv/show/Season 01/show.S01E01.mkv"
+	newLibPath := "/mnt/library/tv/show/Season 01/show.S01E01.mkv"
+	webMeta := model.WebhookMetadata{
+		EventType:    "Download",
+		InstanceName: "Sonarr",
+		Series: &model.SeriesMetadata{
+			Id:     100,
+			TvdbId: 200,
+		},
+		Episodes: []model.EpisodeMetadata{
+			{Id: 400},
+		},
+	}
+	webMetaBytes, err := json.Marshal(webMeta)
+	require.NoError(t, err)
+	webMetaStr := string(webMetaBytes)
+
+	relinked, err := repo.RelinkFileByMetadata(ctx, &webMeta, newPath, newLibPath, &webMetaStr)
+	require.NoError(t, err)
+	assert.True(t, relinked, "Should successfully relink by metadata IDs")
+
+	// 3. Verify the old record got updated to the new paths and reset to pending
+	hNew, err := repo.GetFileHealth(ctx, newPath)
+	require.NoError(t, err)
+	require.NotNil(t, hNew)
+	assert.Equal(t, HealthStatusPending, hNew.Status)
+	assert.Equal(t, newLibPath, *hNew.LibraryPath)
+	assert.Equal(t, 0, hNew.RetryCount)
+	assert.Equal(t, 0, hNew.RepairRetryCount)
+
+	// Verify old path is gone
+	oldH, err := repo.GetFileHealth(ctx, oldPath)
+	require.NoError(t, err)
+	assert.Nil(t, oldH)
+}
+
