@@ -1,11 +1,166 @@
 package importer
 
 import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/importer/filesystem"
+	"github.com/javi11/altmount/internal/importer/multifile"
 	"github.com/javi11/altmount/internal/importer/parser"
+	"github.com/javi11/altmount/internal/metadata"
+	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/testsupport/fakepool"
+	"github.com/javi11/nntppool/v4"
 )
+
+type processorTestPoolManager struct {
+	client *fakepool.Client
+}
+
+func (m processorTestPoolManager) GetPool() (pool.NntpClient, error) { return m.client, nil }
+func (m processorTestPoolManager) SetProviders([]nntppool.Provider) error {
+	return nil
+}
+func (m processorTestPoolManager) ClearPool() error { return nil }
+func (m processorTestPoolManager) HasPool() bool    { return m.client != nil }
+func (m processorTestPoolManager) GetMetrics() (pool.MetricsSnapshot, error) {
+	return pool.MetricsSnapshot{}, nil
+}
+func (m processorTestPoolManager) ResetMetrics(context.Context, bool, bool) error { return nil }
+func (m processorTestPoolManager) ResetProviderErrors(context.Context) error      { return nil }
+func (m processorTestPoolManager) IncArticlesDownloaded()                         {}
+func (m processorTestPoolManager) UpdateDownloadProgress(string, int64)           {}
+func (m processorTestPoolManager) IncArticlesPosted()                             {}
+func (m processorTestPoolManager) AddProvider(nntppool.Provider) error            { return nil }
+func (m processorTestPoolManager) RemoveProvider(string) error                    { return nil }
+func (m processorTestPoolManager) ResetProviderQuota(context.Context, string) error {
+	return nil
+}
+func (m processorTestPoolManager) SetProviderIDs(map[string]string) {}
+func (m processorTestPoolManager) AcquireImportSlot(context.Context) (func(), error) {
+	return func() {}, nil
+}
+func (m processorTestPoolManager) SetAdmissionCaps(int, int)                 {}
+func (m processorTestPoolManager) SetStreamSource(pool.StreamActivitySource) {}
+func (m processorTestPoolManager) NotifyStreamChange()                       {}
+
+func TestApplyEarlyFastFailSkipsOnlyMissingMultiFileEpisode(t *testing.T) {
+	client := fakepool.New()
+	client.SetBehavior("missing-segment", fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
+	proc := &Processor{
+		poolManager:       processorTestPoolManager{client: client},
+		validationTimeout: 100 * time.Millisecond,
+	}
+	parsed := &parser.ParsedNzb{
+		Type: parser.NzbTypeMultiFile,
+		Files: []parser.ParsedFile{
+			processorTestParsedFile("Show.S01E01.mkv", "healthy-segment"),
+			processorTestParsedFile("Show.S01E02.mkv", "missing-segment"),
+			processorTestParsedFile("Show.S01E01.par2", "par2-segment"),
+		},
+	}
+	cfg := config.DefaultConfig()
+	cfg.Import.FastFailEnabled = true
+	cfg.Import.SegmentSamplePercentage = 100
+
+	err := proc.applyEarlyFastFail(context.Background(), parsed, cfg, 1)
+	if err != nil {
+		t.Fatalf("applyEarlyFastFail returned error: %v", err)
+	}
+
+	if len(parsed.Files) != 2 {
+		t.Fatalf("parsed.Files len = %d, want healthy media + par2", len(parsed.Files))
+	}
+	if parsed.Files[0].Filename != "Show.S01E01.mkv" {
+		t.Fatalf("first remaining file = %q, want healthy episode", parsed.Files[0].Filename)
+	}
+	if parsed.Files[1].Filename != "Show.S01E01.par2" {
+		t.Fatalf("second remaining file = %q, want par2 retained", parsed.Files[1].Filename)
+	}
+}
+
+func TestApplyEarlyFastFailFailsWhenAllMultiFileEpisodesMissing(t *testing.T) {
+	client := fakepool.New()
+	client.SetDefaultBehavior(fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
+	proc := &Processor{
+		poolManager:       processorTestPoolManager{client: client},
+		validationTimeout: 100 * time.Millisecond,
+	}
+	parsed := &parser.ParsedNzb{
+		Type: parser.NzbTypeMultiFile,
+		Files: []parser.ParsedFile{
+			processorTestParsedFile("Show.S01E01.mkv", "missing-1"),
+			processorTestParsedFile("Show.S01E02.mkv", "missing-2"),
+			processorTestParsedFile("Show.S01E01.par2", "par2-segment"),
+		},
+	}
+	cfg := config.DefaultConfig()
+	cfg.Import.FastFailEnabled = true
+	cfg.Import.SegmentSamplePercentage = 100
+
+	err := proc.applyEarlyFastFail(context.Background(), parsed, cfg, 1)
+	if !errors.Is(err, multifile.ErrNoFilesProcessed) {
+		t.Fatalf("applyEarlyFastFail error = %v, want ErrNoFilesProcessed", err)
+	}
+}
+
+func TestProcessMultiFilePreservesReleaseFolderWhenOnlyOneFileRemains(t *testing.T) {
+	client := fakepool.New()
+	metaRoot := t.TempDir()
+	cfg := config.DefaultConfig()
+	proc := &Processor{
+		metadataService:   metadata.NewMetadataService(metaRoot),
+		poolManager:       processorTestPoolManager{client: client},
+		configGetter:      func() *config.Config { return cfg },
+		validationTimeout: 100 * time.Millisecond,
+	}
+
+	result, writtenPaths, err := proc.processMultiFile(
+		context.Background(),
+		"tv/Show/Season 01",
+		[]parser.ParsedFile{processorTestParsedFile("Show.S01E01.mkv", "healthy-segment")},
+		nil,
+		"Show.S01.nzb",
+		1,
+		1,
+		[]string{".mkv"},
+		100*time.Millisecond,
+		nil,
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("processMultiFile returned error: %v", err)
+	}
+
+	if result != "tv/Show/Season 01/Show.S01" {
+		t.Fatalf("result = %q, want release folder", result)
+	}
+	wantPath := "tv/Show/Season 01/Show.S01/Show.S01E01.mkv"
+	if len(writtenPaths) != 1 || writtenPaths[0] != wantPath {
+		t.Fatalf("writtenPaths = %v, want %q", writtenPaths, wantPath)
+	}
+	if _, err := os.Stat(filepath.Join(metaRoot, wantPath+".meta")); err != nil {
+		t.Fatalf("metadata for surviving episode not written in release folder: %v", err)
+	}
+}
+
+func processorTestParsedFile(filename, segmentID string) parser.ParsedFile {
+	return parser.ParsedFile{
+		Filename: filename,
+		Size:     100,
+		Segments: []*metapb.SegmentData{
+			{Id: segmentID, StartOffset: 0, EndOffset: 99},
+		},
+		ReleaseDate: time.Unix(1, 0),
+	}
+}
 
 func TestApplyNzbRename(t *testing.T) {
 	tests := []struct {

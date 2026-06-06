@@ -22,6 +22,7 @@ import (
 	"github.com/javi11/altmount/internal/importer/parser"
 	"github.com/javi11/altmount/internal/importer/singlefile"
 	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
+	"github.com/javi11/altmount/internal/importer/validation"
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/nzbfile"
@@ -166,6 +167,69 @@ func (proc *Processor) checkCancellation(ctx context.Context) error {
 	}
 }
 
+func (proc *Processor) fastFailImportSegments(ctx context.Context, files []parser.ParsedFile, maxConnections int, enabled bool, segmentSamplePercentage int) error {
+	if !enabled {
+		return nil
+	}
+
+	fastFailFiles := make([]validation.FastFailFile, 0, len(files))
+	for _, file := range files {
+		fastFailFiles = append(fastFailFiles, validation.FastFailFile{
+			Filename: file.Filename,
+			Segments: file.Segments,
+		})
+	}
+
+	return validation.FastFailSegmentCheck(
+		ctx,
+		fastFailFiles,
+		proc.poolManager,
+		enabled,
+		segmentSamplePercentage,
+		maxConnections,
+		proc.validationTimeout,
+	)
+}
+
+func (proc *Processor) applyEarlyFastFail(ctx context.Context, parsed *parser.ParsedNzb, cfg *config.Config, maxConnections int) error {
+	if parsed == nil || parsed.Type == parser.NzbTypeStrm || !cfg.Import.FastFailEnabled {
+		return nil
+	}
+
+	if parsed.Type != parser.NzbTypeMultiFile {
+		return proc.fastFailImportSegments(ctx, parsed.Files, maxConnections, true, cfg.Import.SegmentSamplePercentage)
+	}
+
+	keptFiles := make([]parser.ParsedFile, 0, len(parsed.Files))
+	keptRegularCount := 0
+	for _, file := range parsed.Files {
+		if file.IsPar2Archive || filesystem.IsPar2File(file.Filename) {
+			keptFiles = append(keptFiles, file)
+			continue
+		}
+
+		err := proc.fastFailImportSegments(ctx, []parser.ParsedFile{file}, maxConnections, true, cfg.Import.SegmentSamplePercentage)
+		if err != nil {
+			if proc.log != nil {
+				proc.log.WarnContext(ctx, "Skipping file due to early fast-fail segment check error",
+					"error", err,
+					"file", file.Filename)
+			}
+			continue
+		}
+
+		keptFiles = append(keptFiles, file)
+		keptRegularCount++
+	}
+
+	if keptRegularCount == 0 {
+		return multifile.ErrNoFilesProcessed
+	}
+
+	parsed.Files = keptFiles
+	return nil
+}
+
 // ProcessNzbFile processes an NZB or STRM file maintaining the folder structure relative to relative path.
 // Returns (resultPath, writtenMetadataPaths, error). writtenMetadataPaths contains all virtual paths of
 // metadata files written to disk; it is populated even on partial failure so callers can clean up.
@@ -238,6 +302,22 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 		return "", nil, err
 	}
 
+	// For NZB-based imports, ensure at least one NNTP provider is configured
+	// and run fast-fail before path calculation, directory creation, archive
+	// analysis, or metadata writes. STRM files are served via HTTP and don't
+	// require an NNTP pool.
+	if parsed.Type != parser.NzbTypeStrm {
+		if !proc.poolManager.HasPool() {
+			proc.log.WarnContext(ctx, "No NNTP providers configured, deferring item processing",
+				"file_path", filePath, "queue_id", queueID)
+			return "", nil, fmt.Errorf("no NNTP providers configured - item will be retried when providers are added")
+		}
+
+		if err := proc.applyEarlyFastFail(ctx, parsed, cfg, maxConnections); err != nil {
+			return "", nil, NewNonRetryableError("fast-fail segment check failed", err)
+		}
+	}
+
 	// Step 2: Calculate virtual directory
 	virtualDir := ""
 	if virtualDirOverride != nil {
@@ -260,16 +340,6 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 	// Check for cancellation before main processing
 	if err := proc.checkCancellation(ctx); err != nil {
 		return "", nil, err
-	}
-
-	// Step 4: For NZB-based imports, ensure at least one NNTP provider is configured.
-	// STRM files are served via HTTP and don't require an NNTP pool.
-	if parsed.Type != parser.NzbTypeStrm {
-		if !proc.poolManager.HasPool() {
-			proc.log.WarnContext(ctx, "No NNTP providers configured, deferring item processing",
-				"file_path", filePath, "queue_id", queueID)
-			return "", nil, fmt.Errorf("no NNTP providers configured - item will be retried when providers are added")
-		}
 	}
 
 	// Step 5: Process based on file type
@@ -526,42 +596,29 @@ func (proc *Processor) processMultiFile(
 	// EXCEPTION: If the virtual directory is a category root (e.g. "movies"), we MUST create
 	// the NZB folder to ensure Radarr/Sonarr can find the job folder correctly.
 	importCfg := proc.configGetter().Import
-	renameToNzbName := true
-	if importCfg.RenameToNzbName != nil {
-		renameToNzbName = *importCfg.RenameToNzbName
-	}
 	samplePercentage := importCfg.SegmentSamplePercentage
 	filterSampleFiles := true
 	if importCfg.FilterSampleFiles != nil {
 		filterSampleFiles = *importCfg.FilterSampleFiles
 	}
 
-	singleLike := len(regularFiles) == 1 && !proc.isCategoryFolder(virtualDir, category)
 	targetBaseDir := virtualDir
 	nzbName := proc.getCleanNzbName(nzbPath, queueID)
 
-	if singleLike {
-		// Rename the leaf to the release name (prevents ext duplication) but keep NZB-provided subfolders.
-		regularFiles = applyNzbRename(renameToNzbName, nzbName, regularFiles)
-
-		// Avoid nesting like /Season 02/<release>/<release>.mkv; drop the NZB-named folder here.
-		if err := filesystem.EnsureDirectoryExists(targetBaseDir, proc.metadataService); err != nil {
-			return "", nil, err
-		}
-	} else {
-		// Create NZB folder for true multi-file imports
-		nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, nzbName, proc.metadataService)
-		if err != nil {
-			return "", nil, err
-		}
-
-		// Create directories for files
-		if err := filesystem.CreateDirectoriesForFiles(nzbFolder, regularFiles, proc.metadataService); err != nil {
-			return "", nil, err
-		}
-
-		targetBaseDir = nzbFolder
+	// Create NZB folder for multi-file imports, even if early fast-fail filtering
+	// leaves only one regular file. The release still originated as a multi-file
+	// NZB and should keep its job-folder shape.
+	nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, nzbName, proc.metadataService)
+	if err != nil {
+		return "", nil, err
 	}
+
+	// Create directories for files
+	if err := filesystem.CreateDirectoriesForFiles(nzbFolder, regularFiles, proc.metadataService); err != nil {
+		return "", nil, err
+	}
+
+	targetBaseDir = nzbFolder
 
 	// Create a granular progress tracker covering the 30–100% range.
 	var fileTracker *progress.Tracker

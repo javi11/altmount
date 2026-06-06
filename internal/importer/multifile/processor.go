@@ -2,6 +2,7 @@ package multifile
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -24,6 +25,8 @@ import (
 // maxConcurrentFileValidations limits parallel file validations to avoid
 // overwhelming the NNTP connection pool (each file uses up to maxValidationGoroutines connections).
 const maxConcurrentFileValidations = 4
+
+var ErrNoFilesProcessed = errors.New("no regular files were successfully processed (all files failed validation)")
 
 // ProcessRegularFiles processes multiple regular files.
 // Returns the virtual paths of all metadata files successfully written, plus any error.
@@ -113,7 +116,8 @@ func ProcessRegularFiles(
 				fileTracker,
 				timeout,
 			); err != nil {
-				return err
+				slog.WarnContext(ctx, "Skipping file due to segment validation error", "error", err, "file", filename)
+				return nil
 			}
 
 			fileMeta := metadataService.CreateFileMetadata(
@@ -154,6 +158,10 @@ func ProcessRegularFiles(
 
 	if err := pl.Wait(); err != nil {
 		return writtenPaths, err
+	}
+
+	if len(writtenPaths) == 0 {
+		return writtenPaths, ErrNoFilesProcessed
 	}
 
 	slog.InfoContext(ctx, "Successfully processed regular files",
