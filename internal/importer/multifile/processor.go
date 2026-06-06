@@ -45,7 +45,6 @@ func ProcessRegularFiles(
 	timeout time.Duration,
 	tracker *progress.Tracker,
 	filterSamples bool,
-	fastFailEnabled bool,
 ) ([]string, error) {
 	if len(files) == 0 {
 		return nil, nil
@@ -102,22 +101,6 @@ func ProcessRegularFiles(
 			virtualPath = filesystem.EnsureUniqueVirtualPath(virtualPath, metadataService)
 
 			if !utils.IsAllowedFile(filename, file.Size, allowedFileExtensions, filterSamples) {
-				return nil
-			}
-
-			if err := validation.FastFailSegmentCheck(
-				ctx,
-				[]validation.FastFailFile{{
-					Filename: filename,
-					Segments: file.Segments,
-				}},
-				poolManager,
-				fastFailEnabled,
-				segmentSamplePercentage,
-				maxValidationGoroutines,
-				timeout,
-			); err != nil {
-				slog.WarnContext(ctx, "Skipping file due to fast-fail segment check error", "error", err, "file", filename)
 				return nil
 			}
 

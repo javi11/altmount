@@ -73,7 +73,6 @@ func TestProcessRegularFilesSkipsFileWithMissingSegments(t *testing.T) {
 		100*time.Millisecond,
 		nil,
 		true,
-		true,
 	)
 	if err != nil {
 		t.Fatalf("ProcessRegularFiles returned error: %v", err)
@@ -116,7 +115,6 @@ func TestProcessRegularFilesFailsWhenAllFilesHaveMissingSegments(t *testing.T) {
 		100*time.Millisecond,
 		nil,
 		true,
-		false,
 	)
 	if err == nil {
 		t.Fatal("ProcessRegularFiles returned nil error, want all-files-failed error")
