@@ -282,7 +282,10 @@ func (r *HealthRepository) SetPriority(ctx context.Context, id int64, priority H
 	return nil
 }
 
-// GetFilesForRepairNotification returns files that need repair notification (repair_triggered status)
+// GetFilesForRepairNotification returns files that need repair notification (repair_triggered status).
+// Records whose repair_retry_count has reached max_repair_retries are returned too: the worker
+// finalizes them as corrupted (prepareRepairNotificationUpdate). Filtering them out here would
+// leave them permanently stuck in repair_triggered — no other query ever selects that status.
 func (r *HealthRepository) GetFilesForRepairNotification(ctx context.Context, limit int) ([]*FileHealth, error) {
 	query := `
 		SELECT id, file_path, status, last_checked, last_error, retry_count, max_retries,
@@ -291,7 +294,6 @@ func (r *HealthRepository) GetFilesForRepairNotification(ctx context.Context, li
 		, metadata
 		FROM file_health
 		WHERE status = 'repair_triggered'
-		  AND repair_retry_count < max_repair_retries
 		  AND (scheduled_check_at IS NULL OR scheduled_check_at <= datetime('now'))
 		ORDER BY last_checked ASC
 		LIMIT ?
@@ -597,8 +599,13 @@ func (r *HealthRepository) AddFileToHealthCheck(ctx context.Context, filePath st
 	return r.AddFileToHealthCheckWithMetadata(ctx, filePath, libraryPath, maxRetries, maxRepairRetries, sourceNzbPath, priority, nil, nil, nil)
 }
 
-// AddFileToHealthCheckWithMetadata adds a file to the health database for checking with metadata
+// AddFileToHealthCheckWithMetadata adds a file to the health database for checking with metadata.
+// On conflict (re-import over an existing record) the record is reset to pending for
+// re-validation, but repair_retry_count is intentionally preserved: it is the per-title
+// repair budget, so a re-download of a broken release cannot reset its own escalation
+// counter. A successful health check resets it to 0.
 func (r *HealthRepository) AddFileToHealthCheckWithMetadata(ctx context.Context, filePath string, libraryPath *string, maxRetries int, maxRepairRetries int, sourceNzbPath *string, priority HealthPriority, releaseDate *time.Time, metadata *string, indexer *string) error {
+	filePath = strings.TrimPrefix(filePath, "/")
 	var releaseDateStr any = nil
 	if releaseDate != nil {
 		releaseDateStr = releaseDate.UTC().Format("2006-01-02 15:04:05")
@@ -612,7 +619,6 @@ func (r *HealthRepository) AddFileToHealthCheckWithMetadata(ctx context.Context,
 		library_path = COALESCE(excluded.library_path, library_path),
 		status = excluded.status,
 		retry_count = 0,
-		repair_retry_count = 0,
 		last_error = NULL,
 		error_details = NULL,
 		max_retries = excluded.max_retries,
@@ -1528,22 +1534,41 @@ func (r *HealthRepository) RenameHealthRecord(ctx context.Context, oldPath, newP
 
 // RelinkFileByFilename updates the file_path and library_path for a record that matches by filename.
 // This is typically called by webhooks during renames or downloads to provide a definitive library path.
-func (r *HealthRepository) RelinkFileByFilename(ctx context.Context, filename, filePath, libraryPath string, metadataStr *string) (bool, error) {
+//
+// revalidate controls what happens to records in repair_triggered/corrupted state:
+//   - true (Download events — a re-downloaded copy was just imported): reset the record to
+//     pending with an immediate check so the fresh copy is validated instead of being
+//     destroyed by the next repair re-trigger. retry_count restarts for the new copy, but
+//     repair_retry_count is preserved as the per-title repair budget so repeatedly broken
+//     re-downloads still escalate to corrupted instead of looping forever.
+//   - false (Rename events — no new content): preserve repair/corrupted state so a library
+//     reorganization cannot wipe repair progress.
+func (r *HealthRepository) RelinkFileByFilename(ctx context.Context, filename, filePath, libraryPath string, metadataStr *string, revalidate bool) (bool, error) {
 	filePath = strings.TrimPrefix(filePath, "/")
 	query := `
 		UPDATE file_health
 		SET file_path = ?,
 		    library_path = ?,
-		    status = 'pending',
-		    retry_count = 0,
-		    repair_retry_count = 0,
-		    last_error = NULL,
-		    error_details = NULL,
-		    metadata = COALESCE(?, metadata),
 		    updated_at = datetime('now'),
-		    scheduled_check_at = datetime('now')
+		    metadata = COALESCE(?, metadata),
+		    scheduled_check_at = CASE WHEN status IN ('repair_triggered', 'corrupted') THEN scheduled_check_at ELSE datetime('now') END
 		WHERE (file_path LIKE ? OR file_path = ? OR library_path LIKE ? OR library_path = ?)
 	`
+	if revalidate {
+		query = `
+			UPDATE file_health
+			SET file_path = ?,
+			    library_path = ?,
+			    status = 'pending',
+			    retry_count = 0,
+			    last_error = NULL,
+			    error_details = NULL,
+			    metadata = COALESCE(?, metadata),
+			    updated_at = datetime('now'),
+			    scheduled_check_at = datetime('now')
+			WHERE (file_path LIKE ? OR file_path = ? OR library_path LIKE ? OR library_path = ?)
+		`
+	}
 
 	likePattern := "%/" + filename
 	res, err := r.db.ExecContext(ctx, query, filePath, libraryPath, metadataStr, likePattern, filename, likePattern, libraryPath)
@@ -1713,7 +1738,16 @@ func (r *HealthRepository) LogIndexerImport(ctx context.Context, indexer string,
 }
 
 // RelinkFileByMetadata matches repair_triggered or corrupted records by metadata and updates them to pending.
-func (r *HealthRepository) RelinkFileByMetadata(ctx context.Context, webMeta *model.WebhookMetadata, filePath, libraryPath string, metadataStr *string) (bool, error) {
+//
+// revalidate controls what happens to records in repair_triggered/corrupted state:
+//   - true (Download events — a re-downloaded copy was just imported): reset the record to
+//     pending with an immediate check so the fresh copy is validated instead of being
+//     destroyed by the next repair re-trigger. retry_count restarts for the new copy, but
+//     repair_retry_count is preserved as the per-title repair budget so repeatedly broken
+//     re-downloads still escalate to corrupted instead of looping forever.
+//   - false (Rename events — no new content): preserve repair/corrupted state so a library
+//     reorganization cannot wipe repair progress.
+func (r *HealthRepository) RelinkFileByMetadata(ctx context.Context, webMeta *model.WebhookMetadata, filePath, libraryPath string, metadataStr *string, revalidate bool) (bool, error) {
 	filePath = strings.TrimPrefix(filePath, "/")
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, file_path, library_path, status, metadata
@@ -1755,16 +1789,26 @@ func (r *HealthRepository) RelinkFileByMetadata(ctx context.Context, webMeta *mo
 			UPDATE file_health
 			SET file_path = ?,
 			    library_path = ?,
-			    status = 'pending',
-			    retry_count = 0,
-			    repair_retry_count = 0,
-			    last_error = NULL,
-			    error_details = NULL,
 			    metadata = COALESCE(?, metadata),
 			    updated_at = datetime('now'),
-			    scheduled_check_at = datetime('now')
+			    scheduled_check_at = CASE WHEN status IN ('repair_triggered', 'corrupted') THEN scheduled_check_at ELSE datetime('now') END
 			WHERE id = ?
 		`
+		if revalidate {
+			query = `
+				UPDATE file_health
+				SET file_path = ?,
+				    library_path = ?,
+				    status = 'pending',
+				    retry_count = 0,
+				    last_error = NULL,
+				    error_details = NULL,
+				    metadata = COALESCE(?, metadata),
+				    updated_at = datetime('now'),
+				    scheduled_check_at = datetime('now')
+				WHERE id = ?
+			`
+		}
 		_, err := r.db.ExecContext(ctx, query, filePath, libraryPath, metadataStr, id)
 		if err != nil {
 			slog.ErrorContext(ctx, "Failed to update matched health record", "id", id, "error", err)

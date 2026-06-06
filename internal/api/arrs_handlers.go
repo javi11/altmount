@@ -623,7 +623,7 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 				}
 
 				// Try to find and relink by metadata IDs (e.g. series ID/TVDB ID/episode ID or movie ID/TMDB ID) first
-				if relinked, err := s.healthRepo.RelinkFileByMetadata(c.Context(), &webMeta, normalizedPath, path, metadataStr); err == nil && relinked {
+				if relinked, err := s.healthRepo.RelinkFileByMetadata(c.Context(), &webMeta, normalizedPath, path, metadataStr, req.EventType == "Download"); err == nil && relinked {
 					attrs := []any{
 						"event", req.EventType,
 						"instance", req.InstanceName,
@@ -647,7 +647,10 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 				}
 
 				// Fall back to filename-based matching
-				if relinked, err := s.healthRepo.RelinkFileByFilename(c.Context(), fileName, normalizedPath, path, metadataStr); err == nil && relinked {
+				// Download events carry a freshly imported copy: relink with revalidation so
+				// the new file gets health-checked (repair budget is preserved). Rename events
+				// carry no new content and must not disturb repair/corrupted state.
+				if relinked, err := s.healthRepo.RelinkFileByFilename(c.Context(), fileName, normalizedPath, path, metadataStr, req.EventType == "Download"); err == nil && relinked {
 					attrs := []any{
 						"event", req.EventType,
 						"instance", req.InstanceName,
