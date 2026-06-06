@@ -607,7 +607,10 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 					metadataStr = &str
 				}
 
-				if relinked, err := s.healthRepo.RelinkFileByFilename(c.Context(), fileName, normalizedPath, path, metadataStr); err == nil && relinked {
+				// Download events carry a freshly imported copy: relink with revalidation so
+			// the new file gets health-checked (repair budget is preserved). Rename events
+			// carry no new content and must not disturb repair/corrupted state.
+			if relinked, err := s.healthRepo.RelinkFileByFilename(c.Context(), fileName, normalizedPath, path, metadataStr, req.EventType == "Download"); err == nil && relinked {
 					attrs := []any{
 						"event", req.EventType,
 						"instance", req.InstanceName,

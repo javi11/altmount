@@ -270,8 +270,8 @@ func TestRelinkFileByFilename_UpdatesAnyStatus(t *testing.T) {
 	err := repo.UpdateFileHealth(ctx, oldPath, HealthStatusHealthy, nil, nil, nil, false)
 	require.NoError(t, err)
 
-	// 2. Perform Relink
-	relinked, err := repo.RelinkFileByFilename(ctx, fileName, newPath, libPath, nil)
+	// 2. Perform Relink (Rename semantics — no new content)
+	relinked, err := repo.RelinkFileByFilename(ctx, fileName, newPath, libPath, nil, false)
 	require.NoError(t, err)
 	assert.True(t, relinked, "Should have relinked the healthy record")
 
@@ -292,9 +292,158 @@ func TestRelinkFileByFilename_UpdatesAnyStatus(t *testing.T) {
 	err = repo.UpdateFileHealth(ctx, corruptedFile, HealthStatusCorrupted, nil, nil, nil, false)
 	require.NoError(t, err)
 
-	relinked, err = repo.RelinkFileByFilename(ctx, "Matrix.mkv", corruptedFile, "/lib/Matrix.mkv", nil)
+	relinked, err = repo.RelinkFileByFilename(ctx, "Matrix.mkv", corruptedFile, "/lib/Matrix.mkv", nil, false)
 	require.NoError(t, err)
 	assert.True(t, relinked)
+}
+
+// TestRelinkFileByFilename_RenamePreservesRepairState verifies that a Rename relink
+// (revalidate=false) does not disturb repair_triggered state: status, counters, errors
+// and schedule must survive a library reorganization.
+func TestRelinkFileByFilename_RenamePreservesRepairState(t *testing.T) {
+	repo := setupTestDB(t)
+	ctx := context.Background()
+
+	filePath := "tv/Show.S01E01/Show.S01E01.mkv"
+	lastErr := "missing 7 segments"
+	future := time.Now().UTC().Add(30 * time.Minute).Format("2006-01-02 15:04:05")
+	_, err := repo.db.ExecContext(ctx, `
+		INSERT INTO file_health (file_path, status, retry_count, repair_retry_count,
+			max_repair_retries, last_error, scheduled_check_at)
+		VALUES (?, 'repair_triggered', 2, 1, 3, ?, ?)
+	`, filePath, lastErr, future)
+	require.NoError(t, err)
+
+	relinked, err := repo.RelinkFileByFilename(ctx, "Show.S01E01.mkv", filePath, "/lib/Show.S01E01.mkv", nil, false)
+	require.NoError(t, err)
+	require.True(t, relinked)
+
+	h, err := repo.GetFileHealth(ctx, filePath)
+	require.NoError(t, err)
+	require.NotNil(t, h)
+	assert.Equal(t, HealthStatusRepairTriggered, h.Status, "Rename must not reset repair status")
+	assert.Equal(t, 2, h.RetryCount)
+	assert.Equal(t, 1, h.RepairRetryCount)
+	require.NotNil(t, h.LastError)
+	assert.Equal(t, lastErr, *h.LastError)
+}
+
+// TestRelinkFileByFilename_DownloadRevalidatesRepairState verifies that a Download relink
+// (revalidate=true — a re-downloaded copy was just imported) resets the record to pending
+// for immediate re-validation while preserving repair_retry_count as the per-title repair
+// budget. This is the exit path from the repair loop: without it, the repair worker
+// destroys the fresh import on its next tick.
+func TestRelinkFileByFilename_DownloadRevalidatesRepairState(t *testing.T) {
+	repo := setupTestDB(t)
+	ctx := context.Background()
+
+	filePath := "tv/Show.S01E02/Show.S01E02.mkv"
+	future := time.Now().UTC().Add(30 * time.Minute).Format("2006-01-02 15:04:05")
+	_, err := repo.db.ExecContext(ctx, `
+		INSERT INTO file_health (file_path, status, retry_count, repair_retry_count,
+			max_repair_retries, last_error, error_details, scheduled_check_at)
+		VALUES (?, 'repair_triggered', 2, 1, 3, 'missing segments', 'details', ?)
+	`, filePath, future)
+	require.NoError(t, err)
+
+	before := time.Now().UTC()
+	relinked, err := repo.RelinkFileByFilename(ctx, "Show.S01E02.mkv", filePath, "/lib/Show.S01E02.mkv", nil, true)
+	require.NoError(t, err)
+	require.True(t, relinked)
+
+	h, err := repo.GetFileHealth(ctx, filePath)
+	require.NoError(t, err)
+	require.NotNil(t, h)
+	assert.Equal(t, HealthStatusPending, h.Status, "Download must reset status so the new copy is validated")
+	assert.Equal(t, 0, h.RetryCount, "retry_count restarts for the new copy")
+	assert.Equal(t, 1, h.RepairRetryCount, "repair budget must be preserved so bad re-downloads still escalate")
+	assert.Nil(t, h.LastError)
+	assert.Nil(t, h.ErrorDetails)
+
+	// scheduled_check_at must be pulled back from the future to now.
+	var raw string
+	err = repo.db.QueryRowContext(ctx,
+		"SELECT scheduled_check_at FROM file_health WHERE file_path = ?", filePath).Scan(&raw)
+	require.NoError(t, err)
+	var scheduled time.Time
+	for _, layout := range []string{time.RFC3339, "2006-01-02 15:04:05"} {
+		if parsed, e := time.Parse(layout, raw); e == nil {
+			scheduled = parsed.UTC()
+			break
+		}
+	}
+	assert.True(t, scheduled.Before(before.Add(time.Minute)),
+		"scheduled_check_at should be ~now, got %v", scheduled)
+}
+
+// TestGetFilesForRepairNotification_ReturnsExhausted verifies that records whose repair
+// budget is spent are still returned, so the worker can finalize them as corrupted.
+// Filtering them out would leave them stuck in repair_triggered forever: no other
+// query selects that status.
+func TestGetFilesForRepairNotification_ReturnsExhausted(t *testing.T) {
+	repo := setupTestDB(t)
+	ctx := context.Background()
+
+	pastTime := time.Now().UTC().Add(-1 * time.Hour)
+	_, err := repo.db.ExecContext(ctx, `
+		INSERT INTO file_health (
+			file_path, status, repair_retry_count, max_repair_retries, scheduled_check_at, last_checked
+		) VALUES (?, ?, ?, ?, ?, ?)
+	`, "exhausted_repair.mkv", "repair_triggered", 3, 3, pastTime, time.Now().UTC())
+	require.NoError(t, err)
+
+	files, err := repo.GetFilesForRepairNotification(ctx, 10)
+	require.NoError(t, err)
+
+	found := false
+	for _, f := range files {
+		if f.FilePath == "exhausted_repair.mkv" {
+			found = true
+		}
+	}
+	assert.True(t, found, "exhausted repair records must be returned for finalization as corrupted")
+}
+
+// TestAddFileToHealthCheck_ConflictPreservesRepairBudget verifies that a re-import upsert
+// over an existing record resets it to pending for re-validation but does NOT reset
+// repair_retry_count: a re-download of a broken release must not refill its own repair
+// budget, or genuinely dead releases would be re-downloaded forever.
+func TestAddFileToHealthCheck_ConflictPreservesRepairBudget(t *testing.T) {
+	repo := setupTestDB(t)
+	ctx := context.Background()
+
+	filePath := "tv/Show.S01E03/Show.S01E03.mkv"
+	_, err := repo.db.ExecContext(ctx, `
+		INSERT INTO file_health (file_path, status, retry_count, repair_retry_count, max_repair_retries)
+		VALUES (?, 'repair_triggered', 2, 2, 3)
+	`, filePath)
+	require.NoError(t, err)
+
+	err = repo.AddFileToHealthCheckWithMetadata(ctx, filePath, &filePath, 3, 3, nil, HealthPriorityNext, nil, nil, nil)
+	require.NoError(t, err)
+
+	h, err := repo.GetFileHealth(ctx, filePath)
+	require.NoError(t, err)
+	require.NotNil(t, h)
+	assert.Equal(t, HealthStatusPending, h.Status)
+	assert.Equal(t, 0, h.RetryCount, "retry_count resets for the new copy")
+	assert.Equal(t, 2, h.RepairRetryCount, "repair budget must survive the re-import upsert")
+}
+
+// TestAddFileToHealthCheck_NormalizesLeadingSlash verifies the upsert strips a leading
+// slash so import-side paths ("/tv/...") and webhook-side paths ("tv/...") cannot create
+// duplicate rows for the same virtual file.
+func TestAddFileToHealthCheck_NormalizesLeadingSlash(t *testing.T) {
+	repo := setupTestDB(t)
+	ctx := context.Background()
+
+	slashed := "/tv/Show.S01E04/Show.S01E04.mkv"
+	err := repo.AddFileToHealthCheckWithMetadata(ctx, slashed, &slashed, 3, 3, nil, HealthPriorityNext, nil, nil, nil)
+	require.NoError(t, err)
+
+	h, err := repo.GetFileHealth(ctx, "tv/Show.S01E04/Show.S01E04.mkv")
+	require.NoError(t, err)
+	require.NotNil(t, h, "record must be stored without the leading slash")
 }
 
 // TestAddFileToHealthCheckWithMetadata_StoresLibraryPath verifies that new files
