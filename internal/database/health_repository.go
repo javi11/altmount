@@ -823,19 +823,22 @@ func (r *HealthRepository) DeleteHealthRecordsBulk(ctx context.Context, filePath
 		return nil
 	}
 
-	// SQLite parameter limit typically is 999. Batch delete in chunks of 500.
-	const batchSize = 500
+	// SQLite parameter limit typically is 999. Batch delete in chunks of 250 (500 placeholders).
+	const batchSize = 250
 	var totalRowsAffected int64
 
 	for i := 0; i < len(filePaths); i += batchSize {
 		end := min(i+batchSize, len(filePaths))
 		chunk := filePaths[i:end]
 
-		placeholders := make([]string, len(chunk))
-		args := make([]any, len(chunk))
+		placeholders := make([]string, len(chunk)*2)
+		args := make([]any, len(chunk)*2)
 		for j, path := range chunk {
-			placeholders[j] = "?"
-			args[j] = strings.TrimPrefix(path, "/")
+			placeholders[j*2] = "?"
+			placeholders[j*2+1] = "?"
+			trimmed := strings.TrimPrefix(path, "/")
+			args[j*2] = trimmed
+			args[j*2+1] = "/" + trimmed
 		}
 
 		query := fmt.Sprintf(`DELETE FROM file_health WHERE file_path IN (%s)`, strings.Join(placeholders, ","))
