@@ -7,7 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/importer/parser/fileinfo"
 )
 
 // maxDirExpansionDepth bounds the recursive walk of "DIR:" written-path entries.
@@ -35,6 +37,28 @@ func (c *Coordinator) ScheduleHealthCheck(ctx context.Context, item *database.Im
 	}
 
 	cfg := c.configGetter()
+
+	// Under SYMLINK/STRM strategies a record only becomes checkable once an ARR
+	// Download webhook relinks it to a real library path (GetUnhealthyFiles
+	// filters on library_path), and ARRs only ever import media files. Sidecars
+	// (.nfo, .srt, ...) would sit permanently ineligible in pending until the
+	// next library sync deletes them, so don't schedule them here. Any sidecar
+	// an ARR does copy into the library is still registered — with a real
+	// library path — by the library sync.
+	if cfg.Import.ImportStrategy != config.ImportStrategyNone {
+		media := make([]string, 0, len(paths))
+		for _, p := range paths {
+			if isArrImportableMedia(p) {
+				media = append(media, p)
+			}
+		}
+		if skipped := len(paths) - len(media); skipped > 0 {
+			slog.DebugContext(ctx, "Skipping health checks for sidecar files",
+				"path", resultingPath, "skipped", skipped)
+		}
+		paths = media
+	}
+
 	var indexer *string = nil
 	if item != nil {
 		indexer = item.Indexer
@@ -77,7 +101,7 @@ func (c *Coordinator) ScheduleHealthCheck(ctx context.Context, item *database.Im
 		// A successful import that schedules nothing means the file will only be
 		// covered by library sync much later — and any pending repair in its
 		// directory stays unresolved. Surface it instead of failing silently.
-		slog.WarnContext(ctx, "No health checks scheduled for import - no readable file metadata found",
+		slog.WarnContext(ctx, "No health checks scheduled for import - no checkable media files with readable metadata found",
 			"path", resultingPath, "written_paths", len(writtenPaths))
 	}
 
@@ -90,6 +114,24 @@ func (c *Coordinator) ScheduleHealthCheck(ctx context.Context, item *database.Im
 		return lastErr
 	}
 	return nil
+}
+
+// arrAudioBookExtensions are the non-video media types ARRs import (Lidarr audio,
+// Readarr books). Video extensions are covered by fileinfo.IsVideoFile.
+var arrAudioBookExtensions = map[string]bool{
+	".mp3": true, ".flac": true, ".m4a": true, ".m4b": true, ".aac": true,
+	".ogg": true, ".opus": true, ".wav": true,
+	".epub": true, ".pdf": true, ".cbz": true, ".cbr": true, ".mobi": true, ".azw3": true,
+}
+
+// isArrImportableMedia reports whether the virtual path is a media file an ARR could
+// import into the library — i.e. one that can ever be relinked to a real library path
+// by a Download webhook and so become eligible for health checks under SYMLINK/STRM.
+func isArrImportableMedia(p string) bool {
+	if fileinfo.IsVideoFile(p) {
+		return true
+	}
+	return arrAudioBookExtensions[strings.ToLower(path.Ext(p))]
 }
 
 // expandWrittenPaths resolves "DIR:"-prefixed entries (whole-directory imports such

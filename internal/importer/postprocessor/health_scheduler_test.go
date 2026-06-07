@@ -16,8 +16,9 @@ import (
 
 // setupSchedulerTest builds a Coordinator with a real MetadataService (temp dir)
 // and a real HealthRepository (in-memory sqlite) so ScheduleHealthCheck can be
-// exercised end to end.
-func setupSchedulerTest(t *testing.T) (*Coordinator, *metadata.MetadataService, *database.HealthRepository, *sql.DB) {
+// exercised end to end. Optional mutators adjust the config before the manager
+// is built (e.g. to set an import strategy).
+func setupSchedulerTest(t *testing.T, mutate ...func(*config.Config)) (*Coordinator, *metadata.MetadataService, *database.HealthRepository, *sql.DB) {
 	t.Helper()
 
 	db, err := sql.Open("sqlite3", "file::memory:")
@@ -59,6 +60,9 @@ func setupSchedulerTest(t *testing.T) (*Coordinator, *metadata.MetadataService, 
 	// stale-repair cleanup path is exercised.
 	resolveRepairs := true
 	cfg.Health.ResolveRepairOnImport = &resolveRepairs
+	for _, m := range mutate {
+		m(cfg)
+	}
 	configManager := config.NewManager(cfg, "")
 
 	coordinator := NewCoordinator(Config{
@@ -161,4 +165,64 @@ func TestScheduleHealthCheck_PlainPathsUnchanged(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, h)
 	assert.Equal(t, database.HealthStatusPending, h.Status)
+}
+
+// TestScheduleHealthCheck_SkipsSidecarsUnderSymlinkStrategy verifies that under
+// SYMLINK/STRM strategies only ARR-importable media files are scheduled. Sidecars
+// (.nfo, .srt, ...) can never be relinked to a real library path by a Download
+// webhook, so their records would sit permanently ineligible for the health worker
+// (GetUnhealthyFiles filters on library_path) and pile up as stuck "pending" until
+// the next library sync deletes them.
+func TestScheduleHealthCheck_SkipsSidecarsUnderSymlinkStrategy(t *testing.T) {
+	coordinator, ms, repo, _ := setupSchedulerTest(t, func(cfg *config.Config) {
+		cfg.Import.ImportStrategy = config.ImportStrategySYMLINK
+	})
+	ctx := context.Background()
+
+	nzbFolder := "/tv/Show.S01E02.1080p-GRP"
+	writeTestMetadata(t, ms, nzbFolder+"/Show.S01E02.1080p-GRP.mkv")
+	writeTestMetadata(t, ms, nzbFolder+"/Show.S01E02.1080p-GRP.nfo")
+	writeTestMetadata(t, ms, nzbFolder+"/Show.S01E02.1080p-GRP.en.srt")
+
+	err := coordinator.ScheduleHealthCheck(ctx, nil, nzbFolder, []string{"DIR:" + nzbFolder})
+	require.NoError(t, err)
+
+	h, err := repo.GetFileHealth(ctx, "tv/Show.S01E02.1080p-GRP/Show.S01E02.1080p-GRP.mkv")
+	require.NoError(t, err)
+	require.NotNil(t, h, "media file must be scheduled")
+	assert.Equal(t, database.HealthStatusPending, h.Status)
+
+	for _, sidecar := range []string{
+		"tv/Show.S01E02.1080p-GRP/Show.S01E02.1080p-GRP.nfo",
+		"tv/Show.S01E02.1080p-GRP/Show.S01E02.1080p-GRP.en.srt",
+	} {
+		h, err := repo.GetFileHealth(ctx, sidecar)
+		require.NoError(t, err)
+		assert.Nil(t, h, "sidecar %s must not get a permanently-ineligible health record", sidecar)
+	}
+}
+
+// TestScheduleHealthCheck_KeepsSidecarsUnderNoneStrategy verifies that under the NONE
+// strategy (no library filter — every record is eligible as-is) sidecars keep getting
+// health checks, preserving the pre-filter behavior.
+func TestScheduleHealthCheck_KeepsSidecarsUnderNoneStrategy(t *testing.T) {
+	coordinator, ms, repo, _ := setupSchedulerTest(t)
+	ctx := context.Background()
+
+	nzbFolder := "/tv/Show.S01E03.1080p-GRP"
+	writeTestMetadata(t, ms, nzbFolder+"/Show.S01E03.1080p-GRP.mkv")
+	writeTestMetadata(t, ms, nzbFolder+"/Show.S01E03.1080p-GRP.nfo")
+
+	err := coordinator.ScheduleHealthCheck(ctx, nil, nzbFolder, []string{"DIR:" + nzbFolder})
+	require.NoError(t, err)
+
+	for _, p := range []string{
+		"tv/Show.S01E03.1080p-GRP/Show.S01E03.1080p-GRP.mkv",
+		"tv/Show.S01E03.1080p-GRP/Show.S01E03.1080p-GRP.nfo",
+	} {
+		h, err := repo.GetFileHealth(ctx, p)
+		require.NoError(t, err)
+		require.NotNil(t, h, "expected a health record for %s under NONE strategy", p)
+		assert.Equal(t, database.HealthStatusPending, h.Status)
+	}
 }
