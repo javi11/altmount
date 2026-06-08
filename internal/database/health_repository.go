@@ -824,6 +824,36 @@ func (r *HealthRepository) ResetStalePendingFiles(ctx context.Context) error {
 	if rows > 0 {
 		slog.InfoContext(ctx, "Reset stale pending files", "count", rows)
 	}
+
+	// Fix files stuck in pending status with scheduled_check_at set to the distant future
+	// (usually by the backfill release dates worker when status check was not restricted).
+	// We only reset them if they have retry_count = 0 (never checked/no legitimate retry delay)
+	// and scheduled_check_at is more than 24 hours in the future relative to now.
+	var stuckQuery string
+	if r.dialect.IsPostgres() {
+		stuckQuery = `UPDATE file_health
+		               SET scheduled_check_at = NOW(),
+		                   updated_at = NOW()
+		               WHERE status = ? 
+		                 AND retry_count = 0 
+		                 AND scheduled_check_at > NOW() + INTERVAL '24 hours'`
+	} else {
+		stuckQuery = `UPDATE file_health
+		               SET scheduled_check_at = datetime('now'),
+		                   updated_at = datetime('now')
+		               WHERE status = ? 
+		                 AND retry_count = 0 
+		                 AND scheduled_check_at > datetime('now', '+24 hours')`
+	}
+	stuckResult, err := r.db.ExecContext(ctx, stuckQuery, HealthStatusPending)
+	if err != nil {
+		return fmt.Errorf("failed to reset stuck pending files: %w", err)
+	}
+	stuckRows, _ := stuckResult.RowsAffected()
+	if stuckRows > 0 {
+		slog.InfoContext(ctx, "Reset stuck pending files (scheduled in distant future)", "count", stuckRows)
+	}
+
 	return nil
 }
 
@@ -1330,7 +1360,7 @@ func (r *HealthRepository) BackfillReleaseDates(ctx context.Context, updates []B
 	stmt, err := tx.PrepareContext(ctx, `
 		UPDATE file_health
 		SET release_date = ?,
-		    scheduled_check_at = ?,
+		    scheduled_check_at = CASE WHEN status = 'healthy' THEN ? ELSE scheduled_check_at END,
 		    updated_at = datetime('now')
 		WHERE id = ?
 	`)

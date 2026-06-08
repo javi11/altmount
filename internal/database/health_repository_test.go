@@ -529,3 +529,36 @@ func TestRelinkFileByMetadata(t *testing.T) {
 	assert.Nil(t, oldH)
 }
 
+func TestResetStalePendingFiles_ResetsStuckPending(t *testing.T) {
+	repo := setupTestDB(t)
+	ctx := context.Background()
+
+	filePath := "movies/stuck.mkv"
+	futureTime := time.Now().UTC().Add(48 * time.Hour).Truncate(time.Second)
+
+	// Add a record scheduled in the distant future with status = 'pending' and retry_count = 0
+	err := repo.UpdateFileHealthScheduled(ctx, filePath, HealthStatusPending, nil, nil, nil, false, futureTime)
+	require.NoError(t, err)
+
+	// Verify it has the future scheduled time
+	hBefore, err := repo.GetFileHealth(ctx, filePath)
+	require.NoError(t, err)
+	require.NotNil(t, hBefore)
+	assert.Equal(t, HealthStatusPending, hBefore.Status)
+	assert.Equal(t, 0, hBefore.RetryCount)
+	
+	// Now run ResetStalePendingFiles
+	err = repo.ResetStalePendingFiles(ctx)
+	require.NoError(t, err)
+
+	// Verify scheduled_check_at was reset to the present/past
+	hAfter, err := repo.GetFileHealth(ctx, filePath)
+	require.NoError(t, err)
+	require.NotNil(t, hAfter)
+	
+	got := queryScheduledCheckAt(t, repo, filePath)
+	require.NotNil(t, got)
+	assert.True(t, got.Before(time.Now().UTC().Add(1*time.Minute)), "stuck file scheduled time should be reset to now (got %v)", got)
+}
+
+
