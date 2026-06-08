@@ -23,9 +23,32 @@ func NewHealthRepository(db *sql.DB, d Dialect) *HealthRepository {
 	}
 }
 
+// normalizeHealthPath canonicalizes a virtual file path before it is written to or
+// matched against file_health. file_path carries a UNIQUE constraint, so a leading
+// slash ("/tv/x" vs "tv/x") from one caller would otherwise split a single virtual
+// file across two rows and silently defeat the repair_retry_count budget that the
+// repair state machine relies on. Every method that writes or matches on file_path
+// funnels through here.
+func normalizeHealthPath(p string) string {
+	return strings.TrimPrefix(p, "/")
+}
+
+// escapeLikePrefix escapes the LIKE metacharacters in a literal prefix so it can be
+// safely concatenated into a "prefix/%" pattern. Release/folder names routinely
+// contain '_' (matches any single char) and occasionally '%' (matches any run), which
+// would otherwise over-match unrelated siblings. Callers must pair the result with an
+// explicit `ESCAPE '\'` clause. The backslash is escaped first so it cannot double-escape
+// a subsequently-inserted escape character.
+func escapeLikePrefix(s string) string {
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	s = strings.ReplaceAll(s, "%", "\\%")
+	s = strings.ReplaceAll(s, "_", "\\_")
+	return s
+}
+
 // UpdateFileHealth updates or inserts a file health record
 func (r *HealthRepository) UpdateFileHealth(ctx context.Context, filePath string, status HealthStatus, errorMessage *string, sourceNzbPath *string, errorDetails *string, noRetry bool) error {
-	filePath = strings.TrimPrefix(filePath, "/")
+	filePath = normalizeHealthPath(filePath)
 	query := `
 		INSERT INTO file_health (file_path, status, last_checked, last_error, source_nzb_path, error_details, retry_count, max_retries, repair_retry_count, created_at, updated_at, scheduled_check_at, priority)
 		VALUES (?, ?, datetime('now'), ?, ?, ?, CASE WHEN ? THEN 1 ELSE 0 END, 2, 0, datetime('now'), datetime('now'), datetime('now'), CASE WHEN ? THEN 2 ELSE 0 END)
@@ -53,7 +76,7 @@ func (r *HealthRepository) UpdateFileHealth(ctx context.Context, filePath string
 // UpdateFileHealthScheduled is like UpdateFileHealth but uses an explicit scheduledAt time
 // instead of datetime('now') for the scheduled_check_at column.
 func (r *HealthRepository) UpdateFileHealthScheduled(ctx context.Context, filePath string, status HealthStatus, errorMessage *string, sourceNzbPath *string, errorDetails *string, noRetry bool, scheduledAt time.Time) error {
-	filePath = strings.TrimPrefix(filePath, "/")
+	filePath = normalizeHealthPath(filePath)
 	scheduledAtStr := scheduledAt.UTC().Format("2006-01-02 15:04:05")
 	query := `
 		INSERT INTO file_health (file_path, status, last_checked, last_error, source_nzb_path, error_details, retry_count, max_retries, repair_retry_count, created_at, updated_at, scheduled_check_at, priority)
@@ -119,7 +142,7 @@ func scanFileHealth(s rowScanner) (*FileHealth, error) {
 
 // GetFileHealth retrieves health record for a specific file
 func (r *HealthRepository) GetFileHealth(ctx context.Context, filePath string) (*FileHealth, error) {
-	filePath = strings.TrimPrefix(filePath, "/")
+	filePath = normalizeHealthPath(filePath)
 	health, err := scanFileHealth(r.db.QueryRowContext(ctx, fileHealthSelectColumns+"WHERE file_path = ?", filePath))
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -155,7 +178,7 @@ func (r *HealthRepository) GetFileHealthByID(ctx context.Context, id int64) (*Fi
 
 // IncrementStreamingFailureCount increments the streaming failure count and returns whether masking/repair threshold was reached
 func (r *HealthRepository) IncrementStreamingFailureCount(ctx context.Context, filePath string, threshold int) (bool, bool, error) {
-	filePath = strings.TrimPrefix(filePath, "/")
+	filePath = normalizeHealthPath(filePath)
 	query := `
 		UPDATE file_health
 		SET streaming_failure_count = streaming_failure_count + 1,
@@ -177,7 +200,7 @@ func (r *HealthRepository) IncrementStreamingFailureCount(ctx context.Context, f
 
 // UnmaskFile removes the mask from a file and resets the failure count
 func (r *HealthRepository) UnmaskFile(ctx context.Context, filePath string) error {
-	filePath = strings.TrimPrefix(filePath, "/")
+	filePath = normalizeHealthPath(filePath)
 	query := `
 		UPDATE file_health
 		SET is_masked = FALSE,
@@ -207,7 +230,11 @@ func (r *HealthRepository) GetUnhealthyFiles(ctx context.Context, limit int, str
 		WHERE scheduled_check_at IS NOT NULL
 		  AND scheduled_check_at <= datetime('now')
 		  AND retry_count < ?
-		  AND status NOT IN ('repair_triggered', 'checking')
+		  -- 'corrupted' is terminal: enforce it at the query level so no re-arm vector
+		  -- (e.g. an unconditional release-date backfill writing scheduled_check_at) can
+		  -- pull a finalized record back into the check queue. 'repair_triggered' and
+		  -- 'checking' are owned by other queries / an in-flight cycle.
+		  AND status NOT IN ('repair_triggered', 'checking', 'corrupted')
 		  AND (
 			  ? = 'NONE' 
 			  OR (library_path IS NOT NULL AND library_path LIKE ?)
@@ -476,7 +503,7 @@ func (r *HealthRepository) DeleteHealthRecordByID(ctx context.Context, id int64)
 
 // DeleteHealthRecord removes a specific health record from the database
 func (r *HealthRepository) DeleteHealthRecord(ctx context.Context, filePath string) error {
-	filePath = strings.TrimPrefix(filePath, "/")
+	filePath = normalizeHealthPath(filePath)
 	query := `DELETE FROM file_health WHERE file_path = ?`
 
 	result, err := r.db.ExecContext(ctx, query, filePath)
@@ -521,8 +548,8 @@ func (r *HealthRepository) DeleteHealthRecordsByLibraryPathPrefix(ctx context.Co
 		return nil, 0, nil
 	}
 
-	likePattern := libraryPathPrefix + "/%"
-	query := `DELETE FROM file_health WHERE library_path = ? OR library_path LIKE ? RETURNING file_path`
+	likePattern := escapeLikePrefix(libraryPathPrefix) + "/%"
+	query := `DELETE FROM file_health WHERE library_path = ? OR library_path LIKE ? ESCAPE '\' RETURNING file_path`
 	rows, err := r.db.QueryContext(ctx, query, libraryPathPrefix, likePattern)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to delete health records by library_path prefix %s: %w", libraryPathPrefix, err)
@@ -544,15 +571,20 @@ func (r *HealthRepository) DeleteHealthRecordsByLibraryPathPrefix(ctx context.Co
 	return filePaths, int64(len(filePaths)), nil
 }
 
-// DeleteHealthRecordsByPrefix removes health records that start with the given prefix
+// DeleteHealthRecordsByPrefix removes ALL health records at or under the given virtual
+// path prefix. Used by the webhook directory-delete handler, where the whole subtree is
+// genuinely gone and every record (including healthy/relinked ones) must be removed.
+// For failed-import rollback use DeleteUnvalidatedHealthRecordsByPrefix instead.
 func (r *HealthRepository) DeleteHealthRecordsByPrefix(ctx context.Context, prefix string) (int64, error) {
-	prefix = strings.TrimPrefix(prefix, "/")
+	prefix = normalizeHealthPath(prefix)
 	if prefix == "" {
 		return 0, nil
 	}
 
-	query := `DELETE FROM file_health WHERE file_path = ? OR file_path LIKE ?`
-	likePattern := prefix + "/%"
+	// LIKE metacharacters in the prefix must be escaped: a release folder containing '_'
+	// or '%' would otherwise over-match and delete unrelated siblings' records.
+	query := `DELETE FROM file_health WHERE file_path = ? OR file_path LIKE ? ESCAPE '\'`
+	likePattern := escapeLikePrefix(prefix) + "/%"
 
 	result, err := r.db.ExecContext(ctx, query, prefix, likePattern)
 	if err != nil {
@@ -562,8 +594,39 @@ func (r *HealthRepository) DeleteHealthRecordsByPrefix(ctx context.Context, pref
 	return result.RowsAffected()
 }
 
+// DeleteUnvalidatedHealthRecordsByPrefix removes only the still-unvalidated placeholder
+// records at or under the prefix — those an ARR webhook has not yet relinked to a real
+// library path (library_path NULL or still equal to the virtual file_path) and that are
+// not in a terminal/repair state. This is the failed-import rollback path: the nzbFolder
+// is deterministic per release (not unique per queue item), so a failed re-import of a
+// release that previously imported successfully shares the subtree. Scoping to unvalidated
+// records protects the prior successful import's healthy/relinked/repair_triggered/corrupted
+// records (and the repair budget they carry) from being wiped by an unrelated failed attempt.
+func (r *HealthRepository) DeleteUnvalidatedHealthRecordsByPrefix(ctx context.Context, prefix string) (int64, error) {
+	prefix = normalizeHealthPath(prefix)
+	if prefix == "" {
+		return 0, nil
+	}
+
+	query := `
+		DELETE FROM file_health
+		WHERE (file_path = ? OR file_path LIKE ? ESCAPE '\')
+		  AND status IN ('pending', 'checking')
+		  AND (library_path IS NULL OR library_path = file_path)
+	`
+	likePattern := escapeLikePrefix(prefix) + "/%"
+
+	result, err := r.db.ExecContext(ctx, query, prefix, likePattern)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete unvalidated health records by prefix %s: %w", prefix, err)
+	}
+
+	return result.RowsAffected()
+}
+
 // RegisterCorruptedFile adds or updates a file as corrupted and schedules it for immediate check/repair
 func (r *HealthRepository) RegisterCorruptedFile(ctx context.Context, filePath string, libraryPath *string, errorMessage string) error {
+	filePath = normalizeHealthPath(filePath)
 	query := `
 		INSERT INTO file_health (
 			file_path, library_path, status, last_error, error_details,
@@ -602,7 +665,7 @@ func (r *HealthRepository) AddFileToHealthCheck(ctx context.Context, filePath st
 // repair budget, so a re-download of a broken release cannot reset its own escalation
 // counter. A successful health check resets it to 0.
 func (r *HealthRepository) AddFileToHealthCheckWithMetadata(ctx context.Context, filePath string, libraryPath *string, maxRetries int, maxRepairRetries int, sourceNzbPath *string, priority HealthPriority, releaseDate *time.Time, metadata *string, indexer *string) error {
-	filePath = strings.TrimPrefix(filePath, "/")
+	filePath = normalizeHealthPath(filePath)
 	var releaseDateStr any = nil
 	if releaseDate != nil {
 		releaseDateStr = releaseDate.UTC().Format("2006-01-02 15:04:05")
@@ -633,6 +696,90 @@ func (r *HealthRepository) AddFileToHealthCheckWithMetadata(ctx context.Context,
 
 	if err != nil {
 		return fmt.Errorf("failed to add file to health check: %w", err)
+	}
+
+	return nil
+}
+
+// HealthCheckUpsert is one record for BatchAddFileToHealthCheck.
+type HealthCheckUpsert struct {
+	FilePath         string
+	LibraryPath      *string
+	SourceNzbPath    *string
+	Indexer          *string
+	Priority         HealthPriority
+	MaxRetries       int
+	MaxRepairRetries int
+	ReleaseDate      *time.Time
+	Metadata         *string
+}
+
+// BatchAddFileToHealthCheck upserts many health records in a few multi-row statements
+// instead of one transaction per file. It has the SAME conflict semantics as
+// AddFileToHealthCheckWithMetadata (reset to pending for re-validation, repair_retry_count
+// preserved as the per-title budget). Used by the import post-processor, where a single
+// archive/season-pack import can expand to hundreds of per-file checks.
+func (r *HealthRepository) BatchAddFileToHealthCheck(ctx context.Context, records []HealthCheckUpsert) error {
+	if len(records) == 0 {
+		return nil
+	}
+
+	// 9 bound params per row; keep batches under SQLite's ~999 parameter limit.
+	const batchSize = 100
+
+	for i := 0; i < len(records); i += batchSize {
+		end := min(i+batchSize, len(records))
+		if err := r.batchUpsertFileHealthCheck(ctx, records[i:end]); err != nil {
+			return fmt.Errorf("failed to upsert health-check batch at index %d: %w", i, err)
+		}
+	}
+
+	return nil
+}
+
+// batchUpsertFileHealthCheck performs a single multi-row upsert.
+func (r *HealthRepository) batchUpsertFileHealthCheck(ctx context.Context, records []HealthCheckUpsert) error {
+	valueStrings := make([]string, len(records))
+	args := make([]any, 0, len(records)*9)
+
+	for i, rec := range records {
+		// status, retry_count and repair_retry_count are literals so excluded.status is
+		// always 'pending' (matching the single-row upsert's bound HealthStatusPending).
+		valueStrings[i] = "(?, ?, 'pending', datetime('now'), 0, ?, 0, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), datetime('now'))"
+
+		var releaseDateStr any = nil
+		if rec.ReleaseDate != nil {
+			releaseDateStr = rec.ReleaseDate.UTC().Format("2006-01-02 15:04:05")
+		}
+
+		args = append(args,
+			normalizeHealthPath(rec.FilePath), rec.LibraryPath,
+			rec.MaxRetries, rec.MaxRepairRetries,
+			rec.SourceNzbPath, rec.Priority, releaseDateStr, rec.Metadata, rec.Indexer)
+	}
+
+	query := fmt.Sprintf(`
+		INSERT INTO file_health (file_path, library_path, status, last_checked, retry_count, max_retries, repair_retry_count, max_repair_retries, source_nzb_path, priority, release_date, metadata, indexer, created_at, updated_at, scheduled_check_at)
+		VALUES %s
+		ON CONFLICT(file_path) DO UPDATE SET
+			library_path = COALESCE(excluded.library_path, library_path),
+			status = excluded.status,
+			retry_count = 0,
+			last_error = NULL,
+			error_details = NULL,
+			max_retries = excluded.max_retries,
+			max_repair_retries = excluded.max_repair_retries,
+			source_nzb_path = COALESCE(excluded.source_nzb_path, source_nzb_path),
+			priority = excluded.priority,
+			release_date = COALESCE(excluded.release_date, release_date),
+			metadata = COALESCE(excluded.metadata, metadata),
+			indexer = COALESCE(excluded.indexer, indexer),
+			updated_at = datetime('now'),
+			scheduled_check_at = datetime('now')
+	`, strings.Join(valueStrings, ","))
+
+	if _, err := r.db.ExecContext(ctx, query, args...); err != nil {
+		return fmt.Errorf("failed to batch upsert file health checks: %w", err)
 	}
 
 	return nil
@@ -779,6 +926,45 @@ func (r *HealthRepository) SetFileChecking(ctx context.Context, filePath string)
 	_, err := r.db.ExecContext(ctx, query, HealthStatusChecking, filePath)
 	if err != nil {
 		return fmt.Errorf("failed to set file status to checking: %w", err)
+	}
+
+	return nil
+}
+
+// SetFilesCheckingBulk marks many files 'checking' in as few writes as possible. The
+// health cycle calls this once for the whole batch instead of issuing one UPDATE per
+// file, which under SQLite's single writer would serialize N transactions against each
+// other and the final bulk status write. Crash recovery is unchanged: ResetFileAllChecking
+// at worker startup re-arms any record stranded in 'checking'.
+func (r *HealthRepository) SetFilesCheckingBulk(ctx context.Context, filePaths []string) error {
+	if len(filePaths) == 0 {
+		return nil
+	}
+
+	// SQLite parameter limit is typically 999; leave room for the status arg.
+	const batchSize = 500
+
+	for i := 0; i < len(filePaths); i += batchSize {
+		end := min(i+batchSize, len(filePaths))
+		chunk := filePaths[i:end]
+
+		placeholders := make([]string, len(chunk))
+		args := make([]any, 0, len(chunk)+1)
+		args = append(args, HealthStatusChecking)
+		for j, p := range chunk {
+			placeholders[j] = "?"
+			args = append(args, normalizeHealthPath(p))
+		}
+
+		query := fmt.Sprintf(`
+			UPDATE file_health
+			SET status = ?, updated_at = datetime('now')
+			WHERE file_path IN (%s)
+		`, strings.Join(placeholders, ","))
+
+		if _, err := r.db.ExecContext(ctx, query, args...); err != nil {
+			return fmt.Errorf("failed to bulk set files checking (batch at %d): %w", i, err)
+		}
 	}
 
 	return nil
@@ -977,6 +1163,7 @@ func (r *HealthRepository) AddHealthCheck(
 	scheduledCheckAt time.Time,
 	sourceNzbPath *string,
 ) error {
+	filePath = normalizeHealthPath(filePath)
 	query := `
 		INSERT INTO file_health (
 			file_path, status, last_checked, retry_count, max_retries,
@@ -1002,7 +1189,7 @@ func (r *HealthRepository) AddHealthCheck(
 
 // UpdateScheduledCheckTime updates the scheduled check time for a file
 func (r *HealthRepository) UpdateScheduledCheckTime(ctx context.Context, filePath string, nextCheckTime time.Time) error {
-	filePath = strings.TrimPrefix(filePath, "/")
+	filePath = normalizeHealthPath(filePath)
 	query := `
 		UPDATE file_health
 		SET status = ?,
@@ -1071,13 +1258,16 @@ func (r *HealthRepository) UpdateHealthStatusBulk(ctx context.Context, updates [
 	}
 	defer tx.Rollback()
 
-	// Prepare common statements
+	// Prepare common statements. Each carries an optional status guard:
+	// `AND (status = ? OR ? = '')` — when the caller binds a non-empty expected status the
+	// write only lands if the record is still in that status (closing the TOCTOU window);
+	// when it binds the empty string the guard is a no-op and the write matches by path alone.
 	stmtHealthy, err := tx.PrepareContext(ctx, `
-		UPDATE file_health 
-		SET status = 'healthy', scheduled_check_at = ?, retry_count = 0, 
-		    repair_retry_count = 0, last_error = NULL, error_details = NULL, 
+		UPDATE file_health
+		SET status = 'healthy', scheduled_check_at = ?, retry_count = 0,
+		    repair_retry_count = 0, last_error = NULL, error_details = NULL,
 		    updated_at = datetime('now'), last_checked = datetime('now')
-		WHERE file_path = ?
+		WHERE file_path = ? AND (status = ? OR ? = '')
 	`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare healthy statement: %w", err)
@@ -1085,11 +1275,11 @@ func (r *HealthRepository) UpdateHealthStatusBulk(ctx context.Context, updates [
 	defer stmtHealthy.Close()
 
 	stmtRetry, err := tx.PrepareContext(ctx, `
-		UPDATE file_health 
-		SET retry_count = retry_count + 1, last_error = ?, error_details = ?, 
-		    status = 'pending', scheduled_check_at = ?, 
+		UPDATE file_health
+		SET retry_count = retry_count + 1, last_error = ?, error_details = ?,
+		    status = 'pending', scheduled_check_at = ?,
 		    updated_at = datetime('now'), last_checked = datetime('now')
-		WHERE file_path = ?
+		WHERE file_path = ? AND (status = ? OR ? = '')
 	`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare retry statement: %w", err)
@@ -1102,7 +1292,7 @@ func (r *HealthRepository) UpdateHealthStatusBulk(ctx context.Context, updates [
 		    error_details = ?, status = 'repair_triggered',
 		    updated_at = datetime('now'), last_checked = datetime('now'),
 			scheduled_check_at = ?
-		WHERE file_path = ?
+		WHERE file_path = ? AND (status = ? OR ? = '')
 	`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare repair statement: %w", err)
@@ -1115,7 +1305,7 @@ func (r *HealthRepository) UpdateHealthStatusBulk(ctx context.Context, updates [
 		SET last_error = ?, error_details = ?, status = 'repair_triggered',
 		    updated_at = datetime('now'), last_checked = datetime('now'),
 		    scheduled_check_at = ?
-		WHERE file_path = ?
+		WHERE file_path = ? AND (status = ? OR ? = '')
 	`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare repair trigger statement: %w", err)
@@ -1123,11 +1313,11 @@ func (r *HealthRepository) UpdateHealthStatusBulk(ctx context.Context, updates [
 	defer stmtRepairTrigger.Close()
 
 	stmtCorrupted, err := tx.PrepareContext(ctx, `
-		UPDATE file_health 
-		SET status = 'corrupted', last_error = ?, error_details = ?, 
+		UPDATE file_health
+		SET status = 'corrupted', last_error = ?, error_details = ?,
 		    scheduled_check_at = NULL,
 		    updated_at = datetime('now'), last_checked = datetime('now')
-		WHERE file_path = ?
+		WHERE file_path = ? AND (status = ? OR ? = '')
 	`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare corrupted statement: %w", err)
@@ -1139,17 +1329,23 @@ func (r *HealthRepository) UpdateHealthStatusBulk(ctx context.Context, updates [
 			continue
 		}
 		filePath := update.FilePath
+		// expected is the empty string for an unguarded write, or the status the record
+		// must still hold for a guarded write to land (see HealthStatusUpdate.ExpectedStatus).
+		expected := ""
+		if update.ExpectedStatus != nil {
+			expected = string(*update.ExpectedStatus)
+		}
 		switch update.Type {
 		case UpdateTypeHealthy:
-			_, err = stmtHealthy.ExecContext(ctx, update.ScheduledCheckAt, filePath)
+			_, err = stmtHealthy.ExecContext(ctx, update.ScheduledCheckAt, filePath, expected, expected)
 		case UpdateTypeRetry:
-			_, err = stmtRetry.ExecContext(ctx, update.ErrorMessage, update.ErrorDetails, update.ScheduledCheckAt, filePath)
+			_, err = stmtRetry.ExecContext(ctx, update.ErrorMessage, update.ErrorDetails, update.ScheduledCheckAt, filePath, expected, expected)
 		case UpdateTypeRepairTrigger:
-			_, err = stmtRepairTrigger.ExecContext(ctx, update.ErrorMessage, update.ErrorDetails, update.ScheduledCheckAt, filePath)
+			_, err = stmtRepairTrigger.ExecContext(ctx, update.ErrorMessage, update.ErrorDetails, update.ScheduledCheckAt, filePath, expected, expected)
 		case UpdateTypeRepairRetry:
-			_, err = stmtRepair.ExecContext(ctx, update.ErrorMessage, update.ErrorDetails, update.ScheduledCheckAt, filePath)
+			_, err = stmtRepair.ExecContext(ctx, update.ErrorMessage, update.ErrorDetails, update.ScheduledCheckAt, filePath, expected, expected)
 		case UpdateTypeCorrupted:
-			_, err = stmtCorrupted.ExecContext(ctx, update.ErrorMessage, update.ErrorDetails, filePath)
+			_, err = stmtCorrupted.ExecContext(ctx, update.ErrorMessage, update.ErrorDetails, filePath, expected, expected)
 		}
 
 		if err != nil {
@@ -1180,6 +1376,13 @@ type HealthStatusUpdate struct {
 	ErrorDetails     *string
 	ScheduledCheckAt time.Time
 	Skip             bool // if true, skip this record in the bulk update (e.g. record already deleted)
+	// ExpectedStatus, when non-nil, makes the write conditional on the record still being
+	// in that status (the status the worker based its decision on). It closes the TOCTOU
+	// window where a concurrent webhook relink, re-import upsert or manual recheck lands
+	// between the cycle's read and its write: if the status changed underneath us the
+	// guarded UPDATE matches no rows and the concurrent actor's decision wins instead of
+	// being silently clobbered (last-writer-wins re-entering the repair loop).
+	ExpectedStatus *HealthStatus
 }
 
 // BackfillRecord represents a record used for metadata backfilling
@@ -1317,10 +1520,18 @@ func (r *HealthRepository) BackfillReleaseDates(ctx context.Context, updates []B
 	}
 	defer tx.Rollback()
 
+	// Backfill release_date for every selected record, but never re-arm a terminal or
+	// in-flight record's schedule: a 'corrupted' record's only terminal guard is a NULL
+	// scheduled_check_at, and a 'repair_triggered' record's schedule is the repair
+	// back-off. Only pending/healthy/checking records get their next check rescheduled
+	// from the freshly-derived release date.
 	stmt, err := tx.PrepareContext(ctx, `
 		UPDATE file_health
 		SET release_date = ?,
-		    scheduled_check_at = ?,
+		    scheduled_check_at = CASE
+		        WHEN status IN ('corrupted', 'repair_triggered') THEN scheduled_check_at
+		        ELSE ?
+		    END,
 		    updated_at = datetime('now')
 		WHERE id = ?
 	`)
@@ -1394,7 +1605,7 @@ func (r *HealthRepository) batchInsertAutomaticHealthChecks(ctx context.Context,
 		}
 
 		args = append(args,
-			record.FilePath, record.LibraryPath, HealthStatusHealthy,
+			normalizeHealthPath(record.FilePath), record.LibraryPath, HealthStatusHealthy,
 			record.MaxRetries, record.MaxRepairRetries,
 			record.SourceNzbPath, releaseDateStr, scheduledCheckAtStr)
 	}
@@ -1468,7 +1679,7 @@ func (r *HealthRepository) ResolvePendingRepairsInDirectory(ctx context.Context,
 
 // UpdateLibraryPath updates the library_path for a specific file
 func (r *HealthRepository) UpdateLibraryPath(ctx context.Context, filePath string, libraryPath string) error {
-	filePath = strings.TrimPrefix(filePath, "/")
+	filePath = normalizeHealthPath(filePath)
 	query := `
 		UPDATE file_health
 		SET library_path = ?,
@@ -1538,48 +1749,106 @@ func (r *HealthRepository) RenameHealthRecord(ctx context.Context, oldPath, newP
 //   - false (Rename events — no new content): preserve repair/corrupted state so a library
 //     reorganization cannot wipe repair progress.
 func (r *HealthRepository) RelinkFileByFilename(ctx context.Context, filename, filePath, libraryPath string, metadataStr *string, revalidate bool) (bool, error) {
-	filePath = strings.TrimPrefix(filePath, "/")
-	query := `
-		UPDATE file_health
-		SET file_path = ?,
-		    library_path = ?,
-		    status = CASE WHEN status IN ('repair_triggered', 'corrupted') THEN status ELSE 'pending' END,
-		    retry_count = CASE WHEN status IN ('repair_triggered', 'corrupted') THEN retry_count ELSE 0 END,
-		    last_error = CASE WHEN status IN ('repair_triggered', 'corrupted') THEN last_error ELSE NULL END,
-		    error_details = CASE WHEN status IN ('repair_triggered', 'corrupted') THEN error_details ELSE NULL END,
-		    metadata = COALESCE(?, metadata),
-		    updated_at = datetime('now'),
-		    scheduled_check_at = CASE WHEN status IN ('repair_triggered', 'corrupted') THEN scheduled_check_at ELSE datetime('now') END
-		WHERE (file_path LIKE ? OR file_path = ? OR library_path LIKE ? OR library_path = ?)
-	`
-	if revalidate {
-		query = `
-			UPDATE file_health
-			SET file_path = ?,
-			    library_path = ?,
-			    status = 'pending',
-			    retry_count = 0,
-			    last_error = NULL,
-			    error_details = NULL,
-			    metadata = COALESCE(?, metadata),
-			    updated_at = datetime('now'),
-			    scheduled_check_at = datetime('now')
-			WHERE (file_path LIKE ? OR file_path = ? OR library_path LIKE ? OR library_path = ?)
-		`
+	filePath = normalizeHealthPath(filePath)
+
+	// A single Download/Rename webhook concerns exactly one imported file. Matching by
+	// bare basename ("%/"+filename) can collide across unrelated titles (01.mkv,
+	// sample.mkv, track01.flac); a blanket UPDATE would force-reset every match and
+	// overwrite their paths. So resolve the target record(s) first and only act when the
+	// target is unambiguous — never reset rows belonging to a different release.
+	likePattern := "%/" + escapeLikePrefix(filename)
+	const matchWhere = `(file_path LIKE ? ESCAPE '\' OR file_path = ? OR library_path LIKE ? ESCAPE '\' OR library_path = ?)`
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("failed to begin relink transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	ids, err := scanIDs(tx.QueryContext(ctx,
+		`SELECT id FROM file_health WHERE `+matchWhere, likePattern, filename, likePattern, libraryPath))
+	if err != nil {
+		return false, fmt.Errorf("failed to resolve relink target: %w", err)
+	}
+	if len(ids) == 0 {
+		return false, nil
 	}
 
-	likePattern := "%/" + filename
-	res, err := r.db.ExecContext(ctx, query, filePath, libraryPath, metadataStr, likePattern, filename, likePattern, libraryPath)
-	if err != nil {
+	targetID := ids[0]
+	if len(ids) > 1 {
+		// Collision: only proceed if exactly one record matches the incoming path
+		// precisely; otherwise refuse and leave every matched row intact.
+		exactIDs, err := scanIDs(tx.QueryContext(ctx,
+			`SELECT id FROM file_health WHERE file_path = ? OR library_path = ?`, filePath, libraryPath))
+		if err != nil {
+			return false, fmt.Errorf("failed to resolve exact relink target: %w", err)
+		}
+		if len(exactIDs) != 1 {
+			slog.WarnContext(ctx, "Refusing ambiguous relink — filename matches multiple records",
+				"filename", filename, "matches", len(ids), "exact_matches", len(exactIDs))
+			return false, nil
+		}
+		slog.WarnContext(ctx, "Filename collision on relink — scoping to the exact path match",
+			"filename", filename, "matches", len(ids))
+		targetID = exactIDs[0]
+	}
+
+	// revalidate (Download — fresh content) resets the record to pending for immediate
+	// re-validation; the non-revalidate (Rename — no new content) branch preserves
+	// repair/corrupted state. Both preserve repair_retry_count (the per-title budget).
+	setClause := `
+		file_path = ?,
+		library_path = ?,
+		status = CASE WHEN status IN ('repair_triggered', 'corrupted') THEN status ELSE 'pending' END,
+		retry_count = CASE WHEN status IN ('repair_triggered', 'corrupted') THEN retry_count ELSE 0 END,
+		last_error = CASE WHEN status IN ('repair_triggered', 'corrupted') THEN last_error ELSE NULL END,
+		error_details = CASE WHEN status IN ('repair_triggered', 'corrupted') THEN error_details ELSE NULL END,
+		metadata = COALESCE(?, metadata),
+		updated_at = datetime('now'),
+		scheduled_check_at = CASE WHEN status IN ('repair_triggered', 'corrupted') THEN scheduled_check_at ELSE datetime('now') END`
+	if revalidate {
+		setClause = `
+		file_path = ?,
+		library_path = ?,
+		status = 'pending',
+		retry_count = 0,
+		last_error = NULL,
+		error_details = NULL,
+		metadata = COALESCE(?, metadata),
+		updated_at = datetime('now'),
+		scheduled_check_at = datetime('now')`
+	}
+
+	if _, err := tx.ExecContext(ctx, `UPDATE file_health SET `+setClause+` WHERE id = ?`,
+		filePath, libraryPath, metadataStr, targetID); err != nil {
 		return false, fmt.Errorf("failed to relink file by filename: %w", err)
 	}
 
-	rows, err := res.RowsAffected()
-	if err != nil {
-		return false, fmt.Errorf("failed to get rows affected: %w", err)
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("failed to commit relink: %w", err)
 	}
 
-	return rows > 0, nil
+	return true, nil
+}
+
+// scanIDs reads an id column from a query result, always closing the rows. It centralizes
+// the "collect matching ids before writing" pattern so a read cursor is never left open
+// across a write on the same transaction.
+func scanIDs(rows *sql.Rows, queryErr error) ([]int64, error) {
+	if queryErr != nil {
+		return nil, queryErr
+	}
+	defer rows.Close()
+
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 // GetSystemState retrieves a persistent state value

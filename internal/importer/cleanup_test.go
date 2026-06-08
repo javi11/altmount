@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/metadata"
@@ -194,6 +195,46 @@ func TestCleanupWrittenPaths_DeletesHealthRecordsForDir(t *testing.T) {
 	h, err := svc.healthRepo.GetFileHealth(ctx, "tv/Other.S01.1080p-GRP/e01.mkv")
 	require.NoError(t, err)
 	assert.NotNil(t, h, "records of unrelated releases must not be touched")
+}
+
+// TestCleanupWrittenPaths_PreservesPriorSuccessfulImport verifies that a failed re-import
+// into a shared nzbFolder deletes only its own unvalidated placeholder records and leaves
+// a prior successful import's validated records (healthy, or relinked to a real ARR library
+// path) intact. The nzbFolder is deterministic per release, so without scoping a failed
+// re-grab would wipe a still-good library entry's health record.
+func TestCleanupWrittenPaths_PreservesPriorSuccessfulImport(t *testing.T) {
+	svc, ms := newCleanupTestService(t)
+	ctx := context.Background()
+
+	writeTestMeta(t, ms, "tv/Pack.S08.1080p-GRP/e01.mkv")
+
+	// This failed attempt's fresh placeholder — must be deleted.
+	addPendingHealthRecord(t, svc.healthRepo, "tv/Pack.S08.1080p-GRP/e01.mkv")
+
+	// A prior successful import's relinked record (library_path != file_path) — must survive.
+	relinked := "/media/library/Pack/e02.mkv"
+	require.NoError(t, svc.healthRepo.AddFileToHealthCheckWithMetadata(ctx,
+		"tv/Pack.S08.1080p-GRP/e02.mkv", &relinked, 3, 3, nil,
+		database.HealthPriorityNext, nil, nil, nil))
+
+	// A prior successful import's healthy record — must survive.
+	addPendingHealthRecord(t, svc.healthRepo, "tv/Pack.S08.1080p-GRP/e03.mkv")
+	require.NoError(t, svc.healthRepo.MarkAsHealthy(ctx, "tv/Pack.S08.1080p-GRP/e03.mkv", time.Now().Add(time.Hour)))
+
+	svc.cleanupWrittenPaths(ctx, 20, []string{"DIR:tv/Pack.S08.1080p-GRP"})
+
+	gone, err := svc.healthRepo.GetFileHealth(ctx, "tv/Pack.S08.1080p-GRP/e01.mkv")
+	require.NoError(t, err)
+	assert.Nil(t, gone, "the failed attempt's unvalidated placeholder must be deleted")
+
+	for _, p := range []string{
+		"tv/Pack.S08.1080p-GRP/e02.mkv",
+		"tv/Pack.S08.1080p-GRP/e03.mkv",
+	} {
+		h, err := svc.healthRepo.GetFileHealth(ctx, p)
+		require.NoError(t, err)
+		assert.NotNil(t, h, "validated record %s from a prior successful import must survive", p)
+	}
 }
 
 // TestCleanupWrittenPaths_DeletesHealthRecordForFile verifies the single-file variant:

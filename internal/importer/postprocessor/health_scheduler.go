@@ -64,15 +64,15 @@ func (c *Coordinator) ScheduleHealthCheck(ctx context.Context, item *database.Im
 		indexer = item.Indexer
 	}
 
-	scheduled := 0
 	var lastErr error
 	repairDirs := make(map[string]struct{})
-	for _, path := range paths {
+	records := make([]database.HealthCheckUpsert, 0, len(paths))
+	for _, p := range paths {
 		// Read metadata to get SourceNzbPath needed for health check
-		fileMeta, err := c.metadataService.ReadFileMetadata(path)
+		fileMeta, err := c.metadataService.ReadFileMetadata(p)
 		if err != nil {
 			slog.WarnContext(ctx, "Failed to read metadata for health check scheduling",
-				"path", path,
+				"path", p,
 				"error", err)
 			lastErr = err
 			continue
@@ -81,17 +81,34 @@ func (c *Coordinator) ScheduleHealthCheck(ctx context.Context, item *database.Im
 			continue
 		}
 
-		// Add/Update health record with high priority
-		filePath := path
-		if err := c.healthRepo.AddFileToHealthCheckWithMetadata(ctx, filePath, &filePath, cfg.GetMaxRetries(), cfg.GetMaxRepairRetries(), &fileMeta.SourceNzbPath, database.HealthPriorityNext, nil, nil, indexer); err != nil {
-			slog.ErrorContext(ctx, "Failed to schedule immediate health check for imported file",
-				"path", path,
-				"error", err)
+		// Copy the path and source NZB into per-iteration locals so the pointers stored in
+		// the batch outlive the loop and do not retain the proto message.
+		filePath := p
+		srcNzb := fileMeta.SourceNzbPath
+		records = append(records, database.HealthCheckUpsert{
+			FilePath:         filePath,
+			LibraryPath:      &filePath,
+			SourceNzbPath:    &srcNzb,
+			Indexer:          indexer,
+			Priority:         database.HealthPriorityNext,
+			MaxRetries:       cfg.GetMaxRetries(),
+			MaxRepairRetries: cfg.GetMaxRepairRetries(),
+		})
+		repairDirs[filepath.Dir(p)] = struct{}{}
+	}
+
+	// One batched upsert for the whole import instead of a write transaction per file — a
+	// season pack / archive can expand to hundreds of paths. Conflict semantics match the
+	// single-row upsert (reset to pending, preserve repair_retry_count).
+	scheduled := 0
+	if len(records) > 0 {
+		if err := c.healthRepo.BatchAddFileToHealthCheck(ctx, records); err != nil {
+			slog.ErrorContext(ctx, "Failed to schedule immediate health checks for imported files",
+				"path", resultingPath, "files", len(records), "error", err)
 			lastErr = err
-			continue
+		} else {
+			scheduled = len(records)
 		}
-		scheduled++
-		repairDirs[filepath.Dir(path)] = struct{}{}
 	}
 
 	if scheduled > 0 {

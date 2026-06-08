@@ -1192,17 +1192,23 @@ func (s *Service) cleanupWrittenPaths(ctx context.Context, itemID int64, paths [
 	}
 }
 
-// cleanupHealthRecords removes health records under the given virtual path (a file or a
-// directory) whose metadata was just rolled back by a failed import. Without this, records
-// scheduled mid-import — or by an earlier attempt of the same release — linger in pending
-// forever under SYMLINK/STRM strategies: their placeholder library_path never matches the
-// worker's library filter, and no ARR webhook will ever relink a rolled-back import.
+// cleanupHealthRecords removes the still-unvalidated health records under the given virtual
+// path (a file or a directory) whose metadata was just rolled back by a failed import.
+// Without this, records scheduled mid-import — or by an earlier attempt of the same release —
+// linger in pending forever under SYMLINK/STRM strategies: their placeholder library_path
+// never matches the worker's library filter, and no ARR webhook will ever relink a
+// rolled-back import.
+//
+// It deletes only unvalidated placeholder records (pending/checking, not yet relinked to a
+// real library path). The nzbFolder is deterministic per release rather than unique per
+// queue item, so a failed re-import shares the subtree of a prior successful import; scoping
+// to unvalidated records keeps that prior import's healthy/relinked/repair records intact.
 func (s *Service) cleanupHealthRecords(ctx context.Context, itemID int64, virtualPath string) {
 	if s.healthRepo == nil {
 		return
 	}
 
-	deleted, err := s.healthRepo.DeleteHealthRecordsByPrefix(ctx, virtualPath)
+	deleted, err := s.healthRepo.DeleteUnvalidatedHealthRecordsByPrefix(ctx, virtualPath)
 	if err != nil {
 		s.log.WarnContext(ctx, "Failed to clean up health records after import failure",
 			"queue_id", itemID,
