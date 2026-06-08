@@ -213,6 +213,7 @@ func (r *HealthRepository) GetUnhealthyFiles(ctx context.Context, limit int, str
 		  AND status NOT IN ('repair_triggered', 'checking')
 		  AND (
 			  ? = 'NONE' 
+			  OR status = 'pending'
 			  OR (metadata IS NOT NULL AND metadata != '')
 			  OR (library_path IS NOT NULL AND library_path LIKE ?)
 			  OR (last_error LIKE '%failed to unmarshal metadata%')
