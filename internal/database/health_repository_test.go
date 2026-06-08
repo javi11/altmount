@@ -561,4 +561,104 @@ func TestResetStalePendingFiles_ResetsStuckPending(t *testing.T) {
 	assert.True(t, got.Before(time.Now().UTC().Add(1*time.Minute)), "stuck file scheduled time should be reset to now (got %v)", got)
 }
 
+func TestRelinkFileByMetadata_ConflictMerge(t *testing.T) {
+	repo := setupTestDB(t)
+	ctx := context.Background()
+
+	// 1. Setup old record with metadata and repair history
+	oldPath := "complete/tv/show.S01E01.mkv"
+	libraryPath := "/mnt/library/tv/show.S01E01.mkv"
+	dbMeta := `{"eventType":"Download","instanceName":"Sonarr","series":{"id":100,"tvdbId":200},"episodeFile":{"id":300},"episodes":[{"id":400}]}`
+	_, err := repo.db.ExecContext(ctx, `
+		INSERT INTO file_health (file_path, status, repair_retry_count, max_repair_retries, metadata, library_path)
+		VALUES (?, 'repair_triggered', 2, 3, ?, ?)
+	`, oldPath, dbMeta, libraryPath)
+	require.NoError(t, err)
+
+	// 2. Setup conflicting record at the target path
+	newPath := "tv/show/Season 01/show.S01E01.mkv"
+	newLibPath := "/mnt/library/tv/show/Season 01/show.S01E01.mkv"
+	_, err = repo.db.ExecContext(ctx, `
+		INSERT INTO file_health (file_path, status, repair_retry_count, max_repair_retries, metadata, library_path)
+		VALUES (?, 'corrupted', 1, 3, ?, ?)
+	`, newPath, dbMeta, newLibPath)
+	require.NoError(t, err)
+
+	// 3. Relink
+	webMeta := model.WebhookMetadata{
+		EventType:    "Download",
+		InstanceName: "Sonarr",
+		Series: &model.SeriesMetadata{
+			Id:     100,
+			TvdbId: 200,
+		},
+		Episodes: []model.EpisodeMetadata{
+			{Id: 400},
+		},
+	}
+	webMetaBytes, err := json.Marshal(webMeta)
+	require.NoError(t, err)
+	webMetaStr := string(webMetaBytes)
+
+	relinked, err := repo.RelinkFileByMetadata(ctx, &webMeta, newPath, newLibPath, &webMetaStr, true)
+	require.NoError(t, err)
+	assert.True(t, relinked)
+
+	// 4. Verify conflicting/new record is merged and updated
+	h, err := repo.GetFileHealth(ctx, newPath)
+	require.NoError(t, err)
+	require.NotNil(t, h)
+	assert.Equal(t, HealthStatusPending, h.Status)
+	assert.Equal(t, 2, h.RepairRetryCount, "Should carry over the maximum repair retry count (2)")
+	assert.Equal(t, 0, h.RetryCount)
+
+	// Verify old record is deleted
+	oldH, err := repo.GetFileHealth(ctx, oldPath)
+	require.NoError(t, err)
+	assert.Nil(t, oldH)
+}
+
+func TestRelinkFileByFilename_ConflictMerge(t *testing.T) {
+	repo := setupTestDB(t)
+	ctx := context.Background()
+
+	fileName := "Matrix.mkv"
+	oldPath := "complete/Matrix.mkv"
+	newPath := "Movies/Matrix/Matrix.mkv"
+	newLibPath := "/lib/Matrix.mkv"
+
+	// 1. Setup old record with repair history
+	_, err := repo.db.ExecContext(ctx, `
+		INSERT INTO file_health (file_path, status, repair_retry_count, max_repair_retries)
+		VALUES (?, 'repair_triggered', 3, 3)
+	`, oldPath)
+	require.NoError(t, err)
+
+	// 2. Setup conflicting record at the target path
+	_, err = repo.db.ExecContext(ctx, `
+		INSERT INTO file_health (file_path, status, repair_retry_count, max_repair_retries)
+		VALUES (?, 'healthy', 1, 3)
+	`, newPath)
+	require.NoError(t, err)
+
+	// 3. Relink
+	relinked, err := repo.RelinkFileByFilename(ctx, fileName, newPath, newLibPath, nil, true)
+	require.NoError(t, err)
+	assert.True(t, relinked)
+
+	// 4. Verify record at new path is updated and merged
+	h, err := repo.GetFileHealth(ctx, newPath)
+	require.NoError(t, err)
+	require.NotNil(t, h)
+	assert.Equal(t, HealthStatusPending, h.Status)
+	assert.Equal(t, 3, h.RepairRetryCount, "Should carry over the maximum repair retry count (3)")
+	assert.Equal(t, 0, h.RetryCount)
+
+	// Verify old path is gone
+	oldH, err := repo.GetFileHealth(ctx, oldPath)
+	require.NoError(t, err)
+	assert.Nil(t, oldH)
+}
+
+
 
