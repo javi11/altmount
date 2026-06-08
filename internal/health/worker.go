@@ -411,45 +411,6 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 		sideEffect = func() error {
 			slog.InfoContext(ctx, "File is healthy", "file_path", fh.FilePath)
 
-			// Discovery: If the file is healthy but missing rich metadata (IDs), attempt to discover it now.
-			// This gradually backfills your library as health checks occur.
-			needsDiscovery := false
-			if fh.Metadata == nil || *fh.Metadata == "" {
-				needsDiscovery = true
-			} else {
-				var dbMeta model.WebhookMetadata
-				if err := json.Unmarshal([]byte(*fh.Metadata), &dbMeta); err == nil {
-					if dbMeta.Series != nil && len(dbMeta.Episodes) == 0 {
-						needsDiscovery = true
-					}
-				}
-			}
-
-			if needsDiscovery {
-				slog.DebugContext(ctx, "Missing metadata or episode IDs for healthy file, attempting discovery", "file_path", fh.FilePath)
-				relativePath := strings.TrimPrefix(fh.FilePath, "complete/")
-				nzbName := ""
-				if fh.SourceNzbPath != nil {
-					nzbName = filepath.Base(*fh.SourceNzbPath)
-				}
-				libPath := ""
-				if fh.LibraryPath != nil {
-					libPath = *fh.LibraryPath
-				}
-				metadata, err := hw.arrsService.DiscoverFileMetadata(ctx, fh.FilePath, relativePath, nzbName, libPath)
-				if err == nil && metadata != nil {
-					metaBytes, err := json.Marshal(metadata)
-					if err == nil {
-						slog.InfoContext(ctx, "Successfully discovered metadata during health check",
-							"file_path", fh.FilePath,
-							"instance", metadata.InstanceName)
-						if err := hw.healthRepo.UpdateFileMetadata(ctx, fh.ID, metaBytes); err != nil {
-							slog.ErrorContext(ctx, "Failed to save discovered metadata", "error", err)
-						}
-					}
-				}
-			}
-
 			return hw.metadataService.UpdateFileStatus(fh.FilePath, metapb.FileStatus_FILE_STATUS_HEALTHY)
 		}
 
@@ -787,6 +748,9 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 				slog.ErrorContext(ctx, "Failed to set file checking status", "file_path", fh.FilePath, "error", err)
 				return
 			}
+
+			// Proactively discover metadata if missing (IDs first priority)
+			fh.Metadata = hw.ensureMetadata(ctx, fh)
 
 			// Perform check
 			opts := CheckOptions{}
@@ -1141,7 +1105,7 @@ func (hw *HealthWorker) ensureMetadata(ctx context.Context, item *database.FileH
 		return item.Metadata
 	}
 
-	slog.InfoContext(ctx, "Emergency ID discovery: Missing metadata for corrupted file, attempting discovery before repair", "file_path", item.FilePath)
+	slog.DebugContext(ctx, "Missing metadata or episode IDs, attempting discovery during health check", "file_path", item.FilePath)
 	relativePath := strings.TrimPrefix(item.FilePath, "complete/")
 	nzbName := ""
 	if item.SourceNzbPath != nil {
@@ -1156,17 +1120,16 @@ func (hw *HealthWorker) ensureMetadata(ctx context.Context, item *database.FileH
 		metaBytes, err := json.Marshal(metadata)
 		if err == nil {
 			str := string(metaBytes)
-			slog.InfoContext(ctx, "Successfully discovered metadata during emergency discovery",
+			slog.InfoContext(ctx, "Successfully discovered metadata during health check",
 				"file_path", item.FilePath,
 				"instance", metadata.InstanceName)
 			if err := hw.healthRepo.UpdateFileMetadata(ctx, item.ID, metaBytes); err != nil {
-				slog.ErrorContext(ctx, "Failed to save discovered metadata during emergency discovery", "error", err)
+				slog.ErrorContext(ctx, "Failed to save discovered metadata", "error", err)
 			}
 			return &str
 		}
 	}
 
-	slog.WarnContext(ctx, "Emergency ID discovery failed, falling back to path-based repair", "file_path", item.FilePath)
 	return nil
 }
 

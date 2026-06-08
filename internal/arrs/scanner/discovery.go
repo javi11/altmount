@@ -78,6 +78,18 @@ func (m *Manager) runStrictDiscovery(ctx context.Context, inst *model.ConfigInst
 	return nil, fmt.Errorf("unsupported type")
 }
 
+func (m *Manager) normalizeTitle(title string) string {
+	t := strings.ToLower(title)
+	t = strings.ReplaceAll(t, ".", "")
+	t = strings.ReplaceAll(t, " ", "")
+	t = strings.ReplaceAll(t, "-", "")
+	t = strings.ReplaceAll(t, "_", "")
+	t = strings.ReplaceAll(t, "&", "")
+	t = strings.ReplaceAll(t, "(", "")
+	t = strings.ReplaceAll(t, ")", "")
+	return t
+}
+
 func (m *Manager) discoverRadarrStrict(ctx context.Context, filePath, cleanNzbName, libraryPath, instanceName string) (*model.WebhookMetadata, error) {
 	instanceConfig, _ := m.instances.FindConfigInstance("radarr", instanceName)
 	client, _ := m.clients.GetOrCreateRadarrClient(instanceName, instanceConfig.URL, instanceConfig.APIKey)
@@ -85,8 +97,19 @@ func (m *Manager) discoverRadarrStrict(ctx context.Context, filePath, cleanNzbNa
 	// 1. Check Library (Active Files)
 	movies, err := m.data.GetMovies(ctx, client, instanceName)
 	if err == nil {
+		normalizedNzb := m.normalizeTitle(cleanNzbName)
+		normalizedPath := m.normalizeTitle(filePath)
+
 		for _, movie := range movies {
 			if movie.HasFile && movie.MovieFile != nil {
+				// Optimization: only pull files for movies that might match
+				normalizedTitle := m.normalizeTitle(movie.Title)
+				if !strings.Contains(normalizedNzb, normalizedTitle) &&
+					!strings.Contains(normalizedPath, normalizedTitle) &&
+					(libraryPath == "" || !strings.Contains(libraryPath, movie.Path)) {
+					continue
+				}
+
 				// Strict Match Conditions:
 				// - Library Path matches
 				// - OR Scene Name matches (NZB Name)
@@ -138,11 +161,21 @@ func (m *Manager) discoverSonarrStrict(ctx context.Context, filePath, cleanNzbNa
 	// 1. Check Library (Active Files)
 	series, err := m.data.GetSeries(ctx, client, instanceName)
 	if err == nil {
+		normalizedNzb := m.normalizeTitle(cleanNzbName)
+		normalizedPath := m.normalizeTitle(filePath)
+
 		for _, show := range series {
 			// Optimization: only pull files for shows that might contain this file
-			if !strings.Contains(strings.ToLower(cleanNzbName), strings.ToLower(show.CleanTitle)) &&
-				!strings.Contains(strings.ToLower(filePath), strings.ToLower(show.Path)) &&
-				(libraryPath == "" || !strings.Contains(strings.ToLower(libraryPath), strings.ToLower(show.Path))) {
+			// Use normalized titles to handle "Law.And.Order" vs "Law & Order" (laworder)
+			normalizedTitle := m.normalizeTitle(show.Title)
+			normalizedClean := strings.ToLower(show.CleanTitle)
+
+			if !strings.Contains(normalizedNzb, normalizedTitle) &&
+				!strings.Contains(normalizedNzb, normalizedClean) &&
+				!strings.Contains(normalizedPath, normalizedTitle) &&
+				!strings.Contains(normalizedPath, normalizedClean) &&
+				!strings.Contains(filePath, show.Path) &&
+				(libraryPath == "" || !strings.Contains(libraryPath, show.Path)) {
 				continue
 			}
 
