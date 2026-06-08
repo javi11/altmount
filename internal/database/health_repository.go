@@ -1834,33 +1834,33 @@ func (r *HealthRepository) relinkOrMergeRecordTx(ctx context.Context, tx *dialec
 		}
 
 		var mergedSourceNzb *string
-		if sourceSourceNzb != nil {
-			mergedSourceNzb = sourceSourceNzb
-		} else {
+		if conflictingSourceNzb != nil {
 			mergedSourceNzb = conflictingSourceNzb
+		} else {
+			mergedSourceNzb = sourceSourceNzb
 		}
 
 		var mergedIndexer *string
-		if sourceIndexer != nil {
-			mergedIndexer = sourceIndexer
-		} else {
+		if conflictingIndexer != nil {
 			mergedIndexer = conflictingIndexer
+		} else {
+			mergedIndexer = sourceIndexer
 		}
 
 		var mergedReleaseDate *time.Time
-		if sourceReleaseDate != nil {
-			mergedReleaseDate = sourceReleaseDate
-		} else {
+		if conflictingReleaseDate != nil {
 			mergedReleaseDate = conflictingReleaseDate
+		} else {
+			mergedReleaseDate = sourceReleaseDate
 		}
 
 		var mergedMetadata *string
 		if metadataStr != nil {
 			mergedMetadata = metadataStr
-		} else if sourceMetadata != nil {
-			mergedMetadata = sourceMetadata
-		} else {
+		} else if conflictingMetadata != nil {
 			mergedMetadata = conflictingMetadata
+		} else {
+			mergedMetadata = sourceMetadata
 		}
 
 		var query string
