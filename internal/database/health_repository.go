@@ -250,8 +250,11 @@ func (r *HealthRepository) GetUnhealthyFiles(ctx context.Context, limit int, str
 
 	// Build library directory prefix filters. Windows may store library_path with
 	// backslashes even when config paths are normalized with slashes.
-	libraryPrefix := strings.TrimRight(libraryDir, `/\`) + "/%"
-	libraryPrefixAlt := strings.TrimRight(libraryDir, `/\`) + `\%`
+	// Normalize the base to forward slashes first so each pattern is internally
+	// consistent regardless of whether libraryDir uses forward or backslashes.
+	libraryBase := strings.TrimRight(strings.ReplaceAll(libraryDir, `\`, "/"), "/")
+	libraryPrefix := libraryBase + "/%"
+	libraryPrefixAlt := strings.ReplaceAll(libraryBase, "/", `\`) + `\%`
 	rows, err := r.db.QueryContext(ctx, query, maxRetries, strategy, libraryPrefix, libraryPrefixAlt, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query files due for check: %w", err)
