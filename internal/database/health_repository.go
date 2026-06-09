@@ -1782,16 +1782,18 @@ func (r *HealthRepository) relinkOrMergeRecordTx(ctx context.Context, tx *dialec
 	filePath = strings.TrimPrefix(filePath, "/")
 
 	// 1. Fetch source/matched record info
+	var sourceStatus string
+	var sourceUpdatedAt time.Time
 	var sourceRepairRetry int
 	var sourceSourceNzb *string
 	var sourceIndexer *string
 	var sourceReleaseDate *time.Time
 	var sourceMetadata *string
 	err := tx.QueryRowContext(ctx, `
-		SELECT repair_retry_count, source_nzb_path, indexer, release_date, metadata
+		SELECT status, updated_at, repair_retry_count, source_nzb_path, indexer, release_date, metadata
 		FROM file_health
 		WHERE id = ?
-	`, id).Scan(&sourceRepairRetry, &sourceSourceNzb, &sourceIndexer, &sourceReleaseDate, &sourceMetadata)
+	`, id).Scan(&sourceStatus, &sourceUpdatedAt, &sourceRepairRetry, &sourceSourceNzb, &sourceIndexer, &sourceReleaseDate, &sourceMetadata)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil // Source record no longer exists, nothing to do
@@ -1801,6 +1803,8 @@ func (r *HealthRepository) relinkOrMergeRecordTx(ctx context.Context, tx *dialec
 
 	// 2. Check if a record with the new file_path already exists
 	var conflictingID int64
+	var conflictingStatus string
+	var conflictingUpdatedAt time.Time
 	var conflictingRepairRetry int
 	var conflictingSourceNzb *string
 	var conflictingIndexer *string
@@ -1809,10 +1813,10 @@ func (r *HealthRepository) relinkOrMergeRecordTx(ctx context.Context, tx *dialec
 	var conflictExists bool = true
 
 	err = tx.QueryRowContext(ctx, `
-		SELECT id, repair_retry_count, source_nzb_path, indexer, release_date, metadata
+		SELECT id, status, updated_at, repair_retry_count, source_nzb_path, indexer, release_date, metadata
 		FROM file_health
 		WHERE file_path = ?
-	`, filePath).Scan(&conflictingID, &conflictingRepairRetry, &conflictingSourceNzb, &conflictingIndexer, &conflictingReleaseDate, &conflictingMetadata)
+	`, filePath).Scan(&conflictingID, &conflictingStatus, &conflictingUpdatedAt, &conflictingRepairRetry, &conflictingSourceNzb, &conflictingIndexer, &conflictingReleaseDate, &conflictingMetadata)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			conflictExists = false
@@ -1824,6 +1828,20 @@ func (r *HealthRepository) relinkOrMergeRecordTx(ctx context.Context, tx *dialec
 	// If the conflicting record is the exact same record as the source, just update it normally
 	if conflictExists && conflictingID == id {
 		conflictExists = false
+	}
+	
+	// Fast-Fail Revalidate Guard: If the target record (the one surviving the merge) recently
+	// had a repair triggered, DO NOT reset it to pending. This prevents Webhooks that fire immediately 
+	// after an import's streaming failure from wiping out the repair trigger.
+	targetStatus := sourceStatus
+	targetUpdatedAt := sourceUpdatedAt
+	if conflictExists {
+		targetStatus = conflictingStatus
+		targetUpdatedAt = conflictingUpdatedAt
+	}
+	
+	if revalidate && (targetStatus == "repair_triggered" || targetStatus == "corrupted") && time.Since(targetUpdatedAt) < 60*time.Second {
+		revalidate = false
 	}
 
 	if conflictExists {
