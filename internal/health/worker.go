@@ -456,25 +456,7 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 	switch fh.Status {
 	case database.HealthStatusRepairTriggered:
 		if fh.RepairRetryCount >= hw.configGetter().GetMaxRepairRetries() {
-			update.Type = database.UpdateTypeCorrupted
-			update.Status = database.HealthStatusCorrupted
-			sideEffect = func() error {
-				slog.ErrorContext(ctx, "File permanently marked as corrupted after repair retries exhausted", "file_path", fh.FilePath)
-
-				// Ensure metadata is hidden in the safety folder
-				hw.moveMetadataToSafetyFolder(ctx, fh)
-
-				// Log failure against the indexer if known
-				if fh.Indexer != nil && *fh.Indexer != "" && *fh.Indexer != database.IndexerUnknown {
-					errMsg := "Permanently corrupted"
-					if errorMsg != nil {
-						errMsg = *errorMsg
-					}
-					_ = hw.healthRepo.LogIndexerImport(ctx, *fh.Indexer, "failed", fmt.Sprintf("Health check permanently corrupted: %s", errMsg), "")
-				}
-
-				return nil
-			}
+			sideEffect = hw.markCorruptedRepairExhausted(ctx, fh, update, errorMsg)
 		} else {
 			// Calculate repair back-off
 			interval := hw.configGetter().GetRepairInterval()
@@ -508,6 +490,15 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 	default:
 		// Regular health check phase
 		if fh.RetryCount >= hw.configGetter().GetMaxRetries()-1 {
+			// Repair budget exhausted: this title was already re-downloaded
+			// max_repair_retries times (the counter survives webhook relinks and
+			// re-import upserts by design). Triggering yet another rescan would
+			// re-download the same broken release forever, so finalize as corrupted.
+			if fh.RepairRetryCount >= hw.configGetter().GetMaxRepairRetries() {
+				sideEffect = hw.markCorruptedRepairExhausted(ctx, fh, update, errorMsg)
+				return update, sideEffect
+			}
+
 			update.Type = database.UpdateTypeRepairTrigger
 			update.Status = database.HealthStatusRepairTriggered
 
@@ -551,6 +542,32 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 	return update, sideEffect
 }
 
+// markCorruptedRepairExhausted fills update with the terminal corrupted state for a file
+// whose repair budget is spent after a failed health check, and returns the side effect
+// (hide metadata in the safety folder, log the failure against the indexer).
+func (hw *HealthWorker) markCorruptedRepairExhausted(ctx context.Context, fh *database.FileHealth, update *database.HealthStatusUpdate, errorMsg *string) func() error {
+	update.Type = database.UpdateTypeCorrupted
+	update.Status = database.HealthStatusCorrupted
+
+	return func() error {
+		slog.ErrorContext(ctx, "File permanently marked as corrupted after repair retries exhausted", "file_path", fh.FilePath)
+
+		// Ensure metadata is hidden in the safety folder
+		hw.moveMetadataToSafetyFolder(ctx, fh)
+
+		// Log failure against the indexer if known
+		if fh.Indexer != nil && *fh.Indexer != "" && *fh.Indexer != database.IndexerUnknown {
+			errMsg := "Permanently corrupted"
+			if errorMsg != nil {
+				errMsg = *errorMsg
+			}
+			_ = hw.healthRepo.LogIndexerImport(ctx, *fh.Indexer, "failed", fmt.Sprintf("Health check permanently corrupted: %s", errMsg), "")
+		}
+
+		return nil
+	}
+}
+
 // prepareRepairNotificationUpdate builds the update and side effect for a file already in
 // repair_triggered state. It re-triggers ARR directly without calling CheckFile, since the
 // metadata has already been moved to the corrupted folder.
@@ -560,7 +577,10 @@ func (hw *HealthWorker) prepareRepairNotificationUpdate(ctx context.Context, fh 
 	}
 
 	if fh.RepairRetryCount >= hw.configGetter().GetMaxRepairRetries() {
-		// Retries exhausted — give up and mark corrupted.
+		// Retries exhausted — give up and mark corrupted. Deliberately no metadata
+		// move here: unlike the failed-check path, this sweep has not re-validated
+		// the file's content, and a re-import may have just landed a good copy. The
+		// user can recheck from the Health page; a failed check will then hide it.
 		update.Type = database.UpdateTypeCorrupted
 		update.Status = database.HealthStatusCorrupted
 		sideEffect := func() error {
@@ -738,10 +758,27 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 		"total", totalFiles,
 		"max_concurrent_jobs", maxJobs)
 
+	// Transition the whole batch to 'checking' in one write instead of one UPDATE per
+	// file: under SQLite's single writer N per-file transitions would serialize against
+	// each other and the final bulk status write. Crash recovery is unchanged
+	// (ResetFileAllChecking at startup re-arms stranded 'checking' rows).
+	checkingPaths := make([]string, len(unhealthyFiles))
+	for i, fh := range unhealthyFiles {
+		checkingPaths[i] = fh.FilePath
+	}
+	if err := hw.healthRepo.SetFilesCheckingBulk(ctx, checkingPaths); err != nil {
+		slog.ErrorContext(ctx, "Failed to bulk-set files to checking", "count", len(checkingPaths), "error", err)
+	}
+
 	// Process files in parallel with bounded concurrency
 	p := pool.New().WithMaxGoroutines(maxJobs)
 	var results []database.HealthStatusUpdate
 	var resultsMu sync.Mutex
+
+	// The regular-check writes are based on the record being 'checking' (set just above);
+	// guard them on that status so a concurrent webhook relink / re-import / manual
+	// recheck that lands mid-check is not silently clobbered by a stale check result.
+	checkingStatus := database.HealthStatusChecking
 
 	// Process health check files
 	for _, fileHealth := range unhealthyFiles {
@@ -749,18 +786,12 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 		p.Go(func() {
 			slog.InfoContext(ctx, "Checking unhealthy file", "file_path", fh.FilePath)
 
-			// Set checking status
-			err := hw.healthRepo.SetFileChecking(ctx, fh.FilePath)
-			if err != nil {
-				slog.ErrorContext(ctx, "Failed to set file checking status", "file_path", fh.FilePath, "error", err)
-				return
-			}
-
 			// Perform check
 			opts := CheckOptions{}
 			event := hw.healthChecker.CheckFile(ctx, fh.FilePath, opts)
 
 			updatePtr, sideEffect := hw.prepareUpdateForResult(ctx, fh, event)
+			updatePtr.ExpectedStatus = &checkingStatus
 			if sideEffect != nil {
 				if err := sideEffect(); err != nil {
 					slog.ErrorContext(ctx, "Failed to execute side effect for health result", "file_path", fh.FilePath, "error", err)
@@ -788,6 +819,7 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 		})
 	}
 
+	repairStatus := database.HealthStatusRepairTriggered
 	for _, fileHealth := range repairFiles {
 		fh := fileHealth // Capture for closure
 		p.Go(func() {
@@ -798,9 +830,21 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 				fh = latest
 			}
 
+			// If a concurrent actor moved the record out of repair_triggered between the
+			// cycle's read and now (e.g. a Download webhook relinked the fresh copy to
+			// pending, or a manual recheck/delete fired), leave it alone. Re-triggering
+			// would clobber that rescue and re-enter the repair loop — and fire the ARR
+			// re-trigger / metadata-move side effects against a record that no longer needs them.
+			if fh.Status != database.HealthStatusRepairTriggered {
+				slog.InfoContext(ctx, "Skipping repair notification — record left repair_triggered concurrently",
+					"file_path", fh.FilePath, "status", fh.Status)
+				return
+			}
+
 			slog.InfoContext(ctx, "Re-triggering repair for file", "file_path", fh.FilePath)
 
 			updatePtr, sideEffect := hw.prepareRepairNotificationUpdate(ctx, fh)
+			updatePtr.ExpectedStatus = &repairStatus
 
 			if sideEffect != nil {
 				if err := sideEffect(); err != nil {
