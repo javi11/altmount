@@ -553,6 +553,7 @@ func (m *Manager) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 
 	var targetMovie *radarr.Movie
 	var targetMovieFileID int64
+	var sceneName string
 	var err error
 
 	// ID-Based Precision: If we have the exact movie ID and file ID from metadata, use them directly
@@ -561,6 +562,8 @@ func (m *Manager) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 			"movie_id", metadata.Movie.Id,
 			"movie_file_id", metadata.MovieFile.Id)
 
+		sceneName = metadata.MovieFile.SceneName
+		
 		movies, err := m.data.GetMovies(ctx, client, instanceName)
 		if err != nil {
 			return fmt.Errorf("failed to get movies from Radarr for ID lookup: %w", err)
@@ -640,6 +643,10 @@ func (m *Manager) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 					}
 				}
 			}
+			
+			if targetMovieFileID > 0 {
+				sceneName = movie.MovieFile.SceneName
+			}
 		}
 	}
 
@@ -666,7 +673,7 @@ func (m *Manager) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 	// If we found the movie and have a file ID, try to blocklist and delete the file
 	if targetMovieFileID > 0 {
 		// Try to blocklist the release associated with this file
-		if err := m.blocklistRadarrMovieFile(ctx, client, targetMovie.ID, targetMovieFileID); err != nil {
+		if err := m.blocklistRadarrMovieFile(ctx, client, targetMovie.ID, targetMovieFileID, sceneName); err != nil {
 			slog.WarnContext(ctx, "Failed to blocklist Radarr release", "error", err)
 		}
 
@@ -721,6 +728,7 @@ func (m *Manager) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 	var targetSeriesID int64
 	var targetSeriesTitle string
 	var targetEpisodeFileID int64
+	var sceneName string
 	var err error
 
 	// ID-Based Precision: If we have exact IDs from metadata, use them
@@ -731,6 +739,7 @@ func (m *Manager) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 
 		targetSeriesID = metadata.Series.Id
 		targetEpisodeFileID = metadata.EpisodeFile.Id
+		sceneName = metadata.EpisodeFile.SceneName
 		targetSeriesTitle = "Known Series (ID Based)" // Title is just for logging
 	}
 
@@ -841,6 +850,7 @@ func (m *Manager) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 
 		if targetEpisodeFile != nil {
 			targetEpisodeFileID = targetEpisodeFile.ID
+			sceneName = targetEpisodeFile.SceneName
 		}
 	}
 
@@ -872,7 +882,7 @@ func (m *Manager) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 			episodeFiles, err := m.data.GetEpisodeFiles(ctx, client, instanceName, targetSeriesID)
 			if err == nil {
 				for _, ef := range episodeFiles {
-					if ef.Path == filePath || (metadata != nil && ef.SceneName == metadata.EpisodeFile.SceneName) {
+					if ef.Path == filePath || (sceneName != "" && ef.SceneName == sceneName) {
 						slog.InfoContext(ctx, "Smart Repair Guard: Episode already has a different healthy file (likely upgraded). Skipping repair.",
 							"old_file_id", targetEpisodeFileID,
 							"new_file_id", ef.ID)
@@ -888,7 +898,7 @@ func (m *Manager) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 				"episode_file_id", targetEpisodeFileID)
 
 			// Try to blocklist the release associated with this file
-			if err := m.blocklistSonarrEpisodeFile(ctx, client, targetSeriesID, targetEpisodeFileID); err != nil {
+			if err := m.blocklistSonarrEpisodeFile(ctx, client, targetSeriesID, targetEpisodeFileID, episodeIDs, sceneName); err != nil {
 				slog.WarnContext(ctx, "Failed to blocklist Sonarr release", "error", err)
 			}
 
@@ -1002,8 +1012,8 @@ func (m *Manager) failSonarrQueueItemByPath(ctx context.Context, client *sonarr.
 }
 
 // blocklistRadarrMovieFile finds the history event for the given file and marks it as failed (blocklisting the release)
-func (m *Manager) blocklistRadarrMovieFile(ctx context.Context, client *radarr.Radarr, movieID int64, fileID int64) error {
-	slog.DebugContext(ctx, "Attempting to find and blocklist release for movie file", "movie_id", movieID, "file_id", fileID)
+func (m *Manager) blocklistRadarrMovieFile(ctx context.Context, client *radarr.Radarr, movieID int64, fileID int64, sceneName string) error {
+	slog.DebugContext(ctx, "Attempting to find and blocklist release for movie file", "movie_id", movieID, "file_id", fileID, "scene_name", sceneName)
 
 	// Fetch history for this specific movie
 	req := &starr.PageReq{PageSize: 100, SortKey: "date", SortDir: starr.SortDescend}
@@ -1019,14 +1029,40 @@ func (m *Manager) blocklistRadarrMovieFile(ctx context.Context, client *radarr.R
 
 	// 1. Find the import event to get the downloadId
 	for _, record := range history.Records {
-		if record.Data.FileID == targetFileID && (record.EventType == "movieFileImported" || record.EventType == "downloadFolderImported") {
-			downloadID = record.DownloadID
-			break
+		if record.EventType == "movieFileImported" || record.EventType == "downloadFolderImported" {
+			if record.Data.FileID == targetFileID {
+				downloadID = record.DownloadID
+				break
+			}
 		}
 	}
 
 	if downloadID == "" {
-		slog.WarnContext(ctx, "Could not find import event in Radarr history for file", "movie_id", movieID, "file_id", fileID)
+		slog.WarnContext(ctx, "Could not find import event in Radarr history for file, attempting to find latest grabbed event directly", "movie_id", movieID, "file_id", fileID)
+		
+		// Precision Fallback: Find the grabbed event matching the SceneName or MovieID
+		for _, record := range history.Records {
+			if record.EventType == "grabbed" && record.MovieID == movieID {
+				if sceneName != "" && strings.Contains(strings.ToLower(record.SourceTitle), strings.ToLower(sceneName)) {
+					slog.InfoContext(ctx, "Found grabbed history record using SceneName precision fallback, marking as failed to blocklist release",
+						"history_id", record.ID, "source_title", record.SourceTitle)
+					if failErr := client.FailContext(ctx, record.ID); failErr != nil {
+						return fmt.Errorf("failed to fail Radarr grab event %d: %w", record.ID, failErr)
+					}
+					return nil
+				}
+				
+				// Without an exact SceneName match, we blindly grab the first grabbed event matching the movieID as a fallback
+				slog.InfoContext(ctx, "Found latest grabbed history record using MovieID fallback, marking as failed to blocklist release",
+					"history_id", record.ID, "movie_id", movieID)
+				if failErr := client.FailContext(ctx, record.ID); failErr != nil {
+					return fmt.Errorf("failed to fail Radarr grab event %d: %w", record.ID, failErr)
+				}
+				return nil
+			}
+		}
+
+		slog.WarnContext(ctx, "Could not find ANY grab event in Radarr history for this movie", "movie_id", movieID)
 		return nil
 	}
 
@@ -1047,8 +1083,8 @@ func (m *Manager) blocklistRadarrMovieFile(ctx context.Context, client *radarr.R
 }
 
 // blocklistSonarrEpisodeFile finds the grabbed history event for the given file and marks it as failed (blocklisting the release)
-func (m *Manager) blocklistSonarrEpisodeFile(ctx context.Context, client *sonarr.Sonarr, seriesID int64, fileID int64) error {
-	slog.DebugContext(ctx, "Attempting to find and blocklist release for episode file", "series_id", seriesID, "file_id", fileID)
+func (m *Manager) blocklistSonarrEpisodeFile(ctx context.Context, client *sonarr.Sonarr, seriesID int64, fileID int64, episodeIDs []int64, sceneName string) error {
+	slog.DebugContext(ctx, "Attempting to find and blocklist release for episode file", "series_id", seriesID, "file_id", fileID, "scene_name", sceneName)
 
 	// Fetch history for this specific series
 	req := &starr.PageReq{PageSize: 100, SortKey: "date", SortDir: starr.SortDescend}
@@ -1064,14 +1100,55 @@ func (m *Manager) blocklistSonarrEpisodeFile(ctx context.Context, client *sonarr
 
 	// 1. Find the import event to get the downloadId
 	for _, record := range history.Records {
-		if record.Data.FileID == targetFileID && record.EventType == "downloadFolderImported" {
-			downloadID = record.DownloadID
-			break
+		if record.EventType == "downloadFolderImported" {
+			if record.Data.FileID == targetFileID {
+				downloadID = record.DownloadID
+				break
+			}
+			
+			// Fallback: Sonarr history might not expose fileId in data consistently. Match by EpisodeID.
+			for _, epID := range episodeIDs {
+				if record.EpisodeID == epID {
+					slog.DebugContext(ctx, "Found import event using EpisodeID fallback", "episode_id", epID, "download_id", record.DownloadID)
+					downloadID = record.DownloadID
+					break
+				}
+			}
+			if downloadID != "" {
+				break
+			}
 		}
 	}
 
 	if downloadID == "" {
-		slog.WarnContext(ctx, "Could not find import event in Sonarr history for file", "series_id", seriesID, "file_id", fileID)
+		slog.WarnContext(ctx, "Could not find import event in Sonarr history for file, attempting to find grabbed event directly", "series_id", seriesID, "file_id", fileID)
+		
+		// Precision Fallback: Find the grabbed event matching the SceneName
+		for _, record := range history.Records {
+			if record.EventType == "grabbed" {
+				if sceneName != "" && strings.Contains(strings.ToLower(record.SourceTitle), strings.ToLower(sceneName)) {
+					slog.InfoContext(ctx, "Found grabbed history record using SceneName precision fallback, marking as failed to blocklist release",
+						"history_id", record.ID, "source_title", record.SourceTitle)
+					if failErr := client.FailContext(ctx, record.ID); failErr != nil {
+						return fmt.Errorf("failed to fail Sonarr grab event %d: %w", record.ID, failErr)
+					}
+					return nil
+				}
+
+				for _, epID := range episodeIDs {
+					if record.EpisodeID == epID {
+						slog.InfoContext(ctx, "Found latest grabbed history record using EpisodeID fallback, marking as failed to blocklist release",
+							"history_id", record.ID, "episode_id", epID)
+						if failErr := client.FailContext(ctx, record.ID); failErr != nil {
+							return fmt.Errorf("failed to fail Sonarr grab event %d: %w", record.ID, failErr)
+						}
+						return nil
+					}
+				}
+			}
+		}
+		
+		slog.WarnContext(ctx, "Could not find ANY grab event in Sonarr history for this episode", "series_id", seriesID)
 		return nil
 	}
 
