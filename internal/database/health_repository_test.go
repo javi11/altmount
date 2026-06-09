@@ -468,3 +468,20 @@ func TestAddFileToHealthCheckWithMetadata_StoresLibraryPath(t *testing.T) {
 	assert.Equal(t, libraryPath, *h.LibraryPath)
 	assert.Equal(t, filePath, h.FilePath)
 }
+
+func TestGetUnhealthyFiles_MatchesWindowsLibraryPath(t *testing.T) {
+	repo := setupTestDB(t)
+	ctx := context.Background()
+
+	past := time.Now().UTC().Add(-1 * time.Hour)
+	_, err := repo.db.ExecContext(ctx, `
+		INSERT INTO file_health (file_path, library_path, status, retry_count, max_retries, scheduled_check_at)
+		VALUES ('tv/Show/Episode.mkv', 'C:\rclone\show-torrents\Show\Season 1\Episode.mkv', 'pending', 0, 3, ?)
+	`, past)
+	require.NoError(t, err)
+
+	files, err := repo.GetUnhealthyFiles(ctx, 10, "SYMLINK", `C:\rclone`, 3)
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+	assert.Equal(t, "tv/Show/Episode.mkv", files[0].FilePath)
+}

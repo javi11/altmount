@@ -237,7 +237,7 @@ func (r *HealthRepository) GetUnhealthyFiles(ctx context.Context, limit int, str
 		  AND status NOT IN ('repair_triggered', 'checking', 'corrupted')
 		  AND (
 			  ? = 'NONE' 
-			  OR (library_path IS NOT NULL AND library_path LIKE ?)
+			  OR (library_path IS NOT NULL AND (library_path LIKE ? OR library_path LIKE ?))
 			  OR (last_error LIKE '%failed to unmarshal metadata%')
 			  OR (last_error LIKE '%failed to read file metadata%')
 			  OR (last_error LIKE '%no ARR instance found%')
@@ -247,14 +247,11 @@ func (r *HealthRepository) GetUnhealthyFiles(ctx context.Context, limit int, str
 		LIMIT ?
 	`
 
-	// Build the library directory prefix filter (e.g. /my/library/path/%)
-	libraryPrefix := libraryDir
-	if !strings.HasSuffix(libraryPrefix, "/") {
-		libraryPrefix += "/"
-	}
-	libraryPrefix += "%"
-
-	rows, err := r.db.QueryContext(ctx, query, maxRetries, strategy, libraryPrefix, limit)
+	// Build library directory prefix filters. Windows may store library_path with
+	// backslashes even when config paths are normalized with slashes.
+	libraryPrefix := strings.TrimRight(libraryDir, `/\`) + "/%"
+	libraryPrefixAlt := strings.TrimRight(libraryDir, `/\`) + `\%`
+	rows, err := r.db.QueryContext(ctx, query, maxRetries, strategy, libraryPrefix, libraryPrefixAlt, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query files due for check: %w", err)
 	}
