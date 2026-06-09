@@ -30,7 +30,8 @@ func NewHealthRepository(db *sql.DB, d Dialect) *HealthRepository {
 // repair state machine relies on. Every method that writes or matches on file_path
 // funnels through here.
 func normalizeHealthPath(p string) string {
-	return strings.TrimPrefix(p, "/")
+	p = strings.TrimPrefix(p, "/")
+	return strings.ReplaceAll(p, `\`, "/")
 }
 
 // escapeLikePrefix escapes the LIKE metacharacters in a literal prefix so it can be
