@@ -51,9 +51,10 @@ func TestFastFailSegmentCheckUsesSegmentSamplePercentageForEligibleFiles(t *test
 			Segments: makeTestSegments("video", 100),
 		},
 		{
-			Filename: "book.pdf",
+			// Sidecar file: must be skipped by the beginning validation pass.
+			Filename: "readme.nfo",
 			Segments: []*metapb.SegmentData{
-				{Id: "pdf-0"},
+				{Id: "nfo-0"},
 			},
 		},
 	}
@@ -74,8 +75,8 @@ func TestFastFailSegmentCheckUsesSegmentSamplePercentageForEligibleFiles(t *test
 	if got := client.StatCalls(); got != 10 {
 		t.Fatalf("StatCalls = %d, want 10", got)
 	}
-	if got := client.PerMessageCalls("pdf-0"); got != 0 {
-		t.Errorf("PerMessageCalls(pdf-0) = %d, want 0", got)
+	if got := client.PerMessageCalls("nfo-0"); got != 0 {
+		t.Errorf("PerMessageCalls(nfo-0) = %d, want 0", got)
 	}
 }
 

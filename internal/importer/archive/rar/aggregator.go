@@ -433,6 +433,7 @@ func ProcessArchive(ctx context.Context, opts ProcessArchiveOptions) error {
 					segmentSamplePercentage,
 					offsetTracker,
 					timeout,
+					false, // archive inner-file segments are validated here, not by the outer fast-fail pass
 				); err != nil {
 					slog.WarnContext(ctx, "Skipping RAR file due to validation error", "error", err, "file", item.baseFilename)
 					return nil

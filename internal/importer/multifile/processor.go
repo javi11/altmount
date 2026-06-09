@@ -45,6 +45,7 @@ func ProcessRegularFiles(
 	timeout time.Duration,
 	tracker *progress.Tracker,
 	filterSamples bool,
+	skipNetworkValidation bool,
 ) ([]string, error) {
 	if len(files) == 0 {
 		return nil, nil
@@ -115,6 +116,7 @@ func ProcessRegularFiles(
 				segmentSamplePercentage,
 				fileTracker,
 				timeout,
+				skipNetworkValidation,
 			); err != nil {
 				slog.WarnContext(ctx, "Skipping file due to segment validation error", "error", err, "file", filename)
 				return nil

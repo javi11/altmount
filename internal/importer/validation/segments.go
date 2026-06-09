@@ -23,6 +23,10 @@ import (
 //
 // The optional progressTracker is passed through to segment availability validation for real-time
 // progress updates during concurrent validation.
+// skipNetworkValidation, when true, skips the network reachability Stat of the selected
+// segments while still performing the local structural and total-size checks. Callers set
+// it when an earlier pass (the import-wide fast-fail) has already confirmed reachability
+// for these files, avoiding a redundant second Stat round-trip over the bulk payload.
 func ValidateSegmentsForFile(
 	ctx context.Context,
 	filename string,
@@ -34,6 +38,7 @@ func ValidateSegmentsForFile(
 	samplePercentage int,
 	progressTracker progress.ProgressTracker,
 	timeout time.Duration,
+	skipNetworkValidation bool,
 ) error {
 	if len(segments) == 0 {
 		return fmt.Errorf("no segments provided for file %s", filename)
@@ -68,9 +73,11 @@ func ValidateSegmentsForFile(
 		totalSegmentSize += segSize
 	}
 
-	selected := usenet.SelectSegmentsForValidation(segments, samplePercentage)
-	if err := usenet.ValidateSegmentList(ctx, selected, poolManager, maxGoroutines, progressTracker, timeout); err != nil {
-		return err
+	if !skipNetworkValidation {
+		selected := usenet.SelectSegmentsForValidation(segments, samplePercentage)
+		if err := usenet.ValidateSegmentList(ctx, selected, poolManager, maxGoroutines, progressTracker, timeout); err != nil {
+			return err
+		}
 	}
 
 	expectedSize := fileSize

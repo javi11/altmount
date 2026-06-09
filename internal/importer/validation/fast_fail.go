@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
@@ -14,19 +13,13 @@ import (
 	concpool "github.com/sourcegraph/conc/pool"
 )
 
-var (
-	fastFailRarPattern      = regexp.MustCompile(`(?i)\.r(ar|\d+)$|\.part\d+\.rar$`)
-	fastFailSevenZipPattern = regexp.MustCompile(`(?i)\.7z$|\.7z\.\d+$`)
-)
-
-var fastFailEligibleExtensions = map[string]struct{}{
-	".3g2": {}, ".3gp": {}, ".aac": {}, ".aif": {}, ".avi": {}, ".flac": {},
-	".m2ts": {}, ".m4a": {}, ".m4b": {}, ".m4v": {}, ".mka": {}, ".mkv": {},
-	".mov": {}, ".mp3": {}, ".mp4": {}, ".mpa": {}, ".mpeg": {}, ".mpg": {},
-	".oga": {}, ".ogg": {}, ".ogv": {}, ".opus": {}, ".rm": {}, ".rmvb": {},
-	".ts": {}, ".vob": {}, ".wav": {}, ".weba": {}, ".webm": {}, ".wma": {},
-	".wmv": {}, ".asf": {}, ".asx": {}, ".dvr-ms": {}, ".mk3d": {}, ".wtv": {},
-	".xvid": {},
+// fastFailSidecarExtensions are small companion files (subtitles, info, checksums,
+// thumbnails, …) whose reachability isn't worth a network round-trip. Everything else —
+// media, archives, and unknown content — is validated by the single beginning pass.
+var fastFailSidecarExtensions = map[string]struct{}{
+	".nfo": {}, ".txt": {}, ".srt": {}, ".sub": {}, ".idx": {}, ".sfv": {},
+	".md5": {}, ".par2": {}, ".jpg": {}, ".jpeg": {}, ".png": {}, ".gif": {},
+	".nzb": {}, ".url": {}, ".diz": {}, ".bmp": {}, ".webp": {},
 }
 
 // FastFailFile is the minimal file surface needed for early segment reachability checks.
@@ -104,15 +97,14 @@ func collectFastFailSegments(files []FastFailFile) []*metapb.SegmentData {
 	return segments
 }
 
+// isFastFailEligibleFile reports whether a file should be reachability-checked by the
+// single beginning validation pass. Everything is eligible except known sidecar files.
 func isFastFailEligibleFile(filename string) bool {
 	base := strings.ToLower(filepath.Base(filename))
 	if base == "" {
 		return false
 	}
-	if fastFailRarPattern.MatchString(base) || fastFailSevenZipPattern.MatchString(base) {
-		return true
-	}
 	ext := filepath.Ext(base)
-	_, ok := fastFailEligibleExtensions[ext]
-	return ok
+	_, isSidecar := fastFailSidecarExtensions[ext]
+	return !isSidecar
 }

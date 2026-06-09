@@ -40,6 +40,7 @@ type FirstSegmentData struct {
 	RawBytes            []byte             // Up to 16KB of raw data for PAR2 detection (may be less if segment is smaller)
 	MissingFirstSegment bool               // True if first segment download failed (article not found, etc.)
 	IsArticleNotFound   bool               // True only when 430 Not Found (permanent); false for timeouts/transient
+	SkippedFirstSegment bool               // True when the fetch was intentionally skipped (clean-named multipart file); Headers/RawBytes are empty by design, not by failure
 	OriginalIndex       int                // Original position in the parsed NZB file list
 }
 
@@ -175,6 +176,20 @@ func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string, pro
 			return nil, errors.NewNonRetryableError("extracting PAR2 file descriptors canceled", par2Err)
 		}
 		p.log.WarnContext(ctx, "Failed to extract PAR2 file descriptors", "error", par2Err)
+	}
+
+	// For files whose first segment we intentionally skipped, fill in the first-segment
+	// decoded size from the NZB-wide representative middle-segment PartSize. In a uniform
+	// multipart yEnc post the first part equals the middle part size, so this is exact.
+	// If no representative is available (e.g. the representative fetch failed),
+	// normalizeSegmentSizesWithYenc falls back to fetching the first segment header,
+	// which preserves correctness at the cost of the saved fetch.
+	if nzbStandardPartSize > 0 {
+		for _, data := range firstSegmentCache {
+			if data != nil && data.SkippedFirstSegment && data.File != nil && len(data.File.Segments) > 0 {
+				firstSegmentSizeCache[data.File.Segments[0].ID] = nzbStandardPartSize
+			}
+		}
 	}
 
 	// Extract file information using priority-based filename selection
@@ -465,6 +480,98 @@ func (p *Parser) parseFile(ctx context.Context, meta map[string]string, nzbFilen
 	return parsedFile, nil
 }
 
+// skipEligibleVideoExtensions is a deliberately narrow set of unambiguous video
+// container extensions whose type can be trusted from the name alone. It excludes
+// ambiguous extensions that IsVideoFile accepts (.bin, .dat, .img, .iso, .ifo, .nsv, …),
+// since those can be archives or disc images that need magic-byte inspection.
+var skipEligibleVideoExtensions = map[string]struct{}{
+	".mkv": {}, ".mp4": {}, ".avi": {}, ".m4v": {}, ".mov": {}, ".wmv": {},
+	".mpg": {}, ".mpeg": {}, ".ts": {}, ".m2ts": {}, ".webm": {}, ".flv": {},
+	".vob": {}, ".mk3d": {}, ".m2v": {}, ".divx": {}, ".ogv": {}, ".rmvb": {},
+}
+
+// shouldSkipFirstSegmentFetch reports whether a file's first segment can be left
+// undownloaded because its NZB subject filename is already trustworthy. This is the
+// SABnzbd-style deobfuscation gate (see fileinfo.IsProbablyObfuscated), applied as a
+// pre-fetch decision rather than a post-fetch naming tie-breaker.
+//
+// We only skip multipart files with at least 3 segments: such a file is itself a valid
+// source for the NZB-wide representative middle-segment PartSize, so a representative is
+// guaranteed to exist and the skipped first segment's decoded size can be filled in
+// exactly (the first part of a uniform multipart yEnc post equals the middle part size).
+//
+// We only skip files we can confidently identify from their name alone: a file with a
+// recognized video extension and a non-obfuscated name. Restricting to known video
+// extensions (rather than any valid-length extension) is deliberate — it excludes the
+// cases that genuinely need their first segment for magic-byte detection: PAR2 files,
+// RAR/7z archives, and ambiguous split-volume names like "Movie.2020.001" or
+// "Movie.mkv.001" whose archive nature is only visible in the bytes. Those keep their
+// fetch. Video files are also where the bandwidth savings matter most.
+func shouldSkipFirstSegmentFetch(file *nzbparser.NzbFile) bool {
+	if file == nil || len(file.Segments) < 3 {
+		return false
+	}
+
+	name := file.Filename
+	if name == "" {
+		return false
+	}
+
+	// Only an unambiguous video container extension is trusted from the name alone.
+	if _, ok := skipEligibleVideoExtensions[strings.ToLower(filepath.Ext(name))]; !ok {
+		return false
+	}
+
+	// Don't trust an obfuscated name even with a video extension.
+	if fileinfo.IsProbablyObfuscated(name) {
+		return false
+	}
+
+	// Uniform-first-part guard: the skip is only safe when the first segment is a full
+	// part the same size as the other non-last parts. Verify locally using the NZB's own
+	// encoded byte counts — no network needed.
+	return firstSegmentEncodedSizeUniform(file.Segments)
+}
+
+// firstSegmentEncodedSizeUniform reports whether the first segment's NZB-reported
+// (encoded) size matches the other full segments, implying its decoded size equals the
+// standard middle-part size. yEnc encoding overhead is uniform per input byte, so equal
+// encoded sizes imply equal decoded sizes. The last segment is the remainder and is
+// excluded from the comparison.
+func firstSegmentEncodedSizeUniform(segments nzbparser.NzbSegments) bool {
+	n := len(segments)
+	if n < 3 {
+		return false
+	}
+
+	first := segments[0].Bytes
+	if first <= 0 {
+		return false
+	}
+
+	mids := make([]int, 0, n-2)
+	for i := 1; i < n-1; i++ {
+		if segments[i].Bytes > 0 {
+			mids = append(mids, segments[i].Bytes)
+		}
+	}
+	if len(mids) == 0 {
+		return false
+	}
+	sort.Ints(mids)
+	median := mids[len(mids)/2]
+	if median <= 0 {
+		return false
+	}
+
+	diff := first - median
+	if diff < 0 {
+		diff = -diff
+	}
+	// Allow 1% tolerance for minor per-part yEnc overhead variation.
+	return float64(diff) <= 0.01*float64(median)
+}
+
 // fetchAllFirstSegments fetches the first segment data for all files in parallel.
 // Returns a slice of FirstSegmentData, a set of segment IDs that returned 430 Not Found
 // (permanent — safe to skip in subsequent fetches), and any fatal error.
@@ -524,6 +631,22 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 						OriginalIndex:       originalIndex,
 					},
 					err: fmt.Errorf("file has no segments"),
+				}, nil
+			}
+
+			// Deobfuscation gate: when the subject filename is trustworthy and the file
+			// is a uniform multipart file, skip the body download entirely. The decoded
+			// first-segment size is filled in later from the NZB-wide representative
+			// part size; naming/type come from the subject. Saves one full-segment
+			// transfer per clean-named multipart file.
+			if shouldSkipFirstSegmentFetch(fileToFetch) {
+				return fetchResult{
+					segmentID: fileToFetch.Segments[0].ID,
+					data: &FirstSegmentData{
+						File:                fileToFetch,
+						SkippedFirstSegment: true,
+						OriginalIndex:       originalIndex,
+					},
 				}, nil
 			}
 
@@ -665,6 +788,11 @@ func (p *Parser) hasPar2IndexCandidate(cache []*FirstSegmentData) bool {
 // Hash16k matching.
 func needs16KBCompletion(d *FirstSegmentData, maxRead int) bool {
 	if d == nil || d.File == nil || d.MissingFirstSegment {
+		return false
+	}
+	// Files whose first segment was intentionally skipped are named from their subject;
+	// PAR2 Hash16k matching is moot and would require re-fetching what we chose to skip.
+	if d.SkippedFirstSegment {
 		return false
 	}
 	if len(d.RawBytes) >= maxRead {

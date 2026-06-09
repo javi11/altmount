@@ -545,6 +545,7 @@ func (proc *Processor) processSingleFile(
 		timeout,
 		fileTracker,
 		filterSampleFiles,
+		proc.configGetter().Import.FastFailEnabled, // skip the redundant end Stat when the beginning fast-fail pass already ran
 	)
 	var writtenPaths []string
 	if writtenPath != "" {
@@ -602,7 +603,6 @@ func (proc *Processor) processMultiFile(
 		filterSampleFiles = *importCfg.FilterSampleFiles
 	}
 
-	targetBaseDir := virtualDir
 	nzbName := proc.getCleanNzbName(nzbPath, queueID)
 
 	// Create NZB folder for multi-file imports, even if early fast-fail filtering
@@ -618,7 +618,7 @@ func (proc *Processor) processMultiFile(
 		return "", nil, err
 	}
 
-	targetBaseDir = nzbFolder
+	targetBaseDir := nzbFolder
 
 	// Create a granular progress tracker covering the 30–100% range.
 	var fileTracker *progress.Tracker
@@ -642,6 +642,7 @@ func (proc *Processor) processMultiFile(
 		timeout,
 		fileTracker,
 		filterSampleFiles,
+		proc.configGetter().Import.FastFailEnabled, // skip the redundant end Stat when the beginning fast-fail pass already ran
 	)
 	if err != nil {
 		return "", writtenPaths, err
@@ -741,6 +742,7 @@ func (proc *Processor) processRarArchive(
 			proc.validationTimeout,
 			nil, // No progress tracker for pre-archive regular files
 			filterSampleFiles,
+			proc.configGetter().Import.FastFailEnabled, // skip the redundant end Stat when the beginning fast-fail pass already ran
 		); err != nil {
 			slog.DebugContext(ctx, "Failed to process regular files", "error", err)
 		}
@@ -881,6 +883,7 @@ func (proc *Processor) processSevenZipArchive(
 			proc.validationTimeout,
 			nil, // No progress tracker for pre-archive regular files
 			filterSampleFiles,
+			proc.configGetter().Import.FastFailEnabled, // skip the redundant end Stat when the beginning fast-fail pass already ran
 		); err != nil {
 			slog.DebugContext(ctx, "Failed to process regular files", "error", err)
 		}

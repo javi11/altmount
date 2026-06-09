@@ -35,6 +35,7 @@ func ProcessSingleFile(
 	timeout time.Duration,
 	tracker *progress.Tracker,
 	filterSamples bool,
+	skipNetworkValidation bool,
 ) (string, string, error) {
 	// Validate file extension before processing
 	if !utils.HasAllowedFilesInRegular([]parser.ParsedFile{file}, allowedFileExtensions, filterSamples) {
@@ -69,6 +70,7 @@ func ProcessSingleFile(
 		segmentSamplePercentage,
 		tracker,
 		timeout,
+		skipNetworkValidation,
 	); err != nil {
 		return "", "", err
 	}
