@@ -1502,6 +1502,11 @@ func (mvf *MetadataVirtualFile) closeCurrentReader() {
 	if mvf.reader != nil {
 		reader := mvf.reader
 		mvf.setReader(nil)
+		// Interrupt immediately so in-flight NNTP downloads stop consuming pool
+		// connections before the closer worker eventually calls Close().
+		if i, ok := reader.(readerInterrupter); ok {
+			i.Interrupt()
+		}
 		mvf.enqueueCloser(reader)
 	}
 	mvf.readerInitialized = false
@@ -1533,6 +1538,11 @@ func (mvf *MetadataVirtualFile) enqueueCloser(r io.Closer) {
 		// Queue full — apply backpressure inline rather than letting
 		// the closer fan-out grow unbounded. This is the rare path; a
 		// real Seek burst stays under closerWorkerCount.
+		// Interrupt first (idempotent) so in-flight downloads release the
+		// pool connection before Close() waits on drain.
+		if i, ok := r.(readerInterrupter); ok {
+			i.Interrupt()
+		}
 		_ = r.Close()
 	}
 }
