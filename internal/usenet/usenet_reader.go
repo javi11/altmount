@@ -440,6 +440,12 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 		_ = b.segmentStore.Put(seg.Id, resultBytes)
 	}
 
+	if errors.Is(err, nntppool.ErrArticleNotFound) {
+		b.log.DebugContext(ctx, "missing segment",
+			"segment_id", seg.Id,
+		)
+	}
+
 	return resultBytes, err
 }
 

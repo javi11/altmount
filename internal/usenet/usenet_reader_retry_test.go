@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/javi11/altmount/internal/testsupport/fakepool"
 	"github.com/javi11/altmount/internal/testsupport/segments"
 	"github.com/javi11/nntppool/v4"
+	"github.com/stretchr/testify/assert"
 )
 
 // usenet_reader_retry_test.go pins the retry-policy invariants for the
@@ -126,3 +129,89 @@ func TestRetry_ContextCancellation_StopsImmediately(t *testing.T) {
 			settled, after)
 	}
 }
+
+// TestMissingSegment_EmitsDebugLog verifies that a DebugContext log with
+// message "missing segment" is emitted when a segment permanently fails
+// with ErrArticleNotFound.
+func TestMissingSegment_EmitsDebugLog(t *testing.T) {
+	t.Parallel()
+	const (
+		segCount    = 1
+		segSize     = 16
+		maxPrefetch = 1
+	)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	fp := fakepool.New()
+	fp.SetBehavior(segments.MessageID(0), fakepool.SegmentBehavior{
+		Err: nntppool.ErrArticleNotFound,
+	})
+
+	var mu sync.Mutex
+	type logRecord struct {
+		msg  string
+		segID string
+	}
+	var captured []logRecord
+
+	handler := &captureLogHandler{
+		onHandle: func(r slog.Record) {
+			var segID string
+			r.Attrs(func(a slog.Attr) bool {
+				if a.Key == "segment_id" {
+					segID = a.Value.String()
+				}
+				return true
+			})
+			mu.Lock()
+			captured = append(captured, logRecord{msg: r.Message, segID: segID})
+			mu.Unlock()
+		},
+	}
+
+	rg := buildEagerRange(ctx, t, segCount, segSize)
+	ur := newReaderForTest(t, ctx, fp, rg, maxPrefetch)
+	ur.log = slog.New(handler)
+	ur.Start()
+
+	_, _ = io.ReadAll(ur)
+
+	// Allow prefetch goroutines to finish.
+	time.Sleep(100 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	found := false
+	for _, r := range captured {
+		if r.msg == "missing segment" && r.segID == segments.MessageID(0) {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "expected 'missing segment' debug log for segment_id=%q, got: %+v", segments.MessageID(0), captured)
+}
+
+// captureLogHandler is a minimal slog.Handler that invokes onHandle for
+// every log record. All levels are enabled.
+type captureLogHandler struct {
+	onHandle func(slog.Record)
+	preAttrs []slog.Attr
+}
+
+func (h *captureLogHandler) Enabled(_ context.Context, _ slog.Level) bool { return true }
+func (h *captureLogHandler) Handle(_ context.Context, r slog.Record) error {
+	full := r.Clone()
+	for _, a := range h.preAttrs {
+		full.AddAttrs(a)
+	}
+	h.onHandle(full)
+	return nil
+}
+func (h *captureLogHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	c := *h
+	c.preAttrs = append(append([]slog.Attr{}, h.preAttrs...), attrs...)
+	return &c
+}
+func (h *captureLogHandler) WithGroup(_ string) slog.Handler { return h }
