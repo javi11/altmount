@@ -1055,13 +1055,39 @@ func (mvf *MetadataVirtualFile) ReadAtContext(readCtx context.Context, p []byte,
 	defer mvf.mu.Unlock()
 
 	// Determine whether this offset can reuse the shared reader.
-	// Shared path: offset matches the next expected sequential position.
-	useShared := (mvf.readAtSharedNext >= 0 && off == mvf.readAtSharedNext) ||
+	// Shared path: offset matches the next expected sequential position, OR
+	// it is slightly ahead (forward-skip: gap ≤ forwardSkipLimit) — discard
+	// the gap via the already-prefetched pipeline instead of creating an
+	// ephemeral reader. Covers "skip intro" / chapter-jump patterns where
+	// the player moves forward by a few seconds inside the prefetch window.
+	const forwardSkipLimit = 16 * 1024 * 1024 // 16 MB — roughly 20 segments
+	forwardSkip := mvf.readerInitialized &&
+		mvf.readAtSharedNext >= 0 &&
+		off > mvf.readAtSharedNext &&
+		off-mvf.readAtSharedNext <= forwardSkipLimit
+	useShared := forwardSkip ||
+		(mvf.readAtSharedNext >= 0 && off == mvf.readAtSharedNext) ||
 		(mvf.readAtSharedNext == 0 && !mvf.readerInitialized && off == mvf.position)
 
 	if useShared {
 		if err := mvf.ensureReader(); err != nil {
 			return 0, err
+		}
+
+		// Forward-skip: discard the gap between the shared reader's current
+		// position and the requested offset. Prefetched bytes make this
+		// memory-speed; any not-yet-fetched bytes download from the pipeline
+		// that would be needed for sequential play anyway.
+		if forwardSkip {
+			gap := off - mvf.readAtSharedNext
+			if _, skipErr := io.CopyN(io.Discard, mvf.reader, gap); skipErr != nil {
+				// Skip failed (e.g. EOF mid-gap). Close and let the
+				// ephemeral path handle this read.
+				mvf.closeCurrentReader()
+				mvf.readAtSharedNext = -1
+				goto ephemeral
+			}
+			mvf.readAtSharedNext = off
 		}
 
 		// Read from the shared reader (same logic as Read but bounded to len(p))
@@ -1100,6 +1126,7 @@ func (mvf *MetadataVirtualFile) ReadAtContext(readCtx context.Context, p []byte,
 		return n, nil
 	}
 
+ephemeral:
 	// --- Ephemeral path: non-sequential offset ---
 	// Track consecutive scrubs. Short bursts (e.g. Plex thumbnail probes) keep
 	// the shared reader alive so the 60-segment prefetch pipeline survives.
