@@ -674,6 +674,10 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 			// Get body for the first segment (v4 returns decoded bytes + YEnc metadata)
 			result, err := cp.Body(c, firstSegment.ID)
 			if err != nil {
+				p.log.DebugContext(ctx, "missing segment",
+					"segment_id", firstSegment.ID,
+					"error", err,
+				)
 				notFound := stderrors.Is(err, nntppool.ErrArticleNotFound)
 				return fetchResult{
 					segmentID:  firstSegment.ID,
