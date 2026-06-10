@@ -71,13 +71,6 @@ func NewParser(poolManager pool.Manager, getConfig config.ConfigGetter) *Parser 
 // progressTracker, if non-nil, receives incremental updates as first segments are fetched (the
 // longest phase). It is safe to pass nil — updates are skipped.
 func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string, progressTracker progress.ProgressTracker) (*ParsedNzb, error) {
-	ctx = slogutil.With(ctx, "nzb_path", nzbPath)
-
-	// Add a safety timeout for the entire parsing process
-	// Parsing large NZBs with many missing articles can sometimes hang in NNTP body fetching
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
-	defer cancel()
-
 	n, err := nzbparser.Parse(r)
 	if err != nil {
 		return nil, errors.NewNonRetryableError("failed to parse NZB XML", err)
@@ -86,6 +79,21 @@ func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string, pro
 	if len(n.Files) == 0 {
 		return nil, errors.NewNonRetryableError("NZB file contains no files", nil)
 	}
+
+	return p.ParseNzb(ctx, n, nzbPath, progressTracker, ParseOptions{})
+}
+
+// ParseNzb processes an already-parsed *nzbparser.Nzb, performing all network
+// operations (first-segment fetches, PAR2 extraction, yEnc normalisation).
+// opts carries knowledge collected before the network phase, e.g. file indexes
+// whose segments are already known to be missing from a pre-parse Stat check.
+func (p *Parser) ParseNzb(ctx context.Context, n *nzbparser.Nzb, nzbPath string, progressTracker progress.ProgressTracker, opts ParseOptions) (*ParsedNzb, error) {
+	ctx = slogutil.With(ctx, "nzb_path", nzbPath)
+
+	// Safety timeout for the entire network phase.
+	// Parsing large NZBs with many missing articles can sometimes hang in NNTP body fetching.
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
 
 	parsed := &ParsedNzb{
 		Path:     nzbPath,
@@ -101,7 +109,7 @@ func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string, pro
 
 	// Fetch first segment data for all files in parallel
 	// This cache is used by both PAR2 extraction and file parsing to avoid redundant fetches
-	firstSegmentCache, notFoundIDs, err := p.fetchAllFirstSegments(ctx, n.Files, progressTracker)
+	firstSegmentCache, notFoundIDs, err := p.fetchAllFirstSegments(ctx, n.Files, progressTracker, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -590,9 +598,16 @@ func firstSegmentEncodedSizeUniform(segments nzbparser.NzbSegments) bool {
 // fetchAllFirstSegments fetches the first segment data for all files in parallel.
 // Returns a slice of FirstSegmentData, a set of segment IDs that returned 430 Not Found
 // (permanent — safe to skip in subsequent fetches), and any fatal error.
-func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.NzbFile, progressTracker progress.ProgressTracker) ([]*FirstSegmentData, map[string]struct{}, error) {
+// opts.BrokenFileIndexes short-circuits Body calls for known-broken file indexes.
+// opts.KnownMissingSegmentIDs pre-seeds notFoundIDs to skip redundant network calls.
+func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.NzbFile, progressTracker progress.ProgressTracker, opts ParseOptions) ([]*FirstSegmentData, map[string]struct{}, error) {
 	cache := make([]*FirstSegmentData, 0, len(files))
 	notFoundIDs := make(map[string]struct{})
+
+	// Seed notFoundIDs with IDs already known to be missing from a pre-parse Stat check.
+	for id := range opts.KnownMissingSegmentIDs {
+		notFoundIDs[id] = struct{}{}
+	}
 
 	// Return empty cache if no pool manager available
 	if p.poolManager == nil || !p.poolManager.HasPool() {
@@ -646,6 +661,21 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 						OriginalIndex:       originalIndex,
 					},
 					err: fmt.Errorf("file has no segments"),
+				}, nil
+			}
+
+			// Short-circuit files flagged as broken by a pre-parse Stat check —
+			// mark missing without a Body call, seeding notFoundIDs via the result.
+			if _, broken := opts.BrokenFileIndexes[originalIndex]; broken {
+				return fetchResult{
+					segmentID:  fileToFetch.Segments[0].ID,
+					isNotFound: true,
+					data: &FirstSegmentData{
+						File:                fileToFetch,
+						MissingFirstSegment: true,
+						IsArticleNotFound:   true,
+						OriginalIndex:       originalIndex,
+					},
 				}, nil
 			}
 

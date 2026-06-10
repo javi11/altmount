@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/javi11/altmount/internal/importer/parser"
 	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
@@ -244,4 +245,70 @@ func EnsureUniqueVirtualPath(virtualPath string, ms *metadata.MetadataService) s
 func isHealthyMetadata(virtualPath string, ms *metadata.MetadataService) bool {
 	meta, err := ms.ReadFileMetadata(virtualPath)
 	return err == nil && meta != nil && meta.Status == metapb.FileStatus_FILE_STATUS_HEALTHY
+}
+
+// PathReserver assigns unique virtual paths within a single import batch,
+// skipping both paths already claimed by sibling goroutines and healthy
+// on-disk metadata.
+//
+// When many files collide to the same name (e.g. obfuscated Blu-ray BDMV posts
+// where every file inherits the release name), re-probing _1.._k for each file
+// is O(N^2) — and when that probing runs under a single shared lock it also
+// serializes the whole worker pool. PathReserver keeps a per-base "next index"
+// high-water mark so each colliding file claims the next free suffix in O(1)
+// amortized time, behind a short-lived internal lock. Safe for concurrent use.
+type PathReserver struct {
+	ms      *metadata.MetadataService
+	mu      sync.Mutex
+	claimed map[string]struct{} // final paths claimed but not yet on disk
+	nextIdx map[string]int      // desired base path -> next suffix index to try
+}
+
+// NewPathReserver creates a reserver backed by the given metadata service.
+func NewPathReserver(ms *metadata.MetadataService) *PathReserver {
+	return &PathReserver{
+		ms:      ms,
+		claimed: make(map[string]struct{}),
+		nextIdx: make(map[string]int),
+	}
+}
+
+// Reserve claims and returns a unique virtual path for desired, appending
+// _1, _2, … only as needed. The caller must Release the returned path once it
+// is durably written (or its write has failed).
+func (r *PathReserver) Reserve(desired string) string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, taken := r.claimed[desired]; !taken && !isHealthyMetadata(desired, r.ms) {
+		r.claimed[desired] = struct{}{}
+		return desired
+	}
+
+	ext := filepath.Ext(desired)
+	stem := strings.TrimSuffix(desired, ext)
+	i := max(r.nextIdx[desired], 1)
+	for ; ; i++ {
+		candidate := fmt.Sprintf("%s_%d%s", stem, i, ext)
+		if _, taken := r.claimed[candidate]; taken {
+			continue
+		}
+		if isHealthyMetadata(candidate, r.ms) {
+			continue
+		}
+		r.claimed[candidate] = struct{}{}
+		// Advance the high-water mark so sibling goroutines start probing past
+		// this slot instead of re-scanning _1.._i. The mark is never rewound:
+		// a written path is caught by the on-disk check above, and a failed
+		// one simply leaves an unused suffix.
+		r.nextIdx[desired] = i + 1
+		return candidate
+	}
+}
+
+// Release drops the in-batch claim for path once it is durably on disk.
+func (r *PathReserver) Release(path string) {
+	r.mu.Lock()
+	delete(r.claimed, path)
+	r.mu.Unlock()
 }

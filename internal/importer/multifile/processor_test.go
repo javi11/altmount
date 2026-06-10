@@ -5,58 +5,50 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/javi11/altmount/internal/importer/parser"
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/pool"
-	"github.com/javi11/altmount/internal/testsupport/fakepool"
-	"github.com/javi11/nntppool/v4"
+	"github.com/javi11/altmount/internal/progress"
 )
 
-type testPoolManager struct {
-	client *fakepool.Client
+// recordingBroadcaster captures progress updates for assertions.
+type recordingBroadcaster struct {
+	mu      sync.Mutex
+	updates int
+	maxPct  int
+	stages  map[string]struct{}
 }
 
-func (m testPoolManager) GetPool() (pool.NntpClient, error) { return m.client, nil }
-func (m testPoolManager) SetProviders([]nntppool.Provider) error {
-	return nil
+func newRecordingBroadcaster() *recordingBroadcaster {
+	return &recordingBroadcaster{stages: make(map[string]struct{})}
 }
-func (m testPoolManager) ClearPool() error { return nil }
-func (m testPoolManager) HasPool() bool    { return m.client != nil }
-func (m testPoolManager) GetMetrics() (pool.MetricsSnapshot, error) {
-	return pool.MetricsSnapshot{}, nil
-}
-func (m testPoolManager) ResetMetrics(context.Context, bool, bool) error { return nil }
-func (m testPoolManager) ResetProviderErrors(context.Context) error      { return nil }
-func (m testPoolManager) IncArticlesDownloaded()                         {}
-func (m testPoolManager) UpdateDownloadProgress(string, int64)           {}
-func (m testPoolManager) IncArticlesPosted()                             {}
-func (m testPoolManager) AddProvider(nntppool.Provider) error            { return nil }
-func (m testPoolManager) RemoveProvider(string) error                    { return nil }
-func (m testPoolManager) ResetProviderQuota(context.Context, string) error {
-	return nil
-}
-func (m testPoolManager) SetProviderIDs(map[string]string) {}
-func (m testPoolManager) AcquireImportSlot(context.Context) (func(), error) {
-	return func() {}, nil
-}
-func (m testPoolManager) SetAdmissionCaps(int, int)                 {}
-func (m testPoolManager) SetStreamSource(pool.StreamActivitySource) {}
-func (m testPoolManager) NotifyStreamChange()                       {}
 
-func TestProcessRegularFilesSkipsFileWithMissingSegments(t *testing.T) {
+func (b *recordingBroadcaster) UpdateProgress(_ int, percentage int) {
+	b.UpdateProgressWithStage(0, percentage, "")
+}
+
+func (b *recordingBroadcaster) UpdateProgressWithStage(_ int, percentage int, stage string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.updates++
+	if percentage > b.maxPct {
+		b.maxPct = percentage
+	}
+	b.stages[stage] = struct{}{}
+}
+
+func TestProcessRegularFilesSkipsFileWithSizeMismatch(t *testing.T) {
 	ctx := context.Background()
 	metaRoot := t.TempDir()
 	svc := metadata.NewMetadataService(metaRoot)
-	client := fakepool.New()
-	client.SetBehavior("missing-segment", fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
 
 	files := []parser.ParsedFile{
 		parsedTestFile("Show.S01E01.mkv", "healthy-segment"),
-		parsedTestFile("Show.S01E02.mkv", "missing-segment"),
+		parsedTestFileSizeMismatch("Show.S01E02.mkv", "bad-segment"),
 	}
 
 	writtenPaths, err := ProcessRegularFiles(
@@ -66,14 +58,9 @@ func TestProcessRegularFilesSkipsFileWithMissingSegments(t *testing.T) {
 		nil,
 		"Show.S01.nzb",
 		svc,
-		testPoolManager{client: client},
-		1,
-		100,
 		[]string{".mkv"},
-		100*time.Millisecond,
-		nil,
 		true,
-		false, // keep network validation in this test
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("ProcessRegularFiles returned error: %v", err)
@@ -90,16 +77,14 @@ func TestProcessRegularFilesSkipsFileWithMissingSegments(t *testing.T) {
 	}
 }
 
-func TestProcessRegularFilesFailsWhenAllFilesHaveMissingSegments(t *testing.T) {
+func TestProcessRegularFilesFailsWhenAllFilesFailValidation(t *testing.T) {
 	ctx := context.Background()
 	metaRoot := t.TempDir()
 	svc := metadata.NewMetadataService(metaRoot)
-	client := fakepool.New()
-	client.SetDefaultBehavior(fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
 
 	files := []parser.ParsedFile{
-		parsedTestFile("Show.S01E01.mkv", "missing-1"),
-		parsedTestFile("Show.S01E02.mkv", "missing-2"),
+		parsedTestFileSizeMismatch("Show.S01E01.mkv", "bad-1"),
+		parsedTestFileSizeMismatch("Show.S01E02.mkv", "bad-2"),
 	}
 
 	writtenPaths, err := ProcessRegularFiles(
@@ -109,14 +94,9 @@ func TestProcessRegularFilesFailsWhenAllFilesHaveMissingSegments(t *testing.T) {
 		nil,
 		"Show.S01.nzb",
 		svc,
-		testPoolManager{client: client},
-		1,
-		100,
 		[]string{".mkv"},
-		100*time.Millisecond,
-		nil,
 		true,
-		false, // keep network validation in this test
+		nil,
 	)
 	if err == nil {
 		t.Fatal("ProcessRegularFiles returned nil error, want all-files-failed error")
@@ -129,10 +109,86 @@ func TestProcessRegularFilesFailsWhenAllFilesHaveMissingSegments(t *testing.T) {
 	}
 }
 
+// TestProcessRegularFilesManyCollidingNames simulates an obfuscated Blu-ray
+// BDMV release where every file inherits the same release name (all colliding
+// to one virtual path). Each colliding file must receive a distinct _N suffix
+// and all metadata must be written. This guards the reservation fast-path:
+// ReserveUniqueVirtualPath must stay correct when hundreds of files collide.
+func TestProcessRegularFilesManyCollidingNames(t *testing.T) {
+	ctx := context.Background()
+	metaRoot := t.TempDir()
+	svc := metadata.NewMetadataService(metaRoot)
+
+	const n = 200
+	files := make([]parser.ParsedFile, n)
+	for i := range files {
+		// All files share the same name, forcing collisions.
+		files[i] = parsedTestFile("Movie.BluRay.clpi", "seg")
+	}
+
+	bc := newRecordingBroadcaster()
+	tracker := progress.NewTracker(bc, 1, 30, 95).WithStage("Writing metadata")
+
+	writtenPaths, err := ProcessRegularFiles(
+		ctx,
+		"movies/Movie.BluRay",
+		files,
+		nil,
+		"Movie.BluRay.nzb",
+		svc,
+		[]string{".clpi"},
+		true,
+		tracker,
+	)
+	if err != nil {
+		t.Fatalf("ProcessRegularFiles returned error: %v", err)
+	}
+
+	if len(writtenPaths) != n {
+		t.Fatalf("writtenPaths = %d, want %d distinct paths", len(writtenPaths), n)
+	}
+
+	// Progress must advance as files complete (not frozen) and use the correct stage.
+	if bc.updates == 0 {
+		t.Fatal("expected progress updates during the write loop, got none")
+	}
+	if bc.maxPct < 95 {
+		t.Fatalf("progress reached only %d%%, want it to climb to the 95%% band top", bc.maxPct)
+	}
+	if _, ok := bc.stages["Writing metadata"]; !ok {
+		t.Fatalf("expected 'Writing metadata' stage, got stages %v", bc.stages)
+	}
+
+	// Every written path must be unique and exist on disk.
+	seen := make(map[string]struct{}, n)
+	for _, p := range writtenPaths {
+		if _, dup := seen[p]; dup {
+			t.Fatalf("duplicate written path: %s", p)
+		}
+		seen[p] = struct{}{}
+		if !metadataExists(t, metaRoot, p) {
+			t.Fatalf("metadata not written to disk for %s", p)
+		}
+	}
+}
+
+// parsedTestFile creates a file where declared size matches segment bytes.
 func parsedTestFile(filename, segmentID string) parser.ParsedFile {
 	return parser.ParsedFile{
 		Filename: filename,
 		Size:     100,
+		Segments: []*metapb.SegmentData{
+			{Id: segmentID, StartOffset: 0, EndOffset: 99},
+		},
+		ReleaseDate: time.Unix(1, 0),
+	}
+}
+
+// parsedTestFileSizeMismatch creates a file where declared size does NOT match segment bytes.
+func parsedTestFileSizeMismatch(filename, segmentID string) parser.ParsedFile {
+	return parser.ParsedFile{
+		Filename: filename,
+		Size:     999, // declared larger than the 100-byte segment
 		Segments: []*metapb.SegmentData{
 			{Id: segmentID, StartOffset: 0, EndOffset: 99},
 		},

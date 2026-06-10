@@ -147,7 +147,6 @@ type ImportAPIResponse struct {
 	MaxDownloadPrefetch            int                   `json:"max_download_prefetch"`
 	ReadTimeoutSeconds             int                   `json:"read_timeout_seconds"`
 	SegmentSamplePercentage        int                   `json:"segment_sample_percentage"` // Percentage of segments to check (1-100)
-	FastFailEnabled                bool                  `json:"fast_fail_enabled"`
 	ImportStrategy                 config.ImportStrategy `json:"import_strategy"`
 	ImportDir                      *string               `json:"import_dir"`
 	WatchDir                       *string               `json:"watch_dir"`
@@ -410,7 +409,6 @@ func ToImportAPIResponse(importConfig config.ImportConfig) ImportAPIResponse {
 		MaxDownloadPrefetch:            importConfig.MaxDownloadPrefetch,
 		ReadTimeoutSeconds:             importConfig.ReadTimeoutSeconds,
 		SegmentSamplePercentage:        importConfig.SegmentSamplePercentage,
-		FastFailEnabled:                importConfig.FastFailEnabled,
 		ImportStrategy:                 importConfig.ImportStrategy,
 		ImportDir:                      importConfig.ImportDir,
 		WatchDir:                       importConfig.WatchDir,
