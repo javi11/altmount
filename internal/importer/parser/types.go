@@ -6,6 +6,19 @@ import (
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 )
 
+// ParseOptions carries pre-parse knowledge into ParseNzb, allowing the
+// processor to skip Body fetches for files whose segments are already known to
+// be missing (identified by a pre-parse Stat check).
+type ParseOptions struct {
+	// BrokenFileIndexes contains the 0-based positions (in the Nzb.Files slice)
+	// of files whose sampled segments failed a pre-parse Stat check. Their first
+	// segments are short-circuited to MissingFirstSegment=true without a Body call.
+	BrokenFileIndexes map[int]struct{}
+	// KnownMissingSegmentIDs seeds notFoundIDs so yEnc normalisation and 16KB
+	// completion never re-issue Stat/Body calls for already-known-missing IDs.
+	KnownMissingSegmentIDs map[string]struct{}
+}
+
 // NzbType represents the type of NZB content
 type NzbType string
 

@@ -7,6 +7,9 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
+
+	concpool "github.com/sourcegraph/conc/pool"
 
 	"github.com/javi11/altmount/internal/importer/archive"
 	"github.com/javi11/altmount/internal/importer/parser"
@@ -97,28 +100,42 @@ func expandBareISOFiles(
 		return nil, nil, fmt.Errorf("expand bare ISOs: %w", err)
 	}
 
+	var writtenMu sync.Mutex
+	pl := concpool.New().WithErrors().WithFirstError().WithContext(ctx)
+
 	for i, c := range expanded {
 		if c.ISOExpansionIndex == 0 && len(c.NestedSources) == 0 {
 			// Untransformed — fall back to standard processing.
 			// len(expanded) <= len(isos) is guaranteed by archive.ExpandISOContents:
 			// it appends one Content per input ISO on passthrough and ≤ one per
 			// group on success. Index isos[i] is therefore safe here.
+			// Collected in this goroutine before pl.Go is called, so no mutex needed.
 			remaining = append(remaining, isos[i])
 			continue
 		}
-		meta := archive.NewFileMetadataFromContent(c, sourceNzbPath, releaseDate, c.NzbdavID)
-		virtualPath := path.Join(virtualDir, c.Filename)
-		if err := deps.writeMetadata(virtualPath, meta); err != nil {
-			return written, nil, fmt.Errorf("write metadata %q: %w", virtualPath, err)
-		}
-		written = append(written, virtualPath)
-		slog.InfoContext(ctx, "Expanded bare ISO into virtual file",
-			"release", releaseName,
-			"path", virtualPath,
-			"size", c.Size,
-			"nested_sources", len(c.NestedSources),
-		)
+		pl.Go(func(ctx context.Context) error {
+			meta := archive.NewFileMetadataFromContent(c, sourceNzbPath, releaseDate, c.NzbdavID)
+			virtualPath := path.Join(virtualDir, c.Filename)
+			if err := deps.writeMetadata(virtualPath, meta); err != nil {
+				return fmt.Errorf("write metadata %q: %w", virtualPath, err)
+			}
+			writtenMu.Lock()
+			written = append(written, virtualPath)
+			writtenMu.Unlock()
+			slog.InfoContext(ctx, "Expanded bare ISO into virtual file",
+				"release", releaseName,
+				"path", virtualPath,
+				"size", c.Size,
+				"nested_sources", len(c.NestedSources),
+			)
+			return nil
+		})
 	}
+
+	if err := pl.Wait(); err != nil {
+		return written, nil, err
+	}
+
 	remaining = append(remaining, rest...)
 	return written, remaining, nil
 }

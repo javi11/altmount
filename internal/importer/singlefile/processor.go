@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/javi11/altmount/internal/importer/filesystem"
 	"github.com/javi11/altmount/internal/importer/parser"
@@ -14,8 +13,6 @@ import (
 	"github.com/javi11/altmount/internal/importer/validation"
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/pool"
-	"github.com/javi11/altmount/internal/progress"
 )
 
 // ProcessSingleFile processes a single file (creates and writes metadata).
@@ -28,12 +25,7 @@ func ProcessSingleFile(
 	par2Files []parser.ParsedFile,
 	nzbPath string,
 	metadataService *metadata.MetadataService,
-	poolManager pool.Manager,
-	maxValidationGoroutines int,
-	segmentSamplePercentage int,
 	allowedFileExtensions []string,
-	timeout time.Duration,
-	tracker *progress.Tracker,
 	filterSamples bool,
 ) (string, string, error) {
 	// Validate file extension before processing
@@ -57,18 +49,12 @@ func ProcessSingleFile(
 		return "", "", fmt.Errorf("file '%s' is not allowed", file.Filename)
 	}
 
-	// Validate segments
+	// Validate segments (local structural checks only; network reachability was confirmed at import start)
 	if err := validation.ValidateSegmentsForFile(
-		ctx,
 		file.Filename,
 		file.Size,
 		file.Segments,
 		file.Encryption,
-		poolManager,
-		maxValidationGoroutines,
-		segmentSamplePercentage,
-		tracker,
-		timeout,
 	); err != nil {
 		return "", "", err
 	}

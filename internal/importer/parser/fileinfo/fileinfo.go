@@ -193,6 +193,14 @@ func getFilenamePriority(filename string, startingPriority int) int {
 	return priority
 }
 
+// IsProbablyObfuscated reports whether a filename is likely obfuscated. It is the
+// exported form of isProbablyObfuscated, used by the parser to decide — before any
+// network fetch — whether a file's NZB subject name is trustworthy enough to skip
+// downloading its first segment.
+func IsProbablyObfuscated(filename string) bool {
+	return isProbablyObfuscated(filename)
+}
+
 // isProbablyObfuscated checks if a filename is likely obfuscated
 // Based on SABnzbd's deobfuscation algorithm:
 // https://github.com/sabnzbd/sabnzbd/blob/64034c5636563b66360aa9dfc1a0b624f4db5cc3/sabnzbd/deobfuscate_filenames.py#L105

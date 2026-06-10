@@ -2,6 +2,9 @@ package importer
 
 import (
 	"context"
+	"sort"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/javi11/altmount/internal/importer/archive"
@@ -206,5 +209,61 @@ func TestExpandBareISOFiles_PropagatesSourceNzbPathAndReleaseDate(t *testing.T) 
 	}
 	if capturedMeta.ReleaseDate != wantReleaseDate {
 		t.Errorf("ReleaseDate = %d, want %d", capturedMeta.ReleaseDate, wantReleaseDate)
+	}
+}
+
+// TestExpandBareISOFiles_MultipleISOs_WritesAllInParallel verifies that when
+// multiple ISOs expand successfully, all their metadata is written and the
+// race detector finds no data races.
+func TestExpandBareISOFiles_MultipleISOs_WritesAllInParallel(t *testing.T) {
+	files := []parser.ParsedFile{
+		{Filename: "DISC_1.iso", Size: 1000},
+		{Filename: "DISC_2.iso", Size: 2000},
+		{Filename: "DISC_3.iso", Size: 3000},
+	}
+
+	var writtenMu sync.Mutex
+	var writtenPaths []string
+
+	deps := expandBareISODeps{
+		enabled: true,
+		expand: func(_ context.Context, _ bool, in []archive.Content) ([]archive.Content, error) {
+			out := make([]archive.Content, len(in))
+			for i, c := range in {
+				out[i] = archive.Content{
+					Filename: strings.TrimSuffix(c.Filename, ".iso") + ".m2ts",
+					Size:     c.Size,
+					NestedSources: []archive.NestedSource{
+						{InnerOffset: 0, InnerLength: c.Size},
+					},
+				}
+			}
+			return out, nil
+		},
+		writeMetadata: func(virtualPath string, _ *metapb.FileMetadata) error {
+			writtenMu.Lock()
+			writtenPaths = append(writtenPaths, virtualPath)
+			writtenMu.Unlock()
+			return nil
+		},
+	}
+
+	written, rest, err := expandBareISOFiles(context.Background(), deps, files, "vdir", "movie", "", 0)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if len(written) != 3 {
+		t.Errorf("written = %v, want 3 paths", written)
+	}
+	if len(rest) != 0 {
+		t.Errorf("rest = %v, want empty (all ISOs expanded)", rest)
+	}
+
+	sort.Strings(writtenPaths)
+	want := []string{"vdir/DISC_1.m2ts", "vdir/DISC_2.m2ts", "vdir/DISC_3.m2ts"}
+	for i, w := range want {
+		if i >= len(writtenPaths) || writtenPaths[i] != w {
+			t.Errorf("writtenPaths[%d] = %q, want %q", i, writtenPaths[i], w)
+		}
 	}
 }

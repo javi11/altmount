@@ -2,6 +2,7 @@ package rar
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -34,11 +35,6 @@ var (
 	ErrNoFilesProcessed = archive.ErrNoFilesProcessed
 )
 
-// getContentSegmentCount delegates to archive.GetContentSegmentCount.
-func getContentSegmentCount(content Content) int {
-	return archive.GetContentSegmentCount(content)
-}
-
 // getContentSegments delegates to archive.GetContentSegments.
 func getContentSegments(content Content) []*metapb.SegmentData {
 	return archive.GetContentSegments(content)
@@ -47,39 +43,6 @@ func getContentSegments(content Content) []*metapb.SegmentData {
 // validateSegmentIntegrity delegates to archive.ValidateSegmentIntegrity.
 func validateSegmentIntegrity(ctx context.Context, content Content) error {
 	return archive.ValidateSegmentIntegrity(ctx, content)
-}
-
-// calculateSegmentsToValidate calculates the actual number of segments that will be validated
-// based on the validation mode (full or sampling) and sample percentage.
-// This mirrors the logic in usenet.SelectSegmentsForValidation.
-func calculateSegmentsToValidate(rarContents []Content, samplePercentage int) int {
-	total := 0
-	for _, content := range rarContents {
-		if content.IsDirectory {
-			continue
-		}
-
-		segmentCount := getContentSegmentCount(content)
-		if samplePercentage == 100 {
-			// Full validation mode: all segments will be validated
-			total += segmentCount
-		} else {
-			// Sampling mode: first 3 + last 2 + random middle samples
-			// Minimum 5 segments always validated for statistical validity
-			minSegments := 5
-			if segmentCount <= minSegments {
-				total += segmentCount
-			} else {
-				// Fixed segments: first 3 + last 2 = 5 segments
-				fixedSegments := 5
-				// Middle segments: based on sample percentage
-				middleSegmentCount := segmentCount - fixedSegments
-				sampledMiddle := (middleSegmentCount * samplePercentage) / 100
-				total += fixedSegments + sampledMiddle
-			}
-		}
-	}
-	return total
 }
 
 // newErrNoAllowedFiles builds a descriptive error showing which extensions were found
@@ -122,27 +85,23 @@ func hasAllowedFiles(rarContents []Content, allowedExtensions []string, filterSa
 
 // ProcessArchiveOptions holds all parameters for ProcessArchive.
 type ProcessArchiveOptions struct {
-	VirtualDir                string
-	ArchiveFiles              []parser.ParsedFile
-	Password                  string
-	ReleaseDate               int64
-	NzbPath                   string
-	Processor                 Processor
-	MetadataService           *metadata.MetadataService
-	PoolManager               pool.Manager
-	ArchiveProgressTracker    *progress.Tracker
-	ValidationProgressTracker *progress.Tracker
-	MaxValidationGoroutines   int
-	SegmentSamplePercentage   int
-	AllowedFileExtensions     []string
-	Timeout                   time.Duration
-	ExtractedFiles            []parser.ExtractedFileInfo
-	MaxPrefetch               int
-	ReadTimeout               time.Duration
-	IsoAnalyzeTimeout         time.Duration
-	ExpandBlurayIso           bool
-	FilterSamples             bool
-	RenameToNzbName           bool
+	VirtualDir             string
+	ArchiveFiles           []parser.ParsedFile
+	Password               string
+	ReleaseDate            int64
+	NzbPath                string
+	Processor              Processor
+	MetadataService        *metadata.MetadataService
+	PoolManager            pool.Manager
+	ArchiveProgressTracker *progress.Tracker
+	AllowedFileExtensions  []string
+	ExtractedFiles         []parser.ExtractedFileInfo
+	MaxPrefetch            int
+	ReadTimeout            time.Duration
+	IsoAnalyzeTimeout      time.Duration
+	ExpandBlurayIso        bool
+	FilterSamples          bool
+	RenameToNzbName        bool
 }
 
 // ProcessArchive analyzes and processes RAR archive files, creating metadata for all extracted files.
@@ -157,11 +116,7 @@ func ProcessArchive(ctx context.Context, opts ProcessArchiveOptions) error {
 	metadataService := opts.MetadataService
 	poolManager := opts.PoolManager
 	archiveProgressTracker := opts.ArchiveProgressTracker
-	validationProgressTracker := opts.ValidationProgressTracker
-	maxValidationGoroutines := opts.MaxValidationGoroutines
-	segmentSamplePercentage := opts.SegmentSamplePercentage
 	allowedFileExtensions := opts.AllowedFileExtensions
-	timeout := opts.Timeout
 	extractedFiles := opts.ExtractedFiles
 	maxPrefetch := opts.MaxPrefetch
 	readTimeout := opts.ReadTimeout
@@ -187,26 +142,59 @@ func ProcessArchive(ctx context.Context, opts ProcessArchiveOptions) error {
 		contents  []Content
 		err       error
 		firstName string
+		skipped   bool // volume gap detected: analysis skipped entirely
 	}
 	groupResults := make([]groupResult, len(archiveGroups))
 	var wg sync.WaitGroup
 	for i, group := range archiveGroups {
+		// Skip groups with a detectable leading/interior volume gap before paying
+		// for network analysis: a missing volume can't be repaired at import time,
+		// so the set is doomed. groupHasVolumeGap is conservative (no false
+		// positives on healthy sets), and a missing trailing volume still falls
+		// through to analysis + segment-integrity validation.
+		if groupHasVolumeGap(group) {
+			slog.WarnContext(ctx, "Skipping RAR archive group with missing volume(s)",
+				"first_file", group[0].Filename, "parts", len(group))
+			groupResults[i] = groupResult{firstName: group[0].Filename, skipped: true}
+			continue
+		}
 		wg.Add(1)
 		go func(idx int, g []parser.ParsedFile) {
 			defer wg.Done()
 			groupContents, err := rarProcessor.AnalyzeRarContentFromNzb(ctx, g, password, archiveProgressTracker)
-			groupResults[idx] = groupResult{groupContents, err, g[0].Filename}
+			groupResults[idx] = groupResult{contents: groupContents, err: err, firstName: g[0].Filename}
 		}(i, group)
 	}
 	wg.Wait()
 
+	// Isolate per-group analysis failures: a single doomed set (missing/unreadable
+	// volume) must not discard the completed analyses of healthy sibling sets. Only
+	// fail the whole archive when no group succeeded. Cancellation is never isolated.
 	var rarContents []Content
+	var groupErrs []error
+	succeeded := 0
 	for _, r := range groupResults {
-		if r.err != nil {
-			slog.ErrorContext(ctx, "Failed to analyze RAR archive group", "error", r.err, "first_file", r.firstName)
-			return r.err
+		if r.skipped {
+			continue
 		}
+		if r.err != nil {
+			if ctx.Err() != nil || errors.Is(r.err, context.Canceled) {
+				return r.err
+			}
+			slog.ErrorContext(ctx, "Skipping RAR archive group after failed analysis",
+				"error", r.err, "first_file", r.firstName)
+			groupErrs = append(groupErrs, r.err)
+			continue
+		}
+		succeeded++
 		rarContents = append(rarContents, r.contents...)
+	}
+	if succeeded == 0 {
+		if len(groupErrs) > 0 {
+			return errors.Join(groupErrs...)
+		}
+		// Every group was skipped for a volume gap — nothing left to import.
+		return ErrNoFilesProcessed
 	}
 
 	// Expand ISO files found inside the RAR archive into their inner media
@@ -232,14 +220,8 @@ func ProcessArchive(ctx context.Context, opts ProcessArchiveOptions) error {
 		return err
 	}
 
-	// Calculate total segments to validate for accurate progress tracking
-	// This accounts for sampling mode if enabled
-	totalSegmentsToValidate := calculateSegmentsToValidate(rarContents, segmentSamplePercentage)
-
-	slog.InfoContext(ctx, "Starting RAR archive validation",
-		"total_files", len(rarContents),
-		"total_segments_to_validate", totalSegmentsToValidate,
-		"sample_percentage", segmentSamplePercentage)
+	slog.InfoContext(ctx, "Starting RAR archive processing",
+		"total_files", len(rarContents))
 
 	// Determine if we should rename the file to match the NZB basename
 	// Only do this if there's exactly one media file in the archive
@@ -270,12 +252,10 @@ func ProcessArchive(ctx context.Context, opts ProcessArchiveOptions) error {
 		baseFilename    string
 		virtualFilePath string
 		isPreExtracted  bool
-		segmentOffset   int
 	}
 
 	var filesToProcess []fileToProcess
 	preProcessedCount := 0 // healthy files already counted as processed
-	cumulativeOffset := 0
 
 	for _, rarContent := range rarContents {
 		if rarContent.IsDirectory {
@@ -357,24 +337,7 @@ func ProcessArchive(ctx context.Context, opts ProcessArchiveOptions) error {
 			baseFilename:    baseFilename,
 			virtualFilePath: virtualFilePath,
 			isPreExtracted:  isPreExtracted,
-			segmentOffset:   cumulativeOffset,
 		})
-
-		// Accumulate the segment offset for the next file's OffsetTracker.
-		segCount := getContentSegmentCount(rarContent)
-		if segmentSamplePercentage == 100 {
-			cumulativeOffset += segCount
-		} else {
-			minSegments := 5
-			if segCount <= minSegments {
-				cumulativeOffset += segCount
-			} else {
-				fixedSegments := 5
-				middleSegmentCount := segCount - fixedSegments
-				sampledMiddle := (middleSegmentCount * segmentSamplePercentage) / 100
-				cumulativeOffset += fixedSegments + sampledMiddle
-			}
-		}
 	}
 
 	// Parallel pass: validate segments and write metadata for each file concurrently.
@@ -395,15 +358,6 @@ func ProcessArchive(ctx context.Context, opts ProcessArchiveOptions) error {
 					return nil
 				}
 
-				var offsetTracker *progress.OffsetTracker
-				if validationProgressTracker != nil && totalSegmentsToValidate > 0 {
-					offsetTracker = progress.NewOffsetTracker(
-						validationProgressTracker,
-						item.segmentOffset,
-						totalSegmentsToValidate,
-					)
-				}
-
 				validationSegments := getContentSegments(item.content)
 
 				var validationSize int64
@@ -422,17 +376,12 @@ func ProcessArchive(ctx context.Context, opts ProcessArchiveOptions) error {
 					}
 				}
 
+				// Local structural checks only; network reachability was confirmed at import start
 				if err := validation.ValidateSegmentsForFile(
-					ctx,
 					item.baseFilename,
 					validationSize,
 					validationSegments,
 					metapb.Encryption_NONE,
-					poolManager,
-					maxValidationGoroutines,
-					segmentSamplePercentage,
-					offsetTracker,
-					timeout,
 				); err != nil {
 					slog.WarnContext(ctx, "Skipping RAR file due to validation error", "error", err, "file", item.baseFilename)
 					return nil
@@ -466,17 +415,6 @@ func ProcessArchive(ctx context.Context, opts ProcessArchiveOptions) error {
 
 	if int(atomic.LoadInt32(&filesProcessed))+preProcessedCount == 0 && len(rarContents) > 0 {
 		return ErrNoFilesProcessed
-	}
-
-	// Ensure validation progress is at 95% (end of validation range)
-	if validationProgressTracker != nil && totalSegmentsToValidate > 0 {
-		validationProgressTracker.Update(totalSegmentsToValidate, totalSegmentsToValidate)
-	}
-
-	// Update progress to 100% after all metadata written (95-100% for metadata finalization)
-	// Use UpdateAbsolute since validationProgressTracker is limited to 80-95% range
-	if validationProgressTracker != nil {
-		validationProgressTracker.UpdateAbsolute(100)
 	}
 
 	slog.InfoContext(ctx, "Successfully processed RAR archive files",

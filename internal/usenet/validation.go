@@ -3,6 +3,7 @@ package usenet
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math/rand"
 	"sync/atomic"
 	"time"
@@ -62,6 +63,10 @@ func ValidateSegmentList(
 			defer cancel()
 
 			if _, err := usenetPool.Stat(checkCtx, seg.Id); err != nil {
+				slog.DebugContext(checkCtx, "missing segment",
+					"segment_id", seg.Id,
+					"error", err,
+				)
 				return fmt.Errorf("segment with ID %s unreachable: %w", seg.Id, err)
 			}
 
@@ -138,6 +143,10 @@ func ValidateSegmentAvailabilityDetailed(
 				poolManager.UpdateDownloadProgress("", 100)
 			}
 			if err != nil {
+				slog.DebugContext(checkCtx, "missing segment",
+					"segment_id", seg.Id,
+					"error", err,
+				)
 				atomic.AddInt32(&missingCount, 1)
 				missingChan <- seg.Id
 				return nil // continue checking remaining segments

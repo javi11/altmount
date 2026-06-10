@@ -100,16 +100,29 @@ func (ms *MetadataService) WriteFileMetadata(virtualPath string, metadata *metap
 		return fmt.Errorf("failed to marshal metadata: %w", err)
 	}
 
-	// Write atomically using a temporary file
-	tmpPath := metadataPath + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
-		metadata.NzbdavId = nzbdavId // Restore on error
-		return fmt.Errorf("failed to write temporary metadata file: %w", err)
+	// Write atomically using a uniquely-named temporary file so concurrent
+	// writes to the same final path don't race on the same .tmp name.
+	tmpFile, err := os.CreateTemp(metadataDir, "."+truncatedFilename+".*.tmp")
+	if err != nil {
+		metadata.NzbdavId = nzbdavId
+		return fmt.Errorf("failed to create temporary metadata file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	if _, writeErr := tmpFile.Write(data); writeErr != nil {
+		tmpFile.Close()
+		_ = os.Remove(tmpPath)
+		metadata.NzbdavId = nzbdavId
+		return fmt.Errorf("failed to write temporary metadata file: %w", writeErr)
+	}
+	if closeErr := tmpFile.Close(); closeErr != nil {
+		_ = os.Remove(tmpPath)
+		metadata.NzbdavId = nzbdavId
+		return fmt.Errorf("failed to close temporary metadata file: %w", closeErr)
 	}
 
 	if err := os.Rename(tmpPath, metadataPath); err != nil {
-		metadata.NzbdavId = nzbdavId // Restore on error
-		_ = os.Remove(tmpPath)       // Clean up
+		_ = os.Remove(tmpPath)
+		metadata.NzbdavId = nzbdavId
 		return fmt.Errorf("failed to rename metadata file: %w", err)
 	}
 
