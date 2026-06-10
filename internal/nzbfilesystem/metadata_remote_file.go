@@ -821,6 +821,12 @@ type MetadataVirtualFile struct {
 	// !readerInitialized means the very first ReadAt at offset 0 is shared.
 	readAtSharedNext int64
 
+	// ephemeralStreak counts consecutive non-sequential ReadAtContext calls
+	// (scrubs, header probes). Short bursts keep the shared reader alive so
+	// the 60-segment prefetch pipeline survives; after ephemeralStreakLimit
+	// consecutive misses the player has genuinely moved and we tear down.
+	ephemeralStreak int
+
 	// Segment offset index for O(1) offset→segment lookup
 	segmentIndex *segmentOffsetIndex
 
@@ -1090,14 +1096,30 @@ func (mvf *MetadataVirtualFile) ReadAtContext(readCtx context.Context, p []byte,
 
 		// Advance the shared cursor so the next sequential call hits this path again.
 		mvf.readAtSharedNext = off + int64(n)
+		mvf.ephemeralStreak = 0 // sequential read — reset scrub counter
 		return n, nil
 	}
 
 	// --- Ephemeral path: non-sequential offset ---
-	// Invalidate the shared cursor and tear down the stale shared reader so
-	// that the next sequential run creates a fresh reader at the correct offset.
-	mvf.readAtSharedNext = -1
-	mvf.closeCurrentReader()
+	// Track consecutive scrubs. Short bursts (e.g. Plex thumbnail probes) keep
+	// the shared reader alive so the 60-segment prefetch pipeline survives.
+	// After ephemeralStreakLimit consecutive misses the player has genuinely
+	// moved, so we tear down and let the next sequential run rebuild from the
+	// new position.
+	const ephemeralStreakLimit = 3
+	if mvf.readerInitialized {
+		mvf.ephemeralStreak++
+		if mvf.ephemeralStreak >= ephemeralStreakLimit {
+			mvf.ephemeralStreak = 0
+			mvf.readAtSharedNext = -1
+			mvf.closeCurrentReader()
+		}
+		// else: shared reader stays alive; readAtSharedNext remains at the
+		// reader's current position so the next sequential call can reuse it.
+	} else {
+		mvf.readAtSharedNext = -1
+		mvf.ephemeralStreak = 0
+	}
 
 	end := off + int64(len(p)) - 1
 	if end >= mvf.meta.FileSize {
@@ -1111,7 +1133,12 @@ func (mvf *MetadataVirtualFile) ReadAtContext(readCtx context.Context, p []byte,
 	// segments — encrypted streams don't map cleanly to segment
 	// boundaries.
 	if n, served := mvf.tryServeFromRandomReadCache(readCtx, p, off, end); served {
-		mvf.readAtSharedNext = off + int64(n)
+		// Only update the shared cursor when the shared reader is gone; if it
+		// is still alive, readAtSharedNext already points to the reader's
+		// current position and must not be overwritten.
+		if !mvf.readerInitialized {
+			mvf.readAtSharedNext = off + int64(n)
+		}
 		return n, nil
 	}
 
@@ -1127,10 +1154,12 @@ func (mvf *MetadataVirtualFile) ReadAtContext(readCtx context.Context, p []byte,
 		err = nil
 	}
 
-	// If this ephemeral read landed right after the shared reader's position,
-	// promote it: set readAtSharedNext so the next sequential call rebuilds
-	// a shared reader from here.
-	mvf.readAtSharedNext = off + int64(n)
+	// Only update the shared cursor when the shared reader was torn down.
+	// If it is still alive, readAtSharedNext already points to the reader's
+	// current position and must not be overwritten by the ephemeral endpoint.
+	if !mvf.readerInitialized {
+		mvf.readAtSharedNext = off + int64(n)
+	}
 
 	return n, err
 }
@@ -1375,8 +1404,11 @@ func (mvf *MetadataVirtualFile) Seek(offset int64, whence int) (int64, error) {
 
 	mvf.position = abs
 	// Align ReadAt shared cursor with the new seek position so that the next
-	// ReadAtContext at this offset reuses the shared reader.
+	// ReadAtContext at this offset reuses the shared reader. Also reset the
+	// ephemeral-streak counter: an explicit Seek establishes a new sequential
+	// starting point regardless of previous scrub activity.
 	mvf.readAtSharedNext = abs
+	mvf.ephemeralStreak = 0
 	return abs, nil
 }
 
@@ -1510,6 +1542,7 @@ func (mvf *MetadataVirtualFile) closeCurrentReader() {
 		mvf.enqueueCloser(reader)
 	}
 	mvf.readerInitialized = false
+	mvf.ephemeralStreak = 0
 }
 
 // closerWorkerCount bounds the number of background reader-Close
