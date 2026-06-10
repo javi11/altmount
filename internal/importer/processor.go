@@ -192,9 +192,14 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 		for j, s := range f.Segments {
 			segs[j] = &metapb.SegmentData{Id: s.ID}
 		}
+		// Tag RAR/split-volume parts with their set key so one unreachable part
+		// dooms the whole set: the sweep skips the rest and marks every member
+		// broken, excluding the doomed set from parsing as a single unit.
+		groupKey, _ := rar.SetKey(f.Filename)
 		fastFailFiles[i] = validation.FastFailFile{
 			Filename: f.Filename,
 			Segments: segs,
+			GroupKey: groupKey,
 		}
 	}
 
@@ -285,6 +290,9 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 		}
 	}
 
+	// With set-level propagation, a broken set has all its parts in brokenIdx, so
+	// this equality is logical-unit accurate: it holds only when every RAR set and
+	// every standalone regular file is broken — nothing healthy remains to import.
 	if eligibleRegularCount > 0 && len(brokenIdx) == eligibleRegularCount {
 		return nil, nil, multifile.ErrNoFilesProcessed
 	}
@@ -292,6 +300,20 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 	if len(brokenIdx) == 0 {
 		return nil, nil, nil
 	}
+
+	if proc.log != nil {
+		brokenSets := make(map[string]struct{})
+		for i := range brokenIdx {
+			if key, ok := rar.SetKey(n.Files[i].Filename); ok {
+				brokenSets[key] = struct{}{}
+			}
+		}
+		proc.log.WarnContext(ctx, "Excluding unreachable files from import",
+			"broken_files", len(brokenIdx),
+			"broken_rar_sets", len(brokenSets),
+			"eligible_files", eligibleRegularCount)
+	}
+
 	return brokenIdx, missingIDs, nil
 }
 
@@ -427,10 +449,15 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 			return "", nil, fmt.Errorf("no NNTP providers configured - item will be retried when providers are added")
 		}
 
+		// Doomed RAR/7z sets are excluded whole during fast-fail (set-level
+		// propagation), so the parser already dropped them and surviving files
+		// never contain a partially-broken known set. Any remaining broken index
+		// belongs to a fully-excluded set or an unrelated file; the aggregator
+		// isolates per-group analysis failures, so don't fail the whole import.
 		if len(brokenIdx) > 0 &&
 			(parsed.Type == parser.NzbTypeRarArchive || parsed.Type == parser.NzbType7zArchive) {
-			return "", nil, NewNonRetryableError("fast-fail segment check failed",
-				fmt.Errorf("archive has %d unreachable part(s)", len(brokenIdx)))
+			proc.log.WarnContext(ctx, "Proceeding with archive import despite unreachable excluded parts",
+				"broken_files", len(brokenIdx))
 		}
 	}
 

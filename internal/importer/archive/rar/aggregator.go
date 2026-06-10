@@ -2,6 +2,7 @@ package rar
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -141,26 +142,59 @@ func ProcessArchive(ctx context.Context, opts ProcessArchiveOptions) error {
 		contents  []Content
 		err       error
 		firstName string
+		skipped   bool // volume gap detected: analysis skipped entirely
 	}
 	groupResults := make([]groupResult, len(archiveGroups))
 	var wg sync.WaitGroup
 	for i, group := range archiveGroups {
+		// Skip groups with a detectable leading/interior volume gap before paying
+		// for network analysis: a missing volume can't be repaired at import time,
+		// so the set is doomed. groupHasVolumeGap is conservative (no false
+		// positives on healthy sets), and a missing trailing volume still falls
+		// through to analysis + segment-integrity validation.
+		if groupHasVolumeGap(group) {
+			slog.WarnContext(ctx, "Skipping RAR archive group with missing volume(s)",
+				"first_file", group[0].Filename, "parts", len(group))
+			groupResults[i] = groupResult{firstName: group[0].Filename, skipped: true}
+			continue
+		}
 		wg.Add(1)
 		go func(idx int, g []parser.ParsedFile) {
 			defer wg.Done()
 			groupContents, err := rarProcessor.AnalyzeRarContentFromNzb(ctx, g, password, archiveProgressTracker)
-			groupResults[idx] = groupResult{groupContents, err, g[0].Filename}
+			groupResults[idx] = groupResult{contents: groupContents, err: err, firstName: g[0].Filename}
 		}(i, group)
 	}
 	wg.Wait()
 
+	// Isolate per-group analysis failures: a single doomed set (missing/unreadable
+	// volume) must not discard the completed analyses of healthy sibling sets. Only
+	// fail the whole archive when no group succeeded. Cancellation is never isolated.
 	var rarContents []Content
+	var groupErrs []error
+	succeeded := 0
 	for _, r := range groupResults {
-		if r.err != nil {
-			slog.ErrorContext(ctx, "Failed to analyze RAR archive group", "error", r.err, "first_file", r.firstName)
-			return r.err
+		if r.skipped {
+			continue
 		}
+		if r.err != nil {
+			if ctx.Err() != nil || errors.Is(r.err, context.Canceled) {
+				return r.err
+			}
+			slog.ErrorContext(ctx, "Skipping RAR archive group after failed analysis",
+				"error", r.err, "first_file", r.firstName)
+			groupErrs = append(groupErrs, r.err)
+			continue
+		}
+		succeeded++
 		rarContents = append(rarContents, r.contents...)
+	}
+	if succeeded == 0 {
+		if len(groupErrs) > 0 {
+			return errors.Join(groupErrs...)
+		}
+		// Every group was skipped for a volume gap — nothing left to import.
+		return ErrNoFilesProcessed
 	}
 
 	// Expand ISO files found inside the RAR archive into their inner media

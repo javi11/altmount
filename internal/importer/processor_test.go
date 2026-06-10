@@ -88,6 +88,70 @@ func TestPreParseFastFailSkipsOnlyMissingEpisode(t *testing.T) {
 // TestPreParseFastFailDoesNotStatPar2 verifies PAR2 segments are skipped entirely
 // from the fast-fail Stat sweep: an unreachable PAR2 segment must neither be
 // Stat-checked nor mark the import broken.
+// TestPreParseFastFailMarksWholeRarSetBroken verifies that one unreachable part
+// dooms its entire RAR set (all parts in brokenIdx) without touching a healthy
+// sibling set.
+func TestPreParseFastFailMarksWholeRarSetBroken(t *testing.T) {
+	client := fakepool.New()
+	client.SetBehavior("a2-missing", fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
+	proc := &Processor{
+		poolManager:       processorTestPoolManager{client: client},
+		validationTimeout: 100 * time.Millisecond,
+	}
+	n := buildTestNzb([]testNzbFile{
+		{name: "setA.part01.rar", segID: "a1"},
+		{name: "setA.part02.rar", segID: "a2-missing"},
+		{name: "setB.part01.rar", segID: "b1"},
+		{name: "setB.part02.rar", segID: "b2"},
+	})
+	cfg := config.DefaultConfig()
+	cfg.Import.SegmentSamplePercentage = 100
+
+	brokenIdx, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, 1)
+	if err != nil {
+		t.Fatalf("preParseFastFail returned error: %v", err)
+	}
+	if len(brokenIdx) != 2 {
+		t.Fatalf("brokenIdx = %v, want both setA parts (indexes 0,1)", brokenIdx)
+	}
+	for _, idx := range []int{0, 1} {
+		if _, ok := brokenIdx[idx]; !ok {
+			t.Errorf("brokenIdx missing index %d (setA part)", idx)
+		}
+	}
+	for _, idx := range []int{2, 3} {
+		if _, ok := brokenIdx[idx]; ok {
+			t.Errorf("brokenIdx contains index %d (healthy setB part), want absent", idx)
+		}
+	}
+}
+
+// TestPreParseFastFailAllRarSetsBrokenReturnsNoFilesProcessed verifies the
+// logical-unit early exit: when every RAR set has a missing part, the import
+// fails before parsing.
+func TestPreParseFastFailAllRarSetsBrokenReturnsNoFilesProcessed(t *testing.T) {
+	client := fakepool.New()
+	client.SetBehavior("a2-missing", fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
+	client.SetBehavior("b2-missing", fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
+	proc := &Processor{
+		poolManager:       processorTestPoolManager{client: client},
+		validationTimeout: 100 * time.Millisecond,
+	}
+	n := buildTestNzb([]testNzbFile{
+		{name: "setA.part01.rar", segID: "a1"},
+		{name: "setA.part02.rar", segID: "a2-missing"},
+		{name: "setB.part01.rar", segID: "b1"},
+		{name: "setB.part02.rar", segID: "b2-missing"},
+	})
+	cfg := config.DefaultConfig()
+	cfg.Import.SegmentSamplePercentage = 100
+
+	_, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, 1)
+	if !errors.Is(err, multifile.ErrNoFilesProcessed) {
+		t.Fatalf("preParseFastFail error = %v, want ErrNoFilesProcessed", err)
+	}
+}
+
 func TestPreParseFastFailDoesNotStatPar2(t *testing.T) {
 	client := fakepool.New()
 	// The PAR2 segment would error if it were ever Stat-checked.

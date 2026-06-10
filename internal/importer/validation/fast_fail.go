@@ -62,6 +62,12 @@ func selectFastFailSegments(segments []*metapb.SegmentData, samplePercentage int
 type FastFailFile struct {
 	Filename string
 	Segments []*metapb.SegmentData
+	// GroupKey identifies the multi-volume set this file belongs to (e.g. a RAR
+	// base name). Empty means the file is standalone. When any member of a group
+	// is found unreachable, FastFailCheckFiles skips the remaining Stats for that
+	// group and marks every member Broken — a missing volume dooms the whole set
+	// (no PAR2 repair at import time), so probing the rest is wasted work.
+	GroupKey string
 }
 
 // FastFailReleaseProbe is the cheap phase-1 reachability gate for an NZB import.
@@ -181,22 +187,45 @@ func FastFailCheckFiles(
 	results := make([]FastFailFileResult, len(files))
 	var mu sync.Mutex
 
+	// brokenGroups records group keys with at least one unreachable segment, so
+	// remaining Stats for those groups can be skipped. Guarded by mu.
+	brokenGroups := make(map[string]struct{})
+
 	// Build the flat work list first so we know the total up front for progress.
 	type statJob struct {
-		fileIdx int
-		segID   string
+		fileIdx  int
+		segID    string
+		groupKey string
 	}
-	var jobs []statJob
 
+	// Select each file's sample once, then interleave the jobs round-robin
+	// across files (every file's first sample, then every file's second, …).
+	// File-by-file ordering would Stat all of a broken set's parts before any
+	// sibling, defeating the group short-circuit; round-robin makes the first
+	// miss of a set land within roughly len(files) Stats so siblings are
+	// skipped. Per-file selection already places Segments[0] first.
+	perFile := make([][]*metapb.SegmentData, len(files))
+	maxSamples := 0
 	for fileIdx, file := range files {
 		if len(file.Segments) == 0 {
 			continue
 		}
+		perFile[fileIdx] = selectFastFailSegments(file.Segments, segmentSamplePercentage)
+		if len(perFile[fileIdx]) > maxSamples {
+			maxSamples = len(perFile[fileIdx])
+		}
+	}
 
-		selected := selectFastFailSegments(file.Segments, segmentSamplePercentage)
-
-		for _, seg := range selected {
-			jobs = append(jobs, statJob{fileIdx: fileIdx, segID: seg.Id})
+	var jobs []statJob
+	for round := 0; round < maxSamples; round++ {
+		for fileIdx, selected := range perFile {
+			if round < len(selected) {
+				jobs = append(jobs, statJob{
+					fileIdx:  fileIdx,
+					segID:    selected[round].Id,
+					groupKey: files[fileIdx].GroupKey,
+				})
+			}
 		}
 	}
 
@@ -211,14 +240,29 @@ func FastFailCheckFiles(
 
 	for _, job := range jobs {
 		pl.Go(func() {
-			checkCtx, cancel := context.WithTimeout(ctx, timeout)
-			defer cancel()
-
-			if _, statErr := usenetPool.Stat(checkCtx, job.segID); statErr != nil {
+			// Skip the Stat if this job's group is already known broken — the
+			// whole set is doomed, so reachability of the rest is irrelevant.
+			// Still advance progress so the bar completes.
+			skip := false
+			if job.groupKey != "" {
 				mu.Lock()
-				results[job.fileIdx].Broken = true
-				results[job.fileIdx].MissingSegmentIDs = append(results[job.fileIdx].MissingSegmentIDs, job.segID)
+				_, skip = brokenGroups[job.groupKey]
 				mu.Unlock()
+			}
+
+			if !skip {
+				checkCtx, cancel := context.WithTimeout(ctx, timeout)
+				defer cancel()
+
+				if _, statErr := usenetPool.Stat(checkCtx, job.segID); statErr != nil {
+					mu.Lock()
+					results[job.fileIdx].Broken = true
+					results[job.fileIdx].MissingSegmentIDs = append(results[job.fileIdx].MissingSegmentIDs, job.segID)
+					if job.groupKey != "" {
+						brokenGroups[job.groupKey] = struct{}{}
+					}
+					mu.Unlock()
+				}
 			}
 
 			// Emit progress only when the integer percentage advances, to avoid
@@ -236,5 +280,21 @@ func FastFailCheckFiles(
 	}
 
 	pl.Wait()
+
+	// Propagate set breakage: every file in a broken group is marked Broken so
+	// the entire doomed set is excluded from parsing as one unit. Siblings carry
+	// no synthetic MissingSegmentIDs — only segments actually observed missing
+	// are reported.
+	if len(brokenGroups) > 0 {
+		for i := range files {
+			if files[i].GroupKey == "" || results[i].Broken {
+				continue
+			}
+			if _, broken := brokenGroups[files[i].GroupKey]; broken {
+				results[i].Broken = true
+			}
+		}
+	}
+
 	return results, nil
 }

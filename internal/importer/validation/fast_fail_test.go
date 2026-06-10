@@ -374,6 +374,114 @@ func TestFastFailCheckFilesFirstSegmentAlwaysChecked(t *testing.T) {
 	}
 }
 
+// TestFastFailCheckFilesGroupPropagation verifies that when one part of a RAR
+// set is unreachable, every member of that set is marked Broken, while an
+// ungrouped sibling file stays healthy.
+func TestFastFailCheckFilesGroupPropagation(t *testing.T) {
+	client := fakepool.New()
+	client.SetBehavior("setA-1-0", fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
+
+	files := []FastFailFile{
+		{Filename: "setA.part01.rar", Segments: makeTestSegments("setA-0", 3), GroupKey: "seta"},
+		{Filename: "setA.part02.rar", Segments: makeTestSegments("setA-1", 3), GroupKey: "seta"},
+		{Filename: "setA.part03.rar", Segments: makeTestSegments("setA-2", 3), GroupKey: "seta"},
+		{Filename: "standalone.mkv", Segments: makeTestSegments("solo", 3)},
+	}
+
+	results, err := FastFailCheckFiles(
+		context.Background(), files,
+		fastFailPoolManager{client: client},
+		100, 4, 100*time.Millisecond,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("FastFailCheckFiles error = %v, want nil", err)
+	}
+	for i := range 3 {
+		if !results[i].Broken {
+			t.Errorf("results[%d].Broken = false, want true (whole set is doomed)", i)
+		}
+	}
+	if results[3].Broken {
+		t.Error("results[3].Broken = true, want false (standalone file is healthy)")
+	}
+	// Only the observed-missing segment is reported; siblings carry none.
+	if len(results[0].MissingSegmentIDs) != 0 {
+		t.Errorf("results[0].MissingSegmentIDs = %v, want empty (no observed miss)", results[0].MissingSegmentIDs)
+	}
+}
+
+// TestFastFailCheckFilesGroupShortCircuitSkipsStats verifies that once a group
+// is known broken, the remaining Stats for that group are skipped — fewer Stats
+// run than the total selected sample count.
+func TestFastFailCheckFilesGroupShortCircuitSkipsStats(t *testing.T) {
+	client := fakepool.New()
+	// Every segment of the broken set is unreachable, so any Stat that runs fails;
+	// the point is that most are skipped after the first miss.
+	client.SetDefaultBehavior(fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
+
+	const parts = 20
+	const segsPerPart = 3
+	files := make([]FastFailFile, parts)
+	for i := range files {
+		files[i] = FastFailFile{
+			Filename: fmt.Sprintf("doomed.part%02d.rar", i+1),
+			Segments: makeTestSegments(fmt.Sprintf("p%d", i), segsPerPart),
+			GroupKey: "doomed",
+		}
+	}
+
+	results, err := FastFailCheckFiles(
+		context.Background(), files,
+		fastFailPoolManager{client: client},
+		100, 1, 100*time.Millisecond, // single connection → deterministic ordering
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("FastFailCheckFiles error = %v, want nil", err)
+	}
+	for i, r := range results {
+		if !r.Broken {
+			t.Errorf("results[%d].Broken = false, want true", i)
+		}
+	}
+	// Round-robin means the first round Stats one segment per part (20 Stats),
+	// the very first of which marks the group broken; all later Stats are skipped.
+	// So total Stats must be well below the full sample of parts*segsPerPart.
+	if got, full := client.StatCalls(), int64(parts*segsPerPart); got >= full {
+		t.Errorf("StatCalls = %d, want < %d (group short-circuit must skip Stats)", got, full)
+	}
+}
+
+// TestFastFailCheckFilesEmptyGroupKeyNoPropagation guards against propagation
+// leaking across ungrouped files: two standalone files, one broken, must not
+// taint the other.
+func TestFastFailCheckFilesEmptyGroupKeyNoPropagation(t *testing.T) {
+	client := fakepool.New()
+	client.SetBehavior("a-0", fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
+
+	files := []FastFailFile{
+		{Filename: "a.mkv", Segments: makeTestSegments("a", 3)},
+		{Filename: "b.mkv", Segments: makeTestSegments("b", 3)},
+	}
+
+	results, err := FastFailCheckFiles(
+		context.Background(), files,
+		fastFailPoolManager{client: client},
+		100, 2, 100*time.Millisecond,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("FastFailCheckFiles error = %v, want nil", err)
+	}
+	if !results[0].Broken {
+		t.Error("results[0].Broken = false, want true")
+	}
+	if results[1].Broken {
+		t.Error("results[1].Broken = true, want false (empty GroupKey must not propagate)")
+	}
+}
+
 func TestFastFailCheckFilesIndexAligned(t *testing.T) {
 	client := fakepool.New()
 	// Only the middle file's segments fail.
