@@ -105,7 +105,6 @@ func (c *Coordinator) broadcastToARRType(ctx context.Context, arrsService *arrs.
 		return fmt.Errorf("cannot determine ARR type: category is nil")
 	}
 	categoryName := *item.Category
-	category := strings.ToLower(categoryName)
 	arrType := ""
 
 	cfg := c.configGetter()
@@ -118,19 +117,9 @@ func (c *Coordinator) broadcastToARRType(ctx context.Context, arrsService *arrs.
 		}
 	}
 
-	// Fallback to heuristic if no explicit type is mapped
+	// Fallback to heuristic if no explicit type is mapped.
 	if arrType == "" {
-		if category == "tv" || strings.Contains(category, "tv") || strings.Contains(category, "show") || category == "sonarr" {
-			arrType = "sonarr"
-		} else if category == "movies" || strings.Contains(category, "movie") || category == "radarr" {
-			arrType = "radarr"
-		} else if category == "music" || strings.Contains(category, "music") || category == "lidarr" {
-			arrType = "lidarr"
-		} else if category == "books" || strings.Contains(category, "book") || category == "readarr" {
-			arrType = "readarr"
-		} else if category == "adult" || category == "whisparr" {
-			arrType = "whisparr"
-		}
+		arrType = config.InferARRTypeFromCategory(categoryName)
 	}
 
 	if arrType != "" {
@@ -139,4 +128,11 @@ func (c *Coordinator) broadcastToARRType(ctx context.Context, arrsService *arrs.
 	}
 
 	return fmt.Errorf("could not determine ARR type for category: %s", categoryName)
+}
+
+// inferARRTypeFromCategory is a thin shim around config.InferARRTypeFromCategory
+// kept so the existing table-driven test in this package continues to compile.
+// Prefer calling config.InferARRTypeFromCategory directly from new code.
+func inferARRTypeFromCategory(categoryName string) string {
+	return config.InferARRTypeFromCategory(categoryName)
 }

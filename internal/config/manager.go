@@ -646,6 +646,59 @@ func (c *Config) GetDownloadClientBaseURL() string {
 	return fmt.Sprintf("http://%s:%d/sabnzbd", host, c.WebDAV.Port)
 }
 
+// InferARRTypeFromCategory guesses the ARR type ("radarr"/"sonarr"/"lidarr"/
+// "readarr"/"whisparr") from a category name. Uses HasPrefix so multi-instance
+// names like "radarr-sqp1", "sonarr-4k", "sonarr-anime" route correctly.
+// Returns "" when no rule matches. Pure string logic, no side effects.
+func InferARRTypeFromCategory(categoryName string) string {
+	category := strings.ToLower(categoryName)
+	switch {
+	case category == "tv",
+		strings.Contains(category, "tv"),
+		strings.Contains(category, "show"),
+		strings.HasPrefix(category, "sonarr"):
+		return "sonarr"
+	case category == "movies",
+		strings.Contains(category, "movie"),
+		strings.HasPrefix(category, "radarr"):
+		return "radarr"
+	case category == "music",
+		strings.Contains(category, "music"),
+		strings.HasPrefix(category, "lidarr"):
+		return "lidarr"
+	case category == "books",
+		strings.Contains(category, "book"),
+		strings.HasPrefix(category, "readarr"):
+		return "readarr"
+	case category == "adult",
+		strings.HasPrefix(category, "whisparr"):
+		return "whisparr"
+	}
+	return ""
+}
+
+// MigrateCategoryTypes walks SABnzbd.Categories and fills in an empty Type
+// field for any category whose name matches the InferARRTypeFromCategory
+// heuristic. Returns the names of categories that were backfilled so the
+// caller can log and decide whether to persist. Does not touch categories
+// whose Type is already set (preserves user intent) or whose name doesn't
+// match any rule.
+func (c *Config) MigrateCategoryTypes() []string {
+	var backfilled []string
+	for i, cat := range c.SABnzbd.Categories {
+		if cat.Type != "" {
+			continue
+		}
+		inferred := InferARRTypeFromCategory(cat.Name)
+		if inferred == "" {
+			continue
+		}
+		c.SABnzbd.Categories[i].Type = inferred
+		backfilled = append(backfilled, cat.Name)
+	}
+	return backfilled
+}
+
 // Validate validates the configuration
 func (c *Config) Validate() error {
 	if c.WebDAV.Port <= 0 || c.WebDAV.Port > 65535 {
@@ -1854,6 +1907,27 @@ func LoadConfig(configFile string) (*Config, error) {
 		}
 		config.WebDAV.Port = port
 		slog.Info("Using PORT from environment variable", "port", port)
+	}
+
+	// Migrate: backfill SABnzbd category Type field from the name heuristic.
+	// Older installs (and any UI-created category before the type-field UI
+	// shipped) carry no Type. Filling it here makes arr_notifier's explicit
+	// mapping path work without manual yaml edits.
+	if backfilled := config.MigrateCategoryTypes(); len(backfilled) > 0 {
+		slog.Info("Backfilled SABnzbd category types from heuristic",
+			"categories", backfilled,
+			"count", len(backfilled))
+		if targetConfigFile != "" {
+			backupFile := targetConfigFile + ".bak"
+			if data, readErr := os.ReadFile(targetConfigFile); readErr == nil {
+				_ = os.WriteFile(backupFile, data, 0644)
+			}
+			if err := SaveToFile(config, targetConfigFile); err != nil {
+				slog.Warn("Failed to persist category-type backfill — will retry on next startup",
+					"path", targetConfigFile,
+					"error", err)
+			}
+		}
 	}
 
 	// Validate configuration
