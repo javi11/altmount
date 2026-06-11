@@ -75,9 +75,15 @@ export function QueuePage() {
 	const [searchTerm, setSearchTerm] = useState("");
 	const [selectedItems, setSelectedItems] = useState<Set<number>>(new Set());
 	const [sortBy, setSortBy] = useState<"created_at" | "updated_at" | "status" | "nzb_path">(
-		"created_at",
+		() => {
+			const saved = localStorage.getItem("queue_sort_by");
+			return (saved as any) || "created_at";
+		},
 	);
-	const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+	const [sortOrder, setSortOrder] = useState<"asc" | "desc">(() => {
+		const saved = localStorage.getItem("queue_sort_order");
+		return (saved as "asc" | "desc") || "desc";
+	});
 
 	const queryClient = useQueryClient();
 
@@ -381,18 +387,24 @@ export function QueuePage() {
 	}, []);
 
 	const handleSort = (column: "created_at" | "updated_at" | "status" | "nzb_path") => {
+		let newOrder: "asc" | "desc";
+		let newBy = sortBy;
 		if (sortBy === column) {
-			setSortOrder(sortOrder === "asc" ? "desc" : "asc");
+			newOrder = sortOrder === "asc" ? "desc" : "asc";
 		} else {
-			setSortBy(column);
+			newBy = column;
 			if (column === "created_at") {
-				setSortOrder("asc");
+				newOrder = "desc";
 			} else if (column === "updated_at") {
-				setSortOrder("desc");
+				newOrder = "desc";
 			} else {
-				setSortOrder("asc");
+				newOrder = "asc";
 			}
 		}
+		setSortBy(newBy);
+		setSortOrder(newOrder);
+		localStorage.setItem("queue_sort_by", newBy);
+		localStorage.setItem("queue_sort_order", newOrder);
 		setPage(0);
 		clearSelection();
 	};
