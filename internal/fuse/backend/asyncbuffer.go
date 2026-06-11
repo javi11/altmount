@@ -16,11 +16,16 @@ const (
 	// Larger chunks reduce mutex churn in ReadAtContext. Segments are ~750KB,
 	// so 4MB reads ~1 ReadAtContext call per segment.
 	fillChunkSize = 4 * 1024 * 1024 // 4MB
-	// nearFrontierWindow is the maximum distance ahead of the fill frontier
-	// that we treat as "near-sequential" and wait for rather than demoting.
-	// Chosen to absorb kernel readahead parallelism (128KB reads, up to 64
-	// in flight) without masking genuine seeks.
-	nearFrontierWindow = 4 * 1024 * 1024 // 4MB
+	// nearFrontierWindow is the lookahead beyond the fill frontier treated as
+	// near-sequential during streaming. Set equal to fillChunkSize so that a
+	// near-frontier read is guaranteed to be satisfied within at most one fill
+	// iteration.
+	nearFrontierWindow = 4 * 1024 * 1024 // 4MB — kept equal to fillChunkSize intentionally
+	// probingSeqTolerance is the maximum forward delta in probing mode that is
+	// still counted as sequential for arming read-ahead. Kernel readahead may
+	// issue 128 KB parallel probes slightly out of order; 256 KB absorbs that
+	// without creating large holes in the streaming start frontier.
+	probingSeqTolerance = 256 * 1024 // 256 KB
 	// armThreshold is how many consecutive sequential reads must be observed
 	// before the buffer promotes from probing to streaming and begins reading
 	// ahead. This keeps read-ahead off during the media player's header-probe
@@ -177,6 +182,9 @@ func (a *AsyncReadBuffer) ReadAtContext(ctx context.Context, p []byte, off int64
 	}
 
 	if a.streaming {
+		// bufEnd is a snapshot of the fill frontier taken once; the inner-loop
+		// conditions use live a.baseOff+int64(a.filled) so they see progress
+		// made by the fill goroutine while we wait.
 		bufEnd := a.baseOff + int64(a.filled)
 
 		// Offset already within the buffered window.
@@ -222,6 +230,7 @@ func (a *AsyncReadBuffer) ReadAtContext(ctx context.Context, p []byte, off int64
 				// consumers to drain it — waiting here would deadlock, so give up
 				// and fall through to demote instead.
 				if a.filled >= a.bufSize {
+					// Buffer full — fill goroutine cannot advance; demote rather than deadlock.
 					goto demote
 				}
 				a.cond.Wait()
@@ -250,9 +259,11 @@ func (a *AsyncReadBuffer) ReadAtContext(ctx context.Context, p []byte, off int64
 
 	// Probing mode: count sequential runs, decide on promotion, then serve the
 	// read directly from the source (outside the lock).
-	// Treat reads within nearFrontierWindow ahead as sequential for arming
-	// purposes — kernel readahead may issue parallel probes slightly out of order.
-	if off >= a.expectedNext && off <= a.expectedNext+nearFrontierWindow {
+	// Treat reads within probingSeqTolerance ahead as sequential for arming
+	// purposes — kernel readahead may issue 128 KB parallel probes slightly out
+	// of order; 256 KB absorbs that without creating large holes in the
+	// streaming start frontier.
+	if off >= a.expectedNext && off <= a.expectedNext+probingSeqTolerance {
 		a.seqRun++
 	} else {
 		a.seqRun = 1

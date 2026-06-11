@@ -395,6 +395,13 @@ func TestAsyncReadBuffer_NearFrontierWaitDoesNotDemote(t *testing.T) {
 		t.Fatal("buffer did not start filling after promotion")
 	}
 
+	// Confirm streaming was active before the near-frontier read so we know the
+	// assertion below is meaningful (streaming was active throughout, not just
+	// re-established after a demote).
+	if bufEnd == 0 {
+		t.Fatal("streaming was not active before near-frontier read")
+	}
+
 	// Issue a near-frontier read: 64KB ahead of current bufEnd.
 	nearOff := bufEnd + 64*1024
 	result := make([]byte, len(p))
