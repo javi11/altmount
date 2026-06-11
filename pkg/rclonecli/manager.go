@@ -80,7 +80,7 @@ func NewManager(cfm *config.Manager) *Manager {
 		logger:      logger,
 		ctx:         ctx,
 		cancel:      cancel,
-		httpClient:    httpclient.NewDefault(),
+		httpClient:    httpclient.New(httpclient.WithTimeout(0)),
 		serverReady:   make(chan struct{}),
 		processExited: make(chan struct{}),
 	}
@@ -368,14 +368,14 @@ func (m *Manager) pingServer() bool {
 	return err == nil
 }
 
-func (m *Manager) makeRequest(req RCRequest, close bool) (*http.Response, error) {
+func (m *Manager) makeRequestWithContext(ctx context.Context, req RCRequest, close bool) (*http.Response, error) {
 	reqBody, err := json.Marshal(req.Args)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
 	url := fmt.Sprintf("http://localhost:%s/%s", m.rcPort, req.Command)
-	httpReq, err := http.NewRequestWithContext(m.ctx, "POST", url, bytes.NewBuffer(reqBody))
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(reqBody))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -410,6 +410,10 @@ func (m *Manager) makeRequest(req RCRequest, close bool) (*http.Response, error)
 	}
 
 	return resp, nil
+}
+
+func (m *Manager) makeRequest(req RCRequest, close bool) (*http.Response, error) {
+	return m.makeRequestWithContext(m.ctx, req, close)
 }
 
 // IsReady returns true if the RC server is ready
