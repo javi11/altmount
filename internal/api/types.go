@@ -179,11 +179,12 @@ type ArrsAPIResponse struct {
 	LidarrInstances                []ArrsInstanceAPIResponse `json:"lidarr_instances"`
 	ReadarrInstances               []ArrsInstanceAPIResponse `json:"readarr_instances"`
 	WhisparrInstances              []ArrsInstanceAPIResponse `json:"whisparr_instances"`
+	SportarrInstances              []ArrsInstanceAPIResponse `json:"sportarr_instances"`
 	QueueCleanupEnabled            bool                      `json:"queue_cleanup_enabled,omitempty"`
 	QueueCleanupIntervalSeconds    int                       `json:"queue_cleanup_interval_seconds,omitempty"`
-	CleanupAutomaticImportFailure  bool                      `json:"cleanup_automatic_import_failure,omitempty"`
 	QueueCleanupGracePeriodMinutes int                       `json:"queue_cleanup_grace_period_minutes,omitempty"`
-	QueueCleanupAllowlist          []config.IgnoredMessage   `json:"queue_cleanup_allowlist,omitempty"`
+	QueueCleanupMaxFailures        int                       `json:"queue_cleanup_max_failures,omitempty"`
+	QueueCleanupRules              []config.StuckCleanupRule `json:"queue_cleanup_rules,omitempty"`
 }
 
 // ArrsInstanceAPIResponse sanitizes ArrsInstance config for API responses
@@ -361,11 +362,12 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 		LidarrInstances:                toArrsInstances(cfg.Arrs.LidarrInstances),
 		ReadarrInstances:               toArrsInstances(cfg.Arrs.ReadarrInstances),
 		WhisparrInstances:              toArrsInstances(cfg.Arrs.WhisparrInstances),
+		SportarrInstances:              toArrsInstances(cfg.Arrs.SportarrInstances),
 		QueueCleanupEnabled:            cfg.Arrs.QueueCleanupEnabled != nil && *cfg.Arrs.QueueCleanupEnabled,
 		QueueCleanupIntervalSeconds:    cfg.Arrs.QueueCleanupIntervalSeconds,
-		CleanupAutomaticImportFailure:  cfg.Arrs.CleanupAutomaticImportFailure != nil && *cfg.Arrs.CleanupAutomaticImportFailure,
 		QueueCleanupGracePeriodMinutes: cfg.Arrs.QueueCleanupGracePeriodMinutes,
-		QueueCleanupAllowlist:          cfg.Arrs.QueueCleanupAllowlist,
+		QueueCleanupMaxFailures:        cfg.Arrs.QueueCleanupMaxFailures,
+		QueueCleanupRules:              cfg.Arrs.QueueCleanupRules,
 	}
 
 	stremioResp := StremioAPIResponse{
@@ -484,13 +486,6 @@ type QueueItemResponse struct {
 	StoragePath  *string                `json:"storage_path,omitempty"` // Internal FUSE mount path (populated after completion)
 }
 
-// QueueListRequest represents request parameters for listing queue items
-type QueueListRequest struct {
-	Status *database.QueueStatus `json:"status"`
-	Since  *time.Time            `json:"since"`
-	Pagination
-}
-
 // QueueStatsResponse represents queue statistics in API responses
 type QueueStatsResponse struct {
 	TotalQueued         int       `json:"total_queued"`
@@ -565,13 +560,6 @@ type HealthItemResponse struct {
 	IsMasked              bool `json:"is_masked"`
 }
 
-// HealthListRequest represents request parameters for listing health records
-type HealthListRequest struct {
-	Status *database.HealthStatus `json:"status"`
-	Since  *time.Time             `json:"since"`
-	Pagination
-}
-
 // HealthStatsResponse represents health statistics in API responses
 type HealthStatsResponse struct {
 	Total           int `json:"total"`
@@ -580,11 +568,6 @@ type HealthStatsResponse struct {
 	Healthy         int `json:"healthy"`
 	RepairTriggered int `json:"repair_triggered"`
 	Checking        int `json:"checking"`
-}
-
-// HealthRetryRequest represents request to retry a corrupted file
-type HealthRetryRequest struct {
-	ResetRetryCount bool `json:"reset_retry_count,omitempty"`
 }
 
 // HealthRepairRequest represents request to trigger repair for a corrupted file

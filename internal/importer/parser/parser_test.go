@@ -2,11 +2,16 @@ package parser
 
 import (
 	"context"
+	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/testsupport/fakepool"
+	"github.com/javi11/altmount/internal/testsupport/segments"
+	"github.com/javi11/nntppool/v4"
 	"github.com/javi11/nzbparser"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -161,6 +166,87 @@ func TestDetermineNzbType_ExcludesPar2Files(t *testing.T) {
 		})
 	}
 }
+
+// TestFetchAllFirstSegments_MissingSegmentEmitsDebugLog verifies that a
+// "missing segment" debug log is emitted when Body() returns ErrArticleNotFound
+// while fetching the first segment of a file.
+// NOT parallel: we inject p.log directly.
+func TestFetchAllFirstSegments_MissingSegmentEmitsDebugLog(t *testing.T) {
+	segID := segments.MessageID(0)
+
+	var mu sync.Mutex
+	type logRecord struct{ msg, segID string }
+	var captured []logRecord
+
+	handler := &parserCaptureLogHandler{
+		onHandle: func(r slog.Record) {
+			var sid string
+			r.Attrs(func(a slog.Attr) bool {
+				if a.Key == "segment_id" {
+					sid = a.Value.String()
+				}
+				return true
+			})
+			mu.Lock()
+			captured = append(captured, logRecord{msg: r.Message, segID: sid})
+			mu.Unlock()
+		},
+	}
+
+	fp := fakepool.New()
+	fp.SetBehavior(segID, fakepool.SegmentBehavior{
+		Err: nntppool.ErrArticleNotFound,
+	})
+
+	mgr := newFakeFullPoolManager(fp)
+	p := NewParser(mgr, testConfigGetter())
+	p.log = slog.New(handler)
+
+	nzbXML := `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE nzb PUBLIC "-//newzBin//DTD NZB 1.1//EN" "http://www.newzbin.com/DTD/nzb-1.1.dtd">
+<nzb xmlns="http://www.newzbin.com/DTD/2003/nzb">
+ <file poster="poster" date="123456789" subject="` + segID + `">
+  <groups><group>alt.binaries.test</group></groups>
+  <segments>
+   <segment bytes="100" number="1">` + segID + `</segment>
+  </segments>
+ </file>
+</nzb>`
+
+	_, _ = p.ParseFile(context.Background(), strings.NewReader(nzbXML), "test.nzb", nil)
+
+	mu.Lock()
+	defer mu.Unlock()
+	found := false
+	for _, r := range captured {
+		if r.msg == "missing segment" && r.segID == segID {
+			found = true
+		}
+	}
+	assert.True(t, found, "expected 'missing segment' debug log for segment_id=%q, got: %+v", segID, captured)
+}
+
+// parserCaptureLogHandler is a minimal slog.Handler for parser tests.
+type parserCaptureLogHandler struct {
+	onHandle func(slog.Record)
+	preAttrs []slog.Attr
+}
+
+func (h *parserCaptureLogHandler) Enabled(_ context.Context, _ slog.Level) bool { return true }
+func (h *parserCaptureLogHandler) Handle(_ context.Context, r slog.Record) error {
+	full := r.Clone()
+	for _, a := range h.preAttrs {
+		full.AddAttrs(a)
+	}
+	h.onHandle(full)
+	return nil
+}
+func (h *parserCaptureLogHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	c := *h
+	c.preAttrs = append(append([]slog.Attr{}, h.preAttrs...), attrs...)
+	return &c
+}
+func (h *parserCaptureLogHandler) WithGroup(_ string) slog.Handler { return h }
 
 // TestPropagateArchiveType_SkipsTxtSidecar is the regression test for
 // Fresh.Off.the.Boat.S01E12 where a .txt sidecar was incorrectly marked

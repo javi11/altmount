@@ -107,7 +107,7 @@ func TestStorm_ImporterFanOutRespectsMaxImportConnections(t *testing.T) {
 	parser := NewParser(mgr, stormConfigGetter(maxImportConnections))
 
 	files := buildSyntheticNzbFiles(filesPerImport)
-	_, _, _ = parser.fetchAllFirstSegments(ctx, files, nil)
+	_, _, _ = parser.fetchAllFirstSegments(ctx, files, nil, ParseOptions{})
 
 	mif := fp.MaxInFlight()
 	t.Logf("single import × %d files (MaxImportConnections=%d) "+
@@ -156,7 +156,7 @@ func TestStorm_ImporterParallelImportsAreNotInternallyGated(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			files := buildSyntheticNzbFiles(filesPerImport)
-			_, _, _ = parser.fetchAllFirstSegments(ctx, files, nil)
+			_, _, _ = parser.fetchAllFirstSegments(ctx, files, nil, ParseOptions{})
 		}()
 	}
 	wg.Wait()

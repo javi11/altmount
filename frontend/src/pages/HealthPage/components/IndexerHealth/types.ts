@@ -12,8 +12,6 @@ export interface IndexerSummary {
 	totalSuccess: number;
 	totalFailed: number;
 	overallRate: number;
-	best: IndexerStat;
-	worst: IndexerStat;
 }
 
 export type SortKey = "health" | "total" | "name";

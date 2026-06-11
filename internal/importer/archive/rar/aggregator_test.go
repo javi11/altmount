@@ -2,8 +2,11 @@ package rar
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -30,6 +33,157 @@ func (m *mockRarProcessor) CreateFileMetadataFromRarContent(content Content, _ s
 		SegmentData: content.Segments,
 		Status:      metapb.FileStatus_FILE_STATUS_HEALTHY,
 	}
+}
+
+// groupBehavior is the scripted result for one RAR set in scriptedRarProcessor.
+type groupBehavior struct {
+	contents []Content
+	err      error
+}
+
+// scriptedRarProcessor returns per-set contents/errors keyed by SetKey and
+// records which sets it was asked to analyze, so tests can assert group
+// isolation and that gapped groups are never analyzed.
+type scriptedRarProcessor struct {
+	mu       sync.Mutex
+	calls    []string
+	behavior map[string]groupBehavior
+}
+
+func (m *scriptedRarProcessor) AnalyzeRarContentFromNzb(_ context.Context, g []parser.ParsedFile, _ string, _ *progress.Tracker) ([]Content, error) {
+	key, _ := SetKey(g[0].Filename)
+	m.mu.Lock()
+	m.calls = append(m.calls, key)
+	b := m.behavior[key]
+	m.mu.Unlock()
+	return b.contents, b.err
+}
+
+func (m *scriptedRarProcessor) CreateFileMetadataFromRarContent(content Content, _ string, _ int64, _ string) *metapb.FileMetadata {
+	return &metapb.FileMetadata{
+		FileSize:    content.Size,
+		SegmentData: content.Segments,
+		Status:      metapb.FileStatus_FILE_STATUS_HEALTHY,
+	}
+}
+
+func (m *scriptedRarProcessor) wasCalled(key string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return slices.Contains(m.calls, key)
+}
+
+func TestProcessArchiveIsolatesFailedGroup(t *testing.T) {
+	metaRoot := t.TempDir()
+	svc := metadata.NewMetadataService(metaRoot)
+	proc := &scriptedRarProcessor{behavior: map[string]groupBehavior{
+		"seta": {err: errors.New("boom: missing volume")},
+		"setb": {contents: []Content{
+			{InternalPath: "videoB.mkv", Filename: "videoB.mkv", Size: 1000,
+				Segments: []*metapb.SegmentData{{Id: "b", StartOffset: 0, EndOffset: 999}}},
+		}},
+	}}
+
+	err := ProcessArchive(context.Background(), ProcessArchiveOptions{
+		VirtualDir: "movies/Release",
+		ArchiveFiles: []parser.ParsedFile{
+			{Filename: "setA.part01.rar"}, {Filename: "setA.part02.rar"},
+			{Filename: "setB.part01.rar"}, {Filename: "setB.part02.rar"},
+		},
+		NzbPath:         "movies/Release.nzb",
+		Processor:       proc,
+		MetadataService: svc,
+		ExtractedFiles:  []parser.ExtractedFileInfo{{Name: "videoB.mkv", Size: 1000}},
+		MaxPrefetch:     1,
+		ReadTimeout:     30 * time.Second,
+	})
+	require.NoError(t, err, "a single failed group must not fail the whole archive")
+	require.True(t, metaExists(t, metaRoot, "movies/Release/videoB.mkv"), "healthy set B must be imported")
+}
+
+func TestProcessArchiveAllGroupsFailedReturnsError(t *testing.T) {
+	sentinel := errors.New("analysis failed")
+	proc := &scriptedRarProcessor{behavior: map[string]groupBehavior{
+		"seta": {err: sentinel},
+		"setb": {err: errors.New("other failure")},
+	}}
+
+	err := ProcessArchive(context.Background(), ProcessArchiveOptions{
+		VirtualDir: "movies/Release",
+		ArchiveFiles: []parser.ParsedFile{
+			{Filename: "setA.part01.rar"}, {Filename: "setA.part02.rar"},
+			{Filename: "setB.part01.rar"}, {Filename: "setB.part02.rar"},
+		},
+		NzbPath:         "movies/Release.nzb",
+		Processor:       proc,
+		MetadataService: metadata.NewMetadataService(t.TempDir()),
+		MaxPrefetch:     1,
+		ReadTimeout:     30 * time.Second,
+	})
+	require.Error(t, err)
+	require.ErrorIs(t, err, sentinel, "joined error must preserve errors.Is on the original")
+}
+
+func TestProcessArchiveContextCancelledNotIsolated(t *testing.T) {
+	proc := &scriptedRarProcessor{behavior: map[string]groupBehavior{
+		"seta": {err: context.Canceled},
+		"setb": {contents: []Content{
+			{InternalPath: "videoB.mkv", Filename: "videoB.mkv", Size: 1000,
+				Segments: []*metapb.SegmentData{{Id: "b", StartOffset: 0, EndOffset: 999}}},
+		}},
+	}}
+
+	err := ProcessArchive(context.Background(), ProcessArchiveOptions{
+		VirtualDir: "movies/Release",
+		ArchiveFiles: []parser.ParsedFile{
+			{Filename: "setA.part01.rar"}, {Filename: "setA.part02.rar"},
+			{Filename: "setB.part01.rar"}, {Filename: "setB.part02.rar"},
+		},
+		NzbPath:         "movies/Release.nzb",
+		Processor:       proc,
+		MetadataService: metadata.NewMetadataService(t.TempDir()),
+		ExtractedFiles:  []parser.ExtractedFileInfo{{Name: "videoB.mkv", Size: 1000}},
+		MaxPrefetch:     1,
+		ReadTimeout:     30 * time.Second,
+	})
+	require.ErrorIs(t, err, context.Canceled, "cancellation must propagate, never be isolated")
+}
+
+func TestProcessArchiveSkipsGroupWithVolumeGap(t *testing.T) {
+	metaRoot := t.TempDir()
+	svc := metadata.NewMetadataService(metaRoot)
+	proc := &scriptedRarProcessor{behavior: map[string]groupBehavior{
+		// setA would succeed if analyzed, but it has a volume gap and must be
+		// skipped before any analysis call.
+		"seta": {contents: []Content{
+			{InternalPath: "videoA.mkv", Filename: "videoA.mkv", Size: 500,
+				Segments: []*metapb.SegmentData{{Id: "a", StartOffset: 0, EndOffset: 499}}},
+		}},
+		"setb": {contents: []Content{
+			{InternalPath: "videoB.mkv", Filename: "videoB.mkv", Size: 1000,
+				Segments: []*metapb.SegmentData{{Id: "b", StartOffset: 0, EndOffset: 999}}},
+		}},
+	}}
+
+	err := ProcessArchive(context.Background(), ProcessArchiveOptions{
+		VirtualDir: "movies/Release",
+		ArchiveFiles: []parser.ParsedFile{
+			// setA missing part01 → gap.
+			{Filename: "setA.part02.rar"}, {Filename: "setA.part03.rar"},
+			{Filename: "setB.part01.rar"}, {Filename: "setB.part02.rar"},
+		},
+		NzbPath:         "movies/Release.nzb",
+		Processor:       proc,
+		MetadataService: svc,
+		ExtractedFiles:  []parser.ExtractedFileInfo{{Name: "videoB.mkv", Size: 1000}},
+		MaxPrefetch:     1,
+		ReadTimeout:     30 * time.Second,
+	})
+	require.NoError(t, err)
+	require.False(t, proc.wasCalled("seta"), "gapped set A must never reach analysis")
+	require.True(t, proc.wasCalled("setb"), "healthy set B must be analyzed")
+	require.True(t, metaExists(t, metaRoot, "movies/Release/videoB.mkv"), "set B must be imported")
+	require.False(t, metaExists(t, metaRoot, "movies/Release/videoA.mkv"), "gapped set A must not be imported")
 }
 
 // metaExists checks whether a .meta file exists for the given virtual path under metaRoot.
@@ -169,14 +323,10 @@ func TestProcessArchivePreservesInternalFolderStructure(t *testing.T) {
 				NzbPath:                 tt.nzbPath,
 				Processor:               proc,
 				MetadataService:         svc,
-				PoolManager:             nil,
-				ArchiveProgressTracker:  nil,
-				ValidationProgressTracker: nil,
-				MaxValidationGoroutines: 1,
-				SegmentSamplePercentage: 100,
-				AllowedFileExtensions:   nil,
-				Timeout:                 30 * time.Second,
-				ExtractedFiles:          extracted,
+				PoolManager:            nil,
+				ArchiveProgressTracker: nil,
+				AllowedFileExtensions:  nil,
+				ExtractedFiles:         extracted,
 				MaxPrefetch:             1,
 				ReadTimeout:             30 * time.Second,
 				ExpandBlurayIso:         false,

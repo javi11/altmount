@@ -24,7 +24,6 @@ import {
 import { formatBytes, formatRelativeTime, getProviderBrandName } from "../../../../lib/utils";
 import type { ProviderSpeedTestHistoryStat, ProviderStatus } from "../../../../types/api";
 import { ProviderChart } from "./ProviderChart";
-import { ProviderQuota } from "./ProviderQuota";
 import { ProviderSpeedChart } from "./ProviderSpeedChart";
 
 type SortField =
@@ -127,7 +126,7 @@ const SpeedHistorySparkline = ({
 					<Line
 						type="stepAfter"
 						dataKey="speed_mbps"
-						stroke="#10b981"
+						stroke="var(--color-success)"
 						strokeWidth={1.5}
 						dot={false}
 						isAnimationActive={false}
@@ -145,7 +144,7 @@ function ConnectionPoolGrid({ used, max }: { used: number; max: number }) {
 			<div className="flex items-center gap-2">
 				<div className="flex h-2.5 w-16 overflow-hidden rounded-full border border-base-content/10 bg-base-200/50">
 					<div
-						className="h-full rounded-full bg-primary shadow-[0_0_8px_rgba(59,130,246,0.5)] transition-all duration-500"
+						className="h-full rounded-full bg-primary transition-all duration-500"
 						style={{ width: `${percent}%` }}
 					/>
 				</div>
@@ -163,9 +162,7 @@ function ConnectionPoolGrid({ used, max }: { used: number; max: number }) {
 					<span
 						key={i}
 						className={`h-3 w-1 rounded-sm transition-all duration-300 ${
-							i < used
-								? "bg-primary shadow-[0_0_6px_rgba(59,130,246,0.6)]"
-								: "border border-base-200 bg-base-200/50"
+							i < used ? "bg-primary" : "border border-base-200 bg-base-200/50"
 						}`}
 					/>
 				))}
@@ -335,7 +332,7 @@ export function ProviderHealth() {
 					</div>
 					<div className="relative z-10 text-primary">
 						<Activity
-							className={`h-8 w-8 ${data.download_speed_bytes_per_sec > 0 ? "animate-pulse text-primary shadow-[0_0_12px_rgba(59,130,246,0.3)]" : "opacity-45"}`}
+							className={`h-8 w-8 ${data.download_speed_bytes_per_sec > 0 ? "animate-pulse text-primary" : "opacity-45 transition-opacity group-hover:opacity-85"}`}
 						/>
 					</div>
 					{/* Active wave line on bottom of the card */}
@@ -387,9 +384,7 @@ export function ProviderHealth() {
 						<div className="text-base-content/50 text-xs">Across all providers</div>
 					</div>
 					<div className="z-10 text-error">
-						<AlertTriangle
-							className={`h-8 w-8 ${data.total_errors > 0 ? "animate-bounce text-error" : "opacity-45"}`}
-						/>
+						<AlertTriangle className="h-8 w-8 opacity-45 transition-opacity group-hover:opacity-85" />
 					</div>
 				</div>
 
@@ -410,7 +405,7 @@ export function ProviderHealth() {
 					</div>
 					<div className="z-10 text-info">
 						<div
-							className="radial-progress border-2 border-base-content/10 text-info shadow-[0_0_8px_rgba(6,182,212,0.15)]"
+							className="radial-progress border-2 border-base-content/10 text-info opacity-45 transition-opacity group-hover:opacity-85"
 							style={
 								{
 									"--value": connectionPercent,
@@ -430,7 +425,6 @@ export function ProviderHealth() {
 			<div className="flex flex-col gap-6">
 				<ProviderChart />
 				<ProviderSpeedChart />
-				<ProviderQuota />
 			</div>
 
 			{/* Provider Table */}
@@ -585,7 +579,7 @@ export function ProviderHealth() {
 										<td>
 											<div className="flex items-center gap-2">
 												{provider.state === "connected" || provider.state === "active" ? (
-													<span className="badge badge-sm gap-1 border-emerald-500/20 bg-emerald-500/10 font-bold text-emerald-400">
+													<span className="badge badge-sm gap-1 border-success/20 bg-success/10 font-bold text-success">
 														<Wifi className="h-3 w-3" /> Connected
 													</span>
 												) : provider.state === "disconnected" ? (
@@ -593,7 +587,7 @@ export function ProviderHealth() {
 														<WifiOff className="h-3 w-3" /> Disconnected
 													</span>
 												) : (
-													<span className="badge badge-sm border-amber-500/20 bg-amber-500/10 font-bold text-amber-400">
+													<span className="badge badge-sm border-warning/20 bg-warning/10 font-bold text-warning">
 														{provider.state}
 													</span>
 												)}
@@ -612,10 +606,10 @@ export function ProviderHealth() {
 														<span
 															className={`h-1.5 w-1.5 rounded-full ${
 																provider.ping_ms > 500
-																	? "bg-rose-500 shadow-[0_0_6px_rgba(244,63,94,0.6)]"
+																	? "bg-error"
 																	: provider.ping_ms > 200
-																		? "bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.6)]"
-																		: "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.6)]"
+																		? "bg-warning"
+																		: "bg-success"
 															}`}
 														/>
 														<span
@@ -637,7 +631,7 @@ export function ProviderHealth() {
 										</td>
 										<td>
 											{provider.error_count > 0 ? (
-												<span className="badge badge-sm border-rose-500/20 bg-rose-500/10 font-bold font-mono text-rose-400 shadow-[0_0_6px_rgba(244,63,94,0.15)]">
+												<span className="badge badge-sm border-error/20 bg-error/10 font-bold font-mono text-error">
 													{provider.error_count}
 												</span>
 											) : (
@@ -647,10 +641,10 @@ export function ProviderHealth() {
 										<td>
 											{provider.missing_count > 0 ? (
 												<span
-													className={`badge badge-sm font-bold font-mono shadow-[0_0_6px_rgba(251,191,36,0.15)] ${
+													className={`badge badge-sm font-bold font-mono ${
 														provider.missing_warning
-															? "border-rose-500/20 bg-rose-500/10 text-rose-400"
-															: "border-amber-500/20 bg-amber-500/10 text-amber-400"
+															? "border-error/20 bg-error/10 text-error"
+															: "border-warning/20 bg-warning/10 text-warning"
 													}`}
 												>
 													{provider.missing_count.toLocaleString()}

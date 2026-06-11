@@ -26,7 +26,7 @@ import {
 	XCircle,
 	XOctagon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { ImportMethods } from "../components/queue/ImportMethods";
 import { QueueItemCard } from "../components/queue/QueueItemCard";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
@@ -285,7 +285,7 @@ export function QueuePage() {
 		if (confirmed) await clearPending.mutateAsync("");
 	};
 
-	const handleAddTestFile = async (size: "100MB" | "1GB" | "10GB") => {
+	const handleAddTestFile = async (size: "100MB" | "1GB") => {
 		try {
 			await addTestQueueItem.mutateAsync(size);
 		} catch (error) {
@@ -396,13 +396,6 @@ export function QueuePage() {
 		queueData && queueData.length > 0 && queueData.every((item) => selectedItems.has(item.id));
 	const isIndeterminate = queueData && selectedItems.size > 0 && !isAllSelected;
 
-	useEffect(() => {
-		setPage(0);
-	}, []);
-	useEffect(() => {
-		clearSelection();
-	}, [clearSelection]);
-
 	if (error) {
 		return (
 			<div className="space-y-4">
@@ -453,7 +446,7 @@ export function QueuePage() {
 									<Settings className="h-3.5 w-3.5" />
 									Cleanup
 								</button>
-								<ul className="dropdown-content menu z-[1] mt-2 w-52 rounded-box border border-base-200 bg-base-100 p-2 shadow-lg">
+								<ul className="dropdown-content menu z-[1] mt-2 w-56 rounded-box border border-base-200 bg-base-100 p-2 shadow-lg">
 									<li>
 										<button
 											type="button"
@@ -943,7 +936,14 @@ export function QueuePage() {
 																<td>
 																	<div className="flex flex-col">
 																		<span className="text-xs opacity-70">
-																			{formatRelativeTime(item.created_at)}
+																			{item.status === QueueStatus.PROCESSING && item.started_at
+																				? `Started ${formatRelativeTime(item.started_at)}`
+																				: item.status === QueueStatus.COMPLETED && item.completed_at
+																					? `Finished ${formatRelativeTime(item.completed_at)}`
+																					: item.status === QueueStatus.FAILED &&
+																							(item.completed_at || item.updated_at)
+																						? `Failed ${formatRelativeTime(item.completed_at || item.updated_at)}`
+																						: `Added ${formatRelativeTime(item.created_at)}`}
 																		</span>
 																		{item.retry_count > 0 && (
 																			<span className="mt-0.5 font-bold text-warning text-xs uppercase tracking-tighter">

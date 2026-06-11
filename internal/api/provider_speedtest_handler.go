@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -54,6 +55,15 @@ func (s *Server) handleTestProviderSpeed(c *fiber.Ctx) error {
 	testCtx, cancel := context.WithTimeout(c.Context(), 5*time.Minute)
 	defer cancel()
 
+	// Build the nntppool provider name the same way the production pool
+	// and coordinator do, so we can match the right per-provider stats
+	// entry in the result.
+	host := fmt.Sprintf("%s:%d", targetProvider.Host, targetProvider.Port)
+	providerName := host
+	if targetProvider.Username != "" {
+		providerName = host + "+" + targetProvider.Username
+	}
+
 	// Prefer the production pool when this provider is already part of
 	// it; otherwise fall back to the singleton coordinator so we never
 	// create a fresh nntppool.Client per request.
@@ -61,7 +71,23 @@ func (s *Server) handleTestProviderSpeed(c *fiber.Ctx) error {
 	if err != nil {
 		return RespondInternalError(c, "Speed test failed", err.Error())
 	}
-	speed := result.WireSpeedBps / 1024 / 1024 // bytes/sec → MB/s
+	// Prefer the targeted provider's per-provider wire speed over the
+	// client-wide aggregate. WireSpeedBps divides the whole-client
+	// BytesConsumed delta by elapsed, so on the shared production pool
+	// any concurrent stream or other provider's traffic during the test
+	// window inflates it. result.Providers carries the delta-based,
+	// per-provider speed for exactly the provider we targeted.
+	//
+	// Match by name to avoid picking a random provider when the result
+	// slice contains multiple entries (map iteration order is undefined).
+	wireBps := result.WireSpeedBps
+	for _, ps := range result.Providers {
+		if ps.Name == providerName && ps.AvgSpeed > 0 {
+			wireBps = ps.AvgSpeed
+			break
+		}
+	}
+	speed := wireBps / 1024 / 1024 // bytes/sec → MB/s
 
 	// Update provider config with speed test result
 	now := time.Now()
@@ -108,9 +134,15 @@ func (s *Server) runProviderSpeedTest(ctx context.Context, p *config.ProviderCon
 	if s.poolManager != nil {
 		if cp, err := s.poolManager.GetPool(); err == nil && cp != nil {
 			if real, ok := cp.(*nntppool.Client); ok {
-				providerName := p.Host
+				// Match the name the production pool registers for this
+				// provider: ToNNTPProvider sets Host = "host:port", and
+				// nntppool's resolveProviderName derives "host:port+user".
+				// Building the lookup from p.Host alone (no port) never
+				// matches, forcing the slow coordinator fallback.
+				host := fmt.Sprintf("%s:%d", p.Host, p.Port)
+				providerName := host
 				if p.Username != "" {
-					providerName = p.Host + "+" + p.Username
+					providerName = host + "+" + p.Username
 				}
 				// Try the production pool first. If the provider isn't
 				// in it, nntppool returns an error and we fall through
@@ -134,7 +166,9 @@ func (s *Server) runProviderSpeedTest(ctx context.Context, p *config.ProviderCon
 		}
 	})
 	v, err := s.speedtest.run(ctx, p, func(client *nntppool.Client, providerName string) (any, error) {
-		return client.SpeedTest(ctx, nntppool.SpeedTestOptions{ProviderName: providerName})
+		return client.SpeedTest(ctx, nntppool.SpeedTestOptions{
+			ProviderName: providerName,
+		})
 	})
 	if err != nil {
 		return nil, err

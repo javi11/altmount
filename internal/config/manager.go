@@ -1,7 +1,6 @@
 package config
 
 import (
-	"crypto/sha256"
 	"crypto/tls"
 	"fmt"
 	"log/slog"
@@ -376,13 +375,6 @@ type HealthConfig struct {
 	Repair                              RepairConfig `yaml:"repair" mapstructure:"repair" json:"repair"`
 }
 
-// GenerateProviderID creates a unique ID based on host, port, and username
-func GenerateProviderID(host string, port int, username string) string {
-	input := fmt.Sprintf("%s:%d@%s", host, port, username)
-	hash := sha256.Sum256([]byte(input))
-	return fmt.Sprintf("%x", hash)[:8] // First 8 characters for readability
-}
-
 // Path validation functions have been moved to internal/utils/path.go
 
 // ProviderConfig represents a single NNTP provider configuration
@@ -454,9 +446,152 @@ type ArrsConfig struct {
 	SportarrInstances              []ArrsInstanceConfig `yaml:"sportarr_instances" mapstructure:"sportarr_instances" json:"sportarr_instances"`
 	QueueCleanupEnabled            *bool                `yaml:"queue_cleanup_enabled" mapstructure:"queue_cleanup_enabled" json:"queue_cleanup_enabled,omitempty"`
 	QueueCleanupIntervalSeconds    int                  `yaml:"queue_cleanup_interval_seconds" mapstructure:"queue_cleanup_interval_seconds" json:"queue_cleanup_interval_seconds,omitempty"`
-	CleanupAutomaticImportFailure  *bool                `yaml:"cleanup_automatic_import_failure" mapstructure:"cleanup_automatic_import_failure" json:"cleanup_automatic_import_failure,omitempty"`
 	QueueCleanupGracePeriodMinutes int                  `yaml:"queue_cleanup_grace_period_minutes" mapstructure:"queue_cleanup_grace_period_minutes" json:"queue_cleanup_grace_period_minutes,omitempty"`
-	QueueCleanupAllowlist          []IgnoredMessage     `yaml:"queue_cleanup_allowlist" mapstructure:"queue_cleanup_allowlist" json:"queue_cleanup_allowlist,omitempty"`
+
+	// QueueCleanupMaxFailures is the per-target failure circuit breaker. After
+	// AltMount has acted on the same target (a Radarr movie or Sonarr/Whisparr
+	// episode that keeps failing import) this many times — via queue cleanup,
+	// health-repair re-searches or the partial-pack reconcile — it gives up:
+	// it blocklists without re-searching and unmonitors the item in the *arr so it
+	// stops being automatically re-grabbed. 0 (the default) disables the breaker.
+	QueueCleanupMaxFailures int `yaml:"queue_cleanup_max_failures" mapstructure:"queue_cleanup_max_failures" json:"queue_cleanup_max_failures,omitempty"`
+
+	// QueueCleanupRules matches an *arr status message for a stuck/failed import and
+	// decides the action (remove / blocklist / blocklist+search). This is the single
+	// message-rule list for queue cleanup; ghost/empty-folder detection runs alongside
+	// it in the same pass. Only items owned by AltMount's download client are touched
+	// (see issue #523).
+	QueueCleanupRules []StuckCleanupRule `yaml:"queue_cleanup_rules,omitempty" mapstructure:"queue_cleanup_rules" json:"queue_cleanup_rules,omitempty"`
+
+	// Deprecated: the fields below are read from existing config files for one-time
+	// migration into the unified queue-cleanup model (see migrateArrsCleanup) and are
+	// cleared afterwards. They are hidden from the API (json:"-") and dropped from
+	// saved YAML once empty (yaml omitempty). Do not use in new code.
+	QueueCleanupAllowlist          []IgnoredMessage   `yaml:"queue_cleanup_allowlist,omitempty" mapstructure:"queue_cleanup_allowlist" json:"-"`
+	StuckCleanupEnabled            *bool              `yaml:"stuck_cleanup_enabled,omitempty" mapstructure:"stuck_cleanup_enabled" json:"-"`
+	StuckCleanupGracePeriodMinutes int                `yaml:"stuck_cleanup_grace_period_minutes,omitempty" mapstructure:"stuck_cleanup_grace_period_minutes" json:"-"`
+	StuckCleanupRules              []StuckCleanupRule `yaml:"stuck_cleanup_rules,omitempty" mapstructure:"stuck_cleanup_rules" json:"-"`
+	// Deprecated: the hardcoded "automatic import is not possible" purge has been
+	// folded into the unified QueueCleanupRules (see migrateArrsCleanup). Read for
+	// one-time migration only, then cleared. Do not use in new code.
+	CleanupAutomaticImportFailure *bool `yaml:"cleanup_automatic_import_failure,omitempty" mapstructure:"cleanup_automatic_import_failure" json:"-"`
+}
+
+// Stuck cleanup actions decide what happens to a matched stuck import.
+const (
+	// StuckActionRemove removes the item from the queue only (no blocklist, no
+	// re-search) — for transient/environmental errors or already-satisfied files.
+	StuckActionRemove = "remove"
+	// StuckActionBlocklist removes the item and blocklists the release so the same
+	// NZB is not grabbed again, but does NOT trigger a new search.
+	StuckActionBlocklist = "blocklist"
+	// StuckActionBlocklistSearch blocklists the release and triggers the *arr to
+	// search for a replacement.
+	StuckActionBlocklistSearch = "blocklist_search"
+)
+
+// StuckCleanupRule matches a stuck-import status message and decides the action
+// (one of StuckActionRemove, StuckActionBlocklist, StuckActionBlocklistSearch).
+type StuckCleanupRule struct {
+	Message string `yaml:"message" mapstructure:"message" json:"message"`
+	Enabled bool   `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	Action  string `yaml:"action" mapstructure:"action" json:"action"`
+}
+
+// migrateArrsCleanup folds the legacy split cleanup config (separate stuck-rules
+// list, allowlist, enable flag and grace period) into the unified QueueCleanupRules
+// model, then clears the legacy fields so they are dropped from saved YAML.
+//
+// A config predates the merge when any legacy field is present. In that case the
+// unified rules are rebuilt from the legacy values (the user's actual settings),
+// overriding the defaults DefaultConfig pre-populated — otherwise a legacy config
+// loaded on top of fresh defaults would silently keep the defaults and discard the
+// user's customizations. The function is idempotent: once the legacy fields are
+// empty it does nothing.
+func migrateArrsCleanup(config *Config) {
+	a := &config.Arrs
+
+	// The legacy split-cleanup model (separate stuck rules / allowlist / enable flag /
+	// grace period) predated the unified queue_cleanup_rules and coexisted with no
+	// queue_cleanup_rules at all. When present, rebuild the unified list from it so the
+	// user's actual settings override the defaults DefaultConfig pre-populated.
+	legacySplitPresent := len(a.StuckCleanupRules) > 0 ||
+		len(a.QueueCleanupAllowlist) > 0 ||
+		a.StuckCleanupEnabled != nil ||
+		a.StuckCleanupGracePeriodMinutes > 0
+	if legacySplitPresent {
+		// Rebuild the unified rules from the legacy config: the stuck rules verbatim,
+		// then allowlist entries as plain "remove" rules. Rule matching is substring-based
+		// (see matchStuckRule), so skip any allowlist entry already covered by an existing
+		// rule whose message is a substring of it — e.g. an allowlist "Sample file" is dead
+		// next to a "Sample" rule, and would just be a confusing duplicate.
+		rules := append([]StuckCleanupRule(nil), a.StuckCleanupRules...)
+		for _, m := range a.QueueCleanupAllowlist {
+			covered := false
+			for _, r := range rules {
+				if r.Message == m.Message || (r.Message != "" && strings.Contains(m.Message, r.Message)) {
+					covered = true
+					break
+				}
+			}
+			if !covered {
+				rules = append(rules, StuckCleanupRule{
+					Message: m.Message,
+					Enabled: m.Enabled,
+					Action:  StuckActionRemove,
+				})
+			}
+		}
+		a.QueueCleanupRules = rules
+
+		// Enable unified cleanup if only the legacy stuck toggle was on.
+		if a.QueueCleanupEnabled == nil && a.StuckCleanupEnabled != nil && *a.StuckCleanupEnabled {
+			enabled := true
+			a.QueueCleanupEnabled = &enabled
+		}
+
+		// Prefer the legacy stuck grace period when no queue grace period is configured.
+		if a.QueueCleanupGracePeriodMinutes == 0 && a.StuckCleanupGracePeriodMinutes > 0 {
+			a.QueueCleanupGracePeriodMinutes = a.StuckCleanupGracePeriodMinutes
+		}
+
+		// Clear legacy fields so SaveConfig no longer emits them.
+		a.QueueCleanupAllowlist = nil
+		a.StuckCleanupEnabled = nil
+		a.StuckCleanupGracePeriodMinutes = 0
+		a.StuckCleanupRules = nil
+	}
+
+	// Fold the legacy "Import Failure Cleanup" toggle (cleanup_automatic_import_failure)
+	// into the unified rules. Unlike the split-cleanup fields, this toggle coexisted with
+	// queue_cleanup_rules, so operate on the already-loaded rules (never rebuild them) to
+	// avoid wiping the user's customizations. When it was on, preserve the prior purge by
+	// enabling an existing rule that matches "automatic import is not possible" (e.g. the
+	// seeded default, which loads disabled) or appending one; matching mirrors
+	// matchStuckRule (a rule's message is a case-insensitive substring of the phrase).
+	if a.CleanupAutomaticImportFailure != nil {
+		if *a.CleanupAutomaticImportFailure {
+			const phrase = "automatic import is not possible"
+			found := false
+			for i := range a.QueueCleanupRules {
+				r := &a.QueueCleanupRules[i]
+				if r.Message != "" && strings.Contains(phrase, strings.ToLower(r.Message)) {
+					r.Enabled = true
+					found = true
+					break
+				}
+			}
+			if !found {
+				a.QueueCleanupRules = append(a.QueueCleanupRules, StuckCleanupRule{
+					Message: phrase,
+					Enabled: true,
+					Action:  StuckActionRemove,
+				})
+			}
+		}
+		// Clear the legacy flag so SaveConfig no longer emits it.
+		a.CleanupAutomaticImportFailure = nil
+	}
 }
 
 // ArrsInstanceConfig represents a single arrs instance configuration
@@ -804,6 +939,24 @@ func (c *Config) Validate() error {
 	// AsyncBufferMaxTotalMB: 0 means unlimited. Clamp negatives.
 	if c.Fuse.AsyncBufferMaxTotalMB < 0 {
 		c.Fuse.AsyncBufferMaxTotalMB = 0
+	}
+
+	// Validate arrs queue-cleanup rule actions: an explicitly set action must be a
+	// known value. An empty action is allowed and treated as "remove" at runtime
+	// (see starrDeleteOpts), so it is not rejected here.
+	for i, rule := range c.Arrs.QueueCleanupRules {
+		switch rule.Action {
+		case "", StuckActionRemove, StuckActionBlocklist, StuckActionBlocklistSearch:
+		default:
+			return fmt.Errorf("arrs queue_cleanup_rules[%d]: invalid action %q (must be %q, %q, or %q)",
+				i, rule.Action, StuckActionRemove, StuckActionBlocklist, StuckActionBlocklistSearch)
+		}
+	}
+
+	// The failure circuit breaker counts up to a positive threshold; 0 disables it.
+	if c.Arrs.QueueCleanupMaxFailures < 0 {
+		return fmt.Errorf("arrs queue_cleanup_max_failures must be >= 0 (0 disables the breaker), got %d",
+			c.Arrs.QueueCleanupMaxFailures)
 	}
 
 	return nil
@@ -1212,6 +1365,9 @@ func (m *Manager) ReloadConfig() error {
 		}
 	}
 
+	// Migrate: fold legacy stuck/allowlist cleanup config into the unified rules.
+	migrateArrsCleanup(config)
+
 	// Validate configuration
 	if err := config.Validate(); err != nil {
 		return fmt.Errorf("config validation failed: %w", err)
@@ -1296,7 +1452,6 @@ func DefaultConfig(configDir ...string) *Config {
 	failedItemRetentionHours := 24  // Default: auto-remove failed items after 24 hours
 	historyRetentionDays := 90      // Default: auto-remove import history after 90 days (3 months)
 	isoAnalyzeTimeoutSeconds := 120 // Default: 120s hard cap per ISO analyse (prevents stuck NNTP from stalling import for 9+ minutes)
-	cleanupAutomaticImportFailure := false
 	metadataBackupEnabled := false
 	failureMaskingEnabled := false
 	repairEnabled := true
@@ -1510,17 +1665,53 @@ func DefaultConfig(configDir ...string) *Config {
 			ReadarrInstances:               []ArrsInstanceConfig{},
 			WhisparrInstances:              []ArrsInstanceConfig{},
 			SportarrInstances:              []ArrsInstanceConfig{},
-			CleanupAutomaticImportFailure:  &cleanupAutomaticImportFailure,
-			QueueCleanupGracePeriodMinutes: 10, // Default to 10 minutes
-			QueueCleanupAllowlist: []IgnoredMessage{
-				{Message: "No files found are eligible", Enabled: true},
-				{Message: "One or more episodes expected in this release were not imported or missing", Enabled: true},
-				{Message: "is not a valid video file", Enabled: true},
-				{Message: "Sample file", Enabled: true},
-				{Message: "No video files were found in the selected folder", Enabled: true},
-				{Message: "Could not find file", Enabled: true},
-				{Message: "Unexpected error processing file", Enabled: true},
-				{Message: "Download doesn't contain intermediate path", Enabled: true},
+			QueueCleanupGracePeriodMinutes: 5,     // Default to 5 minutes stuck before acting
+			QueueCleanupMaxFailures:        0, // Failure circuit breaker disabled by default
+			// Rule table modeled on wArrden's queue cleanup. Action decides what to do:
+			// blocklist_search (bad release → block + re-search), blocklist (block but
+			// don't search), or remove (just clear the queue: transient/environmental
+			// errors or files that are already satisfied).
+			QueueCleanupRules: []StuckCleanupRule{
+				// Bad release — blocklist and search for a replacement.
+				{Message: "Sample", Enabled: true, Action: StuckActionBlocklistSearch},
+				{Message: "Unable to determine if file is a sample", Enabled: true, Action: StuckActionBlocklistSearch},
+				{Message: "is not a valid video file", Enabled: true, Action: StuckActionBlocklistSearch},
+				{Message: "No files found are eligible", Enabled: true, Action: StuckActionBlocklistSearch},
+				{Message: "No audio tracks detected", Enabled: true, Action: StuckActionBlocklistSearch},
+				{Message: "Found archive file", Enabled: true, Action: StuckActionBlocklistSearch},
+				{Message: "Unable to parse file", Enabled: true, Action: StuckActionBlocklistSearch},
+				{Message: "Unexpected error processing file", Enabled: true, Action: StuckActionBlocklistSearch},
+				{Message: "unsupported extension", Enabled: true, Action: StuckActionBlocklistSearch},
+				{Message: "potentially dangerous file", Enabled: true, Action: StuckActionBlocklistSearch},
+				{Message: "Found executable file", Enabled: true, Action: StuckActionBlocklistSearch},
+				{Message: "was not found in the grabbed release", Enabled: true, Action: StuckActionBlocklistSearch},
+				{Message: "Invalid season or episode", Enabled: true, Action: StuckActionBlocklistSearch},
+				{Message: "One or more episodes expected in this release were not imported or missing", Enabled: true, Action: StuckActionBlocklistSearch},
+				// Already satisfied — remove from queue only (don't re-search).
+				{Message: "Not a Custom Format upgrade", Enabled: true, Action: StuckActionRemove},
+				{Message: "Not an upgrade for existing", Enabled: true, Action: StuckActionRemove},
+				{Message: "Not a quality revision upgrade", Enabled: true, Action: StuckActionRemove},
+				{Message: "Movie file already imported", Enabled: true, Action: StuckActionRemove},
+				{Message: "Episode file already imported", Enabled: true, Action: StuckActionRemove},
+				{Message: "Album already imported", Enabled: true, Action: StuckActionRemove},
+				// Transient/environmental — disabled by default (enable if desired).
+				{Message: "Not enough free space", Enabled: false, Action: StuckActionRemove},
+				{Message: "File is still being unpacked", Enabled: false, Action: StuckActionRemove},
+				{Message: "Locked file, try again later", Enabled: false, Action: StuckActionRemove},
+				{Message: "is reporting an error", Enabled: false, Action: StuckActionRemove},
+				{Message: "Import failed, path does not exist", Enabled: false, Action: StuckActionRemove},
+				// Folded from the former queue-cleanup allowlist — remove from queue only.
+				// ("Sample file" is intentionally omitted: the "Sample" rule above already
+				// substring-matches it.)
+				{Message: "No video files were found in the selected folder", Enabled: true, Action: StuckActionRemove},
+				{Message: "Could not find file", Enabled: true, Action: StuckActionRemove},
+				{Message: "Download doesn't contain intermediate path", Enabled: true, Action: StuckActionRemove},
+				// Folded from the former "Import Failure Cleanup" toggle (cleanup_automatic_import_failure).
+				// Seeded disabled to match the toggle's default-off behavior, but discoverable so
+				// users can switch it on (and pick blocklist/blocklist_search if they prefer). A
+				// migrated config that had the toggle enabled gets this rule enabled automatically
+				// (see migrateArrsCleanup).
+				{Message: "automatic import is not possible", Enabled: false, Action: StuckActionRemove},
 			},
 		},
 		Fuse: FuseConfig{
@@ -1633,6 +1824,9 @@ func LoadConfig(configFile string) (*Config, error) {
 		}
 	}
 
+	// Migrate: fold legacy stuck/allowlist cleanup config into the unified rules.
+	migrateArrsCleanup(config)
+
 	// If log file was not explicitly set in the config file and we have a specific config file path,
 	// derive log file path from config file location
 	if configFile != "" && !viper.IsSet("log.file") {
@@ -1666,9 +1860,4 @@ func LoadConfig(configFile string) (*Config, error) {
 	}
 
 	return config, nil
-}
-
-// GetConfigFilePath returns the configuration file path used by viper
-func GetConfigFilePath() string {
-	return viper.ConfigFileUsed()
 }

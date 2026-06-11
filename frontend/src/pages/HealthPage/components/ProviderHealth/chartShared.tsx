@@ -16,14 +16,16 @@ import {
 	YAxis,
 } from "recharts";
 
-export const CHART_COLORS = [
-	"#3b82f6",
-	"#10b981",
-	"#f59e0b",
-	"#ef4444",
-	"#8b5cf6",
-	"#ec4899",
-	"#06b6d4",
+// Multi-series palette sourced from the active daisyUI theme so chart colors
+// follow the selected theme instead of fixed hex values.
+const CHART_COLORS = [
+	"var(--color-primary)",
+	"var(--color-success)",
+	"var(--color-warning)",
+	"var(--color-error)",
+	"var(--color-secondary)",
+	"var(--color-accent)",
+	"var(--color-info)",
 ];
 
 export type ChartDatum = Record<string, string | number>;
@@ -33,7 +35,7 @@ export interface TimeRangeTab {
 	value: number;
 }
 
-export interface TooltipPayloadItem {
+interface TooltipPayloadItem {
 	value: number;
 	dataKey: string;
 	stroke: string;
@@ -47,7 +49,7 @@ interface CustomTooltipProps {
 	totalClassName: string;
 }
 
-export function CustomTooltip({
+function CustomTooltip({
 	active,
 	payload,
 	label,
@@ -60,7 +62,7 @@ export function CustomTooltip({
 	const sum = payload.reduce((acc, p) => acc + p.value, 0);
 
 	return (
-		<div className="z-50 min-w-[220px] rounded-xl border border-base-200/50 bg-base-100/90 p-4 text-xs shadow-2xl backdrop-blur-md">
+		<div className="z-50 min-w-[220px] rounded-xl border border-base-200/50 bg-base-100 p-4 text-xs shadow-2xl">
 			<p className="mb-2 border-base-200/30 border-b pb-1.5 font-bold text-base-content/80">
 				{label}
 			</p>
@@ -85,11 +87,41 @@ export function CustomTooltip({
 	);
 }
 
+interface PieTooltipProps {
+	active?: boolean;
+	payload?: Array<{ name?: string; value?: number; payload?: { fill?: string } }>;
+	formatValue: (value: number) => string;
+}
+
+/** Breakdown pie tooltip — text tinted with the hovered slice's color. */
+function PieTooltip({ active, payload, formatValue }: PieTooltipProps) {
+	const item = payload?.[0];
+	if (!active || !item || typeof item.value !== "number") return null;
+
+	return (
+		<div
+			style={{
+				borderRadius: "12px",
+				border: "1px solid color-mix(in oklch, var(--color-base-content) 10%, transparent)",
+				backgroundColor: "color-mix(in oklch, var(--color-base-100) 95%, transparent)",
+				fontSize: "11px",
+				backdropFilter: "blur(8px)",
+				boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.3)",
+				padding: "8px 12px",
+			}}
+		>
+			<span style={{ color: item.payload?.fill ?? "var(--color-base-content)" }}>
+				{item.name} : {formatValue(item.value)}
+			</span>
+		</div>
+	);
+}
+
 /**
  * Keeps an active/inactive toggle map in sync with the available providers,
  * defaulting newly seen providers to active.
  */
-export function useActiveProviders(providers: string[]) {
+function useActiveProviders(providers: string[]) {
 	const [activeProviders, setActiveProviders] = useState<Record<string, boolean>>({});
 
 	useEffect(() => {
@@ -125,7 +157,7 @@ interface TimeRangeTabsProps {
 	activeClassName: string;
 }
 
-export function TimeRangeTabs({ tabs, value, onChange, activeClassName }: TimeRangeTabsProps) {
+function TimeRangeTabs({ tabs, value, onChange, activeClassName }: TimeRangeTabsProps) {
 	return (
 		<div className="join rounded-xl border border-base-200/40 bg-base-200/50 p-0.5">
 			{tabs.map((tab) => (
@@ -272,7 +304,16 @@ export function ProviderAreaChart({
 											totalClassName={tooltipTotalClassName}
 										/>
 									}
-									cursor={{ stroke: "rgba(255,255,255,0.08)", strokeWidth: 1 }}
+									cursor={{
+										stroke: "var(--color-base-content)",
+										strokeOpacity: 0.1,
+										strokeWidth: 1,
+									}}
+									isAnimationActive={false}
+									// z-index must live on the recharts wrapper: it's positioned
+									// with transform (own stacking context), so the legend would
+									// otherwise paint over the tooltip and clip the Total row.
+									wrapperStyle={{ zIndex: 50 }}
 								/>
 								<Legend
 									onClick={(e) => {
@@ -293,7 +334,8 @@ export function ProviderAreaChart({
 											formatter={(value, entry) => (
 												<span
 													style={{
-														color: !entry?.inactive ? "inherit" : "#666",
+														color: "inherit",
+														opacity: entry?.inactive ? 0.4 : 1,
 														textDecoration: !entry?.inactive ? "none" : "line-through",
 														paddingRight: "8px",
 													}}
@@ -346,15 +388,9 @@ export function ProviderAreaChart({
 									))}
 								</Pie>
 								<Tooltip
-									formatter={(value: number) => formatValue(value)}
-									contentStyle={{
-										borderRadius: "12px",
-										border: "1px solid hsl(var(--bc) / 0.1)",
-										backgroundColor: "hsl(var(--b1) / 0.95)",
-										fontSize: "11px",
-										backdropFilter: "blur(8px)",
-										boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.3)",
-									}}
+									content={<PieTooltip formatValue={formatValue} />}
+									isAnimationActive={false}
+									wrapperStyle={{ zIndex: 50 }}
 								/>
 							</PieChart>
 						</ResponsiveContainer>

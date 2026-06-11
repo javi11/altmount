@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/javi11/nntppool/v4"
+	"github.com/javi11/nzbparser"
 
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
@@ -22,6 +23,7 @@ import (
 	"github.com/javi11/altmount/internal/importer/parser"
 	"github.com/javi11/altmount/internal/importer/singlefile"
 	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
+	"github.com/javi11/altmount/internal/importer/validation"
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/nzbfile"
@@ -166,6 +168,182 @@ func (proc *Processor) checkCancellation(ctx context.Context) error {
 	}
 }
 
+// preParseFastFail runs a per-file Stat-based reachability check against the raw NZB
+// before any Body fetches. PAR2 files and sidecars are never Stat-checked (they're
+// included regardless), so their segments are omitted from the sweep to avoid wasted
+// round-trips. Returns (brokenFileIndexes, knownMissingSegmentIDs, error).
+// Both maps are nil when no pool is available.
+// Returns ErrNoFilesProcessed (wrapped) when all eligible regular files are broken.
+func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, cfg *config.Config, queueID, maxConnections int) (map[int]struct{}, map[string]struct{}, error) {
+	if !proc.poolManager.HasPool() {
+		return nil, nil, nil
+	}
+
+	// Build the fast-fail input index-aligned with n.Files. PAR2 files keep their
+	// slot but carry no segments, so FastFailCheckFiles skips them (their broken
+	// state is ignored below anyway) — this avoids Stat-ing every PAR2 part.
+	fastFailFiles := make([]validation.FastFailFile, len(n.Files))
+	for i, f := range n.Files {
+		if filesystem.IsPar2File(f.Filename) {
+			fastFailFiles[i] = validation.FastFailFile{Filename: f.Filename}
+			continue
+		}
+		segs := make([]*metapb.SegmentData, len(f.Segments))
+		for j, s := range f.Segments {
+			segs[j] = &metapb.SegmentData{Id: s.ID}
+		}
+		// Tag RAR/split-volume parts with their set key so one unreachable part
+		// dooms the whole set: the sweep skips the rest and marks every member
+		// broken, excluding the doomed set from parsing as a single unit.
+		groupKey, _ := rar.SetKey(f.Filename)
+		fastFailFiles[i] = validation.FastFailFile{
+			Filename: f.Filename,
+			Segments: segs,
+			GroupKey: groupKey,
+		}
+	}
+
+	// Stat is a cheap single round-trip on the pool's normal lane; excess
+	// requests queue and yield to streaming (priority lane). Run sweeps at the
+	// pool's full connection capacity rather than MaxImportConnections (which
+	// caps sustained body downloads) so multi-part releases don't crawl
+	// 5-at-a-time.
+	concurrency := fastFailConcurrency(cfg, maxConnections)
+
+	// Phase 1: cheap release-level probe. Sample the whole release once
+	// (≤55 Stats) and fail fast. Healthy releases — the common case — pay only
+	// this and skip the per-file sweep entirely, keeping the "Checking segment
+	// availability" stage short.
+	probeStart := time.Now()
+	missing, err := validation.FastFailReleaseProbe(
+		ctx,
+		fastFailFiles,
+		proc.poolManager,
+		cfg.Import.SegmentSamplePercentage,
+		concurrency,
+		proc.validationTimeout,
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !missing {
+		if proc.log != nil {
+			proc.log.DebugContext(ctx, "Fast-fail release probe passed",
+				"files", len(fastFailFiles),
+				"duration", time.Since(probeStart))
+		}
+		return nil, nil, nil
+	}
+
+	// Phase 2 (escalation): the probe found an unreachable segment, so map
+	// exactly which files are broken. This sweeps a per-file sample of every
+	// file but only runs for releases that are already known to have missing
+	// segments — those imports skip Body work below, so the extra Stats are
+	// recovered.
+	if proc.log != nil {
+		proc.log.DebugContext(ctx, "Fast-fail release probe found a missing segment, escalating to per-file sweep",
+			"files", len(fastFailFiles),
+			"probe_duration", time.Since(probeStart))
+	}
+
+	// Report progress within the 0–10% band so the queue item doesn't appear
+	// frozen at "Checking segment availability" during the network sweep.
+	var fastFailTracker *progress.Tracker
+	if proc.broadcaster != nil && proc.broadcaster.HasSubscribers() {
+		fastFailTracker = proc.broadcaster.CreateTracker(queueID, 0, 10).WithStage("Checking segment availability")
+	}
+
+	results, err := validation.FastFailCheckFiles(
+		ctx,
+		fastFailFiles,
+		proc.poolManager,
+		cfg.Import.SegmentSamplePercentage,
+		concurrency,
+		proc.validationTimeout,
+		fastFailTracker,
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	brokenIdx := make(map[int]struct{})
+	missingIDs := make(map[string]struct{})
+	eligibleRegularCount := 0
+
+	for i, result := range results {
+		f := n.Files[i]
+		isPar2 := filesystem.IsPar2File(f.Filename)
+
+		if !isPar2 {
+			eligibleRegularCount++
+		}
+
+		if result.Broken && !isPar2 {
+			brokenIdx[i] = struct{}{}
+			for _, id := range result.MissingSegmentIDs {
+				missingIDs[id] = struct{}{}
+			}
+			if proc.log != nil {
+				proc.log.WarnContext(ctx, "Skipping file due to early fast-fail segment check error",
+					"file", f.Filename)
+			}
+		}
+	}
+
+	// With set-level propagation, a broken set has all its parts in brokenIdx, so
+	// this equality is logical-unit accurate: it holds only when every RAR set and
+	// every standalone regular file is broken — nothing healthy remains to import.
+	if eligibleRegularCount > 0 && len(brokenIdx) == eligibleRegularCount {
+		return nil, nil, multifile.ErrNoFilesProcessed
+	}
+
+	if len(brokenIdx) == 0 {
+		return nil, nil, nil
+	}
+
+	if proc.log != nil {
+		brokenSets := make(map[string]struct{})
+		for i := range brokenIdx {
+			if key, ok := rar.SetKey(n.Files[i].Filename); ok {
+				brokenSets[key] = struct{}{}
+			}
+		}
+		proc.log.WarnContext(ctx, "Excluding unreachable files from import",
+			"broken_files", len(brokenIdx),
+			"broken_rar_sets", len(brokenSets),
+			"eligible_files", eligibleRegularCount)
+	}
+
+	return brokenIdx, missingIDs, nil
+}
+
+// fastFailConcurrency returns the goroutine cap for the fast-fail Stat sweep.
+// Stats are cheap and queue on the pool's normal lane, so we use the pool's
+// full connection capacity (sum of enabled providers' max connections) rather
+// than the import body-download cap. Falls back to fallback when no capacity is
+// configured and is bounded to keep goroutine counts sane.
+func fastFailConcurrency(cfg *config.Config, fallback int) int {
+	const maxConcurrency = 100
+
+	capacity := 0
+	for _, p := range cfg.Providers {
+		if p.Enabled == nil || *p.Enabled {
+			capacity += p.MaxConnections
+		}
+	}
+
+	if capacity <= 0 {
+		capacity = fallback
+	}
+	if capacity <= 0 {
+		capacity = 1
+	}
+	if capacity > maxConcurrency {
+		capacity = maxConcurrency
+	}
+	return capacity
+}
+
 // ProcessNzbFile processes an NZB or STRM file maintaining the folder structure relative to relative path.
 // Returns (resultPath, writtenMetadataPaths, error). writtenMetadataPaths contains all virtual paths of
 // metadata files written to disk; it is populated even on partial failure so callers can clean up.
@@ -201,6 +379,7 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 	defer file.Close()
 
 	var parsed *parser.ParsedNzb
+	var brokenIdx map[int]struct{}
 
 	// Determine file type and parse accordingly
 	if strings.HasSuffix(strings.ToLower(filePath), strmFileExtension) {
@@ -214,8 +393,29 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 			return "", nil, NewNonRetryableError("STRM validation failed", err)
 		}
 	} else {
-		parseTracker := progress.NewTracker(proc.broadcaster, queueID, 0, 10)
-		parsed, err = proc.parser.ParseFile(ctx, file, filePath, parseTracker)
+		// Parse XML first — cheap, no network needed.
+		n, xmlErr := nzbparser.Parse(file)
+		if xmlErr != nil {
+			return "", nil, NewNonRetryableError("failed to parse NZB file", xmlErr)
+		}
+		if len(n.Files) == 0 {
+			return "", nil, NewNonRetryableError("NZB file contains no files", nil)
+		}
+
+		// Pre-parse Stat check — runs before any Body fetches.
+		proc.updateProgressWithStage(queueID, 0, "Checking segment availability")
+		var missingIDs map[string]struct{}
+		var fastFailErr error
+		brokenIdx, missingIDs, fastFailErr = proc.preParseFastFail(ctx, n, cfg, queueID, maxConnections)
+		if fastFailErr != nil {
+			return "", nil, NewNonRetryableError("fast-fail segment check failed", fastFailErr)
+		}
+
+		parseTracker := progress.NewTracker(proc.broadcaster, queueID, 2, 10)
+		parsed, err = proc.parser.ParseNzb(ctx, n, filePath, parseTracker, parser.ParseOptions{
+			BrokenFileIndexes:      brokenIdx,
+			KnownMissingSegmentIDs: missingIDs,
+		})
 		if err != nil {
 			return "", nil, NewNonRetryableError("failed to parse NZB file", err)
 		}
@@ -236,6 +436,29 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 	// Check for cancellation after parsing
 	if err := proc.checkCancellation(ctx); err != nil {
 		return "", nil, err
+	}
+
+	// For NZB-based imports, ensure at least one NNTP provider is configured
+	// and run fast-fail before path calculation, directory creation, archive
+	// analysis, or metadata writes. STRM files are served via HTTP and don't
+	// require an NNTP pool.
+	if parsed.Type != parser.NzbTypeStrm {
+		if !proc.poolManager.HasPool() {
+			proc.log.WarnContext(ctx, "No NNTP providers configured, deferring item processing",
+				"file_path", filePath, "queue_id", queueID)
+			return "", nil, fmt.Errorf("no NNTP providers configured - item will be retried when providers are added")
+		}
+
+		// Doomed RAR/7z sets are excluded whole during fast-fail (set-level
+		// propagation), so the parser already dropped them and surviving files
+		// never contain a partially-broken known set. Any remaining broken index
+		// belongs to a fully-excluded set or an unrelated file; the aggregator
+		// isolates per-group analysis failures, so don't fail the whole import.
+		if len(brokenIdx) > 0 &&
+			(parsed.Type == parser.NzbTypeRarArchive || parsed.Type == parser.NzbType7zArchive) {
+			proc.log.WarnContext(ctx, "Proceeding with archive import despite unreachable excluded parts",
+				"broken_files", len(brokenIdx))
+		}
 	}
 
 	// Step 2: Calculate virtual directory
@@ -260,16 +483,6 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 	// Check for cancellation before main processing
 	if err := proc.checkCancellation(ctx); err != nil {
 		return "", nil, err
-	}
-
-	// Step 4: For NZB-based imports, ensure at least one NNTP provider is configured.
-	// STRM files are served via HTTP and don't require an NNTP pool.
-	if parsed.Type != parser.NzbTypeStrm {
-		if !proc.poolManager.HasPool() {
-			proc.log.WarnContext(ctx, "No NNTP providers configured, deferring item processing",
-				"file_path", filePath, "queue_id", queueID)
-			return "", nil, fmt.Errorf("no NNTP providers configured - item will be retried when providers are added")
-		}
 	}
 
 	// Step 5: Process based on file type
@@ -345,23 +558,23 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 	switch parsed.Type {
 	case parser.NzbTypeSingleFile:
 		proc.updateProgressWithStage(queueID, 30, "Validating segments")
-		result, dispatchPaths, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, queueID, maxConnections, allowedExtensions, proc.validationTimeout, category, metadata, downloadID)
+		result, dispatchPaths, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, queueID, allowedExtensions, category, metadata, downloadID)
 
 	case parser.NzbTypeMultiFile:
-		proc.updateProgressWithStage(queueID, 30, "Validating segments")
-		result, dispatchPaths, err = proc.processMultiFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, queueID, maxConnections, allowedExtensions, proc.validationTimeout, category, metadata, downloadID)
+		proc.updateProgressWithStage(queueID, 30, "Writing metadata")
+		result, dispatchPaths, err = proc.processMultiFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, queueID, allowedExtensions, category, metadata, downloadID)
 
 	case parser.NzbTypeRarArchive:
 		proc.updateProgressWithStage(queueID, 15, "Analyzing archive")
-		result, dispatchPaths, err = proc.processRarArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, maxConnections, allowedExtensions, proc.validationTimeout, parsed.ExtractedFiles, category, metadata, downloadID)
+		result, dispatchPaths, err = proc.processRarArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, allowedExtensions, parsed.ExtractedFiles, category, metadata, downloadID)
 
 	case parser.NzbType7zArchive:
 		proc.updateProgressWithStage(queueID, 15, "Analyzing archive")
-		result, dispatchPaths, err = proc.processSevenZipArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, maxConnections, allowedExtensions, proc.validationTimeout, parsed.ExtractedFiles, category, metadata, downloadID)
+		result, dispatchPaths, err = proc.processSevenZipArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, allowedExtensions, parsed.ExtractedFiles, category, metadata, downloadID)
 
 	case parser.NzbTypeStrm:
 		proc.updateProgressWithStage(queueID, 30, "Validating segments")
-		result, dispatchPaths, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, queueID, maxConnections, allowedExtensions, proc.validationTimeout, category, metadata, downloadID)
+		result, dispatchPaths, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, queueID, allowedExtensions, category, metadata, downloadID)
 
 	default:
 		return "", writtenPaths, NewNonRetryableError(fmt.Sprintf("unknown file type: %s", parsed.Type), nil)
@@ -386,9 +599,7 @@ func (proc *Processor) processSingleFile(
 	par2Files []parser.ParsedFile,
 	nzbPath string,
 	queueID int,
-	maxConnections int,
 	allowedExtensions []string,
-	timeout time.Duration,
 	category *string,
 	metadata *string,
 	downloadID *string,
@@ -402,7 +613,6 @@ func (proc *Processor) processSingleFile(
 	if importCfg.RenameToNzbName != nil {
 		renameToNzbName = *importCfg.RenameToNzbName
 	}
-	segmentSamplePercentage := importCfg.SegmentSamplePercentage
 	filterSampleFiles := true
 	if importCfg.FilterSampleFiles != nil {
 		filterSampleFiles = *importCfg.FilterSampleFiles
@@ -450,16 +660,6 @@ func (proc *Processor) processSingleFile(
 	// Use the final name for processing
 	regularFiles[0].Filename = finalName
 
-	// Use configured sample percentage for validation
-	samplePercentage := segmentSamplePercentage
-
-	// Create a granular progress tracker covering the 30–100% range.
-	var fileTracker *progress.Tracker
-	if proc.broadcaster != nil && proc.broadcaster.HasSubscribers() {
-		fileTracker = proc.broadcaster.CreateTracker(queueID, 30, 100)
-		fileTracker.WithStage("Validating segments")
-	}
-
 	// Process the single file at the resolved parentPath
 	result, writtenPath, err := singlefile.ProcessSingleFile(
 		ctx,
@@ -468,12 +668,7 @@ func (proc *Processor) processSingleFile(
 		par2Files,
 		nzbPath,
 		proc.metadataService,
-		proc.poolManager,
-		maxConnections,
-		samplePercentage,
 		allowedExtensions,
-		timeout,
-		fileTracker,
 		filterSampleFiles,
 	)
 	var writtenPaths []string
@@ -513,9 +708,7 @@ func (proc *Processor) processMultiFile(
 	par2Files []parser.ParsedFile,
 	nzbPath string,
 	queueID int,
-	maxConnections int,
 	allowedExtensions []string,
-	timeout time.Duration,
 	category *string,
 	metadata *string,
 	downloadID *string,
@@ -526,48 +719,38 @@ func (proc *Processor) processMultiFile(
 	// EXCEPTION: If the virtual directory is a category root (e.g. "movies"), we MUST create
 	// the NZB folder to ensure Radarr/Sonarr can find the job folder correctly.
 	importCfg := proc.configGetter().Import
-	renameToNzbName := true
-	if importCfg.RenameToNzbName != nil {
-		renameToNzbName = *importCfg.RenameToNzbName
-	}
-	samplePercentage := importCfg.SegmentSamplePercentage
 	filterSampleFiles := true
 	if importCfg.FilterSampleFiles != nil {
 		filterSampleFiles = *importCfg.FilterSampleFiles
 	}
 
-	singleLike := len(regularFiles) == 1 && !proc.isCategoryFolder(virtualDir, category)
-	targetBaseDir := virtualDir
 	nzbName := proc.getCleanNzbName(nzbPath, queueID)
 
-	if singleLike {
-		// Rename the leaf to the release name (prevents ext duplication) but keep NZB-provided subfolders.
-		regularFiles = applyNzbRename(renameToNzbName, nzbName, regularFiles)
-
-		// Avoid nesting like /Season 02/<release>/<release>.mkv; drop the NZB-named folder here.
-		if err := filesystem.EnsureDirectoryExists(targetBaseDir, proc.metadataService); err != nil {
-			return "", nil, err
-		}
-	} else {
-		// Create NZB folder for true multi-file imports
-		nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, nzbName, proc.metadataService)
-		if err != nil {
-			return "", nil, err
-		}
-
-		// Create directories for files
-		if err := filesystem.CreateDirectoriesForFiles(nzbFolder, regularFiles, proc.metadataService); err != nil {
-			return "", nil, err
-		}
-
-		targetBaseDir = nzbFolder
+	// Create NZB folder for multi-file imports, even if early fast-fail filtering
+	// leaves only one regular file. The release still originated as a multi-file
+	// NZB and should keep its job-folder shape.
+	nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, nzbName, proc.metadataService)
+	if err != nil {
+		return "", nil, err
 	}
 
-	// Create a granular progress tracker covering the 30–100% range.
-	var fileTracker *progress.Tracker
-	if proc.broadcaster != nil && proc.broadcaster.HasSubscribers() {
-		fileTracker = proc.broadcaster.CreateTracker(queueID, 30, 100)
-		fileTracker.WithStage("Validating segments")
+	// Create directories for files
+	if err := filesystem.CreateDirectoriesForFiles(nzbFolder, regularFiles, proc.metadataService); err != nil {
+		return "", nil, err
+	}
+
+	targetBaseDir := nzbFolder
+
+	// Progress tracker for the metadata write phase. Files are written
+	// concurrently; this ticks the bar across [30,95] as each completes so the
+	// item doesn't appear frozen at "Writing metadata" on large releases.
+	// NOT gated on HasSubscribers(): the tracker also persists the latest
+	// percentage in the broadcaster's state map, which is replayed to clients
+	// that connect mid-import (GetAllProgress). Gating on a live subscriber here
+	// left late-connecting clients stuck at the dispatch's initial 30%.
+	var writeTracker *progress.Tracker
+	if proc.broadcaster != nil {
+		writeTracker = proc.broadcaster.CreateTracker(queueID, 30, 95).WithStage("Writing metadata")
 	}
 
 	// Process all regular files
@@ -578,13 +761,9 @@ func (proc *Processor) processMultiFile(
 		par2Files,
 		nzbPath,
 		proc.metadataService,
-		proc.poolManager,
-		maxConnections,
-		samplePercentage,
 		allowedExtensions,
-		timeout,
-		fileTracker,
 		filterSampleFiles,
+		writeTracker,
 	)
 	if err != nil {
 		return "", writtenPaths, err
@@ -625,16 +804,13 @@ func (proc *Processor) processRarArchive(
 	archiveFiles []parser.ParsedFile,
 	parsed *parser.ParsedNzb,
 	queueID int,
-	maxConnections int,
 	allowedExtensions []string,
-	timeout time.Duration,
 	extractedFiles []parser.ExtractedFileInfo,
 	category *string,
 	metadata *string,
 	downloadID *string,
 ) (string, []string, error) {
 	importCfg := proc.configGetter().Import
-	samplePercentage := importCfg.SegmentSamplePercentage
 	maxPrefetch := importCfg.MaxDownloadPrefetch
 	readTimeout := time.Duration(importCfg.ReadTimeoutSeconds) * time.Second
 	if readTimeout == 0 {
@@ -677,13 +853,9 @@ func (proc *Processor) processRarArchive(
 			nil, // No PAR2 files for archive imports
 			parsed.Path,
 			proc.metadataService,
-			proc.poolManager,
-			maxConnections,
-			samplePercentage,
 			allowedExtensions,
-			proc.validationTimeout,
-			nil, // No progress tracker for pre-archive regular files
 			filterSampleFiles,
+			nil, // archive progress is tracked by the archive tracker below
 		); err != nil {
 			slog.DebugContext(ctx, "Failed to process regular files", "error", err)
 		}
@@ -691,38 +863,32 @@ func (proc *Processor) processRarArchive(
 
 	if len(archiveFiles) > 0 {
 		// Lazy tracker allocation: nil *progress.Tracker is safe (nil-receiver guard).
-		var archiveProgressTracker, validationProgressTracker *progress.Tracker
+		var archiveProgressTracker *progress.Tracker
 		if proc.broadcaster != nil && proc.broadcaster.HasSubscribers() {
-			archiveProgressTracker = proc.broadcaster.CreateTracker(queueID, 15, 80)
+			archiveProgressTracker = proc.broadcaster.CreateTracker(queueID, 15, 100)
 			archiveProgressTracker.WithStage("Analyzing archive")
-			validationProgressTracker = proc.broadcaster.CreateTracker(queueID, 80, 95)
-			validationProgressTracker.WithStage("Verifying archive")
 		}
 
 		releaseDate := archiveFiles[0].ReleaseDate.Unix()
 
 		err := rar.ProcessArchive(ctx, rar.ProcessArchiveOptions{
-			VirtualDir:                nzbFolder,
-			ArchiveFiles:              archiveFiles,
-			Password:                  parsed.GetPassword(),
-			ReleaseDate:               releaseDate,
-			NzbPath:                   parsed.Path,
-			Processor:                 proc.rarProcessor,
-			MetadataService:           proc.metadataService,
-			PoolManager:               proc.poolManager,
-			ArchiveProgressTracker:    archiveProgressTracker,
-			ValidationProgressTracker: validationProgressTracker,
-			MaxValidationGoroutines:   maxConnections,
-			SegmentSamplePercentage:   samplePercentage,
-			AllowedFileExtensions:     allowedExtensions,
-			Timeout:                   timeout,
-			ExtractedFiles:            extractedFiles,
-			MaxPrefetch:               maxPrefetch,
-			ReadTimeout:               readTimeout,
-			IsoAnalyzeTimeout:         proc.configGetter().GetIsoAnalyzeTimeout(),
-			ExpandBlurayIso:           expandBlurayIso,
-			FilterSamples:             filterSampleFiles,
-			RenameToNzbName:           renameToNzbName,
+			VirtualDir:             nzbFolder,
+			ArchiveFiles:           archiveFiles,
+			Password:               parsed.GetPassword(),
+			ReleaseDate:            releaseDate,
+			NzbPath:                parsed.Path,
+			Processor:              proc.rarProcessor,
+			MetadataService:        proc.metadataService,
+			PoolManager:            proc.poolManager,
+			ArchiveProgressTracker: archiveProgressTracker,
+			AllowedFileExtensions:  allowedExtensions,
+			ExtractedFiles:         extractedFiles,
+			MaxPrefetch:            maxPrefetch,
+			ReadTimeout:            readTimeout,
+			IsoAnalyzeTimeout:      proc.configGetter().GetIsoAnalyzeTimeout(),
+			ExpandBlurayIso:        expandBlurayIso,
+			FilterSamples:          filterSampleFiles,
+			RenameToNzbName:        renameToNzbName,
 		})
 		if err != nil {
 			return nzbFolder, writtenPaths, err
@@ -765,16 +931,13 @@ func (proc *Processor) processSevenZipArchive(
 	archiveFiles []parser.ParsedFile,
 	parsed *parser.ParsedNzb,
 	queueID int,
-	maxConnections int,
 	allowedExtensions []string,
-	timeout time.Duration,
 	extractedFiles []parser.ExtractedFileInfo,
 	category *string,
 	metadata *string,
 	downloadID *string,
 ) (string, []string, error) {
 	importCfg := proc.configGetter().Import
-	samplePercentage := importCfg.SegmentSamplePercentage
 	maxPrefetch := importCfg.MaxDownloadPrefetch
 	readTimeout := time.Duration(importCfg.ReadTimeoutSeconds) * time.Second
 	if readTimeout == 0 {
@@ -817,51 +980,41 @@ func (proc *Processor) processSevenZipArchive(
 			nil, // No PAR2 files for archive imports
 			parsed.Path,
 			proc.metadataService,
-			proc.poolManager,
-			maxConnections,
-			samplePercentage,
 			allowedExtensions,
-			proc.validationTimeout,
-			nil, // No progress tracker for pre-archive regular files
 			filterSampleFiles,
+			nil, // archive progress is tracked by the archive tracker below
 		); err != nil {
 			slog.DebugContext(ctx, "Failed to process regular files", "error", err)
 		}
 	}
 
 	if len(archiveFiles) > 0 {
-		var archiveProgressTracker, validationProgressTracker *progress.Tracker
+		var archiveProgressTracker *progress.Tracker
 		if proc.broadcaster != nil && proc.broadcaster.HasSubscribers() {
-			archiveProgressTracker = proc.broadcaster.CreateTracker(queueID, 15, 80)
+			archiveProgressTracker = proc.broadcaster.CreateTracker(queueID, 15, 100)
 			archiveProgressTracker.WithStage("Analyzing archive")
-			validationProgressTracker = proc.broadcaster.CreateTracker(queueID, 80, 95)
-			validationProgressTracker.WithStage("Verifying archive")
 		}
 
 		releaseDate := archiveFiles[0].ReleaseDate.Unix()
 
 		err := sevenzip.ProcessArchive(ctx, sevenzip.ProcessArchiveOptions{
-			VirtualDir:                nzbFolder,
-			ArchiveFiles:              archiveFiles,
-			Password:                  parsed.GetPassword(),
-			ReleaseDate:               releaseDate,
-			NzbPath:                   parsed.Path,
-			Processor:                 proc.sevenZipProcessor,
-			MetadataService:           proc.metadataService,
-			PoolManager:               proc.poolManager,
-			ArchiveProgressTracker:    archiveProgressTracker,
-			ValidationProgressTracker: validationProgressTracker,
-			MaxValidationGoroutines:   maxConnections,
-			SegmentSamplePercentage:   samplePercentage,
-			AllowedFileExtensions:     allowedExtensions,
-			Timeout:                   timeout,
-			ExtractedFiles:            extractedFiles,
-			MaxPrefetch:               maxPrefetch,
-			ReadTimeout:               readTimeout,
-			IsoAnalyzeTimeout:         proc.configGetter().GetIsoAnalyzeTimeout(),
-			ExpandBlurayIso:           expandBlurayIso,
-			FilterSamples:             filterSampleFiles,
-			RenameToNzbName:           renameToNzbName,
+			VirtualDir:             nzbFolder,
+			ArchiveFiles:           archiveFiles,
+			Password:               parsed.GetPassword(),
+			ReleaseDate:            releaseDate,
+			NzbPath:                parsed.Path,
+			Processor:              proc.sevenZipProcessor,
+			MetadataService:        proc.metadataService,
+			PoolManager:            proc.poolManager,
+			ArchiveProgressTracker: archiveProgressTracker,
+			AllowedFileExtensions:  allowedExtensions,
+			ExtractedFiles:         extractedFiles,
+			MaxPrefetch:            maxPrefetch,
+			ReadTimeout:            readTimeout,
+			IsoAnalyzeTimeout:      proc.configGetter().GetIsoAnalyzeTimeout(),
+			ExpandBlurayIso:        expandBlurayIso,
+			FilterSamples:          filterSampleFiles,
+			RenameToNzbName:        renameToNzbName,
 		})
 		if err != nil {
 			return nzbFolder, writtenPaths, err

@@ -100,16 +100,29 @@ func (ms *MetadataService) WriteFileMetadata(virtualPath string, metadata *metap
 		return fmt.Errorf("failed to marshal metadata: %w", err)
 	}
 
-	// Write atomically using a temporary file
-	tmpPath := metadataPath + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
-		metadata.NzbdavId = nzbdavId // Restore on error
-		return fmt.Errorf("failed to write temporary metadata file: %w", err)
+	// Write atomically using a uniquely-named temporary file so concurrent
+	// writes to the same final path don't race on the same .tmp name.
+	tmpFile, err := os.CreateTemp(metadataDir, "."+truncatedFilename+".*.tmp")
+	if err != nil {
+		metadata.NzbdavId = nzbdavId
+		return fmt.Errorf("failed to create temporary metadata file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	if _, writeErr := tmpFile.Write(data); writeErr != nil {
+		tmpFile.Close()
+		_ = os.Remove(tmpPath)
+		metadata.NzbdavId = nzbdavId
+		return fmt.Errorf("failed to write temporary metadata file: %w", writeErr)
+	}
+	if closeErr := tmpFile.Close(); closeErr != nil {
+		_ = os.Remove(tmpPath)
+		metadata.NzbdavId = nzbdavId
+		return fmt.Errorf("failed to close temporary metadata file: %w", closeErr)
 	}
 
 	if err := os.Rename(tmpPath, metadataPath); err != nil {
-		metadata.NzbdavId = nzbdavId // Restore on error
-		_ = os.Remove(tmpPath)       // Clean up
+		_ = os.Remove(tmpPath)
+		metadata.NzbdavId = nzbdavId
 		return fmt.Errorf("failed to rename metadata file: %w", err)
 	}
 
@@ -395,28 +408,6 @@ func (ms *MetadataService) ListDirectoryAll(virtualPath string) (dirs []fs.FileI
 	return dirs, fileNames, nil
 }
 
-// ListSubdirectories lists all subdirectories in a metadata directory
-func (ms *MetadataService) ListSubdirectories(virtualPath string) ([]string, error) {
-	metadataDir := filepath.Join(ms.rootPath, virtualPath)
-
-	entries, err := os.ReadDir(metadataDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return []string{}, nil // Directory not found, return empty list
-		}
-		return nil, fmt.Errorf("failed to read directory: %w", err)
-	}
-
-	var dirs []string
-	for _, entry := range entries {
-		if entry.IsDir() {
-			dirs = append(dirs, entry.Name())
-		}
-	}
-
-	return dirs, nil
-}
-
 // CreateFileMetadata creates a new FileMetadata with basic fields
 func (ms *MetadataService) CreateFileMetadata(
 	fileSize int64,
@@ -609,30 +600,6 @@ func (ms *MetadataService) RenameFileMetadata(oldVirtualPath, newVirtualPath str
 	return nil
 }
 
-// WalkDirectoryFiles walks a metadata directory and calls fn for each file's virtual path and metadata.
-func (ms *MetadataService) WalkDirectoryFiles(virtualPath string, fn func(fileVirtualPath string, meta *metapb.FileMetadata) error) error {
-	metadataDir := filepath.Join(ms.rootPath, virtualPath)
-
-	return filepath.WalkDir(metadataDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() || !strings.HasSuffix(d.Name(), ".meta") {
-			return nil
-		}
-
-		relPath, err := filepath.Rel(ms.rootPath, path)
-		if err != nil {
-			return nil
-		}
-		fileVirtualPath := strings.TrimSuffix(relPath, ".meta")
-
-		meta, err := ms.ReadFileMetadata(fileVirtualPath)
-		if err != nil || meta == nil {
-			return nil
-		}
-
-		return fn(fileVirtualPath, meta)
-	})
-}
-
 // isCrossDeviceError checks if an error is a cross-device link error (EXDEV).
 func isCrossDeviceError(err error) bool {
 	return strings.Contains(err.Error(), "cross-device") || strings.Contains(err.Error(), "invalid cross-device link")
@@ -665,35 +632,6 @@ func copyAndRemoveFile(src, dst string) error {
 	return os.Remove(src)
 }
 
-// ValidateSourceNzb validates that the source NZB file exists and matches metadata
-func (ms *MetadataService) ValidateSourceNzb(metadata *metapb.FileMetadata) error {
-	if metadata.SourceNzbPath == "" {
-		return fmt.Errorf("source NZB path is empty")
-	}
-
-	// Check if source NZB file exists
-	if _, err := os.Stat(metadata.SourceNzbPath); err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("source NZB file not found: %s", metadata.SourceNzbPath)
-		}
-		return fmt.Errorf("failed to stat source NZB file: %w", err)
-	}
-
-	return nil
-}
-
-// CalculateSegmentSize calculates the total size from segment data
-func (ms *MetadataService) CalculateSegmentSize(segments []*metapb.SegmentData) int64 {
-	var totalSize int64
-	for _, segment := range segments {
-		segmentSize := segment.EndOffset - segment.StartOffset
-		if segmentSize > 0 {
-			totalSize += segmentSize
-		}
-	}
-	return totalSize
-}
-
 // GetMetadataFilePath returns the filesystem path for a metadata file
 func (ms *MetadataService) GetMetadataFilePath(virtualPath string) string {
 	filename := filepath.Base(virtualPath)
@@ -706,20 +644,7 @@ func (ms *MetadataService) GetMetadataDirectoryPath(virtualPath string) string {
 	return filepath.Join(ms.rootPath, virtualPath)
 }
 
-// CreateSegmentData creates a new SegmentData with the given parameters
-func (ms *MetadataService) CreateSegmentData(startOffset, endOffset int64, messageID string) *metapb.SegmentData {
-	return &metapb.SegmentData{
-		StartOffset: startOffset,
-		EndOffset:   endOffset,
-		Id:          messageID,
-	}
-}
-
 func (ms *MetadataService) CreateDirectory(name string) error {
-	return os.MkdirAll(filepath.Join(ms.rootPath, name), 0755)
-}
-
-func (ms *MetadataService) CreateDirectoryAll(name string) error {
 	return os.MkdirAll(filepath.Join(ms.rootPath, name), 0755)
 }
 

@@ -31,13 +31,6 @@ func WithTimeout(d time.Duration) Option {
 	}
 }
 
-// WithTransport sets a custom transport.
-func WithTransport(t *http.Transport) Option {
-	return func(o *Options) {
-		o.Transport = t
-	}
-}
-
 // New creates a new HTTP client with the given options.
 // If no timeout is specified, DefaultTimeout (30s) is used.
 func New(opts ...Option) *http.Client {

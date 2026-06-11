@@ -67,25 +67,3 @@ func ParseRangeHeader(s string) (po *RangeHeader, err error) {
 
 	return &o, nil
 }
-
-// FixRangeHeader looks through the slice of options and adjusts any
-// RangeHeader~s found that request a fetch from the end into an
-// absolute fetch using the size passed in and makes sure the range does
-// not exceed filesize.
-func FixRangeHeader(rh *RangeHeader, size int64) *RangeHeader {
-	if size < 0 {
-		// Can't do anything for unknown length objects
-		return rh
-	}
-
-	fixed := rh
-	if fixed.Start < 0 {
-		fixed = &RangeHeader{Start: size - fixed.End, End: -1}
-	}
-	// If end is too big or undefined, fetch to the end
-	if fixed.End > size || fixed.End < 0 {
-		fixed = &RangeHeader{Start: fixed.Start, End: size - 1}
-	}
-
-	return fixed
-}

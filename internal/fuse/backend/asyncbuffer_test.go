@@ -3,6 +3,7 @@ package backend
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"runtime"
 	"sync"
@@ -250,6 +251,42 @@ func TestAsyncReadBuffer_CloseDuringFill(t *testing.T) {
 	}
 }
 
+func TestAsyncReadBuffer_CanceledFillContextDoesNotHangFrontierRead(t *testing.T) {
+	SetAsyncBufferBudget(0)
+	data := testData(4 * 1024 * 1024)
+	parentCtx, cancel := context.WithCancel(context.Background())
+	src := &countingSource{data: data}
+	a := NewAsyncReadBuffer(parentCtx, src, 256*1024, int64(len(data)), nil)
+	defer a.Close()
+
+	p := make([]byte, 1024)
+	for i := range armThreshold {
+		off := int64(i * len(p))
+		if _, err := a.ReadAtContext(context.Background(), p, off); err != nil {
+			t.Fatalf("seed read %d: %v", i, err)
+		}
+	}
+
+	cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		readCtx, readCancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer readCancel()
+		_, err := a.ReadAtContext(readCtx, p, int64(armThreshold*len(p)))
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("frontier read after fill cancellation returned %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("frontier read hung after fill context cancellation")
+	}
+}
+
 func TestAsyncReadBuffer_ConcurrentReadClose(t *testing.T) {
 	SetAsyncBufferBudget(0)
 	data := testData(2 * 1024 * 1024)
@@ -320,6 +357,80 @@ func TestAsyncReadBuffer_NoGoroutineLeak(t *testing.T) {
 	}
 	if got := runtime.NumGoroutine(); got > baseline+2 {
 		t.Fatalf("goroutine leak: baseline=%d now=%d", baseline, got)
+	}
+}
+
+// TestAsyncReadBuffer_NearFrontierWaitDoesNotDemote verifies that a read
+// slightly ahead of the fill frontier (simulating kernel readahead parallelism)
+// waits for the fill goroutine rather than demoting to probing mode.
+func TestAsyncReadBuffer_NearFrontierWaitDoesNotDemote(t *testing.T) {
+	SetAsyncBufferBudget(0)
+	// Source must be larger than bufSize + nearFrontierWindow so the file is big
+	// enough that streaming is expected and nearFrontierWindow fits inside.
+	totalSize := defaultAsyncBufSize + nearFrontierWindow + 1*1024*1024
+	data := testData(totalSize)
+	src := &countingSource{data: data, delay: 5 * time.Millisecond}
+
+	bufSize := defaultAsyncBufSize
+	a := NewAsyncReadBuffer(context.Background(), src, bufSize, int64(totalSize), nil)
+	defer a.Close()
+
+	p := make([]byte, 1024)
+
+	// Drive enough sequential reads to promote into streaming mode (>= armThreshold).
+	for i := range armThreshold + 2 {
+		off := int64(i * len(p))
+		if _, err := a.ReadAtContext(context.Background(), p, off); err != nil {
+			t.Fatalf("seed read %d: %v", i, err)
+		}
+	}
+
+	// Wait until the fill goroutine has buffered at least a few bytes ahead.
+	deadline := time.Now().Add(2 * time.Second)
+	for a.GetBufferedOffset() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	bufEnd := a.GetBufferedOffset()
+	if bufEnd == 0 {
+		t.Fatal("buffer did not start filling after promotion")
+	}
+
+	// Confirm streaming was active before the near-frontier read so we know the
+	// assertion below is meaningful (streaming was active throughout, not just
+	// re-established after a demote).
+	if bufEnd == 0 {
+		t.Fatal("streaming was not active before near-frontier read")
+	}
+
+	// Issue a near-frontier read: 64KB ahead of current bufEnd.
+	nearOff := bufEnd + 64*1024
+	result := make([]byte, len(p))
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := a.ReadAtContext(context.Background(), result, nearOff)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil && err != io.EOF {
+			t.Fatalf("near-frontier read returned unexpected error: %v", err)
+		}
+		// Verify the data is correct.
+		if nearOff < int64(totalSize) {
+			n := min(len(result), totalSize-int(nearOff))
+			if !bytes.Equal(result[:n], data[nearOff:nearOff+int64(n)]) {
+				t.Fatal("near-frontier read: data mismatch")
+			}
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("near-frontier read hung — possible deadlock or no progress")
+	}
+
+	// Confirm the buffer is still in streaming mode (not demoted).
+	if bo := a.GetBufferedOffset(); bo == 0 {
+		t.Fatal("buffer was demoted during near-frontier read; expected to stay streaming")
 	}
 }
 

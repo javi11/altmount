@@ -27,14 +27,11 @@ func buildProxyFunc(httpProxy, httpsProxy, noProxy string) func(*http.Request) (
 
 // WithProxyConfig returns an Option that installs a proxy-aware
 // *http.Transport derived from the supplied values. Pass empty strings to
-// disable proxying. If a Transport was already set by an earlier option, the
-// proxy function is layered on top of a clone of that transport.
+// disable proxying.
 func WithProxyConfig(httpProxy, httpsProxy, noProxy string) Option {
 	return func(o *Options) {
 		var base *http.Transport
-		if o.Transport != nil {
-			base = o.Transport.Clone()
-		} else if dt, ok := http.DefaultTransport.(*http.Transport); ok {
+		if dt, ok := http.DefaultTransport.(*http.Transport); ok {
 			base = dt.Clone()
 		} else {
 			base = &http.Transport{}

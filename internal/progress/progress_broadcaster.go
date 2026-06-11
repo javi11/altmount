@@ -45,6 +45,9 @@ type ProgressBroadcaster struct {
 // subscriber's buffered channel is full the update is dropped for that
 // subscriber and dropMsg is logged. Shared by all the broadcast entry points.
 func (pb *ProgressBroadcaster) broadcast(update ProgressUpdate, dropMsg string) {
+	if pb == nil {
+		return
+	}
 	pb.subMu.RLock()
 	defer pb.subMu.RUnlock()
 	for subID, ch := range pb.subscribers {
@@ -85,6 +88,9 @@ func (pb *ProgressBroadcaster) UpdateProgress(queueID int, percentage int) {
 
 // UpdateProgressWithStage updates the progress for a queue item with an optional stage label.
 func (pb *ProgressBroadcaster) UpdateProgressWithStage(queueID int, percentage int, stage string) {
+	if pb == nil {
+		return
+	}
 	// Clamp percentage to 0-100 range
 	if percentage < 0 {
 		percentage = 0

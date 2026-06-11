@@ -67,6 +67,33 @@ func TestIsProbablyObfuscated(t *testing.T) {
 			want:     false,
 		},
 
+		// Multi-volume archive extensions are never obfuscated
+		{
+			name:     "partNN.rar volume - lowercase base",
+			filename: "archive.part01.rar",
+			want:     false,
+		},
+		{
+			name:     "partNNN.rar volume - lowercase base",
+			filename: "archive.part001.rar",
+			want:     false,
+		},
+		{
+			name:     "r00 old-style volume",
+			filename: "archive.r00",
+			want:     false,
+		},
+		{
+			name:     "r01 old-style volume",
+			filename: "archive.r01",
+			want:     false,
+		},
+		{
+			name:     "numeric split archive .001",
+			filename: "archive.001",
+			want:     false,
+		},
+
 		// Edge cases
 		{
 			name:     "Empty filename",

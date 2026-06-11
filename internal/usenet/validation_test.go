@@ -1,11 +1,19 @@
 package usenet
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"math/rand"
+	"sync"
 	"testing"
+	"time"
 
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/testsupport/fakepool"
+	"github.com/javi11/altmount/internal/testsupport/segments"
+	"github.com/javi11/nntppool/v4"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -13,6 +21,9 @@ import (
 // were removed during v2→v4 migration because nntppool v4 uses a concrete *Client type
 // (not an interface), making it impossible to mock directly. Integration tests with
 // a real NNTP server should be used to test validation behavior.
+//
+// However, ValidateSegmentList and ValidateSegmentAvailabilityDetailed accept
+// pool.Manager which IS an interface — so we can mock at that level.
 
 func TestSelectSegmentsForValidation(t *testing.T) {
 	// Use a deterministic RNG for predictability in middle segments.
@@ -76,3 +87,142 @@ func TestSelectSegmentsForValidation(t *testing.T) {
 		assert.Equal(t, 55, len(selected), "Should be capped at 55")
 	})
 }
+
+// TestValidateSegmentList_MissingSegmentEmitsDebugLog verifies that a
+// DebugContext log with message "missing segment" is emitted when
+// ValidateSegmentList finds a segment that is unavailable.
+// NOT parallel: we replace the global slog default.
+func TestValidateSegmentList_MissingSegmentEmitsDebugLog(t *testing.T) {
+	const segID = "missing-seg@host"
+
+	var mu sync.Mutex
+	type logRecord struct{ msg, segID string }
+	var captured []logRecord
+
+	handler := &captureLogHandler{
+		onHandle: func(r slog.Record) {
+			var sid string
+			r.Attrs(func(a slog.Attr) bool {
+				if a.Key == "segment_id" {
+					sid = a.Value.String()
+				}
+				return true
+			})
+			mu.Lock()
+			captured = append(captured, logRecord{msg: r.Message, segID: sid})
+			mu.Unlock()
+		},
+	}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(handler))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	fp := fakepool.New()
+	fp.SetBehavior(segments.MessageID(0), fakepool.SegmentBehavior{
+		Err: nntppool.ErrArticleNotFound,
+	})
+	// override to use our specific segID
+	fp.SetBehavior(segID, fakepool.SegmentBehavior{
+		Err: nntppool.ErrArticleNotFound,
+	})
+
+	mgr := &validationTestPoolManager{client: fp}
+	segs := []*metapb.SegmentData{{Id: segID}}
+
+	err := ValidateSegmentList(context.Background(), segs, mgr, 1, nil, 5*time.Second)
+	assert.Error(t, err)
+
+	mu.Lock()
+	defer mu.Unlock()
+	found := false
+	for _, r := range captured {
+		if r.msg == "missing segment" && r.segID == segID {
+			found = true
+		}
+	}
+	assert.True(t, found, "expected 'missing segment' debug log for segment_id=%q, got: %+v", segID, captured)
+}
+
+// TestValidateSegmentAvailabilityDetailed_MissingSegmentEmitsDebugLog verifies
+// the same for the non-fail-fast detailed path.
+// NOT parallel: we replace the global slog default.
+func TestValidateSegmentAvailabilityDetailed_MissingSegmentEmitsDebugLog(t *testing.T) {
+	const segID = "missing-detailed@host"
+
+	var mu sync.Mutex
+	type logRecord struct{ msg, segID string }
+	var captured []logRecord
+
+	handler := &captureLogHandler{
+		onHandle: func(r slog.Record) {
+			var sid string
+			r.Attrs(func(a slog.Attr) bool {
+				if a.Key == "segment_id" {
+					sid = a.Value.String()
+				}
+				return true
+			})
+			mu.Lock()
+			captured = append(captured, logRecord{msg: r.Message, segID: sid})
+			mu.Unlock()
+		},
+	}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(handler))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	fp := fakepool.New()
+	fp.SetBehavior(segID, fakepool.SegmentBehavior{
+		Err: nntppool.ErrArticleNotFound,
+	})
+
+	mgr := &validationTestPoolManager{client: fp}
+	segs := []*metapb.SegmentData{{Id: segID}}
+
+	result, err := ValidateSegmentAvailabilityDetailed(context.Background(), segs, mgr, 1, 100, nil, 5*time.Second)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, result.MissingCount)
+
+	mu.Lock()
+	defer mu.Unlock()
+	found := false
+	for _, r := range captured {
+		if r.msg == "missing segment" && r.segID == segID {
+			found = true
+		}
+	}
+	assert.True(t, found, "expected 'missing segment' debug log for segment_id=%q, got: %+v", segID, captured)
+}
+
+// validationTestPoolManager is a minimal pool.Manager for validation tests.
+// It wraps a fakepool.Client and no-ops everything else.
+type validationTestPoolManager struct {
+	client pool.NntpClient
+}
+
+var _ pool.Manager = (*validationTestPoolManager)(nil)
+
+func (m *validationTestPoolManager) GetPool() (pool.NntpClient, error)        { return m.client, nil }
+func (m *validationTestPoolManager) SetProviders(_ []nntppool.Provider) error { return nil }
+func (m *validationTestPoolManager) ClearPool() error                         { return nil }
+func (m *validationTestPoolManager) HasPool() bool                            { return true }
+func (m *validationTestPoolManager) GetMetrics() (pool.MetricsSnapshot, error) {
+	return pool.MetricsSnapshot{}, nil
+}
+func (m *validationTestPoolManager) ResetMetrics(_ context.Context, _, _ bool) error { return nil }
+func (m *validationTestPoolManager) ResetProviderErrors(_ context.Context) error     { return nil }
+func (m *validationTestPoolManager) IncArticlesDownloaded()                          {}
+func (m *validationTestPoolManager) UpdateDownloadProgress(_ string, _ int64)        {}
+func (m *validationTestPoolManager) IncArticlesPosted()                              {}
+func (m *validationTestPoolManager) AddProvider(_ nntppool.Provider) error           { return nil }
+func (m *validationTestPoolManager) RemoveProvider(_ string) error                   { return nil }
+func (m *validationTestPoolManager) ResetProviderQuota(_ context.Context, _ string) error {
+	return nil
+}
+func (m *validationTestPoolManager) SetProviderIDs(_ map[string]string) {}
+func (m *validationTestPoolManager) AcquireImportSlot(_ context.Context) (func(), error) {
+	return func() {}, nil
+}
+func (m *validationTestPoolManager) SetAdmissionCaps(_ int, _ int)               {}
+func (m *validationTestPoolManager) SetStreamSource(_ pool.StreamActivitySource) {}
+func (m *validationTestPoolManager) NotifyStreamChange()                         {}

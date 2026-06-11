@@ -68,6 +68,11 @@ type SegmentBehavior struct {
 	// errors (e.g. nntppool.ErrArticleNotFound) to exercise specific paths
 	// in the retry/dispatch logic.
 	Err error
+
+	// YEnc, if non-zero, is populated on ArticleBody.YEnc and fired via any
+	// onMeta callbacks. Use this to inject yEnc header metadata (FileName,
+	// PartSize, FileSize, etc.) without needing a real NNTP server.
+	YEnc nntppool.YEncMeta
 }
 
 // Client is a fake nntppool.Client suitable for unit and concurrency tests.
@@ -264,7 +269,7 @@ func (c *Client) Body(ctx context.Context, messageID string, onMeta ...func(nntp
 	c.bodyCalls.Add(1)
 	c.countMessage(messageID)
 	defer c.enter()()
-	return c.serveBody(ctx, messageID, nil)
+	return c.serveBody(ctx, messageID, nil, onMeta...)
 }
 
 // BodyPriority is identical to Body but counted separately so tests can
@@ -273,7 +278,7 @@ func (c *Client) BodyPriority(ctx context.Context, messageID string, onMeta ...f
 	c.bodyPriCalls.Add(1)
 	c.countMessage(messageID)
 	defer c.enter()()
-	return c.serveBody(ctx, messageID, nil)
+	return c.serveBody(ctx, messageID, nil, onMeta...)
 }
 
 // BodyAsync streams the configured Bytes (or error) to w and yields a
@@ -317,7 +322,7 @@ func (c *Client) Stats() nntppool.ClientStats {
 	return nntppool.ClientStats{}
 }
 
-func (c *Client) serveBody(ctx context.Context, messageID string, w io.Writer) (*nntppool.ArticleBody, error) {
+func (c *Client) serveBody(ctx context.Context, messageID string, w io.Writer, onMeta ...func(nntppool.YEncMeta)) (*nntppool.ArticleBody, error) {
 	b := c.behaviorFor(messageID)
 	if err := waitOrCancel(ctx, b.Latency); err != nil {
 		return nil, err
@@ -328,6 +333,15 @@ func (c *Client) serveBody(ctx context.Context, messageID string, w io.Writer) (
 		// returns nil.
 		return nil, b.Err
 	}
+	// Fire yEnc metadata callbacks before writing body bytes, mirroring
+	// how nntppool fires onMeta after parsing =ybegin/=ypart headers.
+	if b.YEnc != (nntppool.YEncMeta{}) {
+		for _, fn := range onMeta {
+			if fn != nil {
+				fn(b.YEnc)
+			}
+		}
+	}
 	payload := b.Bytes
 	if w != nil && len(payload) > 0 {
 		if _, err := w.Write(payload); err != nil {
@@ -337,6 +351,7 @@ func (c *Client) serveBody(ctx context.Context, messageID string, w io.Writer) (
 	body := &nntppool.ArticleBody{
 		MessageID:    messageID,
 		BytesDecoded: len(payload),
+		YEnc:         b.YEnc,
 	}
 	if w == nil {
 		body.Bytes = payload

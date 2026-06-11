@@ -33,7 +33,7 @@ export function PruneStatsModal({ isPending, onClose, onPrune }: PruneStatsModal
 					id="prune-modal-title"
 					className="flex items-center gap-2 font-bold text-base-content text-xl"
 				>
-					<Trash2 className="h-6 w-6 text-amber-500" aria-hidden="true" />
+					<Trash2 className="h-6 w-6 text-warning" aria-hidden="true" />
 					Prune Statistics
 				</h3>
 				<p className="py-4 font-medium text-base-content/60 text-sm">
@@ -117,7 +117,7 @@ export function PruneStatsModal({ isPending, onClose, onPrune }: PruneStatsModal
 					</button>
 					<button
 						type="button"
-						className="btn btn-warning gap-2 shadow-[0_2px_12px_rgba(217,119,6,0.2)] transition-all duration-200"
+						className="btn btn-warning gap-2 transition-all duration-200"
 						onClick={handleConfirm}
 						disabled={isPending}
 					>

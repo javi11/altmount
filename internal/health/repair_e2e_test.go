@@ -326,6 +326,102 @@ func TestE2E_FileRepairTriggered_FullRetryFlow(t *testing.T) {
 	assert.NoError(t, readErr)
 }
 
+// TestE2E_RepairBudgetExhausted_PendingFileMarkedCorrupted verifies the terminal state:
+// a pending file that fails its last health retry while its repair budget is already
+// spent (repair_retry_count == max_repair_retries, preserved across re-import upserts
+// and webhook relinks) is marked corrupted instead of triggering yet another ARR rescan.
+// Without this guard, a genuinely dead release loops forever: rescan → re-download →
+// re-import resets to pending → check fails → rescan...
+func TestE2E_RepairBudgetExhausted_PendingFileMarkedCorrupted(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks not supported on Windows")
+	}
+	tempDir := t.TempDir()
+	env := newRepairTestEnv(t, tempDir, nil)
+
+	ctx := context.Background()
+	filePath := "series/show.s01e05.mkv"
+	libraryPath := "/media/library/show.s01e05.mkv"
+	maxRetries := 3
+
+	meta := validSegmentMeta(env.metadataService, 1024)
+	require.NoError(t, env.metadataService.WriteFileMetadata(filePath, meta))
+
+	// Pending file at its last health retry, with the repair budget already spent.
+	insertFileHealth(t, env.db, filePath, libraryPath, maxRetries-1, maxRetries)
+	_, err := env.db.Exec(
+		`UPDATE file_health SET repair_retry_count = 3, max_repair_retries = 3 WHERE file_path = ?`,
+		filePath,
+	)
+	require.NoError(t, err)
+
+	require.NoError(t, env.hw.runHealthCheckCycle(ctx))
+
+	// ARR must NOT be called — no more re-downloads for this title.
+	env.mockARRs.mu.Lock()
+	callCount := len(env.mockARRs.calls)
+	env.mockARRs.mu.Unlock()
+	assert.Equal(t, 0, callCount, "exhausted repair budget must not trigger another ARR rescan")
+
+	// Status must be terminal corrupted.
+	fh, err := env.healthRepo.GetFileHealth(ctx, filePath)
+	require.NoError(t, err)
+	require.NotNil(t, fh)
+	assert.Equal(t, database.HealthStatusCorrupted, fh.Status)
+
+	// Metadata hidden in the safety folder (this path follows a real failed check).
+	original, readErr := env.metadataService.ReadFileMetadata(filePath)
+	assert.Nil(t, original, "metadata should be moved to the safety folder")
+	assert.NoError(t, readErr)
+}
+
+// TestE2E_ExhaustedRepairTriggered_SweptToCorrupted verifies that records already in
+// repair_triggered with a spent repair budget are picked up by the repair-notification
+// pass and finalized as corrupted (previously they were filtered out of every query and
+// stuck in repair_triggered forever). The sweep must be non-destructive: no ARR call and
+// no metadata move, since no fresh check has failed.
+func TestE2E_ExhaustedRepairTriggered_SweptToCorrupted(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks not supported on Windows")
+	}
+	tempDir := t.TempDir()
+	env := newRepairTestEnv(t, tempDir, nil)
+
+	ctx := context.Background()
+	filePath := "series/show.s01e06.mkv"
+	libraryPath := "/media/library/show.s01e06.mkv"
+
+	// Metadata exists (e.g. a re-import landed after the last repair re-trigger).
+	meta := validSegmentMeta(env.metadataService, 1024)
+	require.NoError(t, env.metadataService.WriteFileMetadata(filePath, meta))
+
+	_, err := env.db.Exec(`
+		INSERT INTO file_health
+			(file_path, library_path, status, retry_count, max_retries,
+			 repair_retry_count, max_repair_retries, scheduled_check_at)
+		VALUES (?, ?, 'repair_triggered', 2, 3, 3, 3, datetime('now', '-1 second'))
+	`, filePath, libraryPath)
+	require.NoError(t, err)
+
+	require.NoError(t, env.hw.runHealthCheckCycle(ctx))
+
+	env.mockARRs.mu.Lock()
+	callCount := len(env.mockARRs.calls)
+	env.mockARRs.mu.Unlock()
+	assert.Equal(t, 0, callCount, "sweep must not trigger ARR rescans")
+
+	fh, err := env.healthRepo.GetFileHealth(ctx, filePath)
+	require.NoError(t, err)
+	require.NotNil(t, fh)
+	assert.Equal(t, database.HealthStatusCorrupted, fh.Status,
+		"exhausted repair_triggered record must be finalized as corrupted, not stuck")
+
+	// Metadata must be left in place — the sweep has not re-validated content.
+	original, readErr := env.metadataService.ReadFileMetadata(filePath)
+	require.NoError(t, readErr)
+	assert.NotNil(t, original, "sweep must not move metadata of a possibly-good copy")
+}
+
 // TestE2E_FileRepairTriggered_ARRReturnsAlreadySatisfied verifies that when ARR returns
 // ErrEpisodeAlreadySatisfied the health record is deleted (zombie cleanup).
 func TestE2E_FileRepairTriggered_ARRReturnsAlreadySatisfied(t *testing.T) {
@@ -359,7 +455,10 @@ func TestE2E_FileRepairTriggered_ARRReturnsAlreadySatisfied(t *testing.T) {
 }
 
 // TestE2E_FileRepairTriggered_ARRReturnsPathNotFound verifies that when ARR returns
-// ErrPathMatchFailed the health record is deleted (orphan cleanup).
+// ErrPathMatchFailed (an ambiguous path miss — e.g. an ARR-renamed/reorganized library)
+// the file is NOT destroyed: the health record is kept (marked corrupted) and its metadata
+// is preserved, so the user's library symlink and the underlying virtual file survive.
+// Genuine orphans are removed separately by the guarded library-sync orphan pass.
 func TestE2E_FileRepairTriggered_ARRReturnsPathNotFound(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlinks not supported on Windows")
@@ -384,8 +483,15 @@ func TestE2E_FileRepairTriggered_ARRReturnsPathNotFound(t *testing.T) {
 	env.mockARRs.mu.Unlock()
 	assert.Equal(t, 1, callCount)
 
-	// Health record must be deleted, not set to repair_triggered.
+	// Health record must be preserved (not deleted) and marked corrupted: a path-match miss
+	// is not a reliable orphan signal, so the file must never be destroyed on this path.
 	fh, err := env.healthRepo.GetFileHealth(ctx, filePath)
 	require.NoError(t, err)
-	assert.Nil(t, fh, "health record should be deleted when ARR returns ErrPathMatchFailed")
+	require.NotNil(t, fh, "health record must NOT be deleted when ARR returns ErrPathMatchFailed")
+	assert.Equal(t, database.HealthStatusCorrupted, fh.Status)
+
+	// Metadata must be preserved (not deleted) so the underlying file/symlink survives.
+	original, readErr := env.metadataService.ReadFileMetadata(filePath)
+	require.NoError(t, readErr)
+	assert.NotNil(t, original, "metadata must be preserved when ARR returns ErrPathMatchFailed")
 }

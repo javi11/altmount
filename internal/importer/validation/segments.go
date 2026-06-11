@@ -1,39 +1,21 @@
 package validation
 
 import (
-	"context"
 	"fmt"
-	"time"
 
 	"github.com/javi11/altmount/internal/encryption/rclone"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/pool"
-	"github.com/javi11/altmount/internal/progress"
-	"github.com/javi11/altmount/internal/usenet"
 )
 
-// ValidateSegmentsForFile performs comprehensive validation of file segments including size verification
-// and reachability checks. It validates that segments are structurally sound, accessible via
-// the Usenet connection pool, and that their total size matches the expected file size (accounting
-// for encryption overhead).
-//
-// The function uses a single combined pass for structural validation + size accumulation + segment
-// selection, then validates only the selected subset via the network. This avoids iterating the
-// full segment list twice (once here and once inside ValidateSegmentList).
-//
-// The optional progressTracker is passed through to segment availability validation for real-time
-// progress updates during concurrent validation.
+// ValidateSegmentsForFile performs local structural validation of file segments including size
+// verification. It validates that segments are structurally sound (valid offsets, non-empty IDs)
+// and that their total size matches the expected file size (accounting for encryption overhead).
+// Network reachability is handled solely by the fast-fail pass at import start.
 func ValidateSegmentsForFile(
-	ctx context.Context,
 	filename string,
 	fileSize int64,
 	segments []*metapb.SegmentData,
 	encryption metapb.Encryption,
-	poolManager pool.Manager,
-	maxGoroutines int,
-	samplePercentage int,
-	progressTracker progress.ProgressTracker,
-	timeout time.Duration,
 ) error {
 	if len(segments) == 0 {
 		return fmt.Errorf("no segments provided for file %s", filename)
@@ -66,11 +48,6 @@ func ValidateSegmentsForFile(
 		}
 
 		totalSegmentSize += segSize
-	}
-
-	selected := usenet.SelectSegmentsForValidation(segments, samplePercentage)
-	if err := usenet.ValidateSegmentList(ctx, selected, poolManager, maxGoroutines, progressTracker, timeout); err != nil {
-		return err
 	}
 
 	expectedSize := fileSize
