@@ -9,6 +9,7 @@ import (
 
 	"github.com/javi11/altmount/internal/arrs/model"
 	"golift.io/starr"
+	"golift.io/starr/sonarr"
 )
 
 var (
@@ -77,6 +78,18 @@ func (m *Manager) runStrictDiscovery(ctx context.Context, inst *model.ConfigInst
 	return nil, fmt.Errorf("unsupported type")
 }
 
+func (m *Manager) normalizeTitle(title string) string {
+	t := strings.ToLower(title)
+	t = strings.ReplaceAll(t, ".", "")
+	t = strings.ReplaceAll(t, " ", "")
+	t = strings.ReplaceAll(t, "-", "")
+	t = strings.ReplaceAll(t, "_", "")
+	t = strings.ReplaceAll(t, "&", "")
+	t = strings.ReplaceAll(t, "(", "")
+	t = strings.ReplaceAll(t, ")", "")
+	return t
+}
+
 func (m *Manager) discoverRadarrStrict(ctx context.Context, filePath, cleanNzbName, libraryPath, instanceName string) (*model.WebhookMetadata, error) {
 	instanceConfig, _ := m.instances.FindConfigInstance("radarr", instanceName)
 	client, _ := m.clients.GetOrCreateRadarrClient(instanceName, instanceConfig.URL, instanceConfig.APIKey)
@@ -84,8 +97,19 @@ func (m *Manager) discoverRadarrStrict(ctx context.Context, filePath, cleanNzbNa
 	// 1. Check Library (Active Files)
 	movies, err := m.data.GetMovies(ctx, client, instanceName)
 	if err == nil {
+		normalizedNzb := m.normalizeTitle(cleanNzbName)
+		normalizedPath := m.normalizeTitle(filePath)
+
 		for _, movie := range movies {
 			if movie.HasFile && movie.MovieFile != nil {
+				// Optimization: only pull files for movies that might match
+				normalizedTitle := m.normalizeTitle(movie.Title)
+				if !strings.Contains(normalizedNzb, normalizedTitle) &&
+					!strings.Contains(normalizedPath, normalizedTitle) &&
+					(libraryPath == "" || !strings.Contains(libraryPath, movie.Path)) {
+					continue
+				}
+
 				// Strict Match Conditions:
 				// - Library Path matches
 				// - OR Scene Name matches (NZB Name)
@@ -137,11 +161,21 @@ func (m *Manager) discoverSonarrStrict(ctx context.Context, filePath, cleanNzbNa
 	// 1. Check Library (Active Files)
 	series, err := m.data.GetSeries(ctx, client, instanceName)
 	if err == nil {
+		normalizedNzb := m.normalizeTitle(cleanNzbName)
+		normalizedPath := m.normalizeTitle(filePath)
+
 		for _, show := range series {
 			// Optimization: only pull files for shows that might contain this file
-			if !strings.Contains(strings.ToLower(cleanNzbName), strings.ToLower(show.CleanTitle)) &&
-				!strings.Contains(strings.ToLower(filePath), strings.ToLower(show.Path)) &&
-				(libraryPath == "" || !strings.Contains(strings.ToLower(libraryPath), strings.ToLower(show.Path))) {
+			// Use normalized titles to handle "Law.And.Order" vs "Law & Order" (laworder)
+			normalizedTitle := m.normalizeTitle(show.Title)
+			normalizedClean := strings.ToLower(show.CleanTitle)
+
+			if !strings.Contains(normalizedNzb, normalizedTitle) &&
+				!strings.Contains(normalizedNzb, normalizedClean) &&
+				!strings.Contains(normalizedPath, normalizedTitle) &&
+				!strings.Contains(normalizedPath, normalizedClean) &&
+				!strings.Contains(filePath, show.Path) &&
+				(libraryPath == "" || !strings.Contains(libraryPath, show.Path)) {
 				continue
 			}
 
@@ -153,6 +187,20 @@ func (m *Manager) discoverSonarrStrict(ctx context.Context, filePath, cleanNzbNa
 				if (libraryPath != "" && ef.Path == libraryPath) ||
 					(cleanNzbName != "" && strings.EqualFold(ef.SceneName, cleanNzbName)) ||
 					(ef.Path == filePath) {
+					var episodes []model.EpisodeMetadata
+					eps, err := client.GetSeriesEpisodesContext(ctx, &sonarr.GetEpisode{
+						SeriesID: show.ID,
+					})
+					if err == nil {
+						for _, ep := range eps {
+							if ep.EpisodeFileID == ef.ID {
+								episodes = append(episodes, model.EpisodeMetadata{
+									Id: ep.ID,
+								})
+							}
+						}
+					}
+
 					metadata := &model.WebhookMetadata{
 						EventType:    "StrictDiscovery",
 						InstanceName: instanceName,
@@ -164,6 +212,7 @@ func (m *Manager) discoverSonarrStrict(ctx context.Context, filePath, cleanNzbNa
 							Id:        ef.ID,
 							SceneName: ef.SceneName,
 						},
+						Episodes: episodes,
 					}
 					return metadata, nil
 				}
@@ -175,17 +224,39 @@ func (m *Manager) discoverSonarrStrict(ctx context.Context, filePath, cleanNzbNa
 	req := &starr.PageReq{PageSize: 100, SortKey: "date", SortDir: starr.SortDescend}
 	history, err := client.GetHistoryPageContext(ctx, req)
 	if err == nil {
+		var matchedRecord *sonarr.HistoryRecord
+		var episodeIDs []int64
+		episodeIDMap := make(map[int64]bool)
+
 		for _, record := range history.Records {
 			if strings.EqualFold(record.SourceTitle, cleanNzbName) {
-				metadata := &model.WebhookMetadata{
-					EventType:    "StrictHistoryDiscovery",
-					InstanceName: instanceName,
-					Series: &model.SeriesMetadata{
-						Id: record.SeriesID,
-					},
+				if matchedRecord == nil {
+					matchedRecord = record
 				}
-				return metadata, nil
+				if record.EpisodeID > 0 && !episodeIDMap[record.EpisodeID] {
+					episodeIDMap[record.EpisodeID] = true
+					episodeIDs = append(episodeIDs, record.EpisodeID)
+				}
 			}
+		}
+
+		if matchedRecord != nil {
+			var episodes []model.EpisodeMetadata
+			for _, epID := range episodeIDs {
+				episodes = append(episodes, model.EpisodeMetadata{
+					Id: epID,
+				})
+			}
+
+			metadata := &model.WebhookMetadata{
+				EventType:    "StrictHistoryDiscovery",
+				InstanceName: instanceName,
+				Series: &model.SeriesMetadata{
+					Id: matchedRecord.SeriesID,
+				},
+				Episodes: episodes,
+			}
+			return metadata, nil
 		}
 	}
 
