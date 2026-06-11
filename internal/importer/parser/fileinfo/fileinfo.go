@@ -15,6 +15,9 @@ var (
 	obfLongHexPattern = regexp.MustCompile(`^[a-f0-9.]{40,}$`)
 	obfHexPattern     = regexp.MustCompile(`[a-f0-9]{30}`)
 	obfAbcXyzPattern  = regexp.MustCompile(`^abc\.xyz`)
+
+	// Multi-volume archive suffixes are never obfuscated: .partNN.rar, .rNN, .NNN
+	archiveVolumePattern = regexp.MustCompile(`(?i)(?:\.part\d+\.rar|\.r\d{2,3}|\.\d{2,3})$`)
 )
 
 // GetFileInfos extracts file information from NZB files with first segment data
@@ -206,6 +209,12 @@ func IsProbablyObfuscated(filename string) bool {
 // https://github.com/sabnzbd/sabnzbd/blob/64034c5636563b66360aa9dfc1a0b624f4db5cc3/sabnzbd/deobfuscate_filenames.py#L105
 func isProbablyObfuscated(filename string) bool {
 	if filename == "" {
+		return false
+	}
+
+	// Multi-volume archive suffixes (.part01.rar, .r00, .001) are legitimate naming
+	// conventions, never obfuscated — guard before the heuristic below strips them.
+	if archiveVolumePattern.MatchString(filename) {
 		return false
 	}
 

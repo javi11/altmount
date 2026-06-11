@@ -1,0 +1,26 @@
+{
+  "rar_single": [
+    {
+      "name": "payload_a.bin",
+      "size": 200000
+    }
+  ],
+  "rar_multi": [
+    {
+      "name": "payload_a.bin",
+      "size": 200000
+    }
+  ],
+  "7z_single": [
+    {
+      "name": "payload_b.bin",
+      "size": 120000
+    }
+  ],
+  "7z_multi": [
+    {
+      "name": "payload_b.bin",
+      "size": 120000
+    }
+  ]
+}
