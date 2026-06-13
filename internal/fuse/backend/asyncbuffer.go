@@ -33,11 +33,14 @@ const (
 	// sequential run), addressing the seek-thrashing that got earlier versions
 	// of this buffer reverted.
 	armThreshold = 3
-	// closeDrainTimeout bounds how long Close waits for the fill goroutine to
-	// exit. ctx cancellation propagates into the source read, so this is a
-	// safety net rather than the normal path.
-	closeDrainTimeout = 5 * time.Second
 )
+
+// closeDrainTimeout bounds how long Wait blocks for the fill goroutine to exit.
+// Callers are expected to close/interrupt the source between Shutdown and Wait
+// so the goroutine exits promptly; this timeout is only a safety net against a
+// source whose read cannot be unblocked. It is a var (not a const) so tests can
+// shorten it.
+var closeDrainTimeout = 5 * time.Second
 
 // readAtContexter matches nzbfilesystem.MetadataVirtualFile.ReadAtContext.
 type readAtContexter interface {
@@ -135,10 +138,11 @@ type AsyncReadBuffer struct {
 	seqRun       int   // consecutive sequential reads observed while probing
 	accounted    bool  // holds an accounted slot in the global budget
 
-	started   bool // fill goroutine launched
-	closed    bool
-	closeOnce sync.Once
-	wg        sync.WaitGroup
+	started      bool // fill goroutine launched
+	closed       bool
+	shutdownOnce sync.Once
+	waitOnce     sync.Once
+	wg           sync.WaitGroup
 }
 
 // NewAsyncReadBuffer creates an async read-ahead buffer wrapping src. The fill
@@ -458,22 +462,42 @@ func (a *AsyncReadBuffer) GetBufferedOffset() int64 {
 	return a.baseOff + int64(a.filled)
 }
 
-// Close stops the fill goroutine and releases resources. It does NOT close the
-// underlying source — the FUSE handle owns that lifecycle. Close drains the
-// fill goroutine with a bounded wait: ctx cancellation propagates into the
-// source read, so the goroutine normally exits promptly; the timeout is a
-// safety net against a wedged source.
-func (a *AsyncReadBuffer) Close() {
-	a.closeOnce.Do(func() {
+// Shutdown signals the fill goroutine to stop without waiting for it to exit.
+// It cancels the buffer's context and marks the buffer closed so the goroutine
+// exits at its next lock acquisition without issuing another source read.
+//
+// Shutdown does NOT close the underlying source — the FUSE handle owns that
+// lifecycle. Because a sequential source read blocks on the source's own
+// context (not this buffer's), the caller MUST close/interrupt the source
+// between Shutdown and Wait; otherwise an in-flight read cannot be unblocked
+// and Wait falls back to its bounded safety-net timeout. Idempotent.
+func (a *AsyncReadBuffer) Shutdown() {
+	a.shutdownOnce.Do(func() {
 		a.cancel()
 
 		a.mu.Lock()
 		a.closed = true
 		a.srcDone = true
+		a.cond.Broadcast()
+		a.mu.Unlock()
+	})
+}
+
+// Wait drains the fill goroutine and releases resources. It must be called
+// after Shutdown (and after the underlying source has been closed/interrupted)
+// so the goroutine exits promptly. The bounded wait is a safety net against a
+// wedged source: with the source interrupted first it returns near-instantly.
+// Idempotent.
+func (a *AsyncReadBuffer) Wait() {
+	a.waitOnce.Do(func() {
+		// Defensive: ensure the stop signal was delivered even if a caller
+		// invokes Wait without a preceding Shutdown.
+		a.Shutdown()
+
+		a.mu.Lock()
+		started := a.started
 		accounted := a.accounted
 		a.accounted = false
-		a.cond.Broadcast()
-		started := a.started
 		a.mu.Unlock()
 
 		if started {
@@ -512,4 +536,14 @@ func (a *AsyncReadBuffer) Close() {
 		a.buf = nil
 		a.mu.Unlock()
 	})
+}
+
+// Close stops the fill goroutine and releases resources in a single call. It is
+// equivalent to Shutdown followed by Wait. Callers that own the underlying
+// source should prefer Shutdown → close source → Wait so an in-flight source
+// read is unblocked promptly; Close on its own relies on the bounded safety-net
+// timeout when a source read is wedged.
+func (a *AsyncReadBuffer) Close() {
+	a.Shutdown()
+	a.Wait()
 }
