@@ -209,3 +209,40 @@ func TestArrsWebhookRequest_Unmarshal(t *testing.T) {
 		assert.Equal(t, "/path/to/movie/folder", req.Movie.FolderPath)
 	})
 }
+
+func TestHandleArrsWebhook_WithInstanceName(t *testing.T) {
+	app := fiber.New()
+
+	keyOverride := "12345678901234567890123456789012"
+	cfg := &config.Config{
+		API: config.APIConfig{
+			KeyOverride: keyOverride,
+		},
+	}
+
+	server := &Server{
+		configManager: &mockConfigManager{cfg: cfg},
+		arrsService:   &arrs.Service{}, // non-nil, empty s.data which validates the safe-check path
+	}
+
+	app.Post("/api/arrs/webhook", server.handleArrsWebhook)
+
+	payload := map[string]any{
+		"eventType":    "Test",
+		"instanceName": "Radarr-Test-Instance",
+	}
+	body, _ := json.Marshal(payload)
+
+	req := httptest.NewRequest("POST", "/api/arrs/webhook?apikey="+keyOverride, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := app.Test(req)
+	assert.NoError(t, err)
+	assert.Equal(t, 200, resp.StatusCode)
+
+	var result map[string]any
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	assert.NoError(t, err)
+	assert.Equal(t, true, result["success"])
+}
+

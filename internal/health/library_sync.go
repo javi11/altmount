@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -1036,6 +1037,9 @@ type DryRunResult struct {
 	WouldCleanup           bool
 }
 
+// sampleProofPattern matches filenames containing "sample" or "proof" as a standalone word.
+var sampleProofPattern = regexp.MustCompile(`(?i)(^|[^a-zA-Z0-9])(sample|proof)(?:[^a-zA-Z0-9]|$)`)
+
 // getAllMetadataFiles collects all .meta files from the filesystem
 func (lsw *LibrarySyncWorker) getAllMetadataFiles(ctx context.Context) ([]string, error) {
 	cfg := lsw.configGetter()
@@ -1062,6 +1066,25 @@ func (lsw *LibrarySyncWorker) getAllMetadataFiles(ctx context.Context) ([]string
 
 		// Only include .meta files
 		if !d.IsDir() && strings.HasSuffix(d.Name(), ".meta") {
+			nameWithoutMeta := strings.TrimSuffix(d.Name(), ".meta")
+			if sampleProofPattern.MatchString(nameWithoutMeta) {
+				// Convert to mount relative path to query lite cache
+				mountRelPath := lsw.metaPathToMountRelativePath(path)
+				
+				// Default sample limit is 200MB, but for high-bitrate 4K / Remux releases, sample clips can be larger (up to 600MB)
+				sampleLimit := int64(200 * 1024 * 1024)
+				lowerName := strings.ToLower(nameWithoutMeta)
+				if strings.Contains(lowerName, "2160p") || strings.Contains(lowerName, "4k") || strings.Contains(lowerName, "uhd") || strings.Contains(lowerName, "remux") {
+					sampleLimit = int64(600 * 1024 * 1024)
+				}
+
+				lite, err := lsw.metadataService.ReadFileMetadataLite(mountRelPath)
+				if err == nil && lite != nil && lite.FileSize <= sampleLimit {
+					// Skip sample files
+					slog.DebugContext(ctx, "Library Sync: Skipping sample file", "path", mountRelPath, "size", lite.FileSize, "limit", sampleLimit)
+					return nil
+				}
+			}
 			metaFiles = append(metaFiles, path)
 			count++
 			if count%1000 == 0 {

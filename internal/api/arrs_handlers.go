@@ -84,6 +84,12 @@ type ArrsWebhookRequest struct {
 		SceneName string `json:"sceneName"`
 		Path      string `json:"path"`
 	} `json:"episodeFile"`
+	Episodes []struct {
+		Id            int64  `json:"id"`
+		EpisodeNumber int    `json:"episodeNumber"`
+		SeasonNumber  int    `json:"seasonNumber"`
+		Title         string `json:"title"`
+	} `json:"episodes,omitempty"`
 	DeletedFiles ArrsDeletedFiles `json:"deletedFiles,omitempty"`
 	DownloadId   string           `json:"downloadId,omitempty"`
 	Release      *struct {
@@ -125,6 +131,16 @@ func (req ArrsWebhookRequest) ToMetadata() model.WebhookMetadata {
 			SceneName: req.EpisodeFile.SceneName,
 		}
 	}
+
+	if len(req.Episodes) > 0 {
+		meta.Episodes = make([]model.EpisodeMetadata, len(req.Episodes))
+		for i, ep := range req.Episodes {
+			meta.Episodes[i] = model.EpisodeMetadata{
+				Id: ep.Id,
+			}
+		}
+	}
+
 
 	if req.Artist.Id > 0 {
 		meta.Artist = &model.ArtistMetadata{
@@ -238,6 +254,10 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 	}
 
 	slog.InfoContext(c.Context(), "Received ARR webhook", "event_type", req.EventType)
+
+	if req.InstanceName != "" {
+		s.arrsService.ClearInstanceCache(c.Context(), req.InstanceName)
+	}
 
 	// Determine file path to scan/delete based on event type
 	var pathsToScan []string
@@ -598,19 +618,43 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 			// Handle Rename and Download specifically: try to find and re-link old record
 			if req.EventType == "Rename" || req.EventType == "Download" {
 				fileName := filepath.Base(normalizedPath)
-				// Try to find a record with the same filename but currently under /complete/
-				// or with a NULL library_path
 				var metadataStr *string
-				metaBytes, err := json.Marshal(req.ToMetadata())
+				webMeta := req.ToMetadata()
+				metaBytes, err := json.Marshal(webMeta)
 				if err == nil {
 					str := string(metaBytes)
 					metadataStr = &str
 				}
 
+				// Try to find and relink by metadata IDs (e.g. series ID/TVDB ID/episode ID or movie ID/TMDB ID) first
+				if relinked, err := s.healthRepo.RelinkFileByMetadata(c.Context(), &webMeta, normalizedPath, path, metadataStr, req.EventType == "Download"); err == nil && relinked {
+					attrs := []any{
+						"event", req.EventType,
+						"instance", req.InstanceName,
+						"new_library_path", path,
+					}
+					if req.Series.Id > 0 {
+						attrs = append(attrs, "series_id", req.Series.Id)
+					}
+					if req.EpisodeFile.Id > 0 {
+						attrs = append(attrs, "episode_file_id", req.EpisodeFile.Id)
+					}
+					if req.Movie.Id > 0 {
+						attrs = append(attrs, "movie_id", req.Movie.Id)
+					}
+					if req.MovieFile.Id > 0 {
+						attrs = append(attrs, "movie_file_id", req.MovieFile.Id)
+					}
+
+					slog.InfoContext(c.Context(), "Successfully re-linked health record using metadata IDs during webhook", attrs...)
+					continue // Successfully re-linked, no need to add new
+				}
+
+				// Fall back to filename-based matching
 				// Download events carry a freshly imported copy: relink with revalidation so
-			// the new file gets health-checked (repair budget is preserved). Rename events
-			// carry no new content and must not disturb repair/corrupted state.
-			if relinked, err := s.healthRepo.RelinkFileByFilename(c.Context(), fileName, normalizedPath, path, metadataStr, req.EventType == "Download"); err == nil && relinked {
+				// the new file gets health-checked (repair budget is preserved). Rename events
+				// carry no new content and must not disturb repair/corrupted state.
+				if relinked, err := s.healthRepo.RelinkFileByFilename(c.Context(), fileName, normalizedPath, path, metadataStr, req.EventType == "Download"); err == nil && relinked {
 					attrs := []any{
 						"event", req.EventType,
 						"instance", req.InstanceName,

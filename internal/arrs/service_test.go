@@ -1,6 +1,7 @@
 package arrs
 
 import (
+	"context"
 	"testing"
 
 	"github.com/javi11/altmount/internal/config"
@@ -29,4 +30,19 @@ func TestFindInstanceForFilePath(t *testing.T) {
 	s := NewService(getter, nil, nil, nil)
 
 	assert.NotNil(t, s)
+}
+
+func TestService_ClearInstanceCache(t *testing.T) {
+	cfg := &config.Config{}
+	getter := func() *config.Config { return cfg }
+	s := NewService(getter, nil, nil, nil)
+
+	// Call it, making sure it doesn't crash/panic when s.data is populated
+	ctx := context.Background()
+	s.ClearInstanceCache(ctx, "radarr-test")
+	s.ClearInstanceCache(ctx, "") // Empty safe check
+
+	// Nil s.data check
+	var sNil *Service = &Service{}
+	sNil.ClearInstanceCache(ctx, "radarr-test")
 }

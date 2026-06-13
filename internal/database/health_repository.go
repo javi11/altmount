@@ -3,10 +3,14 @@ package database
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/javi11/altmount/internal/arrs/model"
 )
 
 // HealthRepository handles file health database operations
@@ -238,13 +242,17 @@ func (r *HealthRepository) GetUnhealthyFiles(ctx context.Context, limit int, str
 		  AND status NOT IN ('repair_triggered', 'checking', 'corrupted')
 		  AND (
 			  ? = 'NONE' 
+			  OR status = 'pending'
+			  OR (metadata IS NOT NULL AND metadata != '')
 			  OR (library_path IS NOT NULL AND (library_path LIKE ? ESCAPE '!' OR library_path LIKE ? ESCAPE '!'))
 			  OR (last_error LIKE '%failed to unmarshal metadata%')
 			  OR (last_error LIKE '%failed to read file metadata%')
 			  OR (last_error LIKE '%no ARR instance found%')
 			  OR (last_error LIKE '%missing % checked segments%')
 		  )
-		ORDER BY priority DESC, scheduled_check_at ASC
+		ORDER BY priority DESC, 
+		         (CASE WHEN status = 'pending' THEN 0 ELSE 1 END) ASC, 
+		         scheduled_check_at ASC
 		LIMIT ?
 	`
 
@@ -1004,6 +1012,36 @@ func (r *HealthRepository) ResetStalePendingFiles(ctx context.Context) error {
 	if rows > 0 {
 		slog.InfoContext(ctx, "Reset stale pending files", "count", rows)
 	}
+
+	// Fix files stuck in pending status with scheduled_check_at set to the distant future
+	// (usually by the backfill release dates worker when status check was not restricted).
+	// We only reset them if they have retry_count = 0 (never checked/no legitimate retry delay)
+	// and scheduled_check_at is more than 24 hours in the future relative to now.
+	var stuckQuery string
+	if r.dialect.IsPostgres() {
+		stuckQuery = `UPDATE file_health
+		               SET scheduled_check_at = NOW(),
+		                   updated_at = NOW()
+		               WHERE status = ? 
+		                 AND retry_count = 0 
+		                 AND scheduled_check_at > NOW() + INTERVAL '24 hours'`
+	} else {
+		stuckQuery = `UPDATE file_health
+		               SET scheduled_check_at = datetime('now'),
+		                   updated_at = datetime('now')
+		               WHERE status = ? 
+		                 AND retry_count = 0 
+		                 AND scheduled_check_at > datetime('now', '+24 hours')`
+	}
+	stuckResult, err := r.db.ExecContext(ctx, stuckQuery, HealthStatusPending)
+	if err != nil {
+		return fmt.Errorf("failed to reset stuck pending files: %w", err)
+	}
+	stuckRows, _ := stuckResult.RowsAffected()
+	if stuckRows > 0 {
+		slog.InfoContext(ctx, "Reset stuck pending files (scheduled in distant future)", "count", stuckRows)
+	}
+
 	return nil
 }
 
@@ -1013,19 +1051,22 @@ func (r *HealthRepository) DeleteHealthRecordsBulk(ctx context.Context, filePath
 		return nil
 	}
 
-	// SQLite parameter limit typically is 999. Batch delete in chunks of 500.
-	const batchSize = 500
+	// SQLite parameter limit typically is 999. Batch delete in chunks of 250 (500 placeholders).
+	const batchSize = 250
 	var totalRowsAffected int64
 
 	for i := 0; i < len(filePaths); i += batchSize {
 		end := min(i+batchSize, len(filePaths))
 		chunk := filePaths[i:end]
 
-		placeholders := make([]string, len(chunk))
-		args := make([]any, len(chunk))
+		placeholders := make([]string, len(chunk)*2)
+		args := make([]any, len(chunk)*2)
 		for j, path := range chunk {
-			placeholders[j] = "?"
-			args[j] = strings.TrimPrefix(path, "/")
+			placeholders[j*2] = "?"
+			placeholders[j*2+1] = "?"
+			trimmed := strings.TrimPrefix(path, "/")
+			args[j*2] = trimmed
+			args[j*2+1] = "/" + trimmed
 		}
 
 		query := fmt.Sprintf(`DELETE FROM file_health WHERE file_path IN (%s)`, strings.Join(placeholders, ","))
@@ -1529,10 +1570,7 @@ func (r *HealthRepository) BackfillReleaseDates(ctx context.Context, updates []B
 	stmt, err := tx.PrepareContext(ctx, `
 		UPDATE file_health
 		SET release_date = ?,
-		    scheduled_check_at = CASE
-		        WHEN status IN ('corrupted', 'repair_triggered') THEN scheduled_check_at
-		        ELSE ?
-		    END,
+		    scheduled_check_at = CASE WHEN status = 'healthy' THEN ? ELSE scheduled_check_at END,
 		    updated_at = datetime('now')
 		WHERE id = ?
 	`)
@@ -1751,85 +1789,141 @@ func (r *HealthRepository) RenameHealthRecord(ctx context.Context, oldPath, newP
 //     reorganization cannot wipe repair progress.
 func (r *HealthRepository) RelinkFileByFilename(ctx context.Context, filename, filePath, libraryPath string, metadataStr *string, revalidate bool) (bool, error) {
 	filePath = normalizeHealthPath(filePath)
-
-	// A single Download/Rename webhook concerns exactly one imported file. Matching by
-	// bare basename ("%/"+filename) can collide across unrelated titles (01.mkv,
-	// sample.mkv, track01.flac); a blanket UPDATE would force-reset every match and
-	// overwrite their paths. So resolve the target record(s) first and only act when the
-	// target is unambiguous — never reset rows belonging to a different release.
 	likePattern := "%/" + escapeLikePrefix(filename)
-	const matchWhere = `(file_path LIKE ? ESCAPE '\' OR file_path = ? OR library_path LIKE ? ESCAPE '\' OR library_path = ?)`
 
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return false, fmt.Errorf("failed to begin relink transaction: %w", err)
+		return false, fmt.Errorf("failed to start transaction: %w", err)
 	}
 	defer tx.Rollback()
 
-	ids, err := scanIDs(tx.QueryContext(ctx,
-		`SELECT id FROM file_health WHERE `+matchWhere, likePattern, filename, likePattern, libraryPath))
+	// Query to find all matched records
+	rows, err := tx.QueryContext(ctx, `
+		SELECT id, file_path, library_path FROM file_health
+		WHERE (file_path LIKE ? ESCAPE '\' OR file_path = ? OR library_path LIKE ? ESCAPE '\' OR library_path = ?)
+	`, likePattern, filename, likePattern, libraryPath)
 	if err != nil {
-		return false, fmt.Errorf("failed to resolve relink target: %w", err)
+		return false, fmt.Errorf("failed to query records for filename relink: %w", err)
 	}
-	if len(ids) == 0 {
+	
+	type candidate struct {
+		id          int64
+		filePath    string
+		libraryPath string
+	}
+	var allCandidates []candidate
+	for rows.Next() {
+		var c candidate
+		var lp sql.NullString
+		if err := rows.Scan(&c.id, &c.filePath, &lp); err != nil {
+			rows.Close()
+			return false, err
+		}
+		if lp.Valid {
+			c.libraryPath = lp.String
+		}
+		allCandidates = append(allCandidates, c)
+	}
+	rows.Close()
+
+	if len(allCandidates) == 0 {
 		return false, nil
 	}
 
-	targetID := ids[0]
-	if len(ids) > 1 {
-		// Collision: only proceed if exactly one record matches the incoming path
-		// precisely; otherwise refuse and leave every matched row intact.
-		exactIDs, err := scanIDs(tx.QueryContext(ctx,
-			`SELECT id FROM file_health WHERE file_path = ? OR library_path = ?`, filePath, libraryPath))
-		if err != nil {
-			return false, fmt.Errorf("failed to resolve exact relink target: %w", err)
+	var matchedIDs []int64
+	for _, cand := range allCandidates {
+		// Keep if it is the target path/library path precisely
+		if cand.filePath == filePath || cand.libraryPath == libraryPath {
+			matchedIDs = append(matchedIDs, cand.id)
+			continue
 		}
-		if len(exactIDs) != 1 {
-			slog.WarnContext(ctx, "Refusing ambiguous relink — filename matches multiple records",
-				"filename", filename, "matches", len(ids), "exact_matches", len(exactIDs))
-			return false, nil
+		// Keep if it is a downloader path or shares show folder with the target path
+		if isDownloaderPath(cand.filePath) || shareShowFolder(cand.filePath, filePath) {
+			matchedIDs = append(matchedIDs, cand.id)
+			continue
 		}
-		slog.WarnContext(ctx, "Filename collision on relink — scoping to the exact path match",
-			"filename", filename, "matches", len(ids))
-		targetID = exactIDs[0]
 	}
 
-	// revalidate (Download — fresh content) resets the record to pending for immediate
-	// re-validation; the non-revalidate (Rename — no new content) branch preserves
-	// repair/corrupted state. Both preserve repair_retry_count (the per-title budget).
-	setClause := `
-		file_path = ?,
-		library_path = ?,
-		status = CASE WHEN status IN ('repair_triggered', 'corrupted') THEN status ELSE 'pending' END,
-		retry_count = CASE WHEN status IN ('repair_triggered', 'corrupted') THEN retry_count ELSE 0 END,
-		last_error = CASE WHEN status IN ('repair_triggered', 'corrupted') THEN last_error ELSE NULL END,
-		error_details = CASE WHEN status IN ('repair_triggered', 'corrupted') THEN error_details ELSE NULL END,
-		metadata = COALESCE(?, metadata),
-		updated_at = datetime('now'),
-		scheduled_check_at = CASE WHEN status IN ('repair_triggered', 'corrupted') THEN scheduled_check_at ELSE datetime('now') END`
-	if revalidate {
-		setClause = `
-		file_path = ?,
-		library_path = ?,
-		status = 'pending',
-		retry_count = 0,
-		last_error = NULL,
-		error_details = NULL,
-		metadata = COALESCE(?, metadata),
-		updated_at = datetime('now'),
-		scheduled_check_at = datetime('now')`
+	if len(matchedIDs) == 0 {
+		return false, nil
 	}
 
-	if _, err := tx.ExecContext(ctx, `UPDATE file_health SET `+setClause+` WHERE id = ?`,
-		filePath, libraryPath, metadataStr, targetID); err != nil {
-		return false, fmt.Errorf("failed to relink file by filename: %w", err)
+	var targetID int64
+	var sourceID int64
+	for _, id := range matchedIDs {
+		var isExact bool
+		for _, cand := range allCandidates {
+			if cand.id == id && (cand.filePath == filePath || cand.libraryPath == libraryPath) {
+				isExact = true
+				break
+			}
+		}
+		if isExact {
+			targetID = id
+		} else {
+			sourceID = id
+		}
+	}
+
+	// If there are multiple other source IDs (e.g. len(matchedIDs) > 2), it is ambiguous collision
+	if len(matchedIDs) > 2 {
+		slog.WarnContext(ctx, "Refusing ambiguous relink — filename matches multiple source records",
+			"filename", filename, "matches", len(matchedIDs))
+		return false, nil
+	}
+
+	var actID int64
+	if targetID != 0 && sourceID != 0 {
+		actID = sourceID
+	} else if targetID != 0 {
+		actID = targetID
+	} else if sourceID != 0 {
+		actID = sourceID
+	} else {
+		return false, nil
+	}
+
+	if err := r.relinkOrMergeRecordTx(ctx, tx, actID, filePath, libraryPath, metadataStr, revalidate); err != nil {
+		return false, fmt.Errorf("failed to merge/relink record %d: %w", actID, err)
 	}
 
 	if err := tx.Commit(); err != nil {
-		return false, fmt.Errorf("failed to commit relink: %w", err)
+		return false, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
 	return true, nil
+}
+
+func isDownloaderPath(p string) bool {
+	low := strings.ToLower(p)
+	return strings.Contains(low, "complete") || 
+	       strings.Contains(low, "download") || 
+	       strings.Contains(low, "nzb") || 
+	       strings.Contains(low, "temp") || 
+	       strings.Contains(low, "tmp") || 
+	       strings.Contains(low, "incoming")
+}
+
+func shareShowFolder(p1, p2 string) bool {
+	s1 := strings.Split(filepath.ToSlash(p1), "/")
+	s2 := strings.Split(filepath.ToSlash(p2), "/")
+	if len(s1) < 2 || len(s2) < 2 {
+		return false
+	}
+	for i := len(s1) - 2; i >= 0 && i >= len(s1) - 3; i-- {
+		seg := s1[i]
+		low := strings.ToLower(seg)
+		if strings.HasPrefix(low, "season") || 
+		   low == "specials" || low == "tv" || low == "movies" || low == "downloads" {
+			continue
+		}
+		for j := len(s2) - 2; j >= 0 && j >= len(s2) - 3; j-- {
+			if s2[j] == seg {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // scanIDs reads an id column from a query result, always closing the rows. It centralizes
@@ -2004,3 +2098,324 @@ func (r *HealthRepository) UpdateFileMetadata(ctx context.Context, id int64, met
 func (r *HealthRepository) LogIndexerImport(ctx context.Context, indexer string, status string, errMsg string, downloadID string) error {
 	return logIndexerImport(ctx, r.db, indexer, status, errMsg, downloadID)
 }
+
+// relinkOrMergeRecordTx merges details or updates a matched health record under a transaction,
+// resolving any UNIQUE constraint violations on file_path.
+func (r *HealthRepository) relinkOrMergeRecordTx(ctx context.Context, tx *dialectAwareTx, id int64, filePath, libraryPath string, metadataStr *string, revalidate bool) error {
+	filePath = strings.TrimPrefix(filePath, "/")
+
+	// 1. Fetch source/matched record info
+	var sourceStatus string
+	var sourceUpdatedAt time.Time
+	var sourceRepairRetry int
+	var sourceSourceNzb *string
+	var sourceIndexer *string
+	var sourceReleaseDate *time.Time
+	var sourceMetadata *string
+	err := tx.QueryRowContext(ctx, `
+		SELECT status, updated_at, repair_retry_count, source_nzb_path, indexer, release_date, metadata
+		FROM file_health
+		WHERE id = ?
+	`, id).Scan(&sourceStatus, &sourceUpdatedAt, &sourceRepairRetry, &sourceSourceNzb, &sourceIndexer, &sourceReleaseDate, &sourceMetadata)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil // Source record no longer exists, nothing to do
+		}
+		return err
+	}
+
+	// 2. Check if a record with the new file_path already exists
+	var conflictingID int64
+	var conflictingStatus string
+	var conflictingUpdatedAt time.Time
+	var conflictingRepairRetry int
+	var conflictingSourceNzb *string
+	var conflictingIndexer *string
+	var conflictingReleaseDate *time.Time
+	var conflictingMetadata *string
+	var conflictExists bool = true
+
+	err = tx.QueryRowContext(ctx, `
+		SELECT id, status, updated_at, repair_retry_count, source_nzb_path, indexer, release_date, metadata
+		FROM file_health
+		WHERE file_path = ?
+	`, filePath).Scan(&conflictingID, &conflictingStatus, &conflictingUpdatedAt, &conflictingRepairRetry, &conflictingSourceNzb, &conflictingIndexer, &conflictingReleaseDate, &conflictingMetadata)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			conflictExists = false
+		} else {
+			return err
+		}
+	}
+
+	// If the conflicting record is the exact same record as the source, just update it normally
+	if conflictExists && conflictingID == id {
+		conflictExists = false
+	}
+	
+	// Fast-Fail Revalidate Guard: If the target record (the one surviving the merge) recently
+	// had a repair triggered, DO NOT reset it to pending. This prevents Webhooks that fire immediately 
+	// after an import's streaming failure from wiping out the repair trigger.
+	targetStatus := sourceStatus
+	targetUpdatedAt := sourceUpdatedAt
+	if conflictExists {
+		targetStatus = conflictingStatus
+		targetUpdatedAt = conflictingUpdatedAt
+	}
+	
+	if revalidate && (targetStatus == "repair_triggered" || targetStatus == "corrupted") && time.Since(targetUpdatedAt) < 60*time.Second {
+		revalidate = false
+	}
+
+	if conflictExists {
+		// Merge details into the conflicting record, then delete the source record
+		mergedRepairRetry := sourceRepairRetry
+		if conflictingRepairRetry > mergedRepairRetry {
+			mergedRepairRetry = conflictingRepairRetry
+		}
+
+		var mergedSourceNzb *string
+		if conflictingSourceNzb != nil {
+			mergedSourceNzb = conflictingSourceNzb
+		} else {
+			mergedSourceNzb = sourceSourceNzb
+		}
+
+		var mergedIndexer *string
+		if conflictingIndexer != nil {
+			mergedIndexer = conflictingIndexer
+		} else {
+			mergedIndexer = sourceIndexer
+		}
+
+		var mergedReleaseDate *time.Time
+		if conflictingReleaseDate != nil {
+			mergedReleaseDate = conflictingReleaseDate
+		} else {
+			mergedReleaseDate = sourceReleaseDate
+		}
+
+		var mergedMetadata *string
+		if metadataStr != nil {
+			mergedMetadata = metadataStr
+		} else if conflictingMetadata != nil {
+			mergedMetadata = conflictingMetadata
+		} else {
+			mergedMetadata = sourceMetadata
+		}
+
+		var query string
+		var args []any
+		if revalidate {
+			query = `
+				UPDATE file_health
+				SET library_path = ?,
+				    status = 'pending',
+				    retry_count = 0,
+				    last_error = NULL,
+				    error_details = NULL,
+				    metadata = ?,
+				    repair_retry_count = ?,
+				    source_nzb_path = ?,
+				    indexer = ?,
+				    release_date = ?,
+				    updated_at = datetime('now'),
+				    scheduled_check_at = datetime('now')
+				WHERE id = ?
+			`
+			args = []any{libraryPath, mergedMetadata, mergedRepairRetry, mergedSourceNzb, mergedIndexer, mergedReleaseDate, conflictingID}
+		} else {
+			query = `
+				UPDATE file_health
+				SET library_path = ?,
+				    metadata = ?,
+				    repair_retry_count = ?,
+				    source_nzb_path = ?,
+				    indexer = ?,
+				    release_date = ?,
+				    updated_at = datetime('now'),
+				    scheduled_check_at = CASE WHEN status IN ('repair_triggered', 'corrupted') THEN scheduled_check_at ELSE datetime('now') END
+				WHERE id = ?
+			`
+			args = []any{libraryPath, mergedMetadata, mergedRepairRetry, mergedSourceNzb, mergedIndexer, mergedReleaseDate, conflictingID}
+		}
+
+		_, err = tx.ExecContext(ctx, query, args...)
+		if err != nil {
+			return err
+		}
+
+		// Delete the source record (since its path was obsolete and its history is merged)
+		_, err = tx.ExecContext(ctx, "DELETE FROM file_health WHERE id = ?", id)
+		if err != nil {
+			return err
+		}
+	} else {
+		// No conflict: just rename the source record
+		var query string
+		var args []any
+		if revalidate {
+			query = `
+				UPDATE file_health
+				SET file_path = ?,
+				    library_path = ?,
+				    status = 'pending',
+				    retry_count = 0,
+				    last_error = NULL,
+				    error_details = NULL,
+				    metadata = COALESCE(?, metadata),
+				    updated_at = datetime('now'),
+				    scheduled_check_at = datetime('now')
+				WHERE id = ?
+			`
+			args = []any{filePath, libraryPath, metadataStr, id}
+		} else {
+			query = `
+				UPDATE file_health
+				SET file_path = ?,
+				    library_path = ?,
+				    metadata = COALESCE(?, metadata),
+				    updated_at = datetime('now'),
+				    scheduled_check_at = CASE WHEN status IN ('repair_triggered', 'corrupted') THEN scheduled_check_at ELSE datetime('now') END
+				WHERE id = ?
+			`
+			args = []any{filePath, libraryPath, metadataStr, id}
+		}
+
+		_, err = tx.ExecContext(ctx, query, args...)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// RelinkFileByMetadata matches repair_triggered or corrupted records by metadata and updates them to pending.
+//
+// revalidate controls what happens to records in repair_triggered/corrupted state:
+//   - true (Download events — a re-downloaded copy was just imported): reset the record to
+//     pending with an immediate check so the fresh copy is validated instead of being
+//     destroyed by the next repair re-trigger. retry_count restarts for the new copy, but
+//     repair_retry_count is preserved as the per-title repair budget so repeatedly broken
+//     re-downloads still escalate to corrupted instead of looping forever.
+//   - false (Rename events — no new content): preserve repair/corrupted state so a library
+//     reorganization cannot wipe repair progress.
+func (r *HealthRepository) RelinkFileByMetadata(ctx context.Context, webMeta *model.WebhookMetadata, filePath, libraryPath string, metadataStr *string, revalidate bool) (bool, error) {
+	filePath = strings.TrimPrefix(filePath, "/")
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, file_path, library_path, status, metadata
+		FROM file_health
+		WHERE status IN ('pending', 'repair_triggered', 'corrupted')
+		  AND metadata IS NOT NULL
+	`)
+	if err != nil {
+		return false, fmt.Errorf("failed to query non-healthy records: %w", err)
+	}
+	defer rows.Close()
+
+	var matchedIDs []int64
+	for rows.Next() {
+		var id int64
+		var dbFP, dbLP, dbStatus string
+		var dbMetaStr string
+		if err := rows.Scan(&id, &dbFP, &dbLP, &dbStatus, &dbMetaStr); err != nil {
+			continue
+		}
+
+		var dbMeta model.WebhookMetadata
+		if err := json.Unmarshal([]byte(dbMetaStr), &dbMeta); err != nil {
+			continue
+		}
+
+		if r.matchMetadata(&dbMeta, webMeta) {
+			matchedIDs = append(matchedIDs, id)
+		}
+	}
+
+	if len(matchedIDs) == 0 {
+		return false, nil
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Update each matched record
+	for _, id := range matchedIDs {
+		if err := r.relinkOrMergeRecordTx(ctx, tx, id, filePath, libraryPath, metadataStr, revalidate); err != nil {
+			return false, fmt.Errorf("failed to relink/merge matched record %d: %w", id, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return true, nil
+}
+
+// matchMetadata matches two WebhookMetadata objects by their IDs.
+func (r *HealthRepository) matchMetadata(dbMeta, webMeta *model.WebhookMetadata) bool {
+	if dbMeta == nil || webMeta == nil {
+		return false
+	}
+
+	// 1. Check if both are Movie/Radarr
+	if dbMeta.Movie != nil && webMeta.Movie != nil {
+		if dbMeta.Movie.Id > 0 && webMeta.Movie.Id > 0 && dbMeta.Movie.Id == webMeta.Movie.Id {
+			return true
+		}
+		if dbMeta.Movie.TmdbId > 0 && webMeta.Movie.TmdbId > 0 && dbMeta.Movie.TmdbId == webMeta.Movie.TmdbId {
+			return true
+		}
+	}
+
+	// 2. Check if both are Series/Sonarr
+	if dbMeta.Series != nil && webMeta.Series != nil {
+		seriesMatch := false
+		if dbMeta.Series.Id > 0 && webMeta.Series.Id > 0 && dbMeta.Series.Id == webMeta.Series.Id {
+			seriesMatch = true
+		} else if dbMeta.Series.TvdbId > 0 && webMeta.Series.TvdbId > 0 && dbMeta.Series.TvdbId == webMeta.Series.TvdbId {
+			seriesMatch = true
+		}
+
+		if seriesMatch {
+			// Check if EpisodeFile matches
+			if dbMeta.EpisodeFile != nil && webMeta.EpisodeFile != nil {
+				if dbMeta.EpisodeFile.Id > 0 && webMeta.EpisodeFile.Id > 0 && dbMeta.EpisodeFile.Id == webMeta.EpisodeFile.Id {
+					return true
+				}
+			}
+			// Check if any Episode ID matches
+			if len(dbMeta.Episodes) > 0 && len(webMeta.Episodes) > 0 {
+				for _, dbEp := range dbMeta.Episodes {
+					for _, webEp := range webMeta.Episodes {
+						if dbEp.Id > 0 && webEp.Id > 0 && dbEp.Id == webEp.Id {
+							return true
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 3. Check if both are Album/Lidarr
+	if dbMeta.Album != nil && webMeta.Album != nil {
+		if dbMeta.Album.Id > 0 && webMeta.Album.Id > 0 && dbMeta.Album.Id == webMeta.Album.Id {
+			return true
+		}
+	}
+
+	// 4. Check if both are Book/Readarr
+	if dbMeta.Book != nil && webMeta.Book != nil {
+		if dbMeta.Book.Id > 0 && webMeta.Book.Id > 0 && dbMeta.Book.Id == webMeta.Book.Id {
+			return true
+		}
+	}
+
+	return false
+}
+
