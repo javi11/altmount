@@ -608,8 +608,11 @@ func (s *Service) MoveToFailedFolder(ctx context.Context, item *database.ImportQ
 		return fmt.Errorf("failed to create failed directory: %w", err)
 	}
 
-	fileName := filepath.Base(item.NzbPath)
-	newPath := filepath.Join(failedDir, fileName)
+	// import_queue.nzb_path is UNIQUE. Two failed items can share a basename (e.g. a re-acquired
+	// release reuses the same NZB filename), so a prior failed item may already occupy the plain
+	// destination -- without disambiguation the DB update below fails with a UNIQUE constraint
+	// violation. uniqueFailedNzbPath namespaces the copy by the queue item ID on collision.
+	newPath := uniqueFailedNzbPath(failedDir, item.NzbPath, item.ID)
 
 	// Check if source exists
 	if _, err := os.Stat(item.NzbPath); os.IsNotExist(err) {
@@ -661,6 +664,20 @@ func (s *Service) MoveToFailedFolder(ctx context.Context, item *database.ImportQ
 	item.NzbPath = newPath
 	s.log.InfoContext(ctx, "Moved failed NZB to failed directory", "new_path", newPath)
 	return nil
+}
+
+// uniqueFailedNzbPath returns the destination path for a failed NZB inside failedDir. It keeps the
+// original basename when that destination is free, and namespaces it with the queue item ID when
+// the plain path is already taken. import_queue.nzb_path is UNIQUE and two failed items can share a
+// basename (e.g. a re-acquired release reuses the NZB filename), so reusing the destination would
+// make MoveToFailedFolder's DB update fail with a UNIQUE constraint violation.
+func uniqueFailedNzbPath(failedDir, srcNzbPath string, itemID int64) string {
+	fileName := filepath.Base(srcNzbPath)
+	newPath := filepath.Join(failedDir, fileName)
+	if _, err := os.Stat(newPath); err == nil {
+		newPath = filepath.Join(failedDir, fmt.Sprintf("%d-%s", itemID, fileName))
+	}
+	return newPath
 }
 
 // sanitizeFilename replaces invalid characters in filenames
