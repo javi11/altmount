@@ -169,6 +169,153 @@ func groupHasVolumeGap(files []parser.ParsedFile) bool {
 	return false
 }
 
+// groupHasFirstVolume reports whether a RAR group contains the volume that begins
+// an archive (the one carrying the main header): the plain .rar for the roll
+// scheme, .part01.rar for the part scheme, or .001 for the numeric scheme. A group
+// made only of continuation volumes (.r00.., .s00.., .002..) returns false — it
+// cannot start an archive on its own.
+func groupHasFirstVolume(files []parser.ParsedFile) bool {
+	for _, f := range files {
+		s, n, ok := rarVolumeNumber(f.Filename)
+		if !ok {
+			continue
+		}
+		start := 1
+		if s == schemeRoll {
+			start = 0
+		}
+		if n == start {
+			return true
+		}
+	}
+	return false
+}
+
+// orphanFirstVolumeName derives the name the missing first volume would have for a
+// set of continuation volumes, preserving the original base name's case so
+// rardecode's name-based volume following matches the real continuation files.
+func orphanFirstVolumeName(orphan string, scheme rarScheme) (string, bool) {
+	switch scheme {
+	case schemeRoll:
+		if m := RollVolPattern.FindStringSubmatch(orphan); len(m) > 1 {
+			return m[1] + ".rar", true
+		}
+		if m := RPattern.FindStringSubmatch(orphan); len(m) > 1 {
+			return m[1] + ".rar", true
+		}
+	case schemeNumeric:
+		if m := NumericPattern.FindStringSubmatch(orphan); len(m) > 1 {
+			return m[1] + ".001", true
+		}
+	}
+	return "", false
+}
+
+// baseExtends reports whether one base name is the other extended by a "."-delimited
+// suffix (or they are equal) — the signal that a reposted first volume belongs to the
+// same release as its continuations (e.g. "movie.x264" and "movie.x264.repost").
+func baseExtends(a, b string) bool {
+	if a == b {
+		return true
+	}
+	long, short := a, b
+	if len(b) > len(a) {
+		long, short = b, a
+	}
+	return strings.HasPrefix(long, short) && long[len(short)] == '.'
+}
+
+// reconcileRepostedFirstVolume handles a single physical RAR set whose first volume
+// was reposted under a different base name (e.g. movie.repost.part01.rar) while its
+// continuation volumes keep the original base (movie.r00, movie.r01, …). Grouping by
+// base name splits these apart, isolating the only volume with a real archive header
+// from its continuations, so only that one volume ever gets mapped.
+//
+// When EXACTLY ONE group is a lone first volume and every other group is pure
+// continuations sharing one roll/numeric scheme, those continuations can only belong
+// to that first volume. We rename the first volume to the continuations' first-volume
+// name (so the whole set shares one base and rardecode follows it natively) and merge
+// everything into a single group ordered by volume number. The guards are deliberately
+// strict: any ambiguity (zero or multiple starters, a multi-volume starter, a
+// part-scheme or unrecognized orphan, mixed orphan schemes) leaves grouping untouched.
+func reconcileRepostedFirstVolume(groups [][]parser.ParsedFile) [][]parser.ParsedFile {
+	if len(groups) < 2 {
+		return groups
+	}
+
+	starterIdx := -1
+	for i, g := range groups {
+		if groupHasFirstVolume(g) {
+			if starterIdx >= 0 {
+				return groups // more than one group can start → genuinely separate archives
+			}
+			starterIdx = i
+		}
+	}
+	if starterIdx < 0 || len(groups[starterIdx]) != 1 {
+		return groups // no anchor, or the starter is itself a multi-volume set
+	}
+
+	var orphans []parser.ParsedFile
+	orphanScheme := schemeUnknown
+	orphanBase := ""
+	for i, g := range groups {
+		if i == starterIdx {
+			continue
+		}
+		base, ok := SetKey(g[0].Filename)
+		if !ok {
+			return groups
+		}
+		if orphanBase == "" {
+			orphanBase = base
+		} else if base != orphanBase {
+			return groups // orphans from different releases → not one set
+		}
+		for _, f := range g {
+			s, _, ok := rarVolumeNumber(f.Filename)
+			if !ok || s == schemePart {
+				return groups // unrecognized or part-scheme orphan → too risky to merge
+			}
+			if orphanScheme == schemeUnknown {
+				orphanScheme = s
+			} else if s != orphanScheme {
+				return groups // mixed orphan schemes → ambiguous
+			}
+		}
+		orphans = append(orphans, g...)
+	}
+	if len(orphans) == 0 {
+		return groups
+	}
+
+	// Only merge when the reposted first volume clearly belongs to the same release:
+	// its base must be the continuations' base extended by a ".<suffix>" (e.g.
+	// "movie" → "movie.repost"). Unrelated bases (a continuation set plus a different
+	// single-part archive in the same NZB) are left as separate groups.
+	starterBase, ok := SetKey(groups[starterIdx][0].Filename)
+	if !ok || !baseExtends(starterBase, orphanBase) {
+		return groups
+	}
+
+	// Order continuations by volume ordinal (contiguous across the r→s rollover).
+	sort.SliceStable(orphans, func(a, b int) bool {
+		_, na, _ := rarVolumeNumber(orphans[a].Filename)
+		_, nb, _ := rarVolumeNumber(orphans[b].Filename)
+		return na < nb
+	})
+
+	firstName, ok := orphanFirstVolumeName(orphans[0].Filename, orphanScheme)
+	if !ok {
+		return groups
+	}
+
+	starter := groups[starterIdx][0]
+	starter.Filename = firstName
+	merged := append([]parser.ParsedFile{starter}, orphans...)
+	return [][]parser.ParsedFile{merged}
+}
+
 // normalizeRarPartFilename normalizes RAR part numbers while preserving padding width
 // If allFilesNoExt is true, uses baseFilename for all parts with .rXX extension
 // where XX is the 0-based part number (index) with zero-padding based on totalFiles

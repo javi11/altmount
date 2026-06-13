@@ -440,7 +440,11 @@ func GroupArchivesByBaseName(files []parser.ParsedFile) [][]parser.ParsedFile {
 	for _, k := range keys {
 		groups = append(groups, groupMap[k])
 	}
-	return groups
+
+	// A single physical RAR set whose first volume was reposted under a different
+	// base name (e.g. movie.repost.part01.rar alongside movie.r00..) splits into
+	// multiple groups above; fold it back into one set so the whole archive maps.
+	return reconcileRepostedFirstVolume(groups)
 }
 
 // normalizeArchiveReleaseFilename aligns the filename to the NZB basename while keeping the original extension.
