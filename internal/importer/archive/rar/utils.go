@@ -18,9 +18,15 @@ var (
 	// NumericPattern matches filename.### (numeric extensions like .001, .002)
 	NumericPattern = regexp.MustCompile(`^(.+)\.(\d+)$`)
 	// RPattern matches filename.r## or filename.r### (e.g., movie.r00, movie.r01)
-	RPattern             = regexp.MustCompile(`^(.+)\.r(\d+)$`)
+	RPattern = regexp.MustCompile(`^(.+)\.r(\d+)$`)
+	// RollVolPattern matches old-style continuation volumes whose extension letter
+	// rolls after .r99 (r→s→…→z), always with two digits — e.g. movie.s00 is the
+	// volume right after movie.r99. Mirrors rardecode's nextOldVolName. The leading
+	// .rar is volume 0; .r00 is volume 1. Group 1 is the base, 2 the letter, 3 the digits.
+	RollVolPattern       = regexp.MustCompile(`(?i)^(.+)\.([r-z])(\d{2})$`)
 	partPatternNumber    = regexp.MustCompile(`\.part(\d+)\.rar$`)
 	rPatternNumber       = regexp.MustCompile(`\.r(\d+)$`)
+	rollVolPatternNumber = regexp.MustCompile(`(?i)\.([r-z])(\d{2})$`)
 	numericPatternNumber = regexp.MustCompile(`\.(\d+)$`)
 )
 
@@ -43,6 +49,10 @@ func SetKey(filename string) (string, bool) {
 	}
 	// Pattern 3: filename.r##
 	if m := RPattern.FindStringSubmatch(lower); len(m) > 1 {
+		return m[1], true
+	}
+	// Pattern 3b: old-style rollover volumes .s##..z## (continuation after .r99)
+	if m := RollVolPattern.FindStringSubmatch(lower); len(m) > 1 {
 		return m[1], true
 	}
 	// Pattern 4: filename.### (numeric)
@@ -89,6 +99,15 @@ func rarVolumeNumber(filename string) (rarScheme, int, bool) {
 	}
 	if strings.HasSuffix(lower, ".rar") {
 		return schemeRoll, 0, true
+	}
+	// Old-style continuation volumes .r00..z99. The extension letter rolls after
+	// .r99 (r→s→…→z), so the ordinal must stay contiguous across the boundary:
+	// .r00=1, .r99=100, .s00=101, …, .z99=900. (.rar=0 is handled above.)
+	if m := rollVolPatternNumber.FindStringSubmatch(lower); len(m) > 2 {
+		letter := m[1][0]
+		if nn := archive.ParseInt(m[2]); nn >= 0 {
+			return schemeRoll, 1 + int(letter-'r')*100 + nn, true
+		}
 	}
 	if m := rPatternNumber.FindStringSubmatch(lower); len(m) > 1 {
 		if n := archive.ParseInt(m[1]); n >= 0 {

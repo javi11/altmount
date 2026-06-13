@@ -11,8 +11,9 @@ import (
 // popular/likely file extensions, adapted to Go.
 
 var (
-	// Pattern to detect RAR files
-	rarPattern = regexp.MustCompile(`(?i)\.r(ar|\d+)$|\.part\d+\.rar$`)
+	// Pattern to detect RAR files, including old-style rollover continuation
+	// volumes (.s00…/.t00…/… up to .z99 — the extension letter rolls r→s→…→z after .r99).
+	rarPattern = regexp.MustCompile(`(?i)\.(?:rar|r\d+|[r-z]\d{2})$|\.part\d+\.rar$`)
 	// Pattern to detect 7zip files
 	sevenZipPattern = regexp.MustCompile(`(?i)\.7z$|\.7z\.\d+$`)
 )

@@ -55,6 +55,7 @@ var (
 var (
 	rarPartPattern    = rar.PartPattern
 	rarRPattern       = rar.RPattern
+	rarRollPattern    = rar.RollVolPattern
 	rarNumericPattern = rar.NumericPattern
 )
 
@@ -660,6 +661,9 @@ func isRarArchiveFile(filename string) bool {
 	if rarRPattern.MatchString(lower) {
 		return true
 	}
+	if rarRollPattern.MatchString(lower) {
+		return true
+	}
 	return false
 }
 
@@ -689,6 +693,15 @@ func parseRarFilename(filename string) (base string, part int) {
 		base = matches[1]
 		if partNum := archive.ParseInt(matches[2]); partNum >= 0 {
 			return base, partNum
+		}
+	}
+
+	// Pattern 3b: old-style rollover volumes .s##..z## (continuation after .r99).
+	if matches := rarRollPattern.FindStringSubmatch(filename); len(matches) > 3 {
+		base = matches[1]
+		letter := strings.ToLower(matches[2])[0]
+		if nn := archive.ParseInt(matches[3]); nn >= 0 {
+			return base, int(letter-'r')*100 + nn
 		}
 	}
 

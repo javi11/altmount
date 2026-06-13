@@ -326,7 +326,7 @@ type BatchExportRequest struct {
 
 // Archive detection patterns
 var (
-	rarPattern      = regexp.MustCompile(`(?i)\.r(ar|\d+)$|\.part\d+\.rar$`)
+	rarPattern      = regexp.MustCompile(`(?i)\.(?:rar|r\d+|[r-z]\d{2})$|\.part\d+\.rar$`)
 	sevenZipPattern = regexp.MustCompile(`(?i)\.7z$|\.7z\.\d+$`)
 	archiveExts     = []string{".rar", ".7z", ".zip", ".tar", ".gz", ".bz2", ".arj", ".arc"}
 )

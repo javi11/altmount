@@ -17,6 +17,28 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestGroupArchivesByBaseNameOldStyleRollover is a regression test for old-style
+// multi-volume RAR sets that roll over past .r99 into .s00…/.t00…/… . Every volume
+// must land in a SINGLE group so the full set is handed to rardecode together;
+// before the fix, .sNN..zNN failed SetKey and each became its own singleton group,
+// starving rardecode of the continuation volumes and truncating the extracted file.
+func TestGroupArchivesByBaseNameOldStyleRollover(t *testing.T) {
+	names := oldRollSet("movie", 12) // movie.rar, .r00..r99, .s00..s12 (114 volumes)
+	files := make([]parser.ParsedFile, len(names))
+	for i, n := range names {
+		files[i] = parser.ParsedFile{Filename: n}
+	}
+
+	groups := GroupArchivesByBaseName(files)
+
+	if len(groups) != 1 {
+		t.Fatalf("GroupArchivesByBaseName produced %d groups; want 1 (all volumes in one set)", len(groups))
+	}
+	if len(groups[0]) != len(names) {
+		t.Errorf("group has %d volumes; want %d (no volume dropped)", len(groups[0]), len(names))
+	}
+}
+
 // mockRarProcessor is a test double for the Processor interface that returns
 // pre-configured contents without hitting Usenet.
 type mockRarProcessor struct {
@@ -316,22 +338,22 @@ func TestProcessArchivePreservesInternalFolderStructure(t *testing.T) {
 			}
 
 			err := ProcessArchive(ctx, ProcessArchiveOptions{
-				VirtualDir:              tt.virtualDir,
-				ArchiveFiles:            []parser.ParsedFile{{Filename: "archive.rar"}},
-				Password:                "",
-				ReleaseDate:             0,
-				NzbPath:                 tt.nzbPath,
-				Processor:               proc,
-				MetadataService:         svc,
+				VirtualDir:             tt.virtualDir,
+				ArchiveFiles:           []parser.ParsedFile{{Filename: "archive.rar"}},
+				Password:               "",
+				ReleaseDate:            0,
+				NzbPath:                tt.nzbPath,
+				Processor:              proc,
+				MetadataService:        svc,
 				PoolManager:            nil,
 				ArchiveProgressTracker: nil,
 				AllowedFileExtensions:  nil,
 				ExtractedFiles:         extracted,
-				MaxPrefetch:             1,
-				ReadTimeout:             30 * time.Second,
-				ExpandBlurayIso:         false,
-				FilterSamples:           false,
-				RenameToNzbName:         tt.renameToNzbName,
+				MaxPrefetch:            1,
+				ReadTimeout:            30 * time.Second,
+				ExpandBlurayIso:        false,
+				FilterSamples:          false,
+				RenameToNzbName:        tt.renameToNzbName,
 			})
 			require.NoError(t, err)
 

@@ -20,8 +20,10 @@ var (
 		".mkv": true, ".mk3d": true, ".ts": true, ".wtv": true, ".m2ts": true,
 	}
 
-	// RAR file pattern: .rar or .r00, .r01, etc.
-	rarPattern = regexp.MustCompile(`(?i)\.r(ar|\d+)$|\.part\d+\.rar$`)
+	// RAR file pattern: .rar, .r00/.r01…, the old-style rollover continuation
+	// volumes .s00…/.t00…/… up to .z99 (the extension letter rolls r→s→…→z after
+	// .r99), and .partNN.rar.
+	rarPattern = regexp.MustCompile(`(?i)\.(?:rar|r\d+|[r-z]\d{2})$|\.part\d+\.rar$`)
 
 	// 7z file pattern: .7z or .7z.001, .7z.002, etc.
 	sevenZipPattern = regexp.MustCompile(`(?i)\.7z(\.(\d+))?$`)
