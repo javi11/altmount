@@ -119,16 +119,23 @@ func (h *Handle) Release(ctx context.Context) syscall.Errno {
 		h.stream = nil
 	}
 
-	// Stop read-ahead before closing the underlying file so the fill goroutine
-	// is drained first.
+	// Signal the fill goroutine to stop, then close the underlying file to
+	// unblock any in-flight source read, then drain the goroutine. A sequential
+	// source read blocks on the source's own context, not the async buffer's,
+	// so the file must be closed between Shutdown and Wait — otherwise Wait
+	// would stall on the wedged read until its safety-net timeout.
 	if h.asyncBuf != nil {
-		h.asyncBuf.Close()
+		h.asyncBuf.Shutdown()
 	}
 
 	if h.file != nil {
 		if err := h.file.Close(); err != nil {
 			h.logger.ErrorContext(ctx, "Close failed", "path", h.path, "error", err)
 		}
+	}
+
+	if h.asyncBuf != nil {
+		h.asyncBuf.Wait()
 	}
 
 	return 0

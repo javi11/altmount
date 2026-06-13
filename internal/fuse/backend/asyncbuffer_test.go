@@ -5,7 +5,9 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -484,5 +486,152 @@ func TestAsyncReadBuffer_BudgetGate(t *testing.T) {
 	}
 	if a2.GetBufferedOffset() == 0 {
 		t.Fatal("a2 should promote after a1 released budget")
+	}
+}
+
+// blockingSource models a source whose read-ahead read blocks on its OWN
+// lifecycle (e.g. the UsenetReader's context) rather than the per-read context
+// the async buffer passes in. Small probe reads are served immediately so the
+// buffer can promote; the first large read-ahead read parks until interrupt()
+// is called — modeling MetadataVirtualFile.Close interrupting an in-flight
+// sequential read. The passed ctx is intentionally ignored on the blocking
+// path, reproducing the cancellation-ownership gap behind the timeout warning.
+type blockingSource struct {
+	data     []byte
+	blockMin int // reads with len(p) >= blockMin block
+
+	blocked    chan struct{} // closed once a read has parked
+	release    chan struct{} // closed by interrupt() to unblock the read
+	blockOnce  sync.Once
+	signalOnce sync.Once
+}
+
+func newBlockingSource(data []byte, blockMin int) *blockingSource {
+	return &blockingSource{
+		data:     data,
+		blockMin: blockMin,
+		blocked:  make(chan struct{}),
+		release:  make(chan struct{}),
+	}
+}
+
+func (b *blockingSource) ReadAtContext(_ context.Context, p []byte, off int64) (int, error) {
+	if len(p) >= b.blockMin {
+		b.signalOnce.Do(func() { close(b.blocked) })
+		<-b.release // ignore the passed ctx — only an external interrupt unblocks
+		return 0, io.ErrClosedPipe
+	}
+	if off >= int64(len(b.data)) {
+		return 0, io.EOF
+	}
+	return copy(p, b.data[off:]), nil
+}
+
+// interrupt unblocks the parked read, modeling the underlying source being
+// closed by the FUSE handle between Shutdown and Wait.
+func (b *blockingSource) interrupt() { b.blockOnce.Do(func() { close(b.release) }) }
+
+// warnRecorder is a slog.Handler that records whether the drain-timeout warning
+// was emitted.
+type warnRecorder struct {
+	mu  sync.Mutex
+	got bool
+}
+
+func (w *warnRecorder) Enabled(context.Context, slog.Level) bool { return true }
+
+func (w *warnRecorder) Handle(_ context.Context, r slog.Record) error {
+	if strings.Contains(r.Message, "did not exit within timeout") {
+		w.mu.Lock()
+		w.got = true
+		w.mu.Unlock()
+	}
+	return nil
+}
+
+func (w *warnRecorder) WithAttrs([]slog.Attr) slog.Handler { return w }
+func (w *warnRecorder) WithGroup(string) slog.Handler      { return w }
+
+func (w *warnRecorder) warned() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.got
+}
+
+// promoteBlockingSource drives armThreshold sequential reads to promote the
+// buffer, then waits for the fill goroutine to park inside the source read.
+func promoteBlockingSource(t *testing.T, a *AsyncReadBuffer, src *blockingSource) {
+	t.Helper()
+	p := make([]byte, 1024)
+	for i := range armThreshold {
+		if _, err := a.ReadAtContext(context.Background(), p, int64(i*len(p))); err != nil {
+			t.Fatalf("seed read %d: %v", i, err)
+		}
+	}
+	select {
+	case <-src.blocked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("fill goroutine did not start a read-ahead read")
+	}
+}
+
+// TestAsyncReadBuffer_ShutdownThenSourceCloseDrainsPromptly reproduces the
+// Handle.Release ordering (Shutdown → close source → Wait) and verifies the
+// fill goroutine drains promptly without logging the timeout warning — the
+// regression that caused "async read buffer fill goroutine did not exit within
+// timeout" on every Release with read-ahead in flight.
+func TestAsyncReadBuffer_ShutdownThenSourceCloseDrainsPromptly(t *testing.T) {
+	SetAsyncBufferBudget(0)
+	prev := closeDrainTimeout
+	closeDrainTimeout = 2 * time.Second
+	defer func() { closeDrainTimeout = prev }()
+
+	rec := &warnRecorder{}
+	data := testData(4 * 1024 * 1024)
+	src := newBlockingSource(data, 4096)
+	a := NewAsyncReadBuffer(context.Background(), src, 256*1024, int64(len(data)), slog.New(rec))
+
+	promoteBlockingSource(t, a, src)
+
+	// Real Release ordering: signal stop, then unblock the source, then drain.
+	a.Shutdown()
+	src.interrupt()
+
+	start := time.Now()
+	a.Wait()
+	if d := time.Since(start); d >= closeDrainTimeout {
+		t.Fatalf("Wait took %v, expected a prompt drain well under the %v timeout", d, closeDrainTimeout)
+	}
+	if rec.warned() {
+		t.Fatal("timeout warning was logged despite the source being interrupted before Wait")
+	}
+}
+
+// TestAsyncReadBuffer_WaitWithoutSourceCloseHitsSafetyNet verifies the bounded
+// drain remains a safety net: when the source read cannot be unblocked, Wait
+// blocks until closeDrainTimeout and logs the warning.
+func TestAsyncReadBuffer_WaitWithoutSourceCloseHitsSafetyNet(t *testing.T) {
+	SetAsyncBufferBudget(0)
+	prev := closeDrainTimeout
+	closeDrainTimeout = 200 * time.Millisecond
+	defer func() { closeDrainTimeout = prev }()
+
+	rec := &warnRecorder{}
+	data := testData(4 * 1024 * 1024)
+	src := newBlockingSource(data, 4096)
+	a := NewAsyncReadBuffer(context.Background(), src, 256*1024, int64(len(data)), slog.New(rec))
+	defer src.interrupt() // let the parked goroutine exit after the test
+
+	promoteBlockingSource(t, a, src)
+
+	// Close without interrupting the source: the read stays wedged, so the drain
+	// must fall back to the bounded safety-net timeout and log the warning.
+	start := time.Now()
+	a.Close()
+	if d := time.Since(start); d < closeDrainTimeout {
+		t.Fatalf("Close returned in %v, expected it to block until the %v safety-net timeout", d, closeDrainTimeout)
+	}
+	if !rec.warned() {
+		t.Fatal("expected timeout warning when the source read is wedged")
 	}
 }
