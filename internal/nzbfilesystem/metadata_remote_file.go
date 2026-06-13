@@ -1284,11 +1284,13 @@ func (mvf *MetadataVirtualFile) tryServeFromRandomReadCache(readCtx context.Cont
 // createReaderAtOffset creates an independent reader for reading at a specific offset.
 // This reader is self-contained and can be used concurrently with other readers.
 func (mvf *MetadataVirtualFile) createReaderAtOffset(start, end int64) (io.ReadCloser, error) {
-	reader, err := mvf.createRawReaderAtOffset(start, end)
-	if err != nil {
-		return nil, err
+	if mvf.remuxActive() {
+		// Open the underlying window aligned to the packet grid and trim back to
+		// [start,end] so the rewrite is independent of this (possibly unaligned)
+		// window — see wrapAlignedRemux.
+		return mvf.wrapAlignedRemux(start, end, mvf.createRawReaderAtOffset)
 	}
-	return mvf.maybeWrapRemux(reader, start), nil
+	return mvf.createRawReaderAtOffset(start, end)
 }
 
 // createRawReaderAtOffset builds the underlying reader for [start,end] without
@@ -1315,21 +1317,37 @@ func (mvf *MetadataVirtualFile) createRawReaderAtOffset(start, end int64) (io.Re
 	return mvf.createUsenetReader(mvf.ctx, start, end)
 }
 
-// maybeWrapRemux wraps reader in a continuous-timeline TS remux when the file
-// carries a per-clip boundary table (multi-clip BD main feature). startOff is
-// the absolute file offset of reader's first byte. For every other file the
-// table is empty and reader is returned unchanged (zero overhead).
-func (mvf *MetadataVirtualFile) maybeWrapRemux(reader io.ReadCloser, startOff int64) io.ReadCloser {
+// remuxActive reports whether this file needs the continuous-timeline TS remux
+// (multi-clip BD main feature). It lazily builds the clip-span table on first
+// use. For every other file it returns false with zero overhead.
+func (mvf *MetadataVirtualFile) remuxActive() bool {
 	if len(mvf.meta.ClipBoundaries) == 0 {
-		return reader
+		return false
 	}
 	mvf.clipSpansOnce.Do(func() {
 		mvf.clipSpans = buildClipSpans(mvf.meta.ClipBoundaries)
 	})
-	if len(mvf.clipSpans) == 0 {
-		return reader
+	return len(mvf.clipSpans) > 0
+}
+
+// wrapAlignedRemux opens a remux-corrected reader that delivers exactly the
+// bytes for [start,end]. The raw window is expanded outward to the BDAV packet
+// grid (alignStartDown/alignEndUp) so the remux always rewrites whole packets,
+// then skipLimitReader trims the rewritten bytes back to [start,end]. This makes
+// the output independent of how the caller chunks reads — a window that starts
+// or ends mid-packet yields the same bytes as the full sequential rewrite, which
+// is what stops Plex's unaligned ranged reads from leaking un-shifted (raw)
+// timestamps and stuttering. rawOpen creates the underlying reader for an
+// arbitrary [s,e] byte range. Callers must have confirmed remuxActive().
+func (mvf *MetadataVirtualFile) wrapAlignedRemux(start, end int64, rawOpen func(s, e int64) (io.ReadCloser, error)) (io.ReadCloser, error) {
+	aStart := alignStartDown(mvf.clipSpans, start)
+	aEnd := alignEndUp(mvf.clipSpans, end, mvf.meta.FileSize)
+	raw, err := rawOpen(aStart, aEnd)
+	if err != nil {
+		return nil, err
 	}
-	return newTSRemuxReader(reader, mvf.clipSpans, startOff)
+	remuxed := newTSRemuxReader(raw, mvf.clipSpans, aStart)
+	return newSkipLimitReader(remuxed, start-aStart, end-start+1), nil
 }
 
 // createEncryptedReaderAtOffset creates an encrypted reader for a specific offset range
@@ -1634,35 +1652,51 @@ func (mvf *MetadataVirtualFile) ensureReader() error {
 		start = mvf.readAtSharedNext
 	}
 
+	// For multi-clip BD main features, expand the underlying window outward to
+	// the BDAV packet grid so the remux rewrites whole packets; we trim back to
+	// [start,end] below. `start` here can be unaligned (after Seek / HTTP Range /
+	// shared-cursor advance) and `end` can be a client-supplied unaligned range
+	// end, so both edges are aligned. For every other file rawStart/rawEnd equal
+	// start/end (zero overhead).
+	remux := mvf.remuxActive()
+	rawStart, rawEnd := start, end
+	if remux {
+		rawStart = alignStartDown(mvf.clipSpans, start)
+		rawEnd = alignEndUp(mvf.clipSpans, end, mvf.meta.FileSize)
+	}
+
 	// Create reader for the calculated range using metadata segments
 	if len(mvf.meta.NestedSources) > 0 {
 		// Nested RAR: use multi-source reader
-		reader, err := mvf.createNestedReader(start, end)
+		reader, err := mvf.createNestedReader(rawStart, rawEnd)
 		if err != nil {
 			return fmt.Errorf("failed to create nested reader: %w", err)
 		}
 		mvf.setReader(reader)
 	} else if mvf.meta.Encryption != metapb.Encryption_NONE {
 		// Wrap the usenet reader with encryption
-		decryptedReader, err := mvf.wrapWithEncryption(start, end)
+		decryptedReader, err := mvf.wrapWithEncryption(rawStart, rawEnd)
 		if err != nil {
 			return fmt.Errorf(ErrMsgFailedWrapEncryption, err)
 		}
 		mvf.setReader(decryptedReader)
 	} else {
 		// Create plain usenet reader
-		ur, err := mvf.createUsenetReader(mvf.ctx, start, end)
+		ur, err := mvf.createUsenetReader(mvf.ctx, rawStart, rawEnd)
 		if err != nil {
 			return err
 		}
 		mvf.setReader(ur)
 	}
 
-	// Apply the continuous-timeline remux for multi-clip BD main features.
-	// No-op (returns the same reader) for every other file. The reader yields
-	// bytes from absolute offset `start`, which the wrapper needs for packet
-	// framing and per-clip delta selection.
-	mvf.reader = mvf.maybeWrapRemux(mvf.reader, start)
+	// Apply the continuous-timeline remux for multi-clip BD main features, then
+	// trim the packet-aligned window back to exactly [start,end] so file offsets
+	// and sizes are unchanged. setReader already pointed the interrupt handle at
+	// the inner reader; the wrappers' Close() chain through to it.
+	if remux {
+		mvf.reader = newTSRemuxReader(mvf.reader, mvf.clipSpans, rawStart)
+		mvf.reader = newSkipLimitReader(mvf.reader, start-rawStart, end-start+1)
+	}
 	mvf.bufOffReader, _ = mvf.reader.(interface{ GetBufferedOffset() int64 })
 
 	mvf.readerInitialized = true

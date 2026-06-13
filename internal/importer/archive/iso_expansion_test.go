@@ -316,6 +316,61 @@ func TestBuildMainFeatureContent_NoTimingNoBoundaries(t *testing.T) {
 	}
 }
 
+func TestBuildMainFeatureContent_ClipBoundaryByteSumGuard(t *testing.T) {
+	t.Parallel()
+
+	mkTimed := func(name string, declaredSize, sourceSize int64) iso.ISOFileContent {
+		return iso.ISOFileContent{
+			Filename: name,
+			Size:     declaredSize,
+			Sources: []iso.ISONestedSource{{
+				Segments:    []*metapb.SegmentData{{Id: name, EndOffset: sourceSize - 1, SegmentSize: sourceSize}},
+				InnerLength: sourceSize,
+			}},
+			InTimeTicks:   1000,
+			DurationTicks: 45000,
+		}
+	}
+
+	t.Run("matched byte sum preserves boundaries", func(t *testing.T) {
+		t.Parallel()
+		d := analyzedISO{
+			src: Content{Filename: "M.iso"}, groupKey: "M",
+			analyzed: &iso.AnalyzedISO{MainFeature: []iso.ISOFileContent{
+				mkTimed("00001.m2ts", 100, 100),
+				mkTimed("00002.m2ts", 200, 200),
+			}},
+		}
+
+		got, ok := buildMainFeatureContent(context.Background(), "M", []analyzedISO{d})
+		if !ok {
+			t.Fatal("ok=false")
+		}
+		if len(got.ClipBoundaries) != 2 {
+			t.Fatalf("ClipBoundaries = %d, want 2", len(got.ClipBoundaries))
+		}
+	})
+
+	t.Run("mismatched byte sum disables boundaries", func(t *testing.T) {
+		t.Parallel()
+		d := analyzedISO{
+			src: Content{Filename: "M.iso"}, groupKey: "M",
+			analyzed: &iso.AnalyzedISO{MainFeature: []iso.ISOFileContent{
+				mkTimed("00001.m2ts", 100, 100),
+				mkTimed("00002.m2ts", 200, 150),
+			}},
+		}
+
+		got, ok := buildMainFeatureContent(context.Background(), "M", []analyzedISO{d})
+		if !ok {
+			t.Fatal("ok=false")
+		}
+		if len(got.ClipBoundaries) != 0 {
+			t.Fatalf("ClipBoundaries = %d, want 0 on byte sum mismatch", len(got.ClipBoundaries))
+		}
+	})
+}
+
 func TestBuildLargestFileContent(t *testing.T) {
 	t.Parallel()
 
