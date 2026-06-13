@@ -324,6 +324,17 @@ func (rh *rarProcessor) parseRarFilename(filename string) (base string, part int
 		}
 	}
 
+	// Pattern 3b: old-style rollover volumes .s##..z## (continuation after .r99).
+	// The extension letter rolls r→s→…→z, so the part number stays contiguous:
+	// .r00=0, .r99=99, .s00=100, …, .z99=899 — keeping volumes correctly ordered.
+	if matches := RollVolPattern.FindStringSubmatch(filename); len(matches) > 3 {
+		base = matches[1]
+		letter := strings.ToLower(matches[2])[0]
+		if nn := archive.ParseInt(matches[3]); nn >= 0 {
+			return base, int(letter-'r')*100 + nn
+		}
+	}
+
 	// Pattern 4: filename.### (numeric extensions like .001, .002)
 	if matches := NumericPattern.FindStringSubmatch(filename); len(matches) > 2 {
 		base = matches[1]
@@ -500,6 +511,9 @@ func isRarArchiveFile(filename string) bool {
 		return true
 	}
 	if RPattern.MatchString(lower) {
+		return true
+	}
+	if RollVolPattern.MatchString(lower) {
 		return true
 	}
 	return false
