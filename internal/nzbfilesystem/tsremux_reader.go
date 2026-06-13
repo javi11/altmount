@@ -37,6 +37,108 @@ func buildClipSpans(boundaries []*metapb.ClipBoundary) []clipSpan {
 	return spans
 }
 
+// spanContaining returns the span whose [start,end] range covers off, or nil
+// when off is past the last clip (a passthrough region with no grid). It mirrors
+// tsRemuxReader.clipFor but is a free function usable before a reader exists.
+func spanContaining(spans []clipSpan, off int64) *clipSpan {
+	lo, hi := 0, len(spans)-1
+	idx := -1
+	for lo <= hi {
+		mid := (lo + hi) / 2
+		if spans[mid].start <= off {
+			idx = mid
+			lo = mid + 1
+		} else {
+			hi = mid - 1
+		}
+	}
+	if idx < 0 || off > spans[idx].end {
+		return nil
+	}
+	return &spans[idx]
+}
+
+// alignStartDown rounds off DOWN to the start of the BDAV packet that contains
+// it, using the containing clip's byte start as the grid origin (each clip's
+// bytes begin a fresh 192-byte packet grid). Offsets past the last clip are
+// returned unchanged — that region, if any, is pure passthrough.
+func alignStartDown(spans []clipSpan, off int64) int64 {
+	sp := spanContaining(spans, off)
+	if sp == nil {
+		return off
+	}
+	return off - ((off - sp.start) % bdavPacketLen)
+}
+
+// alignEndUp rounds end UP to the last byte of the BDAV packet that contains it
+// (grid origin = containing clip start), clamped to that clip's end and to
+// fileSize-1. Offsets past the last clip are returned unchanged.
+func alignEndUp(spans []clipSpan, end, fileSize int64) int64 {
+	sp := spanContaining(spans, end)
+	if sp == nil {
+		return end
+	}
+	into := end - sp.start
+	aligned := sp.start + ((into/bdavPacketLen)+1)*bdavPacketLen - 1
+	if aligned > sp.end {
+		aligned = sp.end
+	}
+	if fileSize > 0 && aligned > fileSize-1 {
+		aligned = fileSize - 1
+	}
+	return aligned
+}
+
+// skipLimitReader presents exactly [skip, skip+limit) of its inner reader: it
+// discards the first `skip` bytes (lazily, on first Read) and then delivers at
+// most `limit` bytes. It is the trim half of packet-grid alignment — the inner
+// reader is opened over a packet-aligned window so the remux always sees whole
+// packets, and this wrapper clips the rewritten bytes back to the exact window
+// the caller requested, keeping file offsets and sizes unchanged.
+type skipLimitReader struct {
+	inner     io.ReadCloser
+	skip      int64
+	limit     int64
+	delivered int64
+	skipped   bool
+}
+
+func newSkipLimitReader(inner io.ReadCloser, skip, limit int64) *skipLimitReader {
+	if skip < 0 {
+		skip = 0
+	}
+	if limit < 0 {
+		limit = 0
+	}
+	return &skipLimitReader{inner: inner, skip: skip, limit: limit}
+}
+
+func (s *skipLimitReader) Read(p []byte) (int, error) {
+	if !s.skipped {
+		if s.skip > 0 {
+			if _, err := io.CopyN(io.Discard, s.inner, s.skip); err != nil {
+				if err == io.EOF {
+					err = io.ErrUnexpectedEOF
+				}
+				return 0, err
+			}
+		}
+		s.skipped = true
+	}
+	remaining := s.limit - s.delivered
+	if remaining <= 0 {
+		return 0, io.EOF
+	}
+	if int64(len(p)) > remaining {
+		p = p[:remaining]
+	}
+	n, err := s.inner.Read(p)
+	s.delivered += int64(n)
+	return n, err
+}
+
+func (s *skipLimitReader) Close() error { return s.inner.Close() }
+
 // tsRemuxReader wraps an underlying reader that yields the bytes of a
 // byte-concatenated multi-clip Blu-ray main feature starting at absolute offset
 // startOff. As bytes stream through, it frames them into BDAV/TS source packets
@@ -46,10 +148,12 @@ func buildClipSpans(boundaries []*metapb.ClipBoundary) []clipSpan {
 // not change offsets or sizes.
 //
 // It is a streaming reader: it buffers across Read calls so packet framing is
-// maintained for an entire sequential run. Only the leading bytes of a read
-// that starts mid-packet are passed through unrewritten (their timestamps, if
-// any, live in the packet header before startOff); every fully-streamed packet
-// is rewritten.
+// maintained for an entire sequential run. A read that starts mid-packet emits
+// its leading partial bytes unrewritten, and a read whose underlying window ends
+// mid-packet emits the trailing partial packet unrewritten. Callers that need a
+// byte-window's output to match the full sequential rewrite therefore open the
+// underlying reader over a packet-ALIGNED window (alignStartDown/alignEndUp) and
+// trim it back with skipLimitReader; see MetadataVirtualFile.wrapAlignedRemux.
 type tsRemuxReader struct {
 	inner       io.ReadCloser
 	spans       []clipSpan
