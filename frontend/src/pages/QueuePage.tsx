@@ -77,7 +77,7 @@ export function QueuePage() {
 	const [sortBy, setSortBy] = useState<"created_at" | "updated_at" | "status" | "nzb_path">(
 		"created_at",
 	);
-	const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
+	const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
 	const queryClient = useQueryClient();
 
@@ -110,11 +110,16 @@ export function QueuePage() {
 
 	const enrichedQueueData = useMemo(() => {
 		if (!queueData) return undefined;
-		return queueData.map((item) => ({
+		const enriched = queueData.map((item) => ({
 			...item,
 			percentage: liveProgress[item.id]?.percentage ?? item.percentage,
 			stage: liveProgress[item.id]?.stage,
 		}));
+		return enriched.sort((a, b) => {
+			const aActive = a.status === QueueStatus.PROCESSING ? 0 : 1;
+			const bActive = b.status === QueueStatus.PROCESSING ? 0 : 1;
+			return aActive - bActive;
+		});
 	}, [queueData, liveProgress]);
 
 	const { data: stats } = useQueueStats();
