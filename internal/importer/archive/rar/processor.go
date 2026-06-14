@@ -154,6 +154,18 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 		return nil, err
 	}
 
+	// Guard against truncated volume following. rardecode computes each next volume
+	// name from a fixed digit width, so a set numbered without consistent padding
+	// (e.g. part09 → part010) can make it stop early; a genuinely incomplete upload
+	// stops early too. When that happens the analysis still succeeds but only covers
+	// the volumes it reached, leaving the file's declared size far larger than the
+	// segments backing it — which only surfaces as an unplayable file at read time.
+	// Compare the file payload rardecode followed against the total bytes present in
+	// the supplied volumes and fail loudly here instead.
+	if err := checkVolumeCoverage(ctx, rh.log, aggregatedFiles, normalizedFiles, mainRarFile); err != nil {
+		return nil, err
+	}
+
 	duration := time.Since(start)
 	rh.log.InfoContext(ctx, "RAR analysis completed", "duration_s", duration.Seconds(), "files_in_archive", len(aggregatedFiles))
 
@@ -180,6 +192,58 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 	}
 
 	return Contents, nil
+}
+
+// volumeCoverageMinPercent is the minimum fraction of the supplied volume bytes
+// that rardecode must have actually followed for the analysis to be trusted. RAR
+// per-volume headers and recovery records account for only a small overhead, so a
+// complete stored set covers well above this; falling far below it means volume
+// following stopped early (bad numbering) or the upload is genuinely incomplete.
+const volumeCoverageMinPercent = 80
+
+// checkVolumeCoverage fails when rardecode followed far fewer volume bytes than the
+// supplied volumes contain — the signature of truncated volume following. It sums
+// the file payload across all analyzed parts and compares it to the total size of
+// the input volumes. Returns nil when coverage cannot be judged (no input bytes).
+func checkVolumeCoverage(ctx context.Context, log *slog.Logger, aggregatedFiles []rardecode.ArchiveFileInfo, volumes []parser.ParsedFile, mainRarFile string) error {
+	var inputBytes int64
+	for _, v := range volumes {
+		if v.Size > 0 {
+			inputBytes += v.Size
+		}
+	}
+	if inputBytes <= 0 {
+		return nil // sizes unknown — nothing to compare against
+	}
+
+	var followedBytes int64
+	referenced := make(map[string]struct{})
+	for _, af := range aggregatedFiles {
+		for _, part := range af.Parts {
+			if part.PackedSize > 0 {
+				followedBytes += part.PackedSize
+			}
+			referenced[filepath.Base(part.Path)] = struct{}{}
+		}
+	}
+
+	if followedBytes*100 >= inputBytes*volumeCoverageMinPercent {
+		return nil
+	}
+
+	log.ErrorContext(ctx, "RAR volume following covered far fewer bytes than the supplied volumes contain; the set is truncated (check volume numbering/padding or missing volumes)",
+		"main_file", mainRarFile,
+		"followed_bytes", followedBytes,
+		"input_bytes", inputBytes,
+		"volumes_referenced", len(referenced),
+		"volumes_supplied", len(volumes),
+		"coverage_percent", followedBytes*100/inputBytes,
+	)
+	return errors.NewNonRetryableError(
+		fmt.Sprintf("RAR archive %q is truncated: followed %d of %d volume bytes across %d of %d volumes",
+			mainRarFile, followedBytes, inputBytes, len(referenced), len(volumes)),
+		nil,
+	)
 }
 
 // checkForCompressedFiles validates that no files in the archive are compressed
@@ -355,12 +419,15 @@ func (rh *rarProcessor) parseRarFilename(filename string) (base string, part int
 // Note: AES credentials are extracted per-file from each file's first part, similar to
 // the reference implementation in github.com/javi11/rardecode/blob/main/examples/rarextract/main.go
 func (rh *rarProcessor) convertAggregatedFilesToRarContent(ctx context.Context, aggregatedFiles []rardecode.ArchiveFileInfo, rarFiles []parser.ParsedFile) ([]Content, error) {
-	// Build quick lookup for rar part parser.ParsedFile by both full path and base name
-	fileIndex := make(map[string]*parser.ParsedFile, len(rarFiles)*2)
+	// Build a width-tolerant lookup for rar parts. rardecode follows a set by
+	// computing fixed-width volume names (e.g. ...part10.rar after ...part09.rar),
+	// while the NZB may use different padding (...part010.rar). Matching part.Path
+	// only by exact name would drop every volume past the first width change, so the
+	// locator falls back to a (set, scheme, volume-number) key.
+	fileIndex := newPartLocator[*parser.ParsedFile](len(rarFiles))
 	for i := range rarFiles {
 		pf := &rarFiles[i]
-		fileIndex[pf.Filename] = pf
-		fileIndex[filepath.Base(pf.Filename)] = pf
+		fileIndex.add(pf.Filename, pf)
 	}
 
 	out := make([]Content, 0, len(aggregatedFiles))
@@ -381,11 +448,7 @@ func (rh *rarProcessor) convertAggregatedFilesToRarContent(ctx context.Context, 
 			}
 
 			// Also extract ID from the first part
-			pf := fileIndex[firstPart.Path]
-			if pf == nil {
-				pf = fileIndex[filepath.Base(firstPart.Path)]
-			}
-			if pf != nil {
+			if pf, ok := fileIndex.get(firstPart.Path); ok {
 				nzbdavID = pf.NzbdavID
 			}
 		}
@@ -407,11 +470,8 @@ func (rh *rarProcessor) convertAggregatedFilesToRarContent(ctx context.Context, 
 				continue
 			}
 
-			pf := fileIndex[part.Path]
-			if pf == nil {
-				pf = fileIndex[filepath.Base(part.Path)]
-			}
-			if pf == nil {
+			pf, ok := fileIndex.get(part.Path)
+			if !ok {
 				rh.log.WarnContext(ctx, "RAR part not found among parsed NZB files", "part_path", part.Path, "file", af.Name)
 				continue
 			}
@@ -643,12 +703,12 @@ func (rh *rarProcessor) processNestedRarContent(ctx context.Context, innerRarCon
 		return nil, err
 	}
 
-	// Build index of inner RAR volumes by filename for quick lookup
-	innerVolumeIndex := make(map[string]*Content, len(innerRarContents))
+	// Build a width-tolerant index of inner RAR volumes (same padding-mismatch
+	// concern as the single-layer path — see partLocator).
+	innerVolumeIndex := newPartLocator[*Content](len(innerRarContents))
 	for i := range innerRarContents {
 		c := &innerRarContents[i]
-		innerVolumeIndex[c.Filename] = c
-		innerVolumeIndex[filepath.Base(c.Filename)] = c
+		innerVolumeIndex.add(c.Filename, c)
 	}
 
 	// Map inner files to outer segments
@@ -678,7 +738,7 @@ func (rh *rarProcessor) processNestedRarContent(ctx context.Context, innerRarCon
 
 // mapNestedFileFlat maps an inner file to flattened outer segments (unencrypted outer RAR).
 // Combined offset = outer segment slicing at inner file's data offset within the inner volume.
-func (rh *rarProcessor) mapNestedFileFlat(ctx context.Context, af rardecode.ArchiveFileInfo, normalizedName string, innerVolumeIndex map[string]*Content) (Content, error) {
+func (rh *rarProcessor) mapNestedFileFlat(ctx context.Context, af rardecode.ArchiveFileInfo, normalizedName string, innerVolumeIndex partLocator[*Content]) (Content, error) {
 	rc := Content{
 		InternalPath: normalizedName,
 		Filename:     filepath.Base(normalizedName),
@@ -693,11 +753,8 @@ func (rh *rarProcessor) mapNestedFileFlat(ctx context.Context, af rardecode.Arch
 			continue
 		}
 
-		outerContent := innerVolumeIndex[part.Path]
-		if outerContent == nil {
-			outerContent = innerVolumeIndex[filepath.Base(part.Path)]
-		}
-		if outerContent == nil {
+		outerContent, ok := innerVolumeIndex.get(part.Path)
+		if !ok {
 			rh.log.WarnContext(ctx, "Inner RAR volume not found", "part_path", part.Path, "file", af.Name)
 			continue
 		}
@@ -725,7 +782,7 @@ func (rh *rarProcessor) mapNestedFileFlat(ctx context.Context, af rardecode.Arch
 
 // mapNestedFileEncrypted maps an inner file to NestedSource entries (encrypted outer RAR).
 // Each inner volume part becomes a separate NestedSource with its own AES credentials.
-func (rh *rarProcessor) mapNestedFileEncrypted(ctx context.Context, af rardecode.ArchiveFileInfo, normalizedName string, innerVolumeIndex map[string]*Content) (Content, error) {
+func (rh *rarProcessor) mapNestedFileEncrypted(ctx context.Context, af rardecode.ArchiveFileInfo, normalizedName string, innerVolumeIndex partLocator[*Content]) (Content, error) {
 	rc := Content{
 		InternalPath: normalizedName,
 		Filename:     filepath.Base(normalizedName),
@@ -738,11 +795,8 @@ func (rh *rarProcessor) mapNestedFileEncrypted(ctx context.Context, af rardecode
 			continue
 		}
 
-		outerContent := innerVolumeIndex[part.Path]
-		if outerContent == nil {
-			outerContent = innerVolumeIndex[filepath.Base(part.Path)]
-		}
-		if outerContent == nil {
+		outerContent, ok := innerVolumeIndex.get(part.Path)
+		if !ok {
 			rh.log.WarnContext(ctx, "Inner RAR volume not found for encrypted nesting", "part_path", part.Path, "file", af.Name)
 			continue
 		}
