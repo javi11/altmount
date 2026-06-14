@@ -30,7 +30,8 @@ func NewHealthRepository(db *sql.DB, d Dialect) *HealthRepository {
 // repair state machine relies on. Every method that writes or matches on file_path
 // funnels through here.
 func normalizeHealthPath(p string) string {
-	return strings.TrimPrefix(p, "/")
+	p = strings.TrimPrefix(p, "/")
+	return strings.ReplaceAll(p, `\`, "/")
 }
 
 // escapeLikePrefix escapes the LIKE metacharacters in a literal prefix so it can be
@@ -237,7 +238,7 @@ func (r *HealthRepository) GetUnhealthyFiles(ctx context.Context, limit int, str
 		  AND status NOT IN ('repair_triggered', 'checking', 'corrupted')
 		  AND (
 			  ? = 'NONE' 
-			  OR (library_path IS NOT NULL AND library_path LIKE ?)
+			  OR (library_path IS NOT NULL AND (library_path LIKE ? ESCAPE '!' OR library_path LIKE ? ESCAPE '!'))
 			  OR (last_error LIKE '%failed to unmarshal metadata%')
 			  OR (last_error LIKE '%failed to read file metadata%')
 			  OR (last_error LIKE '%no ARR instance found%')
@@ -247,14 +248,14 @@ func (r *HealthRepository) GetUnhealthyFiles(ctx context.Context, limit int, str
 		LIMIT ?
 	`
 
-	// Build the library directory prefix filter (e.g. /my/library/path/%)
-	libraryPrefix := libraryDir
-	if !strings.HasSuffix(libraryPrefix, "/") {
-		libraryPrefix += "/"
-	}
-	libraryPrefix += "%"
-
-	rows, err := r.db.QueryContext(ctx, query, maxRetries, strategy, libraryPrefix, limit)
+	// Build library directory prefix filters. Windows may store library_path with
+	// backslashes even when config paths are normalized with slashes.
+	// Normalize the base to forward slashes first so each pattern is internally
+	// consistent regardless of whether libraryDir uses forward or backslashes.
+	libraryBase := strings.TrimRight(strings.ReplaceAll(libraryDir, `\`, "/"), "/")
+	libraryPrefix := libraryBase + "/%"
+	libraryPrefixAlt := strings.ReplaceAll(libraryBase, "/", `\`) + `\%`
+	rows, err := r.db.QueryContext(ctx, query, maxRetries, strategy, libraryPrefix, libraryPrefixAlt, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query files due for check: %w", err)
 	}
