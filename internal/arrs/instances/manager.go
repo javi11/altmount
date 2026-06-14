@@ -14,7 +14,7 @@ import (
 	"golift.io/starr/radarr"
 	"golift.io/starr/readarr"
 	"golift.io/starr/sonarr"
-	)
+)
 
 type Manager struct {
 	configGetter  config.ConfigGetter
@@ -169,7 +169,7 @@ func (m *Manager) RegisterInstance(ctx context.Context, arrURL, apiKey string) (
 
 	// Determine category based on ARR type
 	var category string
-	
+
 	// Check if instance already exists in config to respect pre-configured category
 	existingInstances := m.GetAllInstances()
 	found := false
@@ -246,7 +246,7 @@ func (m *Manager) RegisterInstance(ctx context.Context, arrURL, apiKey string) (
 	}
 
 	// Create category for this ARR type
-	m.ensureCategoryExistsInConfig(ctx, newConfig, category)
+	m.ensureCategoryExistsInConfig(ctx, newConfig, category, arrType)
 
 	// Update and save configuration
 	if err := m.configManager.UpdateConfig(newConfig); err != nil {
@@ -442,14 +442,24 @@ func (m *Manager) categoryUsedByOtherInstance(arrType, category string) bool {
 	return false
 }
 
-// ensureCategoryExistsInConfig ensures a category exists in the provided config
-func (m *Manager) ensureCategoryExistsInConfig(ctx context.Context, cfg *config.Config, category string) {
+// ensureCategoryExistsInConfig ensures a category exists in the provided config.
+// arrType ("radarr", "sonarr", "lidarr", "readarr", "whisparr", "sportarr") is
+// recorded on the category so post-process notifications can route to the
+// correct ARR type without relying on category-name heuristics. If the category
+// already exists but has no Type set, it is backfilled from arrType.
+func (m *Manager) ensureCategoryExistsInConfig(ctx context.Context, cfg *config.Config, category string, arrType string) {
 	if category == "" {
 		category = "default"
 	}
 
-	for _, existingCategory := range cfg.SABnzbd.Categories {
+	for i, existingCategory := range cfg.SABnzbd.Categories {
 		if existingCategory.Name == category {
+			if existingCategory.Type == "" && arrType != "" {
+				cfg.SABnzbd.Categories[i].Type = arrType
+				slog.InfoContext(ctx, "Backfilled type on existing category",
+					"category", category,
+					"type", arrType)
+			}
 			slog.DebugContext(ctx, "Category already exists, skipping creation", "category", category)
 			return
 		}
@@ -467,6 +477,7 @@ func (m *Manager) ensureCategoryExistsInConfig(ctx context.Context, cfg *config.
 		Order:    nextOrder,
 		Priority: 0,
 		Dir:      category,
+		Type:     arrType,
 	}
 
 	cfg.SABnzbd.Categories = append(cfg.SABnzbd.Categories, newCategory)
@@ -474,5 +485,6 @@ func (m *Manager) ensureCategoryExistsInConfig(ctx context.Context, cfg *config.
 	slog.InfoContext(ctx, "Created new category",
 		"category", category,
 		"order", nextOrder,
-		"dir", category)
+		"dir", category,
+		"type", arrType)
 }
