@@ -12,7 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-
 func TestDeleteFileMetadataWithSourceNzb_RemovesMetadata(t *testing.T) {
 	root := t.TempDir()
 	ms := NewMetadataService(root)
@@ -257,4 +256,49 @@ func TestReadFileMetadataLite_FallsBackOnLongHeader(t *testing.T) {
 	require.NotNil(t, lite)
 	assert.Equal(t, int64(1234), lite.FileSize)
 	assert.Equal(t, metapb.FileStatus_FILE_STATUS_HEALTHY, lite.Status)
+}
+
+// TestWriteFileMetadata_NormalizesBackslashPath guards against issue #660: a
+// filename containing a backslash deadlocks the FUSE page-cache layer on open()
+// (invalidate_inode_pages2). The metadata service must never persist or serve a
+// backslash path, and a read using the original backslash form must still resolve.
+func TestWriteFileMetadata_NormalizesBackslashPath(t *testing.T) {
+	root := t.TempDir()
+	ms := NewMetadataService(root)
+
+	// Final path component contains a literal backslash (the #660 trigger).
+	backslashPath := "movies/Release Name/file.mkv\\file.mkv"
+	normalizedPath := "movies/Release Name/file.mkv/file.mkv"
+
+	meta := ms.CreateFileMetadata(
+		2048, "test.nzb", metapb.FileStatus_FILE_STATUS_HEALTHY,
+		nil, metapb.Encryption_NONE, "", "", nil, nil, 0, nil, "zxcvb09876",
+	)
+	require.NoError(t, ms.WriteFileMetadata(backslashPath, meta))
+
+	// No persisted file or directory under the metadata root may contain a backslash.
+	err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		assert.NotContains(t, info.Name(), "\\",
+			"metadata entry must not be persisted with a backslash: %s", path)
+		return nil
+	})
+	require.NoError(t, err)
+
+	// The .meta file lives at the normalized location.
+	require.FileExists(t, ms.GetMetadataFilePath(normalizedPath))
+
+	// Reading back via the original backslash path resolves to the same entry.
+	got, err := ms.ReadFileMetadata(backslashPath)
+	require.NoError(t, err)
+	require.NotNil(t, got, "metadata written under a backslash path must be readable")
+	assert.Equal(t, int64(2048), got.FileSize)
+
+	// And via the normalized forward-slash path.
+	gotNorm, err := ms.ReadFileMetadata(normalizedPath)
+	require.NoError(t, err)
+	require.NotNil(t, gotNorm)
+	assert.Equal(t, int64(2048), gotNorm.FileSize)
 }
