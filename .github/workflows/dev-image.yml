@@ -141,6 +141,19 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
+      - name: Check DockerHub credentials
+        id: dockerhub
+        env:
+          DH_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+          DH_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -n "$DH_USER" ] && [ -n "$DH_TOKEN" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "DockerHub credentials not set; skipping DockerHub publish (GHCR only)." >&2
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Log in to Container Registry (GHCR)
         uses: docker/login-action@v4
         with:
@@ -149,6 +162,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Log in to Container Registry (DockerHub)
+        if: steps.dockerhub.outputs.enabled == 'true'
         uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -161,6 +175,15 @@ jobs:
       - name: Get timestamp
         id: timestamp
         run: echo "timestamp=$(TZ='America/New_York' date +'%Y%m%d-%H%M')" >> $GITHUB_OUTPUT
+      - name: Compute image tags
+        id: imgtags
+        run: |
+          TAGS="${{ env.REGISTRY }}/${{ steps.normalize.outputs.image_name }}:dev-amd64-temp"
+          if [ "${{ steps.dockerhub.outputs.enabled }}" = "true" ]; then
+            TAGS="${TAGS},${{ env.DOCKERHUB_IMAGE }}:dev-amd64-temp"
+          fi
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
+
       - name: Build and push AMD64 image
         uses: docker/build-push-action@v7
         with:
@@ -168,9 +191,7 @@ jobs:
           file: docker/Dockerfile.ci
           platforms: linux/amd64
           push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ steps.normalize.outputs.image_name }}:dev-amd64-temp
-            ${{ env.DOCKERHUB_IMAGE }}:dev-amd64-temp
+          tags: ${{ steps.imgtags.outputs.tags }}
           cache-from: type=gha,scope=dev-amd64
           cache-to: type=gha,mode=max,scope=dev-amd64
           provenance: false
@@ -199,6 +220,19 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
+      - name: Check DockerHub credentials
+        id: dockerhub
+        env:
+          DH_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+          DH_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -n "$DH_USER" ] && [ -n "$DH_TOKEN" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "DockerHub credentials not set; skipping DockerHub publish (GHCR only)." >&2
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Log in to Container Registry (GHCR)
         uses: docker/login-action@v4
         with:
@@ -207,6 +241,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Log in to Container Registry (DockerHub)
+        if: steps.dockerhub.outputs.enabled == 'true'
         uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -219,6 +254,15 @@ jobs:
       - name: Get timestamp
         id: timestamp
         run: echo "timestamp=$(TZ='America/New_York' date +'%Y%m%d-%H%M')" >> $GITHUB_OUTPUT
+      - name: Compute image tags
+        id: imgtags
+        run: |
+          TAGS="${{ env.REGISTRY }}/${{ steps.normalize.outputs.image_name }}:dev-arm64-temp"
+          if [ "${{ steps.dockerhub.outputs.enabled }}" = "true" ]; then
+            TAGS="${TAGS},${{ env.DOCKERHUB_IMAGE }}:dev-arm64-temp"
+          fi
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
+
       - name: Build and push ARM64 image
         uses: docker/build-push-action@v7
         with:
@@ -226,9 +270,7 @@ jobs:
           file: docker/Dockerfile.ci
           platforms: linux/arm64
           push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ steps.normalize.outputs.image_name }}:dev-arm64-temp
-            ${{ env.DOCKERHUB_IMAGE }}:dev-arm64-temp
+          tags: ${{ steps.imgtags.outputs.tags }}
           cache-from: type=gha,scope=dev-arm64
           cache-to: type=gha,mode=max,scope=dev-arm64
           provenance: false
@@ -245,6 +287,19 @@ jobs:
       contents: read
       packages: write
     steps:
+      - name: Check DockerHub credentials
+        id: dockerhub
+        env:
+          DH_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+          DH_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -n "$DH_USER" ] && [ -n "$DH_TOKEN" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "DockerHub credentials not set; skipping DockerHub publish (GHCR only)." >&2
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Log in to Container Registry (GHCR)
         uses: docker/login-action@v4
         with:
@@ -253,6 +308,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Log in to Container Registry (DockerHub)
+        if: steps.dockerhub.outputs.enabled == 'true'
         uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -280,6 +336,7 @@ jobs:
           docker manifest push ${IMAGE}:${TIMESTAMP_TAG}
 
       - name: Create and push manifest (DockerHub)
+        if: steps.dockerhub.outputs.enabled == 'true'
         run: |
           DH=${{ env.DOCKERHUB_IMAGE }}
           AMD64_IMAGE="${DH}:dev-amd64-temp"
