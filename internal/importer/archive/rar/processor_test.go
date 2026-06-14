@@ -111,6 +111,42 @@ func TestConvertAggregatedFilesToRarContentMultiPart(t *testing.T) {
 	require.Equal(t, int64(9), got.Segments[3].EndOffset)
 }
 
+// TestConvertAggregatedFilesWidthMismatch reproduces the real bug: the NZB volumes
+// are named with non-fixed-width padding (…part09.rar then …part010.rar), but
+// rardecode follows the set computing fixed-width names (…part10.rar). The part→NZB
+// mapping must resolve by volume number so every part's segments are attached, not
+// just the first 9 that happen to match exactly.
+func TestConvertAggregatedFilesWidthMismatch(t *testing.T) {
+	rp := &rarProcessor{}
+	base := "Movie.REMUX"
+	// NZB files: part01..part012 with the real-world padding (2 digits to 9, then 3).
+	rarFiles := []parser.ParsedFile{
+		{Filename: base + ".part09.rar", Segments: []*metapb.SegmentData{seg("s9", 100)}},
+		{Filename: base + ".part010.rar", Segments: []*metapb.SegmentData{seg("s10", 100)}},
+		{Filename: base + ".part011.rar", Segments: []*metapb.SegmentData{seg("s11", 100)}},
+	}
+	// rardecode reports fixed-width part paths (…part9/…part10/…part11).
+	ag := []rardecode.ArchiveFileInfo{{
+		Name:              "movie.mkv",
+		TotalUnpackedSize: 300,
+		TotalPackedSize:   300,
+		Parts: []rardecode.FilePartInfo{
+			{Path: base + ".part9.rar", DataOffset: 0, PackedSize: 100},
+			{Path: base + ".part10.rar", DataOffset: 0, PackedSize: 100},
+			{Path: base + ".part11.rar", DataOffset: 0, PackedSize: 100},
+		},
+	}}
+
+	out, err := rp.convertAggregatedFilesToRarContent(context.Background(), ag, rarFiles)
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	// All three parts must map despite the width mismatch — segment ids prove it.
+	require.Len(t, out[0].Segments, 3, "every volume's segments must be attached")
+	require.Equal(t, "s9", out[0].Segments[0].Id)
+	require.Equal(t, "s10", out[0].Segments[1].Id, "part10.rar must resolve to NZB part010.rar")
+	require.Equal(t, "s11", out[0].Segments[2].Id, "part11.rar must resolve to NZB part011.rar")
+}
+
 func TestPatchMissingSegment_NoPatchingNeeded(t *testing.T) {
 	segments := []*metapb.SegmentData{seg("s1", 768000), seg("s2", 768000)}
 	expectedSize := int64(1536000)

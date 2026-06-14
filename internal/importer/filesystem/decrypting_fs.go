@@ -44,6 +44,7 @@ type DecryptingFileSystem struct {
 	ctx         context.Context
 	poolManager pool.Manager
 	files       map[string]DecryptingFileEntry
+	volIndex    volumeIndex // number-keyed fallback for width-mismatch volume names
 	maxPrefetch int
 	readTimeout time.Duration
 }
@@ -57,14 +58,17 @@ func NewDecryptingFileSystem(
 	readTimeout time.Duration,
 ) *DecryptingFileSystem {
 	filesMap := make(map[string]DecryptingFileEntry, len(entries))
+	names := make([]string, 0, len(entries))
 	for _, e := range entries {
 		filesMap[e.Filename] = e
+		names = append(names, e.Filename)
 	}
 
 	return &DecryptingFileSystem{
 		ctx:         ctx,
 		poolManager: poolManager,
 		files:       filesMap,
+		volIndex:    newVolumeIndex(names),
 		maxPrefetch: maxPrefetch,
 		readTimeout: readTimeout,
 	}
@@ -75,6 +79,12 @@ func (dfs *DecryptingFileSystem) Open(name string) (fs.File, error) {
 	name = path.Clean(name)
 
 	entry, ok := dfs.files[name]
+	if !ok {
+		if actual, found := dfs.volIndex.resolve(name); found {
+			entry, ok = dfs.files[actual]
+			name = actual
+		}
+	}
 	if !ok {
 		return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrNotExist}
 	}
@@ -94,6 +104,11 @@ func (dfs *DecryptingFileSystem) Stat(p string) (os.FileInfo, error) {
 	p = filepath.Clean(p)
 
 	entry, ok := dfs.files[p]
+	if !ok {
+		if actual, found := dfs.volIndex.resolve(p); found {
+			entry, ok = dfs.files[actual]
+		}
+	}
 	if !ok {
 		return nil, &fs.PathError{Op: "stat", Path: p, Err: fs.ErrNotExist}
 	}

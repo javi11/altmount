@@ -3,14 +3,18 @@ package importer
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/javi11/altmount/internal/importer/multifile"
+	"github.com/javi11/altmount/internal/testsupport/fakepool"
 	"github.com/javi11/altmount/internal/testsupport/nzbbuild"
 	"github.com/javi11/altmount/internal/testsupport/par2gen"
 	"github.com/javi11/nntppool/v4"
-	"github.com/javi11/altmount/internal/testsupport/fakepool"
 )
 
 // partSize used to split fixtures into multiple NZB segments.
@@ -331,6 +335,81 @@ func TestImportBattery_RarMultiPart(t *testing.T) {
 	}
 
 	assertInnerFile(t, env, "/archive", entries)
+}
+
+// TestImportBattery_RarWidthMismatchVolumeNaming imports a multi-volume RAR whose
+// volumes use non-fixed-width numbering (archive.part01.rar … part09.rar, then
+// part010.rar …). rardecode follows the set by computing fixed-width names
+// (…part10.rar) that don't match the NZB's …part010.rar, so BOTH volume following
+// (UsenetFileSystem) and the part→segment mapping (convertAggregatedFilesToRarContent)
+// must resolve by volume number. Without that, only the first 9 volumes map and the
+// import fails with a segment-integrity error — so a passing import here proves the
+// whole pipeline handles the width mismatch end to end.
+func TestImportBattery_RarWidthMismatchVolumeNaming(t *testing.T) {
+	entries := loadManifest(t, "rar_widthmismatch")
+	env := newBatteryEnv(t)
+
+	matches, err := filepath.Glob(filepath.Join("testdata", "rar_widthmismatch", "archive.part*.rar"))
+	if err != nil {
+		t.Fatalf("glob fixtures: %v", err)
+	}
+	if len(matches) < 10 {
+		t.Fatalf("fixture must have >=10 volumes to cross the part09→part010 boundary, got %d", len(matches))
+	}
+
+	// Sort by parsed volume number so the NZB lists part01 first and IDs are stable.
+	volNum := func(p string) int {
+		b := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(p), "archive.part"), ".rar")
+		n, _ := strconv.Atoi(b)
+		return n
+	}
+	sort.Slice(matches, func(i, j int) bool { return volNum(matches[i]) < volNum(matches[j]) })
+
+	var files []nzbbuild.File
+	for _, m := range matches {
+		name := filepath.Base(m)
+		data := loadFixture(t, filepath.Join("rar_widthmismatch", name))
+		segs := env.registerContent(fmt.Sprintf("rar-wm-%03d", volNum(m)), data, archivePartSize, 1.0, nil)
+		files = append(files, nzbbuild.File{Subject: name, Segments: segs})
+	}
+
+	nzb := nzbbuild.Build(files...)
+	result, written, err := env.runImport(nzb, "archive")
+	if err != nil {
+		t.Fatalf("import failed (width-mismatch volume mapping regression): %v", err)
+	}
+	if result != "/archive" {
+		t.Errorf("result = %q, want /archive", result)
+	}
+	hasDirMarker := false
+	for _, p := range written {
+		if p == "DIR:/archive" {
+			hasDirMarker = true
+		}
+	}
+	if !hasDirMarker {
+		t.Errorf("writtenPaths has no DIR:/archive marker; paths: %v", written)
+	}
+
+	assertInnerFile(t, env, "/archive", entries)
+
+	// Explicit full-coverage assertion: every volume's segments must be attached, so
+	// the summed usable segment bytes must cover the whole inner file. Pre-fix this is
+	// only ~9 volumes' worth.
+	want := int64(entries[0].Size)
+	var covered int64
+	for _, name := range env.listDir("/archive") {
+		meta := env.readMeta("/archive/" + name)
+		if meta.FileSize != want {
+			continue
+		}
+		for _, s := range meta.SegmentData {
+			covered += s.EndOffset - s.StartOffset + 1
+		}
+	}
+	if covered < want {
+		t.Errorf("segment coverage %d < file size %d — not all volumes mapped", covered, want)
+	}
 }
 
 // TestImportBattery_SevenZipSingle verifies import of a single-volume 7z archive.

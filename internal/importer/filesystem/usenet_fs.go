@@ -38,6 +38,7 @@ type UsenetFileSystem struct {
 	ctx             context.Context
 	poolManager     pool.Manager
 	files           map[string]parser.ParsedFile
+	volIndex        volumeIndex // number-keyed fallback for width-mismatch volume names
 	maxPrefetch     int
 	progressTracker *progress.Tracker
 	filesCompleted  int32 // atomic counter
@@ -54,14 +55,17 @@ type UsenetFileInfo struct {
 // NewUsenetFileSystem creates a new filesystem for accessing RAR parts from Usenet
 func NewUsenetFileSystem(ctx context.Context, poolManager pool.Manager, files []parser.ParsedFile, maxPrefetch int, progressTracker *progress.Tracker, readTimeout time.Duration) *UsenetFileSystem {
 	filesMap := make(map[string]parser.ParsedFile)
+	names := make([]string, 0, len(files))
 	for _, file := range files {
 		filesMap[file.Filename] = file
+		names = append(names, file.Filename)
 	}
 
 	return &UsenetFileSystem{
 		ctx:             ctx,
 		poolManager:     poolManager,
 		files:           filesMap,
+		volIndex:        newVolumeIndex(names),
 		maxPrefetch:     maxPrefetch,
 		progressTracker: progressTracker,
 		filesCompleted:  0,
@@ -76,8 +80,16 @@ func (ufs *UsenetFileSystem) Open(name string) (fs.File, error) {
 
 	ctx := slogutil.With(ufs.ctx, "file_name", name)
 
-	// Find the corresponding RAR file
+	// Find the corresponding RAR file. Fall back to number-keyed resolution so a
+	// volume requested with a different padding width (rardecode computes e.g.
+	// "…part10.rar" while the real file is "…part010.rar") still resolves.
 	file, ok := ufs.files[name]
+	if !ok {
+		if actual, found := ufs.volIndex.resolve(name); found {
+			file, ok = ufs.files[actual]
+			name = actual
+		}
+	}
 	if !ok {
 		return nil, &fs.PathError{
 			Op:   "open",
@@ -105,8 +117,14 @@ func (ufs *UsenetFileSystem) Open(name string) (fs.File, error) {
 func (ufs *UsenetFileSystem) Stat(path string) (os.FileInfo, error) {
 	path = filepath.Clean(path)
 
-	// Find the corresponding RAR file
+	// Find the corresponding RAR file, with number-keyed fallback for volumes
+	// requested under a different padding width (see Open).
 	file, ok := ufs.files[path]
+	if !ok {
+		if actual, found := ufs.volIndex.resolve(path); found {
+			file, ok = ufs.files[actual]
+		}
+	}
 	if !ok {
 		return nil, &fs.PathError{
 			Op:   "stat",
