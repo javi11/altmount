@@ -28,6 +28,13 @@ func (c *Coordinator) ScheduleHealthCheck(ctx context.Context, item *database.Im
 		return nil // Health checks not configured
 	}
 
+	// Health checking disabled: don't queue immediate checks or resolve repairs on
+	// import — both are health-system concerns. Records queued here would only sit
+	// as pending forever since the worker refuses to run when disabled.
+	if !c.configGetter().GetHealthEnabled() {
+		return nil
+	}
+
 	// Expand directory entries into per-file paths, and fall back to the
 	// resulting path for legacy callers (single-file imports resolve to the
 	// same thing).
