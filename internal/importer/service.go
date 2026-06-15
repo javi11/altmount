@@ -986,7 +986,7 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 	compress := cfg.ShouldCompressNzb()
 	ext := nzbfile.GzExtension
 	if !compress {
-		ext = ".nzb"
+		ext = nzbfile.PlainExtension
 	}
 
 	base := nzbtrim.TrimNzbExtension(sanitizeFilename(filepath.Base(item.NzbPath)))
