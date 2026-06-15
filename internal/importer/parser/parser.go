@@ -347,8 +347,18 @@ func (p *Parser) parseFile(ctx context.Context, meta map[string]string, nzbFilen
 
 		err := p.normalizeSegmentSizesWithYenc(ctx, info.NzbFile.Segments, cachedFirstSegment, nzbStandardPartSize, notFoundIDs)
 		if err != nil {
-			// Log the error but continue with original segment sizes
-			// This ensures processing continues even if yEnc header fetching fails
+			if stderrors.Is(err, nntppool.ErrArticleNotFound) {
+				// A segment required to determine the real (decoded) sizes is missing
+				// from every provider. Importing the file with the NZB's un-normalized
+				// (yEnc-encoded) byte counts would compute wrong segment offsets and
+				// produce a corrupt media file (#681), so skip the whole file. The
+				// caller's aggregation loop logs and continues, so the rest of the
+				// release still imports normally.
+				return nil, fmt.Errorf("failed to normalize segment sizes for %q: %w", info.Filename, err)
+			}
+			// Any other normalization failure (e.g. a present but non-yEnc article that
+			// yields no part size) is non-fatal: the NZB-declared segment sizes remain
+			// the best available source. Log and continue with them, as before.
 			p.log.WarnContext(ctx, "Failed to normalize segment sizes with yEnc headers",
 				"error", err,
 				"segments", len(info.NzbFile.Segments))
@@ -1075,7 +1085,7 @@ func (p *Parser) normalizeSegmentSizesWithYenc(ctx context.Context, segments []n
 	fileSize := firstSegment.FileSize
 	if firstPartSize <= 0 {
 		if _, known404 := notFoundIDs[segments[0].ID]; known404 {
-			return fmt.Errorf("first segment %s is known not found, skipping yEnc normalization", segments[0].ID)
+			return fmt.Errorf("first segment %s is known not found: %w", segments[0].ID, nntppool.ErrArticleNotFound)
 		}
 		// Fetch PartSize from first segment if not in cache. The same headers carry the
 		// total file size, which enables last-part derivation below.
@@ -1104,7 +1114,7 @@ func (p *Parser) normalizeSegmentSizesWithYenc(ctx context.Context, segments []n
 		}
 
 		if _, known404 := notFoundIDs[segments[1].ID]; known404 {
-			return fmt.Errorf("second segment %s is known not found, skipping yEnc normalization", segments[1].ID)
+			return fmt.Errorf("second segment %s is known not found: %w", segments[1].ID, nntppool.ErrArticleNotFound)
 		}
 		// Fetch PartSize from last segment
 		lastPartHeaders, err := p.fetchYencHeaders(ctx, segments[1], nil)
@@ -1129,10 +1139,10 @@ func (p *Parser) normalizeSegmentSizesWithYenc(ctx context.Context, segments []n
 		// Neither a shared part size nor a total file size: both the second and last
 		// segments must be fetched — do it in parallel as before.
 		if _, known404 := notFoundIDs[segments[1].ID]; known404 {
-			return fmt.Errorf("second segment %s is known not found, skipping yEnc normalization", segments[1].ID)
+			return fmt.Errorf("second segment %s is known not found: %w", segments[1].ID, nntppool.ErrArticleNotFound)
 		}
 		if _, known404 := notFoundIDs[segments[lastSegmentIndex].ID]; known404 {
-			return fmt.Errorf("last segment %s is known not found, skipping yEnc normalization", segments[lastSegmentIndex].ID)
+			return fmt.Errorf("last segment %s is known not found: %w", segments[lastSegmentIndex].ID, nntppool.ErrArticleNotFound)
 		}
 		var secondPartHeaders, lastPartHeaders nntppool.YEncMeta
 		g, gctx := errgroup.WithContext(ctx)
@@ -1161,7 +1171,7 @@ func (p *Parser) normalizeSegmentSizesWithYenc(ctx context.Context, segments []n
 		if standardPartSize <= 0 {
 			// No NZB-wide representative — fetch this file's second segment once.
 			if _, known404 := notFoundIDs[segments[1].ID]; known404 {
-				return fmt.Errorf("second segment %s is known not found, skipping yEnc normalization", segments[1].ID)
+				return fmt.Errorf("second segment %s is known not found: %w", segments[1].ID, nntppool.ErrArticleNotFound)
 			}
 			h, err := p.fetchYencHeaders(ctx, segments[1], nil)
 			if err != nil {
@@ -1174,7 +1184,7 @@ func (p *Parser) normalizeSegmentSizesWithYenc(ctx context.Context, segments []n
 			lastPartSize = last
 		} else {
 			if _, known404 := notFoundIDs[segments[lastSegmentIndex].ID]; known404 {
-				return fmt.Errorf("last segment %s is known not found, skipping yEnc normalization", segments[lastSegmentIndex].ID)
+				return fmt.Errorf("last segment %s is known not found: %w", segments[lastSegmentIndex].ID, nntppool.ErrArticleNotFound)
 			}
 			h, err := p.fetchYencHeaders(ctx, segments[lastSegmentIndex], nil)
 			if err != nil {
