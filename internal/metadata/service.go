@@ -79,29 +79,44 @@ func (ms *MetadataService) truncateFilename(filename string) string {
 // A backslash (0x5C) is a legal byte in a Linux filename, but a file whose name
 // contains one deadlocks the FUSE page-cache layer on open() — the kernel hangs
 // indefinitely in invalidate_inode_pages2 (folio_wait_bit_common) and the calling
-// process goes uninterruptible D-state, recoverable only by rebooting the host.
-// See issue #660. The fix is to never persist or serve such a path: every metadata
-// path flows through this service, so normalizing here closes the gap left by the
-// per-extractor normalization (RAR/7zip/filesystem). Forward slash matches the
-// convention already used by nzbfilesystem.normalizePath so that metadata writes
-// and database lookups resolve to the same key.
+// process goes uninterruptible D-state, recoverable only by rebooting the host
+// (issue #660). Forward slash matches the convention already used by
+// nzbfilesystem.normalizePath so metadata writes and database lookups resolve to
+// the same key.
 func normalizeVirtualPath(virtualPath string) string {
 	return strings.ReplaceAll(virtualPath, "\\", "/")
+}
+
+// metaFilePath returns the absolute on-disk path of the .meta file for a virtual
+// path. It is the single chokepoint for file-path construction: backslash
+// normalization (issue #660) and filename truncation both happen here, so no
+// caller — current or future — can persist or serve a backslash or an over-long
+// name.
+func (ms *MetadataService) metaFilePath(virtualPath string) string {
+	virtualPath = normalizeVirtualPath(virtualPath)
+	dir := filepath.Join(ms.rootPath, filepath.Dir(virtualPath))
+	name := ms.truncateFilename(filepath.Base(virtualPath))
+	return filepath.Join(dir, name+".meta")
+}
+
+// metaDirPath returns the absolute on-disk directory path for a virtual path,
+// folding backslashes so a directory can never be created or served with one.
+func (ms *MetadataService) metaDirPath(virtualPath string) string {
+	return filepath.Join(ms.rootPath, normalizeVirtualPath(virtualPath))
 }
 
 // WriteFileMetadata writes file metadata to disk
 func (ms *MetadataService) WriteFileMetadata(virtualPath string, metadata *metapb.FileMetadata) error {
 	virtualPath = normalizeVirtualPath(virtualPath)
-	// Ensure the directory exists
-	metadataDir := filepath.Join(ms.rootPath, filepath.Dir(virtualPath))
+
+	// Build the on-disk path through the single chokepoint, then ensure its
+	// directory exists.
+	metadataPath := ms.metaFilePath(virtualPath)
+	metadataDir := filepath.Dir(metadataPath)
 	if err := os.MkdirAll(metadataDir, 0755); err != nil {
 		return fmt.Errorf("failed to create metadata directory: %w", err)
 	}
-
-	// Create metadata file path (filename + .meta extension)
-	filename := filepath.Base(virtualPath)
-	truncatedFilename := ms.truncateFilename(filename)
-	metadataPath := filepath.Join(metadataDir, truncatedFilename+".meta")
+	truncatedFilename := ms.truncateFilename(filepath.Base(virtualPath))
 
 	// Sidecar ID handling for compatibility
 	// We don't write NzbdavId to the proto to maintain compatibility with versions that don't have field 14.
@@ -162,10 +177,7 @@ func (ms *MetadataService) WriteFileMetadata(virtualPath string, metadata *metap
 // subsequent Readdir/Stat calls are fast without a disk read.
 func (ms *MetadataService) ReadFileMetadata(virtualPath string) (*metapb.FileMetadata, error) {
 	virtualPath = normalizeVirtualPath(virtualPath)
-	// Create metadata file path
-	filename := filepath.Base(virtualPath)
-	metadataDir := filepath.Join(ms.rootPath, filepath.Dir(virtualPath))
-	metadataPath := filepath.Join(metadataDir, filename+".meta")
+	metadataPath := ms.metaFilePath(virtualPath)
 
 	// Read file
 	data, err := os.ReadFile(metadataPath)
@@ -225,15 +237,14 @@ const liteScanBytes = 4096
 // case the partial buffer doesn't cover the lite fields.
 func (ms *MetadataService) ReadFileMetadataLite(virtualPath string) (*FileMetadataLite, error) {
 	virtualPath = normalizeVirtualPath(virtualPath)
+
 	// Check lite cache first
 	if cached, ok := ms.liteCache.Get(virtualPath); ok {
 		return cached, nil
 	}
 
 	// Cache miss — read the head of the file and scan wire-format fields.
-	filename := filepath.Base(virtualPath)
-	metadataDir := filepath.Join(ms.rootPath, filepath.Dir(virtualPath))
-	metadataPath := filepath.Join(metadataDir, filename+".meta")
+	metadataPath := ms.metaFilePath(virtualPath)
 
 	f, err := os.Open(metadataPath)
 	if err != nil {
@@ -330,9 +341,8 @@ func parseLiteFields(buf []byte) (*FileMetadataLite, bool) {
 // partial-read scan in ReadFileMetadataLite fails to locate the lite
 // fields within liteScanBytes.
 func (ms *MetadataService) readFileMetadataLiteFull(virtualPath string) (*FileMetadataLite, error) {
-	filename := filepath.Base(virtualPath)
-	metadataDir := filepath.Join(ms.rootPath, filepath.Dir(virtualPath))
-	metadataPath := filepath.Join(metadataDir, filename+".meta")
+	virtualPath = normalizeVirtualPath(virtualPath)
+	metadataPath := ms.metaFilePath(virtualPath)
 
 	data, err := os.ReadFile(metadataPath)
 	if err != nil {
@@ -358,28 +368,19 @@ func (ms *MetadataService) readFileMetadataLiteFull(virtualPath string) (*FileMe
 
 // FileExists checks if a metadata file exists for the given virtual path
 func (ms *MetadataService) FileExists(virtualPath string) bool {
-	virtualPath = normalizeVirtualPath(virtualPath)
-	filename := filepath.Base(virtualPath)
-	truncatedFilename := ms.truncateFilename(filename)
-	metadataDir := filepath.Join(ms.rootPath, filepath.Dir(virtualPath))
-	metadataPath := filepath.Join(metadataDir, truncatedFilename+".meta")
-
-	_, err := os.Stat(metadataPath)
+	_, err := os.Stat(ms.metaFilePath(virtualPath))
 	return err == nil
 }
 
 // DirectoryExists checks if a metadata directory exists
 func (ms *MetadataService) DirectoryExists(virtualPath string) bool {
-	virtualPath = normalizeVirtualPath(virtualPath)
-	metadataDir := filepath.Join(ms.rootPath, virtualPath)
-	info, err := os.Stat(metadataDir)
+	info, err := os.Stat(ms.metaDirPath(virtualPath))
 	return err == nil && info.IsDir()
 }
 
 // ListDirectory lists all metadata files in a directory
 func (ms *MetadataService) ListDirectory(virtualPath string) ([]string, error) {
-	virtualPath = normalizeVirtualPath(virtualPath)
-	metadataDir := filepath.Join(ms.rootPath, virtualPath)
+	metadataDir := ms.metaDirPath(virtualPath)
 
 	entries, err := os.ReadDir(metadataDir)
 	if err != nil {
@@ -405,8 +406,7 @@ func (ms *MetadataService) ListDirectory(virtualPath string) ([]string, error) {
 // file names from a single os.ReadDir call. This is used by Readdir to avoid
 // two separate directory reads.
 func (ms *MetadataService) ListDirectoryAll(virtualPath string) (dirs []fs.FileInfo, fileNames []string, err error) {
-	virtualPath = normalizeVirtualPath(virtualPath)
-	metadataDir := filepath.Join(ms.rootPath, virtualPath)
+	metadataDir := ms.metaDirPath(virtualPath)
 
 	entries, err := os.ReadDir(metadataDir)
 	if err != nil {
@@ -496,17 +496,16 @@ func (ms *MetadataService) UpdateFileStatus(virtualPath string, status metapb.Fi
 
 // DeleteFileMetadata deletes a metadata file
 func (ms *MetadataService) DeleteFileMetadata(virtualPath string) error {
-	virtualPath = normalizeVirtualPath(virtualPath)
 	return ms.DeleteFileMetadataWithSourceNzb(context.Background(), virtualPath, false)
 }
 
 // DeleteFileMetadataWithSourceNzb deletes a metadata file and optionally its source NZB
 func (ms *MetadataService) DeleteFileMetadataWithSourceNzb(ctx context.Context, virtualPath string, deleteSourceNzb bool) error {
+	virtualPath = normalizeVirtualPath(virtualPath)
 	ms.liteCache.Remove(virtualPath)
 
-	filename := filepath.Base(virtualPath)
-	metadataDir := filepath.Join(ms.rootPath, filepath.Dir(virtualPath))
-	metadataPath := filepath.Join(metadataDir, filename+".meta")
+	metadataPath := ms.metaFilePath(virtualPath)
+	metadataDir := filepath.Dir(metadataPath)
 
 	// If we need to delete the source NZB, read the metadata first
 	var sourceNzbPath string
@@ -552,6 +551,7 @@ func (ms *MetadataService) DeleteFileMetadataWithSourceNzb(ctx context.Context, 
 
 // DeleteDirectory deletes a metadata directory and all its contents
 func (ms *MetadataService) DeleteDirectory(virtualPath string) error {
+	virtualPath = normalizeVirtualPath(virtualPath)
 	// Purge all cached entries under this directory
 	prefix := virtualPath + string(filepath.Separator)
 	for _, key := range ms.liteCache.Keys() {
@@ -560,7 +560,7 @@ func (ms *MetadataService) DeleteDirectory(virtualPath string) error {
 		}
 	}
 
-	metadataDir := filepath.Join(ms.rootPath, virtualPath)
+	metadataDir := ms.metaDirPath(virtualPath)
 
 	// HARD SAFETY: Never delete the root metadata path
 	cleanMetadataDir := filepath.Clean(metadataDir)
@@ -579,16 +579,14 @@ func (ms *MetadataService) DeleteDirectory(virtualPath string) error {
 // RenameFileMetadata atomically renames a metadata file (and its .id sidecar) from oldVirtualPath to newVirtualPath.
 // Uses os.Rename for atomicity on the same filesystem, falling back to read-write-delete for cross-device moves.
 func (ms *MetadataService) RenameFileMetadata(oldVirtualPath, newVirtualPath string) error {
+	oldVirtualPath = normalizeVirtualPath(oldVirtualPath)
+	newVirtualPath = normalizeVirtualPath(newVirtualPath)
 	ms.liteCache.Remove(oldVirtualPath)
 	ms.liteCache.Remove(newVirtualPath)
 
-	oldFilename := filepath.Base(oldVirtualPath)
-	oldDir := filepath.Join(ms.rootPath, filepath.Dir(oldVirtualPath))
-	oldMetaPath := filepath.Join(oldDir, oldFilename+".meta")
-
-	newFilename := filepath.Base(newVirtualPath)
-	newDir := filepath.Join(ms.rootPath, filepath.Dir(newVirtualPath))
-	newMetaPath := filepath.Join(newDir, newFilename+".meta")
+	oldMetaPath := ms.metaFilePath(oldVirtualPath)
+	newMetaPath := ms.metaFilePath(newVirtualPath)
+	newDir := filepath.Dir(newMetaPath)
 
 	// Ensure destination directory exists
 	if err := os.MkdirAll(newDir, 0755); err != nil {
@@ -658,27 +656,22 @@ func copyAndRemoveFile(src, dst string) error {
 
 // GetMetadataFilePath returns the filesystem path for a metadata file
 func (ms *MetadataService) GetMetadataFilePath(virtualPath string) string {
-	virtualPath = normalizeVirtualPath(virtualPath)
-	filename := filepath.Base(virtualPath)
-	metadataDir := filepath.Join(ms.rootPath, filepath.Dir(virtualPath))
-	return filepath.Join(metadataDir, filename+".meta")
+	return ms.metaFilePath(virtualPath)
 }
 
 // GetMetadataDirectoryPath returns the filesystem path for a metadata directory
 func (ms *MetadataService) GetMetadataDirectoryPath(virtualPath string) string {
-	virtualPath = normalizeVirtualPath(virtualPath)
-	return filepath.Join(ms.rootPath, virtualPath)
+	return ms.metaDirPath(virtualPath)
 }
 
 func (ms *MetadataService) CreateDirectory(name string) error {
-	name = normalizeVirtualPath(name)
-	return os.MkdirAll(filepath.Join(ms.rootPath, name), 0755)
+	return os.MkdirAll(ms.metaDirPath(name), 0755)
 }
 
 // CleanupEmptyDirectories recursively removes empty directories under the given virtual path.
 // Uses a bottom-up approach to ensure parent directories are also removed if they become empty.
 func (ms *MetadataService) CleanupEmptyDirectories(virtualPath string, protected []string) error {
-	fullPath := filepath.Join(ms.rootPath, virtualPath)
+	fullPath := ms.metaDirPath(virtualPath)
 
 	// Check if path exists
 	if _, err := os.Stat(fullPath); os.IsNotExist(err) {
@@ -737,9 +730,11 @@ func (ms *MetadataService) cleanupEmptyDirsRecursive(path string, protected []st
 
 // MoveToCorrupted moves a metadata file to a special corrupted directory for safety
 func (ms *MetadataService) MoveToCorrupted(ctx context.Context, virtualPath string) error {
+	virtualPath = normalizeVirtualPath(virtualPath)
 	ms.liteCache.Remove(virtualPath)
 
-	// Normalize path and remove leading slashes to ensure it joins correctly
+	// Remove leading slashes to ensure it joins correctly. virtualPath is already
+	// backslash-normalized above, so the persisted/served name can't contain one.
 	cleanPath := filepath.FromSlash(strings.TrimPrefix(virtualPath, "/"))
 	dir := filepath.Dir(cleanPath)
 	filename := filepath.Base(cleanPath)

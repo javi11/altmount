@@ -258,10 +258,26 @@ func TestReadFileMetadataLite_FallsBackOnLongHeader(t *testing.T) {
 	assert.Equal(t, metapb.FileStatus_FILE_STATUS_HEALTHY, lite.Status)
 }
 
+// assertNoBackslashPersisted walks the metadata root and fails if any persisted
+// file or directory name contains a backslash. A backslash byte in a name is the
+// #660 trigger that deadlocks the FUSE page-cache layer on open().
+func assertNoBackslashPersisted(t *testing.T, root string) {
+	t.Helper()
+	err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		assert.NotContains(t, info.Name(), "\\",
+			"metadata entry must not be persisted with a backslash: %s", path)
+		return nil
+	})
+	require.NoError(t, err)
+}
+
 // TestWriteFileMetadata_NormalizesBackslashPath guards against issue #660: a
-// filename containing a backslash deadlocks the FUSE page-cache layer on open()
-// (invalidate_inode_pages2). The metadata service must never persist or serve a
-// backslash path, and a read using the original backslash form must still resolve.
+// filename containing a backslash deadlocks the FUSE page-cache layer on open().
+// The metadata service must never persist or serve a backslash path, and a read
+// using the original backslash form must still resolve.
 func TestWriteFileMetadata_NormalizesBackslashPath(t *testing.T) {
 	root := t.TempDir()
 	ms := NewMetadataService(root)
@@ -276,16 +292,7 @@ func TestWriteFileMetadata_NormalizesBackslashPath(t *testing.T) {
 	)
 	require.NoError(t, ms.WriteFileMetadata(backslashPath, meta))
 
-	// No persisted file or directory under the metadata root may contain a backslash.
-	err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		assert.NotContains(t, info.Name(), "\\",
-			"metadata entry must not be persisted with a backslash: %s", path)
-		return nil
-	})
-	require.NoError(t, err)
+	assertNoBackslashPersisted(t, root)
 
 	// The .meta file lives at the normalized location.
 	require.FileExists(t, ms.GetMetadataFilePath(normalizedPath))
@@ -301,4 +308,58 @@ func TestWriteFileMetadata_NormalizesBackslashPath(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, gotNorm)
 	assert.Equal(t, int64(2048), gotNorm.FileSize)
+}
+
+// TestRenameFileMetadata_NormalizesBackslashPath guards the rename path: renaming
+// a metadata file to a backslash-bearing virtual path must not persist a backslash
+// name (which would re-introduce #660), and the renamed entry must resolve via the
+// original backslash form.
+func TestRenameFileMetadata_NormalizesBackslashPath(t *testing.T) {
+	root := t.TempDir()
+	ms := NewMetadataService(root)
+
+	srcPath := "movies/old.mkv"
+	backslashDst := "movies/Release\\new.mkv"
+	normalizedDst := "movies/Release/new.mkv"
+
+	meta := ms.CreateFileMetadata(
+		4096, "test.nzb", metapb.FileStatus_FILE_STATUS_HEALTHY,
+		nil, metapb.Encryption_NONE, "", "", nil, nil, 0, nil, "rename12345",
+	)
+	require.NoError(t, ms.WriteFileMetadata(srcPath, meta))
+
+	require.NoError(t, ms.RenameFileMetadata(srcPath, backslashDst))
+
+	assertNoBackslashPersisted(t, root)
+
+	assert.NoFileExists(t, ms.GetMetadataFilePath(srcPath))
+	require.FileExists(t, ms.GetMetadataFilePath(normalizedDst))
+
+	// Resolvable via both the backslash and normalized forms.
+	got, err := ms.ReadFileMetadata(backslashDst)
+	require.NoError(t, err)
+	require.NotNil(t, got, "renamed metadata must be readable via the backslash path")
+	assert.Equal(t, int64(4096), got.FileSize)
+}
+
+// TestDeleteFileMetadataWithSourceNzb_NormalizesBackslashPath guards the delete
+// path: a direct call with a backslash virtual path must locate and remove the
+// (normalized) persisted .meta file rather than silently missing it.
+func TestDeleteFileMetadataWithSourceNzb_NormalizesBackslashPath(t *testing.T) {
+	root := t.TempDir()
+	ms := NewMetadataService(root)
+
+	backslashPath := "movies/Release\\file.mkv"
+	normalizedPath := "movies/Release/file.mkv"
+
+	meta := ms.CreateFileMetadata(
+		1024, "test.nzb", metapb.FileStatus_FILE_STATUS_HEALTHY,
+		nil, metapb.Encryption_NONE, "", "", nil, nil, 0, nil, "delete12345",
+	)
+	require.NoError(t, ms.WriteFileMetadata(backslashPath, meta))
+	require.FileExists(t, ms.GetMetadataFilePath(normalizedPath))
+
+	require.NoError(t, ms.DeleteFileMetadataWithSourceNzb(context.Background(), backslashPath, false))
+
+	assert.NoFileExists(t, ms.GetMetadataFilePath(normalizedPath))
 }
