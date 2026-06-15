@@ -56,6 +56,10 @@ func setupSchedulerTest(t *testing.T, mutate ...func(*config.Config)) (*Coordina
 	ms := metadata.NewMetadataService(t.TempDir())
 
 	cfg := config.DefaultConfig()
+	// Health checking is disabled by default; enable it so the scheduling path runs.
+	// (Tests that exercise the disabled guard override this via a mutator below.)
+	healthEnabled := true
+	cfg.Health.Enabled = &healthEnabled
 	// Directory repair resolution is opt-in (defaults to false); enable it so the
 	// stale-repair cleanup path is exercised.
 	resolveRepairs := true
@@ -165,6 +169,41 @@ func TestScheduleHealthCheck_PlainPathsUnchanged(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, h)
 	assert.Equal(t, database.HealthStatusPending, h.Status)
+}
+
+// TestScheduleHealthCheck_DisabledQueuesNothing verifies that with health checking
+// disabled in config, an import schedules no health records and does not resolve
+// pending repairs — the whole health subsystem is off, so records queued here would
+// only sit as "pending" forever (the worker refuses to run when disabled).
+func TestScheduleHealthCheck_DisabledQueuesNothing(t *testing.T) {
+	coordinator, ms, repo, db := setupSchedulerTest(t, func(cfg *config.Config) {
+		disabled := false
+		cfg.Health.Enabled = &disabled
+	})
+	ctx := context.Background()
+
+	filePath := "/tv/Disabled.S01E01.mkv"
+	writeTestMetadata(t, ms, filePath)
+
+	// A stale repair record that would normally be resolved by an import.
+	_, err := db.Exec(`
+		INSERT INTO file_health (file_path, status, repair_retry_count, max_repair_retries)
+		VALUES ('tv/old-broken.mkv', 'repair_triggered', 1, 3)
+	`)
+	require.NoError(t, err)
+
+	err = coordinator.ScheduleHealthCheck(ctx, nil, filePath, []string{filePath})
+	require.NoError(t, err)
+
+	// No health record must be queued for the imported file.
+	h, err := repo.GetFileHealth(ctx, "tv/Disabled.S01E01.mkv")
+	require.NoError(t, err)
+	assert.Nil(t, h, "no health record may be queued when health checking is disabled")
+
+	// Repair resolution must be skipped too — the stale record stays untouched.
+	stale, err := repo.GetFileHealth(ctx, "tv/old-broken.mkv")
+	require.NoError(t, err)
+	require.NotNil(t, stale, "pending repair must not be resolved when health checking is disabled")
 }
 
 // TestScheduleHealthCheck_SkipsSidecarsUnderSymlinkStrategy verifies that under
