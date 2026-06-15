@@ -71,6 +71,12 @@ func migrateNzbsToGz(ctx context.Context, nzbDir, sentinelPath string, updater f
 // runNzbCompressionMigration is a one-time background task that compresses legacy
 // plain .nzb files in the persistent .nzbs/ directory to .nzb.gz.
 func (s *Service) runNzbCompressionMigration(ctx context.Context) {
+	// Skip when compression is disabled: the user wants plain .nzb files, so don't
+	// rewrite them to .nzb.gz behind their back.
+	if !s.configGetter().ShouldCompressNzb() {
+		return
+	}
+
 	nzbDir := s.GetNzbFolder()
 	sentinelPath := filepath.Join(nzbDir, migrationSentinelFile)
 

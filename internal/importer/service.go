@@ -680,6 +680,19 @@ func uniqueFailedNzbPath(failedDir, srcNzbPath string, itemID int64) string {
 	return newPath
 }
 
+// persistentNzbPath returns the destination path for a successfully imported NZB inside
+// nzbDir. It prefers the clean filename directly in nzbDir and only namespaces it with the
+// queue item ID as a filename prefix (nzbDir/<id>-<name><ext>) when the plain destination is
+// reported taken by isTaken, guaranteeing a unique path for the UNIQUE import_queue.nzb_path
+// column. Mirrors uniqueFailedNzbPath.
+func persistentNzbPath(nzbDir, baseName, ext string, itemID int64, isTaken func(string) bool) string {
+	plain := filepath.Join(nzbDir, baseName+ext)
+	if !isTaken(plain) {
+		return plain
+	}
+	return filepath.Join(nzbDir, fmt.Sprintf("%d-%s%s", itemID, baseName, ext))
+}
+
 // sanitizeFilename replaces invalid characters in filenames
 func sanitizeFilename(name string) string {
 	return strings.ReplaceAll(name, "/", "_")
@@ -960,41 +973,71 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 		return nil
 	}
 
-	// Store each NZB in a per-ID subfolder to guarantee uniqueness without
-	// polluting the user-visible filename (which is exposed via the SABnzbd
-	// history API and parsed by Sonarr/Radarr — a trailing `_<id>` would
-	// break their release-group parser).
 	if item.ID == 0 {
 		return fmt.Errorf("cannot persist NZB without queue ID (row must be inserted first)")
 	}
-	nzbDir = filepath.Join(nzbDir, strconv.FormatInt(item.ID, 10))
+
 	if err := os.MkdirAll(nzbDir, 0755); err != nil {
 		return fmt.Errorf("failed to create persistent NZB directory: %w", err)
 	}
+
+	// Pick the destination extension based on the compression setting: gzip-compressed
+	// NZBs keep the .nzb.gz extension, plain NZBs keep .nzb so they read transparently.
+	compress := cfg.ShouldCompressNzb()
+	ext := nzbfile.GzExtension
+	if !compress {
+		ext = nzbfile.PlainExtension
+	}
+
 	base := nzbtrim.TrimNzbExtension(sanitizeFilename(filepath.Base(item.NzbPath)))
-	newPath := filepath.Join(nzbDir, base+nzbfile.GzExtension)
 
-	s.log.DebugContext(ctx, "Moving and compressing NZB to persistent storage", "old_path", item.NzbPath, "new_path", newPath)
-
-	// Try rename to a temp path first (works only on same filesystem), then compress.
-	// For cross-device moves, compress directly from source.
-	tmpPath := newPath + ".tmp"
-	err := os.Rename(item.NzbPath, tmpPath)
-	if err == nil {
-		// Same filesystem: compress the tmp file to the final .nzb.gz path
-		if compErr := nzbfile.Compress(tmpPath, newPath); compErr != nil {
-			_ = os.Rename(tmpPath, item.NzbPath) // attempt to restore on failure
-			return fmt.Errorf("failed to compress NZB: %w", compErr)
+	// Save directly into the category folder using the clean filename. Only when that
+	// destination is already taken do we namespace it with the queue item ID as a filename
+	// prefix (<id>-<name>) — this drops the numeric folder in the common case while still
+	// guaranteeing a unique path on collision for the UNIQUE import_queue.nzb_path column.
+	taken := func(p string) bool {
+		if _, err := os.Stat(p); err == nil {
+			return true
 		}
-		_ = os.Remove(tmpPath)
+		// DeleteCompletedNzb can remove the file while leaving the UNIQUE nzb_path row,
+		// so also treat a path owned by a different queue item as taken.
+		if existing, err := s.database.Repository.GetQueueItemByNzbPath(ctx, p); err == nil && existing != nil && existing.ID != item.ID {
+			return true
+		}
+		return false
+	}
+	newPath := persistentNzbPath(nzbDir, base, ext, item.ID, taken)
+
+	s.log.DebugContext(ctx, "Moving NZB to persistent storage", "old_path", item.NzbPath, "new_path", newPath, "compress", compress)
+
+	if compress {
+		// Try rename to a temp path first (works only on same filesystem), then compress.
+		// For cross-device moves, compress directly from source.
+		tmpPath := newPath + ".tmp"
+		err := os.Rename(item.NzbPath, tmpPath)
+		if err == nil {
+			// Same filesystem: compress the tmp file to the final .nzb.gz path
+			if compErr := nzbfile.Compress(tmpPath, newPath); compErr != nil {
+				_ = os.Rename(tmpPath, item.NzbPath) // attempt to restore on failure
+				return fmt.Errorf("failed to compress NZB: %w", compErr)
+			}
+			_ = os.Remove(tmpPath)
+		} else {
+			// Cross-device: compress directly from source to destination
+			s.log.DebugContext(ctx, "Rename failed, compressing directly from source", "error", err, "src", item.NzbPath, "dst", newPath)
+			if compErr := nzbfile.Compress(item.NzbPath, newPath); compErr != nil {
+				return fmt.Errorf("failed to compress NZB: %w", compErr)
+			}
+			if err := os.Remove(item.NzbPath); err != nil {
+				s.log.WarnContext(ctx, "Failed to remove source NZB after compression", "path", item.NzbPath, "error", err)
+			}
+		}
 	} else {
-		// Cross-device: compress directly from source to destination
-		s.log.DebugContext(ctx, "Rename failed, compressing directly from source", "error", err, "src", item.NzbPath, "dst", newPath)
-		if compErr := nzbfile.Compress(item.NzbPath, newPath); compErr != nil {
-			return fmt.Errorf("failed to compress NZB: %w", compErr)
-		}
-		if err := os.Remove(item.NzbPath); err != nil {
-			s.log.WarnContext(ctx, "Failed to remove source NZB after compression", "path", item.NzbPath, "error", err)
+		// Plain mode: move the NZB as-is. If the rename fails (e.g. cross-device), leave the
+		// source untouched and abort — the caller can retry rather than risk a partial copy.
+		if err := os.Rename(item.NzbPath, newPath); err != nil {
+			s.log.ErrorContext(ctx, "Failed to move NZB to persistent storage", "error", err, "src", item.NzbPath, "dst", newPath)
+			return fmt.Errorf("failed to move NZB to persistent storage: %w", err)
 		}
 	}
 
