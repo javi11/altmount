@@ -693,27 +693,6 @@ func persistentNzbPath(nzbDir, baseName, ext string, itemID int64, isTaken func(
 	return filepath.Join(nzbDir, fmt.Sprintf("%d-%s%s", itemID, baseName, ext))
 }
 
-// copyFile copies the contents of src to dst, creating dst.
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-
-	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
-		_ = os.Remove(dst)
-		return err
-	}
-	return out.Close()
-}
-
 // sanitizeFilename replaces invalid characters in filenames
 func sanitizeFilename(name string) string {
 	return strings.ReplaceAll(name, "/", "_")
@@ -1054,15 +1033,11 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 			}
 		}
 	} else {
-		// Plain mode: move the NZB as-is (rename, with cross-device copy+remove fallback).
+		// Plain mode: move the NZB as-is. If the rename fails (e.g. cross-device), leave the
+		// source untouched and abort — the caller can retry rather than risk a partial copy.
 		if err := os.Rename(item.NzbPath, newPath); err != nil {
-			s.log.DebugContext(ctx, "Rename failed, copying NZB to persistent storage", "error", err, "src", item.NzbPath, "dst", newPath)
-			if copyErr := copyFile(item.NzbPath, newPath); copyErr != nil {
-				return fmt.Errorf("failed to copy NZB to persistent storage: %w", copyErr)
-			}
-			if err := os.Remove(item.NzbPath); err != nil {
-				s.log.WarnContext(ctx, "Failed to remove source NZB after copy", "path", item.NzbPath, "error", err)
-			}
+			s.log.ErrorContext(ctx, "Failed to move NZB to persistent storage", "error", err, "src", item.NzbPath, "dst", newPath)
+			return fmt.Errorf("failed to move NZB to persistent storage: %w", err)
 		}
 	}
 
