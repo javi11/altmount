@@ -319,6 +319,7 @@ type ImportConfig struct {
 	FailedItemRetentionHours           *int           `yaml:"failed_item_retention_hours" mapstructure:"failed_item_retention_hours" json:"failed_item_retention_hours,omitempty"`
 	HistoryRetentionDays               *int           `yaml:"history_retention_days" mapstructure:"history_retention_days" json:"history_retention_days,omitempty"`
 	DeleteCompletedNzb                 *bool          `yaml:"delete_completed_nzb" mapstructure:"delete_completed_nzb" json:"delete_completed_nzb,omitempty"`
+	CompressNzb                        *bool          `yaml:"compress_nzb" mapstructure:"compress_nzb" json:"compress_nzb,omitempty"`
 }
 
 // ShouldDeleteCompletedNzb returns whether the NZB file should be removed from
@@ -333,6 +334,15 @@ func (c *Config) ShouldDeleteCompletedNzb() bool {
 		return *c.Metadata.DeleteCompletedNzb
 	}
 	return false
+}
+
+// ShouldCompressNzb reports whether persisted NZBs should be gzip-compressed
+// (.nzb.gz). Defaults to true when unset to preserve legacy behavior.
+func (c *Config) ShouldCompressNzb() bool {
+	if c.Import.CompressNzb != nil {
+		return *c.Import.CompressNzb
+	}
+	return true
 }
 
 // LogConfig represents logging configuration with rotation support
@@ -1452,6 +1462,7 @@ func DefaultConfig(configDir ...string) *Config {
 	failedItemRetentionHours := 24  // Default: auto-remove failed items after 24 hours
 	historyRetentionDays := 90      // Default: auto-remove import history after 90 days (3 months)
 	isoAnalyzeTimeoutSeconds := 120 // Default: 120s hard cap per ISO analyse (prevents stuck NNTP from stalling import for 9+ minutes)
+	compressNzb := true             // Default: gzip-compress persisted NZBs (.nzb.gz)
 	metadataBackupEnabled := false
 	failureMaskingEnabled := false
 	repairEnabled := true
@@ -1590,6 +1601,7 @@ func DefaultConfig(configDir ...string) *Config {
 			WatchIntervalSeconds:     &watchIntervalSeconds,
 			FailedItemRetentionHours: &failedItemRetentionHours,
 			HistoryRetentionDays:     &historyRetentionDays,
+			CompressNzb:              &compressNzb,
 		},
 		Log: LogConfig{
 			File:       logPath, // Default log file path
