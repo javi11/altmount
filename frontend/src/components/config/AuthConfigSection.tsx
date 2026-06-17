@@ -1,6 +1,7 @@
 import { AlertTriangle, KeyRound, Save, ShieldCheck, UserCheck } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { apiClient } from "../../api/client";
+import { useAuth } from "../../hooks/useAuth";
 import type { AuthConfig, ConfigResponse } from "../../types/config";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
 
@@ -28,6 +29,7 @@ export function AuthConfigSection({
 	isReadOnly = false,
 	isUpdating = false,
 }: AuthConfigSectionProps) {
+	const { user } = useAuth();
 	const [formData, setFormData] = useState<AuthConfig>({
 		login_required: config.auth.login_required,
 	});
@@ -40,6 +42,15 @@ export function AuthConfigSection({
 	});
 	const [credentialError, setCredentialError] = useState<string | null>(null);
 	const [isRegistering, setIsRegistering] = useState(false);
+
+	const [changePasswordForm, setChangePasswordForm] = useState({
+		currentPassword: "",
+		newPassword: "",
+		confirmPassword: "",
+	});
+	const [changePasswordError, setChangePasswordError] = useState<string | null>(null);
+	const [changePasswordSuccess, setChangePasswordSuccess] = useState(false);
+	const [isChangingPassword, setIsChangingPassword] = useState(false);
 
 	const fetchRegistrationStatus = useCallback(async () => {
 		try {
@@ -73,6 +84,36 @@ export function AuthConfigSection({
 
 	const credentialsAlreadyExist =
 		formData.login_required && registrationStatus !== null && registrationStatus.user_count > 0;
+
+	const isDirectUser = user?.provider === "direct";
+
+	const handleChangePassword = async () => {
+		if (changePasswordForm.newPassword.length < 8) {
+			setChangePasswordError("New password must be at least 8 characters.");
+			return;
+		}
+		if (changePasswordForm.newPassword !== changePasswordForm.confirmPassword) {
+			setChangePasswordError("Passwords do not match.");
+			return;
+		}
+		setIsChangingPassword(true);
+		setChangePasswordError(null);
+		setChangePasswordSuccess(false);
+		try {
+			await apiClient.changeOwnPassword({
+				current_password: changePasswordForm.currentPassword,
+				new_password: changePasswordForm.newPassword,
+			});
+			setChangePasswordSuccess(true);
+			setChangePasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+		} catch (err) {
+			setChangePasswordError(
+				err instanceof Error ? err.message : "Failed to update password. Try again.",
+			);
+		} finally {
+			setIsChangingPassword(false);
+		}
+	};
 
 	const validateCredentials = (): string | null => {
 		if (credentialForm.username.trim().length < 3) {
@@ -236,13 +277,115 @@ export function AuthConfigSection({
 						</div>
 					)}
 
-					{/* Status badge — shown when login is required and users already exist */}
+					{/* Credentials exist: inline change-password when logged in, info message when anonymous */}
 					{credentialsAlreadyExist && (
-						<div className="zoom-in-95 animate-in flex items-center gap-2 rounded-xl border border-success/20 bg-success/5 px-4 py-3">
-							<UserCheck className="h-4 w-4 shrink-0 text-success" />
-							<span className="text-[11px] text-success">
-								Credentials configured — manage password from the user menu.
-							</span>
+						<div className="zoom-in-95 animate-in space-y-4 rounded-xl border-2 border-success/20 bg-success/5 p-4">
+							<div className="flex items-center gap-2">
+								<UserCheck className="h-4 w-4 text-success" />
+								<span className="font-bold text-success text-xs uppercase tracking-widest">
+									Credentials Configured
+								</span>
+							</div>
+
+							{isDirectUser ? (
+								<>
+									<p className="text-[11px] text-base-content/60 leading-relaxed">
+										Update your admin password below.
+									</p>
+
+									<fieldset className="fieldset">
+										<legend className="fieldset-legend">Current Password</legend>
+										<input
+											type="password"
+											className="input w-full"
+											placeholder="Enter current password"
+											value={changePasswordForm.currentPassword}
+											disabled={isReadOnly || isChangingPassword}
+											onChange={(e) =>
+												setChangePasswordForm((f) => ({
+													...f,
+													currentPassword: e.target.value,
+												}))
+											}
+										/>
+									</fieldset>
+
+									<fieldset className="fieldset">
+										<legend className="fieldset-legend">New Password</legend>
+										<input
+											type="password"
+											className="input w-full"
+											placeholder="Min. 8 characters"
+											value={changePasswordForm.newPassword}
+											disabled={isReadOnly || isChangingPassword}
+											onChange={(e) =>
+												setChangePasswordForm((f) => ({
+													...f,
+													newPassword: e.target.value,
+												}))
+											}
+										/>
+									</fieldset>
+
+									<fieldset className="fieldset">
+										<legend className="fieldset-legend">Confirm New Password</legend>
+										<input
+											type="password"
+											className="input w-full"
+											placeholder="Repeat new password"
+											value={changePasswordForm.confirmPassword}
+											disabled={isReadOnly || isChangingPassword}
+											onChange={(e) =>
+												setChangePasswordForm((f) => ({
+													...f,
+													confirmPassword: e.target.value,
+												}))
+											}
+										/>
+									</fieldset>
+
+									{changePasswordError && (
+										<div className="alert alert-error items-start rounded-xl px-4 py-3">
+											<AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+											<span className="text-[11px]">{changePasswordError}</span>
+										</div>
+									)}
+
+									{changePasswordSuccess && (
+										<div className="alert alert-success items-start rounded-xl px-4 py-3">
+											<UserCheck className="mt-0.5 h-4 w-4 shrink-0" />
+											<span className="text-[11px]">Password updated successfully.</span>
+										</div>
+									)}
+
+									{!isReadOnly && (
+										<div className="flex justify-end">
+											<button
+												type="button"
+												className="btn btn-sm btn-success"
+												onClick={handleChangePassword}
+												disabled={
+													isChangingPassword ||
+													!changePasswordForm.currentPassword ||
+													!changePasswordForm.newPassword
+												}
+											>
+												{isChangingPassword ? (
+													<LoadingSpinner size="sm" />
+												) : (
+													<KeyRound className="h-3 w-3" />
+												)}
+												{isChangingPassword ? "Updating..." : "Update Password"}
+											</button>
+										</div>
+									)}
+								</>
+							) : (
+								<p className="text-[11px] text-base-content/60 leading-relaxed">
+									Save this change and sign in with your username and password to manage
+									credentials.
+								</p>
+							)}
 						</div>
 					)}
 				</div>
