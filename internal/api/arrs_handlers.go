@@ -24,17 +24,6 @@ import (
 // out by a stale Download webhook from a previous grab.
 const arrWebhookDeleteGrace = 10 * time.Minute
 
-// ArrsInstanceRequest represents a request to create/update an arrs instance
-type ArrsInstanceRequest struct {
-	Name              string `json:"name"`
-	Type              string `json:"type"`
-	URL               string `json:"url"`
-	APIKey            string `json:"api_key"`
-	Category          string `json:"category"`
-	Enabled           bool   `json:"enabled"`
-	SyncIntervalHours int    `json:"sync_interval_hours"`
-}
-
 // ArrsWebhookRequest represents a webhook payload from Radarr/Sonarr
 type ArrsWebhookRequest struct {
 	Artist struct {
@@ -719,40 +708,6 @@ type ArrsStatsResponse struct {
 	LastSync         *string `json:"last_sync"`
 }
 
-// ArrsMovieResponse represents a movie in API responses
-type ArrsMovieResponse struct {
-	ID          int64   `json:"id"`
-	InstanceID  int64   `json:"instance_id"`
-	MovieID     int64   `json:"movie_id"`
-	Title       string  `json:"title"`
-	Year        *int    `json:"year"`
-	FilePath    string  `json:"file_path"`
-	FileSize    *int64  `json:"file_size"`
-	Quality     *string `json:"quality"`
-	IMDbID      *string `json:"imdb_id"`
-	TMDbID      *int64  `json:"tmdb_id"`
-	LastUpdated string  `json:"last_updated"`
-}
-
-// ArrsEpisodeResponse represents an episode in API responses
-type ArrsEpisodeResponse struct {
-	ID            int64   `json:"id"`
-	InstanceID    int64   `json:"instance_id"`
-	SeriesID      int64   `json:"series_id"`
-	EpisodeID     int64   `json:"episode_id"`
-	SeriesTitle   string  `json:"series_title"`
-	SeasonNumber  int     `json:"season_number"`
-	EpisodeNumber int     `json:"episode_number"`
-	EpisodeTitle  *string `json:"episode_title"`
-	FilePath      string  `json:"file_path"`
-	FileSize      *int64  `json:"file_size"`
-	Quality       *string `json:"quality"`
-	AirDate       *string `json:"air_date"`
-	TVDbID        *int64  `json:"tvdb_id"`
-	IMDbID        *string `json:"imdb_id"`
-	LastUpdated   string  `json:"last_updated"`
-}
-
 // TestConnectionRequest represents a request to test connection
 type TestConnectionRequest struct {
 	Type   string `json:"type"`
@@ -855,7 +810,7 @@ func (s *Server) handleGetArrsInstance(c *fiber.Ctx) error {
 //	@Tags			ARRs
 //	@Accept			json
 //	@Produce		json
-//	@Param			body	body		ArrsInstanceRequest	true	"Instance connection details"
+//	@Param			body	body		TestConnectionRequest	true	"Instance connection details"
 //	@Success		200		{object}	APIResponse
 //	@Failure		400		{object}	APIResponse
 //	@Security		BearerAuth

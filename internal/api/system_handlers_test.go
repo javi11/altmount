@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/javi11/altmount/internal/pool"
@@ -25,21 +24,6 @@ func (m *MockPoolManager) ResetMetrics(ctx context.Context, resetPeak bool, rese
 
 func (m *MockPoolManager) ResetProviderErrors(ctx context.Context) error {
 	args := m.Called(ctx)
-	return args.Error(0)
-}
-
-// MockQueueRepository is a mock for database.Repository
-type MockQueueRepository struct {
-	mock.Mock
-}
-
-func (m *MockQueueRepository) ClearImportHistory(ctx context.Context) error {
-	args := m.Called(ctx)
-	return args.Error(0)
-}
-
-func (m *MockQueueRepository) ClearImportHistorySince(ctx context.Context, since time.Time) error {
-	args := m.Called(ctx, since)
 	return args.Error(0)
 }
 

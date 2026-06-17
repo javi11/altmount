@@ -346,17 +346,6 @@ export const useProviderSpeedHistory = (days = 30) => {
 	});
 };
 
-export const useResetProviderQuota = () => {
-	const queryClient = useQueryClient();
-
-	return useMutation({
-		mutationFn: (id: string) => apiClient.resetProviderQuota(id),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["system", "pool", "metrics"] });
-		},
-	});
-};
-
 export const useTestProviderSpeed = () => {
 	const queryClient = useQueryClient();
 

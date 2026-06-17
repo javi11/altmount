@@ -460,7 +460,7 @@ export function ImportConfigSection({
 										{!isReadOnly && (
 											<button
 												type="button"
-												className="hover:text-white"
+												className="opacity-70 hover:opacity-100"
 												onClick={() => removeExtension(ext)}
 											>
 												<X className="h-3 w-3" />

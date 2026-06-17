@@ -246,7 +246,7 @@ func ProcessArchive(ctx context.Context, opts ProcessArchiveOptions) error {
 	}
 
 	// Pre-pass: resolve paths, apply renames, and pre-compute per-file segment offsets so
-	// each goroutine can build its own OffsetTracker without any sequential shared state.
+	// each goroutine can track its own progress offset without any sequential shared state.
 	type fileToProcess struct {
 		content         Content
 		baseFilename    string

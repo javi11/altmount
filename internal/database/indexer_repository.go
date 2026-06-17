@@ -6,14 +6,6 @@ import (
 	"time"
 )
 
-type IndexerImportStat struct {
-	ID           int64     `db:"id"`
-	Indexer      string    `db:"indexer"`
-	Status       string    `db:"status"`
-	ErrorMessage *string   `db:"error_message"`
-	CreatedAt    time.Time `db:"created_at"`
-}
-
 type IndexerAggregatedHealth struct {
 	Indexer      string    `json:"indexer"`
 	TotalImports int       `json:"total_imports"`

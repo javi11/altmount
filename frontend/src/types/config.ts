@@ -129,27 +129,6 @@ export interface RepairConfig {
 	exponential_backoff: boolean;
 }
 
-// Library sync types
-export interface LibrarySyncProgress {
-	total_files: number;
-	processed_files: number;
-	start_time: string;
-}
-
-export interface LibrarySyncResult {
-	files_added: number;
-	files_deleted: number;
-	metadata_deleted: number;
-	duration: string;
-	completed_at: string;
-}
-
-export interface LibrarySyncStatus {
-	is_running: boolean;
-	progress?: LibrarySyncProgress;
-	last_sync_result?: LibrarySyncResult;
-}
-
 // Dry run result for library sync
 export interface DryRunSyncResult {
 	orphaned_metadata_count: number; // Number of orphaned metadata files
@@ -531,13 +510,6 @@ export type ConfigSection =
 	| "system";
 
 // Form data interfaces for UI components
-export interface WebDAVFormData {
-	port: number;
-	user: string;
-	password: string;
-	host?: string;
-}
-
 export interface RCloneMountFormData {
 	mount_enabled: boolean;
 	mount_options: Record<string, string>;
@@ -673,7 +645,7 @@ export interface StremioConfig {
 }
 
 // Helper type for configuration sections
-export interface ConfigSectionInfo {
+interface ConfigSectionInfo {
 	title: string;
 	description: string;
 	icon: string;

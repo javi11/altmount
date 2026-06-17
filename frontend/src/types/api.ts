@@ -52,11 +52,6 @@ export interface QueueItem {
 	indexer?: string;
 }
 
-export interface ProgressUpdate {
-	id: number;
-	percentage: number;
-}
-
 export interface ImportHistoryItem {
 	id: number;
 	nzb_name: string;
@@ -406,12 +401,6 @@ export interface PoolMetrics {
 	timestamp: string;
 	started_at: string;
 	providers: ProviderStatus[];
-}
-
-// SABnzbd API response types
-export interface SABnzbdAddResponse {
-	status: boolean;
-	nzo_ids: string[];
 }
 
 // System Browse types
