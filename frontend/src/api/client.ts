@@ -708,6 +708,13 @@ export class APIClient {
 		return this.request<{ login_required: boolean }>("/auth/config");
 	}
 
+	async resetAdminPassword(username: string, newPassword: string) {
+		return this.request<{ message: string }>("/auth/reset-admin-password", {
+			method: "POST",
+			body: JSON.stringify({ username, new_password: newPassword }),
+		});
+	}
+
 	// Configuration endpoints
 	async getConfig() {
 		return this.request<ConfigResponse>("/config");

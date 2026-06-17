@@ -365,6 +365,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	})
 	api.Post("/auth/login", authLimiter, s.handleDirectLogin)
 	api.Post("/auth/register", authLimiter, s.handleRegister)
+	api.Post("/auth/reset-admin-password", authLimiter, s.handleResetAdminPassword)
 	api.Get("/auth/registration-status", s.handleCheckRegistration)
 	api.Get("/auth/config", s.handleGetAuthConfig)
 

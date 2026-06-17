@@ -43,6 +43,7 @@ export function AuthConfigSection({
 	const [credentialError, setCredentialError] = useState<string | null>(null);
 	const [isRegistering, setIsRegistering] = useState(false);
 
+	// Change-password form (used when logged in as a direct-auth user)
 	const [changePasswordForm, setChangePasswordForm] = useState({
 		currentPassword: "",
 		newPassword: "",
@@ -51,6 +52,16 @@ export function AuthConfigSection({
 	const [changePasswordError, setChangePasswordError] = useState<string | null>(null);
 	const [changePasswordSuccess, setChangePasswordSuccess] = useState(false);
 	const [isChangingPassword, setIsChangingPassword] = useState(false);
+
+	// Reset-password form (used when auth is disabled — no current password required)
+	const [resetPasswordForm, setResetPasswordForm] = useState({
+		username: "",
+		newPassword: "",
+		confirmPassword: "",
+	});
+	const [resetPasswordError, setResetPasswordError] = useState<string | null>(null);
+	const [resetPasswordSuccess, setResetPasswordSuccess] = useState(false);
+	const [isResettingPassword, setIsResettingPassword] = useState(false);
 
 	const fetchRegistrationStatus = useCallback(async () => {
 		try {
@@ -112,6 +123,38 @@ export function AuthConfigSection({
 			);
 		} finally {
 			setIsChangingPassword(false);
+		}
+	};
+
+	const handleResetPassword = async () => {
+		if (resetPasswordForm.username.trim().length < 1) {
+			setResetPasswordError("Username is required.");
+			return;
+		}
+		if (resetPasswordForm.newPassword.length < 8) {
+			setResetPasswordError("New password must be at least 8 characters.");
+			return;
+		}
+		if (resetPasswordForm.newPassword !== resetPasswordForm.confirmPassword) {
+			setResetPasswordError("Passwords do not match.");
+			return;
+		}
+		setIsResettingPassword(true);
+		setResetPasswordError(null);
+		setResetPasswordSuccess(false);
+		try {
+			await apiClient.resetAdminPassword(
+				resetPasswordForm.username.trim(),
+				resetPasswordForm.newPassword,
+			);
+			setResetPasswordSuccess(true);
+			setResetPasswordForm({ username: "", newPassword: "", confirmPassword: "" });
+		} catch (err) {
+			setResetPasswordError(
+				err instanceof Error ? err.message : "Failed to reset password. Check the username.",
+			);
+		} finally {
+			setIsResettingPassword(false);
 		}
 	};
 
@@ -381,10 +424,92 @@ export function AuthConfigSection({
 									)}
 								</>
 							) : (
-								<p className="text-[11px] text-base-content/60 leading-relaxed">
-									Save this change and sign in with your username and password to manage
-									credentials.
-								</p>
+								<>
+									<p className="text-[11px] text-base-content/60 leading-relaxed">
+										Reset the password for an existing account before enabling login.
+									</p>
+
+									<fieldset className="fieldset">
+										<legend className="fieldset-legend">Username</legend>
+										<input
+											type="text"
+											className="input w-full"
+											placeholder="Enter the username"
+											value={resetPasswordForm.username}
+											disabled={isReadOnly || isResettingPassword}
+											onChange={(e) =>
+												setResetPasswordForm((f) => ({ ...f, username: e.target.value }))
+											}
+										/>
+									</fieldset>
+
+									<fieldset className="fieldset">
+										<legend className="fieldset-legend">New Password</legend>
+										<input
+											type="password"
+											className="input w-full"
+											placeholder="Min. 8 characters"
+											value={resetPasswordForm.newPassword}
+											disabled={isReadOnly || isResettingPassword}
+											onChange={(e) =>
+												setResetPasswordForm((f) => ({ ...f, newPassword: e.target.value }))
+											}
+										/>
+									</fieldset>
+
+									<fieldset className="fieldset">
+										<legend className="fieldset-legend">Confirm New Password</legend>
+										<input
+											type="password"
+											className="input w-full"
+											placeholder="Repeat new password"
+											value={resetPasswordForm.confirmPassword}
+											disabled={isReadOnly || isResettingPassword}
+											onChange={(e) =>
+												setResetPasswordForm((f) => ({
+													...f,
+													confirmPassword: e.target.value,
+												}))
+											}
+										/>
+									</fieldset>
+
+									{resetPasswordError && (
+										<div className="alert alert-error items-start rounded-xl px-4 py-3">
+											<AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+											<span className="text-[11px]">{resetPasswordError}</span>
+										</div>
+									)}
+
+									{resetPasswordSuccess && (
+										<div className="alert alert-success items-start rounded-xl px-4 py-3">
+											<UserCheck className="mt-0.5 h-4 w-4 shrink-0" />
+											<span className="text-[11px]">Password reset successfully.</span>
+										</div>
+									)}
+
+									{!isReadOnly && (
+										<div className="flex justify-end">
+											<button
+												type="button"
+												className="btn btn-sm btn-success"
+												onClick={handleResetPassword}
+												disabled={
+													isResettingPassword ||
+													!resetPasswordForm.username ||
+													!resetPasswordForm.newPassword
+												}
+											>
+												{isResettingPassword ? (
+													<LoadingSpinner size="sm" />
+												) : (
+													<KeyRound className="h-3 w-3" />
+												)}
+												{isResettingPassword ? "Resetting..." : "Reset Password"}
+											</button>
+										</div>
+									)}
+								</>
 							)}
 						</div>
 					)}
