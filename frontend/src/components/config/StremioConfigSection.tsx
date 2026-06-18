@@ -1,5 +1,6 @@
 import { Check, Copy, ExternalLink, Info, Save, Tv, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { copyToClipboard } from "../../lib/utils";
 import type { ConfigResponse, ProwlarrConfig, StremioConfig } from "../../types/config";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
 
@@ -156,9 +157,11 @@ export function StremioConfigSection({
 
 	const handleCopyURL = async () => {
 		if (!addonURL) return;
-		await navigator.clipboard.writeText(addonURL);
-		setUrlCopied(true);
-		setTimeout(() => setUrlCopied(false), 2000);
+		const ok = await copyToClipboard(addonURL);
+		if (ok) {
+			setUrlCopied(true);
+			setTimeout(() => setUrlCopied(false), 2000);
+		}
 	};
 
 	const handleInstallInStremio = () => {

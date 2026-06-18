@@ -19,6 +19,7 @@ type IndexerAggregatedHealth struct {
 	TotalImports int       `json:"total_imports"`
 	SuccessCount int       `json:"success_count"`
 	FailedCount  int       `json:"failed_count"`
+	Last24hCount int       `json:"last_24h_count"`
 	SuccessRate  float64   `json:"success_rate"`
 	LastSeenAt   time.Time `json:"last_seen_at"`
 }
@@ -44,11 +45,12 @@ func logIndexerImport(ctx context.Context, db DBQuerier, indexer string, status 
 
 func getIndexerHealthStats(ctx context.Context, db DBQuerier) ([]*IndexerAggregatedHealth, error) {
 	query := `
-		SELECT 
+		SELECT
 			indexer,
 			COUNT(*) as total_imports,
 			SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as success_count,
 			SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_count,
+			SUM(CASE WHEN created_at >= datetime('now', '-24 hours') THEN 1 ELSE 0 END) as last_24h_count,
 			MAX(created_at) as last_seen_at
 		FROM indexer_import_stats
 		GROUP BY indexer
@@ -64,7 +66,7 @@ func getIndexerHealthStats(ctx context.Context, db DBQuerier) ([]*IndexerAggrega
 	for rows.Next() {
 		var h IndexerAggregatedHealth
 		var lastSeenStr string
-		if err := rows.Scan(&h.Indexer, &h.TotalImports, &h.SuccessCount, &h.FailedCount, &lastSeenStr); err != nil {
+		if err := rows.Scan(&h.Indexer, &h.TotalImports, &h.SuccessCount, &h.FailedCount, &h.Last24hCount, &lastSeenStr); err != nil {
 			return nil, err
 		}
 		for _, layout := range []string{time.RFC3339, "2006-01-02 15:04:05", "2006-01-02T15:04:05"} {

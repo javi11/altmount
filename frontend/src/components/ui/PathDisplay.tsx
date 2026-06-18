@@ -1,5 +1,6 @@
 import { Check, Copy } from "lucide-react";
 import { useState } from "react";
+import { copyToClipboard } from "../../lib/utils";
 
 interface PathDisplayProps {
 	path: string;
@@ -20,12 +21,10 @@ export function PathDisplay({
 	const isTextTruncated = displayText.length > maxLength;
 
 	const handleCopy = async () => {
-		try {
-			await navigator.clipboard.writeText(path);
+		const ok = await copyToClipboard(path);
+		if (ok) {
 			setCopied(true);
 			setTimeout(() => setCopied(false), 2000);
-		} catch (error) {
-			console.error("Failed to copy path:", error);
 		}
 	};
 

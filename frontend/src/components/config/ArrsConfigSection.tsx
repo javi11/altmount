@@ -322,7 +322,7 @@ export function ArrsConfigSection({
 
 								<button
 									type="button"
-									className="btn btn-primary btn-sm shrink-0 px-6 shadow-lg shadow-primary/20"
+									className="btn btn-primary shrink-0 px-6 shadow-lg shadow-primary/20"
 									onClick={handleRegisterWebhooks}
 									disabled={isReadOnly || registerWebhooks.isPending || hasChanges}
 								>

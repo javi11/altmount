@@ -13,6 +13,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useConfirm } from "../../contexts/ModalContext";
 import { useToast } from "../../contexts/ToastContext";
 import { useRegenerateAPIKey } from "../../hooks/useAuth";
+import { copyToClipboard } from "../../lib/utils";
 import type { ConfigResponse, LogFormData } from "../../types/config";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
 import { UpdateSection } from "./UpdateSection";
@@ -195,10 +196,10 @@ export function SystemConfigSection({
 
 	const handleCopyAPIKey = async () => {
 		if (config.api_key) {
-			try {
-				await navigator.clipboard.writeText(config.api_key);
+			const ok = await copyToClipboard(config.api_key);
+			if (ok) {
 				showToast({ type: "success", title: "Success", message: "API key copied to clipboard" });
-			} catch (_error) {
+			} else {
 				showToast({ type: "error", title: "Error", message: "Failed to copy API key" });
 			}
 		}

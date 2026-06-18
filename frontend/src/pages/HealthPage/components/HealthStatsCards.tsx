@@ -14,40 +14,64 @@ export function HealthStatsCards({ stats }: HealthStatsCardsProps) {
 	const corruptedPercentage =
 		stats.total > 0 ? ((stats.corrupted / stats.total) * 100).toFixed(1) : "0.0";
 
+	const cards: {
+		label: string;
+		value: number;
+		valueClass: string;
+		caption: string;
+		captionClass?: string;
+	}[] = [
+		{
+			label: "Files Tracked",
+			value: stats.total,
+			valueClass: "text-primary",
+			caption: "Total in database",
+		},
+		{
+			label: "Healthy",
+			value: stats.healthy || 0,
+			valueClass: "text-success",
+			caption: `${healthyPercentage}% of total`,
+		},
+		{
+			label: "Pending",
+			value: stats.pending || 0,
+			valueClass: "text-info",
+			caption: "Awaiting check",
+		},
+		{
+			label: "Checking",
+			value: stats.checking || 0,
+			valueClass: "text-warning",
+			caption: "In progress",
+		},
+		{
+			label: "Repairing",
+			value: stats.repair_triggered || 0,
+			valueClass: "text-secondary",
+			caption: "Triggered",
+		},
+		{
+			label: "Corrupted",
+			value: stats.corrupted,
+			valueClass: "text-error",
+			caption: `${corruptedPercentage}% - Require action`,
+			captionClass: "font-bold text-error text-xs",
+		},
+	];
+
 	return (
-		<div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-6">
-			<div className="stat rounded-box bg-base-100 shadow">
-				<div className="stat-title">Files Tracked</div>
-				<div className="stat-value text-primary">{stats.total}</div>
-				<div className="stat-desc">Total in database</div>
-			</div>
-			<div className="stat rounded-box bg-base-100 shadow">
-				<div className="stat-title">Healthy</div>
-				<div className="stat-value text-success">{stats.healthy || 0}</div>
-				<div className="stat-desc">{healthyPercentage}% of total</div>
-			</div>
-			<div className="stat rounded-box bg-base-100 shadow">
-				<div className="stat-title">Pending</div>
-				<div className="stat-value text-info">{stats.pending || 0}</div>
-				<div className="stat-desc">Awaiting check</div>
-			</div>
-			<div className="stat rounded-box bg-base-100 shadow">
-				<div className="stat-title">Checking</div>
-				<div className="stat-value text-warning">{stats.checking || 0}</div>
-				<div className="stat-desc">In progress</div>
-			</div>
-			<div className="stat rounded-box bg-base-100 shadow">
-				<div className="stat-title">Repairing</div>
-				<div className="stat-value text-secondary">{stats.repair_triggered || 0}</div>
-				<div className="stat-desc">Triggered</div>
-			</div>
-			<div className="stat rounded-box bg-base-100 shadow">
-				<div className="stat-title">Corrupted</div>
-				<div className="stat-value text-error">{stats.corrupted}</div>
-				<div className="stat-desc font-bold text-error">
-					{corruptedPercentage}% - Require action
+		<div className="grid grid-cols-2 gap-px overflow-hidden rounded-box border border-base-content/20 bg-base-content/20 shadow-md lg:grid-cols-3 xl:grid-cols-6">
+			{cards.map((card, index) => (
+				<div
+					key={card.label}
+					className={`space-y-1 px-5 py-4 ${index % 2 === 0 ? "bg-base-100" : "bg-base-200"}`}
+				>
+					<div className="text-base-content/60 text-xs">{card.label}</div>
+					<div className={`font-extrabold text-3xl ${card.valueClass}`}>{card.value}</div>
+					<div className={card.captionClass ?? "text-base-content/60 text-xs"}>{card.caption}</div>
 				</div>
-			</div>
+			))}
 		</div>
 	);
 }

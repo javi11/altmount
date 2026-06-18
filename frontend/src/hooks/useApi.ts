@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "../api/client";
 import type { HealthCleanupRequest, HealthPriority } from "../types/api";
 
@@ -335,6 +335,8 @@ export const useProviderHistoricalStats = (days = 30, interval = "daily") => {
 		queryKey: ["system", "provider-stats", days, interval],
 		queryFn: () => apiClient.getProviderHistoricalStats(days, interval),
 		refetchInterval: 60000, // Refetch every minute
+		// Keep previous range visible while a new range loads (no spinner flash).
+		placeholderData: keepPreviousData,
 	});
 };
 
@@ -343,6 +345,7 @@ export const useProviderSpeedHistory = (days = 30) => {
 		queryKey: ["system", "provider-speed-history", days],
 		queryFn: () => apiClient.getProviderSpeedHistory(days),
 		refetchInterval: 60000, // Refetch every minute
+		placeholderData: keepPreviousData,
 	});
 };
 
