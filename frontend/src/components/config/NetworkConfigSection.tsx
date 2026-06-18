@@ -1,4 +1,3 @@
-import { Globe } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ConfigResponse, NetworkConfig, NzblnkConfig } from "../../types/config";
 
@@ -67,11 +66,6 @@ export function NetworkConfigSection({
 
 	return (
 		<div className="space-y-6">
-			<div className="flex items-center gap-2">
-				<Globe className="h-5 w-5" aria-hidden="true" />
-				<h2 className="font-semibold text-xl">Network &amp; User Agent</h2>
-			</div>
-
 			<div className="alert alert-info">
 				<div className="text-sm">
 					Applied to every outbound HTTP request used for indexer search, NZB grabbing, Arrs

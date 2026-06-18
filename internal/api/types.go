@@ -116,6 +116,7 @@ type RCloneAPIResponse struct {
 // ProviderAPIResponse sanitizes Provider config for API responses
 type ProviderAPIResponse struct {
 	ID                       string     `json:"id"`
+	Name                     string     `json:"name,omitempty"`
 	Host                     string     `json:"host"`
 	Port                     int        `json:"port"`
 	Username                 string     `json:"username"`
@@ -232,6 +233,7 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 	for i, p := range cfg.Providers {
 		providers[i] = ProviderAPIResponse{
 			ID:                       p.ID,
+			Name:                     p.Name,
 			Host:                     p.Host,
 			Port:                     p.Port,
 			Username:                 p.Username,
@@ -249,6 +251,7 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 			SkipPing:                 p.SkipPing,
 			KeepaliveIntervalSeconds: p.KeepaliveIntervalSeconds,
 			KeepaliveCommand:         p.KeepaliveCommand,
+			UserAgent:                p.UserAgent,
 			QuotaBytes:               p.QuotaBytes,
 			QuotaPeriodHours:         p.QuotaPeriodHours,
 			AccountExpirationDate:    p.AccountExpirationDate,
@@ -1022,6 +1025,7 @@ type ManualImportResponse struct {
 // ProviderStatusResponse represents NNTP provider connection status in API responses
 type ProviderStatusResponse struct {
 	ID                      string     `json:"id"`
+	Name                    string     `json:"name,omitempty"`
 	Host                    string     `json:"host"`
 	Username                string     `json:"username"`
 	UsedConnections         int        `json:"used_connections"`

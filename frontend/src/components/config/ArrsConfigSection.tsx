@@ -261,13 +261,6 @@ export function ArrsConfigSection({
 
 	return (
 		<div className="space-y-10">
-			<div>
-				<h3 className="font-bold text-base-content text-lg tracking-tight">ARR Applications</h3>
-				<p className="break-words text-base-content/50 text-sm">
-					Connect Radarr and Sonarr for automatic health monitoring and repair.
-				</p>
-			</div>
-
 			<div className="space-y-8">
 				{/* Enable/Disable Arrs */}
 				<div className="rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">

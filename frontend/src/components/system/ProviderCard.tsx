@@ -117,7 +117,7 @@ export function ProviderCard({ provider, className, onResetQuota }: ProviderCard
 								className="truncate font-semibold text-sm leading-none"
 								id={`provider-${provider.host}`}
 							>
-								{provider.host}
+								{provider.name || provider.host}
 							</h3>
 						</div>
 						<div className="mt-1 flex items-center gap-2">

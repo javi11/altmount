@@ -72,13 +72,6 @@ export function ImportConfigSection({
 
 	return (
 		<div className="min-w-0 space-y-10">
-			<div className="min-w-0">
-				<h3 className="font-bold text-base-content text-lg tracking-tight">NZB Processor</h3>
-				<p className="break-words text-base-content/50 text-sm">
-					Configure how workers handle new imports and validation.
-				</p>
-			</div>
-
 			<div className="min-w-0 space-y-8">
 				{/* Worker Core Configuration */}
 				<div className="min-w-0 space-y-6 overflow-hidden rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">

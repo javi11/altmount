@@ -171,14 +171,6 @@ export function StremioConfigSection({
 
 	return (
 		<div className="min-w-0 space-y-10">
-			<div className="min-w-0">
-				<h3 className="font-bold text-base-content text-lg tracking-tight">Stremio Integration</h3>
-				<p className="break-words text-base-content/50 text-sm">
-					Enable the Stremio addon to automatically search Prowlarr for NZBs by IMDB ID and stream
-					them directly from Stremio.
-				</p>
-			</div>
-
 			<div className="min-w-0 space-y-8">
 				{/* Enable / Disable */}
 				<div className="min-w-0 space-y-6 overflow-hidden rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">

@@ -269,6 +269,7 @@ export interface LogConfig {
 // NNTP Provider configuration (sanitized)
 export interface ProviderConfig {
 	id: string;
+	name?: string;
 	host: string;
 	port: number;
 	username: string;
@@ -591,6 +592,7 @@ export interface MountStatus {
 }
 
 export interface ProviderFormData {
+	name: string;
 	host: string;
 	port: number;
 	username: string;
@@ -705,6 +707,7 @@ export interface ProviderTestResponse {
 }
 
 export interface ProviderCreateRequest {
+	name?: string;
 	host: string;
 	port: number;
 	username: string;
@@ -732,7 +735,7 @@ export interface ProviderReorderRequest {
 export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo> = {
 	webdav: {
 		title: "WebDAV Server",
-		description: "WebDAV server settings for file access",
+		description: "Expose your virtual library over the network via WebDAV protocol.",
 		icon: "Globe",
 		canEdit: true,
 	},
@@ -750,7 +753,7 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 	},
 	metadata: {
 		title: "Metadata",
-		description: "File metadata storage settings",
+		description: "Configure how AltMount stores and manages virtual file metadata.",
 		icon: "Folder",
 		canEdit: true,
 	},
@@ -775,7 +778,7 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 	},
 	import: {
 		title: "Import Processing",
-		description: "NZB import and processing worker configuration",
+		description: "Configure how workers handle new imports and validation.",
 		icon: "Cog",
 		canEdit: true,
 	},
@@ -801,7 +804,7 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 	},
 	sabnzbd: {
 		title: "SABnzbd API",
-		description: "SABnzbd-compatible API configuration for download clients",
+		description: "Emulate a SABnzbd server to allow ARR applications to send NZBs to AltMount.",
 		icon: "Download",
 		canEdit: true,
 	},
@@ -813,8 +816,9 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		canEdit: true,
 	},
 	stremio: {
-		title: "Stremio",
-		description: "Stremio NZB stream endpoint — upload an NZB and receive instant stream URLs",
+		title: "Stremio Integration",
+		description:
+			"Upload an NZB for instant stream URLs, or enable the addon to automatically search Prowlarr by IMDB ID and stream results directly from Stremio.",
 		icon: "Tv",
 		canEdit: true,
 	},

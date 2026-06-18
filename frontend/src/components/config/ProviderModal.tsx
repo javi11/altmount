@@ -9,6 +9,8 @@ interface ProviderModalProps {
 	provider?: ProviderConfig | null;
 	/** Seeds the "Backup Only" toggle when creating a new provider. */
 	defaultBackup?: boolean;
+	/** Global provider user-agent, applied to newly created providers. */
+	defaultUserAgent?: string;
 	onSuccess: () => void;
 	onCancel: () => void;
 }
@@ -16,6 +18,7 @@ interface ProviderModalProps {
 const BYTES_PER_GB = 1_073_741_824;
 
 const defaultFormData: ProviderFormData = {
+	name: "",
 	host: "",
 	port: 119,
 	username: "",
@@ -40,6 +43,7 @@ export function ProviderModal({
 	mode,
 	provider,
 	defaultBackup = false,
+	defaultUserAgent = "",
 	onSuccess,
 	onCancel,
 }: ProviderModalProps) {
@@ -61,6 +65,7 @@ export function ProviderModal({
 	useEffect(() => {
 		if (mode === "edit" && provider) {
 			setFormData({
+				name: provider.name ?? "",
 				host: provider.host,
 				port: provider.port,
 				username: provider.username,
@@ -86,13 +91,17 @@ export function ProviderModal({
 			// For edit mode, allow saving without testing if only non-connection fields change
 			setCanSave(true);
 		} else {
-			setFormData({ ...defaultFormData, is_backup_provider: defaultBackup });
+			setFormData({
+				...defaultFormData,
+				is_backup_provider: defaultBackup,
+				user_agent: defaultUserAgent,
+			});
 			setQuotaEnabled(false);
 			setQuotaGbInput("1");
 			setCanSave(false);
 		}
 		setConnectionTestResult(null);
-	}, [mode, provider, defaultBackup]);
+	}, [mode, provider, defaultBackup, defaultUserAgent]);
 
 	const handleInputChange = (field: keyof ProviderFormData, value: string | number | boolean) => {
 		setFormData((prev) => ({ ...prev, [field]: value }));
@@ -196,6 +205,7 @@ export function ProviderModal({
 					updateData.user_agent = formData.user_agent;
 				if (formData.account_expiration_date !== (provider.account_expiration_date ?? ""))
 					updateData.account_expiration_date = formData.account_expiration_date;
+				if (formData.name !== (provider.name ?? "")) updateData.name = formData.name;
 				if (formData.quota_bytes !== (provider.quota_bytes ?? 0))
 					updateData.quota_bytes = formData.quota_bytes;
 				if (formData.quota_period_hours !== (provider.quota_period_hours ?? 0))
@@ -229,9 +239,21 @@ export function ProviderModal({
 				</h3>
 
 				<form className="min-w-0 space-y-6" onSubmit={(e) => e.preventDefault()}>
-					{/* Host + Port */}
-					<div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
+					{/* Identity + connection — two equal halves, uniform spacing */}
+					<div className="grid grid-cols-1 gap-x-6 gap-y-6 sm:grid-cols-2">
 						<fieldset className="fieldset sm:col-span-2">
+							<legend className="fieldset-legend font-bold">Nickname</legend>
+							<input
+								id="name"
+								type="text"
+								className="input input-bordered w-full font-mono text-sm"
+								value={formData.name}
+								onChange={(e) => handleInputChange("name", e.target.value)}
+								placeholder="e.g. Frugal (Main)"
+							/>
+						</fieldset>
+
+						<fieldset className="fieldset">
 							<legend className="fieldset-legend font-bold">NNTP Host *</legend>
 							<input
 								id="host"
@@ -258,10 +280,7 @@ export function ProviderModal({
 								max={65535}
 							/>
 						</fieldset>
-					</div>
 
-					{/* Connection Capacity */}
-					<div className="grid grid-cols-1 gap-6 md:grid-cols-2">
 						<fieldset className="fieldset">
 							<legend className="fieldset-legend font-bold">Max Connections</legend>
 							<input
@@ -290,14 +309,8 @@ export function ProviderModal({
 								min={1}
 								max={100}
 							/>
-							<p className="label mt-1 text-base-content/70 text-xs">
-								Requests per connection. Default is 10.
-							</p>
 						</fieldset>
-					</div>
 
-					{/* Authentication */}
-					<div className="grid grid-cols-1 gap-6 md:grid-cols-2">
 						<fieldset className="fieldset">
 							<legend className="fieldset-legend font-bold">Username *</legend>
 							<input
@@ -433,7 +446,7 @@ export function ProviderModal({
 							</fieldset>
 
 							<fieldset className="fieldset">
-								<legend className="fieldset-legend font-bold">Account Expiration</legend>
+								<legend className="fieldset-legend font-bold">Account Expiration Date</legend>
 								<input
 									id="account_expiration_date"
 									type="date"
@@ -453,7 +466,7 @@ export function ProviderModal({
 						<h4 className="font-bold text-base-content/60 text-xs uppercase tracking-widest">
 							Keep-Alive
 						</h4>
-						<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+						<div className="space-y-4">
 							<fieldset className="fieldset">
 								<legend className="fieldset-legend font-bold">Interval (seconds)</legend>
 								<input
@@ -570,22 +583,6 @@ export function ProviderModal({
 							</div>
 						)}
 					</div>
-
-					{/* User-Agent */}
-					<fieldset className="fieldset">
-						<legend className="fieldset-legend font-bold">User-Agent (Optional)</legend>
-						<input
-							id="user_agent"
-							type="text"
-							className="input input-bordered w-full font-mono text-sm"
-							value={formData.user_agent}
-							onChange={(e) => handleInputChange("user_agent", e.target.value)}
-							placeholder="e.g. SABnzbd/4.5.5"
-						/>
-						<p className="label mt-1 text-base-content/70 text-xs">
-							Sent to the NNTP server. Leave empty to disable.
-						</p>
-					</fieldset>
 
 					{/* Connection Test */}
 					<div className="min-w-0 space-y-4 border-base-300/50 border-t pt-4">

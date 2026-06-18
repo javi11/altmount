@@ -235,13 +235,6 @@ export function SystemConfigSection({
 
 	return (
 		<div className="min-w-0 space-y-10">
-			<div className="min-w-0">
-				<h3 className="font-bold text-base-content text-lg tracking-tight">System Core</h3>
-				<p className="break-words text-base-content/50 text-sm">
-					Manage global logging, security, and identity.
-				</p>
-			</div>
-
 			<div className="min-w-0 space-y-8">
 				{/* Updates */}
 				<UpdateSection />

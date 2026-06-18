@@ -46,6 +46,10 @@ export function ProvidersConfigSection({
 
 	const [formData, setFormData] = useState<ProviderConfig[]>(config.providers ?? []);
 	const [hasChanges, setHasChanges] = useState(false);
+	// Single user-agent shared by every provider (stored per-provider, edited globally here).
+	const [globalUserAgent, setGlobalUserAgent] = useState(
+		(config.providers ?? []).map((p) => p.user_agent).find(Boolean) ?? "",
+	);
 
 	const { deleteProvider, testProviderSpeed, resetProviderQuota } = useProviders();
 	const [resettingQuotaId, setResettingQuotaId] = useState<string | null>(null);
@@ -55,6 +59,7 @@ export function ProvidersConfigSection({
 	// Sync with config when it changes
 	useEffect(() => {
 		setFormData(config.providers ?? []);
+		setGlobalUserAgent((config.providers ?? []).map((p) => p.user_agent).find(Boolean) ?? "");
 		setHasChanges(false);
 	}, [config.providers]);
 
@@ -211,6 +216,13 @@ export function ProvidersConfigSection({
 		setHasChanges(JSON.stringify(newFormData) !== JSON.stringify(config.providers));
 	};
 
+	const handleGlobalUserAgentChange = (value: string) => {
+		setGlobalUserAgent(value);
+		const newFormData = formData.map((p) => ({ ...p, user_agent: value }));
+		setFormData(newFormData);
+		setHasChanges(JSON.stringify(newFormData) !== JSON.stringify(config.providers));
+	};
+
 	const handleSave = async () => {
 		if (onUpdate && hasChanges) {
 			try {
@@ -325,17 +337,14 @@ export function ProvidersConfigSection({
 							</div>
 							<div className="min-w-0">
 								<div className="flex items-center gap-1.5">
-									<span className="font-black font-mono text-base-content/50 text-xs">
+									<span className="font-black font-mono text-base-content/50 text-sm">
 										#{index + 1}
 									</span>
 									<h4 className="truncate font-bold text-base-content text-sm tracking-tight">
-										{provider.host}
+										{provider.name || provider.host}
 									</h4>
 								</div>
 								<div className="mt-1 flex items-center gap-1.5">
-									<div
-										className={`h-2 w-2 shrink-0 rounded-full ${provider.enabled ? "bg-success shadow-[0_0_8px_color-mix(in_oklch,var(--color-success)_50%,transparent)]" : "bg-base-300"}`}
-									/>
 									<span className="font-bold text-[11px] text-base-content/70 uppercase tracking-wider">
 										{provider.port}
 									</span>
@@ -428,14 +437,14 @@ export function ProvidersConfigSection({
 					</div>
 
 					{/* Quick Details Grid */}
-					<div className="mt-auto grid grid-cols-2 gap-x-4 gap-y-3 rounded-xl bg-base-200/30 p-3 text-xs">
-						<div className="min-w-0">
-							<span className="mb-1 block font-black text-[10px] text-base-content/50 uppercase tracking-widest">
+					<div className="mt-auto grid grid-cols-2 gap-x-4 gap-y-2.5 rounded-xl bg-base-200/30 p-3 text-xs">
+						<div className="flex min-w-0 items-center gap-3">
+							<span className="min-w-[88px] font-black text-[10px] text-base-content/50 uppercase tracking-widest">
 								Max Conn
 							</span>
 							<input
 								type="number"
-								className="input input-xs input-bordered w-full max-w-[70px] bg-base-100 font-bold font-mono"
+								className="input input-xs input-bordered w-[72px] shrink-0 bg-base-100 text-center font-bold font-mono"
 								value={provider.max_connections}
 								onChange={(e) =>
 									handleFieldChange(
@@ -448,13 +457,21 @@ export function ProvidersConfigSection({
 								max={100}
 							/>
 						</div>
-						<div className="flex min-w-0 flex-col items-center text-center">
-							<span className="mb-1 block font-black text-[10px] text-base-content/50 uppercase tracking-widest">
+						<div className="flex min-w-0 items-center gap-3">
+							<span className="min-w-[88px] font-black text-[10px] text-base-content/50 uppercase tracking-widest">
+								Latency
+							</span>
+							<span className="font-bold font-mono text-xs">
+								{provider.last_rtt_ms !== undefined ? `${provider.last_rtt_ms}ms` : "---"}
+							</span>
+						</div>
+						<div className="flex min-w-0 items-center gap-3">
+							<span className="min-w-[88px] font-black text-[10px] text-base-content/50 uppercase tracking-widest">
 								Pipeline
 							</span>
 							<input
 								type="number"
-								className="input input-xs input-bordered w-full max-w-[70px] bg-base-100 text-center font-bold font-mono"
+								className="input input-xs input-bordered w-[72px] shrink-0 bg-base-100 text-center font-bold font-mono"
 								value={provider.inflight_requests || 10}
 								onChange={(e) =>
 									handleFieldChange(
@@ -467,30 +484,25 @@ export function ProvidersConfigSection({
 								max={100}
 							/>
 						</div>
-						<div className="min-w-0">
-							<span className="mb-1 block font-black text-[10px] text-base-content/50 uppercase tracking-widest">
-								Latency
-							</span>
-							<div className="flex h-6 items-center font-bold font-mono">
-								{provider.last_rtt_ms !== undefined ? `${provider.last_rtt_ms}ms` : "---"}
-							</div>
-						</div>
-						<div className="flex min-w-0 flex-col items-center text-center">
-							<span className="mb-1 block font-black text-[10px] text-base-content/50 uppercase tracking-widest">
+						<div className="flex min-w-0 items-center gap-3">
+							<span className="min-w-[88px] font-black text-[10px] text-base-content/50 uppercase tracking-widest">
 								Last Speed
 							</span>
-							<div className="flex h-6 items-center justify-center font-bold font-mono">
+							<span className="truncate font-bold font-mono text-xs">
 								{provider.last_speed_test_mbps !== undefined
 									? `${provider.last_speed_test_mbps.toFixed(1)} MB/s`
 									: "---"}
-							</div>
-						</div>
-						<div className="col-span-2 flex min-w-0 flex-col items-center border-base-300/40 border-t pt-2.5 text-center">
-							<span className="mb-1 block font-black text-[10px] text-base-content/50 uppercase tracking-widest">
-								Account Expires
 							</span>
-							<div className="flex h-6 items-center font-bold font-mono">
-								{formatExpirationDate(provider.account_expiration_date) || "---"}
+						</div>
+						<div className="col-span-2 grid grid-cols-2 gap-x-4 border-base-300/40 border-t pt-2.5">
+							<span className="font-black text-[10px] text-base-content/50 uppercase tracking-widest">
+								Account Expiration Date
+							</span>
+							<div className="flex min-w-0 items-center gap-3">
+								<span className="min-w-[88px] shrink-0" aria-hidden="true" />
+								<span className="font-bold font-mono text-xs">
+									{formatExpirationDate(provider.account_expiration_date) || "---"}
+								</span>
 							</div>
 						</div>
 					</div>
@@ -527,7 +539,7 @@ export function ProvidersConfigSection({
 				</div>
 				<button
 					type="button"
-					className={`btn btn-sm gap-1.5 ${accent === "success" ? "btn-primary shadow-lg shadow-primary/20" : "btn-outline border-warning/40 text-warning hover:border-warning hover:bg-warning/10"}`}
+					className={`btn btn-sm gap-1.5 ${accent === "success" ? "btn-outline border-success/40 text-success hover:border-success hover:bg-success/10" : "btn-outline border-warning/40 text-warning hover:border-warning hover:bg-warning/10"}`}
 					onClick={onAdd}
 				>
 					<Plus className="h-4 w-4" />
@@ -570,6 +582,25 @@ export function ProvidersConfigSection({
 				)}
 			</div>
 
+			{/* Global Provider User-Agent — one value applied to every provider above */}
+			<div className="space-y-3 border-base-200 border-t pt-6">
+				<div>
+					<h3 className="font-bold text-base-content text-lg tracking-tight">
+						Provider User-Agent
+					</h3>
+					<p className="text-base-content/50 text-xs">
+						Sent to every NNTP provider above. Leave empty to disable.
+					</p>
+				</div>
+				<input
+					type="text"
+					className="input input-bordered w-full font-mono text-sm"
+					value={globalUserAgent}
+					onChange={(e) => handleGlobalUserAgentChange(e.target.value)}
+					placeholder="e.g. SABnzbd/4.5.5"
+				/>
+			</div>
+
 			{/* Save & Validation */}
 			<div className="space-y-4 border-base-200 border-t pt-6">
 				{hasChanges && (
@@ -596,6 +627,7 @@ export function ProvidersConfigSection({
 					mode={modalMode}
 					provider={editingProvider}
 					defaultBackup={createBackup}
+					defaultUserAgent={globalUserAgent}
 					onSuccess={handleModalSuccess}
 					onCancel={() => setIsModalOpen(false)}
 				/>

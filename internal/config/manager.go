@@ -390,6 +390,7 @@ type HealthConfig struct {
 // ProviderConfig represents a single NNTP provider configuration
 type ProviderConfig struct {
 	ID                       string     `yaml:"id" mapstructure:"id" json:"id"`
+	Name                     string     `yaml:"name" mapstructure:"name" json:"name,omitempty"`
 	Host                     string     `yaml:"host" mapstructure:"host" json:"host"`
 	Port                     int        `yaml:"port" mapstructure:"port" json:"port"`
 	Username                 string     `yaml:"username" mapstructure:"username" json:"username"`
