@@ -2,6 +2,7 @@ package api
 
 import (
 	"archive/zip"
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/xml"
@@ -418,112 +419,110 @@ func (s *Server) handleBatchExportNZB(c *fiber.Ctx) error {
 	slog.InfoContext(ctx, "Collected metadata files",
 		"total_count", len(metadataFiles))
 
-	// Create ZIP archive in memory
-	var zipBuffer bytes.Buffer
-	zipWriter := zip.NewWriter(&zipBuffer)
-
-	exportedCount := 0
-	skippedCount := 0
-
-	for _, metaPath := range metadataFiles {
-		// Calculate virtual path
-		relPath, err := filepath.Rel(metadataRootPath, metaPath)
-		if err != nil {
-			slog.WarnContext(ctx, "Failed to calculate relative path",
-				"error", err,
-				"meta_path", metaPath)
-			continue
-		}
-
-		// Remove .meta extension to get virtual filename
-		virtualFilename := strings.TrimSuffix(relPath, ".meta")
-
-		// Check if should exclude based on archive pattern
-		// Archives and AES-encrypted files are always excluded
-		if shouldExcludeFile(virtualFilename, true) {
-			skippedCount++
-			slog.DebugContext(ctx, "Skipping archive file",
-				"filename", virtualFilename)
-			continue
-		}
-
-		// Calculate full virtual path
-		virtualPath := filepath.Join(virtualRootPath, virtualFilename)
-		virtualPath = strings.ReplaceAll(virtualPath, string(filepath.Separator), "/")
-
-		// Read metadata
-		metadata, err := s.metadataReader.GetFileMetadata(virtualPath)
-		if err != nil {
-			slog.WarnContext(ctx, "Failed to read metadata",
-				"error", err,
-				"virtual_path", virtualPath)
-			continue
-		}
-
-		if metadata == nil {
-			slog.WarnContext(ctx, "Metadata not found",
-				"virtual_path", virtualPath)
-			continue
-		}
-
-		// Skip AES-encrypted files (encrypted archives)
-		if metadata.Encryption == metapb.Encryption_AES {
-			skippedCount++
-			continue
-		}
-
-		// Generate NZB
-		nzbContent, err := s.generateNZBFromMetadata(metadata, virtualPath)
-		if err != nil {
-			slog.WarnContext(ctx, "Failed to generate NZB",
-				"error", err,
-				"virtual_path", virtualPath)
-			continue
-		}
-
-		// Create NZB filename
-		nzbFilename := strings.TrimSuffix(virtualFilename, filepath.Ext(virtualFilename)) + ".nzb"
-
-		// Add to ZIP
-		writer, err := zipWriter.Create(nzbFilename)
-		if err != nil {
-			slog.WarnContext(ctx, "Failed to create ZIP entry",
-				"error", err,
-				"filename", nzbFilename)
-			continue
-		}
-
-		if _, err := io.Copy(writer, bytes.NewReader(nzbContent)); err != nil {
-			slog.WarnContext(ctx, "Failed to write NZB to ZIP",
-				"error", err,
-				"filename", nzbFilename)
-			continue
-		}
-
-		exportedCount++
-	}
-
-	// Close ZIP writer
-	if err := zipWriter.Close(); err != nil {
-		slog.ErrorContext(ctx, "Failed to close ZIP writer",
-			"error", err)
-		return RespondInternalError(c, "Failed to finalize ZIP archive", err.Error())
-	}
-
-	if exportedCount == 0 {
-		return RespondError(c, fiber.StatusNotFound, ErrCodeNotFound, "No files were exported", fmt.Sprintf("Skipped %d files (archives or AES-encrypted)", skippedCount))
-	}
-
-	slog.InfoContext(ctx, "Batch export completed",
-		"exported_count", exportedCount,
-		"skipped_count", skippedCount)
-
-	// Set response headers for ZIP download
+	// Set ZIP headers before streaming begins.
 	timestamp := time.Now().Unix()
 	zipFilename := fmt.Sprintf("nzb-export-%d.zip", timestamp)
-
 	c.Set("Content-Type", "application/zip")
 	c.Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, zipFilename))
 
-	return c.Send(zipBuffer.Bytes())
+	// Stream the ZIP instead of buffering the whole archive in memory.
+	c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
+		zipWriter := zip.NewWriter(w)
+		exportedCount := 0
+		skippedCount := 0
+
+		for _, metaPath := range metadataFiles {
+			// Calculate virtual path
+			relPath, err := filepath.Rel(metadataRootPath, metaPath)
+			if err != nil {
+				slog.WarnContext(ctx, "Failed to calculate relative path",
+					"error", err,
+					"meta_path", metaPath)
+				continue
+			}
+
+			// Remove .meta extension to get virtual filename
+			virtualFilename := strings.TrimSuffix(relPath, ".meta")
+
+			// Check if should exclude based on archive pattern
+			// Archives and AES-encrypted files are always excluded
+			if shouldExcludeFile(virtualFilename, true) {
+				skippedCount++
+				slog.DebugContext(ctx, "Skipping archive file",
+					"filename", virtualFilename)
+				continue
+			}
+
+			// Calculate full virtual path
+			virtualPath := filepath.Join(virtualRootPath, virtualFilename)
+			virtualPath = strings.ReplaceAll(virtualPath, string(filepath.Separator), "/")
+
+			// Read metadata
+			metadata, err := s.metadataReader.GetFileMetadata(virtualPath)
+			if err != nil {
+				slog.WarnContext(ctx, "Failed to read metadata",
+					"error", err,
+					"virtual_path", virtualPath)
+				continue
+			}
+
+			if metadata == nil {
+				slog.WarnContext(ctx, "Metadata not found",
+					"virtual_path", virtualPath)
+				continue
+			}
+
+			// Skip AES-encrypted files (encrypted archives)
+			if metadata.Encryption == metapb.Encryption_AES {
+				skippedCount++
+				continue
+			}
+
+			// Generate NZB
+			nzbContent, err := s.generateNZBFromMetadata(metadata, virtualPath)
+			if err != nil {
+				slog.WarnContext(ctx, "Failed to generate NZB",
+					"error", err,
+					"virtual_path", virtualPath)
+				continue
+			}
+
+			// Create NZB filename
+			nzbFilename := strings.TrimSuffix(virtualFilename, filepath.Ext(virtualFilename)) + ".nzb"
+
+			// Add to ZIP
+			writer, err := zipWriter.Create(nzbFilename)
+			if err != nil {
+				slog.WarnContext(ctx, "Failed to create ZIP entry",
+					"error", err,
+					"filename", nzbFilename)
+				continue
+			}
+
+			if _, err := io.Copy(writer, bytes.NewReader(nzbContent)); err != nil {
+				slog.WarnContext(ctx, "Failed to write NZB to ZIP",
+					"error", err,
+					"filename", nzbFilename)
+				continue
+			}
+
+			exportedCount++
+		}
+
+		// Headers are already sent, so finalize errors can only be logged.
+		if err := zipWriter.Close(); err != nil {
+			slog.ErrorContext(ctx, "Failed to close ZIP writer", "error", err)
+			return
+		}
+		if err := w.Flush(); err != nil {
+			slog.WarnContext(ctx, "Failed to flush export stream", "error", err)
+			return
+		}
+
+		slog.InfoContext(ctx, "Batch export completed",
+			"exported_count", exportedCount,
+			"skipped_count", skippedCount)
+	})
+
+	return nil
 }
