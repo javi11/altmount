@@ -52,7 +52,12 @@ const DARK_THEMES = [
 	"abyss",
 ] as const;
 
-type ThemeId = (typeof LIGHT_THEMES)[number] | (typeof DARK_THEMES)[number];
+const MINIMAL_THEMES = ["glass-light", "glass-dark"] as const;
+
+type ThemeId =
+	| (typeof LIGHT_THEMES)[number]
+	| (typeof DARK_THEMES)[number]
+	| (typeof MINIMAL_THEMES)[number];
 
 function getActiveTheme(): ThemeId | "system" {
 	const saved = localStorage.getItem("theme");
@@ -73,12 +78,17 @@ function applyTheme(theme: ThemeId | "system") {
 
 function ThemeSwatch({
 	theme,
+	label,
 	isActive,
 	onClick,
+	minimal = false,
 }: {
 	theme: ThemeId;
+	label?: string;
 	isActive: boolean;
 	onClick: () => void;
+	// Minimal themes share one blue; show success/warning to preview green/amber.
+	minimal?: boolean;
 }) {
 	return (
 		<button
@@ -93,12 +103,12 @@ function ThemeSwatch({
 		>
 			<div className="flex h-8 w-full">
 				<div className="flex-1 bg-primary" />
-				<div className="flex-1 bg-secondary" />
-				<div className="flex-1 bg-accent" />
+				<div className={`flex-1 ${minimal ? "bg-success" : "bg-secondary"}`} />
+				<div className={`flex-1 ${minimal ? "bg-warning" : "bg-accent"}`} />
 				<div className="flex-1 bg-neutral" />
 			</div>
 			<div className="flex w-full items-center justify-between bg-base-100 px-2 py-1.5">
-				<span className="truncate text-[10px] text-base-content">{theme}</span>
+				<span className="truncate text-[10px] text-base-content">{label ?? theme}</span>
 				{isActive && <Check className="h-3 w-3 shrink-0 text-primary" />}
 			</div>
 		</button>
@@ -292,6 +302,25 @@ export function SystemConfigSection({
 								<ThemeSwatch
 									key={theme}
 									theme={theme}
+									isActive={activeTheme === theme}
+									onClick={() => handleThemeChange(theme)}
+								/>
+							))}
+						</div>
+					</div>
+
+					{/* Minimal themes */}
+					<div>
+						<p className="mb-2 font-semibold text-base-content/40 text-xs uppercase tracking-wider">
+							Minimal
+						</p>
+						<div className="grid min-w-0 grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
+							{MINIMAL_THEMES.map((theme) => (
+								<ThemeSwatch
+									key={theme}
+									theme={theme}
+									label={theme.replace("glass-", "")}
+									minimal
 									isActive={activeTheme === theme}
 									onClick={() => handleThemeChange(theme)}
 								/>

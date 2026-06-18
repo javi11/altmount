@@ -38,12 +38,13 @@ const DEFAULT_NEW_INSTANCE: NewInstanceForm = {
 };
 
 const ARR_TYPES: { type: ArrsType; label: string; color: string; defaultCategory: string }[] = [
-	{ type: "radarr", label: "Radarr", color: "bg-primary", defaultCategory: "movies" },
-	{ type: "sonarr", label: "Sonarr", color: "bg-secondary", defaultCategory: "tv" },
-	{ type: "lidarr", label: "Lidarr", color: "bg-accent", defaultCategory: "music" },
-	{ type: "readarr", label: "Readarr", color: "bg-info", defaultCategory: "books" },
-	{ type: "whisparr", label: "Whisparr", color: "bg-warning", defaultCategory: "movies" },
-	{ type: "sportarr", label: "Sportarr", color: "bg-success", defaultCategory: "sports" },
+	// Distinct accents per type; minimal themes collapse primary/secondary/accent/info to one blue.
+	{ type: "radarr", label: "Radarr", color: "bg-warning", defaultCategory: "movies" },
+	{ type: "sonarr", label: "Sonarr", color: "bg-info", defaultCategory: "tv" },
+	{ type: "lidarr", label: "Lidarr", color: "bg-success", defaultCategory: "music" },
+	{ type: "readarr", label: "Readarr", color: "bg-error", defaultCategory: "books" },
+	{ type: "whisparr", label: "Whisparr", color: "bg-secondary", defaultCategory: "movies" },
+	{ type: "sportarr", label: "Sportarr", color: "bg-accent", defaultCategory: "sports" },
 ];
 
 export function ArrsConfigSection({

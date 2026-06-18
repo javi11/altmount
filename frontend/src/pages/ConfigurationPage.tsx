@@ -418,6 +418,7 @@ export function ConfigurationPage() {
 												<li key={key}>
 													<button
 														type="button"
+														aria-current={isActive ? "page" : undefined}
 														className={`flex items-center gap-3 rounded-xl px-4 py-3 transition-all ${
 															isActive
 																? "scale-[1.02] bg-primary font-bold text-primary-content shadow-lg shadow-primary/20"
