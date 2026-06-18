@@ -7,6 +7,8 @@ import type { ProviderConfig, ProviderFormData } from "../../types/config";
 interface ProviderModalProps {
 	mode: "create" | "edit";
 	provider?: ProviderConfig | null;
+	/** Seeds the "Backup Only" toggle when creating a new provider. */
+	defaultBackup?: boolean;
 	onSuccess: () => void;
 	onCancel: () => void;
 }
@@ -31,9 +33,16 @@ const defaultFormData: ProviderFormData = {
 	user_agent: "",
 	quota_bytes: 0,
 	quota_period_hours: 0,
+	account_expiration_date: "",
 };
 
-export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderModalProps) {
+export function ProviderModal({
+	mode,
+	provider,
+	defaultBackup = false,
+	onSuccess,
+	onCancel,
+}: ProviderModalProps) {
 	const [formData, setFormData] = useState<ProviderFormData>(defaultFormData);
 	const [isTestingConnection, setIsTestingConnection] = useState(false);
 	const [connectionTestResult, setConnectionTestResult] = useState<{
@@ -69,6 +78,7 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 				user_agent: provider.user_agent ?? "",
 				quota_bytes: provider.quota_bytes ?? 0,
 				quota_period_hours: provider.quota_period_hours ?? 0,
+				account_expiration_date: provider.account_expiration_date ?? "",
 			});
 			const qb = provider.quota_bytes ?? 0;
 			setQuotaEnabled(qb > 0);
@@ -76,13 +86,13 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 			// For edit mode, allow saving without testing if only non-connection fields change
 			setCanSave(true);
 		} else {
-			setFormData(defaultFormData);
+			setFormData({ ...defaultFormData, is_backup_provider: defaultBackup });
 			setQuotaEnabled(false);
 			setQuotaGbInput("1");
 			setCanSave(false);
 		}
 		setConnectionTestResult(null);
-	}, [mode, provider]);
+	}, [mode, provider, defaultBackup]);
 
 	const handleInputChange = (field: keyof ProviderFormData, value: string | number | boolean) => {
 		setFormData((prev) => ({ ...prev, [field]: value }));
@@ -184,6 +194,8 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 					updateData.keepalive_command = formData.keepalive_command;
 				if (formData.user_agent !== (provider.user_agent ?? ""))
 					updateData.user_agent = formData.user_agent;
+				if (formData.account_expiration_date !== (provider.account_expiration_date ?? ""))
+					updateData.account_expiration_date = formData.account_expiration_date;
 				if (formData.quota_bytes !== (provider.quota_bytes ?? 0))
 					updateData.quota_bytes = formData.quota_bytes;
 				if (formData.quota_period_hours !== (provider.quota_period_hours ?? 0))
@@ -217,22 +229,21 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 				</h3>
 
 				<form className="min-w-0 space-y-6" onSubmit={(e) => e.preventDefault()}>
-					{/* Host */}
-					<fieldset className="fieldset">
-						<legend className="fieldset-legend font-bold">NNTP Host *</legend>
-						<input
-							id="host"
-							type="text"
-							className="input input-bordered w-full font-mono text-sm"
-							value={formData.host}
-							onChange={(e) => handleInputChange("host", e.target.value)}
-							placeholder="news.example.com"
-							required
-						/>
-					</fieldset>
+					{/* Host + Port */}
+					<div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
+						<fieldset className="fieldset sm:col-span-2">
+							<legend className="fieldset-legend font-bold">NNTP Host *</legend>
+							<input
+								id="host"
+								type="text"
+								className="input input-bordered w-full font-mono text-sm"
+								value={formData.host}
+								onChange={(e) => handleInputChange("host", e.target.value)}
+								placeholder="news.example.com"
+								required
+							/>
+						</fieldset>
 
-					{/* Connection Details */}
-					<div className="grid grid-cols-1 gap-6 md:grid-cols-2">
 						<fieldset className="fieldset">
 							<legend className="fieldset-legend font-bold">Port</legend>
 							<input
@@ -247,7 +258,10 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 								max={65535}
 							/>
 						</fieldset>
+					</div>
 
+					{/* Connection Capacity */}
+					<div className="grid grid-cols-1 gap-6 md:grid-cols-2">
 						<fieldset className="fieldset">
 							<legend className="fieldset-legend font-bold">Max Connections</legend>
 							<input
@@ -403,20 +417,36 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 								</div>
 							</label>
 						</div>
-					</div>
 
-					{/* Proxy Settings */}
-					<fieldset className="fieldset">
-						<legend className="fieldset-legend font-bold">SOCKS5 Proxy (Optional)</legend>
-						<input
-							id="proxy_url"
-							type="text"
-							className="input input-bordered w-full font-mono text-sm"
-							value={formData.proxy_url}
-							onChange={(e) => handleInputChange("proxy_url", e.target.value)}
-							placeholder="socks5://user:pass@host:port"
-						/>
-					</fieldset>
+						{/* Proxy + Account Expiration */}
+						<div className="grid grid-cols-1 gap-4 border-base-300/60 border-t pt-4 sm:grid-cols-2">
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend font-bold">SOCKS5 Proxy (Optional)</legend>
+								<input
+									id="proxy_url"
+									type="text"
+									className="input input-bordered w-full font-mono text-sm"
+									value={formData.proxy_url}
+									onChange={(e) => handleInputChange("proxy_url", e.target.value)}
+									placeholder="socks5://user:pass@host:port"
+								/>
+							</fieldset>
+
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend font-bold">Account Expiration</legend>
+								<input
+									id="account_expiration_date"
+									type="date"
+									className="input input-bordered w-full font-mono text-sm"
+									value={formData.account_expiration_date}
+									onChange={(e) => handleInputChange("account_expiration_date", e.target.value)}
+								/>
+								<p className="label mt-1 text-base-content/70 text-xs">
+									Optional. When this account's subscription ends.
+								</p>
+							</fieldset>
+						</div>
+					</div>
 
 					{/* Keep-Alive */}
 					<div className="space-y-4 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-5">

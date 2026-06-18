@@ -410,6 +410,7 @@ type ProviderConfig struct {
 	LastRTTMs                int64      `yaml:"last_rtt_ms" mapstructure:"last_rtt_ms" json:"last_rtt_ms,omitempty"`
 	LastSpeedTestMbps        float64    `yaml:"last_speed_test_mbps" mapstructure:"last_speed_test_mbps" json:"last_speed_test_mbps,omitempty"`
 	LastSpeedTestTime        *time.Time `yaml:"last_speed_test_time" mapstructure:"last_speed_test_time" json:"last_speed_test_time,omitempty"`
+	AccountExpirationDate    string     `yaml:"account_expiration_date" mapstructure:"account_expiration_date" json:"account_expiration_date,omitempty"`
 }
 
 // SABnzbdConfig represents SABnzbd-compatible API configuration

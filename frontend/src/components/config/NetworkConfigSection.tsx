@@ -1,10 +1,10 @@
 import { Globe } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { ConfigResponse, NetworkConfig } from "../../types/config";
+import type { ConfigResponse, NetworkConfig, NzblnkConfig } from "../../types/config";
 
 interface NetworkConfigSectionProps {
 	config: ConfigResponse;
-	onUpdate?: (section: string, data: NetworkConfig) => Promise<void>;
+	onUpdate?: (section: string, data: NetworkConfig | NzblnkConfig) => Promise<void>;
 	isReadOnly?: boolean;
 	isUpdating?: boolean;
 }
@@ -21,24 +21,47 @@ export function NetworkConfigSection({
 	isReadOnly,
 	isUpdating,
 }: NetworkConfigSectionProps) {
-	const baseline = config.network ?? emptyNetwork;
-	const [data, setData] = useState<NetworkConfig>(baseline);
+	const [data, setData] = useState<NetworkConfig>(config.network ?? emptyNetwork);
+	const [nzblnk, setNzblnk] = useState<NzblnkConfig>(config.nzblnk ?? {});
 	const [hasChanges, setHasChanges] = useState(false);
 
 	useEffect(() => {
 		setData(config.network ?? emptyNetwork);
+		setNzblnk(config.nzblnk ?? {});
 		setHasChanges(false);
-	}, [config.network]);
+	}, [config.network, config.nzblnk]);
+
+	const recomputeChanges = (nextNetwork: NetworkConfig, nextNzblnk: NzblnkConfig) => {
+		const networkChanged =
+			JSON.stringify(nextNetwork) !== JSON.stringify(config.network ?? emptyNetwork);
+		const nzblnkChanged = JSON.stringify(nextNzblnk) !== JSON.stringify(config.nzblnk ?? {});
+		setHasChanges(networkChanged || nzblnkChanged);
+	};
 
 	const handleChange = (field: keyof NetworkConfig, value: string) => {
 		const next: NetworkConfig = { ...data, [field]: value };
 		setData(next);
-		setHasChanges(JSON.stringify(next) !== JSON.stringify(baseline));
+		recomputeChanges(next, nzblnk);
+	};
+
+	const handleNzblnkChange = (field: keyof NzblnkConfig, value: string) => {
+		const next: NzblnkConfig = { ...nzblnk, [field]: value };
+		setNzblnk(next);
+		recomputeChanges(data, next);
 	};
 
 	const handleSave = async () => {
 		if (!onUpdate || !hasChanges) return;
-		await onUpdate("network", data);
+		// Capture locally so a refetch-triggered state reset between the two
+		// per-section PATCH calls can't drop the pending edits.
+		const networkToSave = data;
+		const nzblnkToSave = nzblnk;
+		if (JSON.stringify(networkToSave) !== JSON.stringify(config.network ?? emptyNetwork)) {
+			await onUpdate("network", networkToSave);
+		}
+		if (JSON.stringify(nzblnkToSave) !== JSON.stringify(config.nzblnk ?? {})) {
+			await onUpdate("nzblnk", nzblnkToSave);
+		}
 		setHasChanges(false);
 	};
 
@@ -46,7 +69,7 @@ export function NetworkConfigSection({
 		<div className="space-y-6">
 			<div className="flex items-center gap-2">
 				<Globe className="h-5 w-5" aria-hidden="true" />
-				<h2 className="font-semibold text-xl">Network &amp; Proxy</h2>
+				<h2 className="font-semibold text-xl">Network &amp; User Agent</h2>
 			</div>
 
 			<div className="alert alert-info">
@@ -97,6 +120,41 @@ export function NetworkConfigSection({
 				/>
 				<p className="label">Comma-separated hosts, IPs, or CIDRs that bypass the proxy.</p>
 			</fieldset>
+
+			{/* NZBLNK Resolver (merged from the former NZBLNK section) */}
+			<div className="min-w-0 space-y-4 border-base-200 border-t pt-6">
+				<div className="min-w-0">
+					<h3 className="font-bold text-base-content text-lg tracking-tight">NZBLNK Resolver</h3>
+					<p className="break-words text-base-content/50 text-sm">
+						Configure how nzblnk:// links are resolved via public NZB indexers.
+					</p>
+				</div>
+
+				<div className="min-w-0 space-y-6 overflow-hidden rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+					<div className="flex items-center gap-2">
+						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
+							HTTP Headers
+						</h4>
+						<div className="h-px flex-1 bg-base-300/50" />
+					</div>
+
+					<fieldset className="fieldset min-w-0">
+						<legend className="fieldset-legend font-semibold">Indexer User-Agent</legend>
+						<input
+							type="text"
+							className="input input-bordered w-full min-w-0 max-w-full bg-base-100 font-mono text-sm"
+							value={nzblnk.user_agent ?? ""}
+							disabled={isReadOnly}
+							placeholder="Mozilla/5.0 ... (leave empty for default)"
+							onChange={(e) => handleNzblnkChange("user_agent", e.target.value)}
+						/>
+						<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/70 text-xs">
+							HTTP User-Agent sent when searching and downloading from public NZB indexers (e.g.
+							nzbking.com, nzbindex.com). Leave empty to use the built-in default.
+						</p>
+					</fieldset>
+				</div>
+			</div>
 
 			<button
 				type="button"

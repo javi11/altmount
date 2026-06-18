@@ -289,6 +289,7 @@ export interface ProviderConfig {
 	last_rtt_ms?: number;
 	last_speed_test_mbps?: number;
 	last_speed_test_time?: string;
+	account_expiration_date?: string;
 }
 
 // NZBLNK resolver configuration
@@ -498,6 +499,7 @@ export interface ProviderUpdateRequest {
 	user_agent?: string;
 	quota_bytes?: number;
 	quota_period_hours?: number;
+	account_expiration_date?: string;
 }
 
 // SABnzbd update request
@@ -606,6 +608,7 @@ export interface ProviderFormData {
 	user_agent: string;
 	quota_bytes: number;
 	quota_period_hours: number;
+	account_expiration_date: string;
 }
 
 export interface LogFormData {
@@ -719,6 +722,7 @@ export interface ProviderCreateRequest {
 	user_agent?: string;
 	quota_bytes?: number;
 	quota_period_hours?: number;
+	account_expiration_date?: string;
 }
 
 export interface ProviderReorderRequest {
@@ -821,9 +825,9 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		canEdit: true,
 	},
 	network: {
-		title: "Network & Proxy",
+		title: "Network & User Agent",
 		description:
-			"HTTP/HTTPS proxy for outbound indexer, Arrs, NZB grab, and SABnzbd fallback traffic",
+			"HTTP/HTTPS proxy and indexer User-Agent for outbound indexer, Arrs, NZB grab, and SABnzbd fallback traffic",
 		icon: "Globe",
 		canEdit: true,
 	},

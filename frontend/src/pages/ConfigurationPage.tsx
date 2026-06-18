@@ -25,7 +25,6 @@ import { HealthConfigSection } from "../components/config/HealthConfigSection";
 import { MetadataConfigSection } from "../components/config/MetadataConfigSection";
 import { MountConfigSection } from "../components/config/MountConfigSection";
 import { NetworkConfigSection } from "../components/config/NetworkConfigSection";
-import { NzblnkConfigSection } from "../components/config/NzblnkConfigSection";
 import { ProvidersConfigSection } from "../components/config/ProvidersConfigSection";
 import { SABnzbdConfigSection } from "../components/config/SABnzbdConfigSection";
 import { StreamingConfigSection } from "../components/config/StreamingConfigSection";
@@ -97,7 +96,7 @@ const SECTION_GROUPS = [
 	},
 	{
 		title: "Automation",
-		sections: ["sabnzbd", "arrs", "health", "stremio", "import", "nzblnk"],
+		sections: ["sabnzbd", "arrs", "health", "stremio", "import"],
 	},
 	{
 		title: "System",
@@ -122,6 +121,8 @@ export function ConfigurationPage() {
 		if (!section) return "webdav";
 		// Redirect legacy rclone/fuse paths to mount
 		if (section === "rclone" || section === "fuse") return "mount" as ConfigSection;
+		// NZBLNK settings now live inside the Network section
+		if (section === "nzblnk") return "network" as ConfigSection;
 		const validSections = Object.keys(CONFIG_SECTIONS) as (ConfigSection | "system")[];
 		return validSections.includes(section as ConfigSection | "system")
 			? (section as ConfigSection | "system")
@@ -134,6 +135,8 @@ export function ConfigurationPage() {
 			navigate("/config/webdav", { replace: true });
 		} else if (section === "rclone" || section === "fuse") {
 			navigate("/config/mount", { replace: true });
+		} else if (section === "nzblnk") {
+			navigate("/config/network", { replace: true });
 		}
 	}, [section, navigate]);
 
@@ -471,7 +474,9 @@ export function ConfigurationPage() {
 								</div>
 							</div>
 
-							<div className="mx-auto w-full min-w-0 max-w-4xl">
+							<div
+								className={`mx-auto w-full min-w-0 ${activeSection === "providers" ? "max-w-none" : "max-w-4xl"}`}
+							>
 								{activeSection === "webdav" && (
 									<WebDAVConfigSection
 										config={config}
@@ -559,13 +564,6 @@ export function ConfigurationPage() {
 										isUpdating={updateConfigSection.isPending}
 									/>
 								)}
-								{activeSection === "nzblnk" && (
-									<NzblnkConfigSection
-										config={config}
-										onUpdate={handleConfigUpdate}
-										isUpdating={updateConfigSection.isPending}
-									/>
-								)}
 								{activeSection === "network" && (
 									<NetworkConfigSection
 										config={config}
@@ -586,7 +584,6 @@ export function ConfigurationPage() {
 									"arrs",
 									"health",
 									"stremio",
-									"nzblnk",
 									"network",
 								].includes(activeSection) && (
 									<ComingSoonSection

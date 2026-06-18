@@ -106,6 +106,19 @@ export function formatRelativeTime(date: string | Date) {
 	return target.toLocaleDateString();
 }
 
+// Formats a "YYYY-MM-DD" account expiration date for display without timezone drift.
+// Returns "" for empty/invalid input so callers can pick their own placeholder.
+export function formatExpirationDate(date?: string): string {
+	if (!date) return "";
+	const [year, month, day] = date.split("-").map(Number);
+	if (!year || !month || !day) return date;
+	return new Date(year, month - 1, day).toLocaleDateString(undefined, {
+		year: "numeric",
+		month: "short",
+		day: "numeric",
+	});
+}
+
 export function formatFutureTime(date: string | Date | null | undefined): string {
 	if (!date) return "Never";
 
