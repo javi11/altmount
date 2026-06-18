@@ -776,6 +776,53 @@ func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath 
 	return item, nil
 }
 
+// FindAndUpdatePendingUpload de-duplicates manual NZB re-uploads. UNIQUE(nzb_path) can't catch them
+// because ensurePersistentNzb rewrites the path after insert, so this matches a still-pending item by
+// its category-independent base filename and updates its category/priority in place. Returns nil if none.
+func (s *Service) FindAndUpdatePendingUpload(ctx context.Context, filename string, category *string, priority *database.QueuePriority) (*database.ImportQueueItem, error) {
+	cfg := s.configGetter()
+	nzbsDir := filepath.Join(filepath.Dir(cfg.Database.Path), ".nzbs")
+
+	base := nzbtrim.TrimNzbExtension(sanitizeFilename(filepath.Base(filename)))
+	if base == "" {
+		return nil, nil
+	}
+
+	items, err := s.database.Repository.GetPendingQueueItemsByPathPrefix(ctx, nzbsDir+string(filepath.Separator))
+	if err != nil {
+		return nil, err
+	}
+
+	for _, it := range items {
+		// Persisted name is "<base><ext>" or, on collision, "<id>-<base><ext>".
+		cand := nzbtrim.TrimNzbExtension(filepath.Base(it.NzbPath))
+		if cand != base && cand != fmt.Sprintf("%d-%s", it.ID, base) {
+			continue
+		}
+
+		prio := it.Priority
+		if priority != nil {
+			prio = *priority
+		}
+		if err := s.database.Repository.UpdateQueueItemCategory(ctx, it.ID, category, prio); err != nil {
+			return nil, err
+		}
+
+		updated, err := s.database.Repository.GetQueueItem(ctx, it.ID)
+		if err != nil {
+			return nil, err
+		}
+
+		if s.broadcaster != nil {
+			s.broadcaster.BroadcastQueueChanged()
+		}
+		s.log.InfoContext(ctx, "Updated existing pending upload instead of creating a duplicate", "queue_id", it.ID)
+		return updated, nil
+	}
+
+	return nil, nil
+}
+
 // processNzbItem processes the NZB file for a queue item
 func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueueItem) (string, []string, error) {
 	// Determine the base path
