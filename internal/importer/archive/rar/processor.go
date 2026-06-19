@@ -516,6 +516,14 @@ func (rh *rarProcessor) convertAggregatedFilesToRarContent(ctx context.Context, 
 
 		rc.Segments = fileSegments
 
+		// Guard against partially-covered inner files. If volume following stops
+		// early (truncated/incomplete archive), an inner file's mapped segments can
+		// fall far short of the size declared in the RAR header. Emitting it anyway
+		// would surface an unplayable file that still looks "healthy", which makes
+		// downstream tools (e.g. Sonarr) treat the item as complete and stop
+		// searching for a good copy. Instead, drop any file whose declared size
+		// exceeds its mapped bytes by more than a single segment's worth (~800KB
+		// tolerance for a missing trailing segment) so it stays wanted/searchable.
 		var mappedBytes int64
 		for _, s := range fileSegments {
 			mappedBytes += s.EndOffset - s.StartOffset + 1

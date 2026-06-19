@@ -11,11 +11,12 @@ import (
 
 // ProgressUpdate represents a progress update event
 type ProgressUpdate struct {
-	QueueID    int       `json:"queue_id"`
-	Percentage int       `json:"percentage"`
-	Stage      string    `json:"stage,omitempty"`  // e.g. "Parsing NZB", "Validating segments"
-	Status     string    `json:"status,omitempty"` // "completed" or "failed" on terminal events
-	Timestamp  time.Time `json:"timestamp"`
+	QueueID     int       `json:"queue_id"`
+	Percentage  int       `json:"percentage"`
+	Stage       string    `json:"stage,omitempty"`        // e.g. "Parsing NZB", "Validating segments"
+	Status      string    `json:"status,omitempty"`       // "completed", "failed", or "streamable" on terminal/early events
+	StoragePath string    `json:"storage_path,omitempty"` // set when Status="streamable"
+	Timestamp   time.Time `json:"timestamp"`
 }
 
 // ProgressEntry holds the current progress state for a single queue item.
@@ -207,6 +208,19 @@ func (pb *ProgressBroadcaster) BroadcastHealthChanged() {
 		Timestamp: time.Now(),
 	}
 	pb.broadcast(update, "subscriber channel full, skipping health_changed")
+}
+
+// NotifyStreamable broadcasts an early-mount event for a queue item. The storage
+// path is available and the file is accessible via the VFS before post-processing
+// completes. Stremio waiters can return stream URLs immediately on this signal.
+func (pb *ProgressBroadcaster) NotifyStreamable(queueID int, storagePath string) {
+	update := ProgressUpdate{
+		QueueID:     queueID,
+		Status:      "streamable",
+		StoragePath: storagePath,
+		Timestamp:   time.Now(),
+	}
+	pb.broadcast(update, "subscriber channel full, skipping streamable event")
 }
 
 // BroadcastQueueChanged sends a queue-change notification to all SSE subscribers.

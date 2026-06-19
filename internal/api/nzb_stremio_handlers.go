@@ -2,7 +2,9 @@ package api
 
 import (
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -11,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/javi11/altmount/internal/auth"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
 )
@@ -42,11 +45,15 @@ type StremioStream struct {
 }
 
 // StremioStreamsResponse is the response returned by the Stremio stream endpoint.
-// The _queue_item_id and _queue_status fields are AltMount extensions that Stremio ignores.
+// The _queue_item_id, _queue_status, and _cached fields are AltMount extensions that Stremio ignores.
 type StremioStreamsResponse struct {
 	Streams     []StremioStream `json:"streams"`
 	QueueItemID int64           `json:"_queue_item_id"`
 	QueueStatus string          `json:"_queue_status"`
+	// Cached is true when streams were served from an already-completed queue item
+	// without re-processing. Callers such as AIOStreams can use this to show an
+	// "instant" indicator to the user.
+	Cached bool `json:"_cached"`
 }
 
 // handleNzbStreams handles POST /api/nzb/streams.
@@ -56,12 +63,14 @@ type StremioStreamsResponse struct {
 // found in the NZB output.
 //
 //	@Summary		Get Stremio streams for NZB file
-//	@Description	Accepts an NZB file upload, queues it with high priority, and synchronously waits for completion before returning Stremio-compatible stream URLs for all media files found in the NZB output. Authenticated via download_key form field (SHA256 of API key).
+//	@Description	Accepts an NZB file (upload or URL), queues it with high priority, and returns Stremio-compatible stream URLs as soon as the file is accessible via VFS. Auth: download_key form field (SHA256 of API key) or X-Api-Key header (raw API key). Returns _cached=true when served from an already-completed item.
 //	@Tags			Stremio
 //	@Accept			multipart/form-data
 //	@Produce		json
-//	@Param			file			formData	file	true	"NZB file to process"
-//	@Param			download_key	formData	string	true	"SHA256 hash of the user's API key"
+//	@Param			file			formData	file	false	"NZB file to process (mutually exclusive with nzb_url)"
+//	@Param			nzb_url			formData	string	false	"URL to download the NZB from (mutually exclusive with file)"
+//	@Param			download_key	formData	string	false	"SHA256 hash of the user's API key (alternative: X-Api-Key header)"
+//	@Param			X-Api-Key		header		string	false	"Raw API key (alternative to download_key form field)"
 //	@Param			category		formData	string	false	"Queue category (default: stremio)"
 //	@Param			timeout			formData	int		false	"Processing timeout in seconds (default: 300)"
 //	@Success		200	{object}	StremioStreamsResponse
@@ -81,29 +90,88 @@ func (s *Server) handleNzbStreams(c *fiber.Ctx) error {
 		return RespondNotFound(c, "Stremio endpoint", "Stremio integration is disabled in configuration")
 	}
 
-	// --- Authenticate via download_key ---
+	// --- Authenticate via download_key form field, X-Api-Key header, or query param ---
+	// download_key: SHA256 hash of the API key (used by the Stremio addon play path)
+	// X-Api-Key:    raw API key (used by AIOStreams and other integrations)
 	downloadKey := c.FormValue("download_key")
 	if downloadKey == "" {
-		return RespondUnauthorized(c, "download_key is required", "Provide the SHA256 hash of your API key")
+		downloadKey = c.Query("download_key")
+	}
+	if downloadKey == "" {
+		// Accept raw API key via X-Api-Key header (AIOStreams sends altmountApiKey here).
+		// Hash it so validateDownloadKey can compare against the stored hash.
+		if rawKey := c.Get("X-Api-Key"); rawKey != "" {
+			if s.validateAPIKey(c, rawKey) {
+				downloadKey = auth.HashAPIKey(rawKey)
+			} else {
+				slog.WarnContext(ctx, "Stremio stream endpoint: authentication failed - invalid X-Api-Key")
+				return RespondUnauthorized(c, "Invalid X-Api-Key", "")
+			}
+		}
+	}
+	if downloadKey == "" {
+		return RespondUnauthorized(c, "Authentication required", "Provide download_key (SHA256 of API key) or X-Api-Key header")
 	}
 	if !s.validateDownloadKey(ctx, downloadKey) {
 		slog.WarnContext(ctx, "Stremio stream endpoint: authentication failed - invalid download_key")
 		return RespondUnauthorized(c, "Invalid download_key", "")
 	}
 
-	// --- Validate uploaded NZB file ---
-	file, err := c.FormFile("file")
-	if err != nil {
-		return RespondBadRequest(c, "No file provided", "A .nzb file must be uploaded")
-	}
+	// --- Accept NZB as file upload or by URL ---
+	// nzb_url allows callers (e.g. AIOStreams) to pass the NZB download URL directly
+	// instead of uploading the file bytes, avoiding an extra round-trip.
+	nzbURL := c.FormValue("nzb_url")
 
-	if !nzbtrim.HasNzbExtension(file.Filename) {
-		return RespondValidationError(c, "Invalid file type", "Only .nzb or .nzb.gz files are allowed")
-	}
+	var nzbFilename string
+	var nzbData []byte
 
-	const maxUploadSize = 100 * 1024 * 1024 // 100 MB
-	if file.Size > maxUploadSize {
-		return RespondValidationError(c, "File too large", "File size must be less than 100MB")
+	if nzbURL != "" {
+		// Download NZB from the provided URL
+		const maxNzbFetchSize = 100 * 1024 * 1024 // 100 MB
+		resp, err := http.Get(nzbURL) //nolint:gosec // URL is provided by an authenticated caller
+		if err != nil {
+			return RespondBadRequest(c, "Failed to fetch NZB from URL", err.Error())
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return RespondBadRequest(c, "Failed to fetch NZB from URL", fmt.Sprintf("HTTP %d", resp.StatusCode))
+		}
+		nzbData, err = io.ReadAll(io.LimitReader(resp.Body, maxNzbFetchSize))
+		if err != nil {
+			return RespondBadRequest(c, "Failed to read NZB from URL", err.Error())
+		}
+		// Derive filename from URL path
+		nzbFilename = filepath.Base(nzbURL)
+		if idx := strings.Index(nzbFilename, "?"); idx >= 0 {
+			nzbFilename = nzbFilename[:idx]
+		}
+		if !nzbtrim.HasNzbExtension(nzbFilename) {
+			nzbFilename = nzbFilename + ".nzb"
+		}
+	} else {
+		// Require file upload
+		file, err := c.FormFile("file")
+		if err != nil {
+			return RespondBadRequest(c, "No file provided", "Upload a .nzb file or provide nzb_url")
+		}
+		if !nzbtrim.HasNzbExtension(file.Filename) {
+			return RespondValidationError(c, "Invalid file type", "Only .nzb or .nzb.gz files are allowed")
+		}
+		const maxUploadSize = 100 * 1024 * 1024 // 100 MB
+		if file.Size > maxUploadSize {
+			return RespondValidationError(c, "File too large", "File size must be less than 100MB")
+		}
+		nzbFilename = file.Filename
+		// Read file bytes for saving below
+		f, err := file.Open()
+		if err != nil {
+			return RespondInternalError(c, "Failed to open uploaded file", err.Error())
+		}
+		defer f.Close()
+		nzbData, err = io.ReadAll(f)
+		if err != nil {
+			return RespondInternalError(c, "Failed to read uploaded file", err.Error())
+		}
 	}
 
 	// --- Resolve base URL ---
@@ -120,7 +188,7 @@ func (s *Server) handleNzbStreams(c *fiber.Ctx) error {
 
 	// --- Derive stable names before touching the filesystem ---
 	uploadDir := filepath.Join(os.TempDir(), "altmount-uploads")
-	safeFilename := filepath.Base(file.Filename)
+	safeFilename := filepath.Base(nzbFilename)
 	nzbName := nzbtrim.TrimNzbExtension(safeFilename)
 	tempPath := filepath.Join(uploadDir, safeFilename)
 
@@ -144,6 +212,7 @@ func (s *Server) handleNzbStreams(c *fiber.Ctx) error {
 					Streams:     streams,
 					QueueItemID: prev.ID,
 					QueueStatus: string(prev.Status),
+					Cached:      true,
 				})
 			}
 		}
@@ -162,8 +231,8 @@ func (s *Server) handleNzbStreams(c *fiber.Ctx) error {
 		return RespondInternalError(c, "Failed to create upload directory", err.Error())
 	}
 
-	if err := c.SaveFile(file, tempPath); err != nil {
-		return RespondInternalError(c, "Failed to save uploaded file", err.Error())
+	if err := os.WriteFile(tempPath, nzbData, 0644); err != nil {
+		return RespondInternalError(c, "Failed to save NZB file", err.Error())
 	}
 
 	// --- Add NZB to queue with high priority ---
@@ -225,6 +294,7 @@ func (s *Server) waitAndRespond(c *fiber.Ctx, itemID int64, baseURL, downloadKey
 			Streams:     streams,
 			QueueItemID: current.ID,
 			QueueStatus: string(current.Status),
+			Cached:      true,
 		})
 	case database.QueueStatusFailed:
 		errMsg := ""
@@ -232,9 +302,21 @@ func (s *Server) waitAndRespond(c *fiber.Ctx, itemID int64, baseURL, downloadKey
 			errMsg = *current.ErrorMessage
 		}
 		return RespondInternalError(c, "NZB processing failed", errMsg)
+	default:
+		// If the item is already processing and has a storage path, the streamable
+		// event fired before we subscribed — return the streams immediately.
+		if current.StoragePath != nil && *current.StoragePath != "" {
+			if streams, err := s.buildStremioStreams(current, baseURL, downloadKey, nzbName); err == nil && len(streams) > 0 {
+				return c.JSON(StremioStreamsResponse{
+					Streams:     streams,
+					QueueItemID: current.ID,
+					QueueStatus: "streamable",
+				})
+			}
+		}
 	}
 
-	// Wait for a completion event from the broadcaster.
+	// Wait for a streamable or completion event from the broadcaster.
 	timer := time.NewTimer(time.Duration(timeoutSecs) * time.Second)
 	defer timer.Stop()
 
@@ -248,6 +330,20 @@ func (s *Server) waitAndRespond(c *fiber.Ctx, itemID int64, baseURL, downloadKey
 				continue
 			}
 			switch update.Status {
+			case "streamable":
+				// Return streams as soon as the file is accessible in the VFS — before
+				// post-processing (symlinks, STRM, health scheduling) completes.
+				if update.StoragePath != "" {
+					fakeItem := &database.ImportQueueItem{ID: itemID, StoragePath: &update.StoragePath}
+					if streams, err := s.buildStremioStreams(fakeItem, baseURL, downloadKey, nzbName); err == nil && len(streams) > 0 {
+						return c.JSON(StremioStreamsResponse{
+							Streams:     streams,
+							QueueItemID: itemID,
+							QueueStatus: "streamable",
+						})
+					}
+				}
+				// StoragePath empty or no media files yet — fall through to wait for completed.
 			case "completed":
 				item, err := s.queueRepo.GetQueueItem(ctx, itemID)
 				if err != nil {

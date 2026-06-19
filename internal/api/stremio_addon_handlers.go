@@ -455,6 +455,14 @@ func (s *Server) waitAndRedirectToStream(c *fiber.Ctx, itemID int64, baseURL, do
 		return redirectToFirst(current)
 	case database.QueueStatusFailed:
 		return RespondServiceUnavailable(c, "NZB processing failed", "")
+	default:
+		// If the item is already processing and has a storage path, the streamable
+		// event fired before we subscribed — redirect immediately.
+		if current.StoragePath != nil && *current.StoragePath != "" {
+			if streams, err := s.buildStremioStreams(current, baseURL, downloadKey, nzbName); err == nil && len(streams) > 0 {
+				return c.Redirect(streams[0].URL, fiber.StatusFound)
+			}
+		}
 	}
 
 	timer := time.NewTimer(time.Duration(timeoutSecs) * time.Second)
@@ -470,6 +478,15 @@ func (s *Server) waitAndRedirectToStream(c *fiber.Ctx, itemID int64, baseURL, do
 				continue
 			}
 			switch update.Status {
+			case "streamable":
+				// Redirect as soon as the file is accessible in the VFS — before post-processing.
+				if update.StoragePath != "" {
+					fakeItem := &database.ImportQueueItem{ID: itemID, StoragePath: &update.StoragePath}
+					if streams, err := s.buildStremioStreams(fakeItem, baseURL, downloadKey, nzbName); err == nil && len(streams) > 0 {
+						return c.Redirect(streams[0].URL, fiber.StatusFound)
+					}
+				}
+				// No media files yet — fall through to wait for completed.
 			case "completed":
 				item, err := s.queueRepo.GetQueueItem(ctx, itemID)
 				if err != nil {

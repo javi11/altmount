@@ -1152,6 +1152,13 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 		return err
 	}
 
+	// Signal streamable as early as possible — files are accessible via VFS now.
+	// Stremio waiters listening on the broadcaster can return stream URLs without
+	// waiting for post-processing (symlinks, STRM, health scheduling) to complete.
+	if s.broadcaster != nil {
+		s.broadcaster.NotifyStreamable(int(item.ID), resultingPath)
+	}
+
 	// Refresh mount path if needed before post-processing
 	s.postProcessor.RefreshMountPathIfNeeded(ctx, resultingPath, item.ID)
 
