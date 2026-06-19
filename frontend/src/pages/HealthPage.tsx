@@ -732,7 +732,7 @@ export function HealthPage() {
 												<li key={key}>
 													<button
 														type="button"
-														className={`flex! items-center justify-center gap-3 rounded-lg px-4 py-3 transition-all ${
+														className={`flex items-center gap-3 rounded-lg py-3 pr-4 pl-6 transition-all ${
 															isActive
 																? "bg-primary font-semibold text-primary-content shadow-md shadow-primary/20"
 																: "hover:bg-base-200"
@@ -742,7 +742,7 @@ export function HealthPage() {
 														<IconComponent
 															className={`h-5 w-5 ${isActive ? "" : "text-base-content/60"}`}
 														/>
-														<div className="min-w-0 text-center">
+														<div className="min-w-0 flex-1 text-left">
 															<div className="text-sm">{section.title}</div>
 														</div>
 													</button>

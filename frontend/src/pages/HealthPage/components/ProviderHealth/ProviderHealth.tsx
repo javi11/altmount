@@ -11,7 +11,7 @@ import {
 	Wifi,
 	WifiOff,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useToast } from "../../../../contexts/ToastContext";
 import { usePoolMetrics, useTestProviderSpeed } from "../../../../hooks/useApi";
 import { useConfig } from "../../../../hooks/useConfig";
@@ -31,8 +31,42 @@ type SortField =
 	| "current_speed_bytes_per_sec"
 	| "last_speed_test_mbps"
 	| "ping_ms"
-	| "error_count";
+	| "error_count"
+	| "expiration";
 type SortDirection = "asc" | "desc";
+
+const SORT_FIELDS: SortField[] = [
+	"host",
+	"state",
+	"used_connections",
+	"current_speed_bytes_per_sec",
+	"last_speed_test_mbps",
+	"ping_ms",
+	"error_count",
+	"expiration",
+];
+
+const SORT_STORAGE_KEY = "altmount.providerStatus.sort";
+
+// Persisted sort preference so the chosen order survives a page refresh instead
+// of resetting to host-ascending.
+function loadSortPref(): { field: SortField; direction: SortDirection } {
+	try {
+		const raw = localStorage.getItem(SORT_STORAGE_KEY);
+		if (raw) {
+			const p = JSON.parse(raw) as { field?: unknown; direction?: unknown };
+			const field: SortField =
+				typeof p.field === "string" && (SORT_FIELDS as string[]).includes(p.field)
+					? (p.field as SortField)
+					: "host";
+			const direction: SortDirection = p.direction === "desc" ? "desc" : "asc";
+			return { field, direction };
+		}
+	} catch {
+		// ignore malformed/unavailable storage
+	}
+	return { field: "host", direction: "asc" };
+}
 
 const SortIcon = ({
 	field,
@@ -87,9 +121,21 @@ export function ProviderHealth() {
 		return map;
 	}, [configData?.providers]);
 
-	const [sortField, setSortField] = useState<SortField>("host");
-	const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
+	const [sortField, setSortField] = useState<SortField>(() => loadSortPref().field);
+	const [sortDirection, setSortDirection] = useState<SortDirection>(() => loadSortPref().direction);
 	const [testingId, setTestingId] = useState<string | null>(null);
+
+	// Persist the sort preference whenever it changes.
+	useEffect(() => {
+		try {
+			localStorage.setItem(
+				SORT_STORAGE_KEY,
+				JSON.stringify({ field: sortField, direction: sortDirection }),
+			);
+		} catch {
+			// ignore storage write failures
+		}
+	}, [sortField, sortDirection]);
 
 	if (isLoading) {
 		return (
@@ -168,6 +214,18 @@ export function ProviderHealth() {
 	};
 
 	const sortedProviders = [...data.providers].sort((a, b) => {
+		// Expiration date is joined from config (not part of the pool metrics), so
+		// it's sorted separately. Missing dates always sort to the end.
+		if (sortField === "expiration") {
+			const aExp = expirationByKey.get(a.id) ?? expirationByKey.get(a.host) ?? "";
+			const bExp = expirationByKey.get(b.id) ?? expirationByKey.get(b.host) ?? "";
+			if (!aExp && !bExp) return 0;
+			if (!aExp) return 1;
+			if (!bExp) return -1;
+			// YYYY-MM-DD strings compare chronologically as-is.
+			return sortDirection === "asc" ? aExp.localeCompare(bExp) : bExp.localeCompare(aExp);
+		}
+
 		const aRaw = a[sortField as keyof typeof a];
 		const bRaw = b[sortField as keyof typeof b];
 
@@ -433,6 +491,19 @@ export function ProviderHealth() {
 											/>
 										</div>
 									</th>
+									<th
+										className="cursor-pointer transition-colors hover:bg-base-200"
+										onClick={() => handleSort("expiration")}
+									>
+										<div className="flex items-center gap-1">
+											Expiration Date{" "}
+											<SortIcon
+												sortField={sortField}
+												sortDirection={sortDirection}
+												field="expiration"
+											/>
+										</div>
+									</th>
 									<th>Actions</th>
 								</tr>
 							</thead>
@@ -524,38 +595,35 @@ export function ProviderHealth() {
 											)}
 										</td>
 										<td>
-											<div className="flex items-center gap-4">
-												{provider.last_speed_test_mbps > 0 ? (
-													<div className="flex min-w-[70px] flex-col">
-														<span className="font-bold font-mono text-success text-xs">
-															{provider.last_speed_test_mbps.toFixed(2)} MB/s
-														</span>
-														{provider.last_speed_test_time && (
-															<span className="font-mono text-[9px] text-base-content/40">
-																{formatRelativeTime(provider.last_speed_test_time)}
-															</span>
-														)}
-													</div>
-												) : (
-													<span className="min-w-[70px] font-mono text-base-content/30 text-xs">
-														-
+											{provider.last_speed_test_mbps > 0 ? (
+												<div className="flex min-w-[70px] flex-col">
+													<span className="font-bold font-mono text-success text-xs">
+														{provider.last_speed_test_mbps.toFixed(2)} MB/s
 													</span>
-												)}
-												{(() => {
-													const expiration =
-														expirationByKey.get(provider.id) ?? expirationByKey.get(provider.host);
-													return expiration ? (
-														<div className="flex flex-col border-base-300/40 border-l pl-3">
-															<span className="font-mono text-[9px] text-base-content/40 uppercase tracking-wider">
-																Expires
-															</span>
-															<span className="font-mono text-[11px] text-base-content/70">
-																{formatExpirationDate(expiration)}
-															</span>
-														</div>
-													) : null;
-												})()}
-											</div>
+													{provider.last_speed_test_time && (
+														<span className="font-mono text-[9px] text-base-content/40">
+															{formatRelativeTime(provider.last_speed_test_time)}
+														</span>
+													)}
+												</div>
+											) : (
+												<span className="min-w-[70px] font-mono text-base-content/30 text-xs">
+													-
+												</span>
+											)}
+										</td>
+										<td>
+											{(() => {
+												const expiration =
+													expirationByKey.get(provider.id) ?? expirationByKey.get(provider.host);
+												return expiration ? (
+													<span className="font-mono text-[11px] text-base-content/70">
+														{formatExpirationDate(expiration)}
+													</span>
+												) : (
+													<span className="font-mono text-base-content/30 text-xs">-</span>
+												);
+											})()}
 										</td>
 										<td>
 											<div className="flex items-center gap-2">

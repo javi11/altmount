@@ -336,23 +336,23 @@ export function ProvidersConfigSection({
 								<GripVertical className="h-4 w-4" />
 							</div>
 							<div className="min-w-0">
-								<div className="flex items-center gap-1.5">
-									<span className="font-black font-mono text-base-content/50 text-sm">
+								<div className="flex items-baseline gap-1.5">
+									<span className="font-black font-mono text-base text-base-content/50">
 										#{index + 1}
 									</span>
-									<h4 className="truncate font-bold text-base-content text-sm tracking-tight">
+									<h4 className="truncate font-bold text-base text-base-content tracking-tight">
 										{provider.name || provider.host}
 									</h4>
 								</div>
 								<div className="mt-1 flex items-center gap-1.5">
-									<span className="font-bold text-[11px] text-base-content/70 uppercase tracking-wider">
+									<span className="font-bold text-[10px] text-base-content/70 uppercase tracking-wider">
 										{provider.port}
 									</span>
 									<span className="text-base-content/30">•</span>
 									{/* Blur clipped to a rectangle so it doesn't bleed; hover reveals. */}
 									<span className="inline-flex max-w-[150px] items-center overflow-hidden rounded bg-base-300/40 align-middle">
 										<span
-											className="cursor-pointer truncate px-1 font-bold text-[11px] text-base-content/70 blur-[5px] transition-all hover:blur-none"
+											className="cursor-pointer truncate px-1 font-bold text-[10px] text-base-content/70 blur-[5px] transition-all hover:blur-none"
 											title="Click to reveal username"
 										>
 											{provider.username || "anonymous"}
@@ -444,7 +444,7 @@ export function ProvidersConfigSection({
 							</span>
 							<input
 								type="number"
-								className="input input-xs input-bordered w-[72px] shrink-0 bg-base-100 text-center font-bold font-mono [appearance:textfield] [&::-webkit-inner-spin-button]:m-0 [&::-webkit-inner-spin-button]:[-webkit-appearance:none] [&::-webkit-outer-spin-button]:[-webkit-appearance:none]"
+								className="input input-xs input-bordered w-16 shrink-0 bg-base-100 text-center font-bold font-mono [appearance:textfield] [&::-webkit-inner-spin-button]:m-0 [&::-webkit-inner-spin-button]:[-webkit-appearance:none] [&::-webkit-outer-spin-button]:[-webkit-appearance:none]"
 								value={provider.max_connections}
 								onChange={(e) =>
 									handleFieldChange(
@@ -471,7 +471,7 @@ export function ProvidersConfigSection({
 							</span>
 							<input
 								type="number"
-								className="input input-xs input-bordered w-[72px] shrink-0 bg-base-100 text-center font-bold font-mono [appearance:textfield] [&::-webkit-inner-spin-button]:m-0 [&::-webkit-inner-spin-button]:[-webkit-appearance:none] [&::-webkit-outer-spin-button]:[-webkit-appearance:none]"
+								className="input input-xs input-bordered w-16 shrink-0 bg-base-100 text-center font-bold font-mono [appearance:textfield] [&::-webkit-inner-spin-button]:m-0 [&::-webkit-inner-spin-button]:[-webkit-appearance:none] [&::-webkit-outer-spin-button]:[-webkit-appearance:none]"
 								value={provider.inflight_requests || 10}
 								onChange={(e) =>
 									handleFieldChange(

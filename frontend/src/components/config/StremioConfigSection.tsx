@@ -304,77 +304,81 @@ export function StremioConfigSection({
 						/>
 					</div>
 
-					<fieldset className="fieldset min-w-0">
-						<legend className="fieldset-legend">Prowlarr Host</legend>
-						<input
-							type="url"
-							className="input w-full min-w-0 max-w-full"
-							placeholder="http://localhost:9696"
-							value={formData.prowlarr?.host ?? ""}
-							disabled={isReadOnly}
-							onChange={(e) => updateProwlarr({ host: e.target.value })}
-						/>
-					</fieldset>
+					{formData.prowlarr?.enabled && (
+						<div className="fade-in slide-in-from-top-2 animate-in space-y-6 border-base-300/50 border-t pt-6">
+							<fieldset className="fieldset min-w-0">
+								<legend className="fieldset-legend">Prowlarr Host</legend>
+								<input
+									type="url"
+									className="input w-full min-w-0 max-w-full"
+									placeholder="http://localhost:9696"
+									value={formData.prowlarr?.host ?? ""}
+									disabled={isReadOnly}
+									onChange={(e) => updateProwlarr({ host: e.target.value })}
+								/>
+							</fieldset>
 
-					<fieldset className="fieldset min-w-0">
-						<legend className="fieldset-legend">API Key</legend>
-						<input
-							type="password"
-							className="input w-full min-w-0 max-w-full"
-							placeholder="Prowlarr API key"
-							value={formData.prowlarr?.api_key ?? ""}
-							disabled={isReadOnly}
-							onChange={(e) => updateProwlarr({ api_key: e.target.value })}
-						/>
-					</fieldset>
+							<fieldset className="fieldset min-w-0">
+								<legend className="fieldset-legend">API Key</legend>
+								<input
+									type="password"
+									className="input w-full min-w-0 max-w-full"
+									placeholder="Prowlarr API key"
+									value={formData.prowlarr?.api_key ?? ""}
+									disabled={isReadOnly}
+									onChange={(e) => updateProwlarr({ api_key: e.target.value })}
+								/>
+							</fieldset>
 
-					<fieldset className="fieldset min-w-0">
-						<legend className="fieldset-legend">Categories</legend>
-						<TagInput
-							tags={(formData.prowlarr?.categories ?? []).map(String)}
-							onChange={(tags) =>
-								updateProwlarr({ categories: tags.map((t) => Number.parseInt(t, 10)) })
-							}
-							disabled={isReadOnly}
-							placeholder="Add ID..."
-							parseValue={(raw) => {
-								const n = Number.parseInt(raw.trim(), 10);
-								return Number.isNaN(n) ? null : String(n);
-							}}
-						/>
-						<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/50 text-xs">
-							Newznab category IDs. Press Enter or comma to add. Defaults: 2000 (Movies), 2040
-							(Movies/HD), 2060 (Movies/4K), 5000 (TV), 5040 (TV/HD).
-						</p>
-					</fieldset>
+							<fieldset className="fieldset min-w-0">
+								<legend className="fieldset-legend">Categories</legend>
+								<TagInput
+									tags={(formData.prowlarr?.categories ?? []).map(String)}
+									onChange={(tags) =>
+										updateProwlarr({ categories: tags.map((t) => Number.parseInt(t, 10)) })
+									}
+									disabled={isReadOnly}
+									placeholder="Add ID..."
+									parseValue={(raw) => {
+										const n = Number.parseInt(raw.trim(), 10);
+										return Number.isNaN(n) ? null : String(n);
+									}}
+								/>
+								<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/50 text-xs">
+									Newznab category IDs. Press Enter or comma to add. Defaults: 2000 (Movies), 2040
+									(Movies/HD), 2060 (Movies/4K), 5000 (TV), 5040 (TV/HD).
+								</p>
+							</fieldset>
 
-					<fieldset className="fieldset min-w-0">
-						<legend className="fieldset-legend">Language Filter</legend>
-						<TagInput
-							tags={formData.prowlarr?.languages ?? []}
-							onChange={(languages) => updateProwlarr({ languages })}
-							disabled={isReadOnly}
-							placeholder="Add keyword..."
-						/>
-						<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/50 text-xs">
-							Only show releases whose title contains at least one of these keywords. Leave empty to
-							show all languages.
-						</p>
-					</fieldset>
+							<fieldset className="fieldset min-w-0">
+								<legend className="fieldset-legend">Language Filter</legend>
+								<TagInput
+									tags={formData.prowlarr?.languages ?? []}
+									onChange={(languages) => updateProwlarr({ languages })}
+									disabled={isReadOnly}
+									placeholder="Add keyword..."
+								/>
+								<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/50 text-xs">
+									Only show releases whose title contains at least one of these keywords. Leave
+									empty to show all languages.
+								</p>
+							</fieldset>
 
-					<fieldset className="fieldset min-w-0">
-						<legend className="fieldset-legend">Quality Filter</legend>
-						<TagInput
-							tags={formData.prowlarr?.qualities ?? []}
-							onChange={(qualities) => updateProwlarr({ qualities })}
-							disabled={isReadOnly}
-							placeholder="Add keyword..."
-						/>
-						<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/50 text-xs">
-							Only show releases whose title contains at least one of these keywords. Leave empty to
-							show all quality tiers.
-						</p>
-					</fieldset>
+							<fieldset className="fieldset min-w-0">
+								<legend className="fieldset-legend">Quality Filter</legend>
+								<TagInput
+									tags={formData.prowlarr?.qualities ?? []}
+									onChange={(qualities) => updateProwlarr({ qualities })}
+									disabled={isReadOnly}
+									placeholder="Add keyword..."
+								/>
+								<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/50 text-xs">
+									Only show releases whose title contains at least one of these keywords. Leave
+									empty to show all quality tiers.
+								</p>
+							</fieldset>
+						</div>
+					)}
 				</div>
 			</div>
 

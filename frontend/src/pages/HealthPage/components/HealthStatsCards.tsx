@@ -36,19 +36,19 @@ export function HealthStatsCards({ stats }: HealthStatsCardsProps) {
 		{
 			label: "Pending",
 			value: stats.pending || 0,
-			valueClass: "text-info",
+			valueClass: "text-warning",
 			caption: "Awaiting check",
 		},
 		{
 			label: "Checking",
 			value: stats.checking || 0,
-			valueClass: "text-warning",
+			valueClass: "text-info",
 			caption: "In progress",
 		},
 		{
 			label: "Repairing",
 			value: stats.repair_triggered || 0,
-			valueClass: "text-secondary",
+			valueClass: "text-info",
 			caption: "Triggered",
 		},
 		{
@@ -61,7 +61,7 @@ export function HealthStatsCards({ stats }: HealthStatsCardsProps) {
 	];
 
 	return (
-		<div className="grid grid-cols-2 gap-px overflow-hidden rounded-box border border-base-300 bg-base-300 shadow-md lg:grid-cols-3 xl:grid-cols-6">
+		<div className="grid grid-cols-2 overflow-hidden rounded-box border border-base-300 bg-base-100 shadow-md lg:grid-cols-3 xl:grid-cols-6">
 			{cards.map((card, index) => (
 				<div
 					key={card.label}

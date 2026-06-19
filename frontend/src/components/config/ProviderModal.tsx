@@ -249,7 +249,7 @@ export function ProviderModal({
 								className="input input-bordered w-full font-mono text-sm"
 								value={formData.name}
 								onChange={(e) => handleInputChange("name", e.target.value)}
-								placeholder="e.g. Frugal (Main)"
+								placeholder="e.g. Main Provider"
 							/>
 						</fieldset>
 

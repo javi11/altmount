@@ -251,7 +251,7 @@ export function HealthConfigSection({
 								</fieldset>
 							</div>
 
-							<div className="mt-6 flex items-start justify-between gap-4 rounded-xl bg-base-100/50 p-4">
+							<div className="mt-6 flex items-start justify-between gap-4 rounded-xl border border-base-300/60 bg-base-100/40 p-4">
 								<div className="min-w-0 flex-1">
 									<h5 className="font-bold text-xs">Exponential Back-off</h5>
 									<p className="mt-1 text-[10px] text-base-content/60 leading-relaxed">
@@ -268,7 +268,7 @@ export function HealthConfigSection({
 								/>
 							</div>
 
-							<div className="mt-4 flex items-start justify-between gap-4 rounded-xl bg-base-100/50 p-4">
+							<div className="mt-4 flex items-start justify-between gap-4 rounded-xl border border-base-300/60 bg-base-100/40 p-4">
 								<div className="min-w-0 flex-1">
 									<h5 className="font-bold text-xs">Resolve Repairs on Import</h5>
 									<p className="mt-1 text-[10px] text-base-content/60 leading-relaxed">

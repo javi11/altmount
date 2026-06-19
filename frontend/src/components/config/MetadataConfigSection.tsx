@@ -162,35 +162,41 @@ export function MetadataConfigSection({
 								<div className="space-y-4">
 									<div className="font-semibold text-sm">Backup Schedule (UTC)</div>
 
-									<fieldset className="fieldset">
-										<legend className="fieldset-legend font-semibold">Frequency</legend>
-										<select
-											className="select select-bordered w-full bg-base-100 text-sm"
-											value={scheduleState.type}
-											disabled={isReadOnly}
-											onChange={(e) =>
-												handleScheduleChange({ type: e.target.value as ScheduleType })
-											}
-										>
-											<option value="hourly">Every hour</option>
-											<option value="daily">Daily</option>
-											<option value="weekly">Weekly</option>
-											<option value="custom">Custom (cron expression)</option>
-										</select>
-									</fieldset>
-
-									{scheduleState.type === "daily" && (
+									<div
+										className={
+											scheduleState.type === "daily" ? "grid grid-cols-1 gap-4 sm:grid-cols-2" : ""
+										}
+									>
 										<fieldset className="fieldset">
-											<legend className="fieldset-legend font-semibold">Time (UTC)</legend>
-											<input
-												type="time"
-												className="input input-bordered w-full bg-base-100 font-mono text-sm"
-												value={scheduleState.time}
+											<legend className="fieldset-legend font-semibold">Frequency</legend>
+											<select
+												className="select select-bordered w-full bg-base-100 text-sm"
+												value={scheduleState.type}
 												disabled={isReadOnly}
-												onChange={(e) => handleScheduleChange({ time: e.target.value })}
-											/>
+												onChange={(e) =>
+													handleScheduleChange({ type: e.target.value as ScheduleType })
+												}
+											>
+												<option value="hourly">Every hour</option>
+												<option value="daily">Daily</option>
+												<option value="weekly">Weekly</option>
+												<option value="custom">Custom (cron expression)</option>
+											</select>
 										</fieldset>
-									)}
+
+										{scheduleState.type === "daily" && (
+											<fieldset className="fieldset">
+												<legend className="fieldset-legend font-semibold">Time (UTC)</legend>
+												<input
+													type="time"
+													className="input input-bordered w-full bg-base-100 font-mono text-sm"
+													value={scheduleState.time}
+													disabled={isReadOnly}
+													onChange={(e) => handleScheduleChange({ time: e.target.value })}
+												/>
+											</fieldset>
+										)}
+									</div>
 
 									{scheduleState.type === "weekly" && (
 										<div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -241,17 +247,17 @@ export function MetadataConfigSection({
 									)}
 								</div>
 
-								{(() => {
-									try {
-										const desc = cronstrue.toString(buildCronString(scheduleState), {
-											use24HourTimeFormat: true,
-											throwExceptionOnParseError: true,
-										});
-										return <p className="text-[10px] text-base-content/40">Runs: {desc} (UTC)</p>;
-									} catch {
-										return <p className="text-[10px] text-error">Invalid cron expression</p>;
-									}
-								})()}
+								{scheduleState.type === "custom" &&
+									(() => {
+										try {
+											cronstrue.toString(buildCronString(scheduleState), {
+												throwExceptionOnParseError: true,
+											});
+											return null;
+										} catch {
+											return <p className="text-[10px] text-error">Invalid cron expression</p>;
+										}
+									})()}
 
 								<fieldset className="fieldset">
 									<legend className="fieldset-legend font-semibold">Keep Last N Backups</legend>
