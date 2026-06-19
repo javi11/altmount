@@ -141,10 +141,24 @@ func correctExtensionFromMagicBytes(filename string, data []byte) string {
 	return filename
 }
 
+func trimSurroundingQuotes(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) < 2 {
+		return s
+	}
+	first, last := s[0], s[len(s)-1]
+	if (first == '\'' && last == '\'') || (first == '"' && last == '"') {
+		return s[1 : len(s)-1]
+	}
+	return s
+}
+
 // selectBestFilename selects the best filename using priority system
 // Priority: PAR2 (3) > Subject (2) > yEnc header (1) > Subject header (0)
 // With adjustments for obfuscation, important types, and extension length
 func selectBestFilename(par2Filename, subjectFilename, headerFilename, subjectHeader string) string {
+	subjectFilename = trimSurroundingQuotes(subjectFilename)
+
 	type candidate struct {
 		filename string
 		priority int

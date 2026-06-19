@@ -27,6 +27,18 @@ var (
 	numericPatternNumber = regexp.MustCompile(`\.(\d+)$`)
 )
 
+func trimSurroundingQuotes(filename string) string {
+	s := strings.TrimSpace(filename)
+	if len(s) < 2 {
+		return s
+	}
+	first, last := s[0], s[len(s)-1]
+	if (first == '\'' && last == '\'') || (first == '"' && last == '"') {
+		return s[1 : len(s)-1]
+	}
+	return s
+}
+
 // SetKey returns the multi-volume grouping key for a filename and whether the
 // name matches a RAR/split-volume pattern (.partNN.rar, .rar, .rNN, .NNN —
 // the latter also covers .7z.NNN sets). Non-volume filenames (plain media,
@@ -34,7 +46,7 @@ var (
 // should be treated as standalone files. The key is the lowercased base name
 // with the volume suffix stripped, so all parts of one set share it.
 func SetKey(filename string) (string, bool) {
-	return archive.SetKey(filename)
+	return archive.SetKey(trimSurroundingQuotes(filename))
 }
 
 // extractRarBaseName returns the lowercase base name of a RAR filename,
