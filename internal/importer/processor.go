@@ -78,7 +78,7 @@ func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Ma
 // getCleanNzbName removes the queue ID prefix from the NZB filename if present
 func (proc *Processor) getCleanNzbName(nzbPath string, queueID int) string {
 	baseName := filepath.Base(nzbPath)
-	prefix := fmt.Sprintf("%d_", queueID)
+	prefix := fmt.Sprintf("%d-", queueID)
 	if after, ok := strings.CutPrefix(baseName, prefix); ok {
 		return after
 	}
