@@ -29,6 +29,7 @@ func TestSetKey(t *testing.T) {
 		{"plain media file", "movie.mkv", "", false},
 		{"no extension obfuscated", "a1b2c3d4e5", "", false},
 		{"par2", "movie.par2", "", false},
+		// Surrounding-quoted volumes must resolve to the same set key as their unquoted form
 		{"quoted single-quote part rar", "'movie.part01.rar'", "movie", true},
 		{"quoted double-quote part rar", `"movie.part01.rar"`, "movie", true},
 		{"quoted single-quote 3-digit part rar", "'movie.part001.rar'", "movie", true},
@@ -46,6 +47,12 @@ func TestSetKey(t *testing.T) {
 	}
 }
 
+// TestExtractRarBaseNameQuotedFilenames asserts that quoted and clean filenames
+// resolve to the same grouping base name, with an embedded-apostrophe guard. WHY:
+// extractRarBaseName feeds GroupArchivesByBaseName, and when a name is not a
+// recognized volume it falls back to the full lowercased name as the key, so a
+// quoted name that slipped through would become its own group and fail to collapse
+// with its siblings.
 func TestExtractRarBaseNameQuotedFilenames(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -70,6 +77,11 @@ func TestExtractRarBaseNameQuotedFilenames(t *testing.T) {
 	}
 }
 
+// TestGroupArchivesByBaseNameQuotedSubjectNames is the regression's core proof: N
+// surrounding-quoted volumes must collapse into a single group, not N groups of one
+// (the exact production symptom, where rardecode then errored "bad volume number" on
+// every continuation). The clean-3-digit case proves the padding width is not the
+// cause, isolating the surrounding quotes as the real defect.
 func TestGroupArchivesByBaseNameQuotedSubjectNames(t *testing.T) {
 	makeFiles := func(names ...string) []parser.ParsedFile {
 		out := make([]parser.ParsedFile, len(names))

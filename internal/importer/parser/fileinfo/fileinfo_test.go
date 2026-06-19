@@ -228,9 +228,13 @@ func TestCorrectExtensionFromMagicBytes(t *testing.T) {
 	}
 }
 
-// TestGetFileInfo_Par2DetectionViaSubject verifies that a file whose yEnc header
-// strips the .par2 extension is still correctly identified as a PAR2 archive when
-// the subject filename retains the full .par2 extension.
+// TestSelectBestFilenameQuotedSubject verifies that surrounding quotes are stripped
+// from subject-derived filenames, so a poster-quoted NZB subject does not break RAR
+// volume detection. Two guard cases pin the fix down: the "clean 3-digit unquoted"
+// case is the discriminator proving the bug is the surrounding quotes and not the
+// 3-digit partNNN padding width, and the embedded-apostrophe case proves only a
+// matched surrounding pair is removed (a mid-name apostrophe like It's... must
+// survive).
 func TestSelectBestFilenameQuotedSubject(t *testing.T) {
 	tests := []struct {
 		name            string
@@ -309,6 +313,9 @@ func TestSelectBestFilenameQuotedSubject(t *testing.T) {
 	}
 }
 
+// TestGetFileInfo_Par2DetectionViaSubject verifies that a file whose yEnc header
+// strips the .par2 extension is still correctly identified as a PAR2 archive when
+// the subject filename retains the full .par2 extension.
 func TestGetFileInfo_Par2DetectionViaSubject(t *testing.T) {
 	tests := []struct {
 		name            string

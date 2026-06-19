@@ -266,6 +266,12 @@ func TestPatchMissingSegment_VerySmallShortfall(t *testing.T) {
 	require.Equal(t, shortfall-1, patchSeg.EndOffset, "patch should cover exactly 100 bytes")
 }
 
+// TestConvertAggregatedFilesToRarContentOmitsTruncated verifies that an inner file
+// whose mapped segments fall well short of its RAR-declared size is omitted from the
+// output rather than emitted as healthy, while fully-covered siblings are kept. WHY:
+// a truncated file that still reports "healthy" makes Sonarr (and similar) treat the
+// episode as complete and stop searching; omitting it keeps the episode wanted and
+// searchable.
 func TestConvertAggregatedFilesToRarContentOmitsTruncated(t *testing.T) {
 	rp := &rarProcessor{log: slog.Default()}
 

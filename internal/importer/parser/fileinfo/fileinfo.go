@@ -141,6 +141,15 @@ func correctExtensionFromMagicBytes(filename string, data []byte) string {
 	return filename
 }
 
+// trimSurroundingQuotes removes a single matched pair of surrounding quotes from a
+// filename. Some posters wrap the NZB <file subject> value in single or double
+// quotes (subject="'name.part001.rar'") and nzbparser keeps them verbatim, so the
+// name arrives as 'name.part001.rar'. That trailing quote defeats downstream RAR
+// volume detection, whose regexes anchor on .rar$ (and .rNN$, .NNN$), making
+// continuation volumes look like unrelated files. Only a matched leading and
+// trailing pair of the same quote char is stripped (after trimming whitespace), so
+// an embedded apostrophe such as It's.A.Wonderful.Life.part01.rar is left intact.
+// A string shorter than two chars is returned unchanged.
 func trimSurroundingQuotes(s string) string {
 	s = strings.TrimSpace(s)
 	if len(s) < 2 {
@@ -157,6 +166,11 @@ func trimSurroundingQuotes(s string) string {
 // Priority: PAR2 (3) > Subject (2) > yEnc header (1) > Subject header (0)
 // With adjustments for obfuscation, important types, and extension length
 func selectBestFilename(par2Filename, subjectFilename, headerFilename, subjectHeader string) string {
+	// Only the subject needs de-quoting: the PAR2 name comes from binary PAR2 packets
+	// and the header name from the article yEnc name= field, both already clean,
+	// whereas only the NZB <file subject> carries poster-added surrounding quotes.
+	// Trim before priority selection so every downstream candidate (and any RAR
+	// detection keyed off the chosen name) sees a clean filename.
 	subjectFilename = trimSurroundingQuotes(subjectFilename)
 
 	type candidate struct {

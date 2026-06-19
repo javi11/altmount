@@ -27,6 +27,15 @@ var (
 	numericPatternNumber = regexp.MustCompile(`\.(\d+)$`)
 )
 
+// trimSurroundingQuotes strips a single matched pair of surrounding single or double
+// quotes from a filename. It is a deliberate small duplicate of the helper in the
+// fileinfo package, kept local so this package need not take a cross-package
+// dependency for an 11-line pure function. Grouping needs it independently because
+// the parser's fallbackGetFileInfos path sets Filename straight from
+// NzbFile.Filename, bypassing fileinfo.selectBestFilename, so a poster-quoted
+// subject can still reach the grouping and volume-detection layer uncleaned. Only a
+// matched leading and trailing pair is removed, so an embedded apostrophe (It's...)
+// survives.
 func trimSurroundingQuotes(filename string) string {
 	s := strings.TrimSpace(filename)
 	if len(s) < 2 {
@@ -46,6 +55,9 @@ func trimSurroundingQuotes(filename string) string {
 // should be treated as standalone files. The key is the lowercased base name
 // with the volume suffix stripped, so all parts of one set share it.
 func SetKey(filename string) (string, bool) {
+	// Trim before delegating so the volume patterns (which anchor on .rar$, .rNN$,
+	// .NNN$) match: a trailing quote on a quoted name otherwise yields a unique key
+	// per volume, splitting one multi-volume set into one-part-per-volume groups.
 	return archive.SetKey(trimSurroundingQuotes(filename))
 }
 
