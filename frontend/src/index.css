@@ -137,12 +137,6 @@ fieldset {
 }
 
 /* Custom Keyframe Animations & Utilities */
-@keyframes constellation-dash {
-	to {
-		stroke-dashoffset: -40;
-	}
-}
-
 @keyframes speed-wave {
 	0%,
 	100% {
@@ -151,17 +145,6 @@ fieldset {
 	50% {
 		transform: translateY(-4px) scaleY(1.15);
 	}
-}
-
-.animate-dash {
-	animation: constellation-dash 4s linear infinite;
-}
-
-/* Glassmorphic Utilities */
-.glass-frosted {
-	background: rgba(15, 17, 23, 0.35);
-	border: 1px solid rgba(255, 255, 255, 0.05);
-	backdrop-filter: blur(16px);
 }
 
 /* Per-theme glass tokens; applied to elevated surfaces only (navbar/sidebar/cards/dropdowns/modals). */
