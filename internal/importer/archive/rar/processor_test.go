@@ -3,6 +3,7 @@ package rar
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"testing"
 
 	"github.com/javi11/altmount/internal/importer/parser"
@@ -263,6 +264,37 @@ func TestPatchMissingSegment_VerySmallShortfall(t *testing.T) {
 	// Verify the patch segment
 	patchSeg := patched[1]
 	require.Equal(t, shortfall-1, patchSeg.EndOffset, "patch should cover exactly 100 bytes")
+}
+
+func TestConvertAggregatedFilesToRarContentOmitsTruncated(t *testing.T) {
+	rp := &rarProcessor{log: slog.Default()}
+
+	rarFiles := []parser.ParsedFile{
+		{Filename: "vol1.rar", Segments: []*metapb.SegmentData{seg("s0", 200)}},
+		{Filename: "vol2.rar", Segments: []*metapb.SegmentData{seg("s1", 200)}},
+		{Filename: "vol3.rar", Segments: []*metapb.SegmentData{seg("s2", 200)}},
+	}
+
+	ag := []rardecode.ArchiveFileInfo{
+		{
+			Name: "file0.bin", TotalUnpackedSize: 200, TotalPackedSize: 200,
+			Parts: []rardecode.FilePartInfo{{Path: "vol1.rar", DataOffset: 0, PackedSize: 200}},
+		},
+		{
+			Name: "file1.bin", TotalUnpackedSize: 2_000_000, TotalPackedSize: 2_000_000,
+			Parts: []rardecode.FilePartInfo{{Path: "vol2.rar", DataOffset: 0, PackedSize: 200}},
+		},
+		{
+			Name: "file2.bin", TotalUnpackedSize: 200, TotalPackedSize: 200,
+			Parts: []rardecode.FilePartInfo{{Path: "vol3.rar", DataOffset: 0, PackedSize: 200}},
+		},
+	}
+
+	out, err := rp.convertAggregatedFilesToRarContent(context.Background(), ag, rarFiles)
+	require.NoError(t, err)
+	require.Len(t, out, 2, "truncated file1.bin must be omitted")
+	require.Equal(t, "file0.bin", out[0].Filename)
+	require.Equal(t, "file2.bin", out[1].Filename)
 }
 
 func TestGroupArchivesByBaseName(t *testing.T) {
