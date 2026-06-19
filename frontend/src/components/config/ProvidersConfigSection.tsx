@@ -330,7 +330,7 @@ export function ProvidersConfigSection({
 
 				<div className="flex flex-1 flex-col gap-3 p-4 pl-6">
 					{/* Identity + actions */}
-					<div className="flex items-start justify-between gap-2">
+					<div className="flex items-center justify-between gap-2">
 						<div className="flex min-w-0 items-center gap-2">
 							<div className="rounded-lg bg-base-200/50 p-1.5 text-base-content/60">
 								<GripVertical className="h-4 w-4" />
@@ -362,11 +362,11 @@ export function ProvidersConfigSection({
 							</div>
 						</div>
 
-						<div className="join shrink-0 rounded-xl bg-base-200/50 p-0.5">
+						<div className="join shrink-0 rounded-xl bg-base-200/50 p-1">
 							<div className="tooltip" data-tip="Enable/Disable provider">
 								<button
 									type="button"
-									className={`btn btn-xs join-item border-none ${
+									className={`btn btn-sm join-item border-none ${
 										provider.enabled
 											? "bg-warning/10 text-warning hover:bg-warning/20"
 											: "bg-success/10 text-success hover:bg-success/20"
@@ -374,23 +374,23 @@ export function ProvidersConfigSection({
 									onClick={() => handleToggleEnabled(provider)}
 								>
 									{provider.enabled ? (
-										<PowerOff className="h-3.5 w-3.5" />
+										<PowerOff className="h-4 w-4" />
 									) : (
-										<Power className="h-3.5 w-3.5" />
+										<Power className="h-4 w-4" />
 									)}
 								</button>
 							</div>
 							<div className="tooltip" data-tip="Run speed test">
 								<button
 									type="button"
-									className="btn btn-xs join-item border-none bg-info/10 text-info hover:bg-info/20"
+									className="btn btn-sm join-item border-none bg-info/10 text-info hover:bg-info/20"
 									onClick={() => handleSpeedTest(provider)}
 									disabled={testingSpeedProviderId === provider.id || !provider.enabled}
 								>
 									{testingSpeedProviderId === provider.id ? (
-										<span className="loading loading-spinner loading-xs" />
+										<span className="loading loading-spinner loading-sm" />
 									) : (
-										<Gauge className="h-3.5 w-3.5" />
+										<Gauge className="h-4 w-4" />
 									)}
 								</button>
 							</div>
@@ -398,14 +398,14 @@ export function ProvidersConfigSection({
 								<div className="tooltip" data-tip="Reset download quota">
 									<button
 										type="button"
-										className="btn btn-xs join-item border-none bg-warning/10 text-warning hover:bg-warning/20"
+										className="btn btn-sm join-item border-none bg-warning/10 text-warning hover:bg-warning/20"
 										onClick={() => handleResetQuota(provider)}
 										disabled={resettingQuotaId === provider.id}
 									>
 										{resettingQuotaId === provider.id ? (
-											<span className="loading loading-spinner loading-xs" />
+											<span className="loading loading-spinner loading-sm" />
 										) : (
-											<RotateCcw className="h-3.5 w-3.5" />
+											<RotateCcw className="h-4 w-4" />
 										)}
 									</button>
 								</div>
@@ -413,23 +413,23 @@ export function ProvidersConfigSection({
 							<div className="tooltip" data-tip="Edit provider">
 								<button
 									type="button"
-									className="btn btn-xs join-item border-none bg-base-content/5 text-base-content hover:bg-base-content/10"
+									className="btn btn-sm join-item border-none bg-base-content/5 text-base-content hover:bg-base-content/10"
 									onClick={() => handleEdit(provider)}
 								>
-									<Edit className="h-3.5 w-3.5" />
+									<Edit className="h-4 w-4" />
 								</button>
 							</div>
 							<div className="tooltip" data-tip="Remove provider">
 								<button
 									type="button"
-									className="btn btn-xs join-item border-none bg-error/10 text-error hover:bg-error/20"
+									className="btn btn-sm join-item border-none bg-error/10 text-error hover:bg-error/20"
 									onClick={() => handleDelete(provider.id)}
 									disabled={deletingProviderId === provider.id}
 								>
 									{deletingProviderId === provider.id ? (
-										<span className="loading loading-spinner loading-xs" />
+										<span className="loading loading-spinner loading-sm" />
 									) : (
-										<Trash2 className="h-3.5 w-3.5" />
+										<Trash2 className="h-4 w-4" />
 									)}
 								</button>
 							</div>
@@ -444,7 +444,7 @@ export function ProvidersConfigSection({
 							</span>
 							<input
 								type="number"
-								className="input input-xs input-bordered w-[72px] shrink-0 bg-base-100 text-center font-bold font-mono"
+								className="input input-xs input-bordered w-[72px] shrink-0 bg-base-100 text-center font-bold font-mono [appearance:textfield] [&::-webkit-inner-spin-button]:m-0 [&::-webkit-inner-spin-button]:[-webkit-appearance:none] [&::-webkit-outer-spin-button]:[-webkit-appearance:none]"
 								value={provider.max_connections}
 								onChange={(e) =>
 									handleFieldChange(
@@ -471,7 +471,7 @@ export function ProvidersConfigSection({
 							</span>
 							<input
 								type="number"
-								className="input input-xs input-bordered w-[72px] shrink-0 bg-base-100 text-center font-bold font-mono"
+								className="input input-xs input-bordered w-[72px] shrink-0 bg-base-100 text-center font-bold font-mono [appearance:textfield] [&::-webkit-inner-spin-button]:m-0 [&::-webkit-inner-spin-button]:[-webkit-appearance:none] [&::-webkit-outer-spin-button]:[-webkit-appearance:none]"
 								value={provider.inflight_requests || 10}
 								onChange={(e) =>
 									handleFieldChange(

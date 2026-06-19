@@ -396,53 +396,45 @@ export function HealthConfigSection({
 							<h5 className="font-bold text-base-content/70 text-xs uppercase tracking-widest">
 								Validation
 							</h5>
-							<div className="mt-4 grid grid-cols-1 gap-8 sm:grid-cols-2">
-								<fieldset className="fieldset">
-									<legend className="fieldset-legend break-words font-semibold">
-										Validation Intensity
-									</legend>
-									<label className="label cursor-pointer items-start justify-start gap-3">
-										<input
-											type="checkbox"
-											className="checkbox checkbox-sm checkbox-primary mt-1 shrink-0"
-											checked={formData.check_all_segments ?? false}
-											disabled={isReadOnly}
-											onChange={(e) => handleInputChange("check_all_segments", e.target.checked)}
-										/>
-										<div className="min-w-0 flex-1">
-											<span className="label-text break-words font-medium text-xs">
-												Verify Every Segment (100%)
-											</span>
-											<p className="label mt-1 break-words text-base-content/70 text-xs leading-relaxed">
-												Thorough but very slow for large libraries.
-											</p>
-										</div>
-									</label>
-								</fieldset>
+							<div className="mt-4 space-y-3">
+								<label className="flex cursor-pointer items-start gap-3 rounded-xl border border-base-300/60 bg-base-100/40 p-4">
+									<input
+										type="checkbox"
+										className="checkbox checkbox-sm checkbox-primary mt-0.5 shrink-0"
+										checked={formData.check_all_segments ?? false}
+										disabled={isReadOnly}
+										onChange={(e) => handleInputChange("check_all_segments", e.target.checked)}
+									/>
+									<div className="min-w-0 flex-1">
+										<span className="block break-words font-bold text-xs">
+											Verify Every Segment
+										</span>
+										<span className="mt-0.5 block break-words text-[11px] text-base-content/50 leading-snug">
+											Validates 100% of segments instead of a sample. Thorough, but slow on large
+											libraries.
+										</span>
+									</div>
+								</label>
 
 								{!formData.check_all_segments && (
-									<fieldset className="fieldset">
-										<legend className="fieldset-legend break-words font-semibold">
-											Ghost File Detection
-										</legend>
-										<label className="label cursor-pointer items-start justify-start gap-3">
-											<input
-												type="checkbox"
-												className="checkbox checkbox-sm checkbox-primary mt-1 shrink-0"
-												checked={formData.verify_data ?? false}
-												disabled={isReadOnly}
-												onChange={(e) => handleInputChange("verify_data", e.target.checked)}
-											/>
-											<div className="min-w-0 flex-1">
-												<span className="label-text break-words font-medium text-xs">
-													Hybrid Data Verification
-												</span>
-												<p className="label mt-1 break-words text-base-content/70 text-xs leading-relaxed">
-													Reads 1 byte from each checked segment to confirm Usenet data exists.
-												</p>
-											</div>
-										</label>
-									</fieldset>
+									<label className="flex cursor-pointer items-start gap-3 rounded-xl border border-base-300/60 bg-base-100/40 p-4">
+										<input
+											type="checkbox"
+											className="checkbox checkbox-sm checkbox-primary mt-0.5 shrink-0"
+											checked={formData.verify_data ?? false}
+											disabled={isReadOnly}
+											onChange={(e) => handleInputChange("verify_data", e.target.checked)}
+										/>
+										<div className="min-w-0 flex-1">
+											<span className="block break-words font-bold text-xs">
+												Ghost File Detection
+											</span>
+											<span className="mt-0.5 block break-words text-[11px] text-base-content/50 leading-snug">
+												Reads one byte from each checked segment to confirm the Usenet data still
+												exists.
+											</span>
+										</div>
+									</label>
 								)}
 							</div>
 

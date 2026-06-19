@@ -260,76 +260,8 @@ export function SABnzbdConfigSection({
 							</div>
 						</div>
 
-						{/* External Fallback */}
-						<div className="fade-in slide-in-from-top-4 animate-in space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
-							<div className="flex items-center gap-2">
-								<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
-									Failover Engine
-								</h4>
-								<div className="h-px flex-1 bg-base-300/50" />
-							</div>
-
-							<div className="space-y-6">
-								<div className="rounded-xl border border-info/10 bg-info/5 p-4">
-									<div className="flex gap-3">
-										<Info className="mt-0.5 h-4 w-4 shrink-0 text-info" />
-										<p className="break-words text-[11px] leading-relaxed opacity-80">
-											Failover allows internal processing failures to be automatically sent to a
-											real external SABnzbd instance after max retries.
-										</p>
-									</div>
-								</div>
-
-								<div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-									<fieldset className="fieldset">
-										<legend className="fieldset-legend font-semibold">External Host</legend>
-										<input
-											type="text"
-											className="input input-bordered w-full bg-base-100 font-mono text-sm"
-											value={formData.fallback_host || ""}
-											readOnly={isReadOnly}
-											placeholder="http://192.168.1.10:8080"
-											onChange={(e) => updateFormData({ fallback_host: e.target.value })}
-										/>
-									</fieldset>
-
-									<fieldset className="fieldset">
-										<legend className="fieldset-legend font-semibold">API Key</legend>
-										<div className="relative">
-											<input
-												type={showApiKey ? "text" : "password"}
-												className="input input-bordered w-full bg-base-100 pr-10 font-mono text-sm"
-												value={fallbackApiKey}
-												readOnly={isReadOnly}
-												placeholder={
-													formData.fallback_host && config.sabnzbd.fallback_api_key_set
-														? "••••••••••••••••"
-														: "Paste API key..."
-												}
-												onChange={(e) => {
-													setFallbackApiKey(e.target.value);
-													setHasChanges(true);
-												}}
-											/>
-											<button
-												type="button"
-												className="-translate-y-1/2 btn btn-ghost btn-sm absolute top-1/2 right-2"
-												onClick={() => setShowApiKey(!showApiKey)}
-											>
-												{showApiKey ? (
-													<EyeOff className="h-4 w-4 text-base-content/70" />
-												) : (
-													<Eye className="h-4 w-4 text-base-content/70" />
-												)}
-											</button>
-										</div>
-									</fieldset>
-								</div>
-							</div>
-						</div>
-
 						{/* Categories */}
-						<div className="fade-in slide-in-from-top-6 animate-in space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+						<div className="fade-in slide-in-from-top-4 animate-in space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 							<div className="flex items-center justify-between gap-4">
 								<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
 									Category Mapping
@@ -506,6 +438,74 @@ export function SABnzbdConfigSection({
 									</div>
 								</div>
 							)}
+						</div>
+
+						{/* External Fallback */}
+						<div className="fade-in slide-in-from-top-6 animate-in space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+							<div className="flex items-center gap-2">
+								<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
+									Failover Engine
+								</h4>
+								<div className="h-px flex-1 bg-base-300/50" />
+							</div>
+
+							<div className="space-y-6">
+								<div className="rounded-xl border border-info/10 bg-info/5 p-4">
+									<div className="flex gap-3">
+										<Info className="mt-0.5 h-4 w-4 shrink-0 text-info" />
+										<p className="break-words text-[11px] leading-relaxed opacity-80">
+											Failover allows internal processing failures to be automatically sent to a
+											real external SABnzbd instance after max retries.
+										</p>
+									</div>
+								</div>
+
+								<div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+									<fieldset className="fieldset">
+										<legend className="fieldset-legend font-semibold">External Host</legend>
+										<input
+											type="text"
+											className="input input-bordered w-full bg-base-100 font-mono text-sm"
+											value={formData.fallback_host || ""}
+											readOnly={isReadOnly}
+											placeholder="http://192.168.1.10:8080"
+											onChange={(e) => updateFormData({ fallback_host: e.target.value })}
+										/>
+									</fieldset>
+
+									<fieldset className="fieldset">
+										<legend className="fieldset-legend font-semibold">API Key</legend>
+										<div className="relative">
+											<input
+												type={showApiKey ? "text" : "password"}
+												className="input input-bordered w-full bg-base-100 pr-10 font-mono text-sm"
+												value={fallbackApiKey}
+												readOnly={isReadOnly}
+												placeholder={
+													formData.fallback_host && config.sabnzbd.fallback_api_key_set
+														? "••••••••••••••••"
+														: "Paste API key..."
+												}
+												onChange={(e) => {
+													setFallbackApiKey(e.target.value);
+													setHasChanges(true);
+												}}
+											/>
+											<button
+												type="button"
+												className="-translate-y-1/2 btn btn-ghost btn-sm absolute top-1/2 right-2"
+												onClick={() => setShowApiKey(!showApiKey)}
+											>
+												{showApiKey ? (
+													<EyeOff className="h-4 w-4 text-base-content/70" />
+												) : (
+													<Eye className="h-4 w-4 text-base-content/70" />
+												)}
+											</button>
+										</div>
+									</fieldset>
+								</div>
+							</div>
 						</div>
 					</>
 				)}

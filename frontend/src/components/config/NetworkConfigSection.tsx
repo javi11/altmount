@@ -71,42 +71,44 @@ export function NetworkConfigSection({
 					Applied to every outbound HTTP request used for indexer search, NZB grabbing, Arrs
 					(Radarr/Sonarr/Lidarr/Readarr/Whisparr), SABnzbd fallback, and the NZBLNK resolver.
 					Internal endpoints (RC server, self-loopback) are not affected. Leave fields blank to
-					connect directly. Changes take effect on the next external request — restart AltMount if
+					connect directly. Changes take effect on the next external request. Restart AltMount if
 					you want long-lived clients to pick up the new proxy immediately.
 				</div>
 			</div>
 
-			<fieldset className="fieldset">
-				<legend className="fieldset-legend">HTTP Proxy</legend>
-				<input
-					type="text"
-					className="input"
-					placeholder="http://user:pass@host:3128"
-					value={data.http_proxy}
-					disabled={isReadOnly}
-					onChange={(e) => handleChange("http_proxy", e.target.value)}
-				/>
-				<p className="label">Used for plain HTTP outbound requests.</p>
-			</fieldset>
+			<div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+				<fieldset className="fieldset">
+					<legend className="fieldset-legend">HTTP Proxy</legend>
+					<input
+						type="text"
+						className="input w-full"
+						placeholder="http://user:pass@host:3128"
+						value={data.http_proxy}
+						disabled={isReadOnly}
+						onChange={(e) => handleChange("http_proxy", e.target.value)}
+					/>
+					<p className="label">Used for plain HTTP outbound requests.</p>
+				</fieldset>
 
-			<fieldset className="fieldset">
-				<legend className="fieldset-legend">HTTPS Proxy</legend>
-				<input
-					type="text"
-					className="input"
-					placeholder="http://user:pass@host:3128"
-					value={data.https_proxy}
-					disabled={isReadOnly}
-					onChange={(e) => handleChange("https_proxy", e.target.value)}
-				/>
-				<p className="label">Used for HTTPS outbound requests. May be the same as HTTP Proxy.</p>
-			</fieldset>
+				<fieldset className="fieldset">
+					<legend className="fieldset-legend">HTTPS Proxy</legend>
+					<input
+						type="text"
+						className="input w-full"
+						placeholder="http://user:pass@host:3128"
+						value={data.https_proxy}
+						disabled={isReadOnly}
+						onChange={(e) => handleChange("https_proxy", e.target.value)}
+					/>
+					<p className="label">Used for HTTPS outbound requests. May be the same as HTTP Proxy.</p>
+				</fieldset>
+			</div>
 
 			<fieldset className="fieldset">
 				<legend className="fieldset-legend">No Proxy</legend>
 				<input
 					type="text"
-					className="input"
+					className="input w-full"
 					placeholder="localhost,127.0.0.1,10.0.0.0/8,*.internal"
 					value={data.no_proxy}
 					disabled={isReadOnly}

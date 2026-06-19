@@ -359,7 +359,7 @@ export function ArrsConfigSection({
 									Queue Auto-Cleanup
 								</h5>
 								<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
-									Automatically remove empty import folders from ARR queues.
+									Automatically clear stuck and failed imports from your *arr queues.
 								</p>
 							</div>
 							<input
@@ -396,7 +396,7 @@ export function ArrsConfigSection({
 											</span>
 										</div>
 										<div className="mt-2 whitespace-normal text-base-content/70 text-xs">
-											How often the *arr queues are checked.
+											How often *arr queues are checked.
 										</div>
 									</fieldset>
 
@@ -423,8 +423,8 @@ export function ArrsConfigSection({
 											</span>
 										</div>
 										<div className="mt-2 whitespace-normal text-base-content/70 text-xs">
-											How long a stuck or failed import must persist before cleanup acts on it.
-											Brief errors that clear on their own are ignored.
+											How long an import must stay stuck before cleanup acts. Brief errors are
+											ignored.
 										</div>
 									</fieldset>
 
@@ -451,8 +451,8 @@ export function ArrsConfigSection({
 											</span>
 										</div>
 										<div className="mt-2 whitespace-normal text-base-content/70 text-xs">
-											After cleanup acts on the same movie/episode this many times, give up:
-											blocklist without re-searching and unmonitor it in the *arr. 0 disables this.
+											After this many cleanups on the same item, give up: blocklist and unmonitor
+											it. 0 disables.
 										</div>
 									</fieldset>
 								</div>
@@ -460,8 +460,8 @@ export function ArrsConfigSection({
 								<div className="space-y-4">
 									<h5 className="font-bold text-base-content/60 text-xs uppercase">Error Rules</h5>
 									<p className="whitespace-normal text-base-content/70 text-xs">
-										When a stuck import's error matches one of these, run the chosen action: remove,
-										blocklist, or blocklist + search.
+										Match a stuck import's error to an action: remove, blocklist, or blocklist +
+										search.
 									</p>
 									<div className="custom-scrollbar max-h-72 space-y-2 overflow-y-auto pr-2">
 										{(formData.queue_cleanup_rules || []).map((rule, index) => (

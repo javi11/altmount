@@ -1,4 +1,4 @@
-import { Check, Copy, ExternalLink, Info, Save, Tv, X } from "lucide-react";
+import { Check, Copy, ExternalLink, Save, Tv, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { copyToClipboard } from "../../lib/utils";
 import type { ConfigResponse, ProwlarrConfig, StremioConfig } from "../../types/config";
@@ -202,21 +202,37 @@ export function StremioConfigSection({
 						/>
 					</div>
 
-					<fieldset className="fieldset min-w-0">
-						<legend className="fieldset-legend">Public Base URL</legend>
-						<input
-							type="url"
-							className="input w-full min-w-0 max-w-full"
-							placeholder="https://altmount.example.com"
-							value={formData.base_url ?? ""}
-							disabled={isReadOnly}
-							onChange={(e) => update({ base_url: e.target.value })}
-						/>
-						<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/50 text-xs">
-							Public base URL used when building stream links. Leave empty to auto-detect from the
-							request.
-						</p>
-					</fieldset>
+					<div className="grid min-w-0 grid-cols-1 gap-6 sm:grid-cols-2">
+						<fieldset className="fieldset min-w-0">
+							<legend className="fieldset-legend">Public Base URL</legend>
+							<input
+								type="url"
+								className="input w-full min-w-0 max-w-full"
+								placeholder="https://altmount.example.com"
+								value={formData.base_url ?? ""}
+								disabled={isReadOnly}
+								onChange={(e) => update({ base_url: e.target.value })}
+							/>
+							<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/50 text-xs">
+								Base address for generated stream links. Leave empty to auto-detect.
+							</p>
+						</fieldset>
+
+						<fieldset className="fieldset min-w-0">
+							<legend className="fieldset-legend">NZB Cache TTL (hours)</legend>
+							<input
+								type="number"
+								className="input w-full min-w-0 max-w-full"
+								min={0}
+								value={formData.nzb_ttl_hours}
+								disabled={isReadOnly}
+								onChange={(e) => update({ nzb_ttl_hours: Math.max(0, Number(e.target.value)) })}
+							/>
+							<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/50 text-xs">
+								How long cached NZB files stay on disk. Use <strong>0</strong> to keep forever.
+							</p>
+						</fieldset>
+					</div>
 				</div>
 
 				{/* Addon URL */}
@@ -260,33 +276,6 @@ export function StremioConfigSection({
 						</div>
 					</div>
 				)}
-
-				{/* Cache TTL */}
-				<div className="min-w-0 space-y-6 overflow-hidden rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
-					<div className="flex items-center gap-2">
-						<Info className="h-4 w-4 text-base-content/60" />
-						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
-							Cache
-						</h4>
-						<div className="h-px flex-1 bg-base-300/50" />
-					</div>
-
-					<fieldset className="fieldset min-w-0">
-						<legend className="fieldset-legend">NZB File Cache TTL (hours)</legend>
-						<input
-							type="number"
-							className="input w-32 max-w-full"
-							min={0}
-							value={formData.nzb_ttl_hours}
-							disabled={isReadOnly}
-							onChange={(e) => update({ nzb_ttl_hours: Math.max(0, Number(e.target.value)) })}
-						/>
-						<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/50 text-xs">
-							How long AltMount keeps the cached NZB/meta file on disk. Set to <strong>0</strong> to
-							never delete.
-						</p>
-					</fieldset>
-				</div>
 
 				{/* Prowlarr */}
 				<div className="min-w-0 space-y-6 overflow-hidden rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
