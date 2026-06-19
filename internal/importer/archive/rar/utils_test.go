@@ -29,11 +29,6 @@ func TestSetKey(t *testing.T) {
 		{"plain media file", "movie.mkv", "", false},
 		{"no extension obfuscated", "a1b2c3d4e5", "", false},
 		{"par2", "movie.par2", "", false},
-		// Surrounding-quoted volumes must resolve to the same set key as their unquoted form
-		{"quoted single-quote part rar", "'movie.part01.rar'", "movie", true},
-		{"quoted double-quote part rar", `"movie.part01.rar"`, "movie", true},
-		{"quoted single-quote 3-digit part rar", "'movie.part001.rar'", "movie", true},
-		{"quoted obfuscated hash part rar", "'a1b2c3d4.part01.rar'", "a1b2c3d4", true},
 		{"embedded apostrophe not surrounding quotes", "It's.A.Wonderful.Life.part01.rar", "it's.a.wonderful.life", true},
 	}
 	for _, tt := range tests {
@@ -47,25 +42,19 @@ func TestSetKey(t *testing.T) {
 	}
 }
 
-// TestExtractRarBaseNameQuotedFilenames asserts that quoted and clean filenames
-// resolve to the same grouping base name, with an embedded-apostrophe guard. WHY:
-// extractRarBaseName feeds GroupArchivesByBaseName, and when a name is not a
-// recognized volume it falls back to the full lowercased name as the key, so a
-// quoted name that slipped through would become its own group and fail to collapse
-// with its siblings.
-func TestExtractRarBaseNameQuotedFilenames(t *testing.T) {
+// TestExtractRarBaseName covers both branches: a recognized volume resolves to its
+// SetKey, and an unrecognized name falls back to the full lowercased base so it only
+// groups with itself. Inputs are assumed canonical (quotes stripped upstream).
+func TestExtractRarBaseName(t *testing.T) {
 	tests := []struct {
 		name     string
 		filename string
 		want     string
 	}{
-		{"clean 3-digit unquoted", "movie.part001.rar", "movie"},
-		{"single-quoted 3-digit", "'movie.part001.rar'", "movie"},
-		{"single-quoted 2-digit", "'movie.part01.rar'", "movie"},
-		{"double-quoted part rar", `"movie.part01.rar"`, "movie"},
-		{"single-quoted obfuscated hash", "'a1b2c3d4.part01.rar'", "a1b2c3d4"},
-		{"single-quoted real-world NZB subject", "'Some.Show.S03.WEBRip.EAC3.2.0.1080p.x265-GRP.part001.rar'", "some.show.s03.webrip.eac3.2.0.1080p.x265-grp"},
-		{"embedded apostrophe not surrounding quotes", "It's.A.Wonderful.Life.part01.rar", "it's.a.wonderful.life"},
+		{"recognized volume 3-digit", "movie.part001.rar", "movie"},
+		{"recognized volume strips directory", "sub/dir/movie.part02.rar", "movie"},
+		{"embedded apostrophe preserved", "It's.A.Wonderful.Life.part01.rar", "it's.a.wonderful.life"},
+		{"non-volume falls back to full name", "movie.mkv", "movie.mkv"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -77,12 +66,10 @@ func TestExtractRarBaseNameQuotedFilenames(t *testing.T) {
 	}
 }
 
-// TestGroupArchivesByBaseNameQuotedSubjectNames is the regression's core proof: N
-// surrounding-quoted volumes must collapse into a single group, not N groups of one
-// (the exact production symptom, where rardecode then errored "bad volume number" on
-// every continuation). The clean-3-digit case proves the padding width is not the
-// cause, isolating the surrounding quotes as the real defect.
-func TestGroupArchivesByBaseNameQuotedSubjectNames(t *testing.T) {
+// TestGroupArchivesByBaseNamePaddedWidth proves multi-volume parts collapse into a
+// single group regardless of zero-padding width (part001 vs part01). Inputs are
+// canonical; poster quotes are stripped upstream at the nzbparser boundary.
+func TestGroupArchivesByBaseNamePaddedWidth(t *testing.T) {
 	makeFiles := func(names ...string) []parser.ParsedFile {
 		out := make([]parser.ParsedFile, len(names))
 		for i, n := range names {
@@ -98,7 +85,7 @@ func TestGroupArchivesByBaseNameQuotedSubjectNames(t *testing.T) {
 		wantParts  int
 	}{
 		{
-			name: "clean 3-digit unquoted collapses to 1 group of 5",
+			name: "3-digit padding collapses to 1 group of 5",
 			files: makeFiles(
 				"movie.part001.rar",
 				"movie.part002.rar",
@@ -110,28 +97,14 @@ func TestGroupArchivesByBaseNameQuotedSubjectNames(t *testing.T) {
 			wantParts:  5,
 		},
 		{
-			name: "single-quoted 3-digit collapses to 1 group of 5",
+			name: "2-digit padding collapses to 1 group of 3",
 			files: makeFiles(
-				"'movie.part001.rar'",
-				"'movie.part002.rar'",
-				"'movie.part003.rar'",
-				"'movie.part004.rar'",
-				"'movie.part005.rar'",
+				"movie.part01.rar",
+				"movie.part02.rar",
+				"movie.part03.rar",
 			),
 			wantGroups: 1,
-			wantParts:  5,
-		},
-		{
-			name: "real-world quoted NZB subject collapses to 1 group",
-			files: makeFiles(
-				"'Some.Show.S03.WEBRip.EAC3.2.0.1080p.x265-GRP.part001.rar'",
-				"'Some.Show.S03.WEBRip.EAC3.2.0.1080p.x265-GRP.part002.rar'",
-				"'Some.Show.S03.WEBRip.EAC3.2.0.1080p.x265-GRP.part003.rar'",
-				"'Some.Show.S03.WEBRip.EAC3.2.0.1080p.x265-GRP.part004.rar'",
-				"'Some.Show.S03.WEBRip.EAC3.2.0.1080p.x265-GRP.part005.rar'",
-			),
-			wantGroups: 1,
-			wantParts:  5,
+			wantParts:  3,
 		},
 	}
 

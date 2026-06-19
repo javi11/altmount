@@ -1572,6 +1572,8 @@ func (s *Service) calculateNzbFileSize(r io.Reader) (int64, error) {
 		return 0, NewNonRetryableError("NZB file contains no files", nil)
 	}
 
+	parser.SanitizeNzbFilenames(n)
+
 	var totalSize int64
 	par2Pattern := regexp.MustCompile(`(?i)\.par2$|\.p\d+$|\.vol\d+\+\d+\.par2$`)
 

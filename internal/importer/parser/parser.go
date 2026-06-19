@@ -80,7 +80,23 @@ func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string, pro
 		return nil, errors.NewNonRetryableError("NZB file contains no files", nil)
 	}
 
+	SanitizeNzbFilenames(n)
+
 	return p.ParseNzb(ctx, n, nzbPath, progressTracker, ParseOptions{})
+}
+
+// SanitizeNzbFilenames normalizes poster-controlled filenames in place at the
+// nzbparser boundary so every consumer (the pre-parse fast-fail probe, the parser,
+// persisted metadata, and serve-time volume following) sees a canonical name. Call
+// it immediately after nzbparser.Parse and before any code reads NzbFile.Filename.
+// The raw subject remains available on NzbFile.Subject.
+func SanitizeNzbFilenames(n *nzbparser.Nzb) {
+	if n == nil {
+		return
+	}
+	for i := range n.Files {
+		n.Files[i].Filename = nzbtrim.TrimSurroundingQuotes(n.Files[i].Filename)
+	}
 }
 
 // ParseNzb processes an already-parsed *nzbparser.Nzb, performing all network
@@ -228,7 +244,7 @@ func (p *Parser) ParseNzb(ctx context.Context, n *nzbparser.Nzb, nzbPath string,
 
 		subjectHeader := ""
 		if s, err := nzbparser.ParseSubject(data.File.Subject); err == nil {
-			subjectHeader = s.Header
+			subjectHeader = nzbtrim.TrimSurroundingQuotes(s.Header)
 		}
 
 		filesWithFirstSegment = append(filesWithFirstSegment, &fileinfo.NzbFileWithFirstSegment{

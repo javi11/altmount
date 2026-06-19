@@ -27,38 +27,17 @@ var (
 	numericPatternNumber = regexp.MustCompile(`\.(\d+)$`)
 )
 
-// trimSurroundingQuotes strips a single matched pair of surrounding single or double
-// quotes from a filename. It is a deliberate small duplicate of the helper in the
-// fileinfo package, kept local so this package need not take a cross-package
-// dependency for an 11-line pure function. Grouping needs it independently because
-// the parser's fallbackGetFileInfos path sets Filename straight from
-// NzbFile.Filename, bypassing fileinfo.selectBestFilename, so a poster-quoted
-// subject can still reach the grouping and volume-detection layer uncleaned. Only a
-// matched leading and trailing pair is removed, so an embedded apostrophe (It's...)
-// survives.
-func trimSurroundingQuotes(filename string) string {
-	s := strings.TrimSpace(filename)
-	if len(s) < 2 {
-		return s
-	}
-	first, last := s[0], s[len(s)-1]
-	if (first == '\'' && last == '\'') || (first == '"' && last == '"') {
-		return s[1 : len(s)-1]
-	}
-	return s
-}
-
 // SetKey returns the multi-volume grouping key for a filename and whether the
 // name matches a RAR/split-volume pattern (.partNN.rar, .rar, .rNN, .NNN —
 // the latter also covers .7z.NNN sets). Non-volume filenames (plain media,
 // obfuscated names with no recognizable extension) return ("", false) and
 // should be treated as standalone files. The key is the lowercased base name
 // with the volume suffix stripped, so all parts of one set share it.
+//
+// Filenames must already be canonical; poster-added quotes are stripped upstream at
+// the nzbparser boundary (parser.SanitizeNzbFilenames), so SetKey does no cleaning.
 func SetKey(filename string) (string, bool) {
-	// Trim before delegating so the volume patterns (which anchor on .rar$, .rNN$,
-	// .NNN$) match: a trailing quote on a quoted name otherwise yields a unique key
-	// per volume, splitting one multi-volume set into one-part-per-volume groups.
-	return archive.SetKey(trimSurroundingQuotes(filename))
+	return archive.SetKey(filename)
 }
 
 // extractRarBaseName returns the lowercase base name of a RAR filename,

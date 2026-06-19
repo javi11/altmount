@@ -59,6 +59,10 @@ func parseInt(s string) int {
 // obfuscated names with no recognizable extension) return ("", false) and
 // should be treated as standalone files. The key is the lowercased base name
 // with the volume suffix stripped, so all parts of one set share it.
+//
+// Input must be a canonical filename: the patterns anchor on the extension, so
+// callers normalize poster-controlled names (e.g. strip surrounding quotes) before
+// calling. SetKey performs no cleaning of its own.
 func SetKey(filename string) (string, bool) {
 	lower := strings.ToLower(filepath.Base(filename))
 
