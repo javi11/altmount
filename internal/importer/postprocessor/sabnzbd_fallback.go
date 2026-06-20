@@ -27,8 +27,8 @@ func (c *Coordinator) AttemptFallback(ctx context.Context, item *database.Import
 		if err != nil {
 			return fmt.Errorf("failed to open NZB: %w", err)
 		}
+		defer rc.Close()
 		nzbXML, err = io.ReadAll(rc)
-		rc.Close()
 		if err != nil {
 			return fmt.Errorf("failed to read NZB: %w", err)
 		}

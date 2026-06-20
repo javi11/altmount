@@ -187,6 +187,9 @@ func (c *SABnzbdClient) SendNZBContent(ctx context.Context, host, apiKey string,
 	if filename == "" {
 		return "", fmt.Errorf("NZB filename cannot be empty")
 	}
+	if len(nzbXML) == 0 {
+		return "", fmt.Errorf("NZB content cannot be empty")
+	}
 
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
