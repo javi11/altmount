@@ -362,72 +362,93 @@ func (s *Server) handleStremioAddonPlay(c *fiber.Ctx) error {
 		}
 	}
 
-	// Write NZB to temp directory
-	uploadDir := filepath.Join(os.TempDir(), "altmount-uploads")
-	if err := os.MkdirAll(uploadDir, 0755); err != nil {
-		slog.ErrorContext(ctx, "Failed to create upload directory", "error", err)
-		return RespondInternalError(c, "Failed to create upload directory", err.Error())
-	}
-	tempPath := filepath.Join(uploadDir, safeFilename)
-
-	// Short-circuit: join existing active queue item
-	if inQueue, _ := s.queueRepo.IsFileInQueue(ctx, tempPath); inQueue {
-		if activeItems, err := s.queueRepo.ListQueueItems(ctx, nil, safeFilename, "", 1, 0, "updated_at", "desc"); err == nil && len(activeItems) > 0 {
-			return s.waitAndRedirectToStream(c, activeItems[0].ID, baseURL, key, nzbName, 300)
+	// Coalesce concurrent plays of the same title so the release is downloaded/queued once.
+	v, err, _ := s.stremioPlayGroup.Do(safeFilename, func() (interface{}, error) {
+		// Serialized per title: reuse an in-flight or TTL-fresh import instead of re-downloading.
+		if items, e := s.queueRepo.ListQueueItems(ctx, nil, safeFilename, "", 1, 0, "updated_at", "desc"); e == nil && len(items) > 0 {
+			it := items[0]
+			switch it.Status {
+			case database.QueueStatusPending, database.QueueStatusProcessing, database.QueueStatusPaused:
+				return it.ID, nil
+			case database.QueueStatusCompleted:
+				reusable := it.StoragePath != nil && *it.StoragePath != ""
+				if reusable && ttlHours > 0 && it.CompletedAt != nil {
+					reusable = time.Since(*it.CompletedAt) < time.Duration(ttlHours)*time.Hour
+				}
+				if reusable {
+					return it.ID, nil
+				}
+			}
 		}
-	}
 
-	// Download NZB from Prowlarr
-	prowlarrCfg := cfg.Stremio.Prowlarr
-	client := prowlarr.NewClient(
-		prowlarrCfg.Host,
-		prowlarrCfg.APIKey,
-		httpclient.NewForExternal(cfg.Network, httpclient.LongTimeout),
-	)
-	nzbData, err := client.DownloadNZB(ctx, downloadURL)
+		if s.importerService == nil {
+			return nil, fmt.Errorf("importer service not available")
+		}
+
+		// Detach from the caller's request so one client disconnecting won't abort shared work.
+		workCtx := context.WithoutCancel(ctx)
+
+		// Unique per-request staging dir so concurrent plays never share a temp file.
+		uploadDir := filepath.Join(os.TempDir(), "altmount-uploads")
+		if err := os.MkdirAll(uploadDir, 0755); err != nil {
+			return nil, fmt.Errorf("failed to create upload directory: %w", err)
+		}
+		stageDir, err := os.MkdirTemp(uploadDir, "play-*")
+		if err != nil {
+			return nil, fmt.Errorf("failed to create staging directory: %w", err)
+		}
+		// Importer moves the NZB out on success; this clears the staged file / empty dir.
+		defer os.RemoveAll(stageDir)
+		tempPath := filepath.Join(stageDir, safeFilename)
+
+		// Download NZB from Prowlarr
+		prowlarrCfg := cfg.Stremio.Prowlarr
+		client := prowlarr.NewClient(
+			prowlarrCfg.Host,
+			prowlarrCfg.APIKey,
+			httpclient.NewForExternal(cfg.Network, httpclient.LongTimeout),
+		)
+		nzbData, err := client.DownloadNZB(workCtx, downloadURL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to download NZB from Prowlarr: %w", err)
+		}
+		if err := os.WriteFile(tempPath, nzbData, 0644); err != nil {
+			return nil, fmt.Errorf("failed to write NZB temp file: %w", err)
+		}
+
+		var basePath *string
+		if completeDir := cfg.SABnzbd.CompleteDir; completeDir != "" {
+			basePath = &completeDir
+		}
+
+		priority := database.QueuePriorityHigh
+		// Map Stremio stream type to Newznab category name so downloads land in the
+		// correct folder (matches default SABnzbd category config).
+		category := "Movies"
+		if c.Query("type") == "series" {
+			category = "TV"
+		}
+		stremioDownloadID := stremioDownloadIDPrefix + uuid.NewString()
+		item, err := s.importerService.AddToQueue(workCtx, tempPath, basePath, &category, &priority, nil, &stremioDownloadID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to add NZB to queue: %w", err)
+		}
+
+		slog.InfoContext(ctx, "Prowlarr NZB queued for Stremio play",
+			"queue_id", item.ID, "title", safeTitle)
+		return item.ID, nil
+	})
 	if err != nil {
-		slog.WarnContext(ctx, "Failed to download NZB from Prowlarr",
-			"error", err, "title", safeTitle)
-		return RespondServiceUnavailable(c, "Failed to download NZB from Prowlarr", err.Error())
+		slog.WarnContext(ctx, "Failed to prepare Stremio NZB stream", "error", err, "title", safeTitle)
+		return RespondServiceUnavailable(c, "Failed to prepare NZB stream", err.Error())
 	}
 
-	if err := os.WriteFile(tempPath, nzbData, 0644); err != nil {
-		slog.ErrorContext(ctx, "Failed to write NZB temp file", "error", err)
-		return RespondInternalError(c, "Failed to write NZB temp file", err.Error())
+	itemID, ok := v.(int64)
+	if !ok {
+		return RespondInternalError(c, "Unexpected play result", "")
 	}
 
-	// Add NZB to queue with high priority
-	if s.importerService == nil {
-		os.Remove(tempPath)
-		slog.ErrorContext(ctx, "Importer service not available for Stremio addon play")
-		return RespondServiceUnavailable(c, "Importer service not available", "")
-	}
-
-	var basePath *string
-	if completeDir := cfg.SABnzbd.CompleteDir; completeDir != "" {
-		basePath = &completeDir
-	}
-
-	priority := database.QueuePriorityHigh
-	// Map Stremio stream type to Newznab category name so downloads land in the
-	// correct folder (matches default SABnzbd category config).
-	category := "Movies"
-	switch c.Query("type") {
-	case "series":
-		category = "TV"
-	}
-	stremioDownloadID := stremioDownloadIDPrefix + uuid.NewString()
-	item, err := s.importerService.AddToQueue(ctx, tempPath, basePath, &category, &priority, nil, &stremioDownloadID)
-	if err != nil {
-		os.Remove(tempPath)
-		slog.ErrorContext(ctx, "Failed to add Prowlarr NZB to queue", "error", err, "title", safeTitle)
-		return RespondInternalError(c, "Failed to add NZB to queue", err.Error())
-	}
-
-	slog.InfoContext(ctx, "Prowlarr NZB queued for Stremio play",
-		"queue_id", item.ID, "title", safeTitle)
-
-	return s.waitAndRedirectToStream(c, item.ID, baseURL, key, nzbName, 300)
+	return s.waitAndRedirectToStream(c, itemID, baseURL, key, nzbName, 300)
 }
 
 // waitAndRedirectToStream waits for a queue item to complete and 302-redirects to the first stream URL.
