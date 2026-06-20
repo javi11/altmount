@@ -155,7 +155,6 @@ type ImportAPIResponse struct {
 	AllowNestedRarExtraction *bool `json:"allow_nested_rar_extraction,omitempty"`
 	RenameToNzbName          *bool `json:"rename_to_nzb_name,omitempty"`
 	FilterSampleFiles        *bool `json:"filter_sample_files,omitempty"`
-	CompressNzb              *bool `json:"compress_nzb,omitempty"`
 }
 
 // SABnzbdAPIResponse sanitizes SABnzbd config for API responses
@@ -418,7 +417,6 @@ func ToImportAPIResponse(importConfig config.ImportConfig) ImportAPIResponse {
 		AllowNestedRarExtraction: importConfig.AllowNestedRarExtraction,
 		RenameToNzbName:          importConfig.RenameToNzbName,
 		FilterSampleFiles:        importConfig.FilterSampleFiles,
-		CompressNzb:              importConfig.CompressNzb,
 	}
 }
 

@@ -192,8 +192,7 @@ export function QueuePage() {
 					} catch {
 						// Non-JSON error body — fall back to status text.
 					}
-					// For completed items, a missing file almost always means the server
-					// cleaned it up post-import (delete_completed_nzb). Soften the toast.
+					// For completed items, a missing file is expected — soften the toast.
 					if (response.status === 404 && status === "completed") {
 						showToast({
 							type: "info",
