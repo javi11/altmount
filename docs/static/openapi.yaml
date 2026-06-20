@@ -120,7 +120,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/api.ArrsInstanceRequest"
+              $ref: "#/components/schemas/api.TestConnectionRequest"
         description: Instance connection details
         required: true
       responses:
@@ -3279,18 +3279,10 @@ components:
         path:
           type: string
       type: object
-    api.ArrsInstanceRequest:
+    api.TestConnectionRequest:
       properties:
         api_key:
           type: string
-        category:
-          type: string
-        enabled:
-          type: boolean
-        name:
-          type: string
-        sync_interval_hours:
-          type: integer
         type:
           type: string
         url:

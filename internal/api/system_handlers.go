@@ -518,6 +518,7 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 	for _, ps := range poolStats.Providers {
 		// Try to find matching provider in config for additional details
 		var providerID string
+		var name string
 		var host string
 		var username string
 		var lastSpeedTestMbps float64
@@ -528,6 +529,7 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 				// Match by provider name (v4 uses host:port or host:port+username)
 				if ps.Name == p.NNTPPoolName() {
 					providerID = p.ID
+					name = p.Name
 					host = p.Host
 					username = p.Username
 					lastSpeedTestMbps = p.LastSpeedTestMbps
@@ -601,6 +603,7 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 
 		prov := ProviderStatusResponse{
 			ID:                      providerID,
+			Name:                    name,
 			Host:                    host,
 			Username:                username,
 			UsedConnections:         ps.ActiveConnections,
