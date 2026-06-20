@@ -31,6 +31,7 @@ message Par2FileReference {
   string filename = 1;          // PAR2 filename (e.g., "movie.par2", "movie.vol01+02.par2")
   int64 file_size = 2;          // Size of the PAR2 file in bytes
   repeated SegmentData segment_data = 3;  // Usenet segments containing PAR2 data
+  repeated SegmentRef segment_refs = 4;
 }
 
 // NestedSegmentSource represents one inner RAR volume's contribution to a nested file.
@@ -50,6 +51,7 @@ message NestedSegmentSource {
   // (proto default) means "no sharing" — identical to the legacy on-disk
   // layout, so old .meta files keep working without migration.
   int32 shared_outer_source_index = 7;
+  repeated SegmentRef segment_refs = 8;
 }
 
 // ClipBoundary is one clip in a byte-concatenated multi-clip BD main feature.
@@ -99,5 +101,36 @@ message FileMetadata {
   // inner_offset + inner_length per-extent. Cuts the on-disk .meta size
   // from O(extents * segments) to O(extents + segments) for these files.
   repeated NestedSegmentSource shared_outer_sources = 16;
+  string store_ref = 18;               // id/path of the shared NzbStore
+  repeated SegmentRef segment_refs = 19; // v3 replacement for segment_data
+}
+
+// --- v3 shared-store types ---
+
+// NzbStore is the complete original NZB for a release, stored zstd-compressed at
+// the (renamed) source_nzb_path. Single source of truth for streaming + NZB regen.
+message NzbStore {
+  repeated NzbFileEntry files = 1; // original <file>s, in NZB order
+}
+
+message NzbFileEntry {
+  string subject = 1;
+  string poster = 2;
+  int64 date = 3;                  // unix ts
+  repeated string groups = 4;
+  repeated NzbSeg segments = 5;    // ordered by `number`
+}
+
+message NzbSeg {
+  string id = 1;     // message-id (no angle brackets)
+  int32 number = 2;
+  int64 bytes = 3;
+}
+
+// SegmentRef points into the flat segment index of the release's NzbStore.
+message SegmentRef {
+  int64 store_index = 1;   // flat index: files-in-order then segments-by-number
+  int64 start_offset = 2;  // usable byte range within that segment
+  int64 end_offset = 3;
 }
   
