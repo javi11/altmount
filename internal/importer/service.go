@@ -1203,6 +1203,14 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 		return err
 	}
 
+	// Delete the on-disk NZB — the .nzbz store can regenerate it on demand.
+	if item.NzbPath != "" {
+		if err := os.Remove(item.NzbPath); err != nil && !os.IsNotExist(err) {
+			s.log.WarnContext(ctx, "Failed to delete NZB after successful import",
+				"queue_id", item.ID, "nzb_path", item.NzbPath, "error", err)
+		}
+	}
+
 	// Update import_migrations row if this was a nzbdav migration import
 	if s.database.MigrationRepo != nil {
 		if err := s.database.MigrationRepo.MarkImported(ctx, item.ID, resultingPath); err != nil {
