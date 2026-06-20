@@ -556,14 +556,8 @@ func (m *Manager) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 	var sceneName string
 	var err error
 
-	// ID-Based Precision: If we have the exact movie ID and file ID from metadata, use them directly
-	if metadata != nil && metadata.Movie != nil && metadata.MovieFile != nil && metadata.Movie.Id > 0 && metadata.MovieFile.Id > 0 {
-		slog.InfoContext(ctx, "ID-Based Precision: Using metadata IDs for Radarr repair",
-			"movie_id", metadata.Movie.Id,
-			"movie_file_id", metadata.MovieFile.Id)
-
-		sceneName = metadata.MovieFile.SceneName
-		
+	// ID-Based Precision: If we have the movie ID from metadata, use it
+	if metadata != nil && metadata.Movie != nil && metadata.Movie.Id > 0 {
 		movies, err := m.data.GetMovies(ctx, client, instanceName)
 		if err != nil {
 			return fmt.Errorf("failed to get movies from Radarr for ID lookup: %w", err)
@@ -572,16 +566,29 @@ func (m *Manager) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 			if movie.ID == metadata.Movie.Id {
 				targetMovie = movie
 
-				// Smart Repair Guard: Check if the movie already has a newer/different healthy file
-				if movie.HasFile && movie.MovieFile != nil {
-					if movie.MovieFile.ID != metadata.MovieFile.Id {
-						slog.InfoContext(ctx, "Smart Repair Guard: Movie already has a different healthy file (likely upgraded). Skipping repair.",
-							"movie", movie.Title,
-							"old_file_id", metadata.MovieFile.Id,
-							"new_file_id", movie.MovieFile.ID)
-						return model.ErrEpisodeAlreadySatisfied
+				if metadata.MovieFile != nil && metadata.MovieFile.Id > 0 {
+					slog.InfoContext(ctx, "ID-Based Precision: Using metadata IDs for Radarr repair",
+						"movie_id", metadata.Movie.Id,
+						"movie_file_id", metadata.MovieFile.Id)
+					sceneName = metadata.MovieFile.SceneName
+
+					// Smart Repair Guard: Check if the movie already has a newer/different healthy file
+					if movie.HasFile && movie.MovieFile != nil {
+						if movie.MovieFile.ID != metadata.MovieFile.Id {
+							slog.InfoContext(ctx, "Smart Repair Guard: Movie already has a different healthy file (likely upgraded). Skipping repair.",
+								"movie", movie.Title,
+								"old_file_id", metadata.MovieFile.Id,
+								"new_file_id", movie.MovieFile.ID)
+							return model.ErrEpisodeAlreadySatisfied
+						}
+						targetMovieFileID = movie.MovieFile.ID
 					}
-					targetMovieFileID = movie.MovieFile.ID
+				} else {
+					slog.InfoContext(ctx, "ID-Based Precision: Using metadata movie ID for Radarr repair",
+						"movie_id", metadata.Movie.Id)
+					if movie.HasFile && movie.MovieFile != nil {
+						targetMovieFileID = movie.MovieFile.ID
+					}
 				}
 				break
 			}
@@ -731,16 +738,21 @@ func (m *Manager) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 	var sceneName string
 	var err error
 
-	// ID-Based Precision: If we have exact IDs from metadata, use them
-	if metadata != nil && metadata.Series != nil && metadata.EpisodeFile != nil && metadata.Series.Id > 0 && metadata.EpisodeFile.Id > 0 {
-		slog.InfoContext(ctx, "ID-Based Precision: Using metadata IDs for Sonarr repair",
-			"series_id", metadata.Series.Id,
-			"episode_file_id", metadata.EpisodeFile.Id)
-
+	// ID-Based Precision: If we have the series ID from metadata, use it
+	if metadata != nil && metadata.Series != nil && metadata.Series.Id > 0 {
 		targetSeriesID = metadata.Series.Id
-		targetEpisodeFileID = metadata.EpisodeFile.Id
-		sceneName = metadata.EpisodeFile.SceneName
-		targetSeriesTitle = "Known Series (ID Based)" // Title is just for logging
+		targetSeriesTitle = "Known Series (ID Based)"
+
+		if metadata.EpisodeFile != nil && metadata.EpisodeFile.Id > 0 {
+			slog.InfoContext(ctx, "ID-Based Precision: Using metadata IDs for Sonarr repair",
+				"series_id", metadata.Series.Id,
+				"episode_file_id", metadata.EpisodeFile.Id)
+			targetEpisodeFileID = metadata.EpisodeFile.Id
+			sceneName = metadata.EpisodeFile.SceneName
+		} else {
+			slog.InfoContext(ctx, "ID-Based Precision: Using metadata series ID for Sonarr repair",
+				"series_id", metadata.Series.Id)
+		}
 	}
 
 	// Fallback to path-based guessing if ID-based precision failed or metadata was missing
@@ -919,6 +931,14 @@ func (m *Manager) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 		// Fallback: search in Sonarr download queue
 		if err := m.failSonarrQueueItemByPath(ctx, client, filePath); err == nil {
 			return nil
+		}
+
+		// Fallback 2: If we have episode IDs from metadata, use them to trigger replacement search
+		if metadata != nil && len(metadata.Episodes) > 0 {
+			slog.InfoContext(ctx, "Using episode IDs from metadata to trigger replacement search", "series", targetSeriesTitle)
+			for _, ep := range metadata.Episodes {
+				episodeIDs = append(episodeIDs, ep.Id)
+			}
 		}
 	}
 

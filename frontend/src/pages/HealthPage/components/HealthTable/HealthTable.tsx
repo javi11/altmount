@@ -66,7 +66,7 @@ export function HealthTable({
 		<div className="card bg-base-100 shadow-lg">
 			<div className="card-body p-0">
 				{isLoading ? (
-					<LoadingTable columns={9} />
+					<LoadingTable columns={8} />
 				) : data && data.length > 0 ? (
 					<>
 						{/* Mobile View (< 768px) */}
@@ -93,11 +93,11 @@ export function HealthTable({
 								/>
 							))}
 						</div>
-
+ 
 						{/* Desktop View (≥768px) */}
 						<div className="hidden min-h-[450px] overflow-x-auto pb-24 md:block">
 							{" "}
-							<table className="table-zebra table">
+							<table className="table-zebra table table-fixed w-full min-w-[1200px]">
 								<HealthTableHeader
 									isAllSelected={Boolean(isAllSelected)}
 									isIndeterminate={Boolean(isIndeterminate)}

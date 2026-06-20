@@ -212,6 +212,7 @@ export interface FileHealth {
 	streaming_failure_count: number;
 	is_masked: boolean;
 	indexer?: string;
+	metadata?: string;
 }
 
 export interface HealthStats {

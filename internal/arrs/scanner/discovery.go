@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -22,6 +23,19 @@ var (
 func (m *Manager) DiscoverFileMetadata(ctx context.Context, filePath, relativePath, nzbName, libraryPath string) (*model.WebhookMetadata, error) {
 	allInstances := m.instances.GetAllInstances()
 	cleanNzbName := strings.TrimSuffix(nzbName, ".nzb")
+
+	if cleanNzbName == "" {
+		// Fallback to parent directory name if it looks like a release folder
+		parentDir := filepath.Base(filepath.Dir(filePath))
+		if parentDir != "." && parentDir != "tv" && parentDir != "movies" && parentDir != "/" && parentDir != "" {
+			cleanNzbName = parentDir
+		} else {
+			// Fallback to filename without extension
+			baseName := filepath.Base(filePath)
+			ext := filepath.Ext(baseName)
+			cleanNzbName = strings.TrimSuffix(baseName, ext)
+		}
+	}
 
 	// Determine preferred type based on patterns (S01E01, etc.)
 	isTV := tvSeasonPattern.MatchString(cleanNzbName) || tvSeasonPattern.MatchString(filePath) ||
@@ -139,11 +153,21 @@ func (m *Manager) discoverRadarrStrict(ctx context.Context, filePath, cleanNzbNa
 	if err == nil {
 		for _, record := range history.Records {
 			if strings.EqualFold(record.SourceTitle, cleanNzbName) {
+				var tmdbID int64
+				if movies, err := m.data.GetMovies(ctx, client, instanceName); err == nil {
+					for _, movie := range movies {
+						if movie.ID == record.MovieID {
+							tmdbID = movie.TmdbID
+							break
+						}
+					}
+				}
 				metadata := &model.WebhookMetadata{
 					EventType:    "StrictHistoryDiscovery",
 					InstanceName: instanceName,
 					Movie: &model.MovieMetadata{
-						Id: record.MovieID,
+						Id:     record.MovieID,
+						TmdbId: tmdbID,
 					},
 				}
 				return metadata, nil
@@ -248,11 +272,20 @@ func (m *Manager) discoverSonarrStrict(ctx context.Context, filePath, cleanNzbNa
 				})
 			}
 
+			var tvdbID int64
+			for _, show := range series {
+				if show.ID == matchedRecord.SeriesID {
+					tvdbID = show.TvdbID
+					break
+				}
+			}
+
 			metadata := &model.WebhookMetadata{
 				EventType:    "StrictHistoryDiscovery",
 				InstanceName: instanceName,
 				Series: &model.SeriesMetadata{
-					Id: matchedRecord.SeriesID,
+					Id:     matchedRecord.SeriesID,
+					TvdbId: tvdbID,
 				},
 				Episodes: episodes,
 			}

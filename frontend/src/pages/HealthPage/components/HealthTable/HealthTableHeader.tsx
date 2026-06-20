@@ -34,7 +34,7 @@ export function HealthTableHeader({
 						/>
 					</label>
 				</th>
-				<th>
+				<th className="w-96">
 					<button
 						type="button"
 						className="flex items-center gap-1 hover:text-primary"
@@ -49,8 +49,8 @@ export function HealthTableHeader({
 							))}
 					</button>
 				</th>
-				<th>Library Path</th>
-				<th>
+				<th className="w-96">Library Path</th>
+				<th className="w-44">
 					<button
 						type="button"
 						className="flex items-center gap-1 hover:text-primary"
@@ -65,7 +65,7 @@ export function HealthTableHeader({
 							))}
 					</button>
 				</th>
-				<th>
+				<th className="w-24">
 					<button
 						type="button"
 						className="flex items-center gap-1 hover:text-primary"
@@ -80,7 +80,7 @@ export function HealthTableHeader({
 							))}
 					</button>
 				</th>
-				<th>
+				<th className="w-32">
 					<button
 						type="button"
 						className="flex items-center gap-1 hover:text-primary"
@@ -95,7 +95,7 @@ export function HealthTableHeader({
 							))}
 					</button>
 				</th>
-				<th>
+				<th className="w-24">
 					<button
 						type="button"
 						className="flex items-center gap-1 hover:text-primary"
@@ -110,7 +110,7 @@ export function HealthTableHeader({
 							))}
 					</button>
 				</th>
-				<th>Actions</th>
+				<th className="w-16">Actions</th>
 			</tr>
 		</thead>
 	);
