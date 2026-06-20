@@ -332,14 +332,14 @@ func (s *Server) handleDeleteHealthBulk(c *fiber.Ctx) error {
 	}
 
 	// Delete health records in bulk
-	err := s.healthRepo.DeleteHealthRecordsBulk(c.Context(), req.FilePaths)
+	deletedCount, err := s.healthRepo.DeleteHealthRecordsBulk(c.Context(), req.FilePaths)
 	if err != nil {
 		return RespondInternalError(c, "Failed to delete health records", err.Error())
 	}
 
 	return RespondSuccess(c, fiber.Map{
 		"message":               "Health records deleted successfully",
-		"deleted_count":         len(req.FilePaths),
+		"deleted_count":         deletedCount,
 		"file_paths":            req.FilePaths,
 		"deleted_at":            time.Now().Format(time.RFC3339),
 		"meta_deleted_count":    metaDeletedCount,
@@ -825,12 +825,12 @@ func (s *Server) cleanupHealthRecords(ctx context.Context, olderThan time.Time, 
 	}
 
 	// Delete database records (proceed even if some file deletions failed)
-	deleteErr := s.healthRepo.DeleteHealthRecordsBulk(ctx, allFilePaths)
+	deletedRecords, deleteErr := s.healthRepo.DeleteHealthRecordsBulk(ctx, allFilePaths)
 	if deleteErr != nil {
 		return 0, deletedFileCount, fileErrors, fmt.Errorf("failed to delete health records from database: %w", deleteErr)
 	}
 
-	return len(allFilePaths), deletedFileCount, fileErrors, nil
+	return int(deletedRecords), deletedFileCount, fileErrors, nil
 }
 
 // handleAddHealthCheck handles POST /api/health/check

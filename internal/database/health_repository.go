@@ -1008,9 +1008,9 @@ func (r *HealthRepository) ResetStalePendingFiles(ctx context.Context) error {
 }
 
 // DeleteHealthRecordsBulk removes multiple health records from the database
-func (r *HealthRepository) DeleteHealthRecordsBulk(ctx context.Context, filePaths []string) error {
+func (r *HealthRepository) DeleteHealthRecordsBulk(ctx context.Context, filePaths []string) (int64, error) {
 	if len(filePaths) == 0 {
-		return nil
+		return 0, nil
 	}
 
 	// SQLite parameter limit typically is 999. Batch delete in chunks of 500.
@@ -1032,21 +1032,18 @@ func (r *HealthRepository) DeleteHealthRecordsBulk(ctx context.Context, filePath
 
 		result, err := r.db.ExecContext(ctx, query, args...)
 		if err != nil {
-			return fmt.Errorf("failed to delete health records batch starting at %d: %w", i, err)
+			return totalRowsAffected, fmt.Errorf("failed to delete health records batch starting at %d: %w", i, err)
 		}
 
 		rowsAffected, err := result.RowsAffected()
 		if err != nil {
-			return fmt.Errorf("failed to get rows affected for batch starting at %d: %w", i, err)
+			return totalRowsAffected, fmt.Errorf("failed to get rows affected for batch starting at %d: %w", i, err)
 		}
 		totalRowsAffected += rowsAffected
 	}
 
-	if totalRowsAffected == 0 {
-		return fmt.Errorf("no health records found to delete")
-	}
-
-	return nil
+	// Zero deletions is not an error; callers report the actual count.
+	return totalRowsAffected, nil
 }
 
 // ResetHealthChecksBulk resets multiple health records to pending status

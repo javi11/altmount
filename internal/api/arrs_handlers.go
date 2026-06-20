@@ -2,7 +2,6 @@ package api
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"log/slog"
 	"net/url"
@@ -1097,18 +1096,31 @@ func (s *Server) handleRegisterArrsDownloadClients(c *fiber.Ctx) error {
 		}
 	}
 
-	// Launch in background to not block
-	go func() {
-		ctx := context.Background()
-		if err := s.arrsService.EnsureDownloadClientRegistration(ctx, host, port, urlBase, apiKey); err != nil {
-			slog.ErrorContext(ctx, "Failed to register download clients", "error", err)
-		}
-	}()
+	// Register, then verify reachability so the response reflects the real outcome.
+	ctx := c.Context()
+	if err := s.arrsService.EnsureDownloadClientRegistration(ctx, host, port, urlBase, apiKey); err != nil {
+		slog.ErrorContext(ctx, "Failed to register download clients", "error", err)
+		return RespondInternalError(c, "Failed to register download client", err.Error())
+	}
 
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"message": "Download client registration triggered in background",
-	})
+	results, err := s.arrsService.TestDownloadClientRegistration(ctx, host, port, urlBase, apiKey)
+	if err != nil {
+		return RespondInternalError(c, "Failed to verify download client registration", err.Error())
+	}
+
+	var failures []string
+	for name, res := range results {
+		if res != "OK" {
+			failures = append(failures, name+": "+res)
+		}
+	}
+	if len(failures) > 0 {
+		return RespondError(c, fiber.StatusBadGateway, ErrCodeInternalServer,
+			"Download client registered, but ARR instances cannot reach AltMount",
+			strings.Join(failures, "; "))
+	}
+
+	return RespondMessage(c, "Download client registered and verified successfully")
 }
 
 // handleTestArrsDownloadClients tests the connection from ARR instances to AltMount
