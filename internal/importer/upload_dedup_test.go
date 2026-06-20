@@ -31,14 +31,12 @@ func newDedupTestService(t *testing.T) (*Service, string) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 
-	compressOff := false
 	s := &Service{
 		log:      slog.Default(),
 		database: db,
 		configGetter: func() *config.Config {
 			return &config.Config{
 				Database: config.DatabaseConfig{Path: dbPath},
-				Import:   config.ImportConfig{CompressNzb: &compressOff},
 			}
 		},
 	}
