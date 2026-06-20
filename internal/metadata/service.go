@@ -120,16 +120,17 @@ func (ms *MetadataService) WriteFileMetadata(virtualPath string, metadata *metap
 	var writeData []byte
 	if metadata.StoreRef != "" {
 		// v3: clear inline segment fields (they live in the store), write magic + structural proto.
+		// SharedOuterSources dedup is dissolved: each NestedSource carries inline SegmentRefs,
+		// so the read path does not need to expand shared entries.
 		structural := proto.Clone(metadata).(*metapb.FileMetadata)
 		structural.SegmentData = nil
+		structural.SharedOuterSources = nil // v3: dedup dissolved
 		for _, p := range structural.Par2Files {
 			p.SegmentData = nil
 		}
 		for _, ns := range structural.NestedSources {
 			ns.Segments = nil
-		}
-		for _, ns := range structural.SharedOuterSources {
-			ns.Segments = nil
+			ns.SharedOuterSourceIndex = 0 // v3: each NestedSource is self-contained
 		}
 		raw, err := proto.Marshal(structural)
 		if err != nil {

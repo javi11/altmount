@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -588,6 +589,32 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 		return result, writtenPaths, ErrArticlesNotFound
 	}
 
+	// Persist the NzbStore and convert written metadata to v3.
+	// Runs only on successful imports of NZB (non-STRM) files that produced a store.
+	if err == nil && parsed != nil && parsed.Store != nil &&
+		len(parsed.SegmentIndex) > 0 && parsed.Type != parser.NzbTypeStrm &&
+		len(writtenPaths) > 0 {
+		storeRef := nzbtrim.TrimNzbExtension(filePath) + ".nzbz"
+		if storeErr := proc.metadataService.Store().WriteStore(storeRef, parsed.Store); storeErr != nil {
+			proc.log.ErrorContext(ctx, "failed to write NZB store; metadata stays v1",
+				"store_ref", storeRef, "error", storeErr)
+		} else if _, integrityErr := proc.metadataService.Store().ReadStore(storeRef); integrityErr != nil {
+			proc.log.ErrorContext(ctx, "NZB store integrity check failed; removing store",
+				"store_ref", storeRef, "error", integrityErr)
+			_ = os.Remove(storeRef)
+		} else {
+			for _, path := range writtenPaths {
+				if strings.HasPrefix(path, "DIR:") {
+					continue
+				}
+				if convErr := proc.convertMetaToV3(path, parsed.SegmentIndex, storeRef); convErr != nil {
+					proc.log.WarnContext(ctx, "failed to convert metadata to v3",
+						"path", path, "error", convErr)
+				}
+			}
+		}
+	}
+
 	return result, writtenPaths, err
 }
 
@@ -1047,6 +1074,60 @@ func (proc *Processor) processSevenZipArchive(
 	}
 
 	return nzbFolder, writtenPaths, nil
+}
+
+// segDataToRefs converts a slice of SegmentData to SegmentRefs using a flat segment index
+// (message-id → position in NzbStore flat segment array). StartOffset and EndOffset are
+// preserved from the original SegmentData (archive slicing may have narrowed them). Returns
+// nil for a nil or empty input.
+func segDataToRefs(segments []*metapb.SegmentData, index map[string]int64) []*metapb.SegmentRef {
+	if len(segments) == 0 {
+		return nil
+	}
+	refs := make([]*metapb.SegmentRef, len(segments))
+	for i, seg := range segments {
+		refs[i] = &metapb.SegmentRef{
+			StoreIndex:  index[seg.Id],
+			StartOffset: seg.StartOffset,
+			EndOffset:   seg.EndOffset,
+		}
+	}
+	return refs
+}
+
+// convertMetaToV3 reads the metadata at virtualPath, replaces all SegmentData with SegmentRefs
+// (using the provided flat segment index), sets StoreRef, and rewrites the file in v3 format.
+// ReadFileMetadata expands SharedOuterSources before returning, so every NestedSource has its
+// Segments populated; we dissolve the dedup by converting each source independently and
+// zeroing SharedOuterSourceIndex.
+func (proc *Processor) convertMetaToV3(virtualPath string, index map[string]int64, storeRef string) error {
+	meta, err := proc.metadataService.ReadFileMetadata(virtualPath)
+	if err != nil {
+		return fmt.Errorf("read for v3 conversion: %w", err)
+	}
+	if meta == nil {
+		return nil
+	}
+
+	meta.StoreRef = storeRef
+	meta.SegmentRefs = segDataToRefs(meta.SegmentData, index)
+	meta.SegmentData = nil
+
+	for _, p := range meta.Par2Files {
+		p.SegmentRefs = segDataToRefs(p.SegmentData, index)
+		p.SegmentData = nil
+	}
+
+	// ReadFileMetadata already called ExpandSharedOuterSources so all NestedSources
+	// have their Segments populated, even deduped ones. Dissolve the dedup in v3.
+	for _, ns := range meta.NestedSources {
+		ns.SegmentRefs = segDataToRefs(ns.Segments, index)
+		ns.Segments = nil
+		ns.SharedOuterSourceIndex = 0
+	}
+	meta.SharedOuterSources = nil
+
+	return proc.metadataService.WriteFileMetadata(virtualPath, meta)
 }
 
 // applyNzbRename renames the first file in files to match nzbName when renameToNzbName is true.
