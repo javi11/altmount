@@ -64,6 +64,9 @@ type MetadataService struct {
 	liteCache *lru.Cache[string, *FileMetadataLite]
 	// store manages shared per-release NzbStore files used by v3 metadata.
 	store *StoreService
+	// storeRefCounter tracks reference counts for shared NzbStore files.
+	// nil means reference counting is disabled.
+	storeRefCounter StoreRefCounter
 }
 
 // NewMetadataService creates a new metadata service
@@ -79,6 +82,42 @@ func NewMetadataService(rootPath string) *MetadataService {
 // Store returns the StoreService used by this MetadataService.
 func (ms *MetadataService) Store() *StoreService {
 	return ms.store
+}
+
+// SetStoreRefCounter wires in a StoreRefCounter so that reference counts on shared
+// NzbStore files are maintained when metadata is deleted or created.
+func (ms *MetadataService) SetStoreRefCounter(c StoreRefCounter) {
+	ms.storeRefCounter = c
+}
+
+// IncStoreRef increments the reference count for a v3 store file.
+// No-op when no StoreRefCounter is configured.
+func (ms *MetadataService) IncStoreRef(ctx context.Context, storePath string) {
+	if ms.storeRefCounter == nil {
+		return
+	}
+	if err := ms.storeRefCounter.IncStoreRef(ctx, storePath); err != nil {
+		slog.WarnContext(ctx, "failed to increment store ref count",
+			"store_path", storePath, "error", err)
+	}
+}
+
+// readStoreRef reads just the StoreRef field from a .meta file without resolving segments.
+// Returns "" if the file is not v3 or cannot be read.
+func (ms *MetadataService) readStoreRef(metaFilePath string) string {
+	data, err := os.ReadFile(metaFilePath)
+	if err != nil {
+		return ""
+	}
+	if !isV3Meta(data) {
+		return ""
+	}
+	payload := data[len(metaMagicV3):]
+	var fm metapb.FileMetadata
+	if err := proto.Unmarshal(payload, &fm); err != nil {
+		return ""
+	}
+	return fm.StoreRef
 }
 
 // truncateFilename truncates the filename if it's too long to prevent filesystem issues
@@ -568,13 +607,14 @@ func (ms *MetadataService) DeleteFileMetadataWithSourceNzb(ctx context.Context, 
 	metadataDir := filepath.Join(ms.rootPath, filepath.Dir(virtualPath))
 	metadataPath := filepath.Join(metadataDir, filename+".meta")
 
-	// If we need to delete the source NZB, read the metadata first
+	// Always read metadata first to capture SourceNzbPath and StoreRef before deletion.
 	var sourceNzbPath string
-	if deleteSourceNzb {
-		metadata, err := ms.ReadFileMetadata(virtualPath)
-		if err == nil && metadata != nil && metadata.SourceNzbPath != "" {
+	var storeRef string
+	if metadata, err := ms.ReadFileMetadata(virtualPath); err == nil && metadata != nil {
+		if deleteSourceNzb {
 			sourceNzbPath = metadata.SourceNzbPath
 		}
+		storeRef = metadata.StoreRef
 	}
 
 	// Delete the metadata file
@@ -607,11 +647,27 @@ func (ms *MetadataService) DeleteFileMetadataWithSourceNzb(ctx context.Context, 
 		}
 	}
 
+	// Decrement reference count for shared store file and delete it if no more refs.
+	if ms.storeRefCounter != nil && storeRef != "" {
+		newCount, err := ms.storeRefCounter.DecStoreRef(ctx, storeRef)
+		if err != nil {
+			slog.WarnContext(ctx, "failed to decrement store ref count",
+				"store_path", storeRef, "error", err)
+		} else if newCount == 0 {
+			if removeErr := os.Remove(storeRef); removeErr != nil && !os.IsNotExist(removeErr) {
+				slog.WarnContext(ctx, "failed to delete orphaned store file",
+					"store_path", storeRef, "error", removeErr)
+			}
+		}
+	}
+
 	return nil
 }
 
 // DeleteDirectory deletes a metadata directory and all its contents
 func (ms *MetadataService) DeleteDirectory(virtualPath string) error {
+	ctx := context.Background()
+
 	// Purge all cached entries under this directory
 	prefix := virtualPath + string(filepath.Separator)
 	for _, key := range ms.liteCache.Keys() {
@@ -628,9 +684,47 @@ func (ms *MetadataService) DeleteDirectory(virtualPath string) error {
 		return fmt.Errorf("safety block: refusing to remove root metadata directory: %s", cleanMetadataDir)
 	}
 
+	// Pre-pass: if refcounting is enabled, collect all v3 store refs before deletion.
+	var storeRefCounts map[string]int
+	if ms.storeRefCounter != nil {
+		storeRefCounts = make(map[string]int)
+		_ = filepath.WalkDir(metadataDir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".meta") {
+				return nil
+			}
+			if ref := ms.readStoreRef(path); ref != "" {
+				storeRefCounts[ref]++
+			}
+			return nil
+		})
+	}
+
 	err := os.RemoveAll(metadataDir)
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to delete metadata directory: %w", err)
+	}
+
+	// Post-pass: decrement ref counts and delete orphaned store files.
+	if ms.storeRefCounter != nil {
+		for storePath, count := range storeRefCounts {
+			var lastCount int64
+			for i := 0; i < count; i++ {
+				newCount, decErr := ms.storeRefCounter.DecStoreRef(ctx, storePath)
+				if decErr != nil {
+					slog.WarnContext(ctx, "failed to decrement store ref count",
+						"store_path", storePath, "error", decErr)
+					lastCount = -1 // mark as unknown; don't delete
+					break
+				}
+				lastCount = newCount
+			}
+			if lastCount == 0 {
+				if removeErr := os.Remove(storePath); removeErr != nil && !os.IsNotExist(removeErr) {
+					slog.WarnContext(ctx, "failed to delete orphaned store file",
+						"store_path", storePath, "error", removeErr)
+				}
+			}
+		}
 	}
 
 	return nil

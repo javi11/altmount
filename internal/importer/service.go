@@ -218,6 +218,11 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 		config.Workers = 2
 	}
 
+	// Wire store ref counter so metadata delete/create paths maintain reference counts.
+	if database != nil && database.StoreRefRepo != nil {
+		metadataService.SetStoreRefCounter(database.StoreRefRepo)
+	}
+
 	// Create processor with poolManager for dynamic pool access
 	processor := NewProcessor(metadataService, poolManager, broadcaster, configGetter, nil)
 

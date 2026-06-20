@@ -1137,7 +1137,11 @@ func (proc *Processor) convertMetaToV3(virtualPath string, index map[string]int6
 	}
 	meta.SharedOuterSources = nil
 
-	return proc.metadataService.WriteFileMetadata(virtualPath, meta)
+	if err := proc.metadataService.WriteFileMetadata(virtualPath, meta); err != nil {
+		return err
+	}
+	proc.metadataService.IncStoreRef(context.Background(), storeRef)
+	return nil
 }
 
 // applyNzbRename renames the first file in files to match nzbName when renameToNzbName is true.
