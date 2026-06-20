@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -52,6 +53,35 @@ func TestImportBattery_CleanSingleFile(t *testing.T) {
 	}
 	if len(meta.SegmentData) != 3 {
 		t.Errorf("SegmentData len = %d, want 3", len(meta.SegmentData))
+	}
+}
+
+// TestImportBattery_V3FormatOnDisk verifies that a completed import writes a v3 .meta
+// file (starts with the 5-byte magic) and a companion .nzbz store file next to the NZB.
+func TestImportBattery_V3FormatOnDisk(t *testing.T) {
+	env := newBatteryEnv(t)
+
+	content := bytes.Repeat([]byte("V"), 30_000)
+	segs := env.registerContent("v3-disk", content, 10_000, 1.0, nil)
+	nzb := nzbbuild.Build(nzbbuild.File{Subject: "V3Test.mkv", Segments: segs})
+
+	_, written, err := env.runImport(nzb, "V3Test.mkv")
+	if err != nil {
+		t.Fatalf("import failed: %v", err)
+	}
+	paths := filePaths(written)
+	if len(paths) != 1 {
+		t.Fatalf("expected 1 written path, got %v", paths)
+	}
+
+	// The .meta file must start with the v3 magic: 0x00 'A' 'M' '3' 0x01
+	rawMeta, err := os.ReadFile(env.rawMetaPath(paths[0]))
+	if err != nil {
+		t.Fatalf("read .meta: %v", err)
+	}
+	v3Magic := []byte{0x00, 'A', 'M', '3', 0x01}
+	if len(rawMeta) < 5 || !bytes.Equal(rawMeta[:5], v3Magic) {
+		t.Errorf("meta file does not start with v3 magic (got %x); v3 conversion did not run", rawMeta[:min(5, len(rawMeta))])
 	}
 }
 

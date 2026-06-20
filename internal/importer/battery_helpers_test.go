@@ -20,11 +20,12 @@ import (
 
 // batteryEnv holds the full test environment for an import battery test.
 type batteryEnv struct {
-	t      *testing.T
-	client *fakepool.Client
-	svc    *metadata.MetadataService
-	cfg    *config.Config
-	proc   *Processor
+	t        *testing.T
+	client   *fakepool.Client
+	svc      *metadata.MetadataService
+	cfg      *config.Config
+	proc     *Processor
+	metaRoot string
 }
 
 // newBatteryEnv creates a fresh test environment backed by an in-memory fakepool.
@@ -39,7 +40,13 @@ func newBatteryEnv(t *testing.T) *batteryEnv {
 	cfg.Import.AllowedFileExtensions = append(cfg.Import.AllowedFileExtensions, ".bin")
 	svc := metadata.NewMetadataService(metaRoot)
 	proc := NewProcessor(svc, processorTestPoolManager{client: client}, nil, func() *config.Config { return cfg }, nil)
-	return &batteryEnv{t: t, client: client, svc: svc, cfg: cfg, proc: proc}
+	return &batteryEnv{t: t, client: client, svc: svc, cfg: cfg, proc: proc, metaRoot: metaRoot}
+}
+
+// rawMetaPath returns the on-disk path to the .meta file for virtualPath.
+// Mirrors the logic in MetadataService.WriteFileMetadata: base filename + ".meta".
+func (e *batteryEnv) rawMetaPath(virtualPath string) string {
+	return filepath.Join(e.metaRoot, filepath.Dir(virtualPath), filepath.Base(virtualPath)+".meta")
 }
 
 // registerContent slices content into chunks of at most partSize bytes, registers
