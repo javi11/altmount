@@ -23,6 +23,21 @@ const (
 	defaultMetadataCacheSize = 4096
 )
 
+// metaMagicV3 is a 5-byte magic prefix prepended to v3 .meta files.
+// The leading 0x00 byte is an invalid proto tag byte, so v1 files (raw proto,
+// no magic) are safely distinguished from v3 files.
+var metaMagicV3 = []byte{0x00, 'A', 'M', '3', 0x01}
+
+// isV3Meta reports whether data starts with the v3 magic prefix.
+func isV3Meta(data []byte) bool {
+	return len(data) >= len(metaMagicV3) &&
+		data[0] == metaMagicV3[0] &&
+		data[1] == metaMagicV3[1] &&
+		data[2] == metaMagicV3[2] &&
+		data[3] == metaMagicV3[3] &&
+		data[4] == metaMagicV3[4]
+}
+
 // FileMetadataLite holds the minimal metadata needed for directory listings.
 // This avoids keeping full FileMetadata protos (with SegmentData, Par2Files, etc.)
 // in memory just for Readdir.
@@ -47,6 +62,8 @@ type MetadataService struct {
 	// Readdir/Stat/Getattr, and populated as a side effect of ReadFileMetadata
 	// so info-only callers still benefit.
 	liteCache *lru.Cache[string, *FileMetadataLite]
+	// store manages shared per-release NzbStore files used by v3 metadata.
+	store *StoreService
 }
 
 // NewMetadataService creates a new metadata service
@@ -55,7 +72,13 @@ func NewMetadataService(rootPath string) *MetadataService {
 	return &MetadataService{
 		rootPath:  rootPath,
 		liteCache: liteCache,
+		store:     NewStoreService(rootPath),
 	}
+}
+
+// Store returns the StoreService used by this MetadataService.
+func (ms *MetadataService) Store() *StoreService {
+	return ms.store
 }
 
 // truncateFilename truncates the filename if it's too long to prevent filesystem issues
@@ -93,11 +116,35 @@ func (ms *MetadataService) WriteFileMetadata(virtualPath string, metadata *metap
 	nzbdavId := metadata.NzbdavId
 	metadata.NzbdavId = "" // Clear for marshalling
 
-	// Marshal protobuf data
-	data, err := proto.Marshal(metadata)
-	if err != nil {
-		metadata.NzbdavId = nzbdavId // Restore on error
-		return fmt.Errorf("failed to marshal metadata: %w", err)
+	// Marshal protobuf data — v3 when StoreRef is set, v1 otherwise.
+	var writeData []byte
+	if metadata.StoreRef != "" {
+		// v3: clear inline segment fields (they live in the store), write magic + structural proto.
+		structural := proto.Clone(metadata).(*metapb.FileMetadata)
+		structural.SegmentData = nil
+		for _, p := range structural.Par2Files {
+			p.SegmentData = nil
+		}
+		for _, ns := range structural.NestedSources {
+			ns.Segments = nil
+		}
+		for _, ns := range structural.SharedOuterSources {
+			ns.Segments = nil
+		}
+		raw, err := proto.Marshal(structural)
+		if err != nil {
+			metadata.NzbdavId = nzbdavId
+			return fmt.Errorf("failed to marshal v3 metadata: %w", err)
+		}
+		writeData = append(metaMagicV3, raw...)
+	} else {
+		// v1: marshal as-is (existing behavior).
+		raw, err := proto.Marshal(metadata)
+		if err != nil {
+			metadata.NzbdavId = nzbdavId // Restore on error
+			return fmt.Errorf("failed to marshal metadata: %w", err)
+		}
+		writeData = raw
 	}
 
 	// Write atomically using a uniquely-named temporary file so concurrent
@@ -108,7 +155,7 @@ func (ms *MetadataService) WriteFileMetadata(virtualPath string, metadata *metap
 		return fmt.Errorf("failed to create temporary metadata file: %w", err)
 	}
 	tmpPath := tmpFile.Name()
-	if _, writeErr := tmpFile.Write(data); writeErr != nil {
+	if _, writeErr := tmpFile.Write(writeData); writeErr != nil {
 		tmpFile.Close()
 		_ = os.Remove(tmpPath)
 		metadata.NzbdavId = nzbdavId
@@ -159,10 +206,37 @@ func (ms *MetadataService) ReadFileMetadata(virtualPath string) (*metapb.FileMet
 		return nil, fmt.Errorf("failed to read metadata file: %w", err)
 	}
 
-	// Unmarshal protobuf data
+	// Unmarshal protobuf data — v3 detection and ref resolution.
 	metadata := &metapb.FileMetadata{}
-	if err := proto.Unmarshal(data, metadata); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
+	if isV3Meta(data) {
+		if err := proto.Unmarshal(data[len(metaMagicV3):], metadata); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
+		}
+		if metadata.StoreRef != "" {
+			store, err := ms.store.ReadStore(metadata.StoreRef)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read store %q: %w", metadata.StoreRef, err)
+			}
+			flat := FlatSegments(store)
+			var resolveErr error
+			if metadata.SegmentData, resolveErr = resolveRefs(flat, metadata.SegmentRefs); resolveErr != nil {
+				return nil, resolveErr
+			}
+			for _, p := range metadata.Par2Files {
+				if p.SegmentData, resolveErr = resolveRefs(flat, p.SegmentRefs); resolveErr != nil {
+					return nil, resolveErr
+				}
+			}
+			for _, ns := range metadata.NestedSources {
+				if ns.Segments, resolveErr = resolveRefs(flat, ns.SegmentRefs); resolveErr != nil {
+					return nil, resolveErr
+				}
+			}
+		}
+	} else {
+		if err := proto.Unmarshal(data, metadata); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
+		}
 	}
 
 	// Resolve shared_outer_source_index references on nested sources.
@@ -232,6 +306,11 @@ func (ms *MetadataService) ReadFileMetadataLite(virtualPath string) (*FileMetada
 		return nil, fmt.Errorf("failed to read metadata head: %w", err)
 	}
 	buf = buf[:n]
+
+	// Skip v3 magic if present so parseLiteFields sees clean proto wire bytes.
+	if isV3Meta(buf) {
+		buf = buf[len(metaMagicV3):]
+	}
 
 	lite, ok := parseLiteFields(buf)
 	if !ok {
@@ -322,6 +401,10 @@ func (ms *MetadataService) readFileMetadataLiteFull(virtualPath string) (*FileMe
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to read metadata file: %w", err)
+	}
+
+	if isV3Meta(data) {
+		data = data[len(metaMagicV3):]
 	}
 
 	metadata := &metapb.FileMetadata{}
