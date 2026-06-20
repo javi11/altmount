@@ -1,12 +1,14 @@
 package metadata
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	"github.com/javi11/altmount/internal/nzb"
 	"github.com/klauspost/compress/zstd"
 	"google.golang.org/protobuf/proto"
 )
@@ -93,6 +95,20 @@ func FlatSegments(store *metapb.NzbStore) []*metapb.NzbSeg {
 		out = append(out, f.Segments...)
 	}
 	return out
+}
+
+// RegenerateNZB reads the store at storePath and returns NZB XML bytes.
+// Returns (nil, nil) if the store does not exist.
+func (ss *StoreService) RegenerateNZB(storePath string) ([]byte, error) {
+	store, err := ss.ReadStore(storePath)
+	if err != nil {
+		// Unwrap to check for os.ErrNotExist buried inside fmt.Errorf wraps.
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read nzb store: %w", err)
+	}
+	return nzb.BuildNZB(store), nil
 }
 
 // resolveRefs maps SegmentRefs to fully-populated SegmentData using the flat
