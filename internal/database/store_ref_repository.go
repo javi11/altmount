@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 )
 
@@ -60,9 +61,12 @@ func (r *StoreRefRepository) DecStoreRef(ctx context.Context, storePath string) 
 	var count int64
 	selectQuery := r.dialect.q(`SELECT ref_count FROM nzb_store_refs WHERE store_path = ?`)
 	err = tx.QueryRowContext(ctx, selectQuery, storePath).Scan(&count)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		// Row didn't exist before the decrement; nothing to do.
-		return 0, tx.Commit()
+		if err := tx.Commit(); err != nil {
+			return 0, fmt.Errorf("dec store ref %q: commit: %w", storePath, err)
+		}
+		return 0, nil
 	}
 	if err != nil {
 		return 0, fmt.Errorf("dec store ref %q: select: %w", storePath, err)
@@ -88,7 +92,7 @@ func (r *StoreRefRepository) GetStoreRefCount(ctx context.Context, storePath str
 	query := r.dialect.q(`SELECT ref_count FROM nzb_store_refs WHERE store_path = ?`)
 	var count int64
 	err := r.db.QueryRowContext(ctx, query, storePath).Scan(&count)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return 0, nil
 	}
 	if err != nil {

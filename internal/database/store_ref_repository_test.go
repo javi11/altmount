@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"testing"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -12,7 +13,7 @@ import (
 
 func setupStoreRefTestDB(t *testing.T) *StoreRefRepository {
 	t.Helper()
-	db, err := sql.Open("sqlite3", "file::memory:?cache=shared&mode=memory")
+	db, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name()))
 	require.NoError(t, err)
 	t.Cleanup(func() { db.Close() })
 
@@ -20,7 +21,7 @@ func setupStoreRefTestDB(t *testing.T) *StoreRefRepository {
 		CREATE TABLE IF NOT EXISTS nzb_store_refs (
 			store_path TEXT NOT NULL PRIMARY KEY,
 			ref_count  INTEGER NOT NULL DEFAULT 0,
-			updated_at DATETIME DEFAULT (datetime('now'))
+			updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
 		)
 	`)
 	require.NoError(t, err)

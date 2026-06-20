@@ -3,7 +3,7 @@
 CREATE TABLE IF NOT EXISTS nzb_store_refs (
     store_path TEXT NOT NULL PRIMARY KEY,
     ref_count  INTEGER NOT NULL DEFAULT 0,
-    updated_at DATETIME DEFAULT (datetime('now'))
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 -- +goose StatementEnd
 
