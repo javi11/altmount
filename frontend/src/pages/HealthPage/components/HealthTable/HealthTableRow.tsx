@@ -1,5 +1,5 @@
 import { Clock, Heart, HeartCrack, Loader, Wrench } from "lucide-react";
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import { HealthBadge } from "../../../../components/ui/StatusBadge";
 import { formatFutureTime, formatRelativeTime } from "../../../../lib/utils";
 import { type FileHealth, HealthPriority } from "../../../../types/api";
@@ -42,6 +42,15 @@ export const HealthTableRow = memo(function HealthTableRow({
 	onSetPriority,
 	onRegenerate,
 }: HealthTableRowProps) {
+	const parsedMetadata = useMemo(() => {
+		if (!item.metadata) return null;
+		try {
+			return JSON.parse(item.metadata);
+		} catch (e) {
+			return null;
+		}
+	}, [item.metadata]);
+
 	const getNextPriority = (current: HealthPriority): HealthPriority => {
 		switch (current) {
 			case HealthPriority.Normal:
@@ -112,38 +121,29 @@ export const HealthTableRow = memo(function HealthTableRow({
 			<td>
 				<div className="flex flex-col gap-1">
 					<div className="break-all text-sm cursor-help" title={item.library_path || undefined}>{item.library_path?.split("/").pop() || ""}</div>
-					{item.metadata && (
+					{parsedMetadata && (
 						<div className="flex flex-wrap gap-1 mt-1">
-							{(() => {
-								try {
-									const meta = JSON.parse(item.metadata);
-									return (
-										<>
-											{meta.instanceName && (
-												<span className="badge badge-outline badge-xs">{meta.instanceName}</span>
-											)}
-											{meta.series?.id && (
-												<span className="badge badge-ghost badge-xs" title="Series ID">SeriesID: {meta.series.id}</span>
-											)}
-											{meta.movie?.id && (
-												<span className="badge badge-ghost badge-xs" title="Movie ID">MovieID: {meta.movie.id}</span>
-											)}
-											{meta.series?.tvdbId && (
-												<span className="badge badge-ghost badge-xs" title="TVDB ID">TVDBID: {meta.series.tvdbId}</span>
-											)}
-											{meta.episodeFile?.id && (
-												<span className="badge badge-ghost badge-xs" title="Episode File ID">FileID: {meta.episodeFile.id}</span>
-											)}
-											{meta.movie?.tmdbId && (
-												<span className="badge badge-ghost badge-xs" title="TMDB ID">TMDBID: {meta.movie.tmdbId}</span>
-											)}
-											{meta.movieFile?.id && (
-												<span className="badge badge-ghost badge-xs" title="Movie File ID">FileID: {meta.movieFile.id}</span>
-											)}
-										</>
-									);
-								} catch(e) { return null; }
-							})()}
+							{parsedMetadata.instanceName && (
+								<span className="badge badge-outline badge-xs">{parsedMetadata.instanceName}</span>
+							)}
+							{parsedMetadata.series?.id && (
+								<span className="badge badge-ghost badge-xs" title="Series ID">SeriesID: {parsedMetadata.series.id}</span>
+							)}
+							{parsedMetadata.movie?.id && (
+								<span className="badge badge-ghost badge-xs" title="Movie ID">MovieID: {parsedMetadata.movie.id}</span>
+							)}
+							{parsedMetadata.series?.tvdbId && (
+								<span className="badge badge-ghost badge-xs" title="TVDB ID">TVDBID: {parsedMetadata.series.tvdbId}</span>
+							)}
+							{parsedMetadata.episodeFile?.id && (
+								<span className="badge badge-ghost badge-xs" title="Episode File ID">FileID: {parsedMetadata.episodeFile.id}</span>
+							)}
+							{parsedMetadata.movie?.tmdbId && (
+								<span className="badge badge-ghost badge-xs" title="TMDB ID">TMDBID: {parsedMetadata.movie.tmdbId}</span>
+							)}
+							{parsedMetadata.movieFile?.id && (
+								<span className="badge badge-ghost badge-xs" title="Movie File ID">FileID: {parsedMetadata.movieFile.id}</span>
+							)}
 						</div>
 					)}
 				</div>

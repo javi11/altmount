@@ -77,12 +77,13 @@ export function QueuePage() {
 	const [sortBy, setSortBy] = useState<"created_at" | "updated_at" | "status" | "nzb_path">(
 		() => {
 			const saved = localStorage.getItem("queue_sort_by");
-			return (saved as any) || "created_at";
+			const validColumns = ["created_at", "updated_at", "status", "nzb_path"];
+			return (validColumns.includes(saved || "") ? saved : "created_at") as "created_at" | "updated_at" | "status" | "nzb_path";
 		},
 	);
 	const [sortOrder, setSortOrder] = useState<"asc" | "desc">(() => {
 		const saved = localStorage.getItem("queue_sort_order");
-		return (saved as "asc" | "desc") || "desc";
+		return (saved === "asc" || saved === "desc" ? saved : "desc");
 	});
 
 	const queryClient = useQueryClient();

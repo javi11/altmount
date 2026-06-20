@@ -2300,14 +2300,21 @@ func (r *HealthRepository) relinkOrMergeRecordTx(ctx context.Context, tx *dialec
 //     reorganization cannot wipe repair progress.
 func (r *HealthRepository) RelinkFileByMetadata(ctx context.Context, webMeta *model.WebhookMetadata, filePath, libraryPath string, metadataStr *string, revalidate bool) (bool, error) {
 	filePath = strings.TrimPrefix(filePath, "/")
-	rows, err := r.db.QueryContext(ctx, `
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	rows, err := tx.QueryContext(ctx, `
 		SELECT id, file_path, library_path, status, metadata
 		FROM file_health
 		WHERE status IN ('pending', 'repair_triggered', 'corrupted')
 		  AND metadata IS NOT NULL
 	`)
 	if err != nil {
-		return false, fmt.Errorf("failed to query non-healthy records: %w", err)
+		return false, fmt.Errorf("failed to query non-healthy records in transaction: %w", err)
 	}
 	defer rows.Close()
 
@@ -2329,16 +2336,11 @@ func (r *HealthRepository) RelinkFileByMetadata(ctx context.Context, webMeta *mo
 			matchedIDs = append(matchedIDs, id)
 		}
 	}
+	rows.Close() // Explicitly close rows to free connection before modifications
 
 	if len(matchedIDs) == 0 {
 		return false, nil
 	}
-
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return false, fmt.Errorf("failed to start transaction: %w", err)
-	}
-	defer tx.Rollback()
 
 	// Update each matched record
 	for _, id := range matchedIDs {

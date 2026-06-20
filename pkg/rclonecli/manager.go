@@ -374,8 +374,17 @@ func (m *Manager) makeRequestWithContext(ctx context.Context, req RCRequest, clo
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
+	var reqCtx context.Context
+	var cancel context.CancelFunc
+	if close {
+		reqCtx, cancel = context.WithTimeout(ctx, 2*time.Minute)
+		defer cancel()
+	} else {
+		reqCtx = ctx
+	}
+
 	url := fmt.Sprintf("http://localhost:%s/%s", m.rcPort, req.Command)
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(reqBody))
+	httpReq, err := http.NewRequestWithContext(reqCtx, "POST", url, bytes.NewBuffer(reqBody))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}

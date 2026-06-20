@@ -305,8 +305,17 @@ func (m *Manager) sonarrHasFile(ctx context.Context, client *sonarr.Sonarr, inst
 
 // TriggerFileRescan triggers a rescan for a specific file path through the appropriate ARR instance
 func (m *Manager) TriggerFileRescan(ctx context.Context, pathForRescan string, relativePath string, metadataStr *string) error {
-	res, err, _ := m.sf.Do(fmt.Sprintf("rescan:%s", pathForRescan), func() (interface{}, error) {
-		slog.InfoContext(ctx, "Triggering ARR rescan", "path", pathForRescan, "relative_path", relativePath)
+	hasMeta := "false"
+	if metadataStr != nil && *metadataStr != "" {
+		hasMeta = "true"
+	}
+	key := fmt.Sprintf("rescan:%s:%s", pathForRescan, hasMeta)
+
+	res, err, _ := m.sf.Do(key, func() (interface{}, error) {
+		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+
+		slog.InfoContext(bgCtx, "Triggering ARR rescan (singleflight)", "path", pathForRescan, "relative_path", relativePath, "has_metadata", hasMeta)
 
 		var metadata *model.WebhookMetadata
 		if metadataStr != nil && *metadataStr != "" {
@@ -314,7 +323,7 @@ func (m *Manager) TriggerFileRescan(ctx context.Context, pathForRescan string, r
 			if err := json.Unmarshal([]byte(*metadataStr), &parsedMetadata); err == nil {
 				metadata = &parsedMetadata
 			} else {
-				slog.WarnContext(ctx, "Failed to parse metadata string, falling back to path-based repair", "error", err, "path", pathForRescan)
+				slog.WarnContext(bgCtx, "Failed to parse metadata string, falling back to path-based repair", "error", err, "path", pathForRescan)
 			}
 		}
 
@@ -329,7 +338,7 @@ func (m *Manager) TriggerFileRescan(ctx context.Context, pathForRescan string, r
 				if inst.Name == metadata.InstanceName {
 					instanceType = inst.Type
 					instanceName = inst.Name
-					slog.InfoContext(ctx, "Fast path: Found instance from metadata", "instance", instanceName, "type", instanceType)
+					slog.InfoContext(bgCtx, "Fast path: Found instance from metadata", "instance", instanceName, "type", instanceType)
 					break
 				}
 			}
@@ -337,8 +346,8 @@ func (m *Manager) TriggerFileRescan(ctx context.Context, pathForRescan string, r
 
 		// Fallback to path-based logic if instance not found from metadata
 		if instanceName == "" {
-			slog.DebugContext(ctx, "Instance not found from metadata, falling back to path-based detection", "path", pathForRescan)
-			instanceType, instanceName, err = m.findInstanceForFilePath(ctx, pathForRescan, relativePath)
+			slog.DebugContext(bgCtx, "Instance not found from metadata, falling back to path-based detection", "path", pathForRescan)
+			instanceType, instanceName, err = m.findInstanceForFilePath(bgCtx, pathForRescan, relativePath)
 			if err != nil {
 				return nil, fmt.Errorf("failed to find ARR instance for file path %s: %w", pathForRescan, err)
 			}
@@ -362,35 +371,35 @@ func (m *Manager) TriggerFileRescan(ctx context.Context, pathForRescan string, r
 			if err != nil {
 				return nil, fmt.Errorf("failed to create Radarr client: %w", err)
 			}
-			return nil, m.triggerRadarrRescanByPath(ctx, client, pathForRescan, relativePath, instanceName, metadata)
+			return nil, m.triggerRadarrRescanByPath(bgCtx, client, pathForRescan, relativePath, instanceName, metadata)
 
 		case "sonarr":
 			client, err := m.clients.GetOrCreateSonarrClient(instanceName, instanceConfig.URL, instanceConfig.APIKey)
 			if err != nil {
 				return nil, fmt.Errorf("failed to create Sonarr client: %w", err)
 			}
-			return nil, m.triggerSonarrRescanByPath(ctx, client, pathForRescan, relativePath, instanceName, metadata)
+			return nil, m.triggerSonarrRescanByPath(bgCtx, client, pathForRescan, relativePath, instanceName, metadata)
 
 		case "lidarr":
 			client, err := m.clients.GetOrCreateLidarrClient(instanceName, instanceConfig.URL, instanceConfig.APIKey)
 			if err != nil {
 				return nil, fmt.Errorf("failed to create Lidarr client: %w", err)
 			}
-			return nil, m.triggerLidarrRescanByPath(ctx, client, pathForRescan, relativePath, instanceName, metadata)
+			return nil, m.triggerLidarrRescanByPath(bgCtx, client, pathForRescan, relativePath, instanceName, metadata)
 
 		case "readarr":
 			client, err := m.clients.GetOrCreateReadarrClient(instanceName, instanceConfig.URL, instanceConfig.APIKey)
 			if err != nil {
 				return nil, fmt.Errorf("failed to create Readarr client: %w", err)
 			}
-			return nil, m.triggerReadarrRescanByPath(ctx, client, pathForRescan, relativePath, instanceName, metadata)
+			return nil, m.triggerReadarrRescanByPath(bgCtx, client, pathForRescan, relativePath, instanceName, metadata)
 
 		case "whisparr":
 			client, err := m.clients.GetOrCreateWhisparrClient(instanceName, instanceConfig.URL, instanceConfig.APIKey)
 			if err != nil {
 				return nil, fmt.Errorf("failed to create Whisparr client: %w", err)
 			}
-			return nil, m.triggerSonarrRescanByPath(ctx, client, pathForRescan, relativePath, instanceName, metadata)
+			return nil, m.triggerSonarrRescanByPath(bgCtx, client, pathForRescan, relativePath, instanceName, metadata)
 
 		default:
 			return nil, fmt.Errorf("unsupported instance type: %s", instanceType)
@@ -694,8 +703,13 @@ func (m *Manager) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 				"error", err)
 		}
 	} else {
-		slog.InfoContext(ctx, "Movie has no specific file ID linked in Radarr, skipping blocklist/delete and proceeding to search",
+		slog.InfoContext(ctx, "Movie has no specific file ID linked in Radarr, attempting release blocklist using metadata",
 			"movie", targetMovie.Title)
+		if metadata != nil && metadata.Movie != nil && metadata.Movie.Id > 0 {
+			if err := m.blocklistRadarrMovieFile(ctx, client, targetMovie.ID, 0, sceneName); err != nil {
+				slog.WarnContext(ctx, "Failed to blocklist Radarr release using metadata fallback", "error", err)
+			}
+		}
 	}
 
 	// Failure breaker: every targeted re-search counts one failure-driven action
@@ -939,6 +953,11 @@ func (m *Manager) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 			for _, ep := range metadata.Episodes {
 				episodeIDs = append(episodeIDs, ep.Id)
 			}
+
+			// Try to blocklist the release associated with these episodes
+			if err := m.blocklistSonarrEpisodeFile(ctx, client, targetSeriesID, 0, episodeIDs, sceneName); err != nil {
+				slog.WarnContext(ctx, "Failed to blocklist Sonarr release using metadata fallback", "error", err)
+			}
 		}
 	}
 
@@ -1072,17 +1091,19 @@ func (m *Manager) blocklistRadarrMovieFile(ctx context.Context, client *radarr.R
 					return nil
 				}
 				
-				// Without an exact SceneName match, we blindly grab the first grabbed event matching the movieID as a fallback
-				slog.InfoContext(ctx, "Found latest grabbed history record using MovieID fallback, marking as failed to blocklist release",
-					"history_id", record.ID, "movie_id", movieID)
-				if failErr := client.FailContext(ctx, record.ID); failErr != nil {
-					return fmt.Errorf("failed to fail Radarr grab event %d: %w", record.ID, failErr)
+				// Without an exact SceneName match, only fallback to the latest grab if it was recent (within 24 hours)
+				if time.Since(record.Date) < 24*time.Hour {
+					slog.InfoContext(ctx, "Found recent grabbed history record using MovieID fallback, marking as failed to blocklist release",
+						"history_id", record.ID, "movie_id", movieID, "grabbed_at", record.Date)
+					if failErr := client.FailContext(ctx, record.ID); failErr != nil {
+						return fmt.Errorf("failed to fail Radarr grab event %d: %w", record.ID, failErr)
+					}
+					return nil
 				}
-				return nil
 			}
 		}
 
-		slog.WarnContext(ctx, "Could not find ANY grab event in Radarr history for this movie", "movie_id", movieID)
+		slog.WarnContext(ctx, "Could not find any matching or recent grab event in Radarr history to blocklist", "movie_id", movieID)
 		return nil
 	}
 
@@ -1157,18 +1178,21 @@ func (m *Manager) blocklistSonarrEpisodeFile(ctx context.Context, client *sonarr
 
 				for _, epID := range episodeIDs {
 					if record.EpisodeID == epID {
-						slog.InfoContext(ctx, "Found latest grabbed history record using EpisodeID fallback, marking as failed to blocklist release",
-							"history_id", record.ID, "episode_id", epID)
-						if failErr := client.FailContext(ctx, record.ID); failErr != nil {
-							return fmt.Errorf("failed to fail Sonarr grab event %d: %w", record.ID, failErr)
+						// Only fallback if the grabbed event was recent (within 24 hours)
+						if time.Since(record.Date) < 24*time.Hour {
+							slog.InfoContext(ctx, "Found recent grabbed history record using EpisodeID fallback, marking as failed to blocklist release",
+								"history_id", record.ID, "episode_id", epID, "grabbed_at", record.Date)
+							if failErr := client.FailContext(ctx, record.ID); failErr != nil {
+								return fmt.Errorf("failed to fail Sonarr grab event %d: %w", record.ID, failErr)
+							}
+							return nil
 						}
-						return nil
 					}
 				}
 			}
 		}
 		
-		slog.WarnContext(ctx, "Could not find ANY grab event in Sonarr history for this episode", "series_id", seriesID)
+		slog.WarnContext(ctx, "Could not find any matching or recent grab event in Sonarr history to blocklist", "series_id", seriesID)
 		return nil
 	}
 
