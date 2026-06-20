@@ -480,6 +480,7 @@ func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 
 	// Decode create request
 	var createReq struct {
+		Name                    string `json:"name"`
 		Host                    string `json:"host"`
 		Port                    int    `json:"port"`
 		Username                string `json:"username"`
@@ -497,6 +498,7 @@ func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 		UserAgent               string `json:"user_agent"`
 		QuotaBytes              int64  `json:"quota_bytes"`
 		QuotaPeriodHours        int    `json:"quota_period_hours"`
+		AccountExpirationDate   string `json:"account_expiration_date"`
 	}
 
 	if err := c.BodyParser(&createReq); err != nil {
@@ -523,6 +525,7 @@ func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 	// Create new provider
 	newProvider := config.ProviderConfig{
 		ID:                       newID,
+		Name:                     createReq.Name,
 		Host:                     createReq.Host,
 		Port:                     createReq.Port,
 		Username:                 createReq.Username,
@@ -540,6 +543,7 @@ func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 		UserAgent:                createReq.UserAgent,
 		QuotaBytes:               createReq.QuotaBytes,
 		QuotaPeriodHours:         createReq.QuotaPeriodHours,
+		AccountExpirationDate:    createReq.AccountExpirationDate,
 	}
 
 	// Add to config
@@ -565,6 +569,7 @@ func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 	// Return sanitized provider
 	response := ProviderAPIResponse{
 		ID:                       newProvider.ID,
+		Name:                     newProvider.Name,
 		Host:                     newProvider.Host,
 		Port:                     newProvider.Port,
 		Username:                 newProvider.Username,
@@ -583,6 +588,7 @@ func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 		UserAgent:                newProvider.UserAgent,
 		QuotaBytes:               newProvider.QuotaBytes,
 		QuotaPeriodHours:         newProvider.QuotaPeriodHours,
+		AccountExpirationDate:    newProvider.AccountExpirationDate,
 	}
 
 	return RespondSuccess(c, response)
@@ -634,6 +640,7 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 
 	// Decode update request (partial update)
 	var updateReq struct {
+		Name                     *string `json:"name,omitempty"`
 		Host                     *string `json:"host,omitempty"`
 		Port                     *int    `json:"port,omitempty"`
 		Username                 *string `json:"username,omitempty"`
@@ -651,6 +658,7 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 		UserAgent                *string `json:"user_agent,omitempty"`
 		QuotaBytes               *int64  `json:"quota_bytes,omitempty"`
 		QuotaPeriodHours         *int    `json:"quota_period_hours,omitempty"`
+		AccountExpirationDate    *string `json:"account_expiration_date,omitempty"`
 	}
 
 	if err := c.BodyParser(&updateReq); err != nil {
@@ -727,6 +735,12 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 	if updateReq.UserAgent != nil {
 		provider.UserAgent = *updateReq.UserAgent
 	}
+	if updateReq.AccountExpirationDate != nil {
+		provider.AccountExpirationDate = *updateReq.AccountExpirationDate
+	}
+	if updateReq.Name != nil {
+		provider.Name = *updateReq.Name
+	}
 
 	// Assign the updated provider back to the slice
 	newConfig.Providers[providerIndex] = provider
@@ -750,6 +764,7 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 	// Return sanitized provider
 	response := ProviderAPIResponse{
 		ID:                       provider.ID,
+		Name:                     provider.Name,
 		Host:                     provider.Host,
 		Port:                     provider.Port,
 		Username:                 provider.Username,
@@ -768,6 +783,7 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 		UserAgent:                provider.UserAgent,
 		QuotaBytes:               provider.QuotaBytes,
 		QuotaPeriodHours:         provider.QuotaPeriodHours,
+		AccountExpirationDate:    provider.AccountExpirationDate,
 	}
 
 	return RespondSuccess(c, response)
@@ -973,6 +989,7 @@ func (s *Server) handleReorderProviders(c *fiber.Ctx) error {
 	for i, p := range newProviders {
 		providers[i] = ProviderAPIResponse{
 			ID:               p.ID,
+			Name:             p.Name,
 			Host:             p.Host,
 			Port:             p.Port,
 			Username:         p.Username,
@@ -985,6 +1002,7 @@ func (s *Server) handleReorderProviders(c *fiber.Ctx) error {
 			IsBackupProvider: p.IsBackupProvider != nil && *p.IsBackupProvider,
 			InflightRequests: p.InflightRequests,
 			LastRTTMs:        p.LastRTTMs,
+			AccountExpirationDate: p.AccountExpirationDate,
 		}
 	}
 

@@ -778,6 +778,7 @@ export class APIClient {
 				total_imports: number;
 				success_count: number;
 				failed_count: number;
+				last_24h_count: number;
 				success_rate: number;
 				last_seen_at: string;
 			}[]

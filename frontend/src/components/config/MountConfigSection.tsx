@@ -806,17 +806,17 @@ function RCloneMountSubSection({ config, onFormDataChange }: RCloneSubSectionPro
 								placeholder="1m"
 							/>
 						</fieldset>
+						<fieldset className="fieldset">
+							<legend className="fieldset-legend">Cache Max Age</legend>
+							<input
+								type="text"
+								className="input input-bordered w-full bg-base-100 font-mono text-sm"
+								value={mountFormData.vfs_cache_max_age}
+								onChange={(e) => handleMountInputChange("vfs_cache_max_age", e.target.value)}
+								placeholder="504h"
+							/>
+						</fieldset>
 					</div>
-					<fieldset className="fieldset">
-						<legend className="fieldset-legend">Cache Max Age</legend>
-						<input
-							type="text"
-							className="input input-bordered w-full bg-base-100 font-mono text-sm"
-							value={mountFormData.vfs_cache_max_age}
-							onChange={(e) => handleMountInputChange("vfs_cache_max_age", e.target.value)}
-							placeholder="504h"
-						/>
-					</fieldset>
 				</div>
 			</div>
 
