@@ -92,6 +92,9 @@ func (ms *MetadataService) SetStoreRefCounter(c StoreRefCounter) {
 
 // IncStoreRef increments the reference count for a v3 store file.
 // No-op when no StoreRefCounter is configured.
+// Refcounting is best-effort: a DB failure is logged but does not fail the caller.
+// A missed increment means a later DecStoreRef may drive the count to 0 prematurely,
+// but store-file deletion is tolerant of the file already being absent.
 func (ms *MetadataService) IncStoreRef(ctx context.Context, storePath string) {
 	if ms.storeRefCounter == nil {
 		return
@@ -708,7 +711,7 @@ func (ms *MetadataService) DeleteDirectory(virtualPath string) error {
 	if ms.storeRefCounter != nil {
 		for storePath, count := range storeRefCounts {
 			var lastCount int64
-			for i := 0; i < count; i++ {
+			for range count {
 				newCount, decErr := ms.storeRefCounter.DecStoreRef(ctx, storePath)
 				if decErr != nil {
 					slog.WarnContext(ctx, "failed to decrement store ref count",

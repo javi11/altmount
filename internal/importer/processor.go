@@ -607,7 +607,7 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 				if strings.HasPrefix(path, "DIR:") {
 					continue
 				}
-				if convErr := proc.convertMetaToV3(path, parsed.SegmentIndex, storeRef); convErr != nil {
+				if convErr := proc.convertMetaToV3(ctx, path, parsed.SegmentIndex, storeRef); convErr != nil {
 					proc.log.WarnContext(ctx, "failed to convert metadata to v3",
 						"path", path, "error", convErr)
 				}
@@ -1104,7 +1104,7 @@ func segDataToRefs(segments []*metapb.SegmentData, index map[string]int64) ([]*m
 // ReadFileMetadata expands SharedOuterSources before returning, so every NestedSource has its
 // Segments populated; we dissolve the dedup by converting each source independently and
 // zeroing SharedOuterSourceIndex.
-func (proc *Processor) convertMetaToV3(virtualPath string, index map[string]int64, storeRef string) error {
+func (proc *Processor) convertMetaToV3(ctx context.Context, virtualPath string, index map[string]int64, storeRef string) error {
 	meta, err := proc.metadataService.ReadFileMetadata(virtualPath)
 	if err != nil {
 		return fmt.Errorf("read for v3 conversion: %w", err)
@@ -1140,7 +1140,7 @@ func (proc *Processor) convertMetaToV3(virtualPath string, index map[string]int6
 	if err := proc.metadataService.WriteFileMetadata(virtualPath, meta); err != nil {
 		return err
 	}
-	proc.metadataService.IncStoreRef(context.Background(), storeRef)
+	proc.metadataService.IncStoreRef(ctx, storeRef)
 	return nil
 }
 
