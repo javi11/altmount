@@ -16,8 +16,8 @@ func TestSegDataToRefs_Basic(t *testing.T) {
 		{Id: "msg-003", StartOffset: 1000, EndOffset: 8000, SegmentSize: 10000},
 	}
 
-	refs := segDataToRefs(segments, index)
-
+	refs, err := segDataToRefs(segments, index)
+	require.NoError(t, err)
 	require.Len(t, refs, 3)
 	assert.Equal(t, int64(0), refs[0].StoreIndex)
 	assert.Equal(t, int64(0), refs[0].StartOffset)
@@ -29,12 +29,14 @@ func TestSegDataToRefs_Basic(t *testing.T) {
 }
 
 func TestSegDataToRefs_Nil(t *testing.T) {
-	refs := segDataToRefs(nil, nil)
+	refs, err := segDataToRefs(nil, nil)
+	require.NoError(t, err)
 	assert.Nil(t, refs)
 }
 
 func TestSegDataToRefs_Empty(t *testing.T) {
-	refs := segDataToRefs([]*metapb.SegmentData{}, map[string]int64{})
+	refs, err := segDataToRefs([]*metapb.SegmentData{}, map[string]int64{})
+	require.NoError(t, err)
 	assert.Nil(t, refs)
 }
 
@@ -46,10 +48,21 @@ func TestSegDataToRefs_PreservesSlicedOffsets(t *testing.T) {
 		{Id: "seg-big", StartOffset: 4096, EndOffset: 8191, SegmentSize: 10000},
 	}
 
-	refs := segDataToRefs(segments, index)
-
+	refs, err := segDataToRefs(segments, index)
+	require.NoError(t, err)
 	require.Len(t, refs, 1)
 	assert.Equal(t, int64(5), refs[0].StoreIndex)
 	assert.Equal(t, int64(4096), refs[0].StartOffset, "must preserve narrowed StartOffset from archive slicing")
 	assert.Equal(t, int64(8191), refs[0].EndOffset, "must preserve narrowed EndOffset from archive slicing")
+}
+
+func TestSegDataToRefs_MissingIndexKey(t *testing.T) {
+	index := map[string]int64{"msg-001": 0}
+	segments := []*metapb.SegmentData{
+		{Id: "msg-UNKNOWN", StartOffset: 0, EndOffset: 9999, SegmentSize: 10000},
+	}
+
+	_, err := segDataToRefs(segments, index)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "msg-UNKNOWN")
 }

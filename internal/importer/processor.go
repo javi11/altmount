@@ -1079,20 +1079,24 @@ func (proc *Processor) processSevenZipArchive(
 // segDataToRefs converts a slice of SegmentData to SegmentRefs using a flat segment index
 // (message-id → position in NzbStore flat segment array). StartOffset and EndOffset are
 // preserved from the original SegmentData (archive slicing may have narrowed them). Returns
-// nil for a nil or empty input.
-func segDataToRefs(segments []*metapb.SegmentData, index map[string]int64) []*metapb.SegmentRef {
+// nil for a nil or empty input. Returns an error if any segment ID is not present in index.
+func segDataToRefs(segments []*metapb.SegmentData, index map[string]int64) ([]*metapb.SegmentRef, error) {
 	if len(segments) == 0 {
-		return nil
+		return nil, nil
 	}
 	refs := make([]*metapb.SegmentRef, len(segments))
 	for i, seg := range segments {
+		idx, ok := index[seg.Id]
+		if !ok {
+			return nil, fmt.Errorf("segment %q not found in store index", seg.Id)
+		}
 		refs[i] = &metapb.SegmentRef{
-			StoreIndex:  index[seg.Id],
+			StoreIndex:  idx,
 			StartOffset: seg.StartOffset,
 			EndOffset:   seg.EndOffset,
 		}
 	}
-	return refs
+	return refs, nil
 }
 
 // convertMetaToV3 reads the metadata at virtualPath, replaces all SegmentData with SegmentRefs
@@ -1110,18 +1114,24 @@ func (proc *Processor) convertMetaToV3(virtualPath string, index map[string]int6
 	}
 
 	meta.StoreRef = storeRef
-	meta.SegmentRefs = segDataToRefs(meta.SegmentData, index)
+	if meta.SegmentRefs, err = segDataToRefs(meta.SegmentData, index); err != nil {
+		return fmt.Errorf("main segments: %w", err)
+	}
 	meta.SegmentData = nil
 
 	for _, p := range meta.Par2Files {
-		p.SegmentRefs = segDataToRefs(p.SegmentData, index)
+		if p.SegmentRefs, err = segDataToRefs(p.SegmentData, index); err != nil {
+			return fmt.Errorf("par2 segments: %w", err)
+		}
 		p.SegmentData = nil
 	}
 
 	// ReadFileMetadata already called ExpandSharedOuterSources so all NestedSources
 	// have their Segments populated, even deduped ones. Dissolve the dedup in v3.
 	for _, ns := range meta.NestedSources {
-		ns.SegmentRefs = segDataToRefs(ns.Segments, index)
+		if ns.SegmentRefs, err = segDataToRefs(ns.Segments, index); err != nil {
+			return fmt.Errorf("nested source segments: %w", err)
+		}
 		ns.Segments = nil
 		ns.SharedOuterSourceIndex = 0
 	}
