@@ -995,31 +995,6 @@ func (s *Server) handleDirectHealthCheck(c *fiber.Ctx) error {
 	})
 }
 
-// UploadAndCheckRequest represents request to check health of a file by metadata path
-type UploadAndCheckRequest struct {
-	FilePath         string  `json:"file_path"`
-	CheckAllSegments bool    `json:"check_all_segments,omitempty"`
-	MaxRetries       *int    `json:"max_retries,omitempty"`
-	SourceNzb        *string `json:"source_nzb_path,omitempty"`
-}
-
-// UploadAndCheckResponse represents response from immediate health check
-type UploadAndCheckResponse struct {
-	FilePath     string                `json:"file_path"`
-	HealthStatus database.HealthStatus `json:"health_status"`
-	CheckResult  string                `json:"check_result"`
-	ErrorMessage *string               `json:"error_message,omitempty"`
-	CheckedAt    time.Time             `json:"checked_at"`
-	SegmentsInfo *SegmentsInfo         `json:"segments_info,omitempty"`
-}
-
-// SegmentsInfo provides details about segment checking results
-type SegmentsInfo struct {
-	TotalSegments   int  `json:"total_segments"`
-	MissingSegments int  `json:"missing_segments"`
-	CheckedAll      bool `json:"checked_all"`
-}
-
 // handleRestartHealthChecksBulk handles POST /api/health/bulk/restart
 //
 //	@Summary		Bulk restart health checks

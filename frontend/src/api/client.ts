@@ -89,7 +89,7 @@ function extractApiError(status: number, statusText: string, body: ApiErrorEnvel
 	return new APIError(status, errorMessage, errorDetails);
 }
 
-export class APIClient {
+class APIClient {
 	private baseURL: string;
 
 	constructor(baseURL = "/api") {

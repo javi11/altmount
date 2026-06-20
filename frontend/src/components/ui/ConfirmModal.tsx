@@ -1,7 +1,7 @@
 import { AlertTriangle, CheckCircle, Info, X, XCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-export interface ConfirmModalProps {
+interface ConfirmModalProps {
 	isOpen: boolean;
 	title: string;
 	message: string;

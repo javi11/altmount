@@ -147,7 +147,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.ArrsInstanceRequest"
+                            "$ref": "#/definitions/api.TestConnectionRequest"
                         }
                     }
                 ],
@@ -4936,23 +4936,11 @@
                 }
             }
         },
-        "api.ArrsInstanceRequest": {
+        "api.TestConnectionRequest": {
             "type": "object",
             "properties": {
                 "api_key": {
                     "type": "string"
-                },
-                "category": {
-                    "type": "string"
-                },
-                "enabled": {
-                    "type": "boolean"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "sync_interval_hours": {
-                    "type": "integer"
                 },
                 "type": {
                     "type": "string"

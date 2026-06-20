@@ -100,13 +100,13 @@ function PieTooltip({ active, payload, formatValue }: PieTooltipProps) {
 
 	return (
 		<div
+			className="shadow-2xl"
 			style={{
 				borderRadius: "12px",
 				border: "1px solid color-mix(in oklch, var(--color-base-content) 10%, transparent)",
 				backgroundColor: "color-mix(in oklch, var(--color-base-100) 95%, transparent)",
 				fontSize: "11px",
 				backdropFilter: "blur(8px)",
-				boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.3)",
 				padding: "8px 12px",
 			}}
 		>
@@ -176,7 +176,7 @@ function TimeRangeTabs({ tabs, value, onChange, activeClassName }: TimeRangeTabs
 	);
 }
 
-export interface ProviderAreaChartProps {
+interface ProviderAreaChartProps {
 	/** Icon shown next to the title. */
 	icon: LucideIcon;
 	iconClassName: string;
