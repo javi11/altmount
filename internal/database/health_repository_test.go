@@ -180,6 +180,38 @@ func TestHealthRepository_DeleteHealthRecordsByPrefix(t *testing.T) {
 	assert.Nil(t, h)
 }
 
+func TestHealthRepository_DeleteHealthRecordsBulk(t *testing.T) {
+	repo := setupTestDB(t)
+	ctx := context.Background()
+
+	// Insert two health records.
+	for _, f := range []string{"movies/Keep/file.mkv", "movies/Gone/file.mkv"} {
+		require.NoError(t, repo.UpdateFileHealth(ctx, f, HealthStatusHealthy, nil, nil, nil, false))
+	}
+
+	// Mixed existing/non-existent paths: returns the actual deleted count.
+	count, err := repo.DeleteHealthRecordsBulk(ctx, []string{"movies/Gone/file.mkv", "movies/DoesNotExist/file.mkv"})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), count)
+
+	h, err := repo.GetFileHealth(ctx, "movies/Gone/file.mkv")
+	require.NoError(t, err)
+	assert.Nil(t, h)
+	h, err = repo.GetFileHealth(ctx, "movies/Keep/file.mkv")
+	require.NoError(t, err)
+	assert.NotNil(t, h)
+
+	// All non-existent: no-op success, not the old 500.
+	count, err = repo.DeleteHealthRecordsBulk(ctx, []string{"nope/a.mkv", "nope/b.mkv"})
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), count)
+
+	// Empty input is a no-op success.
+	count, err = repo.DeleteHealthRecordsBulk(ctx, nil)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), count)
+}
+
 // queryScheduledCheckAt reads scheduled_check_at directly from the DB for a given file path.
 // This is needed because GetFileHealth does not select that column.
 // go-sqlite3 may return datetimes in either space-separated or RFC3339 format.

@@ -1,3 +1,4 @@
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { formatDistanceToNow } from "date-fns";
 import { File, FileArchive, FileImage, FileText, FileVideo, Folder, Music } from "lucide-react";
 import type React from "react";
@@ -23,25 +24,17 @@ interface FileListProps {
 	isRegenerateSymlinkPending?: boolean;
 }
 
-// Virtual scrolling constants - Responsive heights for better mobile UX
-const ITEM_HEIGHT_MOBILE = 280; // Taller for mobile touch targets
-const ITEM_HEIGHT_TABLET = 240;
-const ITEM_HEIGHT_DESKTOP = 220; // More compact on desktop
+// Small lists use a plain grid, large lists virtualize; cards are content-sized so folders stay compact.
+const VIRTUALIZE_THRESHOLD = 100;
+const ESTIMATED_ROW_HEIGHT = 132;
 
-const ITEMS_PER_ROW = {
-	sm: 1,
-	md: 2,
-	lg: 3,
-	xl: 4,
-};
-const BUFFER_SIZE = 2; // Number of extra rows to render above and below viewport
-
-// Dynamic item height based on screen width
-const getItemHeight = (width: number) => {
-	if (width < 768) return ITEM_HEIGHT_MOBILE;
-	if (width < 1024) return ITEM_HEIGHT_TABLET;
-	return ITEM_HEIGHT_DESKTOP;
-};
+function columnsForWidth(width: number): number {
+	if (width === 0) return 4; // sensible default before the first measure (desktop)
+	if (width < 640) return 1;
+	if (width < 1024) return 2;
+	if (width < 1400) return 3;
+	return 4;
+}
 
 export function FileList({
 	files,
@@ -58,77 +51,38 @@ export function FileList({
 	isExportingNZB = false,
 	isRegenerateSymlinkPending = false,
 }: FileListProps) {
-	const [containerDimensions, setContainerDimensions] = useState({ width: 0, height: 0 });
-	const [scrollTop, setScrollTop] = useState(0);
-	const containerRef = useRef<HTMLDivElement>(null);
-	const scrollElementRef = useRef<HTMLDivElement>(null);
+	const scrollRef = useRef<HTMLDivElement | null>(null);
+	const resizeObserverRef = useRef<ResizeObserver | null>(null);
+	const [scrollWidth, setScrollWidth] = useState(0);
 
-	// Calculate items per row based on container width
-	const itemsPerRow = useMemo(() => {
-		if (containerDimensions.width < 768) return ITEMS_PER_ROW.sm;
-		if (containerDimensions.width < 1024) return ITEMS_PER_ROW.md;
-		if (containerDimensions.width < 1280) return ITEMS_PER_ROW.lg;
-		return ITEMS_PER_ROW.xl;
-	}, [containerDimensions.width]);
-
-	// Calculate virtual scrolling parameters
-	const virtualScrolling = useMemo(() => {
-		const itemHeight = getItemHeight(containerDimensions.width);
-		const totalRows = Math.ceil(files.length / itemsPerRow);
-		const containerHeight = containerDimensions.height || 600;
-		const visibleRows = Math.ceil(containerHeight / itemHeight);
-		const startRow = Math.max(0, Math.floor(scrollTop / itemHeight) - BUFFER_SIZE);
-		const endRow = Math.min(totalRows, startRow + visibleRows + BUFFER_SIZE * 2);
-
-		const startIndex = startRow * itemsPerRow;
-		const endIndex = Math.min(files.length, endRow * itemsPerRow);
-
-		return {
-			totalRows,
-			totalHeight: totalRows * itemHeight,
-			startRow,
-			endRow,
-			startIndex,
-			endIndex,
-			offsetY: startRow * itemHeight,
-			itemHeight, // Include item height for FileCard
-		};
-	}, [files.length, itemsPerRow, containerDimensions.height, containerDimensions.width, scrollTop]);
-
-	// Get visible files
-	const visibleFiles = useMemo(() => {
-		return files.slice(virtualScrolling.startIndex, virtualScrolling.endIndex);
-	}, [files, virtualScrolling.startIndex, virtualScrolling.endIndex]);
-
-	// Handle scroll events
-	const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
-		setScrollTop(e.currentTarget.scrollTop);
-	}, []);
-
-	// Handle container resize
-	const updateDimensions = useCallback(() => {
-		if (containerRef.current) {
-			const rect = containerRef.current.getBoundingClientRect();
-			setContainerDimensions({
-				width: rect.width,
-				height: rect.height,
-			});
+	// Track the scroll container width to pick a column count.
+	const attachScrollContainer = useCallback((node: HTMLDivElement | null) => {
+		scrollRef.current = node;
+		resizeObserverRef.current?.disconnect();
+		if (node) {
+			const observer = new ResizeObserver(() => setScrollWidth(node.clientWidth));
+			observer.observe(node);
+			setScrollWidth(node.clientWidth);
+			resizeObserverRef.current = observer;
 		}
 	}, []);
 
-	// Set up resize observer
+	useEffect(() => () => resizeObserverRef.current?.disconnect(), []);
+
+	const itemsPerRow = useMemo(() => columnsForWidth(scrollWidth), [scrollWidth]);
+	const rowCount = Math.ceil(files.length / itemsPerRow);
+
+	const rowVirtualizer = useVirtualizer({
+		count: rowCount,
+		getScrollElement: () => scrollRef.current,
+		estimateSize: () => ESTIMATED_ROW_HEIGHT,
+		overscan: 5,
+	});
+
+	// Row heights change when the column count changes, so force a re-measure.
 	useEffect(() => {
-		updateDimensions();
-
-		const resizeObserver = new ResizeObserver(updateDimensions);
-		if (containerRef.current) {
-			resizeObserver.observe(containerRef.current);
-		}
-
-		return () => {
-			resizeObserver.disconnect();
-		};
-	}, [updateDimensions]);
+		rowVirtualizer.measure();
+	}, [rowVirtualizer]);
 
 	const getFileIcon = (file: WebDAVFile) => {
 		if (file.type === "directory") {
@@ -165,6 +119,27 @@ export function FileList({
 		}
 	};
 
+	const renderCard = (file: WebDAVFile) => (
+		<FileCard
+			key={file.filename}
+			file={file}
+			currentPath={currentPath}
+			onDownload={onDownload}
+			onDelete={onDelete}
+			onInfo={onInfo}
+			onPreview={onPreview}
+			onExportNZB={onExportNZB}
+			onRegenerateSymlink={onRegenerateSymlink}
+			isDownloading={isDownloading}
+			isDeleting={isDeleting}
+			isExportingNZB={isExportingNZB}
+			isRegenerateSymlinkPending={isRegenerateSymlinkPending}
+			getFileIcon={getFileIcon}
+			formatFileSize={formatFileSize}
+			handleItemClick={handleItemClick}
+		/>
+	);
+
 	if (files.length === 0) {
 		return (
 			<div className="flex flex-col items-center justify-center py-12">
@@ -175,84 +150,44 @@ export function FileList({
 		);
 	}
 
-	// For small lists (< 100 items), render normally without virtualization
-	if (files.length < 100) {
+	// Small lists: plain responsive grid; cards stretch so every box in a row is the same height.
+	if (files.length < VIRTUALIZE_THRESHOLD) {
 		return (
 			<div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-				{files.map((file) => (
-					<FileCard
-						key={file.filename}
-						file={file}
-						currentPath={currentPath}
-						onDownload={onDownload}
-						onDelete={onDelete}
-						onInfo={onInfo}
-						onPreview={onPreview}
-						isDownloading={isDownloading}
-						isDeleting={isDeleting}
-						getFileIcon={getFileIcon}
-						formatFileSize={formatFileSize}
-						handleItemClick={handleItemClick}
-						onExportNZB={onExportNZB}
-						onRegenerateSymlink={onRegenerateSymlink}
-						isExportingNZB={isExportingNZB}
-						isRegenerateSymlinkPending={isRegenerateSymlinkPending}
-					/>
-				))}
+				{files.map(renderCard)}
 			</div>
 		);
 	}
 
-	// Virtual scrolling for large lists
+	// Large lists: virtualize rows with dynamic measurement.
 	return (
-		<div className="relative">
-			<div
-				ref={containerRef}
-				className="h-[50vh] overflow-auto md:h-[60vh] lg:h-[600px]"
-				onScroll={handleScroll}
-			>
-				<div
-					ref={scrollElementRef}
-					style={{ height: virtualScrolling.totalHeight }}
-					className="relative"
-				>
-					<div
-						style={{
-							transform: `translateY(${virtualScrolling.offsetY}px)`,
-						}}
-						className={`grid gap-4 ${
-							itemsPerRow === 1
-								? "grid-cols-1"
-								: itemsPerRow === 2
-									? "grid-cols-2"
-									: itemsPerRow === 3
-										? "grid-cols-3"
-										: "grid-cols-4"
-						}`}
-					>
-						{visibleFiles.map((file) => (
-							<FileCard
-								key={file.filename}
-								file={file}
-								currentPath={currentPath}
-								onDownload={onDownload}
-								onDelete={onDelete}
-								onInfo={onInfo}
-								onPreview={onPreview}
-								onExportNZB={onExportNZB}
-								onRegenerateSymlink={onRegenerateSymlink}
-								isDownloading={isDownloading}
-								isDeleting={isDeleting}
-								isExportingNZB={isExportingNZB}
-								isRegenerateSymlinkPending={isRegenerateSymlinkPending}
-								getFileIcon={getFileIcon}
-								formatFileSize={formatFileSize}
-								handleItemClick={handleItemClick}
-								itemHeight={virtualScrolling.itemHeight}
-							/>
-						))}
-					</div>
-				</div>
+		<div ref={attachScrollContainer} className="h-[60vh] overflow-auto lg:h-[640px]">
+			<div style={{ height: rowVirtualizer.getTotalSize(), width: "100%", position: "relative" }}>
+				{rowVirtualizer.getVirtualItems().map((virtualRow) => {
+					const start = virtualRow.index * itemsPerRow;
+					const rowFiles = files.slice(start, start + itemsPerRow);
+					return (
+						<div
+							key={virtualRow.key}
+							data-index={virtualRow.index}
+							ref={rowVirtualizer.measureElement}
+							style={{
+								position: "absolute",
+								top: 0,
+								left: 0,
+								width: "100%",
+								transform: `translateY(${virtualRow.start}px)`,
+							}}
+						>
+							<div
+								className="grid gap-4 pb-4"
+								style={{ gridTemplateColumns: `repeat(${itemsPerRow}, minmax(0, 1fr))` }}
+							>
+								{rowFiles.map(renderCard)}
+							</div>
+						</div>
+					);
+				})}
 			</div>
 		</div>
 	);
@@ -275,7 +210,6 @@ interface FileCardProps {
 	onRegenerateSymlink?: (path: string) => void;
 	isExportingNZB?: boolean;
 	isRegenerateSymlinkPending?: boolean;
-	itemHeight?: number;
 }
 
 function FileCard({
@@ -294,13 +228,9 @@ function FileCard({
 	onRegenerateSymlink,
 	isExportingNZB,
 	isRegenerateSymlinkPending,
-	itemHeight,
 }: FileCardProps) {
 	return (
-		<div
-			className="card cursor-pointer bg-base-100 shadow-md transition-shadow hover:shadow-lg"
-			style={itemHeight !== undefined ? { height: itemHeight - 16 } : undefined} // Account for gap
-		>
+		<div className="card h-full cursor-pointer border border-base-200/40 bg-base-100 shadow-md transition-shadow hover:shadow-lg">
 			<div className="card-body p-4">
 				<div className="mb-2 flex items-start justify-between">
 					<button

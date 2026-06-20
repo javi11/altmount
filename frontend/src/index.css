@@ -1,5 +1,6 @@
 /** biome-ignore-all lint/suspicious/noUnknownAtRules: wrong lint */
 /** biome-ignore-all lint/correctness/noUnknownProperty: wrong lint */
+/** biome-ignore-all lint/correctness/noUnknownMediaFeatureName: prefers-reduced-transparency is valid CSS */
 @import "tailwindcss";
 
 /* DaisyUI themes: retro (default light), forest (default dark), plus user-selectable options */
@@ -7,6 +8,7 @@
 	themes:
 		retro --default,
 		business --prefersdark,
+		forest,
 		light,
 		cupcake,
 		bumblebee,
@@ -36,10 +38,86 @@
 		abyss;
 }
 
+/* Minimal "dark" — near-black glass theme with muted accents. */
+@plugin "daisyui/theme" {
+	name: "glass-dark";
+	default: false;
+	prefersdark: false;
+	color-scheme: dark;
+	--color-base-100: #0a0a0a;
+	--color-base-200: #121212;
+	--color-base-300: #1c1c1c;
+	/* Softened off-white — full-strength text/headings were too glaring on near-black. */
+	--color-base-content: #d4d4d4;
+	/* Single muted blue shared by every accent role (primary/secondary/accent/info). */
+	--color-primary: #4a78b8;
+	--color-primary-content: #ffffff;
+	--color-secondary: #4a78b8;
+	--color-secondary-content: #ffffff;
+	--color-accent: #4a78b8;
+	--color-accent-content: #ffffff;
+	--color-neutral: #1c1c1c;
+	--color-neutral-content: #d4d4d4;
+	--color-info: #4a78b8;
+	--color-info-content: #ffffff;
+	/* Muted green/amber/red, same family as the blue. */
+	--color-success: #48a06a;
+	--color-success-content: #061f10;
+	--color-warning: #c9a23c;
+	--color-warning-content: #2b2400;
+	--color-error: #cf524a;
+	--color-error-content: #2b0807;
+	--radius-selector: 0.5rem;
+	--radius-field: 0.75rem;
+	--radius-box: 1rem;
+	--size-selector: 0.25rem;
+	--size-field: 0.25rem;
+	--border: 1px;
+	--depth: 0;
+	--noise: 0;
+}
+
+/* Minimal "light" — soft-light glass theme with muted accents. */
+@plugin "daisyui/theme" {
+	name: "glass-light";
+	default: false;
+	prefersdark: false;
+	color-scheme: light;
+	--color-base-100: #ececf1;
+	--color-base-200: #f6f6f9;
+	--color-base-300: #e0e0e8;
+	--color-base-content: #1c1c1e;
+	/* Single muted blue shared by every accent role (primary/secondary/accent/info). */
+	--color-primary: #4779b8;
+	--color-primary-content: #ffffff;
+	--color-secondary: #4779b8;
+	--color-secondary-content: #ffffff;
+	--color-accent: #4779b8;
+	--color-accent-content: #ffffff;
+	--color-neutral: #e0e0e8;
+	--color-neutral-content: #1c1c1e;
+	--color-info: #4779b8;
+	--color-info-content: #ffffff;
+	/* Green/amber/red kept in the same muted family as the blue. */
+	--color-success: #3d925d;
+	--color-success-content: #ffffff;
+	--color-warning: #c58730;
+	--color-warning-content: #2b1a00;
+	--color-error: #cc473d;
+	--color-error-content: #2b0604;
+	--radius-selector: 0.5rem;
+	--radius-field: 0.75rem;
+	--radius-box: 1rem;
+	--size-selector: 0.25rem;
+	--size-field: 0.25rem;
+	--border: 1px;
+	--depth: 0;
+	--noise: 0;
+}
+
 @plugin "@tailwindcss/typography";
 
-/* Fix for native <fieldset> min-inline-size: min-content default which causes
-   fieldset to be as wide as its <legend> text, overflowing containers on mobile */
+/* Fix <fieldset> min-inline-size default that overflows containers on mobile */
 fieldset {
 	min-width: 0;
 }
@@ -59,12 +137,6 @@ fieldset {
 }
 
 /* Custom Keyframe Animations & Utilities */
-@keyframes constellation-dash {
-	to {
-		stroke-dashoffset: -40;
-	}
-}
-
 @keyframes speed-wave {
 	0%,
 	100% {
@@ -75,13 +147,164 @@ fieldset {
 	}
 }
 
-.animate-dash {
-	animation: constellation-dash 4s linear infinite;
+/* Per-theme glass tokens; applied to elevated surfaces only (navbar/sidebar/cards/dropdowns/modals). */
+[data-theme="glass-dark"] {
+	--glass-fill: rgba(255, 255, 255, 0.05);
+	--glass-fill-strong: rgba(255, 255, 255, 0.1);
+	--glass-hover: rgba(255, 255, 255, 0.08);
+	--glass-panel: #161616;
+	--glass-border: rgba(255, 255, 255, 0.3);
+	--glass-border-strong: rgba(255, 255, 255, 0.55);
+	--glass-highlight: rgba(255, 255, 255, 0.1);
+	--glass-highlight-strong: rgba(255, 255, 255, 0.2);
+	/* No outer bloom — surfaces are defined by their borders, not a glow. */
+	--glass-shadow: 0 0 #0000;
+	--glass-solid: #141417;
+}
+[data-theme="glass-light"] {
+	--glass-fill: rgba(255, 255, 255, 0.55);
+	--glass-fill-strong: rgba(255, 255, 255, 0.85);
+	--glass-hover: rgba(0, 0, 0, 0.06);
+	--glass-panel: #f6f6f9;
+	--glass-border: rgba(0, 0, 0, 0.22);
+	--glass-border-strong: rgba(0, 0, 0, 0.4);
+	--glass-highlight: rgba(255, 255, 255, 0.85);
+	--glass-highlight-strong: rgba(255, 255, 255, 0.95);
+	/* No outer bloom — surfaces are defined by their borders, not a glow. */
+	--glass-shadow: 0 0 #0000;
+	--glass-solid: #f2f2f7;
 }
 
-/* Glassmorphic Utilities */
-.glass-frosted {
-	background: rgba(15, 17, 23, 0.35);
-	border: 1px solid rgba(255, 255, 255, 0.05);
-	backdrop-filter: blur(16px);
+/* Flat background — no colored ambient bloom. */
+:is([data-theme="glass-dark"], [data-theme="glass-light"]) body {
+	background-color: var(--color-base-100);
+}
+
+/* Elevated glass surfaces (sit over the ambient bg — subtle frost) */
+:is([data-theme="glass-dark"], [data-theme="glass-light"]) :is(.navbar, .drawer-side aside, .card) {
+	background-color: var(--glass-fill);
+	backdrop-filter: blur(20px) saturate(160%);
+	-webkit-backdrop-filter: blur(20px) saturate(160%);
+	border: 1px solid var(--glass-border);
+	box-shadow:
+		inset 0 1px 0 var(--glass-highlight),
+		var(--glass-shadow);
+}
+
+/* Popovers sit over arbitrary content — near-opaque so nothing bleeds through */
+:is([data-theme="glass-dark"], [data-theme="glass-light"]) :is(.dropdown-content, .modal-box) {
+	background-color: var(--glass-panel);
+	backdrop-filter: blur(24px) saturate(160%);
+	-webkit-backdrop-filter: blur(24px) saturate(160%);
+	border: 1px solid var(--glass-border-strong);
+	box-shadow:
+		inset 0 1px 0 var(--glass-highlight),
+		0 16px 48px rgba(0, 0, 0, 0.5);
+}
+
+/* Navbar/sidebar are edges, not panels: single hairline, no rounding */
+:is([data-theme="glass-dark"], [data-theme="glass-light"]) .navbar {
+	border: 0;
+	border-bottom: 1px solid var(--glass-border);
+	border-radius: 0;
+}
+:is([data-theme="glass-dark"], [data-theme="glass-light"]) .drawer-side aside {
+	border: 0;
+	border-right: 1px solid var(--glass-border);
+}
+
+/* Tables stay flat and transparent so the host card's frost shows through */
+:is([data-theme="glass-dark"], [data-theme="glass-light"]) :is(table, .table) {
+	background-color: transparent;
+	backdrop-filter: none;
+	-webkit-backdrop-filter: none;
+}
+
+/* Form fields stay solid and legible */
+:is([data-theme="glass-dark"], [data-theme="glass-light"]) :is(.input, .select, .textarea) {
+	background-color: var(--color-base-100);
+	backdrop-filter: none;
+	-webkit-backdrop-filter: none;
+}
+
+/* Unified selected style across every nav: frosted fill, distinct border, accent text, no glow. */
+:is([data-theme="glass-dark"], [data-theme="glass-light"]) .menu [aria-current="page"],
+:is([data-theme="glass-dark"], [data-theme="glass-light"]) .menu :is(a, button).bg-primary,
+:is([data-theme="glass-dark"], [data-theme="glass-light"])
+	nav[aria-label="Main navigation"]
+	a.bg-primary {
+	background-color: var(--glass-fill-strong);
+	backdrop-filter: blur(16px) saturate(180%);
+	-webkit-backdrop-filter: blur(16px) saturate(180%);
+	border: 1px solid var(--glass-border-strong);
+	box-shadow: none;
+	transform: none;
+	color: var(--color-primary);
+}
+
+/* No colored drop shadows (the blue "glow"); borders provide separation instead. */
+:is([data-theme="glass-dark"], [data-theme="glass-light"])
+	:is(
+		[class*="shadow-primary"],
+		[class*="shadow-secondary"],
+		[class*="shadow-accent"],
+		[class*="shadow-info"],
+		[class*="shadow-success"],
+		[class*="shadow-warning"],
+		[class*="shadow-error"]
+	) {
+	box-shadow: none;
+}
+
+/* Make faint base borders distinctly visible; accent borders left intact. */
+:is([data-theme="glass-dark"], [data-theme="glass-light"])
+	:is(
+		[class~="border-base-200"],
+		[class*="border-base-200/"],
+		[class~="border-base-300"],
+		[class*="border-base-300/"]
+	) {
+	border-color: var(--glass-border);
+}
+
+/* Sticky panels render solid/opaque so they stay defined while the page scrolls. */
+:is([data-theme="glass-dark"], [data-theme="glass-light"]) .card[class*="sticky"] {
+	background-color: var(--glass-panel);
+	backdrop-filter: none;
+	-webkit-backdrop-filter: none;
+}
+
+/* Hover gray on menu items, except the selected and destructive ones. */
+:is([data-theme="glass-dark"], [data-theme="glass-light"])
+	.menu
+	:is(a, button):hover:not([aria-current="page"]):not(.bg-primary):not(.text-error) {
+	background-color: var(--glass-hover);
+}
+
+/* Blur/dim the page behind an open modal. */
+:is([data-theme="glass-dark"], [data-theme="glass-light"]) .modal[open],
+:is([data-theme="glass-dark"], [data-theme="glass-light"]) .modal.modal-open {
+	backdrop-filter: blur(8px) saturate(140%);
+	-webkit-backdrop-filter: blur(8px) saturate(140%);
+}
+
+/* Accessibility: collapse glass to solid surfaces when transparency is reduced */
+@media (prefers-reduced-transparency: reduce) {
+	:is([data-theme="glass-dark"], [data-theme="glass-light"])
+		:is(.navbar, .drawer-side aside, .card, .dropdown-content, .modal-box) {
+		background-color: var(--glass-solid);
+		backdrop-filter: none;
+		-webkit-backdrop-filter: none;
+	}
+	:is([data-theme="glass-dark"], [data-theme="glass-light"]) .menu [aria-current="page"] {
+		background-color: var(--color-primary);
+		color: var(--color-primary-content);
+		backdrop-filter: none;
+		-webkit-backdrop-filter: none;
+	}
+	:is([data-theme="glass-dark"], [data-theme="glass-light"]) .modal[open],
+	:is([data-theme="glass-dark"], [data-theme="glass-light"]) .modal.modal-open {
+		backdrop-filter: none;
+		-webkit-backdrop-filter: none;
+	}
 }

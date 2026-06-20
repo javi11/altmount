@@ -2,7 +2,6 @@ package api
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"log/slog"
 	"net/url"
@@ -23,17 +22,6 @@ import (
 // metadata/symlink tree so a freshly written release folder is not wiped
 // out by a stale Download webhook from a previous grab.
 const arrWebhookDeleteGrace = 10 * time.Minute
-
-// ArrsInstanceRequest represents a request to create/update an arrs instance
-type ArrsInstanceRequest struct {
-	Name              string `json:"name"`
-	Type              string `json:"type"`
-	URL               string `json:"url"`
-	APIKey            string `json:"api_key"`
-	Category          string `json:"category"`
-	Enabled           bool   `json:"enabled"`
-	SyncIntervalHours int    `json:"sync_interval_hours"`
-}
 
 // ArrsWebhookRequest represents a webhook payload from Radarr/Sonarr
 type ArrsWebhookRequest struct {
@@ -719,40 +707,6 @@ type ArrsStatsResponse struct {
 	LastSync         *string `json:"last_sync"`
 }
 
-// ArrsMovieResponse represents a movie in API responses
-type ArrsMovieResponse struct {
-	ID          int64   `json:"id"`
-	InstanceID  int64   `json:"instance_id"`
-	MovieID     int64   `json:"movie_id"`
-	Title       string  `json:"title"`
-	Year        *int    `json:"year"`
-	FilePath    string  `json:"file_path"`
-	FileSize    *int64  `json:"file_size"`
-	Quality     *string `json:"quality"`
-	IMDbID      *string `json:"imdb_id"`
-	TMDbID      *int64  `json:"tmdb_id"`
-	LastUpdated string  `json:"last_updated"`
-}
-
-// ArrsEpisodeResponse represents an episode in API responses
-type ArrsEpisodeResponse struct {
-	ID            int64   `json:"id"`
-	InstanceID    int64   `json:"instance_id"`
-	SeriesID      int64   `json:"series_id"`
-	EpisodeID     int64   `json:"episode_id"`
-	SeriesTitle   string  `json:"series_title"`
-	SeasonNumber  int     `json:"season_number"`
-	EpisodeNumber int     `json:"episode_number"`
-	EpisodeTitle  *string `json:"episode_title"`
-	FilePath      string  `json:"file_path"`
-	FileSize      *int64  `json:"file_size"`
-	Quality       *string `json:"quality"`
-	AirDate       *string `json:"air_date"`
-	TVDbID        *int64  `json:"tvdb_id"`
-	IMDbID        *string `json:"imdb_id"`
-	LastUpdated   string  `json:"last_updated"`
-}
-
 // TestConnectionRequest represents a request to test connection
 type TestConnectionRequest struct {
 	Type   string `json:"type"`
@@ -855,7 +809,7 @@ func (s *Server) handleGetArrsInstance(c *fiber.Ctx) error {
 //	@Tags			ARRs
 //	@Accept			json
 //	@Produce		json
-//	@Param			body	body		ArrsInstanceRequest	true	"Instance connection details"
+//	@Param			body	body		TestConnectionRequest	true	"Instance connection details"
 //	@Success		200		{object}	APIResponse
 //	@Failure		400		{object}	APIResponse
 //	@Security		BearerAuth
@@ -1097,18 +1051,31 @@ func (s *Server) handleRegisterArrsDownloadClients(c *fiber.Ctx) error {
 		}
 	}
 
-	// Launch in background to not block
-	go func() {
-		ctx := context.Background()
-		if err := s.arrsService.EnsureDownloadClientRegistration(ctx, host, port, urlBase, apiKey); err != nil {
-			slog.ErrorContext(ctx, "Failed to register download clients", "error", err)
-		}
-	}()
+	// Register, then verify reachability so the response reflects the real outcome.
+	ctx := c.Context()
+	if err := s.arrsService.EnsureDownloadClientRegistration(ctx, host, port, urlBase, apiKey); err != nil {
+		slog.ErrorContext(ctx, "Failed to register download clients", "error", err)
+		return RespondInternalError(c, "Failed to register download client", err.Error())
+	}
 
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"message": "Download client registration triggered in background",
-	})
+	results, err := s.arrsService.TestDownloadClientRegistration(ctx, host, port, urlBase, apiKey)
+	if err != nil {
+		return RespondInternalError(c, "Failed to verify download client registration", err.Error())
+	}
+
+	var failures []string
+	for name, res := range results {
+		if res != "OK" {
+			failures = append(failures, name+": "+res)
+		}
+	}
+	if len(failures) > 0 {
+		return RespondError(c, fiber.StatusBadGateway, ErrCodeInternalServer,
+			"Download client registered, but ARR instances cannot reach AltMount",
+			strings.Join(failures, "; "))
+	}
+
+	return RespondMessage(c, "Download client registered and verified successfully")
 }
 
 // handleTestArrsDownloadClients tests the connection from ARR instances to AltMount

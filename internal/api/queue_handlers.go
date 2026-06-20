@@ -611,6 +611,23 @@ func (s *Server) handleUploadToQueue(c *fiber.Ctx) error {
 		priority = database.QueuePriorityNormal
 	}
 
+	// Add to queue using importer service
+	if s.importerService == nil {
+		return RespondServiceUnavailable(c, "Importer service not available", "The import service is not configured or running")
+	}
+
+	var categoryPtr *string
+	if category != "" {
+		categoryPtr = &category
+	}
+
+	// De-dupe re-uploads: update the existing pending item instead of creating a duplicate.
+	if existing, err := s.importerService.FindAndUpdatePendingUpload(c.Context(), file.Filename, categoryPtr, &priority); err != nil {
+		return RespondInternalError(c, "Failed to update existing queue item", err.Error())
+	} else if existing != nil {
+		return RespondCreated(c, ToQueueItemResponse(existing))
+	}
+
 	// Create temporary directory for upload
 	tempDir := os.TempDir()
 	uploadDir := filepath.Join(tempDir, "altmount-uploads")
@@ -624,19 +641,6 @@ func (s *Server) handleUploadToQueue(c *fiber.Ctx) error {
 	tempFile := filepath.Join(uploadDir, safeFilename)
 	if err := c.SaveFile(file, tempFile); err != nil {
 		return RespondInternalError(c, "Failed to save file", err.Error())
-	}
-
-	// Add to queue using importer service
-	if s.importerService == nil {
-		// Clean up temp file
-		os.Remove(tempFile)
-		return RespondServiceUnavailable(c, "Importer service not available", "The import service is not configured or running")
-	}
-
-	// Add the file to the processing queue
-	var categoryPtr *string
-	if category != "" {
-		categoryPtr = &category
 	}
 
 	// Build base path from CompleteDir for manually uploaded files
@@ -743,6 +747,28 @@ func (s *Server) handleUploadNZBLnk(c *fiber.Ctx) error {
 			continue
 		}
 
+		// Sanitize filename from title
+		safeTitle := sanitizeFilename(resolved.Title)
+
+		var categoryPtr *string
+		if req.Category != "" {
+			categoryPtr = &req.Category
+		}
+		priority := database.QueuePriority(req.Priority)
+
+		// De-dupe re-submissions: update the existing pending item instead of creating a duplicate.
+		if existing, err := s.importerService.FindAndUpdatePendingUpload(c.Context(), safeTitle+".nzb", categoryPtr, &priority); err != nil {
+			result.ErrorMessage = "Failed to update existing queue item: " + err.Error()
+			results = append(results, result)
+			continue
+		} else if existing != nil {
+			result.Success = true
+			result.QueueID = &existing.ID
+			successCount++
+			results = append(results, result)
+			continue
+		}
+
 		// Create temp file for the NZB
 		tempDir := os.TempDir()
 		uploadDir := filepath.Join(tempDir, "altmount-uploads")
@@ -751,9 +777,6 @@ func (s *Server) handleUploadNZBLnk(c *fiber.Ctx) error {
 			results = append(results, result)
 			continue
 		}
-
-		// Sanitize filename from title
-		safeTitle := sanitizeFilename(resolved.Title)
 		tempFile := filepath.Join(uploadDir, safeTitle+".nzb")
 
 		// Embed password in NZB if provided
@@ -771,12 +794,6 @@ func (s *Server) handleUploadNZBLnk(c *fiber.Ctx) error {
 			continue
 		}
 
-		// Add to queue
-		var categoryPtr *string
-		if req.Category != "" {
-			categoryPtr = &req.Category
-		}
-
 		var basePath *string
 		if s.configManager != nil {
 			completeDir := s.configManager.GetConfig().SABnzbd.CompleteDir
@@ -789,7 +806,6 @@ func (s *Server) handleUploadNZBLnk(c *fiber.Ctx) error {
 			}
 		}
 
-		priority := database.QueuePriority(req.Priority)
 		item, err := s.importerService.AddToQueue(c.Context(), tempFile, basePath, categoryPtr, &priority, nil, nil)
 		if err != nil {
 			os.Remove(tempFile)
@@ -898,11 +914,29 @@ func (s *Server) handleSearchNZBByName(c *fiber.Ctx) error {
 		return RespondNotFound(c, "NZB", "Could not find NZB for name '"+req.Name+"': "+err.Error())
 	}
 
+	safeTitle := sanitizeFilename(resolved.Title)
+
+	var categoryPtr *string
+	if req.Category != "" {
+		categoryPtr = &req.Category
+	}
+	priority := database.QueuePriority(req.Priority)
+
+	// De-dupe re-submissions: update the existing pending item instead of creating a duplicate.
+	if existing, err := s.importerService.FindAndUpdatePendingUpload(c.Context(), safeTitle+".nzb", categoryPtr, &priority); err != nil {
+		return RespondInternalError(c, "Failed to update existing queue item", err.Error())
+	} else if existing != nil {
+		return RespondCreated(c, fiber.Map{
+			"queue_id": existing.ID,
+			"title":    resolved.Title,
+			"indexer":  resolved.Indexer,
+		})
+	}
+
 	uploadDir := filepath.Join(os.TempDir(), "altmount-uploads")
 	if err := os.MkdirAll(uploadDir, 0755); err != nil {
 		return RespondInternalError(c, "Failed to create upload directory", err.Error())
 	}
-	safeTitle := sanitizeFilename(resolved.Title)
 	tempFile := filepath.Join(uploadDir, safeTitle+".nzb")
 
 	nzbContent := resolved.NZBContent
@@ -912,11 +946,6 @@ func (s *Server) handleSearchNZBByName(c *fiber.Ctx) error {
 	}
 	if err := os.WriteFile(tempFile, nzbContent, 0644); err != nil {
 		return RespondInternalError(c, "Failed to save NZB file", err.Error())
-	}
-
-	var categoryPtr *string
-	if req.Category != "" {
-		categoryPtr = &req.Category
 	}
 
 	var basePath *string
@@ -930,7 +959,6 @@ func (s *Server) handleSearchNZBByName(c *fiber.Ctx) error {
 		}
 	}
 
-	priority := database.QueuePriority(req.Priority)
 	item, err := s.importerService.AddToQueue(c.Context(), tempFile, basePath, categoryPtr, &priority, nil, nil)
 	if err != nil {
 		os.Remove(tempFile)
