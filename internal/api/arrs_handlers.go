@@ -17,13 +17,6 @@ import (
 	"github.com/javi11/altmount/internal/database"
 )
 
-// arrWebhookDeleteGrace is how long after a queue item completes its
-// storage_path is still considered "in use" by the arr webhook directory
-// deletion handler. Within this window the handler skips deleting the
-// metadata/symlink tree so a freshly written release folder is not wiped
-// out by a stale Download webhook from a previous grab.
-const arrWebhookDeleteGrace = 10 * time.Minute
-
 // ArrsInstanceRequest represents a request to create/update an arrs instance
 type ArrsInstanceRequest struct {
 	Name              string `json:"name"`
@@ -34,7 +27,6 @@ type ArrsInstanceRequest struct {
 	Enabled           bool   `json:"enabled"`
 	SyncIntervalHours int    `json:"sync_interval_hours"`
 }
-
 // ArrsWebhookRequest represents a webhook payload from Radarr/Sonarr
 type ArrsWebhookRequest struct {
 	Artist struct {
@@ -262,7 +254,6 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 	// Determine file path to scan/delete based on event type
 	var pathsToScan []string
 	var filesToDelete []string
-	var dirsToDelete []string
 	isScanEvent := false
 
 	switch req.EventType {
@@ -528,72 +519,6 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 				}
 			}
 		}
-	}
-
-	// Process Directory Deletions
-	for _, path := range dirsToDelete {
-		normalizedPath := normalize(path)
-		slog.InfoContext(c.Context(), "Processing webhook directory deletion",
-			"original_path", path,
-			"normalized_path", normalizedPath)
-
-		// Race guard: skip deletion if another import_queue row references this
-		// storage path and is still active (pending/processing/paused) or was
-		// completed within the recent grace window. This prevents arr "Download"
-		// webhooks for a previous grab from wiping the metadata/symlink tree
-		// that a sibling re-grab/upgrade just wrote into the same release dir.
-		if s.queueRepo != nil {
-			busy, err := s.queueRepo.HasActiveOrRecentQueueItemForStoragePath(
-				c.Context(), normalizedPath, arrWebhookDeleteGrace,
-			)
-			if err != nil {
-				slog.WarnContext(c.Context(), "Failed to check active queue items before webhook directory deletion; proceeding cautiously and skipping deletion",
-					"path", normalizedPath, "error", err)
-				continue
-			}
-			if busy {
-				slog.InfoContext(c.Context(), "Skipping webhook directory deletion: active or recently-completed queue item references this storage path",
-					"path", normalizedPath,
-					"grace", arrWebhookDeleteGrace.String())
-				continue
-			}
-		}
-
-		// Delete health records — try by library_path first, fall back to file_path prefix
-		var metadataPaths []string
-		if s.healthRepo != nil {
-			if filePaths, count, err := s.healthRepo.DeleteHealthRecordsByLibraryPathPrefix(c.Context(), path); err != nil {
-				slog.ErrorContext(c.Context(), "Failed to delete health records by library_path prefix from webhook", "prefix", path, "error", err)
-			} else if count > 0 {
-				slog.InfoContext(c.Context(), "Deleted health records by library_path prefix", "prefix", path, "count", count)
-				metadataPaths = filePaths
-			}
-
-			// Fall back to file_path prefix if no records found by library_path
-			if len(metadataPaths) == 0 {
-				if count, err := s.healthRepo.DeleteHealthRecordsByPrefix(c.Context(), normalizedPath); err != nil {
-					slog.ErrorContext(c.Context(), "Failed to delete health records by prefix from webhook", "prefix", normalizedPath, "error", err)
-				} else {
-					slog.InfoContext(c.Context(), "Deleted health records for directory", "prefix", normalizedPath, "count", count)
-				}
-			}
-		}
-
-		// Delete metadata directories for each resolved file_path
-		if s.metadataService != nil {
-			if len(metadataPaths) > 0 {
-				for _, mp := range metadataPaths {
-					if err := s.metadataService.DeleteFileMetadataWithSourceNzb(c.Context(), mp, deleteSourceNzb); err != nil {
-						slog.DebugContext(c.Context(), "Failed to delete metadata from webhook (might be gone)", "path", mp, "error", err)
-					}
-				}
-			} else {
-				if err := s.metadataService.DeleteDirectory(normalizedPath); err != nil {
-					slog.DebugContext(c.Context(), "Failed to delete metadata directory from webhook (might be gone)", "path", normalizedPath, "error", err)
-				}
-			}
-		}
-
 	}
 
 	if len(pathsToScan) == 0 {
