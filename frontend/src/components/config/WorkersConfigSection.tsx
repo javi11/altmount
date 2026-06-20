@@ -266,21 +266,7 @@ export function ImportConfigSection({
 								</div>
 							</label>
 
-							<label className="flex min-w-0 cursor-pointer items-start gap-3 rounded-xl border border-base-300/60 bg-base-100/40 p-4">
-								<input
-									type="checkbox"
-									className="toggle toggle-primary toggle-sm mt-0.5 shrink-0"
-									checked={formData.compress_nzb ?? true}
-									disabled={isReadOnly}
-									onChange={(e) => handleInputChange("compress_nzb", e.target.checked)}
-								/>
-								<div className="min-w-0">
-									<span className="block break-words font-bold text-xs">Compress Stored NZBs</span>
-									<span className="mt-0.5 block break-words text-[11px] text-base-content/50 leading-snug">
-										Store persisted NZBs gzipped as .nzb.gz to save disk space.
-									</span>
-								</div>
-							</label>
+
 						</div>
 
 						<label className="flex min-w-0 cursor-pointer items-start gap-3 rounded-xl border border-error/30 bg-error/5 p-4">
