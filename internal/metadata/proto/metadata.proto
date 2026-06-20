@@ -132,5 +132,6 @@ message SegmentRef {
   int64 store_index = 1;   // flat index: files-in-order then segments-by-number
   int64 start_offset = 2;  // usable byte range within that segment
   int64 end_offset = 3;
+  int64 decoded_bytes = 4; // actual decoded segment size; 0 means use NzbSeg.bytes
 }
   

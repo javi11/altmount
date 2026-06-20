@@ -123,9 +123,13 @@ func resolveRefs(flat []*metapb.NzbSeg, refs []*metapb.SegmentRef) ([]*metapb.Se
 			return nil, fmt.Errorf("segment ref index %d out of range (%d segments)", r.StoreIndex, len(flat))
 		}
 		seg := flat[r.StoreIndex]
+		size := seg.Bytes
+		if r.DecodedBytes != 0 {
+			size = r.DecodedBytes
+		}
 		out[i] = &metapb.SegmentData{
 			Id:          seg.Id,
-			SegmentSize: seg.Bytes,
+			SegmentSize: size,
 			StartOffset: r.StartOffset,
 			EndOffset:   r.EndOffset,
 		}

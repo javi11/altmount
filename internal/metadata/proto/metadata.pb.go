@@ -819,6 +819,7 @@ type SegmentRef struct {
 	StoreIndex    int64                  `protobuf:"varint,1,opt,name=store_index,json=storeIndex,proto3" json:"store_index,omitempty"`    // flat index: files-in-order then segments-by-number
 	StartOffset   int64                  `protobuf:"varint,2,opt,name=start_offset,json=startOffset,proto3" json:"start_offset,omitempty"` // usable byte range within that segment
 	EndOffset     int64                  `protobuf:"varint,3,opt,name=end_offset,json=endOffset,proto3" json:"end_offset,omitempty"`
+	DecodedBytes  int64                  `protobuf:"varint,4,opt,name=decoded_bytes,json=decodedBytes,proto3" json:"decoded_bytes,omitempty"` // actual decoded segment size; 0 means use NzbSeg.bytes
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -870,6 +871,13 @@ func (x *SegmentRef) GetStartOffset() int64 {
 func (x *SegmentRef) GetEndOffset() int64 {
 	if x != nil {
 		return x.EndOffset
+	}
+	return 0
+}
+
+func (x *SegmentRef) GetDecodedBytes() int64 {
+	if x != nil {
+		return x.DecodedBytes
 	}
 	return 0
 }
@@ -939,14 +947,15 @@ const file_internal_metadata_proto_metadata_proto_rawDesc = "" +
 	"\x06NzbSeg\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x16\n" +
 	"\x06number\x18\x02 \x01(\x05R\x06number\x12\x14\n" +
-	"\x05bytes\x18\x03 \x01(\x03R\x05bytes\"o\n" +
+	"\x05bytes\x18\x03 \x01(\x03R\x05bytes\"\x94\x01\n" +
 	"\n" +
 	"SegmentRef\x12\x1f\n" +
 	"\vstore_index\x18\x01 \x01(\x03R\n" +
 	"storeIndex\x12!\n" +
 	"\fstart_offset\x18\x02 \x01(\x03R\vstartOffset\x12\x1d\n" +
 	"\n" +
-	"end_offset\x18\x03 \x01(\x03R\tendOffset*8\n" +
+	"end_offset\x18\x03 \x01(\x03R\tendOffset\x12#\n" +
+	"\rdecoded_bytes\x18\x04 \x01(\x03R\fdecodedBytes*8\n" +
 	"\n" +
 	"Encryption\x12\b\n" +
 	"\x04NONE\x10\x00\x12\n" +

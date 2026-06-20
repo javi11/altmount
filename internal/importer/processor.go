@@ -1091,9 +1091,10 @@ func segDataToRefs(segments []*metapb.SegmentData, index map[string]int64) ([]*m
 			return nil, fmt.Errorf("segment %q not found in store index", seg.Id)
 		}
 		refs[i] = &metapb.SegmentRef{
-			StoreIndex:  idx,
-			StartOffset: seg.StartOffset,
-			EndOffset:   seg.EndOffset,
+			StoreIndex:   idx,
+			StartOffset:  seg.StartOffset,
+			EndOffset:    seg.EndOffset,
+			DecodedBytes: seg.SegmentSize,
 		}
 	}
 	return refs, nil
