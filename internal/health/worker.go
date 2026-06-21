@@ -22,6 +22,7 @@ import (
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/utils"
 	"github.com/sourcegraph/conc/pool"
+	"golang.org/x/sync/singleflight"
 )
 
 // ARRsRepairService abstracts the ARR repair operations needed by HealthWorker.
@@ -80,6 +81,9 @@ type HealthWorker struct {
 	// Statistics
 	stats   WorkerStats
 	statsMu sync.RWMutex
+
+	// Singleflight for metadata discovery
+	discoverySF singleflight.Group
 }
 
 // NewHealthWorker creates a new health worker
@@ -410,33 +414,6 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 
 		sideEffect = func() error {
 			slog.InfoContext(ctx, "File is healthy", "file_path", fh.FilePath)
-
-			// Discovery: If the file is healthy but missing rich metadata (IDs), attempt to discover it now.
-			// This gradually backfills your library as health checks occur.
-			if fh.Metadata == nil || *fh.Metadata == "" {
-				slog.DebugContext(ctx, "Missing metadata for healthy file, attempting discovery", "file_path", fh.FilePath)
-				relativePath := strings.TrimPrefix(fh.FilePath, "complete/")
-				nzbName := ""
-				if fh.SourceNzbPath != nil {
-					nzbName = filepath.Base(*fh.SourceNzbPath)
-				}
-				libPath := ""
-				if fh.LibraryPath != nil {
-					libPath = *fh.LibraryPath
-				}
-				metadata, err := hw.arrsService.DiscoverFileMetadata(ctx, fh.FilePath, relativePath, nzbName, libPath)
-				if err == nil && metadata != nil {
-					metaBytes, err := json.Marshal(metadata)
-					if err == nil {
-						slog.InfoContext(ctx, "Successfully discovered metadata during health check",
-							"file_path", fh.FilePath,
-							"instance", metadata.InstanceName)
-						if err := hw.healthRepo.UpdateFileMetadata(ctx, fh.ID, metaBytes); err != nil {
-							slog.ErrorContext(ctx, "Failed to save discovered metadata", "error", err)
-						}
-					}
-				}
-			}
 
 			return hw.metadataService.UpdateFileStatus(fh.FilePath, metapb.FileStatus_FILE_STATUS_HEALTHY)
 		}
@@ -786,6 +763,8 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 		p.Go(func() {
 			slog.InfoContext(ctx, "Checking unhealthy file", "file_path", fh.FilePath)
 
+			// Proactively discover metadata if missing (IDs first priority)
+			fh.Metadata = hw.ensureMetadata(ctx, fh)
 			// Perform check
 			opts := CheckOptions{}
 			event := hw.healthChecker.CheckFile(ctx, fh.FilePath, opts)
@@ -1137,36 +1116,78 @@ func (hw *HealthWorker) retriggerFileRepair(ctx context.Context, item *database.
 }
 
 func (hw *HealthWorker) ensureMetadata(ctx context.Context, item *database.FileHealth) *string {
-	if item.Metadata != nil && *item.Metadata != "" {
+	needsDiscovery := false
+	if item.Metadata == nil || *item.Metadata == "" {
+		needsDiscovery = true
+	} else {
+		var dbMeta model.WebhookMetadata
+		if err := json.Unmarshal([]byte(*item.Metadata), &dbMeta); err == nil {
+			if dbMeta.Series != nil && len(dbMeta.Episodes) == 0 {
+				needsDiscovery = true
+			}
+		}
+	}
+
+	if !needsDiscovery {
 		return item.Metadata
 	}
 
-	slog.InfoContext(ctx, "Emergency ID discovery: Missing metadata for corrupted file, attempting discovery before repair", "file_path", item.FilePath)
-	relativePath := strings.TrimPrefix(item.FilePath, "complete/")
+	// Build a singleflight key.
+	// If NZB name is known, use that. Otherwise use parent directory of the file path.
 	nzbName := ""
 	if item.SourceNzbPath != nil {
 		nzbName = filepath.Base(*item.SourceNzbPath)
 	}
-	libPath := ""
-	if item.LibraryPath != nil {
-		libPath = *item.LibraryPath
+	sfKey := nzbName
+	if sfKey == "" {
+		sfKey = filepath.Dir(item.FilePath)
 	}
-	metadata, err := hw.arrsService.DiscoverFileMetadata(ctx, item.FilePath, relativePath, nzbName, libPath)
-	if err == nil && metadata != nil {
-		metaBytes, err := json.Marshal(metadata)
-		if err == nil {
-			str := string(metaBytes)
-			slog.InfoContext(ctx, "Successfully discovered metadata during emergency discovery",
-				"file_path", item.FilePath,
-				"instance", metadata.InstanceName)
-			if err := hw.healthRepo.UpdateFileMetadata(ctx, item.ID, metaBytes); err != nil {
-				slog.ErrorContext(ctx, "Failed to save discovered metadata during emergency discovery", "error", err)
+	if sfKey == "" || sfKey == "." {
+		sfKey = item.FilePath
+	}
+
+	res, err, _ := hw.discoverySF.Do(sfKey, func() (interface{}, error) {
+		// Re-read from DB to verify if another concurrent worker finished discovery first
+		latest, err := hw.healthRepo.GetFileHealth(ctx, item.FilePath)
+		if err == nil && latest != nil && latest.Metadata != nil && *latest.Metadata != "" {
+			var dbMeta model.WebhookMetadata
+			if err := json.Unmarshal([]byte(*latest.Metadata), &dbMeta); err == nil {
+				if dbMeta.Series == nil || len(dbMeta.Episodes) > 0 {
+					return latest.Metadata, nil
+				}
 			}
-			return &str
+		}
+
+		slog.DebugContext(ctx, "Missing metadata or episode IDs, attempting discovery during health check", "file_path", item.FilePath, "sf_key", sfKey)
+		relativePath := strings.TrimPrefix(item.FilePath, "complete/")
+		libPath := ""
+		if item.LibraryPath != nil {
+			libPath = *item.LibraryPath
+		}
+		
+		metadata, err := hw.arrsService.DiscoverFileMetadata(ctx, item.FilePath, relativePath, nzbName, libPath)
+		if err == nil && metadata != nil {
+			metaBytes, err := json.Marshal(metadata)
+			if err == nil {
+				str := string(metaBytes)
+				slog.InfoContext(ctx, "Successfully discovered metadata during health check",
+					"file_path", item.FilePath,
+					"instance", metadata.InstanceName)
+				if err := hw.healthRepo.UpdateFileMetadata(ctx, item.ID, metaBytes); err != nil {
+					slog.ErrorContext(ctx, "Failed to save discovered metadata", "error", err)
+				}
+				return &str, nil
+			}
+		}
+		return (*string)(nil), err
+	})
+
+	if err == nil && res != nil {
+		if strPtr, ok := res.(*string); ok {
+			return strPtr
 		}
 	}
 
-	slog.WarnContext(ctx, "Emergency ID discovery failed, falling back to path-based repair", "file_path", item.FilePath)
 	return nil
 }
 
