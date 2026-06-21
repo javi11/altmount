@@ -44,6 +44,10 @@ type BookFileMetadata struct {
 	Id int64 `json:"id,omitempty"`
 }
 
+type EpisodeMetadata struct {
+	Id int64 `json:"id,omitempty"`
+}
+
 type WebhookMetadata struct {
 	EventType    string               `json:"eventType,omitempty"`
 	InstanceName string               `json:"instanceName,omitempty"`
@@ -51,6 +55,7 @@ type WebhookMetadata struct {
 	MovieFile    *MovieFileMetadata   `json:"movieFile,omitempty"`
 	Series       *SeriesMetadata      `json:"series,omitempty"`
 	EpisodeFile  *EpisodeFileMetadata `json:"episodeFile,omitempty"`
+	Episodes     []EpisodeMetadata    `json:"episodes,omitempty"`
 	Artist       *ArtistMetadata      `json:"artist,omitempty"`
 	Album        *AlbumMetadata       `json:"album,omitempty"`
 	TrackFile    *TrackFileMetadata   `json:"trackFile,omitempty"`
@@ -58,3 +63,4 @@ type WebhookMetadata struct {
 	Book         *BookMetadata        `json:"book,omitempty"`
 	BookFile     *BookFileMetadata    `json:"bookFile,omitempty"`
 }
+
