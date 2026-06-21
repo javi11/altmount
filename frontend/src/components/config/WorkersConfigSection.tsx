@@ -265,8 +265,6 @@ export function ImportConfigSection({
 									</span>
 								</div>
 							</label>
-
-
 						</div>
 
 						<label className="flex min-w-0 cursor-pointer items-start gap-3 rounded-xl border border-error/30 bg-error/5 p-4">
@@ -329,7 +327,6 @@ export function ImportConfigSection({
 								</span>
 							</div>
 						</label>
-
 					</div>
 				</div>
 

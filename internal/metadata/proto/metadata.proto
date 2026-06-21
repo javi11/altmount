@@ -32,6 +32,7 @@ message Par2FileReference {
   int64 file_size = 2;          // Size of the PAR2 file in bytes
   repeated SegmentData segment_data = 3;  // Usenet segments containing PAR2 data
   repeated SegmentRef segment_refs = 4;
+  repeated SegmentRun segment_runs = 5;   // compact run encoding; preferred over segment_refs when present
 }
 
 // NestedSegmentSource represents one inner RAR volume's contribution to a nested file.
@@ -103,6 +104,7 @@ message FileMetadata {
   repeated NestedSegmentSource shared_outer_sources = 16;
   string store_ref = 18;               // id/path of the shared NzbStore
   repeated SegmentRef segment_refs = 19; // v3 replacement for segment_data
+  repeated SegmentRun segment_runs = 20; // compact run encoding; preferred over segment_refs when present
 }
 
 // --- v3 shared-store types ---
@@ -133,5 +135,15 @@ message SegmentRef {
   int64 start_offset = 2;  // usable byte range within that segment
   int64 end_offset = 3;
   int64 decoded_bytes = 4; // actual decoded segment size; 0 means use NzbSeg.bytes
+}
+
+// SegmentRun compactly encodes a consecutive range of full-segment refs:
+// start_offset=0, end_offset=decoded_bytes-1, store_index increasing by 1.
+// Used in place of repeated SegmentRef when a file's segments map 1:1 onto a
+// contiguous run of the NzbStore (the common non-archive case).
+message SegmentRun {
+  int64 base_store_index = 1; // flat store index of the first segment in the run
+  int64 count = 2;            // number of consecutive segments
+  int64 decoded_bytes = 3;    // decoded size shared by every segment in the run; 0 = use NzbSeg.bytes
 }
   

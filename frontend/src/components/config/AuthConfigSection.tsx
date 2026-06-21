@@ -258,8 +258,8 @@ export function AuthConfigSection({
 								</span>
 							</div>
 							<p className="text-[11px] text-base-content/60 leading-relaxed">
-								No users exist yet. Create your admin username and password before enabling login
-								— you'll need these to sign in.
+								No users exist yet. Create your admin username and password before enabling login —
+								you'll need these to sign in.
 							</p>
 
 							<fieldset className="fieldset">
@@ -270,9 +270,7 @@ export function AuthConfigSection({
 									placeholder="admin"
 									value={credentialForm.username}
 									disabled={isReadOnly}
-									onChange={(e) =>
-										setCredentialForm((f) => ({ ...f, username: e.target.value }))
-									}
+									onChange={(e) => setCredentialForm((f) => ({ ...f, username: e.target.value }))}
 								/>
 							</fieldset>
 
@@ -284,9 +282,7 @@ export function AuthConfigSection({
 									placeholder="Min. 8 characters"
 									value={credentialForm.password}
 									disabled={isReadOnly}
-									onChange={(e) =>
-										setCredentialForm((f) => ({ ...f, password: e.target.value }))
-									}
+									onChange={(e) => setCredentialForm((f) => ({ ...f, password: e.target.value }))}
 								/>
 							</fieldset>
 
@@ -523,11 +519,7 @@ export function AuthConfigSection({
 						) : (
 							<Save className="h-4 w-4" />
 						)}
-						{isRegistering
-							? "Creating credentials..."
-							: isUpdating
-								? "Saving..."
-								: "Save Changes"}
+						{isRegistering ? "Creating credentials..." : isUpdating ? "Saving..." : "Save Changes"}
 					</button>
 				</div>
 			)}

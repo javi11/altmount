@@ -490,6 +490,27 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 	var result string
 	var writtenPaths []string
 
+	// Persist the NzbStore up front so every metadata write below can be emitted
+	// directly in the v3 store-backed format (no read-back conversion pass).
+	// storeRef stays "" on any failure — which makes each write site fall back to
+	// the v1 inline-segment format — so a store problem never blocks the import.
+	var storeRef string
+	var storeIndex map[string]int64
+	if parsed.Store != nil && len(parsed.SegmentIndex) > 0 && parsed.Type != parser.NzbTypeStrm {
+		ref := nzbtrim.TrimNzbExtension(filePath) + ".nzbz"
+		if storeErr := proc.metadataService.Store().WriteStore(ref, parsed.Store); storeErr != nil {
+			proc.log.ErrorContext(ctx, "failed to write NZB store; metadata stays v1",
+				"store_ref", ref, "error", storeErr)
+		} else if _, integrityErr := proc.metadataService.Store().ReadStore(ref); integrityErr != nil {
+			proc.log.ErrorContext(ctx, "NZB store integrity check failed; removing store",
+				"store_ref", ref, "error", integrityErr)
+			_ = os.Remove(ref)
+		} else {
+			storeRef = ref
+			storeIndex = parsed.SegmentIndex
+		}
+	}
+
 	// Bare-ISO Blu-ray expansion. ISOs posted directly to Usenet (without
 	// RAR/7z wrapping) are classified as NzbTypeSingleFile/NzbTypeMultiFile
 	// by the parser and would otherwise bypass archive.ExpandISOContents.
@@ -531,7 +552,7 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 					proc.poolManager, isoMaxPrefetch, isoReadTimeout, cfg.GetIsoAnalyzeTimeout(), allowedExtensions, isoTracker)
 			},
 			writeMetadata: func(virtualPath string, meta *metapb.FileMetadata) error {
-				return proc.metadataService.WriteFileMetadata(virtualPath, meta)
+				return proc.metadataService.WriteFileMetadataAuto(ctx, virtualPath, meta, storeIndex, storeRef)
 			},
 		}, regularFiles, virtualDir, proc.getCleanNzbName(parsed.Path, queueID), parsed.Path, isoReleaseDate)
 		if isoErr != nil {
@@ -559,23 +580,23 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 	switch parsed.Type {
 	case parser.NzbTypeSingleFile:
 		proc.updateProgressWithStage(queueID, 30, "Validating segments")
-		result, dispatchPaths, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, queueID, allowedExtensions, category, metadata, downloadID)
+		result, dispatchPaths, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, queueID, allowedExtensions, category, metadata, downloadID, storeIndex, storeRef)
 
 	case parser.NzbTypeMultiFile:
 		proc.updateProgressWithStage(queueID, 30, "Writing metadata")
-		result, dispatchPaths, err = proc.processMultiFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, queueID, allowedExtensions, category, metadata, downloadID)
+		result, dispatchPaths, err = proc.processMultiFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, queueID, allowedExtensions, category, metadata, downloadID, storeIndex, storeRef)
 
 	case parser.NzbTypeRarArchive:
 		proc.updateProgressWithStage(queueID, 15, "Analyzing archive")
-		result, dispatchPaths, err = proc.processRarArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, allowedExtensions, parsed.ExtractedFiles, category, metadata, downloadID)
+		result, dispatchPaths, err = proc.processRarArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, allowedExtensions, parsed.ExtractedFiles, category, metadata, downloadID, storeIndex, storeRef)
 
 	case parser.NzbType7zArchive:
 		proc.updateProgressWithStage(queueID, 15, "Analyzing archive")
-		result, dispatchPaths, err = proc.processSevenZipArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, allowedExtensions, parsed.ExtractedFiles, category, metadata, downloadID)
+		result, dispatchPaths, err = proc.processSevenZipArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, allowedExtensions, parsed.ExtractedFiles, category, metadata, downloadID, storeIndex, storeRef)
 
 	case parser.NzbTypeStrm:
 		proc.updateProgressWithStage(queueID, 30, "Validating segments")
-		result, dispatchPaths, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, queueID, allowedExtensions, category, metadata, downloadID)
+		result, dispatchPaths, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, queueID, allowedExtensions, category, metadata, downloadID, storeIndex, storeRef)
 
 	default:
 		return "", writtenPaths, NewNonRetryableError(fmt.Sprintf("unknown file type: %s", parsed.Type), nil)
@@ -587,32 +608,6 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 		proc.updateProgress(queueID, 100)
 	} else if errors.Is(err, nntppool.ErrArticleNotFound) {
 		return result, writtenPaths, ErrArticlesNotFound
-	}
-
-	// Persist the NzbStore and convert written metadata to v3.
-	// Runs only on successful imports of NZB (non-STRM) files that produced a store.
-	if err == nil && parsed != nil && parsed.Store != nil &&
-		len(parsed.SegmentIndex) > 0 && parsed.Type != parser.NzbTypeStrm &&
-		len(writtenPaths) > 0 {
-		storeRef := nzbtrim.TrimNzbExtension(filePath) + ".nzbz"
-		if storeErr := proc.metadataService.Store().WriteStore(storeRef, parsed.Store); storeErr != nil {
-			proc.log.ErrorContext(ctx, "failed to write NZB store; metadata stays v1",
-				"store_ref", storeRef, "error", storeErr)
-		} else if _, integrityErr := proc.metadataService.Store().ReadStore(storeRef); integrityErr != nil {
-			proc.log.ErrorContext(ctx, "NZB store integrity check failed; removing store",
-				"store_ref", storeRef, "error", integrityErr)
-			_ = os.Remove(storeRef)
-		} else {
-			for _, path := range writtenPaths {
-				if strings.HasPrefix(path, "DIR:") {
-					continue
-				}
-				if convErr := proc.convertMetaToV3(ctx, path, parsed.SegmentIndex, storeRef); convErr != nil {
-					proc.log.WarnContext(ctx, "failed to convert metadata to v3",
-						"path", path, "error", convErr)
-				}
-			}
-		}
 	}
 
 	return result, writtenPaths, err
@@ -630,6 +625,8 @@ func (proc *Processor) processSingleFile(
 	category *string,
 	metadata *string,
 	downloadID *string,
+	storeIndex map[string]int64,
+	storeRef string,
 ) (string, []string, error) {
 	if len(regularFiles) == 0 {
 		return "", nil, fmt.Errorf("no regular files to process")
@@ -697,6 +694,8 @@ func (proc *Processor) processSingleFile(
 		proc.metadataService,
 		allowedExtensions,
 		filterSampleFiles,
+		storeIndex,
+		storeRef,
 	)
 	var writtenPaths []string
 	if writtenPath != "" {
@@ -739,6 +738,8 @@ func (proc *Processor) processMultiFile(
 	category *string,
 	metadata *string,
 	downloadID *string,
+	storeIndex map[string]int64,
+	storeRef string,
 ) (string, []string, error) {
 	// If there's only one regular file (and the rest are likely PAR2s), avoid creating a redundant
 	// NZB-named directory that matches the file itself. Instead, keep the file directly under the
@@ -791,6 +792,8 @@ func (proc *Processor) processMultiFile(
 		allowedExtensions,
 		filterSampleFiles,
 		writeTracker,
+		storeIndex,
+		storeRef,
 	)
 	if err != nil {
 		return "", writtenPaths, err
@@ -836,6 +839,8 @@ func (proc *Processor) processRarArchive(
 	category *string,
 	metadata *string,
 	downloadID *string,
+	storeIndex map[string]int64,
+	storeRef string,
 ) (string, []string, error) {
 	importCfg := proc.configGetter().Import
 	maxPrefetch := importCfg.MaxDownloadPrefetch
@@ -883,6 +888,8 @@ func (proc *Processor) processRarArchive(
 			allowedExtensions,
 			filterSampleFiles,
 			nil, // archive progress is tracked by the archive tracker below
+			storeIndex,
+			storeRef,
 		); err != nil {
 			slog.DebugContext(ctx, "Failed to process regular files", "error", err)
 		}
@@ -916,6 +923,8 @@ func (proc *Processor) processRarArchive(
 			ExpandBlurayIso:        expandBlurayIso,
 			FilterSamples:          filterSampleFiles,
 			RenameToNzbName:        renameToNzbName,
+			SegmentIndex:           storeIndex,
+			StoreRef:               storeRef,
 		})
 		if err != nil {
 			return nzbFolder, writtenPaths, err
@@ -963,6 +972,8 @@ func (proc *Processor) processSevenZipArchive(
 	category *string,
 	metadata *string,
 	downloadID *string,
+	storeIndex map[string]int64,
+	storeRef string,
 ) (string, []string, error) {
 	importCfg := proc.configGetter().Import
 	maxPrefetch := importCfg.MaxDownloadPrefetch
@@ -1010,6 +1021,8 @@ func (proc *Processor) processSevenZipArchive(
 			allowedExtensions,
 			filterSampleFiles,
 			nil, // archive progress is tracked by the archive tracker below
+			storeIndex,
+			storeRef,
 		); err != nil {
 			slog.DebugContext(ctx, "Failed to process regular files", "error", err)
 		}
@@ -1042,6 +1055,8 @@ func (proc *Processor) processSevenZipArchive(
 			ExpandBlurayIso:        expandBlurayIso,
 			FilterSamples:          filterSampleFiles,
 			RenameToNzbName:        renameToNzbName,
+			SegmentIndex:           storeIndex,
+			StoreRef:               storeRef,
 		})
 		if err != nil {
 			return nzbFolder, writtenPaths, err
@@ -1074,75 +1089,6 @@ func (proc *Processor) processSevenZipArchive(
 	}
 
 	return nzbFolder, writtenPaths, nil
-}
-
-// segDataToRefs converts a slice of SegmentData to SegmentRefs using a flat segment index
-// (message-id → position in NzbStore flat segment array). StartOffset and EndOffset are
-// preserved from the original SegmentData (archive slicing may have narrowed them). Returns
-// nil for a nil or empty input. Returns an error if any segment ID is not present in index.
-func segDataToRefs(segments []*metapb.SegmentData, index map[string]int64) ([]*metapb.SegmentRef, error) {
-	if len(segments) == 0 {
-		return nil, nil
-	}
-	refs := make([]*metapb.SegmentRef, len(segments))
-	for i, seg := range segments {
-		idx, ok := index[seg.Id]
-		if !ok {
-			return nil, fmt.Errorf("segment %q not found in store index", seg.Id)
-		}
-		refs[i] = &metapb.SegmentRef{
-			StoreIndex:   idx,
-			StartOffset:  seg.StartOffset,
-			EndOffset:    seg.EndOffset,
-			DecodedBytes: seg.SegmentSize,
-		}
-	}
-	return refs, nil
-}
-
-// convertMetaToV3 reads the metadata at virtualPath, replaces all SegmentData with SegmentRefs
-// (using the provided flat segment index), sets StoreRef, and rewrites the file in v3 format.
-// ReadFileMetadata expands SharedOuterSources before returning, so every NestedSource has its
-// Segments populated; we dissolve the dedup by converting each source independently and
-// zeroing SharedOuterSourceIndex.
-func (proc *Processor) convertMetaToV3(ctx context.Context, virtualPath string, index map[string]int64, storeRef string) error {
-	meta, err := proc.metadataService.ReadFileMetadata(virtualPath)
-	if err != nil {
-		return fmt.Errorf("read for v3 conversion: %w", err)
-	}
-	if meta == nil {
-		return nil
-	}
-
-	meta.StoreRef = storeRef
-	if meta.SegmentRefs, err = segDataToRefs(meta.SegmentData, index); err != nil {
-		return fmt.Errorf("main segments: %w", err)
-	}
-	meta.SegmentData = nil
-
-	for _, p := range meta.Par2Files {
-		if p.SegmentRefs, err = segDataToRefs(p.SegmentData, index); err != nil {
-			return fmt.Errorf("par2 segments: %w", err)
-		}
-		p.SegmentData = nil
-	}
-
-	// ReadFileMetadata already called ExpandSharedOuterSources so all NestedSources
-	// have their Segments populated, even deduped ones. Dissolve the dedup in v3.
-	for _, ns := range meta.NestedSources {
-		if ns.SegmentRefs, err = segDataToRefs(ns.Segments, index); err != nil {
-			return fmt.Errorf("nested source segments: %w", err)
-		}
-		ns.Segments = nil
-		ns.SharedOuterSourceIndex = 0
-	}
-	meta.SharedOuterSources = nil
-
-	if err := proc.metadataService.WriteFileMetadata(virtualPath, meta); err != nil {
-		return err
-	}
-	proc.metadataService.IncStoreRef(ctx, storeRef)
-	return nil
 }
 
 // applyNzbRename renames the first file in files to match nzbName when renameToNzbName is true.

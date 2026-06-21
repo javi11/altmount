@@ -209,19 +209,36 @@ func (s *Server) handleExportMetadataToNZB(c *fiber.Ctx) error {
 		return RespondNotFound(c, "File metadata", "")
 	}
 
-	// Generate NZB from metadata
-	nzbContent, err := s.generateNZBFromMetadata(metadata, path)
-	if err != nil {
-		return RespondInternalError(c, "Failed to generate NZB", err.Error())
-	}
-
-	// Extract filename from path
+	// Default download name derived from the virtual file.
 	filename := filepath.Base(path)
-	// Remove any existing extension and add .nzb
 	if idx := strings.LastIndex(filename, "."); idx != -1 {
 		filename = filename[:idx]
 	}
 	nzbFilename := filename + ".nzb"
+
+	// Prefer the faithful original NZB regenerated from the v3 store (all original
+	// files, segments, posters/groups/dates). Fall back to the synthetic single-file
+	// NZB for v1 metadata or when the store is missing.
+	var nzbContent []byte
+	if metadata.StoreRef != "" && s.metadataService != nil {
+		regen, regenErr := s.metadataService.Store().RegenerateNZB(metadata.StoreRef)
+		if regenErr != nil {
+			return RespondInternalError(c, "Failed to regenerate NZB from store", regenErr.Error())
+		}
+		if regen != nil {
+			nzbContent = regen
+			// Name the download after the release (the store), not the single virtual file.
+			nzbFilename = strings.TrimSuffix(filepath.Base(metadata.StoreRef), ".nzbz") + ".nzb"
+		}
+	}
+
+	if nzbContent == nil {
+		generated, genErr := s.generateNZBFromMetadata(metadata, path)
+		if genErr != nil {
+			return RespondInternalError(c, "Failed to generate NZB", genErr.Error())
+		}
+		nzbContent = generated
+	}
 
 	// Set response headers for file download
 	c.Set("Content-Type", "application/x-nzb")

@@ -229,6 +229,77 @@ func (ms *MetadataService) WriteFileMetadata(virtualPath string, metadata *metap
 	return nil
 }
 
+// WriteFileMetadataV3 writes metadata directly in the v3 store-backed format: it
+// converts the inline SegmentData of the main file, PAR2 files, and nested sources
+// into SegmentRefs/SegmentRuns against the release's flat segment index, points the
+// meta at storeRef, and increments the store reference count exactly once.
+//
+// The conversion runs on a clone so a failure (e.g. a segment id missing from the
+// index) leaves the caller's in-memory meta untouched, letting the caller fall back
+// to a v1 WriteFileMetadata. Freshly-built archive metas still carry the
+// SharedOuterSources dedup, so it is expanded first (mirroring the read path) before
+// each nested source is converted independently and the dedup dissolved.
+func (ms *MetadataService) WriteFileMetadataV3(ctx context.Context, virtualPath string, metadata *metapb.FileMetadata, index map[string]int64, storeRef string) error {
+	m := proto.Clone(metadata).(*metapb.FileMetadata)
+
+	if err := ExpandSharedOuterSources(m); err != nil {
+		return fmt.Errorf("expand shared outer sources: %w", err)
+	}
+
+	m.StoreRef = storeRef
+	// The raw .nzb is deleted after import; the .nzbz store is the persistent source
+	// of truth (NZBs are regenerated from it). Point source_nzb_path at the store so a
+	// single, real artifact is recorded instead of a path to a now-deleted .nzb file.
+	m.SourceNzbPath = storeRef
+
+	mainRefs, err := segDataToRefs(m.SegmentData, index)
+	if err != nil {
+		return fmt.Errorf("main segments: %w", err)
+	}
+	m.SegmentRuns, m.SegmentRefs = splitRefs(mainRefs)
+
+	for _, p := range m.Par2Files {
+		refs, err := segDataToRefs(p.SegmentData, index)
+		if err != nil {
+			return fmt.Errorf("par2 segments: %w", err)
+		}
+		p.SegmentRuns, p.SegmentRefs = splitRefs(refs)
+	}
+
+	// Nested sources are archive-sliced (non-trivial offsets): explicit refs only.
+	for _, ns := range m.NestedSources {
+		if ns.SegmentRefs, err = segDataToRefs(ns.Segments, index); err != nil {
+			return fmt.Errorf("nested source segments: %w", err)
+		}
+		ns.SharedOuterSourceIndex = 0
+	}
+	m.SharedOuterSources = nil
+
+	// WriteFileMetadata's v3 branch (StoreRef set) clears inline SegmentData/
+	// SharedOuterSources/NestedSource.Segments and keeps SegmentRefs/SegmentRuns.
+	if err := ms.WriteFileMetadata(virtualPath, m); err != nil {
+		return err
+	}
+	ms.IncStoreRef(ctx, storeRef)
+	return nil
+}
+
+// WriteFileMetadataAuto writes v3 store-backed metadata when storeRef is set,
+// falling back to the v1 inline format if the v3 conversion fails (so a store/index
+// problem on one file never blocks the import). With an empty storeRef it writes v1.
+// This is the single entry point import processors should use.
+func (ms *MetadataService) WriteFileMetadataAuto(ctx context.Context, virtualPath string, metadata *metapb.FileMetadata, index map[string]int64, storeRef string) error {
+	if storeRef == "" {
+		return ms.WriteFileMetadata(virtualPath, metadata)
+	}
+	if err := ms.WriteFileMetadataV3(ctx, virtualPath, metadata, index, storeRef); err != nil {
+		slog.WarnContext(ctx, "v3 metadata write failed; writing v1",
+			"path", virtualPath, "error", err)
+		return ms.WriteFileMetadata(virtualPath, metadata)
+	}
+	return nil
+}
+
 // ReadFileMetadata reads file metadata from disk. The full proto (including
 // SegmentData and NestedSources) is returned to the caller but NOT cached —
 // those slices dominate heap usage and must not be retained beyond the
@@ -262,11 +333,11 @@ func (ms *MetadataService) ReadFileMetadata(virtualPath string) (*metapb.FileMet
 			}
 			flat := FlatSegments(store)
 			var resolveErr error
-			if metadata.SegmentData, resolveErr = resolveRefs(flat, metadata.SegmentRefs); resolveErr != nil {
+			if metadata.SegmentData, resolveErr = resolveSegments(flat, metadata.SegmentRuns, metadata.SegmentRefs); resolveErr != nil {
 				return nil, resolveErr
 			}
 			for _, p := range metadata.Par2Files {
-				if p.SegmentData, resolveErr = resolveRefs(flat, p.SegmentRefs); resolveErr != nil {
+				if p.SegmentData, resolveErr = resolveSegments(flat, p.SegmentRuns, p.SegmentRefs); resolveErr != nil {
 					return nil, resolveErr
 				}
 			}
