@@ -226,7 +226,9 @@ func (s *Server) handleExportMetadataToNZB(c *fiber.Ctx) error {
 			return RespondInternalError(c, "Failed to regenerate NZB from store", regenErr.Error())
 		}
 		if regen != nil {
-			nzbContent = regen
+			// BuildNZB emits no <head>, so re-attach the encryption/password meta
+			// from the metadata; otherwise the exported NZB would lose the password.
+			nzbContent = s.injectEncryptionMeta(regen, metadata)
 			// Name the download after the release (the store), not the single virtual file.
 			nzbFilename = strings.TrimSuffix(filepath.Base(metadata.StoreRef), ".nzbz") + ".nzb"
 		}
@@ -266,13 +268,15 @@ func (s *Server) generateNZBFromMetadata(metadata *metapb.FileMetadata, filePath
 		encType := s.convertEncryptionToString(metadata.Encryption)
 		nzb.Head.Meta = append(nzb.Head.Meta, nzbMeta{Type: "cipher", Value: encType})
 
-		if metadata.Password != "" {
-			nzb.Head.Meta = append(nzb.Head.Meta, nzbMeta{Type: "password", Value: metadata.Password})
-		}
-
 		if metadata.Salt != "" {
 			nzb.Head.Meta = append(nzb.Head.Meta, nzbMeta{Type: "salt", Value: metadata.Salt})
 		}
+	}
+
+	// Preserve the password whenever present (e.g. RAR-password releases), even when
+	// the content is not AES-encrypted, so the exported NZB stays re-importable.
+	if metadata.Password != "" {
+		nzb.Head.Meta = append(nzb.Head.Meta, nzbMeta{Type: "password", Value: metadata.Password})
 	}
 
 	// Create a single file entry with all segments
@@ -335,6 +339,43 @@ func (s *Server) generateNZBFromMetadata(metadata *metapb.FileMetadata, filePath
 	}
 
 	return buf.Bytes(), nil
+}
+
+// injectEncryptionMeta attaches cipher/password/salt <meta> tags to a
+// store-regenerated NZB so exported releases stay re-importable. nzb.BuildNZB
+// emits no <head>, so a new one is inserted after the opening <nzb> tag. The
+// password is preserved whenever present (e.g. RAR-password releases), even when
+// the content is not AES-encrypted; cipher/salt are added only for AES content.
+func (s *Server) injectEncryptionMeta(nzbContent []byte, metadata *metapb.FileMetadata) []byte {
+	if metadata.Encryption == metapb.Encryption_NONE && metadata.Password == "" {
+		return nzbContent
+	}
+
+	var head bytes.Buffer
+	head.WriteString("  <head>\n")
+	if metadata.Encryption != metapb.Encryption_NONE {
+		head.WriteString(`    <meta type="cipher">`)
+		_ = xml.EscapeText(&head, []byte(s.convertEncryptionToString(metadata.Encryption)))
+		head.WriteString("</meta>\n")
+	}
+	if metadata.Password != "" {
+		head.WriteString(`    <meta type="password">`)
+		_ = xml.EscapeText(&head, []byte(metadata.Password))
+		head.WriteString("</meta>\n")
+	}
+	if metadata.Salt != "" {
+		head.WriteString(`    <meta type="salt">`)
+		_ = xml.EscapeText(&head, []byte(metadata.Salt))
+		head.WriteString("</meta>\n")
+	}
+	head.WriteString("  </head>\n")
+
+	// ReplaceAllStringFunc inserts the head literally — unlike ReplaceAllString, it
+	// does not interpret "$" in the replacement, so passwords containing "$" survive.
+	re := regexp.MustCompile(`<nzb[^>]*>\n?`)
+	return []byte(re.ReplaceAllStringFunc(string(nzbContent), func(m string) string {
+		return m + head.String()
+	}))
 }
 
 // BatchExportRequest represents the batch export request body
