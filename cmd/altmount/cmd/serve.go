@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	_ "net/http/pprof"
@@ -289,8 +290,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Start mount service after HTTP server is running
 	// This ensures the WebDAV server is ready to accept connections
 	go func() {
-		// Wait for HTTP server to be fully ready
-		time.Sleep(2 * time.Second)
+		// Wait for HTTP server to be fully ready by polling the liveness endpoint
+		if err := waitForHTTPServer(ctx, cfg.WebDAV.Port); err != nil {
+			logger.WarnContext(ctx, "HTTP server did not become ready, starting mount service anyway", "err", err)
+		} else {
+			logger.InfoContext(ctx, "HTTP server is ready, starting mount service")
+		}
 
 		if err := startMountService(ctx, cfg, mountService, logger); err != nil {
 			logger.WarnContext(ctx, "Mount service failed to start", "err", err)
@@ -399,3 +404,38 @@ func setupSPARoutes(app *fiber.App) {
 		return
 	}
 }
+
+func waitForHTTPServer(ctx context.Context, port int) error {
+	client := &http.Client{
+		Timeout: 500 * time.Millisecond,
+	}
+	url := fmt.Sprintf("http://127.0.0.1:%d/live", port)
+
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	// Wait up to 30 seconds
+	timeout := time.After(30 * time.Second)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timeout:
+			return fmt.Errorf("timeout waiting for HTTP server on port %d to start", port)
+		case <-ticker.C:
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+			if err != nil {
+				continue
+			}
+			resp, err := client.Do(req)
+			if err == nil {
+				resp.Body.Close()
+				if resp.StatusCode == http.StatusOK {
+					return nil
+				}
+			}
+		}
+	}
+}
+

@@ -33,7 +33,7 @@ func (m *Manager) mountWithRetry(ctx context.Context, provider, mountPath, webda
 						"mountPoint": mountPath,
 					},
 				}
-				if _, err := m.makeRequest(req, true); err != nil {
+				if _, err := m.makeRequestWithContext(ctx, req, true); err != nil {
 					m.logger.DebugContext(ctx, "RC unmount before retry failed (may be expected)", "err", err, "provider", provider)
 				}
 			}
@@ -95,7 +95,7 @@ func (m *Manager) performMount(ctx context.Context, provider, mountPath, webdavU
 	}
 
 	// Create rclone config for this provider
-	if err := m.createConfig(provider, webdavURL, cfg.WebDAV.User, cfg.WebDAV.Password); err != nil {
+	if err := m.createConfig(ctx, provider, webdavURL, cfg.WebDAV.User, cfg.WebDAV.Password); err != nil {
 		return fmt.Errorf("failed to create rclone config: %w", err)
 	}
 
@@ -189,7 +189,7 @@ func (m *Manager) performMount(ctx context.Context, provider, mountPath, webdavU
 		Args:    mountArgs,
 	}
 
-	_, err := m.makeRequest(req, true)
+	_, err := m.makeRequestWithContext(ctx, req, true)
 	if err != nil {
 		// Clean up mount point on failure
 		m.forceUnmountPath(mountPath)
@@ -241,7 +241,7 @@ func (m *Manager) unmount(ctx context.Context, provider string) error {
 
 	var rcErr error
 	if m.IsReady() {
-		_, rcErr = m.makeRequest(req, true)
+		_, rcErr = m.makeRequestWithContext(ctx, req, true)
 	}
 
 	// If RC unmount fails or server is not ready, try force unmount
@@ -354,7 +354,7 @@ func (m *Manager) RefreshDir(ctx context.Context, provider string, dirs []string
 			Command: "vfs/forget",
 			Args:    forgetArgs,
 		}
-		_, err := m.makeRequest(req, true)
+		_, err := m.makeRequestWithContext(ctx, req, true)
 		if err != nil {
 			m.logger.ErrorContext(ctx, "Failed to forget directory", "err", err, "provider", provider, "dir", dir)
 			return fmt.Errorf("failed to forget directory %s for provider %s: %w", dir, provider, err)
@@ -376,7 +376,7 @@ func (m *Manager) RefreshDir(ctx context.Context, provider string, dirs []string
 			Command: "vfs/refresh",
 			Args:    refreshArgs,
 		}
-		_, err := m.makeRequest(req, true)
+		_, err := m.makeRequestWithContext(ctx, req, true)
 		if err != nil {
 			m.logger.ErrorContext(ctx, "Failed to refresh directory", "err", err, "provider", provider, "dir", dir)
 			return fmt.Errorf("failed to refresh directory %s for provider %s: %w", dir, provider, err)
@@ -386,7 +386,7 @@ func (m *Manager) RefreshDir(ctx context.Context, provider string, dirs []string
 }
 
 // createConfig creates an rclone config entry for the provider
-func (m *Manager) createConfig(configName, webdavURL string, user, pass string) error {
+func (m *Manager) createConfig(ctx context.Context, configName, webdavURL string, user, pass string) error {
 	req := RCRequest{
 		Command: "config/create",
 		Args: map[string]any{
@@ -402,7 +402,7 @@ func (m *Manager) createConfig(configName, webdavURL string, user, pass string) 
 		},
 	}
 
-	_, err := m.makeRequest(req, true)
+	_, err := m.makeRequestWithContext(ctx, req, true)
 	if err != nil {
 		return fmt.Errorf("failed to create config %s: %w", configName, err)
 	}
