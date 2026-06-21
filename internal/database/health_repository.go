@@ -229,7 +229,15 @@ func (r *HealthRepository) GetUnhealthyFiles(ctx context.Context, limit int, str
 		SELECT id, file_path, status, last_checked, last_error, retry_count, max_retries,
 		       repair_retry_count, max_repair_retries, source_nzb_path,
 		       error_details, created_at, updated_at, release_date, scheduled_check_at,
-			   library_path, priority, streaming_failure_count, is_masked
+			   -- Return NULL for placeholder library_path values (never relinked by an ARR).
+			   -- A real filesystem path can never equal file_path or '/' || file_path, so
+			   -- this is safe on all platforms. Returning NULL here means all downstream
+			   -- guards (resolvePathForRescan, metadata-move, "is imported" checks) treat
+			   -- these records correctly as not-yet-imported rather than acting on a
+			   -- virtual path as if it were a real library location.
+			   CASE WHEN library_path = file_path OR library_path = '/' || file_path
+			        THEN NULL ELSE library_path END AS library_path,
+			   priority, streaming_failure_count, is_masked
 		, metadata, indexer
 		FROM file_health
 		WHERE scheduled_check_at IS NOT NULL
