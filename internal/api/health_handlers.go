@@ -974,8 +974,11 @@ func (s *Server) handleDirectHealthCheck(c *fiber.Ctx) error {
 
 	// Verify that the file still exists
 	f, err := s.metadataReader.GetFileMetadata(item.FilePath)
-	if f == nil || err != nil {
+	if err != nil {
 		return RespondInternalError(c, "Failed to retrieve file metadata", err.Error())
+	}
+	if f == nil {
+		return RespondNotFound(c, "File metadata", "File metadata no longer exists on disk")
 	}
 
 	// Get the updated health record with 'checking' status

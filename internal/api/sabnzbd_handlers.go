@@ -620,7 +620,7 @@ func (s *Server) handleSABnzbdQueue(c *fiber.Ctx) error {
 			if val > 0 {
 				limit = val
 			} else {
-				limit = 10000
+				limit = 100
 			}
 		}
 	}
@@ -790,7 +790,7 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 			if val > 0 {
 				limit = val
 			} else {
-				limit = 10000
+				limit = 100
 			}
 		}
 	}

@@ -157,7 +157,6 @@ func isArrImportableMedia(p string) bool {
 	}
 	return arrAudioBookExtensions[strings.ToLower(path.Ext(p))]
 }
-
 // expandWrittenPaths resolves "DIR:"-prefixed entries (whole-directory imports such
 // as RAR/7z archives, which only report their NZB folder) into the per-file virtual
 // paths beneath them by walking the metadata tree. Plain file entries pass through
