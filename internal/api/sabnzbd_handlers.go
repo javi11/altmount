@@ -831,6 +831,20 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 	// Combine and deduplicate by NZB Name
 	// Priority goes to items still in the queue (as they have more metadata)
 	seenNames := make(map[string]bool)
+	// Also dedupe by the nzo_id we will actually emit. The same logical release
+	// can carry two different name strings across the live-completed-queue and
+	// persistent-history sources (e.g. "<id>-Name.nzb.gz" vs the clean NzbName),
+	// so name-only dedup leaks it through as two slots sharing one nzo_id. *arr
+	// then ingests the same download_id twice, building duplicate queue rows and
+	// tripping a .Single() collision on queue delete. nzoKey mirrors the id logic
+	// in ToSABnzbd{Queue,History}Slot so the guard matches the emitted value.
+	seenNzoIDs := make(map[string]bool)
+	nzoKey := func(downloadID *string, id int64) string {
+		if downloadID != nil && *downloadID != "" {
+			return *downloadID
+		}
+		return fmt.Sprintf("%d", id)
+	}
 	finalItems := make([]*database.ImportQueueItem, 0)
 	// Track items sourced from the live queue with status=Completed. Only these
 	// are eligible to be rewritten as Failed when their reported path is
@@ -854,10 +868,12 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 				continue
 			}
 		}
-		if !seenNames[name] {
+		key := nzoKey(item.DownloadID, item.ID)
+		if !seenNames[name] && !seenNzoIDs[key] {
 			finalItems = append(finalItems, item)
 			liveCompleted[item] = true
 			seenNames[name] = true
+			seenNzoIDs[key] = true
 		}
 	}
 
@@ -878,7 +894,7 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 			}
 		}
 
-		if !seenNames[item.NzbName] {
+		if !seenNames[item.NzbName] && !seenNzoIDs[nzoKey(item.DownloadID, id)] {
 			qItem := &database.ImportQueueItem{
 				ID:          id,
 				DownloadID:  item.DownloadID,
@@ -891,6 +907,7 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 			}
 			finalItems = append(finalItems, qItem)
 			seenNames[item.NzbName] = true
+			seenNzoIDs[nzoKey(item.DownloadID, id)] = true
 		}
 	}
 
@@ -917,9 +934,11 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 				continue
 			}
 		}
-		if !seenNames[name] {
+		key := nzoKey(item.DownloadID, item.ID)
+		if !seenNames[name] && !seenNzoIDs[key] {
 			finalItems = append(finalItems, item)
 			seenNames[name] = true
+			seenNzoIDs[key] = true
 		}
 	}
 
