@@ -31,6 +31,7 @@ import (
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/sabnzbd"
+	"github.com/javi11/altmount/internal/utils"
 	"github.com/javi11/altmount/pkg/rclonecli"
 	"github.com/javi11/nzbparser"
 )
@@ -628,33 +629,8 @@ func (s *Service) MoveToFailedFolder(ctx context.Context, item *database.ImportQ
 	}
 
 	// Move file
-	if err := os.Rename(item.NzbPath, newPath); err != nil {
-		// Fallback to Copy+Delete
-		s.log.DebugContext(ctx, "Rename failed, trying copy to failed dir", "error", err)
-
-		srcFile, err := os.Open(item.NzbPath)
-		if err != nil {
-			return fmt.Errorf("failed to open source NZB: %w", err)
-		}
-		defer srcFile.Close()
-
-		dstFile, err := os.Create(newPath)
-		if err != nil {
-			return fmt.Errorf("failed to create destination NZB: %w", err)
-		}
-		defer dstFile.Close()
-
-		if _, err := io.Copy(dstFile, srcFile); err != nil {
-			return fmt.Errorf("failed to copy NZB content: %w", err)
-		}
-
-		// Close files explicitly to allow deletion
-		srcFile.Close()
-		dstFile.Close()
-
-		if err := os.Remove(item.NzbPath); err != nil {
-			s.log.WarnContext(ctx, "Failed to remove source NZB after copy", "path", item.NzbPath, "error", err)
-		}
+	if err := utils.MoveFile(item.NzbPath, newPath); err != nil {
+		return fmt.Errorf("failed to move NZB to failed folder: %w", err)
 	}
 
 	// Update DB
@@ -1052,9 +1028,8 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 
 	s.log.DebugContext(ctx, "Moving NZB to persistent storage", "old_path", item.NzbPath, "new_path", newPath)
 
-	// Move the NZB as-is. If the rename fails (e.g. cross-device), leave the
-	// source untouched and abort — the caller can retry rather than risk a partial copy.
-	if err := os.Rename(item.NzbPath, newPath); err != nil {
+	// Move the NZB to persistent storage.
+	if err := utils.MoveFile(item.NzbPath, newPath); err != nil {
 		s.log.ErrorContext(ctx, "Failed to move NZB to persistent storage", "error", err, "src", item.NzbPath, "dst", newPath)
 		return fmt.Errorf("failed to move NZB to persistent storage: %w", err)
 	}
