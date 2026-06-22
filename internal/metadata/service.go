@@ -823,65 +823,21 @@ func (ms *MetadataService) RenameFileMetadata(oldVirtualPath, newVirtualPath str
 		return fmt.Errorf("failed to create destination metadata directory: %w", err)
 	}
 
-	// Try atomic rename first
-	if err := os.Rename(oldMetaPath, newMetaPath); err != nil {
-		// Fall back to read-write-delete for cross-device moves
-		if !isCrossDeviceError(err) {
-			return fmt.Errorf("failed to rename metadata file: %w", err)
-		}
-
-		if err := copyAndRemoveFile(oldMetaPath, newMetaPath); err != nil {
-			return fmt.Errorf("failed to copy metadata file across devices: %w", err)
-		}
+	// Try to move metadata file
+	if err := utils.MoveFile(oldMetaPath, newMetaPath); err != nil {
+		return fmt.Errorf("failed to rename metadata file: %w", err)
 	}
 
 	// Also rename the .id sidecar file if it exists
 	oldIDPath := oldMetaPath + ".id"
 	newIDPath := newMetaPath + ".id"
 	if _, err := os.Stat(oldIDPath); err == nil {
-		if err := os.Rename(oldIDPath, newIDPath); err != nil {
-			// Cross-device fallback for .id file
-			if isCrossDeviceError(err) {
-				_ = copyAndRemoveFile(oldIDPath, newIDPath)
-			} else {
-				slog.WarnContext(context.Background(), "Failed to rename .id sidecar file", "old", oldIDPath, "new", newIDPath, "error", err)
-			}
+		if err := utils.MoveFile(oldIDPath, newIDPath); err != nil {
+			slog.WarnContext(context.Background(), "Failed to rename .id sidecar file", "old", oldIDPath, "new", newIDPath, "error", err)
 		}
 	}
 
 	return nil
-}
-
-// isCrossDeviceError checks if an error is a cross-device link error (EXDEV).
-func isCrossDeviceError(err error) bool {
-	return strings.Contains(err.Error(), "cross-device") || strings.Contains(err.Error(), "invalid cross-device link")
-}
-
-// copyAndRemoveFile copies src to dst then removes src.
-func copyAndRemoveFile(src, dst string) error {
-	srcFile, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer srcFile.Close()
-
-	dstFile, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer dstFile.Close()
-
-	if _, err := io.Copy(dstFile, srcFile); err != nil {
-		os.Remove(dst) // Clean up partial write
-		return err
-	}
-
-	if err := dstFile.Close(); err != nil {
-		return err
-	}
-	srcFile.Close()
-
-	return os.Remove(src)
 }
 
 // GetMetadataFilePath returns the filesystem path for a metadata file
