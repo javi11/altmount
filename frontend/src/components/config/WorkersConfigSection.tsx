@@ -265,42 +265,65 @@ export function ImportConfigSection({
 									</span>
 								</div>
 							</label>
-
-							<label className="flex min-w-0 cursor-pointer items-start gap-3 rounded-xl border border-base-300/60 bg-base-100/40 p-4">
-								<input
-									type="checkbox"
-									className="toggle toggle-primary toggle-sm mt-0.5 shrink-0"
-									checked={formData.compress_nzb ?? true}
-									disabled={isReadOnly}
-									onChange={(e) => handleInputChange("compress_nzb", e.target.checked)}
-								/>
-								<div className="min-w-0">
-									<span className="block break-words font-bold text-xs">Compress Stored NZBs</span>
-									<span className="mt-0.5 block break-words text-[11px] text-base-content/50 leading-snug">
-										Store persisted NZBs gzipped as .nzb.gz to save disk space.
-									</span>
-								</div>
-							</label>
 						</div>
 
 						<label className="flex min-w-0 cursor-pointer items-start gap-3 rounded-xl border border-error/30 bg-error/5 p-4">
 							<input
 								type="checkbox"
-								className="checkbox checkbox-error checkbox-sm mt-0.5 shrink-0"
-								checked={formData.delete_completed_nzb ?? false}
+								className="toggle toggle-primary toggle-sm mt-1 shrink-0"
+								checked={formData.allow_nested_rar_extraction ?? true}
 								disabled={isReadOnly}
-								onChange={(e) => handleInputChange("delete_completed_nzb", e.target.checked)}
+								onChange={(e) => handleInputChange("allow_nested_rar_extraction", e.target.checked)}
 							/>
 							<div className="min-w-0 flex-1">
-								<div className="flex items-center gap-2">
-									<span className="break-words font-bold text-xs">Delete NZB After Import</span>
-									<div className="badge badge-error badge-xs shrink-0 font-black text-[8px] uppercase">
-										Dangerous
-									</div>
-								</div>
-								<span className="mt-0.5 block break-words text-[11px] text-base-content/50 leading-snug">
-									Delete the source NZB once import succeeds. Downloading it from the queue stops
-									working.
+								<span className="block whitespace-normal break-words font-bold text-xs">
+									Nested RAR Extraction
+								</span>
+								<span className="mt-1 block whitespace-normal break-words text-base-content/50 text-xs leading-relaxed">
+									Extract nested RAR archives found inside other RAR or 7zip archives. Disable if
+									nested extraction causes issues with your files.
+								</span>
+							</div>
+						</label>
+
+						<div className="divider text-base-content/70" />
+
+						<label className="label cursor-pointer items-start justify-start gap-4">
+							<input
+								type="checkbox"
+								className="toggle toggle-primary toggle-sm mt-1 shrink-0"
+								checked={formData.rename_to_nzb_name ?? true}
+								disabled={isReadOnly}
+								onChange={(e) => handleInputChange("rename_to_nzb_name", e.target.checked)}
+							/>
+							<div className="min-w-0 flex-1">
+								<span className="block whitespace-normal break-words font-bold text-xs">
+									Rename to NZB Name
+								</span>
+								<span className="mt-1 block whitespace-normal break-words text-base-content/50 text-xs leading-relaxed">
+									When an import produces a single file, rename it using the NZB release name
+									instead of the original (often obfuscated) filename.
+								</span>
+							</div>
+						</label>
+
+						<div className="divider text-base-content/70" />
+
+						<label className="label cursor-pointer items-start justify-start gap-4">
+							<input
+								type="checkbox"
+								className="toggle toggle-primary toggle-sm mt-1 shrink-0"
+								checked={formData.filter_sample_files ?? true}
+								disabled={isReadOnly}
+								onChange={(e) => handleInputChange("filter_sample_files", e.target.checked)}
+							/>
+							<div className="min-w-0 flex-1">
+								<span className="block whitespace-normal break-words font-bold text-xs">
+									Filter Sample Files
+								</span>
+								<span className="mt-1 block whitespace-normal break-words text-base-content/50 text-xs leading-relaxed">
+									Automatically reject files that appear to be samples or proofs (e.g.,
+									movie.sample.mkv). Files larger than 200MB are never filtered.
 								</span>
 							</div>
 						</label>

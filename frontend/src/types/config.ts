@@ -70,7 +70,6 @@ export interface DatabaseConfig {
 export interface MetadataConfig {
 	root_path: string;
 	delete_source_nzb_on_removal?: boolean;
-	delete_completed_nzb?: boolean;
 	backup: MetadataBackupConfig;
 }
 
@@ -231,8 +230,6 @@ export interface ImportConfig {
 	filter_sample_files?: boolean;
 	failed_item_retention_hours?: number | null;
 	history_retention_days?: number | null;
-	delete_completed_nzb?: boolean;
-	compress_nzb?: boolean;
 }
 
 // Log configuration
@@ -446,7 +443,6 @@ export interface ImportUpdateRequest {
 	allow_nested_rar_extraction?: boolean;
 	rename_to_nzb_name?: boolean;
 	filter_sample_files?: boolean;
-	compress_nzb?: boolean;
 }
 
 // Log update request

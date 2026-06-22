@@ -45,6 +45,8 @@ type ParsedNzb struct {
 	SegmentsCount  int
 	password       string // Private field - use GetPassword() to access
 	ExtractedFiles []ExtractedFileInfo
+	Store          *metapb.NzbStore // NzbStore for this release (built at parse time)
+	SegmentIndex   map[string]int64 // message-id → flat store index
 }
 
 // GetPassword returns the password for this NZB
@@ -63,6 +65,7 @@ type ParsedFile struct {
 	Filename      string
 	Size          int64
 	Segments      []*metapb.SegmentData
+	SegmentRefs   []*metapb.SegmentRef // v3: refs into NzbStore (populated when Store != nil)
 	Groups        []string
 	IsRarArchive  bool
 	Is7zArchive   bool

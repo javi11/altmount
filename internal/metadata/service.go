@@ -23,6 +23,21 @@ const (
 	defaultMetadataCacheSize = 4096
 )
 
+// metaMagicV3 is a 5-byte magic prefix prepended to v3 .meta files.
+// The leading 0x00 byte is an invalid proto tag byte, so v1 files (raw proto,
+// no magic) are safely distinguished from v3 files.
+var metaMagicV3 = []byte{0x00, 'A', 'M', '3', 0x01}
+
+// isV3Meta reports whether data starts with the v3 magic prefix.
+func isV3Meta(data []byte) bool {
+	return len(data) >= len(metaMagicV3) &&
+		data[0] == metaMagicV3[0] &&
+		data[1] == metaMagicV3[1] &&
+		data[2] == metaMagicV3[2] &&
+		data[3] == metaMagicV3[3] &&
+		data[4] == metaMagicV3[4]
+}
+
 // FileMetadataLite holds the minimal metadata needed for directory listings.
 // This avoids keeping full FileMetadata protos (with SegmentData, Par2Files, etc.)
 // in memory just for Readdir.
@@ -47,6 +62,11 @@ type MetadataService struct {
 	// Readdir/Stat/Getattr, and populated as a side effect of ReadFileMetadata
 	// so info-only callers still benefit.
 	liteCache *lru.Cache[string, *FileMetadataLite]
+	// store manages shared per-release NzbStore files used by v3 metadata.
+	store *StoreService
+	// storeRefCounter tracks reference counts for shared NzbStore files.
+	// nil means reference counting is disabled.
+	storeRefCounter StoreRefCounter
 }
 
 // NewMetadataService creates a new metadata service
@@ -55,7 +75,52 @@ func NewMetadataService(rootPath string) *MetadataService {
 	return &MetadataService{
 		rootPath:  rootPath,
 		liteCache: liteCache,
+		store:     NewStoreService(rootPath),
 	}
+}
+
+// Store returns the StoreService used by this MetadataService.
+func (ms *MetadataService) Store() *StoreService {
+	return ms.store
+}
+
+// SetStoreRefCounter wires in a StoreRefCounter so that reference counts on shared
+// NzbStore files are maintained when metadata is deleted or created.
+func (ms *MetadataService) SetStoreRefCounter(c StoreRefCounter) {
+	ms.storeRefCounter = c
+}
+
+// IncStoreRef increments the reference count for a v3 store file.
+// No-op when no StoreRefCounter is configured.
+// Refcounting is best-effort: a DB failure is logged but does not fail the caller.
+// A missed increment means a later DecStoreRef may drive the count to 0 prematurely,
+// but store-file deletion is tolerant of the file already being absent.
+func (ms *MetadataService) IncStoreRef(ctx context.Context, storePath string) {
+	if ms.storeRefCounter == nil {
+		return
+	}
+	if err := ms.storeRefCounter.IncStoreRef(ctx, storePath); err != nil {
+		slog.WarnContext(ctx, "failed to increment store ref count",
+			"store_path", storePath, "error", err)
+	}
+}
+
+// readStoreRef reads just the StoreRef field from a .meta file without resolving segments.
+// Returns "" if the file is not v3 or cannot be read.
+func (ms *MetadataService) readStoreRef(metaFilePath string) string {
+	data, err := os.ReadFile(metaFilePath)
+	if err != nil {
+		return ""
+	}
+	if !isV3Meta(data) {
+		return ""
+	}
+	payload := data[len(metaMagicV3):]
+	var fm metapb.FileMetadata
+	if err := proto.Unmarshal(payload, &fm); err != nil {
+		return ""
+	}
+	return fm.StoreRef
 }
 
 // truncateFilename truncates the filename if it's too long to prevent filesystem issues
@@ -93,11 +158,36 @@ func (ms *MetadataService) WriteFileMetadata(virtualPath string, metadata *metap
 	nzbdavId := metadata.NzbdavId
 	metadata.NzbdavId = "" // Clear for marshalling
 
-	// Marshal protobuf data
-	data, err := proto.Marshal(metadata)
-	if err != nil {
-		metadata.NzbdavId = nzbdavId // Restore on error
-		return fmt.Errorf("failed to marshal metadata: %w", err)
+	// Marshal protobuf data — v3 when StoreRef is set, v1 otherwise.
+	var writeData []byte
+	if metadata.StoreRef != "" {
+		// v3: clear inline segment fields (they live in the store), write magic + structural proto.
+		// SharedOuterSources dedup is dissolved: each NestedSource carries inline SegmentRefs,
+		// so the read path does not need to expand shared entries.
+		structural := proto.Clone(metadata).(*metapb.FileMetadata)
+		structural.SegmentData = nil
+		structural.SharedOuterSources = nil // v3: dedup dissolved
+		for _, p := range structural.Par2Files {
+			p.SegmentData = nil
+		}
+		for _, ns := range structural.NestedSources {
+			ns.Segments = nil
+			ns.SharedOuterSourceIndex = 0 // v3: each NestedSource is self-contained
+		}
+		raw, err := proto.Marshal(structural)
+		if err != nil {
+			metadata.NzbdavId = nzbdavId
+			return fmt.Errorf("failed to marshal v3 metadata: %w", err)
+		}
+		writeData = append(metaMagicV3, raw...)
+	} else {
+		// v1: marshal as-is (existing behavior).
+		raw, err := proto.Marshal(metadata)
+		if err != nil {
+			metadata.NzbdavId = nzbdavId // Restore on error
+			return fmt.Errorf("failed to marshal metadata: %w", err)
+		}
+		writeData = raw
 	}
 
 	// Write atomically using a uniquely-named temporary file so concurrent
@@ -108,7 +198,7 @@ func (ms *MetadataService) WriteFileMetadata(virtualPath string, metadata *metap
 		return fmt.Errorf("failed to create temporary metadata file: %w", err)
 	}
 	tmpPath := tmpFile.Name()
-	if _, writeErr := tmpFile.Write(data); writeErr != nil {
+	if _, writeErr := tmpFile.Write(writeData); writeErr != nil {
 		tmpFile.Close()
 		_ = os.Remove(tmpPath)
 		metadata.NzbdavId = nzbdavId
@@ -139,6 +229,77 @@ func (ms *MetadataService) WriteFileMetadata(virtualPath string, metadata *metap
 	return nil
 }
 
+// WriteFileMetadataV3 writes metadata directly in the v3 store-backed format: it
+// converts the inline SegmentData of the main file, PAR2 files, and nested sources
+// into SegmentRefs/SegmentRuns against the release's flat segment index, points the
+// meta at storeRef, and increments the store reference count exactly once.
+//
+// The conversion runs on a clone so a failure (e.g. a segment id missing from the
+// index) leaves the caller's in-memory meta untouched, letting the caller fall back
+// to a v1 WriteFileMetadata. Freshly-built archive metas still carry the
+// SharedOuterSources dedup, so it is expanded first (mirroring the read path) before
+// each nested source is converted independently and the dedup dissolved.
+func (ms *MetadataService) WriteFileMetadataV3(ctx context.Context, virtualPath string, metadata *metapb.FileMetadata, index map[string]int64, storeRef string) error {
+	m := proto.Clone(metadata).(*metapb.FileMetadata)
+
+	if err := ExpandSharedOuterSources(m); err != nil {
+		return fmt.Errorf("expand shared outer sources: %w", err)
+	}
+
+	m.StoreRef = storeRef
+	// The raw .nzb is deleted after import; the .nzbz store is the persistent source
+	// of truth (NZBs are regenerated from it). Point source_nzb_path at the store so a
+	// single, real artifact is recorded instead of a path to a now-deleted .nzb file.
+	m.SourceNzbPath = storeRef
+
+	mainRefs, err := segDataToRefs(m.SegmentData, index)
+	if err != nil {
+		return fmt.Errorf("main segments: %w", err)
+	}
+	m.SegmentRuns, m.SegmentRefs = splitRefs(mainRefs)
+
+	for _, p := range m.Par2Files {
+		refs, err := segDataToRefs(p.SegmentData, index)
+		if err != nil {
+			return fmt.Errorf("par2 segments: %w", err)
+		}
+		p.SegmentRuns, p.SegmentRefs = splitRefs(refs)
+	}
+
+	// Nested sources are archive-sliced (non-trivial offsets): explicit refs only.
+	for _, ns := range m.NestedSources {
+		if ns.SegmentRefs, err = segDataToRefs(ns.Segments, index); err != nil {
+			return fmt.Errorf("nested source segments: %w", err)
+		}
+		ns.SharedOuterSourceIndex = 0
+	}
+	m.SharedOuterSources = nil
+
+	// WriteFileMetadata's v3 branch (StoreRef set) clears inline SegmentData/
+	// SharedOuterSources/NestedSource.Segments and keeps SegmentRefs/SegmentRuns.
+	if err := ms.WriteFileMetadata(virtualPath, m); err != nil {
+		return err
+	}
+	ms.IncStoreRef(ctx, storeRef)
+	return nil
+}
+
+// WriteFileMetadataAuto writes v3 store-backed metadata when storeRef is set,
+// falling back to the v1 inline format if the v3 conversion fails (so a store/index
+// problem on one file never blocks the import). With an empty storeRef it writes v1.
+// This is the single entry point import processors should use.
+func (ms *MetadataService) WriteFileMetadataAuto(ctx context.Context, virtualPath string, metadata *metapb.FileMetadata, index map[string]int64, storeRef string) error {
+	if storeRef == "" {
+		return ms.WriteFileMetadata(virtualPath, metadata)
+	}
+	if err := ms.WriteFileMetadataV3(ctx, virtualPath, metadata, index, storeRef); err != nil {
+		slog.WarnContext(ctx, "v3 metadata write failed; writing v1",
+			"path", virtualPath, "error", err)
+		return ms.WriteFileMetadata(virtualPath, metadata)
+	}
+	return nil
+}
+
 // ReadFileMetadata reads file metadata from disk. The full proto (including
 // SegmentData and NestedSources) is returned to the caller but NOT cached —
 // those slices dominate heap usage and must not be retained beyond the
@@ -159,10 +320,37 @@ func (ms *MetadataService) ReadFileMetadata(virtualPath string) (*metapb.FileMet
 		return nil, fmt.Errorf("failed to read metadata file: %w", err)
 	}
 
-	// Unmarshal protobuf data
+	// Unmarshal protobuf data — v3 detection and ref resolution.
 	metadata := &metapb.FileMetadata{}
-	if err := proto.Unmarshal(data, metadata); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
+	if isV3Meta(data) {
+		if err := proto.Unmarshal(data[len(metaMagicV3):], metadata); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
+		}
+		if metadata.StoreRef != "" {
+			store, err := ms.store.ReadStore(metadata.StoreRef)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read store %q: %w", metadata.StoreRef, err)
+			}
+			flat := FlatSegments(store)
+			var resolveErr error
+			if metadata.SegmentData, resolveErr = resolveSegments(flat, metadata.SegmentRuns, metadata.SegmentRefs); resolveErr != nil {
+				return nil, resolveErr
+			}
+			for _, p := range metadata.Par2Files {
+				if p.SegmentData, resolveErr = resolveSegments(flat, p.SegmentRuns, p.SegmentRefs); resolveErr != nil {
+					return nil, resolveErr
+				}
+			}
+			for _, ns := range metadata.NestedSources {
+				if ns.Segments, resolveErr = resolveRefs(flat, ns.SegmentRefs); resolveErr != nil {
+					return nil, resolveErr
+				}
+			}
+		}
+	} else {
+		if err := proto.Unmarshal(data, metadata); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
+		}
 	}
 
 	// Resolve shared_outer_source_index references on nested sources.
@@ -232,6 +420,11 @@ func (ms *MetadataService) ReadFileMetadataLite(virtualPath string) (*FileMetada
 		return nil, fmt.Errorf("failed to read metadata head: %w", err)
 	}
 	buf = buf[:n]
+
+	// Skip v3 magic if present so parseLiteFields sees clean proto wire bytes.
+	if isV3Meta(buf) {
+		buf = buf[len(metaMagicV3):]
+	}
 
 	lite, ok := parseLiteFields(buf)
 	if !ok {
@@ -322,6 +515,10 @@ func (ms *MetadataService) readFileMetadataLiteFull(virtualPath string) (*FileMe
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to read metadata file: %w", err)
+	}
+
+	if isV3Meta(data) {
+		data = data[len(metaMagicV3):]
 	}
 
 	metadata := &metapb.FileMetadata{}
@@ -484,13 +681,14 @@ func (ms *MetadataService) DeleteFileMetadataWithSourceNzb(ctx context.Context, 
 	metadataDir := filepath.Join(ms.rootPath, filepath.Dir(virtualPath))
 	metadataPath := filepath.Join(metadataDir, filename+".meta")
 
-	// If we need to delete the source NZB, read the metadata first
+	// Always read metadata first to capture SourceNzbPath and StoreRef before deletion.
 	var sourceNzbPath string
-	if deleteSourceNzb {
-		metadata, err := ms.ReadFileMetadata(virtualPath)
-		if err == nil && metadata != nil && metadata.SourceNzbPath != "" {
+	var storeRef string
+	if metadata, err := ms.ReadFileMetadata(virtualPath); err == nil && metadata != nil {
+		if deleteSourceNzb {
 			sourceNzbPath = metadata.SourceNzbPath
 		}
+		storeRef = metadata.StoreRef
 	}
 
 	// Delete the metadata file
@@ -523,11 +721,27 @@ func (ms *MetadataService) DeleteFileMetadataWithSourceNzb(ctx context.Context, 
 		}
 	}
 
+	// Decrement reference count for shared store file and delete it if no more refs.
+	if ms.storeRefCounter != nil && storeRef != "" {
+		newCount, err := ms.storeRefCounter.DecStoreRef(ctx, storeRef)
+		if err != nil {
+			slog.WarnContext(ctx, "failed to decrement store ref count",
+				"store_path", storeRef, "error", err)
+		} else if newCount == 0 {
+			if removeErr := os.Remove(storeRef); removeErr != nil && !os.IsNotExist(removeErr) {
+				slog.WarnContext(ctx, "failed to delete orphaned store file",
+					"store_path", storeRef, "error", removeErr)
+			}
+		}
+	}
+
 	return nil
 }
 
 // DeleteDirectory deletes a metadata directory and all its contents
 func (ms *MetadataService) DeleteDirectory(virtualPath string) error {
+	ctx := context.Background()
+
 	// Purge all cached entries under this directory
 	prefix := virtualPath + string(filepath.Separator)
 	for _, key := range ms.liteCache.Keys() {
@@ -544,9 +758,47 @@ func (ms *MetadataService) DeleteDirectory(virtualPath string) error {
 		return fmt.Errorf("safety block: refusing to remove root metadata directory: %s", cleanMetadataDir)
 	}
 
+	// Pre-pass: if refcounting is enabled, collect all v3 store refs before deletion.
+	var storeRefCounts map[string]int
+	if ms.storeRefCounter != nil {
+		storeRefCounts = make(map[string]int)
+		_ = filepath.WalkDir(metadataDir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".meta") {
+				return nil
+			}
+			if ref := ms.readStoreRef(path); ref != "" {
+				storeRefCounts[ref]++
+			}
+			return nil
+		})
+	}
+
 	err := os.RemoveAll(metadataDir)
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to delete metadata directory: %w", err)
+	}
+
+	// Post-pass: decrement ref counts and delete orphaned store files.
+	if ms.storeRefCounter != nil {
+		for storePath, count := range storeRefCounts {
+			var lastCount int64
+			for range count {
+				newCount, decErr := ms.storeRefCounter.DecStoreRef(ctx, storePath)
+				if decErr != nil {
+					slog.WarnContext(ctx, "failed to decrement store ref count",
+						"store_path", storePath, "error", decErr)
+					lastCount = -1 // mark as unknown; don't delete
+					break
+				}
+				lastCount = newCount
+			}
+			if lastCount == 0 {
+				if removeErr := os.Remove(storePath); removeErr != nil && !os.IsNotExist(removeErr) {
+					slog.WarnContext(ctx, "failed to delete orphaned store file",
+						"store_path", storePath, "error", removeErr)
+				}
+			}
+		}
 	}
 
 	return nil

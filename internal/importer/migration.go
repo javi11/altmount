@@ -68,39 +68,3 @@ func migrateNzbsToGz(ctx context.Context, nzbDir, sentinelPath string, updater f
 	return nil
 }
 
-// runNzbCompressionMigration is a one-time background task that compresses legacy
-// plain .nzb files in the persistent .nzbs/ directory to .nzb.gz.
-func (s *Service) runNzbCompressionMigration(ctx context.Context) {
-	// Skip when compression is disabled: the user wants plain .nzb files, so don't
-	// rewrite them to .nzb.gz behind their back.
-	if !s.configGetter().ShouldCompressNzb() {
-		return
-	}
-
-	nzbDir := s.GetNzbFolder()
-	sentinelPath := filepath.Join(nzbDir, migrationSentinelFile)
-
-	if _, err := os.Stat(nzbDir); os.IsNotExist(err) {
-		return
-	}
-
-	updater := func(ctx context.Context, oldPath, newPath string) {
-		item, err := s.database.Repository.GetQueueItemByNzbPath(ctx, oldPath)
-		if err != nil {
-			s.log.WarnContext(ctx, "NZB migration: DB lookup failed",
-				"old_path", oldPath, "error", err)
-			return
-		}
-		if item == nil {
-			return
-		}
-		if err := s.database.Repository.UpdateQueueItemNzbPath(ctx, item.ID, newPath); err != nil {
-			s.log.WarnContext(ctx, "NZB migration: failed to update DB path",
-				"old_path", oldPath, "new_path", newPath, "error", err)
-		}
-	}
-
-	if err := migrateNzbsToGz(ctx, nzbDir, sentinelPath, updater); err != nil {
-		s.log.WarnContext(ctx, "NZB compression migration failed", "error", err)
-	}
-}

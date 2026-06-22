@@ -1358,9 +1358,23 @@ func (s *Server) handleDownloadNZB(c *fiber.Ctx) error {
 		return RespondNotFound(c, "Queue item", "")
 	}
 
-	resolved, err := nzbfile.ResolveOnDisk(item.NzbPath)
-	if err != nil {
-		return RespondNotFound(c, "NZB file", "The NZB file no longer exists on disk")
+	resolved, resolveErr := nzbfile.ResolveOnDisk(item.NzbPath)
+	if resolveErr != nil {
+		// Try to regenerate from the v3 NzbStore when available.
+		if s.metadataService != nil {
+			storePath := nzbtrim.TrimNzbExtension(item.NzbPath) + ".nzbz"
+			nzbXML, err := s.metadataService.Store().RegenerateNZB(storePath)
+			if err != nil {
+				return RespondInternalError(c, "Failed to regenerate NZB from store", err.Error())
+			}
+			if nzbXML != nil {
+				filename := filepath.Base(nzbtrim.TrimNzbExtension(item.NzbPath)) + ".nzb"
+				c.Set("Content-Type", "application/x-nzb")
+				c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+				return c.Send(nzbXML)
+			}
+		}
+		return RespondNotFound(c, "NZB file", "The NZB file no longer exists on disk and no store was found")
 	}
 
 	c.Set("Content-Type", "application/x-nzb")
