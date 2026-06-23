@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -35,6 +36,17 @@ var mediaExtensions = map[string]bool{
 	".webm": true,
 	".ogv":  true,
 	".iso":  true,
+}
+
+var (
+	stremioSeasonEpisodePattern = regexp.MustCompile(`(?i)s0*(\d{1,2})((?:[ ._-]*e0*\d{1,3})+)`)
+	stremioEpisodeOnlyPattern   = regexp.MustCompile(`(?i)e0*(\d{1,3})`)
+	stremioXEpisodePattern      = regexp.MustCompile(`(?i)(?:^|[^0-9])0*(\d{1,2})x0*(\d{1,3})(?:[^0-9]|$)`)
+)
+
+type stremioEpisodeSelector struct {
+	Season  int
+	Episode int
 }
 
 // StremioStream represents a single stream entry in the Stremio addon format.
@@ -73,6 +85,8 @@ type StremioStreamsResponse struct {
 //	@Param			X-Api-Key		header		string	false	"Raw API key (alternative to download_key form field)"
 //	@Param			category		formData	string	false	"Queue category (default: stremio)"
 //	@Param			timeout			formData	int		false	"Processing timeout in seconds (default: 300)"
+//	@Param			season			formData	int		false	"Season number for selecting one episode from a season pack"
+//	@Param			episode			formData	int		false	"Episode number for selecting one episode from a season pack"
 //	@Success		200	{object}	StremioStreamsResponse
 //	@Failure		400	{object}	APIResponse
 //	@Failure		401	{object}	APIResponse
@@ -128,7 +142,7 @@ func (s *Server) handleNzbStreams(c *fiber.Ctx) error {
 	if nzbURL != "" {
 		// Download NZB from the provided URL
 		const maxNzbFetchSize = 100 * 1024 * 1024 // 100 MB
-		resp, err := http.Get(nzbURL) //nolint:gosec // URL is provided by an authenticated caller
+		resp, err := http.Get(nzbURL)             //nolint:gosec // URL is provided by an authenticated caller
 		if err != nil {
 			return RespondBadRequest(c, "Failed to fetch NZB from URL", err.Error())
 		}
@@ -176,6 +190,7 @@ func (s *Server) handleNzbStreams(c *fiber.Ctx) error {
 
 	// --- Resolve base URL ---
 	baseURL := resolveBaseURL(c, cfg.Stremio.BaseURL)
+	selector := stremioEpisodeSelectorFromRequest(c)
 
 	category := c.FormValue("category")
 
@@ -205,7 +220,7 @@ func (s *Server) handleNzbStreams(c *fiber.Ctx) error {
 			cacheValid = time.Since(*prev.CompletedAt) < time.Duration(ttlHours)*time.Hour
 		}
 		if cacheValid {
-			if streams, err := s.buildStremioStreams(prev, baseURL, downloadKey, nzbName); err == nil {
+			if streams, err := s.buildStremioStreams(prev, baseURL, downloadKey, nzbName, selector); err == nil {
 				slog.InfoContext(ctx, "Returning cached Stremio streams for already-processed NZB",
 					"nzb_name", nzbName, "queue_id", prev.ID)
 				return c.JSON(StremioStreamsResponse{
@@ -222,7 +237,7 @@ func (s *Server) handleNzbStreams(c *fiber.Ctx) error {
 	if inQueue, _ := s.queueRepo.IsFileInQueue(ctx, tempPath); inQueue {
 		activeItems, err := s.queueRepo.ListQueueItems(ctx, nil, safeFilename, "", 1, 0, "updated_at", "desc")
 		if err == nil && len(activeItems) > 0 {
-			return s.waitAndRespond(c, activeItems[0].ID, baseURL, downloadKey, nzbName, timeoutSecs)
+			return s.waitAndRespond(c, activeItems[0].ID, baseURL, downloadKey, nzbName, selector, timeoutSecs)
 		}
 	}
 
@@ -262,13 +277,13 @@ func (s *Server) handleNzbStreams(c *fiber.Ctx) error {
 		"nzb_path", tempPath,
 		"timeout_secs", timeoutSecs)
 
-	return s.waitAndRespond(c, item.ID, baseURL, downloadKey, nzbName, timeoutSecs)
+	return s.waitAndRespond(c, item.ID, baseURL, downloadKey, nzbName, selector, timeoutSecs)
 }
 
 // waitAndRespond subscribes to the progress broadcaster and waits for the queue item to
 // reach a terminal state (completed or failed), then returns the appropriate Stremio response.
 // This avoids polling by using an event-driven approach via the ProgressBroadcaster.
-func (s *Server) waitAndRespond(c *fiber.Ctx, itemID int64, baseURL, downloadKey, nzbName string, timeoutSecs int) error {
+func (s *Server) waitAndRespond(c *fiber.Ctx, itemID int64, baseURL, downloadKey, nzbName string, selector *stremioEpisodeSelector, timeoutSecs int) error {
 	ctx := c.Context()
 
 	// Subscribe before the status check to eliminate the race between AddToQueue and the event.
@@ -286,7 +301,7 @@ func (s *Server) waitAndRespond(c *fiber.Ctx, itemID int64, baseURL, downloadKey
 
 	switch current.Status {
 	case database.QueueStatusCompleted:
-		streams, err := s.buildStremioStreams(current, baseURL, downloadKey, nzbName)
+		streams, err := s.buildStremioStreams(current, baseURL, downloadKey, nzbName, selector)
 		if err != nil {
 			return RespondInternalError(c, "Failed to list output media files", err.Error())
 		}
@@ -306,7 +321,7 @@ func (s *Server) waitAndRespond(c *fiber.Ctx, itemID int64, baseURL, downloadKey
 		// If the item is already processing and has a storage path, the streamable
 		// event fired before we subscribed — return the streams immediately.
 		if current.StoragePath != nil && *current.StoragePath != "" {
-			if streams, err := s.buildStremioStreams(current, baseURL, downloadKey, nzbName); err == nil && len(streams) > 0 {
+			if streams, err := s.buildStremioStreams(current, baseURL, downloadKey, nzbName, selector); err == nil && len(streams) > 0 {
 				return c.JSON(StremioStreamsResponse{
 					Streams:     streams,
 					QueueItemID: current.ID,
@@ -335,7 +350,7 @@ func (s *Server) waitAndRespond(c *fiber.Ctx, itemID int64, baseURL, downloadKey
 				// post-processing (symlinks, STRM, health scheduling) completes.
 				if update.StoragePath != "" {
 					fakeItem := &database.ImportQueueItem{ID: itemID, StoragePath: &update.StoragePath}
-					if streams, err := s.buildStremioStreams(fakeItem, baseURL, downloadKey, nzbName); err == nil && len(streams) > 0 {
+					if streams, err := s.buildStremioStreams(fakeItem, baseURL, downloadKey, nzbName, selector); err == nil && len(streams) > 0 {
 						return c.JSON(StremioStreamsResponse{
 							Streams:     streams,
 							QueueItemID: itemID,
@@ -349,7 +364,7 @@ func (s *Server) waitAndRespond(c *fiber.Ctx, itemID int64, baseURL, downloadKey
 				if err != nil {
 					return RespondInternalError(c, "Failed to fetch completed item", err.Error())
 				}
-				streams, err := s.buildStremioStreams(item, baseURL, downloadKey, nzbName)
+				streams, err := s.buildStremioStreams(item, baseURL, downloadKey, nzbName, selector)
 				if err != nil {
 					return RespondInternalError(c, "Failed to list output media files", err.Error())
 				}
@@ -376,7 +391,7 @@ func (s *Server) waitAndRespond(c *fiber.Ctx, itemID int64, baseURL, downloadKey
 
 // buildStremioStreams resolves the virtual paths from a completed queue item and
 // returns Stremio stream objects for all media files in the NZB output.
-func (s *Server) buildStremioStreams(item *database.ImportQueueItem, baseURL, downloadKey, nzbName string) ([]StremioStream, error) {
+func (s *Server) buildStremioStreams(item *database.ImportQueueItem, baseURL, downloadKey, nzbName string, selector *stremioEpisodeSelector) ([]StremioStream, error) {
 	if item.StoragePath == nil || *item.StoragePath == "" {
 		return nil, fmt.Errorf("completed queue item %d has no storage path", item.ID)
 	}
@@ -385,7 +400,10 @@ func (s *Server) buildStremioStreams(item *database.ImportQueueItem, baseURL, do
 
 	// If the storage path already points to a media file, return it directly.
 	if isMediaExtension(filepath.Ext(storagePath)) {
-		return []StremioStream{stremioStreamFromPath(storagePath, baseURL, downloadKey, nzbName)}, nil
+		if selector != nil && !selector.matches(filepath.Base(storagePath)) {
+			return []StremioStream{}, nil
+		}
+		return []StremioStream{stremioStreamFromPath(storagePath, baseURL, downloadKey)}, nil
 	}
 
 	// Otherwise treat it as a virtual directory and list its media files.
@@ -393,35 +411,118 @@ func (s *Server) buildStremioStreams(item *database.ImportQueueItem, baseURL, do
 		return nil, fmt.Errorf("metadata service not available")
 	}
 
-	files, err := s.metadataService.ListDirectory(storagePath)
+	files, err := s.listStremioMediaFiles(storagePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list directory %q: %w", storagePath, err)
 	}
 
-	var streams []StremioStream
+	streams := make([]StremioStream, 0, len(files))
 	for _, name := range files {
-		if !isMediaExtension(filepath.Ext(name)) {
+		if selector != nil && !selector.matches(name) {
 			continue
 		}
-		virtualPath := filepath.ToSlash(filepath.Join(storagePath, name))
-		streams = append(streams, stremioStreamFromPath(virtualPath, baseURL, downloadKey, nzbName))
+		virtualPath := filepath.ToSlash(filepath.Join(storagePath, filepath.FromSlash(name)))
+		streams = append(streams, stremioStreamFromPath(virtualPath, baseURL, downloadKey))
 	}
 
 	return streams, nil
 }
 
+func (s *Server) listStremioMediaFiles(storagePath string) ([]string, error) {
+	dirs, files, err := s.metadataService.ListDirectoryAll(storagePath)
+	if err != nil {
+		return nil, err
+	}
+
+	mediaFiles := make([]string, 0, len(files))
+	for _, name := range files {
+		if isMediaExtension(filepath.Ext(name)) {
+			mediaFiles = append(mediaFiles, name)
+		}
+	}
+
+	for _, dir := range dirs {
+		if dir == nil {
+			continue
+		}
+		children, err := s.listStremioMediaFiles(filepath.ToSlash(filepath.Join(storagePath, dir.Name())))
+		if err != nil {
+			return nil, err
+		}
+		for _, child := range children {
+			mediaFiles = append(mediaFiles, filepath.ToSlash(filepath.Join(dir.Name(), filepath.FromSlash(child))))
+		}
+	}
+
+	return mediaFiles, nil
+}
+
 // stremioStreamFromPath creates a StremioStream for a given virtual file path.
-func stremioStreamFromPath(virtualPath, baseURL, downloadKey, nzbName string) StremioStream {
+func stremioStreamFromPath(virtualPath, baseURL, downloadKey string) StremioStream {
 	streamURL := baseURL + "/api/files/stream?path=" +
 		url.QueryEscape(virtualPath) + "&download_key=" + url.QueryEscape(downloadKey)
+	filename := filepath.Base(virtualPath)
 	return StremioStream{
 		URL:   streamURL,
-		Title: filepath.Base(virtualPath),
-		Name:  nzbName,
+		Title: filename,
+		Name:  filename,
 	}
 }
 
 // isMediaExtension reports whether ext is a common video/media file extension.
 func isMediaExtension(ext string) bool {
 	return mediaExtensions[strings.ToLower(ext)]
+}
+
+func stremioEpisodeSelectorFromRequest(c *fiber.Ctx) *stremioEpisodeSelector {
+	season, okSeason := positiveIntFormOrQuery(c, "season")
+	episode, okEpisode := positiveIntFormOrQuery(c, "episode")
+	if !okSeason || !okEpisode {
+		return nil
+	}
+	return &stremioEpisodeSelector{Season: season, Episode: episode}
+}
+
+func positiveIntFormOrQuery(c *fiber.Ctx, key string) (int, bool) {
+	value := c.FormValue(key)
+	if value == "" {
+		value = c.Query(key)
+	}
+	if value == "" {
+		return 0, false
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed <= 0 {
+		return 0, false
+	}
+	return parsed, true
+}
+
+func (s *stremioEpisodeSelector) matches(filename string) bool {
+	if s == nil || s.Season <= 0 || s.Episode <= 0 {
+		return true
+	}
+
+	for _, match := range stremioSeasonEpisodePattern.FindAllStringSubmatch(filename, -1) {
+		season, err := strconv.Atoi(match[1])
+		if err != nil || season != s.Season {
+			continue
+		}
+		for _, episodeMatch := range stremioEpisodeOnlyPattern.FindAllStringSubmatch(match[2], -1) {
+			episode, err := strconv.Atoi(episodeMatch[1])
+			if err == nil && episode == s.Episode {
+				return true
+			}
+		}
+	}
+
+	for _, match := range stremioXEpisodePattern.FindAllStringSubmatch(filename, -1) {
+		season, seasonErr := strconv.Atoi(match[1])
+		episode, episodeErr := strconv.Atoi(match[2])
+		if seasonErr == nil && episodeErr == nil && season == s.Season && episode == s.Episode {
+			return true
+		}
+	}
+
+	return false
 }
