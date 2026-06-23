@@ -1360,18 +1360,21 @@ func (s *Server) handleDownloadNZB(c *fiber.Ctx) error {
 
 	resolved, resolveErr := nzbfile.ResolveOnDisk(item.NzbPath)
 	if resolveErr != nil {
-		// Try to regenerate from the v3 NzbStore when available.
-		if s.metadataService != nil {
-			storePath := nzbtrim.TrimNzbExtension(item.NzbPath) + ".nzbz"
-			nzbXML, err := s.metadataService.Store().RegenerateNZB(storePath)
-			if err != nil {
-				return RespondInternalError(c, "Failed to regenerate NZB from store", err.Error())
-			}
-			if nzbXML != nil {
-				filename := filepath.Base(nzbtrim.TrimNzbExtension(item.NzbPath)) + ".nzb"
-				c.Set("Content-Type", "application/x-nzb")
-				c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
-				return c.Send(nzbXML)
+		// Raw .nzb is gone (deleted after successful import or not yet written).
+		// Try to regenerate from the .nzbz store via the item's virtual storage path.
+		if s.metadataReader != nil && s.metadataService != nil && item.StoragePath != nil && *item.StoragePath != "" {
+			md, mdErr := s.metadataReader.GetFileMetadata(*item.StoragePath)
+			if mdErr == nil && md != nil && md.StoreRef != "" {
+				nzbXML, err := s.metadataService.Store().RegenerateNZB(md.StoreRef)
+				if err != nil {
+					return RespondInternalError(c, "Failed to regenerate NZB from store", err.Error())
+				}
+				if nzbXML != nil {
+					filename := strings.TrimSuffix(filepath.Base(md.StoreRef), ".nzbz") + ".nzb"
+					c.Set("Content-Type", "application/x-nzb")
+					c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+					return c.Send(nzbXML)
+				}
 			}
 		}
 		return RespondNotFound(c, "NZB file", "The NZB file no longer exists on disk and no store was found")

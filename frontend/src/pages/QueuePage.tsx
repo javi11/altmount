@@ -74,16 +74,18 @@ export function QueuePage() {
 	const [statusFilter, setStatusFilter] = useState<QueueFilter>("");
 	const [searchTerm, setSearchTerm] = useState("");
 	const [selectedItems, setSelectedItems] = useState<Set<number>>(new Set());
-	const [sortBy, setSortBy] = useState<"created_at" | "updated_at" | "status" | "nzb_path">(
-		() => {
-			const saved = localStorage.getItem("queue_sort_by");
-			const validColumns = ["created_at", "updated_at", "status", "nzb_path"];
-			return (validColumns.includes(saved || "") ? saved : "created_at") as "created_at" | "updated_at" | "status" | "nzb_path";
-		},
-	);
+	const [sortBy, setSortBy] = useState<"created_at" | "updated_at" | "status" | "nzb_path">(() => {
+		const saved = localStorage.getItem("queue_sort_by");
+		const validColumns = ["created_at", "updated_at", "status", "nzb_path"];
+		return (validColumns.includes(saved || "") ? saved : "created_at") as
+			| "created_at"
+			| "updated_at"
+			| "status"
+			| "nzb_path";
+	});
 	const [sortOrder, setSortOrder] = useState<"asc" | "desc">(() => {
 		const saved = localStorage.getItem("queue_sort_order");
-		return (saved === "asc" || saved === "desc" ? saved : "desc");
+		return saved === "asc" || saved === "desc" ? saved : "desc";
 	});
 
 	const queryClient = useQueryClient();
@@ -980,8 +982,7 @@ export function QueuePage() {
 																		</button>
 																		<ul className="dropdown-content menu z-[50] w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow-xl">
 																			{(item.status === QueueStatus.PENDING ||
-																				item.status === QueueStatus.FAILED ||
-																				item.status === QueueStatus.COMPLETED) && (
+																				item.status === QueueStatus.FAILED) && (
 																				<li>
 																					<button
 																						type="button"
