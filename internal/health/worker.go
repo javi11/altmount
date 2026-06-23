@@ -941,8 +941,8 @@ func applyRepairOutcome(update *database.HealthStatusUpdate, outcome repairOutco
 // resolvePathForRescan determines the absolute path that ARR should rescan for a given file.
 // It checks LibraryPath first, then LibraryDir, then ImportDir, and falls back to MountPath.
 func (hw *HealthWorker) resolvePathForRescan(item *database.FileHealth) string {
-	if item.LibraryPath != nil && *item.LibraryPath != "" {
-		return *item.LibraryPath
+	if p, ok := item.EffectiveLibraryPath(); ok {
+		return p
 	}
 	cfg := hw.configGetter()
 	if cfg.Health.LibraryDir != nil && *cfg.Health.LibraryDir != "" {
@@ -958,11 +958,12 @@ func (hw *HealthWorker) resolvePathForRescan(item *database.FileHealth) string {
 // no longer tracked by ARR (zombie or orphan). Errors are logged but not returned because
 // cleanup is best-effort.
 func (hw *HealthWorker) cleanupZombieRecord(ctx context.Context, item *database.FileHealth) {
-	// Delete library symlink/STRM if it exists
-	if item.LibraryPath != nil && *item.LibraryPath != "" {
-		if err := os.Remove(*item.LibraryPath); err != nil && !os.IsNotExist(err) {
+	// Delete library symlink/STRM if it exists (only for ARR-relinked records; an
+	// import-time placeholder points at the virtual mount, not a real library file).
+	if p, ok := item.EffectiveLibraryPath(); ok {
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
 			slog.ErrorContext(ctx, "Failed to delete library file during zombie cleanup",
-				"path", *item.LibraryPath, "error", err)
+				"path", p, "error", err)
 		}
 	}
 
@@ -1010,7 +1011,7 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, item *database.Fi
 
 	// SPECIAL CASE: If metadata is corrupted AND we don't have a library path,
 	// we try to regenerate the metadata first before triggering a full ARR repair.
-	if metadataErr != nil && (item.LibraryPath == nil || *item.LibraryPath == "") {
+	if metadataErr != nil && !item.IsImported() {
 		slog.InfoContext(ctx, "Metadata corrupted and no library path found - attempting regeneration from NZB", "file_path", filePath)
 		if regenErr := hw.importerService.RegenerateMetadata(ctx, filePath); regenErr == nil {
 			slog.InfoContext(ctx, "Successfully regenerated metadata for corrupted item", "file_path", filePath)
@@ -1066,7 +1067,7 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, item *database.Fi
 	// CRITICAL: We only do this if the file has already been imported (has a LibraryPath).
 	// If it hasn't been imported yet, we keep it visible so ARR can see the "Missing File"
 	// or "Empty Folder" and report its own warning, which helps the repair cycle.
-	if item.LibraryPath != nil && *item.LibraryPath != "" {
+	if item.IsImported() {
 		hw.moveMetadataToSafetyFolder(ctx, item)
 	} else {
 		slog.InfoContext(ctx, "Skipping metadata move for corrupted item - file not yet imported by ARR", "file_path", filePath)
@@ -1160,11 +1161,8 @@ func (hw *HealthWorker) ensureMetadata(ctx context.Context, item *database.FileH
 
 		slog.DebugContext(ctx, "Missing metadata or episode IDs, attempting discovery during health check", "file_path", item.FilePath, "sf_key", sfKey)
 		relativePath := strings.TrimPrefix(item.FilePath, "complete/")
-		libPath := ""
-		if item.LibraryPath != nil {
-			libPath = *item.LibraryPath
-		}
-		
+		libPath, _ := item.EffectiveLibraryPath()
+
 		metadata, err := hw.arrsService.DiscoverFileMetadata(ctx, item.FilePath, relativePath, nzbName, libPath)
 		if err == nil && metadata != nil {
 			metaBytes, err := json.Marshal(metadata)
@@ -1192,7 +1190,7 @@ func (hw *HealthWorker) ensureMetadata(ctx context.Context, item *database.FileH
 }
 
 func (hw *HealthWorker) moveMetadataToSafetyFolder(ctx context.Context, item *database.FileHealth) {
-	if item.LibraryPath == nil || *item.LibraryPath == "" {
+	if !item.IsImported() {
 		return
 	}
 	cfg := hw.configGetter()

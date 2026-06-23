@@ -121,6 +121,28 @@ type FileHealth struct {
 	Indexer               *string `db:"indexer"`
 }
 
+// IsImported reports whether library_path points to a real, ARR-relinked library
+// location rather than the import-time placeholder. The placeholder is stored equal
+// to file_path (optionally with a leading slash from path normalization); a real
+// filesystem path can never equal file_path or "/"+file_path, so this is unambiguous
+// on every platform.
+func (f *FileHealth) IsImported() bool {
+	if f.LibraryPath == nil || *f.LibraryPath == "" {
+		return false
+	}
+	lp := *f.LibraryPath
+	return lp != f.FilePath && lp != "/"+f.FilePath
+}
+
+// EffectiveLibraryPath returns the real library path and true when the record has
+// been relinked by an ARR; otherwise ("", false).
+func (f *FileHealth) EffectiveLibraryPath() (string, bool) {
+	if !f.IsImported() {
+		return "", false
+	}
+	return *f.LibraryPath, true
+}
+
 // User represents a user account in the system
 type User struct {
 	ID           int64      `db:"id"`
