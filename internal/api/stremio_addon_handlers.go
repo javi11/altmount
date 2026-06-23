@@ -246,6 +246,10 @@ func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 			"?url=" + url.QueryEscape(r.DownloadURL) +
 			"&title=" + url.QueryEscape(safeTitle) +
 			"&type=" + url.QueryEscape(streamType)
+		if streamType == "series" && season > 0 && episode > 0 {
+			playURL += "&season=" + url.QueryEscape(strconv.Itoa(season)) +
+				"&episode=" + url.QueryEscape(strconv.Itoa(episode))
+		}
 
 		sizeGB := float64(r.Size) / 1e9
 		indexerLabel := r.Indexer
@@ -306,6 +310,8 @@ func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 //	@Param			key		path	string	true	"Download key (SHA256 of API key)"
 //	@Param			url		query	string	true	"Prowlarr NZB download URL"
 //	@Param			title	query	string	false	"Safe filename title for the NZB"
+//	@Param			season	query	int		false	"Season number for selecting one episode from a season pack"
+//	@Param			episode	query	int		false	"Episode number for selecting one episode from a season pack"
 //	@Success		302	{string}	string	"Redirects to media stream URL"
 //	@Failure		400	{object}	APIResponse
 //	@Failure		401	{object}	APIResponse
@@ -340,6 +346,7 @@ func (s *Server) handleStremioAddonPlay(c *fiber.Ctx) error {
 	}
 
 	baseURL := resolveBaseURL(c, cfg.Stremio.BaseURL)
+	selector := stremioEpisodeSelectorFromRequest(c)
 
 	safeFilename := safeTitle + ".nzb"
 	nzbName := safeTitle
@@ -354,7 +361,7 @@ func (s *Server) handleStremioAddonPlay(c *fiber.Ctx) error {
 			cacheValid = time.Since(*prev.CompletedAt) < time.Duration(ttlHours)*time.Hour
 		}
 		if cacheValid {
-			if streams, err := s.buildStremioStreams(prev, baseURL, key, nzbName); err == nil && len(streams) > 0 {
+			if streams, err := s.buildStremioStreams(prev, baseURL, key, nzbName, selector); err == nil && len(streams) > 0 {
 				slog.InfoContext(ctx, "Returning cached Stremio stream for Prowlarr NZB",
 					"nzb_name", nzbName)
 				return c.Redirect(streams[0].URL, fiber.StatusFound)
@@ -448,11 +455,11 @@ func (s *Server) handleStremioAddonPlay(c *fiber.Ctx) error {
 		return RespondInternalError(c, "Unexpected play result", "")
 	}
 
-	return s.waitAndRedirectToStream(c, itemID, baseURL, key, nzbName, 300)
+	return s.waitAndRedirectToStream(c, itemID, baseURL, key, nzbName, selector, 300)
 }
 
 // waitAndRedirectToStream waits for a queue item to complete and 302-redirects to the first stream URL.
-func (s *Server) waitAndRedirectToStream(c *fiber.Ctx, itemID int64, baseURL, downloadKey, nzbName string, timeoutSecs int) error {
+func (s *Server) waitAndRedirectToStream(c *fiber.Ctx, itemID int64, baseURL, downloadKey, nzbName string, selector *stremioEpisodeSelector, timeoutSecs int) error {
 	ctx := c.Context()
 
 	subID, ch := s.progressBroadcaster.Subscribe()
@@ -464,7 +471,7 @@ func (s *Server) waitAndRedirectToStream(c *fiber.Ctx, itemID int64, baseURL, do
 	}
 
 	redirectToFirst := func(item *database.ImportQueueItem) error {
-		streams, err := s.buildStremioStreams(item, baseURL, downloadKey, nzbName)
+		streams, err := s.buildStremioStreams(item, baseURL, downloadKey, nzbName, selector)
 		if err != nil || len(streams) == 0 {
 			return RespondServiceUnavailable(c, "No streams available", "")
 		}
@@ -480,7 +487,7 @@ func (s *Server) waitAndRedirectToStream(c *fiber.Ctx, itemID int64, baseURL, do
 		// If the item is already processing and has a storage path, the streamable
 		// event fired before we subscribed — redirect immediately.
 		if current.StoragePath != nil && *current.StoragePath != "" {
-			if streams, err := s.buildStremioStreams(current, baseURL, downloadKey, nzbName); err == nil && len(streams) > 0 {
+			if streams, err := s.buildStremioStreams(current, baseURL, downloadKey, nzbName, selector); err == nil && len(streams) > 0 {
 				return c.Redirect(streams[0].URL, fiber.StatusFound)
 			}
 		}
@@ -503,7 +510,7 @@ func (s *Server) waitAndRedirectToStream(c *fiber.Ctx, itemID int64, baseURL, do
 				// Redirect as soon as the file is accessible in the VFS — before post-processing.
 				if update.StoragePath != "" {
 					fakeItem := &database.ImportQueueItem{ID: itemID, StoragePath: &update.StoragePath}
-					if streams, err := s.buildStremioStreams(fakeItem, baseURL, downloadKey, nzbName); err == nil && len(streams) > 0 {
+					if streams, err := s.buildStremioStreams(fakeItem, baseURL, downloadKey, nzbName, selector); err == nil && len(streams) > 0 {
 						return c.Redirect(streams[0].URL, fiber.StatusFound)
 					}
 				}
