@@ -33,9 +33,13 @@ func NewHealthRepository(db *sql.DB, d Dialect) *HealthRepository {
 // file across two rows and silently defeat the repair_retry_count budget that the
 // repair state machine relies on. Every method that writes or matches on file_path
 // funnels through here.
+//
+// TrimLeft (not TrimPrefix) so ALL leading slashes are stripped: an import can yield
+// a doubled prefix ("//tv/x"), and trimming only one would leave "/tv/x" — still
+// non-canonical, unmatchable by every other caller, and stuck re-checking forever.
 func normalizeHealthPath(p string) string {
 	p = strings.ReplaceAll(p, `\`, "/")
-	p = strings.TrimPrefix(p, "/")
+	p = strings.TrimLeft(p, "/")
 	return p
 }
 
