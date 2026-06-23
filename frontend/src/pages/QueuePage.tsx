@@ -184,7 +184,7 @@ export function QueuePage() {
 	);
 
 	const handleDownload = useCallback(
-		async (id: number, status?: string) => {
+		async (id: number) => {
 			try {
 				const response = await fetch(`/api/queue/${id}/download`);
 				if (!response.ok) {
@@ -200,15 +200,6 @@ export function QueuePage() {
 						}
 					} catch {
 						// Non-JSON error body — fall back to status text.
-					}
-					// For completed items, a missing file is expected — soften the toast.
-					if (response.status === 404 && status === "completed") {
-						showToast({
-							type: "info",
-							title: "NZB file already removed",
-							message: "This NZB was cleaned up after successful import.",
-						});
-						return;
 					}
 					showToast({ type: "error", title, message });
 					return;
@@ -1012,7 +1003,7 @@ export function QueuePage() {
 																			<li>
 																				<button
 																					type="button"
-																					onClick={() => handleDownload(item.id, item.status)}
+																					onClick={() => handleDownload(item.id)}
 																				>
 																					<Download className="h-4 w-4" />
 																					Download NZB
