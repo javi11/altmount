@@ -6,6 +6,23 @@ import (
 	"time"
 )
 
+const (
+	// healthCheckInterval is how often MonitorMounts probes mount/rcd health.
+	healthCheckInterval = 30 * time.Second
+
+	// startupGracePeriod is the window after the RC server first becomes ready
+	// during which the health check will NOT kill+restart the rcd subprocess.
+	// The rcd is busiest while it initializes FUSE mounts right after startup,
+	// which is exactly when a liveness probe is most likely to be slow; killing
+	// it then is the regression we are guarding against.
+	startupGracePeriod = 90 * time.Second
+
+	// maxConsecutiveProbeFailures is how many back-to-back failed liveness
+	// probes are required before the rcd subprocess is considered wedged and
+	// restarted. Prevents a single transient miss from nuking a healthy rcd.
+	maxConsecutiveProbeFailures = 3
+)
+
 // checkMountHealth checks if a specific mount is healthy
 func (m *Manager) checkMountHealth(provider string) bool {
 	// Try to list the root directory of the mount
@@ -37,9 +54,9 @@ func (m *Manager) RecoverMount(ctx context.Context, provider string) error {
 	// every subsequent RPC (mount/unmount, config/create, mount/mount) will
 	// hang on context deadline exceeded. Kill+respawn rcd before issuing
 	// recovery RPCs to break out of that wedge.
-	if !m.pingServerWithTimeout(ctx, 5*time.Second) {
+	if !m.probe(ctx, 5*time.Second) {
 		m.logger.WarnContext(ctx, "rcd unresponsive during recovery, restarting subprocess", "provider", provider)
-		if err := m.restartServer(ctx); err != nil {
+		if err := m.restart(ctx); err != nil {
 			return fmt.Errorf("failed to restart wedged rcd: %w", err)
 		}
 		// After restart there is nothing to RC-unmount; skip straight to Mount,
@@ -74,7 +91,7 @@ func (m *Manager) MonitorMounts(ctx context.Context) {
 		return
 	}
 
-	ticker := time.NewTicker(30 * time.Second) // Check every 30 seconds
+	ticker := time.NewTicker(healthCheckInterval)
 	defer ticker.Stop()
 
 	for {
@@ -97,9 +114,36 @@ func (m *Manager) performMountHealthCheck() {
 	// IsReady() only reflects startup state. Probe the rcd subprocess with a
 	// bounded timeout so a wedged rcd is detected even when no individual
 	// mount has failed yet.
-	if !m.pingServerWithTimeout(m.ctx, 5*time.Second) {
-		m.logger.WarnContext(m.ctx, "rcd unresponsive during health check, restarting subprocess")
-		if err := m.restartServer(m.ctx); err != nil {
+	if m.probe(m.ctx, 5*time.Second) {
+		// Healthy probe: clear the failure streak and continue to per-mount checks.
+		m.consecutiveProbeFailures = 0
+	} else {
+		m.consecutiveProbeFailures++
+
+		// Never kill the rcd during the startup grace period: right after
+		// startup it is busy initializing FUSE mounts, so a slow probe is
+		// expected rather than a wedge. Killing it then is the regression we
+		// guard against. Also require sustained failure before restarting so a
+		// single transient miss can't nuke a healthy rcd.
+		m.mu.RLock()
+		readyAt := m.readyAt
+		m.mu.RUnlock()
+		withinGrace := !readyAt.IsZero() && time.Since(readyAt) < startupGracePeriod
+
+		if withinGrace || m.consecutiveProbeFailures < maxConsecutiveProbeFailures {
+			m.logger.WarnContext(m.ctx, "rcd liveness probe failed; not restarting yet",
+				"consecutive_failures", m.consecutiveProbeFailures,
+				"threshold", maxConsecutiveProbeFailures,
+				"within_startup_grace", withinGrace)
+			// Skip per-mount recovery this tick: if rcd is slow, operations/list
+			// would fail too and could trigger a restart that bypasses this guard.
+			return
+		}
+
+		m.logger.WarnContext(m.ctx, "rcd unresponsive during health check, restarting subprocess",
+			"consecutive_failures", m.consecutiveProbeFailures)
+		m.consecutiveProbeFailures = 0
+		if err := m.restart(m.ctx); err != nil {
 			m.logger.ErrorContext(m.ctx, "Failed to restart wedged rcd", "err", err)
 			return
 		}
