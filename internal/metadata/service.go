@@ -38,6 +38,29 @@ func isV3Meta(data []byte) bool {
 		data[4] == metaMagicV3[4]
 }
 
+// IsV3Meta reports whether raw is a v3-format .meta file (carries the v3 magic
+// prefix). Only v3 metas are store-backed and therefore shareable over P2P,
+// since the segment data lives in a separate NzbStore the receiver rebuilds
+// locally from the same NZB.
+func IsV3Meta(raw []byte) bool { return isV3Meta(raw) }
+
+// DecodeStructuralMeta strips the v3 magic prefix and unmarshals the structural
+// FileMetadata exactly as written on disk — SegmentRefs/SegmentRuns intact, no
+// resolution against any NzbStore. This is the form shared over P2P: the
+// receiver rewrites StoreRef to its locally-rebuilt store and writes it back via
+// WriteFileMetadata. Returns an error for non-v3 (v1 inline-segment) metas,
+// which are not shareable.
+func DecodeStructuralMeta(raw []byte) (*metapb.FileMetadata, error) {
+	if !isV3Meta(raw) {
+		return nil, fmt.Errorf("metadata: not a v3 .meta (missing magic prefix)")
+	}
+	m := &metapb.FileMetadata{}
+	if err := proto.Unmarshal(raw[len(metaMagicV3):], m); err != nil {
+		return nil, fmt.Errorf("metadata: decode structural meta: %w", err)
+	}
+	return m, nil
+}
+
 // FileMetadataLite holds the minimal metadata needed for directory listings.
 // This avoids keeping full FileMetadata protos (with SegmentData, Par2Files, etc.)
 // in memory just for Readdir.
@@ -296,59 +319,6 @@ func (ms *MetadataService) WriteFileMetadataAuto(ctx context.Context, virtualPat
 		slog.WarnContext(ctx, "v3 metadata write failed; writing v1",
 			"path", virtualPath, "error", err)
 		return ms.WriteFileMetadata(virtualPath, metadata)
-	}
-	return nil
-}
-
-// WriteRawMeta writes pre-encoded .meta (and optionally .seg) bytes for a
-// virtualPath. This is used by the P2P sharing subsystem to store metadata
-// received from peers without re-encoding through the proto layer. The bytes
-// must already be in the same on-disk format produced by WriteFileMetadata.
-// segBytes may be empty when the peer's release uses the single-file (v1) layout.
-func (ms *MetadataService) WriteRawMeta(virtualPath string, metaBytes, segBytes []byte) error {
-	metadataDir := filepath.Join(ms.rootPath, filepath.Dir(virtualPath))
-	if err := os.MkdirAll(metadataDir, 0755); err != nil {
-		return fmt.Errorf("failed to create metadata directory: %w", err)
-	}
-
-	truncatedFilename := ms.truncateFilename(filepath.Base(virtualPath))
-
-	// Write the optional .seg sidecar first so a present .meta always has its
-	// companion .seg available to readers.
-	if len(segBytes) > 0 {
-		segPath := filepath.Join(metadataDir, truncatedFilename+".seg")
-		if err := writeAtomicFile(metadataDir, truncatedFilename+".seg", segPath, segBytes); err != nil {
-			return fmt.Errorf("failed to write shared .seg: %w", err)
-		}
-	}
-
-	metadataPath := filepath.Join(metadataDir, truncatedFilename+".meta")
-	if err := writeAtomicFile(metadataDir, truncatedFilename, metadataPath, metaBytes); err != nil {
-		return fmt.Errorf("failed to write shared .meta: %w", err)
-	}
-	return nil
-}
-
-// writeAtomicFile writes data to finalPath via a uniquely-named temp file in dir
-// followed by a rename, mirroring the inline pattern in WriteFileMetadata.
-func writeAtomicFile(dir, namePrefix, finalPath string, data []byte) error {
-	tmpFile, err := os.CreateTemp(dir, "."+namePrefix+".*.tmp")
-	if err != nil {
-		return fmt.Errorf("create temp file: %w", err)
-	}
-	tmpPath := tmpFile.Name()
-	if _, writeErr := tmpFile.Write(data); writeErr != nil {
-		tmpFile.Close()
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("write temp file: %w", writeErr)
-	}
-	if closeErr := tmpFile.Close(); closeErr != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("close temp file: %w", closeErr)
-	}
-	if err := os.Rename(tmpPath, finalPath); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("rename temp file: %w", err)
 	}
 	return nil
 }

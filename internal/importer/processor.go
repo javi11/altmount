@@ -62,8 +62,8 @@ type Processor struct {
 }
 
 // SetShareClient wires the P2P sharing client and store into the processor.
-// When set, ProcessNzbFile tries a peer lookup before downloading a single-file
-// release, and announces the release hash after a successful single-file import.
+// When set, ProcessNzbFile tries a peer lookup before downloading a v3
+// store-backed release, and announces the release hash after a successful import.
 func (proc *Processor) SetShareClient(client *sharenet.Client, store *sharenet.ReleaseStore) {
 	proc.shareClient = client
 	proc.shareStore = store
@@ -80,38 +80,126 @@ func readNzbBytes(filePath string) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(rc, 50<<20))
 }
 
-// tryShareShortcut attempts to satisfy an import from a P2P peer. On success it
-// writes the peer's metadata at the peer-advertised virtual path and returns
-// (virtualPath, true). On any miss or error it returns ("", false) so the
-// caller proceeds with a normal import.
-func (proc *Processor) tryShareShortcut(ctx context.Context, filePath string, queueID int) (string, bool) {
-	nzbBytes, err := readNzbBytes(filePath)
-	if err != nil {
-		return "", false
-	}
-	releaseHash := sharenet.ComputeReleaseHash(nzbBytes)
-
+// tryShareShortcut attempts to satisfy an import from a P2P peer. The local
+// NzbStore has already been rebuilt and written at storeRef (deterministic from
+// this node's NZB), so only the per-file metadata is fetched. Each peer meta is
+// rewritten to point at the local store and written to disk, skipping all NNTP.
+//
+// On success it returns (resultPath, writtenPaths, true); on any miss or error
+// it returns ("", nil, false) so the caller proceeds with a normal import.
+//
+// Two invariants protect the store ref count against double-counting on a
+// fallback: (1) all validation happens before any write, and (2) IncStoreRef is
+// deferred until every meta has landed — a mid-loop write failure rolls back the
+// metas already written and returns without having incremented any ref.
+func (proc *Processor) tryShareShortcut(ctx context.Context, releaseHash, storeRef string, storeSize int, queueID int) (string, []string, bool) {
 	files, err := proc.shareClient.LookupAndFetch(ctx, releaseHash)
-	if err != nil {
-		return "", false // ErrNoPeers or fetch failure — fall through to normal import
+	if err != nil || len(files.Metas) == 0 {
+		return "", nil, false // ErrNoPeers/fetch failure/empty — fall through to normal import
 	}
 
-	if err := proc.metadataService.WriteRawMeta(files.VirtualPath, files.MetaBytes, files.SegBytes); err != nil {
-		proc.log.WarnContext(ctx, "sharenet: failed to write peer metadata, falling back to normal import",
-			"virtual_path", files.VirtualPath, "err", err)
-		return "", false
+	// Validate every meta BEFORE writing anything: the peer-supplied virtual path
+	// must stay within the metadata root, and all segment refs must resolve within
+	// the locally-rebuilt store. Identical releaseHash guarantees an identical
+	// store, so an out-of-range ref means a hash-colliding or malicious peer.
+	for _, m := range files.Metas {
+		if !isSafeVirtualPath(m.VirtualPath) {
+			proc.log.WarnContext(ctx, "sharenet: peer meta has unsafe virtual path, ignoring",
+				"release_hash", shortHash(releaseHash), "virtual_path", m.VirtualPath)
+			return "", nil, false
+		}
+		if !metaWithinStore(m.Meta, int64(storeSize)) {
+			proc.log.WarnContext(ctx, "sharenet: peer meta references out-of-range segments, ignoring",
+				"release_hash", shortHash(releaseHash), "virtual_path", m.VirtualPath)
+			return "", nil, false
+		}
+	}
+
+	written := make([]string, 0, len(files.Metas))
+	for _, m := range files.Metas {
+		// Repoint the meta at our local store; v3 keeps source_nzb_path == store_ref.
+		m.Meta.StoreRef = storeRef
+		m.Meta.SourceNzbPath = storeRef
+		if err := proc.metadataService.WriteFileMetadata(m.VirtualPath, m.Meta); err != nil {
+			proc.log.WarnContext(ctx, "sharenet: failed to write peer metadata, falling back to normal import",
+				"virtual_path", m.VirtualPath, "err", err)
+			for _, w := range written {
+				_ = proc.metadataService.DeleteFileMetadata(w) // roll back; no refs incremented yet
+			}
+			return "", nil, false
+		}
+		written = append(written, m.VirtualPath)
+	}
+	// All metas landed — now bump the store ref count once per meta.
+	for range written {
+		proc.metadataService.IncStoreRef(ctx, storeRef)
 	}
 
 	proc.log.InfoContext(ctx, "sharenet: import shortcut via P2P peer",
-		"release_hash", releaseHash[:8], "virtual_path", files.VirtualPath, "queue_id", queueID)
+		"release_hash", shortHash(releaseHash), "metas", len(written), "queue_id", queueID)
 
 	// Register + re-announce so this node also serves the release going forward.
 	if proc.shareStore != nil {
-		proc.shareStore.Register(releaseHash, files.VirtualPath)
+		proc.shareStore.Register(releaseHash, written)
 	}
 	proc.announceRelease(ctx, releaseHash)
 
-	return files.VirtualPath, true
+	return written[0], written, true
+}
+
+// isSafeVirtualPath rejects absolute paths and any path that escapes the
+// metadata root once cleaned — guarding against a malicious peer that puts
+// "../.." in a manifest entry.
+func isSafeVirtualPath(vp string) bool {
+	if vp == "" || filepath.IsAbs(vp) {
+		return false
+	}
+	clean := filepath.Clean(vp)
+	return clean != ".." && !strings.HasPrefix(clean, ".."+string(filepath.Separator))
+}
+
+// shortHash returns up to the first 8 characters of a release hash for logging.
+func shortHash(h string) string {
+	if len(h) > 8 {
+		return h[:8]
+	}
+	return h
+}
+
+// metaWithinStore reports whether every segment reference in fm resolves within
+// a store of storeSize segments. Mirrors the read path's ref/run resolution.
+func metaWithinStore(fm *metapb.FileMetadata, storeSize int64) bool {
+	runsOK := func(runs []*metapb.SegmentRun) bool {
+		for _, r := range runs {
+			if r.Count <= 0 || r.BaseStoreIndex < 0 || r.BaseStoreIndex+r.Count > storeSize {
+				return false
+			}
+		}
+		return true
+	}
+	refsOK := func(refs []*metapb.SegmentRef) bool {
+		for _, r := range refs {
+			if r.StoreIndex < 0 || r.StoreIndex >= storeSize {
+				return false
+			}
+		}
+		return true
+	}
+	if !runsOK(fm.SegmentRuns) || !refsOK(fm.SegmentRefs) {
+		return false
+	}
+	for _, p := range fm.Par2Files {
+		if !runsOK(p.SegmentRuns) || !refsOK(p.SegmentRefs) {
+			return false
+		}
+	}
+	// NestedSegmentSource carries only SegmentRefs (no run encoding) in the proto.
+	for _, ns := range fm.NestedSources {
+		if !refsOK(ns.SegmentRefs) {
+			return false
+		}
+	}
+	return true
 }
 
 // announceRelease advertises releaseHash to the DHT in the background.
@@ -424,14 +512,6 @@ func fastFailConcurrency(cfg *config.Config, fallback int) int {
 // metadata files written to disk; it is populated even on partial failure so callers can clean up.
 // Paths prefixed with "DIR:" indicate a metadata directory that should be removed entirely.
 func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePath string, queueID int, allowedExtensionsOverride *[]string, virtualDirOverride *string, extractedFiles []parser.ExtractedFileInfo, category *string, metadata *string, downloadID *string) (string, []string, error) {
-	// P2P shortcut: if a peer already imported this exact NZB (single-file
-	// releases only — see Announce below), fetch its metadata and skip the
-	// NNTP download entirely. Any failure falls through to a normal import.
-	if proc.shareClient != nil {
-		if vp, ok := proc.tryShareShortcut(ctx, filePath, queueID); ok {
-			return vp, []string{vp}, nil
-		}
-	}
 
 	// Gate this import behind the pool admission controller so we can cap how
 	// many NZB imports run concurrently end-to-end and yield to streams under
@@ -594,6 +674,34 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 		}
 	}
 
+	// shareReleaseHash is the SHA256 of the raw NZB, identifying this release on
+	// the P2P network. Computed once (only when sharing is enabled and the v3
+	// store write succeeded) and reused for both the lookup shortcut below and
+	// the post-import announce. Empty when sharing is off or the NZB is unreadable.
+	var shareReleaseHash string
+	if proc.shareClient != nil && storeRef != "" {
+		if nzbBytes, hashErr := readNzbBytes(filePath); hashErr == nil {
+			shareReleaseHash = sharenet.ComputeReleaseHash(nzbBytes)
+		}
+	}
+
+	// P2P shortcut: with the NzbStore rebuilt locally, ask the DHT whether a peer
+	// already imported this exact NZB. If so, fetch only the per-file metadata,
+	// repoint it at our store, and skip all NNTP download/analysis.
+	if shareReleaseHash != "" {
+		// Authoritative flat segment count of the store (segments in NZB order).
+		// Derived from the store itself, not len(storeIndex): the message-id index
+		// would undercount if an NZB ever repeated a message-id across files.
+		storeSize := 0
+		for _, f := range parsed.Store.Files {
+			storeSize += len(f.Segments)
+		}
+		if res, paths, ok := proc.tryShareShortcut(ctx, shareReleaseHash, storeRef, storeSize, queueID); ok {
+			proc.updateProgress(queueID, 100)
+			return res, paths, nil
+		}
+	}
+
 	// Bare-ISO Blu-ray expansion. ISOs posted directly to Usenet (without
 	// RAR/7z wrapping) are classified as NzbTypeSingleFile/NzbTypeMultiFile
 	// by the parser and would otherwise bypass archive.ExpandISOContents.
@@ -690,15 +798,22 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 	if err == nil {
 		proc.updateProgress(queueID, 100)
 
-		// P2P sharing: advertise single-file releases so peers importing the
-		// same NZB can skip the download. Only single-file releases map cleanly
-		// to one .meta, which is the invariant the fetch side relies on.
-		if proc.shareClient != nil && proc.shareStore != nil &&
-			parsed.Type == parser.NzbTypeSingleFile && result != "" {
-			if nzbBytes, hashErr := readNzbBytes(filePath); hashErr == nil {
-				releaseHash := sharenet.ComputeReleaseHash(nzbBytes)
-				proc.shareStore.Register(releaseHash, result)
-				proc.announceRelease(ctx, releaseHash)
+		// P2P sharing: advertise this release so peers importing the same NZB can
+		// skip the download. Any v3 store-backed release is shareable (single-file,
+		// multi-file, or archive) — the per-file metas all reference the one store
+		// the receiver rebuilds locally. shareReleaseHash is non-empty only when
+		// sharing is enabled and the v3 store write succeeded.
+		if shareReleaseHash != "" && proc.shareStore != nil {
+			metaPaths := make([]string, 0, len(writtenPaths))
+			for _, p := range writtenPaths {
+				// Skip "DIR:" cleanup markers; the rest are written .meta paths.
+				if !strings.HasPrefix(p, "DIR:") {
+					metaPaths = append(metaPaths, p)
+				}
+			}
+			if len(metaPaths) > 0 {
+				proc.shareStore.Register(shareReleaseHash, metaPaths)
+				proc.announceRelease(ctx, shareReleaseHash)
 			}
 		}
 	} else if errors.Is(err, nntppool.ErrArticleNotFound) {

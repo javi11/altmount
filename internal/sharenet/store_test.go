@@ -8,77 +8,90 @@ import (
 	"github.com/javi11/altmount/internal/sharenet"
 )
 
-func setupStoreDir(t *testing.T) (root, virtualPath string) {
+// setupStoreDir writes two .meta files under root and returns their virtual paths.
+func setupStoreDir(t *testing.T) (root string, paths []string) {
 	t.Helper()
 	root = t.TempDir()
-	virtualPath = "ShowName/episode.s01e01"
 	dir := filepath.Join(root, "ShowName")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "episode.s01e01.meta"), []byte("meta-bytes"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "episode.s01e01.meta"), []byte("meta-0"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "episode.s01e01.seg"), []byte("seg-bytes"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "episode.s01e02.meta"), []byte("meta-1"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return root, virtualPath
+	return root, []string{"ShowName/episode.s01e01", "ShowName/episode.s01e02"}
 }
 
-func TestStore_RegisterAndLookup(t *testing.T) {
-	root, virtualPath := setupStoreDir(t)
+func TestStore_RegisterAndPaths(t *testing.T) {
+	root, paths := setupStoreDir(t)
 	s := sharenet.NewReleaseStore(root)
 
-	s.Register("hash-abc", virtualPath)
-	got, ok := s.Lookup("hash-abc")
+	s.Register("hash-abc", paths)
+	got, ok := s.Paths("hash-abc")
 	if !ok {
 		t.Fatal("expected to find registered hash")
 	}
-	if got != virtualPath {
-		t.Fatalf("expected %q, got %q", virtualPath, got)
+	if len(got) != 2 || got[0] != paths[0] || got[1] != paths[1] {
+		t.Fatalf("expected %v, got %v", paths, got)
 	}
 }
 
-func TestStore_LookupMissing(t *testing.T) {
+func TestStore_PathsMissing(t *testing.T) {
 	s := sharenet.NewReleaseStore(t.TempDir())
-	_, ok := s.Lookup("not-registered")
-	if ok {
+	if _, ok := s.Paths("not-registered"); ok {
 		t.Fatal("expected not found")
 	}
 }
 
-func TestStore_ReadMeta(t *testing.T) {
-	root, virtualPath := setupStoreDir(t)
+func TestStore_ReadMetaByIndex(t *testing.T) {
+	root, paths := setupStoreDir(t)
 	s := sharenet.NewReleaseStore(root)
-	s.Register("hash-abc", virtualPath)
+	s.Register("hash-abc", paths)
 
-	data, err := s.ReadMeta("hash-abc")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if string(data) != "meta-bytes" {
-		t.Fatalf("expected meta-bytes, got %q", data)
+	for i, want := range []string{"meta-0", "meta-1"} {
+		data, err := s.ReadMeta("hash-abc", i)
+		if err != nil {
+			t.Fatalf("index %d: unexpected error: %v", i, err)
+		}
+		if string(data) != want {
+			t.Fatalf("index %d: expected %q, got %q", i, want, data)
+		}
 	}
 }
 
-func TestStore_ReadSeg(t *testing.T) {
-	root, virtualPath := setupStoreDir(t)
+func TestStore_ReadMetaIndexOutOfRange(t *testing.T) {
+	root, paths := setupStoreDir(t)
 	s := sharenet.NewReleaseStore(root)
-	s.Register("hash-abc", virtualPath)
+	s.Register("hash-abc", paths)
 
-	data, err := s.ReadSeg("hash-abc")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if _, err := s.ReadMeta("hash-abc", 2); err == nil {
+		t.Fatal("expected error for out-of-range index")
 	}
-	if string(data) != "seg-bytes" {
-		t.Fatalf("expected seg-bytes, got %q", data)
+	if _, err := s.ReadMeta("hash-abc", -1); err == nil {
+		t.Fatal("expected error for negative index")
 	}
 }
 
-func TestStore_ReadMeta_UnknownHash(t *testing.T) {
+func TestStore_ReadMetaUnknownHash(t *testing.T) {
 	s := sharenet.NewReleaseStore(t.TempDir())
-	_, err := s.ReadMeta("unknown")
-	if err == nil {
+	if _, err := s.ReadMeta("unknown", 0); err == nil {
 		t.Fatal("expected error for unknown hash")
+	}
+}
+
+// Register must copy its input so later mutation of the caller's slice does not
+// corrupt the stored paths.
+func TestStore_RegisterCopiesInput(t *testing.T) {
+	root, paths := setupStoreDir(t)
+	s := sharenet.NewReleaseStore(root)
+	s.Register("hash-abc", paths)
+
+	paths[0] = "mutated"
+	got, _ := s.Paths("hash-abc")
+	if got[0] == "mutated" {
+		t.Fatal("Register must copy input slice")
 	}
 }

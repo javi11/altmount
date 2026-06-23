@@ -11,34 +11,40 @@ import (
 	"sync"
 	"time"
 
+	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"google.golang.org/protobuf/proto"
 )
 
 // ErrNoPeers is returned when no peer has the requested release.
 var ErrNoPeers = errors.New("sharenet: no peers have this release")
 
-// ReleaseFiles holds the raw bytes fetched from a peer plus the virtual path
-// the peer stored the release under (so we write it at the same location).
+// maxManifestEntries caps how many metas a single release manifest may list.
+// A release is one NZB; even a large season pack is well under this. The cap
+// bounds the outbound request fan-out a malicious peer can trigger per lookup.
+const maxManifestEntries = 4096
+
+// SharedMeta is one decoded per-file metadata fetched from a peer.
+// Meta is the structural v3 proto (SegmentRefs/SegmentRuns intact); its StoreRef
+// still points at the peer's store path and must be rewritten by the caller to
+// the locally-rebuilt store before it is written to disk.
+type SharedMeta struct {
+	VirtualPath string
+	Meta        *metapb.FileMetadata
+}
+
+// ReleaseFiles holds every per-file meta a release produced, in manifest order.
 type ReleaseFiles struct {
-	VirtualPath string // peer's metadata virtual path, e.g. "Movies/Title/Title.mkv"
-	MetaBytes   []byte // .meta file content (FileMetadata proto)
-	SegBytes    []byte // .seg sidecar content (zstd-compressed FileSegments proto); may be nil
+	Metas []SharedMeta
 }
 
-// releaseInfo is the JSON returned by GET /api/share/info/{hash}.
-type releaseInfo struct {
-	VirtualPath string `json:"virtual_path"`
-}
-
-// Client coordinates DHT lookups and meta file transfers.
+// Client coordinates DHT lookups and meta transfers.
 type Client struct {
 	dht      DHT
 	httpPort int
 	http     *http.Client
 
-	blMu      sync.Mutex
-	blacklist map[string]time.Time // peer IP string → expiry
+	blMu      sync.RWMutex
+	blacklist map[string]time.Time // peer addr:port string → expiry
 }
 
 // NewClient creates a Client. httpPort is the port altmount's HTTP server
@@ -52,8 +58,10 @@ func NewClient(dht DHT, httpPort int) *Client {
 	}
 }
 
-// LookupAndFetch finds peers with releaseHash and downloads the .meta+.seg files.
-// Returns ErrNoPeers if no reachable, non-blacklisted peer has the release.
+// LookupAndFetch finds peers with releaseHash and downloads every per-file v3
+// .meta the release produced. Returns ErrNoPeers if no reachable, non-blacklisted
+// peer has the release. Segment data is never transferred — the caller rebuilds
+// the NzbStore locally from the same NZB.
 func (c *Client) LookupAndFetch(ctx context.Context, releaseHash string) (*ReleaseFiles, error) {
 	peers, err := c.dht.Lookup(ctx, releaseHash)
 	if err != nil {
@@ -66,7 +74,7 @@ func (c *Client) LookupAndFetch(ctx context.Context, releaseHash string) (*Relea
 		}
 		files, err := c.fetchFromPeer(ctx, peer, releaseHash)
 		if err != nil {
-			// fetchFromPeer blacklists on bad proto; skip to next peer.
+			// fetchFromPeer blacklists peers that serve malformed data; skip to next.
 			continue
 		}
 		return files, nil
@@ -84,51 +92,41 @@ func (c *Client) Announce(ctx context.Context, releaseHash string) error {
 func (c *Client) fetchFromPeer(ctx context.Context, peer netip.AddrPort, releaseHash string) (*ReleaseFiles, error) {
 	base := fmt.Sprintf("http://%s/api/share", peer)
 
-	// Fetch the release info (virtual path) first so we know where to store it.
-	infoBytes, err := c.get(ctx, base+"/info/"+releaseHash)
+	manifestBytes, err := c.get(ctx, base+"/manifest/"+releaseHash)
 	if err != nil {
-		return nil, fmt.Errorf("fetch info from %s: %w", peer, err)
+		return nil, fmt.Errorf("fetch manifest from %s: %w", peer, err)
 	}
-	var info releaseInfo
-	if err := json.Unmarshal(infoBytes, &info); err != nil || info.VirtualPath == "" {
+	var manifest Manifest
+	if err := json.Unmarshal(manifestBytes, &manifest); err != nil || len(manifest.Metas) == 0 {
 		c.blacklistPeer(peer)
-		return nil, fmt.Errorf("peer %s sent invalid info: %w", peer, err)
+		return nil, fmt.Errorf("peer %s sent invalid manifest: %w", peer, err)
 	}
-
-	metaBytes, err := c.get(ctx, base+"/meta/"+releaseHash)
-	if err != nil {
-		return nil, fmt.Errorf("fetch meta from %s: %w", peer, err)
-	}
-
-	// Verify the meta bytes are a parseable FileMetadata proto. v2 files carry a
-	// magic prefix that fails proto.Unmarshal, so strip it before validating.
-	if err := validateMeta(metaBytes); err != nil {
+	if len(manifest.Metas) > maxManifestEntries {
 		c.blacklistPeer(peer)
-		return nil, fmt.Errorf("peer %s sent unparseable .meta: %w", peer, err)
+		return nil, fmt.Errorf("peer %s manifest has %d entries (> %d)", peer, len(manifest.Metas), maxManifestEntries)
 	}
 
-	// The .seg sidecar is optional: single-file (v1) releases have none, so a
-	// 404 or fetch error here is not fatal — SegBytes stays nil.
-	segBytes, segErr := c.get(ctx, base+"/seg/"+releaseHash)
-	if segErr != nil {
-		segBytes = nil
+	metas := make([]SharedMeta, 0, len(manifest.Metas))
+	for i, entry := range manifest.Metas {
+		if entry.VirtualPath == "" {
+			c.blacklistPeer(peer)
+			return nil, fmt.Errorf("peer %s manifest entry %d has empty path", peer, i)
+		}
+		raw, err := c.get(ctx, fmt.Sprintf("%s/meta/%s/%d", base, releaseHash, i))
+		if err != nil {
+			return nil, fmt.Errorf("fetch meta %d from %s: %w", i, peer, err)
+		}
+		// Only v3 store-backed metas are shareable; decode the structural proto
+		// (no store resolution). A peer serving anything else is misbehaving.
+		fm, err := metadata.DecodeStructuralMeta(raw)
+		if err != nil {
+			c.blacklistPeer(peer)
+			return nil, fmt.Errorf("peer %s sent unusable .meta %d: %w", peer, i, err)
+		}
+		metas = append(metas, SharedMeta{VirtualPath: entry.VirtualPath, Meta: fm})
 	}
 
-	return &ReleaseFiles{VirtualPath: info.VirtualPath, MetaBytes: metaBytes, SegBytes: segBytes}, nil
-}
-
-// metaMagicV2 is the prefix the metadata package writes on v2 ".meta" files.
-// It is an invalid protobuf tag (field 0) so a v2 body must be stripped of it
-// before proto.Unmarshal. Keep in sync with internal/metadata/service.go.
-var metaMagicV2 = []byte{0x00, 'A', 'M', '2', 0x01}
-
-func validateMeta(metaBytes []byte) error {
-	body := metaBytes
-	if len(body) >= len(metaMagicV2) && string(body[:len(metaMagicV2)]) == string(metaMagicV2) {
-		body = body[len(metaMagicV2):]
-	}
-	var fm metapb.FileMetadata
-	return proto.Unmarshal(body, &fm)
+	return &ReleaseFiles{Metas: metas}, nil
 }
 
 func (c *Client) get(ctx context.Context, url string) ([]byte, error) {
@@ -148,14 +146,17 @@ func (c *Client) get(ctx context.Context, url string) ([]byte, error) {
 }
 
 func (c *Client) isBlacklisted(peer netip.AddrPort) bool {
-	c.blMu.Lock()
-	defer c.blMu.Unlock()
-	expiry, ok := c.blacklist[peer.Addr().String()]
+	key := peer.String() // include the port: distinct peers can share a NAT IP
+	c.blMu.RLock()
+	expiry, ok := c.blacklist[key]
+	c.blMu.RUnlock()
 	if !ok {
 		return false
 	}
 	if time.Now().After(expiry) {
-		delete(c.blacklist, peer.Addr().String())
+		c.blMu.Lock()
+		delete(c.blacklist, key)
+		c.blMu.Unlock()
 		return false
 	}
 	return true
@@ -164,5 +165,5 @@ func (c *Client) isBlacklisted(peer netip.AddrPort) bool {
 func (c *Client) blacklistPeer(peer netip.AddrPort) {
 	c.blMu.Lock()
 	defer c.blMu.Unlock()
-	c.blacklist[peer.Addr().String()] = time.Now().Add(24 * time.Hour)
+	c.blacklist[peer.String()] = time.Now().Add(24 * time.Hour)
 }

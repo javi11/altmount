@@ -1,11 +1,13 @@
 package sharenet_test
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/javi11/altmount/internal/sharenet"
@@ -18,70 +20,103 @@ func setupHandlerStore(t *testing.T) *sharenet.ReleaseStore {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	_ = os.WriteFile(filepath.Join(dir, "ep01.meta"), []byte("meta-content"), 0o644)
-	_ = os.WriteFile(filepath.Join(dir, "ep01.seg"), []byte("seg-content"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "ep01.meta"), []byte("meta-0"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "ep02.meta"), []byte("meta-1"), 0o644)
 
 	store := sharenet.NewReleaseStore(root)
-	store.Register("abc123", "MyShow/ep01")
+	store.Register("abc123", []string{"MyShow/ep01", "MyShow/ep02"})
 	return store
 }
 
-func TestHandler_ServeMeta(t *testing.T) {
+func TestHandler_ServeManifest(t *testing.T) {
 	store := setupHandlerStore(t)
 	h := sharenet.NewHandler(store)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/share/meta/abc123", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/share/manifest/abc123", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-	body, _ := io.ReadAll(w.Body)
-	if string(body) != "meta-content" {
-		t.Fatalf("expected meta-content, got %q", string(body))
+	var m sharenet.Manifest
+	if err := json.Unmarshal(w.Body.Bytes(), &m); err != nil {
+		t.Fatalf("decode manifest: %v", err)
+	}
+	if len(m.Metas) != 2 || m.Metas[0].VirtualPath != "MyShow/ep01" || m.Metas[1].VirtualPath != "MyShow/ep02" {
+		t.Fatalf("unexpected manifest: %+v", m.Metas)
 	}
 }
 
-func TestHandler_ServeSeg(t *testing.T) {
+func TestHandler_ServeMetaByIndex(t *testing.T) {
 	store := setupHandlerStore(t)
 	h := sharenet.NewHandler(store)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/share/seg/abc123", nil)
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
+	for i, want := range []string{"meta-0", "meta-1"} {
+		req := httptest.NewRequest(http.MethodGet, "/api/share/meta/abc123/"+strconv.Itoa(i), nil)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
-	}
-	body, _ := io.ReadAll(w.Body)
-	if string(body) != "seg-content" {
-		t.Fatalf("expected seg-content, got %q", string(body))
+		if w.Code != http.StatusOK {
+			t.Fatalf("index %d: expected 200, got %d", i, w.Code)
+		}
+		body, _ := io.ReadAll(w.Body)
+		if string(body) != want {
+			t.Fatalf("index %d: expected %q, got %q", i, want, body)
+		}
 	}
 }
 
-func TestHandler_UnknownHash_Returns404(t *testing.T) {
-	store := sharenet.NewReleaseStore(t.TempDir())
-	h := sharenet.NewHandler(store)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/share/meta/doesnotexist", nil)
+func TestHandler_ManifestUnknownHash_404(t *testing.T) {
+	h := sharenet.NewHandler(sharenet.NewReleaseStore(t.TempDir()))
+	req := httptest.NewRequest(http.MethodGet, "/api/share/manifest/doesnotexist", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
-
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", w.Code)
 	}
 }
 
-func TestHandler_MissingHash_Returns400(t *testing.T) {
-	store := sharenet.NewReleaseStore(t.TempDir())
+func TestHandler_MetaOutOfRange_404(t *testing.T) {
+	store := setupHandlerStore(t)
 	h := sharenet.NewHandler(store)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/share/meta/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/share/meta/abc123/9", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", w.Code)
+	}
+}
 
+func TestHandler_MetaBadIndex_400(t *testing.T) {
+	store := setupHandlerStore(t)
+	h := sharenet.NewHandler(store)
+	req := httptest.NewRequest(http.MethodGet, "/api/share/meta/abc123/notanumber", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", w.Code)
 	}
 }
+
+func TestHandler_MetaMissingIndex_400(t *testing.T) {
+	store := setupHandlerStore(t)
+	h := sharenet.NewHandler(store)
+	req := httptest.NewRequest(http.MethodGet, "/api/share/meta/abc123", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestHandler_ManifestMissingHash_400(t *testing.T) {
+	h := sharenet.NewHandler(sharenet.NewReleaseStore(t.TempDir()))
+	req := httptest.NewRequest(http.MethodGet, "/api/share/manifest/", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", w.Code)
+	}
+}
+
