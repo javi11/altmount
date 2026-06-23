@@ -564,7 +564,7 @@ export function FileInfoModal({
 						</h4>
 						<div className="space-y-3">
 							<div>
-								<div className="mb-1 text-base-content/70 text-sm">NZB Source File:</div>
+								<div className="mb-1 text-base-content/70 text-sm">NZB Store File:</div>
 								<div className="break-all rounded bg-base-100 p-2 font-mono text-sm">
 									{metadata.source_nzb_path || "Unknown"}
 								</div>

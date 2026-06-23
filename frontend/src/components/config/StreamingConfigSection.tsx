@@ -1,11 +1,6 @@
 import { Info, Save } from "lucide-react";
 import { useEffect, useState } from "react";
-import type {
-	ConfigResponse,
-	FailureMaskingConfig,
-	SegmentCacheConfig,
-	StreamingConfig,
-} from "../../types/config";
+import type { ConfigResponse, SegmentCacheConfig, StreamingConfig } from "../../types/config";
 
 interface StreamingConfigSectionProps {
 	config: ConfigResponse;
@@ -39,18 +34,6 @@ export function StreamingConfigSection({
 
 	const handleStreamingChange = (field: keyof StreamingConfig, value: number) => {
 		const newData = { ...streamingData, [field]: value };
-		setStreamingData(newData);
-		checkChanges(newData, cacheData);
-	};
-
-	const handleMaskingChange = (field: keyof FailureMaskingConfig, value: boolean | number) => {
-		const newData = {
-			...streamingData,
-			failure_masking: {
-				...streamingData.failure_masking,
-				[field]: value,
-			},
-		};
 		setStreamingData(newData);
 		checkChanges(newData, cacheData);
 	};
@@ -141,92 +124,6 @@ export function StreamingConfigSection({
 						</div>
 					</div>
 				</div>
-			</div>
-
-			{/* Failure Masking */}
-			<div className="border-base-200 border-t pt-10">
-				<h3 className="font-bold text-base-content text-lg">Failure Masking</h3>
-				<p className="text-base-content/50 text-sm">
-					Automatically hide files from the mount if they fail to stream too many times.
-				</p>
-			</div>
-
-			<div className="space-y-8">
-				{/* Masking Toggle */}
-				<div className="flex items-center justify-between rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
-					<div className="min-w-0">
-						<h4 className="font-bold text-base-content text-sm">Enable Masking</h4>
-						<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
-							When enabled, files that repeatedly fail health checks while streaming are hidden.
-						</p>
-					</div>
-					<input
-						type="checkbox"
-						className="toggle toggle-primary"
-						checked={streamingData.failure_masking.enabled}
-						disabled={isReadOnly}
-						onChange={(e) => handleMaskingChange("enabled", e.target.checked)}
-					/>
-				</div>
-
-				{streamingData.failure_masking.enabled && (
-					<>
-						{/* Threshold Slider */}
-						<div className="fade-in slide-in-from-top-2 animate-in space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
-							<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-								<div className="min-w-0">
-									<h4 className="font-bold text-base-content text-sm">Failure Threshold</h4>
-									<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
-										Number of failures before the file is hidden from the mount.
-									</p>
-								</div>
-								<div className="flex shrink-0 items-center gap-3">
-									<span className="font-black font-mono text-primary text-xl">
-										{streamingData.failure_masking.threshold}
-									</span>
-									<span className="font-bold text-base-content/60 text-xs uppercase">failures</span>
-								</div>
-							</div>
-
-							<div className="space-y-4">
-								<input
-									type="range"
-									min="1"
-									max="10"
-									value={streamingData.failure_masking.threshold}
-									step="1"
-									className="range range-primary range-sm w-full [&::-webkit-slider-runnable-track]:rounded-full"
-									disabled={isReadOnly}
-									onChange={(e) =>
-										handleMaskingChange("threshold", Number.parseInt(e.target.value, 10))
-									}
-								/>
-								<div className="flex justify-between px-2 font-black text-base-content/50 text-xs">
-									<span>1</span>
-									<span>3</span>
-									<span>5</span>
-									<span>7</span>
-									<span>10</span>
-								</div>
-							</div>
-						</div>
-
-						{/* Guidance */}
-						<div className="fade-in slide-in-from-top-2 alert animate-in items-start rounded-2xl border border-info/20 bg-info/5 p-4 shadow-sm">
-							<Info className="mt-0.5 h-5 w-5 shrink-0 text-info" />
-							<div className="min-w-0 flex-1">
-								<div className="font-bold text-info text-xs uppercase tracking-wider">
-									Repair Workflow
-								</div>
-								<div className="mt-1 break-words text-[11px] leading-relaxed opacity-80">
-									Masking a file makes it appear as "missing" to your mount. This triggers Sonarr or
-									Radarr to attempt a repair or redownload. The threshold protects against one-off
-									network glitches.
-								</div>
-							</div>
-						</div>
-					</>
-				)}
 			</div>
 
 			{/* Segment Cache */}

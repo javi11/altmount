@@ -102,6 +102,10 @@ type ProcessArchiveOptions struct {
 	ExpandBlurayIso        bool
 	FilterSamples          bool
 	RenameToNzbName        bool
+	// SegmentIndex + StoreRef enable direct v3 store-backed metadata writes. When
+	// StoreRef is empty the aggregator falls back to v1 inline-segment metadata.
+	SegmentIndex map[string]int64
+	StoreRef     string
 }
 
 // ProcessArchive analyzes and processes RAR archive files, creating metadata for all extracted files.
@@ -246,7 +250,7 @@ func ProcessArchive(ctx context.Context, opts ProcessArchiveOptions) error {
 	}
 
 	// Pre-pass: resolve paths, apply renames, and pre-compute per-file segment offsets so
-	// each goroutine can build its own OffsetTracker without any sequential shared state.
+	// each goroutine can track its own progress offset without any sequential shared state.
 	type fileToProcess struct {
 		content         Content
 		baseFilename    string
@@ -395,7 +399,7 @@ func ProcessArchive(ctx context.Context, opts ProcessArchiveOptions) error {
 				_ = metadataService.DeleteFileMetadata(item.virtualFilePath)
 			}
 
-			if err := metadataService.WriteFileMetadata(item.virtualFilePath, fileMeta); err != nil {
+			if err := metadataService.WriteFileMetadataAuto(ctx, item.virtualFilePath, fileMeta, opts.SegmentIndex, opts.StoreRef); err != nil {
 				return fmt.Errorf("failed to write metadata for RAR file %s: %w", item.content.Filename, err)
 			}
 

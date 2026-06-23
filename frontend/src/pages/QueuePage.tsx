@@ -75,9 +75,16 @@ export function QueuePage() {
 	const [searchTerm, setSearchTerm] = useState("");
 	const [selectedItems, setSelectedItems] = useState<Set<number>>(new Set());
 	const [sortBy, setSortBy] = useState<"created_at" | "updated_at" | "status" | "nzb_path">(
-		"created_at",
+		() => {
+			const saved = localStorage.getItem("queue_sort_by");
+			const validColumns = ["created_at", "updated_at", "status", "nzb_path"];
+			return (validColumns.includes(saved || "") ? saved : "created_at") as "created_at" | "updated_at" | "status" | "nzb_path";
+		},
 	);
-	const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+	const [sortOrder, setSortOrder] = useState<"asc" | "desc">(() => {
+		const saved = localStorage.getItem("queue_sort_order");
+		return (saved === "asc" || saved === "desc" ? saved : "desc");
+	});
 
 	const queryClient = useQueryClient();
 
@@ -192,8 +199,7 @@ export function QueuePage() {
 					} catch {
 						// Non-JSON error body — fall back to status text.
 					}
-					// For completed items, a missing file almost always means the server
-					// cleaned it up post-import (delete_completed_nzb). Soften the toast.
+					// For completed items, a missing file is expected — soften the toast.
 					if (response.status === 404 && status === "completed") {
 						showToast({
 							type: "info",
@@ -381,18 +387,24 @@ export function QueuePage() {
 	}, []);
 
 	const handleSort = (column: "created_at" | "updated_at" | "status" | "nzb_path") => {
+		let newOrder: "asc" | "desc";
+		let newBy = sortBy;
 		if (sortBy === column) {
-			setSortOrder(sortOrder === "asc" ? "desc" : "asc");
+			newOrder = sortOrder === "asc" ? "desc" : "asc";
 		} else {
-			setSortBy(column);
+			newBy = column;
 			if (column === "created_at") {
-				setSortOrder("asc");
+				newOrder = "desc";
 			} else if (column === "updated_at") {
-				setSortOrder("desc");
+				newOrder = "desc";
 			} else {
-				setSortOrder("asc");
+				newOrder = "asc";
 			}
 		}
+		setSortBy(newBy);
+		setSortOrder(newOrder);
+		localStorage.setItem("queue_sort_by", newBy);
+		localStorage.setItem("queue_sort_order", newOrder);
 		setPage(0);
 		clearSelection();
 	};
@@ -558,7 +570,7 @@ export function QueuePage() {
 													<li key={section.id}>
 														<button
 															type="button"
-															className={`flex items-center gap-3 rounded-lg px-4 py-3 transition-all ${
+															className={`flex items-center gap-3 rounded-lg py-3 pr-4 pl-6 transition-all ${
 																isActive
 																	? "bg-primary font-semibold text-primary-content shadow-md shadow-primary/20"
 																	: "hover:bg-base-200"

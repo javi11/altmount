@@ -308,6 +308,8 @@ func TestProcessMultiFilePreservesReleaseFolderWhenOnlyOneFileRemains(t *testing
 		nil,
 		nil,
 		nil,
+		nil,
+		"",
 	)
 	if err != nil {
 		t.Fatalf("processMultiFile returned error: %v", err)

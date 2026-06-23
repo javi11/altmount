@@ -138,13 +138,6 @@ type User struct {
 	LastLogin    *time.Time `db:"last_login"`    // Last login timestamp (nullable)
 }
 
-// SystemStat represents a persistent system statistic
-type SystemStat struct {
-	Key       string    `db:"key"`
-	Value     int64     `db:"value"`
-	UpdatedAt time.Time `db:"updated_at"`
-}
-
 // ImportDailyStat represents historical import statistics for a specific day
 type ImportDailyStat struct {
 	Day             time.Time `db:"day"`

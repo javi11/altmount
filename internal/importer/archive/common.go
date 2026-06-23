@@ -78,19 +78,6 @@ type ClipBoundary struct {
 	Delta90k int64 `json:"delta_90k"`
 }
 
-// GetContentSegmentCount returns the total number of segments for a Content,
-// counting NestedSources segments for encrypted nested archive content.
-func GetContentSegmentCount(content Content) int {
-	if len(content.NestedSources) > 0 {
-		total := 0
-		for _, ns := range content.NestedSources {
-			total += len(ns.Segments)
-		}
-		return total
-	}
-	return len(content.Segments)
-}
-
 // GetContentSegments returns all segments for a Content,
 // collecting from NestedSources for encrypted nested archive content.
 func GetContentSegments(content Content) []*metapb.SegmentData {

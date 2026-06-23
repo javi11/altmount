@@ -26,6 +26,7 @@ import (
 	"github.com/javi11/altmount/internal/rclone"
 	"github.com/javi11/altmount/internal/updater"
 	"github.com/javi11/altmount/internal/version"
+	"golang.org/x/sync/singleflight"
 )
 
 // Config represents API server configuration
@@ -69,6 +70,9 @@ type Server struct {
 
 	speedtest     *speedtestCoordinator
 	speedtestOnce sync.Once
+
+	// stremioPlayGroup coalesces concurrent Stremio plays of the same title (download once).
+	stremioPlayGroup singleflight.Group
 }
 
 // NewServer creates a new API server that can optionally register routes on the provided mux (for backwards compatibility)

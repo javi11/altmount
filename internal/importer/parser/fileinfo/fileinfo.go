@@ -71,13 +71,17 @@ func getFileInfo(
 
 	// Select best filename using priority system (PAR2 > subject > yEnc header > subject header)
 	filename := selectBestFilename(par2Filename, subjectFilename, headerFilename, file.SubjectHeader)
+	fromPar2 := par2Filename != "" && filename == par2Filename
 
 	// Gap 4: Correct extension based on magic bytes when filename appears obfuscated.
 	// This handles files that were uploaded with a wrong or missing extension.
 	filename = correctExtensionFromMagicBytes(filename, file.First16KB)
 
 	// Gap 5: Last resort — use NZB filename stem when all other sources are obfuscated/empty.
-	if nzbFilenameStem != "" && (filename == "" || isProbablyObfuscated(filename)) {
+	// A PAR2-sourced name is authoritative, so trust it even when the obfuscation heuristic
+	// flags it (e.g. a short base like "yay.rar"); overriding it would split a multi-volume
+	// RAR set whose first volume PAR2 named differently from its .rNN continuations.
+	if !fromPar2 && nzbFilenameStem != "" && (filename == "" || isProbablyObfuscated(filename)) {
 		ext := filepath.Ext(filename)
 		if ext != "" {
 			filename = nzbFilenameStem + ext

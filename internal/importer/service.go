@@ -31,6 +31,7 @@ import (
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/sabnzbd"
+	"github.com/javi11/altmount/internal/utils"
 	"github.com/javi11/altmount/pkg/rclonecli"
 	"github.com/javi11/nzbparser"
 )
@@ -218,6 +219,11 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 		config.Workers = 2
 	}
 
+	// Wire store ref counter so metadata delete/create paths maintain reference counts.
+	if database != nil && database.StoreRefRepo != nil {
+		metadataService.SetStoreRefCounter(database.StoreRefRepo)
+	}
+
 	// Create processor with poolManager for dynamic pool access
 	processor := NewProcessor(metadataService, poolManager, broadcaster, configGetter, nil)
 
@@ -341,9 +347,6 @@ func (s *Service) Start(ctx context.Context) error {
 
 	// Start background sweeper for grabbed indexers cache
 	go s.runGrabbedIndexerSweeper(s.ctx)
-
-	// Run one-time migration to compress legacy plain .nzb files
-	go s.runNzbCompressionMigration(s.ctx)
 
 	s.running = true
 	s.log.InfoContext(ctx, fmt.Sprintf("NZB import service started successfully with %d workers", s.config.Workers))
@@ -626,33 +629,8 @@ func (s *Service) MoveToFailedFolder(ctx context.Context, item *database.ImportQ
 	}
 
 	// Move file
-	if err := os.Rename(item.NzbPath, newPath); err != nil {
-		// Fallback to Copy+Delete
-		s.log.DebugContext(ctx, "Rename failed, trying copy to failed dir", "error", err)
-
-		srcFile, err := os.Open(item.NzbPath)
-		if err != nil {
-			return fmt.Errorf("failed to open source NZB: %w", err)
-		}
-		defer srcFile.Close()
-
-		dstFile, err := os.Create(newPath)
-		if err != nil {
-			return fmt.Errorf("failed to create destination NZB: %w", err)
-		}
-		defer dstFile.Close()
-
-		if _, err := io.Copy(dstFile, srcFile); err != nil {
-			return fmt.Errorf("failed to copy NZB content: %w", err)
-		}
-
-		// Close files explicitly to allow deletion
-		srcFile.Close()
-		dstFile.Close()
-
-		if err := os.Remove(item.NzbPath); err != nil {
-			s.log.WarnContext(ctx, "Failed to remove source NZB after copy", "path", item.NzbPath, "error", err)
-		}
+	if err := utils.MoveFile(item.NzbPath, newPath); err != nil {
+		return fmt.Errorf("failed to move NZB to failed folder: %w", err)
 	}
 
 	// Update DB
@@ -774,6 +752,53 @@ func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath 
 	}
 
 	return item, nil
+}
+
+// FindAndUpdatePendingUpload de-duplicates manual NZB re-uploads. UNIQUE(nzb_path) can't catch them
+// because ensurePersistentNzb rewrites the path after insert, so this matches a still-pending item by
+// its category-independent base filename and updates its category/priority in place. Returns nil if none.
+func (s *Service) FindAndUpdatePendingUpload(ctx context.Context, filename string, category *string, priority *database.QueuePriority) (*database.ImportQueueItem, error) {
+	cfg := s.configGetter()
+	nzbsDir := filepath.Join(filepath.Dir(cfg.Database.Path), ".nzbs")
+
+	base := nzbtrim.TrimNzbExtension(sanitizeFilename(filepath.Base(filename)))
+	if base == "" {
+		return nil, nil
+	}
+
+	items, err := s.database.Repository.GetPendingQueueItemsByPathPrefix(ctx, nzbsDir+string(filepath.Separator))
+	if err != nil {
+		return nil, err
+	}
+
+	for _, it := range items {
+		// Persisted name is "<base><ext>" or, on collision, "<id>-<base><ext>".
+		cand := nzbtrim.TrimNzbExtension(filepath.Base(it.NzbPath))
+		if cand != base && cand != fmt.Sprintf("%d-%s", it.ID, base) {
+			continue
+		}
+
+		prio := it.Priority
+		if priority != nil {
+			prio = *priority
+		}
+		if err := s.database.Repository.UpdateQueueItemCategory(ctx, it.ID, category, prio); err != nil {
+			return nil, err
+		}
+
+		updated, err := s.database.Repository.GetQueueItem(ctx, it.ID)
+		if err != nil {
+			return nil, err
+		}
+
+		if s.broadcaster != nil {
+			s.broadcaster.BroadcastQueueChanged()
+		}
+		s.log.InfoContext(ctx, "Updated existing pending upload instead of creating a duplicate", "queue_id", it.ID)
+		return updated, nil
+	}
+
+	return nil, nil
 }
 
 // processNzbItem processes the NZB file for a queue item
@@ -981,13 +1006,7 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 		return fmt.Errorf("failed to create persistent NZB directory: %w", err)
 	}
 
-	// Pick the destination extension based on the compression setting: gzip-compressed
-	// NZBs keep the .nzb.gz extension, plain NZBs keep .nzb so they read transparently.
-	compress := cfg.ShouldCompressNzb()
-	ext := nzbfile.GzExtension
-	if !compress {
-		ext = nzbfile.PlainExtension
-	}
+	ext := nzbfile.PlainExtension
 
 	base := nzbtrim.TrimNzbExtension(sanitizeFilename(filepath.Base(item.NzbPath)))
 
@@ -999,8 +1018,7 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 		if _, err := os.Stat(p); err == nil {
 			return true
 		}
-		// DeleteCompletedNzb can remove the file while leaving the UNIQUE nzb_path row,
-		// so also treat a path owned by a different queue item as taken.
+		// Also treat a path owned by a different queue item as taken (UNIQUE nzb_path constraint).
 		if existing, err := s.database.Repository.GetQueueItemByNzbPath(ctx, p); err == nil && existing != nil && existing.ID != item.ID {
 			return true
 		}
@@ -1008,37 +1026,12 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 	}
 	newPath := persistentNzbPath(nzbDir, base, ext, item.ID, taken)
 
-	s.log.DebugContext(ctx, "Moving NZB to persistent storage", "old_path", item.NzbPath, "new_path", newPath, "compress", compress)
+	s.log.DebugContext(ctx, "Moving NZB to persistent storage", "old_path", item.NzbPath, "new_path", newPath)
 
-	if compress {
-		// Try rename to a temp path first (works only on same filesystem), then compress.
-		// For cross-device moves, compress directly from source.
-		tmpPath := newPath + ".tmp"
-		err := os.Rename(item.NzbPath, tmpPath)
-		if err == nil {
-			// Same filesystem: compress the tmp file to the final .nzb.gz path
-			if compErr := nzbfile.Compress(tmpPath, newPath); compErr != nil {
-				_ = os.Rename(tmpPath, item.NzbPath) // attempt to restore on failure
-				return fmt.Errorf("failed to compress NZB: %w", compErr)
-			}
-			_ = os.Remove(tmpPath)
-		} else {
-			// Cross-device: compress directly from source to destination
-			s.log.DebugContext(ctx, "Rename failed, compressing directly from source", "error", err, "src", item.NzbPath, "dst", newPath)
-			if compErr := nzbfile.Compress(item.NzbPath, newPath); compErr != nil {
-				return fmt.Errorf("failed to compress NZB: %w", compErr)
-			}
-			if err := os.Remove(item.NzbPath); err != nil {
-				s.log.WarnContext(ctx, "Failed to remove source NZB after compression", "path", item.NzbPath, "error", err)
-			}
-		}
-	} else {
-		// Plain mode: move the NZB as-is. If the rename fails (e.g. cross-device), leave the
-		// source untouched and abort — the caller can retry rather than risk a partial copy.
-		if err := os.Rename(item.NzbPath, newPath); err != nil {
-			s.log.ErrorContext(ctx, "Failed to move NZB to persistent storage", "error", err, "src", item.NzbPath, "dst", newPath)
-			return fmt.Errorf("failed to move NZB to persistent storage: %w", err)
-		}
+	// Move the NZB to persistent storage.
+	if err := utils.MoveFile(item.NzbPath, newPath); err != nil {
+		s.log.ErrorContext(ctx, "Failed to move NZB to persistent storage", "error", err, "src", item.NzbPath, "dst", newPath)
+		return fmt.Errorf("failed to move NZB to persistent storage: %w", err)
 	}
 
 	// Update DB
@@ -1185,6 +1178,14 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 		return err
 	}
 
+	// Delete the on-disk NZB — the .nzbz store can regenerate it on demand.
+	if item.NzbPath != "" {
+		if err := os.Remove(item.NzbPath); err != nil && !os.IsNotExist(err) {
+			s.log.WarnContext(ctx, "Failed to delete NZB after successful import",
+				"queue_id", item.ID, "nzb_path", item.NzbPath, "error", err)
+		}
+	}
+
 	// Update import_migrations row if this was a nzbdav migration import
 	if s.database.MigrationRepo != nil {
 		if err := s.database.MigrationRepo.MarkImported(ctx, item.ID, resultingPath); err != nil {
@@ -1201,18 +1202,6 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 	}
 
 	s.log.InfoContext(ctx, "Successfully processed queue item", "queue_id", item.ID, "file", item.NzbPath)
-
-	// Handle cleanup of completed NZB if configured. The path is kept in the DB
-	// so the UI can still display the original filename; download requests will
-	// 404 and the frontend surfaces an "already removed" message for completed
-	// items.
-	cfg := s.configGetter()
-	if cfg.ShouldDeleteCompletedNzb() {
-		s.log.InfoContext(ctx, "Deleting completed NZB (per config)", "file", item.NzbPath)
-		if err := os.Remove(item.NzbPath); err != nil && !os.IsNotExist(err) {
-			s.log.WarnContext(ctx, "Failed to delete completed NZB", "file", item.NzbPath, "error", err)
-		}
-	}
 
 	return nil
 }

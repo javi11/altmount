@@ -5,24 +5,22 @@ import {
 	ArrowDown,
 	ArrowUp,
 	ArrowUpDown,
-	CheckCircle2,
 	Gauge,
 	Info,
 	RefreshCw,
 	Wifi,
 	WifiOff,
-	XCircle,
 } from "lucide-react";
-import { useState } from "react";
-import { Line, LineChart, ResponsiveContainer, YAxis } from "recharts";
+import { useEffect, useMemo, useState } from "react";
 import { useToast } from "../../../../contexts/ToastContext";
+import { usePoolMetrics, useTestProviderSpeed } from "../../../../hooks/useApi";
+import { useConfig } from "../../../../hooks/useConfig";
 import {
-	usePoolMetrics,
-	useProviderSpeedHistory,
-	useTestProviderSpeed,
-} from "../../../../hooks/useApi";
-import { formatBytes, formatRelativeTime, getProviderBrandName } from "../../../../lib/utils";
-import type { ProviderSpeedTestHistoryStat, ProviderStatus } from "../../../../types/api";
+	formatBytes,
+	formatExpirationDate,
+	formatRelativeTime,
+	getProviderBrandName,
+} from "../../../../lib/utils";
 import { ProviderChart } from "./ProviderChart";
 import { ProviderSpeedChart } from "./ProviderSpeedChart";
 
@@ -30,13 +28,45 @@ type SortField =
 	| "host"
 	| "state"
 	| "used_connections"
-	| "missing_count"
 	| "current_speed_bytes_per_sec"
 	| "last_speed_test_mbps"
 	| "ping_ms"
 	| "error_count"
-	| "health_score";
+	| "expiration";
 type SortDirection = "asc" | "desc";
+
+const SORT_FIELDS: SortField[] = [
+	"host",
+	"state",
+	"used_connections",
+	"current_speed_bytes_per_sec",
+	"last_speed_test_mbps",
+	"ping_ms",
+	"error_count",
+	"expiration",
+];
+
+const SORT_STORAGE_KEY = "altmount.providerStatus.sort";
+
+// Persisted sort preference so the chosen order survives a page refresh instead
+// of resetting to host-ascending.
+function loadSortPref(): { field: SortField; direction: SortDirection } {
+	try {
+		const raw = localStorage.getItem(SORT_STORAGE_KEY);
+		if (raw) {
+			const p = JSON.parse(raw) as { field?: unknown; direction?: unknown };
+			const field: SortField =
+				typeof p.field === "string" && (SORT_FIELDS as string[]).includes(p.field)
+					? (p.field as SortField)
+					: "host";
+			const direction: SortDirection = p.direction === "desc" ? "desc" : "asc";
+			return { field, direction };
+		}
+	} catch {
+		// ignore malformed/unavailable storage
+	}
+	return { field: "host", direction: "asc" };
+}
 
 const SortIcon = ({
 	field,
@@ -55,119 +85,18 @@ const SortIcon = ({
 	);
 };
 
-const calculateHealthScore = (provider: ProviderStatus) => {
-	let score = 100;
-
-	// State penalty
-	if (provider.state !== "connected" && provider.state !== "active") {
-		return 0; // If disconnected, health is 0
-	}
-
-	// Ping penalty
-	if (provider.ping_ms > 1000) score -= 40;
-	else if (provider.ping_ms > 500) score -= 25;
-	else if (provider.ping_ms > 200) score -= 10;
-	else if (provider.ping_ms > 100) score -= 5;
-
-	// Error penalty
-	score -= Math.min(30, provider.error_count * 5);
-
-	// Missing count penalty (warning indicator)
-	if (provider.missing_warning) {
-		score -= 20;
-	}
-	if (provider.missing_count > 5000) score -= 15;
-	else if (provider.missing_count > 1000) score -= 10;
-
-	return Math.max(0, score);
-};
-
-const HealthIndicator = ({ score }: { score: number }) => {
-	let colorClass = "text-success";
-	let icon = <CheckCircle2 className="h-4 w-4" />;
-
-	if (score < 50) {
-		colorClass = "text-error";
-		icon = <XCircle className="h-4 w-4" />;
-	} else if (score < 85) {
-		colorClass = "text-warning";
-		icon = <AlertTriangle className="h-4 w-4" />;
-	}
-
-	return (
-		<div className={`flex items-center gap-1.5 font-bold ${colorClass}`}>
-			{icon}
-			<span>{score}%</span>
-		</div>
-	);
-};
-
-// Sparkline component for speed history
-const SpeedHistorySparkline = ({
-	providerId,
-	historyData,
-}: {
-	providerId: string;
-	historyData: ProviderSpeedTestHistoryStat[];
-}) => {
-	const providerHistory = historyData?.filter((h) => h.provider_id === providerId) || [];
-	// sort by created_at asc
-	const sortedHistory = [...providerHistory].sort(
-		(a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
-	);
-
-	if (sortedHistory.length < 2) return <span className="text-base-content/50" />;
-
-	return (
-		<div className="h-8 w-20 opacity-80 transition-opacity hover:opacity-100">
-			<ResponsiveContainer width="100%" height="100%">
-				<LineChart data={sortedHistory}>
-					<YAxis domain={["dataMin", "dataMax"]} hide />
-					<Line
-						type="stepAfter"
-						dataKey="speed_mbps"
-						stroke="var(--color-success)"
-						strokeWidth={1.5}
-						dot={false}
-						isAnimationActive={false}
-					/>
-				</LineChart>
-			</ResponsiveContainer>
-		</div>
-	);
-};
-
 function ConnectionPoolGrid({ used, max }: { used: number; max: number }) {
-	if (max > 20) {
-		const percent = Math.round((used / max) * 100);
-		return (
-			<div className="flex items-center gap-2">
-				<div className="flex h-2.5 w-16 overflow-hidden rounded-full border border-base-content/10 bg-base-200/50">
-					<div
-						className="h-full rounded-full bg-primary transition-all duration-500"
-						style={{ width: `${percent}%` }}
-					/>
-				</div>
-				<span className="font-mono text-base-content/80 text-xs">
-					{used}/{max}
-				</span>
-			</div>
-		);
-	}
-
+	// Always render the same bar regardless of pool size for consistent rows.
+	const percent = max > 0 ? Math.round((used / max) * 100) : 0;
 	return (
 		<div className="flex items-center gap-2">
-			<div className="flex max-w-[80px] flex-wrap gap-0.5">
-				{Array.from({ length: max }).map((_, i) => (
-					<span
-						key={i}
-						className={`h-3 w-1 rounded-sm transition-all duration-300 ${
-							i < used ? "bg-primary" : "border border-base-200 bg-base-200/50"
-						}`}
-					/>
-				))}
+			<div className="flex h-2.5 w-16 overflow-hidden rounded-full border border-base-content/10 bg-base-200/50">
+				<div
+					className="h-full rounded-full bg-primary transition-all duration-500"
+					style={{ width: `${percent}%` }}
+				/>
 			</div>
-			<span className="font-mono text-base-content/85 text-xs">
+			<span className="font-mono text-base-content/80 text-xs">
 				{used}/{max}
 			</span>
 		</div>
@@ -176,13 +105,37 @@ function ConnectionPoolGrid({ used, max }: { used: number; max: number }) {
 
 export function ProviderHealth() {
 	const { data, isLoading, error } = usePoolMetrics();
-	const { data: speedHistoryResponse } = useProviderSpeedHistory(7); // Last 7 days
+	const { data: configData } = useConfig();
 	const testSpeed = useTestProviderSpeed();
 	const { showToast } = useToast();
 
-	const [sortField, setSortField] = useState<SortField>("host");
-	const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
+	// Account expiration dates live on the config providers, not the runtime pool
+	// metrics — join them by provider id (falling back to host).
+	const expirationByKey = useMemo(() => {
+		const map = new Map<string, string>();
+		for (const p of configData?.providers ?? []) {
+			if (!p.account_expiration_date) continue;
+			map.set(p.id, p.account_expiration_date);
+			map.set(p.host, p.account_expiration_date);
+		}
+		return map;
+	}, [configData?.providers]);
+
+	const [sortField, setSortField] = useState<SortField>(() => loadSortPref().field);
+	const [sortDirection, setSortDirection] = useState<SortDirection>(() => loadSortPref().direction);
 	const [testingId, setTestingId] = useState<string | null>(null);
+
+	// Persist the sort preference whenever it changes.
+	useEffect(() => {
+		try {
+			localStorage.setItem(
+				SORT_STORAGE_KEY,
+				JSON.stringify({ field: sortField, direction: sortDirection }),
+			);
+		} catch {
+			// ignore storage write failures
+		}
+	}, [sortField, sortDirection]);
 
 	if (isLoading) {
 		return (
@@ -260,27 +213,37 @@ export function ProviderHealth() {
 		}
 	};
 
-	const sortedProviders = [...data.providers]
-		.map((p) => ({ ...p, health_score: calculateHealthScore(p) }))
-		.sort((a, b) => {
-			const aRaw = a[sortField as keyof typeof a];
-			const bRaw = b[sortField as keyof typeof b];
+	const sortedProviders = [...data.providers].sort((a, b) => {
+		// Expiration date is joined from config (not part of the pool metrics), so
+		// it's sorted separately. Missing dates always sort to the end.
+		if (sortField === "expiration") {
+			const aExp = expirationByKey.get(a.id) ?? expirationByKey.get(a.host) ?? "";
+			const bExp = expirationByKey.get(b.id) ?? expirationByKey.get(b.host) ?? "";
+			if (!aExp && !bExp) return 0;
+			if (!aExp) return 1;
+			if (!bExp) return -1;
+			// YYYY-MM-DD strings compare chronologically as-is.
+			return sortDirection === "asc" ? aExp.localeCompare(bExp) : bExp.localeCompare(aExp);
+		}
 
-			let aValue: string | number = 0;
-			let bValue: string | number = 0;
+		const aRaw = a[sortField as keyof typeof a];
+		const bRaw = b[sortField as keyof typeof b];
 
-			if (sortField === "host" || sortField === "state") {
-				aValue = aRaw?.toString().toLowerCase() || "";
-				bValue = bRaw?.toString().toLowerCase() || "";
-			} else {
-				aValue = Number(aRaw) || 0;
-				bValue = Number(bRaw) || 0;
-			}
+		let aValue: string | number = 0;
+		let bValue: string | number = 0;
 
-			if (aValue < bValue) return sortDirection === "asc" ? -1 : 1;
-			if (aValue > bValue) return sortDirection === "asc" ? 1 : -1;
-			return 0;
-		});
+		if (sortField === "host" || sortField === "state") {
+			aValue = aRaw?.toString().toLowerCase() || "";
+			bValue = bRaw?.toString().toLowerCase() || "";
+		} else {
+			aValue = Number(aRaw) || 0;
+			bValue = Number(bRaw) || 0;
+		}
+
+		if (aValue < bValue) return sortDirection === "asc" ? -1 : 1;
+		if (aValue > bValue) return sortDirection === "asc" ? 1 : -1;
+		return 0;
+	});
 
 	return (
 		<div className="space-y-6">
@@ -456,19 +419,6 @@ export function ProviderHealth() {
 									</th>
 									<th
 										className="cursor-pointer transition-colors hover:bg-base-200"
-										onClick={() => handleSort("health_score")}
-									>
-										<div className="flex items-center gap-1">
-											Health{" "}
-											<SortIcon
-												sortField={sortField}
-												sortDirection={sortDirection}
-												field="health_score"
-											/>
-										</div>
-									</th>
-									<th
-										className="cursor-pointer transition-colors hover:bg-base-200"
 										onClick={() => handleSort("state")}
 									>
 										<div className="flex items-center gap-1">
@@ -517,19 +467,6 @@ export function ProviderHealth() {
 									</th>
 									<th
 										className="cursor-pointer transition-colors hover:bg-base-200"
-										onClick={() => handleSort("missing_count")}
-									>
-										<div className="flex items-center gap-1">
-											Missing{" "}
-											<SortIcon
-												sortField={sortField}
-												sortDirection={sortDirection}
-												field="missing_count"
-											/>
-										</div>
-									</th>
-									<th
-										className="cursor-pointer transition-colors hover:bg-base-200"
 										onClick={() => handleSort("current_speed_bytes_per_sec")}
 									>
 										<div className="flex items-center gap-1">
@@ -554,6 +491,19 @@ export function ProviderHealth() {
 											/>
 										</div>
 									</th>
+									<th
+										className="cursor-pointer transition-colors hover:bg-base-200"
+										onClick={() => handleSort("expiration")}
+									>
+										<div className="flex items-center gap-1">
+											Expiration Date{" "}
+											<SortIcon
+												sortField={sortField}
+												sortDirection={sortDirection}
+												field="expiration"
+											/>
+										</div>
+									</th>
 									<th>Actions</th>
 								</tr>
 							</thead>
@@ -572,9 +522,6 @@ export function ProviderHealth() {
 													{provider.host}
 												</span>
 											</div>
-										</td>
-										<td>
-											<HealthIndicator score={provider.health_score} />
 										</td>
 										<td>
 											<div className="flex items-center gap-2">
@@ -639,21 +586,6 @@ export function ProviderHealth() {
 											)}
 										</td>
 										<td>
-											{provider.missing_count > 0 ? (
-												<span
-													className={`badge badge-sm font-bold font-mono ${
-														provider.missing_warning
-															? "border-error/20 bg-error/10 text-error"
-															: "border-warning/20 bg-warning/10 text-warning"
-													}`}
-												>
-													{provider.missing_count.toLocaleString()}
-												</span>
-											) : (
-												<span className="font-mono text-base-content/30 text-xs">0</span>
-											)}
-										</td>
-										<td>
 											{provider.current_speed_bytes_per_sec > 0 ? (
 												<span className="animate-pulse font-mono font-semibold text-info text-xs">
 													{formatBytes(provider.current_speed_bytes_per_sec)}/s
@@ -664,27 +596,34 @@ export function ProviderHealth() {
 										</td>
 										<td>
 											{provider.last_speed_test_mbps > 0 ? (
-												<div className="flex items-center gap-3">
-													<div className="flex min-w-[70px] flex-col">
-														<span className="font-bold font-mono text-success text-xs">
-															{provider.last_speed_test_mbps.toFixed(2)} MB/s
+												<div className="flex min-w-[70px] flex-col">
+													<span className="font-bold font-mono text-success text-xs">
+														{provider.last_speed_test_mbps.toFixed(2)} MB/s
+													</span>
+													{provider.last_speed_test_time && (
+														<span className="font-mono text-[9px] text-base-content/40">
+															{formatRelativeTime(provider.last_speed_test_time)}
 														</span>
-														{provider.last_speed_test_time && (
-															<span className="font-mono text-[9px] text-base-content/40">
-																{formatRelativeTime(provider.last_speed_test_time)}
-															</span>
-														)}
-													</div>
-													{speedHistoryResponse?.history && (
-														<SpeedHistorySparkline
-															providerId={provider.id}
-															historyData={speedHistoryResponse.history}
-														/>
 													)}
 												</div>
 											) : (
-												<span className="font-mono text-base-content/30 text-xs">-</span>
+												<span className="min-w-[70px] font-mono text-base-content/30 text-xs">
+													-
+												</span>
 											)}
+										</td>
+										<td>
+											{(() => {
+												const expiration =
+													expirationByKey.get(provider.id) ?? expirationByKey.get(provider.host);
+												return expiration ? (
+													<span className="font-mono text-[11px] text-base-content/70">
+														{formatExpirationDate(expiration)}
+													</span>
+												) : (
+													<span className="font-mono text-base-content/30 text-xs">-</span>
+												);
+											})()}
 										</td>
 										<td>
 											<div className="flex items-center gap-2">

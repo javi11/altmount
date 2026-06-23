@@ -206,13 +206,6 @@ export function AuthConfigSection({
 
 	return (
 		<div className="space-y-10">
-			<div>
-				<h3 className="font-bold text-base-content text-lg tracking-tight">Security & Access</h3>
-				<p className="break-words text-base-content/50 text-sm">
-					Control how users authenticate with the AltMount web interface.
-				</p>
-			</div>
-
 			<div className="space-y-8">
 				{/* Login Required Toggle */}
 				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
@@ -265,8 +258,8 @@ export function AuthConfigSection({
 								</span>
 							</div>
 							<p className="text-[11px] text-base-content/60 leading-relaxed">
-								No users exist yet. Create your admin username and password before enabling login
-								— you'll need these to sign in.
+								No users exist yet. Create your admin username and password before enabling login —
+								you'll need these to sign in.
 							</p>
 
 							<fieldset className="fieldset">
@@ -277,9 +270,7 @@ export function AuthConfigSection({
 									placeholder="admin"
 									value={credentialForm.username}
 									disabled={isReadOnly}
-									onChange={(e) =>
-										setCredentialForm((f) => ({ ...f, username: e.target.value }))
-									}
+									onChange={(e) => setCredentialForm((f) => ({ ...f, username: e.target.value }))}
 								/>
 							</fieldset>
 
@@ -291,9 +282,7 @@ export function AuthConfigSection({
 									placeholder="Min. 8 characters"
 									value={credentialForm.password}
 									disabled={isReadOnly}
-									onChange={(e) =>
-										setCredentialForm((f) => ({ ...f, password: e.target.value }))
-									}
+									onChange={(e) => setCredentialForm((f) => ({ ...f, password: e.target.value }))}
 								/>
 							</fieldset>
 
@@ -530,11 +519,7 @@ export function AuthConfigSection({
 						) : (
 							<Save className="h-4 w-4" />
 						)}
-						{isRegistering
-							? "Creating credentials..."
-							: isUpdating
-								? "Saving..."
-								: "Save Changes"}
+						{isRegistering ? "Creating credentials..." : isUpdating ? "Saving..." : "Save Changes"}
 					</button>
 				</div>
 			)}

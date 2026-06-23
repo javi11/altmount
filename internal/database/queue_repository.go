@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -13,6 +14,11 @@ import (
 // Stays well under SQLite's default SQLITE_MAX_VARIABLE_NUMBER (999) and
 // PostgreSQL's 65535 parameter limit.
 const bulkChunkSize = 500
+
+// escapeLikePattern escapes LIKE wildcards so a literal string can be matched as a prefix.
+func escapeLikePattern(s string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
+}
 
 // inPlaceholders builds an IN-clause body of n "?" placeholders.
 func inPlaceholders(n int) string {
@@ -226,12 +232,17 @@ func (r *QueueRepository) AddStoragePath(ctx context.Context, itemID int64, stor
 	return nil
 }
 
-// IsFileInQueue checks if a file is already in the queue (pending or processing)
+// IsFileInQueue checks if a file is already in the queue (pending, processing, or paused).
+// It matches by exact nzb_path first, and also by filename suffix to handle the case where
+// ensurePersistentNzb has already moved the file and updated nzb_path from the temp path to
+// the persistent storage path (e.g. /tmp/altmount-uploads/x.nzb → /.nzbs/stremio/42/x.nzb).
 func (r *QueueRepository) IsFileInQueue(ctx context.Context, filePath string) (bool, error) {
-	query := `SELECT 1 FROM import_queue WHERE nzb_path = ? AND status IN ('pending', 'processing', 'paused') LIMIT 1`
+	filename := filepath.Base(filePath)
+	query := `SELECT 1 FROM import_queue WHERE (nzb_path = ? OR nzb_path LIKE ?) AND status IN ('pending', 'processing', 'paused') LIMIT 1`
+	likePattern := "%/" + filename
 
 	var exists int
-	err := r.db.QueryRowContext(ctx, query, filePath).Scan(&exists)
+	err := r.db.QueryRowContext(ctx, query, filePath, likePattern).Scan(&exists)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return false, nil
@@ -547,6 +558,35 @@ func (r *QueueRepository) UpdateQueueItemNzbPath(ctx context.Context, id int64, 
 		return fmt.Errorf("failed to update queue item nzb path: %w", err)
 	}
 	return nil
+}
+
+// UpdateQueueItemCategory updates the category and priority of a queue item.
+func (r *QueueRepository) UpdateQueueItemCategory(ctx context.Context, id int64, category *string, priority QueuePriority) error {
+	query := `UPDATE import_queue SET category = ?, priority = ?, updated_at = datetime('now') WHERE id = ?`
+	if _, err := r.db.ExecContext(ctx, query, category, priority, id); err != nil {
+		return fmt.Errorf("failed to update queue item category: %w", err)
+	}
+	return nil
+}
+
+// GetPendingQueueItemsByPathPrefix returns pending queue items whose nzb_path starts with prefix.
+func (r *QueueRepository) GetPendingQueueItemsByPathPrefix(ctx context.Context, prefix string) ([]*ImportQueueItem, error) {
+	query := `SELECT id, nzb_path FROM import_queue WHERE status = 'pending' AND nzb_path LIKE ? ESCAPE '\'`
+	rows, err := r.db.QueryContext(ctx, query, escapeLikePattern(prefix)+"%")
+	if err != nil {
+		return nil, fmt.Errorf("failed to query pending queue items by prefix: %w", err)
+	}
+	defer rows.Close()
+
+	var items []*ImportQueueItem
+	for rows.Next() {
+		var it ImportQueueItem
+		if err := rows.Scan(&it.ID, &it.NzbPath); err != nil {
+			return nil, fmt.Errorf("failed to scan pending queue item: %w", err)
+		}
+		items = append(items, &it)
+	}
+	return items, rows.Err()
 }
 
 // GetQueueItemByNzbPath returns the queue item with the given NZB path, or nil if not found.

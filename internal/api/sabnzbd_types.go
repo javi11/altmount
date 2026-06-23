@@ -61,19 +61,6 @@ type SABnzbdQueueSlot struct {
 	Mbleft     string `json:"mbleft"`
 }
 
-// SABnzbdHistoryResponse represents the history response structure
-type SABnzbdHistoryResponse struct {
-	Status    bool                 `json:"status"`
-	Version   string               `json:"version"`
-	Paused    bool                 `json:"paused"`
-	NoOfSlots int                  `json:"noofslots"`
-	Slots     []SABnzbdHistorySlot `json:"slots"`
-	TotalSize string               `json:"total_size"`
-	MonthSize string               `json:"month_size"`
-	WeekSize  string               `json:"week_size"`
-	DaySize   string               `json:"day_size"`
-}
-
 // SABnzbdHistorySlot represents a single item in the download history
 type SABnzbdHistorySlot struct {
 	Index        int      `json:"index"`

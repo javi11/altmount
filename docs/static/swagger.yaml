@@ -35,18 +35,10 @@ definitions:
       path:
         type: string
     type: object
-  api.ArrsInstanceRequest:
+  api.TestConnectionRequest:
     properties:
       api_key:
         type: string
-      category:
-        type: string
-      enabled:
-        type: boolean
-      name:
-        type: string
-      sync_interval_hours:
-        type: integer
       type:
         type: string
       url:
@@ -1697,7 +1689,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/api.ArrsInstanceRequest'
+          $ref: '#/definitions/api.TestConnectionRequest'
       produces:
       - application/json
       responses:

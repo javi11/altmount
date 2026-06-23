@@ -195,7 +195,6 @@ type DatabaseConfig struct {
 type MetadataConfig struct {
 	RootPath                 string               `yaml:"root_path" mapstructure:"root_path" json:"root_path"`
 	DeleteSourceNzbOnRemoval *bool                `yaml:"delete_source_nzb_on_removal" mapstructure:"delete_source_nzb_on_removal" json:"delete_source_nzb_on_removal,omitempty"`
-	DeleteCompletedNzb       *bool                `yaml:"delete_completed_nzb" mapstructure:"delete_completed_nzb" json:"delete_completed_nzb,omitempty"`
 	Backup                   MetadataBackupConfig `yaml:"backup" mapstructure:"backup" json:"backup"`
 }
 
@@ -318,31 +317,6 @@ type ImportConfig struct {
 	FilterSampleFiles                  *bool          `yaml:"filter_sample_files" mapstructure:"filter_sample_files" json:"filter_sample_files,omitempty"`
 	FailedItemRetentionHours           *int           `yaml:"failed_item_retention_hours" mapstructure:"failed_item_retention_hours" json:"failed_item_retention_hours,omitempty"`
 	HistoryRetentionDays               *int           `yaml:"history_retention_days" mapstructure:"history_retention_days" json:"history_retention_days,omitempty"`
-	DeleteCompletedNzb                 *bool          `yaml:"delete_completed_nzb" mapstructure:"delete_completed_nzb" json:"delete_completed_nzb,omitempty"`
-	CompressNzb                        *bool          `yaml:"compress_nzb" mapstructure:"compress_nzb" json:"compress_nzb,omitempty"`
-}
-
-// ShouldDeleteCompletedNzb returns whether the NZB file should be removed from
-// disk after a successful import. Reads from ImportConfig first, falling back
-// to the legacy MetadataConfig field for back-compatibility with older config
-// files (the setting was moved from metadata.* to import.*).
-func (c *Config) ShouldDeleteCompletedNzb() bool {
-	if c.Import.DeleteCompletedNzb != nil {
-		return *c.Import.DeleteCompletedNzb
-	}
-	if c.Metadata.DeleteCompletedNzb != nil {
-		return *c.Metadata.DeleteCompletedNzb
-	}
-	return false
-}
-
-// ShouldCompressNzb reports whether persisted NZBs should be gzip-compressed
-// (.nzb.gz). Defaults to true when unset to preserve legacy behavior.
-func (c *Config) ShouldCompressNzb() bool {
-	if c.Import.CompressNzb != nil {
-		return *c.Import.CompressNzb
-	}
-	return true
 }
 
 // LogConfig represents logging configuration with rotation support
@@ -390,6 +364,7 @@ type HealthConfig struct {
 // ProviderConfig represents a single NNTP provider configuration
 type ProviderConfig struct {
 	ID                       string     `yaml:"id" mapstructure:"id" json:"id"`
+	Name                     string     `yaml:"name" mapstructure:"name" json:"name,omitempty"`
 	Host                     string     `yaml:"host" mapstructure:"host" json:"host"`
 	Port                     int        `yaml:"port" mapstructure:"port" json:"port"`
 	Username                 string     `yaml:"username" mapstructure:"username" json:"username"`
@@ -410,6 +385,7 @@ type ProviderConfig struct {
 	LastRTTMs                int64      `yaml:"last_rtt_ms" mapstructure:"last_rtt_ms" json:"last_rtt_ms,omitempty"`
 	LastSpeedTestMbps        float64    `yaml:"last_speed_test_mbps" mapstructure:"last_speed_test_mbps" json:"last_speed_test_mbps,omitempty"`
 	LastSpeedTestTime        *time.Time `yaml:"last_speed_test_time" mapstructure:"last_speed_test_time" json:"last_speed_test_time,omitempty"`
+	AccountExpirationDate    string     `yaml:"account_expiration_date" mapstructure:"account_expiration_date" json:"account_expiration_date,omitempty"`
 }
 
 // SABnzbdConfig represents SABnzbd-compatible API configuration
@@ -1462,7 +1438,6 @@ func DefaultConfig(configDir ...string) *Config {
 	failedItemRetentionHours := 24  // Default: auto-remove failed items after 24 hours
 	historyRetentionDays := 90      // Default: auto-remove import history after 90 days (3 months)
 	isoAnalyzeTimeoutSeconds := 120 // Default: 120s hard cap per ISO analyse (prevents stuck NNTP from stalling import for 9+ minutes)
-	compressNzb := true             // Default: gzip-compress persisted NZBs (.nzb.gz)
 	metadataBackupEnabled := false
 	failureMaskingEnabled := false
 	repairEnabled := true
@@ -1601,7 +1576,6 @@ func DefaultConfig(configDir ...string) *Config {
 			WatchIntervalSeconds:     &watchIntervalSeconds,
 			FailedItemRetentionHours: &failedItemRetentionHours,
 			HistoryRetentionDays:     &historyRetentionDays,
-			CompressNzb:              &compressNzb,
 		},
 		Log: LogConfig{
 			File:       logPath, // Default log file path

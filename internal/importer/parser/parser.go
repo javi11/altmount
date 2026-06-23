@@ -116,6 +116,12 @@ func (p *Parser) ParseNzb(ctx context.Context, n *nzbparser.Nzb, nzbPath string,
 		Filename: filepath.Base(nzbPath),
 		Files:    make([]ParsedFile, 0, len(n.Files)),
 	}
+
+	// Build the shared NzbStore and segment index for v3 format.
+	// Must be built from the raw *nzbparser.Nzb BEFORE any per-file processing
+	// (which may filter/reorder files). The index maps message-id → flat store index.
+	parsed.Store, parsed.SegmentIndex = BuildStore(n)
+
 	// Determine segment size from meta chunk_size or fallback to first segment size
 	if n.Meta != nil {
 		if pwd, ok := n.Meta["password"]; ok && pwd != "" {
@@ -276,7 +282,7 @@ func (p *Parser) ParseNzb(ctx context.Context, n *nzbparser.Nzb, nzbPath string,
 	// Process files in parallel using conc pool
 	for _, info := range fileInfos {
 		concPool.Go(func(ctx context.Context) (fileResult, error) {
-			parsedFile, err := p.parseFile(ctx, n.Meta, parsed.Filename, info, firstSegmentSizeCache, nzbStandardPartSize, notFoundIDs)
+			parsedFile, err := p.parseFile(ctx, n.Meta, parsed.Filename, info, firstSegmentSizeCache, nzbStandardPartSize, notFoundIDs, parsed.SegmentIndex)
 
 			return fileResult{
 				parsedFile: parsedFile,
@@ -347,7 +353,7 @@ func (p *Parser) ParseNzb(ctx context.Context, n *nzbparser.Nzb, nzbPath string,
 // firstSegmentSizeCache contains pre-fetched yEnc info (PartSize + total FileSize) for first segments to avoid redundant fetching.
 // nzbStandardPartSize, when >0, is the yEnc PartSize of a representative middle segment in the NZB;
 // it lets normalization skip the per-file second-segment fetch.
-func (p *Parser) parseFile(ctx context.Context, meta map[string]string, nzbFilename string, info *fileinfo.FileInfo, firstSegmentSizeCache map[string]firstSegmentYencInfo, nzbStandardPartSize int64, notFoundIDs map[string]struct{}) (*ParsedFile, error) {
+func (p *Parser) parseFile(ctx context.Context, meta map[string]string, nzbFilename string, info *fileinfo.FileInfo, firstSegmentSizeCache map[string]firstSegmentYencInfo, nzbStandardPartSize int64, notFoundIDs map[string]struct{}, segmentIndex map[string]int64) (*ParsedFile, error) {
 	if len(info.NzbFile.Segments) == 0 {
 		return nil, fmt.Errorf("file has no segments")
 	}
@@ -390,6 +396,19 @@ func (p *Parser) parseFile(ctx context.Context, meta map[string]string, nzbFilen
 			StartOffset: int64(0),
 			EndOffset:   int64(seg.Bytes - 1),
 			SegmentSize: int64(seg.Bytes),
+		}
+	}
+
+	// Also build SegmentRefs for v3 store-based format
+	var segmentRefs []*metapb.SegmentRef
+	if segmentIndex != nil {
+		segmentRefs = make([]*metapb.SegmentRef, len(info.NzbFile.Segments))
+		for i, seg := range info.NzbFile.Segments {
+			segmentRefs[i] = &metapb.SegmentRef{
+				StoreIndex:  segmentIndex[seg.ID],
+				StartOffset: 0,
+				EndOffset:   int64(seg.Bytes - 1),
+			}
 		}
 	}
 
@@ -512,6 +531,7 @@ func (p *Parser) parseFile(ctx context.Context, meta map[string]string, nzbFilen
 		Filename:      filename,
 		Size:          totalSize,
 		Segments:      segments,
+		SegmentRefs:   segmentRefs,
 		Groups:        info.NzbFile.Groups,
 		IsRarArchive:  info.IsRar,
 		Is7zArchive:   info.Is7z,
@@ -1336,6 +1356,37 @@ func (p *Parser) propagateArchiveType(parsed *ParsedNzb) {
 			}
 		}
 	}
+}
+
+// BuildStore converts a parsed NZB into a NzbStore (for persistence) plus a
+// message-id → flat-store-index lookup used to emit SegmentRefs.
+// Segments are stored in their natural NzbSegments order (by Number after sort).
+func BuildStore(n *nzbparser.Nzb) (*metapb.NzbStore, map[string]int64) {
+	store := &metapb.NzbStore{Files: make([]*metapb.NzbFileEntry, 0, len(n.Files))}
+	index := make(map[string]int64)
+	var flat int64
+	for _, f := range n.Files {
+		fe := &metapb.NzbFileEntry{
+			Subject: f.Subject,
+			Poster:  f.Poster,
+			Date:    int64(f.Date),
+			Groups:  f.Groups,
+		}
+		segs := make(nzbparser.NzbSegments, len(f.Segments))
+		copy(segs, f.Segments)
+		sort.Sort(segs)
+		for _, s := range segs {
+			fe.Segments = append(fe.Segments, &metapb.NzbSeg{
+				Id:     s.ID,
+				Number: int32(s.Number),
+				Bytes:  int64(s.Bytes),
+			})
+			index[s.ID] = flat
+			flat++
+		}
+		store.Files = append(store.Files, fe)
+	}
+	return store, index
 }
 
 // GetMetadata extracts metadata from the NZB head section

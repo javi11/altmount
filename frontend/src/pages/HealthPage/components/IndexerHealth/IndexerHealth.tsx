@@ -3,11 +3,11 @@ import { useEffect, useMemo, useState } from "react";
 import { useConfirm } from "../../../../contexts/ModalContext";
 import { useToast } from "../../../../contexts/ToastContext";
 import { useCleanupIndexerStats, useIndexerStats } from "../../../../hooks/useApi";
-import { IndexerHealthCard } from "./IndexerHealthCard";
 import { IndexerHealthFilters } from "./IndexerHealthFilters";
 import { IndexerHealthSummary } from "./IndexerHealthSummary";
+import { IndexerHealthTable } from "./IndexerHealthTable";
 import { PruneStatsModal } from "./PruneStatsModal";
-import type { IndexerSummary, SortKey } from "./types";
+import { type IndexerSummary, SORT_KEYS, type SortKey } from "./types";
 
 const SORT_STORAGE_KEY = "altmount.indexerHealth.sort";
 
@@ -18,7 +18,10 @@ function loadSortPref(): { key: SortKey; asc: boolean } {
 		const raw = localStorage.getItem(SORT_STORAGE_KEY);
 		if (raw) {
 			const p = JSON.parse(raw) as { key?: unknown; asc?: unknown };
-			const key: SortKey = p.key === "total" || p.key === "name" ? p.key : "health";
+			const key: SortKey =
+				typeof p.key === "string" && (SORT_KEYS as string[]).includes(p.key)
+					? (p.key as SortKey)
+					: "health";
 			const asc = typeof p.asc === "boolean" ? p.asc : false;
 			return { key, asc };
 		}
@@ -105,7 +108,8 @@ export function IndexerHealth() {
 			setSortAsc(!sortAsc);
 		} else {
 			setSortKey(key);
-			setSortAsc(key !== "health");
+			// Text column defaults to ascending; numeric/time columns to descending.
+			setSortAsc(key === "name");
 		}
 	};
 
@@ -113,9 +117,29 @@ export function IndexerHealth() {
 		if (!stats) return [];
 		return [...stats].sort((a, b) => {
 			let cmp = 0;
-			if (sortKey === "health") cmp = a.success_rate - b.success_rate;
-			else if (sortKey === "total") cmp = a.total_imports - b.total_imports;
-			else cmp = a.indexer.localeCompare(b.indexer);
+			switch (sortKey) {
+				case "name":
+					cmp = a.indexer.localeCompare(b.indexer);
+					break;
+				case "last_24h":
+					cmp = (a.last_24h_count ?? 0) - (b.last_24h_count ?? 0);
+					break;
+				case "last_seen":
+					cmp = new Date(a.last_seen_at).getTime() - new Date(b.last_seen_at).getTime();
+					break;
+				case "success":
+					cmp = a.success_count - b.success_count;
+					break;
+				case "failed":
+					cmp = a.failed_count - b.failed_count;
+					break;
+				case "total":
+					cmp = a.total_imports - b.total_imports;
+					break;
+				default:
+					cmp = a.success_rate - b.success_rate;
+					break;
+			}
 			return sortAsc ? cmp : -cmp;
 		});
 	}, [stats, sortKey, sortAsc]);
@@ -162,27 +186,20 @@ export function IndexerHealth() {
 						</div>
 					))}
 				</div>
-				<div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-					{[...Array(3)].map((_, i) => (
-						<div
-							key={i}
-							className="card border border-base-200/30 bg-base-100/20 p-5 shadow backdrop-blur-md"
-						>
-							<div className="flex justify-between gap-4">
-								<div className="flex-1 space-y-2">
-									<div className="h-5 w-32 animate-pulse rounded bg-base-300/40" />
-									<div className="h-3 w-24 animate-pulse rounded bg-base-300/30" />
-								</div>
-								<div className="h-6 w-6 animate-pulse rounded-full bg-base-300/40" />
+				<div className="card overflow-hidden border border-base-200/40 bg-base-100/20 shadow backdrop-blur-md">
+					<div className="space-y-3 p-4">
+						{[...Array(5)].map((_, i) => (
+							<div key={i} className="flex items-center gap-4">
+								<div className="h-8 w-40 animate-pulse rounded bg-base-300/40" />
+								<div className="h-4 w-12 animate-pulse rounded bg-base-300/30" />
+								<div className="h-4 w-20 animate-pulse rounded bg-base-300/30" />
+								<div className="h-2.5 w-24 animate-pulse rounded-full bg-base-300/40" />
+								<div className="ml-auto h-4 w-10 animate-pulse rounded bg-base-300/30" />
+								<div className="h-4 w-10 animate-pulse rounded bg-base-300/30" />
+								<div className="h-4 w-10 animate-pulse rounded bg-base-300/30" />
 							</div>
-							<div className="mt-4 h-8 w-20 animate-pulse rounded bg-base-300/40" />
-							<div className="mt-3 space-y-2">
-								<div className="h-2.5 w-full animate-pulse rounded bg-base-300/40" />
-								<div className="h-3 w-full animate-pulse rounded bg-base-300/30" />
-							</div>
-							<div className="mt-4 h-16 w-full animate-pulse rounded-xl bg-base-300/40" />
-						</div>
-					))}
+						))}
+					</div>
 				</div>
 			</div>
 		);
@@ -246,14 +263,11 @@ export function IndexerHealth() {
 					onSearchChange={setSearchQuery}
 					statusFilter={statusFilter}
 					onStatusFilterChange={setStatusFilter}
-					sortKey={sortKey}
-					sortAsc={sortAsc}
-					onSort={handleSort}
 					filteredCount={filtered.length}
 				/>
 			)}
 
-			{/* Cards Grid */}
+			{/* Indexer Table */}
 			{!hasStats ? (
 				<div className="hero rounded-2xl border border-base-300 border-dashed bg-base-200/50 py-16 backdrop-blur-md">
 					<div className="hero-content text-center">
@@ -281,19 +295,13 @@ export function IndexerHealth() {
 					</div>
 				</div>
 			) : (
-				<div
-					className={`grid gap-5 ${
-						filtered.length === 1
-							? "max-w-md"
-							: filtered.length === 2
-								? "max-w-4xl sm:grid-cols-2"
-								: "sm:grid-cols-2 lg:grid-cols-3"
-					}`}
-				>
-					{filtered.map((item) => (
-						<IndexerHealthCard key={item.indexer} item={item} onDelete={handleDeleteIndexer} />
-					))}
-				</div>
+				<IndexerHealthTable
+					items={filtered}
+					sortKey={sortKey}
+					sortAsc={sortAsc}
+					onSort={handleSort}
+					onDelete={handleDeleteIndexer}
+				/>
 			)}
 
 			{showPruneModal && (

@@ -1,5 +1,6 @@
-import { Check, Copy, ExternalLink, Info, Save, Tv, X } from "lucide-react";
+import { Check, Copy, ExternalLink, Save, Tv, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { copyToClipboard } from "../../lib/utils";
 import type { ConfigResponse, ProwlarrConfig, StremioConfig } from "../../types/config";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
 
@@ -156,9 +157,11 @@ export function StremioConfigSection({
 
 	const handleCopyURL = async () => {
 		if (!addonURL) return;
-		await navigator.clipboard.writeText(addonURL);
-		setUrlCopied(true);
-		setTimeout(() => setUrlCopied(false), 2000);
+		const ok = await copyToClipboard(addonURL);
+		if (ok) {
+			setUrlCopied(true);
+			setTimeout(() => setUrlCopied(false), 2000);
+		}
 	};
 
 	const handleInstallInStremio = () => {
@@ -168,14 +171,6 @@ export function StremioConfigSection({
 
 	return (
 		<div className="min-w-0 space-y-10">
-			<div className="min-w-0">
-				<h3 className="font-bold text-base-content text-lg tracking-tight">Stremio Integration</h3>
-				<p className="break-words text-base-content/50 text-sm">
-					Enable the Stremio addon to automatically search Prowlarr for NZBs by IMDB ID and stream
-					them directly from Stremio.
-				</p>
-			</div>
-
 			<div className="min-w-0 space-y-8">
 				{/* Enable / Disable */}
 				<div className="min-w-0 space-y-6 overflow-hidden rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
@@ -207,21 +202,37 @@ export function StremioConfigSection({
 						/>
 					</div>
 
-					<fieldset className="fieldset min-w-0">
-						<legend className="fieldset-legend">Public Base URL</legend>
-						<input
-							type="url"
-							className="input w-full min-w-0 max-w-full"
-							placeholder="https://altmount.example.com"
-							value={formData.base_url ?? ""}
-							disabled={isReadOnly}
-							onChange={(e) => update({ base_url: e.target.value })}
-						/>
-						<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/50 text-xs">
-							Public base URL used when building stream links. Leave empty to auto-detect from the
-							request.
-						</p>
-					</fieldset>
+					<div className="grid min-w-0 grid-cols-1 gap-6 sm:grid-cols-2">
+						<fieldset className="fieldset min-w-0">
+							<legend className="fieldset-legend">Public Base URL</legend>
+							<input
+								type="url"
+								className="input w-full min-w-0 max-w-full"
+								placeholder="https://altmount.example.com"
+								value={formData.base_url ?? ""}
+								disabled={isReadOnly}
+								onChange={(e) => update({ base_url: e.target.value })}
+							/>
+							<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/50 text-xs">
+								Base address for generated stream links. Leave empty to auto-detect.
+							</p>
+						</fieldset>
+
+						<fieldset className="fieldset min-w-0">
+							<legend className="fieldset-legend">NZB Cache TTL (hours)</legend>
+							<input
+								type="number"
+								className="input w-full min-w-0 max-w-full"
+								min={0}
+								value={formData.nzb_ttl_hours}
+								disabled={isReadOnly}
+								onChange={(e) => update({ nzb_ttl_hours: Math.max(0, Number(e.target.value)) })}
+							/>
+							<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/50 text-xs">
+								How long cached NZB files stay on disk. Use <strong>0</strong> to keep forever.
+							</p>
+						</fieldset>
+					</div>
 				</div>
 
 				{/* Addon URL */}
@@ -266,33 +277,6 @@ export function StremioConfigSection({
 					</div>
 				)}
 
-				{/* Cache TTL */}
-				<div className="min-w-0 space-y-6 overflow-hidden rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
-					<div className="flex items-center gap-2">
-						<Info className="h-4 w-4 text-base-content/60" />
-						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
-							Cache
-						</h4>
-						<div className="h-px flex-1 bg-base-300/50" />
-					</div>
-
-					<fieldset className="fieldset min-w-0">
-						<legend className="fieldset-legend">NZB File Cache TTL (hours)</legend>
-						<input
-							type="number"
-							className="input w-32 max-w-full"
-							min={0}
-							value={formData.nzb_ttl_hours}
-							disabled={isReadOnly}
-							onChange={(e) => update({ nzb_ttl_hours: Math.max(0, Number(e.target.value)) })}
-						/>
-						<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/50 text-xs">
-							How long AltMount keeps the cached NZB/meta file on disk. Set to <strong>0</strong> to
-							never delete.
-						</p>
-					</fieldset>
-				</div>
-
 				{/* Prowlarr */}
 				<div className="min-w-0 space-y-6 overflow-hidden rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="flex items-center gap-2">
@@ -320,77 +304,81 @@ export function StremioConfigSection({
 						/>
 					</div>
 
-					<fieldset className="fieldset min-w-0">
-						<legend className="fieldset-legend">Prowlarr Host</legend>
-						<input
-							type="url"
-							className="input w-full min-w-0 max-w-full"
-							placeholder="http://localhost:9696"
-							value={formData.prowlarr?.host ?? ""}
-							disabled={isReadOnly}
-							onChange={(e) => updateProwlarr({ host: e.target.value })}
-						/>
-					</fieldset>
+					{formData.prowlarr?.enabled && (
+						<div className="fade-in slide-in-from-top-2 animate-in space-y-6 border-base-300/50 border-t pt-6">
+							<fieldset className="fieldset min-w-0">
+								<legend className="fieldset-legend">Prowlarr Host</legend>
+								<input
+									type="url"
+									className="input w-full min-w-0 max-w-full"
+									placeholder="http://localhost:9696"
+									value={formData.prowlarr?.host ?? ""}
+									disabled={isReadOnly}
+									onChange={(e) => updateProwlarr({ host: e.target.value })}
+								/>
+							</fieldset>
 
-					<fieldset className="fieldset min-w-0">
-						<legend className="fieldset-legend">API Key</legend>
-						<input
-							type="password"
-							className="input w-full min-w-0 max-w-full"
-							placeholder="Prowlarr API key"
-							value={formData.prowlarr?.api_key ?? ""}
-							disabled={isReadOnly}
-							onChange={(e) => updateProwlarr({ api_key: e.target.value })}
-						/>
-					</fieldset>
+							<fieldset className="fieldset min-w-0">
+								<legend className="fieldset-legend">API Key</legend>
+								<input
+									type="password"
+									className="input w-full min-w-0 max-w-full"
+									placeholder="Prowlarr API key"
+									value={formData.prowlarr?.api_key ?? ""}
+									disabled={isReadOnly}
+									onChange={(e) => updateProwlarr({ api_key: e.target.value })}
+								/>
+							</fieldset>
 
-					<fieldset className="fieldset min-w-0">
-						<legend className="fieldset-legend">Categories</legend>
-						<TagInput
-							tags={(formData.prowlarr?.categories ?? []).map(String)}
-							onChange={(tags) =>
-								updateProwlarr({ categories: tags.map((t) => Number.parseInt(t, 10)) })
-							}
-							disabled={isReadOnly}
-							placeholder="Add ID..."
-							parseValue={(raw) => {
-								const n = Number.parseInt(raw.trim(), 10);
-								return Number.isNaN(n) ? null : String(n);
-							}}
-						/>
-						<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/50 text-xs">
-							Newznab category IDs. Press Enter or comma to add. Defaults: 2000 (Movies), 2040
-							(Movies/HD), 2060 (Movies/4K), 5000 (TV), 5040 (TV/HD).
-						</p>
-					</fieldset>
+							<fieldset className="fieldset min-w-0">
+								<legend className="fieldset-legend">Categories</legend>
+								<TagInput
+									tags={(formData.prowlarr?.categories ?? []).map(String)}
+									onChange={(tags) =>
+										updateProwlarr({ categories: tags.map((t) => Number.parseInt(t, 10)) })
+									}
+									disabled={isReadOnly}
+									placeholder="Add ID..."
+									parseValue={(raw) => {
+										const n = Number.parseInt(raw.trim(), 10);
+										return Number.isNaN(n) ? null : String(n);
+									}}
+								/>
+								<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/50 text-xs">
+									Newznab category IDs. Press Enter or comma to add. Defaults: 2000 (Movies), 2040
+									(Movies/HD), 2060 (Movies/4K), 5000 (TV), 5040 (TV/HD).
+								</p>
+							</fieldset>
 
-					<fieldset className="fieldset min-w-0">
-						<legend className="fieldset-legend">Language Filter</legend>
-						<TagInput
-							tags={formData.prowlarr?.languages ?? []}
-							onChange={(languages) => updateProwlarr({ languages })}
-							disabled={isReadOnly}
-							placeholder="Add keyword..."
-						/>
-						<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/50 text-xs">
-							Only show releases whose title contains at least one of these keywords. Leave empty to
-							show all languages.
-						</p>
-					</fieldset>
+							<fieldset className="fieldset min-w-0">
+								<legend className="fieldset-legend">Language Filter</legend>
+								<TagInput
+									tags={formData.prowlarr?.languages ?? []}
+									onChange={(languages) => updateProwlarr({ languages })}
+									disabled={isReadOnly}
+									placeholder="Add keyword..."
+								/>
+								<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/50 text-xs">
+									Only show releases whose title contains at least one of these keywords. Leave
+									empty to show all languages.
+								</p>
+							</fieldset>
 
-					<fieldset className="fieldset min-w-0">
-						<legend className="fieldset-legend">Quality Filter</legend>
-						<TagInput
-							tags={formData.prowlarr?.qualities ?? []}
-							onChange={(qualities) => updateProwlarr({ qualities })}
-							disabled={isReadOnly}
-							placeholder="Add keyword..."
-						/>
-						<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/50 text-xs">
-							Only show releases whose title contains at least one of these keywords. Leave empty to
-							show all quality tiers.
-						</p>
-					</fieldset>
+							<fieldset className="fieldset min-w-0">
+								<legend className="fieldset-legend">Quality Filter</legend>
+								<TagInput
+									tags={formData.prowlarr?.qualities ?? []}
+									onChange={(qualities) => updateProwlarr({ qualities })}
+									disabled={isReadOnly}
+									placeholder="Add keyword..."
+								/>
+								<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/50 text-xs">
+									Only show releases whose title contains at least one of these keywords. Leave
+									empty to show all quality tiers.
+								</p>
+							</fieldset>
+						</div>
+					)}
 				</div>
 			</div>
 

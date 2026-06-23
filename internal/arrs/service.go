@@ -243,6 +243,17 @@ func (s *Service) TriggerFileRescan(ctx context.Context, pathForRescan string, r
 	return s.scanner.TriggerFileRescan(ctx, pathForRescan, relativePath, metadataStr)
 }
 
+// ClearInstanceCache clears all movie and series caches for a specific instance
+func (s *Service) ClearInstanceCache(ctx context.Context, instanceName string) {
+	if instanceName == "" || s.data == nil {
+		return
+	}
+	slog.DebugContext(ctx, "Clearing ARR cache for instance", "instance", instanceName)
+	s.data.ClearMoviesCache(instanceName)
+	s.data.ClearSeriesCache(instanceName)
+}
+
+
 // DiscoverFileMetadata attempts to discover the rich metadata for a file through the appropriate ARR instance
 func (s *Service) DiscoverFileMetadata(ctx context.Context, filePath, relativePath, nzbName, libraryPath string) (*model.WebhookMetadata, error) {
 	return s.scanner.DiscoverFileMetadata(ctx, filePath, relativePath, nzbName, libraryPath)

@@ -4,6 +4,38 @@ export function cn(...inputs: ClassValue[]) {
 	return clsx(inputs);
 }
 
+// Copy text, falling back to execCommand when the Clipboard API is unavailable (non-secure HTTP).
+export async function copyToClipboard(text: string): Promise<boolean> {
+	if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+		try {
+			await navigator.clipboard.writeText(text);
+			return true;
+		} catch {
+			// fall back below
+		}
+	}
+
+	if (typeof document === "undefined") {
+		return false;
+	}
+
+	try {
+		const textarea = document.createElement("textarea");
+		textarea.value = text;
+		textarea.setAttribute("readonly", "");
+		textarea.style.position = "fixed";
+		textarea.style.top = "-9999px";
+		textarea.style.opacity = "0";
+		document.body.appendChild(textarea);
+		textarea.select();
+		const ok = document.execCommand("copy");
+		document.body.removeChild(textarea);
+		return ok;
+	} catch {
+		return false;
+	}
+}
+
 export function formatBytes(bytes: number, decimals = 2, shortUnit = false) {
 	const sizes = shortUnit
 		? ["B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"]
@@ -72,6 +104,19 @@ export function formatRelativeTime(date: string | Date) {
 	if (diffInSeconds < 2592000) return `${Math.floor(diffInSeconds / 86400)}d ago`;
 
 	return target.toLocaleDateString();
+}
+
+// Formats a "YYYY-MM-DD" account expiration date for display without timezone drift.
+// Returns "" for empty/invalid input so callers can pick their own placeholder.
+export function formatExpirationDate(date?: string): string {
+	if (!date) return "";
+	const [year, month, day] = date.split("-").map(Number);
+	if (!year || !month || !day) return date;
+	return new Date(year, month - 1, day).toLocaleDateString(undefined, {
+		year: "numeric",
+		month: "short",
+		day: "numeric",
+	});
 }
 
 export function formatFutureTime(date: string | Date | null | undefined): string {
