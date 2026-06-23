@@ -53,6 +53,7 @@ type Config struct {
 	Providers       []ProviderConfig   `yaml:"providers" mapstructure:"providers" json:"providers"`
 	Nzblnk          NzblnkConfig       `yaml:"nzblnk" mapstructure:"nzblnk" json:"nzblnk"`
 	Network         NetworkConfig      `yaml:"network" mapstructure:"network" json:"network"`
+	Share           ShareConfig        `yaml:"share" mapstructure:"share" json:"share"`
 	MountPath       string             `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"`
 	MountType       MountType          `yaml:"mount_type" mapstructure:"mount_type" json:"mount_type"`
 	ProfilerEnabled bool               `yaml:"profiler_enabled" mapstructure:"profiler_enabled" json:"profiler_enabled" default:"false"`
@@ -86,6 +87,28 @@ func (n NetworkConfig) GetHTTPSProxy() string { return n.HTTPSProxy }
 
 // GetNoProxy returns the comma-separated bypass list.
 func (n NetworkConfig) GetNoProxy() string { return n.NoProxy }
+
+// ShareConfig controls the private DHT peer discovery network.
+// When Coordinator is true the node acts as a DHT bootstrap point — it starts
+// without StartingNodes and just maintains the routing table. Regular nodes list
+// coordinator addresses in BootstrapNodes.
+type ShareConfig struct {
+	// Enabled turns P2P meta sharing on or off.
+	Enabled bool `yaml:"enabled" mapstructure:"enabled" json:"enabled" default:"false"`
+	// Coordinator makes this node act as a DHT bootstrap node. Set to true on
+	// nodes with a public IP. No data is stored; the node only maintains the DHT
+	// routing table so others can find each other.
+	Coordinator bool `yaml:"coordinator" mapstructure:"coordinator" json:"coordinator" default:"false"`
+	// BootstrapNodes are the DHT coordinator addresses (host:port). Example:
+	// ["node1.example.com:42042", "node2.example.com:42042"]. Ignored when
+	// Coordinator is true.
+	BootstrapNodes []string `yaml:"bootstrap_nodes" mapstructure:"bootstrap_nodes" json:"bootstrap_nodes"`
+	// DHTPort is the UDP port the local DHT server listens on.
+	DHTPort int `yaml:"dht_port" mapstructure:"dht_port" json:"dht_port" default:"42042"`
+	// HTTPPort is the port altmount's HTTP server listens on, announced to peers
+	// so they know where to fetch .meta/.seg files.
+	HTTPPort int `yaml:"http_port" mapstructure:"http_port" json:"http_port" default:"8080"`
+}
 
 // SegmentCacheConfig configures the segment-aligned disk cache shared by FUSE and WebDAV.
 // When enabled, this cache replaces the FUSE VFS disk cache and additionally benefits WebDAV.
