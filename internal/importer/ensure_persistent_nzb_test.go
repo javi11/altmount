@@ -99,6 +99,10 @@ func TestEnsurePersistentNzb_UsesOSTempQueueDir(t *testing.T) {
 	err := svc.ensurePersistentNzb(context.Background(), item)
 	require.NoError(t, err)
 
+	// Cleanup: remove the file from the OS temp queue dir (registered before assertions so it
+	// always runs even if an assertion fails).
+	t.Cleanup(func() { os.Remove(item.NzbPath) })
+
 	// Assert: item.NzbPath must be inside os.TempDir()/.altmount-queue/
 	expected := filepath.Join(os.TempDir(), ".altmount-queue")
 	assert.True(t, strings.HasPrefix(item.NzbPath, expected),
@@ -109,9 +113,6 @@ func TestEnsurePersistentNzb_UsesOSTempQueueDir(t *testing.T) {
 	// Assert: the file actually exists at the new path
 	_, statErr := os.Stat(item.NzbPath)
 	assert.NoError(t, statErr, "moved file should exist at new path")
-
-	// Cleanup: remove the file from the OS temp queue dir
-	t.Cleanup(func() { os.Remove(item.NzbPath) })
 }
 
 func TestEnsurePersistentNzb_AlreadyInTempQueueDir_IsNoop(t *testing.T) {

@@ -794,6 +794,14 @@ func (s *Service) FindAndUpdatePendingUpload(ctx context.Context, filename strin
 	if err != nil {
 		return nil, err
 	}
+	// Backward compatibility: also search the old configDir/.nzbs/ location for items queued
+	// before the OS temp queue dir migration.
+	oldNzbsDir := s.GetNzbFolder()
+	oldItems, err := s.database.Repository.GetPendingQueueItemsByPathPrefix(ctx, oldNzbsDir+string(filepath.Separator))
+	if err != nil {
+		return nil, err
+	}
+	items = append(items, oldItems...)
 
 	for _, it := range items {
 		// Persisted name is "<base><ext>" or, on collision, "<id>-<base><ext>".
@@ -866,6 +874,13 @@ func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueue
 func (s *Service) calculateProcessVirtualDir(item *database.ImportQueueItem, basePath *string) string {
 	// Calculate initial virtual directory from physical/relative path
 	virtualDir := filesystem.CalculateVirtualDirectory(item.NzbPath, *basePath)
+
+	// Early return: NZB is in the OS temp queue dir — use basePath directly.
+	// The temp queue dir has no meaningful directory structure to derive a virtual path from.
+	tempQueueDir := filepath.Join(os.TempDir(), ".altmount-queue")
+	if strings.HasPrefix(item.NzbPath, tempQueueDir+string(filepath.Separator)) || item.NzbPath == tempQueueDir {
+		return *basePath
+	}
 
 	// Fix for issue where files moved to persistent .nzbs directory end up with exposed paths (like /config) in virtual directory
 	// This happens when NzbPath is inside .nzbs and CalculateVirtualDirectory sees the physical parent folder.
@@ -1013,8 +1028,9 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 	absNzbPath, _ := filepath.Abs(item.NzbPath)
 	absNzbDir, _ := filepath.Abs(nzbDir)
 
-	// Simple check: if path starts with persistent dir, assume it's fine
-	if strings.HasPrefix(absNzbPath, absNzbDir) {
+	// Simple check: if path starts with persistent dir (with separator) or equals it, assume it's fine.
+	// The trailing separator prevents a false match like /tmp/.altmount-queue-other/ matching /tmp/.altmount-queue.
+	if strings.HasPrefix(absNzbPath, absNzbDir+string(os.PathSeparator)) || absNzbPath == absNzbDir {
 		return nil
 	}
 
