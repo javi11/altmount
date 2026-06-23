@@ -46,7 +46,7 @@ export const HealthTableRow = memo(function HealthTableRow({
 		if (!item.metadata) return null;
 		try {
 			return JSON.parse(item.metadata);
-		} catch (e) {
+		} catch (_e) {
 			return null;
 		}
 	}, [item.metadata]);
@@ -120,29 +120,43 @@ export const HealthTableRow = memo(function HealthTableRow({
 			</td>
 			<td>
 				<div className="flex flex-col gap-1">
-					<div className="break-all text-sm cursor-help" title={item.library_path || undefined}>{item.library_path?.split("/").pop() || ""}</div>
+					<div className="cursor-help break-all text-sm" title={item.library_path || undefined}>
+						{item.library_path?.split("/").pop() || ""}
+					</div>
 					{parsedMetadata && (
-						<div className="flex flex-wrap gap-1 mt-1">
+						<div className="mt-1 flex flex-wrap gap-1">
 							{parsedMetadata.instanceName && (
 								<span className="badge badge-outline badge-xs">{parsedMetadata.instanceName}</span>
 							)}
 							{parsedMetadata.series?.id && (
-								<span className="badge badge-ghost badge-xs" title="Series ID">SeriesID: {parsedMetadata.series.id}</span>
+								<span className="badge badge-ghost badge-xs" title="Series ID">
+									SeriesID: {parsedMetadata.series.id}
+								</span>
 							)}
 							{parsedMetadata.movie?.id && (
-								<span className="badge badge-ghost badge-xs" title="Movie ID">MovieID: {parsedMetadata.movie.id}</span>
+								<span className="badge badge-ghost badge-xs" title="Movie ID">
+									MovieID: {parsedMetadata.movie.id}
+								</span>
 							)}
 							{parsedMetadata.series?.tvdbId && (
-								<span className="badge badge-ghost badge-xs" title="TVDB ID">TVDBID: {parsedMetadata.series.tvdbId}</span>
+								<span className="badge badge-ghost badge-xs" title="TVDB ID">
+									TVDBID: {parsedMetadata.series.tvdbId}
+								</span>
 							)}
 							{parsedMetadata.episodeFile?.id && (
-								<span className="badge badge-ghost badge-xs" title="Episode File ID">FileID: {parsedMetadata.episodeFile.id}</span>
+								<span className="badge badge-ghost badge-xs" title="Episode File ID">
+									FileID: {parsedMetadata.episodeFile.id}
+								</span>
 							)}
 							{parsedMetadata.movie?.tmdbId && (
-								<span className="badge badge-ghost badge-xs" title="TMDB ID">TMDBID: {parsedMetadata.movie.tmdbId}</span>
+								<span className="badge badge-ghost badge-xs" title="TMDB ID">
+									TMDBID: {parsedMetadata.movie.tmdbId}
+								</span>
 							)}
 							{parsedMetadata.movieFile?.id && (
-								<span className="badge badge-ghost badge-xs" title="Movie File ID">FileID: {parsedMetadata.movieFile.id}</span>
+								<span className="badge badge-ghost badge-xs" title="Movie File ID">
+									FileID: {parsedMetadata.movieFile.id}
+								</span>
 							)}
 						</div>
 					)}

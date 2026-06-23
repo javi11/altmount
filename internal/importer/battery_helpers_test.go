@@ -20,12 +20,13 @@ import (
 
 // batteryEnv holds the full test environment for an import battery test.
 type batteryEnv struct {
-	t        *testing.T
-	client   *fakepool.Client
-	svc      *metadata.MetadataService
-	cfg      *config.Config
-	proc     *Processor
-	metaRoot string
+	t         *testing.T
+	client    *fakepool.Client
+	svc       *metadata.MetadataService
+	cfg       *config.Config
+	proc      *Processor
+	metaRoot  string
+	configDir string // temp dir used as the config directory (Database.Path = configDir/altmount.db)
 }
 
 // newBatteryEnv creates a fresh test environment backed by an in-memory fakepool.
@@ -35,12 +36,14 @@ func newBatteryEnv(t *testing.T) *batteryEnv {
 	t.Helper()
 	client := fakepool.New()
 	metaRoot := t.TempDir()
+	configDir := t.TempDir()
 	cfg := config.DefaultConfig()
+	cfg.Database.Path = filepath.Join(configDir, "altmount.db")
 	cfg.Import.SegmentSamplePercentage = 100
 	cfg.Import.AllowedFileExtensions = append(cfg.Import.AllowedFileExtensions, ".bin")
 	svc := metadata.NewMetadataService(metaRoot)
 	proc := NewProcessor(svc, processorTestPoolManager{client: client}, nil, func() *config.Config { return cfg }, nil)
-	return &batteryEnv{t: t, client: client, svc: svc, cfg: cfg, proc: proc, metaRoot: metaRoot}
+	return &batteryEnv{t: t, client: client, svc: svc, cfg: cfg, proc: proc, metaRoot: metaRoot, configDir: configDir}
 }
 
 // rawMetaPath returns the on-disk path to the .meta file for virtualPath.
@@ -101,6 +104,17 @@ func (e *batteryEnv) runImport(nzb *nzbparser.Nzb, name string) (string, []strin
 		context.Background(),
 		nzbPath, filepath.Dir(nzbPath),
 		1, nil, nil, nil, nil, nil, nil,
+	)
+}
+
+// runImportWithCategory is like runImport but passes queueID and category.
+func (e *batteryEnv) runImportWithCategory(nzb *nzbparser.Nzb, name string, queueID int, category string) (string, []string, error) {
+	e.t.Helper()
+	nzbPath := nzbbuild.WriteTemp(e.t, nzb, name)
+	return e.proc.ProcessNzbFile(
+		context.Background(),
+		nzbPath, filepath.Dir(nzbPath),
+		queueID, nil, nil, nil, &category, nil, nil,
 	)
 }
 

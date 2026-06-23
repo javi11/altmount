@@ -43,3 +43,5 @@ config/config.yaml
 *.log
 build-test-image.sh
 .claude/worktrees/
+# CocoIndex Code (ccc)
+/.cocoindex_code/

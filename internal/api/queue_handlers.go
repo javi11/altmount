@@ -1360,15 +1360,36 @@ func (s *Server) handleDownloadNZB(c *fiber.Ctx) error {
 
 	resolved, resolveErr := nzbfile.ResolveOnDisk(item.NzbPath)
 	if resolveErr != nil {
-		// Try to regenerate from the v3 NzbStore when available.
-		if s.metadataService != nil {
-			storePath := nzbtrim.TrimNzbExtension(item.NzbPath) + ".nzbz"
-			nzbXML, err := s.metadataService.Store().RegenerateNZB(storePath)
+		// Raw .nzb is gone (deleted after successful import).
+		// Reconstruct the .nzbz path the same way processor.go writes it:
+		//   configDir/.nzbs/{sanitizedCategory}/{queueID}-{nzbBasename}.nzbz
+		if s.metadataService != nil && s.configManager != nil {
+			cfg := s.configManager.GetConfigGetter()()
+			configDir := filepath.Dir(cfg.Database.Path)
+			if !filepath.IsAbs(configDir) {
+				if abs, absErr := filepath.Abs(configDir); absErr == nil {
+					configDir = abs
+				}
+			}
+			var categoryStr string
+			if item.Category != nil && *item.Category != "" {
+				categoryStr = strings.ReplaceAll(*item.Category, `\`, "/")
+				categoryStr = strings.Trim(categoryStr, "/")
+				for _, part := range strings.Split(categoryStr, "/") {
+					if part == ".." || part == "." {
+						categoryStr = ""
+						break
+					}
+				}
+			}
+			nzbBase := nzbtrim.TrimNzbExtension(filepath.Base(item.NzbPath))
+			storeRef := filepath.Join(configDir, ".nzbs", categoryStr, fmt.Sprintf("%d-%s.nzbz", item.ID, nzbBase))
+			nzbXML, err := s.metadataService.Store().RegenerateNZB(storeRef)
 			if err != nil {
 				return RespondInternalError(c, "Failed to regenerate NZB from store", err.Error())
 			}
 			if nzbXML != nil {
-				filename := filepath.Base(nzbtrim.TrimNzbExtension(item.NzbPath)) + ".nzb"
+				filename := strings.TrimSuffix(filepath.Base(storeRef), ".nzbz") + ".nzb"
 				c.Set("Content-Type", "application/x-nzb")
 				c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
 				return c.Send(nzbXML)

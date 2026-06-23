@@ -691,3 +691,45 @@ func assertInnerFile(t *testing.T, env *batteryEnv, dir string, entries []fixtur
 	}
 	t.Errorf("no inner file with size %d in %q; found files %v with sizes %v", want, dir, inner, sizes)
 }
+
+// TestImportBattery_NzbzStoredInConfigDir verifies that the .nzbz companion store is
+// written to configDir/.nzbs/{category}/ and NOT co-located with the .nzb temp file.
+func TestImportBattery_NzbzStoredInConfigDir(t *testing.T) {
+	env := newBatteryEnv(t)
+
+	content := bytes.Repeat([]byte("Z"), 30_000)
+	segs := env.registerContent("nzbz-location", content, 10_000, 1.0, nil)
+	nzb := nzbbuild.Build(nzbbuild.File{Subject: "ConfigDirStore.mkv", Segments: segs})
+
+	const queueID = 42
+	const category = "Movies"
+
+	_, _, err := env.runImportWithCategory(nzb, "ConfigDirStore.mkv", queueID, category)
+	if err != nil {
+		t.Fatalf("import failed: %v", err)
+	}
+
+	// The .nzbz must live under configDir/.nzbs/Movies/.
+	// The NZB is written as "ConfigDirStore.mkv.nzb" so TrimNzbExtension yields "ConfigDirStore.mkv".
+	expectedDir := filepath.Join(env.configDir, ".nzbs", category)
+	expectedName := fmt.Sprintf("%d-ConfigDirStore.mkv.nzbz", queueID)
+	expectedPath := filepath.Join(expectedDir, expectedName)
+
+	if _, statErr := os.Stat(expectedPath); os.IsNotExist(statErr) {
+		// List what is actually in expectedDir for a helpful error.
+		entries, _ := os.ReadDir(expectedDir)
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf(".nzbz not found at %q; files in dir: %v", expectedPath, names)
+	}
+
+	// Confirm the .nzbz is NOT in the OS temp dir (old co-location behaviour).
+	nzbzInTemp, _ := filepath.Glob(filepath.Join(os.TempDir(), "*", "*.nzbz"))
+	for _, p := range nzbzInTemp {
+		if filepath.Base(p) == expectedName {
+			t.Errorf(".nzbz unexpectedly found in temp dir: %s", p)
+		}
+	}
+}

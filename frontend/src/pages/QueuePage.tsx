@@ -74,16 +74,18 @@ export function QueuePage() {
 	const [statusFilter, setStatusFilter] = useState<QueueFilter>("");
 	const [searchTerm, setSearchTerm] = useState("");
 	const [selectedItems, setSelectedItems] = useState<Set<number>>(new Set());
-	const [sortBy, setSortBy] = useState<"created_at" | "updated_at" | "status" | "nzb_path">(
-		() => {
-			const saved = localStorage.getItem("queue_sort_by");
-			const validColumns = ["created_at", "updated_at", "status", "nzb_path"];
-			return (validColumns.includes(saved || "") ? saved : "created_at") as "created_at" | "updated_at" | "status" | "nzb_path";
-		},
-	);
+	const [sortBy, setSortBy] = useState<"created_at" | "updated_at" | "status" | "nzb_path">(() => {
+		const saved = localStorage.getItem("queue_sort_by");
+		const validColumns = ["created_at", "updated_at", "status", "nzb_path"];
+		return (validColumns.includes(saved || "") ? saved : "created_at") as
+			| "created_at"
+			| "updated_at"
+			| "status"
+			| "nzb_path";
+	});
 	const [sortOrder, setSortOrder] = useState<"asc" | "desc">(() => {
 		const saved = localStorage.getItem("queue_sort_order");
-		return (saved === "asc" || saved === "desc" ? saved : "desc");
+		return saved === "asc" || saved === "desc" ? saved : "desc";
 	});
 
 	const queryClient = useQueryClient();
@@ -182,7 +184,7 @@ export function QueuePage() {
 	);
 
 	const handleDownload = useCallback(
-		async (id: number, status?: string) => {
+		async (id: number) => {
 			try {
 				const response = await fetch(`/api/queue/${id}/download`);
 				if (!response.ok) {
@@ -198,15 +200,6 @@ export function QueuePage() {
 						}
 					} catch {
 						// Non-JSON error body — fall back to status text.
-					}
-					// For completed items, a missing file is expected — soften the toast.
-					if (response.status === 404 && status === "completed") {
-						showToast({
-							type: "info",
-							title: "NZB file already removed",
-							message: "This NZB was cleaned up after successful import.",
-						});
-						return;
 					}
 					showToast({ type: "error", title, message });
 					return;
@@ -980,8 +973,7 @@ export function QueuePage() {
 																		</button>
 																		<ul className="dropdown-content menu z-[50] w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow-xl">
 																			{(item.status === QueueStatus.PENDING ||
-																				item.status === QueueStatus.FAILED ||
-																				item.status === QueueStatus.COMPLETED) && (
+																				item.status === QueueStatus.FAILED) && (
 																				<li>
 																					<button
 																						type="button"
@@ -1011,7 +1003,7 @@ export function QueuePage() {
 																			<li>
 																				<button
 																					type="button"
-																					onClick={() => handleDownload(item.id, item.status)}
+																					onClick={() => handleDownload(item.id)}
 																				>
 																					<Download className="h-4 w-4" />
 																					Download NZB

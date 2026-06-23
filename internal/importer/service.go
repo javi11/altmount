@@ -758,18 +758,26 @@ func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath 
 // because ensurePersistentNzb rewrites the path after insert, so this matches a still-pending item by
 // its category-independent base filename and updates its category/priority in place. Returns nil if none.
 func (s *Service) FindAndUpdatePendingUpload(ctx context.Context, filename string, category *string, priority *database.QueuePriority) (*database.ImportQueueItem, error) {
-	cfg := s.configGetter()
-	nzbsDir := filepath.Join(filepath.Dir(cfg.Database.Path), ".nzbs")
+	// NZBs uploaded via the API are persisted into the OS temp queue dir.
+	queueDir := filepath.Join(os.TempDir(), ".altmount-queue")
 
 	base := nzbtrim.TrimNzbExtension(sanitizeFilename(filepath.Base(filename)))
 	if base == "" {
 		return nil, nil
 	}
 
-	items, err := s.database.Repository.GetPendingQueueItemsByPathPrefix(ctx, nzbsDir+string(filepath.Separator))
+	items, err := s.database.Repository.GetPendingQueueItemsByPathPrefix(ctx, queueDir+string(filepath.Separator))
 	if err != nil {
 		return nil, err
 	}
+	// Backward compatibility: also search the old configDir/.nzbs/ location for items queued
+	// before the OS temp queue dir migration.
+	oldNzbsDir := s.GetNzbFolder()
+	oldItems, err := s.database.Repository.GetPendingQueueItemsByPathPrefix(ctx, oldNzbsDir+string(filepath.Separator))
+	if err != nil {
+		return nil, err
+	}
+	items = append(items, oldItems...)
 
 	for _, it := range items {
 		// Persisted name is "<base><ext>" or, on collision, "<id>-<base><ext>".
@@ -842,6 +850,13 @@ func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueue
 func (s *Service) calculateProcessVirtualDir(item *database.ImportQueueItem, basePath *string) string {
 	// Calculate initial virtual directory from physical/relative path
 	virtualDir := filesystem.CalculateVirtualDirectory(item.NzbPath, *basePath)
+
+	// Early return: NZB is in the OS temp queue dir — use basePath directly.
+	// The temp queue dir has no meaningful directory structure to derive a virtual path from.
+	tempQueueDir := filepath.Join(os.TempDir(), ".altmount-queue")
+	if strings.HasPrefix(item.NzbPath, tempQueueDir+string(filepath.Separator)) || item.NzbPath == tempQueueDir {
+		return *basePath
+	}
 
 	// Fix for issue where files moved to persistent .nzbs directory end up with exposed paths (like /config) in virtual directory
 	// This happens when NzbPath is inside .nzbs and CalculateVirtualDirectory sees the physical parent folder.
@@ -976,25 +991,22 @@ func sanitizeVirtualPath(p string) string {
 	return p
 }
 
-// ensurePersistentNzb moves the NZB file to a persistent location in the metadata directory
+// ensurePersistentNzb moves the NZB file to a persistent location in the OS
+// temporary queue directory. Using the OS temp dir (instead of configDir/.nzbs/)
+// keeps raw staging files separate from the permanent .nzbz store and prevents
+// stremio's defer os.RemoveAll(stageDir) from deleting the file before the
+// worker can process it.
 func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.ImportQueueItem) error {
-	cfg := s.configGetter()
-	// Use the database directory as the base for the persistent NZB storage
-	// This puts it next to metadata (e.g. /config/.nzbs)
-	configDir := filepath.Dir(cfg.Database.Path)
-	nzbDir := filepath.Join(configDir, ".nzbs")
-
-	// Add category subfolder if present to keep NZBs organized
-	if item.Category != nil && *item.Category != "" {
-		nzbDir = filepath.Join(nzbDir, *item.Category)
-	}
+	// Use OS temp queue dir; itemID ensures uniqueness so no category subfolder needed.
+	nzbDir := filepath.Join(os.TempDir(), ".altmount-queue")
 
 	// Check if current path is already in the persistent directory
 	absNzbPath, _ := filepath.Abs(item.NzbPath)
 	absNzbDir, _ := filepath.Abs(nzbDir)
 
-	// Simple check: if path starts with persistent dir, assume it's fine
-	if strings.HasPrefix(absNzbPath, absNzbDir) {
+	// Simple check: if path starts with persistent dir (with separator) or equals it, assume it's fine.
+	// The trailing separator prevents a false match like /tmp/.altmount-queue-other/ matching /tmp/.altmount-queue.
+	if strings.HasPrefix(absNzbPath, absNzbDir+string(os.PathSeparator)) || absNzbPath == absNzbDir {
 		return nil
 	}
 
