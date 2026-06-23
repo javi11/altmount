@@ -1743,8 +1743,8 @@ func (r *HealthRepository) UpdateLibraryPath(ctx context.Context, filePath strin
 
 // RenameHealthRecord updates the file_path of a health record or records under a directory after a MOVE operation
 func (r *HealthRepository) RenameHealthRecord(ctx context.Context, oldPath, newPath string) error {
-	oldPath = strings.TrimPrefix(oldPath, "/")
-	newPath = strings.TrimPrefix(newPath, "/")
+	oldPath = normalizeHealthPath(oldPath)
+	newPath = normalizeHealthPath(newPath)
 
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
