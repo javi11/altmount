@@ -51,6 +51,35 @@ func TestBuildStremioStreamsFiltersSeasonPackByEpisodeSelector(t *testing.T) {
 	require.Equal(t, "Show.S01E02.mkv", streams[0].Title)
 }
 
+func TestBuildStremioStreamsFindsMediaFilesInNestedSeasonPackDirectories(t *testing.T) {
+	server, item := newStremioStreamsTestServer(t, []string{
+		"Season 01/Show.S01E01.mkv",
+		"Season 01/Show.S01E02.mkv",
+	})
+
+	selector := &stremioEpisodeSelector{Season: 1, Episode: 2}
+	streams, err := server.buildStremioStreams(item, "https://alt.example", "download-key", "Release.Name", selector)
+	require.NoError(t, err)
+	require.Len(t, streams, 1)
+	require.Equal(t, "Show.S01E02.mkv", streams[0].Name)
+
+	parsedURL, err := url.Parse(streams[0].URL)
+	require.NoError(t, err)
+	require.Equal(t, "/complete/TV/Release.Name/Season 01/Show.S01E02.mkv", parsedURL.Query().Get("path"))
+}
+
+func TestBuildStremioStreamsReturnsEmptySliceWhenSelectorDoesNotMatch(t *testing.T) {
+	server, item := newStremioStreamsTestServer(t, []string{
+		"Show.S01E01.mkv",
+	})
+
+	selector := &stremioEpisodeSelector{Season: 1, Episode: 2}
+	streams, err := server.buildStremioStreams(item, "https://alt.example", "download-key", "Release.Name", selector)
+	require.NoError(t, err)
+	require.NotNil(t, streams)
+	require.Empty(t, streams)
+}
+
 func TestStremioEpisodeSelectorMatchesCommonEpisodeFilenameForms(t *testing.T) {
 	selector := &stremioEpisodeSelector{Season: 1, Episode: 2}
 
@@ -70,7 +99,9 @@ func newStremioStreamsTestServer(t *testing.T, names []string) (*Server, *databa
 	metadataDir := filepath.Join(root, strings.TrimPrefix(storagePath, "/"))
 	require.NoError(t, os.MkdirAll(metadataDir, 0755))
 	for _, name := range names {
-		require.NoError(t, os.WriteFile(filepath.Join(metadataDir, name+".meta"), []byte("test"), 0644))
+		metaPath := filepath.Join(metadataDir, name+".meta")
+		require.NoError(t, os.MkdirAll(filepath.Dir(metaPath), 0755))
+		require.NoError(t, os.WriteFile(metaPath, []byte("test"), 0644))
 	}
 
 	server := &Server{metadataService: metadata.NewMetadataService(root)}

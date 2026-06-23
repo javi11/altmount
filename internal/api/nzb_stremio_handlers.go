@@ -411,24 +411,50 @@ func (s *Server) buildStremioStreams(item *database.ImportQueueItem, baseURL, do
 		return nil, fmt.Errorf("metadata service not available")
 	}
 
-	files, err := s.metadataService.ListDirectory(storagePath)
+	files, err := s.listStremioMediaFiles(storagePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list directory %q: %w", storagePath, err)
 	}
 
-	var streams []StremioStream
+	streams := make([]StremioStream, 0, len(files))
 	for _, name := range files {
-		if !isMediaExtension(filepath.Ext(name)) {
-			continue
-		}
 		if selector != nil && !selector.matches(name) {
 			continue
 		}
-		virtualPath := filepath.ToSlash(filepath.Join(storagePath, name))
+		virtualPath := filepath.ToSlash(filepath.Join(storagePath, filepath.FromSlash(name)))
 		streams = append(streams, stremioStreamFromPath(virtualPath, baseURL, downloadKey))
 	}
 
 	return streams, nil
+}
+
+func (s *Server) listStremioMediaFiles(storagePath string) ([]string, error) {
+	dirs, files, err := s.metadataService.ListDirectoryAll(storagePath)
+	if err != nil {
+		return nil, err
+	}
+
+	mediaFiles := make([]string, 0, len(files))
+	for _, name := range files {
+		if isMediaExtension(filepath.Ext(name)) {
+			mediaFiles = append(mediaFiles, name)
+		}
+	}
+
+	for _, dir := range dirs {
+		if dir == nil {
+			continue
+		}
+		children, err := s.listStremioMediaFiles(filepath.ToSlash(filepath.Join(storagePath, dir.Name())))
+		if err != nil {
+			return nil, err
+		}
+		for _, child := range children {
+			mediaFiles = append(mediaFiles, filepath.ToSlash(filepath.Join(dir.Name(), filepath.FromSlash(child))))
+		}
+	}
+
+	return mediaFiles, nil
 }
 
 // stremioStreamFromPath creates a StremioStream for a given virtual file path.
