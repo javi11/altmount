@@ -524,9 +524,19 @@ func (s *Server) waitAndRedirectToStream(c *fiber.Ctx, itemID int64, baseURL, do
 	}
 }
 
-// validateDownloadKey returns true if key matches any user's hashed API key.
+// validateDownloadKey returns true if key matches any user's hashed API key or the service API key hash.
 func (s *Server) validateDownloadKey(ctx context.Context, key string) bool {
-	if s.userRepo == nil || key == "" {
+	if key == "" {
+		return false
+	}
+	// Check service API key hash (used by AIOStreams sidecar).
+	if s.configManager != nil {
+		svcKey := s.configManager.GetConfig().Stremio.ServiceAPIKey
+		if svcKey != "" && subtle.ConstantTimeCompare([]byte(auth.HashAPIKey(svcKey)), []byte(key)) == 1 {
+			return true
+		}
+	}
+	if s.userRepo == nil {
 		return false
 	}
 	users, err := s.userRepo.GetAllUsers(ctx)

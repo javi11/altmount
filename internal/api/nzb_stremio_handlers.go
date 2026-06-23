@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/subtle"
 	"fmt"
 	"io"
 	"log/slog"
@@ -101,7 +102,11 @@ func (s *Server) handleNzbStreams(c *fiber.Ctx) error {
 		// Accept raw API key via X-Api-Key header (AIOStreams sends altmountApiKey here).
 		// Hash it so validateDownloadKey can compare against the stored hash.
 		if rawKey := c.Get("X-Api-Key"); rawKey != "" {
-			if s.validateAPIKey(c, rawKey) {
+			// Check service API key first (used by AIOStreams sidecar).
+			svcKey := s.configManager.GetConfig().Stremio.ServiceAPIKey
+			if svcKey != "" && subtle.ConstantTimeCompare([]byte(rawKey), []byte(svcKey)) == 1 {
+				downloadKey = auth.HashAPIKey(svcKey)
+			} else if s.validateAPIKey(c, rawKey) {
 				downloadKey = auth.HashAPIKey(rawKey)
 			} else {
 				slog.WarnContext(ctx, "Stremio stream endpoint: authentication failed - invalid X-Api-Key")
