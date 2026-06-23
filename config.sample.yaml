@@ -177,6 +177,28 @@ health:
 mount_path: '' # WebDAV mount path, Example: '/mnt/remotes/altmount' or '/mnt/unionfs'. Must be an absolute path.
                # Windows examples: 'Z:' (drive letter via WinFsp) or 'C:\altmount' (directory mount)
 
+# Stremio NZB stream endpoint configuration
+stremio:
+  enabled: false           # Enable the Stremio NZB streaming endpoint
+  nzb_ttl_hours: 24        # How long to cache processed NZB results (0 = forever)
+  base_url: ''             # Public base URL of this AltMount instance (auto-detected if empty)
+  # Auto-generated API key used by the AIOStreams sidecar to authenticate with /api/nzb/streams.
+  # Leave empty — AltMount generates and saves it on first start.
+  service_api_key: ''
+
+  # ─────────────────────────────────────────────────────────────────────
+  # DEPRECATED: The built-in Prowlarr integration is deprecated.
+  # Migrate to AIOStreams (docker-compose.stremio.yml) for NZB indexing.
+  # Prowlarr settings below continue to work but will be removed in a future release.
+  # ─────────────────────────────────────────────────────────────────────
+  prowlarr:
+    enabled: false
+    host: 'http://localhost:9696'
+    api_key: ''
+    categories: [2000, 2010, 2030, 2040, 2045, 2060, 5000, 5010, 5030, 5040]
+    languages: []
+    qualities: []
+
 # SABnzbd-compatible API configuration
 sabnzbd:
   enabled: false # Enable SABnzbd-compatible API

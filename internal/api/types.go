@@ -202,14 +202,16 @@ type ArrsInstanceAPIResponse struct {
 
 // StremioAPIResponse sanitizes Stremio config for API responses
 type StremioAPIResponse struct {
-	Enabled     bool                `json:"enabled"`
-	NzbTTLHours int                 `json:"nzb_ttl_hours,omitempty"`
-	BaseURL     string              `json:"base_url,omitempty"`
-	Prowlarr    ProwlarrAPIResponse `json:"prowlarr"`
+	Enabled       bool                `json:"enabled"`
+	NzbTTLHours   int                 `json:"nzb_ttl_hours,omitempty"`
+	BaseURL       string              `json:"base_url,omitempty"`
+	ServiceAPIKey string              `json:"service_api_key,omitempty"`
+	Prowlarr      ProwlarrAPIResponse `json:"prowlarr"`
 }
 
 // ProwlarrAPIResponse sanitizes Prowlarr config for API responses
 type ProwlarrAPIResponse struct {
+	Deprecated bool     `json:"deprecated"` // always true — users should migrate to AIOStreams
 	Enabled    bool     `json:"enabled"`
 	Host       string   `json:"host,omitempty"`
 	APIKey     string   `json:"api_key"`
@@ -376,10 +378,12 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 	}
 
 	stremioResp := StremioAPIResponse{
-		Enabled:     cfg.Stremio.Enabled != nil && *cfg.Stremio.Enabled,
-		NzbTTLHours: cfg.Stremio.NzbTTLHours,
-		BaseURL:     cfg.Stremio.BaseURL,
+		Enabled:       cfg.Stremio.Enabled != nil && *cfg.Stremio.Enabled,
+		NzbTTLHours:   cfg.Stremio.NzbTTLHours,
+		BaseURL:       cfg.Stremio.BaseURL,
+		ServiceAPIKey: cfg.Stremio.ServiceAPIKey,
 		Prowlarr: ProwlarrAPIResponse{
+			Deprecated: true,
 			Enabled:    cfg.Stremio.Prowlarr.Enabled != nil && *cfg.Stremio.Prowlarr.Enabled,
 			Host:       cfg.Stremio.Prowlarr.Host,
 			APIKey:     cfg.Stremio.Prowlarr.APIKey,

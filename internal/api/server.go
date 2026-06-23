@@ -379,6 +379,9 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/user/logout", s.handleAuthLogout)
 	api.Post("/user/api-key/regenerate", s.handleRegenerateAPIKey)
 	api.Put("/user/password", s.handleChangeOwnPassword)
+
+	// Stremio onboarding info (authenticated; used by the frontend setup wizard)
+	api.Get("/stremio/setup", s.handleStremioSetup)
 }
 
 // Shutdown shuts down the API server and its managed resources
