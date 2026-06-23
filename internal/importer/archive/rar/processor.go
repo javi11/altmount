@@ -201,12 +201,6 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 // following stopped early (bad numbering) or the upload is genuinely incomplete.
 const volumeCoverageMinPercent = 80
 
-// maxSingleSegmentSize is the per-file coverage tolerance used both when patching
-// a missing trailing segment and when deciding whether an inner file's mapped bytes
-// are close enough to its declared size. ~800 KB matches the typical Usenet segment
-// size of 768 KB with a small safety margin.
-const maxSingleSegmentSize = 800_000
-
 // checkVolumeCoverage fails when rardecode followed far fewer volume bytes than the
 // supplied volumes contain — the signature of truncated volume following. It sums
 // the file payload across all analyzed parts and compares it to the total size of
@@ -515,26 +509,6 @@ func (rh *rarProcessor) convertAggregatedFilesToRarContent(ctx context.Context, 
 		}
 
 		rc.Segments = fileSegments
-
-		// Sum the bytes actually backed by segments and compare to the size the RAR
-		// header declares. If volume following stopped early (truncated/incomplete
-		// archive), a file can claim its full size while only a fraction is mapped;
-		// emitting it surfaces an unplayable file that still reports "healthy", so
-		// *ARRs treat the file as complete and stop searching for a
-		// good copy. Drop any file short by more than one segment's worth
-		// (maxSingleSegmentSize) so it stays absent, wanted, and looking for a valid copy.
-		var mappedBytes int64
-		for _, s := range fileSegments {
-			mappedBytes += s.EndOffset - s.StartOffset + 1
-		}
-		if rc.Size > 0 && rc.Size-mappedBytes > maxSingleSegmentSize {
-			rh.log.WarnContext(ctx, "Omitting partially-covered inner file",
-				"filename", rc.Filename,
-				"declared_size", rc.Size,
-				"mapped_bytes", mappedBytes)
-			continue
-		}
-
 		out = append(out, rc)
 	}
 
@@ -560,6 +534,8 @@ func patchMissingSegment(segments []*metapb.SegmentData, expectedSize, coveredSi
 		// No patching needed
 		return segments, coveredSize, nil
 	}
+
+	const maxSingleSegmentSize = 800000 // ~800KB, typical segment is ~768KB
 
 	// Check if the shortfall is small enough to be a single missing segment
 	if shortfall > maxSingleSegmentSize {
