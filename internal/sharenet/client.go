@@ -2,6 +2,7 @@ package sharenet
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -17,10 +18,17 @@ import (
 // ErrNoPeers is returned when no peer has the requested release.
 var ErrNoPeers = errors.New("sharenet: no peers have this release")
 
-// ReleaseFiles holds the raw bytes fetched from a peer.
+// ReleaseFiles holds the raw bytes fetched from a peer plus the virtual path
+// the peer stored the release under (so we write it at the same location).
 type ReleaseFiles struct {
-	MetaBytes []byte // .meta file content (FileMetadata proto, structural part)
-	SegBytes  []byte // .seg sidecar content (zstd-compressed FileSegments proto)
+	VirtualPath string // peer's metadata virtual path, e.g. "Movies/Title/Title.mkv"
+	MetaBytes   []byte // .meta file content (FileMetadata proto)
+	SegBytes    []byte // .seg sidecar content (zstd-compressed FileSegments proto); may be nil
+}
+
+// releaseInfo is the JSON returned by GET /api/share/info/{hash}.
+type releaseInfo struct {
+	VirtualPath string `json:"virtual_path"`
 }
 
 // Client coordinates DHT lookups and meta file transfers.
@@ -76,6 +84,17 @@ func (c *Client) Announce(ctx context.Context, releaseHash string) error {
 func (c *Client) fetchFromPeer(ctx context.Context, peer netip.AddrPort, releaseHash string) (*ReleaseFiles, error) {
 	base := fmt.Sprintf("http://%s/api/share", peer)
 
+	// Fetch the release info (virtual path) first so we know where to store it.
+	infoBytes, err := c.get(ctx, base+"/info/"+releaseHash)
+	if err != nil {
+		return nil, fmt.Errorf("fetch info from %s: %w", peer, err)
+	}
+	var info releaseInfo
+	if err := json.Unmarshal(infoBytes, &info); err != nil || info.VirtualPath == "" {
+		c.blacklistPeer(peer)
+		return nil, fmt.Errorf("peer %s sent invalid info: %w", peer, err)
+	}
+
 	metaBytes, err := c.get(ctx, base+"/meta/"+releaseHash)
 	if err != nil {
 		return nil, fmt.Errorf("fetch meta from %s: %w", peer, err)
@@ -88,12 +107,14 @@ func (c *Client) fetchFromPeer(ctx context.Context, peer netip.AddrPort, release
 		return nil, fmt.Errorf("peer %s sent unparseable .meta: %w", peer, err)
 	}
 
-	segBytes, err := c.get(ctx, base+"/seg/"+releaseHash)
-	if err != nil {
-		return nil, fmt.Errorf("fetch seg from %s: %w", peer, err)
+	// The .seg sidecar is optional: single-file (v1) releases have none, so a
+	// 404 or fetch error here is not fatal — SegBytes stays nil.
+	segBytes, segErr := c.get(ctx, base+"/seg/"+releaseHash)
+	if segErr != nil {
+		segBytes = nil
 	}
 
-	return &ReleaseFiles{MetaBytes: metaBytes, SegBytes: segBytes}, nil
+	return &ReleaseFiles{VirtualPath: info.VirtualPath, MetaBytes: metaBytes, SegBytes: segBytes}, nil
 }
 
 // metaMagicV2 is the prefix the metadata package writes on v2 ".meta" files.

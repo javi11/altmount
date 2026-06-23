@@ -31,6 +31,7 @@ import (
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/sabnzbd"
+	"github.com/javi11/altmount/internal/sharenet"
 	"github.com/javi11/altmount/internal/utils"
 	"github.com/javi11/altmount/pkg/rclonecli"
 	"github.com/javi11/nzbparser"
@@ -539,6 +540,11 @@ func (s *Service) SetArrsService(service any) {
 	if s.postProcessor != nil {
 		s.postProcessor.SetArrsService(as)
 	}
+}
+
+// SetShareClient wires the P2P sharing client and store into the import processor.
+func (s *Service) SetShareClient(client *sharenet.Client, store *sharenet.ReleaseStore) {
+	s.processor.SetShareClient(client, store)
 }
 
 // GetQueueStats returns current queue statistics from database

@@ -11,10 +11,13 @@ import (
 	"github.com/javi11/altmount/internal/sharenet"
 )
 
-// peerServer starts an httptest.Server that serves meta and seg bytes for hash.
+// peerServer starts an httptest.Server that serves info, meta and seg bytes for hash.
 func peerServer(t *testing.T, hash string, metaBytes, segBytes []byte) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
+	mux.HandleFunc("/api/share/info/"+hash, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"virtual_path":"Movies/Title/Title.mkv"}`))
+	})
 	mux.HandleFunc("/api/share/meta/"+hash, func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write(metaBytes)
 	})
@@ -54,6 +57,9 @@ func TestClient_LookupAndFetch_Success(t *testing.T) {
 	}
 	if string(files.SegBytes) != "seg" {
 		t.Fatalf("seg mismatch: got %q", files.SegBytes)
+	}
+	if files.VirtualPath != "Movies/Title/Title.mkv" {
+		t.Fatalf("virtual path mismatch: got %q", files.VirtualPath)
 	}
 }
 

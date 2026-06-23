@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -30,6 +31,7 @@ import (
 	"github.com/javi11/altmount/internal/nzbfile"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
+	"github.com/javi11/altmount/internal/sharenet"
 )
 
 const (
@@ -53,6 +55,78 @@ type Processor struct {
 	// Pre-compiled regex patterns for RAR file sorting
 	rarPartPattern  *regexp.Regexp // pattern.part###.rar
 	rarPartPattern2 *regexp.Regexp // pattern.r###
+
+	// P2P meta sharing — nil when sharing is disabled.
+	shareClient *sharenet.Client
+	shareStore  *sharenet.ReleaseStore
+}
+
+// SetShareClient wires the P2P sharing client and store into the processor.
+// When set, ProcessNzbFile tries a peer lookup before downloading a single-file
+// release, and announces the release hash after a successful single-file import.
+func (proc *Processor) SetShareClient(client *sharenet.Client, store *sharenet.ReleaseStore) {
+	proc.shareClient = client
+	proc.shareStore = store
+}
+
+// readNzbBytes reads the raw NZB content for hashing, transparently handling
+// gzip-compressed (.nzb.gz) files. Capped at 50 MiB.
+func readNzbBytes(filePath string) ([]byte, error) {
+	rc, err := nzbfile.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer rc.Close()
+	return io.ReadAll(io.LimitReader(rc, 50<<20))
+}
+
+// tryShareShortcut attempts to satisfy an import from a P2P peer. On success it
+// writes the peer's metadata at the peer-advertised virtual path and returns
+// (virtualPath, true). On any miss or error it returns ("", false) so the
+// caller proceeds with a normal import.
+func (proc *Processor) tryShareShortcut(ctx context.Context, filePath string, queueID int) (string, bool) {
+	nzbBytes, err := readNzbBytes(filePath)
+	if err != nil {
+		return "", false
+	}
+	releaseHash := sharenet.ComputeReleaseHash(nzbBytes)
+
+	files, err := proc.shareClient.LookupAndFetch(ctx, releaseHash)
+	if err != nil {
+		return "", false // ErrNoPeers or fetch failure — fall through to normal import
+	}
+
+	if err := proc.metadataService.WriteRawMeta(files.VirtualPath, files.MetaBytes, files.SegBytes); err != nil {
+		proc.log.WarnContext(ctx, "sharenet: failed to write peer metadata, falling back to normal import",
+			"virtual_path", files.VirtualPath, "err", err)
+		return "", false
+	}
+
+	proc.log.InfoContext(ctx, "sharenet: import shortcut via P2P peer",
+		"release_hash", releaseHash[:8], "virtual_path", files.VirtualPath, "queue_id", queueID)
+
+	// Register + re-announce so this node also serves the release going forward.
+	if proc.shareStore != nil {
+		proc.shareStore.Register(releaseHash, files.VirtualPath)
+	}
+	proc.announceRelease(ctx, releaseHash)
+
+	return files.VirtualPath, true
+}
+
+// announceRelease advertises releaseHash to the DHT in the background.
+func (proc *Processor) announceRelease(ctx context.Context, releaseHash string) {
+	if proc.shareClient == nil {
+		return
+	}
+	go func() {
+		announceCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := proc.shareClient.Announce(announceCtx, releaseHash); err != nil {
+			proc.log.WarnContext(ctx, "sharenet: announce failed",
+				"release_hash", releaseHash[:8], "err", err)
+		}
+	}()
 }
 
 // NewProcessor creates a new NZB processor using metadata storage
@@ -350,6 +424,15 @@ func fastFailConcurrency(cfg *config.Config, fallback int) int {
 // metadata files written to disk; it is populated even on partial failure so callers can clean up.
 // Paths prefixed with "DIR:" indicate a metadata directory that should be removed entirely.
 func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePath string, queueID int, allowedExtensionsOverride *[]string, virtualDirOverride *string, extractedFiles []parser.ExtractedFileInfo, category *string, metadata *string, downloadID *string) (string, []string, error) {
+	// P2P shortcut: if a peer already imported this exact NZB (single-file
+	// releases only — see Announce below), fetch its metadata and skip the
+	// NNTP download entirely. Any failure falls through to a normal import.
+	if proc.shareClient != nil {
+		if vp, ok := proc.tryShareShortcut(ctx, filePath, queueID); ok {
+			return vp, []string{vp}, nil
+		}
+	}
+
 	// Gate this import behind the pool admission controller so we can cap how
 	// many NZB imports run concurrently end-to-end and yield to streams under
 	// load. The Acquire is a no-op when no caps are configured.
@@ -606,6 +689,18 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 	// Update progress: complete
 	if err == nil {
 		proc.updateProgress(queueID, 100)
+
+		// P2P sharing: advertise single-file releases so peers importing the
+		// same NZB can skip the download. Only single-file releases map cleanly
+		// to one .meta, which is the invariant the fetch side relies on.
+		if proc.shareClient != nil && proc.shareStore != nil &&
+			parsed.Type == parser.NzbTypeSingleFile && result != "" {
+			if nzbBytes, hashErr := readNzbBytes(filePath); hashErr == nil {
+				releaseHash := sharenet.ComputeReleaseHash(nzbBytes)
+				proc.shareStore.Register(releaseHash, result)
+				proc.announceRelease(ctx, releaseHash)
+			}
+		}
 	} else if errors.Is(err, nntppool.ErrArticleNotFound) {
 		return result, writtenPaths, ErrArticlesNotFound
 	}

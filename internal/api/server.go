@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/gofiber/adaptor/v2"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/limiter"
@@ -24,6 +25,7 @@ import (
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/rclone"
+	"github.com/javi11/altmount/internal/sharenet"
 	"github.com/javi11/altmount/internal/updater"
 	"github.com/javi11/altmount/internal/version"
 	"golang.org/x/sync/singleflight"
@@ -67,6 +69,10 @@ type Server struct {
 	migrationRepo       *database.ImportMigrationRepository
 	updater             updater.Updater
 	ready               atomic.Bool
+
+	// P2P meta sharing — nil when sharing is disabled.
+	shareClient *sharenet.Client
+	shareStore  *sharenet.ReleaseStore
 
 	speedtest     *speedtestCoordinator
 	speedtestOnce sync.Once
@@ -162,6 +168,13 @@ func (s *Server) IsReady() bool {
 	return s.ready.Load()
 }
 
+// SetShareClient wires the P2P meta sharing client and store into the API
+// server. The /api/share routes are only registered when store is non-nil.
+func (s *Server) SetShareClient(client *sharenet.Client, store *sharenet.ReleaseStore) {
+	s.shareClient = client
+	s.shareStore = store
+}
+
 // SetupFiberRoutes configures API routes directly on the Fiber app
 func (s *Server) SetupRoutes(app *fiber.App) {
 	app.Use("/sabnzbd", s.handleSABnzbd)
@@ -183,6 +196,13 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/import/file", s.handleManualImportFile)
 	api.Post("/arrs/webhook", s.handleArrsWebhook)
 	api.Post("/nzb/streams", s.handleNzbStreams)
+
+	// P2P meta sharing — public: the release hash is the capability, no auth needed.
+	// Registered before the JWT middleware below so peers can fetch unauthenticated.
+	if s.shareStore != nil {
+		shareHandler := adaptor.HTTPHandler(sharenet.NewHandler(s.shareStore))
+		api.All("/share/*", shareHandler)
+	}
 
 	cfg := s.configManager.GetConfig()
 
