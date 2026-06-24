@@ -115,8 +115,9 @@ func (proc *Processor) tryShareShortcut(ctx context.Context, releaseHash, storeR
 		}
 		// Never trust a peer for decryption parameters: a malicious peer could
 		// supply wrong AES keys/password and corrupt the read path. Encrypted
-		// releases fall back to a normal import, which derives the keys locally.
-		if metaCarriesDecryptionParams(m.Meta) {
+		// releases fall back to a normal import (which derives the keys locally)
+		// unless the operator opted in via share.allow_encrypted.
+		if shouldRejectMeta(m.Meta, proc.configGetter().Share.AllowEncrypted) {
 			proc.log.InfoContext(ctx, "sharenet: peer meta declares encryption, importing normally",
 				"release_hash", shortHash(releaseHash), "virtual_path", m.VirtualPath)
 			return "", nil, false
@@ -172,6 +173,13 @@ func shortHash(h string) string {
 		return h[:8]
 	}
 	return h
+}
+
+// shouldRejectMeta reports whether a peer meta must be rejected from the import
+// shortcut on encryption grounds. Encrypted metas are rejected unless the
+// operator has explicitly opted in via share.allow_encrypted.
+func shouldRejectMeta(fm *metapb.FileMetadata, allowEncrypted bool) bool {
+	return !allowEncrypted && metaCarriesDecryptionParams(fm)
 }
 
 // metaCarriesDecryptionParams reports whether fm declares any encryption or

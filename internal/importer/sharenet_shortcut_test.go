@@ -31,6 +31,24 @@ func TestIsSafeVirtualPath(t *testing.T) {
 	}
 }
 
+func TestShouldRejectEncryptedMeta(t *testing.T) {
+	enc := &metapb.FileMetadata{Encryption: metapb.Encryption_AES}
+	plain := &metapb.FileMetadata{}
+
+	if !shouldRejectMeta(enc, false) {
+		t.Error("encrypted meta must be rejected when allowEncrypted=false")
+	}
+	if shouldRejectMeta(enc, true) {
+		t.Error("encrypted meta must be allowed when allowEncrypted=true")
+	}
+	if shouldRejectMeta(plain, false) {
+		t.Error("plain meta must never be rejected on encryption grounds")
+	}
+	if shouldRejectMeta(plain, true) {
+		t.Error("plain meta must never be rejected on encryption grounds")
+	}
+}
+
 func TestMetaCarriesDecryptionParams(t *testing.T) {
 	tests := []struct {
 		name string
