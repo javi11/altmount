@@ -278,6 +278,14 @@ share:
   #   - 'node2.example.com:42042'
   dht_port: 42042 # UDP port the local DHT server listens on
   http_port: 8080 # Port announced to peers for fetching .meta files (match the API port)
+  # Max requests per client IP/minute to the public /api/share/* endpoints (0 = unlimited).
+  rate_limit_per_minute: 120
+  # Distinct peer IPs that must agree on a release's metadata before the import
+  # shortcut trusts it. 1 = trust first peer; raise to 2+ on untrusted networks.
+  min_peers: 1
+  # Apply peer metadata for encrypted releases (trusts peer-supplied keys). Leave
+  # false unless you understand the risk; encrypted releases import normally otherwise.
+  allow_encrypted: false
 
 # NNTP Providers Configuration
 # Configure multiple providers for redundancy and load balancing

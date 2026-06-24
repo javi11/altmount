@@ -108,6 +108,20 @@ type ShareConfig struct {
 	// HTTPPort is the port altmount's HTTP server listens on, announced to peers
 	// so they know where to fetch .meta/.seg files.
 	HTTPPort int `yaml:"http_port" mapstructure:"http_port" json:"http_port" default:"8080"`
+	// RateLimitPerMinute caps requests per client IP to the public /api/share/*
+	// endpoints. 0 disables the limit. Default 120 (2 req/s) comfortably serves a
+	// real peer fetching a manifest plus per-file metas.
+	RateLimitPerMinute int `yaml:"rate_limit_per_minute" mapstructure:"rate_limit_per_minute" json:"rate_limit_per_minute" default:"120"`
+	// MinPeers is how many DISTINCT peer IPs must serve a byte-identical metadata
+	// set before the import shortcut trusts it. 1 = trust the first peer (fastest,
+	// matches a young/single-seeder network). 2+ requires independent agreement,
+	// raising the bar on a single malicious peer poisoning a release.
+	MinPeers int `yaml:"min_peers" mapstructure:"min_peers" json:"min_peers" default:"1"`
+	// AllowEncrypted permits applying peer metadata that declares encryption or
+	// carries key material (AES key/iv, password, salt). Default false: encrypted
+	// releases fall back to a normal import so decryption parameters are derived
+	// locally and never dictated by a peer.
+	AllowEncrypted bool `yaml:"allow_encrypted" mapstructure:"allow_encrypted" json:"allow_encrypted" default:"false"`
 }
 
 // SegmentCacheConfig configures the segment-aligned disk cache shared by FUSE and WebDAV.
@@ -1737,6 +1751,15 @@ func DefaultConfig(configDir ...string) *Config {
 		},
 		MountPath: "",            // Empty by default - required when ARRs is enabled
 		MountType: MountTypeNone, // No mount system active by default
+		// P2P sharing safety defaults. The struct `default:` tags are not applied
+		// by the loader (viper + this literal are the source of truth), so the
+		// guardrail defaults must live here: rate limiting on by default, quorum of
+		// one (trust first peer), encrypted-meta acceptance off.
+		Share: ShareConfig{
+			RateLimitPerMinute: 120,
+			MinPeers:           1,
+			AllowEncrypted:     false,
+		},
 	}
 }
 
