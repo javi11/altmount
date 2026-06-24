@@ -9,7 +9,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/gofiber/adaptor/v2"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/limiter"
@@ -25,7 +24,6 @@ import (
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/rclone"
-	"github.com/javi11/altmount/internal/sharenet"
 	"github.com/javi11/altmount/internal/updater"
 	"github.com/javi11/altmount/internal/version"
 	"golang.org/x/sync/singleflight"
@@ -69,10 +67,6 @@ type Server struct {
 	migrationRepo       *database.ImportMigrationRepository
 	updater             updater.Updater
 	ready               atomic.Bool
-
-	// P2P meta sharing — nil when sharing is disabled.
-	shareClient *sharenet.Client
-	shareStore  *sharenet.ReleaseStore
 
 	speedtest     *speedtestCoordinator
 	speedtestOnce sync.Once
@@ -168,37 +162,6 @@ func (s *Server) IsReady() bool {
 	return s.ready.Load()
 }
 
-// SetShareClient wires the P2P meta sharing client and store into the API
-// server. The /api/share routes are only registered when store is non-nil.
-func (s *Server) SetShareClient(client *sharenet.Client, store *sharenet.ReleaseStore) {
-	s.shareClient = client
-	s.shareStore = store
-}
-
-// registerShareRoutes mounts the public P2P share endpoints with a per-IP rate
-// limit and a GET-only restriction. These endpoints are intentionally
-// unauthenticated (the release hash is the capability); the rate limit bounds
-// disk-read amplification from anonymous clients.
-func (s *Server) registerShareRoutes(api fiber.Router) {
-	shareHandler := adaptor.HTTPHandler(sharenet.NewHandler(s.shareStore))
-
-	maxPerMinute := s.configManager.GetConfig().Share.RateLimitPerMinute
-	if maxPerMinute > 0 {
-		shareLimiter := limiter.New(limiter.Config{
-			Max:          maxPerMinute,
-			Expiration:   1 * time.Minute,
-			KeyGenerator: func(c *fiber.Ctx) string { return c.IP() },
-			LimitReached: func(c *fiber.Ctx) error {
-				return RespondError(c, fiber.StatusTooManyRequests, "TOO_MANY_REQUESTS",
-					"Too many share requests. Please slow down.", "")
-			},
-		})
-		api.Get("/share/*", shareLimiter, shareHandler)
-		return
-	}
-	api.Get("/share/*", shareHandler)
-}
-
 // SetupFiberRoutes configures API routes directly on the Fiber app
 func (s *Server) SetupRoutes(app *fiber.App) {
 	app.Use("/sabnzbd", s.handleSABnzbd)
@@ -220,11 +183,6 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/import/file", s.handleManualImportFile)
 	api.Post("/arrs/webhook", s.handleArrsWebhook)
 	api.Post("/nzb/streams", s.handleNzbStreams)
-
-	// P2P meta sharing — public (hash = capability), registered before JWT.
-	if s.shareStore != nil {
-		s.registerShareRoutes(api)
-	}
 
 	cfg := s.configManager.GetConfig()
 

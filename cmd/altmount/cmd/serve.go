@@ -24,7 +24,6 @@ import (
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/rclone"
-	"github.com/javi11/altmount/internal/sharenet"
 	"github.com/javi11/altmount/internal/slogutil"
 	"github.com/javi11/altmount/internal/webdav"
 	"github.com/spf13/cobra"
@@ -131,41 +130,6 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	// P2P meta sharing — optional, best-effort. When enabled, a private DHT
-	// lets nodes discover each other and exchange single-file release metadata,
-	// skipping the NNTP download when a peer already has the release.
-	var shareClient *sharenet.Client
-	var shareStore *sharenet.ReleaseStore
-	if cfg.Share.Enabled {
-		var bootstrapNodes []string
-		if !cfg.Share.Coordinator {
-			bootstrapNodes = cfg.Share.BootstrapNodes
-		}
-		dhtClient, dhtErr := sharenet.NewDHT(bootstrapNodes, cfg.Share.DHTPort)
-		if dhtErr != nil {
-			slog.WarnContext(ctx, "P2P sharing: failed to init DHT, sharing disabled", "err", dhtErr)
-		} else {
-			defer func() {
-				if cerr := dhtClient.Close(); cerr != nil {
-					slog.WarnContext(ctx, "DHT close error", "err", cerr)
-				}
-			}()
-			httpPort := cfg.Share.HTTPPort
-			if httpPort == 0 {
-				httpPort = 8080
-			}
-			shareStore = sharenet.NewReleaseStore(cfg.Metadata.RootPath)
-			shareClient = sharenet.NewClient(dhtClient, httpPort, sharenet.WithMinPeers(cfg.Share.MinPeers))
-			importerService.SetShareClient(shareClient, shareStore)
-			mode := "client"
-			if cfg.Share.Coordinator {
-				mode = "coordinator"
-			}
-			slog.InfoContext(ctx, "P2P sharing enabled",
-				"mode", mode, "dht_port", cfg.Share.DHTPort, "http_port", httpPort)
-		}
-	}
-
 	// Initialize segment cache source — encapsulates atomic manager swap and enabled-flag check.
 	cacheSource := segcache.NewSource(configManager.GetConfigGetter())
 	if initialCache := initializeSegmentCache(ctx, cfg, cacheSource); initialCache != nil {
@@ -191,9 +155,6 @@ func runServe(cmd *cobra.Command, args []string) error {
 	apiServer := setupAPIServer(app, repos, authService, configManager, metadataReader, metadataService, fs, poolManager, importerService, arrsService, mountService, progressBroadcaster, streamTracker, cacheSource)
 	apiServer.SetLogFilePath(slogutil.GetLogFilePath(cfg.Log))
 	apiServer.SetMigrationRepo(db.MigrationRepo)
-	if shareClient != nil {
-		apiServer.SetShareClient(shareClient, shareStore)
-	}
 
 	webdavHandler, err := setupWebDAV(cfg, fs, authService, repos.UserRepo, configManager, streamTracker)
 	if err != nil {
