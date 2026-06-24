@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -94,6 +95,31 @@ func TestCalculateProcessVirtualDir_FailedPath(t *testing.T) {
 			basePath:     "",
 			itemID:       22,
 			expectedPath: "/mnt/remotes/altmount",
+		},
+		{
+			// Production path after PR #717: ensurePersistentNzb stages the NZB in the
+			// OS temp queue dir. The category must still be appended to the destination.
+			name:         "temp queue nzb with category and basePath",
+			nzbPath:      filepath.Join(os.TempDir(), ".altmount-queue", "22-Show.S01E01.nzb"),
+			basePath:     "media",
+			category:     "tv",
+			itemID:       22,
+			expectedPath: "/mnt/remotes/altmount/media/tv",
+		},
+		{
+			name:         "temp queue nzb with category, basePath is CompleteDir",
+			nzbPath:      filepath.Join(os.TempDir(), ".altmount-queue", "7-Movie.nzb"),
+			basePath:     "/mnt/remotes/altmount",
+			category:     "tv",
+			itemID:       7,
+			expectedPath: "/mnt/remotes/altmount/tv",
+		},
+		{
+			name:         "temp queue nzb no category",
+			nzbPath:      filepath.Join(os.TempDir(), ".altmount-queue", "9-Show.nzb"),
+			basePath:     "media",
+			itemID:       9,
+			expectedPath: "/mnt/remotes/altmount/media",
 		},
 	}
 

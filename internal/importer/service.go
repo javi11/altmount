@@ -851,17 +851,20 @@ func (s *Service) calculateProcessVirtualDir(item *database.ImportQueueItem, bas
 	// Calculate initial virtual directory from physical/relative path
 	virtualDir := filesystem.CalculateVirtualDirectory(item.NzbPath, *basePath)
 
-	// Early return: NZB is in the OS temp queue dir — use basePath directly.
-	// The temp queue dir has no meaningful directory structure to derive a virtual path from.
+	// NZB is in the OS temp queue dir — the temp dir has no meaningful directory
+	// structure to derive a virtual path from, so start from basePath. We must NOT
+	// return early here: the category resolution and CompleteDir prepend below still
+	// need to run, otherwise category-tagged uploads (SABnzbd/manual/Stremio) would
+	// land at the mount root instead of inside their category folder.
 	tempQueueDir := filepath.Join(os.TempDir(), ".altmount-queue")
-	if strings.HasPrefix(item.NzbPath, tempQueueDir+string(filepath.Separator)) || item.NzbPath == tempQueueDir {
-		return *basePath
-	}
+	inTempQueue := strings.HasPrefix(item.NzbPath, tempQueueDir+string(filepath.Separator)) || item.NzbPath == tempQueueDir
 
 	// Fix for issue where files moved to persistent .nzbs directory end up with exposed paths (like /config) in virtual directory
 	// This happens when NzbPath is inside .nzbs and CalculateVirtualDirectory sees the physical parent folder.
 	nzbFolder := s.GetNzbFolder()
-	if strings.HasPrefix(item.NzbPath, nzbFolder) {
+	if inTempQueue {
+		virtualDir = *basePath
+	} else if strings.HasPrefix(item.NzbPath, nzbFolder) {
 		// Calculate path relative to the persistent NZB folder
 		if relPath, err := filepath.Rel(nzbFolder, item.NzbPath); err == nil {
 			// If file is directly in root of .nzbs (e.g. "file.nzb"), relDir is "."
