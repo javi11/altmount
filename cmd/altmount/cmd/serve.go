@@ -155,7 +155,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 				httpPort = 8080
 			}
 			shareStore = sharenet.NewReleaseStore(cfg.Metadata.RootPath)
-			shareClient = sharenet.NewClient(dhtClient, httpPort)
+			shareClient = sharenet.NewClient(dhtClient, httpPort, sharenet.WithMinPeers(cfg.Share.MinPeers))
 			importerService.SetShareClient(shareClient, shareStore)
 			mode := "client"
 			if cfg.Share.Coordinator {

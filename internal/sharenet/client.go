@@ -39,6 +39,7 @@ const (
 type SharedMeta struct {
 	VirtualPath string
 	Meta        *metapb.FileMetadata
+	Raw         []byte // on-disk v3 bytes, used for cross-peer agreement fingerprinting
 }
 
 // ReleaseFiles holds every per-file meta a release produced, in manifest order.
@@ -56,6 +57,10 @@ type Client struct {
 	// production (SSRF guard); tests enable it to use loopback httptest servers.
 	allowPrivate bool
 
+	// minPeers is how many distinct peer IPs must serve a byte-identical metadata
+	// set before LookupAndFetch trusts it. Defaults to 1.
+	minPeers int
+
 	blMu      sync.RWMutex
 	blacklist map[string]time.Time // peer addr:port string → expiry
 }
@@ -67,6 +72,17 @@ type Option func(*Client)
 // Intended for tests that serve from loopback; do not use in production.
 func WithAllowPrivatePeers() Option {
 	return func(c *Client) { c.allowPrivate = true }
+}
+
+// WithMinPeers sets how many distinct peer IPs must agree on a metadata set
+// before LookupAndFetch returns it. Values < 1 are treated as 1.
+func WithMinPeers(n int) Option {
+	return func(c *Client) {
+		if n < 1 {
+			n = 1
+		}
+		c.minPeers = n
+	}
 }
 
 // NewClient creates a Client. httpPort is the port altmount's HTTP server
@@ -84,6 +100,7 @@ func NewClient(dht DHT, httpPort int, opts ...Option) *Client {
 			},
 		},
 		blacklist: make(map[string]time.Time),
+		minPeers:  1,
 	}
 	for _, o := range opts {
 		o(c)
@@ -111,6 +128,7 @@ func (c *Client) LookupAndFetch(ctx context.Context, releaseHash string) (*Relea
 		return nil, fmt.Errorf("DHT lookup: %w", err)
 	}
 
+	q := newQuorum(c.minPeers)
 	for _, peer := range peers {
 		if !c.allowPrivate && !routablePeer(peer) {
 			continue // SSRF guard: never dial internal/loopback/link-local addresses
@@ -123,7 +141,9 @@ func (c *Client) LookupAndFetch(ctx context.Context, releaseHash string) (*Relea
 			// fetchFromPeer blacklists peers that serve malformed data; skip to next.
 			continue
 		}
-		return files, nil
+		if agreed := q.add(peer.Addr().String(), files); agreed != nil {
+			return agreed, nil
+		}
 	}
 
 	return nil, ErrNoPeers
@@ -169,7 +189,7 @@ func (c *Client) fetchFromPeer(ctx context.Context, peer netip.AddrPort, release
 			c.blacklistPeer(peer)
 			return nil, fmt.Errorf("peer %s sent unusable .meta %d: %w", peer, i, err)
 		}
-		metas = append(metas, SharedMeta{VirtualPath: entry.VirtualPath, Meta: fm})
+		metas = append(metas, SharedMeta{VirtualPath: entry.VirtualPath, Meta: fm, Raw: raw})
 	}
 
 	return &ReleaseFiles{Metas: metas}, nil
