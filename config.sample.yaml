@@ -267,6 +267,9 @@ profiler_enabled: false # Enable performance profiling (default: false)
 # exchange single-file release metadata, skipping the NNTP download when a peer
 # already imported the same NZB. The release key is SHA256 of the NZB content,
 # and infohashes are namespaced so they're invisible to public BitTorrent.
+# P2P metadata sharing. SECURITY: the /api/share/* endpoints are unauthenticated —
+# do not expose altmount's HTTP port to the public internet unless this node is a
+# coordinator. See docs/p2p-sharing-security.md before enabling.
 share:
   enabled: false # Turn P2P meta sharing on/off (default: false)
   # coordinator: set true on a node with a public IP to act as a DHT bootstrap
