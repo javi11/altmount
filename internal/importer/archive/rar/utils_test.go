@@ -29,6 +29,7 @@ func TestSetKey(t *testing.T) {
 		{"plain media file", "movie.mkv", "", false},
 		{"no extension obfuscated", "a1b2c3d4e5", "", false},
 		{"par2", "movie.par2", "", false},
+		{"embedded apostrophe not surrounding quotes", "It's.A.Wonderful.Life.part01.rar", "it's.a.wonderful.life", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -39,6 +40,99 @@ func TestSetKey(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestExtractRarBaseName covers both branches: a recognized volume resolves to its
+// SetKey, and an unrecognized name falls back to the full lowercased base so it only
+// groups with itself. Inputs are assumed canonical (quotes stripped upstream).
+func TestExtractRarBaseName(t *testing.T) {
+	tests := []struct {
+		name     string
+		filename string
+		want     string
+	}{
+		{"recognized volume 3-digit", "movie.part001.rar", "movie"},
+		{"recognized volume strips directory", "sub/dir/movie.part02.rar", "movie"},
+		{"embedded apostrophe preserved", "It's.A.Wonderful.Life.part01.rar", "it's.a.wonderful.life"},
+		{"non-volume falls back to full name", "movie.mkv", "movie.mkv"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractRarBaseName(tt.filename)
+			if got != tt.want {
+				t.Errorf("extractRarBaseName(%q) = %q; want %q", tt.filename, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestGroupArchivesByBaseNamePaddedWidth proves multi-volume parts collapse into a
+// single group regardless of zero-padding width (part001 vs part01). Inputs are
+// canonical; poster quotes are stripped upstream at the nzbparser boundary.
+func TestGroupArchivesByBaseNamePaddedWidth(t *testing.T) {
+	makeFiles := func(names ...string) []parser.ParsedFile {
+		out := make([]parser.ParsedFile, len(names))
+		for i, n := range names {
+			out[i] = parser.ParsedFile{Filename: n}
+		}
+		return out
+	}
+
+	tests := []struct {
+		name       string
+		files      []parser.ParsedFile
+		wantGroups int
+		wantParts  int
+	}{
+		{
+			name: "3-digit padding collapses to 1 group of 5",
+			files: makeFiles(
+				"movie.part001.rar",
+				"movie.part002.rar",
+				"movie.part003.rar",
+				"movie.part004.rar",
+				"movie.part005.rar",
+			),
+			wantGroups: 1,
+			wantParts:  5,
+		},
+		{
+			name: "2-digit padding collapses to 1 group of 3",
+			files: makeFiles(
+				"movie.part01.rar",
+				"movie.part02.rar",
+				"movie.part03.rar",
+			),
+			wantGroups: 1,
+			wantParts:  3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			groups := GroupArchivesByBaseName(tt.files)
+			if len(groups) != tt.wantGroups {
+				t.Errorf("GroupArchivesByBaseName() got %d groups; want %d (got groups: %v)",
+					len(groups), tt.wantGroups, groupNames(groups))
+			}
+			if tt.wantGroups == 1 && len(groups) == 1 && len(groups[0]) != tt.wantParts {
+				t.Errorf("GroupArchivesByBaseName() group[0] has %d parts; want %d",
+					len(groups[0]), tt.wantParts)
+			}
+		})
+	}
+}
+
+func groupNames(groups [][]parser.ParsedFile) [][]string {
+	out := make([][]string, len(groups))
+	for i, g := range groups {
+		names := make([]string, len(g))
+		for j, f := range g {
+			names[j] = f.Filename
+		}
+		out[i] = names
+	}
+	return out
 }
 
 func TestGroupHasVolumeGap(t *testing.T) {

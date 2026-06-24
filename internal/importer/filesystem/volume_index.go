@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 
 	"github.com/javi11/altmount/internal/importer/rarname"
+	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
 )
 
 // volumeIndex resolves a requested RAR/split volume filename to the actual stored
@@ -55,7 +56,9 @@ func (vi volumeIndex) resolve(name string) (string, bool) {
 // volumeKey derives the (set base, scheme, volume number) key for a filename,
 // width-independent, or ("", false) for non-volume names.
 func volumeKey(filename string) (string, bool) {
-	base := filepath.Base(filename)
+	// Trim quotes on read: filenames persisted before boundary sanitization
+	// (parser.SanitizeNzbFilenames) may still carry poster-added surrounding quotes.
+	base := nzbtrim.TrimSurroundingQuotes(filepath.Base(filename))
 	setKey, ok := rarname.SetKey(base)
 	if !ok {
 		return "", false

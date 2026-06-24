@@ -403,6 +403,8 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 			return "", nil, NewNonRetryableError("NZB file contains no files", nil)
 		}
 
+		parser.SanitizeNzbFilenames(n)
+
 		// Pre-parse Stat check — runs before any Body fetches.
 		proc.updateProgressWithStage(queueID, 0, "Checking segment availability")
 		var missingIDs map[string]struct{}

@@ -33,6 +33,9 @@ var (
 // obfuscated names with no recognizable extension) return ("", false) and
 // should be treated as standalone files. The key is the lowercased base name
 // with the volume suffix stripped, so all parts of one set share it.
+//
+// Filenames must already be canonical; poster-added quotes are stripped upstream at
+// the nzbparser boundary (parser.SanitizeNzbFilenames), so SetKey does no cleaning.
 func SetKey(filename string) (string, bool) {
 	return archive.SetKey(filename)
 }
