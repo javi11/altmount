@@ -76,7 +76,7 @@ func TestClient_LookupAndFetch_Success(t *testing.T) {
 	defer srv.Close()
 
 	mock := &MockDHT{peers: []netip.AddrPort{peerAddrPort(t, srv)}}
-	client := sharenet.NewClient(mock, 8080)
+	client := sharenet.NewClient(mock, 8080, sharenet.WithAllowPrivatePeers())
 
 	files, err := client.LookupAndFetch(context.Background(), hash)
 	if err != nil {
@@ -95,7 +95,7 @@ func TestClient_LookupAndFetch_Success(t *testing.T) {
 
 func TestClient_LookupAndFetch_NoPeers(t *testing.T) {
 	mock := &MockDHT{peers: nil}
-	client := sharenet.NewClient(mock, 8080)
+	client := sharenet.NewClient(mock, 8080, sharenet.WithAllowPrivatePeers())
 
 	if _, err := client.LookupAndFetch(context.Background(), "hash123"); !errors.Is(err, sharenet.ErrNoPeers) {
 		t.Fatalf("expected ErrNoPeers, got %v", err)
@@ -110,7 +110,7 @@ func TestClient_LookupAndFetch_NonV3Meta_BlacklistsPeer(t *testing.T) {
 	defer srv.Close()
 
 	mock := &MockDHT{peers: []netip.AddrPort{peerAddrPort(t, srv)}}
-	client := sharenet.NewClient(mock, 8080)
+	client := sharenet.NewClient(mock, 8080, sharenet.WithAllowPrivatePeers())
 
 	if _, err := client.LookupAndFetch(context.Background(), hash); !errors.Is(err, sharenet.ErrNoPeers) {
 		t.Fatalf("expected ErrNoPeers after bad peer, got %v", err)
@@ -123,7 +123,7 @@ func TestClient_LookupAndFetch_EmptyManifest_BlacklistsPeer(t *testing.T) {
 	defer srv.Close()
 
 	mock := &MockDHT{peers: []netip.AddrPort{peerAddrPort(t, srv)}}
-	client := sharenet.NewClient(mock, 8080)
+	client := sharenet.NewClient(mock, 8080, sharenet.WithAllowPrivatePeers())
 
 	if _, err := client.LookupAndFetch(context.Background(), hash); !errors.Is(err, sharenet.ErrNoPeers) {
 		t.Fatalf("expected ErrNoPeers for empty manifest, got %v", err)
@@ -142,16 +142,33 @@ func TestClient_LookupAndFetch_OversizedManifest_BlacklistsPeer(t *testing.T) {
 	defer srv.Close()
 
 	mock := &MockDHT{peers: []netip.AddrPort{peerAddrPort(t, srv)}}
-	client := sharenet.NewClient(mock, 8080)
+	client := sharenet.NewClient(mock, 8080, sharenet.WithAllowPrivatePeers())
 
 	if _, err := client.LookupAndFetch(context.Background(), hash); !errors.Is(err, sharenet.ErrNoPeers) {
 		t.Fatalf("expected ErrNoPeers for oversized manifest, got %v", err)
 	}
 }
 
+func TestClient_SkipsPrivatePeers_SSRFGuard(t *testing.T) {
+	// Without WithAllowPrivatePeers (production default), a loopback peer address
+	// must be skipped — the SSRF guard against DHT entries pointing at internal
+	// services. The peer would otherwise serve a valid meta.
+	hash := "abc123"
+	meta0 := v3MetaBytes(t, "Movies/A/A.mkv", &metapb.FileMetadata{FileSize: 100})
+	srv := peerServer(t, hash, []string{"Movies/A/A.mkv"}, [][]byte{meta0})
+	defer srv.Close()
+
+	mock := &MockDHT{peers: []netip.AddrPort{peerAddrPort(t, srv)}} // 127.0.0.1
+	client := sharenet.NewClient(mock, 8080)                        // guard ON
+
+	if _, err := client.LookupAndFetch(context.Background(), hash); !errors.Is(err, sharenet.ErrNoPeers) {
+		t.Fatalf("expected loopback peer skipped (ErrNoPeers), got %v", err)
+	}
+}
+
 func TestClient_Announce_CallsDHT(t *testing.T) {
 	mock := &MockDHT{}
-	client := sharenet.NewClient(mock, 8080)
+	client := sharenet.NewClient(mock, 8080, sharenet.WithAllowPrivatePeers())
 
 	if err := client.Announce(context.Background(), "abc123"); err != nil {
 		t.Fatalf("unexpected error: %v", err)

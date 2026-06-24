@@ -18,10 +18,19 @@ import (
 // ErrNoPeers is returned when no peer has the requested release.
 var ErrNoPeers = errors.New("sharenet: no peers have this release")
 
-// maxManifestEntries caps how many metas a single release manifest may list.
-// A release is one NZB; even a large season pack is well under this. The cap
-// bounds the outbound request fan-out a malicious peer can trigger per lookup.
-const maxManifestEntries = 4096
+const (
+	// maxManifestEntries caps how many metas a single release manifest may list.
+	// A release is one NZB; even a large season pack is well under this. The cap
+	// bounds the outbound request fan-out a malicious peer can trigger per lookup.
+	maxManifestEntries = 4096
+	// maxManifestBytes caps a manifest response. JSON for thousands of paths is
+	// well under this; the cap stops a peer slow-dripping a huge body.
+	maxManifestBytes = 8 << 20 // 8 MiB
+	// maxMetaBytes caps a single .meta response. Real structural metas are a few
+	// KiB (large archives a few hundred KiB); this bounds per-connection memory so
+	// a malicious peer can't pin maxManifestEntries × a large buffer in RAM.
+	maxMetaBytes = 4 << 20 // 4 MiB
+)
 
 // SharedMeta is one decoded per-file metadata fetched from a peer.
 // Meta is the structural v3 proto (SegmentRefs/SegmentRuns intact); its StoreRef
@@ -43,19 +52,53 @@ type Client struct {
 	httpPort int
 	http     *http.Client
 
+	// allowPrivate permits dialing private/loopback peer addresses. Off in
+	// production (SSRF guard); tests enable it to use loopback httptest servers.
+	allowPrivate bool
+
 	blMu      sync.RWMutex
 	blacklist map[string]time.Time // peer addr:port string → expiry
 }
 
+// Option configures a Client.
+type Option func(*Client)
+
+// WithAllowPrivatePeers permits dialing private/loopback peer addresses.
+// Intended for tests that serve from loopback; do not use in production.
+func WithAllowPrivatePeers() Option {
+	return func(c *Client) { c.allowPrivate = true }
+}
+
 // NewClient creates a Client. httpPort is the port altmount's HTTP server
 // listens on (announced to peers so they know where to fetch from).
-func NewClient(dht DHT, httpPort int) *Client {
-	return &Client{
-		dht:       dht,
-		httpPort:  httpPort,
-		http:      &http.Client{Timeout: 30 * time.Second},
+func NewClient(dht DHT, httpPort int, opts ...Option) *Client {
+	c := &Client{
+		dht:      dht,
+		httpPort: httpPort,
+		http: &http.Client{
+			Timeout: 30 * time.Second,
+			// Peer addresses come from an untrusted DHT. Never follow redirects —
+			// a peer could otherwise bounce us to an internal/cloud-metadata URL.
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
 		blacklist: make(map[string]time.Time),
 	}
+	for _, o := range opts {
+		o(c)
+	}
+	return c
+}
+
+// routablePeer reports whether peer is a public, globally-routable unicast
+// address we are willing to dial. Rejects loopback, link-local (incl. cloud
+// metadata 169.254.169.254), multicast, unspecified, and RFC1918/ULA private
+// ranges — closing the SSRF vector where a DHT entry points us at an internal
+// service.
+func routablePeer(peer netip.AddrPort) bool {
+	addr := peer.Addr()
+	return peer.IsValid() && addr.IsGlobalUnicast() && !addr.IsPrivate()
 }
 
 // LookupAndFetch finds peers with releaseHash and downloads every per-file v3
@@ -69,6 +112,9 @@ func (c *Client) LookupAndFetch(ctx context.Context, releaseHash string) (*Relea
 	}
 
 	for _, peer := range peers {
+		if !c.allowPrivate && !routablePeer(peer) {
+			continue // SSRF guard: never dial internal/loopback/link-local addresses
+		}
 		if c.isBlacklisted(peer) {
 			continue
 		}
@@ -92,7 +138,7 @@ func (c *Client) Announce(ctx context.Context, releaseHash string) error {
 func (c *Client) fetchFromPeer(ctx context.Context, peer netip.AddrPort, releaseHash string) (*ReleaseFiles, error) {
 	base := fmt.Sprintf("http://%s/api/share", peer)
 
-	manifestBytes, err := c.get(ctx, base+"/manifest/"+releaseHash)
+	manifestBytes, err := c.get(ctx, base+"/manifest/"+releaseHash, maxManifestBytes)
 	if err != nil {
 		return nil, fmt.Errorf("fetch manifest from %s: %w", peer, err)
 	}
@@ -112,7 +158,7 @@ func (c *Client) fetchFromPeer(ctx context.Context, peer netip.AddrPort, release
 			c.blacklistPeer(peer)
 			return nil, fmt.Errorf("peer %s manifest entry %d has empty path", peer, i)
 		}
-		raw, err := c.get(ctx, fmt.Sprintf("%s/meta/%s/%d", base, releaseHash, i))
+		raw, err := c.get(ctx, fmt.Sprintf("%s/meta/%s/%d", base, releaseHash, i), maxMetaBytes)
 		if err != nil {
 			return nil, fmt.Errorf("fetch meta %d from %s: %w", i, peer, err)
 		}
@@ -129,7 +175,7 @@ func (c *Client) fetchFromPeer(ctx context.Context, peer netip.AddrPort, release
 	return &ReleaseFiles{Metas: metas}, nil
 }
 
-func (c *Client) get(ctx context.Context, url string) ([]byte, error) {
+func (c *Client) get(ctx context.Context, url string, maxBytes int64) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -142,7 +188,7 @@ func (c *Client) get(ctx context.Context, url string) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
 	}
-	return io.ReadAll(io.LimitReader(resp.Body, 50<<20)) // 50 MB cap
+	return io.ReadAll(io.LimitReader(resp.Body, maxBytes))
 }
 
 func (c *Client) isBlacklisted(peer netip.AddrPort) bool {

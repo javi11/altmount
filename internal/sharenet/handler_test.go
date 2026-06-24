@@ -13,6 +13,12 @@ import (
 	"github.com/javi11/altmount/internal/sharenet"
 )
 
+// Valid 64-hex release hashes (extractHash now enforces the format).
+const (
+	hHash       = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	hUnknownHsh = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+)
+
 func setupHandlerStore(t *testing.T) *sharenet.ReleaseStore {
 	t.Helper()
 	root := t.TempDir()
@@ -24,7 +30,7 @@ func setupHandlerStore(t *testing.T) *sharenet.ReleaseStore {
 	_ = os.WriteFile(filepath.Join(dir, "ep02.meta"), []byte("meta-1"), 0o644)
 
 	store := sharenet.NewReleaseStore(root)
-	store.Register("abc123", []string{"MyShow/ep01", "MyShow/ep02"})
+	store.Register(hHash, []string{"MyShow/ep01", "MyShow/ep02"})
 	return store
 }
 
@@ -32,7 +38,7 @@ func TestHandler_ServeManifest(t *testing.T) {
 	store := setupHandlerStore(t)
 	h := sharenet.NewHandler(store)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/share/manifest/abc123", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/share/manifest/"+hHash, nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 
@@ -53,7 +59,7 @@ func TestHandler_ServeMetaByIndex(t *testing.T) {
 	h := sharenet.NewHandler(store)
 
 	for i, want := range []string{"meta-0", "meta-1"} {
-		req := httptest.NewRequest(http.MethodGet, "/api/share/meta/abc123/"+strconv.Itoa(i), nil)
+		req := httptest.NewRequest(http.MethodGet, "/api/share/meta/"+hHash+"/"+strconv.Itoa(i), nil)
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, req)
 
@@ -69,7 +75,7 @@ func TestHandler_ServeMetaByIndex(t *testing.T) {
 
 func TestHandler_ManifestUnknownHash_404(t *testing.T) {
 	h := sharenet.NewHandler(sharenet.NewReleaseStore(t.TempDir()))
-	req := httptest.NewRequest(http.MethodGet, "/api/share/manifest/doesnotexist", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/share/manifest/"+hUnknownHsh, nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 	if w.Code != http.StatusNotFound {
@@ -80,7 +86,7 @@ func TestHandler_ManifestUnknownHash_404(t *testing.T) {
 func TestHandler_MetaOutOfRange_404(t *testing.T) {
 	store := setupHandlerStore(t)
 	h := sharenet.NewHandler(store)
-	req := httptest.NewRequest(http.MethodGet, "/api/share/meta/abc123/9", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/share/meta/"+hHash+"/9", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 	if w.Code != http.StatusNotFound {
@@ -91,7 +97,7 @@ func TestHandler_MetaOutOfRange_404(t *testing.T) {
 func TestHandler_MetaBadIndex_400(t *testing.T) {
 	store := setupHandlerStore(t)
 	h := sharenet.NewHandler(store)
-	req := httptest.NewRequest(http.MethodGet, "/api/share/meta/abc123/notanumber", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/share/meta/"+hHash+"/notanumber", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 	if w.Code != http.StatusBadRequest {
@@ -102,11 +108,23 @@ func TestHandler_MetaBadIndex_400(t *testing.T) {
 func TestHandler_MetaMissingIndex_400(t *testing.T) {
 	store := setupHandlerStore(t)
 	h := sharenet.NewHandler(store)
-	req := httptest.NewRequest(http.MethodGet, "/api/share/meta/abc123", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/share/meta/"+hHash, nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestHandler_InvalidHashFormat_400(t *testing.T) {
+	h := sharenet.NewHandler(sharenet.NewReleaseStore(t.TempDir()))
+	for _, bad := range []string{"short", "NOTLOWERHEX" + hHash[11:], hHash + "extra"} {
+		req := httptest.NewRequest(http.MethodGet, "/api/share/manifest/"+bad, nil)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("hash %q: expected 400, got %d", bad, w.Code)
+		}
 	}
 }
 

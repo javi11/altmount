@@ -86,7 +86,7 @@ func TestIntegration_TwoNode_ShareMetaRebuildStore(t *testing.T) {
 	}
 
 	mock := &MockDHT{peers: []netip.AddrPort{peerAddrPort(t, srv)}}
-	client := sharenet.NewClient(mock, 0)
+	client := sharenet.NewClient(mock, 0, sharenet.WithAllowPrivatePeers())
 
 	files, err := client.LookupAndFetch(ctx, releaseHash)
 	if err != nil {

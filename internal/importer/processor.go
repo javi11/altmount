@@ -113,6 +113,14 @@ func (proc *Processor) tryShareShortcut(ctx context.Context, releaseHash, storeR
 				"release_hash", shortHash(releaseHash), "virtual_path", m.VirtualPath)
 			return "", nil, false
 		}
+		// Never trust a peer for decryption parameters: a malicious peer could
+		// supply wrong AES keys/password and corrupt the read path. Encrypted
+		// releases fall back to a normal import, which derives the keys locally.
+		if metaCarriesDecryptionParams(m.Meta) {
+			proc.log.InfoContext(ctx, "sharenet: peer meta declares encryption, importing normally",
+				"release_hash", shortHash(releaseHash), "virtual_path", m.VirtualPath)
+			return "", nil, false
+		}
 	}
 
 	written := make([]string, 0, len(files.Metas))
@@ -166,12 +174,30 @@ func shortHash(h string) string {
 	return h
 }
 
+// metaCarriesDecryptionParams reports whether fm declares any encryption or
+// carries key material. Such metas are rejected by the P2P shortcut so a
+// malicious peer can never dictate how the receiver decrypts a release.
+func metaCarriesDecryptionParams(fm *metapb.FileMetadata) bool {
+	if fm.Encryption != metapb.Encryption_NONE ||
+		len(fm.AesKey) > 0 || len(fm.AesIv) > 0 || fm.Password != "" || fm.Salt != "" {
+		return true
+	}
+	for _, ns := range fm.NestedSources {
+		if len(ns.AesKey) > 0 || len(ns.AesIv) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // metaWithinStore reports whether every segment reference in fm resolves within
 // a store of storeSize segments. Mirrors the read path's ref/run resolution.
 func metaWithinStore(fm *metapb.FileMetadata, storeSize int64) bool {
 	runsOK := func(runs []*metapb.SegmentRun) bool {
 		for _, r := range runs {
-			if r.Count <= 0 || r.BaseStoreIndex < 0 || r.BaseStoreIndex+r.Count > storeSize {
+			// storeSize - BaseStoreIndex avoids the int64 overflow that
+			// BaseStoreIndex+Count would hit for a malicious near-MaxInt64 base.
+			if r.Count <= 0 || r.BaseStoreIndex < 0 || r.Count > storeSize-r.BaseStoreIndex {
 				return false
 			}
 		}
@@ -212,7 +238,7 @@ func (proc *Processor) announceRelease(ctx context.Context, releaseHash string) 
 		defer cancel()
 		if err := proc.shareClient.Announce(announceCtx, releaseHash); err != nil {
 			proc.log.WarnContext(ctx, "sharenet: announce failed",
-				"release_hash", releaseHash[:8], "err", err)
+				"release_hash", shortHash(releaseHash), "err", err)
 		}
 	}()
 }

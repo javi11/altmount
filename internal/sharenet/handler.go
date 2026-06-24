@@ -85,10 +85,18 @@ func (h *Handler) serveMeta(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(data)
 }
 
-// extractHash rejects empty hashes and path-traversal attempts.
+// extractHash returns hash only if it is a well-formed release hash: 64 lowercase
+// hex characters (the output of ComputeReleaseHash). This rejects path-traversal
+// attempts and any non-hash junk before it reaches the store map.
 func extractHash(hash string) string {
-	if hash == "" || strings.ContainsAny(hash, "/\\") || strings.Contains(hash, "..") {
+	if len(hash) != 64 {
 		return ""
+	}
+	for i := 0; i < len(hash); i++ {
+		c := hash[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return ""
+		}
 	}
 	return hash
 }

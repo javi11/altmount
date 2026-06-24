@@ -31,6 +31,33 @@ func TestIsSafeVirtualPath(t *testing.T) {
 	}
 }
 
+func TestMetaCarriesDecryptionParams(t *testing.T) {
+	tests := []struct {
+		name string
+		fm   *metapb.FileMetadata
+		want bool
+	}{
+		{"plain", &metapb.FileMetadata{}, false},
+		{"encryption flag", &metapb.FileMetadata{Encryption: metapb.Encryption_AES}, true},
+		{"aes key", &metapb.FileMetadata{AesKey: []byte{1, 2, 3}}, true},
+		{"aes iv", &metapb.FileMetadata{AesIv: []byte{4, 5}}, true},
+		{"password", &metapb.FileMetadata{Password: "hunter2"}, true},
+		{"salt", &metapb.FileMetadata{Salt: "s"}, true},
+		{
+			name: "nested source key",
+			fm:   &metapb.FileMetadata{NestedSources: []*metapb.NestedSegmentSource{{AesKey: []byte{9}}}},
+			want: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := metaCarriesDecryptionParams(tt.fm); got != tt.want {
+				t.Fatalf("metaCarriesDecryptionParams() = %v; want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestMetaWithinStore(t *testing.T) {
 	const size = 10
 
