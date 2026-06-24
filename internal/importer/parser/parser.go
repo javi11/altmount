@@ -151,6 +151,12 @@ func (p *Parser) ParseNzb(ctx context.Context, n *nzbparser.Nzb, nzbPath string,
 	// size from "=ybegin size=") lets normalization derive the LAST part's size arithmetically,
 	// eliminating the per-file last-segment fetch that would otherwise drain a full body.
 	firstSegmentSizeCache := make(map[string]firstSegmentYencInfo)
+	// warmFirstSegmentBytes carries each fetched file's decoded first-segment bytes
+	// (keyed by first-segment ID) into the archive analysis phase, so a volume's
+	// header read — which starts at offset 0 — is served from memory instead of
+	// re-fetching a segment already pulled over the wire here. Skipped/missing first
+	// segments contribute nothing; those volumes are read lazily by the analyzer.
+	warmFirstSegmentBytes := make(map[string][]byte)
 	for _, data := range firstSegmentCache {
 		if data != nil && data.File != nil && !data.MissingFirstSegment && len(data.File.Segments) > 0 {
 			if data.Headers.PartSize > 0 {
@@ -158,6 +164,9 @@ func (p *Parser) ParseNzb(ctx context.Context, n *nzbparser.Nzb, nzbPath string,
 					PartSize: data.Headers.PartSize,
 					FileSize: data.Headers.FileSize,
 				}
+			}
+			if !data.SkippedFirstSegment && len(data.RawBytes) > 0 {
+				warmFirstSegmentBytes[data.File.Segments[0].ID] = data.RawBytes
 			}
 		}
 	}
@@ -282,7 +291,7 @@ func (p *Parser) ParseNzb(ctx context.Context, n *nzbparser.Nzb, nzbPath string,
 	// Process files in parallel using conc pool
 	for _, info := range fileInfos {
 		concPool.Go(func(ctx context.Context) (fileResult, error) {
-			parsedFile, err := p.parseFile(ctx, n.Meta, parsed.Filename, info, firstSegmentSizeCache, nzbStandardPartSize, notFoundIDs, parsed.SegmentIndex)
+			parsedFile, err := p.parseFile(ctx, n.Meta, parsed.Filename, info, firstSegmentSizeCache, warmFirstSegmentBytes, nzbStandardPartSize, notFoundIDs, parsed.SegmentIndex)
 
 			return fileResult{
 				parsedFile: parsedFile,
@@ -353,7 +362,7 @@ func (p *Parser) ParseNzb(ctx context.Context, n *nzbparser.Nzb, nzbPath string,
 // firstSegmentSizeCache contains pre-fetched yEnc info (PartSize + total FileSize) for first segments to avoid redundant fetching.
 // nzbStandardPartSize, when >0, is the yEnc PartSize of a representative middle segment in the NZB;
 // it lets normalization skip the per-file second-segment fetch.
-func (p *Parser) parseFile(ctx context.Context, meta map[string]string, nzbFilename string, info *fileinfo.FileInfo, firstSegmentSizeCache map[string]firstSegmentYencInfo, nzbStandardPartSize int64, notFoundIDs map[string]struct{}, segmentIndex map[string]int64) (*ParsedFile, error) {
+func (p *Parser) parseFile(ctx context.Context, meta map[string]string, nzbFilename string, info *fileinfo.FileInfo, firstSegmentSizeCache map[string]firstSegmentYencInfo, warmFirstSegmentBytes map[string][]byte, nzbStandardPartSize int64, notFoundIDs map[string]struct{}, segmentIndex map[string]int64) (*ParsedFile, error) {
 	if len(info.NzbFile.Segments) == 0 {
 		return nil, fmt.Errorf("file has no segments")
 	}
@@ -544,6 +553,15 @@ func (p *Parser) parseFile(ctx context.Context, meta map[string]string, nzbFilen
 		IsPar2Archive: info.IsPar2Archive,
 		OriginalIndex: info.OriginalIndex,
 		NzbdavID:      nzbdavID,
+	}
+
+	// Attach the warm first-segment bytes (decoded leading payload at offset 0)
+	// so the archive analysis phase can serve this file's header read from memory.
+	// Keyed by the same first-segment ID domain as firstSegmentSizeCache.
+	if len(info.NzbFile.Segments) > 0 {
+		if b, ok := warmFirstSegmentBytes[info.NzbFile.Segments[0].ID]; ok {
+			parsedFile.FirstSegmentBytes = b
+		}
 	}
 
 	return parsedFile, nil
