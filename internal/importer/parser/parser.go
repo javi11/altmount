@@ -23,6 +23,7 @@ import (
 	"github.com/javi11/altmount/internal/errors"
 	"github.com/javi11/altmount/internal/importer/parser/fileinfo"
 	"github.com/javi11/altmount/internal/importer/parser/par2"
+	"github.com/javi11/altmount/internal/importer/rarname"
 	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
@@ -138,10 +139,13 @@ func (p *Parser) ParseNzb(ctx context.Context, n *nzbparser.Nzb, nzbPath string,
 
 	// PAR2 descriptor matching is only worth network I/O when (a) the NZB actually
 	// contains a PAR2 index AND (b) at least one fetched file has an untrustworthy
-	// name that the descriptors could recover. When every name is already clean,
-	// downloading the PAR2 index and completing files to 16KB would only confirm
-	// what we already trust — skip both entirely.
-	par2MatchingUseful := p.hasPar2IndexCandidate(firstSegmentCache) && anyFileNeedsPar2Matching(firstSegmentCache)
+	// name that the descriptors could recover — either an individually obfuscated name
+	// or a member of a .partNN.rar set whose volumes all have distinct (obfuscated) bases
+	// (hasObfuscatedVolumeSet). When every name is already clean, downloading the PAR2
+	// index and completing files to 16KB would only confirm what we already trust — skip
+	// both entirely.
+	par2MatchingUseful := p.hasPar2IndexCandidate(firstSegmentCache) &&
+		(anyFileNeedsPar2Matching(firstSegmentCache) || hasObfuscatedVolumeSet(firstSegmentCache))
 	if par2MatchingUseful {
 		p.complete16KBReads(ctx, firstSegmentCache, notFoundIDs)
 	}
@@ -932,6 +936,44 @@ func needsPar2Matching(d *FirstSegmentData) bool {
 // names we already trust.
 func anyFileNeedsPar2Matching(cache []*FirstSegmentData) bool {
 	return slices.ContainsFunc(cache, needsPar2Matching)
+}
+
+// hasObfuscatedVolumeSet reports whether the NZB contains a multi-volume .partNN.rar set
+// whose volumes each carry a distinct base name — the fingerprint of per-volume filename
+// obfuscation (US8yidqp….part01.rar, BtEPCuoF….part02.rar, …). These random bases defeat
+// the per-file obfuscation heuristic (mixed case with '-'/'_' separators reads as a clean,
+// readable name), so needsPar2Matching never flags them; yet a numbered set in which every
+// volume's base differs is unambiguous, because a real multi-volume set shares one base.
+//
+// When such a set exists, PAR2 descriptors can recover the real, shared volume names
+// (Hash16k → name), letting grouping reassemble the set — so PAR2 matching is worth the
+// network I/O even though no individual filename looks obfuscated. The "all bases distinct"
+// rule keeps the trigger tight: one clean set has a single base, and two clean sets share a
+// few bases across many volumes — neither trips it.
+func hasObfuscatedVolumeSet(cache []*FirstSegmentData) bool {
+	bases := make(map[string]struct{})
+	count := 0
+	for _, d := range cache {
+		if d == nil || d.File == nil || d.MissingFirstSegment {
+			continue
+		}
+		name := d.File.Filename
+		if fileinfo.IsPar2File(name) {
+			continue
+		}
+		// Only the part scheme (.partNN.rar); divergent-base obfuscation in the roll/numeric
+		// schemes is rarer and left out to keep the trigger tight.
+		if scheme, _, ok := rarname.VolumeNumber(name); !ok || scheme != rarname.SchemePart {
+			continue
+		}
+		key, ok := rarname.SetKey(name)
+		if !ok {
+			continue
+		}
+		bases[key] = struct{}{}
+		count++
+	}
+	return count >= 2 && len(bases) == count
 }
 
 // needs16KBCompletion decides whether a file is worth completing up to 16KB
