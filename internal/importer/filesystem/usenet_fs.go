@@ -312,8 +312,24 @@ func (uf *UsenetFile) ReadAt(p []byte, off int64) (n int, err error) {
 	return io.ReadFull(reader, p)
 }
 
-// createUsenetReader creates a Usenet reader for the specified range
+// createUsenetReader creates a reader for the specified range. Reads that begin
+// at offset 0 are served from the file's warm first-segment bytes (captured by
+// the parser during first-segment analysis) for as far as those bytes reach,
+// falling through to the network only for the remainder. This lets archive
+// header parsing — which reads from offset 0 — reuse a segment already pulled
+// over the wire this import instead of re-fetching it. Files without warm bytes
+// (playback, decrypting FS, skipped/missing first segments) take the network
+// path directly.
 func (uf *UsenetFile) createUsenetReader(ctx context.Context, start, end int64) (io.ReadCloser, error) {
+	if start == 0 && len(uf.file.FirstSegmentBytes) > 0 {
+		return uf.newWarmPrefixReader(ctx, end), nil
+	}
+	return uf.newNetworkReader(ctx, start, end)
+}
+
+// newNetworkReader creates a Usenet reader that fetches the byte range [start,end]
+// from the provider.
+func (uf *UsenetFile) newNetworkReader(ctx context.Context, start, end int64) (io.ReadCloser, error) {
 	// Filter segments for this specific file
 	loader := dbSegmentLoader{segs: uf.file.Segments}
 
@@ -325,6 +341,67 @@ func (uf *UsenetFile) createUsenetReader(ctx context.Context, start, end int64) 
 
 	rg := usenet.GetSegmentsInRange(ctx, start, end, loader)
 	return usenet.NewUsenetReader(ctx, uf.poolManager.GetPool, rg, uf.maxPrefetch, uf.poolManager, uf.name, nil)
+}
+
+// newWarmPrefixReader builds a reader that serves the file's warm first-segment
+// bytes for the requested range [0,end], lazily creating a network reader for any
+// portion beyond the cached prefix. The cached bytes are the decoded payload of
+// the file at offset 0, so they are byte-identical to what the network path would
+// return — no risk of stale or mismatched data.
+func (uf *UsenetFile) newWarmPrefixReader(ctx context.Context, end int64) io.ReadCloser {
+	prefix := uf.file.FirstSegmentBytes
+	// Never serve past the requested range.
+	if limit := end + 1; limit >= 0 && limit < int64(len(prefix)) {
+		prefix = prefix[:limit]
+	}
+	prefixLen := int64(len(prefix))
+
+	wr := &warmPrefixReader{prefix: prefix}
+	if end >= prefixLen {
+		// Reads past the cached prefix fall through to the network, resuming
+		// exactly where the prefix ends so the combined stream has no gap or overlap.
+		wr.makeRest = func() (io.ReadCloser, error) {
+			return uf.newNetworkReader(ctx, prefixLen, end)
+		}
+	}
+	return wr
+}
+
+// warmPrefixReader serves an in-memory prefix, then transparently switches to a
+// lazily-created underlying reader for any bytes past the prefix. The underlying
+// reader is only constructed if a read actually crosses the prefix boundary, so a
+// header-only read (the common archive-analysis case) issues no wire calls.
+type warmPrefixReader struct {
+	prefix   []byte
+	consumed int
+	makeRest func() (io.ReadCloser, error)
+	rest     io.ReadCloser
+}
+
+func (r *warmPrefixReader) Read(p []byte) (int, error) {
+	if r.consumed < len(r.prefix) {
+		n := copy(p, r.prefix[r.consumed:])
+		r.consumed += n
+		return n, nil
+	}
+	if r.makeRest == nil {
+		return 0, io.EOF
+	}
+	if r.rest == nil {
+		rc, err := r.makeRest()
+		if err != nil {
+			return 0, err
+		}
+		r.rest = rc
+	}
+	return r.rest.Read(p)
+}
+
+func (r *warmPrefixReader) Close() error {
+	if r.rest != nil {
+		return r.rest.Close()
+	}
+	return nil
 }
 
 // dbSegmentLoader implements the segment loader interface for database segments
