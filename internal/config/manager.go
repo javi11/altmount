@@ -53,7 +53,6 @@ type Config struct {
 	Providers       []ProviderConfig   `yaml:"providers" mapstructure:"providers" json:"providers"`
 	Nzblnk          NzblnkConfig       `yaml:"nzblnk" mapstructure:"nzblnk" json:"nzblnk"`
 	Network         NetworkConfig      `yaml:"network" mapstructure:"network" json:"network"`
-	Share           ShareConfig        `yaml:"share" mapstructure:"share" json:"share"`
 	MountPath       string             `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"`
 	MountType       MountType          `yaml:"mount_type" mapstructure:"mount_type" json:"mount_type"`
 	ProfilerEnabled bool               `yaml:"profiler_enabled" mapstructure:"profiler_enabled" json:"profiler_enabled" default:"false"`
@@ -87,42 +86,6 @@ func (n NetworkConfig) GetHTTPSProxy() string { return n.HTTPSProxy }
 
 // GetNoProxy returns the comma-separated bypass list.
 func (n NetworkConfig) GetNoProxy() string { return n.NoProxy }
-
-// ShareConfig controls the private DHT peer discovery network.
-// When Coordinator is true the node acts as a DHT bootstrap point — it starts
-// without StartingNodes and just maintains the routing table. Regular nodes list
-// coordinator addresses in BootstrapNodes.
-type ShareConfig struct {
-	// Enabled turns P2P meta sharing on or off.
-	Enabled bool `yaml:"enabled" mapstructure:"enabled" json:"enabled" default:"false"`
-	// Coordinator makes this node act as a DHT bootstrap node. Set to true on
-	// nodes with a public IP. No data is stored; the node only maintains the DHT
-	// routing table so others can find each other.
-	Coordinator bool `yaml:"coordinator" mapstructure:"coordinator" json:"coordinator" default:"false"`
-	// BootstrapNodes are the DHT coordinator addresses (host:port). Example:
-	// ["node1.example.com:42042", "node2.example.com:42042"]. Ignored when
-	// Coordinator is true.
-	BootstrapNodes []string `yaml:"bootstrap_nodes" mapstructure:"bootstrap_nodes" json:"bootstrap_nodes"`
-	// DHTPort is the UDP port the local DHT server listens on.
-	DHTPort int `yaml:"dht_port" mapstructure:"dht_port" json:"dht_port" default:"42042"`
-	// HTTPPort is the port altmount's HTTP server listens on, announced to peers
-	// so they know where to fetch .meta/.seg files.
-	HTTPPort int `yaml:"http_port" mapstructure:"http_port" json:"http_port" default:"8080"`
-	// RateLimitPerMinute caps requests per client IP to the public /api/share/*
-	// endpoints. 0 disables the limit. Default 120 (2 req/s) comfortably serves a
-	// real peer fetching a manifest plus per-file metas.
-	RateLimitPerMinute int `yaml:"rate_limit_per_minute" mapstructure:"rate_limit_per_minute" json:"rate_limit_per_minute" default:"120"`
-	// MinPeers is how many DISTINCT peer IPs must serve a byte-identical metadata
-	// set before the import shortcut trusts it. 1 = trust the first peer (fastest,
-	// matches a young/single-seeder network). 2+ requires independent agreement,
-	// raising the bar on a single malicious peer poisoning a release.
-	MinPeers int `yaml:"min_peers" mapstructure:"min_peers" json:"min_peers" default:"1"`
-	// AllowEncrypted permits applying peer metadata that declares encryption or
-	// carries key material (AES key/iv, password, salt). Default false: encrypted
-	// releases fall back to a normal import so decryption parameters are derived
-	// locally and never dictated by a peer.
-	AllowEncrypted bool `yaml:"allow_encrypted" mapstructure:"allow_encrypted" json:"allow_encrypted" default:"false"`
-}
 
 // SegmentCacheConfig configures the segment-aligned disk cache shared by FUSE and WebDAV.
 // When enabled, this cache replaces the FUSE VFS disk cache and additionally benefits WebDAV.
@@ -1751,15 +1714,6 @@ func DefaultConfig(configDir ...string) *Config {
 		},
 		MountPath: "",            // Empty by default - required when ARRs is enabled
 		MountType: MountTypeNone, // No mount system active by default
-		// P2P sharing safety defaults. The struct `default:` tags are not applied
-		// by the loader (viper + this literal are the source of truth), so the
-		// guardrail defaults must live here: rate limiting on by default, quorum of
-		// one (trust first peer), encrypted-meta acceptance off.
-		Share: ShareConfig{
-			RateLimitPerMinute: 120,
-			MinPeers:           1,
-			AllowEncrypted:     false,
-		},
 	}
 }
 

@@ -38,29 +38,6 @@ func isV3Meta(data []byte) bool {
 		data[4] == metaMagicV3[4]
 }
 
-// IsV3Meta reports whether raw is a v3-format .meta file (carries the v3 magic
-// prefix). Only v3 metas are store-backed and therefore shareable over P2P,
-// since the segment data lives in a separate NzbStore the receiver rebuilds
-// locally from the same NZB.
-func IsV3Meta(raw []byte) bool { return isV3Meta(raw) }
-
-// DecodeStructuralMeta strips the v3 magic prefix and unmarshals the structural
-// FileMetadata exactly as written on disk — SegmentRefs/SegmentRuns intact, no
-// resolution against any NzbStore. This is the form shared over P2P: the
-// receiver rewrites StoreRef to its locally-rebuilt store and writes it back via
-// WriteFileMetadata. Returns an error for non-v3 (v1 inline-segment) metas,
-// which are not shareable.
-func DecodeStructuralMeta(raw []byte) (*metapb.FileMetadata, error) {
-	if !isV3Meta(raw) {
-		return nil, fmt.Errorf("metadata: not a v3 .meta (missing magic prefix)")
-	}
-	m := &metapb.FileMetadata{}
-	if err := proto.Unmarshal(raw[len(metaMagicV3):], m); err != nil {
-		return nil, fmt.Errorf("metadata: decode structural meta: %w", err)
-	}
-	return m, nil
-}
-
 // FileMetadataLite holds the minimal metadata needed for directory listings.
 // This avoids keeping full FileMetadata protos (with SegmentData, Par2Files, etc.)
 // in memory just for Readdir.
