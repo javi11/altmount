@@ -458,3 +458,16 @@ func TestMigrateArrsCleanup_AutoFailureFlag_FalseClearsOnly(t *testing.T) {
 	assert.Equal(t, rules, cfg.Arrs.QueueCleanupRules)
 	assert.Nil(t, cfg.Arrs.CleanupAutomaticImportFailure)
 }
+
+func TestShareConfig_Defaults(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.Share.RateLimitPerMinute != 120 {
+		t.Errorf("RateLimitPerMinute default = %d; want 120", cfg.Share.RateLimitPerMinute)
+	}
+	if cfg.Share.MinPeers != 1 {
+		t.Errorf("MinPeers default = %d; want 1", cfg.Share.MinPeers)
+	}
+	if cfg.Share.AllowEncrypted {
+		t.Error("AllowEncrypted default = true; want false")
+	}
+}
