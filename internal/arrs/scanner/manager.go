@@ -644,54 +644,18 @@ func (m *Manager) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 		}
 
 		for _, movie := range movies {
-			// Try match by filename (the most robust way if paths differ)
-			requestFileName := filepath.Base(filePath)
-
-			if movie.HasFile && movie.MovieFile != nil {
-				// Try exact match
-				if movie.MovieFile.Path == filePath {
-					targetMovie = movie
-					targetMovieFileID = movie.MovieFile.ID
-					break
-				}
-
-				movieFileName := filepath.Base(movie.MovieFile.Path)
-				if movieFileName == requestFileName {
-					slog.InfoContext(ctx, "Found Radarr movie match by filename",
-						"movie", movie.Title,
-						"path", movie.MovieFile.Path)
-					targetMovie = movie
-					targetMovieFileID = movie.MovieFile.ID
-					break
-				}
-
-				// Try match without .strm extension if filePath is a .strm file
-				if before, ok := strings.CutSuffix(filePath, ".strm"); ok {
-					strippedPath := before
-					// Check if movie file path (without its own extension) matches stripped filePath
-					if strings.TrimSuffix(movie.MovieFile.Path, filepath.Ext(movie.MovieFile.Path)) == strippedPath {
-						targetMovie = movie
-						targetMovieFileID = movie.MovieFile.ID
-						break
-					}
-				}
-				// Try suffix match with relative path if provided
-				if relativePath != "" {
-					strippedRelative := strings.TrimSuffix(relativePath, ".strm")
-					if strings.HasSuffix(movie.MovieFile.Path, relativePath) ||
-						strings.HasSuffix(strings.TrimSuffix(movie.MovieFile.Path, filepath.Ext(movie.MovieFile.Path)), strippedRelative) {
-						slog.InfoContext(ctx, "Found Radarr movie match by relative path suffix",
-							"radarr_path", movie.MovieFile.Path,
-							"relative_path", relativePath)
-						targetMovie = movie
-						targetMovieFileID = movie.MovieFile.ID
-						break
-					}
-				}
-			}
-			
-			if targetMovieFileID > 0 {
+			// Reuse the shared matching rules (exact/basename/.strm/relative-suffix)
+			// so the path-based scan and the TMDB-id fallback stay in sync.
+			if movie.HasFile && movie.MovieFile != nil &&
+				radarrFileMatchesTarget(movie.MovieFile.Path, filePath, relativePath) {
+				slog.InfoContext(ctx, "Found Radarr movie match by path",
+					"movie", movie.Title,
+					"path", movie.MovieFile.Path,
+					"relative_path", relativePath)
+				targetMovie = movie
+				targetMovieFileID = movie.MovieFile.ID
 				sceneName = movie.MovieFile.SceneName
+				break
 			}
 		}
 	}
