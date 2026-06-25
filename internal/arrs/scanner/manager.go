@@ -567,39 +567,41 @@ func (m *Manager) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 
 	// ID-Based Precision: If we have the movie ID from metadata, use it
 	if metadata != nil && metadata.Movie != nil && metadata.Movie.Id > 0 {
-		movies, err := m.data.GetMovies(ctx, client, instanceName)
-		if err != nil {
-			return fmt.Errorf("failed to get movies from Radarr for ID lookup: %w", err)
-		}
-		for _, movie := range movies {
-			if movie.ID == metadata.Movie.Id {
-				targetMovie = movie
+		// Targeted lookup by internal Radarr movie ID instead of fetching the ENTIRE
+		// movie library and scanning it. On large libraries the full GetMovies call can
+		// exceed the HTTP client timeout, error out, and wrongly condemn the file. A
+		// failed/empty targeted lookup (e.g. the movie was removed/re-added with a new
+		// internal id) falls through to the path-based matching below rather than erroring.
+		movie, lookupErr := client.GetMovieByIDContext(ctx, metadata.Movie.Id)
+		if lookupErr != nil {
+			slog.WarnContext(ctx, "Targeted Radarr movie lookup by ID failed, falling back to path matching",
+				"instance", instanceName, "movie_id", metadata.Movie.Id, "error", lookupErr)
+		} else if movie != nil && movie.ID == metadata.Movie.Id {
+			targetMovie = movie
 
-				if metadata.MovieFile != nil && metadata.MovieFile.Id > 0 {
-					slog.InfoContext(ctx, "ID-Based Precision: Using metadata IDs for Radarr repair",
-						"movie_id", metadata.Movie.Id,
-						"movie_file_id", metadata.MovieFile.Id)
-					sceneName = metadata.MovieFile.SceneName
+			if metadata.MovieFile != nil && metadata.MovieFile.Id > 0 {
+				slog.InfoContext(ctx, "ID-Based Precision: Using metadata IDs for Radarr repair",
+					"movie_id", metadata.Movie.Id,
+					"movie_file_id", metadata.MovieFile.Id)
+				sceneName = metadata.MovieFile.SceneName
 
-					// Smart Repair Guard: Check if the movie already has a newer/different healthy file
-					if movie.HasFile && movie.MovieFile != nil {
-						if movie.MovieFile.ID != metadata.MovieFile.Id {
-							slog.InfoContext(ctx, "Smart Repair Guard: Movie already has a different healthy file (likely upgraded). Skipping repair.",
-								"movie", movie.Title,
-								"old_file_id", metadata.MovieFile.Id,
-								"new_file_id", movie.MovieFile.ID)
-							return model.ErrEpisodeAlreadySatisfied
-						}
-						targetMovieFileID = movie.MovieFile.ID
+				// Smart Repair Guard: Check if the movie already has a newer/different healthy file
+				if movie.HasFile && movie.MovieFile != nil {
+					if movie.MovieFile.ID != metadata.MovieFile.Id {
+						slog.InfoContext(ctx, "Smart Repair Guard: Movie already has a different healthy file (likely upgraded). Skipping repair.",
+							"movie", movie.Title,
+							"old_file_id", metadata.MovieFile.Id,
+							"new_file_id", movie.MovieFile.ID)
+						return model.ErrEpisodeAlreadySatisfied
 					}
-				} else {
-					slog.InfoContext(ctx, "ID-Based Precision: Using metadata movie ID for Radarr repair",
-						"movie_id", metadata.Movie.Id)
-					if movie.HasFile && movie.MovieFile != nil {
-						targetMovieFileID = movie.MovieFile.ID
-					}
+					targetMovieFileID = movie.MovieFile.ID
 				}
-				break
+			} else {
+				slog.InfoContext(ctx, "ID-Based Precision: Using metadata movie ID for Radarr repair",
+					"movie_id", metadata.Movie.Id)
+				if movie.HasFile && movie.MovieFile != nil {
+					targetMovieFileID = movie.MovieFile.ID
+				}
 			}
 		}
 	}
