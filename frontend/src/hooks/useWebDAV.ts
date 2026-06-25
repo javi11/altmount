@@ -4,7 +4,7 @@ import { apiClient } from "../api/client";
 import { useToast } from "../contexts/ToastContext";
 import { webdavClient } from "../services/webdavClient";
 import type { WebDAVDirectory } from "../types/webdav";
-import { encodeWebDAVPath } from "../utils/fileUtils";
+import { baseName, encodeWebDAVPath, joinPath, parentPath } from "../utils/fileUtils";
 
 export function useWebDAVConnection() {
 	const [isConnected, setIsConnected] = useState(false);
@@ -226,19 +226,109 @@ export function useWebDAVFileOperations() {
 		},
 	});
 
+	// Invalidates a directory listing (prefix match covers the showCorrupted variants).
+	const invalidateDir = (dir: string) =>
+		queryClient.invalidateQueries({ queryKey: ["webdav", "directory", dir] });
+
+	const createFolder = useMutation({
+		mutationFn: async ({ parentDir, name }: { parentDir: string; name: string }) => {
+			await webdavClient.createDirectory(joinPath(parentDir, name));
+			return { parentDir, name };
+		},
+		onSuccess: ({ parentDir, name }) => {
+			invalidateDir(parentDir);
+			showToast({ type: "success", title: "Folder Created", message: `Created "${name}"` });
+		},
+		onError: (error) => {
+			showToast({ type: "error", title: "Create Folder Failed", message: error.message });
+		},
+	});
+
+	const renameItem = useMutation({
+		mutationFn: async ({ path, newName }: { path: string; newName: string }) => {
+			const dir = parentPath(path);
+			await webdavClient.moveItem(path, joinPath(dir, newName));
+			return { dir, newName };
+		},
+		onSuccess: ({ dir, newName }) => {
+			invalidateDir(dir);
+			showToast({ type: "success", title: "Renamed", message: `Renamed to "${newName}"` });
+		},
+		onError: (error) => {
+			showToast({ type: "error", title: "Rename Failed", message: error.message });
+		},
+	});
+
+	const moveItems = useMutation({
+		mutationFn: async ({ paths, destDir }: { paths: string[]; destDir: string }) => {
+			const sourceDirs = new Set<string>();
+			for (const path of paths) {
+				await webdavClient.moveItem(path, joinPath(destDir, baseName(path)));
+				sourceDirs.add(parentPath(path));
+			}
+			return { count: paths.length, destDir, sourceDirs: Array.from(sourceDirs) };
+		},
+		onSuccess: ({ count, destDir, sourceDirs }) => {
+			invalidateDir(destDir);
+			for (const dir of sourceDirs) invalidateDir(dir);
+			showToast({
+				type: "success",
+				title: "Moved",
+				message: `Moved ${count} item${count === 1 ? "" : "s"}`,
+			});
+		},
+		onError: (error) => {
+			showToast({ type: "error", title: "Move Failed", message: error.message });
+		},
+	});
+
+	const bulkDelete = useMutation({
+		mutationFn: async ({ paths }: { paths: string[] }) => {
+			const dirs = new Set<string>();
+			for (const path of paths) {
+				await webdavClient.deleteFile(path);
+				dirs.add(parentPath(path));
+			}
+			return { count: paths.length, dirs: Array.from(dirs) };
+		},
+		onSuccess: ({ count, dirs }) => {
+			for (const dir of dirs) invalidateDir(dir);
+			showToast({
+				type: "success",
+				title: "Deleted",
+				message: `Deleted ${count} item${count === 1 ? "" : "s"}`,
+			});
+		},
+		onError: (error) => {
+			showToast({ type: "error", title: "Delete Failed", message: error.message });
+		},
+	});
+
 	return {
 		downloadFile: downloadFile.mutate,
 		deleteFile: deleteFile.mutate,
 		getFileMetadata: getFileMetadata.mutate,
 		exportNZB: exportNZB.mutate,
+		createFolder: createFolder.mutate,
+		renameItem: renameItem.mutate,
+		moveItems: moveItems.mutate,
+		bulkDelete: bulkDelete.mutate,
 		isDownloading: downloadFile.isPending,
 		isDeleting: deleteFile.isPending,
 		isGettingMetadata: getFileMetadata.isPending,
 		isExportingNZB: exportNZB.isPending,
+		isCreatingFolder: createFolder.isPending,
+		isRenaming: renameItem.isPending,
+		isMoving: moveItems.isPending,
+		isBulkDeleting: bulkDelete.isPending,
 		downloadError: downloadFile.error,
 		deleteError: deleteFile.error,
 		metadataError: getFileMetadata.error,
 		exportNZBError: exportNZB.error,
+		createFolderError: createFolder.error,
+		renameError: renameItem.error,
+		moveError: moveItems.error,
+		bulkDeleteError: bulkDelete.error,
 		metadataData: getFileMetadata.data,
 	};
 }

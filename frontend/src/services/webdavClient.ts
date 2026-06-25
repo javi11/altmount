@@ -176,6 +176,34 @@ class WebDAVClient {
 		}
 	}
 
+	// Creates a directory via WebDAV MKCOL.
+	async createDirectory(path: string): Promise<void> {
+		if (!this.client) {
+			throw new Error("WebDAV client not connected");
+		}
+
+		try {
+			await this.client.createDirectory(path);
+		} catch (error) {
+			console.error("Failed to create directory:", error);
+			throw this.parseError(error, "create folder", path);
+		}
+	}
+
+	// Moves or renames an item via WebDAV MOVE (used for both rename and cut/paste).
+	async moveItem(from: string, to: string): Promise<void> {
+		if (!this.client) {
+			throw new Error("WebDAV client not connected");
+		}
+
+		try {
+			await this.client.moveFile(from, to);
+		} catch (error) {
+			console.error("Failed to move item:", error);
+			throw this.parseError(error, "move item", `${from} → ${to}`);
+		}
+	}
+
 	async testConnection(): Promise<boolean> {
 		if (!this.client) {
 			return false;

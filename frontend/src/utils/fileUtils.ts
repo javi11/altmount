@@ -221,6 +221,33 @@ export function getFormatLabel(filename: string): string | null {
  * encodeWebDAVPath("/#1 HAPPY FAMILY USA (2025)/Season 01/file.mkv")
  * // Returns: "/%231%20HAPPY%20FAMILY%20USA%20(2025)/Season%2001/file.mkv"
  */
+/**
+ * Joins a directory path and a child name into a normalized absolute path.
+ * Collapses duplicate slashes and guarantees a leading slash.
+ */
+export function joinPath(dir: string, name: string): string {
+	const combined = `${dir}/${name}`.replace(/\/+/g, "/");
+	return combined.startsWith("/") ? combined : `/${combined}`;
+}
+
+/**
+ * Returns the parent directory of a path ("/" for top-level entries).
+ */
+export function parentPath(path: string): string {
+	const normalized = path.replace(/\/+/g, "/").replace(/\/$/, "");
+	const idx = normalized.lastIndexOf("/");
+	return idx <= 0 ? "/" : normalized.substring(0, idx);
+}
+
+/**
+ * Returns the final path segment (the file or folder name).
+ */
+export function baseName(path: string): string {
+	const normalized = path.replace(/\/+/g, "/").replace(/\/$/, "");
+	const idx = normalized.lastIndexOf("/");
+	return idx >= 0 ? normalized.substring(idx + 1) : normalized;
+}
+
 export function encodeWebDAVPath(path: string): string {
 	// Handle empty or root path
 	if (!path || path === "/") {

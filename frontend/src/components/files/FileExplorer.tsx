@@ -1,25 +1,35 @@
 import {
 	AlertTriangle,
+	ArrowUpDown,
+	Check,
+	ChevronDown,
+	ClipboardPaste,
+	FolderPlus,
 	FolderTree,
 	History,
 	Info,
 	RefreshCw,
+	Scissors,
 	Search,
+	Trash2,
 	Wifi,
 	WifiOff,
 	X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useConfirm } from "../../contexts/ModalContext";
 import { useImportHistory, useRegenerateSymlinks } from "../../hooks/useApi";
 import { useFilePreview } from "../../hooks/useFilePreview";
 import { useWebDAVDirectory, useWebDAVFileOperations } from "../../hooks/useWebDAV";
 import type { WebDAVFile } from "../../types/webdav";
+import { parentPath } from "../../utils/fileUtils";
 import { ErrorAlert } from "../ui/ErrorAlert";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
 import { BreadcrumbNav } from "./BreadcrumbNav";
 import { FileInfoModal } from "./FileInfoModal";
 import { FileList } from "./FileList";
 import { FilePreview } from "./FilePreview";
+import { PromptModal } from "./PromptModal";
 
 interface FileExplorerProps {
 	isConnected: boolean;
@@ -101,10 +111,18 @@ export function FileExplorer({
 		deleteFile,
 		getFileMetadata,
 		exportNZB,
+		createFolder,
+		renameItem,
+		moveItems,
+		bulkDelete,
 		isDownloading,
 		isDeleting,
 		isGettingMetadata,
 		isExportingNZB,
+		isCreatingFolder,
+		isRenaming,
+		isMoving,
+		isBulkDeleting,
 		downloadError,
 		deleteError,
 		metadataError,
@@ -114,6 +132,121 @@ export function FileExplorer({
 
 	const preview = useFilePreview();
 	const regenerateSymlinks = useRegenerateSymlinks();
+	const { confirmAction } = useConfirm();
+
+	// --- Editable file-manager state (directory view only) ---
+	const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
+	const [cutPaths, setCutPaths] = useState<Set<string>>(new Set());
+	const [sortKey, setSortKey] = useState<"name" | "size" | "modified">("name");
+	const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+	const [createFolderOpen, setCreateFolderOpen] = useState(false);
+	const [renameState, setRenameState] = useState<{ path: string; name: string } | null>(null);
+
+	const editable = !isRecentView;
+
+	// Clear the selection on directory change; the cut buffer persists so items can be pasted elsewhere.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: reset whenever the directory changes
+	useEffect(() => {
+		setSelectedPaths(new Set());
+	}, [currentPath]);
+
+	const toggleSelect = useCallback((path: string) => {
+		setSelectedPaths((prev) => {
+			const next = new Set(prev);
+			if (next.has(path)) {
+				next.delete(path);
+			} else {
+				next.add(path);
+			}
+			return next;
+		});
+	}, []);
+
+	const toggleSelectAll = useCallback((paths: string[]) => {
+		setSelectedPaths((prev) => {
+			const allSelected = paths.length > 0 && paths.every((p) => prev.has(p));
+			const next = new Set(prev);
+			for (const p of paths) {
+				if (allSelected) {
+					next.delete(p);
+				} else {
+					next.add(p);
+				}
+			}
+			return next;
+		});
+	}, []);
+
+	const clearSelection = useCallback(() => setSelectedPaths(new Set()), []);
+
+	const handleCut = useCallback((path: string) => {
+		setCutPaths(new Set([path]));
+	}, []);
+
+	const handleCutSelected = useCallback(() => {
+		setCutPaths(new Set(selectedPaths));
+		clearSelection();
+	}, [selectedPaths, clearSelection]);
+
+	const cancelCut = useCallback(() => setCutPaths(new Set()), []);
+
+	// A cut item can be pasted here unless it already lives here or we'd move a folder into itself.
+	const pasteablePaths = useMemo(
+		() =>
+			Array.from(cutPaths).filter(
+				(p) =>
+					parentPath(p) !== currentPath && currentPath !== p && !currentPath.startsWith(`${p}/`),
+			),
+		[cutPaths, currentPath],
+	);
+
+	const handlePaste = useCallback(() => {
+		if (pasteablePaths.length === 0) {
+			return;
+		}
+		moveItems({ paths: pasteablePaths, destDir: currentPath });
+		setCutPaths(new Set());
+	}, [pasteablePaths, currentPath, moveItems]);
+
+	const handleRename = useCallback((path: string, currentName: string) => {
+		setRenameState({ path, name: currentName });
+	}, []);
+
+	const submitRename = useCallback(
+		(newName: string) => {
+			if (renameState) {
+				renameItem({ path: renameState.path, newName });
+			}
+			setRenameState(null);
+		},
+		[renameState, renameItem],
+	);
+
+	const submitCreateFolder = useCallback(
+		(name: string) => {
+			createFolder({ parentDir: currentPath, name });
+			setCreateFolderOpen(false);
+		},
+		[currentPath, createFolder],
+	);
+
+	const handleDeleteSelected = useCallback(async () => {
+		const paths = Array.from(selectedPaths);
+		if (paths.length === 0) {
+			return;
+		}
+		const confirmed = await confirmAction(
+			"Delete items",
+			`Are you sure you want to delete ${paths.length} selected item${
+				paths.length === 1 ? "" : "s"
+			}? This action cannot be undone.`,
+			{ type: "error", confirmText: "Delete", confirmButtonClass: "btn-error" },
+		);
+		if (confirmed) {
+			bulkDelete({ paths });
+			clearSelection();
+		}
+	}, [selectedPaths, confirmAction, bulkDelete, clearSelection]);
 
 	// Filter files based on search term
 	const filteredFiles = useMemo(() => {
@@ -124,6 +257,26 @@ export function FileExplorer({
 
 		return files.filter((file) => file.basename.toLowerCase().includes(searchTerm.toLowerCase()));
 	}, [isRecentView, historyFiles, directory?.files, searchTerm]);
+
+	// Apply the chosen sort with directories always first.
+	const sortedFiles = useMemo(() => {
+		const arr = [...filteredFiles];
+		arr.sort((a, b) => {
+			if (a.type !== b.type) {
+				return a.type === "directory" ? -1 : 1;
+			}
+			let cmp = 0;
+			if (sortKey === "name") {
+				cmp = a.basename.localeCompare(b.basename);
+			} else if (sortKey === "size") {
+				cmp = (a.size || 0) - (b.size || 0);
+			} else {
+				cmp = new Date(a.lastmod).getTime() - new Date(b.lastmod).getTime();
+			}
+			return sortDir === "asc" ? cmp : -cmp;
+		});
+		return arr;
+	}, [filteredFiles, sortKey, sortDir]);
 
 	// File info modal state
 	const [fileInfoModal, setFileInfoModal] = useState<{
@@ -280,18 +433,6 @@ export function FileExplorer({
 							)}
 						</div>
 					</div>
-
-					<div className="flex shrink-0 items-center gap-2">
-						<button
-							type="button"
-							className="btn btn-ghost btn-sm gap-2 text-base-content/80 hover:opacity-100"
-							onClick={() => refetch()}
-							disabled={isLoading}
-						>
-							<RefreshCw className={`h-3.5 w-3.5 ${isLoading ? "animate-spin" : ""}`} />
-							<span className="text-xs">Refresh</span>
-						</button>
-					</div>
 				</div>
 			</section>
 
@@ -363,16 +504,117 @@ export function FileExplorer({
 
 			{/* File List Section */}
 			<section className="space-y-4">
-				<div className="flex items-center gap-2">
-					<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
-						Contents
-					</h4>
-					<div className="h-px flex-1 bg-base-300" />
+				{/* Toolbar */}
+				<div className="flex flex-wrap items-center justify-between gap-2">
+					<div className="flex flex-wrap items-center gap-2">
+						{editable && (
+							<button
+								type="button"
+								className="btn btn-primary btn-sm gap-2"
+								onClick={() => setCreateFolderOpen(true)}
+								disabled={isCreatingFolder}
+							>
+								<FolderPlus className="h-4 w-4" />
+								Create Folder
+							</button>
+						)}
+
+						{editable && cutPaths.size > 0 && (
+							<>
+								<button
+									type="button"
+									className="btn btn-success btn-sm gap-2"
+									onClick={handlePaste}
+									disabled={pasteablePaths.length === 0 || isMoving}
+								>
+									<ClipboardPaste className="h-4 w-4" />
+									{isMoving ? "Pasting..." : `Paste ${pasteablePaths.length || cutPaths.size} here`}
+								</button>
+								<button type="button" className="btn btn-ghost btn-sm" onClick={cancelCut}>
+									Cancel
+								</button>
+							</>
+						)}
+
+						{editable && selectedPaths.size > 0 && (
+							<div className="flex items-center gap-1 rounded-lg bg-base-200 px-2 py-1">
+								<span className="px-1 font-medium text-sm">{selectedPaths.size} selected</span>
+								<button
+									type="button"
+									className="btn btn-ghost btn-xs gap-1"
+									onClick={handleCutSelected}
+								>
+									<Scissors className="h-3.5 w-3.5" />
+									Cut
+								</button>
+								<button
+									type="button"
+									className="btn btn-ghost btn-xs gap-1 text-error"
+									onClick={handleDeleteSelected}
+									disabled={isBulkDeleting}
+								>
+									<Trash2 className="h-3.5 w-3.5" />
+									{isBulkDeleting ? "Deleting..." : "Delete"}
+								</button>
+								<button
+									type="button"
+									className="btn btn-ghost btn-xs"
+									aria-label="Clear selection"
+									onClick={clearSelection}
+								>
+									<X className="h-3.5 w-3.5" />
+								</button>
+							</div>
+						)}
+					</div>
+
+					<div className="flex items-center gap-2">
+						<button
+							type="button"
+							className="btn btn-ghost btn-sm gap-2"
+							onClick={() => refetch()}
+							disabled={isLoading}
+						>
+							<RefreshCw className={`h-3.5 w-3.5 ${isLoading ? "animate-spin" : ""}`} />
+							Refresh
+						</button>
+
+						<div className="dropdown dropdown-end">
+							<button tabIndex={0} type="button" className="btn btn-sm gap-2">
+								<ArrowUpDown className="h-3.5 w-3.5" />
+								Sort
+								<ChevronDown className="h-3.5 w-3.5" />
+							</button>
+							<ul className="dropdown-content menu z-10 w-44 rounded-box bg-base-100 shadow-lg">
+								{(["name", "size", "modified"] as const).map((key) => (
+									<li key={key}>
+										<button
+											type="button"
+											className="justify-between capitalize"
+											onClick={() => setSortKey(key)}
+										>
+											{key}
+											{sortKey === key && <Check className="h-4 w-4 text-primary" />}
+										</button>
+									</li>
+								))}
+								<div className="divider my-1" />
+								<li>
+									<button
+										type="button"
+										onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
+									>
+										{sortDir === "asc" ? "Ascending" : "Descending"}
+									</button>
+								</li>
+							</ul>
+						</div>
+					</div>
 				</div>
 
-				<div className="min-h-[300px] rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-2 sm:p-6">
+				<div className="min-h-[300px] rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-2 sm:p-4">
 					{searchTerm && (directory || isRecentView) && (
-						<div className="mb-6 flex items-center gap-2 px-2 text-base-content/60 text-xs">
+						<div className="mb-4 flex items-center gap-2 px-2 text-base-content/60 text-xs">
 							<Info className="h-3 w-3" />
 							{filteredFiles.length === 0 ? (
 								<span>No matches for "{searchTerm}"</span>
@@ -406,8 +648,13 @@ export function FileExplorer({
 							</div>
 						) : (
 							<FileList
-								files={filteredFiles}
+								files={sortedFiles}
 								currentPath={currentPath}
+								editable={editable}
+								selectedPaths={selectedPaths}
+								cutPaths={cutPaths}
+								onToggleSelect={toggleSelect}
+								onToggleSelectAll={toggleSelectAll}
 								onNavigate={handleNavigate}
 								onDownload={handleDownload}
 								onDelete={handleDelete}
@@ -415,6 +662,8 @@ export function FileExplorer({
 								onExportNZB={handleExportNZB}
 								onPreview={preview.openPreview}
 								onRegenerateSymlink={handleRegenerateSymlink}
+								onRename={handleRename}
+								onCut={handleCut}
 								isDownloading={isDownloading}
 								isDeleting={isDeleting}
 								isExportingNZB={isExportingNZB}
@@ -449,6 +698,29 @@ export function FileExplorer({
 				error={metadataError}
 				onClose={handleCloseFileInfo}
 				onRetry={handleRetryFileInfo}
+			/>
+
+			<PromptModal
+				isOpen={createFolderOpen}
+				title="Create Folder"
+				label="Folder name"
+				placeholder="New folder"
+				confirmText="Create"
+				isPending={isCreatingFolder}
+				onConfirm={submitCreateFolder}
+				onCancel={() => setCreateFolderOpen(false)}
+			/>
+
+			<PromptModal
+				isOpen={renameState !== null}
+				title="Rename"
+				label="New name"
+				initialValue={renameState?.name ?? ""}
+				confirmText="Rename"
+				selectOnOpen
+				isPending={isRenaming}
+				onConfirm={submitRename}
+				onCancel={() => setRenameState(null)}
 			/>
 		</div>
 	);
