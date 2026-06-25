@@ -1006,7 +1006,10 @@ func (m *Manager) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 	if len(episodeIDs) == 0 {
 		if season, epNums, ok := parseSeasonEpisode(filePath, relativePath); ok {
 			for _, ep := range episodes {
-				if ep == nil || ep.SeasonNumber != season {
+				// Limit this fallback to renamed-but-OWNED episodes (HasFile=true), matching its
+				// documented intent. Without the guard it would also blocklist/re-search episodes
+				// Sonarr has no file for, which is broader than the renamed-file case this handles.
+				if ep == nil || !ep.HasFile || ep.SeasonNumber != season {
 					continue
 				}
 				for _, en := range epNums {
@@ -1209,13 +1212,19 @@ func (m *Manager) blocklistSonarrEpisodeFile(ctx context.Context, client *sonarr
 		return fmt.Errorf("failed to fetch Sonarr history: %w", err)
 	}
 
+	// fileID == 0 is the "episode-only" sentinel used by the blocklist-only callers (the
+	// metadata-episode and season+episode fallbacks): there is no specific file to match on,
+	// so the file-based comparison must be skipped entirely and the import event resolved by
+	// EpisodeID. Otherwise "0" could match a record whose data carries a zero/missing fileId
+	// and the wrong release would win.
+	hasFileID := fileID != 0
 	targetFileID := strconv.FormatInt(fileID, 10)
 	var downloadID string
 
 	// 1. Find the import event to get the downloadId
 	for _, record := range history.Records {
 		if record.EventType == "downloadFolderImported" {
-			if record.Data.FileID == targetFileID {
+			if hasFileID && record.Data.FileID == targetFileID {
 				downloadID = record.DownloadID
 				break
 			}
