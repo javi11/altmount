@@ -16,6 +16,13 @@ import (
 var (
 	tvSeasonPattern = regexp.MustCompile(`(?i)S\d{1,4}E\d{1,4}`)
 	tvDatePattern   = regexp.MustCompile(`(?i)\d{4}.\d{2}.\d{2}`)
+
+	// seasonEpisodeCapture extracts the season and the full run of episode tokens from an
+	// SxxEyy(Ezz...) release name (e.g. "S02E05" or the multi-episode "S01E01E02").
+	// episodeNumCapture then pulls each individual episode number out of that run. Used by
+	// the Sonarr repair season+episode fallback (parseSeasonEpisode).
+	seasonEpisodeCapture = regexp.MustCompile(`(?i)S(\d{1,4})((?:E\d{1,4})+)`)
+	episodeNumCapture    = regexp.MustCompile(`(?i)E(\d{1,4})`)
 )
 
 // DiscoverFileMetadata attempts to find the rich metadata for a file by searching ARR instances.
