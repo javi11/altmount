@@ -1,7 +1,7 @@
 import { Activity } from "lucide-react";
 import { useMemo, useState } from "react";
-import { LoadingSpinner } from "../../../../components/ui/LoadingSpinner";
-import { usePoolMetrics, useProviderSpeedHistory } from "../../../../hooks/useApi";
+import { usePoolMetrics, useProviderSpeedHistory } from "../../hooks/useApi";
+import { LoadingSpinner } from "../ui/LoadingSpinner";
 import { type ChartDatum, ProviderAreaChart, type TimeRangeTab } from "./chartShared";
 
 const TABS: TimeRangeTab[] = [
@@ -19,7 +19,7 @@ export function ProviderSpeedChart() {
 	const { data: historyResponse, isLoading: historyLoading } = useProviderSpeedHistory(days);
 	const { data: poolData } = usePoolMetrics();
 
-	const { chartData, providers, providerMaxes } = useMemo(() => {
+	const { chartData, providers } = useMemo(() => {
 		const grouped: Record<string, ChartDatum> = {};
 		const maxes: Record<string, number> = {};
 
@@ -73,7 +73,7 @@ export function ProviderSpeedChart() {
 
 		const sortedProviders = Object.keys(maxes).sort((a, b) => maxes[b] - maxes[a]);
 
-		return { chartData: Object.values(grouped), providers: sortedProviders, providerMaxes: maxes };
+		return { chartData: Object.values(grouped), providers: sortedProviders };
 	}, [historyResponse, poolData, days]);
 
 	if (historyLoading)
@@ -95,13 +95,11 @@ export function ProviderSpeedChart() {
 			tabActiveClassName="bg-primary text-primary-content shadow hover:bg-primary"
 			chartData={chartData}
 			providers={providers}
-			providerValues={providerMaxes}
 			gradientPrefix="colorSpeed"
 			formatValue={formatSpeed}
 			tooltipTotalClassName="text-success"
 			yAxisUnit=" MB/s"
 			connectNulls
-			breakdownLabel="Peak Performance"
 		/>
 	);
 }

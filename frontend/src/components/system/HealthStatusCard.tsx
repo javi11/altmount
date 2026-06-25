@@ -117,7 +117,7 @@ export function HealthStatusCard({ className }: HealthStatusCardProps) {
 						{metrics.corrupted > 0 ? (
 							<ShieldAlert className="h-8 w-8 text-error" />
 						) : metrics.isWorking ? (
-							<Activity className="h-8 w-8 animate-pulse text-info" />
+							<Activity className="h-8 w-8 text-info" />
 						) : (
 							<ShieldCheck className="h-8 w-8 text-success" />
 						)}

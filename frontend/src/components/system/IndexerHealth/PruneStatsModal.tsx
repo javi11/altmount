@@ -23,12 +23,12 @@ export function PruneStatsModal({ isPending, onClose, onPrune }: PruneStatsModal
 
 	return (
 		<div
-			className="modal modal-open backdrop-blur-sm"
+			className="pointer-events-none fixed inset-0 z-[1000] flex items-center justify-center p-4"
 			role="dialog"
-			aria-modal="true"
+			aria-modal="false"
 			aria-labelledby="prune-modal-title"
 		>
-			<div className="modal-box max-w-md border border-base-300 bg-base-100 p-6 shadow-2xl sm:p-8">
+			<div className="pointer-events-auto max-h-[calc(100vh-2rem)] w-full max-w-md overflow-y-auto rounded-2xl border border-base-300 bg-base-100 p-6 shadow-2xl sm:p-8">
 				<h3
 					id="prune-modal-title"
 					className="flex items-center gap-2 font-bold text-base-content text-xl"
