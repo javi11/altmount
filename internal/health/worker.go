@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/javi11/altmount/internal/arrs"
@@ -915,6 +918,7 @@ const (
 	repairOutcomeCorrupted                        // ARR failed with a generic error; mark file corrupted
 	repairOutcomeDeleted                          // Health record and/or metadata were deleted (zombie)
 	repairOutcomeRegenerated                      // Metadata was successfully regenerated from NZB
+	repairOutcomeDeferred                         // ARR temporarily unreachable; keep repair-pending, do not condemn or burn retries
 )
 
 // applyRepairOutcome maps a repairOutcome to the corresponding fields on the HealthStatusUpdate.
@@ -935,7 +939,86 @@ func applyRepairOutcome(update *database.HealthStatusUpdate, outcome repairOutco
 			errMsg := err.Error()
 			update.ErrorMessage = &errMsg
 		}
+	case repairOutcomeDeferred:
+		// ARR was temporarily unreachable (network/transport failure or a 5xx). Keep
+		// the file repair-pending without incrementing repair_retry_count or condemning
+		// it, so it self-heals on a later cycle once the ARR is reachable again.
+		// UpdateTypeRepairTrigger sets status=repair_triggered and does NOT bump the
+		// repair budget; the caller's pre-set ScheduledCheckAt (back-off) is preserved.
+		update.Type = database.UpdateTypeRepairTrigger
+		update.Status = database.HealthStatusRepairTriggered
+		if err != nil {
+			errMsg := err.Error()
+			update.ErrorMessage = &errMsg
+		}
 	}
+}
+
+// isArrUnreachable reports whether err indicates the *arr application was only
+// temporarily unreachable — a network/transport failure, a timeout, or a 5xx
+// from the arr — rather than a definitive answer about the file. These errors
+// must defer the repair (keep it pending) instead of condemning the file, which
+// would otherwise mark a perfectly healthy file corrupted whenever the arr is
+// briefly down (restart, upgrade, network blip). The ARR-confirmed sentinels
+// (ErrEpisodeAlreadySatisfied, ErrPathMatchFailed) are matched by the caller
+// before this check, so they never reach here.
+func isArrUnreachable(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// Transport-level failures: timeouts, connection refused/reset, DNS, etc.
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		return true
+	}
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return true
+	}
+	if errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, context.Canceled) ||
+		errors.Is(err, syscall.ECONNREFUSED) ||
+		errors.Is(err, syscall.ECONNRESET) ||
+		errors.Is(err, syscall.EHOSTUNREACH) ||
+		errors.Is(err, syscall.ENETUNREACH) ||
+		errors.Is(err, io.EOF) ||
+		errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+
+	// starr surfaces HTTP/transport failures as formatted strings; match the
+	// transient connection / server-side phrases an arr emits when it is down,
+	// restarting, or proxied behind a gateway that is momentarily unavailable.
+	msg := strings.ToLower(err.Error())
+	for _, s := range []string{
+		"connection refused",
+		"no such host",
+		"no route to host",
+		"network is unreachable",
+		"host is unreachable",
+		"i/o timeout",
+		"timeout",
+		"connection reset",
+		"tls handshake",
+		"server misbehaving",
+		"dial tcp",
+		"502 bad gateway",
+		"503 service unavailable",
+		"504 gateway timeout",
+		"bad gateway",
+		"service unavailable",
+		"gateway timeout",
+	} {
+		if strings.Contains(msg, s) {
+			return true
+		}
+	}
+	return false
 }
 
 // resolvePathForRescan determines the absolute path that ARR should rescan for a given file.
@@ -1050,6 +1133,15 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, item *database.Fi
 			return repairOutcomeCorrupted, err
 		}
 
+		// ARR temporarily unreachable: defer instead of condemning. The file stays
+		// repair-pending (no retry-count increment, not marked corrupted) and self-heals
+		// once the ARR is reachable again.
+		if isArrUnreachable(err) {
+			slog.WarnContext(ctx, "ARR temporarily unreachable during repair trigger; deferring repair instead of condemning",
+				"file_path", filePath, "path_for_rescan", pathForRescan, "arr_error", err)
+			return repairOutcomeDeferred, err
+		}
+
 		slog.ErrorContext(ctx, "Failed to trigger ARR rescan",
 			"file_path", filePath,
 			"path_for_rescan", pathForRescan,
@@ -1105,6 +1197,13 @@ func (hw *HealthWorker) retriggerFileRepair(ctx context.Context, item *database.
 			slog.WarnContext(ctx, "ARR rescan path did not match library on re-trigger; leaving file in place (library-sync handles real orphans)",
 				"file_path", filePath, "path_for_rescan", pathForRescan, "arr_error", err)
 			return repairOutcomeCorrupted, err
+		}
+
+		// ARR temporarily unreachable: defer instead of condemning (see triggerFileRepair).
+		if isArrUnreachable(err) {
+			slog.WarnContext(ctx, "ARR temporarily unreachable on repair re-trigger; deferring repair instead of condemning",
+				"file_path", filePath, "path_for_rescan", pathForRescan, "arr_error", err)
+			return repairOutcomeDeferred, err
 		}
 
 		slog.ErrorContext(ctx, "Failed to re-trigger ARR rescan", "file_path", filePath, "error", err)
