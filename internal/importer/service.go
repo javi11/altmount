@@ -676,8 +676,10 @@ func sanitizeFilename(name string) string {
 	return strings.ReplaceAll(name, "/", "_")
 }
 
-// AddToQueue adds a new NZB file to the import queue with optional category and priority
-func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath *string, category *string, priority *database.QueuePriority, metadata *string, downloadID *string) (*database.ImportQueueItem, error) {
+// AddToQueue adds a new NZB file to the import queue with optional category and priority.
+// indexer carries an already-known source indexer (e.g. resolved by NZBLNK or supplied by
+// Prowlarr/Stremio) so it's attributed at insert time instead of falling back to "Unknown".
+func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath *string, category *string, priority *database.QueuePriority, metadata *string, downloadID *string, indexer *string) (*database.ImportQueueItem, error) {
 	// Check context before proceeding
 	select {
 	case <-ctx.Done():
@@ -707,6 +709,12 @@ func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath 
 		if name, ok := s.GetGrabbedIndexer(*downloadID, filepath.Base(filePath)); ok {
 			indexerName = &name
 		}
+	}
+	// Caller-supplied indexer (NZBLNK resolver, Prowlarr/Stremio) takes over when the
+	// webhook cache had nothing, so the import is attributed instead of logged as "Unknown".
+	if indexerName == nil && indexer != nil && *indexer != "" {
+		name := *indexer
+		indexerName = &name
 	}
 
 	item := &database.ImportQueueItem{

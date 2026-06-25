@@ -1,10 +1,13 @@
-import { ChevronDown, Network, RotateCcw } from "lucide-react";
+import { ChevronDown, RotateCcw } from "lucide-react";
 import { QueueHistoricalStatsCard } from "../components/queue/QueueHistoricalStatsCard";
 import { ActivityHub } from "../components/system/ActivityHub";
 import { HealthStatusCard } from "../components/system/HealthStatusCard";
 import { ImportStatusCard } from "../components/system/ImportStatusCard";
+import { IndexerHealth } from "../components/system/IndexerHealth/IndexerHealth";
 import { PoolMetricsCard } from "../components/system/PoolMetricsCard";
-import { ProviderCard } from "../components/system/ProviderCard";
+import { ProviderChart } from "../components/system/ProviderChart";
+import { ProviderSpeedChart } from "../components/system/ProviderSpeedChart";
+import { ProviderStatusTable } from "../components/system/ProviderStatusTable";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { useToast } from "../contexts/ToastContext";
 import {
@@ -13,7 +16,6 @@ import {
 	useQueueStats,
 	useResetSystemStats,
 } from "../hooks/useApi";
-import { useProviders } from "../hooks/useProviders";
 
 export function Dashboard() {
 	const { error: queueError } = useQueueStats();
@@ -21,26 +23,8 @@ export function Dashboard() {
 	const { data: poolMetrics } = usePoolMetrics();
 	const { showToast } = useToast();
 	const resetStats = useResetSystemStats();
-	const { resetProviderQuota } = useProviders();
 
 	const hasError = queueError || healthError;
-
-	const handleResetQuota = async (providerId: string) => {
-		try {
-			await resetProviderQuota.mutateAsync(providerId);
-			showToast({
-				type: "success",
-				title: "Quota Reset",
-				message: "Provider quota has been reset",
-			});
-		} catch {
-			showToast({
-				type: "error",
-				title: "Reset Failed",
-				message: "Failed to reset provider quota",
-			});
-		}
-	};
 
 	const handleResetStats = async (options: {
 		duration?: string;
@@ -228,18 +212,16 @@ export function Dashboard() {
 
 			{/* Provider Status */}
 			{poolMetrics?.providers && poolMetrics.providers.length > 0 && (
-				<div className="space-y-4">
-					<h2 className="flex items-center gap-2 font-semibold text-xl">
-						<Network className="h-6 w-6" />
-						NNTP Providers
-					</h2>
-					<div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-						{poolMetrics.providers.map((provider) => (
-							<ProviderCard key={provider.id} provider={provider} onResetQuota={handleResetQuota} />
-						))}
+				<ProviderStatusTable providers={poolMetrics.providers} title="NNTP Providers">
+					<div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+						<ProviderChart />
+						<ProviderSpeedChart />
 					</div>
-				</div>
+				</ProviderStatusTable>
 			)}
+
+			{/* Indexer Health */}
+			<IndexerHealth />
 		</div>
 	);
 }

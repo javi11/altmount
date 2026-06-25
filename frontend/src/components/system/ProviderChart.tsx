@@ -1,9 +1,9 @@
 import { BarChart3 } from "lucide-react";
 import { useMemo, useState } from "react";
-import { LoadingSpinner } from "../../../../components/ui/LoadingSpinner";
-import { usePoolMetrics, useProviderHistoricalStats } from "../../../../hooks/useApi";
-import { formatBytes } from "../../../../lib/utils";
-import type { ProviderStatus } from "../../../../types/api";
+import { usePoolMetrics, useProviderHistoricalStats } from "../../hooks/useApi";
+import { formatBytes } from "../../lib/utils";
+import type { ProviderStatus } from "../../types/api";
+import { LoadingSpinner } from "../ui/LoadingSpinner";
 import { type ChartDatum, ProviderAreaChart, type TimeRangeTab } from "./chartShared";
 
 const TABS: TimeRangeTab[] = [
@@ -27,7 +27,7 @@ export function ProviderChart() {
 
 	const { data: response, isLoading } = useProviderHistoricalStats(days, interval);
 
-	const { chartData, providers, totalUsage, providerTotals } = useMemo(() => {
+	const { chartData, providers, totalUsage } = useMemo(() => {
 		const groupedByTime: Record<string, ChartDatum> = {};
 		const pTotals: Record<string, number> = {};
 		let total = 0;
@@ -74,7 +74,6 @@ export function ProviderChart() {
 			chartData: Object.values(groupedByTime),
 			providers: sortedProviders,
 			totalUsage: total,
-			providerTotals: pTotals,
 		};
 	}, [response, interval, poolData]);
 
@@ -97,12 +96,10 @@ export function ProviderChart() {
 			tabActiveClassName="bg-info text-info-content shadow hover:bg-info"
 			chartData={chartData}
 			providers={providers}
-			providerValues={providerTotals}
 			gradientPrefix="color"
 			formatValue={formatBytes}
 			tooltipTotalClassName="text-info"
 			yAxisTickFormatter={formatBytes}
-			breakdownLabel="Usage Breakdown"
 		/>
 	);
 }
