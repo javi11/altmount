@@ -26,6 +26,7 @@ import (
 	"github.com/javi11/altmount/internal/utils"
 	"github.com/sourcegraph/conc/pool"
 	"golang.org/x/sync/singleflight"
+	"golift.io/starr"
 )
 
 // ARRsRepairService abstracts the ARR repair operations needed by HealthWorker.
@@ -991,9 +992,21 @@ func isArrUnreachable(err error) bool {
 		return true
 	}
 
+	// starr returns a typed *starr.ReqError for any non-2xx ARR response, carrying the
+	// numeric status code. Any 5xx means the arr (or a reverse proxy in front of it) failed
+	// server-side — typically a restart, upgrade, or transient overload — so the repair must
+	// be deferred and retried, never used to condemn a healthy file. Checking the code is more
+	// reliable than string matching and covers every 5xx, not just the gateway-specific ones.
+	var reqErr *starr.ReqError
+	if errors.As(err, &reqErr) && reqErr.Code >= 500 && reqErr.Code <= 599 {
+		return true
+	}
+
 	// starr surfaces HTTP/transport failures as formatted strings; match the
 	// transient connection / server-side phrases an arr emits when it is down,
 	// restarting, or proxied behind a gateway that is momentarily unavailable.
+	// The 5xx entries below are a textual safety net for cases where the typed
+	// *starr.ReqError above was flattened to a string somewhere in the error chain.
 	msg := strings.ToLower(err.Error())
 	for _, s := range []string{
 		"connection refused",
@@ -1013,6 +1026,9 @@ func isArrUnreachable(err error) bool {
 		"bad gateway",
 		"service unavailable",
 		"gateway timeout",
+		"internal server error",  // generic 500 from the arr or a proxy
+		"status code 500",        // alternate "status code 500" phrasing
+		"invalid status code, 5", // starr's stringified 5xx, e.g. "invalid status code, 503 >= 300"
 	} {
 		if strings.Contains(msg, s) {
 			return true
@@ -1178,9 +1194,6 @@ func (hw *HealthWorker) retriggerFileRepair(ctx context.Context, item *database.
 
 	slog.InfoContext(ctx, "Re-triggering ARR rescan for file in repair", "file_path", filePath, "path_for_rescan", pathForRescan)
 
-	// Ensure metadata is moved to safety folder if the file has now been imported
-	hw.moveMetadataToSafetyFolder(ctx, item)
-
 	err := hw.arrsService.TriggerFileRescan(ctx, pathForRescan, filePath, metadataStr)
 	if err != nil {
 		// See triggerFileRepair: only an ID-confirmed replacement (ErrEpisodeAlreadySatisfied)
@@ -1211,6 +1224,12 @@ func (hw *HealthWorker) retriggerFileRepair(ctx context.Context, item *database.
 	}
 
 	slog.InfoContext(ctx, "Successfully re-triggered ARR rescan", "file_path", filePath)
+
+	// Move the metadata to the safety folder only after a successful rescan, so a deferred
+	// (ARR-unreachable) or path-match-failed outcome leaves the file untouched — matching
+	// triggerFileRepair. moveMetadataToSafetyFolder is a no-op until the file has a LibraryPath.
+	hw.moveMetadataToSafetyFolder(ctx, item)
+
 	return repairOutcomeTriggered, nil
 }
 
@@ -1263,7 +1282,7 @@ func (hw *HealthWorker) ensureMetadata(ctx context.Context, item *database.FileH
 		if item.LibraryPath != nil {
 			libPath = *item.LibraryPath
 		}
-		
+
 		metadata, err := hw.arrsService.DiscoverFileMetadata(ctx, item.FilePath, relativePath, nzbName, libPath)
 		if err == nil && metadata != nil {
 			metaBytes, err := json.Marshal(metadata)
