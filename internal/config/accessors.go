@@ -71,6 +71,21 @@ func (c *Config) GetCheckAllSegments() bool {
 	return *c.Health.CheckAllSegments
 }
 
+// GetAcceptableMissingSegmentsPercentage returns the maximum percentage (0-100) of
+// missing segments tolerated before a file is considered corrupted during a health
+// check. The default of 0 means no missing segments are acceptable. Values are
+// clamped to the [0, 100] range.
+func (c *Config) GetAcceptableMissingSegmentsPercentage() float64 {
+	v := c.Health.AcceptableMissingSegmentsPercentage
+	if v < 0 {
+		return 0
+	}
+	if v > 100 {
+		return 100
+	}
+	return v
+}
+
 // GetHealthReadTimeout returns the health check read timeout as a duration with a default fallback.
 func (c *Config) GetHealthReadTimeout() time.Duration {
 	if c.Health.ReadTimeoutSeconds <= 0 {
