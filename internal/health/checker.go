@@ -198,6 +198,16 @@ func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, i
 		// otherwise-healthy file. Only mark the file corrupted when the missing ratio
 		// exceeds the threshold (default 0 = no missing segments allowed, preserving the
 		// previous behavior). This is the backend reader for acceptable_missing_segments_percentage.
+		//
+		// Basis (intentional): missingPct is computed over the SAMPLED subset
+		// (result.TotalChecked = the segments actually validated), NOT over the file's full
+		// segment count. When sampling < 100% (GetSegmentSamplePercentage), the subset is a
+		// representative random sample, so MissingCount/TotalChecked is an unbiased estimate of
+		// the whole-file missing ratio — which is the statistically correct quantity to compare
+		// against the tolerance. A full check (check_all_segments or ForceFullCheck => 100%
+		// sampling) makes TotalChecked equal the total segment count, so the ratio is exact.
+		// Dividing the subset's MissingCount by the full segment count instead would understate
+		// the true ratio and let genuinely corrupt files slip past the tolerance.
 		acceptablePct := cfg.GetAcceptableMissingSegmentsPercentage()
 		missingPct := 0.0
 		if result.TotalChecked > 0 {
