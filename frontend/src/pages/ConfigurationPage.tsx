@@ -27,6 +27,7 @@ import { MountConfigSection } from "../components/config/MountConfigSection";
 import { NetworkConfigSection } from "../components/config/NetworkConfigSection";
 import { ProvidersConfigSection } from "../components/config/ProvidersConfigSection";
 import { SABnzbdConfigSection } from "../components/config/SABnzbdConfigSection";
+import { StreamCheckConfigSection } from "../components/config/StreamCheckConfigSection";
 import { StreamingConfigSection } from "../components/config/StreamingConfigSection";
 import { StremioConfigSection } from "../components/config/StremioConfigSection";
 import { SystemConfigSection } from "../components/config/SystemConfigSection";
@@ -58,6 +59,7 @@ import type {
 	ProviderConfig,
 	SABnzbdConfig,
 	SegmentCacheConfig,
+	StreamCheckConfig,
 	StreamingConfig,
 	StremioConfig,
 	WebDAVConfig,
@@ -96,7 +98,7 @@ const SECTION_GROUPS = [
 	},
 	{
 		title: "Automation",
-		sections: ["sabnzbd", "arrs", "health", "stremio", "import"],
+		sections: ["sabnzbd", "arrs", "health", "stremio", "stream_check", "import"],
 	},
 	{
 		title: "System",
@@ -266,6 +268,11 @@ export function ConfigurationPage() {
 				await updateConfigSection.mutateAsync({
 					section: "stremio",
 					config: { stremio: data as unknown as StremioConfig },
+				});
+			} else if (section === "stream_check") {
+				await updateConfigSection.mutateAsync({
+					section: "stream_check",
+					config: { stream_check: data as unknown as StreamCheckConfig },
 				});
 			} else if (section === "providers") {
 				await updateConfigSection.mutateAsync({
@@ -564,6 +571,13 @@ export function ConfigurationPage() {
 										isUpdating={updateConfigSection.isPending}
 									/>
 								)}
+								{activeSection === "stream_check" && (
+									<StreamCheckConfigSection
+										config={config}
+										onUpdate={handleConfigUpdate}
+										isUpdating={updateConfigSection.isPending}
+									/>
+								)}
 								{activeSection === "network" && (
 									<NetworkConfigSection
 										config={config}
@@ -584,6 +598,7 @@ export function ConfigurationPage() {
 									"arrs",
 									"health",
 									"stremio",
+									"stream_check",
 									"network",
 								].includes(activeSection) && (
 									<ComingSoonSection

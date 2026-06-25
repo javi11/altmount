@@ -24,6 +24,7 @@ import (
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/rclone"
+	"github.com/javi11/altmount/internal/streamcheck"
 	"github.com/javi11/altmount/internal/updater"
 	"github.com/javi11/altmount/internal/version"
 	"golang.org/x/sync/singleflight"
@@ -67,6 +68,9 @@ type Server struct {
 	migrationRepo       *database.ImportMigrationRepository
 	updater             updater.Updater
 	ready               atomic.Bool
+
+	// streamChecker verifies NZB segment availability for POST /api/nzb/check.
+	streamChecker *streamcheck.Checker
 
 	speedtest     *speedtestCoordinator
 	speedtestOnce sync.Once
@@ -120,6 +124,10 @@ func NewServer(
 		fuseManager:         NewFuseManager(newMountFactory(nzbFilesystem, configManager, streamTracker)),
 		updater:             updater.Default(),
 	}
+
+	// On-demand NZB availability checker (POST /api/nzb/check). configManager.GetConfig
+	// satisfies config.ConfigGetter, so live config changes apply per request.
+	server.streamChecker = streamcheck.NewChecker(poolManager, configManager.GetConfig)
 
 	// Wire stream-activity ↔ pool admission. Streams notify the pool when they
 	// start/stop; the pool reads the active stream count to pick its
@@ -183,6 +191,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/import/file", s.handleManualImportFile)
 	api.Post("/arrs/webhook", s.handleArrsWebhook)
 	api.Post("/nzb/streams", s.handleNzbStreams)
+	api.Post("/nzb/check", s.handleNzbCheck)
 
 	cfg := s.configManager.GetConfig()
 

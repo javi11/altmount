@@ -20,6 +20,7 @@ export interface ConfigResponse {
 	sabnzbd: SABnzbdConfig;
 	arrs: ArrsConfig;
 	stremio: StremioConfig;
+	stream_check: StreamCheckConfig;
 	providers: ProviderConfig[];
 	nzblnk: NzblnkConfig;
 	network: NetworkConfig;
@@ -328,6 +329,7 @@ export interface ConfigUpdateRequest {
 	sabnzbd?: SABnzbdUpdateRequest;
 	arrs?: ArrsConfig;
 	stremio?: Partial<StremioConfig>;
+	stream_check?: Partial<StreamCheckConfig>;
 	providers?: ProviderUpdateRequest[];
 	nzblnk?: NzblnkConfig;
 	network?: NetworkConfig;
@@ -521,6 +523,7 @@ export type ConfigSection =
 	| "sabnzbd"
 	| "arrs"
 	| "stremio"
+	| "stream_check"
 	| "nzblnk"
 	| "network"
 	| "system";
@@ -660,6 +663,17 @@ export interface StremioConfig {
 	nzb_ttl_hours: number;
 	base_url?: string;
 	prowlarr: ProwlarrConfig;
+}
+
+// Stream Check (on-demand NZB availability verification) configuration
+export interface StreamCheckConfig {
+	enabled: boolean;
+	segment_sample_percentage: number;
+	max_connections: number;
+	timeout_seconds: number;
+	acceptable_missing_percentage: number;
+	cache_ttl_minutes: number;
+	max_batch: number;
 }
 
 // Helper type for configuration sections
@@ -805,6 +819,13 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		description:
 			"Upload an NZB for instant stream URLs, or enable the addon to automatically search Prowlarr by IMDB ID and stream results directly from Stremio.",
 		icon: "Tv",
+		canEdit: true,
+	},
+	stream_check: {
+		title: "Stream Check",
+		description:
+			"On-demand Usenet availability check. Verifies an NZB's segments via NNTP STAT without importing, so clients like AIOStreams can filter out dead or incomplete releases before showing them.",
+		icon: "Activity",
 		canEdit: true,
 	},
 	nzblnk: {

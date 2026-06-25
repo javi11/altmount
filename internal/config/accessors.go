@@ -79,6 +79,61 @@ func (c *Config) GetHealthReadTimeout() time.Duration {
 	return time.Duration(c.Health.ReadTimeoutSeconds) * time.Second
 }
 
+// Stream Check config accessors (POST /api/nzb/check) with default fallbacks.
+
+// GetStreamCheckEnabled reports whether the on-demand availability-check endpoint is enabled.
+func (c *Config) GetStreamCheckEnabled() bool {
+	return c.StreamCheck.Enabled != nil && *c.StreamCheck.Enabled
+}
+
+// GetStreamCheckSamplePercentage returns the segment sample percentage (1-100) with a default fallback.
+func (c *Config) GetStreamCheckSamplePercentage() int {
+	if c.StreamCheck.SegmentSamplePercentage < 1 || c.StreamCheck.SegmentSamplePercentage > 100 {
+		return 5 // Default: 5%
+	}
+	return c.StreamCheck.SegmentSamplePercentage
+}
+
+// GetStreamCheckMaxConnections returns the max concurrent STAT connections with a default fallback.
+func (c *Config) GetStreamCheckMaxConnections() int {
+	if c.StreamCheck.MaxConnections <= 0 {
+		return 10 // Default: 10 connections
+	}
+	return c.StreamCheck.MaxConnections
+}
+
+// GetStreamCheckTimeout returns the per-segment STAT timeout as a duration with a default fallback.
+func (c *Config) GetStreamCheckTimeout() time.Duration {
+	if c.StreamCheck.TimeoutSeconds <= 0 {
+		return 15 * time.Second // Default: 15 seconds
+	}
+	return time.Duration(c.StreamCheck.TimeoutSeconds) * time.Second
+}
+
+// GetStreamCheckAcceptableMissingPercentage returns the tolerated missing-segment percentage (0-100).
+func (c *Config) GetStreamCheckAcceptableMissingPercentage() float64 {
+	if c.StreamCheck.AcceptableMissingPercentage < 0 || c.StreamCheck.AcceptableMissingPercentage > 100 {
+		return 0 // Default: no missing segments tolerated
+	}
+	return c.StreamCheck.AcceptableMissingPercentage
+}
+
+// GetStreamCheckCacheTTL returns the verdict cache TTL as a duration (0 disables caching).
+func (c *Config) GetStreamCheckCacheTTL() time.Duration {
+	if c.StreamCheck.CacheTTLMinutes <= 0 {
+		return 0
+	}
+	return time.Duration(c.StreamCheck.CacheTTLMinutes) * time.Minute
+}
+
+// GetStreamCheckMaxBatch returns the max NZBs checkable per request with a default fallback.
+func (c *Config) GetStreamCheckMaxBatch() int {
+	if c.StreamCheck.MaxBatch <= 0 {
+		return 50 // Default: 50 items
+	}
+	return c.StreamCheck.MaxBatch
+}
+
 // GetMaxRetries returns the maximum number of health check retries.
 func (c *Config) GetMaxRetries() int {
 	if c.Health.MaxRetries <= 0 {

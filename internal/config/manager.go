@@ -48,6 +48,7 @@ type Config struct {
 	SABnzbd         SABnzbdConfig      `yaml:"sabnzbd" mapstructure:"sabnzbd" json:"sabnzbd"`
 	Arrs            ArrsConfig         `yaml:"arrs" mapstructure:"arrs" json:"arrs"`
 	Stremio         StremioConfig      `yaml:"stremio" mapstructure:"stremio" json:"stremio"`
+	StreamCheck     StreamCheckConfig  `yaml:"stream_check" mapstructure:"stream_check" json:"stream_check"`
 	Fuse            FuseConfig         `yaml:"fuse" mapstructure:"fuse" json:"fuse"`
 	SegmentCache    SegmentCacheConfig `yaml:"segment_cache" mapstructure:"segment_cache" json:"segment_cache"`
 	Providers       []ProviderConfig   `yaml:"providers" mapstructure:"providers" json:"providers"`
@@ -173,6 +174,34 @@ type StremioConfig struct {
 	BaseURL string `yaml:"base_url" mapstructure:"base_url" json:"base_url,omitempty"`
 	// Prowlarr configures the Prowlarr indexer used by the Stremio addon to search for NZBs.
 	Prowlarr ProwlarrConfig `yaml:"prowlarr" mapstructure:"prowlarr" json:"prowlarr"`
+}
+
+// StreamCheckConfig configures the on-demand NZB availability check exposed at
+// POST /api/nzb/check. Clients (e.g. AIOStreams) call it to verify that a
+// release's Usenet segments still exist — via sampled NNTP STAT, without
+// importing — so dead or incomplete releases can be filtered out before they
+// are shown to the user.
+type StreamCheckConfig struct {
+	// Enabled controls whether the POST /api/nzb/check endpoint is active.
+	// When false the endpoint returns 404. Disabled by default.
+	Enabled *bool `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	// SegmentSamplePercentage is the share of segments to STAT-sample (1-100).
+	// Lower is faster and cheaper. Defaults to 5.
+	SegmentSamplePercentage int `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage,omitempty"`
+	// MaxConnections caps concurrent NNTP STAT round-trips per check. Defaults to 10.
+	MaxConnections int `yaml:"max_connections" mapstructure:"max_connections" json:"max_connections,omitempty"`
+	// TimeoutSeconds is the per-segment STAT timeout. Defaults to 15.
+	TimeoutSeconds int `yaml:"timeout_seconds" mapstructure:"timeout_seconds" json:"timeout_seconds,omitempty"`
+	// AcceptableMissingPercentage is the share of sampled segments allowed to be
+	// missing before a release is reported "dead" rather than "degraded" (a few
+	// missing segments may be PAR2-recoverable). Defaults to 0.
+	AcceptableMissingPercentage float64 `yaml:"acceptable_missing_percentage" mapstructure:"acceptable_missing_percentage" json:"acceptable_missing_percentage,omitempty"`
+	// CacheTTLMinutes is how long a verdict is cached (keyed by release
+	// fingerprint) to avoid re-checking the same release. 0 disables the cache.
+	// Defaults to 30.
+	CacheTTLMinutes int `yaml:"cache_ttl_minutes" mapstructure:"cache_ttl_minutes" json:"cache_ttl_minutes,omitempty"`
+	// MaxBatch caps how many NZBs a single request may check. Defaults to 50.
+	MaxBatch int `yaml:"max_batch" mapstructure:"max_batch" json:"max_batch,omitempty"`
 }
 
 // AuthConfig represents authentication configuration
@@ -1434,6 +1463,7 @@ func DefaultConfig(configDir ...string) *Config {
 	loginRequired := true           // Require login by default
 	stremioEnabled := false         // Stremio endpoint disabled by default
 	prowlarrEnabled := false        // Prowlarr integration disabled by default
+	streamCheckEnabled := false     // Stream Check endpoint disabled by default
 	watchIntervalSeconds := 10      // Default watch interval
 	failedItemRetentionHours := 24  // Default: auto-remove failed items after 24 hours
 	historyRetentionDays := 90      // Default: auto-remove import history after 90 days (3 months)
@@ -1487,6 +1517,15 @@ func DefaultConfig(configDir ...string) *Config {
 				Host:       "http://localhost:9696",
 				Categories: []int{2000, 2010, 2030, 2040, 2045, 2060, 5000, 5010, 5030, 5040},
 			},
+		},
+		StreamCheck: StreamCheckConfig{
+			Enabled:                     &streamCheckEnabled,
+			SegmentSamplePercentage:     5,
+			MaxConnections:              10,
+			TimeoutSeconds:              15,
+			AcceptableMissingPercentage: 0,
+			CacheTTLMinutes:             30,
+			MaxBatch:                    50,
 		},
 		Auth: AuthConfig{
 			LoginRequired: &loginRequired,
@@ -1651,7 +1690,7 @@ func DefaultConfig(configDir ...string) *Config {
 			ReadarrInstances:               []ArrsInstanceConfig{},
 			WhisparrInstances:              []ArrsInstanceConfig{},
 			SportarrInstances:              []ArrsInstanceConfig{},
-			QueueCleanupGracePeriodMinutes: 5,     // Default to 5 minutes stuck before acting
+			QueueCleanupGracePeriodMinutes: 5, // Default to 5 minutes stuck before acting
 			QueueCleanupMaxFailures:        0, // Failure circuit breaker disabled by default
 			// Rule table modeled on wArrden's queue cleanup. Action decides what to do:
 			// blocklist_search (bad release → block + re-search), blocklist (block but
