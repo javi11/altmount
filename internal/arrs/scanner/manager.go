@@ -553,6 +553,36 @@ func (m *Manager) TriggerDownloadScan(ctx context.Context, instanceType string) 
 	}
 }
 
+// radarrFileMatchesTarget reports whether candidatePath (a Radarr movie file path) refers
+// to the same file AltMount is repairing, using the same matching rules as the path-based
+// library scan: exact path, basename, .strm-stripped, and relative-path suffix. It is the
+// delete-safety check for the TMDB-id fallback — a movie file is only deleted when it
+// actually matches the corrupt target, never a healthy re-download sitting at a different path.
+func radarrFileMatchesTarget(candidatePath, filePath, relativePath string) bool {
+	if candidatePath == "" {
+		return false
+	}
+	if candidatePath == filePath {
+		return true
+	}
+	if filepath.Base(candidatePath) == filepath.Base(filePath) {
+		return true
+	}
+	if before, ok := strings.CutSuffix(filePath, ".strm"); ok {
+		if strings.TrimSuffix(candidatePath, filepath.Ext(candidatePath)) == before {
+			return true
+		}
+	}
+	if relativePath != "" {
+		strippedRelative := strings.TrimSuffix(relativePath, ".strm")
+		if strings.HasSuffix(candidatePath, relativePath) ||
+			strings.HasSuffix(strings.TrimSuffix(candidatePath, filepath.Ext(candidatePath)), strippedRelative) {
+			return true
+		}
+	}
+	return false
+}
+
 // triggerRadarrRescanByPath triggers a rescan in Radarr for the given file path
 func (m *Manager) triggerRadarrRescanByPath(ctx context.Context, client *radarr.Radarr, filePath, relativePath, instanceName string, metadata *model.WebhookMetadata) error {
 	slog.InfoContext(ctx, "Searching Radarr for matching movie",
@@ -662,6 +692,52 @@ func (m *Manager) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 			
 			if targetMovieFileID > 0 {
 				sceneName = movie.MovieFile.SceneName
+			}
+		}
+	}
+
+	// TMDB-id fallback: a movie removed and re-added in Radarr keeps its stable TMDB id but
+	// gets a NEW internal id, so both the id lookup and the cached path scan miss it and the
+	// file would be wrongly condemned. Resolve by the stable TMDB id instead.
+	if targetMovie == nil && metadata != nil && metadata.Movie != nil && metadata.Movie.TmdbId > 0 {
+		movies, lookupErr := client.GetMovieContext(ctx, &radarr.GetMovie{TMDBID: metadata.Movie.TmdbId})
+		if lookupErr != nil {
+			slog.WarnContext(ctx, "Radarr TMDB-id fallback lookup failed",
+				"instance", instanceName, "tmdb_id", metadata.Movie.TmdbId, "error", lookupErr)
+		} else {
+			for _, movie := range movies {
+				if movie == nil || movie.TmdbID != metadata.Movie.TmdbId {
+					continue
+				}
+
+				// DELETE-SAFETY GUARD: only treat the re-added movie's current file as the
+				// corrupt repair target — and therefore delete it — when that file actually
+				// matches the file we are repairing. A re-added movie frequently already holds
+				// a DIFFERENT, healthy re-downloaded file; deleting that would destroy a good
+				// copy. In that case report the title as already satisfied so the worker removes
+				// only the redundant AltMount copy and never deletes the ARR's healthy file.
+				if movie.HasFile && movie.MovieFile != nil {
+					if radarrFileMatchesTarget(movie.MovieFile.Path, filePath, relativePath) {
+						slog.InfoContext(ctx, "Radarr TMDB-id fallback resolved the corrupt target movie, repairing",
+							"instance", instanceName, "tmdb_id", metadata.Movie.TmdbId,
+							"movie_id", movie.ID, "movie_file_path", movie.MovieFile.Path)
+						targetMovie = movie
+						targetMovieFileID = movie.MovieFile.ID
+						sceneName = movie.MovieFile.SceneName
+					} else {
+						slog.InfoContext(ctx, "Radarr TMDB-id fallback: movie re-added with a different healthy file; not deleting (guard), treating as satisfied",
+							"instance", instanceName, "tmdb_id", metadata.Movie.TmdbId,
+							"movie_id", movie.ID, "movie_file_path", movie.MovieFile.Path)
+						return model.ErrEpisodeAlreadySatisfied
+					}
+				} else {
+					// Re-added movie is monitored but has no file yet: trigger a search without
+					// deleting anything (targetMovieFileID stays 0 => no delete below).
+					slog.InfoContext(ctx, "Radarr TMDB-id fallback resolved a re-added movie without a file, triggering search",
+						"instance", instanceName, "tmdb_id", metadata.Movie.TmdbId, "movie_id", movie.ID)
+					targetMovie = movie
+				}
+				break
 			}
 		}
 	}
