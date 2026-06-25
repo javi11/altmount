@@ -33,9 +33,14 @@ func NewHealthRepository(db *sql.DB, d Dialect) *HealthRepository {
 // file across two rows and silently defeat the repair_retry_count budget that the
 // repair state machine relies on. Every method that writes or matches on file_path
 // funnels through here.
+//
+// TrimLeft (not TrimPrefix) so ALL leading slashes are stripped: an import can yield
+// a doubled prefix ("//tv/x"), and trimming only one would leave "/tv/x" — still
+// non-canonical, unmatchable by every other caller, and stuck re-checking forever.
 func normalizeHealthPath(p string) string {
-	p = strings.TrimPrefix(p, "/")
-	return strings.ReplaceAll(p, `\`, "/")
+	p = strings.ReplaceAll(p, `\`, "/")
+	p = strings.TrimLeft(p, "/")
+	return p
 }
 
 // escapeLikePrefix escapes the LIKE metacharacters in a literal prefix so it can be
@@ -1742,8 +1747,8 @@ func (r *HealthRepository) UpdateLibraryPath(ctx context.Context, filePath strin
 
 // RenameHealthRecord updates the file_path of a health record or records under a directory after a MOVE operation
 func (r *HealthRepository) RenameHealthRecord(ctx context.Context, oldPath, newPath string) error {
-	oldPath = strings.TrimPrefix(oldPath, "/")
-	newPath = strings.TrimPrefix(newPath, "/")
+	oldPath = normalizeHealthPath(oldPath)
+	newPath = normalizeHealthPath(newPath)
 
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -2099,7 +2104,7 @@ func (r *HealthRepository) LogIndexerImport(ctx context.Context, indexer string,
 // relinkOrMergeRecordTx merges details or updates a matched health record under a transaction,
 // resolving any UNIQUE constraint violations on file_path.
 func (r *HealthRepository) relinkOrMergeRecordTx(ctx context.Context, tx *dialectAwareTx, id int64, filePath, libraryPath string, metadataStr *string, revalidate bool) error {
-	filePath = strings.TrimPrefix(filePath, "/")
+	filePath = normalizeHealthPath(filePath)
 
 	// 1. Fetch source/matched record info
 	var sourceStatus string
@@ -2299,7 +2304,7 @@ func (r *HealthRepository) relinkOrMergeRecordTx(ctx context.Context, tx *dialec
 //   - false (Rename events — no new content): preserve repair/corrupted state so a library
 //     reorganization cannot wipe repair progress.
 func (r *HealthRepository) RelinkFileByMetadata(ctx context.Context, webMeta *model.WebhookMetadata, filePath, libraryPath string, metadataStr *string, revalidate bool) (bool, error) {
-	filePath = strings.TrimPrefix(filePath, "/")
+	filePath = normalizeHealthPath(filePath)
 
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
