@@ -569,14 +569,34 @@ func (m *Manager) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 	if metadata != nil && metadata.Movie != nil && metadata.Movie.Id > 0 {
 		// Targeted lookup by internal Radarr movie ID instead of fetching the ENTIRE
 		// movie library and scanning it. On large libraries the full GetMovies call can
-		// exceed the HTTP client timeout, error out, and wrongly condemn the file. A
-		// failed/empty targeted lookup (e.g. the movie was removed/re-added with a new
-		// internal id) falls through to the path-based matching below rather than erroring.
+		// exceed the HTTP client timeout, error out, and wrongly condemn the file.
 		movie, lookupErr := client.GetMovieByIDContext(ctx, metadata.Movie.Id)
 		if lookupErr != nil {
-			slog.WarnContext(ctx, "Targeted Radarr movie lookup by ID failed, falling back to path matching",
+			slog.WarnContext(ctx, "Targeted Radarr movie lookup by ID failed, falling back to full library scan",
 				"instance", instanceName, "movie_id", metadata.Movie.Id, "error", lookupErr)
-		} else if movie != nil && movie.ID == metadata.Movie.Id {
+		}
+
+		// Fall back to the OLD method when the targeted lookup did not resolve the movie:
+		// fetch the library and match by internal id. This recovers from a transient
+		// targeted-endpoint failure and keeps the Smart Repair Guard working whenever the
+		// metadata ids are present. If the id is genuinely gone (movie removed/re-added
+		// with a new internal id) neither resolves it and we fall through to path matching.
+		if movie == nil || movie.ID != metadata.Movie.Id {
+			movies, listErr := m.data.GetMovies(ctx, client, instanceName)
+			if listErr != nil {
+				slog.WarnContext(ctx, "Radarr full library scan fallback failed, falling back to path matching",
+					"instance", instanceName, "movie_id", metadata.Movie.Id, "error", listErr)
+			} else {
+				for _, candidate := range movies {
+					if candidate.ID == metadata.Movie.Id {
+						movie = candidate
+						break
+					}
+				}
+			}
+		}
+
+		if movie != nil && movie.ID == metadata.Movie.Id {
 			targetMovie = movie
 
 			if metadata.MovieFile != nil && metadata.MovieFile.Id > 0 {
@@ -661,7 +681,7 @@ func (m *Manager) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 					}
 				}
 			}
-			
+
 			if targetMovieFileID > 0 {
 				sceneName = movie.MovieFile.SceneName
 			}
@@ -1080,7 +1100,7 @@ func (m *Manager) blocklistRadarrMovieFile(ctx context.Context, client *radarr.R
 
 	if downloadID == "" {
 		slog.WarnContext(ctx, "Could not find import event in Radarr history for file, attempting to find latest grabbed event directly", "movie_id", movieID, "file_id", fileID)
-		
+
 		// Precision Fallback: Find the grabbed event matching the SceneName or MovieID
 		for _, record := range history.Records {
 			if record.EventType == "grabbed" && record.MovieID == movieID {
@@ -1092,7 +1112,7 @@ func (m *Manager) blocklistRadarrMovieFile(ctx context.Context, client *radarr.R
 					}
 					return nil
 				}
-				
+
 				// Without an exact SceneName match, only fallback to the latest grab if it was recent (within 24 hours)
 				if time.Since(record.Date) < 24*time.Hour {
 					slog.InfoContext(ctx, "Found recent grabbed history record using MovieID fallback, marking as failed to blocklist release",
@@ -1148,7 +1168,7 @@ func (m *Manager) blocklistSonarrEpisodeFile(ctx context.Context, client *sonarr
 				downloadID = record.DownloadID
 				break
 			}
-			
+
 			// Fallback: Sonarr history might not expose fileId in data consistently. Match by EpisodeID.
 			for _, epID := range episodeIDs {
 				if record.EpisodeID == epID {
@@ -1165,7 +1185,7 @@ func (m *Manager) blocklistSonarrEpisodeFile(ctx context.Context, client *sonarr
 
 	if downloadID == "" {
 		slog.WarnContext(ctx, "Could not find import event in Sonarr history for file, attempting to find grabbed event directly", "series_id", seriesID, "file_id", fileID)
-		
+
 		// Precision Fallback: Find the grabbed event matching the SceneName
 		for _, record := range history.Records {
 			if record.EventType == "grabbed" {
@@ -1193,7 +1213,7 @@ func (m *Manager) blocklistSonarrEpisodeFile(ctx context.Context, client *sonarr
 				}
 			}
 		}
-		
+
 		slog.WarnContext(ctx, "Could not find any matching or recent grab event in Sonarr history to blocklist", "series_id", seriesID)
 		return nil
 	}
