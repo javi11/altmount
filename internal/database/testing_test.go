@@ -110,3 +110,13 @@ func countQueueItemsByStatus(t *testing.T, db *sql.DB, status string) int {
 	}
 	return count
 }
+
+func getQueueItemStatusByPath(t *testing.T, db *sql.DB, nzbPath string) string {
+	t.Helper()
+	var status string
+	err := db.QueryRow("SELECT status FROM import_queue WHERE nzb_path = ?", nzbPath).Scan(&status)
+	if err != nil {
+		t.Fatalf("Failed to get queue item status by path: %v", err)
+	}
+	return status
+}

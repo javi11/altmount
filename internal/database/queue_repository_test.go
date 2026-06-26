@@ -164,6 +164,84 @@ func TestGetQueueItemByNzbPath(t *testing.T) {
 	assert.Nil(t, notFound)
 }
 
+func TestAddToQueue_CompletedItem_NotRequeued(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	require.NoError(t, err)
+	defer db.Close()
+	setupQueueSchema(t, db)
+
+	repo := NewQueueRepository(db, DialectSQLite)
+	ctx := context.Background()
+
+	// Add and complete an item.
+	item := &ImportQueueItem{NzbPath: "/nzbs/show.nzb", Priority: QueuePriorityNormal, Status: QueueStatusPending, MaxRetries: 3}
+	require.NoError(t, repo.AddToQueue(ctx, item))
+	_, err = db.Exec(`UPDATE import_queue SET status = 'completed' WHERE nzb_path = '/nzbs/show.nzb'`)
+	require.NoError(t, err)
+
+	// Try to re-add the same path.
+	item2 := &ImportQueueItem{NzbPath: "/nzbs/show.nzb", Priority: QueuePriorityNormal, Status: QueueStatusPending, MaxRetries: 3}
+	require.NoError(t, repo.AddToQueue(ctx, item2))
+
+	// The status must still be 'completed', not reset to 'pending'.
+	assert.Equal(t, "completed", getQueueItemStatusByPath(t, db, "/nzbs/show.nzb"))
+	assert.Equal(t, 1, countQueueItemsByStatus(t, db, "completed"))
+	assert.Equal(t, 0, countQueueItemsByStatus(t, db, "pending"))
+}
+
+func TestIsFileInQueue_CompletedItem_ReturnsTrue(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	require.NoError(t, err)
+	defer db.Close()
+	setupQueueSchema(t, db)
+
+	insertQueueItem(t, db, 1, "/nzbs/show.nzb", "completed")
+	repo := NewQueueRepository(db, DialectSQLite)
+
+	inQueue, err := repo.IsFileInQueue(context.Background(), "/nzbs/show.nzb")
+	require.NoError(t, err)
+	assert.True(t, inQueue, "completed item should be reported as in-queue to prevent re-add")
+}
+
+func TestFindCompletedItemByNzbPath(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	require.NoError(t, err)
+	defer db.Close()
+	setupQueueSchema(t, db)
+
+	insertQueueItem(t, db, 1, "/persistent/123-show.nzb", "completed")
+	insertQueueItem(t, db, 2, "/other/unrelated.nzb", "pending")
+	repo := NewQueueRepository(db, DialectSQLite)
+	ctx := context.Background()
+
+	t.Run("exact match", func(t *testing.T) {
+		got, err := repo.FindCompletedItemByNzbPath(ctx, "/persistent/123-show.nzb")
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		assert.Equal(t, int64(1), got.ID)
+	})
+
+	t.Run("filename suffix match (path changed after ensurePersistentNzb)", func(t *testing.T) {
+		// Upload temp path differs from persisted path but shares filename.
+		got, err := repo.FindCompletedItemByNzbPath(ctx, "/tmp/uploads/123-show.nzb")
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		assert.Equal(t, int64(1), got.ID)
+	})
+
+	t.Run("no match for pending item", func(t *testing.T) {
+		got, err := repo.FindCompletedItemByNzbPath(ctx, "/other/unrelated.nzb")
+		require.NoError(t, err)
+		assert.Nil(t, got, "pending items must not be returned")
+	})
+
+	t.Run("no match for unknown path", func(t *testing.T) {
+		got, err := repo.FindCompletedItemByNzbPath(ctx, "/does/not/exist.nzb")
+		require.NoError(t, err)
+		assert.Nil(t, got)
+	})
+}
+
 func TestResetStaleItems_UpdatedAtFieldUpdated(t *testing.T) {
 	// Setup
 	db, err := sql.Open("sqlite3", ":memory:")
