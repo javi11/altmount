@@ -238,8 +238,8 @@ func (r *QueueRepository) AddStoragePath(ctx context.Context, itemID int64, stor
 // the persistent storage path (e.g. /tmp/altmount-uploads/x.nzb → /.nzbs/stremio/42/x.nzb).
 func (r *QueueRepository) IsFileInQueue(ctx context.Context, filePath string) (bool, error) {
 	filename := filepath.Base(filePath)
-	query := `SELECT 1 FROM import_queue WHERE (nzb_path = ? OR nzb_path LIKE ?) AND status IN ('pending', 'processing', 'paused', 'completed') LIMIT 1`
-	likePattern := "%/" + filename
+	query := `SELECT 1 FROM import_queue WHERE (nzb_path = ? OR nzb_path LIKE ? ESCAPE '\') AND status IN ('pending', 'processing', 'paused', 'completed') LIMIT 1`
+	likePattern := "%/" + escapeLikePattern(filename)
 
 	var exists int
 	err := r.db.QueryRowContext(ctx, query, filePath, likePattern).Scan(&exists)
@@ -258,12 +258,12 @@ func (r *QueueRepository) IsFileInQueue(ctx context.Context, filePath string) (b
 // completed item matches (not an error).
 func (r *QueueRepository) FindCompletedItemByNzbPath(ctx context.Context, filePath string) (*ImportQueueItem, error) {
 	filename := filepath.Base(filePath)
-	likePattern := "%/" + filename
+	likePattern := "%/" + escapeLikePattern(filename)
 	query := `
 		SELECT id, download_id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
 		       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path, target_path, skip_arr_notification, skip_post_import_links, indexer
 		FROM import_queue
-		WHERE (nzb_path = ? OR nzb_path LIKE ?) AND status = 'completed'
+		WHERE (nzb_path = ? OR nzb_path LIKE ? ESCAPE '\') AND status = 'completed'
 		ORDER BY completed_at DESC
 		LIMIT 1
 	`
