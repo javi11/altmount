@@ -685,6 +685,16 @@ func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath 
 	default:
 	}
 
+	// Dedup: if an NZB with the same path (or filename) already completed
+	// successfully, return it as-is instead of re-queuing.
+	if existing, err := s.database.Repository.FindCompletedItemByNzbPath(ctx, filePath); err != nil {
+		return nil, fmt.Errorf("failed to check for completed duplicate: %w", err)
+	} else if existing != nil {
+		s.log.InfoContext(ctx, "NZB already completed, skipping duplicate",
+			"file", filePath, "existing_queue_id", existing.ID)
+		return existing, nil
+	}
+
 	// Calculate file size before adding to queue
 	var fileSize *int64
 	if size, err := s.CalculateFileSizeOnly(filePath); err == nil {
