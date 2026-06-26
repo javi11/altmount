@@ -660,7 +660,7 @@ func (m *Manager) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 					}
 				}
 			}
-			
+
 			if targetMovieFileID > 0 {
 				sceneName = movie.MovieFile.SceneName
 			}
@@ -995,7 +995,15 @@ func (m *Manager) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 		// EpisodeSearch below. DeleteEpisodeFileContext is unreachable from here: it lives
 		// solely inside the `targetEpisodeFileID > 0` branch above, which is never taken
 		// when this else branch runs (targetEpisodeFileID == 0).
-		if len(episodeIDs) == 0 {
+		//
+		// OPT-IN: by the time this runs, path matching has already failed to tie the
+		// corrupt file to any episode file, so we cannot confirm the owned release is the
+		// bad one. On libraries with foreign-language releases or season packs the owned
+		// file is often a healthy-but-differently-named release, and blocklisting it would
+		// throw away a good release. The fallback is therefore gated behind an explicit
+		// opt-in and disabled by default.
+		seasonEpisodeFallbackEnabled := m.configGetter().Arrs.SonarrSeasonEpisodeFallbackEnabled
+		if len(episodeIDs) == 0 && seasonEpisodeFallbackEnabled != nil && *seasonEpisodeFallbackEnabled {
 			if season, ep, ok := parseSeasonEpisode(filePath, relativePath); ok {
 				for _, episode := range episodes {
 					// Require HasFile so we only ever act on episodes Sonarr still owns a
@@ -1134,7 +1142,7 @@ func (m *Manager) blocklistRadarrMovieFile(ctx context.Context, client *radarr.R
 
 	if downloadID == "" {
 		slog.WarnContext(ctx, "Could not find import event in Radarr history for file, attempting to find latest grabbed event directly", "movie_id", movieID, "file_id", fileID)
-		
+
 		// Precision Fallback: Find the grabbed event matching the SceneName or MovieID
 		for _, record := range history.Records {
 			if record.EventType == "grabbed" && record.MovieID == movieID {
@@ -1146,7 +1154,7 @@ func (m *Manager) blocklistRadarrMovieFile(ctx context.Context, client *radarr.R
 					}
 					return nil
 				}
-				
+
 				// Without an exact SceneName match, only fallback to the latest grab if it was recent (within 24 hours)
 				if time.Since(record.Date) < 24*time.Hour {
 					slog.InfoContext(ctx, "Found recent grabbed history record using MovieID fallback, marking as failed to blocklist release",
@@ -1223,7 +1231,7 @@ func (m *Manager) blocklistSonarrEpisodeFile(ctx context.Context, client *sonarr
 
 	if downloadID == "" {
 		slog.WarnContext(ctx, "Could not find import event in Sonarr history for file, attempting to find grabbed event directly", "series_id", seriesID, "file_id", fileID)
-		
+
 		// Precision Fallback: Find the grabbed event matching the SceneName
 		for _, record := range history.Records {
 			if record.EventType == "grabbed" {
@@ -1251,7 +1259,7 @@ func (m *Manager) blocklistSonarrEpisodeFile(ctx context.Context, client *sonarr
 				}
 			}
 		}
-		
+
 		slog.WarnContext(ctx, "Could not find any matching or recent grab event in Sonarr history to blocklist", "series_id", seriesID)
 		return nil
 	}

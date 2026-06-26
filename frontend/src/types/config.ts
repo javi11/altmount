@@ -617,6 +617,10 @@ export interface ArrsConfig {
 	queue_cleanup_grace_period_minutes?: number;
 	queue_cleanup_max_failures?: number;
 	queue_cleanup_rules?: StuckCleanupRule[];
+	// Opt-in: resolve a renamed Sonarr episode by season+episode when path matching
+	// fails, then blocklist + re-search it. Disabled by default because it can
+	// blocklist healthy releases (foreign-language releases, season packs).
+	sonarr_season_episode_fallback_enabled?: boolean;
 }
 
 export type StuckCleanupAction = "remove" | "blocklist" | "blocklist_search";
