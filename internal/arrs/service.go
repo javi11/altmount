@@ -90,7 +90,7 @@ func NewService(configGetter config.ConfigGetter, configManager model.ConfigMana
 	// queue-cleanup worker and the scanner (repair re-triggers) count the same
 	// per-target keys.
 	failureTracker := failures.NewTracker()
-	scannerManager := scanner.NewManager(configGetter, instManager, clientManager, dataManager, failureTracker)
+	scannerManager := scanner.NewManager(configGetter, instManager, clientManager, dataManager, queueRepo, failureTracker)
 	workerManager := worker.NewWorker(configGetter, instManager, clientManager, queueRepo, failureTracker)
 	registrarManager := registrar.NewManager(instManager, clientManager)
 
