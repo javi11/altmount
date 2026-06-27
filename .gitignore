@@ -40,6 +40,7 @@ example/
 rclone.conf
 db.sqlite
 config/config.yaml
+config/shared/
 *.log
 build-test-image.sh
 .claude/worktrees/

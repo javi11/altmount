@@ -1,7 +1,9 @@
 package config
 
 import (
+	"crypto/rand"
 	"crypto/tls"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"os"
@@ -173,6 +175,9 @@ type StremioConfig struct {
 	BaseURL string `yaml:"base_url" mapstructure:"base_url" json:"base_url,omitempty"`
 	// Prowlarr configures the Prowlarr indexer used by the Stremio addon to search for NZBs.
 	Prowlarr ProwlarrConfig `yaml:"prowlarr" mapstructure:"prowlarr" json:"prowlarr"`
+	// ServiceAPIKey is used by AIOStreams to authenticate /api/nzb/streams requests.
+	// Auto-generated on first start if empty.
+	ServiceAPIKey string `yaml:"service_api_key" mapstructure:"service_api_key" json:"service_api_key,omitempty"`
 }
 
 // AuthConfig represents authentication configuration
@@ -1221,10 +1226,19 @@ type Manager struct {
 
 // NewManager creates a new configuration manager
 func NewManager(config *Config, configFile string) *Manager {
-	return &Manager{
+	m := &Manager{
 		current:    config,
 		configFile: configFile,
 	}
+	// Auto-generate a stable service key for AIOStreams if not yet set.
+	if m.current.Stremio.ServiceAPIKey == "" {
+		b := make([]byte, 32)
+		if _, err := rand.Read(b); err == nil {
+			m.current.Stremio.ServiceAPIKey = hex.EncodeToString(b)
+			_ = m.SaveConfig()
+		}
+	}
+	return m
 }
 
 // GetConfig returns the current configuration (thread-safe)

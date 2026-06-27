@@ -531,9 +531,19 @@ func (s *Server) waitAndRedirectToStream(c *fiber.Ctx, itemID int64, baseURL, do
 	}
 }
 
-// validateDownloadKey returns true if key matches any user's hashed API key.
+// validateDownloadKey returns true if key matches any user's hashed API key or the service API key hash.
 func (s *Server) validateDownloadKey(ctx context.Context, key string) bool {
-	if s.userRepo == nil || key == "" {
+	if key == "" {
+		return false
+	}
+	// Check service API key hash (used by AIOStreams sidecar).
+	if s.configManager != nil {
+		svcKey := s.configManager.GetConfig().Stremio.ServiceAPIKey
+		if svcKey != "" && subtle.ConstantTimeCompare([]byte(auth.HashAPIKey(svcKey)), []byte(key)) == 1 {
+			return true
+		}
+	}
+	if s.userRepo == nil {
 		return false
 	}
 	users, err := s.userRepo.GetAllUsers(ctx)
@@ -549,4 +559,36 @@ func (s *Server) validateDownloadKey(ctx context.Context, key string) bool {
 		}
 	}
 	return false
+}
+
+// StremioSetupResponse contains the URLs and key needed for AIOStreams onboarding.
+type StremioSetupResponse struct {
+	AIOStreamsUIURL    string `json:"aiostreams_ui_url"`
+	AIOStreamsAddonURL string `json:"aiostreams_addon_url"`
+	NzbStreamsURL      string `json:"nzb_streams_url"`
+	ServiceAPIKey     string `json:"service_api_key"`
+}
+
+// handleStremioSetup returns the AIOStreams onboarding information for the frontend wizard.
+func (s *Server) handleStremioSetup(c *fiber.Ctx) error {
+	cfg := s.configManager.GetConfig()
+	if !isStremioEnabled(cfg) {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Stremio addon is disabled"})
+	}
+
+	baseURL := resolveBaseURL(c, cfg.Stremio.BaseURL)
+
+	// Derive the AIOStreams base URL: same host as AltMount, port 8081.
+	aioStreamsBase := strings.TrimRight(baseURL, "/")
+	if idx := strings.LastIndex(aioStreamsBase, ":"); idx > strings.Index(aioStreamsBase, "//") {
+		aioStreamsBase = aioStreamsBase[:idx]
+	}
+	aioStreamsBase += ":8081"
+
+	return c.JSON(StremioSetupResponse{
+		AIOStreamsUIURL:    aioStreamsBase,
+		AIOStreamsAddonURL: aioStreamsBase + "/manifest.json",
+		NzbStreamsURL:      baseURL + "/api/nzb/streams",
+		ServiceAPIKey:     cfg.Stremio.ServiceAPIKey,
+	})
 }

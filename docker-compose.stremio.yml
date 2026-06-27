@@ -1,0 +1,32 @@
+# docker-compose.stremio.yml
+# Optional AIOStreams addon sidecar for AltMount.
+#
+# Usage (with AltMount):
+#   docker compose -f docker-compose.yml -f docker-compose.stremio.yml up -d
+#
+# AltMount writes /config/shared/aiostreams-init.json at startup.
+# AIOStreams reads it on boot — no manual URL/key configuration needed.
+# Users only need to add their NZB indexers in the AIOStreams UI (port 8081).
+
+services:
+  aiostreams:
+    image: ghcr.io/viren070/aiostreams:latest
+    container_name: aiostreams
+    # Custom entrypoint reads the init file written by AltMount and sets env vars.
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    environment:
+      - PORT=8081
+      # Secret used by AIOStreams to sign addon config URLs — change in production.
+      - SECRET=change-me-to-a-strong-random-secret
+    volumes:
+      # Shared dir: AltMount writes aiostreams-init.json here; AIOStreams reads it.
+      - ./config/shared:/config/shared:ro
+      # Init script created in docker/aiostreams-entrypoint.sh
+      - ./docker/aiostreams-entrypoint.sh:/entrypoint.sh:ro
+    ports:
+      - "8081:8081"
+    restart: unless-stopped
+    # Only used when running together with the main compose file.
+    # Remove this block if running standalone.
+    networks:
+      - default

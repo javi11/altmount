@@ -2,12 +2,14 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -66,6 +68,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 	defer cancel()
 
 	configManager := config.NewManager(cfg, configFile)
+
+	// Write AIOStreams shared init file so the sidecar can auto-configure.
+	if cfg.Stremio.Enabled != nil && *cfg.Stremio.Enabled {
+		writeAIOStreamsInitFile(ctx, cfg, filepath.Dir(configFile))
+	}
 
 	// 3. Initialize core services
 	db, err := initializeDatabase(ctx, cfg)
@@ -437,5 +444,27 @@ func waitForHTTPServer(ctx context.Context, port int) error {
 			}
 		}
 	}
+}
+
+func writeAIOStreamsInitFile(ctx context.Context, cfg *config.Config, configDir string) {
+	baseURL := cfg.Stremio.BaseURL
+	if baseURL == "" {
+		baseURL = "http://altmount:8080"
+	}
+	sharedDir := filepath.Join(configDir, "shared")
+	if err := os.MkdirAll(sharedDir, 0755); err != nil {
+		slog.WarnContext(ctx, "Failed to create shared config dir", "error", err)
+		return
+	}
+	data, _ := json.Marshal(map[string]string{
+		"url":     baseURL,
+		"api_key": cfg.Stremio.ServiceAPIKey,
+	})
+	path := filepath.Join(sharedDir, "aiostreams-init.json")
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		slog.WarnContext(ctx, "Failed to write AIOStreams init file", "error", err, "path", path)
+		return
+	}
+	slog.InfoContext(ctx, "AIOStreams init config written", "path", path)
 }
 

@@ -646,6 +646,7 @@ export interface StuckCleanupRule {
 
 // Prowlarr indexer configuration (nested inside StremioConfig)
 export interface ProwlarrConfig {
+	deprecated: boolean; // always true from server — migrate to AIOStreams
 	enabled: boolean;
 	host: string;
 	api_key: string;
@@ -659,7 +660,16 @@ export interface StremioConfig {
 	enabled: boolean;
 	nzb_ttl_hours: number;
 	base_url?: string;
+	service_api_key?: string;
 	prowlarr: ProwlarrConfig;
+}
+
+// AIOStreams onboarding info returned by /api/stremio/setup
+export interface StremioSetupResponse {
+	aiostreams_ui_url: string;
+	aiostreams_addon_url: string;
+	nzb_streams_url: string;
+	service_api_key: string;
 }
 
 // Helper type for configuration sections

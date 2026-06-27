@@ -40,6 +40,7 @@ import type {
 	ProviderTestRequest,
 	ProviderTestResponse,
 	ProviderUpdateRequest,
+	StremioSetupResponse,
 } from "../types/config";
 import type { UpdateChannel, UpdateStatusResponse } from "../types/update";
 
@@ -1034,6 +1035,10 @@ class APIClient {
 		if (params?.limit) searchParams.set("limit", params.limit.toString());
 		const query = searchParams.toString();
 		return this.request<LogEntry[]>(`/logs${query ? `?${query}` : ""}`);
+	}
+
+	async getStremioSetup(): Promise<StremioSetupResponse> {
+		return this.request<StremioSetupResponse>("/stremio/setup");
 	}
 }
 
