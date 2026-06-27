@@ -339,6 +339,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	// Provider management endpoints
 	api.Post("/providers/test", s.handleTestProvider)
 	api.Post("/providers/:id/speedtest", s.handleTestProviderSpeed)
+	api.Post("/providers/:id/tune-pipeline", s.handleTunePipeline)
 	api.Post("/providers", s.handleCreateProvider)
 	api.Put("/providers/reorder", s.handleReorderProviders)
 	api.Put("/providers/:id", s.handleUpdateProvider)
