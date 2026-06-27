@@ -553,6 +553,46 @@ func (m *Manager) TriggerDownloadScan(ctx context.Context, instanceType string) 
 	}
 }
 
+// radarrFileMatchesTarget reports whether the movie's current file is the corrupt
+// target identified by filePath/relativePath. It is the single source of truth for
+// the Radarr delete-safety decision: both the library path scan and the TMDB-id
+// fallback route through it so the check cannot drift apart. A movie with no file
+// never matches. Match forms: exact path, basename, .strm-stripped, relative-suffix.
+func radarrFileMatchesTarget(movie *radarr.Movie, filePath, relativePath string) bool {
+	if movie == nil || !movie.HasFile || movie.MovieFile == nil {
+		return false
+	}
+	moviePath := movie.MovieFile.Path
+
+	// Exact path match
+	if moviePath == filePath {
+		return true
+	}
+
+	// Basename match (robust when only the parent directory differs)
+	if filepath.Base(moviePath) == filepath.Base(filePath) {
+		return true
+	}
+
+	// .strm-stripped match: filePath is a .strm pointing at the real file
+	if before, ok := strings.CutSuffix(filePath, ".strm"); ok {
+		if strings.TrimSuffix(moviePath, filepath.Ext(moviePath)) == before {
+			return true
+		}
+	}
+
+	// Relative-suffix match
+	if relativePath != "" {
+		strippedRelative := strings.TrimSuffix(relativePath, ".strm")
+		if strings.HasSuffix(moviePath, relativePath) ||
+			strings.HasSuffix(strings.TrimSuffix(moviePath, filepath.Ext(moviePath)), strippedRelative) {
+			return true
+		}
+	}
+
+	return false
+}
+
 // triggerRadarrRescanByPath triggers a rescan in Radarr for the given file path
 func (m *Manager) triggerRadarrRescanByPath(ctx context.Context, client *radarr.Radarr, filePath, relativePath, instanceName string, metadata *model.WebhookMetadata) error {
 	slog.InfoContext(ctx, "Searching Radarr for matching movie",
@@ -567,39 +607,61 @@ func (m *Manager) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 
 	// ID-Based Precision: If we have the movie ID from metadata, use it
 	if metadata != nil && metadata.Movie != nil && metadata.Movie.Id > 0 {
-		movies, err := m.data.GetMovies(ctx, client, instanceName)
-		if err != nil {
-			return fmt.Errorf("failed to get movies from Radarr for ID lookup: %w", err)
+		// Targeted lookup by internal Radarr movie ID instead of fetching the ENTIRE
+		// movie library and scanning it. On large libraries the full GetMovies call can
+		// exceed the HTTP client timeout, error out, and wrongly condemn the file.
+		movie, lookupErr := client.GetMovieByIDContext(ctx, metadata.Movie.Id)
+		if lookupErr != nil {
+			slog.WarnContext(ctx, "Targeted Radarr movie lookup by ID failed, falling back to full library scan",
+				"instance", instanceName, "movie_id", metadata.Movie.Id, "error", lookupErr)
 		}
-		for _, movie := range movies {
-			if movie.ID == metadata.Movie.Id {
-				targetMovie = movie
 
-				if metadata.MovieFile != nil && metadata.MovieFile.Id > 0 {
-					slog.InfoContext(ctx, "ID-Based Precision: Using metadata IDs for Radarr repair",
-						"movie_id", metadata.Movie.Id,
-						"movie_file_id", metadata.MovieFile.Id)
-					sceneName = metadata.MovieFile.SceneName
-
-					// Smart Repair Guard: Check if the movie already has a newer/different healthy file
-					if movie.HasFile && movie.MovieFile != nil {
-						if movie.MovieFile.ID != metadata.MovieFile.Id {
-							slog.InfoContext(ctx, "Smart Repair Guard: Movie already has a different healthy file (likely upgraded). Skipping repair.",
-								"movie", movie.Title,
-								"old_file_id", metadata.MovieFile.Id,
-								"new_file_id", movie.MovieFile.ID)
-							return model.ErrEpisodeAlreadySatisfied
-						}
-						targetMovieFileID = movie.MovieFile.ID
-					}
-				} else {
-					slog.InfoContext(ctx, "ID-Based Precision: Using metadata movie ID for Radarr repair",
-						"movie_id", metadata.Movie.Id)
-					if movie.HasFile && movie.MovieFile != nil {
-						targetMovieFileID = movie.MovieFile.ID
+		// Fall back to the OLD method when the targeted lookup did not resolve the movie:
+		// fetch the library and match by internal id. This recovers from a transient
+		// targeted-endpoint failure and keeps the Smart Repair Guard working whenever the
+		// metadata ids are present. If the id is genuinely gone (movie removed/re-added
+		// with a new internal id) neither resolves it and we fall through to path matching.
+		if movie == nil || movie.ID != metadata.Movie.Id {
+			movies, listErr := m.data.GetMovies(ctx, client, instanceName)
+			if listErr != nil {
+				slog.WarnContext(ctx, "Radarr full library scan fallback failed, falling back to path matching",
+					"instance", instanceName, "movie_id", metadata.Movie.Id, "error", listErr)
+			} else {
+				for _, candidate := range movies {
+					if candidate.ID == metadata.Movie.Id {
+						movie = candidate
+						break
 					}
 				}
-				break
+			}
+		}
+
+		if movie != nil && movie.ID == metadata.Movie.Id {
+			targetMovie = movie
+
+			if metadata.MovieFile != nil && metadata.MovieFile.Id > 0 {
+				slog.InfoContext(ctx, "ID-Based Precision: Using metadata IDs for Radarr repair",
+					"movie_id", metadata.Movie.Id,
+					"movie_file_id", metadata.MovieFile.Id)
+				sceneName = metadata.MovieFile.SceneName
+
+				// Smart Repair Guard: Check if the movie already has a newer/different healthy file
+				if movie.HasFile && movie.MovieFile != nil {
+					if movie.MovieFile.ID != metadata.MovieFile.Id {
+						slog.InfoContext(ctx, "Smart Repair Guard: Movie already has a different healthy file (likely upgraded). Skipping repair.",
+							"movie", movie.Title,
+							"old_file_id", metadata.MovieFile.Id,
+							"new_file_id", movie.MovieFile.ID)
+						return model.ErrEpisodeAlreadySatisfied
+					}
+					targetMovieFileID = movie.MovieFile.ID
+				}
+			} else {
+				slog.InfoContext(ctx, "ID-Based Precision: Using metadata movie ID for Radarr repair",
+					"movie_id", metadata.Movie.Id)
+				if movie.HasFile && movie.MovieFile != nil {
+					targetMovieFileID = movie.MovieFile.ID
+				}
 			}
 		}
 	}
@@ -614,55 +676,68 @@ func (m *Manager) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 		}
 
 		for _, movie := range movies {
-			// Try match by filename (the most robust way if paths differ)
-			requestFileName := filepath.Base(filePath)
-
-			if movie.HasFile && movie.MovieFile != nil {
-				// Try exact match
-				if movie.MovieFile.Path == filePath {
-					targetMovie = movie
-					targetMovieFileID = movie.MovieFile.ID
-					break
-				}
-
-				movieFileName := filepath.Base(movie.MovieFile.Path)
-				if movieFileName == requestFileName {
-					slog.InfoContext(ctx, "Found Radarr movie match by filename",
-						"movie", movie.Title,
-						"path", movie.MovieFile.Path)
-					targetMovie = movie
-					targetMovieFileID = movie.MovieFile.ID
-					break
-				}
-
-				// Try match without .strm extension if filePath is a .strm file
-				if before, ok := strings.CutSuffix(filePath, ".strm"); ok {
-					strippedPath := before
-					// Check if movie file path (without its own extension) matches stripped filePath
-					if strings.TrimSuffix(movie.MovieFile.Path, filepath.Ext(movie.MovieFile.Path)) == strippedPath {
-						targetMovie = movie
-						targetMovieFileID = movie.MovieFile.ID
-						break
-					}
-				}
-				// Try suffix match with relative path if provided
-				if relativePath != "" {
-					strippedRelative := strings.TrimSuffix(relativePath, ".strm")
-					if strings.HasSuffix(movie.MovieFile.Path, relativePath) ||
-						strings.HasSuffix(strings.TrimSuffix(movie.MovieFile.Path, filepath.Ext(movie.MovieFile.Path)), strippedRelative) {
-						slog.InfoContext(ctx, "Found Radarr movie match by relative path suffix",
-							"radarr_path", movie.MovieFile.Path,
-							"relative_path", relativePath)
-						targetMovie = movie
-						targetMovieFileID = movie.MovieFile.ID
-						break
-					}
-				}
-			}
-			
-			if targetMovieFileID > 0 {
+			// Route through the shared matcher so the library scan and the TMDB-id
+			// fallback below apply identical path-matching (and thus identical
+			// delete-safety) rules.
+			if radarrFileMatchesTarget(movie, filePath, relativePath) {
+				slog.InfoContext(ctx, "Found Radarr movie match by path",
+					"movie", movie.Title,
+					"path", movie.MovieFile.Path,
+					"file_path", filePath)
+				targetMovie = movie
+				targetMovieFileID = movie.MovieFile.ID
 				sceneName = movie.MovieFile.SceneName
+				break
 			}
+		}
+	}
+
+	// TMDB-id fallback: a removed-and-re-added movie gets a NEW internal Radarr id, so
+	// both the metadata-id lookup and the library path scan miss it and the file would
+	// be wrongly condemned. Resolve by the stable TMDB id instead.
+	//
+	// CRITICAL DELETE SAFETY: the resolved movie's file is deleted only when it actually
+	// matches the corrupt target, checked through the SAME radarrFileMatchesTarget matcher
+	// used by the path scan above (so the two cannot drift apart):
+	//   - file present AND matches   -> blocklist + delete + search (targetMovieFileID set)
+	//   - file present but DIFFERENT -> ErrEpisodeAlreadySatisfied, no delete
+	//   - no file yet                -> search only, no delete (targetMovieFileID stays 0)
+	if targetMovie == nil && metadata != nil && metadata.Movie != nil && metadata.Movie.TmdbId > 0 {
+		matches, lookupErr := client.GetMovieContext(ctx, &radarr.GetMovie{TMDBID: metadata.Movie.TmdbId})
+		if lookupErr != nil {
+			slog.WarnContext(ctx, "Radarr TMDB-id fallback lookup failed, falling through to queue/path-match handling",
+				"instance", instanceName, "tmdb_id", metadata.Movie.TmdbId, "error", lookupErr)
+		} else {
+			for _, movie := range matches {
+				if movie == nil || movie.TmdbID != metadata.Movie.TmdbId {
+					continue
+				}
+
+				if movie.HasFile && movie.MovieFile != nil {
+					if radarrFileMatchesTarget(movie, filePath, relativePath) {
+						slog.InfoContext(ctx, "Radarr TMDB-id fallback matched the corrupt target file",
+							"instance", instanceName, "tmdb_id", metadata.Movie.TmdbId,
+							"movie", movie.Title, "movie_path", movie.MovieFile.Path)
+						targetMovie = movie
+						targetMovieFileID = movie.MovieFile.ID
+						sceneName = movie.MovieFile.SceneName
+					} else {
+						// Re-added movie holds a DIFFERENT healthy file. Deleting it would
+						// destroy a good file; report satisfied so the redundant AltMount copy
+						// is cleaned up without any delete against Radarr.
+						slog.InfoContext(ctx, "Radarr TMDB-id fallback found a different healthy file; not deleting",
+							"instance", instanceName, "tmdb_id", metadata.Movie.TmdbId,
+							"movie", movie.Title, "movie_path", movie.MovieFile.Path, "file_path", filePath)
+						return model.ErrEpisodeAlreadySatisfied
+					}
+				} else {
+					// Movie re-added but has no file yet — search only, never delete.
+					slog.InfoContext(ctx, "Radarr TMDB-id fallback resolved movie with no file; search only",
+						"instance", instanceName, "tmdb_id", metadata.Movie.TmdbId, "movie", movie.Title)
+					targetMovie = movie
+				}
+			}
+
 		}
 	}
 
@@ -1078,7 +1153,7 @@ func (m *Manager) blocklistRadarrMovieFile(ctx context.Context, client *radarr.R
 
 	if downloadID == "" {
 		slog.WarnContext(ctx, "Could not find import event in Radarr history for file, attempting to find latest grabbed event directly", "movie_id", movieID, "file_id", fileID)
-		
+
 		// Precision Fallback: Find the grabbed event matching the SceneName or MovieID
 		for _, record := range history.Records {
 			if record.EventType == "grabbed" && record.MovieID == movieID {
@@ -1090,7 +1165,7 @@ func (m *Manager) blocklistRadarrMovieFile(ctx context.Context, client *radarr.R
 					}
 					return nil
 				}
-				
+
 				// Without an exact SceneName match, only fallback to the latest grab if it was recent (within 24 hours)
 				if time.Since(record.Date) < 24*time.Hour {
 					slog.InfoContext(ctx, "Found recent grabbed history record using MovieID fallback, marking as failed to blocklist release",
@@ -1146,7 +1221,7 @@ func (m *Manager) blocklistSonarrEpisodeFile(ctx context.Context, client *sonarr
 				downloadID = record.DownloadID
 				break
 			}
-			
+
 			// Fallback: Sonarr history might not expose fileId in data consistently. Match by EpisodeID.
 			for _, epID := range episodeIDs {
 				if record.EpisodeID == epID {
@@ -1163,7 +1238,7 @@ func (m *Manager) blocklistSonarrEpisodeFile(ctx context.Context, client *sonarr
 
 	if downloadID == "" {
 		slog.WarnContext(ctx, "Could not find import event in Sonarr history for file, attempting to find grabbed event directly", "series_id", seriesID, "file_id", fileID)
-		
+
 		// Precision Fallback: Find the grabbed event matching the SceneName
 		for _, record := range history.Records {
 			if record.EventType == "grabbed" {
@@ -1191,7 +1266,7 @@ func (m *Manager) blocklistSonarrEpisodeFile(ctx context.Context, client *sonarr
 				}
 			}
 		}
-		
+
 		slog.WarnContext(ctx, "Could not find any matching or recent grab event in Sonarr history to blocklist", "series_id", seriesID)
 		return nil
 	}
