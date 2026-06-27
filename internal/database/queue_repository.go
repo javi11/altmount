@@ -233,16 +233,17 @@ func (r *QueueRepository) AddStoragePath(ctx context.Context, itemID int64, stor
 }
 
 // IsFileInQueue checks if a file is already in the queue (pending, processing, or paused).
-// It matches by exact nzb_path first, and also by filename suffix to handle the case where
-// ensurePersistentNzb has already moved the file and updated nzb_path from the temp path to
-// the persistent storage path (e.g. /tmp/altmount-uploads/x.nzb → /.nzbs/stremio/42/x.nzb).
+// It matches by exact nzb_path first, by filename suffix, and also by the ID-prefixed variant
+// that ensurePersistentNzb produces (e.g. /tmp/altmount-uploads/x.nzb → /.nzbs/42/123-x.nzb).
 func (r *QueueRepository) IsFileInQueue(ctx context.Context, filePath string) (bool, error) {
 	filename := filepath.Base(filePath)
-	query := `SELECT 1 FROM import_queue WHERE (nzb_path = ? OR nzb_path LIKE ? ESCAPE '\') AND status IN ('pending', 'processing', 'paused', 'completed') LIMIT 1`
-	likePattern := "%/" + escapeLikePattern(filename)
+	escaped := escapeLikePattern(filename)
+	query := `SELECT 1 FROM import_queue WHERE (nzb_path = ? OR nzb_path LIKE ? ESCAPE '\' OR nzb_path LIKE ? ESCAPE '\') AND status IN ('pending', 'processing', 'paused', 'completed') LIMIT 1`
+	likePattern := "%/" + escaped
+	likePatternIDPrefixed := "%/%-" + escaped
 
 	var exists int
-	err := r.db.QueryRowContext(ctx, query, filePath, likePattern).Scan(&exists)
+	err := r.db.QueryRowContext(ctx, query, filePath, likePattern, likePatternIDPrefixed).Scan(&exists)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return false, nil
@@ -254,21 +255,24 @@ func (r *QueueRepository) IsFileInQueue(ctx context.Context, filePath string) (b
 }
 
 // FindCompletedItemByNzbPath returns the most-recently completed queue item whose
-// nzb_path matches either exactly or by filename suffix. Returns nil, nil when no
-// completed item matches (not an error).
+// nzb_path matches exactly, by filename suffix, or by the ID-prefixed variant that
+// ensurePersistentNzb produces (e.g. /tmp/show.nzb → /persistent/123-show.nzb).
+// Returns nil, nil when no completed item matches (not an error).
 func (r *QueueRepository) FindCompletedItemByNzbPath(ctx context.Context, filePath string) (*ImportQueueItem, error) {
 	filename := filepath.Base(filePath)
-	likePattern := "%/" + escapeLikePattern(filename)
+	escaped := escapeLikePattern(filename)
+	likePattern := "%/" + escaped
+	likePatternIDPrefixed := "%/%-" + escaped
 	query := `
 		SELECT id, download_id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
 		       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path, target_path, skip_arr_notification, skip_post_import_links, indexer
 		FROM import_queue
-		WHERE (nzb_path = ? OR nzb_path LIKE ? ESCAPE '\') AND status = 'completed'
+		WHERE (nzb_path = ? OR nzb_path LIKE ? ESCAPE '\' OR nzb_path LIKE ? ESCAPE '\') AND status = 'completed'
 		ORDER BY completed_at DESC
 		LIMIT 1
 	`
 	var item ImportQueueItem
-	err := r.db.QueryRowContext(ctx, query, filePath, likePattern).Scan(
+	err := r.db.QueryRowContext(ctx, query, filePath, likePattern, likePatternIDPrefixed).Scan(
 		&item.ID, &item.DownloadID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
 		&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
 		&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath, &item.TargetPath, &item.SkipArrNotification, &item.SkipPostImportLinks, &item.Indexer,

@@ -203,6 +203,21 @@ func TestIsFileInQueue_CompletedItem_ReturnsTrue(t *testing.T) {
 	assert.True(t, inQueue, "completed item should be reported as in-queue to prevent re-add")
 }
 
+func TestIsFileInQueue_IDPrefixedCompletedItem_ReturnsTrue(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	require.NoError(t, err)
+	defer db.Close()
+	setupQueueSchema(t, db)
+
+	// Stored with ensurePersistentNzb ID prefix, submitted under original name.
+	insertQueueItem(t, db, 1, "/nzbs/Movies/123-show.nzb", "completed")
+	repo := NewQueueRepository(db, DialectSQLite)
+
+	inQueue, err := repo.IsFileInQueue(context.Background(), "/tmp/uploads/show.nzb")
+	require.NoError(t, err)
+	assert.True(t, inQueue, "ID-prefixed completed item should be detected as in-queue")
+}
+
 func TestFindCompletedItemByNzbPath(t *testing.T) {
 	db, err := sql.Open("sqlite3", ":memory:")
 	require.NoError(t, err)
@@ -224,6 +239,14 @@ func TestFindCompletedItemByNzbPath(t *testing.T) {
 	t.Run("filename suffix match (path changed after ensurePersistentNzb)", func(t *testing.T) {
 		// Upload temp path differs from persisted path but shares filename.
 		got, err := repo.FindCompletedItemByNzbPath(ctx, "/tmp/uploads/123-show.nzb")
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		assert.Equal(t, int64(1), got.ID)
+	})
+
+	t.Run("ID-prefixed match (stremio: submitted as show.nzb, stored as 123-show.nzb)", func(t *testing.T) {
+		// ensurePersistentNzb renames to {id}-{original}; original upload name must still match.
+		got, err := repo.FindCompletedItemByNzbPath(ctx, "/tmp/uploads/show.nzb")
 		require.NoError(t, err)
 		require.NotNil(t, got)
 		assert.Equal(t, int64(1), got.ID)
