@@ -421,18 +421,28 @@ type IgnoredMessage struct {
 
 // ArrsConfig represents arrs configuration
 type ArrsConfig struct {
-	Enabled                        *bool                `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
-	MaxWorkers                     int                  `yaml:"max_workers" mapstructure:"max_workers" json:"max_workers,omitempty"`
-	WebhookBaseURL                 string               `yaml:"webhook_base_url" mapstructure:"webhook_base_url" json:"webhook_base_url,omitempty"`
-	RadarrInstances                []ArrsInstanceConfig `yaml:"radarr_instances" mapstructure:"radarr_instances" json:"radarr_instances"`
-	SonarrInstances                []ArrsInstanceConfig `yaml:"sonarr_instances" mapstructure:"sonarr_instances" json:"sonarr_instances"`
-	LidarrInstances                []ArrsInstanceConfig `yaml:"lidarr_instances" mapstructure:"lidarr_instances" json:"lidarr_instances"`
-	ReadarrInstances               []ArrsInstanceConfig `yaml:"readarr_instances" mapstructure:"readarr_instances" json:"readarr_instances"`
-	WhisparrInstances              []ArrsInstanceConfig `yaml:"whisparr_instances" mapstructure:"whisparr_instances" json:"whisparr_instances"`
-	SportarrInstances              []ArrsInstanceConfig `yaml:"sportarr_instances" mapstructure:"sportarr_instances" json:"sportarr_instances"`
-	QueueCleanupEnabled            *bool                `yaml:"queue_cleanup_enabled" mapstructure:"queue_cleanup_enabled" json:"queue_cleanup_enabled,omitempty"`
-	QueueCleanupIntervalSeconds    int                  `yaml:"queue_cleanup_interval_seconds" mapstructure:"queue_cleanup_interval_seconds" json:"queue_cleanup_interval_seconds,omitempty"`
-	QueueCleanupGracePeriodMinutes int                  `yaml:"queue_cleanup_grace_period_minutes" mapstructure:"queue_cleanup_grace_period_minutes" json:"queue_cleanup_grace_period_minutes,omitempty"`
+	Enabled             *bool                `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	MaxWorkers          int                  `yaml:"max_workers" mapstructure:"max_workers" json:"max_workers,omitempty"`
+	WebhookBaseURL      string               `yaml:"webhook_base_url" mapstructure:"webhook_base_url" json:"webhook_base_url,omitempty"`
+	RadarrInstances     []ArrsInstanceConfig `yaml:"radarr_instances" mapstructure:"radarr_instances" json:"radarr_instances"`
+	SonarrInstances     []ArrsInstanceConfig `yaml:"sonarr_instances" mapstructure:"sonarr_instances" json:"sonarr_instances"`
+	LidarrInstances     []ArrsInstanceConfig `yaml:"lidarr_instances" mapstructure:"lidarr_instances" json:"lidarr_instances"`
+	ReadarrInstances    []ArrsInstanceConfig `yaml:"readarr_instances" mapstructure:"readarr_instances" json:"readarr_instances"`
+	WhisparrInstances   []ArrsInstanceConfig `yaml:"whisparr_instances" mapstructure:"whisparr_instances" json:"whisparr_instances"`
+	SportarrInstances   []ArrsInstanceConfig `yaml:"sportarr_instances" mapstructure:"sportarr_instances" json:"sportarr_instances"`
+	QueueCleanupEnabled *bool                `yaml:"queue_cleanup_enabled" mapstructure:"queue_cleanup_enabled" json:"queue_cleanup_enabled,omitempty"`
+
+	// SonarrSeasonEpisodeFallbackEnabled opts in to the Sonarr season+episode repair
+	// fallback. When a corrupt file can't be matched to any episode file by path, this
+	// fallback resolves the owned episode by the S/E parsed from the path and
+	// blocklists + re-searches it. Because path matching has already failed by the time
+	// it runs, it cannot confirm the owned release is actually the corrupt one — so for
+	// libraries with foreign-language releases or season packs it can blocklist a
+	// healthy release. It is therefore DISABLED by default; enable only when episodes
+	// are reliably one-file-per-release and renames are the main cause of path misses.
+	SonarrSeasonEpisodeFallbackEnabled *bool `yaml:"sonarr_season_episode_fallback_enabled" mapstructure:"sonarr_season_episode_fallback_enabled" json:"sonarr_season_episode_fallback_enabled,omitempty"`
+	QueueCleanupIntervalSeconds        int   `yaml:"queue_cleanup_interval_seconds" mapstructure:"queue_cleanup_interval_seconds" json:"queue_cleanup_interval_seconds,omitempty"`
+	QueueCleanupGracePeriodMinutes     int   `yaml:"queue_cleanup_grace_period_minutes" mapstructure:"queue_cleanup_grace_period_minutes" json:"queue_cleanup_grace_period_minutes,omitempty"`
 
 	// QueueCleanupMaxFailures is the per-target failure circuit breaker. After
 	// AltMount has acted on the same target (a Radarr movie or Sonarr/Whisparr
@@ -1430,6 +1440,7 @@ func DefaultConfig(configDir ...string) *Config {
 	mountEnabled := false // Disabled by default
 	sabnzbdEnabled := false
 	scrapperEnabled := false
+	sonarrSeasonEpisodeFallbackEnabled := false // Opt-in: can blocklist healthy releases, see field doc
 	fuseEnabled := false
 	loginRequired := true           // Require login by default
 	stremioEnabled := false         // Stremio endpoint disabled by default
@@ -1642,17 +1653,18 @@ func DefaultConfig(configDir ...string) *Config {
 			UserAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 		},
 		Arrs: ArrsConfig{
-			Enabled:                        &scrapperEnabled, // Disabled by default
-			MaxWorkers:                     5,                // Default to 5 concurrent workers
-			WebhookBaseURL:                 "",
-			RadarrInstances:                []ArrsInstanceConfig{},
-			SonarrInstances:                []ArrsInstanceConfig{},
-			LidarrInstances:                []ArrsInstanceConfig{},
-			ReadarrInstances:               []ArrsInstanceConfig{},
-			WhisparrInstances:              []ArrsInstanceConfig{},
-			SportarrInstances:              []ArrsInstanceConfig{},
-			QueueCleanupGracePeriodMinutes: 5,     // Default to 5 minutes stuck before acting
-			QueueCleanupMaxFailures:        0, // Failure circuit breaker disabled by default
+			Enabled:                            &scrapperEnabled,                    // Disabled by default
+			SonarrSeasonEpisodeFallbackEnabled: &sonarrSeasonEpisodeFallbackEnabled, // Disabled by default
+			MaxWorkers:                         5,                                   // Default to 5 concurrent workers
+			WebhookBaseURL:                     "",
+			RadarrInstances:                    []ArrsInstanceConfig{},
+			SonarrInstances:                    []ArrsInstanceConfig{},
+			LidarrInstances:                    []ArrsInstanceConfig{},
+			ReadarrInstances:                   []ArrsInstanceConfig{},
+			WhisparrInstances:                  []ArrsInstanceConfig{},
+			SportarrInstances:                  []ArrsInstanceConfig{},
+			QueueCleanupGracePeriodMinutes:     5, // Default to 5 minutes stuck before acting
+			QueueCleanupMaxFailures:            0, // Failure circuit breaker disabled by default
 			// Rule table modeled on wArrden's queue cleanup. Action decides what to do:
 			// blocklist_search (bad release → block + re-search), blocklist (block but
 			// don't search), or remove (just clear the queue: transient/environmental
