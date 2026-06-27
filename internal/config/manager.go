@@ -316,7 +316,6 @@ type ImportConfig struct {
 	RenameToNzbName                    *bool          `yaml:"rename_to_nzb_name" mapstructure:"rename_to_nzb_name" json:"rename_to_nzb_name,omitempty"`
 	FilterSampleFiles                  *bool          `yaml:"filter_sample_files" mapstructure:"filter_sample_files" json:"filter_sample_files,omitempty"`
 	FailedItemRetentionHours           *int           `yaml:"failed_item_retention_hours" mapstructure:"failed_item_retention_hours" json:"failed_item_retention_hours,omitempty"`
-	HistoryRetentionDays               *int           `yaml:"history_retention_days" mapstructure:"history_retention_days" json:"history_retention_days,omitempty"`
 }
 
 // LogConfig represents logging configuration with rotation support
@@ -1436,7 +1435,6 @@ func DefaultConfig(configDir ...string) *Config {
 	prowlarrEnabled := false        // Prowlarr integration disabled by default
 	watchIntervalSeconds := 10      // Default watch interval
 	failedItemRetentionHours := 24  // Default: auto-remove failed items after 24 hours
-	historyRetentionDays := 90      // Default: auto-remove import history after 90 days (3 months)
 	isoAnalyzeTimeoutSeconds := 120 // Default: 120s hard cap per ISO analyse (prevents stuck NNTP from stalling import for 9+ minutes)
 	metadataBackupEnabled := false
 	failureMaskingEnabled := false
@@ -1575,7 +1573,6 @@ func DefaultConfig(configDir ...string) *Config {
 			WatchDir:                 nil,
 			WatchIntervalSeconds:     &watchIntervalSeconds,
 			FailedItemRetentionHours: &failedItemRetentionHours,
-			HistoryRetentionDays:     &historyRetentionDays,
 		},
 		Log: LogConfig{
 			File:       logPath, // Default log file path
