@@ -738,9 +738,6 @@ func (m *Manager) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 				}
 			}
 
-			if targetMovieFileID > 0 {
-				sceneName = movie.MovieFile.SceneName
-			}
 		}
 	}
 
