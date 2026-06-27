@@ -193,10 +193,28 @@ func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, i
 	}
 
 	if result.MissingCount > 0 {
-		event.Type = EventTypeFileCorrupted
-		event.Status = database.HealthStatusCorrupted
-		event.Error = fmt.Errorf("missing %d segments", result.MissingCount)
-		return event
+		// Honor acceptable_missing_segments_percentage: only condemn when the ratio of
+		// missing sampled segments exceeds the configured threshold. The default of 0
+		// preserves the historical strict behaviour (any missing segment condemns), so
+		// a single transient miss is tolerated only when the operator has opted in.
+		acceptable := cfg.GetAcceptableMissingSegmentsPercentage()
+		missingRatio := 0.0
+		if result.TotalChecked > 0 {
+			missingRatio = float64(result.MissingCount) / float64(result.TotalChecked) * 100
+		}
+		if missingRatio > acceptable {
+			event.Type = EventTypeFileCorrupted
+			event.Status = database.HealthStatusCorrupted
+			event.Error = fmt.Errorf("missing %d of %d checked segments (%.2f%% exceeds acceptable %.2f%%)",
+				result.MissingCount, result.TotalChecked, missingRatio, acceptable)
+			return event
+		}
+		slog.InfoContext(ctx, "Missing segments within acceptable threshold, treating file as healthy",
+			"file_path", filePath,
+			"missing", result.MissingCount,
+			"checked", result.TotalChecked,
+			"missing_ratio", missingRatio,
+			"acceptable_percentage", acceptable)
 	}
 
 	// All checked segments are available - record will be deleted

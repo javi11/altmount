@@ -2065,16 +2065,7 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 	ctx, cancel := context.WithTimeout(mvf.ctx, 5*time.Second)
 	defer cancel()
 
-	// Any file with missing segments or corruption is marked as corrupted in metadata
-	// and DB to trigger the repair cycle via the health worker.
-	metadataStatus := metapb.FileStatus_FILE_STATUS_CORRUPTED
-
-	// Update metadata status (blocking with timeout)
-	if err := mvf.metadataService.UpdateFileStatus(mvf.name, metadataStatus); err != nil {
-		slog.WarnContext(ctx, "Failed to update metadata status", "file", mvf.name, "error", err)
-	}
-
-	// Update database health tracking (blocking with timeout)
+	// Build the health tracking error context.
 	errorMsg := dataCorruptionErr.Error()
 	sourceNzbPath := &mvf.meta.SourceNzbPath
 	if *sourceNzbPath == "" {
@@ -2085,43 +2076,24 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 	errorDetails := fmt.Sprintf(`{"missing_articles": %d, "total_articles": %d, "error_type": "ArticleNotFound"}`,
 		1, len(mvf.meta.SegmentData))
 
-	// Mark as repair_triggered with high priority to trigger the replacement immediately.
-	// We skip the re-verification phase because a streaming failure is a definitive indicator of corruption.
-	slog.InfoContext(ctx, "Streaming failure detected, triggering immediate ARR repair", "file", mvf.name)
-	dbStatus := database.HealthStatusRepairTriggered
-
-	// If the file has already been imported (has a library path), move metadata to the safety folder
-	// so that the ARR rescan definitively sees the file as missing and triggers a redownload.
-	if health, err := mvf.healthRepository.GetFileHealth(ctx, mvf.name); err == nil && health != nil {
-		if health.LibraryPath != nil && *health.LibraryPath != "" {
-			cfg := mvf.configGetter()
-			relativePath := strings.TrimPrefix(mvf.name, cfg.MountPath)
-			relativePath = strings.TrimPrefix(relativePath, "/")
-			slog.InfoContext(ctx, "Moving metadata file for corrupted item to safety folder to trigger replacement", "file_path", mvf.name)
-			if moveErr := mvf.metadataService.MoveToCorrupted(ctx, relativePath); moveErr == nil {
-				// Successfully moved metadata, enqueue a coalesced rclone VFS
-				// refresh. Multiple files in the same directory collapse into a
-				// single RC call; concurrent failures across directories are
-				// batched into one call as well. EnqueueRefresh is a no-op on a
-				// nil coalescer (test harness).
-				mvf.repairCoalescer.EnqueueRefresh(filepath.Dir(mvf.name))
-			} else {
-				slog.WarnContext(ctx, "Failed to move corrupted metadata file, proceeding with repair trigger status", "error", moveErr)
-			}
-		}
-	}
-
-	// Update database with high priority (scheduled for immediate pick-up by HealthWorker)
+	// A single streaming miss (NNTP-430 / ArticleNotFound) is frequently a transient
+	// segment unavailability, not real corruption. Do NOT condemn the file on one miss:
+	// instead schedule a high-priority health re-check (pending, scheduled now) so the
+	// health checker re-validates segment availability and only condemns when the missing
+	// ratio exceeds acceptable_missing_segments_percentage. We deliberately do NOT mark the
+	// metadata corrupted or move it to the safety folder here — those are condemnation
+	// steps reserved for the verified path, and doing them now would hide a healthy file.
+	slog.InfoContext(ctx, "Streaming failure detected, scheduling high-priority health re-check before condemning", "file", mvf.name)
 	if err := mvf.healthRepository.UpdateFileHealthScheduled(ctx,
 		mvf.name,
-		dbStatus,
+		database.HealthStatusPending,
 		&errorMsg,
 		sourceNzbPath,
 		&errorDetails,
-		true, // noRetry=true forces it to be picked up for repair immediately
+		true, // high priority — re-check promptly
 		time.Now().UTC(),
 	); err != nil {
-		slog.WarnContext(ctx, "Failed to update health database for streaming failure", "file", mvf.name, "error", err)
+		slog.WarnContext(ctx, "Failed to schedule health re-check for streaming failure", "file", mvf.name, "error", err)
 	}
 
 	// Increment failure count for tracking/masking if enabled
