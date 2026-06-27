@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -207,77 +208,83 @@ func (s *Server) handleNzbStreams(c *fiber.Ctx) error {
 	nzbName := nzbtrim.TrimNzbExtension(safeFilename)
 	tempPath := filepath.Join(uploadDir, safeFilename)
 
-	// --- Short-circuit: return cached streams if NZB was already processed ---
-	// Respect the configurable TTL: 0 means cache forever, >0 means re-process after N hours.
+	// --- Find or add NZB to queue, deduplicated per filename ---
+	// stremioPlayGroup serialises all callers with the same safeFilename: the first
+	// one runs the full find-or-add path; concurrent duplicates (e.g. two users
+	// requesting the same release simultaneously) wait and share the returned queue
+	// item ID, preventing the TOCTOU race that previously created duplicate entries.
 	ttlHours := cfg.Stremio.NzbTTLHours
 
-	completedStatus := database.QueueStatusCompleted
-	existing, err := s.queueRepo.ListQueueItems(ctx, &completedStatus, safeFilename, "", 1, 0, "updated_at", "desc")
-	if err == nil && len(existing) > 0 {
-		prev := existing[0]
-		cacheValid := prev.StoragePath != nil && *prev.StoragePath != ""
-		if cacheValid && ttlHours > 0 && prev.CompletedAt != nil {
-			cacheValid = time.Since(*prev.CompletedAt) < time.Duration(ttlHours)*time.Hour
-		}
-		if cacheValid {
-			if streams, err := s.buildStremioStreams(prev, baseURL, downloadKey, nzbName, selector); err == nil {
-				slog.InfoContext(ctx, "Returning cached Stremio streams for already-processed NZB",
+	rawID, sfErr, _ := s.stremioPlayGroup.Do(safeFilename, func() (interface{}, error) {
+		// Detach from the caller's request context so one client disconnecting
+		// does not abort work that other concurrent callers are also waiting on.
+		workCtx := context.WithoutCancel(ctx)
+
+		completedStatus := database.QueueStatusCompleted
+
+		// Check completed cache inside the critical section so two concurrent
+		// callers can't both miss it and both enqueue the same NZB.
+		if existing, e := s.queueRepo.ListQueueItems(workCtx, &completedStatus, safeFilename, "", 1, 0, "updated_at", "desc"); e == nil && len(existing) > 0 {
+			prev := existing[0]
+			cacheValid := prev.StoragePath != nil && *prev.StoragePath != ""
+			if cacheValid && ttlHours > 0 && prev.CompletedAt != nil {
+				cacheValid = time.Since(*prev.CompletedAt) < time.Duration(ttlHours)*time.Hour
+			}
+			if cacheValid {
+				slog.InfoContext(workCtx, "Returning cached Stremio streams for already-processed NZB",
 					"nzb_name", nzbName, "queue_id", prev.ID)
-				return c.JSON(StremioStreamsResponse{
-					Streams:     streams,
-					QueueItemID: prev.ID,
-					QueueStatus: string(prev.Status),
-					Cached:      true,
-				})
+				return prev.ID, nil
 			}
 		}
-	}
 
-	// --- Short-circuit: join existing active queue item instead of re-adding ---
-	if inQueue, _ := s.queueRepo.IsFileInQueue(ctx, tempPath); inQueue {
-		activeItems, err := s.queueRepo.ListQueueItems(ctx, nil, safeFilename, "", 1, 0, "updated_at", "desc")
-		if err == nil && len(activeItems) > 0 {
-			return s.waitAndRespond(c, activeItems[0].ID, baseURL, downloadKey, nzbName, selector, timeoutSecs)
+		// Join an existing active queue item instead of re-adding.
+		if activeItems, e := s.queueRepo.ListQueueItems(workCtx, nil, safeFilename, "", 1, 0, "updated_at", "desc"); e == nil && len(activeItems) > 0 {
+			it := activeItems[0]
+			switch it.Status {
+			case database.QueueStatusPending, database.QueueStatusProcessing, database.QueueStatusPaused:
+				return it.ID, nil
+			}
 		}
+
+		// --- Save NZB to temp directory and add to queue ---
+		if s.importerService == nil {
+			return nil, fmt.Errorf("importer service not available")
+		}
+
+		if err := os.MkdirAll(uploadDir, 0755); err != nil {
+			return nil, fmt.Errorf("failed to create upload directory: %w", err)
+		}
+		if err := os.WriteFile(tempPath, nzbData, 0644); err != nil {
+			return nil, fmt.Errorf("failed to save NZB file: %w", err)
+		}
+
+		if category == "" {
+			category = "stremio"
+		}
+		var basePath *string
+		if completeDir := cfg.SABnzbd.CompleteDir; completeDir != "" {
+			basePath = &completeDir
+		}
+
+		priority := database.QueuePriorityHigh
+		item, err := s.importerService.AddToQueue(workCtx, tempPath, basePath, &category, &priority, nil, nil)
+		if err != nil {
+			os.Remove(tempPath)
+			return nil, fmt.Errorf("failed to add NZB to queue: %w", err)
+		}
+
+		slog.InfoContext(workCtx, "NZB added to queue for Stremio stream processing",
+			"queue_id", item.ID,
+			"nzb_path", tempPath,
+			"timeout_secs", timeoutSecs)
+
+		return item.ID, nil
+	})
+	if sfErr != nil {
+		return RespondInternalError(c, "Failed to process NZB", sfErr.Error())
 	}
 
-	// --- Save NZB to temp directory ---
-	if err := os.MkdirAll(uploadDir, 0755); err != nil {
-		return RespondInternalError(c, "Failed to create upload directory", err.Error())
-	}
-
-	if err := os.WriteFile(tempPath, nzbData, 0644); err != nil {
-		return RespondInternalError(c, "Failed to save NZB file", err.Error())
-	}
-
-	// --- Add NZB to queue with high priority ---
-	if s.importerService == nil {
-		os.Remove(tempPath)
-		return RespondServiceUnavailable(c, "Importer service not available", "")
-	}
-
-	if category == "" {
-		category = "stremio"
-	}
-
-	var basePath *string
-	if completeDir := cfg.SABnzbd.CompleteDir; completeDir != "" {
-		basePath = &completeDir
-	}
-
-	priority := database.QueuePriorityHigh
-	item, err := s.importerService.AddToQueue(ctx, tempPath, basePath, &category, &priority, nil, nil)
-	if err != nil {
-		os.Remove(tempPath)
-		return RespondInternalError(c, "Failed to add NZB to queue", err.Error())
-	}
-
-	slog.InfoContext(ctx, "NZB added to queue for Stremio stream processing",
-		"queue_id", item.ID,
-		"nzb_path", tempPath,
-		"timeout_secs", timeoutSecs)
-
-	return s.waitAndRespond(c, item.ID, baseURL, downloadKey, nzbName, selector, timeoutSecs)
+	return s.waitAndRespond(c, rawID.(int64), baseURL, downloadKey, nzbName, selector, timeoutSecs)
 }
 
 // waitAndRespond subscribes to the progress broadcaster and waits for the queue item to
