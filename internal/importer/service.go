@@ -778,6 +778,15 @@ func (s *Service) FindAndUpdatePendingUpload(ctx context.Context, filename strin
 		return nil, err
 	}
 	items = append(items, oldItems...)
+	// Also search the Stremio upload staging directory: handleNzbStreams writes there
+	// before calling AddToQueue, so without this scan Stremio-submitted NZBs are never
+	// found by FindAndUpdatePendingUpload and always create a new queue entry.
+	stremioUploadDir := filepath.Join(os.TempDir(), "altmount-uploads")
+	stremioItems, err := s.database.Repository.GetPendingQueueItemsByPathPrefix(ctx, stremioUploadDir+string(filepath.Separator))
+	if err != nil {
+		return nil, err
+	}
+	items = append(items, stremioItems...)
 
 	for _, it := range items {
 		// Persisted name is "<base><ext>" or, on collision, "<id>-<base><ext>".
