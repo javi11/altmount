@@ -458,3 +458,91 @@ func TestMigrateArrsCleanup_AutoFailureFlag_FalseClearsOnly(t *testing.T) {
 	assert.Equal(t, rules, cfg.Arrs.QueueCleanupRules)
 	assert.Nil(t, cfg.Arrs.CleanupAutomaticImportFailure)
 }
+
+func TestInferARRTypeFromCategory(t *testing.T) {
+	cases := []struct {
+		category string
+		want     string
+	}{
+		// Multi-instance radarr/sonarr names — the original bug.
+		{"radarr-sqp1", "radarr"},
+		{"radarr-anime", "radarr"},
+		{"radarr-anime-v3", "radarr"},
+		{"sonarr-4k", "sonarr"},
+		{"sonarr-anime", "sonarr"},
+		// Exact and contains.
+		{"radarr", "radarr"},
+		{"sonarr", "sonarr"},
+		{"movies", "radarr"},
+		{"tv", "sonarr"},
+		{"shows", "sonarr"},
+		{"music", "lidarr"},
+		{"books", "readarr"},
+		{"adult", "whisparr"},
+		// Case insensitive.
+		{"RADARR-SQP1", "radarr"},
+		// Unknown.
+		{"", ""},
+		{"default", ""},
+		{"asdf-foo", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.category, func(t *testing.T) {
+			assert.Equal(t, tc.want, InferARRTypeFromCategory(tc.category))
+		})
+	}
+}
+
+func TestMigrateCategoryTypes_BackfillsEmpty(t *testing.T) {
+	cfg := &Config{
+		SABnzbd: SABnzbdConfig{
+			Categories: []SABnzbdCategory{
+				{Name: "radarr-sqp1", Dir: "radarr-sqp1"},
+				{Name: "sonarr-anime", Dir: "sonarr-anime"},
+			},
+		},
+	}
+
+	backfilled := cfg.MigrateCategoryTypes()
+
+	assert.ElementsMatch(t, []string{"radarr-sqp1", "sonarr-anime"}, backfilled)
+	assert.Equal(t, "radarr", cfg.SABnzbd.Categories[0].Type)
+	assert.Equal(t, "sonarr", cfg.SABnzbd.Categories[1].Type)
+}
+
+func TestMigrateCategoryTypes_PreservesExistingType(t *testing.T) {
+	cfg := &Config{
+		SABnzbd: SABnzbdConfig{
+			Categories: []SABnzbdCategory{
+				{Name: "radarr-sqp1", Dir: "radarr-sqp1", Type: "sonarr"}, // user override
+			},
+		},
+	}
+
+	backfilled := cfg.MigrateCategoryTypes()
+
+	assert.Empty(t, backfilled, "should not touch user-set Type")
+	assert.Equal(t, "sonarr", cfg.SABnzbd.Categories[0].Type, "user value must survive")
+}
+
+func TestMigrateCategoryTypes_SkipsUnknownNames(t *testing.T) {
+	cfg := &Config{
+		SABnzbd: SABnzbdConfig{
+			Categories: []SABnzbdCategory{
+				{Name: "asdf-custom", Dir: "asdf-custom"}, // heuristic miss
+				{Name: "radarr-sqp1", Dir: "radarr-sqp1"},
+			},
+		},
+	}
+
+	backfilled := cfg.MigrateCategoryTypes()
+
+	assert.Equal(t, []string{"radarr-sqp1"}, backfilled)
+	assert.Equal(t, "", cfg.SABnzbd.Categories[0].Type)
+	assert.Equal(t, "radarr", cfg.SABnzbd.Categories[1].Type)
+}
+
+func TestMigrateCategoryTypes_NoCategories(t *testing.T) {
+	cfg := &Config{}
+	assert.Empty(t, cfg.MigrateCategoryTypes())
+}
