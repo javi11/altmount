@@ -13,17 +13,49 @@ import {
 	YAxis,
 } from "recharts";
 
-// Multi-series palette sourced from the active daisyUI theme so chart colors
-// follow the selected theme instead of fixed hex values.
+// Chart series need categorical colors. DaisyUI semantic tokens are intentionally
+// reused in the minimal themes, which makes multiple providers look identical.
 const CHART_COLORS = [
-	"var(--color-primary)",
-	"var(--color-success)",
-	"var(--color-warning)",
-	"var(--color-error)",
-	"var(--color-secondary)",
-	"var(--color-accent)",
-	"var(--color-info)",
+	"#60a5fa", // blue
+	"#f87171", // red
+	"#34d399", // emerald
+	"#fbbf24", // amber
+	"#a78bfa", // violet
+	"#fb923c", // orange
+	"#22d3ee", // cyan
+	"#f472b6", // pink
+	"#a3e635", // lime
+	"#c084fc", // purple
+	"#2dd4bf", // teal
+	"#facc15", // yellow
+	"#818cf8", // indigo
+	"#4ade80", // green
+	"#e879f9", // fuchsia
+	"#38bdf8", // sky
+	"#fdba74", // light orange
+	"#fca5a5", // salmon
 ];
+
+function chartColorAt(index: number) {
+	if (index < CHART_COLORS.length) return CHART_COLORS[index];
+
+	const hue = Math.round((index * 137.508) % 360);
+	const lightness = index % 2 === 0 ? 62 : 72;
+	return `hsl(${hue}, 72%, ${lightness}%)`;
+}
+
+/**
+ * Builds a stable host -> color map. Assigning by alphabetical index keeps a
+ * provider's color identical across both charts and across timeframe changes.
+ */
+export function buildProviderColorMap(hosts: string[]): Record<string, string> {
+	const unique = [...new Set(hosts)].sort((a, b) => a.localeCompare(b));
+	const map: Record<string, string> = {};
+	unique.forEach((host, i) => {
+		map[host] = chartColorAt(i);
+	});
+	return map;
+}
 
 export type ChartDatum = Record<string, string | number>;
 
@@ -158,6 +190,8 @@ interface ProviderAreaChartProps {
 	chartData: ChartDatum[];
 	/** Providers sorted by magnitude (controls color + draw order). */
 	providers: string[];
+	/** Stable color lookup keyed by provider host. */
+	colorMap: Record<string, string>;
 	/** Unique prefix for the gradient ids (avoids collisions between charts). */
 	gradientPrefix: string;
 	/** Tooltip value formatter. */
@@ -181,6 +215,7 @@ export function ProviderAreaChart({
 	tabActiveClassName,
 	chartData,
 	providers,
+	colorMap,
 	gradientPrefix,
 	formatValue,
 	tooltipTotalClassName,
@@ -215,27 +250,22 @@ export function ProviderAreaChart({
 					<ResponsiveContainer width="100%" height="100%">
 						<AreaChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
 							<defs>
-								{providers.map((p, i) => (
-									<linearGradient
-										key={`${gradientPrefix}${p}`}
-										id={`${gradientPrefix}${p}`}
-										x1="0"
-										y1="0"
-										x2="0"
-										y2="1"
-									>
-										<stop
-											offset="5%"
-											stopColor={CHART_COLORS[i % CHART_COLORS.length]}
-											stopOpacity={0.45}
-										/>
-										<stop
-											offset="95%"
-											stopColor={CHART_COLORS[i % CHART_COLORS.length]}
-											stopOpacity={0.02}
-										/>
-									</linearGradient>
-								))}
+								{providers.map((p, i) => {
+									const color = colorMap[p] ?? chartColorAt(i);
+									return (
+										<linearGradient
+											key={`${gradientPrefix}${p}`}
+											id={`${gradientPrefix}${p}`}
+											x1="0"
+											y1="0"
+											x2="0"
+											y2="1"
+										>
+											<stop offset="5%" stopColor={color} stopOpacity={0.45} />
+											<stop offset="95%" stopColor={color} stopOpacity={0.02} />
+										</linearGradient>
+									);
+								})}
 							</defs>
 							<CartesianGrid strokeDasharray="3 3" opacity={0.04} vertical={false} />
 							<XAxis
@@ -278,7 +308,7 @@ export function ProviderAreaChart({
 										payload={providers.map<LegendPayload>((p, i) => ({
 											value: p,
 											type: "circle",
-											color: CHART_COLORS[i % CHART_COLORS.length],
+											color: colorMap[p] ?? chartColorAt(i),
 											dataKey: p,
 											inactive: !activeProviders[p],
 										}))}
@@ -299,7 +329,7 @@ export function ProviderAreaChart({
 							/>
 							{[...providers].reverse().map((p) => {
 								const i = providers.indexOf(p);
-								const color = CHART_COLORS[i % CHART_COLORS.length];
+								const color = colorMap[p] ?? chartColorAt(i);
 								return (
 									activeProviders[p] && (
 										<Area

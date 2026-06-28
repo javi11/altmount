@@ -2,7 +2,12 @@ import { Activity } from "lucide-react";
 import { useMemo, useState } from "react";
 import { usePoolMetrics, useProviderSpeedHistory } from "../../hooks/useApi";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
-import { type ChartDatum, ProviderAreaChart, type TimeRangeTab } from "./chartShared";
+import {
+	buildProviderColorMap,
+	type ChartDatum,
+	ProviderAreaChart,
+	type TimeRangeTab,
+} from "./chartShared";
 
 const TABS: TimeRangeTab[] = [
 	{ label: "24h", value: 1 },
@@ -76,6 +81,11 @@ export function ProviderSpeedChart() {
 		return { chartData: Object.values(grouped), providers: sortedProviders };
 	}, [historyResponse, poolData, days]);
 
+	const colorMap = useMemo(
+		() => buildProviderColorMap([...(poolData?.providers ?? []).map((p) => p.host), ...providers]),
+		[poolData, providers],
+	);
+
 	if (historyLoading)
 		return (
 			<div className="flex h-64 items-center justify-center">
@@ -95,6 +105,7 @@ export function ProviderSpeedChart() {
 			tabActiveClassName="bg-primary text-primary-content shadow hover:bg-primary"
 			chartData={chartData}
 			providers={providers}
+			colorMap={colorMap}
 			gradientPrefix="colorSpeed"
 			formatValue={formatSpeed}
 			tooltipTotalClassName="text-success"

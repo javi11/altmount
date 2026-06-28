@@ -4,7 +4,12 @@ import { usePoolMetrics, useProviderHistoricalStats } from "../../hooks/useApi";
 import { formatBytes } from "../../lib/utils";
 import type { ProviderStatus } from "../../types/api";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
-import { type ChartDatum, ProviderAreaChart, type TimeRangeTab } from "./chartShared";
+import {
+	buildProviderColorMap,
+	type ChartDatum,
+	ProviderAreaChart,
+	type TimeRangeTab,
+} from "./chartShared";
 
 const TABS: TimeRangeTab[] = [
 	{ label: "7d", value: 7 },
@@ -77,6 +82,15 @@ export function ProviderChart() {
 		};
 	}, [response, interval, poolData]);
 
+	const colorMap = useMemo(
+		() =>
+			buildProviderColorMap([
+				...(poolData?.providers ?? []).map((p: ProviderStatus) => p.host),
+				...providers,
+			]),
+		[poolData, providers],
+	);
+
 	if (isLoading)
 		return (
 			<div className="flex h-64 items-center justify-center">
@@ -96,6 +110,7 @@ export function ProviderChart() {
 			tabActiveClassName="bg-info text-info-content shadow hover:bg-info"
 			chartData={chartData}
 			providers={providers}
+			colorMap={colorMap}
 			gradientPrefix="color"
 			formatValue={formatBytes}
 			tooltipTotalClassName="text-info"
