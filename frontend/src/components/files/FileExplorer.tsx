@@ -25,6 +25,7 @@ import type { WebDAVFile } from "../../types/webdav";
 import { parentPath } from "../../utils/fileUtils";
 import { ErrorAlert } from "../ui/ErrorAlert";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
+import { Pagination } from "../ui/Pagination";
 import { BreadcrumbNav } from "./BreadcrumbNav";
 import { FileInfoModal } from "./FileInfoModal";
 import { FileList } from "./FileList";
@@ -40,6 +41,8 @@ interface FileExplorerProps {
 	initialPath?: string;
 	activeView?: string;
 }
+
+const FILE_LIST_PAGE_SIZE = 50;
 
 export function FileExplorer({
 	isConnected,
@@ -139,6 +142,7 @@ export function FileExplorer({
 	const [cutPaths, setCutPaths] = useState<Set<string>>(new Set());
 	const [sortKey, setSortKey] = useState<"name" | "size" | "modified">("name");
 	const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+	const [currentPage, setCurrentPage] = useState(1);
 	const [createFolderOpen, setCreateFolderOpen] = useState(false);
 	const [renameState, setRenameState] = useState<{ path: string; name: string } | null>(null);
 
@@ -277,6 +281,28 @@ export function FileExplorer({
 		});
 		return arr;
 	}, [filteredFiles, sortKey, sortDir]);
+
+	const totalPages = Math.max(1, Math.ceil(sortedFiles.length / FILE_LIST_PAGE_SIZE));
+	const effectivePage = Math.min(currentPage, totalPages);
+	const paginatedFiles = useMemo(() => {
+		const start = (effectivePage - 1) * FILE_LIST_PAGE_SIZE;
+		return sortedFiles.slice(start, start + FILE_LIST_PAGE_SIZE);
+	}, [effectivePage, sortedFiles]);
+
+	useEffect(() => {
+		setCurrentPage(1);
+	}, [activeView, currentPath, searchTerm, showCorrupted, sortKey, sortDir]);
+
+	useEffect(() => {
+		setCurrentPage((page) => Math.min(page, totalPages));
+	}, [totalPages]);
+
+	const handlePageChange = useCallback(
+		(page: number) => {
+			setCurrentPage(Math.min(Math.max(page, 1), totalPages));
+		},
+		[totalPages],
+	);
 
 	// File info modal state
 	const [fileInfoModal, setFileInfoModal] = useState<{
@@ -612,7 +638,7 @@ export function FileExplorer({
 					</div>
 				</div>
 
-				<div className="min-h-[300px] rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-2 sm:p-4">
+				<div className="min-h-[300px]">
 					{searchTerm && (directory || isRecentView) && (
 						<div className="mb-4 flex items-center gap-2 px-2 text-base-content/60 text-xs">
 							<Info className="h-3 w-3" />
@@ -647,28 +673,40 @@ export function FileExplorer({
 								</button>
 							</div>
 						) : (
-							<FileList
-								files={sortedFiles}
-								currentPath={currentPath}
-								editable={editable}
-								selectedPaths={selectedPaths}
-								cutPaths={cutPaths}
-								onToggleSelect={toggleSelect}
-								onToggleSelectAll={toggleSelectAll}
-								onNavigate={handleNavigate}
-								onDownload={handleDownload}
-								onDelete={handleDelete}
-								onInfo={handleFileInfo}
-								onExportNZB={handleExportNZB}
-								onPreview={preview.openPreview}
-								onRegenerateSymlink={handleRegenerateSymlink}
-								onRename={handleRename}
-								onCut={handleCut}
-								isDownloading={isDownloading}
-								isDeleting={isDeleting}
-								isExportingNZB={isExportingNZB}
-								isRegenerateSymlinkPending={regenerateSymlinks.isPending}
-							/>
+							<>
+								<FileList
+									files={paginatedFiles}
+									currentPath={currentPath}
+									editable={editable}
+									selectedPaths={selectedPaths}
+									cutPaths={cutPaths}
+									onToggleSelect={toggleSelect}
+									onToggleSelectAll={toggleSelectAll}
+									onNavigate={handleNavigate}
+									onDownload={handleDownload}
+									onDelete={handleDelete}
+									onInfo={handleFileInfo}
+									onExportNZB={handleExportNZB}
+									onPreview={preview.openPreview}
+									onRegenerateSymlink={handleRegenerateSymlink}
+									onRename={handleRename}
+									onCut={handleCut}
+									isDownloading={isDownloading}
+									isDeleting={isDeleting}
+									isExportingNZB={isExportingNZB}
+									isRegenerateSymlinkPending={regenerateSymlinks.isPending}
+								/>
+								<div className="mt-4">
+									<Pagination
+										currentPage={effectivePage}
+										totalPages={totalPages}
+										onPageChange={handlePageChange}
+										totalItems={sortedFiles.length}
+										itemsPerPage={FILE_LIST_PAGE_SIZE}
+										showAllPages
+									/>
+								</div>
+							</>
 						)
 					) : null}
 				</div>

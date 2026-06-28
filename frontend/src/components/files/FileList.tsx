@@ -130,17 +130,22 @@ export function FileList({
 		}
 	};
 
-	const renderRow = (file: WebDAVFile) => {
+	const renderRow = (file: WebDAVFile, index: number) => {
 		const itemPath = itemPathOf(file);
 		const isSelected = selectedPaths?.has(itemPath) ?? false;
 		const isCut = cutPaths?.has(itemPath) ?? false;
+		const rowTone = isSelected
+			? "bg-primary/15 hover:bg-primary/20"
+			: index % 2 === 0
+				? "bg-base-100 hover:bg-base-200/70"
+				: "bg-base-200/50 hover:bg-base-200/80";
 
 		return (
 			<div
-				key={file.filename}
-				className={`group flex items-center gap-3 border-base-300/40 border-b px-2 py-2 transition-colors sm:px-3 ${
-					isSelected ? "bg-primary/10" : "hover:bg-base-200/60"
-				} ${isCut ? "opacity-50" : ""}`}
+				key={itemPath}
+				className={`group flex min-h-16 items-center gap-3 px-2 py-3 transition-colors sm:px-3 ${
+					index > 0 ? "border-base-300/70 border-t" : ""
+				} ${rowTone} ${isCut ? "opacity-50" : ""}`}
 			>
 				{editable && (
 					<input
@@ -220,7 +225,7 @@ export function FileList({
 	}
 
 	const header = (
-		<div className="flex items-center gap-3 border-base-300 border-b px-2 py-2 font-semibold text-base-content/40 text-xs uppercase tracking-widest sm:px-3">
+		<div className="flex items-center gap-3 border-base-300/80 border-b bg-base-200/40 px-2 py-3 font-semibold text-base-content/60 text-xs uppercase tracking-widest sm:px-3">
 			{editable && (
 				<TriStateCheckbox
 					checked={allSelected}
@@ -232,16 +237,15 @@ export function FileList({
 			<span className="flex-1">Name</span>
 			<span className="hidden w-24 text-right sm:block">Size</span>
 			<span className="hidden w-32 text-right md:block">Modified</span>
-			{/* spacer matching the actions button width */}
 			<span className="w-8" />
 		</div>
 	);
 
 	return (
-		<div className="overflow-hidden rounded-lg bg-base-100">
+		<div className="overflow-hidden rounded-2xl border border-base-300/80 bg-base-100 shadow-lg">
 			{header}
 			{files.length < VIRTUALIZE_THRESHOLD ? (
-				<div>{files.map(renderRow)}</div>
+				<div>{files.map((file, index) => renderRow(file, index))}</div>
 			) : (
 				<VirtualRows
 					files={files}
@@ -262,7 +266,7 @@ function VirtualRows({
 }: {
 	files: WebDAVFile[];
 	scrollRef: React.MutableRefObject<HTMLDivElement | null>;
-	renderRow: (file: WebDAVFile) => React.JSX.Element;
+	renderRow: (file: WebDAVFile, index: number) => React.JSX.Element;
 	estimatedRowHeight: number;
 }) {
 	const rowVirtualizer = useVirtualizer({
@@ -288,7 +292,7 @@ function VirtualRows({
 							transform: `translateY(${virtualRow.start}px)`,
 						}}
 					>
-						{renderRow(files[virtualRow.index])}
+						{renderRow(files[virtualRow.index], virtualRow.index)}
 					</div>
 				))}
 			</div>

@@ -5,6 +5,7 @@ interface PaginationProps {
 	totalItems?: number;
 	itemsPerPage?: number;
 	showSummary?: boolean;
+	showAllPages?: boolean;
 }
 
 export function Pagination({
@@ -14,39 +15,34 @@ export function Pagination({
 	totalItems,
 	itemsPerPage,
 	showSummary = true,
+	showAllPages = false,
 }: PaginationProps) {
-	// Don't render if there's only one page or no pages
 	if (totalPages <= 1) {
 		return null;
 	}
 
 	const getVisiblePages = () => {
 		const pages: (number | string)[] = [];
-		const maxVisiblePages = 7; // Show up to 7 page buttons
+		const maxVisiblePages = 7;
 
-		if (totalPages <= maxVisiblePages) {
-			// Show all pages if total pages is small
+		if (showAllPages || totalPages <= maxVisiblePages) {
 			for (let i = 1; i <= totalPages; i++) {
 				pages.push(i);
 			}
 		} else {
-			// Complex logic for showing relevant pages with ellipsis
 			if (currentPage <= 4) {
-				// Current page is near the beginning
 				for (let i = 1; i <= 5; i++) {
 					pages.push(i);
 				}
 				pages.push("...");
 				pages.push(totalPages);
 			} else if (currentPage >= totalPages - 3) {
-				// Current page is near the end
 				pages.push(1);
 				pages.push("...");
 				for (let i = totalPages - 4; i <= totalPages; i++) {
 					pages.push(i);
 				}
 			} else {
-				// Current page is in the middle
 				pages.push(1);
 				pages.push("...");
 				for (let i = currentPage - 1; i <= currentPage + 1; i++) {
@@ -73,17 +69,14 @@ export function Pagination({
 
 	return (
 		<div className="flex w-full min-w-0 flex-col items-stretch justify-between gap-4 sm:flex-row sm:items-center">
-			{/* Results Summary */}
 			{showSummary && totalItems && itemsPerPage && (
 				<div className="min-w-0 text-center text-base-content/70 text-sm sm:text-left">
 					{getSummaryText()}
 				</div>
 			)}
 
-			{/* Pagination Controls — scroll horizontally on narrow viewports */}
 			<div className="flex w-full min-w-0 justify-center overflow-x-auto pb-1 sm:w-auto sm:justify-end">
 				<div className="join shrink-0">
-					{/* First Page */}
 					<button
 						type="button"
 						className="join-item btn btn-sm"
@@ -94,7 +87,6 @@ export function Pagination({
 						«
 					</button>
 
-					{/* Previous Page */}
 					<button
 						type="button"
 						className="join-item btn btn-sm"
@@ -105,7 +97,6 @@ export function Pagination({
 						‹
 					</button>
 
-					{/* Page Numbers */}
 					{visiblePages.map((page, index) => {
 						if (page === "...") {
 							return (
@@ -136,7 +127,6 @@ export function Pagination({
 						);
 					})}
 
-					{/* Next Page */}
 					<button
 						type="button"
 						className="join-item btn btn-sm"
@@ -147,7 +137,6 @@ export function Pagination({
 						›
 					</button>
 
-					{/* Last Page */}
 					<button
 						type="button"
 						className="join-item btn btn-sm"
