@@ -45,7 +45,6 @@ export function IndexerHealth() {
 	const [sortKey, setSortKey] = useState<SortKey>(() => loadSortPref().key);
 	const [sortAsc, setSortAsc] = useState(() => loadSortPref().asc);
 
-	// Persist the sort preference whenever it changes.
 	useEffect(() => {
 		try {
 			localStorage.setItem(SORT_STORAGE_KEY, JSON.stringify({ key: sortKey, asc: sortAsc }));
@@ -222,7 +221,6 @@ export function IndexerHealth() {
 	return (
 		<div className="card overflow-hidden border border-base-200/40 bg-base-100/20 shadow-2xl backdrop-blur-md">
 			<div className="card-body gap-0 p-0">
-				{/* Header */}
 				<div className="flex flex-col gap-4 border-base-200/50 border-b bg-base-200/30 p-4 sm:flex-row sm:items-center sm:justify-between">
 					<h2 className="flex items-center gap-2 font-semibold text-xl">
 						<Radio className="h-6 w-6" aria-hidden="true" />
@@ -251,14 +249,12 @@ export function IndexerHealth() {
 					</div>
 				</div>
 
-				{/* Tracked indexer stats */}
 				{summary && (
 					<div className="border-base-200/50 border-b p-4">
 						<IndexerHealthSummary stats={stats ?? []} summary={summary} />
 					</div>
 				)}
 
-				{/* Filters */}
 				{hasStats && (
 					<div className="border-base-200/50 border-b p-4">
 						<IndexerHealthFilters
@@ -271,7 +267,6 @@ export function IndexerHealth() {
 					</div>
 				)}
 
-				{/* Indexer Table */}
 				{!hasStats ? (
 					<div className="hero py-16">
 						<div className="hero-content text-center">

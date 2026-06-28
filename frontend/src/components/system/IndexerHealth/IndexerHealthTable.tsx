@@ -100,7 +100,6 @@ export function IndexerHealthTable({
 								key={item.indexer}
 								className="border-base-200/30 border-b transition-colors hover:bg-base-content/5"
 							>
-								{/* Indexer */}
 								<td>
 									<div className="flex flex-col gap-1">
 										<span className="font-bold text-base-content text-sm tracking-wide">
@@ -114,7 +113,6 @@ export function IndexerHealthTable({
 									</div>
 								</td>
 
-								{/* Grabs last 24 hours */}
 								<td>
 									<span
 										className={`font-mono text-sm tabular-nums ${
@@ -127,7 +125,6 @@ export function IndexerHealthTable({
 									</span>
 								</td>
 
-								{/* Last Seen */}
 								<td>
 									<div className="flex items-center gap-1.5 text-base-content/60 text-xs">
 										<Clock className="h-3 w-3 shrink-0" aria-hidden="true" />
@@ -135,7 +132,6 @@ export function IndexerHealthTable({
 									</div>
 								</td>
 
-								{/* Success Rate */}
 								<td>
 									<div className="flex items-center gap-2">
 										<div className="h-2.5 w-20 overflow-hidden rounded-full border border-base-content/10 bg-base-200/50">
@@ -155,7 +151,6 @@ export function IndexerHealthTable({
 									</div>
 								</td>
 
-								{/* Completed */}
 								<td>
 									<span className="inline-flex items-center gap-1 font-mono font-semibold text-sm text-success tabular-nums">
 										<CheckCircle2 className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden="true" />
@@ -163,7 +158,6 @@ export function IndexerHealthTable({
 									</span>
 								</td>
 
-								{/* Failed */}
 								<td>
 									{item.failed_count > 0 ? (
 										<span className="inline-flex items-center gap-1 font-mono font-semibold text-error text-sm tabular-nums">
@@ -175,14 +169,12 @@ export function IndexerHealthTable({
 									)}
 								</td>
 
-								{/* Total */}
 								<td>
 									<span className="font-bold font-mono text-base-content text-sm tabular-nums">
 										{item.total_imports.toLocaleString()}
 									</span>
 								</td>
 
-								{/* Actions */}
 								<td>
 									<button
 										type="button"

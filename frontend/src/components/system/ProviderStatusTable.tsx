@@ -49,15 +49,11 @@ const SORT_FIELDS: SortField[] = [
 
 const SORT_STORAGE_KEY = "altmount.providerStatus.sort";
 
-// Resolve the display label: the user-assigned nickname takes precedence, falling
-// back to a brand name derived from the host when no nickname is configured.
 function getProviderDisplayName(provider: ProviderStatus): string {
 	const nickname = provider.name?.trim();
 	return nickname && nickname.length > 0 ? nickname : getProviderBrandName(provider.host);
 }
 
-// Persisted sort preference so the chosen order survives a page refresh instead
-// of resetting to host-ascending.
 function loadSortPref(): { field: SortField; direction: SortDirection } {
 	try {
 		const raw = localStorage.getItem(SORT_STORAGE_KEY);
@@ -94,7 +90,6 @@ const SortIcon = ({
 };
 
 function ConnectionPoolGrid({ used, max }: { used: number; max: number }) {
-	// Always render the same bar regardless of pool size for consistent rows.
 	const percent = max > 0 ? Math.round((used / max) * 100) : 0;
 	return (
 		<div className="flex items-center gap-2">
@@ -114,7 +109,6 @@ function ConnectionPoolGrid({ used, max }: { used: number; max: number }) {
 interface ProviderStatusTableProps {
 	providers: ProviderStatus[];
 	title?: string;
-	/** Extra content (e.g. usage/speed graphs) rendered as a section inside the card, below the table. */
 	children?: ReactNode;
 }
 
@@ -128,8 +122,7 @@ export function ProviderStatusTable({
 	const { resetProviderQuota } = useProviders();
 	const { showToast } = useToast();
 
-	// Account expiration dates live on the config providers, not the runtime pool
-	// metrics — join them by provider id (falling back to host).
+	// Expiration dates come from config rather than runtime pool metrics.
 	const expirationByKey = useMemo(() => {
 		const map = new Map<string, string>();
 		for (const p of configData?.providers ?? []) {
@@ -145,7 +138,6 @@ export function ProviderStatusTable({
 	const [testingId, setTestingId] = useState<string | null>(null);
 	const [resettingId, setResettingId] = useState<string | null>(null);
 
-	// Persist the sort preference whenever it changes.
 	useEffect(() => {
 		try {
 			localStorage.setItem(
@@ -162,7 +154,7 @@ export function ProviderStatusTable({
 			setSortDirection(sortDirection === "asc" ? "desc" : "asc");
 		} else {
 			setSortField(field);
-			setSortDirection("desc"); // Default to desc for most metrics
+			setSortDirection("desc");
 		}
 	};
 
@@ -207,19 +199,16 @@ export function ProviderStatusTable({
 	};
 
 	const sortedProviders = [...providers].sort((a, b) => {
-		// Expiration date is joined from config (not part of the pool metrics), so
-		// it's sorted separately. Missing dates always sort to the end.
+		// Missing expiration dates sort last.
 		if (sortField === "expiration") {
 			const aExp = expirationByKey.get(a.id) ?? expirationByKey.get(a.host) ?? "";
 			const bExp = expirationByKey.get(b.id) ?? expirationByKey.get(b.host) ?? "";
 			if (!aExp && !bExp) return 0;
 			if (!aExp) return 1;
 			if (!bExp) return -1;
-			// YYYY-MM-DD strings compare chronologically as-is.
 			return sortDirection === "asc" ? aExp.localeCompare(bExp) : bExp.localeCompare(aExp);
 		}
 
-		// Sort the host column by the visible label (nickname or brand name).
 		if (sortField === "host") {
 			const aValue = getProviderDisplayName(a).toLowerCase();
 			const bValue = getProviderDisplayName(b).toLowerCase();

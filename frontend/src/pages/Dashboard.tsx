@@ -220,7 +220,6 @@ export function Dashboard() {
 				</ProviderStatusTable>
 			)}
 
-			{/* Indexer Health */}
 			<IndexerHealth />
 		</div>
 	);

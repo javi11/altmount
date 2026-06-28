@@ -13,27 +13,26 @@ import {
 	YAxis,
 } from "recharts";
 
-// Chart series need categorical colors. DaisyUI semantic tokens are intentionally
-// reused in the minimal themes, which makes multiple providers look identical.
+// Fixed palette keeps provider series distinct in minimal themes.
 const CHART_COLORS = [
-	"#60a5fa", // blue
-	"#f87171", // red
-	"#34d399", // emerald
-	"#fbbf24", // amber
-	"#a78bfa", // violet
-	"#fb923c", // orange
-	"#22d3ee", // cyan
-	"#f472b6", // pink
-	"#a3e635", // lime
-	"#c084fc", // purple
-	"#2dd4bf", // teal
-	"#facc15", // yellow
-	"#818cf8", // indigo
-	"#4ade80", // green
-	"#e879f9", // fuchsia
-	"#38bdf8", // sky
-	"#fdba74", // light orange
-	"#fca5a5", // salmon
+	"#60a5fa",
+	"#f87171",
+	"#34d399",
+	"#fbbf24",
+	"#a78bfa",
+	"#fb923c",
+	"#22d3ee",
+	"#f472b6",
+	"#a3e635",
+	"#c084fc",
+	"#2dd4bf",
+	"#facc15",
+	"#818cf8",
+	"#4ade80",
+	"#e879f9",
+	"#38bdf8",
+	"#fdba74",
+	"#fca5a5",
 ];
 
 function chartColorAt(index: number) {
@@ -44,10 +43,7 @@ function chartColorAt(index: number) {
 	return `hsl(${hue}, 72%, ${lightness}%)`;
 }
 
-/**
- * Builds a stable host -> color map. Assigning by alphabetical index keeps a
- * provider's color identical across both charts and across timeframe changes.
- */
+// Stable host ordering keeps colors consistent across charts.
 export function buildProviderColorMap(hosts: string[]): Record<string, string> {
 	const unique = [...new Set(hosts)].sort((a, b) => a.localeCompare(b));
 	const map: Record<string, string> = {};
@@ -116,10 +112,6 @@ function CustomTooltip({
 	);
 }
 
-/**
- * Keeps an active/inactive toggle map in sync with the available providers,
- * defaulting newly seen providers to active.
- */
 function useActiveProviders(providers: string[]) {
 	const [activeProviders, setActiveProviders] = useState<Record<string, boolean>>({});
 
@@ -176,31 +168,22 @@ function TimeRangeTabs({ tabs, value, onChange, activeClassName }: TimeRangeTabs
 }
 
 interface ProviderAreaChartProps {
-	/** Icon shown next to the title. */
 	icon: LucideIcon;
 	iconClassName: string;
 	title: string;
 	subtitle: ReactNode;
-	/** Time-range tabs configuration. */
 	tabs: TimeRangeTab[];
 	days: number;
 	onDaysChange: (value: number) => void;
 	tabActiveClassName: string;
-	/** Chart data rows, each keyed by provider host. */
 	chartData: ChartDatum[];
-	/** Providers sorted by magnitude (controls color + draw order). */
 	providers: string[];
-	/** Stable color lookup keyed by provider host. */
 	colorMap: Record<string, string>;
-	/** Unique prefix for the gradient ids (avoids collisions between charts). */
 	gradientPrefix: string;
-	/** Tooltip value formatter. */
 	formatValue: (value: number) => string;
 	tooltipTotalClassName: string;
-	/** Tailwind class for the tooltip total accent (passed through to CustomTooltip). */
 	yAxisTickFormatter?: (value: number) => string;
 	yAxisUnit?: string;
-	/** Connect area segments across null gaps (used by the speed chart). */
 	connectNulls?: boolean;
 }
 
@@ -237,7 +220,6 @@ export function ProviderAreaChart({
 						<p className="mt-0.5 text-base-content/60 text-xs">{subtitle}</p>
 					</div>
 
-					{/* Premium Segmented Timeline Controller */}
 					<TimeRangeTabs
 						tabs={tabs}
 						value={days}
@@ -291,9 +273,7 @@ export function ProviderAreaChart({
 									strokeWidth: 1,
 								}}
 								isAnimationActive={false}
-								// z-index must live on the recharts wrapper: it's positioned
-								// with transform (own stacking context), so the legend would
-								// otherwise paint over the tooltip and clip the Total row.
+								// Keep tooltip above the legend.
 								wrapperStyle={{ zIndex: 50 }}
 							/>
 							<Legend

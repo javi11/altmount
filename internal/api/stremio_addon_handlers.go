@@ -246,8 +246,6 @@ func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 			"?url=" + url.QueryEscape(r.DownloadURL) +
 			"&title=" + url.QueryEscape(safeTitle) +
 			"&type=" + url.QueryEscape(streamType)
-		// Relay the Prowlarr indexer so the eventual import is attributed to it in
-		// indexer health rather than logged as "Unknown".
 		if r.Indexer != "" {
 			playURL += "&indexer=" + url.QueryEscape(r.Indexer)
 		}
@@ -349,7 +347,6 @@ func (s *Server) handleStremioAddonPlay(c *fiber.Ctx) error {
 	if safeTitle == "" {
 		safeTitle = "unknown"
 	}
-	// Optional source indexer relayed from the stream list, attributed at import time.
 	var indexerPtr *string
 	if indexer := c.Query("indexer"); indexer != "" {
 		indexerPtr = &indexer
