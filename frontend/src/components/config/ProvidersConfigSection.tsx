@@ -51,8 +51,15 @@ export function ProvidersConfigSection({
 		(config.providers ?? []).map((p) => p.user_agent).find(Boolean) ?? "",
 	);
 
-	const { deleteProvider, testProviderSpeed, resetProviderQuota } = useProviders();
+	const { deleteProvider, testProviderSpeed, tuneProviderPipeline, resetProviderQuota } =
+		useProviders();
 	const [resettingQuotaId, setResettingQuotaId] = useState<string | null>(null);
+	const [pipelineTuning, setPipelineTuning] = useState<{
+		current: number;
+		total: number;
+		host?: string;
+	} | null>(null);
+	const [disablingPipeline, setDisablingPipeline] = useState(false);
 	const { confirmDelete } = useConfirm();
 	const { showToast } = useToast();
 
@@ -221,6 +228,97 @@ export function ProvidersConfigSection({
 		const newFormData = formData.map((p) => ({ ...p, user_agent: value }));
 		setFormData(newFormData);
 		setHasChanges(JSON.stringify(newFormData) !== JSON.stringify(config.providers));
+	};
+
+	const handleAutoTunePipeline = async () => {
+		const targets = formData.filter((p) => p.enabled);
+		if (targets.length === 0) {
+			return;
+		}
+
+		setPipelineTuning({ current: 0, total: targets.length });
+		const recommendations = new Map<string, number>();
+		const skipped: string[] = [];
+
+		for (let i = 0; i < targets.length; i++) {
+			const provider = targets[i];
+			setPipelineTuning({ current: i + 1, total: targets.length, host: provider.host });
+			try {
+				const result = await tuneProviderPipeline.mutateAsync(provider.id);
+				if (result.warning) {
+					skipped.push(`${provider.host}: ${result.warning}`);
+				} else {
+					recommendations.set(provider.id, result.recommended_inflight);
+				}
+			} catch (error) {
+				console.error("Failed to tune pipeline:", error);
+				skipped.push(`${provider.host}: test failed`);
+			}
+		}
+		setPipelineTuning(null);
+
+		if (recommendations.size === 0) {
+			showToast({
+				type: "warning",
+				title: "Pipeline Unchanged",
+				message: skipped.length ? skipped.join("; ") : "No providers could be tuned.",
+			});
+			return;
+		}
+
+		const newFormData = formData.map((p) =>
+			recommendations.has(p.id)
+				? { ...p, inflight_requests: recommendations.get(p.id) as number }
+				: p,
+		);
+		setFormData(newFormData);
+
+		if (!onUpdate) {
+			setHasChanges(true);
+			return;
+		}
+		try {
+			await onUpdate("providers", newFormData);
+			setHasChanges(false);
+			showToast({
+				type: "success",
+				title: "Pipeline Tuned",
+				message: `Updated ${recommendations.size} provider${recommendations.size === 1 ? "" : "s"}.${
+					skipped.length ? ` Skipped: ${skipped.join("; ")}` : ""
+				}`,
+			});
+		} catch (error) {
+			console.error("Failed to save tuned pipeline:", error);
+			showToast({
+				type: "error",
+				title: "Save Failed",
+				message: "Tuned values could not be saved.",
+			});
+		}
+	};
+
+	const handleDisablePipelining = async () => {
+		const newFormData = formData.map((p) => ({ ...p, inflight_requests: 1 }));
+		setFormData(newFormData);
+		if (!onUpdate) {
+			setHasChanges(true);
+			return;
+		}
+		setDisablingPipeline(true);
+		try {
+			await onUpdate("providers", newFormData);
+			setHasChanges(false);
+			showToast({
+				type: "success",
+				title: "Pipelining Disabled",
+				message: "All providers set to pipeline depth 1.",
+			});
+		} catch (error) {
+			console.error("Failed to disable pipelining:", error);
+			showToast({ type: "error", title: "Save Failed", message: "Could not disable pipelining." });
+		} finally {
+			setDisablingPipeline(false);
+		}
 	};
 
 	const handleSave = async () => {
@@ -599,6 +697,48 @@ export function ProvidersConfigSection({
 					onChange={(e) => handleGlobalUserAgentChange(e.target.value)}
 					placeholder="e.g. SABnzbd/4.5.5"
 				/>
+			</div>
+
+			{/* NNTP Pipeline Optimization */}
+			<div className="space-y-3 border-base-200 border-t pt-6">
+				<div>
+					<h3 className="font-bold text-base-content text-lg tracking-tight">NNTP Pipeline</h3>
+					<p className="text-base-content/50 text-xs">
+						Auto-tune the pipeline depth (requests in flight per connection) by speed-testing each
+						enabled provider, or disable pipelining everywhere. Run when downloads are idle for the
+						most accurate result.
+					</p>
+				</div>
+				<div className="flex flex-wrap items-center gap-3">
+					<button
+						type="button"
+						className="btn btn-primary gap-2"
+						onClick={handleAutoTunePipeline}
+						disabled={!!pipelineTuning || disablingPipeline || formData.length === 0}
+					>
+						{pipelineTuning ? (
+							<span className="loading loading-spinner loading-sm" />
+						) : (
+							<Gauge className="h-4 w-4" />
+						)}
+						{pipelineTuning
+							? `Testing ${pipelineTuning.current}/${pipelineTuning.total}${pipelineTuning.host ? ` · ${pipelineTuning.host}` : ""}…`
+							: "Auto-Tune Pipeline"}
+					</button>
+					<button
+						type="button"
+						className="btn btn-outline gap-2"
+						onClick={handleDisablePipelining}
+						disabled={!!pipelineTuning || disablingPipeline || formData.length === 0}
+					>
+						{disablingPipeline ? (
+							<span className="loading loading-spinner loading-sm" />
+						) : (
+							<PowerOff className="h-4 w-4" />
+						)}
+						Disable Pipelining
+					</button>
+				</div>
 			</div>
 
 			{/* Save & Validation */}
