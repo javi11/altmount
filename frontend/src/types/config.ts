@@ -269,6 +269,23 @@ export interface ProviderConfig {
 	account_expiration_date?: string;
 }
 
+// Pipeline auto-tune result for a single provider
+export interface PipelineDepthSample {
+	depth: number;
+	mbps: number;
+}
+
+export interface PipelineTuneResponse {
+	recommended_inflight: number;
+	baseline_mbps: number;
+	best_mbps: number;
+	improvement_pct: number;
+	enabled: boolean;
+	test_connections: number;
+	tested: PipelineDepthSample[];
+	warning?: string;
+}
+
 // NZBLNK resolver configuration
 export interface NzblnkConfig {
 	user_agent?: string;

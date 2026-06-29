@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "../api/client";
 import type {
+	PipelineTuneResponse,
 	ProviderConfig,
 	ProviderCreateRequest,
 	ProviderReorderRequest,
@@ -31,6 +32,13 @@ function useTestProviderSpeed() {
 			// Invalidate config cache to refetch providers
 			queryClient.invalidateQueries({ queryKey: configKeys.current() });
 		},
+	});
+}
+
+// Auto-tune provider pipeline depth (caller applies + saves the batch).
+function useTuneProviderPipeline() {
+	return useMutation<PipelineTuneResponse, Error, string>({
+		mutationFn: (id) => apiClient.tuneProviderPipeline(id),
 	});
 }
 
@@ -115,6 +123,7 @@ function useReorderProviders() {
 export function useProviders() {
 	const testProvider = useTestProvider();
 	const testProviderSpeed = useTestProviderSpeed();
+	const tuneProviderPipeline = useTuneProviderPipeline();
 	const createProvider = useCreateProvider();
 	const updateProvider = useUpdateProvider();
 	const deleteProvider = useDeleteProvider();
@@ -124,6 +133,7 @@ export function useProviders() {
 	return {
 		testProvider,
 		testProviderSpeed,
+		tuneProviderPipeline,
 		createProvider,
 		updateProvider,
 		deleteProvider,

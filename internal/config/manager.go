@@ -355,7 +355,7 @@ type HealthConfig struct {
 	VerifyData                          *bool        `yaml:"verify_data" mapstructure:"verify_data" json:"verify_data,omitempty"`
 	CheckAllSegments                    *bool        `yaml:"check_all_segments" mapstructure:"check_all_segments" json:"check_all_segments,omitempty"`
 	ReadTimeoutSeconds                  int          `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds,omitempty"`
-	AcceptableMissingSegmentsPercentage float64      `yaml:"acceptable_missing_segments_percentage" mapstructure:"acceptable_missing_segments_percentage" json:"acceptable_missing_segments_percentage,omitempty"`
+	AcceptableMissingSegmentsPercentage float64      `yaml:"acceptable_missing_segments_percentage" mapstructure:"acceptable_missing_segments_percentage" json:"acceptable_missing_segments_percentage"`
 	Repair                              RepairConfig `yaml:"repair" mapstructure:"repair" json:"repair"`
 }
 

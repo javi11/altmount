@@ -94,7 +94,7 @@ func (c *Coordinator) CreateStrmFiles(ctx context.Context, item *database.Import
 		// double-prefix the category/CompleteDir on Windows (issue #585).
 		strmResultingPath := buildLibraryRelPath(relPath, cfg.SABnzbd.CompleteDir, category)
 
-		if err := c.CreateSingleStrmFile(ctx, strmResultingPath, relPathWithMeta, cfg.WebDAV.Port); err != nil {
+		if err := c.CreateSingleStrmFile(ctx, strmResultingPath, relPath, cfg.WebDAV.Port); err != nil {
 			c.log.ErrorContext(ctx, "Failed to create STRM file",
 				"path", relPath,
 				"error", err)

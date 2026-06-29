@@ -235,11 +235,13 @@ func (r *QueueRepository) AddStoragePath(ctx context.Context, itemID int64, stor
 // IsFileInQueue checks if a file is already in the queue (pending, processing, or paused).
 // It matches by exact nzb_path first, and also by filename suffix to handle the case where
 // ensurePersistentNzb has already moved the file and updated nzb_path from the temp path to
-// the persistent storage path (e.g. /tmp/altmount-uploads/x.nzb → /.nzbs/stremio/42/x.nzb).
+// the persistent storage path (e.g. /tmp/altmount-uploads/x.nzb → /.nzbs/stremio/42-x.nzb).
+// The LIKE pattern uses "%-filename" (dash wildcard) rather than "%/filename" so it also
+// matches the "<id>-<base>.nzb" naming that ensurePersistentNzb applies on collision.
 func (r *QueueRepository) IsFileInQueue(ctx context.Context, filePath string) (bool, error) {
 	filename := filepath.Base(filePath)
 	query := `SELECT 1 FROM import_queue WHERE (nzb_path = ? OR nzb_path LIKE ?) AND status IN ('pending', 'processing', 'paused') LIMIT 1`
-	likePattern := "%/" + filename
+	likePattern := "%-" + filename
 
 	var exists int
 	err := r.db.QueryRowContext(ctx, query, filePath, likePattern).Scan(&exists)
