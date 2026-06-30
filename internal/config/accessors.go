@@ -39,6 +39,21 @@ func (c *Config) GetSegmentSamplePercentage() int {
 	return c.Health.SegmentSamplePercentage
 }
 
+// GetAcceptableMissingSegmentsPercentage returns the percentage of sampled segments
+// that may be missing before a file is condemned as corrupted during a health check.
+// The default of 0 preserves the historical strict behaviour (any missing segment
+// condemns). The value is clamped to the [0, 100] range.
+func (c *Config) GetAcceptableMissingSegmentsPercentage() float64 {
+	v := c.Health.AcceptableMissingSegmentsPercentage
+	if v < 0 {
+		return 0
+	}
+	if v > 100 {
+		return 100
+	}
+	return v
+}
+
 // GetLibrarySyncInterval returns the library sync interval with a default fallback.
 func (c *Config) GetLibrarySyncInterval() time.Duration {
 	if c.Health.LibrarySyncIntervalMinutes <= 0 {
