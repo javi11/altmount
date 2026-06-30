@@ -93,7 +93,7 @@ type repairTestEnv struct {
 	hw              *HealthWorker
 }
 
-func newRepairTestEnv(t *testing.T, tempDir string, arrsErr error) *repairTestEnv {
+func newRepairTestEnv(t *testing.T, tempDir string, arrsErr error, configure ...func(*config.Config)) *repairTestEnv {
 	t.Helper()
 
 	db, err := sql.Open("sqlite3", "file::memory:?cache=shared&mode=memory")
@@ -146,6 +146,10 @@ func newRepairTestEnv(t *testing.T, tempDir string, arrsErr error) *repairTestEn
 	cfg.Health.CheckIntervalSeconds = 3600
 	cfg.Health.SegmentSamplePercentage = 10
 	cfg.Health.MaxConnectionsForHealthChecks = 1
+
+	for _, fn := range configure {
+		fn(cfg)
+	}
 
 	configManager := config.NewManager(cfg, "")
 
@@ -420,6 +424,51 @@ func TestE2E_ExhaustedRepairTriggered_SweptToCorrupted(t *testing.T) {
 	original, readErr := env.metadataService.ReadFileMetadata(filePath)
 	require.NoError(t, readErr)
 	assert.NotNil(t, original, "sweep must not move metadata of a possibly-good copy")
+}
+
+// TestE2E_RepairDisabled_NoARRRescan verifies that when health.repair.enabled is false, a
+// file that exhausts its health-check retries is finalized as corrupted for visibility but
+// never triggers an Arr rescan and its metadata is left in place (no safety-folder move).
+func TestE2E_RepairDisabled_NoARRRescan(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks not supported on Windows")
+	}
+	tempDir := t.TempDir()
+	repairDisabled := false
+	env := newRepairTestEnv(t, tempDir, nil, func(c *config.Config) {
+		c.Health.Repair.Enabled = &repairDisabled
+	})
+
+	ctx := context.Background()
+	filePath := "series/show.s01e09.mkv"
+	libraryPath := "/media/library/show.s01e09.mkv"
+	maxRetries := 3
+
+	meta := validSegmentMeta(env.metadataService, 1024)
+	require.NoError(t, env.metadataService.WriteFileMetadata(filePath, meta))
+
+	// File already at its last health retry: a single failing cycle would normally
+	// trigger a repair, but repair is disabled.
+	insertFileHealth(t, env.db, filePath, libraryPath, maxRetries-1, maxRetries)
+
+	require.NoError(t, env.hw.runHealthCheckCycle(ctx))
+
+	// ARR must NOT be called when repair is disabled.
+	env.mockARRs.mu.Lock()
+	callCount := len(env.mockARRs.calls)
+	env.mockARRs.mu.Unlock()
+	assert.Equal(t, 0, callCount, "repair disabled must not trigger an ARR rescan")
+
+	// Status finalized as corrupted for visibility.
+	fh, err := env.healthRepo.GetFileHealth(ctx, filePath)
+	require.NoError(t, err)
+	require.NotNil(t, fh)
+	assert.Equal(t, database.HealthStatusCorrupted, fh.Status)
+
+	// Metadata must be left in place — no safety-folder move when repair is disabled.
+	original, readErr := env.metadataService.ReadFileMetadata(filePath)
+	require.NoError(t, readErr)
+	assert.NotNil(t, original, "repair disabled must not move metadata to the corrupted folder")
 }
 
 // TestE2E_FileRepairTriggered_ARRReturnsAlreadySatisfied verifies that when ARR returns

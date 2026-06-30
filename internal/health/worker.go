@@ -430,8 +430,26 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 	update.ErrorMessage = errorMsg
 	update.ErrorDetails = event.Details
 
+	// When automatic repair is disabled, never trigger or re-trigger an Arr rescan: a file
+	// that has exhausted its health-check retries (or is already in repair_triggered from a
+	// time when repair was enabled) is finalized as corrupted for visibility, with no
+	// metadata safety-folder move. Regular health-check retries below are left intact.
+	repairEnabled := hw.configGetter().GetRepairEnabled()
+	markCorruptedNoRepair := func() (*database.HealthStatusUpdate, func() error) {
+		update.Type = database.UpdateTypeCorrupted
+		update.Status = database.HealthStatusCorrupted
+		return update, func() error {
+			slog.InfoContext(ctx, "File corrupted but repair is disabled; marking corrupted without triggering repair",
+				"file_path", fh.FilePath, "status", fh.Status)
+			return nil
+		}
+	}
+
 	switch fh.Status {
 	case database.HealthStatusRepairTriggered:
+		if !repairEnabled {
+			return markCorruptedNoRepair()
+		}
 		if fh.RepairRetryCount >= hw.configGetter().GetMaxRepairRetries() {
 			sideEffect = hw.markCorruptedRepairExhausted(ctx, fh, update, errorMsg)
 		} else {
@@ -474,6 +492,11 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 			if fh.RepairRetryCount >= hw.configGetter().GetMaxRepairRetries() {
 				sideEffect = hw.markCorruptedRepairExhausted(ctx, fh, update, errorMsg)
 				return update, sideEffect
+			}
+
+			// Repair disabled: finalize as corrupted instead of triggering an Arr rescan.
+			if !repairEnabled {
+				return markCorruptedNoRepair()
 			}
 
 			update.Type = database.UpdateTypeRepairTrigger
@@ -710,10 +733,15 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 		return fmt.Errorf("failed to get unhealthy files: %w", err)
 	}
 
-	// Get files that need repair notifications
-	repairFiles, err := hw.healthRepo.GetFilesForRepairNotification(ctx, maxJobs)
-	if err != nil {
-		return fmt.Errorf("failed to get files for repair notification: %w", err)
+	// Get files that need repair notifications. Only when automatic repair is enabled —
+	// when it is disabled, corrupt files are left in the corrupted state and we never
+	// re-trigger an Arr rescan.
+	var repairFiles []*database.FileHealth
+	if hw.configGetter().GetRepairEnabled() {
+		repairFiles, err = hw.healthRepo.GetFilesForRepairNotification(ctx, maxJobs)
+		if err != nil {
+			return fmt.Errorf("failed to get files for repair notification: %w", err)
+		}
 	}
 
 	totalFiles := len(unhealthyFiles) + len(repairFiles)
