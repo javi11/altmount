@@ -246,6 +246,9 @@ func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 			"?url=" + url.QueryEscape(r.DownloadURL) +
 			"&title=" + url.QueryEscape(safeTitle) +
 			"&type=" + url.QueryEscape(streamType)
+		if r.Indexer != "" {
+			playURL += "&indexer=" + url.QueryEscape(r.Indexer)
+		}
 		if streamType == "series" && season > 0 && episode > 0 {
 			playURL += "&season=" + url.QueryEscape(strconv.Itoa(season)) +
 				"&episode=" + url.QueryEscape(strconv.Itoa(episode))
@@ -344,6 +347,10 @@ func (s *Server) handleStremioAddonPlay(c *fiber.Ctx) error {
 	if safeTitle == "" {
 		safeTitle = "unknown"
 	}
+	var indexerPtr *string
+	if indexer := c.Query("indexer"); indexer != "" {
+		indexerPtr = &indexer
+	}
 
 	baseURL := resolveBaseURL(c, cfg.Stremio.BaseURL)
 	selector := stremioEpisodeSelectorFromRequest(c)
@@ -436,7 +443,7 @@ func (s *Server) handleStremioAddonPlay(c *fiber.Ctx) error {
 			category = "TV"
 		}
 		stremioDownloadID := stremioDownloadIDPrefix + uuid.NewString()
-		item, err := s.importerService.AddToQueue(workCtx, tempPath, basePath, &category, &priority, nil, &stremioDownloadID)
+		item, err := s.importerService.AddToQueue(workCtx, tempPath, basePath, &category, &priority, nil, &stremioDownloadID, indexerPtr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to add NZB to queue: %w", err)
 		}

@@ -676,8 +676,8 @@ func sanitizeFilename(name string) string {
 	return strings.ReplaceAll(name, "/", "_")
 }
 
-// AddToQueue adds a new NZB file to the import queue with optional category and priority
-func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath *string, category *string, priority *database.QueuePriority, metadata *string, downloadID *string) (*database.ImportQueueItem, error) {
+// AddToQueue adds a new NZB file to the import queue.
+func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath *string, category *string, priority *database.QueuePriority, metadata *string, downloadID *string, indexer *string) (*database.ImportQueueItem, error) {
 	// Check context before proceeding
 	select {
 	case <-ctx.Done():
@@ -707,6 +707,11 @@ func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath 
 		if name, ok := s.GetGrabbedIndexer(*downloadID, filepath.Base(filePath)); ok {
 			indexerName = &name
 		}
+	}
+	// Prefer the explicit source indexer when webhook lookup misses.
+	if indexerName == nil && indexer != nil && *indexer != "" {
+		name := *indexer
+		indexerName = &name
 	}
 
 	item := &database.ImportQueueItem{

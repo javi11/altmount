@@ -58,7 +58,7 @@ func uploadViaHandlerFlow(t *testing.T, s *Service, uploadDir, filename string, 
 	tempFile := filepath.Join(uploadDir, filename)
 	require.NoError(t, os.WriteFile(tempFile, []byte(dedupNzbContent), 0o644))
 
-	item, err := s.AddToQueue(context.Background(), tempFile, nil, category, &prio, nil, nil)
+	item, err := s.AddToQueue(context.Background(), tempFile, nil, category, &prio, nil, nil, nil)
 	require.NoError(t, err)
 	return item
 }

@@ -659,7 +659,7 @@ func (s *Server) handleUploadToQueue(c *fiber.Ctx) error {
 
 	// For manually uploaded files, pass CompleteDir as the base path (not the temp upload directory)
 	// The category will be appended to this by processNzbItem in the service
-	item, err := s.importerService.AddToQueue(c.Context(), tempFile, basePath, categoryPtr, &priority, nil, nil)
+	item, err := s.importerService.AddToQueue(c.Context(), tempFile, basePath, categoryPtr, &priority, nil, nil, nil)
 	if err != nil {
 		// Clean up temp file on error
 		os.Remove(tempFile)
@@ -806,7 +806,7 @@ func (s *Server) handleUploadNZBLnk(c *fiber.Ctx) error {
 			}
 		}
 
-		item, err := s.importerService.AddToQueue(c.Context(), tempFile, basePath, categoryPtr, &priority, nil, nil)
+		item, err := s.importerService.AddToQueue(c.Context(), tempFile, basePath, categoryPtr, &priority, nil, nil, &resolved.Indexer)
 		if err != nil {
 			os.Remove(tempFile)
 			result.ErrorMessage = "Failed to add to queue: " + err.Error()
@@ -959,7 +959,7 @@ func (s *Server) handleSearchNZBByName(c *fiber.Ctx) error {
 		}
 	}
 
-	item, err := s.importerService.AddToQueue(c.Context(), tempFile, basePath, categoryPtr, &priority, nil, nil)
+	item, err := s.importerService.AddToQueue(c.Context(), tempFile, basePath, categoryPtr, &priority, nil, nil, &resolved.Indexer)
 	if err != nil {
 		os.Remove(tempFile)
 		return RespondInternalError(c, "Failed to add to queue", err.Error())
@@ -1203,7 +1203,7 @@ func (s *Server) handleAddTestQueueItem(c *fiber.Ctx) error {
 		}
 	}
 
-	item, err := s.importerService.AddToQueue(c.Context(), tempPath, basePath, &category, &priority, nil, nil)
+	item, err := s.importerService.AddToQueue(c.Context(), tempPath, basePath, &category, &priority, nil, nil, nil)
 	if err != nil {
 		os.Remove(tempPath)
 		return RespondInternalError(c, "Failed to add test file to queue", err.Error())

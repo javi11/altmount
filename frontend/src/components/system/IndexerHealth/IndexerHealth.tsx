@@ -1,8 +1,8 @@
 import { AlertTriangle, BarChart3, Radio, RefreshCw, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { useConfirm } from "../../../../contexts/ModalContext";
-import { useToast } from "../../../../contexts/ToastContext";
-import { useCleanupIndexerStats, useIndexerStats } from "../../../../hooks/useApi";
+import { useConfirm } from "../../../contexts/ModalContext";
+import { useToast } from "../../../contexts/ToastContext";
+import { useCleanupIndexerStats, useIndexerStats } from "../../../hooks/useApi";
 import { IndexerHealthFilters } from "./IndexerHealthFilters";
 import { IndexerHealthSummary } from "./IndexerHealthSummary";
 import { IndexerHealthTable } from "./IndexerHealthTable";
@@ -45,7 +45,6 @@ export function IndexerHealth() {
 	const [sortKey, setSortKey] = useState<SortKey>(() => loadSortPref().key);
 	const [sortAsc, setSortAsc] = useState(() => loadSortPref().asc);
 
-	// Persist the sort preference whenever it changes.
 	useEffect(() => {
 		try {
 			localStorage.setItem(SORT_STORAGE_KEY, JSON.stringify({ key: sortKey, asc: sortAsc }));
@@ -220,89 +219,90 @@ export function IndexerHealth() {
 	const hasStats = stats && stats.length > 0;
 
 	return (
-		<div className="space-y-6">
-			{/* Header */}
-			<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-				<div>
-					<h3 className="flex items-center gap-2 font-extrabold text-base-content text-lg tracking-tight">
-						<Radio className="h-5 w-5 animate-pulse text-primary" aria-hidden="true" />
-						Usenet Indexers Health HUD
-					</h3>
-					<p className="font-medium text-base-content/50 text-xs sm:text-sm">
-						Persistent success and failure rates tracked per indexer via webhook handshake.
-					</p>
+		<div className="card overflow-hidden border border-base-200/40 bg-base-100/20 shadow-2xl backdrop-blur-md">
+			<div className="card-body gap-0 p-0">
+				<div className="flex flex-col gap-4 border-base-200/50 border-b bg-base-200/30 p-4 sm:flex-row sm:items-center sm:justify-between">
+					<h2 className="flex items-center gap-2 font-semibold text-xl">
+						<Radio className="h-6 w-6" aria-hidden="true" />
+						Indexer Health
+					</h2>
+					<div className="flex flex-wrap items-center gap-2">
+						<button
+							type="button"
+							className="btn btn-ghost btn-sm gap-1.5 border border-base-200 bg-base-200/50 transition-all duration-200 hover:scale-[1.02] hover:bg-base-200 active:scale-[0.98]"
+							onClick={() => void refetch()}
+							aria-label="Refresh indexer statistics"
+						>
+							<RefreshCw className="h-4 w-4" aria-hidden="true" />
+							Sync HUD
+						</button>
+						<button
+							type="button"
+							className="btn btn-warning btn-sm gap-1.5 transition-all duration-200"
+							onClick={() => setShowPruneModal(true)}
+							disabled={!hasStats}
+							aria-label="Prune indexer statistics history"
+						>
+							<Trash2 className="h-4 w-4" aria-hidden="true" />
+							Prune Stats
+						</button>
+					</div>
 				</div>
-				<div className="flex flex-wrap items-center gap-2">
-					<button
-						type="button"
-						className="btn btn-ghost btn-sm gap-1.5 border border-base-200 bg-base-200/50 transition-all duration-200 hover:scale-[1.02] hover:bg-base-200 active:scale-[0.98]"
-						onClick={() => void refetch()}
-						aria-label="Refresh indexer statistics"
-					>
-						<RefreshCw className="h-4 w-4" aria-hidden="true" />
-						Sync HUD
-					</button>
-					<button
-						type="button"
-						className="btn btn-warning btn-sm gap-1.5 transition-all duration-200"
-						onClick={() => setShowPruneModal(true)}
-						disabled={!hasStats}
-						aria-label="Prune indexer statistics history"
-					>
-						<Trash2 className="h-4 w-4" aria-hidden="true" />
-						Prune Stats
-					</button>
-				</div>
-			</div>
 
-			{summary && <IndexerHealthSummary stats={stats!} summary={summary} />}
+				{summary && (
+					<div className="border-base-200/50 border-b p-4">
+						<IndexerHealthSummary stats={stats ?? []} summary={summary} />
+					</div>
+				)}
 
-			{hasStats && (
-				<IndexerHealthFilters
-					searchQuery={searchQuery}
-					onSearchChange={setSearchQuery}
-					statusFilter={statusFilter}
-					onStatusFilterChange={setStatusFilter}
-					filteredCount={filtered.length}
-				/>
-			)}
+				{hasStats && (
+					<div className="border-base-200/50 border-b p-4">
+						<IndexerHealthFilters
+							searchQuery={searchQuery}
+							onSearchChange={setSearchQuery}
+							statusFilter={statusFilter}
+							onStatusFilterChange={setStatusFilter}
+							filteredCount={filtered.length}
+						/>
+					</div>
+				)}
 
-			{/* Indexer Table */}
-			{!hasStats ? (
-				<div className="hero rounded-2xl border border-base-300 border-dashed bg-base-200/50 py-16 backdrop-blur-md">
-					<div className="hero-content text-center">
-						<div className="max-w-md space-y-4">
-							<div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl border border-primary/20 bg-primary/5 text-primary shadow-sm">
-								<BarChart3 className="h-8 w-8 animate-pulse" aria-hidden="true" />
+				{!hasStats ? (
+					<div className="hero py-16">
+						<div className="hero-content text-center">
+							<div className="max-w-md space-y-4">
+								<div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl border border-primary/20 bg-primary/5 text-primary shadow-sm">
+									<BarChart3 className="h-8 w-8" aria-hidden="true" />
+								</div>
+								<h3 className="font-bold text-base-content text-xl tracking-tight">
+									No Indexer History Yet
+								</h3>
+								<p className="text-base-content/50 text-sm">
+									Success and failure statistics will populate automatically as active imports
+									finalize in the queue. Configure indexer webhooks to start tracking!
+								</p>
 							</div>
-							<h3 className="font-bold text-base-content text-xl tracking-tight">
-								No Indexer History Yet
-							</h3>
-							<p className="text-base-content/50 text-sm">
-								Success and failure statistics will populate automatically as active imports
-								finalize in the queue. Configure indexer webhooks to start tracking!
+						</div>
+					</div>
+				) : filtered.length === 0 ? (
+					<div className="hero py-12 text-center">
+						<div className="max-w-xs space-y-2">
+							<h3 className="font-bold text-base text-base-content/70">No Indexers Found</h3>
+							<p className="text-base-content/40 text-xs">
+								Try adjusting your fuzzy search or status filter options.
 							</p>
 						</div>
 					</div>
-				</div>
-			) : filtered.length === 0 ? (
-				<div className="hero rounded-2xl border border-base-300 border-dashed bg-base-200/50 py-12 text-center">
-					<div className="max-w-xs space-y-2">
-						<h3 className="font-bold text-base text-base-content/70">No Indexers Found</h3>
-						<p className="text-base-content/40 text-xs">
-							Try adjusting your fuzzy search or status filter options.
-						</p>
-					</div>
-				</div>
-			) : (
-				<IndexerHealthTable
-					items={filtered}
-					sortKey={sortKey}
-					sortAsc={sortAsc}
-					onSort={handleSort}
-					onDelete={handleDeleteIndexer}
-				/>
-			)}
+				) : (
+					<IndexerHealthTable
+						items={filtered}
+						sortKey={sortKey}
+						sortAsc={sortAsc}
+						onSort={handleSort}
+						onDelete={handleDeleteIndexer}
+					/>
+				)}
+			</div>
 
 			{showPruneModal && (
 				<PruneStatsModal

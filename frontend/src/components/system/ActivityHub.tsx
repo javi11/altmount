@@ -191,7 +191,7 @@ export function ActivityHub() {
 											<div className="flex items-center gap-3">
 												<div className="relative">
 													<FileVideo
-														className={`h-8 w-8 shrink-0 ${isStalled ? "animate-pulse text-warning" : "text-primary/70"}`}
+														className={`h-8 w-8 shrink-0 ${isStalled ? "text-warning" : "text-primary/70"}`}
 													/>
 													{!isStalled && (
 														<span className="-bottom-0.5 -right-0.5 absolute flex h-2 w-2">

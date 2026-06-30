@@ -31,6 +31,7 @@ func (s *stubQueueAdder) AddToQueue(
 	_ *database.QueuePriority,
 	_ *string,
 	_ *string,
+	_ *string,
 ) (*database.ImportQueueItem, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
