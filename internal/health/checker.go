@@ -28,13 +28,13 @@ const (
 
 // HealthEvent represents a health check event
 type HealthEvent struct {
-	Type       EventType
-	FilePath   string
-	Status     database.HealthStatus
-	Error      error
-	Details    *string
-	Timestamp  time.Time
-	SourceNzb  *string
+	Type      EventType
+	FilePath  string
+	Status    database.HealthStatus
+	Error     error
+	Details   *string
+	Timestamp time.Time
+	SourceNzb *string
 }
 
 // CheckOptions defines options for health checking
@@ -158,10 +158,11 @@ func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, i
 		slog.InfoContext(ctx, "Forcing full health check (100% sampling)", "file_path", filePath)
 	}
 
-	slog.InfoContext(ctx, "Checking segment availability",
-		"file_path", filePath,
-		"total_segments", len(input.segments),
-		"sample_percentage", samplePercentage)
+	ctx = context.WithValue(ctx, "file_path", filePath)
+	ctx = context.WithValue(ctx, "total_segments", len(input.segments))
+	ctx = context.WithValue(ctx, "sample_percentage", samplePercentage)
+
+	slog.InfoContext(ctx, "Checking segment availability")
 
 	// 1. Metadata integrity check - Verify the entire file map is complete
 	loader := &metadataSegmentLoader{segments: input.segments}
