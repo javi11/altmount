@@ -737,7 +737,7 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 	// when it is disabled, corrupt files are left in the corrupted state and we never
 	// re-trigger an Arr rescan.
 	var repairFiles []*database.FileHealth
-	if hw.configGetter().GetRepairEnabled() {
+	if cfg.GetRepairEnabled() {
 		repairFiles, err = hw.healthRepo.GetFilesForRepairNotification(ctx, maxJobs)
 		if err != nil {
 			return fmt.Errorf("failed to get files for repair notification: %w", err)
