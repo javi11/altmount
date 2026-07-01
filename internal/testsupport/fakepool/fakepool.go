@@ -312,6 +312,48 @@ func (c *Client) Stat(ctx context.Context, messageID string) (*nntppool.StatResu
 	return &nntppool.StatResult{MessageID: messageID}, nil
 }
 
+// StatMany satisfies pool.NntpClient by fanning Stat out across up to
+// opts.Concurrency goroutines, mirroring nntppool's StatMany semantics: results
+// stream out of order, the channel closes once every dispatched check reports,
+// and ctx cancellation stops dispatch and lets in-flight sends bail out.
+func (c *Client) StatMany(ctx context.Context, messageIDs []string, opts nntppool.StatManyOptions) <-chan nntppool.StatManyResult {
+	conc := opts.Concurrency
+	if conc <= 0 {
+		conc = 64
+	}
+	if conc > len(messageIDs) && len(messageIDs) > 0 {
+		conc = len(messageIDs)
+	}
+
+	out := make(chan nntppool.StatManyResult, max(conc, 1))
+	go func() {
+		defer close(out)
+		sem := make(chan struct{}, conc)
+		var wg sync.WaitGroup
+
+	dispatch:
+		for _, id := range messageIDs {
+			select {
+			case <-ctx.Done():
+				break dispatch
+			case sem <- struct{}{}:
+			}
+			wg.Add(1)
+			go func(id string) {
+				defer wg.Done()
+				defer func() { <-sem }()
+				res, err := c.Stat(ctx, id)
+				select {
+				case out <- nntppool.StatManyResult{MessageID: id, Result: res, Err: err}:
+				case <-ctx.Done():
+				}
+			}(id)
+		}
+		wg.Wait()
+	}()
+	return out
+}
+
 // Stats returns the configured stats or a zero value.
 func (c *Client) Stats() nntppool.ClientStats {
 	c.mu.RLock()
