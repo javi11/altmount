@@ -371,6 +371,29 @@ export function ArrsConfigSection({
 							/>
 						</div>
 
+						<div className="flex items-start justify-between gap-4">
+							<div className="min-w-0 flex-1">
+								<h5 className="break-words font-bold text-base-content text-sm">
+									Sonarr Season+Episode Repair Fallback
+								</h5>
+								<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
+									When a corrupt file can't be matched to an episode by path, resolve the owned
+									episode by its season/episode number, then blocklist and re-search it. Off by
+									default: it can blocklist healthy releases such as foreign-language releases or
+									season packs.
+								</p>
+							</div>
+							<input
+								type="checkbox"
+								className="checkbox checkbox-primary checkbox-sm mt-1 shrink-0"
+								checked={formData.sonarr_season_episode_fallback_enabled ?? false}
+								onChange={(e) =>
+									handleFormChange("sonarr_season_episode_fallback_enabled", e.target.checked)
+								}
+								disabled={isReadOnly}
+							/>
+						</div>
+
 						{(formData.queue_cleanup_enabled ?? true) && (
 							<div className="fade-in zoom-in-95 animate-in space-y-6">
 								<div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
