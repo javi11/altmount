@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/javi11/altmount/internal/importer/parser"
+	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/rardecode/v2"
 )
 
@@ -53,6 +54,58 @@ func TestCheckVolumeCoverage(t *testing.T) {
 		agg := []rardecode.ArchiveFileInfo{{Parts: makeParts("Movie", 1, 0)}}
 		if err := checkVolumeCoverage(context.Background(), log, agg, volumes, "Movie.part1.rar"); err != nil {
 			t.Fatalf("expected nil when sizes unknown, got %v", err)
+		}
+	})
+}
+
+func TestCheckAnalyzedContentCoverage(t *testing.T) {
+	log := slog.Default()
+	cseg := func(id string, size int64) *metapb.SegmentData {
+		return &metapb.SegmentData{Id: id, StartOffset: 0, EndOffset: size - 1, SegmentSize: size}
+	}
+
+	t.Run("declared size not backed by segments fails (shattered obfuscated set)", func(t *testing.T) {
+		// rardecode reported the inner .mkv's full 14.6 GB from the header, but only one
+		// ~150 MB volume was mapped because the set stayed shattered into single-file groups.
+		contents := []Content{{
+			Filename: "finding.you.mkv",
+			Size:     14_671_485_655,
+			Segments: []*metapb.SegmentData{cseg("a@x", 149_999_866)},
+		}}
+		if err := checkAnalyzedContentCoverage(context.Background(), log, contents); err == nil {
+			t.Fatal("expected coverage error for under-backed file, got nil")
+		}
+	})
+
+	t.Run("fully backed stored file passes", func(t *testing.T) {
+		contents := []Content{{
+			Filename: "movie.mkv",
+			Size:     300,
+			Segments: []*metapb.SegmentData{cseg("a@x", 100), cseg("b@x", 100), cseg("c@x", 100)},
+		}}
+		if err := checkAnalyzedContentCoverage(context.Background(), log, contents); err != nil {
+			t.Fatalf("expected nil for fully backed file, got %v", err)
+		}
+	})
+
+	t.Run("nested sources judged by inner length", func(t *testing.T) {
+		contents := []Content{{
+			Filename:      "inner.mkv",
+			Size:          200,
+			NestedSources: []NestedSource{{InnerLength: 120}, {InnerLength: 80}},
+		}}
+		if err := checkAnalyzedContentCoverage(context.Background(), log, contents); err != nil {
+			t.Fatalf("expected nil for fully covered nested file, got %v", err)
+		}
+	})
+
+	t.Run("directories and zero-size entries skipped", func(t *testing.T) {
+		contents := []Content{
+			{Filename: "dir", IsDirectory: true, Size: 999},
+			{Filename: "empty", Size: 0},
+		}
+		if err := checkAnalyzedContentCoverage(context.Background(), log, contents); err != nil {
+			t.Fatalf("expected nil, got %v", err)
 		}
 	})
 }

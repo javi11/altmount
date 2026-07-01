@@ -191,6 +191,13 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 		}
 	}
 
+	// Fail loudly if any analyzed file's declared size is not backed by its segments —
+	// the fingerprint of a truncated / not-fully-regrouped volume set. Without this the
+	// corruption passes import and only surfaces later as a health-check metadata gap.
+	if err := checkAnalyzedContentCoverage(ctx, rh.log, Contents); err != nil {
+		return nil, err
+	}
+
 	return Contents, nil
 }
 
@@ -244,6 +251,59 @@ func checkVolumeCoverage(ctx context.Context, log *slog.Logger, aggregatedFiles 
 			mainRarFile, followedBytes, inputBytes, len(referenced), len(volumes)),
 		nil,
 	)
+}
+
+// contentCoverageMinPercent is the minimum fraction of a file's declared size that
+// its mapped segments must cover for the analysis to be trusted. RAR archives handled
+// here are always STORED (compressed files are rejected by checkForCompressedFiles), so
+// the segments — which carry the packed payload — must equal the unpacked declared size
+// bar a negligible tolerance.
+const contentCoverageMinPercent = 99
+
+// checkAnalyzedContentCoverage fails loudly when an analyzed file's declared size is not
+// actually backed by segments. This is the signature of a set whose volumes were dropped
+// or never regrouped (e.g. a per-volume-obfuscated set that stayed shattered): rardecode
+// still reports the inner file's full size from the header while only one volume of
+// segments is mapped. checkVolumeCoverage cannot see this — it only judges the volumes
+// within a single analyzed group, so a shattered set looks like a "complete" one-volume
+// archive to it. Validating declared-size-vs-mapped-segments here (safe because RAR is
+// always stored) converts what would otherwise surface as an unplayable file / health
+// "metadata gap" into an import failure.
+func checkAnalyzedContentCoverage(ctx context.Context, log *slog.Logger, contents []Content) error {
+	for _, c := range contents {
+		if c.IsDirectory || c.Size <= 0 {
+			continue
+		}
+
+		var covered int64
+		if len(c.NestedSources) > 0 {
+			// Nested (encrypted-outer) files read through inner offsets; their coverage
+			// is the sum of each source's contribution, validated in detail elsewhere.
+			for _, ns := range c.NestedSources {
+				covered += ns.InnerLength
+			}
+		} else {
+			for _, seg := range c.Segments {
+				covered += seg.EndOffset - seg.StartOffset + 1
+			}
+		}
+
+		if covered*100 >= c.Size*contentCoverageMinPercent {
+			continue
+		}
+
+		log.ErrorContext(ctx, "RAR-analyzed file is not fully backed by segments; the volume set is truncated or was not fully regrouped",
+			"file", c.Filename,
+			"declared_size", c.Size,
+			"covered_bytes", covered,
+			"coverage_percent", covered*100/c.Size,
+		)
+		return errors.NewNonRetryableError(
+			fmt.Sprintf("RAR file %q is incomplete: segments cover only %d of %d bytes", c.Filename, covered, c.Size),
+			nil,
+		)
+	}
+	return nil
 }
 
 // checkForCompressedFiles validates that no files in the archive are compressed
