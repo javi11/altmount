@@ -484,10 +484,10 @@ func (r *Repository) RemoveFromQueue(ctx context.Context, id int64) error {
 
 // RemoveFromHistoryByDownloadID removes a record from import_history by its DownloadID
 func (r *Repository) RemoveFromHistoryByDownloadID(ctx context.Context, downloadID string) (int64, error) {
-	query := `DELETE FROM import_history WHERE download_id = ?`
+	query := `UPDATE import_history SET deleted_from_sabnzbd = TRUE WHERE download_id = ?`
 	result, err := r.db.ExecContext(ctx, query, downloadID)
 	if err != nil {
-		return 0, fmt.Errorf("failed to remove history record by download_id: %w", err)
+		return 0, fmt.Errorf("failed to mark history record as deleted by download_id: %w", err)
 	}
 
 	rowsAffected, err := result.RowsAffected()
@@ -500,10 +500,10 @@ func (r *Repository) RemoveFromHistoryByDownloadID(ctx context.Context, download
 
 // RemoveFromHistory removes a record from import_history by its own ID
 func (r *Repository) RemoveFromHistory(ctx context.Context, id int64) (int64, error) {
-	query := `DELETE FROM import_history WHERE id = ?`
+	query := `UPDATE import_history SET deleted_from_sabnzbd = TRUE WHERE id = ?`
 	result, err := r.db.ExecContext(ctx, query, id)
 	if err != nil {
-		return 0, fmt.Errorf("failed to remove history record: %w", err)
+		return 0, fmt.Errorf("failed to mark history record as deleted: %w", err)
 	}
 
 	rowsAffected, err := result.RowsAffected()
@@ -516,10 +516,10 @@ func (r *Repository) RemoveFromHistory(ctx context.Context, id int64) (int64, er
 
 // RemoveFromHistoryByNzbID removes a record from import_history by its original NZB ID
 func (r *Repository) RemoveFromHistoryByNzbID(ctx context.Context, nzbID int64) (int64, error) {
-	query := `DELETE FROM import_history WHERE nzb_id = ?`
+	query := `UPDATE import_history SET deleted_from_sabnzbd = TRUE WHERE nzb_id = ?`
 	result, err := r.db.ExecContext(ctx, query, nzbID)
 	if err != nil {
-		return 0, fmt.Errorf("failed to remove from history: %w", err)
+		return 0, fmt.Errorf("failed to mark history record as deleted: %w", err)
 	}
 
 	rowsAffected, err := result.RowsAffected()
@@ -1202,6 +1202,7 @@ func (r *Repository) ListRecentImportHistory(ctx context.Context, minutes int, c
 		FROM import_history h
 		WHERE h.completed_at >= %s
 		  AND (? = '' OR LOWER(h.category) = LOWER(?))
+		  AND h.deleted_from_sabnzbd = FALSE
 		ORDER BY h.completed_at DESC
 	`, cutoffExpr)
 

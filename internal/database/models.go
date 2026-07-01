@@ -180,18 +180,19 @@ type ImportHourlyStat struct {
 
 // ImportHistory represents a persistent record of a single imported file
 type ImportHistory struct {
-	ID          int64     `db:"id"`
-	DownloadID  *string   `db:"download_id"`
-	NzbID       *int64    `db:"nzb_id"` // Nullable if queue item deleted
-	NzbName     string    `db:"nzb_name"`
-	FileName    string    `db:"file_name"`
-	FileSize    int64     `db:"file_size"`
-	VirtualPath string    `db:"virtual_path"`
-	LibraryPath *string   `db:"library_path"` // Added to show final location from file_health
-	Category    *string   `db:"category"`
-	Metadata    *string   `db:"metadata"`
-	Indexer     *string   `db:"indexer"`
-	CompletedAt time.Time `db:"completed_at"`
+	ID                  int64     `db:"id"`
+	DownloadID          *string   `db:"download_id"`
+	NzbID               *int64    `db:"nzb_id"` // Nullable if queue item deleted
+	NzbName             string    `db:"nzb_name"`
+	FileName            string    `db:"file_name"`
+	FileSize            int64     `db:"file_size"`
+	VirtualPath         string    `db:"virtual_path"`
+	LibraryPath         *string   `db:"library_path"` // Added to show final location from file_health
+	Category            *string   `db:"category"`
+	Metadata            *string   `db:"metadata"`
+	Indexer             *string   `db:"indexer"`
+	CompletedAt         time.Time `db:"completed_at"`
+	DeletedFromSabnzbd bool      `db:"deleted_from_sabnzbd"`
 }
 
 // ImportMigrationStatus represents the status of a migration item
