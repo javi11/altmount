@@ -744,7 +744,7 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 	},
 	streaming: {
 		title: "Streaming & Downloads",
-		description: "File streaming, chunking and download worker configuration",
+		description: "Segment prefetch and on-disk segment cache for smoother media playback.",
 		icon: "Download",
 		canEdit: true,
 	},

@@ -345,8 +345,8 @@ export function StremioConfigSection({
 									}}
 								/>
 								<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/50 text-xs">
-									Newznab category IDs. Press Enter or comma to add. Defaults: 2000 (Movies), 2040
-									(Movies/HD), 2060 (Movies/4K), 5000 (TV), 5040 (TV/HD).
+									Newznab category IDs. Press Enter or comma to add. Defaults: 2000, 2010, 2030,
+									2040, 2045, 2060 (Movies) and 5000, 5010, 5030, 5040 (TV).
 								</p>
 							</fieldset>
 

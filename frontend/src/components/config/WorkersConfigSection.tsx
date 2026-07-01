@@ -494,31 +494,18 @@ export function ImportConfigSection({
 								className="btn btn-sm btn-outline border-base-300 text-base-content/80 hover:opacity-100"
 								disabled={isReadOnly}
 								onClick={() => {
-									const videoDefaults = [
-										".mp4",
+									// Mirrors the backend default whitelist in
+									// internal/config/manager.go (ImportConfig.AllowedFileExtensions).
+									const defaultExtensions = [
 										".mkv",
+										".mp4",
 										".avi",
+										".ts",
+										".m4v",
 										".mov",
 										".wmv",
-										".flv",
-										".webm",
-										".m4v",
 										".mpg",
 										".mpeg",
-										".m2ts",
-										".ts",
-										".vob",
-										".3gp",
-										".3g2",
-										".h264",
-										".h265",
-										".hevc",
-										".ogv",
-										".ogm",
-										".strm",
-										".iso",
-										".img",
-										".divx",
 										".xvid",
 										".rm",
 										".rmvb",
@@ -527,11 +514,17 @@ export function ImportConfigSection({
 										".wtv",
 										".mk3d",
 										".dvr-ms",
+										".mp3",
+										".flac",
+										".m4a",
+										".epub",
+										".pdf",
+										".cbz",
 									];
-									handleInputChange("allowed_file_extensions", videoDefaults);
+									handleInputChange("allowed_file_extensions", defaultExtensions);
 								}}
 							>
-								Reset to Video Defaults
+								Reset to Defaults
 							</button>
 							<button
 								type="button"
