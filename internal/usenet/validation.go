@@ -5,13 +5,12 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand"
-	"sync/atomic"
 	"time"
 
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
-	concpool "github.com/sourcegraph/conc/pool"
+	"github.com/javi11/nntppool/v4"
 )
 
 var randPerm = rand.Perm
@@ -61,49 +60,38 @@ func ValidateSegmentAvailabilityDetailed(
 	segmentsToValidate := selectSegmentsForValidation(segments, samplePercentage)
 	result.TotalChecked = len(segmentsToValidate)
 
-	var validatedCount int32
-	var missingCount int32
-	missingChan := make(chan string, len(segmentsToValidate))
-
-	// No WithFirstError: we want to check all selected segments, not fail fast.
-	pl := concpool.New().WithErrors().WithMaxGoroutines(maxConnections)
-	for _, seg := range segmentsToValidate {
-		pl.Go(func() error {
-			checkCtx, cancel := context.WithTimeout(ctx, timeout)
-			defer cancel()
-
-			var err error
-			_, err = usenetPool.Stat(checkCtx, seg.Id)
-			if err == nil {
-				poolManager.IncArticlesDownloaded()
-				poolManager.UpdateDownloadProgress("", 100)
-			}
-			if err != nil {
-				slog.DebugContext(checkCtx, "missing segment",
-					"segment_id", seg.Id,
-					"error", err,
-				)
-				atomic.AddInt32(&missingCount, 1)
-				missingChan <- seg.Id
-				return nil // continue checking remaining segments
-			}
-
-			if progressTracker != nil {
-				count := atomic.AddInt32(&validatedCount, 1)
-				progressTracker.Update(int(count), result.TotalChecked)
-			}
-
-			return nil
-		})
+	if maxConnections <= 0 {
+		maxConnections = 1
 	}
 
-	_ = pl.Wait()
-	close(missingChan)
+	ids := make([]string, len(segmentsToValidate))
+	for i, seg := range segmentsToValidate {
+		ids[i] = seg.Id
+	}
 
-	result.MissingCount = int(missingCount)
-	for id := range missingChan {
-		if len(result.MissingIDs) < 50 { // cap stored IDs to avoid huge metadata blobs
-			result.MissingIDs = append(result.MissingIDs, id)
+	statCtx, cancel := context.WithTimeout(ctx, pool.StatManyTimeout(len(ids), maxConnections, timeout))
+	defer cancel()
+
+	var validatedCount int
+	for r := range usenetPool.StatMany(statCtx, ids, nntppool.StatManyOptions{Concurrency: maxConnections}) {
+		if r.Err != nil {
+			slog.DebugContext(ctx, "missing segment",
+				"segment_id", r.MessageID,
+				"error", r.Err,
+			)
+			result.MissingCount++
+			if len(result.MissingIDs) < 50 { // cap stored IDs to avoid huge metadata blobs
+				result.MissingIDs = append(result.MissingIDs, r.MessageID)
+			}
+			continue
+		}
+
+		poolManager.IncArticlesDownloaded()
+		poolManager.UpdateDownloadProgress("", 100)
+
+		if progressTracker != nil {
+			validatedCount++
+			progressTracker.Update(validatedCount, result.TotalChecked)
 		}
 	}
 
