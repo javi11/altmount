@@ -327,6 +327,146 @@ func reconcileRepostedFirstVolume(groups [][]parser.ParsedFile) [][]parser.Parse
 	return [][]parser.ParsedFile{merged}
 }
 
+// canonicalVolumeName builds the canonical multi-volume filename for a (scheme,
+// ordinal) under a shared base, matching rarname.VolumeNumber's numbering so the
+// rewritten names round-trip and rardecode follows them by computed name. The
+// ordinal is the value VolumeNumber returns:
+//   - roll: 0 -> .rar, 1 -> .r00, 2 -> .r01, … 100 -> .r99, 101 -> .s00 …
+//   - part: 1 -> .part01.rar, 2 -> .part02.rar …
+//   - numeric: 1 -> .001, 2 -> .002 …
+//
+// The shared base lets a distinct-base obfuscated set be rewritten so rardecode's
+// name-based volume following reaches every part.
+func canonicalVolumeName(base string, scheme rarScheme, num int) string {
+	switch scheme {
+	case schemeRoll:
+		if num <= 0 {
+			return base + ".rar"
+		}
+		k := num - 1 // .r00 is ordinal 1
+		letter := byte('r') + byte(k/100)
+		return fmt.Sprintf("%s.%c%02d", base, letter, k%100)
+	case schemePart:
+		return fmt.Sprintf("%s.part%02d.rar", base, num)
+	case schemeNumeric:
+		return fmt.Sprintf("%s.%03d", base, num)
+	default:
+		return base
+	}
+}
+
+// obfuscatedUnifiedBase is the synthetic base name applied to a reassembled
+// obfuscated volume set. It is used only internally for rardecode's volume
+// following and the part→segment lookup; the imported file's virtual path comes
+// from the inner archive's own filename, so this name never surfaces to the user.
+const obfuscatedUnifiedBase = "obfuscated_volume_set"
+
+// reconcileObfuscatedVolumeSet folds a single multi-volume RAR set whose every
+// volume carries a DISTINCT obfuscated base name (e.g. abc.xyz.<hash1>.r00,
+// abc.xyz.<hash2>.r01, …) back into one ordered group. Grouping by base name shatters
+// such a set into one single-file group per volume, so only the header-carrying volume
+// ever analyzes — yielding a file whose declared size dwarfs its mapped segments
+// (the "metadata gap" failure). With no PAR2 to recover a shared base, the reconstruction
+// relies on the volumes' own contiguous ordinals plus an optional headerless first volume.
+//
+// The guards are deliberately strict so genuinely separate archives are never merged:
+//   - every group must be a single file (the per-volume-obfuscation fingerprint; any
+//     shared base leaves the normal/reposted-volume paths to handle it),
+//   - at least two volumes carry recognizable ordinals in ONE scheme, contiguous and
+//     starting at that scheme's expected first continuation,
+//   - at most one file is unrecognized (the headerless first volume of a roll/numeric set).
+//
+// On a match it returns a single group, renamed to a shared synthetic base and ordered
+// by volume number, so rardecode follows the whole sequence. Any ambiguity returns the
+// groups untouched; the segment-coverage guard then fails such an import loudly instead.
+func reconcileObfuscatedVolumeSet(groups [][]parser.ParsedFile) [][]parser.ParsedFile {
+	if len(groups) < 3 {
+		return groups
+	}
+
+	files := make([]parser.ParsedFile, 0, len(groups))
+	for _, g := range groups {
+		if len(g) != 1 {
+			return groups // a shared base grouped >1 volume → not the distinct-base case
+		}
+		files = append(files, g[0])
+	}
+
+	type vol struct {
+		file parser.ParsedFile
+		num  int
+	}
+	scheme := schemeUnknown
+	var recognized []vol
+	var starters []parser.ParsedFile
+	for _, f := range files {
+		s, num, ok := rarVolumeNumber(f.Filename)
+		if !ok {
+			starters = append(starters, f)
+			continue
+		}
+		if scheme == schemeUnknown {
+			scheme = s
+		} else if s != scheme {
+			return groups // mixed schemes → ambiguous
+		}
+		recognized = append(recognized, vol{file: f, num: num})
+	}
+	if scheme == schemeUnknown || len(recognized) < 2 || len(starters) > 1 {
+		return groups
+	}
+
+	sort.Slice(recognized, func(a, b int) bool { return recognized[a].num < recognized[b].num })
+	for i := 1; i < len(recognized); i++ {
+		if recognized[i].num <= recognized[i-1].num || recognized[i].num != recognized[i-1].num+1 {
+			return groups // duplicate or gap → not a clean single set
+		}
+	}
+
+	// rarname.VolumeNumber ordinals: roll .rar=0/.r00=1/.r01=2…, part .part01.rar=1…,
+	// numeric .001=1…. So a roll set's continuations (.r00..) begin at ordinal 1 and its
+	// headerless first volume is ordinal 0 (.rar); numeric's first volume (.001=1) carries
+	// its own header, with continuations at 2.
+	merged := make([]parser.ParsedFile, 0, len(files))
+	if len(starters) == 1 {
+		// A headerless first volume only exists for the roll (.rar + .r00..) and
+		// numeric (.001 + .002..) schemes; the part scheme carries its header in
+		// part01, so a lone unrecognized file there is foreign — leave it alone.
+		var firstName string
+		var contStart int
+		switch scheme {
+		case schemeRoll:
+			firstName, contStart = obfuscatedUnifiedBase+".rar", 1
+		case schemeNumeric:
+			firstName, contStart = obfuscatedUnifiedBase+".001", 2
+		default:
+			return groups
+		}
+		if recognized[0].num != contStart {
+			return groups // continuations don't slot in right after the first volume
+		}
+		st := starters[0]
+		st.Filename = firstName
+		merged = append(merged, st)
+	} else {
+		// No separate starter: the lowest recognized ordinal carries the header. A roll
+		// set may begin at .rar (0) or, when there is no plain .rar, at .r00 (1);
+		// part/numeric always begin at ordinal 1.
+		validStart := recognized[0].num == 1 || (scheme == schemeRoll && recognized[0].num == 0)
+		if !validStart {
+			return groups
+		}
+	}
+
+	for _, v := range recognized {
+		vf := v.file
+		vf.Filename = canonicalVolumeName(obfuscatedUnifiedBase, scheme, v.num)
+		merged = append(merged, vf)
+	}
+
+	return [][]parser.ParsedFile{merged}
+}
+
 // normalizeRarPartFilename normalizes RAR part numbers while preserving padding width
 // If allFilesNoExt is true, uses baseFilename for all parts with .rXX extension
 // where XX is the 0-based part number (index) with zero-padding based on totalFiles

@@ -448,7 +448,12 @@ func GroupArchivesByBaseName(files []parser.ParsedFile) [][]parser.ParsedFile {
 	// A single physical RAR set whose first volume was reposted under a different
 	// base name (e.g. movie.repost.part01.rar alongside movie.r00..) splits into
 	// multiple groups above; fold it back into one set so the whole archive maps.
-	return reconcileRepostedFirstVolume(groups)
+	groups = reconcileRepostedFirstVolume(groups)
+
+	// A fully per-volume-obfuscated set (every volume a distinct base, no PAR2 to
+	// recover a shared name) shatters into one single-file group per volume; fold it
+	// back into one ordered set using the volumes' own contiguous ordinals.
+	return reconcileObfuscatedVolumeSet(groups)
 }
 
 // normalizeArchiveReleaseFilename aligns the filename to the NZB basename while keeping the original extension.

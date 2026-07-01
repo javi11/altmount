@@ -113,7 +113,14 @@ func ValidateSegmentIntegrity(ctx context.Context, content Content) error {
 			}
 		}
 	} else {
-		// For standard files, validate total segment coverage against PackedSize (if available)
+		// For standard files, validate total segment coverage against PackedSize (if available).
+		// PackedSize (not Size) is correct here because segments carry the archive's *packed*
+		// bytes: for a compressed archive (e.g. 7z) the packed stream is smaller than the
+		// declared unpacked Size, so comparing against Size would raise a false shortfall.
+		// The stored-archive case where PackedSize is itself unreliable (truncated volume
+		// following collapses it to match the partial segments) is caught by the RAR-specific
+		// Size-vs-coverage guard in the rar package, which is safe there because RAR rejects
+		// compressed files.
 		var totalCovered int64
 		for _, seg := range content.Segments {
 			totalCovered += (seg.EndOffset - seg.StartOffset + 1)
