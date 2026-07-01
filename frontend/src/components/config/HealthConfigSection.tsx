@@ -207,7 +207,8 @@ export function HealthConfigSection({
 										min="1"
 									/>
 									<p className="label break-words text-[10px] text-base-content/50">
-										Wait time before the first repair re-notification.
+										Base wait time between repair re-notifications, applied on every retry (doubled
+										each time if exponential back-off is enabled).
 									</p>
 								</fieldset>
 
@@ -430,8 +431,7 @@ export function HealthConfigSection({
 												Ghost File Detection
 											</span>
 											<span className="mt-0.5 block break-words text-[11px] text-base-content/50 leading-snug">
-												Reads one byte from each checked segment to confirm the Usenet data still
-												exists.
+												Reserved for a future data-integrity check. Currently has no effect.
 											</span>
 										</div>
 									</label>

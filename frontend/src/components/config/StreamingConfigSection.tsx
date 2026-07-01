@@ -120,7 +120,7 @@ export function StreamingConfigSection({
 						</div>
 						<div className="mt-1 break-words text-[11px] leading-relaxed opacity-80">
 							Higher values improve stability on slow connections but increase initial memory usage.
-							Default (30) is recommended for most 4K streaming scenarios.
+							Default (60) is recommended for most 4K streaming scenarios.
 						</div>
 					</div>
 				</div>
@@ -270,7 +270,7 @@ export function StreamingConfigSection({
 									Each cached entry corresponds to one decoded Usenet article (~750 KB). On a cache
 									hit the data is served directly from disk with no network round-trip. Eviction
 									runs automatically every 5 minutes, removing expired entries and enforcing the
-									size limit via LRU. Files that are currently open are never evicted.
+									size limit by evicting least-recently-used entries first.
 								</div>
 							</div>
 						</div>
