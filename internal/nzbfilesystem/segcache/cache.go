@@ -44,20 +44,19 @@ type SegmentCache struct {
 	dirty     atomic.Bool
 }
 
-// NewSegmentCache creates a new segment cache, loading any existing catalog.
+// NewSegmentCache creates a new segment cache. It does NOT load any existing
+// catalog; call LoadCatalog to hydrate from disk. Manager.Start runs that load
+// in a background goroutine so the per-segment stat loop does not block boot.
 func NewSegmentCache(cfg Config, logger *slog.Logger) (*SegmentCache, error) {
 	if err := os.MkdirAll(cfg.CachePath, 0o755); err != nil {
 		return nil, fmt.Errorf("segcache: create cache dir %s: %w", cfg.CachePath, err)
 	}
 
-	c := &SegmentCache{
+	return &SegmentCache{
 		items:  make(map[string]*cacheEntry),
 		config: cfg,
 		logger: logger,
-	}
-	c.loadCatalog()
-
-	return c, nil
+	}, nil
 }
 
 // Has reports whether the segment is present in the cache (no disk I/O).
@@ -245,8 +244,13 @@ func (c *SegmentCache) SaveCatalog() error {
 	return nil
 }
 
-func (c *SegmentCache) loadCatalog() {
+// LoadCatalog hydrates the in-memory catalog from catalog.json on disk, statting
+// each .seg file and dropping entries whose data is missing. Safe to call
+// concurrently with Has/Get/Put: loaded entries merge in, and any key already
+// present (written while the load was running) is kept as-is.
+func (c *SegmentCache) LoadCatalog() {
 	catalogPath := filepath.Join(c.config.CachePath, "catalog.json")
+	c.logger.Info("segcache: loading catalog", "path", catalogPath)
 
 	data, err := os.ReadFile(catalogPath)
 	if err != nil {
@@ -270,8 +274,16 @@ func (c *SegmentCache) loadCatalog() {
 		}
 	}
 
-	c.items = valid
-	c.totalSize = totalSize
+	c.mu.Lock()
+	for id, e := range valid {
+		if _, exists := c.items[id]; exists {
+			continue // a Put during load already wrote a newer entry
+		}
+		c.items[id] = e
+		c.totalSize += e.Size
+	}
+	loaded, total := len(valid), c.totalSize
+	c.mu.Unlock()
 
-	c.logger.Info("segcache: catalog loaded", "items", len(valid), "total_bytes", totalSize)
+	c.logger.Info("segcache: catalog loaded", "items", loaded, "total_bytes", total)
 }
