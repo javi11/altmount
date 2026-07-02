@@ -329,7 +329,7 @@ func initializeSegmentCache(ctx context.Context, cfg *config.Config, source *seg
 
 	mgr.Start(ctx)
 	source.Swap(mgr)
-	slog.InfoContext(ctx, "Segment cache initialized",
+	slog.InfoContext(ctx, "Segment cache started (catalog loads in background)",
 		"cache_path", mgrCfg.CachePath,
 		"max_size_bytes", mgrCfg.MaxSizeBytes,
 		"expiry_duration", mgrCfg.ExpiryDuration)
