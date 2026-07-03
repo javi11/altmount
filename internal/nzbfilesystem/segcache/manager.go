@@ -91,11 +91,6 @@ func NewManager(cfg ManagerConfig, logger *slog.Logger) (*Manager, error) {
 // per-segment stat loop). Stop waits for all of them.
 func (m *Manager) Start(_ context.Context) {
 	m.wg.Add(3)
-	// Gate Puts here on the caller's goroutine, before source.Swap wires the cache
-	// live, so a segment downloaded during cold load is skipped rather than
-	// clobbered by the wholesale map assignment. Load itself runs async so the
-	// per-segment stat loop does not block boot; Stop() waits via wg.
-	m.cache.loading.Store(true)
 	go func() {
 		defer m.wg.Done()
 		m.cache.LoadCatalog()

@@ -53,11 +53,16 @@ func NewSegmentCache(cfg Config, logger *slog.Logger) (*SegmentCache, error) {
 		return nil, fmt.Errorf("segcache: create cache dir %s: %w", cfg.CachePath, err)
 	}
 
-	return &SegmentCache{
+	c := &SegmentCache{
 		items:  make(map[string]*cacheEntry),
 		config: cfg,
 		logger: logger,
-	}, nil
+	}
+	// Gate Puts until LoadCatalog runs and clears this. Set at construction (not
+	// in Start's goroutine) so a segment downloaded before the async load runs is
+	// skipped rather than clobbered by the wholesale map assignment.
+	c.loading.Store(true)
+	return c, nil
 }
 
 // Has reports whether the segment is present in the cache (no disk I/O).
