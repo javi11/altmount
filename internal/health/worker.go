@@ -41,12 +41,6 @@ const (
 	WorkerStatusStopping WorkerStatus = "stopping"
 )
 
-// checkBatchSize is how many due files each health cycle fetches and sweeps in
-// one cross-file StatMany call. 50 files × 5–55 sampled segments ≈ 250–2750
-// STATs per sweep, enough to saturate the pool's STAT pipeline at the default
-// 100-way concurrency. Deliberately not a config knob until someone needs it.
-const checkBatchSize = 50
-
 // WorkerStats represents statistics about the health worker
 type WorkerStats struct {
 	Status                 WorkerStatus `json:"status"`
@@ -578,8 +572,13 @@ func (hw *HealthWorker) markCorruptedRepairExhausted(ctx context.Context, fh *da
 // repair_triggered state. It re-triggers ARR directly without calling CheckFile, since the
 // metadata has already been moved to the corrupted folder.
 func (hw *HealthWorker) prepareRepairNotificationUpdate(ctx context.Context, fh *database.FileHealth) (*database.HealthStatusUpdate, func() error) {
+	// Default to the existing diagnosis so a successful re-trigger (which never
+	// sets these itself) doesn't null out the reason the file was flagged in
+	// the first place; applyRepairOutcome combines onto this if repair fails.
 	update := &database.HealthStatusUpdate{
-		FilePath: fh.FilePath,
+		FilePath:     fh.FilePath,
+		ErrorMessage: fh.LastError,
+		ErrorDetails: fh.ErrorDetails,
 	}
 
 	if fh.RepairRetryCount >= hw.configGetter().GetMaxRepairRetries() {
@@ -739,7 +738,7 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 	// (CheckFilesBatch), so NNTP throughput no longer depends on per-file job
 	// concurrency. maxJobs still bounds the per-file result handling below
 	// (repair side effects, ARR API calls).
-	unhealthyFiles, err := hw.healthRepo.GetUnhealthyFiles(ctx, checkBatchSize, strategy, libraryDir, hw.configGetter().GetMaxRetries())
+	unhealthyFiles, err := hw.healthRepo.GetUnhealthyFiles(ctx, cfg.GetCheckBatchSize(), strategy, libraryDir, hw.configGetter().GetMaxRetries())
 	if err != nil {
 		return fmt.Errorf("failed to get unhealthy files: %w", err)
 	}
@@ -985,8 +984,18 @@ func applyRepairOutcome(update *database.HealthStatusUpdate, outcome repairOutco
 		update.Type = database.UpdateTypeCorrupted
 		update.Status = database.HealthStatusCorrupted
 		if err != nil {
-			errMsg := err.Error()
-			update.ErrorMessage = &errMsg
+			// Preserve the original health-check diagnosis (e.g. "missing N
+			// segments") instead of replacing it with the repair-trigger
+			// failure — losing the root cause makes the UI show only an
+			// unrelated ARR error with no indication of why the file was
+			// flagged corrupted in the first place.
+			repairErr := err.Error()
+			if update.ErrorMessage != nil && *update.ErrorMessage != "" {
+				combined := fmt.Sprintf("%s (repair failed: %s)", *update.ErrorMessage, repairErr)
+				update.ErrorMessage = &combined
+			} else {
+				update.ErrorMessage = &repairErr
+			}
 		}
 	case repairOutcomeDeferred:
 		// The ARR was only temporarily unreachable. Keep the file in repair_triggered

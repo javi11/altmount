@@ -346,6 +346,7 @@ type HealthConfig struct {
 	CleanupOrphanedMetadata             *bool        `yaml:"cleanup_orphaned_metadata" mapstructure:"cleanup_orphaned_metadata" json:"cleanup_orphaned_metadata,omitempty"`
 	CheckIntervalSeconds                int          `yaml:"check_interval_seconds" mapstructure:"check_interval_seconds" json:"check_interval_seconds,omitempty"`
 	MaxConnectionsForHealthChecks       int          `yaml:"max_connections_for_health_checks" mapstructure:"max_connections_for_health_checks" json:"max_connections_for_health_checks,omitempty"`
+	CheckBatchSize                      int          `yaml:"check_batch_size" mapstructure:"check_batch_size" json:"check_batch_size,omitempty"`
 	MaxConcurrentJobs                   int          `yaml:"max_concurrent_jobs" mapstructure:"max_concurrent_jobs" json:"max_concurrent_jobs,omitempty"`
 	SegmentSamplePercentage             int          `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage,omitempty"`
 	MaxRetries                          int          `yaml:"max_retries" mapstructure:"max_retries" json:"max_retries"`
@@ -1601,6 +1602,7 @@ func DefaultConfig(configDir ...string) *Config {
 			CleanupOrphanedMetadata:             &cleanupOrphanedMetadata, // Disabled by default
 			CheckIntervalSeconds:                5,
 			MaxConnectionsForHealthChecks:       100,
+			CheckBatchSize:                      50,
 			MaxConcurrentJobs:                   1,                      // Default: 1 concurrent job
 			SegmentSamplePercentage:             5,                      // Default: 5% segment sampling
 			LibrarySyncIntervalMinutes:          360,                    // Default: sync every 6 hours

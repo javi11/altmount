@@ -222,7 +222,8 @@ func judgeValidation(prep preparedCheck, result usenet.ValidationResult, valErr 
 	if result.MissingCount > 0 {
 		event.Type = EventTypeFileCorrupted
 		event.Status = database.HealthStatusCorrupted
-		event.Error = fmt.Errorf("missing %d segments", result.MissingCount)
+		event.Error = fmt.Errorf("%d of %d checked segments are missing from your Usenet provider",
+			result.MissingCount, result.TotalChecked)
 		return event
 	}
 

@@ -161,6 +161,20 @@ func ValidateSegmentAvailabilityBatch(
 	statCtx, cancel := context.WithTimeout(ctx, pool.StatManyTimeout(len(ids), maxConnections, timeout))
 	defer cancel()
 
+	nonEmptyFiles := 0
+	for _, fileIDs := range perFileIDs {
+		if len(fileIDs) > 0 {
+			nonEmptyFiles++
+		}
+	}
+
+	sweepStart := time.Now()
+	slog.InfoContext(ctx, "Starting STAT sweep",
+		"files", nonEmptyFiles,
+		"segments", len(ids),
+		"concurrency", maxConnections,
+	)
+
 	for r := range usenetPool.StatMany(statCtx, ids, nntppool.StatManyOptions{Concurrency: maxConnections}) {
 		owner := owners[r.MessageID]
 		if len(owner) == 0 {
@@ -185,6 +199,17 @@ func ValidateSegmentAvailabilityBatch(
 		poolManager.IncArticlesDownloaded()
 		poolManager.UpdateDownloadProgress("", 100)
 	}
+
+	missingTotal := 0
+	for _, r := range results {
+		missingTotal += r.MissingCount
+	}
+	slog.InfoContext(ctx, "STAT sweep completed",
+		"files", nonEmptyFiles,
+		"segments", len(ids),
+		"missing", missingTotal,
+		"duration", time.Since(sweepStart),
+	)
 
 	return results, nil
 }

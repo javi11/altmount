@@ -30,6 +30,18 @@ func (c *Config) GetMaxConnectionsForHealthChecks() int {
 	return c.Health.MaxConnectionsForHealthChecks
 }
 
+// GetCheckBatchSize returns how many due files each health cycle fetches and
+// sweeps together in one cross-file StatMany call, with a default fallback.
+// Distinct from GetMaxConnectionsForHealthChecks: this bounds how many FILES
+// are batched into one sweep, while that bounds how many segment checks run
+// concurrently within a sweep.
+func (c *Config) GetCheckBatchSize() int {
+	if c.Health.CheckBatchSize <= 0 {
+		return 50 // Default: 50 files per cycle
+	}
+	return c.Health.CheckBatchSize
+}
+
 // GetSegmentSamplePercentage returns segment sample percentage with a default fallback.
 // Returns a value between 1 and 100.
 func (c *Config) GetSegmentSamplePercentage() int {

@@ -108,7 +108,7 @@ func TestCheckFilesBatch(t *testing.T) {
 		assert.Equal(t, EventTypeFileHealthy, events[0].Type)
 		assert.Equal(t, EventTypeFileCorrupted, events[1].Type)
 		require.Error(t, events[1].Error)
-		assert.Contains(t, events[1].Error.Error(), "missing 1 segments")
+		assert.Contains(t, events[1].Error.Error(), "1 of 1 checked segments")
 	})
 
 	t.Run("metadata-missing file removed, siblings still checked", func(t *testing.T) {
@@ -182,7 +182,7 @@ func TestCheckFile_ParityWithBatch(t *testing.T) {
 		event := env.healthChecker.CheckFile(context.Background(), "complete/solo.mkv")
 		assert.Equal(t, EventTypeFileCorrupted, event.Type)
 		require.Error(t, event.Error)
-		assert.Contains(t, event.Error.Error(), "missing 1 segments")
+		assert.Contains(t, event.Error.Error(), "1 of 1 checked segments")
 	})
 
 	t.Run("metadata missing", func(t *testing.T) {

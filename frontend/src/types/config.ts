@@ -107,6 +107,7 @@ export interface HealthConfig {
 	cleanup_orphaned_metadata?: boolean;
 	check_interval_seconds?: number;
 	max_connections_for_health_checks?: number;
+	check_batch_size?: number; // Files fetched and swept together per health-check cycle
 	max_concurrent_jobs?: number; // Max concurrent health check jobs
 	segment_sample_percentage?: number; // Percentage of segments to check (1-100)
 	max_retries?: number; // Max health check retries
@@ -383,6 +384,7 @@ export interface HealthUpdateRequest {
 	cleanup_orphaned_metadata?: boolean;
 	check_interval_seconds?: number; // Interval in seconds (optional)
 	max_connections_for_health_checks?: number;
+	check_batch_size?: number; // Files fetched and swept together per health-check cycle
 	max_concurrent_jobs?: number; // Max concurrent health check jobs
 	segment_sample_percentage?: number; // Percentage of segments to check (1-100)
 	max_retries?: number;

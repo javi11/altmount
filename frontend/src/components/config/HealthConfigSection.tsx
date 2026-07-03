@@ -655,7 +655,7 @@ export function HealthConfigSection({
 								</fieldset>
 								<fieldset className="fieldset">
 									<legend className="fieldset-legend font-semibold">
-										Max Health Check Connections
+										Max Concurrent Segment Checks
 									</legend>
 									<input
 										type="number"
@@ -670,8 +670,29 @@ export function HealthConfigSection({
 											)
 										}
 									/>
-									<p className="label break-words text-base-content/70 text-xs">
-										Max NNTP connections reserved for health checks.
+									<p className="label block whitespace-normal break-words text-base-content/70 text-xs">
+										How many segment existence checks run at once within a sweep. STAT requests
+										are cheap, so this can be much higher than your provider's connection count.
+									</p>
+								</fieldset>
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend font-semibold">Check Batch Size</legend>
+									<input
+										type="number"
+										className="input input-bordered w-full bg-base-100 font-mono text-sm"
+										value={formData.check_batch_size ?? 50}
+										disabled={isReadOnly}
+										min={1}
+										onChange={(e) =>
+											handleInputChange(
+												"check_batch_size",
+												Number.parseInt(e.target.value, 10) || 50,
+											)
+										}
+									/>
+									<p className="label block whitespace-normal break-words text-base-content/70 text-xs">
+										How many due files are fetched and swept together per health-check cycle.
+										Raise this to clear a large backlog faster.
 									</p>
 								</fieldset>
 							</div>
