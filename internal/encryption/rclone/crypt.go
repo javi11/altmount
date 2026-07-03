@@ -185,6 +185,7 @@ func (r *reader) Read(p []byte) (n int, err error) {
 					UnderlyingErr: err,
 					BytesRead:     int64(n),
 					NoRetry:       true,
+					FileOffset:    -1, // ciphertext offsets don't map to file coordinates
 				}
 			}
 		}

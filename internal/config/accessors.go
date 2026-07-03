@@ -83,6 +83,15 @@ func (c *Config) GetCheckAllSegments() bool {
 	return *c.Health.CheckAllSegments
 }
 
+// GetMediaProbeEnabled returns whether video container probing (playback-impact
+// classification) is enabled for health checks and streaming failures.
+func (c *Config) GetMediaProbeEnabled() bool {
+	if c.Health.MediaProbeEnabled == nil {
+		return true // Default: true
+	}
+	return *c.Health.MediaProbeEnabled
+}
+
 // GetHealthReadTimeout returns the health check read timeout as a duration with a default fallback.
 func (c *Config) GetHealthReadTimeout() time.Duration {
 	if c.Health.ReadTimeoutSeconds <= 0 {

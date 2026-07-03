@@ -9,6 +9,7 @@ import (
 
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/mediaprobe"
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
@@ -36,6 +37,9 @@ type HealthEvent struct {
 	Details   *string
 	Timestamp time.Time
 	SourceNzb *string
+	// Classification is the playback-impact verdict for video files with
+	// missing segments (nil when not applicable or probing is disabled).
+	Classification *mediaprobe.Classification
 }
 
 // CheckOptions defines options for health checking
@@ -78,6 +82,15 @@ type healthCheckInput struct {
 	fileSize      int64
 	sourceNzbPath string
 	segments      []*metapb.SegmentData
+	encryption    metapb.Encryption
+	// mediaStructure is the container layout probed on a previous check
+	// (nil until the first successful probe). It is a separate allocation,
+	// so holding it does not keep the parent proto alive.
+	mediaStructure *metapb.MediaStructure
+	// hasNestedOrRemuxedSources marks files whose bytes are not a plain
+	// segment concatenation (nested RAR sources, BD clip remux) — the
+	// container probe cannot read those through the segment loader.
+	hasNestedOrRemuxedSources bool
 }
 
 // preparedCheck is the outcome of the per-file preparation stage shared by the
@@ -90,6 +103,10 @@ type preparedCheck struct {
 	sourceNzbPath string
 	sampledIDs    []string
 	earlyEvent    *HealthEvent
+	// totalSegments is the full (unsampled) segment count, kept as a scalar so
+	// it survives past preparation for error reporting without holding onto
+	// the segment slice itself during the network sweep.
+	totalSegments int
 }
 
 // baseResultEvent builds the shared HealthEvent skeleton. SourceNzbPath is
@@ -148,9 +165,14 @@ func (hc *HealthChecker) prepareCheck(ctx context.Context, filePath string, opts
 	// (MessageState, unknownFields, sizeCache, Par2Files, NestedSources, etc.)
 	// is freed before NNTP stat round-trips begin.
 	input := healthCheckInput{
-		fileSize:      fileMeta.FileSize,
-		sourceNzbPath: fileMeta.SourceNzbPath,
-		segments:      fileMeta.SegmentData,
+		fileSize:       fileMeta.FileSize,
+		sourceNzbPath:  fileMeta.SourceNzbPath,
+		segments:       fileMeta.SegmentData,
+		encryption:     fileMeta.Encryption,
+		mediaStructure: fileMeta.MediaStructure,
+		hasNestedOrRemuxedSources: len(fileMeta.NestedSources) > 0 ||
+			len(fileMeta.SharedOuterSources) > 0 ||
+			len(fileMeta.ClipBoundaries) > 0,
 	}
 	fileMeta = nil //nolint:ineffassign // explicit drop so the proto can be collected
 
@@ -181,7 +203,10 @@ func (hc *HealthChecker) prepareCheck(ctx context.Context, filePath string, opts
 	slog.InfoContext(ctx, "Checking segment availability",
 		"file_path", filePath,
 		"total_segments", len(input.segments),
-		"sample_percentage", samplePercentage)
+		"sample_percentage", samplePercentage,
+	)
+
+	prep.totalSegments = len(input.segments)
 
 	// 1. Metadata integrity check - Verify the entire file map is complete
 	loader := &metadataSegmentLoader{segments: input.segments}
@@ -190,8 +215,8 @@ func (hc *HealthChecker) prepareCheck(ctx context.Context, filePath string, opts
 		event.Type = EventTypeFileCorrupted
 		event.Status = database.HealthStatusCorrupted
 		event.Error = fmt.Errorf("metadata corruption: %w", err)
-		details := fmt.Sprintf(`{"error": "metadata_gap", "message": %q}`, err.Error())
-		event.Details = &details
+		details := database.HealthErrorDetails{ErrorType: "metadata_gap", Message: err.Error()}
+		event.Details = details.Marshal()
 		prep.earlyEvent = &event
 		return prep
 	}
@@ -209,7 +234,10 @@ func (hc *HealthChecker) prepareCheck(ctx context.Context, filePath string, opts
 
 // judgeValidation turns a prepared check's segment-sweep outcome into the
 // terminal HealthEvent, mirroring the pre-batch per-file semantics exactly.
-func judgeValidation(prep preparedCheck, result usenet.ValidationResult, valErr error) HealthEvent {
+// It is a method (not a free function) because a missing-segment or
+// first-healthy-check outcome may need to classify playback impact or probe
+// the container, both of which re-read metadata via hc.metadataService.
+func (hc *HealthChecker) judgeValidation(ctx context.Context, prep preparedCheck, result usenet.ValidationResult, valErr error) HealthEvent {
 	event := baseResultEvent(prep.filePath, prep.sourceNzbPath)
 
 	if valErr != nil {
@@ -224,10 +252,22 @@ func judgeValidation(prep preparedCheck, result usenet.ValidationResult, valErr 
 		event.Status = database.HealthStatusCorrupted
 		event.Error = fmt.Errorf("%d of %d checked segments are missing from your Usenet provider",
 			result.MissingCount, result.TotalChecked)
+		event.Classification = hc.classifyPlaybackImpact(ctx, prep.filePath, result)
+		details := database.HealthErrorDetails{
+			ErrorType:       "missing_segments",
+			MissingArticles: result.MissingCount,
+			TotalArticles:   prep.totalSegments,
+			Sampled:         result.TotalChecked,
+			PlaybackImpact:  event.Classification,
+		}
+		event.Details = details.Marshal()
 		return event
 	}
 
-	// All checked segments are available - record will be deleted
+	// All checked segments are available - record will be deleted.
+	// One-time post-import container probe: persist the layout map while all
+	// segments are alive so a later failure can be classified offline.
+	hc.maybeProbeStructure(ctx, prep.filePath)
 	event.Type = EventTypeFileHealthy
 	// Status not needed as the record will be deleted from database
 
@@ -254,7 +294,7 @@ func (hc *HealthChecker) CheckFile(ctx context.Context, filePath string, opts ..
 	if err == nil {
 		result = results[0]
 	}
-	return judgeValidation(prep, result, err)
+	return hc.judgeValidation(ctx, prep, result, err)
 }
 
 // prepareConcurrency bounds the parallel metadata-read phase of a batch check.
@@ -308,7 +348,7 @@ func (hc *HealthChecker) CheckFilesBatch(ctx context.Context, filePaths []string
 		if valErr == nil {
 			result = results[i]
 		}
-		events[i] = judgeValidation(preps[i], result, valErr)
+		events[i] = hc.judgeValidation(ctx, preps[i], result, valErr)
 	}
 	return events
 }

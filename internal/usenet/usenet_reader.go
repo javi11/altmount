@@ -42,6 +42,11 @@ type DataCorruptionError struct {
 	UnderlyingErr error
 	BytesRead     int64
 	NoRetry       bool
+	// FileOffset is the absolute file-coordinate position where the failure
+	// surfaced (-1 when unknown), enabling playback-impact classification.
+	FileOffset int64
+	// SegmentID is the message ID of the failing segment, when known.
+	SegmentID string
 }
 
 func (e *DataCorruptionError) Error() string {
@@ -233,11 +238,13 @@ func (b *UsenetReader) Read(p []byte) (int, error) {
 				return 0, &DataCorruptionError{
 					UnderlyingErr: err,
 					BytesRead:     totalRead,
+					FileOffset:    rg.start + totalRead,
 				}
 			} else {
 				return 0, &DataCorruptionError{
 					UnderlyingErr: err,
 					BytesRead:     0,
+					FileOffset:    rg.start,
 				}
 			}
 		}
@@ -281,6 +288,7 @@ func (b *UsenetReader) Read(p []byte) (int, error) {
 							return n, &DataCorruptionError{
 								UnderlyingErr: err,
 								BytesRead:     totalRead,
+								FileOffset:    rg.start + totalRead,
 							}
 						}
 					}
@@ -291,6 +299,7 @@ func (b *UsenetReader) Read(p []byte) (int, error) {
 					return n, &DataCorruptionError{
 						UnderlyingErr: err,
 						BytesRead:     totalRead,
+						FileOffset:    rg.start + totalRead,
 					}
 				}
 				return n, err
@@ -387,6 +396,8 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 					return &DataCorruptionError{
 						UnderlyingErr: err,
 						BytesRead:     bytesWritten,
+						FileOffset:    -1,
+						SegmentID:     seg.Id,
 					}
 				}
 

@@ -52,6 +52,12 @@ export function HealthStatsCards({ stats }: HealthStatsCardsProps) {
 			caption: "Triggered",
 		},
 		{
+			label: "Degraded",
+			value: stats.degraded || 0,
+			valueClass: "text-warning",
+			caption: "Playable with glitches",
+		},
+		{
 			label: "Corrupted",
 			value: stats.corrupted,
 			valueClass: "text-error",
@@ -61,7 +67,7 @@ export function HealthStatsCards({ stats }: HealthStatsCardsProps) {
 	];
 
 	return (
-		<div className="grid grid-cols-2 overflow-hidden rounded-box border border-base-300 bg-base-100 shadow-md lg:grid-cols-3 xl:grid-cols-6">
+		<div className="grid grid-cols-2 overflow-hidden rounded-box border border-base-300 bg-base-100 shadow-md lg:grid-cols-4 xl:grid-cols-7">
 			{cards.map((card, index) => (
 				<div
 					key={card.label}

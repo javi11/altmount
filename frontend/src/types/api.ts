@@ -174,6 +174,7 @@ export const HealthStatus = {
 	HEALTHY: "healthy",
 	CORRUPTED: "corrupted",
 	REPAIR_TRIGGERED: "repair_triggered",
+	DEGRADED: "degraded",
 } as const;
 
 export type HealthStatus = (typeof HealthStatus)[keyof typeof HealthStatus];
@@ -217,6 +218,41 @@ export interface HealthStats {
 	corrupted: number;
 	repair_triggered: number;
 	checking: number;
+	degraded: number;
+}
+
+// Playback-impact classification embedded in FileHealth.error_details JSON.
+export type PlaybackImpactVerdict = "fatal" | "degraded" | "unknown";
+
+export interface PlaybackImpactTimeRange {
+	from_sec: number;
+	to_sec: number;
+}
+
+export interface PlaybackImpactByteRange {
+	start: number;
+	end: number;
+	label?: string;
+}
+
+export interface PlaybackImpact {
+	verdict: PlaybackImpactVerdict;
+	container?: string;
+	reason: string;
+	missing_ranges?: PlaybackImpactByteRange[];
+	affected_time?: PlaybackImpactTimeRange[];
+	duration_seconds?: number;
+}
+
+// Structured envelope stored in FileHealth.error_details. Legacy records may
+// hold other JSON shapes or plain strings — always parse defensively.
+export interface HealthErrorDetails {
+	error_type?: string;
+	message?: string;
+	missing_articles?: number;
+	total_articles?: number;
+	sampled?: number;
+	playback_impact?: PlaybackImpact;
 }
 
 export interface HealthCleanupRequest {

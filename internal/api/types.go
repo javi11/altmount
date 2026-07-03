@@ -576,6 +576,7 @@ type HealthStatsResponse struct {
 	Healthy         int `json:"healthy"`
 	RepairTriggered int `json:"repair_triggered"`
 	Checking        int `json:"checking"`
+	Degraded        int `json:"degraded"`
 }
 
 // HealthRepairRequest represents request to trigger repair for a corrupted file
@@ -886,6 +887,7 @@ func ToHealthStatsResponse(stats map[database.HealthStatus]int) *HealthStatsResp
 	healthy := stats[database.HealthStatusHealthy]
 	repairTriggered := stats[database.HealthStatusRepairTriggered]
 	checking := stats[database.HealthStatusChecking]
+	degraded := stats[database.HealthStatusDegraded]
 
 	// Calculate total from all tracked statuses
 	total := 0
@@ -900,6 +902,7 @@ func ToHealthStatsResponse(stats map[database.HealthStatus]int) *HealthStatsResp
 		Healthy:         healthy,
 		RepairTriggered: repairTriggered,
 		Checking:        checking,
+		Degraded:        degraded,
 	}
 }
 

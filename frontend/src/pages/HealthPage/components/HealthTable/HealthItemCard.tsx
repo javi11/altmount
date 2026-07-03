@@ -8,11 +8,17 @@ import {
 	Loader,
 	Wrench,
 } from "lucide-react";
-import { memo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { HealthBadge } from "../../../../components/ui/StatusBadge";
-import { formatFutureTime, formatRelativeTime, truncateText } from "../../../../lib/utils";
+import {
+	formatFutureTime,
+	formatRelativeTime,
+	parseHealthErrorDetails,
+	truncateText,
+} from "../../../../lib/utils";
 import { type FileHealth, HealthPriority } from "../../../../types/api";
 import { HealthItemActionsMenu } from "./HealthItemActionsMenu";
+import { PlaybackImpactBadge } from "./PlaybackImpactBadge";
 
 interface HealthItemCardProps {
 	item: FileHealth;
@@ -53,6 +59,11 @@ export const HealthItemCard = memo(function HealthItemCard({
 }: HealthItemCardProps) {
 	const [isExpanded, setIsExpanded] = useState(false);
 
+	const playbackImpact = useMemo(
+		() => parseHealthErrorDetails(item.error_details)?.playback_impact ?? null,
+		[item.error_details],
+	);
+
 	// Reuse status icon logic from HealthTableRow
 	const getNextPriority = (current: HealthPriority): HealthPriority => {
 		switch (current) {
@@ -85,6 +96,10 @@ export const HealthItemCard = memo(function HealthItemCard({
 			break;
 		case "checking":
 			statusIcon = <Loader className="h-4 w-4 animate-spin" />;
+			iconColorClass = "text-warning";
+			break;
+		case "degraded":
+			statusIcon = <HeartCrack className="h-4 w-4" />;
 			iconColorClass = "text-warning";
 			break;
 		default:
@@ -120,6 +135,7 @@ export const HealthItemCard = memo(function HealthItemCard({
 						{/* Quick Info Pills */}
 						<div className="mt-2 flex flex-wrap gap-2">
 							<HealthBadge status={item.status} isMasked={item.is_masked} />
+							{playbackImpact && <PlaybackImpactBadge impact={playbackImpact} />}
 
 							<button
 								type="button"
