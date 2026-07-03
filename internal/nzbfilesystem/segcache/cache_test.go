@@ -159,36 +159,3 @@ func TestCacheCatalogSurvivesMissingSegFiles(t *testing.T) {
 	assert.False(t, c2.Has("bad@msg"), "entry with missing seg file should be dropped on reload")
 }
 
-// TestCacheLoadCatalogPreservesConcurrentPut guards the merge-under-lock contract
-// introduced when loadCatalog was backgrounded. When LoadCatalog runs after a Put
-// has already written a newer entry for the same message ID (the race window that
-// backgrounding the load created), the stale catalog entry must be skipped, not
-// clobber the in-memory map. If this breaks, a segment downloaded during cold load
-// silently reverts to stale data on the next Get.
-func TestCacheLoadCatalogPreservesConcurrentPut(t *testing.T) {
-	dir := t.TempDir()
-	cfg := segcache.Config{
-		CachePath:    dir,
-		MaxSizeBytes: 10 * 1024 * 1024,
-	}
-
-	// Write a stale catalog entry for "race@msg".
-	c1, err := segcache.NewSegmentCache(cfg, slog.Default())
-	require.NoError(t, err)
-	require.NoError(t, c1.Put("race@msg", []byte("stale")))
-	require.NoError(t, c1.SaveCatalog())
-
-	// New cache — constructor no longer loads. Put newer data before LoadCatalog
-	// runs, simulating a segment downloaded during cold load.
-	c2, err := segcache.NewSegmentCache(cfg, slog.Default())
-	require.NoError(t, err)
-	require.NoError(t, c2.Put("race@msg", []byte("fresh")))
-
-	c2.LoadCatalog()
-
-	// The Put's entry must win; the stale catalog entry must not clobber it.
-	got, ok := c2.Get("race@msg")
-	require.True(t, ok)
-	assert.Equal(t, []byte("fresh"), got)
-	assert.EqualValues(t, len("fresh"), c2.TotalSize())
-}

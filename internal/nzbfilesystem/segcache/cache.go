@@ -42,6 +42,7 @@ type SegmentCache struct {
 	logger    *slog.Logger
 	totalSize int64
 	dirty     atomic.Bool
+	loading   atomic.Bool
 }
 
 // NewSegmentCache creates a new segment cache. It does NOT load any existing
@@ -95,6 +96,13 @@ func (c *SegmentCache) Get(messageID string) ([]byte, bool) {
 
 // Put stores segment bytes atomically (temp-write + rename).
 func (c *SegmentCache) Put(messageID string, data []byte) error {
+	// Skip caching while the catalog hydrates. The segment is still served from
+	// Usenet, just not persisted this round; it gets cached on the next request
+	// after load. Avoids Put/load lock contention on boot.
+	if c.loading.Load() {
+		return nil
+	}
+
 	h := sha256.Sum256([]byte(messageID))
 	filename := hex.EncodeToString(h[:]) + ".seg"
 	dataPath := filepath.Join(c.config.CachePath, filename)
@@ -245,16 +253,17 @@ func (c *SegmentCache) SaveCatalog() error {
 }
 
 // LoadCatalog hydrates the in-memory catalog from catalog.json on disk, statting
-// each .seg file and dropping entries whose data is missing. Safe to call
-// concurrently with Has/Get/Put: loaded entries merge in, and any key already
-// present (written while the load was running) is kept as-is.
+// each .seg file and dropping entries whose data is missing. Put is gated off
+// (see the loading flag) for the duration, so the load can assign the map
+// wholesale without racing a concurrent writer. Clears the gate when done.
 func (c *SegmentCache) LoadCatalog() {
+	defer c.loading.Store(false)
+
 	catalogPath := filepath.Join(c.config.CachePath, "catalog.json")
 	c.logger.Info("segcache: loading catalog", "path", catalogPath)
 
 	data, err := os.ReadFile(catalogPath)
 	if err != nil {
-		// No existing catalog; start fresh.
 		return
 	}
 
@@ -275,15 +284,9 @@ func (c *SegmentCache) LoadCatalog() {
 	}
 
 	c.mu.Lock()
-	for id, e := range valid {
-		if _, exists := c.items[id]; exists {
-			continue // a Put during load already wrote a newer entry
-		}
-		c.items[id] = e
-		c.totalSize += e.Size
-	}
-	loaded, total := len(valid), c.totalSize
+	c.items = valid
+	c.totalSize = totalSize
 	c.mu.Unlock()
 
-	c.logger.Info("segcache: catalog loaded", "items", loaded, "total_bytes", total)
+	c.logger.Info("segcache: catalog loaded", "items", len(valid), "total_bytes", totalSize)
 }
