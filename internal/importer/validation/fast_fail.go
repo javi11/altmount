@@ -4,15 +4,13 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/usenet"
-	concpool "github.com/sourcegraph/conc/pool"
+	"github.com/javi11/nntppool/v4"
 )
 
 // selectFastFailSegments picks a lightweight per-file sample for the fast-fail
@@ -124,24 +122,22 @@ func FastFailReleaseProbe(
 		maxConnections = 1
 	}
 
-	// Stat the sample concurrently, cancelling the rest on the first miss.
-	// Infrastructure failures are handled above, so any error returned by a
-	// goroutine here indicates an unreachable segment.
-	pl := concpool.New().WithContext(ctx).WithCancelOnError().WithFirstError().WithMaxGoroutines(maxConnections)
-	for _, seg := range selected {
-		pl.Go(func(ctx context.Context) error {
-			checkCtx, cancel := context.WithTimeout(ctx, timeout)
-			defer cancel()
-
-			if _, err := usenetPool.Stat(checkCtx, seg.Id); err != nil {
-				return err
-			}
-			return nil
-		})
+	ids := make([]string, len(selected))
+	for i, seg := range selected {
+		ids[i] = seg.Id
 	}
 
-	if err := pl.Wait(); err != nil {
-		return true, nil
+	// Stat the sample via a single bulk sweep, cancelling the rest on the
+	// first miss. Infrastructure failures are handled above, so any error
+	// streamed back here indicates an unreachable segment.
+	statCtx, cancel := context.WithTimeout(ctx, pool.StatManyTimeout(len(ids), maxConnections, timeout))
+	defer cancel()
+
+	for r := range usenetPool.StatMany(statCtx, ids, nntppool.StatManyOptions{Concurrency: maxConnections}) {
+		if r.Err != nil {
+			cancel()
+			return true, nil
+		}
 	}
 	return false, nil
 }
@@ -185,10 +181,9 @@ func FastFailCheckFiles(
 	}
 
 	results := make([]FastFailFileResult, len(files))
-	var mu sync.Mutex
 
 	// brokenGroups records group keys with at least one unreachable segment, so
-	// remaining Stats for those groups can be skipped. Guarded by mu.
+	// remaining Stats for those groups can be skipped in later chunks.
 	brokenGroups := make(map[string]struct{})
 
 	// Build the flat work list first so we know the total up front for progress.
@@ -234,52 +229,69 @@ func FastFailCheckFiles(
 		return results, nil
 	}
 
-	var done int32
-	var lastPct int32 = -1
-	pl := concpool.New().WithMaxGoroutines(maxConnections)
-
-	for _, job := range jobs {
-		pl.Go(func() {
-			// Skip the Stat if this job's group is already known broken — the
-			// whole set is doomed, so reachability of the rest is irrelevant.
-			// Still advance progress so the bar completes.
-			skip := false
-			if job.groupKey != "" {
-				mu.Lock()
-				_, skip = brokenGroups[job.groupKey]
-				mu.Unlock()
-			}
-
-			if !skip {
-				checkCtx, cancel := context.WithTimeout(ctx, timeout)
-				defer cancel()
-
-				if _, statErr := usenetPool.Stat(checkCtx, job.segID); statErr != nil {
-					mu.Lock()
-					results[job.fileIdx].Broken = true
-					results[job.fileIdx].MissingSegmentIDs = append(results[job.fileIdx].MissingSegmentIDs, job.segID)
-					if job.groupKey != "" {
-						brokenGroups[job.groupKey] = struct{}{}
-					}
-					mu.Unlock()
-				}
-			}
-
-			// Emit progress only when the integer percentage advances, to avoid
-			// hundreds of redundant broadcasts during a large sweep. The benign
-			// race on lastPct can at worst cause a couple of extra updates.
-			if progressTracker != nil {
-				d := atomic.AddInt32(&done, 1)
-				pct := d * 100 / int32(total)
-				if pct != atomic.LoadInt32(&lastPct) {
-					atomic.StoreInt32(&lastPct, pct)
-					progressTracker.Update(int(d), total)
-				}
-			}
-		})
+	var done, lastPct int
+	advance := func() {
+		if progressTracker == nil {
+			return
+		}
+		done++
+		pct := done * 100 / total
+		if pct != lastPct {
+			lastPct = pct
+			progressTracker.Update(done, total)
+		}
 	}
 
-	pl.Wait()
+	// Walk the flat job list in maxConnections-sized chunks. Within a chunk,
+	// every not-yet-broken job is Stat-ed together via one StatMany call;
+	// brokenGroups is checked and updated between chunks, so a chunk size of 1
+	// (as the short-circuit test uses) reproduces the exact per-job
+	// short-circuit the previous goroutine-pool implementation gave: the
+	// group is marked broken right after its first miss, and every later
+	// chunk skips the rest of that group's jobs without a network round-trip.
+	for start := 0; start < total; start += maxConnections {
+		end := min(start+maxConnections, total)
+		chunk := jobs[start:end]
+
+		toCheck := make([]statJob, 0, len(chunk))
+		for _, job := range chunk {
+			if job.groupKey != "" {
+				if _, broken := brokenGroups[job.groupKey]; broken {
+					// Group already doomed — skip the Stat but still advance
+					// progress so the bar reaches 100%.
+					advance()
+					continue
+				}
+			}
+			toCheck = append(toCheck, job)
+		}
+		if len(toCheck) == 0 {
+			continue
+		}
+
+		ids := make([]string, len(toCheck))
+		for i, job := range toCheck {
+			ids[i] = job.segID
+		}
+
+		statCtx, cancel := context.WithTimeout(ctx, pool.StatManyTimeout(len(ids), maxConnections, timeout))
+		errByID := make(map[string]error, len(ids))
+		for r := range usenetPool.StatMany(statCtx, ids, nntppool.StatManyOptions{Concurrency: maxConnections}) {
+			errByID[r.MessageID] = r.Err
+		}
+		cancel()
+
+		for _, job := range toCheck {
+			if statErr := errByID[job.segID]; statErr != nil {
+				results[job.fileIdx].Broken = true
+				results[job.fileIdx].MissingSegmentIDs = append(results[job.fileIdx].MissingSegmentIDs, job.segID)
+				if job.groupKey != "" {
+					brokenGroups[job.groupKey] = struct{}{}
+				}
+			}
+			advance()
+		}
+	}
 
 	// Propagate set breakage: every file in a broken group is marked Broken so
 	// the entire doomed set is excluded from parsing as one unit. Siblings carry

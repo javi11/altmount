@@ -572,8 +572,13 @@ func (hw *HealthWorker) markCorruptedRepairExhausted(ctx context.Context, fh *da
 // repair_triggered state. It re-triggers ARR directly without calling CheckFile, since the
 // metadata has already been moved to the corrupted folder.
 func (hw *HealthWorker) prepareRepairNotificationUpdate(ctx context.Context, fh *database.FileHealth) (*database.HealthStatusUpdate, func() error) {
+	// Default to the existing diagnosis so a successful re-trigger (which never
+	// sets these itself) doesn't null out the reason the file was flagged in
+	// the first place; applyRepairOutcome combines onto this if repair fails.
 	update := &database.HealthStatusUpdate{
-		FilePath: fh.FilePath,
+		FilePath:     fh.FilePath,
+		ErrorMessage: fh.LastError,
+		ErrorDetails: fh.ErrorDetails,
 	}
 
 	if fh.RepairRetryCount >= hw.configGetter().GetMaxRepairRetries() {
@@ -728,7 +733,12 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 
 	// Get files due for checking (ordered by scheduled_check_at)
 	// New logic: Only check files with library_path (imported) unless strategy is NONE
-	unhealthyFiles, err := hw.healthRepo.GetUnhealthyFiles(ctx, maxJobs, strategy, libraryDir, hw.configGetter().GetMaxRetries())
+	// The fetch limit is intentionally larger than maxJobs: segment availability
+	// for the whole batch is verified in one cross-file StatMany sweep
+	// (CheckFilesBatch), so NNTP throughput no longer depends on per-file job
+	// concurrency. maxJobs still bounds the per-file result handling below
+	// (repair side effects, ARR API calls).
+	unhealthyFiles, err := hw.healthRepo.GetUnhealthyFiles(ctx, cfg.GetCheckBatchSize(), strategy, libraryDir, hw.configGetter().GetMaxRetries())
 	if err != nil {
 		return fmt.Errorf("failed to get unhealthy files: %w", err)
 	}
@@ -785,18 +795,31 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 	// recheck that lands mid-check is not silently clobbered by a stale check result.
 	checkingStatus := database.HealthStatusChecking
 
-	// Process health check files
+	// Phase A: proactive metadata discovery (may hit ARR APIs — bounded by
+	// maxJobs), then verify segment availability for the whole batch in one
+	// cross-file StatMany sweep. events is index-aligned with unhealthyFiles.
+	discover := pool.New().WithMaxGoroutines(maxJobs)
 	for _, fileHealth := range unhealthyFiles {
 		fh := fileHealth // Capture for closure
-		p.Go(func() {
+		discover.Go(func() {
 			slog.InfoContext(ctx, "Checking unhealthy file", "file_path", fh.FilePath)
-
-			// Proactively discover metadata if missing (IDs first priority)
 			fh.Metadata = hw.ensureMetadata(ctx, fh)
-			// Perform check
-			opts := CheckOptions{}
-			event := hw.healthChecker.CheckFile(ctx, fh.FilePath, opts)
+		})
+	}
+	discover.Wait()
 
+	paths := make([]string, len(unhealthyFiles))
+	for i, fh := range unhealthyFiles {
+		paths[i] = fh.FilePath
+	}
+	events := hw.healthChecker.CheckFilesBatch(ctx, paths)
+
+	// Phase B: per-file result handling (repair side effects, ARR API calls,
+	// VFS notifications), bounded by maxJobs.
+	for i, fileHealth := range unhealthyFiles {
+		fh := fileHealth // Capture for closure
+		event := events[i]
+		p.Go(func() {
 			updatePtr, sideEffect := hw.prepareUpdateForResult(ctx, fh, event)
 			updatePtr.ExpectedStatus = &checkingStatus
 			if sideEffect != nil {
@@ -961,8 +984,18 @@ func applyRepairOutcome(update *database.HealthStatusUpdate, outcome repairOutco
 		update.Type = database.UpdateTypeCorrupted
 		update.Status = database.HealthStatusCorrupted
 		if err != nil {
-			errMsg := err.Error()
-			update.ErrorMessage = &errMsg
+			// Preserve the original health-check diagnosis (e.g. "missing N
+			// segments") instead of replacing it with the repair-trigger
+			// failure — losing the root cause makes the UI show only an
+			// unrelated ARR error with no indication of why the file was
+			// flagged corrupted in the first place.
+			repairErr := err.Error()
+			if update.ErrorMessage != nil && *update.ErrorMessage != "" {
+				combined := fmt.Sprintf("%s (repair failed: %s)", *update.ErrorMessage, repairErr)
+				update.ErrorMessage = &combined
+			} else {
+				update.ErrorMessage = &repairErr
+			}
 		}
 	case repairOutcomeDeferred:
 		// The ARR was only temporarily unreachable. Keep the file in repair_triggered

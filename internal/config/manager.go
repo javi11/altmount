@@ -346,6 +346,7 @@ type HealthConfig struct {
 	CleanupOrphanedMetadata             *bool        `yaml:"cleanup_orphaned_metadata" mapstructure:"cleanup_orphaned_metadata" json:"cleanup_orphaned_metadata,omitempty"`
 	CheckIntervalSeconds                int          `yaml:"check_interval_seconds" mapstructure:"check_interval_seconds" json:"check_interval_seconds,omitempty"`
 	MaxConnectionsForHealthChecks       int          `yaml:"max_connections_for_health_checks" mapstructure:"max_connections_for_health_checks" json:"max_connections_for_health_checks,omitempty"`
+	CheckBatchSize                      int          `yaml:"check_batch_size" mapstructure:"check_batch_size" json:"check_batch_size,omitempty"`
 	MaxConcurrentJobs                   int          `yaml:"max_concurrent_jobs" mapstructure:"max_concurrent_jobs" json:"max_concurrent_jobs,omitempty"`
 	SegmentSamplePercentage             int          `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage,omitempty"`
 	MaxRetries                          int          `yaml:"max_retries" mapstructure:"max_retries" json:"max_retries"`
@@ -371,6 +372,7 @@ type ProviderConfig struct {
 	Password                 string     `yaml:"password" mapstructure:"password" json:"-"`
 	MaxConnections           int        `yaml:"max_connections" mapstructure:"max_connections" json:"max_connections"`
 	InflightRequests         int        `yaml:"inflight_requests" mapstructure:"inflight_requests" json:"inflight_requests"`
+	StatInflightRequests     int        `yaml:"stat_inflight_requests" mapstructure:"stat_inflight_requests" json:"stat_inflight_requests"`
 	TLS                      bool       `yaml:"tls" mapstructure:"tls" json:"tls"`
 	InsecureTLS              bool       `yaml:"insecure_tls" mapstructure:"insecure_tls" json:"insecure_tls"`
 	ProxyURL                 string     `yaml:"proxy_url" mapstructure:"proxy_url" json:"proxy_url,omitempty"`
@@ -909,6 +911,9 @@ func (c *Config) Validate() error {
 		if provider.InflightRequests <= 0 {
 			c.Providers[i].InflightRequests = 10
 		}
+		if provider.StatInflightRequests <= 0 {
+			c.Providers[i].StatInflightRequests = 100
+		}
 	}
 
 	// Validate Fuse configuration
@@ -1019,6 +1024,11 @@ func (p *ProviderConfig) ToNNTPProvider() nntppool.Provider {
 		inflight = 10
 	}
 
+	statInflight := p.StatInflightRequests
+	if statInflight <= 0 {
+		statInflight = 100
+	}
+
 	return nntppool.Provider{
 		Host:              host,
 		TLSConfig:         tlsCfg,
@@ -1026,6 +1036,7 @@ func (p *ProviderConfig) ToNNTPProvider() nntppool.Provider {
 		Connections:       p.MaxConnections,
 		Backup:            isBackup,
 		Inflight:          inflight,
+		StatInflight:      statInflight,
 		IdleTimeout:       60 * time.Second,
 		SkipPing:          p.SkipPing,
 		KeepaliveInterval: time.Duration(p.KeepaliveIntervalSeconds) * time.Second,
@@ -1103,6 +1114,7 @@ func providersFieldsEqual(a, b ProviderConfig) bool {
 		a.Password == b.Password &&
 		a.MaxConnections == b.MaxConnections &&
 		a.InflightRequests == b.InflightRequests &&
+		a.StatInflightRequests == b.StatInflightRequests &&
 		a.TLS == b.TLS &&
 		a.InsecureTLS == b.InsecureTLS &&
 		a.ProxyURL == b.ProxyURL &&
@@ -1589,7 +1601,8 @@ func DefaultConfig(configDir ...string) *Config {
 			Enabled:                             &healthEnabled,           // Disabled by default
 			CleanupOrphanedMetadata:             &cleanupOrphanedMetadata, // Disabled by default
 			CheckIntervalSeconds:                5,
-			MaxConnectionsForHealthChecks:       5,
+			MaxConnectionsForHealthChecks:       100,
+			CheckBatchSize:                      50,
 			MaxConcurrentJobs:                   1,                      // Default: 1 concurrent job
 			SegmentSamplePercentage:             5,                      // Default: 5% segment sampling
 			LibrarySyncIntervalMinutes:          360,                    // Default: sync every 6 hours
@@ -1651,7 +1664,7 @@ func DefaultConfig(configDir ...string) *Config {
 			ReadarrInstances:               []ArrsInstanceConfig{},
 			WhisparrInstances:              []ArrsInstanceConfig{},
 			SportarrInstances:              []ArrsInstanceConfig{},
-			QueueCleanupGracePeriodMinutes: 5,     // Default to 5 minutes stuck before acting
+			QueueCleanupGracePeriodMinutes: 5, // Default to 5 minutes stuck before acting
 			QueueCleanupMaxFailures:        0, // Failure circuit breaker disabled by default
 			// Rule table modeled on wArrden's queue cleanup. Action decides what to do:
 			// blocklist_search (bad release → block + re-search), blocklist (block but

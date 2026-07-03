@@ -5,13 +5,12 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand"
-	"sync/atomic"
 	"time"
 
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
-	concpool "github.com/sourcegraph/conc/pool"
+	"github.com/javi11/nntppool/v4"
 )
 
 var randPerm = rand.Perm
@@ -61,53 +60,158 @@ func ValidateSegmentAvailabilityDetailed(
 	segmentsToValidate := selectSegmentsForValidation(segments, samplePercentage)
 	result.TotalChecked = len(segmentsToValidate)
 
-	var validatedCount int32
-	var missingCount int32
-	missingChan := make(chan string, len(segmentsToValidate))
-
-	// No WithFirstError: we want to check all selected segments, not fail fast.
-	pl := concpool.New().WithErrors().WithMaxGoroutines(maxConnections)
-	for _, seg := range segmentsToValidate {
-		pl.Go(func() error {
-			checkCtx, cancel := context.WithTimeout(ctx, timeout)
-			defer cancel()
-
-			var err error
-			_, err = usenetPool.Stat(checkCtx, seg.Id)
-			if err == nil {
-				poolManager.IncArticlesDownloaded()
-				poolManager.UpdateDownloadProgress("", 100)
-			}
-			if err != nil {
-				slog.DebugContext(checkCtx, "missing segment",
-					"segment_id", seg.Id,
-					"error", err,
-				)
-				atomic.AddInt32(&missingCount, 1)
-				missingChan <- seg.Id
-				return nil // continue checking remaining segments
-			}
-
-			if progressTracker != nil {
-				count := atomic.AddInt32(&validatedCount, 1)
-				progressTracker.Update(int(count), result.TotalChecked)
-			}
-
-			return nil
-		})
+	if maxConnections <= 0 {
+		maxConnections = 1
 	}
 
-	_ = pl.Wait()
-	close(missingChan)
+	ids := make([]string, len(segmentsToValidate))
+	for i, seg := range segmentsToValidate {
+		ids[i] = seg.Id
+	}
 
-	result.MissingCount = int(missingCount)
-	for id := range missingChan {
-		if len(result.MissingIDs) < 50 { // cap stored IDs to avoid huge metadata blobs
-			result.MissingIDs = append(result.MissingIDs, id)
+	statCtx, cancel := context.WithTimeout(ctx, pool.StatManyTimeout(len(ids), maxConnections, timeout))
+	defer cancel()
+
+	var validatedCount int
+	for r := range usenetPool.StatMany(statCtx, ids, nntppool.StatManyOptions{Concurrency: maxConnections}) {
+		if r.Err != nil {
+			slog.DebugContext(ctx, "missing segment",
+				"segment_id", r.MessageID,
+				"error", r.Err,
+			)
+			result.MissingCount++
+			if len(result.MissingIDs) < 50 { // cap stored IDs to avoid huge metadata blobs
+				result.MissingIDs = append(result.MissingIDs, r.MessageID)
+			}
+			continue
+		}
+
+		poolManager.IncArticlesDownloaded()
+		poolManager.UpdateDownloadProgress("", 100)
+
+		if progressTracker != nil {
+			validatedCount++
+			progressTracker.Update(validatedCount, result.TotalChecked)
 		}
 	}
 
 	return result, nil
+}
+
+// ValidateSegmentAvailabilityBatch checks pre-sampled segment IDs for many files
+// in a single StatMany sweep. perFileIDs is index-aligned with the returned
+// results: files with an empty ID list yield a zero ValidationResult. IDs are
+// interleaved round-robin across files (every file's first sample, then every
+// file's second, …) so one file with many segments cannot serialize the sweep
+// for the others. An error is returned only for infrastructure failures (pool
+// unavailable); per-segment misses are reported in the per-file results.
+func ValidateSegmentAvailabilityBatch(
+	ctx context.Context,
+	perFileIDs [][]string,
+	poolManager pool.Manager,
+	maxConnections int,
+	timeout time.Duration,
+) ([]ValidationResult, error) {
+	results := make([]ValidationResult, len(perFileIDs))
+	for i := range results {
+		results[i].MissingIDs = []string{}
+		results[i].TotalChecked = len(perFileIDs[i])
+	}
+
+	total := 0
+	maxSamples := 0
+	for _, ids := range perFileIDs {
+		total += len(ids)
+		if len(ids) > maxSamples {
+			maxSamples = len(ids)
+		}
+	}
+	if total == 0 {
+		return results, nil
+	}
+
+	usenetPool, err := poolManager.GetPool()
+	if err != nil {
+		return results, fmt.Errorf("cannot validate segments: usenet connection pool unavailable: %w", err)
+	}
+	if usenetPool == nil {
+		return results, fmt.Errorf("cannot validate segments: usenet connection pool is nil")
+	}
+
+	if maxConnections <= 0 {
+		maxConnections = 1
+	}
+
+	// Round-robin interleave IDs across files. Results stream out of order from
+	// StatMany, so ownership is resolved by ID: owners maps each message-id to
+	// the file indexes that reference it (FIFO pop per result, so duplicate IDs
+	// shared across files each get their own attribution).
+	ids := make([]string, 0, total)
+	owners := make(map[string][]int, total)
+	for round := 0; round < maxSamples; round++ {
+		for fileIdx, fileIDs := range perFileIDs {
+			if round < len(fileIDs) {
+				id := fileIDs[round]
+				ids = append(ids, id)
+				owners[id] = append(owners[id], fileIdx)
+			}
+		}
+	}
+
+	statCtx, cancel := context.WithTimeout(ctx, pool.StatManyTimeout(len(ids), maxConnections, timeout))
+	defer cancel()
+
+	nonEmptyFiles := 0
+	for _, fileIDs := range perFileIDs {
+		if len(fileIDs) > 0 {
+			nonEmptyFiles++
+		}
+	}
+
+	sweepStart := time.Now()
+	slog.InfoContext(ctx, "Starting STAT sweep",
+		"files", nonEmptyFiles,
+		"segments", len(ids),
+		"concurrency", maxConnections,
+	)
+
+	for r := range usenetPool.StatMany(statCtx, ids, nntppool.StatManyOptions{Concurrency: maxConnections}) {
+		owner := owners[r.MessageID]
+		if len(owner) == 0 {
+			// Unknown ID — should not happen, but never panic on pool output.
+			continue
+		}
+		fileIdx := owner[0]
+		owners[r.MessageID] = owner[1:]
+
+		if r.Err != nil {
+			slog.DebugContext(ctx, "missing segment",
+				"segment_id", r.MessageID,
+				"error", r.Err,
+			)
+			results[fileIdx].MissingCount++
+			if len(results[fileIdx].MissingIDs) < 50 { // cap stored IDs to avoid huge metadata blobs
+				results[fileIdx].MissingIDs = append(results[fileIdx].MissingIDs, r.MessageID)
+			}
+			continue
+		}
+
+		poolManager.IncArticlesDownloaded()
+		poolManager.UpdateDownloadProgress("", 100)
+	}
+
+	missingTotal := 0
+	for _, r := range results {
+		missingTotal += r.MissingCount
+	}
+	slog.InfoContext(ctx, "STAT sweep completed",
+		"files", nonEmptyFiles,
+		"segments", len(ids),
+		"missing", missingTotal,
+		"duration", time.Since(sweepStart),
+	)
+
+	return results, nil
 }
 
 // selectSegmentsForValidation determines which segments to validate based on validation mode and sample percentage.

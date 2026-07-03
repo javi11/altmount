@@ -14,6 +14,7 @@ import (
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/usenet"
 	"github.com/javi11/altmount/pkg/rclonecli"
+	concpool "github.com/sourcegraph/conc/pool"
 )
 
 // EventType represents the type of health event
@@ -70,18 +71,46 @@ func NewHealthChecker(
 
 // healthCheckInput holds the fields extracted from FileMetadata that the
 // health check path actually needs. Passing this lean struct — instead of the
-// full *metapb.FileMetadata — lets the proto wrapper be GC'd while
-// ValidateSegmentAvailabilityDetailed performs long-running NNTP stat
-// round-trips. Only SegmentData must remain referenced for the validation
-// window (it holds the message IDs being checked); everything else is scalar.
+// full *metapb.FileMetadata — lets the proto wrapper be GC'd while the NNTP
+// stat sweep performs long-running round-trips. Only SegmentData must remain
+// referenced until sampling copies the message IDs; everything else is scalar.
 type healthCheckInput struct {
 	fileSize      int64
 	sourceNzbPath string
 	segments      []*metapb.SegmentData
 }
 
-// CheckFile checks the health of a specific file
-func (hc *HealthChecker) CheckFile(ctx context.Context, filePath string, opts ...CheckOptions) HealthEvent {
+// preparedCheck is the outcome of the per-file preparation stage shared by the
+// single-file and batch check paths: either an early terminal event (metadata
+// missing/corrupt, no segments) or the sampled segment IDs to Stat. Only the
+// ID strings survive past preparation, so the proto segment slice is
+// collectible before the network sweep begins.
+type preparedCheck struct {
+	filePath      string
+	sourceNzbPath string
+	sampledIDs    []string
+	earlyEvent    *HealthEvent
+}
+
+// baseResultEvent builds the shared HealthEvent skeleton. SourceNzbPath is
+// copied to an independent string so the event does not retain a pointer into
+// the original proto (which would keep the whole message alive through any
+// downstream consumer of the event).
+func baseResultEvent(filePath, sourceNzbPath string) HealthEvent {
+	sourceNzb := sourceNzbPath
+	return HealthEvent{
+		FilePath:  filePath,
+		Timestamp: time.Now(),
+		SourceNzb: &sourceNzb,
+	}
+}
+
+// prepareCheck runs the local (non-network) stages of a health check: metadata
+// read, integrity verification, and segment sampling. It returns either an
+// early terminal event or the sampled segment IDs for the network sweep.
+func (hc *HealthChecker) prepareCheck(ctx context.Context, filePath string, opts ...CheckOptions) preparedCheck {
+	prep := preparedCheck{filePath: filePath}
+
 	// Get file metadata
 	fileMeta, err := hc.metadataService.ReadFileMetadata(filePath)
 	if err != nil {
@@ -94,7 +123,8 @@ func (hc *HealthChecker) CheckFile(ctx context.Context, filePath string, opts ..
 		}
 		details := fmt.Sprintf(`{"error": "metadata_read_failed", "message": %q}`, err.Error())
 		event.Details = &details
-		return event
+		prep.earlyEvent = &event
+		return prep
 	}
 	if fileMeta == nil {
 		// File not found - remove from health database
@@ -102,13 +132,15 @@ func (hc *HealthChecker) CheckFile(ctx context.Context, filePath string, opts ..
 			slog.ErrorContext(ctx, "Failed to delete health record for removed file", "file_path", filePath, "error", err)
 		}
 
-		return HealthEvent{
+		event := HealthEvent{
 			Type:      EventTypeFileRemoved,
 			FilePath:  filePath,
 			Status:    database.HealthStatusCorrupted,
 			Error:     fmt.Errorf("file not found: %s", filePath),
 			Timestamp: time.Now(),
 		}
+		prep.earlyEvent = &event
+		return prep
 	}
 
 	// Extract only the fields needed for validation. The local fileMeta pointer
@@ -122,27 +154,15 @@ func (hc *HealthChecker) CheckFile(ctx context.Context, filePath string, opts ..
 	}
 	fileMeta = nil //nolint:ineffassign // explicit drop so the proto can be collected
 
-	// Perform the health check
-	return hc.checkSingleFile(ctx, filePath, input, opts...)
-}
-
-// checkSingleFile performs a health check on a single file
-func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, input healthCheckInput, opts ...CheckOptions) HealthEvent {
-	// Copy SourceNzbPath to an independent string so HealthEvent does not
-	// retain a pointer into the original proto (which would keep the whole
-	// message alive through any downstream consumer of the event).
-	sourceNzb := input.sourceNzbPath
-	event := HealthEvent{
-		FilePath:  filePath,
-		Timestamp: time.Now(),
-		SourceNzb: &sourceNzb,
-	}
+	prep.sourceNzbPath = input.sourceNzbPath
 
 	if len(input.segments) == 0 {
+		event := baseResultEvent(filePath, input.sourceNzbPath)
 		event.Type = EventTypeCheckFailed
 		event.Status = database.HealthStatusCorrupted
 		event.Error = fmt.Errorf("no segment data available")
-		return event
+		prep.earlyEvent = &event
+		return prep
 	}
 
 	cfg := hc.configGetter()
@@ -158,45 +178,52 @@ func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, i
 		slog.InfoContext(ctx, "Forcing full health check (100% sampling)", "file_path", filePath)
 	}
 
-	ctx = context.WithValue(ctx, "file_path", filePath)
-	ctx = context.WithValue(ctx, "total_segments", len(input.segments))
-	ctx = context.WithValue(ctx, "sample_percentage", samplePercentage)
-
-	slog.InfoContext(ctx, "Checking segment availability")
+	slog.InfoContext(ctx, "Checking segment availability",
+		"file_path", filePath,
+		"total_segments", len(input.segments),
+		"sample_percentage", samplePercentage)
 
 	// 1. Metadata integrity check - Verify the entire file map is complete
 	loader := &metadataSegmentLoader{segments: input.segments}
 	if err := usenet.CheckMetadataIntegrity(input.fileSize, loader); err != nil {
+		event := baseResultEvent(filePath, input.sourceNzbPath)
 		event.Type = EventTypeFileCorrupted
 		event.Status = database.HealthStatusCorrupted
 		event.Error = fmt.Errorf("metadata corruption: %w", err)
 		details := fmt.Sprintf(`{"error": "metadata_gap", "message": %q}`, err.Error())
 		event.Details = &details
-		return event
+		prep.earlyEvent = &event
+		return prep
 	}
 
-	// 2. Network availability check - Validate segment availability using detailed validation logic
-	result, err := usenet.ValidateSegmentAvailabilityDetailed(
-		ctx,
-		input.segments,
-		hc.poolManager,
-		cfg.GetMaxConnectionsForHealthChecks(),
-		samplePercentage,
-		nil, // No progress callback for health checks
-		cfg.GetHealthReadTimeout(),
-	)
+	// Sample and copy the message IDs so the proto segment slice becomes
+	// collectible before the network sweep begins.
+	selected := usenet.SelectSegmentsForValidation(input.segments, samplePercentage)
+	prep.sampledIDs = make([]string, len(selected))
+	for i, seg := range selected {
+		prep.sampledIDs[i] = seg.Id
+	}
 
-	if err != nil {
+	return prep
+}
+
+// judgeValidation turns a prepared check's segment-sweep outcome into the
+// terminal HealthEvent, mirroring the pre-batch per-file semantics exactly.
+func judgeValidation(prep preparedCheck, result usenet.ValidationResult, valErr error) HealthEvent {
+	event := baseResultEvent(prep.filePath, prep.sourceNzbPath)
+
+	if valErr != nil {
 		event.Type = EventTypeCheckFailed
 		event.Status = database.HealthStatusCorrupted
-		event.Error = fmt.Errorf("failed to validate segments: %w", err)
+		event.Error = fmt.Errorf("failed to validate segments: %w", valErr)
 		return event
 	}
 
 	if result.MissingCount > 0 {
 		event.Type = EventTypeFileCorrupted
 		event.Status = database.HealthStatusCorrupted
-		event.Error = fmt.Errorf("missing %d segments", result.MissingCount)
+		event.Error = fmt.Errorf("%d of %d checked segments are missing from your Usenet provider",
+			result.MissingCount, result.TotalChecked)
 		return event
 	}
 
@@ -205,6 +232,85 @@ func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, i
 	// Status not needed as the record will be deleted from database
 
 	return event
+}
+
+// CheckFile checks the health of a specific file
+func (hc *HealthChecker) CheckFile(ctx context.Context, filePath string, opts ...CheckOptions) HealthEvent {
+	prep := hc.prepareCheck(ctx, filePath, opts...)
+	if prep.earlyEvent != nil {
+		return *prep.earlyEvent
+	}
+
+	cfg := hc.configGetter()
+	results, err := usenet.ValidateSegmentAvailabilityBatch(
+		ctx,
+		[][]string{prep.sampledIDs},
+		hc.poolManager,
+		cfg.GetMaxConnectionsForHealthChecks(),
+		cfg.GetHealthReadTimeout(),
+	)
+
+	var result usenet.ValidationResult
+	if err == nil {
+		result = results[0]
+	}
+	return judgeValidation(prep, result, err)
+}
+
+// prepareConcurrency bounds the parallel metadata-read phase of a batch check.
+// Preparation is local disk I/O, so a small constant keeps seek pressure sane
+// regardless of batch size.
+const prepareConcurrency = 8
+
+// CheckFilesBatch checks many files in one cycle: per-file preparation runs in
+// a small parallel pool, then every prepared file's sampled segments are
+// verified in a single cross-file StatMany sweep, and each file receives its
+// own HealthEvent (index-aligned with filePaths). A sweep infrastructure
+// failure (pool unavailable) yields a CheckFailed event for every file that
+// reached the network stage; per-file early events are unaffected.
+func (hc *HealthChecker) CheckFilesBatch(ctx context.Context, filePaths []string, opts ...CheckOptions) []HealthEvent {
+	if len(filePaths) == 0 {
+		return nil
+	}
+
+	preps := make([]preparedCheck, len(filePaths))
+	pl := concpool.New().WithMaxGoroutines(min(len(filePaths), prepareConcurrency))
+	for i, filePath := range filePaths {
+		pl.Go(func() {
+			preps[i] = hc.prepareCheck(ctx, filePath, opts...)
+		})
+	}
+	pl.Wait()
+
+	perFileIDs := make([][]string, len(preps))
+	for i := range preps {
+		if preps[i].earlyEvent == nil {
+			perFileIDs[i] = preps[i].sampledIDs
+		}
+	}
+
+	cfg := hc.configGetter()
+	results, valErr := usenet.ValidateSegmentAvailabilityBatch(
+		ctx,
+		perFileIDs,
+		hc.poolManager,
+		cfg.GetMaxConnectionsForHealthChecks(),
+		cfg.GetHealthReadTimeout(),
+	)
+
+	events := make([]HealthEvent, len(preps))
+	for i := range preps {
+		if preps[i].earlyEvent != nil {
+			events[i] = *preps[i].earlyEvent
+			continue
+		}
+		var result usenet.ValidationResult
+		if valErr == nil {
+			result = results[i]
+		}
+		events[i] = judgeValidation(preps[i], result, valErr)
+	}
+	return events
 }
 
 // NotifyRcloneVFS notifies rclone VFS about a file status change (async, non-blocking)
