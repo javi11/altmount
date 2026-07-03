@@ -660,13 +660,13 @@ export function HealthConfigSection({
 									<input
 										type="number"
 										className="input input-bordered w-full bg-base-100 font-mono text-sm"
-										value={formData.max_connections_for_health_checks ?? 5}
+										value={formData.max_connections_for_health_checks ?? 100}
 										disabled={isReadOnly}
 										min={1}
 										onChange={(e) =>
 											handleInputChange(
 												"max_connections_for_health_checks",
-												Number.parseInt(e.target.value, 10) || 5,
+												Number.parseInt(e.target.value, 10) || 100,
 											)
 										}
 									/>

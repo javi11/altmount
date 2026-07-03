@@ -480,25 +480,26 @@ func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 
 	// Decode create request
 	var createReq struct {
-		Name                    string `json:"name"`
-		Host                    string `json:"host"`
-		Port                    int    `json:"port"`
-		Username                string `json:"username"`
-		Password                string `json:"password"`
-		MaxConnections          int    `json:"max_connections"`
-		InflightRequests        int    `json:"inflight_requests"`
-		TLS                     bool   `json:"tls"`
-		InsecureTLS             bool   `json:"insecure_tls"`
-		ProxyURL                string `json:"proxy_url"`
-		Enabled                 bool   `json:"enabled"`
-		IsBackupProvider        bool   `json:"is_backup_provider"`
-		SkipPing                bool   `json:"skip_ping"`
-		KeepaliveIntervalSeconds int   `json:"keepalive_interval_seconds"`
-		KeepaliveCommand        string `json:"keepalive_command"`
-		UserAgent               string `json:"user_agent"`
-		QuotaBytes              int64  `json:"quota_bytes"`
-		QuotaPeriodHours        int    `json:"quota_period_hours"`
-		AccountExpirationDate   string `json:"account_expiration_date"`
+		Name                     string `json:"name"`
+		Host                     string `json:"host"`
+		Port                     int    `json:"port"`
+		Username                 string `json:"username"`
+		Password                 string `json:"password"`
+		MaxConnections           int    `json:"max_connections"`
+		InflightRequests         int    `json:"inflight_requests"`
+		StatInflightRequests     int    `json:"stat_inflight_requests"`
+		TLS                      bool   `json:"tls"`
+		InsecureTLS              bool   `json:"insecure_tls"`
+		ProxyURL                 string `json:"proxy_url"`
+		Enabled                  bool   `json:"enabled"`
+		IsBackupProvider         bool   `json:"is_backup_provider"`
+		SkipPing                 bool   `json:"skip_ping"`
+		KeepaliveIntervalSeconds int    `json:"keepalive_interval_seconds"`
+		KeepaliveCommand         string `json:"keepalive_command"`
+		UserAgent                string `json:"user_agent"`
+		QuotaBytes               int64  `json:"quota_bytes"`
+		QuotaPeriodHours         int    `json:"quota_period_hours"`
+		AccountExpirationDate    string `json:"account_expiration_date"`
 	}
 
 	if err := c.BodyParser(&createReq); err != nil {
@@ -532,6 +533,7 @@ func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 		Password:                 createReq.Password,
 		MaxConnections:           createReq.MaxConnections,
 		InflightRequests:         createReq.InflightRequests,
+		StatInflightRequests:     createReq.StatInflightRequests,
 		TLS:                      createReq.TLS,
 		InsecureTLS:              createReq.InsecureTLS,
 		ProxyURL:                 createReq.ProxyURL,
@@ -581,6 +583,7 @@ func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 		Enabled:                  newProvider.Enabled != nil && *newProvider.Enabled,
 		IsBackupProvider:         newProvider.IsBackupProvider != nil && *newProvider.IsBackupProvider,
 		InflightRequests:         newProvider.InflightRequests,
+		StatInflightRequests:     newProvider.StatInflightRequests,
 		LastRTTMs:                newProvider.LastRTTMs,
 		SkipPing:                 newProvider.SkipPing,
 		KeepaliveIntervalSeconds: newProvider.KeepaliveIntervalSeconds,
@@ -647,6 +650,7 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 		Password                 *string `json:"password,omitempty"`
 		MaxConnections           *int    `json:"max_connections,omitempty"`
 		InflightRequests         *int    `json:"inflight_requests,omitempty"`
+		StatInflightRequests     *int    `json:"stat_inflight_requests,omitempty"`
 		TLS                      *bool   `json:"tls,omitempty"`
 		InsecureTLS              *bool   `json:"insecure_tls,omitempty"`
 		ProxyURL                 *string `json:"proxy_url,omitempty"`
@@ -701,6 +705,9 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 	}
 	if updateReq.InflightRequests != nil {
 		provider.InflightRequests = *updateReq.InflightRequests
+	}
+	if updateReq.StatInflightRequests != nil {
+		provider.StatInflightRequests = *updateReq.StatInflightRequests
 	}
 	if updateReq.TLS != nil {
 		provider.TLS = *updateReq.TLS
@@ -776,6 +783,7 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 		Enabled:                  provider.Enabled != nil && *provider.Enabled,
 		IsBackupProvider:         provider.IsBackupProvider != nil && *provider.IsBackupProvider,
 		InflightRequests:         provider.InflightRequests,
+		StatInflightRequests:     provider.StatInflightRequests,
 		LastRTTMs:                provider.LastRTTMs,
 		SkipPing:                 provider.SkipPing,
 		KeepaliveIntervalSeconds: provider.KeepaliveIntervalSeconds,
@@ -988,20 +996,21 @@ func (s *Server) handleReorderProviders(c *fiber.Ctx) error {
 	providers := make([]ProviderAPIResponse, len(newProviders))
 	for i, p := range newProviders {
 		providers[i] = ProviderAPIResponse{
-			ID:               p.ID,
-			Name:             p.Name,
-			Host:             p.Host,
-			Port:             p.Port,
-			Username:         p.Username,
-			MaxConnections:   p.MaxConnections,
-			TLS:              p.TLS,
-			InsecureTLS:      p.InsecureTLS,
-			ProxyURL:         p.ProxyURL,
-			PasswordSet:      p.Password != "",
-			Enabled:          p.Enabled != nil && *p.Enabled,
-			IsBackupProvider: p.IsBackupProvider != nil && *p.IsBackupProvider,
-			InflightRequests: p.InflightRequests,
-			LastRTTMs:        p.LastRTTMs,
+			ID:                    p.ID,
+			Name:                  p.Name,
+			Host:                  p.Host,
+			Port:                  p.Port,
+			Username:              p.Username,
+			MaxConnections:        p.MaxConnections,
+			TLS:                   p.TLS,
+			InsecureTLS:           p.InsecureTLS,
+			ProxyURL:              p.ProxyURL,
+			PasswordSet:           p.Password != "",
+			Enabled:               p.Enabled != nil && *p.Enabled,
+			IsBackupProvider:      p.IsBackupProvider != nil && *p.IsBackupProvider,
+			InflightRequests:      p.InflightRequests,
+			StatInflightRequests:  p.StatInflightRequests,
+			LastRTTMs:             p.LastRTTMs,
 			AccountExpirationDate: p.AccountExpirationDate,
 		}
 	}

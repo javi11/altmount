@@ -25,6 +25,7 @@ const defaultFormData: ProviderFormData = {
 	password: "",
 	max_connections: 10,
 	inflight_requests: 10,
+	stat_inflight_requests: 100,
 	tls: false,
 	insecure_tls: false,
 	proxy_url: "",
@@ -72,6 +73,7 @@ export function ProviderModal({
 				password: "", // Always start with empty password for security
 				max_connections: provider.max_connections,
 				inflight_requests: provider.inflight_requests || 10,
+				stat_inflight_requests: provider.stat_inflight_requests || 100,
 				tls: provider.tls,
 				insecure_tls: provider.insecure_tls,
 				proxy_url: provider.proxy_url || "",
@@ -187,6 +189,8 @@ export function ProviderModal({
 					updateData.max_connections = formData.max_connections;
 				if (formData.inflight_requests !== provider.inflight_requests)
 					updateData.inflight_requests = formData.inflight_requests;
+				if (formData.stat_inflight_requests !== provider.stat_inflight_requests)
+					updateData.stat_inflight_requests = formData.stat_inflight_requests;
 				if (formData.tls !== provider.tls) updateData.tls = formData.tls;
 				if (formData.insecure_tls !== provider.insecure_tls)
 					updateData.insecure_tls = formData.insecure_tls;
@@ -309,6 +313,29 @@ export function ProviderModal({
 								min={1}
 								max={100}
 							/>
+						</fieldset>
+
+						<fieldset className="fieldset sm:col-span-2">
+							<legend className="fieldset-legend font-bold">Stat Pipeline (Inflight)</legend>
+							<input
+								id="stat_inflight_requests"
+								type="number"
+								className="input input-bordered w-full max-w-[10rem] font-mono text-sm"
+								value={formData.stat_inflight_requests}
+								onChange={(e) =>
+									handleInputChange(
+										"stat_inflight_requests",
+										Number.parseInt(e.target.value, 10) || 1,
+									)
+								}
+								min={1}
+								max={1000}
+							/>
+							<p className="label mt-1 block text-balance break-words text-base-content/70 text-xs">
+								Pipeline depth for bodyless STAT commands (existence checks). Since STAT carries no
+								payload, this can run much deeper than the BODY pipeline above without inflating
+								memory use.
+							</p>
 						</fieldset>
 
 						<fieldset className="fieldset">

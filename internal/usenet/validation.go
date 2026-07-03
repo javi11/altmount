@@ -98,6 +98,97 @@ func ValidateSegmentAvailabilityDetailed(
 	return result, nil
 }
 
+// ValidateSegmentAvailabilityBatch checks pre-sampled segment IDs for many files
+// in a single StatMany sweep. perFileIDs is index-aligned with the returned
+// results: files with an empty ID list yield a zero ValidationResult. IDs are
+// interleaved round-robin across files (every file's first sample, then every
+// file's second, …) so one file with many segments cannot serialize the sweep
+// for the others. An error is returned only for infrastructure failures (pool
+// unavailable); per-segment misses are reported in the per-file results.
+func ValidateSegmentAvailabilityBatch(
+	ctx context.Context,
+	perFileIDs [][]string,
+	poolManager pool.Manager,
+	maxConnections int,
+	timeout time.Duration,
+) ([]ValidationResult, error) {
+	results := make([]ValidationResult, len(perFileIDs))
+	for i := range results {
+		results[i].MissingIDs = []string{}
+		results[i].TotalChecked = len(perFileIDs[i])
+	}
+
+	total := 0
+	maxSamples := 0
+	for _, ids := range perFileIDs {
+		total += len(ids)
+		if len(ids) > maxSamples {
+			maxSamples = len(ids)
+		}
+	}
+	if total == 0 {
+		return results, nil
+	}
+
+	usenetPool, err := poolManager.GetPool()
+	if err != nil {
+		return results, fmt.Errorf("cannot validate segments: usenet connection pool unavailable: %w", err)
+	}
+	if usenetPool == nil {
+		return results, fmt.Errorf("cannot validate segments: usenet connection pool is nil")
+	}
+
+	if maxConnections <= 0 {
+		maxConnections = 1
+	}
+
+	// Round-robin interleave IDs across files. Results stream out of order from
+	// StatMany, so ownership is resolved by ID: owners maps each message-id to
+	// the file indexes that reference it (FIFO pop per result, so duplicate IDs
+	// shared across files each get their own attribution).
+	ids := make([]string, 0, total)
+	owners := make(map[string][]int, total)
+	for round := 0; round < maxSamples; round++ {
+		for fileIdx, fileIDs := range perFileIDs {
+			if round < len(fileIDs) {
+				id := fileIDs[round]
+				ids = append(ids, id)
+				owners[id] = append(owners[id], fileIdx)
+			}
+		}
+	}
+
+	statCtx, cancel := context.WithTimeout(ctx, pool.StatManyTimeout(len(ids), maxConnections, timeout))
+	defer cancel()
+
+	for r := range usenetPool.StatMany(statCtx, ids, nntppool.StatManyOptions{Concurrency: maxConnections}) {
+		owner := owners[r.MessageID]
+		if len(owner) == 0 {
+			// Unknown ID — should not happen, but never panic on pool output.
+			continue
+		}
+		fileIdx := owner[0]
+		owners[r.MessageID] = owner[1:]
+
+		if r.Err != nil {
+			slog.DebugContext(ctx, "missing segment",
+				"segment_id", r.MessageID,
+				"error", r.Err,
+			)
+			results[fileIdx].MissingCount++
+			if len(results[fileIdx].MissingIDs) < 50 { // cap stored IDs to avoid huge metadata blobs
+				results[fileIdx].MissingIDs = append(results[fileIdx].MissingIDs, r.MessageID)
+			}
+			continue
+		}
+
+		poolManager.IncArticlesDownloaded()
+		poolManager.UpdateDownloadProgress("", 100)
+	}
+
+	return results, nil
+}
+
 // selectSegmentsForValidation determines which segments to validate based on validation mode and sample percentage.
 // For full validation, returns all segments. For sampling, uses a strategic approach that:
 // - Validates first 3 segments (DMCA/takedown detection)

@@ -41,6 +41,12 @@ const (
 	WorkerStatusStopping WorkerStatus = "stopping"
 )
 
+// checkBatchSize is how many due files each health cycle fetches and sweeps in
+// one cross-file StatMany call. 50 files × 5–55 sampled segments ≈ 250–2750
+// STATs per sweep, enough to saturate the pool's STAT pipeline at the default
+// 100-way concurrency. Deliberately not a config knob until someone needs it.
+const checkBatchSize = 50
+
 // WorkerStats represents statistics about the health worker
 type WorkerStats struct {
 	Status                 WorkerStatus `json:"status"`
@@ -728,7 +734,12 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 
 	// Get files due for checking (ordered by scheduled_check_at)
 	// New logic: Only check files with library_path (imported) unless strategy is NONE
-	unhealthyFiles, err := hw.healthRepo.GetUnhealthyFiles(ctx, maxJobs, strategy, libraryDir, hw.configGetter().GetMaxRetries())
+	// The fetch limit is intentionally larger than maxJobs: segment availability
+	// for the whole batch is verified in one cross-file StatMany sweep
+	// (CheckFilesBatch), so NNTP throughput no longer depends on per-file job
+	// concurrency. maxJobs still bounds the per-file result handling below
+	// (repair side effects, ARR API calls).
+	unhealthyFiles, err := hw.healthRepo.GetUnhealthyFiles(ctx, checkBatchSize, strategy, libraryDir, hw.configGetter().GetMaxRetries())
 	if err != nil {
 		return fmt.Errorf("failed to get unhealthy files: %w", err)
 	}
@@ -785,18 +796,31 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 	// recheck that lands mid-check is not silently clobbered by a stale check result.
 	checkingStatus := database.HealthStatusChecking
 
-	// Process health check files
+	// Phase A: proactive metadata discovery (may hit ARR APIs — bounded by
+	// maxJobs), then verify segment availability for the whole batch in one
+	// cross-file StatMany sweep. events is index-aligned with unhealthyFiles.
+	discover := pool.New().WithMaxGoroutines(maxJobs)
 	for _, fileHealth := range unhealthyFiles {
 		fh := fileHealth // Capture for closure
-		p.Go(func() {
+		discover.Go(func() {
 			slog.InfoContext(ctx, "Checking unhealthy file", "file_path", fh.FilePath)
-
-			// Proactively discover metadata if missing (IDs first priority)
 			fh.Metadata = hw.ensureMetadata(ctx, fh)
-			// Perform check
-			opts := CheckOptions{}
-			event := hw.healthChecker.CheckFile(ctx, fh.FilePath, opts)
+		})
+	}
+	discover.Wait()
 
+	paths := make([]string, len(unhealthyFiles))
+	for i, fh := range unhealthyFiles {
+		paths[i] = fh.FilePath
+	}
+	events := hw.healthChecker.CheckFilesBatch(ctx, paths)
+
+	// Phase B: per-file result handling (repair side effects, ARR API calls,
+	// VFS notifications), bounded by maxJobs.
+	for i, fileHealth := range unhealthyFiles {
+		fh := fileHealth // Capture for closure
+		event := events[i]
+		p.Go(func() {
 			updatePtr, sideEffect := hw.prepareUpdateForResult(ctx, fh, event)
 			updatePtr.ExpectedStatus = &checkingStatus
 			if sideEffect != nil {
