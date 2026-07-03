@@ -2,114 +2,100 @@ package mediaprobe
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"io"
+
+	mp4 "github.com/abema/go-mp4"
 )
 
-const (
-	// maxTopLevelBoxes bounds the walk; real files have well under 100
-	// top-level boxes (fragmented MP4s with thousands of moof boxes are
-	// aborted rather than walked exhaustively).
-	maxTopLevelBoxes = 512
-	// maxMoovChildren bounds the one-level descent used to locate mvhd.
-	maxMoovChildren = 128
-)
+// maxTopLevelBoxes bounds the walk; real files have well under 100
+// top-level boxes (fragmented MP4s with thousands of moof boxes are
+// aborted rather than walked exhaustively).
+const maxTopLevelBoxes = 512
 
-type mp4Box struct {
-	fourcc     string
-	start, end int64 // inclusive box extent, header included
-	dataStart  int64 // first byte after the (possibly extended) header
-}
-
-// probeMP4 walks the top-level box tree and maps ftyp/moov as critical and
-// everything else (mdat, free, skip, udta, meta, moof, sidx, ...) as payload:
-// players resolve samples via moov's absolute offsets, so losing non-moov
-// bytes glitches playback rather than breaking it.
+// probeMP4 walks the top-level box tree (via github.com/abema/go-mp4, which
+// handles box-header quirks — largesize, extends-to-EOF, versioned boxes —
+// so this code only decides what each box means) and maps ftyp/moov as
+// critical and everything else (mdat, free, skip, udta, meta, moof, sidx as
+// seek-only, ...) as payload: players resolve samples via moov's absolute
+// offsets, so losing non-moov bytes glitches playback rather than breaking it.
 func probeMP4(ctx context.Context, r io.ReaderAt, fileSize int64) (*Structure, error) {
-	var boxes []mp4Box
-	pos := int64(0)
-	for pos < fileSize {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		if len(boxes) >= maxTopLevelBoxes {
-			return nil, fmt.Errorf("mp4: more than %d top-level boxes", maxTopLevelBoxes)
-		}
-		box, err := readMP4BoxHeader(r, pos, fileSize)
-		if err != nil {
-			return nil, err
-		}
-		boxes = append(boxes, box)
-		pos = box.end + 1
-	}
+	sr := io.NewSectionReader(r, 0, fileSize)
 
 	s := &Structure{Container: "mp4", FileSize: fileSize}
 	sawFtyp, sawMoov := false, false
-	for _, b := range boxes {
-		br := ByteRange{Start: b.start, End: b.end, Label: b.fourcc}
-		switch b.fourcc {
+	topLevelCount := 0
+
+	_, err := mp4.ReadBoxStructure(sr, func(h *mp4.ReadHandle) (any, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
+		// h.Path includes the current box as its last element, so a
+		// top-level box has len(h.Path) == 1 and a direct child of moov has
+		// len(h.Path) == 2 with h.Path[0] == moov.
+		//
+		// Locate mvhd (the one child of moov we care about) to read the
+		// movie duration. Everything else under moov (trak sample tables,
+		// udta, ...) is left unexpanded: we only need moov's own byte range,
+		// not its payload.
+		if len(h.Path) == 2 && h.Path[0] == mp4.BoxTypeMoov() && h.BoxInfo.Type == mp4.BoxTypeMvhd() {
+			box, _, err := h.ReadPayload()
+			if err != nil {
+				return nil, fmt.Errorf("mp4: read mvhd: %w", err)
+			}
+			if mvhd, ok := box.(*mp4.Mvhd); ok && mvhd.Timescale != 0 {
+				s.DurationSeconds = float64(mvhd.GetDuration()) / float64(mvhd.Timescale)
+			}
+			return nil, nil
+		}
+		if len(h.Path) != 1 {
+			return nil, nil // not top-level, and not moov/mvhd above — skip
+		}
+
+		// Top-level box.
+		topLevelCount++
+		if topLevelCount > maxTopLevelBoxes {
+			return nil, fmt.Errorf("mp4: more than %d top-level boxes", maxTopLevelBoxes)
+		}
+		fourcc := h.BoxInfo.Type.String()
+		if !isPrintableFourCC(fourcc) {
+			return nil, fmt.Errorf("mp4: invalid box type %q at %d", fourcc, h.BoxInfo.Offset)
+		}
+
+		start := int64(h.BoxInfo.Offset)
+		end := start + int64(h.BoxInfo.Size) - 1
+		if h.BoxInfo.ExtendToEOF {
+			end = fileSize - 1
+		}
+		if end >= fileSize || end < start {
+			return nil, fmt.Errorf("mp4: box %q at %d exceeds file size", fourcc, start)
+		}
+		br := ByteRange{Start: start, End: end, Label: fourcc}
+
+		switch fourcc {
 		case "ftyp", "styp":
 			sawFtyp = true
 			s.Critical = append(s.Critical, br)
+			return nil, nil
 		case "moov":
 			sawMoov = true
 			s.Critical = append(s.Critical, br)
+			return h.Expand() // descend one level to find mvhd
 		case "sidx":
 			s.SeekOnly = append(s.SeekOnly, br)
 		default:
 			s.Payload = append(s.Payload, br)
 		}
+		return nil, nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("mp4: %w", err)
 	}
 	if !sawFtyp || !sawMoov {
 		return nil, fmt.Errorf("mp4: missing required top-level boxes (ftyp=%v moov=%v)", sawFtyp, sawMoov)
 	}
-
-	for _, b := range boxes {
-		if b.fourcc == "moov" {
-			if dur, err := readMP4Duration(r, b); err == nil {
-				s.DurationSeconds = dur
-			}
-			break
-		}
-	}
 	return s, nil
-}
-
-// readMP4BoxHeader reads and validates one box header at pos.
-func readMP4BoxHeader(r io.ReaderAt, pos, fileSize int64) (mp4Box, error) {
-	var hdr [8]byte
-	if _, err := r.ReadAt(hdr[:], pos); err != nil {
-		return mp4Box{}, fmt.Errorf("mp4: read box header at %d: %w", pos, err)
-	}
-	size := int64(binary.BigEndian.Uint32(hdr[:4]))
-	fourcc := string(hdr[4:8])
-	if !isPrintableFourCC(fourcc) {
-		return mp4Box{}, fmt.Errorf("mp4: invalid box type %q at %d", fourcc, pos)
-	}
-	dataStart := pos + 8
-	switch size {
-	case 0: // box extends to end of file
-		size = fileSize - pos
-	case 1: // 64-bit largesize follows
-		var ext [8]byte
-		if _, err := r.ReadAt(ext[:], pos+8); err != nil {
-			return mp4Box{}, fmt.Errorf("mp4: read largesize at %d: %w", pos+8, err)
-		}
-		size = int64(binary.BigEndian.Uint64(ext[:]))
-		dataStart = pos + 16
-		if size < 16 {
-			return mp4Box{}, fmt.Errorf("mp4: invalid largesize %d at %d", size, pos)
-		}
-	default:
-		if size < 8 {
-			return mp4Box{}, fmt.Errorf("mp4: invalid box size %d at %d", size, pos)
-		}
-	}
-	if pos+size > fileSize {
-		return mp4Box{}, fmt.Errorf("mp4: box %q at %d exceeds file size", fourcc, pos)
-	}
-	return mp4Box{fourcc: fourcc, start: pos, end: pos + size - 1, dataStart: dataStart}, nil
 }
 
 func isPrintableFourCC(s string) bool {
@@ -124,50 +110,4 @@ func isPrintableFourCC(s string) bool {
 		}
 	}
 	return true
-}
-
-// readMP4Duration descends one level into moov to find mvhd and returns the
-// presentation duration in seconds.
-func readMP4Duration(r io.ReaderAt, moov mp4Box) (float64, error) {
-	pos := moov.dataStart
-	for n := 0; pos < moov.end && n < maxMoovChildren; n++ {
-		child, err := readMP4BoxHeader(r, pos, moov.end+1)
-		if err != nil {
-			return 0, err
-		}
-		if child.fourcc == "mvhd" {
-			var vf [4]byte
-			if _, err := r.ReadAt(vf[:], child.dataStart); err != nil {
-				return 0, err
-			}
-			switch vf[0] {
-			case 0:
-				var buf [8]byte // timescale(4) + duration(4)
-				if _, err := r.ReadAt(buf[:], child.dataStart+12); err != nil {
-					return 0, err
-				}
-				timescale := binary.BigEndian.Uint32(buf[:4])
-				duration := binary.BigEndian.Uint32(buf[4:])
-				if timescale == 0 {
-					return 0, fmt.Errorf("mp4: mvhd timescale is zero")
-				}
-				return float64(duration) / float64(timescale), nil
-			case 1:
-				var buf [12]byte // timescale(4) + duration(8)
-				if _, err := r.ReadAt(buf[:], child.dataStart+20); err != nil {
-					return 0, err
-				}
-				timescale := binary.BigEndian.Uint32(buf[:4])
-				duration := binary.BigEndian.Uint64(buf[4:])
-				if timescale == 0 {
-					return 0, fmt.Errorf("mp4: mvhd timescale is zero")
-				}
-				return float64(duration) / float64(timescale), nil
-			default:
-				return 0, fmt.Errorf("mp4: unsupported mvhd version %d", vf[0])
-			}
-		}
-		pos = child.end + 1
-	}
-	return 0, fmt.Errorf("mp4: mvhd not found in moov")
 }

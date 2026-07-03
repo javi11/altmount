@@ -12,6 +12,7 @@ tool (
 
 require (
 	github.com/Max-Sum/base32768 v0.0.0-20230304063302-18e6ce5945fd
+	github.com/abema/go-mp4 v1.7.1
 	github.com/avast/retry-go/v4 v4.6.1
 	github.com/go-pkgz/auth/v2 v2.0.0
 	github.com/gofiber/fiber/v2 v2.52.9
