@@ -264,6 +264,7 @@ func (c *SegmentCache) LoadCatalog() {
 
 	data, err := os.ReadFile(catalogPath)
 	if err != nil {
+		// No existing catalog; start fresh.
 		return
 	}
 
