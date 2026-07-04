@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/avast/retry-go/v4"
+	"github.com/javi11/altmount/internal/holes"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/slogutil"
 	"github.com/javi11/nntppool/v4"
@@ -36,6 +37,33 @@ type MetricsTracker interface {
 type SegmentStore interface {
 	Get(messageID string) ([]byte, bool)
 	Put(messageID string, data []byte) error
+}
+
+// HoleHooks lets the owner of a reader decide, synchronously, what happens
+// when a segment is confirmed missing (ErrArticleNotFound — never retried).
+// The reader stays dumb: it asks, the owner accounts, persists and
+// transitions health status. Segments approved for padding are zero-filled
+// in place so the read loop never sees an error and playback continues.
+// Both callbacks run on download goroutines: they must be concurrency-safe
+// and fast (no network).
+type HoleHooks struct {
+	// OnHole returns the pad/fail decision for a missing segment, identified
+	// by its index in the file's segment space.
+	OnHole func(segIndex int, segID string) holes.Decision
+	// KnownHoles reports segments already known missing: those are
+	// zero-filled immediately, without any fetch (replay pre-pad).
+	KnownHoles func(segIndex int) bool
+}
+
+// ReaderOption customizes a UsenetReader.
+type ReaderOption func(*UsenetReader)
+
+// WithHoleHooks enables zero-filling of confirmed-missing segments under the
+// owner's control. Without it, a missing segment fails the read as always.
+func WithHoleHooks(h *HoleHooks) ReaderOption {
+	return func(r *UsenetReader) {
+		r.holeHooks = h
+	}
 }
 
 type DataCorruptionError struct {
@@ -72,6 +100,7 @@ type UsenetReader struct {
 	metricsTracker MetricsTracker
 	streamID       string
 	segmentStore   SegmentStore // optional, nil = no caching
+	holeHooks      *HoleHooks   // optional, nil = missing segments fail the read
 	cond           *sync.Cond   // Signals downloadManager when reader advances
 
 	// Prefetch-based download tracking
@@ -91,6 +120,7 @@ func NewUsenetReader(
 	metricsTracker MetricsTracker,
 	streamID string,
 	segmentStore SegmentStore,
+	opts ...ReaderOption,
 ) (*UsenetReader, error) {
 	log := slog.Default().With("component", "usenet-reader")
 	ctx, cancel := context.WithCancel(ctx)
@@ -110,6 +140,9 @@ func NewUsenetReader(
 		metricsTracker: metricsTracker,
 		streamID:       streamID,
 		segmentStore:   segmentStore,
+	}
+	for _, opt := range opts {
+		opt(ur)
 	}
 
 	ur.cond = sync.NewCond(&ur.mu)
@@ -312,6 +345,13 @@ func (b *UsenetReader) Read(p []byte) (int, error) {
 
 // isArticleNotFoundError checks if the error indicates articles were not found in providers
 func (b *UsenetReader) isArticleNotFoundError(err error) bool {
+	return errors.Is(err, nntppool.ErrArticleNotFound)
+}
+
+// IsArticleNotFound reports whether err stems from an article missing on all
+// providers (permanent, never retried) — the only failure the hole model
+// treats as a hole.
+func IsArticleNotFound(err error) bool {
 	return errors.Is(err, nntppool.ErrArticleNotFound)
 }
 
@@ -523,9 +563,28 @@ func (b *UsenetReader) downloadManager(ctx context.Context) {
 			}()
 
 			taskCtx := slogutil.With(ctx, "segment_id", s.Id, "segment_idx", segIdx)
+
+			// Replay pre-pad: a segment already known missing (persisted hole
+			// map) zero-fills immediately, with no fetch round-trip.
+			if b.holeHooks != nil && b.holeHooks.KnownHoles != nil && b.holeHooks.KnownHoles(s.loaderIdx) {
+				b.log.DebugContext(taskCtx, "zero-filling known-missing segment without fetch")
+				s.SetData(make([]byte, s.End+1))
+				return
+			}
+
 			data, err := b.downloadSegmentWithRetry(taskCtx, s)
 
 			if err != nil {
+				// A confirmed-missing article may be zero-filled instead of
+				// failing the stream, when the owner's hole hook approves.
+				if b.holeHooks != nil && b.holeHooks.OnHole != nil &&
+					errors.Is(err, nntppool.ErrArticleNotFound) &&
+					b.holeHooks.OnHole(s.loaderIdx, s.Id) == holes.DecisionPad {
+					b.log.InfoContext(taskCtx, "zero-filling missing segment",
+						"file_segment_index", s.loaderIdx)
+					s.SetData(make([]byte, s.End+1))
+					return
+				}
 				s.SetError(err)
 			} else {
 				s.SetData(data)

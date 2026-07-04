@@ -21,7 +21,7 @@ import (
 	"github.com/javi11/altmount/internal/encryption"
 	"github.com/javi11/altmount/internal/encryption/aes"
 	"github.com/javi11/altmount/internal/encryption/rclone"
-	"github.com/javi11/altmount/internal/mediaprobe"
+	"github.com/javi11/altmount/internal/holes"
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/nzbfilesystem/segcache"
@@ -260,7 +260,7 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 		SegmentData:    fileMeta.SegmentData,
 		NestedSources:  fileMeta.NestedSources,
 		ClipBoundaries: fileMeta.ClipBoundaries,
-		MediaStructure: fileMeta.MediaStructure,
+		KnownHoles:     fileMeta.KnownHoles,
 	}
 
 	// Create a metadata-based virtual file handle
@@ -776,9 +776,9 @@ type fileHandleMeta struct {
 	// feature. Non-empty enables the continuous-timeline TS remux on reads;
 	// empty (every other file) bypasses it entirely.
 	ClipBoundaries []*metapb.ClipBoundary
-	// MediaStructure is the container layout probed at import time (nil until
-	// the first probe); it classifies streaming failures offline.
-	MediaStructure *metapb.MediaStructure
+	// KnownHoles is the persisted hole map: segments confirmed missing on all
+	// providers, zero-filled during streaming without a fetch round-trip.
+	KnownHoles []*metapb.HoleRun
 }
 
 // MetadataVirtualFile implements afero.File for metadata-backed virtual files
@@ -854,6 +854,14 @@ type MetadataVirtualFile struct {
 	// randomReadCache coalesces small random ReadAts within the same
 	// segment. Lazily initialized; held under mvf.mu.
 	randomReadCache *lru.Cache[int, []byte]
+
+	// Hole padding state (see holes.go). holeAcc accumulates confirmed
+	// missing segments for this handle, seeded from meta.KnownHoles; holeMu
+	// guards it (hole hooks run on download goroutines).
+	holeMu       sync.Mutex
+	holeAcc      *holes.Accumulator
+	holeHooksVal *usenet.HoleHooks
+	holeOnce     sync.Once
 }
 
 // randomReadCacheSize bounds the per-file ephemeral-read cache. 8
@@ -1788,7 +1796,11 @@ func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, e
 		}
 	}
 
-	ur, err := usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxPrefetch, mvf.streamTracker, mvf.streamID, mvf.segmentStore)
+	// Hole hooks enable on-the-fly zero-fill of confirmed-missing segments
+	// for eligible video files (nil for everything else — reads fail as
+	// always). See holes.go.
+	ur, err := usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxPrefetch, mvf.streamTracker, mvf.streamID, mvf.segmentStore,
+		usenet.WithHoleHooks(mvf.holeHooks()))
 	if err != nil {
 		return nil, err
 	}
@@ -2074,12 +2086,13 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 	cfg := mvf.configGetter()
 	healthEnabled := cfg.GetHealthEnabled()
 
-	// Classify playback impact first (fast when a structure was probed at
-	// import time; bounded lazy probe otherwise) — the verdict decides whether
-	// this failure triggers a repair at all.
+	// Classify playback impact via the hole model — the verdict decides
+	// whether this failure triggers a repair at all. Note that with hole
+	// hooks wired, within-caps misses are zero-filled and never reach this
+	// path; a degraded verdict here is the exception (e.g. hooks disabled).
 	classification := mvf.classifyStreamingFailure(dataCorruptionErr)
 	isDegraded := healthEnabled && classification != nil &&
-		classification.Verdict == mediaprobe.VerdictDegraded
+		classification.Verdict == holes.VerdictDegraded
 
 	// Any file with missing segments or corruption is marked as corrupted in metadata
 	// and DB so it stays visible on the Health page, regardless of whether repair runs.
@@ -2121,7 +2134,8 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 		// re-checks it on its normal schedule.
 		slog.InfoContext(ctx, "Streaming failure classified as degraded (still playable), skipping repair",
 			"file", mvf.name,
-			"reason", classification.Reason)
+			"total_missing", classification.TotalMissing,
+			"longest_run", classification.LongestRun)
 		dbStatus = database.HealthStatusDegraded
 	} else if healthEnabled {
 		// Mark as repair_triggered with high priority to trigger the replacement immediately.

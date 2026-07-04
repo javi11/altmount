@@ -83,15 +83,6 @@ func (c *Config) GetCheckAllSegments() bool {
 	return *c.Health.CheckAllSegments
 }
 
-// GetMediaProbeEnabled returns whether video container probing (playback-impact
-// classification) is enabled for health checks and streaming failures.
-func (c *Config) GetMediaProbeEnabled() bool {
-	if c.Health.MediaProbeEnabled == nil {
-		return true // Default: true
-	}
-	return *c.Health.MediaProbeEnabled
-}
-
 // GetHealthReadTimeout returns the health check read timeout as a duration with a default fallback.
 func (c *Config) GetHealthReadTimeout() time.Duration {
 	if c.Health.ReadTimeoutSeconds <= 0 {
@@ -117,6 +108,13 @@ func (c *Config) GetMaxRepairRetries() int {
 }
 
 // Import config accessor methods.
+
+// GetImportDamagePolicyTolerant reports whether small confirmed damage on a
+// standalone video file should import as degraded (true, the default) instead
+// of failing the import (false, "strict").
+func (c *Config) GetImportDamagePolicyTolerant() bool {
+	return c.Import.DamagePolicy != "strict"
+}
 
 // GetMaxImportConnections returns max import connections with a default fallback.
 func (c *Config) GetMaxImportConnections() int {

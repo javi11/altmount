@@ -147,6 +147,10 @@ func FastFailReleaseProbe(
 type FastFailFileResult struct {
 	Broken            bool
 	MissingSegmentIDs []string // segment IDs whose Stat failed
+	// SampledCount is how many of the file's segments were Stat-checked (the
+	// sample size), needed to project the release-wide miss rate for the
+	// tolerant damage policy.
+	SampledCount int
 }
 
 // FastFailCheckFiles stats a per-file sample of segments from all files.
@@ -206,6 +210,7 @@ func FastFailCheckFiles(
 			continue
 		}
 		perFile[fileIdx] = selectFastFailSegments(file.Segments, segmentSamplePercentage)
+		results[fileIdx].SampledCount = len(perFile[fileIdx])
 		if len(perFile[fileIdx]) > maxSamples {
 			maxSamples = len(perFile[fileIdx])
 		}

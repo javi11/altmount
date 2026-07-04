@@ -11,7 +11,7 @@ import (
 func TestSegment_SetData_ThenGetReader(t *testing.T) {
 	t.Parallel()
 
-	seg := newSegment("test-segment", 0, 9, 10, nil)
+	seg := newSegment("test-segment", 0, 9, 10, nil, 0)
 
 	// Set data
 	seg.SetData([]byte("0123456789"))
@@ -36,7 +36,7 @@ func TestSegment_SetData_WithOffset(t *testing.T) {
 	t.Parallel()
 
 	// Segment reads bytes [3, 6] from a 10-byte segment
-	seg := newSegment("test-segment", 3, 6, 10, nil)
+	seg := newSegment("test-segment", 3, 6, 10, nil, 0)
 
 	seg.SetData([]byte("0123456789"))
 
@@ -58,7 +58,7 @@ func TestSegment_SetData_WithOffset(t *testing.T) {
 func TestSegment_SetError_PropagatesOnRead(t *testing.T) {
 	t.Parallel()
 
-	seg := newSegment("test-segment", 0, 100, 101, nil)
+	seg := newSegment("test-segment", 0, 100, 101, nil, 0)
 	testErr := errors.New("article not found in providers")
 
 	seg.SetError(testErr)
@@ -78,7 +78,7 @@ func TestSegment_SetError_PropagatesOnRead(t *testing.T) {
 func TestSegment_SetError_FirstWriteWins(t *testing.T) {
 	t.Parallel()
 
-	seg := newSegment("test-segment", 0, 100, 101, nil)
+	seg := newSegment("test-segment", 0, 100, 101, nil, 0)
 
 	firstErr := errors.New("first error")
 	secondErr := errors.New("second error")
@@ -96,7 +96,7 @@ func TestSegment_SetError_FirstWriteWins(t *testing.T) {
 func TestSegment_Close_Idempotent(t *testing.T) {
 	t.Parallel()
 
-	seg := newSegment("test-segment", 0, 100, 101, nil)
+	seg := newSegment("test-segment", 0, 100, 101, nil, 0)
 
 	for i := range 5 {
 		if err := seg.Close(); err != nil {
@@ -115,7 +115,7 @@ func TestSegment_Close_Idempotent(t *testing.T) {
 func TestSegment_Release_UnblocksGetReader(t *testing.T) {
 	t.Parallel()
 
-	seg := newSegment("test-segment", 0, 100, 101, nil)
+	seg := newSegment("test-segment", 0, 100, 101, nil, 0)
 
 	done := make(chan struct{})
 	go func() {
@@ -137,7 +137,7 @@ func TestSegment_Release_UnblocksGetReader(t *testing.T) {
 func TestSegment_SetData_AfterRelease(t *testing.T) {
 	t.Parallel()
 
-	seg := newSegment("test-segment", 0, 100, 101, nil)
+	seg := newSegment("test-segment", 0, 100, 101, nil, 0)
 	seg.Release()
 
 	// Should not panic
@@ -154,7 +154,7 @@ func TestSegment_SetData_AfterRelease(t *testing.T) {
 func TestSegment_DataLen(t *testing.T) {
 	t.Parallel()
 
-	seg := newSegment("test-segment", 0, 9, 10, nil)
+	seg := newSegment("test-segment", 0, 9, 10, nil, 0)
 
 	// Before data is set
 	if seg.DataLen() != 0 {
@@ -212,7 +212,7 @@ func TestSegment_ConcurrentSetDataAndGetReader(t *testing.T) {
 	t.Parallel()
 
 	for range 20 {
-		seg := newSegment("test-segment", 0, 9, 10, nil)
+		seg := newSegment("test-segment", 0, 9, 10, nil, 0)
 
 		var wg sync.WaitGroup
 
@@ -237,7 +237,7 @@ func TestSegment_ConcurrentSetErrorAndGetReader(t *testing.T) {
 	t.Parallel()
 
 	for range 20 {
-		seg := newSegment("test-segment", 0, 100, 101, nil)
+		seg := newSegment("test-segment", 0, 100, 101, nil, 0)
 		testErr := errors.New("concurrent error")
 
 		var wg sync.WaitGroup
@@ -267,7 +267,7 @@ func TestSegment_ConcurrentReleaseAndGetReader(t *testing.T) {
 	t.Parallel()
 
 	for range 20 {
-		seg := newSegment("test-segment", 0, 9, 10, nil)
+		seg := newSegment("test-segment", 0, 9, 10, nil, 0)
 
 		var wg sync.WaitGroup
 
@@ -299,7 +299,7 @@ func TestSegmentRangeClear_ContinuesOnAllSegments(t *testing.T) {
 
 	segments := make([]*segment, numSegments)
 	for i := range numSegments {
-		segments[i] = newSegment("segment-"+string(rune('0'+i)), 0, 100, 101, nil)
+		segments[i] = newSegment("segment-"+string(rune('0'+i)), 0, 100, 101, nil, 0)
 	}
 
 	// Pre-release segment 2 to simulate already-closed state
@@ -335,7 +335,7 @@ func TestSegmentRangeClear_AllSegmentsReleased(t *testing.T) {
 
 	segments := make([]*segment, numSegments)
 	for i := range numSegments {
-		segments[i] = newSegment("segment", 0, 100, 101, nil)
+		segments[i] = newSegment("segment", 0, 100, 101, nil, 0)
 	}
 
 	sr := &segmentRange{
@@ -369,9 +369,9 @@ func TestSegmentRangeClear_NilSegmentsHandled(t *testing.T) {
 	t.Parallel()
 
 	segments := []*segment{
-		newSegment("s1", 0, 100, 101, nil),
+		newSegment("s1", 0, 100, 101, nil, 0),
 		nil, // nil segment
-		newSegment("s2", 0, 100, 101, nil),
+		newSegment("s2", 0, 100, 101, nil, 0),
 	}
 
 	sr := &segmentRange{
@@ -432,7 +432,7 @@ func TestSegmentRangeClear_ConcurrentSafety(t *testing.T) {
 	segments := make([]*segment, numSegments)
 
 	for i := range numSegments {
-		segments[i] = newSegment("segment", 0, 100, 101, nil)
+		segments[i] = newSegment("segment", 0, 100, 101, nil, 0)
 	}
 
 	sr := &segmentRange{
@@ -456,7 +456,7 @@ func BenchmarkClear(b *testing.B) {
 		b.StopTimer()
 		segments := make([]*segment, 100)
 		for j := range 100 {
-			segments[j] = newSegment("segment", 0, 100, 101, nil)
+			segments[j] = newSegment("segment", 0, 100, 101, nil, 0)
 		}
 		sr := &segmentRange{segments: segments}
 		b.StartTimer()

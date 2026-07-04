@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/mediaprobe"
+	"github.com/javi11/altmount/internal/holes"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -29,7 +29,7 @@ func TestPrepareUpdateForResultDegraded(t *testing.T) {
 		Status:    database.HealthStatusPending,
 		CreatedAt: now,
 	}
-	corruptedEvent := func(cls *mediaprobe.Classification) HealthEvent {
+	corruptedEvent := func(cls *holes.Impact) HealthEvent {
 		return HealthEvent{
 			Type:           EventTypeFileCorrupted,
 			FilePath:       filePath,
@@ -42,9 +42,10 @@ func TestPrepareUpdateForResultDegraded(t *testing.T) {
 		fh := baseFH
 		fh.RetryCount = 99 // even with retries exhausted, degraded wins
 		update, sideEffect := env.hw.prepareUpdateForResult(context.Background(), &fh,
-			corruptedEvent(&mediaprobe.Classification{
-				Verdict: mediaprobe.VerdictDegraded,
-				Reason:  "missing ranges only intersect media payload",
+			corruptedEvent(&holes.Impact{
+				Verdict:      holes.VerdictDegraded,
+				TotalMissing: 2,
+				LongestRun:   1,
 			}))
 
 		assert.Equal(t, database.UpdateTypeDegraded, update.Type)
@@ -63,7 +64,7 @@ func TestPrepareUpdateForResultDegraded(t *testing.T) {
 		fh := baseFH
 		fh.Status = database.HealthStatusRepairTriggered
 		update, _ := env.hw.prepareUpdateForResult(context.Background(), &fh,
-			corruptedEvent(&mediaprobe.Classification{Verdict: mediaprobe.VerdictDegraded}))
+			corruptedEvent(&holes.Impact{Verdict: holes.VerdictDegraded}))
 		assert.NotEqual(t, database.UpdateTypeDegraded, update.Type,
 			"an already-triggered repair must not be downgraded")
 	})
@@ -71,7 +72,7 @@ func TestPrepareUpdateForResultDegraded(t *testing.T) {
 	t.Run("fatal verdict follows normal retry path", func(t *testing.T) {
 		fh := baseFH
 		update, _ := env.hw.prepareUpdateForResult(context.Background(), &fh,
-			corruptedEvent(&mediaprobe.Classification{Verdict: mediaprobe.VerdictFatal}))
+			corruptedEvent(&holes.Impact{Verdict: holes.VerdictFailed}))
 		assert.Equal(t, database.UpdateTypeRetry, update.Type)
 		assert.Equal(t, database.HealthStatusPending, update.Status)
 	})
@@ -79,7 +80,7 @@ func TestPrepareUpdateForResultDegraded(t *testing.T) {
 	t.Run("unknown verdict follows normal retry path", func(t *testing.T) {
 		fh := baseFH
 		update, _ := env.hw.prepareUpdateForResult(context.Background(), &fh,
-			corruptedEvent(&mediaprobe.Classification{Verdict: mediaprobe.VerdictUnknown}))
+			corruptedEvent(&holes.Impact{Verdict: holes.VerdictUnknown}))
 		assert.Equal(t, database.UpdateTypeRetry, update.Type)
 	})
 

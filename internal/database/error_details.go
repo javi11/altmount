@@ -3,7 +3,7 @@ package database
 import (
 	"encoding/json"
 
-	"github.com/javi11/altmount/internal/mediaprobe"
+	"github.com/javi11/altmount/internal/holes"
 )
 
 // HealthErrorDetails is the structured JSON stored in file_health.error_details.
@@ -11,12 +11,12 @@ import (
 // the frontend parses it to render playback-impact information. Legacy rows may
 // contain other ad-hoc JSON shapes or plain strings — parsers must tolerate that.
 type HealthErrorDetails struct {
-	ErrorType       string                     `json:"error_type"`
-	Message         string                     `json:"message,omitempty"`
-	MissingArticles int                        `json:"missing_articles,omitempty"`
-	TotalArticles   int                        `json:"total_articles,omitempty"`
-	Sampled         int                        `json:"sampled,omitempty"`
-	PlaybackImpact  *mediaprobe.Classification `json:"playback_impact,omitempty"`
+	ErrorType       string        `json:"error_type"`
+	Message         string        `json:"message,omitempty"`
+	MissingArticles int           `json:"missing_articles,omitempty"`
+	TotalArticles   int           `json:"total_articles,omitempty"`
+	Sampled         int           `json:"sampled,omitempty"`
+	PlaybackImpact  *holes.Impact `json:"playback_impact,omitempty"`
 }
 
 // Marshal renders the envelope for storage, returning nil on the (practically

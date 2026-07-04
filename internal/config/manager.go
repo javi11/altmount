@@ -317,6 +317,13 @@ type ImportConfig struct {
 	FilterSampleFiles                  *bool          `yaml:"filter_sample_files" mapstructure:"filter_sample_files" json:"filter_sample_files,omitempty"`
 	FailedItemRetentionHours           *int           `yaml:"failed_item_retention_hours" mapstructure:"failed_item_retention_hours" json:"failed_item_retention_hours,omitempty"`
 	HistoryRetentionDays               *int           `yaml:"history_retention_days" mapstructure:"history_retention_days" json:"history_retention_days,omitempty"`
+	// DamagePolicy governs standalone video files whose fast-fail sweep finds
+	// SMALL confirmed damage (within the playback padding caps, see
+	// internal/holes): "tolerant" (default) imports them as degraded so
+	// streaming zero-fills the gaps; "strict" fails the import so an ARR can
+	// grab a different release. Damage beyond the caps, archive-set members
+	// and non-video files fail either way.
+	DamagePolicy string `yaml:"damage_policy" mapstructure:"damage_policy" json:"damage_policy,omitempty"`
 }
 
 // LogConfig represents logging configuration with rotation support
@@ -357,7 +364,6 @@ type HealthConfig struct {
 	CheckAllSegments                    *bool        `yaml:"check_all_segments" mapstructure:"check_all_segments" json:"check_all_segments,omitempty"`
 	ReadTimeoutSeconds                  int          `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds,omitempty"`
 	AcceptableMissingSegmentsPercentage float64      `yaml:"acceptable_missing_segments_percentage" mapstructure:"acceptable_missing_segments_percentage" json:"acceptable_missing_segments_percentage"`
-	MediaProbeEnabled                   *bool        `yaml:"media_probe_enabled" mapstructure:"media_probe_enabled" json:"media_probe_enabled,omitempty"`
 	Repair                              RepairConfig `yaml:"repair" mapstructure:"repair" json:"repair"`
 }
 

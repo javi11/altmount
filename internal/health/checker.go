@@ -9,7 +9,7 @@ import (
 
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/mediaprobe"
+	"github.com/javi11/altmount/internal/holes"
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
@@ -38,8 +38,8 @@ type HealthEvent struct {
 	Timestamp time.Time
 	SourceNzb *string
 	// Classification is the playback-impact verdict for video files with
-	// missing segments (nil when not applicable or probing is disabled).
-	Classification *mediaprobe.Classification
+	// missing segments (nil when not applicable).
+	Classification *holes.Impact
 }
 
 // CheckOptions defines options for health checking
@@ -83,13 +83,12 @@ type healthCheckInput struct {
 	sourceNzbPath string
 	segments      []*metapb.SegmentData
 	encryption    metapb.Encryption
-	// mediaStructure is the container layout probed on a previous check
-	// (nil until the first successful probe). It is a separate allocation,
-	// so holding it does not keep the parent proto alive.
-	mediaStructure *metapb.MediaStructure
+	// knownHoles is the file's persisted hole map (segments confirmed
+	// missing by earlier sweeps or playback padding).
+	knownHoles []*metapb.HoleRun
 	// hasNestedOrRemuxedSources marks files whose bytes are not a plain
-	// segment concatenation (nested RAR sources, BD clip remux) — the
-	// container probe cannot read those through the segment loader.
+	// segment concatenation (nested RAR sources, BD clip remux) — those are
+	// never zero-filled, so hole classification does not apply.
 	hasNestedOrRemuxedSources bool
 }
 
@@ -165,11 +164,11 @@ func (hc *HealthChecker) prepareCheck(ctx context.Context, filePath string, opts
 	// (MessageState, unknownFields, sizeCache, Par2Files, NestedSources, etc.)
 	// is freed before NNTP stat round-trips begin.
 	input := healthCheckInput{
-		fileSize:       fileMeta.FileSize,
-		sourceNzbPath:  fileMeta.SourceNzbPath,
-		segments:       fileMeta.SegmentData,
-		encryption:     fileMeta.Encryption,
-		mediaStructure: fileMeta.MediaStructure,
+		fileSize:      fileMeta.FileSize,
+		sourceNzbPath: fileMeta.SourceNzbPath,
+		segments:      fileMeta.SegmentData,
+		encryption:    fileMeta.Encryption,
+		knownHoles:    fileMeta.KnownHoles,
 		hasNestedOrRemuxedSources: len(fileMeta.NestedSources) > 0 ||
 			len(fileMeta.SharedOuterSources) > 0 ||
 			len(fileMeta.ClipBoundaries) > 0,
@@ -234,9 +233,9 @@ func (hc *HealthChecker) prepareCheck(ctx context.Context, filePath string, opts
 
 // judgeValidation turns a prepared check's segment-sweep outcome into the
 // terminal HealthEvent, mirroring the pre-batch per-file semantics exactly.
-// It is a method (not a free function) because a missing-segment or
-// first-healthy-check outcome may need to classify playback impact or probe
-// the container, both of which re-read metadata via hc.metadataService.
+// It is a method (not a free function) because a missing-segment outcome
+// classifies playback impact via the hole model, which re-reads metadata
+// through hc.metadataService.
 func (hc *HealthChecker) judgeValidation(ctx context.Context, prep preparedCheck, result usenet.ValidationResult, valErr error) HealthEvent {
 	event := baseResultEvent(prep.filePath, prep.sourceNzbPath)
 
@@ -252,7 +251,7 @@ func (hc *HealthChecker) judgeValidation(ctx context.Context, prep preparedCheck
 		event.Status = database.HealthStatusCorrupted
 		event.Error = fmt.Errorf("%d of %d checked segments are missing from your Usenet provider",
 			result.MissingCount, result.TotalChecked)
-		event.Classification = hc.classifyPlaybackImpact(ctx, prep.filePath, result)
+		event.Classification = hc.classifyHoles(ctx, prep.filePath, result)
 		details := database.HealthErrorDetails{
 			ErrorType:       "missing_segments",
 			MissingArticles: result.MissingCount,
@@ -265,9 +264,8 @@ func (hc *HealthChecker) judgeValidation(ctx context.Context, prep preparedCheck
 	}
 
 	// All checked segments are available - record will be deleted.
-	// One-time post-import container probe: persist the layout map while all
-	// segments are alive so a later failure can be classified offline.
-	hc.maybeProbeStructure(ctx, prep.filePath)
+	// Persisted known holes (from playback padding) survive on purpose: a
+	// clean STAT sample never overrides observed misses.
 	event.Type = EventTypeFileHealthy
 	// Status not needed as the record will be deleted from database
 

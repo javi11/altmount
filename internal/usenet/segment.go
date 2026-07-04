@@ -133,7 +133,7 @@ func (r *segmentRange) createSegmentLocked(index int) *segment {
 		return nil
 	}
 
-	return newSegment(src.Id, readStart, readEnd, src.Size, groups)
+	return newSegment(src.Id, readStart, readEnd, src.Size, groups, loaderIdx)
 }
 
 func (r *segmentRange) Next() (*segment, error) {
@@ -194,6 +194,10 @@ type segment struct {
 	End         int64
 	SegmentSize int64
 	groups      []string
+	// loaderIdx is the segment's index in the loader's (file's) segment
+	// space, independent of the range-local position. Hole bookkeeping is
+	// keyed on it so persisted hole maps line up across reads.
+	loaderIdx int
 
 	// Data handoff fields (replaces io.Pipe)
 	data      []byte        // Downloaded segment data (set once by downloader)
@@ -208,13 +212,15 @@ type segment struct {
 }
 
 // newSegment creates a segment with an initialized dataReady channel.
-func newSegment(id string, start, end, segmentSize int64, groups []string) *segment {
+// loaderIdx is the segment's index in the loader's segment space.
+func newSegment(id string, start, end, segmentSize int64, groups []string, loaderIdx int) *segment {
 	return &segment{
 		Id:          id,
 		Start:       start,
 		End:         end,
 		SegmentSize: segmentSize,
 		groups:      groups,
+		loaderIdx:   loaderIdx,
 		dataReady:   make(chan struct{}),
 	}
 }

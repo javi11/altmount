@@ -222,26 +222,17 @@ export interface HealthStats {
 }
 
 // Playback-impact classification embedded in FileHealth.error_details JSON.
-export type PlaybackImpactVerdict = "fatal" | "degraded" | "unknown";
-
-export interface PlaybackImpactTimeRange {
-	from_sec: number;
-	to_sec: number;
-}
-
-export interface PlaybackImpactByteRange {
-	start: number;
-	end: number;
-	label?: string;
-}
+// Produced by the hole model (internal/holes): "degraded" files are still
+// playable (streaming zero-fills the missing segments), "failed" are not.
+export type PlaybackImpactVerdict = "clean" | "degraded" | "failed" | "unknown";
 
 export interface PlaybackImpact {
 	verdict: PlaybackImpactVerdict;
-	container?: string;
-	reason: string;
-	missing_ranges?: PlaybackImpactByteRange[];
-	affected_time?: PlaybackImpactTimeRange[];
-	duration_seconds?: number;
+	total_missing?: number;
+	longest_run?: number;
+	sampled?: number;
+	total_segments?: number;
+	padded_ratio?: number;
 }
 
 // Structured envelope stored in FileHealth.error_details. Legacy records may

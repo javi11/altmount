@@ -16,6 +16,7 @@ import (
 
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/holes"
 	"github.com/javi11/altmount/internal/importer/archive"
 	"github.com/javi11/altmount/internal/importer/archive/rar"
 	"github.com/javi11/altmount/internal/importer/archive/sevenzip"
@@ -270,6 +271,7 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 	brokenIdx := make(map[int]struct{})
 	missingIDs := make(map[string]struct{})
 	eligibleRegularCount := 0
+	tolerant := cfg.GetImportDamagePolicyTolerant()
 
 	for i, result := range results {
 		f := n.Files[i]
@@ -280,6 +282,30 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 		}
 
 		if result.Broken && !isPar2 {
+			// Tolerant damage policy: a standalone video file with SMALL
+			// confirmed damage imports as degraded rather than being dropped.
+			// Streaming zero-fills the gaps and the immediate post-import
+			// health check discovers + persists the holes and flags it
+			// degraded. Archive-set members (GroupKey != "") stay binary — a
+			// holed volume corrupts extraction and cannot be padded.
+			if tolerant && fastFailFiles[i].GroupKey == "" && holes.EligibleFile(f.Filename) {
+				verdict := holes.ClassifyProjected(
+					len(result.MissingSegmentIDs),
+					result.SampledCount,
+					len(f.Segments),
+					longestSampledRun(fastFailFiles[i].Segments, result.MissingSegmentIDs),
+				)
+				if verdict == holes.VerdictDegraded {
+					if proc.log != nil {
+						proc.log.InfoContext(ctx, "Importing video file as degraded despite missing segments (tolerant damage policy)",
+							"file", f.Filename,
+							"missing_sampled", len(result.MissingSegmentIDs),
+							"sampled", result.SampledCount)
+					}
+					continue // not broken: let it import
+				}
+			}
+
 			brokenIdx[i] = struct{}{}
 			for _, id := range result.MissingSegmentIDs {
 				missingIDs[id] = struct{}{}
@@ -316,6 +342,28 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 	}
 
 	return brokenIdx, missingIDs, nil
+}
+
+// longestSampledRun maps missing segment IDs back to their indices in the
+// file's segment list and returns the longest run of consecutive missing
+// indices among the sampled set. Because the fast-fail sample is sparse this
+// is usually 1; a longer measured run is a strong signal the file is
+// unwatchable and must fail even under the tolerant policy.
+func longestSampledRun(segments []*metapb.SegmentData, missingIDs []string) int {
+	if len(missingIDs) == 0 {
+		return 0
+	}
+	indexByID := make(map[string]int, len(segments))
+	for i, s := range segments {
+		indexByID[s.Id] = i
+	}
+	var acc holes.Accumulator
+	for _, id := range missingIDs {
+		if idx, ok := indexByID[id]; ok {
+			acc.Add(idx)
+		}
+	}
+	return acc.LongestRun()
 }
 
 // fastFailConcurrency returns the goroutine cap for the fast-fail Stat sweep.

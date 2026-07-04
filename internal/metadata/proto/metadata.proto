@@ -66,25 +66,13 @@ message ClipBoundary {
   int64 delta_90k = 2;
 }
 
-// ProbeRange is an inclusive byte range within the virtual file, labeled with
-// the container structure it covers (e.g. "moov", "Tracks", "Clusters").
-message ProbeRange {
-  int64 start = 1;
-  int64 end = 2;
-  string label = 3;
-}
-
-// MediaStructure is the container layout map of a video file, probed once
-// (typically on the first post-import health check). It lets a later missing-
-// segment event be classified offline: losing bytes in a critical range breaks
-// playback, payload ranges only glitch it, seek_only ranges break seeking.
-// Absent for non-video files (zero overhead, same pattern as clip_boundaries).
-message MediaStructure {
-  string container = 1;          // "mp4" | "mkv"
-  double duration_seconds = 2;   // 0 when unknown
-  repeated ProbeRange critical = 3;
-  repeated ProbeRange payload = 4;
-  repeated ProbeRange seek_only = 5;
+// HoleRun is a run of consecutive segments confirmed missing on every
+// provider (a "hole"). Persisted so streaming can zero-fill known holes
+// without a wasted network round-trip (replay pre-pad) and so health checks
+// accumulate damage across sweeps. Empty for undamaged files (zero overhead).
+message HoleRun {
+  int64 start_segment = 1;  // first missing segment index
+  int64 count = 2;          // number of consecutive missing segments
 }
 
 // FileMetadata represents a single virtual file in the filesystem
@@ -127,7 +115,7 @@ message FileMetadata {
   string store_ref = 18;               // id/path of the shared NzbStore
   repeated SegmentRef segment_refs = 19; // v3 replacement for segment_data
   repeated SegmentRun segment_runs = 20; // compact run encoding; preferred over segment_refs when present
-  MediaStructure media_structure = 21;  // probed container layout for playback-impact classification (video only)
+  repeated HoleRun known_holes = 21;    // segments confirmed missing on all providers (zero-filled during playback)
 }
 
 // --- v3 shared-store types ---

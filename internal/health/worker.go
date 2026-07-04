@@ -16,8 +16,8 @@ import (
 	"github.com/javi11/altmount/internal/arrs/model"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/holes"
 	"github.com/javi11/altmount/internal/importer"
-	"github.com/javi11/altmount/internal/mediaprobe"
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/progress"
@@ -431,12 +431,12 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 	update.ErrorMessage = errorMsg
 	update.ErrorDetails = event.Details
 
-	// Degraded verdict: the missing segments only hit media payload, so the
-	// file still plays (short glitch / broken seeking). Record it as degraded
-	// — no repair trigger, no safety-folder move, periodic re-check — unless a
-	// repair is already in flight, in which case the repair flow wins.
+	// Degraded verdict: the confirmed holes are within the padding caps, so
+	// the file still plays (streaming zero-fills the gaps). Record it as
+	// degraded — no repair trigger, no safety-folder move, periodic re-check —
+	// unless a repair is already in flight, in which case the repair flow wins.
 	if event.Classification != nil &&
-		event.Classification.Verdict == mediaprobe.VerdictDegraded &&
+		event.Classification.Verdict == holes.VerdictDegraded &&
 		fh.Status != database.HealthStatusRepairTriggered {
 		releaseDate := fh.ReleaseDate
 		if releaseDate == nil {
@@ -449,9 +449,10 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 		update.ScheduledCheckAt = nextCheck
 
 		sideEffect = func() error {
-			slog.InfoContext(ctx, "File degraded: missing segments only affect media payload, skipping repair",
+			slog.InfoContext(ctx, "File degraded: missing segments are within padding caps, skipping repair",
 				"file_path", fh.FilePath,
-				"reason", event.Classification.Reason,
+				"total_missing", event.Classification.TotalMissing,
+				"longest_run", event.Classification.LongestRun,
 				"next_check", nextCheck)
 			return hw.metadataService.UpdateFileStatus(fh.FilePath, metapb.FileStatus_FILE_STATUS_DEGRADED)
 		}
