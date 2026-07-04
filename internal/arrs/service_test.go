@@ -8,6 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func boolPtr(b bool) *bool { return &b }
+
 func TestFindInstanceForFilePath(t *testing.T) {
 	// This test is limited because it requires actual Radarr/Sonarr clients or complex mocks
 	// But we can at least verify it compiles and handles basic logic if we were to mock the clients.
@@ -20,7 +22,7 @@ func TestFindInstanceForFilePath(t *testing.T) {
 					Name:    "radarr-test",
 					URL:     "http://localhost:7878",
 					APIKey:  "apikey",
-					Enabled: new(true),
+					Enabled: boolPtr(true),
 				},
 			},
 		},
