@@ -43,6 +43,6 @@ func TestService_ClearInstanceCache(t *testing.T) {
 	s.ClearInstanceCache(ctx, "") // Empty safe check
 
 	// Nil s.data check
-	var sNil *Service = &Service{}
+	var sNil = &Service{}
 	sNil.ClearInstanceCache(ctx, "radarr-test")
 }

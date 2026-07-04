@@ -584,6 +584,90 @@ func buildTestNzb(files []testNzbFile) *nzbparser.Nzb {
 	return &nzbparser.Nzb{Files: nzbFiles}
 }
 
+// buildMultiSegmentNzb builds a single video file with segCount segments,
+// where the indices in missing yield ErrArticleNotFound on the client.
+func buildMultiSegmentNzb(client *fakepool.Client, fileName string, segCount int, missing ...int) *nzbparser.Nzb {
+	missingSet := make(map[int]struct{}, len(missing))
+	for _, m := range missing {
+		missingSet[m] = struct{}{}
+	}
+	segs := make(nzbparser.NzbSegments, segCount)
+	for i := range segs {
+		id := fmt.Sprintf("%s-seg-%d", fileName, i)
+		segs[i] = nzbparser.NzbSegment{Bytes: 100, Number: i + 1, ID: id}
+		if _, ok := missingSet[i]; ok {
+			client.SetBehavior(id, fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
+		}
+	}
+	return &nzbparser.Nzb{Files: nzbparser.NzbFiles{{
+		Filename: fileName,
+		Subject:  fileName,
+		Segments: segs,
+	}}}
+}
+
+// TestPreParseFastFailTolerantImportsDegradedVideo verifies a standalone video
+// file with a small hole imports (not broken) under the default tolerant policy.
+func TestPreParseFastFailTolerantImportsDegradedVideo(t *testing.T) {
+	client := fakepool.New()
+	proc := &Processor{
+		poolManager:       processorTestPoolManager{client: client},
+		validationTimeout: 100 * time.Millisecond,
+	}
+	// 200 segments, 1 missing (0.5%) — well within the pad caps.
+	n := buildMultiSegmentNzb(client, "Movie.2024.mkv", 50, 25)
+	cfg := config.DefaultConfig()
+	cfg.Import.SegmentSamplePercentage = 100
+
+	brokenIdx, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, 1)
+	if err != nil {
+		t.Fatalf("preParseFastFail returned error: %v", err)
+	}
+	if len(brokenIdx) != 0 {
+		t.Fatalf("brokenIdx = %v, want empty (tolerant policy imports degraded video)", brokenIdx)
+	}
+}
+
+// TestPreParseFastFailStrictFailsDegradedVideo verifies the same file is broken
+// under the strict policy.
+func TestPreParseFastFailStrictFailsDegradedVideo(t *testing.T) {
+	client := fakepool.New()
+	proc := &Processor{
+		poolManager:       processorTestPoolManager{client: client},
+		validationTimeout: 100 * time.Millisecond,
+	}
+	n := buildMultiSegmentNzb(client, "Movie.2024.mkv", 50, 25)
+	cfg := config.DefaultConfig()
+	cfg.Import.SegmentSamplePercentage = 100
+	cfg.Import.DamagePolicy = "strict"
+
+	brokenIdx, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, 1)
+	if !errors.Is(err, multifile.ErrNoFilesProcessed) {
+		// Single file, and it's broken → all eligible broken → ErrNoFilesProcessed.
+		t.Fatalf("strict policy: err = %v, want ErrNoFilesProcessed", err)
+	}
+	_ = brokenIdx
+}
+
+// TestPreParseFastFailTolerantStillFailsLongRun verifies tolerant policy does
+// NOT rescue a file whose missing run exceeds the pad cap.
+func TestPreParseFastFailTolerantStillFailsLongRun(t *testing.T) {
+	client := fakepool.New()
+	proc := &Processor{
+		poolManager:       processorTestPoolManager{client: client},
+		validationTimeout: 100 * time.Millisecond,
+	}
+	// 200 segments, a run of 5 consecutive missing (exceeds MaxPadRunSegments=4).
+	n := buildMultiSegmentNzb(client, "Movie.2024.mkv", 50, 20, 21, 22, 23, 24)
+	cfg := config.DefaultConfig()
+	cfg.Import.SegmentSamplePercentage = 100
+
+	_, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, 1)
+	if !errors.Is(err, multifile.ErrNoFilesProcessed) {
+		t.Fatalf("tolerant policy with long run: err = %v, want ErrNoFilesProcessed", err)
+	}
+}
+
 func TestCalculateVirtualDirectory(t *testing.T) {
 	tests := []struct {
 		name         string

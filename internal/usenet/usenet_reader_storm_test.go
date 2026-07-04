@@ -98,7 +98,7 @@ func TestStorm_RetryUsesFixedDelayInsteadOfExponentialBackoff(t *testing.T) {
 			defer wg.Done()
 			// One segment per reader, distinct message-ID per reader,
 			// so each contributes one independent inter-attempt delta.
-			segs := []*segment{newSegment(segments.MessageID(idx), 0, int64(segSize-1), int64(segSize), nil)}
+			segs := []*segment{newSegment(segments.MessageID(idx), 0, int64(segSize-1), int64(segSize), nil, 0)}
 			rg := &segmentRange{segments: segs, start: 0, end: int64(segSize - 1), ctx: ctx}
 			ur := newReaderForTestWithClient(t, ctx, rec, rg, 1)
 			ur.Start()

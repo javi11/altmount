@@ -41,6 +41,7 @@ export function HealthFilters({
 							<option value="healthy">Healthy</option>
 							<option value="corrupted">Corrupted</option>
 							<option value="repair_triggered">Repair Triggered</option>
+							<option value="degraded">Degraded</option>
 						</select>
 					</fieldset>
 				</div>

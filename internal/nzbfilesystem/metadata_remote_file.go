@@ -21,6 +21,7 @@ import (
 	"github.com/javi11/altmount/internal/encryption"
 	"github.com/javi11/altmount/internal/encryption/aes"
 	"github.com/javi11/altmount/internal/encryption/rclone"
+	"github.com/javi11/altmount/internal/holes"
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/nzbfilesystem/segcache"
@@ -259,6 +260,7 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 		SegmentData:    fileMeta.SegmentData,
 		NestedSources:  fileMeta.NestedSources,
 		ClipBoundaries: fileMeta.ClipBoundaries,
+		KnownHoles:     fileMeta.KnownHoles,
 	}
 
 	// Create a metadata-based virtual file handle
@@ -774,6 +776,9 @@ type fileHandleMeta struct {
 	// feature. Non-empty enables the continuous-timeline TS remux on reads;
 	// empty (every other file) bypasses it entirely.
 	ClipBoundaries []*metapb.ClipBoundary
+	// KnownHoles is the persisted hole map: segments confirmed missing on all
+	// providers, zero-filled during streaming without a fetch round-trip.
+	KnownHoles []*metapb.HoleRun
 }
 
 // MetadataVirtualFile implements afero.File for metadata-backed virtual files
@@ -849,6 +854,14 @@ type MetadataVirtualFile struct {
 	// randomReadCache coalesces small random ReadAts within the same
 	// segment. Lazily initialized; held under mvf.mu.
 	randomReadCache *lru.Cache[int, []byte]
+
+	// Hole padding state (see holes.go). holeAcc accumulates confirmed
+	// missing segments for this handle, seeded from meta.KnownHoles; holeMu
+	// guards it (hole hooks run on download goroutines).
+	holeMu       sync.Mutex
+	holeAcc      *holes.Accumulator
+	holeHooksVal *usenet.HoleHooks
+	holeOnce     sync.Once
 }
 
 // randomReadCacheSize bounds the per-file ephemeral-read cache. 8
@@ -1774,6 +1787,7 @@ func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, e
 
 		mvf.updateFileHealthOnError(&usenet.DataCorruptionError{
 			UnderlyingErr: ErrMissmatchedSegments,
+			FileOffset:    -1,
 		}, true)
 
 		return nil, &CorruptedFileError{
@@ -1782,7 +1796,11 @@ func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, e
 		}
 	}
 
-	ur, err := usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxPrefetch, mvf.streamTracker, mvf.streamID, mvf.segmentStore)
+	// Hole hooks enable on-the-fly zero-fill of confirmed-missing segments
+	// for eligible video files (nil for everything else — reads fail as
+	// always). See holes.go.
+	ur, err := usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxPrefetch, mvf.streamTracker, mvf.streamID, mvf.segmentStore,
+		usenet.WithHoleHooks(mvf.holeHooks()))
 	if err != nil {
 		return nil, err
 	}
@@ -2068,9 +2086,22 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 	cfg := mvf.configGetter()
 	healthEnabled := cfg.GetHealthEnabled()
 
+	// Classify playback impact via the hole model — the verdict decides
+	// whether this failure triggers a repair at all. Note that with hole
+	// hooks wired, within-caps misses are zero-filled and never reach this
+	// path; a degraded verdict here is the exception (e.g. hooks disabled).
+	classification := mvf.classifyStreamingFailure(dataCorruptionErr)
+	isDegraded := healthEnabled && classification != nil &&
+		classification.Verdict == holes.VerdictDegraded
+
 	// Any file with missing segments or corruption is marked as corrupted in metadata
 	// and DB so it stays visible on the Health page, regardless of whether repair runs.
+	// Degraded files instead keep a status that leaves them visible AND streamable
+	// (FILE_STATUS_CORRUPTED hides the file from listings and blocks opens).
 	metadataStatus := metapb.FileStatus_FILE_STATUS_CORRUPTED
+	if isDegraded {
+		metadataStatus = metapb.FileStatus_FILE_STATUS_DEGRADED
+	}
 
 	// Update metadata status (blocking with timeout)
 	if err := mvf.metadataService.UpdateFileStatus(mvf.name, metadataStatus); err != nil {
@@ -2084,16 +2115,29 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 		sourceNzbPath = nil
 	}
 
-	// Create error details JSON
-	errorDetails := fmt.Sprintf(`{"missing_articles": %d, "total_articles": %d, "error_type": "ArticleNotFound"}`,
-		1, len(mvf.meta.SegmentData))
+	details := database.HealthErrorDetails{
+		ErrorType:       "ArticleNotFound",
+		MissingArticles: 1,
+		TotalArticles:   len(mvf.meta.SegmentData),
+		PlaybackImpact:  classification,
+	}
+	errorDetails := details.Marshal()
 
 	// The repair action (repair_triggered status + metadata safety-folder move + Arr
 	// redownload) only runs when the health system is enabled. When it is disabled we
 	// record the corruption for visibility but take no repair action whatsoever.
 	var dbStatus database.HealthStatus
 	scheduleImmediately := false
-	if healthEnabled {
+	if isDegraded {
+		// Playable with glitches: record as degraded, no repair trigger, no
+		// safety-folder move, no immediate scheduling — the health worker
+		// re-checks it on its normal schedule.
+		slog.InfoContext(ctx, "Streaming failure classified as degraded (still playable), skipping repair",
+			"file", mvf.name,
+			"total_missing", classification.TotalMissing,
+			"longest_run", classification.LongestRun)
+		dbStatus = database.HealthStatusDegraded
+	} else if healthEnabled {
 		// Mark as repair_triggered with high priority to trigger the replacement immediately.
 		// We skip the re-verification phase because a streaming failure is a definitive indicator of corruption.
 		slog.InfoContext(ctx, "Streaming failure detected, triggering immediate ARR repair", "file", mvf.name)
@@ -2135,15 +2179,17 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 		dbStatus,
 		&errorMsg,
 		sourceNzbPath,
-		&errorDetails,
+		errorDetails,
 		scheduleImmediately,
 		time.Now().UTC(),
 	); err != nil {
 		slog.WarnContext(ctx, "Failed to update health database for streaming failure", "file", mvf.name, "error", err)
 	}
 
-	// Increment failure count for tracking/masking if enabled
-	if cfg.Streaming.FailureMasking.Enabled == nil || *cfg.Streaming.FailureMasking.Enabled {
+	// Increment failure count for tracking/masking if enabled. Degraded files
+	// are exempt: masking would hide a file that still plays, defeating the
+	// point of keeping it available.
+	if !isDegraded && (cfg.Streaming.FailureMasking.Enabled == nil || *cfg.Streaming.FailureMasking.Enabled) {
 		isMasked, _, err := mvf.healthRepository.IncrementStreamingFailureCount(ctx, mvf.name, cfg.Streaming.FailureMasking.Threshold)
 		if err != nil {
 			slog.WarnContext(ctx, "Failed to update streaming failure count", "file", mvf.name, "error", err)

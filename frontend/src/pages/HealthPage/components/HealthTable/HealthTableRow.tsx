@@ -1,9 +1,14 @@
 import { Clock, Heart, HeartCrack, Loader, Wrench } from "lucide-react";
 import { memo, useMemo } from "react";
 import { HealthBadge } from "../../../../components/ui/StatusBadge";
-import { formatFutureTime, formatRelativeTime } from "../../../../lib/utils";
+import {
+	formatFutureTime,
+	formatRelativeTime,
+	parseHealthErrorDetails,
+} from "../../../../lib/utils";
 import { type FileHealth, HealthPriority } from "../../../../types/api";
 import { HealthItemActionsMenu } from "./HealthItemActionsMenu";
+import { PlaybackImpactBadge } from "./PlaybackImpactBadge";
 
 interface HealthTableRowProps {
 	item: FileHealth;
@@ -51,6 +56,11 @@ export const HealthTableRow = memo(function HealthTableRow({
 		}
 	}, [item.metadata]);
 
+	const playbackImpact = useMemo(
+		() => parseHealthErrorDetails(item.error_details)?.playback_impact ?? null,
+		[item.error_details],
+	);
+
 	const getNextPriority = (current: HealthPriority): HealthPriority => {
 		switch (current) {
 			case HealthPriority.Normal:
@@ -82,6 +92,10 @@ export const HealthTableRow = memo(function HealthTableRow({
 			break;
 		case "checking":
 			statusIcon = <Loader className="h-4 w-4 animate-spin" />;
+			iconColorClass = "text-warning";
+			break;
+		case "degraded":
+			statusIcon = <HeartCrack className="h-4 w-4" />;
 			iconColorClass = "text-warning";
 			break;
 		default:
@@ -163,8 +177,9 @@ export const HealthTableRow = memo(function HealthTableRow({
 				</div>
 			</td>
 			<td>
-				<div className="flex items-center gap-2">
+				<div className="flex flex-wrap items-center gap-2">
 					<HealthBadge status={item.status} isMasked={item.is_masked} />
+					{playbackImpact && <PlaybackImpactBadge impact={playbackImpact} />}
 				</div>
 				{/* Show last_error for repair failures and general errors */}
 				{item.last_error && (

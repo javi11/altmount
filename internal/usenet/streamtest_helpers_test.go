@@ -37,7 +37,7 @@ func buildEagerRange(ctx context.Context, t testing.TB, n, segSize int) *segment
 	t.Helper()
 	segs := make([]*segment, n)
 	for i := range segs {
-		segs[i] = newSegment(segments.MessageID(i), 0, int64(segSize-1), int64(segSize), nil)
+		segs[i] = newSegment(segments.MessageID(i), 0, int64(segSize-1), int64(segSize), nil, i)
 	}
 	return &segmentRange{
 		segments: segs,

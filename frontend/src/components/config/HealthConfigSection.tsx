@@ -671,8 +671,8 @@ export function HealthConfigSection({
 										}
 									/>
 									<p className="label block whitespace-normal break-words text-base-content/70 text-xs">
-										How many segment existence checks run at once within a sweep. STAT requests
-										are cheap, so this can be much higher than your provider's connection count.
+										How many segment existence checks run at once within a sweep. STAT requests are
+										cheap, so this can be much higher than your provider's connection count.
 									</p>
 								</fieldset>
 								<fieldset className="fieldset">
@@ -691,8 +691,8 @@ export function HealthConfigSection({
 										}
 									/>
 									<p className="label block whitespace-normal break-words text-base-content/70 text-xs">
-										How many due files are fetched and swept together per health-check cycle.
-										Raise this to clear a large backlog faster.
+										How many due files are fetched and swept together per health-check cycle. Raise
+										this to clear a large backlog faster.
 									</p>
 								</fieldset>
 							</div>

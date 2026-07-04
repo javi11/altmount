@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand"
+	"sort"
 	"time"
 
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
@@ -22,11 +23,21 @@ func SelectSegmentsForValidation(segments []*metapb.SegmentData, samplePercentag
 	return selectSegmentsForValidation(segments, samplePercentage)
 }
 
+// MissingSegment identifies one unavailable segment together with the byte
+// range it covers in file coordinates, enabling playback-impact classification.
+type MissingSegment struct {
+	Index int    // index into the original segments slice
+	ID    string // Usenet message ID
+	Start int64  // inclusive file-coordinate byte range
+	End   int64
+}
+
 // ValidationResult holds detailed validation results
 type ValidationResult struct {
-	TotalChecked int
-	MissingCount int
-	MissingIDs   []string
+	TotalChecked    int
+	MissingCount    int
+	MissingIDs      []string
+	MissingSegments []MissingSegment // same 50-entry cap as MissingIDs
 }
 
 // ValidateSegmentAvailabilityDetailed validates segments and returns detailed results
@@ -69,6 +80,18 @@ func ValidateSegmentAvailabilityDetailed(
 		ids[i] = seg.Id
 	}
 
+	// Segment identity (by message ID) → original index, so misses reported
+	// by StatMany can be mapped back to their file-coordinate byte range via
+	// the prefix-sum offset table.
+	indexByID := make(map[string]int, len(segments))
+	fileOffsets := make([]int64, len(segments))
+	var pos int64
+	for i, seg := range segments {
+		indexByID[seg.Id] = i
+		fileOffsets[i] = pos
+		pos += seg.EndOffset - seg.StartOffset + 1
+	}
+
 	statCtx, cancel := context.WithTimeout(ctx, pool.StatManyTimeout(len(ids), maxConnections, timeout))
 	defer cancel()
 
@@ -80,8 +103,17 @@ func ValidateSegmentAvailabilityDetailed(
 				"error", r.Err,
 			)
 			result.MissingCount++
-			if len(result.MissingIDs) < 50 { // cap stored IDs to avoid huge metadata blobs
+			if len(result.MissingIDs) < 50 { // cap stored entries to avoid huge metadata blobs
 				result.MissingIDs = append(result.MissingIDs, r.MessageID)
+				if idx, ok := indexByID[r.MessageID]; ok {
+					seg := segments[idx]
+					result.MissingSegments = append(result.MissingSegments, MissingSegment{
+						Index: idx,
+						ID:    r.MessageID,
+						Start: fileOffsets[idx],
+						End:   fileOffsets[idx] + (seg.EndOffset - seg.StartOffset),
+					})
+				}
 			}
 			continue
 		}
@@ -94,6 +126,9 @@ func ValidateSegmentAvailabilityDetailed(
 			progressTracker.Update(validatedCount, result.TotalChecked)
 		}
 	}
+	sort.Slice(result.MissingSegments, func(i, j int) bool {
+		return result.MissingSegments[i].Index < result.MissingSegments[j].Index
+	})
 
 	return result, nil
 }

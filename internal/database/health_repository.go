@@ -1368,6 +1368,20 @@ func (r *HealthRepository) UpdateHealthStatusBulk(ctx context.Context, updates [
 	}
 	defer stmtCorrupted.Close()
 
+	// stmtDegraded records a playable-with-glitches verdict: no repair fields
+	// change, the file stays scheduled for periodic re-checks.
+	stmtDegraded, err := tx.PrepareContext(ctx, `
+		UPDATE file_health
+		SET status = 'degraded', last_error = ?, error_details = ?,
+		    scheduled_check_at = ?,
+		    updated_at = datetime('now'), last_checked = datetime('now')
+		WHERE file_path = ? AND (status = ? OR ? = '')
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare degraded statement: %w", err)
+	}
+	defer stmtDegraded.Close()
+
 	for _, update := range updates {
 		if update.Skip {
 			continue
@@ -1390,6 +1404,8 @@ func (r *HealthRepository) UpdateHealthStatusBulk(ctx context.Context, updates [
 			_, err = stmtRepair.ExecContext(ctx, update.ErrorMessage, update.ErrorDetails, update.ScheduledCheckAt, filePath, expected, expected)
 		case UpdateTypeCorrupted:
 			_, err = stmtCorrupted.ExecContext(ctx, update.ErrorMessage, update.ErrorDetails, filePath, expected, expected)
+		case UpdateTypeDegraded:
+			_, err = stmtDegraded.ExecContext(ctx, update.ErrorMessage, update.ErrorDetails, update.ScheduledCheckAt, filePath, expected, expected)
 		}
 
 		if err != nil {
@@ -1409,6 +1425,7 @@ const (
 	UpdateTypeRepairRetry   UpdateType = 3 // re-check of an already-triggered repair; increments repair_retry_count
 	UpdateTypeCorrupted     UpdateType = 4
 	UpdateTypeRepairTrigger UpdateType = 5 // first-time trigger; does not increment repair_retry_count
+	UpdateTypeDegraded      UpdateType = 6 // playable with glitches; no repair, periodic re-check
 )
 
 // HealthStatusUpdate represents a single update request for batch processing
@@ -1704,7 +1721,7 @@ func (r *HealthRepository) ResolvePendingRepairsInDirectory(ctx context.Context,
 	query := `
 		DELETE FROM file_health
 		WHERE file_path LIKE ?
-		AND status IN ('repair_triggered', 'corrupted')
+		AND status IN ('repair_triggered', 'corrupted', 'degraded')
 	`
 
 	// Match paths starting with the directory
@@ -1928,26 +1945,6 @@ func shareShowFolder(p1, p2 string) bool {
 	return false
 }
 
-// scanIDs reads an id column from a query result, always closing the rows. It centralizes
-// the "collect matching ids before writing" pattern so a read cursor is never left open
-// across a write on the same transaction.
-func scanIDs(rows *sql.Rows, queryErr error) ([]int64, error) {
-	if queryErr != nil {
-		return nil, queryErr
-	}
-	defer rows.Close()
-
-	var ids []int64
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	return ids, rows.Err()
-}
-
 // GetSystemState retrieves a persistent state value
 func (r *HealthRepository) GetSystemState(ctx context.Context, key string) (string, error) {
 	query := `SELECT value FROM system_state WHERE key = ?`
@@ -2135,7 +2132,7 @@ func (r *HealthRepository) relinkOrMergeRecordTx(ctx context.Context, tx *dialec
 	var conflictingIndexer *string
 	var conflictingReleaseDate *time.Time
 	var conflictingMetadata *string
-	var conflictExists bool = true
+	conflictExists := true
 
 	err = tx.QueryRowContext(ctx, `
 		SELECT id, status, updated_at, repair_retry_count, source_nzb_path, indexer, release_date, metadata
@@ -2236,7 +2233,7 @@ func (r *HealthRepository) relinkOrMergeRecordTx(ctx context.Context, tx *dialec
 				    indexer = ?,
 				    release_date = ?,
 				    updated_at = datetime('now'),
-				    scheduled_check_at = CASE WHEN status IN ('repair_triggered', 'corrupted') THEN scheduled_check_at ELSE datetime('now') END
+				    scheduled_check_at = CASE WHEN status IN ('repair_triggered', 'corrupted', 'degraded') THEN scheduled_check_at ELSE datetime('now') END
 				WHERE id = ?
 			`
 			args = []any{libraryPath, mergedMetadata, mergedRepairRetry, mergedSourceNzb, mergedIndexer, mergedReleaseDate, conflictingID}
@@ -2278,7 +2275,7 @@ func (r *HealthRepository) relinkOrMergeRecordTx(ctx context.Context, tx *dialec
 				    library_path = ?,
 				    metadata = COALESCE(?, metadata),
 				    updated_at = datetime('now'),
-				    scheduled_check_at = CASE WHEN status IN ('repair_triggered', 'corrupted') THEN scheduled_check_at ELSE datetime('now') END
+				    scheduled_check_at = CASE WHEN status IN ('repair_triggered', 'corrupted', 'degraded') THEN scheduled_check_at ELSE datetime('now') END
 				WHERE id = ?
 			`
 			args = []any{filePath, libraryPath, metadataStr, id}
@@ -2315,7 +2312,7 @@ func (r *HealthRepository) RelinkFileByMetadata(ctx context.Context, webMeta *mo
 	rows, err := tx.QueryContext(ctx, `
 		SELECT id, file_path, library_path, status, metadata
 		FROM file_health
-		WHERE status IN ('pending', 'repair_triggered', 'corrupted')
+		WHERE status IN ('pending', 'repair_triggered', 'corrupted', 'degraded')
 		  AND metadata IS NOT NULL
 	`)
 	if err != nil {

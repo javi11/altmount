@@ -317,6 +317,13 @@ type ImportConfig struct {
 	FilterSampleFiles                  *bool          `yaml:"filter_sample_files" mapstructure:"filter_sample_files" json:"filter_sample_files,omitempty"`
 	FailedItemRetentionHours           *int           `yaml:"failed_item_retention_hours" mapstructure:"failed_item_retention_hours" json:"failed_item_retention_hours,omitempty"`
 	HistoryRetentionDays               *int           `yaml:"history_retention_days" mapstructure:"history_retention_days" json:"history_retention_days,omitempty"`
+	// DamagePolicy governs standalone video files whose fast-fail sweep finds
+	// SMALL confirmed damage (within the playback padding caps, see
+	// internal/holes): "tolerant" (default) imports them as degraded so
+	// streaming zero-fills the gaps; "strict" fails the import so an ARR can
+	// grab a different release. Damage beyond the caps, archive-set members
+	// and non-video files fail either way.
+	DamagePolicy string `yaml:"damage_policy" mapstructure:"damage_policy" json:"damage_policy,omitempty"`
 }
 
 // LogConfig represents logging configuration with rotation support

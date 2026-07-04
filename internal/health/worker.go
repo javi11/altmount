@@ -16,6 +16,7 @@ import (
 	"github.com/javi11/altmount/internal/arrs/model"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/holes"
 	"github.com/javi11/altmount/internal/importer"
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
@@ -429,6 +430,34 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 	}
 	update.ErrorMessage = errorMsg
 	update.ErrorDetails = event.Details
+
+	// Degraded verdict: the confirmed holes are within the padding caps, so
+	// the file still plays (streaming zero-fills the gaps). Record it as
+	// degraded — no repair trigger, no safety-folder move, periodic re-check —
+	// unless a repair is already in flight, in which case the repair flow wins.
+	if event.Classification != nil &&
+		event.Classification.Verdict == holes.VerdictDegraded &&
+		fh.Status != database.HealthStatusRepairTriggered {
+		releaseDate := fh.ReleaseDate
+		if releaseDate == nil {
+			releaseDate = &fh.CreatedAt
+		}
+		nextCheck := CalculateNextCheck(releaseDate.UTC(), time.Now().UTC())
+
+		update.Type = database.UpdateTypeDegraded
+		update.Status = database.HealthStatusDegraded
+		update.ScheduledCheckAt = nextCheck
+
+		sideEffect = func() error {
+			slog.InfoContext(ctx, "File degraded: missing segments are within padding caps, skipping repair",
+				"file_path", fh.FilePath,
+				"total_missing", event.Classification.TotalMissing,
+				"longest_run", event.Classification.LongestRun,
+				"next_check", nextCheck)
+			return hw.metadataService.UpdateFileStatus(fh.FilePath, metapb.FileStatus_FILE_STATUS_DEGRADED)
+		}
+		return update, sideEffect
+	}
 
 	// When automatic repair is disabled, never trigger or re-trigger an Arr rescan: a file
 	// that has exhausted its health-check retries (or is already in repair_triggered from a

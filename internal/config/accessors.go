@@ -109,6 +109,13 @@ func (c *Config) GetMaxRepairRetries() int {
 
 // Import config accessor methods.
 
+// GetImportDamagePolicyTolerant reports whether small confirmed damage on a
+// standalone video file should import as degraded (true, the default) instead
+// of failing the import (false, "strict").
+func (c *Config) GetImportDamagePolicyTolerant() bool {
+	return c.Import.DamagePolicy != "strict"
+}
+
 // GetMaxImportConnections returns max import connections with a default fallback.
 func (c *Config) GetMaxImportConnections() int {
 	if c.Import.MaxImportConnections <= 0 {

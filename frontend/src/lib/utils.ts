@@ -1,4 +1,5 @@
 import { type ClassValue, clsx } from "clsx";
+import type { HealthErrorDetails } from "../types/api";
 
 export function cn(...inputs: ClassValue[]) {
 	return clsx(inputs);
@@ -165,6 +166,20 @@ export function getStatusColor(status: string): string {
 			return "warning";
 		default:
 			return "neutral";
+	}
+}
+
+export function parseHealthErrorDetails(details?: string): HealthErrorDetails | null {
+	if (!details) return null;
+	try {
+		const parsed: unknown = JSON.parse(details);
+		if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+			return parsed as HealthErrorDetails;
+		}
+		return null;
+	} catch (_e) {
+		// Legacy records store plain strings or other shapes.
+		return null;
 	}
 }
 
