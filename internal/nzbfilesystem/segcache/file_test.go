@@ -19,6 +19,9 @@ func newDefaultTestCache(t *testing.T) *segcache.SegmentCache {
 	}
 	cache, err := segcache.NewSegmentCache(cfg, slog.Default())
 	require.NoError(t, err)
+	// Clear the loading gate (set in the constructor) so Put is not a no-op.
+	// Mirrors Manager.Start, which runs LoadCatalog before serving Puts.
+	cache.LoadCatalog()
 	return cache
 }
 

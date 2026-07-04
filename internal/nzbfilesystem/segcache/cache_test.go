@@ -22,6 +22,9 @@ func newTestCache(t *testing.T, maxBytes int64, expiry time.Duration) *segcache.
 	}
 	c, err := segcache.NewSegmentCache(cfg, slog.Default())
 	require.NoError(t, err)
+	// Clear the loading gate (set in the constructor) so Put is not a no-op.
+	// Mirrors Manager.Start, which runs LoadCatalog before serving Puts.
+	c.LoadCatalog()
 	return c
 }
 
@@ -93,6 +96,7 @@ func TestCacheSaveCatalogAndReload(t *testing.T) {
 	// Write entries, save catalog, then reload.
 	c1, err := segcache.NewSegmentCache(cfg, slog.Default())
 	require.NoError(t, err)
+	c1.LoadCatalog()
 	require.NoError(t, c1.Put("persist@msg", []byte("persistent data")))
 	require.NoError(t, c1.SaveCatalog())
 
@@ -130,6 +134,7 @@ func TestCacheCatalogSurvivesMissingSegFiles(t *testing.T) {
 
 	c1, err := segcache.NewSegmentCache(cfg, slog.Default())
 	require.NoError(t, err)
+	c1.LoadCatalog()
 	require.NoError(t, c1.Put("good@msg", []byte("good")))
 	require.NoError(t, c1.Put("bad@msg", []byte("will be deleted")))
 	require.NoError(t, c1.SaveCatalog())
