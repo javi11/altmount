@@ -295,14 +295,11 @@ type ImportConfig struct {
 	MaxProcessorWorkers            int      `yaml:"max_processor_workers" mapstructure:"max_processor_workers" json:"max_processor_workers"`
 	QueueProcessingIntervalSeconds int      `yaml:"queue_processing_interval_seconds" mapstructure:"queue_processing_interval_seconds" json:"queue_processing_interval_seconds"`
 	AllowedFileExtensions          []string `yaml:"allowed_file_extensions" mapstructure:"allowed_file_extensions" json:"allowed_file_extensions"`
-	MaxImportConnections           int      `yaml:"max_import_connections" mapstructure:"max_import_connections" json:"max_import_connections"`
 	// MaxConcurrentImports caps the number of NZB imports that may run
-	// end-to-end at the same time when no stream is active. 0 = unlimited.
-	MaxConcurrentImports int `yaml:"max_concurrent_imports" mapstructure:"max_concurrent_imports" json:"max_concurrent_imports"`
-	// MaxConcurrentImportsWhileStreaming caps concurrent imports while at
-	// least one stream is active, so streams are not starved by imports.
-	// 0 = unlimited.
-	MaxConcurrentImportsWhileStreaming int            `yaml:"max_concurrent_imports_while_streaming" mapstructure:"max_concurrent_imports_while_streaming" json:"max_concurrent_imports_while_streaming"`
+	// end-to-end at the same time. 0 = unlimited. NNTP connection use is
+	// balanced automatically: imports share the pool's full capacity and
+	// yield to streams (priority lane + adaptive connection budget).
+	MaxConcurrentImports               int            `yaml:"max_concurrent_imports" mapstructure:"max_concurrent_imports" json:"max_concurrent_imports"`
 	MaxDownloadPrefetch                int            `yaml:"max_download_prefetch" mapstructure:"max_download_prefetch" json:"max_download_prefetch"`
 	SegmentSamplePercentage            int            `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage"`
 	ReadTimeoutSeconds                 int            `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds"`
@@ -660,10 +657,6 @@ func (c *Config) Validate() error {
 
 	if c.Import.QueueProcessingIntervalSeconds > 300 {
 		return fmt.Errorf("import queue_processing_interval_seconds must not exceed 300 seconds")
-	}
-
-	if c.Import.MaxImportConnections <= 0 {
-		return fmt.Errorf("import max_import_connections must be greater than 0")
 	}
 
 	if c.Import.MaxDownloadPrefetch <= 0 {
@@ -1584,7 +1577,6 @@ func DefaultConfig(configDir ...string) *Config {
 				".xvid", ".rm", ".rmvb", ".asf", ".asx", ".wtv", ".mk3d", ".dvr-ms",
 				".mp3", ".flac", ".m4a", ".epub", ".pdf", ".cbz",
 			},
-			MaxImportConnections:     5,   // Default: 5 concurrent NNTP connections for validation and archive processing
 			MaxDownloadPrefetch:      10,  // Default: 10 segments prefetched ahead for archive analysis
 			SegmentSamplePercentage:  1,   // Default: 1% segment sampling
 			ReadTimeoutSeconds:       300, // Default: 5 minutes read timeout

@@ -226,6 +226,11 @@ func (m *validationTestPoolManager) SetProviderIDs(_ map[string]string) {}
 func (m *validationTestPoolManager) AcquireImportSlot(_ context.Context) (func(), error) {
 	return func() {}, nil
 }
-func (m *validationTestPoolManager) SetAdmissionCaps(_ int, _ int)               {}
+func (m *validationTestPoolManager) SetAdmissionCap(_ int) {}
+func (m *validationTestPoolManager) AcquireImportConnection(_ context.Context) (func(), error) {
+	return func() {}, nil
+}
+func (m *validationTestPoolManager) SetImportConnCapacity(_ int)                 {}
+func (m *validationTestPoolManager) ImportConnCapacity() int                     { return 0 }
 func (m *validationTestPoolManager) SetStreamSource(_ pool.StreamActivitySource) {}
 func (m *validationTestPoolManager) NotifyStreamChange()                         {}

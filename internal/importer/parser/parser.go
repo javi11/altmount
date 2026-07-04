@@ -34,6 +34,12 @@ import (
 	concpool "github.com/sourcegraph/conc/pool"
 )
 
+// maxFetchGoroutines bounds how many fetch goroutines a single parse phase
+// spawns. It is a memory/scheduler bound only — the actual number of in-flight
+// NNTP body fetches is governed by the pool manager's global import connection
+// budget, which adapts to pool capacity and stream activity.
+const maxFetchGoroutines = 100
+
 // FirstSegmentData holds cached data from the first segment of an NZB file
 // This avoids redundant fetching when both PAR2 extraction and file parsing need the same data
 type FirstSegmentData struct {
@@ -696,7 +702,9 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 		err        error
 	}
 
-	maxFetch := max(min(len(files), p.getConfig().GetMaxImportConnections()), 1)
+	// Goroutine bound only — the real fetch bound is the pool manager's global
+	// import connection budget, acquired per Body call below.
+	maxFetch := max(min(min(len(files), p.getConfig().TotalProviderConnections()), maxFetchGoroutines), 1)
 	concPool := concpool.NewWithResults[fetchResult]().WithMaxGoroutines(maxFetch).WithContext(ctx)
 
 	// Atomic counter for progress tracking — incremented by each goroutine on completion
@@ -764,6 +772,14 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 			}
 
 			firstSegment := fileToFetch.Segments[0]
+
+			// Take a token from the global import connection budget before the
+			// per-attempt timeout starts, so queue wait never burns the deadline.
+			releaseConn, err := p.poolManager.AcquireImportConnection(ctx)
+			if err != nil {
+				return fetchResult{}, err
+			}
+			defer releaseConn()
 
 			// Create context with timeout
 			c, cancel := context.WithTimeout(ctx, time.Second*30)
@@ -1017,7 +1033,9 @@ func (p *Parser) complete16KBReads(ctx context.Context, cache []*FirstSegmentDat
 		return
 	}
 
-	maxFetch := max(min(len(targets), p.getConfig().GetMaxImportConnections()), 1)
+	// Goroutine bound only — the real fetch bound is the pool manager's global
+	// import connection budget, acquired per Body call below.
+	maxFetch := max(min(min(len(targets), p.getConfig().TotalProviderConnections()), maxFetchGoroutines), 1)
 	pool := concpool.New().WithMaxGoroutines(maxFetch).WithContext(ctx)
 	for _, d := range targets {
 		pool.Go(func(ctx context.Context) error {
@@ -1041,6 +1059,12 @@ func (p *Parser) complete16KBReads(ctx context.Context, cache []*FirstSegmentDat
 			g, gctx := errgroup.WithContext(ctx)
 			for i, seg := range segsNeeded {
 				g.Go(func() error {
+					// Budget token first, so queue wait never burns the deadline.
+					releaseConn, err := p.poolManager.AcquireImportConnection(gctx)
+					if err != nil {
+						return nil // best-effort
+					}
+					defer releaseConn()
 					segCtx, segCancel := context.WithTimeout(gctx, time.Second*30)
 					defer segCancel()
 					sr, err := cp.Body(segCtx, seg.ID)

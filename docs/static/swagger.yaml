@@ -318,8 +318,6 @@ definitions:
         $ref: '#/definitions/config.ImportStrategy'
       max_download_prefetch:
         type: integer
-      max_import_connections:
-        type: integer
       max_processor_workers:
         type: integer
       queue_processing_interval_seconds:
@@ -1155,8 +1153,6 @@ definitions:
       import_strategy:
         $ref: '#/definitions/config.ImportStrategy'
       max_download_prefetch:
-        type: integer
-      max_import_connections:
         type: integer
       max_processor_workers:
         type: integer

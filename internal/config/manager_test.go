@@ -31,7 +31,6 @@ func TestConfig_Validate_MountPaths(t *testing.T) {
 				Import: ImportConfig{
 					MaxProcessorWorkers:            2,
 					QueueProcessingIntervalSeconds: 5,
-					MaxImportConnections:           5,
 					MaxDownloadPrefetch:            3,
 					SegmentSamplePercentage:        1,
 					ImportStrategy:                 ImportStrategyNone,
@@ -62,7 +61,6 @@ func TestConfig_Validate_MountPaths(t *testing.T) {
 				Import: ImportConfig{
 					MaxProcessorWorkers:            2,
 					QueueProcessingIntervalSeconds: 5,
-					MaxImportConnections:           5,
 					MaxDownloadPrefetch:            3,
 					SegmentSamplePercentage:        1,
 					ImportStrategy:                 ImportStrategyNone,
@@ -92,7 +90,6 @@ func TestConfig_Validate_MountPaths(t *testing.T) {
 				Import: ImportConfig{
 					MaxProcessorWorkers:            2,
 					QueueProcessingIntervalSeconds: 5,
-					MaxImportConnections:           5,
 					MaxDownloadPrefetch:            3,
 					SegmentSamplePercentage:        1,
 					ImportStrategy:                 ImportStrategyNone,
@@ -135,7 +132,6 @@ func TestConfig_Validate_QueueCleanupRuleAction(t *testing.T) {
 			Import: ImportConfig{
 				MaxProcessorWorkers:            2,
 				QueueProcessingIntervalSeconds: 5,
-				MaxImportConnections:           5,
 				MaxDownloadPrefetch:            3,
 				SegmentSamplePercentage:        1,
 				ImportStrategy:                 ImportStrategyNone,

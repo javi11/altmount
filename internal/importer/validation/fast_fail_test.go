@@ -38,7 +38,12 @@ func (m fastFailPoolManager) SetProviderIDs(map[string]string) {}
 func (m fastFailPoolManager) AcquireImportSlot(context.Context) (func(), error) {
 	return func() {}, nil
 }
-func (m fastFailPoolManager) SetAdmissionCaps(int, int)                 {}
+func (m fastFailPoolManager) SetAdmissionCap(int) {}
+func (m fastFailPoolManager) AcquireImportConnection(context.Context) (func(), error) {
+	return func() {}, nil
+}
+func (m fastFailPoolManager) SetImportConnCapacity(int)                 {}
+func (m fastFailPoolManager) ImportConnCapacity() int                   { return 0 }
 func (m fastFailPoolManager) SetStreamSource(pool.StreamActivitySource) {}
 func (m fastFailPoolManager) NotifyStreamChange()                       {}
 

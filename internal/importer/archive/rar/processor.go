@@ -57,7 +57,9 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 	}
 
 	cfg := rh.configGetter()
-	maxConcurrentVolumes := cfg.Import.MaxImportConnections
+	// Reader-parallelism bound only — actual connection use is gated by the
+	// pool manager's global import connection budget inside each reader.
+	maxConcurrentVolumes := max(min(cfg.TotalProviderConnections(), len(rarFiles)), 1)
 	maxPrefetch := cfg.Import.MaxDownloadPrefetch
 	readTimeout := time.Duration(cfg.Import.ReadTimeoutSeconds) * time.Second
 	if readTimeout == 0 {
@@ -695,7 +697,9 @@ func (rh *rarProcessor) detectAndProcessNestedRars(ctx context.Context, outerCon
 // For encrypted outer RARs, it creates NestedSource entries.
 func (rh *rarProcessor) processNestedRarContent(ctx context.Context, innerRarContents []Content) ([]Content, error) {
 	cfg := rh.configGetter()
-	maxConcurrentVolumes := cfg.Import.MaxImportConnections
+	// Reader-parallelism bound only — actual connection use is gated by the
+	// pool manager's global import connection budget inside each reader.
+	maxConcurrentVolumes := max(min(cfg.TotalProviderConnections(), len(innerRarContents)), 1)
 	maxPrefetch := cfg.Import.MaxDownloadPrefetch
 	readTimeout := time.Duration(cfg.Import.ReadTimeoutSeconds) * time.Second
 	if readTimeout == 0 {

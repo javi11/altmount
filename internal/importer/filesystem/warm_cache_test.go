@@ -43,7 +43,12 @@ func (m *fsFakePoolManager) SetProviderIDs(_ map[string]string) {}
 func (m *fsFakePoolManager) AcquireImportSlot(_ context.Context) (func(), error) {
 	return func() {}, nil
 }
-func (m *fsFakePoolManager) SetAdmissionCaps(_ int, _ int)               {}
+func (m *fsFakePoolManager) SetAdmissionCap(_ int) {}
+func (m *fsFakePoolManager) AcquireImportConnection(_ context.Context) (func(), error) {
+	return func() {}, nil
+}
+func (m *fsFakePoolManager) SetImportConnCapacity(_ int)                 {}
+func (m *fsFakePoolManager) ImportConnCapacity() int                     { return 0 }
 func (m *fsFakePoolManager) SetStreamSource(_ pool.StreamActivitySource) {}
 func (m *fsFakePoolManager) NotifyStreamChange()                         {}
 
