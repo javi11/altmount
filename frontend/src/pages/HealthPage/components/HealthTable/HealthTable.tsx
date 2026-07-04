@@ -22,6 +22,7 @@ interface HealthTableProps {
 	isRegeneratePending?: boolean;
 	onSelectItem: (filePath: string, checked: boolean) => void;
 	onSelectAll: (checked: boolean) => void;
+	onSelectAllPages: () => void;
 	onSort: (column: SortBy) => void;
 	onCancelCheck: (id: number) => void;
 	onManualCheck: (id: number) => void;
@@ -48,6 +49,7 @@ export function HealthTable({
 	isRegeneratePending,
 	onSelectItem,
 	onSelectAll,
+	onSelectAllPages,
 	onSort,
 	onCancelCheck,
 	onManualCheck,
@@ -104,6 +106,7 @@ export function HealthTable({
 									sortBy={sortBy}
 									sortOrder={sortOrder}
 									onSelectAll={onSelectAll}
+									onSelectAllPages={onSelectAllPages}
 									onSort={onSort}
 								/>
 								<tbody>

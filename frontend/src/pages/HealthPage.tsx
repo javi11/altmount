@@ -1,3 +1,4 @@
+import { apiClient } from "../api/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { FileCheck, RefreshCw, RotateCcw, Settings, ShieldCheck, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -471,6 +472,40 @@ export function HealthPage() {
 		}
 	};
 
+	const handleSelectAllPages = async () => {
+		if (!meta?.total) return;
+
+		const confirmed = await confirmAction(
+			"Select All Pages",
+			`Are you sure you want to select all ${meta.total} matching items across all pages? This might take a moment to fetch.`,
+			{
+				type: "info",
+				confirmText: "Select All",
+				confirmButtonClass: "btn-info",
+			},
+		);
+
+		if (confirmed) {
+			try {
+				const response = await apiClient.getHealth({
+					limit: meta.total,
+					search: searchTerm || undefined,
+					status: statusFilter || undefined,
+				});
+				if (response.data) {
+					setSelectedItems(new Set(response.data.map((item) => item.file_path)));
+				}
+			} catch (e) {
+				console.error("Failed to fetch all items for select all", e);
+				showToast({
+					title: "Error",
+					message: "Failed to fetch all items",
+					type: "error",
+				});
+			}
+		}
+	};
+
 	const handleBulkDelete = () => {
 		if (selectedItems.size === 0) return;
 		setDeleteModal({ show: true, isBulk: true });
@@ -813,6 +848,7 @@ export function HealthPage() {
 											isUnmaskPending={unmaskItem.isPending}
 											onSelectItem={handleSelectItem}
 											onSelectAll={handleSelectAll}
+											onSelectAllPages={handleSelectAllPages}
 											onSort={handleSort}
 											onCancelCheck={handleCancelCheck}
 											onManualCheck={handleManualCheck}

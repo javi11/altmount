@@ -1,3 +1,4 @@
+import { apiClient } from "../api/client";
 import { useQueryClient } from "@tanstack/react-query";
 import {
 	Activity,
@@ -311,6 +312,40 @@ export function QueuePage() {
 			setSelectedItems(new Set(enrichedQueueData.map((item) => item.id)));
 		} else {
 			setSelectedItems(new Set());
+		}
+	};
+
+	const handleSelectAllPages = async () => {
+		if (!meta?.total) return;
+
+		const confirmed = await confirmAction(
+			"Select All Pages",
+			`Are you sure you want to select all ${meta.total} matching items across all pages? This might take a moment to fetch.`,
+			{
+				type: "info",
+				confirmText: "Select All",
+				confirmButtonClass: "btn-info",
+			},
+		);
+
+		if (confirmed) {
+			try {
+				const response = await apiClient.getQueue({
+					limit: meta.total,
+					search: searchTerm || undefined,
+					status: statusFilter || undefined,
+				});
+				if (response.data) {
+					setSelectedItems(new Set(response.data.map((item) => item.id)));
+				}
+			} catch (e) {
+				console.error("Failed to fetch all items for select all", e);
+				showToast({
+					title: "Error",
+					message: "Failed to fetch all items",
+					type: "error",
+				});
+			}
 		}
 	};
 
@@ -741,16 +776,44 @@ export function QueuePage() {
 												<table className="table-zebra table-sm sm:table-md table">
 													<thead className="bg-base-200/50">
 														<tr>
-															<th className="w-12 text-center">
-																<input
-																	type="checkbox"
-																	className="checkbox checkbox-sm"
-																	checked={isAllSelected}
-																	ref={(input) => {
-																		if (input) input.indeterminate = Boolean(isIndeterminate);
-																	}}
-																	onChange={(e) => handleSelectAll(e.target.checked)}
-																/>
+															<th className="w-16">
+																<div className="dropdown">
+																	<label
+																		tabIndex={0}
+																		className="cursor-pointer flex items-center gap-1"
+																	>
+																		<input
+																			type="checkbox"
+																			className="checkbox checkbox-sm"
+																			checked={isAllSelected}
+																			ref={(input) => {
+																				if (input) input.indeterminate = Boolean(isIndeterminate);
+																			}}
+																			onChange={(e) => handleSelectAll(e.target.checked)}
+																		/>
+																		<ChevronDown className="h-3 w-3" />
+																	</label>
+																	<ul
+																		tabIndex={0}
+																		className="dropdown-content z-[1] menu p-2 shadow bg-base-100 rounded-box w-52"
+																	>
+																		<li>
+																			<button type="button" onClick={() => handleSelectAll(true)}>
+																				Select all on page
+																			</button>
+																		</li>
+																		<li>
+																			<button type="button" onClick={() => handleSelectAllPages()}>
+																				Select all pages
+																			</button>
+																		</li>
+																		<li>
+																			<button type="button" onClick={() => handleSelectAll(false)}>
+																				Clear selection
+																			</button>
+																		</li>
+																	</ul>
+																</div>
 															</th>
 															<th>
 																<button
