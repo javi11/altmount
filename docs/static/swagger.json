@@ -5363,9 +5363,6 @@
                 "max_download_prefetch": {
                     "type": "integer"
                 },
-                "max_import_connections": {
-                    "type": "integer"
-                },
                 "max_processor_workers": {
                     "type": "integer"
                 },
@@ -6628,9 +6625,6 @@
                     "$ref": "#/definitions/config.ImportStrategy"
                 },
                 "max_download_prefetch": {
-                    "type": "integer"
-                },
-                "max_import_connections": {
                     "type": "integer"
                 },
                 "max_processor_workers": {

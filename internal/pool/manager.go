@@ -65,20 +65,33 @@ type Manager interface {
 	// AcquireImportSlot blocks until an admission slot is available for an
 	// NZB import to start, or ctx is cancelled. The returned release function
 	// must be called exactly once when the import has finished (success or
-	// failure). When admission caps are unconfigured (both 0) it is a no-op.
+	// failure). When the admission cap is unconfigured (0) it is a no-op.
 	AcquireImportSlot(ctx context.Context) (release func(), err error)
 
-	// SetAdmissionCaps configures the two import-concurrency caps:
-	// capIdle applies when no stream is active; capWhileStreaming applies
-	// while any stream is active. A cap of 0 means unlimited.
-	SetAdmissionCaps(capIdle, capWhileStreaming int)
+	// SetAdmissionCap configures the cap on concurrently running NZB imports.
+	// A cap of 0 means unlimited.
+	SetAdmissionCap(cap int)
 
-	// SetStreamSource wires the activity signal so admission can adapt to
-	// whether any stream is currently active.
+	// AcquireImportConnection blocks until the global import connection
+	// budget grants a token for one segment (body) fetch, or ctx is
+	// cancelled. The returned release function must be called exactly once
+	// when the fetch is done. No-op while the budget capacity is unset (0).
+	AcquireImportConnection(ctx context.Context) (release func(), err error)
+
+	// SetImportConnCapacity sets the import connection budget to the pool's
+	// total connection count (sum of provider max connections).
+	SetImportConnCapacity(total int)
+
+	// ImportConnCapacity returns the current budget capacity snapshot,
+	// useful for sizing import worker pools.
+	ImportConnCapacity() int
+
+	// SetStreamSource wires the activity signal so the import connection
+	// budget can shrink while streams are active.
 	SetStreamSource(src StreamActivitySource)
 
 	// NotifyStreamChange must be called by the stream source whenever its
-	// active stream count changes, so the admission gate can re-evaluate.
+	// active stream count changes, so the budget can re-evaluate.
 	NotifyStreamChange()
 }
 
@@ -107,6 +120,7 @@ type manager struct {
 	logger           *slog.Logger
 	quotaWatchCancel context.CancelFunc
 	admission        *ImportAdmission
+	budget           *ImportBudget
 }
 
 // NewManager creates a new pool manager
@@ -116,6 +130,7 @@ func NewManager(ctx context.Context, repo StatsRepository) Manager {
 		repo:      repo,
 		logger:    slog.Default().With("component", "pool"),
 		admission: NewImportAdmission(),
+		budget:    NewImportBudget(),
 	}
 }
 
@@ -458,23 +473,39 @@ func (m *manager) AcquireImportSlot(ctx context.Context) (func(), error) {
 	return m.admission.Acquire(ctx)
 }
 
-// SetAdmissionCaps configures the import-concurrency caps. capIdle applies
-// when no stream is active; capWhileStreaming applies while any stream is
-// active. A cap of 0 means unlimited.
-func (m *manager) SetAdmissionCaps(capIdle, capWhileStreaming int) {
-	m.admission.SetCaps(capIdle, capWhileStreaming)
+// SetAdmissionCap configures the cap on concurrently running NZB imports.
+// A cap of 0 means unlimited.
+func (m *manager) SetAdmissionCap(cap int) {
+	m.admission.SetCap(cap)
+}
+
+// AcquireImportConnection blocks until the import connection budget grants a
+// token or ctx is cancelled. See ImportBudget.Acquire.
+func (m *manager) AcquireImportConnection(ctx context.Context) (func(), error) {
+	return m.budget.Acquire(ctx)
+}
+
+// SetImportConnCapacity sets the import connection budget to the pool's total
+// connection count.
+func (m *manager) SetImportConnCapacity(total int) {
+	m.budget.SetCapacity(total)
+}
+
+// ImportConnCapacity returns the current budget capacity snapshot.
+func (m *manager) ImportConnCapacity() int {
+	return m.budget.Capacity()
 }
 
 // SetStreamSource wires the source used to determine whether streams are
 // currently active.
 func (m *manager) SetStreamSource(src StreamActivitySource) {
-	m.admission.SetStreamSource(src)
+	m.budget.SetStreamSource(src)
 }
 
-// NotifyStreamChange forwards a stream-count change to the admission gate so
-// it can wake or hold waiters according to the new effective cap.
+// NotifyStreamChange forwards a stream-count change to the import connection
+// budget so it can wake or hold waiters according to the new effective cap.
 func (m *manager) NotifyStreamChange() {
-	m.admission.NotifyStreamChange()
+	m.budget.NotifyStreamChange()
 }
 
 // SetProviderIDs sets a mapping between pool names and configuration IDs

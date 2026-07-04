@@ -234,7 +234,8 @@ func (df *DecryptingFile) createPlainReader(ctx context.Context, start, end int6
 	}
 
 	rg := usenet.GetSegmentsInRange(ctx, start, end, loader)
-	return usenet.NewUsenetReader(ctx, df.poolManager.GetPool, rg, df.maxPrefetch, df.poolManager, df.name, nil)
+	return usenet.NewUsenetReader(ctx, df.poolManager.GetPool, rg, df.maxPrefetch, df.poolManager, df.name, nil,
+		usenet.WithImportProfile(df.poolManager))
 }
 
 // createDecryptingReader creates a reader with AES-CBC decryption.
@@ -255,7 +256,8 @@ func (df *DecryptingFile) createDecryptingReader(ctx context.Context, start int6
 		}
 
 		rg := usenet.GetSegmentsInRange(ctx, rStart, rEnd, loader)
-		return usenet.NewUsenetReader(ctx, df.poolManager.GetPool, rg, df.maxPrefetch, df.poolManager, df.name, nil)
+		return usenet.NewUsenetReader(ctx, df.poolManager.GetPool, rg, df.maxPrefetch, df.poolManager, df.name, nil,
+			usenet.WithImportProfile(df.poolManager))
 	}
 
 	var rh *utils.RangeHeader

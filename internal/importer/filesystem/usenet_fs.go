@@ -340,7 +340,8 @@ func (uf *UsenetFile) newNetworkReader(ctx context.Context, start, end int64) (i
 	}
 
 	rg := usenet.GetSegmentsInRange(ctx, start, end, loader)
-	return usenet.NewUsenetReader(ctx, uf.poolManager.GetPool, rg, uf.maxPrefetch, uf.poolManager, uf.name, nil)
+	return usenet.NewUsenetReader(ctx, uf.poolManager.GetPool, rg, uf.maxPrefetch, uf.poolManager, uf.name, nil,
+		usenet.WithImportProfile(uf.poolManager))
 }
 
 // newWarmPrefixReader builds a reader that serves the file's warm first-segment

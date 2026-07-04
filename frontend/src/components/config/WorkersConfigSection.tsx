@@ -105,28 +105,6 @@ export function ImportConfigSection({
 						</fieldset>
 
 						<fieldset className="fieldset min-w-0">
-							<legend className="fieldset-legend">Max Connections (per Worker)</legend>
-							<input
-								type="number"
-								className="input input-bordered w-full min-w-0 max-w-full bg-base-100 font-mono text-sm"
-								value={formData.max_import_connections}
-								readOnly={isReadOnly}
-								min={1}
-								onChange={(e) =>
-									handleInputChange(
-										"max_import_connections",
-										Number.parseInt(e.target.value, 10) || 10,
-									)
-								}
-							/>
-							<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/70 text-xs">
-								Socket limit per active worker.
-							</p>
-						</fieldset>
-					</div>
-
-					<div className="grid min-w-0 grid-cols-1 gap-6 sm:grid-cols-2">
-						<fieldset className="fieldset min-w-0">
 							<legend className="fieldset-legend font-semibold">Max Download Prefetch</legend>
 							<input
 								type="number"

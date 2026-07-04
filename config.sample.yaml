@@ -153,7 +153,7 @@ import:
     - '.epub'
     - '.pdf'
     - '.cbz'
-  max_import_connections: 5 # Number of concurrent NNTP connections for validation and archive processing
+  max_concurrent_imports: 0 # Cap on NZB imports running at once (0 = unlimited). NNTP connections are balanced automatically: imports use the pool's full capacity and always yield to streaming.
   segment_sample_percentage: 1 # Percentage of segments to sample for validation (1-100)
   import_strategy: 'NONE' # Import strategy: NONE (direct import), SYMLINK (create symlinks), STRM (create .strm files)
   import_dir: '' # Import directory (required when import_strategy is SYMLINK or STRM, must be absolute path)

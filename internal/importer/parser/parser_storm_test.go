@@ -14,15 +14,18 @@ import (
 	"github.com/javi11/nzbparser"
 )
 
-// parser_storm_test.go pins the per-import invariants on the parser side.
-// The parser bounds fan-out within a single import job via
-// MaxImportConnections; cross-job budgeting is out of scope here.
+// parser_storm_test.go pins the connection-budget invariants on the parser
+// side. Since the removal of the per-import max_import_connections cap, the
+// parser's fan-out is bounded GLOBALLY (across all concurrent imports) by the
+// pool manager's import connection budget.
 
 // fakeFullPoolManager satisfies the full pool.Manager surface so the
 // parser can call GetPool, HasPool, and the metric inc helpers without
-// nil-deref.
+// nil-deref. When budget is set, AcquireImportConnection delegates to it,
+// mirroring the real manager.
 type fakeFullPoolManager struct {
 	client pool.NntpClient
+	budget *pool.ImportBudget
 }
 
 func newFakeFullPoolManager(client pool.NntpClient) *fakeFullPoolManager {
@@ -52,15 +55,36 @@ func (m *fakeFullPoolManager) SetProviderIDs(_ map[string]string) {}
 func (m *fakeFullPoolManager) AcquireImportSlot(_ context.Context) (func(), error) {
 	return func() {}, nil
 }
-func (m *fakeFullPoolManager) SetAdmissionCaps(_ int, _ int)               {}
+func (m *fakeFullPoolManager) SetAdmissionCap(_ int) {}
+func (m *fakeFullPoolManager) AcquireImportConnection(ctx context.Context) (func(), error) {
+	if m.budget != nil {
+		return m.budget.Acquire(ctx)
+	}
+	return func() {}, nil
+}
+func (m *fakeFullPoolManager) SetImportConnCapacity(total int) {
+	if m.budget != nil {
+		m.budget.SetCapacity(total)
+	}
+}
+func (m *fakeFullPoolManager) ImportConnCapacity() int {
+	if m.budget != nil {
+		return m.budget.Capacity()
+	}
+	return 0
+}
 func (m *fakeFullPoolManager) SetStreamSource(_ pool.StreamActivitySource) {}
 func (m *fakeFullPoolManager) NotifyStreamChange()                         {}
 
-// stormConfigGetter returns a ConfigGetter whose MaxImportConnections is
-// exactly N. This is the per-import-job cap on wire-call burstiness.
-func stormConfigGetter(maxImportConnections int) config.ConfigGetter {
+// stormConfigGetter returns a ConfigGetter whose provider capacity is exactly
+// totalConnections. The parser sizes its fetch goroutine pool from
+// TotalProviderConnections; the wire-call bound comes from the budget.
+func stormConfigGetter(totalConnections int) config.ConfigGetter {
 	cfg := config.DefaultConfig()
-	cfg.Import.MaxImportConnections = maxImportConnections
+	enabled := true
+	cfg.Providers = []config.ProviderConfig{
+		{MaxConnections: totalConnections, Enabled: &enabled},
+	}
 	return func() *config.Config { return cfg }
 }
 
@@ -81,16 +105,16 @@ func buildSyntheticNzbFiles(numFiles int) []nzbparser.NzbFile {
 	return files
 }
 
-// TestStorm_ImporterFanOutRespectsMaxImportConnections pins the per-job
-// invariant: the parser's first-segment fan-out for a SINGLE import MUST
-// stay bounded by MaxImportConnections. Cross-job bounding is out of
-// scope for the parser.
-func TestStorm_ImporterFanOutRespectsMaxImportConnections(t *testing.T) {
+// TestStorm_ImporterFanOutRespectsConnectionBudget pins the budget invariant:
+// the parser's first-segment fan-out MUST stay bounded by the pool manager's
+// import connection budget, and a single import MUST be able to fan out past
+// the old fixed per-import cap of 5 when capacity allows.
+func TestStorm_ImporterFanOutRespectsConnectionBudget(t *testing.T) {
 	t.Parallel()
 	const (
-		filesPerImport       = 20
-		maxImportConnections = 6
-		bodyLatency          = 60 * time.Millisecond
+		filesPerImport = 20
+		budgetCapacity = 8
+		bodyLatency    = 100 * time.Millisecond
 	)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -104,37 +128,42 @@ func TestStorm_ImporterFanOutRespectsMaxImportConnections(t *testing.T) {
 	}
 
 	mgr := newFakeFullPoolManager(fp)
-	parser := NewParser(mgr, stormConfigGetter(maxImportConnections))
+	mgr.budget = pool.NewImportBudget()
+	mgr.budget.SetCapacity(budgetCapacity)
+	parser := NewParser(mgr, stormConfigGetter(budgetCapacity))
 
 	files := buildSyntheticNzbFiles(filesPerImport)
 	_, _, _ = parser.fetchAllFirstSegments(ctx, files, nil, ParseOptions{})
 
 	mif := fp.MaxInFlight()
-	t.Logf("single import × %d files (MaxImportConnections=%d) "+
-		"produced MaxInFlight=%d Body calls (invariant: MaxInFlight <= MaxImportConnections)",
-		filesPerImport, maxImportConnections, mif)
+	t.Logf("single import × %d files (budget capacity=%d) "+
+		"produced MaxInFlight=%d Body calls (invariant: MaxInFlight <= capacity)",
+		filesPerImport, budgetCapacity, mif)
 
-	if mif > int32(maxImportConnections) {
-		t.Errorf("INVARIANT regression: MaxInFlight=%d, want <= %d (MaxImportConnections). "+
-			"fetchAllFirstSegments must size its concPool by MaxImportConnections — "+
-			"if this fails, a single import is fanning out past its configured cap "+
-			"and will saturate the slot semaphore on its own.",
-			mif, maxImportConnections)
+	if mif > int32(budgetCapacity) {
+		t.Errorf("INVARIANT regression: MaxInFlight=%d, want <= %d (budget capacity). "+
+			"Every parser Body call must hold an AcquireImportConnection token — "+
+			"if this fails, imports can saturate the pool past the adaptive budget.",
+			mif, budgetCapacity)
+	}
+	// With 20 slow files and capacity 8, fan-out must exceed the old fixed
+	// per-import cap of 5 — the whole point of removing max_import_connections.
+	if mif <= 5 {
+		t.Errorf("regression: MaxInFlight=%d, expected > 5. A single import should "+
+			"expand to the pool's capacity, not the removed fixed cap.", mif)
 	}
 }
 
-// TestStorm_ImporterParallelImportsAreNotInternallyGated asserts that the
-// parser itself does not bound cross-import fan-out. N concurrent imports
-// each fan out up to MaxImportConnections, so MaxInFlight scales as
-// N × MaxImportConnections. Cross-job admission control, if introduced,
-// belongs at a higher layer — not inside the parser.
-func TestStorm_ImporterParallelImportsAreNotInternallyGated(t *testing.T) {
+// TestStorm_ParallelImportsShareGlobalBudget asserts the cross-job bound the
+// old design lacked: N concurrent imports share ONE budget, so global
+// MaxInFlight stays <= capacity instead of scaling as N × per-import cap.
+func TestStorm_ParallelImportsShareGlobalBudget(t *testing.T) {
 	t.Parallel()
 	const (
-		concurrentImports    = 4
-		filesPerImport       = 5
-		maxImportConnections = 4
-		bodyLatency          = 60 * time.Millisecond
+		concurrentImports = 4
+		filesPerImport    = 6
+		budgetCapacity    = 5
+		bodyLatency       = 60 * time.Millisecond
 	)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -148,7 +177,9 @@ func TestStorm_ImporterParallelImportsAreNotInternallyGated(t *testing.T) {
 	}
 
 	mgr := newFakeFullPoolManager(fp)
-	parser := NewParser(mgr, stormConfigGetter(maxImportConnections))
+	mgr.budget = pool.NewImportBudget()
+	mgr.budget.SetCapacity(budgetCapacity)
+	parser := NewParser(mgr, stormConfigGetter(budgetCapacity))
 
 	var wg sync.WaitGroup
 	for i := 0; i < concurrentImports; i++ {
@@ -162,17 +193,14 @@ func TestStorm_ImporterParallelImportsAreNotInternallyGated(t *testing.T) {
 	wg.Wait()
 
 	mif := fp.MaxInFlight()
-	t.Logf("%d concurrent imports × %d files (MaxImportConnections=%d) "+
-		"produced MaxInFlight=%d (parser does NOT internally cap cross-import fan-out)",
-		concurrentImports, filesPerImport, maxImportConnections, mif)
+	t.Logf("%d concurrent imports × %d files (budget capacity=%d) "+
+		"produced global MaxInFlight=%d (invariant: MaxInFlight <= capacity)",
+		concurrentImports, filesPerImport, budgetCapacity, mif)
 
-	// The parser must NOT silently re-introduce an internal slot. If MaxInFlight
-	// stays <= maxImportConnections under N concurrent imports, the parser is
-	// gating internally — regression.
-	minExpected := int32(maxImportConnections + 1)
-	if mif < minExpected {
-		t.Errorf("regression: MaxInFlight=%d, expected > %d. Parser appears to be "+
-			"gating cross-import fan-out internally.",
-			mif, maxImportConnections)
+	if mif > int32(budgetCapacity) {
+		t.Errorf("INVARIANT regression: global MaxInFlight=%d across %d concurrent "+
+			"imports, want <= %d. The import connection budget must bound total "+
+			"in-flight fetches pool-wide, not per job.",
+			mif, concurrentImports, budgetCapacity)
 	}
 }

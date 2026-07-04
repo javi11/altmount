@@ -11,12 +11,20 @@ import (
 func RegisterConfigHandlers(ctx context.Context, configManager *config.Manager, poolManager Manager) {
 	// Initial ID mapping
 	updateProviderIDMap(configManager.GetConfig(), poolManager)
+	// Initial import connection budget: the pool's total connection capacity.
+	poolManager.SetImportConnCapacity(configManager.GetConfig().TotalProviderConnections())
 
 	configManager.OnConfigChange(func(oldConfig, newConfig *config.Config) {
 		slog.InfoContext(ctx, "Configuration updated")
 
 		updateProviderIDMap(newConfig, poolManager)
 		handleProviderChanges(ctx, oldConfig, newConfig, poolManager)
+
+		// Keep the import connection budget in sync with provider capacity.
+		if capacity := newConfig.TotalProviderConnections(); capacity != oldConfig.TotalProviderConnections() {
+			slog.InfoContext(ctx, "Import connection budget updated", "capacity", capacity)
+			poolManager.SetImportConnCapacity(capacity)
+		}
 
 		// Log changes that still require restart
 		if oldConfig.Metadata.RootPath != newConfig.Metadata.RootPath {

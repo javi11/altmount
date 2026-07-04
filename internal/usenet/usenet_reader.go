@@ -66,6 +66,24 @@ func WithHoleHooks(h *HoleHooks) ReaderOption {
 	}
 }
 
+// ConnBudget grants connection tokens for import segment fetches.
+// Implemented by pool.Manager (AcquireImportConnection).
+type ConnBudget interface {
+	AcquireImportConnection(ctx context.Context) (release func(), err error)
+}
+
+// WithImportProfile marks the reader as import-owned: segment fetches use the
+// pool's normal request lane (so they always yield to streaming reads, which
+// use the priority lane) and each fetch is gated by the global import
+// connection budget. Without this option the reader behaves as a streaming
+// reader: priority lane, no budget. A nil budget only switches the lane.
+func WithImportProfile(budget ConnBudget) ReaderOption {
+	return func(r *UsenetReader) {
+		r.priority = false
+		r.budget = budget
+	}
+}
+
 type DataCorruptionError struct {
 	UnderlyingErr error
 	BytesRead     int64
@@ -101,6 +119,8 @@ type UsenetReader struct {
 	streamID       string
 	segmentStore   SegmentStore // optional, nil = no caching
 	holeHooks      *HoleHooks   // optional, nil = missing segments fail the read
+	priority       bool         // true (streaming) = priority lane; false (import) = normal lane
+	budget         ConnBudget   // optional; gates import fetches on the global connection budget
 	cond           *sync.Cond   // Signals downloadManager when reader advances
 
 	// Prefetch-based download tracking
@@ -140,6 +160,7 @@ func NewUsenetReader(
 		metricsTracker: metricsTracker,
 		streamID:       streamID,
 		segmentStore:   segmentStore,
+		priority:       true, // streaming profile by default; WithImportProfile demotes
 	}
 	for _, opt := range opts {
 		opt(ur)
@@ -408,6 +429,18 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 		)
 	}
 
+	// Import readers take a token from the global import connection budget for
+	// the whole fetch (held across retries — it represents one connection's
+	// worth of work). Acquired before any per-attempt timeout is created so
+	// queue wait never burns the fetch deadline. Streaming readers skip this.
+	if b.budget != nil {
+		release, err := b.budget.AcquireImportConnection(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer release()
+	}
+
 	segStart := time.Now()
 	var resultBytes []byte
 	err := retry.Do(
@@ -417,7 +450,15 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 			defer cancel()
 
 			fetchStart := time.Now()
-			result, err := cp.BodyPriority(attemptCtx, seg.Id)
+			var result *nntppool.ArticleBody
+			var err error
+			if b.priority {
+				// Streaming: priority lane — connections serve these first.
+				result, err = cp.BodyPriority(attemptCtx, seg.Id)
+			} else {
+				// Import: normal lane — always yields to streaming reads.
+				result, err = cp.Body(attemptCtx, seg.Id)
+			}
 			fetchDur := time.Since(fetchStart)
 			if err != nil {
 				if errors.Is(err, context.DeadlineExceeded) {

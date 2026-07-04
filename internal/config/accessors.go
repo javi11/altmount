@@ -116,31 +116,37 @@ func (c *Config) GetImportDamagePolicyTolerant() bool {
 	return c.Import.DamagePolicy != "strict"
 }
 
-// GetMaxImportConnections returns max import connections with a default fallback.
-func (c *Config) GetMaxImportConnections() int {
-	if c.Import.MaxImportConnections <= 0 {
-		return 5 // Default: 5 connections
+// TotalProviderConnections returns the pool's total connection capacity: the
+// sum of MaxConnections across enabled, non-backup providers. When no primary
+// providers are configured it falls back to the enabled backup providers' sum
+// so the capacity is not zero while a usable pool exists. Returns 0 when no
+// providers are configured at all.
+func (c *Config) TotalProviderConnections() int {
+	primary := 0
+	backup := 0
+	for _, p := range c.Providers {
+		if p.Enabled != nil && !*p.Enabled {
+			continue
+		}
+		if p.IsBackupProvider != nil && *p.IsBackupProvider {
+			backup += p.MaxConnections
+		} else {
+			primary += p.MaxConnections
+		}
 	}
-	return c.Import.MaxImportConnections
+	if primary > 0 {
+		return primary
+	}
+	return backup
 }
 
-// GetMaxConcurrentImports returns the global cap on concurrent NZB imports
-// when no stream is active. 0 means unlimited (current default behaviour).
+// GetMaxConcurrentImports returns the global cap on concurrent NZB imports.
+// 0 means unlimited (the default).
 func (c *Config) GetMaxConcurrentImports() int {
 	if c.Import.MaxConcurrentImports < 0 {
 		return 0
 	}
 	return c.Import.MaxConcurrentImports
-}
-
-// GetMaxConcurrentImportsWhileStreaming returns the cap on concurrent NZB
-// imports while at least one stream is active. 0 means unlimited (current
-// default behaviour).
-func (c *Config) GetMaxConcurrentImportsWhileStreaming() int {
-	if c.Import.MaxConcurrentImportsWhileStreaming < 0 {
-		return 0
-	}
-	return c.Import.MaxConcurrentImportsWhileStreaming
 }
 
 // GetMaxDownloadPrefetch returns max download prefetch with a default fallback.

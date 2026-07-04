@@ -31,7 +31,7 @@ func waitFor(d time.Duration, cond func() bool) bool {
 
 func TestImportAdmission_DisabledIsNoOp(t *testing.T) {
 	a := NewImportAdmission()
-	// caps (0, 0) -> disabled: every Acquire returns immediately, no queueing.
+	// cap 0 -> disabled: every Acquire returns immediately, no queueing.
 	for i := range 100 {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		release, err := a.Acquire(ctx)
@@ -42,16 +42,16 @@ func TestImportAdmission_DisabledIsNoOp(t *testing.T) {
 		release()
 	}
 
-	a.mu.Lock()
-	if a.inFlight != 0 {
-		t.Fatalf("disabled controller leaked inFlight=%d", a.inFlight)
+	a.sem.mu.Lock()
+	if a.sem.inFlight != 0 {
+		t.Fatalf("disabled controller leaked inFlight=%d", a.sem.inFlight)
 	}
-	a.mu.Unlock()
+	a.sem.mu.Unlock()
 }
 
 func TestImportAdmission_BlocksAtCap(t *testing.T) {
 	a := NewImportAdmission()
-	a.SetCaps(2, 1)
+	a.SetCap(2)
 
 	r1, err := a.Acquire(context.Background())
 	if err != nil {
@@ -93,7 +93,7 @@ func TestImportAdmission_BlocksAtCap(t *testing.T) {
 
 func TestImportAdmission_FIFO(t *testing.T) {
 	a := NewImportAdmission()
-	a.SetCaps(1, 1)
+	a.SetCap(1)
 
 	// Hold the single slot.
 	hold, err := a.Acquire(context.Background())
@@ -138,59 +138,9 @@ func TestImportAdmission_FIFO(t *testing.T) {
 	}
 }
 
-func TestImportAdmission_StreamAwareCap(t *testing.T) {
-	src := &stubStreamSource{}
+func TestImportAdmission_GrowOnSetCapWakesWaiters(t *testing.T) {
 	a := NewImportAdmission()
-	a.SetStreamSource(src)
-	a.SetCaps(3, 1)
-
-	// No streams -> capIdle=3.
-	r1, _ := a.Acquire(context.Background())
-	r2, _ := a.Acquire(context.Background())
-	r3, _ := a.Acquire(context.Background())
-
-	// Activate streams. Existing in-flight imports remain.
-	src.set(1)
-	a.NotifyStreamChange()
-
-	// A fourth must block because capWhileStreaming=1 and inFlight=3.
-	blocked := make(chan struct{})
-	go func() {
-		r, err := a.Acquire(context.Background())
-		if err == nil {
-			close(blocked)
-			r()
-		}
-	}()
-	select {
-	case <-blocked:
-		t.Fatal("Acquire should be blocked while streams active and inFlight > capWhileStreaming")
-	case <-time.After(50 * time.Millisecond):
-	}
-
-	// Release two: inFlight=1 == capWhileStreaming, still no admission.
-	r1()
-	r2()
-	select {
-	case <-blocked:
-		t.Fatal("Acquire should still be blocked at capWhileStreaming")
-	case <-time.After(50 * time.Millisecond):
-	}
-
-	// Stop streaming — cap returns to 3 and the waiter is granted.
-	src.set(0)
-	a.NotifyStreamChange()
-	select {
-	case <-blocked:
-	case <-time.After(time.Second):
-		t.Fatal("Acquire should have been granted after streams ended")
-	}
-	r3()
-}
-
-func TestImportAdmission_GrowOnSetCapsWakesWaiters(t *testing.T) {
-	a := NewImportAdmission()
-	a.SetCaps(1, 1)
+	a.SetCap(1)
 
 	hold, _ := a.Acquire(context.Background())
 
@@ -214,21 +164,21 @@ func TestImportAdmission_GrowOnSetCapsWakesWaiters(t *testing.T) {
 
 	// Wait for them to enqueue.
 	if !waitFor(time.Second, func() bool {
-		a.mu.Lock()
-		defer a.mu.Unlock()
-		return len(a.waiters) == n
+		a.sem.mu.Lock()
+		defer a.sem.mu.Unlock()
+		return len(a.sem.waiters) == n
 	}) {
 		t.Fatalf("expected %d waiters", n)
 	}
 
-	// Grow capIdle to fit them all without releasing the holder.
-	a.SetCaps(1+n, 1)
+	// Grow the cap to fit them all without releasing the holder.
+	a.SetCap(1 + n)
 
 	for i := range n {
 		select {
 		case <-granted:
 		case <-time.After(time.Second):
-			t.Fatalf("waiter %d not granted after SetCaps grew the cap", i)
+			t.Fatalf("waiter %d not granted after SetCap grew the cap", i)
 		}
 	}
 
@@ -242,7 +192,7 @@ func TestImportAdmission_GrowOnSetCapsWakesWaiters(t *testing.T) {
 
 func TestImportAdmission_CtxCancelRemovesWaiter(t *testing.T) {
 	a := NewImportAdmission()
-	a.SetCaps(1, 1)
+	a.SetCap(1)
 
 	hold, _ := a.Acquire(context.Background())
 
@@ -255,9 +205,9 @@ func TestImportAdmission_CtxCancelRemovesWaiter(t *testing.T) {
 
 	// Wait for the waiter to be enqueued.
 	if !waitFor(time.Second, func() bool {
-		a.mu.Lock()
-		defer a.mu.Unlock()
-		return len(a.waiters) == 1
+		a.sem.mu.Lock()
+		defer a.sem.mu.Unlock()
+		return len(a.sem.waiters) == 1
 	}) {
 		t.Fatal("waiter never enqueued")
 	}
@@ -273,14 +223,14 @@ func TestImportAdmission_CtxCancelRemovesWaiter(t *testing.T) {
 	}
 
 	// Waiter slot must be reclaimed; inFlight must remain 1 (the holder).
-	a.mu.Lock()
-	if len(a.waiters) != 0 {
-		t.Fatalf("expected 0 waiters after cancel, got %d", len(a.waiters))
+	a.sem.mu.Lock()
+	if len(a.sem.waiters) != 0 {
+		t.Fatalf("expected 0 waiters after cancel, got %d", len(a.sem.waiters))
 	}
-	if a.inFlight != 1 {
-		t.Fatalf("expected inFlight=1, got %d", a.inFlight)
+	if a.sem.inFlight != 1 {
+		t.Fatalf("expected inFlight=1, got %d", a.sem.inFlight)
 	}
-	a.mu.Unlock()
+	a.sem.mu.Unlock()
 
 	hold()
 }
@@ -289,7 +239,7 @@ func TestImportAdmission_CtxCancelRaceForwardsGrant(t *testing.T) {
 	// Race condition: a waiter is granted at the same moment its ctx cancels.
 	// We must not consume the grant and starve the next waiter.
 	a := NewImportAdmission()
-	a.SetCaps(1, 1)
+	a.SetCap(1)
 
 	hold, _ := a.Acquire(context.Background())
 
@@ -317,9 +267,9 @@ func TestImportAdmission_CtxCancelRaceForwardsGrant(t *testing.T) {
 	}()
 
 	if !waitFor(time.Second, func() bool {
-		a.mu.Lock()
-		defer a.mu.Unlock()
-		return len(a.waiters) == 2
+		a.sem.mu.Lock()
+		defer a.sem.mu.Unlock()
+		return len(a.sem.waiters) == 2
 	}) {
 		t.Fatal("expected 2 waiters")
 	}

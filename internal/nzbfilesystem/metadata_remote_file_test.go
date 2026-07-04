@@ -394,7 +394,12 @@ func (m *mockPoolManager) AcquireImportSlot(_ context.Context) (func(), error) {
 	return func() {}, nil
 }
 
-func (m *mockPoolManager) SetAdmissionCaps(_ int, _ int) {}
+func (m *mockPoolManager) SetAdmissionCap(_ int) {}
+func (m *mockPoolManager) AcquireImportConnection(_ context.Context) (func(), error) {
+	return func() {}, nil
+}
+func (m *mockPoolManager) SetImportConnCapacity(_ int) {}
+func (m *mockPoolManager) ImportConnCapacity() int     { return 0 }
 
 func (m *mockPoolManager) SetStreamSource(_ pool.StreamActivitySource) {}
 

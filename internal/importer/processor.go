@@ -176,7 +176,7 @@ func (proc *Processor) checkCancellation(ctx context.Context) error {
 // round-trips. Returns (brokenFileIndexes, knownMissingSegmentIDs, error).
 // Both maps are nil when no pool is available.
 // Returns ErrNoFilesProcessed (wrapped) when all eligible regular files are broken.
-func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, cfg *config.Config, queueID, maxConnections int) (map[int]struct{}, map[string]struct{}, error) {
+func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, cfg *config.Config, queueID int) (map[int]struct{}, map[string]struct{}, error) {
 	if !proc.poolManager.HasPool() {
 		return nil, nil, nil
 	}
@@ -207,10 +207,8 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 
 	// Stat is a cheap single round-trip on the pool's normal lane; excess
 	// requests queue and yield to streaming (priority lane). Run sweeps at the
-	// pool's full connection capacity rather than MaxImportConnections (which
-	// caps sustained body downloads) so multi-part releases don't crawl
-	// 5-at-a-time.
-	concurrency := fastFailConcurrency(cfg, maxConnections)
+	// pool's full connection capacity so multi-part releases don't crawl.
+	concurrency := fastFailConcurrency(cfg)
 
 	// Phase 1: cheap release-level probe. Sample the whole release once
 	// (≤55 Stats) and fail fast. Healthy releases — the common case — pay only
@@ -368,22 +366,11 @@ func longestSampledRun(segments []*metapb.SegmentData, missingIDs []string) int 
 
 // fastFailConcurrency returns the goroutine cap for the fast-fail Stat sweep.
 // Stats are cheap and queue on the pool's normal lane, so we use the pool's
-// full connection capacity (sum of enabled providers' max connections) rather
-// than the import body-download cap. Falls back to fallback when no capacity is
-// configured and is bounded to keep goroutine counts sane.
-func fastFailConcurrency(cfg *config.Config, fallback int) int {
+// full connection capacity, bounded to keep goroutine counts sane.
+func fastFailConcurrency(cfg *config.Config) int {
 	const maxConcurrency = 100
 
-	capacity := 0
-	for _, p := range cfg.Providers {
-		if p.Enabled == nil || *p.Enabled {
-			capacity += p.MaxConnections
-		}
-	}
-
-	if capacity <= 0 {
-		capacity = fallback
-	}
+	capacity := cfg.TotalProviderConnections()
 	if capacity <= 0 {
 		capacity = 1
 	}
@@ -412,7 +399,6 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 	cfg := proc.configGetter()
 
 	// Determine max connections to use
-	maxConnections := cfg.Import.MaxImportConnections
 
 	// Determine allowed file extensions to use
 	allowedExtensions := cfg.Import.AllowedFileExtensions
@@ -457,7 +443,7 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 		proc.updateProgressWithStage(queueID, 0, "Checking segment availability")
 		var missingIDs map[string]struct{}
 		var fastFailErr error
-		brokenIdx, missingIDs, fastFailErr = proc.preParseFastFail(ctx, n, cfg, queueID, maxConnections)
+		brokenIdx, missingIDs, fastFailErr = proc.preParseFastFail(ctx, n, cfg, queueID)
 		if fastFailErr != nil {
 			return "", nil, NewNonRetryableError("fast-fail segment check failed", fastFailErr)
 		}
@@ -525,8 +511,7 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 		"virtual_dir", virtualDir,
 		"type", parsed.Type,
 		"total_size", parsed.TotalSize,
-		"files", len(parsed.Files),
-		"max_connections", maxConnections)
+		"files", len(parsed.Files))
 
 	// Step 3: Separate files by type (regular, archive, PAR2)
 	regularFiles, archiveFiles, par2Files := filesystem.SeparateFiles(parsed.Files, parsed.Type)

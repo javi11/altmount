@@ -258,14 +258,11 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 		paused:          false,
 	}
 
-	// Push initial admission caps to the pool so imports are gated from the
-	// start. Zero values keep the controller disabled, matching prior behaviour.
+	// Push the initial admission cap to the pool so imports are gated from the
+	// start. Zero keeps the controller disabled, matching prior behaviour.
 	if poolManager != nil && configGetter != nil {
 		if cfg := configGetter(); cfg != nil {
-			poolManager.SetAdmissionCaps(
-				cfg.GetMaxConcurrentImports(),
-				cfg.GetMaxConcurrentImportsWhileStreaming(),
-			)
+			poolManager.SetAdmissionCap(cfg.GetMaxConcurrentImports())
 		}
 	}
 
@@ -431,15 +428,13 @@ func (s *Service) RegisterConfigChangeHandler(configManager any) {
 			}
 		}
 
-		// Push updated import-admission caps to the pool. Zero values keep
+		// Push the updated import-admission cap to the pool. Zero keeps
 		// the admission gate disabled (unlimited).
 		if s.poolManager != nil {
-			capIdle := newConfig.GetMaxConcurrentImports()
-			capWhileStreaming := newConfig.GetMaxConcurrentImportsWhileStreaming()
-			s.poolManager.SetAdmissionCaps(capIdle, capWhileStreaming)
-			s.log.InfoContext(s.ctx, "Import admission caps updated",
-				"max_concurrent_imports", capIdle,
-				"max_concurrent_imports_while_streaming", capWhileStreaming)
+			cap := newConfig.GetMaxConcurrentImports()
+			s.poolManager.SetAdmissionCap(cap)
+			s.log.InfoContext(s.ctx, "Import admission cap updated",
+				"max_concurrent_imports", cap)
 		}
 	})
 }
