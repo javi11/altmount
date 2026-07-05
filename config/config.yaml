@@ -23,6 +23,7 @@ health:
     segment_sample_percentage: 5
     library_sync_interval_minutes: 360
     library_sync_concurrency: 0
+    corruption_action: repair
 rclone:
     path: /config
     password: ''

@@ -172,7 +172,28 @@ export function HealthConfigSection({
 
 				{/* Repair & Back-off Configuration */}
 				<div className="rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
-					<div className="flex items-start justify-between gap-4">
+					<fieldset className="fieldset">
+						<legend className="fieldset-legend font-semibold">On Corruption</legend>
+						<select
+							className="select select-bordered w-full bg-base-100 text-sm"
+							value={formData.corruption_action ?? "repair"}
+							disabled={isReadOnly}
+							onChange={(e) =>
+								handleInputChange("corruption_action", e.target.value as "repair" | "delete")
+							}
+						>
+							<option value="repair">Trigger repair</option>
+							<option value="delete">Delete file</option>
+						</select>
+						<p className="label break-words text-[10px] text-base-content/50">
+							What to do when a confirmed (non-degraded) corruption is detected, whether from a
+							scheduled health check or a live streaming failure. "Delete file" removes the file's
+							metadata, health record, and any now-empty parent directories instead of asking an ARR
+							to redownload it.
+						</p>
+					</fieldset>
+
+					<div className="mt-6 flex items-start justify-between gap-4 border-base-300/50 border-t pt-6">
 						<div className="min-w-0 flex-1">
 							<h4 className="break-words font-bold text-base-content text-sm">Repair Engine</h4>
 							<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
@@ -183,12 +204,12 @@ export function HealthConfigSection({
 							type="checkbox"
 							className="toggle toggle-info mt-1 shrink-0"
 							checked={formData.repair?.enabled ?? true}
-							disabled={isReadOnly}
+							disabled={isReadOnly || formData.corruption_action === "delete"}
 							onChange={(e) => handleRepairChange("enabled", e.target.checked)}
 						/>
 					</div>
 
-					{formData.repair?.enabled && (
+					{formData.repair?.enabled && formData.corruption_action !== "delete" && (
 						<div className="fade-in slide-in-from-top-2 mt-6 animate-in border-base-300/50 border-t pt-6">
 							<div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
 								<fieldset className="fieldset">

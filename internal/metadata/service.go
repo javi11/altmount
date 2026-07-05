@@ -738,6 +738,27 @@ func (ms *MetadataService) DeleteFileMetadataWithSourceNzb(ctx context.Context, 
 	return nil
 }
 
+// DeleteCorruptedFile removes a file's metadata (and optionally its source NZB), then
+// removes the physical library file (if any) and cleans up now-empty parent directories
+// in the physical library tree. Metadata-tree cleanup is already handled by
+// DeleteFileMetadataWithSourceNzb; the physical-path removal is error-tolerant since
+// physicalPath is often just a view into the same mount and may already be gone.
+func (ms *MetadataService) DeleteCorruptedFile(ctx context.Context, virtualPath string, deleteSourceNzb bool, physicalPath string, physicalRoot string) error {
+	if err := ms.DeleteFileMetadataWithSourceNzb(ctx, virtualPath, deleteSourceNzb); err != nil {
+		return err
+	}
+	if physicalPath == "" {
+		return nil
+	}
+	if err := os.Remove(physicalPath); err != nil && !os.IsNotExist(err) {
+		slog.WarnContext(ctx, "Failed to delete physical library file", "path", physicalPath, "error", err)
+	}
+	if physicalRoot != "" {
+		utils.RemoveEmptyDirs(physicalRoot, filepath.Dir(physicalPath))
+	}
+	return nil
+}
+
 // DeleteDirectory deletes a metadata directory and all its contents
 func (ms *MetadataService) DeleteDirectory(virtualPath string) error {
 	ctx := context.Background()

@@ -119,6 +119,10 @@ export interface HealthConfig {
 	read_timeout_seconds?: number; // Timeout for data verification
 	acceptable_missing_segments_percentage?: number;
 	repair: RepairConfig;
+	// What happens when the health checker or a streaming read confirms real
+	// (non-degraded) corruption: "repair" (default) triggers an Arr rescan;
+	// "delete" removes the file and cleans up now-empty parent directories instead.
+	corruption_action?: "repair" | "delete";
 }
 
 export interface RepairConfig {
@@ -395,6 +399,7 @@ export interface HealthUpdateRequest {
 	verify_data?: boolean;
 	acceptable_missing_segments_percentage?: number;
 	repair?: Partial<RepairConfig>;
+	corruption_action?: "repair" | "delete";
 }
 
 // RClone update request

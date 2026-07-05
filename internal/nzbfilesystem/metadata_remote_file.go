@@ -2137,6 +2137,25 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 			"total_missing", classification.TotalMissing,
 			"longest_run", classification.LongestRun)
 		dbStatus = database.HealthStatusDegraded
+	} else if healthEnabled && cfg.GetHealthDeleteOnCorruption() {
+		// Delete-on-corruption is enabled: remove the file instead of triggering a repair.
+		slog.WarnContext(ctx, "Streaming failure detected, deleting corrupted file instead of triggering repair", "file", mvf.name)
+
+		var physicalPath, rootPath string
+		if health, err := mvf.healthRepository.GetFileHealth(ctx, mvf.name); err == nil && health != nil && health.LibraryPath != nil {
+			physicalPath = *health.LibraryPath
+			rootPath = cfg.MountPath
+			if cfg.Health.LibraryDir != nil && *cfg.Health.LibraryDir != "" {
+				rootPath = *cfg.Health.LibraryDir
+			}
+		}
+
+		if err := mvf.metadataService.DeleteCorruptedFile(ctx, mvf.name, cfg.Metadata.ShouldDeleteSourceNzb(), physicalPath, rootPath); err != nil {
+			slog.ErrorContext(ctx, "Failed to delete corrupted file after streaming failure", "file", mvf.name, "error", err)
+		} else if err := mvf.healthRepository.DeleteHealthRecord(ctx, mvf.name); err != nil {
+			slog.ErrorContext(ctx, "Failed to delete health record after deleting corrupted file", "file", mvf.name, "error", err)
+		}
+		return
 	} else if healthEnabled {
 		// Mark as repair_triggered with high priority to trigger the replacement immediately.
 		// We skip the re-verification phase because a streaming failure is a definitive indicator of corruption.

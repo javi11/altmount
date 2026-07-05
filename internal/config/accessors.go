@@ -206,6 +206,12 @@ func (c *Config) GetHealthEnabled() bool {
 	return *c.Health.Enabled
 }
 
+// GetHealthDeleteOnCorruption reports whether confirmed corruption should delete the
+// file instead of triggering an Arr repair (health.corruption_action == "delete").
+func (c *Config) GetHealthDeleteOnCorruption() bool {
+	return c.Health.CorruptionAction == "delete"
+}
+
 // GetRepairEnabled returns whether automatic repair is enabled (defaults to true)
 func (c *Config) GetRepairEnabled() bool {
 	if c.Health.Repair.Enabled == nil {
