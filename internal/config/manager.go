@@ -362,6 +362,11 @@ type HealthConfig struct {
 	ReadTimeoutSeconds                  int          `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds,omitempty"`
 	AcceptableMissingSegmentsPercentage float64      `yaml:"acceptable_missing_segments_percentage" mapstructure:"acceptable_missing_segments_percentage" json:"acceptable_missing_segments_percentage"`
 	Repair                              RepairConfig `yaml:"repair" mapstructure:"repair" json:"repair"`
+	// CorruptionAction controls what happens when the health checker or a streaming read
+	// confirms real (non-degraded) corruption: "repair" (default) triggers an Arr rescan;
+	// "delete" removes the file's metadata/NZB/health record and cleans up now-empty
+	// parent directories instead. Degraded files are never affected either way.
+	CorruptionAction string `yaml:"corruption_action" mapstructure:"corruption_action" json:"corruption_action,omitempty"`
 }
 
 // Path validation functions have been moved to internal/utils/path.go

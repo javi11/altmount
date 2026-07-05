@@ -463,6 +463,13 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 	// that has exhausted its health-check retries (or is already in repair_triggered from a
 	// time when repair was enabled) is finalized as corrupted for visibility, with no
 	// metadata safety-folder move. Regular health-check retries below are left intact.
+	// When delete-on-corruption is enabled, confirmed corruption is handled by removing
+	// the file entirely instead of ever entering the repair flow below (this covers both
+	// freshly-exhausted checks and files already sitting in repair_triggered).
+	if hw.configGetter().GetHealthDeleteOnCorruption() {
+		return hw.deleteCorruptedFile(ctx, fh)
+	}
+
 	repairEnabled := hw.configGetter().GetRepairEnabled()
 	markCorruptedNoRepair := func() (*database.HealthStatusUpdate, func() error) {
 		update.Type = database.UpdateTypeCorrupted
@@ -597,10 +604,42 @@ func (hw *HealthWorker) markCorruptedRepairExhausted(ctx context.Context, fh *da
 	}
 }
 
+// deleteCorruptedFile removes a confirmed-corrupted file's metadata (and optional source
+// NZB), cleans up now-empty parent directories in both the metadata store and the physical
+// library tree, and deletes the health record — used instead of triggering an Arr repair
+// when health.corruption_action is set to "delete".
+func (hw *HealthWorker) deleteCorruptedFile(ctx context.Context, fh *database.FileHealth) (*database.HealthStatusUpdate, func() error) {
+	update := &database.HealthStatusUpdate{FilePath: fh.FilePath, Skip: true}
+	return update, func() error {
+		cfg := hw.configGetter()
+		var physicalPath, rootPath string
+		if fh.LibraryPath != nil {
+			physicalPath = *fh.LibraryPath
+			rootPath = cfg.MountPath
+			if cfg.Health.LibraryDir != nil && *cfg.Health.LibraryDir != "" {
+				rootPath = *cfg.Health.LibraryDir
+			}
+		}
+		if err := hw.metadataService.DeleteCorruptedFile(ctx, fh.FilePath, cfg.Metadata.ShouldDeleteSourceNzb(), physicalPath, rootPath); err != nil {
+			slog.ErrorContext(ctx, "Failed to delete corrupted file", "file_path", fh.FilePath, "error", err)
+			return err
+		}
+		if err := hw.healthRepo.DeleteHealthRecord(ctx, fh.FilePath); err != nil {
+			slog.ErrorContext(ctx, "Failed to delete health record for deleted corrupted file", "file_path", fh.FilePath, "error", err)
+		}
+		slog.WarnContext(ctx, "Deleted corrupted file instead of triggering repair", "file_path", fh.FilePath)
+		return nil
+	}
+}
+
 // prepareRepairNotificationUpdate builds the update and side effect for a file already in
 // repair_triggered state. It re-triggers ARR directly without calling CheckFile, since the
 // metadata has already been moved to the corrupted folder.
 func (hw *HealthWorker) prepareRepairNotificationUpdate(ctx context.Context, fh *database.FileHealth) (*database.HealthStatusUpdate, func() error) {
+	if hw.configGetter().GetHealthDeleteOnCorruption() {
+		return hw.deleteCorruptedFile(ctx, fh)
+	}
+
 	// Default to the existing diagnosis so a successful re-trigger (which never
 	// sets these itself) doesn't null out the reason the file was flagged in
 	// the first place; applyRepairOutcome combines onto this if repair fails.
