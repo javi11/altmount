@@ -8,7 +8,10 @@ import (
 	"testing"
 
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/importer/parser/fileinfo"
 	"github.com/javi11/altmount/internal/metadata"
+	"github.com/javi11/altmount/internal/testsupport/nzbbuild"
+	"github.com/javi11/nzbparser"
 	"github.com/stretchr/testify/require"
 )
 
@@ -109,4 +112,88 @@ func newStremioStreamsTestServer(t *testing.T, names []string) (*Server, *databa
 		ID:          42,
 		StoragePath: &storagePath,
 	}
+}
+
+// buildNzbBytes renders the given files (and optional meta) to NZB bytes as they
+// would arrive over the wire, so deriveNzbNameFromContent can re-parse them.
+func buildNzbBytes(t *testing.T, meta map[string]string, files ...nzbbuild.File) []byte {
+	t.Helper()
+	n := nzbbuild.Build(files...)
+	if meta != nil {
+		n.Meta = meta
+	}
+	data, err := nzbparser.Write(n)
+	require.NoError(t, err)
+	return data
+}
+
+func seg(id string, bytes int) nzbbuild.Segment { return nzbbuild.Segment{ID: id, Bytes: bytes} }
+
+func TestDeriveNzbNameFromContent(t *testing.T) {
+	tests := []struct {
+		name string
+		data []byte
+		want string
+	}{
+		{
+			name: "meta name is preferred when present and clean",
+			data: buildNzbBytes(t,
+				map[string]string{"name": "The.Great.Movie.2024.1080p.WEB-DL"},
+				nzbbuild.File{Subject: `[1/1] "obfuscatedgarbage.mkv" yEnc (1/1)`, Segments: []nzbbuild.Segment{seg("a@x", 1000)}},
+			),
+			want: "The.Great.Movie.2024.1080p.WEB-DL",
+		},
+		{
+			name: "largest media file subject wins when no usable meta",
+			data: buildNzbBytes(t, nil,
+				nzbbuild.File{Subject: `[1/3] "Sample.The.Movie.mp4" yEnc (1/1)`, Segments: []nzbbuild.Segment{seg("s@x", 1000)}},
+				nzbbuild.File{Subject: `[2/3] "The.Sheep.Detectives.2026.2160p.mkv" yEnc (1/2)`, Segments: []nzbbuild.Segment{seg("m1@x", 500000), seg("m2@x", 500000)}},
+				nzbbuild.File{Subject: `[3/3] "The.Sheep.Detectives.2026.2160p.par2" yEnc (1/1)`, Segments: []nzbbuild.Segment{seg("p@x", 2000)}},
+			),
+			want: "The.Sheep.Detectives.2026.2160p",
+		},
+		{
+			name: "obfuscated meta falls through to media file",
+			data: buildNzbBytes(t,
+				map[string]string{"name": "deadbeefdeadbeefdeadbeefdeadbeef"},
+				nzbbuild.File{Subject: `[1/1] "The.Clean.Release.2025.1080p.mkv" yEnc (1/1)`, Segments: []nzbbuild.Segment{seg("c@x", 5000)}},
+			),
+			want: "The.Clean.Release.2025.1080p",
+		},
+		{
+			name: "all obfuscated returns empty",
+			data: buildNzbBytes(t, nil,
+				nzbbuild.File{Subject: `[1/2] "abcdef0123456789abcdef0123456789.mkv" yEnc (1/1)`, Segments: []nzbbuild.Segment{seg("o@x", 1000)}},
+				nzbbuild.File{Subject: `[2/2] "abcdef0123456789abcdef0123456789.par2" yEnc (1/1)`, Segments: []nzbbuild.Segment{seg("op@x", 500)}},
+			),
+			want: "",
+		},
+		{
+			name: "no media files returns empty",
+			data: buildNzbBytes(t, nil,
+				nzbbuild.File{Subject: `[1/1] "The.Release.2024.par2" yEnc (1/1)`, Segments: []nzbbuild.Segment{seg("np@x", 500)}},
+			),
+			want: "",
+		},
+		{
+			name: "invalid nzb bytes returns empty",
+			data: []byte("not an nzb"),
+			want: "",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := deriveNzbNameFromContent(tc.data)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// TestGenericDownloadNameIsObfuscated guards the trigger condition in handleNzbStreams:
+// the generic transport name "download" must be classified obfuscated so the
+// content-derived name override kicks in.
+func TestGenericDownloadNameIsObfuscated(t *testing.T) {
+	require.True(t, fileinfo.IsProbablyObfuscated("download"),
+		`expected "download" to be treated as obfuscated so the name override triggers`)
 }

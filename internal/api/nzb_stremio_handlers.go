@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -17,7 +18,9 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/javi11/altmount/internal/auth"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/importer/parser/fileinfo"
 	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
+	"github.com/javi11/nzbparser"
 )
 
 // mediaExtensions lists common video/media file extensions for Stremio stream filtering.
@@ -186,6 +189,19 @@ func (s *Server) handleNzbStreams(c *fiber.Ctx) error {
 		nzbData, err = io.ReadAll(f)
 		if err != nil {
 			return RespondInternalError(c, "Failed to read uploaded file", err.Error())
+		}
+	}
+
+	// --- Recover a real release name when the transport name is generic ---
+	// AIOStreams uploads/links the NZB as "download.nzb" (multipart part name or a
+	// download-endpoint URL like ".../download?..."), which loses the real title. That
+	// generic name would then (1) rename the imported media file to "download.mp4" via
+	// RenameToNzbName and (2) collide across releases in the per-filename dedup/cache
+	// below, serving one movie's stream for a different request. When the incoming name
+	// looks obfuscated/generic, derive a meaningful, unique name from the NZB contents.
+	if fileinfo.IsProbablyObfuscated(nzbtrim.TrimNzbExtension(filepath.Base(nzbFilename))) {
+		if derived := deriveNzbNameFromContent(nzbData); derived != "" {
+			nzbFilename = derived + ".nzb"
 		}
 	}
 
@@ -479,6 +495,51 @@ func stremioStreamFromPath(virtualPath, baseURL, downloadKey string) StremioStre
 // isMediaExtension reports whether ext is a common video/media file extension.
 func isMediaExtension(ext string) bool {
 	return mediaExtensions[strings.ToLower(ext)]
+}
+
+// deriveNzbNameFromContent inspects raw NZB bytes for a meaningful release name so the
+// downstream filename, dedup key, and import output do not fall back to a generic transport
+// name (e.g. "download"). It parses locally and never touches the network.
+//
+// Preference order:
+//  1. the <head><meta type="name"> value, when present and not obfuscated;
+//  2. otherwise the largest media <file> subject's release stem (extension stripped).
+//
+// Returns "" when nothing trustworthy is found, so the caller keeps its existing fallback.
+func deriveNzbNameFromContent(nzbData []byte) string {
+	nzb, err := nzbparser.Parse(bytes.NewReader(nzbData))
+	if err != nil {
+		return ""
+	}
+
+	// 1. Explicit release name in NZB metadata.
+	if name := strings.TrimSpace(nzb.Meta["name"]); name != "" && !fileinfo.IsProbablyObfuscated(name) {
+		if safe := sanitizeFilename(name); safe != "" {
+			return safe
+		}
+	}
+
+	// 2. Largest media file's subject name.
+	bestName := ""
+	var bestBytes int64 = -1
+	for i := range nzb.Files {
+		f := nzb.Files[i]
+		if !isMediaExtension(filepath.Ext(f.Filename)) {
+			continue
+		}
+		stem := strings.TrimSuffix(f.Filename, filepath.Ext(f.Filename))
+		if stem == "" || fileinfo.IsProbablyObfuscated(stem) {
+			continue
+		}
+		if f.Bytes > bestBytes {
+			bestBytes = f.Bytes
+			bestName = stem
+		}
+	}
+	if bestName == "" {
+		return ""
+	}
+	return sanitizeFilename(bestName)
 }
 
 func stremioEpisodeSelectorFromRequest(c *fiber.Ctx) *stremioEpisodeSelector {
