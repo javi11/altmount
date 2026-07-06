@@ -231,3 +231,44 @@ func oldRollSetSkip(base string, sCount int, skip string) []string {
 	}
 	return out
 }
+
+func TestNormalizeRarPartFilenameMix(t *testing.T) {
+	tests := []struct {
+		name         string
+		filename     string
+		index        int
+		allNoExt     bool
+		totalFiles   int
+		baseFilename string
+		want         string
+	}{
+		{
+			name:         "first file with .rar extension gets normalized to .r00",
+			filename:     "my_show.rar",
+			index:        0,
+			allNoExt:     true,
+			totalFiles:   46,
+			baseFilename: "my_show",
+			want:         "my_show.r00",
+		},
+		{
+			name:         "continuation file with no extension gets normalized to .r01",
+			filename:     "my_show",
+			index:        1,
+			allNoExt:     true,
+			totalFiles:   46,
+			baseFilename: "my_show",
+			want:         "my_show.r01",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizeRarPartFilename(tt.filename, tt.index, tt.allNoExt, tt.totalFiles, tt.baseFilename)
+			if got != tt.want {
+				t.Errorf("normalizeRarPartFilename(%q) = %q; want %q", tt.filename, got, tt.want)
+			}
+		})
+	}
+}
+
