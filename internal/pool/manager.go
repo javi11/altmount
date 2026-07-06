@@ -583,7 +583,11 @@ func (m *manager) checkAndResetExpiredQuotas(ctx context.Context) {
 
 	now := time.Now()
 	for _, ps := range m.pool.Stats().Providers {
-		if ps.QuotaBytes == 0 {
+		// Skip providers with no quota configured or no tracked usage to reset.
+		// Without the QuotaUsed guard, providers that simply have a quota period
+		// configured but have never downloaded anything would trigger a spurious
+		// reset + DB write on every tick once their reset time expires.
+		if ps.QuotaBytes == 0 || ps.QuotaUsed == 0 {
 			continue
 		}
 		if ps.QuotaResetAt.IsZero() || !ps.QuotaResetAt.Before(now) {
