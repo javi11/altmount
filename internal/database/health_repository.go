@@ -202,6 +202,11 @@ func (r *HealthRepository) IncrementStreamingFailureCount(ctx context.Context, f
 	var shouldRepair bool
 	err := r.db.QueryRowContext(ctx, query, threshold, filePath, threshold).Scan(&isMasked, &shouldRepair)
 	if err != nil {
+		// File not yet in file_health (health system just enabled, or first occurrence
+		// before post-import scheduler runs): treat as first failure, proceed with repair.
+		if err == sql.ErrNoRows {
+			return false, true, nil
+		}
 		return false, false, fmt.Errorf("failed to increment streaming failure count: %w", err)
 	}
 
@@ -228,14 +233,13 @@ func (r *HealthRepository) UnmaskFile(ctx context.Context, filePath string) erro
 }
 
 // GetUnhealthyFiles returns files that need health checks
-// GetUnhealthyFiles returns files that need health checks
 func (r *HealthRepository) GetUnhealthyFiles(ctx context.Context, limit int, strategy string, libraryDir string, maxRetries int) ([]*FileHealth, error) {
 	query := `
 		SELECT id, file_path, status, last_checked, last_error, retry_count, max_retries,
 		       repair_retry_count, max_repair_retries, source_nzb_path,
 		       error_details, created_at, updated_at, release_date, scheduled_check_at,
 			   library_path, priority, streaming_failure_count, is_masked
-		, metadata, indexer
+		, metadata, indexer, download_id
 		FROM file_health
 		WHERE scheduled_check_at IS NOT NULL
 		  AND scheduled_check_at <= datetime('now')
@@ -288,7 +292,7 @@ func (r *HealthRepository) GetUnhealthyFiles(ctx context.Context, limit int, str
 			&health.Priority,
 			&health.StreamingFailureCount,
 			&health.IsMasked,
-			&health.Metadata, &health.Indexer,
+			&health.Metadata, &health.Indexer, &health.DownloadID,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan file health: %w", err)

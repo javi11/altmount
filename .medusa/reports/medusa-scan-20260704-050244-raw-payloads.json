@@ -1,0 +1,216 @@
+{
+  "warning": "RAW PAYLOADS - Contains unobfuscated attack content. For human review only.",
+  "generated": "2026-07-04T05:02:44.695819",
+  "payloads": {
+    "b0858ce5caf1": {
+      "original_code": "",
+      "original_issue": "Payload Splitting: cross-context prompt injection assembly detected",
+      "file": "/opt/altmount/github/altmount/CLAUDE.md",
+      "line": 774,
+      "category": "Prompt Injection"
+    },
+    "5746382348ea": {
+      "original_code": "",
+      "original_issue": "Security issue detected: prompt-injection-m-gcg-adversarial-suffix-pattern",
+      "file": "/opt/altmount/github/altmount/CLAUDE.md",
+      "line": 433,
+      "category": "Prompt Injection"
+    },
+    "f839f26acd3a": {
+      "original_code": "",
+      "original_issue": "Security issue detected: prompt-injection-m-gcg-adversarial-suffix-pattern",
+      "file": "/opt/altmount/github/altmount/CLAUDE.md",
+      "line": 434,
+      "category": "Prompt Injection"
+    },
+    "30c9ba8e6115": {
+      "original_code": "",
+      "original_issue": "Security issue detected: prompt-injection-m-gcg-adversarial-suffix-pattern",
+      "file": "/opt/altmount/github/altmount/CLAUDE.md",
+      "line": 435,
+      "category": "Prompt Injection"
+    },
+    "2fdb960ac152": {
+      "original_code": "",
+      "original_issue": "Security issue detected: prompt-injection-m-gcg-adversarial-suffix-pattern",
+      "file": "/opt/altmount/github/altmount/CLAUDE.md",
+      "line": 436,
+      "category": "Prompt Injection"
+    },
+    "8cb7a440ec9a": {
+      "original_code": "",
+      "original_issue": "Security issue detected: prompt-injection-m-gcg-adversarial-suffix-pattern",
+      "file": "/opt/altmount/github/altmount/CLAUDE.md",
+      "line": 437,
+      "category": "Prompt Injection"
+    },
+    "798fc865f6e8": {
+      "original_code": "",
+      "original_issue": "Security issue detected: prompt-injection-m-gcg-adversarial-suffix-pattern",
+      "file": "/opt/altmount/github/altmount/CLAUDE.md",
+      "line": 438,
+      "category": "Prompt Injection"
+    },
+    "40ee1cbf59c6": {
+      "original_code": "",
+      "original_issue": "Security issue detected: prompt-injection-m-gcg-adversarial-suffix-pattern",
+      "file": "/opt/altmount/github/altmount/CLAUDE.md",
+      "line": 439,
+      "category": "Prompt Injection"
+    },
+    "c31b83357c78": {
+      "original_code": "",
+      "original_issue": "Security issue detected: prompt-injection-m-gcg-adversarial-suffix-pattern",
+      "file": "/opt/altmount/github/altmount/CLAUDE.md",
+      "line": 440,
+      "category": "Prompt Injection"
+    },
+    "a78e3fe9b7be": {
+      "original_code": "",
+      "original_issue": "Security issue detected: prompt-injection-m-gcg-adversarial-suffix-pattern",
+      "file": "/opt/altmount/github/altmount/CLAUDE.md",
+      "line": 441,
+      "category": "Prompt Injection"
+    },
+    "17c3f5ba13c8": {
+      "original_code": "",
+      "original_issue": "Security issue detected: prompt-injection-m-gcg-adversarial-suffix-pattern",
+      "file": "/opt/altmount/github/altmount/CLAUDE.md",
+      "line": 442,
+      "category": "Prompt Injection"
+    },
+    "541c8da87bc5": {
+      "original_code": "",
+      "original_issue": "Security issue detected: prompt-injection-m-gcg-adversarial-suffix-pattern",
+      "file": "/opt/altmount/github/altmount/CLAUDE.md",
+      "line": 443,
+      "category": "Prompt Injection"
+    },
+    "624638050e84": {
+      "original_code": "",
+      "original_issue": "Security issue detected: prompt-injection-m-gcg-adversarial-suffix-pattern",
+      "file": "/opt/altmount/github/altmount/CLAUDE.md",
+      "line": 444,
+      "category": "Prompt Injection"
+    },
+    "53a0a1e23598": {
+      "original_code": "",
+      "original_issue": "Security issue detected: prompt-injection-m-gcg-adversarial-suffix-pattern",
+      "file": "/opt/altmount/github/altmount/CLAUDE.md",
+      "line": 445,
+      "category": "Prompt Injection"
+    },
+    "908d9cfe2b3b": {
+      "original_code": "",
+      "original_issue": "Security issue detected: prompt-injection-m-gcg-adversarial-suffix-pattern",
+      "file": "/opt/altmount/github/altmount/CLAUDE.md",
+      "line": 446,
+      "category": "Prompt Injection"
+    },
+    "4ca479edb410": {
+      "original_code": "",
+      "original_issue": "Security issue detected: prompt-injection-m-gcg-adversarial-suffix-pattern",
+      "file": "/opt/altmount/github/altmount/CLAUDE.md",
+      "line": 447,
+      "category": "Prompt Injection"
+    },
+    "d6de193bd6a1": {
+      "original_code": "",
+      "original_issue": "Security issue detected: prompt-injection-m-gcg-adversarial-suffix-pattern",
+      "file": "/opt/altmount/github/altmount/CLAUDE.md",
+      "line": 448,
+      "category": "Prompt Injection"
+    },
+    "29ef23bdef47": {
+      "original_code": "",
+      "original_issue": "Security issue detected: prompt-injection-m-gcg-adversarial-suffix-pattern",
+      "file": "/opt/altmount/github/altmount/CLAUDE.md",
+      "line": 449,
+      "category": "Prompt Injection"
+    },
+    "7f1150cda59c": {
+      "original_code": "",
+      "original_issue": "Security issue detected: prompt-injection-m-gcg-adversarial-suffix-pattern",
+      "file": "/opt/altmount/github/altmount/CLAUDE.md",
+      "line": 450,
+      "category": "Prompt Injection"
+    },
+    "220118ed9f6c": {
+      "original_code": "",
+      "original_issue": "Security issue detected: prompt-injection-m-gcg-adversarial-suffix-pattern",
+      "file": "/opt/altmount/github/altmount/CLAUDE.md",
+      "line": 451,
+      "category": "Prompt Injection"
+    },
+    "ef5b970e38b1": {
+      "original_code": "",
+      "original_issue": "Security issue detected: prompt-injection-m-gcg-adversarial-suffix-pattern",
+      "file": "/opt/altmount/github/altmount/CLAUDE.md",
+      "line": 452,
+      "category": "Prompt Injection"
+    },
+    "fc7393d0e118": {
+      "original_code": "",
+      "original_issue": "Security issue detected: prompt-injection-m-gcg-adversarial-suffix-pattern",
+      "file": "/opt/altmount/github/altmount/CLAUDE.md",
+      "line": 453,
+      "category": "Prompt Injection"
+    },
+    "a667b1072db0": {
+      "original_code": "",
+      "original_issue": "Security issue detected: prompt-injection-m-gcg-adversarial-suffix-pattern",
+      "file": "/opt/altmount/github/altmount/CLAUDE.md",
+      "line": 454,
+      "category": "Prompt Injection"
+    },
+    "c96ad081b466": {
+      "original_code": "",
+      "original_issue": "Security issue detected: prompt-injection-m-gcg-adversarial-suffix-pattern",
+      "file": "/opt/altmount/github/altmount/CLAUDE.md",
+      "line": 455,
+      "category": "Prompt Injection"
+    },
+    "425d56647fe7": {
+      "original_code": "",
+      "original_issue": "Security issue detected: prompt-injection-m-gcg-adversarial-suffix-pattern",
+      "file": "/opt/altmount/github/altmount/CLAUDE.md",
+      "line": 456,
+      "category": "Prompt Injection"
+    },
+    "a5a8e23614ea": {
+      "original_code": "",
+      "original_issue": "Security issue detected: prompt-injection-m-gcg-adversarial-suffix-pattern",
+      "file": "/opt/altmount/github/altmount/CLAUDE.md",
+      "line": 457,
+      "category": "Prompt Injection"
+    },
+    "fafb1a9b08bb": {
+      "original_code": "",
+      "original_issue": "Security issue detected: prompt-injection-m-gcg-adversarial-suffix-pattern",
+      "file": "/opt/altmount/github/altmount/CLAUDE.md",
+      "line": 458,
+      "category": "Prompt Injection"
+    },
+    "dab8cba095c7": {
+      "original_code": "",
+      "original_issue": "Security issue detected: prompt-injection-m-gcg-adversarial-suffix-pattern",
+      "file": "/opt/altmount/github/altmount/CLAUDE.md",
+      "line": 459,
+      "category": "Prompt Injection"
+    },
+    "aae30d722787": {
+      "original_code": "",
+      "original_issue": "Security issue detected: prompt-injection-m-gcg-adversarial-suffix-pattern",
+      "file": "/opt/altmount/github/altmount/CLAUDE.md",
+      "line": 460,
+      "category": "Prompt Injection"
+    },
+    "d514391262be": {
+      "original_code": "",
+      "original_issue": "Security issue detected: prompt-injection-m-gcg-adversarial-suffix-pattern",
+      "file": "/opt/altmount/github/altmount/CLAUDE.md",
+      "line": 1002,
+      "category": "Prompt Injection"
+    }
+  }
+}

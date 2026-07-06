@@ -7,7 +7,7 @@ UPDATE file_health
 SET download_id = (
     SELECT download_id 
     FROM import_history 
-    WHERE TRIM(file_health.file_path, '/') LIKE TRIM(import_history.virtual_path, '/') || '%'
+    WHERE TRIM(import_history.virtual_path, '/') = TRIM(file_health.file_path, '/')
     LIMIT 1
 )
 WHERE download_id IS NULL;
