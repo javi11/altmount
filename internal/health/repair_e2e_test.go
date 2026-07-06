@@ -127,7 +127,8 @@ func newRepairTestEnv(t *testing.T, tempDir string, arrsErr error, configure ...
 			priority INTEGER NOT NULL DEFAULT 0,
 			streaming_failure_count INTEGER DEFAULT 0,
 			is_masked BOOLEAN DEFAULT FALSE,
-			indexer TEXT DEFAULT NULL
+			indexer TEXT DEFAULT NULL,
+			download_id TEXT DEFAULT NULL
 		);
 
 		CREATE TABLE IF NOT EXISTS system_state (

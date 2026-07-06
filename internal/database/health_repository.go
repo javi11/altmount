@@ -121,7 +121,7 @@ const fileHealthSelectColumns = `
 	       repair_retry_count, max_repair_retries, source_nzb_path,
 	       error_details, created_at, updated_at, release_date, priority,
 		   streaming_failure_count, is_masked
-	, metadata, indexer
+	, metadata, indexer, download_id
 	FROM file_health
 	`
 
@@ -142,7 +142,7 @@ func scanFileHealth(s rowScanner) (*FileHealth, error) {
 		&health.SourceNzbPath, &health.ErrorDetails,
 		&health.CreatedAt, &health.UpdatedAt, &health.ReleaseDate, &health.Priority,
 		&health.StreamingFailureCount, &health.IsMasked,
-		&health.Metadata, &health.Indexer,
+		&health.Metadata, &health.Indexer, &health.DownloadID,
 	)
 	if err != nil {
 		return nil, err
@@ -670,7 +670,7 @@ func (r *HealthRepository) RegisterCorruptedFile(ctx context.Context, filePath s
 
 // AddFileToHealthCheck adds a file to the health database for checking
 func (r *HealthRepository) AddFileToHealthCheck(ctx context.Context, filePath string, libraryPath *string, maxRetries int, maxRepairRetries int, sourceNzbPath *string, priority HealthPriority) error {
-	return r.AddFileToHealthCheckWithMetadata(ctx, filePath, libraryPath, maxRetries, maxRepairRetries, sourceNzbPath, priority, nil, nil, nil)
+	return r.AddFileToHealthCheckWithMetadata(ctx, filePath, libraryPath, maxRetries, maxRepairRetries, sourceNzbPath, priority, nil, nil, nil, nil)
 }
 
 // AddFileToHealthCheckWithMetadata adds a file to the health database for checking with metadata.
@@ -678,7 +678,7 @@ func (r *HealthRepository) AddFileToHealthCheck(ctx context.Context, filePath st
 // re-validation, but repair_retry_count is intentionally preserved: it is the per-title
 // repair budget, so a re-download of a broken release cannot reset its own escalation
 // counter. A successful health check resets it to 0.
-func (r *HealthRepository) AddFileToHealthCheckWithMetadata(ctx context.Context, filePath string, libraryPath *string, maxRetries int, maxRepairRetries int, sourceNzbPath *string, priority HealthPriority, releaseDate *time.Time, metadata *string, indexer *string) error {
+func (r *HealthRepository) AddFileToHealthCheckWithMetadata(ctx context.Context, filePath string, libraryPath *string, maxRetries int, maxRepairRetries int, sourceNzbPath *string, priority HealthPriority, releaseDate *time.Time, metadata *string, indexer *string, downloadID *string) error {
 	filePath = normalizeHealthPath(filePath)
 	var releaseDateStr any = nil
 	if releaseDate != nil {
@@ -686,8 +686,8 @@ func (r *HealthRepository) AddFileToHealthCheckWithMetadata(ctx context.Context,
 	}
 
 	query := `
-		INSERT INTO file_health (file_path, library_path, status, last_checked, retry_count, max_retries, repair_retry_count, max_repair_retries, source_nzb_path, priority, release_date, metadata, indexer, created_at, updated_at, scheduled_check_at)
-		VALUES (?, ?, ?, datetime('now'), 0, ?, 0, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), datetime('now'))
+		INSERT INTO file_health (file_path, library_path, status, last_checked, retry_count, max_retries, repair_retry_count, max_repair_retries, source_nzb_path, priority, release_date, metadata, indexer, download_id, created_at, updated_at, scheduled_check_at)
+		VALUES (?, ?, ?, datetime('now'), 0, ?, 0, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), datetime('now'))
 		ON CONFLICT(file_path) DO UPDATE SET
 
 		library_path = COALESCE(excluded.library_path, library_path),
@@ -702,11 +702,12 @@ func (r *HealthRepository) AddFileToHealthCheckWithMetadata(ctx context.Context,
 		release_date = COALESCE(excluded.release_date, release_date),
 		metadata = COALESCE(excluded.metadata, metadata),
 		indexer = COALESCE(excluded.indexer, indexer),
+		download_id = COALESCE(excluded.download_id, download_id),
 		updated_at = datetime('now'),
 		scheduled_check_at = datetime('now')
 	`
 
-	_, err := r.db.ExecContext(ctx, query, filePath, libraryPath, HealthStatusPending, maxRetries, maxRepairRetries, sourceNzbPath, priority, releaseDateStr, metadata, indexer)
+	_, err := r.db.ExecContext(ctx, query, filePath, libraryPath, HealthStatusPending, maxRetries, maxRepairRetries, sourceNzbPath, priority, releaseDateStr, metadata, indexer, downloadID)
 
 	if err != nil {
 		return fmt.Errorf("failed to add file to health check: %w", err)
@@ -726,6 +727,7 @@ type HealthCheckUpsert struct {
 	MaxRepairRetries int
 	ReleaseDate      *time.Time
 	Metadata         *string
+	DownloadID       *string
 }
 
 // BatchAddFileToHealthCheck upserts many health records in a few multi-row statements
@@ -738,8 +740,8 @@ func (r *HealthRepository) BatchAddFileToHealthCheck(ctx context.Context, record
 		return nil
 	}
 
-	// 9 bound params per row; keep batches under SQLite's ~999 parameter limit.
-	const batchSize = 100
+	// 10 bound params per row; keep batches under SQLite's ~999 parameter limit.
+	const batchSize = 95
 
 	for i := 0; i < len(records); i += batchSize {
 		end := min(i+batchSize, len(records))
@@ -754,12 +756,12 @@ func (r *HealthRepository) BatchAddFileToHealthCheck(ctx context.Context, record
 // batchUpsertFileHealthCheck performs a single multi-row upsert.
 func (r *HealthRepository) batchUpsertFileHealthCheck(ctx context.Context, records []HealthCheckUpsert) error {
 	valueStrings := make([]string, len(records))
-	args := make([]any, 0, len(records)*9)
+	args := make([]any, 0, len(records)*10)
 
 	for i, rec := range records {
 		// status, retry_count and repair_retry_count are literals so excluded.status is
 		// always 'pending' (matching the single-row upsert's bound HealthStatusPending).
-		valueStrings[i] = "(?, ?, 'pending', datetime('now'), 0, ?, 0, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), datetime('now'))"
+		valueStrings[i] = "(?, ?, 'pending', datetime('now'), 0, ?, 0, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), datetime('now'))"
 
 		var releaseDateStr any = nil
 		if rec.ReleaseDate != nil {
@@ -769,11 +771,11 @@ func (r *HealthRepository) batchUpsertFileHealthCheck(ctx context.Context, recor
 		args = append(args,
 			normalizeHealthPath(rec.FilePath), rec.LibraryPath,
 			rec.MaxRetries, rec.MaxRepairRetries,
-			rec.SourceNzbPath, rec.Priority, releaseDateStr, rec.Metadata, rec.Indexer)
+			rec.SourceNzbPath, rec.Priority, releaseDateStr, rec.Metadata, rec.Indexer, rec.DownloadID)
 	}
 
 	query := fmt.Sprintf(`
-		INSERT INTO file_health (file_path, library_path, status, last_checked, retry_count, max_retries, repair_retry_count, max_repair_retries, source_nzb_path, priority, release_date, metadata, indexer, created_at, updated_at, scheduled_check_at)
+		INSERT INTO file_health (file_path, library_path, status, last_checked, retry_count, max_retries, repair_retry_count, max_repair_retries, source_nzb_path, priority, release_date, metadata, indexer, download_id, created_at, updated_at, scheduled_check_at)
 		VALUES %s
 		ON CONFLICT(file_path) DO UPDATE SET
 			library_path = COALESCE(excluded.library_path, library_path),
@@ -788,6 +790,7 @@ func (r *HealthRepository) batchUpsertFileHealthCheck(ctx context.Context, recor
 			release_date = COALESCE(excluded.release_date, release_date),
 			metadata = COALESCE(excluded.metadata, metadata),
 			indexer = COALESCE(excluded.indexer, indexer),
+			download_id = COALESCE(excluded.download_id, download_id),
 			updated_at = datetime('now'),
 			scheduled_check_at = datetime('now')
 	`, strings.Join(valueStrings, ","))

@@ -47,7 +47,8 @@ func setupSchedulerTest(t *testing.T, mutate ...func(*config.Config)) (*Coordina
 			priority INTEGER DEFAULT 0,
 			streaming_failure_count INTEGER DEFAULT 0,
 			is_masked BOOLEAN DEFAULT FALSE,
-			indexer TEXT DEFAULT NULL
+			indexer TEXT DEFAULT NULL,
+			download_id TEXT DEFAULT NULL
 		);
 	`)
 	require.NoError(t, err)

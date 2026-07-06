@@ -49,7 +49,8 @@ func setupStreamHealthEnv(t *testing.T) (*database.HealthRepository, *sql.DB, *m
 			priority INTEGER DEFAULT 0,
 			streaming_failure_count INTEGER DEFAULT 0,
 			is_masked BOOLEAN DEFAULT FALSE,
-			indexer TEXT DEFAULT NULL
+			indexer TEXT DEFAULT NULL,
+			download_id TEXT DEFAULT NULL
 		);
 	`)
 	require.NoError(t, err)

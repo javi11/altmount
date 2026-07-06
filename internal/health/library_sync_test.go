@@ -61,7 +61,8 @@ func TestSyncLibrary_WorkerPool(t *testing.T) {
 			scheduled_check_at DATETIME,
 			streaming_failure_count INTEGER DEFAULT 0,
 			is_masked BOOLEAN DEFAULT FALSE,
-			indexer TEXT DEFAULT NULL
+			indexer TEXT DEFAULT NULL,
+			download_id TEXT DEFAULT NULL
 		);
 
 		CREATE TABLE IF NOT EXISTS system_state (
