@@ -2094,12 +2094,14 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 	isDegraded := healthEnabled && classification != nil &&
 		classification.Verdict == holes.VerdictDegraded
 
-	// Increment failure count for tracking/masking if enabled. Degraded files
-	// are exempt: masking would hide a file that still plays, defeating the
-	// point of keeping it available.
+	// Increment failure count for tracking/masking if explicitly enabled with a valid
+	// threshold. Masking must be opt-in: Enabled == nil means disabled (not on-by-default),
+	// and Threshold <= 0 would make every file immediately masked (count+1 >= 0 is always
+	// true), suppressing all repairs. Degraded files are also exempt: masking a still-
+	// playable file defeats the point of keeping it available.
 	shouldRepair := true
 	isMasked := false
-	if !isDegraded && (cfg.Streaming.FailureMasking.Enabled == nil || *cfg.Streaming.FailureMasking.Enabled) {
+	if !isDegraded && cfg.Streaming.FailureMasking.Enabled != nil && *cfg.Streaming.FailureMasking.Enabled && cfg.Streaming.FailureMasking.Threshold > 0 {
 		var err error
 		isMasked, shouldRepair, err = mvf.healthRepository.IncrementStreamingFailureCount(ctx, mvf.name, cfg.Streaming.FailureMasking.Threshold)
 		if err != nil {
