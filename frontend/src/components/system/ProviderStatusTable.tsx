@@ -481,10 +481,10 @@ export function ProviderStatusTable({
 												{provider.byte_count > 0 ? (
 													<>
 														<span className="font-bold font-mono text-base-content/80 text-xs">
-															{formatBytes(provider.byte_count)}
+															{formatBytes(provider.byte_count, 2, false, true)}
 														</span>
 														<span className="font-mono text-[9px] text-base-content/40">
-															{formatBytes(provider.byte_count_24h)} / 24h
+															{formatBytes(provider.byte_count_24h, 2, false, true)} / 24h
 														</span>
 													</>
 												) : (
