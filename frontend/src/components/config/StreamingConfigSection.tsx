@@ -124,6 +124,81 @@ export function StreamingConfigSection({
 						</div>
 					</div>
 				</div>
+
+				{/* Failure Masking */}
+				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+					<div className="flex items-center justify-between">
+						<div className="min-w-0">
+							<h4 className="font-bold text-base-content text-sm">Playback Failure Masking</h4>
+							<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
+								Debounce transient streaming errors (like propagation delays) by requiring multiple consecutive playback failures before triggering a redownload.
+							</p>
+						</div>
+						<input
+							type="checkbox"
+							className="toggle toggle-primary shrink-0"
+							checked={streamingData.failure_masking?.enabled === true}
+							disabled={isReadOnly}
+							onChange={(e) => {
+								const newData = {
+									...streamingData,
+									failure_masking: {
+										...streamingData.failure_masking,
+										enabled: e.target.checked,
+									},
+								};
+								setStreamingData(newData);
+								checkChanges(newData, cacheData);
+							}}
+						/>
+					</div>
+
+					{streamingData.failure_masking?.enabled === true && (
+						<div className="fade-in slide-in-from-top-2 animate-in space-y-4 border-base-300 border-t pt-4">
+							<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+								<div className="min-w-0">
+									<h5 className="font-bold text-base-content text-xs">Failure Threshold</h5>
+									<p className="mt-1 break-words text-[10px] text-base-content/50 leading-relaxed">
+										Number of consecutive failures required before declaring a file corrupted and requesting repair.
+									</p>
+								</div>
+								<div className="flex shrink-0 items-center gap-3">
+									<span className="font-black font-mono text-primary text-lg">
+										{streamingData.failure_masking?.threshold ?? 3}
+									</span>
+									<span className="font-bold text-base-content/60 text-[10px] uppercase">failures</span>
+								</div>
+							</div>
+							<input
+								type="range"
+								min="1"
+								max="10"
+								value={streamingData.failure_masking?.threshold ?? 3}
+								step="1"
+								className="range range-primary range-xs w-full"
+								disabled={isReadOnly}
+								onChange={(e) => {
+									const newData = {
+										...streamingData,
+										failure_masking: {
+											...streamingData.failure_masking,
+											threshold: Number.parseInt(e.target.value, 10),
+										},
+									};
+									setStreamingData(newData);
+									checkChanges(newData, cacheData);
+								}}
+							/>
+							<div className="flex justify-between px-1 font-black text-base-content/50 text-[10px]">
+								<span>1</span>
+								<span>3</span>
+								<span>5</span>
+								<span>7</span>
+								<span>10</span>
+							</div>
+						</div>
+					)}
+				</div>
 			</div>
 
 			{/* Segment Cache */}
