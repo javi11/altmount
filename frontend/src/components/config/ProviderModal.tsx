@@ -15,7 +15,7 @@ interface ProviderModalProps {
 	onCancel: () => void;
 }
 
-const BYTES_PER_GB = 1_073_741_824;
+const BYTES_PER_GB = 1_000_000_000;
 
 const defaultFormData: ProviderFormData = {
 	name: "",
