@@ -171,13 +171,29 @@ func (m *manager) injectQuotaState(providers []nntppool.Provider) {
 	for i := range providers {
 		name := providerPoolName(providers[i])
 
-		if used, ok := quotaUsed[name]; ok && used > 0 {
-			providers[i].QuotaUsed = used
-		}
+		hasResetTime := false
+		var resetTime time.Time
 		if resetNano, ok := quotaResetAt[name]; ok && resetNano > 0 {
-			t := time.Unix(0, resetNano)
-			if t.After(time.Now()) {
-				providers[i].QuotaResetAt = t
+			resetTime = time.Unix(0, resetNano)
+			hasResetTime = true
+		}
+
+		if hasResetTime {
+			if resetTime.After(time.Now()) {
+				// The quota period is still active: restore the used bytes and the reset time
+				if used, ok := quotaUsed[name]; ok && used > 0 {
+					providers[i].QuotaUsed = used
+				}
+				providers[i].QuotaResetAt = resetTime
+			} else {
+				// The quota period has already expired: discard the old usage (it resets to 0)
+				providers[i].QuotaUsed = 0
+				providers[i].QuotaResetAt = time.Time{}
+			}
+		} else {
+			// No persisted reset time: restore whatever usage we have (fallback)
+			if used, ok := quotaUsed[name]; ok && used > 0 {
+				providers[i].QuotaUsed = used
 			}
 		}
 	}
@@ -567,7 +583,7 @@ func (m *manager) checkAndResetExpiredQuotas(ctx context.Context) {
 
 	now := time.Now()
 	for _, ps := range m.pool.Stats().Providers {
-		if ps.QuotaBytes == 0 || !ps.QuotaExceeded {
+		if ps.QuotaBytes == 0 {
 			continue
 		}
 		if ps.QuotaResetAt.IsZero() || !ps.QuotaResetAt.Before(now) {

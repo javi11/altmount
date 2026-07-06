@@ -18,6 +18,7 @@ import { useProviders } from "../../hooks/useProviders";
 import {
 	formatBytes,
 	formatExpirationDate,
+	formatFutureTime,
 	formatRelativeTime,
 	getProviderBrandName,
 } from "../../lib/utils";
@@ -476,20 +477,32 @@ export function ProviderStatusTable({
 											)}
 										</td>
 										<td>
-											{provider.byte_count > 0 ? (
-												<div className="flex min-w-[80px] flex-col">
-													<span className="font-bold font-mono text-base-content/80 text-xs">
-														{formatBytes(provider.byte_count)}
-													</span>
-													<span className="font-mono text-[9px] text-base-content/40">
-														{formatBytes(provider.byte_count_24h)} / 24h
-													</span>
-												</div>
-											) : (
-												<span className="min-w-[80px] font-mono text-base-content/30 text-xs">
-													-
-												</span>
-											)}
+											<div className="flex min-w-[80px] flex-col">
+												{provider.byte_count > 0 ? (
+													<>
+														<span className="font-bold font-mono text-base-content/80 text-xs">
+															{formatBytes(provider.byte_count)}
+														</span>
+														<span className="font-mono text-[9px] text-base-content/40">
+															{formatBytes(provider.byte_count_24h)} / 24h
+														</span>
+													</>
+												) : (
+													<span className="font-mono text-base-content/30 text-xs">-</span>
+												)}
+												{hasQuota && (
+													<div className="mt-1.5 border-base-200/60 border-t pt-1 text-[10px]">
+														<div className="font-semibold font-mono text-warning">
+															Quota: {formatBytes(provider.quota_used || 0)} / {formatBytes(provider.quota_bytes || 0)}
+														</div>
+														{provider.quota_reset_at && (
+															<div className="mt-0.5 font-mono text-base-content/40">
+																Resets: {formatFutureTime(provider.quota_reset_at)}
+															</div>
+														)}
+													</div>
+												)}
+											</div>
 										</td>
 										<td>
 											{(() => {
