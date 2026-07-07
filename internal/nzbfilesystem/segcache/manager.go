@@ -86,9 +86,15 @@ func NewManager(cfg ManagerConfig, logger *slog.Logger) (*Manager, error) {
 	}, nil
 }
 
-// Start launches background maintenance goroutines.
+// Start launches background maintenance goroutines, including the initial
+// catalog load (run here, not in NewManager, so boot is not blocked by the
+// per-segment stat loop). Stop waits for all of them.
 func (m *Manager) Start(_ context.Context) {
-	m.wg.Add(2)
+	m.wg.Add(3)
+	go func() {
+		defer m.wg.Done()
+		m.cache.LoadCatalog()
+	}()
 	go m.cleanupLoop()
 	go m.catalogFlushLoop()
 }

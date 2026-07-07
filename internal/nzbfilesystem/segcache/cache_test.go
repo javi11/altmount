@@ -22,6 +22,8 @@ func newTestCache(t *testing.T, maxBytes int64, expiry time.Duration) *segcache.
 	}
 	c, err := segcache.NewSegmentCache(cfg, slog.Default())
 	require.NoError(t, err)
+	// Hydrate + clear the loading gate; mirrors Manager.Start before serving Puts.
+	c.LoadCatalog()
 	return c
 }
 
@@ -93,12 +95,14 @@ func TestCacheSaveCatalogAndReload(t *testing.T) {
 	// Write entries, save catalog, then reload.
 	c1, err := segcache.NewSegmentCache(cfg, slog.Default())
 	require.NoError(t, err)
+	c1.LoadCatalog()
 	require.NoError(t, c1.Put("persist@msg", []byte("persistent data")))
 	require.NoError(t, c1.SaveCatalog())
 
 	// Load a new cache from the same directory.
 	c2, err := segcache.NewSegmentCache(cfg, slog.Default())
 	require.NoError(t, err)
+	c2.LoadCatalog()
 
 	assert.True(t, c2.Has("persist@msg"), "reloaded cache should contain persisted entry")
 	got, ok := c2.Get("persist@msg")
@@ -129,6 +133,7 @@ func TestCacheCatalogSurvivesMissingSegFiles(t *testing.T) {
 
 	c1, err := segcache.NewSegmentCache(cfg, slog.Default())
 	require.NoError(t, err)
+	c1.LoadCatalog()
 	require.NoError(t, c1.Put("good@msg", []byte("good")))
 	require.NoError(t, c1.Put("bad@msg", []byte("will be deleted")))
 	require.NoError(t, c1.SaveCatalog())
@@ -152,7 +157,9 @@ func TestCacheCatalogSurvivesMissingSegFiles(t *testing.T) {
 	// Reload: only "good@msg" should survive.
 	c2, err := segcache.NewSegmentCache(cfg, slog.Default())
 	require.NoError(t, err)
+	c2.LoadCatalog()
 
 	assert.True(t, c2.Has("good@msg"))
 	assert.False(t, c2.Has("bad@msg"), "entry with missing seg file should be dropped on reload")
 }
+
