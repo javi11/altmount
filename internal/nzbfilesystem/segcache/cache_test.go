@@ -22,8 +22,7 @@ func newTestCache(t *testing.T, maxBytes int64, expiry time.Duration) *segcache.
 	}
 	c, err := segcache.NewSegmentCache(cfg, slog.Default())
 	require.NoError(t, err)
-	// Clear the loading gate (set in the constructor) so Put is not a no-op.
-	// Mirrors Manager.Start, which runs LoadCatalog before serving Puts.
+	// Hydrate + clear the loading gate; mirrors Manager.Start before serving Puts.
 	c.LoadCatalog()
 	return c
 }

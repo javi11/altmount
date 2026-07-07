@@ -58,10 +58,6 @@ func NewSegmentCache(cfg Config, logger *slog.Logger) (*SegmentCache, error) {
 		config: cfg,
 		logger: logger,
 	}
-	// Gate Puts until LoadCatalog runs and clears this. Set at construction (not
-	// in Start's goroutine) so a segment downloaded before the async load runs is
-	// skipped rather than clobbered by the wholesale map assignment.
-	c.loading.Store(true)
 	return c, nil
 }
 
@@ -260,8 +256,10 @@ func (c *SegmentCache) SaveCatalog() error {
 // LoadCatalog hydrates the in-memory catalog from catalog.json on disk, statting
 // each .seg file and dropping entries whose data is missing. Put is gated off
 // (see the loading flag) for the duration, so the load can assign the map
-// wholesale without racing a concurrent writer. Clears the gate when done.
+// wholesale without racing a concurrent writer. Sets the gate on entry and
+// clears it on exit.
 func (c *SegmentCache) LoadCatalog() {
+	c.loading.Store(true)
 	defer c.loading.Store(false)
 
 	catalogPath := filepath.Join(c.config.CachePath, "catalog.json")
