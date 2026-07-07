@@ -88,6 +88,7 @@ and your file manager — needs to be restarted to pick up the change.
 - 📚 [Documentation](https://altmount.kipsilabs.top)
 - 🐛 [Issues](https://github.com/javi11/altmount/issues)
 - 💬 [Discussions](https://github.com/javi11/altmount/discussions)
+- 🎮 [Discord](https://discord.gg/vCWwuvm3F3)
 
 ## Contributing
 
