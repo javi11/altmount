@@ -98,12 +98,14 @@ export function ProviderChart() {
 			</div>
 		);
 
+	const formatDecimalBytes = (v: number) => formatBytes(v, 2, false, true);
+
 	return (
 		<ProviderAreaChart
 			icon={BarChart3}
 			iconClassName="text-info"
 			title="Data Usage Trends"
-			subtitle={`Total volume: ${formatBytes(totalUsage)} in the last ${days} days`}
+			subtitle={`Total volume: ${formatDecimalBytes(totalUsage)} in the last ${days} days`}
 			tabs={TABS}
 			days={days}
 			onDaysChange={setDays}
@@ -112,9 +114,9 @@ export function ProviderChart() {
 			providers={providers}
 			colorMap={colorMap}
 			gradientPrefix="color"
-			formatValue={formatBytes}
+			formatValue={formatDecimalBytes}
 			tooltipTotalClassName="text-info"
-			yAxisTickFormatter={formatBytes}
+			yAxisTickFormatter={formatDecimalBytes}
 		/>
 	);
 }
