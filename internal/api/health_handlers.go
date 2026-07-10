@@ -284,9 +284,6 @@ func (s *Server) handleDeleteHealthBulk(c *fiber.Ctx) error {
 		return RespondValidationError(c, "At least one file path is required", "")
 	}
 
-	if len(req.FilePaths) > 100 {
-		return RespondValidationError(c, "Too many file paths", "Maximum 100 files allowed per bulk operation")
-	}
 
 	metaDeletedCount := 0
 	symlinkDeletedCount := 0
@@ -491,9 +488,6 @@ func (s *Server) handleRepairHealthBulk(c *fiber.Ctx) error {
 		return RespondValidationError(c, "At least one file path is required", "")
 	}
 
-	if len(req.FilePaths) > 100 {
-		return RespondValidationError(c, "Too many file paths", "Maximum 100 files allowed per bulk operation")
-	}
 
 	ctx := c.Context()
 	cfg := s.configManager.GetConfig()
@@ -1025,9 +1019,6 @@ func (s *Server) handleRestartHealthChecksBulk(c *fiber.Ctx) error {
 		return RespondValidationError(c, "At least one file path is required", "")
 	}
 
-	if len(req.FilePaths) > 100 {
-		return RespondValidationError(c, "Too many file paths", "Maximum 100 files allowed per bulk operation")
-	}
 
 	// Cancel any active checks for these files
 	if s.healthWorker != nil {
