@@ -483,7 +483,7 @@ func normalizeRarPartFilename(filename string, index int, allFilesNoExt bool, to
 	// If all files have no extension, use baseFilename with .rXX extension
 	// This ensures all parts of the same archive have the same base filename
 	// Using RAR multi-volume convention: .r00, .r01, .r02, etc. (0-based)
-	if allFilesNoExt && !archive.HasExtension(filename) && baseFilename != "" {
+	if allFilesNoExt && (!archive.HasExtension(filename) || strings.HasSuffix(filename, ".rar")) && baseFilename != "" {
 		// Calculate padding width based on total number of files (0-based, so totalFiles-1)
 		width := len(strconv.Itoa(totalFiles - 1))
 		// Format with zero-padding (index is already 0-based from OriginalIndex)

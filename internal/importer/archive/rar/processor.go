@@ -71,13 +71,24 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 	}
 
 	// Normalize RAR part filenames (e.g., part010 -> part10) for consistent processing
-	// Check if ALL files have no extension - if so, we'll add .partXX.rar extensions
-	allFilesNoExt := true
+	// Check if any files have no extension or if there are duplicate filenames - if so, we'll treat it as allFilesNoExt and add extensions
+	// seenNames detects obfuscated archives where every volume has the same name (or no extension).
+	// We break on the first duplicate found — that's sufficient to identify the obfuscated case.
+	allFilesNoExt := false
+	seenNames := make(map[string]struct{})
 	for _, file := range rarFiles {
-		if archive.HasExtension(file.Filename) {
-			allFilesNoExt = false
+		if !archive.HasExtension(file.Filename) {
+			allFilesNoExt = true
 			break
 		}
+		// Duplicate filename detected: this is an obfuscated multi-volume set where
+		// all parts share the same name. Treat as no-extension so we assign synthetic
+		// partXX.rar names to distinguish each volume.
+		if _, exists := seenNames[file.Filename]; exists {
+			allFilesNoExt = true
+			break
+		}
+		seenNames[file.Filename] = struct{}{}
 	}
 
 	// Get base filename from first file if all files have no extension
@@ -86,9 +97,12 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 		slices.SortFunc(rarFiles, func(a, b parser.ParsedFile) int {
 			return strings.Compare(a.Filename, b.Filename)
 		})
-		// Use the first file's name as the base for all parts
+		// Use the first file's name as the base for all parts (stripping any added extension)
 		if len(rarFiles) > 0 {
 			baseFilename = rarFiles[0].Filename
+			if ext := filepath.Ext(baseFilename); ext != "" {
+				baseFilename = strings.TrimSuffix(baseFilename, ext)
+			}
 		}
 	}
 

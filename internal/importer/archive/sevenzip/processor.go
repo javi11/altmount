@@ -533,13 +533,19 @@ func extractBaseFilenameSevenZip(filename string) string {
 
 // renameSevenZipFilesAndSort renames all 7z files to have the same base name and sorts them
 func renameSevenZipFilesAndSort(sevenZipFiles []parser.ParsedFile) []parser.ParsedFile {
-	// Check if ALL files have no extension - if so, we'll add .XXX extensions
-	allFilesNoExt := true
+	// Check if any files have no extension or if there are duplicate filenames - if so, we'll treat it as allFilesNoExt and add extensions
+	allFilesNoExt := false
+	seenNames := make(map[string]struct{})
 	for _, file := range sevenZipFiles {
-		if archive.HasExtension(file.Filename) {
-			allFilesNoExt = false
+		if !archive.HasExtension(file.Filename) {
+			allFilesNoExt = true
 			break
 		}
+		if _, exists := seenNames[file.Filename]; exists {
+			allFilesNoExt = true
+			break
+		}
+		seenNames[file.Filename] = struct{}{}
 	}
 
 	// Get base filename from first file if all files have no extension
@@ -549,9 +555,12 @@ func renameSevenZipFilesAndSort(sevenZipFiles []parser.ParsedFile) []parser.Pars
 		sort.Slice(sevenZipFiles, func(i, j int) bool {
 			return sevenZipFiles[i].Filename < sevenZipFiles[j].Filename
 		})
-		// Use the first file's name as the base for all parts
+		// Use the first file's name as the base for all parts (stripping any added extension)
 		if len(sevenZipFiles) > 0 {
 			baseFilename = sevenZipFiles[0].Filename
+			if ext := filepath.Ext(baseFilename); ext != "" {
+				baseFilename = strings.TrimSuffix(baseFilename, ext)
+			}
 		}
 	} else {
 		// Sort files by part number BEFORE extracting base filename

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/javi11/altmount/internal/importer/archive"
 )
@@ -30,7 +31,7 @@ func normalize7zPartFilename(filename string, index int, allFilesNoExt bool, tot
 	// If all files have no extension, use baseFilename with .XXX extension
 	// This ensures all parts of the same archive have the same base filename
 	// Using 7zip multi-volume convention: .001, .002, .003, etc. (1-based)
-	if allFilesNoExt && !archive.HasExtension(filename) && baseFilename != "" {
+	if allFilesNoExt && (!archive.HasExtension(filename) || strings.HasSuffix(filename, ".7z")) && baseFilename != "" {
 		// Calculate padding width based on total number of files (1-based, so totalFiles)
 		width := len(strconv.Itoa(totalFiles))
 		// Format with zero-padding (convert 0-based index to 1-based: index+1)
