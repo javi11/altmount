@@ -49,7 +49,8 @@ func setupStreamHealthEnv(t *testing.T) (*database.HealthRepository, *sql.DB, *m
 			priority INTEGER DEFAULT 0,
 			streaming_failure_count INTEGER DEFAULT 0,
 			is_masked BOOLEAN DEFAULT FALSE,
-			indexer TEXT DEFAULT NULL
+			indexer TEXT DEFAULT NULL,
+			download_id TEXT DEFAULT NULL
 		);
 	`)
 	require.NoError(t, err)
@@ -159,3 +160,68 @@ func TestUpdateFileHealthOnError_HealthEnabled_TriggersRepair(t *testing.T) {
 	require.NoError(t, readErr)
 	assert.Nil(t, original, "health enabled must move metadata to the corrupted folder")
 }
+
+// TestUpdateFileHealthOnError_FailureMasking_MasksRepair verifies that when failure masking
+// is enabled, a streaming failure below the threshold does not immediately trigger a repair
+// or move the metadata, but increments the failure count instead.
+func TestUpdateFileHealthOnError_FailureMasking_MasksRepair(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks not supported on Windows")
+	}
+	repo, db, ms := setupStreamHealthEnv(t)
+	ctx := context.Background()
+
+	filePath := "series/stream.s01e03.mkv"
+	libraryPath := "/media/library/stream.s01e03.mkv"
+	seg := writeStreamMeta(t, ms, filePath)
+
+	_, err := db.Exec(
+		`INSERT INTO file_health (file_path, library_path, status, scheduled_check_at, streaming_failure_count) VALUES (?, ?, 'healthy', datetime('now'), 0)`,
+		filePath, libraryPath,
+	)
+	require.NoError(t, err)
+
+	healthEnabled := true
+	maskingEnabled := true
+	cfg := config.DefaultConfig()
+	cfg.Health.Enabled = &healthEnabled
+	cfg.Streaming.FailureMasking.Enabled = &maskingEnabled
+	cfg.Streaming.FailureMasking.Threshold = 3
+	cfg.MountPath = ""
+
+	mvf := newStreamFailureMVF(ctx, filePath, repo, ms, seg, cfg)
+
+	// First failure: below threshold of 3
+	mvf.updateFileHealthOnError(&usenet.DataCorruptionError{UnderlyingErr: errors.New("article not found"), NoRetry: true}, true)
+
+	fh, err := repo.GetFileHealth(ctx, filePath)
+	require.NoError(t, err)
+	require.NotNil(t, fh)
+	assert.Equal(t, database.HealthStatusPending, fh.Status, "should be pending, not repair_triggered yet")
+	assert.Equal(t, 1, fh.StreamingFailureCount, "failure count should be incremented to 1")
+
+	original, readErr := ms.ReadFileMetadata(filePath)
+	require.NoError(t, readErr)
+	assert.NotNil(t, original, "should NOT move metadata to corrupted folder yet")
+
+	// Second failure: still below threshold
+	mvf.updateFileHealthOnError(&usenet.DataCorruptionError{UnderlyingErr: errors.New("article not found"), NoRetry: true}, true)
+
+	fh, err = repo.GetFileHealth(ctx, filePath)
+	require.NoError(t, err)
+	assert.Equal(t, 2, fh.StreamingFailureCount, "failure count should be 2")
+	original, _ = ms.ReadFileMetadata(filePath)
+	assert.NotNil(t, original, "should still not move metadata")
+
+	// Third failure: meets threshold (3) -> triggers repair
+	mvf.updateFileHealthOnError(&usenet.DataCorruptionError{UnderlyingErr: errors.New("article not found"), NoRetry: true}, true)
+
+	fh, err = repo.GetFileHealth(ctx, filePath)
+	require.NoError(t, err)
+	assert.Equal(t, database.HealthStatusRepairTriggered, fh.Status, "should trigger repair now")
+	assert.Equal(t, 3, fh.StreamingFailureCount, "failure count should be 3")
+
+	original, _ = ms.ReadFileMetadata(filePath)
+	assert.Nil(t, original, "metadata should be moved to corrupted folder now")
+}
+

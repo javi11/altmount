@@ -2094,13 +2094,34 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 	isDegraded := healthEnabled && classification != nil &&
 		classification.Verdict == holes.VerdictDegraded
 
+	// Increment failure count for tracking/masking if explicitly enabled with a valid
+	// threshold. Masking must be opt-in: Enabled == nil means disabled (not on-by-default),
+	// and Threshold <= 0 would make every file immediately masked (count+1 >= 0 is always
+	// true), suppressing all repairs. Degraded files are also exempt: masking a still-
+	// playable file defeats the point of keeping it available.
+	shouldRepair := true
+	isMasked := false
+	if !isDegraded && cfg.Streaming.FailureMasking.Enabled != nil && *cfg.Streaming.FailureMasking.Enabled && cfg.Streaming.FailureMasking.Threshold > 0 {
+		var err error
+		isMasked, shouldRepair, err = mvf.healthRepository.IncrementStreamingFailureCount(ctx, mvf.name, cfg.Streaming.FailureMasking.Threshold)
+		if err != nil {
+			slog.WarnContext(ctx, "Failed to update streaming failure count, proceeding with repair", "file", mvf.name, "error", err)
+			shouldRepair = true
+		} else if isMasked && !shouldRepair {
+			slog.InfoContext(ctx, "File masked due to streaming failure (threshold not reached)", "file", mvf.name)
+		}
+	}
+
 	// Any file with missing segments or corruption is marked as corrupted in metadata
 	// and DB so it stays visible on the Health page, regardless of whether repair runs.
 	// Degraded files instead keep a status that leaves them visible AND streamable
 	// (FILE_STATUS_CORRUPTED hides the file from listings and blocks opens).
+	// Masked files keep their healthy metadata status so they remain openable.
 	metadataStatus := metapb.FileStatus_FILE_STATUS_CORRUPTED
 	if isDegraded {
 		metadataStatus = metapb.FileStatus_FILE_STATUS_DEGRADED
+	} else if isMasked && !shouldRepair {
+		metadataStatus = metapb.FileStatus_FILE_STATUS_HEALTHY
 	}
 
 	// Update metadata status (blocking with timeout)
@@ -2156,7 +2177,7 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 			slog.ErrorContext(ctx, "Failed to delete health record after deleting corrupted file", "file", mvf.name, "error", err)
 		}
 		return
-	} else if healthEnabled {
+	} else if healthEnabled && shouldRepair {
 		// Mark as repair_triggered with high priority to trigger the replacement immediately.
 		// We skip the re-verification phase because a streaming failure is a definitive indicator of corruption.
 		slog.InfoContext(ctx, "Streaming failure detected, triggering immediate ARR repair", "file", mvf.name)
@@ -2185,14 +2206,18 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 			}
 		}
 	} else {
-		// Health system disabled: record the corruption for visibility only and skip
-		// every repair action (no repair_triggered status, no metadata move, no Arr redownload).
-		slog.InfoContext(ctx, "Streaming failure detected but health system disabled, marking corrupted without triggering repair", "file", mvf.name)
-		dbStatus = database.HealthStatusCorrupted
+		// Health system disabled or failure count has not reached the threshold:
+		// record the corruption for visibility only and skip every repair action.
+		if healthEnabled && !shouldRepair {
+			slog.InfoContext(ctx, "Streaming failure detected but masked (threshold not reached), skipping repair", "file", mvf.name)
+			dbStatus = database.HealthStatusPending // Re-schedule it for verification later
+		} else {
+			slog.InfoContext(ctx, "Streaming failure detected but health system disabled, marking corrupted without triggering repair", "file", mvf.name)
+			dbStatus = database.HealthStatusCorrupted
+		}
 	}
 
 	// Update database health tracking. scheduleImmediately (noRetry) forces immediate
-	// pick-up by the HealthWorker, which is only desired when a repair was actually triggered.
 	if err := mvf.healthRepository.UpdateFileHealthScheduled(ctx,
 		mvf.name,
 		dbStatus,
@@ -2203,18 +2228,6 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 		time.Now().UTC(),
 	); err != nil {
 		slog.WarnContext(ctx, "Failed to update health database for streaming failure", "file", mvf.name, "error", err)
-	}
-
-	// Increment failure count for tracking/masking if enabled. Degraded files
-	// are exempt: masking would hide a file that still plays, defeating the
-	// point of keeping it available.
-	if !isDegraded && (cfg.Streaming.FailureMasking.Enabled == nil || *cfg.Streaming.FailureMasking.Enabled) {
-		isMasked, _, err := mvf.healthRepository.IncrementStreamingFailureCount(ctx, mvf.name, cfg.Streaming.FailureMasking.Threshold)
-		if err != nil {
-			slog.WarnContext(ctx, "Failed to update streaming failure count", "file", mvf.name, "error", err)
-		} else if isMasked {
-			slog.InfoContext(ctx, "File masked due to streaming failure", "file", mvf.name)
-		}
 	}
 }
 
