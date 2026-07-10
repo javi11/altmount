@@ -39,7 +39,8 @@ func setupTestDB(t *testing.T) *HealthRepository {
 			priority INTEGER DEFAULT 0,
 			streaming_failure_count INTEGER DEFAULT 0,
 			is_masked BOOLEAN DEFAULT FALSE,
-			indexer TEXT DEFAULT NULL
+			indexer TEXT DEFAULT NULL,
+			download_id TEXT DEFAULT NULL
 		);
 	`)
 	require.NoError(t, err)
@@ -454,7 +455,7 @@ func TestAddFileToHealthCheck_ConflictPreservesRepairBudget(t *testing.T) {
 	`, filePath)
 	require.NoError(t, err)
 
-	err = repo.AddFileToHealthCheckWithMetadata(ctx, filePath, &filePath, 3, 3, nil, HealthPriorityNext, nil, nil, nil)
+	err = repo.AddFileToHealthCheckWithMetadata(ctx, filePath, &filePath, 3, 3, nil, HealthPriorityNext, nil, nil, nil, nil)
 	require.NoError(t, err)
 
 	h, err := repo.GetFileHealth(ctx, filePath)
@@ -473,7 +474,7 @@ func TestAddFileToHealthCheck_NormalizesLeadingSlash(t *testing.T) {
 	ctx := context.Background()
 
 	slashed := "/tv/Show.S01E04/Show.S01E04.mkv"
-	err := repo.AddFileToHealthCheckWithMetadata(ctx, slashed, &slashed, 3, 3, nil, HealthPriorityNext, nil, nil, nil)
+	err := repo.AddFileToHealthCheckWithMetadata(ctx, slashed, &slashed, 3, 3, nil, HealthPriorityNext, nil, nil, nil, nil)
 	require.NoError(t, err)
 
 	h, err := repo.GetFileHealth(ctx, "tv/Show.S01E04/Show.S01E04.mkv")
@@ -492,7 +493,7 @@ func TestAddFileToHealthCheckWithMetadata_StoresLibraryPath(t *testing.T) {
 	sourceNzb := "Dune.nzb"
 
 	// Add the file
-	err := repo.AddFileToHealthCheckWithMetadata(ctx, filePath, &libraryPath, 3, 3, &sourceNzb, HealthPriorityNormal, nil, nil, nil)
+	err := repo.AddFileToHealthCheckWithMetadata(ctx, filePath, &libraryPath, 3, 3, &sourceNzb, HealthPriorityNormal, nil, nil, nil, nil)
 	require.NoError(t, err)
 
 	// Verify it was stored
@@ -530,7 +531,7 @@ func TestRelinkFileByMetadata(t *testing.T) {
 	libraryPath := "/mnt/library/tv/show.S01E01.mkv"
 	dbMeta := `{"eventType":"Download","instanceName":"Sonarr","series":{"id":100,"tvdbId":200},"episodeFile":{"id":300},"episodes":[{"id":400}]}`
 
-	err := repo.AddFileToHealthCheckWithMetadata(ctx, oldPath, &libraryPath, 3, 3, nil, HealthPriorityNormal, nil, &dbMeta, nil)
+	err := repo.AddFileToHealthCheckWithMetadata(ctx, oldPath, &libraryPath, 3, 3, nil, HealthPriorityNormal, nil, &dbMeta, nil, nil)
 	require.NoError(t, err)
 
 	// Update its status to repair_triggered

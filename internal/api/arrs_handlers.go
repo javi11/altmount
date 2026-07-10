@@ -633,6 +633,10 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 			}
 
 			var indexer *string = nil
+			var downloadID *string = nil
+			if req.DownloadId != "" {
+				downloadID = &req.DownloadId
+			}
 			if req.Release != nil && req.Release.Indexer != "" {
 				indexer = &req.Release.Indexer
 			} else if req.DownloadId != "" {
@@ -643,7 +647,7 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 
 			// Add to health check (pending status) with high priority (Next) to ensure it's processed right away
 			cfg := s.configManager.GetConfigGetter()()
-			err = s.healthRepo.AddFileToHealthCheckWithMetadata(c.Context(), normalizedPath, &path, cfg.GetMaxRetries(), cfg.GetMaxRepairRetries(), sourceNzb, database.HealthPriorityNext, releaseDate, metadataStr, indexer)
+			err = s.healthRepo.AddFileToHealthCheckWithMetadata(c.Context(), normalizedPath, &path, cfg.GetMaxRetries(), cfg.GetMaxRepairRetries(), sourceNzb, database.HealthPriorityNext, releaseDate, metadataStr, indexer, downloadID)
 			if err != nil {
 				slog.ErrorContext(c.Context(), "Failed to add webhook file to health check", "path", normalizedPath, "error", err)
 			} else {

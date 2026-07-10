@@ -285,6 +285,27 @@ func ensureSchemaIntegrity(db *sql.DB, d Dialect) {
 			}
 		}
 	}
+
+	// 4. Ensure download_id column in file_health (migration 034).
+	// This defensive guard runs at startup before the health worker, so any user
+	// upgrading gets the column even if goose migration 034 fails to apply due
+	// to a version conflict from dev-branch history.
+	if !hasColumn(db, d, "file_health", "download_id") {
+		slog.Info("Adding missing download_id column to file_health")
+		if _, err := db.Exec("ALTER TABLE file_health ADD COLUMN download_id TEXT DEFAULT NULL;"); err != nil {
+			slog.Error("Failed to add download_id column to file_health", "err", err)
+		} else {
+			db.Exec("CREATE INDEX IF NOT EXISTS idx_file_health_download_id ON file_health(download_id);")
+			// Backfill from import_history where paths match exactly
+			db.Exec(`UPDATE file_health
+				SET download_id = (
+					SELECT download_id FROM import_history
+					WHERE TRIM(import_history.virtual_path, '/') = TRIM(file_health.file_path, '/')
+					LIMIT 1
+				)
+				WHERE download_id IS NULL`)
+		}
+	}
 }
 
 // fixDevBranchMigrationConflict fixes an issue for users who applied the metadata migration as version 26

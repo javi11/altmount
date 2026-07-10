@@ -467,6 +467,7 @@ export interface ImportUpdateRequest {
 	allow_nested_rar_extraction?: boolean;
 	rename_to_nzb_name?: boolean;
 	filter_sample_files?: boolean;
+	history_retention_days?: number | null;
 }
 
 // Log update request
