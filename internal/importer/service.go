@@ -959,8 +959,8 @@ func (s *Service) calculateProcessVirtualDir(item *database.ImportQueueItem, bas
 			// If the category is NOT present in the virtual path (e.g. NZBDav import),
 			// we must append it to ensure the file ends up in the correct category folder.
 			if !match {
-				*basePath = filepath.Join(*basePath, categoryPath)
-				virtualDir = filepath.Join(virtualDir, categoryPath)
+				*basePath = joinPathsMergingOverlap(*basePath, categoryPath)
+				virtualDir = joinPathsMergingOverlap(virtualDir, categoryPath)
 			}
 		}
 	}
@@ -1803,3 +1803,50 @@ func (s *Service) pruneGrabbedIndexers() {
 		return true
 	})
 }
+
+func joinPathsMergingOverlap(parent, child string) string {
+	parent = filepath.ToSlash(parent)
+	child = filepath.ToSlash(child)
+
+	parentParts := strings.Split(strings.Trim(parent, "/"), "/")
+	childParts := strings.Split(strings.Trim(child, "/"), "/")
+
+	if len(parentParts) == 1 && parentParts[0] == "" {
+		if strings.HasPrefix(parent, "/") && !strings.HasPrefix(child, "/") {
+			return "/" + child
+		}
+		return child
+	}
+	if len(childParts) == 1 && childParts[0] == "" {
+		return parent
+	}
+
+	overlapLen := 0
+	maxOverlap := len(parentParts)
+	if len(childParts) < maxOverlap {
+		maxOverlap = len(childParts)
+	}
+
+	for l := maxOverlap; l > 0; l-- {
+		match := true
+		for i := 0; i < l; i++ {
+			parentIdx := len(parentParts) - l + i
+			if !strings.EqualFold(parentParts[parentIdx], childParts[i]) {
+				match = false
+				break
+			}
+		}
+		if match {
+			overlapLen = l
+			break
+		}
+	}
+
+	resultParts := append(parentParts, childParts[overlapLen:]...)
+	result := strings.Join(resultParts, "/")
+	if strings.HasPrefix(parent, "/") {
+		return "/" + result
+	}
+	return result
+}
+
