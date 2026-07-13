@@ -1543,6 +1543,7 @@ func (s *Server) calculateHistoryStoragePath(item *database.ImportQueueItem, bas
 	if item.Category != nil && *item.Category != "" {
 		category = *item.Category
 	}
+	categoryPath := s.buildCategoryPath(category)
 
 	// 1. Get the internal relative path (relative to FUSE mount)
 	relPath := strings.TrimPrefix(storagePath, "/")
@@ -1556,10 +1557,12 @@ func (s *Server) calculateHistoryStoragePath(item *database.ImportQueueItem, bas
 			relPath = ""
 		}
 	}
-	if after, ok := strings.CutPrefix(relPath, category+"/"); ok {
-		relPath = after
-	} else if relPath == category {
-		relPath = ""
+	if categoryPath != "" {
+		if after, ok := strings.CutPrefix(relPath, categoryPath+"/"); ok {
+			relPath = after
+		} else if relPath == categoryPath {
+			relPath = ""
+		}
 	}
 
 	// 3. Determine the base path for reporting
@@ -1572,12 +1575,14 @@ func (s *Server) calculateHistoryStoragePath(item *database.ImportQueueItem, bas
 	}
 
 	// 4. Build the clean, isolated reporting path
-	// Construct: Base + CompleteDir + Category + RelPath
+	// Construct: Base + CompleteDir + CategoryPath + RelPath
 	pathParts := []string{finalBasePath}
 	if cfg.SABnzbd.CompleteDir != "" {
 		pathParts = append(pathParts, strings.Trim(cfg.SABnzbd.CompleteDir, "/"))
 	}
-	pathParts = append(pathParts, category)
+	if categoryPath != "" {
+		pathParts = append(pathParts, categoryPath)
+	}
 	pathParts = append(pathParts, relPath)
 
 	fullStoragePath := filepath.Join(pathParts...)

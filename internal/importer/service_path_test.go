@@ -183,3 +183,23 @@ func TestSanitizeVirtualPath(t *testing.T) {
 		})
 	}
 }
+
+func TestJoinPathsMergingOverlap(t *testing.T) {
+	cases := []struct {
+		parent, child, want string
+	}{
+		{"/complete/movies", "movies/1080p", "/complete/movies/1080p"},
+		{"/complete", "movies/1080p", "/complete/movies/1080p"},
+		{"complete/movies", "movies/1080p", "complete/movies/1080p"},
+		{"/complete/movies/1080p/ReleaseName", "movies/1080p", "/complete/movies/1080p/ReleaseName/movies/1080p"},
+		{"/", "movies/1080p", "/movies/1080p"},
+		{"", "movies/1080p", "movies/1080p"},
+		{"/complete/movies/", "/movies/1080p/", "/complete/movies/1080p"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.parent+"_"+tc.child, func(t *testing.T) {
+			got := joinPathsMergingOverlap(tc.parent, tc.child)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}

@@ -30,8 +30,16 @@ func (c *Coordinator) CreateStrmFiles(ctx context.Context, item *database.Import
 	originalResultingPath := resultingPath
 
 	category := ""
-	if item.Category != nil {
+	if item.Category != nil && *item.Category != "" {
 		category = *item.Category
+		for _, cat := range cfg.SABnzbd.Categories {
+			if strings.EqualFold(cat.Name, category) {
+				if cat.Dir != "" {
+					category = cat.Dir
+				}
+				break
+			}
+		}
 	}
 
 	// Build the clean, isolated library path: [CompleteDir]/[Category]/<remainder>,
@@ -85,8 +93,16 @@ func (c *Coordinator) CreateStrmFiles(ctx context.Context, item *database.Import
 		relPath := strings.TrimSuffix(relPathWithMeta, ".meta")
 
 		category := ""
-		if item.Category != nil {
+		if item.Category != nil && *item.Category != "" {
 			category = *item.Category
+			for _, cat := range cfg.SABnzbd.Categories {
+				if strings.EqualFold(cat.Name, category) {
+					if cat.Dir != "" {
+						category = cat.Dir
+					}
+					break
+				}
+			}
 		}
 
 		// filepath.Rel returns OS-native separators (backslashes on Windows);
