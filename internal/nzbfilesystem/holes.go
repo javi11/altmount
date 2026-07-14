@@ -35,6 +35,13 @@ func (mvf *MetadataVirtualFile) holeHooks() *usenet.HoleHooks {
 		acc := &holes.Accumulator{}
 		acc.Load(metadata.KnownHolesFromProto(mvf.meta.KnownHoles))
 		mvf.holeAcc = acc
+		// Snapshot while mvf.meta is still guaranteed non-nil (this runs on
+		// the caller's own goroutine, before any detached download goroutine
+		// can touch it). onHole/recordDegradedPad read these fields instead
+		// of mvf.meta — see the field comments on MetadataVirtualFile.
+		mvf.holeFileSize = mvf.meta.FileSize
+		mvf.holeSourceNzbPath = mvf.meta.SourceNzbPath
+		mvf.holeTotalSegments = len(mvf.meta.SegmentData)
 		mvf.holeHooksVal = &usenet.HoleHooks{
 			OnHole:     mvf.onHole,
 			KnownHoles: mvf.isKnownHole,
@@ -65,15 +72,14 @@ func (mvf *MetadataVirtualFile) onHole(segIndex int, segID string) holes.Decisio
 	longest := mvf.holeAcc.LongestRun()
 	mvf.holeMu.Unlock()
 
-	// Snapshot the meta fields this hook needs. Close() releases mvf.meta
-	// (sets it to nil under mvf.mu) without coordinating with this callback,
-	// which runs on a detached per-segment download goroutine that Close()
-	// does not wait for — reading mvf.meta again after this point (in
-	// particular from the goroutine spawned below) can race a nil mvf.meta
-	// and crash the process. See recordDegradedPad.
-	fileSize := mvf.meta.FileSize
-	sourceNzbPath := mvf.meta.SourceNzbPath
-	totalSegments := len(mvf.meta.SegmentData)
+	// Use the immutable snapshot captured in holeHooks(), not mvf.meta.
+	// This function runs on a detached per-segment download goroutine that
+	// Close() does not wait for; Close() sets mvf.meta = nil with no
+	// synchronization against this goroutine, so reading mvf.meta here (even
+	// before spawning recordDegradedPad below) would still race it.
+	fileSize := mvf.holeFileSize
+	sourceNzbPath := mvf.holeSourceNzbPath
+	totalSegments := mvf.holeTotalSegments
 
 	segBytes := avgSegBytes(fileSize, totalSegments)
 	verdict := holes.Classify(runs, fileSize, segBytes)

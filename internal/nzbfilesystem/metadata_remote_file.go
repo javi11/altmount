@@ -862,6 +862,17 @@ type MetadataVirtualFile struct {
 	holeAcc      *holes.Accumulator
 	holeHooksVal *usenet.HoleHooks
 	holeOnce     sync.Once
+
+	// holeFileSize, holeSourceNzbPath and holeTotalSegments are immutable
+	// snapshots of the corresponding mvf.meta fields, captured once in
+	// holeHooks() while mvf.meta is still guaranteed non-nil. onHole and
+	// recordDegradedPad (holes.go) run on detached per-segment download
+	// goroutines that Close() does not wait for, so they must never read
+	// mvf.meta directly — Close() sets it to nil with no synchronization
+	// against them.
+	holeFileSize      int64
+	holeSourceNzbPath string
+	holeTotalSegments int
 }
 
 // randomReadCacheSize bounds the per-file ephemeral-read cache. 8
