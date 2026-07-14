@@ -65,9 +65,18 @@ func (mvf *MetadataVirtualFile) onHole(segIndex int, segID string) holes.Decisio
 	longest := mvf.holeAcc.LongestRun()
 	mvf.holeMu.Unlock()
 
+	// Snapshot the meta fields this hook needs. Close() releases mvf.meta
+	// (sets it to nil under mvf.mu) without coordinating with this callback,
+	// which runs on a detached per-segment download goroutine that Close()
+	// does not wait for — reading mvf.meta again after this point (in
+	// particular from the goroutine spawned below) can race a nil mvf.meta
+	// and crash the process. See recordDegradedPad.
+	fileSize := mvf.meta.FileSize
+	sourceNzbPath := mvf.meta.SourceNzbPath
 	totalSegments := len(mvf.meta.SegmentData)
-	segBytes := avgSegBytes(mvf.meta.FileSize, totalSegments)
-	verdict := holes.Classify(runs, mvf.meta.FileSize, segBytes)
+
+	segBytes := avgSegBytes(fileSize, totalSegments)
+	verdict := holes.Classify(runs, fileSize, segBytes)
 	if verdict != holes.VerdictDegraded {
 		// Caps exceeded: fail the stream; the DataCorruptionError path takes
 		// over (repair trigger, safety-folder move) as it always has.
@@ -82,7 +91,7 @@ func (mvf *MetadataVirtualFile) onHole(segIndex int, segID string) holes.Decisio
 	// Record the degradation without stalling the download goroutine. Replays
 	// of already-known holes change nothing, so only new discoveries write.
 	if !alreadyKnown {
-		go mvf.recordDegradedPad(segIndex, total, longest, totalSegments, segBytes)
+		go mvf.recordDegradedPad(segIndex, sourceNzbPath, fileSize, total, longest, totalSegments, segBytes)
 	}
 	return holes.DecisionPad
 }
@@ -93,7 +102,22 @@ func (mvf *MetadataVirtualFile) onHole(segIndex int, segID string) holes.Decisio
 // safety-folder move and NO masking-counter increment — the file still plays.
 // Status writes are debounced per file so a burst of pads writes once per
 // window; the hole itself is always persisted (idempotent merge).
-func (mvf *MetadataVirtualFile) recordDegradedPad(segIndex int, total, longest, totalSegments int, segBytes int64) {
+//
+// Runs detached (go mvf.recordDegradedPad(...) in onHole) on its own
+// goroutine that outlives the per-segment download goroutine's own recover().
+// A caller may Close() the handle — which sets mvf.meta = nil — at any point
+// while this runs, so it must not touch mvf.meta; callers pass in everything
+// derived from meta instead. The recover below is defense-in-depth so an
+// unforeseen panic here logs and dies quietly rather than crashing the
+// process, matching the per-segment download goroutine's own recover in
+// usenet.UsenetReader.
+func (mvf *MetadataVirtualFile) recordDegradedPad(segIndex int, sourceNzbPath string, fileSize int64, total, longest, totalSegments int, segBytes int64) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("panic in recordDegradedPad", "file", mvf.name, "panic", r)
+		}
+	}()
+
 	// Always persist the hole so the next open pre-pads it without a fetch.
 	if err := mvf.metadataService.AddKnownHoles(mvf.name, []holes.Run{{Start: segIndex, Count: 1}}); err != nil {
 		slog.WarnContext(mvf.ctx, "Failed to persist known hole", "file", mvf.name, "error", err)
@@ -121,13 +145,13 @@ func (mvf *MetadataVirtualFile) recordDegradedPad(segIndex int, total, longest, 
 			TotalMissing:  total,
 			LongestRun:    longest,
 			TotalSegments: totalSegments,
-			PaddedRatio:   paddedRatio(total, segBytes, mvf.meta.FileSize),
+			PaddedRatio:   paddedRatio(total, segBytes, fileSize),
 		},
 	}
 	errorMsg := "missing segments zero-filled during streaming"
-	sourceNzbPath := &mvf.meta.SourceNzbPath
-	if *sourceNzbPath == "" {
-		sourceNzbPath = nil
+	var sourceNzbPathPtr *string
+	if sourceNzbPath != "" {
+		sourceNzbPathPtr = &sourceNzbPath
 	}
 
 	slog.InfoContext(ctx, "Zero-filled missing segment during streaming, file marked degraded",
@@ -139,7 +163,7 @@ func (mvf *MetadataVirtualFile) recordDegradedPad(segIndex int, total, longest, 
 		mvf.name,
 		database.HealthStatusDegraded,
 		&errorMsg,
-		sourceNzbPath,
+		sourceNzbPathPtr,
 		details.Marshal(),
 		false, // no immediate scheduling — periodic re-check refines the verdict
 		time.Now().UTC(),
