@@ -21,7 +21,7 @@ require (
 	github.com/jackc/pgx/v5 v5.8.0
 	github.com/javi11/nntppool/v4 v4.13.0
 	github.com/javi11/nxg v0.1.0
-	github.com/javi11/nzbparser v0.5.4
+	github.com/javi11/nzbparser v0.5.5
 	github.com/javi11/rardecode/v2 v2.1.2-0.20260610075131-4664d7a7325a
 	github.com/javi11/sevenzip v1.6.2-0.20251026160715-ca961b7f1239
 	github.com/jinzhu/copier v0.4.0
