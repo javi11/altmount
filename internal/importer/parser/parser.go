@@ -40,6 +40,14 @@ import (
 // budget, which adapts to pool capacity and stream activity.
 const maxFetchGoroutines = 100
 
+// First-segment fetches retry transient failures (connection exhaustion,
+// timeouts) so a momentary hiccup doesn't permanently drop a volume from a
+// large multi-volume set. A real article-not-found is not retried.
+const (
+	maxFirstSegmentFetchAttempts = 3
+	firstSegmentRetryBackoff     = 300 * time.Millisecond
+)
+
 // FirstSegmentData holds cached data from the first segment of an NZB file
 // This avoids redundant fetching when both PAR2 extraction and file parsing need the same data
 type FirstSegmentData struct {
@@ -773,26 +781,52 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 
 			firstSegment := fileToFetch.Segments[0]
 
-			// Take a token from the global import connection budget before the
-			// per-attempt timeout starts, so queue wait never burns the deadline.
-			releaseConn, err := p.poolManager.AcquireImportConnection(ctx)
-			if err != nil {
-				return fetchResult{}, err
+			// Fetch the first segment, retrying transient failures. A genuine
+			// article-not-found (430/423) is permanent, so we stop immediately.
+			// But transient errors — connection exhaustion ("all providers
+			// exhausted"), timeouts, resets — must NOT be treated like a missing
+			// article: dropping a volume over a transient hiccup shatters large
+			// multi-volume sets (one lost first segment → no PAR2 name → the
+			// volume is excluded → the archive looks incomplete). Retry those a
+			// few times before giving up.
+			var (
+				result   *nntppool.ArticleBody
+				fetchErr error
+			)
+			for attempt := 1; attempt <= maxFirstSegmentFetchAttempts; attempt++ {
+				// Take a token from the global import connection budget before the
+				// per-attempt timeout starts, so queue wait never burns the deadline.
+				releaseConn, acquireErr := p.poolManager.AcquireImportConnection(ctx)
+				if acquireErr != nil {
+					// Budget acquisition only fails when the context is done — fatal.
+					return fetchResult{}, acquireErr
+				}
+
+				// Create context with timeout
+				c, cancel := context.WithTimeout(ctx, time.Second*30)
+				// Get body for the first segment (v4 returns decoded bytes + YEnc metadata)
+				result, fetchErr = cp.Body(c, firstSegment.ID)
+				cancel()
+				releaseConn()
+
+				// Success or permanent miss: stop retrying.
+				if fetchErr == nil || stderrors.Is(fetchErr, nntppool.ErrArticleNotFound) {
+					break
+				}
+				// Transient failure: brief backoff (unless the context is done) then retry.
+				if attempt < maxFirstSegmentFetchAttempts {
+					select {
+					case <-ctx.Done():
+					case <-time.After(time.Duration(attempt) * firstSegmentRetryBackoff):
+					}
+				}
 			}
-			defer releaseConn()
-
-			// Create context with timeout
-			c, cancel := context.WithTimeout(ctx, time.Second*30)
-			defer cancel()
-
-			// Get body for the first segment (v4 returns decoded bytes + YEnc metadata)
-			result, err := cp.Body(c, firstSegment.ID)
-			if err != nil {
+			if fetchErr != nil {
 				p.log.DebugContext(ctx, "missing segment",
 					"segment_id", firstSegment.ID,
-					"error", err,
+					"error", fetchErr,
 				)
-				notFound := stderrors.Is(err, nntppool.ErrArticleNotFound)
+				notFound := stderrors.Is(fetchErr, nntppool.ErrArticleNotFound)
 				return fetchResult{
 					segmentID:  firstSegment.ID,
 					isNotFound: notFound,
@@ -802,7 +836,7 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 						IsArticleNotFound:   notFound,
 						OriginalIndex:       originalIndex,
 					},
-					err: fmt.Errorf("failed to get body: %w", err),
+					err: fmt.Errorf("failed to get body: %w", fetchErr),
 				}, nil
 			}
 

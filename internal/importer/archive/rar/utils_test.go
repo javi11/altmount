@@ -157,7 +157,9 @@ func TestGroupHasVolumeGap(t *testing.T) {
 		{"old roll missing first volume", files("m.r00", "m.r01"), true},
 		{"old roll interior gap", files("m.rar", "m.r00", "m.r02"), true},
 		{"old roll full rollover into s contiguous", files(oldRollSet("m", 12)...), false},
-		{"old roll rollover missing s00", files(oldRollSetSkip("m", 12, "m.s00")...), true},
+		// A single interior volume missing from a 114-volume set (~0.9%) is within
+		// tolerance: proceed to analysis rather than pre-skipping a near-complete set.
+		{"old roll rollover missing s00 tolerated", files(oldRollSetSkip("m", 12, "m.s00")...), false},
 		{"numeric contiguous", files("a.001", "a.002", "a.003"), false},
 		{"numeric gap", files("a.001", "a.003"), true},
 		{"numeric missing first", files("a.002", "a.003"), true},
@@ -165,6 +167,10 @@ func TestGroupHasVolumeGap(t *testing.T) {
 		{"mixed schemes not flagged", files("m.rar", "m.part02.rar"), false},
 		{"unrecognized member not flagged", files("m.r00", "obfuscated"), false},
 		{"empty", nil, false},
+		// Large part set missing 2 of 257 volumes (~0.8%): within tolerance, proceed.
+		{"large part set small interior gap tolerated", files(partSetSkip("m", 257, 42, 199)...), false},
+		// Large part set with most volumes absent: clearly doomed, skip.
+		{"large part set mostly missing skipped", files("m.part001.rar", "m.part250.rar"), true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -221,6 +227,23 @@ func oldRollSet(base string, sCount int) []string {
 }
 
 // oldRollSetSkip returns oldRollSet with the named volume removed, simulating a gap.
+// partSetSkip builds a .partNNN.rar set of `count` volumes (1-based, 3-digit
+// padded) omitting the given volume numbers, to model near-complete large sets.
+func partSetSkip(base string, count int, skip ...int) []string {
+	drop := make(map[int]struct{}, len(skip))
+	for _, n := range skip {
+		drop[n] = struct{}{}
+	}
+	names := make([]string, 0, count)
+	for i := 1; i <= count; i++ {
+		if _, ok := drop[i]; ok {
+			continue
+		}
+		names = append(names, fmt.Sprintf("%s.part%03d.rar", base, i))
+	}
+	return names
+}
+
 func oldRollSetSkip(base string, sCount int, skip string) []string {
 	all := oldRollSet(base, sCount)
 	out := all[:0:0]
