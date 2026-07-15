@@ -133,13 +133,24 @@ func rarVolumeNumber(filename string) (rarScheme, int, bool) {
 	return archive.VolumeNumber(filename)
 }
 
-// groupHasVolumeGap reports whether a RAR volume set is missing a leading or
-// interior volume, judged purely from filename numbering (no network access).
-// It is deliberately conservative — when the numbering scheme is mixed or any
-// member is unrecognized it returns false so a healthy set is never skipped on
-// a false positive. A missing *trailing* volume is undetectable by numbering
-// (the expected count is unknown) and also returns false; that case is handled
-// downstream by segment-integrity validation.
+// volumeGapTolerance is the maximum fraction of a RAR volume set that may be
+// missing (interior volumes) while analysis is still attempted. A set missing
+// more than this is treated as doomed and skipped before paying for network
+// I/O; smaller gaps proceed so downstream segment-integrity and content-
+// coverage validation can decide. A *leading* volume gap (the archive header
+// is missing) is never tolerated — the set cannot be read at all.
+const volumeGapTolerance = 0.05
+
+// groupHasVolumeGap reports whether a RAR volume set is missing enough leading
+// or interior volumes that analysis should be skipped, judged purely from
+// filename numbering (no network access). It is deliberately conservative —
+// when the numbering scheme is mixed or any member is unrecognized it returns
+// false so a healthy set is never skipped on a false positive. A missing
+// *leading* volume always counts (the archive header is gone). A small interior
+// gap (within volumeGapTolerance of the volume span) is tolerated and left to
+// downstream validation, so a large multi-volume set is not discarded over a
+// couple of missing volumes. A missing *trailing* volume is undetectable by
+// numbering (the expected count is unknown) and also returns false.
 func groupHasVolumeGap(files []parser.ParsedFile) bool {
 	if len(files) <= 1 {
 		return false
@@ -167,17 +178,28 @@ func groupHasVolumeGap(files []parser.ParsedFile) bool {
 		expectedStart = 0
 	}
 	if nums[0] > expectedStart {
-		return true // leading volume(s) missing
+		return true // leading volume(s) missing — archive header gone, can't read
 	}
+
+	// Count unique ordinals present across the volume span and skip only when the
+	// missing fraction exceeds the tolerance. This keeps the fast-skip for clearly
+	// broken sets (most volumes absent) while letting a nearly-complete set proceed
+	// to analysis, where segment/coverage checks make the final call.
+	unique := 1
 	for i := 1; i < len(nums); i++ {
-		if nums[i] == nums[i-1] {
-			continue // duplicate ordinal (defensive); not a gap
-		}
-		if nums[i] != nums[i-1]+1 {
-			return true // interior gap
+		if nums[i] != nums[i-1] {
+			unique++
 		}
 	}
-	return false
+	span := nums[len(nums)-1] - expectedStart + 1
+	if span <= 0 {
+		return false
+	}
+	missing := span - unique
+	if missing <= 0 {
+		return false
+	}
+	return float64(missing) > volumeGapTolerance*float64(span)
 }
 
 // groupHasFirstVolume reports whether a RAR group contains the volume that begins

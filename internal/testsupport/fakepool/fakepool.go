@@ -52,6 +52,11 @@ import (
 // compile-time assertion: Client must satisfy the narrow interface.
 var _ pool.NntpClient = (*Client)(nil)
 
+// errTransientFakepool is the default error returned during a SegmentBehavior
+// FailFirst window — a transient failure that is NOT nntppool.ErrArticleNotFound,
+// so retry logic must treat it as retryable rather than a permanent miss.
+var errTransientFakepool = errors.New("fakepool: transient failure (all providers exhausted)")
+
 // SegmentBehavior describes how the fake should respond to a single
 // message-ID. The zero value returns an empty body with no delay.
 type SegmentBehavior struct {
@@ -73,6 +78,16 @@ type SegmentBehavior struct {
 	// onMeta callbacks. Use this to inject yEnc header metadata (FileName,
 	// PartSize, FileSize, etc.) without needing a real NNTP server.
 	YEnc nntppool.YEncMeta
+
+	// FailFirst makes the first N calls to this message-ID return FailErr (a
+	// transient error) before subsequent calls succeed normally. Use it to
+	// exercise retry logic that must distinguish transient failures from a
+	// permanent article-not-found. Zero disables this behavior.
+	FailFirst int
+
+	// FailErr is the transient error returned during the FailFirst window.
+	// Defaults to a generic "all providers exhausted"-style error when nil.
+	FailErr error
 }
 
 // Client is a fake nntppool.Client suitable for unit and concurrency tests.
@@ -368,6 +383,17 @@ func (c *Client) serveBody(ctx context.Context, messageID string, w io.Writer, o
 	b := c.behaviorFor(messageID)
 	if err := waitOrCancel(ctx, b.Latency); err != nil {
 		return nil, err
+	}
+	// Transient-failure window: fail the first FailFirst calls to this message,
+	// then serve normally. The per-ID counter was already incremented in Body.
+	if b.FailFirst > 0 {
+		if n, ok := c.perIDCalls.Load(messageID); ok && n.(*atomic.Int64).Load() <= int64(b.FailFirst) {
+			failErr := b.FailErr
+			if failErr == nil {
+				failErr = errTransientFakepool
+			}
+			return nil, failErr
+		}
 	}
 	if b.Err != nil {
 		// Mirror nntppool: on error the result may still carry partial
