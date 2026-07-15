@@ -1,16 +1,25 @@
 package nzbfilesystem
 
 import (
-	"context"
 	"log/slog"
-	"time"
 
-	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/holes"
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/usenet"
 )
+
+// holeMetaSnapshot holds the mvf.meta fields the hole path needs, captured
+// once in holeHooks() on the caller's own goroutine while mvf.meta is still
+// guaranteed non-nil. onHole runs on detached per-segment download goroutines
+// that Close() does not wait for, and Close() sets mvf.meta = nil with no
+// synchronization against them — so the hole path must never read mvf.meta
+// directly; this snapshot is its only race-free access.
+type holeMetaSnapshot struct {
+	fileSize      int64
+	sourceNzbPath string
+	totalSegments int
+}
 
 // holeEligible reports whether this file's missing segments may be
 // zero-filled: plain (unencrypted, non-nested, non-remuxed) video only.
@@ -35,13 +44,13 @@ func (mvf *MetadataVirtualFile) holeHooks() *usenet.HoleHooks {
 		acc := &holes.Accumulator{}
 		acc.Load(metadata.KnownHolesFromProto(mvf.meta.KnownHoles))
 		mvf.holeAcc = acc
-		// Snapshot while mvf.meta is still guaranteed non-nil (this runs on
-		// the caller's own goroutine, before any detached download goroutine
-		// can touch it). onHole/recordDegradedPad read these fields instead
-		// of mvf.meta — see the field comments on MetadataVirtualFile.
-		mvf.holeFileSize = mvf.meta.FileSize
-		mvf.holeSourceNzbPath = mvf.meta.SourceNzbPath
-		mvf.holeTotalSegments = len(mvf.meta.SegmentData)
+		// Snapshot before any detached download goroutine exists — see the
+		// holeMetaSnapshot doc comment for why onHole must not read mvf.meta.
+		mvf.holeMeta = holeMetaSnapshot{
+			fileSize:      mvf.meta.FileSize,
+			sourceNzbPath: mvf.meta.SourceNzbPath,
+			totalSegments: len(mvf.meta.SegmentData),
+		}
 		mvf.holeHooksVal = &usenet.HoleHooks{
 			OnHole:     mvf.onHole,
 			KnownHoles: mvf.isKnownHole,
@@ -72,17 +81,10 @@ func (mvf *MetadataVirtualFile) onHole(segIndex int, segID string) holes.Decisio
 	longest := mvf.holeAcc.LongestRun()
 	mvf.holeMu.Unlock()
 
-	// Use the immutable snapshot captured in holeHooks(), not mvf.meta.
-	// This function runs on a detached per-segment download goroutine that
-	// Close() does not wait for; Close() sets mvf.meta = nil with no
-	// synchronization against this goroutine, so reading mvf.meta here (even
-	// before spawning recordDegradedPad below) would still race it.
-	fileSize := mvf.holeFileSize
-	sourceNzbPath := mvf.holeSourceNzbPath
-	totalSegments := mvf.holeTotalSegments
-
-	segBytes := avgSegBytes(fileSize, totalSegments)
-	verdict := holes.Classify(runs, fileSize, segBytes)
+	// Use the immutable snapshot captured in holeHooks(), never mvf.meta —
+	// see the holeMetaSnapshot doc comment.
+	segBytes := avgSegBytes(mvf.holeMeta.fileSize, mvf.holeMeta.totalSegments)
+	verdict := holes.Classify(runs, mvf.holeMeta.fileSize, segBytes)
 	if verdict != holes.VerdictDegraded {
 		// Caps exceeded: fail the stream; the DataCorruptionError path takes
 		// over (repair trigger, safety-folder move) as it always has.
@@ -94,88 +96,22 @@ func (mvf *MetadataVirtualFile) onHole(segIndex int, segID string) holes.Decisio
 		return holes.DecisionFail
 	}
 
-	// Record the degradation without stalling the download goroutine. Replays
-	// of already-known holes change nothing, so only new discoveries write.
+	// Record the degradation without stalling the download goroutine: hand a
+	// value-typed event to the process-lived padRecorder worker. Replays of
+	// already-known holes change nothing, so only new discoveries write.
 	if !alreadyKnown {
-		go mvf.recordDegradedPad(segIndex, sourceNzbPath, fileSize, total, longest, totalSegments, segBytes)
+		mvf.padRecorder.enqueue(padEvent{
+			name:          mvf.name,
+			segIndex:      segIndex,
+			sourceNzbPath: mvf.holeMeta.sourceNzbPath,
+			fileSize:      mvf.holeMeta.fileSize,
+			total:         total,
+			longest:       longest,
+			totalSegments: mvf.holeMeta.totalSegments,
+			segBytes:      segBytes,
+		})
 	}
 	return holes.DecisionPad
-}
-
-// recordDegradedPad persists a newly padded hole and marks the file degraded:
-// hole map merged into metadata, FILE_STATUS_DEGRADED (stays visible and
-// streamable), health record degraded. Deliberately NO repair trigger, NO
-// safety-folder move and NO masking-counter increment — the file still plays.
-// Status writes are debounced per file so a burst of pads writes once per
-// window; the hole itself is always persisted (idempotent merge).
-//
-// Runs detached (go mvf.recordDegradedPad(...) in onHole) on its own
-// goroutine that outlives the per-segment download goroutine's own recover().
-// A caller may Close() the handle — which sets mvf.meta = nil — at any point
-// while this runs, so it must not touch mvf.meta; callers pass in everything
-// derived from meta instead. The recover below is defense-in-depth so an
-// unforeseen panic here logs and dies quietly rather than crashing the
-// process, matching the per-segment download goroutine's own recover in
-// usenet.UsenetReader.
-func (mvf *MetadataVirtualFile) recordDegradedPad(segIndex int, sourceNzbPath string, fileSize int64, total, longest, totalSegments int, segBytes int64) {
-	defer func() {
-		if r := recover(); r != nil {
-			slog.Error("panic in recordDegradedPad", "file", mvf.name, "panic", r)
-		}
-	}()
-
-	// Always persist the hole so the next open pre-pads it without a fetch.
-	if err := mvf.metadataService.AddKnownHoles(mvf.name, []holes.Run{{Start: segIndex, Count: 1}}); err != nil {
-		slog.WarnContext(mvf.ctx, "Failed to persist known hole", "file", mvf.name, "error", err)
-	}
-
-	// Distinct debounce key from the repair path so pads never consume a
-	// repair-trigger token.
-	if !mvf.repairCoalescer.ShouldTrigger(mvf.name + "\x00degraded-pad") {
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(mvf.ctx, 5*time.Second)
-	defer cancel()
-
-	if err := mvf.metadataService.UpdateFileStatus(mvf.name, metapb.FileStatus_FILE_STATUS_DEGRADED); err != nil {
-		slog.WarnContext(ctx, "Failed to update metadata status to degraded", "file", mvf.name, "error", err)
-	}
-
-	details := database.HealthErrorDetails{
-		ErrorType:       "ArticleNotFound",
-		MissingArticles: total,
-		TotalArticles:   totalSegments,
-		PlaybackImpact: &holes.Impact{
-			Verdict:       holes.VerdictDegraded,
-			TotalMissing:  total,
-			LongestRun:    longest,
-			TotalSegments: totalSegments,
-			PaddedRatio:   paddedRatio(total, segBytes, fileSize),
-		},
-	}
-	errorMsg := "missing segments zero-filled during streaming"
-	var sourceNzbPathPtr *string
-	if sourceNzbPath != "" {
-		sourceNzbPathPtr = &sourceNzbPath
-	}
-
-	slog.InfoContext(ctx, "Zero-filled missing segment during streaming, file marked degraded",
-		"file", mvf.name,
-		"total_missing", total,
-		"longest_run", longest)
-
-	if err := mvf.healthRepository.UpdateFileHealthScheduled(ctx,
-		mvf.name,
-		database.HealthStatusDegraded,
-		&errorMsg,
-		sourceNzbPathPtr,
-		details.Marshal(),
-		false, // no immediate scheduling — periodic re-check refines the verdict
-		time.Now().UTC(),
-	); err != nil {
-		slog.WarnContext(ctx, "Failed to record degraded status for padded file", "file", mvf.name, "error", err)
-	}
 }
 
 // classifyStreamingFailure builds the playback-impact summary for a stream
