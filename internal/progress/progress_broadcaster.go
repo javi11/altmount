@@ -42,9 +42,14 @@ type ProgressBroadcaster struct {
 	subSeq      atomic.Uint64
 }
 
-// broadcast delivers update to every subscriber without blocking. If a
-// subscriber's buffered channel is full the update is dropped for that
-// subscriber and dropMsg is logged. Shared by all the broadcast entry points.
+// broadcast delivers update to every subscriber without blocking. Producers
+// (e.g. per-segment progress ticks) can emit updates far faster than a single
+// SSE goroutine can marshal and flush them over the network, so a subscriber's
+// buffered channel can fill up. Only the latest state per queue item matters
+// to consumers, so when a channel is full its oldest buffered update is
+// dropped to make room for the new one instead of discarding the new update -
+// this keeps subscribers converging on current progress rather than getting
+// stuck replaying stale values. dropMsg is logged only if even that retry fails.
 func (pb *ProgressBroadcaster) broadcast(update ProgressUpdate, dropMsg string) {
 	if pb == nil {
 		return
@@ -52,6 +57,19 @@ func (pb *ProgressBroadcaster) broadcast(update ProgressUpdate, dropMsg string) 
 	pb.subMu.RLock()
 	defer pb.subMu.RUnlock()
 	for subID, ch := range pb.subscribers {
+		select {
+		case ch <- update:
+			continue
+		default:
+		}
+
+		// Channel full: drop the oldest queued update, then retry once so the
+		// subscriber ends up with the most recent state.
+		select {
+		case <-ch:
+		default:
+		}
+
 		select {
 		case ch <- update:
 		default:
