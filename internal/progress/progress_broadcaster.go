@@ -42,9 +42,8 @@ type ProgressBroadcaster struct {
 	subSeq      atomic.Uint64
 }
 
-// broadcast delivers update to every subscriber without blocking. If a
-// subscriber's buffered channel is full the update is dropped for that
-// subscriber and dropMsg is logged. Shared by all the broadcast entry points.
+// broadcast delivers update to every subscriber without blocking, dropping the
+// oldest buffered update instead of the new one if a channel is full.
 func (pb *ProgressBroadcaster) broadcast(update ProgressUpdate, dropMsg string) {
 	if pb == nil {
 		return
@@ -52,6 +51,18 @@ func (pb *ProgressBroadcaster) broadcast(update ProgressUpdate, dropMsg string) 
 	pb.subMu.RLock()
 	defer pb.subMu.RUnlock()
 	for subID, ch := range pb.subscribers {
+		select {
+		case ch <- update:
+			continue
+		default:
+		}
+
+		// Full: drop oldest, retry once.
+		select {
+		case <-ch:
+		default:
+		}
+
 		select {
 		case ch <- update:
 		default:
