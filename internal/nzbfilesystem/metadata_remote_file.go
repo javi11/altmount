@@ -46,6 +46,7 @@ type MetadataRemoteFile struct {
 	streamTracker    StreamTracker            // Stream tracker for monitoring active streams
 	cacheSource      *segcache.Source         // Segment cache source (nil = no cache configured)
 	repairCoalescer  *RepairCoalescer         // Throttles streaming-failure repair triggers and rclone VFS refreshes
+	padRecorder      *padRecorder             // Process-lived worker persisting degraded-pad events
 	renameMu         sync.Mutex               // Mutex to protect rename operations from race conditions
 }
 
@@ -75,6 +76,8 @@ func NewMetadataRemoteFile(
 	// Initialize AES cipher for encrypted archives
 	aesCipher := aes.NewAesCipher()
 
+	repairCoalescer := NewRepairCoalescer(rcloneClient, configGetter)
+
 	return &MetadataRemoteFile{
 		metadataService:  metadataService,
 		healthRepository: healthRepository,
@@ -86,7 +89,8 @@ func NewMetadataRemoteFile(
 		aesCipher:        aesCipher,
 		streamTracker:    streamTracker,
 		cacheSource:      cacheSource,
-		repairCoalescer:  NewRepairCoalescer(rcloneClient, configGetter),
+		repairCoalescer:  repairCoalescer,
+		padRecorder:      newPadRecorder(metadataService, healthRepository, repairCoalescer),
 	}
 }
 
@@ -272,6 +276,7 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 		arrsService:      mrf.arrsService,
 		rcloneClient:     mrf.rcloneClient,
 		repairCoalescer:  mrf.repairCoalescer,
+		padRecorder:      mrf.padRecorder,
 		configGetter:     mrf.configGetter,
 		poolManager:      mrf.poolManager,
 		ctx:              ctx,
@@ -790,6 +795,7 @@ type MetadataVirtualFile struct {
 	arrsService      ARRsRepairService
 	rcloneClient     rclonecli.RcloneRcClient // RClone RC client for VFS notifications
 	repairCoalescer  *RepairCoalescer         // Throttles repair triggers; may be nil in tests
+	padRecorder      *padRecorder             // Persists degraded-pad events; may be nil in tests
 	configGetter     config.ConfigGetter
 	poolManager      pool.Manager // Pool manager for dynamic pool access
 	ctx              context.Context
@@ -862,6 +868,7 @@ type MetadataVirtualFile struct {
 	holeAcc      *holes.Accumulator
 	holeHooksVal *usenet.HoleHooks
 	holeOnce     sync.Once
+	holeMeta     holeMetaSnapshot // set in holeHooks(); see holeMetaSnapshot doc
 }
 
 // randomReadCacheSize bounds the per-file ephemeral-read cache. 8
