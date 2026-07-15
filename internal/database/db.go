@@ -296,14 +296,32 @@ func ensureSchemaIntegrity(db *sql.DB, d Dialect) {
 			slog.Error("Failed to add download_id column to file_health", "err", err)
 		} else {
 			db.Exec("CREATE INDEX IF NOT EXISTS idx_file_health_download_id ON file_health(download_id);")
-			// Backfill from import_history where paths match exactly
-			db.Exec(`UPDATE file_health
+			// Backfill download_id from import_history by matching slash-trimmed paths.
+			// PostgreSQL rejects the two-argument TRIM(x, '/') comma form, so use the
+			// dialect-appropriate normalization function. A temporary expression index
+			// lets the correlated subquery probe import_history by index instead of a
+			// full scan per row (avoids the O(N*M) startup hang on large deployments).
+			trim := "TRIM(%s, '/')"
+			if d == DialectPostgres {
+				trim = "btrim(%s, '/')"
+			}
+			trimVPath := fmt.Sprintf(trim, "import_history.virtual_path")
+			trimFPath := fmt.Sprintf(trim, "file_health.file_path")
+			idxExpr := fmt.Sprintf(trim, "virtual_path")
+
+			if _, err := db.Exec(fmt.Sprintf("CREATE INDEX IF NOT EXISTS idx_import_history_trim_vpath ON import_history(%s);", idxExpr)); err != nil {
+				slog.Warn("Failed to create temporary backfill index", "err", err)
+			}
+			if _, err := db.Exec(fmt.Sprintf(`UPDATE file_health
 				SET download_id = (
 					SELECT download_id FROM import_history
-					WHERE TRIM(import_history.virtual_path, '/') = TRIM(file_health.file_path, '/')
+					WHERE %s = %s
 					LIMIT 1
 				)
-				WHERE download_id IS NULL`)
+				WHERE download_id IS NULL`, trimVPath, trimFPath)); err != nil {
+				slog.Error("Failed to backfill download_id in file_health", "err", err)
+			}
+			db.Exec("DROP INDEX IF EXISTS idx_import_history_trim_vpath;")
 		}
 	}
 }
