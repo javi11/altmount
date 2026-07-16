@@ -143,6 +143,9 @@ func runMigrations(db *sql.DB, d Dialect) error {
 	}
 
 	fixDevBranchMigrationConflict(db, d)
+	if err := fixDownloadIDMigrationConflict(db, d); err != nil {
+		return fmt.Errorf("failed to reconcile migration 034: %w", err)
+	}
 
 	if err := goose.Up(db, migrationsDir); err != nil {
 		return fmt.Errorf("failed to run migrations: %w", err)
@@ -151,6 +154,80 @@ func runMigrations(db *sql.DB, d Dialect) error {
 	ensureSchemaIntegrity(db, d)
 
 	return nil
+}
+
+// fixDownloadIDMigrationConflict repairs databases where an older build added
+// file_health.download_id via ensureSchemaIntegrity without recording migration
+// 034. Without this reconciliation, migration 034 fails on the duplicate column
+// and the application enters a restart loop.
+func fixDownloadIDMigrationConflict(db *sql.DB, d Dialect) error {
+	if !hasTable(db, d, "goose_db_version") || !hasColumn(db, d, "file_health", "download_id") {
+		return nil
+	}
+
+	appliedValue := "1"
+	if d == DialectPostgres {
+		appliedValue = "true"
+	}
+
+	var applied bool
+	appliedQuery := fmt.Sprintf("SELECT EXISTS(SELECT 1 FROM goose_db_version WHERE version_id = 34 AND is_applied = %s)", appliedValue)
+	if err := db.QueryRow(appliedQuery).Scan(&applied); err != nil {
+		return fmt.Errorf("check migration state: %w", err)
+	}
+	if applied {
+		return nil
+	}
+
+	// Only reconcile the known partial-upgrade state. Recording version 034 on an
+	// older schema could cause goose to skip prerequisite migrations.
+	var currentVersion int64
+	if err := db.QueryRow(fmt.Sprintf("SELECT COALESCE(MAX(version_id), 0) FROM goose_db_version WHERE is_applied = %s", appliedValue)).Scan(&currentVersion); err != nil {
+		return fmt.Errorf("read current migration version: %w", err)
+	}
+	if currentVersion != 33 {
+		return nil
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin reconciliation: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec("CREATE INDEX IF NOT EXISTS idx_file_health_download_id ON file_health(download_id)"); err != nil {
+		return fmt.Errorf("create download_id index: %w", err)
+	}
+
+	trim := "TRIM(%s, '/')"
+	if d == DialectPostgres {
+		trim = "btrim(%s, '/')"
+	}
+	trimVPath := fmt.Sprintf(trim, "import_history.virtual_path")
+	trimFPath := fmt.Sprintf(trim, "file_health.file_path")
+	idxExpr := fmt.Sprintf(trim, "virtual_path")
+
+	if _, err := tx.Exec(fmt.Sprintf("CREATE INDEX IF NOT EXISTS idx_import_history_trim_vpath ON import_history(%s)", idxExpr)); err != nil {
+		return fmt.Errorf("create temporary backfill index: %w", err)
+	}
+	if _, err := tx.Exec(fmt.Sprintf(`UPDATE file_health
+		SET download_id = (
+			SELECT download_id FROM import_history
+			WHERE %s = %s
+			LIMIT 1
+		)
+		WHERE download_id IS NULL`, trimVPath, trimFPath)); err != nil {
+		return fmt.Errorf("backfill download_id: %w", err)
+	}
+	if _, err := tx.Exec("DROP INDEX IF EXISTS idx_import_history_trim_vpath"); err != nil {
+		return fmt.Errorf("drop temporary backfill index: %w", err)
+	}
+	insertVersion := fmt.Sprintf("INSERT INTO goose_db_version (version_id, is_applied, tstamp) VALUES (34, %s, CURRENT_TIMESTAMP)", appliedValue)
+	if _, err := tx.Exec(insertVersion); err != nil {
+		return fmt.Errorf("record migration 034: %w", err)
+	}
+
+	return tx.Commit()
 }
 
 // hasColumn checks if a column exists in a table.

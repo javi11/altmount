@@ -91,6 +91,30 @@ func TestMigration034_BackfillsDownloadID(t *testing.T) {
 		"SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_import_history_trim_vpath'").Scan(&idxCount))
 	assert.Equal(t, 0, idxCount, "temporary backfill index should be dropped by the migration")
 }
+func TestRunMigrations_ReconcilesExistingDownloadIDColumn(t *testing.T) {
+	ctx := context.Background()
+	db := openMigratedTo(t, 33)
+
+	_, err := db.ExecContext(ctx, `
+		INSERT INTO import_history (nzb_name, file_name, virtual_path, download_id)
+		VALUES ('n', 'a.mkv', '/movies/a.mkv', 'dl-a');
+		INSERT INTO file_health (file_path, status) VALUES ('movies/a.mkv', 'pending');
+		ALTER TABLE file_health ADD COLUMN download_id TEXT DEFAULT NULL;
+	`)
+	require.NoError(t, err)
+
+	require.NoError(t, runMigrations(db, DialectSQLite))
+
+	var downloadID sql.NullString
+	require.NoError(t, db.QueryRowContext(ctx,
+		"SELECT download_id FROM file_health WHERE file_path = 'movies/a.mkv'").Scan(&downloadID))
+	assert.Equal(t, sql.NullString{String: "dl-a", Valid: true}, downloadID)
+
+	var applied bool
+	require.NoError(t, db.QueryRowContext(ctx,
+		"SELECT EXISTS(SELECT 1 FROM goose_db_version WHERE version_id = 34 AND is_applied = 1)").Scan(&applied))
+	assert.True(t, applied)
+}
 
 // TestMigration034_BackfillUsesExpressionIndex is the regression guard for the
 // startup hang: it proves that the per-row lookup performed by the backfill is a
