@@ -16,6 +16,8 @@ import (
 
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/metadata"
+	metapb "github.com/javi11/altmount/internal/metadata/proto"
 )
 
 // newMinimalServiceForPersistTest builds just enough of *Service to exercise
@@ -113,6 +115,84 @@ func TestEnsurePersistentNzb_UsesOSTempQueueDir(t *testing.T) {
 	// Assert: the file actually exists at the new path
 	_, statErr := os.Stat(item.NzbPath)
 	assert.NoError(t, statErr, "moved file should exist at new path")
+}
+
+// newServiceForRegenerateTest builds a *Service with a real metadata.MetadataService so
+// regenerateNzbFile can write/read an actual .nzbz store, plus a configGetter whose
+// Database.Path resolves to a fresh configDir the test controls.
+func newServiceForRegenerateTest(t *testing.T) (svc *Service, configDir string) {
+	t.Helper()
+
+	svc = newMinimalServiceForPersistTest(t)
+	configDir = t.TempDir()
+	svc.configGetter = config.ConfigGetter(func() *config.Config {
+		return &config.Config{
+			Database: config.DatabaseConfig{
+				Path: filepath.Join(configDir, "test.db"),
+			},
+		}
+	})
+	svc.metadataService = metadata.NewMetadataService(t.TempDir())
+	return svc, configDir
+}
+
+// sampleNzbStoreForTest returns a minimal but valid *metapb.NzbStore, mirroring
+// internal/metadata/store_test.go's sampleStore().
+func sampleNzbStoreForTest() *metapb.NzbStore {
+	return &metapb.NzbStore{Files: []*metapb.NzbFileEntry{
+		{Subject: "Movie.mkv yEnc (1/1)", Poster: "p@x", Date: 1000, Groups: []string{"a.b.test"},
+			Segments: []*metapb.NzbSeg{{Id: "m1@x", Number: 1, Bytes: 1000}}},
+	}}
+}
+
+func TestEnsurePersistentNzb_RegeneratesFromStore_WhenRawFileMissing(t *testing.T) {
+	// Arrange: item.NzbPath already points inside the persistent temp queue dir (as it would
+	// after a prior successful import), but the raw file was deleted by handleProcessingSuccess.
+	queueDir := filepath.Join(os.TempDir(), ".altmount-queue")
+	require.NoError(t, os.MkdirAll(queueDir, 0755))
+	missingPath := filepath.Join(queueDir, "regen-movie.nzb")
+	t.Cleanup(func() { os.Remove(missingPath) })
+
+	item := &database.ImportQueueItem{ID: 7, NzbPath: missingPath}
+
+	svc, configDir := newServiceForRegenerateTest(t)
+
+	// The store must live at exactly the path processor.go writes it to / handleDownloadNZB
+	// reconstructs it from: configDir/.nzbs/{category}/{queueID}-{nzbBase}.nzbz.
+	storeRef := filepath.Join(configDir, ".nzbs", "7-regen-movie.nzbz")
+	require.NoError(t, svc.metadataService.Store().WriteStore(storeRef, sampleNzbStoreForTest()))
+
+	// Act
+	err := svc.ensurePersistentNzb(context.Background(), item)
+	require.NoError(t, err)
+
+	// Assert: the raw NZB now exists on disk again, still inside the persistent queue dir.
+	_, statErr := os.Stat(item.NzbPath)
+	assert.NoError(t, statErr, "regenerated file should exist on disk")
+	assert.True(t, strings.HasPrefix(item.NzbPath, queueDir),
+		"regenerated path should stay inside the persistent temp queue dir, got %q", item.NzbPath)
+
+	regenerated, err := os.ReadFile(item.NzbPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(regenerated), "Movie.mkv", "regenerated NZB should contain the file entry from the store")
+}
+
+func TestEnsurePersistentNzb_RegenerateFails_WhenNoStoreFound(t *testing.T) {
+	// Arrange: raw file missing, and no .nzbz store was ever written for this item.
+	queueDir := filepath.Join(os.TempDir(), ".altmount-queue")
+	require.NoError(t, os.MkdirAll(queueDir, 0755))
+	missingPath := filepath.Join(queueDir, "regen-nostore.nzb")
+
+	item := &database.ImportQueueItem{ID: 8, NzbPath: missingPath}
+
+	svc, _ := newServiceForRegenerateTest(t)
+
+	// Act
+	err := svc.ensurePersistentNzb(context.Background(), item)
+
+	// Assert: clear, actionable error instead of a raw "no such file" from a bare file open.
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no store was found")
 }
 
 func TestEnsurePersistentNzb_AlreadyInTempQueueDir_IsNoop(t *testing.T) {

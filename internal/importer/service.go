@@ -1019,7 +1019,14 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 	// Simple check: if path starts with persistent dir (with separator) or equals it, assume it's fine.
 	// The trailing separator prevents a false match like /tmp/.altmount-queue-other/ matching /tmp/.altmount-queue.
 	if strings.HasPrefix(absNzbPath, absNzbDir+string(os.PathSeparator)) || absNzbPath == absNzbDir {
-		return nil
+		if _, err := os.Stat(item.NzbPath); err == nil {
+			return nil
+		}
+		// The raw NZB was deleted after a prior successful import (handleProcessingSuccess
+		// removes it on purpose once the .nzbz store exists). A retry/reprocess reaches this
+		// point with a stale nzb_path, so regenerate the raw file from the store instead of
+		// failing to open a file that no longer exists.
+		return s.regenerateNzbFile(ctx, item)
 	}
 
 	if item.ID == 0 {
@@ -1072,6 +1079,79 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 	}
 
 	s.log.InfoContext(ctx, "Moved NZB to persistent storage", "old_path", oldPath, "new_path", newPath)
+	return nil
+}
+
+// regenerateNzbFile rebuilds the raw .nzb file for item from its .nzbz metadata store when the
+// raw file has been deleted (handleProcessingSuccess removes it after a successful import) but
+// the item is being reprocessed. It reconstructs the store path the same way processor.go writes
+// it and handleDownloadNZB reads it (configDir/.nzbs/{category}/{queueID}-{nzbBase}.nzbz), writes
+// the regenerated XML back into the persistent temp queue dir, and updates nzb_path in the DB.
+func (s *Service) regenerateNzbFile(ctx context.Context, item *database.ImportQueueItem) error {
+	if s.metadataService == nil {
+		return fmt.Errorf("raw NZB file is missing and no metadata service is available to regenerate it")
+	}
+
+	cfg := s.configGetter()
+	configDir := filepath.Dir(cfg.Database.Path)
+	if !filepath.IsAbs(configDir) {
+		if abs, err := filepath.Abs(configDir); err == nil {
+			configDir = abs
+		}
+	}
+
+	var categoryStr string
+	if item.Category != nil && *item.Category != "" {
+		categoryStr = strings.ReplaceAll(*item.Category, `\`, "/")
+		categoryStr = strings.Trim(categoryStr, "/")
+		for _, part := range strings.Split(categoryStr, "/") {
+			if part == ".." || part == "." {
+				categoryStr = ""
+				break
+			}
+		}
+	}
+
+	nzbBase := nzbtrim.TrimNzbExtension(filepath.Base(item.NzbPath))
+	storeRef := filepath.Join(configDir, ".nzbs", categoryStr, fmt.Sprintf("%d-%s.nzbz", item.ID, nzbBase))
+
+	nzbXML, err := s.metadataService.Store().RegenerateNZB(storeRef)
+	if err != nil {
+		return fmt.Errorf("failed to regenerate NZB from store: %w", err)
+	}
+	if nzbXML == nil {
+		return fmt.Errorf("raw NZB file is missing and no store was found at %q to regenerate it", storeRef)
+	}
+
+	nzbDir := filepath.Join(os.TempDir(), ".altmount-queue")
+	if err := os.MkdirAll(nzbDir, 0755); err != nil {
+		return fmt.Errorf("failed to create persistent NZB directory: %w", err)
+	}
+
+	ext := nzbfile.PlainExtension
+	base := nzbtrim.TrimNzbExtension(sanitizeFilename(nzbBase))
+	taken := func(p string) bool {
+		if _, err := os.Stat(p); err == nil {
+			return true
+		}
+		if existing, err := s.database.Repository.GetQueueItemByNzbPath(ctx, p); err == nil && existing != nil && existing.ID != item.ID {
+			return true
+		}
+		return false
+	}
+	newPath := persistentNzbPath(nzbDir, base, ext, item.ID, taken)
+
+	if err := os.WriteFile(newPath, nzbXML, 0644); err != nil {
+		return fmt.Errorf("failed to write regenerated NZB to %q: %w", newPath, err)
+	}
+
+	oldPath := item.NzbPath
+	item.NzbPath = newPath
+	if err := s.database.Repository.UpdateQueueItemNzbPath(ctx, item.ID, newPath); err != nil {
+		return fmt.Errorf("failed to update DB with regenerated NZB path: %w", err)
+	}
+
+	s.log.InfoContext(ctx, "Regenerated raw NZB from metadata store", "old_path", oldPath, "new_path", newPath, "store_ref", storeRef)
 	return nil
 }
 
