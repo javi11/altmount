@@ -199,6 +199,8 @@ jobs:
           build-args: |
             BUILD_DATE=${{ github.event.head_commit.timestamp }}
             VERSION=dev-${{ github.sha }}
+            COMMIT=${{ github.sha }}
+            BUILD_TIMESTAMP=${{ github.event.head_commit.timestamp }}
 
   build-dev-arm64:
     name: Build Dev Image (ARM64)
@@ -278,6 +280,8 @@ jobs:
           build-args: |
             BUILD_DATE=${{ github.event.head_commit.timestamp }}
             VERSION=dev-${{ github.sha }}
+            COMMIT=${{ github.sha }}
+            BUILD_TIMESTAMP=${{ github.event.head_commit.timestamp }}
 
   create-manifest:
     name: Create Multi-Arch Manifest

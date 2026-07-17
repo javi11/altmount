@@ -149,7 +149,7 @@ jobs:
 
   build-image-amd64:
     runs-on: ubuntu-latest
-    needs: [test, build-frontend]
+    needs: [test, build-frontend, prepare-release]
     if: ${{ github.event_name != 'workflow_dispatch' || !inputs.skip_docker }}
     permissions:
       contents: write
@@ -217,10 +217,14 @@ jobs:
           cache-to: type=gha,mode=max,scope=amd64
           provenance: false
           sbom: false
+          build-args: |
+            VERSION=${{ needs.prepare-release.outputs.version }}
+            COMMIT=${{ needs.prepare-release.outputs.commit }}
+            BUILD_TIMESTAMP=${{ github.event.head_commit.timestamp }}
 
   build-image-arm64:
     runs-on: ubuntu-24.04-arm
-    needs: [test, build-frontend]
+    needs: [test, build-frontend, prepare-release]
     if: ${{ github.event_name != 'workflow_dispatch' || !inputs.skip_docker }}
     permissions:
       contents: write
@@ -288,6 +292,10 @@ jobs:
           cache-to: type=gha,mode=max,scope=arm64
           provenance: false
           sbom: false
+          build-args: |
+            VERSION=${{ needs.prepare-release.outputs.version }}
+            COMMIT=${{ needs.prepare-release.outputs.commit }}
+            BUILD_TIMESTAMP=${{ github.event.head_commit.timestamp }}
 
   create-manifest:
     runs-on: ubuntu-latest
