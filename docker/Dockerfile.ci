@@ -49,10 +49,17 @@ COPY ./frontend/embed_docker.go ./frontend/embed_docker.go
 COPY ./frontend/dist ./frontend/dist
 
 # Build web binary with enhanced cache mount for native architecture
+# Version metadata is injected via ldflags so the running binary reports the
+# real release version instead of the "dev" default (see internal/version).
+ARG VERSION=dev
+ARG COMMIT=unknown
+ARG BUILD_TIMESTAMP=unknown
 RUN --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
     --mount=type=cache,target=/tmp/go-build-cache,sharing=locked \
     CGO_ENABLED=1 GOOS=linux \
-    go build -a -ldflags '-linkmode external -extldflags "-static"' -o altmount cmd/altmount/main.go
+    go build -a \
+    -ldflags "-linkmode external -extldflags \"-static\" -X 'github.com/javi11/altmount/internal/version.Version=${VERSION}' -X 'github.com/javi11/altmount/internal/version.GitCommit=${COMMIT}' -X 'github.com/javi11/altmount/internal/version.Timestamp=${BUILD_TIMESTAMP}'" \
+    -o altmount cmd/altmount/main.go
 
 # Final stage - use custom base image with pre-installed packages
 ARG TARGETARCH
