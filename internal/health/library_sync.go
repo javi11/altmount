@@ -654,6 +654,10 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 
 	concurrency := cfg.GetLibrarySyncConcurrency()
 
+	// Categories excluded from health checking must never be registered by the
+	// discovery pass. Resolve their mount-relative prefixes once up front.
+	excludedPrefixes := buildExcludedCategoryPrefixes(cfg)
+
 	// Create a worker pool for parallel metadata reading
 	p := pool.New().WithMaxGoroutines(concurrency)
 
@@ -668,6 +672,11 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 
 		// Capture loop variable for goroutine
 		path := mountRelativePath
+
+		// Skip files under health-excluded categories: never (re)register them.
+		if pathHasExcludedPrefix(path, excludedPrefixes) {
+			continue
+		}
 
 		p.Go(func() {
 			// Check if needs to be added or repaired
@@ -1516,6 +1525,83 @@ func (lsw *LibrarySyncWorker) getLibraryPath(metaPath string, filesInUse map[str
 	}
 
 	return nil
+}
+
+// resolveCategoryDir resolves a SABnzbd category name to its configured
+// directory, mirroring importer.Service.resolveCategoryPath semantics: an
+// explicit Dir wins; otherwise the Default category maps to DefaultCategoryDir
+// and any other category maps to its own name.
+func resolveCategoryDir(cfg *config.Config, category string) string {
+	if len(cfg.SABnzbd.Categories) == 0 {
+		if strings.EqualFold(category, config.DefaultCategoryName) {
+			return config.DefaultCategoryDir
+		}
+		return category
+	}
+
+	for _, cat := range cfg.SABnzbd.Categories {
+		if strings.EqualFold(cat.Name, category) {
+			if cat.Dir != "" {
+				return cat.Dir
+			}
+			if strings.EqualFold(category, config.DefaultCategoryName) {
+				return config.DefaultCategoryDir
+			}
+			return category
+		}
+	}
+
+	return category
+}
+
+// buildExcludedCategoryPrefixes returns the set of mount-relative, lower-cased,
+// forward-slash path prefixes (<CompleteDir>/<categoryDir>) for every category
+// listed in health.excluded_categories. Files whose mount-relative path falls
+// under one of these prefixes are skipped by the library-sync discovery pass.
+func buildExcludedCategoryPrefixes(cfg *config.Config) []string {
+	if cfg == nil {
+		return nil
+	}
+
+	names := cfg.GetHealthExcludedCategories()
+	if len(names) == 0 {
+		return nil
+	}
+
+	completeDir := strings.Trim(filepath.ToSlash(cfg.SABnzbd.CompleteDir), "/")
+
+	prefixes := make([]string, 0, len(names))
+	for _, name := range names {
+		if name == "" {
+			continue
+		}
+		dir := strings.Trim(filepath.ToSlash(resolveCategoryDir(cfg, name)), "/")
+		if dir == "" {
+			continue
+		}
+		prefix := dir
+		if completeDir != "" {
+			prefix = completeDir + "/" + dir
+		}
+		prefixes = append(prefixes, strings.ToLower(prefix))
+	}
+	return prefixes
+}
+
+// pathHasExcludedPrefix reports whether mountRelPath equals, or is nested under,
+// any of the given (already lower-cased) prefixes. Matching is on full path
+// segments so "complete/tv" does not match "complete/tv-extras/...".
+func pathHasExcludedPrefix(mountRelPath string, prefixes []string) bool {
+	if len(prefixes) == 0 {
+		return false
+	}
+	p := strings.ToLower(strings.Trim(filepath.ToSlash(mountRelPath), "/"))
+	for _, prefix := range prefixes {
+		if p == prefix || strings.HasPrefix(p, prefix+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // buildProtectedImportDirs returns the set of clean absolute paths under

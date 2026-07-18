@@ -206,6 +206,12 @@ func (c *Config) GetHealthEnabled() bool {
 	return *c.Health.Enabled
 }
 
+// GetHealthExcludedCategories returns the SABnzbd category names whose files
+// must not be registered for health checking by the library-sync pass.
+func (c *Config) GetHealthExcludedCategories() []string {
+	return c.Health.ExcludedCategories
+}
+
 // GetHealthDeleteOnCorruption reports whether confirmed corruption should delete the
 // file instead of triggering an Arr repair (health.corruption_action == "delete").
 func (c *Config) GetHealthDeleteOnCorruption() bool {

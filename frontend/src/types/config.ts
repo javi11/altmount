@@ -118,6 +118,9 @@ export interface HealthConfig {
 	verify_data?: boolean; // Verify 1 byte of data for each segment
 	read_timeout_seconds?: number; // Timeout for data verification
 	acceptable_missing_segments_percentage?: number;
+	// SABnzbd category names whose files are never registered for health checking
+	// by the library-sync discovery pass. Matching is by the category's directory.
+	excluded_categories?: string[];
 	repair: RepairConfig;
 	// What happens when the health checker or a streaming read confirms real
 	// (non-degraded) corruption: "repair" (default) triggers an Arr rescan;
