@@ -361,7 +361,12 @@ type HealthConfig struct {
 	CheckAllSegments                    *bool        `yaml:"check_all_segments" mapstructure:"check_all_segments" json:"check_all_segments,omitempty"`
 	ReadTimeoutSeconds                  int          `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds,omitempty"`
 	AcceptableMissingSegmentsPercentage float64      `yaml:"acceptable_missing_segments_percentage" mapstructure:"acceptable_missing_segments_percentage" json:"acceptable_missing_segments_percentage"`
-	Repair                              RepairConfig `yaml:"repair" mapstructure:"repair" json:"repair"`
+	// ExcludedCategories lists SABnzbd category names whose files must never be
+	// registered for health checking by the library-sync discovery pass. Matching
+	// is by the category's configured directory under CompleteDir and is
+	// case-insensitive. Empty means no categories are excluded.
+	ExcludedCategories []string     `yaml:"excluded_categories" mapstructure:"excluded_categories" json:"excluded_categories,omitempty"`
+	Repair             RepairConfig `yaml:"repair" mapstructure:"repair" json:"repair"`
 	// CorruptionAction controls what happens when the health checker or a streaming read
 	// confirms real (non-degraded) corruption: "repair" (default) triggers an Arr rescan;
 	// "delete" removes the file's metadata/NZB/health record and cleans up now-empty

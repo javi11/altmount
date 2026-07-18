@@ -86,6 +86,18 @@ export function HealthConfigSection({
 		setValidationError(validateFormData(newData));
 	};
 
+	const handleToggleExcludedCategory = (categoryName: string) => {
+		const current = formData.excluded_categories ?? [];
+		const isExcluded = current.some((name) => name.toLowerCase() === categoryName.toLowerCase());
+		const next = isExcluded
+			? current.filter((name) => name.toLowerCase() !== categoryName.toLowerCase())
+			: [...current, categoryName];
+		const newData = { ...formData, excluded_categories: next };
+		setFormData(newData);
+		setHasChanges(JSON.stringify(newData) !== JSON.stringify(config.health));
+		setValidationError(validateFormData(newData));
+	};
+
 	const handleRepairChange = (
 		field: keyof HealthConfig["repair"],
 		value: boolean | number | undefined,
@@ -402,6 +414,49 @@ export function HealthConfigSection({
 									</div>
 								</div>
 							</div>
+						</div>
+					)}
+				</div>
+
+				{/* Category Exclusions */}
+				<div className="space-y-4 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+					<div className="min-w-0">
+						<h4 className="break-words font-bold text-base-content text-sm">Excluded Categories</h4>
+						<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
+							Files under the selected categories are never registered for health checking by the
+							periodic library sync. Existing records are left untouched.
+						</p>
+					</div>
+
+					{config.sabnzbd?.categories?.length ? (
+						<div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+							{config.sabnzbd.categories.map((category) => {
+								const isExcluded = (formData.excluded_categories ?? []).some(
+									(name) => name.toLowerCase() === category.name.toLowerCase(),
+								);
+								return (
+									<label
+										key={category.name}
+										className="flex cursor-pointer items-center gap-3 rounded-xl border border-base-300/60 bg-base-100/40 p-3"
+									>
+										<input
+											type="checkbox"
+											className="checkbox checkbox-primary checkbox-sm shrink-0"
+											checked={isExcluded}
+											disabled={isReadOnly}
+											onChange={() => handleToggleExcludedCategory(category.name)}
+										/>
+										<span className="min-w-0 flex-1 break-words font-semibold text-xs">
+											{category.name}
+										</span>
+									</label>
+								);
+							})}
+						</div>
+					) : (
+						<div className="rounded-xl border border-base-300/60 bg-base-100/40 p-4 text-[11px] text-base-content/50">
+							No SABnzbd categories are configured yet. Add categories under the SABnzbd settings to
+							exclude them from health checking.
 						</div>
 					)}
 				</div>
