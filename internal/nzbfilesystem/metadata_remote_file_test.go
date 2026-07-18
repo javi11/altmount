@@ -294,6 +294,64 @@ func TestReadAtBoundsValidation(t *testing.T) {
 	}
 }
 
+// TestReadAtContextAfterClose verifies that ReadAtContext returns ErrFileClosed
+// instead of panicking once Close() has released mvf.meta. Regression test for
+// a nil-pointer dereference where mvf.meta was read unlocked before mvf.mu was
+// acquired, racing with Close() nil-ing it out under the lock.
+func TestReadAtContextAfterClose(t *testing.T) {
+	mvf := &MetadataVirtualFile{
+		meta: &fileHandleMeta{
+			FileSize: 1000,
+		},
+	}
+
+	if err := mvf.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	buf := make([]byte, 100)
+	n, err := mvf.ReadAtContext(context.Background(), buf, 0)
+	if err != ErrFileClosed {
+		t.Errorf("ReadAtContext() after Close() error = %v, want ErrFileClosed", err)
+	}
+	if n != 0 {
+		t.Errorf("ReadAtContext() after Close() n = %d, want 0", n)
+	}
+}
+
+// TestReadAtContextConcurrentClose races ReadAtContext against Close() to
+// reproduce the interleaving that produced the original nil-pointer panic:
+// ReadAtContext must never dereference mvf.meta after it observes nil, and
+// Close() must never race unsynchronized with a held mvf.meta read. Run with
+// -race to catch any regression.
+func TestReadAtContextConcurrentClose(t *testing.T) {
+	for range 200 {
+		mvf := &MetadataVirtualFile{
+			meta: &fileHandleMeta{
+				FileSize: 1000,
+			},
+		}
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+
+		go func() {
+			defer wg.Done()
+			buf := make([]byte, 100)
+			for j := range 20 {
+				_, _ = mvf.ReadAtContext(context.Background(), buf, int64(j%10)*100)
+			}
+		}()
+
+		go func() {
+			defer wg.Done()
+			_ = mvf.Close()
+		}()
+
+		wg.Wait()
+	}
+}
+
 // TestReadAtNoPoolManager tests ReadAt when pool manager is nil
 func TestReadAtNoPoolManager(t *testing.T) {
 	segments := []*metapb.SegmentData{

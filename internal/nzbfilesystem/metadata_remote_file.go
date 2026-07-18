@@ -1001,6 +1001,10 @@ func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 	mvf.mu.Lock()
 	defer mvf.mu.Unlock()
 
+	if mvf.meta == nil {
+		return 0, ErrFileClosed
+	}
+
 	for n < len(p) {
 		if err := mvf.ensureReader(); err != nil {
 			return n, err
@@ -1067,12 +1071,19 @@ func (mvf *MetadataVirtualFile) ReadAtContext(readCtx context.Context, p []byte,
 	if off < 0 {
 		return 0, ErrNegativeOffset
 	}
-	if off >= mvf.meta.FileSize {
-		return 0, io.EOF
-	}
 
 	mvf.mu.Lock()
 	defer mvf.mu.Unlock()
+
+	// mvf.meta is nil-ed by Close() under mvf.mu — a concurrent Close (e.g. from
+	// the FUSE handle release path) can complete between an unlocked check and
+	// lock acquisition, so this must be checked here, not before Lock().
+	if mvf.meta == nil {
+		return 0, ErrFileClosed
+	}
+	if off >= mvf.meta.FileSize {
+		return 0, io.EOF
+	}
 
 	// Determine whether this offset can reuse the shared reader.
 	// Shared path: offset matches the next expected sequential position, OR

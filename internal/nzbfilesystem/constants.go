@@ -62,6 +62,7 @@ var (
 	ErrNoCipherConfig      = errors.New("no cipher configured for encryption")
 	ErrNoEncryptionParams  = errors.New("no NZB data available for encryption parameters")
 	ErrFileIsCorrupted     = errors.New("file is corrupted, there are some missing segments")
+	ErrFileClosed          = errors.New("file closed")
 )
 
 // Database operation error message templates
