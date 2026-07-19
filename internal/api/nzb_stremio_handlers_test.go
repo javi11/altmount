@@ -1,42 +1,69 @@
 package api
 
 import (
+	"context"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/gofiber/fiber/v2"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/importer/parser/fileinfo"
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/testsupport/nzbbuild"
 	"github.com/javi11/nzbparser"
 	"github.com/stretchr/testify/require"
+	"github.com/valyala/fasthttp"
 )
 
-func TestBuildStremioStreamsReturnsEverySeasonPackFileWithFilenameIdentity(t *testing.T) {
+func TestBuildStremioStreamsReturnsSingleFileWithFilenameIdentity(t *testing.T) {
+	server, item := newStremioStreamsTestServer(t, []string{
+		"The.Movie.2024.1080p.mkv",
+	})
+
+	streams, err := server.buildStremioStreams(context.Background(), item, "https://alt.example", "download-key", "Release.Name", nil)
+	require.NoError(t, err)
+	require.Len(t, streams, 1)
+
+	stream := streams[0]
+	require.Equal(t, "The.Movie.2024.1080p.mkv", stream.Title)
+	require.Equal(t, "The.Movie.2024.1080p.mkv", stream.Name)
+	require.Contains(t, stream.URL, "download_key=download-key")
+
+	parsedURL, err := url.Parse(stream.URL)
+	require.NoError(t, err)
+	require.Equal(t, "/api/files/stream", parsedURL.Path)
+	require.Equal(t, "/complete/TV/Release.Name/The.Movie.2024.1080p.mkv", parsedURL.Query().Get("path"))
+}
+
+// TestBuildStremioStreamsRejectsMultiEpisodePackWithoutSelector guards the core
+// fix: a season pack resolved without episode context must NOT silently return
+// the first episode — it returns errStremioEpisodeAmbiguous instead.
+func TestBuildStremioStreamsRejectsMultiEpisodePackWithoutSelector(t *testing.T) {
 	server, item := newStremioStreamsTestServer(t, []string{
 		"Show.S01E01.mkv",
 		"Show.S01E02.mkv",
 		"Show.S01E03.mkv",
 	})
 
-	streams, err := server.buildStremioStreams(item, "https://alt.example", "download-key", "Release.Name", nil)
+	streams, err := server.buildStremioStreams(context.Background(), item, "https://alt.example", "download-key", "Release.Name", nil)
+	require.ErrorIs(t, err, errStremioEpisodeAmbiguous)
+	require.Nil(t, streams)
+}
+
+// TestBuildStremioStreamsAllowsMultiPartMovieWithoutSelector ensures the
+// ambiguity guard does not break movies split into multiple non-episode files.
+func TestBuildStremioStreamsAllowsMultiPartMovieWithoutSelector(t *testing.T) {
+	server, item := newStremioStreamsTestServer(t, []string{
+		"The.Movie.2024.1080p.mkv",
+		"The.Movie.2024.1080p-sample.mkv",
+	})
+
+	streams, err := server.buildStremioStreams(context.Background(), item, "https://alt.example", "download-key", "Release.Name", nil)
 	require.NoError(t, err)
-	require.Len(t, streams, 3)
-
-	for i, stream := range streams {
-		expectedName := []string{"Show.S01E01.mkv", "Show.S01E02.mkv", "Show.S01E03.mkv"}[i]
-		require.Equal(t, expectedName, stream.Title)
-		require.Equal(t, expectedName, stream.Name)
-		require.Contains(t, stream.URL, "download_key=download-key")
-
-		parsedURL, err := url.Parse(stream.URL)
-		require.NoError(t, err)
-		require.Equal(t, "/api/files/stream", parsedURL.Path)
-		require.Equal(t, "/complete/TV/Release.Name/"+expectedName, parsedURL.Query().Get("path"))
-	}
+	require.Len(t, streams, 2)
 }
 
 func TestBuildStremioStreamsFiltersSeasonPackByEpisodeSelector(t *testing.T) {
@@ -47,7 +74,7 @@ func TestBuildStremioStreamsFiltersSeasonPackByEpisodeSelector(t *testing.T) {
 	})
 
 	selector := &stremioEpisodeSelector{Season: 1, Episode: 2}
-	streams, err := server.buildStremioStreams(item, "https://alt.example", "download-key", "Release.Name", selector)
+	streams, err := server.buildStremioStreams(context.Background(), item, "https://alt.example", "download-key", "Release.Name", selector)
 	require.NoError(t, err)
 	require.Len(t, streams, 1)
 	require.Equal(t, "Show.S01E02.mkv", streams[0].Name)
@@ -61,7 +88,7 @@ func TestBuildStremioStreamsFindsMediaFilesInNestedSeasonPackDirectories(t *test
 	})
 
 	selector := &stremioEpisodeSelector{Season: 1, Episode: 2}
-	streams, err := server.buildStremioStreams(item, "https://alt.example", "download-key", "Release.Name", selector)
+	streams, err := server.buildStremioStreams(context.Background(), item, "https://alt.example", "download-key", "Release.Name", selector)
 	require.NoError(t, err)
 	require.Len(t, streams, 1)
 	require.Equal(t, "Show.S01E02.mkv", streams[0].Name)
@@ -77,7 +104,7 @@ func TestBuildStremioStreamsReturnsEmptySliceWhenSelectorDoesNotMatch(t *testing
 	})
 
 	selector := &stremioEpisodeSelector{Season: 1, Episode: 2}
-	streams, err := server.buildStremioStreams(item, "https://alt.example", "download-key", "Release.Name", selector)
+	streams, err := server.buildStremioStreams(context.Background(), item, "https://alt.example", "download-key", "Release.Name", selector)
 	require.NoError(t, err)
 	require.NotNil(t, streams)
 	require.Empty(t, streams)
@@ -92,6 +119,93 @@ func TestStremioEpisodeSelectorMatchesCommonEpisodeFilenameForms(t *testing.T) {
 	require.True(t, selector.matches("Show.S01E01E02.mkv"))
 	require.False(t, selector.matches("Show.S01E01.mkv"))
 	require.False(t, selector.matches("Show.S02E02.mkv"))
+}
+
+// TestStremioEpisodeSelectorMatchesSeasonInDirectoryAndSpelledForms covers the
+// hardened fallback: the season is established by a separate token (often the
+// parent directory) while the filename carries only an episode token.
+func TestStremioEpisodeSelectorMatchesSeasonInDirectoryAndSpelledForms(t *testing.T) {
+	selector := &stremioEpisodeSelector{Season: 1, Episode: 5}
+
+	// season from directory, episode-only in filename
+	require.True(t, selector.matches("Season 01/Show E05.mkv"))
+	require.True(t, selector.matches("S01/Show.E05.mkv"))
+	require.False(t, selector.matches("Series 1/Show - 5.mkv")) // "- 5" carries no episode marker
+	require.True(t, selector.matches("Season 1/Show.Episode.5.mkv"))
+	// explicit combined marker is authoritative and not overridden by the fallback
+	require.True(t, selector.matches("Season 01/Show.S01E05.mkv"))
+	require.False(t, selector.matches("Season 02/Show E05.mkv")) // season mismatch
+	require.False(t, selector.matches("Season 01/Show E06.mkv")) // episode mismatch
+	require.False(t, selector.matches("Show.S02E05.mkv"))        // explicit marker, wrong season
+}
+
+func TestParseStremioContentID(t *testing.T) {
+	tests := []struct {
+		raw     string
+		imdb    string
+		season  int
+		episode int
+	}{
+		{"tt1234567", "tt1234567", 0, 0},
+		{"tt1234567:1:5", "tt1234567", 1, 5},
+		{"tt1234567:1", "tt1234567", 1, 0},
+		{"tt1234567:x:5", "tt1234567", 0, 5},
+		{"", "", 0, 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.raw, func(t *testing.T) {
+			imdb, season, episode := parseStremioContentID(tc.raw)
+			require.Equal(t, tc.imdb, imdb)
+			require.Equal(t, tc.season, season)
+			require.Equal(t, tc.episode, episode)
+		})
+	}
+}
+
+func TestCountDistinctEpisodes(t *testing.T) {
+	require.Equal(t, 3, countDistinctEpisodes([]string{"Show.S01E01.mkv", "Show.S01E02.mkv", "Show.S01E03.mkv"}))
+	require.Equal(t, 1, countDistinctEpisodes([]string{"Show.S01E01.mkv"}))
+	require.Equal(t, 0, countDistinctEpisodes([]string{"The.Movie.2024.mkv", "The.Movie.2024-sample.mkv"}))
+	// duplicate episode identity collapses to one
+	require.Equal(t, 1, countDistinctEpisodes([]string{"Season 01/Show.S01E01.mkv", "Show.1x01.mkv"}))
+}
+
+// withQuery builds a Fiber context whose request carries the given raw query
+// string, so request-parsing helpers can be exercised without a live server.
+func withQuery(t *testing.T, rawQuery string) (*fiber.Ctx, func()) {
+	t.Helper()
+	app := fiber.New()
+	fctx := &fasthttp.RequestCtx{}
+	fctx.Request.SetRequestURI("/?" + rawQuery)
+	ctx := app.AcquireCtx(fctx)
+	return ctx, func() { app.ReleaseCtx(ctx) }
+}
+
+func TestStremioEpisodeSelectorFromRequest(t *testing.T) {
+	nzbURL := url.QueryEscape("http://indexer.example/getnzb?id=abc&season=4&episode=8")
+
+	tests := []struct {
+		name  string
+		query string
+		want  *stremioEpisodeSelector
+	}{
+		{"explicit season/episode", "season=1&episode=5", &stremioEpisodeSelector{Season: 1, Episode: 5}},
+		{"combined id", "id=tt1234567:2:7", &stremioEpisodeSelector{Season: 2, Episode: 7}},
+		{"combined stremio_id", "stremio_id=tt1234567:3:9", &stremioEpisodeSelector{Season: 3, Episode: 9}},
+		{"season/episode embedded in nzb_url", "nzb_url=" + nzbURL, &stremioEpisodeSelector{Season: 4, Episode: 8}},
+		{"explicit beats id", "season=1&episode=2&id=tt1234567:5:6", &stremioEpisodeSelector{Season: 1, Episode: 2}},
+		{"movie id yields nil", "id=tt1234567", nil},
+		{"episode without season yields nil", "episode=5", nil},
+		{"nothing yields nil", "", nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, release := withQuery(t, tc.query)
+			defer release()
+			got := stremioEpisodeSelectorFromRequest(ctx)
+			require.Equal(t, tc.want, got)
+		})
+	}
 }
 
 func newStremioStreamsTestServer(t *testing.T, names []string) (*Server, *database.ImportQueueItem) {

@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -46,7 +47,17 @@ var (
 	stremioSeasonEpisodePattern = regexp.MustCompile(`(?i)s0*(\d{1,2})((?:[ ._-]*e0*\d{1,3})+)`)
 	stremioEpisodeOnlyPattern   = regexp.MustCompile(`(?i)e0*(\d{1,3})`)
 	stremioXEpisodePattern      = regexp.MustCompile(`(?i)(?:^|[^0-9])0*(\d{1,2})x0*(\d{1,3})(?:[^0-9]|$)`)
+	// Looser, boundary-anchored season/episode markers used only as a fallback
+	// when a filename (including its parent directory) carries no explicit
+	// combined SxxExx / NxNN token — e.g. "Season 01/Show E05.mkv".
+	stremioSeasonContextPattern  = regexp.MustCompile(`(?i)\b(?:season|series|s)[ ._-]*0*(\d{1,2})`)
+	stremioEpisodeContextPattern = regexp.MustCompile(`(?i)\b(?:episode|ep|e)[ ._-]*0*(\d{1,3})`)
 )
+
+// errStremioEpisodeAmbiguous is returned by buildStremioStreams when a
+// multi-episode release is resolved without any episode context. Callers turn
+// it into a clear client error instead of silently serving the first episode.
+var errStremioEpisodeAmbiguous = errors.New("stremio: episode not specified for a multi-episode release")
 
 type stremioEpisodeSelector struct {
 	Season  int
@@ -91,6 +102,7 @@ type StremioStreamsResponse struct {
 //	@Param			timeout			formData	int		false	"Processing timeout in seconds (default: 300)"
 //	@Param			season			formData	int		false	"Season number for selecting one episode from a season pack"
 //	@Param			episode			formData	int		false	"Episode number for selecting one episode from a season pack"
+//	@Param			id				formData	string	false	"Stremio content id (e.g. tt1234567:1:5) as an alternative to season/episode"
 //	@Success		200	{object}	StremioStreamsResponse
 //	@Failure		400	{object}	APIResponse
 //	@Failure		401	{object}	APIResponse
@@ -324,8 +336,11 @@ func (s *Server) waitAndRespond(c *fiber.Ctx, itemID int64, baseURL, downloadKey
 
 	switch current.Status {
 	case database.QueueStatusCompleted:
-		streams, err := s.buildStremioStreams(current, baseURL, downloadKey, nzbName, selector)
+		streams, err := s.buildStremioStreams(ctx, current, baseURL, downloadKey, nzbName, selector)
 		if err != nil {
+			if errors.Is(err, errStremioEpisodeAmbiguous) {
+				return respondEpisodeAmbiguous(c)
+			}
 			return RespondInternalError(c, "Failed to list output media files", err.Error())
 		}
 		return c.JSON(StremioStreamsResponse{
@@ -344,7 +359,7 @@ func (s *Server) waitAndRespond(c *fiber.Ctx, itemID int64, baseURL, downloadKey
 		// If the item is already processing and has a storage path, the streamable
 		// event fired before we subscribed — return the streams immediately.
 		if current.StoragePath != nil && *current.StoragePath != "" {
-			if streams, err := s.buildStremioStreams(current, baseURL, downloadKey, nzbName, selector); err == nil && len(streams) > 0 {
+			if streams, err := s.buildStremioStreams(ctx, current, baseURL, downloadKey, nzbName, selector); err == nil && len(streams) > 0 {
 				return c.JSON(StremioStreamsResponse{
 					Streams:     streams,
 					QueueItemID: current.ID,
@@ -373,7 +388,7 @@ func (s *Server) waitAndRespond(c *fiber.Ctx, itemID int64, baseURL, downloadKey
 				// post-processing (symlinks, STRM, health scheduling) completes.
 				if update.StoragePath != "" {
 					fakeItem := &database.ImportQueueItem{ID: itemID, StoragePath: &update.StoragePath}
-					if streams, err := s.buildStremioStreams(fakeItem, baseURL, downloadKey, nzbName, selector); err == nil && len(streams) > 0 {
+					if streams, err := s.buildStremioStreams(ctx, fakeItem, baseURL, downloadKey, nzbName, selector); err == nil && len(streams) > 0 {
 						return c.JSON(StremioStreamsResponse{
 							Streams:     streams,
 							QueueItemID: itemID,
@@ -387,8 +402,11 @@ func (s *Server) waitAndRespond(c *fiber.Ctx, itemID int64, baseURL, downloadKey
 				if err != nil {
 					return RespondInternalError(c, "Failed to fetch completed item", err.Error())
 				}
-				streams, err := s.buildStremioStreams(item, baseURL, downloadKey, nzbName, selector)
+				streams, err := s.buildStremioStreams(ctx, item, baseURL, downloadKey, nzbName, selector)
 				if err != nil {
+					if errors.Is(err, errStremioEpisodeAmbiguous) {
+						return respondEpisodeAmbiguous(c)
+					}
 					return RespondInternalError(c, "Failed to list output media files", err.Error())
 				}
 				return c.JSON(StremioStreamsResponse{
@@ -413,8 +431,12 @@ func (s *Server) waitAndRespond(c *fiber.Ctx, itemID int64, baseURL, downloadKey
 }
 
 // buildStremioStreams resolves the virtual paths from a completed queue item and
-// returns Stremio stream objects for all media files in the NZB output.
-func (s *Server) buildStremioStreams(item *database.ImportQueueItem, baseURL, downloadKey, nzbName string, selector *stremioEpisodeSelector) ([]StremioStream, error) {
+// returns Stremio stream objects for the media files in the NZB output. When a
+// selector is provided, only files matching the requested episode are returned.
+// When no selector is provided and the output is a multi-episode pack, it returns
+// errStremioEpisodeAmbiguous so callers can respond with a clear error instead of
+// silently serving the first episode.
+func (s *Server) buildStremioStreams(ctx context.Context, item *database.ImportQueueItem, baseURL, downloadKey, nzbName string, selector *stremioEpisodeSelector) ([]StremioStream, error) {
 	if item.StoragePath == nil || *item.StoragePath == "" {
 		return nil, fmt.Errorf("completed queue item %d has no storage path", item.ID)
 	}
@@ -439,6 +461,14 @@ func (s *Server) buildStremioStreams(item *database.ImportQueueItem, baseURL, do
 		return nil, fmt.Errorf("failed to list directory %q: %w", storagePath, err)
 	}
 
+	// Without episode context, refuse to guess which episode of a multi-episode
+	// pack to serve — returning the first file would silently play the wrong one.
+	if selector == nil && countDistinctEpisodes(files) > 1 {
+		slog.WarnContext(ctx, "Stremio release is a multi-episode pack but no episode was specified",
+			"nzb_name", nzbName, "queue_id", item.ID, "file_count", len(files))
+		return nil, errStremioEpisodeAmbiguous
+	}
+
 	streams := make([]StremioStream, 0, len(files))
 	for _, name := range files {
 		if selector != nil && !selector.matches(name) {
@@ -448,7 +478,22 @@ func (s *Server) buildStremioStreams(item *database.ImportQueueItem, baseURL, do
 		streams = append(streams, stremioStreamFromPath(virtualPath, baseURL, downloadKey))
 	}
 
+	if selector != nil && len(streams) == 0 {
+		slog.WarnContext(ctx, "No media file in Stremio release matched the requested episode",
+			"nzb_name", nzbName, "queue_id", item.ID,
+			"season", selector.Season, "episode", selector.Episode,
+			"available_files", files)
+	}
+
 	return streams, nil
+}
+
+// respondEpisodeAmbiguous returns a clear client error when a multi-episode
+// release is requested without episode context, so the caller does not silently
+// play the first episode.
+func respondEpisodeAmbiguous(c *fiber.Ctx) error {
+	return RespondBadRequest(c, "Episode not specified",
+		"This release is a multi-episode pack; provide season and episode (or a Stremio id like tt1234567:1:5).")
 }
 
 func (s *Server) listStremioMediaFiles(storagePath string) ([]string, error) {
@@ -542,20 +587,76 @@ func deriveNzbNameFromContent(nzbData []byte) string {
 	return sanitizeFilename(bestName)
 }
 
-func stremioEpisodeSelectorFromRequest(c *fiber.Ctx) *stremioEpisodeSelector {
-	season, okSeason := positiveIntFormOrQuery(c, "season")
-	episode, okEpisode := positiveIntFormOrQuery(c, "episode")
-	if !okSeason || !okEpisode {
-		return nil
+// parseStremioContentID parses a Stremio content id of the form "tt1234567"
+// (movie) or "tt1234567:1:5" (series, season:episode). It returns the imdb id
+// and the season/episode numbers, which are 0 when absent or unparseable.
+func parseStremioContentID(rawID string) (imdbID string, season, episode int) {
+	parts := strings.SplitN(rawID, ":", 3)
+	imdbID = strings.TrimSpace(parts[0])
+	if len(parts) >= 2 {
+		if v, err := strconv.Atoi(strings.TrimSpace(parts[1])); err == nil {
+			season = v
+		}
 	}
-	return &stremioEpisodeSelector{Season: season, Episode: episode}
+	if len(parts) >= 3 {
+		if v, err := strconv.Atoi(strings.TrimSpace(parts[2])); err == nil {
+			episode = v
+		}
+	}
+	return imdbID, season, episode
+}
+
+// stremioEpisodeSelectorFromRequest derives the requested season/episode from
+// the request, trying several sources so proxies (e.g. AIOStreams) can forward
+// episode context in whatever form they support. Priority:
+//  1. explicit `season` + `episode` (form or query);
+//  2. a combined Stremio id via `id` / `stremio_id` (form or query), e.g. tt123:1:5;
+//  3. `season`/`episode` embedded in the `nzb_url` query string.
+//
+// Returns nil only when none of the sources yield a positive season+episode.
+func stremioEpisodeSelectorFromRequest(c *fiber.Ctx) *stremioEpisodeSelector {
+	// 1. Explicit discrete fields.
+	if season, okSeason := positiveIntFormOrQuery(c, "season"); okSeason {
+		if episode, okEpisode := positiveIntFormOrQuery(c, "episode"); okEpisode {
+			return &stremioEpisodeSelector{Season: season, Episode: episode}
+		}
+	}
+
+	// 2. Combined Stremio content id.
+	for _, key := range []string{"id", "stremio_id"} {
+		if raw := formOrQuery(c, key); raw != "" {
+			if _, season, episode := parseStremioContentID(raw); season > 0 && episode > 0 {
+				return &stremioEpisodeSelector{Season: season, Episode: episode}
+			}
+		}
+	}
+
+	// 3. season/episode embedded in the nzb_url query string.
+	if nzbURL := formOrQuery(c, "nzb_url"); nzbURL != "" {
+		if u, err := url.Parse(nzbURL); err == nil {
+			q := u.Query()
+			if season, sErr := strconv.Atoi(q.Get("season")); sErr == nil && season > 0 {
+				if episode, eErr := strconv.Atoi(q.Get("episode")); eErr == nil && episode > 0 {
+					return &stremioEpisodeSelector{Season: season, Episode: episode}
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// formOrQuery returns the value for key from the request form, falling back to
+// the URL query string.
+func formOrQuery(c *fiber.Ctx, key string) string {
+	if v := c.FormValue(key); v != "" {
+		return v
+	}
+	return c.Query(key)
 }
 
 func positiveIntFormOrQuery(c *fiber.Ctx, key string) (int, bool) {
-	value := c.FormValue(key)
-	if value == "" {
-		value = c.Query(key)
-	}
+	value := formOrQuery(c, key)
 	if value == "" {
 		return 0, false
 	}
@@ -566,12 +667,52 @@ func positiveIntFormOrQuery(c *fiber.Ctx, key string) (int, bool) {
 	return parsed, true
 }
 
+// parseEpisodeFromName extracts a (season, episode) pair from an explicit
+// combined marker (SxxExx or NxNN) in name. It returns ok=false when the name
+// carries no such marker.
+func parseEpisodeFromName(name string) (season, episode int, ok bool) {
+	if m := stremioSeasonEpisodePattern.FindStringSubmatch(name); m != nil {
+		s, err := strconv.Atoi(m[1])
+		if err == nil {
+			if em := stremioEpisodeOnlyPattern.FindStringSubmatch(m[2]); em != nil {
+				if e, err := strconv.Atoi(em[1]); err == nil {
+					return s, e, true
+				}
+			}
+		}
+	}
+	if m := stremioXEpisodePattern.FindStringSubmatch(name); m != nil {
+		s, sErr := strconv.Atoi(m[1])
+		e, eErr := strconv.Atoi(m[2])
+		if sErr == nil && eErr == nil {
+			return s, e, true
+		}
+	}
+	return 0, 0, false
+}
+
+// countDistinctEpisodes returns how many of the given media files parse to a
+// distinct season+episode via an explicit marker. Files with no recognizable
+// marker are ignored, so a movie (with optional samples/extras) counts as 0 or 1.
+func countDistinctEpisodes(files []string) int {
+	seen := make(map[[2]int]struct{})
+	for _, name := range files {
+		if season, episode, ok := parseEpisodeFromName(name); ok {
+			seen[[2]int{season, episode}] = struct{}{}
+		}
+	}
+	return len(seen)
+}
+
 func (s *stremioEpisodeSelector) matches(filename string) bool {
 	if s == nil || s.Season <= 0 || s.Episode <= 0 {
 		return true
 	}
 
+	// Primary: explicit combined SxxExx / SxxExxExx markers.
+	hasExplicitMarker := false
 	for _, match := range stremioSeasonEpisodePattern.FindAllStringSubmatch(filename, -1) {
+		hasExplicitMarker = true
 		season, err := strconv.Atoi(match[1])
 		if err != nil || season != s.Season {
 			continue
@@ -584,7 +725,9 @@ func (s *stremioEpisodeSelector) matches(filename string) bool {
 		}
 	}
 
+	// Primary: NxNN (e.g. 1x05).
 	for _, match := range stremioXEpisodePattern.FindAllStringSubmatch(filename, -1) {
+		hasExplicitMarker = true
 		season, seasonErr := strconv.Atoi(match[1])
 		episode, episodeErr := strconv.Atoi(match[2])
 		if seasonErr == nil && episodeErr == nil && season == s.Season && episode == s.Episode {
@@ -592,5 +735,28 @@ func (s *stremioEpisodeSelector) matches(filename string) bool {
 		}
 	}
 
+	// If the name carried an explicit combined marker, trust only that — never
+	// fall back to looser matching (which could treat S02E05 as S01E05).
+	if hasExplicitMarker {
+		return false
+	}
+
+	// Fallback: the season is established by a separate token (often the parent
+	// directory, e.g. "Season 01/Show E05.mkv") plus an episode-only token.
+	seasonMatched := false
+	for _, m := range stremioSeasonContextPattern.FindAllStringSubmatch(filename, -1) {
+		if v, err := strconv.Atoi(m[1]); err == nil && v == s.Season {
+			seasonMatched = true
+			break
+		}
+	}
+	if !seasonMatched {
+		return false
+	}
+	for _, m := range stremioEpisodeContextPattern.FindAllStringSubmatch(filename, -1) {
+		if v, err := strconv.Atoi(m[1]); err == nil && v == s.Episode {
+			return true
+		}
+	}
 	return false
 }

@@ -37,6 +37,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.20.0
 	github.com/stretchr/testify v1.11.1
+	github.com/valyala/fasthttp v1.51.0
 	github.com/winfsp/cgofuse v1.6.0
 	golang.org/x/crypto v0.46.0
 	golang.org/x/net v0.48.0
@@ -264,7 +265,6 @@ require (
 	github.com/uudashr/gocognit v1.2.0 // indirect
 	github.com/uudashr/iface v1.4.1 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
-	github.com/valyala/fasthttp v1.51.0 // indirect
 	github.com/valyala/tcplisten v1.0.0 // indirect
 	github.com/xdg-go/pbkdf2 v1.0.0 // indirect
 	github.com/xdg-go/scram v1.1.2 // indirect
