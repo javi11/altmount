@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"crypto/subtle"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -140,23 +141,7 @@ func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 	rawID, _ := url.PathUnescape(c.Params("id"))
 
 	// Parse Stremio ID: tt1234567 (movie) or tt1234567:season:episode (series)
-	var season, episode int
-	parts := strings.SplitN(rawID, ":", 3)
-	imdbID := parts[0]
-	if len(parts) >= 2 {
-		val, err := strconv.Atoi(parts[1])
-		if err != nil {
-			return emptyStreamsResponse(c)
-		}
-		season = val
-	}
-	if len(parts) >= 3 {
-		val, err := strconv.Atoi(parts[2])
-		if err != nil {
-			return emptyStreamsResponse(c)
-		}
-		episode = val
-	}
+	imdbID, season, episode := parseStremioContentID(rawID)
 
 	if !strings.HasPrefix(imdbID, "tt") {
 		return emptyStreamsResponse(c)
@@ -368,7 +353,7 @@ func (s *Server) handleStremioAddonPlay(c *fiber.Ctx) error {
 			cacheValid = time.Since(*prev.CompletedAt) < time.Duration(ttlHours)*time.Hour
 		}
 		if cacheValid {
-			if streams, err := s.buildStremioStreams(prev, baseURL, key, nzbName, selector); err == nil && len(streams) > 0 {
+			if streams, err := s.buildStremioStreams(ctx, prev, baseURL, key, nzbName, selector); err == nil && len(streams) > 0 {
 				slog.InfoContext(ctx, "Returning cached Stremio stream for Prowlarr NZB",
 					"nzb_name", nzbName)
 				return c.Redirect(streams[0].URL, fiber.StatusFound)
@@ -478,8 +463,14 @@ func (s *Server) waitAndRedirectToStream(c *fiber.Ctx, itemID int64, baseURL, do
 	}
 
 	redirectToFirst := func(item *database.ImportQueueItem) error {
-		streams, err := s.buildStremioStreams(item, baseURL, downloadKey, nzbName, selector)
-		if err != nil || len(streams) == 0 {
+		streams, err := s.buildStremioStreams(ctx, item, baseURL, downloadKey, nzbName, selector)
+		if err != nil {
+			if errors.Is(err, errStremioEpisodeAmbiguous) {
+				return respondEpisodeAmbiguous(c)
+			}
+			return RespondServiceUnavailable(c, "No streams available", "")
+		}
+		if len(streams) == 0 {
 			return RespondServiceUnavailable(c, "No streams available", "")
 		}
 		return c.Redirect(streams[0].URL, fiber.StatusFound)
@@ -494,7 +485,7 @@ func (s *Server) waitAndRedirectToStream(c *fiber.Ctx, itemID int64, baseURL, do
 		// If the item is already processing and has a storage path, the streamable
 		// event fired before we subscribed — redirect immediately.
 		if current.StoragePath != nil && *current.StoragePath != "" {
-			if streams, err := s.buildStremioStreams(current, baseURL, downloadKey, nzbName, selector); err == nil && len(streams) > 0 {
+			if streams, err := s.buildStremioStreams(ctx, current, baseURL, downloadKey, nzbName, selector); err == nil && len(streams) > 0 {
 				return c.Redirect(streams[0].URL, fiber.StatusFound)
 			}
 		}
@@ -517,7 +508,7 @@ func (s *Server) waitAndRedirectToStream(c *fiber.Ctx, itemID int64, baseURL, do
 				// Redirect as soon as the file is accessible in the VFS — before post-processing.
 				if update.StoragePath != "" {
 					fakeItem := &database.ImportQueueItem{ID: itemID, StoragePath: &update.StoragePath}
-					if streams, err := s.buildStremioStreams(fakeItem, baseURL, downloadKey, nzbName, selector); err == nil && len(streams) > 0 {
+					if streams, err := s.buildStremioStreams(ctx, fakeItem, baseURL, downloadKey, nzbName, selector); err == nil && len(streams) > 0 {
 						return c.Redirect(streams[0].URL, fiber.StatusFound)
 					}
 				}

@@ -187,10 +187,14 @@ Content-Type: multipart/form-data
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `download_key` | Yes | SHA-256 of your AltMount API key |
-| `file` | Yes | The `.nzb` file (max 100 MB) |
+| `download_key` | Yes | SHA-256 of your AltMount API key (alternatively, send the raw key in the `X-Api-Key` header) |
+| `file` | Conditional | The `.nzb` file (max 100 MB). Provide this **or** `nzb_url` |
+| `nzb_url` | Conditional | URL AltMount downloads the NZB from. Provide this **or** `file` |
 | `category` | No | Download category (e.g. `movies`, `tv`) |
 | `timeout` | No | Seconds to wait before returning 408 (default: `300`) |
+| `season` | No | Season number — see [Selecting one episode from a season pack](#selecting-one-episode-from-a-season-pack) |
+| `episode` | No | Episode number (pair with `season`) |
+| `id` | No | Stremio content id (e.g. `tt1234567:1:5`) as an alternative to `season`/`episode` |
 
 **Success response (`200 OK`):**
 
@@ -236,6 +240,34 @@ builder.defineStreamHandler(async ({ type, id }) => {
 > (`nzb_ttl_hours`). Submitting the same filename a second time returns cached stream URLs
 > immediately without re-downloading.
 
+### Selecting one episode from a season pack
+
+When a series request resolves to a **season pack** (a single NZB containing every
+episode), AltMount needs to know which episode to serve — otherwise it cannot tell the
+requested episode from the others in the pack.
+
+Provide the episode context in any one of these forms (checked in this order):
+
+1. explicit `season` **and** `episode` fields;
+2. a combined Stremio content id via `id` (or `stremio_id`), e.g. `tt1234567:1:5`;
+3. `season`/`episode` query parameters embedded in the `nzb_url` value.
+
+AltMount then returns only the matching episode's stream. If a multi-episode pack is
+submitted **without** any episode context, AltMount responds with `400 Bad Request`
+(`"Episode not specified"`) rather than silently returning the first episode — so make
+sure your addon forwards the season/episode (or `id`) from the Stremio request.
+
+Single-file releases (movies, single-episode releases) do not need this and are unaffected.
+
+**AIOStreams / proxy example** — append the Stremio id when handing the NZB to AltMount:
+
+```
+POST <base_url>/api/nzb/streams
+  download_key=<sha256>
+  nzb_url=<season-pack nzb url>
+  id=tt1234567:1:5
+```
+
 ## Endpoint Reference
 
 ### `POST /api/nzb/streams`
@@ -246,10 +278,17 @@ Submit an NZB manually and receive stream URLs. The request blocks (long-polls) 
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `download_key` | Yes | SHA-256 of your API key (lowercase hex) |
-| `file` | Yes | The `.nzb` file to process (max 100 MB) |
+| `download_key` | Yes | SHA-256 of your API key (lowercase hex). Alternatively send the raw key in the `X-Api-Key` header |
+| `file` | Conditional | The `.nzb` file to process (max 100 MB). Provide this **or** `nzb_url` |
+| `nzb_url` | Conditional | URL to download the NZB from. Provide this **or** `file` |
 | `category` | No | Download category (e.g. `movies`, `tv`) |
 | `timeout` | No | Seconds to wait before returning a 408 (default: `300`) |
+| `season` | No | Season number for selecting one episode from a season pack |
+| `episode` | No | Episode number (pair with `season`) |
+| `id` | No | Stremio content id (e.g. `tt1234567:1:5`) as an alternative to `season`/`episode` |
+
+> Fields may be sent as `multipart/form-data` or as URL query parameters. See
+> [Selecting one episode from a season pack](#selecting-one-episode-from-a-season-pack).
 
 ### Response
 
@@ -291,6 +330,19 @@ Submit an NZB manually and receive stream URLs. The request blocks (long-polls) 
 ```
 
 Use `_queue_item_id` / `queue_item_id` from the error details to check progress via the queue API or retry later.
+
+**400 Bad Request** — a multi-episode season pack was submitted without episode context:
+
+```json
+{
+  "success": false,
+  "error": {
+    "code":    "BAD_REQUEST",
+    "message": "Episode not specified",
+    "details": "This release is a multi-episode pack; provide season and episode (or a Stremio id like tt1234567:1:5)."
+  }
+}
+```
 
 ## Caching
 
