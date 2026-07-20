@@ -1224,6 +1224,100 @@ func (r *Repository) ListRecentImportHistory(ctx context.Context, minutes int, c
 	return history, rows.Err()
 }
 
+// SABnzbdHistoryRow is one flattened row of the unified SABnzbd history view
+// (completed queue + persistent history + failed queue). Source lets the caller
+// reconstruct the "#596 missing-path -> Failed" behavior, which applies only to
+// rows still present in the live completed queue.
+type SABnzbdHistoryRow struct {
+	Source       string // "completed_queue" | "history" | "failed_queue"
+	ID           int64
+	DownloadID   *string
+	Name         string // nzb_path for queue rows, nzb_name for history rows
+	Status       QueueStatus
+	FileSize     *int64
+	CompletedAt  *time.Time
+	Category     *string
+	StoragePath  *string
+	Metadata     *string
+	ErrorMessage *string
+}
+
+// sabnzbdHistoryUnion builds the deduplicated UNION-ALL body shared by
+// ListSABnzbdHistory and CountSABnzbdHistory, plus its bound args (the category
+// filter, repeated once per arm). A completed import can exist in both
+// import_queue (status=completed, never auto-pruned) and import_history; the
+// anti-join drops the history copy when the live completed queue row is present,
+// so each import is counted once. Failed items live only in import_queue and are
+// unaffected. Portable across SQLite + Postgres (no window functions, no
+// basename/regexp); ? placeholders and FALSE are rewritten by the dialect layer.
+func sabnzbdHistoryUnion(category string) (string, []any) {
+	body := `
+		SELECT 'completed_queue' AS source, q.id, q.download_id, q.nzb_path AS name, q.status,
+		       q.file_size, q.completed_at, q.category, q.storage_path, q.metadata, q.error_message,
+		       COALESCE(q.completed_at, q.updated_at, q.created_at) AS sort_time
+		  FROM import_queue q
+		 WHERE q.status = 'completed' AND q.skip_arr_notification = FALSE
+		   AND (? = '' OR LOWER(q.category) = LOWER(?))
+		UNION ALL
+		SELECT 'history', COALESCE(h.nzb_id, h.id), h.download_id, h.nzb_name, 'completed',
+		       h.file_size, h.completed_at, h.category, h.virtual_path, h.metadata, NULL,
+		       h.completed_at
+		  FROM import_history h
+		  LEFT JOIN import_queue q
+		    ON q.id = h.nzb_id AND q.status = 'completed' AND q.skip_arr_notification = FALSE
+		 WHERE q.id IS NULL
+		   AND (? = '' OR LOWER(h.category) = LOWER(?))
+		UNION ALL
+		SELECT 'failed_queue', q.id, q.download_id, q.nzb_path, q.status,
+		       q.file_size, q.completed_at, q.category, q.storage_path, q.metadata, q.error_message,
+		       COALESCE(q.completed_at, q.updated_at, q.created_at)
+		  FROM import_queue q
+		 WHERE q.status = 'failed' AND q.skip_arr_notification = FALSE
+		   AND (? = '' OR LOWER(q.category) = LOWER(?))`
+	args := []any{category, category, category, category, category, category}
+	return body, args
+}
+
+// ListSABnzbdHistory returns one time-ordered, deduplicated page of the SABnzbd
+// history view using real SQL LIMIT/OFFSET.
+func (r *Repository) ListSABnzbdHistory(ctx context.Context, category string, limit, offset int) ([]*SABnzbdHistoryRow, error) {
+	body, args := sabnzbdHistoryUnion(category)
+	query := `SELECT source, id, download_id, name, status, file_size, completed_at, category, storage_path, metadata, error_message
+		FROM (` + body + `) t
+		ORDER BY sort_time DESC, id DESC
+		LIMIT ? OFFSET ?`
+	args = append(args, limit, offset)
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list sabnzbd history: %w", err)
+	}
+	defer rows.Close()
+
+	var out []*SABnzbdHistoryRow
+	for rows.Next() {
+		var row SABnzbdHistoryRow
+		if err := rows.Scan(&row.Source, &row.ID, &row.DownloadID, &row.Name, &row.Status,
+			&row.FileSize, &row.CompletedAt, &row.Category, &row.StoragePath, &row.Metadata, &row.ErrorMessage); err != nil {
+			return nil, fmt.Errorf("failed to scan sabnzbd history row: %w", err)
+		}
+		out = append(out, &row)
+	}
+	return out, rows.Err()
+}
+
+// CountSABnzbdHistory returns the exact pre-pagination total for the SABnzbd
+// history view (for noofslots).
+func (r *Repository) CountSABnzbdHistory(ctx context.Context, category string) (int, error) {
+	body, args := sabnzbdHistoryUnion(category)
+	query := `SELECT COUNT(*) FROM (` + body + `) t`
+	var count int
+	if err := r.db.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("failed to count sabnzbd history: %w", err)
+	}
+	return count, nil
+}
+
 // GetImportDailyStats retrieves import statistics for the specified number of days
 func (r *Repository) GetImportDailyStats(ctx context.Context, days int) ([]*ImportDailyStat, error) {
 	cutoff := time.Now().UTC().AddDate(0, 0, -days).Format("2006-01-02")
