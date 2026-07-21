@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-viper/mapstructure/v2"
 	"github.com/javi11/altmount/internal/utils"
 	"github.com/javi11/nntppool/v4"
 	"github.com/jinzhu/copier"
@@ -1348,6 +1349,8 @@ func (m *Manager) ReloadConfig() error {
 		return fmt.Errorf("error reading config file %s: %w", m.configFile, err)
 	}
 
+	warnUnknownConfigKeys()
+
 	// Create default config and unmarshal into it
 	config := DefaultConfig()
 	if err := viper.Unmarshal(config); err != nil {
@@ -1766,6 +1769,23 @@ func SaveToFile(config *Config, filename string) error {
 }
 
 // LoadConfig loads configuration from file and merges with defaults
+// warnUnknownConfigKeys logs config keys that do not map to any field on Config.
+// These are almost always settings removed or renamed in a past release: viper
+// ignores them silently, so a stale key looks live while having no effect.
+//
+// This warns rather than fails — rejecting unknown keys would break upgrades for
+// anyone whose config still carries a retired setting.
+func warnUnknownConfigKeys() {
+	probe := DefaultConfig()
+	err := viper.Unmarshal(probe, func(dc *mapstructure.DecoderConfig) {
+		dc.ErrorUnused = true
+	})
+	if err != nil {
+		slog.Warn("Configuration contains keys this version does not use; they have no effect and can be removed",
+			"detail", err)
+	}
+}
+
 func LoadConfig(configFile string) (*Config, error) {
 	config := DefaultConfig()
 
@@ -1807,6 +1827,8 @@ func LoadConfig(configFile string) (*Config, error) {
 			return nil, fmt.Errorf("error reading config file: %w", err)
 		}
 	}
+
+	warnUnknownConfigKeys()
 
 	// Unmarshal the config
 	if err := viper.Unmarshal(config); err != nil {
