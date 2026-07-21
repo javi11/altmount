@@ -34,6 +34,7 @@ import type {
 	ConfigSection,
 	ConfigUpdateRequest,
 	PipelineTuneResponse,
+	ProviderBackbone,
 	ProviderConfig,
 	ProviderCreateRequest,
 	ProviderReorderRequest,
@@ -820,6 +821,10 @@ class APIClient {
 		return this.request<PipelineTuneResponse>(`/providers/${id}/tune-pipeline`, {
 			method: "POST",
 		});
+	}
+
+	async getProviderBackbones() {
+		return this.request<ProviderBackbone[]>("/providers/backbones");
 	}
 
 	async createProvider(data: ProviderCreateRequest) {

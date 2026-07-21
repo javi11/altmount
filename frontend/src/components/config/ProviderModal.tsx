@@ -1,8 +1,35 @@
 import { AlertTriangle, Check, Loader, Save, Wifi } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useToast } from "../../contexts/ToastContext";
-import { useProviders } from "../../hooks/useProviders";
-import type { ProviderConfig, ProviderFormData } from "../../types/config";
+import { useProviderBackbones, useProviders } from "../../hooks/useProviders";
+import type { ProviderBackbone, ProviderConfig, ProviderFormData } from "../../types/config";
+
+// registrableDomain returns the last two labels of a hostname (e.g. "eweka.nl"),
+// used as a fallback when an exact host match isn't found in the backbone list.
+function registrableDomain(host: string): string {
+	const parts = host.split(".").filter(Boolean);
+	if (parts.length < 2) return "";
+	return parts.slice(-2).join(".");
+}
+
+// lookupBackbone finds the backbone for a hostname: an exact (case-insensitive)
+// match first, then a same-registrable-domain match, but only when every such
+// entry agrees on a single backbone (avoids guessing when ambiguous).
+function lookupBackbone(host: string, backbones: ProviderBackbone[]): ProviderBackbone | undefined {
+	const h = host.trim().toLowerCase();
+	if (!h || backbones.length === 0) return undefined;
+
+	const exact = backbones.find((b) => b.host === h);
+	if (exact) return exact;
+
+	const domain = registrableDomain(h);
+	if (!domain) return undefined;
+
+	const matches = backbones.filter((b) => registrableDomain(b.host) === domain);
+	if (matches.length === 0) return undefined;
+	const distinct = new Set(matches.map((m) => m.backbone));
+	return distinct.size === 1 ? matches[0] : undefined;
+}
 
 interface ProviderModalProps {
 	mode: "create" | "edit";
@@ -31,6 +58,7 @@ const defaultFormData: ProviderFormData = {
 	proxy_url: "",
 	enabled: true,
 	is_backup_provider: false,
+	storage_group: "",
 	skip_ping: false,
 	keepalive_interval_seconds: 0,
 	keepalive_command: "",
@@ -58,9 +86,22 @@ export function ProviderModal({
 	const [canSave, setCanSave] = useState(false);
 	const [quotaEnabled, setQuotaEnabled] = useState(false);
 	const [quotaGbInput, setQuotaGbInput] = useState("");
+	const [backboneHint, setBackboneHint] = useState<string | null>(null);
 
 	const { testProvider, createProvider, updateProvider } = useProviders();
+	const { data: backbones } = useProviderBackbones();
 	const { showToast } = useToast();
+
+	// Suggest a storage group from the entered host's backbone. Only fills an
+	// empty field and never overwrites a value the user typed.
+	const handleHostBlur = () => {
+		if (!backbones || formData.storage_group.trim() !== "") return;
+		const match = lookupBackbone(formData.host, backbones);
+		if (match) {
+			setFormData((prev) => ({ ...prev, storage_group: match.backbone }));
+			setBackboneHint(`Detected backbone: ${match.backbone} (${match.provider})`);
+		}
+	};
 
 	// Initialize form data when provider changes
 	useEffect(() => {
@@ -79,6 +120,7 @@ export function ProviderModal({
 				proxy_url: provider.proxy_url || "",
 				enabled: provider.enabled,
 				is_backup_provider: provider.is_backup_provider,
+				storage_group: provider.storage_group ?? "",
 				skip_ping: provider.skip_ping ?? false,
 				keepalive_interval_seconds: provider.keepalive_interval_seconds ?? 0,
 				keepalive_command: provider.keepalive_command ?? "",
@@ -199,6 +241,8 @@ export function ProviderModal({
 				if (formData.enabled !== provider.enabled) updateData.enabled = formData.enabled;
 				if (formData.is_backup_provider !== provider.is_backup_provider)
 					updateData.is_backup_provider = formData.is_backup_provider;
+				if (formData.storage_group !== (provider.storage_group ?? ""))
+					updateData.storage_group = formData.storage_group;
 				if (formData.skip_ping !== (provider.skip_ping ?? false))
 					updateData.skip_ping = formData.skip_ping;
 				if (formData.keepalive_interval_seconds !== (provider.keepalive_interval_seconds ?? 0))
@@ -265,6 +309,7 @@ export function ProviderModal({
 								className="input input-bordered w-full font-mono text-sm"
 								value={formData.host}
 								onChange={(e) => handleInputChange("host", e.target.value)}
+								onBlur={handleHostBlur}
 								placeholder="news.example.com"
 								required
 							/>
@@ -470,6 +515,25 @@ export function ProviderModal({
 									onChange={(e) => handleInputChange("proxy_url", e.target.value)}
 									placeholder="socks5://user:pass@host:port"
 								/>
+							</fieldset>
+
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend font-bold">Storage Group (Optional)</legend>
+								<input
+									id="storage_group"
+									type="text"
+									className="input input-bordered w-full font-mono text-sm"
+									value={formData.storage_group}
+									onChange={(e) => {
+										handleInputChange("storage_group", e.target.value);
+										setBackboneHint(null);
+									}}
+									placeholder="e.g. omicron"
+								/>
+								<p className="label mt-1 text-base-content/70 text-xs">
+									{backboneHint ??
+										"Providers sharing a backbone: give them the same group so a missing-article response skips the rest."}
+								</p>
 							</fieldset>
 
 							<fieldset className="fieldset">

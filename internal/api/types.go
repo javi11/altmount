@@ -127,6 +127,7 @@ type ProviderAPIResponse struct {
 	PasswordSet              bool       `json:"password_set"`
 	Enabled                  bool       `json:"enabled"`
 	IsBackupProvider         bool       `json:"is_backup_provider"`
+	StorageGroup             string     `json:"storage_group,omitempty"`
 	InflightRequests         int        `json:"inflight_requests"`
 	StatInflightRequests     int        `json:"stat_inflight_requests"`
 	LastRTTMs                int64      `json:"last_rtt_ms"`
@@ -243,6 +244,7 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 			PasswordSet:              p.Password != "",
 			Enabled:                  p.Enabled != nil && *p.Enabled,
 			IsBackupProvider:         p.IsBackupProvider != nil && *p.IsBackupProvider,
+			StorageGroup:             p.StorageGroup,
 			InflightRequests:         p.InflightRequests,
 			StatInflightRequests:     p.StatInflightRequests,
 			LastRTTMs:                p.LastRTTMs,
@@ -973,6 +975,7 @@ type ProviderCreateRequest struct {
 	ProxyURL         string `json:"proxy_url,omitempty"`
 	Enabled          bool   `json:"enabled"`
 	IsBackupProvider bool   `json:"is_backup_provider"`
+	StorageGroup     string `json:"storage_group,omitempty"`
 }
 
 // ProviderUpdateRequest represents a request to update an existing provider
@@ -987,6 +990,7 @@ type ProviderUpdateRequest struct {
 	ProxyURL         *string `json:"proxy_url,omitempty"`
 	Enabled          *bool   `json:"enabled,omitempty"`
 	IsBackupProvider *bool   `json:"is_backup_provider,omitempty"`
+	StorageGroup     *string `json:"storage_group,omitempty"`
 }
 
 // ProviderReorderRequest represents a request to reorder providers

@@ -493,6 +493,7 @@ func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 		ProxyURL                 string `json:"proxy_url"`
 		Enabled                  bool   `json:"enabled"`
 		IsBackupProvider         bool   `json:"is_backup_provider"`
+		StorageGroup             string `json:"storage_group"`
 		SkipPing                 bool   `json:"skip_ping"`
 		KeepaliveIntervalSeconds int    `json:"keepalive_interval_seconds"`
 		KeepaliveCommand         string `json:"keepalive_command"`
@@ -539,6 +540,7 @@ func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 		ProxyURL:                 createReq.ProxyURL,
 		Enabled:                  &createReq.Enabled,
 		IsBackupProvider:         &createReq.IsBackupProvider,
+		StorageGroup:             createReq.StorageGroup,
 		SkipPing:                 createReq.SkipPing,
 		KeepaliveIntervalSeconds: createReq.KeepaliveIntervalSeconds,
 		KeepaliveCommand:         createReq.KeepaliveCommand,
@@ -582,6 +584,7 @@ func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 		PasswordSet:              newProvider.Password != "",
 		Enabled:                  newProvider.Enabled != nil && *newProvider.Enabled,
 		IsBackupProvider:         newProvider.IsBackupProvider != nil && *newProvider.IsBackupProvider,
+		StorageGroup:             newProvider.StorageGroup,
 		InflightRequests:         newProvider.InflightRequests,
 		StatInflightRequests:     newProvider.StatInflightRequests,
 		LastRTTMs:                newProvider.LastRTTMs,
@@ -656,6 +659,7 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 		ProxyURL                 *string `json:"proxy_url,omitempty"`
 		Enabled                  *bool   `json:"enabled,omitempty"`
 		IsBackupProvider         *bool   `json:"is_backup_provider,omitempty"`
+		StorageGroup             *string `json:"storage_group,omitempty"`
 		SkipPing                 *bool   `json:"skip_ping,omitempty"`
 		KeepaliveIntervalSeconds *int    `json:"keepalive_interval_seconds,omitempty"`
 		KeepaliveCommand         *string `json:"keepalive_command,omitempty"`
@@ -724,6 +728,9 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 	if updateReq.IsBackupProvider != nil {
 		provider.IsBackupProvider = updateReq.IsBackupProvider
 	}
+	if updateReq.StorageGroup != nil {
+		provider.StorageGroup = *updateReq.StorageGroup
+	}
 	if updateReq.SkipPing != nil {
 		provider.SkipPing = *updateReq.SkipPing
 	}
@@ -782,6 +789,7 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 		PasswordSet:              provider.Password != "",
 		Enabled:                  provider.Enabled != nil && *provider.Enabled,
 		IsBackupProvider:         provider.IsBackupProvider != nil && *provider.IsBackupProvider,
+		StorageGroup:             provider.StorageGroup,
 		InflightRequests:         provider.InflightRequests,
 		StatInflightRequests:     provider.StatInflightRequests,
 		LastRTTMs:                provider.LastRTTMs,
@@ -1008,6 +1016,7 @@ func (s *Server) handleReorderProviders(c *fiber.Ctx) error {
 			PasswordSet:           p.Password != "",
 			Enabled:               p.Enabled != nil && *p.Enabled,
 			IsBackupProvider:      p.IsBackupProvider != nil && *p.IsBackupProvider,
+			StorageGroup:          p.StorageGroup,
 			InflightRequests:      p.InflightRequests,
 			StatInflightRequests:  p.StatInflightRequests,
 			LastRTTMs:             p.LastRTTMs,
