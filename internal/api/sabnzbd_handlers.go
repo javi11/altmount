@@ -13,7 +13,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -786,170 +785,51 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 	}
 	limit := 100
 	if l := c.Query("limit"); l != "" {
-		if val, err := strconv.Atoi(l); err == nil {
-			if val > 0 {
-				limit = val
-			} else {
-				limit = 100
-			}
+		if val, err := strconv.Atoi(l); err == nil && val > 0 {
+			limit = val
 		}
+	}
+	// Cap the page size so a client cannot force a huge materialization.
+	const maxSABnzbdHistoryLimit = 1000
+	if limit > maxSABnzbdHistoryLimit {
+		limit = maxSABnzbdHistoryLimit
 	}
 
 	// When *arr asks for specific nzo_ids, look them up directly so the response
-	// is independent of the bulk retention window. This is the path Sonarr/Radarr
-	// use to confirm a known download by id, and it must succeed regardless of
-	// how old the entry is — see issue #543.
+	// is independent of pagination. This is the path Sonarr/Radarr use to confirm
+	// a known download by id, and it must succeed regardless of how old the entry
+	// is — see issue #543.
 	if len(nzoIDs) > 0 {
 		return s.respondSABnzbdHistoryByIDs(c, ctx, nzoIDs, categoryFilter, start, limit)
 	}
 
-	// Determine how far back to look in persistent history. Default to 7 days
-	// (10080 minutes) and allow operators to widen further via config. Clients
-	// rebuilding large libraries with multiple *arrs can otherwise outrun the
-	// previous 24h window and lose visibility of completed imports.
-	historyMinutes := 10080
-	if s.configManager != nil {
-		if v := s.configManager.GetConfig().SABnzbd.HistoryRetentionMinutes; v > 0 {
-			historyMinutes = v
-		}
-	}
-
-	// Get recent items from persistent history (buffer for Sonarr)
-	recentHistory, err := s.queueRepo.ListRecentImportHistory(ctx, historyMinutes, categoryFilter)
+	// Serve the deduplicated, time-ordered union of completed-queue + persistent
+	// history + failed-queue with real SQL LIMIT/OFFSET and an exact total. The
+	// merge/dedup/pagination that used to run in memory over hardcoded caps now
+	// happens in one DB query; failed items keep their existing import_queue
+	// lifecycle (FailedItemRetentionHours).
+	totalAvailableCount, err := s.queueRepo.CountSABnzbdHistory(ctx, categoryFilter)
 	if err != nil {
-		recentHistory = []*database.ImportHistory{} // Fallback
+		return s.writeSABnzbdErrorFiber(c, "Failed to count history")
 	}
 
-	// Fetch items from active queue
-	// We use a larger set here to ensure we get everything for deduplication and combined history
-	completedStatus := database.QueueStatusCompleted
-	completedQueueItems, err := s.queueRepo.ListQueueItems(ctx, &completedStatus, "", categoryFilter, 2000, 0, "updated_at", "desc")
+	historyRows, err := s.queueRepo.ListSABnzbdHistory(ctx, categoryFilter, limit, start)
 	if err != nil {
-		return s.writeSABnzbdErrorFiber(c, "Failed to get completed items from queue")
+		return s.writeSABnzbdErrorFiber(c, "Failed to get history")
 	}
 
-	// Combine and deduplicate by NZB Name
-	// Priority goes to items still in the queue (as they have more metadata)
-	seenNames := make(map[string]bool)
-	finalItems := make([]*database.ImportQueueItem, 0)
-	// Track items sourced from the live queue with status=Completed. Only these
-	// are eligible to be rewritten as Failed when their reported path is
-	// missing on disk (#596). Persistent-history rows represent past successful
-	// imports whose files may have been legitimately deleted later (e.g. ARR
-	// upgrade/cleanup), so they must not be retroactively marked Failed.
-	liveCompleted := make(map[*database.ImportQueueItem]bool)
-
-	for _, item := range completedQueueItems {
-		if item.SkipArrNotification {
-			continue
-		}
-		name := filepath.Base(item.NzbPath)
-		// Filter by nzo_ids if requested (check both integer ID and DownloadID)
-		if len(nzoIDs) > 0 {
-			match := nzoIDs[fmt.Sprintf("%d", item.ID)]
-			if !match && item.DownloadID != nil {
-				match = nzoIDs[*item.DownloadID]
-			}
-			if !match {
-				continue
-			}
-		}
-		if !seenNames[name] {
-			finalItems = append(finalItems, item)
-			liveCompleted[item] = true
-			seenNames[name] = true
-		}
-	}
-
-	for _, item := range recentHistory {
-		id := item.ID
-		if item.NzbID != nil {
-			id = *item.NzbID
-		}
-
-		// Filter by nzo_ids if requested
-		if len(nzoIDs) > 0 {
-			match := nzoIDs[fmt.Sprintf("%d", id)]
-			if !match && item.DownloadID != nil {
-				match = nzoIDs[*item.DownloadID]
-			}
-			if !match {
-				continue
-			}
-		}
-
-		if !seenNames[item.NzbName] {
-			qItem := &database.ImportQueueItem{
-				ID:          id,
-				DownloadID:  item.DownloadID,
-				NzbPath:     item.NzbName,
-				Status:      database.QueueStatusCompleted,
-				FileSize:    &item.FileSize,
-				CompletedAt: &item.CompletedAt,
-				Category:    item.Category,
-				StoragePath: &item.VirtualPath,
-			}
-			finalItems = append(finalItems, qItem)
-			seenNames[item.NzbName] = true
-		}
-	}
-
-	// Get failed items from active queue
-	failedStatus := database.QueueStatusFailed
-	failed, err := s.queueRepo.ListQueueItems(ctx, &failedStatus, "", categoryFilter, 1000, 0, "updated_at", "desc")
-	if err != nil {
-		return s.writeSABnzbdErrorFiber(c, "Failed to get failed items")
-	}
-
-	// Combine failed items for noofslots calculation
-	for _, item := range failed {
-		if item.SkipArrNotification {
-			continue
-		}
-		name := filepath.Base(item.NzbPath)
-		// Filter by nzo_ids if requested
-		if len(nzoIDs) > 0 {
-			match := nzoIDs[fmt.Sprintf("%d", item.ID)]
-			if !match && item.DownloadID != nil {
-				match = nzoIDs[*item.DownloadID]
-			}
-			if !match {
-				continue
-			}
-		}
-		if !seenNames[name] {
-			finalItems = append(finalItems, item)
-			seenNames[name] = true
-		}
-	}
-
-	sort.SliceStable(finalItems, func(i, j int) bool {
-		return sabnzbdHistorySortTime(finalItems[i]).After(sabnzbdHistorySortTime(finalItems[j]))
-	})
-
-	// Total available items before pagination
-	totalAvailableCount := len(finalItems)
-
-	// Apply pagination (start and limit)
-	if start < len(finalItems) {
-		finalItems = finalItems[start:]
-	} else {
-		finalItems = []*database.ImportQueueItem{}
-	}
-
-	if limit > 0 && len(finalItems) > limit {
-		finalItems = finalItems[:limit]
-	}
-
-	// Combine and convert to SABnzbd format
-	slots := make([]SABnzbdHistorySlot, 0, len(finalItems))
+	slots := make([]SABnzbdHistorySlot, 0, len(historyRows))
 	var totalBytes int64
 	itemBasePath := s.calculateItemBasePath()
 
-	for i, item := range finalItems {
+	for i, row := range historyRows {
+		item := sabnzbdHistoryRowToQueueItem(row)
 		finalPath, exists := s.calculateHistoryStoragePath(item, itemBasePath)
 		slot := ToSABnzbdHistorySlot(item, start+i, finalPath)
-		if !exists && liveCompleted[item] {
+		// #596: only rows still present in the live completed queue may be
+		// rewritten to Failed when their reported path is missing on disk.
+		// Persistent-history and failed rows must never be retroactively failed.
+		if !exists && row.Source == "completed_queue" {
 			markHistorySlotMissing(&slot, finalPath)
 		}
 		slots = append(slots, slot)
@@ -970,6 +850,24 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 	}
 
 	return s.writeSABnzbdResponseFiber(c, response)
+}
+
+// sabnzbdHistoryRowToQueueItem adapts a unified history row into the
+// ImportQueueItem shape used by ToSABnzbdHistorySlot.
+func sabnzbdHistoryRowToQueueItem(row *database.SABnzbdHistoryRow) *database.ImportQueueItem {
+	completedAt := row.CompletedAt
+	return &database.ImportQueueItem{
+		ID:           row.ID,
+		DownloadID:   row.DownloadID,
+		NzbPath:      row.Name,
+		Status:       row.Status,
+		FileSize:     row.FileSize,
+		CompletedAt:  completedAt,
+		Category:     row.Category,
+		StoragePath:  row.StoragePath,
+		Metadata:     row.Metadata,
+		ErrorMessage: row.ErrorMessage,
+	}
 }
 
 // respondSABnzbdHistoryByIDs returns a SABnzbd history response containing only
@@ -1108,19 +1006,6 @@ func importHistoryToQueueItem(h *database.ImportHistory) *database.ImportQueueIt
 		Category:    h.Category,
 		StoragePath: &virtualPath,
 	}
-}
-
-func sabnzbdHistorySortTime(item *database.ImportQueueItem) time.Time {
-	if item == nil {
-		return time.Time{}
-	}
-	if !item.UpdatedAt.IsZero() {
-		return item.UpdatedAt
-	}
-	if item.CompletedAt != nil {
-		return *item.CompletedAt
-	}
-	return item.CreatedAt
 }
 
 // handleSABnzbdHistoryDelete handles deleting items from history
