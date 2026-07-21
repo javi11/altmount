@@ -393,6 +393,7 @@ type ProviderConfig struct {
 	ProxyURL                 string     `yaml:"proxy_url" mapstructure:"proxy_url" json:"proxy_url,omitempty"`
 	Enabled                  *bool      `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
 	IsBackupProvider         *bool      `yaml:"is_backup_provider" mapstructure:"is_backup_provider" json:"is_backup_provider,omitempty"`
+	StorageGroup             string     `yaml:"storage_group" mapstructure:"storage_group" json:"storage_group,omitempty"`
 	SkipPing                 bool       `yaml:"skip_ping" mapstructure:"skip_ping" json:"skip_ping,omitempty"`
 	KeepaliveIntervalSeconds int        `yaml:"keepalive_interval_seconds" mapstructure:"keepalive_interval_seconds" json:"keepalive_interval_seconds,omitempty"`
 	KeepaliveCommand         string     `yaml:"keepalive_command" mapstructure:"keepalive_command" json:"keepalive_command,omitempty"`
@@ -1046,6 +1047,7 @@ func (p *ProviderConfig) ToNNTPProvider() nntppool.Provider {
 		Auth:              nntppool.Auth{Username: p.Username, Password: p.Password},
 		Connections:       p.MaxConnections,
 		Backup:            isBackup,
+		StorageGroup:      p.StorageGroup,
 		Inflight:          inflight,
 		StatInflight:      statInflight,
 		IdleTimeout:       60 * time.Second,
@@ -1134,6 +1136,7 @@ func providersFieldsEqual(a, b ProviderConfig) bool {
 		a.UserAgent == b.UserAgent &&
 		a.QuotaBytes == b.QuotaBytes &&
 		a.QuotaPeriodHours == b.QuotaPeriodHours &&
+		a.StorageGroup == b.StorageGroup &&
 		boolPtrEqual(a.Enabled, b.Enabled) &&
 		boolPtrEqual(a.IsBackupProvider, b.IsBackupProvider)
 }
@@ -1198,6 +1201,7 @@ func (c *Config) ProvidersEqual(other *Config) bool {
 			oldProvider.TLS != newProvider.TLS ||
 			oldProvider.InsecureTLS != newProvider.InsecureTLS ||
 			oldProvider.ProxyURL != newProvider.ProxyURL ||
+			oldProvider.StorageGroup != newProvider.StorageGroup ||
 			*oldProvider.Enabled != *newProvider.Enabled ||
 			*oldProvider.IsBackupProvider != *newProvider.IsBackupProvider {
 			return false // Provider modified

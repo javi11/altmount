@@ -265,6 +265,7 @@ export interface ProviderConfig {
 	password_set: boolean;
 	enabled: boolean;
 	is_backup_provider: boolean;
+	storage_group?: string;
 	skip_ping?: boolean;
 	keepalive_interval_seconds?: number;
 	keepalive_command?: string;
@@ -498,6 +499,7 @@ export interface ProviderUpdateRequest {
 	proxy_url?: string;
 	enabled?: boolean;
 	is_backup_provider?: boolean;
+	storage_group?: string;
 	skip_ping?: boolean;
 	keepalive_interval_seconds?: number;
 	keepalive_command?: string;
@@ -602,6 +604,7 @@ export interface ProviderFormData {
 	proxy_url: string;
 	enabled: boolean;
 	is_backup_provider: boolean;
+	storage_group: string;
 	skip_ping: boolean;
 	keepalive_interval_seconds: number;
 	keepalive_command: string;
@@ -718,6 +721,7 @@ export interface ProviderCreateRequest {
 	proxy_url?: string;
 	enabled: boolean;
 	is_backup_provider: boolean;
+	storage_group?: string;
 	skip_ping?: boolean;
 	keepalive_interval_seconds?: number;
 	keepalive_command?: string;
@@ -725,6 +729,14 @@ export interface ProviderCreateRequest {
 	quota_bytes?: number;
 	quota_period_hours?: number;
 	account_expiration_date?: string;
+}
+
+// A single hostname -> backbone (storage group) mapping used to autofill
+// a provider's storage_group. Sourced from the public rexum provider tree.
+export interface ProviderBackbone {
+	host: string;
+	backbone: string;
+	provider: string;
 }
 
 export interface ProviderReorderRequest {

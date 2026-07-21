@@ -1,7 +1,8 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "../api/client";
 import type {
 	PipelineTuneResponse,
+	ProviderBackbone,
 	ProviderConfig,
 	ProviderCreateRequest,
 	ProviderReorderRequest,
@@ -10,6 +11,20 @@ import type {
 	ProviderUpdateRequest,
 } from "../types/config";
 import { configKeys } from "./useConfig";
+
+// Fetch the hostname -> backbone map used to autofill a provider's storage
+// group. Cached aggressively: the underlying dataset changes rarely and the
+// backend already caches it for 24h.
+export function useProviderBackbones() {
+	return useQuery<ProviderBackbone[]>({
+		queryKey: ["providers", "backbones"],
+		queryFn: () => apiClient.getProviderBackbones(),
+		staleTime: 1000 * 60 * 60, // 1 hour
+		gcTime: 1000 * 60 * 60 * 24,
+		refetchOnWindowFocus: false,
+		retry: 1,
+	});
+}
 
 // Test provider connectivity
 function useTestProvider() {

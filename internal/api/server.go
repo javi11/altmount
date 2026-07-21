@@ -337,6 +337,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Get("/fuse/status", s.handleGetFuseStatus)
 
 	// Provider management endpoints
+	api.Get("/providers/backbones", s.handleProviderBackbones)
 	api.Post("/providers/test", s.handleTestProvider)
 	api.Post("/providers/:id/speedtest", s.handleTestProviderSpeed)
 	api.Post("/providers/:id/tune-pipeline", s.handleTunePipeline)
