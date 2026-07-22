@@ -151,6 +151,9 @@ type ProwlarrConfig struct {
 	// Categories filters search results by Newznab category IDs.
 	// Defaults to 5000 (Movies), 5010 (Movies/Foreign), 5030 (TV), 5040 (TV/HD).
 	Categories []int `yaml:"categories" mapstructure:"categories" json:"categories,omitempty"`
+	// Indexers optionally restricts searches to specific Prowlarr indexer IDs.
+	// Empty = search across all configured indexers.
+	Indexers []int `yaml:"indexers" mapstructure:"indexers" json:"indexers,omitempty"`
 	// Languages is an optional list of keywords; releases must contain at least one to pass.
 	// Empty = no filtering. Examples: ["Esp", "🇪🇸", "Spanish", "DUAL"]
 	Languages []string `yaml:"languages" mapstructure:"languages" json:"languages,omitempty"`

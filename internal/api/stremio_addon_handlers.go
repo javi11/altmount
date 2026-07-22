@@ -186,7 +186,7 @@ func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 		if tvdbID != "" {
 			slog.InfoContext(ctx, "Searching Prowlarr using TVDB ID for series",
 				"imdb_id", imdbID, "tvdb_id", tvdbID, "season", season, "episode", episode)
-			results, err = client.SearchByTVDB(ctx, tvdbID, prowlarrType, prowlarrCfg.Categories, season, episode)
+			results, err = client.SearchByTVDB(ctx, tvdbID, prowlarrType, prowlarrCfg.Categories, prowlarrCfg.Indexers, season, episode)
 			if err != nil {
 				slog.WarnContext(ctx, "Prowlarr TVDB search failed; falling back to IMDb search",
 					"error", err, "imdb_id", imdbID, "tvdb_id", tvdbID)
@@ -196,7 +196,7 @@ func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 	}
 
 	if len(results) == 0 {
-		results, err = client.Search(ctx, imdbID, prowlarrType, prowlarrCfg.Categories, season, episode)
+		results, err = client.Search(ctx, imdbID, prowlarrType, prowlarrCfg.Categories, prowlarrCfg.Indexers, season, episode)
 		if err != nil {
 			slog.WarnContext(ctx, "Prowlarr search failed", "error", err, "imdb_id", imdbID, "tvdb_id", tvdbID)
 			return emptyStreamsResponse(c)
@@ -547,4 +547,57 @@ func (s *Server) validateDownloadKey(ctx context.Context, key string) bool {
 		}
 	}
 	return false
+}
+
+// prowlarrIndexersRequest carries optional connection overrides so the config UI
+// can list indexers before the Prowlarr settings are saved.
+type prowlarrIndexersRequest struct {
+	Host   string `json:"host"`
+	APIKey string `json:"api_key"`
+}
+
+// handleListProwlarrIndexers returns the usenet indexers configured in Prowlarr
+// so the Stremio config UI can present them for selection. Host and API key may
+// be supplied in the body (to test unsaved values) or fall back to saved config.
+//
+//	@Summary		List Prowlarr indexers
+//	@Description	Returns the usenet indexers configured in Prowlarr for the Stremio addon.
+//	@Tags			Config
+//	@Accept			json
+//	@Produce		json
+//	@Param			body	body		prowlarrIndexersRequest	false	"Optional Prowlarr connection overrides"
+//	@Success		200		{object}	APIResponse
+//	@Failure		400		{object}	APIResponse
+//	@Security		BearerAuth
+//	@Router			/prowlarr/indexers [post]
+func (s *Server) handleListProwlarrIndexers(c *fiber.Ctx) error {
+	if s.configManager == nil {
+		return RespondServiceUnavailable(c, "Configuration not available", "")
+	}
+
+	var req prowlarrIndexersRequest
+	// Body is optional; ignore parse errors and fall back to saved config.
+	_ = c.BodyParser(&req)
+
+	cfg := s.configManager.GetConfig()
+	host := strings.TrimSpace(req.Host)
+	if host == "" {
+		host = cfg.Stremio.Prowlarr.Host
+	}
+	apiKey := strings.TrimSpace(req.APIKey)
+	if apiKey == "" {
+		apiKey = cfg.Stremio.Prowlarr.APIKey
+	}
+
+	if host == "" || apiKey == "" {
+		return RespondValidationError(c, "Prowlarr host and API key are required", "")
+	}
+
+	client := prowlarr.NewClient(host, apiKey, httpclient.NewForExternal(cfg.Network, 30*time.Second))
+	indexers, err := client.GetIndexers(c.Context())
+	if err != nil {
+		return RespondBadRequest(c, "Failed to list Prowlarr indexers", err.Error())
+	}
+
+	return RespondSuccess(c, indexers)
 }

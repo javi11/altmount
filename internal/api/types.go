@@ -216,6 +216,7 @@ type ProwlarrAPIResponse struct {
 	APIKey     string   `json:"api_key"`
 	APIKeySet  bool     `json:"api_key_set"`
 	Categories []int    `json:"categories,omitempty"`
+	Indexers   []int    `json:"indexers,omitempty"`
 	Languages  []string `json:"languages,omitempty"`
 	Qualities  []string `json:"qualities,omitempty"`
 }
@@ -388,6 +389,7 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 			APIKey:     cfg.Stremio.Prowlarr.APIKey,
 			APIKeySet:  cfg.Stremio.Prowlarr.APIKey != "",
 			Categories: cfg.Stremio.Prowlarr.Categories,
+			Indexers:   cfg.Stremio.Prowlarr.Indexers,
 			Languages:  cfg.Stremio.Prowlarr.Languages,
 			Qualities:  cfg.Stremio.Prowlarr.Qualities,
 		},

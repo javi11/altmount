@@ -330,6 +330,9 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/config/reload", s.handleReloadConfig)
 	api.Post("/config/validate", s.handleValidateConfig)
 
+	// Prowlarr helper endpoints (Stremio addon configuration)
+	api.Post("/prowlarr/indexers", s.handleListProwlarrIndexers)
+
 	// FUSE endpoints
 	api.Post("/fuse/start", s.handleStartFuseMount)
 	api.Post("/fuse/stop", s.handleStopFuseMount)
