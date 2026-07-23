@@ -1,0 +1,53 @@
+name: Fixes CI (build / vet / lint / test)
+
+# Upstream's own dev-image.yml runs `go test` on push to main, but nothing in
+# this repo's CI runs `go vet` or golangci-lint, and dev-image.yml also tries
+# to publish to registries this fork has no credentials for. This workflow
+# is a self-contained gate for this fork's own security/leak fixes (see
+# fix/all-consolidated's commit history, now merged to main): it never
+# touches a registry, so it always gives a real pass/fail signal regardless
+# of whether the publish-oriented workflows succeed here.
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'docs/**'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-vet-lint-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.0'
+          cache: true
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout=5m
+
+      - name: Test
+        run: go test ./...

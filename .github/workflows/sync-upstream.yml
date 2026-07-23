@@ -1,0 +1,102 @@
+name: Sync with upstream (javi11/altmount)
+
+# Keeps this fork's main up to date with javi11/altmount's main, while making
+# sure our own security/leak fixes (see the fix/all-consolidated history,
+# merged to main) are never silently clobbered by an upstream change to the
+# same lines. `-X ours` only affects hunks that actually conflict - every
+# non-conflicting upstream commit still merges in normally, so this is a real
+# sync, not a one-time snapshot that stops tracking upstream.
+#
+# Safety net: the merge only gets pushed if it also builds, vets, and tests
+# clean afterward. If either the merge itself needs manual conflict
+# resolution beyond what -X ours can do, or the merged result fails
+# validation, the workflow stops short of pushing and opens an issue instead
+# of leaving main in a broken or silently-regressed state.
+
+on:
+  schedule:
+    - cron: '0 6 * * *' # daily, 06:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git identity
+        run: |
+          git config user.name "altmount-fixes-sync[bot]"
+          git config user.email "actions@users.noreply.github.com"
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream https://github.com/javi11/altmount.git
+          git fetch upstream main
+
+      - name: Check for new upstream commits
+        id: diff
+        run: |
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo "up_to_date=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "up_to_date=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Merge upstream, our fixes win any conflict
+        if: steps.diff.outputs.up_to_date == 'false'
+        id: merge
+        run: |
+          if git merge upstream/main -X ours -m "sync: merge javi11/altmount main, our fixes take precedence on conflict"; then
+            echo "merge_ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "merge_ok=false" >> "$GITHUB_OUTPUT"
+            git merge --abort || true
+          fi
+
+      - name: Setup Go
+        if: steps.diff.outputs.up_to_date == 'false' && steps.merge.outputs.merge_ok == 'true'
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.0'
+          cache: true
+
+      - name: Validate merged result
+        if: steps.diff.outputs.up_to_date == 'false' && steps.merge.outputs.merge_ok == 'true'
+        id: validate
+        run: |
+          if go build ./... && go vet ./... && go test ./...; then
+            echo "validate_ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "validate_ok=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push synced main
+        if: steps.diff.outputs.up_to_date == 'false' && steps.merge.outputs.merge_ok == 'true' && steps.validate.outputs.validate_ok == 'true'
+        run: git push origin main
+
+      - name: Open an issue when sync needs manual attention
+        if: steps.diff.outputs.up_to_date == 'false' && (steps.merge.outputs.merge_ok == 'false' || steps.validate.outputs.validate_ok == 'false')
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const mergeFailed = '${{ steps.merge.outputs.merge_ok }}' === 'false';
+            const reason = mergeFailed
+              ? 'the automatic merge (`-X ours`) could not resolve every conflict on its own and was aborted'
+              : 'the merge applied cleanly but the merged result failed build/vet/test';
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: 'Upstream sync needs manual attention',
+              body: `The scheduled sync from javi11/altmount's \`main\` did not complete automatically: ${reason}.\n\nRun locally:\n\n\`\`\`bash\ngit fetch upstream main\ngit merge upstream/main -X ours\n# resolve, then validate before pushing\n\`\`\`\n\nTriggered by workflow run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              labels: ['upstream-sync'],
+            });
