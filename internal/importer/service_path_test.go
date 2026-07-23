@@ -176,12 +176,66 @@ func TestSanitizeVirtualPath(t *testing.T) {
 		{"/C:/rclone/altmount/nzb", "/rclone/altmount/nzb"},
 		{"/complete/C:/x", "/complete/x"},
 		{"plain/no/slash", "/plain/no/slash"},
+		// Traversal cases: virtualDir is built from client/poster-reachable
+		// input (Category, NZB filenames) via calculateProcessVirtualDir, so
+		// a smuggled "../../.." must never survive to escape the metadata
+		// root once this value is joined against it in metadata/service.go.
+		{"/../../../etc/passwd", "/etc/passwd"},
+		{"../../etc/passwd", "/etc/passwd"},
+		{"/complete/../../../etc/passwd", "/etc/passwd"},
+		{"/complete/movies/../../../../etc", "/etc"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.in, func(t *testing.T) {
 			assert.Equal(t, tc.want, sanitizeVirtualPath(tc.in))
 		})
 	}
+}
+
+// TestResolveCategoryPath_RejectsTraversal covers a real fix: category is
+// client-reachable (SABnzbd-emulation/Stremio/manual-upload endpoints all
+// pass it through with no validation), and every "return category" fallback
+// in this function used to hand it back raw as a real directory-name
+// component that later gets joined against the metadata root.
+func TestResolveCategoryPath_RejectsTraversal(t *testing.T) {
+	t.Run("no categories configured, traversal category", func(t *testing.T) {
+		s := &Service{
+			configGetter: func() *config.Config {
+				return &config.Config{} // SABnzbd.Categories empty
+			},
+		}
+		got := s.resolveCategoryPath("../../../etc")
+		assert.NotContains(t, got, "..", "sanitized category must not contain a traversal segment")
+		assert.Equal(t, "", got)
+	})
+
+	t.Run("categories configured, category not found, traversal", func(t *testing.T) {
+		s := &Service{
+			configGetter: func() *config.Config {
+				return &config.Config{
+					SABnzbd: config.SABnzbdConfig{
+						Categories: []config.SABnzbdCategory{{Name: "movies", Dir: "movies"}},
+					},
+				}
+			},
+		}
+		got := s.resolveCategoryPath("../../../etc")
+		assert.NotContains(t, got, "..")
+		assert.Equal(t, "", got)
+	})
+
+	t.Run("legitimate category still resolves normally", func(t *testing.T) {
+		s := &Service{
+			configGetter: func() *config.Config {
+				return &config.Config{
+					SABnzbd: config.SABnzbdConfig{
+						Categories: []config.SABnzbdCategory{{Name: "movies", Dir: "movies"}},
+					},
+				}
+			},
+		}
+		assert.Equal(t, "movies", s.resolveCategoryPath("movies"))
+	})
 }
 
 func TestJoinPathsMergingOverlap(t *testing.T) {
