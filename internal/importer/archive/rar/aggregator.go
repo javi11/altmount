@@ -306,6 +306,19 @@ func ProcessArchive(ctx context.Context, opts ProcessArchiveOptions) error {
 			internalSubDir = "."
 		}
 
+		// The archive's own internal path is attacker-controlled content (a RAR header
+		// inside an NZB an indexer can serve with no review). Reject any subdirectory
+		// that would escape virtualDir once cleaned, rather than letting filepath.Join
+		// silently walk the constructed path outside this release's own folder.
+		cleanedSubDir := filepath.ToSlash(filepath.Clean(internalSubDir))
+		if cleanedSubDir == ".." || strings.HasPrefix(cleanedSubDir, "../") {
+			slog.WarnContext(ctx, "Skipping RAR entry with path-traversal internal path",
+				"internal_path", rarContent.InternalPath,
+				"resolved_subdir", cleanedSubDir)
+			continue
+		}
+		internalSubDir = cleanedSubDir
+
 		var virtualFilePath string
 		if internalSubDir == "." || internalSubDir == "" {
 			virtualFilePath = filepath.Join(virtualDir, baseFilename)
