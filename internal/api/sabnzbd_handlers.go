@@ -1264,12 +1264,17 @@ func (s *Server) buildCategoryPath(category string) string {
 		category = config.DefaultCategoryName
 	}
 
+	// category is client-reachable (SABnzbd-emulation API input) and every
+	// fallback below that returns it directly feeds a real os.MkdirAll via
+	// ensureCategoryDirectories - sanitized the same way this same
+	// category-to-directory pattern is sanitized everywhere else it
+	// appears (importer/utils.SanitizePathSegment).
 	if s.configManager == nil {
 		// No config manager, use category name as directory (Default uses its default dir)
 		if category == config.DefaultCategoryName {
 			return config.DefaultCategoryDir
 		}
-		return category
+		return utils.SanitizePathSegment(category)
 	}
 
 	cfg := s.configManager.GetConfig()
@@ -1279,7 +1284,7 @@ func (s *Server) buildCategoryPath(category string) string {
 		if category == config.DefaultCategoryName {
 			return config.DefaultCategoryDir
 		}
-		return category
+		return utils.SanitizePathSegment(category)
 	}
 
 	// Look for the category in configuration
@@ -1293,12 +1298,12 @@ func (s *Server) buildCategoryPath(category string) string {
 			if category == config.DefaultCategoryName {
 				return config.DefaultCategoryDir
 			}
-			return category
+			return utils.SanitizePathSegment(category)
 		}
 	}
 
 	// Category not found in configuration, use category name as directory
-	return category
+	return utils.SanitizePathSegment(category)
 }
 
 // validateSABnzbdCategory validates and returns the category, or error if invalid
@@ -1310,10 +1315,17 @@ func (s *Server) validateSABnzbdCategory(category string) (string, error) {
 
 	config := s.configManager.GetConfig()
 
-	// If no categories are configured, allow any category and default to "default"
+	// If no categories are configured, allow any category and default to "default".
+	// Still reject a traversal attempt outright here rather than silently
+	// sanitizing it - this is the point where the category is accepted at
+	// all, so an attacker-supplied "../../etc" should fail the request
+	// instead of quietly becoming a different, safe-looking value.
 	if len(config.SABnzbd.Categories) == 0 {
 		if category == "" {
 			return defaultCategory.Name, nil
+		}
+		if utils.SanitizePathSegment(category) == "" {
+			return "", fmt.Errorf("invalid category '%s'", category)
 		}
 		return category, nil
 	}
