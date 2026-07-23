@@ -217,9 +217,13 @@ func (m *manager) SetProviders(providers []nntppool.Provider) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Shut down existing pool and metrics tracker if present
+	// Shut down existing pool, quota watcher, and metrics tracker if present.
+	// Stopping the quota watcher here (symmetric with ClearPool below) rather
+	// than relying on startQuotaWatcher()'s already-running no-op guard keeps
+	// its stop/start pairing explicit around each pool replacement.
 	if m.pool != nil {
 		m.logger.InfoContext(m.ctx, "Shutting down existing NNTP connection pool")
+		m.stopQuotaWatcher()
 		if m.metricsTracker != nil {
 			m.metricsTracker.Stop()
 			m.metricsTracker = nil

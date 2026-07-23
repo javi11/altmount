@@ -220,9 +220,20 @@ func (m *Manager) ExecuteItem(ctx context.Context, itemID int64) error {
 
 	m.log.InfoContext(ctx, "Manually triggering processing for queue item", "queue_id", itemID)
 
+	// Derive from the manager's own lifecycle context (m.ctx), not the incoming
+	// request ctx, so a client disconnect doesn't cut this run off early — but
+	// still ties into Stop()'s cancellation, and is tracked in m.wg like every
+	// other worker goroutine so Stop() actually waits for it instead of
+	// reporting a clean shutdown while this is still running.
+	m.mu.RLock()
+	baseCtx := m.ctx
+	m.mu.RUnlock()
+
+	m.wg.Add(1)
 	go func() {
-		// Use a separate context for the execution to avoid early termination
-		itemCtx, cancel := context.WithCancel(context.Background())
+		defer m.wg.Done()
+
+		itemCtx, cancel := context.WithCancel(baseCtx)
 		m.cancelMu.Lock()
 		m.cancelFuncs[item.ID] = cancel
 		m.cancelMu.Unlock()
@@ -231,6 +242,7 @@ func (m *Manager) ExecuteItem(ctx context.Context, itemID int64) error {
 			m.cancelMu.Lock()
 			delete(m.cancelFuncs, item.ID)
 			m.cancelMu.Unlock()
+			cancel()
 		}()
 
 		resultingPath, processingErr := m.processor.ProcessItem(itemCtx, item)
