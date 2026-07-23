@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/javi11/altmount/internal/database"
+	importerutils "github.com/javi11/altmount/internal/importer/utils"
 	"github.com/javi11/altmount/internal/nzbdav"
 )
 
@@ -474,13 +475,17 @@ func (n *NzbDavImporter) createNzbFileAndPrepareItem(ctx context.Context, res *n
 
 	// Preserve nzbdav's folder layout verbatim so the imported mount mirrors
 	// the source tree. Parser supplies (Category, RelPath) as the two halves
-	// of the release's parent path.
-	targetCategory := res.Category
+	// of the release's parent path. Both come from the source NzbDav
+	// SQLite/blob store, which a malformed or maliciously crafted migration
+	// source could control - sanitized the same way Category is everywhere
+	// else it enters the system (see importer/utils.SanitizePathSegment),
+	// rather than joining it raw.
+	targetCategory := importerutils.SanitizePathSegment(res.Category)
 	if targetCategory == "" {
 		targetCategory = "other"
 	}
-	if res.RelPath != "" {
-		targetCategory = filepath.Join(targetCategory, res.RelPath)
+	if safeRelPath := importerutils.SanitizePathSegment(res.RelPath); safeRelPath != "" {
+		targetCategory = filepath.Join(targetCategory, safeRelPath)
 	}
 
 	priority := database.QueuePriorityNormal

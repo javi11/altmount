@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -25,6 +26,7 @@ import (
 	"github.com/javi11/altmount/internal/importer/postprocessor"
 	"github.com/javi11/altmount/internal/importer/queue"
 	"github.com/javi11/altmount/internal/importer/scanner"
+	importerutils "github.com/javi11/altmount/internal/importer/utils"
 	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/nzbfile"
@@ -597,9 +599,13 @@ func (s *Service) GetFailedNzbFolder() string {
 func (s *Service) MoveToFailedFolder(ctx context.Context, item *database.ImportQueueItem) error {
 	failedDir := s.GetFailedNzbFolder()
 
-	// Add category subfolder if present to keep failed items organized
+	// Add category subfolder if present to keep failed items organized.
+	// Sanitized to prevent path traversal - Category is client-reachable
+	// (SABnzbd-emulation/Stremio/manual-upload endpoints).
 	if item.Category != nil && *item.Category != "" {
-		failedDir = filepath.Join(failedDir, *item.Category)
+		if safeCategory := importerutils.SanitizePathSegment(*item.Category); safeCategory != "" {
+			failedDir = filepath.Join(failedDir, safeCategory)
+		}
 	}
 
 	if err := os.MkdirAll(failedDir, 0755); err != nil {
@@ -992,7 +998,13 @@ var driveLetterRe = regexp.MustCompile(`(?i)(^|/)[a-z]:(?:/|$)`)
 
 // sanitizeVirtualPath canonicalizes a virtual path to forward slashes and strips
 // Windows drive-letter segments and stray colons — these would otherwise leak
-// into metadata directory creation and fail with mkdir on Windows.
+// into metadata directory creation and fail with mkdir on Windows. Also closes
+// a path-traversal gap: the pieces that build up a virtual path (Category,
+// NZB-derived filenames) are client/poster-influenceable, so any ".." segment
+// that survived earlier sanitization must not be allowed to escape the
+// virtual root once this value is later joined against the real metadata
+// root. path.Clean on a rooted ("/...") path discards a ".." that would
+// otherwise go above root, which is exactly the containment this needs.
 func sanitizeVirtualPath(p string) string {
 	p = strings.ReplaceAll(p, `\`, "/")
 	p = driveLetterRe.ReplaceAllString(p, "$1")
@@ -1000,7 +1012,7 @@ func sanitizeVirtualPath(p string) string {
 	if !strings.HasPrefix(p, "/") {
 		p = "/" + p
 	}
-	return p
+	return path.Clean(p)
 }
 
 // ensurePersistentNzb moves the NZB file to a persistent location in the OS
@@ -1171,13 +1183,17 @@ func (s *Service) buildCategoryPath(category string) string {
 }
 
 // resolveCategoryPath performs the actual category-to-directory resolution.
+// category is client-reachable (SABnzbd-emulation/Stremio/manual-upload
+// endpoints), so every fallback that returns it directly as a directory name
+// must go through SanitizePathSegment first - it becomes a real virtualDir
+// component via calculateProcessVirtualDir, not just a config lookup key.
 func (s *Service) resolveCategoryPath(category string) string {
 	cfg := s.configGetter()
 	if cfg == nil || len(cfg.SABnzbd.Categories) == 0 {
 		if strings.EqualFold(category, config.DefaultCategoryName) {
 			return config.DefaultCategoryDir
 		}
-		return category
+		return importerutils.SanitizePathSegment(category)
 	}
 
 	for _, cat := range cfg.SABnzbd.Categories {
@@ -1188,11 +1204,12 @@ func (s *Service) resolveCategoryPath(category string) string {
 			if strings.EqualFold(category, config.DefaultCategoryName) {
 				return config.DefaultCategoryDir
 			}
-			return category
+			return importerutils.SanitizePathSegment(category)
 		}
 	}
 
-	return category
+	// category not found in configuration
+	return importerutils.SanitizePathSegment(category)
 }
 
 // resolveIndexerFromArrs asks the ARRs service to resolve the indexer for a

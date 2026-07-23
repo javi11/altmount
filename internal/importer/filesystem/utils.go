@@ -13,6 +13,39 @@ import (
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 )
 
+// normalizeAndSplitFilename normalizes a poster/NZB-controlled filename
+// (backslashes to slashes, then filepath.Clean) and splits it into a
+// directory portion and a base name. filepath.Clean alone does NOT strip a
+// leading ".." from a relative path - it only clamps traversal for absolute
+// paths - so a filename like "../../../etc/passwd" survives Clean unchanged
+// once the leading slash is trimmed (which both callers of this function
+// did before this fix, immediately undoing any protection Clean might have
+// offered). Any directory segment that is ".." (or ".", or empty - e.g. from
+// a doubled slash) is rejected by discarding the whole directory portion,
+// collapsing the entry to a flat filename in the caller's base directory
+// rather than letting it walk upward. Same fail-safe posture already used
+// for archive-internal paths (importer/archive/rar and sevenzip) and for
+// SABnzbd category names (importer/utils.SanitizePathSegment).
+func normalizeAndSplitFilename(rawFilename string) (dir, name string) {
+	normalized := strings.ReplaceAll(rawFilename, "\\", "/")
+	normalized = filepath.Clean(normalized)
+	normalized = strings.TrimPrefix(normalized, "/")
+
+	dir = filepath.ToSlash(filepath.Dir(normalized))
+	name = filepath.Base(normalized)
+
+	if dir != "." {
+		for part := range strings.SplitSeq(dir, "/") {
+			if part == ".." || part == "." || part == "" {
+				dir = "."
+				break
+			}
+		}
+	}
+
+	return dir, name
+}
+
 // CalculateVirtualDirectory determines the virtual directory path based on NZB file location
 func CalculateVirtualDirectory(nzbPath, relativePath string) string {
 	if relativePath == "" {
@@ -149,12 +182,7 @@ func CreateDirectoriesForFiles(virtualDir string, files []parser.ParsedFile, met
 	dirs := make(map[string]bool)
 
 	for _, file := range files {
-		normalizedFilename := strings.ReplaceAll(file.Filename, "\\", "/")
-		normalizedFilename = filepath.Clean(normalizedFilename)
-		normalizedFilename = strings.TrimPrefix(normalizedFilename, "/")
-
-		dir := filepath.ToSlash(filepath.Dir(normalizedFilename))
-		name := filepath.Base(normalizedFilename)
+		dir, name := normalizeAndSplitFilename(file.Filename)
 
 		// Check for redundant nesting (e.g. file.mkv/file.mkv)
 		// If the last directory component matches the filename, flatten the structure
@@ -191,12 +219,7 @@ func CreateDirectoriesForFiles(virtualDir string, files []parser.ParsedFile, met
 
 // DetermineFileLocation determines where a file should be placed in the virtual structure
 func DetermineFileLocation(file parser.ParsedFile, baseDir string) (parentPath, filename string) {
-	normalizedFilename := strings.ReplaceAll(file.Filename, "\\", "/")
-	normalizedFilename = filepath.Clean(normalizedFilename)
-	normalizedFilename = strings.TrimPrefix(normalizedFilename, "/")
-
-	dir := filepath.ToSlash(filepath.Dir(normalizedFilename))
-	name := filepath.Base(normalizedFilename)
+	dir, name := normalizeAndSplitFilename(file.Filename)
 
 	// Check for redundant nesting (e.g. file.mkv/file.mkv)
 	// If the last directory component matches the filename, flatten the structure

@@ -24,6 +24,7 @@ import (
 	"github.com/javi11/altmount/internal/importer/multifile"
 	"github.com/javi11/altmount/internal/importer/parser"
 	"github.com/javi11/altmount/internal/importer/singlefile"
+	importerutils "github.com/javi11/altmount/internal/importer/utils"
 	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
 	"github.com/javi11/altmount/internal/importer/validation"
 	"github.com/javi11/altmount/internal/metadata"
@@ -541,16 +542,8 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 		}
 		var categoryStr string
 		if category != nil && *category != "" {
-			categoryStr = *category
 			// Sanitize category to prevent path traversal.
-			categoryStr = strings.ReplaceAll(categoryStr, `\`, "/")
-			categoryStr = strings.Trim(categoryStr, "/")
-			for _, part := range strings.Split(categoryStr, "/") {
-				if part == ".." || part == "." {
-					categoryStr = ""
-					break
-				}
-			}
+			categoryStr = importerutils.SanitizePathSegment(*category)
 		}
 		nzbStoreDir := filepath.Join(configDir, ".nzbs", categoryStr)
 		allowedBase := filepath.Clean(configDir) + string(os.PathSeparator)

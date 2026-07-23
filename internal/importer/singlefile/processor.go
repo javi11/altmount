@@ -42,7 +42,12 @@ func ProcessSingleFile(
 	// If a healthy file already exists at this path, a _1, _2, … suffix is
 	// appended to the stem so the new import lands alongside the existing one
 	// rather than being silently skipped.
-	virtualFilePath := filepath.Join(virtualDir, file.Filename)
+	// file.Filename is poster-controlled (pulled straight out of the NZB), so
+	// route it through DetermineFileLocation rather than joining it directly -
+	// that's the same traversal-safe normalization multifile's processor
+	// already relies on for the identical input.
+	parentPath, safeFilename := filesystem.DetermineFileLocation(file, virtualDir)
+	virtualFilePath := filepath.Join(parentPath, safeFilename)
 	virtualFilePath = strings.ReplaceAll(virtualFilePath, string(filepath.Separator), "/")
 	virtualFilePath = filesystem.EnsureUniqueVirtualPath(virtualFilePath, metadataService)
 
