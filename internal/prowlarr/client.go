@@ -52,6 +52,43 @@ type NZBResult struct {
 	Indexer     string
 }
 
+// Indexer describes a single Prowlarr indexer, used to let users pick which
+// indexers the Stremio addon should search.
+type Indexer struct {
+	ID       int64  `json:"id"`
+	Name     string `json:"name"`
+	Enable   bool   `json:"enable"`
+	Protocol string `json:"protocol"`
+}
+
+// GetIndexers returns the usenet indexers configured in Prowlarr, sorted by name.
+// Torrent indexers are omitted because AltMount only queues usenet releases.
+func (c *Client) GetIndexers(ctx context.Context) ([]Indexer, error) {
+	outputs, err := c.prowlarr.GetIndexersContext(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("prowlarr: get indexers failed: %w", err)
+	}
+
+	indexers := make([]Indexer, 0, len(outputs))
+	for _, o := range outputs {
+		if o == nil || string(o.Protocol) != "usenet" {
+			continue
+		}
+		indexers = append(indexers, Indexer{
+			ID:       o.ID,
+			Name:     o.Name,
+			Enable:   o.Enable,
+			Protocol: string(o.Protocol),
+		})
+	}
+
+	sort.Slice(indexers, func(i, j int) bool {
+		return strings.ToLower(indexers[i].Name) < strings.ToLower(indexers[j].Name)
+	})
+
+	return indexers, nil
+}
+
 // matchesAnyKeyword returns true when title contains at least one of the
 // keywords (case-insensitive). Returns true when keywords is empty (no filter).
 func matchesAnyKeyword(title string, keywords []string) bool {
@@ -205,18 +242,20 @@ func InferReleaseMeta(title string) ReleaseMeta {
 // Search queries Prowlarr for NZB releases matching the given IMDB ID and categories.
 // searchType should be "movie", "tvsearch", or "search".
 // season and episode are optional (pass 0 to omit); used for tvsearch to scope results to a specific episode.
+// indexers optionally restricts the search to specific indexer IDs (empty = all indexers).
 // Results are returned sorted by publish date descending (newest first).
-func (c *Client) Search(ctx context.Context, imdbID, searchType string, categories []int, season, episode int) ([]NZBResult, error) {
-	return c.searchWithID(ctx, "ImdbId", imdbID, searchType, categories, season, episode)
+func (c *Client) Search(ctx context.Context, imdbID, searchType string, categories, indexers []int, season, episode int) ([]NZBResult, error) {
+	return c.searchWithID(ctx, "ImdbId", imdbID, searchType, categories, indexers, season, episode)
 }
 
 // SearchByTVDB queries Prowlarr for NZB releases using TVDB ID and categories.
 // This is primarily used by TV series lookups when indexers support TvdbId but not ImdbId.
-func (c *Client) SearchByTVDB(ctx context.Context, tvdbID, searchType string, categories []int, season, episode int) ([]NZBResult, error) {
-	return c.searchWithID(ctx, "TvdbId", tvdbID, searchType, categories, season, episode)
+// indexers optionally restricts the search to specific indexer IDs (empty = all indexers).
+func (c *Client) SearchByTVDB(ctx context.Context, tvdbID, searchType string, categories, indexers []int, season, episode int) ([]NZBResult, error) {
+	return c.searchWithID(ctx, "TvdbId", tvdbID, searchType, categories, indexers, season, episode)
 }
 
-func (c *Client) searchWithID(ctx context.Context, idField, idValue, searchType string, categories []int, season, episode int) ([]NZBResult, error) {
+func (c *Client) searchWithID(ctx context.Context, idField, idValue, searchType string, categories, indexers []int, season, episode int) ([]NZBResult, error) {
 	var query strings.Builder
 	if idValue != "" {
 		query.WriteString("{" + idField + ":" + idValue + "}")
@@ -233,10 +272,16 @@ func (c *Client) searchWithID(ctx context.Context, idField, idValue, searchType 
 		cats[i] = int64(cat)
 	}
 
+	idxs := make([]int64, len(indexers))
+	for i, idx := range indexers {
+		idxs[i] = int64(idx)
+	}
+
 	input := starrprowlarr.SearchInput{
 		Query:      query.String(),
 		Type:       searchType,
 		Categories: cats,
+		IndexerIDs: idxs,
 	}
 
 	releases, err := c.prowlarr.SearchContext(ctx, input)

@@ -666,8 +666,17 @@ export interface ProwlarrConfig {
 	host: string;
 	api_key: string;
 	categories: number[];
+	indexers?: number[];
 	languages: string[];
 	qualities: string[];
+}
+
+// A single Prowlarr indexer returned by POST /api/prowlarr/indexers
+export interface ProwlarrIndexer {
+	id: number;
+	name: string;
+	enable: boolean;
+	protocol: string;
 }
 
 // Stremio integration configuration

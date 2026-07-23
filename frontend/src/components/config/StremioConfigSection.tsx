@@ -1,7 +1,12 @@
-import { Check, Copy, ExternalLink, Save, Tv, X } from "lucide-react";
+import { Check, Copy, ExternalLink, RefreshCw, Save, Tv, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { copyToClipboard } from "../../lib/utils";
-import type { ConfigResponse, ProwlarrConfig, StremioConfig } from "../../types/config";
+import type {
+	ConfigResponse,
+	ProwlarrConfig,
+	ProwlarrIndexer,
+	StremioConfig,
+} from "../../types/config";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
 
 interface TagInputProps {
@@ -84,6 +89,7 @@ const DEFAULT_PROWLARR: ProwlarrConfig = {
 	host: "http://localhost:9696",
 	api_key: "",
 	categories: [2000, 2010, 2030, 2040, 2045, 2060, 5000, 5010, 5030, 5040],
+	indexers: [],
 	languages: [],
 	qualities: [],
 };
@@ -110,6 +116,9 @@ export function StremioConfigSection({
 	});
 	const [hasChanges, setHasChanges] = useState(false);
 	const [urlCopied, setUrlCopied] = useState(false);
+	const [indexers, setIndexers] = useState<ProwlarrIndexer[]>([]);
+	const [loadingIndexers, setLoadingIndexers] = useState(false);
+	const [indexersError, setIndexersError] = useState<string | null>(null);
 
 	useEffect(() => {
 		setFormData({
@@ -141,6 +150,37 @@ export function StremioConfigSection({
 		const updated = { ...formData, prowlarr: { ...formData.prowlarr, ...patch } };
 		setFormData(updated);
 		markChanged(updated);
+	};
+
+	const loadIndexers = useCallback(async () => {
+		setLoadingIndexers(true);
+		setIndexersError(null);
+		try {
+			const response = await fetch("/api/prowlarr/indexers", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					host: formData.prowlarr?.host ?? "",
+					api_key: formData.prowlarr?.api_key ?? "",
+				}),
+			});
+			const data = await response.json();
+			if (data.success) {
+				setIndexers((data.data as ProwlarrIndexer[]) ?? []);
+			} else {
+				setIndexersError(data.error?.message || data.error || "Failed to load indexers");
+			}
+		} catch (_error) {
+			setIndexersError("Network error while loading indexers");
+		} finally {
+			setLoadingIndexers(false);
+		}
+	}, [formData.prowlarr?.host, formData.prowlarr?.api_key]);
+
+	const toggleIndexer = (id: number) => {
+		const current = formData.prowlarr?.indexers ?? [];
+		const next = current.includes(id) ? current.filter((i) => i !== id) : [...current, id];
+		updateProwlarr({ indexers: next });
 	};
 
 	const handleSave = async () => {
@@ -347,6 +387,68 @@ export function StremioConfigSection({
 								<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/50 text-xs">
 									Newznab category IDs. Press Enter or comma to add. Defaults: 2000, 2010, 2030,
 									2040, 2045, 2060 (Movies) and 5000, 5010, 5030, 5040 (TV).
+								</p>
+							</fieldset>
+
+							<fieldset className="fieldset min-w-0">
+								<legend className="fieldset-legend">Indexers</legend>
+								<div className="flex flex-wrap items-center gap-3">
+									<button
+										type="button"
+										className="btn btn-sm btn-outline"
+										onClick={loadIndexers}
+										disabled={isReadOnly || loadingIndexers || !formData.prowlarr?.host}
+									>
+										{loadingIndexers ? (
+											<LoadingSpinner size="sm" />
+										) : (
+											<RefreshCw className="h-4 w-4" />
+										)}
+										{loadingIndexers ? "Loading..." : "Load from Prowlarr"}
+									</button>
+									{(formData.prowlarr?.indexers?.length ?? 0) > 0 && (
+										<span className="text-base-content/60 text-xs">
+											{formData.prowlarr?.indexers?.length} selected
+										</span>
+									)}
+								</div>
+
+								{indexersError && (
+									<div className="alert alert-error mt-3 py-2">
+										<X className="h-4 w-4" />
+										<span className="text-xs">{indexersError}</span>
+									</div>
+								)}
+
+								{indexers.length > 0 && (
+									<div className="mt-3 flex max-h-64 flex-col gap-1 overflow-y-auto rounded-box border border-base-300 bg-base-100 p-2">
+										{indexers.map((idx) => {
+											const selected = formData.prowlarr?.indexers?.includes(idx.id) ?? false;
+											return (
+												<label
+													key={idx.id}
+													className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-base-200"
+												>
+													<input
+														type="checkbox"
+														className="checkbox checkbox-sm checkbox-primary"
+														checked={selected}
+														disabled={isReadOnly}
+														onChange={() => toggleIndexer(idx.id)}
+													/>
+													<span className="min-w-0 flex-1 truncate text-sm">{idx.name}</span>
+													{!idx.enable && (
+														<span className="badge badge-ghost badge-xs">disabled</span>
+													)}
+												</label>
+											);
+										})}
+									</div>
+								)}
+
+								<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/50 text-xs">
+									Restrict searches to specific Prowlarr indexers. Leave all unchecked to search{" "}
+									<strong>every</strong> indexer. Only usenet indexers are listed.
 								</p>
 							</fieldset>
 
