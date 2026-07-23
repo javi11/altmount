@@ -189,22 +189,29 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	// Apply global middleware — derive allowed CORS origins from COOKIE_DOMAIN env var,
 	// explicit api.allowed_origins config, or fall back to wildcard.
 	corsOrigins := "*"
+	originsConfigured := false
 
 	if cookieDomain := os.Getenv("COOKIE_DOMAIN"); cookieDomain != "" {
 		// Allow both http and https on the configured domain
 		corsOrigins = "http://" + cookieDomain + ",https://" + cookieDomain
+		originsConfigured = true
 	}
 
 	if cfg != nil && len(cfg.API.AllowedOrigins) > 0 {
 		// Explicit config overrides the env-derived value
 		corsOrigins = strings.Join(cfg.API.AllowedOrigins, ",")
+		originsConfigured = true
 	}
 
+	// AllowCredentials must never be combined with a wildcard AllowOrigins — that pairing
+	// is invalid per the Fetch/CORS spec, and some client/proxy stacks paper over it by
+	// reflecting the caller's real Origin, effectively granting any site credentialed
+	// access. Only allow credentials once a real, explicit origin list is configured.
 	api.Use(cors.New(cors.Config{
 		AllowOrigins:     corsOrigins,
 		AllowHeaders:     "Origin, Content-Type, Accept, Authorization",
 		AllowMethods:     "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-		AllowCredentials: true,
+		AllowCredentials: originsConfigured,
 	}))
 	api.Use(recover.New())
 
