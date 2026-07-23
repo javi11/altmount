@@ -144,9 +144,18 @@ func (n *NzbDavImporter) performImport(ctx context.Context, epoch int64, dbPath 
 			os.Remove(dbPath)
 		}
 
-		// Drain any remaining items from channels to prevent parser goroutine leaks
+		// Drain any remaining items from channels to prevent parser goroutine leaks.
+		// Draining the *ParsedNzb envelope alone isn't enough: Content is backed
+		// by an io.Pipe whose writer goroutine (in parser.go's parseBlobs/
+		// writeReleaseNzb) blocks on Write until something reads or closes the
+		// reader side. On cancellation, closing Content here unblocks that
+		// writer immediately instead of leaking its goroutine and open blob
+		// file descriptor forever waiting for a read that will never come.
 		go func() {
-			for range nzbChan {
+			for res := range nzbChan {
+				if closer, ok := res.Content.(io.Closer); ok {
+					_ = closer.Close()
+				}
 			}
 		}()
 		go func() {

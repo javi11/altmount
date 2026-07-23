@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,8 +34,17 @@ type Worker struct {
 
 	// firstSeen tracks when a failed import item was first seen
 	// key: instanceName|queueID
-	firstSeen   map[string]time.Time
-	firstSeenMu sync.RWMutex
+	// Entries are only ever explicitly deleted once a ghost is confirmed
+	// (see isGhostByPathGone) - if a queue item instead vanishes for any
+	// other reason (transient FUSE hiccup resolves, item completes/gets
+	// removed by the *arr app) before that, its entry is never revisited
+	// and never deleted, growing this map for the life of the process.
+	// ghostSweepMu/lastGhostSweep bound that via an opportunistic sweep
+	// piggybacked on normal ghost checks, rather than a dedicated goroutine.
+	firstSeen      map[string]time.Time
+	firstSeenMu    sync.RWMutex
+	lastGhostSweep time.Time
+	ghostSweepMu   sync.Mutex
 
 	// breaker counts how many times AltMount has acted on a given target (an
 	// episode/movie/album/book that keeps failing import), keyed by a stable
@@ -268,10 +278,40 @@ func (w *Worker) checkGhostByImportHistory(ctx context.Context, outputPath strin
 	return false
 }
 
+// ghostEntryMaxAge is a generous upper bound - well beyond
+// ghostObservationWindow - past which a firstSeen entry is considered
+// abandoned (its queue item stopped being checked for some reason other
+// than a confirmed ghost) and swept rather than left to leak forever.
+const ghostEntryMaxAge = time.Hour
+
+// sweepStaleGhostEntries removes firstSeen entries older than
+// ghostEntryMaxAge, at most once per minute. Piggybacked on ordinary ghost
+// checks (see isGhostByPathGone) instead of a dedicated goroutine, since
+// this worker already gets called on a regular interval for real queue
+// items.
+func (w *Worker) sweepStaleGhostEntries() {
+	w.ghostSweepMu.Lock()
+	if time.Since(w.lastGhostSweep) < time.Minute {
+		w.ghostSweepMu.Unlock()
+		return
+	}
+	w.lastGhostSweep = time.Now()
+	w.ghostSweepMu.Unlock()
+
+	cutoff := time.Now().Add(-ghostEntryMaxAge)
+	w.firstSeenMu.Lock()
+	defer w.firstSeenMu.Unlock()
+	maps.DeleteFunc(w.firstSeen, func(_ string, seenTime time.Time) bool {
+		return seenTime.Before(cutoff)
+	})
+}
+
 // isGhostByPathGone checks if a queue item is a ghost by verifying the source
 // path no longer exists. Applies safety checks to avoid false positives from
 // transient FUSE mount issues or broken symlinks.
 func (w *Worker) isGhostByPathGone(ctx context.Context, outputPath string, queueID int64, cfg *config.Config, instanceName, title string) bool {
+	w.sweepStaleGhostEntries()
+
 	if outputPath == "" {
 		return false
 	}

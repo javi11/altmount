@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -20,6 +21,7 @@ type Client struct {
 	prowlarr *starrprowlarr.Prowlarr
 	apiKey   string
 	http     *http.Client
+	host     string
 }
 
 // NewClient creates a new Prowlarr client. The supplied httpClient is reused
@@ -34,12 +36,14 @@ func NewClient(host, apiKey string, httpClient *http.Client) *Client {
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
-	cfg := starr.New(apiKey, strings.TrimRight(host, "/"), timeout)
+	trimmedHost := strings.TrimRight(host, "/")
+	cfg := starr.New(apiKey, trimmedHost, timeout)
 	cfg.Client = httpClient
 	return &Client{
 		prowlarr: starrprowlarr.New(cfg),
 		apiKey:   apiKey,
 		http:     httpClient,
+		host:     trimmedHost,
 	}
 }
 
@@ -219,13 +223,21 @@ func (c *Client) SearchByTVDB(ctx context.Context, tvdbID, searchType string, ca
 func (c *Client) searchWithID(ctx context.Context, idField, idValue, searchType string, categories []int, season, episode int) ([]NZBResult, error) {
 	var query strings.Builder
 	if idValue != "" {
-		query.WriteString("{" + idField + ":" + idValue + "}")
+		query.WriteString("{")
+		query.WriteString(idField)
+		query.WriteString(":")
+		query.WriteString(idValue)
+		query.WriteString("}")
 	}
 	if season > 0 {
-		query.WriteString("{Season:" + strconv.Itoa(season) + "}")
+		query.WriteString("{Season:")
+		query.WriteString(strconv.Itoa(season))
+		query.WriteString("}")
 	}
 	if episode > 0 {
-		query.WriteString("{Episode:" + strconv.Itoa(episode) + "}")
+		query.WriteString("{Episode:")
+		query.WriteString(strconv.Itoa(episode))
+		query.WriteString("}")
 	}
 
 	cats := make([]int64, len(categories))
@@ -265,13 +277,24 @@ func (c *Client) searchWithID(ctx context.Context, idField, idValue, searchType 
 	return results, nil
 }
 
-// DownloadNZB fetches the NZB file content from the given Prowlarr download URL.
+// DownloadNZB fetches the NZB file content from the given download URL.
+//
+// downloadURL comes from a Prowlarr search result and is indexer-supplied
+// data, not something AltMount controls - depending on an indexer's own
+// "download link resolution" setting in Prowlarr, it can be a link proxied
+// through Prowlarr itself, or a direct link straight to that indexer's own
+// host. Prowlarr's own API key is only ever sent when the URL's host still
+// matches the configured Prowlarr host; a malicious or compromised indexer
+// returning a direct link to an attacker-controlled host must never receive
+// it.
 func (c *Client) DownloadNZB(ctx context.Context, downloadURL string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("prowlarr: create download request: %w", err)
 	}
-	req.Header.Set("X-Api-Key", c.apiKey)
+	if sameHost(downloadURL, c.host) {
+		req.Header.Set("X-Api-Key", c.apiKey)
+	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -285,4 +308,26 @@ func (c *Client) DownloadNZB(ctx context.Context, downloadURL string) ([]byte, e
 	}
 
 	return io.ReadAll(io.LimitReader(resp.Body, 50*1024*1024))
+}
+
+// sameHost reports whether rawURL's host:port matches configuredHost's.
+// Comparison is host-only (scheme and path are ignored) so this stays valid
+// whether the configured host was entered with or without an explicit
+// scheme/port. An unparsable URL or a configured host with no host component
+// both fail closed (return false), since either means the caller can't prove
+// the destination is actually Prowlarr.
+func sameHost(rawURL, configuredHost string) bool {
+	target, err := url.Parse(rawURL)
+	if err != nil || target.Host == "" {
+		return false
+	}
+	configured, err := url.Parse(configuredHost)
+	if err != nil || configured.Host == "" {
+		// configuredHost may have been supplied without a scheme (e.g. "prowlarr:9696").
+		configured, err = url.Parse("//" + configuredHost)
+		if err != nil || configured.Host == "" {
+			return false
+		}
+	}
+	return strings.EqualFold(target.Host, configured.Host)
 }
