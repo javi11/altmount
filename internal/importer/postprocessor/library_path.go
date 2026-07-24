@@ -43,5 +43,16 @@ func buildLibraryRelPath(relPath, completeDir, category string) string {
 		parts = append(parts, category)
 	}
 	parts = append(parts, relPath)
-	return path.Clean(path.Join(parts...))
+
+	// category/relPath are client-reachable (SABnzbd-emulation/Stremio/
+	// manual-upload) and neither is validated before reaching here.
+	// path.Clean/path.Join only clamp ".." for an absolute (leading "/")
+	// path - a relative result would let a smuggled "../../.." survive
+	// straight through to the real filesystem join in the symlink/STRM
+	// writers downstream. Rooting the join before cleaning, then trimming
+	// the root back off, forces that clamp regardless of how deep the
+	// traversal attempt goes.
+	joined := path.Join(parts...)
+	cleaned := path.Clean("/" + joined)
+	return strings.TrimPrefix(cleaned, "/")
 }

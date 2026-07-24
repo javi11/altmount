@@ -85,6 +85,40 @@ func TestBuildLibraryRelPath(t *testing.T) {
 			category:    "Movies",
 			want:        "complete/Movies/file.mkv",
 		},
+		// category and relPath are client-reachable (SABnzbd-emulation/
+		// Stremio/manual-upload endpoints), and the result of this function
+		// is joined directly against *cfg.Import.ImportDir by the symlink
+		// and STRM writers - a "../../.." that survives here becomes a real
+		// escape from ImportDir (an arbitrary-delete-then-symlink primitive
+		// in the symlink writer's case). See also TestBuildLibraryRelPath_Traversal.
+		{
+			name:        "traversal via category clamped at root",
+			relPath:     "file.mkv",
+			completeDir: "",
+			category:    "../../../etc",
+			want:        "etc/file.mkv",
+		},
+		{
+			name:        "traversal via relPath clamped at root",
+			relPath:     "../../../etc/passwd",
+			completeDir: "",
+			category:    "",
+			want:        "etc/passwd",
+		},
+		{
+			name:        "traversal via completeDir clamped at root",
+			relPath:     "file.mkv",
+			completeDir: "../../etc",
+			category:    "",
+			want:        "etc/file.mkv",
+		},
+		{
+			name:        "traversal deep enough to target root itself",
+			relPath:     "../../../../../../../../etc/passwd",
+			completeDir: "",
+			category:    "",
+			want:        "etc/passwd",
+		},
 	}
 
 	for _, tt := range tests {

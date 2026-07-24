@@ -105,13 +105,35 @@ func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string, pro
 // persisted metadata, and serve-time volume following) sees a canonical name. Call
 // it immediately after nzbparser.Parse and before any code reads NzbFile.Filename.
 // The raw subject remains available on NzbFile.Subject.
+//
+// Also neutralizes directory traversal: the filename comes straight from an
+// NZB poster (any indexer an *arr app auto-grabs from can serve one with no
+// human review), and downstream consumers build real filesystem/metadata
+// paths from it via filepath.Join, which does not reject a "../" segment on
+// its own. Rather than reject the whole file, a filename containing one is
+// collapsed to its base name only, discarding any directory component -
+// still importable, just flattened into the release's own folder instead of
+// being allowed to walk outside it.
 func SanitizeNzbFilenames(n *nzbparser.Nzb) {
 	if n == nil {
 		return
 	}
 	for i := range n.Files {
-		n.Files[i].Filename = nzbtrim.TrimSurroundingQuotes(n.Files[i].Filename)
+		name := nzbtrim.TrimSurroundingQuotes(n.Files[i].Filename)
+		n.Files[i].Filename = sanitizeTraversal(name)
 	}
+}
+
+// sanitizeTraversal collapses name to its base component if any '/'- or
+// '\'-separated segment is ".." or "." - see SanitizeNzbFilenames for why.
+func sanitizeTraversal(name string) string {
+	normalized := strings.ReplaceAll(name, `\`, "/")
+	for _, part := range strings.Split(normalized, "/") {
+		if part == ".." || part == "." {
+			return filepath.Base(normalized)
+		}
+	}
+	return name
 }
 
 // ParseNzb processes an already-parsed *nzbparser.Nzb, performing all network

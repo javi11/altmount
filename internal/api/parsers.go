@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/subtle"
 	"strconv"
 	"time"
 
@@ -95,7 +96,7 @@ func (s *Server) validateAPIKey(c *fiber.Ctx, apiKey string) bool {
 	if s.configManager != nil {
 		cfg := s.configManager.GetConfig()
 		if cfg.API.KeyOverride != "" && len(cfg.API.KeyOverride) == 32 {
-			if apiKey == cfg.API.KeyOverride {
+			if subtle.ConstantTimeCompare([]byte(apiKey), []byte(cfg.API.KeyOverride)) == 1 {
 				return true
 			}
 		}

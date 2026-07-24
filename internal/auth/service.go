@@ -2,8 +2,6 @@ package auth
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -35,8 +33,7 @@ type Config struct {
 	CookieSameSite         http.SameSite // SameSite cookie attribute
 
 	// Direct authentication
-	DirectAuthEnabled bool   // Enable direct username/password authentication
-	DirectAuthSalt    string // Salt for direct authentication
+	DirectAuthEnabled bool // Enable direct username/password authentication
 
 	// Application settings
 	Issuer   string // JWT issuer
@@ -78,17 +75,6 @@ func LoadConfigFromEnv() (*Config, error) {
 		// Explicit env var disables auto-detection and forces a fixed value
 		config.CookieSecureAutoDetect = false
 		config.CookieSecure = secure != "false"
-	}
-
-	if salt := os.Getenv("DIRECT_AUTH_SALT"); salt != "" {
-		config.DirectAuthSalt = salt
-	} else {
-		// Generate a random salt for direct authentication
-		salt, err := generateRandomSalt()
-		if err != nil {
-			return nil, fmt.Errorf("failed to generate random salt: %w", err)
-		}
-		config.DirectAuthSalt = salt
 	}
 
 	if directAuth := os.Getenv("DIRECT_AUTH_ENABLED"); directAuth == "false" {
@@ -441,11 +427,3 @@ func (d *directCredChecker) Check(user, password string) (bool, error) {
 	return true, nil
 }
 
-// generateRandomSalt generates a cryptographically random salt for authentication
-func generateRandomSalt() (string, error) {
-	bytes := make([]byte, 32)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", fmt.Errorf("failed to generate random bytes: %w", err)
-	}
-	return hex.EncodeToString(bytes), nil
-}

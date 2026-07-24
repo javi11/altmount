@@ -18,6 +18,7 @@ import (
 	"github.com/javi11/altmount/internal/database"
 	internalerrors "github.com/javi11/altmount/internal/errors"
 	"github.com/javi11/altmount/internal/httpclient"
+	importerutils "github.com/javi11/altmount/internal/importer/utils"
 	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
 	"github.com/javi11/altmount/internal/nzbfile"
 	"github.com/javi11/altmount/internal/nzblnk"
@@ -1373,14 +1374,7 @@ func (s *Server) handleDownloadNZB(c *fiber.Ctx) error {
 			}
 			var categoryStr string
 			if item.Category != nil && *item.Category != "" {
-				categoryStr = strings.ReplaceAll(*item.Category, `\`, "/")
-				categoryStr = strings.Trim(categoryStr, "/")
-				for _, part := range strings.Split(categoryStr, "/") {
-					if part == ".." || part == "." {
-						categoryStr = ""
-						break
-					}
-				}
+				categoryStr = importerutils.SanitizePathSegment(*item.Category)
 			}
 			nzbBase := nzbtrim.TrimNzbExtension(filepath.Base(item.NzbPath))
 			storeRef := filepath.Join(configDir, ".nzbs", categoryStr, fmt.Sprintf("%d-%s.nzbz", item.ID, nzbBase))

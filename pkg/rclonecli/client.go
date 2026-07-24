@@ -390,8 +390,9 @@ func (m *Manager) createConfig(ctx context.Context, configName, webdavURL string
 	req := RCRequest{
 		Command: "config/create",
 		Args: map[string]any{
-			"name": configName,
-			"type": "webdav",
+			"name":    configName,
+			"type":    "webdav",
+			"obscure": true,
 			"parameters": map[string]any{
 				"url":             webdavURL,
 				"vendor":          "other",

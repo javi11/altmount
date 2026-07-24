@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/javi11/altmount/internal/database"
+	importerutils "github.com/javi11/altmount/internal/importer/utils"
 	"github.com/javi11/altmount/internal/nzbdav"
 )
 
@@ -144,9 +145,18 @@ func (n *NzbDavImporter) performImport(ctx context.Context, epoch int64, dbPath 
 			os.Remove(dbPath)
 		}
 
-		// Drain any remaining items from channels to prevent parser goroutine leaks
+		// Drain any remaining items from channels to prevent parser goroutine leaks.
+		// Draining the *ParsedNzb envelope alone isn't enough: Content is backed
+		// by an io.Pipe whose writer goroutine (in parser.go's parseBlobs/
+		// writeReleaseNzb) blocks on Write until something reads or closes the
+		// reader side. On cancellation, closing Content here unblocks that
+		// writer immediately instead of leaking its goroutine and open blob
+		// file descriptor forever waiting for a read that will never come.
 		go func() {
-			for range nzbChan {
+			for res := range nzbChan {
+				if closer, ok := res.Content.(io.Closer); ok {
+					_ = closer.Close()
+				}
 			}
 		}()
 		go func() {
@@ -465,13 +475,17 @@ func (n *NzbDavImporter) createNzbFileAndPrepareItem(ctx context.Context, res *n
 
 	// Preserve nzbdav's folder layout verbatim so the imported mount mirrors
 	// the source tree. Parser supplies (Category, RelPath) as the two halves
-	// of the release's parent path.
-	targetCategory := res.Category
+	// of the release's parent path. Both come from the source NzbDav
+	// SQLite/blob store, which a malformed or maliciously crafted migration
+	// source could control - sanitized the same way Category is everywhere
+	// else it enters the system (see importer/utils.SanitizePathSegment),
+	// rather than joining it raw.
+	targetCategory := importerutils.SanitizePathSegment(res.Category)
 	if targetCategory == "" {
 		targetCategory = "other"
 	}
-	if res.RelPath != "" {
-		targetCategory = filepath.Join(targetCategory, res.RelPath)
+	if safeRelPath := importerutils.SanitizePathSegment(res.RelPath); safeRelPath != "" {
+		targetCategory = filepath.Join(targetCategory, safeRelPath)
 	}
 
 	priority := database.QueuePriorityNormal

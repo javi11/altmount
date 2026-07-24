@@ -2,6 +2,7 @@ package webdav
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"log/slog"
 	"mime"
@@ -314,7 +315,9 @@ func NewHandler(
 		} else {
 			// Check against dynamic credentials
 			currentUser, currentPass := authCreds.GetCredentials()
-			if username == currentUser && password == currentPass {
+			userMatch := subtle.ConstantTimeCompare([]byte(username), []byte(currentUser)) == 1
+			passMatch := subtle.ConstantTimeCompare([]byte(password), []byte(currentPass)) == 1
+			if userMatch && passMatch {
 				authenticated = true
 				effectiveUser = username
 				slog.DebugContext(r.Context(), "WebDAV basic auth succeeded", "user", effectiveUser)

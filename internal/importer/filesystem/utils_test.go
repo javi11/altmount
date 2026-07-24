@@ -233,3 +233,123 @@ func TestEnsureUniqueVirtualPath_UnhealthyNotDeduplicated(t *testing.T) {
 	result := EnsureUniqueVirtualPath("/complete/tv/show.S01E01.mkv", ms)
 	assert.Equal(t, "/complete/tv/show.S01E01.mkv", result)
 }
+
+// ---------------------------------------------------------------------------
+// DetermineFileLocation / normalizeAndSplitFilename — path-traversal guard
+//
+// file.Filename comes straight out of an NZB file entry (poster-controlled,
+// no human review before an *arr app auto-grabs it), so a ".." segment must
+// never survive into the virtual directory these functions build.
+// ---------------------------------------------------------------------------
+
+func TestDetermineFileLocation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		filename       string
+		baseDir        string
+		wantParentPath string
+		wantFilename   string
+	}{
+		{
+			name:           "flat filename unchanged",
+			filename:       "movie.mkv",
+			baseDir:        "/movies/MyMovie",
+			wantParentPath: "/movies/MyMovie",
+			wantFilename:   "movie.mkv",
+		},
+		{
+			name:           "legitimate subdirectory nesting preserved",
+			filename:       "subdir/episode.mkv",
+			baseDir:        "/shows/MyShow",
+			wantParentPath: "/shows/MyShow/subdir",
+			wantFilename:   "episode.mkv",
+		},
+		{
+			name:           "traversal collapses to baseDir, keeps base filename",
+			filename:       "../../../etc/passwd",
+			baseDir:        "/movies/MyMovie",
+			wantParentPath: "/movies/MyMovie",
+			wantFilename:   "passwd",
+		},
+		{
+			name:           "windows-style traversal collapses to baseDir",
+			filename:       `..\..\windows\evil.mkv`,
+			baseDir:        "/movies/MyMovie",
+			wantParentPath: "/movies/MyMovie",
+			wantFilename:   "evil.mkv",
+		},
+		{
+			name:           "traversal nested under a legitimate-looking subdir",
+			filename:       "subdir/../../etc/passwd",
+			baseDir:        "/movies/MyMovie",
+			wantParentPath: "/movies/MyMovie",
+			wantFilename:   "passwd",
+		},
+		{
+			name:           "redundant nesting still flattens (regression)",
+			filename:       "MyMovie/movie.mkv",
+			baseDir:        "/movies/MyMovie",
+			wantParentPath: "/movies/MyMovie",
+			wantFilename:   "movie.mkv",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			parentPath, filename := DetermineFileLocation(parser.ParsedFile{Filename: tt.filename}, tt.baseDir)
+			assert.Equal(t, tt.wantParentPath, parentPath, "parentPath")
+			assert.Equal(t, tt.wantFilename, filename, "filename")
+		})
+	}
+}
+
+func TestNormalizeAndSplitFilename(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		filename string
+		wantDir  string
+		wantName string
+	}{
+		{"flat filename", "movie.mkv", ".", "movie.mkv"},
+		{"legitimate subdir", "subdir/episode.mkv", "subdir", "episode.mkv"},
+		{"bare traversal segment", "../movie.mkv", ".", "movie.mkv"},
+		{"deep traversal", "../../../etc/passwd", ".", "passwd"},
+		{"backslash traversal", `..\..\evil.mkv`, ".", "evil.mkv"},
+		{"traversal after legitimate segment", "subdir/../../escape.mkv", ".", "escape.mkv"},
+		// filepath.Clean already collapses the redundant separator before the
+		// traversal check runs, so this is a legitimate single-level nesting,
+		// not a traversal case.
+		{"double slash collapses via Clean, not traversal", "a//b.mkv", "a", "b.mkv"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			dir, name := normalizeAndSplitFilename(tt.filename)
+			assert.Equal(t, tt.wantDir, dir, "dir")
+			assert.Equal(t, tt.wantName, name, "name")
+		})
+	}
+}
+
+func TestCreateDirectoriesForFiles_RejectsTraversal(t *testing.T) {
+	ms := newTestMetadataService(t)
+	virtualDir := "/movies/MyMovie"
+
+	files := []parser.ParsedFile{
+		{Filename: "../../../etc/passwd"},
+		{Filename: "legit/episode.mkv"},
+	}
+
+	require.NoError(t, CreateDirectoriesForFiles(virtualDir, files, ms))
+
+	// The traversal entry must not have created anything outside virtualDir -
+	// only the legitimate nested directory should exist.
+	assert.DirExists(t, ms.GetMetadataDirectoryPath(filepath.Join(virtualDir, "legit")))
+	assert.NoDirExists(t, ms.GetMetadataDirectoryPath("/etc"))
+}

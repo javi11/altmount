@@ -352,10 +352,24 @@ func (hw *HealthWorker) PerformBackgroundCheck(ctx context.Context, filePath str
 		return fmt.Errorf("health worker is not running")
 	}
 
-	// Start health check in background
-	go func() {
+	// Start health check in background. Tracked in hw.wg (like the main worker
+	// loop) so Stop() actually waits for it instead of returning while this is
+	// still running against the health repo / NNTP pool, and watches stopChan
+	// so a worker shutdown cancels it promptly rather than waiting out the
+	// full 10-minute timeout.
+	hw.wg.Go(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
+
+		done := make(chan struct{})
+		defer close(done)
+		go func() {
+			select {
+			case <-hw.stopChan:
+				cancel()
+			case <-done:
+			}
+		}()
 
 		checkErr := hw.performDirectCheck(ctx, filePath)
 		if checkErr != nil {
@@ -379,7 +393,7 @@ func (hw *HealthWorker) PerformBackgroundCheck(ctx context.Context, filePath str
 				slog.ErrorContext(ctx, "Failed to update status after failed check", "file_path", filePath, "error", updateErr)
 			}
 		}
-	}()
+	})
 
 	return nil
 }

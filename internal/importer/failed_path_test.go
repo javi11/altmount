@@ -100,3 +100,33 @@ func TestMoveToFailedFolder_RetryOfFailedItemInCategoryIsNoop(t *testing.T) {
 	assert.FileExists(t, failedNzb)
 	assert.NoFileExists(t, filepath.Join(failedDir, "9-Show S01E01.nzb"))
 }
+
+// TestMoveToFailedFolder_CategoryTraversalContained covers a real fix:
+// item.Category is client-reachable (SABnzbd-emulation/Stremio/manual-upload
+// endpoints) and used to be joined into failedDir with no sanitization,
+// letting a category like "../../../tmp/evil" create a real directory
+// outside the intended failed-NZB tree. item.NzbPath deliberately points at
+// a nonexistent source, so MoveToFailedFolder returns right after MkdirAll
+// (see its own "maybe it was already moved" early return) without ever
+// reaching the nil s.database this test's Service intentionally has - only
+// the directory-creation side effect is under test here.
+func TestMoveToFailedFolder_CategoryTraversalContained(t *testing.T) {
+	s, failedRoot := newFailedFolderTestService(t)
+	// failedRoot's parent is the temp configDir - traversing up from
+	// failedRoot with enough ".." would otherwise land back inside it, so
+	// use a category that reliably escapes to configDir's own parent.
+	maliciousCategory := "../../../../../../../../tmp/altmount-test-escape-marker"
+
+	item := &database.ImportQueueItem{
+		ID:       1,
+		NzbPath:  filepath.Join(t.TempDir(), "does-not-exist.nzb"),
+		Category: &maliciousCategory,
+	}
+	require.NoError(t, s.MoveToFailedFolder(context.Background(), item))
+
+	assert.NoDirExists(t, "/tmp/altmount-test-escape-marker",
+		"a traversal category must not create a real directory outside the failed-NZB tree")
+	// The sanitizer rejects the whole category on any ".." segment, so this
+	// falls back to the plain (uncategorized) failed directory.
+	assert.DirExists(t, failedRoot)
+}

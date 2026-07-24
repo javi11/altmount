@@ -1,8 +1,6 @@
 package auth
 
 import (
-	"strings"
-
 	"github.com/go-pkgz/auth/v2/token"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/adaptor"
@@ -92,8 +90,8 @@ func RequireAuthWithSkip(tokenService *token.Service, userRepo *database.UserRep
 		// Check if current path should skip authentication
 		path := c.Path()
 		for _, skipPath := range skipPaths {
-			if strings.HasPrefix(path, skipPath) {
-				// Skip authentication for this path
+			if path == skipPath {
+				// Skip authentication for this exact path
 				return c.Next()
 			}
 		}

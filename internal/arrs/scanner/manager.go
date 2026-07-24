@@ -180,6 +180,44 @@ func (m *Manager) hasFile(ctx context.Context, instanceType string, client any, 
 	}
 }
 
+// pathUnderRoot reports whether filePath lives under folderPath, requiring a
+// path-separator boundary rather than a bare string prefix. strings.HasPrefix
+// alone would let "/data/movies-4k/X" match a root folder of "/data/movies",
+// or a series named "The Wire" match a root of "/data/shows/The Wired",
+// silently attributing a file to the wrong instance/root folder.
+func pathUnderRoot(filePath, folderPath string) bool {
+	folderPath = strings.TrimRight(folderPath, "/")
+	if folderPath == "" || !strings.HasPrefix(filePath, folderPath) {
+		return false
+	}
+	return len(filePath) == len(folderPath) || filePath[len(folderPath)] == '/'
+}
+
+// pathContainsSegment reports whether segment occurs in filePath as a whole
+// path component, not just as a substring anywhere. A bare strings.Contains
+// would let show.Path "/tv/The Wire" match inside "/tv/The Wired/...", since
+// "/tv/The Wire" is literally a substring of that unrelated series' path -
+// silently attributing a file to the wrong series. Checks the boundary on
+// both sides of the match (start-of-string or '/', end-of-string or '/').
+func pathContainsSegment(filePath, segment string) bool {
+	segment = strings.TrimRight(segment, "/")
+	if segment == "" {
+		return false
+	}
+	idx := strings.Index(filePath, segment)
+	if idx == -1 {
+		return false
+	}
+	end := idx + len(segment)
+	if idx > 0 && filePath[idx-1] != '/' {
+		return false
+	}
+	if end < len(filePath) && filePath[end] != '/' {
+		return false
+	}
+	return true
+}
+
 // radarrManagesFile checks if Radarr manages the given file path using root folders (checkrr approach)
 func (m *Manager) radarrManagesFile(ctx context.Context, client *radarr.Radarr, filePath string) bool {
 	slog.DebugContext(ctx, "Checking Radarr root folders for file ownership",
@@ -196,7 +234,7 @@ func (m *Manager) radarrManagesFile(ctx context.Context, client *radarr.Radarr, 
 	for _, folder := range rootFolders {
 		slog.DebugContext(ctx, "Checking Radarr root folder", "folder_path", folder.Path, "file_path", filePath)
 		// Check for direct prefix match or if the filePath contains the folder.Path (common in Docker/Remote setups)
-		if strings.HasPrefix(filePath, folder.Path) {
+		if pathUnderRoot(filePath, folder.Path) {
 			slog.DebugContext(ctx, "File matches Radarr root folder", "folder_path", folder.Path)
 			return true
 		}
@@ -221,7 +259,7 @@ func (m *Manager) sonarrManagesFile(ctx context.Context, client *sonarr.Sonarr, 
 	// Check if file path starts with any root folder path
 	for _, folder := range rootFolders {
 		slog.DebugContext(ctx, "Checking Sonarr root folder", "folder_path", folder.Path, "file_path", filePath)
-		if strings.HasPrefix(filePath, folder.Path) {
+		if pathUnderRoot(filePath, folder.Path) {
 			slog.DebugContext(ctx, "File matches Sonarr root folder", "folder_path", folder.Path)
 			return true
 		}
@@ -240,7 +278,7 @@ func (m *Manager) lidarrManagesFile(ctx context.Context, client *lidarr.Lidarr, 
 		return false
 	}
 	for _, folder := range rootFolders {
-		if strings.HasPrefix(filePath, folder.Path) {
+		if pathUnderRoot(filePath, folder.Path) {
 			return true
 		}
 	}
@@ -256,7 +294,7 @@ func (m *Manager) readarrManagesFile(ctx context.Context, client *readarr.Readar
 		return false
 	}
 	for _, folder := range rootFolders {
-		if strings.HasPrefix(filePath, folder.Path) {
+		if pathUnderRoot(filePath, folder.Path) {
 			return true
 		}
 	}
@@ -572,8 +610,16 @@ func radarrFileMatchesTarget(movie *radarr.Movie, filePath, relativePath string)
 		return true
 	}
 
-	// Basename match (robust when only the parent directory differs)
-	if filepath.Base(moviePath) == filepath.Base(filePath) {
+	// Basename + parent-folder match (robust when only the library root
+	// differs, e.g. a remount). Basename alone is too weak to be a
+	// delete-safety signal: unrelated movies can share a generic release
+	// filename (multi-file releases sometimes reuse names like "movie.mkv"),
+	// which would let this function OK deleting a completely different
+	// movie's healthy file. Requiring the immediate parent directory name
+	// to match too narrows this back to "same release, different root,"
+	// not "any file anywhere with this name."
+	if filepath.Base(moviePath) == filepath.Base(filePath) &&
+		filepath.Base(filepath.Dir(moviePath)) == filepath.Base(filepath.Dir(filePath)) {
 		return true
 	}
 
@@ -870,7 +916,7 @@ func (m *Manager) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 		// Find the series that contains this file path
 		var targetSeries *sonarr.Series
 		for _, show := range series {
-			if strings.Contains(filePath, show.Path) {
+			if pathContainsSegment(filePath, show.Path) {
 				targetSeries = show
 				break
 			}
