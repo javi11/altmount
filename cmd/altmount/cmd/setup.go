@@ -315,10 +315,18 @@ func initializeSegmentCache(ctx context.Context, cfg *config.Config, source *seg
 		return nil
 	}
 
+	// ExpiryHours is normalized in config.Validate (nil -> 24h); guard against
+	// nil defensively in case the cache is initialized outside the load path. A
+	// zero value is preserved and means "cache forever".
+	expiryHours := 24
+	if cfg.SegmentCache.ExpiryHours != nil {
+		expiryHours = *cfg.SegmentCache.ExpiryHours
+	}
+
 	mgrCfg := segcache.ManagerConfig{
 		CachePath:      cfg.SegmentCache.CachePath,
 		MaxSizeBytes:   int64(cfg.SegmentCache.MaxSizeGB) * 1024 * 1024 * 1024,
-		ExpiryDuration: time.Duration(cfg.SegmentCache.ExpiryHours) * time.Hour,
+		ExpiryDuration: time.Duration(expiryHours) * time.Hour,
 	}.WithDefaults()
 
 	mgr, err := segcache.NewManager(mgrCfg, slog.Default().With("component", "segcache"))
