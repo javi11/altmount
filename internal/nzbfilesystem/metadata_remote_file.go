@@ -90,7 +90,7 @@ func NewMetadataRemoteFile(
 		streamTracker:    streamTracker,
 		cacheSource:      cacheSource,
 		repairCoalescer:  repairCoalescer,
-		padRecorder:      newPadRecorder(metadataService, healthRepository, repairCoalescer),
+		padRecorder:      newPadRecorder(metadataService, healthRepository, repairCoalescer, arrsService, configGetter),
 	}
 }
 

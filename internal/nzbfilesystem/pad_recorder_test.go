@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/holes"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
@@ -57,6 +58,49 @@ func (f *fakePadHealthStore) UpdateFileHealthScheduled(ctx context.Context, file
 	return nil
 }
 
+func (f *fakePadHealthStore) GetFileHealth(ctx context.Context, filePath string) (*database.FileHealth, error) {
+	return nil, nil
+}
+
+// fakePadHealthStoreWithLibraryPath returns a FileHealth carrying a library
+// path, exercising the EffectiveLibraryPath branch of triggerImmediateRepairSearch.
+type fakePadHealthStoreWithLibraryPath struct {
+	fakePadHealthStore
+	libraryPath string
+}
+
+func (f *fakePadHealthStoreWithLibraryPath) GetFileHealth(ctx context.Context, filePath string) (*database.FileHealth, error) {
+	lp := f.libraryPath
+	return &database.FileHealth{FilePath: filePath, LibraryPath: &lp}, nil
+}
+
+// fakePadArrsTrigger records every TriggerFileRescan call it receives.
+type fakePadArrsTrigger struct {
+	mu       sync.Mutex
+	calls    []string
+	fired    chan struct{}
+	returnFn func() error
+}
+
+func (f *fakePadArrsTrigger) TriggerFileRescan(ctx context.Context, pathForRescan string, relativePath string, metadataStr *string) error {
+	f.mu.Lock()
+	f.calls = append(f.calls, pathForRescan)
+	f.mu.Unlock()
+	if f.fired != nil {
+		f.fired <- struct{}{}
+	}
+	if f.returnFn != nil {
+		return f.returnFn()
+	}
+	return nil
+}
+
+func testConfigGetter() config.ConfigGetter {
+	return func() *config.Config {
+		return &config.Config{MountPath: "/mnt/bearmount"}
+	}
+}
+
 func testPadEvent(name string) padEvent {
 	return padEvent{
 		name:          name,
@@ -73,7 +117,7 @@ func testPadEvent(name string) padEvent {
 func TestPadRecorderPersistsEvent(t *testing.T) {
 	meta := &fakePadMetadataStore{holesRecorded: make(chan struct{}, 1)}
 	health := &fakePadHealthStore{}
-	r := newPadRecorder(meta, health, nil)
+	r := newPadRecorder(meta, health, nil, nil, nil)
 
 	r.enqueue(testPadEvent("movie.mkv"))
 
@@ -99,12 +143,78 @@ func TestPadRecorderPersistsEvent(t *testing.T) {
 	}
 }
 
+func TestPadRecorderTriggersImmediateRepairSearch(t *testing.T) {
+	meta := &fakePadMetadataStore{holesRecorded: make(chan struct{}, 1)}
+	health := &fakePadHealthStoreWithLibraryPath{libraryPath: "/data/movies/Movie (2020)/Movie.mkv"}
+	arrs := &fakePadArrsTrigger{fired: make(chan struct{}, 1)}
+	r := newPadRecorder(meta, health, nil, arrs, testConfigGetter())
+
+	r.enqueue(testPadEvent("movie.mkv"))
+
+	select {
+	case <-arrs.fired:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for immediate repair-search trigger")
+	}
+	r.Close()
+
+	arrs.mu.Lock()
+	defer arrs.mu.Unlock()
+	if len(arrs.calls) != 1 || arrs.calls[0] != "/data/movies/Movie (2020)/Movie.mkv" {
+		t.Fatalf("TriggerFileRescan calls = %v, want one call for the library path", arrs.calls)
+	}
+}
+
+// TestPadRecorderRepairSearchFallsBackToMountPath covers a file with no
+// library path yet (not relinked by an ARR) - triggerImmediateRepairSearch
+// must still fire, resolving the fallback path the same way
+// health.HealthWorker.resolvePathForRescan does (MountPath + virtual path).
+func TestPadRecorderRepairSearchFallsBackToMountPath(t *testing.T) {
+	meta := &fakePadMetadataStore{holesRecorded: make(chan struct{}, 1)}
+	health := &fakePadHealthStore{} // GetFileHealth returns (nil, nil): no library path
+	arrs := &fakePadArrsTrigger{fired: make(chan struct{}, 1)}
+	r := newPadRecorder(meta, health, nil, arrs, testConfigGetter())
+
+	r.enqueue(testPadEvent("movie.mkv"))
+
+	select {
+	case <-arrs.fired:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for immediate repair-search trigger")
+	}
+	r.Close()
+
+	arrs.mu.Lock()
+	defer arrs.mu.Unlock()
+	if len(arrs.calls) != 1 || arrs.calls[0] != "/mnt/bearmount/movie.mkv" {
+		t.Fatalf("TriggerFileRescan calls = %v, want one call for the mount-path fallback", arrs.calls)
+	}
+}
+
+// TestPadRecorderRepairSearchNilArrsIsNoop covers the padArrsTrigger==nil
+// tolerance (test harnesses / any deployment where health monitoring is off
+// but padding still applies): must not panic, must not block enqueue.
+func TestPadRecorderRepairSearchNilArrsIsNoop(t *testing.T) {
+	meta := &fakePadMetadataStore{holesRecorded: make(chan struct{}, 1)}
+	health := &fakePadHealthStore{}
+	r := newPadRecorder(meta, health, nil, nil, nil)
+
+	r.enqueue(testPadEvent("movie.mkv"))
+
+	select {
+	case <-meta.holesRecorded:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for hole persistence")
+	}
+	r.Close()
+}
+
 func TestPadRecorderSurvivesPanic(t *testing.T) {
 	meta := &fakePadMetadataStore{
 		panicOnHoles:  true,
 		holesRecorded: make(chan struct{}, 2),
 	}
-	r := newPadRecorder(meta, &fakePadHealthStore{}, nil)
+	r := newPadRecorder(meta, &fakePadHealthStore{}, nil, nil, nil)
 
 	r.enqueue(testPadEvent("first.mkv")) // panics after recording the hole
 	r.enqueue(testPadEvent("second.mkv"))
