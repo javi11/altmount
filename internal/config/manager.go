@@ -92,10 +92,13 @@ func (n NetworkConfig) GetNoProxy() string { return n.NoProxy }
 // When enabled, this cache replaces the FUSE VFS disk cache and additionally benefits WebDAV.
 // Cache key: Usenet message ID. Cache unit: ~750KB decoded segment (matches one NNTP article).
 type SegmentCacheConfig struct {
-	Enabled     *bool  `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
-	CachePath   string `yaml:"cache_path" mapstructure:"cache_path" json:"cache_path"`
-	MaxSizeGB   int    `yaml:"max_size_gb" mapstructure:"max_size_gb" json:"max_size_gb"`
-	ExpiryHours int    `yaml:"expiry_hours" mapstructure:"expiry_hours" json:"expiry_hours"`
+	Enabled   *bool  `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	CachePath string `yaml:"cache_path" mapstructure:"cache_path" json:"cache_path"`
+	MaxSizeGB int    `yaml:"max_size_gb" mapstructure:"max_size_gb" json:"max_size_gb"`
+	// ExpiryHours controls how long cached segments are kept before automatic
+	// eviction. Set to 0 to disable expiry (cache forever, bounded only by
+	// MaxSizeGB via LRU eviction). Left unset (nil) it defaults to 24 hours.
+	ExpiryHours *int `yaml:"expiry_hours" mapstructure:"expiry_hours" json:"expiry_hours"`
 }
 
 // WebDAVConfig represents WebDAV server configuration
@@ -660,6 +663,14 @@ func (c *Config) Validate() error {
 
 	if c.Streaming.MaxPrefetch <= 0 {
 		c.Streaming.MaxPrefetch = 60 // Default to 60 segments prefetched ahead if not set
+	}
+
+	// Segment cache expiry: nil (unset) defaults to 24 hours; an explicit 0 is
+	// preserved and means "cache forever" (bounded only by the size cap). A
+	// pointer is used so unset and explicit-0 can be distinguished.
+	if c.SegmentCache.ExpiryHours == nil {
+		defaultExpiryHours := 24
+		c.SegmentCache.ExpiryHours = &defaultExpiryHours
 	}
 
 	if c.Import.MaxProcessorWorkers <= 0 {
