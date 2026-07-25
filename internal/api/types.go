@@ -204,7 +204,7 @@ type ArrsInstanceAPIResponse struct {
 // StremioAPIResponse sanitizes Stremio config for API responses
 type StremioAPIResponse struct {
 	Enabled     bool                `json:"enabled"`
-	NzbTTLHours int                 `json:"nzb_ttl_hours,omitempty"`
+	NzbTTLHours int                 `json:"nzb_ttl_hours"`
 	BaseURL     string              `json:"base_url,omitempty"`
 	Prowlarr    ProwlarrAPIResponse `json:"prowlarr"`
 }
