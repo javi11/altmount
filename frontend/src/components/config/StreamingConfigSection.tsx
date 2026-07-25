@@ -131,7 +131,8 @@ export function StreamingConfigSection({
 						<div className="min-w-0">
 							<h4 className="font-bold text-base-content text-sm">Playback Failure Masking</h4>
 							<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
-								Debounce transient streaming errors (like propagation delays) by requiring multiple consecutive playback failures before triggering a redownload.
+								Debounce transient streaming errors (like propagation delays) by requiring multiple
+								consecutive playback failures before triggering a redownload.
 							</p>
 						</div>
 						<input
@@ -159,14 +160,17 @@ export function StreamingConfigSection({
 								<div className="min-w-0">
 									<h5 className="font-bold text-base-content text-xs">Failure Threshold</h5>
 									<p className="mt-1 break-words text-[10px] text-base-content/50 leading-relaxed">
-										Number of consecutive failures required before declaring a file corrupted and requesting repair.
+										Number of consecutive failures required before declaring a file corrupted and
+										requesting repair.
 									</p>
 								</div>
 								<div className="flex shrink-0 items-center gap-3">
-									<span className="font-black font-mono text-primary text-lg">
+									<span className="font-black font-mono text-lg text-primary">
 										{streamingData.failure_masking?.threshold ?? 3}
 									</span>
-									<span className="font-bold text-base-content/60 text-[10px] uppercase">failures</span>
+									<span className="font-bold text-[10px] text-base-content/60 uppercase">
+										failures
+									</span>
 								</div>
 							</div>
 							<input
@@ -189,7 +193,7 @@ export function StreamingConfigSection({
 									checkChanges(newData, cacheData);
 								}}
 							/>
-							<div className="flex justify-between px-1 font-black text-base-content/50 text-[10px]">
+							<div className="flex justify-between px-1 font-black text-[10px] text-base-content/50">
 								<span>1</span>
 								<span>3</span>
 								<span>5</span>
@@ -300,21 +304,30 @@ export function StreamingConfigSection({
 										Cache Expiry
 									</h4>
 									<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
-										How long cached segments are kept before automatic eviction.
+										How long cached segments are kept before automatic eviction. Set to 0 to keep
+										them forever (bounded only by the maximum cache size).
 									</p>
 								</div>
 								<div className="mt-1 flex shrink-0 items-center justify-start gap-3 sm:mt-0 sm:justify-end">
-									<span className="font-black font-mono text-primary text-xl">
-										{cacheData.expiry_hours}
-									</span>
-									<span className="font-bold text-base-content/60 text-xs uppercase">hours</span>
+									{cacheData.expiry_hours === 0 ? (
+										<span className="font-black font-mono text-primary text-xl">Forever</span>
+									) : (
+										<>
+											<span className="font-black font-mono text-primary text-xl">
+												{cacheData.expiry_hours}
+											</span>
+											<span className="font-bold text-base-content/60 text-xs uppercase">
+												hours
+											</span>
+										</>
+									)}
 								</div>
 							</div>
 
 							<div className="space-y-4">
 								<input
 									type="range"
-									min="1"
+									min="0"
 									max="168"
 									value={cacheData.expiry_hours}
 									step="1"
@@ -325,7 +338,7 @@ export function StreamingConfigSection({
 									}
 								/>
 								<div className="flex justify-between px-2 font-black text-base-content/50 text-xs">
-									<span>1h</span>
+									<span>Forever</span>
 									<span>42h</span>
 									<span>84h</span>
 									<span>126h</span>

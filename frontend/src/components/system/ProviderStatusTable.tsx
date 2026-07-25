@@ -492,8 +492,9 @@ export function ProviderStatusTable({
 												)}
 												{hasQuota && (
 													<div className="mt-1.5 border-base-200/60 border-t pt-1 text-[10px]">
-														<div className="font-semibold font-mono text-warning">
-															Quota: {formatBytes(provider.quota_used || 0, 2, false, true)} / {formatBytes(provider.quota_bytes || 0, 2, false, true)}
+														<div className="font-mono font-semibold text-warning">
+															Quota: {formatBytes(provider.quota_used || 0, 2, false, true)} /{" "}
+															{formatBytes(provider.quota_bytes || 0, 2, false, true)}
 														</div>
 														{provider.quota_reset_at && (
 															<div className="mt-0.5 font-mono text-base-content/40">

@@ -178,7 +178,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	configManager.OnConfigChange(func(oldConfig, newConfig *config.Config) {
 		structuralChange := oldConfig.SegmentCache.CachePath != newConfig.SegmentCache.CachePath ||
 			oldConfig.SegmentCache.MaxSizeGB != newConfig.SegmentCache.MaxSizeGB ||
-			oldConfig.SegmentCache.ExpiryHours != newConfig.SegmentCache.ExpiryHours
+			intPtrValue(oldConfig.SegmentCache.ExpiryHours) != intPtrValue(newConfig.SegmentCache.ExpiryHours)
 
 		if !structuralChange {
 			return
@@ -439,3 +439,13 @@ func waitForHTTPServer(ctx context.Context, port int) error {
 	}
 }
 
+
+// intPtrValue returns the value pointed to by p, or 0 when p is nil. It is used
+// to compare optional integer config fields (e.g. segment cache ExpiryHours) by
+// value rather than by pointer identity.
+func intPtrValue(p *int) int {
+	if p == nil {
+		return 0
+	}
+	return *p
+}

@@ -108,7 +108,12 @@ export function HealthTable({
 									onSelectAll={onSelectAll}
 									onSelectAllPages={onSelectAllPages}
 									onSort={onSort}
-									allowSelectAllPages={["pending", "checking", "corrupted", "repair_triggered"].includes(statusFilter)}
+									allowSelectAllPages={[
+										"pending",
+										"checking",
+										"corrupted",
+										"repair_triggered",
+									].includes(statusFilter)}
 								/>
 								<tbody>
 									{data.map((item: FileHealth) => (

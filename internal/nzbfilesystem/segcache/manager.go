@@ -27,6 +27,11 @@ func DefaultManagerConfig() ManagerConfig {
 }
 
 // WithDefaults returns a copy with zero values replaced by defaults.
+//
+// ExpiryDuration is intentionally NOT defaulted here: a zero (or negative)
+// duration means "cache forever" (see SegmentCache.Cleanup), and the expiry
+// default is applied upstream in config.Validate. Overriding it here would make
+// an explicit "forever" setting impossible.
 func (cfg ManagerConfig) WithDefaults() ManagerConfig {
 	defaults := DefaultManagerConfig()
 	if cfg.CachePath == "" {
@@ -34,9 +39,6 @@ func (cfg ManagerConfig) WithDefaults() ManagerConfig {
 	}
 	if cfg.MaxSizeBytes <= 0 {
 		cfg.MaxSizeBytes = defaults.MaxSizeBytes
-	}
-	if cfg.ExpiryDuration <= 0 {
-		cfg.ExpiryDuration = defaults.ExpiryDuration
 	}
 	return cfg
 }
