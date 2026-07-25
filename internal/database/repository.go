@@ -1513,7 +1513,7 @@ func (r *Repository) GetProviderHistoricalStats(ctx context.Context, days int, i
 		if err := rows.Scan(&tsRaw, &stat.ProviderID, &stat.BytesDownloaded); err != nil {
 			return nil, fmt.Errorf("failed to scan provider historical stat: %w", err)
 		}
-		
+
 		switch v := tsRaw.(type) {
 		case time.Time:
 			stat.Timestamp = v
@@ -2121,6 +2121,45 @@ func (r *Repository) GetExpiredStremioQueueItems(ctx context.Context, ttlHours i
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan expired stremio queue item: %w", err)
+		}
+		items = append(items, &item)
+	}
+
+	return items, rows.Err()
+}
+
+// GetCachedStremioQueueItems returns completed Stremio-originated queue items that
+// have a storage path (i.e. are streamable). Used by the Stremio stream handler to
+// mark already-imported releases as cached. TTL freshness is applied by the caller.
+func (r *Repository) GetCachedStremioQueueItems(ctx context.Context) ([]*ImportQueueItem, error) {
+	query := `
+		SELECT id, download_id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
+		       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path, target_path
+		FROM import_queue
+		WHERE status = 'completed'
+		  AND download_id LIKE 'stremio:%'
+		  AND storage_path IS NOT NULL
+		  AND storage_path != ''
+		ORDER BY completed_at DESC
+		LIMIT 500
+	`
+
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query cached stremio queue items: %w", err)
+	}
+	defer rows.Close()
+
+	var items []*ImportQueueItem
+	for rows.Next() {
+		var item ImportQueueItem
+		err := rows.Scan(
+			&item.ID, &item.DownloadID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
+			&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
+			&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath, &item.TargetPath,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan cached stremio queue item: %w", err)
 		}
 		items = append(items, &item)
 	}
