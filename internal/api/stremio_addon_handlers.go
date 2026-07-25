@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -221,12 +222,93 @@ func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 	}
 	results = filtered
 
-	var streams []fiber.Map
+	// Mark already-imported releases as cached so instantly-playable options
+	// surface first. Best-effort: on lookup failure, fall back to no badges.
+	var cachedItems []*database.ImportQueueItem
+	if s.queueRepo != nil {
+		if items, cacheErr := s.queueRepo.GetCachedStremioQueueItems(ctx); cacheErr != nil {
+			slog.WarnContext(ctx, "Failed to load cached Stremio items; continuing without cache badges",
+				"error", cacheErr)
+		} else {
+			cachedItems = items
+		}
+	}
+
+	entries := buildStremioStreamEntries(results, cachedItems, cfg.Stremio.NzbTTLHours, time.Now(),
+		baseURL, key, streamType, season, episode, imdbID)
+
+	streams := make([]fiber.Map, 0, len(entries))
+	for _, e := range entries {
+		streams = append(streams, fiber.Map{
+			"name":  e.Name,
+			"title": e.Title,
+			"url":   e.URL,
+		})
+	}
+
+	return c.JSON(fiber.Map{"streams": streams})
+}
+
+// stremioStreamEntry is a single Stremio stream option produced from a Prowlarr
+// result, together with whether the underlying release is already cached/imported
+// in AltMount.
+type stremioStreamEntry struct {
+	Name   string
+	Title  string
+	URL    string
+	Cached bool
+}
+
+// buildStremioStreamEntries converts filtered Prowlarr results into ordered
+// Stremio stream entries. Results whose release is already imported and still
+// fresh (per the cached queue items and TTL) are badged "⚡ Cached" and stably
+// sorted ahead of the rest, mirroring the aiostreams/Torrentio UX.
+//
+// The match/TTL logic mirrors the short-circuit in handleStremioAddonPlay so the
+// badge is truthful: a cached entry is one /play resolves to an instant redirect.
+// now is injected for deterministic TTL testing.
+func buildStremioStreamEntries(
+	results []prowlarr.NZBResult,
+	cached []*database.ImportQueueItem,
+	ttlHours int,
+	now time.Time,
+	baseURL, key, streamType string,
+	season, episode int,
+	fallbackID string,
+) []stremioStreamEntry {
+	// Collect the nzb paths of cached items that are still usable: they must have
+	// a storage path and, when a TTL is configured, have completed within it.
+	// Mirrors the reuse condition in handleStremioAddonPlay.
+	validCachedPaths := make([]string, 0, len(cached))
+	for _, item := range cached {
+		if item == nil || item.StoragePath == nil || *item.StoragePath == "" {
+			continue
+		}
+		if ttlHours > 0 {
+			if item.CompletedAt == nil || now.Sub(*item.CompletedAt) >= time.Duration(ttlHours)*time.Hour {
+				continue
+			}
+		}
+		validCachedPaths = append(validCachedPaths, filepath.ToSlash(item.NzbPath))
+	}
+
+	isCached := func(safeFilename string) bool {
+		for _, p := range validCachedPaths {
+			if strings.Contains(p, safeFilename) {
+				return true
+			}
+		}
+		return false
+	}
+
+	entries := make([]stremioStreamEntry, 0, len(results))
 	for _, r := range results {
 		safeTitle := sanitizeFilename(r.Title)
 		if safeTitle == "" {
-			safeTitle = imdbID
+			safeTitle = fallbackID
 		}
+		cachedHit := isCached(safeTitle + ".nzb")
+
 		playURL := baseURL + "/stremio/" + key + "/play" +
 			"?url=" + url.QueryEscape(r.DownloadURL) +
 			"&title=" + url.QueryEscape(safeTitle) +
@@ -275,16 +357,27 @@ func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 		if contentTitle != "" {
 			streamName += " - " + contentTitle
 		}
+		if cachedHit {
+			// Prefix marks instantly-playable releases, aiostreams-style.
+			streamName = "⚡ Cached · " + streamName
+		}
 
 		metaLine := fmt.Sprintf("💾 %.2f GB 🌐 %s", sizeGB, indexerLabel)
-		streams = append(streams, fiber.Map{
-			"name":  streamName,
-			"title": fmt.Sprintf("%s\n%s", r.Title, metaLine),
-			"url":   playURL,
+		entries = append(entries, stremioStreamEntry{
+			Name:   streamName,
+			Title:  fmt.Sprintf("%s\n%s", r.Title, metaLine),
+			URL:    playURL,
+			Cached: cachedHit,
 		})
 	}
 
-	return c.JSON(fiber.Map{"streams": streams})
+	// Stably sort cached entries first, preserving Prowlarr's relative order
+	// within each group.
+	sort.SliceStable(entries, func(i, j int) bool {
+		return entries[i].Cached && !entries[j].Cached
+	})
+
+	return entries
 }
 
 // handleStremioAddonPlay handles GET /stremio/:key/play
