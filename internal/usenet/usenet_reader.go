@@ -307,16 +307,24 @@ func (b *UsenetReader) Read(p []byte) (int, error) {
 
 	n := 0
 	for n < len(p) {
-		// Diagnostic only (see 2026-07-26 recurring-hang investigation, occurrences
-		// #4-6, in STACK.md): three confirmed cases where downloadManager finished
-		// every prefetched segment (in_flight drained to 0) while current_read never
-		// advanced, meaning this exact call never returned. GetReaderContext blocks
-		// on the segment's dataReady channel (or ctx.Done()) - if data/error was
-		// genuinely set for this segment, this should return near-instantly; a slow
-		// return here means either the channel close never happened for this segment
-		// specifically, or ctx itself is the problem.
+		// Bounded, not just diagnostic (see 2026-07-26 recurring-hang investigation,
+		// occurrences #4-7, in STACK.md): four confirmed reproductions where
+		// downloadManager finished every prefetched segment (in_flight drained to 0)
+		// while current_read never advanced - this exact call never returned, and
+		// two rounds of warn-on-slow logging around it never fired even after 5+
+		// minutes stuck, meaning it never returns at all rather than returning
+		// slowly. GetReaderContext's wait is a select on the segment's dataReady
+		// channel or ctx.Done() - a channel close can't suffer the classic
+		// sync.Cond lost-wakeup, so this isn't that bug; but b.ctx here is the file
+		// handle's long-lived context, which in practice never cancels on its own,
+		// making the "or ctx.Done()" escape hatch useless in this specific hang.
+		// Root cause not confirmed - bounding this defensively converts a
+		// permanent D-state hang into a bounded, logged, recoverable read error,
+		// consistent with every other wait already bounded today.
 		grcStart := time.Now()
-		reader := s.GetReaderContext(b.ctx)
+		grcCtx, grcCancel := context.WithTimeout(b.ctx, 2*time.Minute)
+		reader := s.GetReaderContext(grcCtx)
+		grcCancel()
 		if grcDur := time.Since(grcStart); grcDur > 10*time.Second {
 			b.log.WarnContext(b.ctx, "GetReaderContext took unusually long",
 				"segment_id", s.Id, "current_index", rg.GetCurrentIndex(), "duration", grcDur)
