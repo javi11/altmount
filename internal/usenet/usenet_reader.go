@@ -328,8 +328,21 @@ func (b *UsenetReader) Read(p []byte) (int, error) {
 
 				s, err = rg.Next()
 				if err == nil {
-					// Wake download manager — room for more prefetch
+					// Wake download manager — room for more prefetch. Signal
+					// must be issued under b.mu: downloadManager's own
+					// check-then-Wait() on the prefetch-ahead condition is
+					// guarded by b.mu, but the state being checked
+					// (rg.GetCurrentIndex(), just advanced by rg.Next() above)
+					// lives behind segmentRange's own separate RWMutex. A
+					// Signal() fired without b.mu held can land in the gap
+					// between downloadManager reading a stale currentRead and
+					// actually parking in Wait() — sync.Cond does not queue
+					// signals, so that Signal() is silently lost and
+					// downloadManager blocks forever, wedging the whole
+					// reader (matches the recurring D-state ffprobe hangs).
+					b.mu.Lock()
 					b.cond.Signal()
+					b.mu.Unlock()
 				}
 
 				if err != nil {
@@ -433,9 +446,25 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 	// the whole fetch (held across retries — it represents one connection's
 	// worth of work). Acquired before any per-attempt timeout is created so
 	// queue wait never burns the fetch deadline. Streaming readers skip this.
+	//
+	// Bounded at 5 minutes (generous — legitimate heavy contention under
+	// concurrent imports plus active streams shouldn't hit this) rather than
+	// left unbounded on the caller's own long-lived ctx. An unbounded wait
+	// here was the actual mechanism behind a real, repeatedly-observed
+	// production hang: a segment fetch would block indefinitely with zero
+	// logs and zero NNTP connections, surviving until the consumer container
+	// was restarted, because nothing ever timed out or errored at any layer
+	// above this Acquire. Logged on timeout since this exact path previously
+	// produced no diagnostic signal at all.
 	if b.budget != nil {
-		release, err := b.budget.AcquireImportConnection(ctx)
+		acquireCtx, acquireCancel := context.WithTimeout(ctx, 5*time.Minute)
+		release, err := b.budget.AcquireImportConnection(acquireCtx)
+		acquireCancel()
 		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+				b.log.WarnContext(ctx, "timed out waiting for import connection budget",
+					"segment_id", seg.Id, "wait", 5*time.Minute)
+			}
 			return nil, err
 		}
 		defer release()
@@ -595,7 +624,14 @@ func (b *UsenetReader) downloadManager(ctx context.Context) {
 		b.inFlight.Add(1)
 		go func(segIdx int, s *segment) {
 			defer b.inFlight.Add(-1)
-			defer b.cond.Signal()
+			defer func() {
+				// See the matching comment in Read() — Signal() must be
+				// issued under b.mu to stay safe against downloadManager's
+				// own check-then-Wait() race.
+				b.mu.Lock()
+				b.cond.Signal()
+				b.mu.Unlock()
+			}()
 			defer func() {
 				if p := recover(); p != nil {
 					b.log.ErrorContext(ctx, "Panic in download task:", "panic", p)
