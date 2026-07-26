@@ -634,7 +634,25 @@ func (b *UsenetReader) downloadManager(ctx context.Context) {
 		currentRead := b.rg.GetCurrentIndex()
 		ahead := b.nextToDownload - currentRead
 		if ahead >= b.maxPrefetch {
+			// Diagnostic only (see 2026-07-26 recurring-hang investigation in
+			// STACK.md): b.cond.Wait() here is genuinely unbounded — if the
+			// in-flight download that would eventually Signal() this waiter
+			// never completes (or completes without signaling, or "ahead"'s
+			// accounting is stale), this blocks forever with ctx.Err() never
+			// re-checked until a wakeup happens. Not fixed yet, just made
+			// visible: logs on entry/exit so a stuck downloadManager shows up
+			// here instead of as total silence.
+			waitStart := time.Now()
+			b.log.DebugContext(ctx, "downloadManager prefetch throttled, waiting",
+				"ahead", ahead, "max_prefetch", b.maxPrefetch,
+				"next_to_download", b.nextToDownload, "current_read", currentRead,
+				"in_flight", b.inFlight.Load())
 			b.cond.Wait()
+			if waited := time.Since(waitStart); waited > 10*time.Second {
+				b.log.WarnContext(ctx, "downloadManager prefetch wait took unusually long",
+					"waited", waited, "next_to_download", b.nextToDownload,
+					"current_read", b.rg.GetCurrentIndex(), "in_flight", b.inFlight.Load())
+			}
 			b.mu.Unlock()
 			if ctx.Err() != nil {
 				return

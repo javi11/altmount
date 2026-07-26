@@ -201,8 +201,13 @@ func (a *AsyncReadBuffer) ReadAtContext(ctx context.Context, p []byte, off int64
 
 		// Sequential read at the buffer frontier — wait for the fill goroutine.
 		if off == bufEnd && off == a.expectedNext {
+			waitStart := time.Now()
 			for a.baseOff+int64(a.filled) <= off && !a.srcDone && !a.closed && ctx.Err() == nil {
 				a.cond.Wait()
+			}
+			if waited := time.Since(waitStart); waited > 10*time.Second {
+				a.log.WarnContext(ctx, "async read buffer: slow wait for fill frontier",
+					"offset", off, "waited", waited)
 			}
 			if ctx.Err() != nil {
 				a.mu.Unlock()
@@ -226,6 +231,7 @@ func (a *AsyncReadBuffer) ReadAtContext(ctx context.Context, p []byte, off int64
 		// kernel readahead parallel read, not a genuine seek. Wait for the fill
 		// goroutine to reach this offset rather than demoting.
 		if off >= bufEnd && off < bufEnd+nearFrontierWindow {
+			waitStart := time.Now()
 			for !a.srcDone && !a.closed && ctx.Err() == nil {
 				if a.baseOff+int64(a.filled) > off {
 					break
@@ -238,6 +244,10 @@ func (a *AsyncReadBuffer) ReadAtContext(ctx context.Context, p []byte, off int64
 					goto demote
 				}
 				a.cond.Wait()
+			}
+			if waited := time.Since(waitStart); waited > 10*time.Second {
+				a.log.WarnContext(ctx, "async read buffer: slow wait near fill frontier",
+					"offset", off, "waited", waited)
 			}
 			if ctx.Err() != nil {
 				a.mu.Unlock()
@@ -391,8 +401,23 @@ func (a *AsyncReadBuffer) fill() {
 		}
 		a.mu.Unlock()
 
-		// Blocking source read happens outside the lock.
+		// Blocking source read happens outside the lock. Diagnostic only (see
+		// 2026-07-26 recurring-hang investigation in STACK.md): this is the
+		// leading suspect for a class of hang that never reaches any of the
+		// bounded waits in usenet_reader.go's downloadSegmentWithRetry — if
+		// UsenetReader.Read() itself blocks upstream of that function (e.g.
+		// waiting on a segment's dataReady channel that never closes because
+		// downloadManager never scheduled it), this call never returns and
+		// nothing below it — including every fix deployed today — ever runs.
+		fetchStart := time.Now()
 		n, err := a.src.ReadAtContext(a.ctx, tmp[:toRead], fillOff)
+		if fetchDur := time.Since(fetchStart); fetchDur > 10*time.Second {
+			a.log.WarnContext(a.ctx, "async read buffer fill: source read took unusually long",
+				"offset", fillOff, "requested", toRead, "got", n, "duration", fetchDur, "error", err)
+		} else {
+			a.log.DebugContext(a.ctx, "async read buffer fill: source read complete",
+				"offset", fillOff, "requested", toRead, "got", n, "duration", fetchDur)
+		}
 
 		a.mu.Lock()
 		if a.gen != myGen || !a.streaming || a.closed {
