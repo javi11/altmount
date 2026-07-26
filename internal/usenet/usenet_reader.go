@@ -424,8 +424,39 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 
 	// Fix B: hoist pool getter outside retry loop — pool errors are not retriable
 	// per-download-attempt; if the pool is unavailable we fail fast.
+	//
+	// b.poolGetter() (pool.manager.GetPool) takes the manager's RWMutex
+	// read-side; under normal operation that's a fast RLock/return, but it can
+	// block for as long as a concurrent SetProviders call holds the write lock
+	// (provider health-checks and pool teardown/setup run under that lock with
+	// no timeout of their own). Bounded here defensively — every other wait in
+	// this function is now bounded (budget Acquire at 5min, each fetch attempt
+	// at 15s), and this was the one remaining unbounded call in the path a
+	// production hang was traced into. Run off-goroutine since poolGetter has
+	// no context parameter to cancel by.
 	poolGetStart := time.Now()
-	cp, poolErr := b.poolGetter()
+	type poolResult struct {
+		cp  pool.NntpClient
+		err error
+	}
+	poolCh := make(chan poolResult, 1)
+	go func() {
+		cp, err := b.poolGetter()
+		poolCh <- poolResult{cp, err}
+	}()
+
+	var cp pool.NntpClient
+	var poolErr error
+	select {
+	case res := <-poolCh:
+		cp, poolErr = res.cp, res.err
+	case <-time.After(30 * time.Second):
+		poolErr = fmt.Errorf("timed out after 30s waiting for connection pool")
+		b.log.WarnContext(ctx, "timed out waiting for poolGetter — likely blocked on pool manager lock",
+			"segment_id", seg.Id)
+	case <-ctx.Done():
+		poolErr = ctx.Err()
+	}
 	poolGetDur := time.Since(poolGetStart)
 	if poolErr != nil {
 		b.log.DebugContext(ctx, "pool get failed",
