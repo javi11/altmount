@@ -1072,7 +1072,19 @@ func (mvf *MetadataVirtualFile) ReadAtContext(readCtx context.Context, p []byte,
 		return 0, ErrNegativeOffset
 	}
 
+	// Diagnostic only (see 2026-07-26 recurring-hang investigation in STACK.md,
+	// occurrence #8): the shared-reader Read loop below is already instrumented
+	// and warns on a slow read, but that timer only starts once mvf.mu is
+	// already held - it says nothing about how long THIS call waited to
+	// acquire the lock in the first place. Close()'s own comment already notes
+	// mvf.mu "can be held for the full segment-download latency" by a
+	// concurrent Read; this measures exactly that wait from the outside.
+	lockWaitStart := time.Now()
 	mvf.mu.Lock()
+	if lockWaitDur := time.Since(lockWaitStart); lockWaitDur > 10*time.Second {
+		slog.WarnContext(readCtx, "ReadAtContext waited unusually long to acquire mvf.mu",
+			"offset", off, "wait", lockWaitDur)
+	}
 	defer mvf.mu.Unlock()
 
 	// mvf.meta is nil-ed by Close() under mvf.mu — a concurrent Close (e.g. from
