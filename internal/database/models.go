@@ -121,6 +121,11 @@ type FileHealth struct {
 	IsMasked              bool    `db:"is_masked"`
 	Indexer               *string `db:"indexer"`
 	DownloadID            *string `db:"download_id"`
+	// ImmediateRepairRequestedAt is non-nil when the FUSE layer's pad recorder
+	// has asked the health worker to fire an ARR repair rescan for this file
+	// on its next cycle, bypassing the normal scheduled check. See migration
+	// 035 and health.HealthWorker.triggerImmediateRepairOnly.
+	ImmediateRepairRequestedAt *time.Time `db:"immediate_repair_requested_at"`
 }
 
 // IsImported reports whether library_path points to a real, ARR-relinked library

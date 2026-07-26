@@ -6,11 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/holes"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/utils"
 )
 
 // padMetadataStore is the slice of metadata.MetadataService the pad recorder
@@ -24,18 +22,15 @@ type padMetadataStore interface {
 // needs; narrowed to an interface so tests can fake it.
 type padHealthStore interface {
 	UpdateFileHealthScheduled(ctx context.Context, filePath string, status database.HealthStatus, errorMessage *string, sourceNzbPath *string, errorDetails *string, noRetry bool, scheduledAt time.Time) error
-	GetFileHealth(ctx context.Context, filePath string) (*database.FileHealth, error)
-}
-
-// padArrsTrigger is the slice of ARRsRepairService the pad recorder needs;
-// narrowed to an interface (same shape as ARRsRepairService, declared
-// separately so tests can fake it without importing that type) so a
-// degraded-pad event can independently ask the owning ARR instance to
-// blocklist+redownload the title without going through the corrupted-file
-// repair lifecycle (no safety-folder move, no FILE_STATUS_CORRUPTED - the
-// file stays visible and streamable throughout).
-type padArrsTrigger interface {
-	TriggerFileRescan(ctx context.Context, pathForRescan string, relativePath string, metadataStr *string) error
+	// SetImmediateRepairRequested asks the health worker to fire an ARR
+	// repair rescan for this file on its next cycle, without moving it into
+	// the corrupted-file repair lifecycle - see
+	// database.HealthRepository.SetImmediateRepairRequested and
+	// health.HealthWorker.triggerImmediateRepairOnly for the full picture.
+	// The worker owns every safeguard around firing it (repair-enabled gate,
+	// retry budget, back-off, indexer logging, path resolution): the pad
+	// recorder's only job is to ask.
+	SetImmediateRepairRequested(ctx context.Context, filePath string) error
 }
 
 // padEvent carries everything a degraded-pad record needs as plain values.
@@ -68,31 +63,24 @@ const padRecorderQueueSize = 128
 // file handles that produced them and Close()'ing a handle never races the
 // recording. Compare RepairCoalescer, which owns the repair side the same way.
 type padRecorder struct {
-	ch           chan padEvent
-	metadata     padMetadataStore
-	health       padHealthStore
-	coalescer    *RepairCoalescer
-	arrs         padArrsTrigger
-	configGetter config.ConfigGetter
+	ch        chan padEvent
+	metadata  padMetadataStore
+	health    padHealthStore
+	coalescer *RepairCoalescer
 
 	stopCh chan struct{}
 	stopWg sync.WaitGroup
 }
 
 // newPadRecorder constructs a recorder and starts its worker. The worker runs
-// for the lifetime of the process; call Close to stop it in tests. arrs and
-// configGetter may be nil (e.g. test harnesses building a bare recorder) -
-// the immediate-repair-search trigger degrades to a no-op when either is nil,
-// same tolerance every other optional collaborator in this file already has.
-func newPadRecorder(metadata padMetadataStore, health padHealthStore, coalescer *RepairCoalescer, arrs padArrsTrigger, configGetter config.ConfigGetter) *padRecorder {
+// for the lifetime of the process; call Close to stop it in tests.
+func newPadRecorder(metadata padMetadataStore, health padHealthStore, coalescer *RepairCoalescer) *padRecorder {
 	r := &padRecorder{
-		ch:           make(chan padEvent, padRecorderQueueSize),
-		metadata:     metadata,
-		health:       health,
-		coalescer:    coalescer,
-		arrs:         arrs,
-		configGetter: configGetter,
-		stopCh:       make(chan struct{}),
+		ch:        make(chan padEvent, padRecorderQueueSize),
+		metadata:  metadata,
+		health:    health,
+		coalescer: coalescer,
+		stopCh:    make(chan struct{}),
 	}
 	r.stopWg.Add(1)
 	go r.run()
@@ -203,69 +191,19 @@ func (r *padRecorder) record(ev padEvent) {
 		slog.WarnContext(ctx, "Failed to record degraded status for padded file", "file", ev.name, "error", err)
 	}
 
-	r.triggerImmediateRepairSearch(ev)
-}
-
-// triggerImmediateRepairSearch asks the owning ARR instance to search for a
-// replacement the moment a playback hole is confirmed, instead of waiting for
-// the file's next scheduled health check (up to 90 days out for files older
-// than 30 days - see health.normalCheckInterval). Deliberately does NOT move
-// the file to the corrupted-safety folder or change its FILE_STATUS: the
-// current stream must keep reading the degraded-but-playable file undisturbed
-// (see the padRecorder doc comment). ARR's own delete+search path only acts
-// when the resolved movie/episode file actually matches this virtual file's
-// library path (see radarrFileMatchesTarget / its Sonarr equivalent), so
-// BearMount's own copy is never touched here - only the ARR-side record.
-//
-// Runs on its own goroutine so a slow ARR round-trip never stalls this
-// recorder's single serialized worker loop (see padRecorder's doc comment);
-// bounded by the same "\x00degraded-pad" debounce key already checked above,
-// so at most one of these fires per file per debounce window regardless of
-// how many holes it accumulates in that window.
-func (r *padRecorder) triggerImmediateRepairSearch(ev padEvent) {
-	if r.arrs == nil || r.configGetter == nil {
-		return
+	// Ask the health worker to fire an immediate ARR repair rescan on its next
+	// cycle, instead of waiting for this file's next scheduled health check
+	// (up to 90 days out for files older than 30 days - see
+	// health.normalCheckInterval). The worker (health.HealthWorker.
+	// triggerImmediateRepairOnly) owns everything about how that happens -
+	// the repair-enabled gate, the repair-retry budget, path resolution,
+	// back-off, indexer failure logging - the same way it already owns every
+	// other ARR trigger; the pad recorder's job stops at asking. This also
+	// keeps the invariant from the doc comment above intact automatically:
+	// the worker's immediate-repair lane never moves metadata to the
+	// corrupted-safety folder or changes FILE_STATUS, so the current stream
+	// keeps reading the degraded-but-playable file undisturbed.
+	if err := r.health.SetImmediateRepairRequested(ctx, ev.name); err != nil {
+		slog.WarnContext(ctx, "Failed to request immediate repair", "file", ev.name, "error", err)
 	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-
-		fh, err := r.health.GetFileHealth(ctx, ev.name)
-		if err != nil {
-			slog.WarnContext(ctx, "Immediate repair-search: could not read health record, skipping",
-				"file", ev.name, "error", err)
-			return
-		}
-
-		var pathForRescan string
-		if fh != nil {
-			if p, ok := fh.EffectiveLibraryPath(); ok {
-				pathForRescan = p
-			}
-		}
-		if pathForRescan == "" {
-			cfg := r.configGetter()
-			switch {
-			case cfg.Health.LibraryDir != nil && *cfg.Health.LibraryDir != "":
-				pathForRescan = utils.JoinAbsPath(*cfg.Health.LibraryDir, ev.name)
-			case cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "":
-				pathForRescan = utils.JoinAbsPath(*cfg.Import.ImportDir, ev.name)
-			default:
-				pathForRescan = utils.JoinAbsPath(cfg.MountPath, ev.name)
-			}
-		}
-
-		var metadataStr *string
-		if fh != nil {
-			metadataStr = fh.Metadata
-		}
-
-		slog.InfoContext(ctx, "Playback hole confirmed, triggering immediate ARR repair search",
-			"file", ev.name, "path_for_rescan", pathForRescan, "total_missing", ev.total)
-
-		if err := r.arrs.TriggerFileRescan(ctx, pathForRescan, ev.name, metadataStr); err != nil {
-			slog.WarnContext(ctx, "Immediate repair search failed (file remains degraded, next scheduled check will retry)",
-				"file", ev.name, "error", err)
-		}
-	}()
 }

@@ -822,7 +822,17 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 		}
 	}
 
-	totalFiles := len(unhealthyFiles) + len(repairFiles)
+	// Files with a pending immediate-repair request (playback holes - see
+	// triggerImmediateRepairOnly's doc comment). Fetched regardless of
+	// cfg.GetRepairEnabled(): triggerImmediateRepairOnly checks that itself
+	// per file and clears the request either way, so a disabled repair
+	// setting doesn't leave requests stuck forever.
+	immediateRepairFiles, err := hw.healthRepo.GetFilesForImmediateRepair(ctx, maxJobs)
+	if err != nil {
+		return fmt.Errorf("failed to get files for immediate repair: %w", err)
+	}
+
+	totalFiles := len(unhealthyFiles) + len(repairFiles) + len(immediateRepairFiles)
 	if totalFiles == 0 {
 		hw.updateStats(func(s *WorkerStats) {
 			s.CurrentRunStartTime = nil
@@ -838,6 +848,7 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 	slog.InfoContext(ctx, "Found files to process",
 		"health_check_files", len(unhealthyFiles),
 		"repair_notification_files", len(repairFiles),
+		"immediate_repair_files", len(immediateRepairFiles),
 		"total", totalFiles,
 		"max_concurrent_jobs", maxJobs)
 
@@ -955,6 +966,37 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 			resultsMu.Unlock()
 
 			// Update cycle progress stats
+			hw.updateStats(func(s *WorkerStats) {
+				s.CurrentRunFilesChecked++
+				s.TotalFilesChecked++
+			})
+		})
+	}
+
+	for _, fileHealth := range immediateRepairFiles {
+		fh := fileHealth // Capture for closure
+		p.Go(func() {
+			// Re-fetch the full record: the listing query only returned
+			// file_path (see GetFilesForImmediateRepair), and this also picks
+			// up any library_path a concurrent webhook relinked in the
+			// meantime, same reasoning as the repairFiles loop above.
+			latest, err := hw.healthRepo.GetFileHealth(ctx, fh.FilePath)
+			if err != nil || latest == nil {
+				slog.WarnContext(ctx, "Skipping immediate repair — could not re-fetch health record",
+					"file_path", fh.FilePath, "error", err)
+				if clearErr := hw.healthRepo.ClearImmediateRepairRequested(ctx, fh.FilePath); clearErr != nil {
+					slog.WarnContext(ctx, "Failed to clear immediate repair request", "file_path", fh.FilePath, "error", clearErr)
+				}
+				return
+			}
+
+			// triggerImmediateRepairOnly does its own direct repository writes
+			// (clear/record) rather than going through the results/
+			// UpdateHealthStatusBulk path below: unlike every other update in
+			// this cycle it deliberately makes no status transition at all, so
+			// there is no HealthStatusUpdate/UpdateType that fits it.
+			hw.triggerImmediateRepairOnly(ctx, latest)
+
 			hw.updateStats(func(s *WorkerStats) {
 				s.CurrentRunFilesChecked++
 				s.TotalFilesChecked++
@@ -1272,6 +1314,68 @@ func (hw *HealthWorker) retriggerFileRepair(ctx context.Context, item *database.
 
 	slog.InfoContext(ctx, "Successfully re-triggered ARR rescan", "file_path", filePath)
 	return repairOutcomeTriggered, nil
+}
+
+// triggerImmediateRepairOnly fires an ARR rescan for a file with a pending
+// immediate-repair request (set by nzbfilesystem's padRecorder the moment a
+// playback hole is confirmed during live streaming - see migration 035 and
+// database.HealthRepository.SetImmediateRepairRequested), skipping every
+// other side effect the normal repair path has: no CheckFile (playback
+// already confirmed the hole; re-verifying it is redundant), no safety-folder
+// move, and no change to item.Status. The file must stay degraded and
+// streamable throughout, since the stream that triggered this may still be
+// reading it.
+//
+// Unlike the direct call this replaces, it inherits the same safeguards the
+// worker already enforces around every other ARR trigger: skipped entirely
+// when repair is disabled, and bounded by the same repair-retry budget
+// (RepairRetryCount vs MaxRepairRetries) so a permanently-broken release
+// cannot be re-downloaded on every debounce window forever. item is expected
+// to have been freshly re-fetched via GetFileHealth (see the call site in
+// runHealthCheckCycle) so LibraryPath/Indexer/Metadata are current, not a
+// stale snapshot from the initial GetFilesForImmediateRepair listing query.
+func (hw *HealthWorker) triggerImmediateRepairOnly(ctx context.Context, item *database.FileHealth) {
+	filePath := item.FilePath
+
+	if !hw.configGetter().GetRepairEnabled() {
+		slog.DebugContext(ctx, "Immediate repair request skipped: repair is disabled", "file_path", filePath)
+		if err := hw.healthRepo.ClearImmediateRepairRequested(ctx, filePath); err != nil {
+			slog.WarnContext(ctx, "Failed to clear immediate repair request", "file_path", filePath, "error", err)
+		}
+		return
+	}
+
+	if item.RepairRetryCount >= hw.configGetter().GetMaxRepairRetries() {
+		slog.WarnContext(ctx, "Immediate repair request skipped: repair budget already exhausted for this file",
+			"file_path", filePath, "repair_retry_count", item.RepairRetryCount)
+		if err := hw.healthRepo.ClearImmediateRepairRequested(ctx, filePath); err != nil {
+			slog.WarnContext(ctx, "Failed to clear immediate repair request", "file_path", filePath, "error", err)
+		}
+		return
+	}
+
+	pathForRescan := hw.resolvePathForRescan(item)
+	metadataStr := hw.ensureMetadata(ctx, item)
+
+	slog.InfoContext(ctx, "Playback hole confirmed, triggering immediate ARR repair search",
+		"file_path", filePath, "path_for_rescan", pathForRescan, "repair_retry_count", item.RepairRetryCount)
+
+	if err := hw.arrsService.TriggerFileRescan(ctx, pathForRescan, filePath, metadataStr); err != nil {
+		if item.Indexer != nil && *item.Indexer != "" && *item.Indexer != database.IndexerUnknown {
+			_ = hw.healthRepo.LogIndexerImport(ctx, *item.Indexer, "failed",
+				fmt.Sprintf("Immediate repair search failed: %s", err), "")
+		}
+		slog.WarnContext(ctx, "Immediate repair search failed (file remains degraded; will retry on the next playback hole or scheduled check)",
+			"file_path", filePath, "error", err)
+	}
+
+	// Increment the retry budget regardless of the outcome above: the counter
+	// bounds how many times this file is asked for, independent of whether
+	// any individual ask "worked" (ARR accepting the request is not the same
+	// as ARR ever delivering a good replacement).
+	if err := hw.healthRepo.RecordImmediateRepairAttempt(ctx, filePath); err != nil {
+		slog.WarnContext(ctx, "Failed to record immediate repair attempt", "file_path", filePath, "error", err)
+	}
 }
 
 func (hw *HealthWorker) ensureMetadata(ctx context.Context, item *database.FileHealth) *string {

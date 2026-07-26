@@ -362,12 +362,104 @@ func (r *HealthRepository) GetFilesForRepairNotification(ctx context.Context, li
 		}
 		files = append(files, &health)
 	}
-
 	if err = rows.Err(); err != nil {
 		return nil, fmt.Errorf("failed to iterate files for repair notification: %w", err)
 	}
 
 	return files, nil
+}
+
+// GetFilesForImmediateRepair returns files with a pending immediate-repair
+// request (set by nzbfilesystem's padRecorder the moment a playback hole is
+// confirmed - see migration 035). The worker fires an ARR rescan for each
+// without a CheckFile pass or a status change; see
+// HealthWorker.triggerImmediateRepairOnly. Only file_path is needed here -
+// the worker re-fetches the full record per file (same pattern
+// GetFilesForRepairNotification's caller already uses) so a webhook-updated
+// library_path is never stale by the time the ARR trigger fires.
+func (r *HealthRepository) GetFilesForImmediateRepair(ctx context.Context, limit int) ([]*FileHealth, error) {
+	query := `
+		SELECT file_path
+		FROM file_health
+		WHERE immediate_repair_requested_at IS NOT NULL
+		ORDER BY immediate_repair_requested_at ASC
+		LIMIT ?
+	`
+
+	rows, err := r.db.QueryContext(ctx, query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query files for immediate repair: %w", err)
+	}
+	defer rows.Close()
+
+	var immediateFiles []*FileHealth
+	for rows.Next() {
+		var filePath string
+		if err := rows.Scan(&filePath); err != nil {
+			return nil, fmt.Errorf("failed to scan file path for immediate repair: %w", err)
+		}
+		immediateFiles = append(immediateFiles, &FileHealth{FilePath: filePath})
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate files for immediate repair: %w", err)
+	}
+
+	return immediateFiles, nil
+}
+
+// SetImmediateRepairRequested marks filePath as needing an immediate ARR
+// repair trigger on the health worker's next cycle. Idempotent: repeated
+// calls before the worker processes it just refresh the timestamp, which is
+// harmless since GetFilesForImmediateRepair only cares that it's non-NULL.
+// A no-op (not an error) if the health record doesn't exist yet.
+func (r *HealthRepository) SetImmediateRepairRequested(ctx context.Context, filePath string) error {
+	filePath = normalizeHealthPath(filePath)
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE file_health SET immediate_repair_requested_at = datetime('now') WHERE file_path = ?`,
+		filePath,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to set immediate repair requested: %w", err)
+	}
+	return nil
+}
+
+// ClearImmediateRepairRequested clears a pending immediate-repair request
+// without touching the repair-retry budget - used when the worker decides
+// not to fire (repair disabled, or the budget is already exhausted).
+func (r *HealthRepository) ClearImmediateRepairRequested(ctx context.Context, filePath string) error {
+	filePath = normalizeHealthPath(filePath)
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE file_health SET immediate_repair_requested_at = NULL WHERE file_path = ?`,
+		filePath,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to clear immediate repair requested: %w", err)
+	}
+	return nil
+}
+
+// RecordImmediateRepairAttempt clears a file's pending immediate-repair
+// request and increments its repair-retry budget counter - called after the
+// worker actually fires (or attempts to fire) the ARR trigger, regardless of
+// whether ARR's response was success or failure: the counter's purpose is to
+// bound how many times this specific file is asked for, independent of
+// whether any individual ask "worked" (ARR accepting the request is not the
+// same as ARR ever delivering a good replacement).
+func (r *HealthRepository) RecordImmediateRepairAttempt(ctx context.Context, filePath string) error {
+	filePath = normalizeHealthPath(filePath)
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE file_health
+		 SET immediate_repair_requested_at = NULL,
+		     repair_retry_count = repair_retry_count + 1,
+		     updated_at = CURRENT_TIMESTAMP
+		 WHERE file_path = ?`,
+		filePath,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to record immediate repair attempt: %w", err)
+	}
+	return nil
 }
 
 // IncrementRetryCount increments the retry count and schedules next check
