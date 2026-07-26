@@ -2289,8 +2289,22 @@ func readFullContext(ctx context.Context, r io.Reader, buf []byte) (int, error) 
 		n, err := io.ReadFull(r, buf)
 		ch <- result{n, err}
 	}()
+	// Diagnostic only (see 2026-07-26 recurring-hang investigation in STACK.md,
+	// occurrence #9): this is the "ephemeral" reader path (createReaderAtOffset
+	// + a fresh one-off reader per call), a completely separate route from the
+	// shared-reader path already instrumented - ffprobe's non-sequential
+	// probing very plausibly hits this branch instead. Callers hold mvf.mu for
+	// this call's entire duration (ReadAtContext's defer), so a stuck read here
+	// wouldn't show up in either the shared-reader-Read timer (different
+	// branch) or the mvf.mu-acquisition timer (measures the wait to acquire,
+	// not time spent after acquiring).
+	waitStart := time.Now()
 	select {
 	case res := <-ch:
+		if waited := time.Since(waitStart); waited > 10*time.Second {
+			slog.WarnContext(ctx, "readFullContext (ephemeral reader path) took unusually long",
+				"duration", waited, "n", res.n, "error", res.err)
+		}
 		return res.n, res.err
 	case <-ctx.Done():
 		// Force-close the reader to unblock io.ReadFull.
