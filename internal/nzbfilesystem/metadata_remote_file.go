@@ -1128,7 +1128,18 @@ func (mvf *MetadataVirtualFile) ReadAtContext(readCtx context.Context, p []byte,
 		}
 		buf := p[:want]
 		for n < int(want) {
+			// Diagnostic only (see 2026-07-26 recurring-hang investigation in
+			// STACK.md): this call holds mvf.mu for its entire duration (see the
+			// defer at the top of ReadAtContext) - if it blocks, every other
+			// ReadAtContext call on this same file handle (including the
+			// AsyncReadBuffer fill goroutine) blocks behind it too, with no
+			// timeout of its own.
+			readStart := time.Now()
 			rn, readErr := mvf.reader.Read(buf[n:])
+			if readDur := time.Since(readStart); readDur > 10*time.Second {
+				slog.WarnContext(readCtx, "shared reader Read took unusually long, holding mvf.mu the whole time",
+					"offset", off, "n_so_far", n, "duration", readDur, "error", readErr)
+			}
 			n += rn
 
 			if n > 0 && mvf.streamTracker != nil && mvf.streamID != "" {

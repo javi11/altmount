@@ -307,7 +307,21 @@ func (b *UsenetReader) Read(p []byte) (int, error) {
 
 	n := 0
 	for n < len(p) {
-		nn, err := s.GetReaderContext(b.ctx).Read(p[n:])
+		// Diagnostic only (see 2026-07-26 recurring-hang investigation, occurrences
+		// #4-6, in STACK.md): three confirmed cases where downloadManager finished
+		// every prefetched segment (in_flight drained to 0) while current_read never
+		// advanced, meaning this exact call never returned. GetReaderContext blocks
+		// on the segment's dataReady channel (or ctx.Done()) - if data/error was
+		// genuinely set for this segment, this should return near-instantly; a slow
+		// return here means either the channel close never happened for this segment
+		// specifically, or ctx itself is the problem.
+		grcStart := time.Now()
+		reader := s.GetReaderContext(b.ctx)
+		if grcDur := time.Since(grcStart); grcDur > 10*time.Second {
+			b.log.WarnContext(b.ctx, "GetReaderContext took unusually long",
+				"segment_id", s.Id, "current_index", rg.GetCurrentIndex(), "duration", grcDur)
+		}
+		nn, err := reader.Read(p[n:])
 		n += nn
 
 		b.mu.Lock()
