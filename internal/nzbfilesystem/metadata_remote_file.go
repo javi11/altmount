@@ -2279,6 +2279,28 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 // On cancellation the reader is force-closed to unblock io.ReadFull, and the
 // goroutine is drained (with a 5 s safety timeout) so that it releases its
 // reference to buf before the function returns.
+//
+// ROOT CAUSE, confirmed 2026-07-27 (see STACK.md's 2026-07-26 recurring-hang
+// investigation): ctx here is the FUSE request's own context
+// (hanwen/go-fuse's *fuse.Context, passed through unchanged as the
+// context.Context for NodeReader.Read). Its Deadline() unconditionally
+// returns "no deadline" and its Done()/Err() are wired directly to the
+// kernel's FUSE_INTERRUPT opcode (vendor/.../fuse/context.go,
+// vendor/.../fuse/protocol-server.go's interruptRequest) - the kernel only
+// sends FUSE_INTERRUPT when a *signal* arrives for the process blocked on
+// the read() syscall. A process stuck in D-state (uninterruptible sleep,
+// exactly what every occurrence of this hang shows via /proc/<pid>/stack)
+// cannot receive that signal by definition, so ctx.Done() structurally
+// never fires for the one case this function exists to protect against.
+// The "case <-ctx.Done()" branch below was never dead in the sense of
+// unreachable code, but it was dead for every real D-state occurrence -
+// which is exactly why five rounds of instrumentation on this and every
+// downstream wait never caught a firing timeout: nothing upstream was ever
+// going to cancel ctx in the first place. Fixed by bounding with an
+// independent timeout derived from ctx but not dependent on ctx itself
+// ever cancelling - the same pattern already used for GetReaderContext
+// (usenet_reader.go) and the budget/poolGetter waits, all of which use
+// their own context.WithTimeout rather than relying on an inherited ctx.
 func readFullContext(ctx context.Context, r io.Reader, buf []byte) (int, error) {
 	type result struct {
 		n   int
@@ -2289,15 +2311,15 @@ func readFullContext(ctx context.Context, r io.Reader, buf []byte) (int, error) 
 		n, err := io.ReadFull(r, buf)
 		ch <- result{n, err}
 	}()
-	// Diagnostic only (see 2026-07-26 recurring-hang investigation in STACK.md,
-	// occurrence #9): this is the "ephemeral" reader path (createReaderAtOffset
-	// + a fresh one-off reader per call), a completely separate route from the
-	// shared-reader path already instrumented - ffprobe's non-sequential
-	// probing very plausibly hits this branch instead. Callers hold mvf.mu for
-	// this call's entire duration (ReadAtContext's defer), so a stuck read here
-	// wouldn't show up in either the shared-reader-Read timer (different
-	// branch) or the mvf.mu-acquisition timer (measures the wait to acquire,
-	// not time spent after acquiring).
+	// This is the "ephemeral" reader path (createReaderAtOffset + a fresh
+	// one-off reader per call), a completely separate route from the
+	// shared-reader path. ffprobe's non-sequential probing hits this branch.
+	// Callers hold mvf.mu for this call's entire duration (ReadAtContext's
+	// defer), so an unbounded stall here previously blocked every other
+	// read on the file handle too - including the shared reader and the
+	// AsyncReadBuffer fill goroutine.
+	boundedCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
 	waitStart := time.Now()
 	select {
 	case res := <-ch:
@@ -2306,7 +2328,12 @@ func readFullContext(ctx context.Context, r io.Reader, buf []byte) (int, error) 
 				"duration", waited, "n", res.n, "error", res.err)
 		}
 		return res.n, res.err
-	case <-ctx.Done():
+	case <-boundedCtx.Done():
+		if ctx.Err() == nil {
+			slog.WarnContext(ctx, "readFullContext (ephemeral reader path) timed out - "+
+				"underlying reader stuck with no FUSE-level cancellation (see func doc)",
+				"waited", time.Since(waitStart))
+		}
 		// Force-close the reader to unblock io.ReadFull.
 		// UsenetReader.Close() is idempotent (closeOnce), so the
 		// caller's defer reader.Close() becomes a safe no-op.
@@ -2318,7 +2345,7 @@ func readFullContext(ctx context.Context, r io.Reader, buf []byte) (int, error) 
 		case <-ch:
 		case <-time.After(5 * time.Second):
 		}
-		return 0, ctx.Err()
+		return 0, boundedCtx.Err()
 	}
 }
 
