@@ -202,7 +202,24 @@ func (a *AsyncReadBuffer) ReadAtContext(ctx context.Context, p []byte, off int64
 		// Sequential read at the buffer frontier — wait for the fill goroutine.
 		if off == bufEnd && off == a.expectedNext {
 			waitStart := time.Now()
-			for a.baseOff+int64(a.filled) <= off && !a.srcDone && !a.closed && ctx.Err() == nil {
+			// ROOT CAUSE, confirmed 2026-07-27 via a live goroutine dump (pprof,
+			// see FIXES.md/STACK.md "recurring-hang" entries): this loop used to
+			// omit `a.streaming` from its condition. A concurrent ReadAtContext
+			// call on the same handle (a seek/scrub) can call demoteLocked()
+			// while this goroutine is parked here - demoteLocked sets
+			// a.streaming=false, resets a.filled=0, and Broadcasts. This
+			// goroutine wakes, re-checks the old condition (which never looked
+			// at a.streaming), sees filled still hasn't caught up, and parks
+			// again - waiting on a fill goroutine that has itself parked
+			// waiting for a NEW promotion, which only a goroutine reaching the
+			// probing-mode code below (not one stuck in this loop) can trigger.
+			// Neither side can ever wake the other again: a genuine permanent
+			// deadlock, confirmed live as the actual mechanism behind the
+			// recurring ffprobe D-state hangs. Fix: also stop waiting the
+			// moment a.streaming goes false, and fall through to the
+			// probing/passthrough path below exactly like the pre-existing
+			// "closed while waiting" case already did.
+			for a.streaming && a.baseOff+int64(a.filled) <= off && !a.srcDone && !a.closed && ctx.Err() == nil {
 				a.cond.Wait()
 			}
 			if waited := time.Since(waitStart); waited > 10*time.Second {
@@ -213,18 +230,19 @@ func (a *AsyncReadBuffer) ReadAtContext(ctx context.Context, p []byte, off int64
 				a.mu.Unlock()
 				return 0, ctx.Err()
 			}
-			if !a.closed && off >= a.baseOff && off < a.baseOff+int64(a.filled) {
+			if a.streaming && !a.closed && off >= a.baseOff && off < a.baseOff+int64(a.filled) {
 				n := a.copyFromBuffer(p, off)
 				a.expectedNext = off + int64(n)
 				a.mu.Unlock()
 				return n, nil
 			}
-			if a.srcDone {
+			if a.streaming && a.srcDone {
 				err := a.srcErr
 				a.mu.Unlock()
 				return 0, err
 			}
-			// Closed while waiting — fall through to passthrough.
+			// Demoted by a concurrent seek, or closed, while waiting — fall
+			// through to passthrough/probing below.
 		}
 
 		// Near-frontier: this read is just ahead of the fill frontier — likely a
@@ -232,7 +250,11 @@ func (a *AsyncReadBuffer) ReadAtContext(ctx context.Context, p []byte, off int64
 		// goroutine to reach this offset rather than demoting.
 		if off >= bufEnd && off < bufEnd+nearFrontierWindow {
 			waitStart := time.Now()
-			for !a.srcDone && !a.closed && ctx.Err() == nil {
+			// See the matching comment on the sequential-frontier wait above -
+			// same fix, same confirmed-live deadlock: this loop must also stop
+			// waiting once a.streaming goes false (a concurrent demote), not
+			// just on srcDone/closed/ctx cancellation.
+			for a.streaming && !a.srcDone && !a.closed && ctx.Err() == nil {
 				if a.baseOff+int64(a.filled) > off {
 					break
 				}
@@ -253,18 +275,19 @@ func (a *AsyncReadBuffer) ReadAtContext(ctx context.Context, p []byte, off int64
 				a.mu.Unlock()
 				return 0, ctx.Err()
 			}
-			if !a.closed && off >= a.baseOff && off < a.baseOff+int64(a.filled) {
+			if a.streaming && !a.closed && off >= a.baseOff && off < a.baseOff+int64(a.filled) {
 				n := a.copyFromBuffer(p, off)
 				a.expectedNext = off + int64(n)
 				a.mu.Unlock()
 				return n, nil
 			}
-			if a.srcDone {
+			if a.streaming && a.srcDone {
 				err := a.srcErr
 				a.mu.Unlock()
 				return 0, err
 			}
-			// Closed while waiting or off fell outside buffer — fall through to demote.
+			// Demoted (by us, by a concurrent seek, or closed) while waiting —
+			// fall through to demote/passthrough below.
 		}
 		// Non-sequential read (seek) while streaming → demote to probing.
 	demote:
