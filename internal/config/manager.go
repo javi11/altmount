@@ -174,12 +174,36 @@ type StremioConfig struct {
 	// the same NZB is re-processed on the next request.
 	// Set to 0 to disable expiry (cache forever). Defaults to 24 hours.
 	NzbTTLHours int `yaml:"nzb_ttl_hours" mapstructure:"nzb_ttl_hours" json:"nzb_ttl_hours"`
+	// FailedReleaseTTLHours controls how long a release that failed to import stays
+	// excluded from the Stremio stream list. Mirrors NzbTTLHours semantics: it filters
+	// failure records by age rather than deleting them, so it is bounded above by
+	// Import.FailedItemRetentionHours. Set to 0 to exclude for as long as the record
+	// survives. Defaults to 24 hours.
+	FailedReleaseTTLHours int `yaml:"failed_release_ttl_hours" mapstructure:"failed_release_ttl_hours" json:"failed_release_ttl_hours"`
+	// MaxFallbackReleases caps how many *extra* releases a single play request may try
+	// after the first one fails. Set to 0 to disable fallback. Defaults to 2.
+	MaxFallbackReleases int `yaml:"max_fallback_releases" mapstructure:"max_fallback_releases" json:"max_fallback_releases"`
 	// BaseURL is the public base URL used when building Stremio stream links
 	// (e.g. "https://altmount.example.com"). Falls back to the auto-detected
 	// request origin when not set.
 	BaseURL string `yaml:"base_url" mapstructure:"base_url" json:"base_url,omitempty"`
 	// Prowlarr configures the Prowlarr indexer used by the Stremio addon to search for NZBs.
 	Prowlarr ProwlarrConfig `yaml:"prowlarr" mapstructure:"prowlarr" json:"prowlarr"`
+}
+
+// maxStremioFallbackReleases bounds MaxFallbackReleases so a run of failures cannot
+// fire an unbounded number of Prowlarr searches for a single play request.
+const maxStremioFallbackReleases = 4
+
+// EffectiveMaxFallbackReleases returns MaxFallbackReleases clamped to [0, 4].
+func (s StremioConfig) EffectiveMaxFallbackReleases() int {
+	if s.MaxFallbackReleases < 0 {
+		return 0
+	}
+	if s.MaxFallbackReleases > maxStremioFallbackReleases {
+		return maxStremioFallbackReleases
+	}
+	return s.MaxFallbackReleases
 }
 
 // AuthConfig represents authentication configuration
@@ -1523,8 +1547,10 @@ func DefaultConfig(configDir ...string) *Config {
 			Prefix: "/api",
 		},
 		Stremio: StremioConfig{
-			Enabled:     &stremioEnabled,
-			NzbTTLHours: 24,
+			Enabled:               &stremioEnabled,
+			NzbTTLHours:           24,
+			FailedReleaseTTLHours: 24,
+			MaxFallbackReleases:   2,
 			Prowlarr: ProwlarrConfig{
 				Enabled:    &prowlarrEnabled,
 				Host:       "http://localhost:9696",

@@ -683,6 +683,8 @@ export interface ProwlarrIndexer {
 export interface StremioConfig {
 	enabled: boolean;
 	nzb_ttl_hours: number;
+	failed_release_ttl_hours: number;
+	max_fallback_releases: number;
 	base_url?: string;
 	prowlarr: ProwlarrConfig;
 }

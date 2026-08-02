@@ -203,10 +203,14 @@ type ArrsInstanceAPIResponse struct {
 
 // StremioAPIResponse sanitizes Stremio config for API responses
 type StremioAPIResponse struct {
-	Enabled     bool                `json:"enabled"`
-	NzbTTLHours int                 `json:"nzb_ttl_hours"`
-	BaseURL     string              `json:"base_url,omitempty"`
-	Prowlarr    ProwlarrAPIResponse `json:"prowlarr"`
+	Enabled bool `json:"enabled"`
+	NzbTTLHours int `json:"nzb_ttl_hours"`
+	// No omitempty: an explicit 0 must survive the round-trip, otherwise saving the
+	// config would silently restore the defaults.
+	FailedReleaseTTLHours int                 `json:"failed_release_ttl_hours"`
+	MaxFallbackReleases   int                 `json:"max_fallback_releases"`
+	BaseURL               string              `json:"base_url,omitempty"`
+	Prowlarr              ProwlarrAPIResponse `json:"prowlarr"`
 }
 
 // ProwlarrAPIResponse sanitizes Prowlarr config for API responses
@@ -380,9 +384,11 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 	}
 
 	stremioResp := StremioAPIResponse{
-		Enabled:     cfg.Stremio.Enabled != nil && *cfg.Stremio.Enabled,
-		NzbTTLHours: cfg.Stremio.NzbTTLHours,
-		BaseURL:     cfg.Stremio.BaseURL,
+		Enabled:               cfg.Stremio.Enabled != nil && *cfg.Stremio.Enabled,
+		NzbTTLHours:           cfg.Stremio.NzbTTLHours,
+		FailedReleaseTTLHours: cfg.Stremio.FailedReleaseTTLHours,
+		MaxFallbackReleases:   cfg.Stremio.MaxFallbackReleases,
+		BaseURL:               cfg.Stremio.BaseURL,
 		Prowlarr: ProwlarrAPIResponse{
 			Enabled:    cfg.Stremio.Prowlarr.Enabled != nil && *cfg.Stremio.Prowlarr.Enabled,
 			Host:       cfg.Stremio.Prowlarr.Host,

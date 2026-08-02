@@ -73,6 +73,9 @@ type Server struct {
 
 	// stremioPlayGroup coalesces concurrent Stremio plays of the same title (download once).
 	stremioPlayGroup singleflight.Group
+	// stremioFailures records releases that failed without leaving a 'failed' queue row,
+	// so they stop being offered in the stream list.
+	stremioFailures *stremioFailureCache
 }
 
 // NewServer creates a new API server that can optionally register routes on the provided mux (for backwards compatibility)
@@ -100,6 +103,7 @@ func NewServer(
 
 	server := &Server{
 		config:              config,
+		stremioFailures:     newStremioFailureCache(),
 		queueRepo:           queueRepo,
 		healthRepo:          healthRepo,
 		authService:         authService,

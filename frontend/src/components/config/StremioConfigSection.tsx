@@ -111,6 +111,8 @@ export function StremioConfigSection({
 	const [formData, setFormData] = useState<StremioConfig>({
 		enabled: config.stremio?.enabled ?? false,
 		nzb_ttl_hours: config.stremio?.nzb_ttl_hours ?? 24,
+		failed_release_ttl_hours: config.stremio?.failed_release_ttl_hours ?? 24,
+		max_fallback_releases: config.stremio?.max_fallback_releases ?? 2,
 		base_url: config.stremio?.base_url ?? "",
 		prowlarr: resolveProwlarr(config.stremio?.prowlarr),
 	});
@@ -124,6 +126,8 @@ export function StremioConfigSection({
 		setFormData({
 			enabled: config.stremio?.enabled ?? false,
 			nzb_ttl_hours: config.stremio?.nzb_ttl_hours ?? 24,
+			failed_release_ttl_hours: config.stremio?.failed_release_ttl_hours ?? 24,
+			max_fallback_releases: config.stremio?.max_fallback_releases ?? 2,
 			base_url: config.stremio?.base_url ?? "",
 			prowlarr: resolveProwlarr(config.stremio?.prowlarr),
 		});
@@ -135,6 +139,8 @@ export function StremioConfigSection({
 		const changed =
 			updated.enabled !== (orig?.enabled ?? false) ||
 			updated.nzb_ttl_hours !== (orig?.nzb_ttl_hours ?? 24) ||
+			updated.failed_release_ttl_hours !== (orig?.failed_release_ttl_hours ?? 24) ||
+			updated.max_fallback_releases !== (orig?.max_fallback_releases ?? 2) ||
 			updated.base_url !== (orig?.base_url ?? "") ||
 			JSON.stringify(updated.prowlarr) !== JSON.stringify(orig?.prowlarr ?? DEFAULT_PROWLARR);
 		setHasChanges(changed);
@@ -270,6 +276,45 @@ export function StremioConfigSection({
 							/>
 							<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/50 text-xs">
 								How long cached NZB files stay on disk. Use <strong>0</strong> to keep forever.
+							</p>
+						</fieldset>
+
+						<fieldset className="fieldset min-w-0">
+							<legend className="fieldset-legend">Failed Release TTL (hours)</legend>
+							<input
+								type="number"
+								className="input w-full min-w-0 max-w-full"
+								min={0}
+								value={formData.failed_release_ttl_hours}
+								disabled={isReadOnly}
+								onChange={(e) =>
+									update({ failed_release_ttl_hours: Math.max(0, Number(e.target.value)) })
+								}
+							/>
+							<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/50 text-xs">
+								How long a release that failed to import stays hidden from stream results. Use{" "}
+								<strong>0</strong> to hide it for as long as the failure record survives.
+							</p>
+						</fieldset>
+
+						<fieldset className="fieldset min-w-0">
+							<legend className="fieldset-legend">Fallback Releases</legend>
+							<input
+								type="number"
+								className="input w-full min-w-0 max-w-full"
+								min={0}
+								max={4}
+								value={formData.max_fallback_releases}
+								disabled={isReadOnly}
+								onChange={(e) =>
+									update({
+										max_fallback_releases: Math.min(4, Math.max(0, Number(e.target.value))),
+									})
+								}
+							/>
+							<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/50 text-xs">
+								How many extra releases to try automatically when playback fails. Use{" "}
+								<strong>0</strong> to disable fallback.
 							</p>
 						</fieldset>
 					</div>
