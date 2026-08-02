@@ -2128,6 +2128,47 @@ func (r *Repository) GetExpiredStremioQueueItems(ctx context.Context, ttlHours i
 	return items, rows.Err()
 }
 
+// GetFailedStremioQueueItems returns Stremio-originated queue items whose import
+// failed. Used by the Stremio stream handler to exclude releases that are known not
+// to work, so they stop being offered (and re-picked) on every search.
+//
+// Ordered by updated_at because UpdateQueueItemStatus does not set completed_at on
+// failure. Age filtering (Stremio.FailedReleaseTTLHours) is applied by the caller,
+// mirroring GetCachedStremioQueueItems.
+func (r *Repository) GetFailedStremioQueueItems(ctx context.Context) ([]*ImportQueueItem, error) {
+	query := `
+		SELECT id, download_id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
+		       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path, target_path
+		FROM import_queue
+		WHERE status = 'failed'
+		  AND download_id LIKE 'stremio:%'
+		ORDER BY updated_at DESC
+		LIMIT 500
+	`
+
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query failed stremio queue items: %w", err)
+	}
+	defer rows.Close()
+
+	var items []*ImportQueueItem
+	for rows.Next() {
+		var item ImportQueueItem
+		err := rows.Scan(
+			&item.ID, &item.DownloadID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
+			&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
+			&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath, &item.TargetPath,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan failed stremio queue item: %w", err)
+		}
+		items = append(items, &item)
+	}
+
+	return items, rows.Err()
+}
+
 // GetCachedStremioQueueItems returns completed Stremio-originated queue items that
 // have a storage path (i.e. are streamable). Used by the Stremio stream handler to
 // mark already-imported releases as cached. TTL freshness is applied by the caller.

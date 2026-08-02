@@ -161,14 +161,207 @@ func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 		"type", streamType, "id", rawID, "imdb_id", imdbID)
 
 	baseURL := resolveBaseURL(c, cfg.Stremio.BaseURL)
-	prowlarrCfg := cfg.Stremio.Prowlarr
 
-	// Search Prowlarr -- return play-URL options immediately, no download yet
+	results, cachedItems, err := s.searchStremioReleases(ctx, cfg, streamType, prowlarrType, imdbID, season, episode)
+	if err != nil || len(results) == 0 {
+		return emptyStreamsResponse(c)
+	}
+
+	entries := buildStremioStreamEntries(results, cachedItems, cfg.Stremio.NzbTTLHours, time.Now(),
+		baseURL, key, streamType, season, episode, imdbID)
+
+	streams := make([]fiber.Map, 0, len(entries))
+	for _, e := range entries {
+		streams = append(streams, fiber.Map{
+			"name":  e.Name,
+			"title": e.Title,
+			"url":   e.URL,
+		})
+	}
+
+	return c.JSON(fiber.Map{"streams": streams})
+}
+
+// stremioPlayCandidate is one release a /play request may attempt. Candidates are
+// produced in the same order the stream list presented, so the fallback chain and the
+// list agree on what "the next release" means.
+type stremioPlayCandidate struct {
+	Title       string // raw Prowlarr title
+	SafeTitle   string // sanitizeFilename(Title) -- the release key
+	DownloadURL string
+	Indexer     string
+}
+
+// stremioNzbPathMatches reports whether a queue item's nzb path belongs to the release
+// identified by safeTitle. The play handler stages every NZB as "<safeTitle>.nzb", and
+// the importer preserves that base name, so a substring test is the join between a
+// Prowlarr result and its queue rows.
+func stremioNzbPathMatches(nzbPath, safeTitle string) bool {
+	return strings.Contains(filepath.ToSlash(nzbPath), safeTitle+".nzb")
+}
+
+// stremioCachedPredicate returns a test for "already imported and still usable":
+// the item must have a storage path and, when a TTL is configured, have completed
+// within it. Mirrors the reuse condition in handleStremioAddonPlay so the "⚡ Cached"
+// badge is truthful.
+func stremioCachedPredicate(cached []*database.ImportQueueItem, ttlHours int, now time.Time) func(safeTitle string) bool {
+	paths := make([]string, 0, len(cached))
+	for _, item := range cached {
+		if item == nil || item.StoragePath == nil || *item.StoragePath == "" {
+			continue
+		}
+		if ttlHours > 0 {
+			if item.CompletedAt == nil || now.Sub(*item.CompletedAt) >= time.Duration(ttlHours)*time.Hour {
+				continue
+			}
+		}
+		paths = append(paths, item.NzbPath)
+	}
+
+	return func(safeTitle string) bool {
+		for _, p := range paths {
+			if stremioNzbPathMatches(p, safeTitle) {
+				return true
+			}
+		}
+		return false
+	}
+}
+
+// stremioFailedPredicate returns a test for "known not to work", combining the durable
+// half (failed import_queue rows) with the process-local half (failures that leave no
+// failed row -- see stremioFailureCache).
+//
+// Unlike the cached predicate this keys off UpdatedAt, because UpdateQueueItemStatus
+// does not set completed_at on failure, and it does not require a storage path.
+func stremioFailedPredicate(
+	failed []*database.ImportQueueItem,
+	memKeys map[string]struct{},
+	ttlHours int,
+	now time.Time,
+) func(safeTitle string) bool {
+	paths := make([]string, 0, len(failed))
+	for _, item := range failed {
+		if item == nil {
+			continue
+		}
+		if ttlHours > 0 && now.Sub(item.UpdatedAt) >= time.Duration(ttlHours)*time.Hour {
+			continue
+		}
+		paths = append(paths, item.NzbPath)
+	}
+
+	return func(safeTitle string) bool {
+		if _, ok := memKeys[safeTitle]; ok {
+			return true
+		}
+		for _, p := range paths {
+			if stremioNzbPathMatches(p, safeTitle) {
+				return true
+			}
+		}
+		return false
+	}
+}
+
+// filterStremioResults drops releases failing the configured language/quality filters,
+// and those already known to have failed. Excluding failed releases here -- rather than
+// demoting them -- is what stops a bad release being offered, and re-picked, forever.
+func filterStremioResults(
+	results []prowlarr.NZBResult,
+	languages, qualities []string,
+	isFailed func(safeTitle string) bool,
+) []prowlarr.NZBResult {
+	filtered := make([]prowlarr.NZBResult, 0, len(results))
+	for _, r := range results {
+		if !prowlarr.MatchesLanguage(r.Title, languages) {
+			continue
+		}
+		if !prowlarr.MatchesQuality(r.Title, qualities) {
+			continue
+		}
+		if isFailed != nil && isFailed(sanitizeFilename(r.Title)) {
+			continue
+		}
+		filtered = append(filtered, r)
+	}
+	return filtered
+}
+
+// orderStremioResults stably reorders results so cached releases come first,
+// preserving Prowlarr's relative order (publish date, newest first) within each group.
+func orderStremioResults(results []prowlarr.NZBResult, isCached func(safeTitle string) bool) []prowlarr.NZBResult {
+	ordered := make([]prowlarr.NZBResult, len(results))
+	copy(ordered, results)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		return isCached(sanitizeFilename(ordered[i].Title)) && !isCached(sanitizeFilename(ordered[j].Title))
+	})
+	return ordered
+}
+
+// stremioCandidates converts ordered Prowlarr results into play candidates.
+func stremioCandidates(results []prowlarr.NZBResult, fallbackID string) []stremioPlayCandidate {
+	cands := make([]stremioPlayCandidate, 0, len(results))
+	for _, r := range results {
+		safeTitle := sanitizeFilename(r.Title)
+		if safeTitle == "" {
+			safeTitle = fallbackID
+		}
+		cands = append(cands, stremioPlayCandidate{
+			Title:       r.Title,
+			SafeTitle:   safeTitle,
+			DownloadURL: r.DownloadURL,
+			Indexer:     r.Indexer,
+		})
+	}
+	return cands
+}
+
+// nextStremioCandidate returns the index of the release to try after currentSafeTitle.
+// When the current release is absent -- the Prowlarr list can change between /stream and
+// /play -- it starts from the top rather than giving up. Reports false when exhausted.
+func nextStremioCandidate(cands []stremioPlayCandidate, currentSafeTitle string, startAfter int) (int, bool) {
+	if len(cands) == 0 {
+		return 0, false
+	}
+
+	if startAfter < 0 {
+		startAfter = -1
+		for i, c := range cands {
+			if c.SafeTitle == currentSafeTitle {
+				startAfter = i
+				break
+			}
+		}
+		if startAfter < 0 {
+			return 0, true
+		}
+	}
+
+	next := startAfter + 1
+	if next >= len(cands) {
+		return 0, false
+	}
+	return next, true
+}
+
+// searchStremioReleases runs the Prowlarr search for a Stremio content id, applies the
+// language/quality filters, drops releases known to have failed, and orders the result
+// cached-first. It is the single source of truth for candidate ordering, shared by the
+// stream list and the play fallback chain, so both agree on what "next" means.
+func (s *Server) searchStremioReleases(
+	ctx context.Context,
+	cfg *config.Config,
+	streamType, prowlarrType, imdbID string,
+	season, episode int,
+) ([]prowlarr.NZBResult, []*database.ImportQueueItem, error) {
+	prowlarrCfg := cfg.Stremio.Prowlarr
 	client := prowlarr.NewClient(
 		prowlarrCfg.Host,
 		prowlarrCfg.APIKey,
 		httpclient.NewForExternal(cfg.Network, 30*time.Second),
 	)
+
 	var (
 		results []prowlarr.NZBResult
 		err     error
@@ -200,53 +393,58 @@ func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 		results, err = client.Search(ctx, imdbID, prowlarrType, prowlarrCfg.Categories, prowlarrCfg.Indexers, season, episode)
 		if err != nil {
 			slog.WarnContext(ctx, "Prowlarr search failed", "error", err, "imdb_id", imdbID, "tvdb_id", tvdbID)
-			return emptyStreamsResponse(c)
+			return nil, nil, err
 		}
 	}
 
 	if len(results) == 0 {
 		slog.InfoContext(ctx, "No Prowlarr results found", "imdb_id", imdbID, "tvdb_id", tvdbID)
-		return emptyStreamsResponse(c)
+		return nil, nil, nil
 	}
 
-	// Apply language and quality filters
-	filtered := results[:0]
-	for _, r := range results {
-		if !prowlarr.MatchesLanguage(r.Title, prowlarrCfg.Languages) {
-			continue
-		}
-		if !prowlarr.MatchesQuality(r.Title, prowlarrCfg.Qualities) {
-			continue
-		}
-		filtered = append(filtered, r)
-	}
-	results = filtered
+	now := time.Now()
+	cachedItems, failedItems := s.loadStremioQueueState(ctx)
 
-	// Mark already-imported releases as cached so instantly-playable options
-	// surface first. Best-effort: on lookup failure, fall back to no badges.
-	var cachedItems []*database.ImportQueueItem
-	if s.queueRepo != nil {
-		if items, cacheErr := s.queueRepo.GetCachedStremioQueueItems(ctx); cacheErr != nil {
-			slog.WarnContext(ctx, "Failed to load cached Stremio items; continuing without cache badges",
-				"error", cacheErr)
-		} else {
-			cachedItems = items
-		}
+	total := len(results)
+	results = filterStremioResults(results, prowlarrCfg.Languages, prowlarrCfg.Qualities,
+		stremioFailedPredicate(failedItems, s.stremioFailures.Keys(stremioFailedTTL(cfg)),
+			cfg.Stremio.FailedReleaseTTLHours, now))
+	if len(results) < total {
+		slog.InfoContext(ctx, "Filtered Prowlarr results",
+			"imdb_id", imdbID, "total", total, "kept", len(results))
 	}
 
-	entries := buildStremioStreamEntries(results, cachedItems, cfg.Stremio.NzbTTLHours, time.Now(),
-		baseURL, key, streamType, season, episode, imdbID)
+	ordered := orderStremioResults(results, stremioCachedPredicate(cachedItems, cfg.Stremio.NzbTTLHours, now))
+	return ordered, cachedItems, nil
+}
 
-	streams := make([]fiber.Map, 0, len(entries))
-	for _, e := range entries {
-		streams = append(streams, fiber.Map{
-			"name":  e.Name,
-			"title": e.Title,
-			"url":   e.URL,
-		})
+// stremioFailedTTL is the age after which a recorded failure stops excluding a release.
+func stremioFailedTTL(cfg *config.Config) time.Duration {
+	return time.Duration(cfg.Stremio.FailedReleaseTTLHours) * time.Hour
+}
+
+// loadStremioQueueState fetches the cached and failed Stremio queue items. Both lookups
+// are best-effort: a DB hiccup degrades badges and exclusion rather than failing search.
+func (s *Server) loadStremioQueueState(ctx context.Context) (cached, failed []*database.ImportQueueItem) {
+	if s.queueRepo == nil {
+		return nil, nil
 	}
 
-	return c.JSON(fiber.Map{"streams": streams})
+	if items, err := s.queueRepo.GetCachedStremioQueueItems(ctx); err != nil {
+		slog.WarnContext(ctx, "Failed to load cached Stremio items; continuing without cache badges",
+			"error", err)
+	} else {
+		cached = items
+	}
+
+	if items, err := s.queueRepo.GetFailedStremioQueueItems(ctx); err != nil {
+		slog.WarnContext(ctx, "Failed to load failed Stremio items; continuing without exclusion",
+			"error", err)
+	} else {
+		failed = items
+	}
+
+	return cached, failed
 }
 
 // stremioStreamEntry is a single Stremio stream option produced from a Prowlarr
@@ -276,30 +474,10 @@ func buildStremioStreamEntries(
 	season, episode int,
 	fallbackID string,
 ) []stremioStreamEntry {
-	// Collect the nzb paths of cached items that are still usable: they must have
-	// a storage path and, when a TTL is configured, have completed within it.
-	// Mirrors the reuse condition in handleStremioAddonPlay.
-	validCachedPaths := make([]string, 0, len(cached))
-	for _, item := range cached {
-		if item == nil || item.StoragePath == nil || *item.StoragePath == "" {
-			continue
-		}
-		if ttlHours > 0 {
-			if item.CompletedAt == nil || now.Sub(*item.CompletedAt) >= time.Duration(ttlHours)*time.Hour {
-				continue
-			}
-		}
-		validCachedPaths = append(validCachedPaths, filepath.ToSlash(item.NzbPath))
-	}
+	isCached := stremioCachedPredicate(cached, ttlHours, now)
 
-	isCached := func(safeFilename string) bool {
-		for _, p := range validCachedPaths {
-			if strings.Contains(p, safeFilename) {
-				return true
-			}
-		}
-		return false
-	}
+	// Order first, then build, so entries come out in final order without a second sort.
+	results = orderStremioResults(results, isCached)
 
 	entries := make([]stremioStreamEntry, 0, len(results))
 	for _, r := range results {
@@ -307,7 +485,7 @@ func buildStremioStreamEntries(
 		if safeTitle == "" {
 			safeTitle = fallbackID
 		}
-		cachedHit := isCached(safeTitle + ".nzb")
+		cachedHit := isCached(safeTitle)
 
 		playURL := baseURL + "/stremio/" + key + "/play" +
 			"?url=" + url.QueryEscape(r.DownloadURL) +
@@ -315,6 +493,10 @@ func buildStremioStreamEntries(
 			"&type=" + url.QueryEscape(streamType)
 		if r.Indexer != "" {
 			playURL += "&indexer=" + url.QueryEscape(r.Indexer)
+		}
+		if fallbackID != "" {
+			// The content id lets /play re-derive the candidate list to fall back on.
+			playURL += "&id=" + url.QueryEscape(fallbackID)
 		}
 		if streamType == "series" && season > 0 && episode > 0 {
 			playURL += "&season=" + url.QueryEscape(strconv.Itoa(season)) +
@@ -371,12 +553,6 @@ func buildStremioStreamEntries(
 		})
 	}
 
-	// Stably sort cached entries first, preserving Prowlarr's relative order
-	// within each group.
-	sort.SliceStable(entries, func(i, j int) bool {
-		return entries[i].Cached && !entries[j].Cached
-	})
-
 	return entries
 }
 
@@ -425,36 +601,233 @@ func (s *Server) handleStremioAddonPlay(c *fiber.Ctx) error {
 	if safeTitle == "" {
 		safeTitle = "unknown"
 	}
-	var indexerPtr *string
-	if indexer := c.Query("indexer"); indexer != "" {
-		indexerPtr = &indexer
-	}
+	imdbID := c.Query("id")
+	streamType := c.Query("type")
 
 	baseURL := resolveBaseURL(c, cfg.Stremio.BaseURL)
 	selector := stremioEpisodeSelectorFromRequest(c)
 
-	safeFilename := safeTitle + ".nzb"
-	nzbName := safeTitle
+	cand := stremioPlayCandidate{
+		Title:       safeTitle,
+		SafeTitle:   safeTitle,
+		DownloadURL: downloadURL,
+		Indexer:     c.Query("indexer"),
+	}
 
-	// Short-circuit: return cached stream if already processed within TTL
+	// Short-circuit: return cached stream if already processed within TTL. This runs
+	// before the failed-release check so a genuinely playable file always wins over a
+	// stale failure record.
 	ttlHours := cfg.Stremio.NzbTTLHours
 	completedStatus := database.QueueStatusCompleted
-	if existing, err := s.queueRepo.ListQueueItems(ctx, &completedStatus, safeFilename, "", 1, 0, "updated_at", "desc"); err == nil && len(existing) > 0 {
+	if existing, err := s.queueRepo.ListQueueItems(ctx, &completedStatus, cand.SafeTitle+".nzb", "", 1, 0, "updated_at", "desc"); err == nil && len(existing) > 0 {
 		prev := existing[0]
 		cacheValid := prev.StoragePath != nil && *prev.StoragePath != ""
 		if cacheValid && ttlHours > 0 && prev.CompletedAt != nil {
 			cacheValid = time.Since(*prev.CompletedAt) < time.Duration(ttlHours)*time.Hour
 		}
 		if cacheValid {
-			if streams, err := s.buildStremioStreams(ctx, prev, baseURL, key, nzbName, selector); err == nil && len(streams) > 0 {
+			if streams, err := s.buildStremioStreams(ctx, prev, baseURL, key, cand.SafeTitle, selector); err == nil && len(streams) > 0 {
 				slog.InfoContext(ctx, "Returning cached Stremio stream for Prowlarr NZB",
-					"nzb_name", nzbName)
+					"nzb_name", cand.SafeTitle)
 				return c.Redirect(streams[0].URL, fiber.StatusFound)
 			}
 		}
 	}
 
-	// Coalesce concurrent plays of the same title so the release is downloaded/queued once.
+	return s.playStremioWithFallback(c, cfg, cand, playRequest{
+		baseURL:    baseURL,
+		key:        key,
+		streamType: streamType,
+		imdbID:     imdbID,
+		selector:   selector,
+	})
+}
+
+// playRequest carries the per-request context the fallback loop needs, keeping the
+// loop signature readable.
+type playRequest struct {
+	baseURL    string
+	key        string
+	streamType string
+	imdbID     string
+	selector   *stremioEpisodeSelector
+}
+
+const (
+	// stremioPlayBudget is the total wall clock a /play request may spend across all
+	// attempts. Unchanged from the original single-attempt timeout, so client
+	// behaviour is unaffected.
+	stremioPlayBudget = 300 * time.Second
+	// stremioMinAttemptBudget is the minimum time left worth starting another attempt.
+	stremioMinAttemptBudget = 20 * time.Second
+)
+
+// playStremioWithFallback queues the requested release and waits for it, advancing to
+// the next candidate release when one fails. Without this, a release that fails is
+// simply re-downloaded and re-queued on every play, forever.
+func (s *Server) playStremioWithFallback(
+	c *fiber.Ctx,
+	cfg *config.Config,
+	cand stremioPlayCandidate,
+	req playRequest,
+) error {
+	ctx := c.Context()
+
+	// Candidates are resolved lazily: the happy path must not pay for a second
+	// Prowlarr search.
+	var (
+		cands       []stremioPlayCandidate
+		candsLoaded bool
+		curIdx      = -1
+	)
+	loadCandidates := func() {
+		if candsLoaded {
+			return
+		}
+		candsLoaded = true
+		if req.imdbID == "" {
+			return
+		}
+		prowlarrType := "search"
+		switch req.streamType {
+		case "movie":
+			prowlarrType = "movie"
+		case "series":
+			prowlarrType = "tvsearch"
+		}
+		season, episode := 0, 0
+		if req.selector != nil {
+			season, episode = req.selector.Season, req.selector.Episode
+		}
+		results, _, err := s.searchStremioReleases(ctx, cfg, req.streamType, prowlarrType, req.imdbID, season, episode)
+		if err != nil {
+			slog.WarnContext(ctx, "Stremio fallback search failed", "error", err, "imdb_id", req.imdbID)
+			return
+		}
+		cands = stremioCandidates(results, req.imdbID)
+	}
+
+	// advance moves to the next candidate, returning false when fallback is disabled,
+	// unavailable, or exhausted.
+	advance := func() bool {
+		if cfg.Stremio.EffectiveMaxFallbackReleases() == 0 || req.imdbID == "" {
+			return false
+		}
+		loadCandidates()
+		next, ok := nextStremioCandidate(cands, cand.SafeTitle, curIdx)
+		if !ok {
+			return false
+		}
+		curIdx = next
+		cand = cands[next]
+		slog.InfoContext(ctx, "Falling back to next Stremio release",
+			"imdb_id", req.imdbID, "title", cand.SafeTitle)
+		return true
+	}
+
+	deadline := time.Now().Add(stremioPlayBudget)
+	maxAttempts := 1 + cfg.Stremio.EffectiveMaxFallbackReleases()
+	attempts := 0
+
+	// A stale client-cached stream list can point straight at a release we already know
+	// is bad. Skip the download entirely and start from the next candidate.
+	if s.stremioIsFailed(ctx, cfg, cand.SafeTitle) {
+		slog.InfoContext(ctx, "Skipping known-failed Stremio release", "title", cand.SafeTitle)
+		if !advance() {
+			return RespondServiceUnavailable(c, "No playable release found", "release previously failed")
+		}
+	}
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		remaining := time.Until(deadline)
+		if attempt > 1 && remaining < stremioMinAttemptBudget {
+			break
+		}
+		attempts++
+
+		itemID, err := s.enqueueStremioRelease(ctx, cfg, cand, req.streamType)
+		if err != nil {
+			// Pre-queue failure (dead Prowlarr URL, malformed NZB): no queue row will
+			// ever exist, so the in-memory cache is the only place this can be recorded.
+			slog.WarnContext(ctx, "Failed to prepare Stremio NZB stream",
+				"error", err, "title", cand.SafeTitle)
+			s.stremioFailures.Record(cand.SafeTitle)
+			if !advance() {
+				return RespondServiceUnavailable(c, "Failed to prepare NZB stream", err.Error())
+			}
+			continue
+		}
+
+		out := s.waitForStream(ctx, itemID, req.baseURL, req.key, cand.SafeTitle, req.selector, remaining)
+		switch out.Kind {
+		case streamOutcomeReady:
+			// Self-healing: a release that plays is no longer excluded.
+			s.stremioFailures.Forget(cand.SafeTitle)
+			return c.Redirect(out.StreamURL, fiber.StatusFound)
+
+		case streamOutcomeNoStreams:
+			// The row is 'completed', so GetFailedStremioQueueItems will never see it
+			// and it would otherwise keep its "⚡ Cached" badge.
+			s.stremioFailures.Record(cand.SafeTitle)
+			if !advance() {
+				return respondStreamOutcome(c, out)
+			}
+
+		case streamOutcomeFailed:
+			// The failed import_queue row already records this durably.
+			if !advance() {
+				return respondStreamOutcome(c, out)
+			}
+
+		default:
+			// Ambiguous, timeout and unavailable are not evidence the release is bad.
+			return respondStreamOutcome(c, out)
+		}
+	}
+
+	slog.WarnContext(ctx, "No playable Stremio release found",
+		"imdb_id", req.imdbID, "attempts", attempts, "candidates", len(cands))
+	return RespondServiceUnavailable(c, "No playable release found",
+		fmt.Sprintf("tried %d release(s), none playable", attempts))
+}
+
+// stremioIsFailed reports whether a release is currently excluded, consulting both the
+// durable (import_queue) and process-local halves of the exclusion set.
+func (s *Server) stremioIsFailed(ctx context.Context, cfg *config.Config, safeTitle string) bool {
+	if s.stremioFailures.Has(safeTitle, stremioFailedTTL(cfg)) {
+		return true
+	}
+	if s.queueRepo == nil {
+		return false
+	}
+	failed, err := s.queueRepo.GetFailedStremioQueueItems(ctx)
+	if err != nil {
+		return false
+	}
+	return stremioFailedPredicate(failed, nil, cfg.Stremio.FailedReleaseTTLHours, time.Now())(safeTitle)
+}
+
+// enqueueStremioRelease downloads the NZB and adds it to the import queue, coalescing
+// concurrent callers for the same release so it is downloaded once.
+//
+// It returns as soon as the queue item exists. The wait deliberately stays outside the
+// singleflight group: holding the group for the whole import would serialize every
+// concurrent viewer of the release behind one request.
+func (s *Server) enqueueStremioRelease(
+	ctx context.Context,
+	cfg *config.Config,
+	cand stremioPlayCandidate,
+	streamType string,
+) (int64, error) {
+	safeFilename := cand.SafeTitle + ".nzb"
+	ttlHours := cfg.Stremio.NzbTTLHours
+
+	var indexerPtr *string
+	if cand.Indexer != "" {
+		indexer := cand.Indexer
+		indexerPtr = &indexer
+	}
+
 	v, err, _ := s.stremioPlayGroup.Do(safeFilename, func() (interface{}, error) {
 		// Serialized per title: reuse an in-flight or TTL-fresh import instead of re-downloading.
 		if items, e := s.queueRepo.ListQueueItems(ctx, nil, safeFilename, "", 1, 0, "updated_at", "desc"); e == nil && len(items) > 0 {
@@ -500,7 +873,7 @@ func (s *Server) handleStremioAddonPlay(c *fiber.Ctx) error {
 			prowlarrCfg.APIKey,
 			httpclient.NewForExternal(cfg.Network, httpclient.LongTimeout),
 		)
-		nzbData, err := client.DownloadNZB(workCtx, downloadURL)
+		nzbData, err := client.DownloadNZB(workCtx, cand.DownloadURL)
 		if err != nil {
 			return nil, fmt.Errorf("failed to download NZB from Prowlarr: %w", err)
 		}
@@ -517,7 +890,7 @@ func (s *Server) handleStremioAddonPlay(c *fiber.Ctx) error {
 		// Map Stremio stream type to Newznab category name so downloads land in the
 		// correct folder (matches default SABnzbd category config).
 		category := "Movies"
-		if c.Query("type") == "series" {
+		if streamType == "series" {
 			category = "TV"
 		}
 		stremioDownloadID := stremioDownloadIDPrefix + uuid.NewString()
@@ -527,100 +900,162 @@ func (s *Server) handleStremioAddonPlay(c *fiber.Ctx) error {
 		}
 
 		slog.InfoContext(ctx, "Prowlarr NZB queued for Stremio play",
-			"queue_id", item.ID, "title", safeTitle)
+			"queue_id", item.ID, "title", cand.SafeTitle)
 		return item.ID, nil
 	})
 	if err != nil {
-		slog.WarnContext(ctx, "Failed to prepare Stremio NZB stream", "error", err, "title", safeTitle)
-		return RespondServiceUnavailable(c, "Failed to prepare NZB stream", err.Error())
+		return 0, err
 	}
 
 	itemID, ok := v.(int64)
 	if !ok {
-		return RespondInternalError(c, "Unexpected play result", "")
+		return 0, fmt.Errorf("unexpected play result type %T", v)
 	}
-
-	return s.waitAndRedirectToStream(c, itemID, baseURL, key, nzbName, selector, 300)
+	return itemID, nil
 }
 
-// waitAndRedirectToStream waits for a queue item to complete and 302-redirects to the first stream URL.
-func (s *Server) waitAndRedirectToStream(c *fiber.Ctx, itemID int64, baseURL, downloadKey, nzbName string, selector *stremioEpisodeSelector, timeoutSecs int) error {
-	ctx := c.Context()
+// streamOutcomeKind classifies how a wait for a queue item ended. The distinction
+// drives fallback: only definitive, release-specific failures justify trying another
+// release.
+type streamOutcomeKind int
 
+const (
+	// streamOutcomeReady: a playable stream URL is available.
+	streamOutcomeReady streamOutcomeKind = iota
+	// streamOutcomeFailed: the import failed. A 'failed' row now exists in
+	// import_queue, so exclusion is already durably recorded.
+	streamOutcomeFailed
+	// streamOutcomeNoStreams: the import completed but produced nothing playable.
+	// The row is 'completed', so this must be recorded in the in-memory cache.
+	streamOutcomeNoStreams
+	// streamOutcomeAmbiguous: a multi-episode pack with no episode selector. A client
+	// problem, not a bad release -- never falls back, never recorded.
+	streamOutcomeAmbiguous
+	// streamOutcomeTimeout: still importing. Never falls back (the item is still
+	// running and a second high-priority import would contend for the same connection
+	// pool) and never recorded.
+	streamOutcomeTimeout
+	// streamOutcomeUnavailable: the wait could not be performed at all.
+	streamOutcomeUnavailable
+)
+
+// streamOutcome is the result of waiting on a queue item.
+type streamOutcome struct {
+	Kind      streamOutcomeKind
+	StreamURL string
+	Detail    string
+}
+
+// waitForStream waits for a queue item to become streamable and classifies the result.
+// Unlike waitAndRedirectToStream it never writes to the HTTP response, so the caller
+// can decide between redirecting and falling back to another release.
+func (s *Server) waitForStream(
+	ctx context.Context,
+	itemID int64,
+	baseURL, downloadKey, nzbName string,
+	selector *stremioEpisodeSelector,
+	timeout time.Duration,
+) streamOutcome {
+	// Subscribe before reading status so an event fired between the two is not missed.
 	subID, ch := s.progressBroadcaster.Subscribe()
 	defer s.progressBroadcaster.Unsubscribe(subID)
 
 	current, err := s.queueRepo.GetQueueItem(ctx, itemID)
 	if err != nil || current == nil {
-		return RespondServiceUnavailable(c, "Queue item not found", "")
+		return streamOutcome{Kind: streamOutcomeUnavailable, Detail: "queue item not found"}
 	}
 
-	redirectToFirst := func(item *database.ImportQueueItem) error {
+	firstStream := func(item *database.ImportQueueItem) streamOutcome {
 		streams, err := s.buildStremioStreams(ctx, item, baseURL, downloadKey, nzbName, selector)
 		if err != nil {
 			if errors.Is(err, errStremioEpisodeAmbiguous) {
-				return respondEpisodeAmbiguous(c)
+				return streamOutcome{Kind: streamOutcomeAmbiguous}
 			}
-			return RespondServiceUnavailable(c, "No streams available", "")
+			return streamOutcome{Kind: streamOutcomeNoStreams, Detail: err.Error()}
 		}
 		if len(streams) == 0 {
-			return RespondServiceUnavailable(c, "No streams available", "")
+			return streamOutcome{Kind: streamOutcomeNoStreams, Detail: "no media files in release"}
 		}
-		return c.Redirect(streams[0].URL, fiber.StatusFound)
+		return streamOutcome{Kind: streamOutcomeReady, StreamURL: streams[0].URL}
 	}
 
 	switch current.Status {
 	case database.QueueStatusCompleted:
-		return redirectToFirst(current)
+		return firstStream(current)
 	case database.QueueStatusFailed:
-		return RespondServiceUnavailable(c, "NZB processing failed", "")
+		detail := ""
+		if current.ErrorMessage != nil {
+			detail = *current.ErrorMessage
+		}
+		return streamOutcome{Kind: streamOutcomeFailed, Detail: detail}
 	default:
 		// If the item is already processing and has a storage path, the streamable
-		// event fired before we subscribed — redirect immediately.
+		// event fired before we subscribed — use it immediately.
 		if current.StoragePath != nil && *current.StoragePath != "" {
-			if streams, err := s.buildStremioStreams(ctx, current, baseURL, downloadKey, nzbName, selector); err == nil && len(streams) > 0 {
-				return c.Redirect(streams[0].URL, fiber.StatusFound)
+			if out := firstStream(current); out.Kind == streamOutcomeReady {
+				return out
 			}
 		}
 	}
 
-	timer := time.NewTimer(time.Duration(timeoutSecs) * time.Second)
+	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 
 	for {
 		select {
 		case update, ok := <-ch:
 			if !ok {
-				return RespondServiceUnavailable(c, "Progress channel closed", "")
+				return streamOutcome{Kind: streamOutcomeUnavailable, Detail: "progress channel closed"}
 			}
 			if update.QueueID != int(itemID) {
 				continue
 			}
 			switch update.Status {
 			case "streamable":
-				// Redirect as soon as the file is accessible in the VFS — before post-processing.
+				// Serve as soon as the file is accessible in the VFS — before post-processing.
 				if update.StoragePath != "" {
 					fakeItem := &database.ImportQueueItem{ID: itemID, StoragePath: &update.StoragePath}
-					if streams, err := s.buildStremioStreams(ctx, fakeItem, baseURL, downloadKey, nzbName, selector); err == nil && len(streams) > 0 {
-						return c.Redirect(streams[0].URL, fiber.StatusFound)
+					if out := firstStream(fakeItem); out.Kind == streamOutcomeReady {
+						return out
 					}
 				}
 				// No media files yet — fall through to wait for completed.
 			case "completed":
 				item, err := s.queueRepo.GetQueueItem(ctx, itemID)
 				if err != nil {
-					return RespondServiceUnavailable(c, "Failed to fetch queue item", "")
+					return streamOutcome{Kind: streamOutcomeUnavailable, Detail: "failed to fetch queue item"}
 				}
-				return redirectToFirst(item)
+				return firstStream(item)
 			case "failed":
-				return RespondServiceUnavailable(c, "NZB processing failed", "")
+				return streamOutcome{Kind: streamOutcomeFailed}
 			}
 		case <-timer.C:
-			return RespondServiceUnavailable(c, "Processing timed out",
-				fmt.Sprintf("did not complete within %d seconds", timeoutSecs))
+			return streamOutcome{
+				Kind:   streamOutcomeTimeout,
+				Detail: fmt.Sprintf("did not complete within %s", timeout),
+			}
 		}
 	}
 }
+
+// respondStreamOutcome writes the HTTP response for a non-ready outcome.
+func respondStreamOutcome(c *fiber.Ctx, out streamOutcome) error {
+	switch out.Kind {
+	case streamOutcomeReady:
+		return c.Redirect(out.StreamURL, fiber.StatusFound)
+	case streamOutcomeAmbiguous:
+		return respondEpisodeAmbiguous(c)
+	case streamOutcomeFailed:
+		return RespondServiceUnavailable(c, "NZB processing failed", out.Detail)
+	case streamOutcomeNoStreams:
+		return RespondServiceUnavailable(c, "No streams available", out.Detail)
+	case streamOutcomeTimeout:
+		return RespondServiceUnavailable(c, "Processing timed out", out.Detail)
+	default:
+		return RespondServiceUnavailable(c, "Failed to prepare NZB stream", out.Detail)
+	}
+}
+
 
 // validateDownloadKey returns true if key matches any user's hashed API key.
 func (s *Server) validateDownloadKey(ctx context.Context, key string) bool {
