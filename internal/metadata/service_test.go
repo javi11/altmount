@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/javi11/altmount/internal/holes"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -257,4 +258,40 @@ func TestReadFileMetadataLite_FallsBackOnLongHeader(t *testing.T) {
 	require.NotNil(t, lite)
 	assert.Equal(t, int64(1234), lite.FileSize)
 	assert.Equal(t, metapb.FileStatus_FILE_STATUS_HEALTHY, lite.Status)
+}
+
+// TestUpdateFileMetadata_PreservesModifiedAt ensures status and known-holes
+// RMW paths do not rewrite ModifiedAt (WebDAV Last-Modified / FUSE mtime).
+func TestUpdateFileMetadata_PreservesModifiedAt(t *testing.T) {
+	root := t.TempDir()
+	ms := NewMetadataService(root)
+
+	virtualPath := filepath.Join("movies", "stable_mtime.mkv")
+	const fixedModifiedAt int64 = 1_700_000_000
+
+	meta := ms.CreateFileMetadata(
+		2048, "test.nzb", metapb.FileStatus_FILE_STATUS_HEALTHY,
+		nil, metapb.Encryption_NONE, "", "", nil, nil, 0, nil, "mtime-id",
+	)
+	meta.ModifiedAt = fixedModifiedAt
+	meta.CreatedAt = fixedModifiedAt - 60
+	require.NoError(t, ms.WriteFileMetadata(virtualPath, meta))
+
+	require.NoError(t, ms.UpdateFileStatus(virtualPath, metapb.FileStatus_FILE_STATUS_DEGRADED))
+
+	afterStatus, err := ms.ReadFileMetadata(virtualPath)
+	require.NoError(t, err)
+	require.NotNil(t, afterStatus)
+	assert.Equal(t, fixedModifiedAt, afterStatus.ModifiedAt)
+	assert.Equal(t, metapb.FileStatus_FILE_STATUS_DEGRADED, afterStatus.Status)
+	assert.Equal(t, fixedModifiedAt-60, afterStatus.CreatedAt)
+
+	require.NoError(t, ms.AddKnownHoles(virtualPath, []holes.Run{{Start: 10, Count: 2}}))
+
+	afterHoles, err := ms.ReadFileMetadata(virtualPath)
+	require.NoError(t, err)
+	require.NotNil(t, afterHoles)
+	assert.Equal(t, fixedModifiedAt, afterHoles.ModifiedAt)
+	require.NotEmpty(t, afterHoles.KnownHoles)
+	assert.Equal(t, metapb.FileStatus_FILE_STATUS_DEGRADED, afterHoles.Status)
 }

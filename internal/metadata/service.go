@@ -640,7 +640,9 @@ func (ms *MetadataService) CreateFileMetadata(
 	}
 }
 
-// UpdateFileMetadata updates the modified timestamp of metadata
+// UpdateFileMetadata applies updateFunc to existing metadata and writes it back.
+// ModifiedAt is preserved unless the callback sets it — status/holes updates are
+// not content changes and must not rewrite WebDAV Last-Modified / FUSE mtime.
 func (ms *MetadataService) UpdateFileMetadata(virtualPath string, updateFunc func(*metapb.FileMetadata)) error {
 	// Read existing metadata
 	metadata, err := ms.ReadFileMetadata(virtualPath)
@@ -653,9 +655,6 @@ func (ms *MetadataService) UpdateFileMetadata(virtualPath string, updateFunc fun
 
 	// Apply update function
 	updateFunc(metadata)
-
-	// Update modified timestamp
-	metadata.ModifiedAt = time.Now().Unix()
 
 	// Write back to disk
 	return ms.WriteFileMetadata(virtualPath, metadata)
