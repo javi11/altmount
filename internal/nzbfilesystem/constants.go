@@ -69,7 +69,8 @@ var (
 	// streaming.read_timeout_seconds. Deliberately not a context error: the
 	// FUSE handles map context errors to EINTR (a retryable interruption),
 	// whereas a timed-out read is a genuine failure and must surface as EIO.
-	ErrReadTimeout = errors.New("read timed out")
+	ErrReadTimeout  = errors.New("read timed out")
+	ErrMetadataGone = errors.New("file metadata was removed underneath this handle by a repair")
 )
 
 // Database operation error message templates

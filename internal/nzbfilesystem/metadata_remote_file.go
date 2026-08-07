@@ -869,6 +869,17 @@ type MetadataVirtualFile struct {
 	// consecutive misses the player has genuinely moved and we tear down.
 	ephemeralStreak int
 
+	// metadataGone is set once a streaming failure caused this file's metadata to
+	// be removed underneath the open handle (moved to the corrupted safety folder
+	// by a repair, or deleted by delete-on-corruption). The path this handle
+	// refers to no longer exists, so every subsequent read must fail instead of
+	// rebuilding a reader against segments already known to be missing.
+	//
+	// Atomic rather than mu-guarded: it is set from updateFileHealthOnError,
+	// which is reached both from the mu-holding read paths and from
+	// createUsenetReader closures that run on background goroutines.
+	metadataGone atomic.Bool
+
 	// Segment offset index for O(1) offset→segment lookup
 	segmentIndex *segmentOffsetIndex
 
@@ -1223,6 +1234,12 @@ func (mvf *MetadataVirtualFile) ReadAtContext(readCtx context.Context, p []byte,
 	}
 	if off >= mvf.meta.FileSize {
 		return 0, io.EOF
+	}
+
+	// The ephemeral path below builds its own reader without going through
+	// ensureReader, so it needs this guard of its own.
+	if err := mvf.metadataGoneErr(); err != nil {
+		return 0, err
 	}
 
 	// Determine whether this offset can reuse the shared reader.
@@ -1826,8 +1843,29 @@ func (mvf *MetadataVirtualFile) enqueueCloser(r io.Closer) {
 	}
 }
 
+// metadataGoneErr returns the terminal error for a handle whose file was removed
+// underneath it, tearing the reader down on first observation, or nil while the
+// handle is still valid. Doing the teardown here rather than at the point the
+// flag is set keeps it on a path that provably holds mvf.mu.
+//
+// Caller must hold mvf.mu.
+func (mvf *MetadataVirtualFile) metadataGoneErr() error {
+	if !mvf.metadataGone.Load() {
+		return nil
+	}
+	mvf.closeCurrentReader()
+	return &CorruptedFileError{
+		TotalExpected: mvf.meta.FileSize,
+		UnderlyingErr: ErrMetadataGone,
+	}
+}
+
 // ensureReader ensures we have a reader initialized for the current position with range support
 func (mvf *MetadataVirtualFile) ensureReader() error {
+	if err := mvf.metadataGoneErr(); err != nil {
+		return err
+	}
+
 	if mvf.readerInitialized {
 		return nil
 	}
@@ -2375,8 +2413,14 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 
 		if err := mvf.metadataService.DeleteCorruptedFile(ctx, mvf.name, cfg.Metadata.ShouldDeleteSourceNzb(), physicalPath, rootPath); err != nil {
 			slog.ErrorContext(ctx, "Failed to delete corrupted file after streaming failure", "file", mvf.name, "error", err)
-		} else if err := mvf.healthRepository.DeleteHealthRecord(ctx, mvf.name); err != nil {
-			slog.ErrorContext(ctx, "Failed to delete health record after deleting corrupted file", "file", mvf.name, "error", err)
+		} else {
+			// The file this handle is reading no longer exists; latch it closed,
+			// same as the repair path below.
+			mvf.metadataGone.Store(true)
+
+			if err := mvf.healthRepository.DeleteHealthRecord(ctx, mvf.name); err != nil {
+				slog.ErrorContext(ctx, "Failed to delete health record after deleting corrupted file", "file", mvf.name, "error", err)
+			}
 		}
 		return
 	} else if healthEnabled && shouldRepair {
@@ -2396,6 +2440,11 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 				relativePath = strings.TrimPrefix(relativePath, "/")
 				slog.InfoContext(ctx, "Moving metadata file for corrupted item to safety folder to trigger replacement", "file_path", mvf.name)
 				if moveErr := mvf.metadataService.MoveToCorrupted(ctx, relativePath); moveErr == nil {
+					// This handle is streaming the file that was just moved away, so
+					// latch it closed. Without this its prefetch pipeline keeps
+					// fetching segments for a path that no longer exists and the
+					// client keeps reading against it (see issue #539).
+					mvf.metadataGone.Store(true)
 					// Successfully moved metadata, enqueue a coalesced rclone VFS
 					// refresh. Multiple files in the same directory collapse into a
 					// single RC call; concurrent failures across directories are
