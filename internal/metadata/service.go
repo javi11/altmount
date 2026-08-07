@@ -216,6 +216,17 @@ func (ms *MetadataService) WriteFileMetadata(virtualPath string, metadata *metap
 		return fmt.Errorf("failed to rename metadata file: %w", err)
 	}
 
+	// Stabilise the .meta disk mtime to match ModifiedAt in the proto.
+	// os.Rename always sets mtime=now on the destination file; without this
+	// Chtimes call any host tool reading the ext4 mtime (rather than the WebDAV
+	// Last-Modified we return from the proto) would see a freshly-updated
+	// timestamp on every health-check rewrite, potentially confusing rclone after
+	// a VFS cache flush or attr-timeout expiry.
+	if metadata.ModifiedAt != 0 {
+		t := time.Unix(metadata.ModifiedAt, 0)
+		_ = os.Chtimes(metadataPath, t, t)
+	}
+
 	metadata.NzbdavId = nzbdavId // Restore for in-memory use
 
 	// Update only the lightweight cache; the full proto (with SegmentData) is
@@ -641,8 +652,10 @@ func (ms *MetadataService) CreateFileMetadata(
 }
 
 // UpdateFileMetadata applies updateFunc to existing metadata and writes it back.
-// ModifiedAt is preserved unless the callback sets it — status/holes updates are
-// not content changes and must not rewrite WebDAV Last-Modified / FUSE mtime.
+// ModifiedAt is always preserved — health-status and known-holes updates are not
+// content changes and must not rewrite WebDAV Last-Modified / FUSE mtime.
+// The snapshot+restore is unconditional so future callbacks cannot accidentally
+// mutate ModifiedAt either.
 func (ms *MetadataService) UpdateFileMetadata(virtualPath string, updateFunc func(*metapb.FileMetadata)) error {
 	// Read existing metadata
 	metadata, err := ms.ReadFileMetadata(virtualPath)
@@ -653,8 +666,17 @@ func (ms *MetadataService) UpdateFileMetadata(virtualPath string, updateFunc fun
 		return fmt.Errorf("metadata not found for path: %s", virtualPath)
 	}
 
+	// Snapshot ModifiedAt before invoking the callback. Health-status and
+	// known-holes updates are not content changes; they must not alter WebDAV
+	// Last-Modified or the FUSE mtime seen by Jellyfin. Restored unconditionally
+	// so future callbacks cannot accidentally mutate it.
+	originalModifiedAt := metadata.ModifiedAt
+
 	// Apply update function
 	updateFunc(metadata)
+
+	// Always restore ModifiedAt to its pre-call value.
+	metadata.ModifiedAt = originalModifiedAt
 
 	// Write back to disk
 	return ms.WriteFileMetadata(virtualPath, metadata)
