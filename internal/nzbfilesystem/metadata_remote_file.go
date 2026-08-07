@@ -33,6 +33,15 @@ import (
 	"github.com/spf13/afero"
 )
 
+var staticVirtualDirModTime = time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+
+func getFileModTime(modifiedAt int64) time.Time {
+	if modifiedAt > 0 {
+		return time.Unix(modifiedAt, 0)
+	}
+	return staticVirtualDirModTime
+}
+
 // MetadataRemoteFile implements the RemoteFile interface for metadata-backed virtual files
 type MetadataRemoteFile struct {
 	metadataService  *metadata.MetadataService
@@ -503,7 +512,7 @@ func (mrf *MetadataRemoteFile) Stat(ctx context.Context, name string) (bool, fs.
 			name:    filepath.Base(normalizedName),
 			size:    0,
 			mode:    os.ModeDir | 0755,
-			modTime: time.Now(), // Use current time for directories
+			modTime: staticVirtualDirModTime, // Fixed static time for virtual directories to prevent media server re-scanning
 			isDir:   true,
 		}
 		return true, info, nil
@@ -560,7 +569,7 @@ func (mrf *MetadataRemoteFile) Stat(ctx context.Context, name string) (bool, fs.
 		name:    filepath.Base(normalizedName),
 		size:    fileMeta.FileSize,
 		mode:    0644, // Default file mode
-		modTime: time.Unix(fileMeta.ModifiedAt, 0),
+		modTime: getFileModTime(fileMeta.ModifiedAt),
 		isDir:   false,
 	}
 
@@ -696,7 +705,7 @@ func (mvd *MetadataVirtualDirectory) Readdir(count int) ([]fs.FileInfo, error) {
 			name:    fileName,
 			size:    fileMeta.FileSize,
 			mode:    0644,
-			modTime: time.Unix(fileMeta.ModifiedAt, 0),
+			modTime: getFileModTime(fileMeta.ModifiedAt),
 			isDir:   false,
 		}
 		infos = append(infos, info)
@@ -729,7 +738,7 @@ func (mvd *MetadataVirtualDirectory) Stat() (fs.FileInfo, error) {
 		name:    filepath.Base(mvd.normalizedPath),
 		size:    0,
 		mode:    os.ModeDir | 0755,
-		modTime: time.Now(),
+		modTime: staticVirtualDirModTime,
 		isDir:   true,
 	}
 	return info, nil
@@ -1558,7 +1567,7 @@ func (mvf *MetadataVirtualFile) Stat() (fs.FileInfo, error) {
 		name:    filepath.Base(mvf.name),
 		size:    mvf.meta.FileSize,
 		mode:    0644,
-		modTime: time.Unix(mvf.meta.ModifiedAt, 0),
+		modTime: getFileModTime(mvf.meta.ModifiedAt),
 		isDir:   false, // Files are never directories in simplified schema
 	}
 
