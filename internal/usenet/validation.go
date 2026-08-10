@@ -262,8 +262,10 @@ func selectSegmentsForValidation(segments []*metapb.SegmentData, samplePercentag
 
 	totalSegments := len(segments)
 
-	// Min 5 for statistical validity, max 55 to cap network I/O on large files.
-	targetSamples := min(max((totalSegments*samplePercentage)/100, 5), 55)
+	// Min 5 for statistical validity. The configured percentage is otherwise
+	// honored exactly: a hard upper cap used to collapse every sub-100% setting
+	// onto the same handful of segments on large releases (issue #812).
+	targetSamples := max((totalSegments*samplePercentage)/100, 5)
 
 	if targetSamples >= totalSegments {
 		return segments
