@@ -73,15 +73,21 @@ func TestSelectSegmentsForValidation(t *testing.T) {
 		assert.Equal(t, 5, len(selected))
 	})
 
-	t.Run("cap 55", func(t *testing.T) {
-		// Create 20,000 segments (10% = 2000)
+	t.Run("large files honor the configured percentage", func(t *testing.T) {
+		// Regression for #812: a hard 55-sample cap made every sub-100%
+		// setting sample the same handful of segments on large releases.
 		largeSegments := make([]*metapb.SegmentData, 20000)
 		for i := range 20000 {
 			largeSegments[i] = &metapb.SegmentData{Id: fmt.Sprintf("seg%d", i)}
 		}
 
-		selected := selectSegmentsForValidation(largeSegments, 10)
-		assert.Equal(t, 55, len(selected), "Should be capped at 55")
+		assert.Equal(t, 2000, len(selectSegmentsForValidation(largeSegments, 10)))
+		assert.Equal(t, 10000, len(selectSegmentsForValidation(largeSegments, 50)))
+		// Higher percentages must sample strictly more than lower ones.
+		assert.Greater(t,
+			len(selectSegmentsForValidation(largeSegments, 25)),
+			len(selectSegmentsForValidation(largeSegments, 10)),
+		)
 	})
 }
 

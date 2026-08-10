@@ -15,21 +15,23 @@ import (
 
 // selectFastFailSegments picks a lightweight per-file sample for the fast-fail
 // reachability gate: always the first and last segment (DMCA/truncation
-// detection) plus samplePercentage% of the middle, capped at 55 to bound very
-// large files. It is intentionally lighter than usenet.SelectSegmentsForValidation
-// (which health checks use and which floors at 5 per file): fast-fail Stats run
-// across every file in the NZB, so a min-5 floor multiplies badly on multi-part
-// releases.
+// detection) plus samplePercentage% of the middle. It is intentionally lighter
+// than usenet.SelectSegmentsForValidation (which health checks use and which
+// floors at 5 per file): fast-fail Stats run across every file in the NZB, so a
+// min-5 floor multiplies badly on multi-part releases. The configured
+// percentage is honored exactly — a fixed upper cap used to make every setting
+// behave identically on large files (issue #812).
 func selectFastFailSegments(segments []*metapb.SegmentData, samplePercentage int) []*metapb.SegmentData {
 	n := len(segments)
 	if n <= 2 {
 		return segments
 	}
 
-	const maxSamples = 55
+	middleRange := n - 2 // sampleable indices are [1, n-2]
+	middleCount := min((n*samplePercentage)/100, middleRange)
 
-	chosen := make(map[int]struct{}, maxSamples)
-	out := make([]*metapb.SegmentData, 0, maxSamples)
+	chosen := make(map[int]struct{}, middleCount+2)
+	out := make([]*metapb.SegmentData, 0, middleCount+2)
 	add := func(i int) {
 		if _, ok := chosen[i]; ok {
 			return
@@ -41,12 +43,7 @@ func selectFastFailSegments(segments []*metapb.SegmentData, samplePercentage int
 	add(0)     // first — catches whole-article DMCA takedowns / missing files
 	add(n - 1) // last — catches truncated/incomplete uploads
 
-	middleCount := (n * samplePercentage) / 100
-	if len(out)+middleCount > maxSamples {
-		middleCount = maxSamples - len(out)
-	}
 	if middleCount > 0 {
-		middleRange := n - 2 // sample from indices [1, n-2]
 		perm := rand.Perm(middleRange)
 		for i := 0; i < middleCount && i < len(perm); i++ {
 			add(1 + perm[i])
@@ -71,7 +68,7 @@ type FastFailFile struct {
 // FastFailReleaseProbe is the cheap phase-1 reachability gate for an NZB import.
 // It flattens all candidate segments across the release and Stats a single
 // sample (usenet.SelectSegmentsForValidation: first 3 + last 2 + random middle,
-// min 5 / max 55 for the whole release), cancelling the remaining Stats on the
+// min 5 for the whole release), cancelling the remaining Stats on the
 // first miss.
 //
 // Returns (missing, err):

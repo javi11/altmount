@@ -187,13 +187,23 @@ func TestSelectFastFailSegments(t *testing.T) {
 		t.Errorf("pct=10: duplicates present (%d unique of %d)", len(ids), len(got))
 	}
 
-	// Total is capped at 55 even at 100% sampling, with no dups.
+	// Regression for #812: large files honor the configured percentage instead
+	// of collapsing onto a fixed sample cap, and stay duplicate-free.
 	big := selectFastFailSegments(makeTestSegments("b", 10000), 100)
-	if len(big) != 55 {
-		t.Fatalf("cap: got %d, want 55", len(big))
+	if len(big) != 10000 {
+		t.Fatalf("pct=100: got %d, want 10000", len(big))
 	}
-	if len(idOf(big)) != 55 {
-		t.Error("cap: duplicates present in capped result")
+	if len(idOf(big)) != len(big) {
+		t.Error("pct=100: duplicates present")
+	}
+
+	// 10% of 10000 middle segments + first + last.
+	sampled := selectFastFailSegments(makeTestSegments("b", 10000), 10)
+	if len(sampled) != 1002 {
+		t.Fatalf("pct=10: got %d, want 1002", len(sampled))
+	}
+	if len(idOf(sampled)) != len(sampled) {
+		t.Error("pct=10: duplicates present")
 	}
 }
 

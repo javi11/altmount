@@ -211,9 +211,9 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 	concurrency := fastFailConcurrency(cfg)
 
 	// Phase 1: cheap release-level probe. Sample the whole release once
-	// (≤55 Stats) and fail fast. Healthy releases — the common case — pay only
-	// this and skip the per-file sweep entirely, keeping the "Checking segment
-	// availability" stage short.
+	// (segment_sample_percentage of it) and fail fast. Healthy releases — the
+	// common case — pay only this and skip the per-file sweep entirely, keeping
+	// the "Checking segment availability" stage short.
 	probeStart := time.Now()
 	missing, err := validation.FastFailReleaseProbe(
 		ctx,
