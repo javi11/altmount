@@ -1493,6 +1493,9 @@ func (mvf *MetadataVirtualFile) Seek(offset int64, whence int) (int64, error) {
 
 // Close implements afero.File.Close
 func (mvf *MetadataVirtualFile) Close() error {
+	if mvf.cancelCtx != nil {
+		mvf.cancelCtx()
+	}
 	// Cancel the in-flight reader before taking mvf.mu — a concurrent
 	// Read can hold the lock for the full segment-download latency.
 	mvf.interruptCurrentReader()
