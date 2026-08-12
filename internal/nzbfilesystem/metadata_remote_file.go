@@ -508,11 +508,15 @@ func (mrf *MetadataRemoteFile) Stat(ctx context.Context, name string) (bool, fs.
 
 	// Check if this is a directory first
 	if mrf.metadataService.DirectoryExists(normalizedName) {
+		modT := mrf.metadataService.GetDirectoryModTime(normalizedName)
+		if modT.IsZero() {
+			modT = staticVirtualDirModTime
+		}
 		info := &MetadataFileInfo{
 			name:    filepath.Base(normalizedName),
 			size:    0,
 			mode:    os.ModeDir | 0755,
-			modTime: staticVirtualDirModTime, // Fixed static time for virtual directories to prevent media server re-scanning
+			modTime: modT,
 			isDir:   true,
 		}
 		return true, info, nil
@@ -669,7 +673,18 @@ func (mvd *MetadataVirtualDirectory) Readdir(count int) ([]fs.FileInfo, error) {
 
 	// Add directories first
 	for _, dirInfo := range dirInfos {
-		infos = append(infos, dirInfo)
+		subPath := filepath.Join(mvd.normalizedPath, dirInfo.Name())
+		subModT := mvd.metadataService.GetDirectoryModTime(subPath)
+		if subModT.IsZero() {
+			subModT = staticVirtualDirModTime
+		}
+		infos = append(infos, &MetadataFileInfo{
+			name:    dirInfo.Name(),
+			size:    0,
+			mode:    os.ModeDir | 0755,
+			modTime: subModT,
+			isDir:   true,
+		})
 		if count > 0 && len(infos) >= count {
 			return infos, nil
 		}
@@ -734,11 +749,15 @@ func (mvd *MetadataVirtualDirectory) Readdirnames(n int) ([]string, error) {
 
 // Stat implements afero.File.Stat
 func (mvd *MetadataVirtualDirectory) Stat() (fs.FileInfo, error) {
+	modT := mvd.metadataService.GetDirectoryModTime(mvd.normalizedPath)
+	if modT.IsZero() {
+		modT = staticVirtualDirModTime
+	}
 	info := &MetadataFileInfo{
 		name:    filepath.Base(mvd.normalizedPath),
 		size:    0,
 		mode:    os.ModeDir | 0755,
-		modTime: staticVirtualDirModTime,
+		modTime: modT,
 		isDir:   true,
 	}
 	return info, nil

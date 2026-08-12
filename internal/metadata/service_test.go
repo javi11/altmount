@@ -295,3 +295,38 @@ func TestUpdateFileMetadata_PreservesModifiedAt(t *testing.T) {
 	require.NotEmpty(t, afterHoles.KnownHoles)
 	assert.Equal(t, metapb.FileStatus_FILE_STATUS_DEGRADED, afterHoles.Status)
 }
+
+func TestGetDirectoryModTime(t *testing.T) {
+	root := t.TempDir()
+	ms := NewMetadataService(root)
+
+	dir := filepath.Join("movies", "ActionMovie")
+
+	// 1. Non-existent / empty directory returns zero time
+	assert.True(t, ms.GetDirectoryModTime(dir).IsZero())
+
+	// 2. Add two files with different ModifiedAt timestamps
+	meta1 := ms.CreateFileMetadata(100, "1.nzb", metapb.FileStatus_FILE_STATUS_HEALTHY, nil, metapb.Encryption_NONE, "", "", nil, nil, 0, nil, "")
+	meta1.ModifiedAt = 1_700_000_100
+	require.NoError(t, ms.WriteFileMetadata(filepath.Join(dir, "part1.mkv"), meta1))
+
+	meta2 := ms.CreateFileMetadata(200, "2.nzb", metapb.FileStatus_FILE_STATUS_HEALTHY, nil, metapb.Encryption_NONE, "", "", nil, nil, 0, nil, "")
+	meta2.ModifiedAt = 1_700_000_500
+	require.NoError(t, ms.WriteFileMetadata(filepath.Join(dir, "part2.mkv"), meta2))
+
+	// Should return max of the children
+	dirModTime := ms.GetDirectoryModTime(dir)
+	assert.Equal(t, time.Unix(1_700_000_500, 0), dirModTime)
+
+	// 3. Status update (health sweep) does not change max directory modTime
+	require.NoError(t, ms.UpdateFileStatus(filepath.Join(dir, "part2.mkv"), metapb.FileStatus_FILE_STATUS_DEGRADED))
+	assert.Equal(t, time.Unix(1_700_000_500, 0), ms.GetDirectoryModTime(dir))
+
+	// 4. Adding a newer file advances directory modTime
+	meta3 := ms.CreateFileMetadata(300, "3.nzb", metapb.FileStatus_FILE_STATUS_HEALTHY, nil, metapb.Encryption_NONE, "", "", nil, nil, 0, nil, "")
+	meta3.ModifiedAt = 1_700_000_900
+	require.NoError(t, ms.WriteFileMetadata(filepath.Join(dir, "part3.mkv"), meta3))
+
+	assert.Equal(t, time.Unix(1_700_000_900, 0), ms.GetDirectoryModTime(dir))
+}
+

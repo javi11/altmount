@@ -616,6 +616,43 @@ func (ms *MetadataService) ListDirectoryAll(virtualPath string) (dirs []fs.FileI
 	return dirs, fileNames, nil
 }
 
+// GetDirectoryModTime returns max(children's ModifiedAt) for the given virtual
+// directory, returning a zero time.Time if the directory is empty or has no
+// children with ModifiedAt > 0 (allowing callers to fall back to a static epoch).
+//
+// This ensures that virtual directory mtime advances when a new file is imported
+// (which sets ModifiedAt once at creation time), while remaining stable across
+// container restarts that trigger health sweeps (which never mutate ModifiedAt).
+func (ms *MetadataService) GetDirectoryModTime(virtualPath string) time.Time {
+	metadataDir := filepath.Join(ms.rootPath, virtualPath)
+
+	entries, err := os.ReadDir(metadataDir)
+	if err != nil {
+		return time.Time{}
+	}
+
+	var maxModTime int64
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".meta" {
+			continue
+		}
+		virtualFileName := entry.Name()[:len(entry.Name())-5]
+		virtualFilePath := filepath.Join(virtualPath, virtualFileName)
+		lite, err := ms.ReadFileMetadataLite(virtualFilePath)
+		if err != nil || lite == nil || lite.ModifiedAt <= 0 {
+			continue
+		}
+		if lite.ModifiedAt > maxModTime {
+			maxModTime = lite.ModifiedAt
+		}
+	}
+
+	if maxModTime > 0 {
+		return time.Unix(maxModTime, 0)
+	}
+	return time.Time{}
+}
+
 // CreateFileMetadata creates a new FileMetadata with basic fields
 func (ms *MetadataService) CreateFileMetadata(
 	fileSize int64,
@@ -652,10 +689,15 @@ func (ms *MetadataService) CreateFileMetadata(
 }
 
 // UpdateFileMetadata applies updateFunc to existing metadata and writes it back.
-// ModifiedAt is always preserved — health-status and known-holes updates are not
-// content changes and must not rewrite WebDAV Last-Modified / FUSE mtime.
-// The snapshot+restore is unconditional so future callbacks cannot accidentally
-// mutate ModifiedAt either.
+//
+// IMPORTANT — non-content RMW only: this helper is reserved for mutations that
+// do NOT change the file's logical content (e.g. health status, known-holes).
+// ModifiedAt is always unconditionally restored to its pre-call value, so any
+// attempt to bump it inside updateFunc will be silently discarded.
+//
+// For paths that legitimately need to set a new ModifiedAt (initial import,
+// content replacement), call WriteFileMetadata or CreateFileMetadata directly
+// with the correct timestamp already set on the metadata struct.
 func (ms *MetadataService) UpdateFileMetadata(virtualPath string, updateFunc func(*metapb.FileMetadata)) error {
 	// Read existing metadata
 	metadata, err := ms.ReadFileMetadata(virtualPath)
