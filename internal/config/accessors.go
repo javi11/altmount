@@ -91,6 +91,25 @@ func (c *Config) GetHealthReadTimeout() time.Duration {
 	return time.Duration(c.Health.ReadTimeoutSeconds) * time.Second
 }
 
+// DefaultStreamReadTimeout bounds a single streaming read when
+// streaming.read_timeout_seconds is unset. A healthy read finishes in seconds;
+// even a pathological one is bounded by the per-segment fetch budget (15s per
+// attempt, 2 attempts). Anything past this is a stall, not slowness.
+const DefaultStreamReadTimeout = 120 * time.Second
+
+// GetStreamReadTimeout returns the per-read timeout for streaming reads.
+// Zero configures the default; a negative value disables the timeout entirely
+// and is returned as 0.
+func (c *Config) GetStreamReadTimeout() time.Duration {
+	if c.Streaming.ReadTimeoutSeconds < 0 {
+		return 0 // Explicitly disabled
+	}
+	if c.Streaming.ReadTimeoutSeconds == 0 {
+		return DefaultStreamReadTimeout
+	}
+	return time.Duration(c.Streaming.ReadTimeoutSeconds) * time.Second
+}
+
 // GetMaxRetries returns the maximum number of health check retries.
 func (c *Config) GetMaxRetries() int {
 	if c.Health.MaxRetries <= 0 {

@@ -17,19 +17,42 @@ _Streaming settings in the system configuration_
 
 ### Parameters
 
-| Parameter      | Description                                           | Default |
-| -------------- | ----------------------------------------------------- | ------- |
-| `max_prefetch` | Number of segments to prefetch ahead during streaming | `30`    |
+| Parameter              | Description                                           | Default |
+| ---------------------- | ----------------------------------------------------- | ------- |
+| `max_prefetch`         | Number of segments to prefetch ahead during streaming | `30`    |
+| `read_timeout_seconds` | Maximum duration of a single read before it fails     | `120`   |
 
 ```yaml
 streaming:
   max_prefetch: 30 # Number of segments prefetched ahead (default: 30)
+  read_timeout_seconds: 120 # Fail a read that stalls this long (0 = default, -1 = disabled)
   failure_masking:
     enabled: true # Automatically hide files from mounts after repeated failures
     threshold: 3 # Number of streaming failures before masking a file
 ```
 
-Higher values improve playback smoothness for high-bitrate content but increase memory usage. Lower values are better for resource-constrained environments.
+Higher `max_prefetch` values improve playback smoothness for high-bitrate content but increase memory usage. Lower values are better for resource-constrained environments.
+
+## Read Timeout
+
+`read_timeout_seconds` bounds how long any single read may take. It applies to both
+FUSE and WebDAV reads.
+
+Without it, a segment fetch that stalls without ever returning an error parks the read
+forever. On a FUSE mount that means the reading process — Sonarr's `ffprobe`, a media
+player, a scanner — enters uninterruptible sleep (D-state) and cannot be killed; only
+restarting AltMount clears it.
+
+When the timeout expires, AltMount interrupts the in-flight reader and the read fails
+with an I/O error, which the calling process can handle normally. The failure is also
+reported to [Failure Masking](#failure-masking) and the health system, so a file that
+repeatedly stalls is eventually masked.
+
+- `0` — use the built-in default of 120 seconds
+- `-1` — disable the timeout entirely (not recommended; restores the hang behavior)
+
+Note this is unrelated to `health.read_timeout_seconds`, which governs only the
+background health-check sweep and has no effect on playback reads.
 
 ## Failure Masking
 

@@ -89,6 +89,7 @@ export interface FailureMaskingConfig {
 // Streaming configuration
 export interface StreamingConfig {
 	max_prefetch: number;
+	read_timeout_seconds: number;
 	failure_masking: FailureMaskingConfig;
 }
 
@@ -381,6 +382,7 @@ export interface MetadataUpdateRequest {
 // Streaming update request
 export interface StreamingUpdateRequest {
 	max_prefetch?: number;
+	read_timeout_seconds?: number;
 	failure_masking?: Partial<FailureMaskingConfig>;
 }
 

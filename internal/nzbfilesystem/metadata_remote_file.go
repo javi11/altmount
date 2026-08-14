@@ -914,6 +914,92 @@ func (mvf *MetadataVirtualFile) interruptCurrentReader() {
 	}
 }
 
+// armReadTimeout bounds a single read, returning a context carrying the
+// deadline, a predicate reporting whether that deadline was hit, and a stop
+// function the caller must defer.
+//
+// Two mechanisms are needed because the read path has two shapes:
+//
+//   - The shared reader ignores the caller's context entirely —
+//     UsenetReader.Read waits on the reader's own context (see
+//     usenet.segment.GetReaderContext), so a derived deadline is invisible to
+//     it. A timer fires the reader's Interrupt hook instead, which cancels its
+//     internal context and releases its segments, unblocking the read.
+//   - Ephemeral (seek-driven) readers are short-lived locals that are never
+//     registered for interruption, but their reads run through
+//     readFullContext, which force-closes the reader when the context expires.
+//     Those need the deadline on the context.
+//
+// Both are no-ops when the timeout is disabled; the parent context is returned
+// unchanged.
+//
+// Safe to call without holding mvf.mu: interruptCurrentReader reads an
+// atomic.Value, so the watchdog can break a jam even while another read holds
+// the mutex.
+func (mvf *MetadataVirtualFile) armReadTimeout(parent context.Context) (ctx context.Context, timedOut func() bool, stop func()) {
+	never := func() bool { return false }
+	if mvf.configGetter == nil {
+		return parent, never, func() {}
+	}
+	cfg := mvf.configGetter()
+	if cfg == nil {
+		return parent, never, func() {}
+	}
+	timeout := cfg.GetStreamReadTimeout()
+	if timeout <= 0 {
+		return parent, never, func() {}
+	}
+
+	ctx, cancel := context.WithTimeout(parent, timeout)
+
+	var interrupted atomic.Bool
+	timer := time.AfterFunc(timeout, func() {
+		interrupted.Store(true)
+		slog.WarnContext(mvf.ctx, "Read exceeded the streaming read timeout, interrupting reader",
+			"path", mvf.name,
+			"timeout", timeout)
+		mvf.interruptCurrentReader()
+	})
+
+	// Checking ctx.Err() rather than only the timer flag keeps this
+	// deterministic: the context package sets DeadlineExceeded before it
+	// releases any waiter, so a read that returns because of the deadline
+	// always observes it, with no race against the timer goroutine.
+	timedOut = func() bool {
+		return interrupted.Load() || errors.Is(ctx.Err(), context.DeadlineExceeded)
+	}
+
+	return ctx, timedOut, func() {
+		timer.Stop()
+		cancel()
+	}
+}
+
+// readContext returns the handle's context, falling back to Background for
+// handles built without one (tests, bridges).
+func (mvf *MetadataVirtualFile) readContext() context.Context {
+	if mvf.ctx != nil {
+		return mvf.ctx
+	}
+	return context.Background()
+}
+
+// classifyReadError maps a reader error to the error a read should return,
+// reporting data corruption to the health pipeline on the way. This is what
+// feeds streaming failure masking — without it a DMCA'd file never accumulates
+// failures and is never masked. Callers must hold mvf.mu.
+func (mvf *MetadataVirtualFile) classifyReadError(readErr error) error {
+	var dataCorruptionErr *usenet.DataCorruptionError
+	if errors.As(readErr, &dataCorruptionErr) {
+		mvf.updateFileHealthOnError(dataCorruptionErr, dataCorruptionErr.NoRetry)
+		return &CorruptedFileError{
+			TotalExpected: mvf.meta.FileSize,
+			UnderlyingErr: dataCorruptionErr,
+		}
+	}
+	return readErr
+}
+
 // segmentOffsetIndex provides O(1) lookup for offset→segment mapping using binary search
 type segmentOffsetIndex struct {
 	offsets []int64 // Cumulative start offset of each segment in file coordinates
@@ -998,6 +1084,17 @@ func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 		return 0, nil
 	}
 
+	// Same watchdog as ReadAtContext — a stalled fetch parks a WebDAV/rclone
+	// read just as indefinitely as a FUSE one. Read has no context to thread
+	// through, so only the interrupt half applies here.
+	_, timedOut, stopTimeout := mvf.armReadTimeout(mvf.readContext())
+	defer func() {
+		stopTimeout()
+		if timedOut() && err != nil && !errors.Is(err, ErrReadTimeout) {
+			err = fmt.Errorf("%w: %w", ErrReadTimeout, err)
+		}
+	}()
+
 	mvf.mu.Lock()
 	defer mvf.mu.Unlock()
 
@@ -1072,6 +1169,18 @@ func (mvf *MetadataVirtualFile) ReadAtContext(readCtx context.Context, p []byte,
 		return 0, ErrNegativeOffset
 	}
 
+	// Armed before taking mvf.mu so the budget covers queueing behind another
+	// read on the same handle. A single stuck read otherwise blocks every
+	// subsequent read on this file; interrupting the in-flight reader from here
+	// breaks that jam.
+	readCtx, timedOut, stopTimeout := mvf.armReadTimeout(readCtx)
+	defer func() {
+		stopTimeout()
+		if timedOut() && err != nil && !errors.Is(err, ErrReadTimeout) {
+			err = fmt.Errorf("%w: %w", ErrReadTimeout, err)
+		}
+	}()
+
 	mvf.mu.Lock()
 	defer mvf.mu.Unlock()
 
@@ -1127,6 +1236,7 @@ func (mvf *MetadataVirtualFile) ReadAtContext(readCtx context.Context, p []byte,
 			want = mvf.meta.FileSize - off
 		}
 		buf := p[:want]
+		var sharedErr error
 		for n < int(want) {
 			rn, readErr := mvf.reader.Read(buf[n:])
 			n += rn
@@ -1142,11 +1252,13 @@ func (mvf *MetadataVirtualFile) ReadAtContext(readCtx context.Context, p []byte,
 			if readErr != nil {
 				if errors.Is(readErr, io.EOF) && mvf.hasMoreDataToRead() {
 					mvf.closeCurrentReader()
-					if err := mvf.ensureReader(); err != nil {
+					if rotateErr := mvf.ensureReader(); rotateErr != nil {
+						sharedErr = rotateErr
 						break
 					}
 					continue
 				}
+				sharedErr = readErr
 				break
 			}
 		}
@@ -1154,6 +1266,19 @@ func (mvf *MetadataVirtualFile) ReadAtContext(readCtx context.Context, p []byte,
 		// Advance the shared cursor so the next sequential call hits this path again.
 		mvf.readAtSharedNext = off + int64(n)
 		mvf.ephemeralStreak = 0 // sequential read — reset scrub counter
+
+		// A real failure (missing segment, interrupted reader, pool error) must
+		// reach the caller. Returning a silent short read here was what kept
+		// streaming failure masking from ever seeing a FUSE-path failure.
+		// io.EOF stays non-fatal: hasMoreDataToRead() already said there is
+		// nothing left to rotate to, so it is a genuine end of data.
+		if sharedErr != nil && !errors.Is(sharedErr, io.EOF) {
+			// The shared reader is in an indeterminate state — drop it so the
+			// next read rebuilds cleanly rather than inheriting the failure.
+			mvf.closeCurrentReader()
+			mvf.readAtSharedNext = -1
+			return n, mvf.classifyReadError(sharedErr)
+		}
 		return n, nil
 	}
 
@@ -1219,7 +1344,14 @@ ephemeral:
 		mvf.readAtSharedNext = off + int64(n)
 	}
 
-	return n, err
+	if err != nil {
+		// Same reporting as the shared path — scrub-driven reads must feed
+		// failure masking too, otherwise a player that seeks never marks a
+		// DMCA'd file as failing.
+		return n, mvf.classifyReadError(err)
+	}
+
+	return n, nil
 }
 
 // tryServeFromRandomReadCache attempts to satisfy a single-segment
@@ -1632,10 +1764,14 @@ const closerWorkerCount = 4
 // mvf.mu (so the lazy init is safe).
 func (mvf *MetadataVirtualFile) enqueueCloser(r io.Closer) {
 	if mvf.closerCh == nil {
-		mvf.closerCh = make(chan io.Closer, closerWorkerCount)
-		for i := 0; i < closerWorkerCount; i++ {
+		// Workers range over this local, not mvf.closerCh: Close() nils the
+		// field under mvf.mu, which the workers do not hold, so reading the
+		// field from inside the goroutine is a data race.
+		ch := make(chan io.Closer, closerWorkerCount)
+		mvf.closerCh = ch
+		for range closerWorkerCount {
 			mvf.closeWg.Go(func() {
-				for c := range mvf.closerCh {
+				for c := range ch {
 					_ = c.Close()
 				}
 			})
@@ -2088,6 +2224,14 @@ func (mvf *MetadataVirtualFile) wrapWithEncryption(start, end int64) (io.ReadClo
 // of corrupt files) cannot fan out into one DB write + one rclone VFS refresh
 // per call. See issue #539 for the failure mode this guards against.
 func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usenet.DataCorruptionError, noRetry bool) {
+	// Health reporting needs both persistence layers. Handles built without
+	// them (nzbdav bridge, tests) have nothing to record — bail rather than
+	// nil-deref. This runs on the read path, where a panic would take the whole
+	// mount down.
+	if mvf.healthRepository == nil || mvf.metadataService == nil || mvf.configGetter == nil {
+		return
+	}
+
 	// Per-path debounce: short-circuit if this file already triggered a repair
 	// inside the debounce window. ShouldTrigger handles a nil coalescer
 	// (test harness) by returning true.
