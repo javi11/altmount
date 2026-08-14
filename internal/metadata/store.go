@@ -6,31 +6,161 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 
-	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/hashicorp/golang-lru/v2/simplelru"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/nzb"
 	"github.com/klauspost/compress/zstd"
 	"google.golang.org/protobuf/proto"
 )
 
-const defaultStoreCacheSize = 256
+// The store cache carries two bounds, because a store's cost has two parts
+// that scale independently:
+//
+//   - defaultStoreCacheBytes bounds the decoded payload, which is dominated by
+//     one message-ID string per segment and is what made retention unbounded
+//     when only entry count was capped (issue #819).
+//   - defaultStoreCacheSize bounds the number of entries, and with it the LRU
+//     list nodes and map slots that the byte estimate charges per entry but
+//     that a library of very small releases would otherwise multiply freely.
+//
+// Neither subsumes the other: large releases hit the byte bound first, small
+// ones hit the entry bound first.
+const (
+	defaultStoreCacheSize = 256
+
+	defaultStoreCacheBytes int64 = 64 << 20
+
+	// The overhead constants below approximate the live heap of each cached
+	// element beyond its own string contents: the message struct, its slot in
+	// the enclosing slice, and allocator rounding. They are calibrated against
+	// measured retention and only need to be the right order for the budget to
+	// hold; TestStoreCache_LiveHeapStaysBounded is the guard against drift as
+	// the proto schema evolves.
+	storeSegOverheadBytes   int64 = 104
+	storeFileOverheadBytes  int64 = 160
+	storeGroupOverheadBytes int64 = 16
+	storeEntryOverheadBytes int64 = 96
+)
+
+// storeEntry pairs a cached store with the size it was charged, so eviction
+// can refund exactly what insertion counted without a second bookkeeping map
+// to keep in lockstep with the LRU.
+type storeEntry struct {
+	store *metapb.NzbStore
+	size  int64
+}
 
 // StoreService reads/writes per-release NzbStore files (zstd proto) and caches
 // decompressed stores keyed by store ref (path).
+//
+// The cache is bounded by estimated bytes, not by entry count: stores vary in
+// size by orders of magnitude (a single-file release versus a full season), so
+// an entry-count bound places no bound at all on retained heap. cache is a
+// non-thread-safe simplelru guarded by mu, which lets the eviction callback
+// maintain the byte accounting without re-entering the lock.
 type StoreService struct {
 	rootPath string
-	cache    *lru.Cache[string, *metapb.NzbStore]
 	encoder  *zstd.Encoder
 	decoder  *zstd.Decoder
+
+	mu       sync.Mutex
+	cache    *simplelru.LRU[string, storeEntry]
+	curBytes int64
+	maxBytes int64
 }
 
-// NewStoreService creates a StoreService rooted at rootPath with an LRU cache.
+// NewStoreService creates a StoreService rooted at rootPath with an LRU cache
+// bounded by defaultStoreCacheBytes.
 func NewStoreService(rootPath string) *StoreService {
-	c, _ := lru.New[string, *metapb.NzbStore](defaultStoreCacheSize)
+	return newStoreServiceWithBudget(rootPath, defaultStoreCacheBytes)
+}
+
+func newStoreServiceWithBudget(rootPath string, maxBytes int64) *StoreService {
 	enc, _ := zstd.NewWriter(nil)
 	dec, _ := zstd.NewReader(nil)
-	return &StoreService{rootPath: rootPath, cache: c, encoder: enc, decoder: dec}
+	ss := &StoreService{
+		rootPath: rootPath,
+		encoder:  enc,
+		decoder:  dec,
+		maxBytes: maxBytes,
+	}
+	ss.cache, _ = simplelru.NewLRU(defaultStoreCacheSize, ss.onEvict)
+	return ss
+}
+
+// onEvict runs inside cache mutations, which only happen under ss.mu, so it
+// must not take the lock itself.
+func (ss *StoreService) onEvict(_ string, e storeEntry) {
+	ss.curBytes -= e.size
+}
+
+// cacheGet returns a cached store, marking it as recently used.
+func (ss *StoreService) cacheGet(ref string) (*metapb.NzbStore, bool) {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	e, ok := ss.cache.Get(ref)
+	return e.store, ok
+}
+
+// cacheAdd inserts a store and evicts from the cold end until the byte budget
+// is met. A store larger than the whole budget is still cached (so the caller
+// that just paid to decode it can reuse it) but will be the sole occupant, and
+// the next insertion evicts it.
+func (ss *StoreService) cacheAdd(ref string, store *metapb.NzbStore) {
+	e := storeEntry{store: store, size: estimateStoreBytes(ref, store)}
+
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+
+	// simplelru replaces a duplicate key in place without invoking the evict
+	// callback, so remove first to refund the previous charge for this ref.
+	ss.cache.Remove(ref)
+	ss.curBytes += e.size
+	ss.cache.Add(ref, e)
+
+	for ss.curBytes > ss.maxBytes && ss.cache.Len() > 1 {
+		ss.cache.RemoveOldest()
+	}
+}
+
+// purgeCache drops every cached store.
+func (ss *StoreService) purgeCache() {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	ss.cache.Purge()
+	ss.curBytes = 0
+}
+
+// cachedBytes reports the estimated live heap currently held by cached stores.
+func (ss *StoreService) cachedBytes() int64 {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	return ss.curBytes
+}
+
+// estimateStoreBytes approximates the live heap a decoded store retains. It is
+// deliberately a cheap structural estimate rather than a marshalled size: the
+// on-disk size understates in-memory cost by roughly 2-3x, and the budget only
+// needs to track the real figure to within a small factor.
+func estimateStoreBytes(ref string, store *metapb.NzbStore) int64 {
+	// Charged even for an empty store: the ref key, the LRU list node and the
+	// map slot cost the same whether the store holds one segment or thousands.
+	total := storeEntryOverheadBytes + int64(len(ref))
+	if store == nil {
+		return total
+	}
+	for _, f := range store.Files {
+		total += storeFileOverheadBytes + int64(len(f.Subject)+len(f.Poster))
+		for _, g := range f.Groups {
+			total += storeGroupOverheadBytes + int64(len(g))
+		}
+		for _, s := range f.Segments {
+			total += storeSegOverheadBytes + int64(len(s.Id))
+		}
+	}
+	return total
 }
 
 // WriteStore writes zstd(proto) to ref atomically and refreshes the cache.
@@ -63,13 +193,13 @@ func (ss *StoreService) WriteStore(ref string, store *metapb.NzbStore) error {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("rename store file: %w", err)
 	}
-	ss.cache.Add(ref, store)
+	ss.cacheAdd(ref, store)
 	return nil
 }
 
 // ReadStore reads and decompresses a store, caching the result.
 func (ss *StoreService) ReadStore(ref string) (*metapb.NzbStore, error) {
-	if c, ok := ss.cache.Get(ref); ok {
+	if c, ok := ss.cacheGet(ref); ok {
 		return c, nil
 	}
 	compressed, err := os.ReadFile(ref)
@@ -84,7 +214,7 @@ func (ss *StoreService) ReadStore(ref string) (*metapb.NzbStore, error) {
 	if err := proto.Unmarshal(raw, store); err != nil {
 		return nil, fmt.Errorf("unmarshal store: %w", err)
 	}
-	ss.cache.Add(ref, store)
+	ss.cacheAdd(ref, store)
 	return store, nil
 }
 
