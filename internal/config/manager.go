@@ -250,8 +250,16 @@ type FailureMaskingConfig struct {
 
 // StreamingConfig represents streaming and chunking configuration
 type StreamingConfig struct {
-	MaxPrefetch    int                  `yaml:"max_prefetch" mapstructure:"max_prefetch" json:"max_prefetch"`
-	FailureMasking FailureMaskingConfig `yaml:"failure_masking" mapstructure:"failure_masking" json:"failure_masking"`
+	MaxPrefetch int `yaml:"max_prefetch" mapstructure:"max_prefetch" json:"max_prefetch"`
+	// ReadTimeoutSeconds bounds a single streaming read (WebDAV Read and FUSE
+	// ReadAt alike). Nothing below this layer carries a deadline the caller can
+	// observe: a segment fetch that stalls without erroring parks the read
+	// indefinitely, and on FUSE that means an uninterruptible D-state for the
+	// reading process. On expiry the in-flight reader is interrupted and the
+	// read fails, so the caller gets an EIO it can act on. 0 uses the built-in
+	// default; a negative value disables the timeout.
+	ReadTimeoutSeconds int                  `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds"`
+	FailureMasking     FailureMaskingConfig `yaml:"failure_masking" mapstructure:"failure_masking" json:"failure_masking"`
 }
 
 // RCloneConfig represents rclone configuration
@@ -1575,7 +1583,8 @@ func DefaultConfig(configDir ...string) *Config {
 			},
 		},
 		Streaming: StreamingConfig{
-			MaxPrefetch: 60, // Default: 60 segments prefetched ahead
+			MaxPrefetch:        60,  // Default: 60 segments prefetched ahead
+			ReadTimeoutSeconds: 120, // Default: bound a single read at 2 minutes
 			FailureMasking: FailureMaskingConfig{
 				Enabled:   &failureMaskingEnabled,
 				Threshold: 3,

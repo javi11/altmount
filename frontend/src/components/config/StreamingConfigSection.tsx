@@ -111,6 +111,44 @@ export function StreamingConfigSection({
 					</div>
 				</div>
 
+				{/* Read Timeout */}
+				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+					<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+						<div className="min-w-0">
+							<h4 className="font-bold text-base-content text-sm">Read Timeout</h4>
+							<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
+								Maximum time a single read may take before it fails. Without this, a stalled
+								download can hang the reading process indefinitely.
+							</p>
+						</div>
+						<div className="flex shrink-0 items-center gap-3">
+							<fieldset className="fieldset">
+								<legend className="sr-only">Read timeout in seconds</legend>
+								<input
+									type="number"
+									min="-1"
+									max="3600"
+									step="1"
+									className="input w-28"
+									value={streamingData.read_timeout_seconds}
+									disabled={isReadOnly}
+									onChange={(e) =>
+										handleStreamingChange(
+											"read_timeout_seconds",
+											Number.parseInt(e.target.value, 10) || 0,
+										)
+									}
+								/>
+							</fieldset>
+							<span className="font-bold text-base-content/60 text-xs uppercase">seconds</span>
+						</div>
+					</div>
+					<p className="text-[11px] text-base-content/50 leading-relaxed">
+						Use <span className="font-bold font-mono">0</span> for the default (120s) or{" "}
+						<span className="font-bold font-mono">-1</span> to disable the timeout entirely.
+					</p>
+				</div>
+
 				{/* Guidance */}
 				<div className="alert items-start rounded-2xl border border-info/20 bg-info/5 p-4 shadow-sm">
 					<Info className="mt-0.5 h-5 w-5 shrink-0 text-info" />
