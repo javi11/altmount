@@ -33,6 +33,24 @@ import (
 	"github.com/spf13/afero"
 )
 
+// epochFallbackModTime is reported when no real timestamp is available (a file
+// whose ModifiedAt was never set, or a directory that is not backed by an
+// on-disk metadata dir). A fixed date is deliberate: returning time.Now() would
+// make every stat look like a fresh modification and force media scanners to
+// re-probe on every call.
+var epochFallbackModTime = time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+
+// getFileModTime maps a proto ModifiedAt to the mtime reported over WebDAV and
+// FUSE. Note that ReadFileMetadataLite treats modified_at as best-effort — it
+// stays zero when the field sits past liteScanBytes — so listings can legitimately
+// fall back to the epoch here.
+func getFileModTime(modifiedAt int64) time.Time {
+	if modifiedAt > 0 {
+		return time.Unix(modifiedAt, 0)
+	}
+	return epochFallbackModTime
+}
+
 // MetadataRemoteFile implements the RemoteFile interface for metadata-backed virtual files
 type MetadataRemoteFile struct {
 	metadataService  *metadata.MetadataService
@@ -499,11 +517,15 @@ func (mrf *MetadataRemoteFile) Stat(ctx context.Context, name string) (bool, fs.
 
 	// Check if this is a directory first
 	if mrf.metadataService.DirectoryExists(normalizedName) {
+		modT := mrf.metadataService.DirectoryModTime(normalizedName)
+		if modT.IsZero() {
+			modT = epochFallbackModTime
+		}
 		info := &MetadataFileInfo{
 			name:    filepath.Base(normalizedName),
 			size:    0,
 			mode:    os.ModeDir | 0755,
-			modTime: time.Now(), // Use current time for directories
+			modTime: modT,
 			isDir:   true,
 		}
 		return true, info, nil
@@ -560,7 +582,7 @@ func (mrf *MetadataRemoteFile) Stat(ctx context.Context, name string) (bool, fs.
 		name:    filepath.Base(normalizedName),
 		size:    fileMeta.FileSize,
 		mode:    0644, // Default file mode
-		modTime: time.Unix(fileMeta.ModifiedAt, 0),
+		modTime: getFileModTime(fileMeta.ModifiedAt),
 		isDir:   false,
 	}
 
@@ -658,7 +680,9 @@ func (mvd *MetadataVirtualDirectory) Readdir(count int) ([]fs.FileInfo, error) {
 
 	var infos []fs.FileInfo
 
-	// Add directories first
+	// Add directories first. dirInfo already carries the backing directory's
+	// real mtime from the single os.ReadDir in ListDirectoryAll, so there is
+	// nothing extra to stat per subdirectory.
 	for _, dirInfo := range dirInfos {
 		infos = append(infos, dirInfo)
 		if count > 0 && len(infos) >= count {
@@ -696,7 +720,7 @@ func (mvd *MetadataVirtualDirectory) Readdir(count int) ([]fs.FileInfo, error) {
 			name:    fileName,
 			size:    fileMeta.FileSize,
 			mode:    0644,
-			modTime: time.Unix(fileMeta.ModifiedAt, 0),
+			modTime: getFileModTime(fileMeta.ModifiedAt),
 			isDir:   false,
 		}
 		infos = append(infos, info)
@@ -725,11 +749,15 @@ func (mvd *MetadataVirtualDirectory) Readdirnames(n int) ([]string, error) {
 
 // Stat implements afero.File.Stat
 func (mvd *MetadataVirtualDirectory) Stat() (fs.FileInfo, error) {
+	modT := mvd.metadataService.DirectoryModTime(mvd.normalizedPath)
+	if modT.IsZero() {
+		modT = epochFallbackModTime
+	}
 	info := &MetadataFileInfo{
 		name:    filepath.Base(mvd.normalizedPath),
 		size:    0,
 		mode:    os.ModeDir | 0755,
-		modTime: time.Now(),
+		modTime: modT,
 		isDir:   true,
 	}
 	return info, nil
@@ -1690,7 +1718,7 @@ func (mvf *MetadataVirtualFile) Stat() (fs.FileInfo, error) {
 		name:    filepath.Base(mvf.name),
 		size:    mvf.meta.FileSize,
 		mode:    0644,
-		modTime: time.Unix(mvf.meta.ModifiedAt, 0),
+		modTime: getFileModTime(mvf.meta.ModifiedAt),
 		isDir:   false, // Files are never directories in simplified schema
 	}
 
