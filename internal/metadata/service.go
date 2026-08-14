@@ -224,7 +224,12 @@ func (ms *MetadataService) WriteFileMetadata(virtualPath string, metadata *metap
 	// a VFS cache flush or attr-timeout expiry.
 	if metadata.ModifiedAt != 0 {
 		t := time.Unix(metadata.ModifiedAt, 0)
-		_ = os.Chtimes(metadataPath, t, t)
+		if err := os.Chtimes(metadataPath, t, t); err != nil {
+			// Not fatal: the proto is written and the WebDAV/FUSE mtime we
+			// report comes from ModifiedAt, not from the host filesystem.
+			slog.DebugContext(context.Background(), "Failed to pin metadata file mtime",
+				"path", metadataPath, "error", err)
+		}
 	}
 
 	metadata.NzbdavId = nzbdavId // Restore for in-memory use
@@ -616,41 +621,21 @@ func (ms *MetadataService) ListDirectoryAll(virtualPath string) (dirs []fs.FileI
 	return dirs, fileNames, nil
 }
 
-// GetDirectoryModTime returns max(children's ModifiedAt) for the given virtual
-// directory, returning a zero time.Time if the directory is empty or has no
-// children with ModifiedAt > 0 (allowing callers to fall back to a static epoch).
+// DirectoryModTime returns the on-disk mtime of the metadata directory backing
+// the given virtual directory, or a zero time.Time if it does not exist or is
+// not a directory (letting callers fall back to a static epoch).
 //
-// This ensures that virtual directory mtime advances when a new file is imported
-// (which sets ModifiedAt once at creation time), while remaining stable across
-// container restarts that trigger health sweeps (which never mutate ModifiedAt).
-func (ms *MetadataService) GetDirectoryModTime(virtualPath string) time.Time {
-	metadataDir := filepath.Join(ms.rootPath, virtualPath)
-
-	entries, err := os.ReadDir(metadataDir)
-	if err != nil {
+// This is a single stat: the kernel already advances a directory's mtime when
+// children are created or removed, so there is no need to scan children. It
+// stays stable across restart health sweeps because UpdateFileStatus skips the
+// write entirely when the status is unchanged, and advances on real imports and
+// deletions, which do mutate directory entries.
+func (ms *MetadataService) DirectoryModTime(virtualPath string) time.Time {
+	info, err := os.Stat(filepath.Join(ms.rootPath, virtualPath))
+	if err != nil || !info.IsDir() {
 		return time.Time{}
 	}
-
-	var maxModTime int64
-	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".meta" {
-			continue
-		}
-		virtualFileName := entry.Name()[:len(entry.Name())-5]
-		virtualFilePath := filepath.Join(virtualPath, virtualFileName)
-		lite, err := ms.ReadFileMetadataLite(virtualFilePath)
-		if err != nil || lite == nil || lite.ModifiedAt <= 0 {
-			continue
-		}
-		if lite.ModifiedAt > maxModTime {
-			maxModTime = lite.ModifiedAt
-		}
-	}
-
-	if maxModTime > 0 {
-		return time.Unix(maxModTime, 0)
-	}
-	return time.Time{}
+	return info.ModTime()
 }
 
 // CreateFileMetadata creates a new FileMetadata with basic fields
@@ -698,6 +683,11 @@ func (ms *MetadataService) CreateFileMetadata(
 // For paths that legitimately need to set a new ModifiedAt (initial import,
 // content replacement), call WriteFileMetadata or CreateFileMetadata directly
 // with the correct timestamp already set on the metadata struct.
+//
+// This is not a cheap call: it unmarshals the full proto and rewrites the .meta
+// via temp file + rename, which also bumps the parent directory's mtime. Callers
+// that may be asked to apply a no-op should guard against it first — see
+// UpdateFileStatus.
 func (ms *MetadataService) UpdateFileMetadata(virtualPath string, updateFunc func(*metapb.FileMetadata)) error {
 	// Read existing metadata
 	metadata, err := ms.ReadFileMetadata(virtualPath)
@@ -724,8 +714,26 @@ func (ms *MetadataService) UpdateFileMetadata(virtualPath string, updateFunc fun
 	return ms.WriteFileMetadata(virtualPath, metadata)
 }
 
-// UpdateFileStatus updates the status of a file in metadata
+// UpdateFileStatus updates the status of a file in metadata.
+//
+// Re-asserting the status a file already has is a no-op and is skipped without
+// touching the disk. This matters at startup: the health worker emits
+// EventTypeFileHealthy for every known-healthy file, and the full read-modify-
+// write path unmarshals the entire proto (megabytes once SegmentData is inline)
+// and rewrites the .meta via temp file + rename for each one. The lite
+// projection carries Status, is served from an LRU, and on a miss reads only
+// liteScanBytes without ever instantiating the full proto — so the unchanged
+// case costs approximately nothing.
+//
+// Skipping the write also leaves the parent directory's mtime untouched, which
+// is what keeps DirectoryModTime stable across restarts.
 func (ms *MetadataService) UpdateFileStatus(virtualPath string, status metapb.FileStatus) error {
+	// Fall through on any error or miss so not-found and unreadable-metadata
+	// behaviour stays exactly as it was.
+	if lite, err := ms.ReadFileMetadataLite(virtualPath); err == nil && lite != nil && lite.Status == status {
+		return nil
+	}
+
 	return ms.UpdateFileMetadata(virtualPath, func(metadata *metapb.FileMetadata) {
 		metadata.Status = status
 	})

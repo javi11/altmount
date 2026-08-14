@@ -14,7 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-
 func TestDeleteFileMetadataWithSourceNzb_RemovesMetadata(t *testing.T) {
 	root := t.TempDir()
 	ms := NewMetadataService(root)
@@ -297,37 +296,158 @@ func TestUpdateFileMetadata_PreservesModifiedAt(t *testing.T) {
 	assert.Equal(t, metapb.FileStatus_FILE_STATUS_DEGRADED, afterHoles.Status)
 }
 
-func TestGetDirectoryModTime(t *testing.T) {
+// TestWriteFileMetadata_PinsDiskMtimeToModifiedAt covers the os.Chtimes call
+// that follows the atomic rename: os.Rename always stamps the destination with
+// mtime=now, which would surface as a fresh timestamp to any host tool reading
+// the on-disk mtime rather than the proto.
+func TestWriteFileMetadata_PinsDiskMtimeToModifiedAt(t *testing.T) {
+	root := t.TempDir()
+	ms := NewMetadataService(root)
+
+	virtualPath := filepath.Join("movies", "pinned.mkv")
+	const fixedModifiedAt int64 = 1_700_000_000
+
+	meta := ms.CreateFileMetadata(
+		1024, "test.nzb", metapb.FileStatus_FILE_STATUS_HEALTHY,
+		nil, metapb.Encryption_NONE, "", "", nil, nil, 0, nil, "",
+	)
+	meta.ModifiedAt = fixedModifiedAt
+	require.NoError(t, ms.WriteFileMetadata(virtualPath, meta))
+
+	info, err := os.Stat(ms.GetMetadataFilePath(virtualPath))
+	require.NoError(t, err)
+	assert.Equal(t, fixedModifiedAt, info.ModTime().Unix())
+}
+
+// TestUpdateFileStatus_UnchangedStatusSkipsWrite pins the fast path that keeps
+// restarts cheap: the health worker re-asserts HEALTHY for every known-healthy
+// file at startup, and rewriting an identical proto for each one is pure waste.
+//
+// A sentinel mtime detects the write: WriteFileMetadata always re-stamps the
+// file to ModifiedAt, so the sentinel survives only if no write happened.
+func TestUpdateFileStatus_UnchangedStatusSkipsWrite(t *testing.T) {
+	root := t.TempDir()
+	ms := NewMetadataService(root)
+
+	virtualPath := filepath.Join("movies", "already_healthy.mkv")
+	const fixedModifiedAt int64 = 1_700_000_000
+
+	meta := ms.CreateFileMetadata(
+		1024, "test.nzb", metapb.FileStatus_FILE_STATUS_HEALTHY,
+		nil, metapb.Encryption_NONE, "", "", nil, nil, 0, nil, "",
+	)
+	meta.ModifiedAt = fixedModifiedAt
+	require.NoError(t, ms.WriteFileMetadata(virtualPath, meta))
+
+	metaPath := ms.GetMetadataFilePath(virtualPath)
+	sentinel := time.Unix(1_600_000_000, 0)
+	require.NoError(t, os.Chtimes(metaPath, sentinel, sentinel))
+
+	// Re-asserting the current status must not touch the file.
+	require.NoError(t, ms.UpdateFileStatus(virtualPath, metapb.FileStatus_FILE_STATUS_HEALTHY))
+
+	info, err := os.Stat(metaPath)
+	require.NoError(t, err)
+	assert.Equal(t, sentinel.Unix(), info.ModTime().Unix(),
+		"re-asserting an unchanged status must not rewrite the .meta file")
+
+	// A real transition still writes, restoring the pinned ModifiedAt mtime.
+	require.NoError(t, ms.UpdateFileStatus(virtualPath, metapb.FileStatus_FILE_STATUS_DEGRADED))
+
+	info, err = os.Stat(metaPath)
+	require.NoError(t, err)
+	assert.Equal(t, fixedModifiedAt, info.ModTime().Unix(),
+		"a genuine status transition must write and re-pin mtime to ModifiedAt")
+
+	after, err := ms.ReadFileMetadata(virtualPath)
+	require.NoError(t, err)
+	require.NotNil(t, after)
+	assert.Equal(t, metapb.FileStatus_FILE_STATUS_DEGRADED, after.Status)
+}
+
+// TestUpdateFileStatus_SkipsWriteOnColdCache ensures the fast path is driven by
+// on-disk state, not just a warm liteCache — a restart starts with an empty one.
+func TestUpdateFileStatus_SkipsWriteOnColdCache(t *testing.T) {
+	root := t.TempDir()
+	ms := NewMetadataService(root)
+
+	virtualPath := filepath.Join("movies", "cold_cache.mkv")
+
+	meta := ms.CreateFileMetadata(
+		1024, "test.nzb", metapb.FileStatus_FILE_STATUS_HEALTHY,
+		nil, metapb.Encryption_NONE, "", "", nil, nil, 0, nil, "",
+	)
+	meta.ModifiedAt = 1_700_000_000
+	require.NoError(t, ms.WriteFileMetadata(virtualPath, meta))
+
+	ms.liteCache.Purge()
+
+	metaPath := ms.GetMetadataFilePath(virtualPath)
+	sentinel := time.Unix(1_600_000_000, 0)
+	require.NoError(t, os.Chtimes(metaPath, sentinel, sentinel))
+
+	require.NoError(t, ms.UpdateFileStatus(virtualPath, metapb.FileStatus_FILE_STATUS_HEALTHY))
+
+	info, err := os.Stat(metaPath)
+	require.NoError(t, err)
+	assert.Equal(t, sentinel.Unix(), info.ModTime().Unix())
+}
+
+// TestDirectoryModTime reports the on-disk mtime of the backing metadata
+// directory. The kernel already advances it when children are created or
+// removed, so no per-child scan is needed to derive a virtual directory mtime.
+func TestDirectoryModTime(t *testing.T) {
 	root := t.TempDir()
 	ms := NewMetadataService(root)
 
 	dir := filepath.Join("movies", "ActionMovie")
 
-	// 1. Non-existent / empty directory returns zero time
-	assert.True(t, ms.GetDirectoryModTime(dir).IsZero())
+	// Non-existent directory reports zero, letting callers fall back to an epoch.
+	assert.True(t, ms.DirectoryModTime(dir).IsZero())
 
-	// 2. Add two files with different ModifiedAt timestamps
-	meta1 := ms.CreateFileMetadata(100, "1.nzb", metapb.FileStatus_FILE_STATUS_HEALTHY, nil, metapb.Encryption_NONE, "", "", nil, nil, 0, nil, "")
-	meta1.ModifiedAt = 1_700_000_100
-	require.NoError(t, ms.WriteFileMetadata(filepath.Join(dir, "part1.mkv"), meta1))
+	meta := ms.CreateFileMetadata(100, "1.nzb", metapb.FileStatus_FILE_STATUS_HEALTHY, nil, metapb.Encryption_NONE, "", "", nil, nil, 0, nil, "")
+	meta.ModifiedAt = 1_700_000_100
+	require.NoError(t, ms.WriteFileMetadata(filepath.Join(dir, "part1.mkv"), meta))
 
-	meta2 := ms.CreateFileMetadata(200, "2.nzb", metapb.FileStatus_FILE_STATUS_HEALTHY, nil, metapb.Encryption_NONE, "", "", nil, nil, 0, nil, "")
-	meta2.ModifiedAt = 1_700_000_500
-	require.NoError(t, ms.WriteFileMetadata(filepath.Join(dir, "part2.mkv"), meta2))
+	onDisk, err := os.Stat(filepath.Join(root, dir))
+	require.NoError(t, err)
+	assert.Equal(t, onDisk.ModTime(), ms.DirectoryModTime(dir))
 
-	// Should return max of the children
-	dirModTime := ms.GetDirectoryModTime(dir)
-	assert.Equal(t, time.Unix(1_700_000_500, 0), dirModTime)
-
-	// 3. Status update (health sweep) does not change max directory modTime
-	require.NoError(t, ms.UpdateFileStatus(filepath.Join(dir, "part2.mkv"), metapb.FileStatus_FILE_STATUS_DEGRADED))
-	assert.Equal(t, time.Unix(1_700_000_500, 0), ms.GetDirectoryModTime(dir))
-
-	// 4. Adding a newer file advances directory modTime
-	meta3 := ms.CreateFileMetadata(300, "3.nzb", metapb.FileStatus_FILE_STATUS_HEALTHY, nil, metapb.Encryption_NONE, "", "", nil, nil, 0, nil, "")
-	meta3.ModifiedAt = 1_700_000_900
-	require.NoError(t, ms.WriteFileMetadata(filepath.Join(dir, "part3.mkv"), meta3))
-
-	assert.Equal(t, time.Unix(1_700_000_900, 0), ms.GetDirectoryModTime(dir))
+	// A file path is not a directory.
+	assert.True(t, ms.DirectoryModTime(filepath.Join(dir, "part1.mkv")).IsZero())
 }
 
+// TestDirectoryModTime_StableAcrossHealthSweep is the regression guard for the
+// original bug: a restart's health sweep must not make directories look freshly
+// modified to media scanners that only rescan folders whose mtime changed.
+func TestDirectoryModTime_StableAcrossHealthSweep(t *testing.T) {
+	root := t.TempDir()
+	ms := NewMetadataService(root)
+
+	dir := filepath.Join("movies", "ActionMovie")
+
+	for _, name := range []string{"part1.mkv", "part2.mkv", "part3.mkv"} {
+		meta := ms.CreateFileMetadata(100, "x.nzb", metapb.FileStatus_FILE_STATUS_HEALTHY, nil, metapb.Encryption_NONE, "", "", nil, nil, 0, nil, "")
+		meta.ModifiedAt = 1_700_000_100
+		require.NoError(t, ms.WriteFileMetadata(filepath.Join(dir, name), meta))
+	}
+
+	before := ms.DirectoryModTime(dir)
+	require.False(t, before.IsZero())
+
+	// Simulate the startup sweep re-asserting HEALTHY for every file.
+	for _, name := range []string{"part1.mkv", "part2.mkv", "part3.mkv"} {
+		require.NoError(t, ms.UpdateFileStatus(filepath.Join(dir, name), metapb.FileStatus_FILE_STATUS_HEALTHY))
+	}
+
+	assert.Equal(t, before, ms.DirectoryModTime(dir),
+		"a no-op health sweep must not bump the directory mtime")
+
+	// A genuine import advances it.
+	newMeta := ms.CreateFileMetadata(300, "3.nzb", metapb.FileStatus_FILE_STATUS_HEALTHY, nil, metapb.Encryption_NONE, "", "", nil, nil, 0, nil, "")
+	newMeta.ModifiedAt = 1_700_000_900
+	require.NoError(t, ms.WriteFileMetadata(filepath.Join(dir, "part4.mkv"), newMeta))
+
+	assert.True(t, ms.DirectoryModTime(dir).After(before),
+		"importing a new file must advance the directory mtime")
+}
