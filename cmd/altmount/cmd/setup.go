@@ -521,7 +521,7 @@ func createHTTPServer(apiServer *api.Server, app *fiber.App, webdavHandler *webd
 		Addr:         fmt.Sprintf(":%d", port),
 		Handler:      mainHandler,
 		IdleTimeout:  time.Minute * 5,
-		WriteTimeout: time.Minute * 3,
+		WriteTimeout: time.Minute * 30,
 		ReadTimeout:  time.Minute * 5,
 	}
 }
