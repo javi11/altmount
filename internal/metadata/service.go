@@ -49,13 +49,18 @@ type FileMetadataLite struct {
 
 // MetadataService provides low-level read/write operations for metadata files.
 //
-// Only a lightweight metadata projection (liteCache) is kept in memory. The
-// full FileMetadata proto — dominated by SegmentData/NestedSources slices
-// holding thousands of message-ID strings — is never cached. Callers that need
-// segments (Open, HealthChecker) re-read from disk each time; the proto then
-// lives only for the duration of the open handle or the health check. This
-// bounds steady-state memory at ~liteCache_entries × 40 bytes instead of the
-// previous unbounded segment retention.
+// The full FileMetadata proto is never cached: callers that need segments
+// (Open, HealthChecker) re-read from disk each time, so the proto lives only
+// for the duration of the open handle or the health check. Two caches hold
+// state between calls, and both are bounded:
+//
+//   - liteCache, a lightweight projection (size, modtime, status) at
+//     ~liteCache_entries × 40 bytes.
+//   - store's decoded NzbStore cache, which v3 metadata resolves segments
+//     against. Stores are shared per release and are the one place message-ID
+//     strings do survive a call, so that cache is bounded by estimated bytes
+//     (defaultStoreCacheBytes) rather than by entry count — bounding it by
+//     entry count left steady-state retention unbounded (issue #819).
 type MetadataService struct {
 	rootPath string
 	// liteCache caches lightweight metadata (size, modtime, status) used by
