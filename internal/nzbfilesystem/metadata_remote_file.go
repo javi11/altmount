@@ -285,6 +285,7 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 		KnownHoles:     fileMeta.KnownHoles,
 	}
 
+	fileCtx, cancel := context.WithCancel(ctx)
 	// Create a metadata-based virtual file handle
 	virtualFile := &MetadataVirtualFile{
 		name:             name,
@@ -297,7 +298,8 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 		padRecorder:      mrf.padRecorder,
 		configGetter:     mrf.configGetter,
 		poolManager:      mrf.poolManager,
-		ctx:              ctx,
+		ctx:              fileCtx,
+		cancelCtx:        cancel,
 		maxPrefetch:      maxPrefetch,
 		rcloneCipher:     mrf.rcloneCipher,
 		aesCipher:        mrf.aesCipher,
@@ -827,6 +829,7 @@ type MetadataVirtualFile struct {
 	configGetter     config.ConfigGetter
 	poolManager      pool.Manager // Pool manager for dynamic pool access
 	ctx              context.Context
+	cancelCtx        context.CancelFunc
 	maxPrefetch      int // Maximum segments prefetched ahead of current read position
 	rcloneCipher     *rclone.RcloneCrypt
 	aesCipher        *aes.AesCipher
@@ -1650,6 +1653,9 @@ func (mvf *MetadataVirtualFile) Seek(offset int64, whence int) (int64, error) {
 
 // Close implements afero.File.Close
 func (mvf *MetadataVirtualFile) Close() error {
+	if mvf.cancelCtx != nil {
+		mvf.cancelCtx()
+	}
 	// Cancel the in-flight reader before taking mvf.mu — a concurrent
 	// Read can hold the lock for the full segment-download latency.
 	mvf.interruptCurrentReader()
