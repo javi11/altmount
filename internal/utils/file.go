@@ -70,15 +70,13 @@ func isCrossDeviceError(err error) bool {
 	if err == nil {
 		return false
 	}
-	var lerr *os.LinkError
-	if errors.As(err, &lerr) {
-		return errors.Is(lerr.Err, syscall.EXDEV)
+	// os.LinkError and os.PathError both unwrap to the underlying syscall error.
+	if errors.Is(err, syscall.EXDEV) || isPlatformCrossDeviceError(err) {
+		return true
 	}
-	var perr *os.PathError
-	if errors.As(err, &perr) {
-		return errors.Is(perr.Err, syscall.EXDEV)
-	}
-	// Fallback to string check
+	// Fallback to string check. Windows never reports EXDEV (see isPlatformCrossDeviceError),
+	// so its ERROR_NOT_SAME_DEVICE message is matched here as well.
 	errStr := err.Error()
-	return strings.Contains(errStr, "cross-device") || strings.Contains(errStr, "invalid cross-device link") || strings.Contains(errStr, "EXDEV")
+	return strings.Contains(errStr, "cross-device") || strings.Contains(errStr, "invalid cross-device link") ||
+		strings.Contains(errStr, "EXDEV") || strings.Contains(errStr, "different disk drive")
 }

@@ -54,6 +54,15 @@ func TestIsCrossDeviceError(t *testing.T) {
 		{errors.New("EXDEV: invalid cross-device link"), true},
 		{&os.LinkError{Op: "rename", Old: "a", New: "b", Err: syscall.EXDEV}, true},
 		{&os.PathError{Op: "rename", Path: "a", Err: syscall.EXDEV}, true},
+		// Windows reports ERROR_NOT_SAME_DEVICE, whose message never mentions
+		// "cross-device". Match it so the copy-and-delete fallback kicks in there too.
+		{errors.New("The system cannot move the file to a different disk drive."), true},
+		{&os.LinkError{
+			Op:  "rename",
+			Old: "a",
+			New: "b",
+			Err: errors.New("The system cannot move the file to a different disk drive."),
+		}, true},
 	}
 
 	for _, tt := range tests {
