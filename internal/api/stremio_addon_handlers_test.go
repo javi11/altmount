@@ -7,6 +7,7 @@ import (
 
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/prowlarr"
+	"github.com/stretchr/testify/assert"
 )
 
 func timePtr(t time.Time) *time.Time { return &t }
@@ -180,4 +181,20 @@ func TestBuildStremioStreamEntries_CachedSortedFirstStable(t *testing.T) {
 	if entries[2].Cached || entries[3].Cached {
 		t.Errorf("last two entries should not be cached")
 	}
+}
+
+func TestFormatLibraryStream(t *testing.T) {
+	libPath := "/library/movies/Sample Movie (2026)/Sample Movie (2026) - [Bluray-2160p][TrueHD Atmos 7.1][DV HDR10][x265]-GROUP.mkv"
+	h := &database.FileHealth{
+		FilePath:    "complete/movies/Sample.Movie.2026.2160p.UHD.BluRay.x265-GROUP/sample.movie.2026.2160p.uhd.bluray.x265-group.mkv",
+		LibraryPath: &libPath,
+	}
+
+	name := formatLibraryStreamName(h)
+	assert.Contains(t, name, "⚡ Altmount Library")
+	assert.Contains(t, name, "2160p")
+
+	title := formatLibraryStreamTitle(h)
+	assert.Contains(t, title, "Sample Movie (2026) - [Bluray-2160p][TrueHD Atmos 7.1][DV HDR10][x265]-GROUP")
+	assert.Contains(t, title, "💾 Local Library • ⚡ Instant 0s Playback")
 }
