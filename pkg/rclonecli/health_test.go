@@ -2,8 +2,10 @@ package rclonecli
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
+	"net/http"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -20,11 +22,12 @@ func newHealthTestManager(t *testing.T, probeOK bool, readyAt time.Time) (*Manag
 
 	var restartCalls int32
 	m := &Manager{
-		logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
-		ctx:         context.Background(),
-		mounts:      make(map[string]*MountInfo),
-		serverReady: ready,
-		readyAt:     readyAt,
+		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+		ctx:           context.Background(),
+		mounts:        make(map[string]*MountInfo),
+		serverReady:   ready,
+		serverStarted: true,
+		readyAt:       readyAt,
 		probe: func(context.Context, time.Duration) bool {
 			return probeOK
 		},
@@ -102,7 +105,9 @@ func TestPerformMountHealthCheck_AtThresholdRestartsOnceAndResets(t *testing.T) 
 
 func TestPerformMountHealthCheck_NotReadyIsNoOp(t *testing.T) {
 	m, restarts := newHealthTestManager(t, false, afterGrace())
+	m.mu.Lock()
 	m.serverReady = make(chan struct{}) // open -> IsReady() == false
+	m.mu.Unlock()
 
 	m.performMountHealthCheck()
 
@@ -112,4 +117,33 @@ func TestPerformMountHealthCheck_NotReadyIsNoOp(t *testing.T) {
 	if m.consecutiveProbeFailures != 0 {
 		t.Fatalf("must not touch failure streak before ready, got %d", m.consecutiveProbeFailures)
 	}
+}
+
+func TestPerformMountHealthCheck_LeavesFailedMountMarkedMountedForRecovery(t *testing.T) {
+	m, _ := newHealthTestManager(t, true, afterGrace())
+	m.mounts["altmount"] = &MountInfo{Provider: "altmount", Mounted: true}
+	m.forceUnmount = func(string) error { return nil }
+	m.restart = func(context.Context) error { return errors.New("stop recovery") }
+	m.httpClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("health check failed")
+	})}
+
+	m.performMountHealthCheck()
+
+	info, ok := m.GetMountInfo("altmount")
+	if !ok {
+		t.Fatal("mount info missing")
+	}
+	if !info.Mounted {
+		t.Fatal("failed mount must remain marked mounted until RecoverMount can unmount and reclaim its VFS")
+	}
+	if info.Error != "Health check failed" {
+		t.Fatalf("unexpected mount error: %q", info.Error)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }

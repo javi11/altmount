@@ -40,6 +40,9 @@ func (m *Manager) checkMountHealth(provider string) bool {
 
 // RecoverMount attempts to recover a failed mount
 func (m *Manager) RecoverMount(ctx context.Context, provider string) error {
+	m.mountMu.Lock()
+	defer m.mountMu.Unlock()
+
 	m.mountsMutex.RLock()
 	mountInfo, exists := m.mounts[provider]
 	m.mountsMutex.RUnlock()
@@ -61,23 +64,25 @@ func (m *Manager) RecoverMount(ctx context.Context, provider string) error {
 		}
 		// After restart there is nothing to RC-unmount; skip straight to Mount,
 		// which will recreate the rclone config and FUSE mount on the fresh rcd.
-		if err := m.Mount(ctx, provider, mountInfo.LocalPath, mountInfo.WebDAVURL); err != nil {
+		if err := m.mountWithRetry(ctx, provider, mountInfo.LocalPath, mountInfo.WebDAVURL, 3); err != nil {
 			return fmt.Errorf("failed to recover mount for %s after rcd restart: %w", provider, err)
 		}
 		m.logger.InfoContext(ctx, "Successfully recovered mount after rcd restart", "provider", provider)
 		return nil
 	}
 
-	// First try to unmount cleanly
-	if err := m.unmount(ctx, provider); err != nil {
-		m.logger.ErrorContext(ctx, "Failed to unmount during recovery", "err", err, "provider", provider)
+	// First try to unmount cleanly. The health checker leaves Mounted=true until
+	// this call so unmount can still reach rclone and reclaim its VFS before the
+	// remount below.
+	if err := m.unmount(ctx, provider, true); err != nil {
+		return fmt.Errorf("failed to unmount during recovery for %s: %w", provider, err)
 	}
 
 	// Wait a moment
 	time.Sleep(1 * time.Second)
 
 	// Try to remount
-	if err := m.Mount(ctx, provider, mountInfo.LocalPath, mountInfo.WebDAVURL); err != nil {
+	if err := m.mountWithRetry(ctx, provider, mountInfo.LocalPath, mountInfo.WebDAVURL, 3); err != nil {
 		return fmt.Errorf("failed to recover mount for %s: %w", provider, err)
 	}
 
@@ -182,11 +187,11 @@ func (m *Manager) performMountHealthCheck() {
 		if !m.checkMountHealth(provider) {
 			m.logger.WarnContext(m.ctx, "Mount health check failed, attempting recovery", "provider", provider)
 
-			// Mark mount as unhealthy
+			// Record the health failure, but leave Mounted=true so RecoverMount can
+			// still issue mount/unmount and reclaim rclone's VFS before remounting.
 			m.mountsMutex.Lock()
 			if mount, exists := m.mounts[provider]; exists {
 				mount.Error = "Health check failed"
-				mount.Mounted = false
 			}
 			m.mountsMutex.Unlock()
 
