@@ -203,8 +203,9 @@ type ArrsInstanceAPIResponse struct {
 
 // StremioAPIResponse sanitizes Stremio config for API responses
 type StremioAPIResponse struct {
-	Enabled bool `json:"enabled"`
-	NzbTTLHours int `json:"nzb_ttl_hours"`
+	Enabled               bool                `json:"enabled"`
+	NzbTTLHours           int                 `json:"nzb_ttl_hours"`
+	ReuseLibraryReleases  *bool               `json:"reuse_library_releases"`
 	// No omitempty: an explicit 0 must survive the round-trip, otherwise saving the
 	// config would silently restore the defaults.
 	FailedReleaseTTLHours int                 `json:"failed_release_ttl_hours"`
@@ -386,6 +387,7 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 	stremioResp := StremioAPIResponse{
 		Enabled:               cfg.Stremio.Enabled != nil && *cfg.Stremio.Enabled,
 		NzbTTLHours:           cfg.Stremio.NzbTTLHours,
+		ReuseLibraryReleases:  cfg.Stremio.ReuseLibraryReleases,
 		FailedReleaseTTLHours: cfg.Stremio.FailedReleaseTTLHours,
 		MaxFallbackReleases:   cfg.Stremio.MaxFallbackReleases,
 		BaseURL:               cfg.Stremio.BaseURL,

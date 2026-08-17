@@ -248,6 +248,22 @@ export function StremioConfigSection({
 						/>
 					</div>
 
+					<div className="flex items-center justify-between gap-4">
+						<div className="min-w-0 flex-1">
+							<h5 className="break-words font-bold text-sm">Reuse Completed Library Releases</h5>
+							<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
+								Reuses completed releases across the entire Altmount library for instant 0s playback without re-downloading existing media.
+							</p>
+						</div>
+						<input
+							type="checkbox"
+							className="toggle toggle-primary mt-1 shrink-0"
+							checked={formData.reuse_library_releases ?? true}
+							disabled={isReadOnly}
+							onChange={(e) => update({ reuse_library_releases: e.target.checked })}
+						/>
+					</div>
+
 					<div className="grid min-w-0 grid-cols-1 gap-6 sm:grid-cols-2">
 						<fieldset className="fieldset min-w-0">
 							<legend className="fieldset-legend">Public Base URL</legend>

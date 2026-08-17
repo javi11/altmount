@@ -172,8 +172,11 @@ type StremioConfig struct {
 	Enabled *bool `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
 	// NzbTTLHours controls how long a completed NZB result is cached before
 	// the same NZB is re-processed on the next request.
-	// Set to 0 to disable expiry (cache forever). Defaults to 24 hours.
+	// Defaults to 24 hours. A value of 0 caches forever (releases never expire).
 	NzbTTLHours int `yaml:"nzb_ttl_hours" mapstructure:"nzb_ttl_hours" json:"nzb_ttl_hours"`
+	// ReuseLibraryReleases checks whether matching completed releases across
+	// the entire Altmount library should be reused for instant stream playback. Defaults to true.
+	ReuseLibraryReleases *bool `yaml:"reuse_library_releases" mapstructure:"reuse_library_releases" json:"reuse_library_releases"`
 	// FailedReleaseTTLHours controls how long a release that failed to import stays
 	// excluded from the Stremio stream list. Mirrors NzbTTLHours semantics: it filters
 	// failure records by age rather than deleting them, so it is bounded above by
@@ -204,6 +207,15 @@ func (s StremioConfig) EffectiveMaxFallbackReleases() int {
 		return maxStremioFallbackReleases
 	}
 	return s.MaxFallbackReleases
+}
+
+// EffectiveReuseLibraryReleases reports whether Stremio should check and reuse matching
+// completed releases across the entire Altmount library. Defaults to true.
+func (s StremioConfig) EffectiveReuseLibraryReleases() bool {
+	if s.ReuseLibraryReleases == nil {
+		return true
+	}
+	return *s.ReuseLibraryReleases
 }
 
 // AuthConfig represents authentication configuration
