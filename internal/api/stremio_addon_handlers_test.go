@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/prowlarr"
 )
@@ -31,10 +32,11 @@ func TestBuildStremioStreamEntries_CacheDetection(t *testing.T) {
 	matchingPath := "/config/.nzbs/Movies/7/" + safeFilename
 
 	tests := []struct {
-		name       string
-		cached     []*database.ImportQueueItem
-		ttlHours   int
-		wantCached bool
+		name        string
+		searchTitle string
+		cached      []*database.ImportQueueItem
+		ttlHours    int
+		wantCached  bool
 	}{
 		{
 			name:       "cached within TTL",
@@ -67,6 +69,41 @@ func TestBuildStremioStreamEntries_CacheDetection(t *testing.T) {
 			wantCached: false,
 		},
 		{
+			name:        "special characters and dot differences match",
+			searchTitle: "House.of.the.Dragon.S03E02.Queens.Landing.2160p.HMAX.WEB-DL.DDP5.1.Atmos.DoVi.HDR.H.265-playWEB",
+			cached:      []*database.ImportQueueItem{cachedItem("/config/.nzbs/TV/House of the Dragon - S03E02 - Queen's Landing [2160p HMAX WEB-DL DDP5.1 Atmos DoVi HDR H.265-playWEB].nzb.gz", "/storage/hotd", timePtr(now.Add(-1*time.Hour)))},
+			ttlHours:    24,
+			wantCached:  true,
+		},
+		{
+			name:        "case differences and brackets match",
+			searchTitle: "lia one piece 0482 1080p",
+			cached:      []*database.ImportQueueItem{cachedItem("/config/.nzbs/TV/[Lia] ONE PIECE - 0482 [1080P].nzb", "/storage/op", timePtr(now.Add(-1*time.Hour)))},
+			ttlHours:    24,
+			wantCached:  true,
+		},
+		{
+			name:        "sequel title does not match earlier movie (no false positive)",
+			searchTitle: "Scream 2 1997 1080p BluRay x264",
+			cached:      []*database.ImportQueueItem{cachedItem("/config/.nzbs/Movies/Scream 1996 1080p BluRay x264.nzb", "/storage/scream1", timePtr(now.Add(-1*time.Hour)))},
+			ttlHours:    24,
+			wantCached:  false,
+		},
+		{
+			name:        "different episode does not match (no false positive)",
+			searchTitle: "Show S01E10 1080p WEB-DL",
+			cached:      []*database.ImportQueueItem{cachedItem("/config/.nzbs/TV/Show S01E01 1080p WEB-DL.nzb", "/storage/s01e01", timePtr(now.Add(-1*time.Hour)))},
+			ttlHours:    24,
+			wantCached:  false,
+		},
+		{
+			name:        "different resolution does not match (no false positive)",
+			searchTitle: "Movie 2024 2160p UHD REMUX",
+			cached:      []*database.ImportQueueItem{cachedItem("/config/.nzbs/Movies/Movie 2024 1080p WEB-DL.nzb", "/storage/movie1080", timePtr(now.Add(-1*time.Hour)))},
+			ttlHours:    24,
+			wantCached:  false,
+		},
+		{
 			name:       "empty cache is not cached",
 			cached:     nil,
 			ttlHours:   24,
@@ -76,10 +113,14 @@ func TestBuildStremioStreamEntries_CacheDetection(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			results := []prowlarr.NZBResult{{Title: title, DownloadURL: "https://prowlarr/dl/1", Size: 1_500_000_000, Indexer: "IdxA"}}
+			sTitle := title
+			if tt.searchTitle != "" {
+				sTitle = tt.searchTitle
+			}
+			results := []prowlarr.NZBResult{{Title: sTitle, DownloadURL: "https://prowlarr/dl/1", Size: 1_500_000_000, Indexer: "IdxA"}}
 
 			entries := buildStremioStreamEntries(results, tt.cached, tt.ttlHours, now,
-				"https://host", "thekey", "movie", 0, 0, "tt123")
+				"https://host", "thekey", "movie", 0, 0, "tt123", config.ProwlarrConfig{})
 
 			if len(entries) != 1 {
 				t.Fatalf("expected 1 entry, got %d", len(entries))
@@ -120,7 +161,7 @@ func TestBuildStremioStreamEntries_CachedSortedFirstStable(t *testing.T) {
 	}
 
 	entries := buildStremioStreamEntries(results, cached, 24, now,
-		"https://host", "k", "movie", 0, 0, "tt1")
+		"https://host", "k", "movie", 0, 0, "tt123", config.ProwlarrConfig{})
 
 	if len(entries) != 4 {
 		t.Fatalf("expected 4 entries, got %d", len(entries))

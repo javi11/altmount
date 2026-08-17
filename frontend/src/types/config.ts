@@ -669,8 +669,13 @@ export interface ProwlarrConfig {
 	api_key: string;
 	categories: number[];
 	indexers?: number[];
+	preferred_indexers?: number[];
+	preferred_indexer_names?: string[];
 	languages: string[];
+	preferred_languages?: string[];
 	qualities: string[];
+	exclude_keywords?: string[];
+	custom_scores?: Record<string, number>;
 }
 
 // A single Prowlarr indexer returned by POST /api/prowlarr/indexers
@@ -681,13 +686,81 @@ export interface ProwlarrIndexer {
 	protocol: string;
 }
 
+// TRaSH Custom Format definition
+export interface TrashCustomFormat {
+	id: string;
+	name: string;
+	category: "source" | "hdr" | "audio" | "release_group" | "resolution" | "custom";
+	pattern: string;
+	patternType: "regex" | "token";
+	score: number;
+	enabled: boolean;
+	isCustom: boolean;
+	invert?: boolean;
+}
+
+export type ScoringPreset = "trash_recommended" | "remux_enthusiast" | "compatibility" | "custom";
+
+export interface StreamScoringConfig {
+	preset: ScoringPreset;
+	custom_formats: TrashCustomFormat[];
+	exclude_keywords: string[];
+	exclude_regex?: string;
+	preferred_languages: string[];
+	require_preferred_language: boolean;
+	size_limits?: {
+		resolution_4k?: { min_gb: number; max_gb: number };
+		resolution_1080p?: { min_gb: number; max_gb: number };
+	};
+}
+
+export interface NewsnabIndexerConfig {
+	id: string;
+	name: string;
+	url: string;
+	api_key: string;
+	api_key_set?: boolean;
+	categories?: number[];
+	weight: number;
+	timeout_seconds: number;
+	enabled: boolean;
+}
+
+export interface StremioIndexersConfig {
+	provider: "prowlarr" | "newsnab" | "both";
+	user_agent_mode?: "auto" | "custom";
+	custom_user_agent?: string;
+	prowlarr: ProwlarrConfig;
+	newsnab?: NewsnabIndexerConfig[];
+}
+
+export interface UserAgentInfo {
+	tv_user_agent: string;
+	movie_user_agent: string;
+	sonarr_version: string;
+	radarr_version: string;
+	last_updated: string;
+	source: string;
+}
+
 // Stremio integration configuration
 export interface StremioConfig {
 	enabled: boolean;
+	addon_name?: string;
+	addon_description?: string;
+	base_url?: string;
+	direct_stream?: boolean;
+	show_cached_indicator?: boolean;
+	fallback_timeout_ms?: number;
+	max_retries?: number;
+	stream_ttl_seconds?: number;
+	indexers?: StremioIndexersConfig;
+	scoring?: StreamScoringConfig;
 	nzb_ttl_hours: number;
 	failed_release_ttl_hours: number;
 	max_fallback_releases: number;
-	base_url?: string;
+	fast_fail_header_only?: boolean;
+	reuse_library_releases?: boolean;
 	prowlarr: ProwlarrConfig;
 }
 

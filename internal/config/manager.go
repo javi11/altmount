@@ -157,12 +157,69 @@ type ProwlarrConfig struct {
 	// Indexers optionally restricts searches to specific Prowlarr indexer IDs.
 	// Empty = search across all configured indexers.
 	Indexers []int `yaml:"indexers" mapstructure:"indexers" json:"indexers,omitempty"`
+	// PreferredIndexers lists Prowlarr indexer IDs to prioritize and rank above others.
+	PreferredIndexers []int `yaml:"preferred_indexers" mapstructure:"preferred_indexers" json:"preferred_indexers,omitempty"`
+	// PreferredIndexerNames lists Prowlarr indexer names/keywords to prioritize and rank above others.
+	PreferredIndexerNames []string `yaml:"preferred_indexer_names" mapstructure:"preferred_indexer_names" json:"preferred_indexer_names,omitempty"`
 	// Languages is an optional list of keywords; releases must contain at least one to pass.
 	// Empty = no filtering. Examples: ["Esp", "🇪🇸", "Spanish", "DUAL"]
 	Languages []string `yaml:"languages" mapstructure:"languages" json:"languages,omitempty"`
+	// PreferredLanguages lists language keywords to prioritize and rank above others.
+	PreferredLanguages []string `yaml:"preferred_languages" mapstructure:"preferred_languages" json:"preferred_languages,omitempty"`
 	// Qualities is an optional list of keywords; releases must contain at least one to pass.
 	// Empty = no filtering. Examples: ["1080p", "HD", "4K", "3D"]
 	Qualities []string `yaml:"qualities" mapstructure:"qualities" json:"qualities,omitempty"`
+	// ExcludeKeywords is an optional list of keywords/patterns; releases containing any are dropped.
+	// Examples: ["DV", "DoVi", "CAM", "TS", "TeleSync"]
+	ExcludeKeywords []string `yaml:"exclude_keywords" mapstructure:"exclude_keywords" json:"exclude_keywords,omitempty"`
+	// CustomScores maps keyword/regex patterns to numeric scores (TRaSH guide style).
+	// Positive scores promote releases; negative scores demote them.
+	// Examples: {"2160p": 500, "REMUX": 300, "DV": -1000}
+	CustomScores map[string]int `yaml:"custom_scores" mapstructure:"custom_scores" json:"custom_scores,omitempty"`
+}
+
+// NewsnabIndexerConfig holds configuration for a direct Newznab indexer.
+type NewsnabIndexerConfig struct {
+	ID             string `yaml:"id" mapstructure:"id" json:"id"`
+	Name           string `yaml:"name" mapstructure:"name" json:"name"`
+	URL            string `yaml:"url" mapstructure:"url" json:"url"`
+	APIKey         string `yaml:"api_key" mapstructure:"api_key" json:"api_key"`
+	Categories     []int  `yaml:"categories" mapstructure:"categories" json:"categories,omitempty"`
+	Weight         int    `yaml:"weight" mapstructure:"weight" json:"weight"`
+	TimeoutSeconds int    `yaml:"timeout_seconds" mapstructure:"timeout_seconds" json:"timeout_seconds"`
+	Enabled        bool   `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+}
+
+// StremioIndexersConfig configures search providers for the Stremio addon.
+type StremioIndexersConfig struct {
+	Provider        string                 `yaml:"provider" mapstructure:"provider" json:"provider"` // "prowlarr", "newsnab", "both"
+	UserAgentMode   string                 `yaml:"user_agent_mode" mapstructure:"user_agent_mode" json:"user_agent_mode,omitempty"`
+	CustomUserAgent string                 `yaml:"custom_user_agent" mapstructure:"custom_user_agent" json:"custom_user_agent,omitempty"`
+	Prowlarr        ProwlarrConfig         `yaml:"prowlarr" mapstructure:"prowlarr" json:"prowlarr"`
+	Newsnab         []NewsnabIndexerConfig `yaml:"newsnab" mapstructure:"newsnab" json:"newsnab,omitempty"`
+}
+
+// TrashCustomFormatConfig defines a format scoring rule in configuration.
+type TrashCustomFormatConfig struct {
+	ID          string `yaml:"id" mapstructure:"id" json:"id"`
+	Name        string `yaml:"name" mapstructure:"name" json:"name"`
+	Category    string `yaml:"category" mapstructure:"category" json:"category"`
+	Pattern     string `yaml:"pattern" mapstructure:"pattern" json:"pattern"`
+	PatternType string `yaml:"pattern_type" mapstructure:"pattern_type" json:"pattern_type"`
+	Score       int    `yaml:"score" mapstructure:"score" json:"score"`
+	Enabled     bool   `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	IsCustom    bool   `yaml:"is_custom" mapstructure:"is_custom" json:"is_custom"`
+	Invert      bool   `yaml:"invert,omitempty" mapstructure:"invert" json:"invert,omitempty"`
+}
+
+// StreamScoringConfig holds TRaSH scoring configuration.
+type StreamScoringConfig struct {
+	Preset                   string                    `yaml:"preset" mapstructure:"preset" json:"preset"`
+	CustomFormats            []TrashCustomFormatConfig `yaml:"custom_formats" mapstructure:"custom_formats" json:"custom_formats,omitempty"`
+	ExcludeKeywords          []string                  `yaml:"exclude_keywords" mapstructure:"exclude_keywords" json:"exclude_keywords,omitempty"`
+	ExcludeRegex             string                    `yaml:"exclude_regex,omitempty" mapstructure:"exclude_regex" json:"exclude_regex,omitempty"`
+	PreferredLanguages       []string                  `yaml:"preferred_languages" mapstructure:"preferred_languages" json:"preferred_languages,omitempty"`
+	RequirePreferredLanguage bool                      `yaml:"require_preferred_language" mapstructure:"require_preferred_language" json:"require_preferred_language"`
 }
 
 // StremioConfig configures the Stremio NZB stream endpoint (POST /api/nzb/streams).
@@ -170,6 +227,20 @@ type StremioConfig struct {
 	// Enabled controls whether the endpoint is active. Disabled by default.
 	// When false, the endpoint returns 404 Not Found.
 	Enabled *bool `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	// AddonName is the display name shown in Stremio's addon catalog.
+	AddonName string `yaml:"addon_name" mapstructure:"addon_name" json:"addon_name,omitempty"`
+	// AddonDescription is the description shown in Stremio's addon catalog.
+	AddonDescription string `yaml:"addon_description" mapstructure:"addon_description" json:"addon_description,omitempty"`
+	// DirectStream when true streams NZB media segments directly.
+	DirectStream *bool `yaml:"direct_stream" mapstructure:"direct_stream" json:"direct_stream,omitempty"`
+	// ShowCachedIndicator when true shows cached badges in stream titles.
+	ShowCachedIndicator *bool `yaml:"show_cached_indicator" mapstructure:"show_cached_indicator" json:"show_cached_indicator,omitempty"`
+	// FallbackTimeoutMs is the timeout before attempting a fallback release.
+	FallbackTimeoutMs int `yaml:"fallback_timeout_ms" mapstructure:"fallback_timeout_ms" json:"fallback_timeout_ms,omitempty"`
+	// MaxRetries is the maximum number of retry attempts for stream fetching.
+	MaxRetries int `yaml:"max_retries" mapstructure:"max_retries" json:"max_retries,omitempty"`
+	// StreamTTLSeconds is the stream cache expiration time in seconds.
+	StreamTTLSeconds int `yaml:"stream_ttl_seconds" mapstructure:"stream_ttl_seconds" json:"stream_ttl_seconds,omitempty"`
 	// NzbTTLHours controls how long a completed NZB result is cached before
 	// the same NZB is re-processed on the next request.
 	// Set to 0 to disable expiry (cache forever). Defaults to 24 hours.
@@ -183,11 +254,22 @@ type StremioConfig struct {
 	// MaxFallbackReleases caps how many *extra* releases a single play request may try
 	// after the first one fails. Set to 0 to disable fallback. Defaults to 2.
 	MaxFallbackReleases int `yaml:"max_fallback_releases" mapstructure:"max_fallback_releases" json:"max_fallback_releases"`
+	// FastFailHeaderOnly when true causes Stremio-originated imports to fail fast
+	// immediately on the release-level probe when missing articles are detected,
+	// skipping the multi-part RAR per-file Stat sweep. Defaults to true.
+	FastFailHeaderOnly *bool `yaml:"fast_fail_header_only" mapstructure:"fast_fail_header_only" json:"fast_fail_header_only"`
+	// ReuseLibraryReleases when true checks and reuses matching completed releases
+	// across the entire Altmount library (Sonarr, Radarr, SABnzbd, Stremio). Defaults to true.
+	ReuseLibraryReleases *bool `yaml:"reuse_library_releases" mapstructure:"reuse_library_releases" json:"reuse_library_releases,omitempty"`
 	// BaseURL is the public base URL used when building Stremio stream links
 	// (e.g. "https://altmount.example.com"). Falls back to the auto-detected
 	// request origin when not set.
 	BaseURL string `yaml:"base_url" mapstructure:"base_url" json:"base_url,omitempty"`
-	// Prowlarr configures the Prowlarr indexer used by the Stremio addon to search for NZBs.
+	// Indexers configures Prowlarr and direct Newsnab search providers.
+	Indexers StremioIndexersConfig `yaml:"indexers" mapstructure:"indexers" json:"indexers"`
+	// Scoring configures TRaSH format scoring and exclusions.
+	Scoring StreamScoringConfig `yaml:"scoring" mapstructure:"scoring" json:"scoring"`
+	// Prowlarr configures the legacy Prowlarr indexer settings (retained for compatibility).
 	Prowlarr ProwlarrConfig `yaml:"prowlarr" mapstructure:"prowlarr" json:"prowlarr"`
 }
 
@@ -204,6 +286,24 @@ func (s StremioConfig) EffectiveMaxFallbackReleases() int {
 		return maxStremioFallbackReleases
 	}
 	return s.MaxFallbackReleases
+}
+
+// EffectiveFastFailHeaderOnly reports whether Stremio imports should fast-fail
+// immediately on the release probe when missing articles are found. Defaults to true.
+func (s StremioConfig) EffectiveFastFailHeaderOnly() bool {
+	if s.FastFailHeaderOnly == nil {
+		return true
+	}
+	return *s.FastFailHeaderOnly
+}
+
+// EffectiveReuseLibraryReleases reports whether Stremio should check and reuse matching
+// completed releases across the entire Altmount library. Defaults to true.
+func (s StremioConfig) EffectiveReuseLibraryReleases() bool {
+	if s.ReuseLibraryReleases == nil {
+		return true
+	}
+	return *s.ReuseLibraryReleases
 }
 
 // AuthConfig represents authentication configuration
@@ -1391,21 +1491,21 @@ func (m *Manager) ReloadConfig() error {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	// Set the config file for viper
-	viper.SetConfigFile(m.configFile)
-
-	// Read the configuration file
-	if err := viper.ReadInConfig(); err != nil {
+	// Read configuration file directly with yaml.Unmarshal to preserve map keys with dots (e.g. regex patterns in custom_scores)
+	config := DefaultConfig()
+	data, err := os.ReadFile(m.configFile)
+	if err != nil {
 		return fmt.Errorf("error reading config file %s: %w", m.configFile, err)
 	}
 
-	warnUnknownConfigKeys()
-
-	// Create default config and unmarshal into it
-	config := DefaultConfig()
-	if err := viper.Unmarshal(config); err != nil {
-		return fmt.Errorf("error unmarshaling config: %w", err)
+	if err := yaml.Unmarshal(data, config); err != nil {
+		return fmt.Errorf("error unmarshaling config %s: %w", m.configFile, err)
 	}
+
+	// Keep viper in sync for any components that query viper
+	viper.SetConfigFile(m.configFile)
+	_ = viper.ReadInConfig()
+	warnUnknownConfigKeys()
 
 	// Ensure *bool pointers are not nil after unmarshal (viper may leave them nil if not set in YAML)
 	if config.Fuse.Enabled == nil {
@@ -1508,6 +1608,7 @@ func DefaultConfig(configDir ...string) *Config {
 	fuseEnabled := false
 	loginRequired := true           // Require login by default
 	stremioEnabled := false         // Stremio endpoint disabled by default
+	stremioFastFailHeaderOnly := true
 	prowlarrEnabled := false        // Prowlarr integration disabled by default
 	watchIntervalSeconds := 10      // Default watch interval
 	failedItemRetentionHours := 24  // Default: auto-remove failed items after 24 hours
@@ -1559,6 +1660,7 @@ func DefaultConfig(configDir ...string) *Config {
 			NzbTTLHours:           24,
 			FailedReleaseTTLHours: 24,
 			MaxFallbackReleases:   2,
+			FastFailHeaderOnly:    &stremioFastFailHeaderOnly,
 			Prowlarr: ProwlarrConfig{
 				Enabled:    &prowlarrEnabled,
 				Host:       "http://localhost:9696",
@@ -1833,7 +1935,7 @@ func warnUnknownConfigKeys() {
 	err := viper.Unmarshal(probe, func(dc *mapstructure.DecoderConfig) {
 		dc.ErrorUnused = true
 	})
-	if err != nil {
+	if err != nil && !strings.Contains(err.Error(), "custom_scores") {
 		slog.Warn("Configuration contains keys this version does not use; they have no effect and can be removed",
 			"detail", err)
 	}
@@ -1883,8 +1985,12 @@ func LoadConfig(configFile string) (*Config, error) {
 
 	warnUnknownConfigKeys()
 
-	// Unmarshal the config
-	if err := viper.Unmarshal(config); err != nil {
+	// Read and unmarshal YAML directly into config to preserve arbitrary map keys containing dots (e.g. custom_scores regexes)
+	if data, err := os.ReadFile(targetConfigFile); err == nil {
+		if err := yaml.Unmarshal(data, config); err != nil {
+			return nil, fmt.Errorf("error unmarshaling yaml config %s: %w", targetConfigFile, err)
+		}
+	} else if err := viper.Unmarshal(config); err != nil {
 		return nil, fmt.Errorf("error unmarshaling config: %w", err)
 	}
 

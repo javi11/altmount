@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/prowlarr"
 )
@@ -100,7 +101,7 @@ func TestFilterStremioResults_ExcludesFailed(t *testing.T) {
 				return tt.failedKey != "" && safeTitle == tt.failedKey
 			}
 
-			got := filterStremioResults(resultsFromTitles(tt.titles...), tt.languages, tt.qualities, isFailed)
+			got := filterStremioResults(resultsFromTitles(tt.titles...), tt.languages, tt.qualities, nil, isFailed)
 			if len(got) != len(tt.want) {
 				t.Fatalf("got %v; want %v", titlesOf(got), tt.want)
 			}
@@ -112,7 +113,7 @@ func TestFilterStremioResults_ExcludesFailed(t *testing.T) {
 }
 
 func TestFilterStremioResults_NilPredicate(t *testing.T) {
-	got := filterStremioResults(resultsFromTitles("Alpha 2024 1080p"), nil, nil, nil)
+	got := filterStremioResults(resultsFromTitles("Alpha 2024 1080p"), nil, nil, nil, nil)
 	if len(got) != 1 {
 		t.Fatalf("expected 1 result with nil predicate, got %d", len(got))
 	}
@@ -195,7 +196,7 @@ func TestOrderStremioResults_CachedFirstStable(t *testing.T) {
 		return ok
 	}
 
-	got := titlesOf(orderStremioResults(results, isCached))
+	got := titlesOf(orderStremioResults(results, isCached, config.ProwlarrConfig{}))
 	want := []string{"Bravo 2024", "Delta 2024", "Alpha 2024", "Charlie 2024"}
 	if !equalStrings(got, want) {
 		t.Errorf("got %v; want %v", got, want)
@@ -298,11 +299,11 @@ func TestStremioCandidatesMatchStreamEntries(t *testing.T) {
 	}
 
 	isCached := stremioCachedPredicate(cached, 24, now)
-	ordered := orderStremioResults(results, isCached)
+	ordered := orderStremioResults(results, isCached, config.ProwlarrConfig{})
 	cands := stremioCandidates(ordered, "tt1")
 
 	entries := buildStremioStreamEntries(results, cached, 24, now,
-		"https://host", "k", "movie", 0, 0, "tt1")
+		"https://host", "k", "movie", 0, 0, "tt1", config.ProwlarrConfig{})
 
 	if len(cands) != len(entries) {
 		t.Fatalf("candidates (%d) and entries (%d) differ in length", len(cands), len(entries))
@@ -318,5 +319,44 @@ func TestStremioCandidatesMatchStreamEntries(t *testing.T) {
 			t.Errorf("position %d: entry URL %q does not carry candidate key %q",
 				i, entries[i].URL, cands[i].SafeTitle)
 		}
+	}
+}
+
+func TestOrderStremioResults_CustomScoresAndExcludes(t *testing.T) {
+	results := resultsFromTitles(
+		"Movie.2024.1080p.WEB-DL.DV",
+		"Movie.2024.2160p.UHD.REMUX",
+		"Movie.2024.1080p.WEB-DL",
+		"Movie.2024.CAM",
+	)
+
+	prowlarrCfg := config.ProwlarrConfig{
+		ExcludeKeywords: []string{"CAM"},
+		CustomScores: map[string]int{
+			"REMUX": 500,
+			"1080p": 200,
+			"DV":    -1000,
+		},
+	}
+
+	filtered := filterStremioResults(results, nil, nil, prowlarrCfg.ExcludeKeywords, nil)
+	if len(filtered) != 3 {
+		t.Fatalf("expected 3 results after excluding CAM, got %d", len(filtered))
+	}
+
+	ordered := orderStremioResults(filtered, func(string) bool { return false }, prowlarrCfg)
+	titles := titlesOf(ordered)
+
+	// Expected rank:
+	// 1. Movie.2024.2160p.UHD.REMUX (REMUX score +500)
+	// 2. Movie.2024.1080p.WEB-DL (1080p score +200)
+	// 3. Movie.2024.1080p.WEB-DL.DV (1080p +200, DV -1000 = -800)
+	want := []string{
+		"Movie.2024.2160p.UHD.REMUX",
+		"Movie.2024.1080p.WEB-DL",
+		"Movie.2024.1080p.WEB-DL.DV",
+	}
+	if !equalStrings(titles, want) {
+		t.Errorf("got %v; want %v", titles, want)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -50,6 +51,7 @@ type NZBResult struct {
 	Size        int64
 	PublishDate time.Time
 	Indexer     string
+	IndexerID   int
 }
 
 // Indexer describes a single Prowlarr indexer, used to let users pick which
@@ -114,6 +116,27 @@ func MatchesLanguage(title string, keywords []string) bool {
 // keywords (case-insensitive). Returns true when keywords is empty (no filter).
 func MatchesQuality(title string, keywords []string) bool {
 	return matchesAnyKeyword(title, keywords)
+}
+
+// MatchesExcludeKeywords reports whether title contains any excluded keyword or pattern.
+func MatchesExcludeKeywords(title string, excludeKeywords []string) bool {
+	if len(excludeKeywords) == 0 {
+		return false
+	}
+	titleLower := strings.ToLower(title)
+	for _, kw := range excludeKeywords {
+		kw = strings.TrimSpace(kw)
+		if kw == "" {
+			continue
+		}
+		if strings.Contains(titleLower, strings.ToLower(kw)) {
+			return true
+		}
+		if re, err := regexp.Compile("(?i)" + kw); err == nil && re.MatchString(title) {
+			return true
+		}
+	}
+	return false
 }
 
 // InferLanguage detects the most likely language from a release title using common scene/group
@@ -300,6 +323,7 @@ func (c *Client) searchWithID(ctx context.Context, idField, idValue, searchType 
 			Size:        r.Size,
 			PublishDate: r.PublishDate,
 			Indexer:     r.Indexer,
+			IndexerID:   int(r.IndexerID),
 		})
 	}
 
