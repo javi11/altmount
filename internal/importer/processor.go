@@ -176,7 +176,7 @@ func (proc *Processor) checkCancellation(ctx context.Context) error {
 // round-trips. Returns (brokenFileIndexes, knownMissingSegmentIDs, error).
 // Both maps are nil when no pool is available.
 // Returns ErrNoFilesProcessed (wrapped) when all eligible regular files are broken.
-func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, cfg *config.Config, queueID int) (map[int]struct{}, map[string]struct{}, error) {
+func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, cfg *config.Config, queueID int, category *string, downloadID *string) (map[int]struct{}, map[string]struct{}, error) {
 	if !proc.poolManager.HasPool() {
 		return nil, nil, nil
 	}
@@ -233,6 +233,16 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 				"duration", time.Since(probeStart))
 		}
 		return nil, nil, nil
+	}
+
+	isStremioImport := (category != nil && *category == "stremio") || (downloadID != nil && strings.HasPrefix(*downloadID, "stremio:"))
+	if isStremioImport && cfg.Stremio.EffectiveFastFailHeaderOnly() {
+		if proc.log != nil {
+			proc.log.InfoContext(ctx, "Fast-fail release probe failed for Stremio import; aborting immediately without per-file sweep",
+				"files", len(fastFailFiles),
+				"probe_duration", time.Since(probeStart))
+		}
+		return nil, nil, multifile.ErrNoFilesProcessed
 	}
 
 	// Phase 2 (escalation): the probe found an unreachable segment, so map
@@ -443,7 +453,7 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 		proc.updateProgressWithStage(queueID, 0, "Checking segment availability")
 		var missingIDs map[string]struct{}
 		var fastFailErr error
-		brokenIdx, missingIDs, fastFailErr = proc.preParseFastFail(ctx, n, cfg, queueID)
+		brokenIdx, missingIDs, fastFailErr = proc.preParseFastFail(ctx, n, cfg, queueID, category, downloadID)
 		if fastFailErr != nil {
 			return "", nil, NewNonRetryableError("fast-fail segment check failed", fastFailErr)
 		}

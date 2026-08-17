@@ -687,6 +687,7 @@ export interface StremioConfig {
 	nzb_ttl_hours: number;
 	failed_release_ttl_hours: number;
 	max_fallback_releases: number;
+	fast_fail_header_only?: boolean;
 	base_url?: string;
 	prowlarr: ProwlarrConfig;
 }

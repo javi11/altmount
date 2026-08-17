@@ -183,6 +183,10 @@ type StremioConfig struct {
 	// MaxFallbackReleases caps how many *extra* releases a single play request may try
 	// after the first one fails. Set to 0 to disable fallback. Defaults to 2.
 	MaxFallbackReleases int `yaml:"max_fallback_releases" mapstructure:"max_fallback_releases" json:"max_fallback_releases"`
+	// FastFailHeaderOnly when true causes Stremio-originated imports to fail fast
+	// immediately on the release-level probe when missing articles are detected,
+	// skipping the multi-part RAR per-file Stat sweep. Defaults to true.
+	FastFailHeaderOnly *bool `yaml:"fast_fail_header_only" mapstructure:"fast_fail_header_only" json:"fast_fail_header_only"`
 	// BaseURL is the public base URL used when building Stremio stream links
 	// (e.g. "https://altmount.example.com"). Falls back to the auto-detected
 	// request origin when not set.
@@ -204,6 +208,15 @@ func (s StremioConfig) EffectiveMaxFallbackReleases() int {
 		return maxStremioFallbackReleases
 	}
 	return s.MaxFallbackReleases
+}
+
+// EffectiveFastFailHeaderOnly reports whether Stremio imports should fast-fail
+// immediately on the release probe when missing articles are found. Defaults to true.
+func (s StremioConfig) EffectiveFastFailHeaderOnly() bool {
+	if s.FastFailHeaderOnly == nil {
+		return true
+	}
+	return *s.FastFailHeaderOnly
 }
 
 // AuthConfig represents authentication configuration
@@ -1508,6 +1521,7 @@ func DefaultConfig(configDir ...string) *Config {
 	fuseEnabled := false
 	loginRequired := true           // Require login by default
 	stremioEnabled := false         // Stremio endpoint disabled by default
+	stremioFastFailHeaderOnly := true
 	prowlarrEnabled := false        // Prowlarr integration disabled by default
 	watchIntervalSeconds := 10      // Default watch interval
 	failedItemRetentionHours := 24  // Default: auto-remove failed items after 24 hours
@@ -1559,6 +1573,7 @@ func DefaultConfig(configDir ...string) *Config {
 			NzbTTLHours:           24,
 			FailedReleaseTTLHours: 24,
 			MaxFallbackReleases:   2,
+			FastFailHeaderOnly:    &stremioFastFailHeaderOnly,
 			Prowlarr: ProwlarrConfig{
 				Enabled:    &prowlarrEnabled,
 				Host:       "http://localhost:9696",
