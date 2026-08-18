@@ -2427,3 +2427,76 @@ func (r *HealthRepository) matchMetadata(dbMeta, webMeta *model.WebhookMetadata)
 	return false
 }
 
+// FindHealthyFilesForMovie returns healthy library files matching a movie by TMDB ID or title/year.
+func (r *HealthRepository) FindHealthyFilesForMovie(ctx context.Context, title string, year string, tmdbID int) ([]*FileHealth, error) {
+	var query string
+	var args []interface{}
+
+	if tmdbID > 0 {
+		query = fileHealthSelectColumns + " WHERE status = 'healthy' AND metadata LIKE ? ORDER BY id DESC LIMIT 50"
+		args = append(args, fmt.Sprintf(`%%"tmdbId":%d%%`, tmdbID))
+	} else if cleanTitle := strings.TrimSpace(title); cleanTitle != "" {
+		if year != "" {
+			query = fileHealthSelectColumns + " WHERE status = 'healthy' AND (file_path LIKE ? OR library_path LIKE ?) AND (file_path LIKE ? OR library_path LIKE ?) ORDER BY id DESC LIMIT 50"
+			args = append(args, "%"+cleanTitle+"%", "%"+cleanTitle+"%", "%"+year+"%", "%"+year+"%")
+		} else {
+			query = fileHealthSelectColumns + " WHERE status = 'healthy' AND (file_path LIKE ? OR library_path LIKE ?) ORDER BY id DESC LIMIT 50"
+			args = append(args, "%"+cleanTitle+"%", "%"+cleanTitle+"%")
+		}
+	} else {
+		return nil, nil
+	}
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []*FileHealth
+	for rows.Next() {
+		h, err := scanFileHealth(rows)
+		if err != nil {
+			return nil, err
+		}
+		if h != nil {
+			results = append(results, h)
+		}
+	}
+	return results, rows.Err()
+}
+
+// FindHealthyFilesForSeries returns healthy library files matching a TV series by TVDB ID or series title.
+func (r *HealthRepository) FindHealthyFilesForSeries(ctx context.Context, seriesTitle string, tvdbID int) ([]*FileHealth, error) {
+	var query string
+	var args []interface{}
+
+	if tvdbID > 0 {
+		query = fileHealthSelectColumns + " WHERE status = 'healthy' AND metadata LIKE ? ORDER BY id DESC LIMIT 100"
+		args = append(args, fmt.Sprintf(`%%"tvdbId":%d%%`, tvdbID))
+	} else if cleanTitle := strings.TrimSpace(seriesTitle); cleanTitle != "" {
+		query = fileHealthSelectColumns + " WHERE status = 'healthy' AND (file_path LIKE ? OR library_path LIKE ?) ORDER BY id DESC LIMIT 100"
+		args = append(args, "%"+cleanTitle+"%", "%"+cleanTitle+"%")
+	} else {
+		return nil, nil
+	}
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []*FileHealth
+	for rows.Next() {
+		h, err := scanFileHealth(rows)
+		if err != nil {
+			return nil, err
+		}
+		if h != nil {
+			results = append(results, h)
+		}
+	}
+	return results, rows.Err()
+}
+

@@ -209,6 +209,7 @@ type StremioAPIResponse struct {
 	// config would silently restore the defaults.
 	FailedReleaseTTLHours int                 `json:"failed_release_ttl_hours"`
 	MaxFallbackReleases   int                 `json:"max_fallback_releases"`
+	IncludeLibraryStreams *bool               `json:"include_library_streams,omitempty"`
 	BaseURL               string              `json:"base_url,omitempty"`
 	Prowlarr              ProwlarrAPIResponse `json:"prowlarr"`
 }
@@ -388,6 +389,7 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 		NzbTTLHours:           cfg.Stremio.NzbTTLHours,
 		FailedReleaseTTLHours: cfg.Stremio.FailedReleaseTTLHours,
 		MaxFallbackReleases:   cfg.Stremio.MaxFallbackReleases,
+		IncludeLibraryStreams: cfg.Stremio.IncludeLibraryStreams,
 		BaseURL:               cfg.Stremio.BaseURL,
 		Prowlarr: ProwlarrAPIResponse{
 			Enabled:    cfg.Stremio.Prowlarr.Enabled != nil && *cfg.Stremio.Prowlarr.Enabled,

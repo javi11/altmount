@@ -157,20 +157,66 @@ func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 		prowlarrType = "tvsearch"
 	}
 
-	slog.InfoContext(ctx, "Stremio addon stream request",
-		"type", streamType, "id", rawID, "imdb_id", imdbID)
-
 	baseURL := resolveBaseURL(c, cfg.Stremio.BaseURL)
+	var libraryStreams []fiber.Map
+
+	// 1. Check local Altmount library in file_health if library streams are enabled
+	if cfg.Stremio.EffectiveIncludeLibraryStreams() && s.healthRepo != nil {
+		selector := &stremioEpisodeSelector{Season: season, Episode: episode}
+		if streamType == "movie" {
+			tmdbID, movieTitle, movieYear, _ := resolveMovieMetadataFromIMDb(ctx, imdbID)
+			if healthyFiles, err := s.healthRepo.FindHealthyFilesForMovie(ctx, movieTitle, movieYear, tmdbID); err == nil {
+				for _, h := range healthyFiles {
+					if h != nil && h.FilePath != "" && isMediaExtension(filepath.Ext(h.FilePath)) {
+						streamURL := baseURL + "/api/files/stream?path=" +
+							url.QueryEscape(h.FilePath) + "&download_key=" + url.QueryEscape(key)
+						libraryStreams = append(libraryStreams, fiber.Map{
+							"name":  formatLibraryStreamName(h),
+							"title": formatLibraryStreamTitle(h),
+							"url":   streamURL,
+						})
+					}
+				}
+			}
+		} else if streamType == "series" {
+			tvdbIDStr, seriesTitle, _ := resolveSeriesMetadataFromIMDb(ctx, imdbID)
+			tvdbID, _ := strconv.Atoi(tvdbIDStr)
+			if healthyFiles, err := s.healthRepo.FindHealthyFilesForSeries(ctx, seriesTitle, tvdbID); err == nil {
+				for _, h := range healthyFiles {
+					if h != nil && h.FilePath != "" && isMediaExtension(filepath.Ext(h.FilePath)) {
+						matchPath := h.FilePath
+						if h.LibraryPath != nil && *h.LibraryPath != "" {
+							matchPath = *h.LibraryPath
+						}
+						if selector.matches(matchPath) || selector.matches(h.FilePath) {
+							streamURL := baseURL + "/api/files/stream?path=" +
+								url.QueryEscape(h.FilePath) + "&download_key=" + url.QueryEscape(key)
+							libraryStreams = append(libraryStreams, fiber.Map{
+								"name":  formatLibraryStreamName(h),
+								"title": formatLibraryStreamTitle(h),
+								"url":   streamURL,
+							})
+						}
+					}
+				}
+			}
+		}
+	}
+
+	slog.InfoContext(ctx, "Stremio addon stream request",
+		"type", streamType, "id", rawID, "imdb_id", imdbID, "library_matches", len(libraryStreams))
 
 	results, cachedItems, err := s.searchStremioReleases(ctx, cfg, streamType, prowlarrType, imdbID, season, episode)
-	if err != nil || len(results) == 0 {
+	if err != nil && len(libraryStreams) == 0 {
 		return emptyStreamsResponse(c)
 	}
 
 	entries := buildStremioStreamEntries(results, cachedItems, cfg.Stremio.NzbTTLHours, time.Now(),
 		baseURL, key, streamType, season, episode, imdbID)
 
-	streams := make([]fiber.Map, 0, len(entries))
+	streams := make([]fiber.Map, 0, len(libraryStreams)+len(entries))
+	streams = append(streams, libraryStreams...)
+
 	for _, e := range entries {
 		streams = append(streams, fiber.Map{
 			"name":  e.Name,
@@ -179,7 +225,47 @@ func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 		})
 	}
 
+	if len(streams) == 0 {
+		return emptyStreamsResponse(c)
+	}
+
 	return c.JSON(fiber.Map{"streams": streams})
+}
+
+func formatLibraryStreamTitle(h *database.FileHealth) string {
+	rawName := ""
+	if h.LibraryPath != nil && *h.LibraryPath != "" {
+		rawName = filepath.Base(*h.LibraryPath)
+	}
+	if rawName == "" || rawName == "." {
+		rawName = filepath.Base(h.FilePath)
+	}
+	rawName = strings.TrimSuffix(rawName, filepath.Ext(rawName))
+
+	return fmt.Sprintf("%s\n💾 Local Library • ⚡ Instant 0s Playback", rawName)
+}
+
+func formatLibraryStreamName(h *database.FileHealth) string {
+	name := filepath.Base(h.FilePath)
+	if h.LibraryPath != nil && *h.LibraryPath != "" {
+		name = filepath.Base(*h.LibraryPath)
+	}
+	nameLower := strings.ToLower(name)
+	res := ""
+	if strings.Contains(nameLower, "2160p") || strings.Contains(nameLower, "4k") || strings.Contains(nameLower, "uhd") {
+		res = "2160p"
+	} else if strings.Contains(nameLower, "1080p") || strings.Contains(nameLower, "fhd") {
+		res = "1080p"
+	} else if strings.Contains(nameLower, "720p") || strings.Contains(nameLower, "hd") {
+		res = "720p"
+	} else if strings.Contains(nameLower, "480p") || strings.Contains(nameLower, "sd") {
+		res = "480p"
+	}
+
+	if res != "" {
+		return fmt.Sprintf("⚡ AltMount Library\n%s", res)
+	}
+	return "⚡ AltMount Library"
 }
 
 // stremioPlayCandidate is one release a /play request may attempt. Candidates are

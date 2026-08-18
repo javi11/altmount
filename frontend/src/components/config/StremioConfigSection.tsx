@@ -113,6 +113,7 @@ export function StremioConfigSection({
 		nzb_ttl_hours: config.stremio?.nzb_ttl_hours ?? 24,
 		failed_release_ttl_hours: config.stremio?.failed_release_ttl_hours ?? 24,
 		max_fallback_releases: config.stremio?.max_fallback_releases ?? 2,
+		include_library_streams: config.stremio?.include_library_streams ?? true,
 		base_url: config.stremio?.base_url ?? "",
 		prowlarr: resolveProwlarr(config.stremio?.prowlarr),
 	});
@@ -128,6 +129,7 @@ export function StremioConfigSection({
 			nzb_ttl_hours: config.stremio?.nzb_ttl_hours ?? 24,
 			failed_release_ttl_hours: config.stremio?.failed_release_ttl_hours ?? 24,
 			max_fallback_releases: config.stremio?.max_fallback_releases ?? 2,
+			include_library_streams: config.stremio?.include_library_streams ?? true,
 			base_url: config.stremio?.base_url ?? "",
 			prowlarr: resolveProwlarr(config.stremio?.prowlarr),
 		});
@@ -141,6 +143,7 @@ export function StremioConfigSection({
 			updated.nzb_ttl_hours !== (orig?.nzb_ttl_hours ?? 24) ||
 			updated.failed_release_ttl_hours !== (orig?.failed_release_ttl_hours ?? 24) ||
 			updated.max_fallback_releases !== (orig?.max_fallback_releases ?? 2) ||
+			updated.include_library_streams !== (orig?.include_library_streams ?? true) ||
 			updated.base_url !== (orig?.base_url ?? "") ||
 			JSON.stringify(updated.prowlarr) !== JSON.stringify(orig?.prowlarr ?? DEFAULT_PROWLARR);
 		setHasChanges(changed);
@@ -245,6 +248,23 @@ export function StremioConfigSection({
 							checked={formData.enabled}
 							disabled={isReadOnly}
 							onChange={(e) => update({ enabled: e.target.checked })}
+						/>
+					</div>
+
+					<div className="flex min-w-0 items-start justify-between gap-4 rounded-box border border-base-300 bg-base-100 p-4">
+						<div className="min-w-0 flex-1">
+							<span className="font-semibold text-sm">Include Library Streams</span>
+							<p className="min-w-0 text-base-content/60 text-xs">
+								Presents matching completed files from your local library (Sonarr, Radarr, SABnzbd) as
+								instant 0s playback stream options in Stremio.
+							</p>
+						</div>
+						<input
+							type="checkbox"
+							className="toggle toggle-primary mt-1 shrink-0"
+							checked={formData.include_library_streams ?? true}
+							disabled={isReadOnly}
+							onChange={(e) => update({ include_library_streams: e.target.checked })}
 						/>
 					</div>
 
