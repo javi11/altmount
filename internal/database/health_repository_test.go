@@ -752,8 +752,20 @@ func TestHealthRepository_FindHealthyFilesForMovieAndSeries(t *testing.T) {
 	require.Len(t, movies, 1)
 	assert.Contains(t, movies[0].FilePath, "Sample.Movie.2026.2160p.UHD.BluRay.x265-GROUP")
 
-	// 3. Search Series by TVDB ID
+	// 3. Search Movie with non-matching TMDB ID (falls back to Title and Year)
+	movies, err = repo.FindHealthyFilesForMovie(ctx, "Sample Movie", "2026", 9999)
+	require.NoError(t, err)
+	require.Len(t, movies, 1)
+	assert.Contains(t, movies[0].FilePath, "Sample.Movie.2026.2160p.UHD.BluRay.x265-GROUP")
+
+	// 4. Search Series by TVDB ID
 	series, err := repo.FindHealthyFilesForSeries(ctx, "Sample Series", 2001)
+	require.NoError(t, err)
+	require.Len(t, series, 1)
+	assert.Contains(t, series[0].FilePath, "Sample.Series.S01E04")
+
+	// 5. Search Series with non-matching TVDB ID (falls back to Series Title)
+	series, err = repo.FindHealthyFilesForSeries(ctx, "Sample Series", 9999)
 	require.NoError(t, err)
 	require.Len(t, series, 1)
 	assert.Contains(t, series[0].FilePath, "Sample.Series.S01E04")
