@@ -122,8 +122,11 @@ func (sc *SearchCoordinator) Search(ctx context.Context, params SearchParams) ([
 				if params.TVDBID != "" {
 					pResults, err = sc.prowlarrClient.SearchByTVDB(searchCtx, params.TVDBID, "tvsearch", sc.config.ProwlarrCats, sc.config.ProwlarrIdxs, params.Season, params.Episode)
 				}
-				if len(pResults) == 0 {
+				if len(pResults) == 0 && params.IMDBID != "" {
 					pResults, err = sc.prowlarrClient.Search(searchCtx, params.IMDBID, "tvsearch", sc.config.ProwlarrCats, sc.config.ProwlarrIdxs, params.Season, params.Episode)
+				}
+				if len(pResults) == 0 && params.Title != "" {
+					pResults, err = sc.prowlarrClient.Search(searchCtx, params.Title, "tvsearch", sc.config.ProwlarrCats, sc.config.ProwlarrIdxs, params.Season, params.Episode)
 				}
 			}
 
@@ -158,6 +161,12 @@ func (sc *SearchCoordinator) Search(ctx context.Context, params SearchParams) ([
 					nResults, err = c.SearchMovie(searchCtx, params.IMDBID, nil, userAgent)
 				} else {
 					nResults, err = c.SearchTV(searchCtx, params.IMDBID, params.TVDBID, params.Title, params.Season, params.Episode, nil, userAgent)
+					// Fallback to title query if ID search yielded no results
+					if (err == nil && len(nResults) == 0) && params.Title != "" && (params.TVDBID != "" || params.IMDBID != "") {
+						if fallbackResults, fbErr := c.SearchTV(searchCtx, "", "", params.Title, params.Season, params.Episode, nil, userAgent); fbErr == nil && len(fallbackResults) > 0 {
+							nResults = append(nResults, fallbackResults...)
+						}
+					}
 				}
 
 				if err == nil && len(nResults) > 0 {
@@ -181,12 +190,23 @@ func (sc *SearchCoordinator) Search(ctx context.Context, params SearchParams) ([
 
 	wg.Wait()
 
-	// Deduplicate aggregated items by DownloadURL / Title
+	// Deduplicate aggregated items by DownloadURL / Title and validate against requested media
 	uniqueResults := make([]SearchResult, 0, len(aggregated))
 	seenURLs := make(map[string]struct{})
 	seenTitles := make(map[string]struct{})
 
 	for _, res := range aggregated {
+		// Validate series / movie release matches the requested media (1:1 Sonarr/Radarr/Prowlarr release validation)
+		if strings.EqualFold(params.Type, "series") {
+			if !MatchesSeries(res.Title, params.Title, params.Season, params.Episode, 0) {
+				continue
+			}
+		} else if strings.EqualFold(params.Type, "movie") {
+			if !MatchesMovie(res.Title, params.Title, 0) {
+				continue
+			}
+		}
+
 		if res.DownloadURL != "" {
 			if _, exists := seenURLs[res.DownloadURL]; exists {
 				continue

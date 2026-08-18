@@ -140,15 +140,21 @@ func (c *Client) SearchMovie(ctx context.Context, imdbID string, categories []in
 }
 
 // SearchTV searches for TV episode releases by IMDB ID, TVDB ID, title, season, and episode.
+// Follows Prowlarr/Sonarr parameter prioritization:
+// Priority 1: tvdbid
+// Priority 2: imdbid
+// Priority 3: q=title (fallback text query)
 func (c *Client) SearchTV(ctx context.Context, imdbID, tvdbID, title string, season, episode int, categories []int, userAgent string) ([]Result, error) {
 	params := url.Values{}
 	params.Set("t", "tvsearch")
-	if title != "" {
-		params.Set("q", title)
-	} else if cleanIMDB := strings.TrimPrefix(imdbID, "tt"); cleanIMDB != "" {
-		params.Set("imdbid", cleanIMDB)
-	} else if tvdbID != "" {
+	cleanIMDB := strings.TrimPrefix(imdbID, "tt")
+
+	if tvdbID != "" {
 		params.Set("tvdbid", tvdbID)
+	} else if cleanIMDB != "" {
+		params.Set("imdbid", cleanIMDB)
+	} else if title != "" {
+		params.Set("q", title)
 	}
 	if season > 0 {
 		params.Set("season", strconv.Itoa(season))
