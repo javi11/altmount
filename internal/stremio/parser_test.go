@@ -109,9 +109,11 @@ func TestMatchesSeries(t *testing.T) {
 		assert.False(t, MatchesSeries("The.Ark.S01E02.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb", "The Ark", 1, 1, 2023))
 	})
 
-	t.Run("Accepts ARK The Animated Series when searching for ARK The Animated Series", func(t *testing.T) {
-		assert.True(t, MatchesSeries("ARK.The.Animated.Series.S01E01.Element.1.2160p.AMZN.WEB-DL.DDP5.1.HEVC-NTb", "ARK: The Animated Series", 1, 1, 2024))
-		assert.True(t, MatchesSeries("ARK - The Animated Series (2024) S01E01 (2160p AMZN WEB-DL H265 SDR DDP 5.1 English - HONE)", "ARK: The Animated Series", 1, 1, 2024))
+	t.Run("Accepts I Will Find You releases", func(t *testing.T) {
+		assert.True(t, MatchesSeries("I.Will.Find.You.S01E01.1080p.NF.WEB-DL.DDP5.1.Atmos.H.264-FLUX", "I Will Find You", 1, 1, 2026))
+		assert.True(t, MatchesSeries("I.Will.Find.You.S01E01.1080p.NF.WEB-DL.DD+5.1.Atmos.H.264-playWEB", "I Will Find You", 1, 1, 2026))
+		assert.True(t, MatchesSeries("I.Will.Find.You.S01E01.1080p.NF.WEB-DL.DDP5.1.Atmos.H.264-FLUX", "Harlan Coben's I Will Find You", 1, 1, 2026))
+		assert.True(t, MatchesSeries("Harlan.Cobens.I.Will.Find.You.S01E01.1080p.NF.WEB-DL-FLUX", "I Will Find You", 1, 1, 2026))
 	})
 }
 

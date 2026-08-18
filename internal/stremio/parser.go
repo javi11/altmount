@@ -163,8 +163,12 @@ func MatchesSeries(releaseTitle, expectedTitle string, expectedSeason, expectedE
 	cleanExpected := CleanSeriesTitle(expectedTitle)
 	if cleanExpected != "" && parsed.CleanTitle != "" {
 		if parsed.CleanTitle != cleanExpected {
-			// Title mismatch (e.g. "arktheanimatedseries" vs "ark")
-			return false
+			// Support author/creator/franchise prefix aliases (e.g. "Harlan Coben's I Will Find You" vs "I Will Find You")
+			isPrefixAlias := (len(cleanExpected) > len(parsed.CleanTitle) && strings.HasSuffix(cleanExpected, parsed.CleanTitle)) ||
+				(len(parsed.CleanTitle) > len(cleanExpected) && strings.HasSuffix(parsed.CleanTitle, cleanExpected))
+			if !isPrefixAlias {
+				return false
+			}
 		}
 	}
 
