@@ -1,0 +1,96 @@
+name: Rclone Version Check
+
+on:
+  schedule:
+    # Weekly, Monday 09:00 UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  check-rclone-version:
+    name: Check for rclone updates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get current pinned version
+        id: current
+        run: |
+          version=$(grep -oP 'downloads\.rclone\.org/v\K[0-9.]+' docker/Dockerfile | head -1)
+          if [ -z "$version" ]; then
+            echo "Could not find pinned rclone version in docker/Dockerfile" >&2
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Get latest rclone release
+        id: latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          latest=$(gh api repos/rclone/rclone/releases/latest -q '.tag_name' | sed 's/^v//')
+          echo "version=${latest}" >> "$GITHUB_OUTPUT"
+
+      - name: Compare versions
+        id: compare
+        run: |
+          if [ "${{ steps.current.outputs.version }}" = "${{ steps.latest.outputs.version }}" ]; then
+            echo "up_to_date=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "up_to_date=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compute new checksums
+        if: steps.compare.outputs.up_to_date == 'false'
+        id: checksums
+        run: |
+          version="${{ steps.latest.outputs.version }}"
+          for arch in amd64 arm64 arm; do
+            url="https://downloads.rclone.org/v${version}/rclone-v${version}-linux-${arch}.zip"
+            echo "Downloading ${url}"
+            curl -sSfLO "${url}"
+            sha=$(sha256sum "rclone-v${version}-linux-${arch}.zip" | awk '{print $1}')
+            echo "sha_${arch}=${sha}" >> "$GITHUB_OUTPUT"
+          done
+
+      - name: Update Dockerfiles
+        if: steps.compare.outputs.up_to_date == 'false'
+        run: |
+          version="${{ steps.latest.outputs.version }}"
+          old_version="${{ steps.current.outputs.version }}"
+          sha_amd64="${{ steps.checksums.outputs.sha_amd64 }}"
+          sha_arm64="${{ steps.checksums.outputs.sha_arm64 }}"
+          sha_arm="${{ steps.checksums.outputs.sha_arm }}"
+
+          for f in docker/Dockerfile docker/Dockerfile.ci; do
+            sed -i "s/v${old_version}/v${version}/g" "$f"
+            # Replace each arch's checksum individually, matched by the ARCH assignment on the same line
+            sed -i "s/\(x86_64) ARCH=amd64; SHA256=\)[a-f0-9]\{64\}/\1${sha_amd64}/" "$f"
+            sed -i "s/\(aarch64) ARCH=arm64; SHA256=\)[a-f0-9]\{64\}/\1${sha_arm64}/" "$f"
+            sed -i "s/\(armv7l) ARCH=arm; SHA256=\)[a-f0-9]\{64\}/\1${sha_arm}/" "$f"
+          done
+
+      - name: Create Pull Request
+        if: steps.compare.outputs.up_to_date == 'false'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore(deps): bump rclone to v${{ steps.latest.outputs.version }}"
+          title: "chore(deps): bump rclone to v${{ steps.latest.outputs.version }}"
+          body: |
+            Bumps the pinned rclone version used in `docker/Dockerfile` and `docker/Dockerfile.ci`
+            from `v${{ steps.current.outputs.version }}` to `v${{ steps.latest.outputs.version }}`.
+
+            SHA256 checksums were recomputed for amd64, arm64, and arm from the official
+            [rclone downloads](https://downloads.rclone.org/v${{ steps.latest.outputs.version }}/) for this release.
+
+            Please review the [rclone changelog](https://github.com/rclone/rclone/releases/tag/v${{ steps.latest.outputs.version }})
+            before merging, since this project's `pkg/rclonecli` package relies on specific
+            rclone RC/VFS behavior.
+          branch: chore/bump-rclone-v${{ steps.latest.outputs.version }}
+          labels: dependencies
