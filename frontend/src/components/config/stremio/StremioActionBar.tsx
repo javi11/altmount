@@ -164,6 +164,10 @@ export function StremioActionBar({
 				{/* Manifest URL Input & Actions */}
 				<div className="mt-5 space-y-3">
 					<div className="font-semibold text-base-content/70 text-xs">Manifest URL</div>
+					<p className="text-base-content/50 text-xs">
+						This link embeds your private access key and grants anyone who has it access to your
+						library — treat it like a password and don't share it publicly.
+					</p>
 					<div className="flex min-w-0 flex-col gap-2 sm:flex-row">
 						<div className="relative min-w-0 flex-1">
 							<input

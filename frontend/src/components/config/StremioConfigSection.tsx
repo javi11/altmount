@@ -13,10 +13,7 @@ import { IndexersConfigCard } from "./stremio/IndexersConfigCard";
 import { ReleaseScoreSandbox } from "./stremio/ReleaseScoreSandbox";
 import { StreamRoutingCard } from "./stremio/StreamRoutingCard";
 import { StremioActionBar } from "./stremio/StremioActionBar";
-import {
-	getDefaultScoringConfig,
-	hydrateScoringFromProwlarr,
-} from "./stremio/scoringPresets";
+import { getDefaultScoringConfig, hydrateScoringFromProwlarr } from "./stremio/scoringPresets";
 import { TrashScoringCard } from "./stremio/TrashScoringCard";
 
 interface StremioConfigSectionProps {
@@ -154,12 +151,10 @@ export function StremioConfigSection({
 						"altmount_stremio_custom_formats",
 						JSON.stringify(formData.scoring.custom_formats),
 					);
-					localStorage.setItem(
-						"altmount_stremio_preset",
-						formData.scoring?.preset || "custom",
-					);
+					localStorage.setItem("altmount_stremio_preset", formData.scoring?.preset || "custom");
 				} catch {
-					// ignore
+					// Non-critical local cache (e.g. private browsing or quota exceeded);
+					// the authoritative copy is still persisted to the backend below.
 				}
 			}
 
@@ -216,7 +211,8 @@ export function StremioConfigSection({
 							Stremio Addon Integration
 						</h2>
 						<p className="text-base-content/60 text-xs">
-							Configure Stremio streaming endpoints, search indexers, TRaSH release scoring, and stream filters.
+							Configure Stremio streaming endpoints, search indexers, TRaSH release scoring, and
+							stream filters.
 						</p>
 					</div>
 				</div>
@@ -232,11 +228,7 @@ export function StremioConfigSection({
 			/>
 
 			{/* 2. Search Providers & Indexer Dispatch (Prowlarr + Direct Newsnab + User-Agents) */}
-			<IndexersConfigCard
-				config={formData}
-				onChange={updateFormData}
-				isReadOnly={isReadOnly}
-			/>
+			<IndexersConfigCard config={formData} onChange={updateFormData} isReadOnly={isReadOnly} />
 
 			{/* 3. Stream Delivery & Playback Pipeline */}
 			<StreamRoutingCard config={formData} onChange={updateFormData} isReadOnly={isReadOnly} />
@@ -275,7 +267,7 @@ export function StremioConfigSection({
 							<span className="relative inline-flex h-3 w-3 rounded-full bg-warning" />
 						</span>
 						<div>
-							<p className="font-bold text-sm text-base-content">Unsaved Stremio Changes</p>
+							<p className="font-bold text-base-content text-sm">Unsaved Stremio Changes</p>
 							<p className="text-base-content/60 text-xs">
 								You have uncommitted modifications to your Stremio or Indexer configuration.
 							</p>

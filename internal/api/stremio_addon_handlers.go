@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -384,7 +383,7 @@ func calculateStremioReleaseScore(r prowlarr.NZBResult, prowlarrCfg config.Prowl
 			}
 			if strings.Contains(titleLower, strings.ToLower(pattern)) {
 				score += val
-			} else if re, err := regexp.Compile("(?i)" + pattern); err == nil && re.MatchString(r.Title) {
+			} else if re, err := prowlarr.CompilePatternCached(pattern); err == nil && re.MatchString(r.Title) {
 				score += val
 			}
 		}
@@ -1431,10 +1430,27 @@ func (s *Server) handleRefreshStremioUserAgents(c *fiber.Ctx) error {
 
 	cfg := s.configManager.GetConfig()
 	if cfg != nil {
-		_ = mgr.CheckLocalARRs(ctx, cfg.Stremio.Indexers.Prowlarr.Host, cfg.Stremio.Indexers.Prowlarr.APIKey, "", "")
+		sonarrURL, sonarrKey := firstEnabledArrInstance(cfg.Arrs.SonarrInstances)
+		radarrURL, radarrKey := firstEnabledArrInstance(cfg.Arrs.RadarrInstances)
+		_ = mgr.CheckLocalARRs(ctx, sonarrURL, sonarrKey, radarrURL, radarrKey)
 	}
 
 	_ = mgr.FetchLatestFromGitHub(ctx)
 
 	return RespondSuccess(c, mgr.GetInfo())
+}
+
+// firstEnabledArrInstance returns the URL and API key of the first enabled
+// ARR instance in the list, or empty strings if none are enabled/configured.
+func firstEnabledArrInstance(instances []config.ArrsInstanceConfig) (url, apiKey string) {
+	for _, inst := range instances {
+		if inst.Enabled != nil && !*inst.Enabled {
+			continue
+		}
+		if inst.URL == "" || inst.APIKey == "" {
+			continue
+		}
+		return inst.URL, inst.APIKey
+	}
+	return "", ""
 }

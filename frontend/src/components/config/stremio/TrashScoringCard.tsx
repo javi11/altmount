@@ -128,15 +128,15 @@ export function TrashScoringCard({
 							onChange={(e) => handlePresetChange(e.target.value as ScoringPreset)}
 						>
 							<option value="trash_recommended">
-								🏆 TRaSH Recommended (High-Quality Remux & HDR Priority)
+								TRaSH Recommended (High-Quality Remux & HDR Priority)
 							</option>
 							<option value="remux_enthusiast">
-								💎 4K Remux Enthusiast (Disc ISO & Lossless Bitrate Focus)
+								4K Remux Enthusiast (Disc ISO & Lossless Bitrate Focus)
 							</option>
 							<option value="compatibility">
-								📱 Compatibility (Universal Direct Play / Low Bitrate WEB-DL)
+								Compatibility (Universal Direct Play / Low Bitrate WEB-DL)
 							</option>
-							<option value="custom">🛠️ Custom User-Defined Weights</option>
+							<option value="custom">Custom User-Defined Weights</option>
 						</select>
 					</div>
 					<p className="label text-base-content/50 text-xs">
@@ -158,7 +158,7 @@ export function TrashScoringCard({
 						<button
 							key={tab.id}
 							type="button"
-							className={`btn btn-xs rounded-lg whitespace-nowrap ${
+							className={`btn btn-xs whitespace-nowrap rounded-lg ${
 								activeCategory === tab.id
 									? "btn-primary shadow-sm"
 									: "btn-ghost text-base-content/70 hover:bg-base-300"
@@ -172,7 +172,7 @@ export function TrashScoringCard({
 
 				{/* Formats Table */}
 				<div className="overflow-x-auto rounded-xl border border-base-300 bg-base-100/80">
-					<table className="table table-sm">
+					<table className="table-sm table">
 						<thead>
 							<tr className="border-base-300 bg-base-200/50 text-[11px] uppercase tracking-wider">
 								<th className="w-10 text-center">Active</th>
@@ -217,7 +217,7 @@ export function TrashScoringCard({
 											</td>
 											<td className="whitespace-nowrap">
 												<span
-													className={`badge badge-xs uppercase font-medium whitespace-nowrap px-2 py-0.5 ${
+													className={`badge badge-xs whitespace-nowrap px-2 py-0.5 font-medium uppercase ${
 														CATEGORY_COLORS[format.category] || "badge-ghost"
 													}`}
 												>
@@ -226,12 +226,12 @@ export function TrashScoringCard({
 											</td>
 											<td className="whitespace-nowrap text-center">
 												{isDiscard ? (
-													<span className="badge badge-error badge-xs font-semibold whitespace-nowrap px-2 py-0.5">
+													<span className="badge badge-error badge-xs whitespace-nowrap px-2 py-0.5 font-semibold">
 														🚫 Discard
 													</span>
 												) : (
 													<span
-														className={`badge badge-xs font-bold font-mono whitespace-nowrap px-2 py-0.5 ${
+														className={`badge badge-xs whitespace-nowrap px-2 py-0.5 font-bold font-mono ${
 															format.score > 0
 																? "badge-success"
 																: format.score < 0
