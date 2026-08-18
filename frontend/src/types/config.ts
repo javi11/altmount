@@ -760,7 +760,6 @@ export interface StremioConfig {
 	failed_release_ttl_hours: number;
 	max_fallback_releases: number;
 	fast_fail_header_only?: boolean;
-	reuse_library_releases?: boolean;
 	prowlarr: ProwlarrConfig;
 }
 

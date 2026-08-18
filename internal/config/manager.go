@@ -258,9 +258,6 @@ type StremioConfig struct {
 	// immediately on the release-level probe when missing articles are detected,
 	// skipping the multi-part RAR per-file Stat sweep. Defaults to true.
 	FastFailHeaderOnly *bool `yaml:"fast_fail_header_only" mapstructure:"fast_fail_header_only" json:"fast_fail_header_only"`
-	// ReuseLibraryReleases when true checks and reuses matching completed releases
-	// across the entire Altmount library (Sonarr, Radarr, SABnzbd, Stremio). Defaults to true.
-	ReuseLibraryReleases *bool `yaml:"reuse_library_releases" mapstructure:"reuse_library_releases" json:"reuse_library_releases,omitempty"`
 	// BaseURL is the public base URL used when building Stremio stream links
 	// (e.g. "https://altmount.example.com"). Falls back to the auto-detected
 	// request origin when not set.
@@ -295,15 +292,6 @@ func (s StremioConfig) EffectiveFastFailHeaderOnly() bool {
 		return true
 	}
 	return *s.FastFailHeaderOnly
-}
-
-// EffectiveReuseLibraryReleases reports whether Stremio should check and reuse matching
-// completed releases across the entire Altmount library. Defaults to true.
-func (s StremioConfig) EffectiveReuseLibraryReleases() bool {
-	if s.ReuseLibraryReleases == nil {
-		return true
-	}
-	return *s.ReuseLibraryReleases
 }
 
 // AuthConfig represents authentication configuration
