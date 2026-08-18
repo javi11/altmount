@@ -27,15 +27,20 @@ type Manager struct {
 	rcloneDir     string
 	mounts        map[string]*MountInfo
 	mountsMutex   sync.RWMutex
+	mountMu       sync.Mutex
 	logger        *slog.Logger
 	ctx           context.Context
 	cancel        context.CancelFunc
-	httpClient     *http.Client
-	serverReady    chan struct{}
-	processExited  chan struct{}
-	serverStarted  bool
-	mu             sync.RWMutex
-	cfg            *config.Manager
+	httpClient    *http.Client
+	serverReady   chan struct{}
+	processExited chan struct{}
+	serverStarted bool
+	stopping      bool
+	restarting    bool
+	generation    uint64
+	lastStartErr  error
+	mu            sync.RWMutex
+	cfg           *config.Manager
 
 	// readyAt is stamped when the RC server first becomes ready (serverReady
 	// closed). Guarded by mu. Used to enforce a startup grace period before
@@ -52,6 +57,10 @@ type Manager struct {
 	// leak a second monitor goroutine.
 	monitorOnce sync.Once
 
+	// restartMu serializes rcd subprocess restarts so the health checker and
+	// mount recovery paths cannot race each other through restartServer.
+	restartMu sync.Mutex
+
 	// probe checks rcd liveness; defaults to pingServerWithTimeout. Injectable
 	// for testing the health-check decision logic without a live subprocess.
 	probe func(ctx context.Context, timeout time.Duration) bool
@@ -60,6 +69,18 @@ type Manager struct {
 	// Injectable so health-check tests can assert the restart decision without
 	// touching a real process.
 	restart func(ctx context.Context) error
+
+	// mountFn performs a single mount attempt; defaults to performMount.
+	// Injectable for testing the retry/cleanup logic without a live rcd.
+	mountFn func(ctx context.Context, provider, mountPath, webdavURL string) error
+
+	// forceUnmount force-unmounts a path via system commands; defaults to
+	// forceUnmountPath. Injectable for testing.
+	forceUnmount func(mountPath string) error
+
+	// retryDelay returns the sleep between mount retry attempts; defaults to a
+	// linear backoff (2s, 4s, 6s). Injectable for testing.
+	retryDelay func(attempt int) time.Duration
 }
 
 type MountInfo struct {
@@ -98,19 +119,24 @@ func NewManager(cfm *config.Manager) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	m := &Manager{
-		cfg:         cfm,
-		rcPort:      rcPort,
-		rcloneDir:   rcloneDir,
-		mounts:      make(map[string]*MountInfo),
-		logger:      logger,
-		ctx:         ctx,
-		cancel:      cancel,
+		cfg:           cfm,
+		rcPort:        rcPort,
+		rcloneDir:     rcloneDir,
+		mounts:        make(map[string]*MountInfo),
+		logger:        logger,
+		ctx:           ctx,
+		cancel:        cancel,
 		httpClient:    httpclient.New(httpclient.WithTimeout(0)),
 		serverReady:   make(chan struct{}),
 		processExited: make(chan struct{}),
 	}
 	m.probe = m.pingServerWithTimeout
 	m.restart = m.restartServer
+	m.mountFn = m.performMount
+	m.forceUnmount = m.forceUnmountPath
+	m.retryDelay = func(attempt int) time.Duration {
+		return time.Duration(attempt*2) * time.Second
+	}
 	return m
 }
 
@@ -121,6 +147,9 @@ func (m *Manager) Start(ctx context.Context) error {
 
 	if m.serverStarted {
 		return nil
+	}
+	if m.stopping {
+		return fmt.Errorf("rclone RC server is stopping")
 	}
 
 	cfg := m.cfg.GetConfig()
@@ -183,7 +212,13 @@ func (m *Manager) Start(ctx context.Context) error {
 
 	m.logger.InfoContext(ctx, "Starting rclone RC server", "args", args)
 
-	m.cmd = exec.CommandContext(ctx, "rclone", args...)
+	// Bind the subprocess to the Manager's own lifetime context rather than
+	// the caller's request context: rcd must keep running even if the context
+	// of the HTTP request that started (or restarted) it is cancelled.
+	m.cmd = exec.CommandContext(m.ctx, "rclone", args...)
+	m.lastStartErr = nil
+	m.generation++
+	generation := m.generation
 
 	// Capture output for debugging
 	var stdout, stderr bytes.Buffer
@@ -210,32 +245,60 @@ func (m *Manager) Start(ctx context.Context) error {
 			}
 		}()
 
-		m.waitForServer()
+		readyErr := m.waitForServer()
+		if readyErr != nil {
+			m.logger.ErrorContext(m.ctx, "Rclone RC server not responding - mount operations will be disabled", "err", readyErr)
+			if cmd.Process != nil {
+				_ = cmd.Process.Kill()
+			}
+		} else {
+			// Stamp readiness so the health check can enforce a startup grace
+			// period before it is allowed to kill+restart the rcd subprocess.
+			m.mu.Lock()
+			if m.generation == generation {
+				m.readyAt = time.Now()
+				select {
+				case <-serverReady:
+				default:
+					close(serverReady)
+				}
+			}
+			m.mu.Unlock()
 
-		// Stamp readiness so the health check can enforce a startup grace
-		// period before it is allowed to kill+restart the rcd subprocess.
-		m.mu.Lock()
-		m.readyAt = time.Now()
-		m.mu.Unlock()
-
-		close(serverReady)
-
-		// Start mount monitoring once server is ready. monitorOnce guarantees a
-		// single monitor for the Manager's lifetime, so a restart (which calls
-		// Start again) cannot spawn a duplicate monitor goroutine.
-		m.monitorOnce.Do(func() {
-			go func() {
-				defer func() {
-					if r := recover(); r != nil {
-						m.logger.ErrorContext(m.ctx, "Panic in mount monitor", "panic", r)
-					}
-				}()
-				m.MonitorMounts(ctx)
-			}()
-		})
+			if m.IsReady() {
+				// Start mount monitoring once server is ready. monitorOnce guarantees a
+				// single monitor for the Manager's lifetime, so a restart (which calls
+				// Start again) cannot spawn a duplicate monitor goroutine.
+				m.monitorOnce.Do(func() {
+					go func() {
+						defer func() {
+							if r := recover(); r != nil {
+								m.logger.ErrorContext(m.ctx, "Panic in mount monitor", "panic", r)
+							}
+						}()
+						m.MonitorMounts(m.ctx)
+					}()
+				})
+			}
+		}
 
 		// Wait for command to finish and log output
 		err := cmd.Wait()
+		if readyErr != nil {
+			// Publish the startup error only after the failed subprocess has been
+			// reaped, so a caller retry cannot race the old RC listener.
+			m.mu.Lock()
+			if m.generation == generation {
+				m.lastStartErr = readyErr
+				m.serverStarted = false
+				select {
+				case <-serverReady:
+				default:
+					close(serverReady)
+				}
+			}
+			m.mu.Unlock()
+		}
 		// Signal that the subprocess has exited so restartServer can proceed.
 		select {
 		case <-processExited:
@@ -270,12 +333,23 @@ func (m *Manager) Start(ctx context.Context) error {
 
 // Stop stops the rclone RC server and unmounts all mounts
 func (m *Manager) Stop() error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.restartMu.Lock()
+	defer m.restartMu.Unlock()
+	m.mountMu.Lock()
+	defer m.mountMu.Unlock()
 
+	m.mu.Lock()
 	if !m.serverStarted {
+		m.mu.Unlock()
 		return nil
 	}
+	m.stopping = true
+	m.mu.Unlock()
+	defer func() {
+		m.mu.Lock()
+		m.stopping = false
+		m.mu.Unlock()
+	}()
 
 	m.logger.InfoContext(m.ctx, "Stopping rclone RC server")
 
@@ -295,7 +369,9 @@ func (m *Manager) Stop() error {
 		wg.Add(1)
 		go func(mount *MountInfo) {
 			defer wg.Done()
-			if err := m.unmount(m.ctx, mount.Provider); err != nil {
+			// restartRCD is false: the rcd subprocess is terminated below,
+			// which reclaims all in-process VFS state.
+			if err := m.unmount(m.ctx, mount.Provider, false); err != nil {
 				m.logger.ErrorContext(m.ctx, "Failed to unmount during shutdown", "err", err, "provider", mount.Provider)
 			}
 		}(mount)
@@ -318,36 +394,34 @@ func (m *Manager) Stop() error {
 	// Cancel context and stop process
 	m.cancel()
 
-	if m.cmd != nil && m.cmd.Process != nil {
+	m.mu.RLock()
+	cmd := m.cmd
+	exited := m.processExited
+	m.mu.RUnlock()
+
+	if cmd != nil && cmd.Process != nil {
 		// Try graceful shutdown first
-		if err := m.cmd.Process.Signal(os.Interrupt); err != nil {
+		if err := cmd.Process.Signal(os.Interrupt); err != nil {
 			m.logger.WarnContext(m.ctx, "Failed to send interrupt signal, using kill", "err", err)
-			if killErr := m.cmd.Process.Kill(); killErr != nil {
+			if killErr := cmd.Process.Kill(); killErr != nil && !errors.Is(killErr, os.ErrProcessDone) {
 				m.logger.ErrorContext(m.ctx, "Failed to kill rclone process", "err", killErr)
 				return killErr
 			}
 		}
 
-		// Wait for process to exit with timeout
-		done := make(chan error, 1)
-		go func() {
-			done <- m.cmd.Wait()
-		}()
-
+		// The Start monitor owns cmd.Wait and closes processExited after the
+		// subprocess is reaped. Waiting on that channel avoids a double Wait.
 		select {
-		case err := <-done:
-			if err != nil && !errors.Is(err, context.Canceled) && !WasHardTerminated(err) {
-				m.logger.WarnContext(m.ctx, "Rclone process exited with error", "err", err)
-			}
+		case <-exited:
 		case <-time.After(10 * time.Second):
 			m.logger.WarnContext(m.ctx, "Timeout waiting for rclone to exit, force killing")
-			if err := m.cmd.Process.Kill(); err != nil {
+			if err := cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
 				m.logger.ErrorContext(m.ctx, "Failed to force kill rclone process", "err", err)
 				return err
 			}
-			// Wait a bit more for the kill to take effect
+			// Wait a bit more for the monitor goroutine to reap the process.
 			select {
-			case <-done:
+			case <-exited:
 				m.logger.InfoContext(m.ctx, "Rclone process killed successfully")
 			case <-time.After(5 * time.Second):
 				m.logger.ErrorContext(m.ctx, "Process may still be running after kill")
@@ -361,7 +435,9 @@ func (m *Manager) Stop() error {
 		m.cleanupMountDirectories(cfg.MountPath)
 	}
 
+	m.mu.Lock()
 	m.serverStarted = false
+	m.mu.Unlock()
 	m.logger.InfoContext(m.ctx, "Rclone RC server stopped")
 	return nil
 }
@@ -382,23 +458,25 @@ func (m *Manager) cleanupMountDirectories(_ string) {
 	}
 }
 
-// waitForServer waits for the RC server to become available
-func (m *Manager) waitForServer() {
+// waitForServer waits for the RC server to become available. It returns an
+// error when the server did not respond within the poll window so callers do
+// not proceed against a dead or unresponsive rcd subprocess.
+func (m *Manager) waitForServer() error {
 	maxAttempts := 30
 	for range maxAttempts {
 		if err := m.ctx.Err(); err != nil {
-			return
+			return err
 		}
 
 		if m.pingServer() {
 			m.logger.InfoContext(m.ctx, "Rclone RC server is ready")
-			return
+			return nil
 		}
 
 		time.Sleep(time.Second)
 	}
 
-	m.logger.ErrorContext(m.ctx, "Rclone RC server not responding - mount operations will be disabled")
+	return fmt.Errorf("rclone RC server not responding after %d attempts", maxAttempts)
 }
 
 // pingServer checks if the RC server is responding
@@ -470,8 +548,20 @@ func (m *Manager) makeRequest(req RCRequest, close bool) (*http.Response, error)
 
 // IsReady returns true if the RC server is ready
 func (m *Manager) IsReady() bool {
+	m.mu.RLock()
+	ready := m.serverReady
+	restarting := m.restarting
+	stopping := m.stopping
+	started := m.serverStarted
+	startErr := m.lastStartErr
+	m.mu.RUnlock()
+
+	if restarting || stopping || !started || startErr != nil {
+		return false
+	}
+
 	select {
-	case <-m.serverReady:
+	case <-ready:
 		return true
 	default:
 		return false
@@ -480,10 +570,23 @@ func (m *Manager) IsReady() bool {
 
 // WaitForReady waits for the RC server to be ready
 func (m *Manager) WaitForReady(timeout time.Duration) error {
+	m.mu.RLock()
+	ready := m.serverReady
+	m.mu.RUnlock()
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
 	select {
-	case <-m.serverReady:
+	case <-ready:
+		m.mu.RLock()
+		startErr := m.lastStartErr
+		m.mu.RUnlock()
+		if startErr != nil {
+			return startErr
+		}
 		return nil
-	case <-time.After(timeout):
+	case <-timer.C:
 		return fmt.Errorf("timeout waiting for rclone RC server to be ready")
 	case <-m.ctx.Done():
 		return m.ctx.Err()
@@ -552,7 +655,31 @@ func (m *Manager) waitForPortFree(ctx context.Context, timeout time.Duration) {
 // The mount map is preserved; callers are expected to re-establish mounts
 // against the fresh rcd via Mount(...).
 func (m *Manager) restartServer(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	m.mu.RLock()
+	requestedGeneration := m.generation
+	m.mu.RUnlock()
+
+	// Serialize restarts so the health checker and mount recovery cannot race
+	// each other through restartServer.
+	m.restartMu.Lock()
+	defer m.restartMu.Unlock()
+
 	m.mu.Lock()
+	if m.generation != requestedGeneration {
+		m.mu.Unlock()
+		return nil
+	}
+	m.restarting = true
+	defer func() {
+		m.mu.Lock()
+		m.restarting = false
+		m.mu.Unlock()
+	}()
+
 	cmd := m.cmd
 	exited := m.processExited
 	wasStarted := m.serverStarted
@@ -561,6 +688,9 @@ func (m *Manager) restartServer(ctx context.Context) error {
 	if !wasStarted || cmd == nil || cmd.Process == nil {
 		return fmt.Errorf("rcd subprocess not running, cannot restart")
 	}
+
+	restartCtx, cancel := context.WithTimeout(m.ctx, 45*time.Second)
+	defer cancel()
 
 	m.logger.WarnContext(ctx, "Killing wedged rcd subprocess", "pid", cmd.Process.Pid)
 	if err := cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
@@ -575,15 +705,15 @@ func (m *Manager) restartServer(ctx context.Context) error {
 	case <-exited:
 	case <-time.After(10 * time.Second):
 		m.logger.WarnContext(ctx, "Timed out waiting for rcd subprocess to exit; proceeding with restart")
-	case <-ctx.Done():
-		return ctx.Err()
+	case <-restartCtx.Done():
+		return restartCtx.Err()
 	}
 
 	// The killed process may not have released the RC listening socket the
 	// instant Wait returned. Give it a bounded window to free the port so the
 	// fresh rcd doesn't immediately fail to bind (the failure would otherwise
 	// only surface as a 30s "did not become ready" timeout).
-	m.waitForPortFree(ctx, 5*time.Second)
+	m.waitForPortFree(restartCtx, 5*time.Second)
 
 	// Reset lifecycle state so Start() will spawn a new subprocess.
 	m.mu.Lock()
@@ -591,12 +721,16 @@ func (m *Manager) restartServer(ctx context.Context) error {
 	m.cmd = nil
 	m.serverReady = make(chan struct{})
 	m.processExited = make(chan struct{})
+	m.lastStartErr = nil
 	m.mu.Unlock()
 
-	if err := m.Start(ctx); err != nil {
+	if err := m.Start(restartCtx); err != nil {
 		return fmt.Errorf("failed to restart rcd: %w", err)
 	}
 
+	// Start's readiness goroutine closes serverReady before this wait returns.
+	// WaitForReady must not reject that healthy generation merely because the
+	// restart operation has not reached its final bookkeeping yet.
 	if err := m.WaitForReady(30 * time.Second); err != nil {
 		m.logger.ErrorContext(ctx, "Respawned rcd never answered core/version; see preceding rclone RC server exit logs for the cause (e.g. port still in use or stale mountpoint)",
 			"rc_port", m.rcPort)

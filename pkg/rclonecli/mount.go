@@ -41,8 +41,8 @@ func (m *Mount) Mount(ctx context.Context) error {
 	m.logger.InfoContext(ctx, "Creating mount via RC", "provider", m.Provider, "webdav_url", m.WebDAVURL, "mount_path", m.LocalPath)
 
 	if err := m.rcManager.Mount(ctx, m.Provider, m.LocalPath, m.WebDAVURL); err != nil {
-		m.logger.ErrorContext(ctx, "Mount operation failed", "provider", m.Provider)
-		return fmt.Errorf("mount failed for %s", m.Provider)
+		m.logger.ErrorContext(ctx, "Mount operation failed", "provider", m.Provider, "err", err)
+		return fmt.Errorf("mount failed for %s: %w", m.Provider, err)
 	}
 
 	m.logger.InfoContext(ctx, "Successfully mounted WebDAV via RC", "provider", m.Provider, "path", m.LocalPath)
