@@ -167,7 +167,7 @@ func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 			tmdbID, movieTitle, movieYear, _ := resolveMovieMetadataFromIMDb(ctx, imdbID)
 			if healthyFiles, err := s.healthRepo.FindHealthyFilesForMovie(ctx, movieTitle, movieYear, tmdbID); err == nil {
 				for _, h := range healthyFiles {
-					if h != nil && h.FilePath != "" && isMediaExtension(filepath.Ext(h.FilePath)) {
+					if h != nil && h.FilePath != "" && isMediaExtension(filepath.Ext(h.FilePath)) && !isSampleFile(h.FilePath) {
 						streamURL := baseURL + "/api/files/stream?path=" +
 							url.QueryEscape(h.FilePath) + "&download_key=" + url.QueryEscape(key)
 						libraryStreams = append(libraryStreams, fiber.Map{
@@ -183,7 +183,7 @@ func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 			tvdbID, _ := strconv.Atoi(tvdbIDStr)
 			if healthyFiles, err := s.healthRepo.FindHealthyFilesForSeries(ctx, seriesTitle, tvdbID); err == nil {
 				for _, h := range healthyFiles {
-					if h != nil && h.FilePath != "" && isMediaExtension(filepath.Ext(h.FilePath)) {
+					if h != nil && h.FilePath != "" && isMediaExtension(filepath.Ext(h.FilePath)) && !isSampleFile(h.FilePath) {
 						matchPath := h.FilePath
 						if h.LibraryPath != nil && *h.LibraryPath != "" {
 							matchPath = *h.LibraryPath
@@ -266,6 +266,15 @@ func formatLibraryStreamName(h *database.FileHealth) string {
 		return fmt.Sprintf("⚡ AltMount Library\n%s", res)
 	}
 	return "⚡ AltMount Library"
+}
+
+func isSampleFile(path string) bool {
+	lower := strings.ToLower(path)
+	if strings.Contains(lower, "/sample/") || strings.Contains(lower, "\\sample\\") {
+		return true
+	}
+	base := strings.ToLower(filepath.Base(path))
+	return strings.Contains(base, "sample.") || strings.HasPrefix(base, "sample") || strings.HasSuffix(base, "-sample") || strings.HasSuffix(base, "_sample")
 }
 
 // stremioPlayCandidate is one release a /play request may attempt. Candidates are
