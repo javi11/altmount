@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 )
 
 // SliceCheck is one input slice's checksums from an IFSC packet. Checksums
@@ -45,48 +46,64 @@ func ParseIndex(streams []io.Reader) (*Index, error) {
 	}
 	var mainSeen bool
 
+	// A PAR2 set is routinely served from usenet, where individual recovery
+	// volumes may be unreachable. An unreadable stream contributes nothing but
+	// must not abort the parse: the remaining volumes still carry usable
+	// recovery slices, and dropping them turns a repairable release into a
+	// lost one. Only a set with no Main packet at all is fatal (checked below).
+	var streamErrs []string
 	for fi, stream := range streams {
 		cr := &countingReader{r: stream}
 		pr := NewPacketReader(cr)
+		// Labelled so a failure inside the type switch abandons this stream
+		// rather than only the switch — continuing would read the next header
+		// at a corrupted offset.
+	packets:
 		for {
 			header, err := pr.ReadHeader()
 			if err == io.EOF {
-				break
+				break packets
 			}
 			if err != nil {
 				if errIsUnexpectedEOF(err) {
-					break
+					break packets
 				}
-				return nil, fmt.Errorf("par2 index: stream %d: %w", fi, err)
+				streamErrs = append(streamErrs, fmt.Sprintf("stream %d: %v", fi, err))
+				break packets
 			}
 			bodyLen := int64(header.Length) - PacketHeaderSize
 
 			switch header.Type {
 			case PacketTypePARMain:
 				if err := parseMainBody(pr.r, bodyLen, idx); err != nil {
-					return nil, fmt.Errorf("par2 index: stream %d: %w", fi, err)
+					streamErrs = append(streamErrs, fmt.Sprintf("stream %d: %v", fi, err))
+					break
 				}
 				mainSeen = true
 
 			case PacketTypeFileDesc:
 				desc, err := pr.ReadFileDescriptor(header)
 				if err != nil {
-					return nil, fmt.Errorf("par2 index: stream %d: %w", fi, err)
+					streamErrs = append(streamErrs, fmt.Sprintf("stream %d: %v", fi, err))
+					break packets
 				}
 				idx.Files[desc.FileID] = *desc
 
 			case PacketTypeIFSC:
 				if err := parseIFSCBody(pr.r, bodyLen, idx); err != nil {
-					return nil, fmt.Errorf("par2 index: stream %d: %w", fi, err)
+					streamErrs = append(streamErrs, fmt.Sprintf("stream %d: %v", fi, err))
+					break packets
 				}
 
 			case PacketTypeRecoverySlice:
 				if bodyLen < 4 {
-					return nil, fmt.Errorf("par2 index: stream %d: RecvSlic body too small: %d", fi, bodyLen)
+					streamErrs = append(streamErrs, fmt.Sprintf("stream %d: RecvSlic body too small: %d", fi, bodyLen))
+					break packets
 				}
 				var exponent uint32
 				if err := binary.Read(pr.r, binary.LittleEndian, &exponent); err != nil {
-					return nil, fmt.Errorf("par2 index: stream %d: read RecvSlic exponent: %w", fi, err)
+					streamErrs = append(streamErrs, fmt.Sprintf("stream %d: read RecvSlic exponent: %v", fi, err))
+					break packets
 				}
 				idx.Recovery = append(idx.Recovery, RecoverySliceRef{
 					Exponent:   exponent,
@@ -94,18 +111,23 @@ func ParseIndex(streams []io.Reader) (*Index, error) {
 					BodyOffset: cr.n,
 				})
 				if err := cr.skip(bodyLen - 4); err != nil {
-					return nil, fmt.Errorf("par2 index: stream %d: skip RecvSlic payload: %w", fi, err)
+					streamErrs = append(streamErrs, fmt.Sprintf("stream %d: skip RecvSlic payload: %v", fi, err))
+					break packets
 				}
 
 			default:
 				if err := pr.SkipPacketBody(header); err != nil {
-					return nil, fmt.Errorf("par2 index: stream %d: %w", fi, err)
+					streamErrs = append(streamErrs, fmt.Sprintf("stream %d: %v", fi, err))
+					break packets
 				}
 			}
 		}
 	}
 
 	if !mainSeen {
+		if len(streamErrs) > 0 {
+			return nil, fmt.Errorf("par2 index: no Main packet found (%s)", strings.Join(streamErrs, "; "))
+		}
 		return nil, fmt.Errorf("par2 index: no Main packet found")
 	}
 	if err := validateIndex(idx); err != nil {

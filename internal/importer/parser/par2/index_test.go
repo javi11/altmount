@@ -2,6 +2,7 @@ package par2_test
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"testing"
 
@@ -103,3 +104,44 @@ func TestParseIndexErrors(t *testing.T) {
 		t.Fatal("want error for missing Main packet")
 	}
 }
+
+// A PAR2 set whose volumes are partly unreachable must still yield the
+// recovery slices that ARE reachable. Failing on the first dead volume throws
+// away usable recovery data and turns a repairable release into a lost one.
+func TestParseIndexToleratesUnreadableVolumes(t *testing.T) {
+	content := bytes.Repeat([]byte{0x5C}, 4096)
+	set := par2gen.BuildFull(1024, []par2gen.FileEntry{{Name: "a.bin", Content: content}}, 4)
+
+	streams := []io.Reader{bytes.NewReader(set.Index)}
+	for i, v := range set.Volumes {
+		if i == 0 {
+			// First recovery volume is unreachable (dead article).
+			streams = append(streams, errReader{err: errors.New("nntp: 430 no such article")})
+			continue
+		}
+		streams = append(streams, bytes.NewReader(v))
+	}
+
+	idx, err := par2.ParseIndex(streams)
+	if err != nil {
+		t.Fatalf("ParseIndex must tolerate an unreadable volume: %v", err)
+	}
+	if len(idx.Recovery) != 3 {
+		t.Fatalf("recovery slices = %d, want 3 (the reachable ones)", len(idx.Recovery))
+	}
+	if idx.SliceSize != 1024 {
+		t.Fatalf("SliceSize = %d", idx.SliceSize)
+	}
+}
+
+// An unreadable INDEX file (no Main packet anywhere) is still fatal: without
+// it there is no slice size or recovery-set membership to plan from.
+func TestParseIndexFailsWhenIndexUnreadable(t *testing.T) {
+	if _, err := par2.ParseIndex([]io.Reader{errReader{err: errors.New("nntp: 430 no such article")}}); err == nil {
+		t.Fatal("want error when no stream yields a Main packet")
+	}
+}
+
+type errReader struct{ err error }
+
+func (e errReader) Read([]byte) (int, error) { return 0, e.err }
