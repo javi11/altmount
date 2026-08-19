@@ -80,7 +80,10 @@ Extended package: `internal/importer/parser/par2` (IFSC + RecvSlic packet parsin
 ### repair.Planner (pure logic)
 
 Inputs: file metadata (`known_holes`, segment maps, `Par2Files`), NzbStore, parsed PAR2
-index. Output: a repair plan —
+index, and the trigger's failing article (if any). Note `known_holes` is only populated
+for hole-eligible (plain video) files — for RAR/AES/nested files the enqueue event must
+carry the failing segment/article, and the planner confirms the missing set by STAT-probing
+candidate articles across providers before committing to a plan. Output: a repair plan —
 
 - global slice indices missing (dead articles mapped through volume byte offsets),
 - articles covering each missing slice and the slice↔article byte mapping,
