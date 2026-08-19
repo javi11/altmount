@@ -212,7 +212,9 @@ export interface FileHealth {
 	metadata?: string;
 }
 
-export type Par2RepairStatus = "pending" | "running" | "repaired" | "unrepairable";
+// Only active jobs exist: finished repairs are translated to the file's
+// health record (or the import queue entry) and their rows deleted.
+export type Par2RepairStatus = "pending" | "running";
 
 export interface Par2RepairJob {
 	id: number;

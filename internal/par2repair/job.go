@@ -8,6 +8,7 @@ import (
 	"hash/crc32"
 	"log/slog"
 	"slices"
+	"sort"
 
 	"github.com/javi11/nntppool/v4"
 
@@ -15,10 +16,16 @@ import (
 )
 
 // ArticleFetcher fetches one decoded article payload. Implementations must be
-// safe for sequential reuse; the job calls it from a single goroutine.
+// safe for concurrent use; the job keeps several fetches in flight.
 type ArticleFetcher interface {
 	Fetch(ctx context.Context, messageID string) ([]byte, error)
 }
+
+// fetchAhead bounds how many article fetches a job keeps in flight (and how
+// many fetched-but-unconsumed payloads it buffers, so memory stays at
+// fetchAhead x article size). Fetches also pass through the pool's import
+// connection budget, which is the real global throttle.
+const fetchAhead = 8
 
 // SweepDeadArticleError reports an article that was live at planning time but
 // vanished during the sweep. Transient at the job level (a retry can replan),
@@ -113,29 +120,75 @@ func RunJob(
 	}
 
 	// Resolve recovery payloads, swapping in spares for dead par2 articles.
+	// Refs are visited in (file, offset) order so their backing articles
+	// stream through a bounded prefetch window instead of piling up on the
+	// heap; on a spill plan the payloads themselves land in a disk arena.
 	refs := slices.Clone(plan.Recovery)
 	spares := slices.Clone(plan.SpareRecovery)
-	par2Cache := map[string][]byte{}
-	payloads := make([][]byte, k)
-	for i := 0; i < k; {
-		ref := refs[i]
-		data, err := readRange(ctx, fetch, par2Files[ref.FileIndex], ref.BodyOffset, sliceSize, par2Cache)
-		if err != nil {
-			if errors.Is(err, nntppool.ErrArticleNotFound) {
-				if len(spares) == 0 {
-					return fmt.Errorf("%w: recovery slice exponent %d is unreachable and no spares remain", ErrUnrepairable, ref.Exponent)
-				}
-				log.WarnContext(ctx, "recovery slice unreachable, swapping in spare",
-					"exponent", ref.Exponent, "spare_exponent", spares[0].Exponent)
-				refs[i] = spares[0]
-				spares = spares[1:]
-				continue
-			}
-			return fmt.Errorf("par2repair: fetch recovery slice exponent %d: %w", ref.Exponent, err)
+	par2Cache := newArticleCache(resolveCacheCap)
+
+	scratch := store.ScratchDir()
+	var payloadArena *arena
+	persist := func(data []byte) ([]byte, error) {
+		if payloadArena == nil {
+			return data, nil
 		}
-		payloads[i] = data
-		i++
+		buf, err := payloadArena.alloc(len(data))
+		if err != nil {
+			return nil, err
+		}
+		copy(buf, data)
+		return buf, nil
 	}
+	if plan.SpillToDisk {
+		// Every chosen slice plus every spare that could ever be swapped in.
+		a, err := newArena(scratch, int64(len(refs)+len(spares))*sliceSize)
+		if err != nil {
+			return err
+		}
+		payloadArena = a
+		defer func() { _ = payloadArena.Close() }()
+	}
+
+	order := make([]int, k)
+	for i := range order {
+		order[i] = i
+	}
+	sort.Slice(order, func(x, y int) bool {
+		a, b := refs[order[x]], refs[order[y]]
+		if a.FileIndex != b.FileIndex {
+			return a.FileIndex < b.FileIndex
+		}
+		return a.BodyOffset < b.BodyOffset
+	})
+
+	payloads := make([][]byte, k)
+	feed := newArticleFeed(ctx, fetch, recoveryArticleIDs(par2Files, refs, order, sliceSize))
+	defer feed.stop()
+	for _, i := range order {
+		for {
+			ref := refs[i]
+			data, err := readRangeFrom(feed.get, par2Files[ref.FileIndex], ref.BodyOffset, sliceSize)
+			if err != nil {
+				if errors.Is(err, nntppool.ErrArticleNotFound) {
+					if len(spares) == 0 {
+						return fmt.Errorf("%w: recovery slice exponent %d is unreachable and no spares remain", ErrUnrepairable, ref.Exponent)
+					}
+					log.WarnContext(ctx, "recovery slice unreachable, swapping in spare",
+						"exponent", ref.Exponent, "spare_exponent", spares[0].Exponent)
+					refs[i] = spares[0]
+					spares = spares[1:]
+					continue
+				}
+				return fmt.Errorf("par2repair: fetch recovery slice exponent %d: %w", ref.Exponent, err)
+			}
+			if payloads[i], err = persist(data); err != nil {
+				return err
+			}
+			break
+		}
+	}
+	feed.stop()
 
 	totalArticles := 0
 	for _, f := range plan.Files {
@@ -148,12 +201,35 @@ func RunJob(
 	// cost of a fresh sweep.
 	missing := slices.Clone(plan.Missing)
 	corruptReplans := 0
+	// On a spill plan each attempt gets a fresh disk arena for its
+	// accumulators and recovered slices (fresh file pages arrive zeroed, so a
+	// re-sweep never sees a stale accumulator).
+	var attemptArena *arena
+	defer func() {
+		if attemptArena != nil {
+			_ = attemptArena.Close()
+		}
+	}()
 	for {
+		if attemptArena != nil {
+			_ = attemptArena.Close()
+			attemptArena = nil
+		}
+		alloc := heapAlloc
+		if plan.SpillToDisk {
+			a, err := newArena(scratch, 2*int64(len(missing))*sliceSize)
+			if err != nil {
+				return err
+			}
+			attemptArena = a
+			alloc = attemptArena.alloc
+		}
+
 		exps := make([]uint32, len(refs))
 		for i, r := range refs {
 			exps[i] = r.Exponent
 		}
-		solver, err := NewSolver(missing, exps, plan.SliceSize)
+		solver, err := NewSolverAlloc(missing, exps, plan.SliceSize, alloc)
 		if err != nil {
 			return err
 		}
@@ -194,6 +270,9 @@ func RunJob(
 			if ferr != nil {
 				return fmt.Errorf("%w: spare recovery slice unreachable: %v", ErrUnrepairable, ferr)
 			}
+			if data, ferr = persist(data); ferr != nil {
+				return ferr
+			}
 			payloads = append(payloads, data)
 			continue
 		}
@@ -211,6 +290,9 @@ func RunJob(
 			data, ferr := readRange(ctx, fetch, par2Files[refs[swap].FileIndex], refs[swap].BodyOffset, sliceSize, par2Cache)
 			if ferr != nil {
 				return fmt.Errorf("%w: spare recovery slice unreachable: %v", ErrUnrepairable, ferr)
+			}
+			if data, ferr = persist(data); ferr != nil {
+				return ferr
 			}
 			payloads[swap] = data
 			continue
@@ -281,8 +363,10 @@ func sweep(
 			return nil
 		}
 
+		slots, stop := prefetchArticles(ctx, fetch, f.Articles)
 		for _, a := range f.Articles {
 			if err := ctx.Err(); err != nil {
+				stop()
 				return err
 			}
 			if onArticle != nil {
@@ -292,28 +376,39 @@ func sweep(
 				// Zero-advance: the affected slices are in the missing set and
 				// will be skipped by completeSlice.
 				if err := feed(make([]byte, a.Size)); err != nil {
+					stop()
 					return err
 				}
 				continue
 			}
-			data, err := fetch.Fetch(ctx, a.MessageID)
-			if err != nil {
-				if errors.Is(err, nntppool.ErrArticleNotFound) {
+			slot, ok := <-slots
+			if !ok {
+				// The prefetcher only closes early when the context ended.
+				stop()
+				return ctx.Err()
+			}
+			res := <-slot
+			if res.err != nil {
+				stop()
+				if errors.Is(res.err, nntppool.ErrArticleNotFound) {
 					// An article that died between planning and sweeping needs
 					// a replan: surface a typed error so the service persists
 					// the discovery and the retry's plan includes it in the
 					// missing set.
-					return &SweepDeadArticleError{MessageID: a.MessageID, Err: err}
+					return &SweepDeadArticleError{MessageID: a.MessageID, Err: res.err}
 				}
-				return fmt.Errorf("par2repair: fetch article %s: %w", a.MessageID, err)
+				return fmt.Errorf("par2repair: fetch article %s: %w", a.MessageID, res.err)
 			}
-			if int64(len(data)) != a.Size {
-				return fmt.Errorf("%w: article %s decoded to %d bytes, expected %d", ErrUnrepairable, a.MessageID, len(data), a.Size)
+			if int64(len(res.data)) != a.Size {
+				stop()
+				return fmt.Errorf("%w: article %s decoded to %d bytes, expected %d", ErrUnrepairable, a.MessageID, len(res.data), a.Size)
 			}
-			if err := feed(data); err != nil {
+			if err := feed(res.data); err != nil {
+				stop()
 				return err
 			}
 		}
+		stop()
 		// Final partial slice: buf is already zero-padded past fill.
 		if fill > 0 {
 			if err := completeSlice(); err != nil {
@@ -323,6 +418,147 @@ func sweep(
 		log.DebugContext(ctx, "swept recovery-set file", "file_index", fi, "slices", local)
 	}
 	return nil
+}
+
+// recoveryArticleIDs lists, in consumption order, every distinct article
+// backing the recovery slices refs, visited in the given order.
+func recoveryArticleIDs(par2Files []SetFile, refs []par2.RecoverySliceRef, order []int, sliceSize int64) []string {
+	seen := map[string]bool{}
+	var ids []string
+	for _, i := range order {
+		ref := refs[i]
+		f := par2Files[ref.FileIndex]
+		var artStart int64
+		for _, a := range f.Articles {
+			artEnd := artStart + a.Size
+			if artEnd > ref.BodyOffset && artStart < ref.BodyOffset+sliceSize && !seen[a.MessageID] {
+				seen[a.MessageID] = true
+				ids = append(ids, a.MessageID)
+			}
+			artStart = artEnd
+			if artStart >= ref.BodyOffset+sliceSize {
+				break
+			}
+		}
+	}
+	return ids
+}
+
+// feedRetain bounds how many consumed articles a feed keeps cached: enough
+// for payloads straddling article boundaries and adjacent refs sharing a
+// boundary article, without growing with the recovery set.
+const feedRetain = 8
+
+// articleFeed streams a known-in-advance article sequence through the bounded
+// prefetch pipeline. get serves prefetched payloads for upcoming sequence ids
+// and falls back to a direct fetch for ids outside the sequence (spare
+// recovery slices swapped in after planning). Not safe for concurrent use.
+type articleFeed struct {
+	ctx    context.Context
+	fetch  ArticleFetcher
+	ids    []string
+	posOf  map[string]int
+	next   int
+	have   map[string][]byte
+	order  []string
+	slots  <-chan chan fetchResult
+	cancel func()
+}
+
+func newArticleFeed(ctx context.Context, fetch ArticleFetcher, ids []string) *articleFeed {
+	arts := make([]Article, len(ids))
+	posOf := make(map[string]int, len(ids))
+	for i, id := range ids {
+		arts[i] = Article{MessageID: id}
+		posOf[id] = i
+	}
+	slots, cancel := prefetchArticles(ctx, fetch, arts)
+	return &articleFeed{
+		ctx: ctx, fetch: fetch, ids: ids, posOf: posOf,
+		have: map[string][]byte{}, slots: slots, cancel: cancel,
+	}
+}
+
+// get returns one article's payload, popping the prefetch pipeline forward to
+// the article's position in the sequence.
+func (f *articleFeed) get(id string) ([]byte, error) {
+	if data, ok := f.have[id]; ok {
+		return data, nil
+	}
+	pos, ok := f.posOf[id]
+	if !ok || pos < f.next {
+		// Outside the planned sequence (a spare swap) or already evicted.
+		return f.fetch.Fetch(f.ctx, id)
+	}
+	for f.next <= pos {
+		slot, ok := <-f.slots
+		if !ok {
+			// The prefetcher only closes early when the context ended.
+			if err := f.ctx.Err(); err != nil {
+				return nil, err
+			}
+			return nil, fmt.Errorf("par2repair: article feed exhausted before %s", id)
+		}
+		res := <-slot
+		cur := f.ids[f.next]
+		f.next++
+		if res.err != nil {
+			if cur == id {
+				return nil, res.err
+			}
+			continue // an id the caller ended up not needing (spare swap)
+		}
+		f.retain(cur, res.data)
+	}
+	return f.have[id], nil
+}
+
+func (f *articleFeed) retain(id string, data []byte) {
+	f.have[id] = data
+	f.order = append(f.order, id)
+	for len(f.order) > feedRetain {
+		delete(f.have, f.order[0])
+		f.order = f.order[1:]
+	}
+}
+
+// stop cancels outstanding prefetches. Idempotent.
+func (f *articleFeed) stop() { f.cancel() }
+
+// fetchResult is one prefetched article payload (or its fetch error).
+type fetchResult struct {
+	data []byte
+	err  error
+}
+
+// prefetchArticles pipelines fetches of the live articles in arts, preserving
+// order: the returned channel yields one single-use result channel per live
+// article, in article order. At most fetchAhead fetches are in flight or
+// buffered at once, so memory stays bounded while the network stays busy.
+// stop cancels outstanding fetches; callers must call it once done (early
+// return or normal completion).
+func prefetchArticles(ctx context.Context, fetch ArticleFetcher, arts []Article) (slots <-chan chan fetchResult, stop func()) {
+	pctx, cancel := context.WithCancel(ctx)
+	out := make(chan chan fetchResult, fetchAhead)
+	go func() {
+		defer close(out)
+		for _, a := range arts {
+			if a.Dead {
+				continue
+			}
+			slot := make(chan fetchResult, 1)
+			go func(id string) {
+				data, err := fetch.Fetch(pctx, id)
+				slot <- fetchResult{data: data, err: err}
+			}(a.MessageID)
+			select {
+			case out <- slot:
+			case <-pctx.Done():
+				return
+			}
+		}
+	}()
+	return out, cancel
 }
 
 // verifyRecovered checks every recovered slice against its IFSC MD5.
@@ -387,20 +623,23 @@ func fileForSlice(startSlice []int64, global int) int {
 
 // readRange reads [off, off+n) from a file's concatenated article payloads,
 // fetching only the overlapping articles (with a per-job cache).
-func readRange(ctx context.Context, fetch ArticleFetcher, f SetFile, off, n int64, cache map[string][]byte) ([]byte, error) {
+func readRange(ctx context.Context, fetch ArticleFetcher, f SetFile, off, n int64, cache *articleCache) ([]byte, error) {
+	return readRangeFrom(func(id string) ([]byte, error) {
+		return fetchCached(ctx, fetch, id, cache)
+	}, f, off, n)
+}
+
+// readRangeFrom reads [off, off+n) of a file's concatenated article payloads
+// through get (typically an articleFeed).
+func readRangeFrom(get func(string) ([]byte, error), f SetFile, off, n int64) ([]byte, error) {
 	out := make([]byte, n)
 	var artStart int64
 	for _, a := range f.Articles {
 		artEnd := artStart + a.Size
 		if artEnd > off && artStart < off+n {
-			data, ok := cache[a.MessageID]
-			if !ok {
-				var err error
-				data, err = fetch.Fetch(ctx, a.MessageID)
-				if err != nil {
-					return nil, err
-				}
-				cache[a.MessageID] = data
+			data, err := get(a.MessageID)
+			if err != nil {
+				return nil, err
 			}
 			from := max(off, artStart)
 			to := min(off+n, artEnd)

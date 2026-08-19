@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -72,14 +73,14 @@ func TestServiceEnqueueDisabledNoOps(t *testing.T) {
 
 func TestServiceRunNextOutcomes(t *testing.T) {
 	tests := []struct {
-		name       string
-		execErr    error
-		wantStatus database.Par2RepairStatus
+		name     string
+		execErr  error
+		wantGone bool
 	}{
-		{"success marks repaired", nil, database.Par2RepairStatusRepaired},
-		{"unrepairable is terminal", fmt.Errorf("%w: nope", ErrUnrepairable), database.Par2RepairStatusUnrepairable},
-		{"nothing-to-repair is terminal", ErrNothingToRepair, database.Par2RepairStatusUnrepairable},
-		{"transient schedules retry", errors.New("nntp timeout"), database.Par2RepairStatusPending},
+		{"success deletes the job", nil, true},
+		{"unrepairable deletes the job", fmt.Errorf("%w: nope", ErrUnrepairable), true},
+		{"nothing-to-repair deletes the job", ErrNothingToRepair, true},
+		{"transient schedules retry", errors.New("nntp timeout"), false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -92,59 +93,54 @@ func TestServiceRunNextOutcomes(t *testing.T) {
 				t.Fatal("runNext found no job")
 			}
 
-			// Terminal states leave nothing claimable; retry is claimable later.
-			job, err := repo.ClaimNext(context.Background(), time.Now().UTC().Add(48*time.Hour))
+			// Terminal outcomes translate to health/queue and delete the row;
+			// only a retrying job remains.
+			rows, err := repo.List(context.Background(), 10)
 			if err != nil {
 				t.Fatal(err)
 			}
-			claimable := job != nil
-			if tt.wantStatus == database.Par2RepairStatusPending && !claimable {
-				t.Fatal("transient failure must be claimable after backoff")
+			if tt.wantGone && len(rows) != 0 {
+				t.Fatalf("rows = %+v, want none after a terminal outcome", rows)
 			}
-			if tt.wantStatus != database.Par2RepairStatusPending && claimable {
-				t.Fatalf("terminal outcome %q must not be claimable, got job %+v", tt.wantStatus, job)
-			}
-			if claimable && job.Attempts != 1 {
-				t.Fatalf("attempts = %d, want 1", job.Attempts)
+			if !tt.wantGone {
+				if len(rows) != 1 || rows[0].Attempts != 1 {
+					t.Fatalf("rows = %+v, want one retrying job with attempts=1", rows)
+				}
+				job, err := repo.ClaimNext(context.Background(), time.Now().UTC().Add(48*time.Hour))
+				if err != nil || job == nil {
+					t.Fatalf("transient failure must be claimable after backoff, err=%v", err)
+				}
 			}
 		})
 	}
 }
 
-func TestServiceAttemptsExhaustedBecomesUnrepairable(t *testing.T) {
+func TestServiceAttemptsExhaustedTranslatesToHealthAndDeletes(t *testing.T) {
 	repo := newTestRepo(t)
 	s := testService(t, repo, true)
-	s.execute = func(context.Context, *database.Par2RepairJob) error { return errors.New("always fails") }
+	healthStore := &recordingHealth{}
+	s.SetHealthStore(healthStore)
 
 	s.Enqueue(context.Background(), "/a.mkv", "")
-	for range maxJobAttempts {
-		if !s.runNext(context.Background()) {
-			// job not yet due: fake due time by claiming far in the future
-			job, err := repo.ClaimNext(context.Background(), time.Now().UTC().Add(100*time.Hour))
-			if err != nil || job == nil {
-				t.Fatalf("expected claimable job, err=%v", err)
-			}
-			if err := s.execute(context.Background(), job); err == nil {
-				t.Fatal("stub must fail")
-			}
-			// re-run bookkeeping through runNext is complex here; instead
-			// mark retry manually mirroring the service's arithmetic.
-			if job.Attempts+1 >= maxJobAttempts {
-				if err := repo.MarkUnrepairable(context.Background(), job.ID, "attempts exhausted"); err != nil {
-					t.Fatal(err)
-				}
-			} else if err := repo.MarkRetry(context.Background(), job.ID, "always fails", time.Now().UTC()); err != nil {
-				t.Fatal(err)
-			}
+	for i := range maxJobAttempts {
+		job, err := repo.ClaimNext(context.Background(), time.Now().UTC().Add(1000*time.Hour))
+		if err != nil || job == nil {
+			t.Fatalf("attempt %d: expected claimable job, err=%v", i, err)
 		}
+		s.handleOutcome(context.Background(), job, errors.New("always fails"))
 	}
-	// After maxJobAttempts failures the job must be terminal.
-	job, err := repo.ClaimNext(context.Background(), time.Now().UTC().Add(1000*time.Hour))
+
+	rows, err := repo.List(context.Background(), 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if job != nil {
-		t.Fatalf("job still claimable after %d attempts: %+v", maxJobAttempts, job)
+	if len(rows) != 0 {
+		t.Fatalf("rows = %+v, want none after attempts exhausted", rows)
+	}
+	if len(healthStore.calls) != 1 ||
+		healthStore.calls[0].status != database.HealthStatusCorrupted ||
+		!strings.Contains(healthStore.calls[0].lastError, "attempts exhausted") {
+		t.Fatalf("health calls = %+v, want one corrupted record carrying the reason", healthStore.calls)
 	}
 }
 
@@ -166,19 +162,24 @@ func (m *recordingMeta) UpdateFileStatus(p string, s metapb.FileStatus) error {
 	return nil
 }
 
-// recordingHealth is a HealthStore fake that records UpdateFileHealth calls.
-type recordingHealth struct {
-	calls []struct {
-		path   string
-		status database.HealthStatus
-	}
+// healthCall is one recorded UpdateFileHealth invocation.
+type healthCall struct {
+	path      string
+	status    database.HealthStatus
+	lastError string
 }
 
-func (h *recordingHealth) UpdateFileHealth(_ context.Context, filePath string, status database.HealthStatus, _ *string, _ *string, _ *string, _ bool) error {
-	h.calls = append(h.calls, struct {
-		path   string
-		status database.HealthStatus
-	}{filePath, status})
+// recordingHealth is a HealthStore fake that records UpdateFileHealth calls.
+type recordingHealth struct {
+	calls []healthCall
+}
+
+func (h *recordingHealth) UpdateFileHealth(_ context.Context, filePath string, status database.HealthStatus, errorMessage *string, _ *string, _ *string, _ bool) error {
+	call := healthCall{path: filePath, status: status}
+	if errorMessage != nil {
+		call.lastError = *errorMessage
+	}
+	h.calls = append(h.calls, call)
 	return nil
 }
 
@@ -208,36 +209,61 @@ func TestServiceSuccessFlipsMetadataAndHealth(t *testing.T) {
 	}
 }
 
-func TestServiceFailureDoesNotFlipStatus(t *testing.T) {
-	tests := []struct {
-		name    string
-		execErr error
-	}{
-		{"unrepairable", fmt.Errorf("%w: nope", ErrUnrepairable)},
-		{"transient", errors.New("nntp timeout")},
+func TestServiceTransientFailureDoesNotFlipStatus(t *testing.T) {
+	repo := newTestRepo(t)
+	s := testService(t, repo, true)
+	meta := &recordingMeta{}
+	healthStore := &recordingHealth{}
+	s.meta = meta
+	s.SetHealthStore(healthStore)
+	s.execute = func(context.Context, *database.Par2RepairJob) error { return errors.New("nntp timeout") }
+
+	s.Enqueue(context.Background(), "/movies/a.mkv", "")
+	if !s.runNext(context.Background()) {
+		t.Fatal("runNext found no job")
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			repo := newTestRepo(t)
-			s := testService(t, repo, true)
-			meta := &recordingMeta{}
-			healthStore := &recordingHealth{}
-			s.meta = meta
-			s.SetHealthStore(healthStore)
-			s.execute = func(context.Context, *database.Par2RepairJob) error { return tt.execErr }
 
-			s.Enqueue(context.Background(), "/movies/a.mkv", "")
-			if !s.runNext(context.Background()) {
-				t.Fatal("runNext found no job")
-			}
+	if len(meta.statusCalls) != 0 {
+		t.Fatalf("metadata status calls = %+v, want none on transient failure", meta.statusCalls)
+	}
+	if len(healthStore.calls) != 0 {
+		t.Fatalf("health calls = %+v, want none on transient failure", healthStore.calls)
+	}
+}
 
-			if len(meta.statusCalls) != 0 {
-				t.Fatalf("metadata status calls = %+v, want none on failure", meta.statusCalls)
-			}
-			if len(healthStore.calls) != 0 {
-				t.Fatalf("health calls = %+v, want none on failure", healthStore.calls)
-			}
-		})
+// An unrepairable verdict must survive the job row's deletion: it lands on
+// the file's health record, which is where the user sees why.
+func TestServiceUnrepairableTranslatesToHealth(t *testing.T) {
+	repo := newTestRepo(t)
+	s := testService(t, repo, true)
+	meta := &recordingMeta{}
+	healthStore := &recordingHealth{}
+	s.meta = meta
+	s.SetHealthStore(healthStore)
+	s.execute = func(context.Context, *database.Par2RepairJob) error {
+		return fmt.Errorf("%w: damage ratio 0.8810 exceeds max_repair_ratio 0.0500", ErrUnrepairable)
+	}
+
+	s.Enqueue(context.Background(), "/movies/a.mkv", "")
+	if !s.runNext(context.Background()) {
+		t.Fatal("runNext found no job")
+	}
+
+	if len(meta.statusCalls) != 0 {
+		t.Fatalf("metadata status calls = %+v, want none on failure", meta.statusCalls)
+	}
+	if len(healthStore.calls) != 1 ||
+		healthStore.calls[0].path != "/movies/a.mkv" ||
+		healthStore.calls[0].status != database.HealthStatusCorrupted ||
+		!strings.Contains(healthStore.calls[0].lastError, "damage ratio") {
+		t.Fatalf("health calls = %+v, want one corrupted record carrying the reason", healthStore.calls)
+	}
+	rows, err := repo.List(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("rows = %+v, want none: the verdict lives on the health record", rows)
 	}
 }
 

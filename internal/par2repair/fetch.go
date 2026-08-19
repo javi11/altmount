@@ -2,7 +2,9 @@ package par2repair
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/javi11/nntppool/v4"
 )
@@ -31,6 +33,58 @@ type PoolFetcher struct {
 // (typically wrapping pool.Manager.GetPool). budget may be nil.
 func NewPoolFetcher(getClient func() (BodyClient, error), budget ConnBudget) *PoolFetcher {
 	return &PoolFetcher{getClient: getClient, budget: budget}
+}
+
+// ArticleStater is an optional ArticleFetcher capability: bulk article
+// existence checks without downloading bodies. Resolvers use it to learn the
+// release's full damage before planning, so unrepairable verdicts land in
+// seconds instead of after downloading the recovery set.
+type ArticleStater interface {
+	// StatIDs reports which of ids are confirmed missing on every provider.
+	// Transient failures must NOT be reported missing. A nil map with a nil
+	// error means the capability is unavailable and the caller should proceed
+	// without liveness data.
+	StatIDs(ctx context.Context, ids []string) (missing map[string]bool, err error)
+}
+
+// statManyClient is the stat surface PoolFetcher probes its pool client for
+// (satisfied by *nntppool.Client and pool.NntpClient implementations).
+type statManyClient interface {
+	StatMany(ctx context.Context, messageIDs []string, opts nntppool.StatManyOptions) <-chan nntppool.StatManyResult
+}
+
+// statPerItemBudget bounds a liveness sweep: STATs are single-line round
+// trips dispatched dozens-at-a-time, so even a generous per-item share keeps
+// the overall deadline in seconds-to-minutes for a full release.
+const statPerItemBudget = 250 * time.Millisecond
+
+// StatIDs implements ArticleStater over the pool's StatMany when the client
+// supports it; otherwise it reports the capability unavailable (nil, nil).
+func (p *PoolFetcher) StatIDs(ctx context.Context, ids []string) (map[string]bool, error) {
+	client, err := p.getClient()
+	if err != nil {
+		return nil, fmt.Errorf("par2repair: nntp pool unavailable: %w", err)
+	}
+	sc, ok := client.(statManyClient)
+	if !ok {
+		return nil, nil
+	}
+	timeout := max(time.Duration(len(ids))*statPerItemBudget, time.Minute)
+	statCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	missing := make(map[string]bool)
+	for r := range sc.StatMany(statCtx, ids, nntppool.StatManyOptions{}) {
+		if errors.Is(r.Err, nntppool.ErrArticleNotFound) {
+			missing[r.MessageID] = true
+		}
+	}
+	// A cancelled sweep left ids unchecked; report it rather than a partial
+	// view that would understate the damage.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return missing, nil
 }
 
 // Fetch implements ArticleFetcher.

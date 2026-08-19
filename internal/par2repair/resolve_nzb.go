@@ -56,24 +56,13 @@ func ResolveFromNzb(
 		return nzbFileBytes(par2Entries[i]) < nzbFileBytes(par2Entries[j])
 	})
 
-	cache := map[string][]byte{}
+	cache := newArticleCache(resolveCacheCap)
 	var par2Files []SetFile
 	var streams []io.Reader
 	for _, f := range par2Entries {
 		sf := nzbEntryToSetFile(f, nil)
 		par2Files = append(par2Files, sf)
 		streams = append(streams, newLazyFileReader(ctx, fetch, sf, cache))
-	}
-	idx, err := par2.ParseIndex(streams)
-	if err != nil {
-		return nil, fmt.Errorf("%w: parse PAR2 set: %v", ErrUnrepairable, err)
-	}
-
-	dead := map[string]bool{}
-	for _, id := range deadSegmentIDs {
-		if id != "" {
-			dead[normalizeMsgID(id)] = true
-		}
 	}
 
 	// Match recovery-set members to NZB content entries, reusing the shared
@@ -90,6 +79,26 @@ func ResolveFromNzb(
 		}
 		store.Files = append(store.Files, entry)
 	}
+
+	dead := map[string]bool{}
+	for _, id := range deadSegmentIDs {
+		if id != "" {
+			dead[normalizeMsgID(id)] = true
+		}
+	}
+	if err := statSweep(ctx, fetch, releaseArticleIDs(store, par2Files), dead); err != nil {
+		return nil, err
+	}
+	// store carries only content entries here, so nothing to exclude.
+	if err := ratioPrecheck(store.Files, nil, dead, caps); err != nil {
+		return nil, err
+	}
+
+	idx, err := par2.ParseIndex(streams)
+	if err != nil {
+		return nil, fmt.Errorf("%w: parse PAR2 set: %v", ErrUnrepairable, err)
+	}
+	dropDeadRecovery(idx, par2Files, dead)
 
 	files, err := matchSetFiles(ctx, idx, store, dead, fetch, cache)
 	if err != nil {

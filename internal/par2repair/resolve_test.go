@@ -3,9 +3,13 @@ package par2repair
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
+	"strings"
 	"testing"
+
+	"github.com/javi11/nntppool/v4"
 
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/testsupport/par2gen"
@@ -230,6 +234,141 @@ func TestResolveFullyMissingVolume(t *testing.T) {
 		if !bytes.Equal(got, want) {
 			t.Fatalf("patch for %s does not match the original bytes", id)
 		}
+	}
+}
+
+// statFetcher wraps fakeFetcher with the ArticleStater capability, answering
+// liveness from the articles map like a StatMany sweep would.
+type statFetcher struct{ *fakeFetcher }
+
+func (s statFetcher) StatIDs(_ context.Context, ids []string) (map[string]bool, error) {
+	missing := map[string]bool{}
+	for _, id := range ids {
+		if _, ok := s.articles[id]; !ok {
+			missing[id] = true
+		}
+	}
+	return missing, nil
+}
+
+// A stat-capable fetcher lets Resolve discover dead articles that nobody
+// declared, so the plan covers the release's full damage instead of tripping
+// over surprises during the sweep.
+func TestResolveStatSweepFindsUndeclaredDead(t *testing.T) {
+	fm, store, fetch, _, deadID := mkResolveFixture(t, false)
+	surprise := "b.rar-2@test"
+	delete(fetch.articles, surprise)
+
+	res, err := Resolve(context.Background(), fm, store, []string{deadID}, statFetcher{fetch},
+		Caps{MaxRepairRatio: 1.0, MaxMemoryBytes: 64 << 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, da := range res.Plan.DeadArticles {
+		got[da.MessageID] = true
+	}
+	if len(got) != 2 || !got[deadID] || !got[surprise] {
+		t.Fatalf("DeadArticles = %+v, want %s and %s", res.Plan.DeadArticles, deadID, surprise)
+	}
+}
+
+// When the stat sweep shows more damage than the recovery set can fix, the
+// verdict must land at plan time — before any payload is downloaded.
+func TestResolveUnrepairableFastWhenDamageExceedsRecovery(t *testing.T) {
+	fm, store, fetch, _, deadID := mkResolveFixture(t, false)
+	// 4 dead articles x 2 slices = 8 missing slices vs 6 recovery slices.
+	// Only deadID is declared; the rest must come from the stat sweep.
+	for _, id := range []string{"a.rar-2@test", "a.rar-3@test", "b.rar-2@test"} {
+		delete(fetch.articles, id)
+	}
+
+	_, err := Resolve(context.Background(), fm, store, []string{deadID}, statFetcher{fetch},
+		Caps{MaxRepairRatio: 1.0, MaxMemoryBytes: 64 << 20})
+	if !errors.Is(err, ErrUnrepairable) {
+		t.Fatalf("err = %v, want ErrUnrepairable", err)
+	}
+}
+
+// A recovery slice whose payload tail lives in a dead article parses fine
+// (ParseIndex seeks past payloads without fetching them), so the plan must
+// drop it up front instead of discovering the hole mid-job.
+func TestResolveDropsRecoverySlicesBackedByDeadArticles(t *testing.T) {
+	fm, store, fetch, _, deadID := mkResolveFixture(t, false)
+
+	// Re-split one PAR2 volume into two articles: a live head carrying the
+	// packet header + exponent, and a dead tail carrying most of the payload.
+	const volID = "par2-1@test"
+	vol := fetch.articles[volID]
+	const split = 128
+	fetch.articles["par2-1a@test"] = vol[:split]
+	delete(fetch.articles, volID) // tail article par2-1b is never added: dead
+	for _, ref := range fm.Par2Files {
+		if len(ref.SegmentData) == 1 && ref.SegmentData[0].Id == "<"+volID+">" {
+			ref.SegmentData = []*metapb.SegmentData{
+				{Id: "<par2-1a@test>", SegmentSize: split},
+				{Id: "<par2-1b@test>", SegmentSize: int64(len(vol) - split)},
+			}
+		}
+	}
+
+	res, err := Resolve(context.Background(), fm, store, []string{deadID}, statFetcher{fetch},
+		Caps{MaxRepairRatio: 1.0, MaxMemoryBytes: 64 << 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(res.Plan.Recovery) + len(res.Plan.SpareRecovery); got != 5 {
+		t.Fatalf("planned recovery slices = %d, want 5 (dead-backed slice dropped)", got)
+	}
+}
+
+// noBodyFetcher is stat-capable but fails the test if any article body is
+// actually downloaded.
+type noBodyFetcher struct {
+	t *testing.T
+	statFetcher
+}
+
+func (f noBodyFetcher) Fetch(_ context.Context, messageID string) ([]byte, error) {
+	f.t.Errorf("article body %s was fetched; the verdict must come from STATs alone", messageID)
+	return nil, nntppool.ErrArticleNotFound
+}
+
+// Damage far above the repair-ratio cap must be rejected right after the
+// liveness sweep — before the PAR2 set is parsed or any body is downloaded.
+func TestResolveRatioCapRejectsEarlyWithoutBodyFetches(t *testing.T) {
+	fm, store, fetch, _, deadID := mkResolveFixture(t, false)
+	// Kill 6 of 8 content articles (75% of the release) against a 5% cap.
+	for _, id := range []string{"a.rar-2@test", "a.rar-3@test", "b.rar-0@test", "b.rar-1@test", "b.rar-3@test"} {
+		delete(fetch.articles, id)
+	}
+
+	_, err := Resolve(context.Background(), fm, store, []string{deadID},
+		noBodyFetcher{t: t, statFetcher: statFetcher{fetch}},
+		Caps{MaxRepairRatio: 0.05, MaxMemoryBytes: 64 << 20})
+	if !errors.Is(err, ErrUnrepairable) {
+		t.Fatalf("err = %v, want ErrUnrepairable", err)
+	}
+	if !strings.Contains(err.Error(), "max_repair_ratio") {
+		t.Fatalf("err = %v, want a damage-ratio verdict", err)
+	}
+}
+
+// The resolve-phase article cache must stay bounded: a 372-volume PAR2 set
+// would otherwise pin hundreds of MB of header articles on the heap.
+func TestArticleCacheEvictsOldestBeyondCap(t *testing.T) {
+	c := newArticleCache(2)
+	c.put("a", []byte("1"))
+	c.put("b", []byte("2"))
+	c.put("c", []byte("3"))
+	if _, ok := c.get("a"); ok {
+		t.Fatal("oldest entry must be evicted past the cap")
+	}
+	if _, ok := c.get("b"); !ok {
+		t.Fatal("entry within cap must remain")
+	}
+	if got, ok := c.get("c"); !ok || string(got) != "3" {
+		t.Fatal("newest entry must remain")
 	}
 }
 

@@ -13,11 +13,12 @@ import (
 // Par2RepairStatus is the lifecycle state of a PAR2 repair job.
 type Par2RepairStatus string
 
+// Only active states exist: a finished job's outcome is translated to the
+// file's health record (file mode) or the import queue entry (NZB mode) and
+// the row is deleted.
 const (
-	Par2RepairStatusPending      Par2RepairStatus = "pending"
-	Par2RepairStatusRunning      Par2RepairStatus = "running"
-	Par2RepairStatusRepaired     Par2RepairStatus = "repaired"
-	Par2RepairStatusUnrepairable Par2RepairStatus = "unrepairable"
+	Par2RepairStatusPending Par2RepairStatus = "pending"
+	Par2RepairStatusRunning Par2RepairStatus = "running"
 )
 
 // Par2RepairJob is one row of par2_repair_jobs.
@@ -167,40 +168,25 @@ func (r *Par2RepairRepository) ClaimNext(ctx context.Context, now time.Time) (*P
 	return job, nil
 }
 
-// MarkRepaired finishes a job successfully, clearing any earlier failure.
-// The retry errors that preceded a success are no longer true of the job, and
-// last_error is what the UI shows as the reason a repair did not work.
-func (r *Par2RepairRepository) MarkRepaired(ctx context.Context, id int64) error {
-	// finished_at comes from the Go clock, like started_at: CURRENT_TIMESTAMP is
-	// second-granularity, so a sub-second repair would appear to finish before
-	// it began.
-	now := time.Now().UTC()
+// DeleteFinished removes every job in a terminal state. Terminal rows are no
+// longer written, but installs that ran an older version still carry them;
+// the service sweeps once at startup.
+func (r *Par2RepairRepository) DeleteFinished(ctx context.Context) error {
 	_, err := r.db.ExecContext(ctx, `
-		UPDATE par2_repair_jobs
-		SET status = ?, last_error = NULL,
-		    finished_at = ?, updated_at = ?
-		WHERE id = ?`, string(Par2RepairStatusRepaired), now, now, id)
+		DELETE FROM par2_repair_jobs WHERE status NOT IN ('pending','running')`)
 	if err != nil {
-		return fmt.Errorf("finish par2 repair job %d: %w", id, err)
+		return fmt.Errorf("delete finished par2 repair jobs: %w", err)
 	}
 	return nil
 }
 
-// MarkUnrepairable finishes a job as permanently failed with a reason. An
-// empty reason keeps whatever error the last attempt recorded.
-func (r *Par2RepairRepository) MarkUnrepairable(ctx context.Context, id int64, reason string) error {
-	var lastErr any
-	if reason != "" {
-		lastErr = reason
-	}
-	now := time.Now().UTC()
-	_, err := r.db.ExecContext(ctx, `
-		UPDATE par2_repair_jobs
-		SET status = ?, last_error = COALESCE(?, last_error),
-		    finished_at = ?, updated_at = ?
-		WHERE id = ?`, string(Par2RepairStatusUnrepairable), lastErr, now, now, id)
+// Delete removes a finished job. Rows are working state, not history: a
+// terminal outcome is translated to the file's health record (file mode) or
+// the import queue entry (NZB mode) before the row is deleted.
+func (r *Par2RepairRepository) Delete(ctx context.Context, id int64) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM par2_repair_jobs WHERE id = ?`, id)
 	if err != nil {
-		return fmt.Errorf("finish par2 repair job %d: %w", id, err)
+		return fmt.Errorf("delete par2 repair job %d: %w", id, err)
 	}
 	return nil
 }

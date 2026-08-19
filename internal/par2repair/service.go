@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"slices"
 	"sync"
 	"time"
@@ -13,8 +14,8 @@ import (
 
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/metadata"
-	"github.com/javi11/altmount/internal/nzbfile"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	"github.com/javi11/altmount/internal/nzbfile"
 )
 
 // Config is the repair policy snapshot the service reads per job (so config
@@ -33,8 +34,8 @@ type Config struct {
 type JobStore interface {
 	Enqueue(ctx context.Context, filePath string, failingSegmentID string) (bool, error)
 	ClaimNext(ctx context.Context, now time.Time) (*database.Par2RepairJob, error)
-	MarkRepaired(ctx context.Context, id int64) error
-	MarkUnrepairable(ctx context.Context, id int64, reason string) error
+	Delete(ctx context.Context, id int64) error
+	DeleteFinished(ctx context.Context) error
 	MarkRetry(ctx context.Context, id int64, reason string, nextAttempt time.Time) error
 	AppendDeadSegment(ctx context.Context, id int64, messageID string) error
 	EnqueueNzb(ctx context.Context, nzbPath string, failingSegmentID string) (bool, error)
@@ -186,6 +187,15 @@ func (s *Service) Start(ctx context.Context) {
 	if err := s.repo.ResetRunning(ctx); err != nil {
 		s.log.ErrorContext(ctx, "Failed to reset running par2 repair jobs", "error", err)
 	}
+	// Solver arenas from a crashed run are worthless; reclaim the disk.
+	if err := os.RemoveAll(s.store.ScratchDir()); err != nil {
+		s.log.ErrorContext(ctx, "Failed to clean par2 repair scratch dir", "error", err)
+	}
+	// Terminal rows written by older versions are history we no longer keep:
+	// outcomes live on health records / import queue entries now.
+	if err := s.repo.DeleteFinished(ctx); err != nil {
+		s.log.ErrorContext(ctx, "Failed to delete finished par2 repair jobs", "error", err)
+	}
 	workers := max(s.cfg().MaxConcurrentJobs, 1)
 	var wg sync.WaitGroup
 	for range workers {
@@ -243,29 +253,30 @@ func (s *Service) runNext(ctx context.Context) bool {
 	return true
 }
 
-// handleOutcome applies the persistence bookkeeping for one executed job.
+// handleOutcome applies the bookkeeping for one executed job. Job rows are
+// working state, not history: a terminal outcome is translated to the file's
+// health record (file mode) or the import queue entry (NZB mode), then the
+// row is deleted. Only retrying jobs keep a row.
 func (s *Service) handleOutcome(ctx context.Context, job *database.Par2RepairJob, err error) {
 	switch {
 	case err == nil:
-		if err := s.repo.MarkRepaired(ctx, job.ID); err != nil {
-			s.log.ErrorContext(ctx, "Failed to mark repair job repaired", "error", err, "job", job.ID)
-		}
 		s.markFileHealthy(ctx, job.FilePath)
 		s.resumeImport(ctx, job)
+		s.deleteJob(ctx, job.ID)
 		s.pruneStore(ctx)
 	case errors.Is(err, ErrUnrepairable), errors.Is(err, ErrNothingToRepair):
 		s.log.WarnContext(ctx, "PAR2 repair not possible", "file", job.FilePath, "reason", err)
-		if mErr := s.repo.MarkUnrepairable(ctx, job.ID, err.Error()); mErr != nil {
-			s.log.ErrorContext(ctx, "Failed to mark repair job unrepairable", "error", mErr, "job", job.ID)
-		}
+		s.markFileUnrepairable(ctx, job.FilePath, err.Error())
 		s.failImport(ctx, job, err.Error())
+		s.deleteJob(ctx, job.ID)
 	default:
 		if job.Attempts+1 >= maxJobAttempts {
 			s.log.ErrorContext(ctx, "PAR2 repair failed permanently after retries",
 				"file", job.FilePath, "attempts", job.Attempts+1, "error", err)
-			if err := s.repo.MarkUnrepairable(ctx, job.ID, "attempts exhausted: "+err.Error()); err != nil {
-				s.log.ErrorContext(ctx, "Failed to mark repair job unrepairable", "error", err, "job", job.ID)
-			}
+			reason := "attempts exhausted: " + err.Error()
+			s.markFileUnrepairable(ctx, job.FilePath, reason)
+			s.failImport(ctx, job, reason)
+			s.deleteJob(ctx, job.ID)
 			return
 		}
 		delay := min(baseBackoff<<job.Attempts, maxBackoff)
@@ -284,6 +295,27 @@ func (s *Service) handleOutcome(ctx context.Context, job *database.Par2RepairJob
 		if err := s.repo.MarkRetry(ctx, job.ID, err.Error(), time.Now().UTC().Add(delay)); err != nil {
 			s.log.ErrorContext(ctx, "Failed to schedule repair retry", "error", err, "job", job.ID)
 		}
+	}
+}
+
+// deleteJob removes a finished job row; failures are logged, never fatal.
+func (s *Service) deleteJob(ctx context.Context, id int64) {
+	if err := s.repo.Delete(ctx, id); err != nil {
+		s.log.ErrorContext(ctx, "Failed to delete finished repair job", "error", err, "job", id)
+	}
+}
+
+// markFileUnrepairable records why repair could not fix the file on its
+// health record, so the verdict survives the job row's deletion and the file
+// stays on the existing ARR/corruption replacement path. No-op for NZB-mode
+// jobs (empty filePath): their verdict lands on the import queue entry.
+func (s *Service) markFileUnrepairable(ctx context.Context, filePath, reason string) {
+	if s.health == nil || filePath == "" {
+		return
+	}
+	if err := s.health.UpdateFileHealth(ctx, filePath, database.HealthStatusCorrupted, &reason, nil, nil, false); err != nil {
+		s.log.ErrorContext(ctx, "Failed to record unrepairable verdict on health record",
+			"error", err, "file", filePath)
 	}
 }
 

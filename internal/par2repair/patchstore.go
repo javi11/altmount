@@ -28,6 +28,11 @@ func NewPatchStore(root string) *PatchStore {
 	return &PatchStore{root: root}
 }
 
+// ScratchDir returns the directory for large transient job files (solver
+// arenas). Contents only matter while a job is running; the repair service
+// wipes it at startup.
+func (p *PatchStore) ScratchDir() string { return filepath.Join(p.root, ".scratch") }
+
 // Put atomically writes the payload for a message ID.
 func (p *PatchStore) Put(messageID string, payload []byte) error {
 	if messageID == "" {

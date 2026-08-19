@@ -44,7 +44,8 @@ type DeadArticle struct {
 type Caps struct {
 	// MaxRepairRatio caps missing bytes over the damaged files' total bytes.
 	MaxRepairRatio float64
-	// MaxMemoryBytes caps the solver's accumulator memory (k × slice size).
+	// MaxMemoryBytes bounds the solver's in-heap accumulator memory (k × slice
+	// size). Jobs over the bound still run, backed by a disk arena.
 	MaxMemoryBytes int64
 }
 
@@ -58,6 +59,10 @@ type Plan struct {
 	SpareRecovery []par2.RecoverySliceRef
 	Files         []SetFile // recovery-set order (FileID ascending)
 	DeadArticles  []DeadArticle
+	// SpillToDisk marks a plan whose solver buffers exceed the memory budget:
+	// the job backs accumulators, recovery payloads and recovered slices with
+	// a memory-mapped scratch file instead of the heap.
+	SpillToDisk bool
 }
 
 // BuildPlan maps dead articles to global recovery-set slices and selects
@@ -128,10 +133,7 @@ func BuildPlan(idx *par2.Index, files []SetFile, caps Caps) (*Plan, error) {
 	// Caps.
 	k := len(plan.Missing)
 	missingBytes := int64(k) * sliceSize
-	if caps.MaxMemoryBytes > 0 && missingBytes > caps.MaxMemoryBytes {
-		return nil, fmt.Errorf("%w: %d missing slices need %d bytes of accumulator memory (budget %d)",
-			ErrUnrepairable, k, missingBytes, caps.MaxMemoryBytes)
-	}
+	plan.SpillToDisk = caps.MaxMemoryBytes > 0 && missingBytes > caps.MaxMemoryBytes
 	if caps.MaxRepairRatio > 0 && damagedFileBytes > 0 {
 		if ratio := float64(missingBytes) / float64(damagedFileBytes); ratio > caps.MaxRepairRatio {
 			return nil, fmt.Errorf("%w: damage ratio %.4f exceeds max_repair_ratio %.4f",

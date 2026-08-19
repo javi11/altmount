@@ -153,16 +153,28 @@ func TestBuildPlanNotEnoughRecovery(t *testing.T) {
 	}
 }
 
-func TestBuildPlanMemoryCap(t *testing.T) {
+func TestBuildPlanMemoryCapSpillsToDisk(t *testing.T) {
 	content := bytes.Repeat([]byte{0x44}, 8192)
 	idx := mkIndex(t, 1024, 4, map[string][]byte{"a.rar": content})
 	files := []SetFile{mkSetFile(t, idx, "a.rar", 8192, 2048, 1)}
 
 	caps := defaultCaps()
 	caps.MaxMemoryBytes = 1024 // 2 slices needed = 2048 B > 1024
-	_, err := BuildPlan(idx, files, caps)
-	if !errors.Is(err, ErrUnrepairable) {
-		t.Fatalf("err = %v, want ErrUnrepairable", err)
+	plan, err := BuildPlan(idx, files, caps)
+	if err != nil {
+		t.Fatalf("over-budget damage must plan a disk-backed repair, got %v", err)
+	}
+	if !plan.SpillToDisk {
+		t.Fatal("plan must spill to disk when accumulators exceed the memory budget")
+	}
+
+	caps.MaxMemoryBytes = 64 << 20
+	plan, err = BuildPlan(idx, files, caps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.SpillToDisk {
+		t.Fatal("plan must stay in memory under the budget")
 	}
 }
 

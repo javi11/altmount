@@ -54,7 +54,7 @@ func Resolve(
 	copy(par2Refs, fm.Par2Files)
 	sort.Slice(par2Refs, func(i, j int) bool { return par2Refs[i].FileSize < par2Refs[j].FileSize })
 
-	cache := map[string][]byte{}
+	cache := newArticleCache(resolveCacheCap)
 	var par2Files []SetFile
 	var streams []io.Reader
 	for _, ref := range par2Refs {
@@ -68,10 +68,6 @@ func Resolve(
 		par2Files = append(par2Files, sf)
 		streams = append(streams, newLazyFileReader(ctx, fetch, sf, cache))
 	}
-	idx, err := par2.ParseIndex(streams)
-	if err != nil {
-		return nil, fmt.Errorf("%w: parse PAR2 set: %v", ErrUnrepairable, err)
-	}
 
 	dead := map[string]bool{}
 	for _, id := range deadSegmentIDs {
@@ -79,6 +75,18 @@ func Resolve(
 			dead[normalizeMsgID(id)] = true
 		}
 	}
+	if err := statSweep(ctx, fetch, releaseArticleIDs(store, par2Files), dead); err != nil {
+		return nil, err
+	}
+	if err := ratioPrecheck(store.Files, par2Files, dead, caps); err != nil {
+		return nil, err
+	}
+
+	idx, err := par2.ParseIndex(streams)
+	if err != nil {
+		return nil, fmt.Errorf("%w: parse PAR2 set: %v", ErrUnrepairable, err)
+	}
+	dropDeadRecovery(idx, par2Files, dead)
 
 	// 2 + 3. Match recovery-set members to NzbStore entries and size articles.
 	files, err := matchSetFiles(ctx, idx, store, dead, fetch, cache)
@@ -93,6 +101,139 @@ func Resolve(
 	return &Resolution{Plan: plan, Index: idx, Par2Files: par2Files}, nil
 }
 
+// statSweep bulk-checks article liveness before planning, when the fetcher
+// supports it, and folds confirmed misses into dead. STATs carry no body, so
+// the sweep costs round trips only — a fraction of a single article download —
+// and buys an exact damage picture: caps and recovery-count verdicts become
+// accurate at plan time, and the payload sweep stops tripping over
+// surprise-dead articles (each of which costs a full replan-and-retry cycle).
+func statSweep(ctx context.Context, fetch ArticleFetcher, ids []string, dead map[string]bool) error {
+	stater, ok := fetch.(ArticleStater)
+	if !ok {
+		return nil
+	}
+	unknown := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if !dead[id] {
+			unknown = append(unknown, id)
+		}
+	}
+	if len(unknown) == 0 {
+		return nil
+	}
+	missing, err := stater.StatIDs(ctx, unknown)
+	if err != nil {
+		return fmt.Errorf("par2repair: liveness sweep: %w", err)
+	}
+	for id := range missing {
+		dead[id] = true
+	}
+	return nil
+}
+
+// releaseArticleIDs collects every article ID of the release: all NzbStore
+// segments plus the PAR2 set's articles (which metadata records separately).
+func releaseArticleIDs(store *metapb.NzbStore, par2Files []SetFile) []string {
+	var ids []string
+	for _, f := range store.Files {
+		for _, seg := range f.Segments {
+			ids = append(ids, normalizeMsgID(seg.Id))
+		}
+	}
+	for _, f := range par2Files {
+		for _, a := range f.Articles {
+			ids = append(ids, a.MessageID)
+		}
+	}
+	return ids
+}
+
+// ratioPrecheckMargin keeps the pre-parse ratio check conservative: encoded
+// segment bytes approximate decoded sizes (yEnc overhead mostly cancels in
+// the ratio) and slice quantization only pushes the exact ratio higher, so a
+// small margin ensures borderline releases fall through to BuildPlan's exact
+// check instead of being rejected on an estimate.
+const ratioPrecheckMargin = 1.05
+
+// ratioPrecheck rejects damage far above the repair-ratio cap right after the
+// liveness sweep — before the PAR2 set is parsed or any article body is
+// downloaded. The estimate needs only the NZB layout: per damaged content
+// file, dead segment bytes over the file's total segment bytes. PAR2 files
+// (identified by their articles) are excluded, mirroring BuildPlan's ratio
+// over recovery-set members. The error matches BuildPlan's exact-check
+// message so callers and the UI treat both identically.
+func ratioPrecheck(files []*metapb.NzbFileEntry, par2Files []SetFile, dead map[string]bool, caps Caps) error {
+	if caps.MaxRepairRatio <= 0 || len(dead) == 0 {
+		return nil
+	}
+	par2IDs := map[string]bool{}
+	for _, f := range par2Files {
+		for _, a := range f.Articles {
+			par2IDs[a.MessageID] = true
+		}
+	}
+	var missingBytes, damagedFileBytes int64
+	for _, f := range files {
+		if len(f.Segments) == 0 || par2IDs[normalizeMsgID(f.Segments[0].Id)] {
+			continue
+		}
+		var fileBytes, deadBytes int64
+		for _, seg := range f.Segments {
+			fileBytes += seg.Bytes
+			if dead[normalizeMsgID(seg.Id)] {
+				deadBytes += seg.Bytes
+			}
+		}
+		if deadBytes > 0 {
+			missingBytes += deadBytes
+			damagedFileBytes += fileBytes
+		}
+	}
+	if damagedFileBytes == 0 {
+		return nil
+	}
+	if ratio := float64(missingBytes) / float64(damagedFileBytes); ratio > caps.MaxRepairRatio*ratioPrecheckMargin {
+		return fmt.Errorf("%w: damage ratio %.4f exceeds max_repair_ratio %.4f",
+			ErrUnrepairable, ratio, caps.MaxRepairRatio)
+	}
+	return nil
+}
+
+// dropDeadRecovery removes recovery slice refs whose payload overlaps a dead
+// article. ParseIndex seeks past recovery payloads without fetching them, so
+// a ref can parse fine while its payload is gone; counting such refs would
+// make BuildPlan promise recovery slices the job can never fetch.
+func dropDeadRecovery(idx *par2.Index, par2Files []SetFile, dead map[string]bool) {
+	if len(dead) == 0 {
+		return
+	}
+	sliceSize := int64(idx.SliceSize)
+	live := make([]par2.RecoverySliceRef, 0, len(idx.Recovery))
+	for _, ref := range idx.Recovery {
+		if payloadArticlesLive(par2Files[ref.FileIndex], ref.BodyOffset, sliceSize, dead) {
+			live = append(live, ref)
+		}
+	}
+	idx.Recovery = live
+}
+
+// payloadArticlesLive reports whether every article overlapping the payload
+// range [off, off+n) of a file's concatenated articles is live.
+func payloadArticlesLive(f SetFile, off, n int64, dead map[string]bool) bool {
+	var artStart int64
+	for _, a := range f.Articles {
+		artEnd := artStart + a.Size
+		if artEnd > off && artStart < off+n && dead[a.MessageID] {
+			return false
+		}
+		artStart = artEnd
+		if artStart >= off+n {
+			break
+		}
+	}
+	return true
+}
+
 // matchSetFiles pairs recovery-set FileDescs with NzbStore entries.
 func matchSetFiles(
 	ctx context.Context,
@@ -100,7 +241,7 @@ func matchSetFiles(
 	store *metapb.NzbStore,
 	dead map[string]bool,
 	fetch ArticleFetcher,
-	cache map[string][]byte,
+	cache *articleCache,
 ) ([]SetFile, error) {
 	used := make([]bool, len(store.Files))
 	var out []SetFile
@@ -119,7 +260,7 @@ func matchSetFiles(
 		// Pass 2: Hash16k of the entry's first bytes.
 		if entry < 0 {
 			for i, f := range store.Files {
-				if used[i] || len(f.Segments) == 0 {
+				if used[i] || len(f.Segments) == 0 || dead[normalizeMsgID(f.Segments[0].Id)] {
 					continue
 				}
 				prefix, err := filePrefix(ctx, fetch, f, cache)
@@ -206,7 +347,7 @@ func sizeArticles(
 	entry *metapb.NzbFileEntry,
 	dead map[string]bool,
 	fetch ArticleFetcher,
-	cache map[string][]byte,
+	cache *articleCache,
 	hint int64,
 ) (SetFile, int64, error) {
 	fd := idx.Files[fileID]
@@ -276,7 +417,7 @@ func sizeArticles(
 }
 
 // filePrefix returns the first up-to-16KiB of a store file's content.
-func filePrefix(ctx context.Context, fetch ArticleFetcher, entry *metapb.NzbFileEntry, cache map[string][]byte) ([]byte, error) {
+func filePrefix(ctx context.Context, fetch ArticleFetcher, entry *metapb.NzbFileEntry, cache *articleCache) ([]byte, error) {
 	payload, err := fetchCached(ctx, fetch, normalizeMsgID(entry.Segments[0].Id), cache)
 	if err != nil {
 		return nil, err
@@ -299,15 +440,49 @@ func hash16k(prefix []byte, fileLength int64) [16]byte {
 	return md5.Sum(padded)
 }
 
-func fetchCached(ctx context.Context, fetch ArticleFetcher, msgID string, cache map[string][]byte) ([]byte, error) {
-	if data, ok := cache[msgID]; ok {
+// resolveCacheCap bounds the resolve/job article caches by entry count. The
+// caches only exist to spare adjacent readers a refetch, so a small window is
+// enough; without a cap a large PAR2 set would pin its header articles on the
+// heap for the whole job.
+const resolveCacheCap = 64
+
+// articleCache is a FIFO-bounded article payload cache.
+type articleCache struct {
+	cap   int
+	data  map[string][]byte
+	order []string
+}
+
+func newArticleCache(cap int) *articleCache {
+	return &articleCache{cap: cap, data: map[string][]byte{}}
+}
+
+func (c *articleCache) get(id string) ([]byte, bool) {
+	data, ok := c.data[id]
+	return data, ok
+}
+
+func (c *articleCache) put(id string, data []byte) {
+	if _, ok := c.data[id]; ok {
+		return
+	}
+	c.data[id] = data
+	c.order = append(c.order, id)
+	for len(c.order) > c.cap {
+		delete(c.data, c.order[0])
+		c.order = c.order[1:]
+	}
+}
+
+func fetchCached(ctx context.Context, fetch ArticleFetcher, msgID string, cache *articleCache) ([]byte, error) {
+	if data, ok := cache.get(msgID); ok {
 		return data, nil
 	}
 	data, err := fetch.Fetch(ctx, msgID)
 	if err != nil {
 		return nil, err
 	}
-	cache[msgID] = data
+	cache.put(msgID, data)
 	return data, nil
 }
 
@@ -326,12 +501,12 @@ type lazyFileReader struct {
 	ctx   context.Context
 	fetch ArticleFetcher
 	file  SetFile
-	cache map[string][]byte
+	cache *articleCache
 	pos   int64
 	size  int64
 }
 
-func newLazyFileReader(ctx context.Context, fetch ArticleFetcher, file SetFile, cache map[string][]byte) *lazyFileReader {
+func newLazyFileReader(ctx context.Context, fetch ArticleFetcher, file SetFile, cache *articleCache) *lazyFileReader {
 	return &lazyFileReader{
 		ctx: ctx, fetch: fetch, file: file, cache: cache,
 		size: articleSizeSum(file.Articles),

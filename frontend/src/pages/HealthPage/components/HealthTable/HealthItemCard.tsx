@@ -17,6 +17,7 @@ import {
 	truncateText,
 } from "../../../../lib/utils";
 import { type FileHealth, HealthPriority } from "../../../../types/api";
+import { parseRepairReason } from "../par2RepairReason";
 import { HealthItemActionsMenu } from "./HealthItemActionsMenu";
 import { PlaybackImpactBadge } from "./PlaybackImpactBadge";
 
@@ -195,11 +196,16 @@ export const HealthItemCard = memo(function HealthItemCard({
 					</div>
 				</div>
 
-				{/* Error Messages */}
+				{/* Error Messages. PAR2 repair verdicts land in last_error when a
+				    repair proved impossible; render those in translated form. */}
 				{item.last_error && (
 					<div className="alert alert-error px-3 py-2">
 						<AlertCircle className="h-4 w-4 shrink-0" />
-						<span className="text-xs">{truncateText(item.last_error, 100)}</span>
+						<span className="text-xs">
+							{item.last_error.startsWith("par2repair:")
+								? `Cannot repair: ${parseRepairReason(item.last_error).summary}`
+								: truncateText(item.last_error, 100)}
+						</span>
 					</div>
 				)}
 

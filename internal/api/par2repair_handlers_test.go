@@ -78,9 +78,6 @@ func TestHandleListPar2Repair(t *testing.T) {
 	if err != nil || job == nil {
 		t.Fatalf("claim failed: %v", err)
 	}
-	if err := repo.MarkUnrepairable(ctx, job.ID, "no recovery slices"); err != nil {
-		t.Fatal(err)
-	}
 
 	s := &Server{par2RepairRepo: repo}
 	app := par2TestApp(s)
@@ -107,7 +104,7 @@ func TestHandleListPar2Repair(t *testing.T) {
 		byPath[j.FilePath] = j
 	}
 	a := byPath["/movies/a.mkv"]
-	if a.Status != "unrepairable" || a.LastError == nil || *a.LastError != "no recovery slices" {
+	if a.Status != "running" || a.StartedAt == nil {
 		t.Fatalf("a.mkv row = %+v", a)
 	}
 	b := byPath["/movies/b.mkv"]

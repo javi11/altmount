@@ -73,14 +73,16 @@ export function parseRepairReason(raw: string): RepairReason {
 		};
 	}
 
+	// Emitted by older versions only: repairs over the memory budget now spill
+	// to disk instead of failing. Kept so historical rows still read sensibly.
 	const memory = message.match(
 		/(\d+) missing slices need (\d+) bytes of accumulator memory \(budget (\d+)\)/,
 	);
 	if (memory) {
 		const mb = (n: string) => `${Math.ceil(Number(n) / (1024 * 1024))} MB`;
 		return {
-			summary: `Rebuilding ${memory[1]} blocks needs ${mb(memory[2])} of memory, above the ${mb(memory[3])} budget.`,
-			hint: "Raise the memory budget in Settings → PAR2 Repair.",
+			summary: `Rebuilding ${memory[1]} blocks needed ${mb(memory[2])} of memory, above the ${mb(memory[3])} budget.`,
+			hint: "This limit no longer blocks repairs — large jobs now spill to disk. Retry the repair.",
 			detail: raw,
 		};
 	}

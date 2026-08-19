@@ -8,7 +8,9 @@ import (
 	"io"
 	"log/slog"
 	"math/rand"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/javi11/nntppool/v4"
 
@@ -17,12 +19,16 @@ import (
 )
 
 // fakeFetcher serves article payloads from a map; absent keys are dead.
+// Concurrency-safe like the production fetcher must be.
 type fakeFetcher struct {
+	mu       sync.Mutex
 	articles map[string][]byte
 	fetched  []string
 }
 
 func (f *fakeFetcher) Fetch(_ context.Context, messageID string) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	data, ok := f.articles[messageID]
 	if !ok {
 		return nil, nntppool.ErrArticleNotFound
@@ -134,6 +140,99 @@ func TestRunJobRepairsDeadArticle(t *testing.T) {
 	}
 	if !bytes.Equal(got, fx.deadOrig) {
 		t.Fatalf("patch mismatch: got %d bytes, want %d byte-exact", len(got), len(fx.deadOrig))
+	}
+}
+
+// concurrencyFetcher records the peak number of Fetch calls in flight.
+type concurrencyFetcher struct {
+	inner *fakeFetcher
+
+	mu          sync.Mutex
+	inFlight    int
+	maxInFlight int
+}
+
+func (c *concurrencyFetcher) Fetch(ctx context.Context, messageID string) ([]byte, error) {
+	c.mu.Lock()
+	c.inFlight++
+	c.maxInFlight = max(c.maxInFlight, c.inFlight)
+	c.mu.Unlock()
+	time.Sleep(time.Millisecond) // give overlapping fetches a chance to pile up
+	defer func() {
+		c.mu.Lock()
+		c.inFlight--
+		c.mu.Unlock()
+	}()
+	return c.inner.Fetch(ctx, messageID)
+}
+
+// The sweep of a 900MB release must not download one article at a time: RunJob
+// is expected to keep several fetches in flight while folding slices in order.
+func TestRunJobFetchesArticlesConcurrently(t *testing.T) {
+	// Small articles (512B) over 2x8192B files -> 32 sweep articles.
+	fx := mkRepairFixture(t, 1024, 512, 6, 1)
+	fetch := &concurrencyFetcher{inner: fx.fetch}
+
+	plan, err := BuildPlan(fx.idx, fx.files, Caps{MaxRepairRatio: 0.5, MaxMemoryBytes: 64 << 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewPatchStore(t.TempDir())
+	if err := RunJob(context.Background(), plan, fx.idx, fx.par2Files, fetch, store, testLogger()); err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok := store.Get(fx.deadMsgID)
+	if !ok || !bytes.Equal(got, fx.deadOrig) {
+		t.Fatal("parallel sweep must still produce a byte-exact patch")
+	}
+	if fetch.maxInFlight < 2 {
+		t.Fatalf("max in-flight fetches = %d, want concurrent fetching", fetch.maxInFlight)
+	}
+}
+
+// A plan over the memory budget must still repair, backed by disk instead of
+// heap accumulators. maxInFlight and byte-exactness must both hold.
+func TestRunJobSpillToDiskRepairs(t *testing.T) {
+	fx := mkRepairFixture(t, 1024, 2048, 6, 1)
+	plan, err := BuildPlan(fx.idx, fx.files, Caps{MaxRepairRatio: 0.5, MaxMemoryBytes: 1}) // force spill
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.SpillToDisk {
+		t.Fatal("fixture must produce a spill plan")
+	}
+
+	store := NewPatchStore(t.TempDir())
+	if err := RunJob(context.Background(), plan, fx.idx, fx.par2Files, fx.fetch, store, testLogger()); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := store.Get(fx.deadMsgID)
+	if !ok || !bytes.Equal(got, fx.deadOrig) {
+		t.Fatal("disk-backed repair must produce a byte-exact patch")
+	}
+}
+
+// Spill mode must survive the attempt loop: a corrupt present slice forces a
+// re-sweep with an extra recovery slice, all on disk-backed buffers.
+func TestRunJobSpillToDiskSurvivesCorruptReplan(t *testing.T) {
+	fx := mkRepairFixture(t, 1024, 2048, 6, 1)
+	corruptID := "<b.rar-0@test>"
+	corrupted := bytes.Clone(fx.fetch.articles[corruptID])
+	corrupted[10] ^= 0xFF
+	fx.fetch.articles[corruptID] = corrupted
+
+	plan, err := BuildPlan(fx.idx, fx.files, Caps{MaxRepairRatio: 0.5, MaxMemoryBytes: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewPatchStore(t.TempDir())
+	if err := RunJob(context.Background(), plan, fx.idx, fx.par2Files, fx.fetch, store, testLogger()); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := store.Get(fx.deadMsgID)
+	if !ok || !bytes.Equal(got, fx.deadOrig) {
+		t.Fatal("disk-backed replan must produce a byte-exact patch")
 	}
 }
 

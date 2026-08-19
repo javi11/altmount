@@ -33,12 +33,25 @@ type Solver struct {
 	missing []int
 	exps    []uint32
 	acc     [][]byte
+	alloc   bufAlloc
 }
 
-// NewSolver prepares accumulators for the given missing global slice indices
-// and the exponents of the recovery slices that will seed them (one per
-// missing slice, matched by position).
+// bufAlloc returns a zeroed buffer of n bytes. The heap allocator is the
+// default; disk-backed jobs pass an arena allocator instead.
+type bufAlloc func(n int) ([]byte, error)
+
+func heapAlloc(n int) ([]byte, error) { return make([]byte, n), nil }
+
+// NewSolver prepares heap accumulators for the given missing global slice
+// indices and the exponents of the recovery slices that will seed them (one
+// per missing slice, matched by position).
 func NewSolver(missingIdx []int, recoveryExp []uint32, sliceSize int) (*Solver, error) {
+	return NewSolverAlloc(missingIdx, recoveryExp, sliceSize, heapAlloc)
+}
+
+// NewSolverAlloc is NewSolver with the accumulator (and recovered-slice)
+// buffers coming from alloc, which must return zeroed memory.
+func NewSolverAlloc(missingIdx []int, recoveryExp []uint32, sliceSize int, alloc bufAlloc) (*Solver, error) {
 	if len(missingIdx) == 0 || len(missingIdx) != len(recoveryExp) {
 		return nil, fmt.Errorf("par2repair: need exactly one recovery slice per missing slice (missing=%d recovery=%d)",
 			len(missingIdx), len(recoveryExp))
@@ -48,12 +61,16 @@ func NewSolver(missingIdx []int, recoveryExp []uint32, sliceSize int) (*Solver, 
 	}
 	acc := make([][]byte, len(missingIdx))
 	for i := range acc {
-		acc[i] = make([]byte, sliceSize)
+		var err error
+		if acc[i], err = alloc(sliceSize); err != nil {
+			return nil, err
+		}
 	}
 	return &Solver{
 		missing: slices.Clone(missingIdx),
 		exps:    slices.Clone(recoveryExp),
 		acc:     acc,
+		alloc:   alloc,
 	}, nil
 }
 
@@ -85,7 +102,11 @@ func (s *Solver) Solve() ([][]byte, error) {
 	}
 	out := make([][]byte, k)
 	for i := range out {
-		out[i] = make([]byte, len(s.acc[0]))
+		buf, err := s.alloc(len(s.acc[0]))
+		if err != nil {
+			return nil, err
+		}
+		out[i] = buf
 		gf2p16.MulByteSliceLE(inv.At(i, 0), s.acc[0], out[i])
 		for r := 1; r < k; r++ {
 			gf2p16.MulAndAddByteSliceLE(inv.At(i, r), s.acc[r], out[i])

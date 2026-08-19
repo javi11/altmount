@@ -1,4 +1,4 @@
-import { CheckCircle, Clock, Loader2, Wrench, XCircle } from "lucide-react";
+import { Clock, Loader2, Wrench } from "lucide-react";
 import { Fragment } from "react";
 import { formatDuration, formatRelativeTime } from "../../../lib/utils";
 import type { Par2RepairJob, Par2RepairStatus } from "../../../types/api";
@@ -11,8 +11,6 @@ interface Par2RepairSectionProps {
 const STATUS_BADGES: Record<Par2RepairStatus, { className: string; label: string }> = {
 	pending: { className: "badge-warning", label: "Pending" },
 	running: { className: "badge-info", label: "Repairing" },
-	repaired: { className: "badge-success", label: "Repaired" },
-	unrepairable: { className: "badge-error", label: "Unrepairable" },
 };
 
 function StatusBadge({ status }: { status: Par2RepairStatus }) {
@@ -21,16 +19,10 @@ function StatusBadge({ status }: { status: Par2RepairStatus }) {
 }
 
 function StatusIcon({ status }: { status: Par2RepairStatus }) {
-	switch (status) {
-		case "running":
-			return <Loader2 className="h-4 w-4 animate-spin text-info" aria-hidden="true" />;
-		case "repaired":
-			return <CheckCircle className="h-4 w-4 text-success" aria-hidden="true" />;
-		case "unrepairable":
-			return <XCircle className="h-4 w-4 text-error" aria-hidden="true" />;
-		default:
-			return <Clock className="h-4 w-4 text-warning" aria-hidden="true" />;
+	if (status === "running") {
+		return <Loader2 className="h-4 w-4 animate-spin text-info" aria-hidden="true" />;
 	}
+	return <Clock className="h-4 w-4 text-warning" aria-hidden="true" />;
 }
 
 function fileName(path: string) {
@@ -86,66 +78,38 @@ function RunTime({ job }: { job: Par2RepairJob }) {
 		return <span className="text-base-content/40">—</span>;
 	}
 	const elapsed = formatDuration(Math.round(job.duration_seconds));
-
-	if (job.status === "running") {
-		const remaining = estimateRemaining(job);
-		return (
-			<div className="whitespace-nowrap">
-				<div>{elapsed}</div>
-				{remaining !== null && (
-					<div className="text-base-content/50 text-xs">
-						~{formatDuration(Math.round(remaining))} left
-					</div>
-				)}
-			</div>
-		);
-	}
-
-	// Finished, either way: how long it cost is worth reporting even when it
-	// failed, since the sweep downloads the release before it can know.
+	const remaining = job.status === "running" ? estimateRemaining(job) : null;
 	return (
-		<span
-			className="whitespace-nowrap"
-			title={job.finished_at ? `finished ${formatRelativeTime(job.finished_at)}` : undefined}
-		>
-			{elapsed}
-		</span>
+		<div className="whitespace-nowrap">
+			<div>{elapsed}</div>
+			{remaining !== null && (
+				<div className="text-base-content/50 text-xs">
+					~{formatDuration(Math.round(remaining))} left
+				</div>
+			)}
+		</div>
 	);
 }
 
 /**
- * The reason a repair could not run, on its own full-width row.
- *
- * Unrepairable is a dead end for that file — the user has to decide whether to
- * raise a limit or replace the release — so the explanation gets real space
- * rather than a truncated line under the filename.
+ * Why the last attempt of a retrying job failed, on its own full-width row.
+ * Unrepairable verdicts do not appear here: they are recorded on the file's
+ * health entry (or the failed import) and the job row is deleted.
  */
 function ReasonRow({ job, columns }: { job: Par2RepairJob; columns: number }) {
-	// Jobs finished before last_error was cleared on success can still carry a
-	// stale failure; never report one against a repaired file.
-	if (!job.last_error || job.status === "repaired") {
+	if (!job.last_error) {
 		return null;
 	}
-	const failed = job.status === "unrepairable";
 	const reason = parseRepairReason(job.last_error);
 	return (
 		<tr className="border-none">
 			<td colSpan={columns} className="pt-0">
-				<div
-					className={`rounded-md border-l-4 px-3 py-2 text-xs ${
-						failed ? "border-error bg-error/10" : "border-warning bg-warning/10"
-					}`}
-				>
+				<div className="rounded-md border-warning border-l-4 bg-warning/10 px-3 py-2 text-xs">
 					<div className="flex items-start gap-2">
-						{failed ? (
-							<XCircle className="mt-0.5 h-4 w-4 shrink-0 text-error" aria-hidden="true" />
-						) : (
-							<Clock className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
-						)}
+						<Clock className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
 						<div className="min-w-0 space-y-1">
 							<p className="font-medium">
-								{failed ? "Cannot repair: " : "Last attempt failed: "}
-								<span className="font-normal">{reason.summary}</span>
+								Last attempt failed: <span className="font-normal">{reason.summary}</span>
 							</p>
 							{reason.hint && <p className="text-base-content/70">{reason.hint}</p>}
 							{reason.detail !== reason.summary && (

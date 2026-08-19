@@ -119,100 +119,48 @@ func TestPar2RepairClaimSkipsNotDue(t *testing.T) {
 	assert.Equal(t, "transient", got.LastError.String)
 }
 
-func TestPar2RepairTerminalStatesAllowReEnqueue(t *testing.T) {
-	repo, _ := newPar2RepairRepo(t)
+// Installs that ran an older version still carry terminal rows; the startup
+// sweep must remove them without touching active jobs.
+func TestPar2RepairDeleteFinishedSweepsLegacyTerminalRows(t *testing.T) {
+	repo, db := newPar2RepairRepo(t)
 	ctx := context.Background()
-	now := time.Now().UTC()
 
-	_, err := repo.Enqueue(ctx, "/movies/a.mkv", "")
+	_, err := repo.Enqueue(ctx, "/movies/active.mkv", "")
 	require.NoError(t, err)
-	job, err := repo.ClaimNext(ctx, now)
+	_, err = db.Exec(`
+		INSERT INTO par2_repair_jobs (file_path, status) VALUES
+		('/movies/old-repaired.mkv', 'repaired'),
+		('/movies/old-unrepairable.mkv', 'unrepairable')`)
 	require.NoError(t, err)
-	require.NoError(t, repo.MarkRepaired(ctx, job.ID))
 
-	created, err := repo.Enqueue(ctx, "/movies/a.mkv", "")
-	require.NoError(t, err)
-	assert.True(t, created, "repaired file damaged again must be re-queueable")
-
-	job2, err := repo.ClaimNext(ctx, now)
-	require.NoError(t, err)
-	require.NoError(t, repo.MarkUnrepairable(ctx, job2.ID, "not enough recovery slices"))
-
-	created, err = repo.Enqueue(ctx, "/movies/a.mkv", "")
-	require.NoError(t, err)
-	assert.True(t, created, "unrepairable outcome must not block later attempts")
-}
-
-// A repair that succeeds after transient failures must not keep the failure
-// text: the UI reports last_error as the reason a job did not work, and a
-// stale one makes a repaired file look broken.
-func TestPar2RepairMarkRepairedClearsLastError(t *testing.T) {
-	repo, _ := newPar2RepairRepo(t)
-	ctx := context.Background()
-	now := time.Now().UTC()
-
-	_, err := repo.Enqueue(ctx, "/movies/a.mkv", "")
-	require.NoError(t, err)
-	job, err := repo.ClaimNext(ctx, now)
-	require.NoError(t, err)
-	require.NoError(t, repo.MarkRetry(ctx, job.ID, "connection reset", now))
-
-	job, err = repo.ClaimNext(ctx, now)
-	require.NoError(t, err)
-	require.Equal(t, "connection reset", job.LastError.String)
-
-	require.NoError(t, repo.MarkRepaired(ctx, job.ID))
+	require.NoError(t, repo.DeleteFinished(ctx))
 
 	jobs, err := repo.List(ctx, 10)
 	require.NoError(t, err)
 	require.Len(t, jobs, 1)
-	assert.Equal(t, Par2RepairStatusRepaired, jobs[0].Status)
-	assert.False(t, jobs[0].LastError.Valid, "successful repair must clear the earlier failure")
+	assert.Equal(t, "/movies/active.mkv", jobs[0].FilePath)
 }
 
-// How long a repair ran is the main thing a user wants to know about one that
-// has finished, successfully or not: a repair streams the whole release, so it
-// is measured in minutes and the cost is worth reporting.
-func TestPar2RepairRecordsRunTimes(t *testing.T) {
+// Finished jobs are deleted (their outcome lives on the health record or the
+// import queue entry), so the same file must always be re-queueable.
+func TestPar2RepairDeleteAllowsReEnqueue(t *testing.T) {
 	repo, _ := newPar2RepairRepo(t)
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	for _, tc := range []struct {
-		name   string
-		finish func(id int64) error
-	}{
-		{"repaired", func(id int64) error { return repo.MarkRepaired(ctx, id) }},
-		{"unrepairable", func(id int64) error { return repo.MarkUnrepairable(ctx, id, "no recovery slices") }},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			path := "/movies/" + tc.name + ".mkv"
-			_, err := repo.Enqueue(ctx, path, "")
-			require.NoError(t, err)
+	_, err := repo.Enqueue(ctx, "/movies/a.mkv", "")
+	require.NoError(t, err)
+	job, err := repo.ClaimNext(ctx, now)
+	require.NoError(t, err)
+	require.NoError(t, repo.Delete(ctx, job.ID))
 
-			job, err := repo.ClaimNext(ctx, now)
-			require.NoError(t, err)
-			require.NotNil(t, job)
-			require.True(t, job.StartedAt.Valid, "claiming a job must stamp when it started running")
-			assert.False(t, job.FinishedAt.Valid, "a running job has not finished")
+	jobs, err := repo.List(ctx, 10)
+	require.NoError(t, err)
+	assert.Empty(t, jobs, "deleted job must not linger in the list")
 
-			require.NoError(t, tc.finish(job.ID))
-
-			jobs, err := repo.List(ctx, 50)
-			require.NoError(t, err)
-			var got *Par2RepairJob
-			for _, j := range jobs {
-				if j.FilePath == path {
-					got = j
-				}
-			}
-			require.NotNil(t, got)
-			require.True(t, got.StartedAt.Valid, "started_at must survive the terminal update")
-			require.True(t, got.FinishedAt.Valid, "a finished job must record when it finished")
-			assert.False(t, got.FinishedAt.Time.Before(got.StartedAt.Time),
-				"finished_at must not precede started_at")
-		})
-	}
+	created, err := repo.Enqueue(ctx, "/movies/a.mkv", "")
+	require.NoError(t, err)
+	assert.True(t, created, "file damaged again must be re-queueable after deletion")
 }
 
 // A retry re-runs the work, so the elapsed time shown must be that of the
@@ -275,11 +223,11 @@ func TestPar2RepairList(t *testing.T) {
 	_, err = repo.Enqueue(ctx, "/movies/b.mkv", "")
 	require.NoError(t, err)
 
-	// Touch a.mkv so it becomes the most recently updated.
+	// Touch a.mkv so it becomes the most recently updated (retry not yet due).
 	job, err := repo.ClaimNext(ctx, now)
 	require.NoError(t, err)
 	require.NotNil(t, job)
-	require.NoError(t, repo.MarkRepaired(ctx, job.ID))
+	require.NoError(t, repo.MarkRetry(ctx, job.ID, "transient", now.Add(time.Hour)))
 	// Force a strictly newer updated_at than the untouched row.
 	_, err = repo.ClaimNext(ctx, now) // claims b.mkv (running -> excluded from claim but updated)
 	require.NoError(t, err)
