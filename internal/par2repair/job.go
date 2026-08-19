@@ -146,8 +146,8 @@ func RunJob(
 	// attempt's fold consumed them as accumulators.
 	corruptReplans := 0
 	// On a spill plan each attempt gets a fresh disk arena for its recovery
-	// payloads (which double as accumulators) and recovered slices; fresh
-	// file pages arrive zeroed, so a re-sweep never sees a stale accumulator.
+	// payloads, solver accumulators and recovered slices; fresh file pages
+	// arrive zeroed, so a re-sweep never sees a stale accumulator.
 	var attemptArena *arena
 	defer func() {
 		if attemptArena != nil {
@@ -161,9 +161,15 @@ func RunJob(
 		}
 		alloc := heapAlloc
 		if plan.SpillToDisk {
-			// Payload/accumulator buffers (len(refs)) plus recovered slices
-			// (at most as many, since missing never exceeds the loaded rows).
-			a, err := newArena(scratch, 2*int64(len(refs))*sliceSize)
+			// Payload buffers plus prepared-layout accumulators (one of each
+			// per loaded row) plus recovered slices (at most as many, since
+			// missing never exceeds the loaded rows).
+			accBytes, err := accumulatorArenaBytes(int(sliceSize))
+			if err != nil {
+				return err
+			}
+			capacity := int64(len(refs)) * (2*sliceSize + accBytes)
+			a, err := newArena(scratch, capacity)
 			if err != nil {
 				return err
 			}
@@ -187,9 +193,12 @@ func RunJob(
 		if err != nil {
 			return err
 		}
+		// Attempts are bounded (spares and the corrupt-replan budget), so a
+		// deferred close per attempt cannot pile up.
+		defer solver.Close()
 		// The payload buffers were read for this attempt alone, so they are
-		// donated: the fold accumulates in them rather than in a second set
-		// the same size.
+		// donated: seeding consumes them into the accumulators' prepared
+		// layout and nothing reads them again.
 		for i, p := range payloads {
 			if err := solver.SeedRecoveryOwning(i, p); err != nil {
 				return err

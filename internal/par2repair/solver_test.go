@@ -5,7 +5,7 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/akalin/gopar/gf2p16"
+	"github.com/javi11/gopar-turbo/gf2p16"
 )
 
 // buildRecovery computes recovery slices the spec way (direct sum over all
@@ -201,8 +201,8 @@ func TestSolverSolveSkipsDependentRows(t *testing.T) {
 }
 
 // TestSolverSeedRecoveryOwning donates the recovery payload buffer to the
-// solver: no copy is made, so the buffer becomes the accumulator and is
-// destroyed by the fold.
+// solver: seeding consumes it into the accumulator's prepared layout and the
+// caller must not rely on it afterwards.
 func TestSolverSeedRecoveryOwning(t *testing.T) {
 	const sliceSize, n = 512, 6
 	rng := rand.New(rand.NewSource(17))
@@ -226,9 +226,6 @@ func TestSolverSeedRecoveryOwning(t *testing.T) {
 		if j != 3 {
 			s.FoldPresent(j, sl)
 		}
-	}
-	if bytes.Equal(donated, rec[0]) {
-		t.Fatal("donated buffer was not used as the accumulator (a copy was made)")
 	}
 	got, err := s.Solve()
 	if err != nil {

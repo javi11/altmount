@@ -8,7 +8,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/akalin/gopar/gf2p16"
+	"github.com/javi11/gopar-turbo/gf2p16"
 )
 
 // FullSet is a complete, spec-valid PAR2 set: an index file (Main + FileDesc
