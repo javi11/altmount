@@ -16,6 +16,12 @@ var ErrUnrepairable = errors.New("par2repair: unrepairable")
 // ErrNothingToRepair is returned when no article in the recovery set is dead.
 var ErrNothingToRepair = errors.New("par2repair: nothing to repair")
 
+// planMargin is how many recovery rows a plan carries beyond the damage it
+// found. The sweep reads every present slice once, and a slice the plan
+// thought present can still turn out dead or corrupt; margin rows let those
+// be solved without a second full read of the release.
+const planMargin = 8
+
 // Article is one usenet article of a recovery-set file.
 type Article struct {
 	MessageID string
@@ -151,13 +157,24 @@ func BuildPlan(idx *par2.Index, files []SetFile, caps Caps) (*Plan, error) {
 			ErrUnrepairable, k, len(idx.Recovery))
 	}
 
-	// Choose the k lowest-exponent recovery slices; the rest are spares for
-	// singular-matrix or dead-recovery-article retries.
+	// Choose the k lowest-exponent recovery slices plus up to planMargin
+	// margin rows; the rest are spares. Margin rows are folded alongside the
+	// chosen ones, so a slice discovered dead or corrupt mid-sweep is absorbed
+	// without a second full read of the release, and a singular matrix is
+	// retried by row selection instead of a re-sweep. Margin never pushes an
+	// in-memory job over the budget and into disk spill — it shrinks first;
+	// a plan that spills anyway keeps the full margin (the arena absorbs it).
 	recs := make([]par2.RecoverySliceRef, len(idx.Recovery))
 	copy(recs, idx.Recovery)
 	sort.Slice(recs, func(i, j int) bool { return recs[i].Exponent < recs[j].Exponent })
-	plan.Recovery = recs[:k]
-	plan.SpareRecovery = recs[k:]
+	m := min(planMargin, len(recs)-k)
+	if !plan.SpillToDisk && caps.MaxMemoryBytes > 0 {
+		for m > 0 && int64(k+m)*sliceSize > caps.MaxMemoryBytes {
+			m--
+		}
+	}
+	plan.Recovery = recs[:k+m]
+	plan.SpareRecovery = recs[k+m:]
 
 	return plan, nil
 }

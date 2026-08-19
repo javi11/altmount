@@ -60,15 +60,17 @@ func WithProgress(cb JobProgress) JobOption {
 }
 
 // maxCorruptReplans bounds how many corrupt present slices a single job may
-// reclassify as missing. Each reclassification grows the solver by one
-// accumulator (slice-size bytes) and costs a fresh sweep, so the bound caps
-// both memory growth and re-sweep count.
+// reclassify as missing beyond what the plan's margin rows absorb in-sweep.
+// Each overflow reclassification grows the solver by one accumulator
+// (slice-size bytes) and costs a fresh sweep, so the bound caps both memory
+// growth and re-sweep count.
 const maxCorruptReplans = 8
 
 // corruptSliceError signals a present slice whose CRC32 didn't match its IFSC
-// checksum during the sweep. Unlike SweepDeadArticleError (article vanished),
-// the fetch succeeded but the data is bad: the attempt loop reclassifies the
-// slice as missing and retries with one more recovery slice.
+// checksum during the sweep and could not be absorbed on a margin row. Unlike
+// SweepDeadArticleError (article vanished), the fetch succeeded but the data
+// is bad: the attempt loop reclassifies the slice as missing and retries with
+// one more recovery slice.
 type corruptSliceError struct {
 	global int
 	fileID [16]byte
@@ -114,96 +116,38 @@ func RunJob(
 		startSlice[i] = total
 		total += (int64(f.Length) + sliceSize - 1) / sliceSize
 	}
-	missingPos := make(map[int]int, k) // global slice index -> position in plan.Missing
+	missingPos := make(map[int]int, k) // global slice index -> position in missing
 	for i, m := range plan.Missing {
 		missingPos[m] = i
 	}
+	missing := slices.Clone(plan.Missing)
 
-	// Resolve recovery payloads, swapping in spares for dead par2 articles.
-	// Refs are visited in (file, offset) order so their backing articles
-	// stream through a bounded prefetch window instead of piling up on the
-	// heap; on a spill plan the payloads themselves land in a disk arena.
 	refs := slices.Clone(plan.Recovery)
 	spares := slices.Clone(plan.SpareRecovery)
-	par2Cache := newArticleCache(resolveCacheCap)
-
-	scratch := store.ScratchDir()
-	var payloadArena *arena
-	persist := func(data []byte) ([]byte, error) {
-		if payloadArena == nil {
-			return data, nil
-		}
-		buf, err := payloadArena.alloc(len(data))
-		if err != nil {
-			return nil, err
-		}
-		copy(buf, data)
-		return buf, nil
-	}
-	if plan.SpillToDisk {
-		// Every chosen slice plus every spare that could ever be swapped in.
-		a, err := newArena(scratch, int64(len(refs)+len(spares))*sliceSize)
-		if err != nil {
-			return err
-		}
-		payloadArena = a
-		defer func() { _ = payloadArena.Close() }()
-	}
-
-	order := make([]int, k)
-	for i := range order {
-		order[i] = i
-	}
-	sort.Slice(order, func(x, y int) bool {
-		a, b := refs[order[x]], refs[order[y]]
-		if a.FileIndex != b.FileIndex {
-			return a.FileIndex < b.FileIndex
-		}
-		return a.BodyOffset < b.BodyOffset
-	})
-
-	payloads := make([][]byte, k)
-	feed := newArticleFeed(ctx, fetch, recoveryArticleIDs(par2Files, refs, order, sliceSize))
-	defer feed.stop()
-	for _, i := range order {
-		for {
-			ref := refs[i]
-			data, err := readRangeFrom(feed.get, par2Files[ref.FileIndex], ref.BodyOffset, sliceSize)
-			if err != nil {
-				if errors.Is(err, nntppool.ErrArticleNotFound) {
-					if len(spares) == 0 {
-						return fmt.Errorf("%w: recovery slice exponent %d is unreachable and no spares remain", ErrUnrepairable, ref.Exponent)
-					}
-					log.WarnContext(ctx, "recovery slice unreachable, swapping in spare",
-						"exponent", ref.Exponent, "spare_exponent", spares[0].Exponent)
-					refs[i] = spares[0]
-					spares = spares[1:]
-					continue
-				}
-				return fmt.Errorf("par2repair: fetch recovery slice exponent %d: %w", ref.Exponent, err)
-			}
-			if payloads[i], err = persist(data); err != nil {
-				return err
-			}
-			break
-		}
-	}
-	feed.stop()
 
 	totalArticles := 0
 	for _, f := range plan.Files {
 		totalArticles += len(f.Articles)
 	}
 
-	// Attempt loop: a singular matrix (a known PAR2 Vandermonde flaw) retries
-	// with a spare recovery slice, and a corrupt present slice is reclassified
-	// as missing and solved for with one more recovery slice — both at the
-	// cost of a fresh sweep.
-	missing := slices.Clone(plan.Missing)
+	// Dead articles discovered mid-sweep, absorbed on margin rows. They are
+	// patched alongside the planned ones: their slices join the unknowns and
+	// are solved in the same pass.
+	var discovered []DeadArticle
+	discoveredIDs := map[string]bool{}
+
+	scratch := store.ScratchDir()
+
+	// Attempt loop. Margin rows absorb most surprises inside a single sweep —
+	// mid-sweep dead articles, corrupt present slices, singular submatrices
+	// (Solve skips dependent rows) — so a retry here is the rare fallback:
+	// margin exhausted with spares left, or a matrix no loaded subset can
+	// invert. Each attempt refetches the recovery payloads, since the previous
+	// attempt's fold consumed them as accumulators.
 	corruptReplans := 0
-	// On a spill plan each attempt gets a fresh disk arena for its
-	// accumulators and recovered slices (fresh file pages arrive zeroed, so a
-	// re-sweep never sees a stale accumulator).
+	// On a spill plan each attempt gets a fresh disk arena for its recovery
+	// payloads (which double as accumulators) and recovered slices; fresh
+	// file pages arrive zeroed, so a re-sweep never sees a stale accumulator.
 	var attemptArena *arena
 	defer func() {
 		if attemptArena != nil {
@@ -217,12 +161,22 @@ func RunJob(
 		}
 		alloc := heapAlloc
 		if plan.SpillToDisk {
-			a, err := newArena(scratch, 2*int64(len(missing))*sliceSize)
+			// Payload/accumulator buffers (len(refs)) plus recovered slices
+			// (at most as many, since missing never exceeds the loaded rows).
+			a, err := newArena(scratch, 2*int64(len(refs))*sliceSize)
 			if err != nil {
 				return err
 			}
 			attemptArena = a
 			alloc = attemptArena.alloc
+		}
+
+		var payloads [][]byte
+		var err error
+		refs, payloads, spares, err = loadRecoveryPayloads(
+			ctx, fetch, par2Files, refs, spares, len(missing), sliceSize, alloc, plan.SpillToDisk, log)
+		if err != nil {
+			return err
 		}
 
 		exps := make([]uint32, len(refs))
@@ -233,8 +187,50 @@ func RunJob(
 		if err != nil {
 			return err
 		}
+		// The payload buffers were read for this attempt alone, so they are
+		// donated: the fold accumulates in them rather than in a second set
+		// the same size.
 		for i, p := range payloads {
-			solver.AddRecovery(i, p)
+			if err := solver.SeedRecoveryOwning(i, p); err != nil {
+				return err
+			}
+		}
+
+		// Absorb callbacks: a slice discovered dead or corrupt mid-sweep
+		// joins the unknowns on a margin row instead of forcing a re-sweep.
+		absorbCorrupt := func(global int) bool {
+			if solver.AddMissing(global) != nil {
+				return false
+			}
+			missingPos[global] = len(missing)
+			missing = append(missing, global)
+			return true
+		}
+		absorbDead := func(fi, ai int, artOff int64, a Article) bool {
+			first := int(startSlice[fi] + artOff/sliceSize)
+			last := int(startSlice[fi] + (artOff+a.Size-1)/sliceSize)
+			var fresh []int
+			for g := first; g <= last; g++ {
+				if _, ok := missingPos[g]; !ok {
+					fresh = append(fresh, g)
+				}
+			}
+			if len(missing)+len(fresh) > len(refs) {
+				return false
+			}
+			for _, g := range fresh {
+				_ = solver.AddMissing(g) // capacity checked above
+				missingPos[g] = len(missing)
+				missing = append(missing, g)
+			}
+			if !discoveredIDs[a.MessageID] {
+				discoveredIDs[a.MessageID] = true
+				discovered = append(discovered, DeadArticle{
+					FileIdx: fi, ArtIdx: ai, MessageID: a.MessageID,
+					FileStart: artOff, Size: a.Size,
+				})
+			}
+			return true
 		}
 
 		doneArticles := 0
@@ -244,13 +240,14 @@ func RunJob(
 				o.progress(doneArticles, totalArticles)
 			}
 		}
-		if err := sweep(ctx, plan, idx, fetch, solver, startSlice, missingPos, onArticle, log); err != nil {
+		if err := sweep(ctx, plan, idx, fetch, solver, startSlice, missingPos, absorbDead, absorbCorrupt, onArticle, log); err != nil {
 			var corrupt *corruptSliceError
 			if !errors.As(err, &corrupt) {
 				return err
 			}
-			// A present-but-corrupt slice is just another unknown: grow the
-			// missing set by it and take one more recovery slice.
+			// Margin exhausted: a present-but-corrupt slice is still just
+			// another unknown — take one more recovery row from the spares
+			// at the cost of a fresh sweep.
 			corruptReplans++
 			if corruptReplans > maxCorruptReplans {
 				return fmt.Errorf("%w: %v and the corrupt-slice replan budget (%d) is exhausted",
@@ -265,20 +262,14 @@ func RunJob(
 			missingPos[corrupt.global] = len(missing) - 1
 			refs = append(refs, spares[0])
 			spares = spares[1:]
-			extra := refs[len(refs)-1]
-			data, ferr := readRange(ctx, fetch, par2Files[extra.FileIndex], extra.BodyOffset, sliceSize, par2Cache)
-			if ferr != nil {
-				return fmt.Errorf("%w: spare recovery slice unreachable: %v", ErrUnrepairable, ferr)
-			}
-			if data, ferr = persist(data); ferr != nil {
-				return ferr
-			}
-			payloads = append(payloads, data)
 			continue
 		}
 
 		recovered, err := solver.Solve()
 		if errors.Is(err, ErrSingularMatrix) {
+			// Solve already tried every loaded row: no invertible subset
+			// exists. A spare brings a genuinely new exponent into play, at
+			// the cost of a fresh sweep.
 			if len(spares) == 0 {
 				return fmt.Errorf("%w: recovery matrix singular and no spare recovery slices remain", ErrUnrepairable)
 			}
@@ -287,14 +278,6 @@ func RunJob(
 				"dropped_exponent", refs[swap].Exponent, "spare_exponent", spares[0].Exponent)
 			refs[swap] = spares[0]
 			spares = spares[1:]
-			data, ferr := readRange(ctx, fetch, par2Files[refs[swap].FileIndex], refs[swap].BodyOffset, sliceSize, par2Cache)
-			if ferr != nil {
-				return fmt.Errorf("%w: spare recovery slice unreachable: %v", ErrUnrepairable, ferr)
-			}
-			if data, ferr = persist(data); ferr != nil {
-				return ferr
-			}
-			payloads[swap] = data
 			continue
 		}
 		if err != nil {
@@ -306,13 +289,101 @@ func RunJob(
 			return err
 		}
 
-		return emitPatches(plan, recovered, sliceSize, startSlice, missingPos, store, log)
+		return emitPatches(plan, discovered, recovered, sliceSize, startSlice, missingPos, store, log)
 	}
+}
+
+// loadRecoveryPayloads fetches the payload of every recovery ref, swapping in
+// spares for refs whose backing articles are dead — or, with no spares left,
+// dropping the ref (margin rows exist to be expendable). Refs are visited in
+// (file, offset) order so their backing articles stream through a bounded
+// prefetch window instead of piling up on the heap. Returned payloads are
+// exclusively owned — fresh buffers, or arena-backed when spill is set — and
+// exactly one slice long, ready to donate to the solver.
+func loadRecoveryPayloads(
+	ctx context.Context,
+	fetch ArticleFetcher,
+	par2Files []SetFile,
+	refs, spares []par2.RecoverySliceRef,
+	minRows int,
+	sliceSize int64,
+	alloc bufAlloc,
+	spill bool,
+	log *slog.Logger,
+) ([]par2.RecoverySliceRef, [][]byte, []par2.RecoverySliceRef, error) {
+	order := make([]int, len(refs))
+	for i := range order {
+		order[i] = i
+	}
+	sort.Slice(order, func(x, y int) bool {
+		a, b := refs[order[x]], refs[order[y]]
+		if a.FileIndex != b.FileIndex {
+			return a.FileIndex < b.FileIndex
+		}
+		return a.BodyOffset < b.BodyOffset
+	})
+
+	payloads := make([][]byte, len(refs))
+	kept := make([]bool, len(refs))
+	feed := newArticleFeed(ctx, fetch, recoveryArticleIDs(par2Files, refs, order, sliceSize))
+	defer feed.stop()
+	for _, i := range order {
+		for {
+			ref := refs[i]
+			data, err := readRangeFrom(feed.get, par2Files[ref.FileIndex], ref.BodyOffset, sliceSize)
+			if err != nil {
+				if errors.Is(err, nntppool.ErrArticleNotFound) {
+					if len(spares) > 0 {
+						log.WarnContext(ctx, "recovery slice unreachable, swapping in spare",
+							"exponent", ref.Exponent, "spare_exponent", spares[0].Exponent)
+						refs[i] = spares[0]
+						spares = spares[1:]
+						continue
+					}
+					log.WarnContext(ctx, "recovery slice unreachable, dropping margin row",
+						"exponent", ref.Exponent)
+					break
+				}
+				return nil, nil, nil, fmt.Errorf("par2repair: fetch recovery slice exponent %d: %w", ref.Exponent, err)
+			}
+			if spill {
+				buf, aerr := alloc(len(data))
+				if aerr != nil {
+					return nil, nil, nil, aerr
+				}
+				copy(buf, data)
+				data = buf
+			}
+			payloads[i] = data
+			kept[i] = true
+			break
+		}
+	}
+
+	outRefs := make([]par2.RecoverySliceRef, 0, len(refs))
+	outPayloads := make([][]byte, 0, len(refs))
+	for i, ok := range kept {
+		if ok {
+			outRefs = append(outRefs, refs[i])
+			outPayloads = append(outPayloads, payloads[i])
+		}
+	}
+	if len(outRefs) < minRows {
+		return nil, nil, nil, fmt.Errorf("%w: %d slice(s) missing but only %d recovery slice(s) reachable",
+			ErrUnrepairable, minRows, len(outRefs))
+	}
+	return outRefs, outPayloads, spares, nil
 }
 
 // sweep streams every article of the recovery set in order, assembles input
 // slices, verifies present slices against IFSC CRC32 and folds them into the
 // solver. Slices touched by dead articles are skipped (they are the unknowns).
+//
+// Surprises are first offered to the absorb callbacks, which reclassify the
+// affected slices as missing on the solver's margin rows: absorbDead for an
+// article that died between planning and sweeping, absorbCorrupt for a slice
+// whose CRC32 does not match. Only when a callback declines (margin
+// exhausted) does the sweep fail with the corresponding typed error.
 func sweep(
 	ctx context.Context,
 	plan *Plan,
@@ -321,6 +392,8 @@ func sweep(
 	solver *Solver,
 	startSlice []int64,
 	missingPos map[int]int,
+	absorbDead func(fi, ai int, artOff int64, a Article) bool,
+	absorbCorrupt func(global int) bool,
 	onArticle func(),
 	log *slog.Logger,
 ) error {
@@ -335,17 +408,21 @@ func sweep(
 			global := int(startSlice[fi]) + local
 			if _, isMissing := missingPos[global]; !isMissing {
 				if local < len(checks) && crc32.ChecksumIEEE(buf) != checks[local].CRC32 {
-					// Present but corrupt: signal the attempt loop to
-					// reclassify this slice as missing and re-sweep.
-					return &corruptSliceError{global: global, fileID: f.FileID, local: local}
+					// Present but corrupt: another unknown, absorbed on a
+					// margin row — or, with none left, signalled to the
+					// attempt loop for a replan.
+					if !absorbCorrupt(global) {
+						return &corruptSliceError{global: global, fileID: f.FileID, local: local}
+					}
+					log.WarnContext(ctx, "present slice failed CRC32, absorbed as missing on a margin row",
+						"global_slice", global)
+				} else {
+					solver.FoldPresent(global, buf)
 				}
-				solver.FoldPresent(global, buf)
 			}
 			local++
 			fill = 0
-			for i := range buf {
-				buf[i] = 0
-			}
+			clear(buf)
 			return nil
 		}
 
@@ -363,8 +440,9 @@ func sweep(
 			return nil
 		}
 
+		var artOff int64
 		slots, stop := prefetchArticles(ctx, fetch, f.Articles)
-		for _, a := range f.Articles {
+		for ai, a := range f.Articles {
 			if err := ctx.Err(); err != nil {
 				stop()
 				return err
@@ -379,6 +457,7 @@ func sweep(
 					stop()
 					return err
 				}
+				artOff += a.Size
 				continue
 			}
 			slot, ok := <-slots
@@ -389,14 +468,26 @@ func sweep(
 			}
 			res := <-slot
 			if res.err != nil {
-				stop()
 				if errors.Is(res.err, nntppool.ErrArticleNotFound) {
-					// An article that died between planning and sweeping needs
-					// a replan: surface a typed error so the service persists
-					// the discovery and the retry's plan includes it in the
-					// missing set.
+					// An article that died between planning and sweeping:
+					// absorbed on margin rows when possible, and patched with
+					// the planned dead articles. Otherwise surface a typed
+					// error so the service persists the discovery and the
+					// retry's plan includes it in the missing set.
+					if absorbDead(fi, ai, artOff, a) {
+						log.WarnContext(ctx, "article died mid-sweep, absorbed on margin rows",
+							"message_id", a.MessageID)
+						if err := feed(make([]byte, a.Size)); err != nil {
+							stop()
+							return err
+						}
+						artOff += a.Size
+						continue
+					}
+					stop()
 					return &SweepDeadArticleError{MessageID: a.MessageID, Err: res.err}
 				}
+				stop()
 				return fmt.Errorf("par2repair: fetch article %s: %w", a.MessageID, res.err)
 			}
 			if int64(len(res.data)) != a.Size {
@@ -407,6 +498,7 @@ func sweep(
 				stop()
 				return err
 			}
+			artOff += a.Size
 		}
 		stop()
 		// Final partial slice: buf is already zero-padded past fill.
@@ -580,13 +672,17 @@ func verifyRecovered(plan *Plan, idx *par2.Index, recovered [][]byte, startSlice
 // emitPatches cuts recovered slices back into dead-article payloads and
 // stores them atomically.
 //
-// Only plan.DeadArticles get patches. Corrupt-but-present slices reclassified
-// during the job are solved for (as unknowns) but deliberately NOT patched:
-// their articles are still served fine by providers, and the read path only
-// consults the patch store when an article is MISSING — a patch for a present
-// article would never be read.
-func emitPatches(plan *Plan, recovered [][]byte, sliceSize int64, startSlice []int64, missingPos map[int]int, store *PatchStore, log *slog.Logger) error {
-	for _, da := range plan.DeadArticles {
+// Only dead articles — the plan's, plus any discovered mid-sweep — get
+// patches. Corrupt-but-present slices reclassified during the job are solved
+// for (as unknowns) but deliberately NOT patched: their articles are still
+// served fine by providers, and the read path only consults the patch store
+// when an article is MISSING — a patch for a present article would never be
+// read.
+func emitPatches(plan *Plan, discovered []DeadArticle, recovered [][]byte, sliceSize int64, startSlice []int64, missingPos map[int]int, store *PatchStore, log *slog.Logger) error {
+	deadArticles := make([]DeadArticle, 0, len(plan.DeadArticles)+len(discovered))
+	deadArticles = append(deadArticles, plan.DeadArticles...)
+	deadArticles = append(deadArticles, discovered...)
+	for _, da := range deadArticles {
 		payload := make([]byte, da.Size)
 		first := startSlice[da.FileIdx] + da.FileStart/sliceSize
 		last := startSlice[da.FileIdx] + (da.FileStart+da.Size-1)/sliceSize
@@ -619,14 +715,6 @@ func fileForSlice(startSlice []int64, global int) int {
 		}
 	}
 	return 0
-}
-
-// readRange reads [off, off+n) from a file's concatenated article payloads,
-// fetching only the overlapping articles (with a per-job cache).
-func readRange(ctx context.Context, fetch ArticleFetcher, f SetFile, off, n int64, cache *articleCache) ([]byte, error) {
-	return readRangeFrom(func(id string) ([]byte, error) {
-		return fetchCached(ctx, fetch, id, cache)
-	}, f, off, n)
 }
 
 // readRangeFrom reads [off, off+n) of a file's concatenated article payloads

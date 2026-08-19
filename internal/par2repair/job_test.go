@@ -213,8 +213,8 @@ func TestRunJobSpillToDiskRepairs(t *testing.T) {
 	}
 }
 
-// Spill mode must survive the attempt loop: a corrupt present slice forces a
-// re-sweep with an extra recovery slice, all on disk-backed buffers.
+// Spill mode must absorb a corrupt present slice on its margin rows, all on
+// disk-backed buffers.
 func TestRunJobSpillToDiskSurvivesCorruptReplan(t *testing.T) {
 	fx := mkRepairFixture(t, 1024, 2048, 6, 1)
 	corruptID := "<b.rar-0@test>"
@@ -326,5 +326,138 @@ func TestRunJobUnrepairableWhenAllRecoveryDead(t *testing.T) {
 	err = RunJob(context.Background(), plan, fx.idx, fx.par2Files, fx.fetch, store, testLogger())
 	if !errors.Is(err, ErrUnrepairable) {
 		t.Fatalf("err = %v, want ErrUnrepairable", err)
+	}
+}
+
+// countFetches returns how many times messageID was successfully fetched.
+func (f *fakeFetcher) countFetches(messageID string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, id := range f.fetched {
+		if id == messageID {
+			n++
+		}
+	}
+	return n
+}
+
+// An article the plan thought live but that dies before the sweep reaches it
+// must be absorbed by the plan's margin recovery rows: the job completes in
+// one sweep and patches the newly dead article too.
+func TestRunJobAbsorbsMidSweepDeadArticle(t *testing.T) {
+	fx := mkRepairFixture(t, 1024, 2048, 6, 1)
+	plan, err := BuildPlan(fx.idx, fx.files, Caps{MaxRepairRatio: 0.5, MaxMemoryBytes: 64 << 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Recovery) <= len(plan.Missing) {
+		t.Fatal("fixture must produce a plan with margin rows")
+	}
+
+	// Kill a b.rar article after planning: the plan still marks it live.
+	lateDead := "<b.rar-1@test>"
+	lateOrig := fx.fetch.articles[lateDead]
+	delete(fx.fetch.articles, lateDead)
+
+	store := NewPatchStore(t.TempDir())
+	if err := RunJob(context.Background(), plan, fx.idx, fx.par2Files, fx.fetch, store, testLogger()); err != nil {
+		t.Fatalf("margin rows must absorb a mid-sweep dead article, got %v", err)
+	}
+
+	got, ok := store.Get(fx.deadMsgID)
+	if !ok || !bytes.Equal(got, fx.deadOrig) {
+		t.Fatal("planned dead article not repaired byte-exact")
+	}
+	got, ok = store.Get(lateDead)
+	if !ok || !bytes.Equal(got, lateOrig) {
+		t.Fatal("mid-sweep dead article not repaired byte-exact")
+	}
+	// One sweep only: no present article was read twice.
+	if n := fx.fetch.countFetches("<a.rar-0@test>"); n != 1 {
+		t.Fatalf("article <a.rar-0@test> fetched %d times, want 1 (single sweep)", n)
+	}
+}
+
+// A mid-sweep dead article with no margin rows left must still surface
+// SweepDeadArticleError so the service can persist the discovery and replan.
+func TestRunJobMidSweepDeadWithoutMarginSurfacesError(t *testing.T) {
+	// numRecovery=2 exactly covers the dead article's 2 missing slices:
+	// no margin, no spares.
+	fx := mkRepairFixture(t, 1024, 2048, 2, 1)
+	plan, err := BuildPlan(fx.idx, fx.files, Caps{MaxRepairRatio: 0.5, MaxMemoryBytes: 64 << 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	delete(fx.fetch.articles, "<b.rar-1@test>")
+
+	store := NewPatchStore(t.TempDir())
+	err = RunJob(context.Background(), plan, fx.idx, fx.par2Files, fx.fetch, store, testLogger())
+	var dead *SweepDeadArticleError
+	if !errors.As(err, &dead) || dead.MessageID != "<b.rar-1@test>" {
+		t.Fatalf("err = %v, want SweepDeadArticleError for <b.rar-1@test>", err)
+	}
+}
+
+// A corrupt present slice must be absorbed by a margin row in the same sweep,
+// not trigger a second full read of the release.
+func TestRunJobAbsorbsCorruptSliceWithoutResweep(t *testing.T) {
+	fx := mkRepairFixture(t, 1024, 2048, 6, 1)
+	corruptID := "<b.rar-0@test>"
+	corrupted := bytes.Clone(fx.fetch.articles[corruptID])
+	corrupted[10] ^= 0xFF
+	fx.fetch.articles[corruptID] = corrupted
+
+	plan, err := BuildPlan(fx.idx, fx.files, Caps{MaxRepairRatio: 0.5, MaxMemoryBytes: 64 << 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewPatchStore(t.TempDir())
+	if err := RunJob(context.Background(), plan, fx.idx, fx.par2Files, fx.fetch, store, testLogger()); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := store.Get(fx.deadMsgID)
+	if !ok || !bytes.Equal(got, fx.deadOrig) {
+		t.Fatal("repair with absorbed corrupt slice not byte-exact")
+	}
+	if n := fx.fetch.countFetches("<a.rar-0@test>"); n != 1 {
+		t.Fatalf("article <a.rar-0@test> fetched %d times, want 1 (corrupt slice must not force a re-sweep)", n)
+	}
+}
+
+// More corrupt slices than margin rows must fall back to the replan path:
+// one spare per overflow slice and a fresh sweep, whose recovery payloads are
+// refetched (the previous attempt's fold consumed the donated buffers).
+func TestRunJobCorruptOverflowFallsBackToReplan(t *testing.T) {
+	// sliceSize == artSize == 512: one slice per article. The dead a.rar
+	// article is 1 missing slice, so the plan carries 1+8 recovery rows;
+	// 12 volumes leave 3 spares.
+	fx := mkRepairFixture(t, 512, 512, 12, 1)
+	// Corrupt 10 b.rar articles: 8 absorbed on margin rows, 2 via replans.
+	for i := range 10 {
+		id := fmt.Sprintf("<b.rar-%d@test>", i)
+		corrupted := bytes.Clone(fx.fetch.articles[id])
+		corrupted[3] ^= 0xFF
+		fx.fetch.articles[id] = corrupted
+	}
+
+	plan, err := BuildPlan(fx.idx, fx.files, Caps{MaxRepairRatio: 0.5, MaxMemoryBytes: 64 << 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Recovery) != 9 || len(plan.SpareRecovery) != 3 {
+		t.Fatalf("recovery split = %d/%d, want 9/3", len(plan.Recovery), len(plan.SpareRecovery))
+	}
+	store := NewPatchStore(t.TempDir())
+	if err := RunJob(context.Background(), plan, fx.idx, fx.par2Files, fx.fetch, store, testLogger()); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := store.Get(fx.deadMsgID)
+	if !ok || !bytes.Equal(got, fx.deadOrig) {
+		t.Fatal("repair across corrupt-overflow replans not byte-exact")
+	}
+	// The replans really happened: present articles were swept more than once.
+	if n := fx.fetch.countFetches("<a.rar-0@test>"); n < 2 {
+		t.Fatalf("article <a.rar-0@test> fetched %d times, want >=2 (replan re-sweeps)", n)
 	}
 }

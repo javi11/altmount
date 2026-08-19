@@ -82,8 +82,9 @@ func TestBuildPlanSingleDeadArticle(t *testing.T) {
 	if plan.GlobalSlices != 10 {
 		t.Fatalf("GlobalSlices = %d", plan.GlobalSlices)
 	}
-	if len(plan.Recovery) != 2 || len(plan.SpareRecovery) != 4 {
-		t.Fatalf("recovery split = %d/%d, want 2/4", len(plan.Recovery), len(plan.SpareRecovery))
+	// 2 missing + up to planMargin extra rows for mid-sweep discoveries.
+	if len(plan.Recovery) != 6 || len(plan.SpareRecovery) != 0 {
+		t.Fatalf("recovery split = %d/%d, want 6/0", len(plan.Recovery), len(plan.SpareRecovery))
 	}
 	// Lowest exponents chosen first.
 	if plan.Recovery[0].Exponent != 0 || plan.Recovery[1].Exponent != 1 {
@@ -249,5 +250,45 @@ func TestBuildPlanRatioUsesMissingBytesNotSliceQuantized(t *testing.T) {
 	}
 	if len(plan.Missing) != 1 {
 		t.Fatalf("Missing = %v, want exactly the one slice holding the dead article", plan.Missing)
+	}
+}
+
+// TestBuildPlanMarginRespectsMemoryBudget shrinks the margin rather than let
+// it push an in-memory job over the budget and into disk spill.
+func TestBuildPlanMarginRespectsMemoryBudget(t *testing.T) {
+	content := bytes.Repeat([]byte{0x5A}, 10240)
+	idx := mkIndex(t, 1024, 6, map[string][]byte{"a.rar": content})
+	files := []SetFile{mkSetFile(t, idx, "a.rar", 10240, 2048, 1)}
+
+	// 2 missing slices of 1024 B fit in 4096 B; margin rows past 4 slices
+	// would not. Margin must shrink to 2, not force SpillToDisk.
+	plan, err := BuildPlan(idx, files, Caps{MaxRepairRatio: 0.5, MaxMemoryBytes: 4096})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.SpillToDisk {
+		t.Fatal("margin must not force an in-memory job to spill")
+	}
+	if len(plan.Recovery) != 4 || len(plan.SpareRecovery) != 2 {
+		t.Fatalf("recovery split = %d/%d, want 4/2", len(plan.Recovery), len(plan.SpareRecovery))
+	}
+}
+
+// TestBuildPlanSpillKeepsFullMargin: a plan already over the memory budget is
+// disk-backed anyway, so it keeps the full margin.
+func TestBuildPlanSpillKeepsFullMargin(t *testing.T) {
+	content := bytes.Repeat([]byte{0x5A}, 10240)
+	idx := mkIndex(t, 1024, 6, map[string][]byte{"a.rar": content})
+	files := []SetFile{mkSetFile(t, idx, "a.rar", 10240, 2048, 1)}
+
+	plan, err := BuildPlan(idx, files, Caps{MaxRepairRatio: 0.5, MaxMemoryBytes: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.SpillToDisk {
+		t.Fatal("fixture must produce a spill plan")
+	}
+	if len(plan.Recovery) != 6 {
+		t.Fatalf("Recovery = %d, want all 6 (full margin on a spill plan)", len(plan.Recovery))
 	}
 }
