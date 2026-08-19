@@ -14,6 +14,14 @@ function ratioToPercent(ratio: number | undefined): number {
 	return Math.round((ratio ?? 0.02) * 10000) / 100;
 }
 
+// sliderPos maps a percentage value to its position (0–100) on the slider's
+// linear 0.5–25 track, so scale labels line up with where the thumb lands.
+const SLIDER_MIN = 0.5;
+const SLIDER_MAX = 25;
+function sliderPos(value: number): number {
+	return ((value - SLIDER_MIN) / (SLIDER_MAX - SLIDER_MIN)) * 100;
+}
+
 const defaults: Par2RepairConfig = {
 	enabled: true,
 	max_repair_ratio: 0.02,
@@ -89,19 +97,24 @@ export function Par2RepairConfigSection({
 					<div className="space-y-2">
 						<input
 							type="range"
-							min="0.5"
-							max="25"
+							min={SLIDER_MIN}
+							max={SLIDER_MAX}
 							step="0.5"
 							value={ratioToPercent(data.max_repair_ratio)}
 							className="range range-primary range-sm w-full"
 							disabled={isReadOnly}
 							onChange={(e) => handleChange("max_repair_ratio", Number(e.target.value) / 100)}
 						/>
-						<div className="flex justify-between px-2 font-black text-base-content/50 text-xs">
-							<span>0.5%</span>
-							<span>2% (DEFAULT)</span>
-							<span>10% (TYPICAL PAR2)</span>
-							<span>25%</span>
+						<div className="relative h-4 font-black text-base-content/50 text-xs">
+							{/* Labels sit at their true positions on the linear 0.5–25 scale. */}
+							<span className="absolute left-0">0.5%</span>
+							<span className="-translate-x-1/2 absolute" style={{ left: `${sliderPos(2)}%` }}>
+								2% (DEFAULT)
+							</span>
+							<span className="-translate-x-1/2 absolute" style={{ left: `${sliderPos(10)}%` }}>
+								10% (TYPICAL PAR2)
+							</span>
+							<span className="absolute right-0">25%</span>
 						</div>
 					</div>
 					<p className="label whitespace-normal">
