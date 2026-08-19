@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -172,6 +173,34 @@ func (s *Service) SetRepairEnqueuer(re RepairEnqueuer) {
 	if s.processor != nil {
 		s.processor.SetRepairEnqueuer(re)
 	}
+}
+
+// ResumeWaitingRepair returns an import parked pending a PAR2 repair to the
+// pending queue, so the normal worker retries it — this time with the repaired
+// articles available from the local patch store.
+func (s *Service) ResumeWaitingRepair(ctx context.Context, nzbPath string) error {
+	item, err := s.database.Repository.GetQueueItemByNzbPath(ctx, nzbPath)
+	if err != nil {
+		return err
+	}
+	if item == nil || item.Status != database.QueueStatusWaitingRepair {
+		return nil
+	}
+	return s.database.Repository.UpdateQueueItemStatus(ctx, item.ID, database.QueueStatusPending, nil)
+}
+
+// FailWaitingRepair fails a parked import whose repair proved impossible,
+// which is the outcome it would have had before deferral existed.
+func (s *Service) FailWaitingRepair(ctx context.Context, nzbPath string, reason string) error {
+	item, err := s.database.Repository.GetQueueItemByNzbPath(ctx, nzbPath)
+	if err != nil {
+		return err
+	}
+	if item == nil || item.Status != database.QueueStatusWaitingRepair {
+		return nil
+	}
+	msg := "PAR2 repair could not rebuild the missing articles: " + reason
+	return s.database.Repository.UpdateQueueItemStatus(ctx, item.ID, database.QueueStatusFailed, &msg)
 }
 
 // SetPatchIndex wires the PAR2 patch store into the import availability sweep.
@@ -1402,6 +1431,20 @@ func (s *Service) cleanupHealthRecords(ctx context.Context, itemID int64, virtua
 
 // handleProcessingFailure handles when processing fails
 func (s *Service) handleProcessingFailure(ctx context.Context, item *database.ImportQueueItem, processingErr error) {
+	// A deferral is not a failure: the release is parked while a PAR2 repair
+	// rebuilds its missing articles. The repair service returns it to pending
+	// on success, or fails it when the damage proves unrepairable.
+	if errors.Is(processingErr, ErrDeferredForRepair) {
+		msg := "waiting for PAR2 repair to rebuild missing articles"
+		if err := s.database.Repository.UpdateQueueItemStatus(ctx, item.ID, database.QueueStatusWaitingRepair, &msg); err != nil {
+			s.log.ErrorContext(ctx, "Failed to park item pending repair", "queue_id", item.ID, "error", err)
+			return
+		}
+		s.log.InfoContext(ctx, "Import parked pending PAR2 repair",
+			"queue_id", item.ID, "file", item.NzbPath)
+		return
+	}
+
 	errorMessage := processingErr.Error()
 
 	// Log persistent indexer statistic

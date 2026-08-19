@@ -58,10 +58,31 @@ type Processor struct {
 	rarPartPattern2 *regexp.Regexp // pattern.r###
 }
 
+// ErrDeferredForRepair reports that an import was parked pending a PAR2
+// repair rather than failed. Archive-set volumes with missing articles cannot
+// be zero-filled — a holed volume breaks extraction — but PAR2 can rebuild
+// them byte-exactly, so dropping the release outright throws away a repair
+// that is most likely to succeed right now, while the recovery volumes are
+// still retrievable.
+var ErrDeferredForRepair = errors.New("import deferred pending PAR2 repair")
+
+// shouldDeferForRepair decides whether a damaged release waits for a PAR2
+// repair instead of being dropped. Deferring needs the feature enabled, PAR2
+// files in the NZB to repair from, and actual damage to repair.
+func shouldDeferForRepair(enabled, hasPar2, brokenInSet bool) bool {
+	return enabled && hasPar2 && brokenInSet
+}
+
 // RepairEnqueuer queues a file for background PAR2 repair (implemented by
 // par2repair.Service). Implementations must be non-blocking.
 type RepairEnqueuer interface {
 	Enqueue(ctx context.Context, filePath string, failingSegmentID string)
+}
+
+// NzbRepairEnqueuer queues a repair planned from an NZB, for releases deferred
+// before they were ever imported.
+type NzbRepairEnqueuer interface {
+	EnqueueNzb(ctx context.Context, nzbPath string, failingSegmentID string)
 }
 
 // SetRepairEnqueuer wires the PAR2 repair queue. Call during boot, before
@@ -74,6 +95,23 @@ func (proc *Processor) SetRepairEnqueuer(re RepairEnqueuer) {
 // as available during the fast-fail availability sweep.
 func (proc *Processor) SetPatchIndex(idx validation.PatchIndex) {
 	proc.patchIndex = idx
+}
+
+// queueNzbRepair queues an NZB-mode repair for a release that was deferred
+// before import, so the repair plans straight from the NZB (there is no file
+// metadata to plan from yet).
+func (proc *Processor) queueNzbRepair(ctx context.Context, nzbPath, failingSegmentID string) {
+	if proc.par2Repair == nil {
+		return
+	}
+	if nq, ok := proc.par2Repair.(NzbRepairEnqueuer); ok {
+		nq.EnqueueNzb(ctx, nzbPath, failingSegmentID)
+		return
+	}
+	if proc.log != nil {
+		proc.log.WarnContext(ctx, "Deferred import but the repair service cannot plan from an NZB",
+			"nzb", nzbPath)
+	}
 }
 
 // queueImportRepairs queues a PAR2 repair for every degraded file the import
@@ -328,6 +366,17 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 
 	brokenIdx := make(map[int]struct{})
 	degradedFiles := make(map[string]string)
+	// Damage inside an archive set: those volumes cannot be zero-filled, but
+	// PAR2 can rebuild them — track it so the caller can defer for repair.
+	archiveSetDamaged := false
+	var firstArchiveMissingID string
+	nzbHasPar2 := false
+	for _, f := range n.Files {
+		if filesystem.IsPar2File(f.Filename) {
+			nzbHasPar2 = true
+			break
+		}
+	}
 	missingIDs := make(map[string]struct{})
 	eligibleRegularCount := 0
 	tolerant := cfg.GetImportDamagePolicyTolerant()
@@ -368,6 +417,12 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 				}
 			}
 
+			if fastFailFiles[i].GroupKey != "" {
+				archiveSetDamaged = true
+				if firstArchiveMissingID == "" && len(result.MissingSegmentIDs) > 0 {
+					firstArchiveMissingID = result.MissingSegmentIDs[0]
+				}
+			}
 			brokenIdx[i] = struct{}{}
 			for _, id := range result.MissingSegmentIDs {
 				missingIDs[id] = struct{}{}
@@ -403,8 +458,27 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 			"eligible_files", eligibleRegularCount)
 	}
 
+	if shouldDeferForRepair(cfg.Par2Repair.EffectiveRepairOnImport(), nzbHasPar2, archiveSetDamaged) {
+		if proc.log != nil {
+			proc.log.InfoContext(ctx, "Deferring import: archive set has missing articles, queueing PAR2 repair",
+				"files", len(fastFailFiles),
+				"missing_segment", firstArchiveMissingID)
+		}
+		return nil, nil, nil, &DeferredRepairError{FirstMissingSegmentID: firstArchiveMissingID}
+	}
+
 	return brokenIdx, missingIDs, degradedFiles, nil
 }
+
+// DeferredRepairError carries the deferral out of the fast-fail sweep together
+// with the segment that proves the damage, so the repair plan has a starting
+// point.
+type DeferredRepairError struct {
+	FirstMissingSegmentID string
+}
+
+func (e *DeferredRepairError) Error() string { return ErrDeferredForRepair.Error() }
+func (e *DeferredRepairError) Unwrap() error { return ErrDeferredForRepair }
 
 // longestSampledRun maps missing segment IDs back to their indices in the
 // file's segment list and returns the longest run of consecutive missing
@@ -512,6 +586,13 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 		var fastFailErr error
 		brokenIdx, missingIDs, degradedFiles, fastFailErr = proc.preParseFastFail(ctx, n, cfg, queueID, category, downloadID)
 		if fastFailErr != nil {
+			// A deferral is not a failure: propagate it so the service parks
+			// the queue item pending the repair.
+			var deferred *DeferredRepairError
+			if errors.As(fastFailErr, &deferred) {
+				proc.queueNzbRepair(ctx, filePath, deferred.FirstMissingSegmentID)
+				return "", nil, fastFailErr
+			}
 			return "", nil, NewNonRetryableError("fast-fail segment check failed", fastFailErr)
 		}
 

@@ -37,7 +37,15 @@ type JobStore interface {
 	MarkUnrepairable(ctx context.Context, id int64, reason string) error
 	MarkRetry(ctx context.Context, id int64, reason string, nextAttempt time.Time) error
 	AppendDeadSegment(ctx context.Context, id int64, messageID string) error
+	EnqueueNzb(ctx context.Context, nzbPath string, failingSegmentID string) (bool, error)
 	ResetRunning(ctx context.Context) error
+}
+
+// ImportResumer returns an import parked pending a repair to the normal queue,
+// or fails it when the damage proved unrepairable. Optional: nil skips resume.
+type ImportResumer interface {
+	ResumeWaitingRepair(ctx context.Context, nzbPath string) error
+	FailWaitingRepair(ctx context.Context, nzbPath string, reason string) error
 }
 
 // HealthStore updates a file's health record (satisfied by
@@ -88,7 +96,8 @@ type Service struct {
 	cfg     func() Config
 	log     *slog.Logger
 	wake    chan struct{}
-	health  HealthStore // optional; nil skips health-record updates
+	health  HealthStore   // optional; nil skips health-record updates
+	resumer ImportResumer // optional; releases imports parked pending a repair
 
 	// progress holds live sweep progress per running job ID.
 	progressMu sync.Mutex
@@ -125,6 +134,31 @@ func (s *Service) PatchStore() *PatchStore { return s.store }
 // SetHealthStore wires the optional health repository so successful repairs
 // flip the file's health record back to healthy. Nil-safe: unset skips it.
 func (s *Service) SetHealthStore(h HealthStore) { s.health = h }
+
+// SetImportResumer wires the import queue so NZB-mode repairs release the
+// import they were queued for. Nil-safe.
+func (s *Service) SetImportResumer(r ImportResumer) { s.resumer = r }
+
+// EnqueueNzb registers a never-imported release for repair, planned from its
+// NZB. Used when an import defers an archive set whose volumes have missing
+// articles.
+func (s *Service) EnqueueNzb(ctx context.Context, nzbPath string, failingSegmentID string) {
+	if !s.cfg().Enabled {
+		return
+	}
+	created, err := s.repo.EnqueueNzb(ctx, nzbPath, failingSegmentID)
+	if err != nil {
+		s.log.ErrorContext(ctx, "Failed to enqueue NZB par2 repair", "error", err, "nzb", nzbPath)
+		return
+	}
+	if created {
+		s.log.InfoContext(ctx, "Queued PAR2 repair for deferred import", "nzb", nzbPath)
+		select {
+		case s.wake <- struct{}{}:
+		default:
+		}
+	}
+}
 
 // Enqueue registers a file for repair. Safe from any goroutine; a no-op when
 // the feature is disabled or an active job already exists. failingSegmentID
@@ -217,12 +251,14 @@ func (s *Service) handleOutcome(ctx context.Context, job *database.Par2RepairJob
 			s.log.ErrorContext(ctx, "Failed to mark repair job repaired", "error", err, "job", job.ID)
 		}
 		s.markFileHealthy(ctx, job.FilePath)
+		s.resumeImport(ctx, job)
 		s.pruneStore(ctx)
 	case errors.Is(err, ErrUnrepairable), errors.Is(err, ErrNothingToRepair):
 		s.log.WarnContext(ctx, "PAR2 repair not possible", "file", job.FilePath, "reason", err)
-		if err := s.repo.MarkUnrepairable(ctx, job.ID, err.Error()); err != nil {
-			s.log.ErrorContext(ctx, "Failed to mark repair job unrepairable", "error", err, "job", job.ID)
+		if mErr := s.repo.MarkUnrepairable(ctx, job.ID, err.Error()); mErr != nil {
+			s.log.ErrorContext(ctx, "Failed to mark repair job unrepairable", "error", mErr, "job", job.ID)
 		}
+		s.failImport(ctx, job, err.Error())
 	default:
 		if job.Attempts+1 >= maxJobAttempts {
 			s.log.ErrorContext(ctx, "PAR2 repair failed permanently after retries",
@@ -375,6 +411,28 @@ func (s *Service) resolveNzbFromDisk(ctx context.Context, nzbPath string, deadID
 		MaxRepairRatio: cfg.MaxRepairRatio,
 		MaxMemoryBytes: int64(cfg.MaxMemoryMB) << 20,
 	})
+}
+
+// resumeImport returns a parked import to the queue after its repair landed.
+func (s *Service) resumeImport(ctx context.Context, job *database.Par2RepairJob) {
+	if s.resumer == nil || !job.NzbPath.Valid || job.NzbPath.String == "" {
+		return
+	}
+	if err := s.resumer.ResumeWaitingRepair(ctx, job.NzbPath.String); err != nil {
+		s.log.ErrorContext(ctx, "Failed to resume import after repair", "error", err, "nzb", job.NzbPath.String)
+		return
+	}
+	s.log.InfoContext(ctx, "Resuming import after successful PAR2 repair", "nzb", job.NzbPath.String)
+}
+
+// failImport fails a parked import whose repair proved impossible.
+func (s *Service) failImport(ctx context.Context, job *database.Par2RepairJob, reason string) {
+	if s.resumer == nil || !job.NzbPath.Valid || job.NzbPath.String == "" {
+		return
+	}
+	if err := s.resumer.FailWaitingRepair(ctx, job.NzbPath.String, reason); err != nil {
+		s.log.ErrorContext(ctx, "Failed to fail parked import", "error", err, "nzb", job.NzbPath.String)
+	}
 }
 
 // mergeDeadIDs appends extra onto base, skipping duplicates, preserving order.

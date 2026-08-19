@@ -148,6 +148,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// its own (the import path builds readers deep inside the parser).
 	importerService.SetRepairEnqueuer(par2RepairService)
 	importerService.SetPatchIndex(par2RepairService.PatchStore())
+	par2RepairService.SetImportResumer(importerService)
 	usenet.SetDefaultPatchLookup(func(segID string) []byte {
 		p, ok := par2RepairService.PatchStore().Get(strings.Trim(segID, "<>"))
 		if !ok {
