@@ -462,6 +462,18 @@ class APIClient {
 		});
 	}
 
+	async cancelPar2Repair(id: number) {
+		return this.request<{ message: string }>(`/par2repair/${id}`, {
+			method: "DELETE",
+		});
+	}
+
+	async cancelAllPar2Repairs() {
+		return this.request<{ cancelled: number }>("/par2repair", {
+			method: "DELETE",
+		});
+	}
+
 	async resetAllHealthChecks() {
 		return this.request<{
 			message: string;

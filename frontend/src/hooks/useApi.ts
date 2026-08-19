@@ -217,6 +217,28 @@ export const useTriggerPar2Repair = () => {
 	});
 };
 
+export const useCancelPar2Repair = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: (id: number) => apiClient.cancelPar2Repair(id),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["par2repair"] });
+		},
+	});
+};
+
+export const useCancelAllPar2Repairs = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: () => apiClient.cancelAllPar2Repairs(),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["par2repair"] });
+		},
+	});
+};
+
 export const useResetAllHealthChecks = () => {
 	const queryClient = useQueryClient();
 
