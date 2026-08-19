@@ -50,10 +50,48 @@ type Processor struct {
 	log               *slog.Logger
 	broadcaster       *progress.ProgressBroadcaster // WebSocket progress broadcaster
 	recorder          HistoryRecorder
+	par2Repair        RepairEnqueuer // optional; queues PAR2 repairs at import time
 
 	// Pre-compiled regex patterns for RAR file sorting
 	rarPartPattern  *regexp.Regexp // pattern.part###.rar
 	rarPartPattern2 *regexp.Regexp // pattern.r###
+}
+
+// RepairEnqueuer queues a file for background PAR2 repair (implemented by
+// par2repair.Service). Implementations must be non-blocking.
+type RepairEnqueuer interface {
+	Enqueue(ctx context.Context, filePath string, failingSegmentID string)
+}
+
+// SetRepairEnqueuer wires the PAR2 repair queue. Call during boot, before
+// imports run.
+func (proc *Processor) SetRepairEnqueuer(re RepairEnqueuer) {
+	proc.par2Repair = re
+}
+
+// queueImportRepairs queues a PAR2 repair for every degraded file the import
+// actually wrote. degraded maps an NZB filename to its first confirmed-missing
+// segment ID; matching is by basename because import renames files (sanitizing,
+// PAR2 deobfuscation, rename-to-nzb-name).
+//
+// Repairing at import — rather than waiting for the first playback — matters
+// because the release's PAR2 volumes are most likely to still be retrievable
+// close to the post date. Opt-in via par2_repair.repair_on_import.
+func (proc *Processor) queueImportRepairs(ctx context.Context, enabled bool, writtenPaths []string, degraded map[string]string) {
+	if !enabled || proc.par2Repair == nil || len(degraded) == 0 {
+		return
+	}
+	for _, vp := range writtenPaths {
+		segID, ok := degraded[filepath.Base(vp)]
+		if !ok {
+			continue
+		}
+		if proc.log != nil {
+			proc.log.InfoContext(ctx, "Queueing PAR2 repair for degraded import",
+				"file", vp, "missing_segment", segID)
+		}
+		proc.par2Repair.Enqueue(ctx, vp, segID)
+	}
 }
 
 // NewProcessor creates a new NZB processor using metadata storage
@@ -176,9 +214,12 @@ func (proc *Processor) checkCancellation(ctx context.Context) error {
 // round-trips. Returns (brokenFileIndexes, knownMissingSegmentIDs, error).
 // Both maps are nil when no pool is available.
 // Returns ErrNoFilesProcessed (wrapped) when all eligible regular files are broken.
-func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, cfg *config.Config, queueID int, category *string, downloadID *string) (map[int]struct{}, map[string]struct{}, error) {
+// preParseFastFail returns the broken file indexes, the confirmed-missing
+// segment IDs, and degraded files (NZB filename -> first missing segment ID)
+// that import anyway under the tolerant damage policy.
+func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, cfg *config.Config, queueID int, category *string, downloadID *string) (map[int]struct{}, map[string]struct{}, map[string]string, error) {
 	if !proc.poolManager.HasPool() {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 
 	// Build the fast-fail input index-aligned with n.Files. PAR2 files keep their
@@ -224,7 +265,7 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 		proc.validationTimeout,
 	)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if !missing {
 		if proc.log != nil {
@@ -232,7 +273,7 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 				"files", len(fastFailFiles),
 				"duration", time.Since(probeStart))
 		}
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 
 	isStremioImport := (category != nil && *category == "stremio") || (downloadID != nil && strings.HasPrefix(*downloadID, "stremio:"))
@@ -242,7 +283,7 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 				"files", len(fastFailFiles),
 				"probe_duration", time.Since(probeStart))
 		}
-		return nil, nil, multifile.ErrNoFilesProcessed
+		return nil, nil, nil, multifile.ErrNoFilesProcessed
 	}
 
 	// Phase 2 (escalation): the probe found an unreachable segment, so map
@@ -273,10 +314,11 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 		fastFailTracker,
 	)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	brokenIdx := make(map[int]struct{})
+	degradedFiles := make(map[string]string)
 	missingIDs := make(map[string]struct{})
 	eligibleRegularCount := 0
 	tolerant := cfg.GetImportDamagePolicyTolerant()
@@ -310,6 +352,9 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 							"missing_sampled", len(result.MissingSegmentIDs),
 							"sampled", result.SampledCount)
 					}
+					if len(result.MissingSegmentIDs) > 0 {
+						degradedFiles[f.Filename] = result.MissingSegmentIDs[0]
+					}
 					continue // not broken: let it import
 				}
 			}
@@ -329,11 +374,11 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 	// this equality is logical-unit accurate: it holds only when every RAR set and
 	// every standalone regular file is broken — nothing healthy remains to import.
 	if eligibleRegularCount > 0 && len(brokenIdx) == eligibleRegularCount {
-		return nil, nil, multifile.ErrNoFilesProcessed
+		return nil, nil, nil, multifile.ErrNoFilesProcessed
 	}
 
 	if len(brokenIdx) == 0 {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 
 	if proc.log != nil {
@@ -349,7 +394,7 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 			"eligible_files", eligibleRegularCount)
 	}
 
-	return brokenIdx, missingIDs, nil
+	return brokenIdx, missingIDs, degradedFiles, nil
 }
 
 // longestSampledRun maps missing segment IDs back to their indices in the
@@ -425,6 +470,9 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 
 	var parsed *parser.ParsedNzb
 	var brokenIdx map[int]struct{}
+	// Degraded files (NZB filename -> first missing segment ID) that import
+	// anyway; used to queue PAR2 repairs once virtual paths are known.
+	var degradedFiles map[string]string
 
 	// Determine file type and parse accordingly
 	if strings.HasSuffix(strings.ToLower(filePath), strmFileExtension) {
@@ -453,7 +501,7 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 		proc.updateProgressWithStage(queueID, 0, "Checking segment availability")
 		var missingIDs map[string]struct{}
 		var fastFailErr error
-		brokenIdx, missingIDs, fastFailErr = proc.preParseFastFail(ctx, n, cfg, queueID, category, downloadID)
+		brokenIdx, missingIDs, degradedFiles, fastFailErr = proc.preParseFastFail(ctx, n, cfg, queueID, category, downloadID)
 		if fastFailErr != nil {
 			return "", nil, NewNonRetryableError("fast-fail segment check failed", fastFailErr)
 		}
@@ -686,6 +734,9 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 
 	// Update progress: complete
 	if err == nil {
+		// Damaged-but-imported files get a PAR2 repair queued now, while the
+		// release's recovery volumes are most likely still retrievable.
+		proc.queueImportRepairs(ctx, cfg.Par2Repair.EffectiveRepairOnImport(), writtenPaths, degradedFiles)
 		proc.updateProgress(queueID, 100)
 	} else if errors.Is(err, nntppool.ErrArticleNotFound) {
 		return result, writtenPaths, ErrArticlesNotFound

@@ -38,6 +38,7 @@ export interface Par2RepairConfig {
 	max_memory_mb?: number; // solver accumulator budget per job
 	max_concurrent_jobs?: number;
 	max_patch_store_mb?: number; // total patch-store size cap; 0 = unlimited
+	repair_on_import?: boolean; // queue a repair as soon as a damaged file imports
 }
 
 // WebDAV server configuration

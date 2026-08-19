@@ -165,6 +165,14 @@ func isFileAlreadyProcessed(metadataService *metadata.MetadataService, filePath 
 	return false
 }
 
+// SetRepairEnqueuer wires the PAR2 repair queue into the import processor so
+// degraded imports can queue a repair. Call during boot.
+func (s *Service) SetRepairEnqueuer(re RepairEnqueuer) {
+	if s.processor != nil {
+		s.processor.SetRepairEnqueuer(re)
+	}
+}
+
 // GetPostProcessor returns the post-processor coordinator
 func (s *Service) GetPostProcessor() *postprocessor.Coordinator {
 	return s.postProcessor

@@ -140,6 +140,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// payloads on the read path's hole branch.
 	par2RepairService := startPar2RepairService(ctx, cfg, repos.Par2RepairRepo, repos.HealthRepo, metadataService, poolManager, configManager.GetConfigGetter())
 
+	// Let degraded imports queue a PAR2 repair (opt-in via repair_on_import).
+	importerService.SetRepairEnqueuer(par2RepairService)
+
 	fs := initializeFilesystem(ctx, metadataService, repos.HealthRepo, arrsService, rcloneRCClient, poolManager, configManager.GetConfigGetter(), streamTracker, cacheSource, par2RepairService)
 
 	// 6. Setup web services

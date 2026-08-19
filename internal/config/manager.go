@@ -75,6 +75,19 @@ type Par2RepairConfig struct {
 	// MaxPatchStoreMB bounds the on-disk patch store size; oldest patches are
 	// evicted first when the cap is exceeded. 0 (default) means unlimited.
 	MaxPatchStoreMB int `yaml:"max_patch_store_mb" mapstructure:"max_patch_store_mb" json:"max_patch_store_mb,omitempty"`
+	// RepairOnImport queues a repair as soon as an import completes with
+	// confirmed missing segments, instead of waiting for the first playback or
+	// a health check. Off by default: every repair costs one full release
+	// download, so a large damaged backlog would be expensive. Worth enabling
+	// when your library outlives article retention — a release's PAR2 volumes
+	// are most likely to still be retrievable close to the post date.
+	RepairOnImport *bool `yaml:"repair_on_import" mapstructure:"repair_on_import" json:"repair_on_import,omitempty"`
+}
+
+// EffectiveRepairOnImport reports whether imports queue PAR2 repairs. Requires
+// the feature itself to be enabled; defaults to false when unset.
+func (p Par2RepairConfig) EffectiveRepairOnImport() bool {
+	return p.Enabled != nil && *p.Enabled && p.RepairOnImport != nil && *p.RepairOnImport
 }
 
 // NzblnkConfig configures the NZBLNK resolver (used for nzblnk:// link resolution via public indexers).
@@ -1637,6 +1650,7 @@ func DefaultConfig(configDir ...string) *Config {
 	repairEnabled := true
 	repairExponentialBackoff := true
 	par2RepairEnabled := true
+	par2RepairOnImport := false // opt-in: each repair costs a full release download
 
 	// Set paths based on whether we're running in Docker or have a specific config directory
 	var dbPath, metadataPath, logPath, rclonePath, cachePath, backupPath string
@@ -1807,6 +1821,7 @@ func DefaultConfig(configDir ...string) *Config {
 			MaxMemoryMB:       256,
 			MaxConcurrentJobs: 1,
 			MaxPatchStoreMB:   0, // unlimited by default
+			RepairOnImport:    &par2RepairOnImport,
 		},
 		SABnzbd: SABnzbdConfig{
 			Enabled:               &sabnzbdEnabled,

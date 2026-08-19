@@ -83,6 +83,28 @@ export function Par2RepairConfigSection({
 				</label>
 			</fieldset>
 
+			<fieldset className="fieldset">
+				<legend className="fieldset-legend">Repair on Import</legend>
+				<label className="label cursor-pointer justify-start gap-3">
+					<input
+						type="checkbox"
+						className="toggle toggle-primary"
+						checked={data.repair_on_import ?? false}
+						disabled={isReadOnly || !(data.enabled ?? true)}
+						onChange={(e) => handleChange("repair_on_import", e.target.checked)}
+					/>
+					<span className="label-text">
+						Repair damaged files as soon as they import, instead of waiting for playback
+					</span>
+				</label>
+				<p className="label whitespace-normal">
+					A release's PAR2 volumes are most likely to still be retrievable close to its post
+					date, so repairing at import can save files that would be unrepairable months later.
+					Off by default: each repair downloads the full release, so importing a large damaged
+					backlog is expensive.
+				</p>
+			</fieldset>
+
 			<div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
 				<fieldset className="fieldset sm:col-span-2">
 					<legend className="fieldset-legend">Max Repair Percentage</legend>
