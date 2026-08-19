@@ -35,9 +35,10 @@ export interface ConfigResponse {
 export interface Par2RepairConfig {
 	enabled?: boolean;
 	max_repair_ratio?: number; // fraction of a file's bytes repairable; PAR2 redundancy is the hard ceiling
-	max_memory_mb?: number; // solver accumulator budget per job
+	max_memory_mb?: number; // in-heap solver budget per job; larger repairs spill to disk
 	max_concurrent_jobs?: number;
 	max_patch_store_mb?: number; // total patch-store size cap; 0 = unlimited
+	patch_dir?: string; // where patches + solver scratch live; empty = <metadata_root>/patches
 	repair_on_import?: boolean; // queue a repair as soon as a damaged file imports
 }
 

@@ -68,13 +68,18 @@ type Par2RepairConfig struct {
 	// MaxRepairRatio caps how large a fraction of a file's bytes a repair may
 	// reconstruct. The release's PAR2 redundancy is always the hard ceiling.
 	MaxRepairRatio float64 `yaml:"max_repair_ratio" mapstructure:"max_repair_ratio" json:"max_repair_ratio,omitempty"`
-	// MaxMemoryMB bounds one job's solver accumulator memory.
+	// MaxMemoryMB bounds one job's in-heap solver memory; jobs needing more
+	// still run, backed by memory-mapped scratch files next to the patch store.
 	MaxMemoryMB int `yaml:"max_memory_mb" mapstructure:"max_memory_mb" json:"max_memory_mb,omitempty"`
 	// MaxConcurrentJobs bounds simultaneously running repair jobs.
 	MaxConcurrentJobs int `yaml:"max_concurrent_jobs" mapstructure:"max_concurrent_jobs" json:"max_concurrent_jobs,omitempty"`
 	// MaxPatchStoreMB bounds the on-disk patch store size; oldest patches are
 	// evicted first when the cap is exceeded. 0 (default) means unlimited.
 	MaxPatchStoreMB int `yaml:"max_patch_store_mb" mapstructure:"max_patch_store_mb" json:"max_patch_store_mb,omitempty"`
+	// PatchDir is where repaired article payloads (and the solver's transient
+	// scratch files) are stored. Empty (default) means <metadata_root>/patches.
+	// Applied at startup; changing it does not move existing patches.
+	PatchDir string `yaml:"patch_dir" mapstructure:"patch_dir" json:"patch_dir,omitempty"`
 	// RepairOnImport queues a repair as soon as an import completes with
 	// confirmed missing segments, instead of waiting for the first playback or
 	// a health check. Off by default: every repair costs one full release
@@ -82,6 +87,15 @@ type Par2RepairConfig struct {
 	// when your library outlives article retention — a release's PAR2 volumes
 	// are most likely to still be retrievable close to the post date.
 	RepairOnImport *bool `yaml:"repair_on_import" mapstructure:"repair_on_import" json:"repair_on_import,omitempty"`
+}
+
+// EffectivePatchDir resolves where repaired article payloads live: the
+// configured PatchDir, or "patches" under the metadata root when unset.
+func (p Par2RepairConfig) EffectivePatchDir(metadataRoot string) string {
+	if p.PatchDir != "" {
+		return p.PatchDir
+	}
+	return filepath.Join(metadataRoot, "patches")
 }
 
 // EffectiveRepairOnImport reports whether imports queue PAR2 repairs. Requires

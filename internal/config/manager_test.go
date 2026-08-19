@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -479,4 +480,14 @@ stremio:
 	assert.Equal(t, 500, cfg.Stremio.Prowlarr.CustomScores[`\b(2160p|4k)\b.*\b(remux|bdremux)\b`])
 	assert.Equal(t, 350, cfg.Stremio.Prowlarr.CustomScores[`\b(dv|dovi|dolby[ ._-]?vision)\b`])
 	assert.Equal(t, -100, cfg.Stremio.Prowlarr.CustomScores[`\b(aac[ ._-]?2\.0|stereo|mp3)\b`])
+}
+
+// The patch directory defaults next to the metadata root but can be pointed
+// anywhere (e.g. a larger disk for patches and solver scratch files).
+func TestPar2RepairEffectivePatchDir(t *testing.T) {
+	cfg := Par2RepairConfig{}
+	assert.Equal(t, filepath.Join("/meta", "patches"), cfg.EffectivePatchDir("/meta"))
+
+	cfg.PatchDir = "/mnt/big-disk/altmount-patches"
+	assert.Equal(t, "/mnt/big-disk/altmount-patches", cfg.EffectivePatchDir("/meta"))
 }

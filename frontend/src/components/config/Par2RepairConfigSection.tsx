@@ -28,6 +28,7 @@ const defaults: Par2RepairConfig = {
 	max_memory_mb: 256,
 	max_concurrent_jobs: 1,
 	max_patch_store_mb: 0,
+	patch_dir: "",
 	repair_on_import: false,
 };
 
@@ -158,7 +159,8 @@ export function Par2RepairConfigSection({
 						onChange={(e) => handleChange("max_memory_mb", Number(e.target.value))}
 					/>
 					<p className="label whitespace-normal">
-						Solver memory budget per job. Damage needing more than this is left to ARR replacement.
+						Solver memory budget per job. Repairs needing more still run, spilling to disk instead
+						of RAM.
 					</p>
 				</fieldset>
 
@@ -190,6 +192,23 @@ export function Par2RepairConfigSection({
 					<p className="label whitespace-normal">
 						Total size of stored repaired data; oldest patches are evicted first. 0 = unlimited.
 						Evicted patches regenerate on the next playback.
+					</p>
+				</fieldset>
+
+				<fieldset className="fieldset">
+					<legend className="fieldset-legend">Patch Directory</legend>
+					<input
+						type="text"
+						className="input input-bordered w-full max-w-md bg-base-100 font-mono text-sm"
+						placeholder="<metadata_root>/patches"
+						value={data.patch_dir ?? ""}
+						disabled={isReadOnly}
+						onChange={(e) => handleChange("patch_dir", e.target.value)}
+					/>
+					<p className="label whitespace-normal">
+						Where repaired data and the solver's temporary scratch files are stored. Point it at a
+						disk with room for large repairs. Empty uses the metadata folder. Applied on restart;
+						existing patches are not moved.
 					</p>
 				</fieldset>
 			</div>

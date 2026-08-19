@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -404,7 +403,7 @@ func startPar2RepairService(
 	fetcher := par2repair.NewPoolFetcher(func() (par2repair.BodyClient, error) {
 		return poolManager.GetPool()
 	}, poolManager)
-	patchStore := par2repair.NewPatchStore(filepath.Join(cfg.Metadata.RootPath, "patches"))
+	patchStore := par2repair.NewPatchStore(cfg.Par2Repair.EffectivePatchDir(cfg.Metadata.RootPath))
 	service := par2repair.NewService(
 		repo,
 		par2repair.NewMetadataSource(metadataService),
