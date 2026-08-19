@@ -31,8 +31,28 @@ type Par2RepairJob struct {
 	FailingSegmentID sql.NullString
 	DeadSegmentIDs   sql.NullString // JSON array of message IDs found dead mid-repair
 	NextAttemptAt    sql.NullTime
+	StartedAt        sql.NullTime // when the current/last attempt began running
+	FinishedAt       sql.NullTime // when the job reached a terminal state
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
+}
+
+// RunDuration reports how long the job's last attempt ran: the finished
+// duration for a terminal job, or the elapsed time so far for a running one.
+// Returns false when the job has not started.
+func (j *Par2RepairJob) RunDuration(now time.Time) (time.Duration, bool) {
+	if !j.StartedAt.Valid {
+		return 0, false
+	}
+	end := now
+	if j.FinishedAt.Valid {
+		end = j.FinishedAt.Time
+	}
+	d := end.Sub(j.StartedAt.Time)
+	if d < 0 {
+		return 0, false
+	}
+	return d, true
 }
 
 // DeadSegments unmarshals the persisted dead-segment message IDs. Returns an
@@ -118,9 +138,11 @@ func (r *Par2RepairRepository) EnqueueNzb(ctx context.Context, nzbPath string, f
 // no next_attempt_at or next_attempt_at <= now), flips it to running and
 // returns it. Returns nil when no job is due.
 func (r *Par2RepairRepository) ClaimNext(ctx context.Context, now time.Time) (*Par2RepairJob, error) {
+	// started_at is stamped on every claim and finished_at cleared: a retry
+	// re-runs the whole sweep, so the run clock belongs to this attempt.
 	row := r.db.QueryRowContext(ctx, `
 		UPDATE par2_repair_jobs
-		SET status = 'running', updated_at = ?
+		SET status = 'running', updated_at = ?, started_at = ?, finished_at = NULL
 		WHERE id = (
 			SELECT id FROM par2_repair_jobs
 			WHERE status = 'pending'
@@ -129,11 +151,13 @@ func (r *Par2RepairRepository) ClaimNext(ctx context.Context, now time.Time) (*P
 			LIMIT 1
 		)
 		RETURNING id, file_path, nzb_path, status, attempts, last_error, failing_segment_id,
-		          dead_segment_ids, next_attempt_at, created_at, updated_at`, now, now)
+		          dead_segment_ids, next_attempt_at, started_at, finished_at, created_at, updated_at`,
+		now, now, now)
 
 	job := &Par2RepairJob{}
 	err := row.Scan(&job.ID, &job.FilePath, &job.NzbPath, &job.Status, &job.Attempts, &job.LastError,
-		&job.FailingSegmentID, &job.DeadSegmentIDs, &job.NextAttemptAt, &job.CreatedAt, &job.UpdatedAt)
+		&job.FailingSegmentID, &job.DeadSegmentIDs, &job.NextAttemptAt,
+		&job.StartedAt, &job.FinishedAt, &job.CreatedAt, &job.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -147,10 +171,15 @@ func (r *Par2RepairRepository) ClaimNext(ctx context.Context, now time.Time) (*P
 // The retry errors that preceded a success are no longer true of the job, and
 // last_error is what the UI shows as the reason a repair did not work.
 func (r *Par2RepairRepository) MarkRepaired(ctx context.Context, id int64) error {
+	// finished_at comes from the Go clock, like started_at: CURRENT_TIMESTAMP is
+	// second-granularity, so a sub-second repair would appear to finish before
+	// it began.
+	now := time.Now().UTC()
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE par2_repair_jobs
-		SET status = ?, last_error = NULL, updated_at = CURRENT_TIMESTAMP
-		WHERE id = ?`, string(Par2RepairStatusRepaired), id)
+		SET status = ?, last_error = NULL,
+		    finished_at = ?, updated_at = ?
+		WHERE id = ?`, string(Par2RepairStatusRepaired), now, now, id)
 	if err != nil {
 		return fmt.Errorf("finish par2 repair job %d: %w", id, err)
 	}
@@ -164,10 +193,12 @@ func (r *Par2RepairRepository) MarkUnrepairable(ctx context.Context, id int64, r
 	if reason != "" {
 		lastErr = reason
 	}
+	now := time.Now().UTC()
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE par2_repair_jobs
-		SET status = ?, last_error = COALESCE(?, last_error), updated_at = CURRENT_TIMESTAMP
-		WHERE id = ?`, string(Par2RepairStatusUnrepairable), lastErr, id)
+		SET status = ?, last_error = COALESCE(?, last_error),
+		    finished_at = ?, updated_at = ?
+		WHERE id = ?`, string(Par2RepairStatusUnrepairable), lastErr, now, now, id)
 	if err != nil {
 		return fmt.Errorf("finish par2 repair job %d: %w", id, err)
 	}
@@ -228,7 +259,7 @@ func (r *Par2RepairRepository) List(ctx context.Context, limit int) ([]*Par2Repa
 	}
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, file_path, nzb_path, status, attempts, last_error, failing_segment_id,
-		       dead_segment_ids, next_attempt_at, created_at, updated_at
+		       dead_segment_ids, next_attempt_at, started_at, finished_at, created_at, updated_at
 		FROM par2_repair_jobs
 		ORDER BY updated_at DESC, id DESC
 		LIMIT ?`, limit)
@@ -241,7 +272,8 @@ func (r *Par2RepairRepository) List(ctx context.Context, limit int) ([]*Par2Repa
 	for rows.Next() {
 		job := &Par2RepairJob{}
 		if err := rows.Scan(&job.ID, &job.FilePath, &job.NzbPath, &job.Status, &job.Attempts, &job.LastError,
-			&job.FailingSegmentID, &job.DeadSegmentIDs, &job.NextAttemptAt, &job.CreatedAt, &job.UpdatedAt); err != nil {
+			&job.FailingSegmentID, &job.DeadSegmentIDs, &job.NextAttemptAt,
+			&job.StartedAt, &job.FinishedAt, &job.CreatedAt, &job.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan par2 repair job: %w", err)
 		}
 		jobs = append(jobs, job)

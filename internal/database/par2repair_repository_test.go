@@ -24,6 +24,8 @@ func setupPar2RepairSchema(t *testing.T, db *sql.DB) {
 			failing_segment_id TEXT,
 			dead_segment_ids TEXT,
 			next_attempt_at TIMESTAMP,
+			started_at TIMESTAMP,
+			finished_at TIMESTAMP,
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 		);
@@ -166,6 +168,71 @@ func TestPar2RepairMarkRepairedClearsLastError(t *testing.T) {
 	require.Len(t, jobs, 1)
 	assert.Equal(t, Par2RepairStatusRepaired, jobs[0].Status)
 	assert.False(t, jobs[0].LastError.Valid, "successful repair must clear the earlier failure")
+}
+
+// How long a repair ran is the main thing a user wants to know about one that
+// has finished, successfully or not: a repair streams the whole release, so it
+// is measured in minutes and the cost is worth reporting.
+func TestPar2RepairRecordsRunTimes(t *testing.T) {
+	repo, _ := newPar2RepairRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	for _, tc := range []struct {
+		name   string
+		finish func(id int64) error
+	}{
+		{"repaired", func(id int64) error { return repo.MarkRepaired(ctx, id) }},
+		{"unrepairable", func(id int64) error { return repo.MarkUnrepairable(ctx, id, "no recovery slices") }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := "/movies/" + tc.name + ".mkv"
+			_, err := repo.Enqueue(ctx, path, "")
+			require.NoError(t, err)
+
+			job, err := repo.ClaimNext(ctx, now)
+			require.NoError(t, err)
+			require.NotNil(t, job)
+			require.True(t, job.StartedAt.Valid, "claiming a job must stamp when it started running")
+			assert.False(t, job.FinishedAt.Valid, "a running job has not finished")
+
+			require.NoError(t, tc.finish(job.ID))
+
+			jobs, err := repo.List(ctx, 50)
+			require.NoError(t, err)
+			var got *Par2RepairJob
+			for _, j := range jobs {
+				if j.FilePath == path {
+					got = j
+				}
+			}
+			require.NotNil(t, got)
+			require.True(t, got.StartedAt.Valid, "started_at must survive the terminal update")
+			require.True(t, got.FinishedAt.Valid, "a finished job must record when it finished")
+			assert.False(t, got.FinishedAt.Time.Before(got.StartedAt.Time),
+				"finished_at must not precede started_at")
+		})
+	}
+}
+
+// A retry re-runs the work, so the elapsed time shown must be that of the
+// attempt in progress, not of the first one.
+func TestPar2RepairRetryRestartsRunTime(t *testing.T) {
+	repo, _ := newPar2RepairRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	_, err := repo.Enqueue(ctx, "/movies/a.mkv", "")
+	require.NoError(t, err)
+	first, err := repo.ClaimNext(ctx, now)
+	require.NoError(t, err)
+	require.NoError(t, repo.MarkRetry(ctx, first.ID, "transient", now))
+
+	second, err := repo.ClaimNext(ctx, now.Add(time.Hour))
+	require.NoError(t, err)
+	require.True(t, second.StartedAt.Valid)
+	assert.True(t, second.StartedAt.Time.After(first.StartedAt.Time),
+		"a re-claimed job must restart its run clock")
 }
 
 func TestPar2RepairAppendDeadSegment(t *testing.T) {

@@ -46,8 +46,13 @@ type Par2RepairJobResponse struct {
 	Attempts      int        `json:"attempts"`
 	LastError     *string    `json:"last_error,omitempty"`
 	NextAttemptAt *time.Time `json:"next_attempt_at,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
+	StartedAt     *time.Time `json:"started_at,omitempty"`
+	FinishedAt    *time.Time `json:"finished_at,omitempty"`
+	// DurationSeconds is how long the last attempt ran: final for a finished
+	// job, elapsed so far for a running one.
+	DurationSeconds *float64  `json:"duration_seconds,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 	// Sweep progress, present only while the job is running and a sweep is
 	// under way.
 	ProgressDone  *int `json:"progress_done,omitempty"`
@@ -70,6 +75,20 @@ func toPar2RepairJobResponse(job *database.Par2RepairJob) Par2RepairJobResponse 
 	if job.NextAttemptAt.Valid {
 		next := job.NextAttemptAt.Time
 		resp.NextAttemptAt = &next
+	}
+	if job.StartedAt.Valid {
+		started := job.StartedAt.Time
+		resp.StartedAt = &started
+	}
+	if job.FinishedAt.Valid {
+		finished := job.FinishedAt.Time
+		resp.FinishedAt = &finished
+	}
+	// Served rather than computed client-side so the number does not depend on
+	// the browser's clock agreeing with the server's.
+	if d, ok := job.RunDuration(time.Now().UTC()); ok {
+		secs := d.Seconds()
+		resp.DurationSeconds = &secs
 	}
 	return resp
 }

@@ -221,6 +221,10 @@ export interface Par2RepairJob {
 	attempts: number;
 	last_error?: string;
 	next_attempt_at?: string;
+	started_at?: string;
+	finished_at?: string;
+	/** How long the last attempt ran: final when finished, elapsed while running. */
+	duration_seconds?: number;
 	created_at: string;
 	updated_at: string;
 	// Sweep progress, present only while the job is running

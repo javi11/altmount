@@ -29,6 +29,8 @@ par2_repair:
 - **`repair_on_import`** — when an import finds confirmed missing segments, queue the repair immediately rather than waiting for someone to press play. This also covers **archive sets** (RAR/7z), which were previously dropped outright: a damaged set is parked as `waiting_repair` in the queue while PAR2 rebuilds its volumes, then imports automatically once the repair lands (or fails with the repair's reason if the damage proves unrepairable). Because repaired bytes exist only locally, the import availability sweep and segment reads consult the patch store, so a repaired release imports normally. The reason this matters is article lifetime: a release's PAR2 volumes are most likely to still be retrievable close to its post date, so a file imported today with three dead articles is repairable today but may not be six months from now. Off by default, because each repair downloads the full release — importing a large damaged backlog with this on is expensive.
 - **`max_patch_store_mb`** — caps the total size of stored patches; when exceeded, the oldest patches are evicted first. Safe because patches are regenerable — a later stream simply re-triggers the repair.
 
+The Health page lists recent repair jobs with live sweep progress, an estimated time remaining, and how long each job ran — reported for failed jobs too, since a repair has to stream the release before it can tell whether the damage is beyond its recovery data. When a repair cannot run, the reason is shown in plain language along with what to do about it.
+
 Repaired payloads live under `<metadata_root>/patches/`. They can be deleted at any time. After a successful repair the file's health status flips back to healthy.
 
 ## API

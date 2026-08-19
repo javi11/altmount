@@ -1,6 +1,6 @@
 import { CheckCircle, Clock, Loader2, Wrench, XCircle } from "lucide-react";
 import { Fragment } from "react";
-import { formatRelativeTime } from "../../../lib/utils";
+import { formatDuration, formatRelativeTime } from "../../../lib/utils";
 import type { Par2RepairJob, Par2RepairStatus } from "../../../types/api";
 import { parseRepairReason } from "./par2RepairReason";
 
@@ -61,6 +61,55 @@ function SweepProgress({ job }: { job: Par2RepairJob }) {
 				{percent}% ({done}/{total} articles)
 			</span>
 		</div>
+	);
+}
+
+/**
+ * Remaining time for a running sweep, extrapolated from the rate so far.
+ *
+ * A repair streams the entire release, so it runs for minutes to hours; a bare
+ * percentage does not tell the user whether to wait for it. Only shown once
+ * enough articles are done for the rate to mean anything.
+ */
+function estimateRemaining(job: Par2RepairJob): number | null {
+	const done = job.progress_done ?? 0;
+	const total = job.progress_total ?? 0;
+	const elapsed = job.duration_seconds ?? 0;
+	if (done < 5 || total <= done || elapsed <= 0) {
+		return null;
+	}
+	return (elapsed / done) * (total - done);
+}
+
+function RunTime({ job }: { job: Par2RepairJob }) {
+	if (job.duration_seconds === undefined) {
+		return <span className="text-base-content/40">—</span>;
+	}
+	const elapsed = formatDuration(Math.round(job.duration_seconds));
+
+	if (job.status === "running") {
+		const remaining = estimateRemaining(job);
+		return (
+			<div className="whitespace-nowrap">
+				<div>{elapsed}</div>
+				{remaining !== null && (
+					<div className="text-base-content/50 text-xs">
+						~{formatDuration(Math.round(remaining))} left
+					</div>
+				)}
+			</div>
+		);
+	}
+
+	// Finished, either way: how long it cost is worth reporting even when it
+	// failed, since the sweep downloads the release before it can know.
+	return (
+		<span
+			className="whitespace-nowrap"
+			title={job.finished_at ? `finished ${formatRelativeTime(job.finished_at)}` : undefined}
+		>
+			{elapsed}
+		</span>
 	);
 }
 
@@ -157,6 +206,7 @@ export function Par2RepairSection({ jobs }: Par2RepairSectionProps) {
 								<th>File</th>
 								<th>Status</th>
 								<th>Progress</th>
+								<th>Time</th>
 								<th>Attempts</th>
 								<th>Updated</th>
 							</tr>
@@ -184,12 +234,15 @@ export function Par2RepairSection({ jobs }: Par2RepairSectionProps) {
 												</span>
 											)}
 										</td>
+										<td className="text-sm">
+											<RunTime job={job} />
+										</td>
 										<td>{job.attempts}</td>
 										<td className="whitespace-nowrap text-base-content/60 text-sm">
 											{formatRelativeTime(job.updated_at)}
 										</td>
 									</tr>
-									<ReasonRow job={job} columns={5} />
+									<ReasonRow job={job} columns={6} />
 								</Fragment>
 							))}
 						</tbody>

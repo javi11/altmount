@@ -32,6 +32,8 @@ func newTestRepo(t *testing.T) *database.Par2RepairRepository {
 			failing_segment_id TEXT,
 			dead_segment_ids TEXT,
 			next_attempt_at TIMESTAMP,
+			started_at TIMESTAMP,
+			finished_at TIMESTAMP,
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 		);
