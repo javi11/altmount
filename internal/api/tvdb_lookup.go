@@ -109,13 +109,6 @@ func resolveSeriesMetadataFromIMDb(ctx context.Context, imdbID string) (tvdbID, 
 	return tvdbID, title, nil
 }
 
-// resolveTVDBFromIMDb resolves a TVDB ID from an IMDb ID via the TVMaze lookup API.
-// Returns an empty ID without error when the mapping does not exist.
-func resolveTVDBFromIMDb(ctx context.Context, imdbID string) (string, error) {
-	tvdbID, _, err := resolveSeriesMetadataFromIMDb(ctx, imdbID)
-	return tvdbID, err
-}
-
 type cinemetaMovieLookupResponse struct {
 	Meta struct {
 		Name      string `json:"name"`

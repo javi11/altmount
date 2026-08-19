@@ -166,7 +166,8 @@ func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 	// 1. Check local Altmount library in file_health if library streams are enabled
 	if cfg.Stremio.EffectiveIncludeLibraryStreams() && s.healthRepo != nil {
 		selector := &stremioEpisodeSelector{Season: season, Episode: episode}
-		if streamType == "movie" {
+		switch streamType {
+		case "movie":
 			tmdbID, movieTitle, movieYear, _ := resolveMovieMetadataFromIMDb(ctx, imdbID)
 			if healthyFiles, err := s.healthRepo.FindHealthyFilesForMovie(ctx, movieTitle, movieYear, tmdbID); err == nil {
 				for _, h := range healthyFiles {
@@ -181,7 +182,7 @@ func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 					}
 				}
 			}
-		} else if streamType == "series" {
+		case "series":
 			tvdbIDStr, seriesTitle, _ := resolveSeriesMetadataFromIMDb(ctx, imdbID)
 			tvdbID, _ := strconv.Atoi(tvdbIDStr)
 			if healthyFiles, err := s.healthRepo.FindHealthyFilesForSeries(ctx, seriesTitle, tvdbID); err == nil {
@@ -325,18 +326,6 @@ func stremioCachedPredicate(cached []*database.ImportQueueItem, ttlHours int, no
 	}
 }
 
-func stremioExtractImdbID(metaRaw *string) string {
-	if metaRaw == nil || *metaRaw == "" {
-		return ""
-	}
-	var data struct {
-		ImdbID string `json:"imdb_id"`
-	}
-	if err := json.Unmarshal([]byte(*metaRaw), &data); err == nil && data.ImdbID != "" {
-		return data.ImdbID
-	}
-	return ""
-}
 // half (failed import_queue rows) with the process-local half (failures that leave no
 // failed row -- see stremioFailureCache).
 //
