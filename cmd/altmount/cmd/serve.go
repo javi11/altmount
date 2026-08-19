@@ -200,12 +200,15 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 	})
 
-	healthWorker, librarySyncWorker, err := startHealthWorker(ctx, cfg, repos.HealthRepo, poolManager, configManager, rcloneRCClient, arrsService, importerService, progressBroadcaster)
+	healthWorker, librarySyncWorker, err := startHealthWorker(ctx, cfg, repos.HealthRepo, poolManager, configManager, rcloneRCClient, arrsService, importerService, progressBroadcaster, par2RepairService)
 	if err != nil {
 		logger.Warn("Health worker initialization failed", "err", err)
 	}
 	if healthWorker != nil {
 		apiServer.SetHealthWorker(healthWorker)
+	}
+	if par2RepairService != nil {
+		apiServer.SetPar2RepairEnqueuer(par2RepairService)
 	}
 	if librarySyncWorker != nil {
 		apiServer.SetLibrarySyncWorker(librarySyncWorker)

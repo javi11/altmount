@@ -58,6 +58,18 @@ type WorkerStats struct {
 }
 
 // HealthWorker manages continuous health monitoring and manual check requests
+// Par2RepairEnqueuer queues a file for background PAR2 repair (implemented by
+// par2repair.Service).
+type Par2RepairEnqueuer interface {
+	Enqueue(ctx context.Context, filePath string, failingSegmentID string)
+}
+
+// SetPar2RepairEnqueuer wires the PAR2 repair queue into the degraded-verdict
+// path. Call during boot, before the worker starts.
+func (hw *HealthWorker) SetPar2RepairEnqueuer(re Par2RepairEnqueuer) {
+	hw.par2Repair = re
+}
+
 type HealthWorker struct {
 	healthChecker       *HealthChecker
 	healthRepo          *database.HealthRepository
@@ -66,6 +78,7 @@ type HealthWorker struct {
 	importerService     importer.ImportService
 	configGetter        config.ConfigGetter
 	progressBroadcaster *progress.ProgressBroadcaster // optional, may be nil
+	par2Repair          Par2RepairEnqueuer            // optional, may be nil
 
 	// Worker state
 	status       WorkerStatus
@@ -108,6 +121,7 @@ func NewHealthWorker(
 		status:              WorkerStatusStopped,
 		stopChan:            make(chan struct{}),
 		activeChecks:        make(map[string]context.CancelFunc),
+		// par2Repair is wired post-construction via SetPar2RepairEnqueuer.
 		stats: WorkerStats{
 			Status: WorkerStatusStopped,
 		},
@@ -449,11 +463,17 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 		update.ScheduledCheckAt = nextCheck
 
 		sideEffect = func() error {
-			slog.InfoContext(ctx, "File degraded: missing segments are within padding caps, skipping repair",
+			slog.InfoContext(ctx, "File degraded: missing segments are within padding caps, skipping ARR repair",
 				"file_path", fh.FilePath,
 				"total_missing", event.Classification.TotalMissing,
 				"longest_run", event.Classification.LongestRun,
 				"next_check", nextCheck)
+			// Degraded damage is exactly what background PAR2 repair exists
+			// for: attempt to restore the zero-filled bytes byte-exact. The
+			// repair queue dedups; ARR replacement stays out of the picture.
+			if hw.par2Repair != nil {
+				hw.par2Repair.Enqueue(ctx, fh.FilePath, "")
+			}
 			return hw.metadataService.UpdateFileStatus(fh.FilePath, metapb.FileStatus_FILE_STATUS_DEGRADED)
 		}
 		return update, sideEffect

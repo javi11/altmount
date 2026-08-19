@@ -131,6 +131,7 @@ func (mvf *MetadataVirtualFile) onHole(segIndex int, segID string) holes.Decisio
 		mvf.padRecorder.enqueue(padEvent{
 			name:          mvf.name,
 			segIndex:      segIndex,
+			segID:         segID,
 			sourceNzbPath: mvf.holeMeta.sourceNzbPath,
 			fileSize:      mvf.holeMeta.fileSize,
 			total:         total,

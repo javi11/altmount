@@ -132,9 +132,11 @@ func initializeFilesystem(
 		cacheSource,
 	)
 
-	// Serve PAR2-repaired article payloads on the hole read path.
+	// Serve PAR2-repaired article payloads on the hole read path, and queue
+	// repairs when playback hits missing articles.
 	if par2RepairService != nil {
 		metadataRemoteFile.SetPatchSource(par2RepairService.PatchStore())
+		metadataRemoteFile.SetRepairEnqueuer(par2RepairService)
 	}
 
 	// Create filesystem backed by metadata
@@ -435,6 +437,7 @@ func startHealthWorker(
 	arrsService *arrs.Service,
 	importerService importer.ImportService,
 	broadcaster *progress.ProgressBroadcaster,
+	par2RepairService *par2repair.Service,
 ) (*health.HealthWorker, *health.LibrarySyncWorker, error) {
 	// Create metadata service for health worker
 	metadataService := metadata.NewMetadataService(cfg.Metadata.RootPath)
@@ -457,6 +460,11 @@ func startHealthWorker(
 		configManager.GetConfigGetter(),
 		broadcaster,
 	)
+
+	// Degraded verdicts attempt PAR2 repair before anything else.
+	if par2RepairService != nil {
+		healthWorker.SetPar2RepairEnqueuer(par2RepairService)
+	}
 
 	// Create library sync worker (always create, but only start if enabled)
 	librarySyncWorker := health.NewLibrarySyncWorker(
