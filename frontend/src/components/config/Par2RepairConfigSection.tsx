@@ -76,24 +76,37 @@ export function Par2RepairConfigSection({
 			</fieldset>
 
 			<div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-				<fieldset className="fieldset">
+				<fieldset className="fieldset sm:col-span-2">
 					<legend className="fieldset-legend">Max Repair Percentage</legend>
-					<label className="input input-bordered flex w-full max-w-48 items-center gap-2 bg-base-100">
+					<div className="flex items-center justify-between">
+						<span className="text-base-content/60 text-xs">
+							Share of a file's bytes a repair may reconstruct
+						</span>
+						<div className="font-black font-mono text-lg text-primary">
+							{ratioToPercent(data.max_repair_ratio)}%
+						</div>
+					</div>
+					<div className="space-y-2">
 						<input
-							type="number"
-							className="grow font-mono text-sm"
-							min={0}
-							max={100}
-							step={0.5}
+							type="range"
+							min="0.5"
+							max="25"
+							step="0.5"
 							value={ratioToPercent(data.max_repair_ratio)}
+							className="range range-primary range-sm w-full"
 							disabled={isReadOnly}
 							onChange={(e) => handleChange("max_repair_ratio", Number(e.target.value) / 100)}
 						/>
-						<span className="text-base-content/60">%</span>
-					</label>
+						<div className="flex justify-between px-2 font-black text-base-content/50 text-xs">
+							<span>0.5%</span>
+							<span>2% (DEFAULT)</span>
+							<span>10% (TYPICAL PAR2)</span>
+							<span>25%</span>
+						</div>
+					</div>
 					<p className="label whitespace-normal">
-						Share of a file's bytes a repair may reconstruct (2% matches the zero-fill tolerance).
-						The release's PAR2 redundancy is always the hard ceiling.
+						2% matches the zero-fill tolerance; posts rarely carry more than 10% recovery data, and
+						the release's PAR2 redundancy is always the hard ceiling.
 					</p>
 				</fieldset>
 
