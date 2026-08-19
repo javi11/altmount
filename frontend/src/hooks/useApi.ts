@@ -192,9 +192,17 @@ export const usePar2RepairJobs = () => {
 	return useQuery({
 		queryKey: ["par2repair", "jobs"],
 		queryFn: () => apiClient.getPar2RepairJobs(),
-		// Poll faster while a repair is actively sweeping, slower when idle.
+		// Repairs are started by imports, playback and health checks, none of
+		// which the page hears about — polling is the only way this list learns
+		// a job exists, so it has to be quick enough to feel live.
 		refetchInterval: (query) =>
-			query.state.data?.some((job) => job.status === "running") ? 2000 : 15000,
+			query.state.data?.some((job) => job.status === "running") ? 2000 : 5000,
+		// The interval pauses while the tab is hidden, and the app disables
+		// focus refetching globally; without this the list is frozen at whatever
+		// it showed when the user last looked away, and only a manual reload
+		// fixes it.
+		refetchOnWindowFocus: true,
+		staleTime: 0,
 	});
 };
 
