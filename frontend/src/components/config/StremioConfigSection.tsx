@@ -1,81 +1,20 @@
-import { Check, Copy, ExternalLink, RefreshCw, Save, Tv, X } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
-import { copyToClipboard } from "../../lib/utils";
+import { AlertTriangle, RotateCcw, Save, Tv } from "lucide-react";
+import { useEffect, useState } from "react";
 import type {
 	ConfigResponse,
 	ProwlarrConfig,
-	ProwlarrIndexer,
+	StreamScoringConfig,
 	StremioConfig,
+	StremioIndexersConfig,
 } from "../../types/config";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
-
-interface TagInputProps {
-	tags: string[];
-	onChange: (tags: string[]) => void;
-	disabled?: boolean;
-	placeholder?: string;
-	parseValue?: (raw: string) => string | null;
-}
-
-function TagInput({
-	tags,
-	onChange,
-	disabled = false,
-	placeholder = "Add...",
-	parseValue,
-}: TagInputProps) {
-	const [inputValue, setInputValue] = useState("");
-
-	const addTag = useCallback(
-		(raw: string) => {
-			const value = parseValue ? parseValue(raw) : raw.trim();
-			if (value && !tags.includes(value)) {
-				onChange([...tags, value]);
-			}
-		},
-		[tags, onChange, parseValue],
-	);
-
-	const commitAndClear = useCallback(() => {
-		addTag(inputValue);
-		setInputValue("");
-	}, [inputValue, addTag]);
-
-	return (
-		<div className="flex min-h-10 min-w-0 flex-wrap gap-2 rounded-box border border-base-300 bg-base-100 p-2">
-			{tags.map((tag) => (
-				<span key={String(tag)} className="badge badge-neutral gap-1">
-					{String(tag)}
-					{!disabled && (
-						<button
-							type="button"
-							aria-label={`Remove ${tag}`}
-							onClick={() => onChange(tags.filter((t) => t !== tag))}
-						>
-							<X className="h-3 w-3" />
-						</button>
-					)}
-				</span>
-			))}
-			{!disabled && (
-				<input
-					type="text"
-					className="input input-ghost input-xs w-28 min-w-0 focus:outline-none"
-					placeholder={placeholder}
-					value={inputValue}
-					onChange={(e) => setInputValue(e.target.value)}
-					onKeyDown={(e) => {
-						if (e.key === "Enter" || e.key === ",") {
-							e.preventDefault();
-							commitAndClear();
-						}
-					}}
-					onBlur={commitAndClear}
-				/>
-			)}
-		</div>
-	);
-}
+import { FilterExclusionsCard } from "./stremio/FilterExclusionsCard";
+import { IndexersConfigCard } from "./stremio/IndexersConfigCard";
+import { ReleaseScoreSandbox } from "./stremio/ReleaseScoreSandbox";
+import { StreamRoutingCard } from "./stremio/StreamRoutingCard";
+import { StremioActionBar } from "./stremio/StremioActionBar";
+import { getDefaultScoringConfig, hydrateScoringFromProwlarr } from "./stremio/scoringPresets";
+import { TrashScoringCard } from "./stremio/TrashScoringCard";
 
 interface StremioConfigSectionProps {
 	config: ConfigResponse;
@@ -86,19 +25,54 @@ interface StremioConfigSectionProps {
 
 const DEFAULT_PROWLARR: ProwlarrConfig = {
 	enabled: false,
-	host: "http://localhost:9696",
+	host: "",
 	api_key: "",
 	categories: [2000, 2010, 2030, 2040, 2045, 2060, 5000, 5010, 5030, 5040],
 	indexers: [],
+	preferred_indexers: [],
+	preferred_indexer_names: [],
 	languages: [],
+	preferred_languages: [],
 	qualities: [],
+	exclude_keywords: [],
+	custom_scores: {},
 };
 
-function resolveProwlarr(p: ProwlarrConfig | undefined): ProwlarrConfig {
-	const base = p ?? DEFAULT_PROWLARR;
+function initializeStremioFormData(config: ConfigResponse): StremioConfig {
+	const stremio = config.stremio;
+	const prowlarr = stremio?.prowlarr ?? DEFAULT_PROWLARR;
+
+	const scoring = hydrateScoringFromProwlarr(stremio?.scoring, prowlarr);
+	const indexers: StremioIndexersConfig = stremio?.indexers || {
+		provider: "prowlarr",
+		user_agent_mode: "auto",
+		custom_user_agent: "",
+		prowlarr: prowlarr,
+		newsnab: [],
+	};
+
 	return {
-		...base,
-		categories: base.categories?.length ? base.categories : DEFAULT_PROWLARR.categories,
+		enabled: stremio?.enabled ?? false,
+		addon_name: stremio?.addon_name ?? "AltMount Usenet",
+		addon_description: stremio?.addon_description ?? "Stream from Usenet via Prowlarr",
+		base_url: stremio?.base_url ?? "",
+		direct_stream: stremio?.direct_stream ?? true,
+		show_cached_indicator: stremio?.show_cached_indicator ?? true,
+		fallback_timeout_ms: stremio?.fallback_timeout_ms ?? 3500,
+		max_retries: stremio?.max_retries ?? 2,
+		stream_ttl_seconds: stremio?.stream_ttl_seconds ?? 86400,
+		nzb_ttl_hours: stremio?.nzb_ttl_hours ?? 24,
+		failed_release_ttl_hours: stremio?.failed_release_ttl_hours ?? 24,
+		max_fallback_releases: stremio?.max_fallback_releases ?? 2,
+		fast_fail_header_only: stremio?.fast_fail_header_only ?? true,
+		indexers,
+		scoring,
+		prowlarr: {
+			...DEFAULT_PROWLARR,
+			...prowlarr,
+			exclude_keywords: scoring.exclude_keywords || prowlarr.exclude_keywords || [],
+			preferred_languages: scoring.preferred_languages || prowlarr.preferred_languages || [],
+		},
 	};
 }
 
@@ -108,455 +82,219 @@ export function StremioConfigSection({
 	isReadOnly = false,
 	isUpdating = false,
 }: StremioConfigSectionProps) {
-	const [formData, setFormData] = useState<StremioConfig>({
-		enabled: config.stremio?.enabled ?? false,
-		nzb_ttl_hours: config.stremio?.nzb_ttl_hours ?? 24,
-		failed_release_ttl_hours: config.stremio?.failed_release_ttl_hours ?? 24,
-		max_fallback_releases: config.stremio?.max_fallback_releases ?? 2,
-		base_url: config.stremio?.base_url ?? "",
-		prowlarr: resolveProwlarr(config.stremio?.prowlarr),
-	});
+	const [formData, setFormData] = useState<StremioConfig>(() => initializeStremioFormData(config));
+	const [initialSnapshot, setInitialSnapshot] = useState<string>(() =>
+		JSON.stringify(initializeStremioFormData(config)),
+	);
 	const [hasChanges, setHasChanges] = useState(false);
-	const [urlCopied, setUrlCopied] = useState(false);
-	const [indexers, setIndexers] = useState<ProwlarrIndexer[]>([]);
-	const [loadingIndexers, setLoadingIndexers] = useState(false);
-	const [indexersError, setIndexersError] = useState<string | null>(null);
+	const [saveError, setSaveError] = useState<string | null>(null);
 
+	// Sync from external config updates (e.g. reload)
 	useEffect(() => {
-		setFormData({
-			enabled: config.stremio?.enabled ?? false,
-			nzb_ttl_hours: config.stremio?.nzb_ttl_hours ?? 24,
-			failed_release_ttl_hours: config.stremio?.failed_release_ttl_hours ?? 24,
-			max_fallback_releases: config.stremio?.max_fallback_releases ?? 2,
-			base_url: config.stremio?.base_url ?? "",
-			prowlarr: resolveProwlarr(config.stremio?.prowlarr),
-		});
+		const initialized = initializeStremioFormData(config);
+		setFormData(initialized);
+		setInitialSnapshot(JSON.stringify(initialized));
 		setHasChanges(false);
-	}, [config.stremio]);
+		setSaveError(null);
+	}, [config]);
 
-	const markChanged = (updated: StremioConfig) => {
-		const orig = config.stremio;
-		const changed =
-			updated.enabled !== (orig?.enabled ?? false) ||
-			updated.nzb_ttl_hours !== (orig?.nzb_ttl_hours ?? 24) ||
-			updated.failed_release_ttl_hours !== (orig?.failed_release_ttl_hours ?? 24) ||
-			updated.max_fallback_releases !== (orig?.max_fallback_releases ?? 2) ||
-			updated.base_url !== (orig?.base_url ?? "") ||
-			JSON.stringify(updated.prowlarr) !== JSON.stringify(orig?.prowlarr ?? DEFAULT_PROWLARR);
-		setHasChanges(changed);
+	const updateFormData = (patch: Partial<StremioConfig>) => {
+		setFormData((prev) => {
+			const updated = { ...prev, ...patch };
+			const isDirty = JSON.stringify(updated) !== initialSnapshot;
+			setHasChanges(isDirty);
+			return updated;
+		});
 	};
 
-	const update = (patch: Partial<StremioConfig>) => {
-		const updated = { ...formData, ...patch };
-		setFormData(updated);
-		markChanged(updated);
-	};
-
-	const updateProwlarr = (patch: Partial<ProwlarrConfig>) => {
-		const updated = { ...formData, prowlarr: { ...formData.prowlarr, ...patch } };
-		setFormData(updated);
-		markChanged(updated);
-	};
-
-	const loadIndexers = useCallback(async () => {
-		setLoadingIndexers(true);
-		setIndexersError(null);
-		try {
-			const response = await fetch("/api/prowlarr/indexers", {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					host: formData.prowlarr?.host ?? "",
-					api_key: formData.prowlarr?.api_key ?? "",
-				}),
-			});
-			const data = await response.json();
-			if (data.success) {
-				setIndexers((data.data as ProwlarrIndexer[]) ?? []);
-			} else {
-				setIndexersError(data.error?.message || data.error || "Failed to load indexers");
+	const handleScoringChange = (updatedScoring: StreamScoringConfig) => {
+		// Sync custom scores and keywords to prowlarr config for backend consistency
+		const customScores: Record<string, number> = {};
+		for (const format of updatedScoring.custom_formats || []) {
+			if (format.enabled && format.pattern) {
+				customScores[format.pattern] = format.score;
 			}
-		} catch (_error) {
-			setIndexersError("Network error while loading indexers");
-		} finally {
-			setLoadingIndexers(false);
 		}
-	}, [formData.prowlarr?.host, formData.prowlarr?.api_key]);
 
-	const toggleIndexer = (id: number) => {
-		const current = formData.prowlarr?.indexers ?? [];
-		const next = current.includes(id) ? current.filter((i) => i !== id) : [...current, id];
-		updateProwlarr({ indexers: next });
+		setFormData((prev) => {
+			const updated: StremioConfig = {
+				...prev,
+				scoring: updatedScoring,
+				prowlarr: {
+					...prev.prowlarr,
+					exclude_keywords: [...(updatedScoring.exclude_keywords || [])],
+					preferred_languages: [...(updatedScoring.preferred_languages || [])],
+					custom_scores: customScores,
+				},
+			};
+			const isDirty = JSON.stringify(updated) !== initialSnapshot;
+			setHasChanges(isDirty);
+			return updated;
+		});
+	};
+
+	const handleRevert = () => {
+		const restored = JSON.parse(initialSnapshot) as StremioConfig;
+		setFormData(restored);
+		setHasChanges(false);
+		setSaveError(null);
 	};
 
 	const handleSave = async () => {
-		if (onUpdate && hasChanges) {
-			await onUpdate("stremio", formData);
+		if (!onUpdate || !hasChanges) return;
+		setSaveError(null);
+		try {
+			// Save custom formats cache locally
+			if (typeof window !== "undefined" && formData.scoring?.custom_formats) {
+				try {
+					localStorage.setItem(
+						"altmount_stremio_custom_formats",
+						JSON.stringify(formData.scoring.custom_formats),
+					);
+					localStorage.setItem("altmount_stremio_preset", formData.scoring?.preset || "custom");
+				} catch {
+					// Non-critical local cache (e.g. private browsing or quota exceeded);
+					// the authoritative copy is still persisted to the backend below.
+				}
+			}
+
+			// Build synchronized payload
+			const customScores: Record<string, number> = {};
+			if (formData.scoring?.custom_formats) {
+				for (const format of formData.scoring.custom_formats) {
+					if (format.enabled && format.pattern) {
+						customScores[format.pattern] = format.score;
+					}
+				}
+			}
+
+			const prowlarrSynced = {
+				...(formData.indexers?.prowlarr || formData.prowlarr),
+				exclude_keywords:
+					formData.scoring?.exclude_keywords || formData.prowlarr.exclude_keywords || [],
+				preferred_languages:
+					formData.scoring?.preferred_languages || formData.prowlarr.preferred_languages || [],
+				custom_scores: customScores,
+			};
+
+			const payload: StremioConfig = {
+				...formData,
+				indexers: {
+					...formData.indexers,
+					provider: formData.indexers?.provider || "prowlarr",
+					prowlarr: prowlarrSynced,
+					newsnab: formData.indexers?.newsnab || [],
+				},
+				prowlarr: prowlarrSynced,
+			};
+
+			await onUpdate("stremio", payload);
+			setInitialSnapshot(JSON.stringify(payload));
 			setHasChanges(false);
+		} catch (e) {
+			setSaveError(e instanceof Error ? e.message : "Failed to save Stremio configuration");
 		}
 	};
 
-	const addonURL =
-		formData.enabled && config.download_key
-			? `${(formData.base_url || "").replace(/\/$/, "") || window.location.origin}/stremio/${config.download_key}/manifest.json`
-			: null;
-
-	const handleCopyURL = async () => {
-		if (!addonURL) return;
-		const ok = await copyToClipboard(addonURL);
-		if (ok) {
-			setUrlCopied(true);
-			setTimeout(() => setUrlCopied(false), 2000);
-		}
-	};
-
-	const handleInstallInStremio = () => {
-		if (!addonURL) return;
-		window.open(`stremio://${addonURL.replace(/^https?:\/\//, "")}`, "_blank");
-	};
+	const scoringConfig = formData.scoring || getDefaultScoringConfig();
 
 	return (
-		<div className="min-w-0 space-y-10">
-			<div className="min-w-0 space-y-8">
-				{/* Enable / Disable */}
-				<div className="min-w-0 space-y-6 overflow-hidden rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
-					<div className="flex items-center gap-2">
-						<Tv className="h-4 w-4 text-base-content/60" />
-						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
-							Endpoint
-						</h4>
-						<div className="h-px flex-1 bg-base-300/50" />
+		<div className="mx-auto min-w-0 max-w-4xl space-y-6">
+			{/* Page Header */}
+			<div className="rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+				<div className="flex items-center gap-3">
+					<div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-primary-content shadow-sm">
+						<Tv className="h-5 w-5" />
 					</div>
-
-					<div className="flex items-center justify-between gap-4">
-						<div className="min-w-0 flex-1">
-							<h5 className="break-words font-bold text-sm">Enable Stremio Integration</h5>
-							<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
-								Activates the Stremio addon endpoints and the{" "}
-								<code className="rounded bg-base-300 px-1 py-0.5 font-mono text-[10px]">
-									POST /api/nzb/streams
-								</code>{" "}
-								NZB upload endpoint.
-							</p>
-						</div>
-						<input
-							type="checkbox"
-							className="toggle toggle-primary mt-1 shrink-0"
-							checked={formData.enabled}
-							disabled={isReadOnly}
-							onChange={(e) => update({ enabled: e.target.checked })}
-						/>
-					</div>
-
-					<div className="grid min-w-0 grid-cols-1 gap-6 sm:grid-cols-2">
-						<fieldset className="fieldset min-w-0">
-							<legend className="fieldset-legend">Public Base URL</legend>
-							<input
-								type="url"
-								className="input w-full min-w-0 max-w-full"
-								placeholder="https://altmount.example.com"
-								value={formData.base_url ?? ""}
-								disabled={isReadOnly}
-								onChange={(e) => update({ base_url: e.target.value })}
-							/>
-							<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/50 text-xs">
-								Base address for generated stream links. Leave empty to auto-detect.
-							</p>
-						</fieldset>
-
-						<fieldset className="fieldset min-w-0">
-							<legend className="fieldset-legend">NZB Cache TTL (hours)</legend>
-							<input
-								type="number"
-								className="input w-full min-w-0 max-w-full"
-								min={0}
-								value={formData.nzb_ttl_hours}
-								disabled={isReadOnly}
-								onChange={(e) => update({ nzb_ttl_hours: Math.max(0, Number(e.target.value)) })}
-							/>
-							<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/50 text-xs">
-								How long cached NZB files stay on disk. Use <strong>0</strong> to keep forever.
-							</p>
-						</fieldset>
-
-						<fieldset className="fieldset min-w-0">
-							<legend className="fieldset-legend">Failed Release TTL (hours)</legend>
-							<input
-								type="number"
-								className="input w-full min-w-0 max-w-full"
-								min={0}
-								value={formData.failed_release_ttl_hours}
-								disabled={isReadOnly}
-								onChange={(e) =>
-									update({ failed_release_ttl_hours: Math.max(0, Number(e.target.value)) })
-								}
-							/>
-							<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/50 text-xs">
-								How long a release that failed to import stays hidden from stream results. Use{" "}
-								<strong>0</strong> to hide it for as long as the failure record survives.
-							</p>
-						</fieldset>
-
-						<fieldset className="fieldset min-w-0">
-							<legend className="fieldset-legend">Fallback Releases</legend>
-							<input
-								type="number"
-								className="input w-full min-w-0 max-w-full"
-								min={0}
-								max={4}
-								value={formData.max_fallback_releases}
-								disabled={isReadOnly}
-								onChange={(e) =>
-									update({
-										max_fallback_releases: Math.min(4, Math.max(0, Number(e.target.value))),
-									})
-								}
-							/>
-							<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/50 text-xs">
-								How many extra releases to try automatically when playback fails. Use{" "}
-								<strong>0</strong> to disable fallback.
-							</p>
-						</fieldset>
-
-						<div className="flex min-w-0 items-start justify-between gap-4 rounded-box border border-base-300 bg-base-100 p-4 sm:col-span-2">
-							<div className="min-w-0 flex-1">
-								<h4 className="font-semibold text-sm">Fast Fail Header Only (Stremio)</h4>
-								<p className="mt-1 text-base-content/70 text-xs">
-									Immediately abort dead NZBs (missing articles / DMCA) on the release header probe without running a full per-file archive sweep.
-								</p>
-							</div>
-							<input
-								type="checkbox"
-								className="toggle toggle-primary mt-1 shrink-0"
-								checked={formData.fast_fail_header_only ?? true}
-								disabled={isReadOnly}
-								onChange={(e) => update({ fast_fail_header_only: e.target.checked })}
-							/>
-						</div>
-					</div>
-				</div>
-
-				{/* Addon URL */}
-				{addonURL && (
-					<div className="min-w-0 space-y-4 overflow-hidden rounded-2xl border-2 border-primary/30 bg-primary/5 p-6">
-						<div className="flex items-center gap-2">
-							<Tv className="h-4 w-4 text-primary" />
-							<h4 className="font-bold text-primary text-xs uppercase tracking-widest">
-								Addon Install URL
-							</h4>
-							<div className="h-px flex-1 bg-primary/20" />
-						</div>
-						<p className="min-w-0 break-words text-base-content/60 text-xs">
-							Install this URL in Stremio to enable automatic Usenet streaming via Prowlarr.
+					<div>
+						<h2 className="font-extrabold text-lg uppercase tracking-tight">
+							Stremio Addon Integration
+						</h2>
+						<p className="text-base-content/60 text-xs">
+							Configure Stremio streaming endpoints, search indexers, TRaSH release scoring, and
+							stream filters.
 						</p>
-						<div className="flex min-w-0 flex-wrap items-center gap-2">
-							<code className="min-w-0 flex-1 basis-0 truncate rounded-lg bg-base-300 px-3 py-2 font-mono text-[11px]">
-								{addonURL}
-							</code>
-							<button
-								type="button"
-								className="btn btn-sm btn-ghost shrink-0"
-								onClick={handleCopyURL}
-								title="Copy URL"
-							>
-								{urlCopied ? (
-									<Check className="h-4 w-4 text-success" />
-								) : (
-									<Copy className="h-4 w-4" />
-								)}
-							</button>
-							<button
-								type="button"
-								className="btn btn-sm btn-primary shrink-0"
-								onClick={handleInstallInStremio}
-								title="Install in Stremio"
-							>
-								<ExternalLink className="h-4 w-4" />
-								Install
-							</button>
-						</div>
 					</div>
-				)}
-
-				{/* Prowlarr */}
-				<div className="min-w-0 space-y-6 overflow-hidden rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
-					<div className="flex items-center gap-2">
-						<Tv className="h-4 w-4 text-base-content/60" />
-						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
-							Prowlarr Indexer
-						</h4>
-						<div className="h-px flex-1 bg-base-300/50" />
-					</div>
-
-					<div className="flex items-center justify-between gap-4">
-						<div className="min-w-0 flex-1">
-							<h5 className="break-words font-bold text-sm">Enable Prowlarr Search</h5>
-							<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
-								When enabled, the Stremio addon automatically searches Prowlarr for NZBs by IMDB ID
-								and queues the best result.
-							</p>
-						</div>
-						<input
-							type="checkbox"
-							className="toggle toggle-primary mt-1 shrink-0"
-							checked={formData.prowlarr?.enabled ?? false}
-							disabled={isReadOnly}
-							onChange={(e) => updateProwlarr({ enabled: e.target.checked })}
-						/>
-					</div>
-
-					{formData.prowlarr?.enabled && (
-						<div className="fade-in slide-in-from-top-2 animate-in space-y-6 border-base-300/50 border-t pt-6">
-							<fieldset className="fieldset min-w-0">
-								<legend className="fieldset-legend">Prowlarr Host</legend>
-								<input
-									type="url"
-									className="input w-full min-w-0 max-w-full"
-									placeholder="http://localhost:9696"
-									value={formData.prowlarr?.host ?? ""}
-									disabled={isReadOnly}
-									onChange={(e) => updateProwlarr({ host: e.target.value })}
-								/>
-							</fieldset>
-
-							<fieldset className="fieldset min-w-0">
-								<legend className="fieldset-legend">API Key</legend>
-								<input
-									type="password"
-									className="input w-full min-w-0 max-w-full"
-									placeholder="Prowlarr API key"
-									value={formData.prowlarr?.api_key ?? ""}
-									disabled={isReadOnly}
-									onChange={(e) => updateProwlarr({ api_key: e.target.value })}
-								/>
-							</fieldset>
-
-							<fieldset className="fieldset min-w-0">
-								<legend className="fieldset-legend">Categories</legend>
-								<TagInput
-									tags={(formData.prowlarr?.categories ?? []).map(String)}
-									onChange={(tags) =>
-										updateProwlarr({ categories: tags.map((t) => Number.parseInt(t, 10)) })
-									}
-									disabled={isReadOnly}
-									placeholder="Add ID..."
-									parseValue={(raw) => {
-										const n = Number.parseInt(raw.trim(), 10);
-										return Number.isNaN(n) ? null : String(n);
-									}}
-								/>
-								<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/50 text-xs">
-									Newznab category IDs. Press Enter or comma to add. Defaults: 2000, 2010, 2030,
-									2040, 2045, 2060 (Movies) and 5000, 5010, 5030, 5040 (TV).
-								</p>
-							</fieldset>
-
-							<fieldset className="fieldset min-w-0">
-								<legend className="fieldset-legend">Indexers</legend>
-								<div className="flex flex-wrap items-center gap-3">
-									<button
-										type="button"
-										className="btn btn-sm btn-outline"
-										onClick={loadIndexers}
-										disabled={isReadOnly || loadingIndexers || !formData.prowlarr?.host}
-									>
-										{loadingIndexers ? (
-											<LoadingSpinner size="sm" />
-										) : (
-											<RefreshCw className="h-4 w-4" />
-										)}
-										{loadingIndexers ? "Loading..." : "Load from Prowlarr"}
-									</button>
-									{(formData.prowlarr?.indexers?.length ?? 0) > 0 && (
-										<span className="text-base-content/60 text-xs">
-											{formData.prowlarr?.indexers?.length} selected
-										</span>
-									)}
-								</div>
-
-								{indexersError && (
-									<div className="alert alert-error mt-3 py-2">
-										<X className="h-4 w-4" />
-										<span className="text-xs">{indexersError}</span>
-									</div>
-								)}
-
-								{indexers.length > 0 && (
-									<div className="mt-3 flex max-h-64 flex-col gap-1 overflow-y-auto rounded-box border border-base-300 bg-base-100 p-2">
-										{indexers.map((idx) => {
-											const selected = formData.prowlarr?.indexers?.includes(idx.id) ?? false;
-											return (
-												<label
-													key={idx.id}
-													className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-base-200"
-												>
-													<input
-														type="checkbox"
-														className="checkbox checkbox-sm checkbox-primary"
-														checked={selected}
-														disabled={isReadOnly}
-														onChange={() => toggleIndexer(idx.id)}
-													/>
-													<span className="min-w-0 flex-1 truncate text-sm">{idx.name}</span>
-													{!idx.enable && (
-														<span className="badge badge-ghost badge-xs">disabled</span>
-													)}
-												</label>
-											);
-										})}
-									</div>
-								)}
-
-								<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/50 text-xs">
-									Restrict searches to specific Prowlarr indexers. Leave all unchecked to search{" "}
-									<strong>every</strong> indexer. Only usenet indexers are listed.
-								</p>
-							</fieldset>
-
-							<fieldset className="fieldset min-w-0">
-								<legend className="fieldset-legend">Language Filter</legend>
-								<TagInput
-									tags={formData.prowlarr?.languages ?? []}
-									onChange={(languages) => updateProwlarr({ languages })}
-									disabled={isReadOnly}
-									placeholder="Add keyword..."
-								/>
-								<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/50 text-xs">
-									Only show releases whose title contains at least one of these keywords. Leave
-									empty to show all languages.
-								</p>
-							</fieldset>
-
-							<fieldset className="fieldset min-w-0">
-								<legend className="fieldset-legend">Quality Filter</legend>
-								<TagInput
-									tags={formData.prowlarr?.qualities ?? []}
-									onChange={(qualities) => updateProwlarr({ qualities })}
-									disabled={isReadOnly}
-									placeholder="Add keyword..."
-								/>
-								<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/50 text-xs">
-									Only show releases whose title contains at least one of these keywords. Leave
-									empty to show all quality tiers.
-								</p>
-							</fieldset>
-						</div>
-					)}
 				</div>
 			</div>
 
-			{/* Save Button */}
-			{!isReadOnly && (
-				<div className="flex justify-end border-base-200 border-t pt-4">
-					<button
-						type="button"
-						className={`btn btn-primary px-10 shadow-lg shadow-primary/20 ${!hasChanges && "btn-ghost border-base-300"}`}
-						onClick={handleSave}
-						disabled={!hasChanges || isUpdating}
-					>
-						{isUpdating ? <LoadingSpinner size="sm" /> : <Save className="h-4 w-4" />}
-						{isUpdating ? "Saving..." : "Save Changes"}
-					</button>
+			{/* 1. Addon Endpoint & Quick Actions */}
+			<StremioActionBar
+				enabled={formData.enabled}
+				baseUrl={formData.base_url || ""}
+				downloadKey={config.download_key}
+				onToggleEnabled={(enabled) => updateFormData({ enabled })}
+				isReadOnly={isReadOnly}
+			/>
+
+			{/* 2. Search Providers & Indexer Dispatch (Prowlarr + Direct Newsnab + User-Agents) */}
+			<IndexersConfigCard config={formData} onChange={updateFormData} isReadOnly={isReadOnly} />
+
+			{/* 3. Stream Delivery & Playback Pipeline */}
+			<StreamRoutingCard config={formData} onChange={updateFormData} isReadOnly={isReadOnly} />
+
+			{/* 4. TRaSH Custom Format Scoring & Quality Profiles */}
+			<TrashScoringCard
+				scoringConfig={scoringConfig}
+				onChange={handleScoringChange}
+				isReadOnly={isReadOnly}
+			/>
+
+			{/* 5. Exclude Keywords & Audio Language Matrix */}
+			<FilterExclusionsCard
+				scoringConfig={scoringConfig}
+				onChange={handleScoringChange}
+				isReadOnly={isReadOnly}
+			/>
+
+			{/* 6. Real-Time Release Scoring Sandbox */}
+			<ReleaseScoreSandbox scoringConfig={scoringConfig} />
+
+			{/* Save Error Alert */}
+			{saveError && (
+				<div className="alert alert-error text-xs shadow-lg">
+					<AlertTriangle className="h-4 w-4 shrink-0" />
+					<span>{saveError}</span>
+				</div>
+			)}
+
+			{/* Sticky Save / Unsaved Changes Floating Bar */}
+			{hasChanges && (
+				<div className="sticky bottom-6 z-30 flex items-center justify-between gap-4 rounded-2xl border-2 border-primary/40 bg-base-100/95 p-4 shadow-2xl backdrop-blur-md">
+					<div className="flex items-center gap-3">
+						<span className="relative flex h-3 w-3">
+							<span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-warning opacity-75" />
+							<span className="relative inline-flex h-3 w-3 rounded-full bg-warning" />
+						</span>
+						<div>
+							<p className="font-bold text-base-content text-sm">Unsaved Stremio Changes</p>
+							<p className="text-base-content/60 text-xs">
+								You have uncommitted modifications to your Stremio or Indexer configuration.
+							</p>
+						</div>
+					</div>
+
+					<div className="flex items-center gap-2">
+						<button
+							type="button"
+							onClick={handleRevert}
+							disabled={isUpdating || isReadOnly}
+							className="btn btn-ghost btn-sm gap-1.5"
+						>
+							<RotateCcw className="h-4 w-4" />
+							<span>Discard</span>
+						</button>
+
+						<button
+							type="button"
+							onClick={handleSave}
+							disabled={isUpdating || isReadOnly}
+							className="btn btn-primary btn-sm gap-2 shadow-sm"
+						>
+							{isUpdating ? <LoadingSpinner size="sm" /> : <Save className="h-4 w-4" />}
+							<span>Save Settings</span>
+						</button>
+					</div>
 				</div>
 			)}
 		</div>

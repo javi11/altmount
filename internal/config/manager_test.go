@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -453,4 +454,29 @@ func TestMigrateArrsCleanup_AutoFailureFlag_FalseClearsOnly(t *testing.T) {
 	// Flag off: no rule seeded, existing rules untouched, flag cleared.
 	assert.Equal(t, rules, cfg.Arrs.QueueCleanupRules)
 	assert.Nil(t, cfg.Arrs.CleanupAutomaticImportFailure)
+}
+
+func TestLoadConfig_WithRegexCustomScores(t *testing.T) {
+	tempDir := t.TempDir()
+	configFile := tempDir + "/config.yaml"
+
+	yamlContent := `
+stremio:
+  enabled: true
+  prowlarr:
+    enabled: true
+    custom_scores:
+      \b(2160p|4k)\b.*\b(remux|bdremux)\b: 500
+      \b(dv|dovi|dolby[ ._-]?vision)\b: 350
+      \b(aac[ ._-]?2\.0|stereo|mp3)\b: -100
+`
+	err := os.WriteFile(configFile, []byte(yamlContent), 0644)
+	assert.NoError(t, err)
+
+	cfg, err := LoadConfig(configFile)
+	assert.NoError(t, err)
+	assert.NotNil(t, cfg)
+	assert.Equal(t, 500, cfg.Stremio.Prowlarr.CustomScores[`\b(2160p|4k)\b.*\b(remux|bdremux)\b`])
+	assert.Equal(t, 350, cfg.Stremio.Prowlarr.CustomScores[`\b(dv|dovi|dolby[ ._-]?vision)\b`])
+	assert.Equal(t, -100, cfg.Stremio.Prowlarr.CustomScores[`\b(aac[ ._-]?2\.0|stereo|mp3)\b`])
 }

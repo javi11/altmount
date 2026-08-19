@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/prowlarr"
 )
@@ -31,10 +32,11 @@ func TestBuildStremioStreamEntries_CacheDetection(t *testing.T) {
 	matchingPath := "/config/.nzbs/Movies/7/" + safeFilename
 
 	tests := []struct {
-		name       string
-		cached     []*database.ImportQueueItem
-		ttlHours   int
-		wantCached bool
+		name        string
+		searchTitle string
+		cached      []*database.ImportQueueItem
+		ttlHours    int
+		wantCached  bool
 	}{
 		{
 			name:       "cached within TTL",
@@ -76,10 +78,14 @@ func TestBuildStremioStreamEntries_CacheDetection(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			results := []prowlarr.NZBResult{{Title: title, DownloadURL: "https://prowlarr/dl/1", Size: 1_500_000_000, Indexer: "IdxA"}}
+			sTitle := title
+			if tt.searchTitle != "" {
+				sTitle = tt.searchTitle
+			}
+			results := []prowlarr.NZBResult{{Title: sTitle, DownloadURL: "https://prowlarr/dl/1", Size: 1_500_000_000, Indexer: "IdxA"}}
 
 			entries := buildStremioStreamEntries(results, tt.cached, tt.ttlHours, now,
-				"https://host", "thekey", "movie", 0, 0, "tt123")
+				"https://host", "thekey", "movie", 0, 0, "tt123", config.ProwlarrConfig{})
 
 			if len(entries) != 1 {
 				t.Fatalf("expected 1 entry, got %d", len(entries))
@@ -120,7 +126,7 @@ func TestBuildStremioStreamEntries_CachedSortedFirstStable(t *testing.T) {
 	}
 
 	entries := buildStremioStreamEntries(results, cached, 24, now,
-		"https://host", "k", "movie", 0, 0, "tt1")
+		"https://host", "k", "movie", 0, 0, "tt123", config.ProwlarrConfig{})
 
 	if len(entries) != 4 {
 		t.Fatalf("expected 4 entries, got %d", len(entries))
