@@ -64,7 +64,23 @@ function SweepProgress({ job }: { job: Par2RepairJob }) {
 
 export function Par2RepairSection({ jobs }: Par2RepairSectionProps) {
 	if (!jobs || jobs.length === 0) {
-		return null;
+		// Always rendered, even with no jobs: an invisible card is
+		// indistinguishable from a broken one.
+		return (
+			<div className="card border-2 border-base-300/50 bg-base-100 shadow-md">
+				<div className="card-body p-4 sm:p-6">
+					<h3 className="card-title text-base">
+						<Wrench className="h-5 w-5 text-primary" aria-hidden="true" />
+						PAR2 Repairs
+					</h3>
+					<p className="text-base-content/60 text-sm">
+						No repairs queued. When a stream hits a missing article — or a health check finds a
+						degraded file — AltMount rebuilds the missing bytes here from the release's PAR2
+						recovery data. You can also start one from a file's actions menu below.
+					</p>
+				</div>
+			</div>
+		);
 	}
 
 	return (

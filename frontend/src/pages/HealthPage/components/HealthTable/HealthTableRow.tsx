@@ -23,6 +23,7 @@ interface HealthTableRowProps {
 	onCancelCheck: (id: number) => void;
 	onManualCheck: (id: number) => void;
 	onRepair: (id: number) => void;
+	onPar2Repair?: (filePath: string) => void;
 	onDelete: (id: number) => void;
 	onUnmask: (id: number) => void;
 	onSetPriority: (id: number, priority: HealthPriority) => void;
@@ -42,6 +43,7 @@ export const HealthTableRow = memo(function HealthTableRow({
 	onCancelCheck,
 	onManualCheck,
 	onRepair,
+	onPar2Repair,
 	onDelete,
 	onUnmask,
 	onSetPriority,
@@ -255,6 +257,7 @@ export const HealthTableRow = memo(function HealthTableRow({
 					onCancelCheck={onCancelCheck}
 					onManualCheck={onManualCheck}
 					onRepair={onRepair}
+					onPar2Repair={onPar2Repair}
 					onDelete={onDelete}
 					onUnmask={onUnmask}
 					onRegenerate={onRegenerate}

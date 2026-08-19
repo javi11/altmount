@@ -22,6 +22,7 @@ import {
 	useResetAllHealthChecks,
 	useRestartBulkHealthItems,
 	useSetHealthPriority,
+	useTriggerPar2Repair,
 	useUnmaskHealthItem,
 } from "../hooks/useApi";
 import { useConfig } from "../hooks/useConfig";
@@ -100,6 +101,7 @@ export function HealthPage() {
 
 	const { data: stats } = useHealthStats();
 	const { data: par2RepairJobs } = usePar2RepairJobs();
+	const triggerPar2Repair = useTriggerPar2Repair();
 	const deleteItem = useDeleteHealthItem();
 	const deleteBulkItems = useDeleteBulkHealthItems();
 	const restartBulkItems = useRestartBulkHealthItems();
@@ -365,6 +367,29 @@ export function HealthPage() {
 			}
 		},
 		[confirmAction, cancelHealthCheck],
+	);
+
+	const handlePar2Repair = useCallback(
+		async (filePath: string) => {
+			try {
+				await triggerPar2Repair.mutateAsync(filePath);
+				showToast({
+					title: "PAR2 Repair Queued",
+					message:
+						"Reconstruction runs in the background; watch its progress in the PAR2 Repairs card.",
+					type: "success",
+				});
+			} catch (err: unknown) {
+				const error = err as { message?: string };
+				console.error("Failed to queue PAR2 repair:", err);
+				showToast({
+					title: "PAR2 Repair Failed",
+					message: error.message || "Could not queue the repair",
+					type: "error",
+				});
+			}
+		},
+		[triggerPar2Repair, showToast],
 	);
 
 	const handleRepair = useCallback(
@@ -858,6 +883,7 @@ export function HealthPage() {
 											onCancelCheck={handleCancelCheck}
 											onManualCheck={handleManualCheck}
 											onRepair={handleRepair}
+											onPar2Repair={handlePar2Repair}
 											onDelete={handleDelete}
 											onUnmask={handleUnmask}
 											onSetPriority={handleSetPriority}
