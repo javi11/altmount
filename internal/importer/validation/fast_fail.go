@@ -78,6 +78,19 @@ type FastFailFile struct {
 //     escalate to the per-file FastFailCheckFiles sweep to map exactly which
 //     files are broken. A clean release returns (false, nil) and the caller
 //     proceeds straight to parsing, paying only this sample's worth of Stats.
+// PatchIndex reports whether a locally repaired copy of an article exists.
+// Repaired bytes live only in AltMount's patch store, never on usenet, so a
+// segment the providers have dropped still counts as available when patched —
+// without this a repaired release could never be (re-)imported.
+type PatchIndex interface {
+	Has(messageID string) bool
+}
+
+// patched reports whether idx has a local patch for the message ID.
+func patched(idx PatchIndex, messageID string) bool {
+	return idx != nil && idx.Has(messageID)
+}
+
 func FastFailReleaseProbe(
 	ctx context.Context,
 	files []FastFailFile,
@@ -85,6 +98,7 @@ func FastFailReleaseProbe(
 	segmentSamplePercentage int,
 	maxConnections int,
 	timeout time.Duration,
+	patchIdx PatchIndex,
 ) (bool, error) {
 	var segments []*metapb.SegmentData
 	for _, file := range files {
@@ -132,6 +146,9 @@ func FastFailReleaseProbe(
 
 	for r := range usenetPool.StatMany(statCtx, ids, nntppool.StatManyOptions{Concurrency: maxConnections}) {
 		if r.Err != nil {
+			if patched(patchIdx, r.MessageID) {
+				continue // repaired locally: treat as available
+			}
 			cancel()
 			return true, nil
 		}
@@ -167,6 +184,7 @@ func FastFailCheckFiles(
 	maxConnections int,
 	timeout time.Duration,
 	progressTracker progress.ProgressTracker,
+	patchIdx PatchIndex,
 ) ([]FastFailFileResult, error) {
 	if !poolManager.HasPool() {
 		return nil, fmt.Errorf("cannot fast-fail import: usenet connection pool is nil")
@@ -279,6 +297,9 @@ func FastFailCheckFiles(
 		statCtx, cancel := context.WithTimeout(ctx, pool.StatManyTimeout(len(ids), maxConnections, timeout))
 		errByID := make(map[string]error, len(ids))
 		for r := range usenetPool.StatMany(statCtx, ids, nntppool.StatManyOptions{Concurrency: maxConnections}) {
+			if patched(patchIdx, r.MessageID) {
+				continue // repaired locally: treat as available
+			}
 			errByID[r.MessageID] = r.Err
 		}
 		cancel()

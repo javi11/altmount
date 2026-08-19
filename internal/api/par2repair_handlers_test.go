@@ -44,6 +44,7 @@ func newPar2RepairAPIRepo(t *testing.T) *database.Par2RepairRepository {
 		CREATE TABLE par2_repair_jobs (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			file_path TEXT NOT NULL,
+			nzb_path TEXT,
 			status TEXT NOT NULL DEFAULT 'pending',
 			attempts INTEGER NOT NULL DEFAULT 0,
 			last_error TEXT,

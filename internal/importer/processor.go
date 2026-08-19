@@ -50,7 +50,8 @@ type Processor struct {
 	log               *slog.Logger
 	broadcaster       *progress.ProgressBroadcaster // WebSocket progress broadcaster
 	recorder          HistoryRecorder
-	par2Repair        RepairEnqueuer // optional; queues PAR2 repairs at import time
+	par2Repair        RepairEnqueuer         // optional; queues PAR2 repairs at import time
+	patchIndex        validation.PatchIndex  // optional; locally repaired articles count as available
 
 	// Pre-compiled regex patterns for RAR file sorting
 	rarPartPattern  *regexp.Regexp // pattern.part###.rar
@@ -67,6 +68,12 @@ type RepairEnqueuer interface {
 // imports run.
 func (proc *Processor) SetRepairEnqueuer(re RepairEnqueuer) {
 	proc.par2Repair = re
+}
+
+// SetPatchIndex wires the PAR2 patch store so articles repaired locally count
+// as available during the fast-fail availability sweep.
+func (proc *Processor) SetPatchIndex(idx validation.PatchIndex) {
+	proc.patchIndex = idx
 }
 
 // queueImportRepairs queues a PAR2 repair for every degraded file the import
@@ -263,6 +270,7 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 		cfg.Import.SegmentSamplePercentage,
 		concurrency,
 		proc.validationTimeout,
+		proc.patchIndex,
 	)
 	if err != nil {
 		return nil, nil, nil, err
@@ -312,6 +320,7 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 		concurrency,
 		proc.validationTimeout,
 		fastFailTracker,
+		proc.patchIndex,
 	)
 	if err != nil {
 		return nil, nil, nil, err

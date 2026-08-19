@@ -22,6 +22,7 @@ import (
 	"github.com/javi11/altmount/internal/httpclient"
 	"github.com/javi11/altmount/internal/importer/filesystem"
 	"github.com/javi11/altmount/internal/importer/parser"
+	"github.com/javi11/altmount/internal/importer/validation"
 	"github.com/javi11/altmount/internal/importer/postprocessor"
 	"github.com/javi11/altmount/internal/importer/queue"
 	"github.com/javi11/altmount/internal/importer/scanner"
@@ -170,6 +171,13 @@ func isFileAlreadyProcessed(metadataService *metadata.MetadataService, filePath 
 func (s *Service) SetRepairEnqueuer(re RepairEnqueuer) {
 	if s.processor != nil {
 		s.processor.SetRepairEnqueuer(re)
+	}
+}
+
+// SetPatchIndex wires the PAR2 patch store into the import availability sweep.
+func (s *Service) SetPatchIndex(idx validation.PatchIndex) {
+	if s.processor != nil {
+		s.processor.SetPatchIndex(idx)
 	}
 }
 

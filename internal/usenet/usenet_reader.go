@@ -62,6 +62,36 @@ type HoleHooks struct {
 	PatchLookup func(segID string) []byte
 }
 
+// defaultPatchLookup serves PAR2-repaired article payloads to every reader
+// that has no explicit PatchLookup of its own — notably the import path, whose
+// readers are built deep inside the parser. Repaired payloads are byte-exact
+// and verified against the release's PAR2 checksums before being stored, and
+// they are only ever consulted for articles the providers have dropped, so
+// serving them anywhere is always correct.
+var defaultPatchLookup atomic.Pointer[func(segID string) []byte]
+
+// SetDefaultPatchLookup installs the process-wide patch lookup. Pass nil to
+// clear it. Call during boot, before readers are created.
+func SetDefaultPatchLookup(fn func(segID string) []byte) {
+	if fn == nil {
+		defaultPatchLookup.Store(nil)
+		return
+	}
+	defaultPatchLookup.Store(&fn)
+}
+
+// patchLookupFor returns the reader's own PatchLookup, falling back to the
+// process-wide default.
+func (b *UsenetReader) patchLookupFor() func(segID string) []byte {
+	if b.holeHooks != nil && b.holeHooks.PatchLookup != nil {
+		return b.holeHooks.PatchLookup
+	}
+	if fn := defaultPatchLookup.Load(); fn != nil {
+		return *fn
+	}
+	return nil
+}
+
 // ReaderOption customizes a UsenetReader.
 type ReaderOption func(*UsenetReader)
 
@@ -552,10 +582,11 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 // PatchLookup has one of exactly the right size, else nil. Runs on download
 // goroutines; PatchLookup must be fast local I/O.
 func (b *UsenetReader) patchFor(ctx context.Context, s *segment) []byte {
-	if b.holeHooks == nil || b.holeHooks.PatchLookup == nil {
+	lookup := b.patchLookupFor()
+	if lookup == nil {
 		return nil
 	}
-	p := b.holeHooks.PatchLookup(s.Id)
+	p := lookup(s.Id)
 	if p == nil {
 		return nil
 	}
@@ -648,7 +679,7 @@ func (b *UsenetReader) downloadManager(ctx context.Context) {
 			data, err := b.downloadSegmentWithRetry(taskCtx, s)
 
 			if err != nil {
-				if b.holeHooks != nil && errors.Is(err, nntppool.ErrArticleNotFound) {
+				if errors.Is(err, nntppool.ErrArticleNotFound) {
 					// A repaired patch takes precedence: already-repaired
 					// damage is served byte-exact and is not new damage, so
 					// OnHole is not consulted.
@@ -661,7 +692,7 @@ func (b *UsenetReader) downloadManager(ctx context.Context) {
 					// A confirmed-missing article may be zero-filled instead
 					// of failing the stream, when the owner's hole hook
 					// approves.
-					if b.holeHooks.OnHole != nil &&
+					if b.holeHooks != nil && b.holeHooks.OnHole != nil &&
 						b.holeHooks.OnHole(s.loaderIdx, s.Id) == holes.DecisionPad {
 						b.log.InfoContext(taskCtx, "zero-filling missing segment",
 							"file_segment_index", s.loaderIdx)

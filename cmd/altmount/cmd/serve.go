@@ -8,6 +8,7 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -25,6 +26,7 @@ import (
 	"github.com/javi11/altmount/internal/rclone"
 	"github.com/javi11/altmount/internal/slogutil"
 	"github.com/javi11/altmount/internal/stremio"
+	"github.com/javi11/altmount/internal/usenet"
 	"github.com/javi11/altmount/internal/webdav"
 	"github.com/spf13/cobra"
 )
@@ -140,8 +142,19 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// payloads on the read path's hole branch.
 	par2RepairService := startPar2RepairService(ctx, cfg, repos.Par2RepairRepo, repos.HealthRepo, metadataService, poolManager, configManager.GetConfigGetter())
 
-	// Let degraded imports queue a PAR2 repair (opt-in via repair_on_import).
+	// Let degraded imports queue a PAR2 repair (opt-in via repair_on_import),
+	// count locally repaired articles as available during the availability
+	// sweep, and serve repaired payloads to every reader that has no hooks of
+	// its own (the import path builds readers deep inside the parser).
 	importerService.SetRepairEnqueuer(par2RepairService)
+	importerService.SetPatchIndex(par2RepairService.PatchStore())
+	usenet.SetDefaultPatchLookup(func(segID string) []byte {
+		p, ok := par2RepairService.PatchStore().Get(strings.Trim(segID, "<>"))
+		if !ok {
+			return nil
+		}
+		return p
+	})
 
 	fs := initializeFilesystem(ctx, metadataService, repos.HealthRepo, arrsService, rcloneRCClient, poolManager, configManager.GetConfigGetter(), streamTracker, cacheSource, par2RepairService)
 
