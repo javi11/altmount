@@ -54,9 +54,24 @@ type Config struct {
 	Providers       []ProviderConfig   `yaml:"providers" mapstructure:"providers" json:"providers"`
 	Nzblnk          NzblnkConfig       `yaml:"nzblnk" mapstructure:"nzblnk" json:"nzblnk"`
 	Network         NetworkConfig      `yaml:"network" mapstructure:"network" json:"network"`
+	Par2Repair      Par2RepairConfig   `yaml:"par2_repair" mapstructure:"par2_repair" json:"par2_repair"`
 	MountPath       string             `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"`
 	MountType       MountType          `yaml:"mount_type" mapstructure:"mount_type" json:"mount_type"`
 	ProfilerEnabled bool               `yaml:"profiler_enabled" mapstructure:"profiler_enabled" json:"profiler_enabled" default:"false"`
+}
+
+// Par2RepairConfig configures background PAR2 repair of missing usenet
+// articles. Repaired article payloads are persisted under
+// <metadata_root>/patches and served on the read path's hole branch.
+type Par2RepairConfig struct {
+	Enabled *bool `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
+	// MaxRepairRatio caps how large a fraction of a file's bytes a repair may
+	// reconstruct. The release's PAR2 redundancy is always the hard ceiling.
+	MaxRepairRatio float64 `yaml:"max_repair_ratio" mapstructure:"max_repair_ratio" json:"max_repair_ratio,omitempty"`
+	// MaxMemoryMB bounds one job's solver accumulator memory.
+	MaxMemoryMB int `yaml:"max_memory_mb" mapstructure:"max_memory_mb" json:"max_memory_mb,omitempty"`
+	// MaxConcurrentJobs bounds simultaneously running repair jobs.
+	MaxConcurrentJobs int `yaml:"max_concurrent_jobs" mapstructure:"max_concurrent_jobs" json:"max_concurrent_jobs,omitempty"`
 }
 
 // NzblnkConfig configures the NZBLNK resolver (used for nzblnk:// link resolution via public indexers).
@@ -1618,6 +1633,7 @@ func DefaultConfig(configDir ...string) *Config {
 	failureMaskingEnabled := false
 	repairEnabled := true
 	repairExponentialBackoff := true
+	par2RepairEnabled := true
 
 	// Set paths based on whether we're running in Docker or have a specific config directory
 	var dbPath, metadataPath, logPath, rclonePath, cachePath, backupPath string
@@ -1781,6 +1797,12 @@ func DefaultConfig(configDir ...string) *Config {
 				MaxCoolDownHours:   24,
 				ExponentialBackoff: &repairExponentialBackoff,
 			},
+		},
+		Par2Repair: Par2RepairConfig{
+			Enabled:           &par2RepairEnabled,
+			MaxRepairRatio:    0.02, // matches the holes padding byte-ratio cap
+			MaxMemoryMB:       256,
+			MaxConcurrentJobs: 1,
 		},
 		SABnzbd: SABnzbdConfig{
 			Enabled:               &sabnzbdEnabled,

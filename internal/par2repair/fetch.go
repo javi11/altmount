@@ -20,15 +20,17 @@ type ConnBudget interface {
 }
 
 // PoolFetcher fetches decoded article payloads through the NNTP pool's
-// normal request lane, budget-gated like imports.
+// normal request lane, budget-gated like imports. The client is resolved per
+// fetch so the fetcher survives pool reconfiguration and boot ordering.
 type PoolFetcher struct {
-	client BodyClient
-	budget ConnBudget // optional; nil skips budget gating
+	getClient func() (BodyClient, error)
+	budget    ConnBudget // optional; nil skips budget gating
 }
 
-// NewPoolFetcher builds a fetcher over a pool client. budget may be nil.
-func NewPoolFetcher(client BodyClient, budget ConnBudget) *PoolFetcher {
-	return &PoolFetcher{client: client, budget: budget}
+// NewPoolFetcher builds a fetcher over a lazily-resolved pool client
+// (typically wrapping pool.Manager.GetPool). budget may be nil.
+func NewPoolFetcher(getClient func() (BodyClient, error), budget ConnBudget) *PoolFetcher {
+	return &PoolFetcher{getClient: getClient, budget: budget}
 }
 
 // Fetch implements ArticleFetcher.
@@ -40,7 +42,12 @@ func (p *PoolFetcher) Fetch(ctx context.Context, messageID string) ([]byte, erro
 		}
 		defer release()
 	}
-	body, err := p.client.Body(ctx, messageID)
+	client, err := p.getClient()
+	if err != nil {
+		return nil, fmt.Errorf("par2repair: nntp pool unavailable: %w", err)
+	}
+	// nntppool adds the angle brackets itself; message IDs here are bare.
+	body, err := client.Body(ctx, messageID)
 	if err != nil {
 		return nil, err
 	}

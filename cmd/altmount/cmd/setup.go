@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/nzbfilesystem"
 	"github.com/javi11/altmount/internal/nzbfilesystem/segcache"
+	"github.com/javi11/altmount/internal/par2repair"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/rclone"
@@ -32,9 +34,10 @@ import (
 
 // repositorySet holds all database repositories
 type repositorySet struct {
-	MainRepo   *database.Repository
-	HealthRepo *database.HealthRepository
-	UserRepo   *database.UserRepository
+	MainRepo       *database.Repository
+	HealthRepo     *database.HealthRepository
+	UserRepo       *database.UserRepository
+	Par2RepairRepo *database.Par2RepairRepository
 }
 
 // initializeDatabase creates and initializes the database
@@ -208,9 +211,10 @@ func setupRepositories(ctx context.Context, db *database.DB) *repositorySet {
 	d := db.Dialect()
 
 	return &repositorySet{
-		MainRepo:   database.NewRepository(dbConn, d),
-		HealthRepo: database.NewHealthRepository(dbConn, d),
-		UserRepo:   database.NewUserRepository(dbConn, d),
+		MainRepo:       database.NewRepository(dbConn, d),
+		HealthRepo:     database.NewHealthRepository(dbConn, d),
+		UserRepo:       database.NewUserRepository(dbConn, d),
+		Par2RepairRepo: database.NewPar2RepairRepository(dbConn, d),
 	}
 }
 
@@ -375,6 +379,43 @@ func setupWebDAV(
 	}
 
 	return webdavHandler, nil
+}
+
+// startPar2RepairService wires and starts the background PAR2 repair service.
+// Always constructed (triggers no-op while disabled, and enable/disable is a
+// hot config change); the worker loop itself starts here.
+func startPar2RepairService(
+	ctx context.Context,
+	cfg *config.Config,
+	repo *database.Par2RepairRepository,
+	metadataService *metadata.MetadataService,
+	poolManager pool.Manager,
+	configGetter config.ConfigGetter,
+) *par2repair.Service {
+	fetcher := par2repair.NewPoolFetcher(func() (par2repair.BodyClient, error) {
+		return poolManager.GetPool()
+	}, poolManager)
+	patchStore := par2repair.NewPatchStore(filepath.Join(cfg.Metadata.RootPath, "patches"))
+	service := par2repair.NewService(
+		repo,
+		par2repair.NewMetadataSource(metadataService),
+		fetcher,
+		patchStore,
+		func() par2repair.Config {
+			c := configGetter()
+			return par2repair.Config{
+				Enabled:           c.Par2Repair.Enabled != nil && *c.Par2Repair.Enabled,
+				MaxRepairRatio:    c.Par2Repair.MaxRepairRatio,
+				MaxMemoryMB:       c.Par2Repair.MaxMemoryMB,
+				MaxConcurrentJobs: c.Par2Repair.MaxConcurrentJobs,
+			}
+		},
+		slog.Default(),
+	)
+	go service.Start(ctx)
+	slog.InfoContext(ctx, "PAR2 repair service started",
+		"enabled", cfg.Par2Repair.Enabled != nil && *cfg.Par2Repair.Enabled)
+	return service
 }
 
 // startHealthWorker creates and starts the health monitoring worker

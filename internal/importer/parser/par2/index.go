@@ -93,7 +93,7 @@ func ParseIndex(streams []io.Reader) (*Index, error) {
 					FileIndex:  fi,
 					BodyOffset: cr.n,
 				})
-				if _, err := io.CopyN(io.Discard, pr.r, bodyLen-4); err != nil {
+				if err := cr.skip(bodyLen - 4); err != nil {
 					return nil, fmt.Errorf("par2 index: stream %d: skip RecvSlic payload: %w", fi, err)
 				}
 
@@ -197,7 +197,10 @@ func validateIndex(idx *Index) error {
 }
 
 // countingReader tracks the absolute byte position within a stream so
-// RecvSlic payload offsets can be recorded.
+// RecvSlic payload offsets can be recorded. When the underlying stream can
+// Seek, skips avoid reading the skipped bytes — this is what keeps ParseIndex
+// from downloading every recovery payload when streams are lazy article
+// readers over NNTP.
 type countingReader struct {
 	r io.Reader
 	n int64
@@ -207,6 +210,22 @@ func (c *countingReader) Read(p []byte) (int, error) {
 	n, err := c.r.Read(p)
 	c.n += int64(n)
 	return n, err
+}
+
+// skip advances past n bytes, seeking when possible.
+func (c *countingReader) skip(n int64) error {
+	if n <= 0 {
+		return nil
+	}
+	if s, ok := c.r.(io.Seeker); ok {
+		if _, err := s.Seek(n, io.SeekCurrent); err == nil {
+			c.n += n
+			return nil
+		}
+	}
+	_, err := io.CopyN(io.Discard, c.r, n)
+	c.n += n
+	return err
 }
 
 // errIsUnexpectedEOF reports whether err wraps an EOF that occurred at a

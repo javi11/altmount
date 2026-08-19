@@ -136,7 +136,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 		defer initialCache.Stop()
 	}
 
+	// Background PAR2 repair: repairs missing articles and serves the patched
+	// payloads on the read path's hole branch.
+	par2RepairService := startPar2RepairService(ctx, cfg, repos.Par2RepairRepo, metadataService, poolManager, configManager.GetConfigGetter())
+
 	fs := initializeFilesystem(ctx, metadataService, repos.HealthRepo, arrsService, rcloneRCClient, poolManager, configManager.GetConfigGetter(), streamTracker, cacheSource)
+	_ = par2RepairService // wired into the read path and triggers in follow-up commits
 
 	// 6. Setup web services
 	app, debugMode := createFiberApp(ctx, cfg)
