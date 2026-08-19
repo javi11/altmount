@@ -25,6 +25,7 @@ func newTestRepo(t *testing.T) *database.Par2RepairRepository {
 		CREATE TABLE par2_repair_jobs (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			file_path TEXT NOT NULL,
+			nzb_path TEXT,
 			status TEXT NOT NULL DEFAULT 'pending',
 			attempts INTEGER NOT NULL DEFAULT 0,
 			last_error TEXT,
@@ -35,7 +36,9 @@ func newTestRepo(t *testing.T) *database.Par2RepairRepository {
 			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 		);
 		CREATE UNIQUE INDEX idx_par2_repair_active ON par2_repair_jobs(file_path)
-			WHERE status IN ('pending','running');
+			WHERE status IN ('pending','running') AND file_path <> '';
+		CREATE UNIQUE INDEX idx_par2_repair_active_nzb ON par2_repair_jobs(nzb_path)
+			WHERE status IN ('pending','running') AND nzb_path IS NOT NULL;
 	`)
 	if err != nil {
 		t.Fatal(err)
@@ -315,5 +318,32 @@ func TestServiceWakeChannelDoesNotBlock(t *testing.T) {
 	// Multiple enqueues without a running worker must not deadlock.
 	for i := range 10 {
 		s.Enqueue(context.Background(), fmt.Sprintf("/f%d.mkv", i), "")
+	}
+}
+
+// NZB-mode jobs resolve from the NZB, not from file metadata (which does not
+// exist for a release that was never imported).
+func TestServiceExecutesNzbModeJob(t *testing.T) {
+	repo := newTestRepo(t)
+	s := testService(t, repo, true)
+
+	var sawNzbPath string
+	s.resolveNzb = func(_ context.Context, nzbPath string, _ []string) (*Resolution, error) {
+		sawNzbPath = nzbPath
+		return nil, ErrNothingToRepair // terminal, keeps the test focused on routing
+	}
+
+	if _, err := repo.EnqueueNzb(context.Background(), "/nzbs/rel.nzb", "<dead@x>"); err != nil {
+		t.Fatal(err)
+	}
+	job, err := repo.ClaimNext(context.Background(), time.Now().UTC())
+	if err != nil || job == nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if err := s.executeJob(context.Background(), job); !errors.Is(err, ErrNothingToRepair) {
+		t.Fatalf("err = %v", err)
+	}
+	if sawNzbPath != "/nzbs/rel.nzb" {
+		t.Fatalf("resolveNzb called with %q, want the job's NZB path", sawNzbPath)
 	}
 }

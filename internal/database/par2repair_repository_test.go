@@ -17,6 +17,7 @@ func setupPar2RepairSchema(t *testing.T, db *sql.DB) {
 		CREATE TABLE par2_repair_jobs (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			file_path TEXT NOT NULL,
+			nzb_path TEXT,
 			status TEXT NOT NULL DEFAULT 'pending',
 			attempts INTEGER NOT NULL DEFAULT 0,
 			last_error TEXT,
@@ -27,7 +28,9 @@ func setupPar2RepairSchema(t *testing.T, db *sql.DB) {
 			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 		);
 		CREATE UNIQUE INDEX idx_par2_repair_active ON par2_repair_jobs(file_path)
-			WHERE status IN ('pending','running');
+			WHERE status IN ('pending','running') AND file_path <> '';
+		CREATE UNIQUE INDEX idx_par2_repair_active_nzb ON par2_repair_jobs(nzb_path)
+			WHERE status IN ('pending','running') AND nzb_path IS NOT NULL;
 		CREATE INDEX idx_par2_repair_due ON par2_repair_jobs(status, next_attempt_at);
 	`)
 	require.NoError(t, err)
@@ -218,4 +221,24 @@ func TestPar2RepairResetRunning(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, job, "crash-recovered job must be claimable again")
 	assert.Equal(t, "/movies/a.mkv", job.FilePath)
+}
+
+func TestPar2RepairEnqueueNzb(t *testing.T) {
+	repo, _ := newPar2RepairRepo(t)
+	ctx := context.Background()
+
+	created, err := repo.EnqueueNzb(ctx, "/nzbs/release.nzb", "<dead@test>")
+	require.NoError(t, err)
+	assert.True(t, created)
+
+	job, err := repo.ClaimNext(ctx, time.Now().UTC())
+	require.NoError(t, err)
+	require.NotNil(t, job)
+	assert.Equal(t, "/nzbs/release.nzb", job.NzbPath.String, "job must carry the NZB source")
+	assert.Equal(t, "", job.FilePath, "NZB-mode jobs have no imported file path")
+
+	// Dedup is per NZB path while active.
+	created, err = repo.EnqueueNzb(ctx, "/nzbs/release.nzb", "")
+	require.NoError(t, err)
+	assert.False(t, created)
 }

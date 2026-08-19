@@ -24,6 +24,7 @@ const (
 type Par2RepairJob struct {
 	ID               int64
 	FilePath         string
+	NzbPath          sql.NullString // set for NZB-mode jobs (release never imported)
 	Status           Par2RepairStatus
 	Attempts         int
 	LastError        sql.NullString
@@ -86,6 +87,33 @@ func (r *Par2RepairRepository) Enqueue(ctx context.Context, filePath string, fai
 	return n > 0, nil
 }
 
+// EnqueueNzb inserts a pending NZB-mode job — a repair for a release that was
+// never imported, planned straight from the NZB. Dedup is per NZB path.
+func (r *Par2RepairRepository) EnqueueNzb(ctx context.Context, nzbPath string, failingSegmentID string) (bool, error) {
+	if nzbPath == "" {
+		return false, errors.New("par2repair: empty nzb path")
+	}
+	var segID any
+	if failingSegmentID != "" {
+		segID = failingSegmentID
+	}
+	res, err := r.db.ExecContext(ctx, `
+		INSERT INTO par2_repair_jobs (file_path, nzb_path, status, failing_segment_id)
+		SELECT '', ?, 'pending', ?
+		WHERE NOT EXISTS (
+			SELECT 1 FROM par2_repair_jobs
+			WHERE nzb_path = ? AND status IN ('pending','running')
+		)`, nzbPath, segID, nzbPath)
+	if err != nil {
+		return false, fmt.Errorf("enqueue nzb par2 repair: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("enqueue nzb par2 repair: %w", err)
+	}
+	return n > 0, nil
+}
+
 // ClaimNext atomically claims the oldest due pending job (pending and either
 // no next_attempt_at or next_attempt_at <= now), flips it to running and
 // returns it. Returns nil when no job is due.
@@ -100,11 +128,11 @@ func (r *Par2RepairRepository) ClaimNext(ctx context.Context, now time.Time) (*P
 			ORDER BY id ASC
 			LIMIT 1
 		)
-		RETURNING id, file_path, status, attempts, last_error, failing_segment_id,
+		RETURNING id, file_path, nzb_path, status, attempts, last_error, failing_segment_id,
 		          dead_segment_ids, next_attempt_at, created_at, updated_at`, now, now)
 
 	job := &Par2RepairJob{}
-	err := row.Scan(&job.ID, &job.FilePath, &job.Status, &job.Attempts, &job.LastError,
+	err := row.Scan(&job.ID, &job.FilePath, &job.NzbPath, &job.Status, &job.Attempts, &job.LastError,
 		&job.FailingSegmentID, &job.DeadSegmentIDs, &job.NextAttemptAt, &job.CreatedAt, &job.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -193,7 +221,7 @@ func (r *Par2RepairRepository) List(ctx context.Context, limit int) ([]*Par2Repa
 		limit = par2RepairListDefaultLimit
 	}
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, file_path, status, attempts, last_error, failing_segment_id,
+		SELECT id, file_path, nzb_path, status, attempts, last_error, failing_segment_id,
 		       dead_segment_ids, next_attempt_at, created_at, updated_at
 		FROM par2_repair_jobs
 		ORDER BY updated_at DESC, id DESC
@@ -206,7 +234,7 @@ func (r *Par2RepairRepository) List(ctx context.Context, limit int) ([]*Par2Repa
 	var jobs []*Par2RepairJob
 	for rows.Next() {
 		job := &Par2RepairJob{}
-		if err := rows.Scan(&job.ID, &job.FilePath, &job.Status, &job.Attempts, &job.LastError,
+		if err := rows.Scan(&job.ID, &job.FilePath, &job.NzbPath, &job.Status, &job.Attempts, &job.LastError,
 			&job.FailingSegmentID, &job.DeadSegmentIDs, &job.NextAttemptAt, &job.CreatedAt, &job.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan par2 repair job: %w", err)
 		}

@@ -3,13 +3,17 @@ package par2repair
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"slices"
 	"sync"
 	"time"
 
+	"github.com/javi11/nzbparser"
+
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/metadata"
+	"github.com/javi11/altmount/internal/nzbfile"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 )
 
@@ -90,6 +94,10 @@ type Service struct {
 	progressMu sync.Mutex
 	progress   map[int64]JobProgressSnapshot
 
+	// resolveNzb plans an NZB-mode repair; replaced in tests. The default
+	// parses the NZB from disk and calls ResolveFromNzb.
+	resolveNzb func(ctx context.Context, nzbPath string, deadIDs []string) (*Resolution, error)
+
 	// execute runs one claimed job; replaced in tests. The default is
 	// (*Service).executeJob.
 	execute func(ctx context.Context, job *database.Par2RepairJob) error
@@ -107,6 +115,7 @@ func NewService(repo JobStore, meta MetadataSource, fetcher ArticleFetcher, stor
 		wake:    make(chan struct{}, 1),
 	}
 	s.execute = s.executeJob
+	s.resolveNzb = s.resolveNzbFromDisk
 	return s
 }
 
@@ -271,6 +280,11 @@ func (s *Service) pruneStore(ctx context.Context) {
 
 // executeJob is the real pipeline: metadata -> resolve -> run.
 func (s *Service) executeJob(ctx context.Context, job *database.Par2RepairJob) error {
+	// NZB-mode: the release was never imported, so there is no metadata to
+	// read — plan straight from the NZB instead.
+	if job.NzbPath.Valid && job.NzbPath.String != "" {
+		return s.executeNzbJob(ctx, job)
+	}
 	fm, err := s.meta.ReadFileMetadata(job.FilePath)
 	if err != nil {
 		return err
@@ -327,6 +341,40 @@ func (s *Service) clearProgress(jobID int64) {
 	s.progressMu.Lock()
 	defer s.progressMu.Unlock()
 	delete(s.progress, jobID)
+}
+
+// executeNzbJob runs a repair planned from an NZB file.
+func (s *Service) executeNzbJob(ctx context.Context, job *database.Par2RepairJob) error {
+	deadIDs := mergeDeadIDs(nil, job.DeadSegments())
+	if job.FailingSegmentID.Valid && job.FailingSegmentID.String != "" {
+		deadIDs = mergeDeadIDs([]string{job.FailingSegmentID.String}, deadIDs)
+	}
+	res, err := s.resolveNzb(ctx, job.NzbPath.String, deadIDs)
+	if err != nil {
+		return err
+	}
+	defer s.clearProgress(job.ID)
+	return RunJob(ctx, res.Plan, res.Index, res.Par2Files, s.fetcher, s.store, s.log,
+		WithProgress(func(done, total int) { s.setProgress(job.ID, done, total) }))
+}
+
+// resolveNzbFromDisk parses the NZB at nzbPath and plans a repair from it.
+func (s *Service) resolveNzbFromDisk(ctx context.Context, nzbPath string, deadIDs []string) (*Resolution, error) {
+	rc, err := nzbfile.Open(nzbPath)
+	if err != nil {
+		return nil, fmt.Errorf("%w: open NZB %s: %v", ErrUnrepairable, nzbPath, err)
+	}
+	defer func() { _ = rc.Close() }()
+
+	n, err := nzbparser.Parse(rc)
+	if err != nil {
+		return nil, fmt.Errorf("%w: parse NZB %s: %v", ErrUnrepairable, nzbPath, err)
+	}
+	cfg := s.cfg()
+	return ResolveFromNzb(ctx, n, deadIDs, s.fetcher, Caps{
+		MaxRepairRatio: cfg.MaxRepairRatio,
+		MaxMemoryBytes: int64(cfg.MaxMemoryMB) << 20,
+	})
 }
 
 // mergeDeadIDs appends extra onto base, skipping duplicates, preserving order.
