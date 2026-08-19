@@ -2169,21 +2169,35 @@ func (r *Repository) GetFailedStremioQueueItems(ctx context.Context) ([]*ImportQ
 	return items, rows.Err()
 }
 
-// GetCachedStremioQueueItems returns completed Stremio-originated queue items that
-// have a storage path (i.e. are streamable). Used by the Stremio stream handler to
-// mark already-imported releases as cached. TTL freshness is applied by the caller.
-func (r *Repository) GetCachedStremioQueueItems(ctx context.Context) ([]*ImportQueueItem, error) {
-	query := `
-		SELECT id, download_id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
-		       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path, target_path
-		FROM import_queue
-		WHERE status = 'completed'
-		  AND download_id LIKE 'stremio:%'
-		  AND storage_path IS NOT NULL
-		  AND storage_path != ''
-		ORDER BY completed_at DESC
-		LIMIT 500
-	`
+// GetCachedStremioQueueItems returns completed queue items that have a storage path
+// (i.e. are streamable). When reuseLibrary is true, it returns completed imports from
+// all sources (Sonarr, Radarr, SABnzbd, Stremio) across the entire library.
+func (r *Repository) GetCachedStremioQueueItems(ctx context.Context, reuseLibrary bool) ([]*ImportQueueItem, error) {
+	var query string
+	if reuseLibrary {
+		query = `
+			SELECT id, download_id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
+			       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path, target_path
+			FROM import_queue
+			WHERE status = 'completed'
+			  AND storage_path IS NOT NULL
+			  AND storage_path != ''
+			ORDER BY completed_at DESC
+			LIMIT 1000
+		`
+	} else {
+		query = `
+			SELECT id, download_id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
+			       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path, target_path
+			FROM import_queue
+			WHERE status = 'completed'
+			  AND download_id LIKE 'stremio:%'
+			  AND storage_path IS NOT NULL
+			  AND storage_path != ''
+			ORDER BY completed_at DESC
+			LIMIT 500
+		`
+	}
 
 	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {

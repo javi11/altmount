@@ -9,33 +9,12 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	parsetorrentname "github.com/middelink/go-parse-torrent-name"
 	"golift.io/starr"
 	starrprowlarr "golift.io/starr/prowlarr"
 )
-
-// excludeKeywordRegexCache caches compiled exclude-keyword regexes so
-// MatchesExcludeKeywords doesn't recompile the same pattern on every call.
-var excludeKeywordRegexCache sync.Map
-
-// CompilePatternCached compiles (and caches) a case-insensitive regex
-// for the given exclude keyword.
-func CompilePatternCached(kw string) (*regexp.Regexp, error) {
-	if val, ok := excludeKeywordRegexCache.Load(kw); ok {
-		if re, ok := val.(*regexp.Regexp); ok {
-			return re, nil
-		}
-	}
-	re, err := regexp.Compile("(?i)" + kw)
-	if err != nil {
-		return nil, err
-	}
-	excludeKeywordRegexCache.Store(kw, re)
-	return re, nil
-}
 
 // Client is a Prowlarr API client backed by golift/starr.
 type Client struct {
@@ -153,7 +132,7 @@ func MatchesExcludeKeywords(title string, excludeKeywords []string) bool {
 		if strings.Contains(titleLower, strings.ToLower(kw)) {
 			return true
 		}
-		if re, err := CompilePatternCached(kw); err == nil && re.MatchString(title) {
+		if re, err := regexp.Compile("(?i)" + kw); err == nil && re.MatchString(title) {
 			return true
 		}
 	}

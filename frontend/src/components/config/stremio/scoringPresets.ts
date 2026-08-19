@@ -356,111 +356,21 @@ export function getDefaultScoringConfig(
 	};
 }
 
-interface ProwlarrScoringSource {
-	exclude_keywords?: string[];
-	preferred_languages?: string[];
-	custom_scores?: Record<string, number>;
-}
-
-interface LocalScoringCache {
-	localCachedFormats: TrashCustomFormat[];
-	savedPreset: ScoringPreset | null;
-}
-
-/** Reads the locally cached custom-format metadata and preset choice, if any. */
-function readLocalScoringCache(): LocalScoringCache {
-	const empty: LocalScoringCache = { localCachedFormats: [], savedPreset: null };
-	if (typeof window === "undefined") {
-		return empty;
-	}
-	try {
-		const saved = localStorage.getItem("altmount_stremio_custom_formats");
-		const localCachedFormats: TrashCustomFormat[] = saved ? JSON.parse(saved) : [];
-		const preset = localStorage.getItem("altmount_stremio_preset") as ScoringPreset | null;
-		return { localCachedFormats, savedPreset: preset || null };
-	} catch {
-		return empty;
-	}
-}
-
-/** Derives a stable synthetic id for a custom-score pattern with no cached metadata. */
-function deriveCustomFormatId(pattern: string): string {
-	const hash = pattern.split("").reduce((a, b) => ((a << 5) - a + b.charCodeAt(0)) | 0, 0);
-	return `custom_${Math.abs(hash)}`;
-}
-
-/**
- * Merges backend-persisted custom_scores (pattern -> score) into the base
- * custom_formats list, preferring cached metadata (name/enabled/category)
- * for patterns that already exist locally or in the base preset.
- */
-function reconcileCustomScores(
-	baseFormats: TrashCustomFormat[],
-	customScores: Record<string, number>,
-	localCachedFormats: TrashCustomFormat[],
-): TrashCustomFormat[] {
-	const existingPatterns = new Map<string, TrashCustomFormat>();
-	for (const f of baseFormats) {
-		existingPatterns.set(f.pattern, f);
-	}
-	for (const f of localCachedFormats) {
-		existingPatterns.set(f.pattern, f);
-	}
-
-	const updatedFormats: TrashCustomFormat[] = [];
-	const visitedPatterns = new Set<string>();
-
-	for (const f of baseFormats) {
-		visitedPatterns.add(f.pattern);
-		const cached = existingPatterns.get(f.pattern);
-		updatedFormats.push({
-			...f,
-			name: cached ? cached.name : f.name,
-			enabled: cached ? cached.enabled : f.enabled,
-			category: cached ? cached.category : f.category,
-			score: f.pattern in customScores ? customScores[f.pattern] : f.score,
-		});
-	}
-
-	for (const [pattern, score] of Object.entries(customScores)) {
-		if (visitedPatterns.has(pattern)) continue;
-		visitedPatterns.add(pattern);
-		const cached = existingPatterns.get(pattern);
-		updatedFormats.push(
-			cached
-				? { ...cached, score }
-				: {
-						id: deriveCustomFormatId(pattern),
-						name: pattern,
-						category: "custom",
-						pattern,
-						patternType: pattern.startsWith("\\") || pattern.includes("(") ? "regex" : "token",
-						score,
-						enabled: true,
-						isCustom: true,
-					},
-		);
-	}
-
-	// Keep any locally cached custom formats that were disabled (not in customScores).
-	for (const f of localCachedFormats) {
-		if (f.isCustom && !visitedPatterns.has(f.pattern)) {
-			visitedPatterns.add(f.pattern);
-			updatedFormats.push(f);
-		}
-	}
-
-	return updatedFormats;
-}
-
 export function hydrateScoringFromProwlarr(
 	scoring: StreamScoringConfig | undefined,
-	prowlarr: ProwlarrScoringSource | undefined,
+	prowlarr: {
+		exclude_keywords?: string[];
+		preferred_languages?: string[];
+		custom_scores?: Record<string, number>;
+	} | undefined,
 ): StreamScoringConfig {
-	const baseScoring: StreamScoringConfig =
-		scoring?.custom_formats && scoring.custom_formats.length > 0
-			? JSON.parse(JSON.stringify(scoring))
-			: getDefaultScoringConfig("trash_recommended");
+	let baseScoring: StreamScoringConfig;
+
+	if (scoring && scoring.custom_formats && scoring.custom_formats.length > 0) {
+		baseScoring = JSON.parse(JSON.stringify(scoring));
+	} else {
+		baseScoring = getDefaultScoringConfig("trash_recommended");
+	}
 
 	if (prowlarr?.exclude_keywords && prowlarr.exclude_keywords.length > 0) {
 		baseScoring.exclude_keywords = [...prowlarr.exclude_keywords];
@@ -470,14 +380,96 @@ export function hydrateScoringFromProwlarr(
 		baseScoring.preferred_languages = [...prowlarr.preferred_languages];
 	}
 
-	const { localCachedFormats, savedPreset } = readLocalScoringCache();
+	// Try reading custom rule metadata cache from localStorage if available
+	let localCachedFormats: TrashCustomFormat[] = [];
+	let savedPreset: ScoringPreset | null = null;
+	if (typeof window !== "undefined") {
+		try {
+			const saved = localStorage.getItem("altmount_stremio_custom_formats");
+			if (saved) {
+				localCachedFormats = JSON.parse(saved);
+			}
+			const preset = localStorage.getItem("altmount_stremio_preset") as ScoringPreset;
+			if (preset) {
+				savedPreset = preset;
+			}
+		} catch {
+			// ignore localStorage error
+		}
+	}
 
+	// If custom_scores is saved in prowlarr config from backend:
 	if (prowlarr?.custom_scores && Object.keys(prowlarr.custom_scores).length > 0) {
-		baseScoring.custom_formats = reconcileCustomScores(
-			baseScoring.custom_formats,
-			prowlarr.custom_scores,
-			localCachedFormats,
-		);
+		const customScores = prowlarr.custom_scores;
+		const existingPatterns = new Map<string, TrashCustomFormat>();
+
+		// Add base formats
+		for (const f of baseScoring.custom_formats) {
+			existingPatterns.set(f.pattern, f);
+		}
+		// Add any locally cached custom formats
+		for (const f of localCachedFormats) {
+			existingPatterns.set(f.pattern, f);
+		}
+
+		// Update scores for all matching patterns
+		const updatedFormats: TrashCustomFormat[] = [];
+		const visitedPatterns = new Set<string>();
+
+		for (const f of baseScoring.custom_formats) {
+			visitedPatterns.add(f.pattern);
+			const cached = existingPatterns.get(f.pattern);
+			if (f.pattern in customScores) {
+				updatedFormats.push({
+					...f,
+					name: cached ? cached.name : f.name,
+					enabled: cached ? cached.enabled : f.enabled,
+					category: cached ? cached.category : f.category,
+					score: customScores[f.pattern],
+				});
+			} else {
+				updatedFormats.push({
+					...f,
+					name: cached ? cached.name : f.name,
+					enabled: cached ? cached.enabled : f.enabled,
+					category: cached ? cached.category : f.category,
+				});
+			}
+		}
+
+		// Add any other patterns from customScores or local cache
+		for (const [pattern, score] of Object.entries(customScores)) {
+			if (!visitedPatterns.has(pattern)) {
+				visitedPatterns.add(pattern);
+				const cached = existingPatterns.get(pattern);
+				if (cached) {
+					updatedFormats.push({ ...cached, score });
+				} else {
+					updatedFormats.push({
+						id: `custom_${Math.abs(
+							pattern.split("").reduce((a, b) => ((a << 5) - a + b.charCodeAt(0)) | 0, 0),
+						)}`,
+						name: pattern,
+						category: "custom",
+						pattern,
+						patternType: pattern.startsWith("\\") || pattern.includes("(") ? "regex" : "token",
+						score,
+						enabled: true,
+						isCustom: true,
+					});
+				}
+			}
+		}
+
+		// Also add any custom formats that might have been disabled (not in customScores)
+		for (const f of localCachedFormats) {
+			if (f.isCustom && !visitedPatterns.has(f.pattern)) {
+				visitedPatterns.add(f.pattern);
+				updatedFormats.push(f);
+			}
+		}
+
+		baseScoring.custom_formats = updatedFormats;
 		baseScoring.preset = savedPreset || "custom";
 	} else if (savedPreset) {
 		baseScoring.preset = savedPreset;
@@ -503,136 +495,6 @@ export interface EvaluationResult {
 	verdictLabel: string;
 }
 
-interface ExclusionCheck {
-	excluded: boolean;
-	excludeReason?: string;
-}
-
-/** Checks the release title against the configured blacklist keywords/regex patterns. */
-function checkExclusions(
-	excludeKeywords: string[] | undefined,
-	trimmed: string,
-	titleLower: string,
-): ExclusionCheck {
-	for (const keyword of excludeKeywords || []) {
-		const kw = keyword.trim().toLowerCase();
-		if (!kw) continue;
-		if (kw.startsWith("/") && kw.endsWith("/")) {
-			try {
-				const re = new RegExp(kw.slice(1, -1), "i");
-				if (re.test(trimmed)) {
-					return {
-						excluded: true,
-						excludeReason: `Matched blacklist pattern /${kw.slice(1, -1)}/`,
-					};
-				}
-			} catch {
-				// ignore invalid regex
-			}
-		} else if (titleLower.includes(kw)) {
-			return { excluded: true, excludeReason: `Matched blacklist keyword "${keyword}"` };
-		}
-	}
-	return { excluded: false };
-}
-
-interface FormatScoreResult {
-	totalScore: number;
-	matches: EvaluationMatch[];
-	exclusion?: ExclusionCheck;
-}
-
-/** Scores the release title against every enabled custom format/pattern. */
-function scoreFormats(
-	customFormats: TrashCustomFormat[] | undefined,
-	trimmed: string,
-	titleLower: string,
-): FormatScoreResult {
-	let totalScore = 0;
-	const matches: EvaluationMatch[] = [];
-	let exclusion: ExclusionCheck | undefined;
-
-	for (const format of customFormats || []) {
-		if (!format.enabled) continue;
-
-		let matched = false;
-		if (format.patternType === "token") {
-			matched = titleLower.includes(format.pattern.toLowerCase().trim());
-		} else {
-			try {
-				matched = new RegExp(format.pattern, "i").test(trimmed);
-			} catch {
-				// Fallback to substring if regex is invalid
-				matched = titleLower.includes(format.pattern.toLowerCase().trim());
-			}
-		}
-
-		if (format.invert) {
-			matched = !matched;
-		}
-
-		if (matched) {
-			totalScore += format.score;
-			matches.push({ format, matched: true, score: format.score });
-			if (format.score <= -1500) {
-				exclusion = {
-					excluded: true,
-					excludeReason: `${format.name} penalty (${format.score} pts)`,
-				};
-			}
-		}
-	}
-
-	return { totalScore, matches, exclusion };
-}
-
-interface LanguageMatchResult {
-	matchedLanguages: string[];
-	missingRequiredLanguage: boolean;
-}
-
-/** Determines which preferred languages are present in the title, and whether that's a problem. */
-function matchLanguages(
-	preferredLanguages: string[] | undefined,
-	requirePreferredLanguage: boolean | undefined,
-	titleLower: string,
-): LanguageMatchResult {
-	const matchedLanguages: string[] = [];
-	for (const lang of preferredLanguages || []) {
-		const langOpt = LANGUAGE_OPTIONS.find(
-			(l) => l.name.toLowerCase() === lang.toLowerCase() || l.id === lang.toLowerCase(),
-		);
-		const terms = langOpt ? langOpt.matchTerms : [lang.toLowerCase()];
-		if (terms.some((term) => titleLower.includes(term))) {
-			matchedLanguages.push(lang);
-		}
-	}
-
-	const missingRequiredLanguage =
-		!!requirePreferredLanguage &&
-		(preferredLanguages || []).length > 0 &&
-		matchedLanguages.length === 0;
-
-	return { matchedLanguages, missingRequiredLanguage };
-}
-
-/** Maps the final excluded/score state to a user-facing verdict and label. */
-function computeVerdict(
-	excluded: boolean,
-	totalScore: number,
-): Pick<EvaluationResult, "verdict" | "verdictLabel"> {
-	if (excluded) {
-		return { verdict: "discarded", verdictLabel: "🚫 Discarded / Blacklisted" };
-	}
-	if (totalScore >= 800) {
-		return { verdict: "top_pick", verdictLabel: "✅ High Priority (Top Stream Pick)" };
-	}
-	if (totalScore < 0) {
-		return { verdict: "low_score", verdictLabel: "⚠️ Low Score (Demoted)" };
-	}
-	return { verdict: "standard", verdictLabel: "⚡ Standard Priority" };
-}
-
 export function evaluateRelease(
 	releaseTitle: string,
 	config: StreamScoringConfig,
@@ -652,29 +514,111 @@ export function evaluateRelease(
 
 	const titleLower = trimmed.toLowerCase();
 
-	let { excluded, excludeReason } = checkExclusions(config.exclude_keywords, trimmed, titleLower);
+	// 1. Check blacklist exclusion keywords
+	let excluded = false;
+	let excludeReason: string | undefined;
 
-	const { totalScore, matches, exclusion } = scoreFormats(
-		config.custom_formats,
-		trimmed,
-		titleLower,
-	);
-	if (!excluded && exclusion) {
-		excluded = exclusion.excluded;
-		excludeReason = exclusion.excludeReason;
+	for (const keyword of config.exclude_keywords || []) {
+		const kw = keyword.trim().toLowerCase();
+		if (!kw) continue;
+		if (kw.startsWith("/") && kw.endsWith("/")) {
+			try {
+				const re = new RegExp(kw.slice(1, -1), "i");
+				if (re.test(trimmed)) {
+					excluded = true;
+					excludeReason = `Matched blacklist pattern /${kw.slice(1, -1)}/`;
+					break;
+				}
+			} catch {
+				// ignore invalid regex
+			}
+		} else if (titleLower.includes(kw)) {
+			excluded = true;
+			excludeReason = `Matched blacklist keyword "${keyword}"`;
+			break;
+		}
 	}
 
-	const { matchedLanguages, missingRequiredLanguage } = matchLanguages(
-		config.preferred_languages,
-		config.require_preferred_language,
-		titleLower,
-	);
-	if (!excluded && missingRequiredLanguage) {
+	// 2. Evaluate custom formats
+	let totalScore = 0;
+	const matches: EvaluationMatch[] = [];
+
+	for (const format of config.custom_formats || []) {
+		if (!format.enabled) continue;
+
+		let matched = false;
+		if (format.patternType === "token") {
+			const tokenLower = format.pattern.toLowerCase().trim();
+			matched = titleLower.includes(tokenLower);
+		} else {
+			try {
+				const regex = new RegExp(format.pattern, "i");
+				matched = regex.test(trimmed);
+			} catch {
+				// Fallback to substring if regex is invalid
+				matched = titleLower.includes(format.pattern.toLowerCase().trim());
+			}
+		}
+
+		if (format.invert) {
+			matched = !matched;
+		}
+
+		if (matched) {
+			totalScore += format.score;
+			matches.push({
+				format,
+				matched: true,
+				score: format.score,
+			});
+			if (format.score <= -1500) {
+				excluded = true;
+				excludeReason = `${format.name} penalty (${format.score} pts)`;
+			}
+		}
+	}
+
+	// 3. Evaluate Preferred Languages
+	const matchedLanguages: string[] = [];
+	for (const lang of config.preferred_languages || []) {
+		const langOpt = LANGUAGE_OPTIONS.find(
+			(l) => l.name.toLowerCase() === lang.toLowerCase() || l.id === lang.toLowerCase(),
+		);
+		const terms = langOpt ? langOpt.matchTerms : [lang.toLowerCase()];
+		const found = terms.some((term) => titleLower.includes(term));
+		if (found) {
+			matchedLanguages.push(lang);
+		}
+	}
+
+	let missingRequiredLanguage = false;
+	if (
+		config.require_preferred_language &&
+		(config.preferred_languages || []).length > 0 &&
+		matchedLanguages.length === 0
+	) {
+		missingRequiredLanguage = true;
 		excluded = true;
 		excludeReason = "Missing required audio language";
 	}
 
-	const { verdict, verdictLabel } = computeVerdict(excluded, totalScore);
+	// 4. Determine Verdict
+	let verdict: "top_pick" | "standard" | "low_score" | "discarded" = "standard";
+	let verdictLabel = "Standard Stream";
+
+	if (excluded) {
+		verdict = "discarded";
+		verdictLabel = "🚫 Discarded / Blacklisted";
+	} else if (totalScore >= 800) {
+		verdict = "top_pick";
+		verdictLabel = "✅ High Priority (Top Stream Pick)";
+	} else if (totalScore < 0) {
+		verdict = "low_score";
+		verdictLabel = "⚠️ Low Score (Demoted)";
+	} else {
+		verdict = "standard";
+		verdictLabel = "⚡ Standard Priority";
+	}
 
 	return {
 		totalScore,

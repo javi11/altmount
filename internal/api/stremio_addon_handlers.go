@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -151,26 +152,26 @@ func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 		return emptyStreamsResponse(c)
 	}
 
-	// Map Stremio type to Prowlarr search type
-	prowlarrType := "search"
-	switch streamType {
-	case "movie":
-		prowlarrType = "movie"
-	case "series":
-		prowlarrType = "tvsearch"
-	}
-
 	baseURL := resolveBaseURL(c, cfg.Stremio.BaseURL)
 	var libraryStreams []fiber.Map
 
-	// 1. Check local Altmount library in file_health if library streams are enabled
+	// 1. Check local Altmount library in file_health if library reuse is enabled
 	if cfg.Stremio.EffectiveIncludeLibraryStreams() && s.healthRepo != nil {
 		selector := &stremioEpisodeSelector{Season: season, Episode: episode}
 		if streamType == "movie" {
 			tmdbID, movieTitle, movieYear, _ := resolveMovieMetadataFromIMDb(ctx, imdbID)
+			yearNum, _ := strconv.Atoi(movieYear)
 			if healthyFiles, err := s.healthRepo.FindHealthyFilesForMovie(ctx, movieTitle, movieYear, tmdbID); err == nil {
 				for _, h := range healthyFiles {
 					if h != nil && h.FilePath != "" && isMediaExtension(filepath.Ext(h.FilePath)) && !isSampleFile(h.FilePath) {
+						matchPath := h.FilePath
+						if h.LibraryPath != nil && *h.LibraryPath != "" {
+							matchPath = *h.LibraryPath
+						}
+						// Verify movie title matches if movieTitle is known (prevents substring false positives)
+						if movieTitle != "" && !stremio.MatchesMovie(filepath.Base(matchPath), movieTitle, yearNum) && !stremio.MatchesMovie(matchPath, movieTitle, yearNum) {
+							continue
+						}
 						streamURL := baseURL + "/api/files/stream?path=" +
 							url.QueryEscape(h.FilePath) + "&download_key=" + url.QueryEscape(key)
 						libraryStreams = append(libraryStreams, fiber.Map{
@@ -192,6 +193,10 @@ func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 							matchPath = *h.LibraryPath
 						}
 						if selector.matches(matchPath) || selector.matches(h.FilePath) {
+							// Verify series title matches if seriesTitle is known (prevents cross-show false positives)
+							if seriesTitle != "" && !stremio.MatchesSeries(filepath.Base(matchPath), seriesTitle, season, episode, 0) && !stremio.MatchesSeries(matchPath, seriesTitle, season, episode, 0) {
+								continue
+							}
 							streamURL := baseURL + "/api/files/stream?path=" +
 								url.QueryEscape(h.FilePath) + "&download_key=" + url.QueryEscape(key)
 							libraryStreams = append(libraryStreams, fiber.Map{
@@ -204,6 +209,15 @@ func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 				}
 			}
 		}
+	}
+
+	// Map Stremio type to Prowlarr search type
+	prowlarrType := "search"
+	switch streamType {
+	case "movie":
+		prowlarrType = "movie"
+	case "series":
+		prowlarrType = "tvsearch"
 	}
 
 	slog.InfoContext(ctx, "Stremio addon stream request",
@@ -266,9 +280,9 @@ func formatLibraryStreamName(h *database.FileHealth) string {
 	}
 
 	if res != "" {
-		return fmt.Sprintf("⚡ AltMount Library\n%s", res)
+		return fmt.Sprintf("⚡ Altmount Library\n%s", res)
 	}
-	return "⚡ AltMount Library"
+	return "⚡ Altmount Library"
 }
 
 func isSampleFile(path string) bool {
@@ -290,19 +304,52 @@ type stremioPlayCandidate struct {
 	Indexer     string
 }
 
-// stremioNzbPathMatches checks if an NZB path in the database corresponds to a given
-// safe release title. Matches both simple filenames (foo.nzb) and subdirectory paths
-// (stremio:tt1234567/foo.nzb).
+// normalizeTitleForMatching extracts an alphanumeric canonical representation of a title
+// or file path, ignoring case, separators (dots, underscores, dashes, spaces), brackets,
+// and file extensions (.nzb, .nzb.gz, .mkv, .mp4, etc.).
+func normalizeTitleForMatching(s string) string {
+	s = strings.ReplaceAll(s, "\\", "/")
+	s = filepath.Base(s)
+	for {
+		orig := s
+		s = strings.TrimSuffix(s, ".gz")
+		s = strings.TrimSuffix(s, ".nzb")
+		s = strings.TrimSuffix(s, ".mkv")
+		s = strings.TrimSuffix(s, ".mp4")
+		s = strings.TrimSuffix(s, ".avi")
+		s = strings.TrimSuffix(s, ".iso")
+		s = strings.TrimSuffix(s, ".rar")
+		if s == orig {
+			break
+		}
+	}
+
+	s = strings.ToLower(s)
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// stremioNzbPathMatches checks if an NZB path matches a candidate title regardless of
+// case, punctuation, extensions, or directory wrappers using exact normalized equality.
 func stremioNzbPathMatches(nzbPath, safeTitle string) bool {
-	return strings.Contains(filepath.ToSlash(nzbPath), safeTitle+".nzb")
+	normA := normalizeTitleForMatching(nzbPath)
+	normB := normalizeTitleForMatching(safeTitle)
+	if normA == "" || normB == "" {
+		return false
+	}
+	return normA == normB
 }
 
 // stremioCachedPredicate returns a test for "already imported and still usable":
 // the item must have a storage path and, when a TTL is configured, have completed
-// within it. Mirrors the reuse condition in handleStremioAddonPlay so the "⚡ Cached"
-// badge is truthful.
+// within it. Uses exact alphanumeric normalized matching to eliminate false positives.
 func stremioCachedPredicate(cached []*database.ImportQueueItem, ttlHours int, now time.Time) func(safeTitle string) bool {
-	paths := make([]string, 0, len(cached))
+	normalizedCache := make(map[string]struct{}, len(cached)*3)
 	for _, item := range cached {
 		if item == nil || item.StoragePath == nil || *item.StoragePath == "" {
 			continue
@@ -312,16 +359,28 @@ func stremioCachedPredicate(cached []*database.ImportQueueItem, ttlHours int, no
 				continue
 			}
 		}
-		paths = append(paths, item.NzbPath)
+		if norm := normalizeTitleForMatching(item.NzbPath); norm != "" {
+			normalizedCache[norm] = struct{}{}
+		}
+		if item.StoragePath != nil {
+			if norm := normalizeTitleForMatching(*item.StoragePath); norm != "" {
+				normalizedCache[norm] = struct{}{}
+			}
+		}
+		if item.RelativePath != nil && *item.RelativePath != "" {
+			if norm := normalizeTitleForMatching(*item.RelativePath); norm != "" {
+				normalizedCache[norm] = struct{}{}
+			}
+		}
 	}
 
 	return func(safeTitle string) bool {
-		for _, p := range paths {
-			if stremioNzbPathMatches(p, safeTitle) {
-				return true
-			}
+		target := normalizeTitleForMatching(safeTitle)
+		if target == "" {
+			return false
 		}
-		return false
+		_, exists := normalizedCache[target]
+		return exists
 	}
 }
 
@@ -433,7 +492,7 @@ func calculateStremioReleaseScore(r prowlarr.NZBResult, prowlarrCfg config.Prowl
 			}
 			if strings.Contains(titleLower, strings.ToLower(pattern)) {
 				score += val
-			} else if re, err := prowlarr.CompilePatternCached(pattern); err == nil && re.MatchString(r.Title) {
+			} else if re, err := regexp.Compile("(?i)" + pattern); err == nil && re.MatchString(r.Title) {
 				score += val
 			}
 		}
@@ -658,7 +717,7 @@ func (s *Server) searchStremioReleases(
 	}
 
 	now := time.Now()
-	cachedItems, failedItems := s.loadStremioQueueState(ctx)
+	cachedItems, failedItems := s.loadStremioQueueState(ctx, cfg.Stremio.EffectiveIncludeLibraryStreams())
 	isFailed := stremioFailedPredicate(failedItems, s.stremioFailures.Keys(stremioFailedTTL(cfg)), cfg.Stremio.FailedReleaseTTLHours, now)
 	isCached := stremioCachedPredicate(cachedItems, cfg.Stremio.NzbTTLHours, now)
 
@@ -702,12 +761,12 @@ func stremioFailedTTL(cfg *config.Config) time.Duration {
 
 // loadStremioQueueState fetches the cached and failed Stremio queue items. Both lookups
 // are best-effort: a DB hiccup degrades badges and exclusion rather than failing search.
-func (s *Server) loadStremioQueueState(ctx context.Context) (cached, failed []*database.ImportQueueItem) {
+func (s *Server) loadStremioQueueState(ctx context.Context, reuseLibrary bool) (cached, failed []*database.ImportQueueItem) {
 	if s.queueRepo == nil {
 		return nil, nil
 	}
 
-	if items, err := s.queueRepo.GetCachedStremioQueueItems(ctx); err != nil {
+	if items, err := s.queueRepo.GetCachedStremioQueueItems(ctx, reuseLibrary); err != nil {
 		slog.WarnContext(ctx, "Failed to load cached Stremio items; continuing without cache badges",
 			"error", err)
 	} else {
@@ -896,18 +955,52 @@ func (s *Server) handleStremioAddonPlay(c *fiber.Ctx) error {
 	// before the failed-release check so a genuinely playable file always wins over a
 	// stale failure record.
 	ttlHours := cfg.Stremio.NzbTTLHours
-	completedStatus := database.QueueStatusCompleted
-	if existing, err := s.queueRepo.ListQueueItems(ctx, &completedStatus, cand.SafeTitle+".nzb", "", 1, 0, "updated_at", "desc"); err == nil && len(existing) > 0 {
-		prev := existing[0]
-		cacheValid := prev.StoragePath != nil && *prev.StoragePath != ""
-		if cacheValid && ttlHours > 0 && prev.CompletedAt != nil {
-			cacheValid = time.Since(*prev.CompletedAt) < time.Duration(ttlHours)*time.Hour
+	normTarget := normalizeTitleForMatching(cand.SafeTitle)
+	if normTarget != "" {
+		if cachedItems, err := s.queueRepo.GetCachedStremioQueueItems(ctx, cfg.Stremio.EffectiveIncludeLibraryStreams()); err == nil {
+			for _, prev := range cachedItems {
+				if prev == nil || prev.StoragePath == nil || *prev.StoragePath == "" {
+					continue
+				}
+				if ttlHours > 0 && prev.CompletedAt != nil && time.Since(*prev.CompletedAt) >= time.Duration(ttlHours)*time.Hour {
+					continue
+				}
+				normNzb := normalizeTitleForMatching(prev.NzbPath)
+				normStorage := ""
+				if prev.StoragePath != nil {
+					normStorage = normalizeTitleForMatching(*prev.StoragePath)
+				}
+				normRel := ""
+				if prev.RelativePath != nil {
+					normRel = normalizeTitleForMatching(*prev.RelativePath)
+				}
+
+				if normNzb == normTarget || (normStorage != "" && normStorage == normTarget) || (normRel != "" && normRel == normTarget) {
+					if streams, err := s.buildStremioStreams(ctx, prev, baseURL, key, cand.SafeTitle, selector); err == nil && len(streams) > 0 {
+						slog.InfoContext(ctx, "Returning cached Stremio stream",
+							"nzb_name", cand.SafeTitle, "matched_path", prev.NzbPath, "indexer", cand.Indexer)
+						return c.Redirect(streams[0].URL, fiber.StatusFound)
+					}
+				}
+			}
 		}
-		if cacheValid {
-			if streams, err := s.buildStremioStreams(ctx, prev, baseURL, key, cand.SafeTitle, selector); err == nil && len(streams) > 0 {
-				slog.InfoContext(ctx, "Returning cached Stremio stream for Prowlarr NZB",
-					"nzb_name", cand.SafeTitle)
-				return c.Redirect(streams[0].URL, fiber.StatusFound)
+	}
+
+	// In-flight coalescing per content: if another Stremio request is already actively importing
+	// a release for this exact movie/episode, wait for it instead of starting another parallel download.
+	if imdbID != "" && s.queueRepo != nil {
+		if activeItems, err := s.queueRepo.ListQueueItems(ctx, nil, "", "", 10, 0, "updated_at", "desc"); err == nil {
+			for _, item := range activeItems {
+				if item != nil && (item.Status == database.QueueStatusProcessing || item.Status == database.QueueStatusPending) {
+					if item.Metadata != nil && strings.Contains(*item.Metadata, fmt.Sprintf(`"imdb_id":"%s"`, imdbID)) {
+						slog.InfoContext(ctx, "Attaching to active in-flight Stremio import for content",
+							"imdb_id", imdbID, "queue_id", item.ID, "active_file", item.NzbPath)
+						out := s.waitForStream(ctx, item.ID, baseURL, key, cand.SafeTitle, selector, 45*time.Second)
+						if out.Kind == streamOutcomeReady {
+							return c.Redirect(out.StreamURL, fiber.StatusFound)
+						}
+					}
+				}
 			}
 		}
 	}
@@ -1465,27 +1558,10 @@ func (s *Server) handleRefreshStremioUserAgents(c *fiber.Ctx) error {
 
 	cfg := s.configManager.GetConfig()
 	if cfg != nil {
-		sonarrURL, sonarrKey := firstEnabledArrInstance(cfg.Arrs.SonarrInstances)
-		radarrURL, radarrKey := firstEnabledArrInstance(cfg.Arrs.RadarrInstances)
-		_ = mgr.CheckLocalARRs(ctx, sonarrURL, sonarrKey, radarrURL, radarrKey)
+		_ = mgr.CheckLocalARRs(ctx, cfg.Stremio.Indexers.Prowlarr.Host, cfg.Stremio.Indexers.Prowlarr.APIKey, "", "")
 	}
 
 	_ = mgr.FetchLatestFromGitHub(ctx)
 
 	return RespondSuccess(c, mgr.GetInfo())
-}
-
-// firstEnabledArrInstance returns the URL and API key of the first enabled
-// ARR instance in the list, or empty strings if none are enabled/configured.
-func firstEnabledArrInstance(instances []config.ArrsInstanceConfig) (url, apiKey string) {
-	for _, inst := range instances {
-		if inst.Enabled != nil && !*inst.Enabled {
-			continue
-		}
-		if inst.URL == "" || inst.APIKey == "" {
-			continue
-		}
-		return inst.URL, inst.APIKey
-	}
-	return "", ""
 }

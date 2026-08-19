@@ -1,6 +1,5 @@
 import {
 	CheckCircle,
-	Film,
 	Globe,
 	Loader2,
 	Plus,
@@ -8,7 +7,6 @@ import {
 	Server,
 	ShieldCheck,
 	Trash2,
-	Tv,
 	XCircle,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -293,7 +291,7 @@ export function IndexersConfigCard({
 									}`}
 								>
 									<div className="flex w-full items-center justify-between">
-										<span className="font-bold text-base-content text-sm">{opt.title}</span>
+										<span className="font-bold text-sm text-base-content">{opt.title}</span>
 										<input
 											type="radio"
 											name="search_provider"
@@ -310,11 +308,11 @@ export function IndexersConfigCard({
 				</div>
 
 				{/* 2. Outbound User-Agent Configuration & Auto-Updater */}
-				<div className="space-y-3 rounded-xl border border-base-300 bg-base-100/70 p-4">
+				<div className="rounded-xl border border-base-300 bg-base-100/70 p-4 space-y-3">
 					<div className="flex flex-wrap items-center justify-between gap-2">
 						<div className="flex items-center gap-2">
 							<ShieldCheck className="h-4 w-4 text-primary" />
-							<span className="font-semibold text-base-content text-xs">
+							<span className="font-semibold text-xs text-base-content">
 								Indexer Client Identification (User-Agent)
 							</span>
 						</div>
@@ -332,15 +330,13 @@ export function IndexersConfigCard({
 
 					<div className="flex flex-wrap items-center gap-2">
 						<div className="flex items-center gap-1.5 rounded-lg border border-base-300 bg-base-200/60 px-3 py-1.5 text-xs">
-							<Tv className="h-3.5 w-3.5 text-base-content/50" aria-hidden="true" />
-							<span className="text-base-content/50">TV Queries:</span>
+							<span className="text-base-content/50">📺 TV Queries:</span>
 							<span className="font-mono font-semibold text-primary">
 								{userAgentInfo?.tv_user_agent || "Sonarr/4.1.1.824 (alpine 3.23.3)"}
 							</span>
 						</div>
 						<div className="flex items-center gap-1.5 rounded-lg border border-base-300 bg-base-200/60 px-3 py-1.5 text-xs">
-							<Film className="h-3.5 w-3.5 text-base-content/50" aria-hidden="true" />
-							<span className="text-base-content/50">Movie Queries:</span>
+							<span className="text-base-content/50">🎬 Movie Queries:</span>
 							<span className="font-mono font-semibold text-secondary">
 								{userAgentInfo?.movie_user_agent || "Radarr/6.5.1.2032 (alpine 3.23.3)"}
 							</span>
@@ -374,7 +370,7 @@ export function IndexersConfigCard({
 					<div className="space-y-3 rounded-xl border border-base-300 bg-base-100/60 p-4">
 						<div className="flex flex-wrap items-center justify-between gap-2 border-base-300 border-b pb-3">
 							<div>
-								<h4 className="font-bold text-base-content text-sm">Direct Newsnab Indexers</h4>
+								<h4 className="font-bold text-sm text-base-content">Direct Newsnab Indexers</h4>
 								<p className="text-base-content/60 text-xs">
 									Add Usenet indexers directly using their Newznab API key and endpoint.
 								</p>
@@ -391,14 +387,14 @@ export function IndexersConfigCard({
 						</div>
 
 						{newsnabList.length === 0 ? (
-							<div className="rounded-lg border border-base-300 border-dashed py-6 text-center text-base-content/50 text-xs">
+							<div className="rounded-lg border border-dashed border-base-300 py-6 text-center text-base-content/50 text-xs">
 								No direct Newsnab indexers configured yet. Click "+ Add Indexer" to add one.
 							</div>
 						) : (
 							<div className="overflow-x-auto">
-								<table className="table-sm table">
+								<table className="table table-sm">
 									<thead>
-										<tr className="border-base-300 text-[11px] text-base-content/60 uppercase tracking-wider">
+										<tr className="border-base-300 text-[11px] uppercase tracking-wider text-base-content/60">
 											<th className="w-12 text-center">Active</th>
 											<th>Indexer Name</th>
 											<th>Endpoint URL</th>
@@ -419,14 +415,14 @@ export function IndexersConfigCard({
 														className="checkbox checkbox-xs checkbox-primary"
 													/>
 												</td>
-												<td className="font-semibold text-base-content text-xs">{item.name}</td>
-												<td className="max-w-xs truncate font-mono text-base-content/70 text-xs">
+												<td className="font-semibold text-xs text-base-content">{item.name}</td>
+												<td className="font-mono text-xs text-base-content/70 truncate max-w-xs">
 													{item.url}
 												</td>
 												<td className="text-center font-mono text-xs">
 													<span className="badge badge-ghost badge-xs">+{item.weight || 0}</span>
 												</td>
-												<td className="text-center font-mono text-base-content/60 text-xs">
+												<td className="text-center font-mono text-xs text-base-content/60">
 													{item.timeout_seconds || 4}s
 												</td>
 												<td className="text-right">
@@ -461,7 +457,7 @@ export function IndexersConfigCard({
 					<div className="space-y-4 rounded-xl border border-base-300 bg-base-100/60 p-4">
 						<div className="flex flex-wrap items-center justify-between gap-2 border-base-300 border-b pb-3">
 							<div>
-								<h4 className="font-bold text-base-content text-sm">Prowlarr Proxy Integration</h4>
+								<h4 className="font-bold text-sm text-base-content">Prowlarr Proxy Integration</h4>
 								<p className="text-base-content/60 text-xs">
 									Connect to your Prowlarr instance to query all configured usenet indexers.
 								</p>
@@ -520,7 +516,7 @@ export function IndexersConfigCard({
 								<span className="font-semibold text-base-content/70 text-xs">
 									Discovered Prowlarr Indexers ({prowlarrIndexers.length})
 								</span>
-								<div className="flex max-h-40 flex-wrap gap-2 overflow-y-auto rounded-lg border border-base-300 bg-base-200/40 p-2">
+								<div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto rounded-lg border border-base-300 p-2 bg-base-200/40">
 									{prowlarrIndexers.map((idx) => (
 										<span key={idx.id} className="badge badge-sm badge-ghost gap-1.5">
 											<CheckCircle className="h-3 w-3 text-success" />
@@ -585,7 +581,7 @@ export function IndexersConfigCard({
 										onChange={(e) =>
 											setNewsnabForm({ ...newsnabForm, weight: Number(e.target.value) })
 										}
-										className="input input-sm w-full font-mono text-xs"
+										className="input input-sm w-full text-xs font-mono"
 									/>
 								</fieldset>
 
@@ -599,7 +595,7 @@ export function IndexersConfigCard({
 										onChange={(e) =>
 											setNewsnabForm({ ...newsnabForm, timeout_seconds: Number(e.target.value) })
 										}
-										className="input input-sm w-full font-mono text-xs"
+										className="input input-sm w-full text-xs font-mono"
 									/>
 								</fieldset>
 							</div>

@@ -100,7 +100,7 @@ export function ReleaseScoreSandbox({ scoringConfig }: ReleaseScoreSandboxProps)
 								evaluation.matches.map((match) => (
 									<span
 										key={match.format.id}
-										className={`badge badge-sm gap-1.5 whitespace-nowrap px-2.5 py-1 font-mono font-semibold shadow-xs ${
+										className={`badge badge-sm gap-1.5 font-mono font-semibold shadow-xs whitespace-nowrap py-1 px-2.5 ${
 											match.score > 0
 												? "badge-success text-success-content"
 												: match.score < 0
@@ -121,15 +121,12 @@ export function ReleaseScoreSandbox({ scoringConfig }: ReleaseScoreSandboxProps)
 					{/* Matched Languages */}
 					{evaluation.matchedLanguages.length > 0 && (
 						<div>
-							<span className="font-semibold text-[11px] text-base-content/60 uppercase tracking-wider">
+							<span className="font-semibold text-base-content/60 text-[11px] uppercase tracking-wider">
 								Detected Audio Languages:
 							</span>
 							<div className="mt-1 flex flex-wrap items-center gap-1.5">
 								{evaluation.matchedLanguages.map((lang) => (
-									<span
-										key={lang}
-										className="badge badge-info badge-sm whitespace-nowrap font-medium"
-									>
+									<span key={lang} className="badge badge-info badge-sm font-medium whitespace-nowrap">
 										{lang}
 									</span>
 								))}
