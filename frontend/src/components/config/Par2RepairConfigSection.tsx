@@ -28,6 +28,7 @@ const defaults: Par2RepairConfig = {
 	max_memory_mb: 256,
 	max_concurrent_jobs: 1,
 	max_patch_store_mb: 0,
+	repair_on_import: false,
 };
 
 export function Par2RepairConfigSection({
@@ -98,10 +99,10 @@ export function Par2RepairConfigSection({
 					</span>
 				</label>
 				<p className="label whitespace-normal">
-					A release's PAR2 volumes are most likely to still be retrievable close to its post
-					date, so repairing at import can save files that would be unrepairable months later.
-					Off by default: each repair downloads the full release, so importing a large damaged
-					backlog is expensive.
+					A release's PAR2 volumes are most likely to still be retrievable close to its post date,
+					so repairing at import can save files that would be unrepairable months later. Off by
+					default: each repair downloads the full release, so importing a large damaged backlog is
+					expensive.
 				</p>
 			</fieldset>
 
