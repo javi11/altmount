@@ -20,6 +20,41 @@ type ArticleFetcher interface {
 	Fetch(ctx context.Context, messageID string) ([]byte, error)
 }
 
+// SweepDeadArticleError reports an article that was live at planning time but
+// vanished during the sweep. Transient at the job level (a retry can replan),
+// but the caller should persist the discovery so the next plan includes it in
+// the missing set instead of hitting the same wall.
+type SweepDeadArticleError struct {
+	MessageID string
+	Err       error
+}
+
+func (e *SweepDeadArticleError) Error() string {
+	return fmt.Sprintf("par2repair: article %s vanished during sweep: %v", e.MessageID, e.Err)
+}
+
+func (e *SweepDeadArticleError) Unwrap() error { return e.Err }
+
+// maxCorruptReplans bounds how many corrupt present slices a single job may
+// reclassify as missing. Each reclassification grows the solver by one
+// accumulator (slice-size bytes) and costs a fresh sweep, so the bound caps
+// both memory growth and re-sweep count.
+const maxCorruptReplans = 8
+
+// corruptSliceError signals a present slice whose CRC32 didn't match its IFSC
+// checksum during the sweep. Unlike SweepDeadArticleError (article vanished),
+// the fetch succeeded but the data is bad: the attempt loop reclassifies the
+// slice as missing and retries with one more recovery slice.
+type corruptSliceError struct {
+	global int
+	fileID [16]byte
+	local  int
+}
+
+func (e *corruptSliceError) Error() string {
+	return fmt.Sprintf("par2repair: file %x slice %d (global %d) failed CRC32 verification", e.fileID, e.local, e.global)
+}
+
 // RunJob executes a repair plan: fetches the chosen recovery slices, sweeps
 // every present input slice of the recovery set (verifying each against its
 // IFSC CRC32), solves for the missing slices, verifies them against their
@@ -81,13 +116,17 @@ func RunJob(
 	}
 
 	// Attempt loop: a singular matrix (a known PAR2 Vandermonde flaw) retries
-	// with a spare recovery slice, at the cost of a fresh sweep.
+	// with a spare recovery slice, and a corrupt present slice is reclassified
+	// as missing and solved for with one more recovery slice — both at the
+	// cost of a fresh sweep.
+	missing := slices.Clone(plan.Missing)
+	corruptReplans := 0
 	for {
-		exps := make([]uint32, k)
+		exps := make([]uint32, len(refs))
 		for i, r := range refs {
 			exps[i] = r.Exponent
 		}
-		solver, err := NewSolver(plan.Missing, exps, plan.SliceSize)
+		solver, err := NewSolver(missing, exps, plan.SliceSize)
 		if err != nil {
 			return err
 		}
@@ -96,7 +135,33 @@ func RunJob(
 		}
 
 		if err := sweep(ctx, plan, idx, fetch, solver, startSlice, missingPos, log); err != nil {
-			return err
+			var corrupt *corruptSliceError
+			if !errors.As(err, &corrupt) {
+				return err
+			}
+			// A present-but-corrupt slice is just another unknown: grow the
+			// missing set by it and take one more recovery slice.
+			corruptReplans++
+			if corruptReplans > maxCorruptReplans {
+				return fmt.Errorf("%w: %v and the corrupt-slice replan budget (%d) is exhausted",
+					ErrUnrepairable, corrupt, maxCorruptReplans)
+			}
+			if len(spares) == 0 {
+				return fmt.Errorf("%w: %v and no spare recovery slices remain", ErrUnrepairable, corrupt)
+			}
+			log.WarnContext(ctx, "present slice failed CRC32, reclassifying as missing",
+				"global_slice", corrupt.global, "spare_exponent", spares[0].Exponent)
+			missing = append(missing, corrupt.global)
+			missingPos[corrupt.global] = len(missing) - 1
+			refs = append(refs, spares[0])
+			spares = spares[1:]
+			extra := refs[len(refs)-1]
+			data, ferr := readRange(ctx, fetch, par2Files[extra.FileIndex], extra.BodyOffset, sliceSize, par2Cache)
+			if ferr != nil {
+				return fmt.Errorf("%w: spare recovery slice unreachable: %v", ErrUnrepairable, ferr)
+			}
+			payloads = append(payloads, data)
+			continue
 		}
 
 		recovered, err := solver.Solve()
@@ -153,9 +218,9 @@ func sweep(
 			global := int(startSlice[fi]) + local
 			if _, isMissing := missingPos[global]; !isMissing {
 				if local < len(checks) && crc32.ChecksumIEEE(buf) != checks[local].CRC32 {
-					// A present-but-corrupt slice would need a replan (grow the
-					// missing set); the prototype treats it as unrepairable.
-					return fmt.Errorf("%w: file %x slice %d failed CRC32 verification", ErrUnrepairable, f.FileID, local)
+					// Present but corrupt: signal the attempt loop to
+					// reclassify this slice as missing and re-sweep.
+					return &corruptSliceError{global: global, fileID: f.FileID, local: local}
 				}
 				solver.FoldPresent(global, buf)
 			}
@@ -196,10 +261,11 @@ func sweep(
 			data, err := fetch.Fetch(ctx, a.MessageID)
 			if err != nil {
 				if errors.Is(err, nntppool.ErrArticleNotFound) {
-					// An article that died between planning and sweeping needs a
-					// replan; surface as transient so the job retries and the
-					// next plan sees the enlarged missing set once persisted.
-					return fmt.Errorf("par2repair: article %s vanished during sweep: %w", a.MessageID, err)
+					// An article that died between planning and sweeping needs
+					// a replan: surface a typed error so the service persists
+					// the discovery and the retry's plan includes it in the
+					// missing set.
+					return &SweepDeadArticleError{MessageID: a.MessageID, Err: err}
 				}
 				return fmt.Errorf("par2repair: fetch article %s: %w", a.MessageID, err)
 			}
@@ -239,6 +305,12 @@ func verifyRecovered(plan *Plan, idx *par2.Index, recovered [][]byte, startSlice
 
 // emitPatches cuts recovered slices back into dead-article payloads and
 // stores them atomically.
+//
+// Only plan.DeadArticles get patches. Corrupt-but-present slices reclassified
+// during the job are solved for (as unknowns) but deliberately NOT patched:
+// their articles are still served fine by providers, and the read path only
+// consults the patch store when an article is MISSING — a patch for a present
+// article would never be read.
 func emitPatches(plan *Plan, recovered [][]byte, sliceSize int64, startSlice []int64, missingPos map[int]int, store *PatchStore, log *slog.Logger) error {
 	for _, da := range plan.DeadArticles {
 		payload := make([]byte, da.Size)

@@ -137,9 +137,42 @@ func TestRunJobRepairsDeadArticle(t *testing.T) {
 	}
 }
 
-func TestRunJobAbortsOnRecoveryChecksumMismatch(t *testing.T) {
+func TestRunJobRepairsDespiteCorruptPresentSlice(t *testing.T) {
 	fx := mkRepairFixture(t, 1024, 2048, 6, 1)
-	// Corrupt a present content article: the swept slice fails its IFSC CRC.
+	// Corrupt a present content article (same length, one flipped byte): the
+	// swept slice fails its IFSC CRC32 and must be reclassified as missing,
+	// consuming a spare recovery slice.
+	corruptID := "<b.rar-0@test>"
+	corrupted := bytes.Clone(fx.fetch.articles[corruptID])
+	corrupted[10] ^= 0xFF
+	fx.fetch.articles[corruptID] = corrupted
+
+	plan, err := BuildPlan(fx.idx, fx.files, Caps{MaxRepairRatio: 0.5, MaxMemoryBytes: 64 << 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewPatchStore(t.TempDir())
+	if err := RunJob(context.Background(), plan, fx.idx, fx.par2Files, fx.fetch, store, testLogger()); err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok := store.Get(fx.deadMsgID)
+	if !ok {
+		t.Fatal("no patch stored for dead article")
+	}
+	if !bytes.Equal(got, fx.deadOrig) {
+		t.Fatalf("patch mismatch: got %d bytes, want %d byte-exact", len(got), len(fx.deadOrig))
+	}
+	// The corrupt article is still served by providers; no patch for it.
+	if store.Has(corruptID) {
+		t.Fatal("must not store a patch for a present (corrupt) article")
+	}
+}
+
+func TestRunJobUnrepairableWhenCorruptAndNoSpares(t *testing.T) {
+	// numRecovery=2 exactly covers the dead article's 2 missing slices
+	// (slice size 1024, article size 2048), leaving zero spares.
+	fx := mkRepairFixture(t, 1024, 2048, 2, 1)
 	corruptID := "<b.rar-0@test>"
 	corrupted := bytes.Clone(fx.fetch.articles[corruptID])
 	corrupted[10] ^= 0xFF
