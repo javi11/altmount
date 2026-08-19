@@ -491,3 +491,11 @@ func TestPar2RepairEffectivePatchDir(t *testing.T) {
 	cfg.PatchDir = "/mnt/big-disk/altmount-patches"
 	assert.Equal(t, "/mnt/big-disk/altmount-patches", cfg.EffectivePatchDir("/meta"))
 }
+
+// PAR2 repair is beta: opt-in, so an install never streams whole releases
+// in the background until the user asks for it.
+func TestPar2RepairDisabledByDefault(t *testing.T) {
+	cfg := DefaultConfig()
+	assert.NotNil(t, cfg.Par2Repair.Enabled)
+	assert.False(t, *cfg.Par2Repair.Enabled, "PAR2 repair must be opt-in while in beta")
+}

@@ -1663,7 +1663,7 @@ func DefaultConfig(configDir ...string) *Config {
 	failureMaskingEnabled := false
 	repairEnabled := true
 	repairExponentialBackoff := true
-	par2RepairEnabled := true
+	par2RepairEnabled := false  // beta: opt-in until the feature settles
 	par2RepairOnImport := false // opt-in: each repair costs a full release download
 
 	// Set paths based on whether we're running in Docker or have a specific config directory

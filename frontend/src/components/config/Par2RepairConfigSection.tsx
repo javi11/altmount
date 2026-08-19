@@ -1,3 +1,4 @@
+import { FlaskConical } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ConfigResponse, Par2RepairConfig } from "../../types/config";
 
@@ -23,7 +24,7 @@ function sliderPos(value: number): number {
 }
 
 const defaults: Par2RepairConfig = {
-	enabled: true,
+	enabled: false,
 	max_repair_ratio: 0.02,
 	max_memory_mb: 256,
 	max_concurrent_jobs: 1,
@@ -60,12 +61,21 @@ export function Par2RepairConfigSection({
 
 	return (
 		<div className="space-y-6">
+			<div className="alert alert-warning">
+				<FlaskConical className="h-5 w-5 shrink-0" aria-hidden="true" />
+				<div className="text-sm">
+					<span className="badge badge-warning badge-sm mr-2 font-semibold">Beta</span>
+					PAR2 repair is new and off by default. Repairs run in the background and download a full
+					release each time, so enable it deliberately and keep an eye on the Health page.
+				</div>
+			</div>
+
 			<div className="alert alert-info">
 				<div className="text-sm">
 					When a stream hits a missing (taken-down) article, AltMount reconstructs the missing bytes
 					in the background from the release's PAR2 recovery files and serves them byte-exact from
 					then on. A repair streams the whole release once over the import connection lane; repaired
-					data is stored under the metadata directory and survives restarts.
+					data is stored in the patch directory below and survives restarts.
 				</div>
 			</div>
 
@@ -75,7 +85,7 @@ export function Par2RepairConfigSection({
 					<input
 						type="checkbox"
 						className="toggle toggle-primary"
-						checked={data.enabled ?? true}
+						checked={data.enabled ?? false}
 						disabled={isReadOnly}
 						onChange={(e) => handleChange("enabled", e.target.checked)}
 					/>
@@ -92,7 +102,7 @@ export function Par2RepairConfigSection({
 						type="checkbox"
 						className="toggle toggle-primary"
 						checked={data.repair_on_import ?? false}
-						disabled={isReadOnly || !(data.enabled ?? true)}
+						disabled={isReadOnly || !(data.enabled ?? false)}
 						onChange={(e) => handleChange("repair_on_import", e.target.checked)}
 					/>
 					<span className="label-text">
