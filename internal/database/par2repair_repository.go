@@ -270,6 +270,26 @@ func (r *Par2RepairRepository) List(ctx context.Context, limit int) ([]*Par2Repa
 	return jobs, nil
 }
 
+// Get returns one job by ID, or (nil, nil) when no such row exists.
+func (r *Par2RepairRepository) Get(ctx context.Context, id int64) (*Par2RepairJob, error) {
+	job := &Par2RepairJob{}
+	err := r.db.QueryRowContext(ctx, `
+		SELECT id, file_path, nzb_path, status, attempts, last_error, failing_segment_id,
+		       dead_segment_ids, next_attempt_at, started_at, finished_at, created_at, updated_at
+		FROM par2_repair_jobs
+		WHERE id = ?`, id).Scan(
+		&job.ID, &job.FilePath, &job.NzbPath, &job.Status, &job.Attempts, &job.LastError,
+		&job.FailingSegmentID, &job.DeadSegmentIDs, &job.NextAttemptAt,
+		&job.StartedAt, &job.FinishedAt, &job.CreatedAt, &job.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get par2 repair job: %w", err)
+	}
+	return job, nil
+}
+
 // ResetRunning flips running jobs back to pending; called once at startup so
 // jobs interrupted by a crash or shutdown are re-claimed.
 func (r *Par2RepairRepository) ResetRunning(ctx context.Context) error {

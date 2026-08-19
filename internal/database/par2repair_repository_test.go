@@ -284,3 +284,26 @@ func TestPar2RepairEnqueueNzb(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, created)
 }
+
+func TestPar2RepairGet(t *testing.T) {
+	repo, _ := newPar2RepairRepo(t)
+	ctx := context.Background()
+	_, err := repo.Enqueue(ctx, "/movies/a.mkv", "<seg@x>")
+	require.NoError(t, err)
+	rows, err := repo.List(ctx, 10)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+
+	got, err := repo.Get(ctx, rows[0].ID)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, rows[0].ID, got.ID)
+	require.Equal(t, "/movies/a.mkv", got.FilePath)
+	require.True(t, got.FailingSegmentID.Valid)
+	require.Equal(t, "<seg@x>", got.FailingSegmentID.String)
+
+	// A missing ID is not an error: callers treat nil as "no such job".
+	missing, err := repo.Get(ctx, 99999)
+	require.NoError(t, err)
+	require.Nil(t, missing)
+}
