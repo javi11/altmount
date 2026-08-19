@@ -106,9 +106,10 @@ export function Par2RepairConfigSection({
 							onChange={(e) => handleChange("max_repair_ratio", Number(e.target.value) / 100)}
 						/>
 						<div className="relative h-4 font-black text-base-content/50 text-xs">
-							{/* Labels sit at their true positions on the linear 0.5–25 scale. */}
-							<span className="absolute left-0">0.5%</span>
-							<span className="-translate-x-1/2 absolute" style={{ left: `${sliderPos(2)}%` }}>
+							{/* Labels sit at their true positions on the linear 0.5–25 scale.
+							    The 2% label is left-anchored (its left edge marks the spot) so
+							    it never spills past the track's start. */}
+							<span className="absolute" style={{ left: `${sliderPos(2)}%` }}>
 								2% (DEFAULT)
 							</span>
 							<span className="-translate-x-1/2 absolute" style={{ left: `${sliderPos(10)}%` }}>
