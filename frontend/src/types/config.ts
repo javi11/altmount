@@ -23,11 +23,21 @@ export interface ConfigResponse {
 	providers: ProviderConfig[];
 	nzblnk: NzblnkConfig;
 	network: NetworkConfig;
+	par2_repair: Par2RepairConfig;
 	mount_path: string;
 	mount_type: MountType;
 	api_key?: string;
 	download_key?: string;
 	profiler_enabled: boolean;
+}
+
+// Background PAR2 repair of missing usenet articles
+export interface Par2RepairConfig {
+	enabled?: boolean;
+	max_repair_ratio?: number; // fraction of a file's bytes repairable; PAR2 redundancy is the hard ceiling
+	max_memory_mb?: number; // solver accumulator budget per job
+	max_concurrent_jobs?: number;
+	max_patch_store_mb?: number; // total patch-store size cap; 0 = unlimited
 }
 
 // WebDAV server configuration
@@ -341,6 +351,7 @@ export interface ConfigUpdateRequest {
 	providers?: ProviderUpdateRequest[];
 	nzblnk?: NzblnkConfig;
 	network?: NetworkConfig;
+	par2_repair?: Par2RepairConfig;
 	mount_path?: string;
 	mount_type?: MountType;
 	profiler_enabled?: boolean;
@@ -539,6 +550,7 @@ export type ConfigSection =
 	| "stremio"
 	| "nzblnk"
 	| "network"
+	| "par2_repair"
 	| "system";
 
 // Form data interfaces for UI components
@@ -930,6 +942,12 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		description:
 			"HTTP/HTTPS proxy and indexer User-Agent for outbound indexer, Arrs, NZB grab, and SABnzbd fallback traffic",
 		icon: "Globe",
+		canEdit: true,
+	},
+	par2_repair: {
+		title: "PAR2 Repair",
+		description: "Background reconstruction of missing usenet articles from PAR2 recovery data",
+		icon: "Wrench",
 		canEdit: true,
 	},
 	system: {
