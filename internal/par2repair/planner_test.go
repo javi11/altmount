@@ -226,3 +226,28 @@ func equalInts(a, b []int) bool {
 	}
 	return true
 }
+
+// The repair cap must measure damage in bytes actually missing, not in
+// slice-quantized bytes. Real releases post large PAR2 slices over much
+// smaller articles (e.g. a 27 MB slice over 1 MB articles), so one dead
+// article marks a whole slice missing and quantized accounting overstates the
+// damage by the slice/article ratio — rejecting releases that are barely
+// damaged at all.
+func TestBuildPlanRatioUsesMissingBytesNotSliceQuantized(t *testing.T) {
+	// 65536 B file, 8192 B slices, 256 B articles: one dead article is
+	// 0.39% of the file, but it lands in a slice worth 12.5% of it.
+	content := bytes.Repeat([]byte{0x66}, 65536)
+	idx := mkIndex(t, 8192, 4, map[string][]byte{"a.rar": content})
+	files := []SetFile{mkSetFile(t, idx, "a.rar", 65536, 256, 3)}
+
+	caps := defaultCaps()
+	caps.MaxRepairRatio = 0.05 // above the true 0.39%, below the quantized 12.5%
+
+	plan, err := BuildPlan(idx, files, caps)
+	if err != nil {
+		t.Fatalf("a file 0.39%% damaged must be repairable under a 5%% cap: %v", err)
+	}
+	if len(plan.Missing) != 1 {
+		t.Fatalf("Missing = %v, want exactly the one slice holding the dead article", plan.Missing)
+	}
+}

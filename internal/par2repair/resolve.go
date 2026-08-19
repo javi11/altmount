@@ -148,11 +148,11 @@ func releaseArticleIDs(store *metapb.NzbStore, par2Files []SetFile) []string {
 	return ids
 }
 
-// ratioPrecheckMargin keeps the pre-parse ratio check conservative: encoded
-// segment bytes approximate decoded sizes (yEnc overhead mostly cancels in
-// the ratio) and slice quantization only pushes the exact ratio higher, so a
-// small margin ensures borderline releases fall through to BuildPlan's exact
-// check instead of being rejected on an estimate.
+// ratioPrecheckMargin keeps the pre-parse ratio check conservative: it works
+// from encoded segment bytes, which only approximate the decoded sizes
+// BuildPlan measures (yEnc overhead mostly cancels in the ratio). The margin
+// ensures borderline releases fall through to BuildPlan's exact check instead
+// of being rejected on an estimate.
 const ratioPrecheckMargin = 1.05
 
 // ratioPrecheck rejects damage far above the repair-ratio cap right after the

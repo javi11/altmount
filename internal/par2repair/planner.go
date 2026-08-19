@@ -99,7 +99,7 @@ func BuildPlan(idx *par2.Index, files []SetFile, caps Caps) (*Plan, error) {
 
 	// Map dead articles to global slice indices.
 	missingSet := map[int]bool{}
-	var damagedFileBytes int64
+	var damagedFileBytes, missingArticleBytes int64
 	damagedFiles := map[int]bool{}
 	for fi, f := range plan.Files {
 		var off int64
@@ -114,6 +114,7 @@ func BuildPlan(idx *par2.Index, files []SetFile, caps Caps) (*Plan, error) {
 					FileIdx: fi, ArtIdx: ai, MessageID: a.MessageID,
 					FileStart: off, Size: a.Size,
 				})
+				missingArticleBytes += a.Size
 				if !damagedFiles[fi] {
 					damagedFiles[fi] = true
 					damagedFileBytes += int64(f.Length)
@@ -130,12 +131,17 @@ func BuildPlan(idx *par2.Index, files []SetFile, caps Caps) (*Plan, error) {
 	}
 	sort.Ints(plan.Missing)
 
-	// Caps.
+	// Caps. Solver memory scales with whole slices, but the damage ratio must
+	// count the bytes actually missing: releases routinely post PAR2 slices far
+	// larger than their articles (a 27 MB slice over 1 MB articles is typical),
+	// so one dead article marks a whole slice missing. Charging the ratio for
+	// the slice would overstate the damage by the slice/article factor and
+	// reject releases that are barely damaged.
 	k := len(plan.Missing)
-	missingBytes := int64(k) * sliceSize
-	plan.SpillToDisk = caps.MaxMemoryBytes > 0 && missingBytes > caps.MaxMemoryBytes
+	solverBytes := int64(k) * sliceSize
+	plan.SpillToDisk = caps.MaxMemoryBytes > 0 && solverBytes > caps.MaxMemoryBytes
 	if caps.MaxRepairRatio > 0 && damagedFileBytes > 0 {
-		if ratio := float64(missingBytes) / float64(damagedFileBytes); ratio > caps.MaxRepairRatio {
+		if ratio := float64(missingArticleBytes) / float64(damagedFileBytes); ratio > caps.MaxRepairRatio {
 			return nil, fmt.Errorf("%w: damage ratio %.4f exceeds max_repair_ratio %.4f",
 				ErrUnrepairable, ratio, caps.MaxRepairRatio)
 		}
