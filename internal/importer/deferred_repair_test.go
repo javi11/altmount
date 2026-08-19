@@ -43,3 +43,35 @@ func TestErrDeferredForRepairIsDistinct(t *testing.T) {
 		t.Fatal("deferral must not be mistaken for a normal missing-articles failure")
 	}
 }
+
+// A release where EVERY file is damaged is the canonical deferral case — a
+// fully-holed archive set. The decision must be reached before the
+// "nothing healthy remains to import" bail-out, or deferral never fires for
+// the exact releases it exists to rescue.
+func TestDeferPrecedesNothingProcessedBailout(t *testing.T) {
+	// allBroken mirrors the sweep's terminal state: every eligible file broken.
+	const eligible, broken = 112, 112
+	deferred, bail := fastFailOutcome(
+		true, /* repair_on_import */
+		true, /* nzb has par2 */
+		true, /* damage is inside an archive set */
+		eligible, broken,
+	)
+	if !deferred {
+		t.Fatal("a fully damaged archive set with PAR2 must defer for repair")
+	}
+	if bail {
+		t.Fatal("deferral must take precedence over the no-files-processed bail-out")
+	}
+}
+
+// Without PAR2 there is nothing to repair from, so the bail-out still wins.
+func TestBailoutWhenNothingToRepairFrom(t *testing.T) {
+	deferred, bail := fastFailOutcome(true, false, true, 112, 112)
+	if deferred {
+		t.Fatal("must not defer without PAR2 files")
+	}
+	if !bail {
+		t.Fatal("a fully damaged release with no PAR2 must still bail out")
+	}
+}

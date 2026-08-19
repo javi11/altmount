@@ -73,6 +73,20 @@ func shouldDeferForRepair(enabled, hasPar2, brokenInSet bool) bool {
 	return enabled && hasPar2 && brokenInSet
 }
 
+// fastFailOutcome decides what the sweep does with a damaged release:
+// defer for repair, or bail out because nothing importable remains.
+//
+// Deferral is evaluated FIRST and deliberately: a fully damaged archive set —
+// every volume broken — is the canonical case PAR2 repair exists to rescue,
+// and it is exactly the case that trips the bail-out. Checking the bail-out
+// first would mean deferral never fires for the releases that need it most.
+func fastFailOutcome(enabled, hasPar2, brokenInSet bool, eligibleCount, brokenCount int) (defer_ bool, bailOut bool) {
+	if shouldDeferForRepair(enabled, hasPar2, brokenInSet) {
+		return true, false
+	}
+	return false, eligibleCount > 0 && brokenCount == eligibleCount
+}
+
 // RepairEnqueuer queues a file for background PAR2 repair (implemented by
 // par2repair.Service). Implementations must be non-blocking.
 type RepairEnqueuer interface {
@@ -434,10 +448,26 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 		}
 	}
 
+	// Deferral is decided before the bail-out below: a fully damaged archive
+	// set trips both, and repair is the better outcome. See fastFailOutcome.
+	deferForRepair, bailOut := fastFailOutcome(
+		cfg.Par2Repair.EffectiveRepairOnImport(), nzbHasPar2, archiveSetDamaged,
+		eligibleRegularCount, len(brokenIdx),
+	)
+	if deferForRepair {
+		if proc.log != nil {
+			proc.log.InfoContext(ctx, "Deferring import: archive set has missing articles, queueing PAR2 repair",
+				"files", len(fastFailFiles),
+				"broken_files", len(brokenIdx),
+				"missing_segment", firstArchiveMissingID)
+		}
+		return nil, nil, nil, &DeferredRepairError{FirstMissingSegmentID: firstArchiveMissingID}
+	}
+
 	// With set-level propagation, a broken set has all its parts in brokenIdx, so
 	// this equality is logical-unit accurate: it holds only when every RAR set and
 	// every standalone regular file is broken — nothing healthy remains to import.
-	if eligibleRegularCount > 0 && len(brokenIdx) == eligibleRegularCount {
+	if bailOut {
 		return nil, nil, nil, multifile.ErrNoFilesProcessed
 	}
 
@@ -456,15 +486,6 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 			"broken_files", len(brokenIdx),
 			"broken_rar_sets", len(brokenSets),
 			"eligible_files", eligibleRegularCount)
-	}
-
-	if shouldDeferForRepair(cfg.Par2Repair.EffectiveRepairOnImport(), nzbHasPar2, archiveSetDamaged) {
-		if proc.log != nil {
-			proc.log.InfoContext(ctx, "Deferring import: archive set has missing articles, queueing PAR2 repair",
-				"files", len(fastFailFiles),
-				"missing_segment", firstArchiveMissingID)
-		}
-		return nil, nil, nil, &DeferredRepairError{FirstMissingSegmentID: firstArchiveMissingID}
 	}
 
 	return brokenIdx, missingIDs, degradedFiles, nil
