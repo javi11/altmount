@@ -93,6 +93,11 @@ candidate articles across providers before committing to a plan. Output: a repai
 Recovery-set membership and ordering are established by matching `FileDesc`
 (MD5-16k, MD5, length, filename) against NzbStore entries.
 
+The sweep covers **exactly the Main-packet recovery set containing the damage** — no
+more, no less. For standard releases (one set over all RAR parts) that is effectively
+the whole release; per-part or multi-set NZBs automatically sweep only the damaged set,
+and files outside the set (samples, nfo) are never downloaded.
+
 ### repair.Job
 
 Executes a plan under a context:
