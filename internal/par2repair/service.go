@@ -34,6 +34,7 @@ type Config struct {
 type JobStore interface {
 	Enqueue(ctx context.Context, filePath string, failingSegmentID string) (bool, error)
 	ClaimNext(ctx context.Context, now time.Time) (*database.Par2RepairJob, error)
+	Get(ctx context.Context, id int64) (*database.Par2RepairJob, error)
 	Delete(ctx context.Context, id int64) error
 	DeleteFinished(ctx context.Context) error
 	MarkRetry(ctx context.Context, id int64, reason string, nextAttempt time.Time) error
@@ -87,6 +88,27 @@ const (
 	maxJobAttempts = 8
 )
 
+// ErrJobNotFound reports that no active repair job has the requested ID —
+// either it never existed or it finished moments earlier.
+var ErrJobNotFound = errors.New("par2repair: job not found")
+
+// cancelReason is recorded on an import parked by an NZB-mode job whose repair
+// the user cancelled.
+const cancelReason = "repair cancelled by user"
+
+// cancelUnwindTimeout bounds how long Cancel waits for a running job to
+// unwind. Unwinding runs RunJob's arena cleanup defers, so Cancel waits rather
+// than returning while scratch files are still mapped.
+const cancelUnwindTimeout = 30 * time.Second
+
+// runningJob is the live handle on a job a worker is executing, so Cancel can
+// stop it and wait for its cleanup defers to run.
+type runningJob struct {
+	cancel    context.CancelFunc
+	done      chan struct{} // closed once the worker has unwound
+	cancelled bool          // set by Cancel, read by the worker
+}
+
 // Service owns the repair queue: triggers enqueue files, worker goroutines
 // claim jobs, resolve them against metadata and run the repair pipeline.
 type Service struct {
@@ -103,6 +125,10 @@ type Service struct {
 	// progress holds live sweep progress per running job ID.
 	progressMu sync.Mutex
 	progress   map[int64]JobProgressSnapshot
+
+	// running holds the live handle on each job a worker is executing.
+	runningMu sync.Mutex
+	running   map[int64]*runningJob
 
 	// resolveNzb plans an NZB-mode repair; replaced in tests. The default
 	// parses the NZB from disk and calls ResolveFromNzb.
@@ -241,7 +267,20 @@ func (s *Service) runNext(ctx context.Context) bool {
 	}
 
 	start := time.Now()
-	err = s.execute(ctx, job)
+	jobCtx, cancel := context.WithCancel(ctx)
+	rj := s.registerRunning(job.ID, cancel)
+	// Deferred so every return path retires the job, and so done closes only
+	// after the bookkeeping below has run.
+	defer s.finishRunning(job.ID, rj)
+
+	err = s.execute(jobCtx, job)
+
+	if s.wasCancelled(job.ID) {
+		// Cancel owns the user-visible verdict; skip retry bookkeeping so the
+		// row cannot be resurrected.
+		s.handleCancelled(context.WithoutCancel(ctx), job)
+		return true
+	}
 	if err != nil && !errors.Is(err, ErrUnrepairable) && !errors.Is(err, ErrNothingToRepair) && ctx.Err() != nil {
 		// Shutdown mid-job: leave it running; ResetRunning reclaims at boot.
 		return false
@@ -296,6 +335,51 @@ func (s *Service) handleOutcome(ctx context.Context, job *database.Par2RepairJob
 			s.log.ErrorContext(ctx, "Failed to schedule repair retry", "error", err, "job", job.ID)
 		}
 	}
+}
+
+// registerRunning publishes a running job so Cancel can reach it.
+func (s *Service) registerRunning(id int64, cancel context.CancelFunc) *runningJob {
+	rj := &runningJob{cancel: cancel, done: make(chan struct{})}
+	s.runningMu.Lock()
+	defer s.runningMu.Unlock()
+	if s.running == nil {
+		s.running = make(map[int64]*runningJob)
+	}
+	s.running[id] = rj
+	return rj
+}
+
+// wasCancelled reports whether Cancel flagged this job, leaving it registered
+// so Cancel keeps waiting until the bookkeeping is done.
+func (s *Service) wasCancelled(id int64) bool {
+	s.runningMu.Lock()
+	defer s.runningMu.Unlock()
+	rj := s.running[id]
+	return rj != nil && rj.cancelled
+}
+
+// finishRunning retires the job: it releases the job context, drops the
+// registry entry, and only then closes done. Closing done last is what makes
+// Cancel's wait mean "the job unwound AND its bookkeeping landed" — close it
+// any earlier and Cancel could return while the row still exists.
+func (s *Service) finishRunning(id int64, rj *runningJob) {
+	rj.cancel()
+	s.runningMu.Lock()
+	delete(s.running, id)
+	s.runningMu.Unlock()
+	close(rj.done)
+}
+
+// handleCancelled applies the bookkeeping for a user-cancelled job. Cancel is
+// a plain stop: no health record and no metadata status are written, so the
+// file is left exactly as it was and a later read may queue the repair again.
+// An NZB-mode job's parked import is failed, since nothing else would ever
+// release it.
+func (s *Service) handleCancelled(ctx context.Context, job *database.Par2RepairJob) {
+	s.log.InfoContext(ctx, "PAR2 repair cancelled", "file", job.FilePath, "job", job.ID)
+	s.failImport(ctx, job, cancelReason)
+	s.deleteJob(ctx, job.ID)
+	s.clearProgress(job.ID)
 }
 
 // deleteJob removes a finished job row; failures are logged, never fatal.
@@ -493,4 +577,72 @@ func deadSegmentIDs(fm *metapb.FileMetadata, failing string) []string {
 		}
 	}
 	return ids
+}
+
+// Cancel stops a queued or in-flight repair and cleans the transient artifacts
+// it generated. For a running job it cancels the job's context and waits for
+// the worker to unwind, so the solver's mmap scratch files are gone before
+// Cancel returns; the worker then deletes the row and releases any parked
+// import. For a job no worker holds, Cancel does that bookkeeping itself.
+//
+// Returns ErrJobNotFound when no job has that ID. Cancel is a plain stop: the
+// file's health record is untouched, so a later read may queue the repair
+// again.
+func (s *Service) Cancel(ctx context.Context, jobID int64) error {
+	s.runningMu.Lock()
+	rj := s.running[jobID]
+	if rj != nil {
+		rj.cancelled = true
+	}
+	s.runningMu.Unlock()
+
+	if rj != nil {
+		rj.cancel()
+		select {
+		case <-rj.done:
+		case <-time.After(cancelUnwindTimeout):
+			return fmt.Errorf("par2repair: job %d did not stop within %s", jobID, cancelUnwindTimeout)
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		s.sweepArtifacts(ctx)
+		return nil
+	}
+
+	job, err := s.repo.Get(ctx, jobID)
+	if err != nil {
+		return err
+	}
+	if job == nil {
+		return ErrJobNotFound
+	}
+	s.log.InfoContext(ctx, "PAR2 repair cancelled before it started",
+		"file", job.FilePath, "job", jobID)
+	s.failImport(ctx, job, cancelReason)
+	if err := s.repo.Delete(ctx, jobID); err != nil {
+		return fmt.Errorf("par2repair: delete cancelled job %d: %w", jobID, err)
+	}
+	s.clearProgress(jobID)
+	s.sweepArtifacts(ctx)
+	return nil
+}
+
+// sweepArtifacts reclaims transient repair artifacts, but only while no job is
+// running: with an empty registry every file under .scratch and every .tmp-*
+// in the patch tree is by definition an orphan, so no per-file ownership
+// tracking is needed. Failures are logged, never fatal — the repair is already
+// stopped, which is what the caller asked for.
+func (s *Service) sweepArtifacts(ctx context.Context) {
+	s.runningMu.Lock()
+	busy := len(s.running) > 0
+	s.runningMu.Unlock()
+	if busy {
+		return
+	}
+	if err := s.store.RemoveScratch(); err != nil {
+		s.log.ErrorContext(ctx, "Failed to clean par2 repair scratch dir", "error", err)
+	}
+	if err := s.store.SweepTempFiles(); err != nil {
+		s.log.ErrorContext(ctx, "Failed to sweep par2 repair temp files", "error", err)
+	}
 }

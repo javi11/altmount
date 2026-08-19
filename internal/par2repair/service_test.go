@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -373,5 +375,168 @@ func TestServiceExecutesNzbModeJob(t *testing.T) {
 	}
 	if sawNzbPath != "/nzbs/rel.nzb" {
 		t.Fatalf("resolveNzb called with %q, want the job's NZB path", sawNzbPath)
+	}
+}
+
+// recordingResumer is an ImportResumer fake that records both calls.
+type recordingResumer struct {
+	resumed []string
+	failed  []struct{ nzb, reason string }
+}
+
+func (r *recordingResumer) ResumeWaitingRepair(_ context.Context, nzbPath string) error {
+	r.resumed = append(r.resumed, nzbPath)
+	return nil
+}
+
+func (r *recordingResumer) FailWaitingRepair(_ context.Context, nzbPath, reason string) error {
+	r.failed = append(r.failed, struct{ nzb, reason string }{nzbPath, reason})
+	return nil
+}
+
+// Cancelling a running job must stop it, delete the row without scheduling a
+// retry, and return only after the job goroutine has unwound (which is what
+// runs RunJob's arena cleanup defers).
+func TestServiceCancelRunningJob(t *testing.T) {
+	repo := newTestRepo(t)
+	s := testService(t, repo, true)
+	healthStore := &recordingHealth{}
+	s.SetHealthStore(healthStore)
+
+	started := make(chan struct{})
+	unwound := make(chan struct{})
+	s.execute = func(ctx context.Context, _ *database.Par2RepairJob) error {
+		close(started)
+		<-ctx.Done()
+		close(unwound)
+		return ctx.Err()
+	}
+
+	s.Enqueue(context.Background(), "/movies/a.mkv", "")
+	go s.runNext(context.Background())
+	<-started
+
+	rows, err := repo.List(context.Background(), 10)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("list before cancel: err=%v rows=%d", err, len(rows))
+	}
+	jobID := rows[0].ID
+	if err := s.Cancel(context.Background(), jobID); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+
+	select {
+	case <-unwound:
+	default:
+		t.Fatal("Cancel returned before the job goroutine unwound")
+	}
+
+	rows, err = repo.List(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("rows = %+v, want none after cancel", rows)
+	}
+	if len(healthStore.calls) != 0 {
+		t.Fatalf("health calls = %+v, want none: cancel is a plain stop", healthStore.calls)
+	}
+	if _, ok := s.Progress(jobID); ok {
+		t.Fatal("progress not cleared after cancel")
+	}
+}
+
+// An NZB-mode job parks an import; cancelling must release it as failed so it
+// cannot wait in waiting_repair forever.
+func TestServiceCancelRunningNzbJobFailsParkedImport(t *testing.T) {
+	repo := newTestRepo(t)
+	s := testService(t, repo, true)
+	resumer := &recordingResumer{}
+	s.SetImportResumer(resumer)
+
+	started := make(chan struct{})
+	s.execute = func(ctx context.Context, _ *database.Par2RepairJob) error {
+		close(started)
+		<-ctx.Done()
+		return ctx.Err()
+	}
+
+	if _, err := repo.EnqueueNzb(context.Background(), "/nzbs/rel.nzb", "<dead@x>"); err != nil {
+		t.Fatal(err)
+	}
+	go s.runNext(context.Background())
+	<-started
+
+	rows, err := repo.List(context.Background(), 10)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("list: err=%v rows=%d", err, len(rows))
+	}
+	if err := s.Cancel(context.Background(), rows[0].ID); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+
+	if len(resumer.resumed) != 0 {
+		t.Fatalf("resumed = %v, want none on cancel", resumer.resumed)
+	}
+	if len(resumer.failed) != 1 ||
+		resumer.failed[0].nzb != "/nzbs/rel.nzb" ||
+		resumer.failed[0].reason != cancelReason {
+		t.Fatalf("failed = %+v, want one /nzbs/rel.nzb with the cancel reason", resumer.failed)
+	}
+}
+
+// A pending job is held by no worker: Cancel deletes it directly.
+func TestServiceCancelPendingJob(t *testing.T) {
+	repo := newTestRepo(t)
+	s := testService(t, repo, true)
+
+	s.Enqueue(context.Background(), "/movies/a.mkv", "")
+	rows, err := repo.List(context.Background(), 10)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("list: err=%v rows=%d", err, len(rows))
+	}
+	if err := s.Cancel(context.Background(), rows[0].ID); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+
+	rows, err = repo.List(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("rows = %+v, want none after cancelling a pending job", rows)
+	}
+}
+
+func TestServiceCancelUnknownJob(t *testing.T) {
+	repo := newTestRepo(t)
+	s := testService(t, repo, true)
+	if err := s.Cancel(context.Background(), 4242); !errors.Is(err, ErrJobNotFound) {
+		t.Fatalf("Cancel(unknown) = %v, want ErrJobNotFound", err)
+	}
+}
+
+// Cancel removes the solver scratch directory once nothing is running.
+func TestServiceCancelSweepsScratch(t *testing.T) {
+	repo := newTestRepo(t)
+	s := testService(t, repo, true)
+	scratch := s.store.ScratchDir()
+	if err := os.MkdirAll(scratch, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(scratch, ".par2repair-1.mem"), []byte("arena"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s.Enqueue(context.Background(), "/movies/a.mkv", "")
+	rows, err := repo.List(context.Background(), 10)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("list: err=%v rows=%d", err, len(rows))
+	}
+	if err := s.Cancel(context.Background(), rows[0].ID); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+	if _, err := os.Stat(scratch); !os.IsNotExist(err) {
+		t.Fatalf("scratch dir survived cancel, stat err = %v", err)
 	}
 }
