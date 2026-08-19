@@ -1,7 +1,7 @@
 # PAR2 Repair for AltMount — Design
 
 **Date:** 2026-08-19
-**Status:** Approved for planning
+**Status:** Implemented (see docs/superpowers/plans/2026-08-19-par2-repair.md)
 **Context:** The "Six ways to stream Usenet" benchmark (2026-08-18) shows zurg as the only
 server that repairs a dead article via PAR2: instant zero-fill on first read, a ~3-minute
 background Reed–Solomon rebuild, then byte-exact data forever, atomically, surviving
