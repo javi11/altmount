@@ -51,6 +51,7 @@ const defaultFormData: ProviderFormData = {
 	username: "",
 	password: "",
 	max_connections: 10,
+	min_connections_alive: 0,
 	inflight_requests: 10,
 	stat_inflight_requests: 100,
 	tls: false,
@@ -113,6 +114,7 @@ export function ProviderModal({
 				username: provider.username,
 				password: "", // Always start with empty password for security
 				max_connections: provider.max_connections,
+				min_connections_alive: provider.min_connections_alive ?? 0,
 				inflight_requests: provider.inflight_requests || 10,
 				stat_inflight_requests: provider.stat_inflight_requests || 100,
 				tls: provider.tls,
@@ -229,6 +231,8 @@ export function ProviderModal({
 				if (formData.password) updateData.password = formData.password; // Only include if not empty
 				if (formData.max_connections !== provider.max_connections)
 					updateData.max_connections = formData.max_connections;
+				if (formData.min_connections_alive !== (provider.min_connections_alive ?? 0))
+					updateData.min_connections_alive = formData.min_connections_alive;
 				if (formData.inflight_requests !== provider.inflight_requests)
 					updateData.inflight_requests = formData.inflight_requests;
 				if (formData.stat_inflight_requests !== provider.stat_inflight_requests)
@@ -343,6 +347,28 @@ export function ProviderModal({
 								min={1}
 								max={100}
 							/>
+						</fieldset>
+
+						<fieldset className="fieldset">
+							<legend className="fieldset-legend font-bold">Min Connections Alive</legend>
+							<input
+								id="min_connections_alive"
+								type="number"
+								className="input input-bordered w-full font-mono text-sm"
+								value={formData.min_connections_alive}
+								onChange={(e) =>
+									handleInputChange(
+										"min_connections_alive",
+										Number.parseInt(e.target.value, 10) || 0,
+									)
+								}
+								min={0}
+								max={formData.max_connections}
+							/>
+							<p className="label mt-1 text-base-content/70 text-xs">
+								0 = disabled. Keeps this many connections dialed and open at all times, instead of
+								connecting cold on first traffic after being idle.
+							</p>
 						</fieldset>
 
 						<fieldset className="fieldset">
