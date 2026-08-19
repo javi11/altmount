@@ -8,6 +8,12 @@ interface Par2RepairConfigSectionProps {
 	isUpdating?: boolean;
 }
 
+// ratioToPercent renders the stored fraction as a percentage, rounded to two
+// decimals so float noise (0.020000000000000004) never reaches the input.
+function ratioToPercent(ratio: number | undefined): number {
+	return Math.round((ratio ?? 0.02) * 10000) / 100;
+}
+
 const defaults: Par2RepairConfig = {
 	enabled: true,
 	max_repair_ratio: 0.02,
@@ -71,20 +77,23 @@ export function Par2RepairConfigSection({
 
 			<div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
 				<fieldset className="fieldset">
-					<legend className="fieldset-legend">Max Repair Ratio</legend>
-					<input
-						type="number"
-						className="input w-full"
-						min={0}
-						max={1}
-						step={0.01}
-						value={data.max_repair_ratio ?? 0.02}
-						disabled={isReadOnly}
-						onChange={(e) => handleChange("max_repair_ratio", Number(e.target.value))}
-					/>
-					<p className="label">
-						Fraction of a file's bytes a repair may reconstruct (0.02 = 2%, matching the zero-fill
-						tolerance). The release's PAR2 redundancy is always the hard ceiling.
+					<legend className="fieldset-legend">Max Repair Percentage</legend>
+					<label className="input input-bordered flex w-full max-w-48 items-center gap-2 bg-base-100">
+						<input
+							type="number"
+							className="grow font-mono text-sm"
+							min={0}
+							max={100}
+							step={0.5}
+							value={ratioToPercent(data.max_repair_ratio)}
+							disabled={isReadOnly}
+							onChange={(e) => handleChange("max_repair_ratio", Number(e.target.value) / 100)}
+						/>
+						<span className="text-base-content/60">%</span>
+					</label>
+					<p className="label whitespace-normal">
+						Share of a file's bytes a repair may reconstruct (2% matches the zero-fill tolerance).
+						The release's PAR2 redundancy is always the hard ceiling.
 					</p>
 				</fieldset>
 
@@ -92,13 +101,13 @@ export function Par2RepairConfigSection({
 					<legend className="fieldset-legend">Max Memory (MB)</legend>
 					<input
 						type="number"
-						className="input w-full"
+						className="input input-bordered w-full max-w-48 bg-base-100 font-mono text-sm"
 						min={16}
 						value={data.max_memory_mb ?? 256}
 						disabled={isReadOnly}
 						onChange={(e) => handleChange("max_memory_mb", Number(e.target.value))}
 					/>
-					<p className="label">
+					<p className="label whitespace-normal">
 						Solver memory budget per job. Damage needing more than this is left to ARR replacement.
 					</p>
 				</fieldset>
@@ -107,13 +116,13 @@ export function Par2RepairConfigSection({
 					<legend className="fieldset-legend">Max Concurrent Jobs</legend>
 					<input
 						type="number"
-						className="input w-full"
+						className="input input-bordered w-full max-w-48 bg-base-100 font-mono text-sm"
 						min={1}
 						value={data.max_concurrent_jobs ?? 1}
 						disabled={isReadOnly}
 						onChange={(e) => handleChange("max_concurrent_jobs", Number(e.target.value))}
 					/>
-					<p className="label">
+					<p className="label whitespace-normal">
 						Each job downloads a full release; more than 1 competes for import bandwidth.
 					</p>
 				</fieldset>
@@ -122,13 +131,13 @@ export function Par2RepairConfigSection({
 					<legend className="fieldset-legend">Patch Store Cap (MB)</legend>
 					<input
 						type="number"
-						className="input w-full"
+						className="input input-bordered w-full max-w-48 bg-base-100 font-mono text-sm"
 						min={0}
 						value={data.max_patch_store_mb ?? 0}
 						disabled={isReadOnly}
 						onChange={(e) => handleChange("max_patch_store_mb", Number(e.target.value))}
 					/>
-					<p className="label">
+					<p className="label whitespace-normal">
 						Total size of stored repaired data; oldest patches are evicted first. 0 = unlimited.
 						Evicted patches regenerate on the next playback.
 					</p>
