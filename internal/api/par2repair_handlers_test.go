@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http/httptest"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/par2repair"
 )
 
 type fakeEnqueuer struct {
@@ -28,6 +30,8 @@ func par2TestApp(s *Server) *fiber.App {
 	app := fiber.New()
 	app.Post("/api/par2repair", s.handlePar2Repair)
 	app.Get("/api/par2repair", s.handleListPar2Repair)
+	app.Delete("/api/par2repair", s.handleCancelAllPar2Repair)
+	app.Delete("/api/par2repair/:id", s.handleCancelPar2Repair)
 	return app
 }
 
@@ -168,5 +172,121 @@ func TestHandlePar2RepairValidation(t *testing.T) {
 				t.Fatalf("status = %d, want %d", resp.StatusCode, tt.wantStatus)
 			}
 		})
+	}
+}
+
+// fakeCanceller is an enqueuer that also cancels, recording the IDs it saw.
+type fakeCanceller struct {
+	fakeEnqueuer
+	cancelled []int64
+	err       error
+}
+
+func (f *fakeCanceller) Cancel(_ context.Context, jobID int64) error {
+	f.cancelled = append(f.cancelled, jobID)
+	return f.err
+}
+
+func TestHandleCancelPar2Repair(t *testing.T) {
+	canceller := &fakeCanceller{}
+	app := par2TestApp(&Server{par2Repair: canceller})
+
+	resp, err := app.Test(httptest.NewRequest("DELETE", "/api/par2repair/7", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if len(canceller.cancelled) != 1 || canceller.cancelled[0] != 7 {
+		t.Fatalf("cancelled = %v, want [7]", canceller.cancelled)
+	}
+}
+
+func TestHandleCancelPar2RepairErrors(t *testing.T) {
+	tests := []struct {
+		name       string
+		server     *Server
+		path       string
+		wantStatus int
+	}{
+		{"bad id", &Server{par2Repair: &fakeCanceller{}}, "/api/par2repair/abc", 400},
+		{"zero id", &Server{par2Repair: &fakeCanceller{}}, "/api/par2repair/0", 400},
+		{"no service", &Server{}, "/api/par2repair/7", 503},
+		{"enqueue-only service", &Server{par2Repair: &fakeEnqueuer{}}, "/api/par2repair/7", 503},
+		{
+			"unknown job",
+			&Server{par2Repair: &fakeCanceller{err: par2repair.ErrJobNotFound}},
+			"/api/par2repair/7",
+			404,
+		},
+		{
+			"will not stop",
+			&Server{par2Repair: &fakeCanceller{err: errors.New("did not stop within 30s")}},
+			"/api/par2repair/7",
+			500,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app := par2TestApp(tt.server)
+			resp, err := app.Test(httptest.NewRequest("DELETE", tt.path, nil))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resp.StatusCode != tt.wantStatus {
+				t.Fatalf("status = %d, want %d", resp.StatusCode, tt.wantStatus)
+			}
+		})
+	}
+}
+
+func TestHandleCancelAllPar2Repair(t *testing.T) {
+	repo := newPar2RepairAPIRepo(t)
+	ctx := context.Background()
+	for _, p := range []string{"/movies/a.mkv", "/movies/b.mkv"} {
+		if _, err := repo.Enqueue(ctx, p, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Cancel deletes rows in the real service; the fake does not, so stop
+	// after the first pass by reporting every job as already gone.
+	canceller := &fakeCanceller{err: par2repair.ErrJobNotFound}
+	app := par2TestApp(&Server{par2Repair: canceller, par2RepairRepo: repo})
+
+	resp, err := app.Test(httptest.NewRequest("DELETE", "/api/par2repair", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if len(canceller.cancelled) != 2 {
+		t.Fatalf("cancelled = %v, want both jobs attempted once", canceller.cancelled)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	var payload struct {
+		Data struct {
+			Cancelled int `json:"cancelled"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal %s: %v", body, err)
+	}
+	// Both were already gone, so nothing counts as cancelled.
+	if payload.Data.Cancelled != 0 {
+		t.Fatalf("cancelled count = %d, want 0", payload.Data.Cancelled)
+	}
+}
+
+func TestHandleCancelAllPar2RepairUnavailable(t *testing.T) {
+	app := par2TestApp(&Server{par2Repair: &fakeCanceller{}})
+	resp, err := app.Test(httptest.NewRequest("DELETE", "/api/par2repair", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != 503 {
+		t.Fatalf("status = %d, want 503 when the repo is unset", resp.StatusCode)
 	}
 }

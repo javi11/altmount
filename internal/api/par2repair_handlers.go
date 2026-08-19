@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"errors"
+	"strconv"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -136,4 +138,83 @@ func (s *Server) handlePar2Repair(c *fiber.Ctx) error {
 	}
 	s.par2Repair.Enqueue(c.Context(), req.FilePath, "")
 	return RespondMessage(c, "PAR2 repair queued")
+}
+
+// Par2RepairCanceller stops an in-flight or queued repair and cleans its
+// transient artifacts (implemented by par2repair.Service).
+type Par2RepairCanceller interface {
+	Cancel(ctx context.Context, jobID int64) error
+}
+
+// canceller returns the wired repair service as a canceller, or nil when PAR2
+// repair is unavailable in this build/config.
+func (s *Server) canceller() Par2RepairCanceller {
+	c, _ := s.par2Repair.(Par2RepairCanceller)
+	return c
+}
+
+// handleCancelPar2Repair handles DELETE /api/par2repair/:id: stop one queued or
+// running repair and clean the artifacts it generated.
+func (s *Server) handleCancelPar2Repair(c *fiber.Ctx) error {
+	canceller := s.canceller()
+	if canceller == nil {
+		return RespondServiceUnavailable(c, "PAR2 repair is not available", "")
+	}
+	id, err := strconv.ParseInt(c.Params("id"), 10, 64)
+	if err != nil || id <= 0 {
+		return RespondBadRequest(c, "Invalid job ID", c.Params("id"))
+	}
+	switch err := canceller.Cancel(c.Context(), id); {
+	case err == nil:
+		return RespondMessage(c, "PAR2 repair cancelled")
+	case errors.Is(err, par2repair.ErrJobNotFound):
+		return RespondNotFound(c, "PAR2 repair job", c.Params("id"))
+	default:
+		return RespondInternalError(c, "Failed to cancel PAR2 repair", err.Error())
+	}
+}
+
+// handleCancelAllPar2Repair handles DELETE /api/par2repair: cancel every queued
+// and running repair.
+//
+// It drains in passes rather than one shot because List caps its result at 100
+// rows, so a single pass is not guaranteed to see the whole queue. A pass that
+// cancels nothing ends the loop, which keeps it finite when a row cannot be
+// removed.
+func (s *Server) handleCancelAllPar2Repair(c *fiber.Ctx) error {
+	canceller := s.canceller()
+	if canceller == nil {
+		return RespondServiceUnavailable(c, "PAR2 repair is not available", "")
+	}
+	if s.par2RepairRepo == nil {
+		return RespondServiceUnavailable(c, "PAR2 repair is not available", "")
+	}
+
+	var cancelled int
+	for {
+		jobs, err := s.par2RepairRepo.List(c.Context(), 0)
+		if err != nil {
+			return RespondInternalError(c, "Failed to list PAR2 repair jobs", err.Error())
+		}
+		if len(jobs) == 0 {
+			break
+		}
+		progressed := false
+		for _, job := range jobs {
+			err := canceller.Cancel(c.Context(), job.ID)
+			switch {
+			case err == nil:
+				cancelled++
+				progressed = true
+			case errors.Is(err, par2repair.ErrJobNotFound):
+				// Finished between the list and the cancel; nothing to do.
+			default:
+				return RespondInternalError(c, "Failed to cancel PAR2 repair", err.Error())
+			}
+		}
+		if !progressed {
+			break
+		}
+	}
+	return RespondSuccess(c, fiber.Map{"cancelled": cancelled})
 }

@@ -274,6 +274,8 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Get("/health", s.handleListHealth)
 	api.Post("/par2repair", s.handlePar2Repair)
 	api.Get("/par2repair", s.handleListPar2Repair)
+	api.Delete("/par2repair", s.handleCancelAllPar2Repair)
+	api.Delete("/par2repair/:id", s.handleCancelPar2Repair)
 	api.Post("/health/bulk/delete", s.handleDeleteHealthBulk)
 	api.Post("/health/bulk/restart", s.handleRestartHealthChecksBulk)
 	api.Post("/health/bulk/repair", s.handleRepairHealthBulk)
