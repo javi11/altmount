@@ -21,6 +21,7 @@ func setupPar2RepairSchema(t *testing.T, db *sql.DB) {
 			attempts INTEGER NOT NULL DEFAULT 0,
 			last_error TEXT,
 			failing_segment_id TEXT,
+			dead_segment_ids TEXT,
 			next_attempt_at TIMESTAMP,
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -135,6 +136,70 @@ func TestPar2RepairTerminalStatesAllowReEnqueue(t *testing.T) {
 	created, err = repo.Enqueue(ctx, "/movies/a.mkv", "")
 	require.NoError(t, err)
 	assert.True(t, created, "unrepairable outcome must not block later attempts")
+}
+
+func TestPar2RepairAppendDeadSegment(t *testing.T) {
+	repo, _ := newPar2RepairRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	_, err := repo.Enqueue(ctx, "/movies/a.mkv", "")
+	require.NoError(t, err)
+	job, err := repo.ClaimNext(ctx, now)
+	require.NoError(t, err)
+	require.NotNil(t, job)
+	assert.Empty(t, job.DeadSegments(), "fresh job has no dead segments")
+
+	require.NoError(t, repo.AppendDeadSegment(ctx, job.ID, "<dead1@test>"))
+	require.NoError(t, repo.AppendDeadSegment(ctx, job.ID, "<dead2@test>"))
+	// Duplicate append must dedup.
+	require.NoError(t, repo.AppendDeadSegment(ctx, job.ID, "<dead1@test>"))
+
+	require.NoError(t, repo.MarkRetry(ctx, job.ID, "sweep dead", now))
+	got, err := repo.ClaimNext(ctx, now.Add(time.Second))
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, []string{"<dead1@test>", "<dead2@test>"}, got.DeadSegments())
+}
+
+func TestPar2RepairDeadSegmentsInvalidJSON(t *testing.T) {
+	job := &Par2RepairJob{DeadSegmentIDs: sql.NullString{String: "{not json", Valid: true}}
+	assert.Empty(t, job.DeadSegments(), "invalid JSON must yield empty, not panic")
+	assert.Empty(t, (&Par2RepairJob{}).DeadSegments(), "NULL must yield empty")
+}
+
+func TestPar2RepairList(t *testing.T) {
+	repo, _ := newPar2RepairRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	_, err := repo.Enqueue(ctx, "/movies/a.mkv", "")
+	require.NoError(t, err)
+	_, err = repo.Enqueue(ctx, "/movies/b.mkv", "")
+	require.NoError(t, err)
+
+	// Touch a.mkv so it becomes the most recently updated.
+	job, err := repo.ClaimNext(ctx, now)
+	require.NoError(t, err)
+	require.NotNil(t, job)
+	require.NoError(t, repo.MarkRepaired(ctx, job.ID))
+	// Force a strictly newer updated_at than the untouched row.
+	_, err = repo.ClaimNext(ctx, now) // claims b.mkv (running -> excluded from claim but updated)
+	require.NoError(t, err)
+
+	jobs, err := repo.List(ctx, 10)
+	require.NoError(t, err)
+	require.Len(t, jobs, 2)
+
+	// Limit is honored.
+	jobs, err = repo.List(ctx, 1)
+	require.NoError(t, err)
+	require.Len(t, jobs, 1)
+
+	// Zero/negative limit falls back to the default.
+	jobs, err = repo.List(ctx, 0)
+	require.NoError(t, err)
+	require.Len(t, jobs, 2)
 }
 
 func TestPar2RepairResetRunning(t *testing.T) {

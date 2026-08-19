@@ -53,7 +53,8 @@ type Server struct {
 	metadataService     *metadata.MetadataService
 	nzbFilesystem       *nzbfilesystem.NzbFilesystem
 	healthWorker        *health.HealthWorker
-	par2Repair          Par2RepairEnqueuer // optional; nil = PAR2 repair unavailable
+	par2Repair          Par2RepairEnqueuer             // optional; nil = PAR2 repair unavailable
+	par2RepairRepo      *database.Par2RepairRepository // optional; nil = repair job listing unavailable
 	librarySyncWorker   *health.LibrarySyncWorker
 	importerService     *importer.Service
 	poolManager         pool.Manager
@@ -272,6 +273,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	// Health endpoints
 	api.Get("/health", s.handleListHealth)
 	api.Post("/par2repair", s.handlePar2Repair)
+	api.Get("/par2repair", s.handleListPar2Repair)
 	api.Post("/health/bulk/delete", s.handleDeleteHealthBulk)
 	api.Post("/health/bulk/restart", s.handleRestartHealthChecksBulk)
 	api.Post("/health/bulk/repair", s.handleRepairHealthBulk)

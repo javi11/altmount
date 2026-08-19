@@ -5,8 +5,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
+	"time"
 )
 
 // PatchStore persists repaired article payloads, one file per article, keyed
@@ -78,6 +81,67 @@ func (p *PatchStore) Has(messageID string) bool {
 	}
 	_, err := os.Stat(p.path(messageID))
 	return err == nil
+}
+
+// Prune bounds the store's total on-disk size: when the sum of all *.patch
+// files exceeds maxBytes, the oldest (by mtime) are deleted first until the
+// total fits. maxBytes <= 0 disables pruning. Patches are regenerable by
+// re-running repair, so eviction is always safe.
+func (p *PatchStore) Prune(maxBytes int64) error {
+	if maxBytes <= 0 {
+		return nil
+	}
+	type patchFile struct {
+		path  string
+		size  int64
+		mtime time.Time
+	}
+	var (
+		files []patchFile
+		total int64
+	)
+	err := filepath.WalkDir(p.root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			// A file deleted mid-walk (concurrent prune/repair) is fine.
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
+			return err
+		}
+		if d.IsDir() || filepath.Ext(path) != ".patch" {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
+			return err
+		}
+		files = append(files, patchFile{path: path, size: info.Size(), mtime: info.ModTime()})
+		total += info.Size()
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil // nothing stored yet
+		}
+		return fmt.Errorf("par2repair: scan patch store: %w", err)
+	}
+	if total <= maxBytes {
+		return nil
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].mtime.Before(files[j].mtime) })
+	for _, f := range files {
+		if total <= maxBytes {
+			break
+		}
+		if err := os.Remove(f.path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("par2repair: evict patch %s: %w", f.path, err)
+		}
+		total -= f.size
+	}
+	return nil
 }
 
 // path fans patches out into 256 subdirectories by the first hash byte to

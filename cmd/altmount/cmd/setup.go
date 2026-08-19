@@ -396,6 +396,7 @@ func startPar2RepairService(
 	ctx context.Context,
 	cfg *config.Config,
 	repo *database.Par2RepairRepository,
+	healthRepo *database.HealthRepository,
 	metadataService *metadata.MetadataService,
 	poolManager pool.Manager,
 	configGetter config.ConfigGetter,
@@ -416,10 +417,14 @@ func startPar2RepairService(
 				MaxRepairRatio:    c.Par2Repair.MaxRepairRatio,
 				MaxMemoryMB:       c.Par2Repair.MaxMemoryMB,
 				MaxConcurrentJobs: c.Par2Repair.MaxConcurrentJobs,
+				MaxPatchStoreMB:   c.Par2Repair.MaxPatchStoreMB,
 			}
 		},
 		slog.Default(),
 	)
+	if healthRepo != nil {
+		service.SetHealthStore(healthRepo)
+	}
 	go service.Start(ctx)
 	slog.InfoContext(ctx, "PAR2 repair service started",
 		"enabled", cfg.Par2Repair.Enabled != nil && *cfg.Par2Repair.Enabled)

@@ -3,11 +3,17 @@ package api
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
+	"io"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
+	_ "github.com/mattn/go-sqlite3"
+
+	"github.com/javi11/altmount/internal/database"
 )
 
 type fakeEnqueuer struct {
@@ -21,7 +27,101 @@ func (f *fakeEnqueuer) Enqueue(_ context.Context, filePath, failingSegmentID str
 func par2TestApp(s *Server) *fiber.App {
 	app := fiber.New()
 	app.Post("/api/par2repair", s.handlePar2Repair)
+	app.Get("/api/par2repair", s.handleListPar2Repair)
 	return app
+}
+
+// newPar2RepairAPIRepo builds a real repository over an in-memory sqlite with
+// the migration-035 schema (mirrors internal/database/par2repair_repository_test.go).
+func newPar2RepairAPIRepo(t *testing.T) *database.Par2RepairRepository {
+	t.Helper()
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	_, err = db.Exec(`
+		CREATE TABLE par2_repair_jobs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			file_path TEXT NOT NULL,
+			status TEXT NOT NULL DEFAULT 'pending',
+			attempts INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT,
+			failing_segment_id TEXT,
+			dead_segment_ids TEXT,
+			next_attempt_at TIMESTAMP,
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+		);
+		CREATE UNIQUE INDEX idx_par2_repair_active ON par2_repair_jobs(file_path)
+			WHERE status IN ('pending','running');
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return database.NewPar2RepairRepository(db, database.DialectSQLite)
+}
+
+func TestHandleListPar2Repair(t *testing.T) {
+	repo := newPar2RepairAPIRepo(t)
+	ctx := context.Background()
+	if _, err := repo.Enqueue(ctx, "/movies/a.mkv", "<seg@x>"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.Enqueue(ctx, "/movies/b.mkv", ""); err != nil {
+		t.Fatal(err)
+	}
+	job, err := repo.ClaimNext(ctx, time.Now().UTC())
+	if err != nil || job == nil {
+		t.Fatalf("claim failed: %v", err)
+	}
+	if err := repo.MarkUnrepairable(ctx, job.ID, "no recovery slices"); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &Server{par2RepairRepo: repo}
+	app := par2TestApp(s)
+	resp, err := app.Test(httptest.NewRequest("GET", "/api/par2repair", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	var envelope struct {
+		Success bool                    `json:"success"`
+		Data    []Par2RepairJobResponse `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		t.Fatalf("unmarshal %s: %v", raw, err)
+	}
+	if !envelope.Success || len(envelope.Data) != 2 {
+		t.Fatalf("envelope = %s", raw)
+	}
+	byPath := map[string]Par2RepairJobResponse{}
+	for _, j := range envelope.Data {
+		byPath[j.FilePath] = j
+	}
+	a := byPath["/movies/a.mkv"]
+	if a.Status != "unrepairable" || a.LastError == nil || *a.LastError != "no recovery slices" {
+		t.Fatalf("a.mkv row = %+v", a)
+	}
+	b := byPath["/movies/b.mkv"]
+	if b.Status != "pending" || b.LastError != nil || b.ID == 0 || b.CreatedAt.IsZero() {
+		t.Fatalf("b.mkv row = %+v", b)
+	}
+}
+
+func TestHandleListPar2RepairUnavailable(t *testing.T) {
+	app := par2TestApp(&Server{})
+	resp, err := app.Test(httptest.NewRequest("GET", "/api/par2repair", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != 503 {
+		t.Fatalf("status = %d, want 503 when repo unset", resp.StatusCode)
+	}
 }
 
 func TestHandlePar2RepairQueues(t *testing.T) {

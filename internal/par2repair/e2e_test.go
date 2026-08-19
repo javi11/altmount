@@ -15,7 +15,8 @@ type fakeMetaSource struct {
 }
 
 func (f *fakeMetaSource) ReadFileMetadata(string) (*metapb.FileMetadata, error) { return f.fm, nil }
-func (f *fakeMetaSource) ReadStore(string) (*metapb.NzbStore, error)           { return f.store, nil }
+func (f *fakeMetaSource) ReadStore(string) (*metapb.NzbStore, error)            { return f.store, nil }
+func (f *fakeMetaSource) UpdateFileStatus(string, metapb.FileStatus) error      { return nil }
 
 // End-to-end through the service: enqueue -> claim -> resolve -> sweep ->
 // solve -> patch persisted -> job terminal -> patch survives a "restart".

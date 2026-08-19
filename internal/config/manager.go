@@ -72,6 +72,9 @@ type Par2RepairConfig struct {
 	MaxMemoryMB int `yaml:"max_memory_mb" mapstructure:"max_memory_mb" json:"max_memory_mb,omitempty"`
 	// MaxConcurrentJobs bounds simultaneously running repair jobs.
 	MaxConcurrentJobs int `yaml:"max_concurrent_jobs" mapstructure:"max_concurrent_jobs" json:"max_concurrent_jobs,omitempty"`
+	// MaxPatchStoreMB bounds the on-disk patch store size; oldest patches are
+	// evicted first when the cap is exceeded. 0 (default) means unlimited.
+	MaxPatchStoreMB int `yaml:"max_patch_store_mb" mapstructure:"max_patch_store_mb" json:"max_patch_store_mb,omitempty"`
 }
 
 // NzblnkConfig configures the NZBLNK resolver (used for nzblnk:// link resolution via public indexers).
@@ -453,21 +456,21 @@ type ImportConfig struct {
 	// end-to-end at the same time. 0 = unlimited. NNTP connection use is
 	// balanced automatically: imports share the pool's full capacity and
 	// yield to streams (priority lane + adaptive connection budget).
-	MaxConcurrentImports               int            `yaml:"max_concurrent_imports" mapstructure:"max_concurrent_imports" json:"max_concurrent_imports"`
-	MaxDownloadPrefetch                int            `yaml:"max_download_prefetch" mapstructure:"max_download_prefetch" json:"max_download_prefetch"`
-	SegmentSamplePercentage            int            `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage"`
-	ReadTimeoutSeconds                 int            `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds"`
-	IsoAnalyzeTimeoutSeconds           *int           `yaml:"iso_analyze_timeout_seconds" mapstructure:"iso_analyze_timeout_seconds" json:"iso_analyze_timeout_seconds,omitempty"`
-	ImportStrategy                     ImportStrategy `yaml:"import_strategy" mapstructure:"import_strategy" json:"import_strategy"`
-	ImportDir                          *string        `yaml:"import_dir" mapstructure:"import_dir" json:"import_dir,omitempty"`
-	WatchDir                           *string        `yaml:"watch_dir" mapstructure:"watch_dir" json:"watch_dir,omitempty"`
-	WatchIntervalSeconds               *int           `yaml:"watch_interval_seconds" mapstructure:"watch_interval_seconds" json:"watch_interval_seconds,omitempty"`
-	AllowNestedRarExtraction           *bool          `yaml:"allow_nested_rar_extraction" mapstructure:"allow_nested_rar_extraction" json:"allow_nested_rar_extraction,omitempty"`
-	ExpandBlurayIso                    *bool          `yaml:"expand_bluray_iso" mapstructure:"expand_bluray_iso" json:"expand_bluray_iso,omitempty"`
-	RenameToNzbName                    *bool          `yaml:"rename_to_nzb_name" mapstructure:"rename_to_nzb_name" json:"rename_to_nzb_name,omitempty"`
-	FilterSampleFiles                  *bool          `yaml:"filter_sample_files" mapstructure:"filter_sample_files" json:"filter_sample_files,omitempty"`
-	FailedItemRetentionHours           *int           `yaml:"failed_item_retention_hours" mapstructure:"failed_item_retention_hours" json:"failed_item_retention_hours,omitempty"`
-	HistoryRetentionDays               *int           `yaml:"history_retention_days" mapstructure:"history_retention_days" json:"history_retention_days,omitempty"`
+	MaxConcurrentImports     int            `yaml:"max_concurrent_imports" mapstructure:"max_concurrent_imports" json:"max_concurrent_imports"`
+	MaxDownloadPrefetch      int            `yaml:"max_download_prefetch" mapstructure:"max_download_prefetch" json:"max_download_prefetch"`
+	SegmentSamplePercentage  int            `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage"`
+	ReadTimeoutSeconds       int            `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds"`
+	IsoAnalyzeTimeoutSeconds *int           `yaml:"iso_analyze_timeout_seconds" mapstructure:"iso_analyze_timeout_seconds" json:"iso_analyze_timeout_seconds,omitempty"`
+	ImportStrategy           ImportStrategy `yaml:"import_strategy" mapstructure:"import_strategy" json:"import_strategy"`
+	ImportDir                *string        `yaml:"import_dir" mapstructure:"import_dir" json:"import_dir,omitempty"`
+	WatchDir                 *string        `yaml:"watch_dir" mapstructure:"watch_dir" json:"watch_dir,omitempty"`
+	WatchIntervalSeconds     *int           `yaml:"watch_interval_seconds" mapstructure:"watch_interval_seconds" json:"watch_interval_seconds,omitempty"`
+	AllowNestedRarExtraction *bool          `yaml:"allow_nested_rar_extraction" mapstructure:"allow_nested_rar_extraction" json:"allow_nested_rar_extraction,omitempty"`
+	ExpandBlurayIso          *bool          `yaml:"expand_bluray_iso" mapstructure:"expand_bluray_iso" json:"expand_bluray_iso,omitempty"`
+	RenameToNzbName          *bool          `yaml:"rename_to_nzb_name" mapstructure:"rename_to_nzb_name" json:"rename_to_nzb_name,omitempty"`
+	FilterSampleFiles        *bool          `yaml:"filter_sample_files" mapstructure:"filter_sample_files" json:"filter_sample_files,omitempty"`
+	FailedItemRetentionHours *int           `yaml:"failed_item_retention_hours" mapstructure:"failed_item_retention_hours" json:"failed_item_retention_hours,omitempty"`
+	HistoryRetentionDays     *int           `yaml:"history_retention_days" mapstructure:"history_retention_days" json:"history_retention_days,omitempty"`
 	// DamagePolicy governs standalone video files whose fast-fail sweep finds
 	// SMALL confirmed damage (within the playback padding caps, see
 	// internal/holes): "tolerant" (default) imports them as degraded so
@@ -499,22 +502,22 @@ type RepairConfig struct {
 
 // HealthConfig represents health checker configuration
 type HealthConfig struct {
-	Enabled                             *bool        `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
-	LibraryDir                          *string      `yaml:"library_dir" mapstructure:"library_dir" json:"library_dir,omitempty"`
-	CleanupOrphanedMetadata             *bool        `yaml:"cleanup_orphaned_metadata" mapstructure:"cleanup_orphaned_metadata" json:"cleanup_orphaned_metadata,omitempty"`
-	CheckIntervalSeconds                int          `yaml:"check_interval_seconds" mapstructure:"check_interval_seconds" json:"check_interval_seconds,omitempty"`
-	MaxConnectionsForHealthChecks       int          `yaml:"max_connections_for_health_checks" mapstructure:"max_connections_for_health_checks" json:"max_connections_for_health_checks,omitempty"`
-	CheckBatchSize                      int          `yaml:"check_batch_size" mapstructure:"check_batch_size" json:"check_batch_size,omitempty"`
-	MaxConcurrentJobs                   int          `yaml:"max_concurrent_jobs" mapstructure:"max_concurrent_jobs" json:"max_concurrent_jobs,omitempty"`
-	SegmentSamplePercentage             int          `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage,omitempty"`
-	MaxRetries                          int          `yaml:"max_retries" mapstructure:"max_retries" json:"max_retries"`
-	LibrarySyncIntervalMinutes          int          `yaml:"library_sync_interval_minutes" mapstructure:"library_sync_interval_minutes" json:"library_sync_interval_minutes,omitempty"`
-	LibrarySyncConcurrency              int          `yaml:"library_sync_concurrency" mapstructure:"library_sync_concurrency" json:"library_sync_concurrency,omitempty"`
-	ResolveRepairOnImport               *bool        `yaml:"resolve_repair_on_import" mapstructure:"resolve_repair_on_import" json:"resolve_repair_on_import,omitempty"`
-	VerifyData                          *bool        `yaml:"verify_data" mapstructure:"verify_data" json:"verify_data,omitempty"`
-	CheckAllSegments                    *bool        `yaml:"check_all_segments" mapstructure:"check_all_segments" json:"check_all_segments,omitempty"`
-	ReadTimeoutSeconds                  int          `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds,omitempty"`
-	AcceptableMissingSegmentsPercentage float64      `yaml:"acceptable_missing_segments_percentage" mapstructure:"acceptable_missing_segments_percentage" json:"acceptable_missing_segments_percentage"`
+	Enabled                             *bool   `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
+	LibraryDir                          *string `yaml:"library_dir" mapstructure:"library_dir" json:"library_dir,omitempty"`
+	CleanupOrphanedMetadata             *bool   `yaml:"cleanup_orphaned_metadata" mapstructure:"cleanup_orphaned_metadata" json:"cleanup_orphaned_metadata,omitempty"`
+	CheckIntervalSeconds                int     `yaml:"check_interval_seconds" mapstructure:"check_interval_seconds" json:"check_interval_seconds,omitempty"`
+	MaxConnectionsForHealthChecks       int     `yaml:"max_connections_for_health_checks" mapstructure:"max_connections_for_health_checks" json:"max_connections_for_health_checks,omitempty"`
+	CheckBatchSize                      int     `yaml:"check_batch_size" mapstructure:"check_batch_size" json:"check_batch_size,omitempty"`
+	MaxConcurrentJobs                   int     `yaml:"max_concurrent_jobs" mapstructure:"max_concurrent_jobs" json:"max_concurrent_jobs,omitempty"`
+	SegmentSamplePercentage             int     `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage,omitempty"`
+	MaxRetries                          int     `yaml:"max_retries" mapstructure:"max_retries" json:"max_retries"`
+	LibrarySyncIntervalMinutes          int     `yaml:"library_sync_interval_minutes" mapstructure:"library_sync_interval_minutes" json:"library_sync_interval_minutes,omitempty"`
+	LibrarySyncConcurrency              int     `yaml:"library_sync_concurrency" mapstructure:"library_sync_concurrency" json:"library_sync_concurrency,omitempty"`
+	ResolveRepairOnImport               *bool   `yaml:"resolve_repair_on_import" mapstructure:"resolve_repair_on_import" json:"resolve_repair_on_import,omitempty"`
+	VerifyData                          *bool   `yaml:"verify_data" mapstructure:"verify_data" json:"verify_data,omitempty"`
+	CheckAllSegments                    *bool   `yaml:"check_all_segments" mapstructure:"check_all_segments" json:"check_all_segments,omitempty"`
+	ReadTimeoutSeconds                  int     `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds,omitempty"`
+	AcceptableMissingSegmentsPercentage float64 `yaml:"acceptable_missing_segments_percentage" mapstructure:"acceptable_missing_segments_percentage" json:"acceptable_missing_segments_percentage"`
 	// ExcludedCategories lists SABnzbd category names whose files must never be
 	// registered for health checking by the library-sync discovery pass. Matching
 	// is by the category's configured directory under CompleteDir and is
@@ -1621,8 +1624,8 @@ func DefaultConfig(configDir ...string) *Config {
 	sabnzbdEnabled := false
 	scrapperEnabled := false
 	fuseEnabled := false
-	loginRequired := true           // Require login by default
-	stremioEnabled := false         // Stremio endpoint disabled by default
+	loginRequired := true   // Require login by default
+	stremioEnabled := false // Stremio endpoint disabled by default
 	stremioFastFailHeaderOnly := true
 	prowlarrEnabled := false        // Prowlarr integration disabled by default
 	watchIntervalSeconds := 10      // Default watch interval
@@ -1803,6 +1806,7 @@ func DefaultConfig(configDir ...string) *Config {
 			MaxRepairRatio:    0.02, // matches the holes padding byte-ratio cap
 			MaxMemoryMB:       256,
 			MaxConcurrentJobs: 1,
+			MaxPatchStoreMB:   0, // unlimited by default
 		},
 		SABnzbd: SABnzbdConfig{
 			Enabled:               &sabnzbdEnabled,

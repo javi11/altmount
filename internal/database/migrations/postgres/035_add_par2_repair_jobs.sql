@@ -6,6 +6,7 @@ CREATE TABLE par2_repair_jobs (
     attempts INTEGER NOT NULL DEFAULT 0,
     last_error TEXT,
     failing_segment_id TEXT,
+    dead_segment_ids TEXT,
     next_attempt_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP

@@ -3,8 +3,10 @@ package database
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 )
 
@@ -26,9 +28,23 @@ type Par2RepairJob struct {
 	Attempts         int
 	LastError        sql.NullString
 	FailingSegmentID sql.NullString
+	DeadSegmentIDs   sql.NullString // JSON array of message IDs found dead mid-repair
 	NextAttemptAt    sql.NullTime
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
+}
+
+// DeadSegments unmarshals the persisted dead-segment message IDs. Returns an
+// empty slice on NULL or invalid JSON.
+func (j *Par2RepairJob) DeadSegments() []string {
+	if !j.DeadSegmentIDs.Valid || j.DeadSegmentIDs.String == "" {
+		return nil
+	}
+	var ids []string
+	if err := json.Unmarshal([]byte(j.DeadSegmentIDs.String), &ids); err != nil {
+		return nil
+	}
+	return ids
 }
 
 // Par2RepairRepository persists PAR2 repair jobs so pending repairs survive
@@ -85,11 +101,11 @@ func (r *Par2RepairRepository) ClaimNext(ctx context.Context, now time.Time) (*P
 			LIMIT 1
 		)
 		RETURNING id, file_path, status, attempts, last_error, failing_segment_id,
-		          next_attempt_at, created_at, updated_at`, now, now)
+		          dead_segment_ids, next_attempt_at, created_at, updated_at`, now, now)
 
 	job := &Par2RepairJob{}
 	err := row.Scan(&job.ID, &job.FilePath, &job.Status, &job.Attempts, &job.LastError,
-		&job.FailingSegmentID, &job.NextAttemptAt, &job.CreatedAt, &job.UpdatedAt)
+		&job.FailingSegmentID, &job.DeadSegmentIDs, &job.NextAttemptAt, &job.CreatedAt, &job.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -135,6 +151,71 @@ func (r *Par2RepairRepository) MarkRetry(ctx context.Context, id int64, reason s
 		return fmt.Errorf("retry par2 repair job %d: %w", id, err)
 	}
 	return nil
+}
+
+// AppendDeadSegment persists a message ID discovered dead mid-repair on the
+// job row (deduplicated), so the next attempt plans it as missing up front.
+func (r *Par2RepairRepository) AppendDeadSegment(ctx context.Context, id int64, messageID string) error {
+	if messageID == "" {
+		return errors.New("par2repair: empty message ID")
+	}
+	var raw sql.NullString
+	err := r.db.QueryRowContext(ctx, `
+		SELECT dead_segment_ids FROM par2_repair_jobs WHERE id = ?`, id).Scan(&raw)
+	if err != nil {
+		return fmt.Errorf("read dead segments for par2 repair job %d: %w", id, err)
+	}
+	ids := (&Par2RepairJob{DeadSegmentIDs: raw}).DeadSegments()
+	if slices.Contains(ids, messageID) {
+		return nil
+	}
+	ids = append(ids, messageID)
+	buf, err := json.Marshal(ids)
+	if err != nil {
+		return fmt.Errorf("marshal dead segments for par2 repair job %d: %w", id, err)
+	}
+	_, err = r.db.ExecContext(ctx, `
+		UPDATE par2_repair_jobs
+		SET dead_segment_ids = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?`, string(buf), id)
+	if err != nil {
+		return fmt.Errorf("append dead segment to par2 repair job %d: %w", id, err)
+	}
+	return nil
+}
+
+const par2RepairListDefaultLimit = 100
+
+// List returns the most recently updated repair jobs, newest first. limit <= 0
+// or > 100 falls back to the default cap of 100.
+func (r *Par2RepairRepository) List(ctx context.Context, limit int) ([]*Par2RepairJob, error) {
+	if limit <= 0 || limit > par2RepairListDefaultLimit {
+		limit = par2RepairListDefaultLimit
+	}
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, file_path, status, attempts, last_error, failing_segment_id,
+		       dead_segment_ids, next_attempt_at, created_at, updated_at
+		FROM par2_repair_jobs
+		ORDER BY updated_at DESC, id DESC
+		LIMIT ?`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list par2 repair jobs: %w", err)
+	}
+	defer rows.Close()
+
+	var jobs []*Par2RepairJob
+	for rows.Next() {
+		job := &Par2RepairJob{}
+		if err := rows.Scan(&job.ID, &job.FilePath, &job.Status, &job.Attempts, &job.LastError,
+			&job.FailingSegmentID, &job.DeadSegmentIDs, &job.NextAttemptAt, &job.CreatedAt, &job.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan par2 repair job: %w", err)
+		}
+		jobs = append(jobs, job)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list par2 repair jobs: %w", err)
+	}
+	return jobs, nil
 }
 
 // ResetRunning flips running jobs back to pending; called once at startup so

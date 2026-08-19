@@ -19,14 +19,23 @@ par2_repair:
   max_repair_ratio: 0.02   # max fraction of a file's bytes a repair may reconstruct
   max_memory_mb: 256       # accumulator memory budget per job
   max_concurrent_jobs: 1   # simultaneous repair jobs
+  max_patch_store_mb: 0    # total patch-store size cap; 0 = unlimited
 ```
 
 - **`max_repair_ratio`** — defaults to the same 2% byte-ratio the streaming zero-fill policy tolerates, so everything watchable becomes byte-exact. Raise it (e.g. `0.10`) to save more heavily damaged files instead of letting ARR replacement handle them. The release's PAR2 redundancy is always the hard ceiling: damage beyond the posted recovery slices is unrepairable no matter the setting.
 - **`max_memory_mb`** — a repair holds one slice-sized buffer per missing slice. A plan exceeding this budget is marked unrepairable.
 
-Repaired payloads live under `<metadata_root>/patches/`. They can be deleted at any time — a later stream simply re-triggers the repair.
+- **`max_patch_store_mb`** — caps the total size of stored patches; when exceeded, the oldest patches are evicted first. Safe because patches are regenerable — a later stream simply re-triggers the repair.
+
+Repaired payloads live under `<metadata_root>/patches/`. They can be deleted at any time. After a successful repair the file's health status flips back to healthy.
 
 ## API
+
+List recent repair jobs:
+
+```bash
+curl http://localhost:8080/api/par2repair
+```
 
 Queue a repair manually:
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
@@ -19,6 +20,8 @@ type Config struct {
 	MaxRepairRatio    float64
 	MaxMemoryMB       int
 	MaxConcurrentJobs int
+	// MaxPatchStoreMB bounds the on-disk patch store; <= 0 means unlimited.
+	MaxPatchStoreMB int
 }
 
 // JobStore is the persistence the service needs (satisfied by
@@ -29,7 +32,14 @@ type JobStore interface {
 	MarkRepaired(ctx context.Context, id int64) error
 	MarkUnrepairable(ctx context.Context, id int64, reason string) error
 	MarkRetry(ctx context.Context, id int64, reason string, nextAttempt time.Time) error
+	AppendDeadSegment(ctx context.Context, id int64, messageID string) error
 	ResetRunning(ctx context.Context) error
+}
+
+// HealthStore updates a file's health record (satisfied by
+// database.HealthRepository). Optional: nil skips health updates.
+type HealthStore interface {
+	UpdateFileHealth(ctx context.Context, filePath string, status database.HealthStatus, errorMessage *string, sourceNzbPath *string, errorDetails *string, noRetry bool) error
 }
 
 // MetadataSource reads file metadata and the shared NzbStore (satisfied by
@@ -37,6 +47,7 @@ type JobStore interface {
 type MetadataSource interface {
 	ReadFileMetadata(virtualPath string) (*metapb.FileMetadata, error)
 	ReadStore(ref string) (*metapb.NzbStore, error)
+	UpdateFileStatus(virtualPath string, status metapb.FileStatus) error
 }
 
 // NewMetadataSource adapts a metadata.MetadataService.
@@ -51,6 +62,9 @@ func (m metadataSource) ReadFileMetadata(p string) (*metapb.FileMetadata, error)
 }
 func (m metadataSource) ReadStore(ref string) (*metapb.NzbStore, error) {
 	return m.ms.Store().ReadStore(ref)
+}
+func (m metadataSource) UpdateFileStatus(p string, status metapb.FileStatus) error {
+	return m.ms.UpdateFileStatus(p, status)
 }
 
 const (
@@ -70,6 +84,7 @@ type Service struct {
 	cfg     func() Config
 	log     *slog.Logger
 	wake    chan struct{}
+	health  HealthStore // optional; nil skips health-record updates
 
 	// execute runs one claimed job; replaced in tests. The default is
 	// (*Service).executeJob.
@@ -93,6 +108,10 @@ func NewService(repo JobStore, meta MetadataSource, fetcher ArticleFetcher, stor
 
 // PatchStore exposes the store for read-path wiring.
 func (s *Service) PatchStore() *PatchStore { return s.store }
+
+// SetHealthStore wires the optional health repository so successful repairs
+// flip the file's health record back to healthy. Nil-safe: unset skips it.
+func (s *Service) SetHealthStore(h HealthStore) { s.health = h }
 
 // Enqueue registers a file for repair. Safe from any goroutine; a no-op when
 // the feature is disabled or an active job already exists. failingSegmentID
@@ -166,20 +185,31 @@ func (s *Service) runNext(ctx context.Context) bool {
 
 	start := time.Now()
 	err = s.execute(ctx, job)
+	if err != nil && !errors.Is(err, ErrUnrepairable) && !errors.Is(err, ErrNothingToRepair) && ctx.Err() != nil {
+		// Shutdown mid-job: leave it running; ResetRunning reclaims at boot.
+		return false
+	}
+	if err == nil {
+		s.log.InfoContext(ctx, "PAR2 repair completed", "file", job.FilePath, "duration", time.Since(start))
+	}
+	s.handleOutcome(ctx, job, err)
+	return true
+}
+
+// handleOutcome applies the persistence bookkeeping for one executed job.
+func (s *Service) handleOutcome(ctx context.Context, job *database.Par2RepairJob, err error) {
 	switch {
 	case err == nil:
-		s.log.InfoContext(ctx, "PAR2 repair completed", "file", job.FilePath, "duration", time.Since(start))
 		if err := s.repo.MarkRepaired(ctx, job.ID); err != nil {
 			s.log.ErrorContext(ctx, "Failed to mark repair job repaired", "error", err, "job", job.ID)
 		}
+		s.markFileHealthy(ctx, job.FilePath)
+		s.pruneStore(ctx)
 	case errors.Is(err, ErrUnrepairable), errors.Is(err, ErrNothingToRepair):
 		s.log.WarnContext(ctx, "PAR2 repair not possible", "file", job.FilePath, "reason", err)
 		if err := s.repo.MarkUnrepairable(ctx, job.ID, err.Error()); err != nil {
 			s.log.ErrorContext(ctx, "Failed to mark repair job unrepairable", "error", err, "job", job.ID)
 		}
-	case ctx.Err() != nil:
-		// Shutdown mid-job: leave it running; ResetRunning reclaims at boot.
-		return false
 	default:
 		if job.Attempts+1 >= maxJobAttempts {
 			s.log.ErrorContext(ctx, "PAR2 repair failed permanently after retries",
@@ -187,16 +217,52 @@ func (s *Service) runNext(ctx context.Context) bool {
 			if err := s.repo.MarkUnrepairable(ctx, job.ID, "attempts exhausted: "+err.Error()); err != nil {
 				s.log.ErrorContext(ctx, "Failed to mark repair job unrepairable", "error", err, "job", job.ID)
 			}
-			return true
+			return
 		}
 		delay := min(baseBackoff<<job.Attempts, maxBackoff)
+		var sweepDead *SweepDeadArticleError
+		if errors.As(err, &sweepDead) {
+			// The dead article is now a known input to the next plan, so the
+			// retry is expected to succeed: persist it and skip the exponent.
+			if perr := s.repo.AppendDeadSegment(ctx, job.ID, sweepDead.MessageID); perr != nil {
+				s.log.ErrorContext(ctx, "Failed to persist dead segment on repair job",
+					"error", perr, "job", job.ID, "message_id", sweepDead.MessageID)
+			}
+			delay = baseBackoff
+		}
 		s.log.WarnContext(ctx, "PAR2 repair failed, will retry",
 			"file", job.FilePath, "error", err, "retry_in", delay)
 		if err := s.repo.MarkRetry(ctx, job.ID, err.Error(), time.Now().UTC().Add(delay)); err != nil {
 			s.log.ErrorContext(ctx, "Failed to schedule repair retry", "error", err, "job", job.ID)
 		}
 	}
-	return true
+}
+
+// markFileHealthy flips the repaired file's metadata and health record back to
+// healthy. Failures are logged, never fatal: the repair itself succeeded.
+func (s *Service) markFileHealthy(ctx context.Context, filePath string) {
+	if s.meta != nil {
+		if err := s.meta.UpdateFileStatus(filePath, metapb.FileStatus_FILE_STATUS_HEALTHY); err != nil {
+			s.log.ErrorContext(ctx, "Failed to flip metadata status to healthy after repair",
+				"error", err, "file", filePath)
+		}
+	}
+	if s.health != nil {
+		note := "restored by PAR2 repair"
+		if err := s.health.UpdateFileHealth(ctx, filePath, database.HealthStatusHealthy, nil, nil, &note, false); err != nil {
+			s.log.ErrorContext(ctx, "Failed to flip health record to healthy after repair",
+				"error", err, "file", filePath)
+		}
+	}
+}
+
+// pruneStore enforces the configured patch-store size cap after a successful
+// job. Errors are logged, never fatal.
+func (s *Service) pruneStore(ctx context.Context) {
+	maxBytes := int64(s.cfg().MaxPatchStoreMB) << 20
+	if err := s.store.Prune(maxBytes); err != nil {
+		s.log.ErrorContext(ctx, "Failed to prune patch store", "error", err)
+	}
 }
 
 // executeJob is the real pipeline: metadata -> resolve -> run.
@@ -215,7 +281,7 @@ func (s *Service) executeJob(ctx context.Context, job *database.Par2RepairJob) e
 		}
 	}
 
-	deadIDs := deadSegmentIDs(fm, job.FailingSegmentID.String)
+	deadIDs := mergeDeadIDs(deadSegmentIDs(fm, job.FailingSegmentID.String), job.DeadSegments())
 	cfg := s.cfg()
 	caps := Caps{
 		MaxRepairRatio: cfg.MaxRepairRatio,
@@ -226,6 +292,17 @@ func (s *Service) executeJob(ctx context.Context, job *database.Par2RepairJob) e
 		return err
 	}
 	return RunJob(ctx, res.Plan, res.Index, res.Par2Files, s.fetcher, s.store, s.log)
+}
+
+// mergeDeadIDs appends extra onto base, skipping duplicates, preserving order.
+func mergeDeadIDs(base, extra []string) []string {
+	out := base
+	for _, id := range extra {
+		if !slices.Contains(out, id) {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 // deadSegmentIDs collects the trigger's failing segment plus every persisted

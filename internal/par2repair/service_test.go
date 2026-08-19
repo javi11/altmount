@@ -11,6 +11,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/javi11/altmount/internal/database"
+	metapb "github.com/javi11/altmount/internal/metadata/proto"
 )
 
 func newTestRepo(t *testing.T) *database.Par2RepairRepository {
@@ -28,6 +29,7 @@ func newTestRepo(t *testing.T) *database.Par2RepairRepository {
 			attempts INTEGER NOT NULL DEFAULT 0,
 			last_error TEXT,
 			failing_segment_id TEXT,
+			dead_segment_ids TEXT,
 			next_attempt_at TIMESTAMP,
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -138,6 +140,172 @@ func TestServiceAttemptsExhaustedBecomesUnrepairable(t *testing.T) {
 	}
 	if job != nil {
 		t.Fatalf("job still claimable after %d attempts: %+v", maxJobAttempts, job)
+	}
+}
+
+// recordingMeta is a MetadataSource fake that records UpdateFileStatus calls.
+type recordingMeta struct {
+	statusCalls []struct {
+		path   string
+		status metapb.FileStatus
+	}
+}
+
+func (m *recordingMeta) ReadFileMetadata(string) (*metapb.FileMetadata, error) { return nil, nil }
+func (m *recordingMeta) ReadStore(string) (*metapb.NzbStore, error)            { return nil, nil }
+func (m *recordingMeta) UpdateFileStatus(p string, s metapb.FileStatus) error {
+	m.statusCalls = append(m.statusCalls, struct {
+		path   string
+		status metapb.FileStatus
+	}{p, s})
+	return nil
+}
+
+// recordingHealth is a HealthStore fake that records UpdateFileHealth calls.
+type recordingHealth struct {
+	calls []struct {
+		path   string
+		status database.HealthStatus
+	}
+}
+
+func (h *recordingHealth) UpdateFileHealth(_ context.Context, filePath string, status database.HealthStatus, _ *string, _ *string, _ *string, _ bool) error {
+	h.calls = append(h.calls, struct {
+		path   string
+		status database.HealthStatus
+	}{filePath, status})
+	return nil
+}
+
+func TestServiceSuccessFlipsMetadataAndHealth(t *testing.T) {
+	repo := newTestRepo(t)
+	s := testService(t, repo, true)
+	meta := &recordingMeta{}
+	healthStore := &recordingHealth{}
+	s.meta = meta
+	s.SetHealthStore(healthStore)
+	s.execute = func(context.Context, *database.Par2RepairJob) error { return nil }
+
+	s.Enqueue(context.Background(), "/movies/a.mkv", "")
+	if !s.runNext(context.Background()) {
+		t.Fatal("runNext found no job")
+	}
+
+	if len(meta.statusCalls) != 1 ||
+		meta.statusCalls[0].path != "/movies/a.mkv" ||
+		meta.statusCalls[0].status != metapb.FileStatus_FILE_STATUS_HEALTHY {
+		t.Fatalf("metadata status calls = %+v, want one healthy for /movies/a.mkv", meta.statusCalls)
+	}
+	if len(healthStore.calls) != 1 ||
+		healthStore.calls[0].path != "/movies/a.mkv" ||
+		healthStore.calls[0].status != database.HealthStatusHealthy {
+		t.Fatalf("health calls = %+v, want one healthy for /movies/a.mkv", healthStore.calls)
+	}
+}
+
+func TestServiceFailureDoesNotFlipStatus(t *testing.T) {
+	tests := []struct {
+		name    string
+		execErr error
+	}{
+		{"unrepairable", fmt.Errorf("%w: nope", ErrUnrepairable)},
+		{"transient", errors.New("nntp timeout")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newTestRepo(t)
+			s := testService(t, repo, true)
+			meta := &recordingMeta{}
+			healthStore := &recordingHealth{}
+			s.meta = meta
+			s.SetHealthStore(healthStore)
+			s.execute = func(context.Context, *database.Par2RepairJob) error { return tt.execErr }
+
+			s.Enqueue(context.Background(), "/movies/a.mkv", "")
+			if !s.runNext(context.Background()) {
+				t.Fatal("runNext found no job")
+			}
+
+			if len(meta.statusCalls) != 0 {
+				t.Fatalf("metadata status calls = %+v, want none on failure", meta.statusCalls)
+			}
+			if len(healthStore.calls) != 0 {
+				t.Fatalf("health calls = %+v, want none on failure", healthStore.calls)
+			}
+		})
+	}
+}
+
+// A nil health store must be skipped, not panic.
+func TestServiceSuccessWithoutHealthStore(t *testing.T) {
+	repo := newTestRepo(t)
+	s := testService(t, repo, true)
+	s.execute = func(context.Context, *database.Par2RepairJob) error { return nil }
+
+	s.Enqueue(context.Background(), "/movies/a.mkv", "")
+	if !s.runNext(context.Background()) {
+		t.Fatal("runNext found no job")
+	}
+}
+
+func TestServiceSweepDeadArticlePersistsAndUsesShortBackoff(t *testing.T) {
+	repo := newTestRepo(t)
+	s := testService(t, repo, true)
+
+	// First attempt: plain transient failure bumps attempts to 1 so the
+	// exponential backoff (baseBackoff<<1 = 2m) diverges from the short one.
+	s.execute = func(context.Context, *database.Par2RepairJob) error { return errors.New("nntp timeout") }
+	s.Enqueue(context.Background(), "/movies/a.mkv", "")
+	if !s.runNext(context.Background()) {
+		t.Fatal("runNext found no job")
+	}
+
+	// Second attempt: sweep discovers a dead article.
+	s.execute = func(context.Context, *database.Par2RepairJob) error {
+		return &SweepDeadArticleError{MessageID: "<dead@x>", Err: errors.New("430 no such article")}
+	}
+	// Make the retry due immediately by claiming past the first backoff.
+	job, err := repo.ClaimNext(context.Background(), time.Now().UTC().Add(48*time.Hour))
+	if err != nil || job == nil {
+		t.Fatalf("expected claimable job, err=%v", err)
+	}
+	// Drive the execute + bookkeeping through the service path directly.
+	s.handleOutcome(context.Background(), job, s.execute(context.Background(), job))
+
+	// Short backoff: due after baseBackoff, well before the exponential 2m.
+	notDue, err := repo.ClaimNext(context.Background(), time.Now().UTC().Add(30*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if notDue != nil {
+		t.Fatalf("job claimable before short backoff elapsed: %+v", notDue)
+	}
+	got, err := repo.ClaimNext(context.Background(), time.Now().UTC().Add(baseBackoff+10*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil {
+		t.Fatal("job not claimable after short backoff; exponential backoff used instead")
+	}
+	dead := got.DeadSegments()
+	if len(dead) != 1 || dead[0] != "<dead@x>" {
+		t.Fatalf("dead segments = %v, want [<dead@x>]", dead)
+	}
+}
+
+func TestMergeDeadIDs(t *testing.T) {
+	got := mergeDeadIDs([]string{"<a@x>", "<b@x>"}, []string{"<b@x>", "<c@x>"})
+	want := []string{"<a@x>", "<b@x>", "<c@x>"}
+	if len(got) != len(want) {
+		t.Fatalf("mergeDeadIDs = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("mergeDeadIDs = %v, want %v", got, want)
+		}
+	}
+	if r := mergeDeadIDs(nil, nil); len(r) != 0 {
+		t.Fatalf("mergeDeadIDs(nil, nil) = %v, want empty", r)
 	}
 }
 

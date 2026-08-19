@@ -16,7 +16,6 @@ import (
 	"github.com/javi11/altmount/frontend"
 	"github.com/javi11/altmount/internal/api"
 	"github.com/javi11/altmount/internal/arrs"
-	"github.com/javi11/altmount/internal/stremio"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/health"
 	"github.com/javi11/altmount/internal/metadata"
@@ -25,6 +24,7 @@ import (
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/rclone"
 	"github.com/javi11/altmount/internal/slogutil"
+	"github.com/javi11/altmount/internal/stremio"
 	"github.com/javi11/altmount/internal/webdav"
 	"github.com/spf13/cobra"
 )
@@ -138,7 +138,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// Background PAR2 repair: repairs missing articles and serves the patched
 	// payloads on the read path's hole branch.
-	par2RepairService := startPar2RepairService(ctx, cfg, repos.Par2RepairRepo, metadataService, poolManager, configManager.GetConfigGetter())
+	par2RepairService := startPar2RepairService(ctx, cfg, repos.Par2RepairRepo, repos.HealthRepo, metadataService, poolManager, configManager.GetConfigGetter())
 
 	fs := initializeFilesystem(ctx, metadataService, repos.HealthRepo, arrsService, rcloneRCClient, poolManager, configManager.GetConfigGetter(), streamTracker, cacheSource, par2RepairService)
 
@@ -209,6 +209,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	if par2RepairService != nil {
 		apiServer.SetPar2RepairEnqueuer(par2RepairService)
+	}
+	if repos.Par2RepairRepo != nil {
+		apiServer.SetPar2RepairRepo(repos.Par2RepairRepo)
 	}
 	if librarySyncWorker != nil {
 		apiServer.SetLibrarySyncWorker(librarySyncWorker)
@@ -445,7 +448,6 @@ func waitForHTTPServer(ctx context.Context, port int) error {
 		}
 	}
 }
-
 
 // intPtrValue returns the value pointed to by p, or 0 when p is nil. It is used
 // to compare optional integer config fields (e.g. segment cache ExpiryHours) by
