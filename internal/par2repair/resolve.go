@@ -104,6 +104,7 @@ func matchSetFiles(
 ) ([]SetFile, error) {
 	used := make([]bool, len(store.Files))
 	var out []SetFile
+	var matched []matchedFile
 
 	for _, id := range idx.RecoveryIDs {
 		fd := idx.Files[id]
@@ -138,18 +139,66 @@ func matchSetFiles(
 			return nil, fmt.Errorf("%w: recovery-set member %q not found in NZB", ErrUnrepairable, fd.Name)
 		}
 		used[entry] = true
+		matched = append(matched, matchedFile{id: id, entry: store.Files[entry]})
+	}
 
-		sf, err := sizeArticles(ctx, idx, id, store.Files[entry], dead, fetch, cache)
+	// Pass 1: size every file that still has a live article to probe, and
+	// remember the part size the release was posted with.
+	out = make([]SetFile, len(matched))
+	var releasePartSize int64
+	var deferred []int
+	for i, m := range matched {
+		sf, partSize, err := sizeArticles(ctx, idx, m.id, m.entry, dead, fetch, cache, 0)
+		if errors.Is(err, errNoLiveArticle) {
+			deferred = append(deferred, i)
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, sf)
+		if releasePartSize == 0 && partSize > 0 {
+			releasePartSize = partSize
+		}
+		out[i] = sf
+	}
+
+	// Pass 2: a volume with no live article at all is exactly what PAR2 repair
+	// is for. Its decoded part size cannot be probed, so borrow the release's —
+	// usenet posts split every file of a release at one uniform size. The
+	// borrowed layout is checked against the file's exact PAR2 length here, and
+	// every rebuilt slice is verified against its PAR2 MD5 before being stored,
+	// so a wrong guess fails the repair rather than corrupting it.
+	for _, i := range deferred {
+		if releasePartSize == 0 {
+			fd := idx.Files[matched[i].id]
+			return nil, fmt.Errorf("%w: no live article anywhere in the release to derive the part size (every article of %q and its siblings is missing)",
+				ErrUnrepairable, fd.Name)
+		}
+		sf, _, err := sizeArticles(ctx, idx, matched[i].id, matched[i].entry, dead, fetch, cache, releasePartSize)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = sf
 	}
 	return out, nil
 }
 
+// matchedFile pairs a recovery-set member with the NZB entry it resolved to.
+type matchedFile struct {
+	id    [16]byte
+	entry *metapb.NzbFileEntry
+}
+
+// errNoLiveArticle marks a file whose every article is missing, so its part
+// size must come from elsewhere in the release.
+var errNoLiveArticle = errors.New("par2repair: no live article to probe")
+
 // sizeArticles derives per-article decoded sizes for one recovery-set member
-// from the uniform part size of its first live article.
+// from the uniform part size of its first live article. When no article is
+// live, hint (the release-wide part size, if already known) is used instead;
+// a zero hint yields errNoLiveArticle so the caller can retry once it knows
+// one. It returns the part size it used, or 0 when the file is a single
+// article and therefore says nothing about the release's part size.
 func sizeArticles(
 	ctx context.Context,
 	idx *par2.Index,
@@ -158,17 +207,19 @@ func sizeArticles(
 	dead map[string]bool,
 	fetch ArticleFetcher,
 	cache map[string][]byte,
-) (SetFile, error) {
+	hint int64,
+) (SetFile, int64, error) {
 	fd := idx.Files[fileID]
 	n := len(entry.Segments)
 	length := int64(fd.Length)
 	sf := SetFile{FileID: fileID, Length: fd.Length}
 
 	if n == 0 {
-		return sf, fmt.Errorf("%w: file %q has no segments in NZB", ErrUnrepairable, fd.Name)
+		return sf, 0, fmt.Errorf("%w: file %q has no segments in NZB", ErrUnrepairable, fd.Name)
 	}
 
 	partSize := length // single-article fallback: the whole file
+	derived := int64(0)
 	if n > 1 {
 		partSize = -1
 		for _, seg := range entry.Segments {
@@ -182,18 +233,24 @@ func sizeArticles(
 					dead[msgID] = true // discovered dead while probing
 					continue
 				}
-				return sf, fmt.Errorf("par2repair: probe article %s: %w", msgID, err)
+				return sf, 0, fmt.Errorf("par2repair: probe article %s: %w", msgID, err)
 			}
 			partSize = int64(len(payload))
 			break
 		}
 		if partSize <= 0 {
-			return sf, fmt.Errorf("%w: no live article in %q to derive part size", ErrUnrepairable, fd.Name)
+			if hint <= 0 {
+				return sf, 0, errNoLiveArticle
+			}
+			partSize = hint
+		} else {
+			derived = partSize
 		}
 		// The probe may have hit the (smaller) final article; a uniform part
-		// size must satisfy (n-1)*partSize < length <= n*partSize.
+		// size must satisfy (n-1)*partSize < length <= n*partSize. This is also
+		// what validates a borrowed hint.
 		if int64(n-1)*partSize >= length || int64(n)*partSize < length {
-			return sf, fmt.Errorf("%w: part size %d inconsistent with %d articles of %d bytes in %q",
+			return sf, 0, fmt.Errorf("%w: part size %d inconsistent with %d articles of %d bytes in %q",
 				ErrUnrepairable, partSize, n, length, fd.Name)
 		}
 	}
@@ -213,9 +270,9 @@ func sizeArticles(
 		off += size
 	}
 	if off != length {
-		return sf, fmt.Errorf("%w: article sizes for %q sum to %d, want %d", ErrUnrepairable, fd.Name, off, length)
+		return sf, 0, fmt.Errorf("%w: article sizes for %q sum to %d, want %d", ErrUnrepairable, fd.Name, off, length)
 	}
-	return sf, nil
+	return sf, derived, nil
 }
 
 // filePrefix returns the first up-to-16KiB of a store file's content.

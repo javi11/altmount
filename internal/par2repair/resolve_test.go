@@ -132,6 +132,107 @@ func TestResolveEndToEndWithRunJob(t *testing.T) {
 	}
 }
 
+// mkVolumeFixture builds a release of two volumes with a full PAR2 set and no
+// dead articles; the caller decides which message IDs to remove from the
+// fetcher. Volume sizes differ so a part size borrowed from one file is
+// genuinely validated against the other's length.
+func mkVolumeFixture(t *testing.T) (*metapb.FileMetadata, *metapb.NzbStore, *fakeFetcher, map[string][]byte) {
+	t.Helper()
+	rng := rand.New(rand.NewSource(29))
+	mk := func(n int) []byte {
+		b := make([]byte, n)
+		rng.Read(b)
+		return b
+	}
+	contents := map[string][]byte{
+		"vol1.rar": mk(4096),
+		"vol2.rar": mk(8192),
+	}
+	set := par2gen.BuildFull(1024, []par2gen.FileEntry{
+		{Name: "vol1.rar", Content: contents["vol1.rar"]},
+		{Name: "vol2.rar", Content: contents["vol2.rar"]},
+	}, 8)
+
+	fetch := &fakeFetcher{articles: map[string][]byte{}}
+	store := &metapb.NzbStore{}
+	const artSize = 2048
+	for _, name := range []string{"vol1.rar", "vol2.rar"} {
+		entry := &metapb.NzbFileEntry{Subject: fmt.Sprintf(`"%s" yEnc (1/4)`, name)}
+		content := contents[name]
+		for off, i := 0, 0; off < len(content); off, i = off+artSize, i+1 {
+			id := fmt.Sprintf("%s-%d@test", name, i)
+			entry.Segments = append(entry.Segments, &metapb.NzbSeg{Id: id, Number: int32(i + 1), Bytes: artSize + 200})
+			fetch.articles[id] = content[off : off+artSize]
+		}
+		store.Files = append(store.Files, entry)
+	}
+
+	fm := &metapb.FileMetadata{}
+	for i, p := range append([][]byte{set.Index}, set.Volumes...) {
+		id := fmt.Sprintf("par2-%d@test", i)
+		fetch.articles[id] = p
+		store.Files = append(store.Files, &metapb.NzbFileEntry{
+			Subject:  fmt.Sprintf(`"rel.vol%02d.par2" yEnc (1/1)`, i),
+			Segments: []*metapb.NzbSeg{{Id: id, Number: 1, Bytes: int64(len(p))}},
+		})
+		fm.Par2Files = append(fm.Par2Files, &metapb.Par2FileReference{
+			Filename:    fmt.Sprintf("rel.vol%02d.par2", i),
+			FileSize:    int64(len(p)),
+			SegmentData: []*metapb.SegmentData{{Id: "<" + id + ">", SegmentSize: int64(len(p))}},
+		})
+	}
+	return fm, store, fetch, contents
+}
+
+// A volume whose articles are ALL missing is the canonical thing PAR2 repair
+// exists to rebuild. Its decoded part size cannot be probed from its own
+// articles, so it must be borrowed from a sibling volume of the same release.
+func TestResolveFullyMissingVolume(t *testing.T) {
+	fm, store, fetch, contents := mkVolumeFixture(t)
+
+	dead := []string{"vol1.rar-0@test", "vol1.rar-1@test"}
+	for _, id := range dead {
+		delete(fetch.articles, id)
+	}
+
+	res, err := Resolve(context.Background(), fm, store, dead, fetch,
+		Caps{MaxRepairRatio: 1.0, MaxMemoryBytes: 64 << 20})
+	if err != nil {
+		t.Fatalf("fully missing volume must still be planned: %v", err)
+	}
+	if len(res.Plan.DeadArticles) != 2 {
+		t.Fatalf("DeadArticles = %+v", res.Plan.DeadArticles)
+	}
+	for _, f := range res.Plan.Files {
+		var sum int64
+		for _, a := range f.Articles {
+			if a.Size != 2048 {
+				t.Fatalf("borrowed part size wrong: article size = %d", a.Size)
+			}
+			sum += a.Size
+		}
+		if sum != int64(f.Length) {
+			t.Fatalf("article sizes sum to %d, want %d", sum, f.Length)
+		}
+	}
+
+	// The layout must be right, not merely plausible: rebuild and compare.
+	ps := NewPatchStore(t.TempDir())
+	if err := RunJob(context.Background(), res.Plan, res.Index, res.Par2Files, fetch, ps, testLogger()); err != nil {
+		t.Fatalf("RunJob: %v", err)
+	}
+	for i, id := range dead {
+		got, ok := ps.Get(id)
+		if !ok {
+			t.Fatalf("no patch stored for %s", id)
+		}
+		want := contents["vol1.rar"][i*2048 : (i+1)*2048]
+		if !bytes.Equal(got, want) {
+			t.Fatalf("patch for %s does not match the original bytes", id)
+		}
+	}
+}
+
 func TestResolveNoPar2Files(t *testing.T) {
 	_, store, fetch, _, _ := mkResolveFixture(t, false)
 	fm := &metapb.FileMetadata{}

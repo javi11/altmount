@@ -101,6 +101,24 @@ export function parseRepairReason(raw: string): RepairReason {
 		};
 	}
 
+	if (message.includes("no live article anywhere in the release")) {
+		return {
+			summary:
+				"Every article of this release is gone from your providers, so there is nothing left to rebuild from.",
+			hint: "The release has expired or been removed entirely. Replace it from another indexer.",
+			detail: raw,
+		};
+	}
+
+	if (message.includes("part size") && message.includes("inconsistent")) {
+		return {
+			summary:
+				"The article layout recorded for this release does not match what its PAR2 files describe.",
+			hint: "Usually a mismatched or re-posted NZB. Re-download the NZB from your indexer.",
+			detail: raw,
+		};
+	}
+
 	if (message.includes("no Main packet found")) {
 		return {
 			summary:
