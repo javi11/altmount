@@ -317,6 +317,22 @@ export function StremioConfigSection({
 								<strong>0</strong> to disable fallback.
 							</p>
 						</fieldset>
+
+						<div className="flex min-w-0 items-start justify-between gap-4 rounded-box border border-base-300 bg-base-100 p-4 sm:col-span-2">
+							<div className="min-w-0 flex-1">
+								<h4 className="font-semibold text-sm">Fast Fail Header Only (Stremio)</h4>
+								<p className="mt-1 text-base-content/70 text-xs">
+									Immediately abort dead NZBs (missing articles / DMCA) on the release header probe without running a full per-file archive sweep.
+								</p>
+							</div>
+							<input
+								type="checkbox"
+								className="toggle toggle-primary mt-1 shrink-0"
+								checked={formData.fast_fail_header_only ?? true}
+								disabled={isReadOnly}
+								onChange={(e) => update({ fast_fail_header_only: e.target.checked })}
+							/>
+						</div>
 					</div>
 				</div>
 
