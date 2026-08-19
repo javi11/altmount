@@ -124,10 +124,14 @@ Routes registered alongside the existing pair in `server.go`:
 | Method | Path | Handler | Behaviour |
 | --- | --- | --- | --- |
 | DELETE | `/api/par2repair/:id` | `handleCancelPar2Repair` | 400 unparseable id, 503 when `s.par2Repair` is nil or not a `Par2RepairCanceller`, 404 on `ErrJobNotFound`, 500 when the job will not unwind, else `RespondMessage(c, "PAR2 repair cancelled")`. |
-| DELETE | `/api/par2repair` | `handleCancelAllPar2Repair` | Lists jobs via `s.par2RepairRepo.List(ctx, 0)`, calls `Cancel` per id, tolerating `ErrJobNotFound` (a job may finish between list and cancel). Returns `RespondSuccess(c, fiber.Map{"cancelled": n})`. |
+| DELETE | `/api/par2repair` | `handleCancelAllPar2Repair` | Drains the queue: repeatedly `s.par2RepairRepo.List(ctx, 0)` and `Cancel` each id, tolerating `ErrJobNotFound` (a job may finish between list and cancel), stopping when a pass lists nothing or cancels nothing. Returns `RespondSuccess(c, fiber.Map{"cancelled": n})`. |
 
 Cancel-all cancels sequentially: each `Cancel` waits for its job to unwind, and
-concurrency is bounded by `MaxConcurrentJobs`, not by queue length.
+concurrency is bounded by `MaxConcurrentJobs`, not by queue length. It loops
+rather than making a single pass because `List` caps its result at 100 rows
+(`par2RepairListDefaultLimit`), so one pass is not guaranteed to see the whole
+queue. The "cancelled nothing this pass" exit keeps the loop finite if a row
+cannot be removed.
 
 ## Frontend
 
