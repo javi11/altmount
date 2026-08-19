@@ -35,6 +35,23 @@ func (e *SweepDeadArticleError) Error() string {
 
 func (e *SweepDeadArticleError) Unwrap() error { return e.Err }
 
+// JobProgress receives sweep progress: articles processed so far out of the
+// total the sweep covers. Called from the job goroutine; must be fast.
+type JobProgress func(doneArticles, totalArticles int)
+
+// JobOption customizes RunJob.
+type JobOption func(*jobOptions)
+
+type jobOptions struct {
+	progress JobProgress
+}
+
+// WithProgress reports sweep progress through cb. A re-sweep (singular-matrix
+// or corrupt-slice replan) restarts the count.
+func WithProgress(cb JobProgress) JobOption {
+	return func(o *jobOptions) { o.progress = cb }
+}
+
 // maxCorruptReplans bounds how many corrupt present slices a single job may
 // reclassify as missing. Each reclassification grows the solver by one
 // accumulator (slice-size bytes) and costs a fresh sweep, so the bound caps
@@ -74,7 +91,12 @@ func RunJob(
 	fetch ArticleFetcher,
 	store *PatchStore,
 	log *slog.Logger,
+	opts ...JobOption,
 ) error {
+	var o jobOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
 	sliceSize := int64(plan.SliceSize)
 	k := len(plan.Missing)
 
@@ -115,6 +137,11 @@ func RunJob(
 		i++
 	}
 
+	totalArticles := 0
+	for _, f := range plan.Files {
+		totalArticles += len(f.Articles)
+	}
+
 	// Attempt loop: a singular matrix (a known PAR2 Vandermonde flaw) retries
 	// with a spare recovery slice, and a corrupt present slice is reclassified
 	// as missing and solved for with one more recovery slice — both at the
@@ -134,7 +161,14 @@ func RunJob(
 			solver.AddRecovery(i, p)
 		}
 
-		if err := sweep(ctx, plan, idx, fetch, solver, startSlice, missingPos, log); err != nil {
+		doneArticles := 0
+		onArticle := func() {
+			doneArticles++
+			if o.progress != nil {
+				o.progress(doneArticles, totalArticles)
+			}
+		}
+		if err := sweep(ctx, plan, idx, fetch, solver, startSlice, missingPos, onArticle, log); err != nil {
 			var corrupt *corruptSliceError
 			if !errors.As(err, &corrupt) {
 				return err
@@ -205,6 +239,7 @@ func sweep(
 	solver *Solver,
 	startSlice []int64,
 	missingPos map[int]int,
+	onArticle func(),
 	log *slog.Logger,
 ) error {
 	sliceSize := plan.SliceSize
@@ -249,6 +284,9 @@ func sweep(
 		for _, a := range f.Articles {
 			if err := ctx.Err(); err != nil {
 				return err
+			}
+			if onArticle != nil {
+				onArticle()
 			}
 			if a.Dead {
 				// Zero-advance: the affected slices are in the missing set and

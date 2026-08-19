@@ -7,6 +7,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/par2repair"
 )
 
 // Par2RepairEnqueuer queues a file for background PAR2 repair (implemented by
@@ -31,6 +32,12 @@ func (s *Server) SetPar2RepairRepo(repo *database.Par2RepairRepository) {
 	s.par2RepairRepo = repo
 }
 
+// Par2RepairProgressSource reports a running job's live sweep progress
+// (implemented by par2repair.Service).
+type Par2RepairProgressSource interface {
+	Progress(jobID int64) (par2repair.JobProgressSnapshot, bool)
+}
+
 // Par2RepairJobResponse is the JSON shape of one repair job row.
 type Par2RepairJobResponse struct {
 	ID            int64      `json:"id"`
@@ -41,6 +48,10 @@ type Par2RepairJobResponse struct {
 	NextAttemptAt *time.Time `json:"next_attempt_at,omitempty"`
 	CreatedAt     time.Time  `json:"created_at"`
 	UpdatedAt     time.Time  `json:"updated_at"`
+	// Sweep progress, present only while the job is running and a sweep is
+	// under way.
+	ProgressDone  *int `json:"progress_done,omitempty"`
+	ProgressTotal *int `json:"progress_total,omitempty"`
 }
 
 func toPar2RepairJobResponse(job *database.Par2RepairJob) Par2RepairJobResponse {
@@ -73,9 +84,17 @@ func (s *Server) handleListPar2Repair(c *fiber.Ctx) error {
 	if err != nil {
 		return RespondInternalError(c, "Failed to list PAR2 repair jobs", err.Error())
 	}
+	progressSource, _ := s.par2Repair.(Par2RepairProgressSource)
 	resp := make([]Par2RepairJobResponse, 0, len(jobs))
 	for _, job := range jobs {
-		resp = append(resp, toPar2RepairJobResponse(job))
+		row := toPar2RepairJobResponse(job)
+		if progressSource != nil && job.Status == database.Par2RepairStatusRunning {
+			if p, ok := progressSource.Progress(job.ID); ok {
+				done, total := p.DoneArticles, p.TotalArticles
+				row.ProgressDone, row.ProgressTotal = &done, &total
+			}
+		}
+		resp = append(resp, row)
 	}
 	return RespondSuccess(c, resp)
 }

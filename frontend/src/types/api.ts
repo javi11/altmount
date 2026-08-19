@@ -211,6 +211,22 @@ export interface FileHealth {
 	metadata?: string;
 }
 
+export type Par2RepairStatus = "pending" | "running" | "repaired" | "unrepairable";
+
+export interface Par2RepairJob {
+	id: number;
+	file_path: string;
+	status: Par2RepairStatus;
+	attempts: number;
+	last_error?: string;
+	next_attempt_at?: string;
+	created_at: string;
+	updated_at: string;
+	// Sweep progress, present only while the job is running
+	progress_done?: number;
+	progress_total?: number;
+}
+
 export interface HealthStats {
 	total: number;
 	pending: number;

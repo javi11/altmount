@@ -86,6 +86,10 @@ type Service struct {
 	wake    chan struct{}
 	health  HealthStore // optional; nil skips health-record updates
 
+	// progress holds live sweep progress per running job ID.
+	progressMu sync.Mutex
+	progress   map[int64]JobProgressSnapshot
+
 	// execute runs one claimed job; replaced in tests. The default is
 	// (*Service).executeJob.
 	execute func(ctx context.Context, job *database.Par2RepairJob) error
@@ -291,7 +295,38 @@ func (s *Service) executeJob(ctx context.Context, job *database.Par2RepairJob) e
 	if err != nil {
 		return err
 	}
-	return RunJob(ctx, res.Plan, res.Index, res.Par2Files, s.fetcher, s.store, s.log)
+	defer s.clearProgress(job.ID)
+	return RunJob(ctx, res.Plan, res.Index, res.Par2Files, s.fetcher, s.store, s.log,
+		WithProgress(func(done, total int) { s.setProgress(job.ID, done, total) }))
+}
+
+// JobProgressSnapshot is a running job's sweep progress.
+type JobProgressSnapshot struct {
+	DoneArticles  int
+	TotalArticles int
+}
+
+// Progress returns the live sweep progress of a running job, when known.
+func (s *Service) Progress(jobID int64) (JobProgressSnapshot, bool) {
+	s.progressMu.Lock()
+	defer s.progressMu.Unlock()
+	p, ok := s.progress[jobID]
+	return p, ok
+}
+
+func (s *Service) setProgress(jobID int64, done, total int) {
+	s.progressMu.Lock()
+	defer s.progressMu.Unlock()
+	if s.progress == nil {
+		s.progress = make(map[int64]JobProgressSnapshot)
+	}
+	s.progress[jobID] = JobProgressSnapshot{DoneArticles: done, TotalArticles: total}
+}
+
+func (s *Service) clearProgress(jobID int64) {
+	s.progressMu.Lock()
+	defer s.progressMu.Unlock()
+	delete(s.progress, jobID)
 }
 
 // mergeDeadIDs appends extra onto base, skipping duplicates, preserving order.

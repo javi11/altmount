@@ -15,6 +15,7 @@ import {
 	useDirectHealthCheck,
 	useHealth,
 	useHealthStats,
+	usePar2RepairJobs,
 	useRegenerateSymlinks,
 	useRepairBulkHealthItems,
 	useRepairHealthItem,
@@ -41,6 +42,7 @@ import { HealthStatsCards } from "./HealthPage/components/HealthStatsCards";
 import { HealthStatusAlert } from "./HealthPage/components/HealthStatusAlert";
 import { HealthTable } from "./HealthPage/components/HealthTable/HealthTable";
 import { LibraryScanStatus } from "./HealthPage/components/LibraryScanStatus";
+import { Par2RepairSection } from "./HealthPage/components/Par2RepairSection";
 import type { CleanupConfig, SortBy, SortOrder } from "./HealthPage/types";
 
 type HealthTab = "files";
@@ -97,6 +99,7 @@ export function HealthPage() {
 	});
 
 	const { data: stats } = useHealthStats();
+	const { data: par2RepairJobs } = usePar2RepairJobs();
 	const deleteItem = useDeleteHealthItem();
 	const deleteBulkItems = useDeleteBulkHealthItems();
 	const restartBulkItems = useRestartBulkHealthItems();
@@ -807,6 +810,8 @@ export function HealthPage() {
 
 						<div className="space-y-6">
 							<HealthStatsCards stats={stats} />
+
+							<Par2RepairSection jobs={par2RepairJobs} />
 
 							<div className="card border-2 border-base-300/50 bg-base-100 shadow-md">
 								<div className="card-body p-4 sm:p-8">

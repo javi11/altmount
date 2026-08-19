@@ -188,6 +188,27 @@ export const useHealthStats = () => {
 	});
 };
 
+export const usePar2RepairJobs = () => {
+	return useQuery({
+		queryKey: ["par2repair", "jobs"],
+		queryFn: () => apiClient.getPar2RepairJobs(),
+		// Poll faster while a repair is actively sweeping, slower when idle.
+		refetchInterval: (query) =>
+			query.state.data?.some((job) => job.status === "running") ? 2000 : 15000,
+	});
+};
+
+export const useTriggerPar2Repair = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: (filePath: string) => apiClient.triggerPar2Repair(filePath),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["par2repair"] });
+		},
+	});
+};
+
 export const useResetAllHealthChecks = () => {
 	const queryClient = useQueryClient();
 
