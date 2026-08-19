@@ -3,6 +3,7 @@ package par2repair
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -165,4 +166,69 @@ func TestPatchStoreAtomicPut(t *testing.T) {
 	}
 	close(stop)
 	wg.Wait()
+}
+
+func TestPatchStoreRemoveScratch(t *testing.T) {
+	store := NewPatchStore(t.TempDir())
+	if err := store.Put("<keep@x>", []byte("payload")); err != nil {
+		t.Fatal(err)
+	}
+	scratch := store.ScratchDir()
+	if err := os.MkdirAll(scratch, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(scratch, ".par2repair-1.mem"), []byte("arena"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.RemoveScratch(); err != nil {
+		t.Fatalf("RemoveScratch: %v", err)
+	}
+	if _, err := os.Stat(scratch); !os.IsNotExist(err) {
+		t.Fatalf("scratch dir still present, stat err = %v", err)
+	}
+	if _, ok := store.Get("<keep@x>"); !ok {
+		t.Fatal("RemoveScratch deleted a stored patch")
+	}
+	// Idempotent: a second call on a missing dir is not an error.
+	if err := store.RemoveScratch(); err != nil {
+		t.Fatalf("second RemoveScratch: %v", err)
+	}
+}
+
+func TestPatchStoreSweepTempFiles(t *testing.T) {
+	root := t.TempDir()
+	store := NewPatchStore(root)
+	if err := store.Put("<keep@x>", []byte("payload")); err != nil {
+		t.Fatal(err)
+	}
+	// A leftover temp file in the same fanned-out dir as the real patch.
+	dir := filepath.Join(root, "ab")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tmp := filepath.Join(dir, ".tmp-orphan")
+	if err := os.WriteFile(tmp, []byte("half"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.SweepTempFiles(); err != nil {
+		t.Fatalf("SweepTempFiles: %v", err)
+	}
+	if _, err := os.Stat(tmp); !os.IsNotExist(err) {
+		t.Fatalf("temp file survived, stat err = %v", err)
+	}
+	if _, ok := store.Get("<keep@x>"); !ok {
+		t.Fatal("SweepTempFiles deleted a stored patch")
+	}
+}
+
+func TestPatchStoreSweepersOnMissingRoot(t *testing.T) {
+	store := NewPatchStore(filepath.Join(t.TempDir(), "never-created"))
+	if err := store.RemoveScratch(); err != nil {
+		t.Fatalf("RemoveScratch on missing root: %v", err)
+	}
+	if err := store.SweepTempFiles(); err != nil {
+		t.Fatalf("SweepTempFiles on missing root: %v", err)
+	}
 }

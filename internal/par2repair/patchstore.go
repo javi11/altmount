@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -145,6 +146,46 @@ func (p *PatchStore) Prune(maxBytes int64) error {
 			return fmt.Errorf("par2repair: evict patch %s: %w", f.path, err)
 		}
 		total -= f.size
+	}
+	return nil
+}
+
+// RemoveScratch deletes the solver-arena scratch directory. Arenas only matter
+// while a job runs, so removing them between jobs is always safe. Idempotent:
+// a missing directory is not an error.
+func (p *PatchStore) RemoveScratch() error {
+	if err := os.RemoveAll(p.ScratchDir()); err != nil {
+		return fmt.Errorf("par2repair: remove scratch dir: %w", err)
+	}
+	return nil
+}
+
+// SweepTempFiles removes half-written patch temp files left behind when a Put
+// was interrupted (kill -9, power loss). A live Put's temp file is only visible
+// for the moment before its rename, so callers must run this when no job is
+// writing. Never touches .patch files.
+func (p *PatchStore) SweepTempFiles() error {
+	err := filepath.WalkDir(p.root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			// A file deleted mid-walk (concurrent repair) is fine.
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
+			return err
+		}
+		if d.IsDir() || !strings.HasPrefix(d.Name(), ".tmp-") {
+			return nil
+		}
+		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil // nothing stored yet
+		}
+		return fmt.Errorf("par2repair: sweep patch temp files: %w", err)
 	}
 	return nil
 }
