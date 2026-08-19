@@ -186,7 +186,13 @@ func (s *Service) ResumeWaitingRepair(ctx context.Context, nzbPath string) error
 	if item == nil || item.Status != database.QueueStatusWaitingRepair {
 		return nil
 	}
-	return s.database.Repository.UpdateQueueItemStatus(ctx, item.ID, database.QueueStatusPending, nil)
+	if err := s.database.Repository.UpdateQueueItemStatus(ctx, item.ID, database.QueueStatusPending, nil); err != nil {
+		return err
+	}
+	if s.broadcaster != nil {
+		s.broadcaster.BroadcastQueueChanged()
+	}
+	return nil
 }
 
 // FailWaitingRepair fails a parked import whose repair proved impossible,
@@ -200,7 +206,14 @@ func (s *Service) FailWaitingRepair(ctx context.Context, nzbPath string, reason 
 		return nil
 	}
 	msg := "PAR2 repair could not rebuild the missing articles: " + reason
-	return s.database.Repository.UpdateQueueItemStatus(ctx, item.ID, database.QueueStatusFailed, &msg)
+	if err := s.database.Repository.UpdateQueueItemStatus(ctx, item.ID, database.QueueStatusFailed, &msg); err != nil {
+		return err
+	}
+	if s.broadcaster != nil {
+		s.broadcaster.NotifyComplete(int(item.ID), string(database.QueueStatusFailed))
+		s.broadcaster.BroadcastQueueChanged()
+	}
+	return nil
 }
 
 // SetPatchIndex wires the PAR2 patch store into the import availability sweep.
@@ -1439,6 +1452,12 @@ func (s *Service) handleProcessingFailure(ctx context.Context, item *database.Im
 		if err := s.database.Repository.UpdateQueueItemStatus(ctx, item.ID, database.QueueStatusWaitingRepair, &msg); err != nil {
 			s.log.ErrorContext(ctx, "Failed to park item pending repair", "queue_id", item.ID, "error", err)
 			return
+		}
+		// Tell the UI: without this the row keeps showing its last progress
+		// stage until the user reloads the page.
+		if s.broadcaster != nil {
+			s.broadcaster.NotifyComplete(int(item.ID), string(database.QueueStatusWaitingRepair))
+			s.broadcaster.BroadcastQueueChanged()
 		}
 		s.log.InfoContext(ctx, "Import parked pending PAR2 repair",
 			"queue_id", item.ID, "file", item.NzbPath)
