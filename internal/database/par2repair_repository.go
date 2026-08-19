@@ -143,17 +143,23 @@ func (r *Par2RepairRepository) ClaimNext(ctx context.Context, now time.Time) (*P
 	return job, nil
 }
 
-// MarkRepaired finishes a job successfully.
+// MarkRepaired finishes a job successfully, clearing any earlier failure.
+// The retry errors that preceded a success are no longer true of the job, and
+// last_error is what the UI shows as the reason a repair did not work.
 func (r *Par2RepairRepository) MarkRepaired(ctx context.Context, id int64) error {
-	return r.setTerminal(ctx, id, Par2RepairStatusRepaired, "")
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE par2_repair_jobs
+		SET status = ?, last_error = NULL, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?`, string(Par2RepairStatusRepaired), id)
+	if err != nil {
+		return fmt.Errorf("finish par2 repair job %d: %w", id, err)
+	}
+	return nil
 }
 
-// MarkUnrepairable finishes a job as permanently failed with a reason.
+// MarkUnrepairable finishes a job as permanently failed with a reason. An
+// empty reason keeps whatever error the last attempt recorded.
 func (r *Par2RepairRepository) MarkUnrepairable(ctx context.Context, id int64, reason string) error {
-	return r.setTerminal(ctx, id, Par2RepairStatusUnrepairable, reason)
-}
-
-func (r *Par2RepairRepository) setTerminal(ctx context.Context, id int64, status Par2RepairStatus, reason string) error {
 	var lastErr any
 	if reason != "" {
 		lastErr = reason
@@ -161,7 +167,7 @@ func (r *Par2RepairRepository) setTerminal(ctx context.Context, id int64, status
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE par2_repair_jobs
 		SET status = ?, last_error = COALESCE(?, last_error), updated_at = CURRENT_TIMESTAMP
-		WHERE id = ?`, string(status), lastErr, id)
+		WHERE id = ?`, string(Par2RepairStatusUnrepairable), lastErr, id)
 	if err != nil {
 		return fmt.Errorf("finish par2 repair job %d: %w", id, err)
 	}

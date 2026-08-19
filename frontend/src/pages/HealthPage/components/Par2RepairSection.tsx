@@ -1,6 +1,8 @@
 import { CheckCircle, Clock, Loader2, Wrench, XCircle } from "lucide-react";
+import { Fragment } from "react";
 import { formatRelativeTime } from "../../../lib/utils";
 import type { Par2RepairJob, Par2RepairStatus } from "../../../types/api";
+import { parseRepairReason } from "./par2RepairReason";
 
 interface Par2RepairSectionProps {
 	jobs: Par2RepairJob[] | undefined;
@@ -62,6 +64,57 @@ function SweepProgress({ job }: { job: Par2RepairJob }) {
 	);
 }
 
+/**
+ * The reason a repair could not run, on its own full-width row.
+ *
+ * Unrepairable is a dead end for that file — the user has to decide whether to
+ * raise a limit or replace the release — so the explanation gets real space
+ * rather than a truncated line under the filename.
+ */
+function ReasonRow({ job, columns }: { job: Par2RepairJob; columns: number }) {
+	// Jobs finished before last_error was cleared on success can still carry a
+	// stale failure; never report one against a repaired file.
+	if (!job.last_error || job.status === "repaired") {
+		return null;
+	}
+	const failed = job.status === "unrepairable";
+	const reason = parseRepairReason(job.last_error);
+	return (
+		<tr className="border-none">
+			<td colSpan={columns} className="pt-0">
+				<div
+					className={`rounded-md border-l-4 px-3 py-2 text-xs ${
+						failed ? "border-error bg-error/10" : "border-warning bg-warning/10"
+					}`}
+				>
+					<div className="flex items-start gap-2">
+						{failed ? (
+							<XCircle className="mt-0.5 h-4 w-4 shrink-0 text-error" aria-hidden="true" />
+						) : (
+							<Clock className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
+						)}
+						<div className="min-w-0 space-y-1">
+							<p className="font-medium">
+								{failed ? "Cannot repair: " : "Last attempt failed: "}
+								<span className="font-normal">{reason.summary}</span>
+							</p>
+							{reason.hint && <p className="text-base-content/70">{reason.hint}</p>}
+							{reason.detail !== reason.summary && (
+								<details>
+									<summary className="cursor-pointer text-base-content/50 hover:text-base-content/80">
+										Technical details
+									</summary>
+									<code className="mt-1 block break-all text-base-content/70">{reason.detail}</code>
+								</details>
+							)}
+						</div>
+					</div>
+				</div>
+			</td>
+		</tr>
+	);
+}
+
 export function Par2RepairSection({ jobs }: Par2RepairSectionProps) {
 	if (!jobs || jobs.length === 0) {
 		// Always rendered, even with no jobs: an invisible card is
@@ -110,36 +163,34 @@ export function Par2RepairSection({ jobs }: Par2RepairSectionProps) {
 						</thead>
 						<tbody>
 							{jobs.map((job) => (
-								<tr key={job.id}>
-									<td className="max-w-md">
-										<div className="flex items-center gap-2">
-											<StatusIcon status={job.status} />
-											<span className="truncate font-medium" title={job.file_path}>
-												{fileName(job.file_path)}
-											</span>
-										</div>
-										{job.last_error && job.status === "unrepairable" && (
-											<div className="mt-1 truncate text-error text-xs" title={job.last_error}>
-												{job.last_error}
+								<Fragment key={job.id}>
+									<tr className={job.last_error ? "border-none" : undefined}>
+										<td className="max-w-md">
+											<div className="flex items-center gap-2">
+												<StatusIcon status={job.status} />
+												<span className="truncate font-medium" title={job.file_path}>
+													{fileName(job.file_path)}
+												</span>
 											</div>
-										)}
-									</td>
-									<td>
-										<StatusBadge status={job.status} />
-									</td>
-									<td>
-										<SweepProgress job={job} />
-										{job.status === "pending" && job.next_attempt_at && (
-											<span className="text-base-content/60 text-xs">
-												retry {formatRelativeTime(job.next_attempt_at)}
-											</span>
-										)}
-									</td>
-									<td>{job.attempts}</td>
-									<td className="whitespace-nowrap text-base-content/60 text-sm">
-										{formatRelativeTime(job.updated_at)}
-									</td>
-								</tr>
+										</td>
+										<td>
+											<StatusBadge status={job.status} />
+										</td>
+										<td>
+											<SweepProgress job={job} />
+											{job.status === "pending" && job.next_attempt_at && (
+												<span className="text-base-content/60 text-xs">
+													retry {formatRelativeTime(job.next_attempt_at)}
+												</span>
+											)}
+										</td>
+										<td>{job.attempts}</td>
+										<td className="whitespace-nowrap text-base-content/60 text-sm">
+											{formatRelativeTime(job.updated_at)}
+										</td>
+									</tr>
+									<ReasonRow job={job} columns={5} />
+								</Fragment>
 							))}
 						</tbody>
 					</table>

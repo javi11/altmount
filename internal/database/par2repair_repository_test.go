@@ -141,6 +141,33 @@ func TestPar2RepairTerminalStatesAllowReEnqueue(t *testing.T) {
 	assert.True(t, created, "unrepairable outcome must not block later attempts")
 }
 
+// A repair that succeeds after transient failures must not keep the failure
+// text: the UI reports last_error as the reason a job did not work, and a
+// stale one makes a repaired file look broken.
+func TestPar2RepairMarkRepairedClearsLastError(t *testing.T) {
+	repo, _ := newPar2RepairRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	_, err := repo.Enqueue(ctx, "/movies/a.mkv", "")
+	require.NoError(t, err)
+	job, err := repo.ClaimNext(ctx, now)
+	require.NoError(t, err)
+	require.NoError(t, repo.MarkRetry(ctx, job.ID, "connection reset", now))
+
+	job, err = repo.ClaimNext(ctx, now)
+	require.NoError(t, err)
+	require.Equal(t, "connection reset", job.LastError.String)
+
+	require.NoError(t, repo.MarkRepaired(ctx, job.ID))
+
+	jobs, err := repo.List(ctx, 10)
+	require.NoError(t, err)
+	require.Len(t, jobs, 1)
+	assert.Equal(t, Par2RepairStatusRepaired, jobs[0].Status)
+	assert.False(t, jobs[0].LastError.Valid, "successful repair must clear the earlier failure")
+}
+
 func TestPar2RepairAppendDeadSegment(t *testing.T) {
 	repo, _ := newPar2RepairRepo(t)
 	ctx := context.Background()
