@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -41,15 +42,24 @@ func resolveSeriesMetadataFromIMDb(ctx context.Context, imdbID string) (tvdbID, 
 		"https://api.tvmaze.com/lookup/shows?imdb="+url.QueryEscape(imdbID),
 		nil,
 	)
-	if err == nil {
+	if err != nil {
+		slog.WarnContext(ctx, "Failed to build TVMaze lookup request", "error", err, "imdb_id", imdbID)
+	} else {
 		req.Header.Set("Accept", "application/json")
 		req.Header.Set("User-Agent", "altmount-stremio-tvdb-lookup")
 
-		if resp, err := tvMetadataLookupClient.Do(req); err == nil {
+		resp, doErr := tvMetadataLookupClient.Do(req)
+		if doErr != nil {
+			slog.WarnContext(ctx, "TVMaze lookup request failed", "error", doErr, "imdb_id", imdbID)
+		} else {
 			defer resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
+			if resp.StatusCode != http.StatusOK {
+				slog.WarnContext(ctx, "TVMaze lookup returned non-200 status", "status", resp.StatusCode, "imdb_id", imdbID)
+			} else {
 				var data tvmazeLookupResponse
-				if err := json.NewDecoder(resp.Body).Decode(&data); err == nil {
+				if decErr := json.NewDecoder(resp.Body).Decode(&data); decErr != nil {
+					slog.WarnContext(ctx, "Failed to decode TVMaze lookup response", "error", decErr, "imdb_id", imdbID)
+				} else {
 					title = data.Name
 					if data.Externals.TheTVDB > 0 {
 						tvdbID = strconv.Itoa(data.Externals.TheTVDB)
@@ -69,20 +79,32 @@ func resolveSeriesMetadataFromIMDb(ctx context.Context, imdbID string) (tvdbID, 
 		fmt.Sprintf("https://v3-cinemeta.strem.io/meta/series/%s.json", url.PathEscape(imdbID)),
 		nil,
 	)
-	if err == nil {
-		req.Header.Set("Accept", "application/json")
-		req.Header.Set("User-Agent", "altmount-stremio-tvdb-lookup")
-
-		if resp, err := tvMetadataLookupClient.Do(req); err == nil {
-			defer resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				var cData cinemetaLookupResponse
-				if err := json.NewDecoder(resp.Body).Decode(&cData); err == nil {
-					title = cData.Meta.Name
-				}
-			}
-		}
+	if err != nil {
+		slog.WarnContext(ctx, "Failed to build Cinemeta lookup request", "error", err, "imdb_id", imdbID)
+		return tvdbID, title, nil
 	}
+
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "altmount-stremio-tvdb-lookup")
+
+	resp, doErr := tvMetadataLookupClient.Do(req)
+	if doErr != nil {
+		slog.WarnContext(ctx, "Cinemeta lookup request failed", "error", doErr, "imdb_id", imdbID)
+		return tvdbID, title, nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		slog.WarnContext(ctx, "Cinemeta lookup returned non-200 status", "status", resp.StatusCode, "imdb_id", imdbID)
+		return tvdbID, title, nil
+	}
+
+	var cData cinemetaLookupResponse
+	if decErr := json.NewDecoder(resp.Body).Decode(&cData); decErr != nil {
+		slog.WarnContext(ctx, "Failed to decode Cinemeta lookup response", "error", decErr, "imdb_id", imdbID)
+		return tvdbID, title, nil
+	}
+	title = cData.Meta.Name
 
 	return tvdbID, title, nil
 }

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"crypto/subtle"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -20,7 +21,9 @@ import (
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/httpclient"
+	"github.com/javi11/altmount/internal/newsnab"
 	"github.com/javi11/altmount/internal/prowlarr"
+	"github.com/javi11/altmount/internal/stremio"
 )
 
 // stremioDownloadIDPrefix marks queue items originating from the Stremio addon.
@@ -212,7 +215,7 @@ func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 	}
 
 	entries := buildStremioStreamEntries(results, cachedItems, cfg.Stremio.NzbTTLHours, time.Now(),
-		baseURL, key, streamType, season, episode, imdbID)
+		baseURL, key, streamType, season, episode, imdbID, cfg.Stremio.Prowlarr)
 
 	streams := make([]fiber.Map, 0, len(libraryStreams)+len(entries))
 	streams = append(streams, libraryStreams...)
@@ -287,10 +290,9 @@ type stremioPlayCandidate struct {
 	Indexer     string
 }
 
-// stremioNzbPathMatches reports whether a queue item's nzb path belongs to the release
-// identified by safeTitle. The play handler stages every NZB as "<safeTitle>.nzb", and
-// the importer preserves that base name, so a substring test is the join between a
-// Prowlarr result and its queue rows.
+// stremioNzbPathMatches checks if an NZB path in the database corresponds to a given
+// safe release title. Matches both simple filenames (foo.nzb) and subdirectory paths
+// (stremio:tt1234567/foo.nzb).
 func stremioNzbPathMatches(nzbPath, safeTitle string) bool {
 	return strings.Contains(filepath.ToSlash(nzbPath), safeTitle+".nzb")
 }
@@ -323,7 +325,18 @@ func stremioCachedPredicate(cached []*database.ImportQueueItem, ttlHours int, no
 	}
 }
 
-// stremioFailedPredicate returns a test for "known not to work", combining the durable
+func stremioExtractImdbID(metaRaw *string) string {
+	if metaRaw == nil || *metaRaw == "" {
+		return ""
+	}
+	var data struct {
+		ImdbID string `json:"imdb_id"`
+	}
+	if err := json.Unmarshal([]byte(*metaRaw), &data); err == nil && data.ImdbID != "" {
+		return data.ImdbID
+	}
+	return ""
+}
 // half (failed import_queue rows) with the process-local half (failures that leave no
 // failed row -- see stremioFailureCache).
 //
@@ -359,12 +372,12 @@ func stremioFailedPredicate(
 	}
 }
 
-// filterStremioResults drops releases failing the configured language/quality filters,
+// filterStremioResults drops releases failing the configured language/quality/exclude filters,
 // and those already known to have failed. Excluding failed releases here -- rather than
 // demoting them -- is what stops a bad release being offered, and re-picked, forever.
 func filterStremioResults(
 	results []prowlarr.NZBResult,
-	languages, qualities []string,
+	languages, qualities, excludeKeywords []string,
 	isFailed func(safeTitle string) bool,
 ) []prowlarr.NZBResult {
 	filtered := make([]prowlarr.NZBResult, 0, len(results))
@@ -375,6 +388,9 @@ func filterStremioResults(
 		if !prowlarr.MatchesQuality(r.Title, qualities) {
 			continue
 		}
+		if prowlarr.MatchesExcludeKeywords(r.Title, excludeKeywords) {
+			continue
+		}
 		if isFailed != nil && isFailed(sanitizeFilename(r.Title)) {
 			continue
 		}
@@ -383,13 +399,74 @@ func filterStremioResults(
 	return filtered
 }
 
+func calculateStremioReleaseScore(r prowlarr.NZBResult, prowlarrCfg config.ProwlarrConfig) int {
+	score := 0
+	if len(prowlarrCfg.PreferredIndexers) > 0 && r.IndexerID > 0 {
+		for _, id := range prowlarrCfg.PreferredIndexers {
+			if id == r.IndexerID {
+				score += 10000
+				break
+			}
+		}
+	}
+	if len(prowlarrCfg.PreferredIndexerNames) > 0 && r.Indexer != "" {
+		indexerLower := strings.ToLower(r.Indexer)
+		for _, name := range prowlarrCfg.PreferredIndexerNames {
+			name = strings.TrimSpace(name)
+			if name != "" && strings.Contains(indexerLower, strings.ToLower(name)) {
+				score += 10000
+				break
+			}
+		}
+	}
+	if len(prowlarrCfg.PreferredLanguages) > 0 {
+		if prowlarr.MatchesLanguage(r.Title, prowlarrCfg.PreferredLanguages) {
+			score += 5000
+		}
+	}
+	if len(prowlarrCfg.CustomScores) > 0 {
+		titleLower := strings.ToLower(r.Title)
+		for pattern, val := range prowlarrCfg.CustomScores {
+			pattern = strings.TrimSpace(pattern)
+			if pattern == "" {
+				continue
+			}
+			if strings.Contains(titleLower, strings.ToLower(pattern)) {
+				score += val
+			} else if re, err := prowlarr.CompilePatternCached(pattern); err == nil && re.MatchString(r.Title) {
+				score += val
+			}
+		}
+	}
+	return score
+}
+
 // orderStremioResults stably reorders results so cached releases come first,
-// preserving Prowlarr's relative order (publish date, newest first) within each group.
-func orderStremioResults(results []prowlarr.NZBResult, isCached func(safeTitle string) bool) []prowlarr.NZBResult {
+// followed by highest TRaSH/custom score, preserving Prowlarr's publish date within equal groups.
+func orderStremioResults(
+	results []prowlarr.NZBResult,
+	isCached func(safeTitle string) bool,
+	prowlarrCfg config.ProwlarrConfig,
+) []prowlarr.NZBResult {
 	ordered := make([]prowlarr.NZBResult, len(results))
 	copy(ordered, results)
+	scores := make(map[string]int, len(results))
+	for _, r := range results {
+		scores[r.Title] = calculateStremioReleaseScore(r, prowlarrCfg)
+	}
+
 	sort.SliceStable(ordered, func(i, j int) bool {
-		return isCached(sanitizeFilename(ordered[i].Title)) && !isCached(sanitizeFilename(ordered[j].Title))
+		cI := isCached(sanitizeFilename(ordered[i].Title))
+		cJ := isCached(sanitizeFilename(ordered[j].Title))
+		if cI != cJ {
+			return cI && !cJ
+		}
+		sI := scores[ordered[i].Title]
+		sJ := scores[ordered[j].Title]
+		if sI != sJ {
+			return sI > sJ
+		}
+		return ordered[i].PublishDate.After(ordered[j].PublishDate)
 	})
 	return ordered
 }
@@ -440,76 +517,181 @@ func nextStremioCandidate(cands []stremioPlayCandidate, currentSafeTitle string,
 	return next, true
 }
 
-// searchStremioReleases runs the Prowlarr search for a Stremio content id, applies the
-// language/quality filters, drops releases known to have failed, and orders the result
-// cached-first. It is the single source of truth for candidate ordering, shared by the
-// stream list and the play fallback chain, so both agree on what "next" means.
+func (s *Server) buildStremioCoordinatorConfig(cfg *config.Config) stremio.CoordinatorConfig {
+	stremioCfg := cfg.Stremio
+
+	// Determine provider
+	provider := stremioCfg.Indexers.Provider
+	if provider == "" {
+		provider = "prowlarr"
+	}
+
+	// Prowlarr config (merging from Indexers.Prowlarr or fallback to Stremio.Prowlarr)
+	pHost := stremioCfg.Indexers.Prowlarr.Host
+	pKey := stremioCfg.Indexers.Prowlarr.APIKey
+	pCats := stremioCfg.Indexers.Prowlarr.Categories
+	pIdxs := stremioCfg.Indexers.Prowlarr.Indexers
+
+	if pHost == "" && stremioCfg.Prowlarr.Host != "" {
+		pHost = stremioCfg.Prowlarr.Host
+		pKey = stremioCfg.Prowlarr.APIKey
+		pCats = stremioCfg.Prowlarr.Categories
+		pIdxs = stremioCfg.Prowlarr.Indexers
+	}
+
+	// Convert newsnab indexers
+	newsnabList := make([]newsnab.IndexerConfig, 0, len(stremioCfg.Indexers.Newsnab))
+	for _, n := range stremioCfg.Indexers.Newsnab {
+		newsnabList = append(newsnabList, newsnab.IndexerConfig{
+			ID:             n.ID,
+			Name:           n.Name,
+			URL:            n.URL,
+			APIKey:         n.APIKey,
+			Categories:     n.Categories,
+			Weight:         n.Weight,
+			TimeoutSeconds: n.TimeoutSeconds,
+			Enabled:        n.Enabled,
+		})
+	}
+
+	// Convert scoring config
+	customFormats := make([]stremio.TrashCustomFormat, 0, len(stremioCfg.Scoring.CustomFormats))
+	for _, f := range stremioCfg.Scoring.CustomFormats {
+		customFormats = append(customFormats, stremio.TrashCustomFormat{
+			ID:          f.ID,
+			Name:        f.Name,
+			Category:    f.Category,
+			Pattern:     f.Pattern,
+			PatternType: f.PatternType,
+			Score:       f.Score,
+			Enabled:     f.Enabled,
+			IsCustom:    f.IsCustom,
+			Invert:      f.Invert,
+		})
+	}
+
+	// If no custom formats configured yet, convert from legacy Prowlarr.CustomScores
+	if len(customFormats) == 0 && len(stremioCfg.Prowlarr.CustomScores) > 0 {
+		for pat, score := range stremioCfg.Prowlarr.CustomScores {
+			customFormats = append(customFormats, stremio.TrashCustomFormat{
+				ID:          pat,
+				Name:        pat,
+				Pattern:     pat,
+				PatternType: "regex",
+				Score:       score,
+				Enabled:     true,
+			})
+		}
+	}
+
+	excludeKeywords := stremioCfg.Scoring.ExcludeKeywords
+	if len(excludeKeywords) == 0 && len(stremioCfg.Prowlarr.ExcludeKeywords) > 0 {
+		excludeKeywords = stremioCfg.Prowlarr.ExcludeKeywords
+	}
+
+	preferredLangs := stremioCfg.Scoring.PreferredLanguages
+	if len(preferredLangs) == 0 && len(stremioCfg.Prowlarr.PreferredLanguages) > 0 {
+		preferredLangs = stremioCfg.Prowlarr.PreferredLanguages
+	}
+
+	return stremio.CoordinatorConfig{
+		Provider:        provider,
+		UserAgentMode:   stremioCfg.Indexers.UserAgentMode,
+		CustomUserAgent: stremioCfg.Indexers.CustomUserAgent,
+		ProwlarrHost:    pHost,
+		ProwlarrKey:     pKey,
+		ProwlarrCats:    pCats,
+		ProwlarrIdxs:    pIdxs,
+		NewsnabIndexers: newsnabList,
+		Scoring: stremio.StreamScoringConfig{
+			Preset:                   stremioCfg.Scoring.Preset,
+			CustomFormats:            customFormats,
+			ExcludeKeywords:          excludeKeywords,
+			ExcludeRegex:             stremioCfg.Scoring.ExcludeRegex,
+			PreferredLanguages:       preferredLangs,
+			RequirePreferredLanguage: stremioCfg.Scoring.RequirePreferredLanguage,
+		},
+	}
+}
+
+// searchStremioReleases runs multi-provider search for a Stremio content id, applies the
+// language/quality filters and TRaSH scoring, drops failed releases, and orders cached-first.
 func (s *Server) searchStremioReleases(
 	ctx context.Context,
 	cfg *config.Config,
 	streamType, prowlarrType, imdbID string,
 	season, episode int,
 ) ([]prowlarr.NZBResult, []*database.ImportQueueItem, error) {
-	prowlarrCfg := cfg.Stremio.Prowlarr
-	client := prowlarr.NewClient(
-		prowlarrCfg.Host,
-		prowlarrCfg.APIKey,
-		httpclient.NewForExternal(cfg.Network, 30*time.Second),
-	)
+	coordCfg := s.buildStremioCoordinatorConfig(cfg)
+	coordinator := stremio.NewSearchCoordinator(coordCfg, httpclient.NewForExternal(cfg.Network, 30*time.Second))
 
-	var (
-		results []prowlarr.NZBResult
-		err     error
-		tvdbID  string
-	)
-
-	// For series, prefer TvdbId queries when possible and fall back to ImdbId.
+	var tvdbID, title string
 	if streamType == "series" {
-		tvdbID, err = resolveTVDBFromIMDb(ctx, imdbID)
+		var err error
+		tvdbID, title, err = resolveSeriesMetadataFromIMDb(ctx, imdbID)
 		if err != nil {
-			slog.WarnContext(ctx, "Failed to resolve TVDB ID from IMDb ID",
-				"error", err, "imdb_id", imdbID)
-			tvdbID = ""
-		}
-
-		if tvdbID != "" {
-			slog.InfoContext(ctx, "Searching Prowlarr using TVDB ID for series",
-				"imdb_id", imdbID, "tvdb_id", tvdbID, "season", season, "episode", episode)
-			results, err = client.SearchByTVDB(ctx, tvdbID, prowlarrType, prowlarrCfg.Categories, prowlarrCfg.Indexers, season, episode)
-			if err != nil {
-				slog.WarnContext(ctx, "Prowlarr TVDB search failed; falling back to IMDb search",
-					"error", err, "imdb_id", imdbID, "tvdb_id", tvdbID)
-				results = nil
-			}
+			slog.WarnContext(ctx, "Failed to resolve series metadata from IMDb ID", "error", err, "imdb_id", imdbID)
 		}
 	}
 
-	if len(results) == 0 {
-		results, err = client.Search(ctx, imdbID, prowlarrType, prowlarrCfg.Categories, prowlarrCfg.Indexers, season, episode)
-		if err != nil {
-			slog.WarnContext(ctx, "Prowlarr search failed", "error", err, "imdb_id", imdbID, "tvdb_id", tvdbID)
-			return nil, nil, err
-		}
+	timeoutMs := cfg.Stremio.FallbackTimeoutMs
+	if timeoutMs <= 0 {
+		timeoutMs = 3500
 	}
 
-	if len(results) == 0 {
-		slog.InfoContext(ctx, "No Prowlarr results found", "imdb_id", imdbID, "tvdb_id", tvdbID)
+	scoredReleases, err := coordinator.Search(ctx, stremio.SearchParams{
+		Type:      streamType,
+		IMDBID:    imdbID,
+		Title:     title,
+		Season:    season,
+		Episode:   episode,
+		TVDBID:    tvdbID,
+		TimeoutMS: timeoutMs,
+	})
+	if err != nil {
+		slog.WarnContext(ctx, "Stremio search coordinator error", "error", err, "imdb_id", imdbID)
+	}
+
+	if len(scoredReleases) == 0 {
+		slog.InfoContext(ctx, "No Stremio releases found across configured providers", "imdb_id", imdbID)
 		return nil, nil, nil
 	}
 
 	now := time.Now()
 	cachedItems, failedItems := s.loadStremioQueueState(ctx)
+	isFailed := stremioFailedPredicate(failedItems, s.stremioFailures.Keys(stremioFailedTTL(cfg)), cfg.Stremio.FailedReleaseTTLHours, now)
+	isCached := stremioCachedPredicate(cachedItems, cfg.Stremio.NzbTTLHours, now)
 
-	total := len(results)
-	results = filterStremioResults(results, prowlarrCfg.Languages, prowlarrCfg.Qualities,
-		stremioFailedPredicate(failedItems, s.stremioFailures.Keys(stremioFailedTTL(cfg)),
-			cfg.Stremio.FailedReleaseTTLHours, now))
-	if len(results) < total {
-		slog.InfoContext(ctx, "Filtered Prowlarr results",
-			"imdb_id", imdbID, "total", total, "kept", len(results))
+	// Filter out failed releases and convert to prowlarr.NZBResult
+	var filtered []prowlarr.NZBResult
+	for _, sr := range scoredReleases {
+		safeTitle := sanitizeFilename(sr.Title)
+		if isFailed != nil && isFailed(safeTitle) {
+			continue
+		}
+		idxID, _ := strconv.Atoi(sr.IndexerID)
+		filtered = append(filtered, prowlarr.NZBResult{
+			Title:       sr.Title,
+			DownloadURL: sr.DownloadURL,
+			Size:        sr.Size,
+			PublishDate: sr.PublishDate,
+			Indexer:     sr.Indexer,
+			IndexerID:   idxID,
+		})
 	}
 
-	ordered := orderStremioResults(results, stremioCachedPredicate(cachedItems, cfg.Stremio.NzbTTLHours, now))
+	// Reorder with cached items first, then preserving scored order
+	ordered := make([]prowlarr.NZBResult, 0, len(filtered))
+	var uncached []prowlarr.NZBResult
+	for _, r := range filtered {
+		if isCached(sanitizeFilename(r.Title)) {
+			ordered = append(ordered, r)
+		} else {
+			uncached = append(uncached, r)
+		}
+	}
+	ordered = append(ordered, uncached...)
+
 	return ordered, cachedItems, nil
 }
 
@@ -568,11 +750,12 @@ func buildStremioStreamEntries(
 	baseURL, key, streamType string,
 	season, episode int,
 	fallbackID string,
+	prowlarrCfg config.ProwlarrConfig,
 ) []stremioStreamEntry {
 	isCached := stremioCachedPredicate(cached, ttlHours, now)
 
 	// Order first, then build, so entries come out in final order without a second sort.
-	results = orderStremioResults(results, isCached)
+	results = orderStremioResults(results, isCached, prowlarrCfg)
 
 	entries := make([]stremioStreamEntry, 0, len(results))
 	for _, r := range results {
@@ -840,7 +1023,7 @@ func (s *Server) playStremioWithFallback(
 		}
 		attempts++
 
-		itemID, err := s.enqueueStremioRelease(ctx, cfg, cand, req.streamType)
+		itemID, err := s.enqueueStremioRelease(ctx, cfg, cand, req.streamType, req.imdbID)
 		if err != nil {
 			// Pre-queue failure (dead Prowlarr URL, malformed NZB): no queue row will
 			// ever exist, so the in-memory cache is the only place this can be recorded.
@@ -913,6 +1096,7 @@ func (s *Server) enqueueStremioRelease(
 	cfg *config.Config,
 	cand stremioPlayCandidate,
 	streamType string,
+	imdbID string,
 ) (int64, error) {
 	safeFilename := cand.SafeTitle + ".nzb"
 	ttlHours := cfg.Stremio.NzbTTLHours
@@ -989,13 +1173,20 @@ func (s *Server) enqueueStremioRelease(
 			category = "TV"
 		}
 		stremioDownloadID := stremioDownloadIDPrefix + uuid.NewString()
-		item, err := s.importerService.AddToQueue(workCtx, tempPath, basePath, &category, &priority, nil, &stremioDownloadID, indexerPtr)
+		var metaJSONPtr *string
+		if imdbID != "" {
+			if b, err := json.Marshal(map[string]string{"imdb_id": imdbID}); err == nil {
+				s := string(b)
+				metaJSONPtr = &s
+			}
+		}
+		item, err := s.importerService.AddToQueue(workCtx, tempPath, basePath, &category, &priority, metaJSONPtr, &stremioDownloadID, indexerPtr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to add NZB to queue: %w", err)
 		}
 
-		slog.InfoContext(ctx, "Prowlarr NZB queued for Stremio play",
-			"queue_id", item.ID, "title", cand.SafeTitle)
+		slog.InfoContext(ctx, "Stremio stream NZB queued for play",
+			"queue_id", item.ID, "title", cand.SafeTitle, "indexer", cand.Indexer)
 		return item.ID, nil
 	})
 	if err != nil {
@@ -1223,4 +1414,78 @@ func (s *Server) handleListProwlarrIndexers(c *fiber.Ctx) error {
 	}
 
 	return RespondSuccess(c, indexers)
+}
+
+type newsnabTestRequest struct {
+	URL    string `json:"url"`
+	APIKey string `json:"api_key"`
+}
+
+func (s *Server) handleTestNewsnabIndexer(c *fiber.Ctx) error {
+	var req newsnabTestRequest
+	if err := c.BodyParser(&req); err != nil {
+		return RespondBadRequest(c, "Invalid request payload", err.Error())
+	}
+
+	reqURL := strings.TrimSpace(req.URL)
+	if reqURL == "" || req.APIKey == "" {
+		return RespondValidationError(c, "Indexer URL and API Key are required", "")
+	}
+
+	cfg := s.configManager.GetConfig()
+	client := newsnab.NewClient(newsnab.IndexerConfig{
+		Name:           "Test Indexer",
+		URL:            reqURL,
+		APIKey:         req.APIKey,
+		TimeoutSeconds: 6,
+		Enabled:        true,
+	}, httpclient.NewForExternal(cfg.Network, 10*time.Second))
+
+	ua := stremio.GetUserAgentManager().GetUserAgent("movie", "")
+	caps, err := client.CheckCaps(c.Context(), ua)
+	if err != nil {
+		return RespondBadRequest(c, "Failed to connect to Newsnab indexer", err.Error())
+	}
+
+	return RespondSuccess(c, fiber.Map{
+		"server_name": caps.ServerName,
+		"categories":  caps.Categories,
+		"status":      "ok",
+	})
+}
+
+func (s *Server) handleGetStremioUserAgents(c *fiber.Ctx) error {
+	mgr := stremio.GetUserAgentManager()
+	return RespondSuccess(c, mgr.GetInfo())
+}
+
+func (s *Server) handleRefreshStremioUserAgents(c *fiber.Ctx) error {
+	mgr := stremio.GetUserAgentManager()
+	ctx := c.Context()
+
+	cfg := s.configManager.GetConfig()
+	if cfg != nil {
+		sonarrURL, sonarrKey := firstEnabledArrInstance(cfg.Arrs.SonarrInstances)
+		radarrURL, radarrKey := firstEnabledArrInstance(cfg.Arrs.RadarrInstances)
+		_ = mgr.CheckLocalARRs(ctx, sonarrURL, sonarrKey, radarrURL, radarrKey)
+	}
+
+	_ = mgr.FetchLatestFromGitHub(ctx)
+
+	return RespondSuccess(c, mgr.GetInfo())
+}
+
+// firstEnabledArrInstance returns the URL and API key of the first enabled
+// ARR instance in the list, or empty strings if none are enabled/configured.
+func firstEnabledArrInstance(instances []config.ArrsInstanceConfig) (url, apiKey string) {
+	for _, inst := range instances {
+		if inst.Enabled != nil && !*inst.Enabled {
+			continue
+		}
+		if inst.URL == "" || inst.APIKey == "" {
+			continue
+		}
+		return inst.URL, inst.APIKey
+	}
+	return "", ""
 }
