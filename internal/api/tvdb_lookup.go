@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -113,4 +114,48 @@ func resolveSeriesMetadataFromIMDb(ctx context.Context, imdbID string) (tvdbID, 
 func resolveTVDBFromIMDb(ctx context.Context, imdbID string) (string, error) {
 	tvdbID, _, err := resolveSeriesMetadataFromIMDb(ctx, imdbID)
 	return tvdbID, err
+}
+
+type cinemetaMovieLookupResponse struct {
+	Meta struct {
+		Name      string `json:"name"`
+		Year      string `json:"year"`
+		MovieDBID int    `json:"moviedb_id"`
+	} `json:"meta"`
+}
+
+// resolveMovieMetadataFromIMDb resolves TMDB ID, movie title, and release year from an IMDb ID.
+func resolveMovieMetadataFromIMDb(ctx context.Context, imdbID string) (tmdbID int, title string, year string, err error) {
+	if imdbID == "" {
+		return 0, "", "", nil
+	}
+
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodGet,
+		fmt.Sprintf("https://v3-cinemeta.strem.io/meta/movie/%s.json", url.PathEscape(imdbID)),
+		nil,
+	)
+	if err != nil {
+		return 0, "", "", err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "altmount-stremio-movie-lookup")
+
+	resp, err := tvMetadataLookupClient.Do(req)
+	if err != nil {
+		return 0, "", "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		var cData cinemetaMovieLookupResponse
+		if err := json.NewDecoder(resp.Body).Decode(&cData); err == nil {
+			return cData.Meta.MovieDBID, cData.Meta.Name, cData.Meta.Year, nil
+		}
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return 0, "", "", fmt.Errorf("decode Cinemeta movie response: %s", string(body))
+	}
+
+	return 0, "", "", nil
 }

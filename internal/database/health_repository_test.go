@@ -717,3 +717,57 @@ func TestRelinkFileByFilename_ConflictMerge(t *testing.T) {
 	assert.Nil(t, oldH)
 }
 
+func TestHealthRepository_FindHealthyFilesForMovieAndSeries(t *testing.T) {
+	repo := setupTestDB(t)
+	ctx := context.Background()
+
+	// Insert movie records
+	_, err := repo.db.ExecContext(ctx, `
+		INSERT INTO file_health (file_path, library_path, status, metadata)
+		VALUES 
+		('complete/movies/Sample.Movie.2026.2160p.UHD.BluRay.x265-GROUP/sample.movie.2026.2160p.uhd.bluray.x265-group.mkv',
+		 '/library/movies/Sample Movie (2026)/Sample Movie (2026) - [Bluray-2160p][TrueHD Atmos 7.1][DV HDR10][x265]-GROUP.mkv',
+		 'healthy',
+		 '{"eventType":"Download","instanceName":"Radarr","movie":{"id":101,"tmdbId":1001},"movieFile":{"id":501,"sceneName":"Sample.Movie.2026.2160p.UHD.BluRay.x265-GROUP"}}'),
+		('complete/movies/Corrupted.Movie.2026/corrupted.mkv',
+		 '/library/movies/Corrupted (2026)/Corrupted.mkv',
+		 'corrupted',
+		 '{"eventType":"Download","instanceName":"Radarr","movie":{"id":102,"tmdbId":1001}}'),
+		('complete/tv/Sample.Series.S01E04.1080p.AMZN.WEB-DL.DDP2.0.H.264-GROUP/Sample.Series.S01E04.Episode.Name.1080p.AMZN.WEB-DL.DD2.0.H.264-GROUP.mkv',
+		 '/library/tv/Sample Series (2020)/Season 01/Sample Series (2020) - S01E04 - Episode Name [WEBDL-1080p][EAC3 2.0][x264]-GROUP.mkv',
+		 'healthy',
+		 '{"eventType":"Download","instanceName":"Sonarr","series":{"id":201,"tvdbId":2001},"episodeFile":{"id":601,"sceneName":"Sample.Series.S01E04.1080p.AMZN.WEB-DL.DDP2.0.H.264-GROUP"},"episodes":[{"id":701}]}')
+	`)
+	require.NoError(t, err)
+
+	// 1. Search Movie by TMDB ID
+	movies, err := repo.FindHealthyFilesForMovie(ctx, "Sample Movie", "2026", 1001)
+	require.NoError(t, err)
+	require.Len(t, movies, 1)
+	assert.Contains(t, movies[0].FilePath, "Sample.Movie.2026.2160p.UHD.BluRay.x265-GROUP")
+
+	// 2. Search Movie by Title and Year only (no TMDB ID)
+	movies, err = repo.FindHealthyFilesForMovie(ctx, "Sample Movie", "2026", 0)
+	require.NoError(t, err)
+	require.Len(t, movies, 1)
+	assert.Contains(t, movies[0].FilePath, "Sample.Movie.2026.2160p.UHD.BluRay.x265-GROUP")
+
+	// 3. Search Movie with non-matching TMDB ID (falls back to Title and Year)
+	movies, err = repo.FindHealthyFilesForMovie(ctx, "Sample Movie", "2026", 9999)
+	require.NoError(t, err)
+	require.Len(t, movies, 1)
+	assert.Contains(t, movies[0].FilePath, "Sample.Movie.2026.2160p.UHD.BluRay.x265-GROUP")
+
+	// 4. Search Series by TVDB ID
+	series, err := repo.FindHealthyFilesForSeries(ctx, "Sample Series", 2001)
+	require.NoError(t, err)
+	require.Len(t, series, 1)
+	assert.Contains(t, series[0].FilePath, "Sample.Series.S01E04")
+
+	// 5. Search Series with non-matching TVDB ID (falls back to Series Title)
+	series, err = repo.FindHealthyFilesForSeries(ctx, "Sample Series", 9999)
+	require.NoError(t, err)
+	require.Len(t, series, 1)
+	assert.Contains(t, series[0].FilePath, "Sample.Series.S01E04")
+}
+

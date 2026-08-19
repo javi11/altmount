@@ -147,3 +147,21 @@ func TestBuildStremioStreamEntries_CachedSortedFirstStable(t *testing.T) {
 		t.Errorf("last two entries should not be cached")
 	}
 }
+
+func TestFormatLibraryStreamNameAndTitle(t *testing.T) {
+	libPath := "/library/movies/Sample Movie (2026)/Sample Movie (2026) - [Bluray-2160p][TrueHD Atmos 7.1][DV HDR10][x265]-GROUP.mkv"
+	h := &database.FileHealth{
+		FilePath:    "complete/movies/Sample.Movie.2026.2160p/sample.mkv",
+		LibraryPath: &libPath,
+	}
+
+	name := formatLibraryStreamName(h)
+	if !strings.Contains(name, "⚡ AltMount Library") || !strings.Contains(name, "2160p") {
+		t.Errorf("unexpected library stream name: %q", name)
+	}
+
+	title := formatLibraryStreamTitle(h)
+	if !strings.Contains(title, "Sample Movie (2026)") || !strings.Contains(title, "Local Library") {
+		t.Errorf("unexpected library stream title: %q", title)
+	}
+}

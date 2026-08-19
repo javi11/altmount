@@ -65,6 +65,7 @@ function initializeStremioFormData(config: ConfigResponse): StremioConfig {
 		failed_release_ttl_hours: stremio?.failed_release_ttl_hours ?? 24,
 		max_fallback_releases: stremio?.max_fallback_releases ?? 2,
 		fast_fail_header_only: stremio?.fast_fail_header_only ?? true,
+		include_library_streams: stremio?.include_library_streams ?? true,
 		indexers,
 		scoring,
 		prowlarr: {

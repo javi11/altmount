@@ -2427,3 +2427,98 @@ func (r *HealthRepository) matchMetadata(dbMeta, webMeta *model.WebhookMetadata)
 	return false
 }
 
+// FindHealthyFilesForMovie returns healthy library files matching a movie by TMDB ID or title/year.
+// It first searches metadata by TMDB ID; if no matches are found, it falls back to title and year search.
+func (r *HealthRepository) FindHealthyFilesForMovie(ctx context.Context, title string, year string, tmdbID int) ([]*FileHealth, error) {
+	// 1. Try TMDB ID if available
+	if tmdbID > 0 {
+		query := fileHealthSelectColumns + " WHERE status = 'healthy' AND metadata LIKE ? ORDER BY id DESC LIMIT 50"
+		rows, err := r.db.QueryContext(ctx, query, fmt.Sprintf(`%%"tmdbId":%d%%`, tmdbID))
+		if err == nil {
+			var results []*FileHealth
+			for rows.Next() {
+				if h, err := scanFileHealth(rows); err == nil && h != nil {
+					results = append(results, h)
+				}
+			}
+			rows.Close()
+			if len(results) > 0 {
+				return results, nil
+			}
+		}
+	}
+
+	// 2. Fallback to Title + Year search across file_path and library_path
+	cleanTitle := strings.TrimSpace(title)
+	if cleanTitle == "" {
+		return nil, nil
+	}
+
+	var query string
+	var args []interface{}
+	if year != "" {
+		query = fileHealthSelectColumns + " WHERE status = 'healthy' AND (file_path LIKE ? OR library_path LIKE ?) AND (file_path LIKE ? OR library_path LIKE ?) ORDER BY id DESC LIMIT 50"
+		args = append(args, "%"+cleanTitle+"%", "%"+cleanTitle+"%", "%"+year+"%", "%"+year+"%")
+	} else {
+		query = fileHealthSelectColumns + " WHERE status = 'healthy' AND (file_path LIKE ? OR library_path LIKE ?) ORDER BY id DESC LIMIT 50"
+		args = append(args, "%"+cleanTitle+"%", "%"+cleanTitle+"%")
+	}
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []*FileHealth
+	for rows.Next() {
+		if h, err := scanFileHealth(rows); err == nil && h != nil {
+			results = append(results, h)
+		}
+	}
+	return results, rows.Err()
+}
+
+// FindHealthyFilesForSeries returns healthy library files matching a TV series by TVDB ID or series title.
+// It first searches metadata by TVDB ID; if no matches are found, it falls back to series title search.
+func (r *HealthRepository) FindHealthyFilesForSeries(ctx context.Context, seriesTitle string, tvdbID int) ([]*FileHealth, error) {
+	// 1. Try TVDB ID if available
+	if tvdbID > 0 {
+		query := fileHealthSelectColumns + " WHERE status = 'healthy' AND metadata LIKE ? ORDER BY id DESC LIMIT 100"
+		rows, err := r.db.QueryContext(ctx, query, fmt.Sprintf(`%%"tvdbId":%d%%`, tvdbID))
+		if err == nil {
+			var results []*FileHealth
+			for rows.Next() {
+				if h, err := scanFileHealth(rows); err == nil && h != nil {
+					results = append(results, h)
+				}
+			}
+			rows.Close()
+			if len(results) > 0 {
+				return results, nil
+			}
+		}
+	}
+
+	// 2. Fallback to Series Title search across file_path and library_path
+	cleanTitle := strings.TrimSpace(seriesTitle)
+	if cleanTitle == "" {
+		return nil, nil
+	}
+
+	query := fileHealthSelectColumns + " WHERE status = 'healthy' AND (file_path LIKE ? OR library_path LIKE ?) ORDER BY id DESC LIMIT 100"
+	rows, err := r.db.QueryContext(ctx, query, "%"+cleanTitle+"%", "%"+cleanTitle+"%")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []*FileHealth
+	for rows.Next() {
+		if h, err := scanFileHealth(rows); err == nil && h != nil {
+			results = append(results, h)
+		}
+	}
+	return results, rows.Err()
+}
+

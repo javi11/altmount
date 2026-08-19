@@ -254,6 +254,9 @@ type StremioConfig struct {
 	// MaxFallbackReleases caps how many *extra* releases a single play request may try
 	// after the first one fails. Set to 0 to disable fallback. Defaults to 2.
 	MaxFallbackReleases int `yaml:"max_fallback_releases" mapstructure:"max_fallback_releases" json:"max_fallback_releases"`
+	// IncludeLibraryStreams when true checks and presents matching completed files
+	// from your Altmount library as instant 0s stream options in Stremio. Defaults to true.
+	IncludeLibraryStreams *bool `yaml:"include_library_streams" mapstructure:"include_library_streams" json:"include_library_streams,omitempty"`
 	// FastFailHeaderOnly when true causes Stremio-originated imports to fail fast
 	// immediately on the release-level probe when missing articles are detected,
 	// skipping the multi-part RAR per-file Stat sweep. Defaults to true.
@@ -283,6 +286,15 @@ func (s StremioConfig) EffectiveMaxFallbackReleases() int {
 		return maxStremioFallbackReleases
 	}
 	return s.MaxFallbackReleases
+}
+
+// EffectiveIncludeLibraryStreams reports whether Stremio stream responses should include
+// matching completed releases from the local library. Defaults to true.
+func (s StremioConfig) EffectiveIncludeLibraryStreams() bool {
+	if s.IncludeLibraryStreams == nil {
+		return true
+	}
+	return *s.IncludeLibraryStreams
 }
 
 // EffectiveFastFailHeaderOnly reports whether Stremio imports should fast-fail
