@@ -1,4 +1,4 @@
-import { Clock, Loader2, Wrench } from "lucide-react";
+import { Ban, Clock, Loader2, Wrench } from "lucide-react";
 import { Fragment } from "react";
 import { formatDuration, formatRelativeTime } from "../../../lib/utils";
 import type { Par2RepairJob, Par2RepairStatus } from "../../../types/api";
@@ -6,6 +6,10 @@ import { parseRepairReason } from "./par2RepairReason";
 
 interface Par2RepairSectionProps {
 	jobs: Par2RepairJob[] | undefined;
+	onCancel: (id: number) => void;
+	onCancelAll: () => void;
+	/** Disables the controls while a cancel request is in flight. */
+	isCancelling?: boolean;
 }
 
 const STATUS_BADGES: Record<Par2RepairStatus, { className: string; label: string }> = {
@@ -128,7 +132,12 @@ function ReasonRow({ job, columns }: { job: Par2RepairJob; columns: number }) {
 	);
 }
 
-export function Par2RepairSection({ jobs }: Par2RepairSectionProps) {
+export function Par2RepairSection({
+	jobs,
+	onCancel,
+	onCancelAll,
+	isCancelling = false,
+}: Par2RepairSectionProps) {
 	if (!jobs || jobs.length === 0) {
 		// Always rendered, even with no jobs: an invisible card is
 		// indistinguishable from a broken one.
@@ -158,6 +167,15 @@ export function Par2RepairSection({ jobs }: Par2RepairSectionProps) {
 					{jobs.some((job) => job.status === "running") && (
 						<span className="badge badge-info badge-sm">active</span>
 					)}
+					<button
+						type="button"
+						className="btn btn-ghost btn-xs ml-auto font-normal"
+						onClick={onCancelAll}
+						disabled={isCancelling}
+					>
+						<Ban className="h-3.5 w-3.5" aria-hidden="true" />
+						Cancel all
+					</button>
 				</h3>
 				<p className="text-base-content/60 text-sm">
 					Missing articles reconstructed from the release's PAR2 recovery data. A repair streams the
@@ -173,6 +191,7 @@ export function Par2RepairSection({ jobs }: Par2RepairSectionProps) {
 								<th>Time</th>
 								<th>Attempts</th>
 								<th>Updated</th>
+								<th>Actions</th>
 							</tr>
 						</thead>
 						<tbody>
@@ -205,8 +224,20 @@ export function Par2RepairSection({ jobs }: Par2RepairSectionProps) {
 										<td className="whitespace-nowrap text-base-content/60 text-sm">
 											{formatRelativeTime(job.updated_at)}
 										</td>
+										<td>
+											<button
+												type="button"
+												className="btn btn-ghost btn-xs text-error"
+												aria-label={`Cancel repair of ${fileName(job.file_path)}`}
+												title="Cancel repair"
+												onClick={() => onCancel(job.id)}
+												disabled={isCancelling}
+											>
+												<Ban className="h-4 w-4" aria-hidden="true" />
+											</button>
+										</td>
 									</tr>
-									<ReasonRow job={job} columns={6} />
+									<ReasonRow job={job} columns={7} />
 								</Fragment>
 							))}
 						</tbody>
