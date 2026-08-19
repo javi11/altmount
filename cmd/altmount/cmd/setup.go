@@ -113,6 +113,7 @@ func initializeFilesystem(
 	configGetter config.ConfigGetter,
 	streamTracker nzbfilesystem.StreamTracker,
 	cacheSource *segcache.Source,
+	par2RepairService *par2repair.Service,
 ) *nzbfilesystem.NzbFilesystem {
 	// Reset all in-progress file health checks on start up
 	if err := healthRepo.ResetFileAllChecking(ctx); err != nil {
@@ -130,6 +131,11 @@ func initializeFilesystem(
 		streamTracker,
 		cacheSource,
 	)
+
+	// Serve PAR2-repaired article payloads on the hole read path.
+	if par2RepairService != nil {
+		metadataRemoteFile.SetPatchSource(par2RepairService.PatchStore())
+	}
 
 	// Create filesystem backed by metadata
 	return nzbfilesystem.NewNzbFilesystem(metadataRemoteFile)

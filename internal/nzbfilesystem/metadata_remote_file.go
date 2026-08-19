@@ -65,7 +65,14 @@ type MetadataRemoteFile struct {
 	cacheSource      *segcache.Source         // Segment cache source (nil = no cache configured)
 	repairCoalescer  *RepairCoalescer         // Throttles streaming-failure repair triggers and rclone VFS refreshes
 	padRecorder      *padRecorder             // Process-lived worker persisting degraded-pad events
+	patchSource      PatchSource              // Repaired-article payloads (nil = PAR2 repair disabled)
 	renameMu         sync.Mutex               // Mutex to protect rename operations from race conditions
+}
+
+// SetPatchSource wires the PAR2 repair patch store into the read path. Call
+// during boot, before the filesystem serves reads.
+func (mrf *MetadataRemoteFile) SetPatchSource(ps PatchSource) {
+	mrf.patchSource = ps
 }
 
 // Configuration is now accessed dynamically through config.ConfigGetter
@@ -296,6 +303,7 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 		rcloneClient:     mrf.rcloneClient,
 		repairCoalescer:  mrf.repairCoalescer,
 		padRecorder:      mrf.padRecorder,
+		patchSource:      mrf.patchSource,
 		configGetter:     mrf.configGetter,
 		poolManager:      mrf.poolManager,
 		ctx:              fileCtx,
@@ -826,6 +834,7 @@ type MetadataVirtualFile struct {
 	rcloneClient     rclonecli.RcloneRcClient // RClone RC client for VFS notifications
 	repairCoalescer  *RepairCoalescer         // Throttles repair triggers; may be nil in tests
 	padRecorder      *padRecorder             // Persists degraded-pad events; may be nil in tests
+	patchSource      PatchSource              // Repaired-article payloads; may be nil
 	configGetter     config.ConfigGetter
 	poolManager      pool.Manager // Pool manager for dynamic pool access
 	ctx              context.Context
