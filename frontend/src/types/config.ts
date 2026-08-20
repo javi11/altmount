@@ -270,6 +270,7 @@ export interface ProviderConfig {
 	port: number;
 	username: string;
 	max_connections: number;
+	min_connections_alive?: number;
 	inflight_requests: number;
 	stat_inflight_requests: number;
 	tls: boolean;
@@ -507,6 +508,7 @@ export interface ProviderUpdateRequest {
 	username?: string;
 	password?: string;
 	max_connections?: number;
+	min_connections_alive?: number;
 	inflight_requests?: number;
 	stat_inflight_requests?: number;
 	tls?: boolean;
@@ -613,6 +615,7 @@ export interface ProviderFormData {
 	username: string;
 	password: string;
 	max_connections: number;
+	min_connections_alive: number;
 	inflight_requests: number;
 	stat_inflight_requests: number;
 	tls: boolean;
@@ -814,6 +817,7 @@ export interface ProviderCreateRequest {
 	username: string;
 	password: string;
 	max_connections: number;
+	min_connections_alive?: number;
 	inflight_requests?: number;
 	stat_inflight_requests?: number;
 	tls: boolean;

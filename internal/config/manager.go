@@ -569,6 +569,7 @@ type ProviderConfig struct {
 	Username                 string     `yaml:"username" mapstructure:"username" json:"username"`
 	Password                 string     `yaml:"password" mapstructure:"password" json:"-"`
 	MaxConnections           int        `yaml:"max_connections" mapstructure:"max_connections" json:"max_connections"`
+	MinConnectionsAlive      int        `yaml:"min_connections_alive" mapstructure:"min_connections_alive" json:"min_connections_alive,omitempty"`
 	InflightRequests         int        `yaml:"inflight_requests" mapstructure:"inflight_requests" json:"inflight_requests"`
 	StatInflightRequests     int        `yaml:"stat_inflight_requests" mapstructure:"stat_inflight_requests" json:"stat_inflight_requests"`
 	TLS                      bool       `yaml:"tls" mapstructure:"tls" json:"tls"`
@@ -1111,6 +1112,9 @@ func (c *Config) Validate() error {
 		if provider.MaxConnections <= 0 {
 			return fmt.Errorf("provider %d: max_connections must be greater than 0", i)
 		}
+		if provider.MinConnectionsAlive < 0 || provider.MinConnectionsAlive > provider.MaxConnections {
+			return fmt.Errorf("provider %d: min_connections_alive must be between 0 and max_connections", i)
+		}
 		if provider.InflightRequests <= 0 {
 			c.Providers[i].InflightRequests = 10
 		}
@@ -1237,6 +1241,7 @@ func (p *ProviderConfig) ToNNTPProvider() nntppool.Provider {
 		TLSConfig:         tlsCfg,
 		Auth:              nntppool.Auth{Username: p.Username, Password: p.Password},
 		Connections:       p.MaxConnections,
+		MinConnections:    p.MinConnectionsAlive,
 		Backup:            isBackup,
 		StorageGroup:      p.StorageGroup,
 		Inflight:          inflight,
@@ -1317,6 +1322,7 @@ func providersFieldsEqual(a, b ProviderConfig) bool {
 		a.SkipPing == b.SkipPing &&
 		a.Password == b.Password &&
 		a.MaxConnections == b.MaxConnections &&
+		a.MinConnectionsAlive == b.MinConnectionsAlive &&
 		a.InflightRequests == b.InflightRequests &&
 		a.StatInflightRequests == b.StatInflightRequests &&
 		a.TLS == b.TLS &&

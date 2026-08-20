@@ -486,6 +486,7 @@ func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 		Username                 string `json:"username"`
 		Password                 string `json:"password"`
 		MaxConnections           int    `json:"max_connections"`
+		MinConnectionsAlive      int    `json:"min_connections_alive"`
 		InflightRequests         int    `json:"inflight_requests"`
 		StatInflightRequests     int    `json:"stat_inflight_requests"`
 		TLS                      bool   `json:"tls"`
@@ -520,6 +521,9 @@ func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 	if createReq.MaxConnections <= 0 {
 		createReq.MaxConnections = 1 // Default
 	}
+	if createReq.MinConnectionsAlive < 0 || createReq.MinConnectionsAlive > createReq.MaxConnections {
+		return RespondValidationError(c, "MinConnectionsAlive must be between 0 and MaxConnections", "INVALID_MIN_CONNECTIONS_ALIVE")
+	}
 
 	// Generate new ID
 	newID := fmt.Sprintf("provider_%d", len(currentConfig.Providers)+1)
@@ -533,6 +537,7 @@ func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 		Username:                 createReq.Username,
 		Password:                 createReq.Password,
 		MaxConnections:           createReq.MaxConnections,
+		MinConnectionsAlive:      createReq.MinConnectionsAlive,
 		InflightRequests:         createReq.InflightRequests,
 		StatInflightRequests:     createReq.StatInflightRequests,
 		TLS:                      createReq.TLS,
@@ -578,6 +583,7 @@ func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 		Port:                     newProvider.Port,
 		Username:                 newProvider.Username,
 		MaxConnections:           newProvider.MaxConnections,
+		MinConnectionsAlive:      newProvider.MinConnectionsAlive,
 		TLS:                      newProvider.TLS,
 		InsecureTLS:              newProvider.InsecureTLS,
 		ProxyURL:                 newProvider.ProxyURL,
@@ -652,6 +658,7 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 		Username                 *string `json:"username,omitempty"`
 		Password                 *string `json:"password,omitempty"`
 		MaxConnections           *int    `json:"max_connections,omitempty"`
+		MinConnectionsAlive      *int    `json:"min_connections_alive,omitempty"`
 		InflightRequests         *int    `json:"inflight_requests,omitempty"`
 		StatInflightRequests     *int    `json:"stat_inflight_requests,omitempty"`
 		TLS                      *bool   `json:"tls,omitempty"`
@@ -706,6 +713,12 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 			return RespondValidationError(c, "MaxConnections must be positive", "INVALID_MAX_CONNECTIONS")
 		}
 		provider.MaxConnections = *updateReq.MaxConnections
+	}
+	if updateReq.MinConnectionsAlive != nil {
+		if *updateReq.MinConnectionsAlive < 0 {
+			return RespondValidationError(c, "MinConnectionsAlive must not be negative", "INVALID_MIN_CONNECTIONS_ALIVE")
+		}
+		provider.MinConnectionsAlive = *updateReq.MinConnectionsAlive
 	}
 	if updateReq.InflightRequests != nil {
 		provider.InflightRequests = *updateReq.InflightRequests
@@ -783,6 +796,7 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 		Port:                     provider.Port,
 		Username:                 provider.Username,
 		MaxConnections:           provider.MaxConnections,
+		MinConnectionsAlive:      provider.MinConnectionsAlive,
 		TLS:                      provider.TLS,
 		InsecureTLS:              provider.InsecureTLS,
 		ProxyURL:                 provider.ProxyURL,
@@ -1010,6 +1024,7 @@ func (s *Server) handleReorderProviders(c *fiber.Ctx) error {
 			Port:                  p.Port,
 			Username:              p.Username,
 			MaxConnections:        p.MaxConnections,
+			MinConnectionsAlive:   p.MinConnectionsAlive,
 			TLS:                   p.TLS,
 			InsecureTLS:           p.InsecureTLS,
 			ProxyURL:              p.ProxyURL,

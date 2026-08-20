@@ -556,6 +556,30 @@ export function ProvidersConfigSection({
 							/>
 						</div>
 						<div className="flex min-w-0 items-center gap-3">
+							<div
+								className="tooltip min-w-[88px] text-left"
+								data-tip="Connections kept dialed and open at all times. 0 = disabled (connect on demand)."
+							>
+								<span className="font-black text-[10px] text-base-content/50 uppercase tracking-widest">
+									Min Alive
+								</span>
+							</div>
+							<input
+								type="number"
+								className="input input-xs input-bordered w-16 shrink-0 bg-base-100 text-center font-bold font-mono [appearance:textfield] [&::-webkit-inner-spin-button]:m-0 [&::-webkit-inner-spin-button]:[-webkit-appearance:none] [&::-webkit-outer-spin-button]:[-webkit-appearance:none]"
+								value={provider.min_connections_alive ?? 0}
+								onChange={(e) =>
+									handleFieldChange(
+										provider.id,
+										"min_connections_alive",
+										Number.parseInt(e.target.value, 10) || 0,
+									)
+								}
+								min={0}
+								max={provider.max_connections}
+							/>
+						</div>
+						<div className="flex min-w-0 items-center gap-3">
 							<span className="min-w-[88px] font-black text-[10px] text-base-content/50 uppercase tracking-widest">
 								Latency
 							</span>

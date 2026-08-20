@@ -121,6 +121,7 @@ type ProviderAPIResponse struct {
 	Port                     int        `json:"port"`
 	Username                 string     `json:"username"`
 	MaxConnections           int        `json:"max_connections"`
+	MinConnectionsAlive      int        `json:"min_connections_alive,omitempty"`
 	TLS                      bool       `json:"tls"`
 	InsecureTLS              bool       `json:"insecure_tls"`
 	ProxyURL                 string     `json:"proxy_url,omitempty"`
@@ -248,15 +249,15 @@ type StreamScoringAPIResponse struct {
 
 // StremioAPIResponse sanitizes Stremio config for API responses
 type StremioAPIResponse struct {
-	Enabled               bool                        `json:"enabled"`
-	AddonName             string                      `json:"addon_name,omitempty"`
-	AddonDescription      string                      `json:"addon_description,omitempty"`
-	DirectStream          *bool                       `json:"direct_stream,omitempty"`
-	ShowCachedIndicator   *bool                       `json:"show_cached_indicator,omitempty"`
-	FallbackTimeoutMs     int                         `json:"fallback_timeout_ms,omitempty"`
-	MaxRetries            int                         `json:"max_retries,omitempty"`
-	StreamTTLSeconds      int                         `json:"stream_ttl_seconds,omitempty"`
-	NzbTTLHours           int                         `json:"nzb_ttl_hours"`
+	Enabled             bool   `json:"enabled"`
+	AddonName           string `json:"addon_name,omitempty"`
+	AddonDescription    string `json:"addon_description,omitempty"`
+	DirectStream        *bool  `json:"direct_stream,omitempty"`
+	ShowCachedIndicator *bool  `json:"show_cached_indicator,omitempty"`
+	FallbackTimeoutMs   int    `json:"fallback_timeout_ms,omitempty"`
+	MaxRetries          int    `json:"max_retries,omitempty"`
+	StreamTTLSeconds    int    `json:"stream_ttl_seconds,omitempty"`
+	NzbTTLHours         int    `json:"nzb_ttl_hours"`
 	// No omitempty: an explicit 0 must survive the round-trip, otherwise saving the
 	// config would silently restore the defaults.
 	FailedReleaseTTLHours int                        `json:"failed_release_ttl_hours"`
@@ -304,6 +305,7 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 			Port:                     p.Port,
 			Username:                 p.Username,
 			MaxConnections:           p.MaxConnections,
+			MinConnectionsAlive:      p.MinConnectionsAlive,
 			TLS:                      p.TLS,
 			InsecureTLS:              p.InsecureTLS,
 			ProxyURL:                 p.ProxyURL,
@@ -1105,32 +1107,34 @@ type ProviderTestRequest struct {
 
 // ProviderCreateRequest represents a request to create a new provider
 type ProviderCreateRequest struct {
-	Host             string `json:"host"`
-	Port             int    `json:"port"`
-	Username         string `json:"username"`
-	Password         string `json:"password"`
-	MaxConnections   int    `json:"max_connections"`
-	TLS              bool   `json:"tls"`
-	InsecureTLS      bool   `json:"insecure_tls"`
-	ProxyURL         string `json:"proxy_url,omitempty"`
-	Enabled          bool   `json:"enabled"`
-	IsBackupProvider bool   `json:"is_backup_provider"`
-	StorageGroup     string `json:"storage_group,omitempty"`
+	Host                string `json:"host"`
+	Port                int    `json:"port"`
+	Username            string `json:"username"`
+	Password            string `json:"password"`
+	MaxConnections      int    `json:"max_connections"`
+	MinConnectionsAlive int    `json:"min_connections_alive,omitempty"`
+	TLS                 bool   `json:"tls"`
+	InsecureTLS         bool   `json:"insecure_tls"`
+	ProxyURL            string `json:"proxy_url,omitempty"`
+	Enabled             bool   `json:"enabled"`
+	IsBackupProvider    bool   `json:"is_backup_provider"`
+	StorageGroup        string `json:"storage_group,omitempty"`
 }
 
 // ProviderUpdateRequest represents a request to update an existing provider
 type ProviderUpdateRequest struct {
-	Host             *string `json:"host,omitempty"`
-	Port             *int    `json:"port,omitempty"`
-	Username         *string `json:"username,omitempty"`
-	Password         *string `json:"password,omitempty"`
-	MaxConnections   *int    `json:"max_connections,omitempty"`
-	TLS              *bool   `json:"tls,omitempty"`
-	InsecureTLS      *bool   `json:"insecure_tls,omitempty"`
-	ProxyURL         *string `json:"proxy_url,omitempty"`
-	Enabled          *bool   `json:"enabled,omitempty"`
-	IsBackupProvider *bool   `json:"is_backup_provider,omitempty"`
-	StorageGroup     *string `json:"storage_group,omitempty"`
+	Host                *string `json:"host,omitempty"`
+	Port                *int    `json:"port,omitempty"`
+	Username            *string `json:"username,omitempty"`
+	Password            *string `json:"password,omitempty"`
+	MaxConnections      *int    `json:"max_connections,omitempty"`
+	MinConnectionsAlive *int    `json:"min_connections_alive,omitempty"`
+	TLS                 *bool   `json:"tls,omitempty"`
+	InsecureTLS         *bool   `json:"insecure_tls,omitempty"`
+	ProxyURL            *string `json:"proxy_url,omitempty"`
+	Enabled             *bool   `json:"enabled,omitempty"`
+	IsBackupProvider    *bool   `json:"is_backup_provider,omitempty"`
+	StorageGroup        *string `json:"storage_group,omitempty"`
 }
 
 // ProviderReorderRequest represents a request to reorder providers
