@@ -16,6 +16,8 @@ import type {
 	ImportStatusResponse,
 	LibrarySyncStatus,
 	ManualScanRequest,
+	MetadataMigrationResult,
+	MetadataMigrationStatus,
 	NzbdavMigrateSymlinksRequest,
 	NzbdavMigrateSymlinksResponse,
 	PoolMetrics,
@@ -503,6 +505,28 @@ class APIClient {
 
 	async cancelLibrarySync() {
 		return this.request<{ message: string }>("/health/library-sync/cancel", {
+			method: "POST",
+		});
+	}
+
+	async getMetadataMigrationStatus() {
+		return this.request<MetadataMigrationStatus>("/metadata/migration/status");
+	}
+
+	async dryRunMetadataMigration() {
+		return this.request<MetadataMigrationResult>("/metadata/migration/dry-run", {
+			method: "POST",
+		});
+	}
+
+	async startMetadataMigration() {
+		return this.request<{ message: string }>("/metadata/migration/start", {
+			method: "POST",
+		});
+	}
+
+	async cancelMetadataMigration() {
+		return this.request<{ message: string }>("/metadata/migration/cancel", {
 			method: "POST",
 		});
 	}
