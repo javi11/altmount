@@ -14,27 +14,27 @@ import (
 
 // SearchParams contains the query parameters for a Stremio stream search.
 type SearchParams struct {
-	Type          string // "movie" or "series"
-	IMDBID        string // "tt1234567"
-	Title         string // "Arcane"
-	Season        int    // 1
-	Episode       int    // 1
-	TVDBID        string // optional
-	TimeoutMS     int    // e.g. 3500
-	CustomUA      string // optional
+	Type      string // "movie" or "series"
+	IMDBID    string // "tt1234567"
+	Title     string // "Arcane"
+	Season    int    // 1
+	Episode   int    // 1
+	TVDBID    string // optional
+	TimeoutMS int    // e.g. 3500
+	CustomUA  string // optional
 }
 
 // CoordinatorConfig defines the search provider configuration.
 type CoordinatorConfig struct {
-	Provider        string                 `yaml:"provider" mapstructure:"provider" json:"provider"` // "prowlarr", "newsnab", "both"
-	UserAgentMode   string                 `yaml:"user_agent_mode" mapstructure:"user_agent_mode" json:"user_agent_mode"` // "auto", "custom"
-	CustomUserAgent string                 `yaml:"custom_user_agent" mapstructure:"custom_user_agent" json:"custom_user_agent"`
-	ProwlarrHost    string                 `yaml:"prowlarr_host" mapstructure:"prowlarr_host" json:"prowlarr_host"`
-	ProwlarrKey     string                 `yaml:"prowlarr_key" mapstructure:"prowlarr_key" json:"prowlarr_key"`
-	ProwlarrCats    []int                  `yaml:"prowlarr_categories" mapstructure:"prowlarr_categories" json:"prowlarr_categories"`
-	ProwlarrIdxs    []int                  `yaml:"prowlarr_indexers" mapstructure:"prowlarr_indexers" json:"prowlarr_indexers"`
+	Provider        string                  `yaml:"provider" mapstructure:"provider" json:"provider"`                      // "prowlarr", "newsnab", "both"
+	UserAgentMode   string                  `yaml:"user_agent_mode" mapstructure:"user_agent_mode" json:"user_agent_mode"` // "auto", "custom"
+	CustomUserAgent string                  `yaml:"custom_user_agent" mapstructure:"custom_user_agent" json:"custom_user_agent"`
+	ProwlarrHost    string                  `yaml:"prowlarr_host" mapstructure:"prowlarr_host" json:"prowlarr_host"`
+	ProwlarrKey     string                  `yaml:"prowlarr_key" mapstructure:"prowlarr_key" json:"prowlarr_key"`
+	ProwlarrCats    []int                   `yaml:"prowlarr_categories" mapstructure:"prowlarr_categories" json:"prowlarr_categories"`
+	ProwlarrIdxs    []int                   `yaml:"prowlarr_indexers" mapstructure:"prowlarr_indexers" json:"prowlarr_indexers"`
 	NewsnabIndexers []newsnab.IndexerConfig `yaml:"newsnab_indexers" mapstructure:"newsnab_indexers" json:"newsnab_indexers"`
-	Scoring         StreamScoringConfig    `yaml:"scoring" mapstructure:"scoring" json:"scoring"`
+	Scoring         StreamScoringConfig     `yaml:"scoring" mapstructure:"scoring" json:"scoring"`
 }
 
 // SearchCoordinator coordinates multi-provider indexer searches and ranking.
@@ -94,9 +94,9 @@ func (sc *SearchCoordinator) Search(ctx context.Context, params SearchParams) ([
 	}
 
 	var (
-		wg            sync.WaitGroup
-		mu            sync.Mutex
-		aggregated    []SearchResult
+		wg             sync.WaitGroup
+		mu             sync.Mutex
+		aggregated     []SearchResult
 		indexerWeights = make(map[string]int)
 	)
 
@@ -140,6 +140,8 @@ func (sc *SearchCoordinator) Search(ctx context.Context, params SearchParams) ([
 						PublishDate: r.PublishDate,
 						Indexer:     r.Indexer,
 						IndexerID:   fmt.Sprintf("%d", r.IndexerID),
+						Source:      "prowlarr",
+						GUID:        r.GUID,
 					})
 				}
 				mu.Unlock()
@@ -180,6 +182,7 @@ func (sc *SearchCoordinator) Search(ctx context.Context, params SearchParams) ([
 							Indexer:     r.Indexer,
 							IndexerID:   r.IndexerID,
 							GUID:        r.GUID,
+							Source:      "newsnab",
 						})
 					}
 					mu.Unlock()
@@ -193,7 +196,7 @@ func (sc *SearchCoordinator) Search(ctx context.Context, params SearchParams) ([
 	// Deduplicate aggregated items by DownloadURL / Title and validate against requested media
 	uniqueResults := make([]SearchResult, 0, len(aggregated))
 	seenURLs := make(map[string]struct{})
-	seenTitles := make(map[string]struct{})
+	seenReleases := make(map[string]struct{})
 
 	for _, res := range aggregated {
 		// Validate series / movie release matches the requested media (1:1 Sonarr/Radarr/Prowlarr release validation)
@@ -213,11 +216,11 @@ func (sc *SearchCoordinator) Search(ctx context.Context, params SearchParams) ([
 			}
 			seenURLs[res.DownloadURL] = struct{}{}
 		}
-		titleLower := strings.ToLower(res.Title)
-		if _, exists := seenTitles[titleLower]; exists {
+		identity := res.Source + "|" + res.IndexerID + "|" + res.GUID + "|" + res.DownloadURL
+		if _, exists := seenReleases[identity]; exists {
 			continue
 		}
-		seenTitles[titleLower] = struct{}{}
+		seenReleases[identity] = struct{}{}
 
 		uniqueResults = append(uniqueResults, res)
 	}

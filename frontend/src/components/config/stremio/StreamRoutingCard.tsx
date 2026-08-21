@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
 import { Database, Eye, Globe, Radio, Rocket, ShieldCheck, Zap } from "lucide-react";
+import { useEffect, useState } from "react";
 import type { StremioConfig } from "../../../types/config";
 
 interface StreamRoutingCardProps {
@@ -125,7 +125,11 @@ export function StreamRoutingCard({
 								<span className="font-semibold text-sm">Reuse Library Releases</span>
 							</div>
 							<p className="mt-1 text-base-content/60 text-xs">
-								Matches Stremio against {libraryCount ? `all ${libraryCount.toLocaleString()} files` : "all completed files"} in your library (Sonarr, Radarr, SABnzbd) for instant 0s playback.
+								Matches Stremio against{" "}
+								{libraryCount
+									? `all ${libraryCount.toLocaleString()} files`
+									: "all completed files"}{" "}
+								in your library (Sonarr, Radarr, SABnzbd) for instant 0s playback.
 							</p>
 						</div>
 						<input

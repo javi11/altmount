@@ -699,6 +699,8 @@ export interface TrashCustomFormat {
 	score: number;
 	enabled: boolean;
 	isCustom: boolean;
+	pattern_type?: "regex" | "token";
+	is_custom?: boolean;
 	invert?: boolean;
 }
 

@@ -131,14 +131,40 @@ func (r *Repository) AddToQueue(ctx context.Context, item *ImportQueueItem) erro
 			return fmt.Errorf("failed to add to queue: %w", err)
 		}
 		item.ID, err = result.LastInsertId()
-		if err != nil {
-			return fmt.Errorf("failed to get last insert ID: %w", err)
+		if err != nil || item.ID == 0 {
+			// SQLite returns no useful insert ID for an UPSERT that updates an
+			// existing row. Resolve the exact row instead of attaching a zero or
+			// unrelated ID to the caller's item.
+			existing, lookupErr := r.getQueueItemByNzbPath(ctx, item.NzbPath)
+			if lookupErr != nil || existing == nil {
+				return fmt.Errorf("failed to resolve queue item after upsert: %w", lookupErr)
+			}
+			item.ID = existing.ID
 		}
 	}
 
 	item.CreatedAt = time.Now()
 	item.UpdatedAt = time.Now()
 	return nil
+}
+
+func (r *Repository) getQueueItemByNzbPath(ctx context.Context, nzbPath string) (*ImportQueueItem, error) {
+	query := `SELECT id, download_id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
+		started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path, target_path, indexer
+		FROM import_queue WHERE nzb_path = ? LIMIT 1`
+	var item ImportQueueItem
+	err := r.db.QueryRowContext(ctx, query, nzbPath).Scan(
+		&item.ID, &item.DownloadID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
+		&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt, &item.RetryCount, &item.MaxRetries,
+		&item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath, &item.TargetPath, &item.Indexer,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &item, nil
 }
 
 // ClaimNextQueueItem atomically claims and returns the next available queue item

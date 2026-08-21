@@ -445,7 +445,14 @@ func (s *Server) buildStremioStreams(ctx context.Context, item *database.ImportQ
 
 	// If the storage path already points to a media file, return it directly.
 	if isMediaExtension(filepath.Ext(storagePath)) {
-		if selector != nil && !selector.matches(filepath.Base(storagePath)) {
+		baseName := filepath.Base(storagePath)
+		match := selector == nil || selector.matches(baseName)
+		if !match && selector != nil && !selector.hasConflictingMarker(baseName) {
+			if selector.matches(nzbName) || (item.NzbPath != "" && selector.matches(item.NzbPath)) || (item.RelativePath != nil && selector.matches(*item.RelativePath)) {
+				match = true
+			}
+		}
+		if !match {
 			return []StremioStream{}, nil
 		}
 		return []StremioStream{stremioStreamFromPath(storagePath, baseURL, downloadKey)}, nil
@@ -471,7 +478,13 @@ func (s *Server) buildStremioStreams(ctx context.Context, item *database.ImportQ
 
 	streams := make([]StremioStream, 0, len(files))
 	for _, name := range files {
-		if selector != nil && !selector.matches(name) {
+		match := selector == nil || selector.matches(name)
+		if !match && selector != nil && len(files) == 1 && !selector.hasConflictingMarker(name) {
+			if selector.matches(nzbName) || (item.NzbPath != "" && selector.matches(item.NzbPath)) || (item.RelativePath != nil && selector.matches(*item.RelativePath)) || countDistinctEpisodes(files) <= 1 {
+				match = true
+			}
+		}
+		if !match {
 			continue
 		}
 		virtualPath := filepath.ToSlash(filepath.Join(storagePath, filepath.FromSlash(name)))
@@ -755,6 +768,34 @@ func (s *stremioEpisodeSelector) matches(filename string) bool {
 	}
 	for _, m := range stremioEpisodeContextPattern.FindAllStringSubmatch(filename, -1) {
 		if v, err := strconv.Atoi(m[1]); err == nil && v == s.Episode {
+			return true
+		}
+	}
+	return false
+}
+
+// hasConflictingMarker checks if a filename contains an explicit season/episode tag
+// that conflicts with the requested season or episode.
+func (s *stremioEpisodeSelector) hasConflictingMarker(filename string) bool {
+	if s == nil || s.Season <= 0 || s.Episode <= 0 {
+		return false
+	}
+	for _, match := range stremioSeasonEpisodePattern.FindAllStringSubmatch(filename, -1) {
+		season, err := strconv.Atoi(match[1])
+		if err == nil && season != s.Season {
+			return true
+		}
+		for _, episodeMatch := range stremioEpisodeOnlyPattern.FindAllStringSubmatch(match[2], -1) {
+			episode, err := strconv.Atoi(episodeMatch[1])
+			if err == nil && episode != s.Episode {
+				return true
+			}
+		}
+	}
+	for _, match := range stremioXEpisodePattern.FindAllStringSubmatch(filename, -1) {
+		season, seasonErr := strconv.Atoi(match[1])
+		episode, episodeErr := strconv.Atoi(match[2])
+		if seasonErr == nil && episodeErr == nil && (season != s.Season || episode != s.Episode) {
 			return true
 		}
 	}

@@ -40,6 +40,7 @@ type SearchResult struct {
 	Indexer     string
 	IndexerID   string
 	GUID        string
+	Source      string
 }
 
 // ScoredRelease represents a ranked release with evaluation metadata.
@@ -53,8 +54,8 @@ type ScoredRelease struct {
 }
 
 var (
-	regexCache   = sync.Map{}
-	languageMap  = map[string][]string{
+	regexCache  = sync.Map{}
+	languageMap = map[string][]string{
 		"English":        {"english", "eng", "\\ben\\b"},
 		"French":         {"french", "vff", "vfq", "truefrench", "\\bfr\\b", "fra"},
 		"Spanish":        {"spanish", "castellano", "latino", "esp", "spa"},
@@ -174,8 +175,28 @@ func EvaluateRelease(title string, cfg *StreamScoringConfig) ScoredRelease {
 		}
 	}
 
-	// 4. TRaSH Custom Format Rules
 	score := 0
+	// Preferred languages are ordered by user preference. A match in the first
+	// position receives the largest bonus, while later entries still outrank an
+	// otherwise identical release without a preferred language.
+	for rank, preferred := range cfg.PreferredLanguages {
+		matchedPreferred := false
+		for _, detected := range res.MatchedLanguages {
+			if strings.EqualFold(preferred, detected) {
+				bonus := 5000 - rank*500
+				if bonus > 0 {
+					score += bonus
+				}
+				matchedPreferred = true
+				break
+			}
+		}
+		if matchedPreferred {
+			break
+		}
+	}
+
+	// 4. TRaSH Custom Format Rules
 	for _, format := range cfg.CustomFormats {
 		if !format.Enabled || strings.TrimSpace(format.Pattern) == "" {
 			continue

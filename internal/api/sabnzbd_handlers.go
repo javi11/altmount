@@ -410,7 +410,7 @@ func (s *Server) handleSABnzbdAddFile(c *fiber.Ctx) error {
 	if movie := c.FormValue("movie"); movie != "" {
 		metadata["movie_title"] = movie
 	}
-	
+
 	var metadataJSON *string
 	if len(metadata) > 0 {
 		if b, err := json.Marshal(metadata); err == nil {
@@ -1268,13 +1268,11 @@ func (s *Server) handleSABnzbdGetCats(c *fiber.Ctx) error {
 			}
 		}
 	}
-
-	// Ensure Default is present if not already added
-	defaultCatName := config.DefaultCategoryName
-	if !seen[strings.ToLower(defaultCatName)] {
-		seen[strings.ToLower(defaultCatName)] = true
-		categories = append(categories, defaultCatName)
+	if !seen[strings.ToLower(config.DefaultCategoryName)] {
+		categories = append(categories, config.DefaultCategoryName)
 	}
+	// Keep the implicit SABnzbd wildcard category separate from the configured
+	// human-readable Default entry; clients expect both representations.
 
 	return s.writeSABnzbdResponseFiber(c, SABnzbdCategoriesResponse{
 		Categories: categories,

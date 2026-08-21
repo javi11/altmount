@@ -358,15 +358,17 @@ export function getDefaultScoringConfig(
 
 export function hydrateScoringFromProwlarr(
 	scoring: StreamScoringConfig | undefined,
-	prowlarr: {
-		exclude_keywords?: string[];
-		preferred_languages?: string[];
-		custom_scores?: Record<string, number>;
-	} | undefined,
+	prowlarr:
+		| {
+				exclude_keywords?: string[];
+				preferred_languages?: string[];
+				custom_scores?: Record<string, number>;
+		  }
+		| undefined,
 ): StreamScoringConfig {
 	let baseScoring: StreamScoringConfig;
 
-	if (scoring && scoring.custom_formats && scoring.custom_formats.length > 0) {
+	if (scoring?.custom_formats && scoring.custom_formats.length > 0) {
 		baseScoring = JSON.parse(JSON.stringify(scoring));
 	} else {
 		baseScoring = getDefaultScoringConfig("trash_recommended");

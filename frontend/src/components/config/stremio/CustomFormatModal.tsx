@@ -195,7 +195,7 @@ export function CustomFormatModal({
 						<div className="flex items-center justify-between">
 							<legend className="fieldset-legend font-semibold text-xs">Score Points</legend>
 							<span
-								className={`badge font-bold font-mono text-xs whitespace-nowrap px-2.5 py-0.5 ${
+								className={`badge whitespace-nowrap px-2.5 py-0.5 font-bold font-mono text-xs ${
 									formData.score > 0
 										? "badge-success"
 										: formData.score < 0

@@ -194,7 +194,7 @@ export function ActivityHub() {
 														className={`h-8 w-8 shrink-0 ${isStalled ? "text-warning" : "text-primary/70"}`}
 													/>
 													{!isStalled && (
-														<span className="-bottom-0.5 -right-0.5 absolute flex h-2 w-2">
+														<span className="absolute -right-0.5 -bottom-0.5 flex h-2 w-2">
 															<span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-75" />
 															<span className="relative inline-flex h-2 w-2 rounded-full bg-success" />
 														</span>
@@ -301,7 +301,7 @@ export function ActivityHub() {
 														className={`h-8 w-8 shrink-0 ${isProcessing ? "text-secondary" : "text-base-content/20"}`}
 													/>
 													{isProcessing && (
-														<span className="-top-1 -right-1 absolute flex h-3 w-3">
+														<span className="absolute -top-1 -right-1 flex h-3 w-3">
 															<span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-secondary opacity-75" />
 															<span className="relative inline-flex h-3 w-3 rounded-full bg-secondary" />
 														</span>

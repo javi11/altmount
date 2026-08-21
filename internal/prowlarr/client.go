@@ -52,6 +52,8 @@ type NZBResult struct {
 	PublishDate time.Time
 	Indexer     string
 	IndexerID   int
+	Source      string
+	GUID        string
 }
 
 // Indexer describes a single Prowlarr indexer, used to let users pick which
@@ -324,6 +326,8 @@ func (c *Client) searchWithID(ctx context.Context, idField, idValue, searchType 
 			PublishDate: r.PublishDate,
 			Indexer:     r.Indexer,
 			IndexerID:   int(r.IndexerID),
+			Source:      "prowlarr",
+			GUID:        r.GUID,
 		})
 	}
 
@@ -341,8 +345,12 @@ func (c *Client) DownloadNZB(ctx context.Context, downloadURL string) ([]byte, e
 		return nil, fmt.Errorf("prowlarr: create download request: %w", err)
 	}
 	req.Header.Set("X-Api-Key", c.apiKey)
+	client := *c.http
+	client.CheckRedirect = func(req *http.Request, _ []*http.Request) error {
+		return fmt.Errorf("prowlarr: download redirect is not allowed")
+	}
 
-	resp, err := c.http.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("prowlarr: download request failed: %w", err)
 	}

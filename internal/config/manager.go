@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -1017,14 +1018,17 @@ func (c *Config) Validate() error {
 
 		// Validate categories if provided
 		categoryNames := make(map[string]bool)
-		for i, category := range c.SABnzbd.Categories {
+		for i := range c.SABnzbd.Categories {
+			category := &c.SABnzbd.Categories[i]
+			category.Name = strings.TrimSpace(category.Name)
 			if category.Name == "" {
 				return fmt.Errorf("sabnzbd category %d: name cannot be empty", i)
 			}
-			if categoryNames[category.Name] {
+			nameKey := strings.ToLower(category.Name)
+			if categoryNames[nameKey] {
 				return fmt.Errorf("sabnzbd category %d: duplicate category name '%s'", i, category.Name)
 			}
-			categoryNames[category.Name] = true
+			categoryNames[nameKey] = true
 		}
 
 		// Validate fallback configuration if host is provided
@@ -1037,6 +1041,24 @@ func (c *Config) Validate() error {
 			if c.SABnzbd.FallbackAPIKey == "" {
 				slog.Warn("SABnzbd fallback_host is set but fallback_api_key is empty")
 			}
+		}
+	}
+
+	for pattern := range c.Stremio.Prowlarr.CustomScores {
+		if _, err := regexp.Compile("(?i)" + pattern); err != nil {
+			return fmt.Errorf("stremio prowlarr custom_scores pattern %q is invalid: %w", pattern, err)
+		}
+	}
+	for i, format := range c.Stremio.Scoring.CustomFormats {
+		if format.Enabled && format.PatternType != "token" && strings.TrimSpace(format.Pattern) != "" {
+			if _, err := regexp.Compile(format.Pattern); err != nil {
+				return fmt.Errorf("stremio scoring custom_formats[%d] pattern is invalid: %w", i, err)
+			}
+		}
+	}
+	if strings.TrimSpace(c.Stremio.Scoring.ExcludeRegex) != "" {
+		if _, err := regexp.Compile(c.Stremio.Scoring.ExcludeRegex); err != nil {
+			return fmt.Errorf("stremio scoring exclude_regex is invalid: %w", err)
 		}
 	}
 
