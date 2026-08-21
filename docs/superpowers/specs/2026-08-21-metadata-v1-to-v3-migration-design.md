@@ -145,8 +145,9 @@ New `internal/api/metadata_migration_handlers.go`, routes alongside the library-
 ones:
 
 - `GET  /api/metadata/migration/status` → `{is_running, progress, last_result}`
-- `POST /api/metadata/migration/dry-run` → scans and converts *in memory*, writing
-  nothing to disk, so numbers are measured rather than estimated: legacy file count, group
+- `POST /api/metadata/migration/dry-run` → runs the real conversion against an
+  isolated temporary metadata root that is deleted afterwards, so nothing in the
+  library is touched and no refcounts move, so numbers are measured rather than estimated: legacy file count, group
   count, faithful-vs-synthesized split, current bytes, projected bytes, savings, and
   the files that would fail
 - `POST /api/metadata/migration/start`
