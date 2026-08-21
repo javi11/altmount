@@ -282,7 +282,8 @@ git commit -m "feat(config): add metadata.migration.default_group"
 - Produces:
   - `type LegacyMeta struct { MetaPath, VirtualPath string; SizeBytes int64; Meta *metapb.FileMetadata }`
   - `type LegacyGroup struct { Key string; Files []LegacyMeta }`
-  - `func (ms *MetadataService) ScanLegacyMetas() ([]LegacyGroup, error)`
+  - `func (ms *MetadataService) ScanLegacyMetas() ([]LegacyGroup, error)` — `LegacyMeta.Meta` is nil in the result
+  - `func (ms *MetadataService) LoadGroupMetas(g LegacyGroup) (LegacyGroup, error)` — returns a copy with `Meta` populated
 
 - [ ] **Step 1: Write the failing test**
 
@@ -340,7 +341,34 @@ func TestScanLegacyMetas_GroupsBySourceNzbPath(t *testing.T) {
 	dirKey := filepath.Join(root, "other")
 	require.Len(t, byKey[dirKey], 1, "empty source_nzb_path falls back to the parent directory")
 	assert.Positive(t, byKey[dirKey][0].SizeBytes)
-	require.Len(t, byKey[dirKey][0].Meta.SegmentData, 1)
+
+	// The scan must not retain full protos: that is the whole-library
+	// allocation pattern ReadFileMetadataLite was introduced to avoid.
+	for _, g := range groups {
+		for _, lm := range g.Files {
+			assert.Nil(t, lm.Meta, "scan must not retain segment data for %s", lm.VirtualPath)
+		}
+	}
+}
+
+func TestLoadGroupMetas_HydratesOneGroup(t *testing.T) {
+	root := t.TempDir()
+	ms := NewMetadataService(root)
+
+	writeLegacyMeta(t, ms, filepath.Join("movies", "A.mkv"), "/nzbs/rel.nzb", "a1@n", "a2@n")
+	writeLegacyMeta(t, ms, filepath.Join("movies", "B.mkv"), "/nzbs/rel.nzb", "b1@n")
+
+	groups, err := ms.ScanLegacyMetas()
+	require.NoError(t, err)
+	require.Len(t, groups, 1)
+
+	loaded, err := ms.LoadGroupMetas(groups[0])
+	require.NoError(t, err)
+	require.Len(t, loaded.Files, 2)
+	require.NotNil(t, loaded.Files[0].Meta)
+	assert.Len(t, loaded.Files[0].Meta.SegmentData, 2)
+	assert.Len(t, loaded.Files[1].Meta.SegmentData, 1)
+	assert.Equal(t, groups[0].Key, loaded.Key)
 }
 
 func TestScanLegacyMetas_SkipsV3Metas(t *testing.T) {
@@ -398,6 +426,12 @@ import (
 )
 
 // LegacyMeta is one v1 (inline-segment) metadata file discovered by a scan.
+//
+// Meta is deliberately nil after a scan: a legacy meta carries its segments
+// inline, so retaining every one of them across a whole-library walk is the
+// allocation pattern that ReadFileMetadataLite exists to avoid (see the 7.94 GB
+// spike documented at service.go:405). LoadGroupMetas fills it in for one
+// release at a time, just before that release is migrated.
 type LegacyMeta struct {
 	MetaPath    string
 	VirtualPath string
@@ -416,6 +450,10 @@ type LegacyGroup struct {
 // meta, grouped by release. The group key is source_nzb_path when set, and the
 // meta's parent directory otherwise. Unreadable files are skipped rather than
 // failing the whole scan: a migration should convert what it can.
+//
+// Each meta is read to obtain its group key and then released, so the walk
+// retains only paths and sizes — peak memory is one meta, not the library.
+// Call LoadGroupMetas to hydrate a single group before migrating it.
 func (ms *MetadataService) ScanLegacyMetas() ([]LegacyGroup, error) {
 	byKey := make(map[string][]LegacyMeta)
 
@@ -443,11 +481,11 @@ func (ms *MetadataService) ScanLegacyMetas() ([]LegacyGroup, error) {
 		if key == "" {
 			key = filepath.Dir(path)
 		}
+		// meta goes out of scope here on purpose — see the LegacyMeta doc.
 		byKey[key] = append(byKey[key], LegacyMeta{
 			MetaPath:    path,
 			VirtualPath: virtualPath,
 			SizeBytes:   int64(len(data)),
-			Meta:        meta,
 		})
 		return nil
 	})
@@ -463,18 +501,37 @@ func (ms *MetadataService) ScanLegacyMetas() ([]LegacyGroup, error) {
 	sort.Slice(groups, func(a, b int) bool { return groups[a].Key < groups[b].Key })
 	return groups, nil
 }
+
+// LoadGroupMetas returns a copy of g with every LegacyMeta.Meta populated.
+// Files that can no longer be read (deleted or migrated since the scan) are
+// dropped, so a stale scan degrades to a smaller group rather than an error.
+func (ms *MetadataService) LoadGroupMetas(g LegacyGroup) (LegacyGroup, error) {
+	loaded := LegacyGroup{Key: g.Key, Files: make([]LegacyMeta, 0, len(g.Files))}
+	for _, lm := range g.Files {
+		meta, err := ms.ReadFileMetadata(lm.VirtualPath)
+		if err != nil || meta == nil {
+			continue
+		}
+		lm.Meta = meta
+		loaded.Files = append(loaded.Files, lm)
+	}
+	if len(loaded.Files) == 0 {
+		return loaded, fmt.Errorf("no readable metadata left in group %q", g.Key)
+	}
+	return loaded, nil
+}
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `go test ./internal/metadata/ -run TestScanLegacyMetas -v`
-Expected: PASS (both subtests)
+Run: `go test ./internal/metadata/ -run 'TestScanLegacyMetas|TestLoadGroupMetas' -v`
+Expected: PASS (all three tests)
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add internal/metadata/migration_scan.go internal/metadata/migration_scan_test.go
-git commit -m "feat(metadata): scan and group legacy metas by release"
+git commit -m "feat(metadata): scan and group legacy metas without retaining segments"
 ```
 
 ---
@@ -935,7 +992,7 @@ This task carries the core invariant: after migration, `ReadFileMetadata` must r
 - Create: `internal/metadata/migration_convert_test.go`
 
 **Interfaces:**
-- Consumes: `buildGroupStore` (Task 5), `LegacyGroup`/`LegacyMeta` (Task 3), `MetadataService.Store()`, `MetadataService.WriteFileMetadataV3(ctx, virtualPath, metadata, index, storeRef)`.
+- Consumes: `buildGroupStore` (Task 5), `LegacyGroup`/`LegacyMeta`/`LoadGroupMetas` (Task 3), `MetadataService.Store()`, `MetadataService.WriteFileMetadataV3(ctx, virtualPath, metadata, index, storeRef)`.
 - Produces:
   - `type GroupResult struct { Key, StoreRef string; Faithful bool; FilesMigrated, FilesFailed int; BytesBefore, BytesAfter int64; Failures []string }`
   - `func (ms *MetadataService) MigrateGroup(ctx context.Context, g LegacyGroup, storeDir, defaultGroup string) (GroupResult, error)`
@@ -1251,10 +1308,25 @@ type GroupResult struct {
 // A per-file failure leaves that file as v1 and is recorded; the rest of the
 // group still migrates. If every file fails, the freshly written store is
 // removed so no orphan is left behind.
+//
+// The group's metas are loaded here rather than at scan time: legacy metas
+// carry their segments inline, so hydrating the whole library at once is the
+// allocation pattern documented at service.go:405.
 func (ms *MetadataService) MigrateGroup(ctx context.Context, g LegacyGroup, storeDir, defaultGroup string) (GroupResult, error) {
 	res := GroupResult{Key: g.Key}
 	for _, lm := range g.Files {
 		res.BytesBefore += lm.SizeBytes
+	}
+
+	// Hydrate this group's metas now and let them fall out of scope when the
+	// call returns, so peak memory is one release rather than the whole library.
+	// A group hydrated by the caller (tests, or a re-used group) is left alone.
+	if len(g.Files) > 0 && g.Files[0].Meta == nil {
+		loaded, err := ms.LoadGroupMetas(g)
+		if err != nil {
+			return res, err
+		}
+		g = loaded
 	}
 
 	store, index, faithful, err := buildGroupStore(g, defaultGroup)
