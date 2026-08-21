@@ -324,9 +324,18 @@ type DatabaseConfig struct {
 
 // MetadataConfig represents metadata filesystem configuration
 type MetadataConfig struct {
-	RootPath                 string               `yaml:"root_path" mapstructure:"root_path" json:"root_path"`
-	DeleteSourceNzbOnRemoval *bool                `yaml:"delete_source_nzb_on_removal" mapstructure:"delete_source_nzb_on_removal" json:"delete_source_nzb_on_removal,omitempty"`
-	Backup                   MetadataBackupConfig `yaml:"backup" mapstructure:"backup" json:"backup"`
+	RootPath                 string                  `yaml:"root_path" mapstructure:"root_path" json:"root_path"`
+	DeleteSourceNzbOnRemoval *bool                   `yaml:"delete_source_nzb_on_removal" mapstructure:"delete_source_nzb_on_removal" json:"delete_source_nzb_on_removal,omitempty"`
+	Backup                   MetadataBackupConfig    `yaml:"backup" mapstructure:"backup" json:"backup"`
+	Migration                MetadataMigrationConfig `yaml:"migration" mapstructure:"migration" json:"migration"`
+}
+
+// MetadataMigrationConfig configures the legacy-metadata → v3 migration.
+type MetadataMigrationConfig struct {
+	// DefaultGroup is the newsgroup written into synthesized NzbStore entries.
+	// Legacy metas do not retain the original groups, and nzb.BuildNZB renders an
+	// empty <groups> element without this, which most NZB clients reject.
+	DefaultGroup string `yaml:"default_group" mapstructure:"default_group" json:"default_group"`
 }
 
 // ShouldDeleteSourceNzb returns whether source NZB files should be deleted on removal.
@@ -1688,6 +1697,9 @@ func DefaultConfig(configDir ...string) *Config {
 				Schedule:    "0 3 * * *", // daily at 3 AM UTC
 				KeepBackups: 10,
 				Path:        backupPath,
+			},
+			Migration: MetadataMigrationConfig{
+				DefaultGroup: "alt.binaries.misc",
 			},
 		},
 		Streaming: StreamingConfig{
