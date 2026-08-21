@@ -11,6 +11,7 @@ import {
 	type ScheduleType,
 } from "../../utils/cronSchedule";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
+import { MetadataMigrationCard } from "./MetadataMigrationCard";
 
 interface MetadataConfigSectionProps {
 	config: ConfigResponse;
@@ -348,6 +349,8 @@ export function MetadataConfigSection({
 					</div>
 				</div>
 			</div>
+
+			<MetadataMigrationCard />
 
 			{/* Save Button */}
 			{!isReadOnly && (
