@@ -4,10 +4,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	"github.com/javi11/nzbparser"
 )
 
 // allSegmentLists returns every inline SegmentData slice a metadata carries:
@@ -117,4 +119,55 @@ func sanitizeStoreBase(groupKey string) string {
 		out = "release"
 	}
 	return out
+}
+
+// buildGroupStore returns the store and flat index for a release group. It
+// prefers a faithful store parsed from the surviving source .nzb (real
+// subjects, posters, groups and segment numbers) and falls back to synthesis
+// from the inline segments. The bool reports which path was taken.
+func buildGroupStore(g LegacyGroup, defaultGroup string) (*metapb.NzbStore, map[string]int64, bool, error) {
+	if store, index, ok := tryFaithfulStore(g); ok {
+		return store, index, true, nil
+	}
+	store, index, err := synthesizeStore(g.Files, defaultGroup)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	return store, index, false, nil
+}
+
+// tryFaithfulStore parses the group's source .nzb, if it still exists, and
+// returns the resulting store only when it covers every segment referenced by
+// every meta in the group. A partial or mismatched NZB (edited, replaced, or
+// belonging to a different release) is rejected outright: half a faithful index
+// is worse than an honest synthesized one.
+func tryFaithfulStore(g LegacyGroup) (*metapb.NzbStore, map[string]int64, bool) {
+	if g.Key == "" {
+		return nil, nil, false
+	}
+	f, err := os.Open(g.Key)
+	if err != nil {
+		return nil, nil, false
+	}
+	defer func() { _ = f.Close() }()
+
+	parsed, err := nzbparser.Parse(f)
+	if err != nil || parsed == nil || len(parsed.Files) == 0 {
+		return nil, nil, false
+	}
+	store, index := BuildStore(parsed)
+
+	for _, lm := range g.Files {
+		if expandErr := ExpandSharedOuterSources(lm.Meta); expandErr != nil {
+			return nil, nil, false
+		}
+		for _, segs := range allSegmentLists(lm.Meta) {
+			for _, s := range segs {
+				if _, ok := index[s.Id]; !ok {
+					return nil, nil, false
+				}
+			}
+		}
+	}
+	return store, index, true
 }
