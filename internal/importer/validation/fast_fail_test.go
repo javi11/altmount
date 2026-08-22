@@ -47,6 +47,30 @@ func (m fastFailPoolManager) ImportConnCapacity() int                   { return
 func (m fastFailPoolManager) SetStreamSource(pool.StreamActivitySource) {}
 func (m fastFailPoolManager) NotifyStreamChange()                       {}
 
+func TestFullValidationReceiptCoversExactSegmentIDs(t *testing.T) {
+	receipt := NewFullValidationReceipt([]string{"a", "b", "", "a"})
+
+	covered := &metapb.FileMetadata{SegmentData: []*metapb.SegmentData{
+		{Id: "a"},
+		{Id: "b"},
+	}}
+	changed := &metapb.FileMetadata{SegmentData: []*metapb.SegmentData{
+		{Id: "a"},
+		{Id: "c"},
+	}}
+	empty := &metapb.FileMetadata{}
+
+	if !receipt.Covers(covered) {
+		t.Fatal("receipt should cover metadata with the exact validated segment IDs")
+	}
+	if receipt.Covers(changed) {
+		t.Fatal("receipt must not cover metadata with an unvalidated segment ID")
+	}
+	if receipt.Covers(empty) {
+		t.Fatal("receipt must not cover metadata without segments")
+	}
+}
+
 func TestFastFailReleaseProbeUsesSegmentSamplePercentage(t *testing.T) {
 	client := fakepool.New()
 	files := []FastFailFile{

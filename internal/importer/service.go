@@ -26,6 +26,7 @@ import (
 	"github.com/javi11/altmount/internal/importer/queue"
 	"github.com/javi11/altmount/internal/importer/scanner"
 	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
+	"github.com/javi11/altmount/internal/importer/validation"
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/nzbfile"
 	"github.com/javi11/altmount/internal/pool"
@@ -38,7 +39,13 @@ import (
 
 // ServiceConfig holds configuration for the NZB import service
 type ServiceConfig struct {
-	Workers int // Number of parallel queue workers (default: 2)
+	Workers            int // Number of parallel queue workers (default: 2)
+	CalculateNextCheck func(releaseDate, lastCheck time.Time) time.Time
+}
+
+type processArtifact struct {
+	paths   []string
+	receipt *validation.FullValidationReceipt
 }
 
 // Type aliases from scanner package for backward compatibility
@@ -205,9 +212,8 @@ type Service struct {
 	// categoryPathCache memoizes buildCategoryPath results; cleared on config reload.
 	categoryPathCache sync.Map
 
-	// writtenPathsCache stores the metadata paths written during ProcessItem so that
-	// HandleFailure can clean them up without changing the ItemProcessor interface.
-	// Keys are item.ID (int64), values are []string.
+	// writtenPathsCache stores the per-item metadata paths and one-shot validation
+	// receipt produced during ProcessItem so post-processing can consume them.
 	writtenPathsCache sync.Map
 	grabbedIndexers   sync.Map
 }
@@ -234,8 +240,9 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 		ConfigGetter:    configGetter,
 		MetadataService: metadataService,
 		RcloneClient:    rcloneClient,
-		HealthRepo:      healthRepo,
-		UserRepo:        userRepo,
+		HealthRepo:         healthRepo,
+		CalculateNextCheck: config.CalculateNextCheck,
+		UserRepo:           userRepo,
 	})
 
 	service := &Service{
@@ -353,27 +360,27 @@ func (s *Service) Start(ctx context.Context) error {
 
 // ProcessItem implements queue.ItemProcessor - processes a single queue item
 func (s *Service) ProcessItem(ctx context.Context, item *database.ImportQueueItem) (string, error) {
-	resultPath, writtenPaths, err := s.processNzbItem(ctx, item)
-	// Always store written paths so HandleFailure can clean them up on error.
-	s.writtenPathsCache.Store(item.ID, writtenPaths)
+	resultPath, paths, receipt, err := s.processNzbItem(ctx, item)
+	// Always store the artifact so HandleFailure can clean paths on error.
+	s.writtenPathsCache.Store(item.ID, processArtifact{paths: paths, receipt: receipt})
 	return resultPath, err
 }
 
 // HandleSuccess implements queue.ItemProcessor - handles successful processing
 func (s *Service) HandleSuccess(ctx context.Context, item *database.ImportQueueItem, resultingPath string) error {
-	// The written virtual paths are carried over from ProcessItem so multi-file
-	// imports (season packs) can schedule a per-episode post-import health check.
-	var writtenPaths []string
-	if paths, ok := s.writtenPathsCache.LoadAndDelete(item.ID); ok {
-		writtenPaths, _ = paths.([]string)
+	artifact := processArtifact{}
+	if stored, ok := s.writtenPathsCache.LoadAndDelete(item.ID); ok {
+		artifact, _ = stored.(processArtifact)
 	}
-	return s.handleProcessingSuccess(ctx, item, resultingPath, writtenPaths)
+	return s.handleProcessingSuccess(ctx, item, resultingPath, artifact.paths, artifact.receipt)
 }
 
 // HandleFailure implements queue.ItemProcessor - handles failed processing
 func (s *Service) HandleFailure(ctx context.Context, item *database.ImportQueueItem, err error) {
-	if paths, ok := s.writtenPathsCache.LoadAndDelete(item.ID); ok {
-		s.cleanupWrittenPaths(ctx, item.ID, paths.([]string))
+	if stored, ok := s.writtenPathsCache.LoadAndDelete(item.ID); ok {
+		if artifact, valid := stored.(processArtifact); valid {
+			s.cleanupWrittenPaths(ctx, item.ID, artifact.paths)
+		}
 	}
 	s.handleProcessingFailure(ctx, item, err)
 }
@@ -819,7 +826,7 @@ func (s *Service) FindAndUpdatePendingUpload(ctx context.Context, filename strin
 }
 
 // processNzbItem processes the NZB file for a queue item
-func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueueItem) (string, []string, error) {
+func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueueItem) (string, []string, *validation.FullValidationReceipt, error) {
 	// Determine the base path
 	basePath := ""
 	if item.RelativePath != nil {
@@ -831,7 +838,7 @@ func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueue
 
 	// Ensure NZB is in a persistent location to prevent data loss if /tmp is cleaned
 	if err := s.ensurePersistentNzb(ctx, item); err != nil {
-		return "", nil, fmt.Errorf("failed to ensure persistent NZB: %w", err)
+		return "", nil, nil, fmt.Errorf("failed to ensure persistent NZB: %w", err)
 	}
 
 	// Determine if allowed extensions override is needed
@@ -1214,7 +1221,7 @@ func (s *Service) resolveIndexerFromArrs(ctx context.Context, downloadID string)
 // handleProcessingSuccess handles all steps after successful NZB processing.
 // writtenPaths lists every virtual file the import wrote (may be nil for legacy
 // callers); multi-file imports use it to health-check each file individually.
-func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.ImportQueueItem, resultingPath string, writtenPaths []string) error {
+func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.ImportQueueItem, resultingPath string, writtenPaths []string, receipt *validation.FullValidationReceipt) error {
 	// Log persistent indexer statistic
 	indexerName := database.IndexerUnknown
 	if item.Indexer != nil && *item.Indexer != "" {
@@ -1261,7 +1268,7 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 
 	// Delegate all post-processing to the coordinator
 	// This handles: VFS notification, symlinks, ID links, STRM files, health checks, ARR notifications
-	result, err := s.postProcessor.HandleSuccess(ctx, item, resultingPath, writtenPaths)
+	result, err := s.postProcessor.HandleSuccess(ctx, item, resultingPath, writtenPaths, receipt)
 	if err != nil {
 		s.log.ErrorContext(ctx, "Post-processing failed", "queue_id", item.ID, "error", err)
 		return err
@@ -1620,7 +1627,7 @@ func (s *Service) ProcessItemInBackground(ctx context.Context, itemID int64) {
 		}()
 
 		// Process the NZB file using cancellable context
-		resultingPath, writtenPaths, processingErr := s.processNzbItem(itemCtx, item)
+		resultingPath, writtenPaths, receipt, processingErr := s.processNzbItem(itemCtx, item)
 
 		// Update queue database with results
 		if processingErr != nil {
@@ -1629,7 +1636,7 @@ func (s *Service) ProcessItemInBackground(ctx context.Context, itemID int64) {
 			s.handleProcessingFailure(ctx, item, processingErr)
 		} else {
 			// Handle success (storage path, VFS notification, symlinks, status update)
-			s.handleProcessingSuccess(ctx, item, resultingPath, writtenPaths)
+			s.handleProcessingSuccess(ctx, item, resultingPath, writtenPaths, receipt)
 		}
 	}()
 }
@@ -1786,7 +1793,7 @@ func (s *Service) RegenerateMetadata(ctx context.Context, mountRelativePath stri
 
 	// Re-process the NZB file. We use a dummy queue ID.
 	// This will overwrite the existing .meta file.
-	_, _, err = s.processor.ProcessNzbFile(ctx, foundNzbPath, "", 0, nil, &virtualDir, nil, nil, nil, nil)
+	_, _, _, err = s.processor.ProcessNzbFile(ctx, foundNzbPath, "", 0, nil, &virtualDir, nil, nil, nil, nil)
 	if err != nil {
 		return fmt.Errorf("failed to re-process NZB: %w", err)
 	}

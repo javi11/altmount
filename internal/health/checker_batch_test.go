@@ -5,7 +5,11 @@ import (
 	"fmt"
 	"runtime"
 	"testing"
+	"time"
 
+	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/importer/postprocessor"
+	"github.com/javi11/altmount/internal/importer/validation"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/testsupport/fakepool"
@@ -69,6 +73,91 @@ func writeHealthyFile(t *testing.T, env *repairTestEnv, filePath string) string 
 	)
 	require.NoError(t, env.metadataService.WriteFileMetadata(filePath, meta))
 	return seg.Id
+}
+
+func TestFullImportValidationSkipsImmediateHealthStat(t *testing.T) {
+	client := fakepool.New()
+	env := newBatchTestEnv(t, t.TempDir(), client)
+	ctx := context.Background()
+	filePath := "complete/import.mkv"
+	segmentID := writeHealthyFile(t, env, filePath)
+
+	missing, err := validation.FastFailReleaseProbe(ctx, []validation.FastFailFile{{
+		Filename: filePath,
+		Segments: []*metapb.SegmentData{{Id: segmentID}},
+	}}, &fakeClientPoolManager{client: client}, 100, 1, time.Second)
+	require.NoError(t, err)
+	assert.False(t, missing)
+
+	coordinator := postprocessor.NewCoordinator(postprocessor.Config{
+		ConfigGetter:       env.hw.configGetter,
+		MetadataService:    env.metadataService,
+		HealthRepo:         env.healthRepo,
+		CalculateNextCheck: CalculateNextCheck,
+	})
+	receipt := validation.NewFullValidationReceipt([]string{segmentID})
+	require.NoError(t, coordinator.ScheduleHealthCheck(ctx, nil, filePath, []string{filePath}, receipt))
+	require.NoError(t, env.hw.runHealthCheckCycle(ctx))
+	assert.Equal(t, int64(1), client.StatCalls(), "the immediate health cycle must not repeat the import STAT")
+
+	health, err := env.healthRepo.GetFileHealth(ctx, filePath)
+	require.NoError(t, err)
+	require.NotNil(t, health)
+	assert.Equal(t, database.HealthStatusHealthy, health.Status)
+
+	var scheduledAt time.Time
+	require.NoError(t, env.db.QueryRow(
+		"SELECT scheduled_check_at FROM file_health WHERE file_path = ?", filePath,
+	).Scan(&scheduledAt))
+	assert.True(t, scheduledAt.After(time.Now().UTC()))
+}
+
+func TestFullImportValidationReceiptFallsBackWhenAbsentOrMismatched(t *testing.T) {
+	tests := []struct {
+		name    string
+		receipt func(segmentID string) *validation.FullValidationReceipt
+	}{
+		{
+			name: "receipt absent",
+			receipt: func(string) *validation.FullValidationReceipt {
+				return nil
+			},
+		},
+		{
+			name: "receipt does not cover current metadata",
+			receipt: func(string) *validation.FullValidationReceipt {
+				return validation.NewFullValidationReceipt([]string{"previous-import@test.example.com"})
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := fakepool.New()
+			env := newBatchTestEnv(t, t.TempDir(), client)
+			ctx := context.Background()
+			filePath := "complete/import.mkv"
+			segmentID := writeHealthyFile(t, env, filePath)
+
+			missing, err := validation.FastFailReleaseProbe(ctx, []validation.FastFailFile{{
+				Filename: filePath,
+				Segments: []*metapb.SegmentData{{Id: segmentID}},
+			}}, &fakeClientPoolManager{client: client}, 100, 1, time.Second)
+			require.NoError(t, err)
+			assert.False(t, missing)
+
+			coordinator := postprocessor.NewCoordinator(postprocessor.Config{
+				ConfigGetter:       env.hw.configGetter,
+				MetadataService:    env.metadataService,
+				HealthRepo:         env.healthRepo,
+				CalculateNextCheck: CalculateNextCheck,
+			})
+			receipt := tt.receipt(segmentID)
+			require.NoError(t, coordinator.ScheduleHealthCheck(ctx, nil, filePath, []string{filePath}, receipt))
+			require.NoError(t, env.hw.runHealthCheckCycle(ctx))
+			assert.Equal(t, int64(2), client.StatCalls(), "an uncovered import must be checked by health immediately")
+		})
+	}
 }
 
 func TestCheckFilesBatch(t *testing.T) {

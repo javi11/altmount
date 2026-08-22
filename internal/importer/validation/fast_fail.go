@@ -65,6 +65,46 @@ type FastFailFile struct {
 	GroupKey string
 }
 
+// FullValidationReceipt contains the exact segment IDs validated by a complete
+// import-time sweep. It is intentionally transient and only matches metadata
+// with non-empty segment IDs.
+type FullValidationReceipt struct {
+	segmentIDs map[string]struct{}
+}
+
+// NewFullValidationReceipt creates an immutable receipt from validated segment IDs.
+func NewFullValidationReceipt(segmentIDs []string) *FullValidationReceipt {
+	ids := make(map[string]struct{}, len(segmentIDs))
+	for _, id := range segmentIDs {
+		if id != "" {
+			ids[id] = struct{}{}
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	return &FullValidationReceipt{segmentIDs: ids}
+}
+
+// Covers reports whether every non-empty segment ID in metadata was validated.
+func (r *FullValidationReceipt) Covers(metadata *metapb.FileMetadata) bool {
+	if r == nil || metadata == nil || len(metadata.GetSegmentData()) == 0 {
+		return false
+	}
+
+	hasSegmentID := false
+	for _, segment := range metadata.GetSegmentData() {
+		if segment == nil || segment.Id == "" {
+			continue
+		}
+		hasSegmentID = true
+		if _, ok := r.segmentIDs[segment.Id]; !ok {
+			return false
+		}
+	}
+	return hasSegmentID
+}
+
 // FastFailReleaseProbe is the cheap phase-1 reachability gate for an NZB import.
 // It flattens all candidate segments across the release and Stats a single
 // sample (usenet.SelectSegmentsForValidation: first 3 + last 2 + random middle,

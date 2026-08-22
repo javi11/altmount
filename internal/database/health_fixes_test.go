@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"testing"
 	"time"
 
@@ -333,4 +334,56 @@ func TestBatchAddFileToHealthCheck_PreservesRepairBudget(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, fresh, "new path normalized and inserted")
 	assert.Equal(t, HealthStatusPending, fresh.Status)
+}
+
+func TestBatchAddFileToHealthCheck_CoveredRecordsUseHealthyFutureBatches(t *testing.T) {
+	repo := setupTestDB(t)
+	ctx := context.Background()
+
+	_, err := repo.db.ExecContext(ctx, `
+		INSERT INTO file_health (file_path, status, retry_count, repair_retry_count, last_error, error_details)
+		VALUES ('pending-conflict.mkv', 'repair_triggered', 2, 4, 'old error', '{"old":true}'),
+		       ('covered-conflict.mkv', 'repair_triggered', 2, 4, 'old error', '{"old":true}')
+	`)
+	require.NoError(t, err)
+
+	future := time.Now().UTC().Add(2 * time.Hour)
+	records := []HealthCheckUpsert{
+		{FilePath: "pending-conflict.mkv", MaxRetries: 3, MaxRepairRetries: 5},
+		{FilePath: "covered-conflict.mkv", MaxRetries: 3, MaxRepairRetries: 5, InitialStatus: HealthStatusHealthy, ScheduledCheckAt: &future},
+	}
+	for i := 0; i < 95; i++ {
+		scheduled := future.Add(time.Duration(i+1) * time.Minute)
+		records = append(records, HealthCheckUpsert{
+			FilePath:         fmt.Sprintf("covered-%03d.mkv", i),
+			MaxRetries:       3,
+			MaxRepairRetries: 5,
+			InitialStatus:    HealthStatusHealthy,
+			ScheduledCheckAt: &scheduled,
+		})
+	}
+
+	require.NoError(t, repo.BatchAddFileToHealthCheck(ctx, records))
+
+	pending, err := repo.GetFileHealth(ctx, "pending-conflict.mkv")
+	require.NoError(t, err)
+	require.NotNil(t, pending)
+	assert.Equal(t, HealthStatusPending, pending.Status)
+	assert.Equal(t, 4, pending.RepairRetryCount)
+
+	covered, err := repo.GetFileHealth(ctx, "covered-conflict.mkv")
+	require.NoError(t, err)
+	require.NotNil(t, covered)
+	assert.Equal(t, HealthStatusHealthy, covered.Status)
+	assert.Equal(t, 0, covered.RepairRetryCount)
+	assert.Equal(t, 0, covered.RetryCount)
+	assert.Nil(t, covered.LastError)
+	assert.Nil(t, covered.ErrorDetails)
+	require.NotNil(t, covered.LastChecked)
+
+	scheduled := scheduledCheckAt(t, repo, "covered-conflict.mkv")
+	require.True(t, scheduled.Valid)
+	scheduledAt, err := time.Parse(time.RFC3339, scheduled.String)
+	require.NoError(t, err)
+	assert.True(t, scheduledAt.After(time.Now().UTC()))
 }

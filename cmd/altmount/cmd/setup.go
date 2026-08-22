@@ -81,7 +81,8 @@ func initializeImporter(
 	}
 
 	serviceConfig := importer.ServiceConfig{
-		Workers: maxProcessorWorkers,
+		Workers:            maxProcessorWorkers,
+		CalculateNextCheck: health.CalculateNextCheck,
 	}
 
 	importerService, err := importer.NewService(serviceConfig, metadataService, db, poolManager, rcloneClient, configGetter, healthRepo, broadcaster, userRepo)
