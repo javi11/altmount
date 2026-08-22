@@ -10,7 +10,7 @@ This file is the project-space ledger for the health-deduplication and availabil
 ## Current checkpoint
 
 - The health-deduplication change is committed and pushed to the fork as `feat/full-import-health-dedup`; upstream PR #833 is open.
-- The availability foundation is implemented, independently audited twice, and ready to commit and push as `feat/availability-foundation`.
+- The availability foundation is committed and pushed as `feat/availability-foundation`; upstream PR #834 is open.
 - No availability writer, health-check integration, streaming integration, hot cache, or STAT look-ahead work has started.
 - Before dispatching the next implementation PR, conduct the architecture interview recorded below and update this file with the answers.
 
@@ -42,10 +42,12 @@ This file is the project-space ledger for the health-deduplication and availabil
 
 ### PR 2 — Availability foundation
 
-**Status:** Audited and ready to push; not yet committed or opened as a PR
+**Status:** Open upstream PR
 **Branch:** `feat/availability-foundation`
 **Worktree:** `/home/hermes/workspaces/altmount-availability-foundation`
 **Plan:** `.hermes/plans/2026-08-22_134300-availability-foundation.md`
+**Commit:** `49b78d2` (`feat: add availability persistence foundation`)
+**PR:** https://github.com/javi11/altmount/pull/834
 
 **Owns:**
 
@@ -73,7 +75,7 @@ This file is the project-space ledger for the health-deduplication and availabil
 - PostgreSQL live execution was not run because the repository has no supported PostgreSQL test DSN/service/CI convention. Both dialect migration files received static parity checks; no DSN, credential, service, or CI setup was invented.
 - The existing metadata mtime failure and API lint findings remain outside this PR.
 
-**Next action:** add this status ledger, commit only the audited availability files plus this documentation file, push to `nrlcode/altmount`, and open a separate upstream PR against `javi11/altmount:main`.
+**Next action:** monitor PR #834 alongside PR #833; do not merge automatically. The next implementation PR remains gated on the architecture interview below.
 
 ### PR 3 — Import and scheduled-health availability writers
 
@@ -219,7 +221,7 @@ Record the answer and date under each item before dispatching the next planner.
 
 ## Safe next steps
 
-1. Push and open PR 2 with this ledger included.
+1. Monitor PRs #833 and #834; both are open and have not been merged.
 2. Monitor PR 1 and PR 2 CI/review; do not merge automatically.
 3. Conduct the architecture interview above.
 4. Update this file with confirmed decisions and unresolved risks.
