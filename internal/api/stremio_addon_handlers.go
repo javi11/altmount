@@ -890,12 +890,22 @@ func (s *Server) searchStremioReleases(
 	coordinator := stremio.NewSearchCoordinator(coordCfg, httpclient.NewForExternal(cfg.Network, 30*time.Second))
 
 	var tvdbID, title string
+	expectedTitle := ""
+	expectedYear := ""
 	if streamType == "series" {
 		var err error
 		tvdbID, title, err = resolveSeriesMetadataFromIMDb(ctx, imdbID)
 		if err != nil {
 			slog.WarnContext(ctx, "Failed to resolve series metadata from IMDb ID", "error", err, "imdb_id", imdbID)
 		}
+		expectedTitle = title
+	} else if imdbID != "" {
+		_, movieTitle, movieYear, mErr := resolveMovieMetadataFromIMDb(ctx, imdbID)
+		if mErr != nil {
+			slog.WarnContext(ctx, "Failed to resolve movie metadata from IMDb ID", "error", mErr, "imdb_id", imdbID)
+		}
+		expectedTitle = movieTitle
+		expectedYear = movieYear
 	}
 
 	timeoutMs := cfg.Stremio.FallbackTimeoutMs
@@ -946,17 +956,33 @@ func (s *Server) searchStremioReleases(
 		})
 	}
 
-	// Reorder with cached items first, then preserving scored order
+	// Reorder with cached items first, then preserving scored order. Cached
+	// releases were already content-matched at import time, so they bypass the
+	// relevance gate; fresh search results must plausibly belong to the
+	// requested content before they can reach any downstream consumer.
 	ordered := make([]prowlarr.NZBResult, 0, len(filtered))
 	var uncached []prowlarr.NZBResult
+	var droppedNames []string
 	for _, r := range filtered {
 		if isCached(sanitizeFilename(r.Title)) {
 			ordered = append(ordered, r)
-		} else {
-			uncached = append(uncached, r)
+			continue
 		}
+		if !releaseMatchesContent(streamType, r.Title, expectedTitle, expectedYear, season, episode) {
+			droppedNames = append(droppedNames, fmt.Sprintf("%q (%s)", r.Title, r.Indexer))
+			continue
+		}
+		uncached = append(uncached, r)
 	}
 	ordered = append(ordered, uncached...)
+
+	if len(droppedNames) > 0 {
+		slog.InfoContext(ctx, "Dropped irrelevant Stremio releases",
+			"imdb_id", imdbID,
+			"dropped_count", len(droppedNames),
+			"dropped_sample", droppedNames,
+			"kept", len(ordered)+len(uncached)-len(droppedNames))
+	}
 
 	return ordered, cachedItems, nil
 }
