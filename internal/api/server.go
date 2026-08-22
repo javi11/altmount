@@ -186,6 +186,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	stremioGroup.Get("/:key/manifest.json", s.handleStremioManifest)
 	stremioGroup.Get("/:key/stream/:type/:id.json", s.handleStremioAddonStream)
 	stremioGroup.Get("/:key/play", s.handleStremioAddonPlay)
+	stremioGroup.Get("/:key/no-streams.mp4", s.handleStremioNoStreamsVideo)
 
 	api := app.Group(s.config.Prefix)
 
