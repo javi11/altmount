@@ -87,6 +87,16 @@ func NewClient(cfg IndexerConfig, httpClient *http.Client) *Client {
 	}
 }
 
+// Name returns the configured name of the indexer.
+func (c *Client) Name() string {
+	return c.config.Name
+}
+
+// ID returns the configured ID of the indexer.
+func (c *Client) ID() string {
+	return c.config.ID
+}
+
 // Capabilities represents the indexer capabilities from /api?t=caps.
 type Capabilities struct {
 	ServerName  string `xml:"server>title"`
@@ -102,18 +112,29 @@ type newsnabJSONResponse struct {
 	} `json:"channel"`
 }
 
+type newsnabJSONAttributes struct {
+	URL    string `json:"url"`
+	Length string `json:"length"`
+	Type   string `json:"type"`
+	Name   string `json:"name"`
+	Value  string `json:"value"`
+}
+
 type newsnabJSONItem struct {
-	Title     string `json:"title"`
-	Link      string `json:"link"`
-	PubDate   string `json:"pubDate"`
+	Title     string          `json:"title"`
+	Link      string          `json:"link"`
+	GUID      json.RawMessage `json:"guid"`
+	PubDate   string          `json:"pubDate"`
 	Enclosure struct {
-		URL    string `json:"_url"`
-		Length string `json:"_length"`
-		Type   string `json:"_type"`
+		Attributes newsnabJSONAttributes `json:"@attributes"`
+		URL        string                `json:"_url"`
+		Length     string                `json:"_length"`
+		Type       string                `json:"_type"`
 	} `json:"enclosure"`
 	Attr []struct {
-		Name  string `json:"_name"`
-		Value string `json:"_value"`
+		Attributes newsnabJSONAttributes `json:"@attributes"`
+		Name       string                `json:"_name"`
+		Value      string                `json:"_value"`
 	} `json:"attr"`
 }
 
@@ -336,29 +357,71 @@ func (c *Client) parseJSONResults(body []byte) ([]Result, error) {
 }
 
 func (c *Client) convertJSONItem(it newsnabJSONItem) Result {
-	downloadURL := it.Enclosure.URL
+	downloadURL := it.Enclosure.Attributes.URL
+	if downloadURL == "" {
+		downloadURL = it.Enclosure.URL
+	}
 	if downloadURL == "" {
 		downloadURL = it.Link
 	}
-	size, _ := strconv.ParseInt(it.Enclosure.Length, 10, 64)
-	if size == 0 {
-		for _, attr := range it.Attr {
-			if attr.Name == "size" {
-				size, _ = strconv.ParseInt(attr.Value, 10, 64)
-				break
-			}
-		}
+
+	lengthStr := it.Enclosure.Attributes.Length
+	if lengthStr == "" {
+		lengthStr = it.Enclosure.Length
 	}
+	size, _ := strconv.ParseInt(lengthStr, 10, 64)
+
 	var cat int
+	var attrGuid string
 	for _, attr := range it.Attr {
-		if attr.Name == "category" {
-			cat, _ = strconv.Atoi(attr.Value)
-			break
+		name := attr.Attributes.Name
+		if name == "" {
+			name = attr.Name
+		}
+		val := attr.Attributes.Value
+		if val == "" {
+			val = attr.Value
+		}
+
+		if name == "size" && size == 0 {
+			size, _ = strconv.ParseInt(val, 10, 64)
+		}
+		if name == "category" && cat == 0 {
+			cat, _ = strconv.Atoi(val)
+		}
+		if name == "guid" && attrGuid == "" {
+			attrGuid = val
 		}
 	}
+
 	pubDate, _ := time.Parse(time.RFC1123Z, it.PubDate)
 	if pubDate.IsZero() {
 		pubDate, _ = time.Parse(time.RFC1123, it.PubDate)
+	}
+
+	guid := attrGuid
+	if guid == "" && len(it.GUID) > 0 {
+		var guidStr string
+		if err := json.Unmarshal(it.GUID, &guidStr); err == nil {
+			guid = guidStr
+		} else {
+			var guidObj struct {
+				Text  string `json:"#text"`
+				Attrs struct {
+					Text string `json:"text"`
+				} `json:"@attributes"`
+			}
+			if err := json.Unmarshal(it.GUID, &guidObj); err == nil {
+				if guidObj.Text != "" {
+					guid = guidObj.Text
+				} else {
+					guid = guidObj.Attrs.Text
+				}
+			}
+		}
+	}
+	if guid == "" {
+		guid = it.Link
 	}
 
 	return Result{
@@ -368,6 +431,7 @@ func (c *Client) convertJSONItem(it newsnabJSONItem) Result {
 		PublishDate: pubDate,
 		Indexer:     c.config.Name,
 		IndexerID:   c.config.ID,
+		GUID:        guid,
 		Category:    cat,
 	}
 }
