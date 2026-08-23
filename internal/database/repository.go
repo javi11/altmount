@@ -1094,7 +1094,7 @@ func (r *Repository) GetImportHistoryByDownloadID(ctx context.Context, downloadI
 	query := `
 		SELECT h.id, h.download_id, h.nzb_id, h.nzb_name, h.file_name, h.file_size, h.virtual_path, f.library_path, h.category, h.metadata, h.indexer, h.completed_at
 		FROM import_history h
-		LEFT JOIN file_health f ON ` + r.dialect.NormalizePathSQL("h.virtual_path") + ` = ` + r.dialect.NormalizePathSQL("f.file_path") + `
+		LEFT JOIN file_health f ON h.virtual_path = f.file_path
 		WHERE h.download_id = ?
 		LIMIT 1
 	`
@@ -1118,7 +1118,7 @@ func (r *Repository) GetImportHistoryByNzbID(ctx context.Context, nzbID int64) (
 	query := `
 		SELECT h.id, h.download_id, h.nzb_id, h.nzb_name, h.file_name, h.file_size, h.virtual_path, f.library_path, h.category, h.metadata, h.indexer, h.completed_at
 		FROM import_history h
-		LEFT JOIN file_health f ON ` + r.dialect.NormalizePathSQL("h.virtual_path") + ` = ` + r.dialect.NormalizePathSQL("f.file_path") + `
+		LEFT JOIN file_health f ON h.virtual_path = f.file_path
 		WHERE h.nzb_id = ?
 		LIMIT 1
 	`
@@ -1141,8 +1141,8 @@ func (r *Repository) GetImportHistoryByPath(ctx context.Context, virtualPath str
 	query := `
 		SELECT h.id, h.download_id, h.nzb_id, h.nzb_name, h.file_name, h.file_size, h.virtual_path, f.library_path, h.category, h.metadata, h.indexer, h.completed_at
 		FROM import_history h
-		LEFT JOIN file_health f ON ` + r.dialect.NormalizePathSQL("h.virtual_path") + ` = ` + r.dialect.NormalizePathSQL("f.file_path") + `
-		WHERE ` + r.dialect.NormalizePathSQL("h.virtual_path") + ` = ` + r.dialect.NormalizePathSQL("?") + `
+		LEFT JOIN file_health f ON h.virtual_path = f.file_path
+		WHERE h.virtual_path = ?
 		LIMIT 1
 	`
 
@@ -1163,7 +1163,7 @@ func (r *Repository) ListImportHistory(ctx context.Context, limit, offset int, s
 	query := `
 		SELECT h.id, h.download_id, h.nzb_id, h.nzb_name, h.file_name, h.file_size, h.virtual_path, f.library_path, h.category, h.metadata, h.indexer, h.completed_at
 		FROM import_history h
-		LEFT JOIN file_health f ON ` + r.dialect.NormalizePathSQL("h.virtual_path") + ` = ` + r.dialect.NormalizePathSQL("f.file_path") + `
+		LEFT JOIN file_health f ON h.virtual_path = f.file_path
 		WHERE (? = '' OR h.nzb_name LIKE ? OR h.file_name LIKE ? OR h.virtual_path LIKE ?)
 		  AND (? = '' OR LOWER(h.category) = LOWER(?))
 		ORDER BY h.completed_at DESC
@@ -1699,7 +1699,7 @@ func (r *Repository) GetImportHistoryItem(ctx context.Context, id int64) (*Impor
 	query := `
 		SELECT h.id, h.download_id, h.nzb_id, h.nzb_name, h.file_name, h.file_size, h.virtual_path, f.library_path, h.category, h.completed_at
 		FROM import_history h
-		LEFT JOIN file_health f ON ` + r.dialect.NormalizePathSQL("h.virtual_path") + ` = ` + r.dialect.NormalizePathSQL("f.file_path") + `
+		LEFT JOIN file_health f ON h.virtual_path = f.file_path
 		WHERE h.id = ?
 	`
 

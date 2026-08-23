@@ -32,18 +32,6 @@ func (h dialectHelper) IsPostgres() bool {
 	return h.d == DialectPostgres
 }
 
-// NormalizePathSQL returns the database expression for the canonical virtual
-// path form used by the health and import-history repositories: forward slashes
-// and no leading separators. Keep this at the dialect boundary because SQLite
-// and PostgreSQL expose different character-code functions.
-func (h dialectHelper) NormalizePathSQL(column string) string {
-	backslash := "char(92)"
-	if h.IsPostgres() {
-		backslash = "chr(92)"
-	}
-	return fmt.Sprintf("ltrim(replace(%s, %s, '/'), '/')", column, backslash)
-}
-
 // DatetimePlusHour returns an expression equivalent to "now + 1 hour".
 //
 //   - SQLite: datetime('now', '+1 hour')

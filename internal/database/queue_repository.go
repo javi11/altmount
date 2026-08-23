@@ -501,7 +501,7 @@ func (r *QueueRepository) ListImportHistory(ctx context.Context, limit int) ([]*
 	query := `
 		SELECT h.id, h.download_id, h.nzb_id, h.nzb_name, h.file_name, h.file_size, h.virtual_path, f.library_path, h.category, h.metadata, h.indexer, h.completed_at
 		FROM import_history h
-		LEFT JOIN file_health f ON ` + r.dialect.NormalizePathSQL("h.virtual_path") + ` = ` + r.dialect.NormalizePathSQL("f.file_path") + `
+		LEFT JOIN file_health f ON h.virtual_path = f.file_path
 		ORDER BY h.completed_at DESC
 		LIMIT ?
 	`

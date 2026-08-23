@@ -25,7 +25,7 @@ func TestMigration035_NormalizesAndMergesHealthPathsIdempotently(t *testing.T) {
 	_, err := db.ExecContext(ctx, `
 		INSERT INTO import_history (nzb_name, file_name, virtual_path, download_id) VALUES
 			('n', 'collision.mkv', char(92) || 'movies' || char(92) || 'collision.mkv', 'history-collision'),
-			('n', 'windows.mkv', '//shows/windows.mkv', 'history-windows')
+			('n', 'windows.mkv', '//shows/windows.mkv/', 'history-windows')
 	`)
 	require.NoError(t, err)
 
@@ -46,7 +46,7 @@ func TestMigration035_NormalizesAndMergesHealthPathsIdempotently(t *testing.T) {
 			 '2026-08-21 10:00:00', '', 4, 2, 1, 4,
 			 '', '', '2026-08-20 10:00:00', '2026-08-21 10:00:00', NULL,
 			 NULL, 2, 3, TRUE, 'canonical', 'new', 'dl-new'),
-			(3, char(92) || 'shows' || char(92) || 'windows.mkv', NULL, 'degraded',
+			(3, char(92) || 'shows' || char(92) || 'windows.mkv' || char(92), NULL, 'degraded',
 			 '2026-08-18 10:00:00', 'windows error', 0, 2, 0, 3,
 			 NULL, NULL, '2026-08-18 10:00:00', '2026-08-18 10:00:00', NULL,
 			 NULL, 0, 0, FALSE, NULL, NULL, NULL)
@@ -86,6 +86,9 @@ func TestMigration035_NormalizesAndMergesHealthPathsIdempotently(t *testing.T) {
 	require.NoError(t, db.QueryRowContext(ctx,
 		"SELECT virtual_path FROM import_history WHERE file_name = 'collision.mkv'").Scan(&historyPath))
 	assert.Equal(t, "movies/collision.mkv", historyPath)
+	require.NoError(t, db.QueryRowContext(ctx,
+		"SELECT virtual_path FROM import_history WHERE file_name = 'windows.mkv'").Scan(&historyPath))
+	assert.Equal(t, "shows/windows.mkv", historyPath)
 
 	// A second application is safe and leaves the merged row/evidence untouched.
 	applyVirtualPathMigration035(t, db)
@@ -139,7 +142,7 @@ func TestVirtualPathRepositoryUsesTheCanonicalForm(t *testing.T) {
 	require.NotNil(t, history.LibraryPath)
 	assert.Equal(t, "/library/movie.mkv", *history.LibraryPath)
 
-	found, err := health.HasImportHistoryForPath(ctx, `\movies\movie.mkv`)
+	found, err := health.HasImportHistoryForPath(ctx, `\movies\movie.mkv\`)
 	require.NoError(t, err)
 	assert.True(t, found)
 }

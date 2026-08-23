@@ -34,12 +34,12 @@ func NewHealthRepository(db *sql.DB, d Dialect) *HealthRepository {
 // repair state machine relies on. Every method that writes or matches on file_path
 // funnels through here.
 //
-// TrimLeft (not TrimPrefix) so ALL leading slashes are stripped: an import can yield
-// a doubled prefix ("//tv/x"), and trimming only one would leave "/tv/x" — still
-// non-canonical, unmatchable by every other caller, and stuck re-checking forever.
+// Trim removes all leading/trailing separators: imports can yield doubled
+// prefixes or a trailing separator ("/tv/x/"). Keeping either variant would
+// split one virtual file across keys and defeat history joins and repair state.
 func normalizeHealthPath(p string) string {
 	p = strings.ReplaceAll(p, `\`, "/")
-	p = strings.TrimLeft(p, "/")
+	p = strings.Trim(p, "/")
 	return p
 }
 
@@ -2078,7 +2078,7 @@ func (r *HealthRepository) GetFilesForLibrarySync(ctx context.Context) ([]*FileH
 // has been recorded by AltMount, regardless of current metadata state.
 func (r *HealthRepository) HasImportHistoryForPath(ctx context.Context, virtualPath string) (bool, error) {
 	virtualPath = normalizeHealthPath(virtualPath)
-	query := `SELECT 1 FROM import_history WHERE ` + r.dialect.NormalizePathSQL("virtual_path") + ` = ` + r.dialect.NormalizePathSQL("?") + ` LIMIT 1`
+	query := `SELECT 1 FROM import_history WHERE virtual_path = ? LIMIT 1`
 	var exists int
 	err := r.db.QueryRowContext(ctx, query, virtualPath).Scan(&exists)
 	if err != nil {
