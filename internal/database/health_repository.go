@@ -372,6 +372,7 @@ func (r *HealthRepository) GetFilesForRepairNotification(ctx context.Context, li
 
 // IncrementRetryCount increments the retry count and schedules next check
 func (r *HealthRepository) IncrementRetryCount(ctx context.Context, filePath string, errorMessage *string, errorDetails *string, nextCheck time.Time) error {
+	filePath = normalizeHealthPath(filePath)
 	query := `
 		UPDATE file_health
 		SET retry_count = retry_count + 1,
@@ -393,6 +394,7 @@ func (r *HealthRepository) IncrementRetryCount(ctx context.Context, filePath str
 
 // SetRepairTriggered sets a file's status to repair_triggered
 func (r *HealthRepository) SetRepairTriggered(ctx context.Context, filePath string, errorMessage *string, errorDetails *string) error {
+	filePath = normalizeHealthPath(filePath)
 	query := fmt.Sprintf(`
 		UPDATE file_health
 		SET status = 'repair_triggered',
@@ -937,6 +939,7 @@ func (r *HealthRepository) CountHealthItems(ctx context.Context, statusFilter *H
 
 // SetFileChecking sets a file's status to 'checking'
 func (r *HealthRepository) SetFileChecking(ctx context.Context, filePath string) error {
+	filePath = normalizeHealthPath(filePath)
 	query := `
 		UPDATE file_health 
 		SET status = ?,
@@ -1071,14 +1074,11 @@ func (r *HealthRepository) DeleteHealthRecordsBulk(ctx context.Context, filePath
 		end := min(i+batchSize, len(filePaths))
 		chunk := filePaths[i:end]
 
-		placeholders := make([]string, len(chunk)*2)
-		args := make([]any, len(chunk)*2)
+		placeholders := make([]string, len(chunk))
+		args := make([]any, len(chunk))
 		for j, path := range chunk {
-			placeholders[j*2] = "?"
-			placeholders[j*2+1] = "?"
-			trimmed := strings.TrimPrefix(path, "/")
-			args[j*2] = trimmed
-			args[j*2+1] = "/" + trimmed
+			placeholders[j] = "?"
+			args[j] = normalizeHealthPath(path)
 		}
 
 		query := fmt.Sprintf(`DELETE FROM file_health WHERE file_path IN (%s)`, strings.Join(placeholders, ","))
@@ -1118,7 +1118,7 @@ func (r *HealthRepository) ResetHealthChecksBulk(ctx context.Context, filePaths 
 		args = append(args, string(HealthStatusPending))
 		for j, path := range chunk {
 			placeholders[j] = "?"
-			args = append(args, path)
+			args = append(args, normalizeHealthPath(path))
 		}
 
 		query := fmt.Sprintf(`
@@ -1268,6 +1268,7 @@ func (r *HealthRepository) UpdateScheduledCheckTime(ctx context.Context, filePat
 
 // MarkAsHealthy marks a file as healthy and clears all retry/error state
 func (r *HealthRepository) MarkAsHealthy(ctx context.Context, filePath string, nextCheckTime time.Time) error {
+	filePath = normalizeHealthPath(filePath)
 	query := `
 		UPDATE file_health
 		SET status = ?,
@@ -1393,7 +1394,7 @@ func (r *HealthRepository) UpdateHealthStatusBulk(ctx context.Context, updates [
 		if update.Skip {
 			continue
 		}
-		filePath := update.FilePath
+		filePath := normalizeHealthPath(update.FilePath)
 		// expected is the empty string for an unguarded write, or the status the record
 		// must still hold for a guarded write to land (see HealthStatusUpdate.ExpectedStatus).
 		expected := ""
@@ -1716,7 +1717,7 @@ func (r *HealthRepository) batchInsertAutomaticHealthChecks(ctx context.Context,
 // that exist in the specified directory. This is used when a new file is imported
 // into a directory, implying it is a replacement for the broken file.
 func (r *HealthRepository) ResolvePendingRepairsInDirectory(ctx context.Context, dirPath string) (int64, error) {
-	dirPath = strings.TrimPrefix(dirPath, "/")
+	dirPath = normalizeHealthPath(dirPath)
 	if dirPath == "" {
 		return 0, nil
 	}
@@ -1727,12 +1728,12 @@ func (r *HealthRepository) ResolvePendingRepairsInDirectory(ctx context.Context,
 
 	query := `
 		DELETE FROM file_health
-		WHERE file_path LIKE ?
+		WHERE file_path LIKE ? ESCAPE '\'
 		AND status IN ('repair_triggered', 'corrupted', 'degraded')
 	`
 
 	// Match paths starting with the directory
-	likePattern := dirPath + "%"
+	likePattern := escapeLikePrefix(dirPath) + "%"
 
 	result, err := r.db.ExecContext(ctx, query, likePattern)
 	if err != nil {
@@ -1831,7 +1832,7 @@ func (r *HealthRepository) RelinkFileByFilename(ctx context.Context, filename, f
 	if err != nil {
 		return false, fmt.Errorf("failed to query records for filename relink: %w", err)
 	}
-	
+
 	type candidate struct {
 		id          int64
 		filePath    string
@@ -1922,12 +1923,12 @@ func (r *HealthRepository) RelinkFileByFilename(ctx context.Context, filename, f
 
 func isDownloaderPath(p string) bool {
 	low := strings.ToLower(p)
-	return strings.Contains(low, "complete") || 
-	       strings.Contains(low, "download") || 
-	       strings.Contains(low, "nzb") || 
-	       strings.Contains(low, "temp") || 
-	       strings.Contains(low, "tmp") || 
-	       strings.Contains(low, "incoming")
+	return strings.Contains(low, "complete") ||
+		strings.Contains(low, "download") ||
+		strings.Contains(low, "nzb") ||
+		strings.Contains(low, "temp") ||
+		strings.Contains(low, "tmp") ||
+		strings.Contains(low, "incoming")
 }
 
 func shareShowFolder(p1, p2 string) bool {
@@ -1936,14 +1937,14 @@ func shareShowFolder(p1, p2 string) bool {
 	if len(s1) < 2 || len(s2) < 2 {
 		return false
 	}
-	for i := len(s1) - 2; i >= 0 && i >= len(s1) - 3; i-- {
+	for i := len(s1) - 2; i >= 0 && i >= len(s1)-3; i-- {
 		seg := s1[i]
 		low := strings.ToLower(seg)
-		if strings.HasPrefix(low, "season") || 
-		   low == "specials" || low == "tv" || low == "movies" || low == "downloads" {
+		if strings.HasPrefix(low, "season") ||
+			low == "specials" || low == "tv" || low == "movies" || low == "downloads" {
 			continue
 		}
-		for j := len(s2) - 2; j >= 0 && j >= len(s2) - 3; j-- {
+		for j := len(s2) - 2; j >= 0 && j >= len(s2)-3; j-- {
 			if s2[j] == seg {
 				return true
 			}
@@ -1993,7 +1994,7 @@ func (r *HealthRepository) GetFilesByPaths(ctx context.Context, filePaths []stri
 	args := make([]any, len(filePaths))
 	for i, path := range filePaths {
 		placeholders[i] = "?"
-		args[i] = strings.TrimPrefix(path, "/")
+		args[i] = normalizeHealthPath(path)
 	}
 
 	query := fmt.Sprintf(`
@@ -2076,7 +2077,8 @@ func (r *HealthRepository) GetFilesForLibrarySync(ctx context.Context) ([]*FileH
 // given virtual path. Used to protect symlinks from deletion when an import
 // has been recorded by AltMount, regardless of current metadata state.
 func (r *HealthRepository) HasImportHistoryForPath(ctx context.Context, virtualPath string) (bool, error) {
-	query := `SELECT 1 FROM import_history WHERE TRIM(virtual_path, '/') = TRIM(?, '/') LIMIT 1`
+	virtualPath = normalizeHealthPath(virtualPath)
+	query := `SELECT 1 FROM import_history WHERE ` + r.dialect.NormalizePathSQL("virtual_path") + ` = ` + r.dialect.NormalizePathSQL("?") + ` LIMIT 1`
 	var exists int
 	err := r.db.QueryRowContext(ctx, query, virtualPath).Scan(&exists)
 	if err != nil {
@@ -2158,9 +2160,9 @@ func (r *HealthRepository) relinkOrMergeRecordTx(ctx context.Context, tx *dialec
 	if conflictExists && conflictingID == id {
 		conflictExists = false
 	}
-	
+
 	// Fast-Fail Revalidate Guard: If the target record (the one surviving the merge) recently
-	// had a repair triggered, DO NOT reset it to pending. This prevents Webhooks that fire immediately 
+	// had a repair triggered, DO NOT reset it to pending. This prevents Webhooks that fire immediately
 	// after an import's streaming failure from wiping out the repair trigger.
 	targetStatus := sourceStatus
 	targetUpdatedAt := sourceUpdatedAt
@@ -2168,7 +2170,7 @@ func (r *HealthRepository) relinkOrMergeRecordTx(ctx context.Context, tx *dialec
 		targetStatus = conflictingStatus
 		targetUpdatedAt = conflictingUpdatedAt
 	}
-	
+
 	if revalidate && (targetStatus == "repair_triggered" || targetStatus == "corrupted") && time.Since(targetUpdatedAt) < 60*time.Second {
 		revalidate = false
 	}
@@ -2521,4 +2523,3 @@ func (r *HealthRepository) FindHealthyFilesForSeries(ctx context.Context, series
 	}
 	return results, rows.Err()
 }
-

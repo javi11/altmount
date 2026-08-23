@@ -482,13 +482,14 @@ func (r *QueueRepository) GetImportHistory(ctx context.Context, days int) ([]*Im
 
 // AddImportHistory records a successful file import in the persistent history table
 func (r *QueueRepository) AddImportHistory(ctx context.Context, history *ImportHistory) error {
+	virtualPath := normalizeHealthPath(history.VirtualPath)
 	query := `
 		INSERT INTO import_history (download_id, nzb_id, nzb_name, file_name, file_size, virtual_path, category, metadata, indexer, completed_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
 	`
 	_, err := r.db.ExecContext(ctx, query,
 		history.DownloadID, history.NzbID, history.NzbName, history.FileName, history.FileSize,
-		history.VirtualPath, history.Category, history.Metadata, history.Indexer)
+		virtualPath, history.Category, history.Metadata, history.Indexer)
 	if err != nil {
 		return fmt.Errorf("failed to add import history: %w", err)
 	}
@@ -500,7 +501,7 @@ func (r *QueueRepository) ListImportHistory(ctx context.Context, limit int) ([]*
 	query := `
 		SELECT h.id, h.download_id, h.nzb_id, h.nzb_name, h.file_name, h.file_size, h.virtual_path, f.library_path, h.category, h.metadata, h.indexer, h.completed_at
 		FROM import_history h
-		LEFT JOIN file_health f ON h.virtual_path = f.file_path
+		LEFT JOIN file_health f ON ` + r.dialect.NormalizePathSQL("h.virtual_path") + ` = ` + r.dialect.NormalizePathSQL("f.file_path") + `
 		ORDER BY h.completed_at DESC
 		LIMIT ?
 	`
