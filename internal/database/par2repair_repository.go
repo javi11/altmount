@@ -23,9 +23,15 @@ const (
 
 // Par2RepairJob is one row of par2_repair_jobs.
 type Par2RepairJob struct {
-	ID               int64
-	FilePath         string
-	NzbPath          sql.NullString // set for NZB-mode jobs (release never imported)
+	ID       int64
+	FilePath string
+	NzbPath  sql.NullString // set for NZB-mode jobs (release never imported)
+	// ReleaseRef is the release's shared NzbStore ref; files with the same ref
+	// group onto one job because a repair sweeps the whole release anyway.
+	ReleaseRef sql.NullString
+	// MemberPaths is the JSON list of every file the job repairs on behalf of
+	// (the trigger file included). NULL on legacy and NZB-mode rows.
+	MemberPaths      sql.NullString
 	Status           Par2RepairStatus
 	Attempts         int
 	LastError        sql.NullString
@@ -69,6 +75,21 @@ func (j *Par2RepairJob) DeadSegments() []string {
 	return ids
 }
 
+// Members returns every file the job repairs on behalf of: the grouped member
+// list when present, else the trigger file. Empty for NZB-mode jobs.
+func (j *Par2RepairJob) Members() []string {
+	if j.MemberPaths.Valid && j.MemberPaths.String != "" {
+		var paths []string
+		if err := json.Unmarshal([]byte(j.MemberPaths.String), &paths); err == nil && len(paths) > 0 {
+			return paths
+		}
+	}
+	if j.FilePath == "" {
+		return nil
+	}
+	return []string{j.FilePath}
+}
+
 // Par2RepairRepository persists PAR2 repair jobs so pending repairs survive
 // restarts. At most one active (pending/running) job exists per file, enforced
 // by a partial unique index.
@@ -81,31 +102,141 @@ func NewPar2RepairRepository(db *sql.DB, d Dialect) *Par2RepairRepository {
 	return &Par2RepairRepository{db: newDialectAwareDB(db, d)}
 }
 
-// Enqueue inserts a pending job for the file unless one is already active.
-// Returns created=false when an active job made this a no-op.
-func (r *Par2RepairRepository) Enqueue(ctx context.Context, filePath string, failingSegmentID string) (bool, error) {
+// Enqueue registers a file for repair. releaseRef (the release's NzbStore ref)
+// groups files: when an active job for the same release exists, the file is
+// attached to it instead of creating a second row — one repair sweeps the
+// whole release, so N rows would just show the user N copies of the same work.
+// An empty releaseRef falls back to per-file dedup.
+//
+// Returns created=true when a new job row was inserted, attached=true when the
+// file joined an existing job, and both false when it was already tracked.
+func (r *Par2RepairRepository) Enqueue(ctx context.Context, filePath, releaseRef, failingSegmentID string) (created, attached bool, err error) {
 	if filePath == "" {
-		return false, errors.New("par2repair: empty file path")
+		return false, false, errors.New("par2repair: empty file path")
 	}
 	var segID any
 	if failingSegmentID != "" {
 		segID = failingSegmentID
 	}
-	res, err := r.db.ExecContext(ctx, `
-		INSERT INTO par2_repair_jobs (file_path, status, failing_segment_id)
-		SELECT ?, 'pending', ?
-		WHERE NOT EXISTS (
-			SELECT 1 FROM par2_repair_jobs
-			WHERE file_path = ? AND status IN ('pending','running')
-		)`, filePath, segID, filePath)
+	var relRef any
+	if releaseRef != "" {
+		relRef = releaseRef
+	}
+	memberJSON, err := json.Marshal([]string{filePath})
 	if err != nil {
-		return false, fmt.Errorf("enqueue par2 repair: %w", err)
+		return false, false, fmt.Errorf("enqueue par2 repair: %w", err)
+	}
+	// Attach and insert race with concurrent enqueues and with the job
+	// finishing; the optimistic attach guard and the partial unique indexes
+	// make the loser take another lap rather than duplicate or clobber.
+	for range 3 {
+		if releaseRef != "" {
+			done, att, err := r.tryAttach(ctx, filePath, releaseRef, failingSegmentID)
+			if err != nil {
+				return false, false, err
+			}
+			if done {
+				return false, att, nil
+			}
+		}
+		res, err := r.db.ExecContext(ctx, `
+			INSERT INTO par2_repair_jobs (file_path, release_ref, member_paths, status, failing_segment_id)
+			SELECT ?, ?, ?, 'pending', ?
+			WHERE NOT EXISTS (
+				SELECT 1 FROM par2_repair_jobs
+				WHERE file_path = ? AND status IN ('pending','running')
+			) AND NOT EXISTS (
+				SELECT 1 FROM par2_repair_jobs
+				WHERE release_ref = ? AND status IN ('pending','running')
+			)`, filePath, relRef, string(memberJSON), segID, filePath, releaseRef)
+		if err != nil {
+			return false, false, fmt.Errorf("enqueue par2 repair: %w", err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return false, false, fmt.Errorf("enqueue par2 repair: %w", err)
+		}
+		if n > 0 {
+			return true, false, nil
+		}
+		if releaseRef == "" {
+			return false, false, nil // per-file dedup: already queued
+		}
+		// An active job for the file or release appeared mid-flight: attach to
+		// it on the next lap.
+	}
+	return false, false, errors.New("par2repair: enqueue contention, giving up")
+}
+
+// tryAttach joins filePath to the release's active job, folding its failing
+// segment into the job's known-dead list so the plan covers it up front.
+// done=true means the enqueue is fully handled (attached, or already a
+// member); done=false means no active job exists or it changed under us.
+func (r *Par2RepairRepository) tryAttach(ctx context.Context, filePath, releaseRef, failingSegmentID string) (done, attached bool, err error) {
+	var id int64
+	var trigger string
+	var members, deads sql.NullString
+	err = r.db.QueryRowContext(ctx, `
+		SELECT id, file_path, member_paths, dead_segment_ids FROM par2_repair_jobs
+		WHERE release_ref = ? AND status IN ('pending','running')`, releaseRef).
+		Scan(&id, &trigger, &members, &deads)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, false, nil
+	}
+	if err != nil {
+		return false, false, fmt.Errorf("find release repair job: %w", err)
+	}
+
+	job := &Par2RepairJob{FilePath: trigger, MemberPaths: members, DeadSegmentIDs: deads}
+	paths := job.Members()
+	if slices.Contains(paths, filePath) {
+		return true, false, nil
+	}
+	paths = append(paths, filePath)
+	pathsJSON, err := json.Marshal(paths)
+	if err != nil {
+		return false, false, fmt.Errorf("attach to par2 repair job %d: %w", id, err)
+	}
+	var deadVal any
+	if deads.Valid {
+		deadVal = deads.String
+	}
+	if failingSegmentID != "" {
+		ids := job.DeadSegments()
+		if !slices.Contains(ids, failingSegmentID) {
+			buf, err := json.Marshal(append(ids, failingSegmentID))
+			if err != nil {
+				return false, false, fmt.Errorf("attach to par2 repair job %d: %w", id, err)
+			}
+			deadVal = string(buf)
+		}
+	}
+	// Optimistic guard on both JSON columns: a concurrent attach or dead-
+	// segment append between the read and this write loses nothing — the
+	// update misses and the caller takes another lap.
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE par2_repair_jobs
+		SET member_paths = ?, dead_segment_ids = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND status IN ('pending','running')
+		  AND COALESCE(member_paths, '') = COALESCE(?, '')
+		  AND COALESCE(dead_segment_ids, '') = COALESCE(?, '')`,
+		string(pathsJSON), deadVal, id, nullableString(members), nullableString(deads))
+	if err != nil {
+		return false, false, fmt.Errorf("attach to par2 repair job %d: %w", id, err)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
-		return false, fmt.Errorf("enqueue par2 repair: %w", err)
+		return false, false, fmt.Errorf("attach to par2 repair job %d: %w", id, err)
 	}
-	return n > 0, nil
+	return n > 0, n > 0, nil
+}
+
+// nullableString converts a NullString to a driver-friendly any (nil on NULL).
+func nullableString(s sql.NullString) any {
+	if !s.Valid {
+		return nil
+	}
+	return s.String
 }
 
 // EnqueueNzb inserts a pending NZB-mode job — a repair for a release that was
@@ -151,12 +282,12 @@ func (r *Par2RepairRepository) ClaimNext(ctx context.Context, now time.Time) (*P
 			ORDER BY id ASC
 			LIMIT 1
 		)
-		RETURNING id, file_path, nzb_path, status, attempts, last_error, failing_segment_id,
+		RETURNING id, file_path, nzb_path, release_ref, member_paths, status, attempts, last_error, failing_segment_id,
 		          dead_segment_ids, next_attempt_at, started_at, finished_at, created_at, updated_at`,
 		now, now, now)
 
 	job := &Par2RepairJob{}
-	err := row.Scan(&job.ID, &job.FilePath, &job.NzbPath, &job.Status, &job.Attempts, &job.LastError,
+	err := row.Scan(&job.ID, &job.FilePath, &job.NzbPath, &job.ReleaseRef, &job.MemberPaths, &job.Status, &job.Attempts, &job.LastError,
 		&job.FailingSegmentID, &job.DeadSegmentIDs, &job.NextAttemptAt,
 		&job.StartedAt, &job.FinishedAt, &job.CreatedAt, &job.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -244,7 +375,7 @@ func (r *Par2RepairRepository) List(ctx context.Context, limit int) ([]*Par2Repa
 		limit = par2RepairListDefaultLimit
 	}
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, file_path, nzb_path, status, attempts, last_error, failing_segment_id,
+		SELECT id, file_path, nzb_path, release_ref, member_paths, status, attempts, last_error, failing_segment_id,
 		       dead_segment_ids, next_attempt_at, started_at, finished_at, created_at, updated_at
 		FROM par2_repair_jobs
 		ORDER BY updated_at DESC, id DESC
@@ -257,7 +388,7 @@ func (r *Par2RepairRepository) List(ctx context.Context, limit int) ([]*Par2Repa
 	var jobs []*Par2RepairJob
 	for rows.Next() {
 		job := &Par2RepairJob{}
-		if err := rows.Scan(&job.ID, &job.FilePath, &job.NzbPath, &job.Status, &job.Attempts, &job.LastError,
+		if err := rows.Scan(&job.ID, &job.FilePath, &job.NzbPath, &job.ReleaseRef, &job.MemberPaths, &job.Status, &job.Attempts, &job.LastError,
 			&job.FailingSegmentID, &job.DeadSegmentIDs, &job.NextAttemptAt,
 			&job.StartedAt, &job.FinishedAt, &job.CreatedAt, &job.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan par2 repair job: %w", err)
@@ -274,11 +405,11 @@ func (r *Par2RepairRepository) List(ctx context.Context, limit int) ([]*Par2Repa
 func (r *Par2RepairRepository) Get(ctx context.Context, id int64) (*Par2RepairJob, error) {
 	job := &Par2RepairJob{}
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, file_path, nzb_path, status, attempts, last_error, failing_segment_id,
+		SELECT id, file_path, nzb_path, release_ref, member_paths, status, attempts, last_error, failing_segment_id,
 		       dead_segment_ids, next_attempt_at, started_at, finished_at, created_at, updated_at
 		FROM par2_repair_jobs
 		WHERE id = ?`, id).Scan(
-		&job.ID, &job.FilePath, &job.NzbPath, &job.Status, &job.Attempts, &job.LastError,
+		&job.ID, &job.FilePath, &job.NzbPath, &job.ReleaseRef, &job.MemberPaths, &job.Status, &job.Attempts, &job.LastError,
 		&job.FailingSegmentID, &job.DeadSegmentIDs, &job.NextAttemptAt,
 		&job.StartedAt, &job.FinishedAt, &job.CreatedAt, &job.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {

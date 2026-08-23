@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/javi11/nntppool/v4"
@@ -15,10 +16,62 @@ type BodyClient interface {
 	Body(ctx context.Context, messageID string, onMeta ...func(nntppool.YEncMeta)) (*nntppool.ArticleBody, error)
 }
 
-// ConnBudget gates fetches on the global import connection budget so repair
-// sweeps never starve streaming reads. Satisfied by pool.Manager.
+// ConnBudget bounds how many article fetches the repair keeps on the wire at
+// once. Repair traffic runs on the pool's normal lane (streaming reads use
+// the priority lane), so the budget shapes background bandwidth rather than
+// protecting playback latency.
 type ConnBudget interface {
-	AcquireImportConnection(ctx context.Context) (release func(), err error)
+	Acquire(ctx context.Context) (release func(), err error)
+}
+
+// connLimiter is a ConnBudget whose limit is read live from the config, so a
+// raised max_connections speeds up a running repair as slots churn — no
+// restart needed.
+type connLimiter struct {
+	limit func() int
+	mu    sync.Mutex
+	cond  *sync.Cond
+	inUse int
+}
+
+// NewConnLimiter builds a ConnBudget over a live limit getter. Values below 1
+// are treated as 1.
+func NewConnLimiter(limit func() int) ConnBudget {
+	l := &connLimiter{limit: limit}
+	l.cond = sync.NewCond(&l.mu)
+	return l
+}
+
+func (l *connLimiter) Acquire(ctx context.Context) (func(), error) {
+	// Wake blocked waiters when the context ends, so cancellation is not
+	// stuck behind the next release.
+	stop := context.AfterFunc(ctx, func() {
+		l.mu.Lock()
+		defer l.mu.Unlock()
+		l.cond.Broadcast()
+	})
+	defer stop()
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if l.inUse < max(l.limit(), 1) {
+			l.inUse++
+			var once sync.Once
+			return func() {
+				once.Do(func() {
+					l.mu.Lock()
+					l.inUse--
+					l.mu.Unlock()
+					l.cond.Broadcast()
+				})
+			}, nil
+		}
+		l.cond.Wait()
+	}
 }
 
 // PoolFetcher fetches decoded article payloads through the NNTP pool's
@@ -27,13 +80,28 @@ type ConnBudget interface {
 type PoolFetcher struct {
 	getClient func() (BodyClient, error)
 	budget    ConnBudget // optional; nil skips budget gating
+
+	// retryDelay is the base backoff between transient-failure retries,
+	// doubled per attempt. Shrunk in tests.
+	retryDelay time.Duration
 }
 
 // NewPoolFetcher builds a fetcher over a lazily-resolved pool client
 // (typically wrapping pool.Manager.GetPool). budget may be nil.
 func NewPoolFetcher(getClient func() (BodyClient, error), budget ConnBudget) *PoolFetcher {
-	return &PoolFetcher{getClient: getClient, budget: budget}
+	return &PoolFetcher{getClient: getClient, budget: budget, retryDelay: fetchRetryBaseDelay}
 }
+
+// fetchRetries is how many times one article fetch is retried after a
+// transient pool error before the failure surfaces. A repair attempt is tens
+// of minutes of streaming; a pool-wide blip of a few seconds ("all providers
+// exhausted" with no per-provider verdict) must cost a short stall, not the
+// whole attempt.
+const fetchRetries = 3
+
+// fetchRetryBaseDelay is the first retry's backoff; each further retry
+// doubles it (1s, 2s, 4s).
+const fetchRetryBaseDelay = time.Second
 
 // ArticleStater is an optional ArticleFetcher capability: bulk article
 // existence checks without downloading bodies. Resolvers use it to learn the
@@ -43,8 +111,9 @@ type ArticleStater interface {
 	// StatIDs reports which of ids are confirmed missing on every provider.
 	// Transient failures must NOT be reported missing. A nil map with a nil
 	// error means the capability is unavailable and the caller should proceed
-	// without liveness data.
-	StatIDs(ctx context.Context, ids []string) (missing map[string]bool, err error)
+	// without liveness data. onResult, when non-nil, receives the count of ids
+	// checked so far as verdicts arrive, for progress reporting.
+	StatIDs(ctx context.Context, ids []string, onResult func(done int)) (missing map[string]bool, err error)
 }
 
 // statManyClient is the stat surface PoolFetcher probes its pool client for
@@ -60,7 +129,7 @@ const statPerItemBudget = 250 * time.Millisecond
 
 // StatIDs implements ArticleStater over the pool's StatMany when the client
 // supports it; otherwise it reports the capability unavailable (nil, nil).
-func (p *PoolFetcher) StatIDs(ctx context.Context, ids []string) (map[string]bool, error) {
+func (p *PoolFetcher) StatIDs(ctx context.Context, ids []string, onResult func(done int)) (map[string]bool, error) {
 	client, err := p.getClient()
 	if err != nil {
 		return nil, fmt.Errorf("par2repair: nntp pool unavailable: %w", err)
@@ -74,9 +143,14 @@ func (p *PoolFetcher) StatIDs(ctx context.Context, ids []string) (map[string]boo
 	defer cancel()
 
 	missing := make(map[string]bool)
+	done := 0
 	for r := range sc.StatMany(statCtx, ids, nntppool.StatManyOptions{}) {
 		if errors.Is(r.Err, nntppool.ErrArticleNotFound) {
 			missing[r.MessageID] = true
+		}
+		done++
+		if onResult != nil {
+			onResult(done)
 		}
 	}
 	// A cancelled sweep left ids unchecked; report it rather than a partial
@@ -87,12 +161,46 @@ func (p *PoolFetcher) StatIDs(ctx context.Context, ids []string) (map[string]boo
 	return missing, nil
 }
 
-// Fetch implements ArticleFetcher.
+// Fetch implements ArticleFetcher. Transient pool errors — a network blip
+// timing out every provider at once surfaces as a bare "all providers
+// exhausted" — are retried with a doubling backoff before they surface: one
+// failed fetch aborts a repair attempt that took tens of minutes of
+// streaming, so a blip must cost seconds, not the attempt. A 430
+// (ErrArticleNotFound) is a definitive verdict and is never retried.
 func (p *PoolFetcher) Fetch(ctx context.Context, messageID string) ([]byte, error) {
+	delay := p.retryDelay
+	if delay <= 0 {
+		delay = fetchRetryBaseDelay
+	}
+	var lastErr error
+	for attempt := 0; attempt <= fetchRetries; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(delay):
+			}
+			delay *= 2
+		}
+		data, err := p.fetchOnce(ctx, messageID)
+		if err == nil {
+			return data, nil
+		}
+		if errors.Is(err, nntppool.ErrArticleNotFound) || ctx.Err() != nil {
+			return nil, err
+		}
+		lastErr = err
+	}
+	return nil, lastErr
+}
+
+// fetchOnce performs one budget-gated article fetch. The budget is held only
+// for the attempt, so a retry's backoff never sits on an import slot.
+func (p *PoolFetcher) fetchOnce(ctx context.Context, messageID string) ([]byte, error) {
 	if p.budget != nil {
-		release, err := p.budget.AcquireImportConnection(ctx)
+		release, err := p.budget.Acquire(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("par2repair: acquire import connection: %w", err)
+			return nil, fmt.Errorf("par2repair: acquire repair connection: %w", err)
 		}
 		defer release()
 	}

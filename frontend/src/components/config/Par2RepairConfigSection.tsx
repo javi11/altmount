@@ -28,8 +28,12 @@ const defaults: Par2RepairConfig = {
 	max_repair_ratio: 0.02,
 	max_memory_mb: 256,
 	max_concurrent_jobs: 1,
+	max_connections: 10,
+	min_release_size_mb: 0,
+	max_release_size_mb: 0,
 	max_patch_store_mb: 0,
 	patch_dir: "",
+	arr_first: true,
 	repair_on_import: false,
 };
 
@@ -93,6 +97,28 @@ export function Par2RepairConfigSection({
 						Repair missing articles automatically (playback holes, health checks)
 					</span>
 				</label>
+			</fieldset>
+
+			<fieldset className="fieldset">
+				<legend className="fieldset-legend">PAR2 Fallback for ARR Repair</legend>
+				<label className="label cursor-pointer justify-start gap-3">
+					<input
+						type="checkbox"
+						className="toggle toggle-primary"
+						checked={data.arr_first ?? true}
+						disabled={isReadOnly || !(data.enabled ?? false)}
+						onChange={(e) => handleChange("arr_first", e.target.checked)}
+					/>
+					<span className="label-text">
+						Repair corrupted files with PAR2 when nothing is found in the ARRs
+					</span>
+				</label>
+				<p className="label whitespace-normal">
+					Corrupted files still go to Radarr/Sonarr first, exactly as before. When the ARRs come up
+					empty — no instance tracks the file, none is configured, or ARR repair is disabled — a
+					PAR2 repair is queued as the fallback instead of giving up. Degraded files and playback
+					holes always repair via PAR2 directly.
+				</p>
 			</fieldset>
 
 			<fieldset className="fieldset">
@@ -186,6 +212,55 @@ export function Par2RepairConfigSection({
 					/>
 					<p className="label whitespace-normal">
 						Each job downloads a full release; more than 1 competes for import bandwidth.
+					</p>
+				</fieldset>
+
+				<fieldset className="fieldset">
+					<legend className="fieldset-legend">Max Connections</legend>
+					<input
+						type="number"
+						className="input input-bordered w-full max-w-48 bg-base-100 font-mono text-sm"
+						min={1}
+						max={64}
+						value={data.max_connections ?? 10}
+						disabled={isReadOnly}
+						onChange={(e) => handleChange("max_connections", Number(e.target.value))}
+					/>
+					<p className="label whitespace-normal">
+						NNTP connections repair downloads may use (shared across jobs). A repair streams the
+						whole release once, so this sets its speed; streaming playback keeps priority
+						regardless. Applies live to running repairs.
+					</p>
+				</fieldset>
+
+				<fieldset className="fieldset">
+					<legend className="fieldset-legend">Min Release Size (MB)</legend>
+					<input
+						type="number"
+						className="input input-bordered w-full max-w-48 bg-base-100 font-mono text-sm"
+						min={0}
+						value={data.min_release_size_mb ?? 0}
+						disabled={isReadOnly}
+						onChange={(e) => handleChange("min_release_size_mb", Number(e.target.value))}
+					/>
+					<p className="label whitespace-normal">
+						Releases smaller than this are not repaired. 0 = no minimum.
+					</p>
+				</fieldset>
+
+				<fieldset className="fieldset">
+					<legend className="fieldset-legend">Max Release Size (MB)</legend>
+					<input
+						type="number"
+						className="input input-bordered w-full max-w-48 bg-base-100 font-mono text-sm"
+						min={0}
+						value={data.max_release_size_mb ?? 0}
+						disabled={isReadOnly}
+						onChange={(e) => handleChange("max_release_size_mb", Number(e.target.value))}
+					/>
+					<p className="label whitespace-normal">
+						Releases larger than this are not repaired — a repair downloads the whole release once.
+						0 = no maximum.
 					</p>
 				</fieldset>
 

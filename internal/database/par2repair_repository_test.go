@@ -26,6 +26,8 @@ func setupPar2RepairSchema(t *testing.T, db *sql.DB) {
 			next_attempt_at TIMESTAMP,
 			started_at TIMESTAMP,
 			finished_at TIMESTAMP,
+			release_ref TEXT,
+			member_paths TEXT,
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 		);
@@ -33,6 +35,8 @@ func setupPar2RepairSchema(t *testing.T, db *sql.DB) {
 			WHERE status IN ('pending','running') AND file_path <> '';
 		CREATE UNIQUE INDEX idx_par2_repair_active_nzb ON par2_repair_jobs(nzb_path)
 			WHERE status IN ('pending','running') AND nzb_path IS NOT NULL;
+		CREATE UNIQUE INDEX idx_par2_repair_active_release ON par2_repair_jobs(release_ref)
+			WHERE status IN ('pending','running') AND release_ref IS NOT NULL;
 		CREATE INDEX idx_par2_repair_due ON par2_repair_jobs(status, next_attempt_at);
 	`)
 	require.NoError(t, err)
@@ -51,18 +55,109 @@ func TestPar2RepairEnqueueDedup(t *testing.T) {
 	repo, _ := newPar2RepairRepo(t)
 	ctx := context.Background()
 
-	created, err := repo.Enqueue(ctx, "/movies/a.mkv", "<seg1@test>")
+	created, _, err := repo.Enqueue(ctx, "/movies/a.mkv", "", "<seg1@test>")
 	require.NoError(t, err)
 	assert.True(t, created)
 
-	created, err = repo.Enqueue(ctx, "/movies/a.mkv", "<seg2@test>")
+	created, _, err = repo.Enqueue(ctx, "/movies/a.mkv", "", "<seg2@test>")
 	require.NoError(t, err)
 	assert.False(t, created, "second enqueue while pending must dedup")
 
 	// A different file is independent.
-	created, err = repo.Enqueue(ctx, "/movies/b.mkv", "")
+	created, _, err = repo.Enqueue(ctx, "/movies/b.mkv", "", "")
 	require.NoError(t, err)
 	assert.True(t, created)
+}
+
+// Files damaged in the same release must share one job: the repair plan covers
+// the whole release anyway, and one row per file would show the user N jobs
+// for what is a single repair.
+func TestPar2RepairEnqueueGroupsByRelease(t *testing.T) {
+	repo, _ := newPar2RepairRepo(t)
+	ctx := context.Background()
+
+	created, attached, err := repo.Enqueue(ctx, "/movies/a.mkv", "store-1", "<a@test>")
+	require.NoError(t, err)
+	assert.True(t, created)
+	assert.False(t, attached)
+
+	// Sibling file of the same release joins the existing job.
+	created, attached, err = repo.Enqueue(ctx, "/movies/b.mkv", "store-1", "<b@test>")
+	require.NoError(t, err)
+	assert.False(t, created, "sibling must not create a second job")
+	assert.True(t, attached)
+
+	jobs, err := repo.List(ctx, 10)
+	require.NoError(t, err)
+	require.Len(t, jobs, 1, "one release, one job")
+	assert.Equal(t, "/movies/a.mkv", jobs[0].FilePath)
+	assert.Equal(t, []string{"/movies/a.mkv", "/movies/b.mkv"}, jobs[0].Members())
+	assert.Contains(t, jobs[0].DeadSegments(), "<b@test>",
+		"the sibling's failing segment must feed the plan")
+
+	// Same file again: already tracked, nothing changes.
+	created, attached, err = repo.Enqueue(ctx, "/movies/b.mkv", "store-1", "<b@test>")
+	require.NoError(t, err)
+	assert.False(t, created)
+	assert.False(t, attached)
+	jobs, err = repo.List(ctx, 10)
+	require.NoError(t, err)
+	require.Len(t, jobs, 1)
+	assert.Equal(t, []string{"/movies/a.mkv", "/movies/b.mkv"}, jobs[0].Members())
+
+	// A different release is independent.
+	created, _, err = repo.Enqueue(ctx, "/movies/c.mkv", "store-2", "")
+	require.NoError(t, err)
+	assert.True(t, created)
+}
+
+// Attaching must also work while the job is already running: the sweep covers
+// the whole release, so the newcomer's damage is repaired by the same pass.
+func TestPar2RepairEnqueueAttachesToRunningJob(t *testing.T) {
+	repo, _ := newPar2RepairRepo(t)
+	ctx := context.Background()
+
+	_, _, err := repo.Enqueue(ctx, "/movies/a.mkv", "store-1", "")
+	require.NoError(t, err)
+	job, err := repo.ClaimNext(ctx, time.Now().UTC())
+	require.NoError(t, err)
+	require.NotNil(t, job)
+
+	created, attached, err := repo.Enqueue(ctx, "/movies/b.mkv", "store-1", "")
+	require.NoError(t, err)
+	assert.False(t, created)
+	assert.True(t, attached)
+
+	got, err := repo.Get(ctx, job.ID)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"/movies/a.mkv", "/movies/b.mkv"}, got.Members())
+}
+
+// After the release's job is gone, a fresh enqueue creates a new one.
+func TestPar2RepairReleaseReEnqueueAfterDelete(t *testing.T) {
+	repo, _ := newPar2RepairRepo(t)
+	ctx := context.Background()
+
+	_, _, err := repo.Enqueue(ctx, "/movies/a.mkv", "store-1", "")
+	require.NoError(t, err)
+	job, err := repo.ClaimNext(ctx, time.Now().UTC())
+	require.NoError(t, err)
+	require.NoError(t, repo.Delete(ctx, job.ID))
+
+	created, attached, err := repo.Enqueue(ctx, "/movies/b.mkv", "store-1", "")
+	require.NoError(t, err)
+	assert.True(t, created)
+	assert.False(t, attached)
+}
+
+func TestPar2RepairJobMembersFallback(t *testing.T) {
+	// Legacy rows (pre-grouping) have no member list: the trigger file is the
+	// only member. NZB-mode rows have no file at all.
+	assert.Equal(t, []string{"/a.mkv"}, (&Par2RepairJob{FilePath: "/a.mkv"}).Members())
+	assert.Empty(t, (&Par2RepairJob{}).Members())
+	assert.Equal(t, []string{"/a.mkv"},
+		(&Par2RepairJob{FilePath: "/a.mkv", MemberPaths: sql.NullString{String: "{bad", Valid: true}}).Members(),
+		"invalid JSON must fall back to the trigger file")
 }
 
 func TestPar2RepairClaimNext(t *testing.T) {
@@ -70,9 +165,9 @@ func TestPar2RepairClaimNext(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	_, err := repo.Enqueue(ctx, "/movies/a.mkv", "<s@test>")
+	_, _, err := repo.Enqueue(ctx, "/movies/a.mkv", "", "<s@test>")
 	require.NoError(t, err)
-	_, err = repo.Enqueue(ctx, "/movies/b.mkv", "")
+	_, _, err = repo.Enqueue(ctx, "/movies/b.mkv", "", "")
 	require.NoError(t, err)
 
 	job, err := repo.ClaimNext(ctx, now)
@@ -99,7 +194,7 @@ func TestPar2RepairClaimSkipsNotDue(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	_, err := repo.Enqueue(ctx, "/movies/a.mkv", "")
+	_, _, err := repo.Enqueue(ctx, "/movies/a.mkv", "", "")
 	require.NoError(t, err)
 	job, err := repo.ClaimNext(ctx, now)
 	require.NoError(t, err)
@@ -125,7 +220,7 @@ func TestPar2RepairDeleteFinishedSweepsLegacyTerminalRows(t *testing.T) {
 	repo, db := newPar2RepairRepo(t)
 	ctx := context.Background()
 
-	_, err := repo.Enqueue(ctx, "/movies/active.mkv", "")
+	_, _, err := repo.Enqueue(ctx, "/movies/active.mkv", "", "")
 	require.NoError(t, err)
 	_, err = db.Exec(`
 		INSERT INTO par2_repair_jobs (file_path, status) VALUES
@@ -148,7 +243,7 @@ func TestPar2RepairDeleteAllowsReEnqueue(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	_, err := repo.Enqueue(ctx, "/movies/a.mkv", "")
+	_, _, err := repo.Enqueue(ctx, "/movies/a.mkv", "", "")
 	require.NoError(t, err)
 	job, err := repo.ClaimNext(ctx, now)
 	require.NoError(t, err)
@@ -158,7 +253,7 @@ func TestPar2RepairDeleteAllowsReEnqueue(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, jobs, "deleted job must not linger in the list")
 
-	created, err := repo.Enqueue(ctx, "/movies/a.mkv", "")
+	created, _, err := repo.Enqueue(ctx, "/movies/a.mkv", "", "")
 	require.NoError(t, err)
 	assert.True(t, created, "file damaged again must be re-queueable after deletion")
 }
@@ -170,7 +265,7 @@ func TestPar2RepairRetryRestartsRunTime(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	_, err := repo.Enqueue(ctx, "/movies/a.mkv", "")
+	_, _, err := repo.Enqueue(ctx, "/movies/a.mkv", "", "")
 	require.NoError(t, err)
 	first, err := repo.ClaimNext(ctx, now)
 	require.NoError(t, err)
@@ -188,7 +283,7 @@ func TestPar2RepairAppendDeadSegment(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	_, err := repo.Enqueue(ctx, "/movies/a.mkv", "")
+	_, _, err := repo.Enqueue(ctx, "/movies/a.mkv", "", "")
 	require.NoError(t, err)
 	job, err := repo.ClaimNext(ctx, now)
 	require.NoError(t, err)
@@ -218,9 +313,9 @@ func TestPar2RepairList(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	_, err := repo.Enqueue(ctx, "/movies/a.mkv", "")
+	_, _, err := repo.Enqueue(ctx, "/movies/a.mkv", "", "")
 	require.NoError(t, err)
-	_, err = repo.Enqueue(ctx, "/movies/b.mkv", "")
+	_, _, err = repo.Enqueue(ctx, "/movies/b.mkv", "", "")
 	require.NoError(t, err)
 
 	// Touch a.mkv so it becomes the most recently updated (retry not yet due).
@@ -252,7 +347,7 @@ func TestPar2RepairResetRunning(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	_, err := repo.Enqueue(ctx, "/movies/a.mkv", "")
+	_, _, err := repo.Enqueue(ctx, "/movies/a.mkv", "", "")
 	require.NoError(t, err)
 	_, err = repo.ClaimNext(ctx, now)
 	require.NoError(t, err)
@@ -288,7 +383,7 @@ func TestPar2RepairEnqueueNzb(t *testing.T) {
 func TestPar2RepairGet(t *testing.T) {
 	repo, _ := newPar2RepairRepo(t)
 	ctx := context.Background()
-	_, err := repo.Enqueue(ctx, "/movies/a.mkv", "<seg@x>")
+	_, _, err := repo.Enqueue(ctx, "/movies/a.mkv", "", "<seg@x>")
 	require.NoError(t, err)
 	rows, err := repo.List(ctx, 10)
 	require.NoError(t, err)

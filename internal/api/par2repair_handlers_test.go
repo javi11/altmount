@@ -57,11 +57,15 @@ func newPar2RepairAPIRepo(t *testing.T) *database.Par2RepairRepository {
 			next_attempt_at TIMESTAMP,
 			started_at TIMESTAMP,
 			finished_at TIMESTAMP,
+			release_ref TEXT,
+			member_paths TEXT,
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 		);
 		CREATE UNIQUE INDEX idx_par2_repair_active ON par2_repair_jobs(file_path)
 			WHERE status IN ('pending','running');
+		CREATE UNIQUE INDEX idx_par2_repair_active_release ON par2_repair_jobs(release_ref)
+			WHERE status IN ('pending','running') AND release_ref IS NOT NULL;
 	`)
 	if err != nil {
 		t.Fatal(err)
@@ -72,10 +76,10 @@ func newPar2RepairAPIRepo(t *testing.T) *database.Par2RepairRepository {
 func TestHandleListPar2Repair(t *testing.T) {
 	repo := newPar2RepairAPIRepo(t)
 	ctx := context.Background()
-	if _, err := repo.Enqueue(ctx, "/movies/a.mkv", "<seg@x>"); err != nil {
+	if _, _, err := repo.Enqueue(ctx, "/movies/a.mkv", "", "<seg@x>"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.Enqueue(ctx, "/movies/b.mkv", ""); err != nil {
+	if _, _, err := repo.Enqueue(ctx, "/movies/b.mkv", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	job, err := repo.ClaimNext(ctx, time.Now().UTC())
@@ -114,6 +118,132 @@ func TestHandleListPar2Repair(t *testing.T) {
 	b := byPath["/movies/b.mkv"]
 	if b.Status != "pending" || b.LastError != nil || b.ID == 0 || b.CreatedAt.IsZero() {
 		t.Fatalf("b.mkv row = %+v", b)
+	}
+}
+
+// fakeProgressSource is an enqueuer that also reports live stage progress,
+// like par2repair.Service does.
+type fakeProgressSource struct {
+	fakeEnqueuer
+	snap par2repair.JobProgressSnapshot
+}
+
+func (f *fakeProgressSource) Progress(int64) (par2repair.JobProgressSnapshot, bool) {
+	return f.snap, true
+}
+
+// A running job with live progress serializes its stage and counts.
+func TestHandleListPar2RepairProgress(t *testing.T) {
+	repo := newPar2RepairAPIRepo(t)
+	ctx := context.Background()
+	if _, _, err := repo.Enqueue(ctx, "/movies/a.mkv", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if job, err := repo.ClaimNext(ctx, time.Now().UTC()); err != nil || job == nil {
+		t.Fatalf("claim failed: %v", err)
+	}
+
+	src := &fakeProgressSource{snap: par2repair.JobProgressSnapshot{
+		Stage: par2repair.StageChecking, DoneArticles: 128, TotalArticles: 512,
+		StageStartedAt: time.Now().UTC().Add(-30 * time.Second),
+	}}
+	app := par2TestApp(&Server{par2RepairRepo: repo, par2Repair: src})
+	resp, err := app.Test(httptest.NewRequest("GET", "/api/par2repair", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	var envelope struct {
+		Data []Par2RepairJobResponse `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		t.Fatalf("unmarshal %s: %v", raw, err)
+	}
+	if len(envelope.Data) != 1 {
+		t.Fatalf("rows = %d, want 1", len(envelope.Data))
+	}
+	row := envelope.Data[0]
+	if row.ProgressStage == nil || *row.ProgressStage != string(par2repair.StageChecking) {
+		t.Fatalf("progress_stage = %v, want %q", row.ProgressStage, par2repair.StageChecking)
+	}
+	if row.ProgressDone == nil || *row.ProgressDone != 128 || row.ProgressTotal == nil || *row.ProgressTotal != 512 {
+		t.Fatalf("progress = %v/%v, want 128/512", row.ProgressDone, row.ProgressTotal)
+	}
+	if row.ProgressStageElapsedSeconds == nil || *row.ProgressStageElapsedSeconds < 29 || *row.ProgressStageElapsedSeconds > 60 {
+		t.Fatalf("progress_stage_elapsed_seconds = %v, want ~30", row.ProgressStageElapsedSeconds)
+	}
+}
+
+// A snapshot without a stage start (older service, or the stage has not
+// reported yet) omits the elapsed field rather than serving a bogus zero-epoch
+// delta.
+func TestHandleListPar2RepairProgressWithoutStageStart(t *testing.T) {
+	repo := newPar2RepairAPIRepo(t)
+	ctx := context.Background()
+	if _, _, err := repo.Enqueue(ctx, "/movies/a.mkv", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if job, err := repo.ClaimNext(ctx, time.Now().UTC()); err != nil || job == nil {
+		t.Fatalf("claim failed: %v", err)
+	}
+
+	src := &fakeProgressSource{snap: par2repair.JobProgressSnapshot{
+		Stage: par2repair.StageChecking, DoneArticles: 128, TotalArticles: 512,
+	}}
+	app := par2TestApp(&Server{par2RepairRepo: repo, par2Repair: src})
+	resp, err := app.Test(httptest.NewRequest("GET", "/api/par2repair", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	var envelope struct {
+		Data []Par2RepairJobResponse `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		t.Fatalf("unmarshal %s: %v", raw, err)
+	}
+	if len(envelope.Data) != 1 {
+		t.Fatalf("rows = %d, want 1", len(envelope.Data))
+	}
+	if got := envelope.Data[0].ProgressStageElapsedSeconds; got != nil {
+		t.Fatalf("progress_stage_elapsed_seconds = %v, want nil", *got)
+	}
+}
+
+// A grouped job (several damaged files of one release) is one row whose
+// file_paths carries every member, so the UI can show what it covers.
+func TestHandleListPar2RepairGroupedJob(t *testing.T) {
+	repo := newPar2RepairAPIRepo(t)
+	ctx := context.Background()
+	if _, _, err := repo.Enqueue(ctx, "/movies/a.mkv", "store-1", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := repo.Enqueue(ctx, "/movies/b.mkv", "store-1", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	app := par2TestApp(&Server{par2RepairRepo: repo})
+	resp, err := app.Test(httptest.NewRequest("GET", "/api/par2repair", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	var envelope struct {
+		Data []Par2RepairJobResponse `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		t.Fatalf("unmarshal %s: %v", raw, err)
+	}
+	if len(envelope.Data) != 1 {
+		t.Fatalf("rows = %s, want a single job for the release", raw)
+	}
+	got := envelope.Data[0]
+	if got.FilePath != "/movies/a.mkv" {
+		t.Fatalf("file_path = %q, want the trigger file", got.FilePath)
+	}
+	want := []string{"/movies/a.mkv", "/movies/b.mkv"}
+	if len(got.FilePaths) != 2 || got.FilePaths[0] != want[0] || got.FilePaths[1] != want[1] {
+		t.Fatalf("file_paths = %v, want %v", got.FilePaths, want)
 	}
 }
 
@@ -245,7 +375,7 @@ func TestHandleCancelAllPar2Repair(t *testing.T) {
 	repo := newPar2RepairAPIRepo(t)
 	ctx := context.Background()
 	for _, p := range []string{"/movies/a.mkv", "/movies/b.mkv"} {
-		if _, err := repo.Enqueue(ctx, p, ""); err != nil {
+		if _, _, err := repo.Enqueue(ctx, p, "", ""); err != nil {
 			t.Fatal(err)
 		}
 	}

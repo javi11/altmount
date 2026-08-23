@@ -3,14 +3,14 @@ package par2repair
 import (
 	"context"
 	"fmt"
-	"io"
+	"log/slog"
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/javi11/nzbparser"
 
-	"github.com/javi11/altmount/internal/importer/parser/par2"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 )
 
@@ -29,6 +29,8 @@ func ResolveFromNzb(
 	deadSegmentIDs []string,
 	fetch ArticleFetcher,
 	caps Caps,
+	log *slog.Logger,
+	progress JobProgress,
 ) (*Resolution, error) {
 	if n == nil || len(n.Files) == 0 {
 		return nil, fmt.Errorf("%w: empty NZB", ErrUnrepairable)
@@ -58,11 +60,8 @@ func ResolveFromNzb(
 
 	cache := newArticleCache(resolveCacheCap)
 	var par2Files []SetFile
-	var streams []io.Reader
 	for _, f := range par2Entries {
-		sf := nzbEntryToSetFile(f, nil)
-		par2Files = append(par2Files, sf)
-		streams = append(streams, newLazyFileReader(ctx, fetch, sf, cache))
+		par2Files = append(par2Files, nzbEntryToSetFile(f, nil))
 	}
 
 	// Match recovery-set members to NZB content entries, reusing the shared
@@ -86,21 +85,24 @@ func ResolveFromNzb(
 			dead[normalizeMsgID(id)] = true
 		}
 	}
-	if err := statSweep(ctx, fetch, releaseArticleIDs(store, par2Files), dead); err != nil {
+	if err := releaseSizePrecheck(store.Files, par2Files, caps); err != nil {
 		return nil, err
 	}
+
+	started := time.Now()
+	hidden, err := statSweep(ctx, fetch, releaseArticleIDs(store, par2Files), dead, progress)
+	if err != nil {
+		return nil, err
+	}
+	caps.ExpectedHiddenArticles = hidden
+	log.InfoContext(ctx, "PAR2 repair liveness check complete",
+		"dead_articles", len(dead), "hidden_estimate", hidden, "duration", time.Since(started).Round(time.Millisecond))
 	// store carries only content entries here, so nothing to exclude.
 	if err := ratioPrecheck(store.Files, nil, dead, caps); err != nil {
 		return nil, err
 	}
 
-	idx, err := par2.ParseIndex(streams)
-	if err != nil {
-		return nil, fmt.Errorf("%w: parse PAR2 set: %v", ErrUnrepairable, err)
-	}
-	dropDeadRecovery(idx, par2Files, dead)
-
-	files, err := matchSetFiles(ctx, idx, store, dead, fetch, cache)
+	idx, files, err := planSet(ctx, fetch, store, par2Files, dead, cache, log, progress)
 	if err != nil {
 		return nil, err
 	}
@@ -109,6 +111,9 @@ func ResolveFromNzb(
 	if err != nil {
 		return nil, err
 	}
+	log.InfoContext(ctx, "PAR2 repair plan built",
+		"missing_slices", len(plan.Missing), "recovery_rows", len(plan.Recovery),
+		"spares", len(plan.SpareRecovery), "spill_to_disk", plan.SpillToDisk)
 	return &Resolution{Plan: plan, Index: idx, Par2Files: par2Files}, nil
 }
 

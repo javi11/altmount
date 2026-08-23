@@ -3,6 +3,7 @@ package par2repair
 import (
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 
 	"github.com/javi11/altmount/internal/importer/parser/par2"
@@ -53,6 +54,18 @@ type Caps struct {
 	// MaxMemoryBytes bounds the solver's in-heap accumulator memory (k × slice
 	// size). Jobs over the bound still run, backed by a disk arena.
 	MaxMemoryBytes int64
+	// MinReleaseSizeBytes / MaxReleaseSizeBytes bound the size of releases a
+	// repair may take on (content bytes, PAR2 files excluded). A repair
+	// downloads the whole release once, so these let users skip releases too
+	// large to be worth the bandwidth or too small to bother with. Zero means
+	// unbounded on that side.
+	MinReleaseSizeBytes int64
+	MaxReleaseSizeBytes int64
+	// ExpectedHiddenArticles is the liveness sample's estimate of dead
+	// articles the plan cannot see (the sample found damage but the full
+	// release was not STATed). BuildPlan provisions extra margin rows for
+	// them so the payload sweep absorbs the discoveries without a replan.
+	ExpectedHiddenArticles int
 }
 
 // Plan is everything a repair job needs to run: which slices to reconstruct,
@@ -167,7 +180,7 @@ func BuildPlan(idx *par2.Index, files []SetFile, caps Caps) (*Plan, error) {
 	recs := make([]par2.RecoverySliceRef, len(idx.Recovery))
 	copy(recs, idx.Recovery)
 	sort.Slice(recs, func(i, j int) bool { return recs[i].Exponent < recs[j].Exponent })
-	m := min(planMargin, len(recs)-k)
+	m := min(planMargin+hiddenMarginRows(plan.Files, sliceSize, caps.ExpectedHiddenArticles), len(recs)-k)
 	if !plan.SpillToDisk && caps.MaxMemoryBytes > 0 {
 		for m > 0 && int64(k+m)*sliceSize > caps.MaxMemoryBytes {
 			m--
@@ -177,6 +190,34 @@ func BuildPlan(idx *par2.Index, files []SetFile, caps Caps) (*Plan, error) {
 	plan.SpareRecovery = recs[k+m:]
 
 	return plan, nil
+}
+
+// maxHiddenMarginRows caps the extra margin the hidden-damage estimate may
+// add. Margin rows are fetched recovery payloads — one slice of download
+// each — so a sampling estimate must not be able to demand unbounded rows.
+// Sized to what maxHiddenAbsorbArticles articles typically span.
+const maxHiddenMarginRows = 128
+
+// hiddenMarginRows converts a hidden-dead-article estimate into extra margin
+// rows: the slices those articles are expected to touch, plus headroom for
+// the estimate's sampling error (~2 standard deviations, Poisson-flavored).
+func hiddenMarginRows(files []SetFile, sliceSize int64, hiddenArticles int) int {
+	if hiddenArticles <= 0 {
+		return 0
+	}
+	var articles, spanned int64
+	for _, f := range files {
+		for _, a := range f.Articles {
+			articles++
+			spanned += a.Size/sliceSize + 1
+		}
+	}
+	if articles == 0 {
+		return 0
+	}
+	expected := float64(hiddenArticles) * float64(spanned) / float64(articles)
+	rows := int(math.Ceil(expected + 2*math.Sqrt(expected)))
+	return min(rows, maxHiddenMarginRows)
 }
 
 func articleSizeSum(arts []Article) int64 {

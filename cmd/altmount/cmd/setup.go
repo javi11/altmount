@@ -402,7 +402,9 @@ func startPar2RepairService(
 ) *par2repair.Service {
 	fetcher := par2repair.NewPoolFetcher(func() (par2repair.BodyClient, error) {
 		return poolManager.GetPool()
-	}, poolManager)
+	}, par2repair.NewConnLimiter(func() int {
+		return configGetter().Par2Repair.EffectiveMaxConnections()
+	}))
 	patchStore := par2repair.NewPatchStore(cfg.Par2Repair.EffectivePatchDir(cfg.Metadata.RootPath))
 	service := par2repair.NewService(
 		repo,
@@ -416,6 +418,9 @@ func startPar2RepairService(
 				MaxRepairRatio:    c.Par2Repair.MaxRepairRatio,
 				MaxMemoryMB:       c.Par2Repair.MaxMemoryMB,
 				MaxConcurrentJobs: c.Par2Repair.MaxConcurrentJobs,
+				MaxConnections:    c.Par2Repair.EffectiveMaxConnections(),
+				MinReleaseSizeMB:  c.Par2Repair.MinReleaseSizeMB,
+				MaxReleaseSizeMB:  c.Par2Repair.MaxReleaseSizeMB,
 				MaxPatchStoreMB:   c.Par2Repair.MaxPatchStoreMB,
 			}
 		},
@@ -465,7 +470,9 @@ func startHealthWorker(
 		broadcaster,
 	)
 
-	// Degraded verdicts attempt PAR2 repair before anything else.
+	// Degraded verdicts attempt PAR2 repair before anything else; with
+	// arr_first (default on) it also picks up corrupted files the ARRs
+	// could not repair.
 	if par2RepairService != nil {
 		healthWorker.SetPar2RepairEnqueuer(par2RepairService)
 	}

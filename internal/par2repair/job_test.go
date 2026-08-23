@@ -8,7 +8,9 @@ import (
 	"io"
 	"log/slog"
 	"math/rand"
+	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -130,8 +132,20 @@ func TestRunJobRepairsDeadArticle(t *testing.T) {
 	}
 
 	store := NewPatchStore(t.TempDir())
-	if err := RunJob(context.Background(), plan, fx.idx, fx.par2Files, fx.fetch, store, testLogger()); err != nil {
+	var stages []Stage
+	progress := WithProgress(func(stage Stage, done, total int) {
+		if n := len(stages); n == 0 || stages[n-1] != stage {
+			stages = append(stages, stage)
+		}
+		if done < 0 || done > total {
+			t.Errorf("progress %d/%d out of range in stage %q", done, total, stage)
+		}
+	})
+	if err := RunJob(context.Background(), plan, fx.idx, fx.par2Files, fx.fetch, store, testLogger(), progress); err != nil {
 		t.Fatal(err)
+	}
+	if want := []Stage{StageDownloading, StageRepairing}; !slices.Equal(stages, want) {
+		t.Fatalf("progress stages = %v, want %v", stages, want)
 	}
 
 	got, ok := store.Get(fx.deadMsgID)
@@ -459,5 +473,167 @@ func TestRunJobCorruptOverflowFallsBackToReplan(t *testing.T) {
 	// The replans really happened: present articles were swept more than once.
 	if n := fx.fetch.countFetches("<a.rar-0@test>"); n < 2 {
 		t.Fatalf("article <a.rar-0@test> fetched %d times, want >=2 (replan re-sweeps)", n)
+	}
+}
+
+// A recovery payload that arrives corrupt (its bytes no longer match the
+// RecvSlic packet's MD5) must never seed an accumulator: a poisoned row makes
+// every rebuilt slice fail verification and the whole repair is discarded.
+// The load must detect the mismatch and fall back exactly like a dead
+// recovery article — margin row dropped or spare swapped in — and the repair
+// must still produce a byte-exact patch.
+func TestRunJobSwapsOutCorruptRecoveryPayload(t *testing.T) {
+	fx := mkRepairFixture(t, 1024, 2048, 6, 1)
+	plan, err := BuildPlan(fx.idx, fx.files, Caps{MaxRepairRatio: 0.5, MaxMemoryBytes: 64 << 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Corrupt the payload bytes of the first chosen recovery slice inside its
+	// backing PAR2 article (copied: the fixture shares the volume buffers).
+	ref := plan.Recovery[0]
+	artID := fx.par2Files[ref.FileIndex].Articles[0].MessageID
+	art := append([]byte(nil), fx.fetch.articles[artID]...)
+	art[ref.BodyOffset+7] ^= 0xFF
+	fx.fetch.articles[artID] = art
+
+	store := NewPatchStore(t.TempDir())
+	if err := RunJob(context.Background(), plan, fx.idx, fx.par2Files, fx.fetch, store, testLogger()); err != nil {
+		t.Fatalf("RunJob must survive a corrupt recovery payload: %v", err)
+	}
+	got, ok := store.Get(fx.deadMsgID)
+	if !ok || !bytes.Equal(got, fx.deadOrig) {
+		t.Fatal("repair with a corrupt recovery payload must still produce a byte-exact patch")
+	}
+}
+
+// The sweep's fetch concurrency must follow the configured repair connection
+// count, not a hard-coded depth: WithConcurrency(2) keeps at most 2 fetches
+// in flight.
+func TestRunJobHonorsConcurrencyOption(t *testing.T) {
+	fx := mkRepairFixture(t, 1024, 512, 6, 1) // 32 sweep articles
+	fetch := &concurrencyFetcher{inner: fx.fetch}
+
+	plan, err := BuildPlan(fx.idx, fx.files, Caps{MaxRepairRatio: 0.5, MaxMemoryBytes: 64 << 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewPatchStore(t.TempDir())
+	if err := RunJob(context.Background(), plan, fx.idx, fx.par2Files, fetch, store, testLogger(), WithConcurrency(2)); err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok := store.Get(fx.deadMsgID)
+	if !ok || !bytes.Equal(got, fx.deadOrig) {
+		t.Fatal("bounded sweep must still produce a byte-exact patch")
+	}
+	if fetch.maxInFlight > 2 {
+		t.Fatalf("max in-flight fetches = %d, want <= 2 (WithConcurrency must bound the sweep)", fetch.maxInFlight)
+	}
+}
+
+// blockingFetcher blocks every Fetch until told to complete one, so tests can
+// observe in-flight counts deterministically.
+type blockingFetcher struct {
+	mu       sync.Mutex
+	inFlight int
+	proceed  chan struct{} // one receive releases one blocked fetch
+}
+
+func (b *blockingFetcher) Fetch(ctx context.Context, messageID string) ([]byte, error) {
+	b.mu.Lock()
+	b.inFlight++
+	b.mu.Unlock()
+	defer func() {
+		b.mu.Lock()
+		b.inFlight--
+		b.mu.Unlock()
+	}()
+	select {
+	case <-b.proceed:
+		return []byte{0}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (b *blockingFetcher) current() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.inFlight
+}
+
+// waitFor polls until cond holds or the deadline passes.
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", what)
+}
+
+// The prefetch pipeline reads its depth live: raising the configured repair
+// connection count mid-run must let a running sweep launch more concurrent
+// fetches as slots churn, without restarting the job.
+func TestPrefetchArticlesHonorsLiveDepthRaise(t *testing.T) {
+	fetch := &blockingFetcher{proceed: make(chan struct{})}
+	var limit atomic.Int64
+	limit.Store(1)
+
+	arts := make([]Article, 8)
+	for i := range arts {
+		arts[i] = Article{MessageID: fmt.Sprintf("<a%d@test>", i), Size: 1}
+	}
+	slots, stop := prefetchArticles(context.Background(), fetch, arts, func() int { return int(limit.Load()) })
+	defer stop()
+
+	waitFor(t, "first fetch in flight", func() bool { return fetch.current() == 1 })
+	time.Sleep(10 * time.Millisecond) // depth 1: no second fetch may start
+	if got := fetch.current(); got != 1 {
+		t.Fatalf("in-flight = %d, want 1 while depth is 1", got)
+	}
+
+	limit.Store(3)
+	fetch.proceed <- struct{}{} // one completion churns a slot at the new depth
+	waitFor(t, "three fetches in flight after raise", func() bool { return fetch.current() == 3 })
+
+	// Drain so the pipeline goroutine exits.
+	for range arts {
+		select {
+		case fetch.proceed <- struct{}{}:
+		default:
+		}
+	}
+	stop()
+	for range slots {
+	}
+}
+
+// WithLiveConcurrency plumbs a live getter through RunJob down to the sweep's
+// fetch pipeline: the bound must be honored end to end.
+func TestRunJobHonorsLiveConcurrencyGetter(t *testing.T) {
+	fx := mkRepairFixture(t, 1024, 512, 6, 1) // 32 sweep articles
+	fetch := &concurrencyFetcher{inner: fx.fetch}
+
+	plan, err := BuildPlan(fx.idx, fx.files, Caps{MaxRepairRatio: 0.5, MaxMemoryBytes: 64 << 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewPatchStore(t.TempDir())
+	err = RunJob(context.Background(), plan, fx.idx, fx.par2Files, fetch, store, testLogger(),
+		WithLiveConcurrency(func() int { return 2 }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := store.Get(fx.deadMsgID)
+	if !ok || !bytes.Equal(got, fx.deadOrig) {
+		t.Fatal("bounded sweep must still produce a byte-exact patch")
+	}
+	if fetch.maxInFlight > 2 {
+		t.Fatalf("max in-flight fetches = %d, want <= 2 (live getter must bound the sweep)", fetch.maxInFlight)
 	}
 }

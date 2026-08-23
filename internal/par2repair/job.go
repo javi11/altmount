@@ -3,6 +3,7 @@ package par2repair
 import (
 	"context"
 	"crypto/md5"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"hash/crc32"
@@ -21,10 +22,11 @@ type ArticleFetcher interface {
 	Fetch(ctx context.Context, messageID string) ([]byte, error)
 }
 
-// fetchAhead bounds how many article fetches a job keeps in flight (and how
-// many fetched-but-unconsumed payloads it buffers, so memory stays at
-// fetchAhead x article size). Fetches also pass through the pool's import
-// connection budget, which is the real global throttle.
+// fetchAhead is the default prefetch depth when no concurrency was
+// configured (WithConcurrency): how many article fetches a job keeps in
+// flight, and how many fetched-but-unconsumed payloads it buffers. Fetches
+// also pass through the repair connection budget, which is the real global
+// throttle.
 const fetchAhead = 8
 
 // SweepDeadArticleError reports an article that was live at planning time but
@@ -42,21 +44,78 @@ func (e *SweepDeadArticleError) Error() string {
 
 func (e *SweepDeadArticleError) Unwrap() error { return e.Err }
 
-// JobProgress receives sweep progress: articles processed so far out of the
-// total the sweep covers. Called from the job goroutine; must be fast.
-type JobProgress func(doneArticles, totalArticles int)
+// Stage identifies a phase of a repair job for progress reporting.
+type Stage string
+
+const (
+	// StageChecking is the pre-plan liveness check: STATing release articles
+	// to learn which are dead before building the plan.
+	StageChecking Stage = "checking"
+	// StagePlanning is the resolve work after the liveness check: parsing the
+	// PAR2 set and matching recovery-set members to NZB files. It has no
+	// meaningful unit count (done/total are zero); reporting it keeps the UI
+	// off the finished liveness numbers while minutes of fetches run.
+	StagePlanning Stage = "planning"
+	// StageDownloading is the recovery payload download that precedes a sweep.
+	StageDownloading Stage = "downloading"
+	// StageRepairing is the verification sweep that streams the release and
+	// folds present slices into the solver.
+	StageRepairing Stage = "repairing"
+)
+
+// JobProgress receives job progress: units processed so far out of the
+// stage's total (articles STATed, recovery slices downloaded, or release
+// articles swept, depending on the stage). Called from the job goroutine;
+// must be fast.
+type JobProgress func(stage Stage, done, total int)
 
 // JobOption customizes RunJob.
 type JobOption func(*jobOptions)
 
 type jobOptions struct {
-	progress JobProgress
+	progress    JobProgress
+	concurrency func() int
 }
 
-// WithProgress reports sweep progress through cb. A re-sweep (singular-matrix
-// or corrupt-slice replan) restarts the count.
+// WithProgress reports job progress through cb. A re-sweep (singular-matrix
+// or corrupt-slice replan) restarts the count of its stage.
 func WithProgress(cb JobProgress) JobOption {
 	return func(o *jobOptions) { o.progress = cb }
+}
+
+// WithConcurrency bounds how many article fetches the job keeps in flight.
+// Values <= 0 keep the default; the depth is capped at maxFetchAhead.
+func WithConcurrency(n int) JobOption {
+	return WithLiveConcurrency(func() int { return n })
+}
+
+// WithLiveConcurrency is WithConcurrency with a live bound (typically the
+// configured repair connection count, read from config): the pipeline
+// re-reads it as fetches complete, so raising max_connections speeds up a
+// job already running. Per-call values <= 0 fall back to the default depth.
+func WithLiveConcurrency(get func() int) JobOption {
+	return func(o *jobOptions) { o.concurrency = get }
+}
+
+// maxFetchAhead caps the fetch concurrency however large the configured
+// connection count is. It is also the pipeline's buffer bound:
+// fetched-but-unconsumed payloads are held in memory, so maxFetchAhead x
+// article size bounds what a sweep outpacing its consumer can pile up.
+const maxFetchAhead = 64
+
+// fetchDepth is the live prefetch depth this job runs with: the configured
+// concurrency getter clamped to [1, maxFetchAhead], or the fetchAhead default
+// when unset or non-positive.
+func (o jobOptions) fetchDepth() func() int {
+	return func() int {
+		n := fetchAhead
+		if o.concurrency != nil {
+			if c := o.concurrency(); c > 0 {
+				n = c
+			}
+		}
+		return min(n, maxFetchAhead)
+	}
 }
 
 // maxCorruptReplans bounds how many corrupt present slices a single job may
@@ -180,7 +239,7 @@ func RunJob(
 		var payloads [][]byte
 		var err error
 		refs, payloads, spares, err = loadRecoveryPayloads(
-			ctx, fetch, par2Files, refs, spares, len(missing), sliceSize, alloc, plan.SpillToDisk, log)
+			ctx, fetch, par2Files, refs, spares, len(missing), sliceSize, alloc, plan.SpillToDisk, o.fetchDepth(), o.progress, log)
 		if err != nil {
 			return err
 		}
@@ -246,10 +305,10 @@ func RunJob(
 		onArticle := func() {
 			doneArticles++
 			if o.progress != nil {
-				o.progress(doneArticles, totalArticles)
+				o.progress(StageRepairing, doneArticles, totalArticles)
 			}
 		}
-		if err := sweep(ctx, plan, idx, fetch, solver, startSlice, missingPos, absorbDead, absorbCorrupt, onArticle, log); err != nil {
+		if err := sweep(ctx, plan, idx, fetch, solver, o.fetchDepth(), startSlice, missingPos, absorbDead, absorbCorrupt, onArticle, log); err != nil {
 			var corrupt *corruptSliceError
 			if !errors.As(err, &corrupt) {
 				return err
@@ -318,6 +377,8 @@ func loadRecoveryPayloads(
 	sliceSize int64,
 	alloc bufAlloc,
 	spill bool,
+	depth func() int,
+	progress JobProgress,
 	log *slog.Logger,
 ) ([]par2.RecoverySliceRef, [][]byte, []par2.RecoverySliceRef, error) {
 	order := make([]int, len(refs))
@@ -334,23 +395,34 @@ func loadRecoveryPayloads(
 
 	payloads := make([][]byte, len(refs))
 	kept := make([]bool, len(refs))
-	feed := newArticleFeed(ctx, fetch, recoveryArticleIDs(par2Files, refs, order, sliceSize))
+	if progress != nil {
+		progress(StageDownloading, 0, len(refs))
+	}
+	loaded := 0
+	feed := newArticleFeed(ctx, fetch, recoveryArticleIDs(par2Files, refs, order, sliceSize), depth)
 	defer feed.stop()
 	for _, i := range order {
 		for {
 			ref := refs[i]
 			data, err := readRangeFrom(feed.get, par2Files[ref.FileIndex], ref.BodyOffset, sliceSize)
+			if err == nil && !recoveryPayloadIntact(ref, data) {
+				// A corrupt recovery payload poisons every slice the solver
+				// rebuilds, and the damage only surfaces after the whole
+				// release has been swept. Caught against the RecvSlic packet's
+				// own MD5, it is just an unreachable slice by another name.
+				err = fmt.Errorf("payload does not match its packet MD5: %w", nntppool.ErrArticleNotFound)
+			}
 			if err != nil {
 				if errors.Is(err, nntppool.ErrArticleNotFound) {
 					if len(spares) > 0 {
-						log.WarnContext(ctx, "recovery slice unreachable, swapping in spare",
-							"exponent", ref.Exponent, "spare_exponent", spares[0].Exponent)
+						log.WarnContext(ctx, "recovery slice unreachable or corrupt, swapping in spare",
+							"exponent", ref.Exponent, "spare_exponent", spares[0].Exponent, "reason", err)
 						refs[i] = spares[0]
 						spares = spares[1:]
 						continue
 					}
-					log.WarnContext(ctx, "recovery slice unreachable, dropping margin row",
-						"exponent", ref.Exponent)
+					log.WarnContext(ctx, "recovery slice unreachable or corrupt, dropping margin row",
+						"exponent", ref.Exponent, "reason", err)
 					break
 				}
 				return nil, nil, nil, fmt.Errorf("par2repair: fetch recovery slice exponent %d: %w", ref.Exponent, err)
@@ -366,6 +438,10 @@ func loadRecoveryPayloads(
 			payloads[i] = data
 			kept[i] = true
 			break
+		}
+		loaded++
+		if progress != nil {
+			progress(StageDownloading, loaded, len(refs))
 		}
 	}
 
@@ -384,6 +460,24 @@ func loadRecoveryPayloads(
 	return outRefs, outPayloads, spares, nil
 }
 
+// recoveryPayloadIntact verifies a fetched recovery payload against its
+// RecvSlic packet MD5, which covers everything after the header's hash field:
+// set ID, packet type, exponent and payload. Refs without a recorded hash
+// (hand-built rather than parsed) pass unchecked.
+func recoveryPayloadIntact(ref par2.RecoverySliceRef, payload []byte) bool {
+	if ref.PacketMD5 == ([16]byte{}) {
+		return true
+	}
+	sum := md5.New()
+	sum.Write(ref.SetID[:])
+	sum.Write(par2.PacketTypeRecoverySlice[:])
+	var exp [4]byte
+	binary.LittleEndian.PutUint32(exp[:], ref.Exponent)
+	sum.Write(exp[:])
+	sum.Write(payload)
+	return [16]byte(sum.Sum(nil)) == ref.PacketMD5
+}
+
 // sweep streams every article of the recovery set in order, assembles input
 // slices, verifies present slices against IFSC CRC32 and folds them into the
 // solver. Slices touched by dead articles are skipped (they are the unknowns).
@@ -399,6 +493,7 @@ func sweep(
 	idx *par2.Index,
 	fetch ArticleFetcher,
 	solver *Solver,
+	depth func() int,
 	startSlice []int64,
 	missingPos map[int]int,
 	absorbDead func(fi, ai int, artOff int64, a Article) bool,
@@ -450,7 +545,7 @@ func sweep(
 		}
 
 		var artOff int64
-		slots, stop := prefetchArticles(ctx, fetch, f.Articles)
+		slots, stop := prefetchArticles(ctx, fetch, f.Articles, depth)
 		for ai, a := range f.Articles {
 			if err := ctx.Err(); err != nil {
 				stop()
@@ -566,14 +661,14 @@ type articleFeed struct {
 	cancel func()
 }
 
-func newArticleFeed(ctx context.Context, fetch ArticleFetcher, ids []string) *articleFeed {
+func newArticleFeed(ctx context.Context, fetch ArticleFetcher, ids []string, depth func() int) *articleFeed {
 	arts := make([]Article, len(ids))
 	posOf := make(map[string]int, len(ids))
 	for i, id := range ids {
 		arts[i] = Article{MessageID: id}
 		posOf[id] = i
 	}
-	slots, cancel := prefetchArticles(ctx, fetch, arts)
+	slots, cancel := prefetchArticles(ctx, fetch, arts, depth)
 	return &articleFeed{
 		ctx: ctx, fetch: fetch, ids: ids, posOf: posOf,
 		have: map[string][]byte{}, slots: slots, cancel: cancel,
@@ -634,22 +729,38 @@ type fetchResult struct {
 
 // prefetchArticles pipelines fetches of the live articles in arts, preserving
 // order: the returned channel yields one single-use result channel per live
-// article, in article order. At most fetchAhead fetches are in flight or
-// buffered at once, so memory stays bounded while the network stays busy.
-// stop cancels outstanding fetches; callers must call it once done (early
-// return or normal completion).
-func prefetchArticles(ctx context.Context, fetch ArticleFetcher, arts []Article) (slots <-chan chan fetchResult, stop func()) {
+// article, in article order. depth is read live: at most depth() fetches are
+// in flight at once, re-evaluated as fetches complete, so a raised repair
+// connection count speeds up a pipeline already running. Completed payloads
+// buffered ahead of the consumer are bounded by maxFetchAhead. stop cancels
+// outstanding fetches; callers must call it once done (early return or normal
+// completion).
+func prefetchArticles(ctx context.Context, fetch ArticleFetcher, arts []Article, depth func() int) (slots <-chan chan fetchResult, stop func()) {
 	pctx, cancel := context.WithCancel(ctx)
-	out := make(chan chan fetchResult, fetchAhead)
+	out := make(chan chan fetchResult, maxFetchAhead)
+	// The limiter bounds concurrent fetches at the live depth (clamped to
+	// [1, maxFetchAhead]); blocked acquires re-check it on every release.
+	lim := NewConnLimiter(func() int {
+		d := depth()
+		if d <= 0 {
+			d = fetchAhead
+		}
+		return min(d, maxFetchAhead)
+	})
 	go func() {
 		defer close(out)
 		for _, a := range arts {
 			if a.Dead {
 				continue
 			}
+			release, err := lim.Acquire(pctx)
+			if err != nil {
+				return
+			}
 			slot := make(chan fetchResult, 1)
 			go func(id string) {
 				data, err := fetch.Fetch(pctx, id)
+				release()
 				slot <- fetchResult{data: data, err: err}
 			}(a.MessageID)
 			select {

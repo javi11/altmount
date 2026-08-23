@@ -34,7 +34,7 @@ func (s *Server) SetPar2RepairRepo(repo *database.Par2RepairRepository) {
 	s.par2RepairRepo = repo
 }
 
-// Par2RepairProgressSource reports a running job's live sweep progress
+// Par2RepairProgressSource reports a running job's live stage progress
 // (implemented by par2repair.Service).
 type Par2RepairProgressSource interface {
 	Progress(jobID int64) (par2repair.JobProgressSnapshot, bool)
@@ -42,8 +42,11 @@ type Par2RepairProgressSource interface {
 
 // Par2RepairJobResponse is the JSON shape of one repair job row.
 type Par2RepairJobResponse struct {
-	ID            int64      `json:"id"`
-	FilePath      string     `json:"file_path"`
+	ID       int64  `json:"id"`
+	FilePath string `json:"file_path"`
+	// FilePaths lists every file the job repairs: damaged files of one release
+	// share a single job, since a repair sweeps the whole release anyway.
+	FilePaths     []string   `json:"file_paths,omitempty"`
 	Status        string     `json:"status"`
 	Attempts      int        `json:"attempts"`
 	LastError     *string    `json:"last_error,omitempty"`
@@ -55,16 +58,26 @@ type Par2RepairJobResponse struct {
 	DurationSeconds *float64  `json:"duration_seconds,omitempty"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
-	// Sweep progress, present only while the job is running and a sweep is
-	// under way.
-	ProgressDone  *int `json:"progress_done,omitempty"`
-	ProgressTotal *int `json:"progress_total,omitempty"`
+	// Stage progress, present only while the job is running and a stage has
+	// begun reporting. Stage is "checking" (liveness STATs), "planning"
+	// (PAR2 parse + matching), "downloading"
+	// (recovery payloads) or "repairing" (verification sweep); the counts are
+	// in that stage's units.
+	ProgressStage *string `json:"progress_stage,omitempty"`
+	ProgressDone  *int    `json:"progress_done,omitempty"`
+	ProgressTotal *int    `json:"progress_total,omitempty"`
+	// ProgressStageElapsedSeconds is how long the current stage has been
+	// running (a re-sweep restarts it with the counter). ETAs must extrapolate
+	// from this, not DurationSeconds: the job's total elapsed time includes
+	// earlier stages and would overstate the estimate.
+	ProgressStageElapsedSeconds *float64 `json:"progress_stage_elapsed_seconds,omitempty"`
 }
 
 func toPar2RepairJobResponse(job *database.Par2RepairJob) Par2RepairJobResponse {
 	resp := Par2RepairJobResponse{
 		ID:        job.ID,
 		FilePath:  job.FilePath,
+		FilePaths: job.Members(),
 		Status:    string(job.Status),
 		Attempts:  job.Attempts,
 		CreatedAt: job.CreatedAt,
@@ -111,8 +124,13 @@ func (s *Server) handleListPar2Repair(c *fiber.Ctx) error {
 		row := toPar2RepairJobResponse(job)
 		if progressSource != nil && job.Status == database.Par2RepairStatusRunning {
 			if p, ok := progressSource.Progress(job.ID); ok {
+				stage := string(p.Stage)
 				done, total := p.DoneArticles, p.TotalArticles
-				row.ProgressDone, row.ProgressTotal = &done, &total
+				row.ProgressStage, row.ProgressDone, row.ProgressTotal = &stage, &done, &total
+				if !p.StageStartedAt.IsZero() {
+					elapsed := time.Since(p.StageStartedAt).Seconds()
+					row.ProgressStageElapsedSeconds = &elapsed
+				}
 			}
 		}
 		resp = append(resp, row)

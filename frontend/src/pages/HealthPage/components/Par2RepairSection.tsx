@@ -34,6 +34,40 @@ function fileName(path: string) {
 	return parts[parts.length - 1] || path;
 }
 
+/**
+ * The other files covered by a grouped job. Damaged files of one release share
+ * a single job (the repair sweeps the whole release), so the row lists every
+ * sibling it will fix alongside the trigger file.
+ */
+function MemberFiles({ job }: { job: Par2RepairJob }) {
+	const others = (job.file_paths ?? []).filter((path) => path !== job.file_path);
+	if (others.length === 0) {
+		return null;
+	}
+	return (
+		<details className="mt-1 text-base-content/60 text-xs">
+			<summary className="cursor-pointer hover:text-base-content/80">
+				+{others.length} more {others.length === 1 ? "file" : "files"} in this release
+			</summary>
+			<ul className="mt-1 list-inside list-disc">
+				{others.map((path) => (
+					<li key={path} className="truncate" title={path}>
+						{fileName(path)}
+					</li>
+				))}
+			</ul>
+		</details>
+	);
+}
+
+/** Per-stage unit label shown next to the progress counts. */
+const STAGE_UNITS: Record<string, string> = {
+	checking: "articles checked",
+	planning: "planning steps",
+	downloading: "recovery slices",
+	repairing: "articles",
+};
+
 function SweepProgress({ job }: { job: Par2RepairJob }) {
 	if (job.status !== "running") {
 		return null;
@@ -41,7 +75,8 @@ function SweepProgress({ job }: { job: Par2RepairJob }) {
 	const total = job.progress_total ?? 0;
 	const done = job.progress_done ?? 0;
 	if (total <= 0) {
-		// Running but the sweep has not started yet (planning / fetching PAR2 index).
+		// Running but no stage has reported yet (parsing the PAR2 index,
+		// matching files).
 		return (
 			<div className="flex items-center gap-2 text-base-content/60 text-xs">
 				<span className="loading loading-spinner loading-xs" aria-hidden="true" />
@@ -49,12 +84,14 @@ function SweepProgress({ job }: { job: Par2RepairJob }) {
 			</div>
 		);
 	}
+	const stage = job.progress_stage ?? "repairing";
+	const unit = STAGE_UNITS[stage] ?? "articles";
 	const percent = Math.min(100, Math.round((done / total) * 100));
 	return (
 		<div className="flex items-center gap-2">
 			<progress className="progress progress-info w-32" value={done} max={total} />
 			<span className="whitespace-nowrap text-base-content/60 text-xs">
-				{percent}% ({done}/{total} articles)
+				{percent}% ({done}/{total} {unit})
 			</span>
 		</div>
 	);
@@ -68,9 +105,18 @@ function SweepProgress({ job }: { job: Par2RepairJob }) {
  * enough articles are done for the rate to mean anything.
  */
 function estimateRemaining(job: Par2RepairJob): number | null {
+	// Only the repairing sweep is long and steady enough to extrapolate;
+	// earlier stages (liveness check, recovery download) would produce
+	// nonsense estimates from the attempt's elapsed time.
+	if (job.progress_stage !== undefined && job.progress_stage !== "repairing") {
+		return null;
+	}
 	const done = job.progress_done ?? 0;
 	const total = job.progress_total ?? 0;
-	const elapsed = job.duration_seconds ?? 0;
+	// The sweep's own elapsed time; the job's duration_seconds also counts the
+	// earlier stages (liveness check, planning, recovery download) and would
+	// overstate the estimate several-fold early in the sweep.
+	const elapsed = job.progress_stage_elapsed_seconds ?? 0;
 	if (done < 5 || total <= done || elapsed <= 0) {
 		return null;
 	}
@@ -205,6 +251,7 @@ export function Par2RepairSection({
 													{fileName(job.file_path)}
 												</span>
 											</div>
+											<MemberFiles job={job} />
 										</td>
 										<td>
 											<StatusBadge status={job.status} />

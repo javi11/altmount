@@ -73,6 +73,19 @@ type Par2RepairConfig struct {
 	MaxMemoryMB int `yaml:"max_memory_mb" mapstructure:"max_memory_mb" json:"max_memory_mb,omitempty"`
 	// MaxConcurrentJobs bounds simultaneously running repair jobs.
 	MaxConcurrentJobs int `yaml:"max_concurrent_jobs" mapstructure:"max_concurrent_jobs" json:"max_concurrent_jobs,omitempty"`
+	// MaxConnections bounds how many NNTP connections repair jobs use for
+	// article fetches (shared across concurrent jobs). Repair streams the
+	// whole release once, so this directly sets its download speed; it runs on
+	// the pool's normal lane, so streaming playback keeps priority either way.
+	// 0 (default) means 10.
+	MaxConnections int `yaml:"max_connections" mapstructure:"max_connections" json:"max_connections,omitempty"`
+	// MinReleaseSizeMB / MaxReleaseSizeMB bound the size of releases repair
+	// takes on (content bytes, PAR2 files excluded). A repair downloads the
+	// whole release once, so these let users skip releases too large to be
+	// worth the bandwidth or too small to bother with. 0 (default) means
+	// unbounded on that side — all sizes are repaired.
+	MinReleaseSizeMB int `yaml:"min_release_size_mb" mapstructure:"min_release_size_mb" json:"min_release_size_mb,omitempty"`
+	MaxReleaseSizeMB int `yaml:"max_release_size_mb" mapstructure:"max_release_size_mb" json:"max_release_size_mb,omitempty"`
 	// MaxPatchStoreMB bounds the on-disk patch store size; oldest patches are
 	// evicted first when the cap is exceeded. 0 (default) means unlimited.
 	MaxPatchStoreMB int `yaml:"max_patch_store_mb" mapstructure:"max_patch_store_mb" json:"max_patch_store_mb,omitempty"`
@@ -80,6 +93,14 @@ type Par2RepairConfig struct {
 	// scratch files) are stored. Empty (default) means <metadata_root>/patches.
 	// Applied at startup; changing it does not move existing patches.
 	PatchDir string `yaml:"patch_dir" mapstructure:"patch_dir" json:"patch_dir,omitempty"`
+	// ArrFirst makes PAR2 repair the fallback for corrupted files: the health
+	// worker triggers the ARR rescan first exactly as before, and enqueues a
+	// PAR2 repair only when nothing is found in the ARRs (no instance
+	// configured, none tracks the file) or ARR repair is disabled. On by
+	// default; disable to keep PAR2 out of the corrupted-file flow (degraded
+	// files, playback holes and repair-on-import still repair via PAR2
+	// directly).
+	ArrFirst *bool `yaml:"arr_first" mapstructure:"arr_first" json:"arr_first,omitempty"`
 	// RepairOnImport queues a repair as soon as an import completes with
 	// confirmed missing segments, instead of waiting for the first playback or
 	// a health check. Off by default: every repair costs one full release
@@ -89,6 +110,15 @@ type Par2RepairConfig struct {
 	RepairOnImport *bool `yaml:"repair_on_import" mapstructure:"repair_on_import" json:"repair_on_import,omitempty"`
 }
 
+// EffectiveMaxConnections resolves the repair fetch connection bound,
+// defaulting to 10 when unset (configs written before the knob existed).
+func (p Par2RepairConfig) EffectiveMaxConnections() int {
+	if p.MaxConnections <= 0 {
+		return 10
+	}
+	return p.MaxConnections
+}
+
 // EffectivePatchDir resolves where repaired article payloads live: the
 // configured PatchDir, or "patches" under the metadata root when unset.
 func (p Par2RepairConfig) EffectivePatchDir(metadataRoot string) string {
@@ -96,6 +126,13 @@ func (p Par2RepairConfig) EffectivePatchDir(metadataRoot string) string {
 		return p.PatchDir
 	}
 	return filepath.Join(metadataRoot, "patches")
+}
+
+// EffectiveArrFirst reports whether corrupted files fall back to PAR2 repair
+// after the ARR repair comes up empty. Defaults to true when unset (configs
+// written before the knob existed).
+func (p Par2RepairConfig) EffectiveArrFirst() bool {
+	return p.ArrFirst == nil || *p.ArrFirst
 }
 
 // EffectiveRepairOnImport reports whether imports queue PAR2 repairs. Requires
@@ -1671,6 +1708,7 @@ func DefaultConfig(configDir ...string) *Config {
 	repairExponentialBackoff := true
 	par2RepairEnabled := false  // beta: opt-in until the feature settles
 	par2RepairOnImport := false // opt-in: each repair costs a full release download
+	par2ArrFirst := true        // prefer ARR replacement; PAR2 only when the ARRs come up empty
 
 	// Set paths based on whether we're running in Docker or have a specific config directory
 	var dbPath, metadataPath, logPath, rclonePath, cachePath, backupPath string
@@ -1840,7 +1878,9 @@ func DefaultConfig(configDir ...string) *Config {
 			MaxRepairRatio:    0.02, // matches the holes padding byte-ratio cap
 			MaxMemoryMB:       256,
 			MaxConcurrentJobs: 1,
+			MaxConnections:    10,
 			MaxPatchStoreMB:   0, // unlimited by default
+			ArrFirst:          &par2ArrFirst,
 			RepairOnImport:    &par2RepairOnImport,
 		},
 		SABnzbd: SABnzbdConfig{

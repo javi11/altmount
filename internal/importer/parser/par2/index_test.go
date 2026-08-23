@@ -2,6 +2,8 @@ package par2_test
 
 import (
 	"bytes"
+	"crypto/md5"
+	"encoding/binary"
 	"errors"
 	"io"
 	"testing"
@@ -145,3 +147,140 @@ func TestParseIndexFailsWhenIndexUnreadable(t *testing.T) {
 type errReader struct{ err error }
 
 func (e errReader) Read([]byte) (int, error) { return 0, e.err }
+
+// findPacket returns the offset of the first packet of the given type in a
+// raw PAR2 stream, or -1.
+func findPacket(data []byte, packetType [16]byte) int {
+	magic := []byte("PAR2\x00PKT")
+	for at := 0; ; {
+		i := bytes.Index(data[at:], magic)
+		if i < 0 {
+			return -1
+		}
+		at += i
+		if at+64 > len(data) {
+			return -1
+		}
+		if bytes.Equal(data[at+48:at+64], packetType[:]) {
+			return at
+		}
+		at += len(magic)
+	}
+}
+
+// PAR2 repeats metadata packets across files so damage in one copy is
+// survivable. A packet whose body no longer matches its header MD5 must be
+// dropped rather than trusted: here the corrupt IFSC copy arrives after the
+// good one and must not overwrite it.
+func TestParseIndexDropsPacketWithBadHash(t *testing.T) {
+	content := bytes.Repeat([]byte{0x5C}, 4096)
+	set := par2gen.BuildFull(1024, []par2gen.FileEntry{{Name: "a.bin", Content: content}}, 1)
+
+	good, err := par2.ParseIndex([]io.Reader{bytes.NewReader(set.Index)})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	corrupt := append([]byte(nil), set.Index...)
+	at := findPacket(corrupt, par2gen.PacketTypeIFSCT())
+	if at < 0 {
+		t.Fatal("no IFSC packet in generated index")
+	}
+	// Flip a CRC32 byte of the first slice entry (body = FileID[16] + 20-byte
+	// entries of MD5[16]+CRC32[4]).
+	corrupt[at+64+16+16] ^= 0xFF
+
+	idx, err := par2.ParseIndex([]io.Reader{bytes.NewReader(set.Index), bytes.NewReader(corrupt)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := idx.RecoveryIDs[0]
+	if got, want := idx.SliceChecks[id][0].CRC32, good.SliceChecks[id][0].CRC32; got != want {
+		t.Fatalf("corrupt IFSC copy overwrote the good one: crc %08x, want %08x", got, want)
+	}
+}
+
+// Damage inside a volume must cost only the packets it hit: the parser must
+// resynchronise on the next packet magic and keep reading. Here a stream
+// carries two RecvSlic packets and the first one's header is destroyed.
+func TestParseIndexResyncsWithinDamagedStream(t *testing.T) {
+	content := make([]byte, 4096) // zero content: recovery payloads carry no fake magic
+	set := par2gen.BuildFull(1024, []par2gen.FileEntry{{Name: "a.bin", Content: content}}, 3)
+
+	damaged := append([]byte(nil), set.Volumes[0]...)
+	damaged[0] ^= 0xFF // break the first packet's magic
+	damaged = append(damaged, set.Volumes[1]...)
+
+	idx, err := par2.ParseIndex([]io.Reader{
+		bytes.NewReader(set.Index),
+		bytes.NewReader(damaged),
+		bytes.NewReader(set.Volumes[2]),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(idx.Recovery) != 2 {
+		t.Fatalf("recovery refs = %d, want 2 (the packets damage did not hit)", len(idx.Recovery))
+	}
+	// The ref recovered by resync must locate its payload exactly.
+	for _, ref := range idx.Recovery {
+		if ref.FileIndex != 1 {
+			continue
+		}
+		want := set.Volumes[1][len(set.Volumes[1])-1024:]
+		got := damaged[ref.BodyOffset : ref.BodyOffset+1024]
+		if !bytes.Equal(got, want) {
+			t.Fatal("resynced RecvSlic ref points at the wrong payload bytes")
+		}
+	}
+}
+
+// A stream that starts with garbage — a dead article zero-filled by the read
+// path — must still yield the packets behind it.
+func TestParseIndexResyncsPastLeadingGarbage(t *testing.T) {
+	content := bytes.Repeat([]byte{0x11}, 4096)
+	set := par2gen.BuildFull(1024, []par2gen.FileEntry{{Name: "a.bin", Content: content}}, 1)
+
+	stream := append(make([]byte, 1500), set.Index...)
+	idx, err := par2.ParseIndex([]io.Reader{bytes.NewReader(stream)})
+	if err != nil {
+		t.Fatalf("ParseIndex must resync past leading garbage: %v", err)
+	}
+	if idx.SliceSize != 1024 {
+		t.Fatalf("SliceSize = %d, want 1024", idx.SliceSize)
+	}
+}
+
+// Every RecvSlic ref must carry its packet's MD5 and set ID so the payload's
+// integrity can be verified when it is finally fetched. The hash covers
+// everything after the header's MD5 field: setID + type + exponent + payload.
+func TestParseIndexRecordsPacketIntegrity(t *testing.T) {
+	content := bytes.Repeat([]byte{0xAB}, 4096)
+	set := par2gen.BuildFull(512, []par2gen.FileEntry{{Name: "x.bin", Content: content}}, 2)
+
+	streams := []io.Reader{bytes.NewReader(set.Index)}
+	for _, v := range set.Volumes {
+		streams = append(streams, bytes.NewReader(v))
+	}
+	idx, err := par2.ParseIndex(streams)
+	if err != nil {
+		t.Fatal(err)
+	}
+	all := append([][]byte{set.Index}, set.Volumes...)
+	for _, ref := range idx.Recovery {
+		if ref.PacketMD5 == ([16]byte{}) {
+			t.Fatalf("ref exponent %d has no PacketMD5", ref.Exponent)
+		}
+		payload := all[ref.FileIndex][ref.BodyOffset : ref.BodyOffset+int64(idx.SliceSize)]
+		sum := md5.New()
+		sum.Write(ref.SetID[:])
+		sum.Write(par2.PacketTypeRecoverySlice[:])
+		var exp [4]byte
+		binary.LittleEndian.PutUint32(exp[:], ref.Exponent)
+		sum.Write(exp[:])
+		sum.Write(payload)
+		if !bytes.Equal(sum.Sum(nil), ref.PacketMD5[:]) {
+			t.Fatalf("ref exponent %d: PacketMD5 does not match the packet bytes", ref.Exponent)
+		}
+	}
+}

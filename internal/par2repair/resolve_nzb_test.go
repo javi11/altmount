@@ -52,13 +52,13 @@ func TestResolveFromNzbMatchesMetadataResolver(t *testing.T) {
 	fm, store, fetch, _, deadID := mkResolveFixture(t, false)
 	caps := Caps{MaxRepairRatio: 0.5, MaxMemoryBytes: 64 << 20}
 
-	fromMeta, err := Resolve(context.Background(), fm, store, []string{deadID}, fetch, caps)
+	fromMeta, err := Resolve(context.Background(), fm, store, []string{deadID}, fetch, caps, testLogger(), nil)
 	if err != nil {
 		t.Fatalf("metadata resolve: %v", err)
 	}
 
 	n := nzbFromFixture(fm, store)
-	fromNzb, err := ResolveFromNzb(context.Background(), n, []string{deadID}, fetch, caps)
+	fromNzb, err := ResolveFromNzb(context.Background(), n, []string{deadID}, fetch, caps, testLogger(), nil)
 	if err != nil {
 		t.Fatalf("nzb resolve: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestResolveFromNzbRepairsEndToEnd(t *testing.T) {
 	n := nzbFromFixture(fm, store)
 
 	res, err := ResolveFromNzb(context.Background(), n, []string{deadID}, fetch,
-		Caps{MaxRepairRatio: 0.5, MaxMemoryBytes: 64 << 20})
+		Caps{MaxRepairRatio: 0.5, MaxMemoryBytes: 64 << 20}, testLogger(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestResolveFromNzbWithoutPar2Files(t *testing.T) {
 	}
 	n.Files = kept
 
-	_, err := ResolveFromNzb(context.Background(), n, nil, fetch, Caps{})
+	_, err := ResolveFromNzb(context.Background(), n, nil, fetch, Caps{}, testLogger(), nil)
 	if err == nil {
 		t.Fatal("want error when the NZB carries no PAR2 files")
 	}

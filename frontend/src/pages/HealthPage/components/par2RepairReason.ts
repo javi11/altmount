@@ -73,6 +73,24 @@ export function parseRepairReason(raw: string): RepairReason {
 		};
 	}
 
+	// The release falls outside the configured size range — user policy.
+	const sizeMin = message.match(/release size (\d+) MB is below min_release_size_mb (\d+)/);
+	if (sizeMin) {
+		return {
+			summary: `This release is ${sizeMin[1]} MB, below the ${sizeMin[2]} MB minimum for repairs.`,
+			hint: "Lower the minimum release size in Settings → PAR2 Repair to attempt it.",
+			detail: raw,
+		};
+	}
+	const sizeMax = message.match(/release size (\d+) MB exceeds max_release_size_mb (\d+)/);
+	if (sizeMax) {
+		return {
+			summary: `This release is ${sizeMax[1]} MB, above the ${sizeMax[2]} MB maximum for repairs.`,
+			hint: "A repair downloads the whole release once. Raise the maximum release size in Settings → PAR2 Repair to attempt it.",
+			detail: raw,
+		};
+	}
+
 	// Emitted by older versions only: repairs over the memory budget now spill
 	// to disk instead of failing. Kept so historical rows still read sensibly.
 	const memory = message.match(

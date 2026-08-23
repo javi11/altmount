@@ -292,3 +292,44 @@ func TestBuildPlanSpillKeepsFullMargin(t *testing.T) {
 		t.Fatalf("Recovery = %d, want all 6 (full margin on a spill plan)", len(plan.Recovery))
 	}
 }
+
+// A liveness sample that found hidden damage yields an article estimate
+// instead of a full-release STAT. The plan must provision extra margin rows
+// for those articles — sized from how many slices a typical article spans —
+// so the payload sweep absorbs them without a replan.
+func TestBuildPlanProvisionsMarginForHiddenDamage(t *testing.T) {
+	// One file: 10240 B, slice 1024 (10 slices), articles of 2048 B.
+	// Article 1 dead -> 2 known missing slices. 20 recovery slices available.
+	content := bytes.Repeat([]byte{0x5A}, 10240)
+	idx := mkIndex(t, 1024, 20, map[string][]byte{"a.rar": content})
+	files := []SetFile{mkSetFile(t, idx, "a.rar", 10240, 2048, 1)}
+
+	caps := defaultCaps()
+	caps.ExpectedHiddenArticles = 2
+	plan, err := BuildPlan(idx, files, caps)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Without the estimate the plan carries k + planMargin = 10 rows; the two
+	// expected hidden articles must add rows beyond that.
+	if len(plan.Recovery) <= 2+planMargin {
+		t.Fatalf("recovery rows = %d, want more than %d (hidden-damage margin missing)",
+			len(plan.Recovery), 2+planMargin)
+	}
+	if got := len(plan.Recovery) + len(plan.SpareRecovery); got != 20 {
+		t.Fatalf("rows + spares = %d, want all 20", got)
+	}
+
+	// The memory cap still bounds the extra rows: with room for only 4 rows
+	// the plan must not grow past it.
+	caps.MaxMemoryBytes = 4 * 1024
+	plan, err = BuildPlan(idx, files, caps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Recovery) != 4 {
+		t.Fatalf("recovery rows = %d, want 4 (memory cap must still bound hidden-damage margin)",
+			len(plan.Recovery))
+	}
+}

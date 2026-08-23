@@ -25,14 +25,31 @@ type Config struct {
 	MaxRepairRatio    float64
 	MaxMemoryMB       int
 	MaxConcurrentJobs int
+	// MaxConnections bounds how many article fetches a job keeps in flight
+	// (the repair connection budget enforces the pool-wide bound).
+	MaxConnections int
+	// MinReleaseSizeMB / MaxReleaseSizeMB bound the size of releases repair
+	// takes on; 0 means unbounded on that side.
+	MinReleaseSizeMB int
+	MaxReleaseSizeMB int
 	// MaxPatchStoreMB bounds the on-disk patch store; <= 0 means unlimited.
 	MaxPatchStoreMB int
+}
+
+// caps translates the service policy into planner caps.
+func (c Config) caps() Caps {
+	return Caps{
+		MaxRepairRatio:      c.MaxRepairRatio,
+		MaxMemoryBytes:      int64(c.MaxMemoryMB) << 20,
+		MinReleaseSizeBytes: int64(c.MinReleaseSizeMB) << 20,
+		MaxReleaseSizeBytes: int64(c.MaxReleaseSizeMB) << 20,
+	}
 }
 
 // JobStore is the persistence the service needs (satisfied by
 // database.Par2RepairRepository).
 type JobStore interface {
-	Enqueue(ctx context.Context, filePath string, failingSegmentID string) (bool, error)
+	Enqueue(ctx context.Context, filePath, releaseRef, failingSegmentID string) (created, attached bool, err error)
 	ClaimNext(ctx context.Context, now time.Time) (*database.Par2RepairJob, error)
 	Get(ctx context.Context, id int64) (*database.Par2RepairJob, error)
 	Delete(ctx context.Context, id int64) error
@@ -86,6 +103,12 @@ const (
 	baseBackoff    = time.Minute
 	maxBackoff     = 6 * time.Hour
 	maxJobAttempts = 8
+
+	// defaultJobTimeout bounds one repair job's wall clock. Reading a whole
+	// release through the article pipeline is slow on purpose-large posts,
+	// but a job that has not finished in this long is stuck, not slow; the
+	// timeout surfaces it as a transient failure so the job retries.
+	defaultJobTimeout = 2 * time.Hour
 )
 
 // ErrJobNotFound reports that no active repair job has the requested ID —
@@ -122,7 +145,7 @@ type Service struct {
 	health  HealthStore   // optional; nil skips health-record updates
 	resumer ImportResumer // optional; releases imports parked pending a repair
 
-	// progress holds live sweep progress per running job ID.
+	// progress holds live stage progress per running job ID.
 	progressMu sync.Mutex
 	progress   map[int64]JobProgressSnapshot
 
@@ -132,23 +155,33 @@ type Service struct {
 
 	// resolveNzb plans an NZB-mode repair; replaced in tests. The default
 	// parses the NZB from disk and calls ResolveFromNzb.
-	resolveNzb func(ctx context.Context, nzbPath string, deadIDs []string) (*Resolution, error)
+	resolveNzb func(ctx context.Context, nzbPath string, deadIDs []string, progress JobProgress) (*Resolution, error)
 
 	// execute runs one claimed job; replaced in tests. The default is
 	// (*Service).executeJob.
 	execute func(ctx context.Context, job *database.Par2RepairJob) error
+
+	// now is the clock used for stage-progress timestamps; nil means wall
+	// clock. Replaced in tests.
+	now func() time.Time
+
+	// jobTimeout bounds one job's wall clock. A job that has not finished in
+	// this long is stuck, not slow: reads hang on pool-level timeouts, so a
+	// healthy job always makes progress. Shrunk in tests.
+	jobTimeout time.Duration
 }
 
 // NewService wires the repair service. fetcher is typically a PoolFetcher.
 func NewService(repo JobStore, meta MetadataSource, fetcher ArticleFetcher, store *PatchStore, cfg func() Config, log *slog.Logger) *Service {
 	s := &Service{
-		repo:    repo,
-		meta:    meta,
-		store:   store,
-		fetcher: fetcher,
-		cfg:     cfg,
-		log:     log,
-		wake:    make(chan struct{}, 1),
+		repo:       repo,
+		meta:       meta,
+		store:      store,
+		fetcher:    fetcher,
+		cfg:        cfg,
+		log:        log,
+		wake:       make(chan struct{}, 1),
+		jobTimeout: defaultJobTimeout,
 	}
 	s.execute = s.executeJob
 	s.resolveNzb = s.resolveNzbFromDisk
@@ -188,15 +221,23 @@ func (s *Service) EnqueueNzb(ctx context.Context, nzbPath string, failingSegment
 }
 
 // Enqueue registers a file for repair. Safe from any goroutine; a no-op when
-// the feature is disabled or an active job already exists. failingSegmentID
-// may be empty.
+// the feature is disabled or the file is already covered by an active job.
+// Files of the same release share one job — the repair sweeps the whole
+// release anyway, so the file joins the release's active job when one exists
+// instead of creating a duplicate. failingSegmentID may be empty.
 func (s *Service) Enqueue(ctx context.Context, filePath string, failingSegmentID string) {
 	if !s.cfg().Enabled {
 		return
 	}
-	created, err := s.repo.Enqueue(ctx, filePath, failingSegmentID)
+	created, attached, err := s.repo.Enqueue(ctx, filePath, s.releaseRef(filePath), failingSegmentID)
 	if err != nil {
 		s.log.ErrorContext(ctx, "Failed to enqueue par2 repair", "error", err, "file", filePath)
+		return
+	}
+	if attached {
+		// The release's job repairs this file too; no new work to wake for.
+		s.log.InfoContext(ctx, "Joined existing PAR2 repair for the release",
+			"file", filePath, "failing_segment", failingSegmentID)
 		return
 	}
 	if created {
@@ -206,6 +247,20 @@ func (s *Service) Enqueue(ctx context.Context, filePath string, failingSegmentID
 		default:
 		}
 	}
+}
+
+// releaseRef is the repair grouping key: the file's NzbStore ref, shared by
+// every file imported from the same NZB release. Best-effort — a file without
+// readable metadata simply gets no grouping, never an error.
+func (s *Service) releaseRef(filePath string) string {
+	if s.meta == nil {
+		return ""
+	}
+	fm, err := s.meta.ReadFileMetadata(filePath)
+	if err != nil || fm == nil {
+		return ""
+	}
+	return fm.StoreRef
 }
 
 // Start recovers interrupted jobs and runs worker loops until ctx ends.
@@ -267,7 +322,7 @@ func (s *Service) runNext(ctx context.Context) bool {
 	}
 
 	start := time.Now()
-	jobCtx, cancel := context.WithCancel(ctx)
+	jobCtx, cancel := context.WithTimeout(ctx, s.jobTimeout)
 	rj := s.registerRunning(job.ID, cancel)
 	// Deferred so every return path retires the job, and so done closes only
 	// after the bookkeeping below has run.
@@ -299,13 +354,18 @@ func (s *Service) runNext(ctx context.Context) bool {
 func (s *Service) handleOutcome(ctx context.Context, job *database.Par2RepairJob, err error) {
 	switch {
 	case err == nil:
-		s.markFileHealthy(ctx, job.FilePath)
+		// One job covers every damaged file of the release: flip them all.
+		for _, member := range s.jobMembers(ctx, job) {
+			s.markFileHealthy(ctx, member)
+		}
 		s.resumeImport(ctx, job)
 		s.deleteJob(ctx, job.ID)
 		s.pruneStore(ctx)
 	case errors.Is(err, ErrUnrepairable), errors.Is(err, ErrNothingToRepair):
 		s.log.WarnContext(ctx, "PAR2 repair not possible", "file", job.FilePath, "reason", err)
-		s.markFileUnrepairable(ctx, job.FilePath, err.Error())
+		for _, member := range s.jobMembers(ctx, job) {
+			s.markFileUnrepairable(ctx, member, err.Error())
+		}
 		s.failImport(ctx, job, err.Error())
 		s.deleteJob(ctx, job.ID)
 	default:
@@ -313,7 +373,9 @@ func (s *Service) handleOutcome(ctx context.Context, job *database.Par2RepairJob
 			s.log.ErrorContext(ctx, "PAR2 repair failed permanently after retries",
 				"file", job.FilePath, "attempts", job.Attempts+1, "error", err)
 			reason := "attempts exhausted: " + err.Error()
-			s.markFileUnrepairable(ctx, job.FilePath, reason)
+			for _, member := range s.jobMembers(ctx, job) {
+				s.markFileUnrepairable(ctx, member, reason)
+			}
 			s.failImport(ctx, job, reason)
 			s.deleteJob(ctx, job.ID)
 			return
@@ -335,6 +397,23 @@ func (s *Service) handleOutcome(ctx context.Context, job *database.Par2RepairJob
 			s.log.ErrorContext(ctx, "Failed to schedule repair retry", "error", err, "job", job.ID)
 		}
 	}
+}
+
+// jobMembers returns the job's member files as of now. Files can join the
+// release's job while it runs (the sweep covers them either way), so the
+// member list snapshotted at claim time may be stale; the row is re-read so a
+// late joiner gets the outcome too. Falls back to the snapshot when the row
+// cannot be re-read.
+func (s *Service) jobMembers(ctx context.Context, job *database.Par2RepairJob) []string {
+	fresh, err := s.repo.Get(ctx, job.ID)
+	if err != nil || fresh == nil {
+		if err != nil {
+			s.log.ErrorContext(ctx, "Failed to refresh repair job members; using claim-time snapshot",
+				"error", err, "job", job.ID)
+		}
+		return job.Members()
+	}
+	return fresh.Members()
 }
 
 // registerRunning publishes a running job so Cancel can reach it.
@@ -453,26 +532,36 @@ func (s *Service) executeJob(ctx context.Context, job *database.Par2RepairJob) e
 
 	deadIDs := mergeDeadIDs(deadSegmentIDs(fm, job.FailingSegmentID.String), job.DeadSegments())
 	cfg := s.cfg()
-	caps := Caps{
-		MaxRepairRatio: cfg.MaxRepairRatio,
-		MaxMemoryBytes: int64(cfg.MaxMemoryMB) << 20,
-	}
-	res, err := Resolve(ctx, fm, store, deadIDs, s.fetcher, caps)
+	caps := cfg.caps()
+	defer s.clearProgress(job.ID)
+	progress := s.jobProgress(job.ID)
+	res, err := Resolve(ctx, fm, store, deadIDs, s.fetcher, caps, s.log, progress)
 	if err != nil {
 		return err
 	}
-	defer s.clearProgress(job.ID)
 	return RunJob(ctx, res.Plan, res.Index, res.Par2Files, s.fetcher, s.store, s.log,
-		WithProgress(func(done, total int) { s.setProgress(job.ID, done, total) }))
+		WithProgress(progress), WithLiveConcurrency(func() int { return s.cfg().MaxConnections }))
 }
 
-// JobProgressSnapshot is a running job's sweep progress.
+// jobProgress returns the JobProgress callback that publishes a job's live
+// stage progress for the API.
+func (s *Service) jobProgress(jobID int64) JobProgress {
+	return func(stage Stage, done, total int) { s.setProgress(jobID, stage, done, total) }
+}
+
+// JobProgressSnapshot is a running job's stage progress: which phase it is in
+// and how far through that phase it is (the unit depends on the stage).
 type JobProgressSnapshot struct {
+	Stage         Stage
 	DoneArticles  int
 	TotalArticles int
+	// StageStartedAt is when the current stage began (or restarted: a re-sweep
+	// resets it along with the counter), so ETAs extrapolate from this stage's
+	// own rate rather than the whole attempt's elapsed time.
+	StageStartedAt time.Time
 }
 
-// Progress returns the live sweep progress of a running job, when known.
+// Progress returns the live stage progress of a running job, when known.
 func (s *Service) Progress(jobID int64) (JobProgressSnapshot, bool) {
 	s.progressMu.Lock()
 	defer s.progressMu.Unlock()
@@ -480,13 +569,26 @@ func (s *Service) Progress(jobID int64) (JobProgressSnapshot, bool) {
 	return p, ok
 }
 
-func (s *Service) setProgress(jobID int64, done, total int) {
+func (s *Service) setProgress(jobID int64, stage Stage, done, total int) {
 	s.progressMu.Lock()
 	defer s.progressMu.Unlock()
 	if s.progress == nil {
 		s.progress = make(map[int64]JobProgressSnapshot)
 	}
-	s.progress[jobID] = JobProgressSnapshot{DoneArticles: done, TotalArticles: total}
+	start := s.timeNow()
+	if prev, ok := s.progress[jobID]; ok && prev.Stage == stage && done >= prev.DoneArticles {
+		start = prev.StageStartedAt
+	}
+	s.progress[jobID] = JobProgressSnapshot{Stage: stage, DoneArticles: done, TotalArticles: total, StageStartedAt: start}
+}
+
+// timeNow is the service clock: the injected test clock when set, wall clock
+// otherwise.
+func (s *Service) timeNow() time.Time {
+	if s.now != nil {
+		return s.now()
+	}
+	return time.Now().UTC()
 }
 
 func (s *Service) clearProgress(jobID int64) {
@@ -501,17 +603,18 @@ func (s *Service) executeNzbJob(ctx context.Context, job *database.Par2RepairJob
 	if job.FailingSegmentID.Valid && job.FailingSegmentID.String != "" {
 		deadIDs = mergeDeadIDs([]string{job.FailingSegmentID.String}, deadIDs)
 	}
-	res, err := s.resolveNzb(ctx, job.NzbPath.String, deadIDs)
+	defer s.clearProgress(job.ID)
+	progress := s.jobProgress(job.ID)
+	res, err := s.resolveNzb(ctx, job.NzbPath.String, deadIDs, progress)
 	if err != nil {
 		return err
 	}
-	defer s.clearProgress(job.ID)
 	return RunJob(ctx, res.Plan, res.Index, res.Par2Files, s.fetcher, s.store, s.log,
-		WithProgress(func(done, total int) { s.setProgress(job.ID, done, total) }))
+		WithProgress(progress), WithLiveConcurrency(func() int { return s.cfg().MaxConnections }))
 }
 
 // resolveNzbFromDisk parses the NZB at nzbPath and plans a repair from it.
-func (s *Service) resolveNzbFromDisk(ctx context.Context, nzbPath string, deadIDs []string) (*Resolution, error) {
+func (s *Service) resolveNzbFromDisk(ctx context.Context, nzbPath string, deadIDs []string, progress JobProgress) (*Resolution, error) {
 	rc, err := nzbfile.Open(nzbPath)
 	if err != nil {
 		return nil, fmt.Errorf("%w: open NZB %s: %v", ErrUnrepairable, nzbPath, err)
@@ -522,11 +625,7 @@ func (s *Service) resolveNzbFromDisk(ctx context.Context, nzbPath string, deadID
 	if err != nil {
 		return nil, fmt.Errorf("%w: parse NZB %s: %v", ErrUnrepairable, nzbPath, err)
 	}
-	cfg := s.cfg()
-	return ResolveFromNzb(ctx, n, deadIDs, s.fetcher, Caps{
-		MaxRepairRatio: cfg.MaxRepairRatio,
-		MaxMemoryBytes: int64(cfg.MaxMemoryMB) << 20,
-	})
+	return ResolveFromNzb(ctx, n, deadIDs, s.fetcher, s.cfg().caps(), s.log, progress)
 }
 
 // resumeImport returns a parked import to the queue after its repair landed.

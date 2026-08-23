@@ -37,8 +37,12 @@ export interface Par2RepairConfig {
 	max_repair_ratio?: number; // fraction of a file's bytes repairable; PAR2 redundancy is the hard ceiling
 	max_memory_mb?: number; // in-heap solver budget per job; larger repairs spill to disk
 	max_concurrent_jobs?: number;
+	max_connections?: number; // NNTP connections repair fetches may use (shared across jobs); 0 = default 10
+	min_release_size_mb?: number; // releases smaller than this are not repaired; 0 = no minimum
+	max_release_size_mb?: number; // releases larger than this are not repaired; 0 = no maximum
 	max_patch_store_mb?: number; // total patch-store size cap; 0 = unlimited
 	patch_dir?: string; // where patches + solver scratch live; empty = <metadata_root>/patches
+	arr_first?: boolean; // corrupted files: ARR repair first, PAR2 as fallback when the ARRs come up empty (default true)
 	repair_on_import?: boolean; // queue a repair as soon as a damaged file imports
 }
 

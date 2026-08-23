@@ -7,8 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
+	"math/rand/v2"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/javi11/nntppool/v4"
 
@@ -41,6 +44,8 @@ func Resolve(
 	deadSegmentIDs []string,
 	fetch ArticleFetcher,
 	caps Caps,
+	log *slog.Logger,
+	progress JobProgress,
 ) (*Resolution, error) {
 	if len(fm.Par2Files) == 0 {
 		return nil, fmt.Errorf("%w: no PAR2 files recorded for this release", ErrUnrepairable)
@@ -56,7 +61,6 @@ func Resolve(
 
 	cache := newArticleCache(resolveCacheCap)
 	var par2Files []SetFile
-	var streams []io.Reader
 	for _, ref := range par2Refs {
 		sf := SetFile{Length: uint64(ref.FileSize)}
 		for _, seg := range ref.SegmentData {
@@ -66,7 +70,6 @@ func Resolve(
 			})
 		}
 		par2Files = append(par2Files, sf)
-		streams = append(streams, newLazyFileReader(ctx, fetch, sf, cache))
 	}
 
 	dead := map[string]bool{}
@@ -75,21 +78,23 @@ func Resolve(
 			dead[normalizeMsgID(id)] = true
 		}
 	}
-	if err := statSweep(ctx, fetch, releaseArticleIDs(store, par2Files), dead); err != nil {
+	if err := releaseSizePrecheck(store.Files, par2Files, caps); err != nil {
 		return nil, err
 	}
+
+	started := time.Now()
+	hidden, err := statSweep(ctx, fetch, releaseArticleIDs(store, par2Files), dead, progress)
+	if err != nil {
+		return nil, err
+	}
+	caps.ExpectedHiddenArticles = hidden
+	log.InfoContext(ctx, "PAR2 repair liveness check complete",
+		"dead_articles", len(dead), "hidden_estimate", hidden, "duration", time.Since(started).Round(time.Millisecond))
 	if err := ratioPrecheck(store.Files, par2Files, dead, caps); err != nil {
 		return nil, err
 	}
 
-	idx, err := par2.ParseIndex(streams)
-	if err != nil {
-		return nil, fmt.Errorf("%w: parse PAR2 set: %v", ErrUnrepairable, err)
-	}
-	dropDeadRecovery(idx, par2Files, dead)
-
-	// 2 + 3. Match recovery-set members to NzbStore entries and size articles.
-	files, err := matchSetFiles(ctx, idx, store, dead, fetch, cache)
+	idx, files, err := planSet(ctx, fetch, store, par2Files, dead, cache, log, progress)
 	if err != nil {
 		return nil, err
 	}
@@ -98,19 +103,111 @@ func Resolve(
 	if err != nil {
 		return nil, err
 	}
+	log.InfoContext(ctx, "PAR2 repair plan built",
+		"missing_slices", len(plan.Missing), "recovery_rows", len(plan.Recovery),
+		"spares", len(plan.SpareRecovery), "spill_to_disk", plan.SpillToDisk)
 	return &Resolution{Plan: plan, Index: idx, Par2Files: par2Files}, nil
 }
 
-// statSweep bulk-checks article liveness before planning, when the fetcher
-// supports it, and folds confirmed misses into dead. STATs carry no body, so
-// the sweep costs round trips only — a fraction of a single article download —
-// and buys an exact damage picture: caps and recovery-count verdicts become
-// accurate at plan time, and the payload sweep stops tripping over
-// surprise-dead articles (each of which costs a full replan-and-retry cycle).
-func statSweep(ctx context.Context, fetch ArticleFetcher, ids []string, dead map[string]bool) error {
+// planSet is the planning stage shared by both resolvers: parse the PAR2 set
+// and match/size every recovery-set member. It is minutes of article fetches
+// on a large release, so it reports progress in steps — one per PAR2 file
+// parsed, one per member matched — and logs each phase.
+func planSet(
+	ctx context.Context,
+	fetch ArticleFetcher,
+	store *metapb.NzbStore,
+	par2Files []SetFile,
+	dead map[string]bool,
+	cache *articleCache,
+	log *slog.Logger,
+	progress JobProgress,
+) (*par2.Index, []SetFile, error) {
+	report := func(done, total int) {
+		if progress != nil {
+			progress(StagePlanning, done, total)
+		}
+	}
+	report(0, len(par2Files))
+	log.InfoContext(ctx, "Planning PAR2 repair: parsing recovery set", "par2_files", len(par2Files))
+
+	// Streams come after the liveness sweep so the lazy readers know which
+	// articles are dead and zero-fill them instead of asking the pool. Each
+	// stream reports itself when parsing first touches it.
+	started := time.Now()
+	streams := par2Streams(ctx, fetch, par2Files, dead, cache)
+	for i, s := range streams {
+		streams[i] = &planningStream{lazy: s.(*lazyFileReader), start: func() { report(i, len(par2Files)) }}
+	}
+
+	idx, err := par2.ParseIndex(streams)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%w: parse PAR2 set: %v", ErrUnrepairable, err)
+	}
+	dropDeadRecovery(idx, par2Files, dead)
+	log.InfoContext(ctx, "PAR2 set parsed",
+		"members", len(idx.RecoveryIDs), "recovery_slices", len(idx.Recovery),
+		"slice_size", idx.SliceSize, "duration", time.Since(started).Round(time.Millisecond))
+
+	// Match recovery-set members to NzbStore entries and size their articles,
+	// one planning step per member.
+	started = time.Now()
+	total := len(par2Files) + len(idx.RecoveryIDs)
+	report(len(par2Files), total)
+	matched := 0
+	files, err := matchSetFiles(ctx, idx, store, dead, fetch, cache, func() {
+		matched++
+		report(len(par2Files)+matched, total)
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	log.InfoContext(ctx, "Recovery-set members matched",
+		"files", len(files), "duration", time.Since(started).Round(time.Millisecond))
+	report(total, total)
+	return idx, files, nil
+}
+
+// planningStream reports the moment parsing first touches its PAR2 file, so
+// the planning progress advances per file parsed.
+type planningStream struct {
+	lazy  *lazyFileReader
+	start func()
+}
+
+func (p *planningStream) Read(b []byte) (int, error) {
+	if p.start != nil {
+		p.start()
+		p.start = nil
+	}
+	return p.lazy.Read(b)
+}
+
+func (p *planningStream) Seek(offset int64, whence int) (int64, error) {
+	return p.lazy.Seek(offset, whence)
+}
+
+// statSampleSize is how many articles the pre-plan liveness check STATs
+// before deciding whether the full release needs sweeping. Large enough that
+// broad hidden damage is all but certain to hit the sample, small enough that
+// the check costs seconds instead of the minutes a full-release STAT sweep
+// takes.
+const statSampleSize = 512
+
+// statSweep checks article liveness before planning, when the fetcher
+// supports it, and folds confirmed misses into dead.
+//
+// It STATs a random sample first: when the sample confirms no damage beyond
+// the already-known dead articles, the rest of the release is not checked —
+// the plan trusts the known holes, and the payload sweep's margin rows absorb
+// any stragglers the sample missed (worst case, a replan-and-retry). Only when
+// the sample finds hidden damage does the sweep STAT every article, buying an
+// exact damage picture: caps and recovery-count verdicts become accurate at
+// plan time instead of after downloading the recovery set.
+func statSweep(ctx context.Context, fetch ArticleFetcher, ids []string, dead map[string]bool, progress JobProgress) (int, error) {
 	stater, ok := fetch.(ArticleStater)
 	if !ok {
-		return nil
+		return 0, nil
 	}
 	unknown := make([]string, 0, len(ids))
 	for _, id := range ids {
@@ -119,16 +216,69 @@ func statSweep(ctx context.Context, fetch ArticleFetcher, ids []string, dead map
 		}
 	}
 	if len(unknown) == 0 {
-		return nil
+		return 0, nil
 	}
-	missing, err := stater.StatIDs(ctx, unknown)
+	report := func(done, total int) {
+		if progress != nil {
+			progress(StageChecking, done, total)
+		}
+	}
+
+	sample, rest := unknown, []string(nil)
+	if len(unknown) > statSampleSize {
+		rand.Shuffle(len(unknown), func(i, j int) { unknown[i], unknown[j] = unknown[j], unknown[i] })
+		sample, rest = unknown[:statSampleSize], unknown[statSampleSize:]
+	}
+	report(0, len(sample))
+	missing, err := stater.StatIDs(ctx, sample, func(done int) { report(done, len(sample)) })
 	if err != nil {
-		return fmt.Errorf("par2repair: liveness sweep: %w", err)
+		return 0, fmt.Errorf("par2repair: liveness sweep: %w", err)
 	}
 	for id := range missing {
 		dead[id] = true
 	}
-	return nil
+	if len(rest) == 0 || len(missing) == 0 {
+		return 0, nil
+	}
+
+	// The sample surfaced damage nothing declared. STATing the whole release
+	// would pin the damage exactly, but it costs one round trip per article —
+	// minutes on a large release — while the payload sweep verifies every
+	// slice anyway. So when the sample's estimate of the hidden damage is
+	// small enough to absorb on margin rows, the estimate is the answer: the
+	// plan provisions rows for it and the sweep finds the articles for free.
+	estimate := (len(missing)*len(rest) + len(sample) - 1) / len(sample)
+	if estimate <= maxHiddenAbsorbArticles {
+		return estimate, nil
+	}
+
+	// Damage too broad for margin rows: only the full census can size the
+	// plan, so its minutes are worth spending.
+	total := len(unknown)
+	missing, err = stater.StatIDs(ctx, rest, func(done int) { report(len(sample)+done, total) })
+	if err != nil {
+		return 0, fmt.Errorf("par2repair: liveness sweep: %w", err)
+	}
+	for id := range missing {
+		dead[id] = true
+	}
+	return 0, nil
+}
+
+// par2Streams builds one lazy reader per PAR2 file, with the dead flags the
+// liveness sweep produced applied so known holes read as zeros without a
+// pointless fetch.
+func par2Streams(ctx context.Context, fetch ArticleFetcher, par2Files []SetFile, dead map[string]bool, cache *articleCache) []io.Reader {
+	streams := make([]io.Reader, len(par2Files))
+	for i := range par2Files {
+		for j := range par2Files[i].Articles {
+			if dead[par2Files[i].Articles[j].MessageID] {
+				par2Files[i].Articles[j].Dead = true
+			}
+		}
+		streams[i] = newLazyFileReader(ctx, fetch, par2Files[i], cache)
+	}
+	return streams
 }
 
 // releaseArticleIDs collects every article ID of the release: all NzbStore
@@ -146,6 +296,42 @@ func releaseArticleIDs(store *metapb.NzbStore, par2Files []SetFile) []string {
 		}
 	}
 	return ids
+}
+
+// releaseSizePrecheck refuses releases outside the configured size range
+// before any network work: the release size is known from the NZB layout
+// alone, so the verdict is free. Sizes are encoded segment bytes (a few
+// percent above the decoded size), which is close enough for a threshold.
+// PAR2 files are excluded — the bound is about the content being streamed.
+func releaseSizePrecheck(files []*metapb.NzbFileEntry, par2Files []SetFile, caps Caps) error {
+	if caps.MinReleaseSizeBytes <= 0 && caps.MaxReleaseSizeBytes <= 0 {
+		return nil
+	}
+	par2IDs := map[string]bool{}
+	for _, f := range par2Files {
+		for _, a := range f.Articles {
+			par2IDs[a.MessageID] = true
+		}
+	}
+	var total int64
+	for _, f := range files {
+		if len(f.Segments) == 0 || par2IDs[normalizeMsgID(f.Segments[0].Id)] {
+			continue
+		}
+		for _, seg := range f.Segments {
+			total += seg.Bytes
+		}
+	}
+	mb := func(n int64) int64 { return n >> 20 }
+	if caps.MinReleaseSizeBytes > 0 && total < caps.MinReleaseSizeBytes {
+		return fmt.Errorf("%w: release size %d MB is below min_release_size_mb %d",
+			ErrUnrepairable, mb(total), mb(caps.MinReleaseSizeBytes))
+	}
+	if caps.MaxReleaseSizeBytes > 0 && total > caps.MaxReleaseSizeBytes {
+		return fmt.Errorf("%w: release size %d MB exceeds max_release_size_mb %d",
+			ErrUnrepairable, mb(total), mb(caps.MaxReleaseSizeBytes))
+	}
+	return nil
 }
 
 // ratioPrecheckMargin keeps the pre-parse ratio check conservative: it works
@@ -234,7 +420,9 @@ func payloadArticlesLive(f SetFile, off, n int64, dead map[string]bool) bool {
 	return true
 }
 
-// matchSetFiles pairs recovery-set FileDescs with NzbStore entries.
+// matchSetFiles pairs recovery-set FileDescs with NzbStore entries. onMember,
+// when non-nil, is called once per member whose articles have been sized —
+// the unit of planning progress.
 func matchSetFiles(
 	ctx context.Context,
 	idx *par2.Index,
@@ -242,6 +430,7 @@ func matchSetFiles(
 	dead map[string]bool,
 	fetch ArticleFetcher,
 	cache *articleCache,
+	onMember func(),
 ) ([]SetFile, error) {
 	used := make([]bool, len(store.Files))
 	var out []SetFile
@@ -301,6 +490,9 @@ func matchSetFiles(
 			releasePartSize = partSize
 		}
 		out[i] = sf
+		if onMember != nil {
+			onMember()
+		}
 	}
 
 	// Pass 2: a volume with no live article at all is exactly what PAR2 repair
@@ -320,6 +512,9 @@ func matchSetFiles(
 			return nil, err
 		}
 		out[i] = sf
+		if onMember != nil {
+			onMember()
+		}
 	}
 	return out, nil
 }
@@ -497,6 +692,11 @@ func normalizeMsgID(id string) string {
 // payloads, fetching articles only when their bytes are actually read.
 // ParseIndex's seek-aware skips make scanning a PAR2 volume cost roughly one
 // article per packet header instead of the whole file.
+//
+// A dead article — flagged up front or discovered on fetch — reads as zeros
+// rather than an error: the packet parser's per-packet hashes reject whatever
+// the hole damaged and its resync recovers the packets behind it, so one dead
+// article costs the packets it overlapped instead of the rest of the volume.
 type lazyFileReader struct {
 	ctx   context.Context
 	fetch ArticleFetcher
@@ -527,13 +727,24 @@ func (l *lazyFileReader) Read(p []byte) (int, error) {
 	for _, a := range l.file.Articles {
 		artEnd := artStart + a.Size
 		if artEnd > l.pos && artStart < l.pos+n {
-			data, err := fetchCached(l.ctx, l.fetch, a.MessageID, l.cache)
-			if err != nil {
-				return read, err
-			}
 			from := max(l.pos, artStart)
 			to := min(l.pos+n, artEnd)
-			copy(p[from-l.pos:to-l.pos], data[from-artStart:to-artStart])
+			span := p[from-l.pos : to-l.pos]
+
+			var data []byte
+			if !a.Dead {
+				var err error
+				data, err = fetchCached(l.ctx, l.fetch, a.MessageID, l.cache)
+				if err != nil && !errors.Is(err, nntppool.ErrArticleNotFound) {
+					return read, err
+				}
+			}
+			// Dead, vanished or short articles read as zeros; p may carry the
+			// caller's stale bytes, so the gap is cleared explicitly.
+			clear(span)
+			if srcFrom := from - artStart; srcFrom < int64(len(data)) {
+				copy(span, data[srcFrom:min(int64(len(data)), to-artStart)])
+			}
 			read = int(to - l.pos)
 		}
 		artStart = artEnd
@@ -563,3 +774,9 @@ func (l *lazyFileReader) Seek(offset int64, whence int) (int64, error) {
 	l.pos = abs
 	return abs, nil
 }
+
+// maxHiddenAbsorbArticles is the largest sample-estimated count of hidden
+// dead articles the plan absorbs on margin rows instead of escalating to a
+// full-release STAT. Beyond it the exact census is worth its minutes: the
+// margin rows it would take exceed maxHiddenMarginRows.
+const maxHiddenAbsorbArticles = 64

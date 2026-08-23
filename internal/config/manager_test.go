@@ -499,3 +499,17 @@ func TestPar2RepairDisabledByDefault(t *testing.T) {
 	assert.NotNil(t, cfg.Par2Repair.Enabled)
 	assert.False(t, *cfg.Par2Repair.Enabled, "PAR2 repair must be opt-in while in beta")
 }
+
+// ARR-first is on by default (including configs written before the knob
+// existed): corrupted files go to the ARRs first as always, with PAR2 repair
+// picking up whatever the ARRs cannot find.
+func TestPar2RepairArrFirstDefaultsOn(t *testing.T) {
+	assert.True(t, Par2RepairConfig{}.EffectiveArrFirst(), "unset must default to ARR-first")
+
+	off := false
+	assert.False(t, Par2RepairConfig{ArrFirst: &off}.EffectiveArrFirst())
+
+	cfg := DefaultConfig()
+	assert.NotNil(t, cfg.Par2Repair.ArrFirst)
+	assert.True(t, *cfg.Par2Repair.ArrFirst)
+}

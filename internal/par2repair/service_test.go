@@ -37,6 +37,8 @@ func newTestRepo(t *testing.T) *database.Par2RepairRepository {
 			next_attempt_at TIMESTAMP,
 			started_at TIMESTAMP,
 			finished_at TIMESTAMP,
+			release_ref TEXT,
+			member_paths TEXT,
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 		);
@@ -44,6 +46,8 @@ func newTestRepo(t *testing.T) *database.Par2RepairRepository {
 			WHERE status IN ('pending','running') AND file_path <> '';
 		CREATE UNIQUE INDEX idx_par2_repair_active_nzb ON par2_repair_jobs(nzb_path)
 			WHERE status IN ('pending','running') AND nzb_path IS NOT NULL;
+		CREATE UNIQUE INDEX idx_par2_repair_active_release ON par2_repair_jobs(release_ref)
+			WHERE status IN ('pending','running') AND release_ref IS NOT NULL;
 	`)
 	if err != nil {
 		t.Fatal(err)
@@ -148,14 +152,20 @@ func TestServiceAttemptsExhaustedTranslatesToHealthAndDeletes(t *testing.T) {
 
 // recordingMeta is a MetadataSource fake that records UpdateFileStatus calls.
 type recordingMeta struct {
+	storeRef    string // when set, every file reports this release ref
 	statusCalls []struct {
 		path   string
 		status metapb.FileStatus
 	}
 }
 
-func (m *recordingMeta) ReadFileMetadata(string) (*metapb.FileMetadata, error) { return nil, nil }
-func (m *recordingMeta) ReadStore(string) (*metapb.NzbStore, error)            { return nil, nil }
+func (m *recordingMeta) ReadFileMetadata(string) (*metapb.FileMetadata, error) {
+	if m.storeRef == "" {
+		return nil, nil
+	}
+	return &metapb.FileMetadata{StoreRef: m.storeRef}, nil
+}
+func (m *recordingMeta) ReadStore(string) (*metapb.NzbStore, error) { return nil, nil }
 func (m *recordingMeta) UpdateFileStatus(p string, s metapb.FileStatus) error {
 	m.statusCalls = append(m.statusCalls, struct {
 		path   string
@@ -208,6 +218,111 @@ func TestServiceSuccessFlipsMetadataAndHealth(t *testing.T) {
 		healthStore.calls[0].path != "/movies/a.mkv" ||
 		healthStore.calls[0].status != database.HealthStatusHealthy {
 		t.Fatalf("health calls = %+v, want one healthy for /movies/a.mkv", healthStore.calls)
+	}
+}
+
+// Two damaged files of the same release must share one job (the repair sweeps
+// the whole release anyway), and a successful repair must flip every member
+// back to healthy — not just the file that triggered the job.
+func TestServiceGroupsSiblingFilesIntoOneJob(t *testing.T) {
+	repo := newTestRepo(t)
+	s := testService(t, repo, true)
+	meta := &recordingMeta{storeRef: "store-1"}
+	healthStore := &recordingHealth{}
+	s.meta = meta
+	s.SetHealthStore(healthStore)
+	s.execute = func(context.Context, *database.Par2RepairJob) error { return nil }
+
+	s.Enqueue(context.Background(), "/movies/a.mkv", "<a@x>")
+	s.Enqueue(context.Background(), "/movies/b.mkv", "<b@x>")
+
+	rows, err := repo.List(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want one job for the whole release", len(rows))
+	}
+
+	if !s.runNext(context.Background()) {
+		t.Fatal("runNext found no job")
+	}
+
+	wantPaths := map[string]bool{"/movies/a.mkv": true, "/movies/b.mkv": true}
+	if len(meta.statusCalls) != 2 {
+		t.Fatalf("metadata status calls = %+v, want one healthy per member", meta.statusCalls)
+	}
+	for _, c := range meta.statusCalls {
+		if !wantPaths[c.path] || c.status != metapb.FileStatus_FILE_STATUS_HEALTHY {
+			t.Fatalf("metadata status calls = %+v, want healthy for both members", meta.statusCalls)
+		}
+	}
+	if len(healthStore.calls) != 2 {
+		t.Fatalf("health calls = %+v, want one healthy per member", healthStore.calls)
+	}
+	for _, c := range healthStore.calls {
+		if !wantPaths[c.path] || c.status != database.HealthStatusHealthy {
+			t.Fatalf("health calls = %+v, want healthy for both members", healthStore.calls)
+		}
+	}
+}
+
+// A file can join the release's job while it is already running (the sweep
+// repairs the whole release either way). The outcome bookkeeping must see the
+// late joiner, not the member list snapshotted at claim time.
+func TestServiceLateJoinerGetsOutcomeToo(t *testing.T) {
+	repo := newTestRepo(t)
+	s := testService(t, repo, true)
+	meta := &recordingMeta{storeRef: "store-1"}
+	healthStore := &recordingHealth{}
+	s.meta = meta
+	s.SetHealthStore(healthStore)
+
+	joined := make(chan struct{})
+	s.execute = func(ctx context.Context, _ *database.Par2RepairJob) error {
+		// Sibling file turns out damaged mid-repair and joins the job.
+		s.Enqueue(ctx, "/movies/b.mkv", "<b@x>")
+		close(joined)
+		return nil
+	}
+
+	s.Enqueue(context.Background(), "/movies/a.mkv", "<a@x>")
+	if !s.runNext(context.Background()) {
+		t.Fatal("runNext found no job")
+	}
+	<-joined
+
+	if len(healthStore.calls) != 2 {
+		t.Fatalf("health calls = %+v, want healthy for both members incl. the late joiner", healthStore.calls)
+	}
+}
+
+// An unrepairable release must mark every member corrupted, so no sibling is
+// left dangling in a repair state that will never resolve.
+func TestServiceUnrepairableMarksAllMembersCorrupted(t *testing.T) {
+	repo := newTestRepo(t)
+	s := testService(t, repo, true)
+	meta := &recordingMeta{storeRef: "store-1"}
+	healthStore := &recordingHealth{}
+	s.meta = meta
+	s.SetHealthStore(healthStore)
+	s.execute = func(context.Context, *database.Par2RepairJob) error {
+		return fmt.Errorf("%w: needs 9 recovery slices, set has 2", ErrUnrepairable)
+	}
+
+	s.Enqueue(context.Background(), "/movies/a.mkv", "")
+	s.Enqueue(context.Background(), "/movies/b.mkv", "")
+	if !s.runNext(context.Background()) {
+		t.Fatal("runNext found no job")
+	}
+
+	if len(healthStore.calls) != 2 {
+		t.Fatalf("health calls = %+v, want one corrupted record per member", healthStore.calls)
+	}
+	for _, c := range healthStore.calls {
+		if c.status != database.HealthStatusCorrupted || !strings.Contains(c.lastError, "recovery slices") {
+			t.Fatalf("health calls = %+v, want corrupted with the reason for both members", healthStore.calls)
+		}
 	}
 }
 
@@ -358,7 +473,7 @@ func TestServiceExecutesNzbModeJob(t *testing.T) {
 	s := testService(t, repo, true)
 
 	var sawNzbPath string
-	s.resolveNzb = func(_ context.Context, nzbPath string, _ []string) (*Resolution, error) {
+	s.resolveNzb = func(_ context.Context, nzbPath string, _ []string, _ JobProgress) (*Resolution, error) {
 		sawNzbPath = nzbPath
 		return nil, ErrNothingToRepair // terminal, keeps the test focused on routing
 	}
@@ -538,5 +653,73 @@ func TestServiceCancelSweepsScratch(t *testing.T) {
 	}
 	if _, err := os.Stat(scratch); !os.IsNotExist(err) {
 		t.Fatalf("scratch dir survived cancel, stat err = %v", err)
+	}
+}
+
+// A job that hangs must not occupy its worker forever: the service bounds
+// every job with a wall-clock timeout, and a timed-out job is a transient
+// failure that schedules a retry.
+func TestServiceJobTimeoutSchedulesRetry(t *testing.T) {
+	repo := newTestRepo(t)
+	s := testService(t, repo, true)
+	s.jobTimeout = 50 * time.Millisecond
+	s.execute = func(ctx context.Context, _ *database.Par2RepairJob) error {
+		<-ctx.Done() // a stuck job only ends when the timeout fires
+		return ctx.Err()
+	}
+
+	s.Enqueue(context.Background(), "/a.mkv", "<seg@x>")
+	done := make(chan bool, 1)
+	go func() { done <- s.runNext(context.Background()) }()
+	select {
+	case worked := <-done:
+		if !worked {
+			t.Fatal("runNext found no job")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("runNext did not return: job timeout never fired")
+	}
+
+	rows, err := repo.List(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Attempts != 1 {
+		t.Fatalf("rows = %+v, want one retrying job with attempts=1", rows)
+	}
+}
+
+// Stage progress tracks when the current stage started: carried forward while
+// the same stage advances, reset on a stage change or when the counter
+// regresses (a re-sweep), so ETA extrapolation never divides by another
+// stage's elapsed time.
+func TestSetProgressTracksStageStart(t *testing.T) {
+	s := &Service{}
+	t0 := time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC)
+	now := t0
+	s.now = func() time.Time { return now }
+
+	s.setProgress(1, StageChecking, 1, 10)
+	p, ok := s.Progress(1)
+	if !ok || !p.StageStartedAt.Equal(t0) {
+		t.Fatalf("StageStartedAt = %v, want %v", p.StageStartedAt, t0)
+	}
+
+	now = t0.Add(time.Minute)
+	s.setProgress(1, StageChecking, 5, 10)
+	if p, _ = s.Progress(1); !p.StageStartedAt.Equal(t0) {
+		t.Fatalf("same-stage advance reset StageStartedAt to %v, want %v", p.StageStartedAt, t0)
+	}
+
+	s.setProgress(1, StageRepairing, 1, 100)
+	if p, _ = s.Progress(1); !p.StageStartedAt.Equal(t0.Add(time.Minute)) {
+		t.Fatalf("stage change: StageStartedAt = %v, want %v", p.StageStartedAt, t0.Add(time.Minute))
+	}
+
+	now = t0.Add(2 * time.Minute)
+	s.setProgress(1, StageRepairing, 50, 100)
+	s.setProgress(1, StageRepairing, 1, 100) // re-sweep: counter regressed
+	if p, _ = s.Progress(1); !p.StageStartedAt.Equal(t0.Add(2 * time.Minute)) {
+		t.Fatalf("counter regression: StageStartedAt = %v, want %v", p.StageStartedAt, t0.Add(2*time.Minute))
 	}
 }

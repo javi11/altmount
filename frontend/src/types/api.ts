@@ -219,6 +219,11 @@ export type Par2RepairStatus = "pending" | "running";
 export interface Par2RepairJob {
 	id: number;
 	file_path: string;
+	/**
+	 * Every file the job repairs: damaged files of one release share a single
+	 * job, since a repair sweeps the whole release anyway.
+	 */
+	file_paths?: string[];
 	status: Par2RepairStatus;
 	attempts: number;
 	last_error?: string;
@@ -229,9 +234,19 @@ export interface Par2RepairJob {
 	duration_seconds?: number;
 	created_at: string;
 	updated_at: string;
-	// Sweep progress, present only while the job is running
+	// Stage progress, present only while the job is running. Stage is
+	// "checking" (article liveness STATs), "planning" (PAR2 parse + file
+	// matching), "downloading" (recovery payloads) or "repairing"
+	// (verification sweep); counts are in that stage's units.
+	progress_stage?: string;
 	progress_done?: number;
 	progress_total?: number;
+	/**
+	 * How long the current stage has been running (a re-sweep restarts it with
+	 * the counter). ETAs must use this, not duration_seconds, which includes
+	 * earlier stages and would overstate the estimate.
+	 */
+	progress_stage_elapsed_seconds?: number;
 }
 
 export interface HealthStats {
