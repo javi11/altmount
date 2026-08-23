@@ -23,7 +23,18 @@ func TestMigration035_NormalizesAndMergesHealthPathsIdempotently(t *testing.T) {
 	ctx := context.Background()
 	db := openMigratedTo(t, 34)
 
+	// These names deliberately exist in the permanent schema. Migration cleanup
+	// must address only its temporary tables, never an application-owned table.
 	_, err := db.ExecContext(ctx, `
+		CREATE TABLE file_health_path_collisions (marker TEXT NOT NULL);
+		CREATE TABLE file_health_path_affected (marker TEXT NOT NULL);
+		CREATE TABLE file_health_path_merged (marker TEXT NOT NULL);
+		INSERT INTO file_health_path_collisions VALUES ('permanent-collisions');
+		INSERT INTO file_health_path_affected VALUES ('permanent-affected');
+		INSERT INTO file_health_path_merged VALUES ('permanent-merged')`)
+	require.NoError(t, err)
+
+	_, err = db.ExecContext(ctx, `
 		INSERT INTO import_history (nzb_name, file_name, virtual_path, download_id) VALUES
 			('n', 'collision.mkv', char(92) || 'movies' || char(92) || 'collision.mkv', 'history-collision'),
 			('n', 'windows.mkv', '//shows/windows.mkv/', 'history-windows')
@@ -83,6 +94,24 @@ func TestMigration035_NormalizesAndMergesHealthPathsIdempotently(t *testing.T) {
 	assert.Equal(t, "new", indexer)
 	assert.Equal(t, "dl-new", downloadID)
 
+	var libraryPath, sourceNZBPath, errorDetails, createdAt, updatedAt, releaseDate, scheduledAt string
+	require.NoError(t, db.QueryRowContext(ctx, `
+		SELECT library_path, source_nzb_path, error_details, CAST(created_at AS TEXT),
+		       CAST(updated_at AS TEXT), CAST(release_date AS TEXT),
+		       CAST(scheduled_check_at AS TEXT)
+		FROM file_health WHERE file_path = 'movies/collision.mkv'`).Scan(
+		&libraryPath, &sourceNZBPath, &errorDetails, &createdAt, &updatedAt,
+		&releaseDate, &scheduledAt))
+	assert.Equal(t, "/library/legacy.mkv", libraryPath, "non-empty library evidence survives")
+	assert.Equal(t, "legacy.nzb", sourceNZBPath, "non-empty NZB evidence survives")
+	assert.Equal(t, "{\"legacy\":true}", errorDetails, "non-empty error evidence survives")
+	assert.Equal(t, "2026-08-19 10:00:00", createdAt, "oldest creation time survives")
+	assert.Equal(t, "2026-08-21 10:00:00", updatedAt, "newest update time survives")
+	assert.Equal(t, "2026-08-19 00:00:00", releaseDate, "non-empty release date survives")
+	assert.Equal(t, "2026-08-20 09:00:00", scheduledAt, "earliest scheduled check survives")
+
+	assertPermanentMigrationTablesSurvive(t, db, ctx, "migration cleanup")
+
 	var historyPath string
 	require.NoError(t, db.QueryRowContext(ctx,
 		"SELECT virtual_path FROM import_history WHERE file_name = 'collision.mkv'").Scan(&historyPath))
@@ -94,6 +123,7 @@ func TestMigration035_NormalizesAndMergesHealthPathsIdempotently(t *testing.T) {
 	// A second application is safe and leaves the merged row/evidence untouched.
 	applyVirtualPathMigration035(t, db)
 	assertVirtualPathMigrationInvariants(t, db, 2)
+	assertPermanentMigrationTablesSurvive(t, db, ctx, "repeated migration cleanup")
 	var secondID int64
 	require.NoError(t, db.QueryRowContext(ctx,
 		"SELECT id FROM file_health WHERE file_path = 'movies/collision.mkv'").Scan(&secondID))
@@ -149,6 +179,22 @@ func assertVirtualPathMigrationInvariants(t *testing.T, db *sql.DB, wantHealthRo
 	assert.Equal(t, wantHealthRows, distinctPaths)
 	assert.Zero(t, badHealthPaths)
 	assert.Zero(t, badHistoryPaths)
+}
+
+func assertPermanentMigrationTablesSurvive(t *testing.T, db *sql.DB, ctx context.Context, operation string) {
+	t.Helper()
+	for _, table := range []struct {
+		name string
+		want string
+	}{
+		{"file_health_path_collisions", "permanent-collisions"},
+		{"file_health_path_affected", "permanent-affected"},
+		{"file_health_path_merged", "permanent-merged"},
+	} {
+		var marker string
+		require.NoError(t, db.QueryRowContext(ctx, "SELECT marker FROM "+table.name).Scan(&marker))
+		assert.Equal(t, table.want, marker, table.name+" must survive "+operation)
+	}
 }
 
 func TestVirtualPathRepositoryUsesTheCanonicalForm(t *testing.T) {

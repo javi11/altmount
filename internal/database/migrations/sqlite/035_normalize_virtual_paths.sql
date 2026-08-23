@@ -9,9 +9,9 @@ UPDATE import_history
 SET virtual_path = trim(replace(virtual_path, char(92), '/'), '/')
 WHERE virtual_path <> trim(replace(virtual_path, char(92), '/'), '/');
 
-DROP TABLE IF EXISTS file_health_path_collisions;
-DROP TABLE IF EXISTS file_health_path_affected;
-DROP TABLE IF EXISTS file_health_path_merged;
+DROP TABLE IF EXISTS temp.file_health_path_collisions;
+DROP TABLE IF EXISTS temp.file_health_path_affected;
+DROP TABLE IF EXISTS temp.file_health_path_merged;
 
 -- Find collision keys without copying the healthy catalog. The affected table
 -- below contains full rows only for dirty paths or collision groups; a clean
@@ -34,6 +34,12 @@ WHERE h.file_path <> trim(replace(h.file_path, char(92), '/'), '/')
        WHERE c.canonical_path = trim(replace(h.file_path, char(92), '/'), '/')
    );
 
+-- Composite merge semantics for one canonical path:
+--   * retain the existing canonical row ID, otherwise retain the lowest ID;
+--   * choose the most severe status, then the newest row (ID breaks ties);
+--   * preserve evidence by taking the newest non-empty value for each field;
+--   * take maxima for retry/priority counters, minima for created/scheduled
+--     times, the latest updated time, and OR the mask flag.
 CREATE TEMP TABLE file_health_path_merged AS
 WITH ranked AS (
     SELECT h.*,
@@ -45,7 +51,6 @@ WITH ranked AS (
                 WHEN 'degraded' THEN 4
                 WHEN 'checking' THEN 3
                 WHEN 'pending' THEN 2
-                WHEN 'partial' THEN 2
                 WHEN 'healthy' THEN 1
                 ELSE 0
             END DESC, updated_at DESC, id DESC) AS status_rank,
@@ -87,7 +92,7 @@ SELECT
     COALESCE(MIN(CASE WHEN file_path = canonical_path THEN id END), MIN(id)) AS id,
     canonical_path AS file_path,
     MAX(CASE WHEN library_rank = 1 AND NULLIF(library_path, '') IS NOT NULL THEN library_path END) AS library_path,
-    MAX(CASE WHEN status_rank = 1 THEN CASE status WHEN 'partial' THEN 'corrupted' ELSE status END END) AS status,
+    MAX(CASE WHEN status_rank = 1 THEN status END) AS status,
     MAX(last_checked) AS last_checked,
     MAX(CASE WHEN last_error_rank = 1 AND NULLIF(last_error, '') IS NOT NULL THEN last_error END) AS last_error,
     MAX(retry_count) AS retry_count,
@@ -129,9 +134,9 @@ SELECT
     indexer, download_id
 FROM file_health_path_merged;
 
-DROP TABLE file_health_path_merged;
-DROP TABLE file_health_path_affected;
-DROP TABLE file_health_path_collisions;
+DROP TABLE temp.file_health_path_merged;
+DROP TABLE temp.file_health_path_affected;
+DROP TABLE temp.file_health_path_collisions;
 -- +goose StatementEnd
 
 -- +goose Down
