@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"strings"
 
 	"github.com/javi11/altmount/internal/arrs/clients"
@@ -48,8 +49,8 @@ func (m *Manager) EnsureWebhookRegistration(ctx context.Context, altmountURL str
 	allInstances := m.instances.GetAllInstances()
 	webhookName := "AltMount Webhook"
 	webhookURL := fmt.Sprintf("%s/api/arrs/webhook?apikey=%s", altmountURL, apiKey)
-	// Redact the API key when logging; the real webhookURL is still used for registration.
-	redactedWebhookURL := fmt.Sprintf("%s/api/arrs/webhook?apikey=***", altmountURL)
+	// Redact all caller-controlled URL credentials when logging; the real webhookURL is still used for registration.
+	redactedWebhookURL := RedactWebhookURLForLog(altmountURL)
 
 	slog.InfoContext(ctx, "Ensuring webhook registration in ARR instances", "webhook_url", redactedWebhookURL)
 
@@ -388,6 +389,23 @@ func (m *Manager) EnsureWebhookRegistration(ctx context.Context, altmountURL str
 	}
 
 	return nil
+}
+
+// RedactWebhookURLForLog returns useful endpoint context without exposing URL
+// credentials, query parameters, or fragments in logs.
+func RedactWebhookURLForLog(altmountURL string) string {
+	parsed, err := url.Parse(altmountURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "invalid-url/api/arrs/webhook?apikey=***"
+	}
+
+	parsed.User = nil
+	parsed.RawQuery = ""
+	parsed.ForceQuery = false
+	parsed.Fragment = ""
+	parsed.RawFragment = ""
+
+	return strings.TrimRight(parsed.String(), "/") + "/api/arrs/webhook?apikey=***"
 }
 
 // EnsureDownloadClientRegistration ensures that AltMount is registered as a SABnzbd download client in all enabled ARR instances
