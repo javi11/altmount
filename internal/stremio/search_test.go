@@ -223,3 +223,79 @@ func TestSearch_TheArk_vs_ArkTheAnimatedSeries_Filtering(t *testing.T) {
 		assert.True(t, foundMismatch, "Should have marked mismatch series as excluded with reason")
 	})
 }
+
+// newsnabItemXML builds a minimal Newznab RSS item so a stubbed indexer can
+// return a hit for the ID-based query form.
+func newsnabItemXML(title string) string {
+	return `<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>t</title>` +
+		`<item><title>` + title + `</title><link>http://example.invalid/nzb/1</link>` +
+		`<enclosure url="http://example.invalid/nzb/1" length="1000" type="application/x-nzb"/>` +
+		`</item></channel></rss>`
+}
+
+// TestSearchInspect_TitleQueryOnlyWhenIDSearchIsEmpty pins that the broader
+// free-text title query is a fallback, not an unconditional second round. Firing
+// both forms on every request doubles each indexer's request volume, and
+// indexers rate-limit aggressively.
+func TestSearchInspect_TitleQueryOnlyWhenIDSearchIsEmpty(t *testing.T) {
+	t.Run("ID hit suppresses the title query", func(t *testing.T) {
+		var queries []string
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			queries = append(queries, r.URL.RawQuery)
+			w.Header().Set("Content-Type", "application/xml")
+			_, _ = w.Write([]byte(newsnabItemXML("The.Ark.S01E01.1080p.WEB.H264")))
+		}))
+		defer server.Close()
+
+		sc := NewSearchCoordinator(CoordinatorConfig{
+			Provider: "newsnab",
+			NewsnabIndexers: []newsnab.IndexerConfig{
+				{Name: "idx", URL: server.URL, APIKey: "k", Enabled: true},
+			},
+		}, server.Client())
+
+		res, err := sc.SearchInspect(context.Background(), SearchParams{
+			Type: "series", IMDBID: "tt15367376", TVDBID: "415089",
+			Title: "The Ark", Season: 1, Episode: 1, TimeoutMS: 2000,
+		})
+		require.NoError(t, err)
+		require.NotNil(t, res)
+
+		assert.Len(t, queries, 1, "expected only the ID query, got %v", queries)
+		for _, q := range queries {
+			assert.NotContains(t, q, "q=The", "title query must not run when the ID search found results")
+		}
+	})
+
+	t.Run("empty ID result falls back to the title query", func(t *testing.T) {
+		var queries []string
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			queries = append(queries, r.URL.RawQuery)
+			w.Header().Set("Content-Type", "application/xml")
+			if strings.Contains(r.URL.RawQuery, "q=") {
+				_, _ = w.Write([]byte(newsnabItemXML("The.Ark.S01E01.1080p.WEB.H264")))
+				return
+			}
+			_, _ = w.Write([]byte(`<?xml version="1.0"?><rss version="2.0"><channel><title>t</title></channel></rss>`))
+		}))
+		defer server.Close()
+
+		sc := NewSearchCoordinator(CoordinatorConfig{
+			Provider: "newsnab",
+			NewsnabIndexers: []newsnab.IndexerConfig{
+				{Name: "idx", URL: server.URL, APIKey: "k", Enabled: true},
+			},
+		}, server.Client())
+
+		res, err := sc.SearchInspect(context.Background(), SearchParams{
+			Type: "series", IMDBID: "tt15367376", TVDBID: "415089",
+			Title: "The Ark", Season: 1, Episode: 1, TimeoutMS: 2000,
+		})
+		require.NoError(t, err)
+		require.NotNil(t, res)
+
+		require.Len(t, queries, 2, "expected the ID query then the title fallback, got %v", queries)
+		assert.Contains(t, queries[1], "q=The", "second query should be the title fallback")
+		assert.Equal(t, 1, res.TotalResults, "the fallback hit should be evaluated")
+	})
+}

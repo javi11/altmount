@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -99,8 +100,200 @@ func (sc *SearchCoordinator) Search(ctx context.Context, params SearchParams) ([
 	return active, nil
 }
 
-// SearchInspect executes concurrent queries across all enabled providers, evaluates every release against
-// scoring/exclusion rules, and returns both active and discarded releases with diagnostic reasons.
+// searchQuery is one indexer query dispatched during a search fan-out. Each
+// query runs in its own goroutine; results are merged under a shared mutex.
+type searchQuery struct {
+	// label identifies the query in diagnostics, e.g. "prowlarr movie id".
+	label string
+	// indexer names the specific indexer for per-indexer queries; empty for
+	// aggregators like Prowlarr that report their own indexer per result.
+	indexer string
+	// run performs the query and returns provider-agnostic results.
+	run func(context.Context) ([]SearchResult, error)
+}
+
+// runSearchQueries dispatches every query concurrently and returns the merged
+// results. A query that fails is logged and contributes nothing; one bad
+// indexer never fails the whole search.
+func runSearchQueries(ctx context.Context, queries []searchQuery) []SearchResult {
+	var (
+		wg         sync.WaitGroup
+		mu         sync.Mutex
+		aggregated []SearchResult
+	)
+
+	for _, q := range queries {
+		q := q
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			res, err := q.run(ctx)
+			if err != nil {
+				slog.WarnContext(ctx, "Indexer search failed",
+					"query", q.label, "indexer", q.indexer, "error", err)
+				return
+			}
+			slog.DebugContext(ctx, "Indexer search returned results",
+				"query", q.label, "indexer", q.indexer, "count", len(res))
+			if len(res) == 0 {
+				return
+			}
+			mu.Lock()
+			aggregated = append(aggregated, res...)
+			mu.Unlock()
+		}()
+	}
+
+	wg.Wait()
+	return aggregated
+}
+
+// newsnabMovieCategories are the Newznab movie categories queried when falling
+// back to a free-text title search, which carries no category of its own.
+var newsnabMovieCategories = []int{2000, 2010, 2030, 2040, 2045, 2060}
+
+// idQueries builds the ID-based queries (IMDb / TVDB) for the enabled providers.
+// ID searches are the precise form and are always tried first.
+func (sc *SearchCoordinator) idQueries(params SearchParams, provider, userAgent string) []searchQuery {
+	var queries []searchQuery
+	isMovie := strings.EqualFold(params.Type, "movie")
+
+	if (provider == "prowlarr" || provider == "both") && sc.prowlarrClient != nil {
+		if isMovie {
+			if params.IMDBID != "" {
+				queries = append(queries, searchQuery{label: "prowlarr movie imdb", run: func(ctx context.Context) ([]SearchResult, error) {
+					return toSearchResults(sc.prowlarrClient.Search(ctx, params.IMDBID, "movie", sc.config.ProwlarrCats, sc.config.ProwlarrIdxs, 0, 0))
+				}})
+			}
+		} else {
+			if params.TVDBID != "" {
+				queries = append(queries, searchQuery{label: "prowlarr tv tvdb", run: func(ctx context.Context) ([]SearchResult, error) {
+					return toSearchResults(sc.prowlarrClient.SearchByTVDB(ctx, params.TVDBID, "tvsearch", sc.config.ProwlarrCats, sc.config.ProwlarrIdxs, params.Season, params.Episode))
+				}})
+			}
+			if params.IMDBID != "" {
+				queries = append(queries, searchQuery{label: "prowlarr tv imdb", run: func(ctx context.Context) ([]SearchResult, error) {
+					return toSearchResults(sc.prowlarrClient.Search(ctx, params.IMDBID, "tvsearch", sc.config.ProwlarrCats, sc.config.ProwlarrIdxs, params.Season, params.Episode))
+				}})
+			}
+		}
+	}
+
+	if (provider == "newsnab" || provider == "both") && len(sc.newsnabClients) > 0 {
+		for _, client := range sc.newsnabClients {
+			c := client
+			if isMovie {
+				if params.IMDBID != "" {
+					queries = append(queries, searchQuery{label: "newsnab movie imdb", indexer: c.Name(), run: func(ctx context.Context) ([]SearchResult, error) {
+						return toSearchResults(c.SearchMovie(ctx, params.IMDBID, nil, userAgent))
+					}})
+				}
+			} else if params.IMDBID != "" || params.TVDBID != "" {
+				queries = append(queries, searchQuery{label: "newsnab tv id", indexer: c.Name(), run: func(ctx context.Context) ([]SearchResult, error) {
+					return toSearchResults(c.SearchTV(ctx, params.IMDBID, params.TVDBID, "", params.Season, params.Episode, nil, userAgent))
+				}})
+			}
+		}
+	}
+
+	return queries
+}
+
+// titleQueries builds the free-text title queries for the enabled providers.
+// These are a fallback: they are broader, and running them alongside the ID
+// searches would double every indexer's request volume on every request.
+func (sc *SearchCoordinator) titleQueries(params SearchParams, provider, userAgent string) []searchQuery {
+	if params.Title == "" {
+		return nil
+	}
+
+	var queries []searchQuery
+	isMovie := strings.EqualFold(params.Type, "movie")
+	searchType := "tvsearch"
+	if isMovie {
+		searchType = "movie"
+	}
+
+	if (provider == "prowlarr" || provider == "both") && sc.prowlarrClient != nil {
+		season, episode := params.Season, params.Episode
+		if isMovie {
+			season, episode = 0, 0
+		}
+		queries = append(queries, searchQuery{label: "prowlarr title", run: func(ctx context.Context) ([]SearchResult, error) {
+			return toSearchResults(sc.prowlarrClient.SearchByQuery(ctx, params.Title, searchType, sc.config.ProwlarrCats, sc.config.ProwlarrIdxs, season, episode))
+		}})
+	}
+
+	if (provider == "newsnab" || provider == "both") && len(sc.newsnabClients) > 0 {
+		for _, client := range sc.newsnabClients {
+			c := client
+			if isMovie {
+				queries = append(queries, searchQuery{label: "newsnab movie title", indexer: c.Name(), run: func(ctx context.Context) ([]SearchResult, error) {
+					return toSearchResults(c.SearchGeneral(ctx, params.Title, newsnabMovieCategories, userAgent))
+				}})
+			} else {
+				queries = append(queries, searchQuery{label: "newsnab tv title", indexer: c.Name(), run: func(ctx context.Context) ([]SearchResult, error) {
+					return toSearchResults(c.SearchTV(ctx, "", "", params.Title, params.Season, params.Episode, nil, userAgent))
+				}})
+			}
+		}
+	}
+
+	return queries
+}
+
+// dedupeResults removes duplicate releases, keying on download URL first and
+// then on the release's full provider identity.
+func dedupeResults(aggregated []SearchResult) []SearchResult {
+	unique := make([]SearchResult, 0, len(aggregated))
+	seenURLs := make(map[string]struct{}, len(aggregated))
+	seenReleases := make(map[string]struct{}, len(aggregated))
+
+	for _, res := range aggregated {
+		if res.DownloadURL != "" {
+			if _, exists := seenURLs[res.DownloadURL]; exists {
+				continue
+			}
+			seenURLs[res.DownloadURL] = struct{}{}
+		}
+		identity := res.Source + "|" + res.IndexerID + "|" + res.GUID + "|" + res.DownloadURL
+		if _, exists := seenReleases[identity]; exists {
+			continue
+		}
+		seenReleases[identity] = struct{}{}
+
+		unique = append(unique, res)
+	}
+
+	return unique
+}
+
+// mediaMismatchReason reports why a release does not belong to the requested
+// media, or "" when it matches (or when no title is available to check).
+func mediaMismatchReason(res SearchResult, params SearchParams) string {
+	if params.Title == "" {
+		return ""
+	}
+	switch {
+	case strings.EqualFold(params.Type, "series"):
+		if !MatchesSeries(res.Title, params.Title, params.Season, params.Episode, 0) {
+			return "Does not match requested series or episode"
+		}
+	case strings.EqualFold(params.Type, "movie"):
+		if !MatchesMovie(res.Title, params.Title, 0) {
+			return "Does not match requested movie title"
+		}
+	}
+	return ""
+}
+
+// SearchInspect queries all enabled providers, evaluates every release against
+// scoring/exclusion rules, and returns both active and discarded releases with
+// diagnostic reasons.
+//
+// ID-based searches run concurrently first; the broader free-text title
+// searches are dispatched only when the ID pass came back empty, so a typical
+// request costs one round of indexer queries rather than two.
 func (sc *SearchCoordinator) SearchInspect(ctx context.Context, params SearchParams) (*SearchInspectResult, error) {
 	timeout := time.Duration(params.TimeoutMS) * time.Millisecond
 	if timeout <= 0 {
@@ -120,16 +313,15 @@ func (sc *SearchCoordinator) SearchInspect(ctx context.Context, params SearchPar
 		provider = "both"
 	}
 
-	slog.InfoContext(searchCtx, "SearchInspect starting", "provider", provider, "has_prowlarr", sc.prowlarrClient != nil, "newsnab_count", len(sc.newsnabClients), "params_type", params.Type, "params_title", params.Title, "params_imdb", params.IMDBID)
+	slog.DebugContext(searchCtx, "Stremio search starting",
+		"provider", provider,
+		"has_prowlarr", sc.prowlarrClient != nil,
+		"newsnab_count", len(sc.newsnabClients),
+		"type", params.Type,
+		"title", params.Title,
+		"imdb_id", params.IMDBID)
 
-	var (
-		wg             sync.WaitGroup
-		mu             sync.Mutex
-		aggregated     []SearchResult
-		indexerWeights = make(map[string]int)
-	)
-
-	// Populate weights from newsnab indexers
+	indexerWeights := make(map[string]int)
 	for _, n := range sc.config.NewsnabIndexers {
 		if n.Weight != 0 {
 			indexerWeights[n.Name] = n.Weight
@@ -137,234 +329,36 @@ func (sc *SearchCoordinator) SearchInspect(ctx context.Context, params SearchPar
 		}
 	}
 
-	// 1. Dispatch Prowlarr Searches concurrently
-	if (provider == "prowlarr" || provider == "both") && sc.prowlarrClient != nil {
-		if strings.EqualFold(params.Type, "movie") {
-			if params.IMDBID != "" {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					res, err := sc.prowlarrClient.Search(searchCtx, params.IMDBID, "movie", sc.config.ProwlarrCats, sc.config.ProwlarrIdxs, 0, 0)
-					if err != nil {
-						slog.WarnContext(searchCtx, "Prowlarr movie ID search failed", "error", err, "imdb_id", params.IMDBID)
-					} else {
-						slog.InfoContext(searchCtx, "Prowlarr movie ID search returned results", "count", len(res), "imdb_id", params.IMDBID)
-					}
-					if err == nil && len(res) > 0 {
-						mu.Lock()
-						for _, r := range res {
-							aggregated = append(aggregated, prowlarrToSearchResult(r))
-						}
-						mu.Unlock()
-					}
-				}()
-			}
-			if params.Title != "" {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					res, err := sc.prowlarrClient.SearchByQuery(searchCtx, params.Title, "movie", sc.config.ProwlarrCats, sc.config.ProwlarrIdxs, 0, 0)
-					if err != nil {
-						slog.WarnContext(searchCtx, "Prowlarr movie Title search failed", "error", err, "title", params.Title)
-					} else {
-						slog.InfoContext(searchCtx, "Prowlarr movie Title search returned results", "count", len(res), "title", params.Title)
-					}
-					if err == nil && len(res) > 0 {
-						mu.Lock()
-						for _, r := range res {
-							aggregated = append(aggregated, prowlarrToSearchResult(r))
-						}
-						mu.Unlock()
-					}
-				}()
-			}
-		} else {
-			if params.TVDBID != "" {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					if res, err := sc.prowlarrClient.SearchByTVDB(searchCtx, params.TVDBID, "tvsearch", sc.config.ProwlarrCats, sc.config.ProwlarrIdxs, params.Season, params.Episode); err == nil && len(res) > 0 {
-						mu.Lock()
-						for _, r := range res {
-							aggregated = append(aggregated, prowlarrToSearchResult(r))
-						}
-						mu.Unlock()
-					}
-				}()
-			}
-			if params.IMDBID != "" {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					if res, err := sc.prowlarrClient.Search(searchCtx, params.IMDBID, "tvsearch", sc.config.ProwlarrCats, sc.config.ProwlarrIdxs, params.Season, params.Episode); err == nil && len(res) > 0 {
-						mu.Lock()
-						for _, r := range res {
-							aggregated = append(aggregated, prowlarrToSearchResult(r))
-						}
-						mu.Unlock()
-					}
-				}()
-			}
-			if params.Title != "" {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					if res, err := sc.prowlarrClient.SearchByQuery(searchCtx, params.Title, "tvsearch", sc.config.ProwlarrCats, sc.config.ProwlarrIdxs, params.Season, params.Episode); err == nil && len(res) > 0 {
-						mu.Lock()
-						for _, r := range res {
-							aggregated = append(aggregated, prowlarrToSearchResult(r))
-						}
-						mu.Unlock()
-					}
-				}()
-			}
+	aggregated := runSearchQueries(searchCtx, sc.idQueries(params, provider, userAgent))
+	if len(aggregated) == 0 {
+		if titleQueries := sc.titleQueries(params, provider, userAgent); len(titleQueries) > 0 {
+			slog.DebugContext(searchCtx, "ID search returned nothing, falling back to title search",
+				"title", params.Title)
+			aggregated = runSearchQueries(searchCtx, titleQueries)
 		}
 	}
 
-	// 2. Dispatch Direct Newsnab Searches concurrently
-	if (provider == "newsnab" || provider == "both") && len(sc.newsnabClients) > 0 {
-		for _, client := range sc.newsnabClients {
-			c := client
-			if strings.EqualFold(params.Type, "movie") {
-				if params.IMDBID != "" {
-					wg.Add(1)
-					go func() {
-						defer wg.Done()
-						res, err := c.SearchMovie(searchCtx, params.IMDBID, nil, userAgent)
-						if err != nil {
-							slog.WarnContext(searchCtx, "Newsnab movie ID search failed", "indexer", c.Name(), "error", err, "imdb_id", params.IMDBID)
-						} else {
-							slog.InfoContext(searchCtx, "Newsnab movie ID search returned results", "indexer", c.Name(), "count", len(res), "imdb_id", params.IMDBID)
-						}
-						if err == nil && len(res) > 0 {
-							mu.Lock()
-							for _, r := range res {
-								aggregated = append(aggregated, newsnabToSearchResult(r))
-							}
-							mu.Unlock()
-						}
-					}()
-				}
-				if params.Title != "" {
-					wg.Add(1)
-					go func() {
-						defer wg.Done()
-						res, err := c.SearchGeneral(searchCtx, params.Title, []int{2000, 2010, 2030, 2040, 2045, 2060}, userAgent)
-						if err != nil {
-							slog.WarnContext(searchCtx, "Newsnab movie Title search failed", "indexer", c.Name(), "error", err, "title", params.Title)
-						} else {
-							slog.InfoContext(searchCtx, "Newsnab movie Title search returned results", "indexer", c.Name(), "count", len(res), "title", params.Title)
-						}
-						if err == nil && len(res) > 0 {
-							mu.Lock()
-							for _, r := range res {
-								aggregated = append(aggregated, newsnabToSearchResult(r))
-							}
-							mu.Unlock()
-						}
-					}()
-				}
-			} else {
-				if params.IMDBID != "" || params.TVDBID != "" {
-					wg.Add(1)
-					go func() {
-						defer wg.Done()
-						res, err := c.SearchTV(searchCtx, params.IMDBID, params.TVDBID, "", params.Season, params.Episode, nil, userAgent)
-						if err != nil {
-							slog.WarnContext(searchCtx, "Newsnab TV ID search failed", "indexer", c.Name(), "error", err)
-						} else {
-							slog.InfoContext(searchCtx, "Newsnab TV ID search returned results", "indexer", c.Name(), "count", len(res))
-						}
-						if err == nil && len(res) > 0 {
-							mu.Lock()
-							for _, r := range res {
-								aggregated = append(aggregated, newsnabToSearchResult(r))
-							}
-							mu.Unlock()
-						}
-					}()
-				}
-				if params.Title != "" {
-					wg.Add(1)
-					go func() {
-						defer wg.Done()
-						res, err := c.SearchTV(searchCtx, "", "", params.Title, params.Season, params.Episode, nil, userAgent)
-						if err != nil {
-							slog.WarnContext(searchCtx, "Newsnab TV Title search failed", "indexer", c.Name(), "error", err, "title", params.Title)
-						} else {
-							slog.InfoContext(searchCtx, "Newsnab TV Title search returned results", "indexer", c.Name(), "count", len(res), "title", params.Title)
-						}
-						if err == nil && len(res) > 0 {
-							mu.Lock()
-							for _, r := range res {
-								aggregated = append(aggregated, newsnabToSearchResult(r))
-							}
-							mu.Unlock()
-						}
-					}()
-				}
-			}
-		}
-	}
-
-	wg.Wait()
-
-	// Deduplicate aggregated items by DownloadURL / Title identity
-	uniqueResults := make([]SearchResult, 0, len(aggregated))
-	seenURLs := make(map[string]struct{})
-	seenReleases := make(map[string]struct{})
-
-	for _, res := range aggregated {
-		if res.DownloadURL != "" {
-			if _, exists := seenURLs[res.DownloadURL]; exists {
-				continue
-			}
-			seenURLs[res.DownloadURL] = struct{}{}
-		}
-		identity := res.Source + "|" + res.IndexerID + "|" + res.GUID + "|" + res.DownloadURL
-		if _, exists := seenReleases[identity]; exists {
-			continue
-		}
-		seenReleases[identity] = struct{}{}
-
-		uniqueResults = append(uniqueResults, res)
-	}
+	uniqueResults := dedupeResults(aggregated)
 
 	activeList := make([]ScoredRelease, 0, len(uniqueResults))
 	discardedList := make([]ScoredRelease, 0, len(uniqueResults))
 
 	for _, rel := range uniqueResults {
-		// Evaluate media matching if title is provided
-		isMediaMismatch := false
-		var mismatchReason string
-		if strings.EqualFold(params.Type, "series") && params.Title != "" {
-			if !MatchesSeries(rel.Title, params.Title, params.Season, params.Episode, 0) {
-				isMediaMismatch = true
-				mismatchReason = "Does not match requested series or episode"
-			}
-		} else if strings.EqualFold(params.Type, "movie") && params.Title != "" {
-			if !MatchesMovie(rel.Title, params.Title, 0) {
-				isMediaMismatch = true
-				mismatchReason = "Does not match requested movie title"
-			}
-		}
-
 		eval := EvaluateRelease(rel.Title, &sc.config.Scoring)
 		eval.SearchResult = rel
 
-		if isMediaMismatch {
+		if reason := mediaMismatchReason(rel, params); reason != "" {
 			eval.Excluded = true
 			if eval.ExcludeReason != "" {
-				eval.ExcludeReason = mismatchReason + "; " + eval.ExcludeReason
+				eval.ExcludeReason = reason + "; " + eval.ExcludeReason
 			} else {
-				eval.ExcludeReason = mismatchReason
+				eval.ExcludeReason = reason
 			}
 		}
 
 		if eval.Excluded {
 			discardedList = append(discardedList, eval)
 		} else {
-			// Apply indexer bonus weights to active releases
 			applyIndexerBonus(&eval, rel, indexerWeights)
 			activeList = append(activeList, eval)
 		}
@@ -373,7 +367,7 @@ func (sc *SearchCoordinator) SearchInspect(ctx context.Context, params SearchPar
 	sortByScoreDesc(activeList)
 	sortByDateDesc(discardedList)
 
-	allEvaluated := append(activeList, discardedList...)
+	allEvaluated := slices.Concat(activeList, discardedList)
 
 	return &SearchInspectResult{
 		TotalResults:     len(allEvaluated),
@@ -381,6 +375,24 @@ func (sc *SearchCoordinator) SearchInspect(ctx context.Context, params SearchPar
 		DiscardedResults: len(discardedList),
 		Releases:         allEvaluated,
 	}, nil
+}
+
+// toSearchResults adapts a provider-specific result slice (and its error) into
+// the common SearchResult form, so every query in a fan-out has one signature.
+func toSearchResults[T prowlarr.NZBResult | newsnab.Result](res []T, err error) ([]SearchResult, error) {
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SearchResult, 0, len(res))
+	for _, r := range res {
+		switch v := any(r).(type) {
+		case prowlarr.NZBResult:
+			out = append(out, prowlarrToSearchResult(v))
+		case newsnab.Result:
+			out = append(out, newsnabToSearchResult(v))
+		}
+	}
+	return out, nil
 }
 
 func prowlarrToSearchResult(r prowlarr.NZBResult) SearchResult {
