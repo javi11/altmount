@@ -2,7 +2,6 @@ package validation
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"math/rand"
@@ -137,15 +136,36 @@ func FastFailReleaseProbe(
 	statCtx, cancel := context.WithTimeout(ctx, pool.StatManyTimeout(len(ids), maxConnections, probeTimeout))
 	defer cancel()
 
+	// Count confirmed-reachable segments rather than trusting the stream to
+	// report every failure: StatMany abandons pending sends once its context is
+	// done, so a deadline expiry closes the channel silently instead of
+	// surfacing an error per segment. Only a full set of successful Stats proves
+	// the sample reachable.
+	reachable := 0
 	for r := range usenetPool.StatMany(statCtx, ids, nntppool.StatManyOptions{Concurrency: maxConnections}) {
 		if r.Err != nil {
-			if errors.Is(r.Err, context.Canceled) || errors.Is(r.Err, context.DeadlineExceeded) || ctx.Err() != nil {
-				return false, ctx.Err()
+			// Only the caller giving up is an error. statCtx carries the probe's
+			// own short deadline, so an expiry there is a reachability signal.
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return false, ctxErr
 			}
 			slog.WarnContext(ctx, "FastFailReleaseProbe segment stat failed", "segment_id", r.MessageID, "error", r.Err)
 			cancel()
 			return true, nil
 		}
+		reachable++
+	}
+
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return false, ctxErr
+	}
+	if reachable < len(ids) {
+		// The probe's own deadline expired before every sampled segment was
+		// confirmed. Reachability is unproven, so report missing and let the
+		// caller escalate to the per-file sweep.
+		slog.WarnContext(ctx, "FastFailReleaseProbe timed out before confirming sample",
+			"confirmed", reachable, "sampled", len(ids))
+		return true, nil
 	}
 	return false, nil
 }
@@ -299,10 +319,10 @@ func FastFailCheckFiles(
 		}
 
 		for _, job := range toCheck {
+			// Caller cancellation was already handled above, so any error left
+			// here — including this chunk's own deadline — is a reachability
+			// signal for the owning file, not a reason to abandon the sweep.
 			if statErr := errByID[job.segID]; statErr != nil {
-				if errors.Is(statErr, context.Canceled) || errors.Is(statErr, context.DeadlineExceeded) {
-					return nil, statErr
-				}
 				results[job.fileIdx].Broken = true
 				results[job.fileIdx].MissingSegmentIDs = append(results[job.fileIdx].MissingSegmentIDs, job.segID)
 				if job.groupKey != "" {
