@@ -13,7 +13,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -704,15 +703,12 @@ func calculateStremioReleaseScore(r prowlarr.NZBResult, prowlarrCfg config.Prowl
 		}
 	}
 	if len(prowlarrCfg.CustomScores) > 0 {
-		titleLower := strings.ToLower(r.Title)
 		for pattern, val := range prowlarrCfg.CustomScores {
 			pattern = strings.TrimSpace(pattern)
 			if pattern == "" {
 				continue
 			}
-			if strings.Contains(titleLower, strings.ToLower(pattern)) {
-				score += val
-			} else if re, err := regexp.Compile("(?i)" + pattern); err == nil && re.MatchString(r.Title) {
+			if prowlarr.MatchKeywordOrPattern(r.Title, pattern) {
 				score += val
 			}
 		}
@@ -922,6 +918,7 @@ func (s *Server) searchStremioReleases(
 		if mErr != nil {
 			slog.WarnContext(ctx, "Failed to resolve movie metadata from IMDb ID", "error", mErr, "imdb_id", imdbID)
 		}
+		title = movieTitle
 		expectedTitle = movieTitle
 		expectedYear = movieYear
 	}
@@ -1903,4 +1900,109 @@ func firstEnabledARR(instances []config.ArrsInstanceConfig) (string, string) {
 		}
 	}
 	return "", ""
+}
+
+// InspectSearchRequest represents a payload to inspect/rank indexer search results in real time.
+type InspectSearchRequest struct {
+	Query     string                       `json:"query"`
+	Type      string                       `json:"type"` // "movie" or "series"
+	IMDbID    string                       `json:"imdb_id,omitempty"`
+	TVDBID    string                       `json:"tvdb_id,omitempty"`
+	Season    int                          `json:"season,omitempty"`
+	Episode   int                          `json:"episode,omitempty"`
+	TimeoutMS int                          `json:"timeout_ms,omitempty"`
+	Scoring   *stremio.StreamScoringConfig `json:"scoring,omitempty"`
+}
+
+// handleInspectStremioSearch handles POST /api/stremio/search/inspect
+func (s *Server) handleInspectStremioSearch(c *fiber.Ctx) error {
+	ctx := c.Context()
+	var req InspectSearchRequest
+	if err := c.BodyParser(&req); err != nil {
+		return RespondBadRequest(c, "Invalid request body", err.Error())
+	}
+
+	req.Query = strings.TrimSpace(req.Query)
+	req.IMDbID = strings.TrimSpace(req.IMDbID)
+
+	if req.Query == "" && req.IMDbID == "" {
+		return RespondBadRequest(c, "Query title or IMDb ID is required", "")
+	}
+
+	// Handle Stremio ID formats (e.g. tt15367376:1:1 or tt2654520)
+	rawTarget := req.IMDbID
+	if rawTarget == "" && strings.HasPrefix(strings.ToLower(req.Query), "tt") {
+		rawTarget = req.Query
+	}
+
+	if rawTarget != "" && strings.HasPrefix(strings.ToLower(rawTarget), "tt") {
+		parsedIMDb, parsedSeason, parsedEpisode := parseStremioContentID(rawTarget)
+		req.IMDbID = parsedIMDb
+		if parsedSeason > 0 && req.Season == 0 {
+			req.Season = parsedSeason
+			req.Type = "series"
+		}
+		if parsedEpisode > 0 && req.Episode == 0 {
+			req.Episode = parsedEpisode
+			req.Type = "series"
+		}
+	}
+
+	if req.Type == "" {
+		req.Type = "movie"
+	}
+
+	searchTitle := req.Query
+	if strings.HasPrefix(strings.ToLower(searchTitle), "tt") {
+		searchTitle = ""
+	}
+
+	// Resolve metadata from IMDb ID identical to Stremio addon stream handler
+	if req.IMDbID != "" {
+		if req.Type == "series" {
+			tvdbID, title, err := resolveSeriesMetadataFromIMDb(ctx, req.IMDbID)
+			if err == nil {
+				if req.TVDBID == "" && tvdbID != "" {
+					req.TVDBID = tvdbID
+				}
+				if searchTitle == "" && title != "" {
+					searchTitle = title
+				}
+			}
+		} else {
+			_, movieTitle, _, err := resolveMovieMetadataFromIMDb(ctx, req.IMDbID)
+			if err == nil && searchTitle == "" && movieTitle != "" {
+				searchTitle = movieTitle
+			}
+		}
+	}
+
+	slog.InfoContext(ctx, "Inspect search executing", "imdb_id", req.IMDbID, "search_title", searchTitle, "type", req.Type)
+
+	cfg := s.configManager.GetConfig()
+	coordCfg := s.buildStremioCoordinatorConfig(cfg)
+
+	// If user provided draft/custom scoring config in the request, override with it
+	if req.Scoring != nil {
+		coordCfg.Scoring = *req.Scoring
+	}
+
+	coordinator := stremio.NewSearchCoordinator(coordCfg, httpclient.NewForExternal(cfg.Network, 30*time.Second))
+
+	params := stremio.SearchParams{
+		Type:      req.Type,
+		IMDBID:    req.IMDbID,
+		Title:     searchTitle,
+		TVDBID:    req.TVDBID,
+		Season:    req.Season,
+		Episode:   req.Episode,
+		TimeoutMS: req.TimeoutMS,
+	}
+
+	res, err := coordinator.SearchInspect(ctx, params)
+	if err != nil {
+		return RespondInternalError(c, "Failed to execute indexer search inspection", err.Error())
+	}
+
+	return RespondSuccess(c, res)
 }

@@ -161,4 +161,65 @@ func TestSearch_TheArk_vs_ArkTheAnimatedSeries_Filtering(t *testing.T) {
 			assert.NotContains(t, r.Title, "The.Ark.2023")
 		}
 	})
+
+	t.Run("SearchInspect returns both active and discarded releases with evaluation reasons", func(t *testing.T) {
+		coordWithExcludes := NewSearchCoordinator(CoordinatorConfig{
+			Provider: "newsnab",
+			NewsnabIndexers: []newsnab.IndexerConfig{
+				{
+					Name:    "mock-indexer",
+					URL:     server.URL,
+					APIKey:  "dummy-key",
+					Enabled: true,
+				},
+			},
+			Scoring: StreamScoringConfig{
+				ExcludeKeywords: []string{"H.264"},
+				CustomFormats: []TrashCustomFormat{
+					{
+						ID:       "webdl_2160p",
+						Name:     "4K WEB-DL",
+						Pattern:  `\b2160p\b`,
+						Score:    300,
+						Enabled:  true,
+					},
+				},
+			},
+		}, server.Client())
+
+		inspect, err := coordWithExcludes.SearchInspect(ctx, SearchParams{
+			Type:      "series",
+			Title:     "The Ark",
+			Season:    1,
+			Episode:   1,
+			TimeoutMS: 2000,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 6, inspect.TotalResults)
+		// Active should only be The Ark 2160p (since 1080p has H.264 keyword excluded, and others are wrong series/episodes)
+		assert.Equal(t, 1, inspect.ActiveResults)
+		assert.Equal(t, 5, inspect.DiscardedResults)
+
+		// Verify active release
+		assert.False(t, inspect.Releases[0].Excluded)
+		assert.Contains(t, inspect.Releases[0].Title, "The.Ark.2023.S01E01.2160p")
+		assert.Equal(t, 300, inspect.Releases[0].Score)
+
+		// Verify excluded release has reason
+		foundH264Exclude := false
+		foundMismatch := false
+		for _, rel := range inspect.Releases[1:] {
+			assert.True(t, rel.Excluded)
+			if strings.Contains(rel.Title, "H.264") {
+				foundH264Exclude = true
+				assert.Contains(t, rel.ExcludeReason, "H.264")
+			}
+			if strings.Contains(rel.Title, "Animated.Series") {
+				foundMismatch = true
+				assert.Contains(t, rel.ExcludeReason, "Does not match")
+			}
+		}
+		assert.True(t, foundH264Exclude, "Should have marked H.264 release as excluded with reason")
+		assert.True(t, foundMismatch, "Should have marked mismatch series as excluded with reason")
+	})
 }

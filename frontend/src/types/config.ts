@@ -739,6 +739,40 @@ export interface StremioIndexersConfig {
 	newsnab?: NewsnabIndexerConfig[];
 }
 
+export interface ScoredReleaseItem {
+	Title: string;
+	DownloadURL: string;
+	Size: number;
+	PublishDate: string;
+	Indexer: string;
+	IndexerID: string;
+	Source: string;
+	GUID: string;
+	score: number;
+	matched_formats: string[];
+	matched_languages: string[];
+	excluded: boolean;
+	exclude_reason?: string;
+}
+
+export interface InspectSearchRequest {
+	query: string;
+	type?: "movie" | "series";
+	imdb_id?: string;
+	tvdb_id?: string;
+	season?: number;
+	episode?: number;
+	timeout_ms?: number;
+	scoring?: StreamScoringConfig;
+}
+
+export interface InspectSearchResponse {
+	total_results: number;
+	active_results: number;
+	discarded_results: number;
+	releases: ScoredReleaseItem[];
+}
+
 export interface UserAgentInfo {
 	tv_user_agent: string;
 	movie_user_agent: string;
