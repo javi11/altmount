@@ -542,9 +542,7 @@ export function matchKeywordOrPattern(title: string, pattern: string): boolean {
 		// always force case-insensitivity to match the Go side.
 		const flags = [
 			"i",
-			...new Set(
-				rawFlags.split("").filter((f) => f !== "i" && SUPPORTED_REGEX_FLAGS.includes(f)),
-			),
+			...new Set(rawFlags.split("").filter((f) => f !== "i" && SUPPORTED_REGEX_FLAGS.includes(f))),
 		].join("");
 		try {
 			return new RegExp(raw, flags).test(title);
