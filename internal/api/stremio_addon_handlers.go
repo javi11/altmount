@@ -1957,11 +1957,19 @@ func (s *Server) handleInspectStremioSearch(c *fiber.Ctx) error {
 		searchTitle = ""
 	}
 
-	// Resolve metadata from IMDb ID identical to Stremio addon stream handler
+	// Resolve metadata from IMDb ID identical to Stremio addon stream handler.
+	// Results are captured once and reused by the library-stream lookup below
+	// to avoid duplicate external Cinemeta calls.
+	var resolvedTVDBID, resolvedTitle, resolvedYear string
+	var resolvedTmdbID int
 	if req.IMDbID != "" {
 		if req.Type == "series" {
 			tvdbID, title, err := resolveSeriesMetadataFromIMDb(ctx, req.IMDbID)
-			if err == nil {
+			if err != nil {
+				slog.WarnContext(ctx, "Failed to resolve series metadata from IMDb ID", "error", err, "imdb_id", req.IMDbID)
+			} else {
+				resolvedTVDBID = tvdbID
+				resolvedTitle = title
 				if req.TVDBID == "" && tvdbID != "" {
 					req.TVDBID = tvdbID
 				}
@@ -1970,9 +1978,16 @@ func (s *Server) handleInspectStremioSearch(c *fiber.Ctx) error {
 				}
 			}
 		} else {
-			_, movieTitle, _, err := resolveMovieMetadataFromIMDb(ctx, req.IMDbID)
-			if err == nil && searchTitle == "" && movieTitle != "" {
-				searchTitle = movieTitle
+			tmdbID, movieTitle, movieYear, err := resolveMovieMetadataFromIMDb(ctx, req.IMDbID)
+			if err != nil {
+				slog.WarnContext(ctx, "Failed to resolve movie metadata from IMDb ID", "error", err, "imdb_id", req.IMDbID)
+			} else {
+				resolvedTmdbID = tmdbID
+				resolvedTitle = movieTitle
+				resolvedYear = movieYear
+				if searchTitle == "" && movieTitle != "" {
+					searchTitle = movieTitle
+				}
 			}
 		}
 	}
@@ -1996,7 +2011,7 @@ func (s *Server) handleInspectStremioSearch(c *fiber.Ctx) error {
 		TVDBID:    req.TVDBID,
 		Season:    req.Season,
 		Episode:   req.Episode,
-		TimeoutMS: req.TimeoutMS,
+		TimeoutMS: clampInspectTimeoutMS(req.TimeoutMS),
 	}
 
 	res, err := coordinator.SearchInspect(ctx, params)
@@ -2024,58 +2039,71 @@ func (s *Server) handleInspectStremioSearch(c *fiber.Ctx) error {
 			}
 		}
 
-		if req.Type == "movie" {
-			tmdbID, movieTitle, movieYear, _ := resolveMovieMetadataFromIMDb(ctx, req.IMDbID)
-			if movieTitle == "" {
-				movieTitle = searchTitle
+		// Without a usable download key the generated stream URLs would 401,
+		// so skip the library lookup entirely rather than emit dead links.
+		if downloadKey != "" {
+			seenLibraryTitles := make(map[string]struct{})
+			for _, r := range res.Releases {
+				seenLibraryTitles[normalizeReleaseTitleKey(r.Title)] = struct{}{}
 			}
-			yearNum, _ := strconv.Atoi(movieYear)
-			if healthyFiles, err := s.healthRepo.FindHealthyFilesForMovie(ctx, movieTitle, movieYear, tmdbID); err == nil {
-				for _, h := range healthyFiles {
-					if h != nil && h.FilePath != "" && isMediaExtension(filepath.Ext(h.FilePath)) && !isSampleFile(h.FilePath) {
-						matchPath := h.FilePath
-						if h.LibraryPath != nil && *h.LibraryPath != "" {
-							matchPath = *h.LibraryPath
-						}
-						if movieTitle != "" && !stremio.MatchesMovie(filepath.Base(matchPath), movieTitle, yearNum) && !stremio.MatchesMovie(matchPath, movieTitle, yearNum) {
-							continue
-						}
-						eval := stremio.EvaluateRelease(filepath.Base(matchPath), &coordCfg.Scoring)
-						eval.Score += 10000
-						eval.Excluded = false
-						eval.Source = "library"
-						eval.Indexer = "Local Library"
-						eval.IndexerID = "library"
-						eval.DownloadURL = baseURL + "/api/files/stream?path=" + url.QueryEscape(h.FilePath) + "&download_key=" + url.QueryEscape(downloadKey)
-						libraryReleases = append(libraryReleases, eval)
-					}
+
+			appendLibraryRelease := func(eval stremio.ScoredRelease, filePath string) {
+				titleKey := normalizeReleaseTitleKey(eval.Title)
+				if titleKey == "" {
+					return
 				}
+				if _, dup := seenLibraryTitles[titleKey]; dup {
+					return
+				}
+				seenLibraryTitles[titleKey] = struct{}{}
+				eval.Score += libraryScoreBoost
+				eval.Excluded = false
+				eval.Source = "library"
+				eval.Indexer = "Local Library"
+				eval.IndexerID = "library"
+				eval.DownloadURL = baseURL + "/api/files/stream?path=" + url.QueryEscape(filePath) + "&download_key=" + url.QueryEscape(downloadKey)
+				libraryReleases = append(libraryReleases, eval)
 			}
-		} else if req.Type == "series" {
-			tvdbIDStr, seriesTitle, _ := resolveSeriesMetadataFromIMDb(ctx, req.IMDbID)
-			if seriesTitle == "" {
-				seriesTitle = searchTitle
-			}
-			tvdbID, _ := strconv.Atoi(tvdbIDStr)
-			if healthyFiles, err := s.healthRepo.FindHealthyFilesForSeries(ctx, seriesTitle, tvdbID); err == nil {
-				for _, h := range healthyFiles {
-					if h != nil && h.FilePath != "" && isMediaExtension(filepath.Ext(h.FilePath)) && !isSampleFile(h.FilePath) {
-						matchPath := h.FilePath
-						if h.LibraryPath != nil && *h.LibraryPath != "" {
-							matchPath = *h.LibraryPath
-						}
-						if selector.matches(matchPath) || selector.matches(h.FilePath) {
-							if seriesTitle != "" && !stremio.MatchesSeries(filepath.Base(matchPath), seriesTitle, req.Season, req.Episode, 0) && !stremio.MatchesSeries(matchPath, seriesTitle, req.Season, req.Episode, 0) {
+
+			if req.Type == "movie" {
+				movieTitle := resolvedTitle
+				if movieTitle == "" {
+					movieTitle = searchTitle
+				}
+				yearNum, _ := strconv.Atoi(resolvedYear)
+				if healthyFiles, err := s.healthRepo.FindHealthyFilesForMovie(ctx, movieTitle, resolvedYear, resolvedTmdbID); err == nil {
+					for _, h := range healthyFiles {
+						if h != nil && h.FilePath != "" && isMediaExtension(filepath.Ext(h.FilePath)) && !isSampleFile(h.FilePath) {
+							matchPath := h.FilePath
+							if h.LibraryPath != nil && *h.LibraryPath != "" {
+								matchPath = *h.LibraryPath
+							}
+							if movieTitle != "" && !stremio.MatchesMovie(filepath.Base(matchPath), movieTitle, yearNum) && !stremio.MatchesMovie(matchPath, movieTitle, yearNum) {
 								continue
 							}
-							eval := stremio.EvaluateRelease(filepath.Base(matchPath), &coordCfg.Scoring)
-							eval.Score += 10000
-							eval.Excluded = false
-							eval.Source = "library"
-							eval.Indexer = "Local Library"
-							eval.IndexerID = "library"
-							eval.DownloadURL = baseURL + "/api/files/stream?path=" + url.QueryEscape(h.FilePath) + "&download_key=" + url.QueryEscape(downloadKey)
-							libraryReleases = append(libraryReleases, eval)
+							appendLibraryRelease(stremio.EvaluateRelease(filepath.Base(matchPath), &coordCfg.Scoring), h.FilePath)
+						}
+					}
+				}
+			} else if req.Type == "series" {
+				seriesTitle := resolvedTitle
+				if seriesTitle == "" {
+					seriesTitle = searchTitle
+				}
+				tvdbID, _ := strconv.Atoi(resolvedTVDBID)
+				if healthyFiles, err := s.healthRepo.FindHealthyFilesForSeries(ctx, seriesTitle, tvdbID); err == nil {
+					for _, h := range healthyFiles {
+						if h != nil && h.FilePath != "" && isMediaExtension(filepath.Ext(h.FilePath)) && !isSampleFile(h.FilePath) {
+							matchPath := h.FilePath
+							if h.LibraryPath != nil && *h.LibraryPath != "" {
+								matchPath = *h.LibraryPath
+							}
+							if selector.matches(matchPath) || selector.matches(h.FilePath) {
+								if seriesTitle != "" && !stremio.MatchesSeries(filepath.Base(matchPath), seriesTitle, req.Season, req.Episode, 0) && !stremio.MatchesSeries(matchPath, seriesTitle, req.Season, req.Episode, 0) {
+									continue
+								}
+								appendLibraryRelease(stremio.EvaluateRelease(filepath.Base(matchPath), &coordCfg.Scoring), h.FilePath)
+							}
 						}
 					}
 				}
@@ -2089,5 +2117,57 @@ func (s *Server) handleInspectStremioSearch(c *fiber.Ctx) error {
 		}
 	}
 
+	// Indexer download URLs embed indexer credentials (e.g. Newznab apikey
+	// query parameters). The inspector only surfaces diagnostics — it never
+	// downloads — so strip everything after the path before responding.
+	for i := range res.Releases {
+		if res.Releases[i].Source != "library" {
+			res.Releases[i].DownloadURL = redactExternalDownloadURL(res.Releases[i].DownloadURL)
+		}
+	}
+
 	return RespondSuccess(c, res)
+}
+
+const (
+	defaultInspectTimeoutMS = 5000
+	maxInspectTimeoutMS     = 15000
+
+	// libraryScoreBoost ranks local library files above any remote release so
+	// instant streams always surface first in inspection results.
+	libraryScoreBoost = 10000
+)
+
+// clampInspectTimeoutMS bounds the client-supplied search timeout to keep each
+// inspect request's indexer fan-out short-lived.
+func clampInspectTimeoutMS(timeoutMS int) int {
+	if timeoutMS <= 0 {
+		return defaultInspectTimeoutMS
+	}
+	if timeoutMS > maxInspectTimeoutMS {
+		return maxInspectTimeoutMS
+	}
+	return timeoutMS
+}
+
+// normalizeReleaseTitleKey builds a case-insensitive dedupe key for release titles.
+func normalizeReleaseTitleKey(title string) string {
+	return strings.ToLower(strings.TrimSpace(title))
+}
+
+// redactExternalDownloadURL removes query parameters and user info from an
+// indexer-provided download URL, preventing embedded API keys from leaking
+// through diagnostic API responses. Unparseable URLs are dropped entirely.
+func redactExternalDownloadURL(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return ""
+	}
+	u.RawQuery = ""
+	u.Fragment = ""
+	u.User = nil
+	return u.String()
 }

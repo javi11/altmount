@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -366,27 +365,13 @@ func (sc *SearchCoordinator) SearchInspect(ctx context.Context, params SearchPar
 			discardedList = append(discardedList, eval)
 		} else {
 			// Apply indexer bonus weights to active releases
-			if bonus, ok := indexerWeights[rel.Indexer]; ok && bonus != 0 {
-				eval.Score += bonus
-			} else if bonus, ok := indexerWeights[rel.IndexerID]; ok && bonus != 0 {
-				eval.Score += bonus
-			}
+			applyIndexerBonus(&eval, rel, indexerWeights)
 			activeList = append(activeList, eval)
 		}
 	}
 
-	// Sort active releases descending by score, ties broken by newest date
-	sort.Slice(activeList, func(i, j int) bool {
-		if activeList[i].Score != activeList[j].Score {
-			return activeList[i].Score > activeList[j].Score
-		}
-		return activeList[i].PublishDate.After(activeList[j].PublishDate)
-	})
-
-	// Sort discarded releases descending by date
-	sort.Slice(discardedList, func(i, j int) bool {
-		return discardedList[i].PublishDate.After(discardedList[j].PublishDate)
-	})
+	sortByScoreDesc(activeList)
+	sortByDateDesc(discardedList)
 
 	allEvaluated := append(activeList, discardedList...)
 

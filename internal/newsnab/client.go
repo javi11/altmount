@@ -356,6 +356,24 @@ func (c *Client) parseJSONResults(body []byte) ([]Result, error) {
 	return []Result{}, nil
 }
 
+// parseNewsnabTime parses publish dates from both XML and JSON Newznab feeds.
+// RSS feeds use RFC 1123 timestamps, but several indexers emit ISO 8601 /
+// RFC 3339 values in their JSON payloads, so both families are accepted.
+func parseNewsnabTime(value string) time.Time {
+	for _, layout := range []string{
+		time.RFC1123Z,
+		time.RFC1123,
+		time.RFC3339,
+		"2006-01-02T15:04:05",
+		"2006-01-02 15:04:05",
+	} {
+		if t, err := time.Parse(layout, value); err == nil {
+			return t
+		}
+	}
+	return time.Time{}
+}
+
 func (c *Client) convertJSONItem(it newsnabJSONItem) Result {
 	downloadURL := it.Enclosure.Attributes.URL
 	if downloadURL == "" {
@@ -394,10 +412,7 @@ func (c *Client) convertJSONItem(it newsnabJSONItem) Result {
 		}
 	}
 
-	pubDate, _ := time.Parse(time.RFC1123Z, it.PubDate)
-	if pubDate.IsZero() {
-		pubDate, _ = time.Parse(time.RFC1123, it.PubDate)
-	}
+	pubDate := parseNewsnabTime(it.PubDate)
 
 	guid := attrGuid
 	if guid == "" && len(it.GUID) > 0 {
@@ -458,10 +473,7 @@ func (c *Client) parseXMLResults(body []byte) ([]Result, error) {
 				cat, _ = strconv.Atoi(attr.Value)
 			}
 		}
-		pubDate, _ := time.Parse(time.RFC1123Z, it.PubDate)
-		if pubDate.IsZero() {
-			pubDate, _ = time.Parse(time.RFC1123, it.PubDate)
-		}
+		pubDate := parseNewsnabTime(it.PubDate)
 		out = append(out, Result{
 			Title:       it.Title,
 			DownloadURL: downloadURL,

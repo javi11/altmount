@@ -2490,11 +2490,17 @@ func (r *HealthRepository) FindHealthyFilesForMovie(ctx context.Context, title s
 	return results, rows.Err()
 }
 
-// buildTitleLikePattern converts space-separated title words to %-separated wildcard pattern for robust SQL LIKE matching.
+// buildTitleLikePattern converts space-separated title words into a
+// %-separated SQL LIKE wildcard pattern for robust matching.
+//
+// Note: the pattern is word-order sensitive — "Movie, The" will not match
+// release names ordered as "The.Movie". Callers must guard against empty
+// titles; an empty input yields an empty pattern (matches nothing) rather
+// than a bare "%" (which would match every row).
 func buildTitleLikePattern(title string) string {
 	clean := strings.TrimSpace(title)
 	if clean == "" {
-		return "%"
+		return ""
 	}
 	words := strings.Fields(clean)
 	escapedWords := make([]string, len(words))

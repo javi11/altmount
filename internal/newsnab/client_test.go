@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -148,4 +149,34 @@ func TestNewsnabClient_SearchGeneral_NZBGeek_JSON(t *testing.T) {
 	assert.Equal(t, "Gladiator.II.2024.720p.AMZN.WEB-DL.DDP5.1.H.264-ViSTA", results[0].Title)
 	assert.Equal(t, int64(5471988000), results[0].Size)
 	assert.Equal(t, "http://api.nzbgeek.info/api?t=get&id=1fc90df05debd7d37615bc1638aa3389&apikey=testkey", results[0].DownloadURL)
+}
+
+func TestParseNewsnabTime(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   string
+		wantOK  bool
+		wantUTC string
+	}{
+		{"RFC1123Z", "Thu, 13 Aug 2026 01:18:34 +0000", true, "2026-08-13T01:18:34Z"},
+		{"RFC1123 GMT", "Thu, 13 Aug 2026 01:18:34 GMT", true, "2026-08-13T01:18:34Z"},
+		{"RFC3339", "2026-08-13T01:18:34Z", true, "2026-08-13T01:18:34Z"},
+		{"RFC3339 with offset", "2026-08-13T03:18:34+02:00", true, "2026-08-13T01:18:34Z"},
+		{"ISO without zone", "2026-08-13T01:18:34", true, "2026-08-13T01:18:34Z"},
+		{"SQL style", "2026-08-13 01:18:34", true, "2026-08-13T01:18:34Z"},
+		{"empty", "", false, ""},
+		{"garbage", "not-a-date", false, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseNewsnabTime(tt.value)
+			if !tt.wantOK {
+				assert.True(t, got.IsZero(), "expected zero time for %q", tt.value)
+				return
+			}
+			assert.False(t, got.IsZero())
+			assert.Equal(t, tt.wantUTC, got.UTC().Format(time.RFC3339))
+		})
+	}
 }

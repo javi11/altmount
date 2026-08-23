@@ -9,10 +9,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	parsetorrentname "github.com/middelink/go-parse-torrent-name"
+	"github.com/javi11/altmount/internal/regexcache"
 	"golift.io/starr"
 	starrprowlarr "golift.io/starr/prowlarr"
 )
@@ -95,31 +95,29 @@ func (c *Client) GetIndexers(ctx context.Context) ([]Indexer, error) {
 }
 
 var (
-	regexCache      sync.Map
 	reExplicitRegex = regexp.MustCompile(`(?i)\\b|\\[dwsDWS]|\(\?|[\(\)\[\]\{\}\|\*\+\?\^\$]`)
 	reWhitespace    = regexp.MustCompile(`\s+`)
 )
 
+// getCompiledRegex returns the pattern from the shared bounded regex cache.
 func getCompiledRegex(pattern string) (*regexp.Regexp, error) {
-	if pattern == "" {
-		return nil, nil
-	}
-	if val, ok := regexCache.Load(pattern); ok {
-		if re, ok := val.(*regexp.Regexp); ok {
-			return re, nil
+	return regexcache.Get(pattern)
+}
+
+// slashPatternExpr builds a case-insensitive (by default) regex expression
+// from a slash-delimited pattern body and its trailing flags. Only the Go
+// supported inline flags i, m, and s are honored; unknown flag letters are
+// ignored, mirroring the JavaScript implementation's leniency.
+func slashPatternExpr(raw, flags string) string {
+	var b strings.Builder
+	b.WriteString("(?i")
+	for _, f := range flags {
+		if f == 'm' || f == 's' {
+			b.WriteRune(f)
 		}
 	}
-
-	expr := pattern
-	if !strings.HasPrefix(pattern, "(?i)") {
-		expr = "(?i)" + pattern
-	}
-	re, err := regexp.Compile(expr)
-	if err != nil {
-		return nil, err
-	}
-	regexCache.Store(pattern, re)
-	return re, nil
+	b.WriteString(")")
+	return b.String() + raw
 }
 
 // isExplicitRegex reports whether the given pattern contains regex metacharacters or directives.
@@ -153,14 +151,18 @@ func MatchKeywordOrPattern(title, pattern string) bool {
 		return false
 	}
 
-	// 1. Explicit slash-delimited regex: /pattern/ or /pattern/i
+	// 1. Explicit slash-delimited regex: /pattern/ or /pattern/flags.
+	// A structurally valid slash pattern never falls through to keyword
+	// matching; an invalid body simply fails to match (parity with the
+	// JavaScript implementation in scoringPresets.ts).
 	if strings.HasPrefix(pattern, "/") && len(pattern) >= 2 {
 		lastSlash := strings.LastIndex(pattern, "/")
 		if lastSlash > 0 {
-			raw := pattern[1:lastSlash]
-			if re, err := getCompiledRegex(raw); err == nil && re != nil {
+			expr := slashPatternExpr(pattern[1:lastSlash], pattern[lastSlash+1:])
+			if re, err := getCompiledRegex(expr); err == nil && re != nil {
 				return re.MatchString(title)
 			}
+			return false
 		}
 	}
 
