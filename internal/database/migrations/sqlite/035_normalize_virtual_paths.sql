@@ -3,22 +3,36 @@
 --
 -- Keep the two virtual-path columns in one representation: forward slashes and
 -- no leading/trailing separators. import_history has no path uniqueness constraint, so it
--- can be normalized in place. file_health is UNIQUE(file_path), so it is rebuilt
--- through a collision-free aggregate before the old rows are replaced.
+-- can be normalized in place. file_health is UNIQUE(file_path), so only dirty rows
+-- and rows in canonical-path collision groups are rebuilt through an aggregate.
 UPDATE import_history
 SET virtual_path = trim(replace(virtual_path, char(92), '/'), '/')
 WHERE virtual_path <> trim(replace(virtual_path, char(92), '/'), '/');
 
-DROP TABLE IF EXISTS file_health_path_normalized;
+DROP TABLE IF EXISTS file_health_path_collisions;
+DROP TABLE IF EXISTS file_health_path_affected;
+DROP TABLE IF EXISTS file_health_path_merged;
 
--- Materialize and index the canonical key before the merge selectors run. A
--- CTE here makes every selector rescan the full health table per path, which
--- is effectively quadratic on a normal 100k-row catalog.
-CREATE TEMP TABLE file_health_path_normalized AS
+-- Find collision keys without copying the healthy catalog. The affected table
+-- below contains full rows only for dirty paths or collision groups; a clean
+-- catalog therefore has no file_health DELETE/INSERT work at all.
+CREATE TEMP TABLE file_health_path_collisions AS
+SELECT trim(replace(file_path, char(92), '/'), '/') AS canonical_path
+FROM file_health
+GROUP BY trim(replace(file_path, char(92), '/'), '/')
+HAVING COUNT(*) > 1;
+CREATE INDEX file_health_path_collisions_path_idx
+    ON file_health_path_collisions(canonical_path);
+
+CREATE TEMP TABLE file_health_path_affected AS
 SELECT h.*, trim(replace(h.file_path, char(92), '/'), '/') AS canonical_path
-FROM file_health h;
-CREATE INDEX file_health_path_normalized_path_idx
-    ON file_health_path_normalized(canonical_path);
+FROM file_health h
+WHERE h.file_path <> trim(replace(h.file_path, char(92), '/'), '/')
+   OR EXISTS (
+       SELECT 1
+       FROM file_health_path_collisions c
+       WHERE c.canonical_path = trim(replace(h.file_path, char(92), '/'), '/')
+   );
 
 CREATE TEMP TABLE file_health_path_merged AS
 WITH ranked AS (
@@ -67,7 +81,7 @@ WITH ranked AS (
             PARTITION BY canonical_path
             ORDER BY CASE WHEN NULLIF(download_id, '') IS NOT NULL THEN 0 ELSE 1 END,
                 updated_at DESC, id DESC) AS download_id_rank
-    FROM file_health_path_normalized h
+    FROM file_health_path_affected h
 )
 SELECT
     COALESCE(MIN(CASE WHEN file_path = canonical_path THEN id END), MIN(id)) AS id,
@@ -95,7 +109,10 @@ SELECT
 FROM ranked
 GROUP BY canonical_path;
 
-DELETE FROM file_health;
+-- Remove only rows represented by the affected aggregate. Clean, canonical
+-- rows retain their IDs and all column values byte-for-byte.
+DELETE FROM file_health
+WHERE id IN (SELECT id FROM file_health_path_affected);
 
 INSERT INTO file_health (
     id, file_path, library_path, status, last_checked, last_error,
@@ -113,7 +130,8 @@ SELECT
 FROM file_health_path_merged;
 
 DROP TABLE file_health_path_merged;
-DROP TABLE file_health_path_normalized;
+DROP TABLE file_health_path_affected;
+DROP TABLE file_health_path_collisions;
 -- +goose StatementEnd
 
 -- +goose Down

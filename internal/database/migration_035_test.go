@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"testing"
+	"time"
 
 	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/assert"
@@ -97,6 +98,44 @@ func TestMigration035_NormalizesAndMergesHealthPathsIdempotently(t *testing.T) {
 	require.NoError(t, db.QueryRowContext(ctx,
 		"SELECT id FROM file_health WHERE file_path = 'movies/collision.mkv'").Scan(&secondID))
 	assert.Equal(t, int64(2), secondID)
+}
+
+func TestMigration035_CleanCatalogIsNoOp(t *testing.T) {
+	db := openMigratedTo(t, 34)
+
+	const cleanRows = 100000
+	_, err := db.Exec(`
+		WITH RECURSIVE numbers(n) AS (
+			SELECT 1
+			UNION ALL
+			SELECT n + 1 FROM numbers WHERE n < ?
+		)
+		INSERT INTO file_health (file_path, status, updated_at, metadata)
+		SELECT 'clean/' || n || '.mkv', 'healthy', '2026-08-22 10:00:00', '{"n":' || n || '}'
+		FROM numbers`, cleanRows)
+	require.NoError(t, err)
+
+	// Snapshot every column so this test catches accidental rebuilds as well as
+	// path mutations. A clean catalog should not enter the affected-row table.
+	_, err = db.Exec(`CREATE TEMP TABLE file_health_before AS SELECT * FROM file_health`)
+	require.NoError(t, err)
+
+	started := time.Now()
+	applyVirtualPathMigration035(t, db)
+	t.Logf("migration 035 clean %d-row catalog: %s", cleanRows, time.Since(started))
+
+	var changed int
+	require.NoError(t, db.QueryRow(`
+		SELECT
+			(SELECT COUNT(*) FROM (SELECT * FROM file_health_before EXCEPT SELECT * FROM file_health)) +
+			(SELECT COUNT(*) FROM (SELECT * FROM file_health EXCEPT SELECT * FROM file_health_before))`).Scan(&changed))
+	assert.Zero(t, changed, "clean file_health rows must remain byte-for-byte unchanged")
+
+	var historyRows, healthRows int
+	require.NoError(t, db.QueryRow("SELECT COUNT(*) FROM import_history").Scan(&historyRows))
+	require.NoError(t, db.QueryRow("SELECT COUNT(*) FROM file_health").Scan(&healthRows))
+	assert.Zero(t, historyRows)
+	assert.Equal(t, cleanRows, healthRows)
 }
 
 func assertVirtualPathMigrationInvariants(t *testing.T, db *sql.DB, wantHealthRows int) {
