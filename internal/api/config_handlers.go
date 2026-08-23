@@ -429,6 +429,12 @@ func (s *Server) handleTestProvider(c *fiber.Ctx) error {
 	defer cancel()
 
 	host := fmt.Sprintf("%s:%d", testReq.Host, testReq.Port)
+	providerName := testReq.ProviderID
+	if providerName == "" {
+		// Ad-hoc tests have no persisted provider ID. Keep the endpoint context
+		// while preventing nntppool from deriving a name from Auth.Username.
+		providerName = host
+	}
 	var tlsCfg *tls.Config
 	if testReq.TLS {
 		tlsCfg = &tls.Config{
@@ -439,6 +445,7 @@ func (s *Server) handleTestProvider(c *fiber.Ctx) error {
 
 	result := nntppool.TestProvider(ctx, nntppool.Provider{
 		Host:      host,
+		Name:      providerName,
 		TLSConfig: tlsCfg,
 		Auth:      nntppool.Auth{Username: testReq.Username, Password: testReq.Password},
 		SkipPing:  testReq.SkipPing,
