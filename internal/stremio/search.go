@@ -185,7 +185,7 @@ func (sc *SearchCoordinator) idQueries(params SearchParams, provider, userAgent 
 			if isMovie {
 				if params.IMDBID != "" {
 					queries = append(queries, searchQuery{label: "newsnab movie imdb", indexer: c.Name(), run: func(ctx context.Context) ([]SearchResult, error) {
-						return toSearchResults(c.SearchMovie(ctx, params.IMDBID, nil, userAgent))
+						return toSearchResults(c.SearchMovie(ctx, params.IMDBID, params.Title, nil, userAgent))
 					}})
 				}
 			} else if params.IMDBID != "" || params.TVDBID != "" {
@@ -270,8 +270,13 @@ func dedupeResults(aggregated []SearchResult) []SearchResult {
 
 // mediaMismatchReason reports why a release does not belong to the requested
 // media, or "" when it matches (or when no title is available to check).
+// Releases the indexer matched via an identifier query (imdbid/tvdbid) skip
+// the gate: the indexer resolved the ID itself, so release names differing
+// from the metadata title (foreign/alternative titles like tt23648788
+// "Contraataque" vs "Counterattack") are still valid — the same trust model
+// Prowlarr/Sonarr/Radarr apply to identifier matches.
 func mediaMismatchReason(res SearchResult, params SearchParams) string {
-	if params.Title == "" {
+	if params.Title == "" || res.ByIDSearch {
 		return ""
 	}
 	switch {
@@ -330,11 +335,13 @@ func (sc *SearchCoordinator) SearchInspect(ctx context.Context, params SearchPar
 	}
 
 	aggregated := runSearchQueries(searchCtx, sc.idQueries(params, provider, userAgent))
+	tagProwlarrProvenance(aggregated, true)
 	if len(aggregated) == 0 {
 		if titleQueries := sc.titleQueries(params, provider, userAgent); len(titleQueries) > 0 {
 			slog.DebugContext(searchCtx, "ID search returned nothing, falling back to title search",
 				"title", params.Title)
 			aggregated = runSearchQueries(searchCtx, titleQueries)
+			tagProwlarrProvenance(aggregated, false)
 		}
 	}
 
@@ -395,6 +402,18 @@ func toSearchResults[T prowlarr.NZBResult | newsnab.Result](res []T, err error) 
 	return out, nil
 }
 
+// tagProwlarrProvenance marks Prowlarr results with the query form that
+// produced them (identifier vs free-text pass). Newsnab results are skipped:
+// their provenance is set per query inside the client itself, which knows
+// when caps forced an identifier query to degrade into a keyword one.
+func tagProwlarrProvenance(res []SearchResult, byID bool) {
+	for i := range res {
+		if res[i].Source == "prowlarr" {
+			res[i].ByIDSearch = byID
+		}
+	}
+}
+
 func prowlarrToSearchResult(r prowlarr.NZBResult) SearchResult {
 	return SearchResult{
 		Title:       r.Title,
@@ -418,5 +437,6 @@ func newsnabToSearchResult(r newsnab.Result) SearchResult {
 		IndexerID:   r.IndexerID,
 		GUID:        r.GUID,
 		Source:      "newsnab",
+		ByIDSearch:  r.ByIDSearch,
 	}
 }

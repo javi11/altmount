@@ -70,6 +70,11 @@ type SearchResult struct {
 	IndexerID   string    `json:"indexer_id"`
 	GUID        string    `json:"guid"`
 	Source      string    `json:"source"`
+	// ByIDSearch reports whether the indexer matched this release via an
+	// identifier query (imdbid/tvdbid) rather than a keyword. Such results
+	// skip the media-title mismatch gate, mirroring Prowlarr/Radarr trust
+	// in identifier matches.
+	ByIDSearch bool `json:"by_id_search,omitempty"`
 }
 
 // ScoredRelease represents a ranked release with evaluation metadata.

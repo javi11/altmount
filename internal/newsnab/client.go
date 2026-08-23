@@ -6,10 +6,12 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/javi11/altmount/internal/httpclient"
@@ -37,6 +39,10 @@ type Result struct {
 	IndexerID   string
 	GUID        string
 	Category    int
+	// ByIDSearch reports whether this release was matched by the indexer via
+	// an identifier query (imdbid/tvdbid) rather than a keyword query. Such
+	// results are trusted downstream, mirroring Prowlarr/Radarr semantics.
+	ByIDSearch bool
 }
 
 // DownloadNZB downloads an NZB from this configured indexer without sending
@@ -71,6 +77,10 @@ func (c *Client) DownloadNZB(ctx context.Context, downloadURL string, userAgent 
 type Client struct {
 	config     IndexerConfig
 	httpClient *http.Client
+
+	capsMu        sync.Mutex
+	caps          *Capabilities
+	capsFetchedAt time.Time
 }
 
 // NewClient creates a new Newsnab client.
@@ -100,13 +110,6 @@ func (c *Client) Name() string {
 // ID returns the configured ID of the indexer.
 func (c *Client) ID() string {
 	return c.config.ID
-}
-
-// Capabilities represents the indexer capabilities from /api?t=caps.
-type Capabilities struct {
-	ServerName  string `xml:"server>title"`
-	Categories  []int  `xml:"categories>category>id"`
-	SearchTypes []string
 }
 
 // newsnabJSONResponse represents the JSON payload returned when o=json is passed.
@@ -171,59 +174,75 @@ type newsnabXMLItem struct {
 	} `xml:"attr"`
 }
 
-// SearchMovie searches for movie releases by IMDB ID.
-func (c *Client) SearchMovie(ctx context.Context, imdbID string, categories []int, userAgent string) ([]Result, error) {
+// SearchMovie searches for movie releases by IMDb ID, degrading to keyword
+// queries when the indexer's caps do not advertise movie-search or imdbid
+// support, mirroring Prowlarr/Radarr per-indexer behavior.
+func (c *Client) SearchMovie(ctx context.Context, imdbID, title string, categories []int, userAgent string) ([]Result, error) {
 	cleanIMDB := strings.TrimPrefix(imdbID, "tt")
-	params := url.Values{}
-	params.Set("t", "movie")
-	params.Set("imdbid", cleanIMDB)
+	caps := c.getCaps(ctx, userAgent)
 
-	cats := c.resolveCategories(categories, []int{2000, 2010, 2030, 2040, 2045, 2060})
-	if len(cats) > 0 {
-		catStrs := make([]string, len(cats))
-		for i, v := range cats {
-			catStrs[i] = strconv.Itoa(v)
-		}
-		params.Set("cat", strings.Join(catStrs, ","))
+	params := url.Values{}
+	byID := true
+	switch {
+	case caps != nil && !caps.MovieSearch:
+		params.Set("t", "search")
+		params.Set("q", queryFallback(imdbID, title))
+		byID = false
+	case caps.supportsParam("imdbid"):
+		params.Set("t", "movie")
+		params.Set("imdbid", cleanIMDB)
+	default:
+		params.Set("t", "movie")
+		params.Set("q", queryFallback(imdbID, title))
+		byID = false
 	}
 
-	return c.executeSearch(ctx, params, userAgent)
+	cats := filterCategories(caps, c.resolveCategories(categories, []int{2000, 2010, 2030, 2040, 2045, 2060}))
+	setCategories(params, cats)
+
+	return c.executeSearch(ctx, params, userAgent, byID)
 }
 
 // SearchTV searches for TV episode releases by IMDB ID, TVDB ID, title, season, and episode.
-// Follows Prowlarr/Sonarr parameter prioritization:
+// Follows Prowlarr/Sonarr parameter prioritization, skipping parameters the
+// indexer does not advertise via caps:
 // Priority 1: tvdbid
 // Priority 2: imdbid
 // Priority 3: q=title (fallback text query)
 func (c *Client) SearchTV(ctx context.Context, imdbID, tvdbID, title string, season, episode int, categories []int, userAgent string) ([]Result, error) {
-	params := url.Values{}
-	params.Set("t", "tvsearch")
 	cleanIMDB := strings.TrimPrefix(imdbID, "tt")
+	caps := c.getCaps(ctx, userAgent)
 
-	if tvdbID != "" {
-		params.Set("tvdbid", tvdbID)
-	} else if cleanIMDB != "" {
-		params.Set("imdbid", cleanIMDB)
-	} else if title != "" {
-		params.Set("q", title)
+	tvSearchSupported := caps == nil || caps.TVSearch
+	params := url.Values{}
+	byID := true
+	if tvSearchSupported {
+		params.Set("t", "tvsearch")
+	} else {
+		params.Set("t", "search")
+		byID = false
 	}
-	if season > 0 {
+
+	switch {
+	case tvSearchSupported && tvdbID != "" && caps.supportsParam("tvdbid"):
+		params.Set("tvdbid", tvdbID)
+	case tvSearchSupported && cleanIMDB != "" && caps.supportsParam("imdbid"):
+		params.Set("imdbid", cleanIMDB)
+	default:
+		params.Set("q", queryFallback(imdbID, title))
+		byID = false
+	}
+	if season > 0 && caps.supportsParam("season") {
 		params.Set("season", strconv.Itoa(season))
 	}
-	if episode > 0 {
+	if episode > 0 && caps.supportsParam("ep") {
 		params.Set("ep", strconv.Itoa(episode))
 	}
 
-	cats := c.resolveCategories(categories, []int{5000, 5010, 5030, 5040})
-	if len(cats) > 0 {
-		catStrs := make([]string, len(cats))
-		for i, v := range cats {
-			catStrs[i] = strconv.Itoa(v)
-		}
-		params.Set("cat", strings.Join(catStrs, ","))
-	}
+	cats := filterCategories(caps, c.resolveCategories(categories, []int{5000, 5010, 5030, 5040}))
+	setCategories(params, cats)
 
-	return c.executeSearch(ctx, params, userAgent)
+	return c.executeSearch(ctx, params, userAgent, byID)
 }
 
 // SearchGeneral performs a generic search by keyword query.
@@ -232,49 +251,11 @@ func (c *Client) SearchGeneral(ctx context.Context, query string, categories []i
 	params.Set("t", "search")
 	params.Set("q", query)
 
-	cats := c.resolveCategories(categories, nil)
-	if len(cats) > 0 {
-		catStrs := make([]string, len(cats))
-		for i, v := range cats {
-			catStrs[i] = strconv.Itoa(v)
-		}
-		params.Set("cat", strings.Join(catStrs, ","))
-	}
+	caps := c.getCaps(ctx, userAgent)
+	cats := filterCategories(caps, c.resolveCategories(categories, nil))
+	setCategories(params, cats)
 
-	return c.executeSearch(ctx, params, userAgent)
-}
-
-// CheckCaps tests connectivity and fetches indexer capabilities.
-func (c *Client) CheckCaps(ctx context.Context, userAgent string) (*Capabilities, error) {
-	reqURL := fmt.Sprintf("%s/api?t=caps&apikey=%s", strings.TrimRight(c.config.URL, "/"), url.QueryEscape(c.config.APIKey))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("newsnab: create caps request failed: %w", err)
-	}
-	if userAgent != "" {
-		req.Header.Set("User-Agent", userAgent)
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("newsnab: caps request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("newsnab: caps returned HTTP %d", resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("newsnab: read caps body failed: %w", err)
-	}
-
-	var caps Capabilities
-	if err := xml.Unmarshal(body, &caps); err != nil {
-		return &Capabilities{ServerName: c.config.Name}, nil
-	}
-	return &caps, nil
+	return c.executeSearch(ctx, params, userAgent, false)
 }
 
 func (c *Client) resolveCategories(explicit []int, defaults []int) []int {
@@ -287,7 +268,93 @@ func (c *Client) resolveCategories(explicit []int, defaults []int) []int {
 	return defaults
 }
 
-func (c *Client) executeSearch(ctx context.Context, params url.Values, userAgent string) ([]Result, error) {
+// Error is a structured Newznab API error payload
+// (<error code=".." description=".."/> or its JSON equivalent).
+type Error struct {
+	Code        int    `json:"code"`
+	Description string `json:"description"`
+}
+
+func (e *Error) Error() string {
+	return fmt.Sprintf("newznab API error %d: %s", e.Code, e.Description)
+}
+
+type apiErrorXML struct {
+	Error struct {
+		Code        string `xml:"code,attr"`
+		Description string `xml:"description,attr"`
+	} `xml:"error"`
+}
+
+// errorRootXML handles the standard Newznab shape where <error> is the
+// document root element.
+type errorRootXML struct {
+	XMLName     xml.Name `xml:"error"`
+	Code        string   `xml:"code,attr"`
+	Description string   `xml:"description,attr"`
+}
+
+type apiErrorJSON struct {
+	Error struct {
+		Attributes struct {
+			Code        string `json:"code"`
+			Description string `json:"description"`
+		} `json:"@attributes"`
+	} `json:"error"`
+}
+
+// detectAPIError extracts a structured Newznab error payload if present.
+// Successful RSS/JSON result payloads contain no error element and yield nil.
+func detectAPIError(body []byte) error {
+	var root errorRootXML
+	if err := xml.Unmarshal(body, &root); err == nil && root.Code != "" {
+		code, _ := strconv.Atoi(root.Code)
+		return &Error{Code: code, Description: root.Description}
+	}
+
+	var x apiErrorXML
+	if err := xml.Unmarshal(body, &x); err == nil && x.Error.Code != "" {
+		code, _ := strconv.Atoi(x.Error.Code)
+		return &Error{Code: code, Description: x.Error.Description}
+	}
+
+	var j apiErrorJSON
+	if err := json.Unmarshal(body, &j); err == nil && j.Error.Attributes.Code != "" {
+		code, _ := strconv.Atoi(j.Error.Attributes.Code)
+		return &Error{Code: code, Description: j.Error.Attributes.Description}
+	}
+
+	return nil
+}
+
+// queryFallback picks the keyword used when an identifier parameter cannot be
+// sent: the resolved title when known, otherwise the raw identifier.
+func queryFallback(imdbID, title string) string {
+	if title != "" {
+		return title
+	}
+	return imdbID
+}
+
+func setCategories(params url.Values, cats []int) {
+	if len(cats) == 0 {
+		return
+	}
+	catStrs := make([]string, len(cats))
+	for i, v := range cats {
+		catStrs[i] = strconv.Itoa(v)
+	}
+	params.Set("cat", strings.Join(catStrs, ","))
+}
+
+func stampByID(results []Result, byID bool) []Result {
+	for i := range results {
+		results[i].ByIDSearch = byID
+	}
+	return results
+}
+
+func (c *Client) executeSearch(ctx context.Context, params url.Values, userAgent string, byID bool) ([]Result, error) {
 	params.Set("apikey", c.config.APIKey)
 	params.Set("o", "json")
 	params.Set("extended", "1")
@@ -319,19 +386,26 @@ func (c *Client) executeSearch(ctx context.Context, params url.Values, userAgent
 		return nil, fmt.Errorf("newsnab: read body failed: %w", err)
 	}
 
+	// Surface structured Newznab errors instead of silently returning zero results.
+	if apiErr := detectAPIError(body); apiErr != nil {
+		slog.WarnContext(ctx, "Newsnab indexer returned API error",
+			"indexer", c.config.Name, "error", apiErr)
+		return nil, apiErr
+	}
+
 	// First try parsing JSON
 	results, err := c.parseJSONResults(body)
 	if err == nil && len(results) > 0 {
-		return results, nil
+		return stampByID(results, byID), nil
 	}
 
 	// Fallback to XML RSS parsing if indexer ignored o=json
 	xmlResults, xmlErr := c.parseXMLResults(body)
 	if xmlErr == nil {
-		return xmlResults, nil
+		return stampByID(xmlResults, byID), nil
 	}
 
-	return results, nil
+	return stampByID(results, byID), nil
 }
 
 func (c *Client) parseJSONResults(body []byte) ([]Result, error) {
