@@ -1317,9 +1317,12 @@ func (s *Server) buildCategoryPath(category string) string {
 		return category
 	}
 
-	// Look for the category in configuration
+	// Look for the category in configuration. Names are compared trimmed and
+	// case-insensitively, matching the uniqueness rule config validation
+	// applies, so a padded or differently-cased config entry still resolves.
+	wanted := strings.ToLower(strings.TrimSpace(category))
 	for _, configCategory := range cfg.SABnzbd.Categories {
-		if configCategory.Name == category {
+		if strings.ToLower(strings.TrimSpace(configCategory.Name)) == wanted {
 			// Use configured Dir if available, otherwise use category name
 			if configCategory.Dir != "" {
 				return configCategory.Dir

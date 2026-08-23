@@ -1028,15 +1028,17 @@ func (c *Config) Validate() error {
 			}
 		}
 
-		// Validate categories if provided
+		// Validate categories if provided. Names are compared trimmed and
+		// case-insensitively so " Movies" cannot shadow "movies", but the stored
+		// values are left untouched — Validate must not mutate the config it is
+		// handed.
 		categoryNames := make(map[string]bool)
-		for i := range c.SABnzbd.Categories {
-			category := &c.SABnzbd.Categories[i]
-			category.Name = strings.TrimSpace(category.Name)
-			if category.Name == "" {
+		for i, category := range c.SABnzbd.Categories {
+			name := strings.TrimSpace(category.Name)
+			if name == "" {
 				return fmt.Errorf("sabnzbd category %d: name cannot be empty", i)
 			}
-			nameKey := strings.ToLower(category.Name)
+			nameKey := strings.ToLower(name)
 			if categoryNames[nameKey] {
 				return fmt.Errorf("sabnzbd category %d: duplicate category name '%s'", i, category.Name)
 			}

@@ -31,6 +31,33 @@ type StreamScoringConfig struct {
 	ExcludeRegex             string              `yaml:"exclude_regex,omitempty" mapstructure:"exclude_regex" json:"exclude_regex,omitempty"`
 	PreferredLanguages       []string            `yaml:"preferred_languages" mapstructure:"preferred_languages" json:"preferred_languages"`
 	RequirePreferredLanguage bool                `yaml:"require_preferred_language" mapstructure:"require_preferred_language" json:"require_preferred_language"`
+	// LanguageBonus is the score added when a release matches the first
+	// preferred language; each subsequent position gets LanguageBonusStep less.
+	// Left at 0 the defaults below apply. Custom-format scores are typically in
+	// the hundreds, so these are deliberately configurable rather than fixed —
+	// an oversized bonus makes every other scoring rule decorative.
+	LanguageBonus     int `yaml:"language_bonus" mapstructure:"language_bonus" json:"language_bonus,omitempty"`
+	LanguageBonusStep int `yaml:"language_bonus_step" mapstructure:"language_bonus_step" json:"language_bonus_step,omitempty"`
+}
+
+// Default language-preference bonuses, applied when the config leaves them at 0.
+const (
+	defaultLanguageBonus     = 500
+	defaultLanguageBonusStep = 50
+)
+
+// languageBonusFor returns the score bonus for a preferred language at the
+// given preference position (0 = most preferred).
+func (c *StreamScoringConfig) languageBonusFor(rank int) int {
+	bonus := c.LanguageBonus
+	if bonus == 0 {
+		bonus = defaultLanguageBonus
+	}
+	step := c.LanguageBonusStep
+	if step == 0 {
+		step = defaultLanguageBonusStep
+	}
+	return bonus - rank*step
 }
 
 // SearchResult is the common interface for release results from any indexer.
@@ -161,8 +188,7 @@ func EvaluateRelease(title string, cfg *StreamScoringConfig) ScoredRelease {
 		matchedPreferred := false
 		for _, detected := range res.MatchedLanguages {
 			if strings.EqualFold(preferred, detected) {
-				bonus := 5000 - rank*500
-				if bonus > 0 {
+				if bonus := cfg.languageBonusFor(rank); bonus > 0 {
 					score += bonus
 				}
 				matchedPreferred = true

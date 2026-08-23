@@ -130,14 +130,21 @@ func (r *Repository) AddToQueue(ctx context.Context, item *ImportQueueItem) erro
 		if err != nil {
 			return fmt.Errorf("failed to add to queue: %w", err)
 		}
-		item.ID, err = result.LastInsertId()
-		if err != nil || item.ID == 0 {
+		insertID, insertIDErr := result.LastInsertId()
+		if insertIDErr == nil && insertID != 0 {
+			item.ID = insertID
+		} else {
 			// SQLite returns no useful insert ID for an UPSERT that updates an
 			// existing row. Resolve the exact row instead of attaching a zero or
 			// unrelated ID to the caller's item.
 			existing, lookupErr := r.getQueueItemByNzbPath(ctx, item.NzbPath)
-			if lookupErr != nil || existing == nil {
-				return fmt.Errorf("failed to resolve queue item after upsert: %w", lookupErr)
+			switch {
+			case lookupErr != nil:
+				return fmt.Errorf("failed to resolve queue item after upsert (last insert id: %v): %w",
+					insertIDErr, lookupErr)
+			case existing == nil:
+				return fmt.Errorf("queue item %q not found after upsert (last insert id: %v)",
+					item.NzbPath, insertIDErr)
 			}
 			item.ID = existing.ID
 		}

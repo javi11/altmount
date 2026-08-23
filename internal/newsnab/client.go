@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/javi11/altmount/internal/httpclient"
 )
 
 // IndexerConfig holds configuration for a single direct Newsnab/Newznab indexer.
@@ -40,6 +42,9 @@ type Result struct {
 // DownloadNZB downloads an NZB from this configured indexer without sending
 // credentials belonging to another provider.
 func (c *Client) DownloadNZB(ctx context.Context, downloadURL string, userAgent string) ([]byte, error) {
+	if err := httpclient.ValidateDownloadURL(downloadURL); err != nil {
+		return nil, fmt.Errorf("newsnab: refusing download from %s: %w", c.config.Name, err)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("newsnab: create download request failed: %w", err)

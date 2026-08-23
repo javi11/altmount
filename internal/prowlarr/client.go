@@ -11,8 +11,9 @@ import (
 	"strings"
 	"time"
 
-	parsetorrentname "github.com/middelink/go-parse-torrent-name"
+	"github.com/javi11/altmount/internal/httpclient"
 	"github.com/javi11/altmount/internal/regexcache"
+	parsetorrentname "github.com/middelink/go-parse-torrent-name"
 	"golift.io/starr"
 	starrprowlarr "golift.io/starr/prowlarr"
 )
@@ -499,6 +500,9 @@ func (c *Client) searchWithID(ctx context.Context, idField, idValue, searchType 
 
 // DownloadNZB fetches the NZB file content from the given Prowlarr download URL.
 func (c *Client) DownloadNZB(ctx context.Context, downloadURL string) ([]byte, error) {
+	if err := httpclient.ValidateDownloadURL(downloadURL); err != nil {
+		return nil, fmt.Errorf("prowlarr: refusing download: %w", err)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("prowlarr: create download request: %w", err)
