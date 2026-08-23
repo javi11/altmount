@@ -153,7 +153,7 @@ func (sc *SearchCoordinator) SearchInspect(ctx context.Context, params SearchPar
 					if err == nil && len(res) > 0 {
 						mu.Lock()
 						for _, r := range res {
-							aggregated = append(aggregated, prowlarrToSearchResult(r))
+							aggregated = append(aggregated, prowlarrToSearchResult(r, true))
 						}
 						mu.Unlock()
 					}
@@ -172,7 +172,7 @@ func (sc *SearchCoordinator) SearchInspect(ctx context.Context, params SearchPar
 					if err == nil && len(res) > 0 {
 						mu.Lock()
 						for _, r := range res {
-							aggregated = append(aggregated, prowlarrToSearchResult(r))
+							aggregated = append(aggregated, prowlarrToSearchResult(r, false))
 						}
 						mu.Unlock()
 					}
@@ -186,7 +186,7 @@ func (sc *SearchCoordinator) SearchInspect(ctx context.Context, params SearchPar
 					if res, err := sc.prowlarrClient.SearchByTVDB(searchCtx, params.TVDBID, "tvsearch", sc.config.ProwlarrCats, sc.config.ProwlarrIdxs, params.Season, params.Episode); err == nil && len(res) > 0 {
 						mu.Lock()
 						for _, r := range res {
-							aggregated = append(aggregated, prowlarrToSearchResult(r))
+							aggregated = append(aggregated, prowlarrToSearchResult(r, true))
 						}
 						mu.Unlock()
 					}
@@ -199,7 +199,7 @@ func (sc *SearchCoordinator) SearchInspect(ctx context.Context, params SearchPar
 					if res, err := sc.prowlarrClient.Search(searchCtx, params.IMDBID, "tvsearch", sc.config.ProwlarrCats, sc.config.ProwlarrIdxs, params.Season, params.Episode); err == nil && len(res) > 0 {
 						mu.Lock()
 						for _, r := range res {
-							aggregated = append(aggregated, prowlarrToSearchResult(r))
+							aggregated = append(aggregated, prowlarrToSearchResult(r, true))
 						}
 						mu.Unlock()
 					}
@@ -212,7 +212,7 @@ func (sc *SearchCoordinator) SearchInspect(ctx context.Context, params SearchPar
 					if res, err := sc.prowlarrClient.SearchByQuery(searchCtx, params.Title, "tvsearch", sc.config.ProwlarrCats, sc.config.ProwlarrIdxs, params.Season, params.Episode); err == nil && len(res) > 0 {
 						mu.Lock()
 						for _, r := range res {
-							aggregated = append(aggregated, prowlarrToSearchResult(r))
+							aggregated = append(aggregated, prowlarrToSearchResult(r, false))
 						}
 						mu.Unlock()
 					}
@@ -221,7 +221,10 @@ func (sc *SearchCoordinator) SearchInspect(ctx context.Context, params SearchPar
 		}
 	}
 
-	// 2. Dispatch Direct Newsnab Searches concurrently
+	// 2. Dispatch Direct Newsnab Searches concurrently.
+	// Mirrors Prowlarr/Sonarr/Radarr: identifier query first, keyword query
+	// only as a sequential fallback when the ID query is unsupported, errors,
+	// or returns nothing. This halves indexer API usage vs firing both always.
 	if (provider == "newsnab" || provider == "both") && len(sc.newsnabClients) > 0 {
 		for _, client := range sc.newsnabClients {
 			c := client
@@ -230,13 +233,24 @@ func (sc *SearchCoordinator) SearchInspect(ctx context.Context, params SearchPar
 					wg.Add(1)
 					go func() {
 						defer wg.Done()
-						res, err := c.SearchMovie(searchCtx, params.IMDBID, nil, userAgent)
+						res, err := c.SearchMovie(searchCtx, params.IMDBID, params.Title, nil, userAgent)
 						if err != nil {
 							slog.WarnContext(searchCtx, "Newsnab movie ID search failed", "indexer", c.Name(), "error", err, "imdb_id", params.IMDBID)
 						} else {
 							slog.InfoContext(searchCtx, "Newsnab movie ID search returned results", "indexer", c.Name(), "count", len(res), "imdb_id", params.IMDBID)
 						}
-						if err == nil && len(res) > 0 {
+						if (err != nil || len(res) == 0) && params.Title != "" {
+							fallbackRes, ferr := c.SearchGeneral(searchCtx, params.Title, []int{2000, 2010, 2030, 2040, 2045, 2060}, userAgent)
+							if ferr != nil {
+								slog.WarnContext(searchCtx, "Newsnab movie keyword fallback failed", "indexer", c.Name(), "error", ferr, "title", params.Title)
+							} else {
+								slog.InfoContext(searchCtx, "Newsnab movie keyword fallback returned results", "indexer", c.Name(), "count", len(fallbackRes), "title", params.Title)
+							}
+							if len(fallbackRes) > 0 {
+								res = fallbackRes
+							}
+						}
+						if len(res) > 0 {
 							mu.Lock()
 							for _, r := range res {
 								aggregated = append(aggregated, newsnabToSearchResult(r))
@@ -244,8 +258,7 @@ func (sc *SearchCoordinator) SearchInspect(ctx context.Context, params SearchPar
 							mu.Unlock()
 						}
 					}()
-				}
-				if params.Title != "" {
+				} else if params.Title != "" {
 					wg.Add(1)
 					go func() {
 						defer wg.Done()
@@ -275,7 +288,18 @@ func (sc *SearchCoordinator) SearchInspect(ctx context.Context, params SearchPar
 						} else {
 							slog.InfoContext(searchCtx, "Newsnab TV ID search returned results", "indexer", c.Name(), "count", len(res))
 						}
-						if err == nil && len(res) > 0 {
+						if (err != nil || len(res) == 0) && params.Title != "" {
+							fallbackRes, ferr := c.SearchTV(searchCtx, "", "", params.Title, params.Season, params.Episode, nil, userAgent)
+							if ferr != nil {
+								slog.WarnContext(searchCtx, "Newsnab TV keyword fallback failed", "indexer", c.Name(), "error", ferr, "title", params.Title)
+							} else {
+								slog.InfoContext(searchCtx, "Newsnab TV keyword fallback returned results", "indexer", c.Name(), "count", len(fallbackRes), "title", params.Title)
+							}
+							if len(fallbackRes) > 0 {
+								res = fallbackRes
+							}
+						}
+						if len(res) > 0 {
 							mu.Lock()
 							for _, r := range res {
 								aggregated = append(aggregated, newsnabToSearchResult(r))
@@ -283,8 +307,7 @@ func (sc *SearchCoordinator) SearchInspect(ctx context.Context, params SearchPar
 							mu.Unlock()
 						}
 					}()
-				}
-				if params.Title != "" {
+				} else if params.Title != "" {
 					wg.Add(1)
 					go func() {
 						defer wg.Done()
@@ -334,18 +357,24 @@ func (sc *SearchCoordinator) SearchInspect(ctx context.Context, params SearchPar
 	discardedList := make([]ScoredRelease, 0, len(uniqueResults))
 
 	for _, rel := range uniqueResults {
-		// Evaluate media matching if title is provided
+		// Evaluate media matching if title is provided. Releases matched by
+		// the indexer via an identifier query (imdbid/tvdbid) skip the gate:
+		// the indexer resolved the ID itself, so release names that differ
+		// from the metadata title (foreign/alternative titles) are still
+		// valid — same trust model as Prowlarr/Sonarr/Radarr.
 		isMediaMismatch := false
 		var mismatchReason string
-		if strings.EqualFold(params.Type, "series") && params.Title != "" {
-			if !MatchesSeries(rel.Title, params.Title, params.Season, params.Episode, 0) {
-				isMediaMismatch = true
-				mismatchReason = "Does not match requested series or episode"
-			}
-		} else if strings.EqualFold(params.Type, "movie") && params.Title != "" {
-			if !MatchesMovie(rel.Title, params.Title, 0) {
-				isMediaMismatch = true
-				mismatchReason = "Does not match requested movie title"
+		if !rel.ByIDSearch {
+			if strings.EqualFold(params.Type, "series") && params.Title != "" {
+				if !MatchesSeries(rel.Title, params.Title, params.Season, params.Episode, 0) {
+					isMediaMismatch = true
+					mismatchReason = "Does not match requested series or episode"
+				}
+			} else if strings.EqualFold(params.Type, "movie") && params.Title != "" {
+				if !MatchesMovie(rel.Title, params.Title, 0) {
+					isMediaMismatch = true
+					mismatchReason = "Does not match requested movie title"
+				}
 			}
 		}
 
@@ -383,7 +412,7 @@ func (sc *SearchCoordinator) SearchInspect(ctx context.Context, params SearchPar
 	}, nil
 }
 
-func prowlarrToSearchResult(r prowlarr.NZBResult) SearchResult {
+func prowlarrToSearchResult(r prowlarr.NZBResult, byID bool) SearchResult {
 	return SearchResult{
 		Title:       r.Title,
 		DownloadURL: r.DownloadURL,
@@ -393,6 +422,7 @@ func prowlarrToSearchResult(r prowlarr.NZBResult) SearchResult {
 		IndexerID:   fmt.Sprintf("%d", r.IndexerID),
 		Source:      "prowlarr",
 		GUID:        r.GUID,
+		ByIDSearch:  byID,
 	}
 }
 
@@ -406,5 +436,6 @@ func newsnabToSearchResult(r newsnab.Result) SearchResult {
 		IndexerID:   r.IndexerID,
 		GUID:        r.GUID,
 		Source:      "newsnab",
+		ByIDSearch:  r.ByIDSearch,
 	}
 }
