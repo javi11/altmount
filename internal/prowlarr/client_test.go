@@ -81,3 +81,67 @@ func TestMatchKeywordOrPattern_LegitimateMatches(t *testing.T) {
 		})
 	}
 }
+
+// TestMatchKeywordOrPattern_BracketedKeywordsAreLiteral pins that release-name
+// punctuation in a plain keyword is treated literally. Release groups and years
+// routinely appear as "[Group]" or "(2024)"; compiling those as regexes turns
+// "[SubsPlease]" into a character class that matches almost every title, which
+// would silently blacklist a user's entire result set.
+func TestMatchKeywordOrPattern_BracketedKeywordsAreLiteral(t *testing.T) {
+	tests := []struct {
+		name    string
+		title   string
+		keyword string
+		want    bool
+	}{
+		{"bracket group matches its own release", "[SubsPlease] Show - 01 (1080p).mkv", "[SubsPlease]", true},
+		{"bracket group does not match other releases", "Movie.2024.1080p.BluRay.x264-GROUP", "[SubsPlease]", false},
+		{"bracket group is not a character class", "A.Plain.Title.Ends.With.S.2024", "[SubsPlease]", false},
+		{"parenthesised year matches literally", "Show (2020) - 35 (1080p).mkv", "(2020)", true},
+		{"parenthesised year does not match other years", "Show (2019) - 35 (1080p).mkv", "(2020)", false},
+		{"braces are literal", "Movie.{Extended}.2024", "{Extended}", true},
+
+		// Unambiguous regex directives must still be honoured.
+		{"alternation is still regex", "Movie.2024.TS.1080p", "(cam|ts)", true},
+		{"alternation still excludes non-matches", "Movie.2024.WEB.1080p", "(cam|ts)", false},
+		{"word boundary is still regex", "Movie.2024.TS.1080p", `\bts\b`, true},
+		{"anchor is still regex", "Movie.2024.TS.1080p", "^Movie", true},
+		{"anchor still excludes non-matches", "Not.Movie.2024", "^Movie", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := MatchKeywordOrPattern(tt.title, tt.keyword)
+			assert.Equal(t, tt.want, got, "MatchKeywordOrPattern(%q, %q)", tt.title, tt.keyword)
+		})
+	}
+}
+
+// TestSlashPatternFlagSemantics documents the flag contract shared with the
+// frontend preview (frontend/src/components/config/stremio/scoringPresets.ts,
+// matchKeywordOrPattern). Only Go's inline flags i/m/s are honoured, matching is
+// always case-insensitive, and unsupported flag letters are ignored rather than
+// making the pattern fail.
+func TestSlashPatternFlagSemantics(t *testing.T) {
+	tests := []struct {
+		name    string
+		title   string
+		pattern string
+		want    bool
+	}{
+		{"no flags is case-insensitive", "Movie.2024.CAM", "/cam/", true},
+		{"explicit i flag", "Movie.2024.CAM", "/cam/i", true},
+		{"s flag honoured", "Movie.2024.CAM", "/movie.*cam/s", true},
+		{"unsupported g flag ignored, still matches", "Movie.2024.CAM", "/cam/g", true},
+		{"unsupported u flag ignored, still matches", "Movie.2024.CAM", "/cam/u", true},
+		{"unsupported x flag ignored, still matches", "Movie.2024.CAM", "/cam/x", true},
+		{"unsupported flags do not force a match", "Movie.2024.WEB", "/cam/gux", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := MatchKeywordOrPattern(tt.title, tt.pattern)
+			assert.Equal(t, tt.want, got, "MatchKeywordOrPattern(%q, %q)", tt.title, tt.pattern)
+		})
+	}
+}

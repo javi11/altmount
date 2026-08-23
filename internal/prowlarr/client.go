@@ -95,7 +95,20 @@ func (c *Client) GetIndexers(ctx context.Context) ([]Indexer, error) {
 }
 
 var (
-	reExplicitRegex = regexp.MustCompile(`(?i)\\b|\\[dwsDWS]|\(\?|[\(\)\[\]\{\}\|\*\+\?\^\$]`)
+	// reExplicitRegex detects patterns a user clearly wrote as a regex.
+	//
+	// Bracket, paren and brace characters are deliberately NOT part of this set:
+	// release names are full of them ("[SubsPlease]", "(2020)", "{Extended}"),
+	// and treating such a keyword as a regex turns "[SubsPlease]" into a
+	// character class that matches nearly every title — silently blacklisting a
+	// user's whole result set. Only unambiguous regex constructs qualify:
+	// escape classes, group directives, alternation, quantifiers and anchors.
+	// Anything else is matched literally on token boundaries; users who want a
+	// regex containing only brackets can use the explicit /pattern/ form.
+	//
+	// Kept in lockstep with REGEX_CONSTRUCTS in
+	// frontend/src/components/config/stremio/scoringPresets.ts.
+	reExplicitRegex = regexp.MustCompile(`\\b|\\[dwsDWS]|\(\?|[|*+?^$]`)
 	reWhitespace    = regexp.MustCompile(`\s+`)
 )
 
