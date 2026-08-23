@@ -2205,34 +2205,35 @@ func (r *Repository) GetFailedStremioQueueItems(ctx context.Context) ([]*ImportQ
 // GetCachedStremioQueueItems returns completed queue items that have a storage path
 // (i.e. are streamable). When reuseLibrary is true, it returns completed imports from
 // all sources (Sonarr, Radarr, SABnzbd, Stremio) across the entire library.
-func (r *Repository) GetCachedStremioQueueItems(ctx context.Context, reuseLibrary bool) ([]*ImportQueueItem, error) {
-	var query string
-	if reuseLibrary {
-		query = `
-			SELECT id, download_id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
+//
+// ttlHours, when positive, restricts results to items that completed within that
+// window. The caller applies the same TTL when building its match set; pushing
+// it down here keeps the row count bounded by recency rather than by library
+// size, which matters because this runs on every Stremio stream request.
+func (r *Repository) GetCachedStremioQueueItems(ctx context.Context, reuseLibrary bool, ttlHours int) ([]*ImportQueueItem, error) {
+	const columns = `SELECT id, download_id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
 			       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path, target_path
 			FROM import_queue
 			WHERE status = 'completed'
 			  AND storage_path IS NOT NULL
-			  AND storage_path != ''
-			ORDER BY completed_at DESC
-			LIMIT 1000
-		`
-	} else {
-		query = `
-			SELECT id, download_id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
-			       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path, target_path
-			FROM import_queue
-			WHERE status = 'completed'
-			  AND download_id LIKE 'stremio:%'
-			  AND storage_path IS NOT NULL
-			  AND storage_path != ''
-			ORDER BY completed_at DESC
-			LIMIT 500
-		`
+			  AND storage_path != ''`
+
+	query := columns
+	limit := 1000
+	if !reuseLibrary {
+		query += ` AND download_id LIKE 'stremio:%'`
+		limit = 500
 	}
 
-	rows, err := r.db.QueryContext(ctx, query)
+	var args []interface{}
+	if ttlHours > 0 {
+		query += ` AND completed_at IS NOT NULL AND completed_at >= ?`
+		args = append(args, time.Now().Add(-time.Duration(ttlHours)*time.Hour))
+	}
+
+	query += fmt.Sprintf(" ORDER BY completed_at DESC LIMIT %d", limit)
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query cached stremio queue items: %w", err)
 	}

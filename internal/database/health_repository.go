@@ -2527,6 +2527,10 @@ func (r *HealthRepository) FindHealthyFilesForSeries(ctx context.Context, series
 					return nil, fmt.Errorf("failed to scan series health row: %w", scanErr)
 				}
 			}
+			if rowsErr := rows.Err(); rowsErr != nil {
+				rows.Close()
+				return nil, fmt.Errorf("failed to read series health rows: %w", rowsErr)
+			}
 			rows.Close()
 			if len(results) > 0 {
 				return results, nil

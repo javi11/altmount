@@ -947,7 +947,7 @@ func (s *Server) searchStremioReleases(
 	}
 
 	now := time.Now()
-	cachedItems, failedItems := s.loadStremioQueueState(ctx, cfg.Stremio.EffectiveIncludeLibraryStreams())
+	cachedItems, failedItems := s.loadStremioQueueState(ctx, cfg.Stremio.EffectiveIncludeLibraryStreams(), cfg.Stremio.NzbTTLHours)
 	isFailed := stremioFailedPredicate(failedItems, s.stremioFailures.Keys(stremioFailedTTL(cfg)), cfg.Stremio.FailedReleaseTTLHours, now)
 	isCached := stremioCachedPredicate(cachedItems, cfg.Stremio.NzbTTLHours, now)
 
@@ -1009,12 +1009,12 @@ func stremioFailedTTL(cfg *config.Config) time.Duration {
 
 // loadStremioQueueState fetches the cached and failed Stremio queue items. Both lookups
 // are best-effort: a DB hiccup degrades badges and exclusion rather than failing search.
-func (s *Server) loadStremioQueueState(ctx context.Context, reuseLibrary bool) (cached, failed []*database.ImportQueueItem) {
+func (s *Server) loadStremioQueueState(ctx context.Context, reuseLibrary bool, ttlHours int) (cached, failed []*database.ImportQueueItem) {
 	if s.queueRepo == nil {
 		return nil, nil
 	}
 
-	if items, err := s.queueRepo.GetCachedStremioQueueItems(ctx, reuseLibrary); err != nil {
+	if items, err := s.queueRepo.GetCachedStremioQueueItems(ctx, reuseLibrary, ttlHours); err != nil {
 		slog.WarnContext(ctx, "Failed to load cached Stremio items; continuing without cache badges",
 			"error", err)
 	} else {
@@ -1218,7 +1218,7 @@ func (s *Server) handleStremioAddonPlay(c *fiber.Ctx) error {
 	ttlHours := cfg.Stremio.NzbTTLHours
 	normTarget := normalizeTitleForMatching(cand.SafeTitle)
 	if normTarget != "" {
-		if cachedItems, err := s.queueRepo.GetCachedStremioQueueItems(ctx, cfg.Stremio.EffectiveIncludeLibraryStreams()); err == nil {
+		if cachedItems, err := s.queueRepo.GetCachedStremioQueueItems(ctx, cfg.Stremio.EffectiveIncludeLibraryStreams(), cfg.Stremio.NzbTTLHours); err == nil {
 			for _, prev := range cachedItems {
 				if prev == nil || prev.StoragePath == nil || *prev.StoragePath == "" {
 					continue
