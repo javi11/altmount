@@ -3,6 +3,7 @@ package stremio
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
@@ -120,6 +121,8 @@ func (sc *SearchCoordinator) SearchInspect(ctx context.Context, params SearchPar
 		provider = "both"
 	}
 
+	slog.InfoContext(searchCtx, "SearchInspect starting", "provider", provider, "has_prowlarr", sc.prowlarrClient != nil, "newsnab_count", len(sc.newsnabClients), "params_type", params.Type, "params_title", params.Title, "params_imdb", params.IMDBID)
+
 	var (
 		wg             sync.WaitGroup
 		mu             sync.Mutex
@@ -135,50 +138,88 @@ func (sc *SearchCoordinator) SearchInspect(ctx context.Context, params SearchPar
 		}
 	}
 
-	// 1. Dispatch Prowlarr Search
+	// 1. Dispatch Prowlarr Searches concurrently
 	if (provider == "prowlarr" || provider == "both") && sc.prowlarrClient != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			var pResults []prowlarr.NZBResult
-			var err error
-
-			if strings.EqualFold(params.Type, "movie") {
-				if params.IMDBID != "" {
-					pResults, err = sc.prowlarrClient.Search(searchCtx, params.IMDBID, "movie", sc.config.ProwlarrCats, sc.config.ProwlarrIdxs, 0, 0)
-				}
-				if len(pResults) == 0 && params.Title != "" {
-					pResults, err = sc.prowlarrClient.SearchByQuery(searchCtx, params.Title, "movie", sc.config.ProwlarrCats, sc.config.ProwlarrIdxs, 0, 0)
-				}
-			} else {
-				if params.TVDBID != "" {
-					pResults, err = sc.prowlarrClient.SearchByTVDB(searchCtx, params.TVDBID, "tvsearch", sc.config.ProwlarrCats, sc.config.ProwlarrIdxs, params.Season, params.Episode)
-				}
-				if len(pResults) == 0 && params.IMDBID != "" {
-					pResults, err = sc.prowlarrClient.Search(searchCtx, params.IMDBID, "tvsearch", sc.config.ProwlarrCats, sc.config.ProwlarrIdxs, params.Season, params.Episode)
-				}
-				if len(pResults) == 0 && params.Title != "" {
-					pResults, err = sc.prowlarrClient.SearchByQuery(searchCtx, params.Title, "tvsearch", sc.config.ProwlarrCats, sc.config.ProwlarrIdxs, params.Season, params.Episode)
-				}
+		if strings.EqualFold(params.Type, "movie") {
+			if params.IMDBID != "" {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					res, err := sc.prowlarrClient.Search(searchCtx, params.IMDBID, "movie", sc.config.ProwlarrCats, sc.config.ProwlarrIdxs, 0, 0)
+					if err != nil {
+						slog.WarnContext(searchCtx, "Prowlarr movie ID search failed", "error", err, "imdb_id", params.IMDBID)
+					} else {
+						slog.InfoContext(searchCtx, "Prowlarr movie ID search returned results", "count", len(res), "imdb_id", params.IMDBID)
+					}
+					if err == nil && len(res) > 0 {
+						mu.Lock()
+						for _, r := range res {
+							aggregated = append(aggregated, prowlarrToSearchResult(r))
+						}
+						mu.Unlock()
+					}
+				}()
 			}
-
-			if err == nil && len(pResults) > 0 {
-				mu.Lock()
-				for _, r := range pResults {
-					aggregated = append(aggregated, SearchResult{
-						Title:       r.Title,
-						DownloadURL: r.DownloadURL,
-						Size:        r.Size,
-						PublishDate: r.PublishDate,
-						Indexer:     r.Indexer,
-						IndexerID:   fmt.Sprintf("%d", r.IndexerID),
-						Source:      "prowlarr",
-						GUID:        r.GUID,
-					})
-				}
-				mu.Unlock()
+			if params.Title != "" {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					res, err := sc.prowlarrClient.SearchByQuery(searchCtx, params.Title, "movie", sc.config.ProwlarrCats, sc.config.ProwlarrIdxs, 0, 0)
+					if err != nil {
+						slog.WarnContext(searchCtx, "Prowlarr movie Title search failed", "error", err, "title", params.Title)
+					} else {
+						slog.InfoContext(searchCtx, "Prowlarr movie Title search returned results", "count", len(res), "title", params.Title)
+					}
+					if err == nil && len(res) > 0 {
+						mu.Lock()
+						for _, r := range res {
+							aggregated = append(aggregated, prowlarrToSearchResult(r))
+						}
+						mu.Unlock()
+					}
+				}()
 			}
-		}()
+		} else {
+			if params.TVDBID != "" {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					if res, err := sc.prowlarrClient.SearchByTVDB(searchCtx, params.TVDBID, "tvsearch", sc.config.ProwlarrCats, sc.config.ProwlarrIdxs, params.Season, params.Episode); err == nil && len(res) > 0 {
+						mu.Lock()
+						for _, r := range res {
+							aggregated = append(aggregated, prowlarrToSearchResult(r))
+						}
+						mu.Unlock()
+					}
+				}()
+			}
+			if params.IMDBID != "" {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					if res, err := sc.prowlarrClient.Search(searchCtx, params.IMDBID, "tvsearch", sc.config.ProwlarrCats, sc.config.ProwlarrIdxs, params.Season, params.Episode); err == nil && len(res) > 0 {
+						mu.Lock()
+						for _, r := range res {
+							aggregated = append(aggregated, prowlarrToSearchResult(r))
+						}
+						mu.Unlock()
+					}
+				}()
+			}
+			if params.Title != "" {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					if res, err := sc.prowlarrClient.SearchByQuery(searchCtx, params.Title, "tvsearch", sc.config.ProwlarrCats, sc.config.ProwlarrIdxs, params.Season, params.Episode); err == nil && len(res) > 0 {
+						mu.Lock()
+						for _, r := range res {
+							aggregated = append(aggregated, prowlarrToSearchResult(r))
+						}
+						mu.Unlock()
+					}
+				}()
+			}
+		}
 	}
 
 	// 2. Dispatch Direct Newsnab Searches
@@ -195,20 +236,22 @@ func (sc *SearchCoordinator) SearchInspect(ctx context.Context, params SearchPar
 					if params.IMDBID != "" {
 						nResults, err = c.SearchMovie(searchCtx, params.IMDBID, nil, userAgent)
 					}
-					if (err == nil && len(nResults) == 0) && params.Title != "" {
-						nResults, err = c.SearchGeneral(searchCtx, params.Title, []int{2000, 2010, 2030, 2040, 2045, 2060}, userAgent)
+					if params.Title != "" {
+						if generalResults, gErr := c.SearchGeneral(searchCtx, params.Title, []int{2000, 2010, 2030, 2040, 2045, 2060}, userAgent); gErr == nil && len(generalResults) > 0 {
+							nResults = append(nResults, generalResults...)
+						}
 					}
 				} else {
 					nResults, err = c.SearchTV(searchCtx, params.IMDBID, params.TVDBID, params.Title, params.Season, params.Episode, nil, userAgent)
 					// Fallback to title query if ID search yielded no results
-					if (err == nil && len(nResults) == 0) && params.Title != "" {
+					if params.Title != "" && (params.TVDBID != "" || params.IMDBID != "") {
 						if fallbackResults, fbErr := c.SearchTV(searchCtx, "", "", params.Title, params.Season, params.Episode, nil, userAgent); fbErr == nil && len(fallbackResults) > 0 {
 							nResults = append(nResults, fallbackResults...)
 						}
 					}
 				}
 
-				if err == nil && len(nResults) > 0 {
+				if (err == nil || len(nResults) > 0) && len(nResults) > 0 {
 					mu.Lock()
 					for _, r := range nResults {
 						aggregated = append(aggregated, SearchResult{
@@ -316,4 +359,17 @@ func (sc *SearchCoordinator) SearchInspect(ctx context.Context, params SearchPar
 		DiscardedResults: len(discardedList),
 		Releases:         allEvaluated,
 	}, nil
+}
+
+func prowlarrToSearchResult(r prowlarr.NZBResult) SearchResult {
+	return SearchResult{
+		Title:       r.Title,
+		DownloadURL: r.DownloadURL,
+		Size:        r.Size,
+		PublishDate: r.PublishDate,
+		Indexer:     r.Indexer,
+		IndexerID:   fmt.Sprintf("%d", r.IndexerID),
+		Source:      "prowlarr",
+		GUID:        r.GUID,
+	}
 }

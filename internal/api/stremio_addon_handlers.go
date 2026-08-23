@@ -918,6 +918,7 @@ func (s *Server) searchStremioReleases(
 		if mErr != nil {
 			slog.WarnContext(ctx, "Failed to resolve movie metadata from IMDb ID", "error", mErr, "imdb_id", imdbID)
 		}
+		title = movieTitle
 		expectedTitle = movieTitle
 		expectedYear = movieYear
 	}
@@ -1975,6 +1976,8 @@ func (s *Server) handleInspectStremioSearch(c *fiber.Ctx) error {
 			}
 		}
 	}
+
+	slog.InfoContext(ctx, "Inspect search executing", "imdb_id", req.IMDbID, "search_title", searchTitle, "type", req.Type)
 
 	cfg := s.configManager.GetConfig()
 	coordCfg := s.buildStremioCoordinatorConfig(cfg)

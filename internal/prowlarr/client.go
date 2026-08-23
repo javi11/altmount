@@ -421,6 +421,10 @@ func (c *Client) SearchByQuery(ctx context.Context, queryText, searchType string
 }
 
 func (c *Client) searchWithID(ctx context.Context, idField, idValue, searchType string, categories, indexers []int, season, episode int) ([]NZBResult, error) {
+	if strings.EqualFold(idField, "ImdbId") {
+		idValue = strings.TrimPrefix(idValue, "tt")
+	}
+
 	var query strings.Builder
 	if idValue != "" {
 		query.WriteString("{" + idField + ":" + idValue + "}")
