@@ -1352,7 +1352,7 @@ function ExternalRCloneSubSection({ config, onFormDataChange }: ExternalSubSecti
 						/>
 						<button
 							type="button"
-							className="-translate-y-1/2 btn btn-ghost btn-sm absolute top-1/2 right-2"
+							className="btn btn-ghost btn-sm absolute top-1/2 right-2 -translate-y-1/2"
 							onClick={() => setShowPassword(!showPassword)}
 						>
 							{showPassword ? (

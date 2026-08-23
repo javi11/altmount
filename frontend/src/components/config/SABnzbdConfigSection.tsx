@@ -493,7 +493,7 @@ export function SABnzbdConfigSection({
 											/>
 											<button
 												type="button"
-												className="-translate-y-1/2 btn btn-ghost btn-sm absolute top-1/2 right-2"
+												className="btn btn-ghost btn-sm absolute top-1/2 right-2 -translate-y-1/2"
 												onClick={() => setShowApiKey(!showApiKey)}
 											>
 												{showApiKey ? (

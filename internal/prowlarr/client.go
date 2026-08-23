@@ -9,33 +9,12 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	parsetorrentname "github.com/middelink/go-parse-torrent-name"
 	"golift.io/starr"
 	starrprowlarr "golift.io/starr/prowlarr"
 )
-
-// excludeKeywordRegexCache caches compiled exclude-keyword regexes so
-// MatchesExcludeKeywords doesn't recompile the same pattern on every call.
-var excludeKeywordRegexCache sync.Map
-
-// CompilePatternCached compiles (and caches) a case-insensitive regex
-// for the given exclude keyword.
-func CompilePatternCached(kw string) (*regexp.Regexp, error) {
-	if val, ok := excludeKeywordRegexCache.Load(kw); ok {
-		if re, ok := val.(*regexp.Regexp); ok {
-			return re, nil
-		}
-	}
-	re, err := regexp.Compile("(?i)" + kw)
-	if err != nil {
-		return nil, err
-	}
-	excludeKeywordRegexCache.Store(kw, re)
-	return re, nil
-}
 
 // Client is a Prowlarr API client backed by golift/starr.
 type Client struct {
@@ -73,6 +52,8 @@ type NZBResult struct {
 	PublishDate time.Time
 	Indexer     string
 	IndexerID   int
+	Source      string
+	GUID        string
 }
 
 // Indexer describes a single Prowlarr indexer, used to let users pick which
@@ -153,7 +134,7 @@ func MatchesExcludeKeywords(title string, excludeKeywords []string) bool {
 		if strings.Contains(titleLower, strings.ToLower(kw)) {
 			return true
 		}
-		if re, err := CompilePatternCached(kw); err == nil && re.MatchString(title) {
+		if re, err := regexp.Compile("(?i)" + kw); err == nil && re.MatchString(title) {
 			return true
 		}
 	}
@@ -345,6 +326,8 @@ func (c *Client) searchWithID(ctx context.Context, idField, idValue, searchType 
 			PublishDate: r.PublishDate,
 			Indexer:     r.Indexer,
 			IndexerID:   int(r.IndexerID),
+			Source:      "prowlarr",
+			GUID:        r.GUID,
 		})
 	}
 
@@ -362,8 +345,12 @@ func (c *Client) DownloadNZB(ctx context.Context, downloadURL string) ([]byte, e
 		return nil, fmt.Errorf("prowlarr: create download request: %w", err)
 	}
 	req.Header.Set("X-Api-Key", c.apiKey)
+	client := *c.http
+	client.CheckRedirect = func(req *http.Request, _ []*http.Request) error {
+		return fmt.Errorf("prowlarr: download redirect is not allowed")
+	}
 
-	resp, err := c.http.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("prowlarr: download request failed: %w", err)
 	}

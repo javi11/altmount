@@ -1,6 +1,7 @@
 package filesystem
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -29,11 +30,12 @@ var (
 // It holds the outer RAR segments and optional AES credentials needed
 // to read (and decrypt) the inner RAR volume at import time.
 type DecryptingFileEntry struct {
-	Filename      string
-	Segments      []*metapb.SegmentData
-	DecryptedSize int64  // Size of the decrypted data
-	AesKey        []byte // Empty = no encryption
-	AesIV         []byte
+	Filename          string
+	Segments          []*metapb.SegmentData
+	DecryptedSize     int64  // Size of the decrypted data
+	AesKey            []byte // Empty = no encryption
+	AesIV             []byte
+	FirstSegmentBytes []byte // Warm yEnc-decoded bytes from first segment for instant header analysis
 }
 
 // DecryptingFileSystem implements fs.FS for reading inner RAR archives
@@ -228,6 +230,13 @@ func (df *DecryptingFile) createReader(ctx context.Context, start int64) (io.Rea
 
 // createPlainReader creates a Usenet reader without decryption.
 func (df *DecryptingFile) createPlainReader(ctx context.Context, start, end int64) (io.ReadCloser, error) {
+	if start == 0 && len(df.entry.FirstSegmentBytes) > 0 {
+		prefix := df.entry.FirstSegmentBytes
+		if end < int64(len(prefix)) {
+			prefix = prefix[:end+1]
+		}
+		return io.NopCloser(bytes.NewReader(prefix)), nil
+	}
 	loader := dbSegmentLoader{segs: df.entry.Segments}
 	if loader.GetSegmentCount() == 0 {
 		return nil, fmt.Errorf("no segments to download")

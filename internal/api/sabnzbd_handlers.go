@@ -128,10 +128,12 @@ func (s *Server) handleSABnzbd(c *fiber.Ctx) error {
 		return s.handleSABnzbdSwitch(c)
 	case "history":
 		return s.handleSABnzbdHistory(c)
-	case "status":
+	case "status", "fullstatus":
 		return s.handleSABnzbdStatus(c)
 	case "get_config":
 		return s.handleSABnzbdGetConfig(c)
+	case "get_cats":
+		return s.handleSABnzbdGetCats(c)
 	case "version":
 		return s.handleSABnzbdVersion(c)
 	default:
@@ -356,8 +358,11 @@ func (s *Server) handleSABnzbdAddFile(c *fiber.Ctx) error {
 		return s.writeSABnzbdErrorFiber(c, "Invalid file type, must be .nzb or .nzb.gz")
 	}
 
-	// Get and validate category from form first
-	category := c.FormValue("cat")
+	// Get and validate category from form or query parameters
+	category := qf(c, "cat")
+	if category == "" {
+		category = qf(c, "category")
+	}
 	validatedCategory, err := s.validateSABnzbdCategory(category)
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, err.Error())
@@ -405,7 +410,7 @@ func (s *Server) handleSABnzbdAddFile(c *fiber.Ctx) error {
 	if movie := c.FormValue("movie"); movie != "" {
 		metadata["movie_title"] = movie
 	}
-	
+
 	var metadataJSON *string
 	if len(metadata) > 0 {
 		if b, err := json.Marshal(metadata); err == nil {
@@ -464,8 +469,11 @@ func (s *Server) handleSABnzbdAddUrl(c *fiber.Ctx) error {
 		return s.writeSABnzbdErrorFiber(c, fmt.Sprintf("Failed to download NZB: HTTP %d", resp.StatusCode))
 	}
 
-	// Get and validate category from query parameters first
-	category := c.Query("cat")
+	// Get and validate category from query or form parameters
+	category := qf(c, "cat")
+	if category == "" {
+		category = qf(c, "category")
+	}
 	validatedCategory, err := s.validateSABnzbdCategory(category)
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, err.Error())
@@ -1244,6 +1252,33 @@ func (s *Server) handleSABnzbdVersion(c *fiber.Ctx) error {
 	return s.writeSABnzbdResponseFiber(c, response)
 }
 
+// handleSABnzbdGetCats handles category list request (e.g. for Dropped Needle and other SABnzbd clients)
+func (s *Server) handleSABnzbdGetCats(c *fiber.Ctx) error {
+	categories := []string{"*"}
+	seen := map[string]bool{"*": true}
+
+	if s.configManager != nil {
+		cfg := s.configManager.GetConfig()
+		for _, cat := range cfg.SABnzbd.Categories {
+			name := strings.TrimSpace(cat.Name)
+			lower := strings.ToLower(name)
+			if name != "" && !seen[lower] {
+				seen[lower] = true
+				categories = append(categories, name)
+			}
+		}
+	}
+	if !seen[strings.ToLower(config.DefaultCategoryName)] {
+		categories = append(categories, config.DefaultCategoryName)
+	}
+	// Keep the implicit SABnzbd wildcard category separate from the configured
+	// human-readable Default entry; clients expect both representations.
+
+	return s.writeSABnzbdResponseFiber(c, SABnzbdCategoriesResponse{
+		Categories: categories,
+	})
+}
+
 // parseSABnzbdPriority converts SABnzbd priority string to AltMount priority.
 // SABnzbd numeric values: 2=Force, 1=High, 0=Normal, -1=Low, -2=Paused.
 func (s *Server) parseSABnzbdPriority(priority string) database.QueuePriority {
@@ -1304,34 +1339,31 @@ func (s *Server) buildCategoryPath(category string) string {
 // validateSABnzbdCategory validates and returns the category, or error if invalid
 func (s *Server) validateSABnzbdCategory(category string) (string, error) {
 	defaultCategory := s.getDefaultCategory()
-	if category == "" {
+	trimmed := strings.TrimSpace(category)
+	if trimmed == "" || trimmed == "*" || strings.EqualFold(trimmed, "default") {
 		return defaultCategory.Name, nil
 	}
 
-	config := s.configManager.GetConfig()
-
-	// If no categories are configured, allow any category and default to "default"
-	if len(config.SABnzbd.Categories) == 0 {
-		if category == "" {
-			return defaultCategory.Name, nil
-		}
-		return category, nil
+	if s.configManager == nil {
+		return trimmed, nil
 	}
 
-	// If categories are configured, validate against the list
-	if category == "" {
-		category = defaultCategory.Name
+	cfg := s.configManager.GetConfig()
+
+	// If no categories are configured, allow any category
+	if len(cfg.SABnzbd.Categories) == 0 {
+		return trimmed, nil
 	}
 
-	// Check if category exists in configuration
-	for _, configCategory := range config.SABnzbd.Categories {
-		if configCategory.Name == category {
-			return category, nil
+	// Check if category exists in configuration (case-insensitive)
+	for _, configCategory := range cfg.SABnzbd.Categories {
+		if strings.EqualFold(configCategory.Name, trimmed) {
+			return configCategory.Name, nil
 		}
 	}
 
 	// Category not found in configuration
-	return "", fmt.Errorf("invalid category '%s' - not found in configuration", category)
+	return "", fmt.Errorf("invalid category '%s' - not found in configuration", trimmed)
 }
 
 // writeSABnzbdResponseFiber writes a successful SABnzbd-compatible response (Fiber version)

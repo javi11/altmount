@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -261,6 +262,9 @@ type StremioConfig struct {
 	// immediately on the release-level probe when missing articles are detected,
 	// skipping the multi-part RAR per-file Stat sweep. Defaults to true.
 	FastFailHeaderOnly *bool `yaml:"fast_fail_header_only" mapstructure:"fast_fail_header_only" json:"fast_fail_header_only"`
+	// ShowNoStreamsVideo when true returns a short placeholder video stream
+	// instead of an empty list when no streams are available. Defaults to true.
+	ShowNoStreamsVideo *bool `yaml:"show_no_streams_video" mapstructure:"show_no_streams_video" json:"show_no_streams_video,omitempty"`
 	// BaseURL is the public base URL used when building Stremio stream links
 	// (e.g. "https://altmount.example.com"). Falls back to the auto-detected
 	// request origin when not set.
@@ -304,6 +308,15 @@ func (s StremioConfig) EffectiveFastFailHeaderOnly() bool {
 		return true
 	}
 	return *s.FastFailHeaderOnly
+}
+
+// EffectiveShowNoStreamsVideo reports whether Stremio stream responses should include a
+// placeholder video when no streams are available. Defaults to true.
+func (s StremioConfig) EffectiveShowNoStreamsVideo() bool {
+	if s.ShowNoStreamsVideo == nil {
+		return true
+	}
+	return *s.ShowNoStreamsVideo
 }
 
 // AuthConfig represents authentication configuration
@@ -1017,14 +1030,17 @@ func (c *Config) Validate() error {
 
 		// Validate categories if provided
 		categoryNames := make(map[string]bool)
-		for i, category := range c.SABnzbd.Categories {
+		for i := range c.SABnzbd.Categories {
+			category := &c.SABnzbd.Categories[i]
+			category.Name = strings.TrimSpace(category.Name)
 			if category.Name == "" {
 				return fmt.Errorf("sabnzbd category %d: name cannot be empty", i)
 			}
-			if categoryNames[category.Name] {
+			nameKey := strings.ToLower(category.Name)
+			if categoryNames[nameKey] {
 				return fmt.Errorf("sabnzbd category %d: duplicate category name '%s'", i, category.Name)
 			}
-			categoryNames[category.Name] = true
+			categoryNames[nameKey] = true
 		}
 
 		// Validate fallback configuration if host is provided
@@ -1037,6 +1053,24 @@ func (c *Config) Validate() error {
 			if c.SABnzbd.FallbackAPIKey == "" {
 				slog.Warn("SABnzbd fallback_host is set but fallback_api_key is empty")
 			}
+		}
+	}
+
+	for pattern := range c.Stremio.Prowlarr.CustomScores {
+		if _, err := regexp.Compile("(?i)" + pattern); err != nil {
+			return fmt.Errorf("stremio prowlarr custom_scores pattern %q is invalid: %w", pattern, err)
+		}
+	}
+	for i, format := range c.Stremio.Scoring.CustomFormats {
+		if format.Enabled && format.PatternType != "token" && strings.TrimSpace(format.Pattern) != "" {
+			if _, err := regexp.Compile(format.Pattern); err != nil {
+				return fmt.Errorf("stremio scoring custom_formats[%d] pattern is invalid: %w", i, err)
+			}
+		}
+	}
+	if strings.TrimSpace(c.Stremio.Scoring.ExcludeRegex) != "" {
+		if _, err := regexp.Compile(c.Stremio.Scoring.ExcludeRegex); err != nil {
+			return fmt.Errorf("stremio scoring exclude_regex is invalid: %w", err)
 		}
 	}
 
@@ -1615,6 +1649,7 @@ func DefaultConfig(configDir ...string) *Config {
 	loginRequired := true   // Require login by default
 	stremioEnabled := false // Stremio endpoint disabled by default
 	stremioFastFailHeaderOnly := true
+	stremioShowNoStreamsVideo := true
 	prowlarrEnabled := false        // Prowlarr integration disabled by default
 	watchIntervalSeconds := 10      // Default watch interval
 	failedItemRetentionHours := 24  // Default: auto-remove failed items after 24 hours
@@ -1667,6 +1702,7 @@ func DefaultConfig(configDir ...string) *Config {
 			FailedReleaseTTLHours: 24,
 			MaxFallbackReleases:   2,
 			FastFailHeaderOnly:    &stremioFastFailHeaderOnly,
+			ShowNoStreamsVideo:    &stremioShowNoStreamsVideo,
 			Prowlarr: ProwlarrConfig{
 				Enabled:    &prowlarrEnabled,
 				Host:       "http://localhost:9696",

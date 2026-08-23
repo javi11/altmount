@@ -1,4 +1,5 @@
-import { Eye, Globe, Radio, Rocket, ShieldCheck, Zap } from "lucide-react";
+import { Database, Eye, Globe, MonitorPlay, Radio, Rocket, ShieldCheck, Zap } from "lucide-react";
+import { useEffect, useState } from "react";
 import type { StremioConfig } from "../../../types/config";
 
 interface StreamRoutingCardProps {
@@ -14,11 +15,27 @@ export function StreamRoutingCard({
 }: StreamRoutingCardProps) {
 	const directStream = config.direct_stream ?? true;
 	const showCached = config.show_cached_indicator ?? true;
+	const reuseLibrary = config.include_library_streams ?? true;
 	const fallbackTimeout = config.fallback_timeout_ms ?? 3500;
 	const nzbTtlHours = config.nzb_ttl_hours ?? 24;
 	const failedTtlHours = config.failed_release_ttl_hours ?? 24;
 	const maxFallbacks = config.max_fallback_releases ?? 2;
 	const fastFailHeader = config.fast_fail_header_only ?? true;
+	const showNoStreamsVideo = config.show_no_streams_video ?? true;
+
+	const [libraryCount, setLibraryCount] = useState<number | null>(null);
+
+	useEffect(() => {
+		fetch("/api/system/stats")
+			.then((res) => (res.ok ? res.json() : null))
+			.then((data) => {
+				const total = data?.data?.health?.total_files ?? data?.data?.health?.total;
+				if (typeof total === "number" && total > 0) {
+					setLibraryCount(total);
+				}
+			})
+			.catch(() => {});
+	}, []);
 
 	return (
 		<div className="min-w-0 overflow-hidden rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6 shadow-sm">
@@ -63,7 +80,7 @@ export function StreamRoutingCard({
 				</fieldset>
 
 				{/* Feature Toggles */}
-				<div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+				<div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
 					<div className="flex items-start justify-between gap-3 rounded-xl border border-base-300 bg-base-100/70 p-4">
 						<div className="min-w-0 flex-1">
 							<div className="flex items-center gap-2">
@@ -99,6 +116,48 @@ export function StreamRoutingCard({
 							checked={showCached}
 							disabled={isReadOnly}
 							onChange={(e) => onChange({ show_cached_indicator: e.target.checked })}
+						/>
+					</div>
+
+					<div className="flex items-start justify-between gap-3 rounded-xl border border-base-300 bg-base-100/70 p-4">
+						<div className="min-w-0 flex-1">
+							<div className="flex items-center gap-2">
+								<Database className="h-4 w-4 text-secondary" />
+								<span className="font-semibold text-sm">Reuse Library Releases</span>
+							</div>
+							<p className="mt-1 text-base-content/60 text-xs">
+								Matches Stremio against{" "}
+								{libraryCount
+									? `all ${libraryCount.toLocaleString()} files`
+									: "all completed files"}{" "}
+								in your library (Sonarr, Radarr, SABnzbd) for instant 0s playback.
+							</p>
+						</div>
+						<input
+							type="checkbox"
+							className="toggle toggle-primary shrink-0"
+							checked={reuseLibrary}
+							disabled={isReadOnly}
+							onChange={(e) => onChange({ include_library_streams: e.target.checked })}
+						/>
+					</div>
+
+					<div className="flex items-start justify-between gap-3 rounded-xl border border-base-300 bg-base-100/70 p-4">
+						<div className="min-w-0 flex-1">
+							<div className="flex items-center gap-2">
+								<MonitorPlay className="h-4 w-4 text-info" />
+								<span className="font-semibold text-sm">No Streams Video</span>
+							</div>
+							<p className="mt-1 text-base-content/60 text-xs">
+								Returns a short placeholder video instead of an empty list when nothing is found.
+							</p>
+						</div>
+						<input
+							type="checkbox"
+							className="toggle toggle-primary shrink-0"
+							checked={showNoStreamsVideo}
+							disabled={isReadOnly}
+							onChange={(e) => onChange({ show_no_streams_video: e.target.checked })}
 						/>
 					</div>
 				</div>

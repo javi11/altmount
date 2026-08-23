@@ -699,6 +699,8 @@ export interface TrashCustomFormat {
 	score: number;
 	enabled: boolean;
 	isCustom: boolean;
+	pattern_type?: "regex" | "token";
+	is_custom?: boolean;
 	invert?: boolean;
 }
 
@@ -764,6 +766,7 @@ export interface StremioConfig {
 	max_fallback_releases: number;
 	include_library_streams?: boolean;
 	fast_fail_header_only?: boolean;
+	show_no_streams_video?: boolean;
 	prowlarr: ProwlarrConfig;
 }
 

@@ -37,6 +37,31 @@ type Result struct {
 	Category    int
 }
 
+// DownloadNZB downloads an NZB from this configured indexer without sending
+// credentials belonging to another provider.
+func (c *Client) DownloadNZB(ctx context.Context, downloadURL string, userAgent string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("newsnab: create download request failed: %w", err)
+	}
+	if userAgent != "" {
+		req.Header.Set("User-Agent", userAgent)
+	}
+	client := *c.httpClient
+	client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+		return fmt.Errorf("newsnab: download redirect is not allowed")
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("newsnab: download request failed (%s): %w", c.config.Name, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("newsnab: download returned HTTP %d (%s)", resp.StatusCode, c.config.Name)
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, 50*1024*1024))
+}
+
 // Client interacts with a Newsnab-compatible indexer API.
 type Client struct {
 	config     IndexerConfig

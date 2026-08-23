@@ -484,6 +484,15 @@ func createHTTPServer(apiServer *api.Server, app *fiber.App, webdavHandler *webd
 			return
 		}
 
+		// Long-lived streaming responses must not inherit the server-wide
+		// WriteTimeout safety net: it hard-kills every media transfer at
+		// exactly 30 minutes regardless of activity, forcing clients into a
+		// mid-playback reconnect. Clear the write deadline for media streams,
+		// WebDAV reads, and SSE endpoints before dispatching.
+		if isStreamingRoute(path) {
+			clearWriteDeadline(w)
+		}
+
 		// Route stream requests directly to stream handler
 		if strings.HasPrefix(path, "/api/files/stream") {
 			streamHTTPHandler.ServeHTTP(w, r)
@@ -524,4 +533,21 @@ func createHTTPServer(apiServer *api.Server, app *fiber.App, webdavHandler *webd
 		WriteTimeout: time.Minute * 30,
 		ReadTimeout:  time.Minute * 5,
 	}
+}
+
+// isStreamingRoute reports whether the request path serves a long-lived
+// response (media transfer, WebDAV read, or SSE feed) that must outlive the
+// server-wide WriteTimeout safety net.
+func isStreamingRoute(path string) bool {
+	return strings.HasPrefix(path, "/api/files/stream") ||
+		strings.HasPrefix(path, "/webdav") ||
+		path == "/api/logs/stream" ||
+		path == "/api/queue/stream" ||
+		path == "/api/health/stream"
+}
+
+// clearWriteDeadline removes the connection write deadline so streaming
+// responses are never hard-killed mid-transfer by the http.Server timeout.
+func clearWriteDeadline(w http.ResponseWriter) {
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
 }

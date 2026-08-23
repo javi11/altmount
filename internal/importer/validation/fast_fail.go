@@ -2,7 +2,9 @@ package validation
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"math/rand"
 	"time"
 
@@ -126,12 +128,21 @@ func FastFailReleaseProbe(
 
 	// Stat the sample via a single bulk sweep, cancelling the rest on the
 	// first miss. Infrastructure failures are handled above, so any error
-	// streamed back here indicates an unreachable segment.
-	statCtx, cancel := context.WithTimeout(ctx, pool.StatManyTimeout(len(ids), maxConnections, timeout))
+	// streamed back here indicates an unreachable segment. Cap probe timeout to
+	// 2 seconds per item so probe sweeps on dead releases finish rapidly.
+	probeTimeout := timeout
+	if probeTimeout > 2*time.Second {
+		probeTimeout = 2 * time.Second
+	}
+	statCtx, cancel := context.WithTimeout(ctx, pool.StatManyTimeout(len(ids), maxConnections, probeTimeout))
 	defer cancel()
 
 	for r := range usenetPool.StatMany(statCtx, ids, nntppool.StatManyOptions{Concurrency: maxConnections}) {
 		if r.Err != nil {
+			if errors.Is(r.Err, context.Canceled) || errors.Is(r.Err, context.DeadlineExceeded) || ctx.Err() != nil {
+				return false, ctx.Err()
+			}
+			slog.WarnContext(ctx, "FastFailReleaseProbe segment stat failed", "segment_id", r.MessageID, "error", r.Err)
 			cancel()
 			return true, nil
 		}
@@ -283,8 +294,15 @@ func FastFailCheckFiles(
 		}
 		cancel()
 
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+
 		for _, job := range toCheck {
 			if statErr := errByID[job.segID]; statErr != nil {
+				if errors.Is(statErr, context.Canceled) || errors.Is(statErr, context.DeadlineExceeded) {
+					return nil, statErr
+				}
 				results[job.fileIdx].Broken = true
 				results[job.fileIdx].MissingSegmentIDs = append(results[job.fileIdx].MissingSegmentIDs, job.segID)
 				if job.groupKey != "" {

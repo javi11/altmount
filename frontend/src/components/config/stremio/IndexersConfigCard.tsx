@@ -1,6 +1,5 @@
 import {
 	CheckCircle,
-	Film,
 	Globe,
 	Loader2,
 	Plus,
@@ -8,7 +7,6 @@ import {
 	Server,
 	ShieldCheck,
 	Trash2,
-	Tv,
 	XCircle,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -332,15 +330,13 @@ export function IndexersConfigCard({
 
 					<div className="flex flex-wrap items-center gap-2">
 						<div className="flex items-center gap-1.5 rounded-lg border border-base-300 bg-base-200/60 px-3 py-1.5 text-xs">
-							<Tv className="h-3.5 w-3.5 text-base-content/50" aria-hidden="true" />
-							<span className="text-base-content/50">TV Queries:</span>
+							<span className="text-base-content/50">📺 TV Queries:</span>
 							<span className="font-mono font-semibold text-primary">
 								{userAgentInfo?.tv_user_agent || "Sonarr/4.1.1.824 (alpine 3.23.3)"}
 							</span>
 						</div>
 						<div className="flex items-center gap-1.5 rounded-lg border border-base-300 bg-base-200/60 px-3 py-1.5 text-xs">
-							<Film className="h-3.5 w-3.5 text-base-content/50" aria-hidden="true" />
-							<span className="text-base-content/50">Movie Queries:</span>
+							<span className="text-base-content/50">🎬 Movie Queries:</span>
 							<span className="font-mono font-semibold text-secondary">
 								{userAgentInfo?.movie_user_agent || "Radarr/6.5.1.2032 (alpine 3.23.3)"}
 							</span>

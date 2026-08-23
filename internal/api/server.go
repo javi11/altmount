@@ -73,6 +73,11 @@ type Server struct {
 
 	// stremioPlayGroup coalesces concurrent Stremio plays of the same title (download once).
 	stremioPlayGroup singleflight.Group
+	// stremioContentGroup closes the check-then-enqueue race across different
+	// releases for the same movie or episode.
+	stremioContentGroup singleflight.Group
+	stremioReleaseMu    sync.Mutex
+	stremioReleaseRefs  map[string]stremioReleaseRef
 	// stremioFailures records releases that failed without leaving a 'failed' queue row,
 	// so they stop being offered in the stream list.
 	stremioFailures *stremioFailureCache
@@ -104,6 +109,7 @@ func NewServer(
 	server := &Server{
 		config:              config,
 		stremioFailures:     newStremioFailureCache(),
+		stremioReleaseRefs:  make(map[string]stremioReleaseRef),
 		queueRepo:           queueRepo,
 		healthRepo:          healthRepo,
 		authService:         authService,
@@ -180,6 +186,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	stremioGroup.Get("/:key/manifest.json", s.handleStremioManifest)
 	stremioGroup.Get("/:key/stream/:type/:id.json", s.handleStremioAddonStream)
 	stremioGroup.Get("/:key/play", s.handleStremioAddonPlay)
+	stremioGroup.Get("/:key/no-streams.mp4", s.handleStremioNoStreamsVideo)
 
 	api := app.Group(s.config.Prefix)
 

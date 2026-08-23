@@ -43,6 +43,11 @@ function initializeStremioFormData(config: ConfigResponse): StremioConfig {
 	const prowlarr = stremio?.prowlarr ?? DEFAULT_PROWLARR;
 
 	const scoring = hydrateScoringFromProwlarr(stremio?.scoring, prowlarr);
+	scoring.custom_formats = scoring.custom_formats.map((format) => ({
+		...format,
+		patternType: format.patternType ?? format.pattern_type ?? "regex",
+		isCustom: format.isCustom ?? format.is_custom ?? false,
+	}));
 	const indexers: StremioIndexersConfig = stremio?.indexers || {
 		provider: "prowlarr",
 		user_agent_mode: "auto",
@@ -66,6 +71,7 @@ function initializeStremioFormData(config: ConfigResponse): StremioConfig {
 		max_fallback_releases: stremio?.max_fallback_releases ?? 2,
 		fast_fail_header_only: stremio?.fast_fail_header_only ?? true,
 		include_library_streams: stremio?.include_library_streams ?? true,
+		show_no_streams_video: stremio?.show_no_streams_video ?? true,
 		indexers,
 		scoring,
 		prowlarr: {
@@ -154,8 +160,7 @@ export function StremioConfigSection({
 					);
 					localStorage.setItem("altmount_stremio_preset", formData.scoring?.preset || "custom");
 				} catch {
-					// Non-critical local cache (e.g. private browsing or quota exceeded);
-					// the authoritative copy is still persisted to the backend below.
+					// ignore
 				}
 			}
 
