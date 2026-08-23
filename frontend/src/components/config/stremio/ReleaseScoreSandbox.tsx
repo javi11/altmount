@@ -435,7 +435,11 @@ export function ReleaseScoreSandbox({ scoringConfig }: ReleaseScoreSandboxProps)
 
 													{/* Details Row: Indexer, Size, Date, Formats, Languages */}
 													<div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-														{release.Indexer && (
+														{release.Source === "library" ? (
+															<span className="badge badge-primary badge-xs font-semibold text-[10px]">
+																⚡ Local Library (Instant)
+															</span>
+														) : release.Indexer && (
 															<span className="badge badge-ghost badge-xs font-medium font-mono text-base-content/70">
 																{release.Indexer}
 																{release.Source && ` [${release.Source}]`}

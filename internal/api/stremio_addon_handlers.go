@@ -2004,5 +2004,90 @@ func (s *Server) handleInspectStremioSearch(c *fiber.Ctx) error {
 		return RespondInternalError(c, "Failed to execute indexer search inspection", err.Error())
 	}
 
+	// If library reuse is enabled, query local file_health and prepend local library files
+	if cfg.Stremio.EffectiveIncludeLibraryStreams() && s.healthRepo != nil {
+		baseURL := resolveBaseURL(c, cfg.Stremio.BaseURL)
+		selector := &stremioEpisodeSelector{Season: req.Season, Episode: req.Episode}
+		var libraryReleases []stremio.ScoredRelease
+
+		downloadKey := ""
+		if s.userRepo != nil {
+			if users, err := s.userRepo.GetAllUsers(ctx); err == nil {
+				for _, u := range users {
+					if u != nil && u.APIKey != nil && *u.APIKey != "" {
+						downloadKey = auth.HashAPIKey(*u.APIKey)
+						if u.IsAdmin {
+							break
+						}
+					}
+				}
+			}
+		}
+
+		if req.Type == "movie" {
+			tmdbID, movieTitle, movieYear, _ := resolveMovieMetadataFromIMDb(ctx, req.IMDbID)
+			if movieTitle == "" {
+				movieTitle = searchTitle
+			}
+			yearNum, _ := strconv.Atoi(movieYear)
+			if healthyFiles, err := s.healthRepo.FindHealthyFilesForMovie(ctx, movieTitle, movieYear, tmdbID); err == nil {
+				for _, h := range healthyFiles {
+					if h != nil && h.FilePath != "" && isMediaExtension(filepath.Ext(h.FilePath)) && !isSampleFile(h.FilePath) {
+						matchPath := h.FilePath
+						if h.LibraryPath != nil && *h.LibraryPath != "" {
+							matchPath = *h.LibraryPath
+						}
+						if movieTitle != "" && !stremio.MatchesMovie(filepath.Base(matchPath), movieTitle, yearNum) && !stremio.MatchesMovie(matchPath, movieTitle, yearNum) {
+							continue
+						}
+						eval := stremio.EvaluateRelease(filepath.Base(matchPath), &coordCfg.Scoring)
+						eval.Score += 10000
+						eval.Excluded = false
+						eval.Source = "library"
+						eval.Indexer = "Local Library"
+						eval.IndexerID = "library"
+						eval.DownloadURL = baseURL + "/api/files/stream?path=" + url.QueryEscape(h.FilePath) + "&download_key=" + url.QueryEscape(downloadKey)
+						libraryReleases = append(libraryReleases, eval)
+					}
+				}
+			}
+		} else if req.Type == "series" {
+			tvdbIDStr, seriesTitle, _ := resolveSeriesMetadataFromIMDb(ctx, req.IMDbID)
+			if seriesTitle == "" {
+				seriesTitle = searchTitle
+			}
+			tvdbID, _ := strconv.Atoi(tvdbIDStr)
+			if healthyFiles, err := s.healthRepo.FindHealthyFilesForSeries(ctx, seriesTitle, tvdbID); err == nil {
+				for _, h := range healthyFiles {
+					if h != nil && h.FilePath != "" && isMediaExtension(filepath.Ext(h.FilePath)) && !isSampleFile(h.FilePath) {
+						matchPath := h.FilePath
+						if h.LibraryPath != nil && *h.LibraryPath != "" {
+							matchPath = *h.LibraryPath
+						}
+						if selector.matches(matchPath) || selector.matches(h.FilePath) {
+							if seriesTitle != "" && !stremio.MatchesSeries(filepath.Base(matchPath), seriesTitle, req.Season, req.Episode, 0) && !stremio.MatchesSeries(matchPath, seriesTitle, req.Season, req.Episode, 0) {
+								continue
+							}
+							eval := stremio.EvaluateRelease(filepath.Base(matchPath), &coordCfg.Scoring)
+							eval.Score += 10000
+							eval.Excluded = false
+							eval.Source = "library"
+							eval.Indexer = "Local Library"
+							eval.IndexerID = "library"
+							eval.DownloadURL = baseURL + "/api/files/stream?path=" + url.QueryEscape(h.FilePath) + "&download_key=" + url.QueryEscape(downloadKey)
+							libraryReleases = append(libraryReleases, eval)
+						}
+					}
+				}
+			}
+		}
+
+		if len(libraryReleases) > 0 {
+			res.Releases = append(libraryReleases, res.Releases...)
+			res.ActiveResults += len(libraryReleases)
+			res.TotalResults += len(libraryReleases)
+		}
+	}
+
 	return RespondSuccess(c, res)
 }
