@@ -252,6 +252,10 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 		if err == nil && newConfig.WebDAV.Password == "" {
 			newConfig.WebDAV.Password = currentConfig.WebDAV.Password
 		}
+		// Preserve existing Prowlarr and Newsnab credentials when patching the Stremio section.
+		if err == nil && section == "stremio" {
+			preserveMaskedStremioCredentials(currentConfig, newConfig)
+		}
 	default:
 		return RespondValidationError(c, fmt.Sprintf("Unknown configuration section: %s", section), "INVALID_SECTION")
 	}
