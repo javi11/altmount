@@ -740,14 +740,14 @@ export interface StremioIndexersConfig {
 }
 
 export interface ScoredReleaseItem {
-	Title: string;
-	DownloadURL: string;
-	Size: number;
-	PublishDate: string;
-	Indexer: string;
-	IndexerID: string;
-	Source: string;
-	GUID: string;
+	title: string;
+	download_url: string;
+	size: number;
+	publish_date: string;
+	indexer: string;
+	indexer_id: string;
+	source: string;
+	guid: string;
 	score: number;
 	matched_formats: string[];
 	matched_languages: string[];

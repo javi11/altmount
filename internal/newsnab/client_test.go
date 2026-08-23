@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -97,4 +98,85 @@ func TestNewsnabClient_SearchTV_XML(t *testing.T) {
 	assert.Len(t, results, 1)
 	assert.Equal(t, "Arcane.S02E01.2160p.HDR.DDP5.1.Atmos.H.265-FLUX", results[0].Title)
 	assert.Equal(t, int64(2500000000), results[0].Size)
+}
+
+func TestNewsnabClient_SearchGeneral_NZBGeek_JSON(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "search", r.URL.Query().Get("t"))
+		assert.Equal(t, "Gladiator II", r.URL.Query().Get("q"))
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"@attributes": {"version": "1.0"},
+			"channel": {
+				"title": "api.nzbgeek.info",
+				"item": [
+					{
+						"title": "Gladiator.II.2024.720p.AMZN.WEB-DL.DDP5.1.H.264-ViSTA",
+						"guid": "https://nzbgeek.info/geekseek.php?guid=1fc90df05debd7d37615bc1638aa3389",
+						"link": "https://api.nzbgeek.info/api?t=get&id=1fc90df05debd7d37615bc1638aa3389&apikey=testkey",
+						"pubDate": "Thu, 13 Aug 2026 01:18:34 +0000",
+						"enclosure": {
+							"@attributes": {
+								"url": "http://api.nzbgeek.info/api?t=get&id=1fc90df05debd7d37615bc1638aa3389&apikey=testkey",
+								"length": "5471988000",
+								"type": "application/x-nzb"
+							}
+						},
+						"attr": [
+							{"@attributes": {"name": "category", "value": "2000"}},
+							{"@attributes": {"name": "size", "value": "5471988000"}}
+						]
+					}
+				]
+			}
+		}`))
+	}))
+	defer ts.Close()
+
+	client := NewClient(IndexerConfig{
+		ID:             "nzbgeek",
+		Name:           "nzbgeek",
+		URL:            ts.URL,
+		APIKey:         "testkey",
+		TimeoutSeconds: 2,
+		Enabled:        true,
+	}, ts.Client())
+
+	results, err := client.SearchGeneral(context.Background(), "Gladiator II", []int{2000, 2010, 2030}, "Altmount/1.0")
+	assert.NoError(t, err)
+	assert.Len(t, results, 1)
+	assert.Equal(t, "Gladiator.II.2024.720p.AMZN.WEB-DL.DDP5.1.H.264-ViSTA", results[0].Title)
+	assert.Equal(t, int64(5471988000), results[0].Size)
+	assert.Equal(t, "http://api.nzbgeek.info/api?t=get&id=1fc90df05debd7d37615bc1638aa3389&apikey=testkey", results[0].DownloadURL)
+}
+
+func TestParseNewsnabTime(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   string
+		wantOK  bool
+		wantUTC string
+	}{
+		{"RFC1123Z", "Thu, 13 Aug 2026 01:18:34 +0000", true, "2026-08-13T01:18:34Z"},
+		{"RFC1123 GMT", "Thu, 13 Aug 2026 01:18:34 GMT", true, "2026-08-13T01:18:34Z"},
+		{"RFC3339", "2026-08-13T01:18:34Z", true, "2026-08-13T01:18:34Z"},
+		{"RFC3339 with offset", "2026-08-13T03:18:34+02:00", true, "2026-08-13T01:18:34Z"},
+		{"ISO without zone", "2026-08-13T01:18:34", true, "2026-08-13T01:18:34Z"},
+		{"SQL style", "2026-08-13 01:18:34", true, "2026-08-13T01:18:34Z"},
+		{"empty", "", false, ""},
+		{"garbage", "not-a-date", false, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseNewsnabTime(tt.value)
+			if !tt.wantOK {
+				assert.True(t, got.IsZero(), "expected zero time for %q", tt.value)
+				return
+			}
+			assert.False(t, got.IsZero())
+			assert.Equal(t, tt.wantUTC, got.UTC().Format(time.RFC3339))
+		})
+	}
 }

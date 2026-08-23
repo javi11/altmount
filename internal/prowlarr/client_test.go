@@ -63,6 +63,15 @@ func TestMatchKeywordOrPattern_LegitimateMatches(t *testing.T) {
 		// Explicit regex patterns
 		{"Movie.2024.TS.1080p", `\b(cam|ts)\b`, true},
 		{"Infidelity.in.Suburbia.2017.1080p.BluRay.REMUX.AVC.DTS-HD.MA.5.1-EPSiLON", `\b(cam|ts)\b`, false},
+
+		// Slash-delimited regex with flags
+		{"Movie.2024.CAM.1080p", `/cam/i`, true},
+		{"Movie.2024.CAM.1080p", `/^movie/i`, true},
+		{"Movie.2024.CAM.1080p", `/^cam/`, false},
+		{"Movie.2024.CAM.1080p", `/cam/m`, true},
+
+		// Invalid slash-delimited regex must fail closed (no literal fallback)
+		{"Movie.2024.[unclosed.1080p", `/[unclosed/`, false},
 	}
 
 	for _, tt := range tests {

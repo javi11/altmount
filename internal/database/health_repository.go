@@ -2461,15 +2461,14 @@ func (r *HealthRepository) FindHealthyFilesForMovie(ctx context.Context, title s
 		return nil, nil
 	}
 
+	titlePattern := buildTitleLikePattern(cleanTitle)
 	var query string
 	var args []interface{}
 	if year != "" {
-		titlePattern := "%" + escapeLikePrefix(cleanTitle) + "%"
 		yearPattern := "%" + escapeLikePrefix(year) + "%"
 		query = fileHealthSelectColumns + " WHERE status = 'healthy' AND (file_path LIKE ? ESCAPE '\\' OR library_path LIKE ? ESCAPE '\\') AND (file_path LIKE ? ESCAPE '\\' OR library_path LIKE ? ESCAPE '\\') ORDER BY id DESC LIMIT 50"
 		args = append(args, titlePattern, titlePattern, yearPattern, yearPattern)
 	} else {
-		titlePattern := "%" + escapeLikePrefix(cleanTitle) + "%"
 		query = fileHealthSelectColumns + " WHERE status = 'healthy' AND (file_path LIKE ? ESCAPE '\\' OR library_path LIKE ? ESCAPE '\\') ORDER BY id DESC LIMIT 50"
 		args = append(args, titlePattern, titlePattern)
 	}
@@ -2489,6 +2488,26 @@ func (r *HealthRepository) FindHealthyFilesForMovie(ctx context.Context, title s
 		}
 	}
 	return results, rows.Err()
+}
+
+// buildTitleLikePattern converts space-separated title words into a
+// %-separated SQL LIKE wildcard pattern for robust matching.
+//
+// Note: the pattern is word-order sensitive — "Movie, The" will not match
+// release names ordered as "The.Movie". Callers must guard against empty
+// titles; an empty input yields an empty pattern (matches nothing) rather
+// than a bare "%" (which would match every row).
+func buildTitleLikePattern(title string) string {
+	clean := strings.TrimSpace(title)
+	if clean == "" {
+		return ""
+	}
+	words := strings.Fields(clean)
+	escapedWords := make([]string, len(words))
+	for i, w := range words {
+		escapedWords[i] = escapeLikePrefix(w)
+	}
+	return "%" + strings.Join(escapedWords, "%") + "%"
 }
 
 // FindHealthyFilesForSeries returns healthy library files matching a TV series by TVDB ID or series title.
@@ -2521,7 +2540,7 @@ func (r *HealthRepository) FindHealthyFilesForSeries(ctx context.Context, series
 		return nil, nil
 	}
 
-	titlePattern := "%" + escapeLikePrefix(cleanTitle) + "%"
+	titlePattern := buildTitleLikePattern(cleanTitle)
 	query := fileHealthSelectColumns + " WHERE status = 'healthy' AND (file_path LIKE ? ESCAPE '\\' OR library_path LIKE ? ESCAPE '\\') ORDER BY id DESC LIMIT 100"
 	rows, err := r.db.QueryContext(ctx, query, titlePattern, titlePattern)
 	if err != nil {

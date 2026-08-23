@@ -10,7 +10,7 @@ import {
 	XCircle,
 	Zap,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { apiClient } from "../../../api/client";
 import type { ScoredReleaseItem, StreamScoringConfig } from "../../../types/config";
 import { LoadingSpinner } from "../../ui/LoadingSpinner";
@@ -90,6 +90,9 @@ export function ReleaseScoreSandbox({ scoringConfig }: ReleaseScoreSandboxProps)
 	const [searchResults, setSearchResults] = useState<ScoredReleaseItem[] | null>(null);
 	const [activeFilterTab, setActiveFilterTab] = useState<"all" | "active" | "discarded">("all");
 	const [searchFilterText, setSearchFilterText] = useState("");
+	// Monotonic request counter so responses from stale searches are ignored
+	// when a newer search has already been issued.
+	const searchSeqRef = useRef(0);
 
 	const evaluation = useMemo(() => {
 		return evaluateRelease(testTitle, scoringConfig);
@@ -99,6 +102,7 @@ export function ReleaseScoreSandbox({ scoringConfig }: ReleaseScoreSandboxProps)
 		const q = searchQuery.trim();
 		if (!q) return;
 
+		const seq = ++searchSeqRef.current;
 		setIsSearching(true);
 		setSearchError(null);
 		try {
@@ -110,13 +114,17 @@ export function ReleaseScoreSandbox({ scoringConfig }: ReleaseScoreSandboxProps)
 				timeout_ms: 6000,
 				scoring: scoringConfig, // evaluate against live/draft rules
 			});
+			if (seq !== searchSeqRef.current) return;
 			setSearchResults(res.releases || []);
 			setActiveFilterTab("all");
 		} catch (err) {
+			if (seq !== searchSeqRef.current) return;
 			setSearchError(err instanceof Error ? err.message : "Failed to execute media search");
 			setSearchResults(null);
 		} finally {
-			setIsSearching(false);
+			if (seq === searchSeqRef.current) {
+				setIsSearching(false);
+			}
 		}
 	};
 
@@ -134,8 +142,8 @@ export function ReleaseScoreSandbox({ scoringConfig }: ReleaseScoreSandboxProps)
 			if (searchFilterText) {
 				const term = searchFilterText.toLowerCase();
 				return (
-					item.Title.toLowerCase().includes(term) ||
-					item.Indexer?.toLowerCase().includes(term) ||
+					item.title.toLowerCase().includes(term) ||
+					item.indexer?.toLowerCase().includes(term) ||
 					item.exclude_reason?.toLowerCase().includes(term) ||
 					item.matched_formats.some((f) => f.toLowerCase().includes(term))
 				);
@@ -405,7 +413,7 @@ export function ReleaseScoreSandbox({ scoringConfig }: ReleaseScoreSandboxProps)
 								<div className="space-y-2.5">
 									{filteredReleases.map((release, idx) => (
 										<div
-											key={`${release.GUID || release.DownloadURL || idx}-${release.Title}`}
+											key={`${release.guid || release.download_url || idx}-${release.title}`}
 											className={`group relative rounded-xl border p-3.5 transition-all ${
 												release.excluded
 													? "border-error/30 bg-error/5 hover:border-error/60"
@@ -427,30 +435,36 @@ export function ReleaseScoreSandbox({ scoringConfig }: ReleaseScoreSandboxProps)
 																	? "text-base-content/60 line-through"
 																	: "text-base-content"
 															}`}
-															title={release.Title}
+															title={release.title}
 														>
-															{release.Title}
+															{release.title}
 														</p>
 													</div>
 
 													{/* Details Row: Indexer, Size, Date, Formats, Languages */}
 													<div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-														{release.Indexer && (
-															<span className="badge badge-ghost badge-xs font-medium font-mono text-base-content/70">
-																{release.Indexer}
-																{release.Source && ` [${release.Source}]`}
+														{release.source === "library" ? (
+															<span className="badge badge-primary badge-xs font-semibold text-[10px]">
+																⚡ Local Library (Instant)
 															</span>
+														) : (
+															release.indexer && (
+																<span className="badge badge-ghost badge-xs font-medium font-mono text-base-content/70">
+																	{release.indexer}
+																	{release.source && ` [${release.source}]`}
+																</span>
+															)
 														)}
 
-														{release.Size > 0 && (
+														{release.size > 0 && (
 															<span className="badge badge-ghost badge-xs font-mono text-base-content/60">
-																{formatBytes(release.Size)}
+																{formatBytes(release.size)}
 															</span>
 														)}
 
-														{release.PublishDate && (
+														{release.publish_date && (
 															<span className="text-[10px] text-base-content/50">
-																{formatDate(release.PublishDate)}
+																{formatDate(release.publish_date)}
 															</span>
 														)}
 
@@ -512,7 +526,7 @@ export function ReleaseScoreSandbox({ scoringConfig }: ReleaseScoreSandboxProps)
 													{/* Drill-down action */}
 													<button
 														type="button"
-														onClick={() => handleInspectInSandbox(release.Title)}
+														onClick={() => handleInspectInSandbox(release.title)}
 														className="btn btn-ghost btn-xs gap-1 text-[11px] text-primary opacity-0 transition-opacity group-hover:opacity-100"
 														title="Inspect release title breakdown in sandbox"
 													>

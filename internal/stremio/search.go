@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -222,52 +221,89 @@ func (sc *SearchCoordinator) SearchInspect(ctx context.Context, params SearchPar
 		}
 	}
 
-	// 2. Dispatch Direct Newsnab Searches
+	// 2. Dispatch Direct Newsnab Searches concurrently
 	if (provider == "newsnab" || provider == "both") && len(sc.newsnabClients) > 0 {
 		for _, client := range sc.newsnabClients {
 			c := client
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				var nResults []newsnab.Result
-				var err error
-
-				if strings.EqualFold(params.Type, "movie") {
-					if params.IMDBID != "" {
-						nResults, err = c.SearchMovie(searchCtx, params.IMDBID, nil, userAgent)
-					}
-					if params.Title != "" {
-						if generalResults, gErr := c.SearchGeneral(searchCtx, params.Title, []int{2000, 2010, 2030, 2040, 2045, 2060}, userAgent); gErr == nil && len(generalResults) > 0 {
-							nResults = append(nResults, generalResults...)
+			if strings.EqualFold(params.Type, "movie") {
+				if params.IMDBID != "" {
+					wg.Add(1)
+					go func() {
+						defer wg.Done()
+						res, err := c.SearchMovie(searchCtx, params.IMDBID, nil, userAgent)
+						if err != nil {
+							slog.WarnContext(searchCtx, "Newsnab movie ID search failed", "indexer", c.Name(), "error", err, "imdb_id", params.IMDBID)
+						} else {
+							slog.InfoContext(searchCtx, "Newsnab movie ID search returned results", "indexer", c.Name(), "count", len(res), "imdb_id", params.IMDBID)
 						}
-					}
-				} else {
-					nResults, err = c.SearchTV(searchCtx, params.IMDBID, params.TVDBID, params.Title, params.Season, params.Episode, nil, userAgent)
-					// Fallback to title query if ID search yielded no results
-					if params.Title != "" && (params.TVDBID != "" || params.IMDBID != "") {
-						if fallbackResults, fbErr := c.SearchTV(searchCtx, "", "", params.Title, params.Season, params.Episode, nil, userAgent); fbErr == nil && len(fallbackResults) > 0 {
-							nResults = append(nResults, fallbackResults...)
+						if err == nil && len(res) > 0 {
+							mu.Lock()
+							for _, r := range res {
+								aggregated = append(aggregated, newsnabToSearchResult(r))
+							}
+							mu.Unlock()
 						}
-					}
+					}()
 				}
-
-				if (err == nil || len(nResults) > 0) && len(nResults) > 0 {
-					mu.Lock()
-					for _, r := range nResults {
-						aggregated = append(aggregated, SearchResult{
-							Title:       r.Title,
-							DownloadURL: r.DownloadURL,
-							Size:        r.Size,
-							PublishDate: r.PublishDate,
-							Indexer:     r.Indexer,
-							IndexerID:   r.IndexerID,
-							GUID:        r.GUID,
-							Source:      "newsnab",
-						})
-					}
-					mu.Unlock()
+				if params.Title != "" {
+					wg.Add(1)
+					go func() {
+						defer wg.Done()
+						res, err := c.SearchGeneral(searchCtx, params.Title, []int{2000, 2010, 2030, 2040, 2045, 2060}, userAgent)
+						if err != nil {
+							slog.WarnContext(searchCtx, "Newsnab movie Title search failed", "indexer", c.Name(), "error", err, "title", params.Title)
+						} else {
+							slog.InfoContext(searchCtx, "Newsnab movie Title search returned results", "indexer", c.Name(), "count", len(res), "title", params.Title)
+						}
+						if err == nil && len(res) > 0 {
+							mu.Lock()
+							for _, r := range res {
+								aggregated = append(aggregated, newsnabToSearchResult(r))
+							}
+							mu.Unlock()
+						}
+					}()
 				}
-			}()
+			} else {
+				if params.IMDBID != "" || params.TVDBID != "" {
+					wg.Add(1)
+					go func() {
+						defer wg.Done()
+						res, err := c.SearchTV(searchCtx, params.IMDBID, params.TVDBID, "", params.Season, params.Episode, nil, userAgent)
+						if err != nil {
+							slog.WarnContext(searchCtx, "Newsnab TV ID search failed", "indexer", c.Name(), "error", err)
+						} else {
+							slog.InfoContext(searchCtx, "Newsnab TV ID search returned results", "indexer", c.Name(), "count", len(res))
+						}
+						if err == nil && len(res) > 0 {
+							mu.Lock()
+							for _, r := range res {
+								aggregated = append(aggregated, newsnabToSearchResult(r))
+							}
+							mu.Unlock()
+						}
+					}()
+				}
+				if params.Title != "" {
+					wg.Add(1)
+					go func() {
+						defer wg.Done()
+						res, err := c.SearchTV(searchCtx, "", "", params.Title, params.Season, params.Episode, nil, userAgent)
+						if err != nil {
+							slog.WarnContext(searchCtx, "Newsnab TV Title search failed", "indexer", c.Name(), "error", err, "title", params.Title)
+						} else {
+							slog.InfoContext(searchCtx, "Newsnab TV Title search returned results", "indexer", c.Name(), "count", len(res), "title", params.Title)
+						}
+						if err == nil && len(res) > 0 {
+							mu.Lock()
+							for _, r := range res {
+								aggregated = append(aggregated, newsnabToSearchResult(r))
+							}
+							mu.Unlock()
+						}
+					}()
+				}
+			}
 		}
 	}
 
@@ -329,27 +365,13 @@ func (sc *SearchCoordinator) SearchInspect(ctx context.Context, params SearchPar
 			discardedList = append(discardedList, eval)
 		} else {
 			// Apply indexer bonus weights to active releases
-			if bonus, ok := indexerWeights[rel.Indexer]; ok && bonus != 0 {
-				eval.Score += bonus
-			} else if bonus, ok := indexerWeights[rel.IndexerID]; ok && bonus != 0 {
-				eval.Score += bonus
-			}
+			applyIndexerBonus(&eval, rel, indexerWeights)
 			activeList = append(activeList, eval)
 		}
 	}
 
-	// Sort active releases descending by score, ties broken by newest date
-	sort.Slice(activeList, func(i, j int) bool {
-		if activeList[i].Score != activeList[j].Score {
-			return activeList[i].Score > activeList[j].Score
-		}
-		return activeList[i].PublishDate.After(activeList[j].PublishDate)
-	})
-
-	// Sort discarded releases descending by date
-	sort.Slice(discardedList, func(i, j int) bool {
-		return discardedList[i].PublishDate.After(discardedList[j].PublishDate)
-	})
+	sortByScoreDesc(activeList)
+	sortByDateDesc(discardedList)
 
 	allEvaluated := append(activeList, discardedList...)
 
@@ -371,5 +393,18 @@ func prowlarrToSearchResult(r prowlarr.NZBResult) SearchResult {
 		IndexerID:   fmt.Sprintf("%d", r.IndexerID),
 		Source:      "prowlarr",
 		GUID:        r.GUID,
+	}
+}
+
+func newsnabToSearchResult(r newsnab.Result) SearchResult {
+	return SearchResult{
+		Title:       r.Title,
+		DownloadURL: r.DownloadURL,
+		Size:        r.Size,
+		PublishDate: r.PublishDate,
+		Indexer:     r.Indexer,
+		IndexerID:   r.IndexerID,
+		GUID:        r.GUID,
+		Source:      "newsnab",
 	}
 }
