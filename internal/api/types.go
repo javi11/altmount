@@ -115,6 +115,7 @@ type RCloneAPIResponse struct {
 
 // ProviderAPIResponse sanitizes Provider config for API responses
 type ProviderAPIResponse struct {
+	// ID is a stable public provider identifier; it is not an authentication field.
 	ID                       string     `json:"id"`
 	Name                     string     `json:"name,omitempty"`
 	Host                     string     `json:"host"`
@@ -1178,7 +1179,6 @@ type ProviderStatusResponse struct {
 	ID                      string     `json:"id"`
 	Name                    string     `json:"name,omitempty"`
 	Host                    string     `json:"host"`
-	Username                string     `json:"username"`
 	UsedConnections         int        `json:"used_connections"`
 	MaxConnections          int        `json:"max_connections"`
 	State                   string     `json:"state"`
