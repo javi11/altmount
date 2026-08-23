@@ -29,10 +29,13 @@ import type {
 	UploadNZBLnkResponse,
 	User,
 } from "../types/api";
+
 import type {
 	ConfigResponse,
 	ConfigSection,
 	ConfigUpdateRequest,
+	InspectSearchRequest,
+	InspectSearchResponse,
 	PipelineTuneResponse,
 	ProviderBackbone,
 	ProviderConfig,
@@ -42,6 +45,7 @@ import type {
 	ProviderTestResponse,
 	ProviderUpdateRequest,
 } from "../types/config";
+
 import type { UpdateChannel, UpdateStatusResponse } from "../types/update";
 
 export interface LogEntry {
@@ -1039,6 +1043,14 @@ class APIClient {
 		if (params?.limit) searchParams.set("limit", params.limit.toString());
 		const query = searchParams.toString();
 		return this.request<LogEntry[]>(`/logs${query ? `?${query}` : ""}`);
+	}
+
+	// Stremio Search & Ranking Inspector
+	async inspectStremioSearch(payload: InspectSearchRequest): Promise<InspectSearchResponse> {
+		return this.request<InspectSearchResponse>("/stremio/search/inspect", {
+			method: "POST",
+			body: JSON.stringify(payload),
+		});
 	}
 }
 

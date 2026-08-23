@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	parsetorrentname "github.com/middelink/go-parse-torrent-name"
@@ -93,15 +94,103 @@ func (c *Client) GetIndexers(ctx context.Context) ([]Indexer, error) {
 	return indexers, nil
 }
 
-// matchesAnyKeyword returns true when title contains at least one of the
-// keywords (case-insensitive). Returns true when keywords is empty (no filter).
+var (
+	regexCache      sync.Map
+	reExplicitRegex = regexp.MustCompile(`(?i)\\b|\\[dwsDWS]|\(\?|[\(\)\[\]\{\}\|\*\+\?\^\$]`)
+	reWhitespace    = regexp.MustCompile(`\s+`)
+)
+
+func getCompiledRegex(pattern string) (*regexp.Regexp, error) {
+	if pattern == "" {
+		return nil, nil
+	}
+	if val, ok := regexCache.Load(pattern); ok {
+		if re, ok := val.(*regexp.Regexp); ok {
+			return re, nil
+		}
+	}
+
+	expr := pattern
+	if !strings.HasPrefix(pattern, "(?i)") {
+		expr = "(?i)" + pattern
+	}
+	re, err := regexp.Compile(expr)
+	if err != nil {
+		return nil, err
+	}
+	regexCache.Store(pattern, re)
+	return re, nil
+}
+
+// isExplicitRegex reports whether the given pattern contains regex metacharacters or directives.
+func isExplicitRegex(pattern string) bool {
+	return reExplicitRegex.MatchString(pattern)
+}
+
+// BuildKeywordRegex constructs a regex pattern that matches a keyword phrase
+// on token/word boundaries (separated by delimiters like ., _, -, spaces, brackets, or start/end of string).
+func BuildKeywordRegex(keyword string) string {
+	clean := strings.TrimSpace(keyword)
+	clean = strings.Trim(clean, "._- \t")
+	if clean == "" {
+		return ""
+	}
+
+	parts := reWhitespace.Split(clean, -1)
+	escapedParts := make([]string, len(parts))
+	for i, p := range parts {
+		escapedParts[i] = regexp.QuoteMeta(p)
+	}
+	body := strings.Join(escapedParts, `[ ._\-]+`)
+
+	return `(?i)(?:^|[^a-zA-Z0-9])` + body + `(?:[^a-zA-Z0-9]|$)`
+}
+
+// MatchKeywordOrPattern matches a release title against either an explicit regex pattern or a token keyword.
+func MatchKeywordOrPattern(title, pattern string) bool {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" || title == "" {
+		return false
+	}
+
+	// 1. Explicit slash-delimited regex: /pattern/ or /pattern/i
+	if strings.HasPrefix(pattern, "/") && len(pattern) >= 2 {
+		lastSlash := strings.LastIndex(pattern, "/")
+		if lastSlash > 0 {
+			raw := pattern[1:lastSlash]
+			if re, err := getCompiledRegex(raw); err == nil && re != nil {
+				return re.MatchString(title)
+			}
+		}
+	}
+
+	// 2. Explicit regex pattern (e.g. \b(cam|ts)\b)
+	if isExplicitRegex(pattern) {
+		if re, err := getCompiledRegex(pattern); err == nil && re != nil {
+			return re.MatchString(title)
+		}
+	}
+
+	// 3. Plain keyword / phrase: match with boundary delimiters
+	tokenPattern := BuildKeywordRegex(pattern)
+	if tokenPattern == "" {
+		return false
+	}
+	if re, err := getCompiledRegex(tokenPattern); err == nil && re != nil {
+		return re.MatchString(title)
+	}
+
+	return false
+}
+
+// matchesAnyKeyword returns true when title matches at least one of the
+// keywords or patterns (case-insensitive on token boundaries). Returns true when keywords is empty (no filter).
 func matchesAnyKeyword(title string, keywords []string) bool {
 	if len(keywords) == 0 {
 		return true
 	}
-	lower := strings.ToLower(title)
 	for _, kw := range keywords {
-		if strings.Contains(lower, strings.ToLower(kw)) {
+		if MatchKeywordOrPattern(title, kw) {
 			return true
 		}
 	}
@@ -125,16 +214,8 @@ func MatchesExcludeKeywords(title string, excludeKeywords []string) bool {
 	if len(excludeKeywords) == 0 {
 		return false
 	}
-	titleLower := strings.ToLower(title)
 	for _, kw := range excludeKeywords {
-		kw = strings.TrimSpace(kw)
-		if kw == "" {
-			continue
-		}
-		if strings.Contains(titleLower, strings.ToLower(kw)) {
-			return true
-		}
-		if re, err := regexp.Compile("(?i)" + kw); err == nil && re.MatchString(title) {
+		if MatchKeywordOrPattern(title, kw) {
 			return true
 		}
 	}
@@ -278,6 +359,65 @@ func (c *Client) Search(ctx context.Context, imdbID, searchType string, categori
 // indexers optionally restricts the search to specific indexer IDs (empty = all indexers).
 func (c *Client) SearchByTVDB(ctx context.Context, tvdbID, searchType string, categories, indexers []int, season, episode int) ([]NZBResult, error) {
 	return c.searchWithID(ctx, "TvdbId", tvdbID, searchType, categories, indexers, season, episode)
+}
+
+// SearchByQuery queries Prowlarr for NZB releases using free-text query and categories.
+func (c *Client) SearchByQuery(ctx context.Context, queryText, searchType string, categories, indexers []int, season, episode int) ([]NZBResult, error) {
+	var query strings.Builder
+	if queryText != "" {
+		query.WriteString(queryText)
+	}
+	if season > 0 {
+		query.WriteString(" {Season:" + strconv.Itoa(season) + "}")
+	}
+	if episode > 0 {
+		query.WriteString(" {Episode:" + strconv.Itoa(episode) + "}")
+	}
+
+	cats := make([]int64, len(categories))
+	for i, cat := range categories {
+		cats[i] = int64(cat)
+	}
+
+	idxs := make([]int64, len(indexers))
+	for i, idx := range indexers {
+		idxs[i] = int64(idx)
+	}
+
+	input := starrprowlarr.SearchInput{
+		Query:      strings.TrimSpace(query.String()),
+		Type:       searchType,
+		Categories: cats,
+		IndexerIDs: idxs,
+	}
+
+	releases, err := c.prowlarr.SearchContext(ctx, input)
+	if err != nil {
+		return nil, fmt.Errorf("prowlarr: search failed: %w", err)
+	}
+
+	results := make([]NZBResult, 0, len(releases))
+	for _, r := range releases {
+		if r.DownloadURL == "" || r.Protocol != "usenet" {
+			continue
+		}
+		results = append(results, NZBResult{
+			Title:       r.Title,
+			DownloadURL: r.DownloadURL,
+			Size:        r.Size,
+			PublishDate: r.PublishDate,
+			Indexer:     r.Indexer,
+			IndexerID:   int(r.IndexerID),
+			Source:      "prowlarr",
+			GUID:        r.GUID,
+		})
+	}
+
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].PublishDate.After(results[j].PublishDate)
+	})
+
+	return results, nil
 }
 
 func (c *Client) searchWithID(ctx context.Context, idField, idValue, searchType string, categories, indexers []int, season, episode int) ([]NZBResult, error) {

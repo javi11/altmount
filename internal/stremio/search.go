@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -73,11 +74,37 @@ func NewSearchCoordinator(cfg CoordinatorConfig, httpClient *http.Client) *Searc
 	}
 }
 
+// SearchInspectResult contains evaluation diagnostics for all releases found during an indexer query.
+type SearchInspectResult struct {
+	TotalResults     int             `json:"total_results"`
+	ActiveResults    int             `json:"active_results"`
+	DiscardedResults int             `json:"discarded_results"`
+	Releases         []ScoredRelease `json:"releases"`
+}
+
 // Search executes concurrent queries across all enabled providers, deduplicates and ranks results.
 func (sc *SearchCoordinator) Search(ctx context.Context, params SearchParams) ([]ScoredRelease, error) {
+	inspect, err := sc.SearchInspect(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+
+	// Filter down to active (non-excluded) releases only
+	active := make([]ScoredRelease, 0, inspect.ActiveResults)
+	for _, rel := range inspect.Releases {
+		if !rel.Excluded {
+			active = append(active, rel)
+		}
+	}
+	return active, nil
+}
+
+// SearchInspect executes concurrent queries across all enabled providers, evaluates every release against
+// scoring/exclusion rules, and returns both active and discarded releases with diagnostic reasons.
+func (sc *SearchCoordinator) SearchInspect(ctx context.Context, params SearchParams) (*SearchInspectResult, error) {
 	timeout := time.Duration(params.TimeoutMS) * time.Millisecond
 	if timeout <= 0 {
-		timeout = 3500 * time.Millisecond
+		timeout = 5000 * time.Millisecond
 	}
 
 	searchCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -117,7 +144,12 @@ func (sc *SearchCoordinator) Search(ctx context.Context, params SearchParams) ([
 			var err error
 
 			if strings.EqualFold(params.Type, "movie") {
-				pResults, err = sc.prowlarrClient.Search(searchCtx, params.IMDBID, "movie", sc.config.ProwlarrCats, sc.config.ProwlarrIdxs, 0, 0)
+				if params.IMDBID != "" {
+					pResults, err = sc.prowlarrClient.Search(searchCtx, params.IMDBID, "movie", sc.config.ProwlarrCats, sc.config.ProwlarrIdxs, 0, 0)
+				}
+				if len(pResults) == 0 && params.Title != "" {
+					pResults, err = sc.prowlarrClient.SearchByQuery(searchCtx, params.Title, "movie", sc.config.ProwlarrCats, sc.config.ProwlarrIdxs, 0, 0)
+				}
 			} else {
 				if params.TVDBID != "" {
 					pResults, err = sc.prowlarrClient.SearchByTVDB(searchCtx, params.TVDBID, "tvsearch", sc.config.ProwlarrCats, sc.config.ProwlarrIdxs, params.Season, params.Episode)
@@ -126,7 +158,7 @@ func (sc *SearchCoordinator) Search(ctx context.Context, params SearchParams) ([
 					pResults, err = sc.prowlarrClient.Search(searchCtx, params.IMDBID, "tvsearch", sc.config.ProwlarrCats, sc.config.ProwlarrIdxs, params.Season, params.Episode)
 				}
 				if len(pResults) == 0 && params.Title != "" {
-					pResults, err = sc.prowlarrClient.Search(searchCtx, params.Title, "tvsearch", sc.config.ProwlarrCats, sc.config.ProwlarrIdxs, params.Season, params.Episode)
+					pResults, err = sc.prowlarrClient.SearchByQuery(searchCtx, params.Title, "tvsearch", sc.config.ProwlarrCats, sc.config.ProwlarrIdxs, params.Season, params.Episode)
 				}
 			}
 
@@ -160,11 +192,16 @@ func (sc *SearchCoordinator) Search(ctx context.Context, params SearchParams) ([
 				var err error
 
 				if strings.EqualFold(params.Type, "movie") {
-					nResults, err = c.SearchMovie(searchCtx, params.IMDBID, nil, userAgent)
+					if params.IMDBID != "" {
+						nResults, err = c.SearchMovie(searchCtx, params.IMDBID, nil, userAgent)
+					}
+					if (err == nil && len(nResults) == 0) && params.Title != "" {
+						nResults, err = c.SearchGeneral(searchCtx, params.Title, []int{2000, 2010, 2030, 2040, 2045, 2060}, userAgent)
+					}
 				} else {
 					nResults, err = c.SearchTV(searchCtx, params.IMDBID, params.TVDBID, params.Title, params.Season, params.Episode, nil, userAgent)
 					// Fallback to title query if ID search yielded no results
-					if (err == nil && len(nResults) == 0) && params.Title != "" && (params.TVDBID != "" || params.IMDBID != "") {
+					if (err == nil && len(nResults) == 0) && params.Title != "" {
 						if fallbackResults, fbErr := c.SearchTV(searchCtx, "", "", params.Title, params.Season, params.Episode, nil, userAgent); fbErr == nil && len(fallbackResults) > 0 {
 							nResults = append(nResults, fallbackResults...)
 						}
@@ -193,23 +230,12 @@ func (sc *SearchCoordinator) Search(ctx context.Context, params SearchParams) ([
 
 	wg.Wait()
 
-	// Deduplicate aggregated items by DownloadURL / Title and validate against requested media
+	// Deduplicate aggregated items by DownloadURL / Title identity
 	uniqueResults := make([]SearchResult, 0, len(aggregated))
 	seenURLs := make(map[string]struct{})
 	seenReleases := make(map[string]struct{})
 
 	for _, res := range aggregated {
-		// Validate series / movie release matches the requested media (1:1 Sonarr/Radarr/Prowlarr release validation)
-		if strings.EqualFold(params.Type, "series") {
-			if !MatchesSeries(res.Title, params.Title, params.Season, params.Episode, 0) {
-				continue
-			}
-		} else if strings.EqualFold(params.Type, "movie") {
-			if !MatchesMovie(res.Title, params.Title, 0) {
-				continue
-			}
-		}
-
 		if res.DownloadURL != "" {
 			if _, exists := seenURLs[res.DownloadURL]; exists {
 				continue
@@ -225,7 +251,69 @@ func (sc *SearchCoordinator) Search(ctx context.Context, params SearchParams) ([
 		uniqueResults = append(uniqueResults, res)
 	}
 
-	// Rank, score, and filter results
-	scored := RankAndFilterReleases(uniqueResults, &sc.config.Scoring, indexerWeights)
-	return scored, nil
+	activeList := make([]ScoredRelease, 0, len(uniqueResults))
+	discardedList := make([]ScoredRelease, 0, len(uniqueResults))
+
+	for _, rel := range uniqueResults {
+		// Evaluate media matching if title is provided
+		isMediaMismatch := false
+		var mismatchReason string
+		if strings.EqualFold(params.Type, "series") && params.Title != "" {
+			if !MatchesSeries(rel.Title, params.Title, params.Season, params.Episode, 0) {
+				isMediaMismatch = true
+				mismatchReason = "Does not match requested series or episode"
+			}
+		} else if strings.EqualFold(params.Type, "movie") && params.Title != "" {
+			if !MatchesMovie(rel.Title, params.Title, 0) {
+				isMediaMismatch = true
+				mismatchReason = "Does not match requested movie title"
+			}
+		}
+
+		eval := EvaluateRelease(rel.Title, &sc.config.Scoring)
+		eval.SearchResult = rel
+
+		if isMediaMismatch {
+			eval.Excluded = true
+			if eval.ExcludeReason != "" {
+				eval.ExcludeReason = mismatchReason + "; " + eval.ExcludeReason
+			} else {
+				eval.ExcludeReason = mismatchReason
+			}
+		}
+
+		if eval.Excluded {
+			discardedList = append(discardedList, eval)
+		} else {
+			// Apply indexer bonus weights to active releases
+			if bonus, ok := indexerWeights[rel.Indexer]; ok && bonus != 0 {
+				eval.Score += bonus
+			} else if bonus, ok := indexerWeights[rel.IndexerID]; ok && bonus != 0 {
+				eval.Score += bonus
+			}
+			activeList = append(activeList, eval)
+		}
+	}
+
+	// Sort active releases descending by score, ties broken by newest date
+	sort.Slice(activeList, func(i, j int) bool {
+		if activeList[i].Score != activeList[j].Score {
+			return activeList[i].Score > activeList[j].Score
+		}
+		return activeList[i].PublishDate.After(activeList[j].PublishDate)
+	})
+
+	// Sort discarded releases descending by date
+	sort.Slice(discardedList, func(i, j int) bool {
+		return discardedList[i].PublishDate.After(discardedList[j].PublishDate)
+	})
+
+	allEvaluated := append(activeList, discardedList...)
+
+	return &SearchInspectResult{
+		TotalResults:     len(allEvaluated),
+		ActiveResults:    len(activeList),
+		DiscardedResults: len(discardedList),
+		Releases:         allEvaluated,
+	}, nil
 }

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/javi11/altmount/internal/prowlarr"
 )
 
 // TrashCustomFormat defines a single scoring format rule.
@@ -114,14 +116,9 @@ func EvaluateRelease(title string, cfg *StreamScoringConfig) ScoredRelease {
 		if kw == "" {
 			continue
 		}
-		if strings.Contains(titleLower, strings.ToLower(kw)) {
+		if prowlarr.MatchKeywordOrPattern(title, kw) {
 			res.Excluded = true
 			res.ExcludeReason = "Matched exclude keyword: " + kw
-			return res
-		}
-		if re, err := getCompiledRegex(kw); err == nil && re != nil && re.MatchString(title) {
-			res.Excluded = true
-			res.ExcludeReason = "Matched exclude keyword regex: " + kw
 			return res
 		}
 	}
@@ -204,7 +201,7 @@ func EvaluateRelease(title string, cfg *StreamScoringConfig) ScoredRelease {
 
 		matched := false
 		if format.PatternType == "token" {
-			matched = strings.Contains(titleLower, strings.ToLower(format.Pattern))
+			matched = prowlarr.MatchKeywordOrPattern(title, format.Pattern)
 		} else {
 			if re, err := getCompiledRegex(format.Pattern); err == nil && re != nil {
 				matched = re.MatchString(title)

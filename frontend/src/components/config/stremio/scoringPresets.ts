@@ -497,6 +497,49 @@ export interface EvaluationResult {
 	verdictLabel: string;
 }
 
+export function matchKeywordOrPattern(title: string, pattern: string): boolean {
+	const trimmedPattern = pattern.trim();
+	if (!trimmedPattern || !title) return false;
+
+	// 1. Explicit regex in /.../
+	if (trimmedPattern.startsWith("/") && trimmedPattern.lastIndexOf("/") > 0) {
+		const lastSlash = trimmedPattern.lastIndexOf("/");
+		const raw = trimmedPattern.slice(1, lastSlash);
+		const flags = trimmedPattern.slice(lastSlash + 1) || "i";
+		try {
+			const re = new RegExp(raw, flags.includes("i") ? flags : `${flags}i`);
+			return re.test(title);
+		} catch {
+			return false;
+		}
+	}
+
+	// 2. Explicit regex containing regex special tokens (\b, (, ), [, ], |, etc.)
+	const hasRegexConstructs = /\\b|\\[dwsDWS]|\(\?|[()[\]{}|*+?^$]/.test(trimmedPattern);
+	if (hasRegexConstructs) {
+		try {
+			const re = new RegExp(trimmedPattern, "i");
+			return re.test(title);
+		} catch {
+			// Fallback to token matching below
+		}
+	}
+
+	// 3. Plain keyword / phrase: match with word/token boundary delimiters
+	try {
+		const cleanKw = trimmedPattern.replace(/^[._\-\s]+|[._\-\s]+$/g, "");
+		if (!cleanKw) return false;
+
+		const escaped = cleanKw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+		const wordsPattern = escaped.split(/\s+/).join("[ ._\\-]+");
+
+		const tokenRegex = new RegExp(`(?:^|[^a-zA-Z0-9])${wordsPattern}(?:[^a-zA-Z0-9]|$)`, "i");
+		return tokenRegex.test(title);
+	} catch {
+		return false;
+	}
+}
+
 export function evaluateRelease(
 	releaseTitle: string,
 	config: StreamScoringConfig,
@@ -521,20 +564,9 @@ export function evaluateRelease(
 	let excludeReason: string | undefined;
 
 	for (const keyword of config.exclude_keywords || []) {
-		const kw = keyword.trim().toLowerCase();
+		const kw = keyword.trim();
 		if (!kw) continue;
-		if (kw.startsWith("/") && kw.endsWith("/")) {
-			try {
-				const re = new RegExp(kw.slice(1, -1), "i");
-				if (re.test(trimmed)) {
-					excluded = true;
-					excludeReason = `Matched blacklist pattern /${kw.slice(1, -1)}/`;
-					break;
-				}
-			} catch {
-				// ignore invalid regex
-			}
-		} else if (titleLower.includes(kw)) {
+		if (matchKeywordOrPattern(trimmed, kw)) {
 			excluded = true;
 			excludeReason = `Matched blacklist keyword "${keyword}"`;
 			break;
@@ -550,15 +582,14 @@ export function evaluateRelease(
 
 		let matched = false;
 		if (format.patternType === "token") {
-			const tokenLower = format.pattern.toLowerCase().trim();
-			matched = titleLower.includes(tokenLower);
+			matched = matchKeywordOrPattern(trimmed, format.pattern);
 		} else {
 			try {
 				const regex = new RegExp(format.pattern, "i");
 				matched = regex.test(trimmed);
 			} catch {
-				// Fallback to substring if regex is invalid
-				matched = titleLower.includes(format.pattern.toLowerCase().trim());
+				// Fallback to token matching if regex is invalid
+				matched = matchKeywordOrPattern(trimmed, format.pattern);
 			}
 		}
 
