@@ -85,6 +85,22 @@ func TestPTTOracleParity(t *testing.T) {
 		par("chained ee", "The Simpsons S01E01E02 1080p BluRay x265 HEVC 10bit AAC 5.1 Tigole", "The Simpsons", 1, 1, 2),
 		par("pokemon e range", "Pokémon.S01E01-E04.SWEDISH.VHSRip.XviD-aka", "Pokémon", 1, 1, 4),
 
+		// --- Multi-episode ranges: NxNN form and >2 chains (PTT-parity fixes) ---
+		par("bracketed NxNN hyphen range", "Friends - [7x23-24] - The One with Monica and Chandler's Wedding", "Friends", 7, 23, 24),
+		par("bracket range nxnn", "BoJack Horseman [06x01-08 of 16] (2019-2020) WEB-DLRip 720p", "BoJack Horseman", 6, 1, 8),
+		par("triple chained e-dash", "Stargate Universe S01E01-E02-E03.mp4", "Stargate Universe", 1, 1, 3),
+		par("quintuple chained e-dash", "The Simpsons S01E01-E02-E03-E04-E05 1080p BluRay x265 HEVC 10bit AAC 5.1 Tigole", "The Simpsons", 1, 1, 5),
+		par("plus chained episodes", "The Office S07E25+E26 Search Committee.mp4", "The Office", 7, 25, 26),
+
+		// --- Three-digit / zero-padded seasons ---
+		par("bare three digit sxxeyy", "S011E16.mkv", "", 11, 16, 16),
+		par("one piece padded season", "One.Piece.S004E111.Dash.For.a.Miracle!.Alabasta.Animal.Land!.1080p.NF.WEB-DL.DDP2.0.x264-KQRM.mkv", "One Piece", 4, 111, 111),
+
+		// --- Anime absolute numbering (fansub style) ---
+		par("absolute numbering dash form", "Naruto Shippuden - 107 - Strange Bedfellows.mkv", "Naruto Shippuden", 0, 107, 107),
+		par("absolute numbering fansub prefix", "[SubsPlease] Digimon Adventure (2020) - 35 (720p) [4E7BA28A].mkv", "Digimon Adventure", 0, 35, 35),
+		par("absolute numbering group id in brackets", "[224] Darling in the FranXX - 14 [BDRip.1080p.x265.FLAC].mkv", "Darling in the FranXX", 0, 14, 14),
+
 		// --- Season packs (including trailing quality tags) ---
 		pack("pack with quality", "Archer.S02.1080p.BluRay.DTSMA.AVC.Remux", "Archer", 2),
 		pack("bare s pack", "Bron - S4 - 720P - SweSub.mp4", "Bron", 4),
@@ -109,6 +125,13 @@ func TestPTTOracleParity(t *testing.T) {
 			name: "accented french title", release: "La.famille.bélier",
 			wantTitle: "La famille bélier", wantSeason: 0,
 		},
+
+		// --- False-positive guards for the chain/absolute extensions ---
+		par("date after range not hijacked", "Top Gear - 3x05 - 2003.11.23.avi", "Top Gear", 3, 5, 5),
+		par("resolution hyphen rejected p", "Show.S01E02-720p.mkv", "Show", 1, 2, 2),
+		par("resolution hyphen rejected i-span", "Show.S01E01-1080p.mkv", "Show", 1, 1, 1),
+		par("titled segment after episode number", "Chernobyl.S01E01.1.23.45.mkv", "Chernobyl", 1, 1, 1),
+		par("letter suffix on episode", "Mash S10E01b Thats Show Biz Part 2 1080p H.264.mp4", "Mash", 10, 1, 1),
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) { assertOracle(t, tc) })
@@ -134,16 +157,34 @@ func TestPTTOracleYearExtraction(t *testing.T) {
 	}
 }
 
-// Gap taxonomy observed against the PTT fixtures, ordered by matching impact:
+// TestMatchesSeriesAbsoluteEpisode pins the anime matching rule: an
+// absolute-numbered release (no season marker) matches a season/episode query
+// purely on exact episode-number agreement.
+func TestMatchesSeriesAbsoluteEpisode(t *testing.T) {
+	release := "Naruto Shippuden - 107 - Strange Bedfellows.mkv"
+	assert.True(t, MatchesSeries(release, "Naruto: Shippuden", 5, 107, 0),
+		"exact absolute episode must match across differing seasons")
+	assert.False(t, MatchesSeries(release, "Naruto: Shippuden", 5, 108, 0),
+		"wrong absolute episode must not match")
+	assert.True(t, MatchesSeries(release, "Naruto: Shippuden", 5, 107, 2009),
+		"title agreement makes the release-year conflict tolerance moot when no release year is parsed")
+
+	movie := "Mad.Max.Fury.Road.2015.1080p.BluRay.x265-GROUP"
+	assert.True(t, MatchesMovie(movie, "Mad Max Fury Road", 2015))
+	assert.True(t, MatchesMovie(movie, "Mad Max Fury Road", 2016),
+		"+/-1 year tolerance is intentional")
+	assert.False(t, MatchesMovie(movie, "Mad Max Fury Road", 2018),
+		"beyond +/-1 year must reject")
+}
+
+// Gap taxonomy remaining against the PTT fixtures, ordered by impact:
 //
-//	HIGH  anime absolute numbering ("Naruto Shippuden - 107") never parsed;
-//	      padded three-digit seasons (S011E16, One.Piece.S004E111) unrecognized
-//	MED   NxNN ranges don't extend ([7x23-24] -> E23 only); episode chains cap
-//	      at two (E01-E02-E03 -> E1-2); '+' chaining lost; multi-season spans
-//	      (S01-S10) collapse to the first season; in-title-year movies pick the
-//	      name year (Wonder Woman 1984 -> year 1984, not 2020)
-//	LOW   regional keywords (Cap./Temporada concat, sezon/seriya, "ao" ranges,
-//	      plural "Episodes" ranges) fall back to pack or nothing; edition words
+//	MED   multi-season spans (S01-S10) collapse to the first season; in-title
+//	      year movies pick the name year (Wonder Woman 1984 -> 1984); glued
+//	      Name1x01 without separators unrecognized
+//	LOW   batch absolute ranges ("01 ~ 12", "(01 - 12)", "215 ao 220") and
+//	      bracket-only episode tokens ("[GM-Team]...[08]") deferred by design;
+//	      regional keywords (Cap./sezon-seriya) unsupported; edition words
 //	      (CUSTOM/EXTENDED/INTEGRAL/PPV) stay in extracted titles; snake_case
 //	      years yield 0 due to \b word-boundary semantics
 //
@@ -157,91 +198,7 @@ func TestPTTOracleKnownDivergences(t *testing.T) {
 		pttNote  string // what PTT reports
 		assertFn func(t *testing.T, got ParsedRelease)
 	}{
-		// --- HIGH impact ---
-		{
-			name:    "anime absolute numbering",
-			release: "Naruto Shippuden - 107 - Strange Bedfellows.mkv",
-			pttNote: "PTT: episode 107 (absolute)",
-			assertFn: func(t *testing.T, got ParsedRelease) {
-				assert.Zero(t, got.EpisodeStart)
-				assert.Contains(t, got.SeriesTitle, "107")
-			},
-		},
-		{
-			name:    "fansub bracket absolute numbering",
-			release: "[SubsPlease] Digimon Adventure (2020) - 35 (720p) [4E7BA28A].mkv",
-			pttNote: "PTT: episode 35",
-			assertFn: func(t *testing.T, got ParsedRelease) {
-				assert.Zero(t, got.EpisodeStart)
-			},
-		},
-		{
-			name:    "three digit season S011E16",
-			release: "S011E16.mkv",
-			pttNote: "PTT: S11 E16",
-			assertFn: func(t *testing.T, got ParsedRelease) {
-				assert.Zero(t, got.Season)
-				assert.Zero(t, got.EpisodeStart)
-			},
-		},
-		{
-			name:    "three digit season One Piece S004E111",
-			release: "One.Piece.S004E111.Dash.For.a.Miracle!.Alabasta.Animal.Land!.1080p.NF.WEB-DL.DDP2.0.x264-KQRM.mkv",
-			pttNote: "PTT: S4 E111",
-			assertFn: func(t *testing.T, got ParsedRelease) {
-				assert.Zero(t, got.Season)
-				assert.Zero(t, got.EpisodeStart)
-			},
-		},
-
 		// --- MED impact ---
-		{
-			name:    "NxNN hyphen range not extended",
-			release: "Friends - [7x23-24] - The One with Monica and Chandler's Wedding",
-			pttNote: "PTT: E23-E24",
-			assertFn: func(t *testing.T, got ParsedRelease) {
-				assert.Equal(t, 7, got.Season)
-				assert.Equal(t, 23, got.EpisodeStart)
-				assert.Equal(t, 23, got.EpisodeEnd, "range suffix only supported on SxxEyy form")
-			},
-		},
-		{
-			name:    "bracketed NxNN range not extended",
-			release: "BoJack Horseman [06x01-08 of 16] (2019-2020) WEB-DLRip 720p",
-			pttNote: "PTT: E1-E8",
-			assertFn: func(t *testing.T, got ParsedRelease) {
-				assert.Equal(t, 6, got.Season)
-				assert.Equal(t, 1, got.EpisodeStart)
-				assert.Equal(t, 1, got.EpisodeEnd)
-			},
-		},
-		{
-			name:    "triple chained E01-E02-E03 stops at second",
-			release: "Stargate Universe S01E01-E02-E03.mp4",
-			pttNote: "PTT: E1-E3",
-			assertFn: func(t *testing.T, got ParsedRelease) {
-				assert.Equal(t, 1, got.EpisodeStart)
-				assert.Equal(t, 2, got.EpisodeEnd)
-			},
-		},
-		{
-			name:    "quintuple chained range also caps at two",
-			release: "The Simpsons S01E01-E02-E03-E04-E05 1080p BluRay x265 HEVC 10bit AAC 5.1 Tigole",
-			pttNote: "PTT: E1-E5",
-			assertFn: func(t *testing.T, got ParsedRelease) {
-				assert.Equal(t, 1, got.EpisodeStart)
-				assert.Equal(t, 2, got.EpisodeEnd)
-			},
-		},
-		{
-			name:    "plus chained S07E25+E26 loses second episode",
-			release: "The Office S07E25+E26 Search Committee.mp4",
-			pttNote: "PTT: E25+E26",
-			assertFn: func(t *testing.T, got ParsedRelease) {
-				assert.Equal(t, 25, got.EpisodeStart)
-				assert.Equal(t, 25, got.EpisodeEnd)
-			},
-		},
 		{
 			name:    "multi season range S01-S10 collapses to first",
 			release: "Friends.Complete.Series.S01-S10.720p.BluRay.2CH.x265.HEVC-PSA",
@@ -258,6 +215,16 @@ func TestPTTOracleKnownDivergences(t *testing.T) {
 			assertFn: func(t *testing.T, got ParsedRelease) {
 				assert.Equal(t, 1984, got.Year)
 				assert.Equal(t, "wonderwoman", got.CleanTitle)
+			},
+		},
+		{
+			name:    "glued NxNN without separator",
+			release: "The.Man.In.The.High.Castle1x01.HDTV.XviD[www.DivxTotaL.com].avi",
+			pttNote: "PTT: S1 E1, title 'The Man In The High Castle'",
+			assertFn: func(t *testing.T, got ParsedRelease) {
+				assert.Zero(t, got.Season)
+				assert.Zero(t, got.EpisodeStart)
+				assert.Contains(t, got.SeriesTitle, "1x01")
 			},
 		},
 
@@ -302,13 +269,28 @@ func TestPTTOracleKnownDivergences(t *testing.T) {
 			},
 		},
 		{
-			name:    "glued NxNN without separator",
-			release: "The.Man.In.The.High.Castle1x01.HDTV.XviD[www.DivxTotaL.com].avi",
-			pttNote: "PTT: S1 E1, title 'The Man In The High Castle'",
+			name:    "batch tilde range deferred",
+			release: "[Erai-raws] 3D Kanojo - Real Girl 2nd Season - 01 ~ 12 [720p]",
+			pttNote: "PTT: E1-E12 (batch handling deferred by design)",
+			assertFn: func(t *testing.T, got ParsedRelease) {
+				assert.Zero(t, got.EpisodeStart)
+			},
+		},
+		{
+			name:    "portuguese range ao deferred",
+			release: "Bleach 10º Temporada - 215 ao 220 - [DB-BR]",
+			pttNote: "PTT: S10, E215-E220",
 			assertFn: func(t *testing.T, got ParsedRelease) {
 				assert.Zero(t, got.Season)
 				assert.Zero(t, got.EpisodeStart)
-				assert.Contains(t, got.SeriesTitle, "1x01")
+			},
+		},
+		{
+			name:    "bracket-only episode token deferred",
+			release: "[GM-Team][国漫][绝代双骄][Legendary Twins][2022][08][HEVC][GB][4K].mp4",
+			pttNote: "PTT: E8",
+			assertFn: func(t *testing.T, got ParsedRelease) {
+				assert.Zero(t, got.EpisodeStart)
 			},
 		},
 		{
@@ -324,15 +306,6 @@ func TestPTTOracleKnownDivergences(t *testing.T) {
 			name:    "cyrillic sezon seriya",
 			release: "Zvezdnie.Voiny.Voina.Klonov.3.sezon.22.seria.iz.22.XviD.HDRip.avi",
 			pttNote: "PTT: S3 E22",
-			assertFn: func(t *testing.T, got ParsedRelease) {
-				assert.Zero(t, got.Season)
-				assert.Zero(t, got.EpisodeStart)
-			},
-		},
-		{
-			name:    "portuguese range ao",
-			release: "Bleach 10º Temporada - 215 ao 220 - [DB-BR]",
-			pttNote: "PTT: S10, E215-E220",
 			assertFn: func(t *testing.T, got ParsedRelease) {
 				assert.Zero(t, got.Season)
 				assert.Zero(t, got.EpisodeStart)
