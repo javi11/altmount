@@ -383,12 +383,22 @@ func (s *Service) handleOutcome(ctx context.Context, job *database.Par2RepairJob
 		delay := min(baseBackoff<<job.Attempts, maxBackoff)
 		var sweepDead *SweepDeadArticleError
 		if errors.As(err, &sweepDead) {
-			// The dead article is now a known input to the next plan, so the
-			// retry is expected to succeed: persist it and skip the exponent.
-			if perr := s.repo.AppendDeadSegment(ctx, job.ID, sweepDead.MessageID); perr != nil {
-				s.log.ErrorContext(ctx, "Failed to persist dead segment on repair job",
-					"error", perr, "job", job.ID, "message_id", sweepDead.MessageID)
+			// Every article the sweep proved dead — the one that broke the
+			// margin plus the ones it absorbed — becomes a known input to the
+			// next plan, so the retry is expected to succeed: persist them all
+			// and skip the exponent. Persisting only the breaking article would
+			// advance the plan one article per attempt while re-reading the
+			// release each time, exhausting maxJobAttempts on any release with
+			// more dead articles than margin rows.
+			ids := sweepDead.DeadMessageIDs()
+			for _, id := range ids {
+				if perr := s.repo.AppendDeadSegment(ctx, job.ID, id); perr != nil {
+					s.log.ErrorContext(ctx, "Failed to persist dead segment on repair job",
+						"error", perr, "job", job.ID, "message_id", id)
+				}
 			}
+			s.log.InfoContext(ctx, "Persisted articles proved dead this sweep for the next plan",
+				"job", job.ID, "count", len(ids))
 			delay = baseBackoff
 		}
 		s.log.WarnContext(ctx, "PAR2 repair failed, will retry",
@@ -625,7 +635,13 @@ func (s *Service) resolveNzbFromDisk(ctx context.Context, nzbPath string, deadID
 	if err != nil {
 		return nil, fmt.Errorf("%w: parse NZB %s: %v", ErrUnrepairable, nzbPath, err)
 	}
-	return ResolveFromNzb(ctx, n, deadIDs, s.fetcher, s.cfg().caps(), s.log, progress)
+	caps := s.cfg().caps()
+	// No known-dead segment means the trigger saw corrupt article DATA (e.g.
+	// RAR analysis failed on a present article), not a missing one: run a
+	// verify sweep that checks every article against the PAR2 checksums and
+	// patches whatever fails.
+	caps.VerifySweep = len(deadIDs) == 0
+	return ResolveFromNzb(ctx, n, deadIDs, s.fetcher, caps, s.log, progress)
 }
 
 // resumeImport returns a parked import to the queue after its repair landed.

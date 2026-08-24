@@ -124,6 +124,40 @@ func mkRepairFixture(t *testing.T, sliceSize int, artSize int64, numRecovery int
 
 func testLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
+// A provider serving a truncated article must not panic the range read: the
+// short tail reads as zeros (the payload then fails its checksum and follows
+// the normal corrupt/dead paths), mirroring lazyFileReader's semantics.
+func TestReadRangeFromShortArticleZeroFills(t *testing.T) {
+	f := SetFile{
+		Length: 4096,
+		Articles: []Article{
+			{MessageID: "<a-0@test>", Size: 2048},
+			{MessageID: "<a-1@test>", Size: 2048},
+		},
+	}
+	get := func(id string) ([]byte, error) {
+		if id == "<a-0@test>" {
+			return bytes.Repeat([]byte{0x11}, 1000), nil // truncated: declared 2048
+		}
+		return bytes.Repeat([]byte{0x22}, 2048), nil
+	}
+	out, err := readRangeFrom(get, f, 0, 4096)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out[0] != 0x11 || out[999] != 0x11 {
+		t.Fatal("delivered bytes of the short article lost")
+	}
+	for i := 1000; i < 2048; i++ {
+		if out[i] != 0 {
+			t.Fatalf("byte %d = %#x, want zero fill for the truncated tail", i, out[i])
+		}
+	}
+	if out[2048] != 0x22 {
+		t.Fatal("following article misplaced")
+	}
+}
+
 func TestRunJobRepairsDeadArticle(t *testing.T) {
 	fx := mkRepairFixture(t, 1024, 2048, 6, 1)
 	plan, err := BuildPlan(fx.idx, fx.files, Caps{MaxRepairRatio: 0.5, MaxMemoryBytes: 64 << 20})
@@ -276,9 +310,14 @@ func TestRunJobRepairsDespiteCorruptPresentSlice(t *testing.T) {
 	if !bytes.Equal(got, fx.deadOrig) {
 		t.Fatalf("patch mismatch: got %d bytes, want %d byte-exact", len(got), len(fx.deadOrig))
 	}
-	// The corrupt article is still served by providers; no patch for it.
-	if store.Has(corruptID) {
-		t.Fatal("must not store a patch for a present (corrupt) article")
+	// The corrupt article's wire copy is bad — readers must get corrected
+	// bytes, so it is patched too, byte-exact.
+	gotCorrupt, ok := store.Get(corruptID)
+	if !ok {
+		t.Fatal("no patch stored for the corrupt present article")
+	}
+	if !bytes.Equal(gotCorrupt, fx.contents["b.rar"][:2048]) {
+		t.Fatal("corrupt article patch not byte-exact")
 	}
 }
 
@@ -413,6 +452,49 @@ func TestRunJobMidSweepDeadWithoutMarginSurfacesError(t *testing.T) {
 	}
 }
 
+// When the margin runs out, the articles the sweep ALREADY proved dead and
+// absorbed must ride out on the error alongside the one that broke the margin.
+// Dropping them makes the retry re-derive facts this sweep already paid for:
+// each attempt would learn exactly one dead article while re-parsing the PAR2
+// set and re-reading the release, so a release with more dead articles than
+// margin rows exhausts maxJobAttempts instead of converging.
+func TestSweepDeadArticleErrorCarriesAbsorbedDiscoveries(t *testing.T) {
+	// deadArt=1 => k=2 missing slices; numRecovery=6 => 4 margin rows, so two
+	// 2-slice articles absorb and the third has nowhere to go.
+	fx := mkRepairFixture(t, 1024, 2048, 6, 1)
+	plan, err := BuildPlan(fx.idx, fx.files, Caps{MaxRepairRatio: 0.9, MaxMemoryBytes: 64 << 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"<b.rar-0@test>", "<b.rar-1@test>", "<b.rar-2@test>"} {
+		delete(fx.fetch.articles, id)
+	}
+
+	store := NewPatchStore(t.TempDir())
+	err = RunJob(context.Background(), plan, fx.idx, fx.par2Files, fx.fetch, store, testLogger())
+
+	var dead *SweepDeadArticleError
+	if !errors.As(err, &dead) {
+		t.Fatalf("err = %v, want SweepDeadArticleError", err)
+	}
+	// Every article this sweep proved dead must be reported, in one set, so
+	// the next plan starts from all of them.
+	got := map[string]bool{dead.MessageID: true}
+	for _, id := range dead.Absorbed {
+		got[id] = true
+	}
+	for _, want := range []string{"<b.rar-0@test>", "<b.rar-1@test>", "<b.rar-2@test>"} {
+		if !got[want] {
+			t.Errorf("dead article %s missing from error (MessageID=%q, Absorbed=%v)",
+				want, dead.MessageID, dead.Absorbed)
+		}
+	}
+	// The planned-dead article was already known; it must not be re-reported.
+	if got[fx.deadMsgID] {
+		t.Errorf("planned-dead %s must not be reported as a new discovery", fx.deadMsgID)
+	}
+}
+
 // A corrupt present slice must be absorbed by a margin row in the same sweep,
 // not trigger a second full read of the release.
 func TestRunJobAbsorbsCorruptSliceWithoutResweep(t *testing.T) {
@@ -436,6 +518,62 @@ func TestRunJobAbsorbsCorruptSliceWithoutResweep(t *testing.T) {
 	}
 	if n := fx.fetch.countFetches("<a.rar-0@test>"); n != 1 {
 		t.Fatalf("article <a.rar-0@test> fetched %d times, want 1 (corrupt slice must not force a re-sweep)", n)
+	}
+}
+
+// A verify sweep: the plan carries no missing slices — the trigger knows the
+// release is damaged (corrupt articles broke import analysis) but not where.
+// The sweep's CRC verification must find the corrupt slice, absorb it onto a
+// margin row, and store a byte-exact patch for the corrupt ARTICLE — the whole
+// point of the sweep is that the resumed import reads corrected bytes. The
+// corrupt article spans a good slice too, so the patch splices recovered bytes
+// over the corrupt slice and wire bytes over the rest.
+func TestRunJobVerifySweepPatchesCorruptArticle(t *testing.T) {
+	fx := mkRepairFixture(t, 1024, 2048, 6, -1) // nothing dead
+	corruptID := "<b.rar-1@test>"
+	orig := bytes.Clone(fx.fetch.articles[corruptID])
+	corrupted := bytes.Clone(orig)
+	corrupted[10] ^= 0xFF // damages the article's first slice only
+	fx.fetch.articles[corruptID] = corrupted
+
+	caps := Caps{MaxRepairRatio: 0.5, MaxMemoryBytes: 64 << 20, VerifySweep: true}
+	plan, err := BuildPlan(fx.idx, fx.files, caps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Missing) != 0 {
+		t.Fatalf("verify plan Missing = %v, want none", plan.Missing)
+	}
+
+	store := NewPatchStore(t.TempDir())
+	if err := RunJob(context.Background(), plan, fx.idx, fx.par2Files, fx.fetch, store, testLogger()); err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok := store.Get(corruptID)
+	if !ok {
+		t.Fatal("no patch stored for the corrupt article")
+	}
+	if !bytes.Equal(got, orig) {
+		t.Fatalf("patch not byte-exact: got %d bytes, want %d", len(got), len(orig))
+	}
+}
+
+// A verify sweep over an intact release finds nothing to fix. It must surface
+// ErrNothingToRepair so the service fails the parked import instead of
+// resuming it — resuming would re-fail analysis and re-defer forever.
+func TestRunJobVerifySweepCleanReleaseReportsNothingToRepair(t *testing.T) {
+	fx := mkRepairFixture(t, 1024, 2048, 6, -1)
+
+	caps := Caps{MaxRepairRatio: 0.5, MaxMemoryBytes: 64 << 20, VerifySweep: true}
+	plan, err := BuildPlan(fx.idx, fx.files, caps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewPatchStore(t.TempDir())
+	err = RunJob(context.Background(), plan, fx.idx, fx.par2Files, fx.fetch, store, testLogger())
+	if !errors.Is(err, ErrNothingToRepair) {
+		t.Fatalf("err = %v, want ErrNothingToRepair for a clean verify sweep", err)
 	}
 }
 

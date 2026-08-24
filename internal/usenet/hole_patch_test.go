@@ -55,6 +55,42 @@ func TestReaderServesPatchOnConfirmedMissing(t *testing.T) {
 	}
 }
 
+// A patched segment serves its patch even when the article still fetches:
+// wire bytes can be corrupt-but-present (that damage is why the patch was
+// built), while the patch is IFSC-verified. Repaired data takes precedence.
+func TestReaderPatchTakesPrecedenceOverFetchedBytes(t *testing.T) {
+	ctx := context.Background()
+	const n, segSize = 8, 4
+	fp := fillFakePool(n, segSize)
+	// No behavior override: segment 3 fetches fine, serving (possibly corrupt)
+	// wire bytes — the patch must win anyway.
+
+	patch := bytes.Repeat([]byte{0xEE}, segSize)
+	hooks := &HoleHooks{
+		PatchLookup: func(segID string) []byte {
+			if segID == segments.MessageID(3) {
+				return patch
+			}
+			return nil
+		},
+	}
+
+	rg := buildEagerRange(ctx, t, n, segSize)
+	ur := newReaderWithHooks(t, ctx, fp, rg, 60, hooks)
+
+	got, err := io.ReadAll(ur)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if !bytes.Equal(got[3*segSize:4*segSize], patch) {
+		t.Fatalf("segment 3 = %v, want the patch to take precedence over fetched bytes", got[3*segSize:4*segSize])
+	}
+	// Neighbors intact.
+	if got[2*segSize] != 3 || got[4*segSize] != 5 {
+		t.Fatal("neighbor segments corrupted")
+	}
+}
+
 // A known hole with a patch serves the patched bytes instead of zeros,
 // without any fetch.
 func TestReaderServesPatchOnKnownHole(t *testing.T) {

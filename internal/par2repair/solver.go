@@ -82,7 +82,9 @@ func NewSolver(missingIdx []int, recoveryExp []uint32, sliceSize int) (*Solver, 
 // NewSolverAlloc is NewSolver with the accumulator (and recovered-slice)
 // buffers coming from alloc, which must return zeroed memory.
 func NewSolverAlloc(missingIdx []int, recoveryExp []uint32, sliceSize int, alloc bufAlloc) (*Solver, error) {
-	if len(missingIdx) == 0 || len(recoveryExp) < len(missingIdx) {
+	// Zero missing slices is valid: a verify sweep starts with no known
+	// damage and grows the unknowns via AddMissing as corrupt slices surface.
+	if len(recoveryExp) < len(missingIdx) {
 		return nil, fmt.Errorf("par2repair: need at least one recovery slice per missing slice (missing=%d recovery=%d)",
 			len(missingIdx), len(recoveryExp))
 	}

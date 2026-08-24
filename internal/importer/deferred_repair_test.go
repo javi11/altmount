@@ -3,6 +3,11 @@ package importer
 import (
 	"errors"
 	"testing"
+
+	"github.com/javi11/nntppool/v4"
+	"github.com/javi11/rardecode/v2"
+
+	alterrors "github.com/javi11/altmount/internal/errors"
 )
 
 // A damaged archive set with PAR2 files defers for repair instead of being
@@ -62,6 +67,77 @@ func TestDeferPrecedesNothingProcessedBailout(t *testing.T) {
 	}
 	if bail {
 		t.Fatal("deferral must take precedence over the no-files-processed bail-out")
+	}
+}
+
+// A corrupt-but-present article breaks archive analysis with a rardecode
+// corruption error after the fast-fail sweep (which only sees MISSING
+// articles) passed clean. That damage is exactly what PAR2 exists for, so the
+// import defers for a repair instead of failing — when the NZB carries PAR2
+// files and repair-on-import is enabled.
+func TestDeferCorruptArchiveDecision(t *testing.T) {
+	// The exact composition the pipeline produces: the aggregator joins the
+	// RAR processor's NonRetryableError wrapping the rardecode sentinel.
+	corruption := errors.Join(alterrors.NewNonRetryableError(
+		`failed to iterate RAR archive "a.part01.rar"`, rardecode.ErrBadHeaderCRC))
+	other := errors.New("failed to write metadata")
+
+	tests := []struct {
+		name    string
+		err     error
+		enabled bool
+		hasPar2 bool
+		want    bool
+	}{
+		{"corruption with par2 and feature on defers", corruption, true, true, true},
+		{"feature off fails as before", corruption, false, true, false},
+		{"no par2 files: nothing to repair with", corruption, true, false, false},
+		{"non-corruption errors fail as before", other, true, true, false},
+		{"nil error never defers", nil, true, true, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := shouldDeferCorruptArchive(tt.err, tt.enabled, tt.hasPar2)
+			if got != tt.want {
+				t.Fatalf("shouldDeferCorruptArchive(%v,%v,%v) = %v, want %v",
+					tt.err, tt.enabled, tt.hasPar2, got, tt.want)
+			}
+		})
+	}
+}
+
+// The fast-fail probe only samples a percentage of segments, so a release
+// with a genuinely missing article can still pass it clean; the miss then
+// surfaces later as an ErrArticleNotFound once analysis walks into the hole.
+// That is the same damage the fast-fail escalation path defers for, so it
+// must not be dropped as a terminal failure just because it was discovered
+// during analysis instead of during the sweep.
+func TestDeferMissingArchiveDecision(t *testing.T) {
+	missing := errors.Join(alterrors.NewNonRetryableError(
+		`failed to iterate RAR archive "a.part01.rar"`, nntppool.ErrArticleNotFound))
+	other := errors.New("failed to write metadata")
+
+	tests := []struct {
+		name    string
+		err     error
+		enabled bool
+		hasPar2 bool
+		want    bool
+	}{
+		{"missing article with par2 and feature on defers", missing, true, true, true},
+		{"feature off fails as before", missing, false, true, false},
+		{"no par2 files: nothing to repair with", missing, true, false, false},
+		{"non-missing-article errors fail as before", other, true, true, false},
+		{"nil error never defers", nil, true, true, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := shouldDeferMissingArchive(tt.err, tt.enabled, tt.hasPar2)
+			if got != tt.want {
+				t.Fatalf("shouldDeferMissingArchive(%v,%v,%v) = %v, want %v",
+					tt.err, tt.enabled, tt.hasPar2, got, tt.want)
+			}
+		})
 	}
 }
 

@@ -676,19 +676,22 @@ func (b *UsenetReader) downloadManager(ctx context.Context) {
 				return
 			}
 
+			// A repaired patch takes precedence over a fetch: the wire copy
+			// can be corrupt-but-present (that damage is why the patch was
+			// built), while the patch is IFSC-verified byte-exact. This also
+			// covers articles that have vanished since the repair, with no
+			// fetch round-trip.
+			if p := b.patchFor(taskCtx, s); p != nil {
+				b.log.DebugContext(taskCtx, "serving repaired payload instead of fetching",
+					"file_segment_index", s.loaderIdx)
+				s.SetData(p)
+				return
+			}
+
 			data, err := b.downloadSegmentWithRetry(taskCtx, s)
 
 			if err != nil {
 				if errors.Is(err, nntppool.ErrArticleNotFound) {
-					// A repaired patch takes precedence: already-repaired
-					// damage is served byte-exact and is not new damage, so
-					// OnHole is not consulted.
-					if p := b.patchFor(taskCtx, s); p != nil {
-						b.log.InfoContext(taskCtx, "serving repaired payload for missing segment",
-							"file_segment_index", s.loaderIdx)
-						s.SetData(p)
-						return
-					}
 					// A confirmed-missing article may be zero-filled instead
 					// of failing the stream, when the owner's hole hook
 					// approves.

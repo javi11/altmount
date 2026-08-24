@@ -87,6 +87,28 @@ func fastFailOutcome(enabled, hasPar2, brokenInSet bool, eligibleCount, brokenCo
 	return false, eligibleCount > 0 && brokenCount == eligibleCount
 }
 
+// shouldDeferCorruptArchive decides whether a failed archive analysis parks
+// the import for an NZB-mode PAR2 repair. The fast-fail sweep catches MISSING
+// articles before analysis; corrupt-but-present articles only surface here,
+// as rardecode corruption errors — and they are exactly what PAR2 rebuilds.
+// The repair's verify sweep locates the corrupt articles itself, so no
+// failing-segment hint is needed.
+func shouldDeferCorruptArchive(err error, enabled, hasPar2 bool) bool {
+	return enabled && hasPar2 && rar.IsCorruptionError(err)
+}
+
+// shouldDeferMissingArchive decides whether an archive analysis failure
+// caused by a genuinely MISSING article should also park the import for a
+// PAR2 repair. The fast-fail probe samples only a percentage of segments
+// (import.segment_sample_percentage), so it can pass clean on a release that
+// does have a missing article; when that happens, the miss only surfaces once
+// analysis actually walks into the hole. That is exactly the same damage the
+// fast-fail escalation path defers for, so it must not be treated as a
+// terminal failure just because it was discovered later.
+func shouldDeferMissingArchive(err error, enabled, hasPar2 bool) bool {
+	return enabled && hasPar2 && errors.Is(err, nntppool.ErrArticleNotFound)
+}
+
 // RepairEnqueuer queues a file for background PAR2 repair (implemented by
 // par2repair.Service). Implementations must be non-blocking.
 type RepairEnqueuer interface {
@@ -849,6 +871,17 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 		// release's recovery volumes are most likely still retrievable.
 		proc.queueImportRepairs(ctx, cfg.Par2Repair.EffectiveRepairOnImport(), writtenPaths, degradedFiles)
 		proc.updateProgress(queueID, 100)
+	} else if repairEnabled, hasPar2 := cfg.Par2Repair.EffectiveRepairOnImport(), len(par2Files) > 0; shouldDeferCorruptArchive(err, repairEnabled, hasPar2) || shouldDeferMissingArchive(err, repairEnabled, hasPar2) {
+		// Corrupt-but-present articles, or an article the fast-fail probe's
+		// sample missed, broke the archive analysis. Park the import for an
+		// NZB-mode repair whose verify sweep checks every article against the
+		// PAR2 checksums, patches the damaged ones, and resumes the import —
+		// or fails it when the release verifies intact (the failure is then
+		// not article damage) or proves unrepairable.
+		proc.log.InfoContext(ctx, "Deferring import: archive analysis hit damaged or missing article data, queueing PAR2 verify sweep",
+			"file_path", filePath, "error", err)
+		proc.queueNzbRepair(ctx, filePath, "")
+		return result, writtenPaths, &DeferredRepairError{}
 	} else if errors.Is(err, nntppool.ErrArticleNotFound) {
 		return result, writtenPaths, ErrArticlesNotFound
 	}

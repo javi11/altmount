@@ -66,6 +66,12 @@ type Caps struct {
 	// release was not STATed). BuildPlan provisions extra margin rows for
 	// them so the payload sweep absorbs the discoveries without a replan.
 	ExpectedHiddenArticles int
+	// VerifySweep builds a plan even when no article is known dead: the
+	// trigger knows the release is damaged (corrupt-but-present articles
+	// broke import analysis) but not which articles. The plan then carries
+	// no missing slices and margin recovery rows only; the job's CRC sweep
+	// locates the corrupt slices and absorbs them onto the margin.
+	VerifySweep bool
 }
 
 // Plan is everything a repair job needs to run: which slices to reconstruct,
@@ -142,7 +148,7 @@ func BuildPlan(idx *par2.Index, files []SetFile, caps Caps) (*Plan, error) {
 			off += a.Size
 		}
 	}
-	if len(missingSet) == 0 {
+	if len(missingSet) == 0 && !caps.VerifySweep {
 		return nil, ErrNothingToRepair
 	}
 	for s := range missingSet {

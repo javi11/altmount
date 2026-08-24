@@ -31,14 +31,41 @@ const fetchAhead = 8
 
 // SweepDeadArticleError reports an article that was live at planning time but
 // vanished during the sweep. Transient at the job level (a retry can replan),
-// but the caller should persist the discovery so the next plan includes it in
-// the missing set instead of hitting the same wall.
+// but the caller should persist the discoveries so the next plan includes them
+// in the missing set instead of hitting the same wall.
+//
+// Absorbed carries the OTHER articles the same sweep already proved dead and
+// fitted onto margin rows before the margin ran out. Reporting them together
+// is what lets the retry converge: the sweep pays for a full read of the
+// release, so every death it observed must survive the failure. Persisting
+// only MessageID would advance the plan by one article per attempt while
+// re-parsing the PAR2 set and re-reading the release each time, and a release
+// with more dead articles than margin rows would exhaust maxJobAttempts
+// instead of ever being repaired.
 type SweepDeadArticleError struct {
 	MessageID string
+	Absorbed  []string
 	Err       error
 }
 
+// DeadMessageIDs lists every article this sweep proved dead: the one that
+// broke the margin plus the ones absorbed before it.
+func (e *SweepDeadArticleError) DeadMessageIDs() []string {
+	ids := make([]string, 0, len(e.Absorbed)+1)
+	ids = append(ids, e.MessageID)
+	for _, id := range e.Absorbed {
+		if id != e.MessageID {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
 func (e *SweepDeadArticleError) Error() string {
+	if len(e.Absorbed) > 0 {
+		return fmt.Sprintf("par2repair: article %s vanished during sweep (with %d more absorbed this sweep): %v",
+			e.MessageID, len(e.Absorbed), e.Err)
+	}
 	return fmt.Sprintf("par2repair: article %s vanished during sweep: %v", e.MessageID, e.Err)
 }
 
@@ -195,6 +222,12 @@ func RunJob(
 	var discovered []DeadArticle
 	discoveredIDs := map[string]bool{}
 
+	// Slices whose present data failed CRC32 verification. Their articles are
+	// patched after the solve — which article inside the slice carried the
+	// bad bytes is unknown, so every overlapping article gets a byte-exact
+	// payload spliced from recovered slices and refetched wire bytes.
+	corruptSlices := map[int]bool{}
+
 	scratch := store.ScratchDir()
 
 	// Attempt loop. Margin rows absorb most surprises inside a single sweep —
@@ -272,6 +305,7 @@ func RunJob(
 			}
 			missingPos[global] = len(missing)
 			missing = append(missing, global)
+			corruptSlices[global] = true
 			return true
 		}
 		absorbDead := func(fi, ai int, artOff int64, a Article) bool {
@@ -311,6 +345,21 @@ func RunJob(
 		if err := sweep(ctx, plan, idx, fetch, solver, o.fetchDepth(), startSlice, missingPos, absorbDead, absorbCorrupt, onArticle, log); err != nil {
 			var corrupt *corruptSliceError
 			if !errors.As(err, &corrupt) {
+				// The margin ran out, but this sweep already proved other
+				// articles dead. Carry them out with the failure so the retry
+				// replans against every death observed here, not just the last
+				// one — otherwise each attempt re-reads the whole release to
+				// learn a single article.
+				var sweepDead *SweepDeadArticleError
+				if errors.As(err, &sweepDead) && len(discovered) > 0 {
+					for _, d := range discovered {
+						if d.MessageID != sweepDead.MessageID {
+							sweepDead.Absorbed = append(sweepDead.Absorbed, d.MessageID)
+						}
+					}
+					log.WarnContext(ctx, "sweep margin exhausted; reporting every article proved dead this sweep",
+						"breaking_article", sweepDead.MessageID, "absorbed", len(sweepDead.Absorbed))
+				}
 				return err
 			}
 			// Margin exhausted: a present-but-corrupt slice is still just
@@ -328,9 +377,20 @@ func RunJob(
 				"global_slice", corrupt.global, "spare_exponent", spares[0].Exponent)
 			missing = append(missing, corrupt.global)
 			missingPos[corrupt.global] = len(missing) - 1
+			corruptSlices[corrupt.global] = true
 			refs = append(refs, spares[0])
 			spares = spares[1:]
 			continue
+		}
+
+		if len(missing) == 0 {
+			// A verify sweep found the release intact: every slice matched its
+			// IFSC CRC32, so there is nothing to patch — and the caller's
+			// damage is not article damage. Surface the standard sentinel so
+			// a parked import is failed rather than resumed into the same
+			// analysis failure again. (Normal plans start with missing slices
+			// and can never reach this.)
+			return ErrNothingToRepair
 		}
 
 		recovered, err := solver.Solve()
@@ -357,8 +417,122 @@ func RunJob(
 			return err
 		}
 
-		return emitPatches(plan, discovered, recovered, sliceSize, startSlice, missingPos, store, log)
+		if err := emitPatches(plan, discovered, recovered, sliceSize, startSlice, missingPos, store, log); err != nil {
+			return err
+		}
+		return emitCorruptArticlePatches(ctx, plan, corruptSlices, discoveredIDs, recovered,
+			sliceSize, startSlice, missingPos, fetch, store, log)
 	}
+}
+
+// emitCorruptArticlePatches stores byte-exact payloads for every article
+// overlapping a corrupt slice. Slice CRC is the only corruption signal — which
+// article inside the slice carried the bad bytes is unknown — so all
+// overlapping articles are patched. Ranges covered by solved slices come from
+// recovered data; ranges inside verified-good slices keep their wire bytes,
+// refetched once per article. Articles already patched as dead are skipped.
+// Failures to patch one article are logged, never fatal: the solve itself
+// succeeded and the remaining patches are still worth keeping.
+func emitCorruptArticlePatches(
+	ctx context.Context,
+	plan *Plan,
+	corrupt map[int]bool,
+	alreadyPatched map[string]bool,
+	recovered [][]byte,
+	sliceSize int64,
+	startSlice []int64,
+	missingPos map[int]int,
+	fetch ArticleFetcher,
+	store *PatchStore,
+	log *slog.Logger,
+) error {
+	if len(corrupt) == 0 {
+		return nil
+	}
+	patched := map[string]bool{}
+	for _, da := range plan.DeadArticles {
+		patched[da.MessageID] = true
+	}
+	for id := range alreadyPatched {
+		patched[id] = true
+	}
+
+	globals := make([]int, 0, len(corrupt))
+	for g := range corrupt {
+		globals = append(globals, g)
+	}
+	sort.Ints(globals)
+
+	for _, g := range globals {
+		fi := fileForSlice(startSlice, g)
+		f := plan.Files[fi]
+		sliceStart := (int64(g) - startSlice[fi]) * sliceSize
+		sliceEnd := sliceStart + sliceSize
+
+		var artOff int64
+		for _, a := range f.Articles {
+			artEnd := artOff + a.Size
+			overlaps := artEnd > sliceStart && artOff < sliceEnd
+			if overlaps && !patched[a.MessageID] {
+				patched[a.MessageID] = true
+				if err := patchCorruptArticle(ctx, fi, a, artOff, recovered,
+					sliceSize, startSlice, missingPos, fetch, store); err != nil {
+					log.WarnContext(ctx, "failed to patch article overlapping corrupt slice; leaving it unpatched",
+						"message_id", a.MessageID, "error", err)
+				} else {
+					log.InfoContext(ctx, "stored repaired payload for corrupt article",
+						"message_id", a.MessageID, "bytes", a.Size)
+				}
+			}
+			artOff = artEnd
+		}
+	}
+	return nil
+}
+
+// patchCorruptArticle assembles one article's true payload: recovered bytes
+// where a slice was solved, wire bytes (one refetch) where the slice verified
+// good, then stores it as the article's patch.
+func patchCorruptArticle(
+	ctx context.Context,
+	fi int,
+	a Article,
+	artOff int64,
+	recovered [][]byte,
+	sliceSize int64,
+	startSlice []int64,
+	missingPos map[int]int,
+	fetch ArticleFetcher,
+	store *PatchStore,
+) error {
+	payload := make([]byte, a.Size)
+	var wire []byte
+	first := startSlice[fi] + artOff/sliceSize
+	last := startSlice[fi] + (artOff+a.Size-1)/sliceSize
+	for g := first; g <= last; g++ {
+		sliceFileStart := (g - startSlice[fi]) * sliceSize
+		from := max(sliceFileStart, artOff)
+		to := min(sliceFileStart+sliceSize, artOff+a.Size)
+		if pos, ok := missingPos[int(g)]; ok {
+			copy(payload[from-artOff:to-artOff], recovered[pos][from-sliceFileStart:to-sliceFileStart])
+			continue
+		}
+		if wire == nil {
+			data, err := fetch.Fetch(ctx, a.MessageID)
+			if err != nil {
+				return fmt.Errorf("refetch wire bytes: %w", err)
+			}
+			if int64(len(data)) != a.Size {
+				return fmt.Errorf("refetched article is %d bytes, want %d", len(data), a.Size)
+			}
+			wire = data
+		}
+		copy(payload[from-artOff:to-artOff], wire[from-artOff:to-artOff])
+	}
+	if err := store.Put(a.MessageID, payload); err != nil {
+		return fmt.Errorf("store patch: %w", err)
+	}
+	return nil
 }
 
 // loadRecoveryPayloads fetches the payload of every recovery ref, swapping in
@@ -851,7 +1025,12 @@ func readRangeFrom(get func(string) ([]byte, error), f SetFile, off, n int64) ([
 			}
 			from := max(off, artStart)
 			to := min(off+n, artEnd)
-			copy(out[from-off:to-off], data[from-artStart:to-artStart])
+			// A truncated payload (shorter than the article's declared size)
+			// leaves its tail as zeros instead of panicking; the checksum
+			// layers above reject whatever the gap damaged.
+			if srcFrom := from - artStart; srcFrom < int64(len(data)) {
+				copy(out[from-off:to-off], data[srcFrom:min(int64(len(data)), to-artStart)])
+			}
 		}
 		artStart = artEnd
 		if artStart >= off+n {

@@ -2,6 +2,7 @@ package par2repair
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/javi11/nntppool/v4"
 	"github.com/javi11/nzbparser"
 
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
@@ -102,6 +104,16 @@ func ResolveFromNzb(
 		return nil, err
 	}
 
+	// The NZB declares yEnc-ENCODED segment sizes — a few percent above the
+	// decoded payloads. Fine for thresholds, fatal for the byte-exact stream
+	// offsets the PAR2 parser and the recovery payload reads rely on: every
+	// article boundary would drift and every recovery payload would fail its
+	// packet MD5. Content members are sized during matching (sizeArticles);
+	// the PAR2 files themselves are sized here.
+	if err := sizePar2SetFiles(ctx, fetch, par2Files, dead, cache, log); err != nil {
+		return nil, err
+	}
+
 	idx, files, err := planSet(ctx, fetch, store, par2Files, dead, cache, log, progress)
 	if err != nil {
 		return nil, err
@@ -115,6 +127,97 @@ func ResolveFromNzb(
 		"missing_slices", len(plan.Missing), "recovery_rows", len(plan.Recovery),
 		"spares", len(plan.SpareRecovery), "spill_to_disk", plan.SpillToDisk)
 	return &Resolution{Plan: plan, Index: idx, Par2Files: par2Files}, nil
+}
+
+// sizePar2SetFiles replaces the PAR2 files' declared (encoded) article sizes
+// with decoded ones, probed from the articles themselves: usenet posts split
+// each file at one uniform decoded part size, so one live non-final article
+// gives every middle article's size and the final article is probed directly.
+// The probed payloads land in the shared cache, so the parse that follows
+// reuses them instead of refetching.
+//
+// Dead articles cannot be probed. They read as zeros either way (the parser
+// drops whatever packets they damaged), so a file whose probes are all dead
+// keeps its encoded sizes; only its own packets are affected, never the
+// stream offsets of sibling PAR2 files.
+func sizePar2SetFiles(
+	ctx context.Context,
+	fetch ArticleFetcher,
+	files []SetFile,
+	dead map[string]bool,
+	cache *articleCache,
+	log *slog.Logger,
+) error {
+	probe := func(id string) (int64, error) {
+		payload, err := fetchCached(ctx, fetch, id, cache)
+		if err != nil {
+			if errors.Is(err, nntppool.ErrArticleNotFound) {
+				dead[id] = true
+				return -1, nil
+			}
+			return -1, fmt.Errorf("par2repair: probe par2 article %s: %w", id, err)
+		}
+		return int64(len(payload)), nil
+	}
+
+	// Warm every probe target up front: the sizing loop below is sequential
+	// and would otherwise pay one fetch round-trip per file per probe.
+	for i := range files {
+		if n := len(files[i].Articles); n > 0 {
+			for _, a := range []Article{files[i].Articles[0], files[i].Articles[n-1]} {
+				if !dead[a.MessageID] {
+					cache.warm(ctx, fetch, a.MessageID)
+				}
+			}
+		}
+	}
+
+	for i := range files {
+		f := &files[i]
+		n := len(f.Articles)
+		if n == 0 {
+			continue
+		}
+
+		// Final article first: its decoded size is not uniform.
+		lastSize := int64(-1)
+		if last := f.Articles[n-1]; !dead[last.MessageID] {
+			var err error
+			if lastSize, err = probe(last.MessageID); err != nil {
+				return err
+			}
+		}
+
+		partSize := int64(-1)
+		for j := 0; j < n-1 && partSize < 0; j++ {
+			if a := f.Articles[j]; !dead[a.MessageID] {
+				var err error
+				if partSize, err = probe(a.MessageID); err != nil {
+					return err
+				}
+			}
+		}
+
+		if n > 1 && partSize < 0 {
+			log.WarnContext(ctx, "PAR2 file's non-final articles are all dead; keeping encoded sizes",
+				"first_article", f.Articles[0].MessageID)
+			continue
+		}
+		var total int64
+		for j := range f.Articles {
+			switch {
+			case j < n-1:
+				f.Articles[j].Size = partSize
+			case lastSize >= 0:
+				f.Articles[j].Size = lastSize
+				// else: dead final article keeps its encoded size; it reads as
+				// zeros and only its own trailing packets are lost.
+			}
+			total += f.Articles[j].Size
+		}
+		f.Length = uint64(total)
+	}
+	return nil
 }
 
 // nzbEntryToSetFile converts one NZB file entry into a SetFile. dead may be nil.

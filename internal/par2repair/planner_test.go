@@ -203,6 +203,45 @@ func TestBuildPlanNothingToRepair(t *testing.T) {
 	}
 }
 
+// A verify sweep: the trigger knows the release is damaged (corrupt-but-
+// present articles broke archive analysis at import) but not which articles.
+// With VerifySweep set, no dead articles builds a plan with no missing slices
+// and margin recovery rows only — the job's CRC sweep locates the corrupt
+// slices and absorbs them onto the margin. Without the flag, the no-damage
+// short-circuit stays as before.
+func TestBuildPlanVerifySweep(t *testing.T) {
+	content := bytes.Repeat([]byte{0x66}, 10240)
+	idx := mkIndex(t, 1024, 6, map[string][]byte{"a.rar": content})
+	files := []SetFile{mkSetFile(t, idx, "a.rar", 10240, 2048)} // nothing dead
+
+	caps := defaultCaps()
+	caps.VerifySweep = true
+	plan, err := BuildPlan(idx, files, caps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Missing) != 0 {
+		t.Fatalf("Missing = %v, want none for a verify sweep", plan.Missing)
+	}
+	if len(plan.Recovery) == 0 {
+		t.Fatal("verify sweep needs margin recovery rows to absorb corrupt slices")
+	}
+	if len(plan.Recovery)+len(plan.SpareRecovery) != 6 {
+		t.Fatalf("recovery split = %d/%d, want all 6 rows accounted for",
+			len(plan.Recovery), len(plan.SpareRecovery))
+	}
+
+	// Known damage keeps its normal plan regardless of the flag.
+	damaged := []SetFile{mkSetFile(t, idx, "a.rar", 10240, 2048, 1)}
+	plan, err = BuildPlan(idx, damaged, caps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Missing) == 0 {
+		t.Fatal("dead articles must still produce missing slices under VerifySweep")
+	}
+}
+
 func TestBuildPlanMissingSetMember(t *testing.T) {
 	a := bytes.Repeat([]byte{0x01}, 4096)
 	b := bytes.Repeat([]byte{0x02}, 4096)

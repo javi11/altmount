@@ -11,6 +11,7 @@ import (
 	"math/rand/v2"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/javi11/nntppool/v4"
@@ -472,6 +473,17 @@ func matchSetFiles(
 		matched = append(matched, matchedFile{id: id, entry: store.Files[entry]})
 	}
 
+	// Warm every member's head article: sizing probes them one at a time
+	// below, and each would otherwise pay a full fetch round-trip in
+	// sequence. The warm pool bounds the fan-out on huge releases.
+	for _, m := range matched {
+		if len(m.entry.Segments) > 0 {
+			if id := normalizeMsgID(m.entry.Segments[0].Id); !dead[id] {
+				cache.warm(ctx, fetch, id)
+			}
+		}
+	}
+
 	// Pass 1: size every file that still has a live article to probe, and
 	// remember the part size the release was posted with.
 	out = make([]SetFile, len(matched))
@@ -642,22 +654,49 @@ func hash16k(prefix []byte, fileLength int64) [16]byte {
 const resolveCacheCap = 64
 
 // articleCache is a FIFO-bounded article payload cache.
+// warmPoolSize bounds how many background warm fetches run at once across one
+// resolve. Planning shares the pool's normal lane, so warming stays modest.
+const warmPoolSize = 8
+
+// articleCache is a concurrency-safe FIFO article cache with singleflight:
+// concurrent demands for the same article share one download, and background
+// warms (see warm) pipeline the otherwise latency-bound planning fetches.
 type articleCache struct {
-	cap   int
-	data  map[string][]byte
-	order []string
+	cap     int
+	warmSem chan struct{}
+
+	mu       sync.Mutex
+	data     map[string][]byte
+	order    []string
+	inflight map[string]chan struct{} // closed when the fetch finishes (either way)
 }
 
 func newArticleCache(cap int) *articleCache {
-	return &articleCache{cap: cap, data: map[string][]byte{}}
+	return &articleCache{
+		cap:      cap,
+		warmSem:  make(chan struct{}, warmPoolSize),
+		data:     map[string][]byte{},
+		inflight: map[string]chan struct{}{},
+	}
 }
 
+// get returns a cached payload.
 func (c *articleCache) get(id string) ([]byte, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	data, ok := c.data[id]
 	return data, ok
 }
 
+// put stores an entry, evicting the oldest past the cap.
 func (c *articleCache) put(id string, data []byte) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.putLocked(id, data)
+}
+
+// putLocked stores an entry; the caller holds c.mu.
+func (c *articleCache) putLocked(id string, data []byte) {
 	if _, ok := c.data[id]; ok {
 		return
 	}
@@ -669,15 +708,82 @@ func (c *articleCache) put(id string, data []byte) {
 	}
 }
 
-func fetchCached(ctx context.Context, fetch ArticleFetcher, msgID string, cache *articleCache) ([]byte, error) {
-	if data, ok := cache.get(msgID); ok {
-		return data, nil
+// warm fetches an article into the cache in the background — deduped against
+// cached and in-flight fetches, bounded by the warm pool. Best-effort: fetch
+// errors are dropped, the demand path refetches and classifies them.
+func (c *articleCache) warm(ctx context.Context, fetch ArticleFetcher, msgID string) {
+	c.mu.Lock()
+	if _, ok := c.data[msgID]; ok {
+		c.mu.Unlock()
+		return
 	}
+	if _, busy := c.inflight[msgID]; busy {
+		c.mu.Unlock()
+		return
+	}
+	ch := make(chan struct{})
+	c.inflight[msgID] = ch
+	c.mu.Unlock()
+
+	go func() {
+		defer close(ch) // after the bookkeeping below, so waiters see the result
+		select {
+		case c.warmSem <- struct{}{}:
+			defer func() { <-c.warmSem }()
+		case <-ctx.Done():
+			c.mu.Lock()
+			delete(c.inflight, msgID)
+			c.mu.Unlock()
+			return
+		}
+		data, err := fetch.Fetch(ctx, msgID)
+		c.mu.Lock()
+		delete(c.inflight, msgID)
+		if err == nil {
+			c.putLocked(msgID, data)
+		}
+		c.mu.Unlock()
+	}()
+}
+
+// fetchCached returns the article's payload, from cache when possible.
+// Concurrent callers of the same article singleflight onto one download; a
+// caller landing on a failed in-flight fetch retries the download itself, so
+// warm failures never surface as anyone else's error.
+func fetchCached(ctx context.Context, fetch ArticleFetcher, msgID string, cache *articleCache) ([]byte, error) {
+	var ch chan struct{}
+	for {
+		cache.mu.Lock()
+		if data, ok := cache.data[msgID]; ok {
+			cache.mu.Unlock()
+			return data, nil
+		}
+		theirs, busy := cache.inflight[msgID]
+		if !busy {
+			ch = make(chan struct{})
+			cache.inflight[msgID] = ch
+			cache.mu.Unlock()
+			break // this caller downloads
+		}
+		cache.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-theirs:
+		}
+	}
+
 	data, err := fetch.Fetch(ctx, msgID)
+	cache.mu.Lock()
+	delete(cache.inflight, msgID)
+	if err == nil {
+		cache.putLocked(msgID, data)
+	}
+	cache.mu.Unlock()
+	close(ch)
 	if err != nil {
 		return nil, err
 	}
-	cache.put(msgID, data)
 	return data, nil
 }
 
@@ -704,13 +810,49 @@ type lazyFileReader struct {
 	cache *articleCache
 	pos   int64
 	size  int64
+
+	// Stride prediction: ParseIndex reads a packet header, seeks past the
+	// payload, reads the next header — so within one PAR2 file, successive
+	// article fetches land a uniform article-stride apart. Once two strides
+	// agree, the next few articles on that stride are warmed in the
+	// background, turning the latency-bound header walk into a pipeline
+	// without prefetching the payload articles the parser skips.
+	lastArt   int // index of the last article fetched; -1 before the first
+	lastDelta int // last observed forward article stride
 }
+
+// lazyWarmDepth is how many articles ahead a stable stride warms — the depth
+// of the planning pipeline. Bounded by the warm pool and the cache cap.
+const lazyWarmDepth = 4
 
 func newLazyFileReader(ctx context.Context, fetch ArticleFetcher, file SetFile, cache *articleCache) *lazyFileReader {
 	return &lazyFileReader{
 		ctx: ctx, fetch: fetch, file: file, cache: cache,
-		size: articleSizeSum(file.Articles),
+		size:    articleSizeSum(file.Articles),
+		lastArt: -1,
 	}
+}
+
+// maybeWarm records that article i was just fetched and, when the article
+// stride has stabilized, warms the next lazyWarmDepth articles on it.
+func (l *lazyFileReader) maybeWarm(i int) {
+	if l.lastArt >= 0 {
+		if d := i - l.lastArt; d > 0 {
+			if d == l.lastDelta {
+				for k := 1; k <= lazyWarmDepth; k++ {
+					j := i + k*d
+					if j >= len(l.file.Articles) {
+						break
+					}
+					if a := l.file.Articles[j]; !a.Dead {
+						l.cache.warm(l.ctx, l.fetch, a.MessageID)
+					}
+				}
+			}
+			l.lastDelta = d
+		}
+	}
+	l.lastArt = i
 }
 
 func (l *lazyFileReader) Read(p []byte) (int, error) {
@@ -724,7 +866,7 @@ func (l *lazyFileReader) Read(p []byte) (int, error) {
 	// Locate and fetch only the articles overlapping [pos, pos+n).
 	var artStart int64
 	read := 0
-	for _, a := range l.file.Articles {
+	for i, a := range l.file.Articles {
 		artEnd := artStart + a.Size
 		if artEnd > l.pos && artStart < l.pos+n {
 			from := max(l.pos, artStart)
@@ -738,6 +880,7 @@ func (l *lazyFileReader) Read(p []byte) (int, error) {
 				if err != nil && !errors.Is(err, nntppool.ErrArticleNotFound) {
 					return read, err
 				}
+				l.maybeWarm(i)
 			}
 			// Dead, vanished or short articles read as zeros; p may carry the
 			// caller's stale bytes, so the gap is cleared explicitly.

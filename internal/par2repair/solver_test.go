@@ -91,8 +91,10 @@ func TestSolverKMismatch(t *testing.T) {
 	if _, err := NewSolver([]int{1, 2}, []uint32{0}, 512); err == nil {
 		t.Fatal("want error: need one recovery slice per missing slice")
 	}
-	if _, err := NewSolver(nil, nil, 512); err == nil {
-		t.Fatal("want error: nothing to solve")
+	// Zero missing slices is valid: a verify sweep starts empty and grows
+	// its unknowns via AddMissing as corrupt slices surface.
+	if _, err := NewSolver(nil, nil, 512); err != nil {
+		t.Fatalf("zero missing slices must construct a valid solver, got %v", err)
 	}
 	if _, err := NewSolver([]int{1}, []uint32{0}, 511); err == nil {
 		t.Fatal("want error: slice size not a multiple of 4")
