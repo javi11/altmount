@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"testing"
 
 	"github.com/javi11/altmount/internal/prowlarr"
@@ -150,5 +151,50 @@ func TestFilterIntegration_OrderingKeepsCachedFirst(t *testing.T) {
 	}
 	if len(kept) != 2 || len(droppedNames) != 1 || droppedNames[0] != junk.Title {
 		t.Fatalf("unexpected filtering result: kept=%d dropped=%v", len(kept), droppedNames)
+	}
+}
+
+func TestReleaseMatchesContentAnimeAliasesAndAbsolute(t *testing.T) {
+	romaji := "Meitantei Conan"
+	aliases := []string{"Detective Conan", "Case Closed"}
+	ctx := releaseMatchContext{aliases: aliases, isAnime: true}
+	absCtx := releaseMatchContext{
+		aliases:     aliases,
+		isAnime:     true,
+		episodeMeta: seriesEpisodeMeta{absolute: map[int]map[int]int{1: {1: 1, 670: 670}, 5: {23: 523}, 99: {1210: 1210}}},
+	}
+
+	cases := []struct {
+		name    string
+		release string
+		season  int
+		episode int
+		ctx     releaseMatchContext
+		want    bool
+	}{
+		{"fansub absolute matches catalog absolute", "[SubsPlease] Detective Conan - 1210 (1080p)", 99, 1210, absCtx, true},
+		{"erai-raws absolute matches catalog absolute", "[Erai-raws] Detective Conan - 1210 [1080p CR WEB-DL AVC AAC]", 99, 1210, absCtx, true},
+		{"toonshub EP prefix matches catalog absolute", "Detective.Conan.EP1210.Episode.1210.1080p.NF.WEB-DL.JPN.AAC2.0.H.264.MSubs-ToonsHub", 99, 1210, absCtx, true},
+		{"english alias title match via standard path", "Detective.Conan.S01E01.The.Roller.Coaster.Murder.Case.1080p.CR.WEB-DL.VARYG", 1, 1, ctx, true},
+		{"legacy baseline without aliases or anime flag rejects", "[SubsPlease] Detective Conan - 1210 (1080p)", 99, 1210, releaseMatchContext{}, false},
+		// Known looseness (pre-existing): once an English alias exists, the
+		// token-coverage fallback accepts absolute-numbered releases even
+		// without the anime path. Documented, not introduced here.
+		{"alias coverage accepts absolute without anime flag", "[SubsPlease] Detective Conan - 1210 (1080p)", 99, 1210, ctx, true},
+		{"unrelated series sharing S/E rejected", "One.Piece.S01E01.1080p.WEB-DL.GROUP", 1, 1, absCtx, false},
+		{"ARK vs The Ark regression guarded", "ARK.The.Animated.Series.S01E01.1080p.WEB-DL.DDP5.1.H.264-GROUP", 1, 1, releaseMatchContext{}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := releaseMatchesContent("series", tc.release, romaji, "", tc.season, tc.episode, tc.ctx); got != tc.want {
+				t.Fatalf("releaseMatchesContent(%q) = %v, want %v", tc.release, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestResolveSeriesTitleAliasesCacheNilSafe(t *testing.T) {
+	if resolveSeriesTitleAliases(context.Background(), "") != nil {
+		t.Fatal("empty imdb must yield nil aliases")
 	}
 }

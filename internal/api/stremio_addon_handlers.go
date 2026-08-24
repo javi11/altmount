@@ -889,6 +889,7 @@ func (s *Server) searchStremioReleases(
 	var tvdbID, title string
 	expectedTitle := ""
 	expectedYear := ""
+	seriesMatchCtx := releaseMatchContext{}
 	if streamType == "series" {
 		var err error
 		tvdbID, title, err = resolveSeriesMetadataFromIMDb(ctx, imdbID)
@@ -896,6 +897,16 @@ func (s *Server) searchStremioReleases(
 			slog.WarnContext(ctx, "Failed to resolve series metadata from IMDb ID", "error", err, "imdb_id", imdbID)
 		}
 		expectedTitle = title
+		// Anime releases use franchise-absolute episode numbers and localized
+		// titles; resolve both once per request so the relevance gate can
+		// accept e.g. "[SubsPlease] Detective Conan - 1210" for catalog
+		// SxxEyy entries.
+		meta := resolveSeriesEpisodeMeta(ctx, imdbID)
+		seriesMatchCtx = releaseMatchContext{
+			aliases:     resolveSeriesTitleAliases(ctx, imdbID),
+			episodeMeta: meta,
+			isAnime:     meta.isAnimation,
+		}
 	} else if imdbID != "" {
 		_, movieTitle, movieYear, mErr := resolveMovieMetadataFromIMDb(ctx, imdbID)
 		if mErr != nil {
@@ -966,7 +977,7 @@ func (s *Server) searchStremioReleases(
 			ordered = append(ordered, r)
 			continue
 		}
-		if !releaseMatchesContent(streamType, r.Title, expectedTitle, expectedYear, season, episode) {
+		if !releaseMatchesContent(streamType, r.Title, expectedTitle, expectedYear, season, episode, seriesMatchCtx) {
 			droppedNames = append(droppedNames, fmt.Sprintf("%q (%s)", r.Title, r.Indexer))
 			continue
 		}

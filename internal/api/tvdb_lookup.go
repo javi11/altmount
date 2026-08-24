@@ -33,42 +33,39 @@ type tvmazeLookupResponse struct {
 // seriesTitleAliases returns alternative titles for the series (all
 // languages, e.g. "Detective Conan" for romaji-primary anime). Empty on any
 // failure — callers must treat nil as "no aliases known".
-var seriesTitleAliasesCache sync.Map // imdbID -> []string
+var seriesTitleAliasesCache seriesMetadataCache[[]string]
 
 func resolveSeriesTitleAliases(ctx context.Context, imdbID string) []string {
 	if imdbID == "" {
 		return nil
 	}
-	if cached, ok := seriesTitleAliasesCache.Load(imdbID); ok {
-		if aliases, _ := cached.([]string); len(aliases) > 0 {
-			return aliases
-		}
-		return nil
+	if cached, ok := seriesTitleAliasesCache.get(imdbID); ok {
+		return cached
 	}
 	showID, err := tvmazeShowIDForIMDb(ctx, imdbID)
 	if err != nil || showID <= 0 {
-		return nil
+		return cacheAliasMiss(imdbID)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		"https://api.tvmaze.com/shows/"+strconv.Itoa(showID)+"/akas", nil)
+		tvmazeBaseURL+"/shows/"+strconv.Itoa(showID)+"/akas", nil)
 	if err != nil {
-		return nil
+		return cacheAliasMiss(imdbID)
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "altmount-stremio-tvdb-lookup")
 	resp, err := tvMetadataLookupClient.Do(req)
 	if err != nil {
-		return nil
+		return cacheAliasMiss(imdbID)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil
+		return cacheAliasMiss(imdbID)
 	}
 	var akas []struct {
 		Name string `json:"name"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxMetadataBytes)).Decode(&akas); err != nil {
-		return nil
+		return cacheAliasMiss(imdbID)
 	}
 	seen := make(map[string]struct{}, len(akas))
 	aliases := make([]string, 0, len(akas))
@@ -85,9 +82,9 @@ func resolveSeriesTitleAliases(ctx context.Context, imdbID string) []string {
 		aliases = append(aliases, name)
 	}
 	if len(aliases) == 0 {
-		return nil
+		return cacheAliasMiss(imdbID)
 	}
-	seriesTitleAliasesCache.Store(imdbID, aliases)
+	seriesTitleAliasesCache.put(imdbID, aliases)
 	return aliases
 }
 
@@ -109,37 +106,34 @@ func (m seriesEpisodeMeta) absoluteFor(season, episode int) int {
 	return 0
 }
 
-var seriesEpisodeMetaCache sync.Map // imdbID -> seriesEpisodeMeta
+var seriesEpisodeMetaCache seriesMetadataCache[seriesEpisodeMeta]
 
 func resolveSeriesEpisodeMeta(ctx context.Context, imdbID string) seriesEpisodeMeta {
 	if imdbID == "" {
 		return seriesEpisodeMeta{}
 	}
-	if cached, ok := seriesEpisodeMetaCache.Load(imdbID); ok {
-		if meta, _ := cached.(seriesEpisodeMeta); meta.absolute != nil {
-			return meta
-		}
-		return seriesEpisodeMeta{}
+	if cached, ok := seriesEpisodeMetaCache.get(imdbID); ok {
+		return cached
 	}
 	showID, metaType, err := tvmazeShowForIMDb(ctx, imdbID)
 	if err != nil || showID <= 0 {
-		return seriesEpisodeMeta{}
+		return cacheEpisodeMetaMiss(imdbID)
 	}
 	meta := seriesEpisodeMeta{isAnimation: strings.EqualFold(strings.TrimSpace(metaType), "Animation")}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		"https://api.tvmaze.com/shows/"+strconv.Itoa(showID)+"/episodes", nil)
+		tvmazeBaseURL+"/shows/"+strconv.Itoa(showID)+"/episodes", nil)
 	if err != nil {
-		return seriesEpisodeMeta{}
+		return cacheEpisodeMetaMiss(imdbID)
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "altmount-stremio-tvdb-lookup")
 	resp, err := tvMetadataLookupClient.Do(req)
 	if err != nil {
-		return seriesEpisodeMeta{}
+		return cacheEpisodeMetaMiss(imdbID)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return seriesEpisodeMeta{}
+		return cacheEpisodeMetaMiss(imdbID)
 	}
 	var episodes []struct {
 		SeasonNumber   int `json:"season"`
@@ -147,7 +141,7 @@ func resolveSeriesEpisodeMeta(ctx context.Context, imdbID string) seriesEpisodeM
 		AbsoluteNumber int `json:"absolute_number"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxMetadataBytes)).Decode(&episodes); err != nil {
-		return seriesEpisodeMeta{}
+		return cacheEpisodeMetaMiss(imdbID)
 	}
 	meta.absolute = make(map[int]map[int]int)
 	for _, ep := range episodes {
@@ -165,13 +159,13 @@ func resolveSeriesEpisodeMeta(ctx context.Context, imdbID string) seriesEpisodeM
 			seasonMap[ep.EpisodeNumber] = ep.EpisodeNumber
 		}
 	}
-	seriesEpisodeMetaCache.Store(imdbID, meta)
+	seriesEpisodeMetaCache.put(imdbID, meta)
 	return meta
 }
 
 func tvmazeShowForIMDb(ctx context.Context, imdbID string) (showID int, showType string, err error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		"https://api.tvmaze.com/lookup/shows?imdb="+url.QueryEscape(imdbID), nil)
+		tvmazeBaseURL+"/lookup/shows?imdb="+url.QueryEscape(imdbID), nil)
 	if err != nil {
 		return 0, "", err
 	}
@@ -214,7 +208,7 @@ func resolveSeriesMetadataFromIMDb(ctx context.Context, imdbID string) (tvdbID, 
 	req, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodGet,
-		"https://api.tvmaze.com/lookup/shows?imdb="+url.QueryEscape(imdbID),
+		tvmazeBaseURL+"/lookup/shows?imdb="+url.QueryEscape(imdbID),
 		nil,
 	)
 	if err == nil {
@@ -306,4 +300,73 @@ func resolveMovieMetadataFromIMDb(ctx context.Context, imdbID string) (tmdbID in
 	}
 
 	return 0, "", "", nil
+}
+
+// tvmazeBaseURL is the TVmaze API root. A variable so tests can point the
+// resolvers at a local server instead of the public API.
+var tvmazeBaseURL = "https://api.tvmaze.com"
+
+// maxSeriesMetadataCacheEntries bounds the series-metadata caches. Keys are
+// IMDb IDs taken from request paths, so an unbounded map would retain one entry
+// per distinct ID for the process lifetime. A real library has far fewer
+// distinct series than this, so the reset below is rare in practice.
+const maxSeriesMetadataCacheEntries = 1024
+
+// seriesMetadataCache is a size-bounded cache that also remembers misses.
+//
+// Both resolvers sit on the Stremio hot path (once per series stream request)
+// and each miss costs two outbound TVmaze calls, so a series TVmaze does not
+// know must be remembered as "nothing here" — otherwise every request pays the
+// lookup again. Reaching the cap clears the map wholesale, mirroring
+// internal/regexcache: hot keys are rebuilt on their next miss.
+type seriesMetadataCache[T any] struct {
+	mu      sync.Mutex
+	entries map[string]T
+}
+
+// get returns the cached value and whether the key was present. A present key
+// with a zero value is a remembered miss.
+func (c *seriesMetadataCache[T]) get(key string) (T, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	v, ok := c.entries[key]
+	return v, ok
+}
+
+// put stores a value, including a zero value to record a miss.
+func (c *seriesMetadataCache[T]) put(key string, value T) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.entries == nil {
+		c.entries = make(map[string]T)
+	}
+	if len(c.entries) >= maxSeriesMetadataCacheEntries {
+		c.entries = make(map[string]T)
+	}
+	c.entries[key] = value
+}
+
+func (c *seriesMetadataCache[T]) len() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.entries)
+}
+
+// cacheAliasMiss records that a series has no known aliases and returns nil,
+// so a later request is served from the cache instead of re-querying TVmaze.
+func cacheAliasMiss(imdbID string) []string {
+	seriesTitleAliasesCache.put(imdbID, nil)
+	return nil
+}
+
+// cacheEpisodeMetaMiss records that a series has no usable episode metadata.
+func cacheEpisodeMetaMiss(imdbID string) seriesEpisodeMeta {
+	seriesEpisodeMetaCache.put(imdbID, seriesEpisodeMeta{})
+	return seriesEpisodeMeta{}
+}
+
+func (c *seriesMetadataCache[T]) reset() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.entries = nil
 }
