@@ -71,7 +71,6 @@ function initializeStremioFormData(config: ConfigResponse): StremioConfig {
 		max_fallback_releases: stremio?.max_fallback_releases ?? 2,
 		fast_fail_header_only: stremio?.fast_fail_header_only ?? true,
 		include_library_streams: stremio?.include_library_streams ?? true,
-		show_no_streams_video: stremio?.show_no_streams_video ?? true,
 		indexers,
 		scoring,
 		prowlarr: {

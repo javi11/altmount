@@ -1,4 +1,4 @@
-import { Database, Eye, Globe, MonitorPlay, Radio, Rocket, ShieldCheck, Zap } from "lucide-react";
+import { Database, Eye, Globe, Radio, Rocket, ShieldCheck, Zap } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { StremioConfig } from "../../../types/config";
 
@@ -21,7 +21,6 @@ export function StreamRoutingCard({
 	const failedTtlHours = config.failed_release_ttl_hours ?? 24;
 	const maxFallbacks = config.max_fallback_releases ?? 2;
 	const fastFailHeader = config.fast_fail_header_only ?? true;
-	const showNoStreamsVideo = config.show_no_streams_video ?? true;
 
 	const [libraryCount, setLibraryCount] = useState<number | null>(null);
 
@@ -80,7 +79,7 @@ export function StreamRoutingCard({
 				</fieldset>
 
 				{/* Feature Toggles */}
-				<div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+				<div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
 					<div className="flex items-start justify-between gap-3 rounded-xl border border-base-300 bg-base-100/70 p-4">
 						<div className="min-w-0 flex-1">
 							<div className="flex items-center gap-2">
@@ -139,25 +138,6 @@ export function StreamRoutingCard({
 							checked={reuseLibrary}
 							disabled={isReadOnly}
 							onChange={(e) => onChange({ include_library_streams: e.target.checked })}
-						/>
-					</div>
-
-					<div className="flex items-start justify-between gap-3 rounded-xl border border-base-300 bg-base-100/70 p-4">
-						<div className="min-w-0 flex-1">
-							<div className="flex items-center gap-2">
-								<MonitorPlay className="h-4 w-4 text-info" />
-								<span className="font-semibold text-sm">No Streams Video</span>
-							</div>
-							<p className="mt-1 text-base-content/60 text-xs">
-								Returns a short placeholder video instead of an empty list when nothing is found.
-							</p>
-						</div>
-						<input
-							type="checkbox"
-							className="toggle toggle-primary shrink-0"
-							checked={showNoStreamsVideo}
-							disabled={isReadOnly}
-							onChange={(e) => onChange({ show_no_streams_video: e.target.checked })}
 						/>
 					</div>
 				</div>

@@ -46,7 +46,6 @@ stremio:
   enabled: true
   nzb_ttl_hours: 24   # 0 = keep cached streams forever
   base_url: ""        # optional — set if auto-detection gives the wrong origin
-  show_no_streams_video: true   # return a placeholder video when nothing is found
   prowlarr:
     enabled: true
     host: "http://localhost:9696"
@@ -61,11 +60,6 @@ stremio:
 | `enabled` | bool | `false` | Enable the Stremio integration |
 | `nzb_ttl_hours` | int | `24` | Hours before a cached NZB result expires. `0` means never expire. |
 | `base_url` | string | `""` | Public base URL used when building stream and manifest links (e.g. `https://altmount.example.com`). When empty, AltMount auto-detects the origin from the incoming request. Set this when running behind a reverse proxy or when the detected origin is wrong. |
-| `show_no_streams_video` | bool | `true` | When no streams are available, return a single stream entry pointing at a short placeholder video (served from `/stremio/:key/no-streams.mp4`) instead of an empty list, so Stremio shows visible feedback in the player. |
-
-### No Streams Placeholder Video
-
-When a stream request yields no results, AltMount returns one entry whose URL points at a bundled placeholder video reading "No streams available — try again later". Playing it makes the empty state obvious inside Stremio. Set `show_no_streams_video: false` to restore the plain empty-list behaviour.
 
 When `nzb_ttl_hours` is greater than zero, submitting the same NZB filename within the TTL window returns the cached stream URLs immediately without re-queueing or re-downloading.
 
