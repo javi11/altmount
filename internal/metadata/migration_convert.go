@@ -64,7 +64,9 @@ func (ms *MetadataService) MigrateGroup(ctx context.Context, g LegacyGroup, stor
 	if err := ms.store.WriteStore(storeRef, store); err != nil {
 		return res, fmt.Errorf("write store %q: %w", storeRef, err)
 	}
-	if _, err := ms.store.ReadStore(storeRef); err != nil {
+	// Read back from disk, bypassing the cache WriteStore just populated, so
+	// this proves the bytes really landed and decompress.
+	if _, err := ms.store.ReadStoreUncached(storeRef); err != nil {
 		_ = os.Remove(storeRef)
 		return res, fmt.Errorf("store integrity check failed for %q: %w", storeRef, err)
 	}
