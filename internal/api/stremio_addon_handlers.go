@@ -46,7 +46,24 @@ type stremioManifest struct {
 }
 
 // emptyStreamsResponse returns the Stremio-protocol response for "no streams available".
-func emptyStreamsResponse(c *fiber.Ctx) error {
+// When ShowNoStreamsVideo is enabled it returns a single stream entry pointing at the
+// bundled placeholder video so clients get visible feedback in the player instead of
+// a bare empty list.
+func (s *Server) emptyStreamsResponse(c *fiber.Ctx, cfg *config.Config, key string) error {
+	showVideo := cfg == nil || cfg.Stremio.EffectiveShowNoStreamsVideo()
+	configuredURL := ""
+	if cfg != nil {
+		configuredURL = cfg.Stremio.BaseURL
+	}
+	if showVideo && key != "" {
+		videoURL := resolveBaseURL(c, configuredURL) + "/stremio/" + url.QueryEscape(key) + "/no-streams.mp4"
+		return c.JSON(fiber.Map{
+			"streams": []any{fiber.Map{
+				"title": noStreamsVideoTitle,
+				"url":   videoURL,
+			}},
+		})
+	}
 	return c.JSON(fiber.Map{"streams": []any{}})
 }
 
@@ -207,11 +224,11 @@ func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 	key := c.Params("key")
 
 	if s.configManager == nil {
-		return emptyStreamsResponse(c)
+		return s.emptyStreamsResponse(c, nil, key)
 	}
 	cfg := s.configManager.GetConfig()
 	if !isStremioEnabled(cfg) || !stremioProviderAvailable(cfg) {
-		return emptyStreamsResponse(c)
+		return s.emptyStreamsResponse(c, cfg, key)
 	}
 
 	if !s.validateDownloadKey(ctx, key) {
@@ -220,7 +237,7 @@ func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 
 	streamType := c.Params("type")
 	if streamType != "movie" && streamType != "series" {
-		return emptyStreamsResponse(c)
+		return s.emptyStreamsResponse(c, cfg, key)
 	}
 
 	rawID, _ := url.PathUnescape(c.Params("id"))
@@ -229,7 +246,7 @@ func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 	imdbID, season, episode := parseStremioContentID(rawID)
 
 	if !strings.HasPrefix(imdbID, "tt") {
-		return emptyStreamsResponse(c)
+		return s.emptyStreamsResponse(c, cfg, key)
 	}
 
 	baseURL := resolveBaseURL(c, cfg.Stremio.BaseURL)
@@ -305,7 +322,7 @@ func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 
 	results, cachedItems, err := s.searchStremioReleases(ctx, cfg, streamType, prowlarrType, imdbID, season, episode)
 	if err != nil && len(libraryStreams) == 0 {
-		return emptyStreamsResponse(c)
+		return s.emptyStreamsResponse(c, cfg, key)
 	}
 
 	showCachedIndicator := cfg.Stremio.ShowCachedIndicator == nil || *cfg.Stremio.ShowCachedIndicator
@@ -330,7 +347,7 @@ func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 	}
 
 	if len(streams) == 0 {
-		return emptyStreamsResponse(c)
+		return s.emptyStreamsResponse(c, cfg, key)
 	}
 
 	return c.JSON(fiber.Map{"streams": streams})
