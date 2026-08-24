@@ -1901,3 +1901,273 @@ func firstEnabledARR(instances []config.ArrsInstanceConfig) (string, string) {
 	}
 	return "", ""
 }
+
+// InspectSearchRequest represents a payload to inspect/rank indexer search results in real time.
+type InspectSearchRequest struct {
+	Query     string                       `json:"query"`
+	Type      string                       `json:"type"` // "movie" or "series"
+	IMDbID    string                       `json:"imdb_id,omitempty"`
+	TVDBID    string                       `json:"tvdb_id,omitempty"`
+	Season    int                          `json:"season,omitempty"`
+	Episode   int                          `json:"episode,omitempty"`
+	TimeoutMS int                          `json:"timeout_ms,omitempty"`
+	Scoring   *stremio.StreamScoringConfig `json:"scoring,omitempty"`
+}
+
+// handleInspectStremioSearch handles POST /api/stremio/search/inspect
+func (s *Server) handleInspectStremioSearch(c *fiber.Ctx) error {
+	ctx := c.Context()
+	var req InspectSearchRequest
+	if err := c.BodyParser(&req); err != nil {
+		return RespondBadRequest(c, "Invalid request body", err.Error())
+	}
+
+	req.Query = strings.TrimSpace(req.Query)
+	req.IMDbID = strings.TrimSpace(req.IMDbID)
+
+	if req.Query == "" && req.IMDbID == "" {
+		return RespondBadRequest(c, "Query title or IMDb ID is required", "")
+	}
+
+	// Handle Stremio ID formats (e.g. tt15367376:1:1 or tt2654520)
+	rawTarget := req.IMDbID
+	if rawTarget == "" && strings.HasPrefix(strings.ToLower(req.Query), "tt") {
+		rawTarget = req.Query
+	}
+
+	if rawTarget != "" && strings.HasPrefix(strings.ToLower(rawTarget), "tt") {
+		parsedIMDb, parsedSeason, parsedEpisode := parseStremioContentID(rawTarget)
+		req.IMDbID = parsedIMDb
+		if parsedSeason > 0 && req.Season == 0 {
+			req.Season = parsedSeason
+			req.Type = "series"
+		}
+		if parsedEpisode > 0 && req.Episode == 0 {
+			req.Episode = parsedEpisode
+			req.Type = "series"
+		}
+	}
+
+	if req.Type == "" {
+		req.Type = "movie"
+	}
+
+	searchTitle := req.Query
+	if strings.HasPrefix(strings.ToLower(searchTitle), "tt") {
+		searchTitle = ""
+	}
+
+	// Resolve metadata from IMDb ID identical to Stremio addon stream handler.
+	// Results are captured once and reused by the library-stream lookup below
+	// to avoid duplicate external Cinemeta calls.
+	var resolvedTVDBID, resolvedTitle, resolvedYear string
+	var resolvedTmdbID int
+	if req.IMDbID != "" {
+		if req.Type == "series" {
+			tvdbID, title, err := resolveSeriesMetadataFromIMDb(ctx, req.IMDbID)
+			if err != nil {
+				slog.WarnContext(ctx, "Failed to resolve series metadata from IMDb ID", "error", err, "imdb_id", req.IMDbID)
+			} else {
+				resolvedTVDBID = tvdbID
+				resolvedTitle = title
+				if req.TVDBID == "" && tvdbID != "" {
+					req.TVDBID = tvdbID
+				}
+				if searchTitle == "" && title != "" {
+					searchTitle = title
+				}
+			}
+		} else {
+			tmdbID, movieTitle, movieYear, err := resolveMovieMetadataFromIMDb(ctx, req.IMDbID)
+			if err != nil {
+				slog.WarnContext(ctx, "Failed to resolve movie metadata from IMDb ID", "error", err, "imdb_id", req.IMDbID)
+			} else {
+				resolvedTmdbID = tmdbID
+				resolvedTitle = movieTitle
+				resolvedYear = movieYear
+				if searchTitle == "" && movieTitle != "" {
+					searchTitle = movieTitle
+				}
+			}
+		}
+	}
+
+	slog.InfoContext(ctx, "Inspect search executing", "imdb_id", req.IMDbID, "search_title", searchTitle, "type", req.Type)
+
+	cfg := s.configManager.GetConfig()
+	coordCfg := s.buildStremioCoordinatorConfig(cfg)
+
+	// If user provided draft/custom scoring config in the request, override with it
+	if req.Scoring != nil {
+		coordCfg.Scoring = *req.Scoring
+	}
+
+	coordinator := stremio.NewSearchCoordinator(coordCfg, httpclient.NewForExternal(cfg.Network, 30*time.Second))
+
+	params := stremio.SearchParams{
+		Type:      req.Type,
+		IMDBID:    req.IMDbID,
+		Title:     searchTitle,
+		TVDBID:    req.TVDBID,
+		Season:    req.Season,
+		Episode:   req.Episode,
+		TimeoutMS: clampInspectTimeoutMS(req.TimeoutMS),
+	}
+
+	res, err := coordinator.SearchInspect(ctx, params)
+	if err != nil {
+		return RespondInternalError(c, "Failed to execute indexer search inspection", err.Error())
+	}
+
+	// If library reuse is enabled, query local file_health and prepend local library files
+	if cfg.Stremio.EffectiveIncludeLibraryStreams() && s.healthRepo != nil {
+		baseURL := resolveBaseURL(c, cfg.Stremio.BaseURL)
+		selector := &stremioEpisodeSelector{Season: req.Season, Episode: req.Episode}
+		var libraryReleases []stremio.ScoredRelease
+
+		downloadKey := ""
+		if s.userRepo != nil {
+			if users, err := s.userRepo.GetAllUsers(ctx); err == nil {
+				for _, u := range users {
+					if u != nil && u.APIKey != nil && *u.APIKey != "" {
+						downloadKey = auth.HashAPIKey(*u.APIKey)
+						if u.IsAdmin {
+							break
+						}
+					}
+				}
+			}
+		}
+
+		// Without a usable download key the generated stream URLs would 401,
+		// so skip the library lookup entirely rather than emit dead links.
+		if downloadKey != "" {
+			seenLibraryTitles := make(map[string]struct{})
+			for _, r := range res.Releases {
+				seenLibraryTitles[normalizeReleaseTitleKey(r.Title)] = struct{}{}
+			}
+
+			appendLibraryRelease := func(eval stremio.ScoredRelease, filePath string) {
+				titleKey := normalizeReleaseTitleKey(eval.Title)
+				if titleKey == "" {
+					return
+				}
+				if _, dup := seenLibraryTitles[titleKey]; dup {
+					return
+				}
+				seenLibraryTitles[titleKey] = struct{}{}
+				eval.Score += libraryScoreBoost
+				eval.Excluded = false
+				eval.Source = "library"
+				eval.Indexer = "Local Library"
+				eval.IndexerID = "library"
+				eval.DownloadURL = baseURL + "/api/files/stream?path=" + url.QueryEscape(filePath) + "&download_key=" + url.QueryEscape(downloadKey)
+				libraryReleases = append(libraryReleases, eval)
+			}
+
+			if req.Type == "movie" {
+				movieTitle := resolvedTitle
+				if movieTitle == "" {
+					movieTitle = searchTitle
+				}
+				yearNum, _ := strconv.Atoi(resolvedYear)
+				if healthyFiles, err := s.healthRepo.FindHealthyFilesForMovie(ctx, movieTitle, resolvedYear, resolvedTmdbID); err == nil {
+					for _, h := range healthyFiles {
+						if h != nil && h.FilePath != "" && isMediaExtension(filepath.Ext(h.FilePath)) && !isSampleFile(h.FilePath) {
+							matchPath := h.FilePath
+							if h.LibraryPath != nil && *h.LibraryPath != "" {
+								matchPath = *h.LibraryPath
+							}
+							if movieTitle != "" && !stremio.MatchesMovie(filepath.Base(matchPath), movieTitle, yearNum) && !stremio.MatchesMovie(matchPath, movieTitle, yearNum) {
+								continue
+							}
+							appendLibraryRelease(stremio.EvaluateRelease(filepath.Base(matchPath), &coordCfg.Scoring), h.FilePath)
+						}
+					}
+				}
+			} else if req.Type == "series" {
+				seriesTitle := resolvedTitle
+				if seriesTitle == "" {
+					seriesTitle = searchTitle
+				}
+				tvdbID, _ := strconv.Atoi(resolvedTVDBID)
+				if healthyFiles, err := s.healthRepo.FindHealthyFilesForSeries(ctx, seriesTitle, tvdbID); err == nil {
+					for _, h := range healthyFiles {
+						if h != nil && h.FilePath != "" && isMediaExtension(filepath.Ext(h.FilePath)) && !isSampleFile(h.FilePath) {
+							matchPath := h.FilePath
+							if h.LibraryPath != nil && *h.LibraryPath != "" {
+								matchPath = *h.LibraryPath
+							}
+							if selector.matches(matchPath) || selector.matches(h.FilePath) {
+								if seriesTitle != "" && !stremio.MatchesSeries(filepath.Base(matchPath), seriesTitle, req.Season, req.Episode, 0) && !stremio.MatchesSeries(matchPath, seriesTitle, req.Season, req.Episode, 0) {
+									continue
+								}
+								appendLibraryRelease(stremio.EvaluateRelease(filepath.Base(matchPath), &coordCfg.Scoring), h.FilePath)
+							}
+						}
+					}
+				}
+			}
+		}
+
+		if len(libraryReleases) > 0 {
+			res.Releases = append(libraryReleases, res.Releases...)
+			res.ActiveResults += len(libraryReleases)
+			res.TotalResults += len(libraryReleases)
+		}
+	}
+
+	// Indexer download URLs embed indexer credentials (e.g. Newznab apikey
+	// query parameters). The inspector only surfaces diagnostics — it never
+	// downloads — so strip everything after the path before responding.
+	for i := range res.Releases {
+		if res.Releases[i].Source != "library" {
+			res.Releases[i].DownloadURL = redactExternalDownloadURL(res.Releases[i].DownloadURL)
+		}
+	}
+
+	return RespondSuccess(c, res)
+}
+
+const (
+	defaultInspectTimeoutMS = 5000
+	maxInspectTimeoutMS     = 15000
+
+	// libraryScoreBoost ranks local library files above any remote release so
+	// instant streams always surface first in inspection results.
+	libraryScoreBoost = 10000
+)
+
+// clampInspectTimeoutMS bounds the client-supplied search timeout to keep each
+// inspect request's indexer fan-out short-lived.
+func clampInspectTimeoutMS(timeoutMS int) int {
+	if timeoutMS <= 0 {
+		return defaultInspectTimeoutMS
+	}
+	if timeoutMS > maxInspectTimeoutMS {
+		return maxInspectTimeoutMS
+	}
+	return timeoutMS
+}
+
+// normalizeReleaseTitleKey builds a case-insensitive dedupe key for release titles.
+func normalizeReleaseTitleKey(title string) string {
+	return strings.ToLower(strings.TrimSpace(title))
+}
+
+// redactExternalDownloadURL removes query parameters and user info from an
+// indexer-provided download URL, preventing embedded API keys from leaking
+// through diagnostic API responses. Unparseable URLs are dropped entirely.
+func redactExternalDownloadURL(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return ""
+	}
+	u.RawQuery = ""
+	u.Fragment = ""
+	u.User = nil
+	return u.String()
+}

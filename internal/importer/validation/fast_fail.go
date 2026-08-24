@@ -2,6 +2,7 @@ package validation
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/rand"
@@ -323,6 +324,9 @@ func FastFailCheckFiles(
 			// here — including this chunk's own deadline — is a reachability
 			// signal for the owning file, not a reason to abandon the sweep.
 			if statErr := errByID[job.segID]; statErr != nil {
+				if errors.Is(statErr, context.Canceled) || errors.Is(statErr, context.DeadlineExceeded) {
+					return nil, statErr
+				}
 				results[job.fileIdx].Broken = true
 				results[job.fileIdx].MissingSegmentIDs = append(results[job.fileIdx].MissingSegmentIDs, job.segID)
 				if job.groupKey != "" {

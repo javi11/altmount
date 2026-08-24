@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-
 func TestToSABnzbdHistorySlot(t *testing.T) {
 	t.Run("basic path assignment", func(t *testing.T) {
 		item := &database.ImportQueueItem{
