@@ -732,6 +732,8 @@ type HealthCheckUpsert struct {
 	ReleaseDate      *time.Time
 	Metadata         *string
 	DownloadID       *string
+	InitialStatus    HealthStatus
+	ScheduledCheckAt *time.Time
 }
 
 // BatchAddFileToHealthCheck upserts many health records in a few multi-row statements
@@ -744,27 +746,43 @@ func (r *HealthRepository) BatchAddFileToHealthCheck(ctx context.Context, record
 		return nil
 	}
 
-	// 10 bound params per row; keep batches under SQLite's ~999 parameter limit.
-	const batchSize = 95
-
-	for i := 0; i < len(records); i += batchSize {
-		end := min(i+batchSize, len(records))
-		if err := r.batchUpsertFileHealthCheck(ctx, records[i:end]); err != nil {
-			return fmt.Errorf("failed to upsert health-check batch at index %d: %w", i, err)
+	pending := make([]HealthCheckUpsert, 0, len(records))
+	healthy := make([]HealthCheckUpsert, 0, len(records))
+	for _, record := range records {
+		switch record.InitialStatus {
+		case "", HealthStatusPending:
+			pending = append(pending, record)
+		case HealthStatusHealthy:
+			if record.ScheduledCheckAt == nil || !record.ScheduledCheckAt.After(time.Now()) {
+				return fmt.Errorf("healthy health-check record requires a future scheduled check")
+			}
+			healthy = append(healthy, record)
+		default:
+			return fmt.Errorf("unsupported initial health status: %q", record.InitialStatus)
 		}
 	}
 
+	// Pending rows retain the existing 10-bind SQL and batch size.
+	const pendingBatchSize = 95
+	for i := 0; i < len(pending); i += pendingBatchSize {
+		end := min(i+pendingBatchSize, len(pending))
+		if err := r.batchUpsertFileHealthCheck(ctx, pending[i:end]); err != nil {
+			return fmt.Errorf("failed to upsert pending health-check batch at index %d: %w", i, err)
+		}
+	}
+
+	if err := r.batchUpsertHealthyFileHealthCheck(ctx, healthy); err != nil {
+		return err
+	}
 	return nil
 }
 
-// batchUpsertFileHealthCheck performs a single multi-row upsert.
+// batchUpsertFileHealthCheck performs a pending multi-row upsert.
 func (r *HealthRepository) batchUpsertFileHealthCheck(ctx context.Context, records []HealthCheckUpsert) error {
 	valueStrings := make([]string, len(records))
 	args := make([]any, 0, len(records)*10)
 
 	for i, rec := range records {
-		// status, retry_count and repair_retry_count are literals so excluded.status is
-		// always 'pending' (matching the single-row upsert's bound HealthStatusPending).
 		valueStrings[i] = "(?, ?, 'pending', datetime('now'), 0, ?, 0, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), datetime('now'))"
 
 		var releaseDateStr any = nil
@@ -802,7 +820,63 @@ func (r *HealthRepository) batchUpsertFileHealthCheck(ctx context.Context, recor
 	if _, err := r.db.ExecContext(ctx, query, args...); err != nil {
 		return fmt.Errorf("failed to batch upsert file health checks: %w", err)
 	}
+	return nil
+}
 
+// batchUpsertHealthyFileHealthCheck initializes validated records as healthy.
+func (r *HealthRepository) batchUpsertHealthyFileHealthCheck(ctx context.Context, records []HealthCheckUpsert) error {
+	if len(records) == 0 {
+		return nil
+	}
+
+	const coveredBindsPerRow = 11
+	batchSize := 999 / coveredBindsPerRow
+	if batchSize <= 0 {
+		return fmt.Errorf("invalid covered health-check batch size")
+	}
+	for i := 0; i < len(records); i += batchSize {
+		end := min(i+batchSize, len(records))
+		valueStrings := make([]string, end-i)
+		args := make([]any, 0, (end-i)*coveredBindsPerRow)
+		for j, rec := range records[i:end] {
+			valueStrings[j] = "(?, ?, 'healthy', datetime('now'), 0, ?, 0, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), ?)"
+			var releaseDateStr any = nil
+			if rec.ReleaseDate != nil {
+				releaseDateStr = rec.ReleaseDate.UTC().Format("2006-01-02 15:04:05")
+			}
+			args = append(args,
+				normalizeHealthPath(rec.FilePath), rec.LibraryPath,
+				rec.MaxRetries, rec.MaxRepairRetries,
+				rec.SourceNzbPath, rec.Priority, releaseDateStr, rec.Metadata, rec.Indexer, rec.DownloadID,
+				rec.ScheduledCheckAt.UTC().Format("2006-01-02 15:04:05"))
+		}
+
+		query := fmt.Sprintf(`
+			INSERT INTO file_health (file_path, library_path, status, last_checked, retry_count, max_retries, repair_retry_count, max_repair_retries, source_nzb_path, priority, release_date, metadata, indexer, download_id, created_at, updated_at, scheduled_check_at)
+			VALUES %s
+			ON CONFLICT(file_path) DO UPDATE SET
+				library_path = COALESCE(excluded.library_path, library_path),
+				status = 'healthy',
+				last_checked = datetime('now'),
+				retry_count = 0,
+				repair_retry_count = 0,
+				last_error = NULL,
+				error_details = NULL,
+				max_retries = excluded.max_retries,
+				max_repair_retries = excluded.max_repair_retries,
+				source_nzb_path = COALESCE(excluded.source_nzb_path, source_nzb_path),
+				priority = excluded.priority,
+				release_date = COALESCE(excluded.release_date, release_date),
+				metadata = COALESCE(excluded.metadata, metadata),
+				indexer = COALESCE(excluded.indexer, indexer),
+				download_id = COALESCE(excluded.download_id, download_id),
+				updated_at = datetime('now'),
+				scheduled_check_at = excluded.scheduled_check_at
+		`, strings.Join(valueStrings, ","))
+		if _, err := r.db.ExecContext(ctx, query, args...); err != nil {
+			return fmt.Errorf("failed to batch upsert healthy file health checks: %w", err)
+		}
+	}
 	return nil
 }
 

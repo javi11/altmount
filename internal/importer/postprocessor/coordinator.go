@@ -15,42 +15,46 @@ import (
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/errors"
+	"github.com/javi11/altmount/internal/importer/validation"
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/pkg/rclonecli"
 )
 
 // Coordinator orchestrates all post-import processing steps
 type Coordinator struct {
-	mu              sync.RWMutex
-	configGetter    config.ConfigGetter
-	metadataService *metadata.MetadataService
-	rcloneClient    rclonecli.RcloneRcClient
-	healthRepo      *database.HealthRepository
-	arrsService     *arrs.Service
-	userRepo        *database.UserRepository
-	log             *slog.Logger
+	mu                  sync.RWMutex
+	configGetter        config.ConfigGetter
+	metadataService     *metadata.MetadataService
+	rcloneClient        rclonecli.RcloneRcClient
+	healthRepo          *database.HealthRepository
+	calculateNextCheck  func(releaseDate, lastCheck time.Time) time.Time
+	arrsService         *arrs.Service
+	userRepo            *database.UserRepository
+	log                 *slog.Logger
 }
 
 // Config holds configuration for the Coordinator
 type Config struct {
-	ConfigGetter    config.ConfigGetter
-	MetadataService *metadata.MetadataService
-	RcloneClient    rclonecli.RcloneRcClient
-	HealthRepo      *database.HealthRepository
-	ArrsService     *arrs.Service
-	UserRepo        *database.UserRepository
+	ConfigGetter        config.ConfigGetter
+	MetadataService     *metadata.MetadataService
+	RcloneClient        rclonecli.RcloneRcClient
+	HealthRepo          *database.HealthRepository
+	CalculateNextCheck  func(releaseDate, lastCheck time.Time) time.Time
+	ArrsService         *arrs.Service
+	UserRepo            *database.UserRepository
 }
 
 // NewCoordinator creates a new post-processor coordinator
 func NewCoordinator(cfg Config) *Coordinator {
 	return &Coordinator{
-		configGetter:    cfg.ConfigGetter,
-		metadataService: cfg.MetadataService,
-		rcloneClient:    cfg.RcloneClient,
-		healthRepo:      cfg.HealthRepo,
-		arrsService:     cfg.ArrsService,
-		userRepo:        cfg.UserRepo,
-		log:             slog.Default().With("component", "postprocessor"),
+		configGetter:       cfg.ConfigGetter,
+		metadataService:    cfg.MetadataService,
+		rcloneClient:       cfg.RcloneClient,
+		healthRepo:         cfg.HealthRepo,
+		calculateNextCheck: cfg.CalculateNextCheck,
+		arrsService:        cfg.ArrsService,
+		userRepo:           cfg.UserRepo,
+		log:                slog.Default().With("component", "postprocessor"),
 	}
 }
 
@@ -81,7 +85,11 @@ type ProcessingResult struct {
 // HandleSuccess performs all post-processing for successful imports.
 // writtenPaths lists every virtual file the import wrote (nil falls back to
 // resultingPath); multi-file imports (season packs) get a per-file health check.
-func (c *Coordinator) HandleSuccess(ctx context.Context, item *database.ImportQueueItem, resultingPath string, writtenPaths []string) (*ProcessingResult, error) {
+func (c *Coordinator) HandleSuccess(ctx context.Context, item *database.ImportQueueItem, resultingPath string, writtenPaths []string, receipts ...*validation.FullValidationReceipt) (*ProcessingResult, error) {
+	var receipt *validation.FullValidationReceipt
+	if len(receipts) > 0 {
+		receipt = receipts[0]
+	}
 	c.mu.RLock()
 	rcloneClient := c.rcloneClient
 	arrsService := c.arrsService
@@ -130,7 +138,7 @@ func (c *Coordinator) HandleSuccess(ctx context.Context, item *database.ImportQu
 	}
 
 	// 4. Schedule health check
-	if err := c.ScheduleHealthCheck(ctx, item, resultingPath, writtenPaths); err != nil {
+	if err := c.ScheduleHealthCheck(ctx, item, resultingPath, writtenPaths, receipt); err != nil {
 		c.log.WarnContext(ctx, "Failed to schedule health check",
 			"path", resultingPath,
 			"error", err)

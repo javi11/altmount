@@ -100,22 +100,24 @@ func (e *batteryEnv) registerContent(
 func (e *batteryEnv) runImport(nzb *nzbparser.Nzb, name string) (string, []string, error) {
 	e.t.Helper()
 	nzbPath := nzbbuild.WriteTemp(e.t, nzb, name)
-	return e.proc.ProcessNzbFile(
+	result, paths, _, err := e.proc.ProcessNzbFile(
 		context.Background(),
 		nzbPath, filepath.Dir(nzbPath),
 		1, nil, nil, nil, nil, nil, nil,
 	)
+	return result, paths, err
 }
 
 // runImportWithCategory is like runImport but passes queueID and category.
 func (e *batteryEnv) runImportWithCategory(nzb *nzbparser.Nzb, name string, queueID int, category string) (string, []string, error) {
 	e.t.Helper()
 	nzbPath := nzbbuild.WriteTemp(e.t, nzb, name)
-	return e.proc.ProcessNzbFile(
+	result, paths, _, err := e.proc.ProcessNzbFile(
 		context.Background(),
 		nzbPath, filepath.Dir(nzbPath),
 		queueID, nil, nil, nil, &category, nil, nil,
 	)
+	return result, paths, err
 }
 
 // readMeta reads and returns FileMetadata for a virtual path, fatal on error.

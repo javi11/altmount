@@ -6,10 +6,12 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/importer/parser/fileinfo"
+	"github.com/javi11/altmount/internal/importer/validation"
 )
 
 // maxDirExpansionDepth bounds the recursive walk of "DIR:" written-path entries.
@@ -23,7 +25,11 @@ const maxDirExpansionDepth = 8
 // way each episode gets verified right after import and a partially-dead pack
 // surfaces immediately. Single-file imports keep the old behavior (one check on
 // resultingPath).
-func (c *Coordinator) ScheduleHealthCheck(ctx context.Context, item *database.ImportQueueItem, resultingPath string, writtenPaths []string) error {
+func (c *Coordinator) ScheduleHealthCheck(ctx context.Context, item *database.ImportQueueItem, resultingPath string, writtenPaths []string, receipts ...*validation.FullValidationReceipt) error {
+	var receipt *validation.FullValidationReceipt
+	if len(receipts) > 0 {
+		receipt = receipts[0]
+	}
 	if c.healthRepo == nil {
 		return nil // Health checks not configured
 	}
@@ -94,6 +100,29 @@ func (c *Coordinator) ScheduleHealthCheck(ctx context.Context, item *database.Im
 		// the batch outlive the loop and do not retain the proto message.
 		filePath := p
 		srcNzb := fileMeta.SourceNzbPath
+		var initialStatus database.HealthStatus
+		var scheduledCheckAt *time.Time
+		if receipt != nil && c.calculateNextCheck != nil && receipt.Covers(fileMeta) {
+			now := time.Now().UTC()
+			baseline := now
+			existing, lookupErr := c.healthRepo.GetFileHealth(ctx, filePath)
+			if lookupErr != nil {
+				lastErr = lookupErr
+			} else {
+				if existing != nil {
+					if existing.ReleaseDate != nil {
+						baseline = existing.ReleaseDate.UTC()
+					} else {
+						baseline = existing.CreatedAt.UTC()
+					}
+				}
+				nextCheck := c.calculateNextCheck(baseline, now)
+				if nextCheck.After(now) {
+					initialStatus = database.HealthStatusHealthy
+					scheduledCheckAt = &nextCheck
+				}
+			}
+		}
 		records = append(records, database.HealthCheckUpsert{
 			FilePath:         filePath,
 			LibraryPath:      &filePath,
@@ -103,6 +132,8 @@ func (c *Coordinator) ScheduleHealthCheck(ctx context.Context, item *database.Im
 			MaxRetries:       cfg.GetMaxRetries(),
 			MaxRepairRetries: cfg.GetMaxRepairRetries(),
 			DownloadID:       downloadID,
+			InitialStatus:    initialStatus,
+			ScheduledCheckAt: scheduledCheckAt,
 		})
 		repairDirs[filepath.Dir(p)] = struct{}{}
 	}

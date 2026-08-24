@@ -4,9 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"testing"
+	"time"
 
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/importer/validation"
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	_ "github.com/mattn/go-sqlite3"
@@ -170,6 +172,32 @@ func TestScheduleHealthCheck_PlainPathsUnchanged(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, h)
 	assert.Equal(t, database.HealthStatusPending, h.Status)
+}
+
+func TestScheduleHealthCheck_InitializesCoveredPathHealthy(t *testing.T) {
+	coordinator, ms, repo, db := setupSchedulerTest(t)
+	coordinator.calculateNextCheck = func(_, lastCheck time.Time) time.Time {
+		return lastCheck.Add(time.Hour)
+	}
+	ctx := context.Background()
+	filePath := "/tv/Covered.S01E01.mkv"
+	writeTestMetadata(t, ms, filePath)
+
+	receipt := validation.NewFullValidationReceipt([]string{"article-001@test.example.com"})
+	require.NoError(t, coordinator.ScheduleHealthCheck(ctx, nil, filePath, []string{filePath}, receipt))
+
+	health, err := repo.GetFileHealth(ctx, "tv/Covered.S01E01.mkv")
+	require.NoError(t, err)
+	require.NotNil(t, health)
+	assert.Equal(t, database.HealthStatusHealthy, health.Status)
+	require.NotNil(t, health.LastChecked)
+
+	var scheduledAt sql.NullTime
+	require.NoError(t, db.QueryRow(
+		"SELECT scheduled_check_at FROM file_health WHERE file_path = ?", "tv/Covered.S01E01.mkv",
+	).Scan(&scheduledAt))
+	require.True(t, scheduledAt.Valid)
+	assert.True(t, scheduledAt.Time.After(time.Now().UTC()))
 }
 
 // TestScheduleHealthCheck_DisabledQueuesNothing verifies that with health checking

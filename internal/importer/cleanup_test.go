@@ -287,15 +287,17 @@ func TestHandleFailure_CleansUpCachedPaths(t *testing.T) {
 
 	// Simulate what ProcessItem does: store the written path in the cache
 	var fakeItemID int64 = 99
-	svc.writtenPathsCache.Store(fakeItemID, []string{virtualPath})
+	svc.writtenPathsCache.Store(fakeItemID, processArtifact{paths: []string{virtualPath}})
 
 	// Confirm the cache entry exists
 	_, ok := svc.writtenPathsCache.Load(fakeItemID)
 	require.True(t, ok, "cache should contain the written paths before HandleFailure")
 
 	// Exercise the cache-retrieval + cleanup path (mirrors HandleFailure minus the DB call)
-	if paths, ok := svc.writtenPathsCache.LoadAndDelete(fakeItemID); ok {
-		svc.cleanupWrittenPaths(ctx, fakeItemID, paths.([]string))
+	if stored, ok := svc.writtenPathsCache.LoadAndDelete(fakeItemID); ok {
+		artifact, valid := stored.(processArtifact)
+		require.True(t, valid)
+		svc.cleanupWrittenPaths(ctx, fakeItemID, artifact.paths)
 	}
 
 	// Cache must be cleared
@@ -317,7 +319,7 @@ func TestProcessItem_StoresPaths_HandleSuccess_ClearsCache(t *testing.T) {
 	writeTestMeta(t, ms, virtualPath)
 
 	var fakeItemID int64 = 77
-	svc.writtenPathsCache.Store(fakeItemID, []string{virtualPath})
+	svc.writtenPathsCache.Store(fakeItemID, processArtifact{paths: []string{virtualPath}})
 
 	// Simulate HandleSuccess cache cleanup
 	svc.writtenPathsCache.Delete(fakeItemID)

@@ -173,12 +173,12 @@ func (proc *Processor) checkCancellation(ctx context.Context) error {
 // preParseFastFail runs a per-file Stat-based reachability check against the raw NZB
 // before any Body fetches. PAR2 files and sidecars are never Stat-checked (they're
 // included regardless), so their segments are omitted from the sweep to avoid wasted
-// round-trips. Returns (brokenFileIndexes, knownMissingSegmentIDs, error).
+// round-trips. Returns (brokenFileIndexes, knownMissingSegmentIDs, fullValidationReceipt, error).
 // Both maps are nil when no pool is available.
 // Returns ErrNoFilesProcessed (wrapped) when all eligible regular files are broken.
-func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, cfg *config.Config, queueID int, category *string, downloadID *string) (map[int]struct{}, map[string]struct{}, error) {
+func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, cfg *config.Config, queueID int, category *string, downloadID *string) (map[int]struct{}, map[string]struct{}, *validation.FullValidationReceipt, error) {
 	if !proc.poolManager.HasPool() {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 
 	// Build the fast-fail input index-aligned with n.Files. PAR2 files keep their
@@ -224,7 +224,7 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 		proc.validationTimeout,
 	)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if !missing {
 		if proc.log != nil {
@@ -232,7 +232,18 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 				"files", len(fastFailFiles),
 				"duration", time.Since(probeStart))
 		}
-		return nil, nil, nil
+		if cfg.Import.SegmentSamplePercentage != 100 {
+			return nil, nil, nil, nil
+		}
+		var segmentIDs []string
+		for _, file := range fastFailFiles {
+			for _, segment := range file.Segments {
+				if segment != nil && segment.Id != "" {
+					segmentIDs = append(segmentIDs, segment.Id)
+				}
+			}
+		}
+		return nil, nil, validation.NewFullValidationReceipt(segmentIDs), nil
 	}
 
 	isStremioImport := (category != nil && *category == "stremio") || (downloadID != nil && strings.HasPrefix(*downloadID, "stremio:"))
@@ -242,7 +253,7 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 				"files", len(fastFailFiles),
 				"probe_duration", time.Since(probeStart))
 		}
-		return nil, nil, multifile.ErrNoFilesProcessed
+		return nil, nil, nil, multifile.ErrNoFilesProcessed
 	}
 
 	// Phase 2 (escalation): the probe found an unreachable segment, so map
@@ -273,11 +284,12 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 		fastFailTracker,
 	)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	brokenIdx := make(map[int]struct{})
 	missingIDs := make(map[string]struct{})
+	var validatedIDs []string
 	eligibleRegularCount := 0
 	tolerant := cfg.GetImportDamagePolicyTolerant()
 
@@ -287,6 +299,13 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 
 		if !isPar2 {
 			eligibleRegularCount++
+		}
+		if cfg.Import.SegmentSamplePercentage == 100 && !result.Broken && !isPar2 && len(f.Segments) > 0 {
+			for _, segment := range f.Segments {
+				if segment.ID != "" {
+					validatedIDs = append(validatedIDs, segment.ID)
+				}
+			}
 		}
 
 		if result.Broken && !isPar2 {
@@ -329,11 +348,11 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 	// this equality is logical-unit accurate: it holds only when every RAR set and
 	// every standalone regular file is broken — nothing healthy remains to import.
 	if eligibleRegularCount > 0 && len(brokenIdx) == eligibleRegularCount {
-		return nil, nil, multifile.ErrNoFilesProcessed
+		return nil, nil, nil, multifile.ErrNoFilesProcessed
 	}
 
 	if len(brokenIdx) == 0 {
-		return nil, nil, nil
+		return nil, nil, validation.NewFullValidationReceipt(validatedIDs), nil
 	}
 
 	if proc.log != nil {
@@ -349,7 +368,7 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 			"eligible_files", eligibleRegularCount)
 	}
 
-	return brokenIdx, missingIDs, nil
+	return brokenIdx, missingIDs, validation.NewFullValidationReceipt(validatedIDs), nil
 }
 
 // longestSampledRun maps missing segment IDs back to their indices in the
@@ -391,17 +410,17 @@ func fastFailConcurrency(cfg *config.Config) int {
 }
 
 // ProcessNzbFile processes an NZB or STRM file maintaining the folder structure relative to relative path.
-// Returns (resultPath, writtenMetadataPaths, error). writtenMetadataPaths contains all virtual paths of
-// metadata files written to disk; it is populated even on partial failure so callers can clean up.
+// Returns (resultPath, writtenMetadataPaths, fullValidationReceipt, error). writtenMetadataPaths contains all virtual paths of
+// metadata files written to disk; it is populated even on partial failure so callers can clean them up.
 // Paths prefixed with "DIR:" indicate a metadata directory that should be removed entirely.
-func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePath string, queueID int, allowedExtensionsOverride *[]string, virtualDirOverride *string, extractedFiles []parser.ExtractedFileInfo, category *string, metadata *string, downloadID *string) (string, []string, error) {
+func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePath string, queueID int, allowedExtensionsOverride *[]string, virtualDirOverride *string, extractedFiles []parser.ExtractedFileInfo, category *string, metadata *string, downloadID *string) (string, []string, *validation.FullValidationReceipt, error) {
 	// Gate this import behind the pool admission controller so we can cap how
 	// many NZB imports run concurrently end-to-end and yield to streams under
 	// load. The Acquire is a no-op when no caps are configured.
 	if proc.poolManager != nil {
 		release, err := proc.poolManager.AcquireImportSlot(ctx)
 		if err != nil {
-			return "", nil, fmt.Errorf("import admission cancelled: %w", err)
+			return "", nil, nil, fmt.Errorf("import admission cancelled: %w", err)
 		}
 		defer release()
 	}
@@ -419,32 +438,33 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 	proc.updateProgressWithStage(queueID, 0, "Parsing NZB")
 	file, err := nzbfile.Open(filePath)
 	if err != nil {
-		return "", nil, NewNonRetryableError("failed to open file", err)
+		return "", nil, nil, NewNonRetryableError("failed to open file", err)
 	}
 	defer file.Close()
 
 	var parsed *parser.ParsedNzb
 	var brokenIdx map[int]struct{}
+	var validationReceipt *validation.FullValidationReceipt
 
 	// Determine file type and parse accordingly
 	if strings.HasSuffix(strings.ToLower(filePath), strmFileExtension) {
 		parsed, err = proc.strmParser.ParseStrmFile(file, filePath)
 		if err != nil {
-			return "", nil, NewNonRetryableError("failed to parse STRM file", err)
+			return "", nil, nil, NewNonRetryableError("failed to parse STRM file", err)
 		}
 
 		// Validate the parsed STRM
 		if err := proc.strmParser.ValidateStrmFile(parsed); err != nil {
-			return "", nil, NewNonRetryableError("STRM validation failed", err)
+			return "", nil, nil, NewNonRetryableError("STRM validation failed", err)
 		}
 	} else {
 		// Parse XML first — cheap, no network needed.
 		n, xmlErr := nzbparser.Parse(file)
 		if xmlErr != nil {
-			return "", nil, NewNonRetryableError("failed to parse NZB file", xmlErr)
+			return "", nil, nil, NewNonRetryableError("failed to parse NZB file", xmlErr)
 		}
 		if len(n.Files) == 0 {
-			return "", nil, NewNonRetryableError("NZB file contains no files", nil)
+			return "", nil, nil, NewNonRetryableError("NZB file contains no files", nil)
 		}
 
 		parser.SanitizeNzbFilenames(n)
@@ -453,9 +473,9 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 		proc.updateProgressWithStage(queueID, 0, "Checking segment availability")
 		var missingIDs map[string]struct{}
 		var fastFailErr error
-		brokenIdx, missingIDs, fastFailErr = proc.preParseFastFail(ctx, n, cfg, queueID, category, downloadID)
+		brokenIdx, missingIDs, validationReceipt, fastFailErr = proc.preParseFastFail(ctx, n, cfg, queueID, category, downloadID)
 		if fastFailErr != nil {
-			return "", nil, NewNonRetryableError("fast-fail segment check failed", fastFailErr)
+			return "", nil, nil, NewNonRetryableError("fast-fail segment check failed", fastFailErr)
 		}
 
 		parseTracker := progress.NewTracker(proc.broadcaster, queueID, 2, 10)
@@ -464,12 +484,12 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 			KnownMissingSegmentIDs: missingIDs,
 		})
 		if err != nil {
-			return "", nil, NewNonRetryableError("failed to parse NZB file", err)
+			return "", nil, nil, NewNonRetryableError("failed to parse NZB file", err)
 		}
 
 		// Validate the parsed NZB
 		if err := proc.parser.ValidateNzb(parsed); err != nil {
-			return "", nil, NewNonRetryableError("NZB validation failed", err)
+			return "", nil, nil, NewNonRetryableError("NZB validation failed", err)
 		}
 	}
 
@@ -482,7 +502,7 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 
 	// Check for cancellation after parsing
 	if err := proc.checkCancellation(ctx); err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 
 	// For NZB-based imports, ensure at least one NNTP provider is configured
@@ -493,7 +513,7 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 		if !proc.poolManager.HasPool() {
 			proc.log.WarnContext(ctx, "No NNTP providers configured, deferring item processing",
 				"file_path", filePath, "queue_id", queueID)
-			return "", nil, fmt.Errorf("no NNTP providers configured - item will be retried when providers are added")
+			return "", nil, nil, fmt.Errorf("no NNTP providers configured - item will be retried when providers are added")
 		}
 
 		// Doomed RAR/7z sets are excluded whole during fast-fail (set-level
@@ -528,7 +548,7 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 
 	// Check for cancellation before main processing
 	if err := proc.checkCancellation(ctx); err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 
 	// Step 5: Process based on file type
@@ -637,7 +657,7 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 			},
 		}, regularFiles, virtualDir, proc.getCleanNzbName(parsed.Path, queueID), parsed.Path, isoReleaseDate)
 		if isoErr != nil {
-			return "", writtenPaths, NewNonRetryableError("bare-ISO expansion failed", isoErr)
+			return "", writtenPaths, validationReceipt, NewNonRetryableError("bare-ISO expansion failed", isoErr)
 		}
 		writtenPaths = append(writtenPaths, isoWritten...)
 		regularFiles = expandedRegularFiles
@@ -649,7 +669,7 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 		// trigger spuriously.
 		if len(regularFiles) == 0 && len(archiveFiles) == 0 && len(isoWritten) > 0 {
 			proc.updateProgress(queueID, 100)
-			return isoWritten[0], writtenPaths, nil
+			return isoWritten[0], writtenPaths, validationReceipt, nil
 		}
 	}
 
@@ -680,7 +700,7 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 		result, dispatchPaths, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, queueID, allowedExtensions, category, metadata, downloadID, storeIndex, storeRef)
 
 	default:
-		return "", writtenPaths, NewNonRetryableError(fmt.Sprintf("unknown file type: %s", parsed.Type), nil)
+		return "", writtenPaths, validationReceipt, NewNonRetryableError(fmt.Sprintf("unknown file type: %s", parsed.Type), nil)
 	}
 	writtenPaths = append(writtenPaths, dispatchPaths...)
 
@@ -688,10 +708,10 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 	if err == nil {
 		proc.updateProgress(queueID, 100)
 	} else if errors.Is(err, nntppool.ErrArticleNotFound) {
-		return result, writtenPaths, ErrArticlesNotFound
+		return result, writtenPaths, validationReceipt, ErrArticlesNotFound
 	}
 
-	return result, writtenPaths, err
+	return result, writtenPaths, validationReceipt, err
 }
 
 // processSingleFile handles single file imports
