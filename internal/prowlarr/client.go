@@ -515,7 +515,7 @@ func (c *Client) DownloadNZB(ctx context.Context, downloadURL string) ([]byte, e
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("prowlarr: download request failed: %w", err)
+		return nil, fmt.Errorf("prowlarr: download request failed: %w", httpclient.RedactURLError(err))
 	}
 	defer resp.Body.Close()
 

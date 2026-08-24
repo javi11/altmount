@@ -1,6 +1,11 @@
 package httpclient
 
-import "testing"
+import (
+	"errors"
+	"net/url"
+	"strings"
+	"testing"
+)
 
 // TestValidateDownloadURL pins which indexer-supplied download targets are
 // allowed. Indexer search responses drive these fetches, so a hostile indexer
@@ -44,4 +49,54 @@ func TestValidateDownloadURL(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestRedactURLError pins that redaction removes credentials from a *url.Error
+// while preserving the wrapped cause and the diagnosable parts of the URL.
+func TestRedactURLError(t *testing.T) {
+	t.Run("nil passes through", func(t *testing.T) {
+		if got := RedactURLError(nil); got != nil {
+			t.Fatalf("RedactURLError(nil) = %v, want nil", got)
+		}
+	})
+
+	t.Run("non-url error is returned unchanged", func(t *testing.T) {
+		err := errors.New("plain failure")
+		if got := RedactURLError(err); got != err {
+			t.Fatalf("RedactURLError(%v) = %v, want the same error", err, got)
+		}
+	})
+
+	t.Run("query, fragment and userinfo are stripped", func(t *testing.T) {
+		cause := errors.New("connection refused")
+		err := RedactURLError(&url.Error{
+			Op:  "Get",
+			URL: "https://user:pw@indexer.example.com/api?apikey=SECRET&t=search#frag",
+			Err: cause,
+		})
+
+		msg := err.Error()
+		for _, secret := range []string{"SECRET", "apikey", "user:pw", "frag"} {
+			if strings.Contains(msg, secret) {
+				t.Errorf("redacted error still contains %q: %v", secret, err)
+			}
+		}
+		if !strings.Contains(msg, "indexer.example.com/api") {
+			t.Errorf("redaction dropped the diagnosable host/path: %v", err)
+		}
+		if !errors.Is(err, cause) {
+			t.Errorf("redaction broke the wrapped cause chain")
+		}
+	})
+
+	t.Run("unparseable url is dropped wholesale", func(t *testing.T) {
+		err := RedactURLError(&url.Error{
+			Op:  "Get",
+			URL: "http://[::1:80/api?apikey=SECRET",
+			Err: errors.New("boom"),
+		})
+		if strings.Contains(err.Error(), "SECRET") {
+			t.Errorf("unparseable URL leaked its query: %v", err)
+		}
+	})
 }

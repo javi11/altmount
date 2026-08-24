@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/javi11/altmount/internal/httpclient"
 )
 
 const (
@@ -117,7 +119,7 @@ func (c *Client) fetchCaps(ctx context.Context, userAgent string) (*Capabilities
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("newsnab: caps request failed: %w", err)
+		return nil, fmt.Errorf("newsnab: caps request failed: %w", httpclient.RedactURLError(err))
 	}
 	defer resp.Body.Close()
 

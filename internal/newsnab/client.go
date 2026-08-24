@@ -64,7 +64,7 @@ func (c *Client) DownloadNZB(ctx context.Context, downloadURL string, userAgent 
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("newsnab: download request failed (%s): %w", c.config.Name, err)
+		return nil, fmt.Errorf("newsnab: download request failed (%s): %w", c.config.Name, httpclient.RedactURLError(err))
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -373,7 +373,7 @@ func (c *Client) executeSearch(ctx context.Context, params url.Values, userAgent
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("newsnab: search request failed (%s): %w", c.config.Name, err)
+		return nil, fmt.Errorf("newsnab: search request failed (%s): %w", c.config.Name, httpclient.RedactURLError(err))
 	}
 	defer resp.Body.Close()
 
