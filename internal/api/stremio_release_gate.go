@@ -89,7 +89,27 @@ func tokenCoverage(release, expected []string) float64 {
 // coverage fallback only rescues legitimate releases whose scene naming
 // defeats the strict parser. Off-topic results — wrong films, typo'd titles,
 // extras packs — never pass either path.
-func releaseMatchesContent(streamType, releaseName, expectedTitle, expectedYear string, season, episode int) bool {
+// releaseMatchContext carries optional per-request metadata that widens the
+// relevance gate: alternative series titles (localized names for anime) and
+// the franchise-absolute episode number for shows whose releases use
+// absolute numbering.
+type releaseMatchContext struct {
+	aliases     []string
+	episodeMeta seriesEpisodeMeta
+	isAnime     bool
+}
+
+// absoluteEpisode resolves the franchise-absolute number for the requested
+// catalog season/episode (0 when unknown).
+func (c releaseMatchContext) absoluteEpisode(season, episode int) int {
+	return c.episodeMeta.absoluteFor(season, episode)
+}
+
+func releaseMatchesContent(streamType, releaseName, expectedTitle, expectedYear string, season, episode int, matchCtx ...releaseMatchContext) bool {
+	var ctx releaseMatchContext
+	if len(matchCtx) > 0 {
+		ctx = matchCtx[0]
+	}
 	if strings.TrimSpace(expectedTitle) == "" {
 		// Canonical metadata unavailable; fail open rather than returning
 		// nothing during a metadata-provider outage.
@@ -101,14 +121,36 @@ func releaseMatchesContent(streamType, releaseName, expectedTitle, expectedYear 
 
 	expectedYearNum, _ := strconv.Atoi(strings.TrimSpace(expectedYear))
 
+	titles := make([]string, 0, 1+len(ctx.aliases))
+	if strings.TrimSpace(expectedTitle) != "" {
+		titles = append(titles, expectedTitle)
+	}
+	for _, alias := range ctx.aliases {
+		if strings.TrimSpace(alias) != "" {
+			titles = append(titles, alias)
+		}
+	}
+
 	switch streamType {
 	case "series":
-		if stremio.MatchesSeries(releaseName, expectedTitle, season, episode, expectedYearNum) {
-			return true
+		for _, candidate := range titles {
+			if stremio.MatchesSeries(releaseName, candidate, season, episode, expectedYearNum) {
+				return true
+			}
+			// Anime absolute-numbering path: fansub packs carry the
+			// franchise-wide episode number with no season marker. Retry
+			// against the catalog episode's absolute number (season unset so
+			// MatchesSeries applies its absolute rule).
+			if abs := ctx.absoluteEpisode(season, episode); ctx.isAnime && abs > 0 &&
+				stremio.MatchesSeries(releaseName, candidate, 0, abs, expectedYearNum) {
+				return true
+			}
 		}
 	default:
-		if stremio.MatchesMovie(releaseName, expectedTitle, expectedYearNum) {
-			return true
+		for _, candidate := range titles {
+			if stremio.MatchesMovie(releaseName, candidate, expectedYearNum) {
+				return true
+			}
 		}
 	}
 
@@ -116,20 +158,24 @@ func releaseMatchesContent(streamType, releaseName, expectedTitle, expectedYear 
 	// Tokenize the full release name rather than parsed.SeriesTitle: scene
 	// names sometimes open with quality tags, which truncates the parser's
 	// series-title extraction to a single word. Coverage is directional —
-	// extra release-side tokens never inflate the score.
-	coverage := tokenCoverage(titleTokens(releaseName), titleTokens(expectedTitle))
-	if coverage < minReleaseTokenCoverage {
-		return false
-	}
-	// Coverage passed: only a clearly conflicting year still disqualifies.
-	if parsed.Year > 0 && expectedYearNum > 0 {
-		diff := parsed.Year - expectedYearNum
-		if diff < 0 {
-			diff = -diff
+	// extra release-side tokens never inflate the score. Every candidate
+	// title gets its own coverage check.
+	for _, candidate := range titles {
+		coverage := tokenCoverage(titleTokens(releaseName), titleTokens(candidate))
+		if coverage < minReleaseTokenCoverage {
+			continue
 		}
-		if diff > 1 {
-			return false
+		// Coverage passed: only a clearly conflicting year still disqualifies.
+		if parsed.Year > 0 && expectedYearNum > 0 {
+			diff := parsed.Year - expectedYearNum
+			if diff < 0 {
+				diff = -diff
+			}
+			if diff > 1 {
+				continue
+			}
 		}
+		return true
 	}
-	return true
+	return false
 }
