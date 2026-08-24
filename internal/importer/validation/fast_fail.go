@@ -14,6 +14,12 @@ import (
 	"github.com/javi11/nntppool/v4"
 )
 
+// errStatUnconfirmed marks a sampled segment whose Stat never came back — the
+// chunk's own deadline expired while it was still in flight. Reachability is
+// unproven, which for the sweep's purposes is the same as broken: the owning
+// file is excluded rather than imported on an unverified segment.
+var errStatUnconfirmed = fmt.Errorf("segment reachability unconfirmed before the stat deadline")
+
 // selectFastFailSegments picks a lightweight per-file sample for the fast-fail
 // reachability gate: always the first and last segment (DMCA/truncation
 // detection) plus samplePercentage% of the middle. It is intentionally lighter
@@ -331,10 +337,19 @@ func FastFailCheckFiles(
 		}
 
 		statCtx, cancel := context.WithTimeout(ctx, pool.StatManyTimeout(len(ids), maxConnections, timeout))
+		// Seed every segment as unconfirmed. StatMany abandons pending sends
+		// once statCtx is done, so a chunk deadline yields NO result for the
+		// segments still in flight rather than an error per segment. Reading an
+		// absent entry back as "no error" would silently pass those segments as
+		// reachable; only a result that actually arrives can clear the seed.
 		errByID := make(map[string]error, len(ids))
+		for _, id := range ids {
+			errByID[id] = errStatUnconfirmed
+		}
 		for r := range usenetPool.StatMany(statCtx, ids, nntppool.StatManyOptions{Concurrency: maxConnections}) {
 			if patched(patchIdx, r.MessageID) {
-				continue // repaired locally: treat as available
+				errByID[r.MessageID] = nil // repaired locally: treat as available
+				continue
 			}
 			errByID[r.MessageID] = r.Err
 		}
