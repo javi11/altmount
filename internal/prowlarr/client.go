@@ -9,33 +9,14 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
+	"github.com/javi11/altmount/internal/httpclient"
+	"github.com/javi11/altmount/internal/regexcache"
 	parsetorrentname "github.com/middelink/go-parse-torrent-name"
 	"golift.io/starr"
 	starrprowlarr "golift.io/starr/prowlarr"
 )
-
-// excludeKeywordRegexCache caches compiled exclude-keyword regexes so
-// MatchesExcludeKeywords doesn't recompile the same pattern on every call.
-var excludeKeywordRegexCache sync.Map
-
-// CompilePatternCached compiles (and caches) a case-insensitive regex
-// for the given exclude keyword.
-func CompilePatternCached(kw string) (*regexp.Regexp, error) {
-	if val, ok := excludeKeywordRegexCache.Load(kw); ok {
-		if re, ok := val.(*regexp.Regexp); ok {
-			return re, nil
-		}
-	}
-	re, err := regexp.Compile("(?i)" + kw)
-	if err != nil {
-		return nil, err
-	}
-	excludeKeywordRegexCache.Store(kw, re)
-	return re, nil
-}
 
 // Client is a Prowlarr API client backed by golift/starr.
 type Client struct {
@@ -73,6 +54,8 @@ type NZBResult struct {
 	PublishDate time.Time
 	Indexer     string
 	IndexerID   int
+	Source      string
+	GUID        string
 }
 
 // Indexer describes a single Prowlarr indexer, used to let users pick which
@@ -112,15 +95,118 @@ func (c *Client) GetIndexers(ctx context.Context) ([]Indexer, error) {
 	return indexers, nil
 }
 
-// matchesAnyKeyword returns true when title contains at least one of the
-// keywords (case-insensitive). Returns true when keywords is empty (no filter).
+var (
+	// reExplicitRegex detects patterns a user clearly wrote as a regex.
+	//
+	// Bracket, paren and brace characters are deliberately NOT part of this set:
+	// release names are full of them ("[SubsPlease]", "(2020)", "{Extended}"),
+	// and treating such a keyword as a regex turns "[SubsPlease]" into a
+	// character class that matches nearly every title — silently blacklisting a
+	// user's whole result set. Only unambiguous regex constructs qualify:
+	// escape classes, group directives, alternation, quantifiers and anchors.
+	// Anything else is matched literally on token boundaries; users who want a
+	// regex containing only brackets can use the explicit /pattern/ form.
+	//
+	// Kept in lockstep with REGEX_CONSTRUCTS in
+	// frontend/src/components/config/stremio/scoringPresets.ts.
+	reExplicitRegex = regexp.MustCompile(`\\b|\\[dwsDWS]|\(\?|[|*+?^$]`)
+	reWhitespace    = regexp.MustCompile(`\s+`)
+)
+
+// getCompiledRegex returns the pattern from the shared bounded regex cache.
+func getCompiledRegex(pattern string) (*regexp.Regexp, error) {
+	return regexcache.Get(pattern)
+}
+
+// slashPatternExpr builds a case-insensitive (by default) regex expression
+// from a slash-delimited pattern body and its trailing flags. Only the Go
+// supported inline flags i, m, and s are honored; unknown flag letters are
+// ignored, mirroring the JavaScript implementation's leniency.
+func slashPatternExpr(raw, flags string) string {
+	var b strings.Builder
+	b.WriteString("(?i")
+	for _, f := range flags {
+		if f == 'm' || f == 's' {
+			b.WriteRune(f)
+		}
+	}
+	b.WriteString(")")
+	return b.String() + raw
+}
+
+// isExplicitRegex reports whether the given pattern contains regex metacharacters or directives.
+func isExplicitRegex(pattern string) bool {
+	return reExplicitRegex.MatchString(pattern)
+}
+
+// BuildKeywordRegex constructs a regex pattern that matches a keyword phrase
+// on token/word boundaries (separated by delimiters like ., _, -, spaces, brackets, or start/end of string).
+func BuildKeywordRegex(keyword string) string {
+	clean := strings.TrimSpace(keyword)
+	clean = strings.Trim(clean, "._- \t")
+	if clean == "" {
+		return ""
+	}
+
+	parts := reWhitespace.Split(clean, -1)
+	escapedParts := make([]string, len(parts))
+	for i, p := range parts {
+		escapedParts[i] = regexp.QuoteMeta(p)
+	}
+	body := strings.Join(escapedParts, `[ ._\-]+`)
+
+	return `(?i)(?:^|[^a-zA-Z0-9])` + body + `(?:[^a-zA-Z0-9]|$)`
+}
+
+// MatchKeywordOrPattern matches a release title against either an explicit regex pattern or a token keyword.
+func MatchKeywordOrPattern(title, pattern string) bool {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" || title == "" {
+		return false
+	}
+
+	// 1. Explicit slash-delimited regex: /pattern/ or /pattern/flags.
+	// A structurally valid slash pattern never falls through to keyword
+	// matching; an invalid body simply fails to match (parity with the
+	// JavaScript implementation in scoringPresets.ts).
+	if strings.HasPrefix(pattern, "/") && len(pattern) >= 2 {
+		lastSlash := strings.LastIndex(pattern, "/")
+		if lastSlash > 0 {
+			expr := slashPatternExpr(pattern[1:lastSlash], pattern[lastSlash+1:])
+			if re, err := getCompiledRegex(expr); err == nil && re != nil {
+				return re.MatchString(title)
+			}
+			return false
+		}
+	}
+
+	// 2. Explicit regex pattern (e.g. \b(cam|ts)\b)
+	if isExplicitRegex(pattern) {
+		if re, err := getCompiledRegex(pattern); err == nil && re != nil {
+			return re.MatchString(title)
+		}
+	}
+
+	// 3. Plain keyword / phrase: match with boundary delimiters
+	tokenPattern := BuildKeywordRegex(pattern)
+	if tokenPattern == "" {
+		return false
+	}
+	if re, err := getCompiledRegex(tokenPattern); err == nil && re != nil {
+		return re.MatchString(title)
+	}
+
+	return false
+}
+
+// matchesAnyKeyword returns true when title matches at least one of the
+// keywords or patterns (case-insensitive on token boundaries). Returns true when keywords is empty (no filter).
 func matchesAnyKeyword(title string, keywords []string) bool {
 	if len(keywords) == 0 {
 		return true
 	}
-	lower := strings.ToLower(title)
 	for _, kw := range keywords {
-		if strings.Contains(lower, strings.ToLower(kw)) {
+		if MatchKeywordOrPattern(title, kw) {
 			return true
 		}
 	}
@@ -144,16 +230,8 @@ func MatchesExcludeKeywords(title string, excludeKeywords []string) bool {
 	if len(excludeKeywords) == 0 {
 		return false
 	}
-	titleLower := strings.ToLower(title)
 	for _, kw := range excludeKeywords {
-		kw = strings.TrimSpace(kw)
-		if kw == "" {
-			continue
-		}
-		if strings.Contains(titleLower, strings.ToLower(kw)) {
-			return true
-		}
-		if re, err := CompilePatternCached(kw); err == nil && re.MatchString(title) {
+		if MatchKeywordOrPattern(title, kw) {
 			return true
 		}
 	}
@@ -299,7 +377,70 @@ func (c *Client) SearchByTVDB(ctx context.Context, tvdbID, searchType string, ca
 	return c.searchWithID(ctx, "TvdbId", tvdbID, searchType, categories, indexers, season, episode)
 }
 
+// SearchByQuery queries Prowlarr for NZB releases using free-text query and categories.
+func (c *Client) SearchByQuery(ctx context.Context, queryText, searchType string, categories, indexers []int, season, episode int) ([]NZBResult, error) {
+	var query strings.Builder
+	if queryText != "" {
+		query.WriteString(queryText)
+	}
+	if season > 0 {
+		query.WriteString(" {Season:" + strconv.Itoa(season) + "}")
+	}
+	if episode > 0 {
+		query.WriteString(" {Episode:" + strconv.Itoa(episode) + "}")
+	}
+
+	cats := make([]int64, len(categories))
+	for i, cat := range categories {
+		cats[i] = int64(cat)
+	}
+
+	idxs := make([]int64, len(indexers))
+	for i, idx := range indexers {
+		idxs[i] = int64(idx)
+	}
+
+	input := starrprowlarr.SearchInput{
+		Query:      strings.TrimSpace(query.String()),
+		Type:       searchType,
+		Categories: cats,
+		IndexerIDs: idxs,
+	}
+
+	releases, err := c.prowlarr.SearchContext(ctx, input)
+	if err != nil {
+		return nil, fmt.Errorf("prowlarr: search failed: %w", err)
+	}
+
+	results := make([]NZBResult, 0, len(releases))
+	for _, r := range releases {
+		if r.DownloadURL == "" || r.Protocol != "usenet" {
+			continue
+		}
+		results = append(results, NZBResult{
+			Title:       r.Title,
+			DownloadURL: r.DownloadURL,
+			Size:        r.Size,
+			PublishDate: r.PublishDate,
+			Indexer:     r.Indexer,
+			IndexerID:   int(r.IndexerID),
+			Source:      "prowlarr",
+			GUID:        r.GUID,
+		})
+	}
+
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].PublishDate.After(results[j].PublishDate)
+	})
+
+	return results, nil
+}
+
 func (c *Client) searchWithID(ctx context.Context, idField, idValue, searchType string, categories, indexers []int, season, episode int) ([]NZBResult, error) {
+	if strings.EqualFold(idField, "ImdbId") {
+		idValue = strings.TrimPrefix(idValue, "tt")
+	}
+
 	var query strings.Builder
 	if idValue != "" {
 		query.WriteString("{" + idField + ":" + idValue + "}")
@@ -345,6 +486,8 @@ func (c *Client) searchWithID(ctx context.Context, idField, idValue, searchType 
 			PublishDate: r.PublishDate,
 			Indexer:     r.Indexer,
 			IndexerID:   int(r.IndexerID),
+			Source:      "prowlarr",
+			GUID:        r.GUID,
 		})
 	}
 
@@ -357,15 +500,22 @@ func (c *Client) searchWithID(ctx context.Context, idField, idValue, searchType 
 
 // DownloadNZB fetches the NZB file content from the given Prowlarr download URL.
 func (c *Client) DownloadNZB(ctx context.Context, downloadURL string) ([]byte, error) {
+	if err := httpclient.ValidateDownloadURL(downloadURL); err != nil {
+		return nil, fmt.Errorf("prowlarr: refusing download: %w", err)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("prowlarr: create download request: %w", err)
 	}
 	req.Header.Set("X-Api-Key", c.apiKey)
+	client := *c.http
+	client.CheckRedirect = func(req *http.Request, _ []*http.Request) error {
+		return fmt.Errorf("prowlarr: download redirect is not allowed")
+	}
 
-	resp, err := c.http.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("prowlarr: download request failed: %w", err)
+		return nil, fmt.Errorf("prowlarr: download request failed: %w", httpclient.RedactURLError(err))
 	}
 	defer resp.Body.Close()
 

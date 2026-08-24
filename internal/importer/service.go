@@ -803,6 +803,10 @@ func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath 
 		s.broadcaster.BroadcastQueueChanged()
 	}
 
+	if s.queueManager != nil {
+		s.queueManager.NotifyNewItem()
+	}
+
 	if fileSize != nil {
 		s.log.InfoContext(ctx, "Added NZB file to queue", "file", item.NzbPath, "queue_id", item.ID, "file_size", *fileSize)
 	} else {

@@ -544,3 +544,90 @@ func TestFastFailCheckFilesIndexAligned(t *testing.T) {
 		t.Error("results[2].Broken = true, want false")
 	}
 }
+
+// TestFastFailReleaseProbeTimeoutReportsMissing pins the documented contract
+// that a probe timeout yields (true, nil) so the caller escalates to the
+// per-file sweep. The probe derives its own short deadline from the caller's
+// context, so an expiry there must not be mistaken for caller cancellation —
+// which would report the release as healthy and swallow the signal entirely.
+func TestFastFailReleaseProbeTimeoutReportsMissing(t *testing.T) {
+	client := fakepool.New()
+	// Every Stat outlives the probe's own deadline.
+	client.SetDefaultBehavior(fakepool.SegmentBehavior{Latency: 2 * time.Second})
+
+	missing, err := FastFailReleaseProbe(
+		context.Background(),
+		[]FastFailFile{{Filename: "movie.mkv", Segments: makeTestSegments("slow", 5)}},
+		fastFailPoolManager{client: client},
+		100,
+		1,
+		10*time.Millisecond,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("FastFailReleaseProbe error = %v, want nil (a probe timeout is not an infrastructure error)", err)
+	}
+	if !missing {
+		t.Fatal("missing = false, want true (probe timed out, so reachability is unproven)")
+	}
+}
+
+// TestFastFailReleaseProbeCallerCancellationReturnsError verifies the opposite
+// case: when the caller's own context is cancelled the probe reports an error
+// rather than claiming the release is missing.
+func TestFastFailReleaseProbeCallerCancellationReturnsError(t *testing.T) {
+	client := fakepool.New()
+	client.SetDefaultBehavior(fakepool.SegmentBehavior{Latency: 2 * time.Second})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	missing, err := FastFailReleaseProbe(
+		ctx,
+		[]FastFailFile{{Filename: "movie.mkv", Segments: makeTestSegments("slow", 5)}},
+		fastFailPoolManager{client: client},
+		100,
+		1,
+		time.Minute,
+		nil,
+	)
+	if err == nil {
+		t.Fatal("FastFailReleaseProbe error = nil, want error when the caller cancelled")
+	}
+	if missing {
+		t.Error("missing = true, want false when the caller cancelled (reachability unknown)")
+	}
+}
+
+// TestFastFailCheckFilesTimeoutMarksFileBroken verifies that a Stat which
+// exceeds the sweep's own per-chunk deadline is mapped to the owning file
+// rather than aborting the whole sweep. Abandoning the sweep would discard the
+// per-file mapping this function exists to produce.
+func TestFastFailCheckFilesTimeoutMarksFileBroken(t *testing.T) {
+	client := fakepool.New()
+	client.SetDefaultBehavior(fakepool.SegmentBehavior{Latency: 2 * time.Second})
+
+	files := []FastFailFile{
+		{Filename: "movie.mkv", Segments: makeTestSegments("slow", 3)},
+	}
+
+	results, err := FastFailCheckFiles(
+		context.Background(),
+		files,
+		fastFailPoolManager{client: client},
+		100,
+		1,
+		10*time.Millisecond,
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("FastFailCheckFiles error = %v, want nil (a stat timeout is a per-file signal)", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("len(results) = %d, want 1", len(results))
+	}
+	if !results[0].Broken {
+		t.Error("results[0].Broken = false, want true (its segments never proved reachable)")
+	}
+}

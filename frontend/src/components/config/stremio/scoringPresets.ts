@@ -503,33 +503,89 @@ export interface EvaluationResult {
 	verdictLabel: string;
 }
 
+/**
+ * Regex flags honoured on a slash-delimited pattern. Kept in lockstep with the
+ * Go implementation (internal/prowlarr.slashPatternExpr), which supports only
+ * Go's inline flags. Unknown letters are dropped rather than throwing, so a
+ * pattern never behaves differently here than it does on the backend.
+ */
+const SUPPORTED_REGEX_FLAGS = "ims";
+
+/**
+ * Detects patterns a user clearly wrote as a regex. Mirrors Go's
+ * isExplicitRegex (internal/prowlarr/client.go).
+ *
+ * Bracket, paren and brace characters are deliberately excluded: release names
+ * are full of them ("[SubsPlease]", "(2020)"), and treating such a keyword as a
+ * regex turns "[SubsPlease]" into a character class matching nearly every
+ * title. Users who want a bracket-only regex can use the /pattern/ form.
+ */
+const REGEX_CONSTRUCTS = /\\b|\\[dwsDWS]|\(\?|[|*+?^$]/;
+
+/**
+ * Matches a release title against either an explicit regex pattern or a token
+ * keyword. Kept in lockstep with Go's prowlarr.MatchKeywordOrPattern so the
+ * preview in this UI and the backend's scoring agree on every input.
+ */
+export function matchKeywordOrPattern(title: string, pattern: string): boolean {
+	const trimmedPattern = pattern.trim();
+	if (!trimmedPattern || !title) return false;
+
+	// 1. Explicit slash-delimited regex: /pattern/ or /pattern/flags.
+	// A structurally valid slash pattern never falls through to keyword
+	// matching; an invalid body simply fails to match.
+	if (trimmedPattern.startsWith("/") && trimmedPattern.lastIndexOf("/") > 0) {
+		const lastSlash = trimmedPattern.lastIndexOf("/");
+		const raw = trimmedPattern.slice(1, lastSlash);
+		const rawFlags = trimmedPattern.slice(lastSlash + 1);
+		// Drop unsupported flags instead of letting RegExp throw on them, and
+		// always force case-insensitivity to match the Go side.
+		const flags = [
+			"i",
+			...new Set(rawFlags.split("").filter((f) => f !== "i" && SUPPORTED_REGEX_FLAGS.includes(f))),
+		].join("");
+		try {
+			return new RegExp(raw, flags).test(title);
+		} catch {
+			return false;
+		}
+	}
+
+	// 2. Explicit regex pattern (e.g. \b(cam|ts)\b)
+	if (REGEX_CONSTRUCTS.test(trimmedPattern)) {
+		try {
+			return new RegExp(trimmedPattern, "i").test(title);
+		} catch {
+			// Fallback to token matching below
+		}
+	}
+
+	// 3. Plain keyword / phrase: match with word/token boundary delimiters
+	try {
+		const cleanKw = trimmedPattern.replace(/^[._\-\s]+|[._\-\s]+$/g, "");
+		if (!cleanKw) return false;
+
+		const escaped = cleanKw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+		const wordsPattern = escaped.split(/\s+/).join("[ ._\\-]+");
+
+		const tokenRegex = new RegExp(`(?:^|[^a-zA-Z0-9])${wordsPattern}(?:[^a-zA-Z0-9]|$)`, "i");
+		return tokenRegex.test(title);
+	} catch {
+		return false;
+	}
+}
+
 interface ExclusionCheck {
 	excluded: boolean;
 	excludeReason?: string;
 }
 
 /** Checks the release title against the configured blacklist keywords/regex patterns. */
-function checkExclusions(
-	excludeKeywords: string[] | undefined,
-	trimmed: string,
-	titleLower: string,
-): ExclusionCheck {
+function checkExclusions(excludeKeywords: string[] | undefined, trimmed: string): ExclusionCheck {
 	for (const keyword of excludeKeywords || []) {
-		const kw = keyword.trim().toLowerCase();
+		const kw = keyword.trim();
 		if (!kw) continue;
-		if (kw.startsWith("/") && kw.endsWith("/")) {
-			try {
-				const re = new RegExp(kw.slice(1, -1), "i");
-				if (re.test(trimmed)) {
-					return {
-						excluded: true,
-						excludeReason: `Matched blacklist pattern /${kw.slice(1, -1)}/`,
-					};
-				}
-			} catch {
-				// ignore invalid regex
-			}
-		} else if (titleLower.includes(kw)) {
+		if (matchKeywordOrPattern(trimmed, kw)) {
 			return { excluded: true, excludeReason: `Matched blacklist keyword "${keyword}"` };
 		}
 	}
@@ -546,7 +602,6 @@ interface FormatScoreResult {
 function scoreFormats(
 	customFormats: TrashCustomFormat[] | undefined,
 	trimmed: string,
-	titleLower: string,
 ): FormatScoreResult {
 	let totalScore = 0;
 	const matches: EvaluationMatch[] = [];
@@ -557,13 +612,13 @@ function scoreFormats(
 
 		let matched = false;
 		if (format.patternType === "token") {
-			matched = titleLower.includes(format.pattern.toLowerCase().trim());
+			matched = matchKeywordOrPattern(trimmed, format.pattern);
 		} else {
 			try {
 				matched = new RegExp(format.pattern, "i").test(trimmed);
 			} catch {
-				// Fallback to substring if regex is invalid
-				matched = titleLower.includes(format.pattern.toLowerCase().trim());
+				// Fallback to token matching if regex is invalid
+				matched = matchKeywordOrPattern(trimmed, format.pattern);
 			}
 		}
 
@@ -652,13 +707,9 @@ export function evaluateRelease(
 
 	const titleLower = trimmed.toLowerCase();
 
-	let { excluded, excludeReason } = checkExclusions(config.exclude_keywords, trimmed, titleLower);
+	let { excluded, excludeReason } = checkExclusions(config.exclude_keywords, trimmed);
 
-	const { totalScore, matches, exclusion } = scoreFormats(
-		config.custom_formats,
-		trimmed,
-		titleLower,
-	);
+	const { totalScore, matches, exclusion } = scoreFormats(config.custom_formats, trimmed);
 	if (!excluded && exclusion) {
 		excluded = exclusion.excluded;
 		excludeReason = exclusion.excludeReason;

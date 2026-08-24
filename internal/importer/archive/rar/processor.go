@@ -60,7 +60,6 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 	// Reader-parallelism bound only — actual connection use is gated by the
 	// pool manager's global import connection budget inside each reader.
 	maxConcurrentVolumes := max(min(cfg.TotalProviderConnections(), len(rarFiles)), 1)
-	maxPrefetch := cfg.Import.MaxDownloadPrefetch
 	readTimeout := time.Duration(cfg.Import.ReadTimeoutSeconds) * time.Second
 	if readTimeout == 0 {
 		readTimeout = 5 * time.Minute
@@ -115,8 +114,11 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 	}
 
 	// Create Usenet filesystem for RAR access - this enables the iterator to access
-	// RAR part files directly from Usenet without downloading
-	ufs := filesystem.NewUsenetFileSystem(ctx, rh.poolManager, normalizedFiles, maxPrefetch, progressTracker, readTimeout)
+	// RAR part files directly from Usenet without downloading. Header analysis only
+	// reads initial volume headers, so prefetch is capped at 1 to prevent downloading
+	// excess payload segments across multi-volume archives.
+	headerAnalysisPrefetch := 1
+	ufs := filesystem.NewUsenetFileSystem(ctx, rh.poolManager, normalizedFiles, headerAnalysisPrefetch, progressTracker, readTimeout)
 
 	// Extract filenames for first part detection
 	fileNames := make([]string, len(normalizedFiles))
@@ -516,6 +518,7 @@ func (rh *rarProcessor) convertAggregatedFilesToRarContent(ctx context.Context, 
 		// Each file can have its own encryption credentials
 		var aesKey, aesIV []byte
 		var nzbdavID string
+		var firstSegBytes []byte
 		if len(af.Parts) > 0 {
 			firstPart := af.Parts[0]
 			if firstPart.AesKey != nil {
@@ -523,20 +526,24 @@ func (rh *rarProcessor) convertAggregatedFilesToRarContent(ctx context.Context, 
 				aesIV = firstPart.AesIV
 			}
 
-			// Also extract ID from the first part
+			// Also extract ID and warm first-segment bytes from the first part
 			if pf, ok := fileIndex.get(firstPart.Path); ok {
 				nzbdavID = pf.NzbdavID
+				if firstPart.DataOffset == 0 && len(pf.FirstSegmentBytes) > 0 {
+					firstSegBytes = pf.FirstSegmentBytes
+				}
 			}
 		}
 
 		rc := Content{
-			InternalPath: normalizedName,
-			Filename:     filepath.Base(normalizedName),
-			Size:         af.TotalUnpackedSize,
-			PackedSize:   af.TotalPackedSize,
-			AesKey:       aesKey,
-			AesIV:        aesIV,
-			NzbdavID:     nzbdavID,
+			InternalPath:      normalizedName,
+			Filename:          filepath.Base(normalizedName),
+			Size:              af.TotalUnpackedSize,
+			PackedSize:        af.TotalPackedSize,
+			AesKey:            aesKey,
+			AesIV:             aesIV,
+			NzbdavID:          nzbdavID,
+			FirstSegmentBytes: firstSegBytes,
 		}
 
 		var fileSegments []*metapb.SegmentData
@@ -714,7 +721,6 @@ func (rh *rarProcessor) processNestedRarContent(ctx context.Context, innerRarCon
 	// Reader-parallelism bound only — actual connection use is gated by the
 	// pool manager's global import connection budget inside each reader.
 	maxConcurrentVolumes := max(min(cfg.TotalProviderConnections(), len(innerRarContents)), 1)
-	maxPrefetch := cfg.Import.MaxDownloadPrefetch
 	readTimeout := time.Duration(cfg.Import.ReadTimeoutSeconds) * time.Second
 	if readTimeout == 0 {
 		readTimeout = 5 * time.Minute
@@ -734,16 +740,19 @@ func (rh *rarProcessor) processNestedRarContent(ctx context.Context, innerRarCon
 		}
 
 		entries = append(entries, filesystem.DecryptingFileEntry{
-			Filename:      c.Filename,
-			Segments:      c.Segments,
-			DecryptedSize: decryptedSize,
-			AesKey:        c.AesKey,
-			AesIV:         c.AesIV,
+			Filename:          c.Filename,
+			Segments:          c.Segments,
+			DecryptedSize:     decryptedSize,
+			AesKey:            c.AesKey,
+			AesIV:             c.AesIV,
+			FirstSegmentBytes: c.FirstSegmentBytes,
 		})
 	}
 
-	// Create filesystem for reading inner RAR volumes
-	dfs := filesystem.NewDecryptingFileSystem(ctx, rh.poolManager, entries, maxPrefetch, readTimeout)
+	// Create filesystem for reading inner RAR volumes.
+	// Header analysis only reads initial volume headers, so prefetch is capped at 1.
+	headerAnalysisPrefetch := 1
+	dfs := filesystem.NewDecryptingFileSystem(ctx, rh.poolManager, entries, headerAnalysisPrefetch, readTimeout)
 
 	// Find the first inner RAR part
 	fileNames := make([]string, len(innerRarContents))

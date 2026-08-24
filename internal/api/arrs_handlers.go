@@ -26,6 +26,7 @@ type ArrsInstanceRequest struct {
 	Enabled           bool   `json:"enabled"`
 	SyncIntervalHours int    `json:"sync_interval_hours"`
 }
+
 // ArrsWebhookRequest represents a webhook payload from Radarr/Sonarr
 type ArrsWebhookRequest struct {
 	Artist struct {
@@ -131,7 +132,6 @@ func (req ArrsWebhookRequest) ToMetadata() model.WebhookMetadata {
 			}
 		}
 	}
-
 
 	if req.Artist.Id > 0 {
 		meta.Artist = &model.ArtistMetadata{
@@ -1133,4 +1133,3 @@ func (s *Server) handleTestArrsDownloadClients(c *fiber.Ctx) error {
 		"data":    results,
 	})
 }
-

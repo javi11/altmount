@@ -194,7 +194,7 @@ export function ActivityHub() {
 														className={`h-8 w-8 shrink-0 ${isStalled ? "text-warning" : "text-primary/70"}`}
 													/>
 													{!isStalled && (
-														<span className="-bottom-0.5 -right-0.5 absolute flex h-2 w-2">
+														<span className="-right-0.5 -bottom-0.5 absolute flex h-2 w-2">
 															<span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-75" />
 															<span className="relative inline-flex h-2 w-2 rounded-full bg-success" />
 														</span>

@@ -443,7 +443,8 @@ func TestDirectoryModTime_StableAcrossHealthSweep(t *testing.T) {
 	assert.Equal(t, before, ms.DirectoryModTime(dir),
 		"a no-op health sweep must not bump the directory mtime")
 
-	// A genuine import advances it.
+	// A genuine import advances it (allow at least 10ms for filesystem mtime tick).
+	time.Sleep(15 * time.Millisecond)
 	newMeta := ms.CreateFileMetadata(300, "3.nzb", metapb.FileStatus_FILE_STATUS_HEALTHY, nil, metapb.Encryption_NONE, "", "", nil, nil, 0, nil, "")
 	newMeta.ModifiedAt = 1_700_000_900
 	require.NoError(t, ms.WriteFileMetadata(filepath.Join(dir, "part4.mkv"), newMeta))
