@@ -74,6 +74,18 @@ func (ms *MetadataService) MigrateGroup(ctx context.Context, g LegacyGroup, stor
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return res, ctxErr
 		}
+
+		// Keep the exact legacy bytes so a file that fails conversion or
+		// verification can be put back precisely as it was.
+		originalBytes, readErr := os.ReadFile(lm.MetaPath)
+		if readErr != nil {
+			res.FilesFailed++
+			res.Failures = append(res.Failures, fmt.Sprintf("%s: read original: %v", lm.VirtualPath, readErr))
+			slog.WarnContext(ctx, "Failed to read legacy metadata before migrating; skipping file",
+				"virtual_path", lm.VirtualPath, "error", readErr)
+			continue
+		}
+
 		if err := ms.WriteFileMetadataV3(ctx, lm.VirtualPath, lm.Meta, index, storeRef); err != nil {
 			res.FilesFailed++
 			res.Failures = append(res.Failures, fmt.Sprintf("%s: %v", lm.VirtualPath, err))
@@ -81,6 +93,28 @@ func (ms *MetadataService) MigrateGroup(ctx context.Context, g LegacyGroup, stor
 				"virtual_path", lm.VirtualPath, "error", err)
 			continue
 		}
+
+		// Prove this specific file still resolves to exactly the segments it
+		// had before, and undo it if not. This is what makes the migration
+		// trustworthy on metadata shapes no test anticipated.
+		if verifyErr := verifyMigratedFile(ms, lm.VirtualPath, lm.Meta); verifyErr != nil {
+			res.FilesFailed++
+			res.Failures = append(res.Failures,
+				fmt.Sprintf("%s: verification failed, restored legacy metadata: %v", lm.VirtualPath, verifyErr))
+			slog.ErrorContext(ctx, "Migrated metadata did not verify; restoring the legacy file",
+				"virtual_path", lm.VirtualPath, "error", verifyErr)
+			if restoreErr := restoreLegacyMeta(lm.MetaPath, originalBytes); restoreErr != nil {
+				slog.ErrorContext(ctx, "Failed to restore legacy metadata after a failed verification",
+					"virtual_path", lm.VirtualPath, "error", restoreErr)
+				res.Failures = append(res.Failures,
+					fmt.Sprintf("%s: RESTORE FAILED: %v", lm.VirtualPath, restoreErr))
+			}
+			// The failed v3 write already refreshed the lite cache; drop that
+			// entry so readers see the restored legacy file.
+			ms.liteCache.Remove(lm.VirtualPath)
+			continue
+		}
+
 		res.FilesMigrated++
 		if info, statErr := os.Stat(lm.MetaPath); statErr == nil {
 			res.BytesAfter += info.Size()

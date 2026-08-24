@@ -136,8 +136,23 @@ export function MetadataMigrationCard() {
 									<div className="text-sm">
 										{lastResult.files_migrated} files migrated,{" "}
 										{formatBytes(lastResult.bytes_saved)} reclaimed
-										{lastResult.files_failed > 0 && `, ${lastResult.files_failed} skipped`}
+										{lastResult.files_failed > 0 && `, ${lastResult.files_failed} left unchanged`}
 									</div>
+									{lastResult.failures && lastResult.failures.length > 0 && (
+										<details className="mt-2">
+											<summary className="cursor-pointer text-sm">
+												Show {lastResult.failures.length} file
+												{lastResult.failures.length === 1 ? "" : "s"} left in the old format
+											</summary>
+											<ul className="mt-2 max-h-48 space-y-1 overflow-y-auto font-mono text-xs">
+												{lastResult.failures.map((failure) => (
+													<li key={failure} className="break-all">
+														{failure}
+													</li>
+												))}
+											</ul>
+										</details>
+									)}
 								</div>
 							</div>
 						)}
