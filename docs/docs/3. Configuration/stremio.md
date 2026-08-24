@@ -78,6 +78,20 @@ When `prowlarr.enabled` is `true`, the Stremio addon endpoint searches Prowlarr 
 
 > **Tip:** The web UI renders categories, languages, and qualities as badge chips. Press Enter or comma to add a keyword; click × to remove.
 
+### Scoring & Keyword Filters
+
+Release scoring (`exclude_keywords`, `custom_formats`, language preferences) is configured from the web UI's Stremio settings card and can be previewed live with the built-in **Release Scoring & Media Search Inspector**.
+
+Keyword filters use **token-boundary matching**, not plain substring matching:
+
+- A keyword like `TS` matches `Movie.2024.TS.1080p` but deliberately does **not** match titles where it only appears inside a larger word, such as `DTS-HD.MA` or `Knights`.
+- Multi-word phrases match across release-name delimiters: `Korean Dub` matches `Korean.Dub`, `Korean_Dub`, and `Korean-Dub`.
+- Advanced users can write explicit regular expressions, either bare (`\b(cam|ts)\b`) or slash-delimited (`/(cam|ts)/i`). Invalid patterns are ignored rather than treated as literal text.
+
+:::note Upgrading
+Earlier versions matched keywords as plain substrings. After upgrading, review your exclude-keyword lists: entries that relied on partial-word hits (for example `ip` intended to block `WEBRip`) will no longer match and should be replaced with a regex such as `\bip\b|webrip` or a full token like `webrip`.
+:::
+
 ## Authentication — the `download_key`
 
 The streams endpoint and addon routes do **not** accept your raw API key. Instead they expect a `download_key`, which is the lowercase hex SHA-256 hash of your API key:

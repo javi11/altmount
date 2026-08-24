@@ -699,6 +699,8 @@ export interface TrashCustomFormat {
 	score: number;
 	enabled: boolean;
 	isCustom: boolean;
+	pattern_type?: "regex" | "token";
+	is_custom?: boolean;
 	invert?: boolean;
 }
 
@@ -735,6 +737,40 @@ export interface StremioIndexersConfig {
 	custom_user_agent?: string;
 	prowlarr: ProwlarrConfig;
 	newsnab?: NewsnabIndexerConfig[];
+}
+
+export interface ScoredReleaseItem {
+	title: string;
+	download_url: string;
+	size: number;
+	publish_date: string;
+	indexer: string;
+	indexer_id: string;
+	source: string;
+	guid: string;
+	score: number;
+	matched_formats: string[];
+	matched_languages: string[];
+	excluded: boolean;
+	exclude_reason?: string;
+}
+
+export interface InspectSearchRequest {
+	query: string;
+	type?: "movie" | "series";
+	imdb_id?: string;
+	tvdb_id?: string;
+	season?: number;
+	episode?: number;
+	timeout_ms?: number;
+	scoring?: StreamScoringConfig;
+}
+
+export interface InspectSearchResponse {
+	total_results: number;
+	active_results: number;
+	discarded_results: number;
+	releases: ScoredReleaseItem[];
 }
 
 export interface UserAgentInfo {

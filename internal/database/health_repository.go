@@ -1831,7 +1831,7 @@ func (r *HealthRepository) RelinkFileByFilename(ctx context.Context, filename, f
 	if err != nil {
 		return false, fmt.Errorf("failed to query records for filename relink: %w", err)
 	}
-	
+
 	type candidate struct {
 		id          int64
 		filePath    string
@@ -1922,12 +1922,12 @@ func (r *HealthRepository) RelinkFileByFilename(ctx context.Context, filename, f
 
 func isDownloaderPath(p string) bool {
 	low := strings.ToLower(p)
-	return strings.Contains(low, "complete") || 
-	       strings.Contains(low, "download") || 
-	       strings.Contains(low, "nzb") || 
-	       strings.Contains(low, "temp") || 
-	       strings.Contains(low, "tmp") || 
-	       strings.Contains(low, "incoming")
+	return strings.Contains(low, "complete") ||
+		strings.Contains(low, "download") ||
+		strings.Contains(low, "nzb") ||
+		strings.Contains(low, "temp") ||
+		strings.Contains(low, "tmp") ||
+		strings.Contains(low, "incoming")
 }
 
 func shareShowFolder(p1, p2 string) bool {
@@ -1936,14 +1936,14 @@ func shareShowFolder(p1, p2 string) bool {
 	if len(s1) < 2 || len(s2) < 2 {
 		return false
 	}
-	for i := len(s1) - 2; i >= 0 && i >= len(s1) - 3; i-- {
+	for i := len(s1) - 2; i >= 0 && i >= len(s1)-3; i-- {
 		seg := s1[i]
 		low := strings.ToLower(seg)
-		if strings.HasPrefix(low, "season") || 
-		   low == "specials" || low == "tv" || low == "movies" || low == "downloads" {
+		if strings.HasPrefix(low, "season") ||
+			low == "specials" || low == "tv" || low == "movies" || low == "downloads" {
 			continue
 		}
-		for j := len(s2) - 2; j >= 0 && j >= len(s2) - 3; j-- {
+		for j := len(s2) - 2; j >= 0 && j >= len(s2)-3; j-- {
 			if s2[j] == seg {
 				return true
 			}
@@ -2158,9 +2158,9 @@ func (r *HealthRepository) relinkOrMergeRecordTx(ctx context.Context, tx *dialec
 	if conflictExists && conflictingID == id {
 		conflictExists = false
 	}
-	
+
 	// Fast-Fail Revalidate Guard: If the target record (the one surviving the merge) recently
-	// had a repair triggered, DO NOT reset it to pending. This prevents Webhooks that fire immediately 
+	// had a repair triggered, DO NOT reset it to pending. This prevents Webhooks that fire immediately
 	// after an import's streaming failure from wiping out the repair trigger.
 	targetStatus := sourceStatus
 	targetUpdatedAt := sourceUpdatedAt
@@ -2168,7 +2168,7 @@ func (r *HealthRepository) relinkOrMergeRecordTx(ctx context.Context, tx *dialec
 		targetStatus = conflictingStatus
 		targetUpdatedAt = conflictingUpdatedAt
 	}
-	
+
 	if revalidate && (targetStatus == "repair_triggered" || targetStatus == "corrupted") && time.Since(targetUpdatedAt) < 60*time.Second {
 		revalidate = false
 	}
@@ -2437,9 +2437,16 @@ func (r *HealthRepository) FindHealthyFilesForMovie(ctx context.Context, title s
 		if err == nil {
 			var results []*FileHealth
 			for rows.Next() {
-				if h, err := scanFileHealth(rows); err == nil && h != nil {
+				if h, scanErr := scanFileHealth(rows); scanErr == nil && h != nil {
 					results = append(results, h)
+				} else if scanErr != nil {
+					rows.Close()
+					return nil, fmt.Errorf("failed to scan movie health row: %w", scanErr)
 				}
+			}
+			if rowsErr := rows.Err(); rowsErr != nil {
+				rows.Close()
+				return nil, fmt.Errorf("failed to read movie health rows: %w", rowsErr)
 			}
 			rows.Close()
 			if len(results) > 0 {
@@ -2454,14 +2461,16 @@ func (r *HealthRepository) FindHealthyFilesForMovie(ctx context.Context, title s
 		return nil, nil
 	}
 
+	titlePattern := buildTitleLikePattern(cleanTitle)
 	var query string
 	var args []interface{}
 	if year != "" {
-		query = fileHealthSelectColumns + " WHERE status = 'healthy' AND (file_path LIKE ? OR library_path LIKE ?) AND (file_path LIKE ? OR library_path LIKE ?) ORDER BY id DESC LIMIT 50"
-		args = append(args, "%"+cleanTitle+"%", "%"+cleanTitle+"%", "%"+year+"%", "%"+year+"%")
+		yearPattern := "%" + escapeLikePrefix(year) + "%"
+		query = fileHealthSelectColumns + " WHERE status = 'healthy' AND (file_path LIKE ? ESCAPE '\\' OR library_path LIKE ? ESCAPE '\\') AND (file_path LIKE ? ESCAPE '\\' OR library_path LIKE ? ESCAPE '\\') ORDER BY id DESC LIMIT 50"
+		args = append(args, titlePattern, titlePattern, yearPattern, yearPattern)
 	} else {
-		query = fileHealthSelectColumns + " WHERE status = 'healthy' AND (file_path LIKE ? OR library_path LIKE ?) ORDER BY id DESC LIMIT 50"
-		args = append(args, "%"+cleanTitle+"%", "%"+cleanTitle+"%")
+		query = fileHealthSelectColumns + " WHERE status = 'healthy' AND (file_path LIKE ? ESCAPE '\\' OR library_path LIKE ? ESCAPE '\\') ORDER BY id DESC LIMIT 50"
+		args = append(args, titlePattern, titlePattern)
 	}
 
 	rows, err := r.db.QueryContext(ctx, query, args...)
@@ -2472,11 +2481,33 @@ func (r *HealthRepository) FindHealthyFilesForMovie(ctx context.Context, title s
 
 	var results []*FileHealth
 	for rows.Next() {
-		if h, err := scanFileHealth(rows); err == nil && h != nil {
+		if h, scanErr := scanFileHealth(rows); scanErr == nil && h != nil {
 			results = append(results, h)
+		} else if scanErr != nil {
+			return nil, fmt.Errorf("failed to scan movie health row: %w", scanErr)
 		}
 	}
 	return results, rows.Err()
+}
+
+// buildTitleLikePattern converts space-separated title words into a
+// %-separated SQL LIKE wildcard pattern for robust matching.
+//
+// Note: the pattern is word-order sensitive — "Movie, The" will not match
+// release names ordered as "The.Movie". Callers must guard against empty
+// titles; an empty input yields an empty pattern (matches nothing) rather
+// than a bare "%" (which would match every row).
+func buildTitleLikePattern(title string) string {
+	clean := strings.TrimSpace(title)
+	if clean == "" {
+		return ""
+	}
+	words := strings.Fields(clean)
+	escapedWords := make([]string, len(words))
+	for i, w := range words {
+		escapedWords[i] = escapeLikePrefix(w)
+	}
+	return "%" + strings.Join(escapedWords, "%") + "%"
 }
 
 // FindHealthyFilesForSeries returns healthy library files matching a TV series by TVDB ID or series title.
@@ -2489,9 +2520,16 @@ func (r *HealthRepository) FindHealthyFilesForSeries(ctx context.Context, series
 		if err == nil {
 			var results []*FileHealth
 			for rows.Next() {
-				if h, err := scanFileHealth(rows); err == nil && h != nil {
+				if h, scanErr := scanFileHealth(rows); scanErr == nil && h != nil {
 					results = append(results, h)
+				} else if scanErr != nil {
+					rows.Close()
+					return nil, fmt.Errorf("failed to scan series health row: %w", scanErr)
 				}
+			}
+			if rowsErr := rows.Err(); rowsErr != nil {
+				rows.Close()
+				return nil, fmt.Errorf("failed to read series health rows: %w", rowsErr)
 			}
 			rows.Close()
 			if len(results) > 0 {
@@ -2506,8 +2544,9 @@ func (r *HealthRepository) FindHealthyFilesForSeries(ctx context.Context, series
 		return nil, nil
 	}
 
-	query := fileHealthSelectColumns + " WHERE status = 'healthy' AND (file_path LIKE ? OR library_path LIKE ?) ORDER BY id DESC LIMIT 100"
-	rows, err := r.db.QueryContext(ctx, query, "%"+cleanTitle+"%", "%"+cleanTitle+"%")
+	titlePattern := buildTitleLikePattern(cleanTitle)
+	query := fileHealthSelectColumns + " WHERE status = 'healthy' AND (file_path LIKE ? ESCAPE '\\' OR library_path LIKE ? ESCAPE '\\') ORDER BY id DESC LIMIT 100"
+	rows, err := r.db.QueryContext(ctx, query, titlePattern, titlePattern)
 	if err != nil {
 		return nil, err
 	}
@@ -2515,10 +2554,11 @@ func (r *HealthRepository) FindHealthyFilesForSeries(ctx context.Context, series
 
 	var results []*FileHealth
 	for rows.Next() {
-		if h, err := scanFileHealth(rows); err == nil && h != nil {
+		if h, scanErr := scanFileHealth(rows); scanErr == nil && h != nil {
 			results = append(results, h)
+		} else if scanErr != nil {
+			return nil, fmt.Errorf("failed to scan series health row: %w", scanErr)
 		}
 	}
 	return results, rows.Err()
 }
-

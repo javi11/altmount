@@ -4,8 +4,10 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"sync"
 	"time"
+
+	"github.com/javi11/altmount/internal/prowlarr"
+	"github.com/javi11/altmount/internal/regexcache"
 )
 
 // TrashCustomFormat defines a single scoring format rule.
@@ -29,17 +31,50 @@ type StreamScoringConfig struct {
 	ExcludeRegex             string              `yaml:"exclude_regex,omitempty" mapstructure:"exclude_regex" json:"exclude_regex,omitempty"`
 	PreferredLanguages       []string            `yaml:"preferred_languages" mapstructure:"preferred_languages" json:"preferred_languages"`
 	RequirePreferredLanguage bool                `yaml:"require_preferred_language" mapstructure:"require_preferred_language" json:"require_preferred_language"`
+	// LanguageBonus is the score added when a release matches the first
+	// preferred language; each subsequent position gets LanguageBonusStep less.
+	// Left at 0 the defaults below apply. Custom-format scores are typically in
+	// the hundreds, so these are deliberately configurable rather than fixed —
+	// an oversized bonus makes every other scoring rule decorative.
+	LanguageBonus     int `yaml:"language_bonus" mapstructure:"language_bonus" json:"language_bonus,omitempty"`
+	LanguageBonusStep int `yaml:"language_bonus_step" mapstructure:"language_bonus_step" json:"language_bonus_step,omitempty"`
+}
+
+// Default language-preference bonuses, applied when the config leaves them at 0.
+const (
+	defaultLanguageBonus     = 500
+	defaultLanguageBonusStep = 50
+)
+
+// languageBonusFor returns the score bonus for a preferred language at the
+// given preference position (0 = most preferred).
+func (c *StreamScoringConfig) languageBonusFor(rank int) int {
+	bonus := c.LanguageBonus
+	if bonus == 0 {
+		bonus = defaultLanguageBonus
+	}
+	step := c.LanguageBonusStep
+	if step == 0 {
+		step = defaultLanguageBonusStep
+	}
+	return bonus - rank*step
 }
 
 // SearchResult is the common interface for release results from any indexer.
 type SearchResult struct {
-	Title       string
-	DownloadURL string
-	Size        int64
-	PublishDate time.Time
-	Indexer     string
-	IndexerID   string
-	GUID        string
+	Title       string    `json:"title"`
+	DownloadURL string    `json:"download_url"`
+	Size        int64     `json:"size"`
+	PublishDate time.Time `json:"publish_date"`
+	Indexer     string    `json:"indexer"`
+	IndexerID   string    `json:"indexer_id"`
+	GUID        string    `json:"guid"`
+	Source      string    `json:"source"`
+	// ByIDSearch reports whether the indexer matched this release via an
+	// identifier query (imdbid/tvdbid) rather than a keyword. Such results
+	// skip the media-title mismatch gate, mirroring Prowlarr/Radarr trust
+	// in identifier matches.
+	ByIDSearch bool `json:"by_id_search,omitempty"`
 }
 
 // ScoredRelease represents a ranked release with evaluation metadata.
@@ -53,8 +88,7 @@ type ScoredRelease struct {
 }
 
 var (
-	regexCache   = sync.Map{}
-	languageMap  = map[string][]string{
+	languageMap = map[string][]string{
 		"English":        {"english", "eng", "\\ben\\b"},
 		"French":         {"french", "vff", "vfq", "truefrench", "\\bfr\\b", "fra"},
 		"Spanish":        {"spanish", "castellano", "latino", "esp", "spa"},
@@ -70,25 +104,7 @@ var (
 )
 
 func getCompiledRegex(pattern string) (*regexp.Regexp, error) {
-	if pattern == "" {
-		return nil, nil
-	}
-	if val, ok := regexCache.Load(pattern); ok {
-		if re, ok := val.(*regexp.Regexp); ok {
-			return re, nil
-		}
-	}
-
-	expr := pattern
-	if !strings.HasPrefix(pattern, "(?i)") {
-		expr = "(?i)" + pattern
-	}
-	re, err := regexp.Compile(expr)
-	if err != nil {
-		return nil, err
-	}
-	regexCache.Store(pattern, re)
-	return re, nil
+	return regexcache.Get(pattern)
 }
 
 // EvaluateRelease evaluates a release title against a scoring configuration.
@@ -113,14 +129,9 @@ func EvaluateRelease(title string, cfg *StreamScoringConfig) ScoredRelease {
 		if kw == "" {
 			continue
 		}
-		if strings.Contains(titleLower, strings.ToLower(kw)) {
+		if prowlarr.MatchKeywordOrPattern(title, kw) {
 			res.Excluded = true
 			res.ExcludeReason = "Matched exclude keyword: " + kw
-			return res
-		}
-		if re, err := getCompiledRegex(kw); err == nil && re != nil && re.MatchString(title) {
-			res.Excluded = true
-			res.ExcludeReason = "Matched exclude keyword regex: " + kw
 			return res
 		}
 	}
@@ -174,8 +185,27 @@ func EvaluateRelease(title string, cfg *StreamScoringConfig) ScoredRelease {
 		}
 	}
 
-	// 4. TRaSH Custom Format Rules
 	score := 0
+	// Preferred languages are ordered by user preference. A match in the first
+	// position receives the largest bonus, while later entries still outrank an
+	// otherwise identical release without a preferred language.
+	for rank, preferred := range cfg.PreferredLanguages {
+		matchedPreferred := false
+		for _, detected := range res.MatchedLanguages {
+			if strings.EqualFold(preferred, detected) {
+				if bonus := cfg.languageBonusFor(rank); bonus > 0 {
+					score += bonus
+				}
+				matchedPreferred = true
+				break
+			}
+		}
+		if matchedPreferred {
+			break
+		}
+	}
+
+	// 4. TRaSH Custom Format Rules
 	for _, format := range cfg.CustomFormats {
 		if !format.Enabled || strings.TrimSpace(format.Pattern) == "" {
 			continue
@@ -183,7 +213,7 @@ func EvaluateRelease(title string, cfg *StreamScoringConfig) ScoredRelease {
 
 		matched := false
 		if format.PatternType == "token" {
-			matched = strings.Contains(titleLower, strings.ToLower(format.Pattern))
+			matched = prowlarr.MatchKeywordOrPattern(title, format.Pattern)
 		} else {
 			if re, err := getCompiledRegex(format.Pattern); err == nil && re != nil {
 				matched = re.MatchString(title)
@@ -212,41 +242,68 @@ func EvaluateRelease(title string, cfg *StreamScoringConfig) ScoredRelease {
 	return res
 }
 
+// applyIndexerBonus adds the configured indexer priority bonus (matched by
+// indexer name first, then by indexer ID) to a scored release.
+func applyIndexerBonus(eval *ScoredRelease, rel SearchResult, indexerWeights map[string]int) {
+	if indexerWeights == nil {
+		return
+	}
+	if bonus, ok := indexerWeights[rel.Indexer]; ok && bonus != 0 {
+		eval.Score += bonus
+	} else if bonus, ok := indexerWeights[rel.IndexerID]; ok && bonus != 0 {
+		eval.Score += bonus
+	}
+}
+
+// sortByScoreDesc sorts releases descending by total score; ties break by
+// newest publish date.
+func sortByScoreDesc(list []ScoredRelease) {
+	sort.Slice(list, func(i, j int) bool {
+		if list[i].Score != list[j].Score {
+			return list[i].Score > list[j].Score
+		}
+		return list[i].PublishDate.After(list[j].PublishDate)
+	})
+}
+
+// sortByDateDesc sorts releases descending by publish date.
+func sortByDateDesc(list []ScoredRelease) {
+	sort.Slice(list, func(i, j int) bool {
+		return list[i].PublishDate.After(list[j].PublishDate)
+	})
+}
+
 // RankAndFilterReleases evaluates a list of search results, applies indexer priority bonuses,
 // drops excluded items, and sorts the remaining releases descending by total score.
 func RankAndFilterReleases(releases []SearchResult, scoringCfg *StreamScoringConfig, indexerWeights map[string]int) []ScoredRelease {
-	if len(releases) == 0 {
-		return []ScoredRelease{}
-	}
+	active, _ := EvaluateReleases(releases, scoringCfg, indexerWeights)
+	return active
+}
 
-	scored := make([]ScoredRelease, 0, len(releases))
+// EvaluateReleases evaluates every search result against the scoring config and
+// splits them into active and discarded releases with diagnostic reasons.
+// Indexer priority bonuses are applied to active releases only. Active releases
+// are sorted descending by score (ties broken by newest date); discarded ones
+// descending by publish date.
+func EvaluateReleases(releases []SearchResult, scoringCfg *StreamScoringConfig, indexerWeights map[string]int) (active, discarded []ScoredRelease) {
+	active = make([]ScoredRelease, 0, len(releases))
+	discarded = make([]ScoredRelease, 0, len(releases))
+
 	for _, rel := range releases {
 		eval := EvaluateRelease(rel.Title, scoringCfg)
+		eval.SearchResult = rel
+
 		if eval.Excluded {
+			discarded = append(discarded, eval)
 			continue
 		}
 
-		eval.SearchResult = rel
-
-		// Apply indexer bonus weight
-		if indexerWeights != nil {
-			if bonus, ok := indexerWeights[rel.Indexer]; ok && bonus != 0 {
-				eval.Score += bonus
-			} else if bonus, ok := indexerWeights[rel.IndexerID]; ok && bonus != 0 {
-				eval.Score += bonus
-			}
-		}
-
-		scored = append(scored, eval)
+		applyIndexerBonus(&eval, rel, indexerWeights)
+		active = append(active, eval)
 	}
 
-	// Sort descending by score; break ties by newest publish date
-	sort.Slice(scored, func(i, j int) bool {
-		if scored[i].Score != scored[j].Score {
-			return scored[i].Score > scored[j].Score
-		}
-		return scored[i].PublishDate.After(scored[j].PublishDate)
-	})
+	sortByScoreDesc(active)
+	sortByDateDesc(discarded)
 
-	return scored
+	return active, discarded
 }

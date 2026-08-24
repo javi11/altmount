@@ -1,13 +1,15 @@
 package api
 
 import (
+	"encoding/json"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/gofiber/fiber/v2"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/stretchr/testify/assert"
 )
-
 
 func TestToSABnzbdHistorySlot(t *testing.T) {
 	t.Run("basic path assignment", func(t *testing.T) {
@@ -138,6 +140,119 @@ func TestCalculateHistoryStoragePath(t *testing.T) {
 		path, exists := server.calculateHistoryStoragePath(item, "/movies-library")
 		assert.Equal(t, "/movies-library/complete/movies/2160p/ReleaseName/movie.mkv", path)
 		assert.True(t, exists)
+	})
+}
+
+func TestValidateSABnzbdCategory(t *testing.T) {
+	cfg := &config.Config{
+		SABnzbd: config.SABnzbdConfig{
+			Categories: []config.SABnzbdCategory{
+				{Name: "Movies"},
+				{Name: "TV"},
+				{Name: "Music"},
+				{Name: "Books"},
+			},
+		},
+	}
+
+	server := &Server{
+		configManager: &mockConfigManager{cfg: cfg},
+	}
+
+	t.Run("empty string maps to default category", func(t *testing.T) {
+		cat, err := server.validateSABnzbdCategory("")
+		assert.NoError(t, err)
+		assert.Equal(t, config.DefaultCategoryName, cat)
+	})
+
+	t.Run("asterisk maps to default category", func(t *testing.T) {
+		cat, err := server.validateSABnzbdCategory("*")
+		assert.NoError(t, err)
+		assert.Equal(t, config.DefaultCategoryName, cat)
+	})
+
+	t.Run("default case insensitive maps to default category", func(t *testing.T) {
+		cat, err := server.validateSABnzbdCategory("dEfAuLt")
+		assert.NoError(t, err)
+		assert.Equal(t, config.DefaultCategoryName, cat)
+	})
+
+	t.Run("case insensitive match for music", func(t *testing.T) {
+		cat, err := server.validateSABnzbdCategory("music")
+		assert.NoError(t, err)
+		assert.Equal(t, "Music", cat)
+
+		catUpper, err := server.validateSABnzbdCategory("MUSIC")
+		assert.NoError(t, err)
+		assert.Equal(t, "Music", catUpper)
+	})
+
+	t.Run("invalid category returns error", func(t *testing.T) {
+		_, err := server.validateSABnzbdCategory("invalid_cat")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid category 'invalid_cat'")
+	})
+
+	t.Run("no configured categories allows any category", func(t *testing.T) {
+		emptyServer := &Server{
+			configManager: &mockConfigManager{cfg: &config.Config{}},
+		}
+		cat, err := emptyServer.validateSABnzbdCategory("custom_category")
+		assert.NoError(t, err)
+		assert.Equal(t, "custom_category", cat)
+	})
+}
+
+func TestHandleSABnzbdGetCats(t *testing.T) {
+	app := fiber.New()
+	keyOverride := "12345678901234567890123456789012"
+	sabnzbdEnabled := true
+
+	cfg := &config.Config{
+		API: config.APIConfig{
+			KeyOverride: keyOverride,
+		},
+		SABnzbd: config.SABnzbdConfig{
+			Enabled: &sabnzbdEnabled,
+			Categories: []config.SABnzbdCategory{
+				{Name: "Movies"},
+				{Name: "TV"},
+				{Name: "Music"},
+				{Name: "Books"},
+				{Name: "Adult"},
+			},
+		},
+	}
+
+	server := &Server{
+		configManager: &mockConfigManager{cfg: cfg},
+	}
+
+	app.Get("/api", server.handleSABnzbd)
+
+	t.Run("mode=get_cats returns expected category list", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api?mode=get_cats&output=json&apikey="+keyOverride, nil)
+		resp, err := app.Test(req)
+		assert.NoError(t, err)
+		assert.Equal(t, 200, resp.StatusCode)
+
+		var result SABnzbdCategoriesResponse
+		err = json.NewDecoder(resp.Body).Decode(&result)
+		assert.NoError(t, err)
+		assert.Equal(t, []string{"*", "Movies", "TV", "Music", "Books", "Adult", "Default"}, result.Categories)
+	})
+
+	t.Run("mode=fullstatus behaves like mode=status", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api?mode=fullstatus&output=json&apikey="+keyOverride, nil)
+		resp, err := app.Test(req)
+		assert.NoError(t, err)
+		assert.Equal(t, 200, resp.StatusCode)
+
+		var result SABnzbdStatusResponse
+		err = json.NewDecoder(resp.Body).Decode(&result)
+		assert.NoError(t, err)
+		assert.True(t, result.Status)
+		assert.Equal(t, "4.5.0", result.Version)
 	})
 }
 

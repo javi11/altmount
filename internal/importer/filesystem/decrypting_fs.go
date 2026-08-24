@@ -29,11 +29,12 @@ var (
 // It holds the outer RAR segments and optional AES credentials needed
 // to read (and decrypt) the inner RAR volume at import time.
 type DecryptingFileEntry struct {
-	Filename      string
-	Segments      []*metapb.SegmentData
-	DecryptedSize int64  // Size of the decrypted data
-	AesKey        []byte // Empty = no encryption
-	AesIV         []byte
+	Filename          string
+	Segments          []*metapb.SegmentData
+	DecryptedSize     int64  // Size of the decrypted data
+	AesKey            []byte // Empty = no encryption
+	AesIV             []byte
+	FirstSegmentBytes []byte // Warm yEnc-decoded bytes from first segment for instant header analysis
 }
 
 // DecryptingFileSystem implements fs.FS for reading inner RAR archives
@@ -226,8 +227,73 @@ func (df *DecryptingFile) createReader(ctx context.Context, start int64) (io.Rea
 	return df.createPlainReader(ctx, start, entry.DecryptedSize-1)
 }
 
-// createPlainReader creates a Usenet reader without decryption.
+// createPlainReader creates a Usenet reader without decryption. Reads that begin
+// at offset 0 are served from the entry's warm first-segment bytes for as far as
+// those bytes reach, falling through to the network for the remainder — the warm
+// prefix covers only the leading bytes of the volume, so it must never terminate
+// the stream early.
 func (df *DecryptingFile) createPlainReader(ctx context.Context, start, end int64) (io.ReadCloser, error) {
+	if start == 0 && len(df.entry.FirstSegmentBytes) > 0 {
+		return df.newWarmPrefixReader(end), nil
+	}
+	return df.newNetworkReader(ctx, start, end)
+}
+
+// newWarmPrefixReader serves the entry's warm first-segment bytes for the
+// requested range [0,end], lazily creating a network reader for any portion
+// beyond the cached prefix so the combined stream has no gap or overlap.
+//
+// The fallthrough reader is built from the file's lifetime context rather than
+// the caller's per-Read context: Read caches the reader across calls but scopes
+// its context to a single call, so a lazily-created reader must not capture it.
+func (df *DecryptingFile) newWarmPrefixReader(end int64) io.ReadCloser {
+	prefix := df.entry.FirstSegmentBytes
+	// Never serve past the requested range.
+	if limit := end + 1; limit >= 0 && limit < int64(len(prefix)) {
+		prefix = prefix[:limit]
+	}
+	prefixLen := int64(len(prefix))
+
+	wr := &warmPrefixReader{prefix: prefix}
+	if end >= prefixLen {
+		wr.makeRest = func() (io.ReadCloser, error) {
+			restCtx, cancel := context.WithTimeout(df.ctx, df.effectiveReadTimeout())
+			rc, err := df.newNetworkReader(restCtx, prefixLen, end)
+			if err != nil {
+				cancel()
+				return nil, err
+			}
+			return &cancelOnCloseReader{ReadCloser: rc, cancel: cancel}, nil
+		}
+	}
+	return wr
+}
+
+// effectiveReadTimeout returns the configured read timeout, falling back to the
+// same default Read applies when none is set.
+func (df *DecryptingFile) effectiveReadTimeout() time.Duration {
+	if df.readTimeout > 0 {
+		return df.readTimeout
+	}
+	return 5 * time.Minute
+}
+
+// cancelOnCloseReader releases a reader's context when the reader is closed,
+// so a lazily-created reader outliving its creating call still cleans up.
+type cancelOnCloseReader struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (r *cancelOnCloseReader) Close() error {
+	err := r.ReadCloser.Close()
+	r.cancel()
+	return err
+}
+
+// newNetworkReader creates a Usenet reader that fetches the byte range [start,end]
+// from the provider.
+func (df *DecryptingFile) newNetworkReader(ctx context.Context, start, end int64) (io.ReadCloser, error) {
 	loader := dbSegmentLoader{segs: df.entry.Segments}
 	if loader.GetSegmentCount() == 0 {
 		return nil, fmt.Errorf("no segments to download")

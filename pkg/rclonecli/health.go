@@ -40,6 +40,22 @@ func (m *Manager) checkMountHealth(provider string) bool {
 
 // RecoverMount attempts to recover a failed mount
 func (m *Manager) RecoverMount(ctx context.Context, provider string) error {
+	m.recoveryMu.Lock()
+	if m.recovering == nil {
+		m.recovering = make(map[string]struct{})
+	}
+	if _, exists := m.recovering[provider]; exists {
+		m.recoveryMu.Unlock()
+		return nil
+	}
+	m.recovering[provider] = struct{}{}
+	m.recoveryMu.Unlock()
+	defer func() {
+		m.recoveryMu.Lock()
+		delete(m.recovering, provider)
+		m.recoveryMu.Unlock()
+	}()
+
 	m.mountMu.Lock()
 	defer m.mountMu.Unlock()
 
@@ -92,10 +108,6 @@ func (m *Manager) RecoverMount(ctx context.Context, provider string) error {
 
 // MonitorMounts continuously monitors mount health and attempts recovery
 func (m *Manager) MonitorMounts(ctx context.Context) {
-	if !m.serverStarted {
-		return
-	}
-
 	ticker := time.NewTicker(healthCheckInterval)
 	defer ticker.Stop()
 
@@ -157,7 +169,10 @@ func (m *Manager) performMountHealthCheck() {
 		m.mountsMutex.RLock()
 		toRemount := make([]*MountInfo, 0, len(m.mounts))
 		for _, mount := range m.mounts {
-			toRemount = append(toRemount, mount)
+			if mount.desired {
+				copy := *mount
+				toRemount = append(toRemount, &copy)
+			}
 		}
 		m.mountsMutex.RUnlock()
 

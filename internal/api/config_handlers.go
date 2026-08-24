@@ -130,6 +130,11 @@ func (s *Server) handleUpdateConfig(c *fiber.Ctx) error {
 		return RespondValidationError(c, "Invalid JSON in request body", err.Error())
 	}
 
+	// API responses intentionally mask provider credentials. Preserve the
+	// stored value when a full-config update sends an empty masked field; a
+	// separate credential-rotation operation can still replace it explicitly.
+	preserveMaskedStremioCredentials(currentConfig, newConfig)
+
 	slog.DebugContext(c.Context(), "Updating configuration")
 
 	// Validate the new configuration with API restrictions
@@ -161,6 +166,25 @@ func (s *Server) handleUpdateConfig(c *fiber.Ctx) error {
 
 	response := ToConfigAPIResponse(newConfig, apiKey)
 	return RespondSuccess(c, response)
+}
+
+func preserveMaskedStremioCredentials(current, updated *config.Config) {
+	if current == nil || updated == nil {
+		return
+	}
+	if updated.Stremio.Prowlarr.APIKey == "" {
+		updated.Stremio.Prowlarr.APIKey = current.Stremio.Prowlarr.APIKey
+	}
+	if updated.Stremio.Indexers.Prowlarr.APIKey == "" {
+		updated.Stremio.Indexers.Prowlarr.APIKey = current.Stremio.Indexers.Prowlarr.APIKey
+	}
+	for i := range updated.Stremio.Indexers.Newsnab {
+		for _, existing := range current.Stremio.Indexers.Newsnab {
+			if existing.ID == updated.Stremio.Indexers.Newsnab[i].ID && updated.Stremio.Indexers.Newsnab[i].APIKey == "" {
+				updated.Stremio.Indexers.Newsnab[i].APIKey = existing.APIKey
+			}
+		}
+	}
 }
 
 // handlePatchConfigSection updates a specific configuration section
@@ -227,6 +251,10 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 		// The frontend sends password: "" when the user hasn't entered a new password.
 		if err == nil && newConfig.WebDAV.Password == "" {
 			newConfig.WebDAV.Password = currentConfig.WebDAV.Password
+		}
+		// Preserve existing Prowlarr and Newsnab credentials when patching the Stremio section.
+		if err == nil && section == "stremio" {
+			preserveMaskedStremioCredentials(currentConfig, newConfig)
 		}
 	default:
 		return RespondValidationError(c, fmt.Sprintf("Unknown configuration section: %s", section), "INVALID_SECTION")
