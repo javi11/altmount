@@ -48,6 +48,24 @@ type SearchCoordinator struct {
 	httpClient     *http.Client
 }
 
+// newsnabClientPool caches newsnab clients per indexer configuration so the
+// in-process caps cache and the learned identifier-support negative cache
+// survive across search requests. A coordinator is created per stream request;
+// without the pool every request would re-fetch caps and replay the full
+// identifier degradation ladder against indexers that cannot resolve
+// identifiers, burning most of the search budget before the title pass runs.
+var newsnabClientPool sync.Map
+
+func cachedNewsnabClient(cfg newsnab.IndexerConfig, httpClient *http.Client) *newsnab.Client {
+	key := cfg.Name + "|" + cfg.URL + "|" + cfg.APIKey
+	if v, ok := newsnabClientPool.Load(key); ok {
+		return v.(*newsnab.Client)
+	}
+	client := newsnab.NewClient(cfg, httpClient)
+	actual, _ := newsnabClientPool.LoadOrStore(key, client)
+	return actual.(*newsnab.Client)
+}
+
 // NewSearchCoordinator creates a new search coordinator.
 func NewSearchCoordinator(cfg CoordinatorConfig, httpClient *http.Client) *SearchCoordinator {
 	if httpClient == nil {
@@ -62,7 +80,7 @@ func NewSearchCoordinator(cfg CoordinatorConfig, httpClient *http.Client) *Searc
 	newsnabClients := make([]*newsnab.Client, 0, len(cfg.NewsnabIndexers))
 	for _, nCfg := range cfg.NewsnabIndexers {
 		if nCfg.Enabled && nCfg.URL != "" {
-			newsnabClients = append(newsnabClients, newsnab.NewClient(nCfg, httpClient))
+			newsnabClients = append(newsnabClients, cachedNewsnabClient(nCfg, httpClient))
 		}
 	}
 

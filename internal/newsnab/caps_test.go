@@ -142,3 +142,73 @@ func TestNewsnabClient_SlowCaps_BackgroundFetchWarmsCache(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int32(1), capsHits.Load(), "caps must be fetched once, then served from cache")
 }
+
+func TestParseCaps_PerSearchTypeSupportedParams(t *testing.T) {
+	t.Run("Prowlarr parity: available without supportedParams means q only", func(t *testing.T) {
+		doc := `<?xml version="1.0" encoding="UTF-8"?>
+<caps>
+	<server appversion="" version="0.1"/>
+	<limits max="60" default="25"/>
+	<searching>
+		<search available="yes"/>
+		<tv-search available="yes"/>
+		<movie-search available="yes"/>
+	</searching>
+	<categories>
+		<category id="5000" name="TV">
+			<subcat id="5070" name="Anime"/>
+		</category>
+	</categories>
+</caps>`
+		caps := parseCaps([]byte(doc))
+		require.NotNil(t, caps)
+		assert.True(t, caps.TVSearch)
+		assert.True(t, caps.supportsParam(SearchTypeTV, "q"))
+		assert.False(t, caps.supportsParam(SearchTypeTV, "ep"), "undeclared params must not be assumed")
+		assert.False(t, caps.supportsParam(SearchTypeTV, "imdbid"))
+		assert.False(t, caps.supportsParam(SearchTypeMovie, "imdbid"))
+		assert.Equal(t, []string{"q"}, caps.TVParams)
+	})
+
+	t.Run("althub style: supportedParams attribute is parsed per search type", func(t *testing.T) {
+		doc := `<?xml version="1.0" encoding="UTF-8"?>
+<caps>
+	<server title="altHUB"/>
+	<searching>
+		<search available="yes"/>
+		<tv-search available="yes" supportedParams="q,rid,tvdbid,imdbid,tvmazeid,season,ep"/>
+		<movie-search available="yes" supportedParams="q,imdbid"/>
+	</searching>
+</caps>`
+		caps := parseCaps([]byte(doc))
+		require.NotNil(t, caps)
+		assert.True(t, caps.TVSearch)
+		for _, p := range []string{"q", "tvdbid", "imdbid", "season", "ep"} {
+			assert.True(t, caps.supportsParam(SearchTypeTV, p), "tv param %s", p)
+		}
+		assert.True(t, caps.supportsParam(SearchTypeMovie, "imdbid"))
+		assert.False(t, caps.supportsParam(SearchTypeMovie, "season"))
+	})
+
+	t.Run("unavailable search function supports nothing", func(t *testing.T) {
+		doc := `<?xml version="1.0"?><caps><searching><search available="yes"/><tv-search available="no" supportedParams="q,ep"/><movie-search available="no"/></searching></caps>`
+		caps := parseCaps([]byte(doc))
+		require.NotNil(t, caps)
+		assert.False(t, caps.TVSearch)
+		assert.False(t, caps.MovieSearch)
+		assert.Nil(t, caps.TVParams)
+	})
+
+	t.Run("missing searching section assumes standard parameter sets", func(t *testing.T) {
+		doc := `<?xml version="1.0"?><caps><server title="Minimal"/></caps>`
+		caps := parseCaps([]byte(doc))
+		require.NotNil(t, caps)
+		assert.True(t, caps.Search)
+		assert.True(t, caps.MovieSearch)
+		assert.True(t, caps.TVSearch)
+		assert.True(t, caps.supportsParam(SearchTypeTV, "season"))
+		assert.True(t, caps.supportsParam(SearchTypeTV, "ep"))
+		assert.True(t, caps.supportsParam(SearchTypeMovie, "imdbid"))
+		assert.False(t, caps.supportsParam(SearchTypeMovie, "season"))
+	})
+}

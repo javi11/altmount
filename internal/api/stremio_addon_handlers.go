@@ -1803,12 +1803,19 @@ func (s *Server) handleListProwlarrIndexers(c *fiber.Ctx) error {
 
 	cfg := s.configManager.GetConfig()
 	host := strings.TrimSpace(req.Host)
-	if host == "" {
-		host = cfg.Stremio.Prowlarr.Host
-	}
 	apiKey := strings.TrimSpace(req.APIKey)
+	// Fall back to the stored Prowlarr configuration so masked credentials
+	// work without re-entry: the per-indexer section is authoritative, the
+	// legacy stremio.prowlarr section is the fallback.
+	if host == "" {
+		if host = cfg.Stremio.Indexers.Prowlarr.Host; host == "" {
+			host = cfg.Stremio.Prowlarr.Host
+		}
+	}
 	if apiKey == "" {
-		apiKey = cfg.Stremio.Prowlarr.APIKey
+		if apiKey = cfg.Stremio.Indexers.Prowlarr.APIKey; apiKey == "" {
+			apiKey = cfg.Stremio.Prowlarr.APIKey
+		}
 	}
 
 	if host == "" || apiKey == "" {
@@ -1825,6 +1832,7 @@ func (s *Server) handleListProwlarrIndexers(c *fiber.Ctx) error {
 }
 
 type newsnabTestRequest struct {
+	ID     string `json:"id"`
 	URL    string `json:"url"`
 	APIKey string `json:"api_key"`
 }
@@ -1836,6 +1844,22 @@ func (s *Server) handleTestNewsnabIndexer(c *fiber.Ctx) error {
 	}
 
 	reqURL := strings.TrimSpace(req.URL)
+
+	// A masked stored API key arrives empty; when the request identifies a
+	// configured indexer, fall back to its stored credentials so testing an
+	// existing indexer does not require re-typing the key.
+	if strings.TrimSpace(req.APIKey) == "" && strings.TrimSpace(req.ID) != "" {
+		for _, n := range s.configManager.GetConfig().Stremio.Indexers.Newsnab {
+			if n.ID == strings.TrimSpace(req.ID) {
+				if reqURL == "" {
+					reqURL = n.URL
+				}
+				req.APIKey = n.APIKey
+				break
+			}
+		}
+	}
+
 	if reqURL == "" || req.APIKey == "" {
 		return RespondValidationError(c, "Indexer URL and API Key are required", "")
 	}
@@ -1859,6 +1883,15 @@ func (s *Server) handleTestNewsnabIndexer(c *fiber.Ctx) error {
 		"server_name": caps.ServerName,
 		"categories":  caps.Categories,
 		"status":      "ok",
+		"capabilities": fiber.Map{
+			"search":         caps.Search,
+			"movie_search":   caps.MovieSearch,
+			"tv_search":      caps.TVSearch,
+			"search_params":  caps.SearchParams,
+			"movie_params":   caps.MovieParams,
+			"tv_params":      caps.TVParams,
+			"category_count": len(caps.Categories),
+		},
 	})
 }
 

@@ -670,6 +670,7 @@ export interface ProwlarrConfig {
 	enabled: boolean;
 	host: string;
 	api_key: string;
+	api_key_set?: boolean;
 	categories: number[];
 	indexers?: number[];
 	preferred_indexers?: number[];

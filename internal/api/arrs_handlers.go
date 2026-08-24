@@ -13,6 +13,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/javi11/altmount/internal/arrs/model"
+	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 )
 
@@ -812,7 +813,42 @@ func (s *Server) handleTestArrsConnection(c *fiber.Ctx) error {
 		})
 	}
 
-	if req.URL == "" || req.APIKey == "" {
+	if req.URL == "" {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"message": "URL and API key are required",
+		})
+	}
+
+	// A masked stored API key arrives empty; fall back to the credentials of
+	// a configured instance with the same URL so testing an existing instance
+	// does not require re-typing the key.
+	if req.APIKey == "" && s.configManager != nil {
+		if cfg := s.configManager.GetConfig(); cfg != nil {
+			var instances []config.ArrsInstanceConfig
+			switch strings.ToLower(req.Type) {
+			case "sonarr":
+				instances = cfg.Arrs.SonarrInstances
+			case "radarr":
+				instances = cfg.Arrs.RadarrInstances
+			case "lidarr":
+				instances = cfg.Arrs.LidarrInstances
+			case "readarr":
+				instances = cfg.Arrs.ReadarrInstances
+			case "whisparr":
+				instances = cfg.Arrs.WhisparrInstances
+			case "sportarr":
+				instances = cfg.Arrs.SportarrInstances
+			}
+			for _, inst := range instances {
+				if inst.URL == req.URL && inst.APIKey != "" {
+					req.APIKey = inst.APIKey
+					break
+				}
+			}
+		}
+	}
+	if req.APIKey == "" {
 		return c.Status(400).JSON(fiber.Map{
 			"success": false,
 			"message": "URL and API key are required",
