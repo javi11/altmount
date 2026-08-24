@@ -81,6 +81,9 @@ type Client struct {
 	capsMu        sync.Mutex
 	caps          *Capabilities
 	capsFetchedAt time.Time
+	// capsInflight is non-nil while a background caps refresh is running and
+	// is closed when it completes, single-flighting concurrent lookups.
+	capsInflight chan struct{}
 }
 
 // NewClient creates a new Newsnab client.

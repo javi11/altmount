@@ -21,6 +21,16 @@ const (
 	// capsFailureRetryTTL bounds how often a failing caps endpoint is retried,
 	// so broken indexers are not hammered on every search.
 	capsFailureRetryTTL = 10 * time.Minute
+	// capsWaitBudget caps how much of a caller's search deadline may be spent
+	// waiting on a caps lookup. Caps are an optimization, never a prerequisite:
+	// once this elapses the search proceeds with unknown caps and legacy
+	// unrestricted queries rather than starving behind a slow indexer.
+	capsWaitBudget = 750 * time.Millisecond
+	// capsFetchTimeout backstops a background caps fetch. The fetch runs on a
+	// context detached from the caller's search deadline so that it keeps
+	// warming the cache after the caller has given up; this bounds how long
+	// such a goroutine may outlive that caller.
+	capsFetchTimeout = 30 * time.Second
 )
 
 // Capabilities describes a Newsnab/Newznab indexer's advertised features from
@@ -78,32 +88,100 @@ func filterCategories(caps *Capabilities, requested []int) []int {
 	return filtered
 }
 
-// getCaps returns cached indexer capabilities, fetching them lazily on first
-// use and refreshing hourly. Failures are negatively cached; a nil result
-// means "unknown caps" and callers fall back to legacy unrestricted queries.
+// getCaps returns cached indexer capabilities, refreshing them in the
+// background when stale. A nil result means "unknown caps" and callers fall
+// back to legacy unrestricted queries.
+//
+// The caps lookup never runs under the caller's lock and never inherits the
+// caller's search deadline. A caller with nothing cached waits at most
+// capsWaitBudget for an in-flight fetch before degrading to unknown caps, so a
+// slow or hung caps endpoint costs one indexer its caps rather than starving
+// every query aimed at it.
 func (c *Client) getCaps(ctx context.Context, userAgent string) *Capabilities {
+	caps, inflight := c.cachedCapsOrRefresh(ctx, userAgent)
+	if inflight == nil {
+		return caps
+	}
+
+	timer := time.NewTimer(capsWaitBudget)
+	defer timer.Stop()
+
+	select {
+	case <-inflight:
+		return c.cachedCaps()
+	case <-timer.C:
+		slog.DebugContext(ctx, "Newsnab caps lookup exceeded wait budget; using unrestricted queries",
+			"indexer", c.config.Name, "wait_budget", capsWaitBudget)
+		return nil
+	case <-ctx.Done():
+		return nil
+	}
+}
+
+// cachedCapsOrRefresh reports the cached caps and, when a refresh is needed,
+// starts (or joins) a single background fetch. It returns a non-nil channel
+// only when the caller has nothing usable cached and may therefore benefit
+// from briefly waiting. The mutex is never held across I/O.
+func (c *Client) cachedCapsOrRefresh(ctx context.Context, userAgent string) (*Capabilities, <-chan struct{}) {
 	c.capsMu.Lock()
 	defer c.capsMu.Unlock()
 
-	now := time.Now()
-	if c.caps != nil && now.Sub(c.capsFetchedAt) < capsCacheTTL {
-		return c.caps
+	// A zero capsFetchedAt means nothing has ever been fetched. Otherwise a
+	// cached hit stays valid for capsCacheTTL, and a cached failure (nil caps)
+	// is respected for the shorter capsFailureRetryTTL.
+	ttl := capsCacheTTL
+	if c.caps == nil {
+		ttl = capsFailureRetryTTL
 	}
-	if c.caps == nil && !c.capsFetchedAt.IsZero() && now.Sub(c.capsFetchedAt) < capsFailureRetryTTL {
-		return nil
+	if !c.capsFetchedAt.IsZero() && time.Since(c.capsFetchedAt) < ttl {
+		return c.caps, nil
 	}
 
+	if c.capsInflight == nil {
+		done := make(chan struct{})
+		c.capsInflight = done
+		go c.refreshCaps(ctx, userAgent, done)
+	}
+
+	// Serve stale-but-usable caps immediately rather than making the caller
+	// wait on the revalidation it just triggered.
+	if c.caps != nil {
+		return c.caps, nil
+	}
+	return nil, c.capsInflight
+}
+
+// cachedCaps returns the currently cached caps without triggering a fetch.
+func (c *Client) cachedCaps() *Capabilities {
+	c.capsMu.Lock()
+	defer c.capsMu.Unlock()
+	return c.caps
+}
+
+// refreshCaps performs a caps fetch on a context detached from the caller's
+// search deadline and stores the outcome. A failure caches nil, which both
+// means "unknown caps" to callers and suppresses retries for
+// capsFailureRetryTTL.
+func (c *Client) refreshCaps(parent context.Context, userAgent string, done chan struct{}) {
+	// Detached from the caller's cancellation but keeping its values, so the
+	// fetch outlives the search that triggered it and warms the cache.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), capsFetchTimeout)
+	defer cancel()
+
 	caps, err := c.fetchCaps(ctx, userAgent)
-	c.capsFetchedAt = now
+
+	c.capsMu.Lock()
+	c.caps = caps
+	c.capsFetchedAt = time.Now()
+	c.capsInflight = nil
+	c.capsMu.Unlock()
+
+	close(done)
+
 	if err != nil {
 		slog.WarnContext(ctx, "Newsnab caps lookup failed; falling back to unrestricted queries",
 			"indexer", c.config.Name, "error", err)
-		c.caps = nil
-		return nil
 	}
-
-	c.caps = caps
-	return caps
 }
 
 // fetchCaps performs the live /api?t=caps request.
