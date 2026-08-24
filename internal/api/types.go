@@ -264,7 +264,6 @@ type StremioAPIResponse struct {
 	MaxFallbackReleases   int                        `json:"max_fallback_releases"`
 	FastFailHeaderOnly    bool                       `json:"fast_fail_header_only"`
 	IncludeLibraryStreams *bool                      `json:"include_library_streams,omitempty"`
-	ShowNoStreamsVideo    *bool                      `json:"show_no_streams_video,omitempty"`
 	BaseURL               string                     `json:"base_url,omitempty"`
 	Indexers              StremioIndexersAPIResponse `json:"indexers"`
 	Scoring               StreamScoringAPIResponse   `json:"scoring"`
@@ -517,7 +516,6 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 		MaxFallbackReleases:   cfg.Stremio.MaxFallbackReleases,
 		FastFailHeaderOnly:    cfg.Stremio.EffectiveFastFailHeaderOnly(),
 		IncludeLibraryStreams: cfg.Stremio.IncludeLibraryStreams,
-		ShowNoStreamsVideo:    cfg.Stremio.ShowNoStreamsVideo,
 		BaseURL:               cfg.Stremio.BaseURL,
 		Indexers: StremioIndexersAPIResponse{
 			Provider:        provider,
