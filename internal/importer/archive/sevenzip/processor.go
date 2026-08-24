@@ -114,7 +114,6 @@ func (sz *sevenZipProcessor) AnalyzeSevenZipContentFromNzb(ctx context.Context, 
 	}
 
 	cfg := sz.configGetter()
-	maxPrefetch := cfg.Import.MaxDownloadPrefetch
 	readTimeout := time.Duration(cfg.Import.ReadTimeoutSeconds) * time.Second
 	if readTimeout == 0 {
 		readTimeout = 5 * time.Minute
@@ -128,8 +127,10 @@ func (sz *sevenZipProcessor) AnalyzeSevenZipContentFromNzb(ctx context.Context, 
 	sortedFiles := renameSevenZipFilesAndSort(sevenZipFiles)
 
 	// Create Usenet filesystem for 7zip access - this enables sevenzip to access
-	// 7zip part files directly from Usenet without downloading
-	ufs := filesystem.NewUsenetFileSystem(ctx, sz.poolManager, sortedFiles, maxPrefetch, progressTracker, readTimeout)
+	// 7zip part files directly from Usenet without downloading. Header analysis only
+	// reads initial volume headers, so prefetch is capped at 1.
+	headerAnalysisPrefetch := 1
+	ufs := filesystem.NewUsenetFileSystem(ctx, sz.poolManager, sortedFiles, headerAnalysisPrefetch, progressTracker, readTimeout)
 
 	// Extract filenames for first part detection
 	fileNames := make([]string, len(sortedFiles))
@@ -881,7 +882,6 @@ func (sz *sevenZipProcessor) detectAndProcessNestedRars(ctx context.Context, out
 // For encrypted outer 7zips, it creates NestedSource entries.
 func (sz *sevenZipProcessor) processNestedRarContent(ctx context.Context, innerRarContents []Content) ([]Content, error) {
 	cfg := sz.configGetter()
-	maxPrefetch := cfg.Import.MaxDownloadPrefetch
 	readTimeout := time.Duration(cfg.Import.ReadTimeoutSeconds) * time.Second
 	if readTimeout == 0 {
 		readTimeout = 5 * time.Minute
@@ -907,8 +907,10 @@ func (sz *sevenZipProcessor) processNestedRarContent(ctx context.Context, innerR
 		})
 	}
 
-	// Create filesystem for reading inner RAR volumes
-	dfs := filesystem.NewDecryptingFileSystem(ctx, sz.poolManager, entries, maxPrefetch, readTimeout)
+	// Create filesystem for reading inner RAR volumes.
+	// Header analysis only reads initial volume headers, so prefetch is capped at 1.
+	headerAnalysisPrefetch := 1
+	dfs := filesystem.NewDecryptingFileSystem(ctx, sz.poolManager, entries, headerAnalysisPrefetch, readTimeout)
 
 	// Find the first inner RAR part
 	fileNames := make([]string, len(innerRarContents))

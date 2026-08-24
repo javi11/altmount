@@ -8,6 +8,7 @@ import (
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/prowlarr"
+	"github.com/stretchr/testify/assert"
 )
 
 func timePtr(t time.Time) *time.Time { return &t }
@@ -67,6 +68,41 @@ func TestBuildStremioStreamEntries_CacheDetection(t *testing.T) {
 			cached:     []*database.ImportQueueItem{cachedItem("/config/.nzbs/Movies/9/Different Release.nzb", "/storage/other", timePtr(now.Add(-1*time.Hour)))},
 			ttlHours:   24,
 			wantCached: false,
+		},
+		{
+			name:        "special characters and dot differences match",
+			searchTitle: "House.of.the.Dragon.S03E02.Queens.Landing.2160p.HMAX.WEB-DL.DDP5.1.Atmos.DoVi.HDR.H.265-playWEB",
+			cached:      []*database.ImportQueueItem{cachedItem("/config/.nzbs/TV/House of the Dragon - S03E02 - Queen's Landing [2160p HMAX WEB-DL DDP5.1 Atmos DoVi HDR H.265-playWEB].nzb.gz", "/storage/hotd", timePtr(now.Add(-1*time.Hour)))},
+			ttlHours:    24,
+			wantCached:  true,
+		},
+		{
+			name:        "case differences and brackets match",
+			searchTitle: "lia one piece 0482 1080p",
+			cached:      []*database.ImportQueueItem{cachedItem("/config/.nzbs/TV/[Lia] ONE PIECE - 0482 [1080P].nzb", "/storage/op", timePtr(now.Add(-1*time.Hour)))},
+			ttlHours:    24,
+			wantCached:  true,
+		},
+		{
+			name:        "sequel title does not match earlier movie (no false positive)",
+			searchTitle: "Scream 2 1997 1080p BluRay x264",
+			cached:      []*database.ImportQueueItem{cachedItem("/config/.nzbs/Movies/Scream 1996 1080p BluRay x264.nzb", "/storage/scream1", timePtr(now.Add(-1*time.Hour)))},
+			ttlHours:    24,
+			wantCached:  false,
+		},
+		{
+			name:        "different episode does not match (no false positive)",
+			searchTitle: "Show S01E10 1080p WEB-DL",
+			cached:      []*database.ImportQueueItem{cachedItem("/config/.nzbs/TV/Show S01E01 1080p WEB-DL.nzb", "/storage/s01e01", timePtr(now.Add(-1*time.Hour)))},
+			ttlHours:    24,
+			wantCached:  false,
+		},
+		{
+			name:        "different resolution does not match (no false positive)",
+			searchTitle: "Movie 2024 2160p UHD REMUX",
+			cached:      []*database.ImportQueueItem{cachedItem("/config/.nzbs/Movies/Movie 2024 1080p WEB-DL.nzb", "/storage/movie1080", timePtr(now.Add(-1*time.Hour)))},
+			ttlHours:    24,
+			wantCached:  false,
 		},
 		{
 			name:       "empty cache is not cached",
@@ -148,20 +184,18 @@ func TestBuildStremioStreamEntries_CachedSortedFirstStable(t *testing.T) {
 	}
 }
 
-func TestFormatLibraryStreamNameAndTitle(t *testing.T) {
+func TestFormatLibraryStream(t *testing.T) {
 	libPath := "/library/movies/Sample Movie (2026)/Sample Movie (2026) - [Bluray-2160p][TrueHD Atmos 7.1][DV HDR10][x265]-GROUP.mkv"
 	h := &database.FileHealth{
-		FilePath:    "complete/movies/Sample.Movie.2026.2160p/sample.mkv",
+		FilePath:    "complete/movies/Sample.Movie.2026.2160p.UHD.BluRay.x265-GROUP/sample.movie.2026.2160p.uhd.bluray.x265-group.mkv",
 		LibraryPath: &libPath,
 	}
 
 	name := formatLibraryStreamName(h)
-	if !strings.Contains(name, "⚡ AltMount Library") || !strings.Contains(name, "2160p") {
-		t.Errorf("unexpected library stream name: %q", name)
-	}
+	assert.Contains(t, name, "⚡ Altmount Library")
+	assert.Contains(t, name, "2160p")
 
 	title := formatLibraryStreamTitle(h)
-	if !strings.Contains(title, "Sample Movie (2026)") || !strings.Contains(title, "Local Library") {
-		t.Errorf("unexpected library stream title: %q", title)
-	}
+	assert.Contains(t, title, "Sample Movie (2026) - [Bluray-2160p][TrueHD Atmos 7.1][DV HDR10][x265]-GROUP")
+	assert.Contains(t, title, "💾 Local Library • ⚡ Instant 0s Playback")
 }

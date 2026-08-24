@@ -452,7 +452,7 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 			ID:             n.ID,
 			Name:           n.Name,
 			URL:            n.URL,
-			APIKey:         n.APIKey,
+			APIKey:         "",
 			APIKeySet:      n.APIKey != "",
 			Categories:     n.Categories,
 			Weight:         n.Weight,
@@ -469,7 +469,7 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 	prowlarrResp := ProwlarrAPIResponse{
 		Enabled:               prowlarrCfg.Enabled != nil && *prowlarrCfg.Enabled,
 		Host:                  prowlarrCfg.Host,
-		APIKey:                prowlarrCfg.APIKey,
+		APIKey:                "",
 		APIKeySet:             prowlarrCfg.APIKey != "",
 		Categories:            prowlarrCfg.Categories,
 		Indexers:              prowlarrCfg.Indexers,

@@ -130,15 +130,48 @@ func (r *Repository) AddToQueue(ctx context.Context, item *ImportQueueItem) erro
 		if err != nil {
 			return fmt.Errorf("failed to add to queue: %w", err)
 		}
-		item.ID, err = result.LastInsertId()
-		if err != nil {
-			return fmt.Errorf("failed to get last insert ID: %w", err)
+		insertID, insertIDErr := result.LastInsertId()
+		if insertIDErr == nil && insertID != 0 {
+			item.ID = insertID
+		} else {
+			// SQLite returns no useful insert ID for an UPSERT that updates an
+			// existing row. Resolve the exact row instead of attaching a zero or
+			// unrelated ID to the caller's item.
+			existing, lookupErr := r.getQueueItemByNzbPath(ctx, item.NzbPath)
+			switch {
+			case lookupErr != nil:
+				return fmt.Errorf("failed to resolve queue item after upsert (last insert id: %v): %w",
+					insertIDErr, lookupErr)
+			case existing == nil:
+				return fmt.Errorf("queue item %q not found after upsert (last insert id: %v)",
+					item.NzbPath, insertIDErr)
+			}
+			item.ID = existing.ID
 		}
 	}
 
 	item.CreatedAt = time.Now()
 	item.UpdatedAt = time.Now()
 	return nil
+}
+
+func (r *Repository) getQueueItemByNzbPath(ctx context.Context, nzbPath string) (*ImportQueueItem, error) {
+	query := `SELECT id, download_id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
+		started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path, target_path, indexer
+		FROM import_queue WHERE nzb_path = ? LIMIT 1`
+	var item ImportQueueItem
+	err := r.db.QueryRowContext(ctx, query, nzbPath).Scan(
+		&item.ID, &item.DownloadID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
+		&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt, &item.RetryCount, &item.MaxRetries,
+		&item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath, &item.TargetPath, &item.Indexer,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &item, nil
 }
 
 // ClaimNextQueueItem atomically claims and returns the next available queue item
@@ -2169,23 +2202,38 @@ func (r *Repository) GetFailedStremioQueueItems(ctx context.Context) ([]*ImportQ
 	return items, rows.Err()
 }
 
-// GetCachedStremioQueueItems returns completed Stremio-originated queue items that
-// have a storage path (i.e. are streamable). Used by the Stremio stream handler to
-// mark already-imported releases as cached. TTL freshness is applied by the caller.
-func (r *Repository) GetCachedStremioQueueItems(ctx context.Context) ([]*ImportQueueItem, error) {
-	query := `
-		SELECT id, download_id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
-		       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path, target_path
-		FROM import_queue
-		WHERE status = 'completed'
-		  AND download_id LIKE 'stremio:%'
-		  AND storage_path IS NOT NULL
-		  AND storage_path != ''
-		ORDER BY completed_at DESC
-		LIMIT 500
-	`
+// GetCachedStremioQueueItems returns completed queue items that have a storage path
+// (i.e. are streamable). When reuseLibrary is true, it returns completed imports from
+// all sources (Sonarr, Radarr, SABnzbd, Stremio) across the entire library.
+//
+// ttlHours, when positive, restricts results to items that completed within that
+// window. The caller applies the same TTL when building its match set; pushing
+// it down here keeps the row count bounded by recency rather than by library
+// size, which matters because this runs on every Stremio stream request.
+func (r *Repository) GetCachedStremioQueueItems(ctx context.Context, reuseLibrary bool, ttlHours int) ([]*ImportQueueItem, error) {
+	const columns = `SELECT id, download_id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
+			       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path, target_path
+			FROM import_queue
+			WHERE status = 'completed'
+			  AND storage_path IS NOT NULL
+			  AND storage_path != ''`
 
-	rows, err := r.db.QueryContext(ctx, query)
+	query := columns
+	limit := 1000
+	if !reuseLibrary {
+		query += ` AND download_id LIKE 'stremio:%'`
+		limit = 500
+	}
+
+	var args []interface{}
+	if ttlHours > 0 {
+		query += ` AND completed_at IS NOT NULL AND completed_at >= ?`
+		args = append(args, time.Now().Add(-time.Duration(ttlHours)*time.Hour))
+	}
+
+	query += fmt.Sprintf(" ORDER BY completed_at DESC LIMIT %d", limit)
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query cached stremio queue items: %w", err)
 	}

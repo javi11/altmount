@@ -128,15 +128,15 @@ export function TrashScoringCard({
 							onChange={(e) => handlePresetChange(e.target.value as ScoringPreset)}
 						>
 							<option value="trash_recommended">
-								TRaSH Recommended (High-Quality Remux & HDR Priority)
+								🏆 TRaSH Recommended (High-Quality Remux & HDR Priority)
 							</option>
 							<option value="remux_enthusiast">
-								4K Remux Enthusiast (Disc ISO & Lossless Bitrate Focus)
+								💎 4K Remux Enthusiast (Disc ISO & Lossless Bitrate Focus)
 							</option>
 							<option value="compatibility">
-								Compatibility (Universal Direct Play / Low Bitrate WEB-DL)
+								📱 Compatibility (Universal Direct Play / Low Bitrate WEB-DL)
 							</option>
-							<option value="custom">Custom User-Defined Weights</option>
+							<option value="custom">🛠️ Custom User-Defined Weights</option>
 						</select>
 					</div>
 					<p className="label text-base-content/50 text-xs">
