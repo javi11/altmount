@@ -477,6 +477,23 @@ class APIClient {
 		});
 	}
 
+	async pinSymlinkTimestamps() {
+		return this.request<{
+			message: string;
+			records: number;
+			pinned: number;
+			skipped_no_path: number;
+			skipped_missing: number;
+			skipped_not_symlink: number;
+			errors: string[];
+			error_count: number;
+			warning?: string;
+			completed_at: string;
+		}>("/health/pin-symlink-timestamps", {
+			method: "POST",
+		});
+	}
+
 	async cleanupHealth(params?: HealthCleanupRequest) {
 		return this.request<HealthCleanupResponse>("/health/cleanup", {
 			method: "DELETE",

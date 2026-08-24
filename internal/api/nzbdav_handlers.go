@@ -170,6 +170,7 @@ func (s *Server) handleMigrateNzbdavSymlinks(c *fiber.Ctx) error {
 		"nzbdav",
 		lookup,
 		req.DryRun,
+		cfg.Import.PinSymlinkTimestamp,
 	)
 	if err != nil {
 		return RespondInternalError(c, "Symlink migration failed", err.Error())

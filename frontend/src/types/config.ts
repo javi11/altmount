@@ -238,6 +238,7 @@ export interface ImportConfig {
 	filter_sample_files?: boolean;
 	failed_item_retention_hours?: number | null;
 	history_retention_days?: number | null;
+	pin_symlink_timestamp?: string | null;
 }
 
 // Log configuration

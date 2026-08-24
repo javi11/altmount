@@ -218,6 +218,12 @@ export const useRegenerateSymlinks = () => {
 	});
 };
 
+export const usePinSymlinkTimestamps = () => {
+	return useMutation({
+		mutationFn: () => apiClient.pinSymlinkTimestamps(),
+	});
+};
+
 export const useDeleteHealthItem = () => {
 	const queryClient = useQueryClient();
 

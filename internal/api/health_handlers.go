@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -1442,6 +1443,15 @@ func (s *Server) handleRegenerateLibraryFiles(c *fiber.Ctx) error {
 			continue
 		}
 
+		// Pin the symlink timestamp if configured
+		if cfg.Import.PinSymlinkTimestamp != nil && cfg.Import.ImportStrategy == config.ImportStrategySYMLINK {
+			if err := utils.PinSymlinkTime(libraryPath, *cfg.Import.PinSymlinkTimestamp); err != nil {
+				slog.WarnContext(ctx, "Failed to pin symlink timestamp",
+					"library_path", libraryPath,
+					"error", err)
+			}
+		}
+
 		slog.InfoContext(ctx, "Library file recreated",
 			"file_path", file.FilePath,
 			"library_path", libraryPath,
@@ -1514,4 +1524,85 @@ func deleteLibraryFile(ctx context.Context, cfg *config.Config, item *database.F
 	}
 
 	return true
+}
+
+// handlePinLibrarySymlinkTimestamps handles POST /api/health/pin-symlink-timestamps
+//
+//	@Summary		Apply pinned date to existing library symlinks
+//	@Description	Sets the configured pin_symlink_timestamp on every stored library path that is a symlink. Existing symlinks are only touched in place (utimensat): nothing is removed, recreated, or re-pointed, so ARR-managed library layouts are never altered.
+//	@Tags			Health
+//	@Success		200	{object}	APIResponse
+//	@Failure		400	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Router			/health/pin-symlink-timestamps [post]
+func (s *Server) handlePinLibrarySymlinkTimestamps(c *fiber.Ctx) error {
+	ctx := c.Context()
+	cfg := s.configManager.GetConfig()
+
+	if cfg.Import.PinSymlinkTimestamp == nil || *cfg.Import.PinSymlinkTimestamp == "" {
+		return RespondBadRequest(c, "No pinned date configured",
+			"Set 'Pin Symlink Timestamp' in Settings > Import first")
+	}
+
+	files, err := s.healthRepo.GetFilesForLibrarySync(ctx)
+	if err != nil {
+		return RespondInternalError(c, "Failed to retrieve health records", err.Error())
+	}
+
+	pinned, skippedNoPath, skippedMissing, skippedNotSymlink, errorCount := 0, 0, 0, 0, 0
+	errors := make([]string, 0)
+
+	for _, file := range files {
+		if file == nil || file.LibraryPath == nil || *file.LibraryPath == "" {
+			skippedNoPath++
+			continue
+		}
+		info, err := os.Lstat(*file.LibraryPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				skippedMissing++
+				continue
+			}
+			errorCount++
+			errors = append(errors, fmt.Sprintf("%s: %v", *file.LibraryPath, err))
+			continue
+		}
+		// Only touch real symlinks. Hardlinks/copies created by ARR applications
+		// are left completely alone.
+		if info.Mode()&fs.ModeSymlink == 0 {
+			skippedNotSymlink++
+			continue
+		}
+		if err := utils.PinSymlinkTime(*file.LibraryPath, *cfg.Import.PinSymlinkTimestamp); err != nil {
+			errorCount++
+			errors = append(errors, fmt.Sprintf("%s: %v", *file.LibraryPath, err))
+			continue
+		}
+		pinned++
+	}
+
+	slog.InfoContext(ctx, "Applied pinned timestamp to existing library symlinks",
+		"records", len(files),
+		"pinned", pinned,
+		"skipped_no_path", skippedNoPath,
+		"skipped_missing", skippedMissing,
+		"skipped_not_symlink", skippedNotSymlink,
+		"error_count", errorCount)
+
+	response := fiber.Map{
+		"message":             fmt.Sprintf("Pinned %d of %d library entries to %s", pinned, len(files), *cfg.Import.PinSymlinkTimestamp),
+		"records":             len(files),
+		"pinned":              pinned,
+		"skipped_no_path":     skippedNoPath,
+		"skipped_missing":     skippedMissing,
+		"skipped_not_symlink": skippedNotSymlink,
+		"errors":              errors,
+		"error_count":         errorCount,
+		"completed_at":        time.Now().Format(time.RFC3339),
+	}
+	if errorCount > 0 {
+		response["warning"] = fmt.Sprintf("%d symlink(s) could not be updated", errorCount)
+	}
+
+	return RespondSuccess(c, response)
 }

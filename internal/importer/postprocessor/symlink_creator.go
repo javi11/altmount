@@ -10,6 +10,7 @@ import (
 
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/utils"
 )
 
 // CreateSymlinks creates symlinks for an imported item based on the import strategy
@@ -20,7 +21,7 @@ func (c *Coordinator) CreateSymlinks(ctx context.Context, item *database.ImportQ
 	// regardless of the configured import strategy.
 	if item.TargetPath != nil && *item.TargetPath != "" {
 		actualPath := filepath.Join(cfg.MountPath, strings.TrimPrefix(resultingPath, "/"))
-		return c.createAbsoluteSymlink(actualPath, *item.TargetPath)
+		return c.createAbsoluteSymlink(actualPath, *item.TargetPath, cfg.Import.PinSymlinkTimestamp)
 	}
 
 	// Check if symlinks are enabled
@@ -150,7 +151,7 @@ func (c *Coordinator) CreateSymlinks(ctx context.Context, item *database.ImportQ
 
 // createAbsoluteSymlink creates a symlink at an exact absolute destination path.
 // It creates any missing parent directories and removes an existing symlink at destPath.
-func (c *Coordinator) createAbsoluteSymlink(actualPath, destPath string) error {
+func (c *Coordinator) createAbsoluteSymlink(actualPath, destPath string, pinTimestamp *string) error {
 	if err := os.MkdirAll(filepath.Dir(destPath), 0775); err != nil {
 		return fmt.Errorf("failed to create parent directory for target symlink: %w", err)
 	}
@@ -164,6 +165,14 @@ func (c *Coordinator) createAbsoluteSymlink(actualPath, destPath string) error {
 
 	if err := os.Symlink(actualPath, destPath); err != nil {
 		return fmt.Errorf("failed to create symlink at target path: %w", err)
+	}
+
+	if pinTimestamp != nil {
+		if err := utils.PinSymlinkTime(destPath, *pinTimestamp); err != nil {
+			c.log.WarnContext(context.Background(), "Failed to pin symlink timestamp",
+				"path", destPath,
+				"error", err)
+		}
 	}
 
 	return nil
@@ -191,6 +200,14 @@ func (c *Coordinator) createSingleSymlink(actualPath, resultingPath string) erro
 	// Create the symlink using the absolute actual path
 	if err := os.Symlink(actualPath, symlinkPath); err != nil {
 		return fmt.Errorf("failed to create symlink: %w", err)
+	}
+
+	if cfg.Import.PinSymlinkTimestamp != nil {
+		if err := utils.PinSymlinkTime(symlinkPath, *cfg.Import.PinSymlinkTimestamp); err != nil {
+			c.log.WarnContext(context.Background(), "Failed to pin symlink timestamp",
+				"path", symlinkPath,
+				"error", err)
+		}
 	}
 
 	return nil

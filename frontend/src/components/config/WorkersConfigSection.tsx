@@ -10,6 +10,14 @@ interface ImportConfigSectionProps {
 	isUpdating?: boolean;
 }
 
+function toDateTimeLocalValue(timestamp: string | null | undefined): string {
+	if (!timestamp) return "";
+	const date = new Date(timestamp);
+	if (Number.isNaN(date.getTime())) return "";
+	const pad = (value: number) => String(value).padStart(2, "0");
+	return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 export function ImportConfigSection({
 	config,
 	onUpdate,
@@ -28,7 +36,7 @@ export function ImportConfigSection({
 
 	const handleInputChange = (
 		field: keyof ImportConfig,
-		value: number | boolean | string | string[],
+		value: number | boolean | string | string[] | null,
 	) => {
 		const newData = { ...formData, [field]: value };
 		setFormData(newData);
@@ -294,6 +302,28 @@ export function ImportConfigSection({
 								/>
 								<p className="label mt-2 min-w-0 max-w-full whitespace-normal break-words text-base-content/70 text-xs">
 									Absolute path for strategy output.
+								</p>
+							</fieldset>
+						)}
+
+						{formData.import_strategy === "SYMLINK" && (
+							<fieldset className="fieldset min-w-0">
+								<legend className="fieldset-legend font-semibold">Pin Symlink Timestamp</legend>
+								<input
+									type="datetime-local"
+									className="input input-bordered w-full min-w-0 max-w-full bg-base-100"
+									value={toDateTimeLocalValue(formData.pin_symlink_timestamp)}
+									disabled={isReadOnly}
+									onChange={(e) =>
+										handleInputChange(
+											"pin_symlink_timestamp",
+											e.target.value ? new Date(e.target.value).toISOString() : null,
+										)
+									}
+								/>
+								<p className="label mt-2 min-w-0 max-w-full whitespace-normal break-words text-base-content/70 text-xs leading-relaxed">
+									Fix all symlink modification times to this date. Prevents Plex/Jellyfin from
+									re-scanning files as new. Leave empty to disable.
 								</p>
 							</fieldset>
 						)}

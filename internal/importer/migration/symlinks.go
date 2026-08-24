@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/javi11/altmount/internal/utils"
 )
 
 // SymlinkLookup looks up the final AltMount path for a given source and external ID.
@@ -39,6 +41,7 @@ func RewriteLibrarySymlinks(
 	source string,
 	lookup SymlinkLookup,
 	dryRun bool,
+	pinTimestamp *string,
 ) (*RewriteReport, error) {
 	report := &RewriteReport{
 		Unmatched: []string{},
@@ -129,6 +132,11 @@ func RewriteLibrarySymlinks(
 				_ = os.Remove(tmpPath)
 				report.Errors = append(report.Errors, fmt.Sprintf("rename %s -> %s: %v", tmpPath, path, err))
 				return nil
+			}
+			if pinTimestamp != nil {
+				if err := utils.PinSymlinkTime(path, *pinTimestamp); err != nil {
+					report.Errors = append(report.Errors, fmt.Sprintf("pin timestamp %s: %v", path, err))
+				}
 			}
 		} else {
 			// .rclonelink: overwrite file content with the new target path.

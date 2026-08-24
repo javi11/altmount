@@ -284,6 +284,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Delete("/health/cleanup", s.handleCleanupHealth)
 	api.Post("/health/reset-all", s.handleResetAllHealthChecks)
 	api.Post("/health/regenerate-symlinks", s.handleRegenerateLibraryFiles)
+	api.Post("/health/pin-symlink-timestamps", s.handlePinLibrarySymlinkTimestamps)
 	api.Post("/health/check", s.handleAddHealthCheck)
 	api.Get("/health/worker/status", s.handleGetHealthWorkerStatus)
 	api.Post("/health/:id/repair", s.handleRepairHealth)

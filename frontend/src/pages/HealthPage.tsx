@@ -1,5 +1,13 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { FileCheck, RefreshCw, RotateCcw, Settings, ShieldCheck, Trash2 } from "lucide-react";
+import {
+	CalendarClock,
+	FileCheck,
+	RefreshCw,
+	RotateCcw,
+	Settings,
+	ShieldCheck,
+	Trash2,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { apiClient } from "../api/client";
@@ -15,6 +23,7 @@ import {
 	useDirectHealthCheck,
 	useHealth,
 	useHealthStats,
+	usePinSymlinkTimestamps,
 	useRegenerateSymlinks,
 	useRepairBulkHealthItems,
 	useRepairHealthItem,
@@ -104,6 +113,7 @@ export function HealthPage() {
 	const cleanupHealth = useCleanupHealth();
 	const resetAllHealth = useResetAllHealthChecks();
 	const regenerateSymlinks = useRegenerateSymlinks();
+	const pinSymlinkTimestamps = usePinSymlinkTimestamps();
 	const directHealthCheck = useDirectHealthCheck();
 	const cancelHealthCheck = useCancelHealthCheck();
 	const repairHealthItem = useRepairHealthItem();
@@ -293,6 +303,36 @@ export function HealthPage() {
 		if (selectedItems.size === 0) return;
 		handleRegenerateLibraryFiles(Array.from(selectedItems));
 	};
+
+	const handlePinTimestamps = useCallback(async () => {
+		const confirmed = await confirmAction(
+			"Apply Pinned Date to Existing Symlinks",
+			"Updates only the modification date of existing symlinks to the configured 'Pin Symlink Timestamp' value. Symlinks are never removed, recreated, or re-pointed, and non-symlink files (e.g. hardlinks created by ARR applications) are left untouched.",
+			{
+				type: "info",
+				confirmText: "Apply Date",
+				confirmButtonClass: "btn-primary",
+			},
+		);
+
+		if (!confirmed) return;
+
+		try {
+			const result = await pinSymlinkTimestamps.mutateAsync();
+			showToast({
+				title: "Timestamp Pinning Complete",
+				message: `${result.message}${result.skipped_not_symlink > 0 ? ` (${result.skipped_not_symlink} non-symlink entries skipped)` : ""}`,
+				type: result.error_count > 0 ? "warning" : "success",
+			});
+		} catch (error) {
+			console.error("Failed to pin symlink timestamps:", error);
+			showToast({
+				title: "Timestamp Pinning Failed",
+				message: error instanceof Error ? error.message : "Failed to pin symlink timestamps",
+				type: "error",
+			});
+		}
+	}, [confirmAction, pinSymlinkTimestamps, showToast]);
 
 	const handleCleanupConfirm = async () => {
 		try {
@@ -689,6 +729,19 @@ export function HealthPage() {
 									<Trash2 className="h-4 w-4" /> Cleanup Records
 								</button>
 							</li>
+							{(config?.import?.import_strategy === "SYMLINK" ||
+								!!config?.import?.pin_symlink_timestamp) && (
+								<li>
+									<button
+										type="button"
+										onClick={handlePinTimestamps}
+										className="gap-2"
+										title="Applies the configured pinned date to existing symlinks in place. Never removes, recreates, or re-points symlinks; non-symlink files are skipped."
+									>
+										<CalendarClock className="h-4 w-4" /> Apply Pinned Date to Symlinks
+									</button>
+								</li>
+							)}
 							{config?.import?.import_strategy !== "NONE" && (
 								<li>
 									<button

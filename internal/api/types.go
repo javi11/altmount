@@ -155,10 +155,11 @@ type ImportAPIResponse struct {
 	ImportDir                      *string               `json:"import_dir"`
 	WatchDir                       *string               `json:"watch_dir"`
 
-	WatchIntervalSeconds     *int  `json:"watch_interval_seconds,omitempty"`
-	AllowNestedRarExtraction *bool `json:"allow_nested_rar_extraction,omitempty"`
-	RenameToNzbName          *bool `json:"rename_to_nzb_name,omitempty"`
-	FilterSampleFiles        *bool `json:"filter_sample_files,omitempty"`
+	WatchIntervalSeconds     *int    `json:"watch_interval_seconds,omitempty"`
+	AllowNestedRarExtraction *bool   `json:"allow_nested_rar_extraction,omitempty"`
+	RenameToNzbName          *bool   `json:"rename_to_nzb_name,omitempty"`
+	FilterSampleFiles        *bool   `json:"filter_sample_files,omitempty"`
+	PinSymlinkTimestamp      *string `json:"pin_symlink_timestamp,omitempty"`
 }
 
 // SABnzbdAPIResponse sanitizes SABnzbd config for API responses
@@ -566,6 +567,7 @@ func ToImportAPIResponse(importConfig config.ImportConfig) ImportAPIResponse {
 		AllowNestedRarExtraction: importConfig.AllowNestedRarExtraction,
 		RenameToNzbName:          importConfig.RenameToNzbName,
 		FilterSampleFiles:        importConfig.FilterSampleFiles,
+		PinSymlinkTimestamp:      importConfig.PinSymlinkTimestamp,
 	}
 }
 

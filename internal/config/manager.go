@@ -461,6 +461,11 @@ type ImportConfig struct {
 	// grab a different release. Damage beyond the caps, archive-set members
 	// and non-video files fail either way.
 	DamagePolicy string `yaml:"damage_policy" mapstructure:"damage_policy" json:"damage_policy,omitempty"`
+	// PinSymlinkTimestamp, when set to an RFC3339 datetime (e.g.
+	// "2020-01-01T01:00:00Z"), forces every library symlink's mtime/atime to
+	// that fixed value. This prevents media servers (Plex, Jellyfin, etc.) from
+	// treating files as new after a regeneration. Empty/nil = disabled.
+	PinSymlinkTimestamp *string `yaml:"pin_symlink_timestamp" mapstructure:"pin_symlink_timestamp" json:"pin_symlink_timestamp,omitempty"`
 }
 
 // LogConfig represents logging configuration with rotation support
@@ -1781,6 +1786,7 @@ func DefaultConfig(configDir ...string) *Config {
 			IsoAnalyzeTimeoutSeconds: &isoAnalyzeTimeoutSeconds,
 			ImportStrategy:           ImportStrategyNone, // Default: no import strategy (direct import)
 			ImportDir:                nil,                // No default import directory
+			PinSymlinkTimestamp:      nil,                // Disabled by default
 			WatchDir:                 nil,
 			WatchIntervalSeconds:     &watchIntervalSeconds,
 			FailedItemRetentionHours: &failedItemRetentionHours,
