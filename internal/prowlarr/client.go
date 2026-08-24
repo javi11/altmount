@@ -14,7 +14,6 @@ import (
 	"github.com/javi11/altmount/internal/httpclient"
 	"github.com/javi11/altmount/internal/regexcache"
 	parsetorrentname "github.com/middelink/go-parse-torrent-name"
-	"github.com/javi11/altmount/internal/regexcache"
 	"golift.io/starr"
 	starrprowlarr "golift.io/starr/prowlarr"
 )
