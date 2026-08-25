@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -176,6 +177,12 @@ func groupHasVolumeGap(files []parser.ParsedFile) bool {
 	expectedStart := 1
 	if scheme == schemeRoll {
 		expectedStart = 0
+		// Handle old-style RAR sets starting with .rar (0) followed by .r01 (2) without .r00 (1).
+		if len(nums) > 1 && nums[0] == 0 && nums[1] == 2 && !slices.Contains(nums, 1) {
+			for i := 1; i < len(nums); i++ {
+				nums[i]--
+			}
+		}
 	}
 	if nums[0] > expectedStart {
 		return true // leading volume(s) missing — archive header gone, can't read

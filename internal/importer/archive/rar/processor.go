@@ -14,6 +14,7 @@ import (
 	"github.com/javi11/altmount/internal/importer/archive"
 	"github.com/javi11/altmount/internal/importer/filesystem"
 	"github.com/javi11/altmount/internal/importer/parser"
+	"github.com/javi11/altmount/internal/importer/parser/fileinfo"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
@@ -324,19 +325,49 @@ func checkAnalyzedContentCoverage(ctx context.Context, log *slog.Logger, content
 	return nil
 }
 
-// checkForCompressedFiles validates that no files in the archive are compressed
-// Returns an error if any compressed files are detected
+func isStreamableOrMediaFile(filename string) bool {
+	if fileinfo.IsVideoFile(filename) || fileinfo.IsRarFile(filename) || fileinfo.Is7zFile(filename) {
+		return true
+	}
+	switch strings.ToLower(filepath.Ext(filename)) {
+	case ".iso", ".flac", ".mp3", ".m4a", ".aac", ".wav", ".ogg", ".opus", ".m4b":
+		return true
+	}
+	return false
+}
+
+// checkForCompressedFiles validates that media files in the archive are not compressed.
+// Compressed media files cannot be streamed directly; non-media sidecars (such as .nfo or .txt)
+// are ignored so stored media files can proceed.
 func (rh *rarProcessor) checkForCompressedFiles(aggregatedFiles []rardecode.ArchiveFileInfo) error {
+	hasStoredMedia := false
 	for _, file := range aggregatedFiles {
+		isMedia := isStreamableOrMediaFile(file.Name)
 		if file.Compressed {
-			compressionInfo := ""
-			if file.CompressionMethod != "" {
-				compressionInfo = fmt.Sprintf(" (uses %s compression)", file.CompressionMethod)
+			if isMedia {
+				compressionInfo := ""
+				if file.CompressionMethod != "" {
+					compressionInfo = fmt.Sprintf(" (uses %s compression)", file.CompressionMethod)
+				}
+				return errors.NewNonRetryableError(
+					fmt.Sprintf("compressed media files are not supported: %s%s", file.Name, compressionInfo),
+					nil,
+				)
 			}
-			return errors.NewNonRetryableError(
-				fmt.Sprintf("compressed files are not supported: %s%s", file.Name, compressionInfo),
-				nil,
-			)
+		} else if isMedia {
+			hasStoredMedia = true
+		}
+	}
+	// If the archive contains ONLY non-media files and ALL of them are compressed,
+	// fail fast if none are stored.
+	if !hasStoredMedia {
+		for _, file := range aggregatedFiles {
+			if file.Compressed {
+				return errors.NewNonRetryableError(
+					fmt.Sprintf("compressed files are not supported: %s", file.Name),
+					nil,
+				)
+			}
 		}
 	}
 	return nil
@@ -511,6 +542,11 @@ func (rh *rarProcessor) convertAggregatedFilesToRarContent(ctx context.Context, 
 	out := make([]Content, 0, len(aggregatedFiles))
 
 	for _, af := range aggregatedFiles {
+		if af.Compressed {
+			rh.log.DebugContext(ctx, "Skipping compressed file in RAR archive", "file", af.Name)
+			continue
+		}
+
 		// Normalize backslashes in path (Windows-style paths in RAR archives)
 		normalizedName := strings.ReplaceAll(af.Name, "\\", "/")
 
