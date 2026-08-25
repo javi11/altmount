@@ -4,6 +4,7 @@
 package par2repair
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"runtime"
@@ -53,6 +54,10 @@ type Solver struct {
 	ctx  *gf16.Context   // primary context: Prepare/Finish and single-threaded folds
 	wctx []*gf16.Context // per-worker contexts for the parallel fold (lazy)
 	prep []byte          // scratch prepared-input buffer, reused across folds
+
+	// usedRows are the rows Solve inverted, recorded so VerifyHeldOutRow can
+	// pick a row the solution was not derived from.
+	usedRows []int
 }
 
 // bufAlloc returns a zeroed buffer of n bytes. The heap allocator is the
@@ -285,6 +290,7 @@ func (s *Solver) Solve() ([][]byte, error) {
 	if rows == nil {
 		return nil, ErrSingularMatrix
 	}
+	s.usedRows = rows
 
 	a := gf2p16.NewMatrixFromFunction(k, k, func(r, i int) gf2p16.T {
 		return coeff(rows[r], i)
@@ -308,6 +314,57 @@ func (s *Solver) Solve() ([][]byte, error) {
 		s.ctx.Finish(tmp, out[i])
 	}
 	return out, nil
+}
+
+// VerifyHeldOutRow re-derives one folded recovery row that Solve did not use
+// and reports whether the recovered slices reproduce it.
+//
+// This is the decisive diagnostic when recovered slices fail their IFSC MD5.
+// A held-out row r still satisfies acc[r] = Σ_i g_{m_i}^{e_r}·D_i over the
+// unknowns alone, and it was never part of the inverted system, so:
+//
+//   - held-out row MATCHES but IFSC MD5 fails → the arithmetic and the
+//     coefficients are self-consistent; the inputs were wrong. Either a
+//     present slice folded bytes that PAR2 hashed at a different position
+//     (article layout drift), or the global slice numbering — and therefore
+//     which Vandermonde base belongs to which slice — disagrees with the
+//     creator's.
+//   - held-out row also MISMATCHES → the fold or the solve itself is at
+//     fault: the GF(2^16) backend, the parallel stride split, or a corrupt
+//     accumulator.
+//
+// checked is false when every loaded row went into the solve (no margin left),
+// which makes the check unavailable rather than failed. Must be called after
+// Solve, with the slices it returned, and before Close.
+func (s *Solver) VerifyHeldOutRow(recovered [][]byte) (row int, checked, ok bool) {
+	k := len(s.missing)
+	if len(recovered) != k {
+		return -1, false, false
+	}
+	used := make(map[int]bool, len(s.usedRows))
+	for _, r := range s.usedRows {
+		used[r] = true
+	}
+	held := -1
+	for r := range s.acc {
+		if !used[r] && s.acc[r] != nil {
+			held = r
+			break
+		}
+	}
+	if held < 0 {
+		return -1, false, false
+	}
+
+	// Σ_i g_{m_i}^{e_held}·D_i, built in the backend's prepared layout so it
+	// can be compared to the accumulator byte for byte.
+	sum := s.ctx.NewBuffer()
+	for i := range recovered {
+		g := VandermondeBase(s.missing[i]).Pow(s.exps[held])
+		s.ctx.Prepare(s.prep, recovered[i])
+		s.ctx.MulAdd(sum, s.prep, uint16(g))
+	}
+	return held, true, bytes.Equal(sum, s.acc[held])
 }
 
 // selectIndependentRows returns the indices of the first k rows (of n, in

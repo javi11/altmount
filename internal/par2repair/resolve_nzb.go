@@ -201,8 +201,10 @@ func sizePar2SetFiles(
 		if n > 1 && partSize < 0 {
 			log.WarnContext(ctx, "PAR2 file's non-final articles are all dead; keeping encoded sizes",
 				"first_article", f.Articles[0].MessageID)
+			f.SizeSource = SizeEncodedFallback
 			continue
 		}
+		f.SizeSource = SizeProbed
 		var total int64
 		for j := range f.Articles {
 			switch {

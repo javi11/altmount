@@ -11,6 +11,7 @@ import (
 	"slices"
 	"sort"
 
+	"github.com/javi11/gopar-turbo/gf16"
 	"github.com/javi11/nntppool/v4"
 
 	"github.com/javi11/altmount/internal/importer/parser/par2"
@@ -413,7 +414,7 @@ func RunJob(
 		}
 
 		// Verify every recovered slice against its IFSC MD5 before storing.
-		if err := verifyRecovered(plan, idx, recovered, startSlice, missingPos); err != nil {
+		if err := verifyRecovered(plan, idx, recovered, startSlice, missingPos, solver, log); err != nil {
 			return err
 		}
 
@@ -947,20 +948,109 @@ func prefetchArticles(ctx context.Context, fetch ArticleFetcher, arts []Article,
 	return out, cancel
 }
 
-// verifyRecovered checks every recovered slice against its IFSC MD5.
-func verifyRecovered(plan *Plan, idx *par2.Index, recovered [][]byte, startSlice []int64, missingPos map[int]int) error {
+// verifyRecovered checks every recovered slice against its IFSC MD5. On
+// failure it logs a diagnostic record naming every mismatched slice, its
+// file's article-size provenance, and whether it abuts a dead article — the
+// facts needed to tell a bad size guess (SizeBorrowedHint / SizeEncodedFallback,
+// localized to one file, adjacent to dead articles) apart from a GF(2^16)
+// backend or slice-numbering bug (spread across every file, no adjacency
+// pattern). See ErrUnrepairable's callers for how this is surfaced.
+func verifyRecovered(plan *Plan, idx *par2.Index, recovered [][]byte, startSlice []int64, missingPos map[int]int, solver *Solver, log *slog.Logger) error {
+	sliceSize := int64(plan.SliceSize)
+
+	deadRanges := make([][2]int, len(plan.DeadArticles))
+	for i, da := range plan.DeadArticles {
+		first := int(startSlice[da.FileIdx] + da.FileStart/sliceSize)
+		last := int(startSlice[da.FileIdx] + (da.FileStart+da.Size-1)/sliceSize)
+		deadRanges[i] = [2]int{first, last}
+	}
+	adjacentToDead := func(global int) bool {
+		for _, r := range deadRanges {
+			if global >= r[0]-1 && global <= r[1]+1 {
+				return true
+			}
+		}
+		return false
+	}
+
+	type failure struct {
+		global     int
+		fileIdx    int
+		fileName   string
+		local      int
+		sizeSource SizeProvenance
+		nearDead   bool
+		outOfRange bool
+	}
+	var failures []failure
 	for global, pos := range missingPos {
 		fi := fileForSlice(startSlice, global)
 		local := global - int(startSlice[fi])
 		checks := idx.SliceChecks[plan.Files[fi].FileID]
 		if local >= len(checks) {
-			return fmt.Errorf("%w: recovered slice %d outside IFSC range", ErrUnrepairable, global)
+			failures = append(failures, failure{global: global, fileIdx: fi, local: local, outOfRange: true})
+			continue
 		}
 		if md5.Sum(recovered[pos]) != checks[local].MD5 {
-			return fmt.Errorf("%w: recovered slice %d failed MD5 verification", ErrUnrepairable, global)
+			failures = append(failures, failure{
+				global:     global,
+				fileIdx:    fi,
+				fileName:   idx.Files[plan.Files[fi].FileID].Name,
+				local:      local,
+				sizeSource: plan.Files[fi].SizeSource,
+				nearDead:   adjacentToDead(global),
+			})
 		}
 	}
-	return nil
+	if len(failures) == 0 {
+		return nil
+	}
+	sort.Slice(failures, func(i, j int) bool { return failures[i].global < failures[j].global })
+
+	if log != nil {
+		filesInvolved := map[int]bool{}
+		for _, f := range failures {
+			filesInvolved[f.fileIdx] = true
+		}
+		var details []any
+		for _, f := range failures {
+			details = append(details, map[string]any{
+				"global_slice": f.global, "file": f.fileName, "local_slice": f.local,
+				"size_source": f.sizeSource.String(), "adjacent_to_dead_article": f.nearDead,
+				"outside_ifsc_range": f.outOfRange,
+			})
+		}
+
+		// The decisive split: does a recovery row the solve never touched
+		// agree with the solution? Yes → the arithmetic is fine and the folded
+		// input bytes (or their slice numbering) are wrong. No → the fold or
+		// the solve is at fault. See Solver.VerifyHeldOutRow.
+		heldOut := "unavailable_no_margin_row"
+		if solver != nil {
+			if _, checked, ok := solver.VerifyHeldOutRow(recovered); checked {
+				if ok {
+					heldOut = "consistent_inputs_or_numbering_wrong"
+				} else {
+					heldOut = "inconsistent_fold_or_solve_wrong"
+				}
+			}
+		}
+
+		log.ErrorContext(context.Background(), "recovered slices failed IFSC MD5 verification",
+			"failed", len(failures), "total_recovered", len(missingPos), "files_involved", len(filesInvolved),
+			"total_files", len(plan.Files), "slice_size", plan.SliceSize,
+			"recovery_rows", len(plan.Recovery), "dead_articles", len(plan.DeadArticles),
+			"gf16_accelerated", gf16.Accelerated(), "main_ids_were_sorted", idx.MainIDsWereSorted,
+			"held_out_row_check", heldOut, "failures", details)
+	}
+
+	first := failures[0]
+	if first.outOfRange {
+		return fmt.Errorf("%w: recovered slice %d outside IFSC range (%d of %d recovered slices affected)",
+			ErrUnrepairable, first.global, len(failures), len(missingPos))
+	}
+	return fmt.Errorf("%w: recovered slice %d failed MD5 verification (%d of %d recovered slices affected, size_source=%s)",
+		ErrUnrepairable, first.global, len(failures), len(missingPos), first.sizeSource)
 }
 
 // emitPatches cuts recovered slices back into dead-article payloads and

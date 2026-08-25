@@ -63,7 +63,7 @@ func Resolve(
 	cache := newArticleCache(resolveCacheCap)
 	var par2Files []SetFile
 	for _, ref := range par2Refs {
-		sf := SetFile{Length: uint64(ref.FileSize)}
+		sf := SetFile{Length: uint64(ref.FileSize), SizeSource: SizeFromMetadata}
 		for _, seg := range ref.SegmentData {
 			sf.Articles = append(sf.Articles, Article{
 				MessageID: normalizeMsgID(seg.Id),
@@ -568,6 +568,7 @@ func sizeArticles(
 
 	partSize := length // single-article fallback: the whole file
 	derived := int64(0)
+	sf.SizeSource = SizeProbed
 	if n > 1 {
 		partSize = -1
 		for _, seg := range entry.Segments {
@@ -591,6 +592,7 @@ func sizeArticles(
 				return sf, 0, errNoLiveArticle
 			}
 			partSize = hint
+			sf.SizeSource = SizeBorrowedHint
 		} else {
 			derived = partSize
 		}

@@ -608,9 +608,23 @@ func TestRunJobCorruptOverflowFallsBackToReplan(t *testing.T) {
 	if !ok || !bytes.Equal(got, fx.deadOrig) {
 		t.Fatal("repair across corrupt-overflow replans not byte-exact")
 	}
-	// The replans really happened: present articles were swept more than once.
-	if n := fx.fetch.countFetches("<a.rar-0@test>"); n < 2 {
-		t.Fatalf("article <a.rar-0@test> fetched %d times, want >=2 (replan re-sweeps)", n)
+	// The replans really happened: some present article was swept more than
+	// once. Which article that is depends on recovery-set order (PAR2 orders
+	// members by FileID, so it is not "a.rar" by name), and an attempt that
+	// overflows early aborts before reaching the later files at all — so
+	// assert on the maximum across present articles rather than naming one.
+	var most string
+	best := 0
+	for i := range 16 {
+		for _, name := range []string{"a.rar", "b.rar"} {
+			id := fmt.Sprintf("<%s-%d@test>", name, i)
+			if n := fx.fetch.countFetches(id); n > best {
+				best, most = n, id
+			}
+		}
+	}
+	if best < 2 {
+		t.Fatalf("no present article fetched more than once (max %d for %q); replans did not re-sweep", best, most)
 	}
 }
 
@@ -773,5 +787,127 @@ func TestRunJobHonorsLiveConcurrencyGetter(t *testing.T) {
 	}
 	if fetch.maxInFlight > 2 {
 		t.Fatalf("max in-flight fetches = %d, want <= 2 (live getter must bound the sweep)", fetch.maxInFlight)
+	}
+}
+
+// mkManyFileFixture builds a release shaped like the ones seen failing in
+// production: many recovery-set members, each split into several articles,
+// with a full PAR2 set. Unlike mkRepairFixture it starts with NO dead
+// articles, so a caller can kill an arbitrary set of them after planning and
+// exercise the mid-sweep absorb path at realistic scale.
+func mkManyFileFixture(t *testing.T, sliceSize int, numFiles int, fileLen int, artSize int64, numRecovery int) *repairFixture {
+	t.Helper()
+	rng := rand.New(rand.NewSource(11))
+	contents := map[string][]byte{}
+	var entries []par2gen.FileEntry
+	for i := 0; i < numFiles; i++ {
+		// Vary the last file's length so one file has a short final slice,
+		// as a real RAR set's last volume does.
+		n := fileLen
+		if i == numFiles-1 {
+			n = fileLen/2 + 777
+		}
+		b := make([]byte, n)
+		rng.Read(b)
+		name := fmt.Sprintf("v%02d.rar", i)
+		contents[name] = b
+		entries = append(entries, par2gen.FileEntry{Name: name, Content: b})
+	}
+	set := par2gen.BuildFull(sliceSize, entries, numRecovery)
+
+	streams := []io.Reader{bytes.NewReader(set.Index)}
+	for _, v := range set.Volumes {
+		streams = append(streams, bytes.NewReader(v))
+	}
+	idx, err := par2.ParseIndex(streams)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fetch := &fakeFetcher{articles: map[string][]byte{}}
+	fx := &repairFixture{idx: idx, fetch: fetch, contents: contents}
+
+	// Recovery-set order is FileID-ascending, which is what BuildPlan uses;
+	// build SetFiles in that same order so indices line up.
+	for _, id := range idx.RecoveryIDs {
+		name := idx.Files[id].Name
+		content := contents[name]
+		sf := SetFile{FileID: id, Length: uint64(len(content)), SizeSource: SizeProbed}
+		for off, i := int64(0), 0; off < int64(len(content)); off, i = off+artSize, i+1 {
+			sz := min(artSize, int64(len(content))-off)
+			msgID := fmt.Sprintf("<%s-%d@test>", name, i)
+			fetch.articles[msgID] = content[off : off+sz]
+			sf.Articles = append(sf.Articles, Article{MessageID: msgID, Size: sz})
+		}
+		fx.files = append(fx.files, sf)
+	}
+
+	par2Payloads := append([][]byte{set.Index}, set.Volumes...)
+	for i, p := range par2Payloads {
+		msgID := fmt.Sprintf("<par2-%d@test>", i)
+		fetch.articles[msgID] = p
+		fx.par2Files = append(fx.par2Files, SetFile{
+			Length:   uint64(len(p)),
+			Articles: []Article{{MessageID: msgID, Size: int64(len(p))}},
+		})
+	}
+	return fx
+}
+
+// Production failures ("N of N recovered slices failed MD5 verification")
+// arrived on releases where ~30 articles spread across ~47 members died
+// between planning and the sweep, with zero CRC32 failures. Each death is
+// absorbed onto a margin row via AddMissing while folding is already under
+// way, so this exercises the absorb path at that scale rather than the single
+// absorb TestRunJobAbsorbsMidSweepDeadArticle covers.
+func TestRunJobAbsorbsManyMidSweepDeadArticles(t *testing.T) {
+	const (
+		sliceSize = 4096
+		numFiles  = 12
+		fileLen   = 16384
+		artSize   = 3000 // not a slice multiple: articles straddle slices
+	)
+	fx := mkManyFileFixture(t, sliceSize, numFiles, fileLen, artSize, 64)
+
+	plan, err := BuildPlan(fx.idx, fx.files, Caps{
+		MaxRepairRatio: 0.9, MaxMemoryBytes: 256 << 20, VerifySweep: true,
+		// Production plans provision margin from the liveness sample's hidden
+		// estimate; without it 8 margin rows cannot absorb this many deaths.
+		ExpectedHiddenArticles: 48,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Missing) != 0 {
+		t.Fatalf("fixture should start undamaged, got %d missing slices", len(plan.Missing))
+	}
+
+	// Kill one article in most files, after planning: every one of these is a
+	// mid-sweep discovery the margin must absorb.
+	killed := map[string][]byte{}
+	for fi, f := range plan.Files {
+		if len(f.Articles) < 3 {
+			continue
+		}
+		a := f.Articles[1+fi%(len(f.Articles)-1)]
+		killed[a.MessageID] = fx.fetch.articles[a.MessageID]
+		delete(fx.fetch.articles, a.MessageID)
+	}
+	if len(killed) < 10 {
+		t.Fatalf("expected to kill at least 10 articles, killed %d", len(killed))
+	}
+
+	store := NewPatchStore(t.TempDir())
+	if err := RunJob(context.Background(), plan, fx.idx, fx.par2Files, fx.fetch, store, testLogger()); err != nil {
+		t.Fatalf("margin rows must absorb %d mid-sweep dead articles, got %v", len(killed), err)
+	}
+	for id, want := range killed {
+		got, ok := store.Get(id)
+		if !ok {
+			t.Fatalf("article %s got no patch", id)
+		}
+		if !bytes.Equal(got, want) {
+			t.Fatalf("article %s not repaired byte-exact (%d bytes vs %d)", id, len(got), len(want))
+		}
 	}
 }

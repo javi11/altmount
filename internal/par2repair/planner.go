@@ -30,12 +30,58 @@ type Article struct {
 	Dead      bool  // confirmed missing on all providers
 }
 
+// SizeProvenance records how a SetFile's article sizes were established, so a
+// verification failure downstream can be attributed to a guess rather than a
+// measurement.
+type SizeProvenance int
+
+const (
+	// SizeUnset means no sizing pass has run yet (a freshly parsed PAR2 file
+	// before sizePar2SetFiles, or a member never visited by sizeArticles).
+	SizeUnset SizeProvenance = iota
+	// SizeFromMetadata means article sizes came from the importer's
+	// yEnc-normalized segment metadata (file-mode PAR2 files) — trusted.
+	SizeFromMetadata
+	// SizeProbed means the uniform part size was read directly off one of the
+	// file's own live articles — solid unless the release itself is
+	// inconsistent.
+	SizeProbed
+	// SizeBorrowedHint means every article of this file is dead: the part
+	// size was borrowed from another file in the same release
+	// (resolve.go:510) because none of this file's own articles could be
+	// probed.
+	SizeBorrowedHint
+	// SizeEncodedFallback means every non-final article of this NZB-mode PAR2
+	// volume is dead, so its sizes were left as yEnc-ENCODED NZB segment
+	// bytes instead of decoded payload sizes (resolve_nzb.go's
+	// sizePar2SetFiles fallback) — the least trustworthy provenance.
+	SizeEncodedFallback
+)
+
+func (p SizeProvenance) String() string {
+	switch p {
+	case SizeFromMetadata:
+		return "metadata"
+	case SizeProbed:
+		return "probed"
+	case SizeBorrowedHint:
+		return "borrowed_hint"
+	case SizeEncodedFallback:
+		return "encoded_fallback"
+	default:
+		return "unset"
+	}
+}
+
 // SetFile is one recovery-set member resolved to its usenet articles, whose
 // concatenated payloads are exactly the file's bytes.
 type SetFile struct {
 	FileID   [16]byte
 	Length   uint64
 	Articles []Article
+	// SizeSource records how Articles' sizes were derived. Only diagnostic —
+	// nothing in the repair path branches on it.
+	SizeSource SizeProvenance
 }
 
 // DeadArticle locates one dead article within the recovery set.
