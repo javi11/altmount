@@ -12,6 +12,7 @@ import (
 )
 
 func timePtr(t time.Time) *time.Time { return &t }
+func boolPtr(b bool) *bool             { return &b }
 
 // cachedItem builds a completed Stremio queue item for cache-lookup tests.
 func cachedItem(nzbPath, storagePath string, completedAt *time.Time) *database.ImportQueueItem {
@@ -199,3 +200,13 @@ func TestFormatLibraryStream(t *testing.T) {
 	assert.Contains(t, title, "Sample Movie (2026) - [Bluray-2160p][TrueHD Atmos 7.1][DV HDR10][x265]-GROUP")
 	assert.Contains(t, title, "💾 Local Library • ⚡ Instant 0s Playback")
 }
+
+func TestFindHealthyLibraryStreams_Disabled(t *testing.T) {
+	s := &Server{}
+	cfg := &config.Config{}
+	cfg.Stremio.IncludeLibraryStreams = boolPtr(false)
+
+	streams := s.findHealthyLibraryStreams(nil, cfg, "series", "tt123", "http://host", "key", 1, 1)
+	assert.Nil(t, streams)
+}
+

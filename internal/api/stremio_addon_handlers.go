@@ -221,63 +221,7 @@ func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 	}
 
 	baseURL := resolveBaseURL(c, cfg.Stremio.BaseURL)
-	var libraryStreams []fiber.Map
-
-	// 1. Check local Altmount library in file_health if library reuse is enabled
-	if cfg.Stremio.EffectiveIncludeLibraryStreams() && s.healthRepo != nil {
-		selector := &stremioEpisodeSelector{Season: season, Episode: episode}
-		if streamType == "movie" {
-			tmdbID, movieTitle, movieYear, _ := resolveMovieMetadataFromIMDb(ctx, imdbID)
-			yearNum, _ := strconv.Atoi(movieYear)
-			if healthyFiles, err := s.healthRepo.FindHealthyFilesForMovie(ctx, movieTitle, movieYear, tmdbID); err == nil {
-				for _, h := range healthyFiles {
-					if h != nil && h.FilePath != "" && isMediaExtension(filepath.Ext(h.FilePath)) && !isSampleFile(h.FilePath) {
-						matchPath := h.FilePath
-						if h.LibraryPath != nil && *h.LibraryPath != "" {
-							matchPath = *h.LibraryPath
-						}
-						// Verify movie title matches if movieTitle is known (prevents substring false positives)
-						if movieTitle != "" && !stremio.MatchesMovie(filepath.Base(matchPath), movieTitle, yearNum) && !stremio.MatchesMovie(matchPath, movieTitle, yearNum) {
-							continue
-						}
-						streamURL := baseURL + "/api/files/stream?path=" +
-							url.QueryEscape(h.FilePath) + "&download_key=" + url.QueryEscape(key)
-						libraryStreams = append(libraryStreams, fiber.Map{
-							"name":  formatLibraryStreamName(h),
-							"title": formatLibraryStreamTitle(h),
-							"url":   streamURL,
-						})
-					}
-				}
-			}
-		} else if streamType == "series" {
-			tvdbIDStr, seriesTitle, _ := resolveSeriesMetadataFromIMDb(ctx, imdbID)
-			tvdbID, _ := strconv.Atoi(tvdbIDStr)
-			if healthyFiles, err := s.healthRepo.FindHealthyFilesForSeries(ctx, seriesTitle, tvdbID); err == nil {
-				for _, h := range healthyFiles {
-					if h != nil && h.FilePath != "" && isMediaExtension(filepath.Ext(h.FilePath)) && !isSampleFile(h.FilePath) {
-						matchPath := h.FilePath
-						if h.LibraryPath != nil && *h.LibraryPath != "" {
-							matchPath = *h.LibraryPath
-						}
-						if selector.matches(matchPath) || selector.matches(h.FilePath) {
-							// Verify series title matches if seriesTitle is known (prevents cross-show false positives)
-							if seriesTitle != "" && !stremio.MatchesSeries(filepath.Base(matchPath), seriesTitle, season, episode, 0) && !stremio.MatchesSeries(matchPath, seriesTitle, season, episode, 0) {
-								continue
-							}
-							streamURL := baseURL + "/api/files/stream?path=" +
-								url.QueryEscape(h.FilePath) + "&download_key=" + url.QueryEscape(key)
-							libraryStreams = append(libraryStreams, fiber.Map{
-								"name":  formatLibraryStreamName(h),
-								"title": formatLibraryStreamTitle(h),
-								"url":   streamURL,
-							})
-						}
-					}
-				}
-			}
-		}
-	}
+	libraryStreams := s.findHealthyLibraryStreams(ctx, cfg, streamType, imdbID, baseURL, key, season, episode)
 
 	// Map Stremio type to Prowlarr search type
 	prowlarrType := "search"
@@ -322,6 +266,66 @@ func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{"streams": streams})
+}
+
+func (s *Server) findHealthyLibraryStreams(ctx context.Context, cfg *config.Config, streamType, imdbID, baseURL, key string, season, episode int) []fiber.Map {
+	if !cfg.Stremio.EffectiveIncludeLibraryStreams() || s.healthRepo == nil || imdbID == "" {
+		return nil
+	}
+	selector := &stremioEpisodeSelector{Season: season, Episode: episode}
+	var libraryStreams []fiber.Map
+	if streamType == "movie" {
+		tmdbID, movieTitle, movieYear, _ := resolveMovieMetadataFromIMDb(ctx, imdbID)
+		yearNum, _ := strconv.Atoi(movieYear)
+		if healthyFiles, err := s.healthRepo.FindHealthyFilesForMovie(ctx, movieTitle, movieYear, tmdbID); err == nil {
+			for _, h := range healthyFiles {
+				if h != nil && h.FilePath != "" && isMediaExtension(filepath.Ext(h.FilePath)) && !isSampleFile(h.FilePath) {
+					matchPath := h.FilePath
+					if h.LibraryPath != nil && *h.LibraryPath != "" {
+						matchPath = *h.LibraryPath
+					}
+					// Verify movie title matches if movieTitle is known (prevents substring false positives)
+					if movieTitle != "" && !stremio.MatchesMovie(filepath.Base(matchPath), movieTitle, yearNum) && !stremio.MatchesMovie(matchPath, movieTitle, yearNum) {
+						continue
+					}
+					streamURL := baseURL + "/api/files/stream?path=" +
+						url.QueryEscape(h.FilePath) + "&download_key=" + url.QueryEscape(key)
+					libraryStreams = append(libraryStreams, fiber.Map{
+						"name":  formatLibraryStreamName(h),
+						"title": formatLibraryStreamTitle(h),
+						"url":   streamURL,
+					})
+				}
+			}
+		}
+	} else if streamType == "series" {
+		tvdbIDStr, seriesTitle, _ := resolveSeriesMetadataFromIMDb(ctx, imdbID)
+		tvdbID, _ := strconv.Atoi(tvdbIDStr)
+		if healthyFiles, err := s.healthRepo.FindHealthyFilesForSeries(ctx, seriesTitle, tvdbID); err == nil {
+			for _, h := range healthyFiles {
+				if h != nil && h.FilePath != "" && isMediaExtension(filepath.Ext(h.FilePath)) && !isSampleFile(h.FilePath) {
+					matchPath := h.FilePath
+					if h.LibraryPath != nil && *h.LibraryPath != "" {
+						matchPath = *h.LibraryPath
+					}
+					if selector == nil || selector.matches(matchPath) || selector.matches(h.FilePath) {
+						// Verify series title matches if seriesTitle is known (prevents cross-show false positives)
+						if seriesTitle != "" && !stremio.MatchesSeries(filepath.Base(matchPath), seriesTitle, season, episode, 0) && !stremio.MatchesSeries(matchPath, seriesTitle, season, episode, 0) {
+							continue
+						}
+						streamURL := baseURL + "/api/files/stream?path=" +
+							url.QueryEscape(h.FilePath) + "&download_key=" + url.QueryEscape(key)
+						libraryStreams = append(libraryStreams, fiber.Map{
+							"name":  formatLibraryStreamName(h),
+							"title": formatLibraryStreamTitle(h),
+							"url":   streamURL,
+						})
+					}
+				}
+			}
+		}
+	}
+	return libraryStreams
 }
 
 func formatLibraryStreamTitle(h *database.FileHealth) string {
@@ -1194,11 +1198,27 @@ func (s *Server) handleStremioAddonPlay(c *fiber.Ctx) error {
 	baseURL := resolveBaseURL(c, cfg.Stremio.BaseURL)
 	selector := stremioEpisodeSelectorFromRequest(c)
 
-	// Short-circuit: return cached stream if already processed within TTL. This runs
+	// Short-circuit: return cached stream if already processed within TTL or present in library. This runs
 	// before the failed-release check so a genuinely playable file always wins over a
 	// stale failure record.
 	ttlHours := cfg.Stremio.NzbTTLHours
+	season, episode := 0, 0
+	if selector != nil {
+		season, episode = selector.Season, selector.Episode
+	}
 	normTarget := normalizeTitleForMatching(cand.SafeTitle)
+	if libraryStreams := s.findHealthyLibraryStreams(ctx, cfg, streamType, imdbID, baseURL, key, season, episode); len(libraryStreams) > 0 {
+		for _, lib := range libraryStreams {
+			if libURL, ok := lib["url"].(string); ok && libURL != "" {
+				normLibrary := normalizeTitleForMatching(libURL)
+				if normLibrary == normTarget {
+					slog.InfoContext(ctx, "Returning local library Stremio stream",
+						"nzb_name", cand.SafeTitle, "library_url", libURL)
+					return c.Redirect(libURL, fiber.StatusFound)
+				}
+			}
+		}
+	}
 	if normTarget != "" {
 		if cachedItems, err := s.queueRepo.GetCachedStremioQueueItems(ctx, cfg.Stremio.EffectiveIncludeLibraryStreams(), cfg.Stremio.NzbTTLHours); err == nil {
 			for _, prev := range cachedItems {
@@ -1335,6 +1355,17 @@ func (s *Server) playStremioWithFallback(
 	if s.stremioIsFailed(ctx, cfg, cand.SafeTitle) {
 		slog.InfoContext(ctx, "Skipping known-failed Stremio release", "title", cand.SafeTitle)
 		if !advance() {
+			season, episode := 0, 0
+			if req.selector != nil {
+				season, episode = req.selector.Season, req.selector.Episode
+			}
+			if libraryStreams := s.findHealthyLibraryStreams(ctx, cfg, req.streamType, req.imdbID, req.baseURL, req.key, season, episode); len(libraryStreams) > 0 {
+				if libURL, ok := libraryStreams[0]["url"].(string); ok && libURL != "" {
+					slog.InfoContext(ctx, "Falling back to healthy local library stream",
+						"imdb_id", req.imdbID, "library_url", libURL)
+					return c.Redirect(libURL, fiber.StatusFound)
+				}
+			}
 			return RespondServiceUnavailable(c, "No playable release found", "release previously failed")
 		}
 	}
@@ -1370,6 +1401,17 @@ func (s *Server) playStremioWithFallback(
 				"error", err, "title", cand.SafeTitle)
 			s.stremioFailures.Record(cand.SafeTitle)
 			if !advance() {
+				season, episode := 0, 0
+				if req.selector != nil {
+					season, episode = req.selector.Season, req.selector.Episode
+				}
+				if libraryStreams := s.findHealthyLibraryStreams(ctx, cfg, req.streamType, req.imdbID, req.baseURL, req.key, season, episode); len(libraryStreams) > 0 {
+					if libURL, ok := libraryStreams[0]["url"].(string); ok && libURL != "" {
+						slog.InfoContext(ctx, "Falling back to healthy local library stream",
+							"imdb_id", req.imdbID, "library_url", libURL)
+						return c.Redirect(libURL, fiber.StatusFound)
+					}
+				}
 				return RespondServiceUnavailable(c, "Failed to prepare NZB stream", err.Error())
 			}
 			continue
@@ -1387,18 +1429,52 @@ func (s *Server) playStremioWithFallback(
 			// and it would otherwise keep its "⚡ Cached" badge.
 			s.stremioFailures.Record(cand.SafeTitle)
 			if !advance() {
+				season, episode := 0, 0
+				if req.selector != nil {
+					season, episode = req.selector.Season, req.selector.Episode
+				}
+				if libraryStreams := s.findHealthyLibraryStreams(ctx, cfg, req.streamType, req.imdbID, req.baseURL, req.key, season, episode); len(libraryStreams) > 0 {
+					if libURL, ok := libraryStreams[0]["url"].(string); ok && libURL != "" {
+						slog.InfoContext(ctx, "Falling back to healthy local library stream",
+							"imdb_id", req.imdbID, "library_url", libURL)
+						return c.Redirect(libURL, fiber.StatusFound)
+					}
+				}
 				return respondStreamOutcome(c, out)
 			}
 
 		case streamOutcomeFailed:
 			// The failed import_queue row already records this durably.
 			if !advance() {
+				season, episode := 0, 0
+				if req.selector != nil {
+					season, episode = req.selector.Season, req.selector.Episode
+				}
+				if libraryStreams := s.findHealthyLibraryStreams(ctx, cfg, req.streamType, req.imdbID, req.baseURL, req.key, season, episode); len(libraryStreams) > 0 {
+					if libURL, ok := libraryStreams[0]["url"].(string); ok && libURL != "" {
+						slog.InfoContext(ctx, "Falling back to healthy local library stream",
+							"imdb_id", req.imdbID, "library_url", libURL)
+						return c.Redirect(libURL, fiber.StatusFound)
+					}
+				}
 				return respondStreamOutcome(c, out)
 			}
 
 		default:
 			// Ambiguous, timeout and unavailable are not evidence the release is bad.
 			return respondStreamOutcome(c, out)
+		}
+	}
+
+	season, episode := 0, 0
+	if req.selector != nil {
+		season, episode = req.selector.Season, req.selector.Episode
+	}
+	if libraryStreams := s.findHealthyLibraryStreams(ctx, cfg, req.streamType, req.imdbID, req.baseURL, req.key, season, episode); len(libraryStreams) > 0 {
+		if libURL, ok := libraryStreams[0]["url"].(string); ok && libURL != "" {
+			slog.InfoContext(ctx, "Falling back to healthy local library stream",
+				"imdb_id", req.imdbID, "library_url", libURL)
+			return c.Redirect(libURL, fiber.StatusFound)
 		}
 	}
 
@@ -1451,7 +1527,7 @@ func (s *Server) enqueueStremioRelease(
 	}
 
 	queue := func() (interface{}, error) {
-		if contentKey != "" && !explicitRelease {
+		if contentKey != "" {
 			active, findErr := s.findActiveStremioContent(ctx, contentKey)
 			if findErr != nil {
 				return nil, fmt.Errorf("find active Stremio content: %w", findErr)
@@ -1575,7 +1651,7 @@ func (s *Server) enqueueStremioRelease(
 
 	var v interface{}
 	var err error
-	if contentKey != "" && !explicitRelease {
+	if contentKey != "" {
 		v, err, _ = s.stremioContentGroup.Do(contentKey, queue)
 	} else {
 		v, err = queue()
@@ -1588,7 +1664,7 @@ func (s *Server) enqueueStremioRelease(
 	if !ok {
 		return 0, fmt.Errorf("unexpected play result type %T", v)
 	}
-	if contentKey != "" && !explicitRelease {
+	if contentKey != "" {
 		item, lookupErr := s.queueRepo.GetQueueItem(ctx, itemID)
 		if lookupErr == nil && item != nil && item.Status != database.QueueStatusCompleted && item.Status != database.QueueStatusFailed && !stremioQueueMetadataMatches(item, contentKey, releaseKey) {
 			return 0, &stremioContentInFlightError{itemID: item.ID}
