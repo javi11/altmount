@@ -319,10 +319,13 @@ func FastFailCheckFiles(
 		}
 
 		for _, job := range toCheck {
-			// Caller cancellation was already handled above, so any error left
-			// here — including this chunk's own deadline — is a reachability
-			// signal for the owning file, not a reason to abandon the sweep.
-			if statErr := errByID[job.segID]; statErr != nil {
+			// Caller cancellation was already handled above, so anything left
+			// here is a reachability signal for the owning file, not a reason
+			// to abandon the sweep. A stat that reports an error — or never
+			// reports at all because the chunk deadline expired before it was
+			// dispatched — means reachability was never proven.
+			statErr, reported := errByID[job.segID]
+			if !reported || statErr != nil {
 				results[job.fileIdx].Broken = true
 				results[job.fileIdx].MissingSegmentIDs = append(results[job.fileIdx].MissingSegmentIDs, job.segID)
 				if job.groupKey != "" {
