@@ -1212,8 +1212,9 @@ func (s *Server) handleStremioAddonPlay(c *fiber.Ctx) error {
 	if libraryStreams := s.findHealthyLibraryStreams(ctx, cfg, streamType, imdbID, baseURL, key, season, episode); len(libraryStreams) > 0 {
 		for _, lib := range libraryStreams {
 			if libURL, ok := lib["url"].(string); ok && libURL != "" {
-				normLibrary := normalizeTitleForMatching(libURL)
-				if normLibrary == normTarget {
+				libTitle, _ := lib["title"].(string)
+				normLibrary := normalizeTitleForMatching(libTitle)
+				if cand.SafeTitle == "" || normTarget == "" || normLibrary == normTarget || (normLibrary != "" && strings.Contains(normTarget, normLibrary)) {
 					slog.InfoContext(ctx, "Returning local library Stremio stream",
 						"nzb_name", cand.SafeTitle, "library_url", libURL)
 					return c.Redirect(libURL, fiber.StatusFound)
