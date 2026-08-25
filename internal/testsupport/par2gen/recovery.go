@@ -11,6 +11,19 @@ import (
 	"github.com/javi11/gopar-turbo/gf2p16"
 )
 
+// fileIDLess orders FileIDs the way PAR2 does: byte 15 most significant,
+// byte 0 least (par2cmdline's MD5Hash::operator<). Mirrors par2.fileIDLess;
+// duplicated to keep this test-support package free of a dependency on the
+// parser it generates fixtures for.
+func fileIDLess(a, b [16]byte) bool {
+	for i := 15; i >= 0; i-- {
+		if a[i] != b[i] {
+			return a[i] < b[i]
+		}
+	}
+	return false
+}
+
 // FullSet is a complete, spec-valid PAR2 set: an index file (Main + FileDesc
 // + IFSC packets) and one volume file per recovery slice (a RecvSlic packet).
 type FullSet struct {
@@ -37,9 +50,13 @@ func BuildFull(sliceSize int, entries []FileEntry, numRecovery int) FullSet {
 		id, h16k := fileIdentity(e)
 		members[i] = member{entry: e, fileID: id, hash16k: h16k}
 	}
-	// Recovery-set order: FileID ascending.
+	// Recovery-set order: FileID ascending by the PAR2 convention, where byte
+	// 15 is most significant (par2cmdline's MD5Hash::operator<). This is NOT
+	// bytes.Compare — using lexicographic order here would make the generator
+	// emit sets no real creator produces, and every test built on it would
+	// agree with itself while disagreeing with par2cmdline.
 	sort.Slice(members, func(i, j int) bool {
-		return bytes.Compare(members[i].fileID[:], members[j].fileID[:]) < 0
+		return fileIDLess(members[i].fileID, members[j].fileID)
 	})
 
 	// Split every file into zero-padded slices, in recovery-set order.

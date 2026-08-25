@@ -36,11 +36,40 @@ type RecoverySliceRef struct {
 // Index is the parsed, recovery-relevant view of a PAR2 set: everything
 // needed to plan and run a repair except the recovery payloads themselves.
 type Index struct {
-	SliceSize   uint64
-	RecoveryIDs [][16]byte // recovery-set FileIDs, FileID-ascending
+	SliceSize uint64
+	// RecoveryIDs are the recovery-set FileIDs in the Main packet's stored
+	// order. That order — NOT any re-sort of it — defines the global input
+	// slice numbering, and therefore which Vandermonde constant belongs to
+	// each slice, so it must be preserved exactly as written.
+	RecoveryIDs [][16]byte
 	Files       map[[16]byte]FileDescriptor
 	SliceChecks map[[16]byte][]SliceCheck
 	Recovery    []RecoverySliceRef
+	// MainIDsWereSorted reports whether the stored order was already
+	// FileID-ascending by the PAR2 convention (see fileIDLess). Creators are
+	// expected to write them that way; a false here means the set is unusual,
+	// and it is recorded for diagnostics rather than acted on.
+	MainIDsWereSorted bool
+}
+
+// fileIDLess orders two FileIDs the way PAR2 does: byte 15 is most
+// significant, byte 0 least. This is par2cmdline's MD5Hash::operator< (which
+// compares from the last byte down) and what every creator's Main packet
+// ordering follows.
+//
+// It is NOT bytes.Compare. Sorting FileIDs lexicographically instead permutes
+// the recovery-set file order, which shifts every file's global slice base and
+// hands the solver the wrong Vandermonde constant for every slice. The damage
+// is invisible to the other checks — present slices still pass their IFSC
+// CRC32 (a file-local index) and recovery payloads still pass their own packet
+// MD5 — and surfaces only as every recovered slice failing its IFSC MD5.
+func fileIDLess(a, b [16]byte) bool {
+	for i := 15; i >= 0; i-- {
+		if a[i] != b[i] {
+			return a[i] < b[i]
+		}
+	}
+	return false
 }
 
 // maxIndexPacketSize bounds a packet's declared length; anything larger is a
@@ -259,8 +288,10 @@ func parseMainBody(r io.Reader, bodyLen int64, idx *Index) error {
 			return fmt.Errorf("read recovery-set FileID %d: %w", i, err)
 		}
 	}
-	sort.Slice(idx.RecoveryIDs, func(i, j int) bool {
-		return bytes.Compare(idx.RecoveryIDs[i][:], idx.RecoveryIDs[j][:]) < 0
+	// Deliberately NOT sorted: the stored order defines the global slice
+	// numbering. Only record whether it matched the expected convention.
+	idx.MainIDsWereSorted = sort.SliceIsSorted(idx.RecoveryIDs, func(i, j int) bool {
+		return fileIDLess(idx.RecoveryIDs[i], idx.RecoveryIDs[j])
 	})
 	return nil
 }

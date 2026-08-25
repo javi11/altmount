@@ -34,8 +34,16 @@ func TestParseIndexRoundTrip(t *testing.T) {
 	if len(idx.RecoveryIDs) != 2 {
 		t.Fatalf("recovery set size = %d", len(idx.RecoveryIDs))
 	}
-	if bytes.Compare(idx.RecoveryIDs[0][:], idx.RecoveryIDs[1][:]) >= 0 {
-		t.Fatal("RecoveryIDs not sorted ascending")
+	// PAR2 orders FileIDs with byte 15 most significant, not lexicographically,
+	// and ParseIndex must hand back the Main packet's stored order either way.
+	for i := 15; i >= 0; i-- {
+		a, b := idx.RecoveryIDs[0][i], idx.RecoveryIDs[1][i]
+		if a != b {
+			if a > b {
+				t.Fatal("RecoveryIDs not in PAR2 FileID order")
+			}
+			break
+		}
 	}
 	total := 0
 	for _, id := range idx.RecoveryIDs {
