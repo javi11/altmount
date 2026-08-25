@@ -1797,6 +1797,11 @@ const closerWorkerCount = 4
 // Lazy-starts the worker goroutines on first call. Caller must hold
 // mvf.mu (so the lazy init is safe).
 func (mvf *MetadataVirtualFile) enqueueCloser(r io.Closer) {
+	// Interrupt first (idempotent) so in-flight downloads release the
+	// pool connection immediately before Close() waits on drain.
+	if i, ok := r.(readerInterrupter); ok {
+		i.Interrupt()
+	}
 	if mvf.closerCh == nil {
 		// Workers range over this local, not mvf.closerCh: Close() nils the
 		// field under mvf.mu, which the workers do not hold, so reading the
@@ -1817,11 +1822,6 @@ func (mvf *MetadataVirtualFile) enqueueCloser(r io.Closer) {
 		// Queue full — apply backpressure inline rather than letting
 		// the closer fan-out grow unbounded. This is the rare path; a
 		// real Seek burst stays under closerWorkerCount.
-		// Interrupt first (idempotent) so in-flight downloads release the
-		// pool connection before Close() waits on drain.
-		if i, ok := r.(readerInterrupter); ok {
-			i.Interrupt()
-		}
 		_ = r.Close()
 	}
 }
@@ -2176,6 +2176,12 @@ func (r *lazyNestedMultiReader) Close() error {
 		return err
 	}
 	return nil
+}
+
+func (r *lazyNestedMultiReader) Interrupt() {
+	if i, ok := r.current.(interface{ Interrupt() }); ok {
+		i.Interrupt()
+	}
 }
 
 // wrapWithEncryption wraps a usenet reader with encryption using metadata
