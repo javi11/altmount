@@ -71,6 +71,11 @@ export interface MetadataConfig {
 	root_path: string;
 	delete_source_nzb_on_removal?: boolean;
 	backup: MetadataBackupConfig;
+	migration?: MetadataMigrationConfig;
+}
+
+export interface MetadataMigrationConfig {
+	default_group: string;
 }
 
 export interface MetadataBackupConfig {

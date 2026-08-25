@@ -365,6 +365,41 @@ export interface LibrarySyncStatus {
 	last_sync_result?: LibrarySyncResult;
 }
 
+// Metadata migration types (legacy inline-segment .meta → v3 shared NZB store)
+export interface MetadataMigrationProgress {
+	total_groups: number;
+	processed_groups: number;
+	total_files: number;
+	processed_files: number;
+	current_release: string;
+	start_time: string;
+}
+
+export interface MetadataMigrationResult {
+	dry_run: boolean;
+	groups: number;
+	faithful_groups: number;
+	synthesized_groups: number;
+	files_migrated: number;
+	files_failed: number;
+	bytes_before: number;
+	bytes_after: number;
+	bytes_saved: number;
+	failures?: string[];
+	cancelled: boolean;
+	duration: number;
+	completed_at: string;
+}
+
+export interface MetadataMigrationStatus {
+	is_running: boolean;
+	legacy_files: number;
+	legacy_groups: number;
+	progress?: MetadataMigrationProgress;
+	last_result?: MetadataMigrationResult;
+	last_dry_run?: MetadataMigrationResult;
+}
+
 // Pool Metrics types
 export interface ProviderStatus {
 	id: string;

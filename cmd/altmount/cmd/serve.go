@@ -208,6 +208,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 		apiServer.SetLibrarySyncWorker(librarySyncWorker)
 	}
 
+	// Legacy metadata → v3 store migration. Manually triggered from the panel;
+	// creating the worker starts nothing.
+	apiServer.SetMetadataMigrationWorker(
+		metadata.NewMigrationWorker(metadataService, configManager.GetConfigGetter()),
+	)
+
 	// Register health system config change handler for dynamic enable/disable
 	if healthWorker != nil && librarySyncWorker != nil {
 		healthController := health.NewHealthSystemController(healthWorker, librarySyncWorker)

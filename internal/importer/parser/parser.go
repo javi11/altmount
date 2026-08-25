@@ -25,6 +25,7 @@ import (
 	"github.com/javi11/altmount/internal/importer/parser/par2"
 	"github.com/javi11/altmount/internal/importer/rarname"
 	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
+	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
@@ -135,7 +136,7 @@ func (p *Parser) ParseNzb(ctx context.Context, n *nzbparser.Nzb, nzbPath string,
 	// Build the shared NzbStore and segment index for v3 format.
 	// Must be built from the raw *nzbparser.Nzb BEFORE any per-file processing
 	// (which may filter/reorder files). The index maps message-id → flat store index.
-	parsed.Store, parsed.SegmentIndex = BuildStore(n)
+	parsed.Store, parsed.SegmentIndex = metadata.BuildStore(n)
 
 	// Determine segment size from meta chunk_size or fallback to first segment size
 	if n.Meta != nil {
@@ -1474,37 +1475,6 @@ func (p *Parser) propagateArchiveType(parsed *ParsedNzb) {
 			}
 		}
 	}
-}
-
-// BuildStore converts a parsed NZB into a NzbStore (for persistence) plus a
-// message-id → flat-store-index lookup used to emit SegmentRefs.
-// Segments are stored in their natural NzbSegments order (by Number after sort).
-func BuildStore(n *nzbparser.Nzb) (*metapb.NzbStore, map[string]int64) {
-	store := &metapb.NzbStore{Files: make([]*metapb.NzbFileEntry, 0, len(n.Files))}
-	index := make(map[string]int64)
-	var flat int64
-	for _, f := range n.Files {
-		fe := &metapb.NzbFileEntry{
-			Subject: f.Subject,
-			Poster:  f.Poster,
-			Date:    int64(f.Date),
-			Groups:  f.Groups,
-		}
-		segs := make(nzbparser.NzbSegments, len(f.Segments))
-		copy(segs, f.Segments)
-		sort.Sort(segs)
-		for _, s := range segs {
-			fe.Segments = append(fe.Segments, &metapb.NzbSeg{
-				Id:     s.ID,
-				Number: int32(s.Number),
-				Bytes:  int64(s.Bytes),
-			})
-			index[s.ID] = flat
-			flat++
-		}
-		store.Files = append(store.Files, fe)
-	}
-	return store, index
 }
 
 // GetMetadata extracts metadata from the NZB head section
