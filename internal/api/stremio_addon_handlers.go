@@ -432,6 +432,8 @@ type stremioQueueMetadata struct {
 	Type       string `json:"type,omitempty"`
 	Season     int    `json:"season,omitempty"`
 	Episode    int    `json:"episode,omitempty"`
+	TMDBID     int    `json:"tmdbId,omitempty"`
+	TVDBID     int    `json:"tvdbId,omitempty"`
 }
 
 type stremioContentInFlightError struct {
@@ -1612,8 +1614,15 @@ func (s *Server) enqueueStremioRelease(
 			// Map Stremio stream type to Newznab category name so downloads land in the
 			// correct folder (matches default SABnzbd category config).
 			category := "Movies"
+			tmdbID := 0
+			tvdbID := 0
 			if streamType == "series" {
 				category = "TV"
+				if tvdbIDStr, _, _ := resolveSeriesMetadataFromIMDb(workCtx, imdbID); tvdbIDStr != "" {
+					tvdbID, _ = strconv.Atoi(tvdbIDStr)
+				}
+			} else if streamType == "movie" {
+				tmdbID, _, _, _ = resolveMovieMetadataFromIMDb(workCtx, imdbID)
 			}
 			stremioDownloadID := stremioDownloadIDPrefix + uuid.NewString()
 			metaJSONPtr, metadataErr := encodeStremioQueueMetadata(stremioQueueMetadata{
@@ -1621,6 +1630,8 @@ func (s *Server) enqueueStremioRelease(
 				ReleaseKey: releaseKey,
 				IMDbID:     imdbID,
 				Type:       streamType,
+				TMDBID:     tmdbID,
+				TVDBID:     tvdbID,
 			})
 			if metadataErr != nil {
 				return nil, fmt.Errorf("failed to encode Stremio queue metadata: %w", metadataErr)
