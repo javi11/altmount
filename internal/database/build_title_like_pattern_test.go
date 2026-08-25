@@ -15,6 +15,7 @@ func TestBuildTitleLikePattern(t *testing.T) {
 		{"simple title", "Gladiator II", "%Gladiator%II%"},
 		{"collapses whitespace", "  Movie   of  the   Year  ", "%Movie%of%the%Year%"},
 		{"escapes LIKE wildcards", "Movie_100% (2024)", "%Movie\\_100\\%%(2024)%"},
+		{"strips delimiter punctuation from tokens", "Avatar Aang: The Last Airbender", "%Avatar%Aang%The%Last%Airbender%"},
 		{"empty string", "", ""},
 		{"whitespace only", "   ", ""},
 	}
