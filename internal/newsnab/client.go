@@ -59,9 +59,7 @@ func (c *Client) DownloadNZB(ctx context.Context, downloadURL string, userAgent 
 		req.Header.Set("User-Agent", userAgent)
 	}
 	client := *c.httpClient
-	client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
-		return fmt.Errorf("newsnab: download redirect is not allowed")
-	}
+	client.CheckRedirect = httpclient.SafeDownloadCheckRedirect(10)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("newsnab: download request failed (%s): %w", c.config.Name, httpclient.RedactURLError(err))
@@ -84,6 +82,64 @@ type Client struct {
 	// capsInflight is non-nil while a background caps refresh is running and
 	// is closed when it completes, single-flighting concurrent lookups.
 	capsInflight chan struct{}
+
+	// idMu guards idSearchFailures, the learned negative cache for identifier
+	// searches: indexers that answer a bare imdbid/tvdbid query with zero
+	// rows (no identifier mappings) are not retried with identifiers until
+	// the entry expires.
+	idMu              sync.Mutex
+	idSearchFailures  map[string]time.Time
+}
+
+// Parameters usable as negative-cache keys for identifier searches.
+const (
+	idParamImdb = "imdbid"
+	idParamTVDB = "tvdbid"
+)
+
+// idSearchNegativeTTL bounds how long a zero-result bare identifier search
+// suppresses identifier queries for an indexer. It matches the caps cache
+// TTL so both learned views of an indexer expire together.
+const idSearchNegativeTTL = time.Hour
+
+// idSearchBroken reports whether a recent bare identifier search for this
+// indexer returned zero results, meaning the indexer likely cannot resolve
+// identifiers at all (e.g. it has no IMDb mappings) and keyword searches
+// should be preferred until the entry expires.
+func (c *Client) idSearchBroken(param string) bool {
+	c.idMu.Lock()
+	defer c.idMu.Unlock()
+	at, ok := c.idSearchFailures[param]
+	return ok && time.Since(at) < idSearchNegativeTTL
+}
+
+// markIDSearchBroken records that a bare identifier search returned zero
+// results for this indexer.
+func (c *Client) markIDSearchBroken(param string) {
+	c.idMu.Lock()
+	defer c.idMu.Unlock()
+	if c.idSearchFailures == nil {
+		c.idSearchFailures = make(map[string]time.Time)
+	}
+	c.idSearchFailures[param] = time.Now()
+}
+
+// cloneWithout returns a copy of params with the given keys removed.
+func cloneWithout(params url.Values, keys ...string) url.Values {
+	out := make(url.Values, len(params))
+	for k, vs := range params {
+		drop := false
+		for _, key := range keys {
+			if k == key {
+				drop = true
+				break
+			}
+		}
+		if !drop {
+			out[k] = vs
+		}
+	}
+	return out
 }
 
 // NewClient creates a new Newsnab client.
@@ -179,7 +235,8 @@ type newsnabXMLItem struct {
 
 // SearchMovie searches for movie releases by IMDb ID, degrading to keyword
 // queries when the indexer's caps do not advertise movie-search or imdbid
-// support, mirroring Prowlarr/Radarr per-indexer behavior.
+// support — or when a learned probe showed identifier queries return nothing
+// for this indexer — mirroring Prowlarr/Radarr per-indexer behavior.
 func (c *Client) SearchMovie(ctx context.Context, imdbID, title string, categories []int, userAgent string) ([]Result, error) {
 	cleanIMDB := strings.TrimPrefix(imdbID, "tt")
 	caps := c.getCaps(ctx, userAgent)
@@ -191,7 +248,7 @@ func (c *Client) SearchMovie(ctx context.Context, imdbID, title string, categori
 		params.Set("t", "search")
 		params.Set("q", queryFallback(imdbID, title))
 		byID = false
-	case caps.supportsParam("imdbid"):
+	case cleanIMDB != "" && !c.idSearchBroken(idParamImdb) && caps.supportsParam(SearchTypeMovie, "imdbid"):
 		params.Set("t", "movie")
 		params.Set("imdbid", cleanIMDB)
 	default:
@@ -203,7 +260,52 @@ func (c *Client) SearchMovie(ctx context.Context, imdbID, title string, categori
 	cats := filterCategories(caps, c.resolveCategories(categories, []int{2000, 2010, 2030, 2040, 2045, 2060}))
 	setCategories(params, cats)
 
-	return c.executeSearch(ctx, params, userAgent, byID)
+	results, err := c.executeSearch(ctx, params, userAgent, byID)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) > 0 || !byID {
+		return results, nil
+	}
+
+	// Some indexers accept the identifier but combine it with categories so
+	// strictly that the pair returns nothing (NZBgeek answers a movie
+	// identifier queried with TV categories and zero rows). Retry with the
+	// identifier alone; the identifier still pins the movie exactly, so
+	// identifier trust is preserved.
+	if len(cats) > 0 {
+		degraded := cloneWithout(params, "cat")
+		retry, err := c.executeSearch(ctx, degraded, userAgent, byID)
+		if err != nil {
+			slog.DebugContext(ctx, "Newsnab category-degraded retry failed",
+				"indexer", c.config.Name, "error", err)
+			return results, nil
+		}
+		if len(retry) > 0 {
+			slog.DebugContext(ctx, "Newsnab search succeeded after dropping category filter",
+				"indexer", c.config.Name, "results", len(retry))
+			return retry, nil
+		}
+	}
+
+	// A bare identifier search that still returns nothing means this indexer
+	// likely cannot resolve identifiers at all (e.g. no IMDb mappings).
+	// Remember that for a while and answer this request with a keyword search.
+	c.markIDSearchBroken(idParamImdb)
+
+	keyword := cloneWithout(params, idParamImdb, "cat")
+	keyword.Set("q", queryFallback(imdbID, title))
+	keywordResults, err := c.executeSearch(ctx, keyword, userAgent, false)
+	if err != nil {
+		slog.DebugContext(ctx, "Newsnab keyword fallback after empty identifier search failed",
+			"indexer", c.config.Name, "error", err)
+		return results, nil
+	}
+	if len(keywordResults) > 0 {
+		slog.DebugContext(ctx, "Newsnab identifier search unsupported; keyword fallback succeeded",
+			"indexer", c.config.Name, "results", len(keywordResults))
+	}
+	return keywordResults, nil
 }
 
 // SearchTV searches for TV episode releases by IMDB ID, TVDB ID, title, season, and episode.
@@ -212,6 +314,15 @@ func (c *Client) SearchMovie(ctx context.Context, imdbID, title string, categori
 // Priority 1: tvdbid
 // Priority 2: imdbid
 // Priority 3: q=title (fallback text query)
+//
+// When a narrowed query returns zero rows the search degrades one rung at a
+// time (drop ep, then season, then categories): some indexers advertise
+// episode filtering but return nothing for content their filters cannot
+// parse — absolute-numbered anime releases are the common case. Degraded
+// identifier matches lose episode precision, so they are marked untrusted
+// and re-validated by the caller's media matching. A bare identifier search
+// that still comes back empty marks identifier queries unsupported for this
+// indexer (negative cache) and answers with a keyword search instead.
 func (c *Client) SearchTV(ctx context.Context, imdbID, tvdbID, title string, season, episode int, categories []int, userAgent string) ([]Result, error) {
 	cleanIMDB := strings.TrimPrefix(imdbID, "tt")
 	caps := c.getCaps(ctx, userAgent)
@@ -227,32 +338,93 @@ func (c *Client) SearchTV(ctx context.Context, imdbID, tvdbID, title string, sea
 	}
 
 	switch {
-	case tvSearchSupported && tvdbID != "" && caps.supportsParam("tvdbid"):
+	case tvSearchSupported && tvdbID != "" && !c.idSearchBroken(idParamTVDB) && caps.supportsParam(SearchTypeTV, "tvdbid"):
 		params.Set("tvdbid", tvdbID)
-	case tvSearchSupported && cleanIMDB != "" && caps.supportsParam("imdbid"):
+	case tvSearchSupported && cleanIMDB != "" && !c.idSearchBroken(idParamImdb) && caps.supportsParam(SearchTypeTV, "imdbid"):
 		params.Set("imdbid", cleanIMDB)
 	default:
 		params.Set("q", queryFallback(imdbID, title))
 		byID = false
 	}
-	if season > 0 && caps.supportsParam("season") {
+	if season > 0 && caps.supportsParam(SearchTypeTV, "season") {
 		params.Set("season", strconv.Itoa(season))
 	}
-	if episode > 0 && caps.supportsParam("ep") {
+	if episode > 0 && caps.supportsParam(SearchTypeTV, "ep") {
 		params.Set("ep", strconv.Itoa(episode))
 	}
 
 	cats := filterCategories(caps, c.resolveCategories(categories, []int{5000, 5010, 5030, 5040}))
 	setCategories(params, cats)
 
-	return c.executeSearch(ctx, params, userAgent, byID)
+	results, err := c.executeSearch(ctx, params, userAgent, byID)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) > 0 || !byID {
+		return results, nil
+	}
+
+	// Degradation ladder: each rung drops one more narrowing parameter. A
+	// rung only applies when its last key is present in the original query,
+	// otherwise it would duplicate the previous rung.
+	for _, drop := range [][]string{{"ep"}, {"ep", "season"}, {"ep", "season", "cat"}} {
+		if params.Get(drop[len(drop)-1]) == "" {
+			continue
+		}
+		degraded := cloneWithout(params, drop...)
+		retry, err := c.executeSearch(ctx, degraded, userAgent, byID)
+		if err != nil {
+			slog.DebugContext(ctx, "Newsnab degraded retry failed",
+				"indexer", c.config.Name, "dropped", strings.Join(drop, "+"), "error", err)
+			return results, nil
+		}
+		if len(retry) == 0 {
+			continue
+		}
+		slog.DebugContext(ctx, "Newsnab search succeeded after dropping narrowing parameters",
+			"indexer", c.config.Name, "dropped", strings.Join(drop, "+"), "results", len(retry))
+		for i := range retry {
+			retry[i].ByIDSearch = false
+		}
+		return retry, nil
+	}
+
+	identityParam := ""
+	switch {
+	case params.Get(idParamTVDB) != "":
+		identityParam = idParamTVDB
+	case params.Get(idParamImdb) != "":
+		identityParam = idParamImdb
+	}
+	if identityParam == "" {
+		return results, nil
+	}
+
+	// The bare identifier search returned nothing: this indexer likely
+	// cannot resolve identifiers at all. Remember that for a while and
+	// answer this request with a keyword search.
+	c.markIDSearchBroken(identityParam)
+
+	keyword := cloneWithout(params, identityParam, "ep", "season", "cat")
+	keyword.Set("q", queryFallback(imdbID, title))
+	keywordResults, err := c.executeSearch(ctx, keyword, userAgent, false)
+	if err != nil {
+		slog.DebugContext(ctx, "Newsnab keyword fallback after empty identifier search failed",
+			"indexer", c.config.Name, "error", err)
+		return results, nil
+	}
+	if len(keywordResults) > 0 {
+		slog.DebugContext(ctx, "Newsnab identifier search unsupported; keyword fallback succeeded",
+			"indexer", c.config.Name, "identifier", identityParam, "results", len(keywordResults))
+	}
+	return keywordResults, nil
 }
 
 // SearchGeneral performs a generic search by keyword query.
 func (c *Client) SearchGeneral(ctx context.Context, query string, categories []int, userAgent string) ([]Result, error) {
 	params := url.Values{}
 	params.Set("t", "search")
-	params.Set("q", query)
+	params.Set("q", sanitizeSearchQuery(query))
 
 	caps := c.getCaps(ctx, userAgent)
 	cats := filterCategories(caps, c.resolveCategories(categories, nil))
@@ -334,9 +506,24 @@ func detectAPIError(body []byte) error {
 // sent: the resolved title when known, otherwise the raw identifier.
 func queryFallback(imdbID, title string) string {
 	if title != "" {
-		return title
+		return sanitizeSearchQuery(title)
 	}
 	return imdbID
+}
+
+// sanitizeSearchQuery prepares a free-text title for a Newznab q= keyword
+// search. Several backends (e.g. altHUB) return zero results when the query
+// contains punctuation such as colons, even though the same releases are
+// indexed under punctuation-free titles ("Re:ZERO" vs "Re Zero"). Replace the
+// known-offending separators with spaces and collapse the result so scene
+// titles keep their word boundaries.
+func sanitizeSearchQuery(query string) string {
+	if query == "" {
+		return ""
+	}
+	replacer := strings.NewReplacer(":", " ", ",", " ", ";", " ")
+	cleaned := replacer.Replace(query)
+	return strings.Join(strings.Fields(cleaned), " ")
 }
 
 func setCategories(params url.Values, cats []int) {

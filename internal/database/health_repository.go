@@ -2503,9 +2503,15 @@ func buildTitleLikePattern(title string) string {
 		return ""
 	}
 	words := strings.Fields(clean)
-	escapedWords := make([]string, len(words))
-	for i, w := range words {
-		escapedWords[i] = escapeLikePrefix(w)
+	escapedWords := make([]string, 0, len(words))
+	for _, w := range words {
+		wClean := strings.Trim(w, ":;,!?\"'`~")
+		if wClean != "" {
+			escapedWords = append(escapedWords, escapeLikePrefix(wClean))
+		}
+	}
+	if len(escapedWords) == 0 {
+		return ""
 	}
 	return "%" + strings.Join(escapedWords, "%") + "%"
 }
