@@ -2,6 +2,7 @@ package newsnab
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -588,4 +589,54 @@ func TestNewsnabClient_LearnsUnsupportedIdentifierSearch(t *testing.T) {
 	assert.Equal(t, 1, secondCallRequests, "learned indexer must answer with a single keyword query")
 	assert.NotEmpty(t, searchQueries[firstCallRequests].Get("q"))
 	assert.Empty(t, searchQueries[firstCallRequests].Get("imdbid"))
+}
+
+type roundTripFunc func(req *http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func TestNewsnabClient_DownloadNZB_Redirect(t *testing.T) {
+	const indexerURL = "https://indexer.example.com/api?t=get&id=123"
+	const cdnURL = "https://cdn.example.com/nzbs/123.nzb"
+	const nzbData = "<nzb>newsnab content</nzb>"
+
+	transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.String() {
+		case indexerURL:
+			header := make(http.Header)
+			header.Set("Location", cdnURL)
+			return &http.Response{
+				StatusCode: http.StatusFound,
+				Header:     header,
+				Body:       io.NopCloser(strings.NewReader("")),
+			}, nil
+		case cdnURL:
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(nzbData)),
+			}, nil
+		default:
+			return &http.Response{
+				StatusCode: http.StatusNotFound,
+				Body:       io.NopCloser(strings.NewReader("not found")),
+			}, nil
+		}
+	})
+
+	httpClient := &http.Client{Transport: transport}
+	client := NewClient(IndexerConfig{Name: "redirect-idx", URL: "https://indexer.example.com", APIKey: "k", Enabled: true}, httpClient)
+
+	t.Run("redirect to cdn succeeds", func(t *testing.T) {
+		data, err := client.DownloadNZB(context.Background(), indexerURL, "test-ua")
+		require.NoError(t, err)
+		assert.Equal(t, nzbData, string(data))
+	})
+
+	t.Run("private address is rejected", func(t *testing.T) {
+		_, err := client.DownloadNZB(context.Background(), "http://10.0.0.1/nzb.xml", "test-ua")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "private address")
+	})
 }

@@ -2,6 +2,7 @@ package httpclient
 
 import (
 	"errors"
+	"net/http"
 	"net/url"
 	"strings"
 	"testing"
@@ -97,6 +98,83 @@ func TestRedactURLError(t *testing.T) {
 		})
 		if strings.Contains(err.Error(), "SECRET") {
 			t.Errorf("unparseable URL leaked its query: %v", err)
+		}
+	})
+}
+
+func TestSafeDownloadCheckRedirect(t *testing.T) {
+	checkRedirect := SafeDownloadCheckRedirect(3)
+
+	t.Run("allows public redirect", func(t *testing.T) {
+		target, _ := url.Parse("https://cdn.example.com/dl.nzb")
+		prev, _ := url.Parse("https://indexer.example.com/get")
+		req := &http.Request{URL: target, Header: make(http.Header)}
+		req.Header.Set("X-Api-Key", "prowlarr-secret")
+		req.Header.Set("Authorization", "Bearer secret")
+		via := []*http.Request{{URL: prev}}
+
+		err := checkRedirect(req, via)
+		if err != nil {
+			t.Fatalf("expected nil, got error: %v", err)
+		}
+		// Cross-domain redirect must strip sensitive credentials
+		if req.Header.Get("X-Api-Key") != "" {
+			t.Errorf("expected X-Api-Key to be stripped on cross-domain redirect")
+		}
+		if req.Header.Get("Authorization") != "" {
+			t.Errorf("expected Authorization to be stripped on cross-domain redirect")
+		}
+	})
+
+	t.Run("preserves headers on same-host redirect", func(t *testing.T) {
+		target, _ := url.Parse("https://indexer.example.com/final.nzb")
+		prev, _ := url.Parse("https://indexer.example.com/get")
+		req := &http.Request{URL: target, Header: make(http.Header)}
+		req.Header.Set("X-Api-Key", "my-key")
+		via := []*http.Request{{URL: prev}}
+
+		err := checkRedirect(req, via)
+		if err != nil {
+			t.Fatalf("expected nil, got error: %v", err)
+		}
+		if req.Header.Get("X-Api-Key") != "my-key" {
+			t.Errorf("expected X-Api-Key to be preserved on same-host redirect")
+		}
+	})
+
+	t.Run("blocks redirect to private ip", func(t *testing.T) {
+		target, _ := url.Parse("http://192.168.1.1/admin")
+		prev, _ := url.Parse("https://indexer.example.com/get")
+		req := &http.Request{URL: target}
+		via := []*http.Request{{URL: prev}}
+
+		err := checkRedirect(req, via)
+		if err == nil {
+			t.Fatal("expected error redirecting to private ip, got nil")
+		}
+	})
+
+	t.Run("blocks redirect to loopback", func(t *testing.T) {
+		target, _ := url.Parse("http://127.0.0.1:8080/secret")
+		prev, _ := url.Parse("https://indexer.example.com/get")
+		req := &http.Request{URL: target}
+		via := []*http.Request{{URL: prev}}
+
+		err := checkRedirect(req, via)
+		if err == nil {
+			t.Fatal("expected error redirecting to loopback, got nil")
+		}
+	})
+
+	t.Run("blocks redirect exceeding limit", func(t *testing.T) {
+		target, _ := url.Parse("https://cdn.example.com/dl.nzb")
+		prev, _ := url.Parse("https://indexer.example.com/get")
+		req := &http.Request{URL: target}
+		via := []*http.Request{{URL: prev}, {URL: prev}, {URL: prev}}
+
+		err := checkRedirect(req, via)
+		if err == nil {
+			t.Fatal("expected error when redirect limit exceeded, got nil")
 		}
 	})
 }

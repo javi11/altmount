@@ -59,9 +59,7 @@ func (c *Client) DownloadNZB(ctx context.Context, downloadURL string, userAgent 
 		req.Header.Set("User-Agent", userAgent)
 	}
 	client := *c.httpClient
-	client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
-		return fmt.Errorf("newsnab: download redirect is not allowed")
-	}
+	client.CheckRedirect = httpclient.SafeDownloadCheckRedirect(10)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("newsnab: download request failed (%s): %w", c.config.Name, httpclient.RedactURLError(err))

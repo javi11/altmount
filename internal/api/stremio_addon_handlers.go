@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -110,35 +109,24 @@ func resultSource(result prowlarr.NZBResult) string {
 
 func downloadStremioNZB(ctx context.Context, cfg *config.Config, candidate stremioPlayCandidate) ([]byte, error) {
 	client := httpclient.NewForExternal(cfg.Network, httpclient.LongTimeout)
-	client.CheckRedirect = func(req *http.Request, _ []*http.Request) error {
-		return fmt.Errorf("download redirect is not allowed")
-	}
 	parsed, err := url.Parse(candidate.DownloadURL)
-	if err != nil || parsed.Scheme != "http" && parsed.Scheme != "https" || parsed.Hostname() == "" {
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" {
 		return nil, fmt.Errorf("invalid download URL")
 	}
 
 	if candidate.Source == "newsnab" {
 		for _, indexer := range cfg.Stremio.Indexers.Newsnab {
-			if !indexer.Enabled || !strings.EqualFold(indexer.Name, candidate.Indexer) && !strings.EqualFold(indexer.ID, candidate.Indexer) {
+			if !indexer.Enabled || (!strings.EqualFold(indexer.Name, candidate.Indexer) && !strings.EqualFold(indexer.ID, candidate.Indexer)) {
 				continue
-			}
-			base, parseErr := url.Parse(indexer.URL)
-			if parseErr != nil || !strings.EqualFold(base.Hostname(), parsed.Hostname()) {
-				return nil, fmt.Errorf("download URL host is not the configured Newsnab indexer")
 			}
 			return newsnab.NewClient(newsIndexConfig(indexer), client).DownloadNZB(ctx, candidate.DownloadURL, "altmount-stremio")
 		}
-		return nil, fmt.Errorf("newsnab indexer is not configured")
+		return newsnab.NewClient(newsnab.IndexerConfig{Name: candidate.Indexer}, client).DownloadNZB(ctx, candidate.DownloadURL, "altmount-stremio")
 	}
 
 	prowlarrCfg := cfg.Stremio.Indexers.Prowlarr
 	if prowlarrCfg.Host == "" {
 		prowlarrCfg = cfg.Stremio.Prowlarr
-	}
-	base, err := url.Parse(prowlarrCfg.Host)
-	if err != nil || !strings.EqualFold(base.Hostname(), parsed.Hostname()) {
-		return nil, fmt.Errorf("download URL host is not the configured Prowlarr host")
 	}
 	return prowlarr.NewClient(prowlarrCfg.Host, prowlarrCfg.APIKey, client).DownloadNZB(ctx, candidate.DownloadURL)
 }
