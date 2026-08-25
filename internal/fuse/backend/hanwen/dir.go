@@ -138,7 +138,10 @@ func (d *Dir) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.Ent
 		noModTime:     d.noModTime,
 	}
 
-	return d.NewInode(ctx, node, fs.StableAttr{Mode: fuse.S_IFDIR}), 0
+	ino := stableInode(fullPath)
+	out.Ino = ino
+
+	return d.NewInode(ctx, node, fs.StableAttr{Mode: fuse.S_IFDIR, Ino: ino}), 0
 }
 
 // Lookup implements fs.NodeLookuper.
@@ -154,6 +157,8 @@ func (d *Dir) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.
 	}
 
 	fillAttr(info, &out.Attr, d.uid, d.gid, d.noModTime)
+	ino := stableInode(fullPath)
+	out.Ino = ino
 
 	if info.IsDir() {
 		node := &Dir{
@@ -166,7 +171,7 @@ func (d *Dir) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.
 			asyncBufSize:  d.asyncBufSize,
 			noModTime:     d.noModTime,
 		}
-		return d.NewInode(ctx, node, fs.StableAttr{Mode: fuse.S_IFDIR}), 0
+		return d.NewInode(ctx, node, fs.StableAttr{Mode: fuse.S_IFDIR, Ino: ino}), 0
 	}
 
 	node := &File{
@@ -180,7 +185,7 @@ func (d *Dir) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.
 		asyncBufSize:  d.asyncBufSize,
 		noModTime:     d.noModTime,
 	}
-	return d.NewInode(ctx, node, fs.StableAttr{Mode: fuse.S_IFREG}), 0
+	return d.NewInode(ctx, node, fs.StableAttr{Mode: fuse.S_IFREG, Ino: ino}), 0
 }
 
 // Rename implements fs.NodeRenamer.
@@ -250,7 +255,7 @@ func (d *Dir) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 		entries = append(entries, fuse.DirEntry{
 			Name: info.Name(),
 			Mode: mode,
-			Ino:  hashPath(filepath.Join(d.path, info.Name())),
+			Ino:  stableInode(filepath.Join(d.path, info.Name())),
 		})
 	}
 

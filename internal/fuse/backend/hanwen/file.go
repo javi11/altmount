@@ -62,22 +62,10 @@ func (f *File) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, s
 		return nil, 0, syscall.EACCES
 	}
 
-	// Create a FUSE-level stream (one per file open) that lives for the
-	// duration of the handle. Backend opens are told to suppress their
-	// own stream creation via SuppressStreamTrackingKey.
-	var stream *nzbfilesystem.ActiveStream
-	if f.streamTracker != nil {
-		stream = f.streamTracker.AddStream(f.path, "FUSE", "FUSE", "", "", f.size)
-	}
-
 	ctx = context.WithValue(ctx, utils.SuppressStreamTrackingKey, true)
 
 	aferoFile, err := f.nzbfs.Open(ctx, f.path)
 	if err != nil {
-		if stream != nil {
-			f.streamTracker.Remove(stream.ID)
-		}
-
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			f.logger.DebugContext(ctx, "File Open canceled", "path", f.path)
 			return nil, 0, syscall.EINTR
@@ -87,12 +75,26 @@ func (f *File) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, s
 		return nil, 0, syscall.EIO
 	}
 
+	fileSize := f.size
+	if fi, statErr := aferoFile.Stat(); statErr == nil {
+		fileSize = fi.Size()
+		f.size = fileSize
+	}
+
+	// Create a FUSE-level stream (one per file open) that lives for the
+	// duration of the handle. Backend opens are told to suppress their
+	// own stream creation via SuppressStreamTrackingKey.
+	var stream *nzbfilesystem.ActiveStream
+	if f.streamTracker != nil {
+		stream = f.streamTracker.AddStream(f.path, "FUSE", "FUSE", "", "", fileSize)
+	}
+
 	// Attach a read-ahead buffer for sufficiently large files. The buffer
 	// stays in passthrough mode until sustained sequential reads are observed,
 	// so header probes and seek/scrub bursts never allocate it.
 	var asyncBuf *backend.AsyncReadBuffer
 	if rac, ok := aferoFile.(readAtContexter); ok {
-		asyncBuf = newHandleAsyncBuffer(ctx, rac, f.asyncBufSize, f.size, f.logger)
+		asyncBuf = newHandleAsyncBuffer(ctx, rac, f.asyncBufSize, fileSize, f.logger)
 	}
 
 	handle := NewHandle(aferoFile, f.logger, f.path, stream, f.streamTracker, asyncBuf)
@@ -100,7 +102,7 @@ func (f *File) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, s
 	// Use DIRECT_IO when file size is unknown/zero to prevent the kernel
 	// from caching pages with stale size metadata (rclone mount2 pattern).
 	fuseFlags := uint32(fuse.FOPEN_KEEP_CACHE)
-	if f.size <= 0 {
+	if fileSize <= 0 {
 		fuseFlags = uint32(fuse.FOPEN_DIRECT_IO)
 	}
 	return handle, fuseFlags, 0
