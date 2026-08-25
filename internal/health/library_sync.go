@@ -818,6 +818,7 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 			}
 
 			deleteSourceNzb := cfg.Metadata.ShouldDeleteSourceNzb()
+			deletedDirs := make(map[string]bool)
 
 			for relativeMountPath := range currentMetaOrphans {
 				select {
@@ -838,10 +839,31 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 							slog.InfoContext(ctx, "Deleted confirmed orphaned metadata file (not found in library for 2 consecutive syncs)",
 								"path", relativeMountPath)
 							metadataDeletedCount++
+							deletedDirs[filepath.Dir(relativeMountPath)] = true
 						}
 					} else {
 						metadataDeletedCount++
 					}
+				}
+			}
+
+			if !dryRun && lsw.rcloneClient != nil && len(deletedDirs) > 0 {
+				cfg := lsw.configGetter()
+				switch cfg.MountType {
+				case config.MountTypeRClone, config.MountTypeRCloneExternal:
+					dirs := make([]string, 0, len(deletedDirs))
+					for d := range deletedDirs {
+						dirs = append(dirs, d)
+					}
+					vfsName := cfg.RClone.VFSName
+					if vfsName == "" {
+						vfsName = config.MountProvider
+					}
+					go func() {
+						c, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+						defer cancel()
+						_ = lsw.rcloneClient.RefreshDir(c, vfsName, dirs)
+					}()
 				}
 			}
 

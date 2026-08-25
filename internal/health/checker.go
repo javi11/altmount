@@ -351,13 +351,11 @@ func (hc *HealthChecker) CheckFilesBatch(ctx context.Context, filePaths []string
 	return events
 }
 
-// NotifyRcloneVFS notifies rclone VFS about a file status change (async, non-blocking)
-func (hc *HealthChecker) notifyRcloneVFS(filePath string, event HealthEvent) {
-	if hc.rcloneClient == nil {
-		return // No rclone client configured
+// NotifyRcloneVFS notifies rclone VFS to forget and refresh the directory containing filePath (async, non-blocking).
+func (hc *HealthChecker) NotifyRcloneVFS(filePath string) {
+	if hc == nil || hc.rcloneClient == nil {
+		return
 	}
-
-	// Only notify for rclone-based mounts; FUSE and none don't use rclone VFS
 	cfg := hc.configGetter()
 	switch cfg.MountType {
 	case config.MountTypeRClone, config.MountTypeRCloneExternal:
@@ -366,21 +364,40 @@ func (hc *HealthChecker) notifyRcloneVFS(filePath string, event HealthEvent) {
 		return
 	}
 
-	// Only notify on significant status changes (healthy <-> corrupted)
-	switch event.Type {
-	case EventTypeFileHealthy, EventTypeFileCorrupted:
-		// Continue with notification
+	virtualDir := filepath.Dir(filePath)
+	hc.NotifyRcloneVFSDirs([]string{virtualDir})
+}
+
+// NotifyRcloneVFSDirs notifies rclone VFS to forget and refresh the specified directories (async, non-blocking).
+func (hc *HealthChecker) NotifyRcloneVFSDirs(dirs []string) {
+	if hc == nil || hc.rcloneClient == nil || len(dirs) == 0 {
+		return
+	}
+	cfg := hc.configGetter()
+	switch cfg.MountType {
+	case config.MountTypeRClone, config.MountTypeRCloneExternal:
+		// continue
 	default:
-		return // No notification needed for other event types
+		return
 	}
 
-	// Start async notification
-	go func() {
-		// Extract directory path from file path for VFS refresh
-		virtualDir := filepath.Dir(filePath)
+	// Filter and deduplicate directories
+	uniqueDirs := make([]string, 0, len(dirs))
+	seen := make(map[string]bool)
+	for _, d := range dirs {
+		if d == "" {
+			d = "/"
+		}
+		if !seen[d] {
+			seen[d] = true
+			uniqueDirs = append(uniqueDirs, d)
+		}
+	}
+	if len(uniqueDirs) == 0 {
+		return
+	}
 
-		// Use background context with timeout for VFS notification
-		// Increased timeout to 60 seconds as vfs/refresh can be slow
+	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 
@@ -389,12 +406,21 @@ func (hc *HealthChecker) notifyRcloneVFS(filePath string, event HealthEvent) {
 			vfsName = config.MountProvider
 		}
 
-		// Refresh cache asynchronously to avoid blocking health checks
-		err := hc.rcloneClient.RefreshDir(ctx, vfsName, []string{virtualDir})
+		err := hc.rcloneClient.RefreshDir(ctx, vfsName, uniqueDirs)
 		if err != nil {
-			slog.ErrorContext(ctx, "Failed to notify rclone VFS about file status change", "file", filePath, "event", event.Type, "err", err)
+			slog.ErrorContext(ctx, "Failed to notify rclone VFS to forget/refresh directories", "dirs", uniqueDirs, "err", err)
 		}
 	}()
+}
+
+// notifyRcloneVFS notifies rclone VFS about a file status change (async, non-blocking)
+func (hc *HealthChecker) notifyRcloneVFS(filePath string, event HealthEvent) {
+	switch event.Type {
+	case EventTypeFileHealthy, EventTypeFileCorrupted:
+		hc.NotifyRcloneVFS(filePath)
+	default:
+		return
+	}
 }
 
 type metadataSegmentLoader struct {
