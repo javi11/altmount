@@ -136,10 +136,19 @@ func ResolveFromNzb(
 // The probed payloads land in the shared cache, so the parse that follows
 // reuses them instead of refetching.
 //
-// Dead articles cannot be probed. They read as zeros either way (the parser
-// drops whatever packets they damaged), so a file whose probes are all dead
-// keeps its encoded sizes; only its own packets are affected, never the
-// stream offsets of sibling PAR2 files.
+// Dead articles cannot be probed. A volume with no probeable non-final article
+// borrows the release-wide decoded part size instead, in a second pass: usenet
+// posts split every file of a release at one uniform decoded part size, so a
+// sibling's probe is authoritative. Keeping such a volume on its yEnc-ENCODED
+// NZB sizes would drift its length and every BodyOffset inside it by the yEnc
+// overhead, making each of its recovery payloads fail its RecvSlic packet MD5
+// and be dropped as unreachable — silently costing the repair a whole volume's
+// recovery rows.
+//
+// A volume whose FINAL article is also dead keeps that article's declared size:
+// unlike a content member, a PAR2 volume has no FileDesc recording its true
+// length, so the remainder is unknowable. Every offset before it is still
+// corrected, which is what locating recovery payloads depends on.
 func sizePar2SetFiles(
 	ctx context.Context,
 	fetch ArticleFetcher,
@@ -172,6 +181,30 @@ func sizePar2SetFiles(
 		}
 	}
 
+	// apply writes decoded sizes for one volume from a known part size, and
+	// the probed final-article size when there is one.
+	apply := func(f *SetFile, partSize, lastSize int64, source SizeProvenance) {
+		n := len(f.Articles)
+		f.SizeSource = source
+		var total int64
+		for j := range f.Articles {
+			switch {
+			case j < n-1:
+				f.Articles[j].Size = partSize
+			case lastSize >= 0:
+				f.Articles[j].Size = lastSize
+				// else: dead final article keeps its declared size; a PAR2
+				// volume has no FileDesc length to derive the remainder from.
+			}
+			total += f.Articles[j].Size
+		}
+		f.Length = uint64(total)
+	}
+
+	// Pass 1: size every volume that has a probeable non-final article, and
+	// remember the release-wide decoded part size.
+	releasePartSize := int64(-1)
+	var deferred []int
 	for i := range files {
 		f := &files[i]
 		n := len(f.Articles)
@@ -199,25 +232,34 @@ func sizePar2SetFiles(
 		}
 
 		if n > 1 && partSize < 0 {
-			log.WarnContext(ctx, "PAR2 file's non-final articles are all dead; keeping encoded sizes",
+			deferred = append(deferred, i)
+			continue
+		}
+		if partSize > 0 && releasePartSize < 0 {
+			releasePartSize = partSize
+		}
+		apply(f, partSize, lastSize, SizeProbed)
+	}
+
+	// Pass 2: volumes with nothing probeable borrow the release's part size.
+	for _, i := range deferred {
+		f := &files[i]
+		if releasePartSize < 0 {
+			log.WarnContext(ctx, "no PAR2 volume in the release had a probeable non-final article; keeping encoded sizes",
 				"first_article", f.Articles[0].MessageID)
 			f.SizeSource = SizeEncodedFallback
 			continue
 		}
-		f.SizeSource = SizeProbed
-		var total int64
-		for j := range f.Articles {
-			switch {
-			case j < n-1:
-				f.Articles[j].Size = partSize
-			case lastSize >= 0:
-				f.Articles[j].Size = lastSize
-				// else: dead final article keeps its encoded size; it reads as
-				// zeros and only its own trailing packets are lost.
+		lastSize := int64(-1)
+		if last := f.Articles[len(f.Articles)-1]; !dead[last.MessageID] {
+			var err error
+			if lastSize, err = probe(last.MessageID); err != nil {
+				return err
 			}
-			total += f.Articles[j].Size
 		}
-		f.Length = uint64(total)
+		log.WarnContext(ctx, "PAR2 volume's non-final articles are all dead; borrowing the release part size",
+			"first_article", f.Articles[0].MessageID, "part_size", releasePartSize)
+		apply(f, releasePartSize, lastSize, SizeBorrowedHint)
 	}
 	return nil
 }

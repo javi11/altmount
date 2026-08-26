@@ -2,6 +2,7 @@ package par2repair
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"sync"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/javi11/nzbparser"
 
+	"github.com/javi11/altmount/internal/importer/parser/par2"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/testsupport/par2gen"
 )
@@ -324,5 +326,148 @@ func TestResolveFromNzbWithoutPar2Files(t *testing.T) {
 	_, err := ResolveFromNzb(context.Background(), n, nil, fetch, Caps{}, testLogger(), nil)
 	if err == nil {
 		t.Fatal("want error when the NZB carries no PAR2 files")
+	}
+}
+
+// A PAR2 volume whose non-final articles are all dead must still get decoded
+// article sizes, borrowed from a sibling volume that could be probed.
+//
+// Usenet posts split every file of a release at one uniform decoded part size,
+// so a sibling's probe is authoritative. Leaving the volume on its yEnc-ENCODED
+// NZB sizes drifts f.Length and every BodyOffset inside it by 2-3%, which makes
+// each of its recovery payloads fail its RecvSlic packet MD5 and get dropped as
+// "unreachable or corrupt" -- silently losing a whole volume's recovery rows.
+func TestSizePar2SetFilesBorrowsPartSizeWhenProbesAreDead(t *testing.T) {
+	const (
+		decodedPart = 700_000
+		encodedPart = 721_000 // ~3% yEnc overhead, as an NZB declares
+		decodedLast = 250_000
+		encodedLast = 257_500
+	)
+
+	// Two volumes, three articles each. Volume 0 is fully live and probeable.
+	// Volume 1 has both probe targets (first non-final, and final) dead.
+	mkVol := func(name string) SetFile {
+		sf := SetFile{}
+		for j := range 3 {
+			size := int64(encodedPart)
+			if j == 2 {
+				size = encodedLast
+			}
+			sf.Articles = append(sf.Articles, Article{
+				MessageID: fmt.Sprintf("<%s-%d@test>", name, j),
+				Size:      size,
+			})
+			sf.Length += uint64(size)
+		}
+		return sf
+	}
+	files := []SetFile{mkVol("v0"), mkVol("v1")}
+
+	fetch := &fakeFetcher{articles: map[string][]byte{}}
+	for j := range 3 {
+		n := decodedPart
+		if j == 2 {
+			n = decodedLast
+		}
+		fetch.articles[fmt.Sprintf("<v0-%d@test>", j)] = make([]byte, n)
+	}
+	// Every article of v1 is absent -> dead.
+
+	dead := map[string]bool{}
+	if err := sizePar2SetFiles(context.Background(), fetch, files, dead,
+		newArticleCache(64), testLogger()); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := files[0].SizeSource; got != SizeProbed {
+		t.Errorf("volume 0 size source = %v, want probed", got)
+	}
+	if got := files[1].SizeSource; got != SizeBorrowedHint {
+		t.Errorf("volume 1 size source = %v, want borrowed_hint", got)
+	}
+	// The non-final articles are what recovery-payload offsets depend on.
+	for j := range 2 {
+		if got := files[1].Articles[j].Size; got != decodedPart {
+			t.Errorf("volume 1 article %d size = %d, want the borrowed decoded part size %d",
+				j, got, decodedPart)
+		}
+	}
+	// A dead final article's true size is unknowable (a PAR2 volume has no
+	// authoritative FileDesc length), so it keeps its declared size -- but the
+	// offsets before it must be right.
+	wantLen := uint64(2*decodedPart + encodedLast)
+	if files[1].Length != wantLen {
+		t.Errorf("volume 1 length = %d, want %d", files[1].Length, wantLen)
+	}
+}
+
+// sizeArticles must not derive the uniform part size from a file's FINAL
+// article. The final article is the short remainder, so probing it yields a
+// part size far too small -- the (n-1)*partSize < length <= n*partSize guard
+// then rejects the file and the whole release fails as "part size
+// inconsistent" even though the release-wide part size was available to borrow.
+//
+// sizePar2SetFiles already gets this right by probing only j < n-1.
+func TestSizeArticlesIgnoresFinalArticleWhenProbing(t *testing.T) {
+	const (
+		partSize = 700_000
+		nSegs    = 4
+		length   = 3*partSize + 120_000 // final article is the short remainder
+	)
+
+	idx := &par2.Index{
+		SliceSize: 1 << 20,
+		Files:     map[[16]byte]par2.FileDescriptor{},
+	}
+	var fileID [16]byte
+	fileID[0] = 9
+	idx.Files[fileID] = par2.FileDescriptor{Name: "v.rar", Length: length}
+
+	entry := &metapb.NzbFileEntry{}
+	for j := range nSegs {
+		entry.Segments = append(entry.Segments, &metapb.NzbSeg{
+			Id:     fmt.Sprintf("<v-%d@test>", j),
+			Number: int32(j + 1),
+		})
+	}
+
+	// Only the FINAL article is live. Everything before it is dead.
+	// Keys must be normalised (no angle brackets) -- that is the form
+	// sizeArticles looks up with, so bracketed keys would silently never match
+	// and make every article read as dead.
+	fetch := &fakeFetcher{articles: map[string][]byte{
+		fmt.Sprintf("v-%d@test", nSegs-1): make([]byte, length-3*partSize),
+	}}
+	dead := map[string]bool{}
+	for j := range nSegs - 1 {
+		dead[fmt.Sprintf("v-%d@test", j)] = true
+	}
+
+	// With no hint the file cannot be sized at all, and that must be reported
+	// as errNoLiveArticle so the caller can retry with a release-wide part
+	// size -- NOT as a bogus "part size inconsistent" failure.
+	_, _, err := sizeArticles(context.Background(), idx, fileID, entry, dead,
+		fetch, newArticleCache(64), 0)
+	if !errors.Is(err, errNoLiveArticle) {
+		t.Fatalf("no probeable non-final article: got %v, want errNoLiveArticle", err)
+	}
+
+	// Given the release-wide part size, the file sizes correctly.
+	sf, _, err := sizeArticles(context.Background(), idx, fileID, entry, dead,
+		fetch, newArticleCache(64), partSize)
+	if err != nil {
+		t.Fatalf("with a borrowed part size: %v", err)
+	}
+	if sf.SizeSource != SizeBorrowedHint {
+		t.Errorf("size source = %v, want borrowed_hint", sf.SizeSource)
+	}
+	for j := range nSegs - 1 {
+		if got := sf.Articles[j].Size; got != partSize {
+			t.Errorf("article %d size = %d, want %d", j, got, partSize)
+		}
+	}
+	if got := sf.Articles[nSegs-1].Size; got != length-3*partSize {
+		t.Errorf("final article size = %d, want %d", got, length-3*partSize)
 	}
 }

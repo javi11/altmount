@@ -571,7 +571,14 @@ func sizeArticles(
 	sf.SizeSource = SizeProbed
 	if n > 1 {
 		partSize = -1
-		for _, seg := range entry.Segments {
+		// Non-final articles only. The final article is the short remainder,
+		// so probing it yields a part size far below the real one, and the
+		// uniformity check below then rejects the file as inconsistent — a
+		// spurious unrepairable for a release whose part size a sibling could
+		// have supplied. Leaving it out means a file whose only live article is
+		// the last one reports errNoLiveArticle instead, and the caller retries
+		// with the release-wide part size.
+		for _, seg := range entry.Segments[:n-1] {
 			msgID := normalizeMsgID(seg.Id)
 			if dead[msgID] {
 				continue
