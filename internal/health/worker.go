@@ -1116,6 +1116,8 @@ func (hw *HealthWorker) cleanupZombieRecord(ctx context.Context, item *database.
 	deleteSourceNzb := cfg.Metadata.ShouldDeleteSourceNzb()
 	if delMetaErr := hw.metadataService.DeleteFileMetadataWithSourceNzb(ctx, relativePath, deleteSourceNzb); delMetaErr != nil {
 		slog.ErrorContext(ctx, "Failed to delete metadata during cleanup", "file_path", item.FilePath, "error", delMetaErr)
+	} else {
+		hw.NotifyRcloneVFS(item.FilePath)
 	}
 }
 
@@ -1357,5 +1359,21 @@ func (hw *HealthWorker) moveMetadataToSafetyFolder(ctx context.Context, item *da
 	slog.InfoContext(ctx, "Moving metadata file for corrupted item to safety folder to trigger replacement", "file_path", item.FilePath)
 	if moveErr := hw.metadataService.MoveToCorrupted(ctx, relativePath); moveErr != nil {
 		slog.WarnContext(ctx, "Failed to move corrupted metadata file", "error", moveErr)
+	} else {
+		hw.NotifyRcloneVFS(item.FilePath)
+	}
+}
+
+// NotifyRcloneVFS notifies rclone VFS to forget and refresh the directory containing filePath.
+func (hw *HealthWorker) NotifyRcloneVFS(filePath string) {
+	if hw != nil && hw.healthChecker != nil {
+		hw.healthChecker.NotifyRcloneVFS(filePath)
+	}
+}
+
+// NotifyRcloneVFSDirs notifies rclone VFS to forget and refresh the specified directories.
+func (hw *HealthWorker) NotifyRcloneVFSDirs(dirs []string) {
+	if hw != nil && hw.healthChecker != nil {
+		hw.healthChecker.NotifyRcloneVFSDirs(dirs)
 	}
 }
