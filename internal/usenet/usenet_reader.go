@@ -103,6 +103,16 @@ func (e *DataCorruptionError) Unwrap() error {
 	return e.UnderlyingErr
 }
 
+// isCorruptionError reports whether err indicates the article body itself is
+// corrupt (as opposed to a transient network/pool failure), so it should be
+// wrapped as a DataCorruptionError and routed into the health/repair pipeline
+// instead of surfacing as an anonymous read error.
+func isCorruptionError(err error) bool {
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "data corruption detected") ||
+		strings.Contains(msg, "crc mismatch")
+}
+
 type UsenetReader struct {
 	log            *slog.Logger
 	wg             sync.WaitGroup
@@ -473,7 +483,7 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 					bytesWritten = int64(result.BytesDecoded)
 				}
 
-				if strings.Contains(err.Error(), "data corruption detected") {
+				if isCorruptionError(err) {
 					return &DataCorruptionError{
 						UnderlyingErr: err,
 						BytesRead:     bytesWritten,
