@@ -2314,6 +2314,13 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 	// inside the debounce window. ShouldTrigger handles a nil coalescer
 	// (test harness) by returning true.
 	if !mvf.repairCoalescer.ShouldTrigger(mvf.name) {
+		// Another handle on this path may already have had the metadata taken
+		// away. Only that handle latched itself, so without this a second handle
+		// failing inside the debounce window keeps rebuilding readers for a file
+		// that is gone - exactly the wedge the latch exists to prevent.
+		if mvf.repairCoalescer.WasRemoved(mvf.name) {
+			mvf.metadataGone.Store(true)
+		}
 		slog.DebugContext(mvf.ctx, "Streaming failure repair already triggered recently, debouncing",
 			"file", mvf.name)
 		return
@@ -2415,8 +2422,10 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 			slog.ErrorContext(ctx, "Failed to delete corrupted file after streaming failure", "file", mvf.name, "error", err)
 		} else {
 			// The file this handle is reading no longer exists; latch it closed,
-			// same as the repair path below.
+			// same as the repair path below, and publish the removal so other
+			// handles on this path latch too even if their failure is debounced.
 			mvf.metadataGone.Store(true)
+			mvf.repairCoalescer.MarkRemoved(mvf.name)
 
 			if err := mvf.healthRepository.DeleteHealthRecord(ctx, mvf.name); err != nil {
 				slog.ErrorContext(ctx, "Failed to delete health record after deleting corrupted file", "file", mvf.name, "error", err)
@@ -2445,6 +2454,10 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 					// fetching segments for a path that no longer exists and the
 					// client keeps reading against it (see issue #539).
 					mvf.metadataGone.Store(true)
+					// Publish the removal so other handles on this path latch
+					// themselves even if their own failure lands inside the
+					// debounce window and returns early above.
+					mvf.repairCoalescer.MarkRemoved(mvf.name)
 					// Successfully moved metadata, enqueue a coalesced rclone VFS
 					// refresh. Multiple files in the same directory collapse into a
 					// single RC call; concurrent failures across directories are
