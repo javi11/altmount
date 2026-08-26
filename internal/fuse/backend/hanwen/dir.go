@@ -12,7 +12,6 @@ import (
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 	"github.com/javi11/altmount/internal/fuse/backend"
-	"github.com/javi11/altmount/internal/nzbfilesystem"
 )
 
 // ensure Dir implements fs.Node* interfaces
@@ -30,20 +29,20 @@ var _ fs.NodeRmdirer = (*Dir)(nil)
 // Dir represents a directory in the FUSE filesystem.
 type Dir struct {
 	fs.Inode
-	nzbfs         *nzbfilesystem.NzbFilesystem
+	nzbfs         nzbFS
 	streamTracker backend.StreamTracker
 	path          string
 	logger        *slog.Logger
 	isRootDir     bool
 	uid           uint32
 	gid           uint32
-	asyncBufSize  int  // read-ahead buffer size in bytes, propagated to File nodes
+	asyncBufSize  int // read-ahead buffer size in bytes, propagated to File nodes
 	noModTime     bool
 }
 
 // NewDir creates a new directory node for the FUSE filesystem.
 func NewDir(
-	nzbfs *nzbfilesystem.NzbFilesystem,
+	nzbfs nzbFS,
 	path string,
 	logger *slog.Logger,
 	uid, gid uint32,
@@ -138,7 +137,10 @@ func (d *Dir) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.Ent
 		noModTime:     d.noModTime,
 	}
 
-	return d.NewInode(ctx, node, fs.StableAttr{Mode: fuse.S_IFDIR}), 0
+	ino := stableInode(fullPath)
+	out.Ino = ino
+
+	return d.NewInode(ctx, node, fs.StableAttr{Mode: fuse.S_IFDIR, Ino: ino}), 0
 }
 
 // Lookup implements fs.NodeLookuper.
@@ -154,6 +156,8 @@ func (d *Dir) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.
 	}
 
 	fillAttr(info, &out.Attr, d.uid, d.gid, d.noModTime)
+	ino := stableInode(fullPath)
+	out.Ino = ino
 
 	if info.IsDir() {
 		node := &Dir{
@@ -166,7 +170,7 @@ func (d *Dir) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.
 			asyncBufSize:  d.asyncBufSize,
 			noModTime:     d.noModTime,
 		}
-		return d.NewInode(ctx, node, fs.StableAttr{Mode: fuse.S_IFDIR}), 0
+		return d.NewInode(ctx, node, fs.StableAttr{Mode: fuse.S_IFDIR, Ino: ino}), 0
 	}
 
 	node := &File{
@@ -174,13 +178,14 @@ func (d *Dir) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.
 		streamTracker: d.streamTracker,
 		path:          fullPath,
 		logger:        d.logger,
-		size:          info.Size(),
 		uid:           d.uid,
 		gid:           d.gid,
 		asyncBufSize:  d.asyncBufSize,
 		noModTime:     d.noModTime,
 	}
-	return d.NewInode(ctx, node, fs.StableAttr{Mode: fuse.S_IFREG}), 0
+	node.size.Store(info.Size())
+
+	return d.NewInode(ctx, node, fs.StableAttr{Mode: fuse.S_IFREG, Ino: ino}), 0
 }
 
 // Rename implements fs.NodeRenamer.
@@ -250,7 +255,7 @@ func (d *Dir) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 		entries = append(entries, fuse.DirEntry{
 			Name: info.Name(),
 			Mode: mode,
-			Ino:  hashPath(filepath.Join(d.path, info.Name())),
+			Ino:  stableInode(filepath.Join(d.path, info.Name())),
 		})
 	}
 
