@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"sync/atomic"
 	"syscall"
 
 	"github.com/hanwen/go-fuse/v2/fs"
@@ -25,15 +26,18 @@ var _ fs.NodeSetattrer = (*File)(nil)
 // File represents a file in the FUSE filesystem.
 type File struct {
 	fs.Inode
-	nzbfs         *nzbfilesystem.NzbFilesystem
+	nzbfs         nzbFS
 	streamTracker backend.StreamTracker
 	path          string
 	logger        *slog.Logger
-	size          int64
-	uid           uint32
-	gid           uint32
-	asyncBufSize  int // per-handle read-ahead buffer size in bytes; 0 = disabled
-	noModTime     bool
+	// size is the last known file size, used only as a fallback when the
+	// per-open Stat fails. Retained nodes can be opened concurrently, so it
+	// must be accessed atomically.
+	size         atomic.Int64
+	uid          uint32
+	gid          uint32
+	asyncBufSize int // per-handle read-ahead buffer size in bytes; 0 = disabled
+	noModTime    bool
 }
 
 // Getattr implements fs.NodeGetattrer.
@@ -75,10 +79,10 @@ func (f *File) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, s
 		return nil, 0, syscall.EIO
 	}
 
-	fileSize := f.size
+	fileSize := f.size.Load()
 	if fi, statErr := aferoFile.Stat(); statErr == nil {
 		fileSize = fi.Size()
-		f.size = fileSize
+		f.size.Store(fileSize)
 	}
 
 	// Create a FUSE-level stream (one per file open) that lives for the
