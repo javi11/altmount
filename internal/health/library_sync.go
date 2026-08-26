@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -839,7 +840,9 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 							slog.InfoContext(ctx, "Deleted confirmed orphaned metadata file (not found in library for 2 consecutive syncs)",
 								"path", relativeMountPath)
 							metadataDeletedCount++
-							deletedDirs[filepath.Dir(relativeMountPath)] = true
+							// Virtual path: keep it forward-slash so it matches a
+							// VFS node on Windows too (see NotifyRcloneVFS).
+							deletedDirs[path.Dir(filepath.ToSlash(relativeMountPath))] = true
 						}
 					} else {
 						metadataDeletedCount++
