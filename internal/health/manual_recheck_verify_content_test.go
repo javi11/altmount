@@ -49,9 +49,9 @@ func TestPerformBackgroundCheck_ThreadsVerifyContentOverride(t *testing.T) {
 	// path as any other corrupted verdict (see prepareUpdateForResult), so the
 	// first failure lands back on Pending with retry_count incremented rather
 	// than immediately Corrupted. What proves the override reached the checker
-	// is the recorded error mentioning content_invalid.
+	// is the recorded error_details carrying the content_invalid error type.
 	require.Eventually(t, func() bool {
 		fh, err := env.healthRepo.GetFileHealth(context.Background(), path)
-		return err == nil && fh != nil && fh.LastError != nil && strings.Contains(*fh.LastError, "content_invalid")
+		return err == nil && fh != nil && fh.ErrorDetails != nil && strings.Contains(*fh.ErrorDetails, "content_invalid")
 	}, 2*time.Second, 10*time.Millisecond, "override must force content verification despite the Degraded status")
 }

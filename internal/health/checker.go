@@ -329,14 +329,16 @@ func (hc *HealthChecker) judgeContentVerification(ctx context.Context, prep prep
 	cfg := hc.configGetter()
 	result := contentverify.Probe(ctx, hc.contentVerifyFS, prep.filePath, cfg.GetHealthVerifyContentTimeout())
 
-	var errType string
+	var errType, message string
 	switch result.Result {
 	case contentverify.ContentValid, contentverify.ContentProbeError:
 		return nil
 	case contentverify.ContentInvalid:
 		errType = "content_invalid"
+		message = "no recognized media container signature was found in the file's header"
 	case contentverify.ContentSegmentMissing:
 		errType = "content_segment_missing"
+		message = "the article needed to read the file's header is missing from your Usenet provider"
 	default:
 		return nil
 	}
@@ -344,8 +346,8 @@ func (hc *HealthChecker) judgeContentVerification(ctx context.Context, prep prep
 	event := baseResultEvent(prep.filePath, prep.sourceNzbPath)
 	event.Type = EventTypeFileCorrupted
 	event.Status = database.HealthStatusCorrupted
-	event.Error = fmt.Errorf("content verification failed: %s", errType)
-	details := database.HealthErrorDetails{ErrorType: errType, Message: result.Err.Error()}
+	event.Error = fmt.Errorf("content verification failed: %s", message)
+	details := database.HealthErrorDetails{ErrorType: errType, Message: message}
 	event.Details = details.Marshal()
 	return &event
 }
