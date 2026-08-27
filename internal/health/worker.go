@@ -347,7 +347,11 @@ func (hw *HealthWorker) AddToHealthCheck(ctx context.Context, filePath string, s
 }
 
 // PerformBackgroundCheck starts a health check in background and returns immediately
-func (hw *HealthWorker) PerformBackgroundCheck(ctx context.Context, filePath string) error {
+// PerformBackgroundCheck starts a manual recheck of filePath in the
+// background. verifyContentOverride, when non-nil, forces (true) or
+// disables (false) content verification for this check regardless of the
+// file's current status or the configured default.
+func (hw *HealthWorker) PerformBackgroundCheck(ctx context.Context, filePath string, verifyContentOverride *bool) error {
 	if !hw.IsRunning() {
 		return fmt.Errorf("health worker is not running")
 	}
@@ -357,7 +361,7 @@ func (hw *HealthWorker) PerformBackgroundCheck(ctx context.Context, filePath str
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
 
-		checkErr := hw.performDirectCheck(ctx, filePath)
+		checkErr := hw.performDirectCheck(ctx, filePath, verifyContentOverride)
 		if checkErr != nil {
 			if errors.Is(checkErr, context.DeadlineExceeded) {
 				slog.ErrorContext(ctx, "Background health check timed out after 10 minutes", "file_path", filePath)
@@ -695,7 +699,7 @@ func (hw *HealthWorker) prepareRepairNotificationUpdate(ctx context.Context, fh 
 }
 
 // performDirectCheck performs a health check on a single file using the HealthChecker
-func (hw *HealthWorker) performDirectCheck(ctx context.Context, filePath string) error {
+func (hw *HealthWorker) performDirectCheck(ctx context.Context, filePath string, verifyContentOverride *bool) error {
 	// Create cancellable context for this check
 	checkCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -728,7 +732,7 @@ func (hw *HealthWorker) performDirectCheck(ctx context.Context, filePath string)
 		return fmt.Errorf("file health record not found: %s", filePath)
 	}
 
-	opts := CheckOptions{CurrentStatus: fh.Status}
+	opts := CheckOptions{CurrentStatus: fh.Status, VerifyContentOverride: verifyContentOverride}
 	// Delegate to HealthChecker
 	event := hw.healthChecker.CheckFile(checkCtx, filePath, opts)
 

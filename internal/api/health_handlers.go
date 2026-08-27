@@ -964,8 +964,16 @@ func (s *Server) handleDirectHealthCheck(c *fiber.Ctx) error {
 		return RespondInternalError(c, "Failed to set checking status", err.Error())
 	}
 
+	// Optional body: {"verify_content": true|false} forces content
+	// verification on or off for this manual check, overriding the
+	// configured default and the Pending-only automatic gate.
+	var body struct {
+		VerifyContent *bool `json:"verify_content"`
+	}
+	_ = c.BodyParser(&body) // optional body; ignore parse errors on an empty/absent body
+
 	// Start health check in background using worker (still needs file path)
-	err = s.healthWorker.PerformBackgroundCheck(context.Background(), item.FilePath)
+	err = s.healthWorker.PerformBackgroundCheck(context.Background(), item.FilePath, body.VerifyContent)
 	if err != nil {
 		return RespondInternalError(c, "Failed to start background health check", err.Error())
 	}
