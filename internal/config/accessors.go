@@ -126,13 +126,20 @@ func (c *Config) GetMaxRepairRetries() int {
 	return c.Health.Repair.MaxRepairRetries
 }
 
-// Import config accessor methods.
-
-// GetImportDamagePolicyTolerant reports whether small confirmed damage on a
-// standalone video file should import as degraded (true, the default) instead
-// of failing the import (false, "strict").
-func (c *Config) GetImportDamagePolicyTolerant() bool {
-	return c.Import.DamagePolicy != "strict"
+// GetAcceptableMissingSegmentsPercentage returns the missing-segment
+// percentage a health check tolerates before failing a file (and triggering
+// repair) rather than leaving it degraded. Defaults to 2%; set to 0 to
+// disable tolerance entirely (any missing segment fails immediately), or to
+// 100 to disable failing on this basis altogether (always degraded, never
+// repaired for missing segments alone). The value is clamped to [0, 100].
+func (c *Config) GetAcceptableMissingSegmentsPercentage() float64 {
+	if c.Health.AcceptableMissingSegmentsPercentage < 0 {
+		return 0
+	}
+	if c.Health.AcceptableMissingSegmentsPercentage > 100 {
+		return 100
+	}
+	return c.Health.AcceptableMissingSegmentsPercentage
 }
 
 // TotalProviderConnections returns the pool's total connection capacity: the
