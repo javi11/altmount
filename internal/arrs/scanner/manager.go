@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -799,12 +800,7 @@ func (m *Manager) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 	}
 
 	// Step 3: Trigger targeted search for the missing movie
-	searchCmd := &radarr.CommandRequest{
-		Name:     "MoviesSearch",
-		MovieIDs: []int64{targetMovie.ID},
-	}
-
-	response, err := client.SendCommandContext(ctx, searchCmd)
+	response, err := sendManualRadarrSearch(ctx, client, "MoviesSearch", []int64{targetMovie.ID})
 	if err != nil {
 		return fmt.Errorf("failed to trigger Radarr search for movie ID %d: %w", targetMovie.ID, err)
 	}
@@ -1053,12 +1049,7 @@ func (m *Manager) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 	}
 
 	// Trigger targeted episode search for the remaining episodes in this file
-	searchCmd := &sonarr.CommandRequest{
-		Name:       "EpisodeSearch",
-		EpisodeIDs: searchIDs,
-	}
-
-	response, err := client.SendCommandContext(ctx, searchCmd)
+	response, err := sendManualSonarrSearch(ctx, client, "EpisodeSearch", searchIDs)
 	if err != nil {
 		return fmt.Errorf("failed to trigger Sonarr episode search: %w", err)
 	}
@@ -1450,4 +1441,56 @@ func (m *Manager) blocklistReadarrBookFile(ctx context.Context, client *readarr.
 		}
 	}
 	return nil
+}
+
+// sendManualRadarrSearch triggers a Radarr search command with trigger set to
+// "manual". golift.io/starr's radarr.CommandRequest doesn't expose a Trigger
+// field, so the request is built and posted manually. Sonarr/Radarr's
+// DelaySpecification only bypasses the configured usenet delay profile when
+// searchCriteria.UserInvokedSearch is true, which the *Arr sets from
+// trigger=="manual" (see altmount#847); an unspecified trigger evaluates the
+// delay profile against a stale, just-deleted file reference and rejects
+// every candidate release.
+func sendManualRadarrSearch(ctx context.Context, client *radarr.Radarr, name string, movieIDs []int64) (*radarr.CommandResponse, error) {
+	cmd := struct {
+		Name     string  `json:"name"`
+		MovieIDs []int64 `json:"movieIds,omitempty"`
+		Trigger  string  `json:"trigger"`
+	}{Name: name, MovieIDs: movieIDs, Trigger: "manual"}
+
+	var body bytes.Buffer
+	if err := json.NewEncoder(&body).Encode(cmd); err != nil {
+		return nil, fmt.Errorf("failed to encode Radarr command: %w", err)
+	}
+
+	var output radarr.CommandResponse
+	req2 := starr.Request{URI: radarr.APIver + "/command", Body: &body}
+	if err := client.PostInto(ctx, req2, &output); err != nil {
+		return nil, fmt.Errorf("failed to send Radarr command: %w", err)
+	}
+
+	return &output, nil
+}
+
+// sendManualSonarrSearch triggers a Sonarr search command with trigger set to
+// "manual". See sendManualRadarrSearch for why this is necessary.
+func sendManualSonarrSearch(ctx context.Context, client *sonarr.Sonarr, name string, episodeIDs []int64) (*sonarr.CommandResponse, error) {
+	cmd := struct {
+		Name       string  `json:"name"`
+		EpisodeIDs []int64 `json:"episodeIds,omitempty"`
+		Trigger    string  `json:"trigger"`
+	}{Name: name, EpisodeIDs: episodeIDs, Trigger: "manual"}
+
+	var body bytes.Buffer
+	if err := json.NewEncoder(&body).Encode(cmd); err != nil {
+		return nil, fmt.Errorf("failed to encode Sonarr command: %w", err)
+	}
+
+	var output sonarr.CommandResponse
+	req2 := starr.Request{URI: sonarr.APIver + "/command", Body: &body}
+	if err := client.PostInto(ctx, req2, &output); err != nil {
+		return nil, fmt.Errorf("failed to send Sonarr command: %w", err)
+	}
+
+	return &output, nil
 }
