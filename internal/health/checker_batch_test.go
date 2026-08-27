@@ -37,6 +37,7 @@ func newBatchTestEnv(t *testing.T, tempDir string, client pool.NntpClient) *repa
 		pm,
 		env.hw.configGetter,
 		&MockRcloneClient{},
+		nil,
 	)
 	env.hw = NewHealthWorker(
 		env.healthChecker,
@@ -85,7 +86,7 @@ func TestCheckFilesBatch(t *testing.T) {
 			writeHealthyFile(t, env, p)
 		}
 
-		events := env.healthChecker.CheckFilesBatch(context.Background(), paths)
+		events := env.healthChecker.CheckFilesBatch(context.Background(), paths, nil)
 		require.Len(t, events, 3)
 		for i, ev := range events {
 			assert.Equal(t, EventTypeFileHealthy, ev.Type, "file %d", i)
@@ -103,7 +104,7 @@ func TestCheckFilesBatch(t *testing.T) {
 		brokenID := writeHealthyFile(t, env, paths[1])
 		client.SetBehavior(brokenID, fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
 
-		events := env.healthChecker.CheckFilesBatch(context.Background(), paths)
+		events := env.healthChecker.CheckFilesBatch(context.Background(), paths, nil)
 		require.Len(t, events, 2)
 		assert.Equal(t, EventTypeFileHealthy, events[0].Type)
 		assert.Equal(t, EventTypeFileCorrupted, events[1].Type)
@@ -120,7 +121,7 @@ func TestCheckFilesBatch(t *testing.T) {
 		writeHealthyFile(t, env, paths[2])
 		insertFileHealth(t, env.db, paths[1], "", 0, 3)
 
-		events := env.healthChecker.CheckFilesBatch(context.Background(), paths)
+		events := env.healthChecker.CheckFilesBatch(context.Background(), paths, nil)
 		require.Len(t, events, 3)
 		assert.Equal(t, EventTypeFileHealthy, events[0].Type)
 		assert.Equal(t, EventTypeFileRemoved, events[1].Type)
@@ -141,7 +142,7 @@ func TestCheckFilesBatch(t *testing.T) {
 			writeHealthyFile(t, env, p)
 		}
 
-		events := env.healthChecker.CheckFilesBatch(context.Background(), paths)
+		events := env.healthChecker.CheckFilesBatch(context.Background(), paths, nil)
 		require.Len(t, events, 2)
 		for i, ev := range events {
 			assert.Equal(t, EventTypeCheckFailed, ev.Type, "file %d", i)
@@ -153,7 +154,7 @@ func TestCheckFilesBatch(t *testing.T) {
 	t.Run("empty input", func(t *testing.T) {
 		client := fakepool.New()
 		env := newBatchTestEnv(t, t.TempDir(), client)
-		assert.Nil(t, env.healthChecker.CheckFilesBatch(context.Background(), nil))
+		assert.Nil(t, env.healthChecker.CheckFilesBatch(context.Background(), nil, nil))
 	})
 }
 

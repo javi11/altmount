@@ -8,8 +8,10 @@ import (
 	"time"
 
 	"github.com/javi11/altmount/internal/config"
+	"github.com/javi11/altmount/internal/contentverify"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/holes"
+	"github.com/javi11/altmount/internal/importer/parser/fileinfo"
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
@@ -45,6 +47,15 @@ type HealthEvent struct {
 // CheckOptions defines options for health checking
 type CheckOptions struct {
 	ForceFullCheck bool
+	// CurrentStatus is the file's HealthStatus before this check started,
+	// used to gate content verification to first-time (Pending) checks.
+	// Set by the caller (HealthWorker), which already has the row loaded.
+	CurrentStatus database.HealthStatus
+	// VerifyContentOverride, when non-nil, forces (true) or disables
+	// (false) content verification for this check regardless of the
+	// file's current status or the configured default. Used by the
+	// manual recheck API to let a user force a re-probe.
+	VerifyContentOverride *bool
 }
 
 // HealthChecker manages file health checking logic
@@ -54,6 +65,7 @@ type HealthChecker struct {
 	poolManager     pool.Manager
 	configGetter    config.ConfigGetter
 	rcloneClient    rclonecli.RcloneRcClient // Optional rclone client for VFS notifications
+	contentVerifyFS contentverify.Opener     // Optional: real NzbFilesystem for content probing
 }
 
 // NewHealthChecker creates a new health checker
@@ -63,6 +75,7 @@ func NewHealthChecker(
 	poolManager pool.Manager,
 	configGetter config.ConfigGetter,
 	rcloneClient rclonecli.RcloneRcClient,
+	contentVerifyFS contentverify.Opener,
 ) *HealthChecker {
 	return &HealthChecker{
 		healthRepo:      healthRepo,
@@ -70,6 +83,7 @@ func NewHealthChecker(
 		poolManager:     poolManager,
 		configGetter:    configGetter,
 		rcloneClient:    rcloneClient,
+		contentVerifyFS: contentVerifyFS,
 	}
 }
 
@@ -106,6 +120,11 @@ type preparedCheck struct {
 	// it survives past preparation for error reporting without holding onto
 	// the segment slice itself during the network sweep.
 	totalSegments int
+	// currentStatus is the file's HealthStatus before this check started,
+	// used to gate content verification to first-time (Pending) checks
+	// unless verifyContentOverride forces it either way.
+	currentStatus         database.HealthStatus
+	verifyContentOverride *bool
 }
 
 // baseResultEvent builds the shared HealthEvent skeleton. SourceNzbPath is
@@ -126,6 +145,10 @@ func baseResultEvent(filePath, sourceNzbPath string) HealthEvent {
 // early terminal event or the sampled segment IDs for the network sweep.
 func (hc *HealthChecker) prepareCheck(ctx context.Context, filePath string, opts ...CheckOptions) preparedCheck {
 	prep := preparedCheck{filePath: filePath}
+	if len(opts) > 0 {
+		prep.currentStatus = opts[0].CurrentStatus
+		prep.verifyContentOverride = opts[0].VerifyContentOverride
+	}
 
 	// Get file metadata
 	fileMeta, err := hc.metadataService.ReadFileMetadata(filePath)
@@ -263,6 +286,12 @@ func (hc *HealthChecker) judgeValidation(ctx context.Context, prep preparedCheck
 		return event
 	}
 
+	if hc.shouldVerifyContent(prep) {
+		if verified := hc.judgeContentVerification(ctx, prep); verified != nil {
+			return *verified
+		}
+	}
+
 	// All checked segments are available - record will be deleted.
 	// Persisted known holes (from playback padding) survive on purpose: a
 	// clean STAT sample never overrides observed misses.
@@ -270,6 +299,55 @@ func (hc *HealthChecker) judgeValidation(ctx context.Context, prep preparedCheck
 	// Status not needed as the record will be deleted from database
 
 	return event
+}
+
+// shouldVerifyContent decides whether judgeValidation should run a content
+// probe for this file: explicit override wins; otherwise only a first-time
+// (Pending) check is probed, so repeated repair-recheck cycles on an
+// already-flagged file don't re-probe on every pass.
+func (hc *HealthChecker) shouldVerifyContent(prep preparedCheck) bool {
+	if prep.verifyContentOverride != nil {
+		return *prep.verifyContentOverride
+	}
+	if hc.contentVerifyFS == nil || !hc.configGetter().GetHealthVerifyContent() {
+		return false
+	}
+	return prep.currentStatus == database.HealthStatusPending
+}
+
+// judgeContentVerification probes prep.filePath's content signature and, if
+// the result is definitive, returns a Corrupted event. A nil return means
+// either verification is not eligible for this file (not a verifiable media
+// type), passed, or failed only transiently — in all three cases the caller
+// proceeds to the normal healthy branch, since a transient probe error must
+// never mark a file corrupted.
+func (hc *HealthChecker) judgeContentVerification(ctx context.Context, prep preparedCheck) *HealthEvent {
+	if !fileinfo.IsVerifiableMediaFile(prep.filePath) {
+		return nil
+	}
+
+	cfg := hc.configGetter()
+	result := contentverify.Probe(ctx, hc.contentVerifyFS, prep.filePath, cfg.GetHealthVerifyContentTimeout())
+
+	var errType string
+	switch result.Result {
+	case contentverify.ContentValid, contentverify.ContentProbeError:
+		return nil
+	case contentverify.ContentInvalid:
+		errType = "content_invalid"
+	case contentverify.ContentSegmentMissing:
+		errType = "content_segment_missing"
+	default:
+		return nil
+	}
+
+	event := baseResultEvent(prep.filePath, prep.sourceNzbPath)
+	event.Type = EventTypeFileCorrupted
+	event.Status = database.HealthStatusCorrupted
+	event.Error = fmt.Errorf("content verification failed: %s", errType)
+	details := database.HealthErrorDetails{ErrorType: errType, Message: result.Err.Error()}
+	event.Details = details.Marshal()
+	return &event
 }
 
 // CheckFile checks the health of a specific file
@@ -306,7 +384,13 @@ const prepareConcurrency = 8
 // own HealthEvent (index-aligned with filePaths). A sweep infrastructure
 // failure (pool unavailable) yields a CheckFailed event for every file that
 // reached the network stage; per-file early events are unaffected.
-func (hc *HealthChecker) CheckFilesBatch(ctx context.Context, filePaths []string, opts ...CheckOptions) []HealthEvent {
+// CheckFilesBatch checks the health of multiple files in a single sweep.
+// statuses, when non-nil, must be index-aligned with filePaths and carries
+// each file's current HealthStatus so content verification (when enabled)
+// only probes first-time (Pending) checks; a nil or short statuses slice
+// simply leaves those files' currentStatus at its zero value, disabling
+// content verification for them.
+func (hc *HealthChecker) CheckFilesBatch(ctx context.Context, filePaths []string, statuses []database.HealthStatus, opts ...CheckOptions) []HealthEvent {
 	if len(filePaths) == 0 {
 		return nil
 	}
@@ -316,6 +400,9 @@ func (hc *HealthChecker) CheckFilesBatch(ctx context.Context, filePaths []string
 	for i, filePath := range filePaths {
 		pl.Go(func() {
 			preps[i] = hc.prepareCheck(ctx, filePath, opts...)
+			if i < len(statuses) {
+				preps[i].currentStatus = statuses[i]
+			}
 		})
 	}
 	pl.Wait()

@@ -728,7 +728,7 @@ func (hw *HealthWorker) performDirectCheck(ctx context.Context, filePath string)
 		return fmt.Errorf("file health record not found: %s", filePath)
 	}
 
-	opts := CheckOptions{}
+	opts := CheckOptions{CurrentStatus: fh.Status}
 	// Delegate to HealthChecker
 	event := hw.healthChecker.CheckFile(checkCtx, filePath, opts)
 
@@ -877,10 +877,12 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 	discover.Wait()
 
 	paths := make([]string, len(unhealthyFiles))
+	statuses := make([]database.HealthStatus, len(unhealthyFiles))
 	for i, fh := range unhealthyFiles {
 		paths[i] = fh.FilePath
+		statuses[i] = fh.Status
 	}
-	events := hw.healthChecker.CheckFilesBatch(ctx, paths)
+	events := hw.healthChecker.CheckFilesBatch(ctx, paths, statuses)
 
 	// Phase B: per-file result handling (repair side effects, ARR API calls,
 	// VFS notifications), bounded by maxJobs.

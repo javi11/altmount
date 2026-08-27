@@ -168,6 +168,7 @@ func newRepairTestEnv(t *testing.T, tempDir string, arrsErr error, configure ...
 		&mockPoolManager{},
 		configManager.GetConfig,
 		&MockRcloneClient{},
+		nil,
 	)
 
 	hw := NewHealthWorker(
