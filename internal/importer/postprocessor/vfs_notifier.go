@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	stdpath "path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -45,22 +46,29 @@ func (c *Coordinator) notifyVFSWith(ctx context.Context, rcloneClient rclonecli.
 			vfsName = config.MountProvider
 		}
 
-		// Normalize paths for rclone (no leading slash)
+		// Normalize paths for rclone: forward slashes, no leading slash. rclone's
+		// VFS is forward-slash on every platform, so a Windows-separated path
+		// matches no node - and vfs/forget reports success regardless, so the
+		// refresh silently does nothing.
 		normalizeForRclone := func(p string) string {
-			p = strings.TrimPrefix(p, "/")
+			p = strings.TrimPrefix(filepath.ToSlash(p), "/")
 			if p == "" {
 				return "."
 			}
 			return p
 		}
 
-		dirsToRefresh := []string{normalizeForRclone(path)}
-		parentDir := filepath.Dir(path)
+		// Walk the ancestry on the virtual (forward-slash) form, so the "/" guards
+		// below actually match at the root. filepath.Dir would yield "\" there,
+		// slipping a useless bare-root entry into every batch on Windows.
+		virtualPath := filepath.ToSlash(path)
+		dirsToRefresh := []string{normalizeForRclone(virtualPath)}
+		parentDir := stdpath.Dir(virtualPath)
 		if parentDir != "." && parentDir != "/" {
 			dirsToRefresh = append(dirsToRefresh, normalizeForRclone(parentDir))
 
 			// Also refresh grandparent if parent might be new
-			grandParent := filepath.Dir(parentDir)
+			grandParent := stdpath.Dir(parentDir)
 			if grandParent != "." && grandParent != "/" {
 				dirsToRefresh = append(dirsToRefresh, normalizeForRclone(grandParent))
 			}
