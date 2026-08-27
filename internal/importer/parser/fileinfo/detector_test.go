@@ -31,3 +31,31 @@ func TestIsRarFile(t *testing.T) {
 		})
 	}
 }
+
+func TestIsVerifiableMediaFile(t *testing.T) {
+	tests := []struct {
+		name     string
+		filename string
+		want     bool
+	}{
+		{"movie", "Movie.2024.1080p.mkv", true},
+		{"episode", "episode.s01e01.mp4", true},
+		{"flac", "soundtrack.flac", true},
+		{"mp3", "song.mp3", true},
+		{"m4a audiobook", "audiobook.m4a", true},
+		{"par2", "archive.par2", false},
+		{"par2 volume", "movie.par2.vol00+01.par2", false},
+		{"sample mixed case", "Movie.Sample.mkv", false},
+		{"sample lowercase", "sample.avi", false},
+		{"subtitle", "subtitle.srt", false},
+		{"nfo", "release.nfo", false},
+		{"empty", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsVerifiableMediaFile(tt.filename); got != tt.want {
+				t.Errorf("IsVerifiableMediaFile(%q) = %t; want %t", tt.filename, got, tt.want)
+			}
+		})
+	}
+}

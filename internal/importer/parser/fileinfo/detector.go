@@ -95,6 +95,31 @@ func IsImportantFileType(filename string) bool {
 		IsMultipartMkv(filename)
 }
 
+// audioExtensions lists file extensions eligible for audio content
+// verification, in addition to the existing videoExtensions.
+var audioExtensions = map[string]bool{
+	".mp3": true, ".flac": true, ".ogg": true, ".aac": true,
+	".m4a": true, ".wma": true, ".wav": true, ".aiff": true,
+}
+
+// samplePattern matches scene-release sample/proof clips, which are
+// legitimately short and would false-positive as truncated/invalid content.
+var samplePattern = regexp.MustCompile(`(?i)sample`)
+
+// IsVerifiableMediaFile reports whether filename is eligible for content
+// signature verification: a video or audio file that is not a sample clip.
+// PAR2, subtitle, .nfo, and other non-media sidecars are never eligible.
+func IsVerifiableMediaFile(filename string) bool {
+	if filename == "" {
+		return false
+	}
+	if samplePattern.MatchString(filename) {
+		return false
+	}
+	ext := strings.ToLower(filepath.Ext(filename))
+	return videoExtensions[ext] || audioExtensions[ext]
+}
+
 // HasValidExtensionLength checks if the extension length is between 2 and 4 characters
 // (considered a valid/common extension length)
 func HasValidExtensionLength(filename string) bool {
