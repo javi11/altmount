@@ -46,33 +46,7 @@ func (c *Coordinator) notifyVFSWith(ctx context.Context, rcloneClient rclonecli.
 			vfsName = config.MountProvider
 		}
 
-		// Normalize paths for rclone: forward slashes, no leading slash. rclone's
-		// VFS is forward-slash on every platform, so a Windows-separated path
-		// matches no node - and vfs/forget reports success regardless, so the
-		// refresh silently does nothing.
-		normalizeForRclone := func(p string) string {
-			p = strings.TrimPrefix(filepath.ToSlash(p), "/")
-			if p == "" {
-				return "."
-			}
-			return p
-		}
-
-		// Walk the ancestry on the virtual (forward-slash) form, so the "/" guards
-		// below actually match at the root. filepath.Dir would yield "\" there,
-		// slipping a useless bare-root entry into every batch on Windows.
-		virtualPath := filepath.ToSlash(path)
-		dirsToRefresh := []string{normalizeForRclone(virtualPath)}
-		parentDir := stdpath.Dir(virtualPath)
-		if parentDir != "." && parentDir != "/" {
-			dirsToRefresh = append(dirsToRefresh, normalizeForRclone(parentDir))
-
-			// Also refresh grandparent if parent might be new
-			grandParent := stdpath.Dir(parentDir)
-			if grandParent != "." && grandParent != "/" {
-				dirsToRefresh = append(dirsToRefresh, normalizeForRclone(grandParent))
-			}
-		}
+		dirsToRefresh := refreshDirsFor(path)
 
 		slog.DebugContext(refreshCtx, "Notifying rclone VFS refresh", "dirs", dirsToRefresh, "vfs", vfsName)
 
@@ -131,4 +105,42 @@ func (c *Coordinator) RefreshMountPathIfNeeded(ctx context.Context, resultingPat
 			}
 		}
 	}
+}
+
+// refreshDirsFor returns the directory and its nearest ancestors to hand to
+// rclone for a newly imported path: the containing directory, its parent, and
+// its grandparent, since those may be new too.
+//
+// The ancestry is walked on the forward-slash form. rclone's VFS is
+// forward-slash on every platform, and walking with filepath.Dir on Windows
+// both yields backslash-separated entries (which match no node, while
+// vfs/forget reports success regardless) and defeats the root guards below,
+// since the Windows root is "\" rather than "/" - appending a useless bare-root
+// entry to every batch.
+//
+// On POSIX this is exactly the previous behaviour: filepath.ToSlash is a no-op
+// and path.Dir and filepath.Dir agree.
+func refreshDirsFor(p string) []string {
+	// rclone wants no leading slash; "." is its spelling for the mount root.
+	normalize := func(s string) string {
+		s = strings.TrimPrefix(filepath.ToSlash(s), "/")
+		if s == "" {
+			return "."
+		}
+		return s
+	}
+
+	virtual := filepath.ToSlash(p)
+	dirs := []string{normalize(virtual)}
+
+	parent := stdpath.Dir(virtual)
+	if parent != "." && parent != "/" {
+		dirs = append(dirs, normalize(parent))
+
+		grandParent := stdpath.Dir(parent)
+		if grandParent != "." && grandParent != "/" {
+			dirs = append(dirs, normalize(grandParent))
+		}
+	}
+	return dirs
 }
