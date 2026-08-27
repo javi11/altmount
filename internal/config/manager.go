@@ -463,13 +463,6 @@ type ImportConfig struct {
 	FilterSampleFiles        *bool          `yaml:"filter_sample_files" mapstructure:"filter_sample_files" json:"filter_sample_files,omitempty"`
 	FailedItemRetentionHours *int           `yaml:"failed_item_retention_hours" mapstructure:"failed_item_retention_hours" json:"failed_item_retention_hours,omitempty"`
 	HistoryRetentionDays     *int           `yaml:"history_retention_days" mapstructure:"history_retention_days" json:"history_retention_days,omitempty"`
-	// DamagePolicy governs standalone video files whose fast-fail sweep finds
-	// SMALL confirmed damage (within the playback padding caps, see
-	// internal/holes): "tolerant" (default) imports them as degraded so
-	// streaming zero-fills the gaps; "strict" fails the import so an ARR can
-	// grab a different release. Damage beyond the caps, archive-set members
-	// and non-video files fail either way.
-	DamagePolicy string `yaml:"damage_policy" mapstructure:"damage_policy" json:"damage_policy,omitempty"`
 	// VerifyContent, when true, probes each eligible video/audio file's
 	// first bytes through the serving stack after import and fails the
 	// import if no recognized media container signature is found.
@@ -1827,7 +1820,7 @@ func DefaultConfig(configDir ...string) *Config {
 			SegmentSamplePercentage:             5,                      // Default: 5% segment sampling
 			LibrarySyncIntervalMinutes:          360,                    // Default: sync every 6 hours
 			ResolveRepairOnImport:               &resolveRepairOnImport, // Enabled by default
-			AcceptableMissingSegmentsPercentage: 0,                      // Default: no missing segments allowed
+			AcceptableMissingSegmentsPercentage: 2,                      // Default: tolerate up to 2% missing segments
 			Repair: RepairConfig{
 				Enabled:            &repairEnabled,
 				IntervalMinutes:    60,

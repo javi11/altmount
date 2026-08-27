@@ -331,6 +331,17 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Start graceful shutdown sequence
 	logger.InfoContext(ctx, "Starting graceful shutdown sequence")
 
+	// Stop the importer first so it stops claiming and processing new queue
+	// items immediately. Without this, the importer keeps running (it was
+	// only ever closed via a deferred Close() after runServe returns) for
+	// the full duration of the remaining shutdown steps below, including
+	// the HTTP server's graceful-shutdown timeout.
+	if err := importerService.Stop(ctx); err != nil {
+		logger.ErrorContext(ctx, "Failed to stop importer service", "error", err)
+	} else {
+		logger.InfoContext(ctx, "Importer service stopped")
+	}
+
 	// Shutdown API server and its managed resources (like FUSE)
 	apiServer.Shutdown(ctx)
 
