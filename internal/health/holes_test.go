@@ -108,7 +108,11 @@ func TestHealthCheckCleanFileIsHealthy(t *testing.T) {
 
 func TestHealthCheckClassifiesSmallHoleAsDegraded(t *testing.T) {
 	env := newHoleTestEnv(t, "movie.mp4", 4*1024*1024, 1024)
-	// Two isolated missing segments — well within the pad caps.
+	// Raise the acceptable-missing threshold so these two isolated misses
+	// (well within the pad caps) stay degraded instead of failing outright —
+	// see TestHealthCheckAcceptableMissingThresholdTriggersRepair for the
+	// zero-tolerance default.
+	env.cfg.Health.AcceptableMissingSegmentsPercentage = 1
 	env.markSegmentMissing(10)
 	env.markSegmentMissing(30)
 
@@ -131,6 +135,30 @@ func TestHealthCheckClassifiesSmallHoleAsDegraded(t *testing.T) {
 	meta, err := env.ms.ReadFileMetadata(env.filePath)
 	require.NoError(t, err)
 	assert.NotEmpty(t, meta.KnownHoles, "degraded holes should be persisted")
+}
+
+// TestHealthCheckAcceptableMissingThresholdTriggersRepair covers issue #813:
+// with the threshold set to 0 (zero tolerance), even a single confirmed
+// missing segment must fail the file (not merely degrade it) so the repair
+// path (worker.go) picks it up instead of leaving it degraded forever.
+func TestHealthCheckAcceptableMissingThresholdTriggersRepair(t *testing.T) {
+	env := newHoleTestEnv(t, "movie.mp4", 4*1024*1024, 1024)
+	env.cfg.Health.AcceptableMissingSegmentsPercentage = 0
+	// A single isolated missing segment — within the pad caps, so only the
+	// acceptable-missing threshold (not the run/total caps) forces the fail.
+	env.markSegmentMissing(10)
+
+	event := env.checker.CheckFile(context.Background(), env.filePath)
+	require.Equal(t, EventTypeFileCorrupted, event.Type)
+	require.NotNil(t, event.Classification)
+	assert.Equal(t, holes.VerdictFailed, event.Classification.Verdict)
+
+	// Raising the threshold above the actual missing fraction keeps it degraded.
+	env.markSegmentMissing(20)
+	env.cfg.Health.AcceptableMissingSegmentsPercentage = 100
+	event = env.checker.CheckFile(context.Background(), env.filePath)
+	require.NotNil(t, event.Classification)
+	assert.Equal(t, holes.VerdictDegraded, event.Classification.Verdict)
 }
 
 func TestHealthCheckClassifiesLongRunAsFailed(t *testing.T) {
@@ -174,6 +202,9 @@ func TestHealthCheckSkipsClassificationForEncrypted(t *testing.T) {
 
 func TestHealthCheckMergesPersistedHoles(t *testing.T) {
 	env := newHoleTestEnv(t, "movie.mp4", 4*1024*1024, 1024)
+	// Raise the acceptable-missing threshold: this test is about merging
+	// persisted holes with newly observed ones, not the threshold itself.
+	env.cfg.Health.AcceptableMissingSegmentsPercentage = 1
 	// Seed a persisted hole (as if playback padded it earlier).
 	require.NoError(t, env.ms.AddKnownHoles(env.filePath, []holes.Run{{Start: 5, Count: 1}}))
 	// A fresh check finds a different missing segment.

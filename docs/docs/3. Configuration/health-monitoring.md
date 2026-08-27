@@ -59,7 +59,18 @@ Expand **Performance & Deep Validation** for:
 | Verify Every Segment | Off | Check 100% of segments instead of sampling |
 | Ghost File Detection | Off | Verify actual content (uses bandwidth) |
 | Sampling Percentage | 5% | Segments to check when sampling (1-100%) |
-| Acceptable Missing | 0% | Missing segment tolerance (0-10%) |
+| Acceptable Missing | 2% | Missing segment tolerance (0-10%) |
+
+#### Acceptable Missing Threshold
+
+This is the single control for how much confirmed segment loss AltMount tolerates on a standalone video file before treating it as corrupted, both when a release is first imported and on every later health check:
+
+- **Missing fraction at or below the threshold** — the file imports/stays **degraded**: it plays with the small gap zero-filled, and no repair is triggered.
+- **Missing fraction above the threshold** — the file is marked **unhealthy**, which triggers a repair (re-download/blocklist-and-search via Sonarr/Radarr, if the Repair Engine is enabled).
+
+A file whose damage exceeds the hard-coded playback caps (a run longer than 4 consecutive missing segments, or over 64 missing segments total) always fails, regardless of this setting — the threshold only governs behavior *inside* those caps.
+
+**To make AltMount stricter** — repair on any missing segment, no degraded grace period — set **Acceptable Missing** to **0%**. This also applies at import time: a freshly grabbed release with even one confirmed missing segment is rejected immediately, so your ARR can search for an alternate release, instead of importing degraded.
 
 **Scheduling & Concurrency:**
 
@@ -280,7 +291,7 @@ health:
   resolve_repair_on_import: false
   verify_data: false
   check_all_segments: false
-  acceptable_missing_segments_percentage: 0.0
+  acceptable_missing_segments_percentage: 2.0 # 0 = strict (repair on any missing segment); 100 = disabled (never fail on this basis)
   read_timeout_seconds: 10
 
   repair:
