@@ -184,6 +184,43 @@ func (c *Config) GetReadTimeoutSeconds() int {
 	return c.Import.ReadTimeoutSeconds
 }
 
+// GetImportVerifyContent returns whether imported media files should be
+// probed for a valid container signature before the import is reported
+// successful.
+func (c *Config) GetImportVerifyContent() bool {
+	if c.Import.VerifyContent == nil {
+		return false
+	}
+	return *c.Import.VerifyContent
+}
+
+// GetImportVerifyContentTimeout returns the per-file content probe timeout
+// for import verification, defaulting to 15 seconds.
+func (c *Config) GetImportVerifyContentTimeout() time.Duration {
+	if c.Import.VerifyContentTimeoutSeconds == nil || *c.Import.VerifyContentTimeoutSeconds <= 0 {
+		return 15 * time.Second
+	}
+	return time.Duration(*c.Import.VerifyContentTimeoutSeconds) * time.Second
+}
+
+// GetHealthVerifyContent returns whether health checks should probe media
+// files for a valid container signature.
+func (c *Config) GetHealthVerifyContent() bool {
+	if c.Health.VerifyContent == nil {
+		return false
+	}
+	return *c.Health.VerifyContent
+}
+
+// GetHealthVerifyContentTimeout returns the per-file content probe timeout
+// for health check verification, defaulting to 15 seconds.
+func (c *Config) GetHealthVerifyContentTimeout() time.Duration {
+	if c.Health.VerifyContentTimeoutSeconds == nil || *c.Health.VerifyContentTimeoutSeconds <= 0 {
+		return 15 * time.Second
+	}
+	return time.Duration(*c.Health.VerifyContentTimeoutSeconds) * time.Second
+}
+
 // GetIsoAnalyzeTimeout returns the per-ISO analyse deadline with a 120s
 // default fallback. This bounds the entire iso.AnalyzeISO walk so a
 // degraded NNTP provider cannot stall the importer indefinitely.

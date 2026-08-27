@@ -470,6 +470,11 @@ type ImportConfig struct {
 	// grab a different release. Damage beyond the caps, archive-set members
 	// and non-video files fail either way.
 	DamagePolicy string `yaml:"damage_policy" mapstructure:"damage_policy" json:"damage_policy,omitempty"`
+	// VerifyContent, when true, probes each eligible video/audio file's
+	// first bytes through the serving stack after import and fails the
+	// import if no recognized media container signature is found.
+	VerifyContent               *bool `yaml:"verify_content" mapstructure:"verify_content" json:"verify_content,omitempty"`
+	VerifyContentTimeoutSeconds *int  `yaml:"verify_content_timeout_seconds" mapstructure:"verify_content_timeout_seconds" json:"verify_content_timeout_seconds,omitempty"`
 }
 
 // LogConfig represents logging configuration with rotation support
@@ -521,6 +526,12 @@ type HealthConfig struct {
 	// "delete" removes the file's metadata/NZB/health record and cleans up now-empty
 	// parent directories instead. Degraded files are never affected either way.
 	CorruptionAction string `yaml:"corruption_action" mapstructure:"corruption_action" json:"corruption_action,omitempty"`
+	// VerifyContent, when true, probes each eligible video/audio file's
+	// first bytes through the serving stack during a health check and
+	// marks the file corrupted if no recognized media container signature
+	// is found. Distinct from the unrelated, unused VerifyData field above.
+	VerifyContent               *bool `yaml:"verify_content" mapstructure:"verify_content" json:"verify_content,omitempty"`
+	VerifyContentTimeoutSeconds *int  `yaml:"verify_content_timeout_seconds" mapstructure:"verify_content_timeout_seconds" json:"verify_content_timeout_seconds,omitempty"`
 }
 
 // Path validation functions have been moved to internal/utils/path.go
