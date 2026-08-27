@@ -512,6 +512,25 @@ export function HealthConfigSection({
 										</div>
 									</label>
 								)}
+
+								<label className="flex cursor-pointer items-start gap-3 rounded-xl border border-base-300/60 bg-base-100/40 p-4">
+									<input
+										type="checkbox"
+										className="checkbox checkbox-sm checkbox-primary mt-0.5 shrink-0"
+										checked={formData.verify_content ?? false}
+										disabled={isReadOnly}
+										onChange={(e) => handleInputChange("verify_content", e.target.checked)}
+									/>
+									<div className="min-w-0 flex-1">
+										<span className="block break-words font-bold text-xs">
+											Verify Media Content
+										</span>
+										<span className="mt-0.5 block break-words text-[11px] text-base-content/50 leading-snug">
+											On a file's first health check, read its header through the serving stack and
+											mark it corrupted if no recognized media container signature is found.
+										</span>
+									</div>
+								</label>
 							</div>
 
 							{/* Sample Percentage Slider */}

@@ -243,6 +243,24 @@ export function ImportConfigSection({
 									</span>
 								</div>
 							</label>
+
+							<label className="flex min-w-0 cursor-pointer items-start gap-3 rounded-xl border border-base-300/60 bg-base-100/40 p-4">
+								<input
+									type="checkbox"
+									className="toggle toggle-primary toggle-sm mt-0.5 shrink-0"
+									checked={formData.verify_content ?? false}
+									disabled={isReadOnly}
+									onChange={(e) => handleInputChange("verify_content", e.target.checked)}
+								/>
+								<div className="min-w-0">
+									<span className="block break-words font-bold text-xs">Verify Media Content</span>
+									<span className="mt-0.5 block break-words text-[11px] text-base-content/50 leading-snug">
+										After import, read each video/audio file's header through the serving stack and
+										fail the import if no recognized media container signature is found. Catches
+										releases assembled in the wrong order.
+									</span>
+								</div>
+							</label>
 						</div>
 					</div>
 				</div>
