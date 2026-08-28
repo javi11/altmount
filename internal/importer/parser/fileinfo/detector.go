@@ -96,14 +96,34 @@ func IsImportantFileType(filename string) bool {
 }
 
 // audioExtensions lists file extensions eligible for audio content
-// verification, in addition to the existing videoExtensions.
+// verification. Every entry was verified empirically to produce a
+// mimetype.Detect-recognized signature within the first 512 bytes.
 var audioExtensions = map[string]bool{
 	".mp3": true, ".flac": true, ".ogg": true, ".aac": true,
 	".m4a": true, ".wma": true, ".wav": true, ".aiff": true,
 }
 
+// verifiableVideoExtensions lists video-container extensions eligible for
+// content signature verification. This is deliberately narrower than
+// videoExtensions (which also covers Kodi-style "might be playable"
+// extensions such as .iso, .strm, .ifo, .m3u, and raw/ambiguous streams
+// like .bin/.dat): those formats either carry no magic number in the first
+// 512 bytes (e.g. ISO 9660's CD001 sits at offset 32769) or are plain
+// text/XML, so IsRecognizedMediaContainer can never confirm them and a
+// false "not recognized" verdict there would destroy a healthy file. Every
+// entry here was verified empirically against IsRecognizedMediaContainer.
+var verifiableVideoExtensions = map[string]bool{
+	".mkv": true, ".mk3d": true, ".webm": true, ".mp4": true, ".m4v": true,
+	".mov": true, ".qt": true, ".avi": true, ".flv": true, ".ogv": true,
+	".ogm": true, ".wmv": true, ".asf": true, ".3gp": true, ".ts": true,
+	".m2ts": true, ".mpg": true, ".mpeg": true, ".vob": true,
+}
+
 // samplePattern matches scene-release sample/proof clips, which are
 // legitimately short and would false-positive as truncated/invalid content.
+// Matched only against the base filename — a directory named e.g.
+// "Samples" elsewhere in the path must not disqualify an otherwise valid
+// file (see /data/Samples/Movie.mkv, which is a real release layout).
 var samplePattern = regexp.MustCompile(`(?i)sample`)
 
 // IsVerifiableMediaFile reports whether filename is eligible for content
@@ -113,11 +133,11 @@ func IsVerifiableMediaFile(filename string) bool {
 	if filename == "" {
 		return false
 	}
-	if samplePattern.MatchString(filename) {
+	if samplePattern.MatchString(filepath.Base(filename)) {
 		return false
 	}
 	ext := strings.ToLower(filepath.Ext(filename))
-	return videoExtensions[ext] || audioExtensions[ext]
+	return verifiableVideoExtensions[ext] || audioExtensions[ext]
 }
 
 // HasValidExtensionLength checks if the extension length is between 2 and 4 characters

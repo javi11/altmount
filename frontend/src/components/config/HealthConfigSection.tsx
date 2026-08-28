@@ -531,6 +531,31 @@ export function HealthConfigSection({
 										</span>
 									</div>
 								</label>
+
+								{formData.verify_content && (
+									<fieldset className="fieldset">
+										<legend className="fieldset-legend font-semibold">
+											Content Probe Timeout (Seconds)
+										</legend>
+										<input
+											type="number"
+											className="input input-bordered w-full bg-base-100 font-mono text-sm"
+											value={formData.verify_content_timeout_seconds ?? 15}
+											disabled={isReadOnly}
+											onChange={(e) =>
+												handleInputChange(
+													"verify_content_timeout_seconds",
+													Number.parseInt(e.target.value, 10) || 15,
+												)
+											}
+											min="1"
+										/>
+										<p className="label break-words text-[10px] text-base-content/50">
+											Per-file deadline for the header probe. A timeout is treated as a transient
+											error, never as a corruption verdict.
+										</p>
+									</fieldset>
+								)}
 							</div>
 
 							{/* Sample Percentage Slider */}

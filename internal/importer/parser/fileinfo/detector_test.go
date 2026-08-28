@@ -50,6 +50,20 @@ func TestIsVerifiableMediaFile(t *testing.T) {
 		{"subtitle", "subtitle.srt", false},
 		{"nfo", "release.nfo", false},
 		{"empty", "", false},
+
+		// BUG 2 regression: extensions whose valid files carry no magic
+		// number within the first 512 bytes must no longer be eligible.
+		{"iso", "movie.iso", false},
+		{"strm", "movie.strm", false},
+		{"ifo", "VIDEO_TS.ifo", false},
+		{"img", "movie.img", false},
+		{"bin", "movie.bin", false},
+		{"m3u playlist", "playlist.m3u", false},
+
+		// BUG 3 regression: "sample" in a directory component must not
+		// disqualify an otherwise eligible file; only the base name counts.
+		{"sample in directory path", "/data/samples/Movie.2024.mkv", true},
+		{"sample in filename under normal dir", "/data/movies/Movie.Sample.mkv", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

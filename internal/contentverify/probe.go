@@ -3,6 +3,7 @@ package contentverify
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"time"
@@ -30,6 +31,23 @@ const (
 	ContentProbeError
 )
 
+// String returns the constant name, so log lines and test failures print
+// readable values instead of bare integers.
+func (r Result) String() string {
+	switch r {
+	case ContentValid:
+		return "ContentValid"
+	case ContentInvalid:
+		return "ContentInvalid"
+	case ContentSegmentMissing:
+		return "ContentSegmentMissing"
+	case ContentProbeError:
+		return "ContentProbeError"
+	default:
+		return fmt.Sprintf("Result(%d)", int(r))
+	}
+}
+
 // ProbeResult is the outcome of Probe.
 type ProbeResult struct {
 	Result Result
@@ -55,6 +73,15 @@ func Probe(ctx context.Context, opener Opener, path string, timeout time.Duratio
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	ctx = context.WithValue(ctx, utils.MaxPrefetchKey, 1)
+	// A probe is not a user stream: without this, metadata_remote_file.go
+	// falls through to registering a phantom "FUSE" active stream, polluting
+	// the active-streams UI and stream stats for every content-verification
+	// probe. FUSE backends set this same key for the analogous reason
+	// (see cgofuse/fs.go and hanwen/file.go).
+	ctx = context.WithValue(ctx, utils.SuppressStreamTrackingKey, true)
+	// Reading through NzbFilesystem takes the priority/streaming connection
+	// lane (BodyPriority), not the import lane — an accepted trade-off for
+	// probes, not something to change here.
 
 	f, err := opener.OpenFile(ctx, path, os.O_RDONLY, 0)
 	if err != nil {

@@ -205,7 +205,7 @@ func (c *Config) GetImportVerifyContent() bool {
 // for import verification, defaulting to 15 seconds.
 func (c *Config) GetImportVerifyContentTimeout() time.Duration {
 	if c.Import.VerifyContentTimeoutSeconds == nil || *c.Import.VerifyContentTimeoutSeconds <= 0 {
-		return 15 * time.Second
+		return defaultVerifyContentTimeoutSeconds * time.Second
 	}
 	return time.Duration(*c.Import.VerifyContentTimeoutSeconds) * time.Second
 }
@@ -223,7 +223,7 @@ func (c *Config) GetHealthVerifyContent() bool {
 // for health check verification, defaulting to 15 seconds.
 func (c *Config) GetHealthVerifyContentTimeout() time.Duration {
 	if c.Health.VerifyContentTimeoutSeconds == nil || *c.Health.VerifyContentTimeoutSeconds <= 0 {
-		return 15 * time.Second
+		return defaultVerifyContentTimeoutSeconds * time.Second
 	}
 	return time.Duration(*c.Health.VerifyContentTimeoutSeconds) * time.Second
 }

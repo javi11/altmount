@@ -62,24 +62,49 @@ func IsRecognizedMediaContainer(buf []byte) bool {
 	return HasMpegTSMagic(buf) || HasMpegPSMagic(buf)
 }
 
-// mpegTSSyncByte is the MPEG-TS packet sync byte, recurring every 188 bytes.
+// mpegTSSyncByte is the MPEG-TS packet sync byte, recurring every
+// mpegTSPacketSize (plain TS) or mpegTSBDAVPacketSize (Blu-ray BDAV) bytes.
 const mpegTSSyncByte = 0x47
 
 // mpegTSPacketSize is the fixed MPEG-TS packet length in bytes.
 const mpegTSPacketSize = 188
 
-// HasMpegTSMagic checks for the sync byte 0x47 recurring at the 188-byte
-// MPEG-TS packet stride. A single 0x47 byte is common in non-TS data, so at
-// least two packets (376 bytes) must be available and agree before this
-// returns true.
+// mpegTSBDAVPacketSize is the Blu-ray BDAV (.m2ts) packet length: a 4-byte
+// TP_extra_header (arrival timestamp, arbitrary bytes) prepended to a
+// standard 188-byte TS packet.
+const mpegTSBDAVPacketSize = 192
+
+// HasMpegTSMagic checks for the sync byte 0x47 recurring at the MPEG-TS
+// packet stride, trying both the plain 188-byte stride and the Blu-ray BDAV
+// 192-byte stride (where the sync byte is offset by a 4-byte timestamp
+// header). It scans for the first 0x47 within the first BDAV packet, then
+// requires that offset to hold as a consistent stride for at least two
+// packets — a single stray 0x47 byte is common in non-TS data and must not
+// false-positive.
 func HasMpegTSMagic(data []byte) bool {
 	if len(data) < 2*mpegTSPacketSize {
 		return false
 	}
-	if data[0] != mpegTSSyncByte {
+	for start := 0; start < mpegTSBDAVPacketSize && start < len(data); start++ {
+		if data[start] != mpegTSSyncByte {
+			continue
+		}
+		if hasConsistentTSStride(data, start, mpegTSPacketSize) ||
+			hasConsistentTSStride(data, start, mpegTSBDAVPacketSize) {
+			return true
+		}
+	}
+	return false
+}
+
+// hasConsistentTSStride reports whether data[start] and every subsequent
+// byte at the given stride are the TS sync byte, requiring at least two
+// packets' worth of data to be available and agree.
+func hasConsistentTSStride(data []byte, start, stride int) bool {
+	if start+stride >= len(data) {
 		return false
 	}
-	for offset := mpegTSPacketSize; offset < len(data); offset += mpegTSPacketSize {
+	for offset := start; offset < len(data); offset += stride {
 		if data[offset] != mpegTSSyncByte {
 			return false
 		}

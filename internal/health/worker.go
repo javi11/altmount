@@ -346,12 +346,16 @@ func (hw *HealthWorker) AddToHealthCheck(ctx context.Context, filePath string, s
 	return nil
 }
 
-// PerformBackgroundCheck starts a health check in background and returns immediately
 // PerformBackgroundCheck starts a manual recheck of filePath in the
-// background. verifyContentOverride, when non-nil, forces (true) or
-// disables (false) content verification for this check regardless of the
-// file's current status or the configured default.
-func (hw *HealthWorker) PerformBackgroundCheck(ctx context.Context, filePath string, verifyContentOverride *bool) error {
+// background. currentStatus must be the file's HealthStatus as it was BEFORE
+// the caller transitioned the row to Checking (e.g. via SetFileCheckingByID);
+// it is threaded straight into CheckOptions.CurrentStatus so the automatic
+// Pending-only content-verification gate (see shouldVerifyContent) still
+// works on this path — re-reading the row inside performDirectCheck would
+// always observe Checking and make the gate unreachable. verifyContentOverride,
+// when non-nil, forces (true) or disables (false) content verification for
+// this check regardless of currentStatus or the configured default.
+func (hw *HealthWorker) PerformBackgroundCheck(ctx context.Context, filePath string, currentStatus database.HealthStatus, verifyContentOverride *bool) error {
 	if !hw.IsRunning() {
 		return fmt.Errorf("health worker is not running")
 	}
@@ -361,7 +365,7 @@ func (hw *HealthWorker) PerformBackgroundCheck(ctx context.Context, filePath str
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
 
-		checkErr := hw.performDirectCheck(ctx, filePath, verifyContentOverride)
+		checkErr := hw.performDirectCheck(ctx, filePath, currentStatus, verifyContentOverride)
 		if checkErr != nil {
 			if errors.Is(checkErr, context.DeadlineExceeded) {
 				slog.ErrorContext(ctx, "Background health check timed out after 10 minutes", "file_path", filePath)
@@ -698,8 +702,11 @@ func (hw *HealthWorker) prepareRepairNotificationUpdate(ctx context.Context, fh 
 	return update, sideEffect
 }
 
-// performDirectCheck performs a health check on a single file using the HealthChecker
-func (hw *HealthWorker) performDirectCheck(ctx context.Context, filePath string, verifyContentOverride *bool) error {
+// performDirectCheck performs a health check on a single file using the HealthChecker.
+// currentStatus is the file's HealthStatus as observed by the caller before the row was
+// transitioned to Checking; see PerformBackgroundCheck for why this cannot be re-derived
+// by re-reading the row here.
+func (hw *HealthWorker) performDirectCheck(ctx context.Context, filePath string, currentStatus database.HealthStatus, verifyContentOverride *bool) error {
 	// Create cancellable context for this check
 	checkCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -732,7 +739,7 @@ func (hw *HealthWorker) performDirectCheck(ctx context.Context, filePath string,
 		return fmt.Errorf("file health record not found: %s", filePath)
 	}
 
-	opts := CheckOptions{CurrentStatus: fh.Status, VerifyContentOverride: verifyContentOverride}
+	opts := CheckOptions{CurrentStatus: currentStatus, VerifyContentOverride: verifyContentOverride}
 	// Delegate to HealthChecker
 	event := hw.healthChecker.CheckFile(checkCtx, filePath, opts)
 

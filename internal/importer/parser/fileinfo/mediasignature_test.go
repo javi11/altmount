@@ -49,6 +49,17 @@ func mpegTSFixture() []byte {
 	return buf
 }
 
+// bdavFixture builds a buffer with the 0x47 sync byte recurring at the
+// 192-byte Blu-ray BDAV packet stride, offset by the 4-byte TP_extra_header
+// that precedes every 188-byte TS packet in a .m2ts file.
+func bdavFixture() []byte {
+	buf := make([]byte, 768)
+	for i := 4; i < len(buf); i += 192 {
+		buf[i] = 0x47
+	}
+	return buf
+}
+
 func TestHasMpegTSMagic(t *testing.T) {
 	buf := mpegTSFixture()
 	if !HasMpegTSMagic(buf) {
@@ -56,6 +67,15 @@ func TestHasMpegTSMagic(t *testing.T) {
 	}
 	if HasMpegTSMagic([]byte{0x47, 0, 0}) {
 		t.Error("a single sync byte with no stride must not be treated as MPEG-TS")
+	}
+	if !HasMpegTSMagic(bdavFixture()) {
+		t.Error("expected Blu-ray BDAV 192-byte packet stride (.m2ts) to be detected")
+	}
+}
+
+func TestIsRecognizedMediaContainer_BDAV(t *testing.T) {
+	if !IsRecognizedMediaContainer(bdavFixture()) {
+		t.Error("expected Blu-ray BDAV .m2ts buffer to be recognized as a media container")
 	}
 }
 

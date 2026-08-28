@@ -3,14 +3,20 @@ package health
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/testsupport/fakepool"
 	"github.com/javi11/altmount/internal/usenet"
 	"github.com/spf13/afero"
+	"github.com/stretchr/testify/require"
 )
 
 // fakeContentFile implements afero.File with only Read/Close exercised.
@@ -130,4 +136,73 @@ func TestJudgeValidation_SkipsNonMediaFiles(t *testing.T) {
 	if event.Type != EventTypeFileHealthy {
 		t.Errorf("expected non-media files to skip content verification, got %v", event.Type)
 	}
+}
+
+// blockingContentOpener tracks the maximum number of OpenFile calls observed
+// in flight simultaneously, holding each call open for delay before
+// returning. Used to prove the batch judge loop actually runs content probes
+// concurrently rather than one-at-a-time.
+type blockingContentOpener struct {
+	delay       time.Duration
+	data        []byte
+	current     int64
+	maxInFlight int64
+}
+
+func (o *blockingContentOpener) OpenFile(ctx context.Context, name string, flag int, perm os.FileMode) (afero.File, error) {
+	n := atomic.AddInt64(&o.current, 1)
+	for {
+		max := atomic.LoadInt64(&o.maxInFlight)
+		if n <= max || atomic.CompareAndSwapInt64(&o.maxInFlight, max, n) {
+			break
+		}
+	}
+	time.Sleep(o.delay)
+	atomic.AddInt64(&o.current, -1)
+	return &fakeContentFile{data: o.data}, nil
+}
+
+func (o *blockingContentOpener) maxObserved() int64 {
+	return atomic.LoadInt64(&o.maxInFlight)
+}
+
+// TestCheckFilesBatch_JudgesContentVerificationConcurrently is the regression
+// test for issue 1: judgeValidation's content-verification probe does a real
+// network read per file bounded by a multi-second timeout, so a sequential
+// judge loop would serialize the whole batch behind file_count * timeout of
+// wall-clock time. This proves the judge phase runs with bounded parallelism.
+func TestCheckFilesBatch_JudgesContentVerificationConcurrently(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks not supported on Windows")
+	}
+
+	client := fakepool.New()
+	env := newBatchTestEnv(t, t.TempDir(), client)
+
+	enabled := true
+	cfg := env.hw.configGetter()
+	cfg.Health.VerifyContent = &enabled
+
+	const files = 6
+	const probeDelay = 200 * time.Millisecond
+	opener := &blockingContentOpener{delay: probeDelay, data: make([]byte, 512)} // no recognized signature; result is irrelevant to this test
+	env.healthChecker.contentVerifyFS = opener
+
+	paths := make([]string, files)
+	statuses := make([]database.HealthStatus, files)
+	for i := range files {
+		paths[i] = fmt.Sprintf("complete/movie-%02d.mkv", i)
+		writeHealthyFile(t, env, paths[i])
+		statuses[i] = database.HealthStatusPending
+	}
+
+	start := time.Now()
+	events := env.healthChecker.CheckFilesBatch(context.Background(), paths, statuses)
+	elapsed := time.Since(start)
+
+	require.Len(t, events, files)
+	require.Greater(t, opener.maxObserved(), int64(1),
+		"content probes across the batch must overlap, not run one at a time")
+	require.Less(t, elapsed, files*probeDelay,
+		"a concurrent judge loop must complete well under file_count * per-file probe delay")
 }

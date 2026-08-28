@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/javi11/altmount/internal/utils"
 	"github.com/javi11/nntppool/v4"
 	"github.com/spf13/afero"
 )
@@ -35,11 +36,13 @@ func (f *fakeFile) Read(p []byte) (int, error) {
 func (f *fakeFile) Close() error { return nil }
 
 type fakeOpener struct {
-	file *fakeFile
-	err  error
+	file        *fakeFile
+	err         error
+	capturedCtx context.Context
 }
 
 func (o *fakeOpener) OpenFile(ctx context.Context, name string, flag int, perm os.FileMode) (afero.File, error) {
+	o.capturedCtx = ctx
 	if o.err != nil {
 		return nil, o.err
 	}
@@ -51,7 +54,7 @@ func TestProbe_ValidSignature(t *testing.T) {
 	data = append(data, make([]byte, 512-len(data))...)
 	res := Probe(context.Background(), &fakeOpener{file: &fakeFile{data: data}}, "movie.mkv", time.Second)
 	if res.Result != ContentValid {
-		t.Errorf("got %v, want ContentValid", res.Result)
+		t.Errorf("got %s, want %s", res.Result, ContentValid)
 	}
 }
 
@@ -59,7 +62,7 @@ func TestProbe_InvalidSignature(t *testing.T) {
 	data := make([]byte, 512) // all zero bytes, no known signature
 	res := Probe(context.Background(), &fakeOpener{file: &fakeFile{data: data}}, "movie.mkv", time.Second)
 	if res.Result != ContentInvalid {
-		t.Errorf("got %v, want ContentInvalid", res.Result)
+		t.Errorf("got %s, want %s", res.Result, ContentInvalid)
 	}
 }
 
@@ -68,7 +71,7 @@ func TestProbe_ShortFileTolerated(t *testing.T) {
 	data := []byte("\x66\x4C\x61\x43\x00\x00\x00\x22")
 	res := Probe(context.Background(), &fakeOpener{file: &fakeFile{data: data}}, "song.flac", time.Second)
 	if res.Result != ContentValid {
-		t.Errorf("got %v, want ContentValid for short-but-valid file", res.Result)
+		t.Errorf("got %s, want %s for short-but-valid file", res.Result, ContentValid)
 	}
 }
 
@@ -76,7 +79,7 @@ func TestProbe_MissingSegment(t *testing.T) {
 	opener := &fakeOpener{file: &fakeFile{readErr: nntppool.ErrArticleNotFound}}
 	res := Probe(context.Background(), opener, "movie.mkv", time.Second)
 	if res.Result != ContentSegmentMissing {
-		t.Errorf("got %v, want ContentSegmentMissing", res.Result)
+		t.Errorf("got %s, want %s", res.Result, ContentSegmentMissing)
 	}
 	if !errors.Is(res.Err, nntppool.ErrArticleNotFound) {
 		t.Errorf("expected wrapped ErrArticleNotFound, got %v", res.Err)
@@ -87,7 +90,7 @@ func TestProbe_TransientError(t *testing.T) {
 	opener := &fakeOpener{file: &fakeFile{readErr: errors.New("connection reset by peer")}}
 	res := Probe(context.Background(), opener, "movie.mkv", time.Second)
 	if res.Result != ContentProbeError {
-		t.Errorf("got %v, want ContentProbeError", res.Result)
+		t.Errorf("got %s, want %s", res.Result, ContentProbeError)
 	}
 }
 
@@ -95,7 +98,7 @@ func TestProbe_OpenFileError(t *testing.T) {
 	opener := &fakeOpener{err: errors.New("boom")}
 	res := Probe(context.Background(), opener, "movie.mkv", time.Second)
 	if res.Result != ContentProbeError {
-		t.Errorf("got %v, want ContentProbeError", res.Result)
+		t.Errorf("got %s, want %s", res.Result, ContentProbeError)
 	}
 }
 
@@ -103,6 +106,39 @@ func TestProbe_Timeout(t *testing.T) {
 	opener := &fakeOpener{file: &fakeFile{readErr: context.DeadlineExceeded}}
 	res := Probe(context.Background(), opener, "movie.mkv", time.Millisecond)
 	if res.Result != ContentProbeError {
-		t.Errorf("got %v, want ContentProbeError", res.Result)
+		t.Errorf("got %s, want %s", res.Result, ContentProbeError)
+	}
+}
+
+func TestProbe_ContextCarriesPrefetchAndSuppressFlags(t *testing.T) {
+	data := make([]byte, 512)
+	opener := &fakeOpener{file: &fakeFile{data: data}}
+	Probe(context.Background(), opener, "movie.mkv", time.Second)
+
+	if opener.capturedCtx == nil {
+		t.Fatal("OpenFile was not called with a context")
+	}
+	prefetch, ok := opener.capturedCtx.Value(utils.MaxPrefetchKey).(int)
+	if !ok || prefetch != 1 {
+		t.Errorf("got MaxPrefetchKey=%v (ok=%v), want 1", prefetch, ok)
+	}
+	suppress, ok := opener.capturedCtx.Value(utils.SuppressStreamTrackingKey).(bool)
+	if !ok || suppress != true {
+		t.Errorf("got SuppressStreamTrackingKey=%v (ok=%v), want true", suppress, ok)
+	}
+}
+
+func TestResult_String(t *testing.T) {
+	cases := map[Result]string{
+		ContentValid:          "ContentValid",
+		ContentInvalid:        "ContentInvalid",
+		ContentSegmentMissing: "ContentSegmentMissing",
+		ContentProbeError:     "ContentProbeError",
+		Result(99):            "Result(99)",
+	}
+	for result, want := range cases {
+		if got := result.String(); got != want {
+			t.Errorf("Result(%d).String() = %q, want %q", int(result), got, want)
+		}
 	}
 }

@@ -380,6 +380,15 @@ func (hc *HealthChecker) CheckFile(ctx context.Context, filePath string, opts ..
 // regardless of batch size.
 const prepareConcurrency = 8
 
+// judgeConcurrency bounds the parallel judge phase of a batch check. Judging
+// a segment-availability result is cheap CPU-only work, but when content
+// verification is enabled judgeValidation also runs a real network probe per
+// file (see judgeContentVerification) bounded by the configured content-probe
+// timeout. Running that loop sequentially would serialize the whole batch
+// behind file_count * timeout of wall-clock time, so it is bounded-parallel
+// like the prepare stage instead.
+const judgeConcurrency = 8
+
 // CheckFilesBatch checks many files in one cycle: per-file preparation runs in
 // a small parallel pool, then every prepared file's sampled segments are
 // verified in a single cross-file StatMany sweep, and each file receives its
@@ -426,17 +435,21 @@ func (hc *HealthChecker) CheckFilesBatch(ctx context.Context, filePaths []string
 	)
 
 	events := make([]HealthEvent, len(preps))
+	jl := concpool.New().WithMaxGoroutines(min(len(preps), judgeConcurrency))
 	for i := range preps {
-		if preps[i].earlyEvent != nil {
-			events[i] = *preps[i].earlyEvent
-			continue
-		}
-		var result usenet.ValidationResult
-		if valErr == nil {
-			result = results[i]
-		}
-		events[i] = hc.judgeValidation(ctx, preps[i], result, valErr)
+		jl.Go(func() {
+			if preps[i].earlyEvent != nil {
+				events[i] = *preps[i].earlyEvent
+				return
+			}
+			var result usenet.ValidationResult
+			if valErr == nil {
+				result = results[i]
+			}
+			events[i] = hc.judgeValidation(ctx, preps[i], result, valErr)
+		})
 	}
+	jl.Wait()
 	return events
 }
 

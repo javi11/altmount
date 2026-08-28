@@ -893,8 +893,12 @@ func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueue
 // retry/backoff path as any other transient import failure; no separate
 // mechanism is introduced.
 func (s *Service) verifyWrittenContent(ctx context.Context, writtenPaths []string) error {
+	s.mu.Lock()
+	contentVerifyFS := s.contentVerifyFS
+	s.mu.Unlock()
+
 	cfg := s.configGetter()
-	if cfg == nil || !cfg.GetImportVerifyContent() || s.contentVerifyFS == nil {
+	if cfg == nil || !cfg.GetImportVerifyContent() || contentVerifyFS == nil {
 		return nil
 	}
 
@@ -904,7 +908,7 @@ func (s *Service) verifyWrittenContent(ctx context.Context, writtenPaths []strin
 			continue
 		}
 
-		result := contentverify.Probe(ctx, s.contentVerifyFS, path, timeout)
+		result := contentverify.Probe(ctx, contentVerifyFS, path, timeout)
 		switch result.Result {
 		case contentverify.ContentValid:
 			continue

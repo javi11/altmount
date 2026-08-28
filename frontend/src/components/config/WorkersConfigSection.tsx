@@ -261,6 +261,31 @@ export function ImportConfigSection({
 									</span>
 								</div>
 							</label>
+
+							{formData.verify_content && (
+								<fieldset className="fieldset min-w-0">
+									<legend className="fieldset-legend font-semibold">
+										Content Probe Timeout (Seconds)
+									</legend>
+									<input
+										type="number"
+										className="input input-bordered w-full min-w-0 max-w-full bg-base-100 font-mono text-sm"
+										value={formData.verify_content_timeout_seconds ?? 15}
+										readOnly={isReadOnly}
+										min={1}
+										onChange={(e) =>
+											handleInputChange(
+												"verify_content_timeout_seconds",
+												Number.parseInt(e.target.value, 10) || 15,
+											)
+										}
+									/>
+									<p className="label text-[11px] text-base-content/50">
+										Per-file deadline for the header probe. A timeout is treated as a transient
+										error, never as a content failure.
+									</p>
+								</fieldset>
+							)}
 						</div>
 					</div>
 				</div>

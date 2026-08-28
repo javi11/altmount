@@ -439,6 +439,12 @@ const (
 	ImportStrategySTRM    ImportStrategy = "STRM"
 )
 
+// defaultVerifyContentTimeoutSeconds is the shared fallback for both
+// Import.VerifyContentTimeoutSeconds and Health.VerifyContentTimeoutSeconds
+// so the 15s default lives in one place instead of being duplicated across
+// DefaultConfig and the accessor fallbacks.
+const defaultVerifyContentTimeoutSeconds = 15
+
 // ImportConfig represents import processing configuration
 type ImportConfig struct {
 	MaxProcessorWorkers            int      `yaml:"max_processor_workers" mapstructure:"max_processor_workers" json:"max_processor_workers"`
@@ -873,6 +879,10 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	if c.Import.VerifyContentTimeoutSeconds != nil && *c.Import.VerifyContentTimeoutSeconds <= 0 {
+		return fmt.Errorf("import verify_content_timeout_seconds must be greater than 0")
+	}
+
 	// Validate log level (both old and new config)
 	if c.Log.Level != "" {
 		validLevels := []string{"debug", "info", "warn", "error"}
@@ -944,6 +954,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Health.SegmentSamplePercentage < 1 || c.Health.SegmentSamplePercentage > 100 {
 		return fmt.Errorf("health segment_sample_percentage must be between 1 and 100")
+	}
+	if c.Health.VerifyContentTimeoutSeconds != nil && *c.Health.VerifyContentTimeoutSeconds <= 0 {
+		return fmt.Errorf("health verify_content_timeout_seconds must be greater than 0")
 	}
 
 	// Validate health configuration - requires library_dir when enabled and using a strategy other than NONE
@@ -1661,6 +1674,10 @@ func DefaultConfig(configDir ...string) *Config {
 	failureMaskingEnabled := false
 	repairEnabled := true
 	repairExponentialBackoff := true
+	importVerifyContent := false // Content verification disabled by default (destructive if misfired)
+	importVerifyContentTimeoutSeconds := defaultVerifyContentTimeoutSeconds
+	healthVerifyContent := false // Content verification disabled by default (destructive if misfired)
+	healthVerifyContentTimeoutSeconds := defaultVerifyContentTimeoutSeconds
 
 	// Set paths based on whether we're running in Docker or have a specific config directory
 	var dbPath, metadataPath, logPath, rclonePath, cachePath, backupPath string
@@ -1791,16 +1808,18 @@ func DefaultConfig(configDir ...string) *Config {
 				".xvid", ".rm", ".rmvb", ".asf", ".asx", ".wtv", ".mk3d", ".dvr-ms",
 				".mp3", ".flac", ".m4a", ".epub", ".pdf", ".cbz",
 			},
-			MaxDownloadPrefetch:      10,  // Default: 10 segments prefetched ahead for archive analysis
-			SegmentSamplePercentage:  1,   // Default: 1% segment sampling
-			ReadTimeoutSeconds:       300, // Default: 5 minutes read timeout
-			IsoAnalyzeTimeoutSeconds: &isoAnalyzeTimeoutSeconds,
-			ImportStrategy:           ImportStrategyNone, // Default: no import strategy (direct import)
-			ImportDir:                nil,                // No default import directory
-			WatchDir:                 nil,
-			WatchIntervalSeconds:     &watchIntervalSeconds,
-			FailedItemRetentionHours: &failedItemRetentionHours,
-			HistoryRetentionDays:     &historyRetentionDays,
+			MaxDownloadPrefetch:         10,  // Default: 10 segments prefetched ahead for archive analysis
+			SegmentSamplePercentage:     1,   // Default: 1% segment sampling
+			ReadTimeoutSeconds:          300, // Default: 5 minutes read timeout
+			IsoAnalyzeTimeoutSeconds:    &isoAnalyzeTimeoutSeconds,
+			ImportStrategy:              ImportStrategyNone, // Default: no import strategy (direct import)
+			ImportDir:                   nil,                // No default import directory
+			WatchDir:                    nil,
+			WatchIntervalSeconds:        &watchIntervalSeconds,
+			FailedItemRetentionHours:    &failedItemRetentionHours,
+			HistoryRetentionDays:        &historyRetentionDays,
+			VerifyContent:               &importVerifyContent,               // Disabled by default
+			VerifyContentTimeoutSeconds: &importVerifyContentTimeoutSeconds, // Default: 15s per-file content probe timeout
 		},
 		Log: LogConfig{
 			File:       logPath, // Default log file path
@@ -1816,11 +1835,13 @@ func DefaultConfig(configDir ...string) *Config {
 			CheckIntervalSeconds:                5,
 			MaxConnectionsForHealthChecks:       100,
 			CheckBatchSize:                      50,
-			MaxConcurrentJobs:                   1,                      // Default: 1 concurrent job
-			SegmentSamplePercentage:             5,                      // Default: 5% segment sampling
-			LibrarySyncIntervalMinutes:          360,                    // Default: sync every 6 hours
-			ResolveRepairOnImport:               &resolveRepairOnImport, // Enabled by default
-			AcceptableMissingSegmentsPercentage: 2,                      // Default: tolerate up to 2% missing segments
+			MaxConcurrentJobs:                   1,                                  // Default: 1 concurrent job
+			SegmentSamplePercentage:             5,                                  // Default: 5% segment sampling
+			LibrarySyncIntervalMinutes:          360,                                // Default: sync every 6 hours
+			ResolveRepairOnImport:               &resolveRepairOnImport,             // Enabled by default
+			AcceptableMissingSegmentsPercentage: 2,                                  // Default: tolerate up to 2% missing segments
+			VerifyContent:                       &healthVerifyContent,               // Disabled by default
+			VerifyContentTimeoutSeconds:         &healthVerifyContentTimeoutSeconds, // Default: 15s per-file content probe timeout
 			Repair: RepairConfig{
 				Enabled:            &repairEnabled,
 				IntervalMinutes:    60,
