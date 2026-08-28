@@ -16,6 +16,7 @@ import (
 	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/auth"
 	"github.com/javi11/altmount/internal/config"
+	"github.com/javi11/altmount/internal/contentverify"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/health"
 	"github.com/javi11/altmount/internal/httpclient"
@@ -388,6 +389,7 @@ func startHealthWorker(
 	arrsService *arrs.Service,
 	importerService importer.ImportService,
 	broadcaster *progress.ProgressBroadcaster,
+	contentVerifyFS contentverify.Opener,
 ) (*health.HealthWorker, *health.LibrarySyncWorker, error) {
 	// Create metadata service for health worker
 	metadataService := metadata.NewMetadataService(cfg.Metadata.RootPath)
@@ -399,6 +401,7 @@ func startHealthWorker(
 		poolManager,
 		configManager.GetConfigGetter(),
 		rcloneClient,
+		contentVerifyFS,
 	)
 
 	healthWorker := health.NewHealthWorker(

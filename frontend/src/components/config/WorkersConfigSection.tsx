@@ -243,6 +243,49 @@ export function ImportConfigSection({
 									</span>
 								</div>
 							</label>
+
+							<label className="flex min-w-0 cursor-pointer items-start gap-3 rounded-xl border border-base-300/60 bg-base-100/40 p-4">
+								<input
+									type="checkbox"
+									className="toggle toggle-primary toggle-sm mt-0.5 shrink-0"
+									checked={formData.verify_content ?? false}
+									disabled={isReadOnly}
+									onChange={(e) => handleInputChange("verify_content", e.target.checked)}
+								/>
+								<div className="min-w-0">
+									<span className="block break-words font-bold text-xs">Verify Media Content</span>
+									<span className="mt-0.5 block break-words text-[11px] text-base-content/50 leading-snug">
+										After import, read each video/audio file's header through the serving stack and
+										fail the import if no recognized media container signature is found. Catches
+										releases assembled in the wrong order.
+									</span>
+								</div>
+							</label>
+
+							{formData.verify_content && (
+								<fieldset className="fieldset min-w-0">
+									<legend className="fieldset-legend font-semibold">
+										Content Probe Timeout (Seconds)
+									</legend>
+									<input
+										type="number"
+										className="input input-bordered w-full min-w-0 max-w-full bg-base-100 font-mono text-sm"
+										value={formData.verify_content_timeout_seconds ?? 15}
+										readOnly={isReadOnly}
+										min={1}
+										onChange={(e) =>
+											handleInputChange(
+												"verify_content_timeout_seconds",
+												Number.parseInt(e.target.value, 10) || 15,
+											)
+										}
+									/>
+									<p className="label text-[11px] text-base-content/50">
+										Per-file deadline for the header probe. A timeout is treated as a transient
+										error, never as a content failure.
+									</p>
+								</fieldset>
+							)}
 						</div>
 					</div>
 				</div>

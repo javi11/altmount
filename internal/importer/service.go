@@ -18,10 +18,12 @@ import (
 
 	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/config"
+	"github.com/javi11/altmount/internal/contentverify"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/httpclient"
 	"github.com/javi11/altmount/internal/importer/filesystem"
 	"github.com/javi11/altmount/internal/importer/parser"
+	"github.com/javi11/altmount/internal/importer/parser/fileinfo"
 	"github.com/javi11/altmount/internal/importer/postprocessor"
 	"github.com/javi11/altmount/internal/importer/queue"
 	"github.com/javi11/altmount/internal/importer/scanner"
@@ -189,6 +191,7 @@ type Service struct {
 	broadcaster     *progress.ProgressBroadcaster // WebSocket progress broadcaster
 	userRepo        *database.UserRepository      // User repository for API key lookup
 	poolManager     pool.Manager                  // Pool manager — used to push admission caps on config change
+	contentVerifyFS contentverify.Opener          // Optional: real NzbFilesystem, set post-construction to break the init-order cycle with nzbfilesystem
 	log             *slog.Logger
 
 	// Runtime state
@@ -515,6 +518,17 @@ func (s *Service) SetRcloneClient(client any) {
 	} else {
 		s.log.InfoContext(s.ctx, "RClone client disabled")
 	}
+}
+
+// SetContentVerifyFilesystem wires the real serving-stack filesystem used to
+// probe imported media files' content signatures. Called once after the
+// NzbFilesystem singleton is constructed (see cmd/altmount/cmd/serve.go),
+// mirroring SetArrsService's late-binding to avoid an import-time dependency
+// cycle between importer and nzbfilesystem.
+func (s *Service) SetContentVerifyFilesystem(fs contentverify.Opener) {
+	s.mu.Lock()
+	s.contentVerifyFS = fs
+	s.mu.Unlock()
 }
 
 // SetArrsService sets or updates the ARRs service
@@ -857,7 +871,56 @@ func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueue
 		}
 	}
 
-	return s.processor.ProcessNzbFile(ctx, item.NzbPath, basePath, int(item.ID), allowedExtensionsOverride, &virtualDir, extractedFiles, item.Category, item.Metadata, item.DownloadID)
+	resultPath, writtenPaths, err := s.processor.ProcessNzbFile(ctx, item.NzbPath, basePath, int(item.ID), allowedExtensionsOverride, &virtualDir, extractedFiles, item.Category, item.Metadata, item.DownloadID)
+	if err != nil {
+		return resultPath, writtenPaths, err
+	}
+
+	if verifyErr := s.verifyWrittenContent(ctx, writtenPaths); verifyErr != nil {
+		return resultPath, writtenPaths, verifyErr
+	}
+
+	return resultPath, writtenPaths, nil
+}
+
+// verifyWrittenContent probes every eligible video/audio file among
+// writtenPaths for a recognized media container signature, when
+// import.verify_content is enabled. A definitive failure (bad signature or
+// confirmed-missing head article) is returned as an error so the caller
+// routes the item to HandleFailure exactly like any other import error,
+// letting the Arr app blocklist the release. A transient probe error is
+// likewise returned as an error — it flows through the same existing
+// retry/backoff path as any other transient import failure; no separate
+// mechanism is introduced.
+func (s *Service) verifyWrittenContent(ctx context.Context, writtenPaths []string) error {
+	s.mu.Lock()
+	contentVerifyFS := s.contentVerifyFS
+	s.mu.Unlock()
+
+	cfg := s.configGetter()
+	if cfg == nil || !cfg.GetImportVerifyContent() || contentVerifyFS == nil {
+		return nil
+	}
+
+	timeout := cfg.GetImportVerifyContentTimeout()
+	for _, path := range writtenPaths {
+		if !fileinfo.IsVerifiableMediaFile(path) {
+			continue
+		}
+
+		result := contentverify.Probe(ctx, contentVerifyFS, path, timeout)
+		switch result.Result {
+		case contentverify.ContentValid:
+			continue
+		case contentverify.ContentInvalid:
+			return fmt.Errorf("content verification failed for %q: no recognized media container signature: %w", path, result.Err)
+		case contentverify.ContentSegmentMissing:
+			return fmt.Errorf("content verification failed for %q: head article missing: %w", path, result.Err)
+		case contentverify.ContentProbeError:
+			return fmt.Errorf("content verification could not complete for %q: %w", path, result.Err)
+		}
+	}
+	return nil
 }
 
 func (s *Service) calculateProcessVirtualDir(item *database.ImportQueueItem, basePath *string) string {
