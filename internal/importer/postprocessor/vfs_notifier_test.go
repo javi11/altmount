@@ -57,6 +57,18 @@ func TestRefreshDirsFor(t *testing.T) {
 				"movies",
 			},
 		},
+		{
+			// Trimming one leading slash left the rest in place, so rclone saw
+			// "/tv//Show//ep.mkv" with a slash still on the front.
+			name: "duplicate slashes are collapsed",
+			in:   "//tv//Show//ep.mkv",
+			want: []string{"tv/Show/ep.mkv", "tv/Show", "tv"},
+		},
+		{
+			name: "trailing slash does not survive",
+			in:   "/tv/Show/",
+			want: []string{"tv/Show", "tv"},
+		},
 	}
 
 	for _, tc := range cases {

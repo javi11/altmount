@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"path"
-	"path/filepath"
 	"time"
 
 	"github.com/javi11/altmount/internal/config"
@@ -468,11 +467,11 @@ func (hc *HealthChecker) NotifyRcloneVFS(filePath string) {
 	}
 
 	// Virtual path, not an OS path: rclone's VFS is forward-slash on every
-	// platform. filepath.Dir would emit "\" separators on Windows, which never
+	// platform. An OS-aware Dir would emit "\" separators on Windows, which never
 	// match a VFS node, and vfs/forget reports success regardless - so the
 	// invalidation silently does nothing. ToSlash also normalizes legacy rows
 	// that still carry backslashes. On POSIX both calls are no-ops.
-	virtualDir := path.Dir(filepath.ToSlash(filePath))
+	virtualDir := path.Dir(rclonecli.ToVFSPath(filePath))
 	hc.NotifyRcloneVFSDirs([]string{virtualDir})
 }
 

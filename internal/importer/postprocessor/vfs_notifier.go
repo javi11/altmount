@@ -107,9 +107,11 @@ func (c *Coordinator) RefreshMountPathIfNeeded(ctx context.Context, resultingPat
 	}
 }
 
-// refreshDirsFor returns the directory and its nearest ancestors to hand to
-// rclone for a newly imported path: the containing directory, its parent, and
-// its grandparent, since those may be new too.
+// refreshDirsFor returns the entries to hand to rclone for a newly imported
+// path: the path itself, then its parent and grandparent, since those
+// directories may be new too. Note the first entry is the path as given, which
+// for a single-file import is the file rather than a directory - preserved as
+// the existing behaviour.
 //
 // The ancestry is walked on the forward-slash form. rclone's VFS is
 // forward-slash on every platform, and walking with filepath.Dir on Windows
@@ -118,19 +120,25 @@ func (c *Coordinator) RefreshMountPathIfNeeded(ctx context.Context, resultingPat
 // since the Windows root is "\" rather than "/" - appending a useless bare-root
 // entry to every batch.
 //
-// On POSIX this is exactly the previous behaviour: filepath.ToSlash is a no-op
-// and path.Dir and filepath.Dir agree.
+// On POSIX the separator conversion is a no-op and path.Dir and filepath.Dir
+// agree, so the only behaviour change there is Clean collapsing duplicate and
+// trailing slashes, which previously leaked through to rclone.
 func refreshDirsFor(p string) []string {
 	// rclone wants no leading slash; "." is its spelling for the mount root.
 	normalize := func(s string) string {
-		s = strings.TrimPrefix(filepath.ToSlash(s), "/")
+		s = strings.TrimPrefix(s, "/")
 		if s == "" {
 			return "."
 		}
 		return s
 	}
 
-	virtual := filepath.ToSlash(p)
+	// Clean once, up front, and walk the ancestry on the result. TrimPrefix
+	// alone strips a single leading slash, so "//tv//Show//ep.mkv" previously
+	// reached rclone still carrying one. Cleaning inside normalize instead
+	// would leave the walk on the raw path, where Dir("/tv/Show/") is
+	// "/tv/Show" and the first two entries come out identical.
+	virtual := stdpath.Clean(rclonecli.ToVFSPath(p))
 	dirs := []string{normalize(virtual)}
 
 	parent := stdpath.Dir(virtual)

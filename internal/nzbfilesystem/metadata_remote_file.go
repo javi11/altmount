@@ -2467,7 +2467,7 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 					// and rclone's VFS is forward-slash on every platform, so
 					// filepath.Dir would enqueue "\dir" (or a bare "\" for a file at
 					// the mount root) on Windows and match nothing.
-					mvf.repairCoalescer.EnqueueRefresh(path.Dir(filepath.ToSlash(mvf.name)))
+					mvf.repairCoalescer.EnqueueRefresh(path.Dir(rclonecli.ToVFSPath(mvf.name)))
 				} else {
 					slog.WarnContext(ctx, "Failed to move corrupted metadata file, proceeding with repair trigger status", "error", moveErr)
 				}

@@ -115,11 +115,7 @@ func (c *rcloneRcClient) RefreshDir(ctx context.Context, provider string, dirs [
 	// rclone's VFS is forward-slash on every platform. Normalize here so a
 	// caller that built a directory with filepath cannot silently no-op:
 	// vfs/forget accepts any string and reports success either way.
-	normalized := make([]string, 0, len(dirs))
-	for _, dir := range dirs {
-		normalized = append(normalized, ToVFSPath(dir))
-	}
-	dirs = normalized
+	dirs = ToVFSPaths(dirs)
 
 	baseUrl, err := buildRCUrl(cfg.RClone.RCUrl, cfg.RClone.RCUser, cfg.RClone.RCPass)
 	if err != nil {

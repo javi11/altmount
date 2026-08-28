@@ -842,7 +842,7 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 							metadataDeletedCount++
 							// Virtual path: keep it forward-slash so it matches a
 							// VFS node on Windows too (see NotifyRcloneVFS).
-							deletedDirs[path.Dir(filepath.ToSlash(relativeMountPath))] = true
+							deletedDirs[path.Dir(rclonecli.ToVFSPath(relativeMountPath))] = true
 						}
 					} else {
 						metadataDeletedCount++
