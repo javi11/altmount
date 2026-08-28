@@ -8,6 +8,7 @@ import {
 } from "../../../../lib/utils";
 import { type FileHealth, HealthPriority } from "../../../../types/api";
 import { HealthItemActionsMenu } from "./HealthItemActionsMenu";
+import { PartialCheckBadge } from "./PartialCheckBadge";
 import { PlaybackImpactBadge } from "./PlaybackImpactBadge";
 
 interface HealthTableRowProps {
@@ -56,10 +57,11 @@ export const HealthTableRow = memo(function HealthTableRow({
 		}
 	}, [item.metadata]);
 
-	const playbackImpact = useMemo(
-		() => parseHealthErrorDetails(item.error_details)?.playback_impact ?? null,
+	const errorDetails = useMemo(
+		() => parseHealthErrorDetails(item.error_details),
 		[item.error_details],
 	);
+	const playbackImpact = errorDetails?.playback_impact ?? null;
 
 	const getNextPriority = (current: HealthPriority): HealthPriority => {
 		switch (current) {
@@ -180,6 +182,7 @@ export const HealthTableRow = memo(function HealthTableRow({
 				<div className="flex flex-wrap items-center gap-2">
 					<HealthBadge status={item.status} isMasked={item.is_masked} />
 					{playbackImpact && <PlaybackImpactBadge impact={playbackImpact} />}
+					{errorDetails && <PartialCheckBadge details={errorDetails} />}
 				</div>
 				{/* Show last_error for repair failures and general errors */}
 				{item.last_error && (
