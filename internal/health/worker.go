@@ -384,6 +384,14 @@ func (hw *HealthWorker) PerformBackgroundCheck(ctx context.Context, filePath str
 	return nil
 }
 
+// inconclusiveRecheckDelay is how long a file waits after a health check that
+// reached no verdict — a provider outage, timeouts, or a sweep truncated
+// before every segment answered. Such a check produces no evidence, so the
+// record is left exactly as it was and only its next check is pushed out; the
+// delay keeps a provider-wide outage from turning into a tight recheck loop
+// across the whole library.
+const inconclusiveRecheckDelay = 30 * time.Minute
+
 // prepareUpdateForResult decides what DB update and side effects are needed based on the check result.
 func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database.FileHealth, event HealthEvent) (*database.HealthStatusUpdate, func() error) {
 	update := &database.HealthStatusUpdate{
@@ -419,6 +427,38 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 			return hw.metadataService.UpdateFileStatus(fh.FilePath, metapb.FileStatus_FILE_STATUS_HEALTHY)
 		}
 
+		return update, sideEffect
+	}
+
+	// An inconclusive check says nothing about the file: the providers never
+	// answered for at least one segment. Restore the status the record held
+	// before the cycle set it to 'checking', push the next check out, and
+	// leave both retry counters alone — an outage must not consume the retry
+	// budget or escalate the file into repair (#861).
+	if event.Type == EventTypeCheckInconclusive {
+		status := fh.Status
+		if status == database.HealthStatusChecking || status == "" {
+			status = database.HealthStatusPending
+		}
+		nextCheck := time.Now().UTC().Add(inconclusiveRecheckDelay)
+
+		update.Type = database.UpdateTypeInconclusive
+		update.Status = status
+		update.ScheduledCheckAt = nextCheck
+		if event.Error != nil {
+			text := event.Error.Error()
+			update.ErrorMessage = &text
+		}
+		update.ErrorDetails = event.Details
+
+		sideEffect = func() error {
+			slog.WarnContext(ctx, "Health check inconclusive, rescheduling without counting a retry",
+				"file_path", fh.FilePath,
+				"status", status,
+				"next_check", nextCheck,
+				"error", event.Error)
+			return nil
+		}
 		return update, sideEffect
 	}
 

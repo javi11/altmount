@@ -26,6 +26,11 @@ const (
 	EventTypeFileCorrupted EventType = "file_corrupted"
 	EventTypeCheckFailed   EventType = "check_failed"
 	EventTypeFileRemoved   EventType = "file_removed"
+	// EventTypeCheckInconclusive means the check reached the network but the
+	// providers could not answer for at least one segment (outage, timeout,
+	// quota, auth, truncated sweep). It carries no verdict: the file keeps the
+	// status it had and is simply re-checked later.
+	EventTypeCheckInconclusive EventType = "check_inconclusive"
 )
 
 // HealthEvent represents a health check event
@@ -239,10 +244,27 @@ func (hc *HealthChecker) prepareCheck(ctx context.Context, filePath string, opts
 func (hc *HealthChecker) judgeValidation(ctx context.Context, prep preparedCheck, result usenet.ValidationResult, valErr error) HealthEvent {
 	event := baseResultEvent(prep.filePath, prep.sourceNzbPath)
 
-	if valErr != nil {
-		event.Type = EventTypeCheckFailed
-		event.Status = database.HealthStatusCorrupted
-		event.Error = fmt.Errorf("failed to validate segments: %w", valErr)
+	// An inconclusive sweep proves nothing. Reading a transient provider
+	// failure as a missing article marked files degraded and wrote their
+	// segment ids into the permanent hole map, which no later clean check
+	// clears (#861) — so this check must come before the missing-count
+	// verdict, even when the sweep also found genuine misses.
+	if valErr != nil || result.Inconclusive() {
+		event.Type = EventTypeCheckInconclusive
+		event.Status = database.HealthStatusPending
+		if valErr != nil {
+			event.Error = fmt.Errorf("segment check inconclusive: %w", valErr)
+		} else {
+			event.Error = fmt.Errorf("segment check inconclusive: %d of %d checked segments could not be verified: %w",
+				result.ErrorCount, result.TotalChecked, result.Err)
+		}
+		details := database.HealthErrorDetails{
+			ErrorType:     "check_inconclusive",
+			Message:       event.Error.Error(),
+			TotalArticles: prep.totalSegments,
+			Sampled:       result.TotalChecked,
+		}
+		event.Details = details.Marshal()
 		return event
 	}
 

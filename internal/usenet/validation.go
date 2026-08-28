@@ -2,6 +2,7 @@ package usenet
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/rand"
@@ -38,6 +39,43 @@ type ValidationResult struct {
 	MissingCount    int
 	MissingIDs      []string
 	MissingSegments []MissingSegment // same 50-entry cap as MissingIDs
+	// ErrorCount counts checked segments whose availability could not be
+	// determined: an operational STAT failure, or no result at all because
+	// the sweep was truncated. Those segments are unknown, never missing.
+	ErrorCount int
+	// Err is the first such failure. Non-nil marks the whole result
+	// inconclusive.
+	Err error
+}
+
+// Inconclusive reports whether the sweep failed to reach a definitive answer
+// for at least one checked segment. An inconclusive result is not evidence of
+// anything — neither of missing articles nor of a healthy file — so callers
+// must retry rather than record a verdict from it.
+func (r ValidationResult) Inconclusive() bool { return r.Err != nil }
+
+// errSegmentUnreported marks segments the pool never answered for. StatMany
+// stops dispatching and drops in-flight results when its context ends, so a
+// cancelled or timed-out sweep silently returns fewer results than ids.
+var errSegmentUnreported = errors.New("segment availability not reported by the STAT sweep")
+
+// isDefinitiveMiss reports whether a STAT error proves the article is gone.
+// Only NNTP 430/423 does. Every other error — dead connection, timeout,
+// context cancellation, authentication failure, quota exceeded, service
+// unavailable, exhausted pool — means the check could not answer, and
+// counting it as a miss persisted false holes that no later clean check
+// could clear (issue #861).
+func isDefinitiveMiss(err error) bool {
+	return errors.Is(err, nntppool.ErrArticleNotFound)
+}
+
+// unreportedErr wraps the sweep's context error (when there is one) so the
+// caller can tell a truncated sweep from a per-segment failure.
+func unreportedErr(ctxErr error) error {
+	if ctxErr != nil {
+		return fmt.Errorf("%w: %w", errSegmentUnreported, ctxErr)
+	}
+	return errSegmentUnreported
 }
 
 // ValidateSegmentAvailabilityDetailed validates segments and returns detailed results
@@ -96,8 +134,21 @@ func ValidateSegmentAvailabilityDetailed(
 	defer cancel()
 
 	var validatedCount int
+	var reported int
 	for r := range usenetPool.StatMany(statCtx, ids, nntppool.StatManyOptions{Concurrency: maxConnections}) {
+		reported++
 		if r.Err != nil {
+			if !isDefinitiveMiss(r.Err) {
+				slog.DebugContext(ctx, "inconclusive segment check",
+					"segment_id", r.MessageID,
+					"error", r.Err,
+				)
+				result.ErrorCount++
+				if result.Err == nil {
+					result.Err = r.Err
+				}
+				continue
+			}
 			slog.DebugContext(ctx, "missing segment",
 				"segment_id", r.MessageID,
 				"error", r.Err,
@@ -126,6 +177,13 @@ func ValidateSegmentAvailabilityDetailed(
 			progressTracker.Update(validatedCount, result.TotalChecked)
 		}
 	}
+	if unreported := len(ids) - reported; unreported > 0 {
+		result.ErrorCount += unreported
+		if result.Err == nil {
+			result.Err = unreportedErr(statCtx.Err())
+		}
+	}
+
 	sort.Slice(result.MissingSegments, func(i, j int) bool {
 		return result.MissingSegments[i].Index < result.MissingSegments[j].Index
 	})
@@ -220,6 +278,17 @@ func ValidateSegmentAvailabilityBatch(
 		owners[r.MessageID] = owner[1:]
 
 		if r.Err != nil {
+			if !isDefinitiveMiss(r.Err) {
+				slog.DebugContext(ctx, "inconclusive segment check",
+					"segment_id", r.MessageID,
+					"error", r.Err,
+				)
+				results[fileIdx].ErrorCount++
+				if results[fileIdx].Err == nil {
+					results[fileIdx].Err = r.Err
+				}
+				continue
+			}
 			slog.DebugContext(ctx, "missing segment",
 				"segment_id", r.MessageID,
 				"error", r.Err,
@@ -235,14 +304,30 @@ func ValidateSegmentAvailabilityBatch(
 		poolManager.UpdateDownloadProgress("", 100)
 	}
 
+	// Ids still owed an answer never reached a provider (or their result was
+	// dropped when the sweep context ended). Attribute them to their files as
+	// unknown, so a truncated sweep cannot pass for a clean one.
+	sweepErr := statCtx.Err()
+	for _, remaining := range owners {
+		for _, fileIdx := range remaining {
+			results[fileIdx].ErrorCount++
+			if results[fileIdx].Err == nil {
+				results[fileIdx].Err = unreportedErr(sweepErr)
+			}
+		}
+	}
+
 	missingTotal := 0
+	errorTotal := 0
 	for _, r := range results {
 		missingTotal += r.MissingCount
+		errorTotal += r.ErrorCount
 	}
 	slog.InfoContext(ctx, "STAT sweep completed",
 		"files", nonEmptyFiles,
 		"segments", len(ids),
 		"missing", missingTotal,
+		"inconclusive", errorTotal,
 		"duration", time.Since(sweepStart),
 	)
 

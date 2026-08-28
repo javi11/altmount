@@ -16,6 +16,7 @@ import (
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/testsupport/fakepool"
 	nntppool "github.com/javi11/nntppool/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -91,6 +92,7 @@ func (m *mockImportService) RegenerateMetadata(_ context.Context, _ string) erro
 // repairTestEnv holds all the pieces needed for repair e2e tests.
 type repairTestEnv struct {
 	db              *sql.DB
+	client          *fakepool.Client
 	healthRepo      *database.HealthRepository
 	metadataService *metadata.MetadataService
 	healthChecker   *HealthChecker
@@ -162,10 +164,16 @@ func newRepairTestEnv(t *testing.T, tempDir string, arrsErr error, configure ...
 	mockARRs := &mockARRsService{returnErr: arrsErr}
 	mockImporter := &mockImportService{}
 
+	// Default pool: every STAT answers 430 (article genuinely gone), which is
+	// what the repair e2e flows are about. Transient/pool-down failures are
+	// deliberately NOT the default — they are inconclusive, not corruption.
+	client := fakepool.New()
+	client.SetDefaultBehavior(fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
+
 	healthChecker := NewHealthChecker(
 		healthRepo,
 		metadataService,
-		&mockPoolManager{},
+		&fakeClientPoolManager{client: client},
 		configManager.GetConfig,
 		&MockRcloneClient{},
 	)
@@ -182,6 +190,7 @@ func newRepairTestEnv(t *testing.T, tempDir string, arrsErr error, configure ...
 
 	return &repairTestEnv{
 		db:              db,
+		client:          client,
 		healthRepo:      healthRepo,
 		metadataService: metadataService,
 		healthChecker:   healthChecker,
@@ -191,7 +200,8 @@ func newRepairTestEnv(t *testing.T, tempDir string, arrsErr error, configure ...
 }
 
 // validSegmentMeta creates a FileMetadata with one segment that covers the full fileSize,
-// so CheckMetadataIntegrity passes. Pool failure then causes EventTypeCheckFailed.
+// so CheckMetadataIntegrity passes. The env's default pool then answers 430 for that
+// segment, producing EventTypeFileCorrupted.
 func validSegmentMeta(ms *metadata.MetadataService, fileSize int64) *metapb.FileMetadata {
 	seg := &metapb.SegmentData{
 		Id:          "test-article-001@test.example.com",

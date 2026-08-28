@@ -14,6 +14,7 @@ import (
 	"github.com/javi11/altmount/internal/testsupport/fakepool"
 	"github.com/javi11/nntppool/v4"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // NOTE: Tests for ValidateSegmentAvailability and ValidateSegmentAvailabilityDetailed
@@ -240,3 +241,135 @@ func (m *validationTestPoolManager) SetImportConnCapacity(_ int)                
 func (m *validationTestPoolManager) ImportConnCapacity() int                     { return 0 }
 func (m *validationTestPoolManager) SetStreamSource(_ pool.StreamActivitySource) {}
 func (m *validationTestPoolManager) NotifyStreamChange()                         {}
+
+// TestValidateSegmentAvailability_TransientErrorsAreInconclusive is the
+// regression guard for #861: a STAT that fails for an operational reason
+// (dead connection, timeout, quota, auth, 502, exhausted pool) says nothing
+// about whether the article exists. Counting it as missing let a transient
+// backup-provider failure be written into the file's permanent hole map.
+func TestValidateSegmentAvailability_TransientErrorsAreInconclusive(t *testing.T) {
+	operational := []struct {
+		name string
+		err  error
+	}{
+		{"connection died", nntppool.ErrConnectionDied},
+		{"quota exceeded", nntppool.ErrQuotaExceeded},
+		{"service unavailable", nntppool.ErrServiceUnavailable},
+		{"auth rejected", nntppool.ErrAuthRejected},
+		{"deadline exceeded", context.DeadlineExceeded},
+		{"providers exhausted", fmt.Errorf("nntp: all providers exhausted: %w", nntppool.ErrConnectionDied)},
+	}
+
+	for _, tc := range operational {
+		t.Run(tc.name, func(t *testing.T) {
+			fp := fakepool.New()
+			mgr := &validationTestPoolManager{client: fp}
+			const id = "flaky@host"
+			fp.SetBehavior(id, fakepool.SegmentBehavior{Err: tc.err})
+
+			results, err := ValidateSegmentAvailabilityBatch(
+				context.Background(), [][]string{{id}}, mgr, 1, 5*time.Second)
+			assert.NoError(t, err)
+			require.Len(t, results, 1)
+
+			assert.Zero(t, results[0].MissingCount, "operational error must not count as missing")
+			assert.Empty(t, results[0].MissingIDs, "operational error must not yield a hole id")
+			assert.Equal(t, 1, results[0].ErrorCount)
+			assert.True(t, results[0].Inconclusive())
+			assert.ErrorIs(t, results[0].Err, tc.err)
+		})
+	}
+}
+
+// TestValidateSegmentAvailability_ArticleNotFoundIsMissing keeps the genuine
+// miss path intact: only 430/423 proves the article is gone.
+func TestValidateSegmentAvailability_ArticleNotFoundIsMissing(t *testing.T) {
+	fp := fakepool.New()
+	mgr := &validationTestPoolManager{client: fp}
+	const id = "gone@host"
+	fp.SetBehavior(id, fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
+
+	results, err := ValidateSegmentAvailabilityBatch(
+		context.Background(), [][]string{{id}}, mgr, 1, 5*time.Second)
+	assert.NoError(t, err)
+	require.Len(t, results, 1)
+
+	assert.Equal(t, 1, results[0].MissingCount)
+	assert.Equal(t, []string{id}, results[0].MissingIDs)
+	assert.Zero(t, results[0].ErrorCount)
+	assert.False(t, results[0].Inconclusive())
+}
+
+// TestValidateSegmentAvailabilityBatch_InconclusiveIsPerFile verifies one
+// file's transient failure does not taint its batch siblings' verdicts.
+func TestValidateSegmentAvailabilityBatch_InconclusiveIsPerFile(t *testing.T) {
+	fp := fakepool.New()
+	mgr := &validationTestPoolManager{client: fp}
+	fp.SetBehavior("flaky@host", fakepool.SegmentBehavior{Err: nntppool.ErrConnectionDied})
+	fp.SetBehavior("gone@host", fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
+
+	results, err := ValidateSegmentAvailabilityBatch(context.Background(), [][]string{
+		{"ok@host"},
+		{"flaky@host"},
+		{"gone@host"},
+	}, mgr, 3, 5*time.Second)
+	assert.NoError(t, err)
+	require.Len(t, results, 3)
+
+	assert.False(t, results[0].Inconclusive())
+	assert.Zero(t, results[0].MissingCount)
+
+	assert.True(t, results[1].Inconclusive())
+	assert.Zero(t, results[1].MissingCount)
+
+	assert.False(t, results[2].Inconclusive())
+	assert.Equal(t, 1, results[2].MissingCount)
+}
+
+// TestValidateSegmentAvailabilityBatch_UnreportedSegmentsAreInconclusive
+// covers the other half of #861: StatMany emits nothing for ids it never
+// dispatched (cancelled context / elapsed sweep deadline). Treating that
+// silence as "checked and present" made a truncated sweep declare a file
+// healthy on no evidence at all.
+func TestValidateSegmentAvailabilityBatch_UnreportedSegmentsAreInconclusive(t *testing.T) {
+	fp := fakepool.New()
+	mgr := &validationTestPoolManager{client: fp}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	results, err := ValidateSegmentAvailabilityBatch(
+		ctx, [][]string{{"a@host", "b@host"}}, mgr, 1, 5*time.Second)
+	assert.NoError(t, err)
+	require.Len(t, results, 1)
+
+	assert.Zero(t, results[0].MissingCount)
+	assert.Empty(t, results[0].MissingIDs)
+	assert.Equal(t, 2, results[0].ErrorCount)
+	assert.True(t, results[0].Inconclusive())
+	assert.ErrorIs(t, results[0].Err, context.Canceled)
+}
+
+// TestValidateSegmentAvailabilityDetailed_TransientErrorIsInconclusive
+// mirrors the batch guard on the detailed path.
+func TestValidateSegmentAvailabilityDetailed_TransientErrorIsInconclusive(t *testing.T) {
+	fp := fakepool.New()
+	mgr := &validationTestPoolManager{client: fp}
+
+	segs := []*metapb.SegmentData{
+		{Id: "ok@host", StartOffset: 0, EndOffset: 999},
+		{Id: "flaky@host", StartOffset: 0, EndOffset: 999},
+	}
+	fp.SetBehavior("flaky@host", fakepool.SegmentBehavior{Err: nntppool.ErrConnectionDied})
+
+	result, err := ValidateSegmentAvailabilityDetailed(
+		context.Background(), segs, mgr, 2, 100, nil, 5*time.Second)
+	assert.NoError(t, err)
+
+	assert.Zero(t, result.MissingCount)
+	assert.Empty(t, result.MissingIDs)
+	assert.Empty(t, result.MissingSegments)
+	assert.Equal(t, 1, result.ErrorCount)
+	assert.True(t, result.Inconclusive())
+	assert.ErrorIs(t, result.Err, nntppool.ErrConnectionDied)
+}
