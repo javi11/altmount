@@ -100,6 +100,13 @@ type repairTestEnv struct {
 
 func newRepairTestEnv(t *testing.T, tempDir string, arrsErr error, configure ...func(*config.Config)) *repairTestEnv {
 	t.Helper()
+	return newRepairTestEnvWithPool(t, tempDir, arrsErr, &mockPoolManager{}, configure...)
+}
+
+// newRepairTestEnvWithPool is newRepairTestEnv with an injectable pool.Manager, so tests
+// can block or fail the segment-availability sweep at a controlled point.
+func newRepairTestEnvWithPool(t *testing.T, tempDir string, arrsErr error, poolManager pool.Manager, configure ...func(*config.Config)) *repairTestEnv {
+	t.Helper()
 
 	db, err := sql.Open("sqlite3", "file::memory:?cache=shared&mode=memory")
 	require.NoError(t, err)
@@ -165,7 +172,7 @@ func newRepairTestEnv(t *testing.T, tempDir string, arrsErr error, configure ...
 	healthChecker := NewHealthChecker(
 		healthRepo,
 		metadataService,
-		&mockPoolManager{},
+		poolManager,
 		configManager.GetConfig,
 		&MockRcloneClient{},
 		nil,
