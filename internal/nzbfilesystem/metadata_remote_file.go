@@ -354,12 +354,10 @@ func (mrf *MetadataRemoteFile) RemoveFile(ctx context.Context, fileName string) 
 		}
 	}
 
-	// Check if we should delete the source NZB file
 	cfg := mrf.configGetter()
-	deleteSourceNzb := cfg.Metadata.ShouldDeleteSourceNzb()
 
-	// Use MetadataService's file delete operation with optional NZB deletion
-	err := mrf.metadataService.DeleteFileMetadataWithSourceNzb(ctx, normalizedName, deleteSourceNzb)
+	// Deletes the .meta and, once the last sibling is gone, the shared .nzbz store.
+	err := mrf.metadataService.DeleteFileMetadata(ctx, normalizedName)
 	if err != nil {
 		return true, err
 	}
@@ -2418,7 +2416,7 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 			}
 		}
 
-		if err := mvf.metadataService.DeleteCorruptedFile(ctx, mvf.name, cfg.Metadata.ShouldDeleteSourceNzb(), physicalPath, rootPath); err != nil {
+		if err := mvf.metadataService.DeleteCorruptedFile(ctx, mvf.name, physicalPath, rootPath); err != nil {
 			slog.ErrorContext(ctx, "Failed to delete corrupted file after streaming failure", "file", mvf.name, "error", err)
 		} else {
 			// The file this handle is reading no longer exists; latch it closed,

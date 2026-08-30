@@ -1404,7 +1404,7 @@ func (s *Service) cleanupWrittenPaths(ctx context.Context, itemID int64, paths [
 			}
 			s.cleanupHealthRecords(ctx, itemID, dirPath)
 		} else {
-			if delErr := s.metadataService.DeleteFileMetadata(p); delErr != nil {
+			if delErr := s.metadataService.DeleteFileMetadata(ctx, p); delErr != nil {
 				s.log.WarnContext(ctx, "Failed to clean up metadata file after import failure",
 					"queue_id", itemID,
 					"path", p,

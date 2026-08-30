@@ -69,7 +69,6 @@ export interface DatabaseConfig {
 // Metadata configuration
 export interface MetadataConfig {
 	root_path: string;
-	delete_source_nzb_on_removal?: boolean;
 	backup: MetadataBackupConfig;
 	migration?: MetadataMigrationConfig;
 }
@@ -385,7 +384,6 @@ export interface DatabaseUpdateRequest {
 // Metadata update request
 export interface MetadataUpdateRequest {
 	root_path?: string;
-	delete_source_nzb_on_removal?: boolean;
 	backup?: MetadataBackupConfig;
 }
 

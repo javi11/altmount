@@ -817,7 +817,6 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 				previousPending = make(map[string]bool)
 			}
 
-			deleteSourceNzb := cfg.Metadata.ShouldDeleteSourceNzb()
 			deletedDirs := make(map[string]bool)
 
 			for relativeMountPath := range currentMetaOrphans {
@@ -830,7 +829,7 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 				if previousPending[relativeMountPath] {
 					// Confirmed orphan: missing in two consecutive runs → safe to delete
 					if !dryRun {
-						if err := lsw.metadataService.DeleteFileMetadataWithSourceNzb(ctx, relativeMountPath, deleteSourceNzb); err != nil {
+						if err := lsw.metadataService.DeleteFileMetadata(ctx, relativeMountPath); err != nil {
 							if !os.IsNotExist(err) {
 								slog.ErrorContext(ctx, "Failed to delete confirmed orphaned metadata",
 									"path", relativeMountPath, "error", err)

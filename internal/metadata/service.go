@@ -744,28 +744,24 @@ func (ms *MetadataService) UpdateFileStatus(virtualPath string, status metapb.Fi
 	})
 }
 
-// DeleteFileMetadata deletes a metadata file
-func (ms *MetadataService) DeleteFileMetadata(virtualPath string) error {
-	return ms.DeleteFileMetadataWithSourceNzb(context.Background(), virtualPath, false)
-}
-
-// DeleteFileMetadataWithSourceNzb deletes a metadata file and optionally its source NZB
-func (ms *MetadataService) DeleteFileMetadataWithSourceNzb(ctx context.Context, virtualPath string, deleteSourceNzb bool) error {
+// DeleteFileMetadata deletes a metadata file, its .id sidecar, and — when this was
+// the last metadata file referencing it — the shared .nzbz store behind it.
+//
+// The store is a per-release artifact shared by every file of a multi-file import,
+// so its lifetime is governed exclusively by the reference count. Nothing here acts
+// on SourceNzbPath: for v3 metadata it aliases StoreRef, and removing it directly
+// destroyed the store out from under sibling files (issue #858).
+func (ms *MetadataService) DeleteFileMetadata(ctx context.Context, virtualPath string) error {
 	ms.liteCache.Remove(virtualPath)
 
 	filename := filepath.Base(virtualPath)
 	metadataDir := filepath.Join(ms.rootPath, filepath.Dir(virtualPath))
 	metadataPath := filepath.Join(metadataDir, filename+".meta")
 
-	// Always read metadata first to capture SourceNzbPath and StoreRef before deletion.
-	var sourceNzbPath string
-	var storeRef string
-	if metadata, err := ms.ReadFileMetadata(virtualPath); err == nil && metadata != nil {
-		if deleteSourceNzb {
-			sourceNzbPath = metadata.SourceNzbPath
-		}
-		storeRef = metadata.StoreRef
-	}
+	// Read StoreRef straight off the proto rather than via ReadFileMetadata: a full
+	// read resolves segments against the store, so on an install whose store is
+	// already missing it fails and we would lose the reference we need to decrement.
+	storeRef := ms.readStoreRef(metadataPath)
 
 	// Delete the metadata file
 	err := os.Remove(metadataPath)
@@ -782,28 +778,13 @@ func (ms *MetadataService) DeleteFileMetadataWithSourceNzb(ctx context.Context, 
 	// Clean up empty parent directories in metadata path
 	utils.RemoveEmptyDirs(ms.rootPath, metadataDir)
 
-	// Optionally delete the source NZB file (error-tolerant)
-	if deleteSourceNzb && sourceNzbPath != "" {
-		if err := os.Remove(sourceNzbPath); err != nil {
-			if !os.IsNotExist(err) {
-				slog.DebugContext(ctx, "Failed to delete source NZB file",
-					"nzb_path", sourceNzbPath,
-					"error", err)
-			}
-		} else {
-			slog.DebugContext(ctx, "Deleted source NZB file",
-				"nzb_path", sourceNzbPath,
-				"virtual_path", virtualPath)
-		}
-	}
-
 	// Decrement reference count for shared store file and delete it if no more refs.
 	if ms.storeRefCounter != nil && storeRef != "" {
-		newCount, err := ms.storeRefCounter.DecStoreRef(ctx, storeRef)
+		newCount, tracked, err := ms.storeRefCounter.DecStoreRef(ctx, storeRef)
 		if err != nil {
 			slog.WarnContext(ctx, "failed to decrement store ref count",
 				"store_path", storeRef, "error", err)
-		} else if newCount == 0 {
+		} else if tracked && newCount == 0 {
 			if removeErr := os.Remove(storeRef); removeErr != nil && !os.IsNotExist(removeErr) {
 				slog.WarnContext(ctx, "failed to delete orphaned store file",
 					"store_path", storeRef, "error", removeErr)
@@ -814,13 +795,13 @@ func (ms *MetadataService) DeleteFileMetadataWithSourceNzb(ctx context.Context, 
 	return nil
 }
 
-// DeleteCorruptedFile removes a file's metadata (and optionally its source NZB), then
-// removes the physical library file (if any) and cleans up now-empty parent directories
-// in the physical library tree. Metadata-tree cleanup is already handled by
-// DeleteFileMetadataWithSourceNzb; the physical-path removal is error-tolerant since
-// physicalPath is often just a view into the same mount and may already be gone.
-func (ms *MetadataService) DeleteCorruptedFile(ctx context.Context, virtualPath string, deleteSourceNzb bool, physicalPath string, physicalRoot string) error {
-	if err := ms.DeleteFileMetadataWithSourceNzb(ctx, virtualPath, deleteSourceNzb); err != nil {
+// DeleteCorruptedFile removes a file's metadata, then removes the physical library
+// file (if any) and cleans up now-empty parent directories in the physical library
+// tree. Metadata-tree cleanup is already handled by DeleteFileMetadata; the
+// physical-path removal is error-tolerant since physicalPath is often just a view
+// into the same mount and may already be gone.
+func (ms *MetadataService) DeleteCorruptedFile(ctx context.Context, virtualPath string, physicalPath string, physicalRoot string) error {
+	if err := ms.DeleteFileMetadata(ctx, virtualPath); err != nil {
 		return err
 	}
 	if physicalPath == "" {
@@ -879,17 +860,21 @@ func (ms *MetadataService) DeleteDirectory(virtualPath string) error {
 	if ms.storeRefCounter != nil {
 		for storePath, count := range storeRefCounts {
 			var lastCount int64
+			var lastTracked bool
 			for range count {
-				newCount, decErr := ms.storeRefCounter.DecStoreRef(ctx, storePath)
+				newCount, tracked, decErr := ms.storeRefCounter.DecStoreRef(ctx, storePath)
 				if decErr != nil {
 					slog.WarnContext(ctx, "failed to decrement store ref count",
 						"store_path", storePath, "error", decErr)
 					lastCount = -1 // mark as unknown; don't delete
+					lastTracked = false
 					break
 				}
-				lastCount = newCount
+				lastCount, lastTracked = newCount, tracked
 			}
-			if lastCount == 0 {
+			// An untracked store has an unknown ref count, not a zero one: leaking it
+			// is recoverable, deleting one a sibling still needs is not.
+			if lastTracked && lastCount == 0 {
 				if removeErr := os.Remove(storePath); removeErr != nil && !os.IsNotExist(removeErr) {
 					slog.WarnContext(ctx, "failed to delete orphaned store file",
 						"store_path", storePath, "error", removeErr)
