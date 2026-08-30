@@ -282,3 +282,63 @@ func TestPropagateArchiveType_SkipsTxtSidecar(t *testing.T) {
 		}
 	}
 }
+
+func TestExtractNzbPassword(t *testing.T) {
+	// Case 1: n.Meta with password
+	n1 := &nzbparser.Nzb{
+		Meta: map[string]string{
+			"password": "secret_password_1",
+		},
+	}
+	assert.Equal(t, "secret_password_1", extractNzbPassword(n1, "movie.nzb"))
+
+	// Case 2: n.Meta with uppercase Password
+	n2 := &nzbparser.Nzb{
+		Meta: map[string]string{
+			"Password": "secret_password_2",
+		},
+	}
+	assert.Equal(t, "secret_password_2", extractNzbPassword(n2, "movie.nzb"))
+
+	// Case 3: Filename {{password}}
+	n3 := &nzbparser.Nzb{}
+	assert.Equal(t, "secret_in_name", extractNzbPassword(n3, "Movie.Title.2024.1080p{{secret_in_name}}.nzb"))
+
+	// Case 4: Subject {{password}}
+	n4 := &nzbparser.Nzb{
+		Files: []nzbparser.NzbFile{
+			{Subject: "[1234/5678] - \"movie.part01.rar\" yEnc (1/100) {{subject_pass}}"},
+		},
+	}
+	assert.Equal(t, "subject_pass", extractNzbPassword(n4, "movie.nzb"))
+
+	// Case 5: No password
+	n5 := &nzbparser.Nzb{
+		Files: []nzbparser.NzbFile{
+			{Subject: "[1234/5678] - \"movie.part01.rar\" yEnc (1/100)"},
+		},
+	}
+	assert.Equal(t, "", extractNzbPassword(n5, "movie.nzb"))
+}
+
+func TestPropagateArchiveType_NumericExtensions(t *testing.T) {
+	parsed := &ParsedNzb{
+		Type: NzbTypeRarArchive,
+		Files: []ParsedFile{
+			{Filename: "b082fa0beaa644d3aa01045d5b8d0b36.1", IsRarArchive: true},
+			{Filename: "b082fa0beaa644d3aa01045d5b8d0b36.2", IsRarArchive: false},
+			{Filename: "b082fa0beaa644d3aa01045d5b8d0b36.193", IsRarArchive: false},
+			{Filename: "b082fa0beaa644d3aa01045d5b8d0b36.nfo", IsRarArchive: false},
+			{Filename: "b082fa0beaa644d3aa01045d5b8d0b36.par2", IsPar2Archive: true},
+		},
+	}
+
+	p := &Parser{}
+	p.propagateArchiveType(parsed)
+
+	assert.True(t, parsed.Files[0].IsRarArchive, ".1 must be IsRarArchive=true")
+	assert.True(t, parsed.Files[1].IsRarArchive, ".2 must be propagated to IsRarArchive=true")
+	assert.True(t, parsed.Files[2].IsRarArchive, ".193 must be propagated to IsRarArchive=true")
+	assert.False(t, parsed.Files[3].IsRarArchive, ".nfo must NOT be IsRarArchive")
+	assert.False(t, parsed.Files[4].IsRarArchive, ".par2 must NOT be IsRarArchive")
+}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -21,6 +22,7 @@ import (
 // Client is a Prowlarr API client backed by golift/starr.
 type Client struct {
 	prowlarr *starrprowlarr.Prowlarr
+	host     string
 	apiKey   string
 	http     *http.Client
 }
@@ -41,6 +43,7 @@ func NewClient(host, apiKey string, httpClient *http.Client) *Client {
 	cfg.Client = httpClient
 	return &Client{
 		prowlarr: starrprowlarr.New(cfg),
+		host:     strings.TrimRight(host, "/"),
 		apiKey:   apiKey,
 		http:     httpClient,
 	}
@@ -498,20 +501,32 @@ func (c *Client) searchWithID(ctx context.Context, idField, idValue, searchType 
 	return results, nil
 }
 
-// DownloadNZB fetches the NZB file content from the given Prowlarr download URL.
+// DownloadNZB fetches the NZB file content from the given Prowlarr download URL or direct indexer URL.
 func (c *Client) DownloadNZB(ctx context.Context, downloadURL string) ([]byte, error) {
-	if err := httpclient.ValidateDownloadURL(downloadURL); err != nil {
-		return nil, fmt.Errorf("prowlarr: refusing download: %w", err)
+	reqURL, err := url.Parse(downloadURL)
+	if err != nil {
+		return nil, fmt.Errorf("prowlarr: invalid download URL: %w", err)
 	}
+
+	prowlarrHostURL, _ := url.Parse(c.host)
+	isProwlarrHost := prowlarrHostURL != nil && prowlarrHostURL.Hostname() != "" && strings.EqualFold(prowlarrHostURL.Hostname(), reqURL.Hostname())
+
+	if !isProwlarrHost {
+		if err := httpclient.ValidateDownloadURL(downloadURL); err != nil {
+			return nil, fmt.Errorf("prowlarr: refusing download: %w", err)
+		}
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("prowlarr: create download request: %w", err)
 	}
-	req.Header.Set("X-Api-Key", c.apiKey)
-	client := *c.http
-	client.CheckRedirect = func(req *http.Request, _ []*http.Request) error {
-		return fmt.Errorf("prowlarr: download redirect is not allowed")
+	if isProwlarrHost && c.apiKey != "" {
+		req.Header.Set("X-Api-Key", c.apiKey)
 	}
+
+	client := *c.http
+	client.CheckRedirect = httpclient.SafeDownloadCheckRedirect(10)
 
 	resp, err := client.Do(req)
 	if err != nil {

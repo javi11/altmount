@@ -459,7 +459,7 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 	}
 	missingIDs := make(map[string]struct{})
 	eligibleRegularCount := 0
-	tolerant := cfg.GetImportDamagePolicyTolerant()
+	acceptableMissingPercent := cfg.GetAcceptableMissingSegmentsPercentage()
 
 	for i, result := range results {
 		f := n.Files[i]
@@ -470,22 +470,25 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 		}
 
 		if result.Broken && !isPar2 {
-			// Tolerant damage policy: a standalone video file with SMALL
-			// confirmed damage imports as degraded rather than being dropped.
-			// Streaming zero-fills the gaps and the immediate post-import
-			// health check discovers + persists the holes and flags it
-			// degraded. Archive-set members (GroupKey != "") stay binary — a
-			// holed volume corrupts extraction and cannot be padded.
-			if tolerant && fastFailFiles[i].GroupKey == "" && holes.EligibleFile(f.Filename) {
+			// A standalone video file with SMALL confirmed damage, within the
+			// configured acceptable-missing threshold, imports as degraded
+			// rather than being dropped. Streaming zero-fills the gaps and
+			// the immediate post-import health check discovers + persists
+			// the holes and flags it degraded (or fails it, if the
+			// threshold changed since). Archive-set members (GroupKey != "")
+			// stay binary — a holed volume corrupts extraction and cannot be
+			// padded.
+			if acceptableMissingPercent > 0 && fastFailFiles[i].GroupKey == "" && holes.EligibleFile(f.Filename) {
 				verdict := holes.ClassifyProjected(
 					len(result.MissingSegmentIDs),
 					result.SampledCount,
 					len(f.Segments),
 					longestSampledRun(fastFailFiles[i].Segments, result.MissingSegmentIDs),
 				)
-				if verdict == holes.VerdictDegraded {
+				if verdict == holes.VerdictDegraded &&
+					!holes.ExceedsAcceptableMissing(len(result.MissingSegmentIDs), result.SampledCount, acceptableMissingPercent) {
 					if proc.log != nil {
-						proc.log.InfoContext(ctx, "Importing video file as degraded despite missing segments (tolerant damage policy)",
+						proc.log.InfoContext(ctx, "Importing video file as degraded despite missing segments (within acceptable-missing threshold)",
 							"file", f.Filename,
 							"missing_sampled", len(result.MissingSegmentIDs),
 							"sampled", result.SampledCount)

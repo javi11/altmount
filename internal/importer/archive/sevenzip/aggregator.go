@@ -331,7 +331,7 @@ func ProcessArchive(ctx context.Context, opts ProcessArchiveOptions) error {
 
 			metadataPath := metadataService.GetMetadataFilePath(item.virtualFilePath)
 			if _, err := os.Stat(metadataPath); err == nil {
-				_ = metadataService.DeleteFileMetadata(item.virtualFilePath)
+				_ = metadataService.DeleteFileMetadata(ctx, item.virtualFilePath)
 			}
 
 			if err := metadataService.WriteFileMetadataAuto(ctx, item.virtualFilePath, fileMeta, opts.SegmentIndex, opts.StoreRef); err != nil {

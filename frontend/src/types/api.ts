@@ -282,6 +282,13 @@ export interface HealthErrorDetails {
 	total_articles?: number;
 	sampled?: number;
 	playback_impact?: PlaybackImpact;
+	// Segments whose availability was never established (transport failures, or
+	// ids the sweep never reached). Deliberately not counted as missing.
+	unresolved_segments?: number;
+	// Set when the check stopped before examining every planned segment, which
+	// makes `sampled` a partial count and the missing-segment map incomplete.
+	terminated_early?: boolean;
+	termination_reason?: string;
 }
 
 export interface HealthCleanupRequest {
@@ -401,6 +408,41 @@ export interface LibrarySyncStatus {
 	is_running: boolean;
 	progress?: LibrarySyncProgress;
 	last_sync_result?: LibrarySyncResult;
+}
+
+// Metadata migration types (legacy inline-segment .meta → v3 shared NZB store)
+export interface MetadataMigrationProgress {
+	total_groups: number;
+	processed_groups: number;
+	total_files: number;
+	processed_files: number;
+	current_release: string;
+	start_time: string;
+}
+
+export interface MetadataMigrationResult {
+	dry_run: boolean;
+	groups: number;
+	faithful_groups: number;
+	synthesized_groups: number;
+	files_migrated: number;
+	files_failed: number;
+	bytes_before: number;
+	bytes_after: number;
+	bytes_saved: number;
+	failures?: string[];
+	cancelled: boolean;
+	duration: number;
+	completed_at: string;
+}
+
+export interface MetadataMigrationStatus {
+	is_running: boolean;
+	legacy_files: number;
+	legacy_groups: number;
+	progress?: MetadataMigrationProgress;
+	last_result?: MetadataMigrationResult;
+	last_dry_run?: MetadataMigrationResult;
 }
 
 // Pool Metrics types

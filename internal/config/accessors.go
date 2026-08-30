@@ -126,13 +126,20 @@ func (c *Config) GetMaxRepairRetries() int {
 	return c.Health.Repair.MaxRepairRetries
 }
 
-// Import config accessor methods.
-
-// GetImportDamagePolicyTolerant reports whether small confirmed damage on a
-// standalone video file should import as degraded (true, the default) instead
-// of failing the import (false, "strict").
-func (c *Config) GetImportDamagePolicyTolerant() bool {
-	return c.Import.DamagePolicy != "strict"
+// GetAcceptableMissingSegmentsPercentage returns the missing-segment
+// percentage a health check tolerates before failing a file (and triggering
+// repair) rather than leaving it degraded. Defaults to 2%; set to 0 to
+// disable tolerance entirely (any missing segment fails immediately), or to
+// 100 to disable failing on this basis altogether (always degraded, never
+// repaired for missing segments alone). The value is clamped to [0, 100].
+func (c *Config) GetAcceptableMissingSegmentsPercentage() float64 {
+	if c.Health.AcceptableMissingSegmentsPercentage < 0 {
+		return 0
+	}
+	if c.Health.AcceptableMissingSegmentsPercentage > 100 {
+		return 100
+	}
+	return c.Health.AcceptableMissingSegmentsPercentage
 }
 
 // TotalProviderConnections returns the pool's total connection capacity: the
@@ -182,6 +189,43 @@ func (c *Config) GetReadTimeoutSeconds() int {
 		return 30 // Default: 30 seconds
 	}
 	return c.Import.ReadTimeoutSeconds
+}
+
+// GetImportVerifyContent returns whether imported media files should be
+// probed for a valid container signature before the import is reported
+// successful.
+func (c *Config) GetImportVerifyContent() bool {
+	if c.Import.VerifyContent == nil {
+		return false
+	}
+	return *c.Import.VerifyContent
+}
+
+// GetImportVerifyContentTimeout returns the per-file content probe timeout
+// for import verification, defaulting to 15 seconds.
+func (c *Config) GetImportVerifyContentTimeout() time.Duration {
+	if c.Import.VerifyContentTimeoutSeconds == nil || *c.Import.VerifyContentTimeoutSeconds <= 0 {
+		return defaultVerifyContentTimeoutSeconds * time.Second
+	}
+	return time.Duration(*c.Import.VerifyContentTimeoutSeconds) * time.Second
+}
+
+// GetHealthVerifyContent returns whether health checks should probe media
+// files for a valid container signature.
+func (c *Config) GetHealthVerifyContent() bool {
+	if c.Health.VerifyContent == nil {
+		return false
+	}
+	return *c.Health.VerifyContent
+}
+
+// GetHealthVerifyContentTimeout returns the per-file content probe timeout
+// for health check verification, defaulting to 15 seconds.
+func (c *Config) GetHealthVerifyContentTimeout() time.Duration {
+	if c.Health.VerifyContentTimeoutSeconds == nil || *c.Health.VerifyContentTimeoutSeconds <= 0 {
+		return defaultVerifyContentTimeoutSeconds * time.Second
+	}
+	return time.Duration(*c.Health.VerifyContentTimeoutSeconds) * time.Second
 }
 
 // GetIsoAnalyzeTimeout returns the per-ISO analyse deadline with a 120s

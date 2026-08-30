@@ -2,9 +2,13 @@ package newsnab
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -18,9 +22,9 @@ const testCapsXML = `<?xml version="1.0" encoding="UTF-8"?>
 <caps>
 	<server title="Test Indexer"/>
 	<searching>
-		<search available="yes"/>
-		<movie-search available="yes"/>
-		<tv-search available="yes"/>
+		<search available="yes" supportedParams="q,cat,limit,extended"/>
+		<movie-search available="yes" supportedParams="q,cat,imdbid,limit,extended"/>
+		<tv-search available="yes" supportedParams="q,cat,imdbid,tvdbid,season,ep,limit,extended"/>
 	</searching>
 	<categories>
 		<category id="2000" name="Movies">
@@ -36,7 +40,6 @@ const testCapsXML = `<?xml version="1.0" encoding="UTF-8"?>
 			<subcat id="5040"/>
 		</category>
 	</categories>
-	<supportedParams>q,imdbid,tvdbid,season,ep,extended,limit,cat</supportedParams>
 </caps>`
 
 // serveCaps routes ?t=caps requests to the given fixture inside test handlers.
@@ -243,8 +246,11 @@ func TestParseCaps(t *testing.T) {
 		assert.Contains(t, caps.Categories, 2045)
 		assert.Contains(t, caps.Categories, 5000)
 		assert.Contains(t, caps.Categories, 5040)
-		assert.True(t, caps.supportsParam("imdbid"))
-		assert.False(t, caps.supportsParam("tmdbid"))
+		assert.True(t, caps.supportsParam(SearchTypeTV, "imdbid"))
+		assert.True(t, caps.supportsParam(SearchTypeTV, "season"))
+		assert.True(t, caps.supportsParam(SearchTypeMovie, "imdbid"))
+		assert.False(t, caps.supportsParam(SearchTypeTV, "tmdbid"))
+		assert.False(t, caps.supportsParam(SearchTypeMovie, "season"))
 	})
 
 	t.Run("Missing searching section means unknown not unsupported", func(t *testing.T) {
@@ -354,10 +360,9 @@ func TestNewsnabClient_SearchTV_TVDBIDUnsupported_PrefersImdbID(t *testing.T) {
 <caps>
 	<server title="No TVDB Indexer"/>
 	<searching>
-		<search available="yes"/>
-		<tv-search available="yes"/>
+		<search available="yes" supportedParams="q"/>
+		<tv-search available="yes" supportedParams="q,imdbid,season,ep"/>
 	</searching>
-	<supportedParams>q,imdbid,season,ep</supportedParams>
 </caps>`))
 			return
 		}
@@ -365,15 +370,21 @@ func TestNewsnabClient_SearchTV_TVDBIDUnsupported_PrefersImdbID(t *testing.T) {
 		if _, ok := q["tvdbid"]; ok {
 			tvdbRequested = true
 		}
-		assert.Equal(t, "15367376", q.Get("imdbid"))
+		if q.Get("imdbid") != "" {
+			assert.Equal(t, "15367376", q.Get("imdbid"))
+			w.Header().Set("Content-Type", "application/xml")
+			_, _ = w.Write([]byte(`<?xml version="1.0"?><rss version="2.0"><channel><title>x</title><item><title>The Ark S01E01</title><enclosure url="http://idx/nzb.nzb" type="application/x-nzb"/></item></channel></rss>`))
+			return
+		}
 		w.Header().Set("Content-Type", "application/xml")
 		_, _ = w.Write([]byte(`<?xml version="1.0"?><rss version="2.0"><channel><title>x</title></channel></rss>`))
 	}))
 	defer ts.Close()
 
 	client := NewClient(IndexerConfig{Name: "tv-caps-idx", URL: ts.URL, APIKey: "k", Enabled: true}, ts.Client())
-	_, err := client.SearchTV(context.Background(), "tt15367376", "415089", "The Ark", 1, 1, nil, "ua")
+	results, err := client.SearchTV(context.Background(), "tt15367376", "415089", "The Ark", 1, 1, nil, "ua")
 	require.NoError(t, err)
+	require.NotEmpty(t, results, "identifier search must succeed without triggering degradation")
 	assert.False(t, tvdbRequested, "tvdbid must be omitted when caps do not advertise it")
 }
 
@@ -396,4 +407,236 @@ func TestNewsnabClient_SearchSurfacesNewznabAPIError(t *testing.T) {
 	assert.Equal(t, 201, apiErr.Code)
 	assert.Equal(t, "Missing parameter", apiErr.Description)
 	assert.True(t, strings.Contains(err.Error(), "201"))
+}
+
+func TestSanitizeSearchQuery(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "empty", input: "", want: ""},
+		{name: "colon title", input: "Re:ZERO -Starting Life in Another World-", want: "Re ZERO -Starting Life in Another World-"},
+		{name: "multiple colons collapse spaces", input: "Re:Zero::Part:2", want: "Re Zero Part 2"},
+		{name: "comma and semicolon", input: "Show, Part; One", want: "Show Part One"},
+		{name: "keeps scene dots and dashes", input: "One.Piece.S004E111-FLUX", want: "One.Piece.S004E111-FLUX"},
+		{name: "trims and collapses whitespace", input: "  A   Will   Eternal  ", want: "A Will Eternal"},
+		{name: "only punctuation", input: "::", want: ""},
+		{name: "imdb id untouched", input: "tt5566766", want: "tt5566766"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, sanitizeSearchQuery(tt.input))
+		})
+	}
+}
+
+func TestQueryFallbackSanitizesTitle(t *testing.T) {
+	assert.Equal(t, "Re ZERO kara Hajimeru", queryFallback("", "Re:ZERO kara Hajimeru"))
+	// Identifier passthrough is never rewritten.
+	assert.Equal(t, "tt5566766", queryFallback("tt5566766", ""))
+}
+
+// rssWithItems builds a minimal RSS response containing the given titles.
+func rssWithItems(titles ...string) string {
+	items := ""
+	for _, title := range titles {
+		items += `<item><title>` + title + `</title><enclosure url="http://idx/` + title + `.nzb" type="application/x-nzb"/></item>`
+	}
+	return `<?xml version="1.0"?><rss version="2.0"><channel><title>x</title>` + items + `</channel></rss>`
+}
+
+func TestNewsnabClient_SearchTV_DegradesWhenEpisodeFilterZeroes(t *testing.T) {
+	var mu sync.Mutex
+	searchQueries := []url.Values{}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveCaps(w, r) {
+			return
+		}
+		q := r.URL.Query()
+		mu.Lock()
+		searchQueries = append(searchQueries, q)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/xml")
+		// Model altHUB: an advertised ep filter that zeroes out for content
+		// it cannot parse. Any query carrying ep returns nothing; the same
+		// query without ep returns releases.
+		if q.Get("ep") != "" {
+			_, _ = w.Write([]byte(`<?xml version="1.0"?><rss version="2.0"><channel><title>x</title></channel></rss>`))
+			return
+		}
+		_, _ = w.Write([]byte(rssWithItems("Re Zero kara Hajimeru Isekai Seikatsu - 72")))
+	}))
+	defer ts.Close()
+
+	client := NewClient(IndexerConfig{Name: "ep-zero-idx", URL: ts.URL, APIKey: "k", Enabled: true}, ts.Client())
+	results, err := client.SearchTV(context.Background(), "tt5566766", "", "Re Zero", 2, 11, nil, "ua")
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Len(t, searchQueries, 2, "exactly one degradation retry expected")
+	assert.Equal(t, "11", searchQueries[0].Get("ep"), "first attempt keeps the advertised ep filter")
+	assert.Empty(t, searchQueries[1].Get("ep"), "retry must drop the zeroing ep filter")
+	assert.Equal(t, "2", searchQueries[1].Get("season"), "season narrowing survives the first rung")
+	assert.Equal(t, "5566766", searchQueries[1].Get("imdbid"))
+	// Episode precision was dropped, so identifier trust must not apply.
+	assert.False(t, results[0].ByIDSearch, "degraded identifier matches must be re-validated by media matching")
+}
+
+func TestNewsnabClient_SearchTV_NoRetryWhenFirstAttemptHasResults(t *testing.T) {
+	var requests atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveCaps(w, r) {
+			return
+		}
+		requests.Add(1)
+		w.Header().Set("Content-Type", "application/xml")
+		_, _ = w.Write([]byte(rssWithItems("Release One")))
+	}))
+	defer ts.Close()
+
+	client := NewClient(IndexerConfig{Name: "healthy-idx", URL: ts.URL, APIKey: "k", Enabled: true}, ts.Client())
+	results, err := client.SearchTV(context.Background(), "tt1234567", "", "Show", 1, 1, nil, "ua")
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, int32(1), requests.Load(), "non-empty first attempt must not retry")
+}
+
+func TestNewsnabClient_SearchMovie_DropsCategoriesWhenCombinedQueryZeroes(t *testing.T) {
+	var mu sync.Mutex
+	searchQueries := []url.Values{}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveCaps(w, r) {
+			return
+		}
+		q := r.URL.Query()
+		mu.Lock()
+		searchQueries = append(searchQueries, q)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/xml")
+		// Model NZBgeek per-type strictness: a movie identifier combined
+		// with TV categories returns nothing; the identifier alone works.
+		if q.Get("imdbid") != "" && q.Get("cat") != "" {
+			_, _ = w.Write([]byte(`<?xml version="1.0"?><rss version="2.0"><channel><title>x</title></channel></rss>`))
+			return
+		}
+		_, _ = w.Write([]byte(rssWithItems("Some Movie 1080p")))
+	}))
+	defer ts.Close()
+
+	client := NewClient(IndexerConfig{Name: "strict-cats-idx", URL: ts.URL, APIKey: "k", Enabled: true}, ts.Client())
+	// TV categories passed to a movie search.
+	results, err := client.SearchMovie(context.Background(), "tt0111161", "Some Movie", []int{5000, 5030, 5040}, "ua")
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Len(t, searchQueries, 2)
+	assert.NotEmpty(t, searchQueries[0].Get("cat"))
+	assert.Empty(t, searchQueries[1].Get("cat"), "retry must drop the zeroing category filter")
+	assert.Equal(t, "0111161", searchQueries[1].Get("imdbid"))
+	// The identifier still pins the movie exactly, so trust is preserved.
+	assert.True(t, results[0].ByIDSearch)
+}
+
+func TestNewsnabClient_LearnsUnsupportedIdentifierSearch(t *testing.T) {
+	var mu sync.Mutex
+	searchQueries := []url.Values{}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveCaps(w, r) {
+			return
+		}
+		q := r.URL.Query()
+		mu.Lock()
+		searchQueries = append(searchQueries, q)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/xml")
+		// Model altHUB identifier behavior: imdbid queries always return
+		// zero rows; keyword queries return releases.
+		if q.Get("imdbid") != "" {
+			_, _ = w.Write([]byte(`<?xml version="1.0"?><rss version="2.0"><channel><title>x</title></channel></rss>`))
+			return
+		}
+		_, _ = w.Write([]byte(rssWithItems("A Will Eternal - Season 4 Episode 7 [172] (1080p)")))
+	}))
+	defer ts.Close()
+
+	client := NewClient(IndexerConfig{Name: "no-mappings-idx", URL: ts.URL, APIKey: "k", Enabled: true}, ts.Client())
+
+	// First request: identifier attempt, full degradation ladder, then the
+	// keyword fallback answers.
+	results, err := client.SearchTV(context.Background(), "tt11143630", "", "A Will Eternal", 4, 7, nil, "ua")
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.False(t, client.idSearchBroken(idParamImdb) == false, "negative cache entry must be set")
+
+	mu.Lock()
+	firstCallRequests := len(searchQueries)
+	mu.Unlock()
+
+	// Second request: the learned entry skips identifier queries entirely.
+	results, err = client.SearchTV(context.Background(), "tt11143630", "", "A Will Eternal", 4, 7, nil, "ua")
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+
+	mu.Lock()
+	defer mu.Unlock()
+	secondCallRequests := len(searchQueries) - firstCallRequests
+	assert.Equal(t, 1, secondCallRequests, "learned indexer must answer with a single keyword query")
+	assert.NotEmpty(t, searchQueries[firstCallRequests].Get("q"))
+	assert.Empty(t, searchQueries[firstCallRequests].Get("imdbid"))
+}
+
+type roundTripFunc func(req *http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func TestNewsnabClient_DownloadNZB_Redirect(t *testing.T) {
+	const indexerURL = "https://indexer.example.com/api?t=get&id=123"
+	const cdnURL = "https://cdn.example.com/nzbs/123.nzb"
+	const nzbData = "<nzb>newsnab content</nzb>"
+
+	transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.String() {
+		case indexerURL:
+			header := make(http.Header)
+			header.Set("Location", cdnURL)
+			return &http.Response{
+				StatusCode: http.StatusFound,
+				Header:     header,
+				Body:       io.NopCloser(strings.NewReader("")),
+			}, nil
+		case cdnURL:
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(nzbData)),
+			}, nil
+		default:
+			return &http.Response{
+				StatusCode: http.StatusNotFound,
+				Body:       io.NopCloser(strings.NewReader("not found")),
+			}, nil
+		}
+	})
+
+	httpClient := &http.Client{Transport: transport}
+	client := NewClient(IndexerConfig{Name: "redirect-idx", URL: "https://indexer.example.com", APIKey: "k", Enabled: true}, httpClient)
+
+	t.Run("redirect to cdn succeeds", func(t *testing.T) {
+		data, err := client.DownloadNZB(context.Background(), indexerURL, "test-ua")
+		require.NoError(t, err)
+		assert.Equal(t, nzbData, string(data))
+	})
+
+	t.Run("private address is rejected", func(t *testing.T) {
+		_, err := client.DownloadNZB(context.Background(), "http://10.0.0.1/nzb.xml", "test-ua")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "private address")
+	})
 }

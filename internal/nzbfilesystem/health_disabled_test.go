@@ -161,6 +161,51 @@ func TestUpdateFileHealthOnError_HealthEnabled_TriggersRepair(t *testing.T) {
 	assert.Nil(t, original, "health enabled must move metadata to the corrupted folder")
 }
 
+// TestUpdateFileHealthOnError_RepairLatchesHandleClosed pins the orphaned-reader fix:
+// once a repair has moved a file's metadata to the corrupted safety folder, the handle
+// that hit the failure must refuse further reads. Otherwise its prefetch pipeline keeps
+// fetching segments for a path that no longer exists and the client keeps reading
+// against it until the mount is restarted (issue #539).
+func TestUpdateFileHealthOnError_RepairLatchesHandleClosed(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks not supported on Windows")
+	}
+	repo, db, ms := setupStreamHealthEnv(t)
+	ctx := context.Background()
+
+	filePath := "series/stream.s01e04.mkv"
+	libraryPath := "/media/library/stream.s01e04.mkv"
+	seg := writeStreamMeta(t, ms, filePath)
+
+	_, err := db.Exec(
+		`INSERT INTO file_health (file_path, library_path, status, scheduled_check_at) VALUES (?, ?, 'healthy', datetime('now'))`,
+		filePath, libraryPath,
+	)
+	require.NoError(t, err)
+
+	enabled := true
+	cfg := config.DefaultConfig()
+	cfg.Health.Enabled = &enabled
+	cfg.MountPath = ""
+
+	mvf := newStreamFailureMVF(ctx, filePath, repo, ms, seg, cfg)
+	require.False(t, mvf.metadataGone.Load(), "handle must start out readable")
+
+	mvf.updateFileHealthOnError(&usenet.DataCorruptionError{UnderlyingErr: errors.New("article not found"), NoRetry: true}, true)
+
+	require.True(t, mvf.metadataGone.Load(), "moving the metadata away must latch the handle closed")
+
+	// Both read entry points must refuse: Read goes through ensureReader, while
+	// ReadAtContext's ephemeral path builds readers without it.
+	err = mvf.ensureReader()
+	require.Error(t, err, "ensureReader must not rebuild a reader for a file that was moved away")
+	assert.ErrorIs(t, err, ErrMetadataGone)
+
+	_, err = mvf.ReadAtContext(ctx, make([]byte, 16), 0)
+	require.Error(t, err, "ReadAtContext must refuse reads after the metadata is gone")
+	assert.ErrorIs(t, err, ErrMetadataGone)
+}
+
 // TestUpdateFileHealthOnError_FailureMasking_MasksRepair verifies that when failure masking
 // is enabled, a streaming failure below the threshold does not immediately trigger a repair
 // or move the metadata, but increments the failure count instead.
@@ -224,4 +269,3 @@ func TestUpdateFileHealthOnError_FailureMasking_MasksRepair(t *testing.T) {
 	original, _ = ms.ReadFileMetadata(filePath)
 	assert.Nil(t, original, "metadata should be moved to corrupted folder now")
 }
-

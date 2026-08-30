@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"strings"
 )
@@ -17,8 +18,8 @@ import (
 // Hostnames are not resolved here: a DNS name that resolves to a private
 // address still passes. Blocking literal private targets removes the direct
 // attack while keeping the check cheap and dependency-free on a hot path;
-// callers additionally refuse redirects, so a remote host cannot bounce the
-// request onto an internal address.
+// callers validate redirect hops using SafeDownloadCheckRedirect, so a remote
+// host cannot bounce the request onto an internal address.
 func ValidateDownloadURL(raw string) error {
 	if strings.TrimSpace(raw) == "" {
 		return fmt.Errorf("download URL is empty")
@@ -55,6 +56,32 @@ func ValidateDownloadURL(raw string) error {
 	}
 
 	return nil
+}
+
+// SafeDownloadCheckRedirect returns a CheckRedirect function that permits redirects
+// up to maxRedirects (default 10) and ensures each redirect target satisfies
+// ValidateDownloadURL. It also redacts sensitive credentials (X-Api-Key, Authorization)
+// when redirecting across different hostnames.
+func SafeDownloadCheckRedirect(maxRedirects int) func(req *http.Request, via []*http.Request) error {
+	if maxRedirects <= 0 {
+		maxRedirects = 10
+	}
+	return func(req *http.Request, via []*http.Request) error {
+		if len(via) >= maxRedirects {
+			return fmt.Errorf("stopped after %d redirects", maxRedirects)
+		}
+		if err := ValidateDownloadURL(req.URL.String()); err != nil {
+			return fmt.Errorf("refusing redirect: %w", err)
+		}
+		if len(via) > 0 {
+			prev := via[len(via)-1]
+			if !strings.EqualFold(prev.URL.Hostname(), req.URL.Hostname()) {
+				req.Header.Del("X-Api-Key")
+				req.Header.Del("Authorization")
+			}
+		}
+		return nil
+	}
 }
 
 // RedactURLError strips the query string, fragment and userinfo from the URL

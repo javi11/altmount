@@ -85,8 +85,12 @@ export interface DatabaseConfig {
 // Metadata configuration
 export interface MetadataConfig {
 	root_path: string;
-	delete_source_nzb_on_removal?: boolean;
 	backup: MetadataBackupConfig;
+	migration?: MetadataMigrationConfig;
+}
+
+export interface MetadataMigrationConfig {
+	default_group: string;
 }
 
 export interface MetadataBackupConfig {
@@ -143,6 +147,8 @@ export interface HealthConfig {
 	// (non-degraded) corruption: "repair" (default) triggers an Arr rescan;
 	// "delete" removes the file and cleans up now-empty parent directories instead.
 	corruption_action?: "repair" | "delete";
+	verify_content?: boolean; // Probe each media file's header for a valid container signature during health checks
+	verify_content_timeout_seconds?: number; // Per-file content probe timeout (default 15s)
 }
 
 export interface RepairConfig {
@@ -254,6 +260,8 @@ export interface ImportConfig {
 	filter_sample_files?: boolean;
 	failed_item_retention_hours?: number | null;
 	history_retention_days?: number | null;
+	verify_content?: boolean; // Probe each media file's header for a valid container signature before reporting import success
+	verify_content_timeout_seconds?: number; // Per-file content probe timeout (default 15s)
 }
 
 // Log configuration
@@ -393,7 +401,6 @@ export interface DatabaseUpdateRequest {
 // Metadata update request
 export interface MetadataUpdateRequest {
 	root_path?: string;
-	delete_source_nzb_on_removal?: boolean;
 	backup?: MetadataBackupConfig;
 }
 
@@ -688,6 +695,7 @@ export interface ProwlarrConfig {
 	enabled: boolean;
 	host: string;
 	api_key: string;
+	api_key_set?: boolean;
 	categories: number[];
 	indexers?: number[];
 	preferred_indexers?: number[];

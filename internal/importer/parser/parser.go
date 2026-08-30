@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -25,6 +27,7 @@ import (
 	"github.com/javi11/altmount/internal/importer/parser/par2"
 	"github.com/javi11/altmount/internal/importer/rarname"
 	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
+	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/nzbgap"
 	"github.com/javi11/altmount/internal/pool"
@@ -136,13 +139,11 @@ func (p *Parser) ParseNzb(ctx context.Context, n *nzbparser.Nzb, nzbPath string,
 	// Build the shared NzbStore and segment index for v3 format.
 	// Must be built from the raw *nzbparser.Nzb BEFORE any per-file processing
 	// (which may filter/reorder files). The index maps message-id → flat store index.
-	parsed.Store, parsed.SegmentIndex = BuildStore(n)
+	parsed.Store, parsed.SegmentIndex = metadata.BuildStore(n)
 
-	// Determine segment size from meta chunk_size or fallback to first segment size
-	if n.Meta != nil {
-		if pwd, ok := n.Meta["password"]; ok && pwd != "" {
-			parsed.SetPassword(pwd)
-		}
+	// Extract password from metadata, filename tags, subject lines, or raw NZB meta
+	if pwd := extractNzbPassword(n, nzbPath); pwd != "" {
+		parsed.SetPassword(pwd)
 	}
 
 	// Fetch first segment data for all files in parallel
@@ -1482,60 +1483,88 @@ func (p *Parser) determineNzbType(files []ParsedFile) NzbType {
 	return NzbTypeMultiFile
 }
 
+var (
+	passwordBracketsRegex = regexp.MustCompile(`(?i)\{\{\s*([^{}]+?)\s*\}\}`)
+	passwordSlashRegex    = regexp.MustCompile(`(?i)/(?:password|pwd)[:=]\s*([^\s/]+)`)
+	passwordMetaRegex     = regexp.MustCompile(`(?i)<meta\b[^>]*type\s*=\s*["']?(?:password|pass|pwd|password_hash)["']?[^>]*>([\s\S]*?)<\/meta>`)
+)
+
+func extractNzbPassword(n *nzbparser.Nzb, nzbPath string) string {
+	if n == nil {
+		return ""
+	}
+	// 1. Check n.Meta with case-insensitive keys
+	if n.Meta != nil {
+		for k, v := range n.Meta {
+			if strings.EqualFold(k, "password") || strings.EqualFold(k, "pass") || strings.EqualFold(k, "pwd") || strings.EqualFold(k, "password_hash") {
+				if trimmed := strings.TrimSpace(v); trimmed != "" {
+					return trimmed
+				}
+			}
+		}
+	}
+	// 2. Check filename for {{password}} or /password:xyz/ patterns
+	baseName := filepath.Base(nzbPath)
+	if m := passwordBracketsRegex.FindStringSubmatch(baseName); len(m) > 1 {
+		if trimmed := strings.TrimSpace(m[1]); trimmed != "" {
+			return trimmed
+		}
+	}
+	if m := passwordSlashRegex.FindStringSubmatch(baseName); len(m) > 1 {
+		if trimmed := strings.TrimSpace(m[1]); trimmed != "" {
+			return trimmed
+		}
+	}
+	// 3. Check file subjects for {{password}} or /password:xyz/
+	for _, f := range n.Files {
+		if m := passwordBracketsRegex.FindStringSubmatch(f.Subject); len(m) > 1 {
+			if trimmed := strings.TrimSpace(m[1]); trimmed != "" {
+				return trimmed
+			}
+		}
+		if m := passwordSlashRegex.FindStringSubmatch(f.Subject); len(m) > 1 {
+			if trimmed := strings.TrimSpace(m[1]); trimmed != "" {
+				return trimmed
+			}
+		}
+	}
+	// 4. Check NZB file on disk if available (for <meta type="password"> outside <head>)
+	if nzbPath != "" {
+		if data, err := os.ReadFile(nzbPath); err == nil && len(data) > 0 {
+			limit := len(data)
+			if limit > 64*1024 {
+				limit = 64 * 1024
+			}
+			if m := passwordMetaRegex.FindSubmatch(data[:limit]); len(m) > 1 {
+				if trimmed := strings.TrimSpace(string(m[1])); trimmed != "" {
+					return trimmed
+				}
+			}
+		}
+	}
+	return ""
+}
+
 // propagateArchiveType sets the archive-type flag on non-PAR2 files that are
-// confirmed archive parts. Propagation is gated on the file already being
-// detected as an archive (via magic bytes or extension), preventing non-archive
-// sidecars (.txt, .nfo, etc.) from being wrongly classified.
+// archive parts (including split continuation volumes with numeric or extensionless names).
+// Non-archive sidecars (.txt, .nfo, .sfv, etc.) are excluded so they are processed as regular files.
 func (p *Parser) propagateArchiveType(parsed *ParsedNzb) {
 	switch parsed.Type {
 	case NzbType7zArchive:
 		for i := range parsed.Files {
 			f := &parsed.Files[i]
-			if !f.IsPar2Archive && !fileinfo.IsPar2File(f.Filename) &&
-				(f.Is7zArchive || fileinfo.Is7zFile(f.Filename)) {
+			if !f.IsPar2Archive && !fileinfo.IsPar2File(f.Filename) && !isPar2SidecarExtension(f.Filename) {
 				f.Is7zArchive = true
 			}
 		}
 	case NzbTypeRarArchive:
 		for i := range parsed.Files {
 			f := &parsed.Files[i]
-			if !f.IsPar2Archive && !fileinfo.IsPar2File(f.Filename) &&
-				(f.IsRarArchive || fileinfo.IsRarFile(f.Filename)) {
+			if !f.IsPar2Archive && !fileinfo.IsPar2File(f.Filename) && !isPar2SidecarExtension(f.Filename) {
 				f.IsRarArchive = true
 			}
 		}
 	}
-}
-
-// BuildStore converts a parsed NZB into a NzbStore (for persistence) plus a
-// message-id → flat-store-index lookup used to emit SegmentRefs.
-// Segments are stored in their natural NzbSegments order (by Number after sort).
-func BuildStore(n *nzbparser.Nzb) (*metapb.NzbStore, map[string]int64) {
-	store := &metapb.NzbStore{Files: make([]*metapb.NzbFileEntry, 0, len(n.Files))}
-	index := make(map[string]int64)
-	var flat int64
-	for _, f := range n.Files {
-		fe := &metapb.NzbFileEntry{
-			Subject: f.Subject,
-			Poster:  f.Poster,
-			Date:    int64(f.Date),
-			Groups:  f.Groups,
-		}
-		segs := make(nzbparser.NzbSegments, len(f.Segments))
-		copy(segs, f.Segments)
-		sort.Sort(segs)
-		for _, s := range segs {
-			fe.Segments = append(fe.Segments, &metapb.NzbSeg{
-				Id:     s.ID,
-				Number: int32(s.Number),
-				Bytes:  int64(s.Bytes),
-			})
-			index[s.ID] = flat
-			flat++
-		}
-		store.Files = append(store.Files, fe)
-	}
-	return store, index
 }
 
 // GetMetadata extracts metadata from the NZB head section

@@ -606,31 +606,33 @@ func buildMultiSegmentNzb(client *fakepool.Client, fileName string, segCount int
 	}}}
 }
 
-// TestPreParseFastFailTolerantImportsDegradedVideo verifies a standalone video
-// file with a small hole imports (not broken) under the default tolerant policy.
-func TestPreParseFastFailTolerantImportsDegradedVideo(t *testing.T) {
+// TestPreParseFastFailAcceptableThresholdImportsDegradedVideo verifies a
+// standalone video file with a small hole imports (not broken) once the
+// acceptable-missing threshold is raised above the actual damage.
+func TestPreParseFastFailAcceptableThresholdImportsDegradedVideo(t *testing.T) {
 	client := fakepool.New()
 	proc := &Processor{
 		poolManager:       processorTestPoolManager{client: client},
 		validationTimeout: 100 * time.Millisecond,
 	}
-	// 200 segments, 1 missing (0.5%) — well within the pad caps.
+	// 50 segments, 1 missing (2%) — well within the pad caps.
 	n := buildMultiSegmentNzb(client, "Movie.2024.mkv", 50, 25)
 	cfg := config.DefaultConfig()
 	cfg.Import.SegmentSamplePercentage = 100
+	cfg.Health.AcceptableMissingSegmentsPercentage = 5
 
 	brokenIdx, _, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, nil)
 	if err != nil {
 		t.Fatalf("preParseFastFail returned error: %v", err)
 	}
 	if len(brokenIdx) != 0 {
-		t.Fatalf("brokenIdx = %v, want empty (tolerant policy imports degraded video)", brokenIdx)
+		t.Fatalf("brokenIdx = %v, want empty (within acceptable-missing threshold)", brokenIdx)
 	}
 }
 
-// TestPreParseFastFailStrictFailsDegradedVideo verifies the same file is broken
-// under the strict policy.
-func TestPreParseFastFailStrictFailsDegradedVideo(t *testing.T) {
+// TestPreParseFastFailZeroToleranceFailsDegradedVideo verifies the same file
+// is broken when the acceptable-missing threshold is set to 0 (issue #813).
+func TestPreParseFastFailZeroToleranceFailsDegradedVideo(t *testing.T) {
 	client := fakepool.New()
 	proc := &Processor{
 		poolManager:       processorTestPoolManager{client: client},
@@ -639,19 +641,20 @@ func TestPreParseFastFailStrictFailsDegradedVideo(t *testing.T) {
 	n := buildMultiSegmentNzb(client, "Movie.2024.mkv", 50, 25)
 	cfg := config.DefaultConfig()
 	cfg.Import.SegmentSamplePercentage = 100
-	cfg.Import.DamagePolicy = "strict"
+	cfg.Health.AcceptableMissingSegmentsPercentage = 0
 
 	brokenIdx, _, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, nil)
 	if !errors.Is(err, multifile.ErrNoFilesProcessed) {
 		// Single file, and it's broken → all eligible broken → ErrNoFilesProcessed.
-		t.Fatalf("strict policy: err = %v, want ErrNoFilesProcessed", err)
+		t.Fatalf("zero tolerance: err = %v, want ErrNoFilesProcessed", err)
 	}
 	_ = brokenIdx
 }
 
-// TestPreParseFastFailTolerantStillFailsLongRun verifies tolerant policy does
-// NOT rescue a file whose missing run exceeds the pad cap.
-func TestPreParseFastFailTolerantStillFailsLongRun(t *testing.T) {
+// TestPreParseFastFailAcceptableThresholdStillFailsLongRun verifies a raised
+// acceptable-missing threshold does NOT rescue a file whose missing run
+// exceeds the pad cap.
+func TestPreParseFastFailAcceptableThresholdStillFailsLongRun(t *testing.T) {
 	client := fakepool.New()
 	proc := &Processor{
 		poolManager:       processorTestPoolManager{client: client},
@@ -661,10 +664,11 @@ func TestPreParseFastFailTolerantStillFailsLongRun(t *testing.T) {
 	n := buildMultiSegmentNzb(client, "Movie.2024.mkv", 50, 20, 21, 22, 23, 24)
 	cfg := config.DefaultConfig()
 	cfg.Import.SegmentSamplePercentage = 100
+	cfg.Health.AcceptableMissingSegmentsPercentage = 100
 
 	_, _, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, nil)
 	if !errors.Is(err, multifile.ErrNoFilesProcessed) {
-		t.Fatalf("tolerant policy with long run: err = %v, want ErrNoFilesProcessed", err)
+		t.Fatalf("raised threshold with long run: err = %v, want ErrNoFilesProcessed", err)
 	}
 }
 

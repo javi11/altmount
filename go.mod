@@ -13,6 +13,7 @@ tool (
 require (
 	github.com/Max-Sum/base32768 v0.0.0-20230304063302-18e6ce5945fd
 	github.com/avast/retry-go/v4 v4.6.1
+	github.com/gabriel-vasile/mimetype v1.4.15
 	github.com/go-pkgz/auth/v2 v2.0.0
 	github.com/go-viper/mapstructure/v2 v2.4.0
 	github.com/gofiber/fiber/v2 v2.52.9

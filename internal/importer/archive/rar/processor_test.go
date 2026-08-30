@@ -296,3 +296,40 @@ func TestGroupArchivesByBaseName(t *testing.T) {
 	require.Len(t, group46, 46)
 	require.Len(t, group1, 1)
 }
+
+func TestCheckForCompressedFiles(t *testing.T) {
+	rp := &rarProcessor{}
+
+	// Case 1: Video file is stored, sidecar .nfo is compressed -> MUST PASS (nil error)
+	filesWithStoredVideo := []rardecode.ArchiveFileInfo{
+		{
+			Name:              "The.Umbrella.Academy.S01E01.1080p.mkv",
+			TotalUnpackedSize: 1000000,
+			TotalPackedSize:   1000000,
+			Compressed:        false,
+		},
+		{
+			Name:              "The.Umbrella.Academy.S01E01.nfo",
+			TotalUnpackedSize: 500,
+			TotalPackedSize:   200,
+			Compressed:        true,
+			CompressionMethod: "rar5.0",
+		},
+	}
+	err := rp.checkForCompressedFiles(filesWithStoredVideo)
+	require.NoError(t, err, "stored video with compressed .nfo sidecar should be allowed")
+
+	// Case 2: Video file is compressed -> MUST FAIL with error
+	filesWithCompressedVideo := []rardecode.ArchiveFileInfo{
+		{
+			Name:              "Project.Hail.Mary.2026.1080p.mkv",
+			TotalUnpackedSize: 1000000,
+			TotalPackedSize:   500000,
+			Compressed:        true,
+			CompressionMethod: "rar5.0",
+		},
+	}
+	err = rp.checkForCompressedFiles(filesWithCompressedVideo)
+	require.Error(t, err, "compressed video file must be rejected")
+	require.Contains(t, err.Error(), "compressed media files are not supported")
+}

@@ -230,10 +230,13 @@ func (s *Server) handleDeleteHealth(c *fiber.Ctx) error {
 
 		// Delete metadata if requested
 		if deleteMeta && s.metadataService != nil {
-			if delErr := s.metadataService.DeleteFileMetadataWithSourceNzb(c.Context(), item.FilePath, cfg.Metadata.ShouldDeleteSourceNzb()); delErr != nil {
+			if delErr := s.metadataService.DeleteFileMetadata(c.Context(), item.FilePath); delErr != nil {
 				slog.ErrorContext(c.Context(), "Failed to delete metadata during health record deletion", "file_path", item.FilePath, "error", delErr)
 			} else {
 				metaDeleted = true
+				if s.healthWorker != nil {
+					s.healthWorker.NotifyRcloneVFS(item.FilePath)
+				}
 			}
 		}
 
@@ -311,10 +314,13 @@ func (s *Server) handleDeleteHealthBulk(c *fiber.Ctx) error {
 
 			// Delete metadata if requested
 			if req.DeleteMeta && s.metadataService != nil {
-				if delErr := s.metadataService.DeleteFileMetadataWithSourceNzb(c.Context(), item.FilePath, cfg.Metadata.ShouldDeleteSourceNzb()); delErr != nil {
+				if delErr := s.metadataService.DeleteFileMetadata(c.Context(), item.FilePath); delErr != nil {
 					slog.ErrorContext(c.Context(), "Failed to delete metadata during bulk deletion", "file_path", item.FilePath, "error", delErr)
 				} else {
 					metaDeletedCount++
+					if s.healthWorker != nil {
+						s.healthWorker.NotifyRcloneVFS(item.FilePath)
+					}
 				}
 			}
 
@@ -952,6 +958,28 @@ func (s *Server) handleDirectHealthCheck(c *fiber.Ctx) error {
 		return RespondConflict(c, "Health check already in progress", "This file is currently being checked")
 	}
 
+	// Optional body: {"verify_content": true|false} forces content
+	// verification on or off for this manual check, overriding the
+	// configured default and the Pending-only automatic gate. Parsed and
+	// validated BEFORE the row is transitioned to 'checking' below: rejecting
+	// a malformed body after that transition would leave the record stuck.
+	// An absent/empty body is a legitimate "no override" request and must
+	// stay tolerated.
+	var body struct {
+		VerifyContent *bool `json:"verify_content"`
+	}
+	if len(c.Body()) > 0 {
+		if err := c.BodyParser(&body); err != nil {
+			return RespondBadRequest(c, "Invalid request body", err.Error())
+		}
+	}
+
+	// preCheckStatus is the file's HealthStatus before this transition to
+	// 'checking'; it must be threaded into PerformBackgroundCheck rather than
+	// re-read afterward, since re-reading here would always observe 'checking'
+	// and make the automatic Pending-only content-verification gate unreachable.
+	preCheckStatus := item.Status
+
 	// Immediately set status to 'checking' using ID
 	err = s.healthRepo.SetFileCheckingByID(c.Context(), id)
 	if err != nil {
@@ -959,7 +987,7 @@ func (s *Server) handleDirectHealthCheck(c *fiber.Ctx) error {
 	}
 
 	// Start health check in background using worker (still needs file path)
-	err = s.healthWorker.PerformBackgroundCheck(context.Background(), item.FilePath)
+	err = s.healthWorker.PerformBackgroundCheck(context.Background(), item.FilePath, preCheckStatus, body.VerifyContent)
 	if err != nil {
 		return RespondInternalError(c, "Failed to start background health check", err.Error())
 	}

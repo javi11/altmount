@@ -9,6 +9,7 @@ import {
 import { type FileHealth, HealthPriority } from "../../../../types/api";
 import { parseRepairReason } from "../par2RepairReason";
 import { HealthItemActionsMenu } from "./HealthItemActionsMenu";
+import { PartialCheckBadge } from "./PartialCheckBadge";
 import { PlaybackImpactBadge } from "./PlaybackImpactBadge";
 
 interface HealthTableRowProps {
@@ -59,14 +60,15 @@ export const HealthTableRow = memo(function HealthTableRow({
 		}
 	}, [item.metadata]);
 
-	const playbackImpact = useMemo(
-		() => parseHealthErrorDetails(item.error_details)?.playback_impact ?? null,
+	const errorDetails = useMemo(
+		() => parseHealthErrorDetails(item.error_details),
 		[item.error_details],
 	);
 	const repairReason = useMemo(
 		() => (item.last_error?.startsWith("par2repair:") ? parseRepairReason(item.last_error) : null),
 		[item.last_error],
 	);
+	const playbackImpact = errorDetails?.playback_impact ?? null;
 
 	const getNextPriority = (current: HealthPriority): HealthPriority => {
 		switch (current) {
@@ -187,6 +189,7 @@ export const HealthTableRow = memo(function HealthTableRow({
 				<div className="flex flex-wrap items-center gap-2">
 					<HealthBadge status={item.status} isMasked={item.is_masked} />
 					{playbackImpact && <PlaybackImpactBadge impact={playbackImpact} />}
+					{errorDetails && <PartialCheckBadge details={errorDetails} />}
 				</div>
 				{/* Show last_error for repair failures and general errors. PAR2
 				    repair verdicts land here when a repair proved impossible;

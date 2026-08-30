@@ -37,23 +37,69 @@ const (
 // /api?t=caps. A nil *Capabilities means "unknown"; every accessor treats
 // unknown as supported so behavior degrades gracefully to legacy queries.
 type Capabilities struct {
-	ServerName      string   `json:"server_name"`
-	Categories      []int    `json:"categories"`
-	Search          bool     `json:"search"`
-	MovieSearch     bool     `json:"movie_search"`
-	TVSearch        bool     `json:"tv_search"`
-	SupportedParams []string `json:"supported_params,omitempty"`
+	ServerName string `json:"server_name"`
+	Categories []int  `json:"categories"`
+	Search     bool   `json:"search"`
+	// SearchParams lists the parameters the indexer advertises for t=search.
+	SearchParams []string `json:"search_params,omitempty"`
+	MovieSearch  bool     `json:"movie_search"`
+	// MovieParams lists the parameters the indexer advertises for t=movie.
+	MovieParams []string `json:"movie_params,omitempty"`
+	TVSearch    bool     `json:"tv_search"`
+	// TVParams lists the parameters the indexer advertises for t=tvsearch.
+	TVParams []string `json:"tv_params,omitempty"`
 }
 
+// SearchType identifies the Newznab search function a parameter is checked
+// against. Indexers advertise supportedParams per search function, not
+// globally.
+type SearchType string
+
+const (
+	// SearchTypeSearch is the generic t=search function.
+	SearchTypeSearch SearchType = "search"
+	// SearchTypeMovie is the t=movie function.
+	SearchTypeMovie SearchType = "movie"
+	// SearchTypeTV is the t=tvsearch function.
+	SearchTypeTV SearchType = "tvsearch"
+)
+
+// Standard parameter sets assumed when a caps document omits the <searching>
+// section entirely. Older indexers do this while still supporting the common
+// parameters, so absence means unknown rather than unsupported. Mirrors the
+// defaults Prowlarr's IndexerCapabilities applies.
+var (
+	standardSearchParams = []string{"q"}
+	standardMovieParams  = []string{"q", "imdbid"}
+	standardTVParams     = []string{"q", "imdbid", "tvdbid", "season", "ep"}
+)
+
 // supportsParam reports whether the indexer advertises the given Newznab
-// search parameter (imdbid, tvdbid, season, ep, ...). Indexers that do not
-// declare supportedParams are treated as supporting every parameter.
-func (c *Capabilities) supportsParam(name string) bool {
-	if c == nil || len(c.SupportedParams) == 0 {
+// parameter (q, imdbid, tvdbid, season, ep, ...) for the search type.
+// Prowlarr-parity defaults: a search function that is available but declares
+// no supportedParams attribute supports q only; an unavailable function
+// supports nothing (callers consult Search/MovieSearch/TVSearch first); a nil
+// Capabilities (unknown caps) behaves as "everything supported" so callers
+// fall back to legacy unrestricted queries.
+func (c *Capabilities) supportsParam(searchType SearchType, name string) bool {
+	if c == nil {
 		return true
 	}
-	for _, p := range c.SupportedParams {
-		if p == strings.ToLower(name) {
+	var params []string
+	switch searchType {
+	case SearchTypeMovie:
+		params = c.MovieParams
+	case SearchTypeTV:
+		params = c.TVParams
+	default:
+		params = c.SearchParams
+	}
+	if len(params) == 0 {
+		return false
+	}
+	name = strings.ToLower(name)
+	for _, p := range params {
+		if p == name {
 			return true
 		}
 	}
@@ -224,6 +270,10 @@ func (c *Client) CheckCaps(ctx context.Context, userAgent string) (*Capabilities
 
 type capsXMLSearch struct {
 	Available string `xml:"available,attr"`
+	// SupportedParams is the comma-separated parameter list advertised on the
+	// search element itself, per the Newznab spec
+	// (e.g. <tv-search available="yes" supportedParams="q,season,ep"/>).
+	SupportedParams string `xml:"supportedParams,attr"`
 }
 
 type capsXML struct {
@@ -244,7 +294,6 @@ type capsXML struct {
 			} `xml:"subcat"`
 		} `xml:"category"`
 	} `xml:"categories"`
-	SupportedParams string `xml:"supportedParams"`
 }
 
 // parseCaps decodes a caps document. It returns nil when the body is not a
@@ -256,19 +305,32 @@ func parseCaps(body []byte) *Capabilities {
 	}
 
 	caps := &Capabilities{
-		ServerName:      doc.Server.Title,
-		Search:          searchAvailable(doc.Searching.Search.Available),
-		MovieSearch:     searchAvailable(doc.Searching.MovieSearch.Available),
-		TVSearch:        searchAvailable(doc.Searching.TVSearch.Available),
-		SupportedParams: parseSupportedParams(doc.SupportedParams),
+		ServerName: doc.Server.Title,
 	}
 
 	// Older indexers omit the <searching> section entirely while still
-	// supporting every search type; absence means unknown, not unsupported.
-	if doc.Searching.Search.Available == "" && doc.Searching.MovieSearch.Available == "" && doc.Searching.TVSearch.Available == "" {
+	// supporting the common search types and parameters; absence means
+	// unknown, so the standard parameter sets are assumed. When the section
+	// is present, each search function is parsed with Prowlarr's defaults:
+	// available but undeclared parameters mean q only, unavailable means the
+	// function is not usable.
+	searchingPresent := doc.Searching.Search.Available != "" ||
+		doc.Searching.MovieSearch.Available != "" ||
+		doc.Searching.TVSearch.Available != ""
+	if !searchingPresent {
 		caps.Search = true
+		caps.SearchParams = standardSearchParams
 		caps.MovieSearch = true
+		caps.MovieParams = standardMovieParams
 		caps.TVSearch = true
+		caps.TVParams = standardTVParams
+	} else {
+		caps.Search = searchAvailable(doc.Searching.Search.Available)
+		caps.SearchParams = advertisedParams(doc.Searching.Search, standardSearchParams)
+		caps.MovieSearch = searchAvailable(doc.Searching.MovieSearch.Available)
+		caps.MovieParams = advertisedParams(doc.Searching.MovieSearch, standardMovieParams)
+		caps.TVSearch = searchAvailable(doc.Searching.TVSearch.Available)
+		caps.TVParams = advertisedParams(doc.Searching.TVSearch, standardTVParams)
 	}
 
 	for _, cat := range doc.Categories.Category {
@@ -283,6 +345,20 @@ func parseCaps(body []byte) *Capabilities {
 	}
 
 	return caps
+}
+
+// advertisedParams returns the parameter list for an available search
+// function. An available function without a supportedParams attribute is
+// treated as supporting q only, matching Prowlarr's conservative reading of
+// the spec; unavailable functions support nothing.
+func advertisedParams(el capsXMLSearch, standard []string) []string {
+	if !searchAvailable(el.Available) {
+		return nil
+	}
+	if strings.TrimSpace(el.SupportedParams) == "" {
+		return []string{"q"}
+	}
+	return parseSupportedParams(el.SupportedParams)
 }
 
 func searchAvailable(value string) bool {

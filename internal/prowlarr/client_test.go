@@ -1,6 +1,10 @@
 package prowlarr
 
 import (
+	"context"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -144,4 +148,78 @@ func TestSlashPatternFlagSemantics(t *testing.T) {
 			assert.Equal(t, tt.want, got, "MatchKeywordOrPattern(%q, %q)", tt.title, tt.pattern)
 		})
 	}
+}
+
+type roundTripFunc func(req *http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func TestDownloadNZB_ProwlarrRedirect(t *testing.T) {
+	const prowlarrHost = "http://prowlarr.local:9696"
+	const prowlarrAPIKey = "prowlarr-secret-key"
+	const directIndexerURL = "https://indexer.example.com/api?t=get&id=123&apikey=indexerkey"
+	const nzbContent = "<nzb>test content</nzb>"
+
+	transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.String() {
+		case prowlarrHost + "/1/api?t=get&id=123":
+			// Must include Prowlarr API key
+			if req.Header.Get("X-Api-Key") != prowlarrAPIKey {
+				return &http.Response{
+					StatusCode: http.StatusUnauthorized,
+					Body:       io.NopCloser(strings.NewReader("unauthorized")),
+				}, nil
+			}
+			// Respond with redirect to indexer
+			header := make(http.Header)
+			header.Set("Location", directIndexerURL)
+			return &http.Response{
+				StatusCode: http.StatusFound,
+				Header:     header,
+				Body:       io.NopCloser(strings.NewReader("")),
+			}, nil
+
+		case directIndexerURL:
+			// Must NOT include Prowlarr API key on cross-host request
+			if req.Header.Get("X-Api-Key") != "" {
+				return &http.Response{
+					StatusCode: http.StatusBadRequest,
+					Body:       io.NopCloser(strings.NewReader("prowlarr key leaked")),
+				}, nil
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(nzbContent)),
+			}, nil
+
+		default:
+			return &http.Response{
+				StatusCode: http.StatusNotFound,
+				Body:       io.NopCloser(strings.NewReader("not found")),
+			}, nil
+		}
+	})
+
+	httpClient := &http.Client{Transport: transport}
+	client := NewClient(prowlarrHost, prowlarrAPIKey, httpClient)
+
+	t.Run("prowlarr redirect to indexer succeeds", func(t *testing.T) {
+		data, err := client.DownloadNZB(context.Background(), prowlarrHost+"/1/api?t=get&id=123")
+		assert.NoError(t, err)
+		assert.Equal(t, nzbContent, string(data))
+	})
+
+	t.Run("direct indexer url succeeds without prowlarr key", func(t *testing.T) {
+		data, err := client.DownloadNZB(context.Background(), directIndexerURL)
+		assert.NoError(t, err)
+		assert.Equal(t, nzbContent, string(data))
+	})
+
+	t.Run("direct loopback url is rejected as SSRF", func(t *testing.T) {
+		_, err := client.DownloadNZB(context.Background(), "http://127.0.0.1:8080/secret.nzb")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "private address")
+	})
 }

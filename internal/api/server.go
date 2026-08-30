@@ -43,32 +43,34 @@ func DefaultConfig() *Config {
 
 // Server represents the API server
 type Server struct {
-	config              *Config
-	queueRepo           *database.Repository
-	healthRepo          *database.HealthRepository
-	authService         *auth.Service
-	userRepo            *database.UserRepository
-	configManager       ConfigManager
-	metadataReader      *metadata.MetadataReader
-	metadataService     *metadata.MetadataService
-	nzbFilesystem       *nzbfilesystem.NzbFilesystem
-	healthWorker        *health.HealthWorker
-	par2Repair          Par2RepairEnqueuer             // optional; nil = PAR2 repair unavailable
-	par2RepairRepo      *database.Par2RepairRepository // optional; nil = repair job listing unavailable
-	librarySyncWorker   *health.LibrarySyncWorker
-	importerService     *importer.Service
-	poolManager         pool.Manager
-	arrsService         *arrs.Service
-	mountService        *rclone.MountService
-	startTime           time.Time
-	progressBroadcaster *progress.ProgressBroadcaster
-	streamTracker       *StreamTracker
-	fuseManager         *FuseManager
-	cacheSource         *segcache.Source
-	logFilePath         string
-	migrationRepo       *database.ImportMigrationRepository
-	updater             updater.Updater
-	ready               atomic.Bool
+	config            *Config
+	queueRepo         *database.Repository
+	healthRepo        *database.HealthRepository
+	authService       *auth.Service
+	userRepo          *database.UserRepository
+	configManager     ConfigManager
+	metadataReader    *metadata.MetadataReader
+	metadataService   *metadata.MetadataService
+	nzbFilesystem     *nzbfilesystem.NzbFilesystem
+	healthWorker      *health.HealthWorker
+	par2Repair        Par2RepairEnqueuer             // optional; nil = PAR2 repair unavailable
+	par2RepairRepo    *database.Par2RepairRepository // optional; nil = repair job listing unavailable
+	librarySyncWorker *health.LibrarySyncWorker
+
+	metadataMigrationWorker *metadata.MigrationWorker
+	importerService         *importer.Service
+	poolManager             pool.Manager
+	arrsService             *arrs.Service
+	mountService            *rclone.MountService
+	startTime               time.Time
+	progressBroadcaster     *progress.ProgressBroadcaster
+	streamTracker           *StreamTracker
+	fuseManager             *FuseManager
+	cacheSource             *segcache.Source
+	logFilePath             string
+	migrationRepo           *database.ImportMigrationRepository
+	updater                 updater.Updater
+	ready                   atomic.Bool
 
 	speedtest     *speedtestCoordinator
 	speedtestOnce sync.Once
@@ -152,6 +154,11 @@ func (s *Server) SetHealthWorker(healthWorker *health.HealthWorker) {
 // SetLibrarySyncWorker sets the library sync worker reference for the server
 func (s *Server) SetLibrarySyncWorker(librarySyncWorker *health.LibrarySyncWorker) {
 	s.librarySyncWorker = librarySyncWorker
+}
+
+// SetMetadataMigrationWorker sets the metadata migration worker for the server.
+func (s *Server) SetMetadataMigrationWorker(worker *metadata.MigrationWorker) {
+	s.metadataMigrationWorker = worker
 }
 
 // SetLogFilePath sets the path to the JSON log file used by the logs endpoints.
@@ -306,6 +313,11 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/health/library-sync/start", s.handleStartLibrarySync)
 	api.Post("/health/library-sync/cancel", s.handleCancelLibrarySync)
 	api.Post("/health/library-sync/dry-run", s.handleDryRunLibrarySync)
+
+	api.Get("/metadata/migration/status", s.handleGetMetadataMigrationStatus)
+	api.Post("/metadata/migration/dry-run", s.handleDryRunMetadataMigration)
+	api.Post("/metadata/migration/start", s.handleStartMetadataMigration)
+	api.Post("/metadata/migration/cancel", s.handleCancelMetadataMigration)
 
 	api.Get("/files/info", s.handleGetFileMetadata)
 	api.Get("/files/active-streams", s.handleGetActiveStreams)
@@ -660,4 +672,76 @@ func (s *Server) handleGetStreamHistory(c *fiber.Ctx) error {
 		"success": true,
 		"data":    s.streamTracker.GetHistory(),
 	})
+}
+
+// Metadata migration handler methods
+
+// handleGetMetadataMigrationStatus handles GET /api/metadata/migration/status
+//
+//	@Summary		Get metadata migration status
+//	@Description	Returns the status of the legacy metadata → v3 migration worker.
+//	@Tags			Metadata
+//	@Produce		json
+//	@Success		200	{object}	APIResponse
+//	@Failure		503	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Router			/metadata/migration/status [get]
+func (s *Server) handleGetMetadataMigrationStatus(c *fiber.Ctx) error {
+	if s.metadataMigrationWorker == nil {
+		return RespondServiceUnavailable(c, "Metadata migration worker not available", "")
+	}
+	return NewMetadataMigrationHandlers(s.metadataMigrationWorker).handleGetStatus(c)
+}
+
+// handleDryRunMetadataMigration handles POST /api/metadata/migration/dry-run
+//
+//	@Summary		Dry-run the metadata migration
+//	@Description	Converts against an isolated temporary root and reports measured savings without touching the library.
+//	@Tags			Metadata
+//	@Produce		json
+//	@Success		200	{object}	APIResponse
+//	@Failure		409	{object}	APIResponse
+//	@Failure		503	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Router			/metadata/migration/dry-run [post]
+func (s *Server) handleDryRunMetadataMigration(c *fiber.Ctx) error {
+	if s.metadataMigrationWorker == nil {
+		return RespondServiceUnavailable(c, "Metadata migration worker not available", "")
+	}
+	return NewMetadataMigrationHandlers(s.metadataMigrationWorker).handleDryRun(c)
+}
+
+// handleStartMetadataMigration handles POST /api/metadata/migration/start
+//
+//	@Summary		Start the metadata migration
+//	@Description	Rewrites legacy .meta files to the v3 store-backed format in place.
+//	@Tags			Metadata
+//	@Produce		json
+//	@Success		200	{object}	APIResponse
+//	@Failure		409	{object}	APIResponse
+//	@Failure		503	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Router			/metadata/migration/start [post]
+func (s *Server) handleStartMetadataMigration(c *fiber.Ctx) error {
+	if s.metadataMigrationWorker == nil {
+		return RespondServiceUnavailable(c, "Metadata migration worker not available", "")
+	}
+	return NewMetadataMigrationHandlers(s.metadataMigrationWorker).handleStart(c)
+}
+
+// handleCancelMetadataMigration handles POST /api/metadata/migration/cancel
+//
+//	@Summary		Cancel the metadata migration
+//	@Description	Stops an in-flight migration after the current file.
+//	@Tags			Metadata
+//	@Produce		json
+//	@Success		200	{object}	APIResponse
+//	@Failure		503	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Router			/metadata/migration/cancel [post]
+func (s *Server) handleCancelMetadataMigration(c *fiber.Ctx) error {
+	if s.metadataMigrationWorker == nil {
+		return RespondServiceUnavailable(c, "Metadata migration worker not available", "")
+	}
+	return NewMetadataMigrationHandlers(s.metadataMigrationWorker).handleCancel(c)
 }

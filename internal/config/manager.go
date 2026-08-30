@@ -407,14 +407,17 @@ type DatabaseConfig struct {
 
 // MetadataConfig represents metadata filesystem configuration
 type MetadataConfig struct {
-	RootPath                 string               `yaml:"root_path" mapstructure:"root_path" json:"root_path"`
-	DeleteSourceNzbOnRemoval *bool                `yaml:"delete_source_nzb_on_removal" mapstructure:"delete_source_nzb_on_removal" json:"delete_source_nzb_on_removal,omitempty"`
-	Backup                   MetadataBackupConfig `yaml:"backup" mapstructure:"backup" json:"backup"`
+	RootPath  string                  `yaml:"root_path" mapstructure:"root_path" json:"root_path"`
+	Backup    MetadataBackupConfig    `yaml:"backup" mapstructure:"backup" json:"backup"`
+	Migration MetadataMigrationConfig `yaml:"migration" mapstructure:"migration" json:"migration"`
 }
 
-// ShouldDeleteSourceNzb returns whether source NZB files should be deleted on removal.
-func (m MetadataConfig) ShouldDeleteSourceNzb() bool {
-	return m.DeleteSourceNzbOnRemoval != nil && *m.DeleteSourceNzbOnRemoval
+// MetadataMigrationConfig configures the legacy-metadata → v3 migration.
+type MetadataMigrationConfig struct {
+	// DefaultGroup is the newsgroup written into synthesized NzbStore entries.
+	// Legacy metas do not retain the original groups, and nzb.BuildNZB renders an
+	// empty <groups> element without this, which most NZB clients reject.
+	DefaultGroup string `yaml:"default_group" mapstructure:"default_group" json:"default_group"`
 }
 
 // MetadataBackupConfig represents metadata backup configuration
@@ -512,6 +515,12 @@ const (
 	ImportStrategySTRM    ImportStrategy = "STRM"
 )
 
+// defaultVerifyContentTimeoutSeconds is the shared fallback for both
+// Import.VerifyContentTimeoutSeconds and Health.VerifyContentTimeoutSeconds
+// so the 15s default lives in one place instead of being duplicated across
+// DefaultConfig and the accessor fallbacks.
+const defaultVerifyContentTimeoutSeconds = 15
+
 // ImportConfig represents import processing configuration
 type ImportConfig struct {
 	MaxProcessorWorkers            int      `yaml:"max_processor_workers" mapstructure:"max_processor_workers" json:"max_processor_workers"`
@@ -536,13 +545,11 @@ type ImportConfig struct {
 	FilterSampleFiles        *bool          `yaml:"filter_sample_files" mapstructure:"filter_sample_files" json:"filter_sample_files,omitempty"`
 	FailedItemRetentionHours *int           `yaml:"failed_item_retention_hours" mapstructure:"failed_item_retention_hours" json:"failed_item_retention_hours,omitempty"`
 	HistoryRetentionDays     *int           `yaml:"history_retention_days" mapstructure:"history_retention_days" json:"history_retention_days,omitempty"`
-	// DamagePolicy governs standalone video files whose fast-fail sweep finds
-	// SMALL confirmed damage (within the playback padding caps, see
-	// internal/holes): "tolerant" (default) imports them as degraded so
-	// streaming zero-fills the gaps; "strict" fails the import so an ARR can
-	// grab a different release. Damage beyond the caps, archive-set members
-	// and non-video files fail either way.
-	DamagePolicy string `yaml:"damage_policy" mapstructure:"damage_policy" json:"damage_policy,omitempty"`
+	// VerifyContent, when true, probes each eligible video/audio file's
+	// first bytes through the serving stack after import and fails the
+	// import if no recognized media container signature is found.
+	VerifyContent               *bool `yaml:"verify_content" mapstructure:"verify_content" json:"verify_content,omitempty"`
+	VerifyContentTimeoutSeconds *int  `yaml:"verify_content_timeout_seconds" mapstructure:"verify_content_timeout_seconds" json:"verify_content_timeout_seconds,omitempty"`
 }
 
 // LogConfig represents logging configuration with rotation support
@@ -594,6 +601,12 @@ type HealthConfig struct {
 	// "delete" removes the file's metadata/NZB/health record and cleans up now-empty
 	// parent directories instead. Degraded files are never affected either way.
 	CorruptionAction string `yaml:"corruption_action" mapstructure:"corruption_action" json:"corruption_action,omitempty"`
+	// VerifyContent, when true, probes each eligible video/audio file's
+	// first bytes through the serving stack during a health check and
+	// marks the file corrupted if no recognized media container signature
+	// is found. Distinct from the unrelated, unused VerifyData field above.
+	VerifyContent               *bool `yaml:"verify_content" mapstructure:"verify_content" json:"verify_content,omitempty"`
+	VerifyContentTimeoutSeconds *int  `yaml:"verify_content_timeout_seconds" mapstructure:"verify_content_timeout_seconds" json:"verify_content_timeout_seconds,omitempty"`
 }
 
 // Path validation functions have been moved to internal/utils/path.go
@@ -942,6 +955,10 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	if c.Import.VerifyContentTimeoutSeconds != nil && *c.Import.VerifyContentTimeoutSeconds <= 0 {
+		return fmt.Errorf("import verify_content_timeout_seconds must be greater than 0")
+	}
+
 	// Validate log level (both old and new config)
 	if c.Log.Level != "" {
 		validLevels := []string{"debug", "info", "warn", "error"}
@@ -1013,6 +1030,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Health.SegmentSamplePercentage < 1 || c.Health.SegmentSamplePercentage > 100 {
 		return fmt.Errorf("health segment_sample_percentage must be between 1 and 100")
+	}
+	if c.Health.VerifyContentTimeoutSeconds != nil && *c.Health.VerifyContentTimeoutSeconds <= 0 {
+		return fmt.Errorf("health verify_content_timeout_seconds must be greater than 0")
 	}
 
 	// Validate health configuration - requires library_dir when enabled and using a strategy other than NONE
@@ -1709,10 +1729,9 @@ func isRunningInDocker() bool {
 // DefaultConfig returns a config with default values
 // If configDir is provided, it will be used for database and log file paths
 func DefaultConfig(configDir ...string) *Config {
-	healthEnabled := false            // Health system disabled by default
-	cleanupOrphanedMetadata := false  // Cleanup orphaned metadata disabled by default
-	resolveRepairOnImport := false    // Disable smart replacement detection by default
-	deleteSourceNzbOnRemoval := false // Delete source NZB on removal disabled by default
+	healthEnabled := false           // Health system disabled by default
+	cleanupOrphanedMetadata := false // Cleanup orphaned metadata disabled by default
+	resolveRepairOnImport := false   // Disable smart replacement detection by default
 	vfsEnabled := false
 	mountEnabled := false // Disabled by default
 	sabnzbdEnabled := false
@@ -1733,6 +1752,10 @@ func DefaultConfig(configDir ...string) *Config {
 	par2RepairEnabled := false  // beta: opt-in until the feature settles
 	par2RepairOnImport := false // opt-in: each repair costs a full release download
 	par2ArrFirst := true        // prefer ARR replacement; PAR2 only when the ARRs come up empty
+	importVerifyContent := false // Content verification disabled by default (destructive if misfired)
+	importVerifyContentTimeoutSeconds := defaultVerifyContentTimeoutSeconds
+	healthVerifyContent := false // Content verification disabled by default (destructive if misfired)
+	healthVerifyContentTimeoutSeconds := defaultVerifyContentTimeoutSeconds
 
 	// Set paths based on whether we're running in Docker or have a specific config directory
 	var dbPath, metadataPath, logPath, rclonePath, cachePath, backupPath string
@@ -1790,13 +1813,15 @@ func DefaultConfig(configDir ...string) *Config {
 			Path: dbPath,
 		},
 		Metadata: MetadataConfig{
-			RootPath:                 metadataPath,
-			DeleteSourceNzbOnRemoval: &deleteSourceNzbOnRemoval,
+			RootPath: metadataPath,
 			Backup: MetadataBackupConfig{
 				Enabled:     &metadataBackupEnabled,
 				Schedule:    "0 3 * * *", // daily at 3 AM UTC
 				KeepBackups: 10,
 				Path:        backupPath,
+			},
+			Migration: MetadataMigrationConfig{
+				DefaultGroup: "alt.binaries.misc",
 			},
 		},
 		Streaming: StreamingConfig{
@@ -1860,16 +1885,18 @@ func DefaultConfig(configDir ...string) *Config {
 				".xvid", ".rm", ".rmvb", ".asf", ".asx", ".wtv", ".mk3d", ".dvr-ms",
 				".mp3", ".flac", ".m4a", ".epub", ".pdf", ".cbz",
 			},
-			MaxDownloadPrefetch:      10,  // Default: 10 segments prefetched ahead for archive analysis
-			SegmentSamplePercentage:  1,   // Default: 1% segment sampling
-			ReadTimeoutSeconds:       300, // Default: 5 minutes read timeout
-			IsoAnalyzeTimeoutSeconds: &isoAnalyzeTimeoutSeconds,
-			ImportStrategy:           ImportStrategyNone, // Default: no import strategy (direct import)
-			ImportDir:                nil,                // No default import directory
-			WatchDir:                 nil,
-			WatchIntervalSeconds:     &watchIntervalSeconds,
-			FailedItemRetentionHours: &failedItemRetentionHours,
-			HistoryRetentionDays:     &historyRetentionDays,
+			MaxDownloadPrefetch:         10,  // Default: 10 segments prefetched ahead for archive analysis
+			SegmentSamplePercentage:     1,   // Default: 1% segment sampling
+			ReadTimeoutSeconds:          300, // Default: 5 minutes read timeout
+			IsoAnalyzeTimeoutSeconds:    &isoAnalyzeTimeoutSeconds,
+			ImportStrategy:              ImportStrategyNone, // Default: no import strategy (direct import)
+			ImportDir:                   nil,                // No default import directory
+			WatchDir:                    nil,
+			WatchIntervalSeconds:        &watchIntervalSeconds,
+			FailedItemRetentionHours:    &failedItemRetentionHours,
+			HistoryRetentionDays:        &historyRetentionDays,
+			VerifyContent:               &importVerifyContent,               // Disabled by default
+			VerifyContentTimeoutSeconds: &importVerifyContentTimeoutSeconds, // Default: 15s per-file content probe timeout
 		},
 		Log: LogConfig{
 			File:       logPath, // Default log file path
@@ -1885,11 +1912,13 @@ func DefaultConfig(configDir ...string) *Config {
 			CheckIntervalSeconds:                5,
 			MaxConnectionsForHealthChecks:       100,
 			CheckBatchSize:                      50,
-			MaxConcurrentJobs:                   1,                      // Default: 1 concurrent job
-			SegmentSamplePercentage:             5,                      // Default: 5% segment sampling
-			LibrarySyncIntervalMinutes:          360,                    // Default: sync every 6 hours
-			ResolveRepairOnImport:               &resolveRepairOnImport, // Enabled by default
-			AcceptableMissingSegmentsPercentage: 0,                      // Default: no missing segments allowed
+			MaxConcurrentJobs:                   1,                                  // Default: 1 concurrent job
+			SegmentSamplePercentage:             5,                                  // Default: 5% segment sampling
+			LibrarySyncIntervalMinutes:          360,                                // Default: sync every 6 hours
+			ResolveRepairOnImport:               &resolveRepairOnImport,             // Enabled by default
+			AcceptableMissingSegmentsPercentage: 2,                                  // Default: tolerate up to 2% missing segments
+			VerifyContent:                       &healthVerifyContent,               // Disabled by default
+			VerifyContentTimeoutSeconds:         &healthVerifyContentTimeoutSeconds, // Default: 15s per-file content probe timeout
 			Repair: RepairConfig{
 				Enabled:            &repairEnabled,
 				IntervalMinutes:    60,

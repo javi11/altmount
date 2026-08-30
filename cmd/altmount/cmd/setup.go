@@ -16,6 +16,7 @@ import (
 	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/auth"
 	"github.com/javi11/altmount/internal/config"
+	"github.com/javi11/altmount/internal/contentverify"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/health"
 	"github.com/javi11/altmount/internal/httpclient"
@@ -439,6 +440,7 @@ func startPar2RepairService(
 func startHealthWorker(
 	ctx context.Context,
 	cfg *config.Config,
+	metadataService *metadata.MetadataService,
 	healthRepo *database.HealthRepository,
 	poolManager pool.Manager,
 	configManager *config.Manager,
@@ -447,9 +449,12 @@ func startHealthWorker(
 	importerService importer.ImportService,
 	broadcaster *progress.ProgressBroadcaster,
 	par2RepairService *par2repair.Service,
+	contentVerifyFS contentverify.Opener,
 ) (*health.HealthWorker, *health.LibrarySyncWorker, error) {
-	// Create metadata service for health worker
-	metadataService := metadata.NewMetadataService(cfg.Metadata.RootPath)
+	// The health and library-sync workers share the process-wide metadata service so
+	// their deletions go through the same store reference counter the importer wires
+	// up. A second instance here silently skipped every DecStoreRef, leaking .nzbz
+	// stores and letting the two lite caches serve each other stale entries.
 
 	// Create health checker
 	healthChecker := health.NewHealthChecker(
@@ -458,6 +463,7 @@ func startHealthWorker(
 		poolManager,
 		configManager.GetConfigGetter(),
 		rcloneClient,
+		contentVerifyFS,
 	)
 
 	healthWorker := health.NewHealthWorker(
