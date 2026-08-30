@@ -244,6 +244,13 @@ export interface HealthErrorDetails {
 	total_articles?: number;
 	sampled?: number;
 	playback_impact?: PlaybackImpact;
+	// Segments whose availability was never established (transport failures, or
+	// ids the sweep never reached). Deliberately not counted as missing.
+	unresolved_segments?: number;
+	// Set when the check stopped before examining every planned segment, which
+	// makes `sampled` a partial count and the missing-segment map incomplete.
+	terminated_early?: boolean;
+	termination_reason?: string;
 }
 
 export interface HealthCleanupRequest {

@@ -72,6 +72,10 @@ A file whose damage exceeds the hard-coded playback caps (a run longer than 4 co
 
 **To make AltMount stricter** — repair on any missing segment, no degraded grace period — set **Acceptable Missing** to **0%**. This also applies at import time: a freshly grabbed release with even one confirmed missing segment is rejected immediately, so your ARR can search for an alternate release, instead of importing degraded.
 
+The threshold also decides when a health check can **stop early**. Once a file's confirmed missing segments put it irreversibly above the threshold, further checking cannot change the outcome, so AltMount stops checking that file and moves its remaining connection budget to the other files in the batch. At 0% tolerance the first confirmed missing article settles the file. Results from a check that stopped early are labelled as partial in the UI: their segment counts are a subset of the file, not a complete map of the damage.
+
+Only a confirmed *article not found* response (NNTP 430/423) counts toward the threshold. Connection failures, timeouts, and provider outages never mark a segment as missing — a check that could not resolve some of its segments is recorded as a failed attempt and retried later, so a transient network problem cannot condemn a file.
+
 **Scheduling & Concurrency:**
 
 | Setting | Default | Description |

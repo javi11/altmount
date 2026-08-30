@@ -81,6 +81,7 @@ func newHoleTestEnv(t *testing.T, fileName string, fileSize, segSize int64) *hol
 		&fakePoolManager{client: fp},
 		func() *config.Config { return cfg },
 		nil,
+		nil,
 	)
 
 	return &holeTestEnv{

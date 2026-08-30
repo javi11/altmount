@@ -138,6 +138,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	fs := initializeFilesystem(ctx, metadataService, repos.HealthRepo, arrsService, rcloneRCClient, poolManager, configManager.GetConfigGetter(), streamTracker, cacheSource)
+	importerService.SetContentVerifyFilesystem(fs)
 
 	// 6. Setup web services
 	app, debugMode := createFiberApp(ctx, cfg)
@@ -197,7 +198,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 	})
 
-	healthWorker, librarySyncWorker, err := startHealthWorker(ctx, cfg, repos.HealthRepo, poolManager, configManager, rcloneRCClient, arrsService, importerService, progressBroadcaster)
+	healthWorker, librarySyncWorker, err := startHealthWorker(ctx, cfg, repos.HealthRepo, poolManager, configManager, rcloneRCClient, arrsService, importerService, progressBroadcaster, fs)
 	if err != nil {
 		logger.Warn("Health worker initialization failed", "err", err)
 	}

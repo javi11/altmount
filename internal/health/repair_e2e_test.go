@@ -92,7 +92,6 @@ func (m *mockImportService) RegenerateMetadata(_ context.Context, _ string) erro
 // repairTestEnv holds all the pieces needed for repair e2e tests.
 type repairTestEnv struct {
 	db              *sql.DB
-	client          *fakepool.Client
 	healthRepo      *database.HealthRepository
 	metadataService *metadata.MetadataService
 	healthChecker   *HealthChecker
@@ -100,7 +99,21 @@ type repairTestEnv struct {
 	hw              *HealthWorker
 }
 
+// newRepairTestEnv defaults to a fakepool answering 430 (article genuinely
+// gone) rather than a dead pool manager, so the repair e2e flows below still
+// exercise genuine corruption — a pool that cannot be reached is an outage,
+// not corruption (#861), and must not be the default for tests whose whole
+// point is triggering repair on real missing segments.
 func newRepairTestEnv(t *testing.T, tempDir string, arrsErr error, configure ...func(*config.Config)) *repairTestEnv {
+	t.Helper()
+	client := fakepool.New()
+	client.SetDefaultBehavior(fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
+	return newRepairTestEnvWithPool(t, tempDir, arrsErr, &fakeClientPoolManager{client: client}, configure...)
+}
+
+// newRepairTestEnvWithPool is newRepairTestEnv with an injectable pool.Manager, so tests
+// can block or fail the segment-availability sweep at a controlled point.
+func newRepairTestEnvWithPool(t *testing.T, tempDir string, arrsErr error, poolManager pool.Manager, configure ...func(*config.Config)) *repairTestEnv {
 	t.Helper()
 
 	db, err := sql.Open("sqlite3", "file::memory:?cache=shared&mode=memory")
@@ -164,18 +177,13 @@ func newRepairTestEnv(t *testing.T, tempDir string, arrsErr error, configure ...
 	mockARRs := &mockARRsService{returnErr: arrsErr}
 	mockImporter := &mockImportService{}
 
-	// Default pool: every STAT answers 430 (article genuinely gone), which is
-	// what the repair e2e flows are about. Transient/pool-down failures are
-	// deliberately NOT the default — they are inconclusive, not corruption.
-	client := fakepool.New()
-	client.SetDefaultBehavior(fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
-
 	healthChecker := NewHealthChecker(
 		healthRepo,
 		metadataService,
-		&fakeClientPoolManager{client: client},
+		poolManager,
 		configManager.GetConfig,
 		&MockRcloneClient{},
+		nil,
 	)
 
 	hw := NewHealthWorker(
@@ -190,7 +198,6 @@ func newRepairTestEnv(t *testing.T, tempDir string, arrsErr error, configure ...
 
 	return &repairTestEnv{
 		db:              db,
-		client:          client,
 		healthRepo:      healthRepo,
 		metadataService: metadataService,
 		healthChecker:   healthChecker,

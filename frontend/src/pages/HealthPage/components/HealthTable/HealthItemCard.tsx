@@ -18,6 +18,7 @@ import {
 } from "../../../../lib/utils";
 import { type FileHealth, HealthPriority } from "../../../../types/api";
 import { HealthItemActionsMenu } from "./HealthItemActionsMenu";
+import { PartialCheckBadge } from "./PartialCheckBadge";
 import { PlaybackImpactBadge } from "./PlaybackImpactBadge";
 
 interface HealthItemCardProps {
@@ -59,10 +60,11 @@ export const HealthItemCard = memo(function HealthItemCard({
 }: HealthItemCardProps) {
 	const [isExpanded, setIsExpanded] = useState(false);
 
-	const playbackImpact = useMemo(
-		() => parseHealthErrorDetails(item.error_details)?.playback_impact ?? null,
+	const errorDetails = useMemo(
+		() => parseHealthErrorDetails(item.error_details),
 		[item.error_details],
 	);
+	const playbackImpact = errorDetails?.playback_impact ?? null;
 
 	// Reuse status icon logic from HealthTableRow
 	const getNextPriority = (current: HealthPriority): HealthPriority => {
@@ -136,6 +138,7 @@ export const HealthItemCard = memo(function HealthItemCard({
 						<div className="mt-2 flex flex-wrap gap-2">
 							<HealthBadge status={item.status} isMasked={item.is_masked} />
 							{playbackImpact && <PlaybackImpactBadge impact={playbackImpact} />}
+							{errorDetails && <PartialCheckBadge details={errorDetails} />}
 
 							<button
 								type="button"

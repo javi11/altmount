@@ -57,6 +57,12 @@ type WorkerStats struct {
 	ErrorCount             int64        `json:"error_count"`
 }
 
+// activeCheck is one in-flight health check. Registrations are compared by pointer so a
+// releasing owner never removes an entry another owner has since registered for the same path.
+type activeCheck struct {
+	cancel context.CancelFunc
+}
+
 // HealthWorker manages continuous health monitoring and manual check requests
 type HealthWorker struct {
 	healthChecker       *HealthChecker
@@ -76,7 +82,7 @@ type HealthWorker struct {
 	mu           sync.RWMutex
 
 	// Active checks tracking for cancellation
-	activeChecks   map[string]context.CancelFunc // filePath -> cancel function
+	activeChecks   map[string]*activeCheck // filePath -> in-flight check
 	activeChecksMu sync.RWMutex
 
 	// Statistics
@@ -107,7 +113,7 @@ func NewHealthWorker(
 		progressBroadcaster: broadcaster,
 		status:              WorkerStatusStopped,
 		stopChan:            make(chan struct{}),
-		activeChecks:        make(map[string]context.CancelFunc),
+		activeChecks:        make(map[string]*activeCheck),
 		stats: WorkerStats{
 			Status: WorkerStatusStopped,
 		},
@@ -220,13 +226,13 @@ func (hw *HealthWorker) CancelHealthCheck(ctx context.Context, filePath string) 
 	hw.activeChecksMu.Lock()
 	defer hw.activeChecksMu.Unlock()
 
-	cancelFunc, exists := hw.activeChecks[filePath]
+	check, exists := hw.activeChecks[filePath]
 	if !exists {
 		return fmt.Errorf("no active health check found for file: %s", filePath)
 	}
 
 	// Cancel the context
-	cancelFunc()
+	check.cancel()
 
 	// Remove from active checks
 	delete(hw.activeChecks, filePath)
@@ -346,8 +352,16 @@ func (hw *HealthWorker) AddToHealthCheck(ctx context.Context, filePath string, s
 	return nil
 }
 
-// PerformBackgroundCheck starts a health check in background and returns immediately
-func (hw *HealthWorker) PerformBackgroundCheck(ctx context.Context, filePath string) error {
+// PerformBackgroundCheck starts a manual recheck of filePath in the
+// background. currentStatus must be the file's HealthStatus as it was BEFORE
+// the caller transitioned the row to Checking (e.g. via SetFileCheckingByID);
+// it is threaded straight into CheckOptions.CurrentStatus so the automatic
+// Pending-only content-verification gate (see shouldVerifyContent) still
+// works on this path — re-reading the row inside performDirectCheck would
+// always observe Checking and make the gate unreachable. verifyContentOverride,
+// when non-nil, forces (true) or disables (false) content verification for
+// this check regardless of currentStatus or the configured default.
+func (hw *HealthWorker) PerformBackgroundCheck(ctx context.Context, filePath string, currentStatus database.HealthStatus, verifyContentOverride *bool) error {
 	if !hw.IsRunning() {
 		return fmt.Errorf("health worker is not running")
 	}
@@ -357,7 +371,7 @@ func (hw *HealthWorker) PerformBackgroundCheck(ctx context.Context, filePath str
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
 
-		checkErr := hw.performDirectCheck(ctx, filePath)
+		checkErr := hw.performDirectCheck(ctx, filePath, currentStatus, verifyContentOverride)
 		if checkErr != nil {
 			if errors.Is(checkErr, context.DeadlineExceeded) {
 				slog.ErrorContext(ctx, "Background health check timed out after 10 minutes", "file_path", filePath)
@@ -734,21 +748,64 @@ func (hw *HealthWorker) prepareRepairNotificationUpdate(ctx context.Context, fh 
 	return update, sideEffect
 }
 
-// performDirectCheck performs a health check on a single file using the HealthChecker
-func (hw *HealthWorker) performDirectCheck(ctx context.Context, filePath string) error {
+// beginBatchChecks registers a cancellable context per file of a cycle batch, so a file the
+// scheduled cycle is checking can be cancelled through CancelHealthCheck exactly like a manual
+// check-now. Each context is an independent child: cancelling one file neither aborts the shared
+// cross-file sweep nor disturbs the other files — the cancelled file's result is discarded
+// instead. Returns the per-file contexts and a release func that clears the registrations.
+func (hw *HealthWorker) beginBatchChecks(ctx context.Context, filePaths []string) (map[string]context.Context, func()) {
+	fileCtxs := make(map[string]context.Context, len(filePaths))
+	entries := make(map[string]*activeCheck, len(filePaths))
+
+	hw.activeChecksMu.Lock()
+	for _, filePath := range filePaths {
+		if _, exists := hw.activeChecks[filePath]; exists {
+			continue
+		}
+		fileCtx, cancel := context.WithCancel(ctx)
+		entry := &activeCheck{cancel: cancel}
+		fileCtxs[filePath] = fileCtx
+		entries[filePath] = entry
+		hw.activeChecks[filePath] = entry
+	}
+	hw.activeChecksMu.Unlock()
+
+	return fileCtxs, func() {
+		hw.activeChecksMu.Lock()
+		for filePath, entry := range entries {
+			if hw.activeChecks[filePath] == entry {
+				delete(hw.activeChecks, filePath)
+			}
+		}
+		hw.activeChecksMu.Unlock()
+
+		for _, entry := range entries {
+			entry.cancel()
+		}
+	}
+}
+
+// performDirectCheck performs a health check on a single file using the HealthChecker.
+// currentStatus is the file's HealthStatus as observed by the caller before the row was
+// transitioned to Checking; see PerformBackgroundCheck for why this cannot be re-derived
+// by re-reading the row here.
+func (hw *HealthWorker) performDirectCheck(ctx context.Context, filePath string, currentStatus database.HealthStatus, verifyContentOverride *bool) error {
 	// Create cancellable context for this check
 	checkCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	// Track active check
+	entry := &activeCheck{cancel: cancel}
 	hw.activeChecksMu.Lock()
-	hw.activeChecks[filePath] = cancel
+	hw.activeChecks[filePath] = entry
 	hw.activeChecksMu.Unlock()
 
 	// Ensure cleanup on exit
 	defer func() {
 		hw.activeChecksMu.Lock()
-		delete(hw.activeChecks, filePath)
+		if hw.activeChecks[filePath] == entry {
+			delete(hw.activeChecks, filePath)
+		}
 		hw.activeChecksMu.Unlock()
 	}()
 
@@ -768,7 +825,7 @@ func (hw *HealthWorker) performDirectCheck(ctx context.Context, filePath string)
 		return fmt.Errorf("file health record not found: %s", filePath)
 	}
 
-	opts := CheckOptions{}
+	opts := CheckOptions{CurrentStatus: currentStatus, VerifyContentOverride: verifyContentOverride}
 	// Delegate to HealthChecker
 	event := hw.healthChecker.CheckFile(checkCtx, filePath, opts)
 
@@ -893,6 +950,10 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 		slog.ErrorContext(ctx, "Failed to bulk-set files to checking", "count", len(checkingPaths), "error", err)
 	}
 
+	// Make every file of this batch cancellable for as long as it is 'checking'.
+	fileCtxs, releaseChecks := hw.beginBatchChecks(ctx, checkingPaths)
+	defer releaseChecks()
+
 	// Process files in parallel with bounded concurrency
 	p := pool.New().WithMaxGoroutines(maxJobs)
 	var results []database.HealthStatusUpdate
@@ -917,17 +978,27 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 	discover.Wait()
 
 	paths := make([]string, len(unhealthyFiles))
+	statuses := make([]database.HealthStatus, len(unhealthyFiles))
 	for i, fh := range unhealthyFiles {
 		paths[i] = fh.FilePath
+		statuses[i] = fh.Status
 	}
-	events := hw.healthChecker.CheckFilesBatch(ctx, paths)
+	events := hw.healthChecker.CheckFilesBatch(ctx, paths, statuses)
 
 	// Phase B: per-file result handling (repair side effects, ARR API calls,
 	// VFS notifications), bounded by maxJobs.
 	for i, fileHealth := range unhealthyFiles {
 		fh := fileHealth // Capture for closure
 		event := events[i]
+		fileCtx := fileCtxs[fh.FilePath]
 		p.Go(func() {
+			// A cancelled check must not land its result: CancelHealthCheck already put the
+			// record back to pending, and the repair side effects below would undo that.
+			if fileCtx != nil && fileCtx.Err() != nil {
+				slog.InfoContext(ctx, "Discarding result of cancelled health check", "file_path", fh.FilePath)
+				return
+			}
+
 			updatePtr, sideEffect := hw.prepareUpdateForResult(ctx, fh, event)
 			updatePtr.ExpectedStatus = &checkingStatus
 			if sideEffect != nil {

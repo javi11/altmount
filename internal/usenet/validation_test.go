@@ -3,15 +3,11 @@ package usenet
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"math/rand"
-	"sync"
 	"testing"
-	"time"
 
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
-	"github.com/javi11/altmount/internal/testsupport/fakepool"
 	"github.com/javi11/nntppool/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -90,118 +86,6 @@ func TestSelectSegmentsForValidation(t *testing.T) {
 			len(selectSegmentsForValidation(largeSegments, 10)),
 		)
 	})
-}
-
-// TestValidateSegmentAvailabilityDetailed_MissingSegmentEmitsDebugLog verifies
-// the same for the non-fail-fast detailed path.
-// NOT parallel: we replace the global slog default.
-func TestValidateSegmentAvailabilityDetailed_MissingSegmentEmitsDebugLog(t *testing.T) {
-	const segID = "missing-detailed@host"
-
-	var mu sync.Mutex
-	type logRecord struct{ msg, segID string }
-	var captured []logRecord
-
-	handler := &captureLogHandler{
-		onHandle: func(r slog.Record) {
-			var sid string
-			r.Attrs(func(a slog.Attr) bool {
-				if a.Key == "segment_id" {
-					sid = a.Value.String()
-				}
-				return true
-			})
-			mu.Lock()
-			captured = append(captured, logRecord{msg: r.Message, segID: sid})
-			mu.Unlock()
-		},
-	}
-	prev := slog.Default()
-	slog.SetDefault(slog.New(handler))
-	t.Cleanup(func() { slog.SetDefault(prev) })
-
-	fp := fakepool.New()
-	fp.SetBehavior(segID, fakepool.SegmentBehavior{
-		Err: nntppool.ErrArticleNotFound,
-	})
-
-	mgr := &validationTestPoolManager{client: fp}
-	segs := []*metapb.SegmentData{{Id: segID}}
-
-	result, err := ValidateSegmentAvailabilityDetailed(context.Background(), segs, mgr, 1, 100, nil, 5*time.Second)
-	assert.NoError(t, err)
-	assert.Equal(t, 1, result.MissingCount)
-
-	mu.Lock()
-	defer mu.Unlock()
-	found := false
-	for _, r := range captured {
-		if r.msg == "missing segment" && r.segID == segID {
-			found = true
-		}
-	}
-	assert.True(t, found, "expected 'missing segment' debug log for segment_id=%q, got: %+v", segID, captured)
-}
-
-// TestValidateSegmentAvailabilityDetailed_MissingSegmentByteRanges verifies
-// that misses are reported with their original index and file-coordinate byte
-// range (prefix sum of usable segment lengths), for both full and sampled runs.
-func TestValidateSegmentAvailabilityDetailed_MissingSegmentByteRanges(t *testing.T) {
-	fp := fakepool.New()
-	mgr := &validationTestPoolManager{client: fp}
-
-	// 10 segments of 1000 usable bytes each (with a non-zero archive slice
-	// offset on segment 3 to prove usable length, not segment size, drives
-	// the prefix sum).
-	segs := make([]*metapb.SegmentData, 10)
-	for i := range segs {
-		segs[i] = &metapb.SegmentData{
-			Id:          fmt.Sprintf("seg%d@host", i),
-			SegmentSize: 1200,
-			StartOffset: 100,
-			EndOffset:   1099, // usable = 1000
-		}
-	}
-
-	fp.SetBehavior("seg0@host", fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
-	fp.SetBehavior("seg7@host", fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
-
-	result, err := ValidateSegmentAvailabilityDetailed(context.Background(), segs, mgr, 2, 100, nil, 5*time.Second)
-	assert.NoError(t, err)
-	assert.Equal(t, 2, result.MissingCount)
-	assert.Len(t, result.MissingSegments, 2)
-
-	assert.Equal(t, 0, result.MissingSegments[0].Index)
-	assert.Equal(t, "seg0@host", result.MissingSegments[0].ID)
-	assert.Equal(t, int64(0), result.MissingSegments[0].Start)
-	assert.Equal(t, int64(999), result.MissingSegments[0].End)
-
-	assert.Equal(t, 7, result.MissingSegments[1].Index)
-	assert.Equal(t, int64(7000), result.MissingSegments[1].Start)
-	assert.Equal(t, int64(7999), result.MissingSegments[1].End)
-
-	// MissingIDs stays populated for compatibility.
-	assert.ElementsMatch(t, []string{"seg0@host", "seg7@host"}, result.MissingIDs)
-}
-
-// TestValidateSegmentAvailabilityDetailed_MissingSegmentsCap verifies the
-// 50-entry cap holds while MissingCount reports the true total.
-func TestValidateSegmentAvailabilityDetailed_MissingSegmentsCap(t *testing.T) {
-	fp := fakepool.New()
-	mgr := &validationTestPoolManager{client: fp}
-
-	segs := make([]*metapb.SegmentData, 60)
-	for i := range segs {
-		id := fmt.Sprintf("seg%d@host", i)
-		segs[i] = &metapb.SegmentData{Id: id, StartOffset: 0, EndOffset: 999}
-		fp.SetBehavior(id, fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
-	}
-
-	result, err := ValidateSegmentAvailabilityDetailed(context.Background(), segs, mgr, 4, 100, nil, 5*time.Second)
-	assert.NoError(t, err)
-	assert.Equal(t, 60, result.MissingCount)
-	assert.Len(t, result.MissingIDs, 50)
-	assert.Len(t, result.MissingSegments, 50)
 }
 
 // validationTestPoolManager is a minimal pool.Manager for validation tests.
