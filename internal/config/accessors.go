@@ -22,15 +22,28 @@ func (c *Config) GetMaxConcurrentJobs() int {
 	return c.Health.MaxConcurrentJobs
 }
 
-// GetMaxConnectionsForHealthChecks returns how many STATs a health sweep keeps
-// in flight. Despite the name this is a STAT concurrency, not a connection
-// count. When unset it follows the providers' configured stat_inflight_requests
-// (see StatConcurrency) so all STAT paths scale off the same knob.
+// defaultHealthCheckConnections is the fallback when no providers are
+// configured, since TotalProviderConnections reports 0 in that case and a
+// health sweep would otherwise collapse to a chunk size of 1.
+const defaultHealthCheckConnections = 100
+
+// GetMaxConnectionsForHealthChecks returns how wide one health sweep asks to
+// run. When unset it follows the enabled providers' connection count.
+//
+// This is deliberately NOT StatConcurrency: that is the depth nntppool
+// pipelines STATs down a single connection, a different quantity entirely, and
+// sizing a connection budget from it reports a number unrelated to how many
+// connections exist. The two are consumed separately — this bounds one sweep,
+// StatConcurrency bounds the pool-wide STAT budget the sweeps are admitted
+// against.
 func (c *Config) GetMaxConnectionsForHealthChecks() int {
-	if c.Health.MaxConnectionsForHealthChecks <= 0 {
-		return c.StatConcurrency()
+	if c.Health.MaxConnectionsForHealthChecks > 0 {
+		return c.Health.MaxConnectionsForHealthChecks
 	}
-	return c.Health.MaxConnectionsForHealthChecks
+	if n := c.TotalProviderConnections(); n > 0 {
+		return n
+	}
+	return defaultHealthCheckConnections
 }
 
 // GetCheckBatchSize returns how many due files each health cycle fetches and
