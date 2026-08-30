@@ -424,8 +424,6 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 	}
 
 	// Process File Deletions
-	deleteSourceNzb := cfg.Metadata.ShouldDeleteSourceNzb()
-
 	for _, path := range filesToDelete {
 		normalizedPath := normalize(path)
 
@@ -471,7 +469,7 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 
 		// Delete metadata (and optionally source NZB)
 		if s.metadataService != nil {
-			if err := s.metadataService.DeleteFileMetadataWithSourceNzb(c.Context(), metadataPath, deleteSourceNzb); err != nil {
+			if err := s.metadataService.DeleteFileMetadata(c.Context(), metadataPath); err != nil {
 				slog.DebugContext(c.Context(), "Failed to delete metadata from webhook (might be gone)", "path", metadataPath, "error", err)
 			}
 		}

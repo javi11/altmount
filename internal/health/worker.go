@@ -634,7 +634,7 @@ func (hw *HealthWorker) deleteCorruptedFile(ctx context.Context, fh *database.Fi
 				rootPath = *cfg.Health.LibraryDir
 			}
 		}
-		if err := hw.metadataService.DeleteCorruptedFile(ctx, fh.FilePath, cfg.Metadata.ShouldDeleteSourceNzb(), physicalPath, rootPath); err != nil {
+		if err := hw.metadataService.DeleteCorruptedFile(ctx, fh.FilePath, physicalPath, rootPath); err != nil {
 			slog.ErrorContext(ctx, "Failed to delete corrupted file", "file_path", fh.FilePath, "error", err)
 			return err
 		}
@@ -1184,8 +1184,7 @@ func (hw *HealthWorker) cleanupZombieRecord(ctx context.Context, item *database.
 	relativePath := strings.TrimPrefix(item.FilePath, cfg.MountPath)
 	relativePath = strings.TrimPrefix(relativePath, "/")
 
-	deleteSourceNzb := cfg.Metadata.ShouldDeleteSourceNzb()
-	if delMetaErr := hw.metadataService.DeleteFileMetadataWithSourceNzb(ctx, relativePath, deleteSourceNzb); delMetaErr != nil {
+	if delMetaErr := hw.metadataService.DeleteFileMetadata(ctx, relativePath); delMetaErr != nil {
 		slog.ErrorContext(ctx, "Failed to delete metadata during cleanup", "file_path", item.FilePath, "error", delMetaErr)
 	} else {
 		hw.NotifyRcloneVFS(item.FilePath)

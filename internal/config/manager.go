@@ -325,10 +325,9 @@ type DatabaseConfig struct {
 
 // MetadataConfig represents metadata filesystem configuration
 type MetadataConfig struct {
-	RootPath                 string                  `yaml:"root_path" mapstructure:"root_path" json:"root_path"`
-	DeleteSourceNzbOnRemoval *bool                   `yaml:"delete_source_nzb_on_removal" mapstructure:"delete_source_nzb_on_removal" json:"delete_source_nzb_on_removal,omitempty"`
-	Backup                   MetadataBackupConfig    `yaml:"backup" mapstructure:"backup" json:"backup"`
-	Migration                MetadataMigrationConfig `yaml:"migration" mapstructure:"migration" json:"migration"`
+	RootPath  string                  `yaml:"root_path" mapstructure:"root_path" json:"root_path"`
+	Backup    MetadataBackupConfig    `yaml:"backup" mapstructure:"backup" json:"backup"`
+	Migration MetadataMigrationConfig `yaml:"migration" mapstructure:"migration" json:"migration"`
 }
 
 // MetadataMigrationConfig configures the legacy-metadata → v3 migration.
@@ -337,11 +336,6 @@ type MetadataMigrationConfig struct {
 	// Legacy metas do not retain the original groups, and nzb.BuildNZB renders an
 	// empty <groups> element without this, which most NZB clients reject.
 	DefaultGroup string `yaml:"default_group" mapstructure:"default_group" json:"default_group"`
-}
-
-// ShouldDeleteSourceNzb returns whether source NZB files should be deleted on removal.
-func (m MetadataConfig) ShouldDeleteSourceNzb() bool {
-	return m.DeleteSourceNzbOnRemoval != nil && *m.DeleteSourceNzbOnRemoval
 }
 
 // MetadataBackupConfig represents metadata backup configuration
@@ -1653,10 +1647,9 @@ func isRunningInDocker() bool {
 // DefaultConfig returns a config with default values
 // If configDir is provided, it will be used for database and log file paths
 func DefaultConfig(configDir ...string) *Config {
-	healthEnabled := false            // Health system disabled by default
-	cleanupOrphanedMetadata := false  // Cleanup orphaned metadata disabled by default
-	resolveRepairOnImport := false    // Disable smart replacement detection by default
-	deleteSourceNzbOnRemoval := false // Delete source NZB on removal disabled by default
+	healthEnabled := false           // Health system disabled by default
+	cleanupOrphanedMetadata := false // Cleanup orphaned metadata disabled by default
+	resolveRepairOnImport := false   // Disable smart replacement detection by default
 	vfsEnabled := false
 	mountEnabled := false // Disabled by default
 	sabnzbdEnabled := false
@@ -1735,8 +1728,7 @@ func DefaultConfig(configDir ...string) *Config {
 			Path: dbPath,
 		},
 		Metadata: MetadataConfig{
-			RootPath:                 metadataPath,
-			DeleteSourceNzbOnRemoval: &deleteSourceNzbOnRemoval,
+			RootPath: metadataPath,
 			Backup: MetadataBackupConfig{
 				Enabled:     &metadataBackupEnabled,
 				Schedule:    "0 3 * * *", // daily at 3 AM UTC

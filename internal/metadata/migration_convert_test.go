@@ -173,11 +173,14 @@ func (c *countingRefCounter) IncStoreRef(_ context.Context, storePath string) er
 	return nil
 }
 
-func (c *countingRefCounter) DecStoreRef(_ context.Context, storePath string) (int64, error) {
+func (c *countingRefCounter) DecStoreRef(_ context.Context, storePath string) (int64, bool, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.inc[storePath] == 0 {
+		return 0, false, nil
+	}
 	c.decs[storePath]++
-	return int64(c.inc[storePath] - c.decs[storePath]), nil
+	return int64(c.inc[storePath] - c.decs[storePath]), true, nil
 }
 
 func TestMigrateGroup_RefCountMatchesMigratedFiles(t *testing.T) {

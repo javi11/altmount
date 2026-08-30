@@ -261,7 +261,7 @@ When Sonarr/Radarr deletes a file or series/movie, AltMount automatically cleans
 1. **Receives the webhook** with the absolute file/folder path from ARR
 2. **Looks up the health record** — first by `library_path` (the absolute ARR path), falling back to the normalized `file_path`
 3. **Deletes the health record** from the database
-4. **Deletes the metadata** (`.meta` and `.id` sidecar files) and optionally the source NZB
+4. **Deletes the metadata** (`.meta` and `.id` sidecar files), plus the shared `.nzbz` store once no other metadata still references it
 
 For directory deletions (MovieDelete, SeriesDelete), AltMount deletes all health records and metadata within that directory prefix.
 

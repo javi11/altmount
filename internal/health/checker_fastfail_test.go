@@ -66,7 +66,7 @@ func TestCheckFilesBatch_TransportErrorIsNotCorruption(t *testing.T) {
 	writeHealthyFile(t, env, paths[1])
 	client.SetBehavior(flakyID, fakepool.SegmentBehavior{Err: nntppool.ErrConnectionDied})
 
-	events := env.healthChecker.CheckFilesBatch(context.Background(), paths)
+	events := env.healthChecker.CheckFilesBatch(context.Background(), paths, nil)
 	require.Len(t, events, 2)
 
 	assert.Equal(t, EventTypeCheckFailed, events[0].Type,
@@ -96,7 +96,7 @@ func TestCheckFilesBatch_TransportErrorPersistsNoHoles(t *testing.T) {
 	ids := writeMultiSegmentFile(t, env, path, 20)
 	client.SetBehavior(ids[3], fakepool.SegmentBehavior{Err: nntppool.ErrConnectionDied})
 
-	events := env.healthChecker.CheckFilesBatch(context.Background(), []string{path})
+	events := env.healthChecker.CheckFilesBatch(context.Background(), []string{path}, nil)
 	require.Len(t, events, 1)
 	assert.Equal(t, EventTypeCheckFailed, events[0].Type)
 
@@ -127,7 +127,7 @@ func TestCheckFilesBatch_FastFailStopsDoomedFileOnly(t *testing.T) {
 	writeMultiSegmentFile(t, env, paths[1], segCount)
 	client.SetBehavior(doomedIDs[0], fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
 
-	events := env.healthChecker.CheckFilesBatch(context.Background(), paths)
+	events := env.healthChecker.CheckFilesBatch(context.Background(), paths, nil)
 	require.Len(t, events, 2)
 
 	assert.Equal(t, EventTypeFileCorrupted, events[0].Type)
@@ -163,7 +163,7 @@ func TestCheckFilesBatch_NoFastFailWhenToleranceUnreached(t *testing.T) {
 	ids := writeMultiSegmentFile(t, env, path, segCount)
 	client.SetBehavior(ids[0], fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
 
-	events := env.healthChecker.CheckFilesBatch(context.Background(), []string{path})
+	events := env.healthChecker.CheckFilesBatch(context.Background(), []string{path}, nil)
 	require.Len(t, events, 1)
 
 	d := parseDetails(t, events[0])

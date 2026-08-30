@@ -75,8 +75,9 @@ func TestStoreRefRepository_DecStoreRef_Decrement(t *testing.T) {
 	require.NoError(t, repo.IncStoreRef(ctx, storePath))
 
 	// Decrement: should return 2.
-	count, err := repo.DecStoreRef(ctx, storePath)
+	count, existed, err := repo.DecStoreRef(ctx, storePath)
 	require.NoError(t, err)
+	assert.True(t, existed, "a tracked store must report existed=true")
 	assert.Equal(t, int64(2), count)
 
 	// Verify via Get.
@@ -94,8 +95,9 @@ func TestStoreRefRepository_DecStoreRef_DeletesRowAtZero(t *testing.T) {
 	// Set up: increment once, then decrement back to zero.
 	require.NoError(t, repo.IncStoreRef(ctx, storePath))
 
-	count, err := repo.DecStoreRef(ctx, storePath)
+	count, existed, err := repo.DecStoreRef(ctx, storePath)
 	require.NoError(t, err)
+	assert.True(t, existed, "dropping the last reference must report existed=true")
 	assert.Equal(t, int64(0), count, "decrementing to zero should return 0")
 
 	// Row must be gone.
@@ -108,9 +110,11 @@ func TestStoreRefRepository_DecStoreRef_NoRow(t *testing.T) {
 	repo := setupStoreRefTestDB(t)
 	ctx := context.Background()
 
-	// Decrementing a non-existent row should not error and should return 0.
-	count, err := repo.DecStoreRef(ctx, "/store/ghost.nzbz")
+	// Decrementing a non-existent row must be distinguishable from dropping the
+	// last reference: callers unlink the store file only when existed is true.
+	count, existed, err := repo.DecStoreRef(ctx, "/store/ghost.nzbz")
 	require.NoError(t, err)
+	assert.False(t, existed, "an untracked store must report existed=false")
 	assert.Equal(t, int64(0), count)
 }
 
@@ -134,8 +138,9 @@ func TestStoreRefRepository_MultipleStores(t *testing.T) {
 	assert.Equal(t, int64(1), countB)
 
 	// Decrement A once; B should be unaffected.
-	newA, err := repo.DecStoreRef(ctx, pathA)
+	newA, existed, err := repo.DecStoreRef(ctx, pathA)
 	require.NoError(t, err)
+	assert.True(t, existed)
 	assert.Equal(t, int64(1), newA)
 
 	countB, err = repo.GetStoreRefCount(ctx, pathB)

@@ -41,11 +41,15 @@ func (r *StoreRefRepository) IncStoreRef(ctx context.Context, storePath string) 
 
 // DecStoreRef decrements the ref_count for storePath by 1.
 // If the resulting count is ≤ 0, the row is deleted and 0 is returned.
-// Returns the new count (0 if the row was deleted or did not exist).
-func (r *StoreRefRepository) DecStoreRef(ctx context.Context, storePath string) (int64, error) {
+//
+// The second return value reports whether a row existed before the decrement.
+// Callers must not confuse an untracked store (existed=false, count=0) with the
+// last reference being dropped (existed=true, count=0): only the latter means the
+// store file is genuinely unreferenced and safe to unlink.
+func (r *StoreRefRepository) DecStoreRef(ctx context.Context, storePath string) (int64, bool, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, fmt.Errorf("dec store ref %q: begin tx: %w", storePath, err)
+		return 0, false, fmt.Errorf("dec store ref %q: begin tx: %w", storePath, err)
 	}
 	defer tx.Rollback()
 
@@ -55,7 +59,7 @@ func (r *StoreRefRepository) DecStoreRef(ctx context.Context, storePath string) 
 		WHERE store_path = ?
 	`)
 	if _, err := tx.ExecContext(ctx, updateQuery, storePath); err != nil {
-		return 0, fmt.Errorf("dec store ref %q: update: %w", storePath, err)
+		return 0, false, fmt.Errorf("dec store ref %q: update: %w", storePath, err)
 	}
 
 	var count int64
@@ -64,26 +68,26 @@ func (r *StoreRefRepository) DecStoreRef(ctx context.Context, storePath string) 
 	if errors.Is(err, sql.ErrNoRows) {
 		// Row didn't exist before the decrement; nothing to do.
 		if err := tx.Commit(); err != nil {
-			return 0, fmt.Errorf("dec store ref %q: commit: %w", storePath, err)
+			return 0, false, fmt.Errorf("dec store ref %q: commit: %w", storePath, err)
 		}
-		return 0, nil
+		return 0, false, nil
 	}
 	if err != nil {
-		return 0, fmt.Errorf("dec store ref %q: select: %w", storePath, err)
+		return 0, false, fmt.Errorf("dec store ref %q: select: %w", storePath, err)
 	}
 
 	if count <= 0 {
 		deleteQuery := r.dialect.q(`DELETE FROM nzb_store_refs WHERE store_path = ?`)
 		if _, err := tx.ExecContext(ctx, deleteQuery, storePath); err != nil {
-			return 0, fmt.Errorf("dec store ref %q: delete: %w", storePath, err)
+			return 0, false, fmt.Errorf("dec store ref %q: delete: %w", storePath, err)
 		}
 		count = 0
 	}
 
 	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("dec store ref %q: commit: %w", storePath, err)
+		return 0, false, fmt.Errorf("dec store ref %q: commit: %w", storePath, err)
 	}
-	return count, nil
+	return count, true, nil
 }
 
 // GetStoreRefCount returns the current ref_count for storePath.

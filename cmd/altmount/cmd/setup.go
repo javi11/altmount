@@ -382,6 +382,7 @@ func setupWebDAV(
 func startHealthWorker(
 	ctx context.Context,
 	cfg *config.Config,
+	metadataService *metadata.MetadataService,
 	healthRepo *database.HealthRepository,
 	poolManager pool.Manager,
 	configManager *config.Manager,
@@ -391,8 +392,10 @@ func startHealthWorker(
 	broadcaster *progress.ProgressBroadcaster,
 	contentVerifyFS contentverify.Opener,
 ) (*health.HealthWorker, *health.LibrarySyncWorker, error) {
-	// Create metadata service for health worker
-	metadataService := metadata.NewMetadataService(cfg.Metadata.RootPath)
+	// The health and library-sync workers share the process-wide metadata service so
+	// their deletions go through the same store reference counter the importer wires
+	// up. A second instance here silently skipped every DecStoreRef, leaking .nzbz
+	// stores and letting the two lite caches serve each other stale entries.
 
 	// Create health checker
 	healthChecker := health.NewHealthChecker(

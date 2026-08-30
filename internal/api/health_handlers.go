@@ -230,7 +230,7 @@ func (s *Server) handleDeleteHealth(c *fiber.Ctx) error {
 
 		// Delete metadata if requested
 		if deleteMeta && s.metadataService != nil {
-			if delErr := s.metadataService.DeleteFileMetadataWithSourceNzb(c.Context(), item.FilePath, cfg.Metadata.ShouldDeleteSourceNzb()); delErr != nil {
+			if delErr := s.metadataService.DeleteFileMetadata(c.Context(), item.FilePath); delErr != nil {
 				slog.ErrorContext(c.Context(), "Failed to delete metadata during health record deletion", "file_path", item.FilePath, "error", delErr)
 			} else {
 				metaDeleted = true
@@ -314,7 +314,7 @@ func (s *Server) handleDeleteHealthBulk(c *fiber.Ctx) error {
 
 			// Delete metadata if requested
 			if req.DeleteMeta && s.metadataService != nil {
-				if delErr := s.metadataService.DeleteFileMetadataWithSourceNzb(c.Context(), item.FilePath, cfg.Metadata.ShouldDeleteSourceNzb()); delErr != nil {
+				if delErr := s.metadataService.DeleteFileMetadata(c.Context(), item.FilePath); delErr != nil {
 					slog.ErrorContext(c.Context(), "Failed to delete metadata during bulk deletion", "file_path", item.FilePath, "error", delErr)
 				} else {
 					metaDeletedCount++
