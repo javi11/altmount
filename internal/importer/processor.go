@@ -458,6 +458,9 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 		var fastFailErr error
 		brokenIdx, missingIDs, fastFailErr = proc.preParseFastFail(ctx, n, cfg, queueID, category, downloadID)
 		if fastFailErr != nil {
+			if errors.Is(fastFailErr, validation.ErrFastFailInconclusive) {
+				return "", nil, fmt.Errorf("fast-fail segment check inconclusive: %w", fastFailErr)
+			}
 			return "", nil, NewNonRetryableError("fast-fail segment check failed", fastFailErr)
 		}
 

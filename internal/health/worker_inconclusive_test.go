@@ -5,15 +5,28 @@ import (
 	"database/sql"
 	"errors"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/testsupport/fakepool"
 	"github.com/javi11/nntppool/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type beforeStatManyClient struct {
+	pool.NntpClient
+	once   sync.Once
+	before func()
+}
+
+func (c *beforeStatManyClient) StatMany(ctx context.Context, ids []string, opts nntppool.StatManyOptions) <-chan nntppool.StatManyResult {
+	c.once.Do(c.before)
+	return c.NntpClient.StatMany(ctx, ids, opts)
+}
 
 // TestPrepareUpdateForResultInconclusive covers the worker's half of #861: a
 // check that could not reach a verdict must reschedule the file without
@@ -128,4 +141,78 @@ func TestInconclusiveCycleLeavesRecordIntact(t *testing.T) {
 	assert.Equal(t, 1, future, "the next check must be pushed into the future")
 
 	assert.Empty(t, env.mockARRs.calls)
+}
+
+func TestInconclusiveManualRecheckRestoresPreCheckStatus(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks not supported on Windows")
+	}
+
+	for _, originalStatus := range []database.HealthStatus{
+		database.HealthStatusDegraded,
+		database.HealthStatusRepairTriggered,
+	} {
+		t.Run(string(originalStatus), func(t *testing.T) {
+			client := fakepool.New()
+			env := newBatchTestEnv(t, t.TempDir(), client)
+			filePath := "complete/" + string(originalStatus) + ".mkv"
+			segID := writeHealthyFile(t, env, filePath)
+			client.SetBehavior(segID, fakepool.SegmentBehavior{Err: nntppool.ErrConnectionDied})
+
+			_, err := env.db.Exec(`
+				INSERT INTO file_health (file_path, status, retry_count, max_retries, repair_retry_count, max_repair_retries, scheduled_check_at)
+				VALUES (?, ?, 1, 3, 1, 3, datetime('now', '-1 second'))
+			`, filePath, originalStatus)
+			require.NoError(t, err)
+			require.NoError(t, env.healthRepo.SetFileChecking(context.Background(), filePath))
+
+			require.NoError(t, env.hw.performDirectCheck(context.Background(), filePath, originalStatus, nil))
+
+			fh, err := env.healthRepo.GetFileHealth(context.Background(), filePath)
+			require.NoError(t, err)
+			require.NotNil(t, fh)
+			assert.Equal(t, originalStatus, fh.Status)
+			assert.Equal(t, 1, fh.RetryCount, "inconclusive manual recheck must not consume a health retry")
+			assert.Equal(t, 1, fh.RepairRetryCount, "inconclusive manual recheck must not consume a repair retry")
+		})
+	}
+}
+
+func TestManualRecheckDoesNotOverwriteConcurrentStatusChange(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks not supported on Windows")
+	}
+
+	baseClient := fakepool.New()
+	env := newBatchTestEnv(t, t.TempDir(), baseClient)
+	filePath := "complete/concurrent.mkv"
+	segID := writeHealthyFile(t, env, filePath)
+	baseClient.SetBehavior(segID, fakepool.SegmentBehavior{Err: nntppool.ErrConnectionDied})
+
+	_, err := env.db.Exec(`
+		INSERT INTO file_health (file_path, status, retry_count, max_retries, repair_retry_count, max_repair_retries, scheduled_check_at)
+		VALUES (?, 'degraded', 1, 3, 0, 3, datetime('now', '-1 second'))
+	`, filePath)
+	require.NoError(t, err)
+	require.NoError(t, env.healthRepo.SetFileChecking(context.Background(), filePath))
+
+	client := &beforeStatManyClient{
+		NntpClient: baseClient,
+		before: func() {
+			require.NoError(t, env.healthRepo.UpdateFileHealth(
+				context.Background(), filePath, database.HealthStatusHealthy, nil, nil, nil, false,
+			))
+		},
+	}
+	env.healthChecker.poolManager = &fakeClientPoolManager{client: client}
+
+	require.NoError(t, env.hw.performDirectCheck(
+		context.Background(), filePath, database.HealthStatusDegraded, nil,
+	))
+
+	fh, err := env.healthRepo.GetFileHealth(context.Background(), filePath)
+	require.NoError(t, err)
+	require.NotNil(t, fh)
+	assert.Equal(t, database.HealthStatusHealthy, fh.Status,
+		"a webhook or re-import status change during a manual check must win")
 }

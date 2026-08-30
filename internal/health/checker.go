@@ -282,8 +282,11 @@ func (hc *HealthChecker) judgeValidation(ctx context.Context, prep preparedCheck
 		if valErr != nil {
 			event.Error = fmt.Errorf("segment check inconclusive: %w", valErr)
 		} else {
-			event.Error = fmt.Errorf("segment check inconclusive: %d of %d checked segments could not be verified: %w",
-				result.UnresolvedCount, result.TotalChecked, result.Err)
+			// TotalChecked counts only resolved segments, so the sampled total
+			// is the two buckets summed — otherwise a sweep where nothing
+			// resolved reports "1 of 0".
+			event.Error = fmt.Errorf("segment check inconclusive: %d of %d sampled segments could not be verified: %w",
+				result.UnresolvedCount, result.TotalChecked+result.UnresolvedCount, result.Err)
 		}
 		details := database.HealthErrorDetails{
 			ErrorType:          "check_inconclusive",

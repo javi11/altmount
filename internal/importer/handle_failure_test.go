@@ -3,6 +3,7 @@ package importer
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/importer/validation"
 )
 
 // newMoveToFailedTestService builds a minimal *Service with a real SQLite DB so that
@@ -151,6 +153,29 @@ func TestHandleFailure_SourceMissing_IsNoop(t *testing.T) {
 
 	err := svc.MoveToFailedFolder(context.Background(), item)
 	assert.NoError(t, err, "missing source NZB should not be treated as an error")
+}
+
+func TestHandleFailure_FastFailInconclusiveSkipsDefinitiveFailureHandling(t *testing.T) {
+	svc := newMoveToFailedTestService(t)
+	ctx := context.Background()
+	item := &database.ImportQueueItem{
+		NzbPath: filepath.Join(t.TempDir(), "inconclusive.nzb"),
+		Status:  database.QueueStatusPending,
+	}
+	require.NoError(t, os.WriteFile(item.NzbPath, []byte("<nzb/>"), 0644))
+	require.NoError(t, svc.database.Repository.AddToQueue(ctx, item))
+
+	// postProcessor is deliberately nil: reaching definitive fallback/ARR
+	// handling would panic, while an inconclusive validation must stop before it.
+	svc.HandleFailure(ctx, item, fmt.Errorf("fast-fail check: %w", validation.ErrFastFailInconclusive))
+
+	dbItem, err := svc.database.Repository.GetQueueItem(ctx, item.ID)
+	require.NoError(t, err)
+	require.NotNil(t, dbItem)
+	assert.Equal(t, database.QueueStatusFailed, dbItem.Status)
+	require.NotNil(t, dbItem.ErrorMessage)
+	assert.Contains(t, *dbItem.ErrorMessage, validation.ErrFastFailInconclusive.Error())
+	assert.FileExists(t, item.NzbPath, "inconclusive validation must retain the NZB for manual retry")
 }
 
 // TestCleanupFailedItems_RemovesNzbFile verifies that cleanupFailedItems deletes the
