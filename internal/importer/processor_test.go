@@ -248,19 +248,22 @@ func TestPreParseFastFailHealthyReleaseSkipsPerFileSweep(t *testing.T) {
 	}
 }
 
-// TestFastFailStatConcurrencyIndependentOfConnections pins the STAT sweep's
-// concurrency to the pipeline depth nntppool can actually sustain rather than
-// to the pool's connection count: STAT carries no body, so many pipeline down
-// one connection (Provider.StatInflight). A small pool must not throttle it.
-func TestFastFailStatConcurrencyIndependentOfConnections(t *testing.T) {
-	if fastFailStatConcurrency != 100 {
-		t.Fatalf("fastFailStatConcurrency = %d, want 100 (matches the StatInflight default)", fastFailStatConcurrency)
-	}
-
+// TestFastFailUsesStatPipelineDepthNotConnections pins the fast-fail sweep's
+// concurrency to the providers' STAT pipeline depth rather than their
+// connection count: STAT carries no body, so nntppool pipelines many per
+// connection (Provider.StatInflight). A two-connection pool must not throttle
+// the sweep to two in-flight STATs.
+func TestFastFailUsesStatPipelineDepthNotConnections(t *testing.T) {
 	enabled := true
-	tiny := &config.Config{Providers: []config.ProviderConfig{{MaxConnections: 2, Enabled: &enabled}}}
-	if got := tiny.TotalProviderConnections(); got >= fastFailStatConcurrency {
-		t.Fatalf("test fixture is not a small pool: TotalProviderConnections = %d", got)
+	cfg := &config.Config{Providers: []config.ProviderConfig{
+		{MaxConnections: 2, StatInflightRequests: 100, Enabled: &enabled},
+	}}
+
+	if got := cfg.TotalProviderConnections(); got != 2 {
+		t.Fatalf("fixture TotalProviderConnections = %d, want 2", got)
+	}
+	if got := cfg.StatConcurrency(); got != 100 {
+		t.Fatalf("StatConcurrency = %d, want 100 (the configured pipeline depth)", got)
 	}
 }
 
