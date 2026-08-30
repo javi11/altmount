@@ -248,41 +248,19 @@ func TestPreParseFastFailHealthyReleaseSkipsPerFileSweep(t *testing.T) {
 	}
 }
 
-func TestFastFailConcurrency(t *testing.T) {
-	enabled := true
-	disabled := false
-	tests := []struct {
-		name string
-		cfg  *config.Config
-		want int
-	}{
-		{
-			name: "sums enabled providers (nil Enabled counts as enabled)",
-			cfg:  &config.Config{Providers: []config.ProviderConfig{{MaxConnections: 10, Enabled: &enabled}, {MaxConnections: 20}}},
-			want: 30,
-		},
-		{
-			name: "skips disabled providers",
-			cfg:  &config.Config{Providers: []config.ProviderConfig{{MaxConnections: 10, Enabled: &disabled}, {MaxConnections: 20, Enabled: &enabled}}},
-			want: 20,
-		},
-		{
-			name: "floors at 1 when no capacity configured",
-			cfg:  &config.Config{},
-			want: 1,
-		},
-		{
-			name: "caps at 100",
-			cfg:  &config.Config{Providers: []config.ProviderConfig{{MaxConnections: 500, Enabled: &enabled}}},
-			want: 100,
-		},
+// TestFastFailStatConcurrencyIndependentOfConnections pins the STAT sweep's
+// concurrency to the pipeline depth nntppool can actually sustain rather than
+// to the pool's connection count: STAT carries no body, so many pipeline down
+// one connection (Provider.StatInflight). A small pool must not throttle it.
+func TestFastFailStatConcurrencyIndependentOfConnections(t *testing.T) {
+	if fastFailStatConcurrency != 100 {
+		t.Fatalf("fastFailStatConcurrency = %d, want 100 (matches the StatInflight default)", fastFailStatConcurrency)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := fastFailConcurrency(tt.cfg); got != tt.want {
-				t.Fatalf("fastFailConcurrency = %d, want %d", got, tt.want)
-			}
-		})
+
+	enabled := true
+	tiny := &config.Config{Providers: []config.ProviderConfig{{MaxConnections: 2, Enabled: &enabled}}}
+	if got := tiny.TotalProviderConnections(); got >= fastFailStatConcurrency {
+		t.Fatalf("test fixture is not a small pool: TotalProviderConnections = %d", got)
 	}
 }
 

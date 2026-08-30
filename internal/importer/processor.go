@@ -35,6 +35,16 @@ import (
 
 const (
 	strmFileExtension = ".strm"
+
+	// fastFailStatConcurrency bounds STATs in flight for the fast-fail sweeps.
+	// STAT carries no body, so nntppool pipelines many of them down a single
+	// connection (Provider.StatInflight, defaulted to 100 in config.Manager)
+	// instead of spending one connection per check — connection count is the
+	// wrong ceiling. Deriving this from TotalProviderConnections throttled a
+	// 10-connection pool to 10 in-flight STATs when the pool could carry far
+	// more. 100 matches both the StatInflight default and health's own
+	// max_connections_for_health_checks default.
+	fastFailStatConcurrency = 100
 )
 
 // Processor handles the processing and storage of parsed NZB files using metadata storage
@@ -206,9 +216,8 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 	}
 
 	// Stat is a cheap single round-trip on the pool's normal lane; excess
-	// requests queue and yield to streaming (priority lane). Run sweeps at the
-	// pool's full connection capacity so multi-part releases don't crawl.
-	concurrency := fastFailConcurrency(cfg)
+	// requests queue and yield to streaming (priority lane).
+	concurrency := fastFailStatConcurrency
 
 	// Phase 1: cheap release-level probe. Sample the whole release once
 	// (segment_sample_percentage of it) and fail fast. Healthy releases — the
@@ -375,22 +384,6 @@ func longestSampledRun(segments []*metapb.SegmentData, missingIDs []string) int 
 		}
 	}
 	return acc.LongestRun()
-}
-
-// fastFailConcurrency returns the goroutine cap for the fast-fail Stat sweep.
-// Stats are cheap and queue on the pool's normal lane, so we use the pool's
-// full connection capacity, bounded to keep goroutine counts sane.
-func fastFailConcurrency(cfg *config.Config) int {
-	const maxConcurrency = 100
-
-	capacity := cfg.TotalProviderConnections()
-	if capacity <= 0 {
-		capacity = 1
-	}
-	if capacity > maxConcurrency {
-		capacity = maxConcurrency
-	}
-	return capacity
 }
 
 // ProcessNzbFile processes an NZB or STRM file maintaining the folder structure relative to relative path.
