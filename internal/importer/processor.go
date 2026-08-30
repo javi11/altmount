@@ -206,9 +206,10 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 	}
 
 	// Stat is a cheap single round-trip on the pool's normal lane; excess
-	// requests queue and yield to streaming (priority lane). Run sweeps at the
-	// pool's full connection capacity so multi-part releases don't crawl.
-	concurrency := fastFailConcurrency(cfg)
+	// requests queue and yield to streaming (priority lane). Size the sweep by
+	// the providers' STAT pipeline depth, not their connection count — STAT is
+	// bodyless, so nntppool pipelines many per connection.
+	concurrency := cfg.StatConcurrency()
 
 	// Phase 1: cheap release-level probe. Sample the whole release once
 	// (segment_sample_percentage of it) and fail fast. Healthy releases — the
@@ -377,22 +378,6 @@ func longestSampledRun(segments []*metapb.SegmentData, missingIDs []string) int 
 	return acc.LongestRun()
 }
 
-// fastFailConcurrency returns the goroutine cap for the fast-fail Stat sweep.
-// Stats are cheap and queue on the pool's normal lane, so we use the pool's
-// full connection capacity, bounded to keep goroutine counts sane.
-func fastFailConcurrency(cfg *config.Config) int {
-	const maxConcurrency = 100
-
-	capacity := cfg.TotalProviderConnections()
-	if capacity <= 0 {
-		capacity = 1
-	}
-	if capacity > maxConcurrency {
-		capacity = maxConcurrency
-	}
-	return capacity
-}
-
 // ProcessNzbFile processes an NZB or STRM file maintaining the folder structure relative to relative path.
 // Returns (resultPath, writtenMetadataPaths, error). writtenMetadataPaths contains all virtual paths of
 // metadata files written to disk; it is populated even on partial failure so callers can clean up.
@@ -458,6 +443,9 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 		var fastFailErr error
 		brokenIdx, missingIDs, fastFailErr = proc.preParseFastFail(ctx, n, cfg, queueID, category, downloadID)
 		if fastFailErr != nil {
+			if errors.Is(fastFailErr, validation.ErrFastFailInconclusive) {
+				return "", nil, fmt.Errorf("fast-fail segment check inconclusive: %w", fastFailErr)
+			}
 			return "", nil, NewNonRetryableError("fast-fail segment check failed", fastFailErr)
 		}
 

@@ -16,6 +16,7 @@ import (
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/testsupport/fakepool"
 	nntppool "github.com/javi11/nntppool/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -98,9 +99,16 @@ type repairTestEnv struct {
 	hw              *HealthWorker
 }
 
+// newRepairTestEnv defaults to a fakepool answering 430 (article genuinely
+// gone) rather than a dead pool manager, so the repair e2e flows below still
+// exercise genuine corruption — a pool that cannot be reached is an outage,
+// not corruption (#861), and must not be the default for tests whose whole
+// point is triggering repair on real missing segments.
 func newRepairTestEnv(t *testing.T, tempDir string, arrsErr error, configure ...func(*config.Config)) *repairTestEnv {
 	t.Helper()
-	return newRepairTestEnvWithPool(t, tempDir, arrsErr, &mockPoolManager{}, configure...)
+	client := fakepool.New()
+	client.SetDefaultBehavior(fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
+	return newRepairTestEnvWithPool(t, tempDir, arrsErr, &fakeClientPoolManager{client: client}, configure...)
 }
 
 // newRepairTestEnvWithPool is newRepairTestEnv with an injectable pool.Manager, so tests
@@ -199,7 +207,8 @@ func newRepairTestEnvWithPool(t *testing.T, tempDir string, arrsErr error, poolM
 }
 
 // validSegmentMeta creates a FileMetadata with one segment that covers the full fileSize,
-// so CheckMetadataIntegrity passes. Pool failure then causes EventTypeCheckFailed.
+// so CheckMetadataIntegrity passes. The env's default pool then answers 430 for that
+// segment, producing EventTypeFileCorrupted.
 func validSegmentMeta(ms *metadata.MetadataService, fileSize int64) *metapb.FileMetadata {
 	seg := &metapb.SegmentData{
 		Id:          "test-article-001@test.example.com",

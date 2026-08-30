@@ -28,6 +28,11 @@ const (
 	EventTypeFileCorrupted EventType = "file_corrupted"
 	EventTypeCheckFailed   EventType = "check_failed"
 	EventTypeFileRemoved   EventType = "file_removed"
+	// EventTypeCheckInconclusive means the check reached the network but the
+	// providers could not answer for at least one segment (outage, timeout,
+	// quota, auth, truncated sweep). It carries no verdict: the file keeps the
+	// status it had and is simply re-checked later.
+	EventTypeCheckInconclusive EventType = "check_inconclusive"
 )
 
 // HealthEvent represents a health check event
@@ -262,27 +267,30 @@ func (hc *HealthChecker) prepareCheck(ctx context.Context, filePath string, opts
 func (hc *HealthChecker) judgeValidation(ctx context.Context, prep preparedCheck, result usenet.ValidationResult, valErr error) HealthEvent {
 	event := baseResultEvent(prep.filePath, prep.sourceNzbPath)
 
-	if valErr != nil {
-		event.Type = EventTypeCheckFailed
-		event.Status = database.HealthStatusCorrupted
-		event.Error = fmt.Errorf("failed to validate segments: %w", valErr)
-		return event
-	}
-
-	// Segments whose availability was never established make the sweep
-	// inconclusive: the file can be neither cleared nor condemned on evidence
-	// that was not gathered. A settled verdict wins over that noise — once the
-	// missing-segment threshold is irreversibly exceeded, no amount of further
-	// checking could change the outcome.
-	if result.UnresolvedCount > 0 && !result.TerminatedEarly {
-		event.Type = EventTypeCheckFailed
-		event.Status = database.HealthStatusCorrupted
-		event.Error = fmt.Errorf("%d of %d segments could not be checked (provider or connection failure)",
-			result.UnresolvedCount, result.UnresolvedCount+result.TotalChecked)
+	// An inconclusive sweep proves nothing. Reading a transient provider
+	// failure — whether the whole pool was unreachable or just a handful of
+	// segments hit a connection blip mid-sweep — as a missing article marked
+	// files degraded and wrote their segment ids into the permanent hole map,
+	// which no later clean check clears; treating it as a failed attempt
+	// instead still burned the retry budget and could escalate a perfectly
+	// good file into repair (#861). So this check must come before the
+	// missing-count verdict, even when the sweep also found genuine misses,
+	// and it must not consume a retry.
+	if valErr != nil || result.Inconclusive() {
+		event.Type = EventTypeCheckInconclusive
+		event.Status = database.HealthStatusPending
+		if valErr != nil {
+			event.Error = fmt.Errorf("segment check inconclusive: %w", valErr)
+		} else {
+			// TotalChecked counts only resolved segments, so the sampled total
+			// is the two buckets summed — otherwise a sweep where nothing
+			// resolved reports "1 of 0".
+			event.Error = fmt.Errorf("segment check inconclusive: %d of %d sampled segments could not be verified: %w",
+				result.UnresolvedCount, result.TotalChecked+result.UnresolvedCount, result.Err)
+		}
 		details := database.HealthErrorDetails{
-			ErrorType:          "segments_unresolved",
+			ErrorType:          "check_inconclusive",
 			Message:            event.Error.Error(),
-			MissingArticles:    result.MissingCount,
 			TotalArticles:      prep.totalSegments,
 			Sampled:            result.TotalChecked,
 			UnresolvedSegments: result.UnresolvedCount,

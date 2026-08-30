@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -28,6 +29,7 @@ import (
 	"github.com/javi11/altmount/internal/importer/queue"
 	"github.com/javi11/altmount/internal/importer/scanner"
 	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
+	"github.com/javi11/altmount/internal/importer/validation"
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/nzbfile"
 	"github.com/javi11/altmount/internal/pool"
@@ -1454,6 +1456,31 @@ func (s *Service) cleanupHealthRecords(ctx context.Context, itemID int64, virtua
 // handleProcessingFailure handles when processing fails
 func (s *Service) handleProcessingFailure(ctx context.Context, item *database.ImportQueueItem, processingErr error) {
 	errorMessage := processingErr.Error()
+	if errors.Is(processingErr, validation.ErrFastFailInconclusive) {
+		// The provider never produced a conclusive answer within the validator's
+		// bounded retry budget. Keep this distinct from a bad release: do not log
+		// an indexer failure, notify/blocklist in ARR, invoke fallback, or move the
+		// NZB away. The retained failed item can be retried manually once the
+		// provider is healthy again.
+		s.log.WarnContext(ctx, "Import stopped because segment availability was inconclusive",
+			"queue_id", item.ID,
+			"file", item.NzbPath,
+			"error", processingErr)
+		if err := s.database.Repository.UpdateQueueItemStatus(ctx, item.ID, database.QueueStatusFailed, &errorMessage); err != nil {
+			s.log.ErrorContext(ctx, "Failed to mark inconclusive import as failed", "queue_id", item.ID, "error", err)
+		}
+		if s.database.MigrationRepo != nil {
+			if err := s.database.MigrationRepo.MarkFailed(ctx, item.ID, errorMessage); err != nil {
+				s.log.WarnContext(ctx, "Failed to mark inconclusive import migration as failed",
+					"queue_id", item.ID, "error", err)
+			}
+		}
+		if s.broadcaster != nil {
+			s.broadcaster.NotifyComplete(int(item.ID), "failed")
+			s.broadcaster.BroadcastQueueChanged()
+		}
+		return
+	}
 
 	// Log persistent indexer statistic
 	indexerName := database.IndexerUnknown
@@ -1996,4 +2023,3 @@ func joinPathsMergingOverlap(parent, child string) string {
 	}
 	return result
 }
-

@@ -135,8 +135,20 @@ func TestCheckFilesBatch(t *testing.T) {
 		assert.Nil(t, fh)
 	})
 
-	t.Run("pool down fails all non-early files", func(t *testing.T) {
-		env := newRepairTestEnv(t, t.TempDir(), nil) // mockPoolManager: GetPool errors
+	// A pool that cannot be reached is an outage, not corruption: the sweep
+	// produced no evidence about these files, so they must come back later
+	// rather than burn retries toward a repair (#861).
+	t.Run("pool down leaves all non-early files inconclusive", func(t *testing.T) {
+		env := newRepairTestEnv(t, t.TempDir(), nil)
+		// mockPoolManager: GetPool errors — the sweep never reaches a provider.
+		env.healthChecker = NewHealthChecker(
+			env.healthRepo,
+			env.metadataService,
+			&mockPoolManager{},
+			env.hw.configGetter,
+			&MockRcloneClient{},
+			nil,
+		)
 
 		paths := []string{"complete/a.mkv", "complete/b.mkv"}
 		for _, p := range paths {
@@ -146,10 +158,57 @@ func TestCheckFilesBatch(t *testing.T) {
 		events := env.healthChecker.CheckFilesBatch(context.Background(), paths, nil)
 		require.Len(t, events, 2)
 		for i, ev := range events {
-			assert.Equal(t, EventTypeCheckFailed, ev.Type, "file %d", i)
+			assert.Equal(t, EventTypeCheckInconclusive, ev.Type, "file %d", i)
 			require.Error(t, ev.Error, "file %d", i)
-			assert.Contains(t, ev.Error.Error(), "failed to validate segments", "file %d", i)
+			assert.Contains(t, ev.Error.Error(), "inconclusive", "file %d", i)
+			assert.Nil(t, ev.Classification, "file %d", i)
 		}
+	})
+
+	// Regression for #861: a transient provider failure on one file must not
+	// be read as a missing article, and must not taint its batch siblings.
+	t.Run("transient provider error is inconclusive, not corrupted", func(t *testing.T) {
+		client := fakepool.New()
+		env := newBatchTestEnv(t, t.TempDir(), client)
+
+		paths := []string{"complete/good.mkv", "complete/flaky.mkv", "complete/gone.mkv"}
+		writeHealthyFile(t, env, paths[0])
+		flakyID := writeHealthyFile(t, env, paths[1])
+		goneID := writeHealthyFile(t, env, paths[2])
+		client.SetBehavior(flakyID, fakepool.SegmentBehavior{Err: nntppool.ErrConnectionDied})
+		client.SetBehavior(goneID, fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
+
+		events := env.healthChecker.CheckFilesBatch(context.Background(), paths, nil)
+		require.Len(t, events, 3)
+
+		assert.Equal(t, EventTypeFileHealthy, events[0].Type)
+
+		assert.Equal(t, EventTypeCheckInconclusive, events[1].Type)
+		require.Error(t, events[1].Error)
+		assert.Contains(t, events[1].Error.Error(), "inconclusive")
+		assert.Nil(t, events[1].Classification, "an inconclusive check must not classify holes")
+
+		assert.Equal(t, EventTypeFileCorrupted, events[2].Type)
+	})
+
+	// The hole map is permanent — a clean check never clears it — so an
+	// inconclusive sweep must never write into it (#861).
+	t.Run("inconclusive check persists no known holes", func(t *testing.T) {
+		client := fakepool.New()
+		env := newBatchTestEnv(t, t.TempDir(), client)
+
+		path := "complete/flaky.mkv"
+		segID := writeHealthyFile(t, env, path)
+		client.SetBehavior(segID, fakepool.SegmentBehavior{Err: nntppool.ErrConnectionDied})
+
+		events := env.healthChecker.CheckFilesBatch(context.Background(), []string{path}, nil)
+		require.Len(t, events, 1)
+		require.Equal(t, EventTypeCheckInconclusive, events[0].Type)
+
+		meta, err := env.metadataService.ReadFileMetadata(path)
+		require.NoError(t, err)
+		require.NotNil(t, meta)
+		assert.Empty(t, meta.KnownHoles, "no holes may be persisted from an inconclusive sweep")
 	})
 
 	t.Run("empty input", func(t *testing.T) {

@@ -51,8 +51,8 @@ func parseDetails(t *testing.T, ev HealthEvent) database.HealthErrorDetails {
 
 // TestCheckFilesBatch_TransportErrorIsNotCorruption is the correctness fix the
 // issue calls for: a connection failure must neither condemn a file nor let it
-// pass as healthy. It is a failed attempt, which the existing retry ladder
-// re-runs later.
+// pass as healthy, and must not consume a retry either — it proves nothing,
+// so the existing retry ladder must not advance on its account (#861).
 func TestCheckFilesBatch_TransportErrorIsNotCorruption(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlinks not supported on Windows")
@@ -69,8 +69,8 @@ func TestCheckFilesBatch_TransportErrorIsNotCorruption(t *testing.T) {
 	events := env.healthChecker.CheckFilesBatch(context.Background(), paths, nil)
 	require.Len(t, events, 2)
 
-	assert.Equal(t, EventTypeCheckFailed, events[0].Type,
-		"a transport error is an inconclusive attempt, not corruption")
+	assert.Equal(t, EventTypeCheckInconclusive, events[0].Type,
+		"a transport error proves nothing, so it must not be read as corruption or burn a retry")
 	assert.NotEqual(t, EventTypeFileHealthy, events[0].Type,
 		"a segment we never resolved must not pass as available")
 	assert.Equal(t, EventTypeFileHealthy, events[1].Type, "sibling unaffected")
@@ -98,7 +98,7 @@ func TestCheckFilesBatch_TransportErrorPersistsNoHoles(t *testing.T) {
 
 	events := env.healthChecker.CheckFilesBatch(context.Background(), []string{path}, nil)
 	require.Len(t, events, 1)
-	assert.Equal(t, EventTypeCheckFailed, events[0].Type)
+	assert.Equal(t, EventTypeCheckInconclusive, events[0].Type)
 
 	meta, err := env.metadataService.ReadFileMetadata(path)
 	require.NoError(t, err)
