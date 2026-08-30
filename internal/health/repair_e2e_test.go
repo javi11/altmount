@@ -567,3 +567,8 @@ func TestE2E_FileRepairTriggered_ARRReturnsPathNotFound(t *testing.T) {
 	require.NoError(t, readErr)
 	assert.NotNil(t, original, "metadata must be preserved when ARR returns ErrPathMatchFailed")
 }
+
+func (m *mockPoolManager) AcquireStatSlots(_ context.Context, want int) (int, func(), error) {
+	return want, func() {}, nil
+}
+func (m *mockPoolManager) SetStatCapacity(_ int) {}

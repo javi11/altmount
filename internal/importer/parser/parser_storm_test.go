@@ -204,3 +204,8 @@ func TestStorm_ParallelImportsShareGlobalBudget(t *testing.T) {
 			mif, concurrentImports, budgetCapacity)
 	}
 }
+
+func (m *fakeFullPoolManager) AcquireStatSlots(_ context.Context, want int) (int, func(), error) {
+	return want, func() {}, nil
+}
+func (m *fakeFullPoolManager) SetStatCapacity(_ int) {}

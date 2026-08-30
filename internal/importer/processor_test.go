@@ -717,3 +717,8 @@ func TestCalculateVirtualDirectory(t *testing.T) {
 		})
 	}
 }
+
+func (m processorTestPoolManager) AcquireStatSlots(_ context.Context, want int) (int, func(), error) {
+	return want, func() {}, nil
+}
+func (m processorTestPoolManager) SetStatCapacity(_ int) {}

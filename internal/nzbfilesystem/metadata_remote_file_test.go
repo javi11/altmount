@@ -697,3 +697,8 @@ func TestConcurrentSegmentIndexAccess(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func (m *mockPoolManager) AcquireStatSlots(_ context.Context, want int) (int, func(), error) {
+	return want, func() {}, nil
+}
+func (m *mockPoolManager) SetStatCapacity(_ int) {}

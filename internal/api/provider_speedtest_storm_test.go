@@ -139,3 +139,8 @@ func TestStorm_SpeedTestBypassesPoolManager(t *testing.T) {
 			getPoolCalls, concurrentRequests)
 	}
 }
+
+func (m *countingPoolManager) AcquireStatSlots(_ context.Context, want int) (int, func(), error) {
+	return want, func() {}, nil
+}
+func (m *countingPoolManager) SetStatCapacity(_ int) {}
