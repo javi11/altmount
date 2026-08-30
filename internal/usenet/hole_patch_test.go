@@ -148,6 +148,53 @@ func TestReaderKnownHoleWithoutPatchZeroFills(t *testing.T) {
 	}
 }
 
+// A segment that maps a sub-range of its article (archive inner-file
+// segments: Start/End trim the article, SegmentSize is the full article size)
+// must still serve a full-article patch. The PAR2 repair engine stores whole
+// decoded articles; rejecting them because End+1 != len(patch) throws away a
+// successful repair (part40.rar regression).
+func TestReaderServesFullArticlePatchOnTrimmedSegment(t *testing.T) {
+	ctx := context.Background()
+	const artSize = 8
+	const segSize = 4
+	fp := fillFakePool(3, segSize)
+	fp.SetBehavior(segments.MessageID(1), fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
+
+	patch := make([]byte, artSize)
+	for i := range patch {
+		patch[i] = byte(0xE0 + i)
+	}
+	hooks := &HoleHooks{
+		PatchLookup: func(segID string) []byte {
+			if segID == segments.MessageID(1) {
+				return patch
+			}
+			return nil
+		},
+	}
+
+	// Segment 1 uses only bytes [2,5] of its 8-byte article.
+	segs := []*segment{
+		newSegment(segments.MessageID(0), 0, segSize-1, segSize, nil, 0),
+		newSegment(segments.MessageID(1), 2, 5, artSize, nil, 1),
+		newSegment(segments.MessageID(2), 0, segSize-1, segSize, nil, 2),
+	}
+	rg := &segmentRange{segments: segs, start: 0, end: int64(3*segSize - 1), ctx: ctx}
+	ur := newReaderWithHooks(t, ctx, fp, rg, 60, hooks)
+
+	got, err := io.ReadAll(ur)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if !bytes.Equal(got[segSize:2*segSize], patch[2:6]) {
+		t.Fatalf("segment 1 = %v, want patch sub-range %v", got[segSize:2*segSize], patch[2:6])
+	}
+	// Neighbors intact.
+	if got[0] != 1 || got[2*segSize] != 3 {
+		t.Fatal("neighbor segments corrupted")
+	}
+}
+
 // A patch whose size doesn't match the segment is ignored (falls back to
 // zero-fill) rather than corrupting stream offsets.
 func TestReaderIgnoresSizeMismatchedPatch(t *testing.T) {

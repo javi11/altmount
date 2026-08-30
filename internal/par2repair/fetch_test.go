@@ -271,3 +271,68 @@ func TestConnLimiterBoundsConcurrency(t *testing.T) {
 		release()
 	}
 }
+
+// wedgedBodyClient simulates the observed nntppool failure: a Body call whose
+// response is never delivered (committed request orphaned by a dying
+// connection). It returns only when the caller's context expires.
+type wedgedBodyClient struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (c *wedgedBodyClient) Body(ctx context.Context, _ string, _ ...func(nntppool.YEncMeta)) (*nntppool.ArticleBody, error) {
+	c.mu.Lock()
+	n := c.calls
+	c.calls++
+	c.mu.Unlock()
+	if n == 0 {
+		<-ctx.Done() // wedged until the per-attempt deadline fires
+		return nil, ctx.Err()
+	}
+	return &nntppool.ArticleBody{Bytes: []byte("payload")}, nil
+}
+
+// One wedged Body call must not freeze a repair until the job timeout: each
+// attempt carries its own deadline, after which the fetch retries on a fresh
+// request. (Observed live: committed requests orphaned by dying connections
+// waited forever while dozens of slots idled.)
+func TestPoolFetcherAttemptTimeoutUnwedgesBody(t *testing.T) {
+	client := &wedgedBodyClient{}
+	f := NewPoolFetcher(func() (BodyClient, error) { return client, nil }, nil)
+	f.retryDelay = time.Millisecond
+	f.attemptTimeout = 50 * time.Millisecond
+
+	start := time.Now()
+	data, err := f.Fetch(context.Background(), "wedged@x")
+	if err != nil {
+		t.Fatalf("Fetch = %v, want retry success after the wedged attempt", err)
+	}
+	if string(data) != "payload" {
+		t.Fatalf("payload = %q", data)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("Fetch took %v, want the attempt timeout to cut the wedged call short", elapsed)
+	}
+	if client.calls != 2 {
+		t.Fatalf("Body calls = %d, want 2 (wedged attempt + retry)", client.calls)
+	}
+}
+
+// The attempt deadline must not mask the caller's own cancellation: a
+// cancelled parent context surfaces as such, without retries.
+func TestPoolFetcherAttemptTimeoutPreservesCallerCancel(t *testing.T) {
+	client := &wedgedBodyClient{}
+	f := NewPoolFetcher(func() (BodyClient, error) { return client, nil }, nil)
+	f.retryDelay = time.Millisecond
+	f.attemptTimeout = time.Hour
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { time.Sleep(20 * time.Millisecond); cancel() }()
+	_, err := f.Fetch(ctx, "wedged@x")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	if client.calls != 1 {
+		t.Fatalf("Body calls = %d, want 1 (no retry after caller cancel)", client.calls)
+	}
+}

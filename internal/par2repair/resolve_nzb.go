@@ -14,6 +14,7 @@ import (
 	"github.com/javi11/nzbparser"
 
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	"github.com/javi11/altmount/internal/nzbgap"
 )
 
 // ResolveFromNzb builds a repair plan straight from a parsed NZB, for releases
@@ -36,6 +37,22 @@ func ResolveFromNzb(
 ) (*Resolution, error) {
 	if n == nil || len(n.Files) == 0 {
 		return nil, fmt.Errorf("%w: empty NZB", ErrUnrepairable)
+	}
+
+	// Segment numbers the NZB never listed become synthetic placeholder
+	// articles, pre-marked dead: no provider can serve an ID we minted, and
+	// their byte positions are exactly what the plan needs to treat the gap's
+	// slices as missing. The patch is later stored under the same
+	// deterministic ID the importer inserts, which is where the read path's
+	// patch-before-fetch lookup finds it.
+	gaps := nzbgap.Fill(n)
+	var gapIDs []string
+	for _, ids := range gaps {
+		gapIDs = append(gapIDs, ids...)
+	}
+	if len(gapIDs) > 0 {
+		log.InfoContext(ctx, "NZB omits segment numbers; planning synthetic placeholder articles as dead",
+			"files_with_gaps", len(gaps), "missing_segments", len(gapIDs))
 	}
 
 	// Split the NZB into PAR2 files and candidate content files.
@@ -87,6 +104,19 @@ func ResolveFromNzb(
 			dead[normalizeMsgID(id)] = true
 		}
 	}
+	for _, id := range gapIDs {
+		dead[normalizeMsgID(id)] = true
+	}
+	// Articles already repaired locally are alive: the fetcher serves their
+	// patch. Without this a completed repair re-plans (and re-downloads the
+	// release) on every cycle, since providers still 430 the originals.
+	if pc, ok := fetch.(PatchChecker); ok {
+		for id := range dead {
+			if pc.HasPatch(id) {
+				delete(dead, id)
+			}
+		}
+	}
 	if err := releaseSizePrecheck(store.Files, par2Files, caps); err != nil {
 		return nil, err
 	}
@@ -99,6 +129,12 @@ func ResolveFromNzb(
 	caps.ExpectedHiddenArticles = hidden
 	log.InfoContext(ctx, "PAR2 repair liveness check complete",
 		"dead_articles", len(dead), "hidden_estimate", hidden, "duration", time.Since(started).Round(time.Millisecond))
+	// Flip the reported stage off "checking" now: the sizing probes below are
+	// minutes of article fetches, and until planSet reports again the UI would
+	// otherwise sit on a finished liveness count.
+	if progress != nil {
+		progress(StagePlanning, 0, 0)
+	}
 	// store carries only content entries here, so nothing to exclude.
 	if err := ratioPrecheck(store.Files, nil, dead, caps); err != nil {
 		return nil, err
@@ -119,6 +155,21 @@ func ResolveFromNzb(
 		return nil, err
 	}
 
+	// Dead articles in files the recovery set does not cover (unmatched
+	// entries, or gaps in unprotected sidecars) can never be repaired here.
+	// With repairable damage the job still runs — partial repair is worth it —
+	// but once nothing plannable remains, surface the coverage hole as
+	// permanent: the alternative is an endless defer → repair → defer loop,
+	// each cycle streaming the whole release again.
+	if uncovered := uncoveredDeadArticles(dead, files, par2Files); len(uncovered) > 0 {
+		if !anyMemberArticleDead(dead, files) {
+			return nil, fmt.Errorf("%w: %d missing article(s) (e.g. %s) are not covered by the PAR2 recovery set",
+				ErrUnrepairable, len(uncovered), uncovered[0])
+		}
+		log.WarnContext(ctx, "Some missing articles are outside the PAR2 recovery set and cannot be repaired",
+			"uncovered", len(uncovered), "example", uncovered[0])
+	}
+
 	plan, err := BuildPlan(idx, files, caps)
 	if err != nil {
 		return nil, err
@@ -128,6 +179,52 @@ func ResolveFromNzb(
 		"spares", len(plan.SpareRecovery), "spill_to_disk", plan.SpillToDisk)
 	return &Resolution{Plan: plan, Index: idx, Par2Files: par2Files}, nil
 }
+
+// uncoveredDeadArticles lists dead article IDs that belong to neither a
+// recovery-set member nor a PAR2 file — damage the recovery set cannot see,
+// let alone repair. (A dead PAR2 article costs spares, not repairability.)
+func uncoveredDeadArticles(dead map[string]bool, members []SetFile, par2Files []SetFile) []string {
+	covered := map[string]bool{}
+	for _, f := range members {
+		for _, a := range f.Articles {
+			covered[a.MessageID] = true
+		}
+	}
+	for _, f := range par2Files {
+		for _, a := range f.Articles {
+			covered[a.MessageID] = true
+		}
+	}
+	var out []string
+	for id := range dead {
+		if !covered[id] {
+			out = append(out, id)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// anyMemberArticleDead reports whether any recovery-set member has a dead
+// article — i.e. whether the plan will have missing slices worth repairing.
+func anyMemberArticleDead(dead map[string]bool, members []SetFile) bool {
+	for _, f := range members {
+		for _, a := range f.Articles {
+			if dead[a.MessageID] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// maxSizeProbesPerFile bounds how many articles one file's size derivation
+// may probe before deferring to the release-wide part size. Usenet posts use
+// one uniform decoded part size, so any live article answers the question;
+// probing beyond a few candidates only multiplies wire time on releases whose
+// articles keep failing (each failed probe costs seconds to minutes on a
+// flapping provider).
+const maxSizeProbesPerFile = 4
 
 // sizePar2SetFiles replaces the PAR2 files' declared (encoded) article sizes
 // with decoded ones, probed from the articles themselves: usenet posts split
@@ -222,8 +319,15 @@ func sizePar2SetFiles(
 		}
 
 		partSize := int64(-1)
-		for j := 0; j < n-1 && partSize < 0; j++ {
+		// Bounded walk: with a flapping provider every failed probe costs tens
+		// of seconds, so an article-by-article march through a large dead
+		// volume would stall planning for hours. Any live article yields the
+		// same uniform part size, so after the cap the volume defers to the
+		// release-wide size (pass 2) instead.
+		probes := 0
+		for j := 0; j < n-1 && partSize < 0 && probes < maxSizeProbesPerFile; j++ {
 			if a := f.Articles[j]; !dead[a.MessageID] {
+				probes++
 				var err error
 				if partSize, err = probe(a.MessageID); err != nil {
 					return err

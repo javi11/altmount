@@ -79,6 +79,15 @@ func Resolve(
 			dead[normalizeMsgID(id)] = true
 		}
 	}
+	// Articles already repaired locally are alive: the fetcher serves their
+	// patch, so re-planning them would redo finished work.
+	if pc, ok := fetch.(PatchChecker); ok {
+		for id := range dead {
+			if pc.HasPatch(id) {
+				delete(dead, id)
+			}
+		}
+	}
 	if err := releaseSizePrecheck(store.Files, par2Files, caps); err != nil {
 		return nil, err
 	}
@@ -133,15 +142,14 @@ func planSet(
 	log.InfoContext(ctx, "Planning PAR2 repair: parsing recovery set", "par2_files", len(par2Files))
 
 	// Streams come after the liveness sweep so the lazy readers know which
-	// articles are dead and zero-fill them instead of asking the pool. Each
-	// stream reports itself when parsing first touches it.
+	// articles are dead and zero-fill them instead of asking the pool. The
+	// parse walks every stream concurrently (each is a serial packet chain, so
+	// per-article latency overlaps across files instead of accumulating
+	// set-wide); progress counts completed streams.
 	started := time.Now()
 	streams := par2Streams(ctx, fetch, par2Files, dead, cache)
-	for i, s := range streams {
-		streams[i] = &planningStream{lazy: s.(*lazyFileReader), start: func() { report(i, len(par2Files)) }}
-	}
 
-	idx, err := par2.ParseIndex(streams)
+	idx, err := par2.ParseIndexWithProgress(streams, func(done, total int) { report(done, total) })
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: parse PAR2 set: %v", ErrUnrepairable, err)
 	}
@@ -167,25 +175,6 @@ func planSet(
 		"files", len(files), "duration", time.Since(started).Round(time.Millisecond))
 	report(total, total)
 	return idx, files, nil
-}
-
-// planningStream reports the moment parsing first touches its PAR2 file, so
-// the planning progress advances per file parsed.
-type planningStream struct {
-	lazy  *lazyFileReader
-	start func()
-}
-
-func (p *planningStream) Read(b []byte) (int, error) {
-	if p.start != nil {
-		p.start()
-		p.start = nil
-	}
-	return p.lazy.Read(b)
-}
-
-func (p *planningStream) Seek(offset int64, whence int) (int64, error) {
-	return p.lazy.Seek(offset, whence)
 }
 
 // statSampleSize is how many articles the pre-plan liveness check STATs
@@ -578,11 +567,20 @@ func sizeArticles(
 		// have supplied. Leaving it out means a file whose only live article is
 		// the last one reports errNoLiveArticle instead, and the caller retries
 		// with the release-wide part size.
+		// Bounded walk (see maxSizeProbesPerFile): any live article yields the
+		// same uniform part size, and unbounded probing of a heavily-dead file
+		// stalls planning for hours on a flapping provider. Past the cap the
+		// file defers to the release-wide part size via errNoLiveArticle.
+		probes := 0
 		for _, seg := range entry.Segments[:n-1] {
+			if probes >= maxSizeProbesPerFile {
+				break
+			}
 			msgID := normalizeMsgID(seg.Id)
 			if dead[msgID] {
 				continue
 			}
+			probes++
 			payload, err := fetchCached(ctx, fetch, msgID, cache)
 			if err != nil {
 				if errors.Is(err, nntppool.ErrArticleNotFound) {
@@ -888,6 +886,14 @@ func (l *lazyFileReader) Read(p []byte) (int, error) {
 				data, err = fetchCached(l.ctx, l.fetch, a.MessageID, l.cache)
 				if err != nil && !errors.Is(err, nntppool.ErrArticleNotFound) {
 					return read, err
+				}
+				if errors.Is(err, nntppool.ErrArticleNotFound) {
+					// A 430 is definitive, and errors are not cached: without
+					// remembering it here, every small read overlapping this
+					// article pays the round trip again — a mostly-purged
+					// volume then costs hours of repeated 430s while resync
+					// crawls its zeroed regions.
+					l.file.Articles[i].Dead = true
 				}
 				l.maybeWarm(i)
 			}

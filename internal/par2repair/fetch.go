@@ -84,12 +84,32 @@ type PoolFetcher struct {
 	// retryDelay is the base backoff between transient-failure retries,
 	// doubled per attempt. Shrunk in tests.
 	retryDelay time.Duration
+
+	// attemptTimeout bounds one Body call. The pool has been observed to
+	// orphan a committed request when its connection dies mid-response —
+	// the caller then waits on a reply that no live connection will ever
+	// deliver, freezing the whole repair until the job deadline. The
+	// per-attempt deadline cancels the request (the pool's dispatch honors
+	// the request context) and the fetch retries on a fresh one. Shrunk in
+	// tests.
+	attemptTimeout time.Duration
 }
+
+// fetchAttemptTimeout bounds one article Body call: generous against a slow
+// provider serving a ~750 KB article (stall detection inside the pool trips
+// far earlier for genuinely stalled transfers), tiny against the 2 h job
+// deadline that was previously the only bound.
+const fetchAttemptTimeout = 2 * time.Minute
 
 // NewPoolFetcher builds a fetcher over a lazily-resolved pool client
 // (typically wrapping pool.Manager.GetPool). budget may be nil.
 func NewPoolFetcher(getClient func() (BodyClient, error), budget ConnBudget) *PoolFetcher {
-	return &PoolFetcher{getClient: getClient, budget: budget, retryDelay: fetchRetryBaseDelay}
+	return &PoolFetcher{
+		getClient:      getClient,
+		budget:         budget,
+		retryDelay:     fetchRetryBaseDelay,
+		attemptTimeout: fetchAttemptTimeout,
+	}
 }
 
 // fetchRetries is how many times one article fetch is retried after a
@@ -208,8 +228,16 @@ func (p *PoolFetcher) fetchOnce(ctx context.Context, messageID string) ([]byte, 
 	if err != nil {
 		return nil, fmt.Errorf("par2repair: nntp pool unavailable: %w", err)
 	}
+	// Per-attempt deadline: see the attemptTimeout field. The caller's own
+	// cancellation still wins — Fetch checks ctx.Err() to tell them apart.
+	bodyCtx := ctx
+	if p.attemptTimeout > 0 {
+		var cancel context.CancelFunc
+		bodyCtx, cancel = context.WithTimeout(ctx, p.attemptTimeout)
+		defer cancel()
+	}
 	// nntppool adds the angle brackets itself; message IDs here are bare.
-	body, err := client.Body(ctx, messageID)
+	body, err := client.Body(bodyCtx, messageID)
 	if err != nil {
 		return nil, err
 	}

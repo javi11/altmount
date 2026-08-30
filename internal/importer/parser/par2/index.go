@@ -9,6 +9,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // SliceCheck is one input slice's checksums from an IFSC packet. Checksums
@@ -93,22 +94,94 @@ const maxMetadataPacketBody = 64 << 20
 // not hashed here — that would download every payload — so their refs carry
 // the packet MD5 for verification at fetch time instead.
 func ParseIndex(streams []io.Reader) (*Index, error) {
+	return ParseIndexWithProgress(streams, nil)
+}
+
+// parseStreamConcurrency bounds how many streams ParseIndex walks at once.
+// Each stream is an independent serial packet chain; over lazy NNTP readers
+// walking them concurrently overlaps per-article latency instead of paying it
+// set-wide in sequence. Wire-level concurrency stays bounded by the caller's
+// connection budget; this only caps goroutines for pathological sets.
+const parseStreamConcurrency = 16
+
+// ParseIndexWithProgress is ParseIndex reporting per-stream completion:
+// onStreamDone(done, total) fires as each stream finishes its walk (from
+// whichever goroutine finished it; done is cumulative and monotonic).
+func ParseIndexWithProgress(streams []io.Reader, onStreamDone func(done, total int)) (*Index, error) {
+	// Every stream parses into its own partial index, concurrently; partials
+	// are then merged in stream order, which reproduces the sequential walk
+	// exactly — metadata packets last-write-wins by stream order, recovery
+	// exponents first-seen-wins by stream order.
+	type partial struct {
+		idx      *Index
+		mainSeen bool
+		err      error
+	}
+	parts := make([]partial, len(streams))
+	// done is guarded by doneMu so onStreamDone observes a monotonic count
+	// (an atomic counter alone lets a later count be delivered first).
+	var doneMu sync.Mutex
+	done := 0
+	sem := make(chan struct{}, parseStreamConcurrency)
+	var wg sync.WaitGroup
+	for fi := range streams {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			p := &parts[fi]
+			p.idx = &Index{
+				Files:       make(map[[16]byte]FileDescriptor),
+				SliceChecks: make(map[[16]byte][]SliceCheck),
+			}
+			p.err = parseIndexStream(streams[fi], fi, p.idx, map[uint32]bool{}, &p.mainSeen)
+			if onStreamDone != nil {
+				doneMu.Lock()
+				done++
+				onStreamDone(done, len(streams))
+				doneMu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+
 	idx := &Index{
 		Files:       make(map[[16]byte]FileDescriptor),
 		SliceChecks: make(map[[16]byte][]SliceCheck),
 	}
-	var mainSeen bool
-
 	// A PAR2 set is routinely served from usenet, where individual recovery
 	// volumes may be unreachable. An unreadable stream contributes nothing but
 	// must not abort the parse: the remaining volumes still carry usable
 	// recovery slices, and dropping them turns a repairable release into a
 	// lost one. Only a set with no Main packet at all is fatal (checked below).
 	var streamErrs []string
+	var mainSeen bool
 	seenExp := make(map[uint32]bool)
-	for fi, stream := range streams {
-		if err := parseIndexStream(stream, fi, idx, seenExp, &mainSeen); err != nil {
-			streamErrs = append(streamErrs, fmt.Sprintf("stream %d: %v", fi, err))
+	for fi, p := range parts {
+		if p.err != nil {
+			streamErrs = append(streamErrs, fmt.Sprintf("stream %d: %v", fi, p.err))
+		}
+		if p.idx == nil {
+			continue
+		}
+		if p.mainSeen {
+			mainSeen = true
+			idx.SliceSize = p.idx.SliceSize
+			idx.RecoveryIDs = p.idx.RecoveryIDs
+			idx.MainIDsWereSorted = p.idx.MainIDsWereSorted
+		}
+		for id, fd := range p.idx.Files {
+			idx.Files[id] = fd
+		}
+		for id, checks := range p.idx.SliceChecks {
+			idx.SliceChecks[id] = checks
+		}
+		for _, ref := range p.idx.Recovery {
+			if !seenExp[ref.Exponent] {
+				seenExp[ref.Exponent] = true
+				idx.Recovery = append(idx.Recovery, ref)
+			}
 		}
 	}
 

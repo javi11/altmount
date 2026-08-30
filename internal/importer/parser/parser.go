@@ -26,6 +26,7 @@ import (
 	"github.com/javi11/altmount/internal/importer/rarname"
 	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	"github.com/javi11/altmount/internal/nzbgap"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/slogutil"
@@ -922,13 +923,32 @@ func pickRepresentativeMiddleSegment(cache []*FirstSegmentData, notFoundIDs map[
 		if len(d.File.Segments) < 3 {
 			continue
 		}
-		seg := d.File.Segments[1]
-		if _, known404 := notFoundIDs[seg.ID]; known404 {
-			continue
+		// Middle segments only (the last is the short remainder). Synthetic gap
+		// placeholders are skipped: no provider can serve an ID we minted.
+		for _, seg := range d.File.Segments[1 : len(d.File.Segments)-1] {
+			if nzbgap.IsSynthetic(seg.ID) {
+				continue
+			}
+			if _, known404 := notFoundIDs[seg.ID]; known404 {
+				continue
+			}
+			return seg, d.File.Groups, true
 		}
-		return seg, d.File.Groups, true
 	}
 	return nzbparser.NzbSegment{}, nil, false
+}
+
+// middleProbeSegment returns the first middle segment (indexes 1..n-2) that is
+// not a synthetic gap placeholder — the segment whose yEnc headers can supply
+// the file's standard part size. ok is false when every middle segment is a
+// placeholder.
+func middleProbeSegment(segments []nzbparser.NzbSegment) (nzbparser.NzbSegment, bool) {
+	for _, seg := range segments[1 : len(segments)-1] {
+		if !nzbgap.IsSynthetic(seg.ID) {
+			return seg, true
+		}
+	}
+	return nzbparser.NzbSegment{}, false
 }
 
 // hasPar2IndexCandidate reports whether any cached first segment looks like a
@@ -1289,11 +1309,19 @@ func (p *Parser) normalizeSegmentSizesWithYenc(ctx context.Context, segments []n
 	standardPartSize := nzbStandardPartSize
 	var lastPartSize int64
 
+	// The middle-segment probe target: the first middle segment that is not a
+	// synthetic gap placeholder (no provider can serve an ID we minted, so
+	// probing one would 430 and skip the whole file).
+	probeSeg, haveProbe := middleProbeSegment(segments)
+
 	if standardPartSize <= 0 && fileSize <= 0 {
 		// Neither a shared part size nor a total file size: both the second and last
 		// segments must be fetched — do it in parallel as before.
-		if _, known404 := notFoundIDs[segments[1].ID]; known404 {
-			return fmt.Errorf("second segment %s is known not found: %w", segments[1].ID, nntppool.ErrArticleNotFound)
+		if !haveProbe {
+			return fmt.Errorf("every middle segment is a gap placeholder: %w", nntppool.ErrArticleNotFound)
+		}
+		if _, known404 := notFoundIDs[probeSeg.ID]; known404 {
+			return fmt.Errorf("second segment %s is known not found: %w", probeSeg.ID, nntppool.ErrArticleNotFound)
 		}
 		if _, known404 := notFoundIDs[segments[lastSegmentIndex].ID]; known404 {
 			return fmt.Errorf("last segment %s is known not found: %w", segments[lastSegmentIndex].ID, nntppool.ErrArticleNotFound)
@@ -1301,7 +1329,7 @@ func (p *Parser) normalizeSegmentSizesWithYenc(ctx context.Context, segments []n
 		var secondPartHeaders, lastPartHeaders nntppool.YEncMeta
 		g, gctx := errgroup.WithContext(ctx)
 		g.Go(func() error {
-			h, err := p.fetchYencHeaders(gctx, segments[1], nil)
+			h, err := p.fetchYencHeaders(gctx, probeSeg, nil)
 			if err != nil {
 				return fmt.Errorf("failed to fetch second segment yEnc part size: %w", err)
 			}
@@ -1324,10 +1352,13 @@ func (p *Parser) normalizeSegmentSizesWithYenc(ctx context.Context, segments []n
 	} else {
 		if standardPartSize <= 0 {
 			// No NZB-wide representative — fetch this file's second segment once.
-			if _, known404 := notFoundIDs[segments[1].ID]; known404 {
-				return fmt.Errorf("second segment %s is known not found: %w", segments[1].ID, nntppool.ErrArticleNotFound)
+			if !haveProbe {
+				return fmt.Errorf("every middle segment is a gap placeholder: %w", nntppool.ErrArticleNotFound)
 			}
-			h, err := p.fetchYencHeaders(ctx, segments[1], nil)
+			if _, known404 := notFoundIDs[probeSeg.ID]; known404 {
+				return fmt.Errorf("second segment %s is known not found: %w", probeSeg.ID, nntppool.ErrArticleNotFound)
+			}
+			h, err := p.fetchYencHeaders(ctx, probeSeg, nil)
 			if err != nil {
 				return fmt.Errorf("failed to fetch second segment yEnc part size: %w", err)
 			}

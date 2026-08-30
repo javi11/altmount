@@ -174,10 +174,12 @@ type Service struct {
 // NewService wires the repair service. fetcher is typically a PoolFetcher.
 func NewService(repo JobStore, meta MetadataSource, fetcher ArticleFetcher, store *PatchStore, cfg func() Config, log *slog.Logger) *Service {
 	s := &Service{
-		repo:       repo,
-		meta:       meta,
-		store:      store,
-		fetcher:    fetcher,
+		repo:  repo,
+		meta:  meta,
+		store: store,
+		// Patch-aware: articles repaired locally count alive and fetch their
+		// patch, so a completed repair is never planned or downloaded again.
+		fetcher:    newPatchAwareFetcher(fetcher, store),
 		cfg:        cfg,
 		log:        log,
 		wake:       make(chan struct{}, 1),

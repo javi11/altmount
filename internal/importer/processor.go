@@ -29,6 +29,7 @@ import (
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/nzbfile"
+	"github.com/javi11/altmount/internal/nzbgap"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
 )
@@ -50,8 +51,8 @@ type Processor struct {
 	log               *slog.Logger
 	broadcaster       *progress.ProgressBroadcaster // WebSocket progress broadcaster
 	recorder          HistoryRecorder
-	par2Repair        RepairEnqueuer         // optional; queues PAR2 repairs at import time
-	patchIndex        validation.PatchIndex  // optional; locally repaired articles count as available
+	par2Repair        RepairEnqueuer        // optional; queues PAR2 repairs at import time
+	patchIndex        validation.PatchIndex // optional; locally repaired articles count as available
 
 	// Pre-compiled regex patterns for RAR file sorting
 	rarPartPattern  *regexp.Regexp // pattern.part###.rar
@@ -299,8 +300,31 @@ func (proc *Processor) checkCancellation(ctx context.Context) error {
 // segment IDs, and degraded files (NZB filename -> first missing segment ID)
 // that import anyway under the tolerant damage policy.
 func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, cfg *config.Config, queueID int, category *string, downloadID *string) (map[int]struct{}, map[string]struct{}, map[string]string, error) {
+	// Segment numbers the NZB never listed become synthetic placeholder
+	// segments (deterministic IDs), so downstream — parsing, archive coverage,
+	// metadata, PAR2 repair — sees a complete file instead of silently shifted
+	// offsets. Runs before the pool check: the placeholders matter to parsing
+	// even when no fast-fail sweep can.
+	nzbgap.Fill(n)
+
 	if !proc.poolManager.HasPool() {
 		return nil, nil, nil, nil
+	}
+
+	// A synthetic ID can never be served by a provider — the gap either has a
+	// local patch (repaired already) or is damage, decided here without a wire
+	// STAT. Deterministic on purpose: the sampled sweeps below could miss the
+	// gap and let the import walk into "incomplete NZB data" at analysis time.
+	gapDamage := map[int][]string{} // n.Files index -> unpatched synthetic IDs
+	for i, f := range n.Files {
+		if filesystem.IsPar2File(f.Filename) {
+			continue
+		}
+		for _, s := range f.Segments {
+			if nzbgap.IsSynthetic(s.ID) && (proc.patchIndex == nil || !proc.patchIndex.Has(s.ID)) {
+				gapDamage[i] = append(gapDamage[i], s.ID)
+			}
+		}
 	}
 
 	// Build the fast-fail input index-aligned with n.Files. PAR2 files keep their
@@ -312,9 +336,13 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 			fastFailFiles[i] = validation.FastFailFile{Filename: f.Filename}
 			continue
 		}
-		segs := make([]*metapb.SegmentData, len(f.Segments))
-		for j, s := range f.Segments {
-			segs[j] = &metapb.SegmentData{Id: s.ID}
+		// Synthetic gap placeholders are excluded from the Stat sweeps: no
+		// provider has them, and their verdict was already decided above.
+		segs := make([]*metapb.SegmentData, 0, len(f.Segments))
+		for _, s := range f.Segments {
+			if !nzbgap.IsSynthetic(s.ID) {
+				segs = append(segs, &metapb.SegmentData{Id: s.ID})
+			}
 		}
 		// Tag RAR/split-volume parts with their set key so one unreachable part
 		// dooms the whole set: the sweep skips the rest and marks every member
@@ -349,7 +377,7 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	if !missing {
+	if !missing && len(gapDamage) == 0 {
 		if proc.log != nil {
 			proc.log.DebugContext(ctx, "Fast-fail release probe passed",
 				"files", len(fastFailFiles),
@@ -398,6 +426,22 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 	)
 	if err != nil {
 		return nil, nil, nil, err
+	}
+
+	// Fold the deterministic gap verdicts into the sweep's results so gap
+	// files flow through the same deferral/exclusion logic as wire-missing
+	// ones — including set-level propagation: a gap-damaged part dooms its
+	// whole RAR set, exactly as a wire-missing part does inside the sweep.
+	for i, ids := range gapDamage {
+		results[i].Broken = true
+		results[i].MissingSegmentIDs = append(results[i].MissingSegmentIDs, ids...)
+		if key := fastFailFiles[i].GroupKey; key != "" {
+			for j := range fastFailFiles {
+				if fastFailFiles[j].GroupKey == key {
+					results[j].Broken = true
+				}
+			}
+		}
 	}
 
 	brokenIdx := make(map[int]struct{})

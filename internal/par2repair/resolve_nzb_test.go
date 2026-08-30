@@ -12,6 +12,8 @@ import (
 
 	"github.com/javi11/nzbparser"
 
+	"github.com/javi11/altmount/internal/nzbgap"
+
 	"github.com/javi11/altmount/internal/importer/parser/par2"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/testsupport/par2gen"
@@ -203,6 +205,127 @@ func TestResolveFromNzbMultiArticlePar2WithEncodedSizes(t *testing.T) {
 	if !ok || string(got) != string(contents["a.rar"][2048:4096]) {
 		t.Fatal("repair with encoded-size PAR2 articles did not reproduce the dead article byte-exactly")
 	}
+}
+
+// An NZB that simply omits a segment number (the article was never indexed —
+// no message ID exists) must still resolve and repair: the gap becomes a
+// synthetic placeholder article, planned dead, and the recovered payload is
+// stored under the deterministic synthetic ID the read path will look up.
+func TestResolveFromNzbRepairsSegmentMissingFromNzb(t *testing.T) {
+	n, fetch, contents, _ := mkEncodedNzbFixture(t, 600, false)
+
+	// Remove a.rar's segment number 2 from the NZB entirely, and make its
+	// article live on the wire (irrelevant: nothing references it anymore).
+	for i := range n.Files {
+		if n.Files[i].Filename != "a.rar" {
+			continue
+		}
+		var kept []nzbparser.NzbSegment
+		for _, s := range n.Files[i].Segments {
+			if s.Number != 2 {
+				kept = append(kept, s)
+			}
+		}
+		n.Files[i].Segments = kept
+	}
+	fetch.articles["a.rar-1@test"] = contents["a.rar"][2048:4096]
+
+	res, err := ResolveFromNzb(context.Background(), n, nil, fetch,
+		Caps{MaxRepairRatio: 0.5, MaxMemoryBytes: 64 << 20}, testLogger(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wantID := nzbgap.SyntheticID("a.rar-0@test", 2)
+	found := false
+	for _, da := range res.Plan.DeadArticles {
+		if da.MessageID == wantID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("DeadArticles = %+v, want synthetic %s planned dead", res.Plan.DeadArticles, wantID)
+	}
+
+	ps := NewPatchStore(t.TempDir())
+	if err := RunJob(context.Background(), res.Plan, res.Index, res.Par2Files, fetch, ps, testLogger()); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := ps.Get(wantID)
+	if !ok || string(got) != string(contents["a.rar"][2048:4096]) {
+		t.Fatal("gap repair did not reproduce the missing article byte-exactly under the synthetic ID")
+	}
+}
+
+// After a repair completes, the next planning cycle must converge instead of
+// re-repairing forever: articles with patches count alive (patch-aware
+// fetcher), and when the only remaining dead articles sit in files the PAR2
+// set does not cover, planning fails with ErrUnrepairable — which fails the
+// parked import terminally instead of looping defer → repair → defer.
+func TestResolveFromNzbSecondCycleTerminatesOnUncoveredGaps(t *testing.T) {
+	n, fetch, contents, _ := mkEncodedNzbFixture(t, 600, false)
+
+	// a.rar (a PAR2 member) omits segment number 2 — repairable.
+	for i := range n.Files {
+		if n.Files[i].Filename == "a.rar" {
+			var kept []nzbparser.NzbSegment
+			for _, s := range n.Files[i].Segments {
+				if s.Number != 2 {
+					kept = append(kept, s)
+				}
+			}
+			n.Files[i].Segments = kept
+		}
+	}
+	// c.bin is NOT in the PAR2 set and omits segment number 2 — unrepairable.
+	n.Files = append(n.Files, nzbparser.NzbFile{
+		Filename: "c.bin",
+		Subject:  `"c.bin" yEnc (1/4)`,
+		Segments: nzbparser.NzbSegments{
+			{ID: "c.bin-0@test", Number: 1, Bytes: 2248},
+			{ID: "c.bin-2@test", Number: 3, Bytes: 2248},
+			{ID: "c.bin-3@test", Number: 4, Bytes: 2248},
+		},
+	})
+	for _, i := range []int{0, 2, 3} {
+		fetch.articles[fmt.Sprintf("c.bin-%d@test", i)] = make([]byte, 2048)
+	}
+
+	ps := NewPatchStore(t.TempDir())
+	pf := newPatchAwareFetcher(&statFakeFetcher{fakeFetcher: fetch}, ps)
+	caps := Caps{MaxRepairRatio: 0.5, MaxMemoryBytes: 64 << 20}
+
+	// Cycle 1: plans a.rar's gap, repairs it, stores the patch.
+	res, err := ResolveFromNzb(context.Background(), n, nil, pf, caps, testLogger(), nil)
+	if err != nil {
+		t.Fatalf("cycle 1 resolve: %v", err)
+	}
+	if err := RunJob(context.Background(), res.Plan, res.Index, res.Par2Files, pf, ps, testLogger()); err != nil {
+		t.Fatalf("cycle 1 job: %v", err)
+	}
+	wantID := nzbgap.SyntheticID("a.rar-0@test", 2)
+	if got, ok := ps.Get(wantID); !ok || string(got) != string(contents["a.rar"][2048:4096]) {
+		t.Fatal("cycle 1 did not patch a.rar's gap byte-exactly")
+	}
+
+	// Cycle 2 (re-parse the NZB like a fresh defer would): the patched gap is
+	// alive, only c.bin's uncoverable gap remains -> terminal, not a re-repair.
+	n2 := cloneNzb(n)
+	_, err = ResolveFromNzb(context.Background(), n2, nil, pf, caps, testLogger(), nil)
+	if !errors.Is(err, ErrUnrepairable) {
+		t.Fatalf("cycle 2 err = %v, want ErrUnrepairable (uncovered gap must terminate the loop)", err)
+	}
+}
+
+// cloneNzb deep-copies files and segments so a re-resolve sees pristine input.
+func cloneNzb(n *nzbparser.Nzb) *nzbparser.Nzb {
+	out := &nzbparser.Nzb{TotalFiles: n.TotalFiles}
+	for _, f := range n.Files {
+		nf := f
+		nf.Segments = append(nzbparser.NzbSegments(nil), f.Segments...)
+		out.Files = append(out.Files, nf)
+	}
+	return out
 }
 
 // Planning must pipeline its article fetches instead of paying one full

@@ -590,9 +590,16 @@ func (b *UsenetReader) patchFor(ctx context.Context, s *segment) []byte {
 	if p == nil {
 		return nil
 	}
-	if int64(len(p)) != s.End+1 {
+	// Patches hold the article's full decoded payload; Start/End may trim a
+	// sub-range of it (archive inner-file segments), so match against the
+	// article size, not the range end.
+	want := s.SegmentSize
+	if want <= 0 {
+		want = s.End + 1
+	}
+	if int64(len(p)) != want {
 		b.log.WarnContext(ctx, "Repaired payload size mismatch, ignoring patch",
-			"segment_id", s.Id, "patch_bytes", len(p), "want", s.End+1)
+			"segment_id", s.Id, "patch_bytes", len(p), "want", want)
 		return nil
 	}
 	return p
