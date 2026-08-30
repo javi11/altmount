@@ -187,8 +187,3 @@ func TestWarmPrefixReaderPrefixOnly(t *testing.T) {
 		t.Errorf("makeRest called %d times for prefix-only read, want 0", madeRest)
 	}
 }
-
-func (m *fsFakePoolManager) AcquireStatSlots(_ context.Context, want int) (int, func(), error) {
-	return want, func() {}, nil
-}
-func (m *fsFakePoolManager) SetStatCapacity(_ int) {}

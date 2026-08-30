@@ -812,8 +812,3 @@ func TestFastFailCheckFilesTimeoutIsInconclusive(t *testing.T) {
 		t.Fatalf("StatCalls = %d, want bounded maximum of %d", got, fastFailStatMaxAttempts)
 	}
 }
-
-func (m fastFailPoolManager) AcquireStatSlots(_ context.Context, want int) (int, func(), error) {
-	return want, func() {}, nil
-}
-func (m fastFailPoolManager) SetStatCapacity(_ int) {}

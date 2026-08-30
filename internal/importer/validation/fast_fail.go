@@ -40,7 +40,6 @@ func isDefinitiveFastFailMiss(err error) bool {
 func statIDsWithBoundedRetries(
 	ctx context.Context,
 	client pool.NntpClient,
-	adm pool.StatAdmitter,
 	ids []string,
 	maxConnections int,
 	timeout time.Duration,
@@ -60,22 +59,11 @@ func statIDsWithBoundedRetries(
 	var lastErr error
 
 	for attempt := 1; attempt <= fastFailStatMaxAttempts && len(remaining) > 0; attempt++ {
-		// Each attempt takes its own grant from the pool-wide STAT budget this
-		// sweep shares with health checks, and runs at the granted concurrency.
-		// Re-acquiring per attempt keeps the slots from being held across the
-		// backoff, when the pool is least able to spare them.
-		granted, releaseSlots, err := adm.AcquireStatSlots(ctx, maxConnections)
-		if err != nil {
-			return nil, err
-		}
-
-		// The deadline starts after admission, so queueing for the budget is
-		// never charged against the Stat timeout.
-		statCtx, cancel := context.WithTimeout(ctx, pool.StatManyTimeout(len(remaining), granted, timeout))
+		statCtx, cancel := context.WithTimeout(ctx, pool.StatManyTimeout(len(remaining), maxConnections, timeout))
 		reported := make(map[string]bool, len(remaining))
 		transient := make(map[string]error, len(remaining))
 
-		for result := range client.StatMany(statCtx, remaining, nntppool.StatManyOptions{Concurrency: granted}) {
+		for result := range client.StatMany(statCtx, remaining, nntppool.StatManyOptions{Concurrency: maxConnections}) {
 			if _, wanted := seen[result.MessageID]; !wanted {
 				continue
 			}
@@ -88,11 +76,9 @@ func statIDsWithBoundedRetries(
 				if stopOnMissing {
 					if ctxErr := ctx.Err(); ctxErr != nil {
 						cancel()
-						releaseSlots()
 						return nil, ctxErr
 					}
 					cancel()
-					releaseSlots()
 					return missing, nil
 				}
 				continue
@@ -103,7 +89,6 @@ func statIDsWithBoundedRetries(
 
 		statErr := statCtx.Err()
 		cancel()
-		releaseSlots()
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, ctxErr
 		}
@@ -276,7 +261,7 @@ func FastFailReleaseProbe(
 	if probeTimeout > 2*time.Second {
 		probeTimeout = 2 * time.Second
 	}
-	missing, err := statIDsWithBoundedRetries(ctx, usenetPool, poolManager, ids, maxConnections, probeTimeout, true)
+	missing, err := statIDsWithBoundedRetries(ctx, usenetPool, ids, maxConnections, probeTimeout, true)
 	if err != nil {
 		return false, err
 	}
@@ -422,7 +407,7 @@ func FastFailCheckFiles(
 			ids[i] = job.segID
 		}
 
-		missingByID, err := statIDsWithBoundedRetries(ctx, usenetPool, poolManager, ids, maxConnections, timeout, false)
+		missingByID, err := statIDsWithBoundedRetries(ctx, usenetPool, ids, maxConnections, timeout, false)
 		if err != nil {
 			return nil, err
 		}

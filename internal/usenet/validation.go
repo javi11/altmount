@@ -167,19 +167,9 @@ func ValidateSegmentAvailabilityBatch(
 	skipped := 0
 
 	for pos := 0; pos < len(ids); {
-		// One chunk per grant from the pool-wide STAT budget, which this sweep
-		// shares with import verification: both draw on the same pipeline
-		// depth, and without a shared cap their limits simply add up. The
-		// grant also sizes the chunk, so the deadline below matches the
-		// concurrency we actually got rather than the one we asked for.
-		granted, releaseSlots, err := poolManager.AcquireStatSlots(ctx, opts.MaxConnections)
-		if err != nil {
-			return results, err
-		}
-
-		chunk := make([]string, 0, granted)
-		chunkOwners := make([]int, 0, granted)
-		for pos < len(ids) && len(chunk) < granted {
+		chunk := make([]string, 0, opts.MaxConnections)
+		chunkOwners := make([]int, 0, opts.MaxConnections)
+		for pos < len(ids) && len(chunk) < opts.MaxConnections {
 			fileIdx := fileOf[pos]
 			if dropped[fileIdx] {
 				skipped++
@@ -190,20 +180,16 @@ func ValidateSegmentAvailabilityBatch(
 			pos++
 		}
 		if len(chunk) == 0 {
-			releaseSlots()
 			continue
 		}
 
-		// The deadline starts here, after admission, so time spent queueing for
-		// the budget is never charged against the Stat timeout.
-		statCtx, cancel := context.WithTimeout(ctx, pool.StatManyTimeout(len(chunk), granted, opts.Timeout))
+		statCtx, cancel := context.WithTimeout(ctx, pool.StatManyTimeout(len(chunk), opts.MaxConnections, opts.Timeout))
 		errByID := make(map[string]error, len(chunk))
-		for r := range usenetPool.StatMany(statCtx, chunk, nntppool.StatManyOptions{Concurrency: granted}) {
+		for r := range usenetPool.StatMany(statCtx, chunk, nntppool.StatManyOptions{Concurrency: opts.MaxConnections}) {
 			errByID[r.MessageID] = r.Err
 		}
 		sweepErr := statCtx.Err()
 		cancel()
-		releaseSlots()
 
 		// Caller cancellation invalidates the whole sweep: the remaining files
 		// would otherwise be judged on evidence that was never gathered.

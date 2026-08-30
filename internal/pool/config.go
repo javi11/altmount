@@ -13,9 +13,6 @@ func RegisterConfigHandlers(ctx context.Context, configManager *config.Manager, 
 	updateProviderIDMap(configManager.GetConfig(), poolManager)
 	// Initial import connection budget: the pool's total connection capacity.
 	poolManager.SetImportConnCapacity(configManager.GetConfig().TotalProviderConnections())
-	// Initial STAT budget: the pool's STAT pipeline depth, shared by health
-	// sweeps and import verification.
-	poolManager.SetStatCapacity(configManager.GetConfig().StatConcurrency())
 
 	configManager.OnConfigChange(func(oldConfig, newConfig *config.Config) {
 		slog.InfoContext(ctx, "Configuration updated")
@@ -27,12 +24,6 @@ func RegisterConfigHandlers(ctx context.Context, configManager *config.Manager, 
 		if capacity := newConfig.TotalProviderConnections(); capacity != oldConfig.TotalProviderConnections() {
 			slog.InfoContext(ctx, "Import connection budget updated", "capacity", capacity)
 			poolManager.SetImportConnCapacity(capacity)
-		}
-
-		// Keep the shared STAT budget in sync with the providers' pipeline depth.
-		if n := newConfig.StatConcurrency(); n != oldConfig.StatConcurrency() {
-			slog.InfoContext(ctx, "STAT check budget updated", "capacity", n)
-			poolManager.SetStatCapacity(n)
 		}
 
 		// Log changes that still require restart

@@ -93,18 +93,6 @@ type Manager interface {
 	// NotifyStreamChange must be called by the stream source whenever its
 	// active stream count changes, so the budget can re-evaluate.
 	NotifyStreamChange()
-
-	// AcquireStatSlots blocks until the shared STAT budget can grant at least
-	// one of the requested slots, or ctx is cancelled. Every STAT sweep —
-	// import release probes, per-file import validation and health checks —
-	// goes through it so their combined outstanding checks stay within the
-	// pool's STAT pipeline depth. The returned release function must be called
-	// exactly once. No-op (grants want) while the capacity is unset (0).
-	AcquireStatSlots(ctx context.Context, want int) (granted int, release func(), err error)
-
-	// SetStatCapacity sets the pool-wide cap on concurrent STAT checks, wired
-	// from Config.StatConcurrency. A capacity of 0 disables the budget.
-	SetStatCapacity(n int)
 }
 
 // StatsRepository defines the interface for persisting pool statistics
@@ -133,18 +121,16 @@ type manager struct {
 	quotaWatchCancel context.CancelFunc
 	admission        *ImportAdmission
 	budget           *ImportBudget
-	statBudget       *StatBudget
 }
 
 // NewManager creates a new pool manager
 func NewManager(ctx context.Context, repo StatsRepository) Manager {
 	return &manager{
-		ctx:        ctx,
-		repo:       repo,
-		logger:     slog.Default().With("component", "pool"),
-		admission:  NewImportAdmission(),
-		budget:     NewImportBudget(),
-		statBudget: NewStatBudget(),
+		ctx:       ctx,
+		repo:      repo,
+		logger:    slog.Default().With("component", "pool"),
+		admission: NewImportAdmission(),
+		budget:    NewImportBudget(),
 	}
 }
 
@@ -524,17 +510,6 @@ func (m *manager) SetImportConnCapacity(total int) {
 // ImportConnCapacity returns the current budget capacity snapshot.
 func (m *manager) ImportConnCapacity() int {
 	return m.budget.Capacity()
-}
-
-// AcquireStatSlots blocks until the shared STAT budget grants at least one of
-// the requested slots or ctx is cancelled. See StatBudget.Acquire.
-func (m *manager) AcquireStatSlots(ctx context.Context, want int) (int, func(), error) {
-	return m.statBudget.Acquire(ctx, want)
-}
-
-// SetStatCapacity sets the pool-wide cap on concurrent STAT checks.
-func (m *manager) SetStatCapacity(n int) {
-	m.statBudget.SetCapacity(n)
 }
 
 // SetStreamSource wires the source used to determine whether streams are

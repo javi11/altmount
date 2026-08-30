@@ -231,8 +231,3 @@ func TestValidateSegmentAvailabilityBatch_UnreportedSegmentsAreInconclusive(t *t
 	assert.True(t, results[0].Inconclusive())
 	assert.ErrorIs(t, results[0].Err, context.DeadlineExceeded)
 }
-
-func (m *validationTestPoolManager) AcquireStatSlots(_ context.Context, want int) (int, func(), error) {
-	return want, func() {}, nil
-}
-func (m *validationTestPoolManager) SetStatCapacity(_ int) {}

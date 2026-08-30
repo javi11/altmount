@@ -142,8 +142,3 @@ func newTestMVF(
 	t.Cleanup(func() { _ = mvf.Close() })
 	return mvf
 }
-
-func (m *fakePoolManager) AcquireStatSlots(_ context.Context, want int) (int, func(), error) {
-	return want, func() {}, nil
-}
-func (m *fakePoolManager) SetStatCapacity(_ int) {}
