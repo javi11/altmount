@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"path/filepath"
 	"runtime"
 	"sync"
 	"testing"
@@ -21,6 +22,16 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// healthTestDSN returns a DSN for a database private to one test. A
+// shared-cache in-memory DSN is a single database for the whole package, where
+// a read cursor open on one connection makes a concurrent write on another
+// fail with SQLITE_LOCKED — an error the busy handler never retries. WAL on a
+// private file lets readers and writers overlap.
+func healthTestDSN(t *testing.T) string {
+	t.Helper()
+	return "file:" + filepath.Join(t.TempDir(), "health_test.db") + "?_journal_mode=WAL&_busy_timeout=5000"
+}
 
 // mockPoolManager implements pool.Manager and always fails GetPool so segment validation fails.
 type mockPoolManager struct{}
@@ -116,7 +127,7 @@ func newRepairTestEnv(t *testing.T, tempDir string, arrsErr error, configure ...
 func newRepairTestEnvWithPool(t *testing.T, tempDir string, arrsErr error, poolManager pool.Manager, configure ...func(*config.Config)) *repairTestEnv {
 	t.Helper()
 
-	db, err := sql.Open("sqlite3", "file::memory:?cache=shared&mode=memory")
+	db, err := sql.Open("sqlite3", healthTestDSN(t))
 	require.NoError(t, err)
 	t.Cleanup(func() { db.Close() })
 
