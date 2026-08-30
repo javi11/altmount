@@ -5,19 +5,15 @@ import (
 	"fmt"
 	"math/rand"
 	"testing"
+	"time"
 
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/testsupport/fakepool"
 	"github.com/javi11/nntppool/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// NOTE: Tests for ValidateSegmentAvailability and ValidateSegmentAvailabilityDetailed
-// were removed during v2→v4 migration because nntppool v4 uses a concrete *Client type
-// (not an interface), making it impossible to mock directly. Integration tests with
-// a real NNTP server should be used to test validation behavior.
-//
 
 func TestSelectSegmentsForValidation(t *testing.T) {
 	// Use a deterministic RNG for predictability in middle segments.
@@ -152,13 +148,13 @@ func TestValidateSegmentAvailability_TransientErrorsAreInconclusive(t *testing.T
 			fp.SetBehavior(id, fakepool.SegmentBehavior{Err: tc.err})
 
 			results, err := ValidateSegmentAvailabilityBatch(
-				context.Background(), [][]string{{id}}, mgr, 1, 5*time.Second)
+				context.Background(), [][]string{{id}}, mgr, BatchOptions{MaxConnections: 1, Timeout: 5 * time.Second})
 			assert.NoError(t, err)
 			require.Len(t, results, 1)
 
 			assert.Zero(t, results[0].MissingCount, "operational error must not count as missing")
 			assert.Empty(t, results[0].MissingIDs, "operational error must not yield a hole id")
-			assert.Equal(t, 1, results[0].ErrorCount)
+			assert.Equal(t, 1, results[0].UnresolvedCount)
 			assert.True(t, results[0].Inconclusive())
 			assert.ErrorIs(t, results[0].Err, tc.err)
 		})
@@ -174,13 +170,13 @@ func TestValidateSegmentAvailability_ArticleNotFoundIsMissing(t *testing.T) {
 	fp.SetBehavior(id, fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
 
 	results, err := ValidateSegmentAvailabilityBatch(
-		context.Background(), [][]string{{id}}, mgr, 1, 5*time.Second)
+		context.Background(), [][]string{{id}}, mgr, BatchOptions{MaxConnections: 1, Timeout: 5 * time.Second})
 	assert.NoError(t, err)
 	require.Len(t, results, 1)
 
 	assert.Equal(t, 1, results[0].MissingCount)
 	assert.Equal(t, []string{id}, results[0].MissingIDs)
-	assert.Zero(t, results[0].ErrorCount)
+	assert.Zero(t, results[0].UnresolvedCount)
 	assert.False(t, results[0].Inconclusive())
 }
 
@@ -196,7 +192,7 @@ func TestValidateSegmentAvailabilityBatch_InconclusiveIsPerFile(t *testing.T) {
 		{"ok@host"},
 		{"flaky@host"},
 		{"gone@host"},
-	}, mgr, 3, 5*time.Second)
+	}, mgr, BatchOptions{MaxConnections: 3, Timeout: 5 * time.Second})
 	assert.NoError(t, err)
 	require.Len(t, results, 3)
 
@@ -211,49 +207,27 @@ func TestValidateSegmentAvailabilityBatch_InconclusiveIsPerFile(t *testing.T) {
 }
 
 // TestValidateSegmentAvailabilityBatch_UnreportedSegmentsAreInconclusive
-// covers the other half of #861: StatMany emits nothing for ids it never
-// dispatched (cancelled context / elapsed sweep deadline). Treating that
+// covers the other half of #861: StatMany emits nothing for ids whose
+// per-chunk deadline elapsed before they were dispatched. Treating that
 // silence as "checked and present" made a truncated sweep declare a file
-// healthy on no evidence at all.
+// healthy on no evidence at all — it must instead mark the result
+// inconclusive.
 func TestValidateSegmentAvailabilityBatch_UnreportedSegmentsAreInconclusive(t *testing.T) {
 	fp := fakepool.New()
+	// Every stat blocks past the chunk deadline, so the ids are abandoned
+	// without ever reporting a result.
+	fp.SetDefaultBehavior(fakepool.SegmentBehavior{Latency: 200 * time.Millisecond})
 	mgr := &validationTestPoolManager{client: fp}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
 	results, err := ValidateSegmentAvailabilityBatch(
-		ctx, [][]string{{"a@host", "b@host"}}, mgr, 1, 5*time.Second)
+		context.Background(), [][]string{{"a@host", "b@host"}}, mgr,
+		BatchOptions{MaxConnections: 2, Timeout: 10 * time.Millisecond})
 	assert.NoError(t, err)
 	require.Len(t, results, 1)
 
 	assert.Zero(t, results[0].MissingCount)
 	assert.Empty(t, results[0].MissingIDs)
-	assert.Equal(t, 2, results[0].ErrorCount)
+	assert.Equal(t, 2, results[0].UnresolvedCount)
 	assert.True(t, results[0].Inconclusive())
-	assert.ErrorIs(t, results[0].Err, context.Canceled)
-}
-
-// TestValidateSegmentAvailabilityDetailed_TransientErrorIsInconclusive
-// mirrors the batch guard on the detailed path.
-func TestValidateSegmentAvailabilityDetailed_TransientErrorIsInconclusive(t *testing.T) {
-	fp := fakepool.New()
-	mgr := &validationTestPoolManager{client: fp}
-
-	segs := []*metapb.SegmentData{
-		{Id: "ok@host", StartOffset: 0, EndOffset: 999},
-		{Id: "flaky@host", StartOffset: 0, EndOffset: 999},
-	}
-	fp.SetBehavior("flaky@host", fakepool.SegmentBehavior{Err: nntppool.ErrConnectionDied})
-
-	result, err := ValidateSegmentAvailabilityDetailed(
-		context.Background(), segs, mgr, 2, 100, nil, 5*time.Second)
-	assert.NoError(t, err)
-
-	assert.Zero(t, result.MissingCount)
-	assert.Empty(t, result.MissingIDs)
-	assert.Empty(t, result.MissingSegments)
-	assert.Equal(t, 1, result.ErrorCount)
-	assert.True(t, result.Inconclusive())
-	assert.ErrorIs(t, result.Err, nntppool.ErrConnectionDied)
+	assert.ErrorIs(t, results[0].Err, context.DeadlineExceeded)
 }

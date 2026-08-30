@@ -51,8 +51,8 @@ func parseDetails(t *testing.T, ev HealthEvent) database.HealthErrorDetails {
 
 // TestCheckFilesBatch_TransportErrorIsNotCorruption is the correctness fix the
 // issue calls for: a connection failure must neither condemn a file nor let it
-// pass as healthy. It is a failed attempt, which the existing retry ladder
-// re-runs later.
+// pass as healthy, and must not consume a retry either — it proves nothing,
+// so the existing retry ladder must not advance on its account (#861).
 func TestCheckFilesBatch_TransportErrorIsNotCorruption(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlinks not supported on Windows")
@@ -66,11 +66,11 @@ func TestCheckFilesBatch_TransportErrorIsNotCorruption(t *testing.T) {
 	writeHealthyFile(t, env, paths[1])
 	client.SetBehavior(flakyID, fakepool.SegmentBehavior{Err: nntppool.ErrConnectionDied})
 
-	events := env.healthChecker.CheckFilesBatch(context.Background(), paths)
+	events := env.healthChecker.CheckFilesBatch(context.Background(), paths, nil)
 	require.Len(t, events, 2)
 
-	assert.Equal(t, EventTypeCheckFailed, events[0].Type,
-		"a transport error is an inconclusive attempt, not corruption")
+	assert.Equal(t, EventTypeCheckInconclusive, events[0].Type,
+		"a transport error proves nothing, so it must not be read as corruption or burn a retry")
 	assert.NotEqual(t, EventTypeFileHealthy, events[0].Type,
 		"a segment we never resolved must not pass as available")
 	assert.Equal(t, EventTypeFileHealthy, events[1].Type, "sibling unaffected")
@@ -96,9 +96,9 @@ func TestCheckFilesBatch_TransportErrorPersistsNoHoles(t *testing.T) {
 	ids := writeMultiSegmentFile(t, env, path, 20)
 	client.SetBehavior(ids[3], fakepool.SegmentBehavior{Err: nntppool.ErrConnectionDied})
 
-	events := env.healthChecker.CheckFilesBatch(context.Background(), []string{path})
+	events := env.healthChecker.CheckFilesBatch(context.Background(), []string{path}, nil)
 	require.Len(t, events, 1)
-	assert.Equal(t, EventTypeCheckFailed, events[0].Type)
+	assert.Equal(t, EventTypeCheckInconclusive, events[0].Type)
 
 	meta, err := env.metadataService.ReadFileMetadata(path)
 	require.NoError(t, err)
@@ -127,7 +127,7 @@ func TestCheckFilesBatch_FastFailStopsDoomedFileOnly(t *testing.T) {
 	writeMultiSegmentFile(t, env, paths[1], segCount)
 	client.SetBehavior(doomedIDs[0], fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
 
-	events := env.healthChecker.CheckFilesBatch(context.Background(), paths)
+	events := env.healthChecker.CheckFilesBatch(context.Background(), paths, nil)
 	require.Len(t, events, 2)
 
 	assert.Equal(t, EventTypeFileCorrupted, events[0].Type)
@@ -163,7 +163,7 @@ func TestCheckFilesBatch_NoFastFailWhenToleranceUnreached(t *testing.T) {
 	ids := writeMultiSegmentFile(t, env, path, segCount)
 	client.SetBehavior(ids[0], fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
 
-	events := env.healthChecker.CheckFilesBatch(context.Background(), []string{path})
+	events := env.healthChecker.CheckFilesBatch(context.Background(), []string{path}, nil)
 	require.Len(t, events, 1)
 
 	d := parseDetails(t, events[0])

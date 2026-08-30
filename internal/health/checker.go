@@ -268,10 +268,14 @@ func (hc *HealthChecker) judgeValidation(ctx context.Context, prep preparedCheck
 	event := baseResultEvent(prep.filePath, prep.sourceNzbPath)
 
 	// An inconclusive sweep proves nothing. Reading a transient provider
-	// failure as a missing article marked files degraded and wrote their
-	// segment ids into the permanent hole map, which no later clean check
-	// clears (#861) — so this check must come before the missing-count
-	// verdict, even when the sweep also found genuine misses.
+	// failure — whether the whole pool was unreachable or just a handful of
+	// segments hit a connection blip mid-sweep — as a missing article marked
+	// files degraded and wrote their segment ids into the permanent hole map,
+	// which no later clean check clears; treating it as a failed attempt
+	// instead still burned the retry budget and could escalate a perfectly
+	// good file into repair (#861). So this check must come before the
+	// missing-count verdict, even when the sweep also found genuine misses,
+	// and it must not consume a retry.
 	if valErr != nil || result.Inconclusive() {
 		event.Type = EventTypeCheckInconclusive
 		event.Status = database.HealthStatusPending
@@ -279,32 +283,11 @@ func (hc *HealthChecker) judgeValidation(ctx context.Context, prep preparedCheck
 			event.Error = fmt.Errorf("segment check inconclusive: %w", valErr)
 		} else {
 			event.Error = fmt.Errorf("segment check inconclusive: %d of %d checked segments could not be verified: %w",
-				result.ErrorCount, result.TotalChecked, result.Err)
+				result.UnresolvedCount, result.TotalChecked, result.Err)
 		}
 		details := database.HealthErrorDetails{
-			ErrorType:     "check_inconclusive",
-			Message:       event.Error.Error(),
-			TotalArticles: prep.totalSegments,
-			Sampled:       result.TotalChecked,
-		}
-		event.Details = details.Marshal()
-		return event
-	}
-
-	// Segments whose availability was never established make the sweep
-	// inconclusive: the file can be neither cleared nor condemned on evidence
-	// that was not gathered. A settled verdict wins over that noise — once the
-	// missing-segment threshold is irreversibly exceeded, no amount of further
-	// checking could change the outcome.
-	if result.UnresolvedCount > 0 && !result.TerminatedEarly {
-		event.Type = EventTypeCheckFailed
-		event.Status = database.HealthStatusCorrupted
-		event.Error = fmt.Errorf("%d of %d segments could not be checked (provider or connection failure)",
-			result.UnresolvedCount, result.UnresolvedCount+result.TotalChecked)
-		details := database.HealthErrorDetails{
-			ErrorType:          "segments_unresolved",
+			ErrorType:          "check_inconclusive",
 			Message:            event.Error.Error(),
-			MissingArticles:    result.MissingCount,
 			TotalArticles:      prep.totalSegments,
 			Sampled:            result.TotalChecked,
 			UnresolvedSegments: result.UnresolvedCount,

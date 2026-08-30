@@ -147,6 +147,7 @@ func TestCheckFilesBatch(t *testing.T) {
 			&mockPoolManager{},
 			env.hw.configGetter,
 			&MockRcloneClient{},
+			nil,
 		)
 
 		paths := []string{"complete/a.mkv", "complete/b.mkv"}
@@ -177,7 +178,7 @@ func TestCheckFilesBatch(t *testing.T) {
 		client.SetBehavior(flakyID, fakepool.SegmentBehavior{Err: nntppool.ErrConnectionDied})
 		client.SetBehavior(goneID, fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
 
-		events := env.healthChecker.CheckFilesBatch(context.Background(), paths)
+		events := env.healthChecker.CheckFilesBatch(context.Background(), paths, nil)
 		require.Len(t, events, 3)
 
 		assert.Equal(t, EventTypeFileHealthy, events[0].Type)
@@ -200,7 +201,7 @@ func TestCheckFilesBatch(t *testing.T) {
 		segID := writeHealthyFile(t, env, path)
 		client.SetBehavior(segID, fakepool.SegmentBehavior{Err: nntppool.ErrConnectionDied})
 
-		events := env.healthChecker.CheckFilesBatch(context.Background(), []string{path})
+		events := env.healthChecker.CheckFilesBatch(context.Background(), []string{path}, nil)
 		require.Len(t, events, 1)
 		require.Equal(t, EventTypeCheckInconclusive, events[0].Type)
 
