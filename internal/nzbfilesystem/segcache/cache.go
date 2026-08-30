@@ -20,9 +20,10 @@ import (
 
 // Config holds segment cache storage settings.
 type Config struct {
-	CachePath      string
-	MaxSizeBytes   int64
-	ExpiryDuration time.Duration
+	CachePath        string
+	MaxSizeBytes     int64
+	ExpiryDuration   time.Duration
+	HydrationTimeout time.Duration
 }
 
 type cacheEntry struct {
@@ -42,7 +43,8 @@ type SegmentCache struct {
 	logger    *slog.Logger
 	totalSize int64
 	dirty     atomic.Bool
-	loading   atomic.Bool
+	ready     chan struct{}
+	readyOnce sync.Once
 }
 
 // NewSegmentCache creates a new segment cache. It does NOT load any existing
@@ -57,12 +59,28 @@ func NewSegmentCache(cfg Config, logger *slog.Logger) (*SegmentCache, error) {
 		items:  make(map[string]*cacheEntry),
 		config: cfg,
 		logger: logger,
+		ready:  make(chan struct{}),
 	}
 	return c, nil
 }
 
+const defaultHydrationTimeout = 30 * time.Second
+
+func (c *SegmentCache) waitReady() {
+	timeout := c.config.HydrationTimeout
+	if timeout <= 0 {
+		timeout = defaultHydrationTimeout
+	}
+	select {
+	case <-c.ready:
+	case <-time.After(timeout):
+		c.logger.Warn("segcache: catalog hydration wait timed out, proceeding unblocked")
+	}
+}
+
 // Has reports whether the segment is present in the cache (no disk I/O).
 func (c *SegmentCache) Has(messageID string) bool {
+	c.waitReady()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	_, ok := c.items[messageID]
@@ -71,6 +89,7 @@ func (c *SegmentCache) Has(messageID string) bool {
 
 // Get returns the decoded segment bytes. Returns (nil, false) on miss.
 func (c *SegmentCache) Get(messageID string) ([]byte, bool) {
+	c.waitReady()
 	c.mu.Lock()
 	e, ok := c.items[messageID]
 	if !ok {
@@ -97,12 +116,7 @@ func (c *SegmentCache) Get(messageID string) ([]byte, bool) {
 
 // Put stores segment bytes atomically (temp-write + rename).
 func (c *SegmentCache) Put(messageID string, data []byte) error {
-	// Skip caching while the catalog hydrates. The segment is still served from
-	// Usenet, just not persisted this round; it gets cached on the next request
-	// after load. Avoids Put/load lock contention on boot.
-	if c.loading.Load() {
-		return nil
-	}
+	c.waitReady()
 
 	h := sha256.Sum256([]byte(messageID))
 	filename := hex.EncodeToString(h[:]) + ".seg"
@@ -141,6 +155,7 @@ func (c *SegmentCache) Put(messageID string, data []byte) error {
 
 // Evict removes the oldest entries (by LastAccess) until total size is within MaxSizeBytes.
 func (c *SegmentCache) Evict() {
+	c.waitReady()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -183,6 +198,7 @@ func (c *SegmentCache) Cleanup() {
 		return
 	}
 
+	c.waitReady()
 	deadline := time.Now().Add(-c.config.ExpiryDuration)
 
 	c.mu.Lock()
@@ -204,6 +220,7 @@ func (c *SegmentCache) Cleanup() {
 
 // TotalSize returns the total bytes occupied by cached segments.
 func (c *SegmentCache) TotalSize() int64 {
+	c.waitReady()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.totalSize
@@ -211,6 +228,7 @@ func (c *SegmentCache) TotalSize() int64 {
 
 // ItemCount returns the number of cached segments.
 func (c *SegmentCache) ItemCount() int {
+	c.waitReady()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return len(c.items)
@@ -219,6 +237,7 @@ func (c *SegmentCache) ItemCount() int {
 // SaveCatalog flushes the in-memory catalog to disk (catalog.json) atomically.
 // It is a no-op when the catalog has not changed since the last flush.
 func (c *SegmentCache) SaveCatalog() error {
+	c.waitReady()
 	if !c.dirty.Load() {
 		return nil
 	}
@@ -254,13 +273,12 @@ func (c *SegmentCache) SaveCatalog() error {
 }
 
 // LoadCatalog hydrates the in-memory catalog from catalog.json on disk, statting
-// each .seg file and dropping entries whose data is missing. Put is gated off
-// (see the loading flag) for the duration, so the load can assign the map
-// wholesale without racing a concurrent writer. Sets the gate on entry and
-// clears it on exit.
+// each .seg file and dropping entries whose data is missing. Operations on the cache
+// wait for ready channel to close, guaranteeing safe access after hydration completes.
 func (c *SegmentCache) LoadCatalog() {
-	c.loading.Store(true)
-	defer c.loading.Store(false)
+	defer c.readyOnce.Do(func() {
+		close(c.ready)
+	})
 
 	catalogPath := filepath.Join(c.config.CachePath, "catalog.json")
 	c.logger.Info("segcache: loading catalog", "path", catalogPath)

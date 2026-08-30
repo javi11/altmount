@@ -2,31 +2,62 @@ package segcache
 
 import (
 	"log/slog"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// TestPutIgnoredWhileLoading guards the loading gate that replaced the
-// merge-under-lock path: while the catalog hydrates, Put must be a silent no-op
-// so a segment downloaded during cold load neither contends with the load nor
-// gets clobbered by the wholesale map assignment in LoadCatalog. Once the gate
-// clears, Put works normally again.
-func TestPutIgnoredWhileLoading(t *testing.T) {
+// TestOperationsBlockUntilLoaded verifies that Put/Get/Has block until LoadCatalog completes,
+// ensuring no cache misses or race conditions during boot hydration.
+func TestOperationsBlockUntilLoaded(t *testing.T) {
 	cfg := Config{CachePath: t.TempDir(), MaxSizeBytes: 10 * 1024 * 1024}
 	c, err := NewSegmentCache(cfg, slog.Default())
 	require.NoError(t, err)
 
-	c.loading.Store(true)
+	var (
+		wg      sync.WaitGroup
+		putDone = make(chan struct{})
+	)
 
-	require.NoError(t, c.Put("busy@msg", []byte("data")))
-	assert.False(t, c.Has("busy@msg"), "Put must be ignored while catalog is loading")
-	assert.EqualValues(t, 0, c.ItemCount())
-	assert.EqualValues(t, 0, c.TotalSize())
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		err := c.Put("busy@msg", []byte("data"))
+		assert.NoError(t, err)
+		close(putDone)
+	}()
 
-	c.loading.Store(false)
+	// Ensure the goroutine is blocked waiting for hydration
+	select {
+	case <-putDone:
+		t.Fatal("Put should have blocked until LoadCatalog")
+	case <-time.After(50 * time.Millisecond):
+	}
 
-	require.NoError(t, c.Put("busy@msg", []byte("data")))
+	// Now hydrate the catalog
+	c.LoadCatalog()
+
+	// Put should complete
+	wg.Wait()
 	assert.True(t, c.Has("busy@msg"))
+	assert.EqualValues(t, 1, c.ItemCount())
+}
+
+// TestOperationsProceedWhenHydrationTimesOut guards against deadlocks if LoadCatalog is never called.
+func TestOperationsProceedWhenHydrationTimesOut(t *testing.T) {
+	cfg := Config{
+		CachePath:        t.TempDir(),
+		MaxSizeBytes:     10 * 1024 * 1024,
+		HydrationTimeout: 20 * time.Millisecond,
+	}
+	c, err := NewSegmentCache(cfg, slog.Default())
+	require.NoError(t, err)
+
+	// Put without calling LoadCatalog: should unblock after HydrationTimeout and succeed.
+	err = c.Put("unhydrated@msg", []byte("data"))
+	assert.NoError(t, err)
+	assert.True(t, c.Has("unhydrated@msg"))
 }
