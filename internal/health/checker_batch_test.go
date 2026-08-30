@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/javi11/altmount/internal/config"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/testsupport/fakepool"
@@ -26,9 +27,9 @@ func (m *fakeClientPoolManager) HasPool() bool                     { return true
 
 // newBatchTestEnv builds a repair test env whose checker and worker use a
 // fakepool-backed pool manager instead of the always-failing mock.
-func newBatchTestEnv(t *testing.T, tempDir string, client pool.NntpClient) *repairTestEnv {
+func newBatchTestEnv(t *testing.T, tempDir string, client pool.NntpClient, configure ...func(*config.Config)) *repairTestEnv {
 	t.Helper()
-	env := newRepairTestEnv(t, tempDir, nil)
+	env := newRepairTestEnv(t, tempDir, nil, configure...)
 
 	pm := &fakeClientPoolManager{client: client}
 	env.healthChecker = NewHealthChecker(

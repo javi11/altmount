@@ -269,6 +269,28 @@ func (hc *HealthChecker) judgeValidation(ctx context.Context, prep preparedCheck
 		return event
 	}
 
+	// Segments whose availability was never established make the sweep
+	// inconclusive: the file can be neither cleared nor condemned on evidence
+	// that was not gathered. A settled verdict wins over that noise — once the
+	// missing-segment threshold is irreversibly exceeded, no amount of further
+	// checking could change the outcome.
+	if result.UnresolvedCount > 0 && !result.TerminatedEarly {
+		event.Type = EventTypeCheckFailed
+		event.Status = database.HealthStatusCorrupted
+		event.Error = fmt.Errorf("%d of %d segments could not be checked (provider or connection failure)",
+			result.UnresolvedCount, result.UnresolvedCount+result.TotalChecked)
+		details := database.HealthErrorDetails{
+			ErrorType:          "segments_unresolved",
+			Message:            event.Error.Error(),
+			MissingArticles:    result.MissingCount,
+			TotalArticles:      prep.totalSegments,
+			Sampled:            result.TotalChecked,
+			UnresolvedSegments: result.UnresolvedCount,
+		}
+		event.Details = details.Marshal()
+		return event
+	}
+
 	if result.MissingCount > 0 {
 		event.Type = EventTypeFileCorrupted
 		event.Status = database.HealthStatusCorrupted
@@ -276,11 +298,18 @@ func (hc *HealthChecker) judgeValidation(ctx context.Context, prep preparedCheck
 			result.MissingCount, result.TotalChecked)
 		event.Classification = hc.classifyHoles(ctx, prep.filePath, result)
 		details := database.HealthErrorDetails{
-			ErrorType:       "missing_segments",
-			MissingArticles: result.MissingCount,
-			TotalArticles:   prep.totalSegments,
-			Sampled:         result.TotalChecked,
-			PlaybackImpact:  event.Classification,
+			ErrorType:          "missing_segments",
+			MissingArticles:    result.MissingCount,
+			TotalArticles:      prep.totalSegments,
+			Sampled:            result.TotalChecked,
+			UnresolvedSegments: result.UnresolvedCount,
+			PlaybackImpact:     event.Classification,
+			TerminatedEarly:    result.TerminatedEarly,
+		}
+		if result.TerminatedEarly {
+			details.TerminationReason = fmt.Sprintf(
+				"missing-segment threshold exceeded after %d of %d segments",
+				result.TotalChecked, prep.totalSegments)
 		}
 		event.Details = details.Marshal()
 		return event
@@ -359,13 +388,11 @@ func (hc *HealthChecker) CheckFile(ctx context.Context, filePath string, opts ..
 		return *prep.earlyEvent
 	}
 
-	cfg := hc.configGetter()
 	results, err := usenet.ValidateSegmentAvailabilityBatch(
 		ctx,
 		[][]string{prep.sampledIDs},
 		hc.poolManager,
-		cfg.GetMaxConnectionsForHealthChecks(),
-		cfg.GetHealthReadTimeout(),
+		hc.batchOptions([]preparedCheck{prep}),
 	)
 
 	var result usenet.ValidationResult
@@ -373,6 +400,34 @@ func (hc *HealthChecker) CheckFile(ctx context.Context, filePath string, opts ..
 		result = results[0]
 	}
 	return hc.judgeValidation(ctx, prep, result, err)
+}
+
+// batchOptions builds the sweep configuration for a set of prepared checks,
+// including the fast-fail policy. A file stops consuming stats as soon as its
+// confirmed missing segments irreversibly exceed the configured
+// acceptable-missing threshold: that predicate is monotonic in the miss count,
+// so no amount of further checking could bring the file back under it, and the
+// segments it would have checked cannot change the repair decision.
+//
+// Only confirmed article-not-found responses feed the count (the sweep never
+// classifies a transport failure as missing), and the file's full segment
+// count is the denominator, so the policy matches the one health.classifyHoles
+// applies to the final verdict.
+func (hc *HealthChecker) batchOptions(preps []preparedCheck) usenet.BatchOptions {
+	cfg := hc.configGetter()
+	acceptable := cfg.GetAcceptableMissingSegmentsPercentage()
+
+	return usenet.BatchOptions{
+		MaxConnections: cfg.GetMaxConnectionsForHealthChecks(),
+		Timeout:        cfg.GetHealthReadTimeout(),
+		ShouldStop: func(fileIdx int, result usenet.ValidationResult) bool {
+			if fileIdx >= len(preps) {
+				return false
+			}
+			return holes.ExceedsAcceptableMissing(
+				result.MissingCount, preps[fileIdx].totalSegments, acceptable)
+		},
+	}
 }
 
 // prepareConcurrency bounds the parallel metadata-read phase of a batch check.
@@ -425,13 +480,11 @@ func (hc *HealthChecker) CheckFilesBatch(ctx context.Context, filePaths []string
 		}
 	}
 
-	cfg := hc.configGetter()
 	results, valErr := usenet.ValidateSegmentAvailabilityBatch(
 		ctx,
 		perFileIDs,
 		hc.poolManager,
-		cfg.GetMaxConnectionsForHealthChecks(),
-		cfg.GetHealthReadTimeout(),
+		hc.batchOptions(preps),
 	)
 
 	events := make([]HealthEvent, len(preps))
