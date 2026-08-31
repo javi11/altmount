@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -113,9 +114,14 @@ func TestParseIndexWithProgressReportsCompletions(t *testing.T) {
 
 	var calls atomic.Int32
 	var last atomic.Int32
-	_, err := par2.ParseIndexWithProgress(streams, func(done, total int) {
+	var mu sync.Mutex
+	seen := map[int]bool{}
+	_, err := par2.ParseIndexWithProgress(streams, func(streamIndex, done, total int) {
 		calls.Add(1)
 		last.Store(int32(done))
+		mu.Lock()
+		seen[streamIndex] = true
+		mu.Unlock()
 		if total != len(streams) {
 			t.Errorf("total = %d, want %d", total, len(streams))
 		}
@@ -128,5 +134,9 @@ func TestParseIndexWithProgressReportsCompletions(t *testing.T) {
 	}
 	if got := last.Load(); got != int32(len(streams)) {
 		t.Fatalf("final done = %d, want %d", got, len(streams))
+	}
+	// Every stream must name itself, so a caller can tell which one finished.
+	if len(seen) != len(streams) {
+		t.Fatalf("distinct stream indexes reported = %d, want %d", len(seen), len(streams))
 	}
 }

@@ -107,6 +107,30 @@ func TestResolveFromNzbRepairsEndToEnd(t *testing.T) {
 	}
 }
 
+// The deferred-import path resolves from the NZB, so the recovery-capacity
+// verdict has to land here too: a release whose PAR2 set is mostly purged
+// must be refused before the parse, not after it has walked every volume.
+func TestResolveFromNzbRejectsSetWithoutEnoughLiveRecovery(t *testing.T) {
+	fm, store, fetch, _, _ := mkResolveFixture(t, false)
+	n := nzbFromFixture(fm, store)
+
+	var deadIDs []string
+	for _, f := range store.Files[:2] {
+		for _, seg := range f.Segments {
+			deadIDs = append(deadIDs, "<"+seg.Id+">")
+		}
+	}
+
+	_, err := ResolveFromNzb(context.Background(), n, deadIDs, fetch,
+		Caps{MaxRepairRatio: 1, MaxMemoryBytes: 64 << 20}, testLogger(), nil)
+	if !errors.Is(err, ErrUnrepairable) {
+		t.Fatalf("err = %v, want ErrUnrepairable", err)
+	}
+	if n := len(fetch.fetched); n != 0 {
+		t.Fatalf("fetched %d articles, want 0 (the verdict needs no parse)", n)
+	}
+}
+
 // mkEncodedNzbFixture builds a realistic NZB-mode release: yEnc-style
 // ENCODED declared segment sizes (larger than the decoded payloads the
 // fetcher returns), PAR2 files split into par2ArtSize-byte articles, and —

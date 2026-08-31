@@ -103,6 +103,9 @@ func Resolve(
 	if err := ratioPrecheck(store.Files, par2Files, dead, caps); err != nil {
 		return nil, err
 	}
+	if err := recoveryCapacityPrecheck(store.Files, par2Files, dead); err != nil {
+		return nil, err
+	}
 
 	idx, files, err := planSet(ctx, fetch, store, par2Files, dead, cache, log, progress)
 	if err != nil {
@@ -149,7 +152,13 @@ func planSet(
 	started := time.Now()
 	streams := par2Streams(ctx, fetch, par2Files, dead, cache)
 
-	idx, err := par2.ParseIndexWithProgress(streams, func(done, total int) { report(done, total) })
+	idx, err := par2.ParseIndexWithProgress(streams, func(streamIndex, done, total int) {
+		report(done, total)
+		first, live, deadArticles := volumeStats(par2Files[streamIndex])
+		log.InfoContext(ctx, "PAR2 volume parsed",
+			"first_article", first, "live_articles", live, "dead_articles", deadArticles,
+			"done", done, "total", total, "elapsed", time.Since(started).Round(time.Millisecond))
+	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: parse PAR2 set: %v", ErrUnrepairable, err)
 	}
@@ -175,6 +184,24 @@ func planSet(
 		"files", len(files), "duration", time.Since(started).Round(time.Millisecond))
 	report(total, total)
 	return idx, files, nil
+}
+
+// volumeStats describes a parsed PAR2 volume for the planning log: its first
+// article ID — the only handle a caller can match against the NZB at this
+// stage, since the volume's name lives in packets the parse has not surfaced
+// yet — and how much of it the liveness sweep found alive.
+func volumeStats(f SetFile) (firstArticle string, live, dead int) {
+	for _, a := range f.Articles {
+		if a.Dead {
+			dead++
+		} else {
+			live++
+		}
+	}
+	if len(f.Articles) > 0 {
+		firstArticle = f.Articles[0].MessageID
+	}
+	return firstArticle, live, dead
 }
 
 // statSampleSize is how many articles the pre-plan liveness check STATs
@@ -288,6 +315,26 @@ func releaseArticleIDs(store *metapb.NzbStore, par2Files []SetFile) []string {
 	return ids
 }
 
+// par2ArticleIDs indexes every article of the PAR2 set. The prechecks all
+// reason about content bytes only, and the NZB store lists PAR2 files
+// alongside content files, so this set is what tells the two apart.
+func par2ArticleIDs(par2Files []SetFile) map[string]bool {
+	ids := map[string]bool{}
+	for _, f := range par2Files {
+		for _, a := range f.Articles {
+			ids[a.MessageID] = true
+		}
+	}
+	return ids
+}
+
+// isContentFile reports whether an NzbStore entry carries release content
+// rather than recovery data. A file is recognised by its first segment: PAR2
+// files are known only by their article IDs at precheck time.
+func isContentFile(f *metapb.NzbFileEntry, par2IDs map[string]bool) bool {
+	return len(f.Segments) > 0 && !par2IDs[normalizeMsgID(f.Segments[0].Id)]
+}
+
 // releaseSizePrecheck refuses releases outside the configured size range
 // before any network work: the release size is known from the NZB layout
 // alone, so the verdict is free. Sizes are encoded segment bytes (a few
@@ -297,15 +344,10 @@ func releaseSizePrecheck(files []*metapb.NzbFileEntry, par2Files []SetFile, caps
 	if caps.MinReleaseSizeBytes <= 0 && caps.MaxReleaseSizeBytes <= 0 {
 		return nil
 	}
-	par2IDs := map[string]bool{}
-	for _, f := range par2Files {
-		for _, a := range f.Articles {
-			par2IDs[a.MessageID] = true
-		}
-	}
+	par2IDs := par2ArticleIDs(par2Files)
 	var total int64
 	for _, f := range files {
-		if len(f.Segments) == 0 || par2IDs[normalizeMsgID(f.Segments[0].Id)] {
+		if !isContentFile(f, par2IDs) {
 			continue
 		}
 		for _, seg := range f.Segments {
@@ -342,15 +384,10 @@ func ratioPrecheck(files []*metapb.NzbFileEntry, par2Files []SetFile, dead map[s
 	if caps.MaxRepairRatio <= 0 || len(dead) == 0 {
 		return nil
 	}
-	par2IDs := map[string]bool{}
-	for _, f := range par2Files {
-		for _, a := range f.Articles {
-			par2IDs[a.MessageID] = true
-		}
-	}
+	par2IDs := par2ArticleIDs(par2Files)
 	var missingBytes, damagedFileBytes int64
 	for _, f := range files {
-		if len(f.Segments) == 0 || par2IDs[normalizeMsgID(f.Segments[0].Id)] {
+		if !isContentFile(f, par2IDs) {
 			continue
 		}
 		var fileBytes, deadBytes int64
@@ -371,6 +408,50 @@ func ratioPrecheck(files []*metapb.NzbFileEntry, par2Files []SetFile, dead map[s
 	if ratio := float64(missingBytes) / float64(damagedFileBytes); ratio > caps.MaxRepairRatio*ratioPrecheckMargin {
 		return fmt.Errorf("%w: damage ratio %.4f exceeds max_repair_ratio %.4f",
 			ErrUnrepairable, ratio, caps.MaxRepairRatio)
+	}
+	return nil
+}
+
+// recoveryCapacityPrecheck rejects a set whose surviving recovery data cannot
+// cover the damage, before the PAR2 set is parsed. Recovery slices are the
+// size of data slices, and dropDeadRecovery discards any slice whose payload
+// overlaps a dead article, so the live PAR2 bytes are a hard upper bound on
+// what the repair can reconstruct. The bound is deliberately optimistic —
+// scattered live bytes may not form a single whole slice — so it only refuses
+// sets that are hopeless under the most generous reading.
+//
+// Without it, a set that is almost entirely purged still pays the full parse:
+// with the packet headers sitting in dead articles, the parser resyncs through
+// each volume instead of seeking past its payloads, downloading every article
+// that survives — tens of minutes to reach a verdict the NZB layout and the
+// liveness sweep already imply.
+func recoveryCapacityPrecheck(files []*metapb.NzbFileEntry, par2Files []SetFile, dead map[string]bool) error {
+	if len(dead) == 0 {
+		return nil
+	}
+	var liveRecovery int64
+	for _, f := range par2Files {
+		for _, a := range f.Articles {
+			if !dead[a.MessageID] {
+				liveRecovery += a.Size
+			}
+		}
+	}
+	par2IDs := par2ArticleIDs(par2Files)
+	var missing int64
+	for _, f := range files {
+		if !isContentFile(f, par2IDs) {
+			continue
+		}
+		for _, seg := range f.Segments {
+			if dead[normalizeMsgID(seg.Id)] {
+				missing += seg.Bytes
+			}
+		}
+	}
+	if missing > 0 && liveRecovery < missing {
+		return fmt.Errorf("%w: %d MB of live recovery data cannot cover %d MB of missing content",
+			ErrUnrepairable, liveRecovery>>20, missing>>20)
 	}
 	return nil
 }
@@ -505,7 +586,7 @@ func matchSetFiles(
 	for _, i := range deferred {
 		if releasePartSize == 0 {
 			fd := idx.Files[matched[i].id]
-			return nil, fmt.Errorf("%w: no live article anywhere in the release to derive the part size (every article of %q and its siblings is missing)",
+			return nil, fmt.Errorf("%w: no retrievable article in any release member to derive the part size (every probed article of %q and its siblings is missing)",
 				ErrUnrepairable, fd.Name)
 		}
 		sf, _, err := sizeArticles(ctx, idx, matched[i].id, matched[i].entry, dead, fetch, cache, releasePartSize)

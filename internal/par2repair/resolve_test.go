@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math/rand"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/javi11/nntppool/v4"
@@ -697,5 +699,119 @@ func TestResolveRejectsReleaseOutsideSizeRange(t *testing.T) {
 		Caps{MaxRepairRatio: 0.5, MaxMemoryBytes: 64 << 20, MaxReleaseSizeBytes: 1}, testLogger(), nil)
 	if !errors.Is(err, ErrUnrepairable) {
 		t.Fatalf("err = %v, want ErrUnrepairable for a release above the maximum size", err)
+	}
+}
+
+// A set whose surviving recovery data cannot cover the damage must be refused
+// before the PAR2 parse. That parse is the expensive stage — with the packet
+// headers dead the parser resyncs through each volume, downloading every
+// article that survives — and its verdict here is already decided.
+func TestResolveRejectsSetWithoutEnoughLiveRecovery(t *testing.T) {
+	fm, store, fetch, _, _ := mkResolveFixture(t, false)
+
+	// Every content article is dead: no recovery set this small can cover it.
+	var deadIDs []string
+	for _, f := range store.Files[:2] {
+		for _, seg := range f.Segments {
+			deadIDs = append(deadIDs, "<"+seg.Id+">")
+		}
+	}
+
+	_, err := Resolve(context.Background(), fm, store, deadIDs, fetch,
+		Caps{MaxRepairRatio: 1, MaxMemoryBytes: 64 << 20}, testLogger(), nil)
+	if !errors.Is(err, ErrUnrepairable) {
+		t.Fatalf("err = %v, want ErrUnrepairable", err)
+	}
+	if n := len(fetch.fetched); n != 0 {
+		t.Fatalf("fetched %d articles, want 0 (the verdict needs no parse)", n)
+	}
+}
+
+// capturingHandler records the messages a stage logs. Records arrive from the
+// parse goroutines, so the mutex is load-bearing.
+type capturingHandler struct {
+	mu       sync.Mutex
+	messages []string
+}
+
+func (h *capturingHandler) Enabled(context.Context, slog.Level) bool { return true }
+func (h *capturingHandler) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.messages = append(h.messages, r.Message)
+	return nil
+}
+func (h *capturingHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *capturingHandler) WithGroup(string) slog.Handler      { return h }
+
+func (h *capturingHandler) count(msg string) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	n := 0
+	for _, m := range h.messages {
+		if m == msg {
+			n++
+		}
+	}
+	return n
+}
+
+// Parsing the recovery set is the long pole of a repair — tens of minutes on a
+// damaged release — and it used to log nothing between "parsing recovery set"
+// and "PAR2 set parsed". A volume stuck on a flapping provider was then
+// indistinguishable from a hang, so each volume reports as it finishes.
+func TestPlanningLogsEachVolumeAsItParses(t *testing.T) {
+	fm, store, fetch, _, deadID := mkResolveFixture(t, false)
+	h := &capturingHandler{}
+
+	_, err := Resolve(context.Background(), fm, store, []string{deadID}, fetch,
+		Caps{MaxRepairRatio: 0.5, MaxMemoryBytes: 64 << 20}, slog.New(h), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := h.count("PAR2 volume parsed"), len(fm.Par2Files); got != want {
+		t.Fatalf("per-volume parse records = %d, want %d (one per PAR2 file)", got, want)
+	}
+}
+
+// A repair cannot produce more bytes than the recovery data that survives:
+// recovery slices are the size of data slices, and a slice whose payload
+// overlaps a dead article is unusable. So live PAR2 bytes below missing
+// content bytes means the set is hopeless however it parses — a verdict the
+// NZB layout and the liveness sweep already contain.
+func TestRecoveryCapacityPrecheck(t *testing.T) {
+	files := []*metapb.NzbFileEntry{
+		{Segments: []*metapb.NzbSeg{{Id: "c1@x", Bytes: 100}, {Id: "c2@x", Bytes: 100}}},
+		{Segments: []*metapb.NzbSeg{{Id: "p1@x", Bytes: 100}, {Id: "p2@x", Bytes: 100}}}, // PAR2
+	}
+	par2Files := []SetFile{{Articles: []Article{
+		{MessageID: "p1@x", Size: 100},
+		{MessageID: "p2@x", Size: 100},
+	}}}
+
+	tests := []struct {
+		name    string
+		dead    map[string]bool
+		wantErr bool
+	}{
+		{"no damage", map[string]bool{}, false},
+		{"100 missing, 200 live recovery", map[string]bool{"c1@x": true}, false},
+		{"200 missing, 200 live recovery", map[string]bool{"c1@x": true, "c2@x": true}, false},
+		{"200 missing, 100 live recovery", map[string]bool{"c1@x": true, "c2@x": true, "p1@x": true}, true},
+		{"100 missing, no live recovery", map[string]bool{"c1@x": true, "p1@x": true, "p2@x": true}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := recoveryCapacityPrecheck(files, par2Files, tt.dead)
+			if tt.wantErr {
+				if !errors.Is(err, ErrUnrepairable) {
+					t.Fatalf("err = %v, want ErrUnrepairable", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("err = %v, want nil", err)
+			}
+		})
 	}
 }

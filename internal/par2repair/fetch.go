@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -147,8 +148,28 @@ type statManyClient interface {
 // the overall deadline in seconds-to-minutes for a full release.
 const statPerItemBudget = 250 * time.Millisecond
 
+// statSweepConcurrency caps how many STATs one sweep keeps outstanding.
+// Left unset, StatMany derives its bound from the pool's aggregate STAT
+// pipeline capacity — thousands for a typical multi-provider config — and a
+// full-release census then floods every provider's dispatch queue at once.
+// Requests that cannot be dispatched within the per-attempt window fail over
+// silently until the sweep's own burst reads back as "all providers
+// exhausted" on most of its articles. STATs are cheap round trips: this many
+// outstanding still censuses thousands of articles in seconds while leaving
+// the pool responsive for everything else running beside the repair.
+const statSweepConcurrency = 64
+
 // StatIDs implements ArticleStater over the pool's StatMany when the client
 // supports it; otherwise it reports the capability unavailable (nil, nil).
+//
+// A STAT that fails with a transport error ("all providers exhausted" while
+// connections flap) proves nothing about the article, so unresolved ids are
+// re-STATed with the same backoff ladder Fetch uses. Ids still unresolved
+// after the retry budget are not reported missing (the contract), but when
+// they outnumber what margin rows can absorb the whole sweep fails instead:
+// planning on that many silent "alive" verdicts once let a ~90%-dead release
+// sweep clean and cost ten minutes of serial dead-article discovery before
+// the inevitable unrepairable verdict.
 func (p *PoolFetcher) StatIDs(ctx context.Context, ids []string, onResult func(done int)) (map[string]bool, error) {
 	client, err := p.getClient()
 	if err != nil {
@@ -158,19 +179,69 @@ func (p *PoolFetcher) StatIDs(ctx context.Context, ids []string, onResult func(d
 	if !ok {
 		return nil, nil
 	}
+
+	missing := make(map[string]bool)
+	done := 0
+	delay := p.retryDelay
+	if delay <= 0 {
+		delay = fetchRetryBaseDelay
+	}
+	pending := ids
+	for attempt := 0; ; attempt++ {
+		unresolved, err := p.statOnce(ctx, sc, pending, missing, &done, onResult)
+		if err != nil {
+			return nil, err
+		}
+		pending = unresolved
+		if len(pending) == 0 || attempt >= fetchRetries {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(delay):
+		}
+		delay *= 2
+	}
+	if len(pending) > maxHiddenAbsorbArticles {
+		return nil, fmt.Errorf("par2repair: liveness sweep got no verdict for %d of %d articles (transient provider errors)",
+			len(pending), len(ids))
+	}
+	return missing, nil
+}
+
+// statOnce runs one StatMany pass over ids, folding definitive verdicts into
+// missing/done and returning the ids that got none — transport errors, plus
+// ids the pass abandoned before dispatching.
+func (p *PoolFetcher) statOnce(
+	ctx context.Context,
+	sc statManyClient,
+	ids []string,
+	missing map[string]bool,
+	done *int,
+	onResult func(done int),
+) ([]string, error) {
 	timeout := max(time.Duration(len(ids))*statPerItemBudget, time.Minute)
 	statCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	missing := make(map[string]bool)
-	done := 0
-	for r := range sc.StatMany(statCtx, ids, nntppool.StatManyOptions{}) {
-		if errors.Is(r.Err, nntppool.ErrArticleNotFound) {
+	resolved := make(map[string]bool, len(ids))
+	var firstErr error
+	for r := range sc.StatMany(statCtx, ids, nntppool.StatManyOptions{Concurrency: statSweepConcurrency}) {
+		switch {
+		case errors.Is(r.Err, nntppool.ErrArticleNotFound):
 			missing[r.MessageID] = true
+		case r.Err != nil:
+			// Transport failure: no verdict either way.
+			if firstErr == nil {
+				firstErr = r.Err
+			}
+			continue
 		}
-		done++
+		resolved[r.MessageID] = true
+		*done++
 		if onResult != nil {
-			onResult(done)
+			onResult(*done)
 		}
 	}
 	// A cancelled sweep left ids unchecked; report it rather than a partial
@@ -178,7 +249,17 @@ func (p *PoolFetcher) StatIDs(ctx context.Context, ids []string, onResult func(d
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return missing, nil
+	var unresolved []string
+	for _, id := range ids {
+		if !resolved[id] {
+			unresolved = append(unresolved, id)
+		}
+	}
+	if len(unresolved) > 0 {
+		slog.DebugContext(ctx, "liveness sweep pass left articles unresolved",
+			"unresolved", len(unresolved), "total", len(ids), "example_error", firstErr)
+	}
+	return unresolved, nil
 }
 
 // Fetch implements ArticleFetcher. Transient pool errors — a network blip

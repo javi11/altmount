@@ -139,6 +139,9 @@ func ResolveFromNzb(
 	if err := ratioPrecheck(store.Files, nil, dead, caps); err != nil {
 		return nil, err
 	}
+	if err := recoveryCapacityPrecheck(store.Files, par2Files, dead); err != nil {
+		return nil, err
+	}
 
 	// The NZB declares yEnc-ENCODED segment sizes — a few percent above the
 	// decoded payloads. Fine for thresholds, fatal for the byte-exact stream

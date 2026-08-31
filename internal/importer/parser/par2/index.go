@@ -105,9 +105,11 @@ func ParseIndex(streams []io.Reader) (*Index, error) {
 const parseStreamConcurrency = 16
 
 // ParseIndexWithProgress is ParseIndex reporting per-stream completion:
-// onStreamDone(done, total) fires as each stream finishes its walk (from
-// whichever goroutine finished it; done is cumulative and monotonic).
-func ParseIndexWithProgress(streams []io.Reader, onStreamDone func(done, total int)) (*Index, error) {
+// onStreamDone(streamIndex, done, total) fires as each stream finishes its
+// walk (from whichever goroutine finished it; done is cumulative and
+// monotonic). streams complete out of order, so streamIndex is what names the
+// one that finished — and, by elimination, the ones still running.
+func ParseIndexWithProgress(streams []io.Reader, onStreamDone func(streamIndex, done, total int)) (*Index, error) {
 	// Every stream parses into its own partial index, concurrently; partials
 	// are then merged in stream order, which reproduces the sequential walk
 	// exactly — metadata packets last-write-wins by stream order, recovery
@@ -139,7 +141,7 @@ func ParseIndexWithProgress(streams []io.Reader, onStreamDone func(done, total i
 			if onStreamDone != nil {
 				doneMu.Lock()
 				done++
-				onStreamDone(done, len(streams))
+				onStreamDone(fi, done, len(streams))
 				doneMu.Unlock()
 			}
 		}()
