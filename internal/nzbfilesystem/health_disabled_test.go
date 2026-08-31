@@ -6,6 +6,7 @@ import (
 	"errors"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
@@ -268,4 +269,55 @@ func TestUpdateFileHealthOnError_FailureMasking_MasksRepair(t *testing.T) {
 
 	original, _ = ms.ReadFileMetadata(filePath)
 	assert.Nil(t, original, "metadata should be moved to corrupted folder now")
+}
+
+// TestUpdateFileHealthOnError_EnqueuesForwardSlashDir pins the directory handed to
+// the coalesced rclone refresh after a repair moves metadata to the safety folder.
+// rclone's VFS is forward-slash on every platform, so building this with
+// filepath.Dir sent "\dir" (or a bare "\" for a file at the mount root) on Windows,
+// which matches no node - and vfs/forget reports success regardless, so the refresh
+// silently did nothing.
+func TestUpdateFileHealthOnError_EnqueuesForwardSlashDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks not supported on Windows")
+	}
+	repo, db, ms := setupStreamHealthEnv(t)
+	ctx := context.Background()
+
+	filePath := "series/Show.S01E04/stream.s01e04.mkv"
+	libraryPath := "/media/library/stream.s01e04.mkv"
+	seg := writeStreamMeta(t, ms, filePath)
+
+	_, err := db.Exec(
+		`INSERT INTO file_health (file_path, library_path, status, scheduled_check_at) VALUES (?, ?, 'healthy', datetime('now'))`,
+		filePath, libraryPath,
+	)
+	require.NoError(t, err)
+
+	enabled := true
+	cfg := config.DefaultConfig()
+	cfg.Health.Enabled = &enabled
+	cfg.MountPath = ""
+
+	// A real coalescer, so the enqueued directory actually reaches a client.
+	client := &fakeRcloneClient{}
+	coalescer := newTestCoalescer(t, client)
+
+	mvf := newStreamFailureMVF(ctx, filePath, repo, ms, seg, cfg)
+	mvf.repairCoalescer = coalescer
+
+	mvf.updateFileHealthOnError(&usenet.DataCorruptionError{UnderlyingErr: errors.New("article not found"), NoRetry: true}, true)
+
+	require.Eventually(t, func() bool {
+		return len(client.collectedDirs()) > 0
+	}, 2*time.Second, 20*time.Millisecond, "a repair must enqueue a coalesced VFS refresh")
+
+	dirs := client.collectedDirs()
+	assert.Equal(t, []string{"series/Show.S01E04"}, dirs,
+		"the refresh directory must be the forward-slash parent of the repaired file")
+
+	for _, d := range dirs {
+		assert.NotContains(t, d, `\`, "no directory handed to rclone may carry a Windows separator")
+		assert.NotEmpty(t, d, "no empty directory may be enqueued")
+	}
 }

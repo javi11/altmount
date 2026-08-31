@@ -202,6 +202,27 @@ func TestPoolFetcherStatIDsBoundsConcurrency(t *testing.T) {
 	}
 }
 
+// The sweep bound must follow the pool-wide stat budget when one is wired
+// (pool.Manager.StatSweepConcurrency: conservative while streams are active,
+// full STAT pipeline capacity when idle), not the static fallback.
+func TestPoolFetcherStatIDsUsesConfiguredStatConcurrency(t *testing.T) {
+	client := &concurrencyRecordingStatClient{fakeStatClient: fakeStatClient{articles: map[string]bool{"live@x": true}}}
+	f := NewPoolFetcher(func() (BodyClient, error) { return client, nil }, nil)
+	f.StatConcurrency = func() int { return 7 }
+
+	if _, err := f.StatIDs(context.Background(), []string{"live@x"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(client.opts) == 0 {
+		t.Fatal("StatMany never called")
+	}
+	for _, o := range client.opts {
+		if o.Concurrency != 7 {
+			t.Fatalf("Concurrency = %d, want 7 from the wired stat budget", o.Concurrency)
+		}
+	}
+}
+
 // bodyOnlyClient has no stat surface; StatIDs must degrade to a no-op.
 type bodyOnlyClient struct{}
 

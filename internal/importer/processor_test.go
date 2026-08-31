@@ -56,6 +56,7 @@ func (m processorTestPoolManager) SetImportConnCapacity(int)                 {}
 func (m processorTestPoolManager) ImportConnCapacity() int                   { return 0 }
 func (m processorTestPoolManager) SetStreamSource(pool.StreamActivitySource) {}
 func (m processorTestPoolManager) NotifyStreamChange()                       {}
+func (m processorTestPoolManager) StatSweepConcurrency(conservative int) int { return conservative }
 
 func TestPreParseFastFailSkipsOnlyMissingEpisode(t *testing.T) {
 	client := fakepool.New()
@@ -248,41 +249,22 @@ func TestPreParseFastFailHealthyReleaseSkipsPerFileSweep(t *testing.T) {
 	}
 }
 
-func TestFastFailConcurrency(t *testing.T) {
+// TestFastFailUsesStatPipelineDepthNotConnections pins the fast-fail sweep's
+// concurrency to the providers' STAT pipeline depth rather than their
+// connection count: STAT carries no body, so nntppool pipelines many per
+// connection (Provider.StatInflight). A two-connection pool must not throttle
+// the sweep to two in-flight STATs.
+func TestFastFailUsesStatPipelineDepthNotConnections(t *testing.T) {
 	enabled := true
-	disabled := false
-	tests := []struct {
-		name string
-		cfg  *config.Config
-		want int
-	}{
-		{
-			name: "sums enabled providers (nil Enabled counts as enabled)",
-			cfg:  &config.Config{Providers: []config.ProviderConfig{{MaxConnections: 10, Enabled: &enabled}, {MaxConnections: 20}}},
-			want: 30,
-		},
-		{
-			name: "skips disabled providers",
-			cfg:  &config.Config{Providers: []config.ProviderConfig{{MaxConnections: 10, Enabled: &disabled}, {MaxConnections: 20, Enabled: &enabled}}},
-			want: 20,
-		},
-		{
-			name: "floors at 1 when no capacity configured",
-			cfg:  &config.Config{},
-			want: 1,
-		},
-		{
-			name: "caps at 100",
-			cfg:  &config.Config{Providers: []config.ProviderConfig{{MaxConnections: 500, Enabled: &enabled}}},
-			want: 100,
-		},
+	cfg := &config.Config{Providers: []config.ProviderConfig{
+		{MaxConnections: 2, StatInflightRequests: 100, Enabled: &enabled},
+	}}
+
+	if got := cfg.TotalProviderConnections(); got != 2 {
+		t.Fatalf("fixture TotalProviderConnections = %d, want 2", got)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := fastFailConcurrency(tt.cfg); got != tt.want {
-				t.Fatalf("fastFailConcurrency = %d, want %d", got, tt.want)
-			}
-		})
+	if got := cfg.StatConcurrency(); got != 100 {
+		t.Fatalf("StatConcurrency = %d, want 100 (the configured pipeline depth)", got)
 	}
 }
 

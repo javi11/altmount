@@ -406,6 +406,9 @@ func startPar2RepairService(
 	}, par2repair.NewConnLimiter(func() int {
 		return configGetter().Par2Repair.EffectiveMaxConnections()
 	}))
+	fetcher.StatConcurrency = func() int {
+		return poolManager.StatSweepConcurrency(configGetter().StatConcurrency())
+	}
 	patchStore := par2repair.NewPatchStore(cfg.Par2Repair.EffectivePatchDir(cfg.Metadata.RootPath))
 	service := par2repair.NewService(
 		repo,

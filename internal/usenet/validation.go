@@ -2,6 +2,7 @@ package usenet
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/rand"
@@ -35,6 +36,32 @@ type ValidationResult struct {
 	// TerminatedEarly reports that the sweep stopped short of this file's
 	// planned samples because its verdict was already settled.
 	TerminatedEarly bool
+	// Err is the first operational (non-definitive) STAT failure observed for
+	// this file — a dead connection, timeout, cancellation, auth failure,
+	// quota, or an id the sweep never answered for. Non-nil marks the whole
+	// result inconclusive: it is not evidence of anything and must not be
+	// read as a missing-segment verdict (issue #861).
+	Err error
+}
+
+// Inconclusive reports whether the sweep failed to reach a definitive answer
+// for at least one checked segment. An inconclusive result is not evidence of
+// anything — neither of missing articles nor of a healthy file — so callers
+// must retry rather than record a verdict from it.
+func (r ValidationResult) Inconclusive() bool { return r.Err != nil }
+
+// errSegmentUnreported marks segments the pool never answered for. StatMany
+// stops dispatching and drops in-flight results when its context ends, so a
+// cancelled or timed-out sweep silently returns fewer results than ids.
+var errSegmentUnreported = errors.New("segment availability not reported by the STAT sweep")
+
+// unreportedErr wraps the sweep's context error (when there is one) so the
+// caller can tell a truncated sweep from a per-segment failure.
+func unreportedErr(ctxErr error) error {
+	if ctxErr != nil {
+		return fmt.Errorf("%w: %w", errSegmentUnreported, ctxErr)
+	}
+	return errSegmentUnreported
 }
 
 // maxTrackedMissingIDs caps the message-ids stored per file so a wholly dead
@@ -161,6 +188,7 @@ func ValidateSegmentAvailabilityBatch(
 		for r := range usenetPool.StatMany(statCtx, chunk, nntppool.StatManyOptions{Concurrency: opts.MaxConnections}) {
 			errByID[r.MessageID] = r.Err
 		}
+		sweepErr := statCtx.Err()
 		cancel()
 
 		// Caller cancellation invalidates the whole sweep: the remaining files
@@ -177,6 +205,9 @@ func ValidateSegmentAvailabilityBatch(
 				// The chunk deadline expired before this id was dispatched, so
 				// StatMany abandoned it. Reachability was never proven.
 				res.UnresolvedCount++
+				if res.Err == nil {
+					res.Err = unreportedErr(sweepErr)
+				}
 			case statErr == nil:
 				res.TotalChecked++
 				poolManager.IncArticlesDownloaded()
@@ -189,12 +220,17 @@ func ValidateSegmentAvailabilityBatch(
 				}
 			default:
 				// Transport or infrastructure failure. Never a confirmed miss:
-				// a connection blip must not condemn a file.
+				// a connection blip must not condemn a file, and reading it as
+				// one persisted false holes that no later clean check could
+				// clear (#861).
 				slog.DebugContext(ctx, "segment check unresolved",
 					"segment_id", id,
 					"error", statErr,
 				)
 				res.UnresolvedCount++
+				if res.Err == nil {
+					res.Err = statErr
+				}
 			}
 		}
 
@@ -215,8 +251,10 @@ func ValidateSegmentAvailabilityBatch(
 	}
 
 	missingTotal := 0
+	unresolvedTotal := 0
 	for _, r := range results {
 		missingTotal += r.MissingCount
+		unresolvedTotal += r.UnresolvedCount
 	}
 	slog.InfoContext(ctx, "STAT sweep completed",
 		"files", nonEmptyFiles,
@@ -224,6 +262,7 @@ func ValidateSegmentAvailabilityBatch(
 		"checked", len(ids)-skipped,
 		"skipped_after_early_termination", skipped,
 		"missing", missingTotal,
+		"inconclusive", unresolvedTotal,
 		"duration", time.Since(sweepStart),
 	)
 

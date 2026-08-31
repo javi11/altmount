@@ -21,7 +21,7 @@ export interface ConfigResponse {
 	arrs: ArrsConfig;
 	stremio: StremioConfig;
 	providers: ProviderConfig[];
-	nzblnk: NzblnkConfig;
+	user_agent?: string;
 	network: NetworkConfig;
 	par2_repair: Par2RepairConfig;
 	mount_path: string;
@@ -321,11 +321,6 @@ export interface PipelineTuneResponse {
 	warning?: string;
 }
 
-// NZBLNK resolver configuration
-export interface NzblnkConfig {
-	user_agent?: string;
-}
-
 // SABnzbd configuration
 export interface SABnzbdConfig {
 	enabled: boolean;
@@ -364,7 +359,7 @@ export interface ConfigUpdateRequest {
 	arrs?: ArrsConfig;
 	stremio?: Partial<StremioConfig>;
 	providers?: ProviderUpdateRequest[];
-	nzblnk?: NzblnkConfig;
+	user_agent?: string;
 	network?: NetworkConfig;
 	par2_repair?: Par2RepairConfig;
 	mount_path?: string;
@@ -563,7 +558,6 @@ export type ConfigSection =
 	| "sabnzbd"
 	| "arrs"
 	| "stremio"
-	| "nzblnk"
 	| "network"
 	| "par2_repair"
 	| "system";
@@ -983,12 +977,6 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		description:
 			"Upload an NZB for instant stream URLs, or enable the addon to automatically search Prowlarr by IMDB ID and stream results directly from Stremio.",
 		icon: "Tv",
-		canEdit: true,
-	},
-	nzblnk: {
-		title: "NZBLNK",
-		description: "Settings for resolving nzblnk:// links via public NZB indexers",
-		icon: "Link",
 		canEdit: true,
 	},
 	network: {

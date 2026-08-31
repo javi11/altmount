@@ -44,6 +44,9 @@ func TestPerformBackgroundCheck_ThreadsVerifyContentOverride(t *testing.T) {
 	env.hw.mu.Unlock()
 
 	force := true
+	// Mirror handleDirectHealthCheck: the API transitions the row to Checking
+	// before dispatching the background worker while passing the prior status.
+	require.NoError(t, env.hw.healthRepo.SetFileChecking(context.Background(), path))
 	require.NoError(t, env.hw.PerformBackgroundCheck(context.Background(), path, database.HealthStatusDegraded, &force))
 
 	// A definitive content failure routes through the same retry-before-repair

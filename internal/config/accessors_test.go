@@ -161,3 +161,70 @@ func TestValidate_HealthVerifyContentTimeoutSeconds(t *testing.T) {
 		})
 	}
 }
+
+func TestStatConcurrency(t *testing.T) {
+	enabled := true
+	disabled := false
+
+	tests := []struct {
+		name string
+		cfg  *Config
+		want int
+	}{
+		{
+			name: "no providers falls back to the stat_inflight_requests default",
+			cfg:  &Config{},
+			want: 100,
+		},
+		{
+			name: "unset depth falls back to the same default applied at normalization",
+			cfg:  &Config{Providers: []ProviderConfig{{MaxConnections: 10, Enabled: &enabled}}},
+			want: 100,
+		},
+		{
+			name: "connection count does not bound STAT concurrency",
+			cfg: &Config{Providers: []ProviderConfig{
+				{MaxConnections: 2, StatInflightRequests: 100, Enabled: &enabled},
+			}},
+			want: 100,
+		},
+		{
+			name: "follows the configured depth below the default",
+			cfg: &Config{Providers: []ProviderConfig{
+				{MaxConnections: 50, StatInflightRequests: 20, Enabled: &enabled},
+			}},
+			want: 20,
+		},
+		{
+			name: "takes the deepest enabled provider",
+			cfg: &Config{Providers: []ProviderConfig{
+				{MaxConnections: 10, StatInflightRequests: 20, Enabled: &enabled},
+				{MaxConnections: 10, StatInflightRequests: 200, Enabled: &enabled},
+			}},
+			want: 200,
+		},
+		{
+			name: "ignores disabled providers",
+			cfg: &Config{Providers: []ProviderConfig{
+				{MaxConnections: 10, StatInflightRequests: 20, Enabled: &enabled},
+				{MaxConnections: 10, StatInflightRequests: 400, Enabled: &disabled},
+			}},
+			want: 20,
+		},
+		{
+			name: "caps so a chunked sweep keeps its early-termination boundaries",
+			cfg: &Config{Providers: []ProviderConfig{
+				{MaxConnections: 10, StatInflightRequests: 5000, Enabled: &enabled},
+			}},
+			want: maxStatConcurrency,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.cfg.StatConcurrency(); got != tt.want {
+				t.Fatalf("StatConcurrency() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}

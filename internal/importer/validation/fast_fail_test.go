@@ -2,7 +2,9 @@ package validation
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,7 +15,7 @@ import (
 )
 
 type fastFailPoolManager struct {
-	client *fakepool.Client
+	client pool.NntpClient
 }
 
 func (m fastFailPoolManager) GetPool() (pool.NntpClient, error) { return m.client, nil }
@@ -46,6 +48,199 @@ func (m fastFailPoolManager) SetImportConnCapacity(int)                 {}
 func (m fastFailPoolManager) ImportConnCapacity() int                   { return 0 }
 func (m fastFailPoolManager) SetStreamSource(pool.StreamActivitySource) {}
 func (m fastFailPoolManager) NotifyStreamChange()                       {}
+func (m fastFailPoolManager) StatSweepConcurrency(conservative int) int { return conservative }
+
+// scriptedStatClient returns a configured sequence of STAT errors per
+// message ID. Once a sequence is exhausted, its final outcome repeats.
+type scriptedStatClient struct {
+	pool.NntpClient
+	mu       sync.Mutex
+	outcomes map[string][]error
+	calls    map[string]int
+}
+
+type uncancelableStatClient struct {
+	pool.NntpClient
+	result nntppool.StatManyResult
+}
+
+func (c uncancelableStatClient) StatMany(context.Context, []string, nntppool.StatManyOptions) <-chan nntppool.StatManyResult {
+	out := make(chan nntppool.StatManyResult, 1)
+	out <- c.result
+	close(out)
+	return out
+}
+
+func newScriptedStatClient(outcomes map[string][]error) *scriptedStatClient {
+	return &scriptedStatClient{
+		NntpClient: fakepool.New(),
+		outcomes:   outcomes,
+		calls:      make(map[string]int),
+	}
+}
+
+func (c *scriptedStatClient) StatMany(ctx context.Context, ids []string, _ nntppool.StatManyOptions) <-chan nntppool.StatManyResult {
+	out := make(chan nntppool.StatManyResult, len(ids))
+	go func() {
+		defer close(out)
+		for _, id := range ids {
+			c.mu.Lock()
+			attempt := c.calls[id]
+			c.calls[id]++
+			sequence := c.outcomes[id]
+			var err error
+			if len(sequence) > 0 {
+				idx := min(attempt, len(sequence)-1)
+				err = sequence[idx]
+			}
+			c.mu.Unlock()
+
+			result := nntppool.StatManyResult{MessageID: id, Err: err}
+			if err == nil {
+				result.Result = &nntppool.StatResult{MessageID: id}
+			}
+			select {
+			case out <- result:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return out
+}
+
+func (c *scriptedStatClient) callCount(id string) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.calls[id]
+}
+
+func TestFastFailReleaseProbeRetriesTransientFailure(t *testing.T) {
+	client := newScriptedStatClient(map[string][]error{
+		"flaky-0": {nntppool.ErrConnectionDied, nil},
+	})
+
+	missing, err := FastFailReleaseProbe(
+		context.Background(),
+		[]FastFailFile{{Filename: "movie.mkv", Segments: makeTestSegments("flaky", 1)}},
+		fastFailPoolManager{client: client},
+		100,
+		1,
+		100*time.Millisecond, nil,
+	)
+	if err != nil {
+		t.Fatalf("FastFailReleaseProbe error = %v, want nil after transient recovery", err)
+	}
+	if missing {
+		t.Fatal("missing = true, want false after transient recovery")
+	}
+	if got := client.callCount("flaky-0"); got != 2 {
+		t.Fatalf("STAT attempts = %d, want 2", got)
+	}
+}
+
+func TestFastFailReleaseProbeDoesNotRetryDefinitiveMiss(t *testing.T) {
+	client := newScriptedStatClient(map[string][]error{
+		"gone-0": {nntppool.ErrArticleNotFound},
+	})
+
+	missing, err := FastFailReleaseProbe(
+		context.Background(),
+		[]FastFailFile{{Filename: "movie.mkv", Segments: makeTestSegments("gone", 1)}},
+		fastFailPoolManager{client: client},
+		100,
+		1,
+		100*time.Millisecond, nil,
+	)
+	if err != nil {
+		t.Fatalf("FastFailReleaseProbe error = %v, want nil for definitive miss", err)
+	}
+	if !missing {
+		t.Fatal("missing = false, want true for definitive miss")
+	}
+	if got := client.callCount("gone-0"); got != 1 {
+		t.Fatalf("STAT attempts = %d, want 1 for definitive miss", got)
+	}
+}
+
+func TestFastFailReleaseProbeCancellationWinsOverDefinitiveMiss(t *testing.T) {
+	client := uncancelableStatClient{
+		NntpClient: fakepool.New(),
+		result:     nntppool.StatManyResult{MessageID: "gone-0", Err: nntppool.ErrArticleNotFound},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	missing, err := FastFailReleaseProbe(
+		ctx,
+		[]FastFailFile{{Filename: "movie.mkv", Segments: makeTestSegments("gone", 1)}},
+		fastFailPoolManager{client: client},
+		100,
+		1,
+		100*time.Millisecond, nil,
+	)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("FastFailReleaseProbe error = %v, want context.Canceled", err)
+	}
+	if missing {
+		t.Fatal("missing = true, want cancellation to take precedence")
+	}
+}
+
+func TestFastFailCheckFilesRetriesOnlyTransientIDs(t *testing.T) {
+	client := newScriptedStatClient(map[string][]error{
+		"flaky-0": {nntppool.ErrServiceUnavailable, nil},
+	})
+	files := []FastFailFile{
+		{Filename: "good.mkv", Segments: makeTestSegments("good", 1)},
+		{Filename: "flaky.mkv", Segments: makeTestSegments("flaky", 1)},
+	}
+
+	results, err := FastFailCheckFiles(
+		context.Background(), files, fastFailPoolManager{client: client},
+		100, 2, 100*time.Millisecond, nil, nil,
+	)
+	if err != nil {
+		t.Fatalf("FastFailCheckFiles error = %v, want nil after transient recovery", err)
+	}
+	if results[0].Broken || results[1].Broken {
+		t.Fatalf("results = %+v, want both files healthy after transient recovery", results)
+	}
+	if got := client.callCount("good-0"); got != 1 {
+		t.Fatalf("good STAT attempts = %d, want 1", got)
+	}
+	if got := client.callCount("flaky-0"); got != 2 {
+		t.Fatalf("flaky STAT attempts = %d, want 2", got)
+	}
+}
+
+func TestFastFailCheckFilesTransientExhaustionIsInconclusive(t *testing.T) {
+	client := newScriptedStatClient(map[string][]error{
+		"down-0": {nntppool.ErrConnectionDied},
+	})
+
+	results, err := FastFailCheckFiles(
+		context.Background(),
+		[]FastFailFile{{Filename: "movie.mkv", Segments: makeTestSegments("down", 1)}},
+		fastFailPoolManager{client: client},
+		100, 1, 100*time.Millisecond, nil, nil,
+	)
+	if err == nil {
+		t.Fatal("FastFailCheckFiles error = nil, want inconclusive error after retries are exhausted")
+	}
+	if !errors.Is(err, ErrFastFailInconclusive) {
+		t.Fatalf("FastFailCheckFiles error = %v, want ErrFastFailInconclusive", err)
+	}
+	if !errors.Is(err, nntppool.ErrConnectionDied) {
+		t.Fatalf("FastFailCheckFiles error = %v, want wrapped connection error", err)
+	}
+	if results != nil {
+		t.Fatalf("results = %+v, want nil when validation is inconclusive", results)
+	}
+	if got := client.callCount("down-0"); got != 3 {
+		t.Fatalf("STAT attempts = %d, want bounded maximum of 3", got)
+	}
+}
 
 func TestFastFailReleaseProbeUsesSegmentSamplePercentage(t *testing.T) {
 	client := fakepool.New()
@@ -545,12 +740,9 @@ func TestFastFailCheckFilesIndexAligned(t *testing.T) {
 	}
 }
 
-// TestFastFailReleaseProbeTimeoutReportsMissing pins the documented contract
-// that a probe timeout yields (true, nil) so the caller escalates to the
-// per-file sweep. The probe derives its own short deadline from the caller's
-// context, so an expiry there must not be mistaken for caller cancellation —
-// which would report the release as healthy and swallow the signal entirely.
-func TestFastFailReleaseProbeTimeoutReportsMissing(t *testing.T) {
+// TestFastFailReleaseProbeTimeoutIsInconclusive verifies a probe timeout is
+// retried but never converted into a definitive missing-segment verdict.
+func TestFastFailReleaseProbeTimeoutIsInconclusive(t *testing.T) {
 	client := fakepool.New()
 	// Every Stat outlives the probe's own deadline.
 	client.SetDefaultBehavior(fakepool.SegmentBehavior{Latency: 2 * time.Second})
@@ -564,11 +756,17 @@ func TestFastFailReleaseProbeTimeoutReportsMissing(t *testing.T) {
 		10*time.Millisecond,
 		nil,
 	)
-	if err != nil {
-		t.Fatalf("FastFailReleaseProbe error = %v, want nil (a probe timeout is not an infrastructure error)", err)
+	if err == nil {
+		t.Fatal("FastFailReleaseProbe error = nil, want inconclusive error after retries")
 	}
-	if !missing {
-		t.Fatal("missing = false, want true (probe timed out, so reachability is unproven)")
+	if !errors.Is(err, ErrFastFailInconclusive) || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("FastFailReleaseProbe error = %v, want inconclusive deadline error", err)
+	}
+	if missing {
+		t.Fatal("missing = true, want false when reachability is inconclusive")
+	}
+	if got := client.StatCalls(); got != fastFailStatMaxAttempts {
+		t.Fatalf("StatCalls = %d, want bounded maximum of %d", got, fastFailStatMaxAttempts)
 	}
 }
 
@@ -599,11 +797,9 @@ func TestFastFailReleaseProbeCallerCancellationReturnsError(t *testing.T) {
 	}
 }
 
-// TestFastFailCheckFilesTimeoutMarksFileBroken verifies that a Stat which
-// exceeds the sweep's own per-chunk deadline is mapped to the owning file
-// rather than aborting the whole sweep. Abandoning the sweep would discard the
-// per-file mapping this function exists to produce.
-func TestFastFailCheckFilesTimeoutMarksFileBroken(t *testing.T) {
+// TestFastFailCheckFilesTimeoutIsInconclusive verifies timeout exhaustion
+// aborts validation without marking the owning file definitively broken.
+func TestFastFailCheckFilesTimeoutIsInconclusive(t *testing.T) {
 	client := fakepool.New()
 	client.SetDefaultBehavior(fakepool.SegmentBehavior{Latency: 2 * time.Second})
 
@@ -621,13 +817,16 @@ func TestFastFailCheckFilesTimeoutMarksFileBroken(t *testing.T) {
 		nil,
 		nil,
 	)
-	if err != nil {
-		t.Fatalf("FastFailCheckFiles error = %v, want nil (a stat timeout is a per-file signal)", err)
+	if err == nil {
+		t.Fatal("FastFailCheckFiles error = nil, want inconclusive error after retries")
 	}
-	if len(results) != 1 {
-		t.Fatalf("len(results) = %d, want 1", len(results))
+	if !errors.Is(err, ErrFastFailInconclusive) || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("FastFailCheckFiles error = %v, want inconclusive deadline error", err)
 	}
-	if !results[0].Broken {
-		t.Error("results[0].Broken = false, want true (its segments never proved reachable)")
+	if results != nil {
+		t.Fatalf("results = %+v, want nil when validation is inconclusive", results)
+	}
+	if got := client.StatCalls(); got != fastFailStatMaxAttempts {
+		t.Fatalf("StatCalls = %d, want bounded maximum of %d", got, fastFailStatMaxAttempts)
 	}
 }

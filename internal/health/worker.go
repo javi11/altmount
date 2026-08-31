@@ -98,6 +98,10 @@ type HealthWorker struct {
 	activeChecks   map[string]*activeCheck // filePath -> in-flight check
 	activeChecksMu sync.RWMutex
 
+	// directCheckTimeout bounds a single manual recheck. Overridable so tests
+	// can exercise the timeout path without waiting out the real budget.
+	directCheckTimeout time.Duration
+
 	// Statistics
 	stats   WorkerStats
 	statsMu sync.RWMutex
@@ -128,6 +132,7 @@ func NewHealthWorker(
 		stopChan:            make(chan struct{}),
 		activeChecks:        make(map[string]*activeCheck),
 		// par2Repair is wired post-construction via SetPar2RepairEnqueuer.
+		directCheckTimeout: defaultDirectCheckTimeout,
 		stats: WorkerStats{
 			Status: WorkerStatusStopped,
 		},
@@ -366,6 +371,9 @@ func (hw *HealthWorker) AddToHealthCheck(ctx context.Context, filePath string, s
 	return nil
 }
 
+// defaultDirectCheckTimeout bounds a single manual recheck.
+const defaultDirectCheckTimeout = 10 * time.Minute
+
 // PerformBackgroundCheck starts a manual recheck of filePath in the
 // background. currentStatus must be the file's HealthStatus as it was BEFORE
 // the caller transitioned the row to Checking (e.g. via SetFileCheckingByID);
@@ -380,29 +388,53 @@ func (hw *HealthWorker) PerformBackgroundCheck(ctx context.Context, filePath str
 		return fmt.Errorf("health worker is not running")
 	}
 
+	timeout := hw.directCheckTimeout
+	if timeout <= 0 {
+		timeout = defaultDirectCheckTimeout
+	}
+
 	// Start health check in background
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 
 		checkErr := hw.performDirectCheck(ctx, filePath, currentStatus, verifyContentOverride)
 		if checkErr != nil {
+			if errors.Is(checkErr, context.Canceled) {
+				// CancelHealthCheck already parked the record on Pending on the
+				// user's behalf; re-writing it here would undo that decision.
+				slog.InfoContext(ctx, "Background health check cancelled", "file_path", filePath)
+				return
+			}
+
 			if errors.Is(checkErr, context.DeadlineExceeded) {
-				slog.ErrorContext(ctx, "Background health check timed out after 10 minutes", "file_path", filePath)
+				slog.ErrorContext(ctx, "Background health check timed out", "file_path", filePath, "timeout", timeout)
 			} else {
 				slog.ErrorContext(ctx, "Background health check failed", "file_path", filePath, "error", checkErr)
 			}
 
+			// ctx is already expired on the timeout path, so the recovery write
+			// needs a live context of its own.
+			recoverCtx, recoverCancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer recoverCancel()
+
 			// Get current health record to preserve source NZB path
-			fileHealth, getErr := hw.healthRepo.GetFileHealth(ctx, filePath)
+			fileHealth, getErr := hw.healthRepo.GetFileHealth(recoverCtx, filePath)
 			var sourceNzb *string
 			if getErr == nil && fileHealth != nil {
 				sourceNzb = fileHealth.SourceNzbPath
 			}
 
-			// Set status back to pending if the check failed
+			// A check that never reached a verdict says nothing about the file:
+			// restore the status captured before the row was set to 'checking'
+			// rather than demoting a degraded/repair_triggered record to pending.
+			restored := currentStatus
+			if restored == database.HealthStatusChecking || restored == "" {
+				restored = database.HealthStatusPending
+			}
+
 			errorMsg := checkErr.Error()
-			updateErr := hw.healthRepo.UpdateFileHealth(ctx, filePath, database.HealthStatusPending, &errorMsg, sourceNzb, nil, false)
+			updateErr := hw.healthRepo.UpdateFileHealth(recoverCtx, filePath, restored, &errorMsg, sourceNzb, nil, false)
 			if updateErr != nil {
 				slog.ErrorContext(ctx, "Failed to update status after failed check", "file_path", filePath, "error", updateErr)
 			}
@@ -411,6 +443,14 @@ func (hw *HealthWorker) PerformBackgroundCheck(ctx context.Context, filePath str
 
 	return nil
 }
+
+// inconclusiveRecheckDelay is how long a file waits after a health check that
+// reached no verdict — a provider outage, timeouts, or a sweep truncated
+// before every segment answered. Such a check produces no evidence, so the
+// record is left exactly as it was and only its next check is pushed out; the
+// delay keeps a provider-wide outage from turning into a tight recheck loop
+// across the whole library.
+const inconclusiveRecheckDelay = 30 * time.Minute
 
 // prepareUpdateForResult decides what DB update and side effects are needed based on the check result.
 func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database.FileHealth, event HealthEvent) (*database.HealthStatusUpdate, func() error) {
@@ -447,6 +487,38 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 			return hw.metadataService.UpdateFileStatus(fh.FilePath, metapb.FileStatus_FILE_STATUS_HEALTHY)
 		}
 
+		return update, sideEffect
+	}
+
+	// An inconclusive check says nothing about the file: the providers never
+	// answered for at least one segment. Restore the status the record held
+	// before the cycle set it to 'checking', push the next check out, and
+	// leave both retry counters alone — an outage must not consume the retry
+	// budget or escalate the file into repair (#861).
+	if event.Type == EventTypeCheckInconclusive {
+		status := fh.Status
+		if status == database.HealthStatusChecking || status == "" {
+			status = database.HealthStatusPending
+		}
+		nextCheck := time.Now().UTC().Add(inconclusiveRecheckDelay)
+
+		update.Type = database.UpdateTypeInconclusive
+		update.Status = status
+		update.ScheduledCheckAt = nextCheck
+		if event.Error != nil {
+			text := event.Error.Error()
+			update.ErrorMessage = &text
+		}
+		update.ErrorDetails = event.Details
+
+		sideEffect = func() error {
+			slog.WarnContext(ctx, "Health check inconclusive, rescheduling without counting a retry",
+				"file_path", fh.FilePath,
+				"status", status,
+				"next_check", nextCheck,
+				"error", event.Error)
+			return nil
+		}
 		return update, sideEffect
 	}
 
@@ -832,7 +904,24 @@ func (hw *HealthWorker) performDirectCheck(ctx context.Context, filePath string,
 	default:
 	}
 
-	updatePtr, sideEffect := hw.prepareUpdateForResult(ctx, fh, event)
+	// The row is deliberately 'checking' while a manual recheck runs, but an
+	// inconclusive result says nothing about the file and must restore the state
+	// captured before that transition. Keep definitive-result handling unchanged:
+	// those paths can perform repair/delete side effects and need a broader
+	// ownership protocol before they can safely use a guarded write.
+	decisionHealth := *fh
+	if event.Type == EventTypeCheckInconclusive {
+		decisionHealth.Status = currentStatus
+	}
+	updatePtr, sideEffect := hw.prepareUpdateForResult(ctx, &decisionHealth, event)
+
+	if event.Type == EventTypeCheckInconclusive {
+		// A webhook or re-import may have changed the row while the NNTP sweep
+		// was running. Only restore the prior state if this check still owns the
+		// transient 'checking' row; otherwise the concurrent decision wins.
+		checkingStatus := database.HealthStatusChecking
+		updatePtr.ExpectedStatus = &checkingStatus
+	}
 	if sideEffect != nil {
 		if err := sideEffect(); err != nil {
 			slog.ErrorContext(ctx, "Side effect failed in direct check", "file_path", filePath, "error", err)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"path/filepath"
 	"runtime"
 	"sync"
 	"testing"
@@ -16,10 +17,21 @@ import (
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/testsupport/fakepool"
 	nntppool "github.com/javi11/nntppool/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// healthTestDSN returns a DSN for a database private to one test. A
+// shared-cache in-memory DSN is a single database for the whole package, where
+// a read cursor open on one connection makes a concurrent write on another
+// fail with SQLITE_LOCKED — an error the busy handler never retries. WAL on a
+// private file lets readers and writers overlap.
+func healthTestDSN(t *testing.T) string {
+	t.Helper()
+	return "file:" + filepath.Join(t.TempDir(), "health_test.db") + "?_journal_mode=WAL&_busy_timeout=5000"
+}
 
 // mockPoolManager implements pool.Manager and always fails GetPool so segment validation fails.
 type mockPoolManager struct{}
@@ -55,6 +67,7 @@ func (m *mockPoolManager) SetImportConnCapacity(_ int)                 {}
 func (m *mockPoolManager) ImportConnCapacity() int                     { return 0 }
 func (m *mockPoolManager) SetStreamSource(_ pool.StreamActivitySource) {}
 func (m *mockPoolManager) NotifyStreamChange()                         {}
+func (m *mockPoolManager) StatSweepConcurrency(conservative int) int   { return conservative }
 
 // mockARRsService captures TriggerFileRescan calls and returns a configurable error.
 type mockARRsService struct {
@@ -98,9 +111,16 @@ type repairTestEnv struct {
 	hw              *HealthWorker
 }
 
+// newRepairTestEnv defaults to a fakepool answering 430 (article genuinely
+// gone) rather than a dead pool manager, so the repair e2e flows below still
+// exercise genuine corruption — a pool that cannot be reached is an outage,
+// not corruption (#861), and must not be the default for tests whose whole
+// point is triggering repair on real missing segments.
 func newRepairTestEnv(t *testing.T, tempDir string, arrsErr error, configure ...func(*config.Config)) *repairTestEnv {
 	t.Helper()
-	return newRepairTestEnvWithPool(t, tempDir, arrsErr, &mockPoolManager{}, configure...)
+	client := fakepool.New()
+	client.SetDefaultBehavior(fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
+	return newRepairTestEnvWithPool(t, tempDir, arrsErr, &fakeClientPoolManager{client: client}, configure...)
 }
 
 // newRepairTestEnvWithPool is newRepairTestEnv with an injectable pool.Manager, so tests
@@ -108,7 +128,7 @@ func newRepairTestEnv(t *testing.T, tempDir string, arrsErr error, configure ...
 func newRepairTestEnvWithPool(t *testing.T, tempDir string, arrsErr error, poolManager pool.Manager, configure ...func(*config.Config)) *repairTestEnv {
 	t.Helper()
 
-	db, err := sql.Open("sqlite3", "file::memory:?cache=shared&mode=memory")
+	db, err := sql.Open("sqlite3", healthTestDSN(t))
 	require.NoError(t, err)
 	t.Cleanup(func() { db.Close() })
 
@@ -199,7 +219,8 @@ func newRepairTestEnvWithPool(t *testing.T, tempDir string, arrsErr error, poolM
 }
 
 // validSegmentMeta creates a FileMetadata with one segment that covers the full fileSize,
-// so CheckMetadataIntegrity passes. Pool failure then causes EventTypeCheckFailed.
+// so CheckMetadataIntegrity passes. The env's default pool then answers 430 for that
+// segment, producing EventTypeFileCorrupted.
 func validSegmentMeta(ms *metadata.MetadataService, fileSize int64) *metapb.FileMetadata {
 	seg := &metapb.SegmentData{
 		Id:          "test-article-001@test.example.com",

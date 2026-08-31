@@ -432,6 +432,12 @@ func (m *Manager) RefreshDir(ctx context.Context, provider string, dirs []string
 	if len(dirs) == 0 {
 		dirs = []string{"/"}
 	}
+
+	// rclone's VFS is forward-slash on every platform. Normalize here so a
+	// caller that built a directory with filepath cannot silently no-op:
+	// vfs/forget accepts any string and reports success either way.
+	dirs = ToVFSPaths(dirs)
+
 	// Issue a vfs/forget call for each directory to ensure all parents/children are forgotten
 	for _, dir := range dirs {
 		if dir == "" {

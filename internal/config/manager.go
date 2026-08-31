@@ -37,28 +37,34 @@ const (
 
 // Config represents the complete application configuration
 type Config struct {
-	WebDAV          WebDAVConfig       `yaml:"webdav" mapstructure:"webdav" json:"webdav"`
-	API             APIConfig          `yaml:"api" mapstructure:"api" json:"api"`
-	Auth            AuthConfig         `yaml:"auth" mapstructure:"auth" json:"auth"`
-	Database        DatabaseConfig     `yaml:"database" mapstructure:"database" json:"database"`
-	Metadata        MetadataConfig     `yaml:"metadata" mapstructure:"metadata" json:"metadata"`
-	Streaming       StreamingConfig    `yaml:"streaming" mapstructure:"streaming" json:"streaming"`
-	Health          HealthConfig       `yaml:"health" mapstructure:"health" json:"health"`
-	RClone          RCloneConfig       `yaml:"rclone" mapstructure:"rclone" json:"rclone"`
-	Import          ImportConfig       `yaml:"import" mapstructure:"import" json:"import"`
-	Log             LogConfig          `yaml:"log" mapstructure:"log" json:"log"`
-	SABnzbd         SABnzbdConfig      `yaml:"sabnzbd" mapstructure:"sabnzbd" json:"sabnzbd"`
-	Arrs            ArrsConfig         `yaml:"arrs" mapstructure:"arrs" json:"arrs"`
-	Stremio         StremioConfig      `yaml:"stremio" mapstructure:"stremio" json:"stremio"`
-	Fuse            FuseConfig         `yaml:"fuse" mapstructure:"fuse" json:"fuse"`
-	SegmentCache    SegmentCacheConfig `yaml:"segment_cache" mapstructure:"segment_cache" json:"segment_cache"`
-	Providers       []ProviderConfig   `yaml:"providers" mapstructure:"providers" json:"providers"`
-	Nzblnk          NzblnkConfig       `yaml:"nzblnk" mapstructure:"nzblnk" json:"nzblnk"`
-	Network         NetworkConfig      `yaml:"network" mapstructure:"network" json:"network"`
-	Par2Repair      Par2RepairConfig   `yaml:"par2_repair" mapstructure:"par2_repair" json:"par2_repair"`
-	MountPath       string             `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"`
-	MountType       MountType          `yaml:"mount_type" mapstructure:"mount_type" json:"mount_type"`
-	ProfilerEnabled bool               `yaml:"profiler_enabled" mapstructure:"profiler_enabled" json:"profiler_enabled" default:"false"`
+	WebDAV       WebDAVConfig       `yaml:"webdav" mapstructure:"webdav" json:"webdav"`
+	API          APIConfig          `yaml:"api" mapstructure:"api" json:"api"`
+	Auth         AuthConfig         `yaml:"auth" mapstructure:"auth" json:"auth"`
+	Database     DatabaseConfig     `yaml:"database" mapstructure:"database" json:"database"`
+	Metadata     MetadataConfig     `yaml:"metadata" mapstructure:"metadata" json:"metadata"`
+	Streaming    StreamingConfig    `yaml:"streaming" mapstructure:"streaming" json:"streaming"`
+	Health       HealthConfig       `yaml:"health" mapstructure:"health" json:"health"`
+	RClone       RCloneConfig       `yaml:"rclone" mapstructure:"rclone" json:"rclone"`
+	Import       ImportConfig       `yaml:"import" mapstructure:"import" json:"import"`
+	Log          LogConfig          `yaml:"log" mapstructure:"log" json:"log"`
+	SABnzbd      SABnzbdConfig      `yaml:"sabnzbd" mapstructure:"sabnzbd" json:"sabnzbd"`
+	Arrs         ArrsConfig         `yaml:"arrs" mapstructure:"arrs" json:"arrs"`
+	Stremio      StremioConfig      `yaml:"stremio" mapstructure:"stremio" json:"stremio"`
+	Fuse         FuseConfig         `yaml:"fuse" mapstructure:"fuse" json:"fuse"`
+	SegmentCache SegmentCacheConfig `yaml:"segment_cache" mapstructure:"segment_cache" json:"segment_cache"`
+	Providers    []ProviderConfig   `yaml:"providers" mapstructure:"providers" json:"providers"`
+	Nzblnk       NzblnkConfig       `yaml:"nzblnk,omitempty" mapstructure:"nzblnk" json:"-"`
+	Network      NetworkConfig      `yaml:"network" mapstructure:"network" json:"network"`
+	Par2Repair   Par2RepairConfig   `yaml:"par2_repair" mapstructure:"par2_repair" json:"par2_repair"`
+	// UserAgent is the HTTP User-Agent sent on every outbound HTTP request that
+	// identifies AltMount (indexer NZB downloads, metadata lookups, nzblnk://
+	// resolution, GitHub release checks). Defaults to a browser-like string
+	// because some public indexers reject non-browser agents. Leave empty to
+	// use the default.
+	UserAgent       string    `yaml:"user_agent" mapstructure:"user_agent" json:"user_agent"`
+	MountPath       string    `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"`
+	MountType       MountType `yaml:"mount_type" mapstructure:"mount_type" json:"mount_type"`
+	ProfilerEnabled bool      `yaml:"profiler_enabled" mapstructure:"profiler_enabled" json:"profiler_enabled" default:"false"`
 }
 
 // Par2RepairConfig configures background PAR2 repair of missing usenet
@@ -142,11 +148,23 @@ func (p Par2RepairConfig) EffectiveRepairOnImport() bool {
 	return p.Enabled != nil && *p.Enabled && p.RepairOnImport != nil && *p.RepairOnImport
 }
 
-// NzblnkConfig configures the NZBLNK resolver (used for nzblnk:// link resolution via public indexers).
+// NzblnkConfig is the legacy scoped user-agent config, retained only so
+// existing YAML files can be migrated into the global user_agent field.
 type NzblnkConfig struct {
-	// UserAgent is the HTTP User-Agent sent to indexers when resolving nzblnk:// links.
-	// Defaults to a browser-like string. Leave empty to use the default.
-	UserAgent string `yaml:"user_agent" mapstructure:"user_agent" json:"user_agent,omitempty"`
+	UserAgent string `yaml:"user_agent,omitempty" mapstructure:"user_agent" json:"-"`
+}
+
+// DefaultUserAgent is the fallback for Config.UserAgent. Browser-like because
+// some public indexers (e.g. nzbking.com) reject non-browser agents.
+const DefaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+// GetUserAgent returns the configured global User-Agent, falling back to
+// DefaultUserAgent when unset.
+func (c *Config) GetUserAgent() string {
+	if c.UserAgent != "" {
+		return c.UserAgent
+	}
+	return DefaultUserAgent
 }
 
 // NetworkConfig holds outbound HTTP routing options applied to every external
@@ -735,6 +753,19 @@ type StuckCleanupRule struct {
 	Message string `yaml:"message" mapstructure:"message" json:"message"`
 	Enabled bool   `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
 	Action  string `yaml:"action" mapstructure:"action" json:"action"`
+}
+
+// migrateGlobalUserAgent adopts the legacy nzblnk.user_agent as the global
+// user_agent when the global one was never customized, then clears the legacy
+// field so it is dropped from saved YAML. Idempotent.
+func migrateGlobalUserAgent(config *Config) {
+	if config.Nzblnk.UserAgent == "" {
+		return
+	}
+	if config.UserAgent == "" || config.UserAgent == DefaultUserAgent {
+		config.UserAgent = config.Nzblnk.UserAgent
+	}
+	config.Nzblnk = NzblnkConfig{}
 }
 
 // migrateArrsCleanup folds the legacy split cleanup config (separate stuck-rules
@@ -1660,6 +1691,7 @@ func (m *Manager) ReloadConfig() error {
 
 	// Migrate: fold legacy stuck/allowlist cleanup config into the unified rules.
 	migrateArrsCleanup(config)
+	migrateGlobalUserAgent(config)
 
 	// Validate configuration
 	if err := config.Validate(); err != nil {
@@ -1749,9 +1781,9 @@ func DefaultConfig(configDir ...string) *Config {
 	failureMaskingEnabled := false
 	repairEnabled := true
 	repairExponentialBackoff := true
-	par2RepairEnabled := false  // beta: opt-in until the feature settles
-	par2RepairOnImport := false // opt-in: each repair costs a full release download
-	par2ArrFirst := true        // prefer ARR replacement; PAR2 only when the ARRs come up empty
+	par2RepairEnabled := false   // beta: opt-in until the feature settles
+	par2RepairOnImport := false  // opt-in: each repair costs a full release download
+	par2ArrFirst := true         // prefer ARR replacement; PAR2 only when the ARRs come up empty
 	importVerifyContent := false // Content verification disabled by default (destructive if misfired)
 	importVerifyContentTimeoutSeconds := defaultVerifyContentTimeoutSeconds
 	healthVerifyContent := false // Content verification disabled by default (destructive if misfired)
@@ -1972,9 +2004,7 @@ func DefaultConfig(configDir ...string) *Config {
 			HistoryRetentionMinutes: 10080,
 		},
 		Providers: []ProviderConfig{},
-		Nzblnk: NzblnkConfig{
-			UserAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-		},
+		UserAgent: DefaultUserAgent,
 		Arrs: ArrsConfig{
 			Enabled:                        &scrapperEnabled, // Disabled by default
 			MaxWorkers:                     5,                // Default to 5 concurrent workers
@@ -2169,6 +2199,7 @@ func LoadConfig(configFile string) (*Config, error) {
 
 	// Migrate: fold legacy stuck/allowlist cleanup config into the unified rules.
 	migrateArrsCleanup(config)
+	migrateGlobalUserAgent(config)
 
 	// If log file was not explicitly set in the config file and we have a specific config file path,
 	// derive log file path from config file location

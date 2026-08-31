@@ -93,6 +93,16 @@ type Manager interface {
 	// NotifyStreamChange must be called by the stream source whenever its
 	// active stream count changes, so the budget can re-evaluate.
 	NotifyStreamChange()
+
+	// StatSweepConcurrency returns how many STATs an availability sweep
+	// (import fast-fail, health check) should keep in flight. While streams
+	// are active it returns the caller's conservative bound — typically one
+	// connection's STAT pipeline depth, so sweeps never crowd playback — and
+	// on an idle pool it opens up to the pool's aggregate STAT pipeline
+	// capacity (nntppool's StatCapacity), where STAT's one-line replies make
+	// the extra width nearly free. Falls back to conservative when no pool
+	// exists or its capacity is below the conservative bound.
+	StatSweepConcurrency(conservative int) int
 }
 
 // StatsRepository defines the interface for persisting pool statistics
@@ -533,6 +543,25 @@ func (m *manager) SetProviderIDs(mapping map[string]string) {
 	if m.metricsTracker != nil {
 		m.metricsTracker.SetProviderIDs(mapping)
 	}
+}
+
+// StatSweepConcurrency picks the in-flight STAT bound for an availability
+// sweep: conservative while streams are active (or with no pool), the pool's
+// aggregate StatCapacity when idle.
+func (m *manager) StatSweepConcurrency(conservative int) int {
+	if m.budget.StreamsActive() {
+		return conservative
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.pool == nil {
+		return conservative
+	}
+	if capacity := m.pool.StatCapacity(); capacity > conservative {
+		return capacity
+	}
+	return conservative
 }
 
 // startQuotaWatcher starts the background quota watcher if not already running.

@@ -2,6 +2,7 @@ package validation
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/rand"
@@ -14,11 +15,131 @@ import (
 	"github.com/javi11/nntppool/v4"
 )
 
-// errStatUnconfirmed marks a sampled segment whose Stat never came back — the
-// chunk's own deadline expired while it was still in flight. Reachability is
-// unproven, which for the sweep's purposes is the same as broken: the owning
-// file is excluded rather than imported on an unverified segment.
-var errStatUnconfirmed = fmt.Errorf("segment reachability unconfirmed before the stat deadline")
+const (
+	fastFailStatMaxAttempts = 3
+	fastFailRetryBaseDelay  = 100 * time.Millisecond
+)
+
+var (
+	// ErrFastFailInconclusive means bounded retries could not establish whether
+	// one or more sampled articles exist. It is deliberately distinct from a
+	// definitive NNTP 430/423 miss so callers do not discard files as broken.
+	ErrFastFailInconclusive = errors.New("fast-fail validation inconclusive")
+	errFastFailUnreported   = errors.New("STAT result was not reported")
+)
+
+func isDefinitiveFastFailMiss(err error) bool {
+	return errors.Is(err, nntppool.ErrArticleNotFound)
+}
+
+// statIDsWithBoundedRetries checks ids up to fastFailStatMaxAttempts times.
+// Successful and definitively missing ids leave the retry set immediately;
+// only operational errors and unreported ids are retried. The returned map
+// contains only definitive misses. When stopOnMissing is true the first such
+// miss ends the sweep, preserving the release probe's fast-fail behavior.
+func statIDsWithBoundedRetries(
+	ctx context.Context,
+	client pool.NntpClient,
+	ids []string,
+	maxConnections int,
+	timeout time.Duration,
+	stopOnMissing bool,
+) (map[string]error, error) {
+	remaining := make([]string, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		remaining = append(remaining, id)
+	}
+
+	missing := make(map[string]error)
+	var lastErr error
+
+	for attempt := 1; attempt <= fastFailStatMaxAttempts && len(remaining) > 0; attempt++ {
+		statCtx, cancel := context.WithTimeout(ctx, pool.StatManyTimeout(len(remaining), maxConnections, timeout))
+		reported := make(map[string]bool, len(remaining))
+		transient := make(map[string]error, len(remaining))
+
+		for result := range client.StatMany(statCtx, remaining, nntppool.StatManyOptions{Concurrency: maxConnections}) {
+			if _, wanted := seen[result.MessageID]; !wanted {
+				continue
+			}
+			reported[result.MessageID] = true
+			if result.Err == nil {
+				continue
+			}
+			if isDefinitiveFastFailMiss(result.Err) {
+				missing[result.MessageID] = result.Err
+				if stopOnMissing {
+					if ctxErr := ctx.Err(); ctxErr != nil {
+						cancel()
+						return nil, ctxErr
+					}
+					cancel()
+					return missing, nil
+				}
+				continue
+			}
+			transient[result.MessageID] = result.Err
+			lastErr = result.Err
+		}
+
+		statErr := statCtx.Err()
+		cancel()
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+
+		next := make([]string, 0, len(remaining))
+		for _, id := range remaining {
+			if _, definitive := missing[id]; definitive {
+				continue
+			}
+			if err, failed := transient[id]; failed {
+				lastErr = err
+				next = append(next, id)
+				continue
+			}
+			if !reported[id] {
+				if statErr != nil {
+					lastErr = statErr
+				} else {
+					lastErr = errFastFailUnreported
+				}
+				next = append(next, id)
+			}
+		}
+		remaining = next
+
+		if len(remaining) == 0 {
+			return missing, nil
+		}
+		if attempt == fastFailStatMaxAttempts {
+			return missing, fmt.Errorf("%w: %d segment(s) remained unverified after %d attempts: %w",
+				ErrFastFailInconclusive, len(remaining), attempt, lastErr)
+		}
+
+		delay := fastFailRetryBaseDelay << (attempt - 1)
+		slog.WarnContext(ctx, "Retrying inconclusive fast-fail STATs",
+			"attempt", attempt+1,
+			"remaining", len(remaining),
+			"delay", delay,
+			"error", lastErr,
+		)
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+
+	return missing, nil
+}
 
 // selectFastFailSegments picks a lightweight per-file sample for the fast-fail
 // reachability gate: always the first and last segment (DMCA/truncation
@@ -72,19 +193,6 @@ type FastFailFile struct {
 	GroupKey string
 }
 
-// FastFailReleaseProbe is the cheap phase-1 reachability gate for an NZB import.
-// It flattens all candidate segments across the release and Stats a single
-// sample (usenet.SelectSegmentsForValidation: first 3 + last 2 + random middle,
-// min 5 for the whole release), cancelling the remaining Stats on the
-// first miss.
-//
-// Returns (missing, err):
-//   - err is reserved for infrastructure failures (pool unavailable/nil).
-//   - missing reports whether any sampled segment was unreachable. A 430 / Stat
-//     failure / timeout yields (true, nil) — not an error — so the caller can
-//     escalate to the per-file FastFailCheckFiles sweep to map exactly which
-//     files are broken. A clean release returns (false, nil) and the caller
-//     proceeds straight to parsing, paying only this sample's worth of Stats.
 // PatchIndex reports whether a locally repaired copy of an article exists.
 // Repaired bytes live only in AltMount's patch store, never on usenet, so a
 // segment the providers have dropped still counts as available when patched —
@@ -93,11 +201,38 @@ type PatchIndex interface {
 	Has(messageID string) bool
 }
 
-// patched reports whether idx has a local patch for the message ID.
-func patched(idx PatchIndex, messageID string) bool {
-	return idx != nil && idx.Has(messageID)
+// unpatchedIDs filters out ids whose article has a local patch: those are
+// available regardless of what providers say, so STATing them wastes a round
+// trip and a definitive 430 on one would falsely mark the release broken.
+func unpatchedIDs(ids []string, patchIdx PatchIndex) []string {
+	if patchIdx == nil {
+		return ids
+	}
+	out := ids[:0:len(ids)]
+	for _, id := range ids {
+		if !patchIdx.Has(id) {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
+// FastFailReleaseProbe is the cheap phase-1 reachability gate for an NZB import.
+// It flattens all candidate segments across the release and Stats a single
+// sample (usenet.SelectSegmentsForValidation: first 3 + last 2 + random middle,
+// min 5 for the whole release), cancelling the remaining Stats on the
+// first definitive miss. Operational errors are retried before the probe is
+// declared inconclusive. Segments with a local patch are treated as available
+// without a STAT.
+//
+// Returns (missing, err):
+//   - err reports infrastructure failures, caller cancellation, or operational
+//     STAT failures that remain inconclusive after bounded retries.
+//   - missing reports whether any sampled segment returned a definitive 430/423,
+//     so the caller can escalate to the per-file FastFailCheckFiles sweep to map
+//     exactly which files are broken. Operational errors and timeouts are retried;
+//     exhaustion returns ErrFastFailInconclusive. A clean release returns
+//     (false, nil) and proceeds straight to parsing.
 func FastFailReleaseProbe(
 	ctx context.Context,
 	files []FastFailFile,
@@ -144,58 +279,22 @@ func FastFailReleaseProbe(
 	for i, seg := range selected {
 		ids[i] = seg.Id
 	}
+	if ids = unpatchedIDs(ids, patchIdx); len(ids) == 0 {
+		return false, nil
+	}
 
-	// Stat the sample via a single bulk sweep, cancelling the rest on the
-	// first miss. Infrastructure failures are handled above, so any error
-	// streamed back here indicates an unreachable segment. Cap probe timeout to
-	// 2 seconds per item so probe sweeps on dead releases finish rapidly.
+	// Stat the sample via a bulk sweep, cancelling the rest on the first
+	// definitive miss. Operational errors retry only the affected IDs. Cap each
+	// attempt's probe timeout to 2 seconds per item so dead releases stay bounded.
 	probeTimeout := timeout
 	if probeTimeout > 2*time.Second {
 		probeTimeout = 2 * time.Second
 	}
-	statCtx, cancel := context.WithTimeout(ctx, pool.StatManyTimeout(len(ids), maxConnections, probeTimeout))
-	defer cancel()
-
-	// Count confirmed-reachable segments rather than trusting the stream to
-	// report every failure: StatMany abandons pending sends once its context is
-	// done, so a deadline expiry closes the channel silently instead of
-	// surfacing an error per segment. Only a full set of successful Stats proves
-	// the sample reachable.
-	reachable := 0
-	for r := range usenetPool.StatMany(statCtx, ids, nntppool.StatManyOptions{Concurrency: maxConnections}) {
-		if r.Err != nil {
-			if patched(patchIdx, r.MessageID) {
-				// Repaired locally, so the article is available even though the
-				// provider Stat missed. It must count as confirmed-reachable:
-				// the unproven-sample check below compares against len(ids), so
-				// skipping the increment would report the release missing.
-				reachable++
-				continue
-			}
-			// Only the caller giving up is an error. statCtx carries the probe's
-			// own short deadline, so an expiry there is a reachability signal.
-			if ctxErr := ctx.Err(); ctxErr != nil {
-				return false, ctxErr
-			}
-			slog.WarnContext(ctx, "FastFailReleaseProbe segment stat failed", "segment_id", r.MessageID, "error", r.Err)
-			cancel()
-			return true, nil
-		}
-		reachable++
+	missing, err := statIDsWithBoundedRetries(ctx, usenetPool, ids, maxConnections, probeTimeout, true)
+	if err != nil {
+		return false, err
 	}
-
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		return false, ctxErr
-	}
-	if reachable < len(ids) {
-		// The probe's own deadline expired before every sampled segment was
-		// confirmed. Reachability is unproven, so report missing and let the
-		// caller escalate to the per-file sweep.
-		slog.WarnContext(ctx, "FastFailReleaseProbe timed out before confirming sample",
-			"confirmed", reachable, "sampled", len(ids))
-		return true, nil
-	}
-	return false, nil
+	return len(missing) > 0, nil
 }
 
 // FastFailFileResult records the reachability outcome for a single FastFailFile.
@@ -216,8 +315,10 @@ type FastFailFileResult struct {
 // index alignment while avoiding wasted Stat round-trips.
 // Returns one result per input file (index-aligned). Files with no segments
 // are skipped. Infrastructure failures (pool unavailable) are returned as an
-// error; per-segment Stat failures mark the owning file Broken. progressTracker
-// may be nil; when set it reports completed Stats as work progresses.
+// error; definitive article-not-found results mark the owning file Broken.
+// Operational failures are retried, and exhaustion returns
+// ErrFastFailInconclusive without marking files broken. progressTracker may be
+// nil; when set it reports completed Stats as work progresses.
 func FastFailCheckFiles(
 	ctx context.Context,
 	files []FastFailFile,
@@ -325,6 +426,11 @@ func FastFailCheckFiles(
 					continue
 				}
 			}
+			if patchIdx != nil && patchIdx.Has(job.segID) {
+				// Repaired locally: available regardless of provider verdicts.
+				advance()
+				continue
+			}
 			toCheck = append(toCheck, job)
 		}
 		if len(toCheck) == 0 {
@@ -336,37 +442,13 @@ func FastFailCheckFiles(
 			ids[i] = job.segID
 		}
 
-		statCtx, cancel := context.WithTimeout(ctx, pool.StatManyTimeout(len(ids), maxConnections, timeout))
-		// Seed every segment as unconfirmed. StatMany abandons pending sends
-		// once statCtx is done, so a chunk deadline yields NO result for the
-		// segments still in flight rather than an error per segment. Reading an
-		// absent entry back as "no error" would silently pass those segments as
-		// reachable; only a result that actually arrives can clear the seed.
-		errByID := make(map[string]error, len(ids))
-		for _, id := range ids {
-			errByID[id] = errStatUnconfirmed
-		}
-		for r := range usenetPool.StatMany(statCtx, ids, nntppool.StatManyOptions{Concurrency: maxConnections}) {
-			if patched(patchIdx, r.MessageID) {
-				errByID[r.MessageID] = nil // repaired locally: treat as available
-				continue
-			}
-			errByID[r.MessageID] = r.Err
-		}
-		cancel()
-
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
+		missingByID, err := statIDsWithBoundedRetries(ctx, usenetPool, ids, maxConnections, timeout, false)
+		if err != nil {
+			return nil, err
 		}
 
 		for _, job := range toCheck {
-			// Caller cancellation was already handled above, so anything left
-			// here is a reachability signal for the owning file, not a reason
-			// to abandon the sweep. A stat that reports an error — or never
-			// reports at all because the chunk deadline expired before it was
-			// dispatched — means reachability was never proven.
-			statErr, reported := errByID[job.segID]
-			if !reported || statErr != nil {
+			if _, missing := missingByID[job.segID]; missing {
 				results[job.fileIdx].Broken = true
 				results[job.fileIdx].MissingSegmentIDs = append(results[job.fileIdx].MissingSegmentIDs, job.segID)
 				if job.groupKey != "" {

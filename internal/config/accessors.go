@@ -22,19 +22,11 @@ func (c *Config) GetMaxConcurrentJobs() int {
 	return c.Health.MaxConcurrentJobs
 }
 
-// GetMaxConnectionsForHealthChecks returns max connections for health checks with a default fallback.
-func (c *Config) GetMaxConnectionsForHealthChecks() int {
-	if c.Health.MaxConnectionsForHealthChecks <= 0 {
-		return 100 // Default: 100 concurrent STAT checks
-	}
-	return c.Health.MaxConnectionsForHealthChecks
-}
-
 // GetCheckBatchSize returns how many due files each health cycle fetches and
 // sweeps together in one cross-file StatMany call, with a default fallback.
-// Distinct from GetMaxConnectionsForHealthChecks: this bounds how many FILES
-// are batched into one sweep, while that bounds how many segment checks run
-// concurrently within a sweep.
+// Distinct from HealthStatConcurrency: this bounds how many FILES are batched
+// into one sweep, while that bounds how many segment checks run concurrently
+// within a sweep.
 func (c *Config) GetCheckBatchSize() int {
 	if c.Health.CheckBatchSize <= 0 {
 		return 50 // Default: 50 files per cycle
@@ -164,6 +156,51 @@ func (c *Config) TotalProviderConnections() int {
 		return primary
 	}
 	return backup
+}
+
+// defaultStatInflightRequests mirrors the per-provider default applied in
+// (*Manager) config normalization, so StatConcurrency reports the depth the
+// pool will actually use for providers that leave the field unset.
+const defaultStatInflightRequests = 100
+
+// maxStatConcurrency caps StatConcurrency. The chunked STAT sweeps use this
+// number as their chunk size, and a chunk boundary is the only place a file
+// can be dropped from the remaining work — so an unbounded value would erase
+// early-termination granularity and make one chunk deadline cover the entire
+// sweep.
+const maxStatConcurrency = 500
+
+// StatConcurrency returns how many STATs to keep in flight during an
+// availability sweep. STAT carries no body, so nntppool pipelines it down a
+// connection to Provider.StatInflight depth rather than spending one
+// connection per check (see NNTPConnection.inflightSem) — connection count is
+// the wrong ceiling.
+//
+// The value is the deepest stat_inflight_requests among enabled providers, not
+// the sum of connections × depth. A single provider's pipeline depth is the
+// conservative read: it is what one connection alone can sustain, so the sweep
+// stays within reach even when the pool is busy serving streams.
+func (c *Config) StatConcurrency() int {
+	depth := 0
+	for _, p := range c.Providers {
+		if p.Enabled != nil && !*p.Enabled {
+			continue
+		}
+		d := p.StatInflightRequests
+		if d <= 0 {
+			d = defaultStatInflightRequests
+		}
+		if d > depth {
+			depth = d
+		}
+	}
+	if depth <= 0 {
+		depth = defaultStatInflightRequests
+	}
+	if depth > maxStatConcurrency {
+		depth = maxStatConcurrency
+	}
+	return depth
 }
 
 // GetMaxConcurrentImports returns the global cap on concurrent NZB imports.

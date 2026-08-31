@@ -82,6 +82,13 @@ type PoolFetcher struct {
 	getClient func() (BodyClient, error)
 	budget    ConnBudget // optional; nil skips budget gating
 
+	// StatConcurrency, when set, supplies the in-flight bound for each
+	// liveness-sweep pass — wired to pool.Manager.StatSweepConcurrency so
+	// repair sweeps share the pool-wide stat budget (conservative while
+	// streams are active, full STAT pipeline capacity when idle). Nil falls
+	// back to statSweepConcurrency.
+	StatConcurrency func() int
+
 	// retryDelay is the base backoff between transient-failure retries,
 	// doubled per attempt. Shrunk in tests.
 	retryDelay time.Duration
@@ -148,15 +155,16 @@ type statManyClient interface {
 // the overall deadline in seconds-to-minutes for a full release.
 const statPerItemBudget = 250 * time.Millisecond
 
-// statSweepConcurrency caps how many STATs one sweep keeps outstanding.
-// Left unset, StatMany derives its bound from the pool's aggregate STAT
-// pipeline capacity — thousands for a typical multi-provider config — and a
-// full-release census then floods every provider's dispatch queue at once.
-// Requests that cannot be dispatched within the per-attempt window fail over
-// silently until the sweep's own burst reads back as "all providers
-// exhausted" on most of its articles. STATs are cheap round trips: this many
-// outstanding still censuses thousands of articles in seconds while leaving
-// the pool responsive for everything else running beside the repair.
+// statSweepConcurrency is the fallback in-flight STAT bound when no
+// StatConcurrency policy is wired (par2diag, tests). Left unset, StatMany
+// derives its bound from the pool's aggregate STAT pipeline capacity —
+// thousands for a typical multi-provider config — and a full-release census
+// then floods every provider's dispatch queue at once. Requests that cannot
+// be dispatched within the per-attempt window fail over silently until the
+// sweep's own burst reads back as "all providers exhausted" on most of its
+// articles. STATs are cheap round trips: this many outstanding still censuses
+// thousands of articles in seconds while leaving the pool responsive for
+// everything else running beside the repair.
 const statSweepConcurrency = 64
 
 // StatIDs implements ArticleStater over the pool's StatMany when the client
@@ -225,9 +233,15 @@ func (p *PoolFetcher) statOnce(
 	statCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	conc := statSweepConcurrency
+	if p.StatConcurrency != nil {
+		if v := p.StatConcurrency(); v > 0 {
+			conc = v
+		}
+	}
 	resolved := make(map[string]bool, len(ids))
 	var firstErr error
-	for r := range sc.StatMany(statCtx, ids, nntppool.StatManyOptions{Concurrency: statSweepConcurrency}) {
+	for r := range sc.StatMany(statCtx, ids, nntppool.StatManyOptions{Concurrency: conc}) {
 		switch {
 		case errors.Is(r.Err, nntppool.ErrArticleNotFound):
 			missing[r.MessageID] = true
