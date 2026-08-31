@@ -275,7 +275,7 @@ func (s *Server) findHealthyLibraryStreams(ctx context.Context, cfg *config.Conf
 	selector := &stremioEpisodeSelector{Season: season, Episode: episode}
 	var libraryStreams []fiber.Map
 	if streamType == "movie" {
-		tmdbID, movieTitle, movieYear, _ := resolveMovieMetadataFromIMDb(ctx, imdbID)
+		tmdbID, movieTitle, movieYear, _ := resolveMovieMetadataFromIMDb(ctx, imdbID, cfg.GetUserAgent())
 		yearNum, _ := strconv.Atoi(movieYear)
 		if healthyFiles, err := s.healthRepo.FindHealthyFilesForMovie(ctx, movieTitle, movieYear, tmdbID); err == nil {
 			for _, h := range healthyFiles {
@@ -299,7 +299,7 @@ func (s *Server) findHealthyLibraryStreams(ctx context.Context, cfg *config.Conf
 			}
 		}
 	} else if streamType == "series" {
-		tvdbIDStr, seriesTitle, _ := resolveSeriesMetadataFromIMDb(ctx, imdbID)
+		tvdbIDStr, seriesTitle, _ := resolveSeriesMetadataFromIMDb(ctx, imdbID, cfg.GetUserAgent())
 		tvdbID, _ := strconv.Atoi(tvdbIDStr)
 		if healthyFiles, err := s.healthRepo.FindHealthyFilesForSeries(ctx, seriesTitle, tvdbID); err == nil {
 			for _, h := range healthyFiles {
@@ -886,7 +886,7 @@ func (s *Server) searchStremioReleases(
 	seriesMatchCtx := releaseMatchContext{}
 	if streamType == "series" {
 		var err error
-		tvdbID, title, err = resolveSeriesMetadataFromIMDb(ctx, imdbID)
+		tvdbID, title, err = resolveSeriesMetadataFromIMDb(ctx, imdbID, cfg.GetUserAgent())
 		if err != nil {
 			slog.WarnContext(ctx, "Failed to resolve series metadata from IMDb ID", "error", err, "imdb_id", imdbID)
 		}
@@ -895,14 +895,14 @@ func (s *Server) searchStremioReleases(
 		// titles; resolve both once per request so the relevance gate can
 		// accept e.g. "[SubsPlease] Detective Conan - 1210" for catalog
 		// SxxEyy entries.
-		meta := resolveSeriesEpisodeMeta(ctx, imdbID)
+		meta := resolveSeriesEpisodeMeta(ctx, imdbID, cfg.GetUserAgent())
 		seriesMatchCtx = releaseMatchContext{
-			aliases:     resolveSeriesTitleAliases(ctx, imdbID),
+			aliases:     resolveSeriesTitleAliases(ctx, imdbID, cfg.GetUserAgent()),
 			episodeMeta: meta,
 			isAnime:     meta.isAnimation,
 		}
 	} else if imdbID != "" {
-		_, movieTitle, movieYear, mErr := resolveMovieMetadataFromIMDb(ctx, imdbID)
+		_, movieTitle, movieYear, mErr := resolveMovieMetadataFromIMDb(ctx, imdbID, cfg.GetUserAgent())
 		if mErr != nil {
 			slog.WarnContext(ctx, "Failed to resolve movie metadata from IMDb ID", "error", mErr, "imdb_id", imdbID)
 		}
@@ -1619,11 +1619,11 @@ func (s *Server) enqueueStremioRelease(
 			tvdbID := 0
 			if streamType == "series" {
 				category = "TV"
-				if tvdbIDStr, _, _ := resolveSeriesMetadataFromIMDb(workCtx, imdbID); tvdbIDStr != "" {
+				if tvdbIDStr, _, _ := resolveSeriesMetadataFromIMDb(workCtx, imdbID, cfg.GetUserAgent()); tvdbIDStr != "" {
 					tvdbID, _ = strconv.Atoi(tvdbIDStr)
 				}
 			} else if streamType == "movie" {
-				tmdbID, _, _, _ = resolveMovieMetadataFromIMDb(workCtx, imdbID)
+				tmdbID, _, _, _ = resolveMovieMetadataFromIMDb(workCtx, imdbID, cfg.GetUserAgent())
 			}
 			stremioDownloadID := stremioDownloadIDPrefix + uuid.NewString()
 			metaJSONPtr, metadataErr := encodeStremioQueueMetadata(stremioQueueMetadata{
@@ -1949,7 +1949,7 @@ func (s *Server) handleTestNewsnabIndexer(c *fiber.Ctx) error {
 		Enabled:        true,
 	}, httpclient.NewForExternal(cfg.Network, 10*time.Second))
 
-	ua := stremio.GetUserAgentManager().GetUserAgent("movie", "")
+	ua := stremio.GetUserAgentManager().GetUserAgent("movie", cfg.Stremio.Indexers.CustomUserAgent)
 	caps, err := client.CheckCaps(c.Context(), ua)
 	if err != nil {
 		return RespondBadRequest(c, "Failed to connect to Newsnab indexer", err.Error())
@@ -1982,12 +1982,12 @@ func (s *Server) handleRefreshStremioUserAgents(c *fiber.Ctx) error {
 
 	cfg := s.configManager.GetConfig()
 	if cfg != nil {
-		_ = mgr.FetchLatestFromGitHub(ctx)
+		_ = mgr.FetchLatestFromGitHub(ctx, cfg.GetUserAgent())
 		sonarrURL, sonarrKey := firstEnabledARR(cfg.Arrs.SonarrInstances)
 		radarrURL, radarrKey := firstEnabledARR(cfg.Arrs.RadarrInstances)
 		_ = mgr.CheckLocalARRs(ctx, sonarrURL, sonarrKey, radarrURL, radarrKey)
 	} else {
-		_ = mgr.FetchLatestFromGitHub(ctx)
+		_ = mgr.FetchLatestFromGitHub(ctx, "")
 	}
 
 	return RespondSuccess(c, mgr.GetInfo())

@@ -54,7 +54,6 @@ import type {
 	LogFormData,
 	MetadataConfig,
 	NetworkConfig,
-	NzblnkConfig,
 	ProviderConfig,
 	SABnzbdConfig,
 	SegmentCacheConfig,
@@ -272,10 +271,10 @@ export function ConfigurationPage() {
 					section: "providers",
 					config: { providers: data as unknown as ProviderConfig[] },
 				});
-			} else if (section === "nzblnk") {
+			} else if (section === "user_agent") {
 				await updateConfigSection.mutateAsync({
-					section: "nzblnk",
-					config: { nzblnk: data as unknown as NzblnkConfig },
+					section: "network",
+					config: { user_agent: data as unknown as string },
 				});
 			} else if (section === "network") {
 				await updateConfigSection.mutateAsync({

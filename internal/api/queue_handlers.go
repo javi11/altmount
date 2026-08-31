@@ -713,7 +713,7 @@ func (s *Server) handleUploadNZBLnk(c *fiber.Ctx) error {
 
 	// Create resolver
 	cfg := s.configManager.GetConfig()
-	resolver := nzblnk.NewResolver(cfg.Nzblnk.UserAgent, httpclient.NewForExternal(cfg.Network, 30*time.Second))
+	resolver := nzblnk.NewResolver(cfg.GetUserAgent(), httpclient.NewForExternal(cfg.Network, 30*time.Second))
 
 	// Process each link
 	type linkResult struct {
@@ -908,7 +908,7 @@ func (s *Server) handleSearchNZBByName(c *fiber.Ctx) error {
 	}
 
 	cfg := s.configManager.GetConfig()
-	resolver := nzblnk.NewResolver(cfg.Nzblnk.UserAgent, httpclient.NewForExternal(cfg.Network, 30*time.Second))
+	resolver := nzblnk.NewResolver(cfg.GetUserAgent(), httpclient.NewForExternal(cfg.Network, 30*time.Second))
 	resolved, err := resolver.Resolve(c.Context(), syntheticLink)
 	if err != nil {
 		return RespondNotFound(c, "NZB", "Could not find NZB for name '"+req.Name+"': "+err.Error())
