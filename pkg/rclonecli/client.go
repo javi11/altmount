@@ -496,10 +496,17 @@ func (m *Manager) createConfig(ctx context.Context, configName, webdavURL string
 				"user":            user,
 				"pass":            pass,
 			},
-			// Obscure the plaintext webdav password before rclone stores it.
-			// Without this rclone keeps it as-is, then fails to reveal it and
-			// sends a garbled password to the local webdav → 401 when
-			// auth.login_required is true (the whole native-mount blocker).
+			// Tell rclone the password above is plaintext.
+			//
+			// Without this, config/create guesses: it tries to reveal the value
+			// and, if that succeeds, assumes it was already obscured and stores
+			// it verbatim. The guess is wrong for any plaintext password that
+			// happens to be revealable — base64-shaped strings, which is what a
+			// randomly generated password usually looks like. Such a password is
+			// then stored un-obscured, reveals to a different string on every
+			// later read, and the mount authenticates against altmount's own
+			// WebDAV with the wrong credential: 401 when auth.login_required is
+			// on. Passing obscure explicitly removes the guess.
 			"opt": map[string]any{
 				"obscure": true,
 			},
