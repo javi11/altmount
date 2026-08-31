@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -18,19 +19,23 @@ import (
 
 	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/config"
+	"github.com/javi11/altmount/internal/contentverify"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/httpclient"
 	"github.com/javi11/altmount/internal/importer/filesystem"
 	"github.com/javi11/altmount/internal/importer/parser"
+	"github.com/javi11/altmount/internal/importer/parser/fileinfo"
 	"github.com/javi11/altmount/internal/importer/postprocessor"
 	"github.com/javi11/altmount/internal/importer/queue"
 	"github.com/javi11/altmount/internal/importer/scanner"
 	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
+	"github.com/javi11/altmount/internal/importer/validation"
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/nzbfile"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/sabnzbd"
+	"github.com/javi11/altmount/internal/utils"
 	"github.com/javi11/altmount/pkg/rclonecli"
 	"github.com/javi11/nzbparser"
 )
@@ -188,6 +193,7 @@ type Service struct {
 	broadcaster     *progress.ProgressBroadcaster // WebSocket progress broadcaster
 	userRepo        *database.UserRepository      // User repository for API key lookup
 	poolManager     pool.Manager                  // Pool manager — used to push admission caps on config change
+	contentVerifyFS contentverify.Opener          // Optional: real NzbFilesystem, set post-construction to break the init-order cycle with nzbfilesystem
 	log             *slog.Logger
 
 	// Runtime state
@@ -216,6 +222,11 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 	// Set defaults
 	if config.Workers == 0 {
 		config.Workers = 2
+	}
+
+	// Wire store ref counter so metadata delete/create paths maintain reference counts.
+	if database != nil && database.StoreRefRepo != nil {
+		metadataService.SetStoreRefCounter(database.StoreRefRepo)
 	}
 
 	// Create processor with poolManager for dynamic pool access
@@ -252,14 +263,11 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 		paused:          false,
 	}
 
-	// Push initial admission caps to the pool so imports are gated from the
-	// start. Zero values keep the controller disabled, matching prior behaviour.
+	// Push the initial admission cap to the pool so imports are gated from the
+	// start. Zero keeps the controller disabled, matching prior behaviour.
 	if poolManager != nil && configGetter != nil {
 		if cfg := configGetter(); cfg != nil {
-			poolManager.SetAdmissionCaps(
-				cfg.GetMaxConcurrentImports(),
-				cfg.GetMaxConcurrentImportsWhileStreaming(),
-			)
+			poolManager.SetAdmissionCap(cfg.GetMaxConcurrentImports())
 		}
 	}
 
@@ -341,9 +349,6 @@ func (s *Service) Start(ctx context.Context) error {
 
 	// Start background sweeper for grabbed indexers cache
 	go s.runGrabbedIndexerSweeper(s.ctx)
-
-	// Run one-time migration to compress legacy plain .nzb files
-	go s.runNzbCompressionMigration(s.ctx)
 
 	s.running = true
 	s.log.InfoContext(ctx, fmt.Sprintf("NZB import service started successfully with %d workers", s.config.Workers))
@@ -428,15 +433,13 @@ func (s *Service) RegisterConfigChangeHandler(configManager any) {
 			}
 		}
 
-		// Push updated import-admission caps to the pool. Zero values keep
+		// Push the updated import-admission cap to the pool. Zero keeps
 		// the admission gate disabled (unlimited).
 		if s.poolManager != nil {
-			capIdle := newConfig.GetMaxConcurrentImports()
-			capWhileStreaming := newConfig.GetMaxConcurrentImportsWhileStreaming()
-			s.poolManager.SetAdmissionCaps(capIdle, capWhileStreaming)
-			s.log.InfoContext(s.ctx, "Import admission caps updated",
-				"max_concurrent_imports", capIdle,
-				"max_concurrent_imports_while_streaming", capWhileStreaming)
+			cap := newConfig.GetMaxConcurrentImports()
+			s.poolManager.SetAdmissionCap(cap)
+			s.log.InfoContext(s.ctx, "Import admission cap updated",
+				"max_concurrent_imports", cap)
 		}
 	})
 }
@@ -517,6 +520,17 @@ func (s *Service) SetRcloneClient(client any) {
 	} else {
 		s.log.InfoContext(s.ctx, "RClone client disabled")
 	}
+}
+
+// SetContentVerifyFilesystem wires the real serving-stack filesystem used to
+// probe imported media files' content signatures. Called once after the
+// NzbFilesystem singleton is constructed (see cmd/altmount/cmd/serve.go),
+// mirroring SetArrsService's late-binding to avoid an import-time dependency
+// cycle between importer and nzbfilesystem.
+func (s *Service) SetContentVerifyFilesystem(fs contentverify.Opener) {
+	s.mu.Lock()
+	s.contentVerifyFS = fs
+	s.mu.Unlock()
 }
 
 // SetArrsService sets or updates the ARRs service
@@ -626,33 +640,8 @@ func (s *Service) MoveToFailedFolder(ctx context.Context, item *database.ImportQ
 	}
 
 	// Move file
-	if err := os.Rename(item.NzbPath, newPath); err != nil {
-		// Fallback to Copy+Delete
-		s.log.DebugContext(ctx, "Rename failed, trying copy to failed dir", "error", err)
-
-		srcFile, err := os.Open(item.NzbPath)
-		if err != nil {
-			return fmt.Errorf("failed to open source NZB: %w", err)
-		}
-		defer srcFile.Close()
-
-		dstFile, err := os.Create(newPath)
-		if err != nil {
-			return fmt.Errorf("failed to create destination NZB: %w", err)
-		}
-		defer dstFile.Close()
-
-		if _, err := io.Copy(dstFile, srcFile); err != nil {
-			return fmt.Errorf("failed to copy NZB content: %w", err)
-		}
-
-		// Close files explicitly to allow deletion
-		srcFile.Close()
-		dstFile.Close()
-
-		if err := os.Remove(item.NzbPath); err != nil {
-			s.log.WarnContext(ctx, "Failed to remove source NZB after copy", "path", item.NzbPath, "error", err)
-		}
+	if err := utils.MoveFile(item.NzbPath, newPath); err != nil {
+		return fmt.Errorf("failed to move NZB to failed folder: %w", err)
 	}
 
 	// Update DB
@@ -680,13 +669,26 @@ func uniqueFailedNzbPath(failedDir, srcNzbPath string, itemID int64) string {
 	return newPath
 }
 
+// persistentNzbPath returns the destination path for a successfully imported NZB inside
+// nzbDir. It prefers the clean filename directly in nzbDir and only namespaces it with the
+// queue item ID as a filename prefix (nzbDir/<id>-<name><ext>) when the plain destination is
+// reported taken by isTaken, guaranteeing a unique path for the UNIQUE import_queue.nzb_path
+// column. Mirrors uniqueFailedNzbPath.
+func persistentNzbPath(nzbDir, baseName, ext string, itemID int64, isTaken func(string) bool) string {
+	plain := filepath.Join(nzbDir, baseName+ext)
+	if !isTaken(plain) {
+		return plain
+	}
+	return filepath.Join(nzbDir, fmt.Sprintf("%d-%s%s", itemID, baseName, ext))
+}
+
 // sanitizeFilename replaces invalid characters in filenames
 func sanitizeFilename(name string) string {
 	return strings.ReplaceAll(name, "/", "_")
 }
 
-// AddToQueue adds a new NZB file to the import queue with optional category and priority
-func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath *string, category *string, priority *database.QueuePriority, metadata *string, downloadID *string) (*database.ImportQueueItem, error) {
+// AddToQueue adds a new NZB file to the import queue.
+func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath *string, category *string, priority *database.QueuePriority, metadata *string, downloadID *string, indexer *string) (*database.ImportQueueItem, error) {
 	// Check context before proceeding
 	select {
 	case <-ctx.Done():
@@ -716,6 +718,11 @@ func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath 
 		if name, ok := s.GetGrabbedIndexer(*downloadID, filepath.Base(filePath)); ok {
 			indexerName = &name
 		}
+	}
+	// Prefer the explicit source indexer when webhook lookup misses.
+	if indexerName == nil && indexer != nil && *indexer != "" {
+		name := *indexer
+		indexerName = &name
 	}
 
 	item := &database.ImportQueueItem{
@@ -754,6 +761,10 @@ func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath 
 		s.broadcaster.BroadcastQueueChanged()
 	}
 
+	if s.queueManager != nil {
+		s.queueManager.NotifyNewItem()
+	}
+
 	if fileSize != nil {
 		s.log.InfoContext(ctx, "Added NZB file to queue", "file", item.NzbPath, "queue_id", item.ID, "file_size", *fileSize)
 	} else {
@@ -761,6 +772,70 @@ func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath 
 	}
 
 	return item, nil
+}
+
+// FindAndUpdatePendingUpload de-duplicates manual NZB re-uploads. UNIQUE(nzb_path) can't catch them
+// because ensurePersistentNzb rewrites the path after insert, so this matches a still-pending item by
+// its category-independent base filename and updates its category/priority in place. Returns nil if none.
+func (s *Service) FindAndUpdatePendingUpload(ctx context.Context, filename string, category *string, priority *database.QueuePriority) (*database.ImportQueueItem, error) {
+	// NZBs uploaded via the API are persisted into the OS temp queue dir.
+	queueDir := filepath.Join(os.TempDir(), ".altmount-queue")
+
+	base := nzbtrim.TrimNzbExtension(sanitizeFilename(filepath.Base(filename)))
+	if base == "" {
+		return nil, nil
+	}
+
+	items, err := s.database.Repository.GetPendingQueueItemsByPathPrefix(ctx, queueDir+string(filepath.Separator))
+	if err != nil {
+		return nil, err
+	}
+	// Backward compatibility: also search the old configDir/.nzbs/ location for items queued
+	// before the OS temp queue dir migration.
+	oldNzbsDir := s.GetNzbFolder()
+	oldItems, err := s.database.Repository.GetPendingQueueItemsByPathPrefix(ctx, oldNzbsDir+string(filepath.Separator))
+	if err != nil {
+		return nil, err
+	}
+	items = append(items, oldItems...)
+	// Also search the Stremio upload staging directory: handleNzbStreams writes there
+	// before calling AddToQueue, so without this scan Stremio-submitted NZBs are never
+	// found by FindAndUpdatePendingUpload and always create a new queue entry.
+	stremioUploadDir := filepath.Join(os.TempDir(), "altmount-uploads")
+	stremioItems, err := s.database.Repository.GetPendingQueueItemsByPathPrefix(ctx, stremioUploadDir+string(filepath.Separator))
+	if err != nil {
+		return nil, err
+	}
+	items = append(items, stremioItems...)
+
+	for _, it := range items {
+		// Persisted name is "<base><ext>" or, on collision, "<id>-<base><ext>".
+		cand := nzbtrim.TrimNzbExtension(filepath.Base(it.NzbPath))
+		if cand != base && cand != fmt.Sprintf("%d-%s", it.ID, base) {
+			continue
+		}
+
+		prio := it.Priority
+		if priority != nil {
+			prio = *priority
+		}
+		if err := s.database.Repository.UpdateQueueItemCategory(ctx, it.ID, category, prio); err != nil {
+			return nil, err
+		}
+
+		updated, err := s.database.Repository.GetQueueItem(ctx, it.ID)
+		if err != nil {
+			return nil, err
+		}
+
+		if s.broadcaster != nil {
+			s.broadcaster.BroadcastQueueChanged()
+		}
+		s.log.InfoContext(ctx, "Updated existing pending upload instead of creating a duplicate", "queue_id", it.ID)
+		return updated, nil
+	}
+
+	return nil, nil
 }
 
 // processNzbItem processes the NZB file for a queue item
@@ -798,17 +873,76 @@ func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueue
 		}
 	}
 
-	return s.processor.ProcessNzbFile(ctx, item.NzbPath, basePath, int(item.ID), allowedExtensionsOverride, &virtualDir, extractedFiles, item.Category, item.Metadata, item.DownloadID)
+	resultPath, writtenPaths, err := s.processor.ProcessNzbFile(ctx, item.NzbPath, basePath, int(item.ID), allowedExtensionsOverride, &virtualDir, extractedFiles, item.Category, item.Metadata, item.DownloadID)
+	if err != nil {
+		return resultPath, writtenPaths, err
+	}
+
+	if verifyErr := s.verifyWrittenContent(ctx, writtenPaths); verifyErr != nil {
+		return resultPath, writtenPaths, verifyErr
+	}
+
+	return resultPath, writtenPaths, nil
+}
+
+// verifyWrittenContent probes every eligible video/audio file among
+// writtenPaths for a recognized media container signature, when
+// import.verify_content is enabled. A definitive failure (bad signature or
+// confirmed-missing head article) is returned as an error so the caller
+// routes the item to HandleFailure exactly like any other import error,
+// letting the Arr app blocklist the release. A transient probe error is
+// likewise returned as an error — it flows through the same existing
+// retry/backoff path as any other transient import failure; no separate
+// mechanism is introduced.
+func (s *Service) verifyWrittenContent(ctx context.Context, writtenPaths []string) error {
+	s.mu.Lock()
+	contentVerifyFS := s.contentVerifyFS
+	s.mu.Unlock()
+
+	cfg := s.configGetter()
+	if cfg == nil || !cfg.GetImportVerifyContent() || contentVerifyFS == nil {
+		return nil
+	}
+
+	timeout := cfg.GetImportVerifyContentTimeout()
+	for _, path := range writtenPaths {
+		if !fileinfo.IsVerifiableMediaFile(path) {
+			continue
+		}
+
+		result := contentverify.Probe(ctx, contentVerifyFS, path, timeout)
+		switch result.Result {
+		case contentverify.ContentValid:
+			continue
+		case contentverify.ContentInvalid:
+			return fmt.Errorf("content verification failed for %q: no recognized media container signature: %w", path, result.Err)
+		case contentverify.ContentSegmentMissing:
+			return fmt.Errorf("content verification failed for %q: head article missing: %w", path, result.Err)
+		case contentverify.ContentProbeError:
+			return fmt.Errorf("content verification could not complete for %q: %w", path, result.Err)
+		}
+	}
+	return nil
 }
 
 func (s *Service) calculateProcessVirtualDir(item *database.ImportQueueItem, basePath *string) string {
 	// Calculate initial virtual directory from physical/relative path
 	virtualDir := filesystem.CalculateVirtualDirectory(item.NzbPath, *basePath)
 
+	// NZB is in the OS temp queue dir — the temp dir has no meaningful directory
+	// structure to derive a virtual path from, so start from basePath. We must NOT
+	// return early here: the category resolution and CompleteDir prepend below still
+	// need to run, otherwise category-tagged uploads (SABnzbd/manual/Stremio) would
+	// land at the mount root instead of inside their category folder.
+	tempQueueDir := filepath.Join(os.TempDir(), ".altmount-queue")
+	inTempQueue := strings.HasPrefix(item.NzbPath, tempQueueDir+string(filepath.Separator)) || item.NzbPath == tempQueueDir
+
 	// Fix for issue where files moved to persistent .nzbs directory end up with exposed paths (like /config) in virtual directory
 	// This happens when NzbPath is inside .nzbs and CalculateVirtualDirectory sees the physical parent folder.
 	nzbFolder := s.GetNzbFolder()
-	if strings.HasPrefix(item.NzbPath, nzbFolder) {
+	if inTempQueue {
+		virtualDir = *basePath
+	} else if strings.HasPrefix(item.NzbPath, nzbFolder) {
 		// Calculate path relative to the persistent NZB folder
 		if relPath, err := filepath.Rel(nzbFolder, item.NzbPath); err == nil {
 			// If file is directly in root of .nzbs (e.g. "file.nzb"), relDir is "."
@@ -894,8 +1028,8 @@ func (s *Service) calculateProcessVirtualDir(item *database.ImportQueueItem, bas
 			// If the category is NOT present in the virtual path (e.g. NZBDav import),
 			// we must append it to ensure the file ends up in the correct category folder.
 			if !match {
-				*basePath = filepath.Join(*basePath, categoryPath)
-				virtualDir = filepath.Join(virtualDir, categoryPath)
+				*basePath = joinPathsMergingOverlap(*basePath, categoryPath)
+				virtualDir = joinPathsMergingOverlap(virtualDir, categoryPath)
 			}
 		}
 	}
@@ -938,64 +1072,66 @@ func sanitizeVirtualPath(p string) string {
 	return p
 }
 
-// ensurePersistentNzb moves the NZB file to a persistent location in the metadata directory
+// ensurePersistentNzb moves the NZB file to a persistent location in the OS
+// temporary queue directory. Using the OS temp dir (instead of configDir/.nzbs/)
+// keeps raw staging files separate from the permanent .nzbz store and prevents
+// stremio's defer os.RemoveAll(stageDir) from deleting the file before the
+// worker can process it.
 func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.ImportQueueItem) error {
-	cfg := s.configGetter()
-	// Use the database directory as the base for the persistent NZB storage
-	// This puts it next to metadata (e.g. /config/.nzbs)
-	configDir := filepath.Dir(cfg.Database.Path)
-	nzbDir := filepath.Join(configDir, ".nzbs")
-
-	// Add category subfolder if present to keep NZBs organized
-	if item.Category != nil && *item.Category != "" {
-		nzbDir = filepath.Join(nzbDir, *item.Category)
-	}
+	// Use OS temp queue dir; itemID ensures uniqueness so no category subfolder needed.
+	nzbDir := filepath.Join(os.TempDir(), ".altmount-queue")
 
 	// Check if current path is already in the persistent directory
 	absNzbPath, _ := filepath.Abs(item.NzbPath)
 	absNzbDir, _ := filepath.Abs(nzbDir)
 
-	// Simple check: if path starts with persistent dir, assume it's fine
-	if strings.HasPrefix(absNzbPath, absNzbDir) {
-		return nil
+	// Simple check: if path starts with persistent dir (with separator) or equals it, assume it's fine.
+	// The trailing separator prevents a false match like /tmp/.altmount-queue-other/ matching /tmp/.altmount-queue.
+	if strings.HasPrefix(absNzbPath, absNzbDir+string(os.PathSeparator)) || absNzbPath == absNzbDir {
+		if _, err := os.Stat(item.NzbPath); err == nil {
+			return nil
+		}
+		// The raw NZB was deleted after a prior successful import (handleProcessingSuccess
+		// removes it on purpose once the .nzbz store exists). A retry/reprocess reaches this
+		// point with a stale nzb_path, so regenerate the raw file from the store instead of
+		// failing to open a file that no longer exists.
+		return s.regenerateNzbFile(ctx, item)
 	}
 
-	// Store each NZB in a per-ID subfolder to guarantee uniqueness without
-	// polluting the user-visible filename (which is exposed via the SABnzbd
-	// history API and parsed by Sonarr/Radarr — a trailing `_<id>` would
-	// break their release-group parser).
 	if item.ID == 0 {
 		return fmt.Errorf("cannot persist NZB without queue ID (row must be inserted first)")
 	}
-	nzbDir = filepath.Join(nzbDir, strconv.FormatInt(item.ID, 10))
+
 	if err := os.MkdirAll(nzbDir, 0755); err != nil {
 		return fmt.Errorf("failed to create persistent NZB directory: %w", err)
 	}
+
+	ext := nzbfile.PlainExtension
+
 	base := nzbtrim.TrimNzbExtension(sanitizeFilename(filepath.Base(item.NzbPath)))
-	newPath := filepath.Join(nzbDir, base+nzbfile.GzExtension)
 
-	s.log.DebugContext(ctx, "Moving and compressing NZB to persistent storage", "old_path", item.NzbPath, "new_path", newPath)
+	// Save directly into the category folder using the clean filename. Only when that
+	// destination is already taken do we namespace it with the queue item ID as a filename
+	// prefix (<id>-<name>) — this drops the numeric folder in the common case while still
+	// guaranteeing a unique path on collision for the UNIQUE import_queue.nzb_path column.
+	taken := func(p string) bool {
+		if _, err := os.Stat(p); err == nil {
+			return true
+		}
+		// Also treat a path owned by a different queue item as taken (UNIQUE nzb_path constraint).
+		if existing, err := s.database.Repository.GetQueueItemByNzbPath(ctx, p); err == nil && existing != nil && existing.ID != item.ID {
+			return true
+		}
+		return false
+	}
+	newPath := persistentNzbPath(nzbDir, base, ext, item.ID, taken)
 
-	// Try rename to a temp path first (works only on same filesystem), then compress.
-	// For cross-device moves, compress directly from source.
-	tmpPath := newPath + ".tmp"
-	err := os.Rename(item.NzbPath, tmpPath)
-	if err == nil {
-		// Same filesystem: compress the tmp file to the final .nzb.gz path
-		if compErr := nzbfile.Compress(tmpPath, newPath); compErr != nil {
-			_ = os.Rename(tmpPath, item.NzbPath) // attempt to restore on failure
-			return fmt.Errorf("failed to compress NZB: %w", compErr)
-		}
-		_ = os.Remove(tmpPath)
-	} else {
-		// Cross-device: compress directly from source to destination
-		s.log.DebugContext(ctx, "Rename failed, compressing directly from source", "error", err, "src", item.NzbPath, "dst", newPath)
-		if compErr := nzbfile.Compress(item.NzbPath, newPath); compErr != nil {
-			return fmt.Errorf("failed to compress NZB: %w", compErr)
-		}
-		if err := os.Remove(item.NzbPath); err != nil {
-			s.log.WarnContext(ctx, "Failed to remove source NZB after compression", "path", item.NzbPath, "error", err)
-		}
+	s.log.DebugContext(ctx, "Moving NZB to persistent storage", "old_path", item.NzbPath, "new_path", newPath)
+
+	// Move the NZB to persistent storage.
+	if err := utils.MoveFile(item.NzbPath, newPath); err != nil {
+		s.log.ErrorContext(ctx, "Failed to move NZB to persistent storage", "error", err, "src", item.NzbPath, "dst", newPath)
+		return fmt.Errorf("failed to move NZB to persistent storage: %w", err)
 	}
 
 	// Update DB
@@ -1012,6 +1148,79 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 	}
 
 	s.log.InfoContext(ctx, "Moved NZB to persistent storage", "old_path", oldPath, "new_path", newPath)
+	return nil
+}
+
+// regenerateNzbFile rebuilds the raw .nzb file for item from its .nzbz metadata store when the
+// raw file has been deleted (handleProcessingSuccess removes it after a successful import) but
+// the item is being reprocessed. It reconstructs the store path the same way processor.go writes
+// it and handleDownloadNZB reads it (configDir/.nzbs/{category}/{queueID}-{nzbBase}.nzbz), writes
+// the regenerated XML back into the persistent temp queue dir, and updates nzb_path in the DB.
+func (s *Service) regenerateNzbFile(ctx context.Context, item *database.ImportQueueItem) error {
+	if s.metadataService == nil {
+		return fmt.Errorf("raw NZB file is missing and no metadata service is available to regenerate it")
+	}
+
+	cfg := s.configGetter()
+	configDir := filepath.Dir(cfg.Database.Path)
+	if !filepath.IsAbs(configDir) {
+		if abs, err := filepath.Abs(configDir); err == nil {
+			configDir = abs
+		}
+	}
+
+	var categoryStr string
+	if item.Category != nil && *item.Category != "" {
+		categoryStr = strings.ReplaceAll(*item.Category, `\`, "/")
+		categoryStr = strings.Trim(categoryStr, "/")
+		for _, part := range strings.Split(categoryStr, "/") {
+			if part == ".." || part == "." {
+				categoryStr = ""
+				break
+			}
+		}
+	}
+
+	nzbBase := nzbtrim.TrimNzbExtension(filepath.Base(item.NzbPath))
+	storeRef := filepath.Join(configDir, ".nzbs", categoryStr, fmt.Sprintf("%d-%s.nzbz", item.ID, nzbBase))
+
+	nzbXML, err := s.metadataService.Store().RegenerateNZB(storeRef)
+	if err != nil {
+		return fmt.Errorf("failed to regenerate NZB from store: %w", err)
+	}
+	if nzbXML == nil {
+		return fmt.Errorf("raw NZB file is missing and no store was found at %q to regenerate it", storeRef)
+	}
+
+	nzbDir := filepath.Join(os.TempDir(), ".altmount-queue")
+	if err := os.MkdirAll(nzbDir, 0755); err != nil {
+		return fmt.Errorf("failed to create persistent NZB directory: %w", err)
+	}
+
+	ext := nzbfile.PlainExtension
+	base := nzbtrim.TrimNzbExtension(sanitizeFilename(nzbBase))
+	taken := func(p string) bool {
+		if _, err := os.Stat(p); err == nil {
+			return true
+		}
+		if existing, err := s.database.Repository.GetQueueItemByNzbPath(ctx, p); err == nil && existing != nil && existing.ID != item.ID {
+			return true
+		}
+		return false
+	}
+	newPath := persistentNzbPath(nzbDir, base, ext, item.ID, taken)
+
+	if err := os.WriteFile(newPath, nzbXML, 0644); err != nil {
+		return fmt.Errorf("failed to write regenerated NZB to %q: %w", newPath, err)
+	}
+
+	oldPath := item.NzbPath
+	item.NzbPath = newPath
+	if err := s.database.Repository.UpdateQueueItemNzbPath(ctx, item.ID, newPath); err != nil {
+		return fmt.Errorf("failed to update DB with regenerated NZB path: %w", err)
+	}
+
+	s.log.InfoContext(ctx, "Regenerated raw NZB from metadata store", "old_path", oldPath, "new_path", newPath, "store_ref", storeRef)
 	return nil
 }
 
@@ -1109,6 +1318,13 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 		return err
 	}
 
+	// Signal streamable as early as possible — files are accessible via VFS now.
+	// Stremio waiters listening on the broadcaster can return stream URLs without
+	// waiting for post-processing (symlinks, STRM, health scheduling) to complete.
+	if s.broadcaster != nil {
+		s.broadcaster.NotifyStreamable(int(item.ID), resultingPath)
+	}
+
 	// Refresh mount path if needed before post-processing
 	s.postProcessor.RefreshMountPathIfNeeded(ctx, resultingPath, item.ID)
 
@@ -1135,6 +1351,14 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 		return err
 	}
 
+	// Delete the on-disk NZB — the .nzbz store can regenerate it on demand.
+	if item.NzbPath != "" {
+		if err := os.Remove(item.NzbPath); err != nil && !os.IsNotExist(err) {
+			s.log.WarnContext(ctx, "Failed to delete NZB after successful import",
+				"queue_id", item.ID, "nzb_path", item.NzbPath, "error", err)
+		}
+	}
+
 	// Update import_migrations row if this was a nzbdav migration import
 	if s.database.MigrationRepo != nil {
 		if err := s.database.MigrationRepo.MarkImported(ctx, item.ID, resultingPath); err != nil {
@@ -1151,18 +1375,6 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 	}
 
 	s.log.InfoContext(ctx, "Successfully processed queue item", "queue_id", item.ID, "file", item.NzbPath)
-
-	// Handle cleanup of completed NZB if configured. The path is kept in the DB
-	// so the UI can still display the original filename; download requests will
-	// 404 and the frontend surfaces an "already removed" message for completed
-	// items.
-	cfg := s.configGetter()
-	if cfg.ShouldDeleteCompletedNzb() {
-		s.log.InfoContext(ctx, "Deleting completed NZB (per config)", "file", item.NzbPath)
-		if err := os.Remove(item.NzbPath); err != nil && !os.IsNotExist(err) {
-			s.log.WarnContext(ctx, "Failed to delete completed NZB", "file", item.NzbPath, "error", err)
-		}
-	}
 
 	return nil
 }
@@ -1194,7 +1406,7 @@ func (s *Service) cleanupWrittenPaths(ctx context.Context, itemID int64, paths [
 			}
 			s.cleanupHealthRecords(ctx, itemID, dirPath)
 		} else {
-			if delErr := s.metadataService.DeleteFileMetadata(p); delErr != nil {
+			if delErr := s.metadataService.DeleteFileMetadata(ctx, p); delErr != nil {
 				s.log.WarnContext(ctx, "Failed to clean up metadata file after import failure",
 					"queue_id", itemID,
 					"path", p,
@@ -1244,6 +1456,31 @@ func (s *Service) cleanupHealthRecords(ctx context.Context, itemID int64, virtua
 // handleProcessingFailure handles when processing fails
 func (s *Service) handleProcessingFailure(ctx context.Context, item *database.ImportQueueItem, processingErr error) {
 	errorMessage := processingErr.Error()
+	if errors.Is(processingErr, validation.ErrFastFailInconclusive) {
+		// The provider never produced a conclusive answer within the validator's
+		// bounded retry budget. Keep this distinct from a bad release: do not log
+		// an indexer failure, notify/blocklist in ARR, invoke fallback, or move the
+		// NZB away. The retained failed item can be retried manually once the
+		// provider is healthy again.
+		s.log.WarnContext(ctx, "Import stopped because segment availability was inconclusive",
+			"queue_id", item.ID,
+			"file", item.NzbPath,
+			"error", processingErr)
+		if err := s.database.Repository.UpdateQueueItemStatus(ctx, item.ID, database.QueueStatusFailed, &errorMessage); err != nil {
+			s.log.ErrorContext(ctx, "Failed to mark inconclusive import as failed", "queue_id", item.ID, "error", err)
+		}
+		if s.database.MigrationRepo != nil {
+			if err := s.database.MigrationRepo.MarkFailed(ctx, item.ID, errorMessage); err != nil {
+				s.log.WarnContext(ctx, "Failed to mark inconclusive import migration as failed",
+					"queue_id", item.ID, "error", err)
+			}
+		}
+		if s.broadcaster != nil {
+			s.broadcaster.NotifyComplete(int(item.ID), "failed")
+			s.broadcaster.BroadcastQueueChanged()
+		}
+		return
+	}
 
 	// Log persistent indexer statistic
 	indexerName := database.IndexerUnknown
@@ -1522,6 +1759,8 @@ func (s *Service) calculateNzbFileSize(r io.Reader) (int64, error) {
 		return 0, NewNonRetryableError("NZB file contains no files", nil)
 	}
 
+	parser.SanitizeNzbFilenames(n)
+
 	var totalSize int64
 	par2Pattern := regexp.MustCompile(`(?i)\.par2$|\.p\d+$|\.vol\d+\+\d+\.par2$`)
 
@@ -1737,4 +1976,50 @@ func (s *Service) pruneGrabbedIndexers() {
 		}
 		return true
 	})
+}
+
+func joinPathsMergingOverlap(parent, child string) string {
+	parent = filepath.ToSlash(parent)
+	child = filepath.ToSlash(child)
+
+	parentParts := strings.Split(strings.Trim(parent, "/"), "/")
+	childParts := strings.Split(strings.Trim(child, "/"), "/")
+
+	if len(parentParts) == 1 && parentParts[0] == "" {
+		if strings.HasPrefix(parent, "/") && !strings.HasPrefix(child, "/") {
+			return "/" + child
+		}
+		return child
+	}
+	if len(childParts) == 1 && childParts[0] == "" {
+		return parent
+	}
+
+	overlapLen := 0
+	maxOverlap := len(parentParts)
+	if len(childParts) < maxOverlap {
+		maxOverlap = len(childParts)
+	}
+
+	for l := maxOverlap; l > 0; l-- {
+		match := true
+		for i := 0; i < l; i++ {
+			parentIdx := len(parentParts) - l + i
+			if !strings.EqualFold(parentParts[parentIdx], childParts[i]) {
+				match = false
+				break
+			}
+		}
+		if match {
+			overlapLen = l
+			break
+		}
+	}
+
+	resultParts := append(parentParts, childParts[overlapLen:]...)
+	result := strings.Join(resultParts, "/")
+	if strings.HasPrefix(parent, "/") {
+		return "/" + result
+	}
+	return result
 }

@@ -516,3 +516,53 @@ func (s *Server) clearJWTCookie(c *fiber.Ctx) {
 
 	c.Cookie(cookie)
 }
+
+// ResetAdminPasswordRequest for resetting admin password while login is disabled
+type ResetAdminPasswordRequest struct {
+	Username    string `json:"username"`
+	NewPassword string `json:"new_password"`
+}
+
+// handleResetAdminPassword allows resetting an admin password when login is disabled.
+// Only available when login_required is false — caller already has full admin access in that state.
+//
+//	@Summary		Reset admin password
+//	@Description	Resets the password for a direct-auth user. Only available when login is disabled.
+//	@Tags			Auth
+//	@Accept			json
+//	@Produce		json
+//	@Param			body	body		ResetAdminPasswordRequest	true	"Reset credentials"
+//	@Success		200		{object}	APIResponse
+//	@Failure		400		{object}	APIResponse
+//	@Failure		403		{object}	APIResponse
+//	@Router			/auth/reset-admin-password [post]
+func (s *Server) handleResetAdminPassword(c *fiber.Ctx) error {
+	cfg := s.configManager.GetConfig()
+	loginRequired := true
+	if cfg != nil && cfg.Auth.LoginRequired != nil {
+		loginRequired = *cfg.Auth.LoginRequired
+	}
+	if loginRequired {
+		return RespondForbidden(c, "Password reset is only available when login is disabled", "")
+	}
+
+	var req ResetAdminPasswordRequest
+	if err := c.BodyParser(&req); err != nil {
+		return RespondBadRequest(c, "Invalid request body", err.Error())
+	}
+	if req.Username == "" || req.NewPassword == "" {
+		return RespondBadRequest(c, "Username and new password are required", "")
+	}
+
+	hash, err := s.authService.HashPassword(req.NewPassword)
+	if err != nil {
+		return RespondInternalError(c, "Failed to hash password", err.Error())
+	}
+
+	if err := s.userRepo.UpdatePassword(c.Context(), req.Username, hash); err != nil {
+		return RespondNotFound(c, "User", req.Username)
+	}
+
+	slog.InfoContext(c.Context(), "Admin password reset while login disabled", "username", req.Username)
+	return RespondMessage(c, "Password updated successfully")
+}

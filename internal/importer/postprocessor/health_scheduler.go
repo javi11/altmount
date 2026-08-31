@@ -28,6 +28,13 @@ func (c *Coordinator) ScheduleHealthCheck(ctx context.Context, item *database.Im
 		return nil // Health checks not configured
 	}
 
+	// Health checking disabled: don't queue immediate checks or resolve repairs on
+	// import — both are health-system concerns. Records queued here would only sit
+	// as pending forever since the worker refuses to run when disabled.
+	if !c.configGetter().GetHealthEnabled() {
+		return nil
+	}
+
 	// Expand directory entries into per-file paths, and fall back to the
 	// resulting path for legacy callers (single-file imports resolve to the
 	// same thing).
@@ -60,8 +67,12 @@ func (c *Coordinator) ScheduleHealthCheck(ctx context.Context, item *database.Im
 	}
 
 	var indexer *string = nil
+	var downloadID *string = nil
+	var itemMetadata *string = nil
 	if item != nil {
 		indexer = item.Indexer
+		downloadID = item.DownloadID
+		itemMetadata = item.Metadata
 	}
 
 	var lastErr error
@@ -93,6 +104,8 @@ func (c *Coordinator) ScheduleHealthCheck(ctx context.Context, item *database.Im
 			Priority:         database.HealthPriorityNext,
 			MaxRetries:       cfg.GetMaxRetries(),
 			MaxRepairRetries: cfg.GetMaxRepairRetries(),
+			DownloadID:       downloadID,
+			Metadata:         itemMetadata,
 		})
 		repairDirs[filepath.Dir(p)] = struct{}{}
 	}
@@ -150,7 +163,6 @@ func isArrImportableMedia(p string) bool {
 	}
 	return arrAudioBookExtensions[strings.ToLower(path.Ext(p))]
 }
-
 // expandWrittenPaths resolves "DIR:"-prefixed entries (whole-directory imports such
 // as RAR/7z archives, which only report their NZB folder) into the per-file virtual
 // paths beneath them by walking the metadata tree. Plain file entries pass through

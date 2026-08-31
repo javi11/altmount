@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/url"
 	"strings"
 
@@ -148,9 +149,81 @@ func (m *Manager) GetInstance(instanceType, instanceName string) *model.ConfigIn
 
 // RegisterInstance attempts to automatically register an ARR instance
 // It returns true if a new instance was registered, false if it already existed
+// isInternalIP reports whether ip is on loopback or a private network (RFC1918 / IPv6 ULA).
+// Link-local addresses (including the 169.254.169.254 cloud-metadata endpoint) and global
+// addresses are treated as non-internal.
+func isInternalIP(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate()
+}
+
+// validateInternalARRURL rejects ARR auto-registration targets that are not on an internal
+// network. Auto-registration is reachable via the unauthenticated SABnzbd ARR-credential
+// path, so an external URL here would let a caller drive AltMount into issuing outbound
+// requests to — and persisting — an attacker-chosen destination (SSRF). Legitimate
+// Radarr/Sonarr instances always live on loopback or a private network; a genuinely external
+// ARR can still be added manually through the UI.
+func validateInternalARRURL(arrURL string, lookupIP func(host string) ([]net.IP, error)) error {
+	if strings.TrimSpace(arrURL) == "" {
+		return fmt.Errorf("ARR URL is empty")
+	}
+
+	parsed, err := url.Parse(arrURL)
+	if err != nil {
+		return fmt.Errorf("invalid ARR URL %q: %w", arrURL, err)
+	}
+
+	host := parsed.Hostname()
+	if host == "" {
+		return fmt.Errorf("ARR URL %q has no host", arrURL)
+	}
+
+	// IP literal: classify directly, no DNS lookup required.
+	if ip := net.ParseIP(host); ip != nil {
+		if !isInternalIP(ip) {
+			return fmt.Errorf("ARR URL %q points to non-internal address %s; add external ARR instances manually", arrURL, ip)
+		}
+		return nil
+	}
+
+	// Hostname: resolve and require every returned address to be internal so a mixed
+	// public/private DNS record cannot slip an external target through.
+	ips, err := lookupIP(host)
+	if err != nil {
+		return fmt.Errorf("failed to resolve ARR host %q: %w", host, err)
+	}
+	if len(ips) == 0 {
+		return fmt.Errorf("ARR host %q did not resolve to any address", host)
+	}
+	for _, ip := range ips {
+		if !isInternalIP(ip) {
+			return fmt.Errorf("ARR host %q resolves to non-internal address %s; add external ARR instances manually", host, ip)
+		}
+	}
+	return nil
+}
+
 func (m *Manager) RegisterInstance(ctx context.Context, arrURL, apiKey string) (bool, error) {
 	if m.configManager == nil {
 		return false, fmt.Errorf("config manager not available")
+	}
+
+	// Reject non-internal targets before dialing out. Auto-registration is reachable via the
+	// unauthenticated SABnzbd ARR-credential path; an external URL here would be SSRF.
+	if err := validateInternalARRURL(arrURL, func(host string) ([]net.IP, error) {
+		addrs, lErr := net.DefaultResolver.LookupIPAddr(ctx, host)
+		if lErr != nil {
+			return nil, lErr
+		}
+		ips := make([]net.IP, len(addrs))
+		for i, a := range addrs {
+			ips[i] = a.IP
+		}
+		return ips, nil
+	}); err != nil {
+		return false, fmt.Errorf("ARR URL not allowed for auto-registration: %w", err)
 	}
 
 	slog.InfoContext(ctx, "Attempting to register ARR instance", "url", arrURL)

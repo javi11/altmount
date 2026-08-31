@@ -72,6 +72,34 @@ ls -la rar_multi/
 echo "  done"
 
 # ---------------------------------------------------------------------------
+# RAR multi-part with NON-fixed-width volume numbering ("part0" + N).
+# Real releases sometimes name volumes part01..part09 (2 chars) then
+# part010..part0NN (3+ chars) — i.e. "part0" + the unpadded number, not a fixed
+# zero-padded width. rardecode follows a set by computing the next name at the
+# first volume's digit width, so after part09 it asks for part10.rar while the
+# real file is part010.rar. This fixture reproduces that exact naming so the
+# import battery test exercises the width-tolerant volume resolution end to end.
+# -v15k over the 200 KB payload yields ~14 volumes, crossing the 09→010 boundary.
+# ---------------------------------------------------------------------------
+echo "==> rar_widthmismatch/archive.part0*.rar ..."
+rm -f rar_widthmismatch/archive.part*.rar
+mkdir -p rar_widthmismatch
+rar a -m0 -ep -v15k rar_widthmismatch/archive.rar payload_a.bin
+# Normalize every volume to the "part0" + N scheme regardless of the width rar
+# chose: parse the volume number (base-10, ignoring leading zeros) and rewrite as
+# archive.part0<N>.rar. part1/part01 → part01, part10 → part010, part14 → part014.
+for f in rar_widthmismatch/archive.part*.rar; do
+    [ -f "$f" ] || continue
+    num="${f##*part}"
+    num="${num%.rar}"
+    n=$((10#$num))
+    target="rar_widthmismatch/archive.part0${n}.rar"
+    [ "$f" = "$target" ] || mv "$f" "$target"
+done
+ls -la rar_widthmismatch/
+echo "  done"
+
+# ---------------------------------------------------------------------------
 # RAR old-style volumes (.rar / .r00 / .r01 ...)
 # Modern rar (5+) dropped the -vn flag and always uses new-style naming.
 # Skip gracefully when not supported; the test checks for the fixture files.
@@ -202,6 +230,10 @@ if os.path.exists("rar_single/archive.rar"):
 # For multi-part, use the first volume.
 if os.path.exists("rar_multi/archive.part01.rar"):
     manifest["rar_multi"] = rar_contents("rar_multi/archive.part01.rar")
+
+# Non-fixed-width multi-part (part01..part09, part010..); first volume is part01.
+if os.path.exists("rar_widthmismatch/archive.part01.rar"):
+    manifest["rar_widthmismatch"] = rar_contents("rar_widthmismatch/archive.part01.rar")
 
 if os.path.exists("rar_oldstyle/archive.rar"):
     manifest["rar_oldstyle"] = rar_contents("rar_oldstyle/archive.rar")

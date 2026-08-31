@@ -61,6 +61,8 @@ func TestProcessRegularFilesSkipsFileWithSizeMismatch(t *testing.T) {
 		[]string{".mkv"},
 		true,
 		nil,
+		nil,
+		"",
 	)
 	if err != nil {
 		t.Fatalf("ProcessRegularFiles returned error: %v", err)
@@ -97,6 +99,8 @@ func TestProcessRegularFilesFailsWhenAllFilesFailValidation(t *testing.T) {
 		[]string{".mkv"},
 		true,
 		nil,
+		nil,
+		"",
 	)
 	if err == nil {
 		t.Fatal("ProcessRegularFiles returned nil error, want all-files-failed error")
@@ -139,6 +143,8 @@ func TestProcessRegularFilesManyCollidingNames(t *testing.T) {
 		[]string{".clpi"},
 		true,
 		tracker,
+		nil,
+		"",
 	)
 	if err != nil {
 		t.Fatalf("ProcessRegularFiles returned error: %v", err)

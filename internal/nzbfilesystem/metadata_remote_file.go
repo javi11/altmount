@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -21,6 +22,7 @@ import (
 	"github.com/javi11/altmount/internal/encryption"
 	"github.com/javi11/altmount/internal/encryption/aes"
 	"github.com/javi11/altmount/internal/encryption/rclone"
+	"github.com/javi11/altmount/internal/holes"
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/nzbfilesystem/segcache"
@@ -31,6 +33,24 @@ import (
 	"github.com/javi11/altmount/pkg/rclonecli"
 	"github.com/spf13/afero"
 )
+
+// epochFallbackModTime is reported when no real timestamp is available (a file
+// whose ModifiedAt was never set, or a directory that is not backed by an
+// on-disk metadata dir). A fixed date is deliberate: returning time.Now() would
+// make every stat look like a fresh modification and force media scanners to
+// re-probe on every call.
+var epochFallbackModTime = time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+
+// getFileModTime maps a proto ModifiedAt to the mtime reported over WebDAV and
+// FUSE. Note that ReadFileMetadataLite treats modified_at as best-effort — it
+// stays zero when the field sits past liteScanBytes — so listings can legitimately
+// fall back to the epoch here.
+func getFileModTime(modifiedAt int64) time.Time {
+	if modifiedAt > 0 {
+		return time.Unix(modifiedAt, 0)
+	}
+	return epochFallbackModTime
+}
 
 // MetadataRemoteFile implements the RemoteFile interface for metadata-backed virtual files
 type MetadataRemoteFile struct {
@@ -45,6 +65,7 @@ type MetadataRemoteFile struct {
 	streamTracker    StreamTracker            // Stream tracker for monitoring active streams
 	cacheSource      *segcache.Source         // Segment cache source (nil = no cache configured)
 	repairCoalescer  *RepairCoalescer         // Throttles streaming-failure repair triggers and rclone VFS refreshes
+	padRecorder      *padRecorder             // Process-lived worker persisting degraded-pad events
 	renameMu         sync.Mutex               // Mutex to protect rename operations from race conditions
 }
 
@@ -74,6 +95,8 @@ func NewMetadataRemoteFile(
 	// Initialize AES cipher for encrypted archives
 	aesCipher := aes.NewAesCipher()
 
+	repairCoalescer := NewRepairCoalescer(rcloneClient, configGetter)
+
 	return &MetadataRemoteFile{
 		metadataService:  metadataService,
 		healthRepository: healthRepository,
@@ -85,7 +108,8 @@ func NewMetadataRemoteFile(
 		aesCipher:        aesCipher,
 		streamTracker:    streamTracker,
 		cacheSource:      cacheSource,
-		repairCoalescer:  NewRepairCoalescer(rcloneClient, configGetter),
+		repairCoalescer:  repairCoalescer,
+		padRecorder:      newPadRecorder(metadataService, healthRepository, repairCoalescer),
 	}
 }
 
@@ -259,8 +283,10 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 		SegmentData:    fileMeta.SegmentData,
 		NestedSources:  fileMeta.NestedSources,
 		ClipBoundaries: fileMeta.ClipBoundaries,
+		KnownHoles:     fileMeta.KnownHoles,
 	}
 
+	fileCtx, cancel := context.WithCancel(ctx)
 	// Create a metadata-based virtual file handle
 	virtualFile := &MetadataVirtualFile{
 		name:             name,
@@ -270,9 +296,11 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 		arrsService:      mrf.arrsService,
 		rcloneClient:     mrf.rcloneClient,
 		repairCoalescer:  mrf.repairCoalescer,
+		padRecorder:      mrf.padRecorder,
 		configGetter:     mrf.configGetter,
 		poolManager:      mrf.poolManager,
-		ctx:              ctx,
+		ctx:              fileCtx,
+		cancelCtx:        cancel,
 		maxPrefetch:      maxPrefetch,
 		rcloneCipher:     mrf.rcloneCipher,
 		aesCipher:        mrf.aesCipher,
@@ -327,12 +355,10 @@ func (mrf *MetadataRemoteFile) RemoveFile(ctx context.Context, fileName string) 
 		}
 	}
 
-	// Check if we should delete the source NZB file
 	cfg := mrf.configGetter()
-	deleteSourceNzb := cfg.Metadata.ShouldDeleteSourceNzb()
 
-	// Use MetadataService's file delete operation with optional NZB deletion
-	err := mrf.metadataService.DeleteFileMetadataWithSourceNzb(ctx, normalizedName, deleteSourceNzb)
+	// Deletes the .meta and, once the last sibling is gone, the shared .nzbz store.
+	err := mrf.metadataService.DeleteFileMetadata(ctx, normalizedName)
 	if err != nil {
 		return true, err
 	}
@@ -492,11 +518,15 @@ func (mrf *MetadataRemoteFile) Stat(ctx context.Context, name string) (bool, fs.
 
 	// Check if this is a directory first
 	if mrf.metadataService.DirectoryExists(normalizedName) {
+		modT := mrf.metadataService.DirectoryModTime(normalizedName)
+		if modT.IsZero() {
+			modT = epochFallbackModTime
+		}
 		info := &MetadataFileInfo{
 			name:    filepath.Base(normalizedName),
 			size:    0,
 			mode:    os.ModeDir | 0755,
-			modTime: time.Now(), // Use current time for directories
+			modTime: modT,
 			isDir:   true,
 		}
 		return true, info, nil
@@ -553,7 +583,7 @@ func (mrf *MetadataRemoteFile) Stat(ctx context.Context, name string) (bool, fs.
 		name:    filepath.Base(normalizedName),
 		size:    fileMeta.FileSize,
 		mode:    0644, // Default file mode
-		modTime: time.Unix(fileMeta.ModifiedAt, 0),
+		modTime: getFileModTime(fileMeta.ModifiedAt),
 		isDir:   false,
 	}
 
@@ -651,7 +681,9 @@ func (mvd *MetadataVirtualDirectory) Readdir(count int) ([]fs.FileInfo, error) {
 
 	var infos []fs.FileInfo
 
-	// Add directories first
+	// Add directories first. dirInfo already carries the backing directory's
+	// real mtime from the single os.ReadDir in ListDirectoryAll, so there is
+	// nothing extra to stat per subdirectory.
 	for _, dirInfo := range dirInfos {
 		infos = append(infos, dirInfo)
 		if count > 0 && len(infos) >= count {
@@ -689,7 +721,7 @@ func (mvd *MetadataVirtualDirectory) Readdir(count int) ([]fs.FileInfo, error) {
 			name:    fileName,
 			size:    fileMeta.FileSize,
 			mode:    0644,
-			modTime: time.Unix(fileMeta.ModifiedAt, 0),
+			modTime: getFileModTime(fileMeta.ModifiedAt),
 			isDir:   false,
 		}
 		infos = append(infos, info)
@@ -718,11 +750,15 @@ func (mvd *MetadataVirtualDirectory) Readdirnames(n int) ([]string, error) {
 
 // Stat implements afero.File.Stat
 func (mvd *MetadataVirtualDirectory) Stat() (fs.FileInfo, error) {
+	modT := mvd.metadataService.DirectoryModTime(mvd.normalizedPath)
+	if modT.IsZero() {
+		modT = epochFallbackModTime
+	}
 	info := &MetadataFileInfo{
 		name:    filepath.Base(mvd.normalizedPath),
 		size:    0,
 		mode:    os.ModeDir | 0755,
-		modTime: time.Now(),
+		modTime: modT,
 		isDir:   true,
 	}
 	return info, nil
@@ -774,6 +810,9 @@ type fileHandleMeta struct {
 	// feature. Non-empty enables the continuous-timeline TS remux on reads;
 	// empty (every other file) bypasses it entirely.
 	ClipBoundaries []*metapb.ClipBoundary
+	// KnownHoles is the persisted hole map: segments confirmed missing on all
+	// providers, zero-filled during streaming without a fetch round-trip.
+	KnownHoles []*metapb.HoleRun
 }
 
 // MetadataVirtualFile implements afero.File for metadata-backed virtual files
@@ -785,9 +824,11 @@ type MetadataVirtualFile struct {
 	arrsService      ARRsRepairService
 	rcloneClient     rclonecli.RcloneRcClient // RClone RC client for VFS notifications
 	repairCoalescer  *RepairCoalescer         // Throttles repair triggers; may be nil in tests
+	padRecorder      *padRecorder             // Persists degraded-pad events; may be nil in tests
 	configGetter     config.ConfigGetter
 	poolManager      pool.Manager // Pool manager for dynamic pool access
 	ctx              context.Context
+	cancelCtx        context.CancelFunc
 	maxPrefetch      int // Maximum segments prefetched ahead of current read position
 	rcloneCipher     *rclone.RcloneCrypt
 	aesCipher        *aes.AesCipher
@@ -827,6 +868,17 @@ type MetadataVirtualFile struct {
 	// consecutive misses the player has genuinely moved and we tear down.
 	ephemeralStreak int
 
+	// metadataGone is set once a streaming failure caused this file's metadata to
+	// be removed underneath the open handle (moved to the corrupted safety folder
+	// by a repair, or deleted by delete-on-corruption). The path this handle
+	// refers to no longer exists, so every subsequent read must fail instead of
+	// rebuilding a reader against segments already known to be missing.
+	//
+	// Atomic rather than mu-guarded: it is set from updateFileHealthOnError,
+	// which is reached both from the mu-holding read paths and from
+	// createUsenetReader closures that run on background goroutines.
+	metadataGone atomic.Bool
+
 	// Segment offset index for O(1) offset→segment lookup
 	segmentIndex *segmentOffsetIndex
 
@@ -849,6 +901,15 @@ type MetadataVirtualFile struct {
 	// randomReadCache coalesces small random ReadAts within the same
 	// segment. Lazily initialized; held under mvf.mu.
 	randomReadCache *lru.Cache[int, []byte]
+
+	// Hole padding state (see holes.go). holeAcc accumulates confirmed
+	// missing segments for this handle, seeded from meta.KnownHoles; holeMu
+	// guards it (hole hooks run on download goroutines).
+	holeMu       sync.Mutex
+	holeAcc      *holes.Accumulator
+	holeHooksVal *usenet.HoleHooks
+	holeOnce     sync.Once
+	holeMeta     holeMetaSnapshot // set in holeHooks(); see holeMetaSnapshot doc
 }
 
 // randomReadCacheSize bounds the per-file ephemeral-read cache. 8
@@ -892,6 +953,92 @@ func (mvf *MetadataVirtualFile) interruptCurrentReader() {
 	if slot.i != nil {
 		slot.i.Interrupt()
 	}
+}
+
+// armReadTimeout bounds a single read, returning a context carrying the
+// deadline, a predicate reporting whether that deadline was hit, and a stop
+// function the caller must defer.
+//
+// Two mechanisms are needed because the read path has two shapes:
+//
+//   - The shared reader ignores the caller's context entirely —
+//     UsenetReader.Read waits on the reader's own context (see
+//     usenet.segment.GetReaderContext), so a derived deadline is invisible to
+//     it. A timer fires the reader's Interrupt hook instead, which cancels its
+//     internal context and releases its segments, unblocking the read.
+//   - Ephemeral (seek-driven) readers are short-lived locals that are never
+//     registered for interruption, but their reads run through
+//     readFullContext, which force-closes the reader when the context expires.
+//     Those need the deadline on the context.
+//
+// Both are no-ops when the timeout is disabled; the parent context is returned
+// unchanged.
+//
+// Safe to call without holding mvf.mu: interruptCurrentReader reads an
+// atomic.Value, so the watchdog can break a jam even while another read holds
+// the mutex.
+func (mvf *MetadataVirtualFile) armReadTimeout(parent context.Context) (ctx context.Context, timedOut func() bool, stop func()) {
+	never := func() bool { return false }
+	if mvf.configGetter == nil {
+		return parent, never, func() {}
+	}
+	cfg := mvf.configGetter()
+	if cfg == nil {
+		return parent, never, func() {}
+	}
+	timeout := cfg.GetStreamReadTimeout()
+	if timeout <= 0 {
+		return parent, never, func() {}
+	}
+
+	ctx, cancel := context.WithTimeout(parent, timeout)
+
+	var interrupted atomic.Bool
+	timer := time.AfterFunc(timeout, func() {
+		interrupted.Store(true)
+		slog.WarnContext(mvf.ctx, "Read exceeded the streaming read timeout, interrupting reader",
+			"path", mvf.name,
+			"timeout", timeout)
+		mvf.interruptCurrentReader()
+	})
+
+	// Checking ctx.Err() rather than only the timer flag keeps this
+	// deterministic: the context package sets DeadlineExceeded before it
+	// releases any waiter, so a read that returns because of the deadline
+	// always observes it, with no race against the timer goroutine.
+	timedOut = func() bool {
+		return interrupted.Load() || errors.Is(ctx.Err(), context.DeadlineExceeded)
+	}
+
+	return ctx, timedOut, func() {
+		timer.Stop()
+		cancel()
+	}
+}
+
+// readContext returns the handle's context, falling back to Background for
+// handles built without one (tests, bridges).
+func (mvf *MetadataVirtualFile) readContext() context.Context {
+	if mvf.ctx != nil {
+		return mvf.ctx
+	}
+	return context.Background()
+}
+
+// classifyReadError maps a reader error to the error a read should return,
+// reporting data corruption to the health pipeline on the way. This is what
+// feeds streaming failure masking — without it a DMCA'd file never accumulates
+// failures and is never masked. Callers must hold mvf.mu.
+func (mvf *MetadataVirtualFile) classifyReadError(readErr error) error {
+	var dataCorruptionErr *usenet.DataCorruptionError
+	if errors.As(readErr, &dataCorruptionErr) {
+		mvf.updateFileHealthOnError(dataCorruptionErr, dataCorruptionErr.NoRetry)
+		return &CorruptedFileError{
+			TotalExpected: mvf.meta.FileSize,
+			UnderlyingErr: dataCorruptionErr,
+		}
+	}
+	return readErr
 }
 
 // segmentOffsetIndex provides O(1) lookup for offset→segment mapping using binary search
@@ -978,8 +1125,23 @@ func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 		return 0, nil
 	}
 
+	// Same watchdog as ReadAtContext — a stalled fetch parks a WebDAV/rclone
+	// read just as indefinitely as a FUSE one. Read has no context to thread
+	// through, so only the interrupt half applies here.
+	_, timedOut, stopTimeout := mvf.armReadTimeout(mvf.readContext())
+	defer func() {
+		stopTimeout()
+		if timedOut() && err != nil && !errors.Is(err, ErrReadTimeout) {
+			err = fmt.Errorf("%w: %w", ErrReadTimeout, err)
+		}
+	}()
+
 	mvf.mu.Lock()
 	defer mvf.mu.Unlock()
+
+	if mvf.meta == nil {
+		return 0, ErrFileClosed
+	}
 
 	for n < len(p) {
 		if err := mvf.ensureReader(); err != nil {
@@ -1047,12 +1209,37 @@ func (mvf *MetadataVirtualFile) ReadAtContext(readCtx context.Context, p []byte,
 	if off < 0 {
 		return 0, ErrNegativeOffset
 	}
+
+	// Armed before taking mvf.mu so the budget covers queueing behind another
+	// read on the same handle. A single stuck read otherwise blocks every
+	// subsequent read on this file; interrupting the in-flight reader from here
+	// breaks that jam.
+	readCtx, timedOut, stopTimeout := mvf.armReadTimeout(readCtx)
+	defer func() {
+		stopTimeout()
+		if timedOut() && err != nil && !errors.Is(err, ErrReadTimeout) {
+			err = fmt.Errorf("%w: %w", ErrReadTimeout, err)
+		}
+	}()
+
+	mvf.mu.Lock()
+	defer mvf.mu.Unlock()
+
+	// mvf.meta is nil-ed by Close() under mvf.mu — a concurrent Close (e.g. from
+	// the FUSE handle release path) can complete between an unlocked check and
+	// lock acquisition, so this must be checked here, not before Lock().
+	if mvf.meta == nil {
+		return 0, ErrFileClosed
+	}
 	if off >= mvf.meta.FileSize {
 		return 0, io.EOF
 	}
 
-	mvf.mu.Lock()
-	defer mvf.mu.Unlock()
+	// The ephemeral path below builds its own reader without going through
+	// ensureReader, so it needs this guard of its own.
+	if err := mvf.metadataGoneErr(); err != nil {
+		return 0, err
+	}
 
 	// Determine whether this offset can reuse the shared reader.
 	// Shared path: offset matches the next expected sequential position, OR
@@ -1096,6 +1283,7 @@ func (mvf *MetadataVirtualFile) ReadAtContext(readCtx context.Context, p []byte,
 			want = mvf.meta.FileSize - off
 		}
 		buf := p[:want]
+		var sharedErr error
 		for n < int(want) {
 			rn, readErr := mvf.reader.Read(buf[n:])
 			n += rn
@@ -1111,11 +1299,13 @@ func (mvf *MetadataVirtualFile) ReadAtContext(readCtx context.Context, p []byte,
 			if readErr != nil {
 				if errors.Is(readErr, io.EOF) && mvf.hasMoreDataToRead() {
 					mvf.closeCurrentReader()
-					if err := mvf.ensureReader(); err != nil {
+					if rotateErr := mvf.ensureReader(); rotateErr != nil {
+						sharedErr = rotateErr
 						break
 					}
 					continue
 				}
+				sharedErr = readErr
 				break
 			}
 		}
@@ -1123,6 +1313,19 @@ func (mvf *MetadataVirtualFile) ReadAtContext(readCtx context.Context, p []byte,
 		// Advance the shared cursor so the next sequential call hits this path again.
 		mvf.readAtSharedNext = off + int64(n)
 		mvf.ephemeralStreak = 0 // sequential read — reset scrub counter
+
+		// A real failure (missing segment, interrupted reader, pool error) must
+		// reach the caller. Returning a silent short read here was what kept
+		// streaming failure masking from ever seeing a FUSE-path failure.
+		// io.EOF stays non-fatal: hasMoreDataToRead() already said there is
+		// nothing left to rotate to, so it is a genuine end of data.
+		if sharedErr != nil && !errors.Is(sharedErr, io.EOF) {
+			// The shared reader is in an indeterminate state — drop it so the
+			// next read rebuilds cleanly rather than inheriting the failure.
+			mvf.closeCurrentReader()
+			mvf.readAtSharedNext = -1
+			return n, mvf.classifyReadError(sharedErr)
+		}
 		return n, nil
 	}
 
@@ -1188,7 +1391,14 @@ ephemeral:
 		mvf.readAtSharedNext = off + int64(n)
 	}
 
-	return n, err
+	if err != nil {
+		// Same reporting as the shared path — scrub-driven reads must feed
+		// failure masking too, otherwise a player that seeks never marks a
+		// DMCA'd file as failing.
+		return n, mvf.classifyReadError(err)
+	}
+
+	return n, nil
 }
 
 // tryServeFromRandomReadCache attempts to satisfy a single-segment
@@ -1459,6 +1669,9 @@ func (mvf *MetadataVirtualFile) Seek(offset int64, whence int) (int64, error) {
 
 // Close implements afero.File.Close
 func (mvf *MetadataVirtualFile) Close() error {
+	if mvf.cancelCtx != nil {
+		mvf.cancelCtx()
+	}
 	// Cancel the in-flight reader before taking mvf.mu — a concurrent
 	// Read can hold the lock for the full segment-download latency.
 	mvf.interruptCurrentReader()
@@ -1527,7 +1740,7 @@ func (mvf *MetadataVirtualFile) Stat() (fs.FileInfo, error) {
 		name:    filepath.Base(mvf.name),
 		size:    mvf.meta.FileSize,
 		mode:    0644,
-		modTime: time.Unix(mvf.meta.ModifiedAt, 0),
+		modTime: getFileModTime(mvf.meta.ModifiedAt),
 		isDir:   false, // Files are never directories in simplified schema
 	}
 
@@ -1600,11 +1813,20 @@ const closerWorkerCount = 4
 // Lazy-starts the worker goroutines on first call. Caller must hold
 // mvf.mu (so the lazy init is safe).
 func (mvf *MetadataVirtualFile) enqueueCloser(r io.Closer) {
+	// Interrupt first (idempotent) so in-flight downloads release the
+	// pool connection immediately before Close() waits on drain.
+	if i, ok := r.(readerInterrupter); ok {
+		i.Interrupt()
+	}
 	if mvf.closerCh == nil {
-		mvf.closerCh = make(chan io.Closer, closerWorkerCount)
-		for i := 0; i < closerWorkerCount; i++ {
+		// Workers range over this local, not mvf.closerCh: Close() nils the
+		// field under mvf.mu, which the workers do not hold, so reading the
+		// field from inside the goroutine is a data race.
+		ch := make(chan io.Closer, closerWorkerCount)
+		mvf.closerCh = ch
+		for range closerWorkerCount {
 			mvf.closeWg.Go(func() {
-				for c := range mvf.closerCh {
+				for c := range ch {
 					_ = c.Close()
 				}
 			})
@@ -1616,17 +1838,33 @@ func (mvf *MetadataVirtualFile) enqueueCloser(r io.Closer) {
 		// Queue full — apply backpressure inline rather than letting
 		// the closer fan-out grow unbounded. This is the rare path; a
 		// real Seek burst stays under closerWorkerCount.
-		// Interrupt first (idempotent) so in-flight downloads release the
-		// pool connection before Close() waits on drain.
-		if i, ok := r.(readerInterrupter); ok {
-			i.Interrupt()
-		}
 		_ = r.Close()
+	}
+}
+
+// metadataGoneErr returns the terminal error for a handle whose file was removed
+// underneath it, tearing the reader down on first observation, or nil while the
+// handle is still valid. Doing the teardown here rather than at the point the
+// flag is set keeps it on a path that provably holds mvf.mu.
+//
+// Caller must hold mvf.mu.
+func (mvf *MetadataVirtualFile) metadataGoneErr() error {
+	if !mvf.metadataGone.Load() {
+		return nil
+	}
+	mvf.closeCurrentReader()
+	return &CorruptedFileError{
+		TotalExpected: mvf.meta.FileSize,
+		UnderlyingErr: ErrMetadataGone,
 	}
 }
 
 // ensureReader ensures we have a reader initialized for the current position with range support
 func (mvf *MetadataVirtualFile) ensureReader() error {
+	if err := mvf.metadataGoneErr(); err != nil {
+		return err
+	}
+
 	if mvf.readerInitialized {
 		return nil
 	}
@@ -1774,6 +2012,7 @@ func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, e
 
 		mvf.updateFileHealthOnError(&usenet.DataCorruptionError{
 			UnderlyingErr: ErrMissmatchedSegments,
+			FileOffset:    -1,
 		}, true)
 
 		return nil, &CorruptedFileError{
@@ -1782,7 +2021,11 @@ func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, e
 		}
 	}
 
-	ur, err := usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxPrefetch, mvf.streamTracker, mvf.streamID, mvf.segmentStore)
+	// Hole hooks enable on-the-fly zero-fill of confirmed-missing segments
+	// for eligible video files (nil for everything else — reads fail as
+	// always). See holes.go.
+	ur, err := usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxPrefetch, mvf.streamTracker, mvf.streamID, mvf.segmentStore,
+		usenet.WithHoleHooks(mvf.holeHooks()))
 	if err != nil {
 		return nil, err
 	}
@@ -1972,6 +2215,12 @@ func (r *lazyNestedMultiReader) Close() error {
 	return nil
 }
 
+func (r *lazyNestedMultiReader) Interrupt() {
+	if i, ok := r.current.(interface{ Interrupt() }); ok {
+		i.Interrupt()
+	}
+}
+
 // wrapWithEncryption wraps a usenet reader with encryption using metadata
 func (mvf *MetadataVirtualFile) wrapWithEncryption(start, end int64) (io.ReadCloser, error) {
 	if mvf.meta.Encryption == metapb.Encryption_NONE {
@@ -2052,10 +2301,25 @@ func (mvf *MetadataVirtualFile) wrapWithEncryption(start, end int64) (io.ReadClo
 // of corrupt files) cannot fan out into one DB write + one rclone VFS refresh
 // per call. See issue #539 for the failure mode this guards against.
 func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usenet.DataCorruptionError, noRetry bool) {
+	// Health reporting needs both persistence layers. Handles built without
+	// them (nzbdav bridge, tests) have nothing to record — bail rather than
+	// nil-deref. This runs on the read path, where a panic would take the whole
+	// mount down.
+	if mvf.healthRepository == nil || mvf.metadataService == nil || mvf.configGetter == nil {
+		return
+	}
+
 	// Per-path debounce: short-circuit if this file already triggered a repair
 	// inside the debounce window. ShouldTrigger handles a nil coalescer
 	// (test harness) by returning true.
 	if !mvf.repairCoalescer.ShouldTrigger(mvf.name) {
+		// Another handle on this path may already have had the metadata taken
+		// away. Only that handle latched itself, so without this a second handle
+		// failing inside the debounce window keeps rebuilding readers for a file
+		// that is gone - exactly the wedge the latch exists to prevent.
+		if mvf.repairCoalescer.WasRemoved(mvf.name) {
+			mvf.metadataGone.Store(true)
+		}
 		slog.DebugContext(mvf.ctx, "Streaming failure repair already triggered recently, debouncing",
 			"file", mvf.name)
 		return
@@ -2065,9 +2329,46 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 	ctx, cancel := context.WithTimeout(mvf.ctx, 5*time.Second)
 	defer cancel()
 
+	cfg := mvf.configGetter()
+	healthEnabled := cfg.GetHealthEnabled()
+
+	// Classify playback impact via the hole model — the verdict decides
+	// whether this failure triggers a repair at all. Note that with hole
+	// hooks wired, within-caps misses are zero-filled and never reach this
+	// path; a degraded verdict here is the exception (e.g. hooks disabled).
+	classification := mvf.classifyStreamingFailure(dataCorruptionErr)
+	isDegraded := healthEnabled && classification != nil &&
+		classification.Verdict == holes.VerdictDegraded
+
+	// Increment failure count for tracking/masking if explicitly enabled with a valid
+	// threshold. Masking must be opt-in: Enabled == nil means disabled (not on-by-default),
+	// and Threshold <= 0 would make every file immediately masked (count+1 >= 0 is always
+	// true), suppressing all repairs. Degraded files are also exempt: masking a still-
+	// playable file defeats the point of keeping it available.
+	shouldRepair := true
+	isMasked := false
+	if !isDegraded && cfg.Streaming.FailureMasking.Enabled != nil && *cfg.Streaming.FailureMasking.Enabled && cfg.Streaming.FailureMasking.Threshold > 0 {
+		var err error
+		isMasked, shouldRepair, err = mvf.healthRepository.IncrementStreamingFailureCount(ctx, mvf.name, cfg.Streaming.FailureMasking.Threshold)
+		if err != nil {
+			slog.WarnContext(ctx, "Failed to update streaming failure count, proceeding with repair", "file", mvf.name, "error", err)
+			shouldRepair = true
+		} else if isMasked && !shouldRepair {
+			slog.InfoContext(ctx, "File masked due to streaming failure (threshold not reached)", "file", mvf.name)
+		}
+	}
+
 	// Any file with missing segments or corruption is marked as corrupted in metadata
-	// and DB to trigger the repair cycle via the health worker.
+	// and DB so it stays visible on the Health page, regardless of whether repair runs.
+	// Degraded files instead keep a status that leaves them visible AND streamable
+	// (FILE_STATUS_CORRUPTED hides the file from listings and blocks opens).
+	// Masked files keep their healthy metadata status so they remain openable.
 	metadataStatus := metapb.FileStatus_FILE_STATUS_CORRUPTED
+	if isDegraded {
+		metadataStatus = metapb.FileStatus_FILE_STATUS_DEGRADED
+	} else if isMasked && !shouldRepair {
+		metadataStatus = metapb.FileStatus_FILE_STATUS_HEALTHY
+	}
 
 	// Update metadata status (blocking with timeout)
 	if err := mvf.metadataService.UpdateFileStatus(mvf.name, metadataStatus); err != nil {
@@ -2081,58 +2382,118 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 		sourceNzbPath = nil
 	}
 
-	// Create error details JSON
-	errorDetails := fmt.Sprintf(`{"missing_articles": %d, "total_articles": %d, "error_type": "ArticleNotFound"}`,
-		1, len(mvf.meta.SegmentData))
+	details := database.HealthErrorDetails{
+		ErrorType:       "ArticleNotFound",
+		MissingArticles: 1,
+		TotalArticles:   len(mvf.meta.SegmentData),
+		PlaybackImpact:  classification,
+	}
+	errorDetails := details.Marshal()
 
-	// Mark as repair_triggered with high priority to trigger the replacement immediately.
-	// We skip the re-verification phase because a streaming failure is a definitive indicator of corruption.
-	slog.InfoContext(ctx, "Streaming failure detected, triggering immediate ARR repair", "file", mvf.name)
-	dbStatus := database.HealthStatusRepairTriggered
+	// The repair action (repair_triggered status + metadata safety-folder move + Arr
+	// redownload) only runs when the health system is enabled. When it is disabled we
+	// record the corruption for visibility but take no repair action whatsoever.
+	var dbStatus database.HealthStatus
+	scheduleImmediately := false
+	if isDegraded {
+		// Playable with glitches: record as degraded, no repair trigger, no
+		// safety-folder move, no immediate scheduling — the health worker
+		// re-checks it on its normal schedule.
+		slog.InfoContext(ctx, "Streaming failure classified as degraded (still playable), skipping repair",
+			"file", mvf.name,
+			"total_missing", classification.TotalMissing,
+			"longest_run", classification.LongestRun)
+		dbStatus = database.HealthStatusDegraded
+	} else if healthEnabled && cfg.GetHealthDeleteOnCorruption() {
+		// Delete-on-corruption is enabled: remove the file instead of triggering a repair.
+		slog.WarnContext(ctx, "Streaming failure detected, deleting corrupted file instead of triggering repair", "file", mvf.name)
 
-	// If the file has already been imported (has a library path), move metadata to the safety folder
-	// so that the ARR rescan definitively sees the file as missing and triggers a redownload.
-	if health, err := mvf.healthRepository.GetFileHealth(ctx, mvf.name); err == nil && health != nil {
-		if health.LibraryPath != nil && *health.LibraryPath != "" {
-			cfg := mvf.configGetter()
-			relativePath := strings.TrimPrefix(mvf.name, cfg.MountPath)
-			relativePath = strings.TrimPrefix(relativePath, "/")
-			slog.InfoContext(ctx, "Moving metadata file for corrupted item to safety folder to trigger replacement", "file_path", mvf.name)
-			if moveErr := mvf.metadataService.MoveToCorrupted(ctx, relativePath); moveErr == nil {
-				// Successfully moved metadata, enqueue a coalesced rclone VFS
-				// refresh. Multiple files in the same directory collapse into a
-				// single RC call; concurrent failures across directories are
-				// batched into one call as well. EnqueueRefresh is a no-op on a
-				// nil coalescer (test harness).
-				mvf.repairCoalescer.EnqueueRefresh(filepath.Dir(mvf.name))
-			} else {
-				slog.WarnContext(ctx, "Failed to move corrupted metadata file, proceeding with repair trigger status", "error", moveErr)
+		var physicalPath, rootPath string
+		if health, err := mvf.healthRepository.GetFileHealth(ctx, mvf.name); err == nil && health != nil && health.LibraryPath != nil {
+			physicalPath = *health.LibraryPath
+			rootPath = cfg.MountPath
+			if cfg.Health.LibraryDir != nil && *cfg.Health.LibraryDir != "" {
+				rootPath = *cfg.Health.LibraryDir
 			}
+		}
+
+		if err := mvf.metadataService.DeleteCorruptedFile(ctx, mvf.name, physicalPath, rootPath); err != nil {
+			slog.ErrorContext(ctx, "Failed to delete corrupted file after streaming failure", "file", mvf.name, "error", err)
+		} else {
+			// The file this handle is reading no longer exists; latch it closed,
+			// same as the repair path below, and publish the removal so other
+			// handles on this path latch too even if their failure is debounced.
+			mvf.metadataGone.Store(true)
+			mvf.repairCoalescer.MarkRemoved(mvf.name)
+
+			if err := mvf.healthRepository.DeleteHealthRecord(ctx, mvf.name); err != nil {
+				slog.ErrorContext(ctx, "Failed to delete health record after deleting corrupted file", "file", mvf.name, "error", err)
+			}
+		}
+		return
+	} else if healthEnabled && shouldRepair {
+		// Mark as repair_triggered with high priority to trigger the replacement immediately.
+		// We skip the re-verification phase because a streaming failure is a definitive indicator of corruption.
+		slog.InfoContext(ctx, "Streaming failure detected, triggering immediate ARR repair", "file", mvf.name)
+		dbStatus = database.HealthStatusRepairTriggered
+		// noRetry signals a definitive corruption (e.g. article-not-found); force immediate
+		// pick-up by the HealthWorker so the replacement is scheduled without re-verification.
+		scheduleImmediately = noRetry
+
+		// If the file has already been imported (has a library path), move metadata to the safety folder
+		// so that the ARR rescan definitively sees the file as missing and triggers a redownload.
+		if health, err := mvf.healthRepository.GetFileHealth(ctx, mvf.name); err == nil && health != nil {
+			if health.LibraryPath != nil && *health.LibraryPath != "" {
+				relativePath := strings.TrimPrefix(mvf.name, cfg.MountPath)
+				relativePath = strings.TrimPrefix(relativePath, "/")
+				slog.InfoContext(ctx, "Moving metadata file for corrupted item to safety folder to trigger replacement", "file_path", mvf.name)
+				if moveErr := mvf.metadataService.MoveToCorrupted(ctx, relativePath); moveErr == nil {
+					// This handle is streaming the file that was just moved away, so
+					// latch it closed. Without this its prefetch pipeline keeps
+					// fetching segments for a path that no longer exists and the
+					// client keeps reading against it (see issue #539).
+					mvf.metadataGone.Store(true)
+					// Publish the removal so other handles on this path latch
+					// themselves even if their own failure lands inside the
+					// debounce window and returns early above.
+					mvf.repairCoalescer.MarkRemoved(mvf.name)
+					// Successfully moved metadata, enqueue a coalesced rclone VFS
+					// refresh. Multiple files in the same directory collapse into a
+					// single RC call; concurrent failures across directories are
+					// batched into one call as well. EnqueueRefresh is a no-op on a
+					// nil coalescer (test harness). The directory is a virtual path
+					// and rclone's VFS is forward-slash on every platform, so
+					// filepath.Dir would enqueue "\dir" (or a bare "\" for a file at
+					// the mount root) on Windows and match nothing.
+					mvf.repairCoalescer.EnqueueRefresh(path.Dir(rclonecli.ToVFSPath(mvf.name)))
+				} else {
+					slog.WarnContext(ctx, "Failed to move corrupted metadata file, proceeding with repair trigger status", "error", moveErr)
+				}
+			}
+		}
+	} else {
+		// Health system disabled or failure count has not reached the threshold:
+		// record the corruption for visibility only and skip every repair action.
+		if healthEnabled && !shouldRepair {
+			slog.InfoContext(ctx, "Streaming failure detected but masked (threshold not reached), skipping repair", "file", mvf.name)
+			dbStatus = database.HealthStatusPending // Re-schedule it for verification later
+		} else {
+			slog.InfoContext(ctx, "Streaming failure detected but health system disabled, marking corrupted without triggering repair", "file", mvf.name)
+			dbStatus = database.HealthStatusCorrupted
 		}
 	}
 
-	// Update database with high priority (scheduled for immediate pick-up by HealthWorker)
+	// Update database health tracking. scheduleImmediately (noRetry) forces immediate
 	if err := mvf.healthRepository.UpdateFileHealthScheduled(ctx,
 		mvf.name,
 		dbStatus,
 		&errorMsg,
 		sourceNzbPath,
-		&errorDetails,
-		true, // noRetry=true forces it to be picked up for repair immediately
+		errorDetails,
+		scheduleImmediately,
 		time.Now().UTC(),
 	); err != nil {
 		slog.WarnContext(ctx, "Failed to update health database for streaming failure", "file", mvf.name, "error", err)
-	}
-
-	// Increment failure count for tracking/masking if enabled
-	cfg := mvf.configGetter()
-	if cfg.Streaming.FailureMasking.Enabled == nil || *cfg.Streaming.FailureMasking.Enabled {
-		isMasked, _, err := mvf.healthRepository.IncrementStreamingFailureCount(ctx, mvf.name, cfg.Streaming.FailureMasking.Threshold)
-		if err != nil {
-			slog.WarnContext(ctx, "Failed to update streaming failure count", "file", mvf.name, "error", err)
-		} else if isMasked {
-			slog.InfoContext(ctx, "File masked due to streaming failure", "file", mvf.name)
-		}
 	}
 }
 

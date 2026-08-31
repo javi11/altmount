@@ -5,11 +5,15 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/javi11/altmount/internal/httpclient"
+	"github.com/javi11/altmount/internal/regexcache"
 	parsetorrentname "github.com/middelink/go-parse-torrent-name"
 	"golift.io/starr"
 	starrprowlarr "golift.io/starr/prowlarr"
@@ -18,6 +22,7 @@ import (
 // Client is a Prowlarr API client backed by golift/starr.
 type Client struct {
 	prowlarr *starrprowlarr.Prowlarr
+	host     string
 	apiKey   string
 	http     *http.Client
 }
@@ -38,6 +43,7 @@ func NewClient(host, apiKey string, httpClient *http.Client) *Client {
 	cfg.Client = httpClient
 	return &Client{
 		prowlarr: starrprowlarr.New(cfg),
+		host:     strings.TrimRight(host, "/"),
 		apiKey:   apiKey,
 		http:     httpClient,
 	}
@@ -50,17 +56,160 @@ type NZBResult struct {
 	Size        int64
 	PublishDate time.Time
 	Indexer     string
+	IndexerID   int
+	Source      string
+	GUID        string
 }
 
-// matchesAnyKeyword returns true when title contains at least one of the
-// keywords (case-insensitive). Returns true when keywords is empty (no filter).
+// Indexer describes a single Prowlarr indexer, used to let users pick which
+// indexers the Stremio addon should search.
+type Indexer struct {
+	ID       int64  `json:"id"`
+	Name     string `json:"name"`
+	Enable   bool   `json:"enable"`
+	Protocol string `json:"protocol"`
+}
+
+// GetIndexers returns the usenet indexers configured in Prowlarr, sorted by name.
+// Torrent indexers are omitted because AltMount only queues usenet releases.
+func (c *Client) GetIndexers(ctx context.Context) ([]Indexer, error) {
+	outputs, err := c.prowlarr.GetIndexersContext(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("prowlarr: get indexers failed: %w", err)
+	}
+
+	indexers := make([]Indexer, 0, len(outputs))
+	for _, o := range outputs {
+		if o == nil || string(o.Protocol) != "usenet" {
+			continue
+		}
+		indexers = append(indexers, Indexer{
+			ID:       o.ID,
+			Name:     o.Name,
+			Enable:   o.Enable,
+			Protocol: string(o.Protocol),
+		})
+	}
+
+	sort.Slice(indexers, func(i, j int) bool {
+		return strings.ToLower(indexers[i].Name) < strings.ToLower(indexers[j].Name)
+	})
+
+	return indexers, nil
+}
+
+var (
+	// reExplicitRegex detects patterns a user clearly wrote as a regex.
+	//
+	// Bracket, paren and brace characters are deliberately NOT part of this set:
+	// release names are full of them ("[SubsPlease]", "(2020)", "{Extended}"),
+	// and treating such a keyword as a regex turns "[SubsPlease]" into a
+	// character class that matches nearly every title — silently blacklisting a
+	// user's whole result set. Only unambiguous regex constructs qualify:
+	// escape classes, group directives, alternation, quantifiers and anchors.
+	// Anything else is matched literally on token boundaries; users who want a
+	// regex containing only brackets can use the explicit /pattern/ form.
+	//
+	// Kept in lockstep with REGEX_CONSTRUCTS in
+	// frontend/src/components/config/stremio/scoringPresets.ts.
+	reExplicitRegex = regexp.MustCompile(`\\b|\\[dwsDWS]|\(\?|[|*+?^$]`)
+	reWhitespace    = regexp.MustCompile(`\s+`)
+)
+
+// getCompiledRegex returns the pattern from the shared bounded regex cache.
+func getCompiledRegex(pattern string) (*regexp.Regexp, error) {
+	return regexcache.Get(pattern)
+}
+
+// slashPatternExpr builds a case-insensitive (by default) regex expression
+// from a slash-delimited pattern body and its trailing flags. Only the Go
+// supported inline flags i, m, and s are honored; unknown flag letters are
+// ignored, mirroring the JavaScript implementation's leniency.
+func slashPatternExpr(raw, flags string) string {
+	var b strings.Builder
+	b.WriteString("(?i")
+	for _, f := range flags {
+		if f == 'm' || f == 's' {
+			b.WriteRune(f)
+		}
+	}
+	b.WriteString(")")
+	return b.String() + raw
+}
+
+// isExplicitRegex reports whether the given pattern contains regex metacharacters or directives.
+func isExplicitRegex(pattern string) bool {
+	return reExplicitRegex.MatchString(pattern)
+}
+
+// BuildKeywordRegex constructs a regex pattern that matches a keyword phrase
+// on token/word boundaries (separated by delimiters like ., _, -, spaces, brackets, or start/end of string).
+func BuildKeywordRegex(keyword string) string {
+	clean := strings.TrimSpace(keyword)
+	clean = strings.Trim(clean, "._- \t")
+	if clean == "" {
+		return ""
+	}
+
+	parts := reWhitespace.Split(clean, -1)
+	escapedParts := make([]string, len(parts))
+	for i, p := range parts {
+		escapedParts[i] = regexp.QuoteMeta(p)
+	}
+	body := strings.Join(escapedParts, `[ ._\-]+`)
+
+	return `(?i)(?:^|[^a-zA-Z0-9])` + body + `(?:[^a-zA-Z0-9]|$)`
+}
+
+// MatchKeywordOrPattern matches a release title against either an explicit regex pattern or a token keyword.
+func MatchKeywordOrPattern(title, pattern string) bool {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" || title == "" {
+		return false
+	}
+
+	// 1. Explicit slash-delimited regex: /pattern/ or /pattern/flags.
+	// A structurally valid slash pattern never falls through to keyword
+	// matching; an invalid body simply fails to match (parity with the
+	// JavaScript implementation in scoringPresets.ts).
+	if strings.HasPrefix(pattern, "/") && len(pattern) >= 2 {
+		lastSlash := strings.LastIndex(pattern, "/")
+		if lastSlash > 0 {
+			expr := slashPatternExpr(pattern[1:lastSlash], pattern[lastSlash+1:])
+			if re, err := getCompiledRegex(expr); err == nil && re != nil {
+				return re.MatchString(title)
+			}
+			return false
+		}
+	}
+
+	// 2. Explicit regex pattern (e.g. \b(cam|ts)\b)
+	if isExplicitRegex(pattern) {
+		if re, err := getCompiledRegex(pattern); err == nil && re != nil {
+			return re.MatchString(title)
+		}
+	}
+
+	// 3. Plain keyword / phrase: match with boundary delimiters
+	tokenPattern := BuildKeywordRegex(pattern)
+	if tokenPattern == "" {
+		return false
+	}
+	if re, err := getCompiledRegex(tokenPattern); err == nil && re != nil {
+		return re.MatchString(title)
+	}
+
+	return false
+}
+
+// matchesAnyKeyword returns true when title matches at least one of the
+// keywords or patterns (case-insensitive on token boundaries). Returns true when keywords is empty (no filter).
 func matchesAnyKeyword(title string, keywords []string) bool {
 	if len(keywords) == 0 {
 		return true
 	}
-	lower := strings.ToLower(title)
 	for _, kw := range keywords {
-		if strings.Contains(lower, strings.ToLower(kw)) {
+		if MatchKeywordOrPattern(title, kw) {
 			return true
 		}
 	}
@@ -77,6 +226,19 @@ func MatchesLanguage(title string, keywords []string) bool {
 // keywords (case-insensitive). Returns true when keywords is empty (no filter).
 func MatchesQuality(title string, keywords []string) bool {
 	return matchesAnyKeyword(title, keywords)
+}
+
+// MatchesExcludeKeywords reports whether title contains any excluded keyword or pattern.
+func MatchesExcludeKeywords(title string, excludeKeywords []string) bool {
+	if len(excludeKeywords) == 0 {
+		return false
+	}
+	for _, kw := range excludeKeywords {
+		if MatchKeywordOrPattern(title, kw) {
+			return true
+		}
+	}
+	return false
 }
 
 // InferLanguage detects the most likely language from a release title using common scene/group
@@ -205,27 +367,30 @@ func InferReleaseMeta(title string) ReleaseMeta {
 // Search queries Prowlarr for NZB releases matching the given IMDB ID and categories.
 // searchType should be "movie", "tvsearch", or "search".
 // season and episode are optional (pass 0 to omit); used for tvsearch to scope results to a specific episode.
+// indexers optionally restricts the search to specific indexer IDs (empty = all indexers).
 // Results are returned sorted by publish date descending (newest first).
-func (c *Client) Search(ctx context.Context, imdbID, searchType string, categories []int, season, episode int) ([]NZBResult, error) {
-	return c.searchWithID(ctx, "ImdbId", imdbID, searchType, categories, season, episode)
+func (c *Client) Search(ctx context.Context, imdbID, searchType string, categories, indexers []int, season, episode int) ([]NZBResult, error) {
+	return c.searchWithID(ctx, "ImdbId", imdbID, searchType, categories, indexers, season, episode)
 }
 
 // SearchByTVDB queries Prowlarr for NZB releases using TVDB ID and categories.
 // This is primarily used by TV series lookups when indexers support TvdbId but not ImdbId.
-func (c *Client) SearchByTVDB(ctx context.Context, tvdbID, searchType string, categories []int, season, episode int) ([]NZBResult, error) {
-	return c.searchWithID(ctx, "TvdbId", tvdbID, searchType, categories, season, episode)
+// indexers optionally restricts the search to specific indexer IDs (empty = all indexers).
+func (c *Client) SearchByTVDB(ctx context.Context, tvdbID, searchType string, categories, indexers []int, season, episode int) ([]NZBResult, error) {
+	return c.searchWithID(ctx, "TvdbId", tvdbID, searchType, categories, indexers, season, episode)
 }
 
-func (c *Client) searchWithID(ctx context.Context, idField, idValue, searchType string, categories []int, season, episode int) ([]NZBResult, error) {
+// SearchByQuery queries Prowlarr for NZB releases using free-text query and categories.
+func (c *Client) SearchByQuery(ctx context.Context, queryText, searchType string, categories, indexers []int, season, episode int) ([]NZBResult, error) {
 	var query strings.Builder
-	if idValue != "" {
-		query.WriteString("{" + idField + ":" + idValue + "}")
+	if queryText != "" {
+		query.WriteString(queryText)
 	}
 	if season > 0 {
-		query.WriteString("{Season:" + strconv.Itoa(season) + "}")
+		query.WriteString(" {Season:" + strconv.Itoa(season) + "}")
 	}
 	if episode > 0 {
-		query.WriteString("{Episode:" + strconv.Itoa(episode) + "}")
+		query.WriteString(" {Episode:" + strconv.Itoa(episode) + "}")
 	}
 
 	cats := make([]int64, len(categories))
@@ -233,10 +398,16 @@ func (c *Client) searchWithID(ctx context.Context, idField, idValue, searchType 
 		cats[i] = int64(cat)
 	}
 
+	idxs := make([]int64, len(indexers))
+	for i, idx := range indexers {
+		idxs[i] = int64(idx)
+	}
+
 	input := starrprowlarr.SearchInput{
-		Query:      query.String(),
+		Query:      strings.TrimSpace(query.String()),
 		Type:       searchType,
 		Categories: cats,
+		IndexerIDs: idxs,
 	}
 
 	releases, err := c.prowlarr.SearchContext(ctx, input)
@@ -255,6 +426,9 @@ func (c *Client) searchWithID(ctx context.Context, idField, idValue, searchType 
 			Size:        r.Size,
 			PublishDate: r.PublishDate,
 			Indexer:     r.Indexer,
+			IndexerID:   int(r.IndexerID),
+			Source:      "prowlarr",
+			GUID:        r.GUID,
 		})
 	}
 
@@ -265,17 +439,98 @@ func (c *Client) searchWithID(ctx context.Context, idField, idValue, searchType 
 	return results, nil
 }
 
-// DownloadNZB fetches the NZB file content from the given Prowlarr download URL.
+func (c *Client) searchWithID(ctx context.Context, idField, idValue, searchType string, categories, indexers []int, season, episode int) ([]NZBResult, error) {
+	if strings.EqualFold(idField, "ImdbId") {
+		idValue = strings.TrimPrefix(idValue, "tt")
+	}
+
+	var query strings.Builder
+	if idValue != "" {
+		query.WriteString("{" + idField + ":" + idValue + "}")
+	}
+	if season > 0 {
+		query.WriteString("{Season:" + strconv.Itoa(season) + "}")
+	}
+	if episode > 0 {
+		query.WriteString("{Episode:" + strconv.Itoa(episode) + "}")
+	}
+
+	cats := make([]int64, len(categories))
+	for i, cat := range categories {
+		cats[i] = int64(cat)
+	}
+
+	idxs := make([]int64, len(indexers))
+	for i, idx := range indexers {
+		idxs[i] = int64(idx)
+	}
+
+	input := starrprowlarr.SearchInput{
+		Query:      query.String(),
+		Type:       searchType,
+		Categories: cats,
+		IndexerIDs: idxs,
+	}
+
+	releases, err := c.prowlarr.SearchContext(ctx, input)
+	if err != nil {
+		return nil, fmt.Errorf("prowlarr: search failed: %w", err)
+	}
+
+	results := make([]NZBResult, 0, len(releases))
+	for _, r := range releases {
+		if r.DownloadURL == "" || r.Protocol != "usenet" {
+			continue
+		}
+		results = append(results, NZBResult{
+			Title:       r.Title,
+			DownloadURL: r.DownloadURL,
+			Size:        r.Size,
+			PublishDate: r.PublishDate,
+			Indexer:     r.Indexer,
+			IndexerID:   int(r.IndexerID),
+			Source:      "prowlarr",
+			GUID:        r.GUID,
+		})
+	}
+
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].PublishDate.After(results[j].PublishDate)
+	})
+
+	return results, nil
+}
+
+// DownloadNZB fetches the NZB file content from the given Prowlarr download URL or direct indexer URL.
 func (c *Client) DownloadNZB(ctx context.Context, downloadURL string) ([]byte, error) {
+	reqURL, err := url.Parse(downloadURL)
+	if err != nil {
+		return nil, fmt.Errorf("prowlarr: invalid download URL: %w", err)
+	}
+
+	prowlarrHostURL, _ := url.Parse(c.host)
+	isProwlarrHost := prowlarrHostURL != nil && prowlarrHostURL.Hostname() != "" && strings.EqualFold(prowlarrHostURL.Hostname(), reqURL.Hostname())
+
+	if !isProwlarrHost {
+		if err := httpclient.ValidateDownloadURL(downloadURL); err != nil {
+			return nil, fmt.Errorf("prowlarr: refusing download: %w", err)
+		}
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("prowlarr: create download request: %w", err)
 	}
-	req.Header.Set("X-Api-Key", c.apiKey)
+	if isProwlarrHost && c.apiKey != "" {
+		req.Header.Set("X-Api-Key", c.apiKey)
+	}
 
-	resp, err := c.http.Do(req)
+	client := *c.http
+	client.CheckRedirect = httpclient.SafeDownloadCheckRedirect(10)
+
+	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("prowlarr: download request failed: %w", err)
+		return nil, fmt.Errorf("prowlarr: download request failed: %w", httpclient.RedactURLError(err))
 	}
 	defer resp.Body.Close()
 

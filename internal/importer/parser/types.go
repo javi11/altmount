@@ -45,6 +45,8 @@ type ParsedNzb struct {
 	SegmentsCount  int
 	password       string // Private field - use GetPassword() to access
 	ExtractedFiles []ExtractedFileInfo
+	Store          *metapb.NzbStore // NzbStore for this release (built at parse time)
+	SegmentIndex   map[string]int64 // message-id → flat store index
 }
 
 // GetPassword returns the password for this NZB
@@ -63,6 +65,7 @@ type ParsedFile struct {
 	Filename      string
 	Size          int64
 	Segments      []*metapb.SegmentData
+	SegmentRefs   []*metapb.SegmentRef // v3: refs into NzbStore (populated when Store != nil)
 	Groups        []string
 	IsRarArchive  bool
 	Is7zArchive   bool
@@ -75,4 +78,13 @@ type ParsedFile struct {
 	NzbdavID      string            // Original ID from nzbdav (for backward compatibility)
 	AesKey        []byte            // AES encryption key (for nzbdav compatibility)
 	AesIv         []byte            // AES initialization vector (for nzbdav compatibility)
+
+	// FirstSegmentBytes holds the decoded leading bytes (≤16KB) of this file's first
+	// segment, captured when the parser fetched it during first-segment analysis. It
+	// lets the archive analysis phase (UsenetFileSystem) serve a volume's header read,
+	// which starts at offset 0, from memory instead of re-fetching a segment already
+	// pulled over the wire this import. Empty when the first segment was skipped/missing
+	// or for files built outside the parser — those paths fall through to the network.
+	// Transient (not persisted); valid only for the lifetime of the import.
+	FirstSegmentBytes []byte
 }

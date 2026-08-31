@@ -1,15 +1,8 @@
 import { useQueryClient } from "@tanstack/react-query";
-import {
-	FileCheck,
-	RefreshCw,
-	RotateCcw,
-	Server,
-	Settings,
-	ShieldCheck,
-	Trash2,
-} from "lucide-react";
+import { FileCheck, RefreshCw, RotateCcw, Settings, ShieldCheck, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { apiClient } from "../api/client";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { Pagination } from "../components/ui/Pagination";
 import { useConfirm } from "../contexts/ModalContext";
@@ -47,12 +40,10 @@ import { HealthFilters } from "./HealthPage/components/HealthFilters";
 import { HealthStatsCards } from "./HealthPage/components/HealthStatsCards";
 import { HealthStatusAlert } from "./HealthPage/components/HealthStatusAlert";
 import { HealthTable } from "./HealthPage/components/HealthTable/HealthTable";
-import { IndexerHealth } from "./HealthPage/components/IndexerHealth/IndexerHealth";
 import { LibraryScanStatus } from "./HealthPage/components/LibraryScanStatus";
-import { ProviderHealth } from "./HealthPage/components/ProviderHealth/ProviderHealth";
 import type { CleanupConfig, SortBy, SortOrder } from "./HealthPage/types";
 
-type HealthTab = "files" | "providers" | "indexers";
+type HealthTab = "files";
 
 const HEALTH_SECTIONS = {
 	files: {
@@ -60,32 +51,16 @@ const HEALTH_SECTIONS = {
 		description: "Monitor and repair corrupted media files",
 		icon: FileCheck,
 	},
-	providers: {
-		title: "Provider Health",
-		description: "Check Usenet provider connectivity and speed",
-		icon: Server,
-	},
-	indexers: {
-		title: "Indexer Health",
-		description: "View success and failure rates of Usenet indexers",
-		icon: ShieldCheck,
-	},
 };
 
 export function HealthPage() {
 	const { tab } = useParams<{ tab?: string }>();
 	const navigate = useNavigate();
 
-	const activeTab = useMemo<HealthTab>(() => {
-		if (!tab) return "files";
-		const validTabs = ["files", "providers", "indexers"];
-		return validTabs.includes(tab) ? (tab as HealthTab) : "files";
-	}, [tab]);
+	const activeTab: HealthTab = "files";
 
 	useEffect(() => {
-		if (!tab) {
-			navigate("/health/files", { replace: true });
-		} else if (tab !== "files" && tab !== "providers" && tab !== "indexers") {
+		if (tab !== "files") {
 			navigate("/health/files", { replace: true });
 		}
 	}, [tab, navigate]);
@@ -497,6 +472,40 @@ export function HealthPage() {
 		}
 	};
 
+	const handleSelectAllPages = async () => {
+		if (!meta?.total) return;
+
+		const confirmed = await confirmAction(
+			"Select All Pages",
+			`Are you sure you want to select all ${meta.total} matching items across all pages? This might take a moment to fetch.`,
+			{
+				type: "info",
+				confirmText: "Select All",
+				confirmButtonClass: "btn-info",
+			},
+		);
+
+		if (confirmed) {
+			try {
+				const response = await apiClient.getHealth({
+					limit: meta.total,
+					search: searchTerm || undefined,
+					status: statusFilter || undefined,
+				});
+				if (response.data) {
+					setSelectedItems(new Set(response.data.map((item) => item.file_path)));
+				}
+			} catch (e) {
+				console.error("Failed to fetch all items for select all", e);
+				showToast({
+					title: "Error",
+					message: "Failed to fetch all items",
+					type: "error",
+				});
+			}
+		}
+	};
+
 	const handleBulkDelete = () => {
 		if (selectedItems.size === 0) return;
 		setDeleteModal({ show: true, isBulk: true });
@@ -732,7 +741,7 @@ export function HealthPage() {
 												<li key={key}>
 													<button
 														type="button"
-														className={`flex items-center gap-3 rounded-lg px-4 py-3 transition-all ${
+														className={`flex items-center gap-3 rounded-lg py-3 pr-4 pl-6 transition-all ${
 															isActive
 																? "bg-primary font-semibold text-primary-content shadow-md shadow-primary/20"
 																: "hover:bg-base-200"
@@ -796,120 +805,101 @@ export function HealthPage() {
 							</div>
 						</div>
 
-						{activeTab === "files" ? (
-							<div className="space-y-6">
-								<HealthStatsCards stats={stats} />
+						<div className="space-y-6">
+							<HealthStatsCards stats={stats} />
 
-								<div className="card border-2 border-base-300/50 bg-base-100 shadow-md">
-									<div className="card-body p-4 sm:p-8">
-										<HealthFilters
+							<div className="card border-2 border-base-300/50 bg-base-100 shadow-md">
+								<div className="card-body p-4 sm:p-8">
+									<HealthFilters
+										searchTerm={searchTerm}
+										statusFilter={statusFilter}
+										onSearchChange={setSearchTerm}
+										onStatusFilterChange={setStatusFilter}
+									/>
+
+									<BulkActionsToolbar
+										selectedCount={selectedItems.size}
+										isRestartPending={restartBulkItems.isPending}
+										isDeletePending={deleteBulkItems.isPending}
+										isRepairPending={repairBulkItems.isPending}
+										isRegeneratePending={regenerateSymlinks.isPending}
+										onClearSelection={() => setSelectedItems(new Set())}
+										onBulkRestart={handleBulkRestart}
+										onBulkDelete={handleBulkDelete}
+										onBulkRepair={handleBulkRepair}
+										onBulkRegenerate={
+											config?.import?.import_strategy !== "NONE" ? handleBulkRegenerate : undefined
+										}
+									/>
+
+									<div className="mt-6">
+										<HealthTable
+											data={data}
+											isLoading={isLoading}
+											selectedItems={selectedItems}
+											sortBy={sortBy}
+											sortOrder={sortOrder}
 											searchTerm={searchTerm}
 											statusFilter={statusFilter}
-											onSearchChange={setSearchTerm}
-											onStatusFilterChange={setStatusFilter}
-										/>
-
-										<BulkActionsToolbar
-											selectedCount={selectedItems.size}
-											isRestartPending={restartBulkItems.isPending}
-											isDeletePending={deleteBulkItems.isPending}
-											isRepairPending={repairBulkItems.isPending}
-											isRegeneratePending={regenerateSymlinks.isPending}
-											onClearSelection={() => setSelectedItems(new Set())}
-											onBulkRestart={handleBulkRestart}
-											onBulkDelete={handleBulkDelete}
-											onBulkRepair={handleBulkRepair}
-											onBulkRegenerate={
+											isCancelPending={cancelHealthCheck.isPending}
+											isDirectCheckPending={directHealthCheck.isPending}
+											isRepairPending={repairHealthItem.isPending}
+											isDeletePending={deleteItem.isPending}
+											isUnmaskPending={unmaskItem.isPending}
+											onSelectItem={handleSelectItem}
+											onSelectAll={handleSelectAll}
+											onSelectAllPages={handleSelectAllPages}
+											onSort={handleSort}
+											onCancelCheck={handleCancelCheck}
+											onManualCheck={handleManualCheck}
+											onRepair={handleRepair}
+											onDelete={handleDelete}
+											onUnmask={handleUnmask}
+											onSetPriority={handleSetPriority}
+											onRegenerate={
 												config?.import?.import_strategy !== "NONE"
-													? handleBulkRegenerate
+													? handleRegenerateSingle
 													: undefined
 											}
 										/>
+									</div>
 
+									{meta?.total && meta.total > pageSize && (
 										<div className="mt-6">
-											<HealthTable
-												data={data}
-												isLoading={isLoading}
-												selectedItems={selectedItems}
-												sortBy={sortBy}
-												sortOrder={sortOrder}
-												searchTerm={searchTerm}
-												statusFilter={statusFilter}
-												isCancelPending={cancelHealthCheck.isPending}
-												isDirectCheckPending={directHealthCheck.isPending}
-												isRepairPending={repairHealthItem.isPending}
-												isDeletePending={deleteItem.isPending}
-												isUnmaskPending={unmaskItem.isPending}
-												onSelectItem={handleSelectItem}
-												onSelectAll={handleSelectAll}
-												onSort={handleSort}
-												onCancelCheck={handleCancelCheck}
-												onManualCheck={handleManualCheck}
-												onRepair={handleRepair}
-												onDelete={handleDelete}
-												onUnmask={handleUnmask}
-												onSetPriority={handleSetPriority}
-												onRegenerate={
-													config?.import?.import_strategy !== "NONE"
-														? handleRegenerateSingle
-														: undefined
-												}
+											<Pagination
+												currentPage={page + 1}
+												totalPages={Math.ceil(meta.total / pageSize)}
+												onPageChange={(newPage) => setPage(newPage - 1)}
+												totalItems={meta.total}
+												itemsPerPage={pageSize}
+												showSummary={true}
 											/>
 										</div>
-
-										{meta?.total && meta.total > pageSize && (
-											<div className="mt-6">
-												<Pagination
-													currentPage={page + 1}
-													totalPages={Math.ceil(meta.total / pageSize)}
-													onPageChange={(newPage) => setPage(newPage - 1)}
-													totalItems={meta.total}
-													itemsPerPage={pageSize}
-													showSummary={true}
-												/>
-											</div>
-										)}
-									</div>
-								</div>
-
-								<HealthStatusAlert stats={stats} />
-
-								<CleanupModal
-									show={showCleanupModal}
-									config={cleanupConfig}
-									isPending={cleanupHealth.isPending}
-									onClose={() => setShowCleanupModal(false)}
-									onConfigChange={setCleanupConfig}
-									onConfirm={handleCleanupConfirm}
-								/>
-
-								<DeleteHealthModal
-									show={deleteModal.show}
-									itemCount={
-										deleteModal.isBulk
-											? selectedItems.size
-											: deleteModal.itemId !== undefined
-												? 1
-												: 0
-									}
-									isPending={deleteItem.isPending || deleteBulkItems.isPending}
-									onClose={() => setDeleteModal({ show: false, isBulk: false })}
-									onConfirm={handleDeleteConfirm}
-								/>
-							</div>
-						) : activeTab === "providers" ? (
-							<div className="card border-2 border-base-300/50 bg-base-100 shadow-md">
-								<div className="card-body p-4 sm:p-8">
-									<ProviderHealth />
+									)}
 								</div>
 							</div>
-						) : (
-							<div className="card border-2 border-base-300/50 bg-base-100 shadow-md">
-								<div className="card-body p-4 sm:p-8">
-									<IndexerHealth />
-								</div>
-							</div>
-						)}
+
+							<HealthStatusAlert stats={stats} />
+
+							<CleanupModal
+								show={showCleanupModal}
+								config={cleanupConfig}
+								isPending={cleanupHealth.isPending}
+								onClose={() => setShowCleanupModal(false)}
+								onConfigChange={setCleanupConfig}
+								onConfirm={handleCleanupConfirm}
+							/>
+
+							<DeleteHealthModal
+								show={deleteModal.show}
+								itemCount={
+									deleteModal.isBulk ? selectedItems.size : deleteModal.itemId !== undefined ? 1 : 0
+								}
+								isPending={deleteItem.isPending || deleteBulkItems.isPending}
+								onClose={() => setDeleteModal({ show: false, isBulk: false })}
+								onConfirm={handleDeleteConfirm}
+							/>
+						</div>
 					</div>
 				</div>
 			</div>

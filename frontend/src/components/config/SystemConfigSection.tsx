@@ -13,6 +13,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useConfirm } from "../../contexts/ModalContext";
 import { useToast } from "../../contexts/ToastContext";
 import { useRegenerateAPIKey } from "../../hooks/useAuth";
+import { copyToClipboard } from "../../lib/utils";
 import type { ConfigResponse, LogFormData } from "../../types/config";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
 import { UpdateSection } from "./UpdateSection";
@@ -52,7 +53,12 @@ const DARK_THEMES = [
 	"abyss",
 ] as const;
 
-type ThemeId = (typeof LIGHT_THEMES)[number] | (typeof DARK_THEMES)[number];
+const MINIMAL_THEMES = ["glass-light", "glass-dark"] as const;
+
+type ThemeId =
+	| (typeof LIGHT_THEMES)[number]
+	| (typeof DARK_THEMES)[number]
+	| (typeof MINIMAL_THEMES)[number];
 
 function getActiveTheme(): ThemeId | "system" {
 	const saved = localStorage.getItem("theme");
@@ -73,12 +79,17 @@ function applyTheme(theme: ThemeId | "system") {
 
 function ThemeSwatch({
 	theme,
+	label,
 	isActive,
 	onClick,
+	minimal = false,
 }: {
 	theme: ThemeId;
+	label?: string;
 	isActive: boolean;
 	onClick: () => void;
+	// Minimal themes share one blue; show success/warning to preview green/amber.
+	minimal?: boolean;
 }) {
 	return (
 		<button
@@ -93,12 +104,12 @@ function ThemeSwatch({
 		>
 			<div className="flex h-8 w-full">
 				<div className="flex-1 bg-primary" />
-				<div className="flex-1 bg-secondary" />
-				<div className="flex-1 bg-accent" />
+				<div className={`flex-1 ${minimal ? "bg-success" : "bg-secondary"}`} />
+				<div className={`flex-1 ${minimal ? "bg-warning" : "bg-accent"}`} />
 				<div className="flex-1 bg-neutral" />
 			</div>
 			<div className="flex w-full items-center justify-between bg-base-100 px-2 py-1.5">
-				<span className="truncate text-[10px] text-base-content">{theme}</span>
+				<span className="truncate text-[10px] text-base-content">{label ?? theme}</span>
 				{isActive && <Check className="h-3 w-3 shrink-0 text-primary" />}
 			</div>
 		</button>
@@ -185,10 +196,10 @@ export function SystemConfigSection({
 
 	const handleCopyAPIKey = async () => {
 		if (config.api_key) {
-			try {
-				await navigator.clipboard.writeText(config.api_key);
+			const ok = await copyToClipboard(config.api_key);
+			if (ok) {
 				showToast({ type: "success", title: "Success", message: "API key copied to clipboard" });
-			} catch (_error) {
+			} else {
 				showToast({ type: "error", title: "Error", message: "Failed to copy API key" });
 			}
 		}
@@ -224,13 +235,6 @@ export function SystemConfigSection({
 
 	return (
 		<div className="min-w-0 space-y-10">
-			<div className="min-w-0">
-				<h3 className="font-bold text-base-content text-lg tracking-tight">System Core</h3>
-				<p className="break-words text-base-content/50 text-sm">
-					Manage global logging, security, and identity.
-				</p>
-			</div>
-
 			<div className="min-w-0 space-y-8">
 				{/* Updates */}
 				<UpdateSection />
@@ -292,6 +296,25 @@ export function SystemConfigSection({
 								<ThemeSwatch
 									key={theme}
 									theme={theme}
+									isActive={activeTheme === theme}
+									onClick={() => handleThemeChange(theme)}
+								/>
+							))}
+						</div>
+					</div>
+
+					{/* Minimal themes */}
+					<div>
+						<p className="mb-2 font-semibold text-base-content/40 text-xs uppercase tracking-wider">
+							Minimal
+						</p>
+						<div className="grid min-w-0 grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
+							{MINIMAL_THEMES.map((theme) => (
+								<ThemeSwatch
+									key={theme}
+									theme={theme}
+									label={theme.replace("glass-", "")}
+									minimal
 									isActive={activeTheme === theme}
 									onClick={() => handleThemeChange(theme)}
 								/>

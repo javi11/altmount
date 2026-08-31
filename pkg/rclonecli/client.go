@@ -12,54 +12,125 @@ import (
 
 // Mount creates a mount using the rclone RC API with retry logic
 func (m *Manager) Mount(ctx context.Context, provider, mountPath, webdavURL string) error {
+	m.mountMu.Lock()
+	defer m.mountMu.Unlock()
 	return m.mountWithRetry(ctx, provider, mountPath, webdavURL, 3)
 }
 
-// mountWithRetry attempts to mount with retry logic
+// mountWithRetry attempts to mount with retry logic.
+//
+// A failed mount/mount attempt leaves a leaked VFS instance inside the rcd
+// subprocess: rclone creates the VFS before attempting the FUSE mount and does
+// not shut it down on failure, and the failed mount is never registered with
+// mount/unmount. Neither RC unmount nor fusermount can remove that in-process
+// state, so the only reliable cleanup is restarting the rcd subprocess between
+// attempts (and after the terminal failure) to guarantee a clean VFS registry.
 func (m *Manager) mountWithRetry(ctx context.Context, provider, mountPath, webdavURL string, maxRetries int) error {
+	if m.mountFn == nil {
+		return fmt.Errorf("mount operation is not configured")
+	}
+	if m.retryDelay == nil {
+		m.retryDelay = func(attempt int) time.Duration { return time.Duration(attempt*2) * time.Second }
+	}
 	if !m.IsReady() {
 		if err := m.WaitForReady(30 * time.Second); err != nil {
 			return fmt.Errorf("rclone RC server not ready: %w", err)
 		}
 	}
 
+	var lastErr error
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
-			// Try RC unmount first (cleans up rclone internal state)
-			if m.IsReady() {
-				req := RCRequest{
-					Command: "mount/unmount",
-					Args: map[string]any{
-						"mountPoint": mountPath,
-					},
-				}
-				if _, err := m.makeRequest(req, true); err != nil {
-					m.logger.DebugContext(ctx, "RC unmount before retry failed (may be expected)", "err", err, "provider", provider)
-				}
+			// Clear partial mount state and reset the rcd subprocess so the
+			// retry starts from a clean VFS registry.
+			if err := m.cleanupAfterFailedMount(ctx, provider, mountPath); err != nil {
+				return fmt.Errorf("mount attempt %d failed for %s: %w; cleanup failed: %w", attempt, provider, lastErr, err)
 			}
-
-			// Force unmount using system commands
-			if err := m.forceUnmountPath(mountPath); err != nil {
-				m.logger.DebugContext(ctx, "Force unmount before retry returned error (may be expected)", "err", err, "provider", provider)
-			}
-
-			// Clean up mount directory if empty
-			_ = os.Remove(mountPath)
 
 			// Wait before retry
-			wait := time.Duration(attempt*2) * time.Second
+			wait := m.retryDelay(attempt)
 			m.logger.DebugContext(ctx, "Retrying mount operation", "attempt", attempt, "provider", provider)
-			time.Sleep(wait)
+			if !sleepWithContext(ctx, wait) {
+				return ctx.Err()
+			}
 		}
 
-		if err := m.performMount(ctx, provider, mountPath, webdavURL); err != nil {
+		if err := m.mountFn(ctx, provider, mountPath, webdavURL); err != nil {
+			lastErr = err
 			m.logger.ErrorContext(ctx, "Mount attempt failed", "err", err, "provider", provider, "attempt", attempt+1)
 			continue
 		}
 
 		return nil // Success
 	}
+
+	// The terminal attempt also leaked a VFS. Reset the rcd subprocess so a
+	// clean state is left behind even when mounting is reported as failed.
+	if err := m.cleanupAfterFailedMount(ctx, provider, mountPath); err != nil {
+		return fmt.Errorf("mount failed for %s: %w; cleanup failed: %w", provider, lastErr, err)
+	}
+
+	if lastErr != nil {
+		return fmt.Errorf("mount failed for %s: %w", provider, lastErr)
+	}
 	return fmt.Errorf("mount failed for %s", provider)
+}
+
+// cleanupAfterFailedMount removes partial mount state from a failed mount/mount
+// attempt and restarts the rcd subprocess. Restarting is required because a
+// failed FUSE mount leaves a leaked VFS instance inside the rcd process that
+// mount/unmount and fusermount cannot remove.
+func (m *Manager) cleanupAfterFailedMount(ctx context.Context, provider, mountPath string) error {
+	var restore []*MountInfo
+	m.mountsMutex.RLock()
+	for name, info := range m.mounts {
+		if name != provider && info.desired {
+			copy := *info
+			restore = append(restore, &copy)
+		}
+	}
+	m.mountsMutex.RUnlock()
+
+	// Force unmount using system commands
+	if err := m.forceUnmount(mountPath); err != nil {
+		m.logger.DebugContext(ctx, "Force unmount returned error (may be expected)", "err", err, "provider", provider)
+	}
+
+	// Clean up mount directory if empty
+	_ = os.Remove(mountPath)
+
+	if !m.IsReady() {
+		// rcd is not running; there is no leaked VFS state to reset.
+		return nil
+	}
+
+	m.logger.InfoContext(ctx, "Restarting rclone RC server to clear leaked VFS state", "provider", provider)
+	cleanupCtx, cancel := context.WithTimeout(m.ctx, 45*time.Second)
+	defer cancel()
+	if err := m.restart(cleanupCtx); err != nil {
+		return fmt.Errorf("failed to restart rclone RC server after failed mount: %w", err)
+	}
+	// Restarting rcd invalidates every FUSE mount in that process. Restore
+	// mounts that were active before recycling after the current operation
+	// releases mountMu; otherwise one failed provider permanently drops all
+	// unrelated providers.
+	for _, info := range restore {
+		if err := m.mountWithRetry(cleanupCtx, info.Provider, info.LocalPath, info.WebDAVURL, 3); err != nil {
+			return fmt.Errorf("failed to restore sibling mount %s after rcd restart: %w", info.Provider, err)
+		}
+	}
+	return nil
+}
+
+// sleepWithContext sleeps for d unless ctx is cancelled first. It returns false
+// when the sleep was interrupted by context cancellation.
+func sleepWithContext(ctx context.Context, d time.Duration) bool {
+	select {
+	case <-time.After(d):
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 // performMount performs a single mount attempt
@@ -95,7 +166,7 @@ func (m *Manager) performMount(ctx context.Context, provider, mountPath, webdavU
 	}
 
 	// Create rclone config for this provider
-	if err := m.createConfig(provider, webdavURL, cfg.WebDAV.User, cfg.WebDAV.Password); err != nil {
+	if err := m.createConfig(ctx, provider, webdavURL, cfg.WebDAV.User, cfg.WebDAV.Password); err != nil {
 		return fmt.Errorf("failed to create rclone config: %w", err)
 	}
 
@@ -189,7 +260,7 @@ func (m *Manager) performMount(ctx context.Context, provider, mountPath, webdavU
 		Args:    mountArgs,
 	}
 
-	_, err := m.makeRequest(req, true)
+	_, err := m.makeRequestWithContext(ctx, req, true)
 	if err != nil {
 		// Clean up mount point on failure
 		m.forceUnmountPath(mountPath)
@@ -204,6 +275,7 @@ func (m *Manager) performMount(ctx context.Context, provider, mountPath, webdavU
 		Mounted:    true,
 		MountedAt:  time.Now().Format(time.RFC3339),
 		ConfigName: provider,
+		desired:    true,
 	}
 
 	m.mountsMutex.Lock()
@@ -215,11 +287,19 @@ func (m *Manager) performMount(ctx context.Context, provider, mountPath, webdavU
 
 // Unmount unmounts a specific provider
 func (m *Manager) Unmount(ctx context.Context, provider string) error {
-	return m.unmount(ctx, provider)
+	m.mountMu.Lock()
+	defer m.mountMu.Unlock()
+	return m.unmount(ctx, provider, true)
 }
 
-// unmount is the internal unmount function
-func (m *Manager) unmount(ctx context.Context, provider string) error {
+// unmount is the internal unmount function.
+//
+// When restartRCD is true the rcd subprocess is restarted after a successful
+// unmount: rclone keeps the VFS alive in-process after mount/unmount, so
+// without a restart a subsequent mount would create a second VFS instance
+// under the same name. restartRCD should be false during full shutdown, where
+// terminating the rcd subprocess already reclaims all VFS state.
+func (m *Manager) unmount(ctx context.Context, provider string, restartRCD bool) error {
 	m.mountsMutex.RLock()
 	mountInfo, exists := m.mounts[provider]
 	m.mountsMutex.RUnlock()
@@ -241,30 +321,41 @@ func (m *Manager) unmount(ctx context.Context, provider string) error {
 
 	var rcErr error
 	if m.IsReady() {
-		_, rcErr = m.makeRequest(req, true)
+		_, rcErr = m.makeRequestWithContext(ctx, req, true)
 	}
 
-	// If RC unmount fails or server is not ready, try force unmount
-	if rcErr != nil {
+	var forceErr error
+	// If RC unmount fails or server is not ready, try force unmount.
+	if rcErr != nil || !m.IsReady() {
 		m.logger.WarnContext(ctx, "RC unmount failed, trying force unmount", "err", rcErr, "provider", provider)
-		if err := m.forceUnmountPath(mountInfo.LocalPath); err != nil {
-			m.logger.ErrorContext(ctx, "Force unmount failed", "err", err, "provider", provider)
-			// Don't return error here, update the state anyway
+		forceErr = m.forceUnmount(mountInfo.LocalPath)
+		if forceErr != nil {
+			m.logger.ErrorContext(ctx, "Force unmount failed", "err", forceErr, "provider", provider)
 		}
 	}
 
 	// Update mount info
 	m.mountsMutex.Lock()
 	if info, exists := m.mounts[provider]; exists {
-		info.Mounted = false
+		info.Mounted = forceErr != nil
+		if forceErr == nil {
+			info.desired = false
+		}
 		info.Error = ""
 		if rcErr != nil {
 			info.Error = rcErr.Error()
+		}
+		if forceErr != nil {
+			info.Error = forceErr.Error()
 		}
 	}
 	m.mountsMutex.Unlock()
 
 	m.logger.InfoContext(ctx, "Unmount completed", "provider", provider)
+	if forceErr != nil {
+		return fmt.Errorf("failed to unmount %s: %w", provider, forceErr)
+	}
+
 	return nil
 }
 
@@ -281,7 +372,7 @@ func (m *Manager) UnmountAll(ctx context.Context) error {
 
 	var lastError error
 	for _, provider := range providers {
-		if err := m.unmount(ctx, provider); err != nil {
+		if err := m.unmount(ctx, provider, false); err != nil {
 			lastError = err
 			m.logger.DebugContext(ctx, "Failed to unmount", "err", err, "provider", provider)
 		}
@@ -341,6 +432,12 @@ func (m *Manager) RefreshDir(ctx context.Context, provider string, dirs []string
 	if len(dirs) == 0 {
 		dirs = []string{"/"}
 	}
+
+	// rclone's VFS is forward-slash on every platform. Normalize here so a
+	// caller that built a directory with filepath cannot silently no-op:
+	// vfs/forget accepts any string and reports success either way.
+	dirs = ToVFSPaths(dirs)
+
 	// Issue a vfs/forget call for each directory to ensure all parents/children are forgotten
 	for _, dir := range dirs {
 		if dir == "" {
@@ -354,7 +451,7 @@ func (m *Manager) RefreshDir(ctx context.Context, provider string, dirs []string
 			Command: "vfs/forget",
 			Args:    forgetArgs,
 		}
-		_, err := m.makeRequest(req, true)
+		_, err := m.makeRequestWithContext(ctx, req, true)
 		if err != nil {
 			m.logger.ErrorContext(ctx, "Failed to forget directory", "err", err, "provider", provider, "dir", dir)
 			return fmt.Errorf("failed to forget directory %s for provider %s: %w", dir, provider, err)
@@ -376,7 +473,7 @@ func (m *Manager) RefreshDir(ctx context.Context, provider string, dirs []string
 			Command: "vfs/refresh",
 			Args:    refreshArgs,
 		}
-		_, err := m.makeRequest(req, true)
+		_, err := m.makeRequestWithContext(ctx, req, true)
 		if err != nil {
 			m.logger.ErrorContext(ctx, "Failed to refresh directory", "err", err, "provider", provider, "dir", dir)
 			return fmt.Errorf("failed to refresh directory %s for provider %s: %w", dir, provider, err)
@@ -386,7 +483,7 @@ func (m *Manager) RefreshDir(ctx context.Context, provider string, dirs []string
 }
 
 // createConfig creates an rclone config entry for the provider
-func (m *Manager) createConfig(configName, webdavURL string, user, pass string) error {
+func (m *Manager) createConfig(ctx context.Context, configName, webdavURL string, user, pass string) error {
 	req := RCRequest{
 		Command: "config/create",
 		Args: map[string]any{
@@ -402,7 +499,7 @@ func (m *Manager) createConfig(configName, webdavURL string, user, pass string) 
 		},
 	}
 
-	_, err := m.makeRequest(req, true)
+	_, err := m.makeRequestWithContext(ctx, req, true)
 	if err != nil {
 		return fmt.Errorf("failed to create config %s: %w", configName, err)
 	}

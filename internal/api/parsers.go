@@ -45,7 +45,7 @@ func ParsePaginationFiber(c *fiber.Ctx) Pagination {
 	pagination := DefaultPagination()
 
 	if limitStr := c.Query("limit"); limitStr != "" {
-		if limit, err := strconv.Atoi(limitStr); err == nil && limit > 0 && limit <= 1000 {
+		if limit, err := strconv.Atoi(limitStr); err == nil && limit > 0 && limit <= 100000 {
 			pagination.Limit = limit
 		}
 	}

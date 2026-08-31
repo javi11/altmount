@@ -3,6 +3,7 @@ import {
 	Eye,
 	EyeOff,
 	HardDrive,
+	Info,
 	Play,
 	Save,
 	Square,
@@ -608,6 +609,11 @@ function RCloneMountSubSection({ config, onFormDataChange }: RCloneSubSectionPro
 		setMountFormData(buildRCloneMountFormData(config));
 	}, [config.rclone, config]);
 
+	// rclone applies no cache size cap unless one is passed, so an empty value
+	// while caching is enabled lets the cache directory fill the disk.
+	const cacheLimitsUnbounded =
+		mountFormData.vfs_cache_mode !== "off" && mountFormData.vfs_cache_max_size.trim() === "";
+
 	const handleMountInputChange = (
 		field: keyof RCloneMountFormData,
 		value: string | boolean | number | Record<string, string>,
@@ -621,6 +627,16 @@ function RCloneMountSubSection({ config, onFormDataChange }: RCloneSubSectionPro
 
 	return (
 		<div className="space-y-8">
+			{/* Mount options are passed to rclone when the mount is created, so saving
+			    alone does not change a mount that is already running. */}
+			<div className="alert alert-info rounded-2xl border border-info/20 bg-info/5 py-3">
+				<Info className="h-4 w-4 shrink-0" aria-hidden="true" />
+				<span className="text-xs">
+					These options are applied when the mount is created. After saving, stop and start the
+					mount (or restart AltMount) for the changes to take effect.
+				</span>
+			</div>
+
 			{/* Basic Mount Settings */}
 			<div className="space-y-4">
 				<h5 className="font-bold text-base-content/60 text-xs uppercase tracking-widest">
@@ -795,6 +811,15 @@ function RCloneMountSubSection({ config, onFormDataChange }: RCloneSubSectionPro
 								onChange={(e) => handleMountInputChange("vfs_cache_max_size", e.target.value)}
 								placeholder="50G"
 							/>
+							{cacheLimitsUnbounded && (
+								<p className="label flex items-start gap-1.5 text-warning text-xs">
+									<AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
+									<span>
+										Empty: no size limit is sent to rclone, so the cache directory grows until the
+										disk is full. Set a value such as 50G.
+									</span>
+								</p>
+							)}
 						</fieldset>
 						<fieldset className="fieldset">
 							<legend className="fieldset-legend">Cache Poll Interval</legend>
@@ -806,17 +831,17 @@ function RCloneMountSubSection({ config, onFormDataChange }: RCloneSubSectionPro
 								placeholder="1m"
 							/>
 						</fieldset>
+						<fieldset className="fieldset">
+							<legend className="fieldset-legend">Cache Max Age</legend>
+							<input
+								type="text"
+								className="input input-bordered w-full bg-base-100 font-mono text-sm"
+								value={mountFormData.vfs_cache_max_age}
+								onChange={(e) => handleMountInputChange("vfs_cache_max_age", e.target.value)}
+								placeholder="504h"
+							/>
+						</fieldset>
 					</div>
-					<fieldset className="fieldset">
-						<legend className="fieldset-legend">Cache Max Age</legend>
-						<input
-							type="text"
-							className="input input-bordered w-full bg-base-100 font-mono text-sm"
-							value={mountFormData.vfs_cache_max_age}
-							onChange={(e) => handleMountInputChange("vfs_cache_max_age", e.target.value)}
-							placeholder="504h"
-						/>
-					</fieldset>
 				</div>
 			</div>
 
@@ -1327,7 +1352,7 @@ function ExternalRCloneSubSection({ config, onFormDataChange }: ExternalSubSecti
 						/>
 						<button
 							type="button"
-							className="-translate-y-1/2 btn btn-ghost btn-sm absolute top-1/2 right-2"
+							className="btn btn-ghost btn-sm -translate-y-1/2 absolute top-1/2 right-2"
 							onClick={() => setShowPassword(!showPassword)}
 						>
 							{showPassword ? (
@@ -1388,9 +1413,12 @@ function buildRCloneMountFormData(config: ConfigResponse): RCloneMountFormData {
 		transfers: config.rclone.transfers || 4,
 		cache_dir: config.rclone.cache_dir || "",
 		vfs_cache_mode: config.rclone.vfs_cache_mode || "full",
-		vfs_cache_poll_interval: config.rclone.vfs_cache_poll_interval || "1m",
-		vfs_cache_max_size: config.rclone.vfs_cache_max_size || "50G",
-		vfs_cache_max_age: config.rclone.vfs_cache_max_age || "504h",
+		// Cache limits are shown verbatim: an empty value means AltMount sends no
+		// limit to rclone (rclone then caches without bound), so substituting a
+		// placeholder default here would misreport the mount's real behaviour.
+		vfs_cache_poll_interval: config.rclone.vfs_cache_poll_interval ?? "",
+		vfs_cache_max_size: config.rclone.vfs_cache_max_size ?? "",
+		vfs_cache_max_age: config.rclone.vfs_cache_max_age ?? "",
 		vfs_read_chunk_size: config.rclone.vfs_read_chunk_size || "32M",
 		vfs_read_chunk_size_limit: config.rclone.vfs_read_chunk_size_limit || "2G",
 		vfs_read_ahead: config.rclone.vfs_read_ahead || "128M",

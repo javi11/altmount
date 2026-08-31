@@ -1,8 +1,10 @@
 package fileinfo
 
 import (
+	"crypto/md5"
 	"testing"
 
+	"github.com/javi11/altmount/internal/importer/parser/par2"
 	"github.com/javi11/nntppool/v4"
 	"github.com/javi11/nzbparser"
 )
@@ -281,5 +283,46 @@ func TestGetFileInfo_Par2DetectionViaSubject(t *testing.T) {
 					info.IsPar2Archive, tt.wantIsPar2, tt.subjectFilename, tt.headerFilename, info.Filename)
 			}
 		})
+	}
+}
+
+// par2DescFor builds a descriptor map keyed the same way getFileInfo computes it:
+// md5 of the first 16KB zero-padded to 16384 bytes.
+func par2DescFor(first16KB []byte, name string) map[[16]byte]*par2.FileDescriptor {
+	padded := make([]byte, 16384)
+	copy(padded, first16KB)
+	key := md5.Sum(padded)
+	return map[[16]byte]*par2.FileDescriptor{key: {Name: name, Hash16k: key, Length: 100}}
+}
+
+// TestGetFileInfo_Par2NameSurvivesGap5 guards the RAR-set fragmentation bug: PAR2
+// recovers a real first-volume name "yay.rar", but its short lowercase base trips
+// isProbablyObfuscated, so Gap 5 used to overwrite it with the NZB stem. That split
+// the volume from its yay.rNN siblings and broke the whole set. PAR2 is
+// authoritative, so its name must survive.
+func TestGetFileInfo_Par2NameSurvivesGap5(t *testing.T) {
+	content := []byte("rar volume payload")
+	file := &NzbFileWithFirstSegment{
+		NzbFile:   &nzbparser.NzbFile{Filename: "3fefe1fb9d2632bed19c026e37af5f92"},
+		First16KB: content,
+	}
+
+	info := getFileInfo(file, par2DescFor(content, "yay.rar"), "Example.Show.S01E01.1080p.WEB-DL-GRP")
+	if info.Filename != "yay.rar" {
+		t.Errorf("Filename = %q, want %q (PAR2 name was clobbered by Gap 5)", info.Filename, "yay.rar")
+	}
+}
+
+// TestGetFileInfo_Gap5StillFiresWithoutPar2 ensures the fix does not disable Gap 5:
+// with no PAR2 match and an obfuscated subject, the NZB stem is still used.
+func TestGetFileInfo_Gap5StillFiresWithoutPar2(t *testing.T) {
+	file := &NzbFileWithFirstSegment{
+		NzbFile:   &nzbparser.NzbFile{Filename: "b082fa0beaa644d3aa01045d5b8d0b36"},
+		First16KB: make([]byte, 16),
+	}
+
+	info := getFileInfo(file, nil, "My.Show.S01E01")
+	if info.Filename != "My.Show.S01E01" {
+		t.Errorf("Filename = %q, want %q (Gap 5 should still substitute the NZB stem)", info.Filename, "My.Show.S01E01")
 	}
 }

@@ -7,7 +7,9 @@ interface HealthTableHeaderProps {
 	sortBy: SortBy;
 	sortOrder: SortOrder;
 	onSelectAll: (checked: boolean) => void;
+	onSelectAllPages: () => void;
 	onSort: (column: SortBy) => void;
+	allowSelectAllPages: boolean;
 }
 
 export function HealthTableHeader({
@@ -16,23 +18,47 @@ export function HealthTableHeader({
 	sortBy,
 	sortOrder,
 	onSelectAll,
+	onSelectAllPages,
 	onSort,
+	allowSelectAllPages,
 }: HealthTableHeaderProps) {
 	return (
 		<thead>
 			<tr>
-				<th className="w-12">
-					<label className="cursor-pointer">
-						<input
-							type="checkbox"
-							className="checkbox"
-							checked={isAllSelected}
-							ref={(input) => {
-								if (input) input.indeterminate = Boolean(isIndeterminate);
-							}}
-							onChange={(e) => onSelectAll(e.target.checked)}
-						/>
-					</label>
+				<th className="w-16">
+					<div className="dropdown">
+						<label className="flex cursor-pointer items-center gap-1">
+							<input
+								type="checkbox"
+								className="checkbox checkbox-sm"
+								checked={isAllSelected}
+								ref={(input) => {
+									if (input) input.indeterminate = Boolean(isIndeterminate);
+								}}
+								onChange={(e) => onSelectAll(e.target.checked)}
+							/>
+							<ChevronDown className="h-3 w-3" />
+						</label>
+						<ul className="dropdown-content menu z-[1] w-52 rounded-box bg-base-100 p-2 shadow">
+							<li>
+								<button type="button" onClick={() => onSelectAll(true)}>
+									Select all on page
+								</button>
+							</li>
+							{allowSelectAllPages && (
+								<li>
+									<button type="button" onClick={() => onSelectAllPages()}>
+										Select all pages
+									</button>
+								</li>
+							)}
+							<li>
+								<button type="button" onClick={() => onSelectAll(false)}>
+									Clear selection
+								</button>
+							</li>
+						</ul>
+					</div>
 				</th>
 				<th>
 					<button

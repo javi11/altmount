@@ -73,20 +73,21 @@ export function ArrsInstanceCard({
 		[onInstanceChange],
 	);
 
+	// Mirror ARR_TYPES in ArrsConfigSection: distinct accents per type.
 	const getBorderColor = () => {
 		switch (type) {
 			case "radarr":
-				return "bg-primary";
-			case "sonarr":
-				return "bg-secondary";
-			case "lidarr":
-				return "bg-accent";
-			case "readarr":
-				return "bg-info";
-			case "whisparr":
 				return "bg-warning";
-			case "sportarr":
+			case "sonarr":
+				return "bg-info";
+			case "lidarr":
 				return "bg-success";
+			case "readarr":
+				return "bg-error";
+			case "whisparr":
+				return "bg-secondary";
+			case "sportarr":
+				return "bg-accent";
 			default:
 				return "bg-base-300";
 		}

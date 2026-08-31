@@ -27,6 +27,7 @@ import {
 	XOctagon,
 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
+import { apiClient } from "../api/client";
 import { ImportMethods } from "../components/queue/ImportMethods";
 import { QueueItemCard } from "../components/queue/QueueItemCard";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
@@ -74,10 +75,19 @@ export function QueuePage() {
 	const [statusFilter, setStatusFilter] = useState<QueueFilter>("");
 	const [searchTerm, setSearchTerm] = useState("");
 	const [selectedItems, setSelectedItems] = useState<Set<number>>(new Set());
-	const [sortBy, setSortBy] = useState<"created_at" | "updated_at" | "status" | "nzb_path">(
-		"created_at",
-	);
-	const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+	const [sortBy, setSortBy] = useState<"created_at" | "updated_at" | "status" | "nzb_path">(() => {
+		const saved = localStorage.getItem("queue_sort_by");
+		const validColumns = ["created_at", "updated_at", "status", "nzb_path"];
+		return (validColumns.includes(saved || "") ? saved : "created_at") as
+			| "created_at"
+			| "updated_at"
+			| "status"
+			| "nzb_path";
+	});
+	const [sortOrder, setSortOrder] = useState<"asc" | "desc">(() => {
+		const saved = localStorage.getItem("queue_sort_order");
+		return saved === "asc" || saved === "desc" ? saved : "desc";
+	});
 
 	const queryClient = useQueryClient();
 
@@ -175,7 +185,7 @@ export function QueuePage() {
 	);
 
 	const handleDownload = useCallback(
-		async (id: number, status?: string) => {
+		async (id: number) => {
 			try {
 				const response = await fetch(`/api/queue/${id}/download`);
 				if (!response.ok) {
@@ -191,16 +201,6 @@ export function QueuePage() {
 						}
 					} catch {
 						// Non-JSON error body — fall back to status text.
-					}
-					// For completed items, a missing file almost always means the server
-					// cleaned it up post-import (delete_completed_nzb). Soften the toast.
-					if (response.status === 404 && status === "completed") {
-						showToast({
-							type: "info",
-							title: "NZB file already removed",
-							message: "This NZB was cleaned up after successful import.",
-						});
-						return;
 					}
 					showToast({ type: "error", title, message });
 					return;
@@ -315,6 +315,40 @@ export function QueuePage() {
 		}
 	};
 
+	const handleSelectAllPages = async () => {
+		if (!meta?.total) return;
+
+		const confirmed = await confirmAction(
+			"Select All Pages",
+			`Are you sure you want to select all ${meta.total} matching items across all pages? This might take a moment to fetch.`,
+			{
+				type: "info",
+				confirmText: "Select All",
+				confirmButtonClass: "btn-info",
+			},
+		);
+
+		if (confirmed) {
+			try {
+				const response = await apiClient.getQueue({
+					limit: meta.total,
+					search: searchTerm || undefined,
+					status: statusFilter || undefined,
+				});
+				if (response.data) {
+					setSelectedItems(new Set(response.data.map((item) => item.id)));
+				}
+			} catch (e) {
+				console.error("Failed to fetch all items for select all", e);
+				showToast({
+					title: "Error",
+					message: "Failed to fetch all items",
+					type: "error",
+				});
+			}
+		}
+	};
+
 	const handleBulkDelete = async () => {
 		if (selectedItems.size === 0) return;
 		const confirmed = await confirmAction(
@@ -381,18 +415,24 @@ export function QueuePage() {
 	}, []);
 
 	const handleSort = (column: "created_at" | "updated_at" | "status" | "nzb_path") => {
+		let newOrder: "asc" | "desc";
+		let newBy = sortBy;
 		if (sortBy === column) {
-			setSortOrder(sortOrder === "asc" ? "desc" : "asc");
+			newOrder = sortOrder === "asc" ? "desc" : "asc";
 		} else {
-			setSortBy(column);
+			newBy = column;
 			if (column === "created_at") {
-				setSortOrder("asc");
+				newOrder = "desc";
 			} else if (column === "updated_at") {
-				setSortOrder("desc");
+				newOrder = "desc";
 			} else {
-				setSortOrder("asc");
+				newOrder = "asc";
 			}
 		}
+		setSortBy(newBy);
+		setSortOrder(newOrder);
+		localStorage.setItem("queue_sort_by", newBy);
+		localStorage.setItem("queue_sort_order", newOrder);
 		setPage(0);
 		clearSelection();
 	};
@@ -558,7 +598,7 @@ export function QueuePage() {
 													<li key={section.id}>
 														<button
 															type="button"
-															className={`flex items-center gap-3 rounded-lg px-4 py-3 transition-all ${
+															className={`flex items-center gap-3 rounded-lg py-3 pr-4 pl-6 transition-all ${
 																isActive
 																	? "bg-primary font-semibold text-primary-content shadow-md shadow-primary/20"
 																	: "hover:bg-base-200"
@@ -736,16 +776,38 @@ export function QueuePage() {
 												<table className="table-zebra table-sm sm:table-md table">
 													<thead className="bg-base-200/50">
 														<tr>
-															<th className="w-12 text-center">
-																<input
-																	type="checkbox"
-																	className="checkbox checkbox-sm"
-																	checked={isAllSelected}
-																	ref={(input) => {
-																		if (input) input.indeterminate = Boolean(isIndeterminate);
-																	}}
-																	onChange={(e) => handleSelectAll(e.target.checked)}
-																/>
+															<th className="w-16">
+																<div className="dropdown">
+																	<label className="flex cursor-pointer items-center gap-1">
+																		<input
+																			type="checkbox"
+																			className="checkbox checkbox-sm"
+																			checked={isAllSelected}
+																			ref={(input) => {
+																				if (input) input.indeterminate = Boolean(isIndeterminate);
+																			}}
+																			onChange={(e) => handleSelectAll(e.target.checked)}
+																		/>
+																		<ChevronDown className="h-3 w-3" />
+																	</label>
+																	<ul className="dropdown-content menu z-[1] w-52 rounded-box bg-base-100 p-2 shadow">
+																		<li>
+																			<button type="button" onClick={() => handleSelectAll(true)}>
+																				Select all on page
+																			</button>
+																		</li>
+																		<li>
+																			<button type="button" onClick={() => handleSelectAllPages()}>
+																				Select all pages
+																			</button>
+																		</li>
+																		<li>
+																			<button type="button" onClick={() => handleSelectAll(false)}>
+																				Clear selection
+																			</button>
+																		</li>
+																	</ul>
+																</div>
 															</th>
 															<th>
 																<button
@@ -968,8 +1030,7 @@ export function QueuePage() {
 																		</button>
 																		<ul className="dropdown-content menu z-[50] w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow-xl">
 																			{(item.status === QueueStatus.PENDING ||
-																				item.status === QueueStatus.FAILED ||
-																				item.status === QueueStatus.COMPLETED) && (
+																				item.status === QueueStatus.FAILED) && (
 																				<li>
 																					<button
 																						type="button"
@@ -999,7 +1060,7 @@ export function QueuePage() {
 																			<li>
 																				<button
 																					type="button"
-																					onClick={() => handleDownload(item.id, item.status)}
+																					onClick={() => handleDownload(item.id)}
 																				>
 																					<Download className="h-4 w-4" />
 																					Download NZB

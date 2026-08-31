@@ -8,7 +8,7 @@ import (
 
 var (
 	ErrPathMatchFailed         = fmt.Errorf("path match failed")
-	ErrEpisodeAlreadySatisfied = fmt.Errorf("episode already satisfied by another file")
+	ErrEpisodeAlreadySatisfied = fmt.Errorf("item already satisfied by another file in ARR")
 	ErrInstanceNotFound        = fmt.Errorf("instance not found")
 )
 

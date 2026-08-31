@@ -29,6 +29,7 @@ func TestSetKey(t *testing.T) {
 		{"plain media file", "movie.mkv", "", false},
 		{"no extension obfuscated", "a1b2c3d4e5", "", false},
 		{"par2", "movie.par2", "", false},
+		{"embedded apostrophe not surrounding quotes", "It's.A.Wonderful.Life.part01.rar", "it's.a.wonderful.life", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -39,6 +40,99 @@ func TestSetKey(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestExtractRarBaseName covers both branches: a recognized volume resolves to its
+// SetKey, and an unrecognized name falls back to the full lowercased base so it only
+// groups with itself. Inputs are assumed canonical (quotes stripped upstream).
+func TestExtractRarBaseName(t *testing.T) {
+	tests := []struct {
+		name     string
+		filename string
+		want     string
+	}{
+		{"recognized volume 3-digit", "movie.part001.rar", "movie"},
+		{"recognized volume strips directory", "sub/dir/movie.part02.rar", "movie"},
+		{"embedded apostrophe preserved", "It's.A.Wonderful.Life.part01.rar", "it's.a.wonderful.life"},
+		{"non-volume falls back to full name", "movie.mkv", "movie.mkv"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractRarBaseName(tt.filename)
+			if got != tt.want {
+				t.Errorf("extractRarBaseName(%q) = %q; want %q", tt.filename, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestGroupArchivesByBaseNamePaddedWidth proves multi-volume parts collapse into a
+// single group regardless of zero-padding width (part001 vs part01). Inputs are
+// canonical; poster quotes are stripped upstream at the nzbparser boundary.
+func TestGroupArchivesByBaseNamePaddedWidth(t *testing.T) {
+	makeFiles := func(names ...string) []parser.ParsedFile {
+		out := make([]parser.ParsedFile, len(names))
+		for i, n := range names {
+			out[i] = parser.ParsedFile{Filename: n}
+		}
+		return out
+	}
+
+	tests := []struct {
+		name       string
+		files      []parser.ParsedFile
+		wantGroups int
+		wantParts  int
+	}{
+		{
+			name: "3-digit padding collapses to 1 group of 5",
+			files: makeFiles(
+				"movie.part001.rar",
+				"movie.part002.rar",
+				"movie.part003.rar",
+				"movie.part004.rar",
+				"movie.part005.rar",
+			),
+			wantGroups: 1,
+			wantParts:  5,
+		},
+		{
+			name: "2-digit padding collapses to 1 group of 3",
+			files: makeFiles(
+				"movie.part01.rar",
+				"movie.part02.rar",
+				"movie.part03.rar",
+			),
+			wantGroups: 1,
+			wantParts:  3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			groups := GroupArchivesByBaseName(tt.files)
+			if len(groups) != tt.wantGroups {
+				t.Errorf("GroupArchivesByBaseName() got %d groups; want %d (got groups: %v)",
+					len(groups), tt.wantGroups, groupNames(groups))
+			}
+			if tt.wantGroups == 1 && len(groups) == 1 && len(groups[0]) != tt.wantParts {
+				t.Errorf("GroupArchivesByBaseName() group[0] has %d parts; want %d",
+					len(groups[0]), tt.wantParts)
+			}
+		})
+	}
+}
+
+func groupNames(groups [][]parser.ParsedFile) [][]string {
+	out := make([][]string, len(groups))
+	for i, g := range groups {
+		names := make([]string, len(g))
+		for j, f := range g {
+			names[j] = f.Filename
+		}
+		out[i] = names
+	}
+	return out
 }
 
 func TestGroupHasVolumeGap(t *testing.T) {
@@ -63,7 +157,9 @@ func TestGroupHasVolumeGap(t *testing.T) {
 		{"old roll missing first volume", files("m.r00", "m.r01"), true},
 		{"old roll interior gap", files("m.rar", "m.r00", "m.r02"), true},
 		{"old roll full rollover into s contiguous", files(oldRollSet("m", 12)...), false},
-		{"old roll rollover missing s00", files(oldRollSetSkip("m", 12, "m.s00")...), true},
+		// A single interior volume missing from a 114-volume set (~0.9%) is within
+		// tolerance: proceed to analysis rather than pre-skipping a near-complete set.
+		{"old roll rollover missing s00 tolerated", files(oldRollSetSkip("m", 12, "m.s00")...), false},
 		{"numeric contiguous", files("a.001", "a.002", "a.003"), false},
 		{"numeric gap", files("a.001", "a.003"), true},
 		{"numeric missing first", files("a.002", "a.003"), true},
@@ -71,6 +167,10 @@ func TestGroupHasVolumeGap(t *testing.T) {
 		{"mixed schemes not flagged", files("m.rar", "m.part02.rar"), false},
 		{"unrecognized member not flagged", files("m.r00", "obfuscated"), false},
 		{"empty", nil, false},
+		// Large part set missing 2 of 257 volumes (~0.8%): within tolerance, proceed.
+		{"large part set small interior gap tolerated", files(partSetSkip("m", 257, 42, 199)...), false},
+		// Large part set with most volumes absent: clearly doomed, skip.
+		{"large part set mostly missing skipped", files("m.part001.rar", "m.part250.rar"), true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -127,6 +227,23 @@ func oldRollSet(base string, sCount int) []string {
 }
 
 // oldRollSetSkip returns oldRollSet with the named volume removed, simulating a gap.
+// partSetSkip builds a .partNNN.rar set of `count` volumes (1-based, 3-digit
+// padded) omitting the given volume numbers, to model near-complete large sets.
+func partSetSkip(base string, count int, skip ...int) []string {
+	drop := make(map[int]struct{}, len(skip))
+	for _, n := range skip {
+		drop[n] = struct{}{}
+	}
+	names := make([]string, 0, count)
+	for i := 1; i <= count; i++ {
+		if _, ok := drop[i]; ok {
+			continue
+		}
+		names = append(names, fmt.Sprintf("%s.part%03d.rar", base, i))
+	}
+	return names
+}
+
 func oldRollSetSkip(base string, sCount int, skip string) []string {
 	all := oldRollSet(base, sCount)
 	out := all[:0:0]
@@ -137,3 +254,90 @@ func oldRollSetSkip(base string, sCount int, skip string) []string {
 	}
 	return out
 }
+
+func TestNormalizeRarPartFilenameMix(t *testing.T) {
+	tests := []struct {
+		name         string
+		filename     string
+		index        int
+		allNoExt     bool
+		totalFiles   int
+		baseFilename string
+		want         string
+	}{
+		{
+			name:         "first file with .rar extension gets normalized to .r00",
+			filename:     "my_show.rar",
+			index:        0,
+			allNoExt:     true,
+			totalFiles:   46,
+			baseFilename: "my_show",
+			want:         "my_show.r00",
+		},
+		{
+			name:         "continuation file with no extension gets normalized to .r01",
+			filename:     "my_show",
+			index:        1,
+			allNoExt:     true,
+			totalFiles:   46,
+			baseFilename: "my_show",
+			want:         "my_show.r01",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizeRarPartFilename(tt.filename, tt.index, tt.allNoExt, tt.totalFiles, tt.baseFilename)
+			if got != tt.want {
+				t.Errorf("normalizeRarPartFilename(%q) = %q; want %q", tt.filename, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGroupHasVolumeGap_NoR00Convention(t *testing.T) {
+	makeFiles := func(names ...string) []parser.ParsedFile {
+		out := make([]parser.ParsedFile, len(names))
+		for i, n := range names {
+			out[i] = parser.ParsedFile{Filename: n}
+		}
+		return out
+	}
+
+	// 11 volumes: movie.rar, movie.r01, movie.r02, ..., movie.r10 (no movie.r00)
+	// Must NOT be detected as having a volume gap
+	files := makeFiles(
+		"movie.rar",
+		"movie.r01",
+		"movie.r02",
+		"movie.r03",
+		"movie.r04",
+		"movie.r05",
+		"movie.r06",
+		"movie.r07",
+		"movie.r08",
+		"movie.r09",
+		"movie.r10",
+	)
+
+	hasGap := groupHasVolumeGap(files)
+	if hasGap {
+		t.Errorf("groupHasVolumeGap(movie.rar + movie.r01..r10) = true, want false (no gap)")
+	}
+
+	// 11 volumes with actual gap: movie.rar, movie.r01, movie.r03..r10 (missing movie.r02)
+	// Must be detected as having a volume gap
+	filesWithGap := makeFiles(
+		"movie.rar",
+		"movie.r01",
+		"movie.r03",
+		"movie.r04",
+		"movie.r05",
+	)
+
+	hasGap2 := groupHasVolumeGap(filesWithGap)
+	if !hasGap2 {
+		t.Errorf("groupHasVolumeGap with missing r02 = false, want true")
+	}
+}
+

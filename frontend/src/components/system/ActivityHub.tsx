@@ -55,6 +55,7 @@ export function ActivityHub() {
 	const getClientApp = (ua?: string) => {
 		if (!ua) return { name: "Unknown Client", icon: User };
 		const lowUA = ua.toLowerCase();
+		if (lowUA.includes("stremio")) return { name: "Stremio", icon: Play };
 		if (lowUA.includes("plex")) return { name: "Plex", icon: Play };
 		if (lowUA.includes("infuse")) return { name: "Infuse", icon: Play };
 		if (lowUA.includes("vlc")) return { name: "VLC", icon: FileVideo };
@@ -79,9 +80,9 @@ export function ActivityHub() {
 	const groupedStreams = useMemo(() => {
 		if (!allStreams) return [];
 
-		// Filter to show only active streaming sessions (WebDAV or FUSE)
+		// Filter to show only active streaming sessions (WebDAV, FUSE, or API/Stremio)
 		const streamingOnly = allStreams.filter((s) => {
-			const isSystemSource = s.source === "WebDAV" || s.source === "FUSE";
+			const isSystemSource = s.source === "WebDAV" || s.source === "FUSE" || s.source === "API";
 			const isStreaming = s.status === "Streaming";
 
 			// Heuristic: Filter out metadata probes and very short system scans
@@ -190,10 +191,10 @@ export function ActivityHub() {
 											<div className="flex items-center gap-3">
 												<div className="relative">
 													<FileVideo
-														className={`h-8 w-8 shrink-0 ${isStalled ? "animate-pulse text-warning" : "text-primary/70"}`}
+														className={`h-8 w-8 shrink-0 ${isStalled ? "text-warning" : "text-primary/70"}`}
 													/>
 													{!isStalled && (
-														<span className="-bottom-0.5 -right-0.5 absolute flex h-2 w-2">
+														<span className="-right-0.5 -bottom-0.5 absolute flex h-2 w-2">
 															<span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-75" />
 															<span className="relative inline-flex h-2 w-2 rounded-full bg-success" />
 														</span>

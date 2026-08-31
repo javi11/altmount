@@ -116,17 +116,21 @@ type RCloneAPIResponse struct {
 // ProviderAPIResponse sanitizes Provider config for API responses
 type ProviderAPIResponse struct {
 	ID                       string     `json:"id"`
+	Name                     string     `json:"name,omitempty"`
 	Host                     string     `json:"host"`
 	Port                     int        `json:"port"`
 	Username                 string     `json:"username"`
 	MaxConnections           int        `json:"max_connections"`
+	MinConnectionsAlive      int        `json:"min_connections_alive,omitempty"`
 	TLS                      bool       `json:"tls"`
 	InsecureTLS              bool       `json:"insecure_tls"`
 	ProxyURL                 string     `json:"proxy_url,omitempty"`
 	PasswordSet              bool       `json:"password_set"`
 	Enabled                  bool       `json:"enabled"`
 	IsBackupProvider         bool       `json:"is_backup_provider"`
+	StorageGroup             string     `json:"storage_group,omitempty"`
 	InflightRequests         int        `json:"inflight_requests"`
+	StatInflightRequests     int        `json:"stat_inflight_requests"`
 	LastRTTMs                int64      `json:"last_rtt_ms"`
 	LastSpeedTestMbps        float64    `json:"last_speed_test_mbps"`
 	LastSpeedTestTime        *time.Time `json:"last_speed_test_time,omitempty"`
@@ -136,6 +140,7 @@ type ProviderAPIResponse struct {
 	UserAgent                string     `json:"user_agent,omitempty"`
 	QuotaBytes               int64      `json:"quota_bytes"`
 	QuotaPeriodHours         int        `json:"quota_period_hours"`
+	AccountExpirationDate    string     `json:"account_expiration_date,omitempty"`
 }
 
 // ImportAPIResponse handles Import config for API responses
@@ -143,7 +148,6 @@ type ImportAPIResponse struct {
 	MaxProcessorWorkers            int                   `json:"max_processor_workers"`
 	QueueProcessingIntervalSeconds int                   `json:"queue_processing_interval_seconds"` // Interval in seconds
 	AllowedFileExtensions          []string              `json:"allowed_file_extensions"`
-	MaxImportConnections           int                   `json:"max_import_connections"`
 	MaxDownloadPrefetch            int                   `json:"max_download_prefetch"`
 	ReadTimeoutSeconds             int                   `json:"read_timeout_seconds"`
 	SegmentSamplePercentage        int                   `json:"segment_sample_percentage"` // Percentage of segments to check (1-100)
@@ -198,23 +202,89 @@ type ArrsInstanceAPIResponse struct {
 	SyncIntervalHours *int   `json:"sync_interval_hours,omitempty"`
 }
 
+// NewsnabIndexerAPIResponse represents sanitized Newsnab indexer config for API
+type NewsnabIndexerAPIResponse struct {
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	URL            string `json:"url"`
+	APIKey         string `json:"api_key"`
+	APIKeySet      bool   `json:"api_key_set"`
+	Categories     []int  `json:"categories,omitempty"`
+	Weight         int    `json:"weight"`
+	TimeoutSeconds int    `json:"timeout_seconds"`
+	Enabled        bool   `json:"enabled"`
+}
+
+// StremioIndexersAPIResponse represents sanitized search providers config
+type StremioIndexersAPIResponse struct {
+	Provider        string                      `json:"provider"`
+	UserAgentMode   string                      `json:"user_agent_mode,omitempty"`
+	CustomUserAgent string                      `json:"custom_user_agent,omitempty"`
+	Prowlarr        ProwlarrAPIResponse         `json:"prowlarr"`
+	Newsnab         []NewsnabIndexerAPIResponse `json:"newsnab,omitempty"`
+}
+
+// TrashCustomFormatAPIResponse represents a format scoring rule
+type TrashCustomFormatAPIResponse struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Category    string `json:"category"`
+	Pattern     string `json:"pattern"`
+	PatternType string `json:"pattern_type"`
+	Score       int    `json:"score"`
+	Enabled     bool   `json:"enabled"`
+	IsCustom    bool   `json:"is_custom"`
+	Invert      bool   `json:"invert,omitempty"`
+}
+
+// StreamScoringAPIResponse represents scoring and filter config
+type StreamScoringAPIResponse struct {
+	Preset                   string                         `json:"preset"`
+	CustomFormats            []TrashCustomFormatAPIResponse `json:"custom_formats,omitempty"`
+	ExcludeKeywords          []string                       `json:"exclude_keywords,omitempty"`
+	ExcludeRegex             string                         `json:"exclude_regex,omitempty"`
+	PreferredLanguages       []string                       `json:"preferred_languages,omitempty"`
+	RequirePreferredLanguage bool                           `json:"require_preferred_language"`
+}
+
 // StremioAPIResponse sanitizes Stremio config for API responses
 type StremioAPIResponse struct {
-	Enabled     bool                `json:"enabled"`
-	NzbTTLHours int                 `json:"nzb_ttl_hours,omitempty"`
-	BaseURL     string              `json:"base_url,omitempty"`
-	Prowlarr    ProwlarrAPIResponse `json:"prowlarr"`
+	Enabled             bool   `json:"enabled"`
+	AddonName           string `json:"addon_name,omitempty"`
+	AddonDescription    string `json:"addon_description,omitempty"`
+	DirectStream        *bool  `json:"direct_stream,omitempty"`
+	ShowCachedIndicator *bool  `json:"show_cached_indicator,omitempty"`
+	FallbackTimeoutMs   int    `json:"fallback_timeout_ms,omitempty"`
+	MaxRetries          int    `json:"max_retries,omitempty"`
+	StreamTTLSeconds    int    `json:"stream_ttl_seconds,omitempty"`
+	NzbTTLHours         int    `json:"nzb_ttl_hours"`
+	// No omitempty: an explicit 0 must survive the round-trip, otherwise saving the
+	// config would silently restore the defaults.
+	FailedReleaseTTLHours int                        `json:"failed_release_ttl_hours"`
+	MaxFallbackReleases   int                        `json:"max_fallback_releases"`
+	FastFailHeaderOnly    bool                       `json:"fast_fail_header_only"`
+	IncludeLibraryStreams *bool                      `json:"include_library_streams,omitempty"`
+	BaseURL               string                     `json:"base_url,omitempty"`
+	Indexers              StremioIndexersAPIResponse `json:"indexers"`
+	Scoring               StreamScoringAPIResponse   `json:"scoring"`
+	Prowlarr              ProwlarrAPIResponse        `json:"prowlarr"`
 }
 
 // ProwlarrAPIResponse sanitizes Prowlarr config for API responses
 type ProwlarrAPIResponse struct {
-	Enabled    bool     `json:"enabled"`
-	Host       string   `json:"host,omitempty"`
-	APIKey     string   `json:"api_key"`
-	APIKeySet  bool     `json:"api_key_set"`
-	Categories []int    `json:"categories,omitempty"`
-	Languages  []string `json:"languages,omitempty"`
-	Qualities  []string `json:"qualities,omitempty"`
+	Enabled               bool           `json:"enabled"`
+	Host                  string         `json:"host,omitempty"`
+	APIKey                string         `json:"api_key"`
+	APIKeySet             bool           `json:"api_key_set"`
+	Categories            []int          `json:"categories,omitempty"`
+	Indexers              []int          `json:"indexers,omitempty"`
+	PreferredIndexers     []int          `json:"preferred_indexers,omitempty"`
+	PreferredIndexerNames []string       `json:"preferred_indexer_names,omitempty"`
+	Languages             []string       `json:"languages,omitempty"`
+	PreferredLanguages    []string       `json:"preferred_languages,omitempty"`
+	Qualities             []string       `json:"qualities,omitempty"`
+	ExcludeKeywords       []string       `json:"exclude_keywords,omitempty"`
+	CustomScores          map[string]int `json:"custom_scores,omitempty"`
 }
 
 // Helper functions to create API responses from core config types
@@ -230,25 +300,31 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 	for i, p := range cfg.Providers {
 		providers[i] = ProviderAPIResponse{
 			ID:                       p.ID,
+			Name:                     p.Name,
 			Host:                     p.Host,
 			Port:                     p.Port,
 			Username:                 p.Username,
 			MaxConnections:           p.MaxConnections,
+			MinConnectionsAlive:      p.MinConnectionsAlive,
 			TLS:                      p.TLS,
 			InsecureTLS:              p.InsecureTLS,
 			ProxyURL:                 p.ProxyURL,
 			PasswordSet:              p.Password != "",
 			Enabled:                  p.Enabled != nil && *p.Enabled,
 			IsBackupProvider:         p.IsBackupProvider != nil && *p.IsBackupProvider,
+			StorageGroup:             p.StorageGroup,
 			InflightRequests:         p.InflightRequests,
+			StatInflightRequests:     p.StatInflightRequests,
 			LastRTTMs:                p.LastRTTMs,
 			LastSpeedTestMbps:        p.LastSpeedTestMbps,
 			LastSpeedTestTime:        p.LastSpeedTestTime,
 			SkipPing:                 p.SkipPing,
 			KeepaliveIntervalSeconds: p.KeepaliveIntervalSeconds,
 			KeepaliveCommand:         p.KeepaliveCommand,
+			UserAgent:                p.UserAgent,
 			QuotaBytes:               p.QuotaBytes,
 			QuotaPeriodHours:         p.QuotaPeriodHours,
+			AccountExpirationDate:    p.AccountExpirationDate,
 		}
 	}
 
@@ -370,19 +446,93 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 		QueueCleanupRules:              cfg.Arrs.QueueCleanupRules,
 	}
 
+	newsnabResps := make([]NewsnabIndexerAPIResponse, 0, len(cfg.Stremio.Indexers.Newsnab))
+	for _, n := range cfg.Stremio.Indexers.Newsnab {
+		newsnabResps = append(newsnabResps, NewsnabIndexerAPIResponse{
+			ID:             n.ID,
+			Name:           n.Name,
+			URL:            n.URL,
+			APIKey:         "",
+			APIKeySet:      n.APIKey != "",
+			Categories:     n.Categories,
+			Weight:         n.Weight,
+			TimeoutSeconds: n.TimeoutSeconds,
+			Enabled:        n.Enabled,
+		})
+	}
+
+	prowlarrCfg := cfg.Stremio.Indexers.Prowlarr
+	if prowlarrCfg.Host == "" && cfg.Stremio.Prowlarr.Host != "" {
+		prowlarrCfg = cfg.Stremio.Prowlarr
+	}
+
+	prowlarrResp := ProwlarrAPIResponse{
+		Enabled:               prowlarrCfg.Enabled != nil && *prowlarrCfg.Enabled,
+		Host:                  prowlarrCfg.Host,
+		APIKey:                "",
+		APIKeySet:             prowlarrCfg.APIKey != "",
+		Categories:            prowlarrCfg.Categories,
+		Indexers:              prowlarrCfg.Indexers,
+		PreferredIndexers:     prowlarrCfg.PreferredIndexers,
+		PreferredIndexerNames: prowlarrCfg.PreferredIndexerNames,
+		Languages:             prowlarrCfg.Languages,
+		PreferredLanguages:    prowlarrCfg.PreferredLanguages,
+		Qualities:             prowlarrCfg.Qualities,
+		ExcludeKeywords:       prowlarrCfg.ExcludeKeywords,
+		CustomScores:          prowlarrCfg.CustomScores,
+	}
+
+	cfResps := make([]TrashCustomFormatAPIResponse, 0, len(cfg.Stremio.Scoring.CustomFormats))
+	for _, f := range cfg.Stremio.Scoring.CustomFormats {
+		cfResps = append(cfResps, TrashCustomFormatAPIResponse{
+			ID:          f.ID,
+			Name:        f.Name,
+			Category:    f.Category,
+			Pattern:     f.Pattern,
+			PatternType: f.PatternType,
+			Score:       f.Score,
+			Enabled:     f.Enabled,
+			IsCustom:    f.IsCustom,
+			Invert:      f.Invert,
+		})
+	}
+
+	provider := cfg.Stremio.Indexers.Provider
+	if provider == "" {
+		provider = "prowlarr"
+	}
+
 	stremioResp := StremioAPIResponse{
-		Enabled:     cfg.Stremio.Enabled != nil && *cfg.Stremio.Enabled,
-		NzbTTLHours: cfg.Stremio.NzbTTLHours,
-		BaseURL:     cfg.Stremio.BaseURL,
-		Prowlarr: ProwlarrAPIResponse{
-			Enabled:    cfg.Stremio.Prowlarr.Enabled != nil && *cfg.Stremio.Prowlarr.Enabled,
-			Host:       cfg.Stremio.Prowlarr.Host,
-			APIKey:     cfg.Stremio.Prowlarr.APIKey,
-			APIKeySet:  cfg.Stremio.Prowlarr.APIKey != "",
-			Categories: cfg.Stremio.Prowlarr.Categories,
-			Languages:  cfg.Stremio.Prowlarr.Languages,
-			Qualities:  cfg.Stremio.Prowlarr.Qualities,
+		Enabled:               cfg.Stremio.Enabled != nil && *cfg.Stremio.Enabled,
+		AddonName:             cfg.Stremio.AddonName,
+		AddonDescription:      cfg.Stremio.AddonDescription,
+		DirectStream:          cfg.Stremio.DirectStream,
+		ShowCachedIndicator:   cfg.Stremio.ShowCachedIndicator,
+		FallbackTimeoutMs:     cfg.Stremio.FallbackTimeoutMs,
+		MaxRetries:            cfg.Stremio.MaxRetries,
+		StreamTTLSeconds:      cfg.Stremio.StreamTTLSeconds,
+		NzbTTLHours:           cfg.Stremio.NzbTTLHours,
+		FailedReleaseTTLHours: cfg.Stremio.FailedReleaseTTLHours,
+		MaxFallbackReleases:   cfg.Stremio.MaxFallbackReleases,
+		FastFailHeaderOnly:    cfg.Stremio.EffectiveFastFailHeaderOnly(),
+		IncludeLibraryStreams: cfg.Stremio.IncludeLibraryStreams,
+		BaseURL:               cfg.Stremio.BaseURL,
+		Indexers: StremioIndexersAPIResponse{
+			Provider:        provider,
+			UserAgentMode:   cfg.Stremio.Indexers.UserAgentMode,
+			CustomUserAgent: cfg.Stremio.Indexers.CustomUserAgent,
+			Prowlarr:        prowlarrResp,
+			Newsnab:         newsnabResps,
 		},
+		Scoring: StreamScoringAPIResponse{
+			Preset:                   cfg.Stremio.Scoring.Preset,
+			CustomFormats:            cfResps,
+			ExcludeKeywords:          cfg.Stremio.Scoring.ExcludeKeywords,
+			ExcludeRegex:             cfg.Stremio.Scoring.ExcludeRegex,
+			PreferredLanguages:       cfg.Stremio.Scoring.PreferredLanguages,
+			RequirePreferredLanguage: cfg.Stremio.Scoring.RequirePreferredLanguage,
+		},
+		Prowlarr: prowlarrResp,
 	}
 
 	return &ConfigAPIResponse{
@@ -405,7 +555,6 @@ func ToImportAPIResponse(importConfig config.ImportConfig) ImportAPIResponse {
 		MaxProcessorWorkers:            importConfig.MaxProcessorWorkers,
 		QueueProcessingIntervalSeconds: importConfig.QueueProcessingIntervalSeconds,
 		AllowedFileExtensions:          importConfig.AllowedFileExtensions,
-		MaxImportConnections:           importConfig.MaxImportConnections,
 		MaxDownloadPrefetch:            importConfig.MaxDownloadPrefetch,
 		ReadTimeoutSeconds:             importConfig.ReadTimeoutSeconds,
 		SegmentSamplePercentage:        importConfig.SegmentSamplePercentage,
@@ -467,23 +616,23 @@ type QueueItemResponse struct {
 	NzbPath        string                 `json:"nzb_path"`
 	NzbDisplayName string                 `json:"nzb_display_name"`
 	TargetPath     string                 `json:"target_path"`
-	Category     *string                `json:"category"`
-	Priority     database.QueuePriority `json:"priority"`
-	Status       database.QueueStatus   `json:"status"`
-	CreatedAt    time.Time              `json:"created_at"`
-	UpdatedAt    time.Time              `json:"updated_at"`
-	StartedAt    *time.Time             `json:"started_at"`
-	CompletedAt  *time.Time             `json:"completed_at"`
-	RetryCount   int                    `json:"retry_count"`
-	MaxRetries   int                    `json:"max_retries"`
-	ErrorMessage *string                `json:"error_message"`
-	BatchID      *string                `json:"batch_id"`
-	Metadata     *string                `json:"metadata"`
-	FileSize     *int64                 `json:"file_size"`
-	Indexer      *string                `json:"indexer,omitempty"`      // Indexer name
-	Percentage   *int                   `json:"percentage,omitempty"`    // Progress percentage (0-100), only for items being processed
-	Stage        string                 `json:"stage,omitempty"`         // Progress stage (e.g. "Validating segments")
-	StoragePath  *string                `json:"storage_path,omitempty"` // Internal FUSE mount path (populated after completion)
+	Category       *string                `json:"category"`
+	Priority       database.QueuePriority `json:"priority"`
+	Status         database.QueueStatus   `json:"status"`
+	CreatedAt      time.Time              `json:"created_at"`
+	UpdatedAt      time.Time              `json:"updated_at"`
+	StartedAt      *time.Time             `json:"started_at"`
+	CompletedAt    *time.Time             `json:"completed_at"`
+	RetryCount     int                    `json:"retry_count"`
+	MaxRetries     int                    `json:"max_retries"`
+	ErrorMessage   *string                `json:"error_message"`
+	BatchID        *string                `json:"batch_id"`
+	Metadata       *string                `json:"metadata"`
+	FileSize       *int64                 `json:"file_size"`
+	Indexer        *string                `json:"indexer,omitempty"`      // Indexer name
+	Percentage     *int                   `json:"percentage,omitempty"`   // Progress percentage (0-100), only for items being processed
+	Stage          string                 `json:"stage,omitempty"`        // Progress stage (e.g. "Validating segments")
+	StoragePath    *string                `json:"storage_path,omitempty"` // Internal FUSE mount path (populated after completion)
 }
 
 // QueueStatsResponse represents queue statistics in API responses
@@ -551,6 +700,7 @@ type HealthItemResponse struct {
 	RepairRetryCount int                     `json:"repair_retry_count"`
 	MaxRepairRetries int                     `json:"max_repair_retries"`
 	Indexer          *string                 `json:"indexer,omitempty"` // Added indexer
+	Metadata         *string                 `json:"metadata,omitempty"`
 	CreatedAt        time.Time               `json:"created_at"`
 	UpdatedAt        time.Time               `json:"updated_at"`
 	ScheduledCheckAt *time.Time              `json:"scheduled_check_at,omitempty"`
@@ -568,6 +718,7 @@ type HealthStatsResponse struct {
 	Healthy         int `json:"healthy"`
 	RepairTriggered int `json:"repair_triggered"`
 	Checking        int `json:"checking"`
+	Degraded        int `json:"degraded"`
 }
 
 // HealthRepairRequest represents request to trigger repair for a corrupted file
@@ -636,14 +787,14 @@ const (
 
 // UpdateStatusResponse represents the current update status.
 type UpdateStatusResponse struct {
-	CurrentVersion         string        `json:"current_version"`
-	GitCommit              string        `json:"git_commit,omitempty"`
-	Channel                UpdateChannel `json:"channel"`
-	LatestVersion          string        `json:"latest_version,omitempty"`
-	UpdateAvailable        bool          `json:"update_available"`
-	ReleaseURL             string        `json:"release_url,omitempty"`
-	DockerAvailable        bool          `json:"docker_available"`
-	BinaryUpdateAvailable  bool          `json:"binary_update_available"`
+	CurrentVersion        string        `json:"current_version"`
+	GitCommit             string        `json:"git_commit,omitempty"`
+	Channel               UpdateChannel `json:"channel"`
+	LatestVersion         string        `json:"latest_version,omitempty"`
+	UpdateAvailable       bool          `json:"update_available"`
+	ReleaseURL            string        `json:"release_url,omitempty"`
+	DockerAvailable       bool          `json:"docker_available"`
+	BinaryUpdateAvailable bool          `json:"binary_update_available"`
 }
 
 // SystemHealthResponse represents system health check result
@@ -720,21 +871,21 @@ func ToQueueItemResponse(item *database.ImportQueueItem) *QueueItemResponse {
 		NzbPath:        item.NzbPath,
 		NzbDisplayName: nzbDisplayName,
 		TargetPath:     targetPath,
-		Category:     item.Category,
-		Priority:     item.Priority,
-		Status:       item.Status,
-		CreatedAt:    item.CreatedAt,
-		UpdatedAt:    item.UpdatedAt,
-		StartedAt:    item.StartedAt,
-		CompletedAt:  item.CompletedAt,
-		RetryCount:   item.RetryCount,
-		MaxRetries:   item.MaxRetries,
-		ErrorMessage: &errorMessage,
-		BatchID:      item.BatchID,
-		Metadata:     item.Metadata,
-		FileSize:     item.FileSize,
-		StoragePath:  item.StoragePath,
-		Indexer:      item.Indexer,
+		Category:       item.Category,
+		Priority:       item.Priority,
+		Status:         item.Status,
+		CreatedAt:      item.CreatedAt,
+		UpdatedAt:      item.UpdatedAt,
+		StartedAt:      item.StartedAt,
+		CompletedAt:    item.CompletedAt,
+		RetryCount:     item.RetryCount,
+		MaxRetries:     item.MaxRetries,
+		ErrorMessage:   &errorMessage,
+		BatchID:        item.BatchID,
+		Metadata:       item.Metadata,
+		FileSize:       item.FileSize,
+		StoragePath:    item.StoragePath,
+		Indexer:        item.Indexer,
 	}
 }
 
@@ -861,6 +1012,7 @@ func ToHealthItemResponse(item *database.FileHealth) *HealthItemResponse {
 		RepairRetryCount:      item.RepairRetryCount,
 		MaxRepairRetries:      item.MaxRepairRetries,
 		Indexer:               item.Indexer, // Fixed: use pointer directly
+		Metadata:              item.Metadata,
 		CreatedAt:             item.CreatedAt,
 		UpdatedAt:             item.UpdatedAt,
 		ScheduledCheckAt:      item.ScheduledCheckAt,
@@ -877,6 +1029,7 @@ func ToHealthStatsResponse(stats map[database.HealthStatus]int) *HealthStatsResp
 	healthy := stats[database.HealthStatusHealthy]
 	repairTriggered := stats[database.HealthStatusRepairTriggered]
 	checking := stats[database.HealthStatusChecking]
+	degraded := stats[database.HealthStatusDegraded]
 
 	// Calculate total from all tracked statuses
 	total := 0
@@ -891,6 +1044,7 @@ func ToHealthStatsResponse(stats map[database.HealthStatus]int) *HealthStatsResp
 		Healthy:         healthy,
 		RepairTriggered: repairTriggered,
 		Checking:        checking,
+		Degraded:        degraded,
 	}
 }
 
@@ -953,30 +1107,34 @@ type ProviderTestRequest struct {
 
 // ProviderCreateRequest represents a request to create a new provider
 type ProviderCreateRequest struct {
-	Host             string `json:"host"`
-	Port             int    `json:"port"`
-	Username         string `json:"username"`
-	Password         string `json:"password"`
-	MaxConnections   int    `json:"max_connections"`
-	TLS              bool   `json:"tls"`
-	InsecureTLS      bool   `json:"insecure_tls"`
-	ProxyURL         string `json:"proxy_url,omitempty"`
-	Enabled          bool   `json:"enabled"`
-	IsBackupProvider bool   `json:"is_backup_provider"`
+	Host                string `json:"host"`
+	Port                int    `json:"port"`
+	Username            string `json:"username"`
+	Password            string `json:"password"`
+	MaxConnections      int    `json:"max_connections"`
+	MinConnectionsAlive int    `json:"min_connections_alive,omitempty"`
+	TLS                 bool   `json:"tls"`
+	InsecureTLS         bool   `json:"insecure_tls"`
+	ProxyURL            string `json:"proxy_url,omitempty"`
+	Enabled             bool   `json:"enabled"`
+	IsBackupProvider    bool   `json:"is_backup_provider"`
+	StorageGroup        string `json:"storage_group,omitempty"`
 }
 
 // ProviderUpdateRequest represents a request to update an existing provider
 type ProviderUpdateRequest struct {
-	Host             *string `json:"host,omitempty"`
-	Port             *int    `json:"port,omitempty"`
-	Username         *string `json:"username,omitempty"`
-	Password         *string `json:"password,omitempty"`
-	MaxConnections   *int    `json:"max_connections,omitempty"`
-	TLS              *bool   `json:"tls,omitempty"`
-	InsecureTLS      *bool   `json:"insecure_tls,omitempty"`
-	ProxyURL         *string `json:"proxy_url,omitempty"`
-	Enabled          *bool   `json:"enabled,omitempty"`
-	IsBackupProvider *bool   `json:"is_backup_provider,omitempty"`
+	Host                *string `json:"host,omitempty"`
+	Port                *int    `json:"port,omitempty"`
+	Username            *string `json:"username,omitempty"`
+	Password            *string `json:"password,omitempty"`
+	MaxConnections      *int    `json:"max_connections,omitempty"`
+	MinConnectionsAlive *int    `json:"min_connections_alive,omitempty"`
+	TLS                 *bool   `json:"tls,omitempty"`
+	InsecureTLS         *bool   `json:"insecure_tls,omitempty"`
+	ProxyURL            *string `json:"proxy_url,omitempty"`
+	Enabled             *bool   `json:"enabled,omitempty"`
+	IsBackupProvider    *bool   `json:"is_backup_provider,omitempty"`
+	StorageGroup        *string `json:"storage_group,omitempty"`
 }
 
 // ProviderReorderRequest represents a request to reorder providers
@@ -1018,6 +1176,7 @@ type ManualImportResponse struct {
 // ProviderStatusResponse represents NNTP provider connection status in API responses
 type ProviderStatusResponse struct {
 	ID                      string     `json:"id"`
+	Name                    string     `json:"name,omitempty"`
 	Host                    string     `json:"host"`
 	Username                string     `json:"username"`
 	UsedConnections         int        `json:"used_connections"`

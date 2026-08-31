@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/avast/retry-go/v4"
+	"github.com/javi11/altmount/internal/holes"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/slogutil"
 	"github.com/javi11/nntppool/v4"
@@ -38,10 +39,60 @@ type SegmentStore interface {
 	Put(messageID string, data []byte) error
 }
 
+// HoleHooks lets the owner of a reader decide, synchronously, what happens
+// when a segment is confirmed missing (ErrArticleNotFound — never retried).
+// The reader stays dumb: it asks, the owner accounts, persists and
+// transitions health status. Segments approved for padding are zero-filled
+// in place so the read loop never sees an error and playback continues.
+// Both callbacks run on download goroutines: they must be concurrency-safe
+// and fast (no network).
+type HoleHooks struct {
+	// OnHole returns the pad/fail decision for a missing segment, identified
+	// by its index in the file's segment space.
+	OnHole func(segIndex int, segID string) holes.Decision
+	// KnownHoles reports segments already known missing: those are
+	// zero-filled immediately, without any fetch (replay pre-pad).
+	KnownHoles func(segIndex int) bool
+}
+
+// ReaderOption customizes a UsenetReader.
+type ReaderOption func(*UsenetReader)
+
+// WithHoleHooks enables zero-filling of confirmed-missing segments under the
+// owner's control. Without it, a missing segment fails the read as always.
+func WithHoleHooks(h *HoleHooks) ReaderOption {
+	return func(r *UsenetReader) {
+		r.holeHooks = h
+	}
+}
+
+// ConnBudget grants connection tokens for import segment fetches.
+// Implemented by pool.Manager (AcquireImportConnection).
+type ConnBudget interface {
+	AcquireImportConnection(ctx context.Context) (release func(), err error)
+}
+
+// WithImportProfile marks the reader as import-owned: segment fetches use the
+// pool's normal request lane (so they always yield to streaming reads, which
+// use the priority lane) and each fetch is gated by the global import
+// connection budget. Without this option the reader behaves as a streaming
+// reader: priority lane, no budget. A nil budget only switches the lane.
+func WithImportProfile(budget ConnBudget) ReaderOption {
+	return func(r *UsenetReader) {
+		r.priority = false
+		r.budget = budget
+	}
+}
+
 type DataCorruptionError struct {
 	UnderlyingErr error
 	BytesRead     int64
 	NoRetry       bool
+	// FileOffset is the absolute file-coordinate position where the failure
+	// surfaced (-1 when unknown), enabling playback-impact classification.
+	FileOffset int64
+	// SegmentID is the message ID of the failing segment, when known.
+	SegmentID string
 }
 
 func (e *DataCorruptionError) Error() string {
@@ -50,6 +101,26 @@ func (e *DataCorruptionError) Error() string {
 
 func (e *DataCorruptionError) Unwrap() error {
 	return e.UnderlyingErr
+}
+
+// isCorruptionError reports whether err indicates the article body itself is
+// corrupt (as opposed to a transient network/pool failure), so it should be
+// wrapped as a DataCorruptionError and routed into the health/repair pipeline
+// instead of surfacing as an anonymous read error.
+//
+// nntppool.ErrCRCMismatch is checked by identity since it's an exported
+// sentinel (errors.New("nntp: yEnc CRC mismatch")), returned unwrapped from
+// finishBody. The substring fallback covers "data corruption detected",
+// rapidyenc's own corruption sentinel text, in case a future nntppool version
+// starts propagating it (today it does not: the decode error is discarded in
+// nntppool's reader).
+func isCorruptionError(err error) bool {
+	if errors.Is(err, nntppool.ErrCRCMismatch) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "data corruption detected") ||
+		strings.Contains(msg, "crc mismatch")
 }
 
 type UsenetReader struct {
@@ -67,6 +138,9 @@ type UsenetReader struct {
 	metricsTracker MetricsTracker
 	streamID       string
 	segmentStore   SegmentStore // optional, nil = no caching
+	holeHooks      *HoleHooks   // optional, nil = missing segments fail the read
+	priority       bool         // true (streaming) = priority lane; false (import) = normal lane
+	budget         ConnBudget   // optional; gates import fetches on the global connection budget
 	cond           *sync.Cond   // Signals downloadManager when reader advances
 
 	// Prefetch-based download tracking
@@ -86,6 +160,7 @@ func NewUsenetReader(
 	metricsTracker MetricsTracker,
 	streamID string,
 	segmentStore SegmentStore,
+	opts ...ReaderOption,
 ) (*UsenetReader, error) {
 	log := slog.Default().With("component", "usenet-reader")
 	ctx, cancel := context.WithCancel(ctx)
@@ -105,6 +180,10 @@ func NewUsenetReader(
 		metricsTracker: metricsTracker,
 		streamID:       streamID,
 		segmentStore:   segmentStore,
+		priority:       true, // streaming profile by default; WithImportProfile demotes
+	}
+	for _, opt := range opts {
+		opt(ur)
 	}
 
 	ur.cond = sync.NewCond(&ur.mu)
@@ -233,11 +312,13 @@ func (b *UsenetReader) Read(p []byte) (int, error) {
 				return 0, &DataCorruptionError{
 					UnderlyingErr: err,
 					BytesRead:     totalRead,
+					FileOffset:    rg.start + totalRead,
 				}
 			} else {
 				return 0, &DataCorruptionError{
 					UnderlyingErr: err,
 					BytesRead:     0,
+					FileOffset:    rg.start,
 				}
 			}
 		}
@@ -281,6 +362,7 @@ func (b *UsenetReader) Read(p []byte) (int, error) {
 							return n, &DataCorruptionError{
 								UnderlyingErr: err,
 								BytesRead:     totalRead,
+								FileOffset:    rg.start + totalRead,
 							}
 						}
 					}
@@ -291,6 +373,7 @@ func (b *UsenetReader) Read(p []byte) (int, error) {
 					return n, &DataCorruptionError{
 						UnderlyingErr: err,
 						BytesRead:     totalRead,
+						FileOffset:    rg.start + totalRead,
 					}
 				}
 				return n, err
@@ -303,6 +386,13 @@ func (b *UsenetReader) Read(p []byte) (int, error) {
 
 // isArticleNotFoundError checks if the error indicates articles were not found in providers
 func (b *UsenetReader) isArticleNotFoundError(err error) bool {
+	return errors.Is(err, nntppool.ErrArticleNotFound)
+}
+
+// IsArticleNotFound reports whether err stems from an article missing on all
+// providers (permanent, never retried) — the only failure the hole model
+// treats as a hole.
+func IsArticleNotFound(err error) bool {
 	return errors.Is(err, nntppool.ErrArticleNotFound)
 }
 
@@ -359,6 +449,18 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 		)
 	}
 
+	// Import readers take a token from the global import connection budget for
+	// the whole fetch (held across retries — it represents one connection's
+	// worth of work). Acquired before any per-attempt timeout is created so
+	// queue wait never burns the fetch deadline. Streaming readers skip this.
+	if b.budget != nil {
+		release, err := b.budget.AcquireImportConnection(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer release()
+	}
+
 	segStart := time.Now()
 	var resultBytes []byte
 	err := retry.Do(
@@ -368,7 +470,15 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 			defer cancel()
 
 			fetchStart := time.Now()
-			result, err := cp.BodyPriority(attemptCtx, seg.Id)
+			var result *nntppool.ArticleBody
+			var err error
+			if b.priority {
+				// Streaming: priority lane — connections serve these first.
+				result, err = cp.BodyPriority(attemptCtx, seg.Id)
+			} else {
+				// Import: normal lane — always yields to streaming reads.
+				result, err = cp.Body(attemptCtx, seg.Id)
+			}
 			fetchDur := time.Since(fetchStart)
 			if err != nil {
 				if errors.Is(err, context.DeadlineExceeded) {
@@ -383,10 +493,12 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 					bytesWritten = int64(result.BytesDecoded)
 				}
 
-				if strings.Contains(err.Error(), "data corruption detected") {
+				if isCorruptionError(err) {
 					return &DataCorruptionError{
 						UnderlyingErr: err,
 						BytesRead:     bytesWritten,
+						FileOffset:    -1,
+						SegmentID:     seg.Id,
 					}
 				}
 
@@ -512,9 +624,28 @@ func (b *UsenetReader) downloadManager(ctx context.Context) {
 			}()
 
 			taskCtx := slogutil.With(ctx, "segment_id", s.Id, "segment_idx", segIdx)
+
+			// Replay pre-pad: a segment already known missing (persisted hole
+			// map) zero-fills immediately, with no fetch round-trip.
+			if b.holeHooks != nil && b.holeHooks.KnownHoles != nil && b.holeHooks.KnownHoles(s.loaderIdx) {
+				b.log.DebugContext(taskCtx, "zero-filling known-missing segment without fetch")
+				s.SetData(make([]byte, s.End+1))
+				return
+			}
+
 			data, err := b.downloadSegmentWithRetry(taskCtx, s)
 
 			if err != nil {
+				// A confirmed-missing article may be zero-filled instead of
+				// failing the stream, when the owner's hole hook approves.
+				if b.holeHooks != nil && b.holeHooks.OnHole != nil &&
+					errors.Is(err, nntppool.ErrArticleNotFound) &&
+					b.holeHooks.OnHole(s.loaderIdx, s.Id) == holes.DecisionPad {
+					b.log.InfoContext(taskCtx, "zero-filling missing segment",
+						"file_segment_index", s.loaderIdx)
+					s.SetData(make([]byte, s.End+1))
+					return
+				}
 				s.SetError(err)
 			} else {
 				s.SetData(data)

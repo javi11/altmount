@@ -11,11 +11,12 @@ import (
 
 // ProgressUpdate represents a progress update event
 type ProgressUpdate struct {
-	QueueID    int       `json:"queue_id"`
-	Percentage int       `json:"percentage"`
-	Stage      string    `json:"stage,omitempty"`  // e.g. "Parsing NZB", "Validating segments"
-	Status     string    `json:"status,omitempty"` // "completed" or "failed" on terminal events
-	Timestamp  time.Time `json:"timestamp"`
+	QueueID     int       `json:"queue_id"`
+	Percentage  int       `json:"percentage"`
+	Stage       string    `json:"stage,omitempty"`        // e.g. "Parsing NZB", "Validating segments"
+	Status      string    `json:"status,omitempty"`       // "completed", "failed", or "streamable" on terminal/early events
+	StoragePath string    `json:"storage_path,omitempty"` // set when Status="streamable"
+	Timestamp   time.Time `json:"timestamp"`
 }
 
 // ProgressEntry holds the current progress state for a single queue item.
@@ -41,9 +42,8 @@ type ProgressBroadcaster struct {
 	subSeq      atomic.Uint64
 }
 
-// broadcast delivers update to every subscriber without blocking. If a
-// subscriber's buffered channel is full the update is dropped for that
-// subscriber and dropMsg is logged. Shared by all the broadcast entry points.
+// broadcast delivers update to every subscriber without blocking, dropping the
+// oldest buffered update instead of the new one if a channel is full.
 func (pb *ProgressBroadcaster) broadcast(update ProgressUpdate, dropMsg string) {
 	if pb == nil {
 		return
@@ -51,6 +51,18 @@ func (pb *ProgressBroadcaster) broadcast(update ProgressUpdate, dropMsg string) 
 	pb.subMu.RLock()
 	defer pb.subMu.RUnlock()
 	for subID, ch := range pb.subscribers {
+		select {
+		case ch <- update:
+			continue
+		default:
+		}
+
+		// Full: drop oldest, retry once.
+		select {
+		case <-ch:
+		default:
+		}
+
 		select {
 		case ch <- update:
 		default:
@@ -207,6 +219,19 @@ func (pb *ProgressBroadcaster) BroadcastHealthChanged() {
 		Timestamp: time.Now(),
 	}
 	pb.broadcast(update, "subscriber channel full, skipping health_changed")
+}
+
+// NotifyStreamable broadcasts an early-mount event for a queue item. The storage
+// path is available and the file is accessible via the VFS before post-processing
+// completes. Stremio waiters can return stream URLs immediately on this signal.
+func (pb *ProgressBroadcaster) NotifyStreamable(queueID int, storagePath string) {
+	update := ProgressUpdate{
+		QueueID:     queueID,
+		Status:      "streamable",
+		StoragePath: storagePath,
+		Timestamp:   time.Now(),
+	}
+	pb.broadcast(update, "subscriber channel full, skipping streamable event")
 }
 
 // BroadcastQueueChanged sends a queue-change notification to all SSE subscribers.

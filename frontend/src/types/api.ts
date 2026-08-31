@@ -52,11 +52,6 @@ export interface QueueItem {
 	indexer?: string;
 }
 
-export interface ProgressUpdate {
-	id: number;
-	percentage: number;
-}
-
 export interface ImportHistoryItem {
 	id: number;
 	nzb_name: string;
@@ -179,6 +174,7 @@ export const HealthStatus = {
 	HEALTHY: "healthy",
 	CORRUPTED: "corrupted",
 	REPAIR_TRIGGERED: "repair_triggered",
+	DEGRADED: "degraded",
 } as const;
 
 export type HealthStatus = (typeof HealthStatus)[keyof typeof HealthStatus];
@@ -212,6 +208,7 @@ export interface FileHealth {
 	streaming_failure_count: number;
 	is_masked: boolean;
 	indexer?: string;
+	metadata?: string;
 }
 
 export interface HealthStats {
@@ -221,6 +218,39 @@ export interface HealthStats {
 	corrupted: number;
 	repair_triggered: number;
 	checking: number;
+	degraded: number;
+}
+
+// Playback-impact classification embedded in FileHealth.error_details JSON.
+// Produced by the hole model (internal/holes): "degraded" files are still
+// playable (streaming zero-fills the missing segments), "failed" are not.
+export type PlaybackImpactVerdict = "clean" | "degraded" | "failed" | "unknown";
+
+export interface PlaybackImpact {
+	verdict: PlaybackImpactVerdict;
+	total_missing?: number;
+	longest_run?: number;
+	sampled?: number;
+	total_segments?: number;
+	padded_ratio?: number;
+}
+
+// Structured envelope stored in FileHealth.error_details. Legacy records may
+// hold other JSON shapes or plain strings — always parse defensively.
+export interface HealthErrorDetails {
+	error_type?: string;
+	message?: string;
+	missing_articles?: number;
+	total_articles?: number;
+	sampled?: number;
+	playback_impact?: PlaybackImpact;
+	// Segments whose availability was never established (transport failures, or
+	// ids the sweep never reached). Deliberately not counted as missing.
+	unresolved_segments?: number;
+	// Set when the check stopped before examining every planned segment, which
+	// makes `sampled` a partial count and the missing-segment map incomplete.
+	terminated_early?: boolean;
+	termination_reason?: string;
 }
 
 export interface HealthCleanupRequest {
@@ -342,9 +372,45 @@ export interface LibrarySyncStatus {
 	last_sync_result?: LibrarySyncResult;
 }
 
+// Metadata migration types (legacy inline-segment .meta → v3 shared NZB store)
+export interface MetadataMigrationProgress {
+	total_groups: number;
+	processed_groups: number;
+	total_files: number;
+	processed_files: number;
+	current_release: string;
+	start_time: string;
+}
+
+export interface MetadataMigrationResult {
+	dry_run: boolean;
+	groups: number;
+	faithful_groups: number;
+	synthesized_groups: number;
+	files_migrated: number;
+	files_failed: number;
+	bytes_before: number;
+	bytes_after: number;
+	bytes_saved: number;
+	failures?: string[];
+	cancelled: boolean;
+	duration: number;
+	completed_at: string;
+}
+
+export interface MetadataMigrationStatus {
+	is_running: boolean;
+	legacy_files: number;
+	legacy_groups: number;
+	progress?: MetadataMigrationProgress;
+	last_result?: MetadataMigrationResult;
+	last_dry_run?: MetadataMigrationResult;
+}
+
 // Pool Metrics types
 export interface ProviderStatus {
 	id: string;
+	name?: string;
 	host: string;
 	username: string;
 	used_connections: number;
@@ -406,12 +472,6 @@ export interface PoolMetrics {
 	timestamp: string;
 	started_at: string;
 	providers: ProviderStatus[];
-}
-
-// SABnzbd API response types
-export interface SABnzbdAddResponse {
-	status: boolean;
-	nzo_ids: string[];
 }
 
 // System Browse types

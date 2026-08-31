@@ -4,7 +4,7 @@ import { useSystemBrowse } from "../../hooks/useApi";
 import { formatBytes } from "../../lib/utils";
 import type { FileEntry } from "../../types/api";
 
-export interface FileBrowserModalProps {
+interface FileBrowserModalProps {
 	isOpen: boolean;
 	onClose: () => void;
 	onSelect: (filePath: string) => void;

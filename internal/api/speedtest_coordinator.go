@@ -141,14 +141,6 @@ func (sc *speedtestCoordinator) getOrBuildClient(ctx context.Context, p *config.
 	}
 	sc.mu.Unlock()
 
-	var tlsCfg *tls.Config
-	if p.TLS {
-		tlsCfg = &tls.Config{
-			InsecureSkipVerify: p.InsecureTLS,
-			ServerName:         p.Host,
-		}
-	}
-
 	// Mirror the production pool (ToNNTPProvider): without Inflight the
 	// nntppool client defaults to depth 1, making the fallback path
 	// latency-bound (one BODY per RTT) instead of pipelined.
@@ -157,16 +149,7 @@ func (sc *speedtestCoordinator) getOrBuildClient(ctx context.Context, p *config.
 		inflight = 10
 	}
 
-	client, err := nntppool.NewClient(ctx, []nntppool.Provider{
-		{
-			Host:        host,
-			TLSConfig:   tlsCfg,
-			Auth:        nntppool.Auth{Username: p.Username, Password: p.Password},
-			Connections: p.MaxConnections,
-			Inflight:    inflight,
-			IdleTimeout: 60 * time.Second,
-		},
-	})
+	client, err := buildAdHocClient(ctx, p, p.MaxConnections, inflight)
 	if err != nil {
 		return nil, "", err
 	}
@@ -187,6 +170,27 @@ func (sc *speedtestCoordinator) getOrBuildClient(ctx context.Context, p *config.
 	sc.mu.Unlock()
 
 	return client, providerName, nil
+}
+
+// buildAdHocClient dials a throwaway single-provider client; the caller owns Close.
+func buildAdHocClient(ctx context.Context, p *config.ProviderConfig, connections, inflight int) (*nntppool.Client, error) {
+	var tlsCfg *tls.Config
+	if p.TLS {
+		tlsCfg = &tls.Config{
+			InsecureSkipVerify: p.InsecureTLS,
+			ServerName:         p.Host,
+		}
+	}
+	return nntppool.NewClient(ctx, []nntppool.Provider{
+		{
+			Host:        fmt.Sprintf("%s:%d", p.Host, p.Port),
+			TLSConfig:   tlsCfg,
+			Auth:        nntppool.Auth{Username: p.Username, Password: p.Password},
+			Connections: connections,
+			Inflight:    inflight,
+			IdleTimeout: 60 * time.Second,
+		},
+	})
 }
 
 // run executes fn under the singleflight key for the given provider,

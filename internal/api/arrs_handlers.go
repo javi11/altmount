@@ -2,7 +2,6 @@ package api
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"log/slog"
 	"net/url"
@@ -14,15 +13,9 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/javi11/altmount/internal/arrs/model"
+	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 )
-
-// arrWebhookDeleteGrace is how long after a queue item completes its
-// storage_path is still considered "in use" by the arr webhook directory
-// deletion handler. Within this window the handler skips deleting the
-// metadata/symlink tree so a freshly written release folder is not wiped
-// out by a stale Download webhook from a previous grab.
-const arrWebhookDeleteGrace = 10 * time.Minute
 
 // ArrsInstanceRequest represents a request to create/update an arrs instance
 type ArrsInstanceRequest struct {
@@ -84,6 +77,12 @@ type ArrsWebhookRequest struct {
 		SceneName string `json:"sceneName"`
 		Path      string `json:"path"`
 	} `json:"episodeFile"`
+	Episodes []struct {
+		Id            int64  `json:"id"`
+		EpisodeNumber int    `json:"episodeNumber"`
+		SeasonNumber  int    `json:"seasonNumber"`
+		Title         string `json:"title"`
+	} `json:"episodes,omitempty"`
 	DeletedFiles ArrsDeletedFiles `json:"deletedFiles,omitempty"`
 	DownloadId   string           `json:"downloadId,omitempty"`
 	Release      *struct {
@@ -123,6 +122,15 @@ func (req ArrsWebhookRequest) ToMetadata() model.WebhookMetadata {
 		meta.EpisodeFile = &model.EpisodeFileMetadata{
 			Id:        req.EpisodeFile.Id,
 			SceneName: req.EpisodeFile.SceneName,
+		}
+	}
+
+	if len(req.Episodes) > 0 {
+		meta.Episodes = make([]model.EpisodeMetadata, len(req.Episodes))
+		for i, ep := range req.Episodes {
+			meta.Episodes[i] = model.EpisodeMetadata{
+				Id: ep.Id,
+			}
 		}
 	}
 
@@ -239,10 +247,13 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 
 	slog.InfoContext(c.Context(), "Received ARR webhook", "event_type", req.EventType)
 
+	if req.InstanceName != "" {
+		s.arrsService.ClearInstanceCache(c.Context(), req.InstanceName)
+	}
+
 	// Determine file path to scan/delete based on event type
 	var pathsToScan []string
 	var filesToDelete []string
-	var dirsToDelete []string
 	isScanEvent := false
 
 	switch req.EventType {
@@ -413,8 +424,6 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 	}
 
 	// Process File Deletions
-	deleteSourceNzb := cfg.Metadata.ShouldDeleteSourceNzb()
-
 	for _, path := range filesToDelete {
 		normalizedPath := normalize(path)
 
@@ -460,7 +469,7 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 
 		// Delete metadata (and optionally source NZB)
 		if s.metadataService != nil {
-			if err := s.metadataService.DeleteFileMetadataWithSourceNzb(c.Context(), metadataPath, deleteSourceNzb); err != nil {
+			if err := s.metadataService.DeleteFileMetadata(c.Context(), metadataPath); err != nil {
 				slog.DebugContext(c.Context(), "Failed to delete metadata from webhook (might be gone)", "path", metadataPath, "error", err)
 			}
 		}
@@ -510,72 +519,6 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 		}
 	}
 
-	// Process Directory Deletions
-	for _, path := range dirsToDelete {
-		normalizedPath := normalize(path)
-		slog.InfoContext(c.Context(), "Processing webhook directory deletion",
-			"original_path", path,
-			"normalized_path", normalizedPath)
-
-		// Race guard: skip deletion if another import_queue row references this
-		// storage path and is still active (pending/processing/paused) or was
-		// completed within the recent grace window. This prevents arr "Download"
-		// webhooks for a previous grab from wiping the metadata/symlink tree
-		// that a sibling re-grab/upgrade just wrote into the same release dir.
-		if s.queueRepo != nil {
-			busy, err := s.queueRepo.HasActiveOrRecentQueueItemForStoragePath(
-				c.Context(), normalizedPath, arrWebhookDeleteGrace,
-			)
-			if err != nil {
-				slog.WarnContext(c.Context(), "Failed to check active queue items before webhook directory deletion; proceeding cautiously and skipping deletion",
-					"path", normalizedPath, "error", err)
-				continue
-			}
-			if busy {
-				slog.InfoContext(c.Context(), "Skipping webhook directory deletion: active or recently-completed queue item references this storage path",
-					"path", normalizedPath,
-					"grace", arrWebhookDeleteGrace.String())
-				continue
-			}
-		}
-
-		// Delete health records — try by library_path first, fall back to file_path prefix
-		var metadataPaths []string
-		if s.healthRepo != nil {
-			if filePaths, count, err := s.healthRepo.DeleteHealthRecordsByLibraryPathPrefix(c.Context(), path); err != nil {
-				slog.ErrorContext(c.Context(), "Failed to delete health records by library_path prefix from webhook", "prefix", path, "error", err)
-			} else if count > 0 {
-				slog.InfoContext(c.Context(), "Deleted health records by library_path prefix", "prefix", path, "count", count)
-				metadataPaths = filePaths
-			}
-
-			// Fall back to file_path prefix if no records found by library_path
-			if len(metadataPaths) == 0 {
-				if count, err := s.healthRepo.DeleteHealthRecordsByPrefix(c.Context(), normalizedPath); err != nil {
-					slog.ErrorContext(c.Context(), "Failed to delete health records by prefix from webhook", "prefix", normalizedPath, "error", err)
-				} else {
-					slog.InfoContext(c.Context(), "Deleted health records for directory", "prefix", normalizedPath, "count", count)
-				}
-			}
-		}
-
-		// Delete metadata directories for each resolved file_path
-		if s.metadataService != nil {
-			if len(metadataPaths) > 0 {
-				for _, mp := range metadataPaths {
-					if err := s.metadataService.DeleteFileMetadataWithSourceNzb(c.Context(), mp, deleteSourceNzb); err != nil {
-						slog.DebugContext(c.Context(), "Failed to delete metadata from webhook (might be gone)", "path", mp, "error", err)
-					}
-				}
-			} else {
-				if err := s.metadataService.DeleteDirectory(normalizedPath); err != nil {
-					slog.DebugContext(c.Context(), "Failed to delete metadata directory from webhook (might be gone)", "path", normalizedPath, "error", err)
-				}
-			}
-		}
-
-	}
-
 	if len(pathsToScan) == 0 {
 		if isScanEvent {
 			slog.WarnContext(c.Context(), "No file path found in webhook payload to scan")
@@ -598,19 +541,43 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 			// Handle Rename and Download specifically: try to find and re-link old record
 			if req.EventType == "Rename" || req.EventType == "Download" {
 				fileName := filepath.Base(normalizedPath)
-				// Try to find a record with the same filename but currently under /complete/
-				// or with a NULL library_path
 				var metadataStr *string
-				metaBytes, err := json.Marshal(req.ToMetadata())
+				webMeta := req.ToMetadata()
+				metaBytes, err := json.Marshal(webMeta)
 				if err == nil {
 					str := string(metaBytes)
 					metadataStr = &str
 				}
 
+				// Try to find and relink by metadata IDs (e.g. series ID/TVDB ID/episode ID or movie ID/TMDB ID) first
+				if relinked, err := s.healthRepo.RelinkFileByMetadata(c.Context(), &webMeta, normalizedPath, path, metadataStr, req.EventType == "Download"); err == nil && relinked {
+					attrs := []any{
+						"event", req.EventType,
+						"instance", req.InstanceName,
+						"new_library_path", path,
+					}
+					if req.Series.Id > 0 {
+						attrs = append(attrs, "series_id", req.Series.Id)
+					}
+					if req.EpisodeFile.Id > 0 {
+						attrs = append(attrs, "episode_file_id", req.EpisodeFile.Id)
+					}
+					if req.Movie.Id > 0 {
+						attrs = append(attrs, "movie_id", req.Movie.Id)
+					}
+					if req.MovieFile.Id > 0 {
+						attrs = append(attrs, "movie_file_id", req.MovieFile.Id)
+					}
+
+					slog.InfoContext(c.Context(), "Successfully re-linked health record using metadata IDs during webhook", attrs...)
+					continue // Successfully re-linked, no need to add new
+				}
+
+				// Fall back to filename-based matching
 				// Download events carry a freshly imported copy: relink with revalidation so
-			// the new file gets health-checked (repair budget is preserved). Rename events
-			// carry no new content and must not disturb repair/corrupted state.
-			if relinked, err := s.healthRepo.RelinkFileByFilename(c.Context(), fileName, normalizedPath, path, metadataStr, req.EventType == "Download"); err == nil && relinked {
+				// the new file gets health-checked (repair budget is preserved). Rename events
+				// carry no new content and must not disturb repair/corrupted state.
+				if relinked, err := s.healthRepo.RelinkFileByFilename(c.Context(), fileName, normalizedPath, path, metadataStr, req.EventType == "Download"); err == nil && relinked {
 					attrs := []any{
 						"event", req.EventType,
 						"instance", req.InstanceName,
@@ -665,6 +632,10 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 			}
 
 			var indexer *string = nil
+			var downloadID *string = nil
+			if req.DownloadId != "" {
+				downloadID = &req.DownloadId
+			}
 			if req.Release != nil && req.Release.Indexer != "" {
 				indexer = &req.Release.Indexer
 			} else if req.DownloadId != "" {
@@ -675,7 +646,7 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 
 			// Add to health check (pending status) with high priority (Next) to ensure it's processed right away
 			cfg := s.configManager.GetConfigGetter()()
-			err = s.healthRepo.AddFileToHealthCheckWithMetadata(c.Context(), normalizedPath, &path, cfg.GetMaxRetries(), cfg.GetMaxRepairRetries(), sourceNzb, database.HealthPriorityNext, releaseDate, metadataStr, indexer)
+			err = s.healthRepo.AddFileToHealthCheckWithMetadata(c.Context(), normalizedPath, &path, cfg.GetMaxRetries(), cfg.GetMaxRepairRetries(), sourceNzb, database.HealthPriorityNext, releaseDate, metadataStr, indexer, downloadID)
 			if err != nil {
 				slog.ErrorContext(c.Context(), "Failed to add webhook file to health check", "path", normalizedPath, "error", err)
 			} else {
@@ -717,40 +688,6 @@ type ArrsStatsResponse struct {
 	EnabledSportarr  int     `json:"enabled_sportarr"`
 	DueForSync       int     `json:"due_for_sync"`
 	LastSync         *string `json:"last_sync"`
-}
-
-// ArrsMovieResponse represents a movie in API responses
-type ArrsMovieResponse struct {
-	ID          int64   `json:"id"`
-	InstanceID  int64   `json:"instance_id"`
-	MovieID     int64   `json:"movie_id"`
-	Title       string  `json:"title"`
-	Year        *int    `json:"year"`
-	FilePath    string  `json:"file_path"`
-	FileSize    *int64  `json:"file_size"`
-	Quality     *string `json:"quality"`
-	IMDbID      *string `json:"imdb_id"`
-	TMDbID      *int64  `json:"tmdb_id"`
-	LastUpdated string  `json:"last_updated"`
-}
-
-// ArrsEpisodeResponse represents an episode in API responses
-type ArrsEpisodeResponse struct {
-	ID            int64   `json:"id"`
-	InstanceID    int64   `json:"instance_id"`
-	SeriesID      int64   `json:"series_id"`
-	EpisodeID     int64   `json:"episode_id"`
-	SeriesTitle   string  `json:"series_title"`
-	SeasonNumber  int     `json:"season_number"`
-	EpisodeNumber int     `json:"episode_number"`
-	EpisodeTitle  *string `json:"episode_title"`
-	FilePath      string  `json:"file_path"`
-	FileSize      *int64  `json:"file_size"`
-	Quality       *string `json:"quality"`
-	AirDate       *string `json:"air_date"`
-	TVDbID        *int64  `json:"tvdb_id"`
-	IMDbID        *string `json:"imdb_id"`
-	LastUpdated   string  `json:"last_updated"`
 }
 
 // TestConnectionRequest represents a request to test connection
@@ -855,7 +792,7 @@ func (s *Server) handleGetArrsInstance(c *fiber.Ctx) error {
 //	@Tags			ARRs
 //	@Accept			json
 //	@Produce		json
-//	@Param			body	body		ArrsInstanceRequest	true	"Instance connection details"
+//	@Param			body	body		TestConnectionRequest	true	"Instance connection details"
 //	@Success		200		{object}	APIResponse
 //	@Failure		400		{object}	APIResponse
 //	@Security		BearerAuth
@@ -874,7 +811,42 @@ func (s *Server) handleTestArrsConnection(c *fiber.Ctx) error {
 		})
 	}
 
-	if req.URL == "" || req.APIKey == "" {
+	if req.URL == "" {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"message": "URL and API key are required",
+		})
+	}
+
+	// A masked stored API key arrives empty; fall back to the credentials of
+	// a configured instance with the same URL so testing an existing instance
+	// does not require re-typing the key.
+	if req.APIKey == "" && s.configManager != nil {
+		if cfg := s.configManager.GetConfig(); cfg != nil {
+			var instances []config.ArrsInstanceConfig
+			switch strings.ToLower(req.Type) {
+			case "sonarr":
+				instances = cfg.Arrs.SonarrInstances
+			case "radarr":
+				instances = cfg.Arrs.RadarrInstances
+			case "lidarr":
+				instances = cfg.Arrs.LidarrInstances
+			case "readarr":
+				instances = cfg.Arrs.ReadarrInstances
+			case "whisparr":
+				instances = cfg.Arrs.WhisparrInstances
+			case "sportarr":
+				instances = cfg.Arrs.SportarrInstances
+			}
+			for _, inst := range instances {
+				if inst.URL == req.URL && inst.APIKey != "" {
+					req.APIKey = inst.APIKey
+					break
+				}
+			}
+		}
+	}
+	if req.APIKey == "" {
 		return c.Status(400).JSON(fiber.Map{
 			"success": false,
 			"message": "URL and API key are required",
@@ -1097,18 +1069,31 @@ func (s *Server) handleRegisterArrsDownloadClients(c *fiber.Ctx) error {
 		}
 	}
 
-	// Launch in background to not block
-	go func() {
-		ctx := context.Background()
-		if err := s.arrsService.EnsureDownloadClientRegistration(ctx, host, port, urlBase, apiKey); err != nil {
-			slog.ErrorContext(ctx, "Failed to register download clients", "error", err)
-		}
-	}()
+	// Register, then verify reachability so the response reflects the real outcome.
+	ctx := c.Context()
+	if err := s.arrsService.EnsureDownloadClientRegistration(ctx, host, port, urlBase, apiKey); err != nil {
+		slog.ErrorContext(ctx, "Failed to register download clients", "error", err)
+		return RespondInternalError(c, "Failed to register download client", err.Error())
+	}
 
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"message": "Download client registration triggered in background",
-	})
+	results, err := s.arrsService.TestDownloadClientRegistration(ctx, host, port, urlBase, apiKey)
+	if err != nil {
+		return RespondInternalError(c, "Failed to verify download client registration", err.Error())
+	}
+
+	var failures []string
+	for name, res := range results {
+		if res != "OK" {
+			failures = append(failures, name+": "+res)
+		}
+	}
+	if len(failures) > 0 {
+		return RespondError(c, fiber.StatusBadGateway, ErrCodeInternalServer,
+			"Download client registered, but ARR instances cannot reach AltMount",
+			strings.Join(failures, "; "))
+	}
+
+	return RespondMessage(c, "Download client registered and verified successfully")
 }
 
 // handleTestArrsDownloadClients tests the connection from ARR instances to AltMount
@@ -1182,4 +1167,3 @@ func (s *Server) handleTestArrsDownloadClients(c *fiber.Ctx) error {
 		"data":    results,
 	})
 }
-

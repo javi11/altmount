@@ -2,7 +2,9 @@ package arrs
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"net"
 	"strings"
 	"time"
 
@@ -30,6 +32,41 @@ var (
 	ErrInstanceNotFound        = model.ErrInstanceNotFound
 )
 
+// IsTemporarilyUnreachable reports whether err indicates the *arr was only
+// temporarily unreachable — a network/transport failure (timeout, connection
+// refused, DNS, TLS, etc.) or a 5xx server response — rather than a definitive
+// answer about the release. Such errors must DEFER a repair (keep the file
+// repair-pending so it self-heals when the *arr returns) instead of condemning
+// the file as corrupted. starr surfaces non-2xx responses as a *starr.ReqError
+// whose Code carries the HTTP status; transport failures surface as net.Error
+// (often wrapped in *url.Error) or a context deadline.
+func IsTemporarilyUnreachable(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// Typed 5xx response from the starr app (server-side, almost always transient).
+	var reqErr *starr.ReqError
+	if errors.As(err, &reqErr) && reqErr.Code >= 500 && reqErr.Code <= 599 {
+		return true
+	}
+
+	// Network/transport failure: timeouts, connection refused, DNS, TLS handshake,
+	// etc. *url.Error (returned by the HTTP client) also satisfies net.Error.
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+
+	// A context deadline tripping mid-request is an unreachable/too-slow *arr, not
+	// a corrupt file.
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return true
+	}
+
+	return false
+}
+
 // Service manages Radarr, Sonarr, Lidarr, Readarr, and Whisparr instances for health monitoring and file repair
 type Service struct {
 	configGetter  config.ConfigGetter
@@ -53,7 +90,7 @@ func NewService(configGetter config.ConfigGetter, configManager model.ConfigMana
 	// queue-cleanup worker and the scanner (repair re-triggers) count the same
 	// per-target keys.
 	failureTracker := failures.NewTracker()
-	scannerManager := scanner.NewManager(configGetter, instManager, clientManager, dataManager, failureTracker)
+	scannerManager := scanner.NewManager(configGetter, instManager, clientManager, dataManager, queueRepo, failureTracker)
 	workerManager := worker.NewWorker(configGetter, instManager, clientManager, queueRepo, failureTracker)
 	registrarManager := registrar.NewManager(instManager, clientManager)
 
@@ -242,6 +279,17 @@ func (s *Service) RegisterConfigChangeHandler(ctx context.Context, configManager
 func (s *Service) TriggerFileRescan(ctx context.Context, pathForRescan string, relativePath string, metadataStr *string) error {
 	return s.scanner.TriggerFileRescan(ctx, pathForRescan, relativePath, metadataStr)
 }
+
+// ClearInstanceCache clears all movie and series caches for a specific instance
+func (s *Service) ClearInstanceCache(ctx context.Context, instanceName string) {
+	if instanceName == "" || s.data == nil {
+		return
+	}
+	slog.DebugContext(ctx, "Clearing ARR cache for instance", "instance", instanceName)
+	s.data.ClearMoviesCache(instanceName)
+	s.data.ClearSeriesCache(instanceName)
+}
+
 
 // DiscoverFileMetadata attempts to discover the rich metadata for a file through the appropriate ARR instance
 func (s *Service) DiscoverFileMetadata(ctx context.Context, filePath, relativePath, nzbName, libraryPath string) (*model.WebhookMetadata, error) {

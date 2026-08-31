@@ -58,6 +58,9 @@ type Manager struct {
 	// claimMu serialises DB claim transactions to avoid SQLite lock contention.
 	claimMu sync.Mutex
 
+	// notifyChan is used to signal workers when new items arrive in the queue
+	notifyChan chan struct{}
+
 	// Cancellation tracking for processing items
 	cancelFuncs map[int64]context.CancelFunc
 	cancelMu    sync.RWMutex
@@ -82,6 +85,7 @@ func NewManager(cfg ManagerConfig, repository *database.QueueRepository, process
 		ctx:          ctx,
 		cancel:       cancel,
 		cancelFuncs:  make(map[int64]context.CancelFunc),
+		notifyChan:   make(chan struct{}, 10),
 	}
 }
 
@@ -288,6 +292,14 @@ func (m *Manager) Resize(ctx context.Context, newCount int) error {
 	return nil
 }
 
+// NotifyNewItem signals queue workers that a new item is available for immediate processing.
+func (m *Manager) NotifyNewItem() {
+	select {
+	case m.notifyChan <- struct{}{}:
+	default:
+	}
+}
+
 // workerLoop is the main worker loop.
 // loopCtx controls this worker's lifecycle (cancelled on Resize shrink or Stop).
 // Item processing uses m.ctx so in-flight items are not cancelled when a worker is removed by Resize.
@@ -306,11 +318,23 @@ func (m *Manager) workerLoop(workerID int, loopCtx context.Context) {
 	for {
 		select {
 		case <-ticker.C:
-			// Check if manager is paused
 			if m.IsPaused() {
 				continue
 			}
-			m.processNextItem(m.ctx, workerID)
+			for m.processNextItem(m.ctx, workerID) {
+				if m.IsPaused() {
+					break
+				}
+			}
+		case <-m.notifyChan:
+			if m.IsPaused() {
+				continue
+			}
+			for m.processNextItem(m.ctx, workerID) {
+				if m.IsPaused() {
+					break
+				}
+			}
 		case <-loopCtx.Done():
 			log.Info("Queue worker stopped")
 			return
@@ -318,8 +342,9 @@ func (m *Manager) workerLoop(workerID int, loopCtx context.Context) {
 	}
 }
 
-// processNextItem claims and processes the next queue item
-func (m *Manager) processNextItem(ctx context.Context, workerID int) {
+// processNextItem claims and processes the next queue item.
+// Returns true if an item was claimed and processed, false if no item was claimed or an error occurred.
+func (m *Manager) processNextItem(ctx context.Context, workerID int) bool {
 	m.claimMu.Lock()
 	item, err := m.claimer.ClaimWithRetry(ctx, workerID)
 	m.claimMu.Unlock()
@@ -328,11 +353,11 @@ func (m *Manager) processNextItem(ctx context.Context, workerID int) {
 		if !IsDatabaseContentionError(err) {
 			m.log.ErrorContext(ctx, "Failed to claim next queue item", "worker_id", workerID, "error", err)
 		}
-		return
+		return false
 	}
 
 	if item == nil {
-		return // No work to do
+		return false // No work to do
 	}
 
 	if m.listener != nil {
@@ -359,4 +384,6 @@ func (m *Manager) processNextItem(ctx context.Context, workerID int) {
 	} else {
 		m.processor.HandleSuccess(ctx, item, resultingPath)
 	}
+
+	return true
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -13,20 +14,17 @@ import (
 )
 
 var (
-	// PartPattern matches filename.part###.rar (e.g., movie.part001.rar, movie.part01.rar)
-	PartPattern = regexp.MustCompile(`^(.+)\.part(\d+)\.rar$`)
-	// NumericPattern matches filename.### (numeric extensions like .001, .002)
-	NumericPattern = regexp.MustCompile(`^(.+)\.(\d+)$`)
-	// RPattern matches filename.r## or filename.r### (e.g., movie.r00, movie.r01)
-	RPattern = regexp.MustCompile(`^(.+)\.r(\d+)$`)
-	// RollVolPattern matches old-style continuation volumes whose extension letter
-	// rolls after .r99 (r→s→…→z), always with two digits — e.g. movie.s00 is the
-	// volume right after movie.r99. Mirrors rardecode's nextOldVolName. The leading
-	// .rar is volume 0; .r00 is volume 1. Group 1 is the base, 2 the letter, 3 the digits.
-	RollVolPattern       = regexp.MustCompile(`(?i)^(.+)\.([r-z])(\d{2})$`)
+	// Re-exported from the archive package, which is the single source of truth for
+	// these patterns (the filesystem and sevenzip packages depend on them too).
+	PartPattern    = archive.PartPattern
+	NumericPattern = archive.NumericPattern
+	RPattern       = archive.RPattern
+	RollVolPattern = archive.RollVolPattern
+
+	// Number-only patterns used locally by normalizeRarPartFilename to rewrite a
+	// volume's digits while preserving its padding width.
 	partPatternNumber    = regexp.MustCompile(`\.part(\d+)\.rar$`)
 	rPatternNumber       = regexp.MustCompile(`\.r(\d+)$`)
-	rollVolPatternNumber = regexp.MustCompile(`(?i)\.([r-z])(\d{2})$`)
 	numericPatternNumber = regexp.MustCompile(`\.(\d+)$`)
 )
 
@@ -36,30 +34,11 @@ var (
 // obfuscated names with no recognizable extension) return ("", false) and
 // should be treated as standalone files. The key is the lowercased base name
 // with the volume suffix stripped, so all parts of one set share it.
+//
+// Filenames must already be canonical; poster-added quotes are stripped upstream at
+// the nzbparser boundary (parser.SanitizeNzbFilenames), so SetKey does no cleaning.
 func SetKey(filename string) (string, bool) {
-	lower := strings.ToLower(filepath.Base(filename))
-
-	// Pattern 1: filename.part###.rar
-	if m := PartPattern.FindStringSubmatch(lower); len(m) > 1 {
-		return m[1], true
-	}
-	// Pattern 2: filename.rar (single part / old-style first volume)
-	if before, ok := strings.CutSuffix(lower, ".rar"); ok {
-		return before, true
-	}
-	// Pattern 3: filename.r##
-	if m := RPattern.FindStringSubmatch(lower); len(m) > 1 {
-		return m[1], true
-	}
-	// Pattern 3b: old-style rollover volumes .s##..z## (continuation after .r99)
-	if m := RollVolPattern.FindStringSubmatch(lower); len(m) > 1 {
-		return m[1], true
-	}
-	// Pattern 4: filename.### (numeric)
-	if m := NumericPattern.FindStringSubmatch(lower); len(m) > 1 {
-		return m[1], true
-	}
-	return "", false
+	return archive.SetKey(filename)
 }
 
 // extractRarBaseName returns the lowercase base name of a RAR filename,
@@ -74,61 +53,105 @@ func extractRarBaseName(filename string) string {
 	return strings.ToLower(filepath.Base(filename))
 }
 
-// rarScheme identifies the volume-numbering convention of a RAR/split set.
-type rarScheme int
+// volumeNumberKey derives a width-independent (set, scheme, volume-number) key for
+// a RAR volume filename, or ("", false) when the name is not a recognized volume.
+// It lets a part be matched regardless of zero-padding width — rardecode follows a
+// set by computing fixed-width names (e.g. ...part10.rar) while the source files
+// may be padded differently (...part010.rar).
+func volumeNumberKey(filename string) (string, bool) {
+	setKey, ok := SetKey(filename)
+	if !ok {
+		return "", false
+	}
+	scheme, num, ok := rarVolumeNumber(filename)
+	if !ok {
+		return "", false
+	}
+	return fmt.Sprintf("%s\x00%d\x00%d", setKey, int(scheme), num), true
+}
+
+// partLocator resolves a rardecode part.Path to a previously-registered value,
+// tolerating volume-name width mismatches. Exact filename (full then base) is tried
+// first; on a miss it falls back to the width-independent volume-number key. The
+// same defect — rardecode emitting "part10.rar" when the real volume is
+// "part010.rar" — breaks both volume following (handled in the filesystem layer)
+// and the part→source mapping here, so both need this fallback.
+type partLocator[T any] struct {
+	byName   map[string]T
+	byNumber map[string]T
+}
+
+func newPartLocator[T any](capacity int) partLocator[T] {
+	return partLocator[T]{
+		byName:   make(map[string]T, capacity*2),
+		byNumber: make(map[string]T, capacity),
+	}
+}
+
+// add registers a source value under its filename. The first entry for a given
+// volume-number key wins (exact-name matches are unaffected).
+func (l partLocator[T]) add(filename string, v T) {
+	l.byName[filename] = v
+	l.byName[filepath.Base(filename)] = v
+	if key, ok := volumeNumberKey(filename); ok {
+		if _, exists := l.byNumber[key]; !exists {
+			l.byNumber[key] = v
+		}
+	}
+}
+
+// get resolves a part path, returning the registered value and whether it matched.
+func (l partLocator[T]) get(partPath string) (T, bool) {
+	if v, ok := l.byName[partPath]; ok {
+		return v, true
+	}
+	if v, ok := l.byName[filepath.Base(partPath)]; ok {
+		return v, true
+	}
+	if key, ok := volumeNumberKey(partPath); ok {
+		if v, ok := l.byNumber[key]; ok {
+			return v, true
+		}
+	}
+	var zero T
+	return zero, false
+}
+
+// rarScheme and the scheme constants alias the canonical definitions in the
+// archive package so existing rar-package code keeps compiling unchanged.
+type rarScheme = archive.RarScheme
 
 const (
-	schemeUnknown rarScheme = iota
-	schemePart              // name.partNN.rar (1-based)
-	schemeRoll              // name.rar (vol 0) + name.rNN (vol NN+1)
-	schemeNumeric           // name.NNN, e.g. .001 or .7z.001 (1-based)
+	schemeUnknown = archive.SchemeUnknown
+	schemePart    = archive.SchemePart
+	schemeRoll    = archive.SchemeRoll
+	schemeNumeric = archive.SchemeNumeric
 )
 
 // rarVolumeNumber extracts the volume scheme and ordinal for a filename so a set
-// can be checked for contiguity. The old-style roll scheme is normalized so
-// ".rar" is volume 0 and ".rNN" is volume NN+1, giving a single contiguous
-// sequence. Returns ok=false for names with no recognizable volume suffix.
+// can be checked for contiguity. Delegates to archive.VolumeNumber.
 func rarVolumeNumber(filename string) (rarScheme, int, bool) {
-	lower := strings.ToLower(filepath.Base(filename))
-
-	// part###.rar must be checked before the plain .rar suffix.
-	if m := partPatternNumber.FindStringSubmatch(lower); len(m) > 1 {
-		if n := archive.ParseInt(m[1]); n >= 0 {
-			return schemePart, n, true
-		}
-	}
-	if strings.HasSuffix(lower, ".rar") {
-		return schemeRoll, 0, true
-	}
-	// Old-style continuation volumes .r00..z99. The extension letter rolls after
-	// .r99 (r→s→…→z), so the ordinal must stay contiguous across the boundary:
-	// .r00=1, .r99=100, .s00=101, …, .z99=900. (.rar=0 is handled above.)
-	if m := rollVolPatternNumber.FindStringSubmatch(lower); len(m) > 2 {
-		letter := m[1][0]
-		if nn := archive.ParseInt(m[2]); nn >= 0 {
-			return schemeRoll, 1 + int(letter-'r')*100 + nn, true
-		}
-	}
-	if m := rPatternNumber.FindStringSubmatch(lower); len(m) > 1 {
-		if n := archive.ParseInt(m[1]); n >= 0 {
-			return schemeRoll, n + 1, true
-		}
-	}
-	if m := numericPatternNumber.FindStringSubmatch(lower); len(m) > 1 {
-		if n := archive.ParseInt(m[1]); n >= 0 {
-			return schemeNumeric, n, true
-		}
-	}
-	return schemeUnknown, 0, false
+	return archive.VolumeNumber(filename)
 }
 
-// groupHasVolumeGap reports whether a RAR volume set is missing a leading or
-// interior volume, judged purely from filename numbering (no network access).
-// It is deliberately conservative — when the numbering scheme is mixed or any
-// member is unrecognized it returns false so a healthy set is never skipped on
-// a false positive. A missing *trailing* volume is undetectable by numbering
-// (the expected count is unknown) and also returns false; that case is handled
-// downstream by segment-integrity validation.
+// volumeGapTolerance is the maximum fraction of a RAR volume set that may be
+// missing (interior volumes) while analysis is still attempted. A set missing
+// more than this is treated as doomed and skipped before paying for network
+// I/O; smaller gaps proceed so downstream segment-integrity and content-
+// coverage validation can decide. A *leading* volume gap (the archive header
+// is missing) is never tolerated — the set cannot be read at all.
+const volumeGapTolerance = 0.05
+
+// groupHasVolumeGap reports whether a RAR volume set is missing enough leading
+// or interior volumes that analysis should be skipped, judged purely from
+// filename numbering (no network access). It is deliberately conservative —
+// when the numbering scheme is mixed or any member is unrecognized it returns
+// false so a healthy set is never skipped on a false positive. A missing
+// *leading* volume always counts (the archive header is gone). A small interior
+// gap (within volumeGapTolerance of the volume span) is tolerated and left to
+// downstream validation, so a large multi-volume set is not discarded over a
+// couple of missing volumes. A missing *trailing* volume is undetectable by
+// numbering (the expected count is unknown) and also returns false.
 func groupHasVolumeGap(files []parser.ParsedFile) bool {
 	if len(files) <= 1 {
 		return false
@@ -154,19 +177,36 @@ func groupHasVolumeGap(files []parser.ParsedFile) bool {
 	expectedStart := 1
 	if scheme == schemeRoll {
 		expectedStart = 0
+		// Handle old-style RAR sets starting with .rar (0) followed by .r01 (2) without .r00 (1).
+		if len(nums) > 1 && nums[0] == 0 && nums[1] == 2 && !slices.Contains(nums, 1) {
+			for i := 1; i < len(nums); i++ {
+				nums[i]--
+			}
+		}
 	}
 	if nums[0] > expectedStart {
-		return true // leading volume(s) missing
+		return true // leading volume(s) missing — archive header gone, can't read
 	}
+
+	// Count unique ordinals present across the volume span and skip only when the
+	// missing fraction exceeds the tolerance. This keeps the fast-skip for clearly
+	// broken sets (most volumes absent) while letting a nearly-complete set proceed
+	// to analysis, where segment/coverage checks make the final call.
+	unique := 1
 	for i := 1; i < len(nums); i++ {
-		if nums[i] == nums[i-1] {
-			continue // duplicate ordinal (defensive); not a gap
-		}
-		if nums[i] != nums[i-1]+1 {
-			return true // interior gap
+		if nums[i] != nums[i-1] {
+			unique++
 		}
 	}
-	return false
+	span := nums[len(nums)-1] - expectedStart + 1
+	if span <= 0 {
+		return false
+	}
+	missing := span - unique
+	if missing <= 0 {
+		return false
+	}
+	return float64(missing) > volumeGapTolerance*float64(span)
 }
 
 // groupHasFirstVolume reports whether a RAR group contains the volume that begins
@@ -316,6 +356,146 @@ func reconcileRepostedFirstVolume(groups [][]parser.ParsedFile) [][]parser.Parse
 	return [][]parser.ParsedFile{merged}
 }
 
+// canonicalVolumeName builds the canonical multi-volume filename for a (scheme,
+// ordinal) under a shared base, matching rarname.VolumeNumber's numbering so the
+// rewritten names round-trip and rardecode follows them by computed name. The
+// ordinal is the value VolumeNumber returns:
+//   - roll: 0 -> .rar, 1 -> .r00, 2 -> .r01, … 100 -> .r99, 101 -> .s00 …
+//   - part: 1 -> .part01.rar, 2 -> .part02.rar …
+//   - numeric: 1 -> .001, 2 -> .002 …
+//
+// The shared base lets a distinct-base obfuscated set be rewritten so rardecode's
+// name-based volume following reaches every part.
+func canonicalVolumeName(base string, scheme rarScheme, num int) string {
+	switch scheme {
+	case schemeRoll:
+		if num <= 0 {
+			return base + ".rar"
+		}
+		k := num - 1 // .r00 is ordinal 1
+		letter := byte('r') + byte(k/100)
+		return fmt.Sprintf("%s.%c%02d", base, letter, k%100)
+	case schemePart:
+		return fmt.Sprintf("%s.part%02d.rar", base, num)
+	case schemeNumeric:
+		return fmt.Sprintf("%s.%03d", base, num)
+	default:
+		return base
+	}
+}
+
+// obfuscatedUnifiedBase is the synthetic base name applied to a reassembled
+// obfuscated volume set. It is used only internally for rardecode's volume
+// following and the part→segment lookup; the imported file's virtual path comes
+// from the inner archive's own filename, so this name never surfaces to the user.
+const obfuscatedUnifiedBase = "obfuscated_volume_set"
+
+// reconcileObfuscatedVolumeSet folds a single multi-volume RAR set whose every
+// volume carries a DISTINCT obfuscated base name (e.g. abc.xyz.<hash1>.r00,
+// abc.xyz.<hash2>.r01, …) back into one ordered group. Grouping by base name shatters
+// such a set into one single-file group per volume, so only the header-carrying volume
+// ever analyzes — yielding a file whose declared size dwarfs its mapped segments
+// (the "metadata gap" failure). With no PAR2 to recover a shared base, the reconstruction
+// relies on the volumes' own contiguous ordinals plus an optional headerless first volume.
+//
+// The guards are deliberately strict so genuinely separate archives are never merged:
+//   - every group must be a single file (the per-volume-obfuscation fingerprint; any
+//     shared base leaves the normal/reposted-volume paths to handle it),
+//   - at least two volumes carry recognizable ordinals in ONE scheme, contiguous and
+//     starting at that scheme's expected first continuation,
+//   - at most one file is unrecognized (the headerless first volume of a roll/numeric set).
+//
+// On a match it returns a single group, renamed to a shared synthetic base and ordered
+// by volume number, so rardecode follows the whole sequence. Any ambiguity returns the
+// groups untouched; the segment-coverage guard then fails such an import loudly instead.
+func reconcileObfuscatedVolumeSet(groups [][]parser.ParsedFile) [][]parser.ParsedFile {
+	if len(groups) < 3 {
+		return groups
+	}
+
+	files := make([]parser.ParsedFile, 0, len(groups))
+	for _, g := range groups {
+		if len(g) != 1 {
+			return groups // a shared base grouped >1 volume → not the distinct-base case
+		}
+		files = append(files, g[0])
+	}
+
+	type vol struct {
+		file parser.ParsedFile
+		num  int
+	}
+	scheme := schemeUnknown
+	var recognized []vol
+	var starters []parser.ParsedFile
+	for _, f := range files {
+		s, num, ok := rarVolumeNumber(f.Filename)
+		if !ok {
+			starters = append(starters, f)
+			continue
+		}
+		if scheme == schemeUnknown {
+			scheme = s
+		} else if s != scheme {
+			return groups // mixed schemes → ambiguous
+		}
+		recognized = append(recognized, vol{file: f, num: num})
+	}
+	if scheme == schemeUnknown || len(recognized) < 2 || len(starters) > 1 {
+		return groups
+	}
+
+	sort.Slice(recognized, func(a, b int) bool { return recognized[a].num < recognized[b].num })
+	for i := 1; i < len(recognized); i++ {
+		if recognized[i].num <= recognized[i-1].num || recognized[i].num != recognized[i-1].num+1 {
+			return groups // duplicate or gap → not a clean single set
+		}
+	}
+
+	// rarname.VolumeNumber ordinals: roll .rar=0/.r00=1/.r01=2…, part .part01.rar=1…,
+	// numeric .001=1…. So a roll set's continuations (.r00..) begin at ordinal 1 and its
+	// headerless first volume is ordinal 0 (.rar); numeric's first volume (.001=1) carries
+	// its own header, with continuations at 2.
+	merged := make([]parser.ParsedFile, 0, len(files))
+	if len(starters) == 1 {
+		// A headerless first volume only exists for the roll (.rar + .r00..) and
+		// numeric (.001 + .002..) schemes; the part scheme carries its header in
+		// part01, so a lone unrecognized file there is foreign — leave it alone.
+		var firstName string
+		var contStart int
+		switch scheme {
+		case schemeRoll:
+			firstName, contStart = obfuscatedUnifiedBase+".rar", 1
+		case schemeNumeric:
+			firstName, contStart = obfuscatedUnifiedBase+".001", 2
+		default:
+			return groups
+		}
+		if recognized[0].num != contStart {
+			return groups // continuations don't slot in right after the first volume
+		}
+		st := starters[0]
+		st.Filename = firstName
+		merged = append(merged, st)
+	} else {
+		// No separate starter: the lowest recognized ordinal carries the header. A roll
+		// set may begin at .rar (0) or, when there is no plain .rar, at .r00 (1);
+		// part/numeric always begin at ordinal 1.
+		validStart := recognized[0].num == 1 || (scheme == schemeRoll && recognized[0].num == 0)
+		if !validStart {
+			return groups
+		}
+	}
+
+	for _, v := range recognized {
+		vf := v.file
+		vf.Filename = canonicalVolumeName(obfuscatedUnifiedBase, scheme, v.num)
+		merged = append(merged, vf)
+	}
+
+	return [][]parser.ParsedFile{merged}
+}
+
 // normalizeRarPartFilename normalizes RAR part numbers while preserving padding width
 // If allFilesNoExt is true, uses baseFilename for all parts with .rXX extension
 // where XX is the 0-based part number (index) with zero-padding based on totalFiles
@@ -332,7 +512,7 @@ func normalizeRarPartFilename(filename string, index int, allFilesNoExt bool, to
 	// If all files have no extension, use baseFilename with .rXX extension
 	// This ensures all parts of the same archive have the same base filename
 	// Using RAR multi-volume convention: .r00, .r01, .r02, etc. (0-based)
-	if allFilesNoExt && !archive.HasExtension(filename) && baseFilename != "" {
+	if allFilesNoExt && (!archive.HasExtension(filename) || strings.HasSuffix(filename, ".rar")) && baseFilename != "" {
 		// Calculate padding width based on total number of files (0-based, so totalFiles-1)
 		width := len(strconv.Itoa(totalFiles - 1))
 		// Format with zero-padding (index is already 0-based from OriginalIndex)

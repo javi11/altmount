@@ -16,6 +16,8 @@ import type {
 	ImportStatusResponse,
 	LibrarySyncStatus,
 	ManualScanRequest,
+	MetadataMigrationResult,
+	MetadataMigrationStatus,
 	NzbdavMigrateSymlinksRequest,
 	NzbdavMigrateSymlinksResponse,
 	PoolMetrics,
@@ -29,10 +31,15 @@ import type {
 	UploadNZBLnkResponse,
 	User,
 } from "../types/api";
+
 import type {
 	ConfigResponse,
 	ConfigSection,
 	ConfigUpdateRequest,
+	InspectSearchRequest,
+	InspectSearchResponse,
+	PipelineTuneResponse,
+	ProviderBackbone,
 	ProviderConfig,
 	ProviderCreateRequest,
 	ProviderReorderRequest,
@@ -40,6 +47,7 @@ import type {
 	ProviderTestResponse,
 	ProviderUpdateRequest,
 } from "../types/config";
+
 import type { UpdateChannel, UpdateStatusResponse } from "../types/update";
 
 export interface LogEntry {
@@ -89,7 +97,7 @@ function extractApiError(status: number, statusText: string, body: ApiErrorEnvel
 	return new APIError(status, errorMessage, errorDetails);
 }
 
-export class APIClient {
+class APIClient {
 	private baseURL: string;
 
 	constructor(baseURL = "/api") {
@@ -505,6 +513,28 @@ export class APIClient {
 		});
 	}
 
+	async getMetadataMigrationStatus() {
+		return this.request<MetadataMigrationStatus>("/metadata/migration/status");
+	}
+
+	async dryRunMetadataMigration() {
+		return this.request<MetadataMigrationResult>("/metadata/migration/dry-run", {
+			method: "POST",
+		});
+	}
+
+	async startMetadataMigration() {
+		return this.request<{ message: string }>("/metadata/migration/start", {
+			method: "POST",
+		});
+	}
+
+	async cancelMetadataMigration() {
+		return this.request<{ message: string }>("/metadata/migration/cancel", {
+			method: "POST",
+		});
+	}
+
 	async getPoolMetrics() {
 		return this.request<PoolMetrics>("/system/pool/metrics");
 	}
@@ -708,6 +738,13 @@ export class APIClient {
 		return this.request<{ login_required: boolean }>("/auth/config");
 	}
 
+	async resetAdminPassword(username: string, newPassword: string) {
+		return this.request<{ message: string }>("/auth/reset-admin-password", {
+			method: "POST",
+			body: JSON.stringify({ username, new_password: newPassword }),
+		});
+	}
+
 	// Configuration endpoints
 	async getConfig() {
 		return this.request<ConfigResponse>("/config");
@@ -771,6 +808,7 @@ export class APIClient {
 				total_imports: number;
 				success_count: number;
 				failed_count: number;
+				last_24h_count: number;
 				success_rate: number;
 				last_seen_at: string;
 			}[]
@@ -805,6 +843,16 @@ export class APIClient {
 				method: "POST",
 			},
 		);
+	}
+
+	async tuneProviderPipeline(id: string) {
+		return this.request<PipelineTuneResponse>(`/providers/${id}/tune-pipeline`, {
+			method: "POST",
+		});
+	}
+
+	async getProviderBackbones() {
+		return this.request<ProviderBackbone[]>("/providers/backbones");
 	}
 
 	async createProvider(data: ProviderCreateRequest) {
@@ -1019,6 +1067,14 @@ export class APIClient {
 		if (params?.limit) searchParams.set("limit", params.limit.toString());
 		const query = searchParams.toString();
 		return this.request<LogEntry[]>(`/logs${query ? `?${query}` : ""}`);
+	}
+
+	// Stremio Search & Ranking Inspector
+	async inspectStremioSearch(payload: InspectSearchRequest): Promise<InspectSearchResponse> {
+		return this.request<InspectSearchResponse>("/stremio/search/inspect", {
+			method: "POST",
+			body: JSON.stringify(payload),
+		});
 	}
 }
 

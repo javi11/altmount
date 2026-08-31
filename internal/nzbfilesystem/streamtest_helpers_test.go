@@ -34,18 +34,20 @@ func newFakePoolManager(c pool.NntpClient) *fakePoolManager {
 	return &fakePoolManager{client: c}
 }
 
-func (m *fakePoolManager) GetPool() (pool.NntpClient, error)            { return m.client, nil }
-func (m *fakePoolManager) SetProviders(_ []nntppool.Provider) error     { return nil }
-func (m *fakePoolManager) ClearPool() error                              { return nil }
-func (m *fakePoolManager) HasPool() bool                                 { return true }
-func (m *fakePoolManager) GetMetrics() (pool.MetricsSnapshot, error)     { return pool.MetricsSnapshot{}, nil }
+func (m *fakePoolManager) GetPool() (pool.NntpClient, error)        { return m.client, nil }
+func (m *fakePoolManager) SetProviders(_ []nntppool.Provider) error { return nil }
+func (m *fakePoolManager) ClearPool() error                         { return nil }
+func (m *fakePoolManager) HasPool() bool                            { return true }
+func (m *fakePoolManager) GetMetrics() (pool.MetricsSnapshot, error) {
+	return pool.MetricsSnapshot{}, nil
+}
 func (m *fakePoolManager) ResetMetrics(_ context.Context, _, _ bool) error { return nil }
-func (m *fakePoolManager) ResetProviderErrors(_ context.Context) error   { return nil }
-func (m *fakePoolManager) IncArticlesDownloaded()                        {}
-func (m *fakePoolManager) UpdateDownloadProgress(_ string, _ int64)      {}
-func (m *fakePoolManager) IncArticlesPosted()                            {}
-func (m *fakePoolManager) AddProvider(_ nntppool.Provider) error         { return nil }
-func (m *fakePoolManager) RemoveProvider(_ string) error                 { return nil }
+func (m *fakePoolManager) ResetProviderErrors(_ context.Context) error     { return nil }
+func (m *fakePoolManager) IncArticlesDownloaded()                          {}
+func (m *fakePoolManager) UpdateDownloadProgress(_ string, _ int64)        {}
+func (m *fakePoolManager) IncArticlesPosted()                              {}
+func (m *fakePoolManager) AddProvider(_ nntppool.Provider) error           { return nil }
+func (m *fakePoolManager) RemoveProvider(_ string) error                   { return nil }
 func (m *fakePoolManager) ResetProviderQuota(_ context.Context, _ string) error {
 	return nil
 }
@@ -53,7 +55,12 @@ func (m *fakePoolManager) SetProviderIDs(_ map[string]string) {}
 func (m *fakePoolManager) AcquireImportSlot(_ context.Context) (func(), error) {
 	return func() {}, nil
 }
-func (m *fakePoolManager) SetAdmissionCaps(_ int, _ int)               {}
+func (m *fakePoolManager) SetAdmissionCap(_ int) {}
+func (m *fakePoolManager) AcquireImportConnection(_ context.Context) (func(), error) {
+	return func() {}, nil
+}
+func (m *fakePoolManager) SetImportConnCapacity(_ int)                 {}
+func (m *fakePoolManager) ImportConnCapacity() int                     { return 0 }
 func (m *fakePoolManager) SetStreamSource(_ pool.StreamActivitySource) {}
 func (m *fakePoolManager) NotifyStreamChange()                         {}
 

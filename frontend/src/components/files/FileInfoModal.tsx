@@ -439,7 +439,7 @@ export function FileInfoModal({
 			);
 		}
 
-		if (!metadata || !metadata.nested_sources || metadata.nested_sources.length === 0) {
+		if (!metadata?.nested_sources || metadata.nested_sources.length === 0) {
 			return (
 				<div className="py-8 text-center">
 					<Archive className="mx-auto mb-4 h-16 w-16 text-base-content/30" />
@@ -564,7 +564,7 @@ export function FileInfoModal({
 						</h4>
 						<div className="space-y-3">
 							<div>
-								<div className="mb-1 text-base-content/70 text-sm">NZB Source File:</div>
+								<div className="mb-1 text-base-content/70 text-sm">NZB Store File:</div>
 								<div className="break-all rounded bg-base-100 p-2 font-mono text-sm">
 									{metadata.source_nzb_path || "Unknown"}
 								</div>

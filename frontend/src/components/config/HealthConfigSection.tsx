@@ -86,6 +86,18 @@ export function HealthConfigSection({
 		setValidationError(validateFormData(newData));
 	};
 
+	const handleToggleExcludedCategory = (categoryName: string) => {
+		const current = formData.excluded_categories ?? [];
+		const isExcluded = current.some((name) => name.toLowerCase() === categoryName.toLowerCase());
+		const next = isExcluded
+			? current.filter((name) => name.toLowerCase() !== categoryName.toLowerCase())
+			: [...current, categoryName];
+		const newData = { ...formData, excluded_categories: next };
+		setFormData(newData);
+		setHasChanges(JSON.stringify(newData) !== JSON.stringify(config.health));
+		setValidationError(validateFormData(newData));
+	};
+
 	const handleRepairChange = (
 		field: keyof HealthConfig["repair"],
 		value: boolean | number | undefined,
@@ -111,13 +123,6 @@ export function HealthConfigSection({
 
 	return (
 		<div className="space-y-10">
-			<div>
-				<h3 className="font-bold text-base-content text-lg tracking-tight">Auto-Repair System</h3>
-				<p className="break-words text-base-content/50 text-sm">
-					Monitor and automatically repair corrupted library files.
-				</p>
-			</div>
-
 			<div className="space-y-8">
 				{/* Enable Health Toggle */}
 				<div className="rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
@@ -179,7 +184,28 @@ export function HealthConfigSection({
 
 				{/* Repair & Back-off Configuration */}
 				<div className="rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
-					<div className="flex items-start justify-between gap-4">
+					<fieldset className="fieldset">
+						<legend className="fieldset-legend font-semibold">On Corruption</legend>
+						<select
+							className="select select-bordered w-full bg-base-100 text-sm"
+							value={formData.corruption_action ?? "repair"}
+							disabled={isReadOnly}
+							onChange={(e) =>
+								handleInputChange("corruption_action", e.target.value as "repair" | "delete")
+							}
+						>
+							<option value="repair">Trigger repair</option>
+							<option value="delete">Delete file</option>
+						</select>
+						<p className="label break-words text-[10px] text-base-content/50">
+							What to do when a confirmed (non-degraded) corruption is detected, whether from a
+							scheduled health check or a live streaming failure. "Delete file" removes the file's
+							metadata, health record, and any now-empty parent directories instead of asking an ARR
+							to redownload it.
+						</p>
+					</fieldset>
+
+					<div className="mt-6 flex items-start justify-between gap-4 border-base-300/50 border-t pt-6">
 						<div className="min-w-0 flex-1">
 							<h4 className="break-words font-bold text-base-content text-sm">Repair Engine</h4>
 							<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
@@ -190,12 +216,12 @@ export function HealthConfigSection({
 							type="checkbox"
 							className="toggle toggle-info mt-1 shrink-0"
 							checked={formData.repair?.enabled ?? true}
-							disabled={isReadOnly}
+							disabled={isReadOnly || formData.corruption_action === "delete"}
 							onChange={(e) => handleRepairChange("enabled", e.target.checked)}
 						/>
 					</div>
 
-					{formData.repair?.enabled && (
+					{formData.repair?.enabled && formData.corruption_action !== "delete" && (
 						<div className="fade-in slide-in-from-top-2 mt-6 animate-in border-base-300/50 border-t pt-6">
 							<div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
 								<fieldset className="fieldset">
@@ -214,7 +240,8 @@ export function HealthConfigSection({
 										min="1"
 									/>
 									<p className="label break-words text-[10px] text-base-content/50">
-										Wait time before the first repair re-notification.
+										Base wait time between repair re-notifications, applied on every retry (doubled
+										each time if exponential back-off is enabled).
 									</p>
 								</fieldset>
 
@@ -258,7 +285,7 @@ export function HealthConfigSection({
 								</fieldset>
 							</div>
 
-							<div className="mt-6 flex items-start justify-between gap-4 rounded-xl bg-base-100/50 p-4">
+							<div className="mt-6 flex items-start justify-between gap-4 rounded-xl border border-base-300/60 bg-base-100/40 p-4">
 								<div className="min-w-0 flex-1">
 									<h5 className="font-bold text-xs">Exponential Back-off</h5>
 									<p className="mt-1 text-[10px] text-base-content/60 leading-relaxed">
@@ -275,7 +302,7 @@ export function HealthConfigSection({
 								/>
 							</div>
 
-							<div className="mt-4 flex items-start justify-between gap-4 rounded-xl bg-base-100/50 p-4">
+							<div className="mt-4 flex items-start justify-between gap-4 rounded-xl border border-base-300/60 bg-base-100/40 p-4">
 								<div className="min-w-0 flex-1">
 									<h5 className="font-bold text-xs">Resolve Repairs on Import</h5>
 									<p className="mt-1 text-[10px] text-base-content/60 leading-relaxed">
@@ -391,6 +418,49 @@ export function HealthConfigSection({
 					)}
 				</div>
 
+				{/* Category Exclusions */}
+				<div className="space-y-4 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+					<div className="min-w-0">
+						<h4 className="break-words font-bold text-base-content text-sm">Excluded Categories</h4>
+						<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
+							Files under the selected categories are never registered for health checking by the
+							periodic library sync. Existing records are left untouched.
+						</p>
+					</div>
+
+					{config.sabnzbd?.categories?.length ? (
+						<div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+							{config.sabnzbd.categories.map((category) => {
+								const isExcluded = (formData.excluded_categories ?? []).some(
+									(name) => name.toLowerCase() === category.name.toLowerCase(),
+								);
+								return (
+									<label
+										key={category.name}
+										className="flex cursor-pointer items-center gap-3 rounded-xl border border-base-300/60 bg-base-100/40 p-3"
+									>
+										<input
+											type="checkbox"
+											className="checkbox checkbox-primary checkbox-sm shrink-0"
+											checked={isExcluded}
+											disabled={isReadOnly}
+											onChange={() => handleToggleExcludedCategory(category.name)}
+										/>
+										<span className="min-w-0 flex-1 break-words font-semibold text-xs">
+											{category.name}
+										</span>
+									</label>
+								);
+							})}
+						</div>
+					) : (
+						<div className="rounded-xl border border-base-300/60 bg-base-100/40 p-4 text-[11px] text-base-content/50">
+							No SABnzbd categories are configured yet. Add categories under the SABnzbd settings to
+							exclude them from health checking.
+						</div>
+					)}
+				</div>
+
 				{/* Advanced Performance & Logic */}
 				<div className="collapse-arrow collapse rounded-2xl border-2 border-base-300/80 bg-base-200/60">
 					<input type="checkbox" />
@@ -403,52 +473,87 @@ export function HealthConfigSection({
 							<h5 className="font-bold text-base-content/70 text-xs uppercase tracking-widest">
 								Validation
 							</h5>
-							<div className="mt-4 grid grid-cols-1 gap-8 sm:grid-cols-2">
-								<fieldset className="fieldset">
-									<legend className="fieldset-legend break-words font-semibold">
-										Validation Intensity
-									</legend>
-									<label className="label cursor-pointer items-start justify-start gap-3">
-										<input
-											type="checkbox"
-											className="checkbox checkbox-sm checkbox-primary mt-1 shrink-0"
-											checked={formData.check_all_segments ?? false}
-											disabled={isReadOnly}
-											onChange={(e) => handleInputChange("check_all_segments", e.target.checked)}
-										/>
-										<div className="min-w-0 flex-1">
-											<span className="label-text break-words font-medium text-xs">
-												Verify Every Segment (100%)
-											</span>
-											<p className="label mt-1 break-words text-base-content/70 text-xs leading-relaxed">
-												Thorough but very slow for large libraries.
-											</p>
-										</div>
-									</label>
-								</fieldset>
+							<div className="mt-4 space-y-3">
+								<label className="flex cursor-pointer items-start gap-3 rounded-xl border border-base-300/60 bg-base-100/40 p-4">
+									<input
+										type="checkbox"
+										className="checkbox checkbox-sm checkbox-primary mt-0.5 shrink-0"
+										checked={formData.check_all_segments ?? false}
+										disabled={isReadOnly}
+										onChange={(e) => handleInputChange("check_all_segments", e.target.checked)}
+									/>
+									<div className="min-w-0 flex-1">
+										<span className="block break-words font-bold text-xs">
+											Verify Every Segment
+										</span>
+										<span className="mt-0.5 block break-words text-[11px] text-base-content/50 leading-snug">
+											Validates 100% of segments instead of a sample. Thorough, but slow on large
+											libraries.
+										</span>
+									</div>
+								</label>
 
 								{!formData.check_all_segments && (
+									<label className="flex cursor-pointer items-start gap-3 rounded-xl border border-base-300/60 bg-base-100/40 p-4">
+										<input
+											type="checkbox"
+											className="checkbox checkbox-sm checkbox-primary mt-0.5 shrink-0"
+											checked={formData.verify_data ?? false}
+											disabled={isReadOnly}
+											onChange={(e) => handleInputChange("verify_data", e.target.checked)}
+										/>
+										<div className="min-w-0 flex-1">
+											<span className="block break-words font-bold text-xs">
+												Ghost File Detection
+											</span>
+											<span className="mt-0.5 block break-words text-[11px] text-base-content/50 leading-snug">
+												Reserved for a future data-integrity check. Currently has no effect.
+											</span>
+										</div>
+									</label>
+								)}
+
+								<label className="flex cursor-pointer items-start gap-3 rounded-xl border border-base-300/60 bg-base-100/40 p-4">
+									<input
+										type="checkbox"
+										className="checkbox checkbox-sm checkbox-primary mt-0.5 shrink-0"
+										checked={formData.verify_content ?? false}
+										disabled={isReadOnly}
+										onChange={(e) => handleInputChange("verify_content", e.target.checked)}
+									/>
+									<div className="min-w-0 flex-1">
+										<span className="block break-words font-bold text-xs">
+											Verify Media Content
+										</span>
+										<span className="mt-0.5 block break-words text-[11px] text-base-content/50 leading-snug">
+											On a file's first health check, read its header through the serving stack and
+											mark it corrupted if no recognized media container signature is found.
+										</span>
+									</div>
+								</label>
+
+								{formData.verify_content && (
 									<fieldset className="fieldset">
-										<legend className="fieldset-legend break-words font-semibold">
-											Ghost File Detection
+										<legend className="fieldset-legend font-semibold">
+											Content Probe Timeout (Seconds)
 										</legend>
-										<label className="label cursor-pointer items-start justify-start gap-3">
-											<input
-												type="checkbox"
-												className="checkbox checkbox-sm checkbox-primary mt-1 shrink-0"
-												checked={formData.verify_data ?? false}
-												disabled={isReadOnly}
-												onChange={(e) => handleInputChange("verify_data", e.target.checked)}
-											/>
-											<div className="min-w-0 flex-1">
-												<span className="label-text break-words font-medium text-xs">
-													Hybrid Data Verification
-												</span>
-												<p className="label mt-1 break-words text-base-content/70 text-xs leading-relaxed">
-													Reads 1 byte from each checked segment to confirm Usenet data exists.
-												</p>
-											</div>
-										</label>
+										<input
+											type="number"
+											className="input input-bordered w-full bg-base-100 font-mono text-sm"
+											value={formData.verify_content_timeout_seconds ?? 15}
+											disabled={isReadOnly}
+											onChange={(e) =>
+												handleInputChange(
+													"verify_content_timeout_seconds",
+													Number.parseInt(e.target.value, 10) || 15,
+												)
+											}
+											min="1"
+										/>
+										<p className="label break-words text-[10px] text-base-content/50">
+											Per-file deadline for the header probe. A timeout is treated as a transient
+											error, never as a corruption verdict.
+										</p>
 									</fieldset>
 								)}
 							</div>
@@ -670,23 +775,44 @@ export function HealthConfigSection({
 								</fieldset>
 								<fieldset className="fieldset">
 									<legend className="fieldset-legend font-semibold">
-										Max Health Check Connections
+										Max Concurrent Segment Checks
 									</legend>
 									<input
 										type="number"
 										className="input input-bordered w-full bg-base-100 font-mono text-sm"
-										value={formData.max_connections_for_health_checks ?? 5}
+										value={formData.max_connections_for_health_checks ?? 100}
 										disabled={isReadOnly}
 										min={1}
 										onChange={(e) =>
 											handleInputChange(
 												"max_connections_for_health_checks",
-												Number.parseInt(e.target.value, 10) || 5,
+												Number.parseInt(e.target.value, 10) || 100,
 											)
 										}
 									/>
-									<p className="label break-words text-base-content/70 text-xs">
-										Max NNTP connections reserved for health checks.
+									<p className="label block whitespace-normal break-words text-base-content/70 text-xs">
+										How many segment existence checks run at once within a sweep. STAT requests are
+										cheap, so this can be much higher than your provider's connection count.
+									</p>
+								</fieldset>
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend font-semibold">Check Batch Size</legend>
+									<input
+										type="number"
+										className="input input-bordered w-full bg-base-100 font-mono text-sm"
+										value={formData.check_batch_size ?? 50}
+										disabled={isReadOnly}
+										min={1}
+										onChange={(e) =>
+											handleInputChange(
+												"check_batch_size",
+												Number.parseInt(e.target.value, 10) || 50,
+											)
+										}
+									/>
+									<p className="label block whitespace-normal break-words text-base-content/70 text-xs">
+										How many due files are fetched and swept together per health-check cycle. Raise
+										this to clear a large backlog faster.
 									</p>
 								</fieldset>
 							</div>

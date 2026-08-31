@@ -3,27 +3,17 @@ package usenet
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"math/rand"
-	"sync"
 	"testing"
 	"time"
 
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/testsupport/fakepool"
-	"github.com/javi11/altmount/internal/testsupport/segments"
 	"github.com/javi11/nntppool/v4"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
-
-// NOTE: Tests for ValidateSegmentAvailability and ValidateSegmentAvailabilityDetailed
-// were removed during v2→v4 migration because nntppool v4 uses a concrete *Client type
-// (not an interface), making it impossible to mock directly. Integration tests with
-// a real NNTP server should be used to test validation behavior.
-//
-// However, ValidateSegmentList and ValidateSegmentAvailabilityDetailed accept
-// pool.Manager which IS an interface — so we can mock at that level.
 
 func TestSelectSegmentsForValidation(t *testing.T) {
 	// Use a deterministic RNG for predictability in middle segments.
@@ -76,122 +66,22 @@ func TestSelectSegmentsForValidation(t *testing.T) {
 		assert.Equal(t, 5, len(selected))
 	})
 
-	t.Run("cap 55", func(t *testing.T) {
-		// Create 20,000 segments (10% = 2000)
+	t.Run("large files honor the configured percentage", func(t *testing.T) {
+		// Regression for #812: a hard 55-sample cap made every sub-100%
+		// setting sample the same handful of segments on large releases.
 		largeSegments := make([]*metapb.SegmentData, 20000)
 		for i := range 20000 {
 			largeSegments[i] = &metapb.SegmentData{Id: fmt.Sprintf("seg%d", i)}
 		}
 
-		selected := selectSegmentsForValidation(largeSegments, 10)
-		assert.Equal(t, 55, len(selected), "Should be capped at 55")
+		assert.Equal(t, 2000, len(selectSegmentsForValidation(largeSegments, 10)))
+		assert.Equal(t, 10000, len(selectSegmentsForValidation(largeSegments, 50)))
+		// Higher percentages must sample strictly more than lower ones.
+		assert.Greater(t,
+			len(selectSegmentsForValidation(largeSegments, 25)),
+			len(selectSegmentsForValidation(largeSegments, 10)),
+		)
 	})
-}
-
-// TestValidateSegmentList_MissingSegmentEmitsDebugLog verifies that a
-// DebugContext log with message "missing segment" is emitted when
-// ValidateSegmentList finds a segment that is unavailable.
-// NOT parallel: we replace the global slog default.
-func TestValidateSegmentList_MissingSegmentEmitsDebugLog(t *testing.T) {
-	const segID = "missing-seg@host"
-
-	var mu sync.Mutex
-	type logRecord struct{ msg, segID string }
-	var captured []logRecord
-
-	handler := &captureLogHandler{
-		onHandle: func(r slog.Record) {
-			var sid string
-			r.Attrs(func(a slog.Attr) bool {
-				if a.Key == "segment_id" {
-					sid = a.Value.String()
-				}
-				return true
-			})
-			mu.Lock()
-			captured = append(captured, logRecord{msg: r.Message, segID: sid})
-			mu.Unlock()
-		},
-	}
-	prev := slog.Default()
-	slog.SetDefault(slog.New(handler))
-	t.Cleanup(func() { slog.SetDefault(prev) })
-
-	fp := fakepool.New()
-	fp.SetBehavior(segments.MessageID(0), fakepool.SegmentBehavior{
-		Err: nntppool.ErrArticleNotFound,
-	})
-	// override to use our specific segID
-	fp.SetBehavior(segID, fakepool.SegmentBehavior{
-		Err: nntppool.ErrArticleNotFound,
-	})
-
-	mgr := &validationTestPoolManager{client: fp}
-	segs := []*metapb.SegmentData{{Id: segID}}
-
-	err := ValidateSegmentList(context.Background(), segs, mgr, 1, nil, 5*time.Second)
-	assert.Error(t, err)
-
-	mu.Lock()
-	defer mu.Unlock()
-	found := false
-	for _, r := range captured {
-		if r.msg == "missing segment" && r.segID == segID {
-			found = true
-		}
-	}
-	assert.True(t, found, "expected 'missing segment' debug log for segment_id=%q, got: %+v", segID, captured)
-}
-
-// TestValidateSegmentAvailabilityDetailed_MissingSegmentEmitsDebugLog verifies
-// the same for the non-fail-fast detailed path.
-// NOT parallel: we replace the global slog default.
-func TestValidateSegmentAvailabilityDetailed_MissingSegmentEmitsDebugLog(t *testing.T) {
-	const segID = "missing-detailed@host"
-
-	var mu sync.Mutex
-	type logRecord struct{ msg, segID string }
-	var captured []logRecord
-
-	handler := &captureLogHandler{
-		onHandle: func(r slog.Record) {
-			var sid string
-			r.Attrs(func(a slog.Attr) bool {
-				if a.Key == "segment_id" {
-					sid = a.Value.String()
-				}
-				return true
-			})
-			mu.Lock()
-			captured = append(captured, logRecord{msg: r.Message, segID: sid})
-			mu.Unlock()
-		},
-	}
-	prev := slog.Default()
-	slog.SetDefault(slog.New(handler))
-	t.Cleanup(func() { slog.SetDefault(prev) })
-
-	fp := fakepool.New()
-	fp.SetBehavior(segID, fakepool.SegmentBehavior{
-		Err: nntppool.ErrArticleNotFound,
-	})
-
-	mgr := &validationTestPoolManager{client: fp}
-	segs := []*metapb.SegmentData{{Id: segID}}
-
-	result, err := ValidateSegmentAvailabilityDetailed(context.Background(), segs, mgr, 1, 100, nil, 5*time.Second)
-	assert.NoError(t, err)
-	assert.Equal(t, 1, result.MissingCount)
-
-	mu.Lock()
-	defer mu.Unlock()
-	found := false
-	for _, r := range captured {
-		if r.msg == "missing segment" && r.segID == segID {
-			found = true
-		}
-	}
-	assert.True(t, found, "expected 'missing segment' debug log for segment_id=%q, got: %+v", segID, captured)
 }
 
 // validationTestPoolManager is a minimal pool.Manager for validation tests.
@@ -223,6 +113,121 @@ func (m *validationTestPoolManager) SetProviderIDs(_ map[string]string) {}
 func (m *validationTestPoolManager) AcquireImportSlot(_ context.Context) (func(), error) {
 	return func() {}, nil
 }
-func (m *validationTestPoolManager) SetAdmissionCaps(_ int, _ int)               {}
+func (m *validationTestPoolManager) SetAdmissionCap(_ int) {}
+func (m *validationTestPoolManager) AcquireImportConnection(_ context.Context) (func(), error) {
+	return func() {}, nil
+}
+func (m *validationTestPoolManager) SetImportConnCapacity(_ int)                 {}
+func (m *validationTestPoolManager) ImportConnCapacity() int                     { return 0 }
 func (m *validationTestPoolManager) SetStreamSource(_ pool.StreamActivitySource) {}
 func (m *validationTestPoolManager) NotifyStreamChange()                         {}
+
+// TestValidateSegmentAvailability_TransientErrorsAreInconclusive is the
+// regression guard for #861: a STAT that fails for an operational reason
+// (dead connection, timeout, quota, auth, 502, exhausted pool) says nothing
+// about whether the article exists. Counting it as missing let a transient
+// backup-provider failure be written into the file's permanent hole map.
+func TestValidateSegmentAvailability_TransientErrorsAreInconclusive(t *testing.T) {
+	operational := []struct {
+		name string
+		err  error
+	}{
+		{"connection died", nntppool.ErrConnectionDied},
+		{"quota exceeded", nntppool.ErrQuotaExceeded},
+		{"service unavailable", nntppool.ErrServiceUnavailable},
+		{"auth rejected", nntppool.ErrAuthRejected},
+		{"deadline exceeded", context.DeadlineExceeded},
+		{"providers exhausted", fmt.Errorf("nntp: all providers exhausted: %w", nntppool.ErrConnectionDied)},
+	}
+
+	for _, tc := range operational {
+		t.Run(tc.name, func(t *testing.T) {
+			fp := fakepool.New()
+			mgr := &validationTestPoolManager{client: fp}
+			const id = "flaky@host"
+			fp.SetBehavior(id, fakepool.SegmentBehavior{Err: tc.err})
+
+			results, err := ValidateSegmentAvailabilityBatch(
+				context.Background(), [][]string{{id}}, mgr, BatchOptions{MaxConnections: 1, Timeout: 5 * time.Second})
+			assert.NoError(t, err)
+			require.Len(t, results, 1)
+
+			assert.Zero(t, results[0].MissingCount, "operational error must not count as missing")
+			assert.Empty(t, results[0].MissingIDs, "operational error must not yield a hole id")
+			assert.Equal(t, 1, results[0].UnresolvedCount)
+			assert.True(t, results[0].Inconclusive())
+			assert.ErrorIs(t, results[0].Err, tc.err)
+		})
+	}
+}
+
+// TestValidateSegmentAvailability_ArticleNotFoundIsMissing keeps the genuine
+// miss path intact: only 430/423 proves the article is gone.
+func TestValidateSegmentAvailability_ArticleNotFoundIsMissing(t *testing.T) {
+	fp := fakepool.New()
+	mgr := &validationTestPoolManager{client: fp}
+	const id = "gone@host"
+	fp.SetBehavior(id, fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
+
+	results, err := ValidateSegmentAvailabilityBatch(
+		context.Background(), [][]string{{id}}, mgr, BatchOptions{MaxConnections: 1, Timeout: 5 * time.Second})
+	assert.NoError(t, err)
+	require.Len(t, results, 1)
+
+	assert.Equal(t, 1, results[0].MissingCount)
+	assert.Equal(t, []string{id}, results[0].MissingIDs)
+	assert.Zero(t, results[0].UnresolvedCount)
+	assert.False(t, results[0].Inconclusive())
+}
+
+// TestValidateSegmentAvailabilityBatch_InconclusiveIsPerFile verifies one
+// file's transient failure does not taint its batch siblings' verdicts.
+func TestValidateSegmentAvailabilityBatch_InconclusiveIsPerFile(t *testing.T) {
+	fp := fakepool.New()
+	mgr := &validationTestPoolManager{client: fp}
+	fp.SetBehavior("flaky@host", fakepool.SegmentBehavior{Err: nntppool.ErrConnectionDied})
+	fp.SetBehavior("gone@host", fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
+
+	results, err := ValidateSegmentAvailabilityBatch(context.Background(), [][]string{
+		{"ok@host"},
+		{"flaky@host"},
+		{"gone@host"},
+	}, mgr, BatchOptions{MaxConnections: 3, Timeout: 5 * time.Second})
+	assert.NoError(t, err)
+	require.Len(t, results, 3)
+
+	assert.False(t, results[0].Inconclusive())
+	assert.Zero(t, results[0].MissingCount)
+
+	assert.True(t, results[1].Inconclusive())
+	assert.Zero(t, results[1].MissingCount)
+
+	assert.False(t, results[2].Inconclusive())
+	assert.Equal(t, 1, results[2].MissingCount)
+}
+
+// TestValidateSegmentAvailabilityBatch_UnreportedSegmentsAreInconclusive
+// covers the other half of #861: StatMany emits nothing for ids whose
+// per-chunk deadline elapsed before they were dispatched. Treating that
+// silence as "checked and present" made a truncated sweep declare a file
+// healthy on no evidence at all — it must instead mark the result
+// inconclusive.
+func TestValidateSegmentAvailabilityBatch_UnreportedSegmentsAreInconclusive(t *testing.T) {
+	fp := fakepool.New()
+	// Every stat blocks past the chunk deadline, so the ids are abandoned
+	// without ever reporting a result.
+	fp.SetDefaultBehavior(fakepool.SegmentBehavior{Latency: 200 * time.Millisecond})
+	mgr := &validationTestPoolManager{client: fp}
+
+	results, err := ValidateSegmentAvailabilityBatch(
+		context.Background(), [][]string{{"a@host", "b@host"}}, mgr,
+		BatchOptions{MaxConnections: 2, Timeout: 10 * time.Millisecond})
+	assert.NoError(t, err)
+	require.Len(t, results, 1)
+
+	assert.Zero(t, results[0].MissingCount)
+	assert.Empty(t, results[0].MissingIDs)
+	assert.Equal(t, 2, results[0].UnresolvedCount)
+	assert.True(t, results[0].Inconclusive())
+	assert.ErrorIs(t, results[0].Err, context.DeadlineExceeded)
+}

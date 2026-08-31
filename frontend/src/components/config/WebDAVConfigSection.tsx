@@ -66,13 +66,6 @@ export function WebDAVConfigSection({
 
 	return (
 		<div className="space-y-10">
-			<div>
-				<h3 className="font-bold text-base-content text-lg tracking-tight">WebDAV Interface</h3>
-				<p className="break-words text-base-content/50 text-sm">
-					Expose your virtual library over the network via WebDAV protocol.
-				</p>
-			</div>
-
 			<div className="space-y-8">
 				{/* Network Configuration */}
 				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">

@@ -72,13 +72,6 @@ export function ImportConfigSection({
 
 	return (
 		<div className="min-w-0 space-y-10">
-			<div className="min-w-0">
-				<h3 className="font-bold text-base-content text-lg tracking-tight">NZB Processor</h3>
-				<p className="break-words text-base-content/50 text-sm">
-					Configure how workers handle new imports and validation.
-				</p>
-			</div>
-
 			<div className="min-w-0 space-y-8">
 				{/* Worker Core Configuration */}
 				<div className="min-w-0 space-y-6 overflow-hidden rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
@@ -111,28 +104,6 @@ export function ImportConfigSection({
 							</p>
 						</fieldset>
 
-						<fieldset className="fieldset min-w-0">
-							<legend className="fieldset-legend">Max Connections (per Worker)</legend>
-							<input
-								type="number"
-								className="input input-bordered w-full min-w-0 max-w-full bg-base-100 font-mono text-sm"
-								value={formData.max_import_connections}
-								readOnly={isReadOnly}
-								min={1}
-								onChange={(e) =>
-									handleInputChange(
-										"max_import_connections",
-										Number.parseInt(e.target.value, 10) || 10,
-									)
-								}
-							/>
-							<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/70 text-xs">
-								Socket limit per active worker.
-							</p>
-						</fieldset>
-					</div>
-
-					<div className="grid min-w-0 grid-cols-1 gap-6 sm:grid-cols-2">
 						<fieldset className="fieldset min-w-0">
 							<legend className="fieldset-legend font-semibold">Max Download Prefetch</legend>
 							<input
@@ -220,95 +191,102 @@ export function ImportConfigSection({
 							</div>
 						</div>
 
-						<div className="divider text-base-content/70" />
+						<div className="divider my-1 text-base-content/70" />
 
-						<label className="label cursor-pointer items-start justify-start gap-4">
-							<input
-								type="checkbox"
-								className="toggle toggle-primary toggle-sm mt-1 shrink-0"
-								checked={formData.allow_nested_rar_extraction ?? true}
-								disabled={isReadOnly}
-								onChange={(e) => handleInputChange("allow_nested_rar_extraction", e.target.checked)}
-							/>
-							<div className="min-w-0 flex-1">
-								<span className="block whitespace-normal break-words font-bold text-xs">
-									Nested RAR Extraction
-								</span>
-								<span className="mt-1 block whitespace-normal break-words text-base-content/50 text-xs leading-relaxed">
-									Extract nested RAR archives found inside other RAR or 7zip archives. Disable if
-									nested extraction causes issues with your files.
-								</span>
-							</div>
-						</label>
-
-						<div className="divider text-base-content/70" />
-
-						<label className="label cursor-pointer items-start justify-start gap-4">
-							<input
-								type="checkbox"
-								className="toggle toggle-primary toggle-sm mt-1 shrink-0"
-								checked={formData.rename_to_nzb_name ?? true}
-								disabled={isReadOnly}
-								onChange={(e) => handleInputChange("rename_to_nzb_name", e.target.checked)}
-							/>
-							<div className="min-w-0 flex-1">
-								<span className="block whitespace-normal break-words font-bold text-xs">
-									Rename to NZB Name
-								</span>
-								<span className="mt-1 block whitespace-normal break-words text-base-content/50 text-xs leading-relaxed">
-									When an import produces a single file, rename it using the NZB release name
-									instead of the original (often obfuscated) filename.
-								</span>
-							</div>
-						</label>
-
-						<div className="divider text-base-content/70" />
-
-						<label className="label cursor-pointer items-start justify-start gap-4">
-							<input
-								type="checkbox"
-								className="toggle toggle-primary toggle-sm mt-1 shrink-0"
-								checked={formData.filter_sample_files ?? true}
-								disabled={isReadOnly}
-								onChange={(e) => handleInputChange("filter_sample_files", e.target.checked)}
-							/>
-							<div className="min-w-0 flex-1">
-								<span className="block whitespace-normal break-words font-bold text-xs">
-									Filter Sample Files
-								</span>
-								<span className="mt-1 block whitespace-normal break-words text-base-content/50 text-xs leading-relaxed">
-									Automatically reject files that appear to be samples or proofs (e.g.,
-									movie.sample.mkv). Files larger than 200MB are never filtered.
-								</span>
-							</div>
-						</label>
-
-						<div className="divider text-base-content/70" />
-
-						<label className="label cursor-pointer items-start justify-start gap-4">
-							<input
-								type="checkbox"
-								className="checkbox checkbox-error checkbox-sm mt-1 shrink-0"
-								checked={formData.delete_completed_nzb ?? false}
-								disabled={isReadOnly}
-								onChange={(e) => handleInputChange("delete_completed_nzb", e.target.checked)}
-							/>
-							<div className="min-w-0 flex-1">
-								<div className="flex items-center gap-2">
-									<span className="whitespace-normal break-words font-bold text-xs">
-										Delete NZB After Import
+						<div className="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2">
+							<label className="flex min-w-0 cursor-pointer items-start gap-3 rounded-xl border border-base-300/60 bg-base-100/40 p-4">
+								<input
+									type="checkbox"
+									className="toggle toggle-primary toggle-sm mt-0.5 shrink-0"
+									checked={formData.allow_nested_rar_extraction ?? true}
+									disabled={isReadOnly}
+									onChange={(e) =>
+										handleInputChange("allow_nested_rar_extraction", e.target.checked)
+									}
+								/>
+								<div className="min-w-0">
+									<span className="block break-words font-bold text-xs">Nested RAR Extraction</span>
+									<span className="mt-0.5 block break-words text-[11px] text-base-content/50 leading-snug">
+										Extract RAR archives nested inside other archives.
 									</span>
-									<div className="badge badge-error badge-xs shrink-0 font-black text-[8px] uppercase">
-										Dangerous
-									</div>
 								</div>
-								<span className="mt-1 block whitespace-normal break-words text-base-content/50 text-xs leading-relaxed">
-									Delete the original NZB file from disk once the import completes successfully. The
-									queue entry is retained, but downloading the NZB from the queue will no longer be
-									possible.
-								</span>
-							</div>
-						</label>
+							</label>
+
+							<label className="flex min-w-0 cursor-pointer items-start gap-3 rounded-xl border border-base-300/60 bg-base-100/40 p-4">
+								<input
+									type="checkbox"
+									className="toggle toggle-primary toggle-sm mt-0.5 shrink-0"
+									checked={formData.rename_to_nzb_name ?? true}
+									disabled={isReadOnly}
+									onChange={(e) => handleInputChange("rename_to_nzb_name", e.target.checked)}
+								/>
+								<div className="min-w-0">
+									<span className="block break-words font-bold text-xs">Rename to NZB Name</span>
+									<span className="mt-0.5 block break-words text-[11px] text-base-content/50 leading-snug">
+										Rename single-file imports to the NZB release name, not the obfuscated original.
+									</span>
+								</div>
+							</label>
+
+							<label className="flex min-w-0 cursor-pointer items-start gap-3 rounded-xl border border-base-300/60 bg-base-100/40 p-4">
+								<input
+									type="checkbox"
+									className="toggle toggle-primary toggle-sm mt-0.5 shrink-0"
+									checked={formData.filter_sample_files ?? true}
+									disabled={isReadOnly}
+									onChange={(e) => handleInputChange("filter_sample_files", e.target.checked)}
+								/>
+								<div className="min-w-0">
+									<span className="block break-words font-bold text-xs">Filter Sample Files</span>
+									<span className="mt-0.5 block break-words text-[11px] text-base-content/50 leading-snug">
+										Reject sample and proof clips. Files over 200MB are always kept.
+									</span>
+								</div>
+							</label>
+
+							<label className="flex min-w-0 cursor-pointer items-start gap-3 rounded-xl border border-base-300/60 bg-base-100/40 p-4">
+								<input
+									type="checkbox"
+									className="toggle toggle-primary toggle-sm mt-0.5 shrink-0"
+									checked={formData.verify_content ?? false}
+									disabled={isReadOnly}
+									onChange={(e) => handleInputChange("verify_content", e.target.checked)}
+								/>
+								<div className="min-w-0">
+									<span className="block break-words font-bold text-xs">Verify Media Content</span>
+									<span className="mt-0.5 block break-words text-[11px] text-base-content/50 leading-snug">
+										After import, read each video/audio file's header through the serving stack and
+										fail the import if no recognized media container signature is found. Catches
+										releases assembled in the wrong order.
+									</span>
+								</div>
+							</label>
+
+							{formData.verify_content && (
+								<fieldset className="fieldset min-w-0">
+									<legend className="fieldset-legend font-semibold">
+										Content Probe Timeout (Seconds)
+									</legend>
+									<input
+										type="number"
+										className="input input-bordered w-full min-w-0 max-w-full bg-base-100 font-mono text-sm"
+										value={formData.verify_content_timeout_seconds ?? 15}
+										readOnly={isReadOnly}
+										min={1}
+										onChange={(e) =>
+											handleInputChange(
+												"verify_content_timeout_seconds",
+												Number.parseInt(e.target.value, 10) || 15,
+											)
+										}
+									/>
+									<p className="label text-[11px] text-base-content/50">
+										Per-file deadline for the header probe. A timeout is treated as a transient
+										error, never as a content failure.
+									</p>
+								</fieldset>
+							)}
+						</div>
 					</div>
 				</div>
 
@@ -439,7 +417,7 @@ export function ImportConfigSection({
 										{!isReadOnly && (
 											<button
 												type="button"
-												className="hover:text-white"
+												className="opacity-70 hover:opacity-100"
 												onClick={() => removeExtension(ext)}
 											>
 												<X className="h-3 w-3" />
@@ -476,31 +454,18 @@ export function ImportConfigSection({
 								className="btn btn-sm btn-outline border-base-300 text-base-content/80 hover:opacity-100"
 								disabled={isReadOnly}
 								onClick={() => {
-									const videoDefaults = [
-										".mp4",
+									// Mirrors the backend default whitelist in
+									// internal/config/manager.go (ImportConfig.AllowedFileExtensions).
+									const defaultExtensions = [
 										".mkv",
+										".mp4",
 										".avi",
+										".ts",
+										".m4v",
 										".mov",
 										".wmv",
-										".flv",
-										".webm",
-										".m4v",
 										".mpg",
 										".mpeg",
-										".m2ts",
-										".ts",
-										".vob",
-										".3gp",
-										".3g2",
-										".h264",
-										".h265",
-										".hevc",
-										".ogv",
-										".ogm",
-										".strm",
-										".iso",
-										".img",
-										".divx",
 										".xvid",
 										".rm",
 										".rmvb",
@@ -509,11 +474,17 @@ export function ImportConfigSection({
 										".wtv",
 										".mk3d",
 										".dvr-ms",
+										".mp3",
+										".flac",
+										".m4a",
+										".epub",
+										".pdf",
+										".cbz",
 									];
-									handleInputChange("allowed_file_extensions", videoDefaults);
+									handleInputChange("allowed_file_extensions", defaultExtensions);
 								}}
 							>
-								Reset to Video Defaults
+								Reset to Defaults
 							</button>
 							<button
 								type="button"

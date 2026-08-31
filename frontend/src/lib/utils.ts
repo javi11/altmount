@@ -1,17 +1,50 @@
 import { type ClassValue, clsx } from "clsx";
+import type { HealthErrorDetails } from "../types/api";
 
 export function cn(...inputs: ClassValue[]) {
 	return clsx(inputs);
 }
 
-export function formatBytes(bytes: number, decimals = 2, shortUnit = false) {
+// Copy text, falling back to execCommand when the Clipboard API is unavailable (non-secure HTTP).
+export async function copyToClipboard(text: string): Promise<boolean> {
+	if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+		try {
+			await navigator.clipboard.writeText(text);
+			return true;
+		} catch {
+			// fall back below
+		}
+	}
+
+	if (typeof document === "undefined") {
+		return false;
+	}
+
+	try {
+		const textarea = document.createElement("textarea");
+		textarea.value = text;
+		textarea.setAttribute("readonly", "");
+		textarea.style.position = "fixed";
+		textarea.style.top = "-9999px";
+		textarea.style.opacity = "0";
+		document.body.appendChild(textarea);
+		textarea.select();
+		const ok = document.execCommand("copy");
+		document.body.removeChild(textarea);
+		return ok;
+	} catch {
+		return false;
+	}
+}
+
+export function formatBytes(bytes: number, decimals = 2, shortUnit = false, useDecimal = false) {
 	const sizes = shortUnit
 		? ["B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"]
 		: ["Bytes", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"];
 
 	if (bytes === 0) return `0 ${sizes[0]}`;
 
-	const k = 1024;
+	const k = useDecimal ? 1000 : 1024;
 	const dm = decimals < 0 ? 0 : decimals;
 
 	const i = Math.floor(Math.log(bytes) / Math.log(k));
@@ -74,6 +107,19 @@ export function formatRelativeTime(date: string | Date) {
 	return target.toLocaleDateString();
 }
 
+// Formats a "YYYY-MM-DD" account expiration date for display without timezone drift.
+// Returns "" for empty/invalid input so callers can pick their own placeholder.
+export function formatExpirationDate(date?: string): string {
+	if (!date) return "";
+	const [year, month, day] = date.split("-").map(Number);
+	if (!year || !month || !day) return date;
+	return new Date(year, month - 1, day).toLocaleDateString(undefined, {
+		year: "numeric",
+		month: "short",
+		day: "numeric",
+	});
+}
+
 export function formatFutureTime(date: string | Date | null | undefined): string {
 	if (!date) return "Never";
 
@@ -120,6 +166,20 @@ export function getStatusColor(status: string): string {
 			return "warning";
 		default:
 			return "neutral";
+	}
+}
+
+export function parseHealthErrorDetails(details?: string): HealthErrorDetails | null {
+	if (!details) return null;
+	try {
+		const parsed: unknown = JSON.parse(details);
+		if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+			return parsed as HealthErrorDetails;
+		}
+		return null;
+	} catch (_e) {
+		// Legacy records store plain strings or other shapes.
+		return null;
 	}
 }
 

@@ -27,6 +27,8 @@ func ProcessSingleFile(
 	metadataService *metadata.MetadataService,
 	allowedFileExtensions []string,
 	filterSamples bool,
+	storeIndex map[string]int64,
+	storeRef string,
 ) (string, string, error) {
 	// Validate file extension before processing
 	if !utils.HasAllowedFilesInRegular([]parser.ParsedFile{file}, allowedFileExtensions, filterSamples) {
@@ -85,8 +87,8 @@ func ProcessSingleFile(
 		file.NzbdavID,
 	)
 
-	// Write file metadata to disk
-	if err := metadataService.WriteFileMetadata(virtualFilePath, fileMeta); err != nil {
+	// Write file metadata to disk (v3 store-backed when available, else v1)
+	if err := metadataService.WriteFileMetadataAuto(ctx, virtualFilePath, fileMeta, storeIndex, storeRef); err != nil {
 		return "", "", fmt.Errorf("failed to write metadata for single file %s: %w", file.Filename, err)
 	}
 

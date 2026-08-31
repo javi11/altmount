@@ -24,7 +24,6 @@ database:
 # Metadata filesystem configuration
 metadata:
   root_path: '/config/metadata' # Directory to store metadata files (required)
-  delete_source_nzb_on_removal: false # Delete source NZB file when metadata is removed (default: false)
   delete_completed_nzb: false # Delete NZB source file after successful import (default: false, DANGEROUS: prevents re-import)
   backup:
     enabled: false # Enable automatic metadata backups
@@ -153,7 +152,7 @@ import:
     - '.epub'
     - '.pdf'
     - '.cbz'
-  max_import_connections: 5 # Number of concurrent NNTP connections for validation and archive processing
+  max_concurrent_imports: 0 # Cap on NZB imports running at once (0 = unlimited). NNTP connections are balanced automatically: imports use the pool's full capacity and always yield to streaming.
   segment_sample_percentage: 1 # Percentage of segments to sample for validation (1-100)
   import_strategy: 'NONE' # Import strategy: NONE (direct import), SYMLINK (create symlinks), STRM (create .strm files)
   import_dir: '' # Import directory (required when import_strategy is SYMLINK or STRM, must be absolute path)
@@ -166,7 +165,8 @@ health:
   library_dir: '' # Library directory to monitor (required when health is enabled, must be absolute path)
   cleanup_orphaned_metadata: false # Clean up orphaned files, metadata, and empty directories (when false, no cleanup occurs; when true, deletes orphaned library files, metadata files, and removes empty directories from library, import, and metadata paths, default: false)
   check_interval_seconds: 5 # Health check interval in seconds (default: 5)
-  max_connections_for_health_checks: 5 # Number of NNTP connections for health checks (default: 5)
+  max_connections_for_health_checks: 100 # Max concurrent STAT checks within a single sweep (default: 100)
+  check_batch_size: 50 # Number of due files fetched and swept together per health-check cycle (default: 50)
   segment_sample_percentage: 5 # Percentage of segments to sample for health validation (1-100, default: 5)
   acceptable_missing_segments_percentage: 0 # Percentage of missing segments allowed before a file is marked as corrupted (0-100, default: 0)
   library_sync_interval_minutes: 360 # Library synchronization interval in minutes (default: 360 = 6 hours)
@@ -273,6 +273,7 @@ providers:
     password: 'your_password' # Replace with your password
     max_connections: 20
     inflight_requests: 10 # Concurrent requests per connection (pipelining, default: 3)
+    stat_inflight_requests: 100 # Pipeline depth for bodyless STAT (existence check) requests (default: 100)
     tls: true
     insecure_tls: false
     enabled: true # Enable/disable this provider (default: true)

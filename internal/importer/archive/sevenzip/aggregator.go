@@ -98,6 +98,10 @@ type ProcessArchiveOptions struct {
 	ExpandBlurayIso        bool
 	FilterSamples          bool
 	RenameToNzbName        bool
+	// SegmentIndex + StoreRef enable direct v3 store-backed metadata writes. When
+	// StoreRef is empty the aggregator falls back to v1 inline-segment metadata.
+	SegmentIndex map[string]int64
+	StoreRef     string
 }
 
 // ProcessArchive analyzes and processes 7zip archive files, creating metadata for all extracted files.
@@ -327,10 +331,10 @@ func ProcessArchive(ctx context.Context, opts ProcessArchiveOptions) error {
 
 			metadataPath := metadataService.GetMetadataFilePath(item.virtualFilePath)
 			if _, err := os.Stat(metadataPath); err == nil {
-				_ = metadataService.DeleteFileMetadata(item.virtualFilePath)
+				_ = metadataService.DeleteFileMetadata(ctx, item.virtualFilePath)
 			}
 
-			if err := metadataService.WriteFileMetadata(item.virtualFilePath, fileMeta); err != nil {
+			if err := metadataService.WriteFileMetadataAuto(ctx, item.virtualFilePath, fileMeta, opts.SegmentIndex, opts.StoreRef); err != nil {
 				return fmt.Errorf("failed to write metadata for 7zip file %s: %w", item.content.Filename, err)
 			}
 

@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -23,7 +25,9 @@ import (
 	"github.com/javi11/altmount/internal/errors"
 	"github.com/javi11/altmount/internal/importer/parser/fileinfo"
 	"github.com/javi11/altmount/internal/importer/parser/par2"
+	"github.com/javi11/altmount/internal/importer/rarname"
 	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
+	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
@@ -31,6 +35,20 @@ import (
 	"github.com/javi11/nntppool/v4"
 	"github.com/javi11/nzbparser"
 	concpool "github.com/sourcegraph/conc/pool"
+)
+
+// maxFetchGoroutines bounds how many fetch goroutines a single parse phase
+// spawns. It is a memory/scheduler bound only — the actual number of in-flight
+// NNTP body fetches is governed by the pool manager's global import connection
+// budget, which adapts to pool capacity and stream activity.
+const maxFetchGoroutines = 100
+
+// First-segment fetches retry transient failures (connection exhaustion,
+// timeouts) so a momentary hiccup doesn't permanently drop a volume from a
+// large multi-volume set. A real article-not-found is not retried.
+const (
+	maxFirstSegmentFetchAttempts = 3
+	firstSegmentRetryBackoff     = 300 * time.Millisecond
 )
 
 // FirstSegmentData holds cached data from the first segment of an NZB file
@@ -80,7 +98,23 @@ func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string, pro
 		return nil, errors.NewNonRetryableError("NZB file contains no files", nil)
 	}
 
+	SanitizeNzbFilenames(n)
+
 	return p.ParseNzb(ctx, n, nzbPath, progressTracker, ParseOptions{})
+}
+
+// SanitizeNzbFilenames normalizes poster-controlled filenames in place at the
+// nzbparser boundary so every consumer (the pre-parse fast-fail probe, the parser,
+// persisted metadata, and serve-time volume following) sees a canonical name. Call
+// it immediately after nzbparser.Parse and before any code reads NzbFile.Filename.
+// The raw subject remains available on NzbFile.Subject.
+func SanitizeNzbFilenames(n *nzbparser.Nzb) {
+	if n == nil {
+		return
+	}
+	for i := range n.Files {
+		n.Files[i].Filename = nzbtrim.TrimSurroundingQuotes(n.Files[i].Filename)
+	}
 }
 
 // ParseNzb processes an already-parsed *nzbparser.Nzb, performing all network
@@ -100,11 +134,15 @@ func (p *Parser) ParseNzb(ctx context.Context, n *nzbparser.Nzb, nzbPath string,
 		Filename: filepath.Base(nzbPath),
 		Files:    make([]ParsedFile, 0, len(n.Files)),
 	}
-	// Determine segment size from meta chunk_size or fallback to first segment size
-	if n.Meta != nil {
-		if pwd, ok := n.Meta["password"]; ok && pwd != "" {
-			parsed.SetPassword(pwd)
-		}
+
+	// Build the shared NzbStore and segment index for v3 format.
+	// Must be built from the raw *nzbparser.Nzb BEFORE any per-file processing
+	// (which may filter/reorder files). The index maps message-id → flat store index.
+	parsed.Store, parsed.SegmentIndex = metadata.BuildStore(n)
+
+	// Extract password from metadata, filename tags, subject lines, or raw NZB meta
+	if pwd := extractNzbPassword(n, nzbPath); pwd != "" {
+		parsed.SetPassword(pwd)
 	}
 
 	// Fetch first segment data for all files in parallel
@@ -116,10 +154,13 @@ func (p *Parser) ParseNzb(ctx context.Context, n *nzbparser.Nzb, nzbPath string,
 
 	// PAR2 descriptor matching is only worth network I/O when (a) the NZB actually
 	// contains a PAR2 index AND (b) at least one fetched file has an untrustworthy
-	// name that the descriptors could recover. When every name is already clean,
-	// downloading the PAR2 index and completing files to 16KB would only confirm
-	// what we already trust — skip both entirely.
-	par2MatchingUseful := p.hasPar2IndexCandidate(firstSegmentCache) && anyFileNeedsPar2Matching(firstSegmentCache)
+	// name that the descriptors could recover — either an individually obfuscated name
+	// or a member of a .partNN.rar set whose volumes all have distinct (obfuscated) bases
+	// (hasObfuscatedVolumeSet). When every name is already clean, downloading the PAR2
+	// index and completing files to 16KB would only confirm what we already trust — skip
+	// both entirely.
+	par2MatchingUseful := p.hasPar2IndexCandidate(firstSegmentCache) &&
+		(anyFileNeedsPar2Matching(firstSegmentCache) || hasObfuscatedVolumeSet(firstSegmentCache))
 	if par2MatchingUseful {
 		p.complete16KBReads(ctx, firstSegmentCache, notFoundIDs)
 	}
@@ -129,6 +170,12 @@ func (p *Parser) ParseNzb(ctx context.Context, n *nzbparser.Nzb, nzbPath string,
 	// size from "=ybegin size=") lets normalization derive the LAST part's size arithmetically,
 	// eliminating the per-file last-segment fetch that would otherwise drain a full body.
 	firstSegmentSizeCache := make(map[string]firstSegmentYencInfo)
+	// warmFirstSegmentBytes carries each fetched file's decoded first-segment bytes
+	// (keyed by first-segment ID) into the archive analysis phase, so a volume's
+	// header read — which starts at offset 0 — is served from memory instead of
+	// re-fetching a segment already pulled over the wire here. Skipped/missing first
+	// segments contribute nothing; those volumes are read lazily by the analyzer.
+	warmFirstSegmentBytes := make(map[string][]byte)
 	for _, data := range firstSegmentCache {
 		if data != nil && data.File != nil && !data.MissingFirstSegment && len(data.File.Segments) > 0 {
 			if data.Headers.PartSize > 0 {
@@ -136,6 +183,9 @@ func (p *Parser) ParseNzb(ctx context.Context, n *nzbparser.Nzb, nzbPath string,
 					PartSize: data.Headers.PartSize,
 					FileSize: data.Headers.FileSize,
 				}
+			}
+			if !data.SkippedFirstSegment && len(data.RawBytes) > 0 {
+				warmFirstSegmentBytes[data.File.Segments[0].ID] = data.RawBytes
 			}
 		}
 	}
@@ -228,7 +278,7 @@ func (p *Parser) ParseNzb(ctx context.Context, n *nzbparser.Nzb, nzbPath string,
 
 		subjectHeader := ""
 		if s, err := nzbparser.ParseSubject(data.File.Subject); err == nil {
-			subjectHeader = s.Header
+			subjectHeader = nzbtrim.TrimSurroundingQuotes(s.Header)
 		}
 
 		filesWithFirstSegment = append(filesWithFirstSegment, &fileinfo.NzbFileWithFirstSegment{
@@ -260,7 +310,7 @@ func (p *Parser) ParseNzb(ctx context.Context, n *nzbparser.Nzb, nzbPath string,
 	// Process files in parallel using conc pool
 	for _, info := range fileInfos {
 		concPool.Go(func(ctx context.Context) (fileResult, error) {
-			parsedFile, err := p.parseFile(ctx, n.Meta, parsed.Filename, info, firstSegmentSizeCache, nzbStandardPartSize, notFoundIDs)
+			parsedFile, err := p.parseFile(ctx, n.Meta, parsed.Filename, info, firstSegmentSizeCache, warmFirstSegmentBytes, nzbStandardPartSize, notFoundIDs, parsed.SegmentIndex)
 
 			return fileResult{
 				parsedFile: parsedFile,
@@ -331,7 +381,7 @@ func (p *Parser) ParseNzb(ctx context.Context, n *nzbparser.Nzb, nzbPath string,
 // firstSegmentSizeCache contains pre-fetched yEnc info (PartSize + total FileSize) for first segments to avoid redundant fetching.
 // nzbStandardPartSize, when >0, is the yEnc PartSize of a representative middle segment in the NZB;
 // it lets normalization skip the per-file second-segment fetch.
-func (p *Parser) parseFile(ctx context.Context, meta map[string]string, nzbFilename string, info *fileinfo.FileInfo, firstSegmentSizeCache map[string]firstSegmentYencInfo, nzbStandardPartSize int64, notFoundIDs map[string]struct{}) (*ParsedFile, error) {
+func (p *Parser) parseFile(ctx context.Context, meta map[string]string, nzbFilename string, info *fileinfo.FileInfo, firstSegmentSizeCache map[string]firstSegmentYencInfo, warmFirstSegmentBytes map[string][]byte, nzbStandardPartSize int64, notFoundIDs map[string]struct{}, segmentIndex map[string]int64) (*ParsedFile, error) {
 	if len(info.NzbFile.Segments) == 0 {
 		return nil, fmt.Errorf("file has no segments")
 	}
@@ -347,8 +397,18 @@ func (p *Parser) parseFile(ctx context.Context, meta map[string]string, nzbFilen
 
 		err := p.normalizeSegmentSizesWithYenc(ctx, info.NzbFile.Segments, cachedFirstSegment, nzbStandardPartSize, notFoundIDs)
 		if err != nil {
-			// Log the error but continue with original segment sizes
-			// This ensures processing continues even if yEnc header fetching fails
+			if stderrors.Is(err, nntppool.ErrArticleNotFound) {
+				// A segment required to determine the real (decoded) sizes is missing
+				// from every provider. Importing the file with the NZB's un-normalized
+				// (yEnc-encoded) byte counts would compute wrong segment offsets and
+				// produce a corrupt media file (#681), so skip the whole file. The
+				// caller's aggregation loop logs and continues, so the rest of the
+				// release still imports normally.
+				return nil, fmt.Errorf("failed to normalize segment sizes for %q: %w", info.Filename, err)
+			}
+			// Any other normalization failure (e.g. a present but non-yEnc article that
+			// yields no part size) is non-fatal: the NZB-declared segment sizes remain
+			// the best available source. Log and continue with them, as before.
 			p.log.WarnContext(ctx, "Failed to normalize segment sizes with yEnc headers",
 				"error", err,
 				"segments", len(info.NzbFile.Segments))
@@ -364,6 +424,19 @@ func (p *Parser) parseFile(ctx context.Context, meta map[string]string, nzbFilen
 			StartOffset: int64(0),
 			EndOffset:   int64(seg.Bytes - 1),
 			SegmentSize: int64(seg.Bytes),
+		}
+	}
+
+	// Also build SegmentRefs for v3 store-based format
+	var segmentRefs []*metapb.SegmentRef
+	if segmentIndex != nil {
+		segmentRefs = make([]*metapb.SegmentRef, len(info.NzbFile.Segments))
+		for i, seg := range info.NzbFile.Segments {
+			segmentRefs[i] = &metapb.SegmentRef{
+				StoreIndex:  segmentIndex[seg.ID],
+				StartOffset: 0,
+				EndOffset:   int64(seg.Bytes - 1),
+			}
 		}
 	}
 
@@ -486,6 +559,7 @@ func (p *Parser) parseFile(ctx context.Context, meta map[string]string, nzbFilen
 		Filename:      filename,
 		Size:          totalSize,
 		Segments:      segments,
+		SegmentRefs:   segmentRefs,
 		Groups:        info.NzbFile.Groups,
 		IsRarArchive:  info.IsRar,
 		Is7zArchive:   info.Is7z,
@@ -498,6 +572,15 @@ func (p *Parser) parseFile(ctx context.Context, meta map[string]string, nzbFilen
 		IsPar2Archive: info.IsPar2Archive,
 		OriginalIndex: info.OriginalIndex,
 		NzbdavID:      nzbdavID,
+	}
+
+	// Attach the warm first-segment bytes (decoded leading payload at offset 0)
+	// so the archive analysis phase can serve this file's header read from memory.
+	// Keyed by the same first-segment ID domain as firstSegmentSizeCache.
+	if len(info.NzbFile.Segments) > 0 {
+		if b, ok := warmFirstSegmentBytes[info.NzbFile.Segments[0].ID]; ok {
+			parsedFile.FirstSegmentBytes = b
+		}
 	}
 
 	return parsedFile, nil
@@ -628,7 +711,9 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 		err        error
 	}
 
-	maxFetch := max(min(len(files), p.getConfig().GetMaxImportConnections()), 1)
+	// Goroutine bound only — the real fetch bound is the pool manager's global
+	// import connection budget, acquired per Body call below.
+	maxFetch := max(min(min(len(files), p.getConfig().TotalProviderConnections()), maxFetchGoroutines), 1)
 	concPool := concpool.NewWithResults[fetchResult]().WithMaxGoroutines(maxFetch).WithContext(ctx)
 
 	// Atomic counter for progress tracking — incremented by each goroutine on completion
@@ -697,18 +782,52 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 
 			firstSegment := fileToFetch.Segments[0]
 
-			// Create context with timeout
-			c, cancel := context.WithTimeout(ctx, time.Second*30)
-			defer cancel()
+			// Fetch the first segment, retrying transient failures. A genuine
+			// article-not-found (430/423) is permanent, so we stop immediately.
+			// But transient errors — connection exhaustion ("all providers
+			// exhausted"), timeouts, resets — must NOT be treated like a missing
+			// article: dropping a volume over a transient hiccup shatters large
+			// multi-volume sets (one lost first segment → no PAR2 name → the
+			// volume is excluded → the archive looks incomplete). Retry those a
+			// few times before giving up.
+			var (
+				result   *nntppool.ArticleBody
+				fetchErr error
+			)
+			for attempt := 1; attempt <= maxFirstSegmentFetchAttempts; attempt++ {
+				// Take a token from the global import connection budget before the
+				// per-attempt timeout starts, so queue wait never burns the deadline.
+				releaseConn, acquireErr := p.poolManager.AcquireImportConnection(ctx)
+				if acquireErr != nil {
+					// Budget acquisition only fails when the context is done — fatal.
+					return fetchResult{}, acquireErr
+				}
 
-			// Get body for the first segment (v4 returns decoded bytes + YEnc metadata)
-			result, err := cp.Body(c, firstSegment.ID)
-			if err != nil {
+				// Create context with timeout
+				c, cancel := context.WithTimeout(ctx, time.Second*30)
+				// Get body for the first segment (v4 returns decoded bytes + YEnc metadata)
+				result, fetchErr = cp.Body(c, firstSegment.ID)
+				cancel()
+				releaseConn()
+
+				// Success or permanent miss: stop retrying.
+				if fetchErr == nil || stderrors.Is(fetchErr, nntppool.ErrArticleNotFound) {
+					break
+				}
+				// Transient failure: brief backoff (unless the context is done) then retry.
+				if attempt < maxFirstSegmentFetchAttempts {
+					select {
+					case <-ctx.Done():
+					case <-time.After(time.Duration(attempt) * firstSegmentRetryBackoff):
+					}
+				}
+			}
+			if fetchErr != nil {
 				p.log.DebugContext(ctx, "missing segment",
 					"segment_id", firstSegment.ID,
-					"error", err,
+					"error", fetchErr,
 				)
-				notFound := stderrors.Is(err, nntppool.ErrArticleNotFound)
+				notFound := stderrors.Is(fetchErr, nntppool.ErrArticleNotFound)
 				return fetchResult{
 					segmentID:  firstSegment.ID,
 					isNotFound: notFound,
@@ -718,7 +837,7 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 						IsArticleNotFound:   notFound,
 						OriginalIndex:       originalIndex,
 					},
-					err: fmt.Errorf("failed to get body: %w", err),
+					err: fmt.Errorf("failed to get body: %w", fetchErr),
 				}, nil
 			}
 
@@ -870,6 +989,44 @@ func anyFileNeedsPar2Matching(cache []*FirstSegmentData) bool {
 	return slices.ContainsFunc(cache, needsPar2Matching)
 }
 
+// hasObfuscatedVolumeSet reports whether the NZB contains a multi-volume .partNN.rar set
+// whose volumes each carry a distinct base name — the fingerprint of per-volume filename
+// obfuscation (US8yidqp….part01.rar, BtEPCuoF….part02.rar, …). These random bases defeat
+// the per-file obfuscation heuristic (mixed case with '-'/'_' separators reads as a clean,
+// readable name), so needsPar2Matching never flags them; yet a numbered set in which every
+// volume's base differs is unambiguous, because a real multi-volume set shares one base.
+//
+// When such a set exists, PAR2 descriptors can recover the real, shared volume names
+// (Hash16k → name), letting grouping reassemble the set — so PAR2 matching is worth the
+// network I/O even though no individual filename looks obfuscated. The "all bases distinct"
+// rule keeps the trigger tight: one clean set has a single base, and two clean sets share a
+// few bases across many volumes — neither trips it.
+func hasObfuscatedVolumeSet(cache []*FirstSegmentData) bool {
+	bases := make(map[string]struct{})
+	count := 0
+	for _, d := range cache {
+		if d == nil || d.File == nil || d.MissingFirstSegment {
+			continue
+		}
+		name := d.File.Filename
+		if fileinfo.IsPar2File(name) {
+			continue
+		}
+		// Only the part scheme (.partNN.rar); divergent-base obfuscation in the roll/numeric
+		// schemes is rarer and left out to keep the trigger tight.
+		if scheme, _, ok := rarname.VolumeNumber(name); !ok || scheme != rarname.SchemePart {
+			continue
+		}
+		key, ok := rarname.SetKey(name)
+		if !ok {
+			continue
+		}
+		bases[key] = struct{}{}
+		count++
+	}
+	return count >= 2 && len(bases) == count
+}
+
 // needs16KBCompletion decides whether a file is worth completing up to 16KB
 // from additional segments. Only files that need PAR2 matching (untrustworthy
 // names) qualify — clean names are trusted and sidecars/PAR2 files never benefit
@@ -911,7 +1068,9 @@ func (p *Parser) complete16KBReads(ctx context.Context, cache []*FirstSegmentDat
 		return
 	}
 
-	maxFetch := max(min(len(targets), p.getConfig().GetMaxImportConnections()), 1)
+	// Goroutine bound only — the real fetch bound is the pool manager's global
+	// import connection budget, acquired per Body call below.
+	maxFetch := max(min(min(len(targets), p.getConfig().TotalProviderConnections()), maxFetchGoroutines), 1)
 	pool := concpool.New().WithMaxGoroutines(maxFetch).WithContext(ctx)
 	for _, d := range targets {
 		pool.Go(func(ctx context.Context) error {
@@ -935,6 +1094,12 @@ func (p *Parser) complete16KBReads(ctx context.Context, cache []*FirstSegmentDat
 			g, gctx := errgroup.WithContext(ctx)
 			for i, seg := range segsNeeded {
 				g.Go(func() error {
+					// Budget token first, so queue wait never burns the deadline.
+					releaseConn, err := p.poolManager.AcquireImportConnection(gctx)
+					if err != nil {
+						return nil // best-effort
+					}
+					defer releaseConn()
 					segCtx, segCancel := context.WithTimeout(gctx, time.Second*30)
 					defer segCancel()
 					sr, err := cp.Body(segCtx, seg.ID)
@@ -1075,7 +1240,7 @@ func (p *Parser) normalizeSegmentSizesWithYenc(ctx context.Context, segments []n
 	fileSize := firstSegment.FileSize
 	if firstPartSize <= 0 {
 		if _, known404 := notFoundIDs[segments[0].ID]; known404 {
-			return fmt.Errorf("first segment %s is known not found, skipping yEnc normalization", segments[0].ID)
+			return fmt.Errorf("first segment %s is known not found: %w", segments[0].ID, nntppool.ErrArticleNotFound)
 		}
 		// Fetch PartSize from first segment if not in cache. The same headers carry the
 		// total file size, which enables last-part derivation below.
@@ -1104,7 +1269,7 @@ func (p *Parser) normalizeSegmentSizesWithYenc(ctx context.Context, segments []n
 		}
 
 		if _, known404 := notFoundIDs[segments[1].ID]; known404 {
-			return fmt.Errorf("second segment %s is known not found, skipping yEnc normalization", segments[1].ID)
+			return fmt.Errorf("second segment %s is known not found: %w", segments[1].ID, nntppool.ErrArticleNotFound)
 		}
 		// Fetch PartSize from last segment
 		lastPartHeaders, err := p.fetchYencHeaders(ctx, segments[1], nil)
@@ -1129,10 +1294,10 @@ func (p *Parser) normalizeSegmentSizesWithYenc(ctx context.Context, segments []n
 		// Neither a shared part size nor a total file size: both the second and last
 		// segments must be fetched — do it in parallel as before.
 		if _, known404 := notFoundIDs[segments[1].ID]; known404 {
-			return fmt.Errorf("second segment %s is known not found, skipping yEnc normalization", segments[1].ID)
+			return fmt.Errorf("second segment %s is known not found: %w", segments[1].ID, nntppool.ErrArticleNotFound)
 		}
 		if _, known404 := notFoundIDs[segments[lastSegmentIndex].ID]; known404 {
-			return fmt.Errorf("last segment %s is known not found, skipping yEnc normalization", segments[lastSegmentIndex].ID)
+			return fmt.Errorf("last segment %s is known not found: %w", segments[lastSegmentIndex].ID, nntppool.ErrArticleNotFound)
 		}
 		var secondPartHeaders, lastPartHeaders nntppool.YEncMeta
 		g, gctx := errgroup.WithContext(ctx)
@@ -1161,7 +1326,7 @@ func (p *Parser) normalizeSegmentSizesWithYenc(ctx context.Context, segments []n
 		if standardPartSize <= 0 {
 			// No NZB-wide representative — fetch this file's second segment once.
 			if _, known404 := notFoundIDs[segments[1].ID]; known404 {
-				return fmt.Errorf("second segment %s is known not found, skipping yEnc normalization", segments[1].ID)
+				return fmt.Errorf("second segment %s is known not found: %w", segments[1].ID, nntppool.ErrArticleNotFound)
 			}
 			h, err := p.fetchYencHeaders(ctx, segments[1], nil)
 			if err != nil {
@@ -1174,7 +1339,7 @@ func (p *Parser) normalizeSegmentSizesWithYenc(ctx context.Context, segments []n
 			lastPartSize = last
 		} else {
 			if _, known404 := notFoundIDs[segments[lastSegmentIndex].ID]; known404 {
-				return fmt.Errorf("last segment %s is known not found, skipping yEnc normalization", segments[lastSegmentIndex].ID)
+				return fmt.Errorf("last segment %s is known not found: %w", segments[lastSegmentIndex].ID, nntppool.ErrArticleNotFound)
 			}
 			h, err := p.fetchYencHeaders(ctx, segments[lastSegmentIndex], nil)
 			if err != nil {
@@ -1287,25 +1452,84 @@ func (p *Parser) determineNzbType(files []ParsedFile) NzbType {
 	return NzbTypeMultiFile
 }
 
+var (
+	passwordBracketsRegex = regexp.MustCompile(`(?i)\{\{\s*([^{}]+?)\s*\}\}`)
+	passwordSlashRegex    = regexp.MustCompile(`(?i)/(?:password|pwd)[:=]\s*([^\s/]+)`)
+	passwordMetaRegex     = regexp.MustCompile(`(?i)<meta\b[^>]*type\s*=\s*["']?(?:password|pass|pwd|password_hash)["']?[^>]*>([\s\S]*?)<\/meta>`)
+)
+
+func extractNzbPassword(n *nzbparser.Nzb, nzbPath string) string {
+	if n == nil {
+		return ""
+	}
+	// 1. Check n.Meta with case-insensitive keys
+	if n.Meta != nil {
+		for k, v := range n.Meta {
+			if strings.EqualFold(k, "password") || strings.EqualFold(k, "pass") || strings.EqualFold(k, "pwd") || strings.EqualFold(k, "password_hash") {
+				if trimmed := strings.TrimSpace(v); trimmed != "" {
+					return trimmed
+				}
+			}
+		}
+	}
+	// 2. Check filename for {{password}} or /password:xyz/ patterns
+	baseName := filepath.Base(nzbPath)
+	if m := passwordBracketsRegex.FindStringSubmatch(baseName); len(m) > 1 {
+		if trimmed := strings.TrimSpace(m[1]); trimmed != "" {
+			return trimmed
+		}
+	}
+	if m := passwordSlashRegex.FindStringSubmatch(baseName); len(m) > 1 {
+		if trimmed := strings.TrimSpace(m[1]); trimmed != "" {
+			return trimmed
+		}
+	}
+	// 3. Check file subjects for {{password}} or /password:xyz/
+	for _, f := range n.Files {
+		if m := passwordBracketsRegex.FindStringSubmatch(f.Subject); len(m) > 1 {
+			if trimmed := strings.TrimSpace(m[1]); trimmed != "" {
+				return trimmed
+			}
+		}
+		if m := passwordSlashRegex.FindStringSubmatch(f.Subject); len(m) > 1 {
+			if trimmed := strings.TrimSpace(m[1]); trimmed != "" {
+				return trimmed
+			}
+		}
+	}
+	// 4. Check NZB file on disk if available (for <meta type="password"> outside <head>)
+	if nzbPath != "" {
+		if data, err := os.ReadFile(nzbPath); err == nil && len(data) > 0 {
+			limit := len(data)
+			if limit > 64*1024 {
+				limit = 64 * 1024
+			}
+			if m := passwordMetaRegex.FindSubmatch(data[:limit]); len(m) > 1 {
+				if trimmed := strings.TrimSpace(string(m[1])); trimmed != "" {
+					return trimmed
+				}
+			}
+		}
+	}
+	return ""
+}
+
 // propagateArchiveType sets the archive-type flag on non-PAR2 files that are
-// confirmed archive parts. Propagation is gated on the file already being
-// detected as an archive (via magic bytes or extension), preventing non-archive
-// sidecars (.txt, .nfo, etc.) from being wrongly classified.
+// archive parts (including split continuation volumes with numeric or extensionless names).
+// Non-archive sidecars (.txt, .nfo, .sfv, etc.) are excluded so they are processed as regular files.
 func (p *Parser) propagateArchiveType(parsed *ParsedNzb) {
 	switch parsed.Type {
 	case NzbType7zArchive:
 		for i := range parsed.Files {
 			f := &parsed.Files[i]
-			if !f.IsPar2Archive && !fileinfo.IsPar2File(f.Filename) &&
-				(f.Is7zArchive || fileinfo.Is7zFile(f.Filename)) {
+			if !f.IsPar2Archive && !fileinfo.IsPar2File(f.Filename) && !isPar2SidecarExtension(f.Filename) {
 				f.Is7zArchive = true
 			}
 		}
 	case NzbTypeRarArchive:
 		for i := range parsed.Files {
 			f := &parsed.Files[i]
-			if !f.IsPar2Archive && !fileinfo.IsPar2File(f.Filename) &&
-				(f.IsRarArchive || fileinfo.IsRarFile(f.Filename)) {
+			if !f.IsPar2Archive && !fileinfo.IsPar2File(f.Filename) && !isPar2SidecarExtension(f.Filename) {
 				f.IsRarArchive = true
 			}
 		}

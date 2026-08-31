@@ -83,6 +83,7 @@ const (
 	HealthStatusHealthy         HealthStatus = "healthy"          // File passed health check
 	HealthStatusRepairTriggered HealthStatus = "repair_triggered" // File repair has been triggered in Arrs
 	HealthStatusCorrupted       HealthStatus = "corrupted"        // File has missing segments or is corrupted
+	HealthStatusDegraded        HealthStatus = "degraded"         // Missing segments only hit media payload: still playable, no repair
 )
 
 // HealthPriority represents the priority level of a health check
@@ -119,6 +120,29 @@ type FileHealth struct {
 	StreamingFailureCount int     `db:"streaming_failure_count"`
 	IsMasked              bool    `db:"is_masked"`
 	Indexer               *string `db:"indexer"`
+	DownloadID            *string `db:"download_id"`
+}
+
+// IsImported reports whether library_path points to a real, ARR-relinked library
+// location rather than the import-time placeholder. The placeholder is stored equal
+// to file_path (optionally with a leading slash from path normalization); a real
+// filesystem path can never equal file_path or "/"+file_path, so this is unambiguous
+// on every platform.
+func (f *FileHealth) IsImported() bool {
+	if f.LibraryPath == nil || *f.LibraryPath == "" {
+		return false
+	}
+	lp := *f.LibraryPath
+	return lp != f.FilePath && lp != "/"+f.FilePath
+}
+
+// EffectiveLibraryPath returns the real library path and true when the record has
+// been relinked by an ARR; otherwise ("", false).
+func (f *FileHealth) EffectiveLibraryPath() (string, bool) {
+	if !f.IsImported() {
+		return "", false
+	}
+	return *f.LibraryPath, true
 }
 
 // User represents a user account in the system
@@ -136,13 +160,6 @@ type User struct {
 	CreatedAt    time.Time  `db:"created_at"`    // Account creation timestamp
 	UpdatedAt    time.Time  `db:"updated_at"`    // Last profile update timestamp
 	LastLogin    *time.Time `db:"last_login"`    // Last login timestamp (nullable)
-}
-
-// SystemStat represents a persistent system statistic
-type SystemStat struct {
-	Key       string    `db:"key"`
-	Value     int64     `db:"value"`
-	UpdatedAt time.Time `db:"updated_at"`
 }
 
 // ImportDailyStat represents historical import statistics for a specific day
@@ -165,18 +182,18 @@ type ImportHourlyStat struct {
 
 // ImportHistory represents a persistent record of a single imported file
 type ImportHistory struct {
-	ID          int64     `db:"id"`
-	DownloadID  *string   `db:"download_id"`
-	NzbID       *int64    `db:"nzb_id"` // Nullable if queue item deleted
-	NzbName     string    `db:"nzb_name"`
-	FileName    string    `db:"file_name"`
-	FileSize    int64     `db:"file_size"`
-	VirtualPath string    `db:"virtual_path"`
-	LibraryPath *string   `db:"library_path"` // Added to show final location from file_health
-	Category    *string   `db:"category"`
-	Metadata    *string   `db:"metadata"`
-	Indexer     *string   `db:"indexer"`
-	CompletedAt time.Time `db:"completed_at"`
+	ID                  int64     `db:"id"`
+	DownloadID          *string   `db:"download_id"`
+	NzbID               *int64    `db:"nzb_id"` // Nullable if queue item deleted
+	NzbName             string    `db:"nzb_name"`
+	FileName            string    `db:"file_name"`
+	FileSize            int64     `db:"file_size"`
+	VirtualPath         string    `db:"virtual_path"`
+	LibraryPath         *string   `db:"library_path"` // Added to show final location from file_health
+	Category            *string   `db:"category"`
+	Metadata            *string   `db:"metadata"`
+	Indexer             *string   `db:"indexer"`
+	CompletedAt         time.Time `db:"completed_at"`
 }
 
 // ImportMigrationStatus represents the status of a migration item

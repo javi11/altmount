@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"path/filepath"
 	"runtime"
 	"sync"
 	"testing"
@@ -16,10 +17,21 @@ import (
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/testsupport/fakepool"
 	nntppool "github.com/javi11/nntppool/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// healthTestDSN returns a DSN for a database private to one test. A
+// shared-cache in-memory DSN is a single database for the whole package, where
+// a read cursor open on one connection makes a concurrent write on another
+// fail with SQLITE_LOCKED — an error the busy handler never retries. WAL on a
+// private file lets readers and writers overlap.
+func healthTestDSN(t *testing.T) string {
+	t.Helper()
+	return "file:" + filepath.Join(t.TempDir(), "health_test.db") + "?_journal_mode=WAL&_busy_timeout=5000"
+}
 
 // mockPoolManager implements pool.Manager and always fails GetPool so segment validation fails.
 type mockPoolManager struct{}
@@ -47,7 +59,12 @@ func (m *mockPoolManager) SetProviderIDs(_ map[string]string) {}
 func (m *mockPoolManager) AcquireImportSlot(_ context.Context) (func(), error) {
 	return func() {}, nil
 }
-func (m *mockPoolManager) SetAdmissionCaps(_ int, _ int)               {}
+func (m *mockPoolManager) SetAdmissionCap(_ int) {}
+func (m *mockPoolManager) AcquireImportConnection(_ context.Context) (func(), error) {
+	return func() {}, nil
+}
+func (m *mockPoolManager) SetImportConnCapacity(_ int)                 {}
+func (m *mockPoolManager) ImportConnCapacity() int                     { return 0 }
 func (m *mockPoolManager) SetStreamSource(_ pool.StreamActivitySource) {}
 func (m *mockPoolManager) NotifyStreamChange()                         {}
 
@@ -93,10 +110,24 @@ type repairTestEnv struct {
 	hw              *HealthWorker
 }
 
-func newRepairTestEnv(t *testing.T, tempDir string, arrsErr error) *repairTestEnv {
+// newRepairTestEnv defaults to a fakepool answering 430 (article genuinely
+// gone) rather than a dead pool manager, so the repair e2e flows below still
+// exercise genuine corruption — a pool that cannot be reached is an outage,
+// not corruption (#861), and must not be the default for tests whose whole
+// point is triggering repair on real missing segments.
+func newRepairTestEnv(t *testing.T, tempDir string, arrsErr error, configure ...func(*config.Config)) *repairTestEnv {
+	t.Helper()
+	client := fakepool.New()
+	client.SetDefaultBehavior(fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
+	return newRepairTestEnvWithPool(t, tempDir, arrsErr, &fakeClientPoolManager{client: client}, configure...)
+}
+
+// newRepairTestEnvWithPool is newRepairTestEnv with an injectable pool.Manager, so tests
+// can block or fail the segment-availability sweep at a controlled point.
+func newRepairTestEnvWithPool(t *testing.T, tempDir string, arrsErr error, poolManager pool.Manager, configure ...func(*config.Config)) *repairTestEnv {
 	t.Helper()
 
-	db, err := sql.Open("sqlite3", "file::memory:?cache=shared&mode=memory")
+	db, err := sql.Open("sqlite3", healthTestDSN(t))
 	require.NoError(t, err)
 	t.Cleanup(func() { db.Close() })
 
@@ -122,7 +153,8 @@ func newRepairTestEnv(t *testing.T, tempDir string, arrsErr error) *repairTestEn
 			priority INTEGER NOT NULL DEFAULT 0,
 			streaming_failure_count INTEGER DEFAULT 0,
 			is_masked BOOLEAN DEFAULT FALSE,
-			indexer TEXT DEFAULT NULL
+			indexer TEXT DEFAULT NULL,
+			download_id TEXT DEFAULT NULL
 		);
 
 		CREATE TABLE IF NOT EXISTS system_state (
@@ -147,6 +179,10 @@ func newRepairTestEnv(t *testing.T, tempDir string, arrsErr error) *repairTestEn
 	cfg.Health.SegmentSamplePercentage = 10
 	cfg.Health.MaxConnectionsForHealthChecks = 1
 
+	for _, fn := range configure {
+		fn(cfg)
+	}
+
 	configManager := config.NewManager(cfg, "")
 
 	mockARRs := &mockARRsService{returnErr: arrsErr}
@@ -155,9 +191,10 @@ func newRepairTestEnv(t *testing.T, tempDir string, arrsErr error) *repairTestEn
 	healthChecker := NewHealthChecker(
 		healthRepo,
 		metadataService,
-		&mockPoolManager{},
+		poolManager,
 		configManager.GetConfig,
 		&MockRcloneClient{},
+		nil,
 	)
 
 	hw := NewHealthWorker(
@@ -181,7 +218,8 @@ func newRepairTestEnv(t *testing.T, tempDir string, arrsErr error) *repairTestEn
 }
 
 // validSegmentMeta creates a FileMetadata with one segment that covers the full fileSize,
-// so CheckMetadataIntegrity passes. Pool failure then causes EventTypeCheckFailed.
+// so CheckMetadataIntegrity passes. The env's default pool then answers 430 for that
+// segment, producing EventTypeFileCorrupted.
 func validSegmentMeta(ms *metadata.MetadataService, fileSize int64) *metapb.FileMetadata {
 	seg := &metapb.SegmentData{
 		Id:          "test-article-001@test.example.com",
@@ -420,6 +458,51 @@ func TestE2E_ExhaustedRepairTriggered_SweptToCorrupted(t *testing.T) {
 	original, readErr := env.metadataService.ReadFileMetadata(filePath)
 	require.NoError(t, readErr)
 	assert.NotNil(t, original, "sweep must not move metadata of a possibly-good copy")
+}
+
+// TestE2E_RepairDisabled_NoARRRescan verifies that when health.repair.enabled is false, a
+// file that exhausts its health-check retries is finalized as corrupted for visibility but
+// never triggers an Arr rescan and its metadata is left in place (no safety-folder move).
+func TestE2E_RepairDisabled_NoARRRescan(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks not supported on Windows")
+	}
+	tempDir := t.TempDir()
+	repairDisabled := false
+	env := newRepairTestEnv(t, tempDir, nil, func(c *config.Config) {
+		c.Health.Repair.Enabled = &repairDisabled
+	})
+
+	ctx := context.Background()
+	filePath := "series/show.s01e09.mkv"
+	libraryPath := "/media/library/show.s01e09.mkv"
+	maxRetries := 3
+
+	meta := validSegmentMeta(env.metadataService, 1024)
+	require.NoError(t, env.metadataService.WriteFileMetadata(filePath, meta))
+
+	// File already at its last health retry: a single failing cycle would normally
+	// trigger a repair, but repair is disabled.
+	insertFileHealth(t, env.db, filePath, libraryPath, maxRetries-1, maxRetries)
+
+	require.NoError(t, env.hw.runHealthCheckCycle(ctx))
+
+	// ARR must NOT be called when repair is disabled.
+	env.mockARRs.mu.Lock()
+	callCount := len(env.mockARRs.calls)
+	env.mockARRs.mu.Unlock()
+	assert.Equal(t, 0, callCount, "repair disabled must not trigger an ARR rescan")
+
+	// Status finalized as corrupted for visibility.
+	fh, err := env.healthRepo.GetFileHealth(ctx, filePath)
+	require.NoError(t, err)
+	require.NotNil(t, fh)
+	assert.Equal(t, database.HealthStatusCorrupted, fh.Status)
+
+	// Metadata must be left in place — no safety-folder move when repair is disabled.
+	original, readErr := env.metadataService.ReadFileMetadata(filePath)
+	require.NoError(t, readErr)
+	assert.NotNil(t, original, "repair disabled must not move metadata to the corrupted folder")
 }
 
 // TestE2E_FileRepairTriggered_ARRReturnsAlreadySatisfied verifies that when ARR returns

@@ -18,9 +18,3 @@ export interface BreadcrumbItem {
 	name: string;
 	path: string;
 }
-
-export interface FileOperation {
-	type: "download" | "delete" | "info";
-	file: WebDAVFile;
-	path: string;
-}

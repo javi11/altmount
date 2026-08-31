@@ -37,6 +37,12 @@ type NntpClient interface {
 	// downloading the body. Used by health checks and validation.
 	Stat(ctx context.Context, messageID string) (*nntppool.StatResult, error)
 
+	// StatMany checks the existence of many articles concurrently, streaming a
+	// result per message-id as each completes. Used by health checks and
+	// fast-fail import validation to batch existence sweeps instead of
+	// issuing one Stat per segment.
+	StatMany(ctx context.Context, messageIDs []string, opts nntppool.StatManyOptions) <-chan nntppool.StatManyResult
+
 	// Stats returns a snapshot of pool/provider statistics used by the metrics
 	// tracker and the system handlers.
 	Stats() nntppool.ClientStats

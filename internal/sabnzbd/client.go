@@ -171,6 +171,100 @@ func (c *SABnzbdClient) SendNZBFile(ctx context.Context, host, apiKey, nzbPath s
 	return apiResp.NzoIds[0], nil
 }
 
+// SendNZBContent sends raw NZB XML bytes to a SABnzbd host.
+// Returns the NZO ID assigned by SABnzbd, or an error.
+// Priority values: "-100" (default), "-2" (paused), "-1" (low), "0" (normal), "1" (high), "2" (force)
+func (c *SABnzbdClient) SendNZBContent(ctx context.Context, host, apiKey string, nzbXML []byte, filename string, category *string, priority *string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	if host == "" {
+		return "", fmt.Errorf("SABnzbd host cannot be empty")
+	}
+	if apiKey == "" {
+		return "", fmt.Errorf("SABnzbd API key cannot be empty")
+	}
+	if filename == "" {
+		return "", fmt.Errorf("NZB filename cannot be empty")
+	}
+	if len(nzbXML) == 0 {
+		return "", fmt.Errorf("NZB content cannot be empty")
+	}
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+
+	part, err := writer.CreateFormFile("nzbfile", filename)
+	if err != nil {
+		return "", fmt.Errorf("failed to create form file: %w", err)
+	}
+	if _, err := part.Write(nzbXML); err != nil {
+		return "", fmt.Errorf("failed to write nzb content: %w", err)
+	}
+
+	if category != nil && *category != "" {
+		if err := writer.WriteField("cat", *category); err != nil {
+			return "", fmt.Errorf("failed to write category field: %w", err)
+		}
+	}
+
+	if priority != nil && *priority != "" {
+		if err := writer.WriteField("priority", *priority); err != nil {
+			return "", fmt.Errorf("failed to write priority field: %w", err)
+		}
+	}
+
+	if err := writer.Close(); err != nil {
+		return "", fmt.Errorf("failed to close multipart writer: %w", err)
+	}
+
+	requestURL, err := c.buildAddFileURL(host, apiKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to build request URL: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", requestURL, body)
+	if err != nil {
+		return "", fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to send request to SABnzbd: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("SABnzbd returned HTTP %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var apiResp SABnzbdAPIResponse
+	if err := json.Unmarshal(respBody, &apiResp); err != nil {
+		return "", fmt.Errorf("failed to parse SABnzbd response: %w", err)
+	}
+
+	if !apiResp.Status {
+		errorMsg := "unknown error"
+		if apiResp.Error != nil {
+			errorMsg = *apiResp.Error
+		}
+		return "", fmt.Errorf("SABnzbd API error: %s", errorMsg)
+	}
+
+	if len(apiResp.NzoIds) == 0 {
+		return "", fmt.Errorf("SABnzbd did not return an NZO ID")
+	}
+
+	return apiResp.NzoIds[0], nil
+}
+
 // buildAddFileURL constructs the SABnzbd API URL for adding files
 func (c *SABnzbdClient) buildAddFileURL(host, apiKey string) (string, error) {
 	// Parse the host URL to ensure it's valid

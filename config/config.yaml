@@ -10,7 +10,6 @@ database:
     path: /config/altmount.db
 metadata:
     root_path: /config/metadata
-    delete_source_nzb_on_removal: false
 streaming:
     max_prefetch: 30
 health:
@@ -23,6 +22,7 @@ health:
     segment_sample_percentage: 5
     library_sync_interval_minutes: 360
     library_sync_concurrency: 0
+    corruption_action: repair
 rclone:
     path: /config
     password: ''
@@ -102,7 +102,6 @@ import:
         - .wtv
         - .mk3d
         - .dvr-ms
-    max_import_connections: 5
     max_download_prefetch: 3
     segment_sample_percentage: 1
     import_strategy: NONE

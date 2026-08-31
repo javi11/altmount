@@ -16,6 +16,7 @@ import (
 	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/auth"
 	"github.com/javi11/altmount/internal/config"
+	"github.com/javi11/altmount/internal/contentverify"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/health"
 	"github.com/javi11/altmount/internal/httpclient"
@@ -315,10 +316,18 @@ func initializeSegmentCache(ctx context.Context, cfg *config.Config, source *seg
 		return nil
 	}
 
+	// ExpiryHours is normalized in config.Validate (nil -> 24h); guard against
+	// nil defensively in case the cache is initialized outside the load path. A
+	// zero value is preserved and means "cache forever".
+	expiryHours := 24
+	if cfg.SegmentCache.ExpiryHours != nil {
+		expiryHours = *cfg.SegmentCache.ExpiryHours
+	}
+
 	mgrCfg := segcache.ManagerConfig{
 		CachePath:      cfg.SegmentCache.CachePath,
 		MaxSizeBytes:   int64(cfg.SegmentCache.MaxSizeGB) * 1024 * 1024 * 1024,
-		ExpiryDuration: time.Duration(cfg.SegmentCache.ExpiryHours) * time.Hour,
+		ExpiryDuration: time.Duration(expiryHours) * time.Hour,
 	}.WithDefaults()
 
 	mgr, err := segcache.NewManager(mgrCfg, slog.Default().With("component", "segcache"))
@@ -329,7 +338,7 @@ func initializeSegmentCache(ctx context.Context, cfg *config.Config, source *seg
 
 	mgr.Start(ctx)
 	source.Swap(mgr)
-	slog.InfoContext(ctx, "Segment cache initialized",
+	slog.InfoContext(ctx, "Segment cache started (catalog loads in background)",
 		"cache_path", mgrCfg.CachePath,
 		"max_size_bytes", mgrCfg.MaxSizeBytes,
 		"expiry_duration", mgrCfg.ExpiryDuration)
@@ -373,6 +382,7 @@ func setupWebDAV(
 func startHealthWorker(
 	ctx context.Context,
 	cfg *config.Config,
+	metadataService *metadata.MetadataService,
 	healthRepo *database.HealthRepository,
 	poolManager pool.Manager,
 	configManager *config.Manager,
@@ -380,9 +390,12 @@ func startHealthWorker(
 	arrsService *arrs.Service,
 	importerService importer.ImportService,
 	broadcaster *progress.ProgressBroadcaster,
+	contentVerifyFS contentverify.Opener,
 ) (*health.HealthWorker, *health.LibrarySyncWorker, error) {
-	// Create metadata service for health worker
-	metadataService := metadata.NewMetadataService(cfg.Metadata.RootPath)
+	// The health and library-sync workers share the process-wide metadata service so
+	// their deletions go through the same store reference counter the importer wires
+	// up. A second instance here silently skipped every DecStoreRef, leaking .nzbz
+	// stores and letting the two lite caches serve each other stale entries.
 
 	// Create health checker
 	healthChecker := health.NewHealthChecker(
@@ -391,6 +404,7 @@ func startHealthWorker(
 		poolManager,
 		configManager.GetConfigGetter(),
 		rcloneClient,
+		contentVerifyFS,
 	)
 
 	healthWorker := health.NewHealthWorker(
@@ -476,6 +490,15 @@ func createHTTPServer(apiServer *api.Server, app *fiber.App, webdavHandler *webd
 			return
 		}
 
+		// Long-lived streaming responses must not inherit the server-wide
+		// WriteTimeout safety net: it hard-kills every media transfer at
+		// exactly 30 minutes regardless of activity, forcing clients into a
+		// mid-playback reconnect. Clear the write deadline for media streams,
+		// WebDAV reads, and SSE endpoints before dispatching.
+		if isStreamingRoute(path) {
+			clearWriteDeadline(w)
+		}
+
 		// Route stream requests directly to stream handler
 		if strings.HasPrefix(path, "/api/files/stream") {
 			streamHTTPHandler.ServeHTTP(w, r)
@@ -516,4 +539,21 @@ func createHTTPServer(apiServer *api.Server, app *fiber.App, webdavHandler *webd
 		WriteTimeout: time.Minute * 30,
 		ReadTimeout:  time.Minute * 5,
 	}
+}
+
+// isStreamingRoute reports whether the request path serves a long-lived
+// response (media transfer, WebDAV read, or SSE feed) that must outlive the
+// server-wide WriteTimeout safety net.
+func isStreamingRoute(path string) bool {
+	return strings.HasPrefix(path, "/api/files/stream") ||
+		strings.HasPrefix(path, "/webdav") ||
+		path == "/api/logs/stream" ||
+		path == "/api/queue/stream" ||
+		path == "/api/health/stream"
+}
+
+// clearWriteDeadline removes the connection write deadline so streaming
+// responses are never hard-killed mid-transfer by the http.Server timeout.
+func clearWriteDeadline(w http.ResponseWriter) {
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
 }

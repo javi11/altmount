@@ -2,7 +2,9 @@ package validation
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,7 +15,7 @@ import (
 )
 
 type fastFailPoolManager struct {
-	client *fakepool.Client
+	client pool.NntpClient
 }
 
 func (m fastFailPoolManager) GetPool() (pool.NntpClient, error) { return m.client, nil }
@@ -38,9 +40,206 @@ func (m fastFailPoolManager) SetProviderIDs(map[string]string) {}
 func (m fastFailPoolManager) AcquireImportSlot(context.Context) (func(), error) {
 	return func() {}, nil
 }
-func (m fastFailPoolManager) SetAdmissionCaps(int, int)                 {}
+func (m fastFailPoolManager) SetAdmissionCap(int) {}
+func (m fastFailPoolManager) AcquireImportConnection(context.Context) (func(), error) {
+	return func() {}, nil
+}
+func (m fastFailPoolManager) SetImportConnCapacity(int)                 {}
+func (m fastFailPoolManager) ImportConnCapacity() int                   { return 0 }
 func (m fastFailPoolManager) SetStreamSource(pool.StreamActivitySource) {}
 func (m fastFailPoolManager) NotifyStreamChange()                       {}
+
+// scriptedStatClient returns a configured sequence of STAT errors per
+// message ID. Once a sequence is exhausted, its final outcome repeats.
+type scriptedStatClient struct {
+	pool.NntpClient
+	mu       sync.Mutex
+	outcomes map[string][]error
+	calls    map[string]int
+}
+
+type uncancelableStatClient struct {
+	pool.NntpClient
+	result nntppool.StatManyResult
+}
+
+func (c uncancelableStatClient) StatMany(context.Context, []string, nntppool.StatManyOptions) <-chan nntppool.StatManyResult {
+	out := make(chan nntppool.StatManyResult, 1)
+	out <- c.result
+	close(out)
+	return out
+}
+
+func newScriptedStatClient(outcomes map[string][]error) *scriptedStatClient {
+	return &scriptedStatClient{
+		NntpClient: fakepool.New(),
+		outcomes:   outcomes,
+		calls:      make(map[string]int),
+	}
+}
+
+func (c *scriptedStatClient) StatMany(ctx context.Context, ids []string, _ nntppool.StatManyOptions) <-chan nntppool.StatManyResult {
+	out := make(chan nntppool.StatManyResult, len(ids))
+	go func() {
+		defer close(out)
+		for _, id := range ids {
+			c.mu.Lock()
+			attempt := c.calls[id]
+			c.calls[id]++
+			sequence := c.outcomes[id]
+			var err error
+			if len(sequence) > 0 {
+				idx := min(attempt, len(sequence)-1)
+				err = sequence[idx]
+			}
+			c.mu.Unlock()
+
+			result := nntppool.StatManyResult{MessageID: id, Err: err}
+			if err == nil {
+				result.Result = &nntppool.StatResult{MessageID: id}
+			}
+			select {
+			case out <- result:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return out
+}
+
+func (c *scriptedStatClient) callCount(id string) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.calls[id]
+}
+
+func TestFastFailReleaseProbeRetriesTransientFailure(t *testing.T) {
+	client := newScriptedStatClient(map[string][]error{
+		"flaky-0": {nntppool.ErrConnectionDied, nil},
+	})
+
+	missing, err := FastFailReleaseProbe(
+		context.Background(),
+		[]FastFailFile{{Filename: "movie.mkv", Segments: makeTestSegments("flaky", 1)}},
+		fastFailPoolManager{client: client},
+		100,
+		1,
+		100*time.Millisecond,
+	)
+	if err != nil {
+		t.Fatalf("FastFailReleaseProbe error = %v, want nil after transient recovery", err)
+	}
+	if missing {
+		t.Fatal("missing = true, want false after transient recovery")
+	}
+	if got := client.callCount("flaky-0"); got != 2 {
+		t.Fatalf("STAT attempts = %d, want 2", got)
+	}
+}
+
+func TestFastFailReleaseProbeDoesNotRetryDefinitiveMiss(t *testing.T) {
+	client := newScriptedStatClient(map[string][]error{
+		"gone-0": {nntppool.ErrArticleNotFound},
+	})
+
+	missing, err := FastFailReleaseProbe(
+		context.Background(),
+		[]FastFailFile{{Filename: "movie.mkv", Segments: makeTestSegments("gone", 1)}},
+		fastFailPoolManager{client: client},
+		100,
+		1,
+		100*time.Millisecond,
+	)
+	if err != nil {
+		t.Fatalf("FastFailReleaseProbe error = %v, want nil for definitive miss", err)
+	}
+	if !missing {
+		t.Fatal("missing = false, want true for definitive miss")
+	}
+	if got := client.callCount("gone-0"); got != 1 {
+		t.Fatalf("STAT attempts = %d, want 1 for definitive miss", got)
+	}
+}
+
+func TestFastFailReleaseProbeCancellationWinsOverDefinitiveMiss(t *testing.T) {
+	client := uncancelableStatClient{
+		NntpClient: fakepool.New(),
+		result:     nntppool.StatManyResult{MessageID: "gone-0", Err: nntppool.ErrArticleNotFound},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	missing, err := FastFailReleaseProbe(
+		ctx,
+		[]FastFailFile{{Filename: "movie.mkv", Segments: makeTestSegments("gone", 1)}},
+		fastFailPoolManager{client: client},
+		100,
+		1,
+		100*time.Millisecond,
+	)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("FastFailReleaseProbe error = %v, want context.Canceled", err)
+	}
+	if missing {
+		t.Fatal("missing = true, want cancellation to take precedence")
+	}
+}
+
+func TestFastFailCheckFilesRetriesOnlyTransientIDs(t *testing.T) {
+	client := newScriptedStatClient(map[string][]error{
+		"flaky-0": {nntppool.ErrServiceUnavailable, nil},
+	})
+	files := []FastFailFile{
+		{Filename: "good.mkv", Segments: makeTestSegments("good", 1)},
+		{Filename: "flaky.mkv", Segments: makeTestSegments("flaky", 1)},
+	}
+
+	results, err := FastFailCheckFiles(
+		context.Background(), files, fastFailPoolManager{client: client},
+		100, 2, 100*time.Millisecond, nil,
+	)
+	if err != nil {
+		t.Fatalf("FastFailCheckFiles error = %v, want nil after transient recovery", err)
+	}
+	if results[0].Broken || results[1].Broken {
+		t.Fatalf("results = %+v, want both files healthy after transient recovery", results)
+	}
+	if got := client.callCount("good-0"); got != 1 {
+		t.Fatalf("good STAT attempts = %d, want 1", got)
+	}
+	if got := client.callCount("flaky-0"); got != 2 {
+		t.Fatalf("flaky STAT attempts = %d, want 2", got)
+	}
+}
+
+func TestFastFailCheckFilesTransientExhaustionIsInconclusive(t *testing.T) {
+	client := newScriptedStatClient(map[string][]error{
+		"down-0": {nntppool.ErrConnectionDied},
+	})
+
+	results, err := FastFailCheckFiles(
+		context.Background(),
+		[]FastFailFile{{Filename: "movie.mkv", Segments: makeTestSegments("down", 1)}},
+		fastFailPoolManager{client: client},
+		100, 1, 100*time.Millisecond, nil,
+	)
+	if err == nil {
+		t.Fatal("FastFailCheckFiles error = nil, want inconclusive error after retries are exhausted")
+	}
+	if !errors.Is(err, ErrFastFailInconclusive) {
+		t.Fatalf("FastFailCheckFiles error = %v, want ErrFastFailInconclusive", err)
+	}
+	if !errors.Is(err, nntppool.ErrConnectionDied) {
+		t.Fatalf("FastFailCheckFiles error = %v, want wrapped connection error", err)
+	}
+	if results != nil {
+		t.Fatalf("results = %+v, want nil when validation is inconclusive", results)
+	}
+	if got := client.callCount("down-0"); got != 3 {
+		t.Fatalf("STAT attempts = %d, want bounded maximum of 3", got)
+	}
+}
 
 func TestFastFailReleaseProbeUsesSegmentSamplePercentage(t *testing.T) {
 	client := fakepool.New()
@@ -182,13 +381,23 @@ func TestSelectFastFailSegments(t *testing.T) {
 		t.Errorf("pct=10: duplicates present (%d unique of %d)", len(ids), len(got))
 	}
 
-	// Total is capped at 55 even at 100% sampling, with no dups.
+	// Regression for #812: large files honor the configured percentage instead
+	// of collapsing onto a fixed sample cap, and stay duplicate-free.
 	big := selectFastFailSegments(makeTestSegments("b", 10000), 100)
-	if len(big) != 55 {
-		t.Fatalf("cap: got %d, want 55", len(big))
+	if len(big) != 10000 {
+		t.Fatalf("pct=100: got %d, want 10000", len(big))
 	}
-	if len(idOf(big)) != 55 {
-		t.Error("cap: duplicates present in capped result")
+	if len(idOf(big)) != len(big) {
+		t.Error("pct=100: duplicates present")
+	}
+
+	// 10% of 10000 middle segments + first + last.
+	sampled := selectFastFailSegments(makeTestSegments("b", 10000), 10)
+	if len(sampled) != 1002 {
+		t.Fatalf("pct=10: got %d, want 1002", len(sampled))
+	}
+	if len(idOf(sampled)) != len(sampled) {
+		t.Error("pct=10: duplicates present")
 	}
 }
 
@@ -513,5 +722,93 @@ func TestFastFailCheckFilesIndexAligned(t *testing.T) {
 	}
 	if results[2].Broken {
 		t.Error("results[2].Broken = true, want false")
+	}
+}
+
+// TestFastFailReleaseProbeTimeoutIsInconclusive verifies a probe timeout is
+// retried but never converted into a definitive missing-segment verdict.
+func TestFastFailReleaseProbeTimeoutIsInconclusive(t *testing.T) {
+	client := fakepool.New()
+	// Every Stat outlives the probe's own deadline.
+	client.SetDefaultBehavior(fakepool.SegmentBehavior{Latency: 2 * time.Second})
+
+	missing, err := FastFailReleaseProbe(
+		context.Background(),
+		[]FastFailFile{{Filename: "movie.mkv", Segments: makeTestSegments("slow", 5)}},
+		fastFailPoolManager{client: client},
+		100,
+		1,
+		10*time.Millisecond,
+	)
+	if err == nil {
+		t.Fatal("FastFailReleaseProbe error = nil, want inconclusive error after retries")
+	}
+	if !errors.Is(err, ErrFastFailInconclusive) || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("FastFailReleaseProbe error = %v, want inconclusive deadline error", err)
+	}
+	if missing {
+		t.Fatal("missing = true, want false when reachability is inconclusive")
+	}
+	if got := client.StatCalls(); got != fastFailStatMaxAttempts {
+		t.Fatalf("StatCalls = %d, want bounded maximum of %d", got, fastFailStatMaxAttempts)
+	}
+}
+
+// TestFastFailReleaseProbeCallerCancellationReturnsError verifies the opposite
+// case: when the caller's own context is cancelled the probe reports an error
+// rather than claiming the release is missing.
+func TestFastFailReleaseProbeCallerCancellationReturnsError(t *testing.T) {
+	client := fakepool.New()
+	client.SetDefaultBehavior(fakepool.SegmentBehavior{Latency: 2 * time.Second})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	missing, err := FastFailReleaseProbe(
+		ctx,
+		[]FastFailFile{{Filename: "movie.mkv", Segments: makeTestSegments("slow", 5)}},
+		fastFailPoolManager{client: client},
+		100,
+		1,
+		time.Minute,
+	)
+	if err == nil {
+		t.Fatal("FastFailReleaseProbe error = nil, want error when the caller cancelled")
+	}
+	if missing {
+		t.Error("missing = true, want false when the caller cancelled (reachability unknown)")
+	}
+}
+
+// TestFastFailCheckFilesTimeoutIsInconclusive verifies timeout exhaustion
+// aborts validation without marking the owning file definitively broken.
+func TestFastFailCheckFilesTimeoutIsInconclusive(t *testing.T) {
+	client := fakepool.New()
+	client.SetDefaultBehavior(fakepool.SegmentBehavior{Latency: 2 * time.Second})
+
+	files := []FastFailFile{
+		{Filename: "movie.mkv", Segments: makeTestSegments("slow", 3)},
+	}
+
+	results, err := FastFailCheckFiles(
+		context.Background(),
+		files,
+		fastFailPoolManager{client: client},
+		100,
+		1,
+		10*time.Millisecond,
+		nil,
+	)
+	if err == nil {
+		t.Fatal("FastFailCheckFiles error = nil, want inconclusive error after retries")
+	}
+	if !errors.Is(err, ErrFastFailInconclusive) || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("FastFailCheckFiles error = %v, want inconclusive deadline error", err)
+	}
+	if results != nil {
+		t.Fatalf("results = %+v, want nil when validation is inconclusive", results)
+	}
+	if got := client.StatCalls(); got != fastFailStatMaxAttempts {
+		t.Fatalf("StatCalls = %d, want bounded maximum of %d", got, fastFailStatMaxAttempts)
 	}
 }

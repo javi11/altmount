@@ -611,6 +611,23 @@ func (s *Server) handleUploadToQueue(c *fiber.Ctx) error {
 		priority = database.QueuePriorityNormal
 	}
 
+	// Add to queue using importer service
+	if s.importerService == nil {
+		return RespondServiceUnavailable(c, "Importer service not available", "The import service is not configured or running")
+	}
+
+	var categoryPtr *string
+	if category != "" {
+		categoryPtr = &category
+	}
+
+	// De-dupe re-uploads: update the existing pending item instead of creating a duplicate.
+	if existing, err := s.importerService.FindAndUpdatePendingUpload(c.Context(), file.Filename, categoryPtr, &priority); err != nil {
+		return RespondInternalError(c, "Failed to update existing queue item", err.Error())
+	} else if existing != nil {
+		return RespondCreated(c, ToQueueItemResponse(existing))
+	}
+
 	// Create temporary directory for upload
 	tempDir := os.TempDir()
 	uploadDir := filepath.Join(tempDir, "altmount-uploads")
@@ -624,19 +641,6 @@ func (s *Server) handleUploadToQueue(c *fiber.Ctx) error {
 	tempFile := filepath.Join(uploadDir, safeFilename)
 	if err := c.SaveFile(file, tempFile); err != nil {
 		return RespondInternalError(c, "Failed to save file", err.Error())
-	}
-
-	// Add to queue using importer service
-	if s.importerService == nil {
-		// Clean up temp file
-		os.Remove(tempFile)
-		return RespondServiceUnavailable(c, "Importer service not available", "The import service is not configured or running")
-	}
-
-	// Add the file to the processing queue
-	var categoryPtr *string
-	if category != "" {
-		categoryPtr = &category
 	}
 
 	// Build base path from CompleteDir for manually uploaded files
@@ -655,7 +659,7 @@ func (s *Server) handleUploadToQueue(c *fiber.Ctx) error {
 
 	// For manually uploaded files, pass CompleteDir as the base path (not the temp upload directory)
 	// The category will be appended to this by processNzbItem in the service
-	item, err := s.importerService.AddToQueue(c.Context(), tempFile, basePath, categoryPtr, &priority, nil, nil)
+	item, err := s.importerService.AddToQueue(c.Context(), tempFile, basePath, categoryPtr, &priority, nil, nil, nil)
 	if err != nil {
 		// Clean up temp file on error
 		os.Remove(tempFile)
@@ -743,6 +747,28 @@ func (s *Server) handleUploadNZBLnk(c *fiber.Ctx) error {
 			continue
 		}
 
+		// Sanitize filename from title
+		safeTitle := sanitizeFilename(resolved.Title)
+
+		var categoryPtr *string
+		if req.Category != "" {
+			categoryPtr = &req.Category
+		}
+		priority := database.QueuePriority(req.Priority)
+
+		// De-dupe re-submissions: update the existing pending item instead of creating a duplicate.
+		if existing, err := s.importerService.FindAndUpdatePendingUpload(c.Context(), safeTitle+".nzb", categoryPtr, &priority); err != nil {
+			result.ErrorMessage = "Failed to update existing queue item: " + err.Error()
+			results = append(results, result)
+			continue
+		} else if existing != nil {
+			result.Success = true
+			result.QueueID = &existing.ID
+			successCount++
+			results = append(results, result)
+			continue
+		}
+
 		// Create temp file for the NZB
 		tempDir := os.TempDir()
 		uploadDir := filepath.Join(tempDir, "altmount-uploads")
@@ -751,9 +777,6 @@ func (s *Server) handleUploadNZBLnk(c *fiber.Ctx) error {
 			results = append(results, result)
 			continue
 		}
-
-		// Sanitize filename from title
-		safeTitle := sanitizeFilename(resolved.Title)
 		tempFile := filepath.Join(uploadDir, safeTitle+".nzb")
 
 		// Embed password in NZB if provided
@@ -771,12 +794,6 @@ func (s *Server) handleUploadNZBLnk(c *fiber.Ctx) error {
 			continue
 		}
 
-		// Add to queue
-		var categoryPtr *string
-		if req.Category != "" {
-			categoryPtr = &req.Category
-		}
-
 		var basePath *string
 		if s.configManager != nil {
 			completeDir := s.configManager.GetConfig().SABnzbd.CompleteDir
@@ -789,8 +806,7 @@ func (s *Server) handleUploadNZBLnk(c *fiber.Ctx) error {
 			}
 		}
 
-		priority := database.QueuePriority(req.Priority)
-		item, err := s.importerService.AddToQueue(c.Context(), tempFile, basePath, categoryPtr, &priority, nil, nil)
+		item, err := s.importerService.AddToQueue(c.Context(), tempFile, basePath, categoryPtr, &priority, nil, nil, &resolved.Indexer)
 		if err != nil {
 			os.Remove(tempFile)
 			result.ErrorMessage = "Failed to add to queue: " + err.Error()
@@ -898,11 +914,29 @@ func (s *Server) handleSearchNZBByName(c *fiber.Ctx) error {
 		return RespondNotFound(c, "NZB", "Could not find NZB for name '"+req.Name+"': "+err.Error())
 	}
 
+	safeTitle := sanitizeFilename(resolved.Title)
+
+	var categoryPtr *string
+	if req.Category != "" {
+		categoryPtr = &req.Category
+	}
+	priority := database.QueuePriority(req.Priority)
+
+	// De-dupe re-submissions: update the existing pending item instead of creating a duplicate.
+	if existing, err := s.importerService.FindAndUpdatePendingUpload(c.Context(), safeTitle+".nzb", categoryPtr, &priority); err != nil {
+		return RespondInternalError(c, "Failed to update existing queue item", err.Error())
+	} else if existing != nil {
+		return RespondCreated(c, fiber.Map{
+			"queue_id": existing.ID,
+			"title":    resolved.Title,
+			"indexer":  resolved.Indexer,
+		})
+	}
+
 	uploadDir := filepath.Join(os.TempDir(), "altmount-uploads")
 	if err := os.MkdirAll(uploadDir, 0755); err != nil {
 		return RespondInternalError(c, "Failed to create upload directory", err.Error())
 	}
-	safeTitle := sanitizeFilename(resolved.Title)
 	tempFile := filepath.Join(uploadDir, safeTitle+".nzb")
 
 	nzbContent := resolved.NZBContent
@@ -912,11 +946,6 @@ func (s *Server) handleSearchNZBByName(c *fiber.Ctx) error {
 	}
 	if err := os.WriteFile(tempFile, nzbContent, 0644); err != nil {
 		return RespondInternalError(c, "Failed to save NZB file", err.Error())
-	}
-
-	var categoryPtr *string
-	if req.Category != "" {
-		categoryPtr = &req.Category
 	}
 
 	var basePath *string
@@ -930,8 +959,7 @@ func (s *Server) handleSearchNZBByName(c *fiber.Ctx) error {
 		}
 	}
 
-	priority := database.QueuePriority(req.Priority)
-	item, err := s.importerService.AddToQueue(c.Context(), tempFile, basePath, categoryPtr, &priority, nil, nil)
+	item, err := s.importerService.AddToQueue(c.Context(), tempFile, basePath, categoryPtr, &priority, nil, nil, &resolved.Indexer)
 	if err != nil {
 		os.Remove(tempFile)
 		return RespondInternalError(c, "Failed to add to queue", err.Error())
@@ -1175,7 +1203,7 @@ func (s *Server) handleAddTestQueueItem(c *fiber.Ctx) error {
 		}
 	}
 
-	item, err := s.importerService.AddToQueue(c.Context(), tempPath, basePath, &category, &priority, nil, nil)
+	item, err := s.importerService.AddToQueue(c.Context(), tempPath, basePath, &category, &priority, nil, nil, nil)
 	if err != nil {
 		os.Remove(tempPath)
 		return RespondInternalError(c, "Failed to add test file to queue", err.Error())
@@ -1330,9 +1358,44 @@ func (s *Server) handleDownloadNZB(c *fiber.Ctx) error {
 		return RespondNotFound(c, "Queue item", "")
 	}
 
-	resolved, err := nzbfile.ResolveOnDisk(item.NzbPath)
-	if err != nil {
-		return RespondNotFound(c, "NZB file", "The NZB file no longer exists on disk")
+	resolved, resolveErr := nzbfile.ResolveOnDisk(item.NzbPath)
+	if resolveErr != nil {
+		// Raw .nzb is gone (deleted after successful import).
+		// Reconstruct the .nzbz path the same way processor.go writes it:
+		//   configDir/.nzbs/{sanitizedCategory}/{queueID}-{nzbBasename}.nzbz
+		if s.metadataService != nil && s.configManager != nil {
+			cfg := s.configManager.GetConfigGetter()()
+			configDir := filepath.Dir(cfg.Database.Path)
+			if !filepath.IsAbs(configDir) {
+				if abs, absErr := filepath.Abs(configDir); absErr == nil {
+					configDir = abs
+				}
+			}
+			var categoryStr string
+			if item.Category != nil && *item.Category != "" {
+				categoryStr = strings.ReplaceAll(*item.Category, `\`, "/")
+				categoryStr = strings.Trim(categoryStr, "/")
+				for _, part := range strings.Split(categoryStr, "/") {
+					if part == ".." || part == "." {
+						categoryStr = ""
+						break
+					}
+				}
+			}
+			nzbBase := nzbtrim.TrimNzbExtension(filepath.Base(item.NzbPath))
+			storeRef := filepath.Join(configDir, ".nzbs", categoryStr, fmt.Sprintf("%d-%s.nzbz", item.ID, nzbBase))
+			nzbXML, err := s.metadataService.Store().RegenerateNZB(storeRef)
+			if err != nil {
+				return RespondInternalError(c, "Failed to regenerate NZB from store", err.Error())
+			}
+			if nzbXML != nil {
+				filename := strings.TrimSuffix(filepath.Base(storeRef), ".nzbz") + ".nzb"
+				c.Set("Content-Type", "application/x-nzb")
+				c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+				return c.Send(nzbXML)
+			}
+		}
+		return RespondNotFound(c, "NZB file", "The NZB file no longer exists on disk and no store was found")
 	}
 
 	c.Set("Content-Type", "application/x-nzb")

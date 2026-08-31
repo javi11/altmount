@@ -120,7 +120,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/api.ArrsInstanceRequest"
+              $ref: "#/components/schemas/api.TestConnectionRequest"
         description: Instance connection details
         required: true
       responses:
@@ -3279,18 +3279,10 @@ components:
         path:
           type: string
       type: object
-    api.ArrsInstanceRequest:
+    api.TestConnectionRequest:
       properties:
         api_key:
           type: string
-        category:
-          type: string
-        enabled:
-          type: boolean
-        name:
-          type: string
-        sync_interval_hours:
-          type: integer
         type:
           type: string
         url:
@@ -3569,8 +3561,6 @@ components:
         import_strategy:
           $ref: "#/components/schemas/config.ImportStrategy"
         max_download_prefetch:
-          type: integer
-        max_import_connections:
           type: integer
         max_processor_workers:
           type: integer
@@ -4410,8 +4400,6 @@ components:
           $ref: "#/components/schemas/config.ImportStrategy"
         max_download_prefetch:
           type: integer
-        max_import_connections:
-          type: integer
         max_processor_workers:
           type: integer
         queue_processing_interval_seconds:
@@ -4474,8 +4462,6 @@ components:
         backup:
           $ref: "#/components/schemas/config.MetadataBackupConfig"
         delete_completed_nzb:
-          type: boolean
-        delete_source_nzb_on_removal:
           type: boolean
         root_path:
           type: string

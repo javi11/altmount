@@ -87,9 +87,9 @@ func (s *StremioCleanupService) deleteItem(ctx context.Context, item *database.I
 					"path", item.NzbPath, "error", err)
 			}
 		} else {
-			// Single file: delete .meta + source NZB together
-			if err := s.metadataService.DeleteFileMetadataWithSourceNzb(ctx, storagePath, true); err != nil {
-				slog.ErrorContext(ctx, "StremioCleanup: failed to delete meta+nzb",
+			// Single file: delete .meta; the store follows once unreferenced
+			if err := s.metadataService.DeleteFileMetadata(ctx, storagePath); err != nil {
+				slog.ErrorContext(ctx, "StremioCleanup: failed to delete meta",
 					"path", storagePath, "error", err)
 			}
 		}

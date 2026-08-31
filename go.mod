@@ -13,15 +13,17 @@ tool (
 require (
 	github.com/Max-Sum/base32768 v0.0.0-20230304063302-18e6ce5945fd
 	github.com/avast/retry-go/v4 v4.6.1
+	github.com/gabriel-vasile/mimetype v1.4.15
 	github.com/go-pkgz/auth/v2 v2.0.0
+	github.com/go-viper/mapstructure/v2 v2.4.0
 	github.com/gofiber/fiber/v2 v2.52.9
 	github.com/google/uuid v1.6.0
 	github.com/hanwen/go-fuse/v2 v2.9.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/jackc/pgx/v5 v5.8.0
-	github.com/javi11/nntppool/v4 v4.12.0
+	github.com/javi11/nntppool/v4 v4.17.1
 	github.com/javi11/nxg v0.1.0
-	github.com/javi11/nzbparser v0.5.4
+	github.com/javi11/nzbparser v0.5.5
 	github.com/javi11/rardecode/v2 v2.1.2-0.20260610075131-4664d7a7325a
 	github.com/javi11/sevenzip v1.6.2-0.20251026160715-ca961b7f1239
 	github.com/jinzhu/copier v0.4.0
@@ -37,6 +39,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.20.0
 	github.com/stretchr/testify v1.11.1
+	github.com/valyala/fasthttp v1.51.0
 	github.com/winfsp/cgofuse v1.6.0
 	golang.org/x/crypto v0.46.0
 	golang.org/x/net v0.48.0
@@ -143,7 +146,6 @@ require (
 	github.com/go-toolsmith/astp v1.1.0 // indirect
 	github.com/go-toolsmith/strparse v1.1.0 // indirect
 	github.com/go-toolsmith/typep v1.1.0 // indirect
-	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
 	github.com/go-xmlfmt/xmlfmt v1.1.3 // indirect
 	github.com/gobwas/glob v0.2.3 // indirect
 	github.com/gofrs/flock v0.13.0 // indirect
@@ -264,7 +266,6 @@ require (
 	github.com/uudashr/gocognit v1.2.0 // indirect
 	github.com/uudashr/iface v1.4.1 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
-	github.com/valyala/fasthttp v1.51.0 // indirect
 	github.com/valyala/tcplisten v1.0.0 // indirect
 	github.com/xdg-go/pbkdf2 v1.0.0 // indirect
 	github.com/xdg-go/scram v1.1.2 // indirect

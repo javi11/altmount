@@ -6,6 +6,10 @@
 
 A WebDAV server backed by NZB/Usenet that provides seamless access to Usenet content through standard WebDAV protocols.
 
+<p align="center">
+  <a href="https://discord.gg/vCWwuvm3F3"><img src="https://img.shields.io/badge/Discord-Join%20us-5865F2?logo=discord&logoColor=white&style=for-the-badge" alt="Discord" /></a>
+</p>
+
 [!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/qbt52hh7sjd)
 
 ## 📖 Documentation
@@ -88,6 +92,7 @@ and your file manager — needs to be restarted to pick up the change.
 - 📚 [Documentation](https://altmount.kipsilabs.top)
 - 🐛 [Issues](https://github.com/javi11/altmount/issues)
 - 💬 [Discussions](https://github.com/javi11/altmount/discussions)
+- 🎮 [Discord](https://discord.gg/vCWwuvm3F3)
 
 ## Contributing
 

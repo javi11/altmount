@@ -59,7 +59,22 @@ Expand **Performance & Deep Validation** for:
 | Verify Every Segment | Off | Check 100% of segments instead of sampling |
 | Ghost File Detection | Off | Verify actual content (uses bandwidth) |
 | Sampling Percentage | 5% | Segments to check when sampling (1-100%) |
-| Acceptable Missing | 0% | Missing segment tolerance (0-10%) |
+| Acceptable Missing | 2% | Missing segment tolerance (0-10%) |
+
+#### Acceptable Missing Threshold
+
+This is the single control for how much confirmed segment loss AltMount tolerates on a standalone video file before treating it as corrupted, both when a release is first imported and on every later health check:
+
+- **Missing fraction at or below the threshold** — the file imports/stays **degraded**: it plays with the small gap zero-filled, and no repair is triggered.
+- **Missing fraction above the threshold** — the file is marked **unhealthy**, which triggers a repair (re-download/blocklist-and-search via Sonarr/Radarr, if the Repair Engine is enabled).
+
+A file whose damage exceeds the hard-coded playback caps (a run longer than 4 consecutive missing segments, or over 64 missing segments total) always fails, regardless of this setting — the threshold only governs behavior *inside* those caps.
+
+**To make AltMount stricter** — repair on any missing segment, no degraded grace period — set **Acceptable Missing** to **0%**. This also applies at import time: a freshly grabbed release with even one confirmed missing segment is rejected immediately, so your ARR can search for an alternate release, instead of importing degraded.
+
+The threshold also decides when a health check can **stop early**. Once a file's confirmed missing segments put it irreversibly above the threshold, further checking cannot change the outcome, so AltMount stops checking that file and moves its remaining connection budget to the other files in the batch. At 0% tolerance the first confirmed missing article settles the file. Results from a check that stopped early are labelled as partial in the UI: their segment counts are a subset of the file, not a complete map of the damage.
+
+Only a confirmed *article not found* response (NNTP 430/423) counts toward the threshold. Connection failures, timeouts, and provider outages never mark a segment as missing — a check that could not resolve some of its segments is recorded as a failed attempt and retried later, so a transient network problem cannot condemn a file.
 
 **Scheduling & Concurrency:**
 
@@ -246,7 +261,7 @@ When Sonarr/Radarr deletes a file or series/movie, AltMount automatically cleans
 1. **Receives the webhook** with the absolute file/folder path from ARR
 2. **Looks up the health record** — first by `library_path` (the absolute ARR path), falling back to the normalized `file_path`
 3. **Deletes the health record** from the database
-4. **Deletes the metadata** (`.meta` and `.id` sidecar files) and optionally the source NZB
+4. **Deletes the metadata** (`.meta` and `.id` sidecar files), plus the shared `.nzbz` store once no other metadata still references it
 
 For directory deletions (MovieDelete, SeriesDelete), AltMount deletes all health records and metadata within that directory prefix.
 
@@ -280,7 +295,7 @@ health:
   resolve_repair_on_import: false
   verify_data: false
   check_all_segments: false
-  acceptable_missing_segments_percentage: 0.0
+  acceptable_missing_segments_percentage: 2.0 # 0 = strict (repair on any missing segment); 100 = disabled (never fail on this basis)
   read_timeout_seconds: 10
 
   repair:

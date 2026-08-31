@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	_ "net/http/pprof"
@@ -15,7 +16,7 @@ import (
 	"github.com/javi11/altmount/frontend"
 	"github.com/javi11/altmount/internal/api"
 	"github.com/javi11/altmount/internal/arrs"
-	"github.com/javi11/altmount/internal/stremio"
+	"github.com/javi11/altmount/internal/arrs/registrar"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/health"
 	"github.com/javi11/altmount/internal/metadata"
@@ -24,6 +25,7 @@ import (
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/rclone"
 	"github.com/javi11/altmount/internal/slogutil"
+	"github.com/javi11/altmount/internal/stremio"
 	"github.com/javi11/altmount/internal/webdav"
 	"github.com/spf13/cobra"
 )
@@ -136,6 +138,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	fs := initializeFilesystem(ctx, metadataService, repos.HealthRepo, arrsService, rcloneRCClient, poolManager, configManager.GetConfigGetter(), streamTracker, cacheSource)
+	importerService.SetContentVerifyFilesystem(fs)
 
 	// 6. Setup web services
 	app, debugMode := createFiberApp(ctx, cfg)
@@ -177,7 +180,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	configManager.OnConfigChange(func(oldConfig, newConfig *config.Config) {
 		structuralChange := oldConfig.SegmentCache.CachePath != newConfig.SegmentCache.CachePath ||
 			oldConfig.SegmentCache.MaxSizeGB != newConfig.SegmentCache.MaxSizeGB ||
-			oldConfig.SegmentCache.ExpiryHours != newConfig.SegmentCache.ExpiryHours
+			intPtrValue(oldConfig.SegmentCache.ExpiryHours) != intPtrValue(newConfig.SegmentCache.ExpiryHours)
 
 		if !structuralChange {
 			return
@@ -195,7 +198,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 	})
 
-	healthWorker, librarySyncWorker, err := startHealthWorker(ctx, cfg, repos.HealthRepo, poolManager, configManager, rcloneRCClient, arrsService, importerService, progressBroadcaster)
+	healthWorker, librarySyncWorker, err := startHealthWorker(ctx, cfg, metadataService, repos.HealthRepo, poolManager, configManager, rcloneRCClient, arrsService, importerService, progressBroadcaster, fs)
 	if err != nil {
 		logger.Warn("Health worker initialization failed", "err", err)
 	}
@@ -205,6 +208,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if librarySyncWorker != nil {
 		apiServer.SetLibrarySyncWorker(librarySyncWorker)
 	}
+
+	// Legacy metadata → v3 store migration. Manually triggered from the panel;
+	// creating the worker starts nothing.
+	apiServer.SetMetadataMigrationWorker(
+		metadata.NewMigrationWorker(metadataService, configManager.GetConfigGetter()),
+	)
 
 	// Register health system config change handler for dynamic enable/disable
 	if healthWorker != nil && librarySyncWorker != nil {
@@ -277,7 +286,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 
 		if apiKey != "" {
-			logger.InfoContext(bgCtx, "Triggering automatic ARR webhook registration", "webhook_url", cfg.GetWebhookBaseURL())
+			logger.InfoContext(bgCtx, "Triggering automatic ARR webhook registration", "webhook_url", registrar.RedactWebhookURLForLog(cfg.GetWebhookBaseURL()))
 			if err := arrsService.EnsureWebhookRegistration(bgCtx, cfg.GetWebhookBaseURL(), apiKey); err != nil {
 				logger.ErrorContext(bgCtx, "Failed to register ARR webhooks on startup", "error", err)
 			}
@@ -289,8 +298,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Start mount service after HTTP server is running
 	// This ensures the WebDAV server is ready to accept connections
 	go func() {
-		// Wait for HTTP server to be fully ready
-		time.Sleep(2 * time.Second)
+		// Wait for HTTP server to be fully ready by polling the liveness endpoint
+		if err := waitForHTTPServer(ctx, cfg.WebDAV.Port); err != nil {
+			logger.WarnContext(ctx, "HTTP server did not become ready, starting mount service anyway", "err", err)
+		} else {
+			logger.InfoContext(ctx, "HTTP server is ready, starting mount service")
+		}
 
 		if err := startMountService(ctx, cfg, mountService, logger); err != nil {
 			logger.WarnContext(ctx, "Mount service failed to start", "err", err)
@@ -317,6 +330,17 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// Start graceful shutdown sequence
 	logger.InfoContext(ctx, "Starting graceful shutdown sequence")
+
+	// Stop the importer first so it stops claiming and processing new queue
+	// items immediately. Without this, the importer keeps running (it was
+	// only ever closed via a deferred Close() after runServe returns) for
+	// the full duration of the remaining shutdown steps below, including
+	// the HTTP server's graceful-shutdown timeout.
+	if err := importerService.Stop(ctx); err != nil {
+		logger.ErrorContext(ctx, "Failed to stop importer service", "error", err)
+	} else {
+		logger.InfoContext(ctx, "Importer service stopped")
+	}
 
 	// Shutdown API server and its managed resources (like FUSE)
 	apiServer.Shutdown(ctx)
@@ -398,4 +422,48 @@ func setupSPARoutes(app *fiber.App) {
 
 		return
 	}
+}
+
+func waitForHTTPServer(ctx context.Context, port int) error {
+	client := &http.Client{
+		Timeout: 500 * time.Millisecond,
+	}
+	url := fmt.Sprintf("http://127.0.0.1:%d/live", port)
+
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	// Wait up to 30 seconds
+	timeout := time.After(30 * time.Second)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timeout:
+			return fmt.Errorf("timeout waiting for HTTP server on port %d to start", port)
+		case <-ticker.C:
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+			if err != nil {
+				continue
+			}
+			resp, err := client.Do(req)
+			if err == nil {
+				resp.Body.Close()
+				if resp.StatusCode == http.StatusOK {
+					return nil
+				}
+			}
+		}
+	}
+}
+
+// intPtrValue returns the value pointed to by p, or 0 when p is nil. It is used
+// to compare optional integer config fields (e.g. segment cache ExpiryHours) by
+// value rather than by pointer identity.
+func intPtrValue(p *int) int {
+	if p == nil {
+		return 0
+	}
+	return *p
 }

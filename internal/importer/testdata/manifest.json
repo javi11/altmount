@@ -11,6 +11,12 @@
       "size": 200000
     }
   ],
+  "rar_widthmismatch": [
+    {
+      "name": "payload_a.bin",
+      "size": 200000
+    }
+  ],
   "7z_single": [
     {
       "name": "payload_b.bin",

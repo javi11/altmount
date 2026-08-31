@@ -103,7 +103,7 @@ func GetSegmentsInRangeFromIndex(ctx context.Context, start, end int64, ml Segme
 			continue
 		}
 
-		seg := newSegment(src.Id, readStart, readEnd, src.Size, groups)
+		seg := newSegment(src.Id, readStart, readEnd, src.Size, groups, idx)
 		segments = append(segments, seg)
 		accumulatedLen += readEnd - readStart + 1
 

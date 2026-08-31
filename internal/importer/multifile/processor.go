@@ -37,6 +37,8 @@ func ProcessRegularFiles(
 	allowedFileExtensions []string,
 	filterSamples bool,
 	tracker *progress.Tracker,
+	storeIndex map[string]int64,
+	storeRef string,
 ) ([]string, error) {
 	if len(files) == 0 {
 		return nil, nil
@@ -139,10 +141,10 @@ func ProcessRegularFiles(
 
 			metadataPath := metadataService.GetMetadataFilePath(virtualPath)
 			if _, err := os.Stat(metadataPath); err == nil {
-				_ = metadataService.DeleteFileMetadata(virtualPath)
+				_ = metadataService.DeleteFileMetadata(ctx, virtualPath)
 			}
 
-			if err := metadataService.WriteFileMetadata(virtualPath, fileMeta); err != nil {
+			if err := metadataService.WriteFileMetadataAuto(ctx, virtualPath, fileMeta, storeIndex, storeRef); err != nil {
 				return fmt.Errorf("failed to write metadata for file %s: %w", filename, err)
 			}
 

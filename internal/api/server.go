@@ -26,6 +26,7 @@ import (
 	"github.com/javi11/altmount/internal/rclone"
 	"github.com/javi11/altmount/internal/updater"
 	"github.com/javi11/altmount/internal/version"
+	"golang.org/x/sync/singleflight"
 )
 
 // Config represents API server configuration
@@ -42,33 +43,46 @@ func DefaultConfig() *Config {
 
 // Server represents the API server
 type Server struct {
-	config              *Config
-	queueRepo           *database.Repository
-	healthRepo          *database.HealthRepository
-	authService         *auth.Service
-	userRepo            *database.UserRepository
-	configManager       ConfigManager
-	metadataReader      *metadata.MetadataReader
-	metadataService     *metadata.MetadataService
-	nzbFilesystem       *nzbfilesystem.NzbFilesystem
-	healthWorker        *health.HealthWorker
-	librarySyncWorker   *health.LibrarySyncWorker
-	importerService     *importer.Service
-	poolManager         pool.Manager
-	arrsService         *arrs.Service
-	mountService        *rclone.MountService
-	startTime           time.Time
-	progressBroadcaster *progress.ProgressBroadcaster
-	streamTracker       *StreamTracker
-	fuseManager         *FuseManager
-	cacheSource         *segcache.Source
-	logFilePath         string
-	migrationRepo       *database.ImportMigrationRepository
-	updater             updater.Updater
-	ready               atomic.Bool
+	config            *Config
+	queueRepo         *database.Repository
+	healthRepo        *database.HealthRepository
+	authService       *auth.Service
+	userRepo          *database.UserRepository
+	configManager     ConfigManager
+	metadataReader    *metadata.MetadataReader
+	metadataService   *metadata.MetadataService
+	nzbFilesystem     *nzbfilesystem.NzbFilesystem
+	healthWorker      *health.HealthWorker
+	librarySyncWorker *health.LibrarySyncWorker
+
+	metadataMigrationWorker *metadata.MigrationWorker
+	importerService         *importer.Service
+	poolManager             pool.Manager
+	arrsService             *arrs.Service
+	mountService            *rclone.MountService
+	startTime               time.Time
+	progressBroadcaster     *progress.ProgressBroadcaster
+	streamTracker           *StreamTracker
+	fuseManager             *FuseManager
+	cacheSource             *segcache.Source
+	logFilePath             string
+	migrationRepo           *database.ImportMigrationRepository
+	updater                 updater.Updater
+	ready                   atomic.Bool
 
 	speedtest     *speedtestCoordinator
 	speedtestOnce sync.Once
+
+	// stremioPlayGroup coalesces concurrent Stremio plays of the same title (download once).
+	stremioPlayGroup singleflight.Group
+	// stremioContentGroup closes the check-then-enqueue race across different
+	// releases for the same movie or episode.
+	stremioContentGroup singleflight.Group
+	stremioReleaseMu    sync.Mutex
+	stremioReleaseRefs  map[string]stremioReleaseRef
+	// stremioFailures records releases that failed without leaving a 'failed' queue row,
+	// so they stop being offered in the stream list.
+	stremioFailures *stremioFailureCache
 }
 
 // NewServer creates a new API server that can optionally register routes on the provided mux (for backwards compatibility)
@@ -96,6 +110,8 @@ func NewServer(
 
 	server := &Server{
 		config:              config,
+		stremioFailures:     newStremioFailureCache(),
+		stremioReleaseRefs:  make(map[string]stremioReleaseRef),
 		queueRepo:           queueRepo,
 		healthRepo:          healthRepo,
 		authService:         authService,
@@ -136,6 +152,11 @@ func (s *Server) SetHealthWorker(healthWorker *health.HealthWorker) {
 // SetLibrarySyncWorker sets the library sync worker reference for the server
 func (s *Server) SetLibrarySyncWorker(librarySyncWorker *health.LibrarySyncWorker) {
 	s.librarySyncWorker = librarySyncWorker
+}
+
+// SetMetadataMigrationWorker sets the metadata migration worker for the server.
+func (s *Server) SetMetadataMigrationWorker(worker *metadata.MigrationWorker) {
+	s.metadataMigrationWorker = worker
 }
 
 // SetLogFilePath sets the path to the JSON log file used by the logs endpoints.
@@ -287,6 +308,11 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/health/library-sync/cancel", s.handleCancelLibrarySync)
 	api.Post("/health/library-sync/dry-run", s.handleDryRunLibrarySync)
 
+	api.Get("/metadata/migration/status", s.handleGetMetadataMigrationStatus)
+	api.Post("/metadata/migration/dry-run", s.handleDryRunMetadataMigration)
+	api.Post("/metadata/migration/start", s.handleStartMetadataMigration)
+	api.Post("/metadata/migration/cancel", s.handleCancelMetadataMigration)
+
 	api.Get("/files/info", s.handleGetFileMetadata)
 	api.Get("/files/active-streams", s.handleGetActiveStreams)
 	api.Delete("/files/active-streams/:id", s.handleKillStream)
@@ -326,6 +352,13 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/config/reload", s.handleReloadConfig)
 	api.Post("/config/validate", s.handleValidateConfig)
 
+	// Stremio helper endpoints
+	api.Post("/prowlarr/indexers", s.handleListProwlarrIndexers)
+	api.Post("/stremio/indexers/newsnab/test", s.handleTestNewsnabIndexer)
+	api.Get("/stremio/useragents", s.handleGetStremioUserAgents)
+	api.Post("/stremio/useragents/refresh", s.handleRefreshStremioUserAgents)
+	api.Post("/stremio/search/inspect", s.handleInspectStremioSearch)
+
 	// FUSE endpoints
 	api.Post("/fuse/start", s.handleStartFuseMount)
 	api.Post("/fuse/stop", s.handleStopFuseMount)
@@ -333,8 +366,10 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Get("/fuse/status", s.handleGetFuseStatus)
 
 	// Provider management endpoints
+	api.Get("/providers/backbones", s.handleProviderBackbones)
 	api.Post("/providers/test", s.handleTestProvider)
 	api.Post("/providers/:id/speedtest", s.handleTestProviderSpeed)
+	api.Post("/providers/:id/tune-pipeline", s.handleTunePipeline)
 	api.Post("/providers", s.handleCreateProvider)
 	api.Put("/providers/reorder", s.handleReorderProviders)
 	api.Put("/providers/:id", s.handleUpdateProvider)
@@ -365,6 +400,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	})
 	api.Post("/auth/login", authLimiter, s.handleDirectLogin)
 	api.Post("/auth/register", authLimiter, s.handleRegister)
+	api.Post("/auth/reset-admin-password", authLimiter, s.handleResetAdminPassword)
 	api.Get("/auth/registration-status", s.handleCheckRegistration)
 	api.Get("/auth/config", s.handleGetAuthConfig)
 
@@ -630,4 +666,76 @@ func (s *Server) handleGetStreamHistory(c *fiber.Ctx) error {
 		"success": true,
 		"data":    s.streamTracker.GetHistory(),
 	})
+}
+
+// Metadata migration handler methods
+
+// handleGetMetadataMigrationStatus handles GET /api/metadata/migration/status
+//
+//	@Summary		Get metadata migration status
+//	@Description	Returns the status of the legacy metadata → v3 migration worker.
+//	@Tags			Metadata
+//	@Produce		json
+//	@Success		200	{object}	APIResponse
+//	@Failure		503	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Router			/metadata/migration/status [get]
+func (s *Server) handleGetMetadataMigrationStatus(c *fiber.Ctx) error {
+	if s.metadataMigrationWorker == nil {
+		return RespondServiceUnavailable(c, "Metadata migration worker not available", "")
+	}
+	return NewMetadataMigrationHandlers(s.metadataMigrationWorker).handleGetStatus(c)
+}
+
+// handleDryRunMetadataMigration handles POST /api/metadata/migration/dry-run
+//
+//	@Summary		Dry-run the metadata migration
+//	@Description	Converts against an isolated temporary root and reports measured savings without touching the library.
+//	@Tags			Metadata
+//	@Produce		json
+//	@Success		200	{object}	APIResponse
+//	@Failure		409	{object}	APIResponse
+//	@Failure		503	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Router			/metadata/migration/dry-run [post]
+func (s *Server) handleDryRunMetadataMigration(c *fiber.Ctx) error {
+	if s.metadataMigrationWorker == nil {
+		return RespondServiceUnavailable(c, "Metadata migration worker not available", "")
+	}
+	return NewMetadataMigrationHandlers(s.metadataMigrationWorker).handleDryRun(c)
+}
+
+// handleStartMetadataMigration handles POST /api/metadata/migration/start
+//
+//	@Summary		Start the metadata migration
+//	@Description	Rewrites legacy .meta files to the v3 store-backed format in place.
+//	@Tags			Metadata
+//	@Produce		json
+//	@Success		200	{object}	APIResponse
+//	@Failure		409	{object}	APIResponse
+//	@Failure		503	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Router			/metadata/migration/start [post]
+func (s *Server) handleStartMetadataMigration(c *fiber.Ctx) error {
+	if s.metadataMigrationWorker == nil {
+		return RespondServiceUnavailable(c, "Metadata migration worker not available", "")
+	}
+	return NewMetadataMigrationHandlers(s.metadataMigrationWorker).handleStart(c)
+}
+
+// handleCancelMetadataMigration handles POST /api/metadata/migration/cancel
+//
+//	@Summary		Cancel the metadata migration
+//	@Description	Stops an in-flight migration after the current file.
+//	@Tags			Metadata
+//	@Produce		json
+//	@Success		200	{object}	APIResponse
+//	@Failure		503	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Router			/metadata/migration/cancel [post]
+func (s *Server) handleCancelMetadataMigration(c *fiber.Ctx) error {
+	if s.metadataMigrationWorker == nil {
+		return RespondServiceUnavailable(c, "Metadata migration worker not available", "")
+	}
+	return NewMetadataMigrationHandlers(s.metadataMigrationWorker).handleCancel(c)
 }

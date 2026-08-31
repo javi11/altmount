@@ -59,7 +59,8 @@ func newCleanupTestHealthRepo(t *testing.T) *database.HealthRepository {
 			priority INTEGER DEFAULT 0,
 			streaming_failure_count INTEGER DEFAULT 0,
 			is_masked BOOLEAN DEFAULT FALSE,
-			indexer TEXT DEFAULT NULL
+			indexer TEXT DEFAULT NULL,
+			download_id TEXT DEFAULT NULL
 		);
 	`)
 	require.NoError(t, err)
@@ -73,7 +74,7 @@ func addPendingHealthRecord(t *testing.T, repo *database.HealthRepository, virtu
 	t.Helper()
 	require.NoError(t, repo.AddFileToHealthCheckWithMetadata(
 		context.Background(), virtualPath, &virtualPath, 3, 3, nil,
-		database.HealthPriorityNext, nil, nil, nil))
+		database.HealthPriorityNext, nil, nil, nil, nil))
 }
 
 // writeTestMeta writes a minimal healthy metadata file at virtualPath and returns it.
@@ -215,7 +216,7 @@ func TestCleanupWrittenPaths_PreservesPriorSuccessfulImport(t *testing.T) {
 	relinked := "/media/library/Pack/e02.mkv"
 	require.NoError(t, svc.healthRepo.AddFileToHealthCheckWithMetadata(ctx,
 		"tv/Pack.S08.1080p-GRP/e02.mkv", &relinked, 3, 3, nil,
-		database.HealthPriorityNext, nil, nil, nil))
+		database.HealthPriorityNext, nil, nil, nil, nil))
 
 	// A prior successful import's healthy record — must survive.
 	addPendingHealthRecord(t, svc.healthRepo, "tv/Pack.S08.1080p-GRP/e03.mkv")

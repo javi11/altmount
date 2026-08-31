@@ -8,11 +8,18 @@ import {
 	Loader,
 	Wrench,
 } from "lucide-react";
-import { memo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { HealthBadge } from "../../../../components/ui/StatusBadge";
-import { formatFutureTime, formatRelativeTime, truncateText } from "../../../../lib/utils";
+import {
+	formatFutureTime,
+	formatRelativeTime,
+	parseHealthErrorDetails,
+	truncateText,
+} from "../../../../lib/utils";
 import { type FileHealth, HealthPriority } from "../../../../types/api";
 import { HealthItemActionsMenu } from "./HealthItemActionsMenu";
+import { PartialCheckBadge } from "./PartialCheckBadge";
+import { PlaybackImpactBadge } from "./PlaybackImpactBadge";
 
 interface HealthItemCardProps {
 	item: FileHealth;
@@ -53,6 +60,12 @@ export const HealthItemCard = memo(function HealthItemCard({
 }: HealthItemCardProps) {
 	const [isExpanded, setIsExpanded] = useState(false);
 
+	const errorDetails = useMemo(
+		() => parseHealthErrorDetails(item.error_details),
+		[item.error_details],
+	);
+	const playbackImpact = errorDetails?.playback_impact ?? null;
+
 	// Reuse status icon logic from HealthTableRow
 	const getNextPriority = (current: HealthPriority): HealthPriority => {
 		switch (current) {
@@ -85,6 +98,10 @@ export const HealthItemCard = memo(function HealthItemCard({
 			break;
 		case "checking":
 			statusIcon = <Loader className="h-4 w-4 animate-spin" />;
+			iconColorClass = "text-warning";
+			break;
+		case "degraded":
+			statusIcon = <HeartCrack className="h-4 w-4" />;
 			iconColorClass = "text-warning";
 			break;
 		default:
@@ -120,6 +137,8 @@ export const HealthItemCard = memo(function HealthItemCard({
 						{/* Quick Info Pills */}
 						<div className="mt-2 flex flex-wrap gap-2">
 							<HealthBadge status={item.status} isMasked={item.is_masked} />
+							{playbackImpact && <PlaybackImpactBadge impact={playbackImpact} />}
+							{errorDetails && <PartialCheckBadge details={errorDetails} />}
 
 							<button
 								type="button"
@@ -211,6 +230,59 @@ export const HealthItemCard = memo(function HealthItemCard({
 							<div>
 								<span className="opacity-70">Library Path:</span>
 								<div className="mt-1 break-all font-mono text-xs">{item.library_path}</div>
+							</div>
+						)}
+						{item.metadata && (
+							<div>
+								<span className="opacity-70">Metadata:</span>
+								<div className="mt-1 flex flex-wrap gap-1">
+									{(() => {
+										try {
+											const meta = JSON.parse(item.metadata);
+											return (
+												<>
+													{meta.instanceName && (
+														<span className="badge badge-outline badge-xs">
+															{meta.instanceName}
+														</span>
+													)}
+													{meta.series?.id && (
+														<span className="badge badge-ghost badge-xs" title="Series ID">
+															SeriesID: {meta.series.id}
+														</span>
+													)}
+													{meta.movie?.id && (
+														<span className="badge badge-ghost badge-xs" title="Movie ID">
+															MovieID: {meta.movie.id}
+														</span>
+													)}
+													{meta.series?.tvdbId && (
+														<span className="badge badge-ghost badge-xs" title="TVDB ID">
+															TVDBID: {meta.series.tvdbId}
+														</span>
+													)}
+													{meta.episodeFile?.id && (
+														<span className="badge badge-ghost badge-xs" title="Episode File ID">
+															FileID: {meta.episodeFile.id}
+														</span>
+													)}
+													{meta.movie?.tmdbId && (
+														<span className="badge badge-ghost badge-xs" title="TMDB ID">
+															TMDBID: {meta.movie.tmdbId}
+														</span>
+													)}
+													{meta.movieFile?.id && (
+														<span className="badge badge-ghost badge-xs" title="Movie File ID">
+															FileID: {meta.movieFile.id}
+														</span>
+													)}
+												</>
+											);
+										} catch (_e) {
+											return null;
+										}
+									})()}
+								</div>
 							</div>
 						)}
 						<div>

@@ -35,18 +35,10 @@ definitions:
       path:
         type: string
     type: object
-  api.ArrsInstanceRequest:
+  api.TestConnectionRequest:
     properties:
       api_key:
         type: string
-      category:
-        type: string
-      enabled:
-        type: boolean
-      name:
-        type: string
-      sync_interval_hours:
-        type: integer
       type:
         type: string
       url:
@@ -325,8 +317,6 @@ definitions:
       import_strategy:
         $ref: '#/definitions/config.ImportStrategy'
       max_download_prefetch:
-        type: integer
-      max_import_connections:
         type: integer
       max_processor_workers:
         type: integer
@@ -1164,8 +1154,6 @@ definitions:
         $ref: '#/definitions/config.ImportStrategy'
       max_download_prefetch:
         type: integer
-      max_import_connections:
-        type: integer
       max_processor_workers:
         type: integer
       queue_processing_interval_seconds:
@@ -1228,8 +1216,6 @@ definitions:
       backup:
         $ref: '#/definitions/config.MetadataBackupConfig'
       delete_completed_nzb:
-        type: boolean
-      delete_source_nzb_on_removal:
         type: boolean
       root_path:
         type: string
@@ -1697,7 +1683,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/api.ArrsInstanceRequest'
+          $ref: '#/definitions/api.TestConnectionRequest'
       produces:
       - application/json
       responses:

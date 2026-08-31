@@ -6,11 +6,13 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/go-viper/mapstructure/v2"
 	"github.com/javi11/altmount/internal/utils"
 	"github.com/javi11/nntppool/v4"
 	"github.com/jinzhu/copier"
@@ -91,10 +93,13 @@ func (n NetworkConfig) GetNoProxy() string { return n.NoProxy }
 // When enabled, this cache replaces the FUSE VFS disk cache and additionally benefits WebDAV.
 // Cache key: Usenet message ID. Cache unit: ~750KB decoded segment (matches one NNTP article).
 type SegmentCacheConfig struct {
-	Enabled     *bool  `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
-	CachePath   string `yaml:"cache_path" mapstructure:"cache_path" json:"cache_path"`
-	MaxSizeGB   int    `yaml:"max_size_gb" mapstructure:"max_size_gb" json:"max_size_gb"`
-	ExpiryHours int    `yaml:"expiry_hours" mapstructure:"expiry_hours" json:"expiry_hours"`
+	Enabled   *bool  `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	CachePath string `yaml:"cache_path" mapstructure:"cache_path" json:"cache_path"`
+	MaxSizeGB int    `yaml:"max_size_gb" mapstructure:"max_size_gb" json:"max_size_gb"`
+	// ExpiryHours controls how long cached segments are kept before automatic
+	// eviction. Set to 0 to disable expiry (cache forever, bounded only by
+	// MaxSizeGB via LRU eviction). Left unset (nil) it defaults to 24 hours.
+	ExpiryHours *int `yaml:"expiry_hours" mapstructure:"expiry_hours" json:"expiry_hours"`
 }
 
 // WebDAVConfig represents WebDAV server configuration
@@ -150,12 +155,72 @@ type ProwlarrConfig struct {
 	// Categories filters search results by Newznab category IDs.
 	// Defaults to 5000 (Movies), 5010 (Movies/Foreign), 5030 (TV), 5040 (TV/HD).
 	Categories []int `yaml:"categories" mapstructure:"categories" json:"categories,omitempty"`
+	// Indexers optionally restricts searches to specific Prowlarr indexer IDs.
+	// Empty = search across all configured indexers.
+	Indexers []int `yaml:"indexers" mapstructure:"indexers" json:"indexers,omitempty"`
+	// PreferredIndexers lists Prowlarr indexer IDs to prioritize and rank above others.
+	PreferredIndexers []int `yaml:"preferred_indexers" mapstructure:"preferred_indexers" json:"preferred_indexers,omitempty"`
+	// PreferredIndexerNames lists Prowlarr indexer names/keywords to prioritize and rank above others.
+	PreferredIndexerNames []string `yaml:"preferred_indexer_names" mapstructure:"preferred_indexer_names" json:"preferred_indexer_names,omitempty"`
 	// Languages is an optional list of keywords; releases must contain at least one to pass.
 	// Empty = no filtering. Examples: ["Esp", "🇪🇸", "Spanish", "DUAL"]
 	Languages []string `yaml:"languages" mapstructure:"languages" json:"languages,omitempty"`
+	// PreferredLanguages lists language keywords to prioritize and rank above others.
+	PreferredLanguages []string `yaml:"preferred_languages" mapstructure:"preferred_languages" json:"preferred_languages,omitempty"`
 	// Qualities is an optional list of keywords; releases must contain at least one to pass.
 	// Empty = no filtering. Examples: ["1080p", "HD", "4K", "3D"]
 	Qualities []string `yaml:"qualities" mapstructure:"qualities" json:"qualities,omitempty"`
+	// ExcludeKeywords is an optional list of keywords/patterns; releases containing any are dropped.
+	// Examples: ["DV", "DoVi", "CAM", "TS", "TeleSync"]
+	ExcludeKeywords []string `yaml:"exclude_keywords" mapstructure:"exclude_keywords" json:"exclude_keywords,omitempty"`
+	// CustomScores maps keyword/regex patterns to numeric scores (TRaSH guide style).
+	// Positive scores promote releases; negative scores demote them.
+	// Examples: {"2160p": 500, "REMUX": 300, "DV": -1000}
+	CustomScores map[string]int `yaml:"custom_scores" mapstructure:"custom_scores" json:"custom_scores,omitempty"`
+}
+
+// NewsnabIndexerConfig holds configuration for a direct Newznab indexer.
+type NewsnabIndexerConfig struct {
+	ID             string `yaml:"id" mapstructure:"id" json:"id"`
+	Name           string `yaml:"name" mapstructure:"name" json:"name"`
+	URL            string `yaml:"url" mapstructure:"url" json:"url"`
+	APIKey         string `yaml:"api_key" mapstructure:"api_key" json:"api_key"`
+	Categories     []int  `yaml:"categories" mapstructure:"categories" json:"categories,omitempty"`
+	Weight         int    `yaml:"weight" mapstructure:"weight" json:"weight"`
+	TimeoutSeconds int    `yaml:"timeout_seconds" mapstructure:"timeout_seconds" json:"timeout_seconds"`
+	Enabled        bool   `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+}
+
+// StremioIndexersConfig configures search providers for the Stremio addon.
+type StremioIndexersConfig struct {
+	Provider        string                 `yaml:"provider" mapstructure:"provider" json:"provider"` // "prowlarr", "newsnab", "both"
+	UserAgentMode   string                 `yaml:"user_agent_mode" mapstructure:"user_agent_mode" json:"user_agent_mode,omitempty"`
+	CustomUserAgent string                 `yaml:"custom_user_agent" mapstructure:"custom_user_agent" json:"custom_user_agent,omitempty"`
+	Prowlarr        ProwlarrConfig         `yaml:"prowlarr" mapstructure:"prowlarr" json:"prowlarr"`
+	Newsnab         []NewsnabIndexerConfig `yaml:"newsnab" mapstructure:"newsnab" json:"newsnab,omitempty"`
+}
+
+// TrashCustomFormatConfig defines a format scoring rule in configuration.
+type TrashCustomFormatConfig struct {
+	ID          string `yaml:"id" mapstructure:"id" json:"id"`
+	Name        string `yaml:"name" mapstructure:"name" json:"name"`
+	Category    string `yaml:"category" mapstructure:"category" json:"category"`
+	Pattern     string `yaml:"pattern" mapstructure:"pattern" json:"pattern"`
+	PatternType string `yaml:"pattern_type" mapstructure:"pattern_type" json:"pattern_type"`
+	Score       int    `yaml:"score" mapstructure:"score" json:"score"`
+	Enabled     bool   `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	IsCustom    bool   `yaml:"is_custom" mapstructure:"is_custom" json:"is_custom"`
+	Invert      bool   `yaml:"invert,omitempty" mapstructure:"invert" json:"invert,omitempty"`
+}
+
+// StreamScoringConfig holds TRaSH scoring configuration.
+type StreamScoringConfig struct {
+	Preset                   string                    `yaml:"preset" mapstructure:"preset" json:"preset"`
+	CustomFormats            []TrashCustomFormatConfig `yaml:"custom_formats" mapstructure:"custom_formats" json:"custom_formats,omitempty"`
+	ExcludeKeywords          []string                  `yaml:"exclude_keywords" mapstructure:"exclude_keywords" json:"exclude_keywords,omitempty"`
+	ExcludeRegex             string                    `yaml:"exclude_regex,omitempty" mapstructure:"exclude_regex" json:"exclude_regex,omitempty"`
+	PreferredLanguages       []string                  `yaml:"preferred_languages" mapstructure:"preferred_languages" json:"preferred_languages,omitempty"`
+	RequirePreferredLanguage bool                      `yaml:"require_preferred_language" mapstructure:"require_preferred_language" json:"require_preferred_language"`
 }
 
 // StremioConfig configures the Stremio NZB stream endpoint (POST /api/nzb/streams).
@@ -163,16 +228,83 @@ type StremioConfig struct {
 	// Enabled controls whether the endpoint is active. Disabled by default.
 	// When false, the endpoint returns 404 Not Found.
 	Enabled *bool `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	// AddonName is the display name shown in Stremio's addon catalog.
+	AddonName string `yaml:"addon_name" mapstructure:"addon_name" json:"addon_name,omitempty"`
+	// AddonDescription is the description shown in Stremio's addon catalog.
+	AddonDescription string `yaml:"addon_description" mapstructure:"addon_description" json:"addon_description,omitempty"`
+	// DirectStream when true streams NZB media segments directly.
+	DirectStream *bool `yaml:"direct_stream" mapstructure:"direct_stream" json:"direct_stream,omitempty"`
+	// ShowCachedIndicator when true shows cached badges in stream titles.
+	ShowCachedIndicator *bool `yaml:"show_cached_indicator" mapstructure:"show_cached_indicator" json:"show_cached_indicator,omitempty"`
+	// FallbackTimeoutMs is the timeout before attempting a fallback release.
+	FallbackTimeoutMs int `yaml:"fallback_timeout_ms" mapstructure:"fallback_timeout_ms" json:"fallback_timeout_ms,omitempty"`
+	// MaxRetries is the maximum number of retry attempts for stream fetching.
+	MaxRetries int `yaml:"max_retries" mapstructure:"max_retries" json:"max_retries,omitempty"`
+	// StreamTTLSeconds is the stream cache expiration time in seconds.
+	StreamTTLSeconds int `yaml:"stream_ttl_seconds" mapstructure:"stream_ttl_seconds" json:"stream_ttl_seconds,omitempty"`
 	// NzbTTLHours controls how long a completed NZB result is cached before
 	// the same NZB is re-processed on the next request.
 	// Set to 0 to disable expiry (cache forever). Defaults to 24 hours.
-	NzbTTLHours int `yaml:"nzb_ttl_hours" mapstructure:"nzb_ttl_hours" json:"nzb_ttl_hours,omitempty"`
+	NzbTTLHours int `yaml:"nzb_ttl_hours" mapstructure:"nzb_ttl_hours" json:"nzb_ttl_hours"`
+	// FailedReleaseTTLHours controls how long a release that failed to import stays
+	// excluded from the Stremio stream list. Mirrors NzbTTLHours semantics: it filters
+	// failure records by age rather than deleting them, so it is bounded above by
+	// Import.FailedItemRetentionHours. Set to 0 to exclude for as long as the record
+	// survives. Defaults to 24 hours.
+	FailedReleaseTTLHours int `yaml:"failed_release_ttl_hours" mapstructure:"failed_release_ttl_hours" json:"failed_release_ttl_hours"`
+	// MaxFallbackReleases caps how many *extra* releases a single play request may try
+	// after the first one fails. Set to 0 to disable fallback. Defaults to 2.
+	MaxFallbackReleases int `yaml:"max_fallback_releases" mapstructure:"max_fallback_releases" json:"max_fallback_releases"`
+	// IncludeLibraryStreams when true checks and presents matching completed files
+	// from your Altmount library as instant 0s stream options in Stremio. Defaults to true.
+	IncludeLibraryStreams *bool `yaml:"include_library_streams" mapstructure:"include_library_streams" json:"include_library_streams,omitempty"`
+	// FastFailHeaderOnly when true causes Stremio-originated imports to fail fast
+	// immediately on the release-level probe when missing articles are detected,
+	// skipping the multi-part RAR per-file Stat sweep. Defaults to true.
+	FastFailHeaderOnly *bool `yaml:"fast_fail_header_only" mapstructure:"fast_fail_header_only" json:"fast_fail_header_only"`
 	// BaseURL is the public base URL used when building Stremio stream links
 	// (e.g. "https://altmount.example.com"). Falls back to the auto-detected
 	// request origin when not set.
 	BaseURL string `yaml:"base_url" mapstructure:"base_url" json:"base_url,omitempty"`
-	// Prowlarr configures the Prowlarr indexer used by the Stremio addon to search for NZBs.
+	// Indexers configures Prowlarr and direct Newsnab search providers.
+	Indexers StremioIndexersConfig `yaml:"indexers" mapstructure:"indexers" json:"indexers"`
+	// Scoring configures TRaSH format scoring and exclusions.
+	Scoring StreamScoringConfig `yaml:"scoring" mapstructure:"scoring" json:"scoring"`
+	// Prowlarr configures the legacy Prowlarr indexer settings (retained for compatibility).
 	Prowlarr ProwlarrConfig `yaml:"prowlarr" mapstructure:"prowlarr" json:"prowlarr"`
+}
+
+// maxStremioFallbackReleases bounds MaxFallbackReleases so a run of failures cannot
+// fire an unbounded number of Prowlarr searches for a single play request.
+const maxStremioFallbackReleases = 4
+
+// EffectiveMaxFallbackReleases returns MaxFallbackReleases clamped to [0, 4].
+func (s StremioConfig) EffectiveMaxFallbackReleases() int {
+	if s.MaxFallbackReleases < 0 {
+		return 0
+	}
+	if s.MaxFallbackReleases > maxStremioFallbackReleases {
+		return maxStremioFallbackReleases
+	}
+	return s.MaxFallbackReleases
+}
+
+// EffectiveIncludeLibraryStreams reports whether Stremio stream responses should include
+// matching completed releases from the local library. Defaults to true.
+func (s StremioConfig) EffectiveIncludeLibraryStreams() bool {
+	if s.IncludeLibraryStreams == nil {
+		return true
+	}
+	return *s.IncludeLibraryStreams
+}
+
+// EffectiveFastFailHeaderOnly reports whether Stremio imports should fast-fail
+// immediately on the release probe when missing articles are found. Defaults to true.
+func (s StremioConfig) EffectiveFastFailHeaderOnly() bool {
+	if s.FastFailHeaderOnly == nil {
+		return true
+	}
+	return *s.FastFailHeaderOnly
 }
 
 // AuthConfig represents authentication configuration
@@ -193,15 +325,17 @@ type DatabaseConfig struct {
 
 // MetadataConfig represents metadata filesystem configuration
 type MetadataConfig struct {
-	RootPath                 string               `yaml:"root_path" mapstructure:"root_path" json:"root_path"`
-	DeleteSourceNzbOnRemoval *bool                `yaml:"delete_source_nzb_on_removal" mapstructure:"delete_source_nzb_on_removal" json:"delete_source_nzb_on_removal,omitempty"`
-	DeleteCompletedNzb       *bool                `yaml:"delete_completed_nzb" mapstructure:"delete_completed_nzb" json:"delete_completed_nzb,omitempty"`
-	Backup                   MetadataBackupConfig `yaml:"backup" mapstructure:"backup" json:"backup"`
+	RootPath  string                  `yaml:"root_path" mapstructure:"root_path" json:"root_path"`
+	Backup    MetadataBackupConfig    `yaml:"backup" mapstructure:"backup" json:"backup"`
+	Migration MetadataMigrationConfig `yaml:"migration" mapstructure:"migration" json:"migration"`
 }
 
-// ShouldDeleteSourceNzb returns whether source NZB files should be deleted on removal.
-func (m MetadataConfig) ShouldDeleteSourceNzb() bool {
-	return m.DeleteSourceNzbOnRemoval != nil && *m.DeleteSourceNzbOnRemoval
+// MetadataMigrationConfig configures the legacy-metadata → v3 migration.
+type MetadataMigrationConfig struct {
+	// DefaultGroup is the newsgroup written into synthesized NzbStore entries.
+	// Legacy metas do not retain the original groups, and nzb.BuildNZB renders an
+	// empty <groups> element without this, which most NZB clients reject.
+	DefaultGroup string `yaml:"default_group" mapstructure:"default_group" json:"default_group"`
 }
 
 // MetadataBackupConfig represents metadata backup configuration
@@ -220,8 +354,16 @@ type FailureMaskingConfig struct {
 
 // StreamingConfig represents streaming and chunking configuration
 type StreamingConfig struct {
-	MaxPrefetch    int                  `yaml:"max_prefetch" mapstructure:"max_prefetch" json:"max_prefetch"`
-	FailureMasking FailureMaskingConfig `yaml:"failure_masking" mapstructure:"failure_masking" json:"failure_masking"`
+	MaxPrefetch int `yaml:"max_prefetch" mapstructure:"max_prefetch" json:"max_prefetch"`
+	// ReadTimeoutSeconds bounds a single streaming read (WebDAV Read and FUSE
+	// ReadAt alike). Nothing below this layer carries a deadline the caller can
+	// observe: a segment fetch that stalls without erroring parks the read
+	// indefinitely, and on FUSE that means an uninterruptible D-state for the
+	// reading process. On expiry the in-flight reader is interrupted and the
+	// read fails, so the caller gets an EIO it can act on. 0 uses the built-in
+	// default; a negative value disables the timeout.
+	ReadTimeoutSeconds int                  `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds"`
+	FailureMasking     FailureMaskingConfig `yaml:"failure_masking" mapstructure:"failure_masking" json:"failure_masking"`
 }
 
 // RCloneConfig represents rclone configuration
@@ -291,48 +433,41 @@ const (
 	ImportStrategySTRM    ImportStrategy = "STRM"
 )
 
+// defaultVerifyContentTimeoutSeconds is the shared fallback for both
+// Import.VerifyContentTimeoutSeconds and Health.VerifyContentTimeoutSeconds
+// so the 15s default lives in one place instead of being duplicated across
+// DefaultConfig and the accessor fallbacks.
+const defaultVerifyContentTimeoutSeconds = 15
+
 // ImportConfig represents import processing configuration
 type ImportConfig struct {
 	MaxProcessorWorkers            int      `yaml:"max_processor_workers" mapstructure:"max_processor_workers" json:"max_processor_workers"`
 	QueueProcessingIntervalSeconds int      `yaml:"queue_processing_interval_seconds" mapstructure:"queue_processing_interval_seconds" json:"queue_processing_interval_seconds"`
 	AllowedFileExtensions          []string `yaml:"allowed_file_extensions" mapstructure:"allowed_file_extensions" json:"allowed_file_extensions"`
-	MaxImportConnections           int      `yaml:"max_import_connections" mapstructure:"max_import_connections" json:"max_import_connections"`
 	// MaxConcurrentImports caps the number of NZB imports that may run
-	// end-to-end at the same time when no stream is active. 0 = unlimited.
-	MaxConcurrentImports int `yaml:"max_concurrent_imports" mapstructure:"max_concurrent_imports" json:"max_concurrent_imports"`
-	// MaxConcurrentImportsWhileStreaming caps concurrent imports while at
-	// least one stream is active, so streams are not starved by imports.
-	// 0 = unlimited.
-	MaxConcurrentImportsWhileStreaming int            `yaml:"max_concurrent_imports_while_streaming" mapstructure:"max_concurrent_imports_while_streaming" json:"max_concurrent_imports_while_streaming"`
-	MaxDownloadPrefetch                int            `yaml:"max_download_prefetch" mapstructure:"max_download_prefetch" json:"max_download_prefetch"`
-	SegmentSamplePercentage            int            `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage"`
-	ReadTimeoutSeconds                 int            `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds"`
-	IsoAnalyzeTimeoutSeconds           *int           `yaml:"iso_analyze_timeout_seconds" mapstructure:"iso_analyze_timeout_seconds" json:"iso_analyze_timeout_seconds,omitempty"`
-	ImportStrategy                     ImportStrategy `yaml:"import_strategy" mapstructure:"import_strategy" json:"import_strategy"`
-	ImportDir                          *string        `yaml:"import_dir" mapstructure:"import_dir" json:"import_dir,omitempty"`
-	WatchDir                           *string        `yaml:"watch_dir" mapstructure:"watch_dir" json:"watch_dir,omitempty"`
-	WatchIntervalSeconds               *int           `yaml:"watch_interval_seconds" mapstructure:"watch_interval_seconds" json:"watch_interval_seconds,omitempty"`
-	AllowNestedRarExtraction           *bool          `yaml:"allow_nested_rar_extraction" mapstructure:"allow_nested_rar_extraction" json:"allow_nested_rar_extraction,omitempty"`
-	ExpandBlurayIso                    *bool          `yaml:"expand_bluray_iso" mapstructure:"expand_bluray_iso" json:"expand_bluray_iso,omitempty"`
-	RenameToNzbName                    *bool          `yaml:"rename_to_nzb_name" mapstructure:"rename_to_nzb_name" json:"rename_to_nzb_name,omitempty"`
-	FilterSampleFiles                  *bool          `yaml:"filter_sample_files" mapstructure:"filter_sample_files" json:"filter_sample_files,omitempty"`
-	FailedItemRetentionHours           *int           `yaml:"failed_item_retention_hours" mapstructure:"failed_item_retention_hours" json:"failed_item_retention_hours,omitempty"`
-	HistoryRetentionDays               *int           `yaml:"history_retention_days" mapstructure:"history_retention_days" json:"history_retention_days,omitempty"`
-	DeleteCompletedNzb                 *bool          `yaml:"delete_completed_nzb" mapstructure:"delete_completed_nzb" json:"delete_completed_nzb,omitempty"`
-}
-
-// ShouldDeleteCompletedNzb returns whether the NZB file should be removed from
-// disk after a successful import. Reads from ImportConfig first, falling back
-// to the legacy MetadataConfig field for back-compatibility with older config
-// files (the setting was moved from metadata.* to import.*).
-func (c *Config) ShouldDeleteCompletedNzb() bool {
-	if c.Import.DeleteCompletedNzb != nil {
-		return *c.Import.DeleteCompletedNzb
-	}
-	if c.Metadata.DeleteCompletedNzb != nil {
-		return *c.Metadata.DeleteCompletedNzb
-	}
-	return false
+	// end-to-end at the same time. 0 = unlimited. NNTP connection use is
+	// balanced automatically: imports share the pool's full capacity and
+	// yield to streams (priority lane + adaptive connection budget).
+	MaxConcurrentImports     int            `yaml:"max_concurrent_imports" mapstructure:"max_concurrent_imports" json:"max_concurrent_imports"`
+	MaxDownloadPrefetch      int            `yaml:"max_download_prefetch" mapstructure:"max_download_prefetch" json:"max_download_prefetch"`
+	SegmentSamplePercentage  int            `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage"`
+	ReadTimeoutSeconds       int            `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds"`
+	IsoAnalyzeTimeoutSeconds *int           `yaml:"iso_analyze_timeout_seconds" mapstructure:"iso_analyze_timeout_seconds" json:"iso_analyze_timeout_seconds,omitempty"`
+	ImportStrategy           ImportStrategy `yaml:"import_strategy" mapstructure:"import_strategy" json:"import_strategy"`
+	ImportDir                *string        `yaml:"import_dir" mapstructure:"import_dir" json:"import_dir,omitempty"`
+	WatchDir                 *string        `yaml:"watch_dir" mapstructure:"watch_dir" json:"watch_dir,omitempty"`
+	WatchIntervalSeconds     *int           `yaml:"watch_interval_seconds" mapstructure:"watch_interval_seconds" json:"watch_interval_seconds,omitempty"`
+	AllowNestedRarExtraction *bool          `yaml:"allow_nested_rar_extraction" mapstructure:"allow_nested_rar_extraction" json:"allow_nested_rar_extraction,omitempty"`
+	ExpandBlurayIso          *bool          `yaml:"expand_bluray_iso" mapstructure:"expand_bluray_iso" json:"expand_bluray_iso,omitempty"`
+	RenameToNzbName          *bool          `yaml:"rename_to_nzb_name" mapstructure:"rename_to_nzb_name" json:"rename_to_nzb_name,omitempty"`
+	FilterSampleFiles        *bool          `yaml:"filter_sample_files" mapstructure:"filter_sample_files" json:"filter_sample_files,omitempty"`
+	FailedItemRetentionHours *int           `yaml:"failed_item_retention_hours" mapstructure:"failed_item_retention_hours" json:"failed_item_retention_hours,omitempty"`
+	HistoryRetentionDays     *int           `yaml:"history_retention_days" mapstructure:"history_retention_days" json:"history_retention_days,omitempty"`
+	// VerifyContent, when true, probes each eligible video/audio file's
+	// first bytes through the serving stack after import and fails the
+	// import if no recognized media container signature is found.
+	VerifyContent               *bool `yaml:"verify_content" mapstructure:"verify_content" json:"verify_content,omitempty"`
+	VerifyContentTimeoutSeconds *int  `yaml:"verify_content_timeout_seconds" mapstructure:"verify_content_timeout_seconds" json:"verify_content_timeout_seconds,omitempty"`
 }
 
 // LogConfig represents logging configuration with rotation support
@@ -357,22 +492,39 @@ type RepairConfig struct {
 
 // HealthConfig represents health checker configuration
 type HealthConfig struct {
-	Enabled                             *bool        `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
-	LibraryDir                          *string      `yaml:"library_dir" mapstructure:"library_dir" json:"library_dir,omitempty"`
-	CleanupOrphanedMetadata             *bool        `yaml:"cleanup_orphaned_metadata" mapstructure:"cleanup_orphaned_metadata" json:"cleanup_orphaned_metadata,omitempty"`
-	CheckIntervalSeconds                int          `yaml:"check_interval_seconds" mapstructure:"check_interval_seconds" json:"check_interval_seconds,omitempty"`
-	MaxConnectionsForHealthChecks       int          `yaml:"max_connections_for_health_checks" mapstructure:"max_connections_for_health_checks" json:"max_connections_for_health_checks,omitempty"`
-	MaxConcurrentJobs                   int          `yaml:"max_concurrent_jobs" mapstructure:"max_concurrent_jobs" json:"max_concurrent_jobs,omitempty"`
-	SegmentSamplePercentage             int          `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage,omitempty"`
-	MaxRetries                          int          `yaml:"max_retries" mapstructure:"max_retries" json:"max_retries"`
-	LibrarySyncIntervalMinutes          int          `yaml:"library_sync_interval_minutes" mapstructure:"library_sync_interval_minutes" json:"library_sync_interval_minutes,omitempty"`
-	LibrarySyncConcurrency              int          `yaml:"library_sync_concurrency" mapstructure:"library_sync_concurrency" json:"library_sync_concurrency,omitempty"`
-	ResolveRepairOnImport               *bool        `yaml:"resolve_repair_on_import" mapstructure:"resolve_repair_on_import" json:"resolve_repair_on_import,omitempty"`
-	VerifyData                          *bool        `yaml:"verify_data" mapstructure:"verify_data" json:"verify_data,omitempty"`
-	CheckAllSegments                    *bool        `yaml:"check_all_segments" mapstructure:"check_all_segments" json:"check_all_segments,omitempty"`
-	ReadTimeoutSeconds                  int          `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds,omitempty"`
-	AcceptableMissingSegmentsPercentage float64      `yaml:"acceptable_missing_segments_percentage" mapstructure:"acceptable_missing_segments_percentage" json:"acceptable_missing_segments_percentage,omitempty"`
-	Repair                              RepairConfig `yaml:"repair" mapstructure:"repair" json:"repair"`
+	Enabled                             *bool   `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
+	LibraryDir                          *string `yaml:"library_dir" mapstructure:"library_dir" json:"library_dir,omitempty"`
+	CleanupOrphanedMetadata             *bool   `yaml:"cleanup_orphaned_metadata" mapstructure:"cleanup_orphaned_metadata" json:"cleanup_orphaned_metadata,omitempty"`
+	CheckIntervalSeconds                int     `yaml:"check_interval_seconds" mapstructure:"check_interval_seconds" json:"check_interval_seconds,omitempty"`
+	MaxConnectionsForHealthChecks       int     `yaml:"max_connections_for_health_checks" mapstructure:"max_connections_for_health_checks" json:"max_connections_for_health_checks,omitempty"`
+	CheckBatchSize                      int     `yaml:"check_batch_size" mapstructure:"check_batch_size" json:"check_batch_size,omitempty"`
+	MaxConcurrentJobs                   int     `yaml:"max_concurrent_jobs" mapstructure:"max_concurrent_jobs" json:"max_concurrent_jobs,omitempty"`
+	SegmentSamplePercentage             int     `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage,omitempty"`
+	MaxRetries                          int     `yaml:"max_retries" mapstructure:"max_retries" json:"max_retries"`
+	LibrarySyncIntervalMinutes          int     `yaml:"library_sync_interval_minutes" mapstructure:"library_sync_interval_minutes" json:"library_sync_interval_minutes,omitempty"`
+	LibrarySyncConcurrency              int     `yaml:"library_sync_concurrency" mapstructure:"library_sync_concurrency" json:"library_sync_concurrency,omitempty"`
+	ResolveRepairOnImport               *bool   `yaml:"resolve_repair_on_import" mapstructure:"resolve_repair_on_import" json:"resolve_repair_on_import,omitempty"`
+	VerifyData                          *bool   `yaml:"verify_data" mapstructure:"verify_data" json:"verify_data,omitempty"`
+	CheckAllSegments                    *bool   `yaml:"check_all_segments" mapstructure:"check_all_segments" json:"check_all_segments,omitempty"`
+	ReadTimeoutSeconds                  int     `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds,omitempty"`
+	AcceptableMissingSegmentsPercentage float64 `yaml:"acceptable_missing_segments_percentage" mapstructure:"acceptable_missing_segments_percentage" json:"acceptable_missing_segments_percentage"`
+	// ExcludedCategories lists SABnzbd category names whose files must never be
+	// registered for health checking by the library-sync discovery pass. Matching
+	// is by the category's configured directory under CompleteDir and is
+	// case-insensitive. Empty means no categories are excluded.
+	ExcludedCategories []string     `yaml:"excluded_categories" mapstructure:"excluded_categories" json:"excluded_categories,omitempty"`
+	Repair             RepairConfig `yaml:"repair" mapstructure:"repair" json:"repair"`
+	// CorruptionAction controls what happens when the health checker or a streaming read
+	// confirms real (non-degraded) corruption: "repair" (default) triggers an Arr rescan;
+	// "delete" removes the file's metadata/NZB/health record and cleans up now-empty
+	// parent directories instead. Degraded files are never affected either way.
+	CorruptionAction string `yaml:"corruption_action" mapstructure:"corruption_action" json:"corruption_action,omitempty"`
+	// VerifyContent, when true, probes each eligible video/audio file's
+	// first bytes through the serving stack during a health check and
+	// marks the file corrupted if no recognized media container signature
+	// is found. Distinct from the unrelated, unused VerifyData field above.
+	VerifyContent               *bool `yaml:"verify_content" mapstructure:"verify_content" json:"verify_content,omitempty"`
+	VerifyContentTimeoutSeconds *int  `yaml:"verify_content_timeout_seconds" mapstructure:"verify_content_timeout_seconds" json:"verify_content_timeout_seconds,omitempty"`
 }
 
 // Path validation functions have been moved to internal/utils/path.go
@@ -380,17 +532,21 @@ type HealthConfig struct {
 // ProviderConfig represents a single NNTP provider configuration
 type ProviderConfig struct {
 	ID                       string     `yaml:"id" mapstructure:"id" json:"id"`
+	Name                     string     `yaml:"name" mapstructure:"name" json:"name,omitempty"`
 	Host                     string     `yaml:"host" mapstructure:"host" json:"host"`
 	Port                     int        `yaml:"port" mapstructure:"port" json:"port"`
 	Username                 string     `yaml:"username" mapstructure:"username" json:"username"`
 	Password                 string     `yaml:"password" mapstructure:"password" json:"-"`
 	MaxConnections           int        `yaml:"max_connections" mapstructure:"max_connections" json:"max_connections"`
+	MinConnectionsAlive      int        `yaml:"min_connections_alive" mapstructure:"min_connections_alive" json:"min_connections_alive,omitempty"`
 	InflightRequests         int        `yaml:"inflight_requests" mapstructure:"inflight_requests" json:"inflight_requests"`
+	StatInflightRequests     int        `yaml:"stat_inflight_requests" mapstructure:"stat_inflight_requests" json:"stat_inflight_requests"`
 	TLS                      bool       `yaml:"tls" mapstructure:"tls" json:"tls"`
 	InsecureTLS              bool       `yaml:"insecure_tls" mapstructure:"insecure_tls" json:"insecure_tls"`
 	ProxyURL                 string     `yaml:"proxy_url" mapstructure:"proxy_url" json:"proxy_url,omitempty"`
 	Enabled                  *bool      `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
 	IsBackupProvider         *bool      `yaml:"is_backup_provider" mapstructure:"is_backup_provider" json:"is_backup_provider,omitempty"`
+	StorageGroup             string     `yaml:"storage_group" mapstructure:"storage_group" json:"storage_group,omitempty"`
 	SkipPing                 bool       `yaml:"skip_ping" mapstructure:"skip_ping" json:"skip_ping,omitempty"`
 	KeepaliveIntervalSeconds int        `yaml:"keepalive_interval_seconds" mapstructure:"keepalive_interval_seconds" json:"keepalive_interval_seconds,omitempty"`
 	KeepaliveCommand         string     `yaml:"keepalive_command" mapstructure:"keepalive_command" json:"keepalive_command,omitempty"`
@@ -400,6 +556,7 @@ type ProviderConfig struct {
 	LastRTTMs                int64      `yaml:"last_rtt_ms" mapstructure:"last_rtt_ms" json:"last_rtt_ms,omitempty"`
 	LastSpeedTestMbps        float64    `yaml:"last_speed_test_mbps" mapstructure:"last_speed_test_mbps" json:"last_speed_test_mbps,omitempty"`
 	LastSpeedTestTime        *time.Time `yaml:"last_speed_test_time" mapstructure:"last_speed_test_time" json:"last_speed_test_time,omitempty"`
+	AccountExpirationDate    string     `yaml:"account_expiration_date" mapstructure:"account_expiration_date" json:"account_expiration_date,omitempty"`
 }
 
 // SABnzbdConfig represents SABnzbd-compatible API configuration
@@ -655,6 +812,14 @@ func (c *Config) Validate() error {
 		c.Streaming.MaxPrefetch = 60 // Default to 60 segments prefetched ahead if not set
 	}
 
+	// Segment cache expiry: nil (unset) defaults to 24 hours; an explicit 0 is
+	// preserved and means "cache forever" (bounded only by the size cap). A
+	// pointer is used so unset and explicit-0 can be distinguished.
+	if c.SegmentCache.ExpiryHours == nil {
+		defaultExpiryHours := 24
+		c.SegmentCache.ExpiryHours = &defaultExpiryHours
+	}
+
 	if c.Import.MaxProcessorWorkers <= 0 {
 		return fmt.Errorf("import max_processor_workers must be greater than 0")
 	}
@@ -665,10 +830,6 @@ func (c *Config) Validate() error {
 
 	if c.Import.QueueProcessingIntervalSeconds > 300 {
 		return fmt.Errorf("import queue_processing_interval_seconds must not exceed 300 seconds")
-	}
-
-	if c.Import.MaxImportConnections <= 0 {
-		return fmt.Errorf("import max_import_connections must be greater than 0")
 	}
 
 	if c.Import.MaxDownloadPrefetch <= 0 {
@@ -710,6 +871,10 @@ func (c *Config) Validate() error {
 		if c.Import.WatchIntervalSeconds != nil && *c.Import.WatchIntervalSeconds <= 0 {
 			return fmt.Errorf("import watch_interval_seconds must be greater than 0")
 		}
+	}
+
+	if c.Import.VerifyContentTimeoutSeconds != nil && *c.Import.VerifyContentTimeoutSeconds <= 0 {
+		return fmt.Errorf("import verify_content_timeout_seconds must be greater than 0")
 	}
 
 	// Validate log level (both old and new config)
@@ -783,6 +948,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Health.SegmentSamplePercentage < 1 || c.Health.SegmentSamplePercentage > 100 {
 		return fmt.Errorf("health segment_sample_percentage must be between 1 and 100")
+	}
+	if c.Health.VerifyContentTimeoutSeconds != nil && *c.Health.VerifyContentTimeoutSeconds <= 0 {
+		return fmt.Errorf("health verify_content_timeout_seconds must be greater than 0")
 	}
 
 	// Validate health configuration - requires library_dir when enabled and using a strategy other than NONE
@@ -868,16 +1036,21 @@ func (c *Config) Validate() error {
 			}
 		}
 
-		// Validate categories if provided
+		// Validate categories if provided. Names are compared trimmed and
+		// case-insensitively so " Movies" cannot shadow "movies", but the stored
+		// values are left untouched — Validate must not mutate the config it is
+		// handed.
 		categoryNames := make(map[string]bool)
 		for i, category := range c.SABnzbd.Categories {
-			if category.Name == "" {
+			name := strings.TrimSpace(category.Name)
+			if name == "" {
 				return fmt.Errorf("sabnzbd category %d: name cannot be empty", i)
 			}
-			if categoryNames[category.Name] {
+			nameKey := strings.ToLower(name)
+			if categoryNames[nameKey] {
 				return fmt.Errorf("sabnzbd category %d: duplicate category name '%s'", i, category.Name)
 			}
-			categoryNames[category.Name] = true
+			categoryNames[nameKey] = true
 		}
 
 		// Validate fallback configuration if host is provided
@@ -890,6 +1063,24 @@ func (c *Config) Validate() error {
 			if c.SABnzbd.FallbackAPIKey == "" {
 				slog.Warn("SABnzbd fallback_host is set but fallback_api_key is empty")
 			}
+		}
+	}
+
+	for pattern := range c.Stremio.Prowlarr.CustomScores {
+		if _, err := regexp.Compile("(?i)" + pattern); err != nil {
+			return fmt.Errorf("stremio prowlarr custom_scores pattern %q is invalid: %w", pattern, err)
+		}
+	}
+	for i, format := range c.Stremio.Scoring.CustomFormats {
+		if format.Enabled && format.PatternType != "token" && strings.TrimSpace(format.Pattern) != "" {
+			if _, err := regexp.Compile(format.Pattern); err != nil {
+				return fmt.Errorf("stremio scoring custom_formats[%d] pattern is invalid: %w", i, err)
+			}
+		}
+	}
+	if strings.TrimSpace(c.Stremio.Scoring.ExcludeRegex) != "" {
+		if _, err := regexp.Compile(c.Stremio.Scoring.ExcludeRegex); err != nil {
+			return fmt.Errorf("stremio scoring exclude_regex is invalid: %w", err)
 		}
 	}
 
@@ -920,8 +1111,14 @@ func (c *Config) Validate() error {
 		if provider.MaxConnections <= 0 {
 			return fmt.Errorf("provider %d: max_connections must be greater than 0", i)
 		}
+		if provider.MinConnectionsAlive < 0 || provider.MinConnectionsAlive > provider.MaxConnections {
+			return fmt.Errorf("provider %d: min_connections_alive must be between 0 and max_connections", i)
+		}
 		if provider.InflightRequests <= 0 {
 			c.Providers[i].InflightRequests = 10
+		}
+		if provider.StatInflightRequests <= 0 {
+			c.Providers[i].StatInflightRequests = 100
 		}
 	}
 
@@ -1033,13 +1230,21 @@ func (p *ProviderConfig) ToNNTPProvider() nntppool.Provider {
 		inflight = 10
 	}
 
+	statInflight := p.StatInflightRequests
+	if statInflight <= 0 {
+		statInflight = 100
+	}
+
 	return nntppool.Provider{
 		Host:              host,
 		TLSConfig:         tlsCfg,
 		Auth:              nntppool.Auth{Username: p.Username, Password: p.Password},
 		Connections:       p.MaxConnections,
+		MinConnections:    p.MinConnectionsAlive,
 		Backup:            isBackup,
+		StorageGroup:      p.StorageGroup,
 		Inflight:          inflight,
+		StatInflight:      statInflight,
 		IdleTimeout:       60 * time.Second,
 		SkipPing:          p.SkipPing,
 		KeepaliveInterval: time.Duration(p.KeepaliveIntervalSeconds) * time.Second,
@@ -1116,7 +1321,9 @@ func providersFieldsEqual(a, b ProviderConfig) bool {
 		a.SkipPing == b.SkipPing &&
 		a.Password == b.Password &&
 		a.MaxConnections == b.MaxConnections &&
+		a.MinConnectionsAlive == b.MinConnectionsAlive &&
 		a.InflightRequests == b.InflightRequests &&
+		a.StatInflightRequests == b.StatInflightRequests &&
 		a.TLS == b.TLS &&
 		a.InsecureTLS == b.InsecureTLS &&
 		a.ProxyURL == b.ProxyURL &&
@@ -1125,6 +1332,7 @@ func providersFieldsEqual(a, b ProviderConfig) bool {
 		a.UserAgent == b.UserAgent &&
 		a.QuotaBytes == b.QuotaBytes &&
 		a.QuotaPeriodHours == b.QuotaPeriodHours &&
+		a.StorageGroup == b.StorageGroup &&
 		boolPtrEqual(a.Enabled, b.Enabled) &&
 		boolPtrEqual(a.IsBackupProvider, b.IsBackupProvider)
 }
@@ -1189,6 +1397,7 @@ func (c *Config) ProvidersEqual(other *Config) bool {
 			oldProvider.TLS != newProvider.TLS ||
 			oldProvider.InsecureTLS != newProvider.InsecureTLS ||
 			oldProvider.ProxyURL != newProvider.ProxyURL ||
+			oldProvider.StorageGroup != newProvider.StorageGroup ||
 			*oldProvider.Enabled != *newProvider.Enabled ||
 			*oldProvider.IsBackupProvider != *newProvider.IsBackupProvider {
 			return false // Provider modified
@@ -1332,19 +1541,21 @@ func (m *Manager) ReloadConfig() error {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	// Set the config file for viper
-	viper.SetConfigFile(m.configFile)
-
-	// Read the configuration file
-	if err := viper.ReadInConfig(); err != nil {
+	// Read configuration file directly with yaml.Unmarshal to preserve map keys with dots (e.g. regex patterns in custom_scores)
+	config := DefaultConfig()
+	data, err := os.ReadFile(m.configFile)
+	if err != nil {
 		return fmt.Errorf("error reading config file %s: %w", m.configFile, err)
 	}
 
-	// Create default config and unmarshal into it
-	config := DefaultConfig()
-	if err := viper.Unmarshal(config); err != nil {
-		return fmt.Errorf("error unmarshaling config: %w", err)
+	if err := yaml.Unmarshal(data, config); err != nil {
+		return fmt.Errorf("error unmarshaling config %s: %w", m.configFile, err)
 	}
+
+	// Keep viper in sync for any components that query viper
+	viper.SetConfigFile(m.configFile)
+	_ = viper.ReadInConfig()
+	warnUnknownConfigKeys()
 
 	// Ensure *bool pointers are not nil after unmarshal (viper may leave them nil if not set in YAML)
 	if config.Fuse.Enabled == nil {
@@ -1436,17 +1647,17 @@ func isRunningInDocker() bool {
 // DefaultConfig returns a config with default values
 // If configDir is provided, it will be used for database and log file paths
 func DefaultConfig(configDir ...string) *Config {
-	healthEnabled := false            // Health system disabled by default
-	cleanupOrphanedMetadata := false  // Cleanup orphaned metadata disabled by default
-	resolveRepairOnImport := false    // Disable smart replacement detection by default
-	deleteSourceNzbOnRemoval := false // Delete source NZB on removal disabled by default
+	healthEnabled := false           // Health system disabled by default
+	cleanupOrphanedMetadata := false // Cleanup orphaned metadata disabled by default
+	resolveRepairOnImport := false   // Disable smart replacement detection by default
 	vfsEnabled := false
 	mountEnabled := false // Disabled by default
 	sabnzbdEnabled := false
 	scrapperEnabled := false
 	fuseEnabled := false
-	loginRequired := true           // Require login by default
-	stremioEnabled := false         // Stremio endpoint disabled by default
+	loginRequired := true   // Require login by default
+	stremioEnabled := false // Stremio endpoint disabled by default
+	stremioFastFailHeaderOnly := true
 	prowlarrEnabled := false        // Prowlarr integration disabled by default
 	watchIntervalSeconds := 10      // Default watch interval
 	failedItemRetentionHours := 24  // Default: auto-remove failed items after 24 hours
@@ -1456,6 +1667,10 @@ func DefaultConfig(configDir ...string) *Config {
 	failureMaskingEnabled := false
 	repairEnabled := true
 	repairExponentialBackoff := true
+	importVerifyContent := false // Content verification disabled by default (destructive if misfired)
+	importVerifyContentTimeoutSeconds := defaultVerifyContentTimeoutSeconds
+	healthVerifyContent := false // Content verification disabled by default (destructive if misfired)
+	healthVerifyContentTimeoutSeconds := defaultVerifyContentTimeoutSeconds
 
 	// Set paths based on whether we're running in Docker or have a specific config directory
 	var dbPath, metadataPath, logPath, rclonePath, cachePath, backupPath string
@@ -1494,8 +1709,11 @@ func DefaultConfig(configDir ...string) *Config {
 			Prefix: "/api",
 		},
 		Stremio: StremioConfig{
-			Enabled:     &stremioEnabled,
-			NzbTTLHours: 24,
+			Enabled:               &stremioEnabled,
+			NzbTTLHours:           24,
+			FailedReleaseTTLHours: 24,
+			MaxFallbackReleases:   2,
+			FastFailHeaderOnly:    &stremioFastFailHeaderOnly,
 			Prowlarr: ProwlarrConfig{
 				Enabled:    &prowlarrEnabled,
 				Host:       "http://localhost:9696",
@@ -1510,17 +1728,20 @@ func DefaultConfig(configDir ...string) *Config {
 			Path: dbPath,
 		},
 		Metadata: MetadataConfig{
-			RootPath:                 metadataPath,
-			DeleteSourceNzbOnRemoval: &deleteSourceNzbOnRemoval,
+			RootPath: metadataPath,
 			Backup: MetadataBackupConfig{
 				Enabled:     &metadataBackupEnabled,
 				Schedule:    "0 3 * * *", // daily at 3 AM UTC
 				KeepBackups: 10,
 				Path:        backupPath,
 			},
+			Migration: MetadataMigrationConfig{
+				DefaultGroup: "alt.binaries.misc",
+			},
 		},
 		Streaming: StreamingConfig{
-			MaxPrefetch: 60, // Default: 60 segments prefetched ahead
+			MaxPrefetch:        60,  // Default: 60 segments prefetched ahead
+			ReadTimeoutSeconds: 120, // Default: bound a single read at 2 minutes
 			FailureMasking: FailureMaskingConfig{
 				Enabled:   &failureMaskingEnabled,
 				Threshold: 3,
@@ -1579,17 +1800,18 @@ func DefaultConfig(configDir ...string) *Config {
 				".xvid", ".rm", ".rmvb", ".asf", ".asx", ".wtv", ".mk3d", ".dvr-ms",
 				".mp3", ".flac", ".m4a", ".epub", ".pdf", ".cbz",
 			},
-			MaxImportConnections:     5,   // Default: 5 concurrent NNTP connections for validation and archive processing
-			MaxDownloadPrefetch:      10,  // Default: 10 segments prefetched ahead for archive analysis
-			SegmentSamplePercentage:  1,   // Default: 1% segment sampling
-			ReadTimeoutSeconds:       300, // Default: 5 minutes read timeout
-			IsoAnalyzeTimeoutSeconds: &isoAnalyzeTimeoutSeconds,
-			ImportStrategy:           ImportStrategyNone, // Default: no import strategy (direct import)
-			ImportDir:                nil,                // No default import directory
-			WatchDir:                 nil,
-			WatchIntervalSeconds:     &watchIntervalSeconds,
-			FailedItemRetentionHours: &failedItemRetentionHours,
-			HistoryRetentionDays:     &historyRetentionDays,
+			MaxDownloadPrefetch:         10,  // Default: 10 segments prefetched ahead for archive analysis
+			SegmentSamplePercentage:     1,   // Default: 1% segment sampling
+			ReadTimeoutSeconds:          300, // Default: 5 minutes read timeout
+			IsoAnalyzeTimeoutSeconds:    &isoAnalyzeTimeoutSeconds,
+			ImportStrategy:              ImportStrategyNone, // Default: no import strategy (direct import)
+			ImportDir:                   nil,                // No default import directory
+			WatchDir:                    nil,
+			WatchIntervalSeconds:        &watchIntervalSeconds,
+			FailedItemRetentionHours:    &failedItemRetentionHours,
+			HistoryRetentionDays:        &historyRetentionDays,
+			VerifyContent:               &importVerifyContent,               // Disabled by default
+			VerifyContentTimeoutSeconds: &importVerifyContentTimeoutSeconds, // Default: 15s per-file content probe timeout
 		},
 		Log: LogConfig{
 			File:       logPath, // Default log file path
@@ -1603,12 +1825,15 @@ func DefaultConfig(configDir ...string) *Config {
 			Enabled:                             &healthEnabled,           // Disabled by default
 			CleanupOrphanedMetadata:             &cleanupOrphanedMetadata, // Disabled by default
 			CheckIntervalSeconds:                5,
-			MaxConnectionsForHealthChecks:       5,
-			MaxConcurrentJobs:                   1,                      // Default: 1 concurrent job
-			SegmentSamplePercentage:             5,                      // Default: 5% segment sampling
-			LibrarySyncIntervalMinutes:          360,                    // Default: sync every 6 hours
-			ResolveRepairOnImport:               &resolveRepairOnImport, // Enabled by default
-			AcceptableMissingSegmentsPercentage: 0,                      // Default: no missing segments allowed
+			MaxConnectionsForHealthChecks:       100,
+			CheckBatchSize:                      50,
+			MaxConcurrentJobs:                   1,                                  // Default: 1 concurrent job
+			SegmentSamplePercentage:             5,                                  // Default: 5% segment sampling
+			LibrarySyncIntervalMinutes:          360,                                // Default: sync every 6 hours
+			ResolveRepairOnImport:               &resolveRepairOnImport,             // Enabled by default
+			AcceptableMissingSegmentsPercentage: 2,                                  // Default: tolerate up to 2% missing segments
+			VerifyContent:                       &healthVerifyContent,               // Disabled by default
+			VerifyContentTimeoutSeconds:         &healthVerifyContentTimeoutSeconds, // Default: 15s per-file content probe timeout
 			Repair: RepairConfig{
 				Enabled:            &repairEnabled,
 				IntervalMinutes:    60,
@@ -1665,7 +1890,7 @@ func DefaultConfig(configDir ...string) *Config {
 			ReadarrInstances:               []ArrsInstanceConfig{},
 			WhisparrInstances:              []ArrsInstanceConfig{},
 			SportarrInstances:              []ArrsInstanceConfig{},
-			QueueCleanupGracePeriodMinutes: 5,     // Default to 5 minutes stuck before acting
+			QueueCleanupGracePeriodMinutes: 5, // Default to 5 minutes stuck before acting
 			QueueCleanupMaxFailures:        0, // Failure circuit breaker disabled by default
 			// Rule table modeled on wArrden's queue cleanup. Action decides what to do:
 			// blocklist_search (bad release → block + re-search), blocklist (block but
@@ -1758,6 +1983,23 @@ func SaveToFile(config *Config, filename string) error {
 }
 
 // LoadConfig loads configuration from file and merges with defaults
+// warnUnknownConfigKeys logs config keys that do not map to any field on Config.
+// These are almost always settings removed or renamed in a past release: viper
+// ignores them silently, so a stale key looks live while having no effect.
+//
+// This warns rather than fails — rejecting unknown keys would break upgrades for
+// anyone whose config still carries a retired setting.
+func warnUnknownConfigKeys() {
+	probe := DefaultConfig()
+	err := viper.Unmarshal(probe, func(dc *mapstructure.DecoderConfig) {
+		dc.ErrorUnused = true
+	})
+	if err != nil && !strings.Contains(err.Error(), "custom_scores") {
+		slog.Warn("Configuration contains keys this version does not use; they have no effect and can be removed",
+			"detail", err)
+	}
+}
+
 func LoadConfig(configFile string) (*Config, error) {
 	config := DefaultConfig()
 
@@ -1800,8 +2042,14 @@ func LoadConfig(configFile string) (*Config, error) {
 		}
 	}
 
-	// Unmarshal the config
-	if err := viper.Unmarshal(config); err != nil {
+	warnUnknownConfigKeys()
+
+	// Read and unmarshal YAML directly into config to preserve arbitrary map keys containing dots (e.g. custom_scores regexes)
+	if data, err := os.ReadFile(targetConfigFile); err == nil {
+		if err := yaml.Unmarshal(data, config); err != nil {
+			return nil, fmt.Errorf("error unmarshaling yaml config %s: %w", targetConfigFile, err)
+		}
+	} else if err := viper.Unmarshal(config); err != nil {
 		return nil, fmt.Errorf("error unmarshaling config: %w", err)
 	}
 

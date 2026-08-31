@@ -34,10 +34,12 @@ func (m *countingPoolManager) GetPool() (pool.NntpClient, error) {
 	m.getPoolCalls.Add(1)
 	return nil, nil
 }
-func (m *countingPoolManager) HasPool() bool                              { m.hasPoolCalls.Add(1); return false }
-func (m *countingPoolManager) SetProviders(_ []nntppool.Provider) error   { return nil }
-func (m *countingPoolManager) ClearPool() error                           { return nil }
-func (m *countingPoolManager) GetMetrics() (pool.MetricsSnapshot, error)  { return pool.MetricsSnapshot{}, nil }
+func (m *countingPoolManager) HasPool() bool                            { m.hasPoolCalls.Add(1); return false }
+func (m *countingPoolManager) SetProviders(_ []nntppool.Provider) error { return nil }
+func (m *countingPoolManager) ClearPool() error                         { return nil }
+func (m *countingPoolManager) GetMetrics() (pool.MetricsSnapshot, error) {
+	return pool.MetricsSnapshot{}, nil
+}
 func (m *countingPoolManager) ResetMetrics(_ context.Context, _, _ bool) error {
 	return nil
 }
@@ -54,7 +56,12 @@ func (m *countingPoolManager) SetProviderIDs(_ map[string]string) {}
 func (m *countingPoolManager) AcquireImportSlot(_ context.Context) (func(), error) {
 	return func() {}, nil
 }
-func (m *countingPoolManager) SetAdmissionCaps(_ int, _ int)               {}
+func (m *countingPoolManager) SetAdmissionCap(_ int) {}
+func (m *countingPoolManager) AcquireImportConnection(_ context.Context) (func(), error) {
+	return func() {}, nil
+}
+func (m *countingPoolManager) SetImportConnCapacity(_ int)                 {}
+func (m *countingPoolManager) ImportConnCapacity() int                     { return 0 }
 func (m *countingPoolManager) SetStreamSource(_ pool.StreamActivitySource) {}
 func (m *countingPoolManager) NotifyStreamChange()                         {}
 

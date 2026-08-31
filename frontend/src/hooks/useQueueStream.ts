@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-export interface ProgressEntry {
+interface ProgressEntry {
 	percentage: number;
 	stage?: string;
 }

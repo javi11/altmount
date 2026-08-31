@@ -46,7 +46,7 @@ func TestBackfillReleaseDates_DoesNotRearmTerminal(t *testing.T) {
 
 	_, err := repo.db.ExecContext(ctx, `
 		INSERT INTO file_health (file_path, status, scheduled_check_at, release_date)
-		VALUES ('dead.mkv', 'corrupted', NULL, NULL), ('alive.mkv', 'pending', NULL, NULL)
+		VALUES ('dead.mkv', 'corrupted', NULL, NULL), ('alive.mkv', 'healthy', NULL, NULL)
 	`)
 	require.NoError(t, err)
 
@@ -75,7 +75,7 @@ func TestBackfillReleaseDates_DoesNotRearmTerminal(t *testing.T) {
 	assert.False(t, scheduledCheckAt(t, repo, "dead.mkv").Valid,
 		"backfill must NOT re-arm a corrupted record's terminal NULL schedule")
 	assert.True(t, scheduledCheckAt(t, repo, "alive.mkv").Valid,
-		"pending record must be (re)scheduled by backfill")
+		"healthy record must be (re)scheduled by backfill")
 }
 
 // scheduledCheckAt reads the raw scheduled_check_at column (not projected by GetFileHealth).
@@ -172,10 +172,11 @@ func TestRelinkFileByFilename_CollisionResolvedByExactPath(t *testing.T) {
 	repo := setupTestDB(t)
 	ctx := context.Background()
 
+	past := time.Now().UTC().Add(-5 * time.Minute).Format("2006-01-02 15:04:05")
 	_, err := repo.db.ExecContext(ctx, `
-		INSERT INTO file_health (file_path, status, repair_retry_count, max_repair_retries)
-		VALUES ('tv/ShowA/01.mkv', 'repair_triggered', 1, 3), ('tv/ShowB/01.mkv', 'repair_triggered', 2, 3)
-	`)
+		INSERT INTO file_health (file_path, status, repair_retry_count, max_repair_retries, updated_at)
+		VALUES ('tv/ShowA/01.mkv', 'repair_triggered', 1, 3, ?), ('tv/ShowB/01.mkv', 'repair_triggered', 2, 3, ?)
+	`, past, past)
 	require.NoError(t, err)
 
 	// Incoming Download whose path matches ShowA exactly: relink only that one.

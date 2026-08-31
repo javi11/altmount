@@ -3,14 +3,21 @@ package importer
 import (
 	"bytes"
 	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/javi11/altmount/internal/importer/multifile"
+	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	"github.com/javi11/altmount/internal/testsupport/fakepool"
 	"github.com/javi11/altmount/internal/testsupport/nzbbuild"
 	"github.com/javi11/altmount/internal/testsupport/par2gen"
 	"github.com/javi11/nntppool/v4"
-	"github.com/javi11/altmount/internal/testsupport/fakepool"
+	"google.golang.org/protobuf/proto"
 )
 
 // partSize used to split fixtures into multiple NZB segments.
@@ -48,6 +55,57 @@ func TestImportBattery_CleanSingleFile(t *testing.T) {
 	}
 	if len(meta.SegmentData) != 3 {
 		t.Errorf("SegmentData len = %d, want 3", len(meta.SegmentData))
+	}
+}
+
+// TestImportBattery_V3FormatOnDisk verifies that a completed import writes a v3 .meta
+// file (starts with the 5-byte magic) and a companion .nzbz store file next to the NZB.
+func TestImportBattery_V3FormatOnDisk(t *testing.T) {
+	env := newBatteryEnv(t)
+
+	content := bytes.Repeat([]byte("V"), 30_000)
+	segs := env.registerContent("v3-disk", content, 10_000, 1.0, nil)
+	nzb := nzbbuild.Build(nzbbuild.File{Subject: "V3Test.mkv", Segments: segs})
+
+	_, written, err := env.runImport(nzb, "V3Test.mkv")
+	if err != nil {
+		t.Fatalf("import failed: %v", err)
+	}
+	paths := filePaths(written)
+	if len(paths) != 1 {
+		t.Fatalf("expected 1 written path, got %v", paths)
+	}
+
+	// The .meta file must start with the v3 magic: 0x00 'A' 'M' '3' 0x01
+	rawMeta, err := os.ReadFile(env.rawMetaPath(paths[0]))
+	if err != nil {
+		t.Fatalf("read .meta: %v", err)
+	}
+	v3Magic := []byte{0x00, 'A', 'M', '3', 0x01}
+	if len(rawMeta) < 5 || !bytes.Equal(rawMeta[:5], v3Magic) {
+		t.Errorf("meta file does not start with v3 magic (got %x); v3 conversion did not run", rawMeta[:min(5, len(rawMeta))])
+	}
+
+	// The 3 uniform 10KB segments must be run-encoded (one SegmentRun, no SegmentRefs)
+	// so the on-disk meta stays compact regardless of segment count.
+	var onDisk metapb.FileMetadata
+	if err := proto.Unmarshal(rawMeta[5:], &onDisk); err != nil {
+		t.Fatalf("unmarshal v3 meta: %v", err)
+	}
+	if len(onDisk.SegmentRefs) != 0 {
+		t.Errorf("expected no explicit SegmentRefs, got %d", len(onDisk.SegmentRefs))
+	}
+	if len(onDisk.SegmentRuns) != 1 {
+		t.Fatalf("expected 1 SegmentRun, got %d", len(onDisk.SegmentRuns))
+	}
+	if got := onDisk.SegmentRuns[0].Count; got != 3 {
+		t.Errorf("SegmentRun.Count = %d, want 3", got)
+	}
+
+	// Reading back must expand the run into the original 3 segments.
+	resolved := env.readMeta(paths[0])
+	if len(resolved.SegmentData) != 3 {
+		t.Errorf("resolved SegmentData len = %d, want 3", len(resolved.SegmentData))
 	}
 }
 
@@ -331,6 +389,85 @@ func TestImportBattery_RarMultiPart(t *testing.T) {
 	}
 
 	assertInnerFile(t, env, "/archive", entries)
+
+	// Archive extracted files must be written directly in v3 format (this is the
+	// path that previously stayed v1 because writtenPaths held only the DIR marker).
+	assertV3MetaDir(t, env, "/archive")
+}
+
+// TestImportBattery_RarWidthMismatchVolumeNaming imports a multi-volume RAR whose
+// volumes use non-fixed-width numbering (archive.part01.rar … part09.rar, then
+// part010.rar …). rardecode follows the set by computing fixed-width names
+// (…part10.rar) that don't match the NZB's …part010.rar, so BOTH volume following
+// (UsenetFileSystem) and the part→segment mapping (convertAggregatedFilesToRarContent)
+// must resolve by volume number. Without that, only the first 9 volumes map and the
+// import fails with a segment-integrity error — so a passing import here proves the
+// whole pipeline handles the width mismatch end to end.
+func TestImportBattery_RarWidthMismatchVolumeNaming(t *testing.T) {
+	entries := loadManifest(t, "rar_widthmismatch")
+	env := newBatteryEnv(t)
+
+	matches, err := filepath.Glob(filepath.Join("testdata", "rar_widthmismatch", "archive.part*.rar"))
+	if err != nil {
+		t.Fatalf("glob fixtures: %v", err)
+	}
+	if len(matches) < 10 {
+		t.Fatalf("fixture must have >=10 volumes to cross the part09→part010 boundary, got %d", len(matches))
+	}
+
+	// Sort by parsed volume number so the NZB lists part01 first and IDs are stable.
+	volNum := func(p string) int {
+		b := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(p), "archive.part"), ".rar")
+		n, _ := strconv.Atoi(b)
+		return n
+	}
+	sort.Slice(matches, func(i, j int) bool { return volNum(matches[i]) < volNum(matches[j]) })
+
+	var files []nzbbuild.File
+	for _, m := range matches {
+		name := filepath.Base(m)
+		data := loadFixture(t, filepath.Join("rar_widthmismatch", name))
+		segs := env.registerContent(fmt.Sprintf("rar-wm-%03d", volNum(m)), data, archivePartSize, 1.0, nil)
+		files = append(files, nzbbuild.File{Subject: name, Segments: segs})
+	}
+
+	nzb := nzbbuild.Build(files...)
+	result, written, err := env.runImport(nzb, "archive")
+	if err != nil {
+		t.Fatalf("import failed (width-mismatch volume mapping regression): %v", err)
+	}
+	if result != "/archive" {
+		t.Errorf("result = %q, want /archive", result)
+	}
+	hasDirMarker := false
+	for _, p := range written {
+		if p == "DIR:/archive" {
+			hasDirMarker = true
+		}
+	}
+	if !hasDirMarker {
+		t.Errorf("writtenPaths has no DIR:/archive marker; paths: %v", written)
+	}
+
+	assertInnerFile(t, env, "/archive", entries)
+
+	// Explicit full-coverage assertion: every volume's segments must be attached, so
+	// the summed usable segment bytes must cover the whole inner file. Pre-fix this is
+	// only ~9 volumes' worth.
+	want := int64(entries[0].Size)
+	var covered int64
+	for _, name := range env.listDir("/archive") {
+		meta := env.readMeta("/archive/" + name)
+		if meta.FileSize != want {
+			continue
+		}
+		for _, s := range meta.SegmentData {
+			covered += s.EndOffset - s.StartOffset + 1
+		}
+	}
+	if covered < want {
+		t.Errorf("segment coverage %d < file size %d — not all volumes mapped", covered, want)
+	}
 }
 
 // TestImportBattery_SevenZipSingle verifies import of a single-volume 7z archive.
@@ -501,6 +638,37 @@ func TestImportBattery_EmptyNzb(t *testing.T) {
 // file whose size matches the first manifest entry. The archive processor may
 // rename inner files (e.g. obfuscation-based normalization), so only the size
 // is asserted — not the exact filename.
+// assertV3MetaDir walks a virtual directory and asserts every .meta on disk is in
+// v3 store-backed format (starts with the 5-byte magic). Recurses into subdirs so
+// archive releases that place files under an inner folder are fully covered.
+func assertV3MetaDir(t *testing.T, env *batteryEnv, dir string) {
+	t.Helper()
+	v3Magic := []byte{0x00, 'A', 'M', '3', 0x01}
+	root := filepath.Join(env.svc.GetMetadataDirectoryPath(dir))
+	count := 0
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".meta") {
+			return nil
+		}
+		raw, readErr := os.ReadFile(path)
+		if readErr != nil {
+			t.Errorf("read %q: %v", path, readErr)
+			return nil
+		}
+		count++
+		if len(raw) < 5 || !bytes.Equal(raw[:5], v3Magic) {
+			t.Errorf("meta %q is not v3 (got %x); direct v3 write did not run", path, raw[:min(5, len(raw))])
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %q: %v", root, err)
+	}
+	if count == 0 {
+		t.Fatalf("no .meta files found under %q", dir)
+	}
+}
+
 func assertInnerFile(t *testing.T, env *batteryEnv, dir string, entries []fixtureEntry) {
 	t.Helper()
 	inner := env.listDir(dir)
@@ -522,4 +690,46 @@ func assertInnerFile(t *testing.T, env *batteryEnv, dir string, entries []fixtur
 		sizes = append(sizes, meta.FileSize)
 	}
 	t.Errorf("no inner file with size %d in %q; found files %v with sizes %v", want, dir, inner, sizes)
+}
+
+// TestImportBattery_NzbzStoredInConfigDir verifies that the .nzbz companion store is
+// written to configDir/.nzbs/{category}/ and NOT co-located with the .nzb temp file.
+func TestImportBattery_NzbzStoredInConfigDir(t *testing.T) {
+	env := newBatteryEnv(t)
+
+	content := bytes.Repeat([]byte("Z"), 30_000)
+	segs := env.registerContent("nzbz-location", content, 10_000, 1.0, nil)
+	nzb := nzbbuild.Build(nzbbuild.File{Subject: "ConfigDirStore.mkv", Segments: segs})
+
+	const queueID = 42
+	const category = "Movies"
+
+	_, _, err := env.runImportWithCategory(nzb, "ConfigDirStore.mkv", queueID, category)
+	if err != nil {
+		t.Fatalf("import failed: %v", err)
+	}
+
+	// The .nzbz must live under configDir/.nzbs/Movies/.
+	// The NZB is written as "ConfigDirStore.mkv.nzb" so TrimNzbExtension yields "ConfigDirStore.mkv".
+	expectedDir := filepath.Join(env.configDir, ".nzbs", category)
+	expectedName := fmt.Sprintf("%d-ConfigDirStore.mkv.nzbz", queueID)
+	expectedPath := filepath.Join(expectedDir, expectedName)
+
+	if _, statErr := os.Stat(expectedPath); os.IsNotExist(statErr) {
+		// List what is actually in expectedDir for a helpful error.
+		entries, _ := os.ReadDir(expectedDir)
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf(".nzbz not found at %q; files in dir: %v", expectedPath, names)
+	}
+
+	// Confirm the .nzbz is NOT in the OS temp dir (old co-location behaviour).
+	nzbzInTemp, _ := filepath.Glob(filepath.Join(os.TempDir(), "*", "*.nzbz"))
+	for _, p := range nzbzInTemp {
+		if filepath.Base(p) == expectedName {
+			t.Errorf(".nzbz unexpectedly found in temp dir: %s", p)
+		}
+	}
 }

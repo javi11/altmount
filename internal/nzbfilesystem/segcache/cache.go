@@ -42,9 +42,12 @@ type SegmentCache struct {
 	logger    *slog.Logger
 	totalSize int64
 	dirty     atomic.Bool
+	loading   atomic.Bool
 }
 
-// NewSegmentCache creates a new segment cache, loading any existing catalog.
+// NewSegmentCache creates a new segment cache. It does NOT load any existing
+// catalog; call LoadCatalog to hydrate from disk. Manager.Start runs that load
+// in a background goroutine so the per-segment stat loop does not block boot.
 func NewSegmentCache(cfg Config, logger *slog.Logger) (*SegmentCache, error) {
 	if err := os.MkdirAll(cfg.CachePath, 0o755); err != nil {
 		return nil, fmt.Errorf("segcache: create cache dir %s: %w", cfg.CachePath, err)
@@ -55,8 +58,6 @@ func NewSegmentCache(cfg Config, logger *slog.Logger) (*SegmentCache, error) {
 		config: cfg,
 		logger: logger,
 	}
-	c.loadCatalog()
-
 	return c, nil
 }
 
@@ -96,6 +97,13 @@ func (c *SegmentCache) Get(messageID string) ([]byte, bool) {
 
 // Put stores segment bytes atomically (temp-write + rename).
 func (c *SegmentCache) Put(messageID string, data []byte) error {
+	// Skip caching while the catalog hydrates. The segment is still served from
+	// Usenet, just not persisted this round; it gets cached on the next request
+	// after load. Avoids Put/load lock contention on boot.
+	if c.loading.Load() {
+		return nil
+	}
+
 	h := sha256.Sum256([]byte(messageID))
 	filename := hex.EncodeToString(h[:]) + ".seg"
 	dataPath := filepath.Join(c.config.CachePath, filename)
@@ -245,8 +253,17 @@ func (c *SegmentCache) SaveCatalog() error {
 	return nil
 }
 
-func (c *SegmentCache) loadCatalog() {
+// LoadCatalog hydrates the in-memory catalog from catalog.json on disk, statting
+// each .seg file and dropping entries whose data is missing. Put is gated off
+// (see the loading flag) for the duration, so the load can assign the map
+// wholesale without racing a concurrent writer. Sets the gate on entry and
+// clears it on exit.
+func (c *SegmentCache) LoadCatalog() {
+	c.loading.Store(true)
+	defer c.loading.Store(false)
+
 	catalogPath := filepath.Join(c.config.CachePath, "catalog.json")
+	c.logger.Info("segcache: loading catalog", "path", catalogPath)
 
 	data, err := os.ReadFile(catalogPath)
 	if err != nil {
@@ -270,8 +287,10 @@ func (c *SegmentCache) loadCatalog() {
 		}
 	}
 
+	c.mu.Lock()
 	c.items = valid
 	c.totalSize = totalSize
+	c.mu.Unlock()
 
 	c.logger.Info("segcache: catalog loaded", "items", len(valid), "total_bytes", totalSize)
 }

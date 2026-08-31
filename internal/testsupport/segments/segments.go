@@ -43,16 +43,6 @@ func MessageID(i int) string {
 	return fmt.Sprintf("%s%06d@fake", MessageIDPrefix, i)
 }
 
-// MessageIDs returns the first n message-IDs as a convenience for callers
-// that want to seed fakepool behaviors in bulk.
-func MessageIDs(n int) []string {
-	out := make([]string, n)
-	for i := range out {
-		out[i] = MessageID(i)
-	}
-	return out
-}
-
 // Payload returns a deterministic byte slice for segment i. Bytes 0..31
 // encode the index in ASCII; the remainder follow a stable cheap pattern.
 // Length is always exactly size. A size <= 0 returns nil.

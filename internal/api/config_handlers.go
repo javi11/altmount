@@ -130,6 +130,11 @@ func (s *Server) handleUpdateConfig(c *fiber.Ctx) error {
 		return RespondValidationError(c, "Invalid JSON in request body", err.Error())
 	}
 
+	// API responses intentionally mask provider credentials. Preserve the
+	// stored value when a full-config update sends an empty masked field; a
+	// separate credential-rotation operation can still replace it explicitly.
+	preserveMaskedStremioCredentials(currentConfig, newConfig)
+
 	slog.DebugContext(c.Context(), "Updating configuration")
 
 	// Validate the new configuration with API restrictions
@@ -161,6 +166,25 @@ func (s *Server) handleUpdateConfig(c *fiber.Ctx) error {
 
 	response := ToConfigAPIResponse(newConfig, apiKey)
 	return RespondSuccess(c, response)
+}
+
+func preserveMaskedStremioCredentials(current, updated *config.Config) {
+	if current == nil || updated == nil {
+		return
+	}
+	if updated.Stremio.Prowlarr.APIKey == "" {
+		updated.Stremio.Prowlarr.APIKey = current.Stremio.Prowlarr.APIKey
+	}
+	if updated.Stremio.Indexers.Prowlarr.APIKey == "" {
+		updated.Stremio.Indexers.Prowlarr.APIKey = current.Stremio.Indexers.Prowlarr.APIKey
+	}
+	for i := range updated.Stremio.Indexers.Newsnab {
+		for _, existing := range current.Stremio.Indexers.Newsnab {
+			if existing.ID == updated.Stremio.Indexers.Newsnab[i].ID && updated.Stremio.Indexers.Newsnab[i].APIKey == "" {
+				updated.Stremio.Indexers.Newsnab[i].APIKey = existing.APIKey
+			}
+		}
+	}
 }
 
 // handlePatchConfigSection updates a specific configuration section
@@ -227,6 +251,10 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 		// The frontend sends password: "" when the user hasn't entered a new password.
 		if err == nil && newConfig.WebDAV.Password == "" {
 			newConfig.WebDAV.Password = currentConfig.WebDAV.Password
+		}
+		// Preserve existing Prowlarr and Newsnab credentials when patching the Stremio section.
+		if err == nil && section == "stremio" {
+			preserveMaskedStremioCredentials(currentConfig, newConfig)
 		}
 	default:
 		return RespondValidationError(c, fmt.Sprintf("Unknown configuration section: %s", section), "INVALID_SECTION")
@@ -480,23 +508,28 @@ func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 
 	// Decode create request
 	var createReq struct {
-		Host                    string `json:"host"`
-		Port                    int    `json:"port"`
-		Username                string `json:"username"`
-		Password                string `json:"password"`
-		MaxConnections          int    `json:"max_connections"`
-		InflightRequests        int    `json:"inflight_requests"`
-		TLS                     bool   `json:"tls"`
-		InsecureTLS             bool   `json:"insecure_tls"`
-		ProxyURL                string `json:"proxy_url"`
-		Enabled                 bool   `json:"enabled"`
-		IsBackupProvider        bool   `json:"is_backup_provider"`
-		SkipPing                bool   `json:"skip_ping"`
-		KeepaliveIntervalSeconds int   `json:"keepalive_interval_seconds"`
-		KeepaliveCommand        string `json:"keepalive_command"`
-		UserAgent               string `json:"user_agent"`
-		QuotaBytes              int64  `json:"quota_bytes"`
-		QuotaPeriodHours        int    `json:"quota_period_hours"`
+		Name                     string `json:"name"`
+		Host                     string `json:"host"`
+		Port                     int    `json:"port"`
+		Username                 string `json:"username"`
+		Password                 string `json:"password"`
+		MaxConnections           int    `json:"max_connections"`
+		MinConnectionsAlive      int    `json:"min_connections_alive"`
+		InflightRequests         int    `json:"inflight_requests"`
+		StatInflightRequests     int    `json:"stat_inflight_requests"`
+		TLS                      bool   `json:"tls"`
+		InsecureTLS              bool   `json:"insecure_tls"`
+		ProxyURL                 string `json:"proxy_url"`
+		Enabled                  bool   `json:"enabled"`
+		IsBackupProvider         bool   `json:"is_backup_provider"`
+		StorageGroup             string `json:"storage_group"`
+		SkipPing                 bool   `json:"skip_ping"`
+		KeepaliveIntervalSeconds int    `json:"keepalive_interval_seconds"`
+		KeepaliveCommand         string `json:"keepalive_command"`
+		UserAgent                string `json:"user_agent"`
+		QuotaBytes               int64  `json:"quota_bytes"`
+		QuotaPeriodHours         int    `json:"quota_period_hours"`
+		AccountExpirationDate    string `json:"account_expiration_date"`
 	}
 
 	if err := c.BodyParser(&createReq); err != nil {
@@ -516,6 +549,9 @@ func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 	if createReq.MaxConnections <= 0 {
 		createReq.MaxConnections = 1 // Default
 	}
+	if createReq.MinConnectionsAlive < 0 || createReq.MinConnectionsAlive > createReq.MaxConnections {
+		return RespondValidationError(c, "MinConnectionsAlive must be between 0 and MaxConnections", "INVALID_MIN_CONNECTIONS_ALIVE")
+	}
 
 	// Generate new ID
 	newID := fmt.Sprintf("provider_%d", len(currentConfig.Providers)+1)
@@ -523,23 +559,28 @@ func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 	// Create new provider
 	newProvider := config.ProviderConfig{
 		ID:                       newID,
+		Name:                     createReq.Name,
 		Host:                     createReq.Host,
 		Port:                     createReq.Port,
 		Username:                 createReq.Username,
 		Password:                 createReq.Password,
 		MaxConnections:           createReq.MaxConnections,
+		MinConnectionsAlive:      createReq.MinConnectionsAlive,
 		InflightRequests:         createReq.InflightRequests,
+		StatInflightRequests:     createReq.StatInflightRequests,
 		TLS:                      createReq.TLS,
 		InsecureTLS:              createReq.InsecureTLS,
 		ProxyURL:                 createReq.ProxyURL,
 		Enabled:                  &createReq.Enabled,
 		IsBackupProvider:         &createReq.IsBackupProvider,
+		StorageGroup:             createReq.StorageGroup,
 		SkipPing:                 createReq.SkipPing,
 		KeepaliveIntervalSeconds: createReq.KeepaliveIntervalSeconds,
 		KeepaliveCommand:         createReq.KeepaliveCommand,
 		UserAgent:                createReq.UserAgent,
 		QuotaBytes:               createReq.QuotaBytes,
 		QuotaPeriodHours:         createReq.QuotaPeriodHours,
+		AccountExpirationDate:    createReq.AccountExpirationDate,
 	}
 
 	// Add to config
@@ -565,17 +606,21 @@ func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 	// Return sanitized provider
 	response := ProviderAPIResponse{
 		ID:                       newProvider.ID,
+		Name:                     newProvider.Name,
 		Host:                     newProvider.Host,
 		Port:                     newProvider.Port,
 		Username:                 newProvider.Username,
 		MaxConnections:           newProvider.MaxConnections,
+		MinConnectionsAlive:      newProvider.MinConnectionsAlive,
 		TLS:                      newProvider.TLS,
 		InsecureTLS:              newProvider.InsecureTLS,
 		ProxyURL:                 newProvider.ProxyURL,
 		PasswordSet:              newProvider.Password != "",
 		Enabled:                  newProvider.Enabled != nil && *newProvider.Enabled,
 		IsBackupProvider:         newProvider.IsBackupProvider != nil && *newProvider.IsBackupProvider,
+		StorageGroup:             newProvider.StorageGroup,
 		InflightRequests:         newProvider.InflightRequests,
+		StatInflightRequests:     newProvider.StatInflightRequests,
 		LastRTTMs:                newProvider.LastRTTMs,
 		SkipPing:                 newProvider.SkipPing,
 		KeepaliveIntervalSeconds: newProvider.KeepaliveIntervalSeconds,
@@ -583,6 +628,7 @@ func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 		UserAgent:                newProvider.UserAgent,
 		QuotaBytes:               newProvider.QuotaBytes,
 		QuotaPeriodHours:         newProvider.QuotaPeriodHours,
+		AccountExpirationDate:    newProvider.AccountExpirationDate,
 	}
 
 	return RespondSuccess(c, response)
@@ -634,23 +680,28 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 
 	// Decode update request (partial update)
 	var updateReq struct {
+		Name                     *string `json:"name,omitempty"`
 		Host                     *string `json:"host,omitempty"`
 		Port                     *int    `json:"port,omitempty"`
 		Username                 *string `json:"username,omitempty"`
 		Password                 *string `json:"password,omitempty"`
 		MaxConnections           *int    `json:"max_connections,omitempty"`
+		MinConnectionsAlive      *int    `json:"min_connections_alive,omitempty"`
 		InflightRequests         *int    `json:"inflight_requests,omitempty"`
+		StatInflightRequests     *int    `json:"stat_inflight_requests,omitempty"`
 		TLS                      *bool   `json:"tls,omitempty"`
 		InsecureTLS              *bool   `json:"insecure_tls,omitempty"`
 		ProxyURL                 *string `json:"proxy_url,omitempty"`
 		Enabled                  *bool   `json:"enabled,omitempty"`
 		IsBackupProvider         *bool   `json:"is_backup_provider,omitempty"`
+		StorageGroup             *string `json:"storage_group,omitempty"`
 		SkipPing                 *bool   `json:"skip_ping,omitempty"`
 		KeepaliveIntervalSeconds *int    `json:"keepalive_interval_seconds,omitempty"`
 		KeepaliveCommand         *string `json:"keepalive_command,omitempty"`
 		UserAgent                *string `json:"user_agent,omitempty"`
 		QuotaBytes               *int64  `json:"quota_bytes,omitempty"`
 		QuotaPeriodHours         *int    `json:"quota_period_hours,omitempty"`
+		AccountExpirationDate    *string `json:"account_expiration_date,omitempty"`
 	}
 
 	if err := c.BodyParser(&updateReq); err != nil {
@@ -691,8 +742,17 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 		}
 		provider.MaxConnections = *updateReq.MaxConnections
 	}
+	if updateReq.MinConnectionsAlive != nil {
+		if *updateReq.MinConnectionsAlive < 0 {
+			return RespondValidationError(c, "MinConnectionsAlive must not be negative", "INVALID_MIN_CONNECTIONS_ALIVE")
+		}
+		provider.MinConnectionsAlive = *updateReq.MinConnectionsAlive
+	}
 	if updateReq.InflightRequests != nil {
 		provider.InflightRequests = *updateReq.InflightRequests
+	}
+	if updateReq.StatInflightRequests != nil {
+		provider.StatInflightRequests = *updateReq.StatInflightRequests
 	}
 	if updateReq.TLS != nil {
 		provider.TLS = *updateReq.TLS
@@ -708,6 +768,9 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 	}
 	if updateReq.IsBackupProvider != nil {
 		provider.IsBackupProvider = updateReq.IsBackupProvider
+	}
+	if updateReq.StorageGroup != nil {
+		provider.StorageGroup = *updateReq.StorageGroup
 	}
 	if updateReq.SkipPing != nil {
 		provider.SkipPing = *updateReq.SkipPing
@@ -726,6 +789,12 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 	}
 	if updateReq.UserAgent != nil {
 		provider.UserAgent = *updateReq.UserAgent
+	}
+	if updateReq.AccountExpirationDate != nil {
+		provider.AccountExpirationDate = *updateReq.AccountExpirationDate
+	}
+	if updateReq.Name != nil {
+		provider.Name = *updateReq.Name
 	}
 
 	// Assign the updated provider back to the slice
@@ -750,17 +819,21 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 	// Return sanitized provider
 	response := ProviderAPIResponse{
 		ID:                       provider.ID,
+		Name:                     provider.Name,
 		Host:                     provider.Host,
 		Port:                     provider.Port,
 		Username:                 provider.Username,
 		MaxConnections:           provider.MaxConnections,
+		MinConnectionsAlive:      provider.MinConnectionsAlive,
 		TLS:                      provider.TLS,
 		InsecureTLS:              provider.InsecureTLS,
 		ProxyURL:                 provider.ProxyURL,
 		PasswordSet:              provider.Password != "",
 		Enabled:                  provider.Enabled != nil && *provider.Enabled,
 		IsBackupProvider:         provider.IsBackupProvider != nil && *provider.IsBackupProvider,
+		StorageGroup:             provider.StorageGroup,
 		InflightRequests:         provider.InflightRequests,
+		StatInflightRequests:     provider.StatInflightRequests,
 		LastRTTMs:                provider.LastRTTMs,
 		SkipPing:                 provider.SkipPing,
 		KeepaliveIntervalSeconds: provider.KeepaliveIntervalSeconds,
@@ -768,6 +841,7 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 		UserAgent:                provider.UserAgent,
 		QuotaBytes:               provider.QuotaBytes,
 		QuotaPeriodHours:         provider.QuotaPeriodHours,
+		AccountExpirationDate:    provider.AccountExpirationDate,
 	}
 
 	return RespondSuccess(c, response)
@@ -972,19 +1046,24 @@ func (s *Server) handleReorderProviders(c *fiber.Ctx) error {
 	providers := make([]ProviderAPIResponse, len(newProviders))
 	for i, p := range newProviders {
 		providers[i] = ProviderAPIResponse{
-			ID:               p.ID,
-			Host:             p.Host,
-			Port:             p.Port,
-			Username:         p.Username,
-			MaxConnections:   p.MaxConnections,
-			TLS:              p.TLS,
-			InsecureTLS:      p.InsecureTLS,
-			ProxyURL:         p.ProxyURL,
-			PasswordSet:      p.Password != "",
-			Enabled:          p.Enabled != nil && *p.Enabled,
-			IsBackupProvider: p.IsBackupProvider != nil && *p.IsBackupProvider,
-			InflightRequests: p.InflightRequests,
-			LastRTTMs:        p.LastRTTMs,
+			ID:                    p.ID,
+			Name:                  p.Name,
+			Host:                  p.Host,
+			Port:                  p.Port,
+			Username:              p.Username,
+			MaxConnections:        p.MaxConnections,
+			MinConnectionsAlive:   p.MinConnectionsAlive,
+			TLS:                   p.TLS,
+			InsecureTLS:           p.InsecureTLS,
+			ProxyURL:              p.ProxyURL,
+			PasswordSet:           p.Password != "",
+			Enabled:               p.Enabled != nil && *p.Enabled,
+			IsBackupProvider:      p.IsBackupProvider != nil && *p.IsBackupProvider,
+			StorageGroup:          p.StorageGroup,
+			InflightRequests:      p.InflightRequests,
+			StatInflightRequests:  p.StatInflightRequests,
+			LastRTTMs:             p.LastRTTMs,
+			AccountExpirationDate: p.AccountExpirationDate,
 		}
 	}
 

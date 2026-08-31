@@ -30,8 +30,16 @@ func (c *Coordinator) CreateStrmFiles(ctx context.Context, item *database.Import
 	originalResultingPath := resultingPath
 
 	category := ""
-	if item.Category != nil {
+	if item.Category != nil && *item.Category != "" {
 		category = *item.Category
+		for _, cat := range cfg.SABnzbd.Categories {
+			if strings.EqualFold(cat.Name, category) {
+				if cat.Dir != "" {
+					category = cat.Dir
+				}
+				break
+			}
+		}
 	}
 
 	// Build the clean, isolated library path: [CompleteDir]/[Category]/<remainder>,
@@ -85,8 +93,16 @@ func (c *Coordinator) CreateStrmFiles(ctx context.Context, item *database.Import
 		relPath := strings.TrimSuffix(relPathWithMeta, ".meta")
 
 		category := ""
-		if item.Category != nil {
+		if item.Category != nil && *item.Category != "" {
 			category = *item.Category
+			for _, cat := range cfg.SABnzbd.Categories {
+				if strings.EqualFold(cat.Name, category) {
+					if cat.Dir != "" {
+						category = cat.Dir
+					}
+					break
+				}
+			}
 		}
 
 		// filepath.Rel returns OS-native separators (backslashes on Windows);
@@ -94,7 +110,7 @@ func (c *Coordinator) CreateStrmFiles(ctx context.Context, item *database.Import
 		// double-prefix the category/CompleteDir on Windows (issue #585).
 		strmResultingPath := buildLibraryRelPath(relPath, cfg.SABnzbd.CompleteDir, category)
 
-		if err := c.CreateSingleStrmFile(ctx, strmResultingPath, relPathWithMeta, cfg.WebDAV.Port); err != nil {
+		if err := c.CreateSingleStrmFile(ctx, strmResultingPath, relPath, cfg.WebDAV.Port); err != nil {
 			c.log.ErrorContext(ctx, "Failed to create STRM file",
 				"path", relPath,
 				"error", err)

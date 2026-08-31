@@ -13,6 +13,9 @@ import (
 // GzExtension is the persistent storage extension for gzip-compressed NZB files.
 const GzExtension = ".nzb.gz"
 
+// PlainExtension is the persistent storage extension for uncompressed NZB files.
+const PlainExtension = ".nzb"
+
 // IsGzipped reports whether path points to a gzip-compressed NZB by suffix.
 func IsGzipped(path string) bool {
 	return strings.HasSuffix(strings.ToLower(path), GzExtension)

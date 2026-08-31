@@ -38,12 +38,13 @@ const DEFAULT_NEW_INSTANCE: NewInstanceForm = {
 };
 
 const ARR_TYPES: { type: ArrsType; label: string; color: string; defaultCategory: string }[] = [
-	{ type: "radarr", label: "Radarr", color: "bg-primary", defaultCategory: "movies" },
-	{ type: "sonarr", label: "Sonarr", color: "bg-secondary", defaultCategory: "tv" },
-	{ type: "lidarr", label: "Lidarr", color: "bg-accent", defaultCategory: "music" },
-	{ type: "readarr", label: "Readarr", color: "bg-info", defaultCategory: "books" },
-	{ type: "whisparr", label: "Whisparr", color: "bg-warning", defaultCategory: "movies" },
-	{ type: "sportarr", label: "Sportarr", color: "bg-success", defaultCategory: "sports" },
+	// Distinct accents per type; minimal themes collapse primary/secondary/accent/info to one blue.
+	{ type: "radarr", label: "Radarr", color: "bg-warning", defaultCategory: "movies" },
+	{ type: "sonarr", label: "Sonarr", color: "bg-info", defaultCategory: "tv" },
+	{ type: "lidarr", label: "Lidarr", color: "bg-success", defaultCategory: "music" },
+	{ type: "readarr", label: "Readarr", color: "bg-error", defaultCategory: "books" },
+	{ type: "whisparr", label: "Whisparr", color: "bg-secondary", defaultCategory: "movies" },
+	{ type: "sportarr", label: "Sportarr", color: "bg-accent", defaultCategory: "sports" },
 ];
 
 export function ArrsConfigSection({
@@ -260,13 +261,6 @@ export function ArrsConfigSection({
 
 	return (
 		<div className="space-y-10">
-			<div>
-				<h3 className="font-bold text-base-content text-lg tracking-tight">ARR Applications</h3>
-				<p className="break-words text-base-content/50 text-sm">
-					Connect Radarr and Sonarr for automatic health monitoring and repair.
-				</p>
-			</div>
-
 			<div className="space-y-8">
 				{/* Enable/Disable Arrs */}
 				<div className="rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
@@ -321,7 +315,7 @@ export function ArrsConfigSection({
 
 								<button
 									type="button"
-									className="btn btn-primary btn-sm shrink-0 px-6 shadow-lg shadow-primary/20"
+									className="btn btn-primary shrink-0 px-6 shadow-lg shadow-primary/20"
 									onClick={handleRegisterWebhooks}
 									disabled={isReadOnly || registerWebhooks.isPending || hasChanges}
 								>
@@ -365,7 +359,7 @@ export function ArrsConfigSection({
 									Queue Auto-Cleanup
 								</h5>
 								<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
-									Automatically remove empty import folders from ARR queues.
+									Automatically clear stuck and failed imports from your *arr queues.
 								</p>
 							</div>
 							<input
@@ -402,7 +396,7 @@ export function ArrsConfigSection({
 											</span>
 										</div>
 										<div className="mt-2 whitespace-normal text-base-content/70 text-xs">
-											How often the *arr queues are checked.
+											How often *arr queues are checked.
 										</div>
 									</fieldset>
 
@@ -429,8 +423,8 @@ export function ArrsConfigSection({
 											</span>
 										</div>
 										<div className="mt-2 whitespace-normal text-base-content/70 text-xs">
-											How long a stuck or failed import must persist before cleanup acts on it.
-											Brief errors that clear on their own are ignored.
+											How long an import must stay stuck before cleanup acts. Brief errors are
+											ignored.
 										</div>
 									</fieldset>
 
@@ -457,8 +451,8 @@ export function ArrsConfigSection({
 											</span>
 										</div>
 										<div className="mt-2 whitespace-normal text-base-content/70 text-xs">
-											After cleanup acts on the same movie/episode this many times, give up:
-											blocklist without re-searching and unmonitor it in the *arr. 0 disables this.
+											After this many cleanups on the same item, give up: blocklist and unmonitor
+											it. 0 disables.
 										</div>
 									</fieldset>
 								</div>
@@ -466,8 +460,8 @@ export function ArrsConfigSection({
 								<div className="space-y-4">
 									<h5 className="font-bold text-base-content/60 text-xs uppercase">Error Rules</h5>
 									<p className="whitespace-normal text-base-content/70 text-xs">
-										When a stuck import's error matches one of these, run the chosen action: remove,
-										blocklist, or blocklist + search.
+										Match a stuck import's error to an action: remove, blocklist, or blocklist +
+										search.
 									</p>
 									<div className="custom-scrollbar max-h-72 space-y-2 overflow-y-auto pr-2">
 										{(formData.queue_cleanup_rules || []).map((rule, index) => (

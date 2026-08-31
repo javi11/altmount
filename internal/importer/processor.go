@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/holes"
 	"github.com/javi11/altmount/internal/importer/archive"
 	"github.com/javi11/altmount/internal/importer/archive/rar"
 	"github.com/javi11/altmount/internal/importer/archive/sevenzip"
@@ -78,7 +80,7 @@ func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Ma
 // getCleanNzbName removes the queue ID prefix from the NZB filename if present
 func (proc *Processor) getCleanNzbName(nzbPath string, queueID int) string {
 	baseName := filepath.Base(nzbPath)
-	prefix := fmt.Sprintf("%d_", queueID)
+	prefix := fmt.Sprintf("%d-", queueID)
 	if after, ok := strings.CutPrefix(baseName, prefix); ok {
 		return after
 	}
@@ -174,7 +176,7 @@ func (proc *Processor) checkCancellation(ctx context.Context) error {
 // round-trips. Returns (brokenFileIndexes, knownMissingSegmentIDs, error).
 // Both maps are nil when no pool is available.
 // Returns ErrNoFilesProcessed (wrapped) when all eligible regular files are broken.
-func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, cfg *config.Config, queueID, maxConnections int) (map[int]struct{}, map[string]struct{}, error) {
+func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, cfg *config.Config, queueID int, category *string, downloadID *string) (map[int]struct{}, map[string]struct{}, error) {
 	if !proc.poolManager.HasPool() {
 		return nil, nil, nil
 	}
@@ -204,16 +206,15 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 	}
 
 	// Stat is a cheap single round-trip on the pool's normal lane; excess
-	// requests queue and yield to streaming (priority lane). Run sweeps at the
-	// pool's full connection capacity rather than MaxImportConnections (which
-	// caps sustained body downloads) so multi-part releases don't crawl
-	// 5-at-a-time.
-	concurrency := fastFailConcurrency(cfg, maxConnections)
+	// requests queue and yield to streaming (priority lane). Size the sweep by
+	// the providers' STAT pipeline depth, not their connection count — STAT is
+	// bodyless, so nntppool pipelines many per connection.
+	concurrency := cfg.StatConcurrency()
 
 	// Phase 1: cheap release-level probe. Sample the whole release once
-	// (≤55 Stats) and fail fast. Healthy releases — the common case — pay only
-	// this and skip the per-file sweep entirely, keeping the "Checking segment
-	// availability" stage short.
+	// (segment_sample_percentage of it) and fail fast. Healthy releases — the
+	// common case — pay only this and skip the per-file sweep entirely, keeping
+	// the "Checking segment availability" stage short.
 	probeStart := time.Now()
 	missing, err := validation.FastFailReleaseProbe(
 		ctx,
@@ -233,6 +234,16 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 				"duration", time.Since(probeStart))
 		}
 		return nil, nil, nil
+	}
+
+	isStremioImport := (category != nil && *category == "stremio") || (downloadID != nil && strings.HasPrefix(*downloadID, "stremio:"))
+	if isStremioImport && cfg.Stremio.EffectiveFastFailHeaderOnly() {
+		if proc.log != nil {
+			proc.log.InfoContext(ctx, "Fast-fail release probe failed for Stremio import; aborting immediately without per-file sweep",
+				"files", len(fastFailFiles),
+				"probe_duration", time.Since(probeStart))
+		}
+		return nil, nil, multifile.ErrNoFilesProcessed
 	}
 
 	// Phase 2 (escalation): the probe found an unreachable segment, so map
@@ -269,6 +280,7 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 	brokenIdx := make(map[int]struct{})
 	missingIDs := make(map[string]struct{})
 	eligibleRegularCount := 0
+	acceptableMissingPercent := cfg.GetAcceptableMissingSegmentsPercentage()
 
 	for i, result := range results {
 		f := n.Files[i]
@@ -279,6 +291,33 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 		}
 
 		if result.Broken && !isPar2 {
+			// A standalone video file with SMALL confirmed damage, within the
+			// configured acceptable-missing threshold, imports as degraded
+			// rather than being dropped. Streaming zero-fills the gaps and
+			// the immediate post-import health check discovers + persists
+			// the holes and flags it degraded (or fails it, if the
+			// threshold changed since). Archive-set members (GroupKey != "")
+			// stay binary — a holed volume corrupts extraction and cannot be
+			// padded.
+			if acceptableMissingPercent > 0 && fastFailFiles[i].GroupKey == "" && holes.EligibleFile(f.Filename) {
+				verdict := holes.ClassifyProjected(
+					len(result.MissingSegmentIDs),
+					result.SampledCount,
+					len(f.Segments),
+					longestSampledRun(fastFailFiles[i].Segments, result.MissingSegmentIDs),
+				)
+				if verdict == holes.VerdictDegraded &&
+					!holes.ExceedsAcceptableMissing(len(result.MissingSegmentIDs), result.SampledCount, acceptableMissingPercent) {
+					if proc.log != nil {
+						proc.log.InfoContext(ctx, "Importing video file as degraded despite missing segments (within acceptable-missing threshold)",
+							"file", f.Filename,
+							"missing_sampled", len(result.MissingSegmentIDs),
+							"sampled", result.SampledCount)
+					}
+					continue // not broken: let it import
+				}
+			}
+
 			brokenIdx[i] = struct{}{}
 			for _, id := range result.MissingSegmentIDs {
 				missingIDs[id] = struct{}{}
@@ -317,31 +356,26 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 	return brokenIdx, missingIDs, nil
 }
 
-// fastFailConcurrency returns the goroutine cap for the fast-fail Stat sweep.
-// Stats are cheap and queue on the pool's normal lane, so we use the pool's
-// full connection capacity (sum of enabled providers' max connections) rather
-// than the import body-download cap. Falls back to fallback when no capacity is
-// configured and is bounded to keep goroutine counts sane.
-func fastFailConcurrency(cfg *config.Config, fallback int) int {
-	const maxConcurrency = 100
-
-	capacity := 0
-	for _, p := range cfg.Providers {
-		if p.Enabled == nil || *p.Enabled {
-			capacity += p.MaxConnections
+// longestSampledRun maps missing segment IDs back to their indices in the
+// file's segment list and returns the longest run of consecutive missing
+// indices among the sampled set. Because the fast-fail sample is sparse this
+// is usually 1; a longer measured run is a strong signal the file is
+// unwatchable and must fail even under the tolerant policy.
+func longestSampledRun(segments []*metapb.SegmentData, missingIDs []string) int {
+	if len(missingIDs) == 0 {
+		return 0
+	}
+	indexByID := make(map[string]int, len(segments))
+	for i, s := range segments {
+		indexByID[s.Id] = i
+	}
+	var acc holes.Accumulator
+	for _, id := range missingIDs {
+		if idx, ok := indexByID[id]; ok {
+			acc.Add(idx)
 		}
 	}
-
-	if capacity <= 0 {
-		capacity = fallback
-	}
-	if capacity <= 0 {
-		capacity = 1
-	}
-	if capacity > maxConcurrency {
-		capacity = maxConcurrency
-	}
-	return capacity
+	return acc.LongestRun()
 }
 
 // ProcessNzbFile processes an NZB or STRM file maintaining the folder structure relative to relative path.
@@ -363,7 +397,6 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 	cfg := proc.configGetter()
 
 	// Determine max connections to use
-	maxConnections := cfg.Import.MaxImportConnections
 
 	// Determine allowed file extensions to use
 	allowedExtensions := cfg.Import.AllowedFileExtensions
@@ -402,12 +435,17 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 			return "", nil, NewNonRetryableError("NZB file contains no files", nil)
 		}
 
+		parser.SanitizeNzbFilenames(n)
+
 		// Pre-parse Stat check — runs before any Body fetches.
 		proc.updateProgressWithStage(queueID, 0, "Checking segment availability")
 		var missingIDs map[string]struct{}
 		var fastFailErr error
-		brokenIdx, missingIDs, fastFailErr = proc.preParseFastFail(ctx, n, cfg, queueID, maxConnections)
+		brokenIdx, missingIDs, fastFailErr = proc.preParseFastFail(ctx, n, cfg, queueID, category, downloadID)
 		if fastFailErr != nil {
+			if errors.Is(fastFailErr, validation.ErrFastFailInconclusive) {
+				return "", nil, fmt.Errorf("fast-fail segment check inconclusive: %w", fastFailErr)
+			}
 			return "", nil, NewNonRetryableError("fast-fail segment check failed", fastFailErr)
 		}
 
@@ -474,8 +512,7 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 		"virtual_dir", virtualDir,
 		"type", parsed.Type,
 		"total_size", parsed.TotalSize,
-		"files", len(parsed.Files),
-		"max_connections", maxConnections)
+		"files", len(parsed.Files))
 
 	// Step 3: Separate files by type (regular, archive, PAR2)
 	regularFiles, archiveFiles, par2Files := filesystem.SeparateFiles(parsed.Files, parsed.Type)
@@ -488,6 +525,63 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 	// Step 5: Process based on file type
 	var result string
 	var writtenPaths []string
+
+	// Persist the NzbStore up front so every metadata write below can be emitted
+	// directly in the v3 store-backed format (no read-back conversion pass).
+	// storeRef stays "" on any failure — which makes each write site fall back to
+	// the v1 inline-segment format — so a store problem never blocks the import.
+	var storeRef string
+	var storeIndex map[string]int64
+	if parsed.Store != nil && len(parsed.SegmentIndex) > 0 && parsed.Type != parser.NzbTypeStrm {
+		cfg := proc.configGetter()
+		configDir := filepath.Dir(cfg.Database.Path)
+		if !filepath.IsAbs(configDir) {
+			if abs, err := filepath.Abs(configDir); err == nil {
+				configDir = abs
+			}
+		}
+		var categoryStr string
+		if category != nil && *category != "" {
+			categoryStr = *category
+			// Sanitize category to prevent path traversal.
+			categoryStr = strings.ReplaceAll(categoryStr, `\`, "/")
+			categoryStr = strings.Trim(categoryStr, "/")
+			for _, part := range strings.Split(categoryStr, "/") {
+				if part == ".." || part == "." {
+					categoryStr = ""
+					break
+				}
+			}
+		}
+		nzbStoreDir := filepath.Join(configDir, ".nzbs", categoryStr)
+		allowedBase := filepath.Clean(configDir) + string(os.PathSeparator)
+		if !strings.HasPrefix(filepath.Clean(nzbStoreDir)+string(os.PathSeparator), allowedBase) {
+			proc.log.WarnContext(ctx, "category produced path outside configDir; falling back to root .nzbs/",
+				"category", categoryStr, "resolved", nzbStoreDir)
+			nzbStoreDir = filepath.Join(configDir, ".nzbs")
+		}
+		if mkErr := os.MkdirAll(nzbStoreDir, 0755); mkErr != nil {
+			proc.log.WarnContext(ctx, "failed to create nzb store dir; metadata stays v1",
+				"dir", nzbStoreDir, "error", mkErr)
+		} else {
+			base := nzbtrim.TrimNzbExtension(filepath.Base(filePath))
+			if queueID > 0 {
+				base = fmt.Sprintf("%d-%s", queueID, base)
+			}
+			ref := filepath.Join(nzbStoreDir, base+".nzbz")
+			if storeErr := proc.metadataService.Store().WriteStore(ref, parsed.Store); storeErr != nil {
+				proc.log.ErrorContext(ctx, "failed to write NZB store; metadata stays v1",
+					"store_ref", ref, "error", storeErr)
+			} else if _, integrityErr := proc.metadataService.Store().ReadStore(ref); integrityErr != nil {
+				proc.log.ErrorContext(ctx, "NZB store integrity check failed; removing store",
+					"store_ref", ref, "error", integrityErr)
+				_ = os.Remove(ref)
+			} else {
+				storeRef = ref
+				storeIndex = parsed.SegmentIndex
+			}
+		}
+	}
 
 	// Bare-ISO Blu-ray expansion. ISOs posted directly to Usenet (without
 	// RAR/7z wrapping) are classified as NzbTypeSingleFile/NzbTypeMultiFile
@@ -530,7 +624,7 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 					proc.poolManager, isoMaxPrefetch, isoReadTimeout, cfg.GetIsoAnalyzeTimeout(), allowedExtensions, isoTracker)
 			},
 			writeMetadata: func(virtualPath string, meta *metapb.FileMetadata) error {
-				return proc.metadataService.WriteFileMetadata(virtualPath, meta)
+				return proc.metadataService.WriteFileMetadataAuto(ctx, virtualPath, meta, storeIndex, storeRef)
 			},
 		}, regularFiles, virtualDir, proc.getCleanNzbName(parsed.Path, queueID), parsed.Path, isoReleaseDate)
 		if isoErr != nil {
@@ -558,23 +652,23 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 	switch parsed.Type {
 	case parser.NzbTypeSingleFile:
 		proc.updateProgressWithStage(queueID, 30, "Validating segments")
-		result, dispatchPaths, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, queueID, allowedExtensions, category, metadata, downloadID)
+		result, dispatchPaths, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, queueID, allowedExtensions, category, metadata, downloadID, storeIndex, storeRef)
 
 	case parser.NzbTypeMultiFile:
 		proc.updateProgressWithStage(queueID, 30, "Writing metadata")
-		result, dispatchPaths, err = proc.processMultiFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, queueID, allowedExtensions, category, metadata, downloadID)
+		result, dispatchPaths, err = proc.processMultiFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, queueID, allowedExtensions, category, metadata, downloadID, storeIndex, storeRef)
 
 	case parser.NzbTypeRarArchive:
 		proc.updateProgressWithStage(queueID, 15, "Analyzing archive")
-		result, dispatchPaths, err = proc.processRarArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, allowedExtensions, parsed.ExtractedFiles, category, metadata, downloadID)
+		result, dispatchPaths, err = proc.processRarArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, allowedExtensions, parsed.ExtractedFiles, category, metadata, downloadID, storeIndex, storeRef)
 
 	case parser.NzbType7zArchive:
 		proc.updateProgressWithStage(queueID, 15, "Analyzing archive")
-		result, dispatchPaths, err = proc.processSevenZipArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, allowedExtensions, parsed.ExtractedFiles, category, metadata, downloadID)
+		result, dispatchPaths, err = proc.processSevenZipArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, allowedExtensions, parsed.ExtractedFiles, category, metadata, downloadID, storeIndex, storeRef)
 
 	case parser.NzbTypeStrm:
 		proc.updateProgressWithStage(queueID, 30, "Validating segments")
-		result, dispatchPaths, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, queueID, allowedExtensions, category, metadata, downloadID)
+		result, dispatchPaths, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, queueID, allowedExtensions, category, metadata, downloadID, storeIndex, storeRef)
 
 	default:
 		return "", writtenPaths, NewNonRetryableError(fmt.Sprintf("unknown file type: %s", parsed.Type), nil)
@@ -603,6 +697,8 @@ func (proc *Processor) processSingleFile(
 	category *string,
 	metadata *string,
 	downloadID *string,
+	storeIndex map[string]int64,
+	storeRef string,
 ) (string, []string, error) {
 	if len(regularFiles) == 0 {
 		return "", nil, fmt.Errorf("no regular files to process")
@@ -670,6 +766,8 @@ func (proc *Processor) processSingleFile(
 		proc.metadataService,
 		allowedExtensions,
 		filterSampleFiles,
+		storeIndex,
+		storeRef,
 	)
 	var writtenPaths []string
 	if writtenPath != "" {
@@ -712,6 +810,8 @@ func (proc *Processor) processMultiFile(
 	category *string,
 	metadata *string,
 	downloadID *string,
+	storeIndex map[string]int64,
+	storeRef string,
 ) (string, []string, error) {
 	// If there's only one regular file (and the rest are likely PAR2s), avoid creating a redundant
 	// NZB-named directory that matches the file itself. Instead, keep the file directly under the
@@ -764,6 +864,8 @@ func (proc *Processor) processMultiFile(
 		allowedExtensions,
 		filterSampleFiles,
 		writeTracker,
+		storeIndex,
+		storeRef,
 	)
 	if err != nil {
 		return "", writtenPaths, err
@@ -809,6 +911,8 @@ func (proc *Processor) processRarArchive(
 	category *string,
 	metadata *string,
 	downloadID *string,
+	storeIndex map[string]int64,
+	storeRef string,
 ) (string, []string, error) {
 	importCfg := proc.configGetter().Import
 	maxPrefetch := importCfg.MaxDownloadPrefetch
@@ -856,6 +960,8 @@ func (proc *Processor) processRarArchive(
 			allowedExtensions,
 			filterSampleFiles,
 			nil, // archive progress is tracked by the archive tracker below
+			storeIndex,
+			storeRef,
 		); err != nil {
 			slog.DebugContext(ctx, "Failed to process regular files", "error", err)
 		}
@@ -889,6 +995,8 @@ func (proc *Processor) processRarArchive(
 			ExpandBlurayIso:        expandBlurayIso,
 			FilterSamples:          filterSampleFiles,
 			RenameToNzbName:        renameToNzbName,
+			SegmentIndex:           storeIndex,
+			StoreRef:               storeRef,
 		})
 		if err != nil {
 			return nzbFolder, writtenPaths, err
@@ -936,6 +1044,8 @@ func (proc *Processor) processSevenZipArchive(
 	category *string,
 	metadata *string,
 	downloadID *string,
+	storeIndex map[string]int64,
+	storeRef string,
 ) (string, []string, error) {
 	importCfg := proc.configGetter().Import
 	maxPrefetch := importCfg.MaxDownloadPrefetch
@@ -983,6 +1093,8 @@ func (proc *Processor) processSevenZipArchive(
 			allowedExtensions,
 			filterSampleFiles,
 			nil, // archive progress is tracked by the archive tracker below
+			storeIndex,
+			storeRef,
 		); err != nil {
 			slog.DebugContext(ctx, "Failed to process regular files", "error", err)
 		}
@@ -1015,6 +1127,8 @@ func (proc *Processor) processSevenZipArchive(
 			ExpandBlurayIso:        expandBlurayIso,
 			FilterSamples:          filterSampleFiles,
 			RenameToNzbName:        renameToNzbName,
+			SegmentIndex:           storeIndex,
+			StoreRef:               storeRef,
 		})
 		if err != nil {
 			return nzbFolder, writtenPaths, err

@@ -114,7 +114,6 @@ func (sz *sevenZipProcessor) AnalyzeSevenZipContentFromNzb(ctx context.Context, 
 	}
 
 	cfg := sz.configGetter()
-	maxPrefetch := cfg.Import.MaxDownloadPrefetch
 	readTimeout := time.Duration(cfg.Import.ReadTimeoutSeconds) * time.Second
 	if readTimeout == 0 {
 		readTimeout = 5 * time.Minute
@@ -128,8 +127,10 @@ func (sz *sevenZipProcessor) AnalyzeSevenZipContentFromNzb(ctx context.Context, 
 	sortedFiles := renameSevenZipFilesAndSort(sevenZipFiles)
 
 	// Create Usenet filesystem for 7zip access - this enables sevenzip to access
-	// 7zip part files directly from Usenet without downloading
-	ufs := filesystem.NewUsenetFileSystem(ctx, sz.poolManager, sortedFiles, maxPrefetch, progressTracker, readTimeout)
+	// 7zip part files directly from Usenet without downloading. Header analysis only
+	// reads initial volume headers, so prefetch is capped at 1.
+	headerAnalysisPrefetch := 1
+	ufs := filesystem.NewUsenetFileSystem(ctx, sz.poolManager, sortedFiles, headerAnalysisPrefetch, progressTracker, readTimeout)
 
 	// Extract filenames for first part detection
 	fileNames := make([]string, len(sortedFiles))
@@ -533,13 +534,19 @@ func extractBaseFilenameSevenZip(filename string) string {
 
 // renameSevenZipFilesAndSort renames all 7z files to have the same base name and sorts them
 func renameSevenZipFilesAndSort(sevenZipFiles []parser.ParsedFile) []parser.ParsedFile {
-	// Check if ALL files have no extension - if so, we'll add .XXX extensions
-	allFilesNoExt := true
+	// Check if any files have no extension or if there are duplicate filenames - if so, we'll treat it as allFilesNoExt and add extensions
+	allFilesNoExt := false
+	seenNames := make(map[string]struct{})
 	for _, file := range sevenZipFiles {
-		if archive.HasExtension(file.Filename) {
-			allFilesNoExt = false
+		if !archive.HasExtension(file.Filename) {
+			allFilesNoExt = true
 			break
 		}
+		if _, exists := seenNames[file.Filename]; exists {
+			allFilesNoExt = true
+			break
+		}
+		seenNames[file.Filename] = struct{}{}
 	}
 
 	// Get base filename from first file if all files have no extension
@@ -549,9 +556,12 @@ func renameSevenZipFilesAndSort(sevenZipFiles []parser.ParsedFile) []parser.Pars
 		sort.Slice(sevenZipFiles, func(i, j int) bool {
 			return sevenZipFiles[i].Filename < sevenZipFiles[j].Filename
 		})
-		// Use the first file's name as the base for all parts
+		// Use the first file's name as the base for all parts (stripping any added extension)
 		if len(sevenZipFiles) > 0 {
 			baseFilename = sevenZipFiles[0].Filename
+			if ext := filepath.Ext(baseFilename); ext != "" {
+				baseFilename = strings.TrimSuffix(baseFilename, ext)
+			}
 		}
 	} else {
 		// Sort files by part number BEFORE extracting base filename
@@ -872,7 +882,6 @@ func (sz *sevenZipProcessor) detectAndProcessNestedRars(ctx context.Context, out
 // For encrypted outer 7zips, it creates NestedSource entries.
 func (sz *sevenZipProcessor) processNestedRarContent(ctx context.Context, innerRarContents []Content) ([]Content, error) {
 	cfg := sz.configGetter()
-	maxPrefetch := cfg.Import.MaxDownloadPrefetch
 	readTimeout := time.Duration(cfg.Import.ReadTimeoutSeconds) * time.Second
 	if readTimeout == 0 {
 		readTimeout = 5 * time.Minute
@@ -898,8 +907,10 @@ func (sz *sevenZipProcessor) processNestedRarContent(ctx context.Context, innerR
 		})
 	}
 
-	// Create filesystem for reading inner RAR volumes
-	dfs := filesystem.NewDecryptingFileSystem(ctx, sz.poolManager, entries, maxPrefetch, readTimeout)
+	// Create filesystem for reading inner RAR volumes.
+	// Header analysis only reads initial volume headers, so prefetch is capped at 1.
+	headerAnalysisPrefetch := 1
+	dfs := filesystem.NewDecryptingFileSystem(ctx, sz.poolManager, entries, headerAnalysisPrefetch, readTimeout)
 
 	// Find the first inner RAR part
 	fileNames := make([]string, len(innerRarContents))

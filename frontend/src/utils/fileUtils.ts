@@ -1,4 +1,4 @@
-export interface FileTypeInfo {
+interface FileTypeInfo {
 	category: "image" | "video" | "audio" | "text" | "document" | "archive" | "unknown";
 	isPreviewable: boolean;
 	iconType: "image" | "video" | "audio" | "text" | "archive" | "file";

@@ -67,6 +67,9 @@ type Content struct {
 	// time a TS filter adds each clip's Delta90k to the timestamps inside
 	// its byte range to build one continuous timeline.
 	ClipBoundaries []ClipBoundary `json:"clip_boundaries,omitempty"`
+	// FirstSegmentBytes holds the warm yEnc-decoded bytes of the first segment
+	// captured during NZB parsing, allowing instant header analysis without wire calls.
+	FirstSegmentBytes []byte `json:"-"`
 }
 
 // ClipBoundary mirrors metapb.ClipBoundary at the archive layer: one clip in a
@@ -76,19 +79,6 @@ type Content struct {
 type ClipBoundary struct {
 	ByteLen  int64 `json:"byte_len"`
 	Delta90k int64 `json:"delta_90k"`
-}
-
-// GetContentSegmentCount returns the total number of segments for a Content,
-// counting NestedSources segments for encrypted nested archive content.
-func GetContentSegmentCount(content Content) int {
-	if len(content.NestedSources) > 0 {
-		total := 0
-		for _, ns := range content.NestedSources {
-			total += len(ns.Segments)
-		}
-		return total
-	}
-	return len(content.Segments)
 }
 
 // GetContentSegments returns all segments for a Content,
@@ -126,7 +116,14 @@ func ValidateSegmentIntegrity(ctx context.Context, content Content) error {
 			}
 		}
 	} else {
-		// For standard files, validate total segment coverage against PackedSize (if available)
+		// For standard files, validate total segment coverage against PackedSize (if available).
+		// PackedSize (not Size) is correct here because segments carry the archive's *packed*
+		// bytes: for a compressed archive (e.g. 7z) the packed stream is smaller than the
+		// declared unpacked Size, so comparing against Size would raise a false shortfall.
+		// The stored-archive case where PackedSize is itself unreliable (truncated volume
+		// following collapses it to match the partial segments) is caught by the RAR-specific
+		// Size-vs-coverage guard in the rar package, which is safe there because RAR rejects
+		// compressed files.
 		var totalCovered int64
 		for _, seg := range content.Segments {
 			totalCovered += (seg.EndOffset - seg.StartOffset + 1)

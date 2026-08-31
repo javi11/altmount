@@ -23,6 +23,7 @@ type DB struct {
 	// Repository is kept for backwards-compat; prefer using Connection() directly.
 	Repository    *QueueRepository
 	MigrationRepo *ImportMigrationRepository
+	StoreRefRepo  *StoreRefRepository
 }
 
 // Config holds database configuration.
@@ -90,6 +91,7 @@ func newSQLiteDB(config Config) (*DB, error) {
 	db := &DB{conn: conn, dialect: dh}
 	db.Repository = NewQueueRepository(conn, DialectSQLite)
 	db.MigrationRepo = NewImportMigrationRepository(conn, DialectSQLite)
+	db.StoreRefRepo = NewStoreRefRepository(conn, DialectSQLite)
 	return db, nil
 }
 
@@ -119,6 +121,7 @@ func newPostgresDB(config Config) (*DB, error) {
 	db := &DB{conn: conn, dialect: dh}
 	db.Repository = NewQueueRepository(conn, DialectPostgres)
 	db.MigrationRepo = NewImportMigrationRepository(conn, DialectPostgres)
+	db.StoreRefRepo = NewStoreRefRepository(conn, DialectPostgres)
 	return db, nil
 }
 
@@ -280,6 +283,45 @@ func ensureSchemaIntegrity(db *sql.DB, d Dialect) {
 			} else {
 				db.Exec("CREATE INDEX IF NOT EXISTS idx_indexer_stats_download_id ON indexer_import_stats(download_id);")
 			}
+		}
+	}
+
+	// 4. Ensure download_id column in file_health (migration 034).
+	// This defensive guard runs at startup before the health worker, so any user
+	// upgrading gets the column even if goose migration 034 fails to apply due
+	// to a version conflict from dev-branch history.
+	if !hasColumn(db, d, "file_health", "download_id") {
+		slog.Info("Adding missing download_id column to file_health")
+		if _, err := db.Exec("ALTER TABLE file_health ADD COLUMN download_id TEXT DEFAULT NULL;"); err != nil {
+			slog.Error("Failed to add download_id column to file_health", "err", err)
+		} else {
+			db.Exec("CREATE INDEX IF NOT EXISTS idx_file_health_download_id ON file_health(download_id);")
+			// Backfill download_id from import_history by matching slash-trimmed paths.
+			// PostgreSQL rejects the two-argument TRIM(x, '/') comma form, so use the
+			// dialect-appropriate normalization function. A temporary expression index
+			// lets the correlated subquery probe import_history by index instead of a
+			// full scan per row (avoids the O(N*M) startup hang on large deployments).
+			trim := "TRIM(%s, '/')"
+			if d == DialectPostgres {
+				trim = "btrim(%s, '/')"
+			}
+			trimVPath := fmt.Sprintf(trim, "import_history.virtual_path")
+			trimFPath := fmt.Sprintf(trim, "file_health.file_path")
+			idxExpr := fmt.Sprintf(trim, "virtual_path")
+
+			if _, err := db.Exec(fmt.Sprintf("CREATE INDEX IF NOT EXISTS idx_import_history_trim_vpath ON import_history(%s);", idxExpr)); err != nil {
+				slog.Warn("Failed to create temporary backfill index", "err", err)
+			}
+			if _, err := db.Exec(fmt.Sprintf(`UPDATE file_health
+				SET download_id = (
+					SELECT download_id FROM import_history
+					WHERE %s = %s
+					LIMIT 1
+				)
+				WHERE download_id IS NULL`, trimVPath, trimFPath)); err != nil {
+				slog.Error("Failed to backfill download_id in file_health", "err", err)
+			}
+			db.Exec("DROP INDEX IF EXISTS idx_import_history_trim_vpath;")
 		}
 	}
 }

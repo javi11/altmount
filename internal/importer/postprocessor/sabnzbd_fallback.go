@@ -2,10 +2,15 @@ package postprocessor
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/httpclient"
+	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
+	"github.com/javi11/altmount/internal/nzbfile"
 	"github.com/javi11/altmount/internal/sabnzbd"
 )
 
@@ -13,13 +18,46 @@ import (
 func (c *Coordinator) AttemptFallback(ctx context.Context, item *database.ImportQueueItem) error {
 	cfg := c.configGetter()
 
-	// Check if the NZB file still exists
-	if _, err := os.Stat(item.NzbPath); err != nil {
-		c.log.WarnContext(ctx, "SABnzbd fallback not attempted - NZB file not found",
-			"queue_id", item.ID,
-			"file", item.NzbPath,
-			"error", err)
-		return err
+	var nzbXML []byte
+	var nzbFilename string
+
+	// Try the NZB file on disk first.
+	if _, err := os.Stat(item.NzbPath); err == nil {
+		rc, err := nzbfile.Open(item.NzbPath)
+		if err != nil {
+			return fmt.Errorf("failed to open NZB: %w", err)
+		}
+		defer rc.Close()
+		nzbXML, err = io.ReadAll(rc)
+		if err != nil {
+			return fmt.Errorf("failed to read NZB: %w", err)
+		}
+		nzbFilename = nzbfile.PlainFilename(item.NzbPath)
+	} else {
+		// Fall back to regenerating from the v3 NzbStore.
+		if c.metadataService == nil {
+			c.log.WarnContext(ctx, "SABnzbd fallback not attempted - NZB missing and no metadata service",
+				"queue_id", item.ID,
+				"file", item.NzbPath)
+			return fmt.Errorf("nzb file not found and metadata service unavailable for item %d", item.ID)
+		}
+		storePath := nzbtrim.TrimNzbExtension(item.NzbPath) + ".nzbz"
+		regenerated, err := c.metadataService.Store().RegenerateNZB(storePath)
+		if err != nil {
+			c.log.WarnContext(ctx, "SABnzbd fallback: failed to regenerate NZB from store",
+				"queue_id", item.ID,
+				"store_path", storePath,
+				"error", err)
+			return fmt.Errorf("nzb not found on disk and store regeneration failed: %w", err)
+		}
+		if regenerated == nil {
+			c.log.WarnContext(ctx, "SABnzbd fallback not attempted - NZB and store both missing",
+				"queue_id", item.ID,
+				"file", item.NzbPath)
+			return fmt.Errorf("nzb file and store both not found for item %d", item.ID)
+		}
+		nzbXML = regenerated
+		nzbFilename = filepath.Base(nzbtrim.TrimNzbExtension(item.NzbPath)) + ".nzb"
 	}
 
 	c.log.InfoContext(ctx, "Attempting to send failed import to external SABnzbd",
@@ -27,16 +65,17 @@ func (c *Coordinator) AttemptFallback(ctx context.Context, item *database.Import
 		"file", item.NzbPath,
 		"fallback_host", cfg.SABnzbd.FallbackHost)
 
-	// Convert priority to SABnzbd format
+	// Convert priority to SABnzbd format.
 	priority := convertPriorityToSABnzbd(item.Priority)
 
-	// Create client and send (proxy-aware per current network config)
+	// Create client and send (proxy-aware per current network config).
 	client := sabnzbd.NewSABnzbdClient(httpclient.NewForExternal(cfg.Network, httpclient.LongTimeout))
-	nzoID, err := client.SendNZBFile(
+	nzoID, err := client.SendNZBContent(
 		ctx,
 		cfg.SABnzbd.FallbackHost,
 		cfg.SABnzbd.FallbackAPIKey,
-		item.NzbPath,
+		nzbXML,
+		nzbFilename,
 		item.Category,
 		&priority,
 	)

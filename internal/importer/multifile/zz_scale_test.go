@@ -33,6 +33,7 @@ func TestProcessRegularFilesCollisionScaling(t *testing.T) {
 		"movies/Movie.BluRay",
 		files, nil, "Movie.BluRay.nzb",
 		svc, []string{".clpi"}, true, nil,
+		nil, "",
 	)
 	elapsed := time.Since(start)
 	if err != nil {

@@ -1,39 +1,82 @@
 import { AlertTriangle, Check, Loader, Save, Wifi } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useToast } from "../../contexts/ToastContext";
-import { useProviders } from "../../hooks/useProviders";
-import type { ProviderConfig, ProviderFormData } from "../../types/config";
+import { useProviderBackbones, useProviders } from "../../hooks/useProviders";
+import type { ProviderBackbone, ProviderConfig, ProviderFormData } from "../../types/config";
+
+// registrableDomain returns the last two labels of a hostname (e.g. "eweka.nl"),
+// used as a fallback when an exact host match isn't found in the backbone list.
+function registrableDomain(host: string): string {
+	const parts = host.split(".").filter(Boolean);
+	if (parts.length < 2) return "";
+	return parts.slice(-2).join(".");
+}
+
+// lookupBackbone finds the backbone for a hostname: an exact (case-insensitive)
+// match first, then a same-registrable-domain match, but only when every such
+// entry agrees on a single backbone (avoids guessing when ambiguous).
+function lookupBackbone(host: string, backbones: ProviderBackbone[]): ProviderBackbone | undefined {
+	const h = host.trim().toLowerCase();
+	if (!h || backbones.length === 0) return undefined;
+
+	const exact = backbones.find((b) => b.host === h);
+	if (exact) return exact;
+
+	const domain = registrableDomain(h);
+	if (!domain) return undefined;
+
+	const matches = backbones.filter((b) => registrableDomain(b.host) === domain);
+	if (matches.length === 0) return undefined;
+	const distinct = new Set(matches.map((m) => m.backbone));
+	return distinct.size === 1 ? matches[0] : undefined;
+}
 
 interface ProviderModalProps {
 	mode: "create" | "edit";
 	provider?: ProviderConfig | null;
+	/** Seeds the "Backup Only" toggle when creating a new provider. */
+	defaultBackup?: boolean;
+	/** Global provider user-agent, applied to newly created providers. */
+	defaultUserAgent?: string;
 	onSuccess: () => void;
 	onCancel: () => void;
 }
 
-const BYTES_PER_GB = 1_073_741_824;
+const BYTES_PER_GB = 1_000_000_000;
 
 const defaultFormData: ProviderFormData = {
+	name: "",
 	host: "",
 	port: 119,
 	username: "",
 	password: "",
 	max_connections: 10,
+	min_connections_alive: 0,
 	inflight_requests: 10,
+	stat_inflight_requests: 100,
 	tls: false,
 	insecure_tls: false,
 	proxy_url: "",
 	enabled: true,
 	is_backup_provider: false,
+	storage_group: "",
 	skip_ping: false,
 	keepalive_interval_seconds: 0,
 	keepalive_command: "",
 	user_agent: "",
 	quota_bytes: 0,
 	quota_period_hours: 0,
+	account_expiration_date: "",
 };
 
-export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderModalProps) {
+export function ProviderModal({
+	mode,
+	provider,
+	defaultBackup = false,
+	defaultUserAgent = "",
+	onSuccess,
+	onCancel,
+}: ProviderModalProps) {
 	const [formData, setFormData] = useState<ProviderFormData>(defaultFormData);
 	const [isTestingConnection, setIsTestingConnection] = useState(false);
 	const [connectionTestResult, setConnectionTestResult] = useState<{
@@ -44,31 +87,49 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 	const [canSave, setCanSave] = useState(false);
 	const [quotaEnabled, setQuotaEnabled] = useState(false);
 	const [quotaGbInput, setQuotaGbInput] = useState("");
+	const [backboneHint, setBackboneHint] = useState<string | null>(null);
 
 	const { testProvider, createProvider, updateProvider } = useProviders();
+	const { data: backbones } = useProviderBackbones();
 	const { showToast } = useToast();
+
+	// Suggest a storage group from the entered host's backbone. Only fills an
+	// empty field and never overwrites a value the user typed.
+	const handleHostBlur = () => {
+		if (!backbones || formData.storage_group.trim() !== "") return;
+		const match = lookupBackbone(formData.host, backbones);
+		if (match) {
+			setFormData((prev) => ({ ...prev, storage_group: match.backbone }));
+			setBackboneHint(`Detected backbone: ${match.backbone} (${match.provider})`);
+		}
+	};
 
 	// Initialize form data when provider changes
 	useEffect(() => {
 		if (mode === "edit" && provider) {
 			setFormData({
+				name: provider.name ?? "",
 				host: provider.host,
 				port: provider.port,
 				username: provider.username,
 				password: "", // Always start with empty password for security
 				max_connections: provider.max_connections,
+				min_connections_alive: provider.min_connections_alive ?? 0,
 				inflight_requests: provider.inflight_requests || 10,
+				stat_inflight_requests: provider.stat_inflight_requests || 100,
 				tls: provider.tls,
 				insecure_tls: provider.insecure_tls,
 				proxy_url: provider.proxy_url || "",
 				enabled: provider.enabled,
 				is_backup_provider: provider.is_backup_provider,
+				storage_group: provider.storage_group ?? "",
 				skip_ping: provider.skip_ping ?? false,
 				keepalive_interval_seconds: provider.keepalive_interval_seconds ?? 0,
 				keepalive_command: provider.keepalive_command ?? "",
 				user_agent: provider.user_agent ?? "",
 				quota_bytes: provider.quota_bytes ?? 0,
 				quota_period_hours: provider.quota_period_hours ?? 0,
+				account_expiration_date: provider.account_expiration_date ?? "",
 			});
 			const qb = provider.quota_bytes ?? 0;
 			setQuotaEnabled(qb > 0);
@@ -76,13 +137,17 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 			// For edit mode, allow saving without testing if only non-connection fields change
 			setCanSave(true);
 		} else {
-			setFormData(defaultFormData);
+			setFormData({
+				...defaultFormData,
+				is_backup_provider: defaultBackup,
+				user_agent: defaultUserAgent,
+			});
 			setQuotaEnabled(false);
 			setQuotaGbInput("1");
 			setCanSave(false);
 		}
 		setConnectionTestResult(null);
-	}, [mode, provider]);
+	}, [mode, provider, defaultBackup, defaultUserAgent]);
 
 	const handleInputChange = (field: keyof ProviderFormData, value: string | number | boolean) => {
 		setFormData((prev) => ({ ...prev, [field]: value }));
@@ -166,8 +231,12 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 				if (formData.password) updateData.password = formData.password; // Only include if not empty
 				if (formData.max_connections !== provider.max_connections)
 					updateData.max_connections = formData.max_connections;
+				if (formData.min_connections_alive !== (provider.min_connections_alive ?? 0))
+					updateData.min_connections_alive = formData.min_connections_alive;
 				if (formData.inflight_requests !== provider.inflight_requests)
 					updateData.inflight_requests = formData.inflight_requests;
+				if (formData.stat_inflight_requests !== provider.stat_inflight_requests)
+					updateData.stat_inflight_requests = formData.stat_inflight_requests;
 				if (formData.tls !== provider.tls) updateData.tls = formData.tls;
 				if (formData.insecure_tls !== provider.insecure_tls)
 					updateData.insecure_tls = formData.insecure_tls;
@@ -176,6 +245,8 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 				if (formData.enabled !== provider.enabled) updateData.enabled = formData.enabled;
 				if (formData.is_backup_provider !== provider.is_backup_provider)
 					updateData.is_backup_provider = formData.is_backup_provider;
+				if (formData.storage_group !== (provider.storage_group ?? ""))
+					updateData.storage_group = formData.storage_group;
 				if (formData.skip_ping !== (provider.skip_ping ?? false))
 					updateData.skip_ping = formData.skip_ping;
 				if (formData.keepalive_interval_seconds !== (provider.keepalive_interval_seconds ?? 0))
@@ -184,6 +255,9 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 					updateData.keepalive_command = formData.keepalive_command;
 				if (formData.user_agent !== (provider.user_agent ?? ""))
 					updateData.user_agent = formData.user_agent;
+				if (formData.account_expiration_date !== (provider.account_expiration_date ?? ""))
+					updateData.account_expiration_date = formData.account_expiration_date;
+				if (formData.name !== (provider.name ?? "")) updateData.name = formData.name;
 				if (formData.quota_bytes !== (provider.quota_bytes ?? 0))
 					updateData.quota_bytes = formData.quota_bytes;
 				if (formData.quota_period_hours !== (provider.quota_period_hours ?? 0))
@@ -217,22 +291,34 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 				</h3>
 
 				<form className="min-w-0 space-y-6" onSubmit={(e) => e.preventDefault()}>
-					{/* Host */}
-					<fieldset className="fieldset">
-						<legend className="fieldset-legend font-bold">NNTP Host *</legend>
-						<input
-							id="host"
-							type="text"
-							className="input input-bordered w-full font-mono text-sm"
-							value={formData.host}
-							onChange={(e) => handleInputChange("host", e.target.value)}
-							placeholder="news.example.com"
-							required
-						/>
-					</fieldset>
+					{/* Identity + connection — two equal halves, uniform spacing */}
+					<div className="grid grid-cols-1 gap-x-6 gap-y-6 sm:grid-cols-2">
+						<fieldset className="fieldset sm:col-span-2">
+							<legend className="fieldset-legend font-bold">Nickname</legend>
+							<input
+								id="name"
+								type="text"
+								className="input input-bordered w-full font-mono text-sm"
+								value={formData.name}
+								onChange={(e) => handleInputChange("name", e.target.value)}
+								placeholder="e.g. Main Provider"
+							/>
+						</fieldset>
 
-					{/* Connection Details */}
-					<div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+						<fieldset className="fieldset">
+							<legend className="fieldset-legend font-bold">NNTP Host *</legend>
+							<input
+								id="host"
+								type="text"
+								className="input input-bordered w-full font-mono text-sm"
+								value={formData.host}
+								onChange={(e) => handleInputChange("host", e.target.value)}
+								onBlur={handleHostBlur}
+								placeholder="news.example.com"
+								required
+							/>
+						</fieldset>
+
 						<fieldset className="fieldset">
 							<legend className="fieldset-legend font-bold">Port</legend>
 							<input
@@ -264,6 +350,28 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 						</fieldset>
 
 						<fieldset className="fieldset">
+							<legend className="fieldset-legend font-bold">Min Connections Alive</legend>
+							<input
+								id="min_connections_alive"
+								type="number"
+								className="input input-bordered w-full font-mono text-sm"
+								value={formData.min_connections_alive}
+								onChange={(e) =>
+									handleInputChange(
+										"min_connections_alive",
+										Number.parseInt(e.target.value, 10) || 0,
+									)
+								}
+								min={0}
+								max={formData.max_connections}
+							/>
+							<p className="label mt-1 text-base-content/70 text-xs">
+								0 = disabled. Keeps this many connections dialed and open at all times, instead of
+								connecting cold on first traffic after being idle.
+							</p>
+						</fieldset>
+
+						<fieldset className="fieldset">
 							<legend className="fieldset-legend font-bold">Pipeline (Inflight)</legend>
 							<input
 								id="inflight_requests"
@@ -276,14 +384,31 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 								min={1}
 								max={100}
 							/>
-							<p className="label mt-1 text-base-content/70 text-xs">
-								Requests per connection. Default is 10.
+						</fieldset>
+
+						<fieldset className="fieldset sm:col-span-2">
+							<legend className="fieldset-legend font-bold">Stat Pipeline (Inflight)</legend>
+							<input
+								id="stat_inflight_requests"
+								type="number"
+								className="input input-bordered w-full max-w-[10rem] font-mono text-sm"
+								value={formData.stat_inflight_requests}
+								onChange={(e) =>
+									handleInputChange(
+										"stat_inflight_requests",
+										Number.parseInt(e.target.value, 10) || 1,
+									)
+								}
+								min={1}
+								max={1000}
+							/>
+							<p className="label mt-1 block text-balance break-words text-base-content/70 text-xs">
+								Pipeline depth for bodyless STAT commands (existence checks). Since STAT carries no
+								payload, this can run much deeper than the BODY pipeline above without inflating
+								memory use.
 							</p>
 						</fieldset>
-					</div>
 
-					{/* Authentication */}
-					<div className="grid grid-cols-1 gap-6 md:grid-cols-2">
 						<fieldset className="fieldset">
 							<legend className="fieldset-legend font-bold">Username *</legend>
 							<input
@@ -403,27 +528,62 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 								</div>
 							</label>
 						</div>
-					</div>
 
-					{/* Proxy Settings */}
-					<fieldset className="fieldset">
-						<legend className="fieldset-legend font-bold">SOCKS5 Proxy (Optional)</legend>
-						<input
-							id="proxy_url"
-							type="text"
-							className="input input-bordered w-full font-mono text-sm"
-							value={formData.proxy_url}
-							onChange={(e) => handleInputChange("proxy_url", e.target.value)}
-							placeholder="socks5://user:pass@host:port"
-						/>
-					</fieldset>
+						{/* Proxy + Account Expiration */}
+						<div className="grid grid-cols-1 gap-4 border-base-300/60 border-t pt-4 sm:grid-cols-2">
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend font-bold">SOCKS5 Proxy (Optional)</legend>
+								<input
+									id="proxy_url"
+									type="text"
+									className="input input-bordered w-full font-mono text-sm"
+									value={formData.proxy_url}
+									onChange={(e) => handleInputChange("proxy_url", e.target.value)}
+									placeholder="socks5://user:pass@host:port"
+								/>
+							</fieldset>
+
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend font-bold">Storage Group (Optional)</legend>
+								<input
+									id="storage_group"
+									type="text"
+									className="input input-bordered w-full font-mono text-sm"
+									value={formData.storage_group}
+									onChange={(e) => {
+										handleInputChange("storage_group", e.target.value);
+										setBackboneHint(null);
+									}}
+									placeholder="e.g. omicron"
+								/>
+								<p className="label mt-1 text-base-content/70 text-xs">
+									{backboneHint ??
+										"Providers sharing a backbone: give them the same group so a missing-article response skips the rest."}
+								</p>
+							</fieldset>
+
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend font-bold">Account Expiration Date</legend>
+								<input
+									id="account_expiration_date"
+									type="date"
+									className="input input-bordered w-full font-mono text-sm"
+									value={formData.account_expiration_date}
+									onChange={(e) => handleInputChange("account_expiration_date", e.target.value)}
+								/>
+								<p className="label mt-1 text-base-content/70 text-xs">
+									Optional. When this account's subscription ends.
+								</p>
+							</fieldset>
+						</div>
+					</div>
 
 					{/* Keep-Alive */}
 					<div className="space-y-4 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-5">
 						<h4 className="font-bold text-base-content/60 text-xs uppercase tracking-widest">
 							Keep-Alive
 						</h4>
-						<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+						<div className="space-y-4">
 							<fieldset className="fieldset">
 								<legend className="fieldset-legend font-bold">Interval (seconds)</legend>
 								<input
@@ -540,22 +700,6 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 							</div>
 						)}
 					</div>
-
-					{/* User-Agent */}
-					<fieldset className="fieldset">
-						<legend className="fieldset-legend font-bold">User-Agent (Optional)</legend>
-						<input
-							id="user_agent"
-							type="text"
-							className="input input-bordered w-full font-mono text-sm"
-							value={formData.user_agent}
-							onChange={(e) => handleInputChange("user_agent", e.target.value)}
-							placeholder="e.g. SABnzbd/4.5.5"
-						/>
-						<p className="label mt-1 text-base-content/70 text-xs">
-							Sent to the NNTP server. Leave empty to disable.
-						</p>
-					</fieldset>
 
 					{/* Connection Test */}
 					<div className="min-w-0 space-y-4 border-base-300/50 border-t pt-4">

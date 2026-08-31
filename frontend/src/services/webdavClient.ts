@@ -1,7 +1,7 @@
 import { AuthType, createClient, type FileStat } from "webdav";
 import type { WebDAVDirectory, WebDAVFile } from "../types/webdav";
 
-export class WebDAVClient {
+class WebDAVClient {
 	private client: ReturnType<typeof createClient> | null = null;
 
 	// Parse and enhance error messages for better handling

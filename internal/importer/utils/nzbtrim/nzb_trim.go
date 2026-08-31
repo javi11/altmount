@@ -23,3 +23,21 @@ func HasNzbExtension(filename string) bool {
 	lower := strings.ToLower(filename)
 	return strings.HasSuffix(lower, ".nzb") || strings.HasSuffix(lower, ".nzb.gz")
 }
+
+// TrimSurroundingQuotes trims whitespace and strips matched surrounding single or
+// double quotes that some posters add to the NZB subject (which otherwise reaches
+// the persisted filename and breaks $-anchored archive volume detection). Only a
+// matched surrounding pair is removed, so an embedded apostrophe (It's...) is
+// preserved. Idempotent and safe on strings shorter than two characters.
+func TrimSurroundingQuotes(s string) string {
+	s = strings.TrimSpace(s)
+	for len(s) >= 2 {
+		first, last := s[0], s[len(s)-1]
+		if (first == '\'' && last == '\'') || (first == '"' && last == '"') {
+			s = strings.TrimSpace(s[1 : len(s)-1])
+			continue
+		}
+		break
+	}
+	return s
+}

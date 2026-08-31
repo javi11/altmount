@@ -69,9 +69,12 @@ export interface DatabaseConfig {
 // Metadata configuration
 export interface MetadataConfig {
 	root_path: string;
-	delete_source_nzb_on_removal?: boolean;
-	delete_completed_nzb?: boolean;
 	backup: MetadataBackupConfig;
+	migration?: MetadataMigrationConfig;
+}
+
+export interface MetadataMigrationConfig {
+	default_group: string;
 }
 
 export interface MetadataBackupConfig {
@@ -90,6 +93,7 @@ export interface FailureMaskingConfig {
 // Streaming configuration
 export interface StreamingConfig {
 	max_prefetch: number;
+	read_timeout_seconds: number;
 	failure_masking: FailureMaskingConfig;
 }
 
@@ -108,6 +112,7 @@ export interface HealthConfig {
 	cleanup_orphaned_metadata?: boolean;
 	check_interval_seconds?: number;
 	max_connections_for_health_checks?: number;
+	check_batch_size?: number; // Files fetched and swept together per health-check cycle
 	max_concurrent_jobs?: number; // Max concurrent health check jobs
 	segment_sample_percentage?: number; // Percentage of segments to check (1-100)
 	max_retries?: number; // Max health check retries
@@ -118,7 +123,16 @@ export interface HealthConfig {
 	verify_data?: boolean; // Verify 1 byte of data for each segment
 	read_timeout_seconds?: number; // Timeout for data verification
 	acceptable_missing_segments_percentage?: number;
+	// SABnzbd category names whose files are never registered for health checking
+	// by the library-sync discovery pass. Matching is by the category's directory.
+	excluded_categories?: string[];
 	repair: RepairConfig;
+	// What happens when the health checker or a streaming read confirms real
+	// (non-degraded) corruption: "repair" (default) triggers an Arr rescan;
+	// "delete" removes the file and cleans up now-empty parent directories instead.
+	corruption_action?: "repair" | "delete";
+	verify_content?: boolean; // Probe each media file's header for a valid container signature during health checks
+	verify_content_timeout_seconds?: number; // Per-file content probe timeout (default 15s)
 }
 
 export interface RepairConfig {
@@ -127,27 +141,6 @@ export interface RepairConfig {
 	max_cooldown_hours: number;
 	max_repair_retries: number; // Max repair notification retries
 	exponential_backoff: boolean;
-}
-
-// Library sync types
-export interface LibrarySyncProgress {
-	total_files: number;
-	processed_files: number;
-	start_time: string;
-}
-
-export interface LibrarySyncResult {
-	files_added: number;
-	files_deleted: number;
-	metadata_deleted: number;
-	duration: string;
-	completed_at: string;
-}
-
-export interface LibrarySyncStatus {
-	is_running: boolean;
-	progress?: LibrarySyncProgress;
-	last_sync_result?: LibrarySyncResult;
 }
 
 // Dry run result for library sync
@@ -239,7 +232,6 @@ export interface ImportConfig {
 	max_processor_workers: number;
 	queue_processing_interval_seconds: number; // Interval in seconds for queue processing
 	allowed_file_extensions: string[];
-	max_import_connections: number;
 	max_download_prefetch: number;
 	segment_sample_percentage: number; // Percentage of segments to check (1-100)
 	read_timeout_seconds: number;
@@ -252,7 +244,8 @@ export interface ImportConfig {
 	filter_sample_files?: boolean;
 	failed_item_retention_hours?: number | null;
 	history_retention_days?: number | null;
-	delete_completed_nzb?: boolean;
+	verify_content?: boolean; // Probe each media file's header for a valid container signature before reporting import success
+	verify_content_timeout_seconds?: number; // Per-file content probe timeout (default 15s)
 }
 
 // Log configuration
@@ -268,17 +261,21 @@ export interface LogConfig {
 // NNTP Provider configuration (sanitized)
 export interface ProviderConfig {
 	id: string;
+	name?: string;
 	host: string;
 	port: number;
 	username: string;
 	max_connections: number;
+	min_connections_alive?: number;
 	inflight_requests: number;
+	stat_inflight_requests: number;
 	tls: boolean;
 	insecure_tls: boolean;
 	proxy_url?: string;
 	password_set: boolean;
 	enabled: boolean;
 	is_backup_provider: boolean;
+	storage_group?: string;
 	skip_ping?: boolean;
 	keepalive_interval_seconds?: number;
 	keepalive_command?: string;
@@ -288,6 +285,24 @@ export interface ProviderConfig {
 	last_rtt_ms?: number;
 	last_speed_test_mbps?: number;
 	last_speed_test_time?: string;
+	account_expiration_date?: string;
+}
+
+// Pipeline auto-tune result for a single provider
+export interface PipelineDepthSample {
+	depth: number;
+	mbps: number;
+}
+
+export interface PipelineTuneResponse {
+	recommended_inflight: number;
+	baseline_mbps: number;
+	best_mbps: number;
+	improvement_pct: number;
+	enabled: boolean;
+	test_connections: number;
+	tested: PipelineDepthSample[];
+	warning?: string;
 }
 
 // NZBLNK resolver configuration
@@ -369,13 +384,13 @@ export interface DatabaseUpdateRequest {
 // Metadata update request
 export interface MetadataUpdateRequest {
 	root_path?: string;
-	delete_source_nzb_on_removal?: boolean;
 	backup?: MetadataBackupConfig;
 }
 
 // Streaming update request
 export interface StreamingUpdateRequest {
 	max_prefetch?: number;
+	read_timeout_seconds?: number;
 	failure_masking?: Partial<FailureMaskingConfig>;
 }
 
@@ -386,6 +401,7 @@ export interface HealthUpdateRequest {
 	cleanup_orphaned_metadata?: boolean;
 	check_interval_seconds?: number; // Interval in seconds (optional)
 	max_connections_for_health_checks?: number;
+	check_batch_size?: number; // Files fetched and swept together per health-check cycle
 	max_concurrent_jobs?: number; // Max concurrent health check jobs
 	segment_sample_percentage?: number; // Percentage of segments to check (1-100)
 	max_retries?: number;
@@ -397,6 +413,7 @@ export interface HealthUpdateRequest {
 	verify_data?: boolean;
 	acceptable_missing_segments_percentage?: number;
 	repair?: Partial<RepairConfig>;
+	corruption_action?: "repair" | "delete";
 }
 
 // RClone update request
@@ -464,6 +481,7 @@ export interface ImportUpdateRequest {
 	allow_nested_rar_extraction?: boolean;
 	rename_to_nzb_name?: boolean;
 	filter_sample_files?: boolean;
+	history_retention_days?: number | null;
 }
 
 // Log update request
@@ -484,18 +502,22 @@ export interface ProviderUpdateRequest {
 	username?: string;
 	password?: string;
 	max_connections?: number;
+	min_connections_alive?: number;
 	inflight_requests?: number;
+	stat_inflight_requests?: number;
 	tls?: boolean;
 	insecure_tls?: boolean;
 	proxy_url?: string;
 	enabled?: boolean;
 	is_backup_provider?: boolean;
+	storage_group?: string;
 	skip_ping?: boolean;
 	keepalive_interval_seconds?: number;
 	keepalive_command?: string;
 	user_agent?: string;
 	quota_bytes?: number;
 	quota_period_hours?: number;
+	account_expiration_date?: string;
 }
 
 // SABnzbd update request
@@ -529,13 +551,6 @@ export type ConfigSection =
 	| "system";
 
 // Form data interfaces for UI components
-export interface WebDAVFormData {
-	port: number;
-	user: string;
-	password: string;
-	host?: string;
-}
-
 export interface RCloneMountFormData {
 	mount_enabled: boolean;
 	mount_options: Record<string, string>;
@@ -587,23 +602,28 @@ export interface MountStatus {
 }
 
 export interface ProviderFormData {
+	name: string;
 	host: string;
 	port: number;
 	username: string;
 	password: string;
 	max_connections: number;
+	min_connections_alive: number;
 	inflight_requests: number;
+	stat_inflight_requests: number;
 	tls: boolean;
 	insecure_tls: boolean;
 	proxy_url: string;
 	enabled: boolean;
 	is_backup_provider: boolean;
+	storage_group: string;
 	skip_ping: boolean;
 	keepalive_interval_seconds: number;
 	keepalive_command: string;
 	user_agent: string;
 	quota_bytes: number;
 	quota_period_hours: number;
+	account_expiration_date: string;
 }
 
 export interface LogFormData {
@@ -657,21 +677,142 @@ export interface ProwlarrConfig {
 	enabled: boolean;
 	host: string;
 	api_key: string;
+	api_key_set?: boolean;
 	categories: number[];
+	indexers?: number[];
+	preferred_indexers?: number[];
+	preferred_indexer_names?: string[];
 	languages: string[];
+	preferred_languages?: string[];
 	qualities: string[];
+	exclude_keywords?: string[];
+	custom_scores?: Record<string, number>;
+}
+
+// A single Prowlarr indexer returned by POST /api/prowlarr/indexers
+export interface ProwlarrIndexer {
+	id: number;
+	name: string;
+	enable: boolean;
+	protocol: string;
+}
+
+// TRaSH Custom Format definition
+export interface TrashCustomFormat {
+	id: string;
+	name: string;
+	category: "source" | "hdr" | "audio" | "release_group" | "resolution" | "custom";
+	pattern: string;
+	patternType: "regex" | "token";
+	score: number;
+	enabled: boolean;
+	isCustom: boolean;
+	pattern_type?: "regex" | "token";
+	is_custom?: boolean;
+	invert?: boolean;
+}
+
+export type ScoringPreset = "trash_recommended" | "remux_enthusiast" | "compatibility" | "custom";
+
+export interface StreamScoringConfig {
+	preset: ScoringPreset;
+	custom_formats: TrashCustomFormat[];
+	exclude_keywords: string[];
+	exclude_regex?: string;
+	preferred_languages: string[];
+	require_preferred_language: boolean;
+	size_limits?: {
+		resolution_4k?: { min_gb: number; max_gb: number };
+		resolution_1080p?: { min_gb: number; max_gb: number };
+	};
+}
+
+export interface NewsnabIndexerConfig {
+	id: string;
+	name: string;
+	url: string;
+	api_key: string;
+	api_key_set?: boolean;
+	categories?: number[];
+	weight: number;
+	timeout_seconds: number;
+	enabled: boolean;
+}
+
+export interface StremioIndexersConfig {
+	provider: "prowlarr" | "newsnab" | "both";
+	user_agent_mode?: "auto" | "custom";
+	custom_user_agent?: string;
+	prowlarr: ProwlarrConfig;
+	newsnab?: NewsnabIndexerConfig[];
+}
+
+export interface ScoredReleaseItem {
+	title: string;
+	download_url: string;
+	size: number;
+	publish_date: string;
+	indexer: string;
+	indexer_id: string;
+	source: string;
+	guid: string;
+	score: number;
+	matched_formats: string[];
+	matched_languages: string[];
+	excluded: boolean;
+	exclude_reason?: string;
+}
+
+export interface InspectSearchRequest {
+	query: string;
+	type?: "movie" | "series";
+	imdb_id?: string;
+	tvdb_id?: string;
+	season?: number;
+	episode?: number;
+	timeout_ms?: number;
+	scoring?: StreamScoringConfig;
+}
+
+export interface InspectSearchResponse {
+	total_results: number;
+	active_results: number;
+	discarded_results: number;
+	releases: ScoredReleaseItem[];
+}
+
+export interface UserAgentInfo {
+	tv_user_agent: string;
+	movie_user_agent: string;
+	sonarr_version: string;
+	radarr_version: string;
+	last_updated: string;
+	source: string;
 }
 
 // Stremio integration configuration
 export interface StremioConfig {
 	enabled: boolean;
-	nzb_ttl_hours: number;
+	addon_name?: string;
+	addon_description?: string;
 	base_url?: string;
+	direct_stream?: boolean;
+	show_cached_indicator?: boolean;
+	fallback_timeout_ms?: number;
+	max_retries?: number;
+	stream_ttl_seconds?: number;
+	indexers?: StremioIndexersConfig;
+	scoring?: StreamScoringConfig;
+	nzb_ttl_hours: number;
+	failed_release_ttl_hours: number;
+	max_fallback_releases: number;
+	include_library_streams?: boolean;
+	fast_fail_header_only?: boolean;
 	prowlarr: ProwlarrConfig;
 }
 
 // Helper type for configuration sections
-export interface ConfigSectionInfo {
+interface ConfigSectionInfo {
 	title: string;
 	description: string;
 	icon: string;
@@ -700,23 +841,36 @@ export interface ProviderTestResponse {
 }
 
 export interface ProviderCreateRequest {
+	name?: string;
 	host: string;
 	port: number;
 	username: string;
 	password: string;
 	max_connections: number;
+	min_connections_alive?: number;
 	inflight_requests?: number;
+	stat_inflight_requests?: number;
 	tls: boolean;
 	insecure_tls: boolean;
 	proxy_url?: string;
 	enabled: boolean;
 	is_backup_provider: boolean;
+	storage_group?: string;
 	skip_ping?: boolean;
 	keepalive_interval_seconds?: number;
 	keepalive_command?: string;
 	user_agent?: string;
 	quota_bytes?: number;
 	quota_period_hours?: number;
+	account_expiration_date?: string;
+}
+
+// A single hostname -> backbone (storage group) mapping used to autofill
+// a provider's storage_group. Sourced from the public rexum provider tree.
+export interface ProviderBackbone {
+	host: string;
+	backbone: string;
+	provider: string;
 }
 
 export interface ProviderReorderRequest {
@@ -726,7 +880,7 @@ export interface ProviderReorderRequest {
 export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo> = {
 	webdav: {
 		title: "WebDAV Server",
-		description: "WebDAV server settings for file access",
+		description: "Expose your virtual library over the network via WebDAV protocol.",
 		icon: "Globe",
 		canEdit: true,
 	},
@@ -744,13 +898,13 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 	},
 	metadata: {
 		title: "Metadata",
-		description: "File metadata storage settings",
+		description: "Configure how AltMount stores and manages virtual file metadata.",
 		icon: "Folder",
 		canEdit: true,
 	},
 	streaming: {
 		title: "Streaming & Downloads",
-		description: "File streaming, chunking and download worker configuration",
+		description: "Segment prefetch and on-disk segment cache for smoother media playback.",
 		icon: "Download",
 		canEdit: true,
 	},
@@ -769,7 +923,7 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 	},
 	import: {
 		title: "Import Processing",
-		description: "NZB import and processing worker configuration",
+		description: "Configure how workers handle new imports and validation.",
 		icon: "Cog",
 		canEdit: true,
 	},
@@ -795,7 +949,7 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 	},
 	sabnzbd: {
 		title: "SABnzbd API",
-		description: "SABnzbd-compatible API configuration for download clients",
+		description: "Emulate a SABnzbd server to allow ARR applications to send NZBs to AltMount.",
 		icon: "Download",
 		canEdit: true,
 	},
@@ -807,8 +961,9 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		canEdit: true,
 	},
 	stremio: {
-		title: "Stremio",
-		description: "Stremio NZB stream endpoint — upload an NZB and receive instant stream URLs",
+		title: "Stremio Integration",
+		description:
+			"Upload an NZB for instant stream URLs, or enable the addon to automatically search Prowlarr by IMDB ID and stream results directly from Stremio.",
 		icon: "Tv",
 		canEdit: true,
 	},
@@ -819,9 +974,9 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		canEdit: true,
 	},
 	network: {
-		title: "Network & Proxy",
+		title: "Network & User Agent",
 		description:
-			"HTTP/HTTPS proxy for outbound indexer, Arrs, NZB grab, and SABnzbd fallback traffic",
+			"HTTP/HTTPS proxy and indexer User-Agent for outbound indexer, Arrs, NZB grab, and SABnzbd fallback traffic",
 		icon: "Globe",
 		canEdit: true,
 	},

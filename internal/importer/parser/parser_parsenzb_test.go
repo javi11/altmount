@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/javi11/altmount/internal/testsupport/fakepool"
+	"github.com/javi11/nntppool/v4"
 	"github.com/javi11/nzbparser"
 )
 
@@ -12,6 +13,11 @@ import (
 // with BrokenFileIndexes never calls Body() for the flagged file index.
 func TestParseNzbBrokenIndexMakesNoBodyCallForBrokenFile(t *testing.T) {
 	fp := fakepool.New()
+	// Serve valid yEnc for the healthy file so it normalizes and is kept;
+	// otherwise it would be skipped for failing normalization (#681).
+	fp.SetBehavior("healthy-seg-0", fakepool.SegmentBehavior{
+		YEnc: nntppool.YEncMeta{FileName: "healthy.mkv", PartSize: 1024},
+	})
 	pm := newFakeFullPoolManager(fp)
 
 	n := &nzbparser.Nzb{
@@ -59,6 +65,11 @@ func TestParseNzbBrokenIndexMakesNoBodyCallForBrokenFile(t *testing.T) {
 // with an empty ParseOptions processes all files normally.
 func TestParseNzbEmptyOptionsNormalBehavior(t *testing.T) {
 	fp := fakepool.New()
+	// Serve valid yEnc so the file normalizes and is processed normally;
+	// without it normalization fails and the file is skipped (#681).
+	fp.SetBehavior("movie-seg-0", fakepool.SegmentBehavior{
+		YEnc: nntppool.YEncMeta{FileName: "movie.mkv", PartSize: 1024},
+	})
 	pm := newFakeFullPoolManager(fp)
 
 	n := &nzbparser.Nzb{

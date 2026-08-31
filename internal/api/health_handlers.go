@@ -68,10 +68,10 @@ func (s *Server) handleListHealth(c *fiber.Ctx) error {
 		status := database.HealthStatus(statusStr)
 		// Validate status
 		switch status {
-		case database.HealthStatusPending, database.HealthStatusChecking, database.HealthStatusCorrupted, database.HealthStatusRepairTriggered, database.HealthStatusHealthy:
+		case database.HealthStatusPending, database.HealthStatusChecking, database.HealthStatusCorrupted, database.HealthStatusRepairTriggered, database.HealthStatusHealthy, database.HealthStatusDegraded:
 			statusFilter = &status
 		default:
-			return RespondValidationError(c, fmt.Sprintf("Invalid status filter: '%s'", statusStr), "Valid values: pending, checking, corrupted, repair_triggered, healthy")
+			return RespondValidationError(c, fmt.Sprintf("Invalid status filter: '%s'", statusStr), "Valid values: pending, checking, corrupted, repair_triggered, healthy, degraded")
 		}
 	}
 
@@ -230,10 +230,13 @@ func (s *Server) handleDeleteHealth(c *fiber.Ctx) error {
 
 		// Delete metadata if requested
 		if deleteMeta && s.metadataService != nil {
-			if delErr := s.metadataService.DeleteFileMetadataWithSourceNzb(c.Context(), item.FilePath, cfg.Metadata.ShouldDeleteSourceNzb()); delErr != nil {
+			if delErr := s.metadataService.DeleteFileMetadata(c.Context(), item.FilePath); delErr != nil {
 				slog.ErrorContext(c.Context(), "Failed to delete metadata during health record deletion", "file_path", item.FilePath, "error", delErr)
 			} else {
 				metaDeleted = true
+				if s.healthWorker != nil {
+					s.healthWorker.NotifyRcloneVFS(item.FilePath)
+				}
 			}
 		}
 
@@ -284,10 +287,6 @@ func (s *Server) handleDeleteHealthBulk(c *fiber.Ctx) error {
 		return RespondValidationError(c, "At least one file path is required", "")
 	}
 
-	if len(req.FilePaths) > 100 {
-		return RespondValidationError(c, "Too many file paths", "Maximum 100 files allowed per bulk operation")
-	}
-
 	metaDeletedCount := 0
 	symlinkDeletedCount := 0
 
@@ -315,10 +314,13 @@ func (s *Server) handleDeleteHealthBulk(c *fiber.Ctx) error {
 
 			// Delete metadata if requested
 			if req.DeleteMeta && s.metadataService != nil {
-				if delErr := s.metadataService.DeleteFileMetadataWithSourceNzb(c.Context(), item.FilePath, cfg.Metadata.ShouldDeleteSourceNzb()); delErr != nil {
+				if delErr := s.metadataService.DeleteFileMetadata(c.Context(), item.FilePath); delErr != nil {
 					slog.ErrorContext(c.Context(), "Failed to delete metadata during bulk deletion", "file_path", item.FilePath, "error", delErr)
 				} else {
 					metaDeletedCount++
+					if s.healthWorker != nil {
+						s.healthWorker.NotifyRcloneVFS(item.FilePath)
+					}
 				}
 			}
 
@@ -332,14 +334,14 @@ func (s *Server) handleDeleteHealthBulk(c *fiber.Ctx) error {
 	}
 
 	// Delete health records in bulk
-	err := s.healthRepo.DeleteHealthRecordsBulk(c.Context(), req.FilePaths)
+	deletedCount, err := s.healthRepo.DeleteHealthRecordsBulk(c.Context(), req.FilePaths)
 	if err != nil {
 		return RespondInternalError(c, "Failed to delete health records", err.Error())
 	}
 
 	return RespondSuccess(c, fiber.Map{
 		"message":               "Health records deleted successfully",
-		"deleted_count":         len(req.FilePaths),
+		"deleted_count":         deletedCount,
 		"file_paths":            req.FilePaths,
 		"deleted_at":            time.Now().Format(time.RFC3339),
 		"meta_deleted_count":    metaDeletedCount,
@@ -489,10 +491,6 @@ func (s *Server) handleRepairHealthBulk(c *fiber.Ctx) error {
 	// Validate file paths
 	if len(req.FilePaths) == 0 {
 		return RespondValidationError(c, "At least one file path is required", "")
-	}
-
-	if len(req.FilePaths) > 100 {
-		return RespondValidationError(c, "Too many file paths", "Maximum 100 files allowed per bulk operation")
 	}
 
 	ctx := c.Context()
@@ -681,10 +679,10 @@ func (s *Server) handleCleanupHealth(c *fiber.Ctx) error {
 			statusStr = strings.TrimSpace(statusStr)
 			status := database.HealthStatus(statusStr)
 			switch status {
-			case database.HealthStatusPending, database.HealthStatusChecking, database.HealthStatusCorrupted, database.HealthStatusRepairTriggered, database.HealthStatusHealthy:
+			case database.HealthStatusPending, database.HealthStatusChecking, database.HealthStatusCorrupted, database.HealthStatusRepairTriggered, database.HealthStatusHealthy, database.HealthStatusDegraded:
 				req.Status = &status
 			default:
-				return RespondValidationError(c, fmt.Sprintf("Invalid status filter: '%s'", statusStr), "Valid values: pending, checking, corrupted, repair_triggered, healthy")
+				return RespondValidationError(c, fmt.Sprintf("Invalid status filter: '%s'", statusStr), "Valid values: pending, checking, corrupted, repair_triggered, healthy, degraded")
 			}
 		}
 	}
@@ -825,12 +823,12 @@ func (s *Server) cleanupHealthRecords(ctx context.Context, olderThan time.Time, 
 	}
 
 	// Delete database records (proceed even if some file deletions failed)
-	deleteErr := s.healthRepo.DeleteHealthRecordsBulk(ctx, allFilePaths)
+	deletedRecords, deleteErr := s.healthRepo.DeleteHealthRecordsBulk(ctx, allFilePaths)
 	if deleteErr != nil {
 		return 0, deletedFileCount, fileErrors, fmt.Errorf("failed to delete health records from database: %w", deleteErr)
 	}
 
-	return len(allFilePaths), deletedFileCount, fileErrors, nil
+	return int(deletedRecords), deletedFileCount, fileErrors, nil
 }
 
 // handleAddHealthCheck handles POST /api/health/check
@@ -960,6 +958,28 @@ func (s *Server) handleDirectHealthCheck(c *fiber.Ctx) error {
 		return RespondConflict(c, "Health check already in progress", "This file is currently being checked")
 	}
 
+	// Optional body: {"verify_content": true|false} forces content
+	// verification on or off for this manual check, overriding the
+	// configured default and the Pending-only automatic gate. Parsed and
+	// validated BEFORE the row is transitioned to 'checking' below: rejecting
+	// a malformed body after that transition would leave the record stuck.
+	// An absent/empty body is a legitimate "no override" request and must
+	// stay tolerated.
+	var body struct {
+		VerifyContent *bool `json:"verify_content"`
+	}
+	if len(c.Body()) > 0 {
+		if err := c.BodyParser(&body); err != nil {
+			return RespondBadRequest(c, "Invalid request body", err.Error())
+		}
+	}
+
+	// preCheckStatus is the file's HealthStatus before this transition to
+	// 'checking'; it must be threaded into PerformBackgroundCheck rather than
+	// re-read afterward, since re-reading here would always observe 'checking'
+	// and make the automatic Pending-only content-verification gate unreachable.
+	preCheckStatus := item.Status
+
 	// Immediately set status to 'checking' using ID
 	err = s.healthRepo.SetFileCheckingByID(c.Context(), id)
 	if err != nil {
@@ -967,15 +987,18 @@ func (s *Server) handleDirectHealthCheck(c *fiber.Ctx) error {
 	}
 
 	// Start health check in background using worker (still needs file path)
-	err = s.healthWorker.PerformBackgroundCheck(context.Background(), item.FilePath)
+	err = s.healthWorker.PerformBackgroundCheck(context.Background(), item.FilePath, preCheckStatus, body.VerifyContent)
 	if err != nil {
 		return RespondInternalError(c, "Failed to start background health check", err.Error())
 	}
 
 	// Verify that the file still exists
 	f, err := s.metadataReader.GetFileMetadata(item.FilePath)
-	if f == nil || err != nil {
+	if err != nil {
 		return RespondInternalError(c, "Failed to retrieve file metadata", err.Error())
+	}
+	if f == nil {
+		return RespondNotFound(c, "File metadata", "File metadata no longer exists on disk")
 	}
 
 	// Get the updated health record with 'checking' status
@@ -993,31 +1016,6 @@ func (s *Server) handleDirectHealthCheck(c *fiber.Ctx) error {
 		"checked_at":  updatedItem.LastChecked,
 		"health_data": ToHealthItemResponse(updatedItem),
 	})
-}
-
-// UploadAndCheckRequest represents request to check health of a file by metadata path
-type UploadAndCheckRequest struct {
-	FilePath         string  `json:"file_path"`
-	CheckAllSegments bool    `json:"check_all_segments,omitempty"`
-	MaxRetries       *int    `json:"max_retries,omitempty"`
-	SourceNzb        *string `json:"source_nzb_path,omitempty"`
-}
-
-// UploadAndCheckResponse represents response from immediate health check
-type UploadAndCheckResponse struct {
-	FilePath     string                `json:"file_path"`
-	HealthStatus database.HealthStatus `json:"health_status"`
-	CheckResult  string                `json:"check_result"`
-	ErrorMessage *string               `json:"error_message,omitempty"`
-	CheckedAt    time.Time             `json:"checked_at"`
-	SegmentsInfo *SegmentsInfo         `json:"segments_info,omitempty"`
-}
-
-// SegmentsInfo provides details about segment checking results
-type SegmentsInfo struct {
-	TotalSegments   int  `json:"total_segments"`
-	MissingSegments int  `json:"missing_segments"`
-	CheckedAll      bool `json:"checked_all"`
 }
 
 // handleRestartHealthChecksBulk handles POST /api/health/bulk/restart
@@ -1045,10 +1043,6 @@ func (s *Server) handleRestartHealthChecksBulk(c *fiber.Ctx) error {
 	// Validate file paths
 	if len(req.FilePaths) == 0 {
 		return RespondValidationError(c, "At least one file path is required", "")
-	}
-
-	if len(req.FilePaths) > 100 {
-		return RespondValidationError(c, "Too many file paths", "Maximum 100 files allowed per bulk operation")
 	}
 
 	// Cancel any active checks for these files

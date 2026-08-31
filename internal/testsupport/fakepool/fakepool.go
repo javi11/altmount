@@ -52,6 +52,11 @@ import (
 // compile-time assertion: Client must satisfy the narrow interface.
 var _ pool.NntpClient = (*Client)(nil)
 
+// errTransientFakepool is the default error returned during a SegmentBehavior
+// FailFirst window — a transient failure that is NOT nntppool.ErrArticleNotFound,
+// so retry logic must treat it as retryable rather than a permanent miss.
+var errTransientFakepool = errors.New("fakepool: transient failure (all providers exhausted)")
+
 // SegmentBehavior describes how the fake should respond to a single
 // message-ID. The zero value returns an empty body with no delay.
 type SegmentBehavior struct {
@@ -73,6 +78,16 @@ type SegmentBehavior struct {
 	// onMeta callbacks. Use this to inject yEnc header metadata (FileName,
 	// PartSize, FileSize, etc.) without needing a real NNTP server.
 	YEnc nntppool.YEncMeta
+
+	// FailFirst makes the first N calls to this message-ID return FailErr (a
+	// transient error) before subsequent calls succeed normally. Use it to
+	// exercise retry logic that must distinguish transient failures from a
+	// permanent article-not-found. Zero disables this behavior.
+	FailFirst int
+
+	// FailErr is the transient error returned during the FailFirst window.
+	// Defaults to a generic "all providers exhausted"-style error when nil.
+	FailErr error
 }
 
 // Client is a fake nntppool.Client suitable for unit and concurrency tests.
@@ -312,6 +327,48 @@ func (c *Client) Stat(ctx context.Context, messageID string) (*nntppool.StatResu
 	return &nntppool.StatResult{MessageID: messageID}, nil
 }
 
+// StatMany satisfies pool.NntpClient by fanning Stat out across up to
+// opts.Concurrency goroutines, mirroring nntppool's StatMany semantics: results
+// stream out of order, the channel closes once every dispatched check reports,
+// and ctx cancellation stops dispatch and lets in-flight sends bail out.
+func (c *Client) StatMany(ctx context.Context, messageIDs []string, opts nntppool.StatManyOptions) <-chan nntppool.StatManyResult {
+	conc := opts.Concurrency
+	if conc <= 0 {
+		conc = 64
+	}
+	if conc > len(messageIDs) && len(messageIDs) > 0 {
+		conc = len(messageIDs)
+	}
+
+	out := make(chan nntppool.StatManyResult, max(conc, 1))
+	go func() {
+		defer close(out)
+		sem := make(chan struct{}, conc)
+		var wg sync.WaitGroup
+
+	dispatch:
+		for _, id := range messageIDs {
+			select {
+			case <-ctx.Done():
+				break dispatch
+			case sem <- struct{}{}:
+			}
+			wg.Add(1)
+			go func(id string) {
+				defer wg.Done()
+				defer func() { <-sem }()
+				res, err := c.Stat(ctx, id)
+				select {
+				case out <- nntppool.StatManyResult{MessageID: id, Result: res, Err: err}:
+				case <-ctx.Done():
+				}
+			}(id)
+		}
+		wg.Wait()
+	}()
+	return out
+}
+
 // Stats returns the configured stats or a zero value.
 func (c *Client) Stats() nntppool.ClientStats {
 	c.mu.RLock()
@@ -326,6 +383,17 @@ func (c *Client) serveBody(ctx context.Context, messageID string, w io.Writer, o
 	b := c.behaviorFor(messageID)
 	if err := waitOrCancel(ctx, b.Latency); err != nil {
 		return nil, err
+	}
+	// Transient-failure window: fail the first FailFirst calls to this message,
+	// then serve normally. The per-ID counter was already incremented in Body.
+	if b.FailFirst > 0 {
+		if n, ok := c.perIDCalls.Load(messageID); ok && n.(*atomic.Int64).Load() <= int64(b.FailFirst) {
+			failErr := b.FailErr
+			if failErr == nil {
+				failErr = errTransientFakepool
+			}
+			return nil, failErr
+		}
 	}
 	if b.Err != nil {
 		// Mirror nntppool: on error the result may still carry partial

@@ -27,6 +27,11 @@ func DefaultManagerConfig() ManagerConfig {
 }
 
 // WithDefaults returns a copy with zero values replaced by defaults.
+//
+// ExpiryDuration is intentionally NOT defaulted here: a zero (or negative)
+// duration means "cache forever" (see SegmentCache.Cleanup), and the expiry
+// default is applied upstream in config.Validate. Overriding it here would make
+// an explicit "forever" setting impossible.
 func (cfg ManagerConfig) WithDefaults() ManagerConfig {
 	defaults := DefaultManagerConfig()
 	if cfg.CachePath == "" {
@@ -34,9 +39,6 @@ func (cfg ManagerConfig) WithDefaults() ManagerConfig {
 	}
 	if cfg.MaxSizeBytes <= 0 {
 		cfg.MaxSizeBytes = defaults.MaxSizeBytes
-	}
-	if cfg.ExpiryDuration <= 0 {
-		cfg.ExpiryDuration = defaults.ExpiryDuration
 	}
 	return cfg
 }
@@ -86,9 +88,15 @@ func NewManager(cfg ManagerConfig, logger *slog.Logger) (*Manager, error) {
 	}, nil
 }
 
-// Start launches background maintenance goroutines.
+// Start launches background maintenance goroutines, including the initial
+// catalog load (run here, not in NewManager, so boot is not blocked by the
+// per-segment stat loop). Stop waits for all of them.
 func (m *Manager) Start(_ context.Context) {
-	m.wg.Add(2)
+	m.wg.Add(3)
+	go func() {
+		defer m.wg.Done()
+		m.cache.LoadCatalog()
+	}()
 	go m.cleanupLoop()
 	go m.catalogFlushLoop()
 }

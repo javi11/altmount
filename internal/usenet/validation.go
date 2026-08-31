@@ -2,83 +2,18 @@ package usenet
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/rand"
-	"sync/atomic"
 	"time"
 
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
-	"github.com/javi11/altmount/internal/progress"
-	concpool "github.com/sourcegraph/conc/pool"
+	"github.com/javi11/nntppool/v4"
 )
 
 var randPerm = rand.Perm
-
-// ValidateSegmentList validates a pre-selected list of segments via Usenet.
-// No sampling/selection is performed — every segment in the list is checked.
-// Callers that pre-compute their own selection (e.g. after combining structural
-// validation + selection in a single pass) should use this function to avoid a
-// redundant iteration over the full segment slice.
-func ValidateSegmentList(
-	ctx context.Context,
-	segments []*metapb.SegmentData,
-	poolManager pool.Manager,
-	maxConnections int,
-	progressTracker progress.ProgressTracker,
-	timeout time.Duration,
-) error {
-	if len(segments) == 0 {
-		return nil
-	}
-
-	usenetPool, err := poolManager.GetPool()
-	if err != nil {
-		return fmt.Errorf("cannot validate segments: usenet connection pool unavailable: %w", err)
-	}
-
-	if usenetPool == nil {
-		return fmt.Errorf("cannot validate segments: usenet connection pool is nil")
-	}
-
-	totalToValidate := len(segments)
-	var checkedCount int32
-
-	pl := concpool.New().WithErrors().WithFirstError().WithMaxGoroutines(maxConnections)
-	for _, seg := range segments {
-		pl.Go(func() error {
-			// Advance progress for every segment checked, pass or fail, so the
-			// bar reflects validation throughput instead of freezing at the
-			// stage floor (e.g. 30%) when a file is incomplete and no segment
-			// succeeds.
-			if progressTracker != nil {
-				defer func() {
-					count := atomic.AddInt32(&checkedCount, 1)
-					progressTracker.Update(int(count), totalToValidate)
-				}()
-			}
-
-			checkCtx, cancel := context.WithTimeout(ctx, timeout)
-			defer cancel()
-
-			if _, err := usenetPool.Stat(checkCtx, seg.Id); err != nil {
-				slog.DebugContext(checkCtx, "missing segment",
-					"segment_id", seg.Id,
-					"error", err,
-				)
-				return fmt.Errorf("segment with ID %s unreachable: %w", seg.Id, err)
-			}
-
-			poolManager.IncArticlesDownloaded()
-			poolManager.UpdateDownloadProgress("", 100)
-
-			return nil
-		})
-	}
-
-	return pl.Wait()
-}
 
 // SelectSegmentsForValidation is the exported form of the sampling selector.
 // It returns the subset of segments that should be validated based on samplePercentage,
@@ -87,91 +22,251 @@ func SelectSegmentsForValidation(segments []*metapb.SegmentData, samplePercentag
 	return selectSegmentsForValidation(segments, samplePercentage)
 }
 
-// ValidationResult holds detailed validation results
+// ValidationResult holds the outcome of a segment availability sweep for one
+// file. Segments fall into exactly three buckets: available, confirmed
+// missing (a 430/423 from the provider), and unresolved (a transport or
+// infrastructure failure, or an id the sweep never got to). TotalChecked
+// counts only the two resolved buckets, so a segment we learned nothing about
+// never dilutes the observed miss rate.
 type ValidationResult struct {
-	TotalChecked int
-	MissingCount int
-	MissingIDs   []string
+	TotalChecked    int
+	MissingCount    int
+	UnresolvedCount int
+	MissingIDs      []string
+	// TerminatedEarly reports that the sweep stopped short of this file's
+	// planned samples because its verdict was already settled.
+	TerminatedEarly bool
+	// Err is the first operational (non-definitive) STAT failure observed for
+	// this file — a dead connection, timeout, cancellation, auth failure,
+	// quota, or an id the sweep never answered for. Non-nil marks the whole
+	// result inconclusive: it is not evidence of anything and must not be
+	// read as a missing-segment verdict (issue #861).
+	Err error
 }
 
-// ValidateSegmentAvailabilityDetailed validates segments and returns detailed results
-// instead of failing fast on the first error.
-func ValidateSegmentAvailabilityDetailed(
+// Inconclusive reports whether the sweep failed to reach a definitive answer
+// for at least one checked segment. An inconclusive result is not evidence of
+// anything — neither of missing articles nor of a healthy file — so callers
+// must retry rather than record a verdict from it.
+func (r ValidationResult) Inconclusive() bool { return r.Err != nil }
+
+// errSegmentUnreported marks segments the pool never answered for. StatMany
+// stops dispatching and drops in-flight results when its context ends, so a
+// cancelled or timed-out sweep silently returns fewer results than ids.
+var errSegmentUnreported = errors.New("segment availability not reported by the STAT sweep")
+
+// unreportedErr wraps the sweep's context error (when there is one) so the
+// caller can tell a truncated sweep from a per-segment failure.
+func unreportedErr(ctxErr error) error {
+	if ctxErr != nil {
+		return fmt.Errorf("%w: %w", errSegmentUnreported, ctxErr)
+	}
+	return errSegmentUnreported
+}
+
+// maxTrackedMissingIDs caps the message-ids stored per file so a wholly dead
+// release cannot produce a huge metadata blob. MissingCount stays exact.
+const maxTrackedMissingIDs = 50
+
+// BatchOptions tunes a cross-file STAT sweep.
+type BatchOptions struct {
+	// MaxConnections bounds STATs in flight and also sets the chunk size the
+	// sweep dispatches in.
+	MaxConnections int
+
+	// Timeout is the per-item budget scaled into each chunk's deadline.
+	Timeout time.Duration
+
+	// ShouldStop, when non-nil, is consulted after every chunk for each file
+	// still being swept. Returning true removes that file from the remaining
+	// chunks, leaving its siblings unaffected. Callers must only return true
+	// for a verdict that further checking cannot reverse, since the file's
+	// unchecked segments are then never looked at.
+	ShouldStop func(fileIdx int, result ValidationResult) bool
+}
+
+// ValidateSegmentAvailabilityBatch checks pre-sampled segment IDs for many files
+// in one interleaved STAT sweep. perFileIDs is index-aligned with the returned
+// results: files with an empty ID list yield a zero ValidationResult. IDs are
+// interleaved round-robin across files (every file's first sample, then every
+// file's second, …) so one file with many segments cannot serialize the sweep
+// for the others.
+//
+// The sweep dispatches in MaxConnections-sized chunks rather than one giant
+// StatMany, mirroring the import fast-fail sweep. The chunk boundary is the
+// only place a file can be dropped from the remaining work, so it is also what
+// bounds how far past a settled verdict the sweep can run.
+//
+// An error is returned for infrastructure failures (pool unavailable) and for
+// caller cancellation; per-segment outcomes are reported in the per-file
+// results.
+func ValidateSegmentAvailabilityBatch(
 	ctx context.Context,
-	segments []*metapb.SegmentData,
+	perFileIDs [][]string,
 	poolManager pool.Manager,
-	maxConnections int,
-	samplePercentage int,
-	progressTracker progress.ProgressTracker,
-	timeout time.Duration,
-) (ValidationResult, error) {
-	result := ValidationResult{
-		MissingIDs: []string{},
+	opts BatchOptions,
+) ([]ValidationResult, error) {
+	results := make([]ValidationResult, len(perFileIDs))
+	for i := range results {
+		results[i].MissingIDs = []string{}
 	}
 
-	if len(segments) == 0 {
-		return result, nil
+	total := 0
+	maxSamples := 0
+	for _, ids := range perFileIDs {
+		total += len(ids)
+		if len(ids) > maxSamples {
+			maxSamples = len(ids)
+		}
+	}
+	if total == 0 {
+		return results, nil
 	}
 
 	usenetPool, err := poolManager.GetPool()
 	if err != nil {
-		return result, fmt.Errorf("cannot validate segments: usenet connection pool unavailable: %w", err)
+		return results, fmt.Errorf("cannot validate segments: usenet connection pool unavailable: %w", err)
 	}
-
 	if usenetPool == nil {
-		return result, fmt.Errorf("cannot validate segments: usenet connection pool is nil")
+		return results, fmt.Errorf("cannot validate segments: usenet connection pool is nil")
 	}
 
-	segmentsToValidate := selectSegmentsForValidation(segments, samplePercentage)
-	result.TotalChecked = len(segmentsToValidate)
-
-	var validatedCount int32
-	var missingCount int32
-	missingChan := make(chan string, len(segmentsToValidate))
-
-	// No WithFirstError: we want to check all selected segments, not fail fast.
-	pl := concpool.New().WithErrors().WithMaxGoroutines(maxConnections)
-	for _, seg := range segmentsToValidate {
-		pl.Go(func() error {
-			checkCtx, cancel := context.WithTimeout(ctx, timeout)
-			defer cancel()
-
-			var err error
-			_, err = usenetPool.Stat(checkCtx, seg.Id)
-			if err == nil {
-				poolManager.IncArticlesDownloaded()
-				poolManager.UpdateDownloadProgress("", 100)
-			}
-			if err != nil {
-				slog.DebugContext(checkCtx, "missing segment",
-					"segment_id", seg.Id,
-					"error", err,
-				)
-				atomic.AddInt32(&missingCount, 1)
-				missingChan <- seg.Id
-				return nil // continue checking remaining segments
-			}
-
-			if progressTracker != nil {
-				count := atomic.AddInt32(&validatedCount, 1)
-				progressTracker.Update(int(count), result.TotalChecked)
-			}
-
-			return nil
-		})
+	if opts.MaxConnections <= 0 {
+		opts.MaxConnections = 1
 	}
 
-	_ = pl.Wait()
-	close(missingChan)
-
-	result.MissingCount = int(missingCount)
-	for id := range missingChan {
-		if len(result.MissingIDs) < 50 { // cap stored IDs to avoid huge metadata blobs
-			result.MissingIDs = append(result.MissingIDs, id)
+	// Round-robin interleave IDs across files into one flat plan. Ownership is
+	// positional (ids[i] belongs to fileOf[i]) rather than keyed by message-id,
+	// so an id shared by two files is attributed to each of them independently.
+	ids := make([]string, 0, total)
+	fileOf := make([]int, 0, total)
+	for round := 0; round < maxSamples; round++ {
+		for fileIdx, fileIDs := range perFileIDs {
+			if round < len(fileIDs) {
+				ids = append(ids, fileIDs[round])
+				fileOf = append(fileOf, fileIdx)
+			}
 		}
 	}
 
-	return result, nil
+	nonEmptyFiles := 0
+	for _, fileIDs := range perFileIDs {
+		if len(fileIDs) > 0 {
+			nonEmptyFiles++
+		}
+	}
+
+	sweepStart := time.Now()
+	slog.InfoContext(ctx, "Starting STAT sweep",
+		"files", nonEmptyFiles,
+		"segments", len(ids),
+		"concurrency", opts.MaxConnections,
+	)
+
+	dropped := make([]bool, len(perFileIDs))
+	skipped := 0
+
+	for pos := 0; pos < len(ids); {
+		chunk := make([]string, 0, opts.MaxConnections)
+		chunkOwners := make([]int, 0, opts.MaxConnections)
+		for pos < len(ids) && len(chunk) < opts.MaxConnections {
+			fileIdx := fileOf[pos]
+			if dropped[fileIdx] {
+				skipped++
+			} else {
+				chunk = append(chunk, ids[pos])
+				chunkOwners = append(chunkOwners, fileIdx)
+			}
+			pos++
+		}
+		if len(chunk) == 0 {
+			continue
+		}
+
+		statCtx, cancel := context.WithTimeout(ctx, pool.StatManyTimeout(len(chunk), opts.MaxConnections, opts.Timeout))
+		errByID := make(map[string]error, len(chunk))
+		for r := range usenetPool.StatMany(statCtx, chunk, nntppool.StatManyOptions{Concurrency: opts.MaxConnections}) {
+			errByID[r.MessageID] = r.Err
+		}
+		sweepErr := statCtx.Err()
+		cancel()
+
+		// Caller cancellation invalidates the whole sweep: the remaining files
+		// would otherwise be judged on evidence that was never gathered.
+		if ctx.Err() != nil {
+			return results, ctx.Err()
+		}
+
+		for i, id := range chunk {
+			res := &results[chunkOwners[i]]
+			statErr, reported := errByID[id]
+			switch {
+			case !reported:
+				// The chunk deadline expired before this id was dispatched, so
+				// StatMany abandoned it. Reachability was never proven.
+				res.UnresolvedCount++
+				if res.Err == nil {
+					res.Err = unreportedErr(sweepErr)
+				}
+			case statErr == nil:
+				res.TotalChecked++
+				poolManager.IncArticlesDownloaded()
+				poolManager.UpdateDownloadProgress("", 100)
+			case IsArticleNotFound(statErr):
+				res.TotalChecked++
+				res.MissingCount++
+				if len(res.MissingIDs) < maxTrackedMissingIDs {
+					res.MissingIDs = append(res.MissingIDs, id)
+				}
+			default:
+				// Transport or infrastructure failure. Never a confirmed miss:
+				// a connection blip must not condemn a file, and reading it as
+				// one persisted false holes that no later clean check could
+				// clear (#861).
+				slog.DebugContext(ctx, "segment check unresolved",
+					"segment_id", id,
+					"error", statErr,
+				)
+				res.UnresolvedCount++
+				if res.Err == nil {
+					res.Err = statErr
+				}
+			}
+		}
+
+		if opts.ShouldStop == nil {
+			continue
+		}
+		for i := range perFileIDs {
+			if dropped[i] || len(perFileIDs[i]) == 0 || !opts.ShouldStop(i, results[i]) {
+				continue
+			}
+			dropped[i] = true
+			// Only a file with work left to skip was genuinely cut short; one
+			// that happened to settle on its final chunk ran to completion.
+			if results[i].TotalChecked+results[i].UnresolvedCount < len(perFileIDs[i]) {
+				results[i].TerminatedEarly = true
+			}
+		}
+	}
+
+	missingTotal := 0
+	unresolvedTotal := 0
+	for _, r := range results {
+		missingTotal += r.MissingCount
+		unresolvedTotal += r.UnresolvedCount
+	}
+	slog.InfoContext(ctx, "STAT sweep completed",
+		"files", nonEmptyFiles,
+		"segments", len(ids),
+		"checked", len(ids)-skipped,
+		"skipped_after_early_termination", skipped,
+		"missing", missingTotal,
+		"inconclusive", unresolvedTotal,
+		"duration", time.Since(sweepStart),
+	)
+
+	return results, nil
 }
 
 // selectSegmentsForValidation determines which segments to validate based on validation mode and sample percentage.
@@ -187,8 +282,10 @@ func selectSegmentsForValidation(segments []*metapb.SegmentData, samplePercentag
 
 	totalSegments := len(segments)
 
-	// Min 5 for statistical validity, max 55 to cap network I/O on large files.
-	targetSamples := min(max((totalSegments*samplePercentage)/100, 5), 55)
+	// Min 5 for statistical validity. The configured percentage is otherwise
+	// honored exactly: a hard upper cap used to collapse every sub-100% setting
+	// onto the same handful of segments on large releases (issue #812).
+	targetSamples := max((totalSegments*samplePercentage)/100, 5)
 
 	if targetSamples >= totalSegments {
 		return segments
