@@ -82,6 +82,12 @@ type PoolFetcher struct {
 	getClient func() (BodyClient, error)
 	budget    ConnBudget // optional; nil skips budget gating
 
+	// StatConcurrency, when set, supplies the in-flight bound for each
+	// liveness-sweep pass — wired to the config's conservative stat bound
+	// (one connection's STAT pipeline depth). Nil falls back to
+	// statSweepConcurrency.
+	StatConcurrency func() int
+
 	// retryDelay is the base backoff between transient-failure retries,
 	// doubled per attempt. Shrunk in tests.
 	retryDelay time.Duration
