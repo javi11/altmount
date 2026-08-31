@@ -847,11 +847,24 @@ func (ms *MetadataService) DeleteDirectory(virtualPath string) error {
 	virtualPath = normalizeVirtualPath(virtualPath)
 	ctx := context.Background()
 
-	// Purge all cached entries under this directory
-	prefix := virtualPath + string(filepath.Separator)
-	for _, key := range ms.liteCache.Keys() {
-		if key == virtualPath || strings.HasPrefix(key, prefix) {
-			ms.liteCache.Remove(key)
+	// Purge all cached entries under this directory.
+	//
+	// The prefix is built with a literal "/" rather than filepath.Separator
+	// because cache keys are normalized paths and normalizeVirtualPath always
+	// emits forward slashes. On Windows the separator is "\", so the prefix
+	// would be "movies\" against keys like "movies/file.mkv" and the purge
+	// would quietly match nothing at all.
+	//
+	// Trailing separators are trimmed for the same reason: "movies/" would
+	// otherwise produce "movies//" and match no key, leaving cached entries
+	// behind for files that are about to be deleted. A later read of one of
+	// them would be served stale metadata for a file that no longer exists.
+	if cacheDir := strings.TrimRight(virtualPath, "/"); cacheDir != "" {
+		prefix := cacheDir + "/"
+		for _, key := range ms.liteCache.Keys() {
+			if key == cacheDir || strings.HasPrefix(key, prefix) {
+				ms.liteCache.Remove(key)
+			}
 		}
 	}
 

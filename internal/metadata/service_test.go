@@ -366,6 +366,40 @@ func TestDeleteFileMetadata_NormalizesBackslashPath(t *testing.T) {
 	assert.NoFileExists(t, ms.GetMetadataFilePath(normalizedPath))
 }
 
+// TestDeleteDirectory_PurgesCacheForTrailingSeparator covers the cache purge in
+// DeleteDirectory, which builds a prefix from the directory path.
+//
+// Two ways it could miss every key. A trailing separator makes the prefix double
+// up ("movies/" becomes "movies//"), and building it from filepath.Separator
+// matches nothing on Windows, where the separator is a backslash but cache keys
+// are always normalized to forward slashes. Either way the on-disk directory is
+// removed while its entries stay in the lite cache, and the next read of one of
+// them is served metadata for a file that is gone.
+func TestDeleteDirectory_PurgesCacheForTrailingSeparator(t *testing.T) {
+	root := t.TempDir()
+	ms := NewMetadataService(root)
+
+	filePath := "movies/Release/file.mkv"
+	meta := ms.CreateFileMetadata(
+		2048, "test.nzb", metapb.FileStatus_FILE_STATUS_HEALTHY,
+		nil, metapb.Encryption_NONE, "", "", nil, nil, 0, nil, "purge12345",
+	)
+	require.NoError(t, ms.WriteFileMetadata(filePath, meta))
+
+	// Populate the lite cache so a failed purge is observable.
+	lite, err := ms.ReadFileMetadataLite(filePath)
+	require.NoError(t, err)
+	require.NotNil(t, lite)
+
+	// Trailing backslash: normalization turns it into a trailing forward slash,
+	// which is exactly the shape that used to defeat the prefix match.
+	require.NoError(t, ms.DeleteDirectory("movies/Release\\"))
+
+	after, err := ms.ReadFileMetadataLite(filePath)
+	require.NoError(t, err)
+	assert.Nil(t, after, "lite cache must not serve metadata for a deleted directory's files")
+}
+
 // TestUpdateFileMetadata_PreservesModifiedAt ensures status and known-holes
 // RMW paths do not rewrite ModifiedAt (WebDAV Last-Modified / FUSE mtime).
 func TestUpdateFileMetadata_PreservesModifiedAt(t *testing.T) {
