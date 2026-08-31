@@ -61,3 +61,33 @@ func TestOperationsProceedWhenHydrationTimesOut(t *testing.T) {
 	assert.NoError(t, err)
 	assert.True(t, c.Has("unhydrated@msg"))
 }
+
+// TestLoadCatalogKeepsEntriesFromEscapedPuts verifies that a Put that proceeded
+// past the hydration timeout is not clobbered when LoadCatalog later hydrates,
+// which would orphan its .seg file on disk.
+func TestLoadCatalogKeepsEntriesFromEscapedPuts(t *testing.T) {
+	dir := t.TempDir()
+
+	seed, err := NewSegmentCache(Config{CachePath: dir, MaxSizeBytes: 10 * 1024 * 1024}, slog.Default())
+	require.NoError(t, err)
+	seed.LoadCatalog()
+	require.NoError(t, seed.Put("old@msg", []byte("old-data")))
+	require.NoError(t, seed.SaveCatalog())
+
+	c, err := NewSegmentCache(Config{
+		CachePath:        dir,
+		MaxSizeBytes:     10 * 1024 * 1024,
+		HydrationTimeout: 20 * time.Millisecond,
+	}, slog.Default())
+	require.NoError(t, err)
+
+	// Escapes waitReady via the timeout, landing in the map before hydration.
+	require.NoError(t, c.Put("escaped@msg", []byte("escaped-data")))
+
+	c.LoadCatalog()
+
+	assert.True(t, c.Has("escaped@msg"))
+	assert.True(t, c.Has("old@msg"))
+	assert.EqualValues(t, 2, c.ItemCount())
+	assert.EqualValues(t, int64(len("old-data")+len("escaped-data")), c.TotalSize())
+}

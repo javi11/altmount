@@ -295,20 +295,27 @@ func (c *SegmentCache) LoadCatalog() {
 		return
 	}
 
-	var totalSize int64
 	valid := make(map[string]*cacheEntry, len(items))
 
 	for id, e := range items {
 		if _, statErr := os.Stat(e.DataPath); statErr == nil {
 			valid[id] = e
-			totalSize += e.Size
 		}
 	}
 
+	// Merge rather than replace: a Put that escaped waitReady via the hydration
+	// timeout may already have inserted entries, and those are fresher than the
+	// catalog's. Replacing the map would orphan their .seg files.
 	c.mu.Lock()
-	c.items = valid
-	c.totalSize = totalSize
+	for id, e := range valid {
+		if _, exists := c.items[id]; !exists {
+			c.items[id] = e
+			c.totalSize += e.Size
+		}
+	}
+	loaded := len(c.items)
+	total := c.totalSize
 	c.mu.Unlock()
 
-	c.logger.Info("segcache: catalog loaded", "items", len(valid), "total_bytes", totalSize)
+	c.logger.Info("segcache: catalog loaded", "items", loaded, "total_bytes", total)
 }
