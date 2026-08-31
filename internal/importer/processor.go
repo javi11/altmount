@@ -208,8 +208,10 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 	// Stat is a cheap single round-trip on the pool's normal lane; excess
 	// requests queue and yield to streaming (priority lane). Size the sweep by
 	// the providers' STAT pipeline depth, not their connection count — STAT is
-	// bodyless, so nntppool pipelines many per connection.
-	concurrency := cfg.StatConcurrency()
+	// bodyless, so nntppool pipelines many per connection. While streams are
+	// active the sweep stays at one connection's depth; on an idle pool it
+	// widens to the pool's aggregate pipeline capacity (StatCapacity).
+	concurrency := proc.poolManager.StatSweepConcurrency(cfg.StatConcurrency())
 
 	// Phase 1: cheap release-level probe. Sample the whole release once
 	// (segment_sample_percentage of it) and fail fast. Healthy releases — the

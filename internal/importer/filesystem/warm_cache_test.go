@@ -51,6 +51,7 @@ func (m *fsFakePoolManager) SetImportConnCapacity(_ int)                 {}
 func (m *fsFakePoolManager) ImportConnCapacity() int                     { return 0 }
 func (m *fsFakePoolManager) SetStreamSource(_ pool.StreamActivitySource) {}
 func (m *fsFakePoolManager) NotifyStreamChange()                         {}
+func (m *fsFakePoolManager) StatSweepConcurrency(conservative int) int   { return conservative }
 
 // TestWarmCacheServesPrefixWithoutNetwork verifies that a read confined to a
 // file's warm first-segment bytes is served from memory, issuing zero wire calls.

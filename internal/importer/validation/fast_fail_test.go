@@ -48,6 +48,7 @@ func (m fastFailPoolManager) SetImportConnCapacity(int)                 {}
 func (m fastFailPoolManager) ImportConnCapacity() int                   { return 0 }
 func (m fastFailPoolManager) SetStreamSource(pool.StreamActivitySource) {}
 func (m fastFailPoolManager) NotifyStreamChange()                       {}
+func (m fastFailPoolManager) StatSweepConcurrency(conservative int) int { return conservative }
 
 // scriptedStatClient returns a configured sequence of STAT errors per
 // message ID. Once a sequence is exhausted, its final outcome repeats.

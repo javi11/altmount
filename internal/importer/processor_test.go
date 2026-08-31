@@ -56,6 +56,7 @@ func (m processorTestPoolManager) SetImportConnCapacity(int)                 {}
 func (m processorTestPoolManager) ImportConnCapacity() int                   { return 0 }
 func (m processorTestPoolManager) SetStreamSource(pool.StreamActivitySource) {}
 func (m processorTestPoolManager) NotifyStreamChange()                       {}
+func (m processorTestPoolManager) StatSweepConcurrency(conservative int) int { return conservative }
 
 func TestPreParseFastFailSkipsOnlyMissingEpisode(t *testing.T) {
 	client := fakepool.New()

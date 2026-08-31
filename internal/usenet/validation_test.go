@@ -121,6 +121,7 @@ func (m *validationTestPoolManager) SetImportConnCapacity(_ int)                
 func (m *validationTestPoolManager) ImportConnCapacity() int                     { return 0 }
 func (m *validationTestPoolManager) SetStreamSource(_ pool.StreamActivitySource) {}
 func (m *validationTestPoolManager) NotifyStreamChange()                         {}
+func (m *validationTestPoolManager) StatSweepConcurrency(conservative int) int   { return conservative }
 
 // TestValidateSegmentAvailability_TransientErrorsAreInconclusive is the
 // regression guard for #861: a STAT that fails for an operational reason
