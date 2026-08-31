@@ -3,6 +3,7 @@ package par2repair
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -49,6 +50,155 @@ func TestPoolFetcherStatIDs(t *testing.T) {
 	}
 	if missing["live@x"] || !missing["gone@x"] {
 		t.Fatalf("missing = %v", missing)
+	}
+}
+
+// flakyStatClient answers StatMany with a transient error for the first
+// failures[id] calls per id, then with the article's real verdict.
+type flakyStatClient struct {
+	articles map[string]bool
+	mu       sync.Mutex
+	failures map[string]int
+	calls    map[string]int
+}
+
+func (c *flakyStatClient) Body(_ context.Context, messageID string, _ ...func(nntppool.YEncMeta)) (*nntppool.ArticleBody, error) {
+	if !c.articles[messageID] {
+		return nil, nntppool.ErrArticleNotFound
+	}
+	return &nntppool.ArticleBody{}, nil
+}
+
+func (c *flakyStatClient) StatMany(_ context.Context, messageIDs []string, _ nntppool.StatManyOptions) <-chan nntppool.StatManyResult {
+	out := make(chan nntppool.StatManyResult, len(messageIDs))
+	go func() {
+		defer close(out)
+		for _, id := range messageIDs {
+			c.mu.Lock()
+			if c.calls == nil {
+				c.calls = map[string]int{}
+			}
+			c.calls[id]++
+			transient := c.failures[id] > 0
+			if transient {
+				c.failures[id]--
+			}
+			c.mu.Unlock()
+			switch {
+			case transient:
+				out <- nntppool.StatManyResult{MessageID: id, Err: errors.New("nntp: all providers exhausted: connection died")}
+			case c.articles[id]:
+				out <- nntppool.StatManyResult{MessageID: id, Result: &nntppool.StatResult{MessageID: id}}
+			default:
+				out <- nntppool.StatManyResult{MessageID: id, Err: nntppool.ErrArticleNotFound}
+			}
+		}
+	}()
+	return out
+}
+
+// A STAT that fails with a transport error proves nothing about the article.
+// Counting it alive poisons planning (a flapping provider makes a mostly-dead
+// release look healthy), so unresolved ids must be re-STATed until they yield
+// a real verdict.
+func TestPoolFetcherStatIDsRetriesUnresolved(t *testing.T) {
+	client := &flakyStatClient{
+		articles: map[string]bool{"live@x": true},
+		failures: map[string]int{"gone@x": 2, "live@x": 1},
+	}
+	f := NewPoolFetcher(func() (BodyClient, error) { return client, nil }, nil)
+	f.retryDelay = time.Millisecond
+
+	missing, err := f.StatIDs(context.Background(), []string{"live@x", "gone@x"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if missing["live@x"] || !missing["gone@x"] {
+		t.Fatalf("missing = %v, want only gone@x after retrying transient errors", missing)
+	}
+	if got := client.calls["gone@x"]; got != 3 {
+		t.Fatalf("StatMany calls for gone@x = %d, want 3", got)
+	}
+}
+
+// A handful of still-unresolved articles after retries is absorbable — the
+// payload sweep verifies every slice anyway — so the sweep result stands,
+// with the unresolved ids simply not reported missing.
+func TestPoolFetcherStatIDsToleratesFewUnresolved(t *testing.T) {
+	client := &flakyStatClient{
+		articles: map[string]bool{"live@x": true},
+		failures: map[string]int{"stuck@x": 99},
+	}
+	f := NewPoolFetcher(func() (BodyClient, error) { return client, nil }, nil)
+	f.retryDelay = time.Millisecond
+
+	missing, err := f.StatIDs(context.Background(), []string{"live@x", "stuck@x"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(missing) != 0 {
+		t.Fatalf("missing = %v, want empty (unresolved is not a verdict)", missing)
+	}
+}
+
+// When transient failures dominate the sweep even after retries, the liveness
+// picture is fiction: reporting it would let planning proceed on false "alive"
+// verdicts (observed live: a flapping provider made a ~90%-dead release sweep
+// clean, costing 10 minutes of serial dead-article discovery). The sweep must
+// fail so the attempt is retried later instead.
+func TestPoolFetcherStatIDsFailsWhenUnresolvedDominates(t *testing.T) {
+	n := maxHiddenAbsorbArticles + 1
+	ids := make([]string, n)
+	failures := map[string]int{}
+	for i := range ids {
+		ids[i] = fmt.Sprintf("stuck%d@x", i)
+		failures[ids[i]] = 99
+	}
+	client := &flakyStatClient{failures: failures}
+	f := NewPoolFetcher(func() (BodyClient, error) { return client, nil }, nil)
+	f.retryDelay = time.Millisecond
+
+	_, err := f.StatIDs(context.Background(), ids, nil)
+	if err == nil {
+		t.Fatal("StatIDs must fail when most of the sweep stays unresolved")
+	}
+	if errors.Is(err, ErrUnrepairable) {
+		t.Fatalf("err = %v, must be transient, not unrepairable", err)
+	}
+}
+
+// concurrencyRecordingStatClient records the StatManyOptions each pass used.
+type concurrencyRecordingStatClient struct {
+	fakeStatClient
+	mu   sync.Mutex
+	opts []nntppool.StatManyOptions
+}
+
+func (c *concurrencyRecordingStatClient) StatMany(ctx context.Context, messageIDs []string, opts nntppool.StatManyOptions) <-chan nntppool.StatManyResult {
+	c.mu.Lock()
+	c.opts = append(c.opts, opts)
+	c.mu.Unlock()
+	return c.fakeStatClient.StatMany(ctx, messageIDs, opts)
+}
+
+// An unbounded sweep lets the pool derive concurrency from its aggregate STAT
+// pipeline capacity — thousands of simultaneous STATs that saturate every
+// provider's dispatch window and fail the sweep itself with "all providers
+// exhausted" (observed live). The sweep must cap its own burst.
+func TestPoolFetcherStatIDsBoundsConcurrency(t *testing.T) {
+	client := &concurrencyRecordingStatClient{fakeStatClient: fakeStatClient{articles: map[string]bool{"live@x": true}}}
+	f := NewPoolFetcher(func() (BodyClient, error) { return client, nil }, nil)
+
+	if _, err := f.StatIDs(context.Background(), []string{"live@x", "gone@x"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(client.opts) == 0 {
+		t.Fatal("StatMany never called")
+	}
+	for _, o := range client.opts {
+		if o.Concurrency <= 0 || o.Concurrency > statSweepConcurrency {
+			t.Fatalf("Concurrency = %d, want in (0, %d]", o.Concurrency, statSweepConcurrency)
+		}
 	}
 }
 
