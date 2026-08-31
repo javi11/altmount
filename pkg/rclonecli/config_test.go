@@ -12,16 +12,9 @@ import (
 	"time"
 )
 
-// TestCreateConfig_SendsObscureOpt pins the obscure flag on the config/create
-// RC call.
-//
-// rclone decides for itself whether an incoming password is already obscured:
-// it tries to reveal the value, and if that succeeds it assumes the caller
-// handed it an obscured secret and stores it verbatim. That guess is wrong for
-// any plaintext password that happens to be revealable, which includes ordinary
-// base64-shaped generated passwords. The password is then stored un-obscured,
-// reveals to a different string on every later read, and the internal mount
-// authenticates against AltMount's own WebDAV with the wrong credential.
+// TestCreateConfig_SendsObscureOpt pins the obscure flag on config/create.
+// Without it rclone guesses whether the password is already obscured, and a
+// plaintext password that happens to be revealable is stored verbatim (#691).
 func TestCreateConfig_SendsObscureOpt(t *testing.T) {
 	var body map[string]any
 
