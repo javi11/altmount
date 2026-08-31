@@ -461,7 +461,8 @@ func (m *mockPoolManager) ImportConnCapacity() int     { return 0 }
 
 func (m *mockPoolManager) SetStreamSource(_ pool.StreamActivitySource) {}
 
-func (m *mockPoolManager) NotifyStreamChange() {}
+func (m *mockPoolManager) NotifyStreamChange()                       {}
+func (m *mockPoolManager) StatSweepConcurrency(conservative int) int { return conservative }
 
 // TestSeekResetsOriginalRangeEnd tests that Seek properly resets originalRangeEnd
 // This is critical for video playback - without this fix, seeking causes stale range

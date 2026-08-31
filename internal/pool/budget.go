@@ -90,6 +90,14 @@ func (b *ImportBudget) NotifyStreamChange() {
 	b.sem.mu.Unlock()
 }
 
+// StreamsActive reports whether the wired stream source currently has at
+// least one active stream. False when no source is wired.
+func (b *ImportBudget) StreamsActive() bool {
+	b.sem.mu.Lock()
+	defer b.sem.mu.Unlock()
+	return b.streamSource != nil && b.streamSource.ActiveStreams() > 0
+}
+
 // Acquire blocks until a connection token is available or ctx is cancelled.
 // The returned release function MUST be called exactly once when the fetch is
 // done. When the capacity is 0 the call is a fast-path no-op.
