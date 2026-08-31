@@ -153,9 +153,10 @@ func (m *UserAgentManager) CheckLocalARRs(ctx context.Context, sonarrURL, sonarr
 }
 
 // FetchLatestFromGitHub queries GitHub releases for latest Sonarr & Radarr version tags.
-func (m *UserAgentManager) FetchLatestFromGitHub(ctx context.Context) error {
-	sonarrVer, sonarrErr := m.fetchGitHubReleaseTag(ctx, "Sonarr/Sonarr")
-	radarrVer, radarrErr := m.fetchGitHubReleaseTag(ctx, "Radarr/Radarr")
+// userAgent is the configured User-Agent to send; empty falls back to a static identifier.
+func (m *UserAgentManager) FetchLatestFromGitHub(ctx context.Context, userAgent string) error {
+	sonarrVer, sonarrErr := m.fetchGitHubReleaseTag(ctx, "Sonarr/Sonarr", userAgent)
+	radarrVer, radarrErr := m.fetchGitHubReleaseTag(ctx, "Radarr/Radarr", userAgent)
 
 	if sonarrErr != nil && radarrErr != nil {
 		return fmt.Errorf("failed to fetch from github: sonarr: %v; radarr: %v", sonarrErr, radarrErr)
@@ -179,13 +180,16 @@ func (m *UserAgentManager) FetchLatestFromGitHub(ctx context.Context) error {
 	return nil
 }
 
-func (m *UserAgentManager) fetchGitHubReleaseTag(ctx context.Context, repo string) (string, error) {
+func (m *UserAgentManager) fetchGitHubReleaseTag(ctx context.Context, repo, userAgent string) (string, error) {
 	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", repo)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", "AltMount/1.0")
+	if userAgent == "" {
+		userAgent = "AltMount/1.0"
+	}
+	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
 
 	resp, err := m.httpClient.Do(req)

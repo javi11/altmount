@@ -85,7 +85,7 @@ func (s *Server) resolveInspectMetadata(ctx context.Context, req *InspectSearchR
 	}
 
 	if req.Type == "series" {
-		tvdbID, title, err := resolveSeriesMetadataFromIMDb(ctx, req.IMDbID)
+		tvdbID, title, err := resolveSeriesMetadataFromIMDb(ctx, req.IMDbID, s.configManager.GetConfig().GetUserAgent())
 		if err != nil {
 			slog.WarnContext(ctx, "Failed to resolve series metadata from IMDb ID", "error", err, "imdb_id", req.IMDbID)
 			return meta
@@ -101,7 +101,7 @@ func (s *Server) resolveInspectMetadata(ctx context.Context, req *InspectSearchR
 		return meta
 	}
 
-	tmdbID, movieTitle, movieYear, err := resolveMovieMetadataFromIMDb(ctx, req.IMDbID)
+	tmdbID, movieTitle, movieYear, err := resolveMovieMetadataFromIMDb(ctx, req.IMDbID, s.configManager.GetConfig().GetUserAgent())
 	if err != nil {
 		slog.WarnContext(ctx, "Failed to resolve movie metadata from IMDb ID", "error", err, "imdb_id", req.IMDbID)
 		return meta
