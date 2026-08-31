@@ -406,8 +406,15 @@ func startPar2RepairService(
 	}, par2repair.NewConnLimiter(func() int {
 		return configGetter().Par2Repair.EffectiveMaxConnections()
 	}))
+	// Always the conservative stat bound (one connection's STAT pipeline
+	// depth), never StatSweepConcurrency's idle-pool burst: a repair census
+	// STATs an entire release in one call, and the burst bound — the pool's
+	// aggregate pipeline capacity, thousands on a typical config — floods the
+	// provider's dispatch window whenever anything else (a health sweep, an
+	// import) runs beside it. Repair is a background job; the conservative
+	// depth clears a full census in seconds anyway.
 	fetcher.StatConcurrency = func() int {
-		return poolManager.StatSweepConcurrency(configGetter().StatConcurrency())
+		return configGetter().StatConcurrency()
 	}
 	patchStore := par2repair.NewPatchStore(cfg.Par2Repair.EffectivePatchDir(cfg.Metadata.RootPath))
 	service := par2repair.NewService(

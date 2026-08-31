@@ -83,10 +83,9 @@ type PoolFetcher struct {
 	budget    ConnBudget // optional; nil skips budget gating
 
 	// StatConcurrency, when set, supplies the in-flight bound for each
-	// liveness-sweep pass — wired to pool.Manager.StatSweepConcurrency so
-	// repair sweeps share the pool-wide stat budget (conservative while
-	// streams are active, full STAT pipeline capacity when idle). Nil falls
-	// back to statSweepConcurrency.
+	// liveness-sweep pass — wired to the config's conservative stat bound
+	// (one connection's STAT pipeline depth). Nil falls back to
+	// statSweepConcurrency.
 	StatConcurrency func() int
 
 	// retryDelay is the base backoff between transient-failure retries,
