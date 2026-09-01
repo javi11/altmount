@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/javi11/altmount/internal/utils"
@@ -549,6 +550,8 @@ type HealthConfig struct {
 
 // ProviderConfig represents a single NNTP provider configuration
 type ProviderConfig struct {
+	// ID is a stable public identifier used in pool names, metrics, and errors.
+	// It must never contain credentials or non-graphic characters.
 	ID                       string     `yaml:"id" mapstructure:"id" json:"id"`
 	Name                     string     `yaml:"name" mapstructure:"name" json:"name,omitempty"`
 	Host                     string     `yaml:"host" mapstructure:"host" json:"host"`
@@ -1132,7 +1135,22 @@ func (c *Config) Validate() error {
 	}
 
 	// Validate each provider
+	providerIDs := make(map[string]struct{}, len(c.Providers))
 	for i, provider := range c.Providers {
+		trimmedID := strings.TrimSpace(provider.ID)
+		if trimmedID == "" {
+			return fmt.Errorf("provider %d: id cannot be empty", i)
+		}
+		if trimmedID != provider.ID {
+			return fmt.Errorf("provider %d: id cannot have leading or trailing whitespace", i)
+		}
+		if strings.IndexFunc(provider.ID, func(r rune) bool { return !unicode.IsGraphic(r) }) >= 0 {
+			return fmt.Errorf("provider %d: id contains non-graphic characters", i)
+		}
+		if _, exists := providerIDs[provider.ID]; exists {
+			return fmt.Errorf("provider %d: id %q is duplicated", i, provider.ID)
+		}
+		providerIDs[provider.ID] = struct{}{}
 		if provider.Host == "" {
 			return fmt.Errorf("provider %d: host cannot be empty", i)
 		}
@@ -1228,14 +1246,9 @@ type ProviderChange struct {
 	NewProvider *ProviderConfig // nil for Removed
 }
 
-// NNTPPoolName returns the name nntppool v4 uses to identify this provider.
-// Format: "host:port" or "host:port+username" when username is set.
+// NNTPPoolName returns the stable ID nntppool uses to identify this provider.
 func (p *ProviderConfig) NNTPPoolName() string {
-	name := fmt.Sprintf("%s:%d", p.Host, p.Port)
-	if p.Username != "" {
-		name += "+" + p.Username
-	}
-	return name
+	return p.ID
 }
 
 // ToNNTPProvider converts a single ProviderConfig to an nntppool.Provider.
@@ -1268,6 +1281,7 @@ func (p *ProviderConfig) ToNNTPProvider() nntppool.Provider {
 
 	return nntppool.Provider{
 		Host:              host,
+		Name:              p.ID,
 		TLSConfig:         tlsCfg,
 		Auth:              nntppool.Auth{Username: p.Username, Password: p.Password},
 		Connections:       p.MaxConnections,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -51,7 +52,7 @@ type Manager interface {
 	// If no pool exists, a new one is created with this provider.
 	AddProvider(provider nntppool.Provider) error
 
-	// RemoveProvider removes a provider by its nntppool name (host:port or host:port+username).
+	// RemoveProvider removes a provider by its stable configuration ID.
 	// If the last provider is removed, the pool is closed.
 	RemoveProvider(name string) error
 
@@ -109,6 +110,7 @@ type Manager interface {
 type StatsRepository interface {
 	UpdateSystemStat(ctx context.Context, key string, value int64) error
 	BatchUpdateSystemStats(ctx context.Context, stats map[string]int64) error
+	MigrateSystemStats(ctx context.Context, stats map[string]int64, deleteKeys []string) error
 	GetSystemStats(ctx context.Context) (map[string]int64, error)
 	AddBytesDownloadedToDailyStat(ctx context.Context, bytes int64) error
 	AddProviderBytesToHourlyStat(ctx context.Context, providerID string, bytes int64) error
@@ -146,6 +148,13 @@ func NewManager(ctx context.Context, repo StatsRepository) Manager {
 
 // providerPoolName returns the lookup key nntppool uses for a provider.
 func providerPoolName(p nntppool.Provider) string {
+	if p.Name != "" {
+		return p.Name
+	}
+	return legacyProviderPoolName(p)
+}
+
+func legacyProviderPoolName(p nntppool.Provider) string {
 	name := p.Host
 	if p.Auth.Username != "" {
 		name += "+" + p.Auth.Username
@@ -178,12 +187,51 @@ func (m *manager) injectQuotaState(providers []nntppool.Provider) {
 		}
 	}
 
+	migrated := make(map[string]int64)
+	legacyKeys := make(map[string]struct{})
+	legacyProviderCounts := make(map[string]int)
 	for i := range providers {
 		name := providerPoolName(providers[i])
+		legacyName := legacyProviderPoolName(providers[i])
+		if name != legacyName {
+			legacyProviderCounts[legacyName]++
+		}
+	}
+
+	for i := range providers {
+		name := providerPoolName(providers[i])
+		legacyName := legacyProviderPoolName(providers[i])
+		used, hasUsed := quotaUsed[name]
+		resetNano, hasReset := quotaResetAt[name]
+		if name != legacyName {
+			if legacyProviderCounts[legacyName] == 1 {
+				// Provider IDs replaced host+username keys. Import each legacy value
+				// only when the new key does not already exist, so a restart cannot
+				// overwrite state written after a partial migration.
+				if !hasUsed {
+					used, hasUsed = quotaUsed[legacyName]
+					if hasUsed {
+						migrated["quota_used:"+name] = used
+					}
+				}
+				if !hasReset {
+					resetNano, hasReset = quotaResetAt[legacyName]
+					if hasReset {
+						migrated["quota_reset_at:"+name] = resetNano
+					}
+				}
+				if _, ok := quotaUsed[legacyName]; ok {
+					legacyKeys["quota_used:"+legacyName] = struct{}{}
+				}
+				if _, ok := quotaResetAt[legacyName]; ok {
+					legacyKeys["quota_reset_at:"+legacyName] = struct{}{}
+				}
+			}
+		}
 
 		hasResetTime := false
 		var resetTime time.Time
-		if resetNano, ok := quotaResetAt[name]; ok && resetNano > 0 {
+		if hasReset && resetNano > 0 {
 			resetTime = time.Unix(0, resetNano)
 			hasResetTime = true
 		}
@@ -191,7 +239,7 @@ func (m *manager) injectQuotaState(providers []nntppool.Provider) {
 		if hasResetTime {
 			if resetTime.After(time.Now()) {
 				// The quota period is still active: restore the used bytes and the reset time
-				if used, ok := quotaUsed[name]; ok && used > 0 {
+				if hasUsed && used > 0 {
 					providers[i].QuotaUsed = used
 				}
 				providers[i].QuotaResetAt = resetTime
@@ -202,9 +250,24 @@ func (m *manager) injectQuotaState(providers []nntppool.Provider) {
 			}
 		} else {
 			// No persisted reset time: restore whatever usage we have (fallback)
-			if used, ok := quotaUsed[name]; ok && used > 0 {
+			if hasUsed && used > 0 {
 				providers[i].QuotaUsed = used
 			}
+		}
+	}
+
+	if len(legacyKeys) > 0 {
+		keys := make([]string, 0, len(legacyKeys))
+		for key := range legacyKeys {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		if err := m.repo.MigrateSystemStats(m.ctx, migrated, keys); err != nil {
+			m.logger.ErrorContext(m.ctx, "Failed to migrate legacy provider quota state", "error_class", "repository")
+		}
+	} else if len(migrated) > 0 {
+		if err := m.repo.MigrateSystemStats(m.ctx, migrated, nil); err != nil {
+			m.logger.ErrorContext(m.ctx, "Failed to migrate legacy provider quota state", "error_class", "repository")
 		}
 	}
 }

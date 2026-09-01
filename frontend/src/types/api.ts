@@ -412,7 +412,6 @@ export interface ProviderStatus {
 	id: string;
 	name?: string;
 	host: string;
-	username: string;
 	used_connections: number;
 	max_connections: number;
 	state: string;

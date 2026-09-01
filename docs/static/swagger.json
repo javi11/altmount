@@ -5562,6 +5562,7 @@
                     "type": "string"
                 },
                 "id": {
+                    "description": "Stable public provider identifier; never credentials or non-graphic characters",
                     "type": "string"
                 },
                 "inflight_requests": {
@@ -5675,6 +5676,7 @@
                     "type": "string"
                 },
                 "id": {
+                    "description": "Stable public provider identifier; never credentials or non-graphic characters",
                     "type": "string"
                 },
                 "last_connection_attempt": {
@@ -5709,9 +5711,6 @@
                 },
                 "used_connections": {
                     "type": "integer"
-                },
-                "username": {
-                    "type": "string"
                 }
             }
         },
