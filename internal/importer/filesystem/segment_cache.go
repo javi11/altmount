@@ -2,6 +2,9 @@ package filesystem
 
 import (
 	"container/list"
+	"context"
+	"fmt"
+	"log/slog"
 	"sync"
 
 	"github.com/javi11/altmount/internal/usenet"
@@ -47,7 +50,13 @@ type ImportSegmentCache struct {
 	items    map[string]*list.Element
 	order    *list.List // front = most recently used
 	maxBytes int64
-	curBytes int64
+
+	// Counters are guarded by mu alongside the map, so a Stats() snapshot is
+	// consistent with the entries it describes.
+	hits      int64
+	misses    int64
+	evictions int64
+	curBytes  int64
 }
 
 type importSegmentCacheEntry struct {
@@ -70,6 +79,72 @@ func NewImportSegmentCache(maxBytes int64) *ImportSegmentCache {
 	}
 }
 
+// ImportSegmentCacheStats is a snapshot of one cache's activity. It exists so
+// an operator can tell from a real import whether the cache earns the memory it
+// reserves — the hit rate was never measured before shipping, only assumed from
+// how archive analysis was believed to read.
+type ImportSegmentCacheStats struct {
+	Hits      int64
+	Misses    int64
+	Evictions int64
+	// Entries and Bytes describe the cache at the moment of the snapshot.
+	Entries int
+	Bytes   int64
+}
+
+// HitRate is hits as a fraction of all requests, or 0 when nothing was
+// requested. Computed here so every caller does not repeat the zero guard.
+func (s ImportSegmentCacheStats) HitRate() float64 {
+	total := s.Hits + s.Misses
+	if total == 0 {
+		return 0
+	}
+	return float64(s.Hits) / float64(total)
+}
+
+// Stats snapshots the cache's activity counters and current occupancy.
+func (c *ImportSegmentCache) Stats() ImportSegmentCacheStats {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return ImportSegmentCacheStats{
+		Hits:      c.hits,
+		Misses:    c.misses,
+		Evictions: c.evictions,
+		Entries:   len(c.items),
+		Bytes:     c.curBytes,
+	}
+}
+
+// LogStats writes a one-line summary of this cache's effectiveness. Call it
+// once, as the analysis pass finishes.
+//
+// Logged at info rather than debug on purpose: the counters exist so the hit
+// rate can be read off a real import, which is the one thing that was never
+// measured before the cache shipped. It is one line per analysis pass, not per
+// segment, so the volume is negligible. A pass that never touched the cache
+// logs nothing.
+func (c *ImportSegmentCache) LogStats(ctx context.Context, log *slog.Logger, pass string) {
+	if c == nil {
+		return
+	}
+	s := c.Stats()
+	if s.Hits+s.Misses == 0 {
+		return
+	}
+	if log == nil {
+		log = slog.Default()
+	}
+	log.InfoContext(ctx, "Import segment cache",
+		"pass", pass,
+		"hit_rate", fmt.Sprintf("%.2f", s.HitRate()),
+		"hits", s.Hits,
+		"misses", s.Misses,
+		"evictions", s.Evictions,
+		"entries", s.Entries,
+		"bytes", s.Bytes,
+	)
+}
+
 // Get returns the cached bytes for messageID, promoting the entry to
 // most-recently-used on hit.
 func (c *ImportSegmentCache) Get(messageID string) ([]byte, bool) {
@@ -78,8 +153,10 @@ func (c *ImportSegmentCache) Get(messageID string) ([]byte, bool) {
 
 	el, ok := c.items[messageID]
 	if !ok {
+		c.misses++
 		return nil, false
 	}
+	c.hits++
 	c.order.MoveToFront(el)
 	entry := el.Value.(*importSegmentCacheEntry)
 	return entry.data, true
@@ -108,6 +185,7 @@ func (c *ImportSegmentCache) Put(messageID string, data []byte) error {
 		if back == nil {
 			break
 		}
+		c.evictions++
 		entry := back.Value.(*importSegmentCacheEntry)
 		c.order.Remove(back)
 		delete(c.items, entry.id)
