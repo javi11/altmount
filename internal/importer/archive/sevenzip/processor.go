@@ -136,6 +136,7 @@ func (sz *sevenZipProcessor) AnalyzeSevenZipContentFromNzb(ctx context.Context, 
 	// or header probe that revisits an already-fetched segment re-downloads it.
 	// Bounded and released (by dropping the reference) when this pass returns.
 	segStore := filesystem.NewImportSegmentCache(0)
+	defer segStore.LogStats(ctx, sz.log, "7z-header")
 	ufs := filesystem.NewUsenetFileSystem(ctx, sz.poolManager, sortedFiles, headerAnalysisPrefetch, progressTracker, readTimeout, segStore)
 
 	// Extract filenames for first part detection
@@ -918,6 +919,7 @@ func (sz *sevenZipProcessor) processNestedRarContent(ctx context.Context, innerR
 	headerAnalysisPrefetch := 1
 	// Import-scoped segment cache, private to this nested-RAR analysis pass.
 	segStore := filesystem.NewImportSegmentCache(0)
+	defer segStore.LogStats(ctx, sz.log, "7z-nested")
 	dfs := filesystem.NewDecryptingFileSystem(ctx, sz.poolManager, entries, headerAnalysisPrefetch, readTimeout, segStore)
 
 	// Find the first inner RAR part
