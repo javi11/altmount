@@ -1884,9 +1884,9 @@ func DefaultConfig(configDir ...string) *Config {
 				".xvid", ".rm", ".rmvb", ".asf", ".asx", ".wtv", ".mk3d", ".dvr-ms",
 				".mp3", ".flac", ".m4a", ".epub", ".pdf", ".cbz",
 			},
-			MaxDownloadPrefetch:         10,  // Default: 10 segments prefetched ahead for archive analysis
-			SegmentSamplePercentage:     1,   // Default: 1% segment sampling
-			ReadTimeoutSeconds:          300, // Default: 5 minutes read timeout
+			MaxDownloadPrefetch:         DefaultMaxDownloadPrefetch, // Segments prefetched ahead for archive analysis
+			SegmentSamplePercentage:     1,                          // Default: 1% segment sampling
+			ReadTimeoutSeconds:          300,                         // Default: 5 minutes read timeout
 			IsoAnalyzeTimeoutSeconds:    &isoAnalyzeTimeoutSeconds,
 			ImportStrategy:              ImportStrategyNone, // Default: no import strategy (direct import)
 			ImportDir:                   nil,                // No default import directory

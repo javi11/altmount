@@ -273,10 +273,14 @@ func DefaultStreamHeadroom(connections int) int {
 	return h
 }
 
+// DefaultMaxDownloadPrefetch is the default number of segments to prefetch ahead
+// during archive analysis and expansion. Must match the value in DefaultConfig.
+const DefaultMaxDownloadPrefetch = 10
+
 // GetMaxDownloadPrefetch returns max download prefetch with a default fallback.
 func (c *Config) GetMaxDownloadPrefetch() int {
 	if c.Import.MaxDownloadPrefetch <= 0 {
-		return 3 // Default: 3 segments prefetched ahead
+		return DefaultMaxDownloadPrefetch
 	}
 	return c.Import.MaxDownloadPrefetch
 }
