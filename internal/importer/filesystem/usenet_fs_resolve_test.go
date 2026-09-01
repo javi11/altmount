@@ -15,7 +15,7 @@ func TestUsenetFileSystemResolvesWidthMismatchVolume(t *testing.T) {
 		{Filename: base + ".part09.rar", Size: 100},
 		{Filename: base + ".part010.rar", Size: 200},
 	}
-	ufs := NewUsenetFileSystem(context.Background(), nil, files, 1, nil, 0)
+	ufs := NewUsenetFileSystem(context.Background(), nil, files, 1, nil, 0, nil)
 
 	// rardecode computes "…part10.rar" (fixed 2-digit width) for the volume after
 	// part09; it must resolve to the real "…part010.rar".

@@ -48,15 +48,22 @@ type DecryptingFileSystem struct {
 	volIndex    volumeIndex // number-keyed fallback for width-mismatch volume names
 	maxPrefetch int
 	readTimeout time.Duration
+	// segmentStore is an optional import-scoped cache of decoded segment
+	// bytes, shared across every DecryptingFile opened from this
+	// filesystem. nil disables caching. See UsenetFileSystem.segmentStore.
+	segmentStore usenet.SegmentStore
 }
 
 // NewDecryptingFileSystem creates a new filesystem for reading inner RAR volumes.
+// segmentStore is an optional import-scoped SegmentStore (see ImportSegmentCache)
+// shared by every file opened from this filesystem; pass nil to disable caching.
 func NewDecryptingFileSystem(
 	ctx context.Context,
 	poolManager pool.Manager,
 	entries []DecryptingFileEntry,
 	maxPrefetch int,
 	readTimeout time.Duration,
+	segmentStore usenet.SegmentStore,
 ) *DecryptingFileSystem {
 	filesMap := make(map[string]DecryptingFileEntry, len(entries))
 	names := make([]string, 0, len(entries))
@@ -66,12 +73,13 @@ func NewDecryptingFileSystem(
 	}
 
 	return &DecryptingFileSystem{
-		ctx:         ctx,
-		poolManager: poolManager,
-		files:       filesMap,
-		volIndex:    newVolumeIndex(names),
-		maxPrefetch: maxPrefetch,
-		readTimeout: readTimeout,
+		ctx:          ctx,
+		poolManager:  poolManager,
+		files:        filesMap,
+		volIndex:     newVolumeIndex(names),
+		maxPrefetch:  maxPrefetch,
+		readTimeout:  readTimeout,
+		segmentStore: segmentStore,
 	}
 }
 
@@ -91,12 +99,13 @@ func (dfs *DecryptingFileSystem) Open(name string) (fs.File, error) {
 	}
 
 	return &DecryptingFile{
-		name:        name,
-		entry:       &entry,
-		poolManager: dfs.poolManager,
-		ctx:         dfs.ctx,
-		maxPrefetch: dfs.maxPrefetch,
-		readTimeout: dfs.readTimeout,
+		name:         name,
+		entry:        &entry,
+		poolManager:  dfs.poolManager,
+		ctx:          dfs.ctx,
+		maxPrefetch:  dfs.maxPrefetch,
+		readTimeout:  dfs.readTimeout,
+		segmentStore: dfs.segmentStore,
 	}, nil
 }
 
@@ -128,6 +137,9 @@ type DecryptingFile struct {
 	ctx         context.Context
 	maxPrefetch int
 	readTimeout time.Duration
+	// segmentStore, when non-nil, is shared across every reader this file
+	// creates. See UsenetFile.segmentStore.
+	segmentStore usenet.SegmentStore
 
 	reader   io.ReadCloser
 	position int64
@@ -300,7 +312,7 @@ func (df *DecryptingFile) newNetworkReader(ctx context.Context, start, end int64
 	}
 
 	rg := usenet.GetSegmentsInRange(ctx, start, end, loader)
-	return usenet.NewUsenetReader(ctx, df.poolManager.GetPool, rg, df.maxPrefetch, df.poolManager, df.name, nil,
+	return usenet.NewUsenetReader(ctx, df.poolManager.GetPool, rg, df.maxPrefetch, df.poolManager, df.name, df.segmentStore,
 		usenet.WithImportProfile(df.poolManager))
 }
 
@@ -322,7 +334,7 @@ func (df *DecryptingFile) createDecryptingReader(ctx context.Context, start int6
 		}
 
 		rg := usenet.GetSegmentsInRange(ctx, rStart, rEnd, loader)
-		return usenet.NewUsenetReader(ctx, df.poolManager.GetPool, rg, df.maxPrefetch, df.poolManager, df.name, nil,
+		return usenet.NewUsenetReader(ctx, df.poolManager.GetPool, rg, df.maxPrefetch, df.poolManager, df.name, df.segmentStore,
 			usenet.WithImportProfile(df.poolManager))
 	}
 

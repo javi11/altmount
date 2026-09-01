@@ -28,7 +28,7 @@ export function ImportConfigSection({
 
 	const handleInputChange = (
 		field: keyof ImportConfig,
-		value: number | boolean | string | string[],
+		value: number | boolean | string | string[] | null,
 	) => {
 		const newData = { ...formData, [field]: value };
 		setFormData(newData);
@@ -121,6 +121,47 @@ export function ImportConfigSection({
 							/>
 							<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/70 text-xs">
 								Segments prefetched ahead for archive analysis.
+							</p>
+						</fieldset>
+
+						<fieldset className="fieldset min-w-0">
+							<legend className="fieldset-legend font-semibold">Stream Headroom Connections</legend>
+							<label className="mb-2 flex min-w-0 cursor-pointer items-center gap-3 rounded-xl border border-base-300/60 bg-base-100/40 p-3">
+								<input
+									type="checkbox"
+									className="toggle toggle-primary toggle-sm shrink-0"
+									checked={formData.stream_headroom_connections == null}
+									disabled={isReadOnly}
+									onChange={(e) =>
+										handleInputChange(
+											"stream_headroom_connections",
+											e.target.checked ? null : (formData.stream_headroom_connections ?? 8),
+										)
+									}
+								/>
+								<span className="min-w-0 break-words font-bold text-xs">
+									Auto (derive from pool size)
+								</span>
+							</label>
+							<input
+								type="number"
+								className="input input-bordered w-full min-w-0 max-w-full bg-base-100 font-mono text-sm"
+								value={formData.stream_headroom_connections ?? ""}
+								readOnly={isReadOnly}
+								disabled={isReadOnly || formData.stream_headroom_connections == null}
+								min={0}
+								placeholder="Auto"
+								onChange={(e) =>
+									handleInputChange(
+										"stream_headroom_connections",
+										Number.parseInt(e.target.value, 10) || 0,
+									)
+								}
+							/>
+							<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/70 text-xs">
+								Connections held back from import for each active stream, to keep playback latency
+								low. Auto derives from pool size (connections / 4, floor 2). Set 0 to disable the
+								reservation entirely.
 							</p>
 						</fieldset>
 

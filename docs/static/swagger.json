@@ -79,7 +79,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns health check results from all configured Sonarr/Radarr instances.",
+                "description": "Returns health check results from all configured ARR instances.",
                 "produces": [
                     "application/json"
                 ],
@@ -104,7 +104,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns all configured Sonarr/Radarr instances.",
+                "description": "Returns all configured ARR instances.",
                 "produces": [
                     "application/json"
                 ],
@@ -129,7 +129,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Tests connectivity to a Sonarr/Radarr instance with given credentials.",
+                "description": "Tests connectivity to an ARR instance with given credentials.",
                 "consumes": [
                     "application/json"
                 ],
@@ -174,7 +174,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns a specific Sonarr/Radarr instance by type and name.",
+                "description": "Returns a specific ARR instance by type and name.",
                 "produces": [
                     "application/json"
                 ],
@@ -185,7 +185,7 @@
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Instance type (sonarr or radarr)",
+                        "description": "Instance type (sonarr, radarr, lidarr, readarr, whisparr, or sportarr)",
                         "name": "type",
                         "in": "path",
                         "required": true
@@ -246,7 +246,7 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "Receives file-import webhook events from Sonarr/Radarr and triggers health checks. Authenticated via API key query parameter.",
+                "description": "Receives file-import webhook events from ARR instances and triggers health checks. Authenticated via API key query parameter.",
                 "consumes": [
                     "application/json"
                 ],
@@ -298,7 +298,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Automatically registers AltMount as a webhook connection in all configured Sonarr/Radarr instances.",
+                "description": "Automatically registers AltMount as a webhook connection in all configured ARR instances.",
                 "produces": [
                     "application/json"
                 ],
@@ -484,6 +484,52 @@
                 }
             }
         },
+        "/auth/reset-admin-password": {
+            "post": {
+                "description": "Resets the password for a direct-auth user. Only available when login is disabled.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Auth"
+                ],
+                "summary": "Reset admin password",
+                "parameters": [
+                    {
+                        "description": "Reset credentials",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.ResetAdminPasswordRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.APIResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/api.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/api.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/config": {
             "get": {
                 "security": [
@@ -607,6 +653,70 @@
                                     "properties": {
                                         "data": {
                                             "$ref": "#/definitions/api.ProviderSpeedTestResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/api.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/api.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/api.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/config/providers/{id}/tune-pipeline": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Sweeps inflight depths against the provider and returns the recommended inflight_requests value.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Providers"
+                ],
+                "summary": "Auto-tune provider pipeline depth",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Provider ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/api.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/api.PipelineTuneResponse"
                                         }
                                     }
                                 }
@@ -1750,37 +1860,6 @@
                 }
             }
         },
-        "/health/regenerate-symlinks": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Regenerates all library symlinks and STRM files for files that already have metadata.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Health"
-                ],
-                "summary": "Regenerate library symlinks",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/api.APIResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/api.APIResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/health/reset-all": {
             "post": {
                 "security": [
@@ -2531,6 +2610,107 @@
                 }
             }
         },
+        "/import/nzbdav/migrate-symlinks": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Walks a library directory and rewrites symlinks that target the nzbdav mount to point at the altmount path instead.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Import"
+                ],
+                "summary": "Migrate NZBDav library symlinks",
+                "parameters": [
+                    {
+                        "description": "library_path, source_mount_path, dry_run",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.APIResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/api.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/api.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/import/nzbdav/migrations": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Deletes every import_migrations row for source='nzbdav' regardless of status. Use to force a full re-import after the imported files have been deleted from AltMount. This will cause the scanner to re-process every blob on the next import.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Import"
+                ],
+                "summary": "Clear ALL NZBDav migration rows",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/import/nzbdav/pending-migrations": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Deletes all import_migrations rows with status='pending' for source='nzbdav'. Keeps imported/symlinks_migrated rows untouched. Use to remove orphaned rows from a cancelled/failed import before re-importing.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Import"
+                ],
+                "summary": "Clear pending NZBDav migration rows",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/import/nzbdav/reset": {
             "post": {
                 "security": [
@@ -2686,9 +2866,145 @@
                 }
             }
         },
+        "/metadata/migration/cancel": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Stops an in-flight migration after the current file.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Metadata"
+                ],
+                "summary": "Cancel the metadata migration",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.APIResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/api.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/metadata/migration/dry-run": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Converts against an isolated temporary root and reports measured savings without touching the library.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Metadata"
+                ],
+                "summary": "Dry-run the metadata migration",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.APIResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/api.APIResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/api.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/metadata/migration/start": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Rewrites legacy .meta files to the v3 store-backed format in place.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Metadata"
+                ],
+                "summary": "Start the metadata migration",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.APIResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/api.APIResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/api.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/metadata/migration/status": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the status of the legacy metadata → v3 migration worker.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Metadata"
+                ],
+                "summary": "Get metadata migration status",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.APIResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/api.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/nzb/streams": {
             "post": {
-                "description": "Accepts an NZB file upload, queues it with high priority, and synchronously waits for completion before returning Stremio-compatible stream URLs for all media files found in the NZB output. Authenticated via download_key form field (SHA256 of API key).",
+                "description": "Accepts an NZB file (upload or URL), queues it with high priority, and returns Stremio-compatible stream URLs as soon as the file is accessible via VFS. Auth: download_key form field (SHA256 of API key) or X-Api-Key header (raw API key). Returns _cached=true when served from an already-completed item.",
                 "consumes": [
                     "multipart/form-data"
                 ],
@@ -2702,17 +3018,27 @@
                 "parameters": [
                     {
                         "type": "file",
-                        "description": "NZB file to process",
+                        "description": "NZB file to process (mutually exclusive with nzb_url)",
                         "name": "file",
-                        "in": "formData",
-                        "required": true
+                        "in": "formData"
                     },
                     {
                         "type": "string",
-                        "description": "SHA256 hash of the user's API key",
+                        "description": "URL to download the NZB from (mutually exclusive with file)",
+                        "name": "nzb_url",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "SHA256 hash of the user's API key (alternative: X-Api-Key header)",
                         "name": "download_key",
-                        "in": "formData",
-                        "required": true
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Raw API key (alternative to download_key form field)",
+                        "name": "X-Api-Key",
+                        "in": "header"
                     },
                     {
                         "type": "string",
@@ -2724,6 +3050,24 @@
                         "type": "integer",
                         "description": "Processing timeout in seconds (default: 300)",
                         "name": "timeout",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Season number for selecting one episode from a season pack",
+                        "name": "season",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Episode number for selecting one episode from a season pack",
+                        "name": "episode",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Stremio content id (e.g. tt1234567:1:5) as an alternative to season/episode",
+                        "name": "id",
                         "in": "formData"
                     }
                 ],
@@ -2807,6 +3151,34 @@
                         "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/api.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/providers/backbones": {
+            "get": {
+                "description": "Returns a cached mapping of usenet hostnames to their upstream backbone (storage group)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "providers"
+                ],
+                "summary": "Get provider backbone map",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     }
                 }
@@ -3012,6 +3384,90 @@
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/api.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/providers/{id}/reset-quota": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Resets the download quota counter for the specified provider, allowing it to download again.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Providers"
+                ],
+                "summary": "Reset provider download quota",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Provider ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/api.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/prowlarr/indexers": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the usenet indexers configured in Prowlarr for the Stremio addon.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Config"
+                ],
+                "summary": "List Prowlarr indexers",
+                "parameters": [
+                    {
+                        "description": "Optional Prowlarr connection overrides",
+                        "name": "body",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/api.prowlarrIndexersRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.APIResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/api.APIResponse"
                         }
@@ -3235,6 +3691,86 @@
                         "description": "Accepted",
                         "schema": {
                             "$ref": "#/definitions/api.APIResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/api.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/queue/bulk/priority": {
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Updates the priority for multiple queue items at once. Items currently being processed are skipped.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Queue"
+                ],
+                "summary": "Bulk update queue item priorities",
+                "parameters": [
+                    {
+                        "description": "IDs and priority: 1=high, 2=normal, 3=low",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "ids": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "integer",
+                                        "format": "int64"
+                                    }
+                                },
+                                "priority": {
+                                    "type": "integer"
+                                }
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/api.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "object",
+                                            "properties": {
+                                                "message": {
+                                                    "type": "string"
+                                                },
+                                                "skipped_count": {
+                                                    "type": "integer"
+                                                },
+                                                "updated_count": {
+                                                    "type": "integer"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     },
                     "400": {
@@ -4069,7 +4605,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Resets a failed, pending, or completed queue item to pending and triggers processing.",
+                "description": "Resets a failed, pending, or completed queue item to pending so it is picked up by the worker pool.",
                 "produces": [
                     "application/json"
                 ],
@@ -4190,6 +4726,18 @@
                         "type": "string",
                         "description": "Safe filename title for the NZB",
                         "name": "title",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Season number for selecting one episode from a season pack",
+                        "name": "season",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Episode number for selecting one episode from a season pack",
+                        "name": "episode",
                         "in": "query"
                     }
                 ],
@@ -4430,6 +4978,102 @@
                                     "properties": {
                                         "data": {
                                             "$ref": "#/definitions/api.PoolMetricsResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/system/provider-speed-history": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns speed test history per provider over the given number of days.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System"
+                ],
+                "summary": "Get provider speed test history",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Number of days to fetch data for (default: 30)",
+                        "name": "days",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/api.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/api.ProviderSpeedTestHistoryResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/system/provider-stats": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns aggregated data usage per provider over the given number of days.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System"
+                ],
+                "summary": "Get provider historical data usage stats",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Number of days to fetch data for (default: 30)",
+                        "name": "days",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Aggregation interval (daily, weekly, monthly, yearly)",
+                        "name": "interval",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/api.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/api.ProviderHistoricalStatsResponse"
                                         }
                                     }
                                 }
@@ -4928,6 +5572,74 @@
                 }
             }
         },
+        "api.ArrsAPIResponse": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "lidarr_instances": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.ArrsInstanceAPIResponse"
+                    }
+                },
+                "max_workers": {
+                    "type": "integer"
+                },
+                "queue_cleanup_enabled": {
+                    "type": "boolean"
+                },
+                "queue_cleanup_grace_period_minutes": {
+                    "type": "integer"
+                },
+                "queue_cleanup_interval_seconds": {
+                    "type": "integer"
+                },
+                "queue_cleanup_max_failures": {
+                    "type": "integer"
+                },
+                "queue_cleanup_rules": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/config.StuckCleanupRule"
+                    }
+                },
+                "radarr_instances": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.ArrsInstanceAPIResponse"
+                    }
+                },
+                "readarr_instances": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.ArrsInstanceAPIResponse"
+                    }
+                },
+                "sonarr_instances": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.ArrsInstanceAPIResponse"
+                    }
+                },
+                "sportarr_instances": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.ArrsInstanceAPIResponse"
+                    }
+                },
+                "webhook_base_url": {
+                    "type": "string"
+                },
+                "whisparr_instances": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.ArrsInstanceAPIResponse"
+                    }
+                }
+            }
+        },
         "api.ArrsDeletedFile": {
             "type": "object",
             "properties": {
@@ -4936,14 +5648,26 @@
                 }
             }
         },
-        "api.TestConnectionRequest": {
+        "api.ArrsInstanceAPIResponse": {
             "type": "object",
             "properties": {
                 "api_key": {
                     "type": "string"
                 },
-                "type": {
+                "api_key_set": {
+                    "type": "boolean"
+                },
+                "category": {
                     "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "sync_interval_hours": {
+                    "type": "integer"
                 },
                 "url": {
                     "type": "string"
@@ -4953,17 +5677,98 @@
         "api.ArrsWebhookRequest": {
             "type": "object",
             "properties": {
+                "album": {
+                    "type": "object",
+                    "properties": {
+                        "id": {
+                            "type": "integer"
+                        },
+                        "title": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "artist": {
+                    "type": "object",
+                    "properties": {
+                        "id": {
+                            "type": "integer"
+                        },
+                        "path": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "author": {
+                    "type": "object",
+                    "properties": {
+                        "id": {
+                            "type": "integer"
+                        },
+                        "path": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "book": {
+                    "type": "object",
+                    "properties": {
+                        "id": {
+                            "type": "integer"
+                        },
+                        "title": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "bookFile": {
+                    "type": "object",
+                    "properties": {
+                        "id": {
+                            "type": "integer"
+                        }
+                    }
+                },
                 "deletedFiles": {
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/api.ArrsDeletedFile"
                     }
                 },
+                "downloadId": {
+                    "type": "string"
+                },
                 "episodeFile": {
                     "type": "object",
                     "properties": {
+                        "id": {
+                            "type": "integer"
+                        },
                         "path": {
                             "type": "string"
+                        },
+                        "sceneName": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "episodes": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "episodeNumber": {
+                                "type": "integer"
+                            },
+                            "id": {
+                                "type": "integer"
+                            },
+                            "seasonNumber": {
+                                "type": "integer"
+                            },
+                            "title": {
+                                "type": "string"
+                            }
                         }
                     }
                 },
@@ -4973,19 +5778,45 @@
                 "filePath": {
                     "type": "string"
                 },
+                "instanceName": {
+                    "type": "string"
+                },
                 "movie": {
                     "description": "For upgrades/renames, the file path might be in other fields or need to be inferred",
                     "type": "object",
                     "properties": {
                         "folderPath": {
                             "type": "string"
+                        },
+                        "id": {
+                            "type": "integer"
+                        },
+                        "tmdbId": {
+                            "type": "integer"
                         }
                     }
                 },
                 "movieFile": {
                     "type": "object",
                     "properties": {
+                        "id": {
+                            "type": "integer"
+                        },
                         "path": {
+                            "type": "string"
+                        },
+                        "sceneName": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "release": {
+                    "type": "object",
+                    "properties": {
+                        "indexer": {
+                            "type": "string"
+                        },
+                        "releaseTitle": {
                             "type": "string"
                         }
                     }
@@ -4993,8 +5824,22 @@
                 "series": {
                     "type": "object",
                     "properties": {
+                        "id": {
+                            "type": "integer"
+                        },
                         "path": {
                             "type": "string"
+                        },
+                        "tvdbId": {
+                            "type": "integer"
+                        }
+                    }
+                },
+                "trackFile": {
+                    "type": "object",
+                    "properties": {
+                        "id": {
+                            "type": "integer"
                         }
                     }
                 }
@@ -5040,7 +5885,7 @@
                     "type": "string"
                 },
                 "arrs": {
-                    "$ref": "#/definitions/config.ArrsConfig"
+                    "$ref": "#/definitions/api.ArrsAPIResponse"
                 },
                 "auth": {
                     "$ref": "#/definitions/config.AuthConfig"
@@ -5073,6 +5918,9 @@
                 "mount_type": {
                     "$ref": "#/definitions/config.MountType"
                 },
+                "network": {
+                    "$ref": "#/definitions/config.NetworkConfig"
+                },
                 "profiler_enabled": {
                     "type": "boolean"
                 },
@@ -5095,7 +5943,11 @@
                     "$ref": "#/definitions/config.StreamingConfig"
                 },
                 "stremio": {
-                    "$ref": "#/definitions/config.StremioConfig"
+                    "$ref": "#/definitions/api.StremioAPIResponse"
+                },
+                "user_agent": {
+                    "description": "UserAgent is the HTTP User-Agent sent on every outbound HTTP request that\nidentifies AltMount (indexer NZB downloads, metadata lookups, nzblnk://\nresolution, GitHub release checks). Defaults to a browser-like string\nbecause some public indexers reject non-browser agents. Leave empty to\nuse the default.",
+                    "type": "string"
                 },
                 "webdav": {
                     "$ref": "#/definitions/api.WebDAVAPIResponse"
@@ -5187,6 +6039,9 @@
                 "file_path": {
                     "type": "string"
                 },
+                "library_path": {
+                    "type": "string"
+                },
                 "max_retries": {
                     "type": "integer"
                 },
@@ -5228,6 +6083,10 @@
                 "id": {
                     "type": "integer"
                 },
+                "indexer": {
+                    "description": "Added indexer",
+                    "type": "string"
+                },
                 "is_masked": {
                     "type": "boolean"
                 },
@@ -5245,6 +6104,9 @@
                 },
                 "max_retries": {
                     "type": "integer"
+                },
+                "metadata": {
+                    "type": "string"
                 },
                 "priority": {
                     "$ref": "#/definitions/database.HealthPriority"
@@ -5288,6 +6150,9 @@
                     "type": "integer"
                 },
                 "corrupted": {
+                    "type": "integer"
+                },
+                "degraded": {
                     "type": "integer"
                 },
                 "healthy": {
@@ -5354,6 +6219,9 @@
                         "type": "string"
                     }
                 },
+                "filter_sample_files": {
+                    "type": "boolean"
+                },
                 "import_dir": {
                     "type": "string"
                 },
@@ -5373,12 +6241,16 @@
                 "read_timeout_seconds": {
                     "type": "integer"
                 },
+                "rename_to_nzb_name": {
+                    "type": "boolean"
+                },
                 "segment_sample_percentage": {
                     "description": "Percentage of segments to check (1-100)",
                     "type": "integer"
                 },
-                "skip_health_check": {
-                    "type": "boolean"
+                "stream_headroom_connections": {
+                    "description": "StreamHeadroomConnections is nil when the reservation derives from pool\nsize, and an explicit 0 when the operator has disabled it entirely.",
+                    "type": "integer"
                 },
                 "watch_dir": {
                     "type": "string"
@@ -5406,7 +6278,14 @@
                 "id": {
                     "type": "integer"
                 },
+                "indexer": {
+                    "description": "Added indexer",
+                    "type": "string"
+                },
                 "library_path": {
+                    "type": "string"
+                },
+                "metadata": {
                     "type": "string"
                 },
                 "nzb_id": {
@@ -5439,6 +6318,9 @@
                 },
                 "relative_path": {
                     "type": "string"
+                },
+                "skip_arr_notification": {
+                    "type": "boolean"
                 }
             }
         },
@@ -5504,6 +6386,84 @@
                 }
             }
         },
+        "api.NewsnabIndexerAPIResponse": {
+            "type": "object",
+            "properties": {
+                "api_key": {
+                    "type": "string"
+                },
+                "api_key_set": {
+                    "type": "boolean"
+                },
+                "categories": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "timeout_seconds": {
+                    "type": "integer"
+                },
+                "url": {
+                    "type": "string"
+                },
+                "weight": {
+                    "type": "integer"
+                }
+            }
+        },
+        "api.PipelineDepthSample": {
+            "type": "object",
+            "properties": {
+                "depth": {
+                    "type": "integer"
+                },
+                "mbps": {
+                    "type": "number"
+                }
+            }
+        },
+        "api.PipelineTuneResponse": {
+            "type": "object",
+            "properties": {
+                "baseline_mbps": {
+                    "type": "number"
+                },
+                "best_mbps": {
+                    "type": "number"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "improvement_pct": {
+                    "type": "number"
+                },
+                "recommended_inflight": {
+                    "type": "integer"
+                },
+                "test_connections": {
+                    "type": "integer"
+                },
+                "tested": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.PipelineDepthSample"
+                    }
+                },
+                "warning": {
+                    "type": "string"
+                }
+            }
+        },
         "api.PoolMetricsResponse": {
             "type": "object",
             "properties": {
@@ -5528,6 +6488,13 @@
                 "max_download_speed_bytes_per_sec": {
                     "type": "number"
                 },
+                "provider_bytes": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer",
+                        "format": "int64"
+                    }
+                },
                 "provider_errors": {
                     "type": "object",
                     "additionalProperties": {
@@ -5540,6 +6507,9 @@
                     "items": {
                         "$ref": "#/definitions/api.ProviderStatusResponse"
                     }
+                },
+                "started_at": {
+                    "type": "string"
                 },
                 "timestamp": {
                     "type": "string"
@@ -5555,6 +6525,9 @@
         "api.ProviderAPIResponse": {
             "type": "object",
             "properties": {
+                "account_expiration_date": {
+                    "type": "string"
+                },
                 "enabled": {
                     "type": "boolean"
                 },
@@ -5573,6 +6546,12 @@
                 "is_backup_provider": {
                     "type": "boolean"
                 },
+                "keepalive_command": {
+                    "type": "string"
+                },
+                "keepalive_interval_seconds": {
+                    "type": "integer"
+                },
                 "last_rtt_ms": {
                     "type": "integer"
                 },
@@ -5585,6 +6564,12 @@
                 "max_connections": {
                     "type": "integer"
                 },
+                "min_connections_alive": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
                 "password_set": {
                     "type": "boolean"
                 },
@@ -5594,8 +6579,26 @@
                 "proxy_url": {
                     "type": "string"
                 },
+                "quota_bytes": {
+                    "type": "integer"
+                },
+                "quota_period_hours": {
+                    "type": "integer"
+                },
+                "skip_ping": {
+                    "type": "boolean"
+                },
+                "stat_inflight_requests": {
+                    "type": "integer"
+                },
+                "storage_group": {
+                    "type": "string"
+                },
                 "tls": {
                     "type": "boolean"
+                },
+                "user_agent": {
+                    "type": "string"
                 },
                 "username": {
                     "type": "string"
@@ -5620,6 +6623,9 @@
                 "max_connections": {
                     "type": "integer"
                 },
+                "min_connections_alive": {
+                    "type": "integer"
+                },
                 "password": {
                     "type": "string"
                 },
@@ -5629,11 +6635,39 @@
                 "proxy_url": {
                     "type": "string"
                 },
+                "storage_group": {
+                    "type": "string"
+                },
                 "tls": {
                     "type": "boolean"
                 },
                 "username": {
                     "type": "string"
+                }
+            }
+        },
+        "api.ProviderHistoricalStatResponse": {
+            "type": "object",
+            "properties": {
+                "bytes_downloaded": {
+                    "type": "integer"
+                },
+                "provider_id": {
+                    "type": "string"
+                },
+                "timestamp": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.ProviderHistoricalStatsResponse": {
+            "type": "object",
+            "properties": {
+                "stats": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.ProviderHistoricalStatResponse"
+                    }
                 }
             }
         },
@@ -5645,6 +6679,34 @@
                     "items": {
                         "type": "string"
                     }
+                }
+            }
+        },
+        "api.ProviderSpeedTestHistoryResponse": {
+            "type": "object",
+            "properties": {
+                "history": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.ProviderSpeedTestHistoryStat"
+                    }
+                }
+            }
+        },
+        "api.ProviderSpeedTestHistoryStat": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "provider_id": {
+                    "type": "string"
+                },
+                "speed_mbps": {
+                    "type": "number"
                 }
             }
         },
@@ -5662,6 +6724,12 @@
         "api.ProviderStatusResponse": {
             "type": "object",
             "properties": {
+                "byte_count": {
+                    "type": "integer"
+                },
+                "byte_count_24h": {
+                    "type": "integer"
+                },
                 "current_speed_bytes_per_sec": {
                     "type": "number"
                 },
@@ -5701,8 +6769,26 @@
                 "missing_warning": {
                     "type": "boolean"
                 },
+                "name": {
+                    "type": "string"
+                },
                 "ping_ms": {
                     "type": "integer"
+                },
+                "quota_bytes": {
+                    "type": "integer"
+                },
+                "quota_exceeded": {
+                    "type": "boolean"
+                },
+                "quota_reset_at": {
+                    "type": "string"
+                },
+                "quota_used": {
+                    "type": "integer"
+                },
+                "started_at": {
+                    "type": "string"
                 },
                 "state": {
                     "type": "string"
@@ -5759,6 +6845,9 @@
                 "max_connections": {
                     "type": "integer"
                 },
+                "min_connections_alive": {
+                    "type": "integer"
+                },
                 "password": {
                     "type": "string"
                 },
@@ -5768,11 +6857,85 @@
                 "proxy_url": {
                     "type": "string"
                 },
+                "storage_group": {
+                    "type": "string"
+                },
                 "tls": {
                     "type": "boolean"
                 },
                 "username": {
                     "type": "string"
+                }
+            }
+        },
+        "api.ProwlarrAPIResponse": {
+            "type": "object",
+            "properties": {
+                "api_key": {
+                    "type": "string"
+                },
+                "api_key_set": {
+                    "type": "boolean"
+                },
+                "categories": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "custom_scores": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer"
+                    }
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "exclude_keywords": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "host": {
+                    "type": "string"
+                },
+                "indexers": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "languages": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "preferred_indexer_names": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "preferred_indexers": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "preferred_languages": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "qualities": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },
@@ -5837,10 +7000,17 @@
                 "id": {
                     "type": "integer"
                 },
+                "indexer": {
+                    "description": "Indexer name",
+                    "type": "string"
+                },
                 "max_retries": {
                     "type": "integer"
                 },
                 "metadata": {
+                    "type": "string"
+                },
+                "nzb_display_name": {
                     "type": "string"
                 },
                 "nzb_path": {
@@ -5856,11 +7026,19 @@
                 "retry_count": {
                     "type": "integer"
                 },
+                "stage": {
+                    "description": "Progress stage (e.g. \"Validating segments\")",
+                    "type": "string"
+                },
                 "started_at": {
                     "type": "string"
                 },
                 "status": {
                     "$ref": "#/definitions/database.QueueStatus"
+                },
+                "storage_path": {
+                    "description": "Internal FUSE mount path (populated after completion)",
+                    "type": "string"
                 },
                 "target_path": {
                     "type": "string"
@@ -5971,12 +7149,6 @@
                 "rc_user": {
                     "type": "string"
                 },
-                "read_chunk_size": {
-                    "type": "string"
-                },
-                "read_chunk_size_limit": {
-                    "type": "string"
-                },
                 "read_only": {
                     "type": "boolean"
                 },
@@ -6013,6 +7185,9 @@
                 "vfs_cache_mode": {
                     "type": "string"
                 },
+                "vfs_cache_poll_interval": {
+                    "type": "string"
+                },
                 "vfs_disk_space_total": {
                     "type": "string"
                 },
@@ -6023,6 +7198,12 @@
                     "type": "string"
                 },
                 "vfs_read_ahead": {
+                    "type": "string"
+                },
+                "vfs_read_chunk_size": {
+                    "type": "string"
+                },
+                "vfs_read_chunk_size_limit": {
                     "type": "string"
                 },
                 "vfs_read_chunk_streams": {
@@ -6037,6 +7218,17 @@
                     "type": "string"
                 },
                 "password": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.ResetAdminPasswordRequest": {
+            "type": "object",
+            "properties": {
+                "new_password": {
                     "type": "string"
                 },
                 "username": {
@@ -6072,6 +7264,9 @@
                 },
                 "fallback_host": {
                     "type": "string"
+                },
+                "history_retention_minutes": {
+                    "type": "integer"
                 }
             }
         },
@@ -6121,6 +7316,118 @@
                 }
             }
         },
+        "api.StreamScoringAPIResponse": {
+            "type": "object",
+            "properties": {
+                "custom_formats": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.TrashCustomFormatAPIResponse"
+                    }
+                },
+                "exclude_keywords": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "exclude_regex": {
+                    "type": "string"
+                },
+                "preferred_languages": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "preset": {
+                    "type": "string"
+                },
+                "require_preferred_language": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "api.StremioAPIResponse": {
+            "type": "object",
+            "properties": {
+                "addon_description": {
+                    "type": "string"
+                },
+                "addon_name": {
+                    "type": "string"
+                },
+                "base_url": {
+                    "type": "string"
+                },
+                "direct_stream": {
+                    "type": "boolean"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "failed_release_ttl_hours": {
+                    "description": "No omitempty: an explicit 0 must survive the round-trip, otherwise saving the\nconfig would silently restore the defaults.",
+                    "type": "integer"
+                },
+                "fallback_timeout_ms": {
+                    "type": "integer"
+                },
+                "fast_fail_header_only": {
+                    "type": "boolean"
+                },
+                "include_library_streams": {
+                    "type": "boolean"
+                },
+                "indexers": {
+                    "$ref": "#/definitions/api.StremioIndexersAPIResponse"
+                },
+                "max_fallback_releases": {
+                    "type": "integer"
+                },
+                "max_retries": {
+                    "type": "integer"
+                },
+                "nzb_ttl_hours": {
+                    "type": "integer"
+                },
+                "prowlarr": {
+                    "$ref": "#/definitions/api.ProwlarrAPIResponse"
+                },
+                "scoring": {
+                    "$ref": "#/definitions/api.StreamScoringAPIResponse"
+                },
+                "show_cached_indicator": {
+                    "type": "boolean"
+                },
+                "stream_ttl_seconds": {
+                    "type": "integer"
+                }
+            }
+        },
+        "api.StremioIndexersAPIResponse": {
+            "type": "object",
+            "properties": {
+                "custom_user_agent": {
+                    "type": "string"
+                },
+                "newsnab": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.NewsnabIndexerAPIResponse"
+                    }
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "prowlarr": {
+                    "$ref": "#/definitions/api.ProwlarrAPIResponse"
+                },
+                "user_agent_mode": {
+                    "type": "string"
+                }
+            }
+        },
         "api.StremioStream": {
             "type": "object",
             "properties": {
@@ -6138,6 +7445,10 @@
         "api.StremioStreamsResponse": {
             "type": "object",
             "properties": {
+                "_cached": {
+                    "description": "Cached is true when streams were served from an already-completed queue item\nwithout re-processing. Callers such as AIOStreams can use this to show an\n\"instant\" indicator to the user.",
+                    "type": "boolean"
+                },
                 "_queue_item_id": {
                     "type": "integer"
                 },
@@ -6252,6 +7563,20 @@
                 }
             }
         },
+        "api.TestConnectionRequest": {
+            "type": "object",
+            "properties": {
+                "api_key": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                },
+                "url": {
+                    "type": "string"
+                }
+            }
+        },
         "api.TestProviderResponse": {
             "type": "object",
             "properties": {
@@ -6263,6 +7588,38 @@
                 },
                 "success": {
                     "type": "boolean"
+                }
+            }
+        },
+        "api.TrashCustomFormatAPIResponse": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "invert": {
+                    "type": "boolean"
+                },
+                "is_custom": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "pattern": {
+                    "type": "string"
+                },
+                "pattern_type": {
+                    "type": "string"
+                },
+                "score": {
+                    "type": "integer"
                 }
             }
         },
@@ -6280,6 +7637,9 @@
         "api.UpdateStatusResponse": {
             "type": "object",
             "properties": {
+                "binary_update_available": {
+                    "type": "boolean"
+                },
                 "channel": {
                     "$ref": "#/definitions/api.UpdateChannel"
                 },
@@ -6350,6 +7710,17 @@
                 }
             }
         },
+        "api.prowlarrIndexersRequest": {
+            "type": "object",
+            "properties": {
+                "api_key": {
+                    "type": "string"
+                },
+                "host": {
+                    "type": "string"
+                }
+            }
+        },
         "api.stremioManifest": {
             "type": "object",
             "properties": {
@@ -6409,20 +7780,17 @@
         "config.ArrsConfig": {
             "type": "object",
             "properties": {
-                "cleanup_automatic_import_failure": {
-                    "type": "boolean"
-                },
                 "enabled": {
                     "type": "boolean"
                 },
-                "max_workers": {
-                    "type": "integer"
-                },
-                "queue_cleanup_allowlist": {
+                "lidarr_instances": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/config.IgnoredMessage"
+                        "$ref": "#/definitions/config.ArrsInstanceConfig"
                     }
+                },
+                "max_workers": {
+                    "type": "integer"
                 },
                 "queue_cleanup_enabled": {
                     "type": "boolean"
@@ -6433,7 +7801,24 @@
                 "queue_cleanup_interval_seconds": {
                     "type": "integer"
                 },
+                "queue_cleanup_max_failures": {
+                    "description": "QueueCleanupMaxFailures is the per-target failure circuit breaker. After\nAltMount has acted on the same target (a Radarr movie or Sonarr/Whisparr\nepisode that keeps failing import) this many times — via queue cleanup,\nhealth-repair re-searches or the partial-pack reconcile — it gives up:\nit blocklists without re-searching and unmonitors the item in the *arr so it\nstops being automatically re-grabbed. 0 (the default) disables the breaker.",
+                    "type": "integer"
+                },
+                "queue_cleanup_rules": {
+                    "description": "QueueCleanupRules matches an *arr status message for a stuck/failed import and\ndecides the action (remove / blocklist / blocklist+search). This is the single\nmessage-rule list for queue cleanup; ghost/empty-folder detection runs alongside\nit in the same pass. Only items owned by AltMount's download client are touched\n(see issue #523).",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/config.StuckCleanupRule"
+                    }
+                },
                 "radarr_instances": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/config.ArrsInstanceConfig"
+                    }
+                },
+                "readarr_instances": {
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/config.ArrsInstanceConfig"
@@ -6445,8 +7830,20 @@
                         "$ref": "#/definitions/config.ArrsInstanceConfig"
                     }
                 },
+                "sportarr_instances": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/config.ArrsInstanceConfig"
+                    }
+                },
                 "webhook_base_url": {
                     "type": "string"
+                },
+                "whisparr_instances": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/config.ArrsInstanceConfig"
+                    }
                 }
             }
         },
@@ -6515,6 +7912,14 @@
                 "allow_other": {
                     "type": "boolean"
                 },
+                "async_buffer_max_total_mb": {
+                    "description": "AsyncBufferMaxTotalMB caps total read-ahead memory across all open files\n(MB). Buffers reserve their size only while actively streaming; over the\ncap, additional streams run unbuffered. 0 = unlimited.",
+                    "type": "integer"
+                },
+                "async_buffer_size_mb": {
+                    "description": "AsyncBufferSizeMB is the per-open-file read-ahead buffer size (MB). A\nbackground goroutine fills it ahead of the player so reads are served\nfrom memory instead of blocking on the network, mirroring the buffering\nrclone's VFS provides over WebDAV. 0 disables read-ahead (every read is a\ndirect passthrough — the previous behavior).",
+                    "type": "integer"
+                },
                 "attr_timeout_seconds": {
                     "type": "integer"
                 },
@@ -6539,6 +7944,10 @@
                 },
                 "mount_path": {
                     "type": "string"
+                },
+                "no_mod_time": {
+                    "description": "NoModTime reports epoch for all timestamps (mtime, ctime, atime); prevents\nmedia servers re-scanning on unstable VFS mtimes. Note: tools like find -atime\nwill not see meaningful access times on this mount.",
+                    "type": "boolean"
                 }
             }
         },
@@ -6551,14 +7960,28 @@
                 "check_all_segments": {
                     "type": "boolean"
                 },
+                "check_batch_size": {
+                    "type": "integer"
+                },
                 "check_interval_seconds": {
                     "type": "integer"
                 },
                 "cleanup_orphaned_metadata": {
                     "type": "boolean"
                 },
+                "corruption_action": {
+                    "description": "CorruptionAction controls what happens when the health checker or a streaming read\nconfirms real (non-degraded) corruption: \"repair\" (default) triggers an Arr rescan;\n\"delete\" removes the file's metadata/NZB/health record and cleans up now-empty\nparent directories instead. Degraded files are never affected either way.",
+                    "type": "string"
+                },
                 "enabled": {
                     "type": "boolean"
+                },
+                "excluded_categories": {
+                    "description": "ExcludedCategories lists SABnzbd category names whose files must never be\nregistered for health checking by the library-sync discovery pass. Matching\nis by the category's configured directory under CompleteDir and is\ncase-insensitive. Empty means no categories are excluded.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "library_dir": {
                     "type": "string"
@@ -6572,7 +7995,18 @@
                 "max_concurrent_jobs": {
                     "type": "integer"
                 },
+                "max_concurrent_segment_checks": {
+                    "description": "MaxConcurrentSegmentChecks bounds how many STAT checks a health sweep keeps\nin flight. STAT is bodyless and pipelines many per connection, so connection\ncount is the wrong unit — the import path already sizes its sweep by STAT\npipeline depth (see importer/processor.go).\n\nnil or 0 means \"adapt\": the pool narrows the sweep to one connection's depth\nwhile a stream is playing and widens it to the pool's aggregate STAT capacity\nwhen idle, which measured 24x the sweep throughput on an idle pool.",
+                    "type": "integer"
+                },
                 "max_connections_for_health_checks": {
+                    "description": "Deprecated: superseded by MaxConcurrentSegmentChecks, which is named for\nwhat it actually bounds. Read for one-time migration only (see\nmigrateHealthSweepConcurrency), then cleared. Do not use in new code.",
+                    "type": "integer"
+                },
+                "max_retries": {
+                    "type": "integer"
+                },
+                "read_timeout_seconds": {
                     "type": "integer"
                 },
                 "repair": {
@@ -6582,21 +8016,18 @@
                     "type": "boolean"
                 },
                 "segment_sample_percentage": {
+                    "description": "SegmentSamplePercentage is the fraction (1-100) of segments randomly sampled\nduring health-check sweeps (post-import validation only). Distinct from\nImport.SegmentSamplePercentage, which samples during archive extraction.\nHigher sampling catches more corruption but adds overhead. Default 5%.",
+                    "type": "integer"
+                },
+                "verify_content": {
+                    "description": "VerifyContent, when true, probes each eligible video/audio file's\nfirst bytes through the serving stack during a health check and\nmarks the file corrupted if no recognized media container signature\nis found. Distinct from the unrelated, unused VerifyData field above.",
+                    "type": "boolean"
+                },
+                "verify_content_timeout_seconds": {
                     "type": "integer"
                 },
                 "verify_data": {
                     "type": "boolean"
-                }
-            }
-        },
-        "config.IgnoredMessage": {
-            "type": "object",
-            "properties": {
-                "enabled": {
-                    "type": "boolean"
-                },
-                "message": {
-                    "type": "string"
                 }
             }
         },
@@ -6618,11 +8049,24 @@
                 "failed_item_retention_hours": {
                     "type": "integer"
                 },
+                "filter_sample_files": {
+                    "type": "boolean"
+                },
+                "history_retention_days": {
+                    "type": "integer"
+                },
                 "import_dir": {
                     "type": "string"
                 },
                 "import_strategy": {
                     "$ref": "#/definitions/config.ImportStrategy"
+                },
+                "iso_analyze_timeout_seconds": {
+                    "type": "integer"
+                },
+                "max_concurrent_imports": {
+                    "description": "MaxConcurrentImports caps the number of NZB imports that may run\nend-to-end at the same time. 0 = unlimited. NNTP connection use is\nbalanced automatically: imports share the pool's full capacity and\nyield to streams (priority lane + adaptive connection budget).",
+                    "type": "integer"
                 },
                 "max_download_prefetch": {
                     "type": "integer"
@@ -6636,11 +8080,23 @@
                 "read_timeout_seconds": {
                     "type": "integer"
                 },
+                "rename_to_nzb_name": {
+                    "type": "boolean"
+                },
                 "segment_sample_percentage": {
+                    "description": "SegmentSamplePercentage is the fraction (1-100) of segments randomly sampled\nduring import-phase validation (RAR extraction, archive integrity). Distinct from\nHealth.SegmentSamplePercentage, which samples during post-import health checks.\nLower defaults faster imports but skips error detection. Default 1%.",
                     "type": "integer"
                 },
-                "skip_health_check": {
+                "stream_headroom_connections": {
+                    "description": "StreamHeadroomConnections is how many connections are held back from\nimport per active stream. On a saturated link those connections are slack\n— they are not converting into bytes — so handing them to playback costs\nlittle and measurably shortens stream latency. Past that point the pool\ncan no longer fill the link and import throughput really does fall.\n\nMeasured at 100 connections behind a 400 MB/s link: 8 is free (import\n358 vs 359 MB/s) and takes stream p50 190ms -\u003e 179ms; 32 costs ~13% import\nand takes p50 to 146ms and p99 245ms -\u003e 167ms. The right value depends on\nthe link rate and pool size, so it is a knob rather than a constant.\n0 disables the reservation entirely.\nA nil pointer means \"unset, use the default\"; an explicit 0 disables the\nreservation. A plain int cannot express that difference, since YAML omits\nand YAML-zero both decode to 0.",
+                    "type": "integer"
+                },
+                "verify_content": {
+                    "description": "VerifyContent, when true, probes each eligible video/audio file's\nfirst bytes through the serving stack after import and fails the\nimport if no recognized media container signature is found.",
                     "type": "boolean"
+                },
+                "verify_content_timeout_seconds": {
+                    "type": "integer"
                 },
                 "watch_dir": {
                     "type": "string"
@@ -6698,13 +8154,14 @@
                 "enabled": {
                     "type": "boolean"
                 },
-                "interval_hours": {
-                    "type": "integer"
-                },
                 "keep_backups": {
                     "type": "integer"
                 },
                 "path": {
+                    "type": "string"
+                },
+                "schedule": {
+                    "description": "cron expression (UTC)",
                     "type": "string"
                 }
             }
@@ -6715,13 +8172,19 @@
                 "backup": {
                     "$ref": "#/definitions/config.MetadataBackupConfig"
                 },
-                "delete_completed_nzb": {
-                    "type": "boolean"
-                },
-                "delete_source_nzb_on_removal": {
-                    "type": "boolean"
+                "migration": {
+                    "$ref": "#/definitions/config.MetadataMigrationConfig"
                 },
                 "root_path": {
+                    "type": "string"
+                }
+            }
+        },
+        "config.MetadataMigrationConfig": {
+            "type": "object",
+            "properties": {
+                "default_group": {
+                    "description": "DefaultGroup is the newsgroup written into synthesized NzbStore entries.\nLegacy metas do not retain the original groups, and nzb.BuildNZB renders an\nempty \u003cgroups\u003e element without this, which most NZB clients reject.",
                     "type": "string"
                 }
             }
@@ -6741,9 +8204,58 @@
                 "MountTypeRCloneExternal"
             ]
         },
+        "config.NetworkConfig": {
+            "type": "object",
+            "properties": {
+                "http_proxy": {
+                    "type": "string"
+                },
+                "https_proxy": {
+                    "type": "string"
+                },
+                "no_proxy": {
+                    "type": "string"
+                }
+            }
+        },
+        "config.NewsnabIndexerConfig": {
+            "type": "object",
+            "properties": {
+                "api_key": {
+                    "type": "string"
+                },
+                "categories": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "timeout_seconds": {
+                    "type": "integer"
+                },
+                "url": {
+                    "type": "string"
+                },
+                "weight": {
+                    "type": "integer"
+                }
+            }
+        },
         "config.ProviderConfig": {
             "type": "object",
             "properties": {
+                "account_expiration_date": {
+                    "type": "string"
+                },
                 "enabled": {
                     "type": "boolean"
                 },
@@ -6754,6 +8266,7 @@
                     "type": "string"
                 },
                 "inflight_requests": {
+                    "description": "InflightRequests caps concurrent decoded article bodies per connection (memory\nceiling). In practice, the pool-wide ImportBudget caps total in-flight bodies\nto roughly the connection count, so each connection carries ~1 body. Peak observed\ndepth is 3-4 against this cap of 10. Raising it does not improve import throughput.",
                     "type": "integer"
                 },
                 "insecure_tls": {
@@ -6761,6 +8274,12 @@
                 },
                 "is_backup_provider": {
                     "type": "boolean"
+                },
+                "keepalive_command": {
+                    "type": "string"
+                },
+                "keepalive_interval_seconds": {
+                    "type": "integer"
                 },
                 "last_rtt_ms": {
                     "type": "integer"
@@ -6774,17 +8293,39 @@
                 "max_connections": {
                     "type": "integer"
                 },
+                "min_connections_alive": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
                 "port": {
                     "type": "integer"
                 },
                 "proxy_url": {
                     "type": "string"
                 },
+                "quota_bytes": {
+                    "type": "integer"
+                },
+                "quota_period_hours": {
+                    "type": "integer"
+                },
                 "skip_ping": {
                     "type": "boolean"
                 },
+                "stat_inflight_requests": {
+                    "description": "StatInflightRequests caps the per-connection STAT pipeline depth (bodyless\nexistence checks). Its pool-wide aggregate (connections × depth, clamped to 4096)\ndetermines how much an idle-pool health sweep can widen: measured 24x sweep\nthroughput improvement. While a stream is active the sweep is capped lower regardless.",
+                    "type": "integer"
+                },
+                "storage_group": {
+                    "type": "string"
+                },
                 "tls": {
                     "type": "boolean"
+                },
+                "user_agent": {
+                    "type": "string"
                 },
                 "username": {
                     "type": "string"
@@ -6805,16 +8346,58 @@
                         "type": "integer"
                     }
                 },
+                "custom_scores": {
+                    "description": "CustomScores maps keyword/regex patterns to numeric scores (TRaSH guide style).\nPositive scores promote releases; negative scores demote them.\nExamples: {\"2160p\": 500, \"REMUX\": 300, \"DV\": -1000}",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer"
+                    }
+                },
                 "enabled": {
                     "description": "Enabled controls whether Prowlarr search is active for the Stremio addon.",
                     "type": "boolean"
+                },
+                "exclude_keywords": {
+                    "description": "ExcludeKeywords is an optional list of keywords/patterns; releases containing any are dropped.\nExamples: [\"DV\", \"DoVi\", \"CAM\", \"TS\", \"TeleSync\"]",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "host": {
                     "description": "Host is the Prowlarr base URL (e.g. \"http://localhost:9696\").",
                     "type": "string"
                 },
+                "indexers": {
+                    "description": "Indexers optionally restricts searches to specific Prowlarr indexer IDs.\nEmpty = search across all configured indexers.",
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
                 "languages": {
                     "description": "Languages is an optional list of keywords; releases must contain at least one to pass.\nEmpty = no filtering. Examples: [\"Esp\", \"🇪🇸\", \"Spanish\", \"DUAL\"]",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "preferred_indexer_names": {
+                    "description": "PreferredIndexerNames lists Prowlarr indexer names/keywords to prioritize and rank above others.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "preferred_indexers": {
+                    "description": "PreferredIndexers lists Prowlarr indexer IDs to prioritize and rank above others.",
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "preferred_languages": {
+                    "description": "PreferredLanguages lists language keywords to prioritize and rank above others.",
                     "type": "array",
                     "items": {
                         "type": "string"
@@ -6895,6 +8478,9 @@
                         "type": "string"
                     }
                 },
+                "rc_pass": {
+                    "type": "string"
+                },
                 "rc_port": {
                     "type": "integer"
                 },
@@ -6902,12 +8488,6 @@
                     "type": "string"
                 },
                 "rc_user": {
-                    "type": "string"
-                },
-                "read_chunk_size": {
-                    "type": "string"
-                },
-                "read_chunk_size_limit": {
                     "type": "string"
                 },
                 "read_only": {
@@ -6961,6 +8541,9 @@
                 "vfs_read_chunk_size": {
                     "type": "string"
                 },
+                "vfs_read_chunk_size_limit": {
+                    "type": "string"
+                },
                 "vfs_read_chunk_streams": {
                     "type": "integer"
                 }
@@ -6979,6 +8562,9 @@
                     "type": "integer"
                 },
                 "max_cooldown_hours": {
+                    "type": "integer"
+                },
+                "max_repair_retries": {
                     "type": "integer"
                 }
             }
@@ -7029,6 +8615,10 @@
                 "fallback_host": {
                     "description": "Fallback configuration for sending failed imports to external SABnzbd",
                     "type": "string"
+                },
+                "history_retention_minutes": {
+                    "description": "HistoryRetentionMinutes controls how far back the SABnzbd-emulating history\nendpoint looks into import_history when *arr clients poll without a specific\nnzo_id filter. Older entries are still returned when *arr asks for them by\nnzo_id. Defaults to 10080 (7 days).",
+                    "type": "integer"
                 }
             }
         },
@@ -7042,10 +8632,43 @@
                     "type": "boolean"
                 },
                 "expiry_hours": {
+                    "description": "ExpiryHours controls how long cached segments are kept before automatic\neviction. Set to 0 to disable expiry (cache forever, bounded only by\nMaxSizeGB via LRU eviction). Left unset (nil) it defaults to 24 hours.",
                     "type": "integer"
                 },
                 "max_size_gb": {
                     "type": "integer"
+                }
+            }
+        },
+        "config.StreamScoringConfig": {
+            "type": "object",
+            "properties": {
+                "custom_formats": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/config.TrashCustomFormatConfig"
+                    }
+                },
+                "exclude_keywords": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "exclude_regex": {
+                    "type": "string"
+                },
+                "preferred_languages": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "preset": {
+                    "type": "string"
+                },
+                "require_preferred_language": {
+                    "type": "boolean"
                 }
             }
         },
@@ -7057,31 +8680,165 @@
                 },
                 "max_prefetch": {
                     "type": "integer"
+                },
+                "read_timeout_seconds": {
+                    "description": "ReadTimeoutSeconds bounds a single streaming read (WebDAV Read and FUSE\nReadAt alike). Nothing below this layer carries a deadline the caller can\nobserve: a segment fetch that stalls without erroring parks the read\nindefinitely, and on FUSE that means an uninterruptible D-state for the\nreading process. On expiry the in-flight reader is interrupted and the\nread fails, so the caller gets an EIO it can act on. 0 uses the built-in\ndefault; a negative value disables the timeout.",
+                    "type": "integer"
                 }
             }
         },
         "config.StremioConfig": {
             "type": "object",
             "properties": {
+                "addon_description": {
+                    "description": "AddonDescription is the description shown in Stremio's addon catalog.",
+                    "type": "string"
+                },
+                "addon_name": {
+                    "description": "AddonName is the display name shown in Stremio's addon catalog.",
+                    "type": "string"
+                },
                 "base_url": {
                     "description": "BaseURL is the public base URL used when building Stremio stream links\n(e.g. \"https://altmount.example.com\"). Falls back to the auto-detected\nrequest origin when not set.",
                     "type": "string"
                 },
+                "direct_stream": {
+                    "description": "DirectStream when true streams NZB media segments directly.",
+                    "type": "boolean"
+                },
                 "enabled": {
                     "description": "Enabled controls whether the endpoint is active. Disabled by default.\nWhen false, the endpoint returns 404 Not Found.",
                     "type": "boolean"
+                },
+                "failed_release_ttl_hours": {
+                    "description": "FailedReleaseTTLHours controls how long a release that failed to import stays\nexcluded from the Stremio stream list. Mirrors NzbTTLHours semantics: it filters\nfailure records by age rather than deleting them, so it is bounded above by\nImport.FailedItemRetentionHours. Set to 0 to exclude for as long as the record\nsurvives. Defaults to 24 hours.",
+                    "type": "integer"
+                },
+                "fallback_timeout_ms": {
+                    "description": "FallbackTimeoutMs is the timeout before attempting a fallback release.",
+                    "type": "integer"
+                },
+                "fast_fail_header_only": {
+                    "description": "FastFailHeaderOnly when true causes Stremio-originated imports to fail fast\nimmediately on the release-level probe when missing articles are detected,\nskipping the multi-part RAR per-file Stat sweep. Defaults to true.",
+                    "type": "boolean"
+                },
+                "include_library_streams": {
+                    "description": "IncludeLibraryStreams when true checks and presents matching completed files\nfrom your Altmount library as instant 0s stream options in Stremio. Defaults to true.",
+                    "type": "boolean"
+                },
+                "indexers": {
+                    "description": "Indexers configures Prowlarr and direct Newsnab search providers.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/config.StremioIndexersConfig"
+                        }
+                    ]
+                },
+                "max_fallback_releases": {
+                    "description": "MaxFallbackReleases caps how many *extra* releases a single play request may try\nafter the first one fails. Set to 0 to disable fallback. Defaults to 2.",
+                    "type": "integer"
+                },
+                "max_retries": {
+                    "description": "MaxRetries is the maximum number of retry attempts for stream fetching.",
+                    "type": "integer"
                 },
                 "nzb_ttl_hours": {
                     "description": "NzbTTLHours controls how long a completed NZB result is cached before\nthe same NZB is re-processed on the next request.\nSet to 0 to disable expiry (cache forever). Defaults to 24 hours.",
                     "type": "integer"
                 },
                 "prowlarr": {
-                    "description": "Prowlarr configures the Prowlarr indexer used by the Stremio addon to search for NZBs.",
+                    "description": "Prowlarr configures the legacy Prowlarr indexer settings (retained for compatibility).",
                     "allOf": [
                         {
                             "$ref": "#/definitions/config.ProwlarrConfig"
                         }
                     ]
+                },
+                "scoring": {
+                    "description": "Scoring configures TRaSH format scoring and exclusions.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/config.StreamScoringConfig"
+                        }
+                    ]
+                },
+                "show_cached_indicator": {
+                    "description": "ShowCachedIndicator when true shows cached badges in stream titles.",
+                    "type": "boolean"
+                },
+                "stream_ttl_seconds": {
+                    "description": "StreamTTLSeconds is the stream cache expiration time in seconds.",
+                    "type": "integer"
+                }
+            }
+        },
+        "config.StremioIndexersConfig": {
+            "type": "object",
+            "properties": {
+                "custom_user_agent": {
+                    "type": "string"
+                },
+                "newsnab": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/config.NewsnabIndexerConfig"
+                    }
+                },
+                "provider": {
+                    "description": "\"prowlarr\", \"newsnab\", \"both\"",
+                    "type": "string"
+                },
+                "prowlarr": {
+                    "$ref": "#/definitions/config.ProwlarrConfig"
+                },
+                "user_agent_mode": {
+                    "type": "string"
+                }
+            }
+        },
+        "config.StuckCleanupRule": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "config.TrashCustomFormatConfig": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "invert": {
+                    "type": "boolean"
+                },
+                "is_custom": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "pattern": {
+                    "type": "string"
+                },
+                "pattern_type": {
+                    "type": "string"
+                },
+                "score": {
+                    "type": "integer"
                 }
             }
         },
@@ -7122,11 +8879,13 @@
                 "checking",
                 "healthy",
                 "repair_triggered",
-                "corrupted"
+                "corrupted",
+                "degraded"
             ],
             "x-enum-comments": {
                 "HealthStatusChecking": "File is currently being checked",
                 "HealthStatusCorrupted": "File has missing segments or is corrupted",
+                "HealthStatusDegraded": "Missing segments only hit media payload: still playable, no repair",
                 "HealthStatusHealthy": "File passed health check",
                 "HealthStatusPending": "File has not been checked yet",
                 "HealthStatusRepairTriggered": "File repair has been triggered in Arrs"
@@ -7136,14 +8895,16 @@
                 "File is currently being checked",
                 "File passed health check",
                 "File repair has been triggered in Arrs",
-                "File has missing segments or is corrupted"
+                "File has missing segments or is corrupted",
+                "Missing segments only hit media payload: still playable, no repair"
             ],
             "x-enum-varnames": [
                 "HealthStatusPending",
                 "HealthStatusChecking",
                 "HealthStatusHealthy",
                 "HealthStatusRepairTriggered",
-                "HealthStatusCorrupted"
+                "HealthStatusCorrupted",
+                "HealthStatusDegraded"
             ]
         },
         "database.QueuePriority": {

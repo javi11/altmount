@@ -71,7 +71,7 @@ func newHoleTestEnv(t *testing.T, fileName string, fileSize, segSize int64) *hol
 	cfg := config.DefaultConfig()
 	cfg.Health.Enabled = &healthEnabled
 	cfg.Metadata.RootPath = tempDir
-	cfg.Health.MaxConnectionsForHealthChecks = 2
+	cfg.Health.MaxConcurrentSegmentChecks = ptr(2)
 	checkAll := true
 	cfg.Health.CheckAllSegments = &checkAll // deterministic: stat every segment
 

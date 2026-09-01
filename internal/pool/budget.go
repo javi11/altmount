@@ -4,13 +4,17 @@ import (
 	"context"
 )
 
-// streamHeadroom is how many connections are set aside per active stream when
-// shrinking the import budget. Deliberately a constant, not config: the whole
-// point of the budget is automatic balancing without knobs. Streams get hard
-// priority via the pool's priority request lane regardless; the headroom just
-// keeps free connections available so a stream never waits for an import
-// article to finish.
-const streamHeadroom = 2
+// defaultStreamHeadroom is the per-stream connection reserve used until the
+// adaptive controller (see headroom.go) learns a better one, and the value the
+// budget falls back to when no controller is wired.
+//
+// It is deliberately small. The budget bounds in-flight import BODIES pool-wide;
+// it does not pin which connections are free, so raising it does not buy stream
+// latency by keeping a connection idle. What it does buy — measured — is
+// bandwidth share: on a saturated link, fewer concurrent import bodies leaves
+// more of the pipe for playback. That effect is real but its right size depends
+// on the link rate and pool size, which is exactly what a constant cannot know.
+const defaultStreamHeadroom = 2
 
 // ImportBudget bounds the total number of in-flight import segment (body)
 // fetches pool-wide, across all concurrent imports. Its capacity tracks the
@@ -27,12 +31,15 @@ type ImportBudget struct {
 	sem          adaptiveSemaphore
 	capacity     int
 	streamSource StreamActivitySource
+	// headroom is the per-stream connection reserve. Owned by the adaptive
+	// controller when one is running; defaultStreamHeadroom otherwise.
+	headroom int
 }
 
 // NewImportBudget constructs a budget with capacity 0 (disabled). Use
 // SetCapacity and SetStreamSource to configure it.
 func NewImportBudget() *ImportBudget {
-	b := &ImportBudget{}
+	b := &ImportBudget{headroom: defaultStreamHeadroom}
 	b.sem.capLocked = b.effectiveCapLocked
 	return b
 }
@@ -44,7 +51,7 @@ func (b *ImportBudget) effectiveCapLocked() int {
 	}
 	reserve := 0
 	if b.streamSource != nil {
-		reserve = streamHeadroom * b.streamSource.ActiveStreams()
+		reserve = b.headroom * b.streamSource.ActiveStreams()
 	}
 	if reserve > b.capacity-1 {
 		reserve = b.capacity - 1
@@ -71,6 +78,25 @@ func (b *ImportBudget) Capacity() int {
 	b.sem.mu.Lock()
 	defer b.sem.mu.Unlock()
 	return b.capacity
+}
+
+// SetHeadroom sets the per-stream connection reserve and wakes any waiters the
+// change frees. Called by the adaptive controller.
+func (b *ImportBudget) SetHeadroom(n int) {
+	if n < 0 {
+		n = 0
+	}
+	b.sem.mu.Lock()
+	b.headroom = n
+	b.sem.wakeWaitersLocked()
+	b.sem.mu.Unlock()
+}
+
+// Headroom returns the current per-stream connection reserve.
+func (b *ImportBudget) Headroom() int {
+	b.sem.mu.Lock()
+	defer b.sem.mu.Unlock()
+	return b.headroom
 }
 
 // SetStreamSource wires the activity signal. nil sources are tolerated and
