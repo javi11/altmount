@@ -19,10 +19,45 @@ type BodyClient interface {
 
 // ConnBudget bounds how many article fetches the repair keeps on the wire at
 // once. Repair traffic runs on the pool's normal lane (streaming reads use
-// the priority lane), so the budget shapes background bandwidth rather than
-// protecting playback latency.
+// the priority lane); the wired budget stacks the repair's own cap with the
+// pool-wide import connection budget, so repair both shapes background
+// bandwidth and yields headroom to active streams the way imports do.
 type ConnBudget interface {
 	Acquire(ctx context.Context) (release func(), err error)
+}
+
+// ConnBudgetFunc adapts a bare acquire function — such as
+// pool.Manager.AcquireImportConnection — to ConnBudget.
+type ConnBudgetFunc func(ctx context.Context) (release func(), err error)
+
+func (f ConnBudgetFunc) Acquire(ctx context.Context) (func(), error) { return f(ctx) }
+
+// CombineBudgets stacks budgets: Acquire takes each in order and release
+// returns them in reverse. A later acquisition failing hands back everything
+// already held. Nil entries are skipped so optional budgets wire without
+// branching. Order matters for contention: put the narrow repair cap first so
+// at most that many fetches ever queue on the wider shared budget.
+func CombineBudgets(budgets ...ConnBudget) ConnBudget {
+	return ConnBudgetFunc(func(ctx context.Context) (func(), error) {
+		releases := make([]func(), 0, len(budgets))
+		releaseAll := func() {
+			for i := len(releases) - 1; i >= 0; i-- {
+				releases[i]()
+			}
+		}
+		for _, b := range budgets {
+			if b == nil {
+				continue
+			}
+			release, err := b.Acquire(ctx)
+			if err != nil {
+				releaseAll()
+				return nil, err
+			}
+			releases = append(releases, release)
+		}
+		return releaseAll, nil
+	})
 }
 
 // connLimiter is a ConnBudget whose limit is read live from the config, so a

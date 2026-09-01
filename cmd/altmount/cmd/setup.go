@@ -401,20 +401,24 @@ func startPar2RepairService(
 	poolManager pool.Manager,
 	configGetter config.ConfigGetter,
 ) *par2repair.Service {
+	// Repair fetches hold both budgets: the repair's own cap (narrow, so at
+	// most that many fetches queue on the shared budget) and the pool-wide
+	// import connection budget, whose stream headroom makes repair yield to
+	// playback exactly as imports do.
 	fetcher := par2repair.NewPoolFetcher(func() (par2repair.BodyClient, error) {
 		return poolManager.GetPool()
-	}, par2repair.NewConnLimiter(func() int {
-		return configGetter().Par2Repair.EffectiveMaxConnections()
-	}))
-	// Always the conservative stat bound (one connection's STAT pipeline
-	// depth), never StatSweepConcurrency's idle-pool burst: a repair census
-	// STATs an entire release in one call, and the burst bound — the pool's
-	// aggregate pipeline capacity, thousands on a typical config — floods the
-	// provider's dispatch window whenever anything else (a health sweep, an
-	// import) runs beside it. Repair is a background job; the conservative
-	// depth clears a full census in seconds anyway.
+	}, par2repair.CombineBudgets(
+		par2repair.NewConnLimiter(func() int {
+			return configGetter().Par2Repair.EffectiveMaxConnections()
+		}),
+		par2repair.ConnBudgetFunc(poolManager.AcquireImportConnection),
+	))
+	// Stream-aware sweep width, like health checks and import fast-fail: the
+	// conservative bound (one connection's STAT pipeline depth) while any
+	// stream plays, the pool's aggregate STAT capacity on an idle pool where
+	// a repair census flooding the dispatch window costs nobody anything.
 	fetcher.StatConcurrency = func() int {
-		return configGetter().StatConcurrency()
+		return poolManager.StatSweepConcurrency(configGetter().StatConcurrency())
 	}
 	patchStore := par2repair.NewPatchStore(cfg.Par2Repair.EffectivePatchDir(cfg.Metadata.RootPath))
 	service := par2repair.NewService(
