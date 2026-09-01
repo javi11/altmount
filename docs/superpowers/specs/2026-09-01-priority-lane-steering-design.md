@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-01
 **Status:** Approved design, pending implementation plan
-**Repos:** `github.com/javi11/nntppool` (phases 1a, 1b), `github.com/javi11/altmount` (phases 1c, 1d, 2)
+**Repos:** `github.com/javi11/nntppool` (phases 1a-1c), `github.com/javi11/altmount` (phases 1d, 1e, 2)
 
 ## Problem
 
@@ -24,7 +24,8 @@ Stream p50 moves +5 %; p99 moves +37 %. Decomposing the 59 ms of p99 inflation:
 dispatch timeouts and zero errors across all 39 runs — nothing starves, but the
 tail is real.
 
-Four defects explain it.
+Five defects explain it. D1-D4 come from the latency measurements above; D5
+came out of a CPU profile taken afterwards.
 
 ### D1 — the priority lane is not actually prioritised
 
@@ -108,6 +109,43 @@ changed nothing (p99 212/213/210/212 ms; 1 115/1 116/1 123/1 123 STAT/s). The
 STAT pipelining the knob configures is unreachable until sweep concurrency exceeds
 the connection count.
 
+### D5 — `StatMany` dispatch serialises on one unbuffered channel
+
+A CPU profile of the widest scenario (S4: 470 MB/s decoded plus 27 k STAT/s over
+12.4 s wall, 18.1 s of samples) shows CPU is not where one would guess:
+
+| Cost | Share of samples |
+|---|---|
+| yEnc decode (`decodeYenc`, already cgo/SIMD) | **2.0 %** |
+| `syscall.rawsyscalln` (read + write) | 37.1 % |
+| Scheduler park/wake — `kevent` 13.9 %, `pthread_cond_wait` 13.8 %, `usleep` 8.0 %, `pthread_cond_signal` 6.6 % | ~42 % |
+| `runtime.lock2` (cum) / `runtime.selectgo` (cum) | 16.4 % / 10.7 % |
+| GC | ~3 % |
+
+Roughly half the syscall time is the in-process fake server, so the client's true
+share is smaller — which makes the scheduler and lock figures proportionally
+larger still. The decode everyone reaches for first is 2 %.
+
+The `lock2`/`selectgo`/`cond_signal` signature points at `StatMany`
+(`stat.go:119-134`), which feeds up to `conc` (4 096) worker goroutines from a
+**single unbuffered channel**:
+
+```go
+ids := make(chan string)   // unbuffered
+wg.Add(conc)
+for range conc {
+    go func() { for id := range ids { ... } }()
+}
+```
+
+Every send is a runtime handoff that takes `hchan.lock` and wakes one goroutine
+out of a 4 096-deep receive queue. The work is a fully-materialised slice, so a
+channel buys nothing here — it is the streaming primitive applied to non-streaming
+work.
+
+This only bites in the wide-sweep path (S4/S5, idle pool), which is exactly where
+phase 1d sends *more* traffic by reviving adaptive widening.
+
 ## Constraint
 
 **No throughput regression.** Import MB/s and aggregate STAT/s must not fall. This
@@ -169,7 +207,47 @@ Cost when no priority traffic exists: nothing is ever sent on `hotIdleBodyCh`, s
 the extra select case never fires and no connection is withheld from the normal
 lane. Capacity is *steered*, never reserved.
 
-### Phase 1c — AltMount: config correctness (D4)
+### Phase 1c — nntppool: lock-free STAT dispatch (D5)
+
+Replace the `ids` channel with an atomic cursor into `messageIDs`. Each worker
+pulls its own index; there is no channel, no `hchan.lock`, and no parking on the
+dispatch side:
+
+```go
+var cursor atomic.Int64
+for range conc {
+    go func() {
+        defer wg.Done()
+        for {
+            i := int(cursor.Add(1)) - 1
+            if i >= len(messageIDs) || ctx.Err() != nil {
+                return
+            }
+            ...
+        }
+    }()
+}
+```
+
+One uncontended atomic add per message-id replaces a locked handoff. Cancellation
+semantics are preserved: the existing loop broke out of dispatch on `ctx.Done()`,
+and the worker's own `ctx.Err()` check plus the existing `select` on the `out`
+send do the same job.
+
+Two things deliberately left alone:
+
+- **Worker count stays `conc`.** `statOne` blocks until its reply arrives, so one
+  goroutine per outstanding STAT is inherent without an async API.
+- **The `out` channel stays.** It is the public return type
+  (`<-chan StatManyResult`) and is already buffered to `conc`. Fan-in contention
+  there is real but cannot be removed without an API change; measure it after this
+  phase rather than pre-emptively batching results and changing streaming
+  semantics.
+
+Cost when sweeps are narrow: identical — the cursor is simply less contended than
+the channel it replaces.
+
+### Phase 1d — AltMount: config correctness (D4)
 
 1. Allow `max_connections_for_health_checks: 0` in validation and make `0` mean
    "adapt", reviving `StatSweepConcurrency`. Change the default to `0` so new
@@ -198,9 +276,9 @@ lane. Capacity is *steered*, never reserved.
    `config.sample.yaml:168`, `docs/docs/3. Configuration/health-monitoring.md:290`,
    `docs/static/swagger.yaml:1121`, `docs/static/openapi.yaml:4367`.
 
-### Phase 1d — AltMount: re-measure `ImportBudget` (D3)
+### Phase 1e — AltMount: re-measure `ImportBudget` (D3)
 
-Do not delete it up front. Re-run the benchmark after 1a/1b and check whether it
+Do not delete it up front. Re-run the benchmark after 1a-1c and check whether it
 still never binds. If it remains inert, removing it is a separate, evidenced
 change; if phase 2 raises import concurrency, it may become the right place to
 bound memory rather than latency. **No code change in this phase — a measurement
@@ -230,8 +308,15 @@ compared with `benchstat` against the numbers in the Problem table.
 |---|---|---|
 | 1a | stream p99 (S2, S3) | import MB/s, STAT/s, p50 |
 | 1b | stream p99 (S2, S3) toward the 158 ms S1 baseline | import MB/s (458/445), STAT/s (561/1 111/26 575) |
-| 1c | health STAT/s in S5 (no stream), via adaptive widening | stream p50/p95/p99 and import MB/s in S3; `StatSweepConcurrency` provably reached |
+| 1c | STAT/s in S4/S5; `lock2` + `selectgo` share of a fresh CPU profile | stream p99, import MB/s; result *completeness* and cancellation semantics (`StatMany` documents results as unordered — order is not a property to preserve) |
+| 1d | health STAT/s in S5 (no stream), via adaptive widening | stream p50/p95/p99 and import MB/s in S3; `StatSweepConcurrency` provably reached |
+| 1e | — (no code change: a re-measurement that decides `ImportBudget`'s fate) | — |
 | 2 | import MB/s | stream p99 no worse than after 1b; peak RSS bounded |
+
+**Phase 1 splits into two implementation plans**, along the repo boundary: 1a-1c
+in nntppool (one release), then 1d-1e in AltMount against that release. They are
+specced together because 1d's adaptive widening is what makes 1c's dispatch cost
+matter, but they ship separately.
 
 Phase 2 is abandoned if its gate fails, and gets its own implementation plan once
 phase 1's numbers are in — it is specced here only so the phase-1 gates are chosen
@@ -247,6 +332,10 @@ New tests required:
   saturated normal lane is dispatched first (deterministic, no timing).
 - nntppool: a steering test asserting a priority body never lands on a connection
   with `len(bodySem) > 0` while a body-free connection exists.
+- nntppool: a `StatMany` test asserting every id yields exactly one result, no
+  duplicates, and that a mid-sweep `ctx` cancellation stops dispatch and closes
+  the channel — the properties the cursor rewrite must preserve. Run under
+  `-race`.
 - AltMount: a config test asserting `0` reaches `StatSweepConcurrency`, and a
   migration test asserting a legacy key is carried over and cleared.
 
@@ -266,3 +355,13 @@ phase-1c PR merges; the `replace` must not land in `main`.
   depth is unreachable until sweep concurrency exceeds connection count.
 - `ImportAdmission` (`internal/pool/admission.go`). It bounds whole imports, not
   connections, and never engaged in any scenario.
+- **Further CGO.** The profile in D5 settles it: yEnc decode is already cgo/SIMD
+  and costs 2 % of CPU, and every remaining cost is syscalls or Go scheduling,
+  which cgo worsens because its calls pin OS threads. io_uring against the 37 %
+  syscall share is the only real candidate and is rejected here — Linux-only
+  (AltMount ships darwin and windows), requires bypassing Go's netpoller, and
+  targets CPU when the bottleneck is 40 ms of RTT.
+- **TLS cost.** Unmeasured: the harness runs plain TCP while real providers use
+  TLS. Go's `crypto/tls` uses hardware AES on arm64 and amd64, so an OpenSSL-via-cgo
+  swap is unlikely to pay for its per-call overhead — but this is reasoning, not a
+  measurement, and the harness would need a TLS mode to settle it.
