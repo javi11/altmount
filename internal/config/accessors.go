@@ -212,6 +212,18 @@ func (c *Config) GetMaxConcurrentImports() int {
 	return c.Import.MaxConcurrentImports
 }
 
+// GetMaxConcurrentSegmentChecks returns the operator's hard cap on in-flight
+// STAT checks during a health sweep, or 0 meaning "let the pool adapt".
+func (c *Config) GetMaxConcurrentSegmentChecks() int {
+	if c.Health.MaxConcurrentSegmentChecks == nil {
+		return 0
+	}
+	if n := *c.Health.MaxConcurrentSegmentChecks; n > 0 {
+		return n
+	}
+	return 0
+}
+
 // GetStreamHeadroomConnections returns the per-stream import reservation:
 // an explicit setting when present, otherwise a value derived from the pool size.
 func (c *Config) GetStreamHeadroomConnections() int {

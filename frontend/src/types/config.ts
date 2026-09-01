@@ -111,6 +111,9 @@ export interface HealthConfig {
 	library_dir?: string;
 	cleanup_orphaned_metadata?: boolean;
 	check_interval_seconds?: number;
+	/** Max in-flight STAT checks per sweep. 0 or absent = adapt to pool + stream activity. */
+	max_concurrent_segment_checks?: number;
+	/** @deprecated renamed to max_concurrent_segment_checks; migrated automatically. */
 	max_connections_for_health_checks?: number;
 	check_batch_size?: number; // Files fetched and swept together per health-check cycle
 	max_concurrent_jobs?: number; // Max concurrent health check jobs
@@ -397,6 +400,9 @@ export interface HealthUpdateRequest {
 	library_dir?: string;
 	cleanup_orphaned_metadata?: boolean;
 	check_interval_seconds?: number; // Interval in seconds (optional)
+	/** Max in-flight STAT checks per sweep. 0 or absent = adapt to pool + stream activity. */
+	max_concurrent_segment_checks?: number;
+	/** @deprecated renamed to max_concurrent_segment_checks; migrated automatically. */
 	max_connections_for_health_checks?: number;
 	check_batch_size?: number; // Files fetched and swept together per health-check cycle
 	max_concurrent_jobs?: number; // Max concurrent health check jobs

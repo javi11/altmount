@@ -525,11 +525,24 @@ type RepairConfig struct {
 
 // HealthConfig represents health checker configuration
 type HealthConfig struct {
-	Enabled                             *bool   `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
-	LibraryDir                          *string `yaml:"library_dir" mapstructure:"library_dir" json:"library_dir,omitempty"`
-	CleanupOrphanedMetadata             *bool   `yaml:"cleanup_orphaned_metadata" mapstructure:"cleanup_orphaned_metadata" json:"cleanup_orphaned_metadata,omitempty"`
-	CheckIntervalSeconds                int     `yaml:"check_interval_seconds" mapstructure:"check_interval_seconds" json:"check_interval_seconds,omitempty"`
-	MaxConnectionsForHealthChecks       int     `yaml:"max_connections_for_health_checks" mapstructure:"max_connections_for_health_checks" json:"max_connections_for_health_checks,omitempty"`
+	Enabled                 *bool   `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
+	LibraryDir              *string `yaml:"library_dir" mapstructure:"library_dir" json:"library_dir,omitempty"`
+	CleanupOrphanedMetadata *bool   `yaml:"cleanup_orphaned_metadata" mapstructure:"cleanup_orphaned_metadata" json:"cleanup_orphaned_metadata,omitempty"`
+	CheckIntervalSeconds    int     `yaml:"check_interval_seconds" mapstructure:"check_interval_seconds" json:"check_interval_seconds,omitempty"`
+	// MaxConcurrentSegmentChecks bounds how many STAT checks a health sweep keeps
+	// in flight. STAT is bodyless and pipelines many per connection, so connection
+	// count is the wrong unit — the import path already sizes its sweep by STAT
+	// pipeline depth (see importer/processor.go).
+	//
+	// nil or 0 means "adapt": the pool narrows the sweep to one connection's depth
+	// while a stream is playing and widens it to the pool's aggregate STAT capacity
+	// when idle, which measured 24x the sweep throughput on an idle pool.
+	MaxConcurrentSegmentChecks *int `yaml:"max_concurrent_segment_checks" mapstructure:"max_concurrent_segment_checks" json:"max_concurrent_segment_checks,omitempty"`
+
+	// Deprecated: superseded by MaxConcurrentSegmentChecks, which is named for
+	// what it actually bounds. Read for one-time migration only (see
+	// migrateHealthSweepConcurrency), then cleared. Do not use in new code.
+	MaxConnectionsForHealthChecks       int     `yaml:"max_connections_for_health_checks,omitempty" mapstructure:"max_connections_for_health_checks" json:"max_connections_for_health_checks,omitempty"`
 	CheckBatchSize                      int     `yaml:"check_batch_size" mapstructure:"check_batch_size" json:"check_batch_size,omitempty"`
 	MaxConcurrentJobs                   int     `yaml:"max_concurrent_jobs" mapstructure:"max_concurrent_jobs" json:"max_concurrent_jobs,omitempty"`
 	SegmentSamplePercentage             int     `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage,omitempty"`
@@ -691,6 +704,29 @@ type StuckCleanupRule struct {
 // migrateGlobalUserAgent adopts the legacy nzblnk.user_agent as the global
 // user_agent when the global one was never customized, then clears the legacy
 // field so it is dropped from saved YAML. Idempotent.
+// migrateHealthSweepConcurrency carries the legacy
+// health.max_connections_for_health_checks over to max_concurrent_segment_checks
+// and clears it, so it drops out of saved YAML.
+//
+// The rename is not cosmetic: the old key was named for connections but bounded
+// STAT concurrency, and because it defaulted to 100 with validation rejecting
+// <= 0, the pool's stream-aware adaptive sizing was unreachable in every valid
+// config. An operator who had set it explicitly keeps that value; everyone else
+// gets the adaptive behaviour the code always intended.
+//
+// Idempotent: once the legacy field is zero this does nothing.
+func migrateHealthSweepConcurrency(config *Config) {
+	legacy := config.Health.MaxConnectionsForHealthChecks
+	if legacy == 0 {
+		return
+	}
+	if config.Health.MaxConcurrentSegmentChecks == nil {
+		v := legacy
+		config.Health.MaxConcurrentSegmentChecks = &v
+	}
+	config.Health.MaxConnectionsForHealthChecks = 0
+}
+
 func migrateGlobalUserAgent(config *Config) {
 	if config.Nzblnk.UserAgent == "" {
 		return
@@ -983,8 +1019,8 @@ func (c *Config) Validate() error {
 	if c.Health.CheckIntervalSeconds <= 0 {
 		return fmt.Errorf("health check_interval_seconds must be greater than 0")
 	}
-	if c.Health.MaxConnectionsForHealthChecks <= 0 {
-		return fmt.Errorf("health max_connections_for_health_checks must be greater than 0")
+	if c.Health.MaxConcurrentSegmentChecks != nil && *c.Health.MaxConcurrentSegmentChecks < 0 {
+		return fmt.Errorf("health max_concurrent_segment_checks must be zero (adaptive) or greater")
 	}
 	if c.Health.MaxConcurrentJobs <= 0 {
 		return fmt.Errorf("health max_concurrent_jobs must be greater than 0")
@@ -1625,6 +1661,7 @@ func (m *Manager) ReloadConfig() error {
 	// Migrate: fold legacy stuck/allowlist cleanup config into the unified rules.
 	migrateArrsCleanup(config)
 	migrateGlobalUserAgent(config)
+	migrateHealthSweepConcurrency(config)
 
 	// Validate configuration
 	if err := config.Validate(); err != nil {
@@ -1872,7 +1909,6 @@ func DefaultConfig(configDir ...string) *Config {
 			Enabled:                             &healthEnabled,           // Disabled by default
 			CleanupOrphanedMetadata:             &cleanupOrphanedMetadata, // Disabled by default
 			CheckIntervalSeconds:                5,
-			MaxConnectionsForHealthChecks:       100,
 			CheckBatchSize:                      50,
 			MaxConcurrentJobs:                   1,                                  // Default: 1 concurrent job
 			SegmentSamplePercentage:             5,                                  // Default: 5% segment sampling
@@ -2120,6 +2156,7 @@ func LoadConfig(configFile string) (*Config, error) {
 	// Migrate: fold legacy stuck/allowlist cleanup config into the unified rules.
 	migrateArrsCleanup(config)
 	migrateGlobalUserAgent(config)
+	migrateHealthSweepConcurrency(config)
 
 	// If log file was not explicitly set in the config file and we have a specific config file path,
 	// derive log file path from config file location

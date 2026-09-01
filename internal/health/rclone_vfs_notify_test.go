@@ -12,7 +12,7 @@ import (
 )
 
 type mockRcloneClient struct {
-	mu          sync.Mutex
+	mu           sync.Mutex
 	refreshCalls []struct {
 		VFSName string
 		Dirs    []string
