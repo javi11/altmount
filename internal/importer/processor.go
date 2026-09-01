@@ -823,7 +823,7 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 		if importCfg.ExpandBlurayIso != nil {
 			expandEnabled = *importCfg.ExpandBlurayIso
 		}
-		isoMaxPrefetch := importCfg.MaxDownloadPrefetch
+		isoMaxPrefetch := cfg.GetMaxDownloadPrefetch()
 		isoReadTimeout := time.Duration(importCfg.ReadTimeoutSeconds) * time.Second
 		if isoReadTimeout == 0 {
 			isoReadTimeout = 5 * time.Minute
@@ -1155,8 +1155,9 @@ func (proc *Processor) processRarArchive(
 	storeIndex map[string]int64,
 	storeRef string,
 ) (string, []string, error) {
-	importCfg := proc.configGetter().Import
-	maxPrefetch := importCfg.MaxDownloadPrefetch
+	cfg := proc.configGetter()
+	importCfg := cfg.Import
+	maxPrefetch := cfg.GetMaxDownloadPrefetch()
 	readTimeout := time.Duration(importCfg.ReadTimeoutSeconds) * time.Second
 	if readTimeout == 0 {
 		readTimeout = 5 * time.Minute
@@ -1288,8 +1289,9 @@ func (proc *Processor) processSevenZipArchive(
 	storeIndex map[string]int64,
 	storeRef string,
 ) (string, []string, error) {
-	importCfg := proc.configGetter().Import
-	maxPrefetch := importCfg.MaxDownloadPrefetch
+	cfg := proc.configGetter()
+	importCfg := cfg.Import
+	maxPrefetch := cfg.GetMaxDownloadPrefetch()
 	readTimeout := time.Duration(importCfg.ReadTimeoutSeconds) * time.Second
 	if readTimeout == 0 {
 		readTimeout = 5 * time.Minute

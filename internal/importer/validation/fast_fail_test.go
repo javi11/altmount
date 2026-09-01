@@ -59,6 +59,8 @@ type scriptedStatClient struct {
 	calls    map[string]int
 }
 
+func (m fastFailPoolManager) SetStreamHeadroom(int) {}
+
 type uncancelableStatClient struct {
 	pool.NntpClient
 	result nntppool.StatManyResult

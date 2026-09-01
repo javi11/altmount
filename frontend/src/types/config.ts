@@ -127,6 +127,9 @@ export interface HealthConfig {
 	library_dir?: string;
 	cleanup_orphaned_metadata?: boolean;
 	check_interval_seconds?: number;
+	/** Max in-flight STAT checks per sweep. 0 or absent = adapt to pool + stream activity. */
+	max_concurrent_segment_checks?: number;
+	/** @deprecated renamed to max_concurrent_segment_checks; migrated automatically. */
 	max_connections_for_health_checks?: number;
 	check_batch_size?: number; // Files fetched and swept together per health-check cycle
 	max_concurrent_jobs?: number; // Max concurrent health check jobs
@@ -246,6 +249,11 @@ export type ImportStrategy = "NONE" | "SYMLINK" | "STRM";
 // Import configuration
 export interface ImportConfig {
 	max_processor_workers: number;
+	/**
+	 * Connections held back from import per active stream. `null`/absent
+	 * derives the reservation from pool size; an explicit `0` disables it.
+	 */
+	stream_headroom_connections?: number | null;
 	queue_processing_interval_seconds: number; // Interval in seconds for queue processing
 	allowed_file_extensions: string[];
 	max_download_prefetch: number;
@@ -412,6 +420,9 @@ export interface HealthUpdateRequest {
 	library_dir?: string;
 	cleanup_orphaned_metadata?: boolean;
 	check_interval_seconds?: number; // Interval in seconds (optional)
+	/** Max in-flight STAT checks per sweep. 0 or absent = adapt to pool + stream activity. */
+	max_concurrent_segment_checks?: number;
+	/** @deprecated renamed to max_concurrent_segment_checks; migrated automatically. */
 	max_connections_for_health_checks?: number;
 	check_batch_size?: number; // Files fetched and swept together per health-check cycle
 	max_concurrent_jobs?: number; // Max concurrent health check jobs

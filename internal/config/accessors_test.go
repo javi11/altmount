@@ -162,6 +162,34 @@ func TestValidate_HealthVerifyContentTimeoutSeconds(t *testing.T) {
 	}
 }
 
+func TestDefaultConfig_MaxDownloadPrefetchMatches(t *testing.T) {
+	c := DefaultConfig()
+	got := c.GetMaxDownloadPrefetch()
+	if got != DefaultMaxDownloadPrefetch {
+		t.Errorf("DefaultConfig().GetMaxDownloadPrefetch() = %d, want %d (DefaultMaxDownloadPrefetch)", got, DefaultMaxDownloadPrefetch)
+	}
+}
+
+func TestGetMaxDownloadPrefetch_FallbackOnNonPositive(t *testing.T) {
+	for _, val := range []int{0, -1, -10} {
+		c := &Config{}
+		c.Import.MaxDownloadPrefetch = val
+		got := c.GetMaxDownloadPrefetch()
+		if got != DefaultMaxDownloadPrefetch {
+			t.Errorf("value=%d: GetMaxDownloadPrefetch() = %d, want %d fallback", val, got, DefaultMaxDownloadPrefetch)
+		}
+	}
+}
+
+func TestGetMaxDownloadPrefetch_ReturnsPositiveValue(t *testing.T) {
+	c := &Config{}
+	c.Import.MaxDownloadPrefetch = 25
+	got := c.GetMaxDownloadPrefetch()
+	if got != 25 {
+		t.Errorf("GetMaxDownloadPrefetch() = %d, want 25", got)
+	}
+}
+
 func TestStatConcurrency(t *testing.T) {
 	enabled := true
 	disabled := false

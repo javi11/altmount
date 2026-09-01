@@ -39,7 +39,7 @@ func TestDecryptingWarmCacheReadsPastPrefix(t *testing.T) {
 		FirstSegmentBytes: warm,
 	}
 
-	dfs := NewDecryptingFileSystem(context.Background(), mgr, []DecryptingFileEntry{entry}, 1, time.Minute)
+	dfs := NewDecryptingFileSystem(context.Background(), mgr, []DecryptingFileEntry{entry}, 1, time.Minute, nil)
 	f, err := dfs.Open("inner.part01.rar")
 	if err != nil {
 		t.Fatalf("Open: %v", err)
@@ -79,7 +79,7 @@ func TestDecryptingWarmCacheServesPrefixWithoutNetwork(t *testing.T) {
 		FirstSegmentBytes: full,
 	}
 
-	dfs := NewDecryptingFileSystem(context.Background(), mgr, []DecryptingFileEntry{entry}, 1, time.Minute)
+	dfs := NewDecryptingFileSystem(context.Background(), mgr, []DecryptingFileEntry{entry}, 1, time.Minute, nil)
 	f, err := dfs.Open("inner.part01.rar")
 	if err != nil {
 		t.Fatalf("Open: %v", err)

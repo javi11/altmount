@@ -140,3 +140,5 @@ func TestStorm_SpeedTestBypassesPoolManager(t *testing.T) {
 			getPoolCalls, concurrentRequests)
 	}
 }
+
+func (m *countingPoolManager) SetStreamHeadroom(int) {}

@@ -28,7 +28,12 @@ func NewISOReadSeeker(
 		AesIV:         src.AesIV,
 	}
 
-	fsys := filesystem.NewDecryptingFileSystem(ctx, poolManager, []filesystem.DecryptingFileEntry{entry}, maxPrefetch, readTimeout)
+	// Import-scoped segment cache: ISO structure parsing seeks back and forth
+	// across volume descriptors and path tables, often re-reading leading
+	// segments. Bounded and released (by dropping the reference) once the
+	// caller closes the returned Closer.
+	segStore := filesystem.NewImportSegmentCache(0)
+	fsys := filesystem.NewDecryptingFileSystem(ctx, poolManager, []filesystem.DecryptingFileEntry{entry}, maxPrefetch, readTimeout, segStore)
 
 	f, err := fsys.Open(src.Filename)
 	if err != nil {
@@ -41,5 +46,19 @@ func NewISOReadSeeker(
 		return nil, nil, fmt.Errorf("iso: opened file does not implement io.ReadSeeker")
 	}
 
-	return rs, f, nil
+	// The cache lives as long as the reader, so its effectiveness can only be
+	// reported once the caller is done with it — not when this constructor
+	// returns, which is before a single sector has been read.
+	closer := closerFunc(func() error {
+		err := f.Close()
+		segStore.LogStats(ctx, nil, "iso-structure")
+		return err
+	})
+
+	return rs, closer, nil
 }
+
+// closerFunc adapts a function to io.Closer.
+type closerFunc func() error
+
+func (fn closerFunc) Close() error { return fn() }

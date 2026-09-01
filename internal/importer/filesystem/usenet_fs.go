@@ -44,6 +44,14 @@ type UsenetFileSystem struct {
 	filesCompleted  int32 // atomic counter
 	totalFiles      int
 	readTimeout     time.Duration
+	// segmentStore is an optional import-scoped cache of decoded segment
+	// bytes, shared across every UsenetFile opened from this filesystem.
+	// Archive analysis (RAR/7z/ISO) frequently re-reads the same leading
+	// segments — 7zip's ReadAt in particular builds a brand-new
+	// UsenetReader per call — so sharing one cache across the whole
+	// analysis pass avoids re-fetching bytes already pulled over the wire.
+	// nil disables caching.
+	segmentStore usenet.SegmentStore
 }
 
 // UsenetFileInfo implements fs.FileInfo for RAR part files
@@ -52,8 +60,10 @@ type UsenetFileInfo struct {
 	size int64
 }
 
-// NewUsenetFileSystem creates a new filesystem for accessing RAR parts from Usenet
-func NewUsenetFileSystem(ctx context.Context, poolManager pool.Manager, files []parser.ParsedFile, maxPrefetch int, progressTracker *progress.Tracker, readTimeout time.Duration) *UsenetFileSystem {
+// NewUsenetFileSystem creates a new filesystem for accessing RAR parts from Usenet.
+// segmentStore is an optional import-scoped SegmentStore (see ImportSegmentCache)
+// shared by every file opened from this filesystem; pass nil to disable caching.
+func NewUsenetFileSystem(ctx context.Context, poolManager pool.Manager, files []parser.ParsedFile, maxPrefetch int, progressTracker *progress.Tracker, readTimeout time.Duration, segmentStore usenet.SegmentStore) *UsenetFileSystem {
 	filesMap := make(map[string]parser.ParsedFile)
 	names := make([]string, 0, len(files))
 	for _, file := range files {
@@ -71,6 +81,7 @@ func NewUsenetFileSystem(ctx context.Context, poolManager pool.Manager, files []
 		filesCompleted:  0,
 		totalFiles:      len(files),
 		readTimeout:     readTimeout,
+		segmentStore:    segmentStore,
 	}
 }
 
@@ -99,16 +110,17 @@ func (ufs *UsenetFileSystem) Open(name string) (fs.File, error) {
 	}
 
 	return &UsenetFile{
-		name:        name,
-		file:        &file,
-		poolManager: ufs.poolManager,
-		ctx:         ctx,
-		maxPrefetch: ufs.maxPrefetch,
-		size:        file.Size,
-		position:    0,
-		closed:      false,
-		ufs:         ufs,
-		readTimeout: ufs.readTimeout,
+		name:         name,
+		file:         &file,
+		poolManager:  ufs.poolManager,
+		ctx:          ctx,
+		maxPrefetch:  ufs.maxPrefetch,
+		size:         file.Size,
+		position:     0,
+		closed:       false,
+		ufs:          ufs,
+		readTimeout:  ufs.readTimeout,
+		segmentStore: ufs.segmentStore,
 	}, nil
 }
 
@@ -153,6 +165,11 @@ type UsenetFile struct {
 	closed      bool
 	ufs         *UsenetFileSystem
 	readTimeout time.Duration
+	// segmentStore, when non-nil, is shared across every reader this file
+	// creates (Read's single lazily-created reader and ReadAt's per-call
+	// readers alike) so a segment fetched once is never re-fetched for the
+	// lifetime of the owning UsenetFileSystem.
+	segmentStore usenet.SegmentStore
 }
 
 // UsenetFile methods implementing fs.File interface
@@ -340,7 +357,7 @@ func (uf *UsenetFile) newNetworkReader(ctx context.Context, start, end int64) (i
 	}
 
 	rg := usenet.GetSegmentsInRange(ctx, start, end, loader)
-	return usenet.NewUsenetReader(ctx, uf.poolManager.GetPool, rg, uf.maxPrefetch, uf.poolManager, uf.name, nil,
+	return usenet.NewUsenetReader(ctx, uf.poolManager.GetPool, rg, uf.maxPrefetch, uf.poolManager, uf.name, uf.segmentStore,
 		usenet.WithImportProfile(uf.poolManager))
 }
 
