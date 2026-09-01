@@ -8,12 +8,19 @@ import (
 )
 
 // DefaultImportSegmentCacheBytes bounds the default size of an
-// ImportSegmentCache. Decoded Usenet segments are ~750 KB each, so 128 MiB
-// holds roughly 170 of them — enough to absorb the repeated header/prefix
-// reads a single archive-analysis pass performs (rardecode's parallel volume
-// reads, 7zip's central-directory ReadAt calls, ISO structure scans) without
-// letting an unbounded cache OOM the importer.
-const DefaultImportSegmentCacheBytes = 128 * 1024 * 1024
+// ImportSegmentCache. Decoded Usenet segments are ~750 KB each, so 32 MiB holds
+// roughly 43 of them — enough to absorb the repeated header/prefix reads a
+// single archive-analysis pass performs (rardecode's parallel volume reads,
+// 7zip's central-directory ReadAt calls, ISO structure scans).
+//
+// The size is set by the worst case, not by one cache. There are five
+// construction sites and the nested-RAR pass runs INSIDE the outer pass, so two
+// caches are live per import; at max_processor_workers 2 that is four concurrent
+// instances. At 128 MiB each that would be 512 MiB, which is far too much to
+// spend on the NAS hardware AltMount commonly runs on — especially for a hit
+// rate nobody has measured yet. 32 MiB caps the worst case at 128 MiB.
+// TestImportSegmentCache_WorstCaseFootprintIsDeliberate pins that budget.
+const DefaultImportSegmentCacheBytes = 32 * 1024 * 1024
 
 // ImportSegmentCache is a bounded, in-memory, LRU cache of decoded Usenet
 // segment bytes, scoped to a single import (or a single archive-analysis
