@@ -102,6 +102,8 @@ type ProcessArchiveOptions struct {
 	// StoreRef is empty the aggregator falls back to v1 inline-segment metadata.
 	SegmentIndex map[string]int64
 	StoreRef     string
+	// OnMetadataWritten is invoked whenever a file's metadata is successfully written to disk.
+	OnMetadataWritten func(virtualPath string)
 }
 
 // ProcessArchive analyzes and processes 7zip archive files, creating metadata for all extracted files.
@@ -336,6 +338,10 @@ func ProcessArchive(ctx context.Context, opts ProcessArchiveOptions) error {
 
 			if err := metadataService.WriteFileMetadataAuto(ctx, item.virtualFilePath, fileMeta, opts.SegmentIndex, opts.StoreRef); err != nil {
 				return fmt.Errorf("failed to write metadata for 7zip file %s: %w", item.content.Filename, err)
+			}
+
+			if opts.OnMetadataWritten != nil {
+				opts.OnMetadataWritten(item.virtualFilePath)
 			}
 
 			slog.InfoContext(ctx, "Created metadata for 7zip extracted file",

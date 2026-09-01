@@ -1389,23 +1389,14 @@ func (s *Service) OnItemClaimed(ctx context.Context, item *database.ImportQueueI
 
 // cleanupWrittenPaths deletes metadata files/directories written during a failed import,
 // along with any health records already scheduled for them.
-// Paths prefixed with "DIR:" indicate a whole directory should be removed; others are individual files.
+// Paths prefixed with "DIR:" indicate a directory that should be removed if empty; others are individual files.
 func (s *Service) cleanupWrittenPaths(ctx context.Context, itemID int64, paths []string) {
+	var dirPaths []string
 	for _, p := range paths {
 		if after, ok := strings.CutPrefix(p, "DIR:"); ok {
-			dirPath := after
-			if delErr := s.metadataService.DeleteDirectory(dirPath); delErr != nil {
-				s.log.WarnContext(ctx, "Failed to clean up metadata directory after import failure",
-					"queue_id", itemID,
-					"dir", dirPath,
-					"error", delErr)
-			} else {
-				s.log.DebugContext(ctx, "Cleaned up metadata directory after import failure",
-					"queue_id", itemID,
-					"dir", dirPath)
-			}
-			s.cleanupHealthRecords(ctx, itemID, dirPath)
+			dirPaths = append(dirPaths, after)
 		} else {
+			// Pass 1: Delete all individual files written by this job
 			if delErr := s.metadataService.DeleteFileMetadata(ctx, p); delErr != nil {
 				s.log.WarnContext(ctx, "Failed to clean up metadata file after import failure",
 					"queue_id", itemID,
@@ -1418,6 +1409,21 @@ func (s *Service) cleanupWrittenPaths(ctx context.Context, itemID int64, paths [
 			}
 			s.cleanupHealthRecords(ctx, itemID, p)
 		}
+	}
+
+	// Pass 2: Now that this job's files have been removed, delete the directory
+	// ONLY if it is empty. If sibling files exist, it is preserved unharmed.
+	for _, dirPath := range dirPaths {
+		if delErr := s.metadataService.DeleteDirectoryIfEmpty(dirPath); delErr != nil {
+			s.log.DebugContext(ctx, "Preserved metadata directory after import failure (contains files from another import)",
+				"queue_id", itemID,
+				"dir", dirPath)
+		} else {
+			s.log.DebugContext(ctx, "Cleaned up empty metadata directory after import failure",
+				"queue_id", itemID,
+				"dir", dirPath)
+		}
+		s.cleanupHealthRecords(ctx, itemID, dirPath)
 	}
 }
 

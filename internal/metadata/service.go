@@ -886,6 +886,33 @@ func (ms *MetadataService) DeleteDirectory(virtualPath string) error {
 	return nil
 }
 
+// DeleteDirectoryIfEmpty deletes a metadata directory only if it contains no files or subdirectories.
+// Returns an error (ENOTEMPTY) if the directory is not empty, guaranteeing concurrent/sibling files are never deleted.
+func (ms *MetadataService) DeleteDirectoryIfEmpty(virtualPath string) error {
+	metadataDir := filepath.Join(ms.rootPath, virtualPath)
+
+	cleanMetadataDir := filepath.Clean(metadataDir)
+	if cleanMetadataDir == filepath.Clean(ms.rootPath) || cleanMetadataDir == "/" || cleanMetadataDir == "." {
+		return fmt.Errorf("safety block: refusing to remove root metadata directory: %s", cleanMetadataDir)
+	}
+
+	err := os.Remove(metadataDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	prefix := virtualPath + string(filepath.Separator)
+	for _, key := range ms.liteCache.Keys() {
+		if key == virtualPath || strings.HasPrefix(key, prefix) {
+			ms.liteCache.Remove(key)
+		}
+	}
+	return nil
+}
+
 // RenameFileMetadata atomically renames a metadata file (and its .id sidecar) from oldVirtualPath to newVirtualPath.
 // Uses os.Rename for atomicity on the same filesystem, falling back to read-write-delete for cross-device moves.
 func (ms *MetadataService) RenameFileMetadata(oldVirtualPath, newVirtualPath string) error {

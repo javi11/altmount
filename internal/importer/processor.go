@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/javi11/nntppool/v4"
@@ -979,7 +980,13 @@ func (proc *Processor) processRarArchive(
 
 		releaseDate := archiveFiles[0].ReleaseDate.Unix()
 
+		var writtenMu sync.Mutex
 		err := rar.ProcessArchive(ctx, rar.ProcessArchiveOptions{
+			OnMetadataWritten: func(vp string) {
+				writtenMu.Lock()
+				writtenPaths = append(writtenPaths, vp)
+				writtenMu.Unlock()
+			},
 			VirtualDir:             nzbFolder,
 			ArchiveFiles:           archiveFiles,
 			Password:               parsed.GetPassword(),
@@ -1111,7 +1118,13 @@ func (proc *Processor) processSevenZipArchive(
 
 		releaseDate := archiveFiles[0].ReleaseDate.Unix()
 
+		var writtenMu sync.Mutex
 		err := sevenzip.ProcessArchive(ctx, sevenzip.ProcessArchiveOptions{
+			OnMetadataWritten: func(vp string) {
+				writtenMu.Lock()
+				writtenPaths = append(writtenPaths, vp)
+				writtenMu.Unlock()
+			},
 			VirtualDir:             nzbFolder,
 			ArchiveFiles:           archiveFiles,
 			Password:               parsed.GetPassword(),
