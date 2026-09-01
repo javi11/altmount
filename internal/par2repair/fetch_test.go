@@ -507,3 +507,76 @@ func TestPoolFetcherAttemptTimeoutPreservesCallerCancel(t *testing.T) {
 		t.Fatalf("Body calls = %d, want 1 (no retry after caller cancel)", client.calls)
 	}
 }
+
+// A combined budget must hold both underlying budgets for the fetch and
+// release both afterwards — repair fetches take the repair's own cap AND the
+// pool-wide import budget, so they yield to streams like imports do.
+func TestCombineBudgetsAcquiresAndReleasesBoth(t *testing.T) {
+	var aHeld, bHeld atomic.Int32
+	a := ConnBudgetFunc(func(ctx context.Context) (func(), error) {
+		aHeld.Add(1)
+		return func() { aHeld.Add(-1) }, nil
+	})
+	b := ConnBudgetFunc(func(ctx context.Context) (func(), error) {
+		if aHeld.Load() != 1 {
+			t.Error("second budget acquired before the first")
+		}
+		bHeld.Add(1)
+		return func() { bHeld.Add(-1) }, nil
+	})
+
+	release, err := CombineBudgets(a, b).Acquire(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if aHeld.Load() != 1 || bHeld.Load() != 1 {
+		t.Fatalf("held = (%d, %d), want (1, 1)", aHeld.Load(), bHeld.Load())
+	}
+	release()
+	if aHeld.Load() != 0 || bHeld.Load() != 0 {
+		t.Fatalf("after release held = (%d, %d), want (0, 0)", aHeld.Load(), bHeld.Load())
+	}
+}
+
+// A later budget failing must release the earlier acquisitions, or a stream
+// burst that cancels a repair fetch would leak repair slots.
+func TestCombineBudgetsReleasesOnLaterFailure(t *testing.T) {
+	var aHeld atomic.Int32
+	a := ConnBudgetFunc(func(ctx context.Context) (func(), error) {
+		aHeld.Add(1)
+		return func() { aHeld.Add(-1) }, nil
+	})
+	boom := errors.New("boom")
+	b := ConnBudgetFunc(func(ctx context.Context) (func(), error) {
+		return nil, boom
+	})
+
+	if _, err := CombineBudgets(a, b).Acquire(context.Background()); !errors.Is(err, boom) {
+		t.Fatalf("err = %v, want boom", err)
+	}
+	if aHeld.Load() != 0 {
+		t.Fatalf("first budget still held after later failure")
+	}
+}
+
+// Nil entries are tolerated so callers can wire optional budgets without
+// branching; a single non-nil budget passes straight through.
+func TestCombineBudgetsSkipsNil(t *testing.T) {
+	var held atomic.Int32
+	a := ConnBudgetFunc(func(ctx context.Context) (func(), error) {
+		held.Add(1)
+		return func() { held.Add(-1) }, nil
+	})
+
+	release, err := CombineBudgets(nil, a, nil).Acquire(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if held.Load() != 1 {
+		t.Fatalf("held = %d, want 1", held.Load())
+	}
+	release()
+	if held.Load() != 0 {
+		t.Fatalf("held = %d after release, want 0", held.Load())
+	}
+}
