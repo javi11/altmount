@@ -61,6 +61,14 @@ type Config struct {
 	// BandwidthPerConn throttles body payload bytes per connection, in bytes
 	// per second. Zero disables the throttle.
 	BandwidthPerConn int64
+	// AggregateBandwidth caps total body payload bytes across ALL connections,
+	// in bytes per second. Zero disables it.
+	//
+	// Without this, N connections each throttled to R sum to N×R, which no real
+	// link does — and a harness that lets 100 connections reach 800 MB/s draws
+	// exactly the wrong conclusions about whether spending connections on
+	// latency costs throughput. Set it to the deployment's actual link rate.
+	AggregateBandwidth int64
 	// ArticleSize is the decoded size of the single article every BODY
 	// request returns.
 	ArticleSize int
@@ -90,6 +98,13 @@ type Server struct {
 
 	wg     sync.WaitGroup
 	closed atomic.Bool
+
+	// aggMu/aggNext implement the aggregate ceiling as a virtual clock: each
+	// writer reserves the slot at which its bytes may go out and sleeps until
+	// then. Reservation order, not sleep precision, is what holds the rate, so
+	// coarse OS timer granularity costs latency without inflating throughput.
+	aggMu   sync.Mutex
+	aggNext time.Time
 
 	conns        atomic.Int64
 	stats        atomic.Int64
@@ -367,21 +382,48 @@ func (s *Server) writeLoop(conn net.Conn, futures <-chan chan response) {
 	_ = w.Flush()
 }
 
-// writeThrottled paces body bytes at BandwidthPerConn.
+// reserveAggregate blocks until n bytes may be written under the aggregate
+// ceiling shared by every connection. A no-op when no ceiling is configured.
+func (s *Server) reserveAggregate(n int) {
+	if s.cfg.AggregateBandwidth <= 0 {
+		return
+	}
+	d := time.Duration(float64(n) / float64(s.cfg.AggregateBandwidth) * float64(time.Second))
+
+	s.aggMu.Lock()
+	now := time.Now()
+	if s.aggNext.Before(now) {
+		s.aggNext = now
+	}
+	at := s.aggNext
+	s.aggNext = s.aggNext.Add(d)
+	s.aggMu.Unlock()
+
+	if wait := time.Until(at); wait > 0 {
+		time.Sleep(wait)
+	}
+}
+
+// writeThrottled paces body bytes at BandwidthPerConn and, when configured, at
+// the aggregate ceiling shared across connections. The effective rate is the
+// lower of the two.
 func (s *Server) writeThrottled(w *bufio.Writer, body []byte) error {
 	bw := s.cfg.BandwidthPerConn
 	for off := 0; off < len(body); off += writeChunk {
 		end := min(off+writeChunk, len(body))
 		chunk := body[off:end]
 
-		if bw > 0 {
+		if bw > 0 || s.cfg.AggregateBandwidth > 0 {
 			// Flush before sleeping: bytes the client cannot see yet are not
 			// bytes on the wire, and the whole point is to pace the wire.
 			if err := w.Flush(); err != nil {
 				return err
 			}
+		}
+		if bw > 0 {
 			time.Sleep(time.Duration(float64(len(chunk)) / float64(bw) * float64(time.Second)))
 		}
+		s.reserveAggregate(len(chunk))
 
 		n, err := w.Write(chunk)
 		s.bytesWritten.Add(int64(n))

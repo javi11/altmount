@@ -176,3 +176,55 @@ func commonPrefix(a, b []byte) int {
 	}
 	return n
 }
+
+// TestAggregateBandwidthCaps pins the property that makes the harness model a real
+// deployment: per-connection throttling alone lets N connections sum to N×rate,
+// which no real link does. With an aggregate ceiling, total throughput across all
+// connections must not exceed it however many connections pull at once.
+func TestAggregateBandwidthCaps(t *testing.T) {
+	const (
+		size    = 128 * 1024
+		conns   = 8
+		perConn = 16 * 1024 * 1024 // generous: the aggregate cap must be what binds
+		aggBW   = 8 * 1024 * 1024  // 8 MB/s total
+	)
+
+	_, client := newTestClient(t, Config{
+		BandwidthPerConn:   perConn,
+		AggregateBandwidth: aggBW,
+		ArticleSize:        size,
+	}, conns, 2, 8)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	// Warm the connections so dial/auth is outside the measurement.
+	if _, err := client.Body(ctx, segments.MessageID(0)); err != nil {
+		t.Fatalf("warmup: %v", err)
+	}
+
+	const fetches = 16
+	start := time.Now()
+	errs := make(chan error, fetches)
+	for i := range fetches {
+		go func() {
+			_, err := client.Body(ctx, segments.MessageID(i+1))
+			errs <- err
+		}()
+	}
+	for range fetches {
+		if err := <-errs; err != nil {
+			t.Fatalf("body: %v", err)
+		}
+	}
+	elapsed := time.Since(start)
+
+	// Without an aggregate cap these 16 bodies would ride 8 connections at
+	// 16 MB/s each and finish almost instantly; the ceiling is what forces them
+	// to take at least total/aggBW.
+	floor := time.Duration(float64(fetches*size) / float64(aggBW) * float64(time.Second))
+	if elapsed < floor {
+		t.Errorf("moved %d bytes in %v; aggregate cap of %d B/s implies at least %v",
+			fetches*size, elapsed, aggBW, floor)
+	}
+}
