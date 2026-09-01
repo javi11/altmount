@@ -212,25 +212,54 @@ func (c *Config) GetMaxConcurrentImports() int {
 	return c.Import.MaxConcurrentImports
 }
 
-// GetStreamHeadroomConnections returns the per-stream import reservation.
-// A negative value is treated as 0 (no reservation); an unset value takes the
-// default that is free on every link measured.
+// GetStreamHeadroomConnections returns the per-stream import reservation:
+// an explicit setting when present, otherwise a value derived from the pool size.
 func (c *Config) GetStreamHeadroomConnections() int {
-	if c.Import.StreamHeadroomConnections == nil {
-		return DefaultStreamHeadroomConnections
+	if c.Import.StreamHeadroomConnections != nil {
+		if n := *c.Import.StreamHeadroomConnections; n > 0 {
+			return n
+		}
+		return 0 // explicitly disabled
 	}
-	if n := *c.Import.StreamHeadroomConnections; n > 0 {
-		return n
-	}
-	return 0 // explicitly disabled
+	return DefaultStreamHeadroom(c.TotalProviderConnections())
 }
 
-// DefaultStreamHeadroomConnections is the per-stream import reservation used
-// when the config does not set one. Measured free at 100 connections behind a
-// 400 MB/s link: import 358 vs 359 MB/s, stream p50 190ms -> 179ms. Deliberately
-// conservative, because a deployment on a slower link has less slack to give and
-// would pay for a larger value in real throughput.
-const DefaultStreamHeadroomConnections = 8
+const (
+	// streamHeadroomFraction makes the default reservation a fixed SHARE of the
+	// pool rather than a fixed count. The cost of a reservation is the fraction
+	// of the pool it removes, so an absolute default cannot be right at more
+	// than one pool size: 8 connections is 8% of a 100-connection pool but 80%
+	// of a 10-connection one.
+	streamHeadroomFraction = 4
+
+	// minStreamHeadroom keeps a small pool's reservation meaningful without
+	// letting it dominate: at 8 connections or fewer the fraction would round
+	// toward nothing.
+	minStreamHeadroom = 2
+)
+
+// DefaultStreamHeadroom derives the per-stream import reservation from the
+// pool's connection count.
+//
+// On a saturated link the pool holds slack — connections that are not
+// converting into bytes because the wire, not the pool, is the limit — and
+// handing that slack to playback is close to free. Measured at 100 connections
+// behind a 400 MB/s ceiling: a reservation of 8 cost nothing (import 357 vs
+// 359 MB/s) for stream p50 190ms -> 179ms, and 32 cost 7-13% import throughput
+// during playback only for p50 147ms and p99 245ms -> 170ms.
+//
+// A quarter of the pool sits between those and, crucially, costs the same share
+// at every pool size. How much slack actually exists depends on the link rate,
+// which cannot be known statically — a small pool on a fast line has little, and
+// will pay something real for this. Set stream_headroom_connections explicitly
+// to override, or 0 to disable.
+func DefaultStreamHeadroom(connections int) int {
+	h := connections / streamHeadroomFraction
+	if h < minStreamHeadroom {
+		return minStreamHeadroom
+	}
+	return h
+}
 
 // GetMaxDownloadPrefetch returns max download prefetch with a default fallback.
 func (c *Config) GetMaxDownloadPrefetch() int {

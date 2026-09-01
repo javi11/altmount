@@ -1693,9 +1693,6 @@ func isRunningInDocker() bool {
 
 // DefaultConfig returns a config with default values
 // If configDir is provided, it will be used for database and log file paths
-// defaultStreamHeadroomValue is addressable so DefaultConfig can point at it.
-var defaultStreamHeadroomValue = DefaultStreamHeadroomConnections
-
 func DefaultConfig(configDir ...string) *Config {
 	healthEnabled := false           // Health system disabled by default
 	cleanupOrphanedMetadata := false // Cleanup orphaned metadata disabled by default
@@ -1844,7 +1841,6 @@ func DefaultConfig(configDir ...string) *Config {
 		},
 		Import: ImportConfig{
 			MaxProcessorWorkers:            2, // Default: 2 processor workers
-			StreamHeadroomConnections:      &defaultStreamHeadroomValue,
 			QueueProcessingIntervalSeconds: 5, // Default: check for work every 5 seconds
 			AllowedFileExtensions: []string{ // Default: common media extensions
 				".mkv", ".mp4", ".avi", ".ts", ".m4v", ".mov", ".wmv", ".mpg", ".mpeg",
