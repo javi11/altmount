@@ -481,21 +481,25 @@ type ImportConfig struct {
 	// A nil pointer means "unset, use the default"; an explicit 0 disables the
 	// reservation. A plain int cannot express that difference, since YAML omits
 	// and YAML-zero both decode to 0.
-	StreamHeadroomConnections *int           `yaml:"stream_headroom_connections" mapstructure:"stream_headroom_connections" json:"stream_headroom_connections,omitempty"`
-	MaxDownloadPrefetch       int            `yaml:"max_download_prefetch" mapstructure:"max_download_prefetch" json:"max_download_prefetch"`
-	SegmentSamplePercentage   int            `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage"`
-	ReadTimeoutSeconds        int            `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds"`
-	IsoAnalyzeTimeoutSeconds  *int           `yaml:"iso_analyze_timeout_seconds" mapstructure:"iso_analyze_timeout_seconds" json:"iso_analyze_timeout_seconds,omitempty"`
-	ImportStrategy            ImportStrategy `yaml:"import_strategy" mapstructure:"import_strategy" json:"import_strategy"`
-	ImportDir                 *string        `yaml:"import_dir" mapstructure:"import_dir" json:"import_dir,omitempty"`
-	WatchDir                  *string        `yaml:"watch_dir" mapstructure:"watch_dir" json:"watch_dir,omitempty"`
-	WatchIntervalSeconds      *int           `yaml:"watch_interval_seconds" mapstructure:"watch_interval_seconds" json:"watch_interval_seconds,omitempty"`
-	AllowNestedRarExtraction  *bool          `yaml:"allow_nested_rar_extraction" mapstructure:"allow_nested_rar_extraction" json:"allow_nested_rar_extraction,omitempty"`
-	ExpandBlurayIso           *bool          `yaml:"expand_bluray_iso" mapstructure:"expand_bluray_iso" json:"expand_bluray_iso,omitempty"`
-	RenameToNzbName           *bool          `yaml:"rename_to_nzb_name" mapstructure:"rename_to_nzb_name" json:"rename_to_nzb_name,omitempty"`
-	FilterSampleFiles         *bool          `yaml:"filter_sample_files" mapstructure:"filter_sample_files" json:"filter_sample_files,omitempty"`
-	FailedItemRetentionHours  *int           `yaml:"failed_item_retention_hours" mapstructure:"failed_item_retention_hours" json:"failed_item_retention_hours,omitempty"`
-	HistoryRetentionDays      *int           `yaml:"history_retention_days" mapstructure:"history_retention_days" json:"history_retention_days,omitempty"`
+	StreamHeadroomConnections *int `yaml:"stream_headroom_connections" mapstructure:"stream_headroom_connections" json:"stream_headroom_connections,omitempty"`
+	MaxDownloadPrefetch       int  `yaml:"max_download_prefetch" mapstructure:"max_download_prefetch" json:"max_download_prefetch"`
+	// SegmentSamplePercentage is the fraction (1-100) of segments randomly sampled
+	// during import-phase validation (RAR extraction, archive integrity). Distinct from
+	// Health.SegmentSamplePercentage, which samples during post-import health checks.
+	// Lower defaults faster imports but skips error detection. Default 1%.
+	SegmentSamplePercentage  int            `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage"`
+	ReadTimeoutSeconds       int            `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds"`
+	IsoAnalyzeTimeoutSeconds *int           `yaml:"iso_analyze_timeout_seconds" mapstructure:"iso_analyze_timeout_seconds" json:"iso_analyze_timeout_seconds,omitempty"`
+	ImportStrategy           ImportStrategy `yaml:"import_strategy" mapstructure:"import_strategy" json:"import_strategy"`
+	ImportDir                *string        `yaml:"import_dir" mapstructure:"import_dir" json:"import_dir,omitempty"`
+	WatchDir                 *string        `yaml:"watch_dir" mapstructure:"watch_dir" json:"watch_dir,omitempty"`
+	WatchIntervalSeconds     *int           `yaml:"watch_interval_seconds" mapstructure:"watch_interval_seconds" json:"watch_interval_seconds,omitempty"`
+	AllowNestedRarExtraction *bool          `yaml:"allow_nested_rar_extraction" mapstructure:"allow_nested_rar_extraction" json:"allow_nested_rar_extraction,omitempty"`
+	ExpandBlurayIso          *bool          `yaml:"expand_bluray_iso" mapstructure:"expand_bluray_iso" json:"expand_bluray_iso,omitempty"`
+	RenameToNzbName          *bool          `yaml:"rename_to_nzb_name" mapstructure:"rename_to_nzb_name" json:"rename_to_nzb_name,omitempty"`
+	FilterSampleFiles        *bool          `yaml:"filter_sample_files" mapstructure:"filter_sample_files" json:"filter_sample_files,omitempty"`
+	FailedItemRetentionHours *int           `yaml:"failed_item_retention_hours" mapstructure:"failed_item_retention_hours" json:"failed_item_retention_hours,omitempty"`
+	HistoryRetentionDays     *int           `yaml:"history_retention_days" mapstructure:"history_retention_days" json:"history_retention_days,omitempty"`
 	// VerifyContent, when true, probes each eligible video/audio file's
 	// first bytes through the serving stack after import and fails the
 	// import if no recognized media container signature is found.
@@ -542,9 +546,13 @@ type HealthConfig struct {
 	// Deprecated: superseded by MaxConcurrentSegmentChecks, which is named for
 	// what it actually bounds. Read for one-time migration only (see
 	// migrateHealthSweepConcurrency), then cleared. Do not use in new code.
-	MaxConnectionsForHealthChecks       int     `yaml:"max_connections_for_health_checks,omitempty" mapstructure:"max_connections_for_health_checks" json:"max_connections_for_health_checks,omitempty"`
-	CheckBatchSize                      int     `yaml:"check_batch_size" mapstructure:"check_batch_size" json:"check_batch_size,omitempty"`
-	MaxConcurrentJobs                   int     `yaml:"max_concurrent_jobs" mapstructure:"max_concurrent_jobs" json:"max_concurrent_jobs,omitempty"`
+	MaxConnectionsForHealthChecks int `yaml:"max_connections_for_health_checks,omitempty" mapstructure:"max_connections_for_health_checks" json:"max_connections_for_health_checks,omitempty"`
+	CheckBatchSize                int `yaml:"check_batch_size" mapstructure:"check_batch_size" json:"check_batch_size,omitempty"`
+	MaxConcurrentJobs             int `yaml:"max_concurrent_jobs" mapstructure:"max_concurrent_jobs" json:"max_concurrent_jobs,omitempty"`
+	// SegmentSamplePercentage is the fraction (1-100) of segments randomly sampled
+	// during health-check sweeps (post-import validation only). Distinct from
+	// Import.SegmentSamplePercentage, which samples during archive extraction.
+	// Higher sampling catches more corruption but adds overhead. Default 5%.
 	SegmentSamplePercentage             int     `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage,omitempty"`
 	MaxRetries                          int     `yaml:"max_retries" mapstructure:"max_retries" json:"max_retries"`
 	LibrarySyncIntervalMinutes          int     `yaml:"library_sync_interval_minutes" mapstructure:"library_sync_interval_minutes" json:"library_sync_interval_minutes,omitempty"`
@@ -577,15 +585,23 @@ type HealthConfig struct {
 
 // ProviderConfig represents a single NNTP provider configuration
 type ProviderConfig struct {
-	ID                       string     `yaml:"id" mapstructure:"id" json:"id"`
-	Name                     string     `yaml:"name" mapstructure:"name" json:"name,omitempty"`
-	Host                     string     `yaml:"host" mapstructure:"host" json:"host"`
-	Port                     int        `yaml:"port" mapstructure:"port" json:"port"`
-	Username                 string     `yaml:"username" mapstructure:"username" json:"username"`
-	Password                 string     `yaml:"password" mapstructure:"password" json:"-"`
-	MaxConnections           int        `yaml:"max_connections" mapstructure:"max_connections" json:"max_connections"`
-	MinConnectionsAlive      int        `yaml:"min_connections_alive" mapstructure:"min_connections_alive" json:"min_connections_alive,omitempty"`
-	InflightRequests         int        `yaml:"inflight_requests" mapstructure:"inflight_requests" json:"inflight_requests"`
+	ID                  string `yaml:"id" mapstructure:"id" json:"id"`
+	Name                string `yaml:"name" mapstructure:"name" json:"name,omitempty"`
+	Host                string `yaml:"host" mapstructure:"host" json:"host"`
+	Port                int    `yaml:"port" mapstructure:"port" json:"port"`
+	Username            string `yaml:"username" mapstructure:"username" json:"username"`
+	Password            string `yaml:"password" mapstructure:"password" json:"-"`
+	MaxConnections      int    `yaml:"max_connections" mapstructure:"max_connections" json:"max_connections"`
+	MinConnectionsAlive int    `yaml:"min_connections_alive" mapstructure:"min_connections_alive" json:"min_connections_alive,omitempty"`
+	// InflightRequests caps concurrent decoded article bodies per connection (memory
+	// ceiling). In practice, the pool-wide ImportBudget caps total in-flight bodies
+	// to roughly the connection count, so each connection carries ~1 body. Peak observed
+	// depth is 3-4 against this cap of 10. Raising it does not improve import throughput.
+	InflightRequests int `yaml:"inflight_requests" mapstructure:"inflight_requests" json:"inflight_requests"`
+	// StatInflightRequests caps the per-connection STAT pipeline depth (bodyless
+	// existence checks). Its pool-wide aggregate (connections × depth, clamped to 4096)
+	// determines how much an idle-pool health sweep can widen: measured 24x sweep
+	// throughput improvement. While a stream is active the sweep is capped lower regardless.
 	StatInflightRequests     int        `yaml:"stat_inflight_requests" mapstructure:"stat_inflight_requests" json:"stat_inflight_requests"`
 	TLS                      bool       `yaml:"tls" mapstructure:"tls" json:"tls"`
 	InsecureTLS              bool       `yaml:"insecure_tls" mapstructure:"insecure_tls" json:"insecure_tls"`
@@ -1886,7 +1902,7 @@ func DefaultConfig(configDir ...string) *Config {
 			},
 			MaxDownloadPrefetch:         DefaultMaxDownloadPrefetch, // Segments prefetched ahead for archive analysis
 			SegmentSamplePercentage:     1,                          // Default: 1% segment sampling
-			ReadTimeoutSeconds:          300,                         // Default: 5 minutes read timeout
+			ReadTimeoutSeconds:          300,                        // Default: 5 minutes read timeout
 			IsoAnalyzeTimeoutSeconds:    &isoAnalyzeTimeoutSeconds,
 			ImportStrategy:              ImportStrategyNone, // Default: no import strategy (direct import)
 			ImportDir:                   nil,                // No default import directory
