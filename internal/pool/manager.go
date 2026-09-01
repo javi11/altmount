@@ -463,15 +463,23 @@ func (m *manager) RemoveProvider(name string) error {
 	return nil
 }
 
-// resetProviderQuotaLocked performs the quota reset with m.mu already held.
-func (m *manager) resetProviderQuotaLocked(ctx context.Context, poolName string) error {
-	if m.pool == nil {
-		return fmt.Errorf("NNTP connection pool not available")
-	}
+// currentPool snapshots the pool pointer under a short read lock so callers can
+// use it without holding the manager lock across slow operations.
+func (m *manager) currentPool() *nntppool.Client {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
+	return m.pool
+}
+
+// resetProviderQuotaOn resets poolName's quota on the given pool and clears the
+// persisted quota state. Must be called without m.mu held: the repository write
+// can block, and holding the manager lock across it would stall GetPool on the
+// streaming/import hot path.
+func (m *manager) resetProviderQuotaOn(ctx context.Context, pool *nntppool.Client, poolName string) error {
 	m.logger.InfoContext(ctx, "Resetting provider quota", "provider", poolName)
 
-	if err := m.pool.ResetProviderQuota(poolName); err != nil {
+	if err := pool.ResetProviderQuota(poolName); err != nil {
 		return fmt.Errorf("failed to reset provider quota: %w", err)
 	}
 
@@ -491,10 +499,12 @@ func (m *manager) resetProviderQuotaLocked(ctx context.Context, poolName string)
 // ResetProviderQuota resets the download quota counter for a provider,
 // clearing its consumed-bytes counter and exceeded flag in-place.
 func (m *manager) ResetProviderQuota(ctx context.Context, poolName string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	pool := m.currentPool()
+	if pool == nil {
+		return fmt.Errorf("NNTP connection pool not available")
+	}
 
-	return m.resetProviderQuotaLocked(ctx, poolName)
+	return m.resetProviderQuotaOn(ctx, pool, poolName)
 }
 
 // AcquireImportSlot blocks until an import admission slot is available or ctx
@@ -612,15 +622,17 @@ func (m *manager) quotaWatchLoop(ctx context.Context) {
 // but whose quota counter was never cleared (because no new request arrived to
 // trigger nntppool's on-demand reset path).
 func (m *manager) checkAndResetExpiredQuotas(ctx context.Context) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.pool == nil {
+	// Snapshot the pool and do the rest unlocked: SetProviders/ClearPool may
+	// swap or close it meanwhile, but nntppool's accessors are concurrency-safe
+	// and resetting a quota on a replaced/closed pool is harmless (it either
+	// finds the provider or reports it as not found).
+	pool := m.currentPool()
+	if pool == nil {
 		return
 	}
 
 	now := time.Now()
-	for _, ps := range m.pool.Stats().Providers {
+	for _, ps := range pool.Stats().Providers {
 		// Skip providers with no quota configured or no tracked usage to reset.
 		// Without the QuotaUsed guard, providers that simply have a quota period
 		// configured but have never downloaded anything would trigger a spurious
@@ -634,7 +646,7 @@ func (m *manager) checkAndResetExpiredQuotas(ctx context.Context) {
 
 		m.logger.InfoContext(ctx, "Auto-resetting expired provider quota",
 			"provider", ps.Name, "reset_at", ps.QuotaResetAt)
-		if err := m.resetProviderQuotaLocked(ctx, ps.Name); err != nil {
+		if err := m.resetProviderQuotaOn(ctx, pool, ps.Name); err != nil {
 			m.logger.ErrorContext(ctx, "Failed to auto-reset provider quota",
 				"provider", ps.Name, "error", err)
 		}
