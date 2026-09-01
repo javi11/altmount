@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -22,9 +23,13 @@ import (
 // pool will actually push, so what these benchmarks measure is the pool's own
 // scheduling — not a saturated link.
 const (
-	benchRTT          = 40 * time.Millisecond
-	benchJitter       = 10 * time.Millisecond
-	benchBandwidth    = 8 << 20
+	benchRTT       = 40 * time.Millisecond
+	benchJitter    = 10 * time.Millisecond
+	benchBandwidth = 8 << 20
+	// benchAggregateBW models the deployment's real link ceiling. Without it the
+	// harness lets 100 connections sum to 800 MB/s, which no link does — and that
+	// makes spending connections on latency look far more expensive than it is.
+	benchAggregateBW  = 400 << 20
 	benchArticleSize  = 750 << 10
 	benchConns        = 100
 	benchInflight     = 10  // per-connection concurrent bodies (config default)
@@ -136,10 +141,11 @@ func newHarness(tb testing.TB, statInflight int) *harness {
 	tb.Helper()
 
 	srv, err := nntpserver.New(nntpserver.Config{
-		RTT:              benchRTT,
-		Jitter:           benchJitter,
-		BandwidthPerConn: benchBandwidth,
-		ArticleSize:      benchArticleSize,
+		RTT:                benchRTT,
+		Jitter:             benchJitter,
+		BandwidthPerConn:   benchBandwidth,
+		AggregateBandwidth: envInt64("ALTMOUNT_BENCH_AGG_BW", benchAggregateBW),
+		ArticleSize:        benchArticleSize,
 	})
 	if err != nil {
 		tb.Fatalf("nntpserver.New: %v", err)
@@ -175,8 +181,13 @@ func newHarness(tb testing.TB, statInflight int) *harness {
 
 	stream := &benchStreamSource{}
 	mgr.SetStreamSource(stream)
-	// Production sets this to Config.TotalProviderConnections().
-	mgr.SetImportConnCapacity(benchConns)
+	// Production sets this to Config.TotalProviderConnections(). The multiplier
+	// lets a run model deeper import body pipelining (budget above the connection
+	// count) without touching production defaults.
+	mgr.SetImportConnCapacity(benchConns * int(envInt64("ALTMOUNT_BENCH_BUDGET_MULT", 1)))
+	// Exercise the shipped knob rather than ImportBudget's bare default, so the
+	// benchmark measures what a deployment actually runs.
+	mgr.SetStreamHeadroom(int(envInt64("ALTMOUNT_BENCH_HEADROOM", 8)))
 
 	h := &harness{srv: srv, mgr: mgr, client: client, stream: stream, cancel: cancel}
 
@@ -334,6 +345,9 @@ type scenario struct {
 	body   bool
 	imprt  bool // import fast-fail STAT sweep
 	health bool // health-check STAT sweep
+	// headroom, when non-nil, runs the adaptive import-headroom controller with
+	// this policy instead of leaving the budget at its fixed default.
+	headroom *HeadroomPolicy
 }
 
 var scenarios = []scenario{
@@ -342,6 +356,14 @@ var scenarios = []scenario{
 	{name: "stream+import+health", stream: true, body: true, imprt: true, health: true},
 	{name: "import+health_nostream", body: true, imprt: true, health: true},
 	{name: "health_only_nostream", health: true},
+	{
+		name: "adaptive_free", stream: true, body: true, imprt: true, health: true,
+		headroom: &HeadroomPolicy{MaxTotalCostPct: 0},
+	},
+	{
+		name: "adaptive_spend15", stream: true, body: true, imprt: true, health: true,
+		headroom: &HeadroomPolicy{MaxTotalCostPct: 15},
+	},
 }
 
 // BenchmarkContention measures what background STAT sweeps and import bodies
@@ -377,6 +399,16 @@ func BenchmarkContentionHealthConcurrency(b *testing.B) {
 			runScenario(b, sc, benchStatInflight, conc)
 		})
 	}
+}
+
+// envInt64 reads an int64 override from the environment, falling back to def.
+func envInt64(key string, def int64) int64 {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			return n
+		}
+	}
+	return def
 }
 
 // scenarioDuration lets a smoke run shorten the measurement window without
@@ -418,6 +450,28 @@ func runScenario(b *testing.B, sc scenario, statInflight, healthConc int) {
 		h.runSweep(ctx, &wg, 3_000_000, func() int { return healthConc })
 	}
 
+	// The controller samples every 15s in production; a 15s measurement window
+	// would give it one decision. Drive step directly on a fast ticker so the
+	// same number of decisions happens inside the window.
+	var ctrl *headroomController
+	if sc.headroom != nil {
+		ctrl = newHeadroomController(h.mgr.(*manager).budget, *sc.headroom)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			t := time.NewTicker(1500 * time.Millisecond)
+			defer t.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case now := <-t.C:
+					ctrl.step(now, h.srv.Counters().BytesWritten, h.stream.ActiveStreams())
+				}
+			}
+		}()
+	}
+
 	b.ResetTimer()
 	start := time.Now()
 	time.Sleep(scenarioDuration())
@@ -447,6 +501,10 @@ func runScenario(b *testing.B, sc scenario, statInflight, healthConc int) {
 	b.ReportMetric(float64(h.dispatchOuts.Load()), "dispatch_timeouts")
 	b.ReportMetric(float64(h.otherErrs.Load()), "other_errors")
 	b.ReportMetric(float64(after.PeakInflight), "peak_pipeline_depth")
+	if ctrl != nil {
+		b.ReportMetric(float64(ctrl.reserve), "final_headroom")
+		b.ReportMetric(float64(ctrl.learned), "learned_headroom")
+	}
 
 	firstErr := ""
 	if p := h.firstErr.Load(); p != nil {
