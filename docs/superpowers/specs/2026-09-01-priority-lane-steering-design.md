@@ -284,7 +284,7 @@ change; if phase 2 raises import concurrency, it may become the right place to
 bound memory rather than latency. **No code change in this phase — a measurement
 and a decision.**
 
-### Phase 2 — import body pipelining (gated)
+### Phase 2 — import body pipelining — ABANDONED, measured harmful (2026-09-01)
 
 `ImportBudget` capacity is `TotalProviderConnections()` = 100, but the pool's body
 capacity is `conns × Inflight` = 1000. Imports therefore run ~1 body per
@@ -295,9 +295,26 @@ At 2 bodies pipelined per connection, body 2's TTFB overlaps body 1's transfer a
 the cycle becomes transfer-bound at ~94 ms → ~800 MB/s, roughly **+75 %**. This is
 a model prediction, not a measurement.
 
-Deeper body pipelining makes D2 strictly worse, so this phase ships **only after**
-phase 1 and **only if** its gate passes. It also raises peak memory (more
-concurrent decoded article buffers), which the gate must watch.
+**This phase is dead. Do not revive it without re-reading this section.**
+
+The +75% above was an artifact of a harness with no aggregate bandwidth ceiling:
+it throttled each connection independently, so 100 connections could reach
+800 MB/s. Under a realistic 400 MB/s ceiling, doubling the import budget measured:
+
+| | import MB/s | stream p99 | stream MB/s |
+|---|---|---|---|
+| budget 100 (default) | 359 | 245 ms | 29.4 |
+| budget 200 (2x pipelining) | 371 (**+3.4%**) | **536 ms** (2.2x worse) | 18.7 (−36%) |
+
+That is the signature of a saturated link: the extra in-flight bodies buy almost
+no throughput because the wire was already the constraint, while they more than
+double stream latency and take a third of playback's bandwidth. Deeper body
+pipelining also makes D2 strictly worse by leaving even fewer body-free
+connections.
+
+What replaced it: `import.stream_headroom_connections`, which spends the pool's
+slack on playback instead of trying to extract throughput that the link cannot
+deliver.
 
 ## Verification gates
 
@@ -345,6 +362,21 @@ nntppool changes ship as a tagged release (current: `v4.18.0`, local checkout
 `/Users/javi/mio/nntppool`, clean on `main`). AltMount develops against a
 temporary `replace` directive and switches to the released version before its own
 phase-1c PR merges; the `replace` must not land in `main`.
+
+## Outcome (2026-09-01)
+
+Phase 1 shipped to `perf/priority-dispatch` in nntppool (6 commits, untagged) and
+**failed its gate**: stream p99 did not move (S2 209 -> 209 ms). A diagnostic
+settled why - `idleBodyChan()` returned non-nil zero times across ~22k
+evaluations, because 91% of connections held exactly one body and only 0.8% were
+ever body-free. The steering is correct but had nowhere to steer to. D5's atomic
+cursor did deliver (`lock2` 16.6% -> 15.1%).
+
+The gate only produced a trustworthy answer once the harness gained an aggregate
+bandwidth ceiling. Under a real link the dominant effect on stream latency is not
+per-connection head-of-line blocking at all - it is bandwidth share. That is what
+`import.stream_headroom_connections` addresses, and it is where the measured win
+actually lives.
 
 ## Explicitly out of scope
 
