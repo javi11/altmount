@@ -252,11 +252,11 @@ func (h *harness) runStream(ctx context.Context, wg *sync.WaitGroup) {
 				if ctx.Err() != nil {
 					return
 				}
-				h.streamLat.add(time.Since(start))
 				if err != nil {
 					h.record(err)
 					continue
 				}
+				h.streamLat.add(time.Since(start))
 				h.streamBytes.Add(int64(len(body.Bytes)))
 			}
 		}()
@@ -314,6 +314,9 @@ func (h *harness) runSweep(ctx context.Context, wg *sync.WaitGroup, idBase int, 
 
 			chunkCtx, cancel := context.WithTimeout(ctx, StatManyTimeout(len(ids), conc, 30*time.Second))
 			for res := range h.client.StatMany(chunkCtx, ids, nntppool.StatManyOptions{Concurrency: conc}) {
+				if ctx.Err() != nil {
+					continue
+				}
 				if res.Err != nil {
 					h.record(res.Err)
 					continue
