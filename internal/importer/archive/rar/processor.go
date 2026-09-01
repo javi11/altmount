@@ -119,7 +119,11 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 	// reads initial volume headers, so prefetch is capped at 1 to prevent downloading
 	// excess payload segments across multi-volume archives.
 	headerAnalysisPrefetch := 1
-	ufs := filesystem.NewUsenetFileSystem(ctx, rh.poolManager, normalizedFiles, headerAnalysisPrefetch, progressTracker, readTimeout)
+	// Import-scoped segment cache: rardecode's parallel volume reads and repeated
+	// header probing frequently revisit the same leading segments across volumes.
+	// Bounded and released (by dropping the reference) when this analysis pass returns.
+	segStore := filesystem.NewImportSegmentCache(0)
+	ufs := filesystem.NewUsenetFileSystem(ctx, rh.poolManager, normalizedFiles, headerAnalysisPrefetch, progressTracker, readTimeout, segStore)
 
 	// Extract filenames for first part detection
 	fileNames := make([]string, len(normalizedFiles))
@@ -788,7 +792,9 @@ func (rh *rarProcessor) processNestedRarContent(ctx context.Context, innerRarCon
 	// Create filesystem for reading inner RAR volumes.
 	// Header analysis only reads initial volume headers, so prefetch is capped at 1.
 	headerAnalysisPrefetch := 1
-	dfs := filesystem.NewDecryptingFileSystem(ctx, rh.poolManager, entries, headerAnalysisPrefetch, readTimeout)
+	// Import-scoped segment cache, private to this nested-RAR analysis pass.
+	segStore := filesystem.NewImportSegmentCache(0)
+	dfs := filesystem.NewDecryptingFileSystem(ctx, rh.poolManager, entries, headerAnalysisPrefetch, readTimeout, segStore)
 
 	// Find the first inner RAR part
 	fileNames := make([]string, len(innerRarContents))

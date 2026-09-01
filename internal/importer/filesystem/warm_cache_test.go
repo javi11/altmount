@@ -74,7 +74,7 @@ func TestWarmCacheServesPrefixWithoutNetwork(t *testing.T) {
 		FirstSegmentBytes: want,
 	}
 
-	ufs := NewUsenetFileSystem(context.Background(), mgr, []parser.ParsedFile{file}, 1, nil, time.Minute)
+	ufs := NewUsenetFileSystem(context.Background(), mgr, []parser.ParsedFile{file}, 1, nil, time.Minute, nil)
 	f, err := ufs.Open("movie.part01.rar")
 	if err != nil {
 		t.Fatalf("Open: %v", err)

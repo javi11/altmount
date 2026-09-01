@@ -28,7 +28,12 @@ func NewISOReadSeeker(
 		AesIV:         src.AesIV,
 	}
 
-	fsys := filesystem.NewDecryptingFileSystem(ctx, poolManager, []filesystem.DecryptingFileEntry{entry}, maxPrefetch, readTimeout)
+	// Import-scoped segment cache: ISO structure parsing seeks back and forth
+	// across volume descriptors and path tables, often re-reading leading
+	// segments. Bounded and released (by dropping the reference) once the
+	// caller closes the returned Closer.
+	segStore := filesystem.NewImportSegmentCache(0)
+	fsys := filesystem.NewDecryptingFileSystem(ctx, poolManager, []filesystem.DecryptingFileEntry{entry}, maxPrefetch, readTimeout, segStore)
 
 	f, err := fsys.Open(src.Filename)
 	if err != nil {
