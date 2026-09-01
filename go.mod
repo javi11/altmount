@@ -31,6 +31,7 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.22
 	github.com/middelink/go-parse-torrent-name v0.0.0-20190301154245-3ff4efacd4c4
 	github.com/minio/selfupdate v0.6.0
+	github.com/mnightingale/rapidyenc v0.0.0-20251128204712-7aafef1eaf1c
 	github.com/pressly/goose/v3 v3.24.3
 	github.com/rfjakob/eme v1.1.2
 	github.com/robfig/cron/v3 v3.0.1
@@ -205,7 +206,6 @@ require (
 	github.com/mfridman/interpolate v0.0.2 // indirect
 	github.com/mgechev/revive v1.13.0 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
-	github.com/mnightingale/rapidyenc v0.0.0-20251128204712-7aafef1eaf1c // indirect
 	github.com/montanaflynn/stats v0.7.1 // indirect
 	github.com/moricho/tparallel v0.3.2 // indirect
 	github.com/muesli/termenv v0.16.0 // indirect

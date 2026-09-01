@@ -1,0 +1,178 @@
+package nntpserver
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/javi11/altmount/internal/testsupport/segments"
+	"github.com/javi11/nntppool/v4"
+)
+
+const testArticleSize = 64 * 1024
+
+func newTestClient(t *testing.T, cfg Config, conns, inflight, statInflight int) (*Server, *nntppool.Client) {
+	t.Helper()
+
+	srv, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = srv.Close() })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	client, err := nntppool.NewClient(ctx, []nntppool.Provider{{
+		Factory:      srv.Dial,
+		Auth:         nntppool.Auth{Username: "bench", Password: "bench"},
+		Connections:  conns,
+		Inflight:     inflight,
+		StatInflight: statInflight,
+		SkipPing:     true,
+		IdleTimeout:  time.Hour,
+	}})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	return srv, client
+}
+
+func TestStatHitAndMiss(t *testing.T) {
+	missing := segments.MessageID(99)
+	srv, client := newTestClient(t, Config{
+		RTT:         time.Millisecond,
+		ArticleSize: testArticleSize,
+		Missing:     map[string]struct{}{missing: {}},
+	}, 2, 2, 8)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if _, err := client.Stat(ctx, segments.MessageID(1)); err != nil {
+		t.Fatalf("Stat hit: %v", err)
+	}
+	if _, err := client.Stat(ctx, missing); !errors.Is(err, nntppool.ErrArticleNotFound) {
+		t.Fatalf("Stat miss: got %v, want ErrArticleNotFound", err)
+	}
+
+	if got := srv.Counters().StatMisses; got != 1 {
+		t.Errorf("StatMisses = %d, want 1", got)
+	}
+}
+
+func TestBodyRoundTrip(t *testing.T) {
+	_, client := newTestClient(t, Config{
+		RTT:              time.Millisecond,
+		BandwidthPerConn: 64 * 1024 * 1024,
+		ArticleSize:      testArticleSize,
+	}, 2, 2, 8)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	body, err := client.Body(ctx, segments.MessageID(1))
+	if err != nil {
+		t.Fatalf("Body: %v", err)
+	}
+
+	want := segments.Payload(0, testArticleSize)
+	if !bytes.Equal(body.Bytes, want) {
+		t.Fatalf("body mismatch: got %d bytes, want %d bytes (equal prefix %d)",
+			len(body.Bytes), len(want), commonPrefix(body.Bytes, want))
+	}
+}
+
+// TestPipelinedRepliesStayOrdered is the property the whole harness rests on:
+// many STATs outstanding on few connections, every reply matched to its own
+// message-id. A server that answered out of order would cross the wires and
+// nntppool's FIFO reader would pair replies with the wrong requests.
+func TestPipelinedRepliesStayOrdered(t *testing.T) {
+	const n = 400
+
+	ids := make([]string, n)
+	missing := make(map[string]struct{})
+	for i := range ids {
+		ids[i] = segments.MessageID(i)
+		if i%3 == 0 {
+			missing[ids[i]] = struct{}{}
+		}
+	}
+
+	srv, client := newTestClient(t, Config{
+		RTT:         5 * time.Millisecond,
+		Jitter:      4 * time.Millisecond, // reply computation finishes out of order
+		ArticleSize: testArticleSize,
+		Missing:     missing,
+	}, 2, 2, 64)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	seen := make(map[string]bool, n)
+	for res := range client.StatMany(ctx, ids, nntppool.StatManyOptions{Concurrency: 128}) {
+		if seen[res.MessageID] {
+			t.Fatalf("duplicate result for %s", res.MessageID)
+		}
+		seen[res.MessageID] = true
+
+		_, wantMissing := missing[res.MessageID]
+		gotMissing := errors.Is(res.Err, nntppool.ErrArticleNotFound)
+		if gotMissing != wantMissing {
+			t.Fatalf("%s: missing=%v want %v (err=%v)", res.MessageID, gotMissing, wantMissing, res.Err)
+		}
+	}
+	if len(seen) != n {
+		t.Fatalf("got %d results, want %d", len(seen), n)
+	}
+
+	// With 2 connections and 128 dispatchers the server must have seen real
+	// pipelining, otherwise the timing model is a lie.
+	if peak := srv.Counters().PeakInflight; peak < 8 {
+		t.Errorf("PeakInflight = %d, want >= 8 (pipelining did not happen)", peak)
+	}
+}
+
+func TestBandwidthThrottleIsHonoured(t *testing.T) {
+	const size = 256 * 1024
+	const bw = 2 * 1024 * 1024 // 2 MB/s => ~128ms for 256 KiB
+
+	_, client := newTestClient(t, Config{
+		BandwidthPerConn: bw,
+		ArticleSize:      size,
+	}, 1, 1, 4)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Warm the connection so dial/auth is not counted.
+	if _, err := client.Body(ctx, segments.MessageID(0)); err != nil {
+		t.Fatalf("warmup Body: %v", err)
+	}
+
+	start := time.Now()
+	if _, err := client.Body(ctx, segments.MessageID(1)); err != nil {
+		t.Fatalf("Body: %v", err)
+	}
+	elapsed := time.Since(start)
+
+	// yEnc inflates ~2%, so the floor is a little over size/bw.
+	floor := time.Duration(float64(size) / float64(bw) * float64(time.Second))
+	if elapsed < floor {
+		t.Errorf("transfer took %v, want at least %v", elapsed, floor)
+	}
+}
+
+func commonPrefix(a, b []byte) int {
+	n := min(len(a), len(b))
+	for i := range n {
+		if a[i] != b[i] {
+			return i
+		}
+	}
+	return n
+}
