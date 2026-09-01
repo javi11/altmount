@@ -37,33 +37,33 @@ const (
 
 // Config represents the complete application configuration
 type Config struct {
-	WebDAV          WebDAVConfig       `yaml:"webdav" mapstructure:"webdav" json:"webdav"`
-	API             APIConfig          `yaml:"api" mapstructure:"api" json:"api"`
-	Auth            AuthConfig         `yaml:"auth" mapstructure:"auth" json:"auth"`
-	Database        DatabaseConfig     `yaml:"database" mapstructure:"database" json:"database"`
-	Metadata        MetadataConfig     `yaml:"metadata" mapstructure:"metadata" json:"metadata"`
-	Streaming       StreamingConfig    `yaml:"streaming" mapstructure:"streaming" json:"streaming"`
-	Health          HealthConfig       `yaml:"health" mapstructure:"health" json:"health"`
-	RClone          RCloneConfig       `yaml:"rclone" mapstructure:"rclone" json:"rclone"`
-	Import          ImportConfig       `yaml:"import" mapstructure:"import" json:"import"`
-	Log             LogConfig          `yaml:"log" mapstructure:"log" json:"log"`
-	SABnzbd         SABnzbdConfig      `yaml:"sabnzbd" mapstructure:"sabnzbd" json:"sabnzbd"`
-	Arrs            ArrsConfig         `yaml:"arrs" mapstructure:"arrs" json:"arrs"`
-	Stremio         StremioConfig      `yaml:"stremio" mapstructure:"stremio" json:"stremio"`
-	Fuse            FuseConfig         `yaml:"fuse" mapstructure:"fuse" json:"fuse"`
-	SegmentCache    SegmentCacheConfig `yaml:"segment_cache" mapstructure:"segment_cache" json:"segment_cache"`
-	Providers       []ProviderConfig   `yaml:"providers" mapstructure:"providers" json:"providers"`
-	Nzblnk          NzblnkConfig       `yaml:"nzblnk,omitempty" mapstructure:"nzblnk" json:"-"`
-	Network         NetworkConfig      `yaml:"network" mapstructure:"network" json:"network"`
+	WebDAV       WebDAVConfig       `yaml:"webdav" mapstructure:"webdav" json:"webdav"`
+	API          APIConfig          `yaml:"api" mapstructure:"api" json:"api"`
+	Auth         AuthConfig         `yaml:"auth" mapstructure:"auth" json:"auth"`
+	Database     DatabaseConfig     `yaml:"database" mapstructure:"database" json:"database"`
+	Metadata     MetadataConfig     `yaml:"metadata" mapstructure:"metadata" json:"metadata"`
+	Streaming    StreamingConfig    `yaml:"streaming" mapstructure:"streaming" json:"streaming"`
+	Health       HealthConfig       `yaml:"health" mapstructure:"health" json:"health"`
+	RClone       RCloneConfig       `yaml:"rclone" mapstructure:"rclone" json:"rclone"`
+	Import       ImportConfig       `yaml:"import" mapstructure:"import" json:"import"`
+	Log          LogConfig          `yaml:"log" mapstructure:"log" json:"log"`
+	SABnzbd      SABnzbdConfig      `yaml:"sabnzbd" mapstructure:"sabnzbd" json:"sabnzbd"`
+	Arrs         ArrsConfig         `yaml:"arrs" mapstructure:"arrs" json:"arrs"`
+	Stremio      StremioConfig      `yaml:"stremio" mapstructure:"stremio" json:"stremio"`
+	Fuse         FuseConfig         `yaml:"fuse" mapstructure:"fuse" json:"fuse"`
+	SegmentCache SegmentCacheConfig `yaml:"segment_cache" mapstructure:"segment_cache" json:"segment_cache"`
+	Providers    []ProviderConfig   `yaml:"providers" mapstructure:"providers" json:"providers"`
+	Nzblnk       NzblnkConfig       `yaml:"nzblnk,omitempty" mapstructure:"nzblnk" json:"-"`
+	Network      NetworkConfig      `yaml:"network" mapstructure:"network" json:"network"`
 	// UserAgent is the HTTP User-Agent sent on every outbound HTTP request that
 	// identifies AltMount (indexer NZB downloads, metadata lookups, nzblnk://
 	// resolution, GitHub release checks). Defaults to a browser-like string
 	// because some public indexers reject non-browser agents. Leave empty to
 	// use the default.
-	UserAgent string `yaml:"user_agent" mapstructure:"user_agent" json:"user_agent"`
-	MountPath       string             `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"`
-	MountType       MountType          `yaml:"mount_type" mapstructure:"mount_type" json:"mount_type"`
-	ProfilerEnabled bool               `yaml:"profiler_enabled" mapstructure:"profiler_enabled" json:"profiler_enabled" default:"false"`
+	UserAgent       string    `yaml:"user_agent" mapstructure:"user_agent" json:"user_agent"`
+	MountPath       string    `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"`
+	MountType       MountType `yaml:"mount_type" mapstructure:"mount_type" json:"mount_type"`
+	ProfilerEnabled bool      `yaml:"profiler_enabled" mapstructure:"profiler_enabled" json:"profiler_enabled" default:"false"`
 }
 
 // NzblnkConfig is the legacy scoped user-agent config, retained only so
@@ -466,21 +466,36 @@ type ImportConfig struct {
 	// end-to-end at the same time. 0 = unlimited. NNTP connection use is
 	// balanced automatically: imports share the pool's full capacity and
 	// yield to streams (priority lane + adaptive connection budget).
-	MaxConcurrentImports     int            `yaml:"max_concurrent_imports" mapstructure:"max_concurrent_imports" json:"max_concurrent_imports"`
-	MaxDownloadPrefetch      int            `yaml:"max_download_prefetch" mapstructure:"max_download_prefetch" json:"max_download_prefetch"`
-	SegmentSamplePercentage  int            `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage"`
-	ReadTimeoutSeconds       int            `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds"`
-	IsoAnalyzeTimeoutSeconds *int           `yaml:"iso_analyze_timeout_seconds" mapstructure:"iso_analyze_timeout_seconds" json:"iso_analyze_timeout_seconds,omitempty"`
-	ImportStrategy           ImportStrategy `yaml:"import_strategy" mapstructure:"import_strategy" json:"import_strategy"`
-	ImportDir                *string        `yaml:"import_dir" mapstructure:"import_dir" json:"import_dir,omitempty"`
-	WatchDir                 *string        `yaml:"watch_dir" mapstructure:"watch_dir" json:"watch_dir,omitempty"`
-	WatchIntervalSeconds     *int           `yaml:"watch_interval_seconds" mapstructure:"watch_interval_seconds" json:"watch_interval_seconds,omitempty"`
-	AllowNestedRarExtraction *bool          `yaml:"allow_nested_rar_extraction" mapstructure:"allow_nested_rar_extraction" json:"allow_nested_rar_extraction,omitempty"`
-	ExpandBlurayIso          *bool          `yaml:"expand_bluray_iso" mapstructure:"expand_bluray_iso" json:"expand_bluray_iso,omitempty"`
-	RenameToNzbName          *bool          `yaml:"rename_to_nzb_name" mapstructure:"rename_to_nzb_name" json:"rename_to_nzb_name,omitempty"`
-	FilterSampleFiles        *bool          `yaml:"filter_sample_files" mapstructure:"filter_sample_files" json:"filter_sample_files,omitempty"`
-	FailedItemRetentionHours *int           `yaml:"failed_item_retention_hours" mapstructure:"failed_item_retention_hours" json:"failed_item_retention_hours,omitempty"`
-	HistoryRetentionDays     *int           `yaml:"history_retention_days" mapstructure:"history_retention_days" json:"history_retention_days,omitempty"`
+	MaxConcurrentImports int `yaml:"max_concurrent_imports" mapstructure:"max_concurrent_imports" json:"max_concurrent_imports"`
+	// StreamHeadroomConnections is how many connections are held back from
+	// import per active stream. On a saturated link those connections are slack
+	// — they are not converting into bytes — so handing them to playback costs
+	// little and measurably shortens stream latency. Past that point the pool
+	// can no longer fill the link and import throughput really does fall.
+	//
+	// Measured at 100 connections behind a 400 MB/s link: 8 is free (import
+	// 358 vs 359 MB/s) and takes stream p50 190ms -> 179ms; 32 costs ~13% import
+	// and takes p50 to 146ms and p99 245ms -> 167ms. The right value depends on
+	// the link rate and pool size, so it is a knob rather than a constant.
+	// 0 disables the reservation entirely.
+	// A nil pointer means "unset, use the default"; an explicit 0 disables the
+	// reservation. A plain int cannot express that difference, since YAML omits
+	// and YAML-zero both decode to 0.
+	StreamHeadroomConnections *int           `yaml:"stream_headroom_connections" mapstructure:"stream_headroom_connections" json:"stream_headroom_connections,omitempty"`
+	MaxDownloadPrefetch       int            `yaml:"max_download_prefetch" mapstructure:"max_download_prefetch" json:"max_download_prefetch"`
+	SegmentSamplePercentage   int            `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage"`
+	ReadTimeoutSeconds        int            `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds"`
+	IsoAnalyzeTimeoutSeconds  *int           `yaml:"iso_analyze_timeout_seconds" mapstructure:"iso_analyze_timeout_seconds" json:"iso_analyze_timeout_seconds,omitempty"`
+	ImportStrategy            ImportStrategy `yaml:"import_strategy" mapstructure:"import_strategy" json:"import_strategy"`
+	ImportDir                 *string        `yaml:"import_dir" mapstructure:"import_dir" json:"import_dir,omitempty"`
+	WatchDir                  *string        `yaml:"watch_dir" mapstructure:"watch_dir" json:"watch_dir,omitempty"`
+	WatchIntervalSeconds      *int           `yaml:"watch_interval_seconds" mapstructure:"watch_interval_seconds" json:"watch_interval_seconds,omitempty"`
+	AllowNestedRarExtraction  *bool          `yaml:"allow_nested_rar_extraction" mapstructure:"allow_nested_rar_extraction" json:"allow_nested_rar_extraction,omitempty"`
+	ExpandBlurayIso           *bool          `yaml:"expand_bluray_iso" mapstructure:"expand_bluray_iso" json:"expand_bluray_iso,omitempty"`
+	RenameToNzbName           *bool          `yaml:"rename_to_nzb_name" mapstructure:"rename_to_nzb_name" json:"rename_to_nzb_name,omitempty"`
+	FilterSampleFiles         *bool          `yaml:"filter_sample_files" mapstructure:"filter_sample_files" json:"filter_sample_files,omitempty"`
+	FailedItemRetentionHours  *int           `yaml:"failed_item_retention_hours" mapstructure:"failed_item_retention_hours" json:"failed_item_retention_hours,omitempty"`
+	HistoryRetentionDays      *int           `yaml:"history_retention_days" mapstructure:"history_retention_days" json:"history_retention_days,omitempty"`
 	// VerifyContent, when true, probes each eligible video/audio file's
 	// first bytes through the serving stack after import and fails the
 	// import if no recognized media container signature is found.
@@ -1678,6 +1693,9 @@ func isRunningInDocker() bool {
 
 // DefaultConfig returns a config with default values
 // If configDir is provided, it will be used for database and log file paths
+// defaultStreamHeadroomValue is addressable so DefaultConfig can point at it.
+var defaultStreamHeadroomValue = DefaultStreamHeadroomConnections
+
 func DefaultConfig(configDir ...string) *Config {
 	healthEnabled := false           // Health system disabled by default
 	cleanupOrphanedMetadata := false // Cleanup orphaned metadata disabled by default
@@ -1826,6 +1844,7 @@ func DefaultConfig(configDir ...string) *Config {
 		},
 		Import: ImportConfig{
 			MaxProcessorWorkers:            2, // Default: 2 processor workers
+			StreamHeadroomConnections:      &defaultStreamHeadroomValue,
 			QueueProcessingIntervalSeconds: 5, // Default: check for work every 5 seconds
 			AllowedFileExtensions: []string{ // Default: common media extensions
 				".mkv", ".mp4", ".avi", ".ts", ".m4v", ".mov", ".wmv", ".mpg", ".mpeg",

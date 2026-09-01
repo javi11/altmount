@@ -152,6 +152,13 @@ import:
     - '.epub'
     - '.pdf'
     - '.cbz'
+  # Connections held back from import per active stream. On a saturated link
+  # these are slack — they aren't converting into bytes — so giving them to
+  # playback is close to free. Measured at 100 connections / 400 MB/s:
+  # 8 costs nothing and cuts stream p50 190ms->179ms; 32 costs ~13% import
+  # throughput (during playback only) and gives p50 146ms, p99 245ms->167ms.
+  # Raise it if playback latency matters more than import speed. 0 disables.
+  stream_headroom_connections: 8
   max_concurrent_imports: 0 # Cap on NZB imports running at once (0 = unlimited). NNTP connections are balanced automatically: imports use the pool's full capacity and always yield to streaming.
   segment_sample_percentage: 1 # Percentage of segments to sample for validation (1-100)
   import_strategy: 'NONE' # Import strategy: NONE (direct import), SYMLINK (create symlinks), STRM (create .strm files)

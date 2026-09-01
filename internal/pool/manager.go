@@ -82,6 +82,10 @@ type Manager interface {
 	// total connection count (sum of provider max connections).
 	SetImportConnCapacity(total int)
 
+	// SetStreamHeadroom sets how many connections the import budget holds back
+	// per active stream. See config.Config.StreamHeadroomConnections.
+	SetStreamHeadroom(perStream int)
+
 	// ImportConnCapacity returns the current budget capacity snapshot,
 	// useful for sizing import worker pools.
 	ImportConnCapacity() int
@@ -515,6 +519,11 @@ func (m *manager) AcquireImportConnection(ctx context.Context) (func(), error) {
 // connection count.
 func (m *manager) SetImportConnCapacity(total int) {
 	m.budget.SetCapacity(total)
+}
+
+// SetStreamHeadroom sets the per-stream import connection reservation.
+func (m *manager) SetStreamHeadroom(perStream int) {
+	m.budget.SetHeadroom(perStream)
 }
 
 // ImportConnCapacity returns the current budget capacity snapshot.

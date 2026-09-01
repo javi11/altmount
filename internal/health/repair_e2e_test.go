@@ -76,6 +76,8 @@ type mockARRsService struct {
 	returnErr error
 }
 
+func (m *mockPoolManager) SetStreamHeadroom(int) {}
+
 type triggerCall struct {
 	pathForRescan string
 	relativePath  string

@@ -230,6 +230,8 @@ export type ImportStrategy = "NONE" | "SYMLINK" | "STRM";
 // Import configuration
 export interface ImportConfig {
 	max_processor_workers: number;
+	/** Connections held back from import per active stream. 0 disables. */
+	stream_headroom_connections?: number;
 	queue_processing_interval_seconds: number; // Interval in seconds for queue processing
 	allowed_file_extensions: string[];
 	max_download_prefetch: number;
