@@ -1,6 +1,7 @@
 package usenet
 
 import (
+	"context"
 	"errors"
 	"io"
 	"sync"
@@ -448,6 +449,44 @@ func TestSegmentRangeClear_ConcurrentSafety(t *testing.T) {
 	}
 
 	wg.Wait()
+}
+
+// TestSegmentRange_GetSegment_ConcurrentClear reproduces issue #870: GetSegment
+// validated the index under RLock, then re-acquired the write lock for lazy
+// creation and indexed r.segments without re-checking bounds. A concurrent
+// Clear() nil-ing the slice in that window panicked with index out of range.
+func TestSegmentRange_GetSegment_ConcurrentClear(t *testing.T) {
+	t.Parallel()
+
+	loader := &mockLoader{
+		segments: []Segment{{Id: "seg", Start: 0, End: 99, Size: 100}},
+		groups:   [][]string{nil},
+	}
+
+	for range 20000 {
+		sr := &segmentRange{
+			start:    0,
+			end:      99,
+			segments: make([]*segment, 1),
+			ctx:      context.Background(),
+			loader:   loader,
+		}
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			seg, err := sr.GetSegment(0)
+			if err == nil && seg == nil {
+				t.Error("GetSegment returned nil segment without error")
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			_ = sr.Clear()
+		}()
+		wg.Wait()
+	}
 }
 
 // BenchmarkClear benchmarks the Clear operation
