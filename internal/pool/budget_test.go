@@ -2,8 +2,12 @@ package pool
 
 import (
 	"context"
+	"net"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/javi11/nntppool/v4"
 )
 
 func TestImportBudget_ZeroCapacityIsNoOp(t *testing.T) {
@@ -65,14 +69,20 @@ func TestImportBudget_StreamsShrinkEffectiveCap(t *testing.T) {
 	src := &stubStreamSource{}
 	b := NewImportBudget()
 	b.SetStreamSource(src)
-	b.SetCapacity(8)
 
-	// 2 streams -> reserve 2*streamHeadroom=4 -> effective cap 4.
-	src.set(2)
+	// Derive the sizes from defaultStreamHeadroom rather than hardcoding them, so the
+	// constant stays tunable: a capacity of 4x headroom keeps the reserve well
+	// clear of the capacity-1 clamp for the 2 streams below.
+	const streams = 2
+	capacity := 4 * defaultStreamHeadroom
+	wantCap := capacity - streams*defaultStreamHeadroom
+	b.SetCapacity(capacity)
+
+	src.set(streams)
 	b.NotifyStreamChange()
 
 	var releases []func()
-	for i := range 4 {
+	for i := range wantCap {
 		r, err := b.Acquire(context.Background())
 		if err != nil {
 			t.Fatalf("acquire %d: %v", i, err)
@@ -90,11 +100,12 @@ func TestImportBudget_StreamsShrinkEffectiveCap(t *testing.T) {
 	}()
 	select {
 	case <-blocked:
-		t.Fatal("fifth Acquire should block at effective cap 4 (capacity 8, 2 streams)")
+		t.Fatalf("acquire %d should block at effective cap %d (capacity %d, %d streams)",
+			wantCap+1, wantCap, capacity, streams)
 	case <-time.After(50 * time.Millisecond):
 	}
 
-	// Streams stop -> effective cap returns to 8, waiter granted.
+	// Streams stop -> effective cap returns to capacity, waiter granted.
 	src.set(0)
 	b.NotifyStreamChange()
 	select {
@@ -274,5 +285,86 @@ func TestImportBudget_CapacitySnapshot(t *testing.T) {
 	b.SetCapacity(-5)
 	if got := b.Capacity(); got != 0 {
 		t.Fatalf("Capacity() = %d, want 0 after negative set", got)
+	}
+}
+
+func TestImportBudgetStreamsActive(t *testing.T) {
+	b := NewImportBudget()
+
+	if b.StreamsActive() {
+		t.Fatal("StreamsActive() = true with no stream source wired")
+	}
+
+	src := &stubStreamSource{}
+	b.SetStreamSource(src)
+	if b.StreamsActive() {
+		t.Fatal("StreamsActive() = true with zero active streams")
+	}
+
+	src.n.Store(1)
+	if !b.StreamsActive() {
+		t.Fatal("StreamsActive() = false with one active stream")
+	}
+
+	src.n.Store(0)
+	if b.StreamsActive() {
+		t.Fatal("StreamsActive() = true after streams drained")
+	}
+}
+
+// pipeConnFactory returns an nntppool.ConnFactory backed by net.Pipe whose
+// mock server only greets and answers DATE pings — enough for a pool to build
+// without any real dialing.
+func pipeConnFactory() nntppool.ConnFactory {
+	return func(ctx context.Context) (net.Conn, error) {
+		client, server := net.Pipe()
+		go func() {
+			defer func() { _ = server.Close() }()
+			_, _ = server.Write([]byte("200 ready\r\n"))
+			buf := make([]byte, 512)
+			for {
+				n, err := server.Read(buf)
+				if err != nil {
+					return
+				}
+				if strings.HasPrefix(string(buf[:n]), "DATE") {
+					_, _ = server.Write([]byte("111 20240101000000\r\n"))
+				}
+			}
+		}()
+		return client, nil
+	}
+}
+
+func TestManagerStatSweepConcurrency(t *testing.T) {
+	m := NewManager(context.Background(), nil)
+
+	if got := m.StatSweepConcurrency(100); got != 100 {
+		t.Fatalf("StatSweepConcurrency(100) = %d, want 100 (conservative when no pool exists)", got)
+	}
+
+	if err := m.SetProviders([]nntppool.Provider{{
+		Factory:      pipeConnFactory(),
+		Connections:  5,
+		StatInflight: 100,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = m.ClearPool() }()
+
+	if got := m.StatSweepConcurrency(100); got != 500 {
+		t.Fatalf("StatSweepConcurrency(100) = %d, want 500 (idle pool opens to StatCapacity)", got)
+	}
+
+	src := &stubStreamSource{}
+	m.SetStreamSource(src)
+	src.n.Store(1)
+	if got := m.StatSweepConcurrency(100); got != 100 {
+		t.Fatalf("StatSweepConcurrency(100) = %d, want 100 (conservative while streams are active)", got)
+	}
+
+	src.n.Store(0)
+	if got := m.StatSweepConcurrency(1000); got != 1000 {
+		t.Fatalf("StatSweepConcurrency(1000) = %d, want 1000 (conservative floor never shrinks the sweep)", got)
 	}
 }

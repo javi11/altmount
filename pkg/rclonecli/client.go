@@ -198,6 +198,16 @@ func (m *Manager) performMount(ctx context.Context, provider, mountPath, webdavU
 	}
 	vfsOpt["PollInterval"] = 0 // Poll interval not supported for webdav, set to 0
 
+	// DirCacheTime is applied regardless of vfs_cache_mode: it governs how long
+	// directory listings are cached, not file content, so it still matters when
+	// content caching is off. Cuts PROPFIND load against the WebDAV backend
+	// during library scans.
+	if cfg.RClone.DirCacheTime != "" {
+		if dirCacheTime, e := time.ParseDuration(cfg.RClone.DirCacheTime); e == nil {
+			vfsOpt["DirCacheTime"] = dirCacheTime.Nanoseconds()
+		}
+	}
+
 	// Add VFS options if caching is enabled
 	if cfg.RClone.VFSCacheMode != "off" {
 		if cfg.RClone.VFSCacheMaxAge != "" {
@@ -210,6 +220,9 @@ func (m *Manager) performMount(ctx context.Context, provider, mountPath, webdavU
 			// Ensure the reported total disk space matches the configured cache size
 			// so media servers see accurate available space
 			vfsOpt["DiskSpaceTotalSize"] = cfg.RClone.VFSCacheMaxSize
+		}
+		if cfg.RClone.VFSCacheMinFreeSpace != "" {
+			vfsOpt["CacheMinFreeSpace"] = cfg.RClone.VFSCacheMinFreeSpace
 		}
 		if cfg.RClone.VFSCachePollInterval != "" {
 			vfsOpt["CachePollInterval"] = cfg.RClone.VFSCachePollInterval
@@ -432,6 +445,12 @@ func (m *Manager) RefreshDir(ctx context.Context, provider string, dirs []string
 	if len(dirs) == 0 {
 		dirs = []string{"/"}
 	}
+
+	// rclone's VFS is forward-slash on every platform. Normalize here so a
+	// caller that built a directory with filepath cannot silently no-op:
+	// vfs/forget accepts any string and reports success either way.
+	dirs = ToVFSPaths(dirs)
+
 	// Issue a vfs/forget call for each directory to ensure all parents/children are forgotten
 	for _, dir := range dirs {
 		if dir == "" {
@@ -489,6 +508,12 @@ func (m *Manager) createConfig(ctx context.Context, configName, webdavURL string
 				"pacer_min_sleep": "0",
 				"user":            user,
 				"pass":            pass,
+			},
+			// obscure tells rclone the password is plaintext. Without it,
+			// config/create guesses, and guesses wrong for any password that is
+			// itself revealable, storing it verbatim (#691).
+			"opt": map[string]any{
+				"obscure": true,
 			},
 		},
 	}

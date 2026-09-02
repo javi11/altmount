@@ -37,28 +37,34 @@ const (
 
 // Config represents the complete application configuration
 type Config struct {
-	WebDAV          WebDAVConfig       `yaml:"webdav" mapstructure:"webdav" json:"webdav"`
-	API             APIConfig          `yaml:"api" mapstructure:"api" json:"api"`
-	Auth            AuthConfig         `yaml:"auth" mapstructure:"auth" json:"auth"`
-	Database        DatabaseConfig     `yaml:"database" mapstructure:"database" json:"database"`
-	Metadata        MetadataConfig     `yaml:"metadata" mapstructure:"metadata" json:"metadata"`
-	Streaming       StreamingConfig    `yaml:"streaming" mapstructure:"streaming" json:"streaming"`
-	Health          HealthConfig       `yaml:"health" mapstructure:"health" json:"health"`
-	RClone          RCloneConfig       `yaml:"rclone" mapstructure:"rclone" json:"rclone"`
-	Import          ImportConfig       `yaml:"import" mapstructure:"import" json:"import"`
-	Log             LogConfig          `yaml:"log" mapstructure:"log" json:"log"`
-	SABnzbd         SABnzbdConfig      `yaml:"sabnzbd" mapstructure:"sabnzbd" json:"sabnzbd"`
-	Arrs            ArrsConfig         `yaml:"arrs" mapstructure:"arrs" json:"arrs"`
-	Stremio         StremioConfig      `yaml:"stremio" mapstructure:"stremio" json:"stremio"`
-	Fuse            FuseConfig         `yaml:"fuse" mapstructure:"fuse" json:"fuse"`
-	SegmentCache    SegmentCacheConfig `yaml:"segment_cache" mapstructure:"segment_cache" json:"segment_cache"`
-	Providers       []ProviderConfig   `yaml:"providers" mapstructure:"providers" json:"providers"`
-	Nzblnk          NzblnkConfig       `yaml:"nzblnk" mapstructure:"nzblnk" json:"nzblnk"`
-	Network         NetworkConfig      `yaml:"network" mapstructure:"network" json:"network"`
-	Par2Repair      Par2RepairConfig   `yaml:"par2_repair" mapstructure:"par2_repair" json:"par2_repair"`
-	MountPath       string             `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"`
-	MountType       MountType          `yaml:"mount_type" mapstructure:"mount_type" json:"mount_type"`
-	ProfilerEnabled bool               `yaml:"profiler_enabled" mapstructure:"profiler_enabled" json:"profiler_enabled" default:"false"`
+	WebDAV       WebDAVConfig       `yaml:"webdav" mapstructure:"webdav" json:"webdav"`
+	API          APIConfig          `yaml:"api" mapstructure:"api" json:"api"`
+	Auth         AuthConfig         `yaml:"auth" mapstructure:"auth" json:"auth"`
+	Database     DatabaseConfig     `yaml:"database" mapstructure:"database" json:"database"`
+	Metadata     MetadataConfig     `yaml:"metadata" mapstructure:"metadata" json:"metadata"`
+	Streaming    StreamingConfig    `yaml:"streaming" mapstructure:"streaming" json:"streaming"`
+	Health       HealthConfig       `yaml:"health" mapstructure:"health" json:"health"`
+	RClone       RCloneConfig       `yaml:"rclone" mapstructure:"rclone" json:"rclone"`
+	Import       ImportConfig       `yaml:"import" mapstructure:"import" json:"import"`
+	Log          LogConfig          `yaml:"log" mapstructure:"log" json:"log"`
+	SABnzbd      SABnzbdConfig      `yaml:"sabnzbd" mapstructure:"sabnzbd" json:"sabnzbd"`
+	Arrs         ArrsConfig         `yaml:"arrs" mapstructure:"arrs" json:"arrs"`
+	Stremio      StremioConfig      `yaml:"stremio" mapstructure:"stremio" json:"stremio"`
+	Fuse         FuseConfig         `yaml:"fuse" mapstructure:"fuse" json:"fuse"`
+	SegmentCache SegmentCacheConfig `yaml:"segment_cache" mapstructure:"segment_cache" json:"segment_cache"`
+	Providers    []ProviderConfig   `yaml:"providers" mapstructure:"providers" json:"providers"`
+	Nzblnk       NzblnkConfig       `yaml:"nzblnk,omitempty" mapstructure:"nzblnk" json:"-"`
+	Network      NetworkConfig      `yaml:"network" mapstructure:"network" json:"network"`
+	// UserAgent is the HTTP User-Agent sent on every outbound HTTP request that
+	// identifies AltMount (indexer NZB downloads, metadata lookups, nzblnk://
+	// resolution, GitHub release checks). Defaults to a browser-like string
+	// because some public indexers reject non-browser agents. Leave empty to
+	// use the default.
+	UserAgent       string           `yaml:"user_agent" mapstructure:"user_agent" json:"user_agent"`
+	Par2Repair      Par2RepairConfig `yaml:"par2_repair" mapstructure:"par2_repair" json:"par2_repair"`
+	MountPath       string           `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"`
+	MountType       MountType        `yaml:"mount_type" mapstructure:"mount_type" json:"mount_type"`
+	ProfilerEnabled bool             `yaml:"profiler_enabled" mapstructure:"profiler_enabled" json:"profiler_enabled" default:"false"`
 }
 
 // Par2RepairConfig configures background PAR2 repair of missing usenet
@@ -142,11 +148,23 @@ func (p Par2RepairConfig) EffectiveRepairOnImport() bool {
 	return p.Enabled != nil && *p.Enabled && p.RepairOnImport != nil && *p.RepairOnImport
 }
 
-// NzblnkConfig configures the NZBLNK resolver (used for nzblnk:// link resolution via public indexers).
+// NzblnkConfig is the legacy scoped user-agent config, retained only so
+// existing YAML files can be migrated into the global user_agent field.
 type NzblnkConfig struct {
-	// UserAgent is the HTTP User-Agent sent to indexers when resolving nzblnk:// links.
-	// Defaults to a browser-like string. Leave empty to use the default.
-	UserAgent string `yaml:"user_agent" mapstructure:"user_agent" json:"user_agent,omitempty"`
+	UserAgent string `yaml:"user_agent,omitempty" mapstructure:"user_agent" json:"-"`
+}
+
+// DefaultUserAgent is the fallback for Config.UserAgent. Browser-like because
+// some public indexers (e.g. nzbking.com) reject non-browser agents.
+const DefaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+// GetUserAgent returns the configured global User-Agent, falling back to
+// DefaultUserAgent when unset.
+func (c *Config) GetUserAgent() string {
+	if c.UserAgent != "" {
+		return c.UserAgent
+	}
+	return DefaultUserAgent
 }
 
 // NetworkConfig holds outbound HTTP routing options applied to every external
@@ -407,14 +425,17 @@ type DatabaseConfig struct {
 
 // MetadataConfig represents metadata filesystem configuration
 type MetadataConfig struct {
-	RootPath                 string               `yaml:"root_path" mapstructure:"root_path" json:"root_path"`
-	DeleteSourceNzbOnRemoval *bool                `yaml:"delete_source_nzb_on_removal" mapstructure:"delete_source_nzb_on_removal" json:"delete_source_nzb_on_removal,omitempty"`
-	Backup                   MetadataBackupConfig `yaml:"backup" mapstructure:"backup" json:"backup"`
+	RootPath  string                  `yaml:"root_path" mapstructure:"root_path" json:"root_path"`
+	Backup    MetadataBackupConfig    `yaml:"backup" mapstructure:"backup" json:"backup"`
+	Migration MetadataMigrationConfig `yaml:"migration" mapstructure:"migration" json:"migration"`
 }
 
-// ShouldDeleteSourceNzb returns whether source NZB files should be deleted on removal.
-func (m MetadataConfig) ShouldDeleteSourceNzb() bool {
-	return m.DeleteSourceNzbOnRemoval != nil && *m.DeleteSourceNzbOnRemoval
+// MetadataMigrationConfig configures the legacy-metadata → v3 migration.
+type MetadataMigrationConfig struct {
+	// DefaultGroup is the newsgroup written into synthesized NzbStore entries.
+	// Legacy metas do not retain the original groups, and nzb.BuildNZB renders an
+	// empty <groups> element without this, which most NZB clients reject.
+	DefaultGroup string `yaml:"default_group" mapstructure:"default_group" json:"default_group"`
 }
 
 // MetadataBackupConfig represents metadata backup configuration
@@ -512,6 +533,12 @@ const (
 	ImportStrategySTRM    ImportStrategy = "STRM"
 )
 
+// defaultVerifyContentTimeoutSeconds is the shared fallback for both
+// Import.VerifyContentTimeoutSeconds and Health.VerifyContentTimeoutSeconds
+// so the 15s default lives in one place instead of being duplicated across
+// DefaultConfig and the accessor fallbacks.
+const defaultVerifyContentTimeoutSeconds = 15
+
 // ImportConfig represents import processing configuration
 type ImportConfig struct {
 	MaxProcessorWorkers            int      `yaml:"max_processor_workers" mapstructure:"max_processor_workers" json:"max_processor_workers"`
@@ -521,8 +548,27 @@ type ImportConfig struct {
 	// end-to-end at the same time. 0 = unlimited. NNTP connection use is
 	// balanced automatically: imports share the pool's full capacity and
 	// yield to streams (priority lane + adaptive connection budget).
-	MaxConcurrentImports     int            `yaml:"max_concurrent_imports" mapstructure:"max_concurrent_imports" json:"max_concurrent_imports"`
-	MaxDownloadPrefetch      int            `yaml:"max_download_prefetch" mapstructure:"max_download_prefetch" json:"max_download_prefetch"`
+	MaxConcurrentImports int `yaml:"max_concurrent_imports" mapstructure:"max_concurrent_imports" json:"max_concurrent_imports"`
+	// StreamHeadroomConnections is how many connections are held back from
+	// import per active stream. On a saturated link those connections are slack
+	// — they are not converting into bytes — so handing them to playback costs
+	// little and measurably shortens stream latency. Past that point the pool
+	// can no longer fill the link and import throughput really does fall.
+	//
+	// Measured at 100 connections behind a 400 MB/s link: 8 is free (import
+	// 358 vs 359 MB/s) and takes stream p50 190ms -> 179ms; 32 costs ~13% import
+	// and takes p50 to 146ms and p99 245ms -> 167ms. The right value depends on
+	// the link rate and pool size, so it is a knob rather than a constant.
+	// 0 disables the reservation entirely.
+	// A nil pointer means "unset, use the default"; an explicit 0 disables the
+	// reservation. A plain int cannot express that difference, since YAML omits
+	// and YAML-zero both decode to 0.
+	StreamHeadroomConnections *int `yaml:"stream_headroom_connections" mapstructure:"stream_headroom_connections" json:"stream_headroom_connections,omitempty"`
+	MaxDownloadPrefetch       int  `yaml:"max_download_prefetch" mapstructure:"max_download_prefetch" json:"max_download_prefetch"`
+	// SegmentSamplePercentage is the fraction (1-100) of segments randomly sampled
+	// during import-phase validation (RAR extraction, archive integrity). Distinct from
+	// Health.SegmentSamplePercentage, which samples during post-import health checks.
+	// Lower defaults faster imports but skips error detection. Default 1%.
 	SegmentSamplePercentage  int            `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage"`
 	ReadTimeoutSeconds       int            `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds"`
 	IsoAnalyzeTimeoutSeconds *int           `yaml:"iso_analyze_timeout_seconds" mapstructure:"iso_analyze_timeout_seconds" json:"iso_analyze_timeout_seconds,omitempty"`
@@ -536,13 +582,11 @@ type ImportConfig struct {
 	FilterSampleFiles        *bool          `yaml:"filter_sample_files" mapstructure:"filter_sample_files" json:"filter_sample_files,omitempty"`
 	FailedItemRetentionHours *int           `yaml:"failed_item_retention_hours" mapstructure:"failed_item_retention_hours" json:"failed_item_retention_hours,omitempty"`
 	HistoryRetentionDays     *int           `yaml:"history_retention_days" mapstructure:"history_retention_days" json:"history_retention_days,omitempty"`
-	// DamagePolicy governs standalone video files whose fast-fail sweep finds
-	// SMALL confirmed damage (within the playback padding caps, see
-	// internal/holes): "tolerant" (default) imports them as degraded so
-	// streaming zero-fills the gaps; "strict" fails the import so an ARR can
-	// grab a different release. Damage beyond the caps, archive-set members
-	// and non-video files fail either way.
-	DamagePolicy string `yaml:"damage_policy" mapstructure:"damage_policy" json:"damage_policy,omitempty"`
+	// VerifyContent, when true, probes each eligible video/audio file's
+	// first bytes through the serving stack after import and fails the
+	// import if no recognized media container signature is found.
+	VerifyContent               *bool `yaml:"verify_content" mapstructure:"verify_content" json:"verify_content,omitempty"`
+	VerifyContentTimeoutSeconds *int  `yaml:"verify_content_timeout_seconds" mapstructure:"verify_content_timeout_seconds" json:"verify_content_timeout_seconds,omitempty"`
 }
 
 // LogConfig represents logging configuration with rotation support
@@ -567,13 +611,30 @@ type RepairConfig struct {
 
 // HealthConfig represents health checker configuration
 type HealthConfig struct {
-	Enabled                             *bool   `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
-	LibraryDir                          *string `yaml:"library_dir" mapstructure:"library_dir" json:"library_dir,omitempty"`
-	CleanupOrphanedMetadata             *bool   `yaml:"cleanup_orphaned_metadata" mapstructure:"cleanup_orphaned_metadata" json:"cleanup_orphaned_metadata,omitempty"`
-	CheckIntervalSeconds                int     `yaml:"check_interval_seconds" mapstructure:"check_interval_seconds" json:"check_interval_seconds,omitempty"`
-	MaxConnectionsForHealthChecks       int     `yaml:"max_connections_for_health_checks" mapstructure:"max_connections_for_health_checks" json:"max_connections_for_health_checks,omitempty"`
-	CheckBatchSize                      int     `yaml:"check_batch_size" mapstructure:"check_batch_size" json:"check_batch_size,omitempty"`
-	MaxConcurrentJobs                   int     `yaml:"max_concurrent_jobs" mapstructure:"max_concurrent_jobs" json:"max_concurrent_jobs,omitempty"`
+	Enabled                 *bool   `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
+	LibraryDir              *string `yaml:"library_dir" mapstructure:"library_dir" json:"library_dir,omitempty"`
+	CleanupOrphanedMetadata *bool   `yaml:"cleanup_orphaned_metadata" mapstructure:"cleanup_orphaned_metadata" json:"cleanup_orphaned_metadata,omitempty"`
+	CheckIntervalSeconds    int     `yaml:"check_interval_seconds" mapstructure:"check_interval_seconds" json:"check_interval_seconds,omitempty"`
+	// MaxConcurrentSegmentChecks bounds how many STAT checks a health sweep keeps
+	// in flight. STAT is bodyless and pipelines many per connection, so connection
+	// count is the wrong unit — the import path already sizes its sweep by STAT
+	// pipeline depth (see importer/processor.go).
+	//
+	// nil or 0 means "adapt": the pool narrows the sweep to one connection's depth
+	// while a stream is playing and widens it to the pool's aggregate STAT capacity
+	// when idle, which measured 24x the sweep throughput on an idle pool.
+	MaxConcurrentSegmentChecks *int `yaml:"max_concurrent_segment_checks" mapstructure:"max_concurrent_segment_checks" json:"max_concurrent_segment_checks,omitempty"`
+
+	// Deprecated: superseded by MaxConcurrentSegmentChecks, which is named for
+	// what it actually bounds. Read for one-time migration only (see
+	// migrateHealthSweepConcurrency), then cleared. Do not use in new code.
+	MaxConnectionsForHealthChecks int `yaml:"max_connections_for_health_checks,omitempty" mapstructure:"max_connections_for_health_checks" json:"max_connections_for_health_checks,omitempty"`
+	CheckBatchSize                int `yaml:"check_batch_size" mapstructure:"check_batch_size" json:"check_batch_size,omitempty"`
+	MaxConcurrentJobs             int `yaml:"max_concurrent_jobs" mapstructure:"max_concurrent_jobs" json:"max_concurrent_jobs,omitempty"`
+	// SegmentSamplePercentage is the fraction (1-100) of segments randomly sampled
+	// during health-check sweeps (post-import validation only). Distinct from
+	// Import.SegmentSamplePercentage, which samples during archive extraction.
+	// Higher sampling catches more corruption but adds overhead. Default 5%.
 	SegmentSamplePercentage             int     `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage,omitempty"`
 	MaxRetries                          int     `yaml:"max_retries" mapstructure:"max_retries" json:"max_retries"`
 	LibrarySyncIntervalMinutes          int     `yaml:"library_sync_interval_minutes" mapstructure:"library_sync_interval_minutes" json:"library_sync_interval_minutes,omitempty"`
@@ -594,21 +655,35 @@ type HealthConfig struct {
 	// "delete" removes the file's metadata/NZB/health record and cleans up now-empty
 	// parent directories instead. Degraded files are never affected either way.
 	CorruptionAction string `yaml:"corruption_action" mapstructure:"corruption_action" json:"corruption_action,omitempty"`
+	// VerifyContent, when true, probes each eligible video/audio file's
+	// first bytes through the serving stack during a health check and
+	// marks the file corrupted if no recognized media container signature
+	// is found. Distinct from the unrelated, unused VerifyData field above.
+	VerifyContent               *bool `yaml:"verify_content" mapstructure:"verify_content" json:"verify_content,omitempty"`
+	VerifyContentTimeoutSeconds *int  `yaml:"verify_content_timeout_seconds" mapstructure:"verify_content_timeout_seconds" json:"verify_content_timeout_seconds,omitempty"`
 }
 
 // Path validation functions have been moved to internal/utils/path.go
 
 // ProviderConfig represents a single NNTP provider configuration
 type ProviderConfig struct {
-	ID                       string     `yaml:"id" mapstructure:"id" json:"id"`
-	Name                     string     `yaml:"name" mapstructure:"name" json:"name,omitempty"`
-	Host                     string     `yaml:"host" mapstructure:"host" json:"host"`
-	Port                     int        `yaml:"port" mapstructure:"port" json:"port"`
-	Username                 string     `yaml:"username" mapstructure:"username" json:"username"`
-	Password                 string     `yaml:"password" mapstructure:"password" json:"-"`
-	MaxConnections           int        `yaml:"max_connections" mapstructure:"max_connections" json:"max_connections"`
-	MinConnectionsAlive      int        `yaml:"min_connections_alive" mapstructure:"min_connections_alive" json:"min_connections_alive,omitempty"`
-	InflightRequests         int        `yaml:"inflight_requests" mapstructure:"inflight_requests" json:"inflight_requests"`
+	ID                  string `yaml:"id" mapstructure:"id" json:"id"`
+	Name                string `yaml:"name" mapstructure:"name" json:"name,omitempty"`
+	Host                string `yaml:"host" mapstructure:"host" json:"host"`
+	Port                int    `yaml:"port" mapstructure:"port" json:"port"`
+	Username            string `yaml:"username" mapstructure:"username" json:"username"`
+	Password            string `yaml:"password" mapstructure:"password" json:"-"`
+	MaxConnections      int    `yaml:"max_connections" mapstructure:"max_connections" json:"max_connections"`
+	MinConnectionsAlive int    `yaml:"min_connections_alive" mapstructure:"min_connections_alive" json:"min_connections_alive,omitempty"`
+	// InflightRequests caps concurrent decoded article bodies per connection (memory
+	// ceiling). In practice, the pool-wide ImportBudget caps total in-flight bodies
+	// to roughly the connection count, so each connection carries ~1 body. Peak observed
+	// depth is 3-4 against this cap of 10. Raising it does not improve import throughput.
+	InflightRequests int `yaml:"inflight_requests" mapstructure:"inflight_requests" json:"inflight_requests"`
+	// StatInflightRequests caps the per-connection STAT pipeline depth (bodyless
+	// existence checks). Its pool-wide aggregate (connections × depth, clamped to 4096)
+	// determines how much an idle-pool health sweep can widen: measured 24x sweep
+	// throughput improvement. While a stream is active the sweep is capped lower regardless.
 	StatInflightRequests     int        `yaml:"stat_inflight_requests" mapstructure:"stat_inflight_requests" json:"stat_inflight_requests"`
 	TLS                      bool       `yaml:"tls" mapstructure:"tls" json:"tls"`
 	InsecureTLS              bool       `yaml:"insecure_tls" mapstructure:"insecure_tls" json:"insecure_tls"`
@@ -722,6 +797,42 @@ type StuckCleanupRule struct {
 	Message string `yaml:"message" mapstructure:"message" json:"message"`
 	Enabled bool   `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
 	Action  string `yaml:"action" mapstructure:"action" json:"action"`
+}
+
+// migrateGlobalUserAgent adopts the legacy nzblnk.user_agent as the global
+// user_agent when the global one was never customized, then clears the legacy
+// field so it is dropped from saved YAML. Idempotent.
+// migrateHealthSweepConcurrency carries the legacy
+// health.max_connections_for_health_checks over to max_concurrent_segment_checks
+// and clears it, so it drops out of saved YAML.
+//
+// The rename is not cosmetic: the old key was named for connections but bounded
+// STAT concurrency, and because it defaulted to 100 with validation rejecting
+// <= 0, the pool's stream-aware adaptive sizing was unreachable in every valid
+// config. An operator who had set it explicitly keeps that value; everyone else
+// gets the adaptive behaviour the code always intended.
+//
+// Idempotent: once the legacy field is zero this does nothing.
+func migrateHealthSweepConcurrency(config *Config) {
+	legacy := config.Health.MaxConnectionsForHealthChecks
+	if legacy == 0 {
+		return
+	}
+	if config.Health.MaxConcurrentSegmentChecks == nil {
+		v := legacy
+		config.Health.MaxConcurrentSegmentChecks = &v
+	}
+	config.Health.MaxConnectionsForHealthChecks = 0
+}
+
+func migrateGlobalUserAgent(config *Config) {
+	if config.Nzblnk.UserAgent == "" {
+		return
+	}
+	if config.UserAgent == "" || config.UserAgent == DefaultUserAgent {
+		config.UserAgent = config.Nzblnk.UserAgent
+	}
+	config.Nzblnk = NzblnkConfig{}
 }
 
 // migrateArrsCleanup folds the legacy split cleanup config (separate stuck-rules
@@ -942,6 +1053,10 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	if c.Import.VerifyContentTimeoutSeconds != nil && *c.Import.VerifyContentTimeoutSeconds <= 0 {
+		return fmt.Errorf("import verify_content_timeout_seconds must be greater than 0")
+	}
+
 	// Validate log level (both old and new config)
 	if c.Log.Level != "" {
 		validLevels := []string{"debug", "info", "warn", "error"}
@@ -1002,8 +1117,8 @@ func (c *Config) Validate() error {
 	if c.Health.CheckIntervalSeconds <= 0 {
 		return fmt.Errorf("health check_interval_seconds must be greater than 0")
 	}
-	if c.Health.MaxConnectionsForHealthChecks <= 0 {
-		return fmt.Errorf("health max_connections_for_health_checks must be greater than 0")
+	if c.Health.MaxConcurrentSegmentChecks != nil && *c.Health.MaxConcurrentSegmentChecks < 0 {
+		return fmt.Errorf("health max_concurrent_segment_checks must be zero (adaptive) or greater")
 	}
 	if c.Health.MaxConcurrentJobs <= 0 {
 		return fmt.Errorf("health max_concurrent_jobs must be greater than 0")
@@ -1013,6 +1128,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Health.SegmentSamplePercentage < 1 || c.Health.SegmentSamplePercentage > 100 {
 		return fmt.Errorf("health segment_sample_percentage must be between 1 and 100")
+	}
+	if c.Health.VerifyContentTimeoutSeconds != nil && *c.Health.VerifyContentTimeoutSeconds <= 0 {
+		return fmt.Errorf("health verify_content_timeout_seconds must be greater than 0")
 	}
 
 	// Validate health configuration - requires library_dir when enabled and using a strategy other than NONE
@@ -1640,6 +1758,8 @@ func (m *Manager) ReloadConfig() error {
 
 	// Migrate: fold legacy stuck/allowlist cleanup config into the unified rules.
 	migrateArrsCleanup(config)
+	migrateGlobalUserAgent(config)
+	migrateHealthSweepConcurrency(config)
 
 	// Validate configuration
 	if err := config.Validate(); err != nil {
@@ -1709,10 +1829,9 @@ func isRunningInDocker() bool {
 // DefaultConfig returns a config with default values
 // If configDir is provided, it will be used for database and log file paths
 func DefaultConfig(configDir ...string) *Config {
-	healthEnabled := false            // Health system disabled by default
-	cleanupOrphanedMetadata := false  // Cleanup orphaned metadata disabled by default
-	resolveRepairOnImport := false    // Disable smart replacement detection by default
-	deleteSourceNzbOnRemoval := false // Delete source NZB on removal disabled by default
+	healthEnabled := false           // Health system disabled by default
+	cleanupOrphanedMetadata := false // Cleanup orphaned metadata disabled by default
+	resolveRepairOnImport := false   // Disable smart replacement detection by default
 	vfsEnabled := false
 	mountEnabled := false // Disabled by default
 	sabnzbdEnabled := false
@@ -1730,9 +1849,13 @@ func DefaultConfig(configDir ...string) *Config {
 	failureMaskingEnabled := false
 	repairEnabled := true
 	repairExponentialBackoff := true
-	par2RepairEnabled := false  // beta: opt-in until the feature settles
-	par2RepairOnImport := false // opt-in: each repair costs a full release download
-	par2ArrFirst := true        // prefer ARR replacement; PAR2 only when the ARRs come up empty
+	par2RepairEnabled := false   // beta: opt-in until the feature settles
+	par2RepairOnImport := false  // opt-in: each repair costs a full release download
+	par2ArrFirst := true         // prefer ARR replacement; PAR2 only when the ARRs come up empty
+	importVerifyContent := false // Content verification disabled by default (destructive if misfired)
+	importVerifyContentTimeoutSeconds := defaultVerifyContentTimeoutSeconds
+	healthVerifyContent := false // Content verification disabled by default (destructive if misfired)
+	healthVerifyContentTimeoutSeconds := defaultVerifyContentTimeoutSeconds
 
 	// Set paths based on whether we're running in Docker or have a specific config directory
 	var dbPath, metadataPath, logPath, rclonePath, cachePath, backupPath string
@@ -1790,13 +1913,15 @@ func DefaultConfig(configDir ...string) *Config {
 			Path: dbPath,
 		},
 		Metadata: MetadataConfig{
-			RootPath:                 metadataPath,
-			DeleteSourceNzbOnRemoval: &deleteSourceNzbOnRemoval,
+			RootPath: metadataPath,
 			Backup: MetadataBackupConfig{
 				Enabled:     &metadataBackupEnabled,
 				Schedule:    "0 3 * * *", // daily at 3 AM UTC
 				KeepBackups: 10,
 				Path:        backupPath,
+			},
+			Migration: MetadataMigrationConfig{
+				DefaultGroup: "alt.binaries.misc",
 			},
 		},
 		Streaming: StreamingConfig{
@@ -1860,16 +1985,18 @@ func DefaultConfig(configDir ...string) *Config {
 				".xvid", ".rm", ".rmvb", ".asf", ".asx", ".wtv", ".mk3d", ".dvr-ms",
 				".mp3", ".flac", ".m4a", ".epub", ".pdf", ".cbz",
 			},
-			MaxDownloadPrefetch:      10,  // Default: 10 segments prefetched ahead for archive analysis
-			SegmentSamplePercentage:  1,   // Default: 1% segment sampling
-			ReadTimeoutSeconds:       300, // Default: 5 minutes read timeout
-			IsoAnalyzeTimeoutSeconds: &isoAnalyzeTimeoutSeconds,
-			ImportStrategy:           ImportStrategyNone, // Default: no import strategy (direct import)
-			ImportDir:                nil,                // No default import directory
-			WatchDir:                 nil,
-			WatchIntervalSeconds:     &watchIntervalSeconds,
-			FailedItemRetentionHours: &failedItemRetentionHours,
-			HistoryRetentionDays:     &historyRetentionDays,
+			MaxDownloadPrefetch:         DefaultMaxDownloadPrefetch, // Segments prefetched ahead for archive analysis
+			SegmentSamplePercentage:     1,                          // Default: 1% segment sampling
+			ReadTimeoutSeconds:          300,                        // Default: 5 minutes read timeout
+			IsoAnalyzeTimeoutSeconds:    &isoAnalyzeTimeoutSeconds,
+			ImportStrategy:              ImportStrategyNone, // Default: no import strategy (direct import)
+			ImportDir:                   nil,                // No default import directory
+			WatchDir:                    nil,
+			WatchIntervalSeconds:        &watchIntervalSeconds,
+			FailedItemRetentionHours:    &failedItemRetentionHours,
+			HistoryRetentionDays:        &historyRetentionDays,
+			VerifyContent:               &importVerifyContent,               // Disabled by default
+			VerifyContentTimeoutSeconds: &importVerifyContentTimeoutSeconds, // Default: 15s per-file content probe timeout
 		},
 		Log: LogConfig{
 			File:       logPath, // Default log file path
@@ -1883,13 +2010,14 @@ func DefaultConfig(configDir ...string) *Config {
 			Enabled:                             &healthEnabled,           // Disabled by default
 			CleanupOrphanedMetadata:             &cleanupOrphanedMetadata, // Disabled by default
 			CheckIntervalSeconds:                5,
-			MaxConnectionsForHealthChecks:       100,
 			CheckBatchSize:                      50,
-			MaxConcurrentJobs:                   1,                      // Default: 1 concurrent job
-			SegmentSamplePercentage:             5,                      // Default: 5% segment sampling
-			LibrarySyncIntervalMinutes:          360,                    // Default: sync every 6 hours
-			ResolveRepairOnImport:               &resolveRepairOnImport, // Enabled by default
-			AcceptableMissingSegmentsPercentage: 0,                      // Default: no missing segments allowed
+			MaxConcurrentJobs:                   1,                                  // Default: 1 concurrent job
+			SegmentSamplePercentage:             5,                                  // Default: 5% segment sampling
+			LibrarySyncIntervalMinutes:          360,                                // Default: sync every 6 hours
+			ResolveRepairOnImport:               &resolveRepairOnImport,             // Enabled by default
+			AcceptableMissingSegmentsPercentage: 2,                                  // Default: tolerate up to 2% missing segments
+			VerifyContent:                       &healthVerifyContent,               // Disabled by default
+			VerifyContentTimeoutSeconds:         &healthVerifyContentTimeoutSeconds, // Default: 15s per-file content probe timeout
 			Repair: RepairConfig{
 				Enabled:            &repairEnabled,
 				IntervalMinutes:    60,
@@ -1943,9 +2071,7 @@ func DefaultConfig(configDir ...string) *Config {
 			HistoryRetentionMinutes: 10080,
 		},
 		Providers: []ProviderConfig{},
-		Nzblnk: NzblnkConfig{
-			UserAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-		},
+		UserAgent: DefaultUserAgent,
 		Arrs: ArrsConfig{
 			Enabled:                        &scrapperEnabled, // Disabled by default
 			MaxWorkers:                     5,                // Default to 5 concurrent workers
@@ -2140,6 +2266,8 @@ func LoadConfig(configFile string) (*Config, error) {
 
 	// Migrate: fold legacy stuck/allowlist cleanup config into the unified rules.
 	migrateArrsCleanup(config)
+	migrateGlobalUserAgent(config)
+	migrateHealthSweepConcurrency(config)
 
 	// If log file was not explicitly set in the config file and we have a specific config file path,
 	// derive log file path from config file location

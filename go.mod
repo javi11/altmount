@@ -13,6 +13,7 @@ tool (
 require (
 	github.com/Max-Sum/base32768 v0.0.0-20230304063302-18e6ce5945fd
 	github.com/avast/retry-go/v4 v4.6.1
+	github.com/gabriel-vasile/mimetype v1.4.15
 	github.com/go-pkgz/auth/v2 v2.0.0
 	github.com/go-viper/mapstructure/v2 v2.4.0
 	github.com/gofiber/fiber/v2 v2.52.9
@@ -21,7 +22,7 @@ require (
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/jackc/pgx/v5 v5.8.0
 	github.com/javi11/gopar-turbo v0.2.0
-	github.com/javi11/nntppool/v4 v4.16.0
+	github.com/javi11/nntppool/v4 v4.20.1
 	github.com/javi11/nxg v0.1.0
 	github.com/javi11/nzbparser v0.5.5
 	github.com/javi11/rardecode/v2 v2.1.2-0.20260610075131-4664d7a7325a
@@ -31,6 +32,7 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.22
 	github.com/middelink/go-parse-torrent-name v0.0.0-20190301154245-3ff4efacd4c4
 	github.com/minio/selfupdate v0.6.0
+	github.com/mnightingale/rapidyenc v0.0.0-20251128204712-7aafef1eaf1c
 	github.com/pressly/goose/v3 v3.24.3
 	github.com/rfjakob/eme v1.1.2
 	github.com/robfig/cron/v3 v3.0.1
@@ -202,7 +204,6 @@ require (
 	github.com/mfridman/interpolate v0.0.2 // indirect
 	github.com/mgechev/revive v1.13.0 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
-	github.com/mnightingale/rapidyenc v0.0.0-20251128204712-7aafef1eaf1c // indirect
 	github.com/montanaflynn/stats v0.7.1 // indirect
 	github.com/moricho/tparallel v0.3.2 // indirect
 	github.com/muesli/termenv v0.16.0 // indirect

@@ -295,3 +295,48 @@ func TestNormalizeRarPartFilenameMix(t *testing.T) {
 	}
 }
 
+func TestGroupHasVolumeGap_NoR00Convention(t *testing.T) {
+	makeFiles := func(names ...string) []parser.ParsedFile {
+		out := make([]parser.ParsedFile, len(names))
+		for i, n := range names {
+			out[i] = parser.ParsedFile{Filename: n}
+		}
+		return out
+	}
+
+	// 11 volumes: movie.rar, movie.r01, movie.r02, ..., movie.r10 (no movie.r00)
+	// Must NOT be detected as having a volume gap
+	files := makeFiles(
+		"movie.rar",
+		"movie.r01",
+		"movie.r02",
+		"movie.r03",
+		"movie.r04",
+		"movie.r05",
+		"movie.r06",
+		"movie.r07",
+		"movie.r08",
+		"movie.r09",
+		"movie.r10",
+	)
+
+	hasGap := groupHasVolumeGap(files)
+	if hasGap {
+		t.Errorf("groupHasVolumeGap(movie.rar + movie.r01..r10) = true, want false (no gap)")
+	}
+
+	// 11 volumes with actual gap: movie.rar, movie.r01, movie.r03..r10 (missing movie.r02)
+	// Must be detected as having a volume gap
+	filesWithGap := makeFiles(
+		"movie.rar",
+		"movie.r01",
+		"movie.r03",
+		"movie.r04",
+		"movie.r05",
+	)
+
+	hasGap2 := groupHasVolumeGap(filesWithGap)
+	if !hasGap2 {
+		t.Errorf("groupHasVolumeGap with missing r02 = false, want true")
+	}
+}

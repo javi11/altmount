@@ -458,7 +458,7 @@ func (s *Server) handleSABnzbdAddUrl(c *fiber.Ctx) error {
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to build NZB download request")
 	}
-	req.Header.Set("User-Agent", "altmount")
+	req.Header.Set("User-Agent", s.configManager.GetConfig().GetUserAgent())
 	resp, err := httpclient.NewLong().Do(req)
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to download NZB from URL")
@@ -718,12 +718,19 @@ func (s *Server) handleSABnzbdQueueDelete(c *fiber.Ctx) error {
 	// 1. Try numeric ID
 	id, err := strconv.ParseInt(nzoID, 10, 64)
 	if err == nil {
+		// Fetch the item first so we can delete its NZB file after removal
+		queueItem, _ := s.queueRepo.GetQueueItem(c.Context(), id)
+
 		// Delete from queue
 		err = s.queueRepo.RemoveFromQueue(c.Context(), id)
 		if err == nil {
 			// Also remove from history if it existed there (to prevent ghost items)
 			_, _ = s.queueRepo.RemoveFromHistoryByNzbID(c.Context(), id)
 			_, _ = s.queueRepo.RemoveFromHistory(c.Context(), id)
+
+			if queueItem != nil {
+				s.removeQueueNzbFiles(c, []string{queueItem.NzbPath})
+			}
 
 			// When a queue item is deleted by ID, notify web UI of queue change
 			if s.progressBroadcaster != nil {
@@ -735,7 +742,7 @@ func (s *Server) handleSABnzbdQueueDelete(c *fiber.Ctx) error {
 
 	// 2. Fallback to DownloadID if not found or not numeric
 	if s.queueRepo != nil {
-		// Try to find the item first to get its ID (for history cleanup)
+		// Try to find the item first to get its ID and NZB path (for history cleanup)
 		item, _ := s.queueRepo.GetQueueItemByDownloadID(c.Context(), nzoID)
 
 		err = s.queueRepo.RemoveFromQueueByDownloadID(c.Context(), nzoID)
@@ -745,6 +752,7 @@ func (s *Server) handleSABnzbdQueueDelete(c *fiber.Ctx) error {
 
 			if item != nil {
 				_, _ = s.queueRepo.RemoveFromHistoryByNzbID(c.Context(), item.ID)
+				s.removeQueueNzbFiles(c, []string{item.NzbPath})
 			}
 
 			// When a queue item is deleted by DownloadID, notify web UI of queue change
@@ -1031,11 +1039,19 @@ func (s *Server) handleSABnzbdHistoryDelete(c *fiber.Ctx) error {
 	// 1. Try numeric ID
 	id, err := strconv.ParseInt(nzoID, 10, 64)
 	if err == nil {
+		// Fetch the item first so we can delete its NZB file after removal
+		queueItem, _ := s.queueRepo.GetQueueItem(c.Context(), id)
+
 		// Delete from queue (history items are still queue items with completed/failed status)
 		err = s.queueRepo.RemoveFromQueue(c.Context(), id)
 		if err == nil {
 			_, _ = s.queueRepo.RemoveFromHistoryByNzbID(c.Context(), id)
 			_, _ = s.queueRepo.RemoveFromHistory(c.Context(), id)
+
+			if queueItem != nil {
+				s.removeQueueNzbFiles(c, []string{queueItem.NzbPath})
+			}
+
 			// When a history item is deleted by queue ID, notify web UI of queue change
 			if s.progressBroadcaster != nil {
 				s.progressBroadcaster.BroadcastQueueChanged()
@@ -1070,8 +1086,12 @@ func (s *Server) handleSABnzbdHistoryDelete(c *fiber.Ctx) error {
 		item, _ := s.queueRepo.GetQueueItemByDownloadID(c.Context(), nzoID)
 
 		// Remove from queue and history by DownloadID
-		_ = s.queueRepo.RemoveFromQueueByDownloadID(c.Context(), nzoID)
+		queueErr := s.queueRepo.RemoveFromQueueByDownloadID(c.Context(), nzoID)
 		affected, err := s.queueRepo.RemoveFromHistoryByDownloadID(c.Context(), nzoID)
+
+		if item != nil && queueErr == nil {
+			s.removeQueueNzbFiles(c, []string{item.NzbPath})
+		}
 
 		if err == nil && affected > 0 {
 			if item != nil {

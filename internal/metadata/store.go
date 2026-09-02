@@ -218,6 +218,29 @@ func (ss *StoreService) ReadStore(ref string) (*metapb.NzbStore, error) {
 	return store, nil
 }
 
+// ReadStoreUncached reads and decompresses a store straight from disk, ignoring
+// the cache and without populating it.
+//
+// WriteStore adds the written store to the cache, and ReadStore consults the
+// cache first, so a read-back immediately after a write is served from memory
+// and proves nothing about what actually landed on disk. Post-write integrity
+// checks must use this instead.
+func (ss *StoreService) ReadStoreUncached(ref string) (*metapb.NzbStore, error) {
+	compressed, err := os.ReadFile(ref)
+	if err != nil {
+		return nil, fmt.Errorf("read store %q: %w", ref, err)
+	}
+	raw, err := ss.decoder.DecodeAll(compressed, nil)
+	if err != nil {
+		return nil, fmt.Errorf("decompress store: %w", err)
+	}
+	store := &metapb.NzbStore{}
+	if err := proto.Unmarshal(raw, store); err != nil {
+		return nil, fmt.Errorf("unmarshal store: %w", err)
+	}
+	return store, nil
+}
+
 // FlatSegments returns all segments in flat order: files in order, each file's
 // segments in the order they appear (sorted by number at import time).
 func FlatSegments(store *metapb.NzbStore) []*metapb.NzbSeg {

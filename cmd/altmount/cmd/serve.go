@@ -159,6 +159,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	})
 
 	fs := initializeFilesystem(ctx, metadataService, repos.HealthRepo, arrsService, rcloneRCClient, poolManager, configManager.GetConfigGetter(), streamTracker, cacheSource, par2RepairService)
+	importerService.SetContentVerifyFilesystem(fs)
 
 	// 6. Setup web services
 	app, debugMode := createFiberApp(ctx, cfg)
@@ -218,7 +219,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 	})
 
-	healthWorker, librarySyncWorker, err := startHealthWorker(ctx, cfg, repos.HealthRepo, poolManager, configManager, rcloneRCClient, arrsService, importerService, progressBroadcaster, par2RepairService)
+	healthWorker, librarySyncWorker, err := startHealthWorker(ctx, cfg, metadataService, repos.HealthRepo, poolManager, configManager, rcloneRCClient, arrsService, importerService, progressBroadcaster, par2RepairService, fs)
 	if err != nil {
 		logger.Warn("Health worker initialization failed", "err", err)
 	}
@@ -234,6 +235,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if librarySyncWorker != nil {
 		apiServer.SetLibrarySyncWorker(librarySyncWorker)
 	}
+
+	// Legacy metadata → v3 store migration. Manually triggered from the panel;
+	// creating the worker starts nothing.
+	apiServer.SetMetadataMigrationWorker(
+		metadata.NewMigrationWorker(metadataService, configManager.GetConfigGetter()),
+	)
 
 	// Register health system config change handler for dynamic enable/disable
 	if healthWorker != nil && librarySyncWorker != nil {
@@ -350,6 +357,17 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// Start graceful shutdown sequence
 	logger.InfoContext(ctx, "Starting graceful shutdown sequence")
+
+	// Stop the importer first so it stops claiming and processing new queue
+	// items immediately. Without this, the importer keeps running (it was
+	// only ever closed via a deferred Close() after runServe returns) for
+	// the full duration of the remaining shutdown steps below, including
+	// the HTTP server's graceful-shutdown timeout.
+	if err := importerService.Stop(ctx); err != nil {
+		logger.ErrorContext(ctx, "Failed to stop importer service", "error", err)
+	} else {
+		logger.InfoContext(ctx, "Importer service stopped")
+	}
 
 	// Shutdown API server and its managed resources (like FUSE)
 	apiServer.Shutdown(ctx)

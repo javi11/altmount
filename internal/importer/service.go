@@ -19,15 +19,17 @@ import (
 
 	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/config"
+	"github.com/javi11/altmount/internal/contentverify"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/httpclient"
 	"github.com/javi11/altmount/internal/importer/filesystem"
 	"github.com/javi11/altmount/internal/importer/parser"
-	"github.com/javi11/altmount/internal/importer/validation"
+	"github.com/javi11/altmount/internal/importer/parser/fileinfo"
 	"github.com/javi11/altmount/internal/importer/postprocessor"
 	"github.com/javi11/altmount/internal/importer/queue"
 	"github.com/javi11/altmount/internal/importer/scanner"
 	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
+	"github.com/javi11/altmount/internal/importer/validation"
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/nzbfile"
 	"github.com/javi11/altmount/internal/pool"
@@ -247,6 +249,7 @@ type Service struct {
 	broadcaster     *progress.ProgressBroadcaster // WebSocket progress broadcaster
 	userRepo        *database.UserRepository      // User repository for API key lookup
 	poolManager     pool.Manager                  // Pool manager — used to push admission caps on config change
+	contentVerifyFS contentverify.Opener          // Optional: real NzbFilesystem, set post-construction to break the init-order cycle with nzbfilesystem
 	log             *slog.Logger
 
 	// Runtime state
@@ -573,6 +576,17 @@ func (s *Service) SetRcloneClient(client any) {
 	} else {
 		s.log.InfoContext(s.ctx, "RClone client disabled")
 	}
+}
+
+// SetContentVerifyFilesystem wires the real serving-stack filesystem used to
+// probe imported media files' content signatures. Called once after the
+// NzbFilesystem singleton is constructed (see cmd/altmount/cmd/serve.go),
+// mirroring SetArrsService's late-binding to avoid an import-time dependency
+// cycle between importer and nzbfilesystem.
+func (s *Service) SetContentVerifyFilesystem(fs contentverify.Opener) {
+	s.mu.Lock()
+	s.contentVerifyFS = fs
+	s.mu.Unlock()
 }
 
 // SetArrsService sets or updates the ARRs service
@@ -915,7 +929,56 @@ func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueue
 		}
 	}
 
-	return s.processor.ProcessNzbFile(ctx, item.NzbPath, basePath, int(item.ID), allowedExtensionsOverride, &virtualDir, extractedFiles, item.Category, item.Metadata, item.DownloadID)
+	resultPath, writtenPaths, err := s.processor.ProcessNzbFile(ctx, item.NzbPath, basePath, int(item.ID), allowedExtensionsOverride, &virtualDir, extractedFiles, item.Category, item.Metadata, item.DownloadID)
+	if err != nil {
+		return resultPath, writtenPaths, err
+	}
+
+	if verifyErr := s.verifyWrittenContent(ctx, writtenPaths); verifyErr != nil {
+		return resultPath, writtenPaths, verifyErr
+	}
+
+	return resultPath, writtenPaths, nil
+}
+
+// verifyWrittenContent probes every eligible video/audio file among
+// writtenPaths for a recognized media container signature, when
+// import.verify_content is enabled. A definitive failure (bad signature or
+// confirmed-missing head article) is returned as an error so the caller
+// routes the item to HandleFailure exactly like any other import error,
+// letting the Arr app blocklist the release. A transient probe error is
+// likewise returned as an error — it flows through the same existing
+// retry/backoff path as any other transient import failure; no separate
+// mechanism is introduced.
+func (s *Service) verifyWrittenContent(ctx context.Context, writtenPaths []string) error {
+	s.mu.Lock()
+	contentVerifyFS := s.contentVerifyFS
+	s.mu.Unlock()
+
+	cfg := s.configGetter()
+	if cfg == nil || !cfg.GetImportVerifyContent() || contentVerifyFS == nil {
+		return nil
+	}
+
+	timeout := cfg.GetImportVerifyContentTimeout()
+	for _, path := range writtenPaths {
+		if !fileinfo.IsVerifiableMediaFile(path) {
+			continue
+		}
+
+		result := contentverify.Probe(ctx, contentVerifyFS, path, timeout)
+		switch result.Result {
+		case contentverify.ContentValid:
+			continue
+		case contentverify.ContentInvalid:
+			return fmt.Errorf("content verification failed for %q: no recognized media container signature: %w", path, result.Err)
+		case contentverify.ContentSegmentMissing:
+			return fmt.Errorf("content verification failed for %q: head article missing: %w", path, result.Err)
+		case contentverify.ContentProbeError:
+			return fmt.Errorf("content verification could not complete for %q: %w", path, result.Err)
+		}
+	}
+	return nil
 }
 
 func (s *Service) calculateProcessVirtualDir(item *database.ImportQueueItem, basePath *string) string {
@@ -1399,7 +1462,7 @@ func (s *Service) cleanupWrittenPaths(ctx context.Context, itemID int64, paths [
 			}
 			s.cleanupHealthRecords(ctx, itemID, dirPath)
 		} else {
-			if delErr := s.metadataService.DeleteFileMetadata(p); delErr != nil {
+			if delErr := s.metadataService.DeleteFileMetadata(ctx, p); delErr != nil {
 				s.log.WarnContext(ctx, "Failed to clean up metadata file after import failure",
 					"queue_id", itemID,
 					"path", p,
@@ -1469,6 +1532,31 @@ func (s *Service) handleProcessingFailure(ctx context.Context, item *database.Im
 	}
 
 	errorMessage := processingErr.Error()
+	if errors.Is(processingErr, validation.ErrFastFailInconclusive) {
+		// The provider never produced a conclusive answer within the validator's
+		// bounded retry budget. Keep this distinct from a bad release: do not log
+		// an indexer failure, notify/blocklist in ARR, invoke fallback, or move the
+		// NZB away. The retained failed item can be retried manually once the
+		// provider is healthy again.
+		s.log.WarnContext(ctx, "Import stopped because segment availability was inconclusive",
+			"queue_id", item.ID,
+			"file", item.NzbPath,
+			"error", processingErr)
+		if err := s.database.Repository.UpdateQueueItemStatus(ctx, item.ID, database.QueueStatusFailed, &errorMessage); err != nil {
+			s.log.ErrorContext(ctx, "Failed to mark inconclusive import as failed", "queue_id", item.ID, "error", err)
+		}
+		if s.database.MigrationRepo != nil {
+			if err := s.database.MigrationRepo.MarkFailed(ctx, item.ID, errorMessage); err != nil {
+				s.log.WarnContext(ctx, "Failed to mark inconclusive import migration as failed",
+					"queue_id", item.ID, "error", err)
+			}
+		}
+		if s.broadcaster != nil {
+			s.broadcaster.NotifyComplete(int(item.ID), "failed")
+			s.broadcaster.BroadcastQueueChanged()
+		}
+		return
+	}
 
 	// Log persistent indexer statistic
 	indexerName := database.IndexerUnknown
@@ -2011,4 +2099,3 @@ func joinPathsMergingOverlap(parent, child string) string {
 	}
 	return result
 }
-

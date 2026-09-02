@@ -19,11 +19,10 @@ const testCapsXML = `<?xml version="1.0" encoding="UTF-8"?>
 <caps>
 	<server title="Mock Indexer"/>
 	<searching>
-		<search available="yes"/>
-		<movie-search available="yes"/>
-		<tv-search available="yes"/>
+		<search available="yes" supportedParams="q,cat,limit,extended"/>
+		<movie-search available="yes" supportedParams="q,cat,imdbid,limit,extended"/>
+		<tv-search available="yes" supportedParams="q,cat,imdbid,tvdbid,season,ep,limit,extended"/>
 	</searching>
-	<supportedParams>q,imdbid,tvdbid,season,ep,extended,limit,cat</supportedParams>
 </caps>`
 
 func TestSearchTV_NewznabQueryPriority_Prowlarr1to1(t *testing.T) {
@@ -37,7 +36,9 @@ func TestSearchTV_NewznabQueryPriority_Prowlarr1to1(t *testing.T) {
 		capturedQuery = r.URL.RawQuery
 		w.Header().Set("Content-Type", "application/xml")
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>test</title></channel></rss>`))
+		// A non-empty result keeps the degradation ladder out of the picture:
+		// this test pins query-shape priority, not empty-result behavior.
+		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>test</title><item><title>The Ark S01E01</title><enclosure url="http://idx/the-ark.nzb" type="application/x-nzb"/></item></channel></rss>`))
 	}))
 	defer server.Close()
 
@@ -326,8 +327,16 @@ func TestSearchInspect_TitleQueryOnlyWhenIDSearchIsEmpty(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, res)
 
-		require.Len(t, queries, 2, "expected the ID query then the title fallback, got %v", queries)
-		assert.Contains(t, queries[1], "q=The", "second query should be the title fallback")
+		// The identifier search degrades through its ladder (full params,
+		// minus ep, minus season, minus categories). A still-empty bare
+		// identifier search is learned as unsupported and answered inside
+		// the same client call by a keyword retry on the raw identifier —
+		// so the ID pass costs five queries and satisfies the coordinator,
+		// which then never needs the title fallback.
+		require.Len(t, queries, 5, "expected the degrading ID queries then the learned keyword retry, got %v", queries)
+		assert.Contains(t, queries[0], "tvdbid=415089", "first query should be the identifier query")
+		assert.Contains(t, queries[3], "tvdbid=415089", "the bare identifier query precedes the fallback")
+		assert.Contains(t, queries[4], "q=tt15367376", "last query should be the client keyword retry")
 		assert.Equal(t, 1, res.TotalResults, "the fallback hit should be evaluated")
 	})
 }
@@ -469,16 +478,16 @@ func TestSearch_Movie_EmptyIDResult_FallsBackToKeywordQuery(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	imdbIdx, searchIdx := -1, -1
+	imdbIdx, keywordIdx := -1, -1
 	for i, query := range queries {
 		if strings.Contains(query, "imdbid=") && imdbIdx == -1 {
 			imdbIdx = i
 		}
-		if strings.Contains(query, "t=search") {
-			searchIdx = i
+		if strings.Contains(query, "q=Contraataque") && !strings.Contains(query, "imdbid=") {
+			keywordIdx = i
 		}
 	}
 	require.NotEqual(t, -1, imdbIdx, "identifier query must have been issued first")
-	require.NotEqual(t, -1, searchIdx, "keyword fallback query must have been issued")
-	assert.Greater(t, searchIdx, imdbIdx, "keyword fallback must follow the empty identifier query")
+	require.NotEqual(t, -1, keywordIdx, "keyword fallback query must have been issued")
+	assert.Greater(t, keywordIdx, imdbIdx, "keyword fallback must follow the empty identifier query")
 }

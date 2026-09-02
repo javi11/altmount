@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	stdpath "path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -45,26 +46,7 @@ func (c *Coordinator) notifyVFSWith(ctx context.Context, rcloneClient rclonecli.
 			vfsName = config.MountProvider
 		}
 
-		// Normalize paths for rclone (no leading slash)
-		normalizeForRclone := func(p string) string {
-			p = strings.TrimPrefix(p, "/")
-			if p == "" {
-				return "."
-			}
-			return p
-		}
-
-		dirsToRefresh := []string{normalizeForRclone(path)}
-		parentDir := filepath.Dir(path)
-		if parentDir != "." && parentDir != "/" {
-			dirsToRefresh = append(dirsToRefresh, normalizeForRclone(parentDir))
-
-			// Also refresh grandparent if parent might be new
-			grandParent := filepath.Dir(parentDir)
-			if grandParent != "." && grandParent != "/" {
-				dirsToRefresh = append(dirsToRefresh, normalizeForRclone(grandParent))
-			}
-		}
+		dirsToRefresh := refreshDirsFor(path)
 
 		slog.DebugContext(refreshCtx, "Notifying rclone VFS refresh", "dirs", dirsToRefresh, "vfs", vfsName)
 
@@ -123,4 +105,50 @@ func (c *Coordinator) RefreshMountPathIfNeeded(ctx context.Context, resultingPat
 			}
 		}
 	}
+}
+
+// refreshDirsFor returns the entries to hand to rclone for a newly imported
+// path: the path itself, then its parent and grandparent, since those
+// directories may be new too. Note the first entry is the path as given, which
+// for a single-file import is the file rather than a directory - preserved as
+// the existing behaviour.
+//
+// The ancestry is walked on the forward-slash form. rclone's VFS is
+// forward-slash on every platform, and walking with filepath.Dir on Windows
+// both yields backslash-separated entries (which match no node, while
+// vfs/forget reports success regardless) and defeats the root guards below,
+// since the Windows root is "\" rather than "/" - appending a useless bare-root
+// entry to every batch.
+//
+// On POSIX the separator conversion is a no-op and path.Dir and filepath.Dir
+// agree, so the only behaviour change there is Clean collapsing duplicate and
+// trailing slashes, which previously leaked through to rclone.
+func refreshDirsFor(p string) []string {
+	// rclone wants no leading slash; "." is its spelling for the mount root.
+	normalize := func(s string) string {
+		s = strings.TrimPrefix(s, "/")
+		if s == "" {
+			return "."
+		}
+		return s
+	}
+
+	// Clean once, up front, and walk the ancestry on the result. TrimPrefix
+	// alone strips a single leading slash, so "//tv//Show//ep.mkv" previously
+	// reached rclone still carrying one. Cleaning inside normalize instead
+	// would leave the walk on the raw path, where Dir("/tv/Show/") is
+	// "/tv/Show" and the first two entries come out identical.
+	virtual := stdpath.Clean(rclonecli.ToVFSPath(p))
+	dirs := []string{normalize(virtual)}
+
+	parent := stdpath.Dir(virtual)
+	if parent != "." && parent != "/" {
+		dirs = append(dirs, normalize(parent))
+
+		grandParent := stdpath.Dir(parent)
+		if grandParent != "." && grandParent != "/" {
+			dirs = append(dirs, normalize(grandParent))
+		}
+	}
+	return dirs
 }

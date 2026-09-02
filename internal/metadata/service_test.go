@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDeleteFileMetadataWithSourceNzb_RemovesMetadata(t *testing.T) {
+func TestDeleteFileMetadata_RemovesMetadata(t *testing.T) {
 	root := t.TempDir()
 	ms := NewMetadataService(root)
 
@@ -30,12 +30,12 @@ func TestDeleteFileMetadataWithSourceNzb_RemovesMetadata(t *testing.T) {
 	require.FileExists(t, metaPath)
 
 	ctx := context.Background()
-	require.NoError(t, ms.DeleteFileMetadataWithSourceNzb(ctx, virtualPath, false))
+	require.NoError(t, ms.DeleteFileMetadata(ctx, virtualPath))
 
 	assert.NoFileExists(t, metaPath)
 }
 
-func TestDeleteFileMetadataWithSourceNzb_NoIDSidecar_NoError(t *testing.T) {
+func TestDeleteFileMetadata_NoIDSidecar_NoError(t *testing.T) {
 	root := t.TempDir()
 	ms := NewMetadataService(root)
 
@@ -48,7 +48,7 @@ func TestDeleteFileMetadataWithSourceNzb_NoIDSidecar_NoError(t *testing.T) {
 	require.NoError(t, ms.WriteFileMetadata(virtualPath, meta))
 
 	ctx := context.Background()
-	err := ms.DeleteFileMetadataWithSourceNzb(ctx, virtualPath, false)
+	err := ms.DeleteFileMetadata(ctx, virtualPath)
 	assert.NoError(t, err, "delete should succeed even without .id sidecar")
 
 	assert.NoFileExists(t, ms.GetMetadataFilePath(virtualPath))

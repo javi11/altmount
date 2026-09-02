@@ -22,19 +22,11 @@ func (c *Config) GetMaxConcurrentJobs() int {
 	return c.Health.MaxConcurrentJobs
 }
 
-// GetMaxConnectionsForHealthChecks returns max connections for health checks with a default fallback.
-func (c *Config) GetMaxConnectionsForHealthChecks() int {
-	if c.Health.MaxConnectionsForHealthChecks <= 0 {
-		return 100 // Default: 100 concurrent STAT checks
-	}
-	return c.Health.MaxConnectionsForHealthChecks
-}
-
 // GetCheckBatchSize returns how many due files each health cycle fetches and
 // sweeps together in one cross-file StatMany call, with a default fallback.
-// Distinct from GetMaxConnectionsForHealthChecks: this bounds how many FILES
-// are batched into one sweep, while that bounds how many segment checks run
-// concurrently within a sweep.
+// Distinct from HealthStatConcurrency: this bounds how many FILES are batched
+// into one sweep, while that bounds how many segment checks run concurrently
+// within a sweep.
 func (c *Config) GetCheckBatchSize() int {
 	if c.Health.CheckBatchSize <= 0 {
 		return 50 // Default: 50 files per cycle
@@ -126,13 +118,20 @@ func (c *Config) GetMaxRepairRetries() int {
 	return c.Health.Repair.MaxRepairRetries
 }
 
-// Import config accessor methods.
-
-// GetImportDamagePolicyTolerant reports whether small confirmed damage on a
-// standalone video file should import as degraded (true, the default) instead
-// of failing the import (false, "strict").
-func (c *Config) GetImportDamagePolicyTolerant() bool {
-	return c.Import.DamagePolicy != "strict"
+// GetAcceptableMissingSegmentsPercentage returns the missing-segment
+// percentage a health check tolerates before failing a file (and triggering
+// repair) rather than leaving it degraded. Defaults to 2%; set to 0 to
+// disable tolerance entirely (any missing segment fails immediately), or to
+// 100 to disable failing on this basis altogether (always degraded, never
+// repaired for missing segments alone). The value is clamped to [0, 100].
+func (c *Config) GetAcceptableMissingSegmentsPercentage() float64 {
+	if c.Health.AcceptableMissingSegmentsPercentage < 0 {
+		return 0
+	}
+	if c.Health.AcceptableMissingSegmentsPercentage > 100 {
+		return 100
+	}
+	return c.Health.AcceptableMissingSegmentsPercentage
 }
 
 // TotalProviderConnections returns the pool's total connection capacity: the
@@ -159,6 +158,51 @@ func (c *Config) TotalProviderConnections() int {
 	return backup
 }
 
+// defaultStatInflightRequests mirrors the per-provider default applied in
+// (*Manager) config normalization, so StatConcurrency reports the depth the
+// pool will actually use for providers that leave the field unset.
+const defaultStatInflightRequests = 100
+
+// maxStatConcurrency caps StatConcurrency. The chunked STAT sweeps use this
+// number as their chunk size, and a chunk boundary is the only place a file
+// can be dropped from the remaining work — so an unbounded value would erase
+// early-termination granularity and make one chunk deadline cover the entire
+// sweep.
+const maxStatConcurrency = 500
+
+// StatConcurrency returns how many STATs to keep in flight during an
+// availability sweep. STAT carries no body, so nntppool pipelines it down a
+// connection to Provider.StatInflight depth rather than spending one
+// connection per check (see NNTPConnection.inflightSem) — connection count is
+// the wrong ceiling.
+//
+// The value is the deepest stat_inflight_requests among enabled providers, not
+// the sum of connections × depth. A single provider's pipeline depth is the
+// conservative read: it is what one connection alone can sustain, so the sweep
+// stays within reach even when the pool is busy serving streams.
+func (c *Config) StatConcurrency() int {
+	depth := 0
+	for _, p := range c.Providers {
+		if p.Enabled != nil && !*p.Enabled {
+			continue
+		}
+		d := p.StatInflightRequests
+		if d <= 0 {
+			d = defaultStatInflightRequests
+		}
+		if d > depth {
+			depth = d
+		}
+	}
+	if depth <= 0 {
+		depth = defaultStatInflightRequests
+	}
+	if depth > maxStatConcurrency {
+		depth = maxStatConcurrency
+	}
+	return depth
+}
+
 // GetMaxConcurrentImports returns the global cap on concurrent NZB imports.
 // 0 means unlimited (the default).
 func (c *Config) GetMaxConcurrentImports() int {
@@ -168,10 +212,75 @@ func (c *Config) GetMaxConcurrentImports() int {
 	return c.Import.MaxConcurrentImports
 }
 
+// GetMaxConcurrentSegmentChecks returns the operator's hard cap on in-flight
+// STAT checks during a health sweep, or 0 meaning "let the pool adapt".
+func (c *Config) GetMaxConcurrentSegmentChecks() int {
+	if c.Health.MaxConcurrentSegmentChecks == nil {
+		return 0
+	}
+	if n := *c.Health.MaxConcurrentSegmentChecks; n > 0 {
+		return n
+	}
+	return 0
+}
+
+// GetStreamHeadroomConnections returns the per-stream import reservation:
+// an explicit setting when present, otherwise a value derived from the pool size.
+func (c *Config) GetStreamHeadroomConnections() int {
+	if c.Import.StreamHeadroomConnections != nil {
+		if n := *c.Import.StreamHeadroomConnections; n > 0 {
+			return n
+		}
+		return 0 // explicitly disabled
+	}
+	return DefaultStreamHeadroom(c.TotalProviderConnections())
+}
+
+const (
+	// streamHeadroomFraction makes the default reservation a fixed SHARE of the
+	// pool rather than a fixed count. The cost of a reservation is the fraction
+	// of the pool it removes, so an absolute default cannot be right at more
+	// than one pool size: 8 connections is 8% of a 100-connection pool but 80%
+	// of a 10-connection one.
+	streamHeadroomFraction = 4
+
+	// minStreamHeadroom keeps a small pool's reservation meaningful without
+	// letting it dominate: at 8 connections or fewer the fraction would round
+	// toward nothing.
+	minStreamHeadroom = 2
+)
+
+// DefaultStreamHeadroom derives the per-stream import reservation from the
+// pool's connection count.
+//
+// On a saturated link the pool holds slack — connections that are not
+// converting into bytes because the wire, not the pool, is the limit — and
+// handing that slack to playback is close to free. Measured at 100 connections
+// behind a 400 MB/s ceiling: a reservation of 8 cost nothing (import 357 vs
+// 359 MB/s) for stream p50 190ms -> 179ms, and 32 cost 7-13% import throughput
+// during playback only for p50 147ms and p99 245ms -> 170ms.
+//
+// A quarter of the pool sits between those and, crucially, costs the same share
+// at every pool size. How much slack actually exists depends on the link rate,
+// which cannot be known statically — a small pool on a fast line has little, and
+// will pay something real for this. Set stream_headroom_connections explicitly
+// to override, or 0 to disable.
+func DefaultStreamHeadroom(connections int) int {
+	h := connections / streamHeadroomFraction
+	if h < minStreamHeadroom {
+		return minStreamHeadroom
+	}
+	return h
+}
+
+// DefaultMaxDownloadPrefetch is the default number of segments to prefetch ahead
+// during archive analysis and expansion. Must match the value in DefaultConfig.
+const DefaultMaxDownloadPrefetch = 10
+
 // GetMaxDownloadPrefetch returns max download prefetch with a default fallback.
 func (c *Config) GetMaxDownloadPrefetch() int {
 	if c.Import.MaxDownloadPrefetch <= 0 {
-		return 3 // Default: 3 segments prefetched ahead
+		return DefaultMaxDownloadPrefetch
 	}
 	return c.Import.MaxDownloadPrefetch
 }
@@ -182,6 +291,43 @@ func (c *Config) GetReadTimeoutSeconds() int {
 		return 30 // Default: 30 seconds
 	}
 	return c.Import.ReadTimeoutSeconds
+}
+
+// GetImportVerifyContent returns whether imported media files should be
+// probed for a valid container signature before the import is reported
+// successful.
+func (c *Config) GetImportVerifyContent() bool {
+	if c.Import.VerifyContent == nil {
+		return false
+	}
+	return *c.Import.VerifyContent
+}
+
+// GetImportVerifyContentTimeout returns the per-file content probe timeout
+// for import verification, defaulting to 15 seconds.
+func (c *Config) GetImportVerifyContentTimeout() time.Duration {
+	if c.Import.VerifyContentTimeoutSeconds == nil || *c.Import.VerifyContentTimeoutSeconds <= 0 {
+		return defaultVerifyContentTimeoutSeconds * time.Second
+	}
+	return time.Duration(*c.Import.VerifyContentTimeoutSeconds) * time.Second
+}
+
+// GetHealthVerifyContent returns whether health checks should probe media
+// files for a valid container signature.
+func (c *Config) GetHealthVerifyContent() bool {
+	if c.Health.VerifyContent == nil {
+		return false
+	}
+	return *c.Health.VerifyContent
+}
+
+// GetHealthVerifyContentTimeout returns the per-file content probe timeout
+// for health check verification, defaulting to 15 seconds.
+func (c *Config) GetHealthVerifyContentTimeout() time.Duration {
+	if c.Health.VerifyContentTimeoutSeconds == nil || *c.Health.VerifyContentTimeoutSeconds <= 0 {
+		return defaultVerifyContentTimeoutSeconds * time.Second
+	}
+	return time.Duration(*c.Health.VerifyContentTimeoutSeconds) * time.Second
 }
 
 // GetIsoAnalyzeTimeout returns the per-ISO analyse deadline with a 120s

@@ -194,7 +194,7 @@ func TestReleaseMatchesContentAnimeAliasesAndAbsolute(t *testing.T) {
 }
 
 func TestResolveSeriesTitleAliasesCacheNilSafe(t *testing.T) {
-	if resolveSeriesTitleAliases(context.Background(), "") != nil {
+	if resolveSeriesTitleAliases(context.Background(), "", "test-agent") != nil {
 		t.Fatal("empty imdb must yield nil aliases")
 	}
 }

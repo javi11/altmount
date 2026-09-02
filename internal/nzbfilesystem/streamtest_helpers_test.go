@@ -63,6 +63,7 @@ func (m *fakePoolManager) SetImportConnCapacity(_ int)                 {}
 func (m *fakePoolManager) ImportConnCapacity() int                     { return 0 }
 func (m *fakePoolManager) SetStreamSource(_ pool.StreamActivitySource) {}
 func (m *fakePoolManager) NotifyStreamChange()                         {}
+func (m *fakePoolManager) StatSweepConcurrency(conservative int) int   { return conservative }
 
 // noopStreamTracker is a zero-state StreamTracker. The streaming-storm
 // tests don't care about stream metrics; they only need a non-nil
@@ -96,6 +97,8 @@ func buildSegmentData(t testing.TB, n, segSize int) []*metapb.SegmentData {
 	}
 	return out
 }
+
+func (m *fakePoolManager) SetStreamHeadroom(int) {}
 
 // configurePoolForFile teaches the fakepool how to satisfy every segment
 // of a synthetic file built via buildSegmentData(n, segSize). Each

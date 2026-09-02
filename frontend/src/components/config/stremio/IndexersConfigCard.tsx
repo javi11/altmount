@@ -1,5 +1,4 @@
 import {
-	CheckCircle,
 	Globe,
 	Loader2,
 	Plus,
@@ -9,7 +8,7 @@ import {
 	Trash2,
 	XCircle,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
 	NewsnabIndexerConfig,
 	ProwlarrConfig,
@@ -24,6 +23,48 @@ interface IndexersConfigCardProps {
 	onChange: (updated: StremioConfig) => void;
 	isReadOnly?: boolean;
 }
+
+// Category presets for common indexer profiles. The list is shared by movie
+// and TV searches for the indexer, so mixed lists only suit indexers that
+// tolerate them (NZBgeek does; altHUB does not).
+const CATEGORY_PRESETS: { label: string; value: string; title: string }[] = [
+	{
+		label: "TV + Anime",
+		value: "5000, 5010, 5030, 5040, 5070",
+		title:
+			"For anime-focused indexers — several file anime under 5070, outside the TV defaults. On general indexers (e.g. NZBgeek) this restricts movie searches on this indexer.",
+	},
+	{
+		label: "Movies",
+		value: "2000, 2010, 2030, 2040, 2045, 2060",
+		title: "For movie-focused indexers. Restricts TV searches on this indexer.",
+	},
+	{
+		label: "Movies + TV + Anime",
+		value: "2000, 2010, 2030, 2040, 2045, 2060, 5000, 5010, 5030, 5040, 5070",
+		title:
+			"The universal choice when in doubt — verified against altHUB and NZBgeek for both movie and TV searches.",
+	},
+];
+
+const CATEGORIES_HELP_TEXT =
+	"Space- or comma-separated Newznab category IDs. Leave empty for automatic per-type defaults (recommended). A custom list applies to both movie and TV searches on this indexer.";
+
+// parseCategoriesInput converts the comma/space-separated category text into a
+// deduplicated numeric list. It returns null when any token is not a valid
+// non-negative integer so callers can surface a validation error.
+const parseCategoriesInput = (raw: string): number[] | null => {
+	const trimmed = raw.trim();
+	if (!trimmed) return [];
+	const cats: number[] = [];
+	for (const token of trimmed.split(/[,\s]+/).filter(Boolean)) {
+		if (!/^\d+$/.test(token)) return null;
+		const value = Number(token);
+		if (!Number.isInteger(value) || value > 999999) return null;
+		if (!cats.includes(value)) cats.push(value);
+	}
+	return cats;
+};
 
 export function IndexersConfigCard({
 	config,
@@ -66,6 +107,8 @@ export function IndexersConfigCard({
 		success?: boolean;
 		message?: string;
 	}>({ loading: false });
+	const [categoriesText, setCategoriesText] = useState("");
+	const [categoriesError, setCategoriesError] = useState<string | null>(null);
 
 	// Fetch live user agent metadata
 	useEffect(() => {
@@ -120,18 +163,29 @@ export function IndexersConfigCard({
 		updateIndexersConfig({ prowlarr: updatedProwlarr });
 	};
 
-	const handleFetchProwlarrIndexers = async () => {
-		if (!prowlarr.host || !prowlarr.api_key) {
-			setFetchError("Host and API key are required to test Prowlarr connection");
+	// Read through a ref so manual fetches send the key currently in the form
+	// without making the fetch callback depend on it (which would refetch on
+	// every keystroke via the auto-load effect).
+	const prowlarrKeyRef = useRef(prowlarr.api_key);
+	prowlarrKeyRef.current = prowlarr.api_key;
+
+	const handleFetchProwlarrIndexers = useCallback(async () => {
+		if (!prowlarr.host) {
+			setFetchError("Prowlarr host is required to load indexers");
 			return;
 		}
 		setIsFetchingIndexers(true);
 		setFetchError(null);
 		try {
+			// An empty key means the stored credentials are masked; the backend
+			// falls back to the saved Prowlarr configuration.
 			const res = await fetch("/api/prowlarr/indexers", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ host: prowlarr.host, api_key: prowlarr.api_key }),
+				body: JSON.stringify({
+					host: prowlarr.host,
+					api_key: prowlarrKeyRef.current || "",
+				}),
 			});
 			const data = await res.json();
 			if (!res.ok) {
@@ -143,6 +197,22 @@ export function IndexersConfigCard({
 		} finally {
 			setIsFetchingIndexers(false);
 		}
+		// apiKeyRef keeps the form's current key fresh; the host is the only
+		// reactive dependency so the auto-load effect does not refetch on
+		// every keystroke.
+	}, [prowlarr.host]);
+
+	// Load the indexer list automatically so the selection checkboxes are
+	// visible without a manual "Test & Load Indexers" click.
+	useEffect(() => {
+		if (!prowlarr.host || isReadOnly) return;
+		handleFetchProwlarrIndexers();
+	}, [prowlarr.host, handleFetchProwlarrIndexers, isReadOnly]);
+
+	const toggleProwlarrIndexer = (id: number) => {
+		const current = prowlarr.indexers ?? [];
+		const next = current.includes(id) ? current.filter((i) => i !== id) : [...current, id];
+		handleProwlarrFieldChange("indexers", next);
 	};
 
 	// Newsnab CRUD Handlers
@@ -157,6 +227,8 @@ export function IndexersConfigCard({
 			timeout_seconds: 4,
 			enabled: true,
 		});
+		setCategoriesText("");
+		setCategoriesError(null);
 		setNewsnabTestStatus({ loading: false });
 		setIsNewsnabModalOpen(true);
 	};
@@ -164,20 +236,40 @@ export function IndexersConfigCard({
 	const openEditNewsnabModal = (item: NewsnabIndexerConfig) => {
 		setEditingNewsnab(item);
 		setNewsnabForm({ ...item });
+		setCategoriesText(item.categories?.length ? item.categories.join(", ") : "");
+		setCategoriesError(null);
 		setNewsnabTestStatus({ loading: false });
 		setIsNewsnabModalOpen(true);
 	};
 
-	const handleTestNewsnab = async (url: string, apiKey: string) => {
+	// Discovered indexer capabilities, surfaced by the Test Connection probe.
+	interface DiscoveredCapabilities {
+		search?: boolean;
+		movie_search?: boolean;
+		tv_search?: boolean;
+		search_params?: string[];
+		movie_params?: string[];
+		tv_params?: string[];
+		category_count?: number;
+	}
+	const [discoveredCaps, setDiscoveredCaps] = useState<DiscoveredCapabilities | null>(null);
+
+	const handleTestNewsnab = async (url: string, apiKey: string, indexerId?: string) => {
 		setNewsnabTestStatus({ loading: true });
+		setDiscoveredCaps(null);
 		try {
 			const res = await fetch("/api/stremio/indexers/newsnab/test", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ url, api_key: apiKey }),
+				body: JSON.stringify({
+					id: indexerId,
+					url,
+					api_key: apiKey,
+				}),
 			});
 			const data = await res.json();
 			if (res.ok && data?.data?.status === "ok") {
+				setDiscoveredCaps(data.data.capabilities ?? null);
 				setNewsnabTestStatus({
 					loading: false,
 					success: true,
@@ -200,14 +292,27 @@ export function IndexersConfigCard({
 	};
 
 	const handleSaveNewsnab = () => {
-		if (!newsnabForm.name || !newsnabForm.url || !newsnabForm.api_key) return;
+		// When editing, the stored API key is masked in API responses and an
+		// empty value keeps it (the backend restores it when patching).
+		if (!newsnabForm.name || !newsnabForm.url || (!editingNewsnab && !newsnabForm.api_key)) {
+			return;
+		}
+
+		const categories = parseCategoriesInput(categoriesText);
+		if (categories === null) {
+			setCategoriesError(
+				"Categories must be space- or comma-separated Newznab IDs (e.g. 5000, 5070)",
+			);
+			return;
+		}
 
 		const current = [...newsnabList];
 		const item: NewsnabIndexerConfig = {
 			id: editingNewsnab ? editingNewsnab.id : `newsnab_${Date.now()}`,
 			name: newsnabForm.name.trim(),
 			url: newsnabForm.url.trim(),
-			api_key: newsnabForm.api_key.trim(),
+			api_key: (newsnabForm.api_key ?? "").trim(),
+			categories,
 			weight: Number(newsnabForm.weight) || 0,
 			timeout_seconds: Number(newsnabForm.timeout_seconds) || 4,
 			enabled: newsnabForm.enabled ?? true,
@@ -400,6 +505,7 @@ export function IndexersConfigCard({
 											<th>Endpoint URL</th>
 											<th className="w-24 text-center">Weight</th>
 											<th className="w-24 text-center">Timeout</th>
+											<th className="w-24 text-center">Categories</th>
 											<th className="w-20 text-right">Actions</th>
 										</tr>
 									</thead>
@@ -424,6 +530,18 @@ export function IndexersConfigCard({
 												</td>
 												<td className="text-center font-mono text-base-content/60 text-xs">
 													{item.timeout_seconds || 4}s
+												</td>
+												<td className="text-center">
+													{item.categories?.length ? (
+														<span
+															className="badge badge-ghost badge-xs"
+															title={item.categories.join(", ")}
+														>
+															{item.categories.length} cats
+														</span>
+													) : (
+														<span className="text-base-content/40 text-xs">auto</span>
+													)}
 												</td>
 												<td className="text-right">
 													<div className="flex items-center justify-end gap-1">
@@ -462,19 +580,26 @@ export function IndexersConfigCard({
 									Connect to your Prowlarr instance to query all configured usenet indexers.
 								</p>
 							</div>
-							<button
-								type="button"
-								onClick={handleFetchProwlarrIndexers}
-								disabled={isFetchingIndexers || isReadOnly || !prowlarr.host || !prowlarr.api_key}
-								className="btn btn-outline btn-xs gap-1.5"
-							>
-								{isFetchingIndexers ? (
-									<Loader2 className="h-3 w-3 animate-spin" />
-								) : (
-									<Globe className="h-3 w-3" />
+							<div className="flex items-center gap-2">
+								{(prowlarr.indexers?.length ?? 0) > 0 && (
+									<span className="badge badge-primary badge-xs">
+										{prowlarr.indexers?.length} selected
+									</span>
 								)}
-								<span>Test & Load Indexers</span>
-							</button>
+								<button
+									type="button"
+									onClick={handleFetchProwlarrIndexers}
+									disabled={isFetchingIndexers || isReadOnly || !prowlarr.host}
+									className="btn btn-outline btn-xs gap-1.5"
+								>
+									{isFetchingIndexers ? (
+										<Loader2 className="h-3 w-3 animate-spin" />
+									) : (
+										<Globe className="h-3 w-3" />
+									)}
+									<span>Test & Load Indexers</span>
+								</button>
+							</div>
 						</div>
 
 						{fetchError && (
@@ -501,7 +626,9 @@ export function IndexersConfigCard({
 								<legend className="fieldset-legend font-semibold text-xs">Prowlarr API Key</legend>
 								<input
 									type="password"
-									placeholder="Prowlarr API Key"
+									placeholder={
+										prowlarr.api_key_set ? "Stored — leave empty to keep" : "Prowlarr API Key"
+									}
 									value={prowlarr.api_key || ""}
 									disabled={isReadOnly}
 									onChange={(e) => handleProwlarrFieldChange("api_key", e.target.value)}
@@ -510,19 +637,39 @@ export function IndexersConfigCard({
 							</fieldset>
 						</div>
 
-						{/* Prowlarr Indexers list if loaded */}
+						{/* Prowlarr Indexer selection */}
 						{prowlarrIndexers.length > 0 && (
 							<div className="space-y-2 pt-2">
-								<span className="font-semibold text-base-content/70 text-xs">
-									Discovered Prowlarr Indexers ({prowlarrIndexers.length})
-								</span>
-								<div className="flex max-h-40 flex-wrap gap-2 overflow-y-auto rounded-lg border border-base-300 bg-base-200/40 p-2">
-									{prowlarrIndexers.map((idx) => (
-										<span key={idx.id} className="badge badge-sm badge-ghost gap-1.5">
-											<CheckCircle className="h-3 w-3 text-success" />
-											<span>{idx.name}</span>
-										</span>
-									))}
+								<div className="flex items-center justify-between gap-2">
+									<span className="font-semibold text-base-content/70 text-xs">
+										Discovered Prowlarr Indexers ({prowlarrIndexers.length})
+									</span>
+									<span className="text-[11px] text-base-content/50">
+										Leave all unchecked to search across every configured indexer.
+									</span>
+								</div>
+								<div className="grid max-h-40 grid-cols-1 gap-1 overflow-y-auto rounded-lg border border-base-300 bg-base-200/40 p-2 sm:grid-cols-2">
+									{prowlarrIndexers.map((idx) => {
+										const selected = prowlarr.indexers?.includes(idx.id) ?? false;
+										return (
+											<label
+												key={idx.id}
+												className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 hover:bg-base-200"
+											>
+												<input
+													type="checkbox"
+													className="checkbox checkbox-xs checkbox-primary"
+													checked={selected}
+													disabled={isReadOnly}
+													onChange={() => toggleProwlarrIndexer(idx.id)}
+												/>
+												<span className="min-w-0 flex-1 truncate text-xs">{idx.name}</span>
+												{!idx.enable && (
+													<span className="badge badge-ghost badge-xs">disabled</span>
+												)}
+											</label>
+										);
+									})}
 								</div>
 							</div>
 						)}
@@ -565,7 +712,11 @@ export function IndexersConfigCard({
 								<legend className="fieldset-legend font-semibold text-xs">API Key</legend>
 								<input
 									type="password"
-									placeholder="Indexer API Key"
+									placeholder={
+										editingNewsnab && editingNewsnab.api_key_set !== false
+											? "Stored — leave empty to keep"
+											: "Indexer API Key"
+									}
 									value={newsnabForm.api_key || ""}
 									onChange={(e) => setNewsnabForm({ ...newsnabForm, api_key: e.target.value })}
 									className="input input-sm w-full font-mono text-xs"
@@ -600,6 +751,65 @@ export function IndexersConfigCard({
 								</fieldset>
 							</div>
 
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend font-semibold text-xs">
+									Categories (Newznab IDs)
+								</legend>
+								<div className="flex flex-wrap items-center gap-2">
+									<input
+										type="text"
+										value={categoriesText}
+										disabled={isReadOnly}
+										onChange={(e) => {
+											setCategoriesText(e.target.value);
+											setCategoriesError(null);
+										}}
+										placeholder="Leave empty for automatic defaults"
+										className={`input input-sm min-w-0 flex-1 font-mono text-xs ${
+											categoriesError ? "input-error" : ""
+										}`}
+									/>
+								</div>
+								<div className="flex flex-wrap gap-1.5">
+									{CATEGORY_PRESETS.map((preset) => (
+										<button
+											key={preset.label}
+											type="button"
+											disabled={isReadOnly}
+											onClick={() => {
+												setCategoriesText(preset.value);
+												setCategoriesError(null);
+											}}
+											className="btn btn-outline btn-xs"
+											title={preset.title}
+										>
+											{preset.label}
+										</button>
+									))}
+									{categoriesText && (
+										<button
+											type="button"
+											disabled={isReadOnly}
+											onClick={() => {
+												setCategoriesText("");
+												setCategoriesError(null);
+											}}
+											className="btn btn-ghost btn-xs"
+											title="Clear back to automatic per-type defaults"
+										>
+											Clear
+										</button>
+									)}
+								</div>
+								<p className="label text-base-content/60">
+									{categoriesError ? (
+										<span className="text-error">{categoriesError}</span>
+									) : (
+										CATEGORIES_HELP_TEXT
+									)}
+								</p>
+							</fieldset>
+
 							{newsnabTestStatus.message && (
 								<div
 									className={`alert alert-xs ${
@@ -609,13 +819,56 @@ export function IndexersConfigCard({
 									<span>{newsnabTestStatus.message}</span>
 								</div>
 							)}
+
+							{newsnabTestStatus.success && discoveredCaps && (
+								<div className="space-y-1.5 rounded-lg border border-base-300 bg-base-200/40 p-2.5">
+									<span className="font-semibold text-[11px] text-base-content/70 uppercase tracking-wider">
+										Discovered capabilities
+									</span>
+									<div className="flex flex-wrap gap-1.5">
+										{discoveredCaps.tv_search !== false && (
+											<span className="badge badge-success badge-xs">TV Search</span>
+										)}
+										{discoveredCaps.movie_search !== false && (
+											<span className="badge badge-success badge-xs">Movies</span>
+										)}
+										{discoveredCaps.search !== false && (
+											<span className="badge badge-ghost badge-xs">General</span>
+										)}
+										{typeof discoveredCaps.category_count === "number" && (
+											<span className="badge badge-ghost badge-xs">
+												{discoveredCaps.category_count} categories
+											</span>
+										)}
+									</div>
+									{(() => {
+										const tv = discoveredCaps.tv_params ?? [];
+										const movie = discoveredCaps.movie_params ?? [];
+										const extras = [tv, movie]
+											.flat()
+											.filter((p, i, arr) => p !== "q" && p !== "cat" && arr.indexOf(p) === i);
+										if (extras.length === 0) return null;
+										return (
+											<p className="text-[11px] text-base-content/60">
+												Supported params: {extras.join(", ")}
+											</p>
+										);
+									})()}
+								</div>
+							)}
 						</div>
 
 						<div className="modal-action flex items-center justify-between pt-2">
 							<button
 								type="button"
 								disabled={newsnabTestStatus.loading || !newsnabForm.url || !newsnabForm.api_key}
-								onClick={() => handleTestNewsnab(newsnabForm.url || "", newsnabForm.api_key || "")}
+								onClick={() =>
+									handleTestNewsnab(
+										newsnabForm.url || "",
+										newsnabForm.api_key || "",
+										editingNewsnab?.id,
+									)
+								}
 								className="btn btn-outline btn-sm gap-1.5"
 							>
 								{newsnabTestStatus.loading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
@@ -633,7 +886,12 @@ export function IndexersConfigCard({
 								<button
 									type="button"
 									onClick={handleSaveNewsnab}
-									disabled={!newsnabForm.name || !newsnabForm.url || !newsnabForm.api_key}
+									disabled={
+										!newsnabForm.name ||
+										!newsnabForm.url ||
+										(!editingNewsnab && !newsnabForm.api_key) ||
+										categoriesError !== null
+									}
 									className="btn btn-primary btn-sm"
 								>
 									Save Indexer

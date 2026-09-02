@@ -140,6 +140,26 @@ func (e *DataCorruptionError) Unwrap() error {
 	return e.UnderlyingErr
 }
 
+// isCorruptionError reports whether err indicates the article body itself is
+// corrupt (as opposed to a transient network/pool failure), so it should be
+// wrapped as a DataCorruptionError and routed into the health/repair pipeline
+// instead of surfacing as an anonymous read error.
+//
+// nntppool.ErrCRCMismatch is checked by identity since it's an exported
+// sentinel (errors.New("nntp: yEnc CRC mismatch")), returned unwrapped from
+// finishBody. The substring fallback covers "data corruption detected",
+// rapidyenc's own corruption sentinel text, in case a future nntppool version
+// starts propagating it (today it does not: the decode error is discarded in
+// nntppool's reader).
+func isCorruptionError(err error) bool {
+	if errors.Is(err, nntppool.ErrCRCMismatch) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "data corruption detected") ||
+		strings.Contains(msg, "crc mismatch")
+}
+
 type UsenetReader struct {
 	log            *slog.Logger
 	wg             sync.WaitGroup
@@ -510,7 +530,7 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 					bytesWritten = int64(result.BytesDecoded)
 				}
 
-				if strings.Contains(err.Error(), "data corruption detected") {
+				if isCorruptionError(err) {
 					return &DataCorruptionError{
 						UnderlyingErr: err,
 						BytesRead:     bytesWritten,

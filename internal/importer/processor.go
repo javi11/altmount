@@ -328,9 +328,12 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 	}
 
 	// Stat is a cheap single round-trip on the pool's normal lane; excess
-	// requests queue and yield to streaming (priority lane). Run sweeps at the
-	// pool's full connection capacity so multi-part releases don't crawl.
-	concurrency := fastFailConcurrency(cfg)
+	// requests queue and yield to streaming (priority lane). Size the sweep by
+	// the providers' STAT pipeline depth, not their connection count — STAT is
+	// bodyless, so nntppool pipelines many per connection. While streams are
+	// active the sweep stays at one connection's depth; on an idle pool it
+	// widens to the pool's aggregate pipeline capacity (StatCapacity).
+	concurrency := proc.poolManager.StatSweepConcurrency(cfg.StatConcurrency())
 
 	// Phase 1: cheap release-level probe. Sample the whole release once
 	// (segment_sample_percentage of it) and fail fast. Healthy releases — the
@@ -415,7 +418,7 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 	}
 	missingIDs := make(map[string]struct{})
 	eligibleRegularCount := 0
-	tolerant := cfg.GetImportDamagePolicyTolerant()
+	acceptableMissingPercent := cfg.GetAcceptableMissingSegmentsPercentage()
 
 	for i, result := range results {
 		f := n.Files[i]
@@ -426,22 +429,25 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 		}
 
 		if result.Broken && !isPar2 {
-			// Tolerant damage policy: a standalone video file with SMALL
-			// confirmed damage imports as degraded rather than being dropped.
-			// Streaming zero-fills the gaps and the immediate post-import
-			// health check discovers + persists the holes and flags it
-			// degraded. Archive-set members (GroupKey != "") stay binary — a
-			// holed volume corrupts extraction and cannot be padded.
-			if tolerant && fastFailFiles[i].GroupKey == "" && holes.EligibleFile(f.Filename) {
+			// A standalone video file with SMALL confirmed damage, within the
+			// configured acceptable-missing threshold, imports as degraded
+			// rather than being dropped. Streaming zero-fills the gaps and
+			// the immediate post-import health check discovers + persists
+			// the holes and flags it degraded (or fails it, if the
+			// threshold changed since). Archive-set members (GroupKey != "")
+			// stay binary — a holed volume corrupts extraction and cannot be
+			// padded.
+			if acceptableMissingPercent > 0 && fastFailFiles[i].GroupKey == "" && holes.EligibleFile(f.Filename) {
 				verdict := holes.ClassifyProjected(
 					len(result.MissingSegmentIDs),
 					result.SampledCount,
 					len(f.Segments),
 					longestSampledRun(fastFailFiles[i].Segments, result.MissingSegmentIDs),
 				)
-				if verdict == holes.VerdictDegraded {
+				if verdict == holes.VerdictDegraded &&
+					!holes.ExceedsAcceptableMissing(len(result.MissingSegmentIDs), result.SampledCount, acceptableMissingPercent) {
 					if proc.log != nil {
-						proc.log.InfoContext(ctx, "Importing video file as degraded despite missing segments (tolerant damage policy)",
+						proc.log.InfoContext(ctx, "Importing video file as degraded despite missing segments (within acceptable-missing threshold)",
 							"file", f.Filename,
 							"missing_sampled", len(result.MissingSegmentIDs),
 							"sampled", result.SampledCount)
@@ -545,22 +551,6 @@ func longestSampledRun(segments []*metapb.SegmentData, missingIDs []string) int 
 	return acc.LongestRun()
 }
 
-// fastFailConcurrency returns the goroutine cap for the fast-fail Stat sweep.
-// Stats are cheap and queue on the pool's normal lane, so we use the pool's
-// full connection capacity, bounded to keep goroutine counts sane.
-func fastFailConcurrency(cfg *config.Config) int {
-	const maxConcurrency = 100
-
-	capacity := cfg.TotalProviderConnections()
-	if capacity <= 0 {
-		capacity = 1
-	}
-	if capacity > maxConcurrency {
-		capacity = maxConcurrency
-	}
-	return capacity
-}
-
 // ProcessNzbFile processes an NZB or STRM file maintaining the folder structure relative to relative path.
 // Returns (resultPath, writtenMetadataPaths, error). writtenMetadataPaths contains all virtual paths of
 // metadata files written to disk; it is populated even on partial failure so callers can clean up.
@@ -630,11 +620,15 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 		brokenIdx, missingIDs, degradedFiles, fastFailErr = proc.preParseFastFail(ctx, n, cfg, queueID, category, downloadID)
 		if fastFailErr != nil {
 			// A deferral is not a failure: propagate it so the service parks
-			// the queue item pending the repair.
+			// the queue item pending the repair. Checked before the
+			// inconclusive branch, which returns a hard error.
 			var deferred *DeferredRepairError
 			if errors.As(fastFailErr, &deferred) {
 				proc.queueNzbRepair(ctx, filePath, deferred.FirstMissingSegmentID)
 				return "", nil, fastFailErr
+			}
+			if errors.Is(fastFailErr, validation.ErrFastFailInconclusive) {
+				return "", nil, fmt.Errorf("fast-fail segment check inconclusive: %w", fastFailErr)
 			}
 			return "", nil, NewNonRetryableError("fast-fail segment check failed", fastFailErr)
 		}
@@ -786,7 +780,7 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 		if importCfg.ExpandBlurayIso != nil {
 			expandEnabled = *importCfg.ExpandBlurayIso
 		}
-		isoMaxPrefetch := importCfg.MaxDownloadPrefetch
+		isoMaxPrefetch := cfg.GetMaxDownloadPrefetch()
 		isoReadTimeout := time.Duration(importCfg.ReadTimeoutSeconds) * time.Second
 		if isoReadTimeout == 0 {
 			isoReadTimeout = 5 * time.Minute
@@ -1118,8 +1112,9 @@ func (proc *Processor) processRarArchive(
 	storeIndex map[string]int64,
 	storeRef string,
 ) (string, []string, error) {
-	importCfg := proc.configGetter().Import
-	maxPrefetch := importCfg.MaxDownloadPrefetch
+	cfg := proc.configGetter()
+	importCfg := cfg.Import
+	maxPrefetch := cfg.GetMaxDownloadPrefetch()
 	readTimeout := time.Duration(importCfg.ReadTimeoutSeconds) * time.Second
 	if readTimeout == 0 {
 		readTimeout = 5 * time.Minute
@@ -1251,8 +1246,9 @@ func (proc *Processor) processSevenZipArchive(
 	storeIndex map[string]int64,
 	storeRef string,
 ) (string, []string, error) {
-	importCfg := proc.configGetter().Import
-	maxPrefetch := importCfg.MaxDownloadPrefetch
+	cfg := proc.configGetter()
+	importCfg := cfg.Import
+	maxPrefetch := cfg.GetMaxDownloadPrefetch()
 	readTimeout := time.Duration(importCfg.ReadTimeoutSeconds) * time.Second
 	if readTimeout == 0 {
 		readTimeout = 5 * time.Minute

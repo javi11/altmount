@@ -64,6 +64,7 @@ func (m *countingPoolManager) SetImportConnCapacity(_ int)                 {}
 func (m *countingPoolManager) ImportConnCapacity() int                     { return 0 }
 func (m *countingPoolManager) SetStreamSource(_ pool.StreamActivitySource) {}
 func (m *countingPoolManager) NotifyStreamChange()                         {}
+func (m *countingPoolManager) StatSweepConcurrency(conservative int) int   { return conservative }
 
 // TestStorm_SpeedTestBypassesPoolManager pins the post-S8 invariant:
 // the /providers/:id/speedtest handler routes through pool.Manager
@@ -139,3 +140,5 @@ func TestStorm_SpeedTestBypassesPoolManager(t *testing.T) {
 			getPoolCalls, concurrentRequests)
 	}
 }
+
+func (m *countingPoolManager) SetStreamHeadroom(int) {}

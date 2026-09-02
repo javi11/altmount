@@ -27,7 +27,7 @@ func TestSeriesMetadataNegativeCaching(t *testing.T) {
 
 	const imdb = "tt0000001"
 	for i := 0; i < 5; i++ {
-		if aliases := resolveSeriesTitleAliases(context.Background(), imdb); aliases != nil {
+		if aliases := resolveSeriesTitleAliases(context.Background(), imdb, "test-agent"); aliases != nil {
 			t.Fatalf("expected nil aliases for an unknown series, got %v", aliases)
 		}
 	}
@@ -51,7 +51,7 @@ func TestSeriesMetadataCacheIsBounded(t *testing.T) {
 	resetSeriesMetadataCaches()
 
 	for i := 0; i < maxSeriesMetadataCacheEntries+50; i++ {
-		resolveSeriesTitleAliases(context.Background(), "tt"+strconv.Itoa(i))
+		resolveSeriesTitleAliases(context.Background(), "tt"+strconv.Itoa(i), "test-agent")
 	}
 
 	if n := seriesTitleAliasesCacheLen(); n > maxSeriesMetadataCacheEntries {

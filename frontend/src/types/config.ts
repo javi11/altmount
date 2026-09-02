@@ -21,7 +21,7 @@ export interface ConfigResponse {
 	arrs: ArrsConfig;
 	stremio: StremioConfig;
 	providers: ProviderConfig[];
-	nzblnk: NzblnkConfig;
+	user_agent?: string;
 	network: NetworkConfig;
 	par2_repair: Par2RepairConfig;
 	mount_path: string;
@@ -85,8 +85,12 @@ export interface DatabaseConfig {
 // Metadata configuration
 export interface MetadataConfig {
 	root_path: string;
-	delete_source_nzb_on_removal?: boolean;
 	backup: MetadataBackupConfig;
+	migration?: MetadataMigrationConfig;
+}
+
+export interface MetadataMigrationConfig {
+	default_group: string;
 }
 
 export interface MetadataBackupConfig {
@@ -123,6 +127,9 @@ export interface HealthConfig {
 	library_dir?: string;
 	cleanup_orphaned_metadata?: boolean;
 	check_interval_seconds?: number;
+	/** Max in-flight STAT checks per sweep. 0 or absent = adapt to pool + stream activity. */
+	max_concurrent_segment_checks?: number;
+	/** @deprecated renamed to max_concurrent_segment_checks; migrated automatically. */
 	max_connections_for_health_checks?: number;
 	check_batch_size?: number; // Files fetched and swept together per health-check cycle
 	max_concurrent_jobs?: number; // Max concurrent health check jobs
@@ -143,6 +150,8 @@ export interface HealthConfig {
 	// (non-degraded) corruption: "repair" (default) triggers an Arr rescan;
 	// "delete" removes the file and cleans up now-empty parent directories instead.
 	corruption_action?: "repair" | "delete";
+	verify_content?: boolean; // Probe each media file's header for a valid container signature during health checks
+	verify_content_timeout_seconds?: number; // Per-file content probe timeout (default 15s)
 }
 
 export interface RepairConfig {
@@ -240,6 +249,11 @@ export type ImportStrategy = "NONE" | "SYMLINK" | "STRM";
 // Import configuration
 export interface ImportConfig {
 	max_processor_workers: number;
+	/**
+	 * Connections held back from import per active stream. `null`/absent
+	 * derives the reservation from pool size; an explicit `0` disables it.
+	 */
+	stream_headroom_connections?: number | null;
 	queue_processing_interval_seconds: number; // Interval in seconds for queue processing
 	allowed_file_extensions: string[];
 	max_download_prefetch: number;
@@ -254,6 +268,8 @@ export interface ImportConfig {
 	filter_sample_files?: boolean;
 	failed_item_retention_hours?: number | null;
 	history_retention_days?: number | null;
+	verify_content?: boolean; // Probe each media file's header for a valid container signature before reporting import success
+	verify_content_timeout_seconds?: number; // Per-file content probe timeout (default 15s)
 }
 
 // Log configuration
@@ -313,11 +329,6 @@ export interface PipelineTuneResponse {
 	warning?: string;
 }
 
-// NZBLNK resolver configuration
-export interface NzblnkConfig {
-	user_agent?: string;
-}
-
 // SABnzbd configuration
 export interface SABnzbdConfig {
 	enabled: boolean;
@@ -356,7 +367,7 @@ export interface ConfigUpdateRequest {
 	arrs?: ArrsConfig;
 	stremio?: Partial<StremioConfig>;
 	providers?: ProviderUpdateRequest[];
-	nzblnk?: NzblnkConfig;
+	user_agent?: string;
 	network?: NetworkConfig;
 	par2_repair?: Par2RepairConfig;
 	mount_path?: string;
@@ -393,7 +404,6 @@ export interface DatabaseUpdateRequest {
 // Metadata update request
 export interface MetadataUpdateRequest {
 	root_path?: string;
-	delete_source_nzb_on_removal?: boolean;
 	backup?: MetadataBackupConfig;
 }
 
@@ -410,6 +420,9 @@ export interface HealthUpdateRequest {
 	library_dir?: string;
 	cleanup_orphaned_metadata?: boolean;
 	check_interval_seconds?: number; // Interval in seconds (optional)
+	/** Max in-flight STAT checks per sweep. 0 or absent = adapt to pool + stream activity. */
+	max_concurrent_segment_checks?: number;
+	/** @deprecated renamed to max_concurrent_segment_checks; migrated automatically. */
 	max_connections_for_health_checks?: number;
 	check_batch_size?: number; // Files fetched and swept together per health-check cycle
 	max_concurrent_jobs?: number; // Max concurrent health check jobs
@@ -556,7 +569,6 @@ export type ConfigSection =
 	| "sabnzbd"
 	| "arrs"
 	| "stremio"
-	| "nzblnk"
 	| "network"
 	| "par2_repair"
 	| "system";
@@ -688,6 +700,7 @@ export interface ProwlarrConfig {
 	enabled: boolean;
 	host: string;
 	api_key: string;
+	api_key_set?: boolean;
 	categories: number[];
 	indexers?: number[];
 	preferred_indexers?: number[];
@@ -975,12 +988,6 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		description:
 			"Upload an NZB for instant stream URLs, or enable the addon to automatically search Prowlarr by IMDB ID and stream results directly from Stremio.",
 		icon: "Tv",
-		canEdit: true,
-	},
-	nzblnk: {
-		title: "NZBLNK",
-		description: "Settings for resolving nzblnk:// links via public NZB indexers",
-		icon: "Link",
 		canEdit: true,
 	},
 	network: {

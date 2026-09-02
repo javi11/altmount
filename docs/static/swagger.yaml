@@ -30,34 +30,141 @@ definitions:
       success:
         type: boolean
     type: object
+  api.ArrsAPIResponse:
+    properties:
+      enabled:
+        type: boolean
+      lidarr_instances:
+        items:
+          $ref: '#/definitions/api.ArrsInstanceAPIResponse'
+        type: array
+      max_workers:
+        type: integer
+      queue_cleanup_enabled:
+        type: boolean
+      queue_cleanup_grace_period_minutes:
+        type: integer
+      queue_cleanup_interval_seconds:
+        type: integer
+      queue_cleanup_max_failures:
+        type: integer
+      queue_cleanup_rules:
+        items:
+          $ref: '#/definitions/config.StuckCleanupRule'
+        type: array
+      radarr_instances:
+        items:
+          $ref: '#/definitions/api.ArrsInstanceAPIResponse'
+        type: array
+      readarr_instances:
+        items:
+          $ref: '#/definitions/api.ArrsInstanceAPIResponse'
+        type: array
+      sonarr_instances:
+        items:
+          $ref: '#/definitions/api.ArrsInstanceAPIResponse'
+        type: array
+      sportarr_instances:
+        items:
+          $ref: '#/definitions/api.ArrsInstanceAPIResponse'
+        type: array
+      webhook_base_url:
+        type: string
+      whisparr_instances:
+        items:
+          $ref: '#/definitions/api.ArrsInstanceAPIResponse'
+        type: array
+    type: object
   api.ArrsDeletedFile:
     properties:
       path:
         type: string
     type: object
-  api.TestConnectionRequest:
+  api.ArrsInstanceAPIResponse:
     properties:
       api_key:
         type: string
-      type:
+      api_key_set:
+        type: boolean
+      category:
         type: string
+      enabled:
+        type: boolean
+      name:
+        type: string
+      sync_interval_hours:
+        type: integer
       url:
         type: string
     type: object
   api.ArrsWebhookRequest:
     properties:
+      album:
+        properties:
+          id:
+            type: integer
+          title:
+            type: string
+        type: object
+      artist:
+        properties:
+          id:
+            type: integer
+          path:
+            type: string
+        type: object
+      author:
+        properties:
+          id:
+            type: integer
+          path:
+            type: string
+        type: object
+      book:
+        properties:
+          id:
+            type: integer
+          title:
+            type: string
+        type: object
+      bookFile:
+        properties:
+          id:
+            type: integer
+        type: object
       deletedFiles:
         items:
           $ref: '#/definitions/api.ArrsDeletedFile'
         type: array
+      downloadId:
+        type: string
       episodeFile:
         properties:
+          id:
+            type: integer
           path:
             type: string
+          sceneName:
+            type: string
         type: object
+      episodes:
+        items:
+          properties:
+            episodeNumber:
+              type: integer
+            id:
+              type: integer
+            seasonNumber:
+              type: integer
+            title:
+              type: string
+          type: object
+        type: array
       eventType:
         type: string
       filePath:
+        type: string
+      instanceName:
         type: string
       movie:
         description: For upgrades/renames, the file path might be in other fields
@@ -65,16 +172,40 @@ definitions:
         properties:
           folderPath:
             type: string
+          id:
+            type: integer
+          tmdbId:
+            type: integer
         type: object
       movieFile:
         properties:
+          id:
+            type: integer
           path:
+            type: string
+          sceneName:
+            type: string
+        type: object
+      release:
+        properties:
+          indexer:
+            type: string
+          releaseTitle:
             type: string
         type: object
       series:
         properties:
+          id:
+            type: integer
           path:
             type: string
+          tvdbId:
+            type: integer
+        type: object
+      trackFile:
+        properties:
+          id:
+            type: integer
         type: object
     type: object
   api.AuthResponse:
@@ -104,7 +235,7 @@ definitions:
         description: User's API key for authentication
         type: string
       arrs:
-        $ref: '#/definitions/config.ArrsConfig'
+        $ref: '#/definitions/api.ArrsAPIResponse'
       auth:
         $ref: '#/definitions/config.AuthConfig'
       database:
@@ -126,6 +257,8 @@ definitions:
         type: string
       mount_type:
         $ref: '#/definitions/config.MountType'
+      network:
+        $ref: '#/definitions/config.NetworkConfig'
       profiler_enabled:
         type: boolean
       providers:
@@ -141,7 +274,15 @@ definitions:
       streaming:
         $ref: '#/definitions/config.StreamingConfig'
       stremio:
-        $ref: '#/definitions/config.StremioConfig'
+        $ref: '#/definitions/api.StremioAPIResponse'
+      user_agent:
+        description: |-
+          UserAgent is the HTTP User-Agent sent on every outbound HTTP request that
+          identifies AltMount (indexer NZB downloads, metadata lookups, nzblnk://
+          resolution, GitHub release checks). Defaults to a browser-like string
+          because some public indexers reject non-browser agents. Leave empty to
+          use the default.
+        type: string
       webdav:
         $ref: '#/definitions/api.WebDAVAPIResponse'
     type: object
@@ -202,6 +343,8 @@ definitions:
     properties:
       file_path:
         type: string
+      library_path:
+        type: string
       max_retries:
         type: integer
       priority:
@@ -229,6 +372,9 @@ definitions:
         type: string
       id:
         type: integer
+      indexer:
+        description: Added indexer
+        type: string
       is_masked:
         type: boolean
       last_checked:
@@ -241,6 +387,8 @@ definitions:
         type: integer
       max_retries:
         type: integer
+      metadata:
+        type: string
       priority:
         $ref: '#/definitions/database.HealthPriority'
       repair_retry_count:
@@ -269,6 +417,8 @@ definitions:
       checking:
         type: integer
       corrupted:
+        type: integer
+      degraded:
         type: integer
       healthy:
         type: integer
@@ -312,6 +462,8 @@ definitions:
         items:
           type: string
         type: array
+      filter_sample_files:
+        type: boolean
       import_dir:
         type: string
       import_strategy:
@@ -325,11 +477,16 @@ definitions:
         type: integer
       read_timeout_seconds:
         type: integer
+      rename_to_nzb_name:
+        type: boolean
       segment_sample_percentage:
         description: Percentage of segments to check (1-100)
         type: integer
-      skip_health_check:
-        type: boolean
+      stream_headroom_connections:
+        description: |-
+          StreamHeadroomConnections is nil when the reservation derives from pool
+          size, and an explicit 0 when the operator has disabled it entirely.
+        type: integer
       watch_dir:
         type: string
       watch_interval_seconds:
@@ -347,7 +504,12 @@ definitions:
         type: integer
       id:
         type: integer
+      indexer:
+        description: Added indexer
+        type: string
       library_path:
+        type: string
+      metadata:
         type: string
       nzb_id:
         type: integer
@@ -369,6 +531,8 @@ definitions:
         type: string
       relative_path:
         type: string
+      skip_arr_notification:
+        type: boolean
     type: object
   api.ManualImportResponse:
     properties:
@@ -410,6 +574,57 @@ definitions:
       volume_index:
         type: integer
     type: object
+  api.NewsnabIndexerAPIResponse:
+    properties:
+      api_key:
+        type: string
+      api_key_set:
+        type: boolean
+      categories:
+        items:
+          type: integer
+        type: array
+      enabled:
+        type: boolean
+      id:
+        type: string
+      name:
+        type: string
+      timeout_seconds:
+        type: integer
+      url:
+        type: string
+      weight:
+        type: integer
+    type: object
+  api.PipelineDepthSample:
+    properties:
+      depth:
+        type: integer
+      mbps:
+        type: number
+    type: object
+  api.PipelineTuneResponse:
+    properties:
+      baseline_mbps:
+        type: number
+      best_mbps:
+        type: number
+      enabled:
+        type: boolean
+      improvement_pct:
+        type: number
+      recommended_inflight:
+        type: integer
+      test_connections:
+        type: integer
+      tested:
+        items:
+          $ref: '#/definitions/api.PipelineDepthSample'
+        type: array
+      warning:
+        type: string
+    type: object
   api.PoolMetricsResponse:
     properties:
       articles_downloaded:
@@ -426,6 +641,11 @@ definitions:
         type: number
       max_download_speed_bytes_per_sec:
         type: number
+      provider_bytes:
+        additionalProperties:
+          format: int64
+          type: integer
+        type: object
       provider_errors:
         additionalProperties:
           format: int64
@@ -435,6 +655,8 @@ definitions:
         items:
           $ref: '#/definitions/api.ProviderStatusResponse'
         type: array
+      started_at:
+        type: string
       timestamp:
         type: string
       total_errors:
@@ -444,6 +666,8 @@ definitions:
     type: object
   api.ProviderAPIResponse:
     properties:
+      account_expiration_date:
+        type: string
       enabled:
         type: boolean
       host:
@@ -456,6 +680,10 @@ definitions:
         type: boolean
       is_backup_provider:
         type: boolean
+      keepalive_command:
+        type: string
+      keepalive_interval_seconds:
+        type: integer
       last_rtt_ms:
         type: integer
       last_speed_test_mbps:
@@ -464,14 +692,30 @@ definitions:
         type: string
       max_connections:
         type: integer
+      min_connections_alive:
+        type: integer
+      name:
+        type: string
       password_set:
         type: boolean
       port:
         type: integer
       proxy_url:
         type: string
+      quota_bytes:
+        type: integer
+      quota_period_hours:
+        type: integer
+      skip_ping:
+        type: boolean
+      stat_inflight_requests:
+        type: integer
+      storage_group:
+        type: string
       tls:
         type: boolean
+      user_agent:
+        type: string
       username:
         type: string
     type: object
@@ -487,16 +731,36 @@ definitions:
         type: boolean
       max_connections:
         type: integer
+      min_connections_alive:
+        type: integer
       password:
         type: string
       port:
         type: integer
       proxy_url:
         type: string
+      storage_group:
+        type: string
       tls:
         type: boolean
       username:
         type: string
+    type: object
+  api.ProviderHistoricalStatResponse:
+    properties:
+      bytes_downloaded:
+        type: integer
+      provider_id:
+        type: string
+      timestamp:
+        type: string
+    type: object
+  api.ProviderHistoricalStatsResponse:
+    properties:
+      stats:
+        items:
+          $ref: '#/definitions/api.ProviderHistoricalStatResponse'
+        type: array
     type: object
   api.ProviderReorderRequest:
     properties:
@@ -504,6 +768,24 @@ definitions:
         items:
           type: string
         type: array
+    type: object
+  api.ProviderSpeedTestHistoryResponse:
+    properties:
+      history:
+        items:
+          $ref: '#/definitions/api.ProviderSpeedTestHistoryStat'
+        type: array
+    type: object
+  api.ProviderSpeedTestHistoryStat:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: integer
+      provider_id:
+        type: string
+      speed_mbps:
+        type: number
     type: object
   api.ProviderSpeedTestResponse:
     properties:
@@ -514,6 +796,10 @@ definitions:
     type: object
   api.ProviderStatusResponse:
     properties:
+      byte_count:
+        type: integer
+      byte_count_24h:
+        type: integer
       current_speed_bytes_per_sec:
         type: number
       error_count:
@@ -540,8 +826,20 @@ definitions:
         type: number
       missing_warning:
         type: boolean
+      name:
+        type: string
       ping_ms:
         type: integer
+      quota_bytes:
+        type: integer
+      quota_exceeded:
+        type: boolean
+      quota_reset_at:
+        type: string
+      quota_used:
+        type: integer
+      started_at:
+        type: string
       state:
         type: string
       used_connections:
@@ -578,16 +876,67 @@ definitions:
         type: boolean
       max_connections:
         type: integer
+      min_connections_alive:
+        type: integer
       password:
         type: string
       port:
         type: integer
       proxy_url:
         type: string
+      storage_group:
+        type: string
       tls:
         type: boolean
       username:
         type: string
+    type: object
+  api.ProwlarrAPIResponse:
+    properties:
+      api_key:
+        type: string
+      api_key_set:
+        type: boolean
+      categories:
+        items:
+          type: integer
+        type: array
+      custom_scores:
+        additionalProperties:
+          type: integer
+        type: object
+      enabled:
+        type: boolean
+      exclude_keywords:
+        items:
+          type: string
+        type: array
+      host:
+        type: string
+      indexers:
+        items:
+          type: integer
+        type: array
+      languages:
+        items:
+          type: string
+        type: array
+      preferred_indexer_names:
+        items:
+          type: string
+        type: array
+      preferred_indexers:
+        items:
+          type: integer
+        type: array
+      preferred_languages:
+        items:
+          type: string
+        type: array
+      qualities:
+        items:
+          type: string
+        type: array
     type: object
   api.QueueHistoricalStatsResponse:
     properties:
@@ -629,9 +978,14 @@ definitions:
         type: integer
       id:
         type: integer
+      indexer:
+        description: Indexer name
+        type: string
       max_retries:
         type: integer
       metadata:
+        type: string
+      nzb_display_name:
         type: string
       nzb_path:
         type: string
@@ -642,10 +996,16 @@ definitions:
         $ref: '#/definitions/database.QueuePriority'
       retry_count:
         type: integer
+      stage:
+        description: Progress stage (e.g. "Validating segments")
+        type: string
       started_at:
         type: string
       status:
         $ref: '#/definitions/database.QueueStatus'
+      storage_path:
+        description: Internal FUSE mount path (populated after completion)
+        type: string
       target_path:
         type: string
       updated_at:
@@ -720,10 +1080,6 @@ definitions:
         type: string
       rc_user:
         type: string
-      read_chunk_size:
-        type: string
-      read_chunk_size_limit:
-        type: string
       read_only:
         type: boolean
       salt_set:
@@ -748,6 +1104,8 @@ definitions:
         type: string
       vfs_cache_mode:
         type: string
+      vfs_cache_poll_interval:
+        type: string
       vfs_disk_space_total:
         type: string
       vfs_fast_fingerprint:
@@ -755,6 +1113,10 @@ definitions:
       vfs_name:
         type: string
       vfs_read_ahead:
+        type: string
+      vfs_read_chunk_size:
+        type: string
+      vfs_read_chunk_size_limit:
         type: string
       vfs_read_chunk_streams:
         type: integer
@@ -764,6 +1126,13 @@ definitions:
       email:
         type: string
       password:
+        type: string
+      username:
+        type: string
+    type: object
+  api.ResetAdminPasswordRequest:
+    properties:
+      new_password:
         type: string
       username:
         type: string
@@ -788,6 +1157,8 @@ definitions:
         type: boolean
       fallback_host:
         type: string
+      history_retention_minutes:
+        type: integer
     type: object
   api.ScanStatusResponse:
     properties:
@@ -819,6 +1190,82 @@ definitions:
       start_offset:
         type: integer
     type: object
+  api.StreamScoringAPIResponse:
+    properties:
+      custom_formats:
+        items:
+          $ref: '#/definitions/api.TrashCustomFormatAPIResponse'
+        type: array
+      exclude_keywords:
+        items:
+          type: string
+        type: array
+      exclude_regex:
+        type: string
+      preferred_languages:
+        items:
+          type: string
+        type: array
+      preset:
+        type: string
+      require_preferred_language:
+        type: boolean
+    type: object
+  api.StremioAPIResponse:
+    properties:
+      addon_description:
+        type: string
+      addon_name:
+        type: string
+      base_url:
+        type: string
+      direct_stream:
+        type: boolean
+      enabled:
+        type: boolean
+      failed_release_ttl_hours:
+        description: |-
+          No omitempty: an explicit 0 must survive the round-trip, otherwise saving the
+          config would silently restore the defaults.
+        type: integer
+      fallback_timeout_ms:
+        type: integer
+      fast_fail_header_only:
+        type: boolean
+      include_library_streams:
+        type: boolean
+      indexers:
+        $ref: '#/definitions/api.StremioIndexersAPIResponse'
+      max_fallback_releases:
+        type: integer
+      max_retries:
+        type: integer
+      nzb_ttl_hours:
+        type: integer
+      prowlarr:
+        $ref: '#/definitions/api.ProwlarrAPIResponse'
+      scoring:
+        $ref: '#/definitions/api.StreamScoringAPIResponse'
+      show_cached_indicator:
+        type: boolean
+      stream_ttl_seconds:
+        type: integer
+    type: object
+  api.StremioIndexersAPIResponse:
+    properties:
+      custom_user_agent:
+        type: string
+      newsnab:
+        items:
+          $ref: '#/definitions/api.NewsnabIndexerAPIResponse'
+        type: array
+      provider:
+        type: string
+      prowlarr:
+        $ref: '#/definitions/api.ProwlarrAPIResponse'
+      user_agent_mode:
+        type: string
+    type: object
   api.StremioStream:
     properties:
       name:
@@ -830,6 +1277,12 @@ definitions:
     type: object
   api.StremioStreamsResponse:
     properties:
+      _cached:
+        description: |-
+          Cached is true when streams were served from an already-completed queue item
+          without re-processing. Callers such as AIOStreams can use this to show an
+          "instant" indicator to the user.
+        type: boolean
       _queue_item_id:
         type: integer
       _queue_status:
@@ -904,6 +1357,15 @@ definitions:
       system:
         $ref: '#/definitions/api.SystemInfoResponse'
     type: object
+  api.TestConnectionRequest:
+    properties:
+      api_key:
+        type: string
+      type:
+        type: string
+      url:
+        type: string
+    type: object
   api.TestProviderResponse:
     properties:
       error_message:
@@ -912,6 +1374,27 @@ definitions:
         type: integer
       success:
         type: boolean
+    type: object
+  api.TrashCustomFormatAPIResponse:
+    properties:
+      category:
+        type: string
+      enabled:
+        type: boolean
+      id:
+        type: string
+      invert:
+        type: boolean
+      is_custom:
+        type: boolean
+      name:
+        type: string
+      pattern:
+        type: string
+      pattern_type:
+        type: string
+      score:
+        type: integer
     type: object
   api.UpdateChannel:
     enum:
@@ -923,6 +1406,8 @@ definitions:
     - UpdateChannelDev
   api.UpdateStatusResponse:
     properties:
+      binary_update_available:
+        type: boolean
       channel:
         $ref: '#/definitions/api.UpdateChannel'
       current_version:
@@ -969,6 +1454,13 @@ definitions:
       user:
         type: string
     type: object
+  api.prowlarrIndexersRequest:
+    properties:
+      api_key:
+        type: string
+      host:
+        type: string
+    type: object
   api.stremioManifest:
     properties:
       catalogs:
@@ -1008,23 +1500,44 @@ definitions:
     type: object
   config.ArrsConfig:
     properties:
-      cleanup_automatic_import_failure:
-        type: boolean
       enabled:
         type: boolean
+      lidarr_instances:
+        items:
+          $ref: '#/definitions/config.ArrsInstanceConfig'
+        type: array
       max_workers:
         type: integer
-      queue_cleanup_allowlist:
-        items:
-          $ref: '#/definitions/config.IgnoredMessage'
-        type: array
       queue_cleanup_enabled:
         type: boolean
       queue_cleanup_grace_period_minutes:
         type: integer
       queue_cleanup_interval_seconds:
         type: integer
+      queue_cleanup_max_failures:
+        description: |-
+          QueueCleanupMaxFailures is the per-target failure circuit breaker. After
+          AltMount has acted on the same target (a Radarr movie or Sonarr/Whisparr
+          episode that keeps failing import) this many times — via queue cleanup,
+          health-repair re-searches or the partial-pack reconcile — it gives up:
+          it blocklists without re-searching and unmonitors the item in the *arr so it
+          stops being automatically re-grabbed. 0 (the default) disables the breaker.
+        type: integer
+      queue_cleanup_rules:
+        description: |-
+          QueueCleanupRules matches an *arr status message for a stuck/failed import and
+          decides the action (remove / blocklist / blocklist+search). This is the single
+          message-rule list for queue cleanup; ghost/empty-folder detection runs alongside
+          it in the same pass. Only items owned by AltMount's download client are touched
+          (see issue #523).
+        items:
+          $ref: '#/definitions/config.StuckCleanupRule'
+        type: array
       radarr_instances:
+        items:
+          $ref: '#/definitions/config.ArrsInstanceConfig'
+        type: array
+      readarr_instances:
         items:
           $ref: '#/definitions/config.ArrsInstanceConfig'
         type: array
@@ -1032,8 +1545,16 @@ definitions:
         items:
           $ref: '#/definitions/config.ArrsInstanceConfig'
         type: array
+      sportarr_instances:
+        items:
+          $ref: '#/definitions/config.ArrsInstanceConfig'
+        type: array
       webhook_base_url:
         type: string
+      whisparr_instances:
+        items:
+          $ref: '#/definitions/config.ArrsInstanceConfig'
+        type: array
     type: object
   config.ArrsInstanceConfig:
     properties:
@@ -1080,6 +1601,20 @@ definitions:
     properties:
       allow_other:
         type: boolean
+      async_buffer_max_total_mb:
+        description: |-
+          AsyncBufferMaxTotalMB caps total read-ahead memory across all open files
+          (MB). Buffers reserve their size only while actively streaming; over the
+          cap, additional streams run unbuffered. 0 = unlimited.
+        type: integer
+      async_buffer_size_mb:
+        description: |-
+          AsyncBufferSizeMB is the per-open-file read-ahead buffer size (MB). A
+          background goroutine fills it ahead of the player so reads are served
+          from memory instead of blocking on the network, mirroring the buffering
+          rclone's VFS provides over WebDAV. 0 disables read-ahead (every read is a
+          direct passthrough — the previous behavior).
+        type: integer
       attr_timeout_seconds:
         type: integer
       backend:
@@ -1097,6 +1632,12 @@ definitions:
         type: integer
       mount_path:
         type: string
+      no_mod_time:
+        description: |-
+          NoModTime reports epoch for all timestamps (mtime, ctime, atime); prevents
+          media servers re-scanning on unstable VFS mtimes. Note: tools like find -atime
+          will not see meaningful access times on this mount.
+        type: boolean
     type: object
   config.HealthConfig:
     properties:
@@ -1104,12 +1645,30 @@ definitions:
         type: number
       check_all_segments:
         type: boolean
+      check_batch_size:
+        type: integer
       check_interval_seconds:
         type: integer
       cleanup_orphaned_metadata:
         type: boolean
+      corruption_action:
+        description: |-
+          CorruptionAction controls what happens when the health checker or a streaming read
+          confirms real (non-degraded) corruption: "repair" (default) triggers an Arr rescan;
+          "delete" removes the file's metadata/NZB/health record and cleans up now-empty
+          parent directories instead. Degraded files are never affected either way.
+        type: string
       enabled:
         type: boolean
+      excluded_categories:
+        description: |-
+          ExcludedCategories lists SABnzbd category names whose files must never be
+          registered for health checking by the library-sync discovery pass. Matching
+          is by the category's configured directory under CompleteDir and is
+          case-insensitive. Empty means no categories are excluded.
+        items:
+          type: string
+        type: array
       library_dir:
         type: string
       library_sync_concurrency:
@@ -1118,23 +1677,49 @@ definitions:
         type: integer
       max_concurrent_jobs:
         type: integer
+      max_concurrent_segment_checks:
+        description: |-
+          MaxConcurrentSegmentChecks bounds how many STAT checks a health sweep keeps
+          in flight. STAT is bodyless and pipelines many per connection, so connection
+          count is the wrong unit — the import path already sizes its sweep by STAT
+          pipeline depth (see importer/processor.go).
+
+          nil or 0 means "adapt": the pool narrows the sweep to one connection's depth
+          while a stream is playing and widens it to the pool's aggregate STAT capacity
+          when idle, which measured 24x the sweep throughput on an idle pool.
+        type: integer
       max_connections_for_health_checks:
+        description: |-
+          Deprecated: superseded by MaxConcurrentSegmentChecks, which is named for
+          what it actually bounds. Read for one-time migration only (see
+          migrateHealthSweepConcurrency), then cleared. Do not use in new code.
+        type: integer
+      max_retries:
+        type: integer
+      read_timeout_seconds:
         type: integer
       repair:
         $ref: '#/definitions/config.RepairConfig'
       resolve_repair_on_import:
         type: boolean
       segment_sample_percentage:
+        description: |-
+          SegmentSamplePercentage is the fraction (1-100) of segments randomly sampled
+          during health-check sweeps (post-import validation only). Distinct from
+          Import.SegmentSamplePercentage, which samples during archive extraction.
+          Higher sampling catches more corruption but adds overhead. Default 5%.
+        type: integer
+      verify_content:
+        description: |-
+          VerifyContent, when true, probes each eligible video/audio file's
+          first bytes through the serving stack during a health check and
+          marks the file corrupted if no recognized media container signature
+          is found. Distinct from the unrelated, unused VerifyData field above.
+        type: boolean
+      verify_content_timeout_seconds:
         type: integer
       verify_data:
         type: boolean
-    type: object
-  config.IgnoredMessage:
-    properties:
-      enabled:
-        type: boolean
-      message:
-        type: string
     type: object
   config.ImportConfig:
     properties:
@@ -1148,10 +1733,23 @@ definitions:
         type: boolean
       failed_item_retention_hours:
         type: integer
+      filter_sample_files:
+        type: boolean
+      history_retention_days:
+        type: integer
       import_dir:
         type: string
       import_strategy:
         $ref: '#/definitions/config.ImportStrategy'
+      iso_analyze_timeout_seconds:
+        type: integer
+      max_concurrent_imports:
+        description: |-
+          MaxConcurrentImports caps the number of NZB imports that may run
+          end-to-end at the same time. 0 = unlimited. NNTP connection use is
+          balanced automatically: imports share the pool's full capacity and
+          yield to streams (priority lane + adaptive connection budget).
+        type: integer
       max_download_prefetch:
         type: integer
       max_processor_workers:
@@ -1160,10 +1758,40 @@ definitions:
         type: integer
       read_timeout_seconds:
         type: integer
-      segment_sample_percentage:
-        type: integer
-      skip_health_check:
+      rename_to_nzb_name:
         type: boolean
+      segment_sample_percentage:
+        description: |-
+          SegmentSamplePercentage is the fraction (1-100) of segments randomly sampled
+          during import-phase validation (RAR extraction, archive integrity). Distinct from
+          Health.SegmentSamplePercentage, which samples during post-import health checks.
+          Lower defaults faster imports but skips error detection. Default 1%.
+        type: integer
+      stream_headroom_connections:
+        description: |-
+          StreamHeadroomConnections is how many connections are held back from
+          import per active stream. On a saturated link those connections are slack
+          — they are not converting into bytes — so handing them to playback costs
+          little and measurably shortens stream latency. Past that point the pool
+          can no longer fill the link and import throughput really does fall.
+
+          Measured at 100 connections behind a 400 MB/s link: 8 is free (import
+          358 vs 359 MB/s) and takes stream p50 190ms -> 179ms; 32 costs ~13% import
+          and takes p50 to 146ms and p99 245ms -> 167ms. The right value depends on
+          the link rate and pool size, so it is a knob rather than a constant.
+          0 disables the reservation entirely.
+          A nil pointer means "unset, use the default"; an explicit 0 disables the
+          reservation. A plain int cannot express that difference, since YAML omits
+          and YAML-zero both decode to 0.
+        type: integer
+      verify_content:
+        description: |-
+          VerifyContent, when true, probes each eligible video/audio file's
+          first bytes through the serving stack after import and fails the
+          import if no recognized media container signature is found.
+        type: boolean
+      verify_content_timeout_seconds:
+        type: integer
       watch_dir:
         type: string
       watch_interval_seconds:
@@ -1204,22 +1832,30 @@ definitions:
     properties:
       enabled:
         type: boolean
-      interval_hours:
-        type: integer
       keep_backups:
         type: integer
       path:
+        type: string
+      schedule:
+        description: cron expression (UTC)
         type: string
     type: object
   config.MetadataConfig:
     properties:
       backup:
         $ref: '#/definitions/config.MetadataBackupConfig'
-      delete_completed_nzb:
-        type: boolean
-      delete_source_nzb_on_removal:
-        type: boolean
+      migration:
+        $ref: '#/definitions/config.MetadataMigrationConfig'
       root_path:
+        type: string
+    type: object
+  config.MetadataMigrationConfig:
+    properties:
+      default_group:
+        description: |-
+          DefaultGroup is the newsgroup written into synthesized NzbStore entries.
+          Legacy metas do not retain the original groups, and nzb.BuildNZB renders an
+          empty <groups> element without this, which most NZB clients reject.
         type: string
     type: object
   config.MountType:
@@ -1234,8 +1870,40 @@ definitions:
     - MountTypeRClone
     - MountTypeFuse
     - MountTypeRCloneExternal
+  config.NetworkConfig:
+    properties:
+      http_proxy:
+        type: string
+      https_proxy:
+        type: string
+      no_proxy:
+        type: string
+    type: object
+  config.NewsnabIndexerConfig:
+    properties:
+      api_key:
+        type: string
+      categories:
+        items:
+          type: integer
+        type: array
+      enabled:
+        type: boolean
+      id:
+        type: string
+      name:
+        type: string
+      timeout_seconds:
+        type: integer
+      url:
+        type: string
+      weight:
+        type: integer
+    type: object
   config.ProviderConfig:
     properties:
+      account_expiration_date:
+        type: string
       enabled:
         type: boolean
       host:
@@ -1243,11 +1911,20 @@ definitions:
       id:
         type: string
       inflight_requests:
+        description: |-
+          InflightRequests caps concurrent decoded article bodies per connection (memory
+          ceiling). In practice, the pool-wide ImportBudget caps total in-flight bodies
+          to roughly the connection count, so each connection carries ~1 body. Peak observed
+          depth is 3-4 against this cap of 10. Raising it does not improve import throughput.
         type: integer
       insecure_tls:
         type: boolean
       is_backup_provider:
         type: boolean
+      keepalive_command:
+        type: string
+      keepalive_interval_seconds:
+        type: integer
       last_rtt_ms:
         type: integer
       last_speed_test_mbps:
@@ -1256,14 +1933,33 @@ definitions:
         type: string
       max_connections:
         type: integer
+      min_connections_alive:
+        type: integer
+      name:
+        type: string
       port:
         type: integer
       proxy_url:
         type: string
+      quota_bytes:
+        type: integer
+      quota_period_hours:
+        type: integer
       skip_ping:
         type: boolean
+      stat_inflight_requests:
+        description: |-
+          StatInflightRequests caps the per-connection STAT pipeline depth (bodyless
+          existence checks). Its pool-wide aggregate (connections × depth, clamped to 4096)
+          determines how much an idle-pool health sweep can widen: measured 24x sweep
+          throughput improvement. While a stream is active the sweep is capped lower regardless.
+        type: integer
+      storage_group:
+        type: string
       tls:
         type: boolean
+      user_agent:
+        type: string
       username:
         type: string
     type: object
@@ -1279,17 +1975,57 @@ definitions:
         items:
           type: integer
         type: array
+      custom_scores:
+        additionalProperties:
+          type: integer
+        description: |-
+          CustomScores maps keyword/regex patterns to numeric scores (TRaSH guide style).
+          Positive scores promote releases; negative scores demote them.
+          Examples: {"2160p": 500, "REMUX": 300, "DV": -1000}
+        type: object
       enabled:
         description: Enabled controls whether Prowlarr search is active for the Stremio
           addon.
         type: boolean
+      exclude_keywords:
+        description: |-
+          ExcludeKeywords is an optional list of keywords/patterns; releases containing any are dropped.
+          Examples: ["DV", "DoVi", "CAM", "TS", "TeleSync"]
+        items:
+          type: string
+        type: array
       host:
         description: Host is the Prowlarr base URL (e.g. "http://localhost:9696").
         type: string
+      indexers:
+        description: |-
+          Indexers optionally restricts searches to specific Prowlarr indexer IDs.
+          Empty = search across all configured indexers.
+        items:
+          type: integer
+        type: array
       languages:
         description: "Languages is an optional list of keywords; releases must contain
           at least one to pass.\nEmpty = no filtering. Examples: [\"Esp\", \"\U0001F1EA\U0001F1F8\",
           \"Spanish\", \"DUAL\"]"
+        items:
+          type: string
+        type: array
+      preferred_indexer_names:
+        description: PreferredIndexerNames lists Prowlarr indexer names/keywords to
+          prioritize and rank above others.
+        items:
+          type: string
+        type: array
+      preferred_indexers:
+        description: PreferredIndexers lists Prowlarr indexer IDs to prioritize and
+          rank above others.
+        items:
+          type: integer
+        type: array
+      preferred_languages:
+        description: PreferredLanguages lists language keywords to prioritize and
+          rank above others.
         items:
           type: string
         type: array
@@ -1347,15 +2083,13 @@ definitions:
         additionalProperties:
           type: string
         type: object
+      rc_pass:
+        type: string
       rc_port:
         type: integer
       rc_url:
         type: string
       rc_user:
-        type: string
-      read_chunk_size:
-        type: string
-      read_chunk_size_limit:
         type: string
       read_only:
         type: boolean
@@ -1391,6 +2125,8 @@ definitions:
         type: string
       vfs_read_chunk_size:
         type: string
+      vfs_read_chunk_size_limit:
+        type: string
       vfs_read_chunk_streams:
         type: integer
     type: object
@@ -1403,6 +2139,8 @@ definitions:
       interval_minutes:
         type: integer
       max_cooldown_hours:
+        type: integer
+      max_repair_retries:
         type: integer
     type: object
   config.SABnzbdCategory:
@@ -1438,6 +2176,13 @@ definitions:
         description: Fallback configuration for sending failed imports to external
           SABnzbd
         type: string
+      history_retention_minutes:
+        description: |-
+          HistoryRetentionMinutes controls how far back the SABnzbd-emulating history
+          endpoint looks into import_history when *arr clients poll without a specific
+          nzo_id filter. Older entries are still returned when *arr asks for them by
+          nzo_id. Defaults to 10080 (7 days).
+        type: integer
     type: object
   config.SegmentCacheConfig:
     properties:
@@ -1446,9 +2191,34 @@ definitions:
       enabled:
         type: boolean
       expiry_hours:
+        description: |-
+          ExpiryHours controls how long cached segments are kept before automatic
+          eviction. Set to 0 to disable expiry (cache forever, bounded only by
+          MaxSizeGB via LRU eviction). Left unset (nil) it defaults to 24 hours.
         type: integer
       max_size_gb:
         type: integer
+    type: object
+  config.StreamScoringConfig:
+    properties:
+      custom_formats:
+        items:
+          $ref: '#/definitions/config.TrashCustomFormatConfig'
+        type: array
+      exclude_keywords:
+        items:
+          type: string
+        type: array
+      exclude_regex:
+        type: string
+      preferred_languages:
+        items:
+          type: string
+        type: array
+      preset:
+        type: string
+      require_preferred_language:
+        type: boolean
     type: object
   config.StreamingConfig:
     properties:
@@ -1456,20 +2226,76 @@ definitions:
         $ref: '#/definitions/config.FailureMaskingConfig'
       max_prefetch:
         type: integer
+      read_timeout_seconds:
+        description: |-
+          ReadTimeoutSeconds bounds a single streaming read (WebDAV Read and FUSE
+          ReadAt alike). Nothing below this layer carries a deadline the caller can
+          observe: a segment fetch that stalls without erroring parks the read
+          indefinitely, and on FUSE that means an uninterruptible D-state for the
+          reading process. On expiry the in-flight reader is interrupted and the
+          read fails, so the caller gets an EIO it can act on. 0 uses the built-in
+          default; a negative value disables the timeout.
+        type: integer
     type: object
   config.StremioConfig:
     properties:
+      addon_description:
+        description: AddonDescription is the description shown in Stremio's addon
+          catalog.
+        type: string
+      addon_name:
+        description: AddonName is the display name shown in Stremio's addon catalog.
+        type: string
       base_url:
         description: |-
           BaseURL is the public base URL used when building Stremio stream links
           (e.g. "https://altmount.example.com"). Falls back to the auto-detected
           request origin when not set.
         type: string
+      direct_stream:
+        description: DirectStream when true streams NZB media segments directly.
+        type: boolean
       enabled:
         description: |-
           Enabled controls whether the endpoint is active. Disabled by default.
           When false, the endpoint returns 404 Not Found.
         type: boolean
+      failed_release_ttl_hours:
+        description: |-
+          FailedReleaseTTLHours controls how long a release that failed to import stays
+          excluded from the Stremio stream list. Mirrors NzbTTLHours semantics: it filters
+          failure records by age rather than deleting them, so it is bounded above by
+          Import.FailedItemRetentionHours. Set to 0 to exclude for as long as the record
+          survives. Defaults to 24 hours.
+        type: integer
+      fallback_timeout_ms:
+        description: FallbackTimeoutMs is the timeout before attempting a fallback
+          release.
+        type: integer
+      fast_fail_header_only:
+        description: |-
+          FastFailHeaderOnly when true causes Stremio-originated imports to fail fast
+          immediately on the release-level probe when missing articles are detected,
+          skipping the multi-part RAR per-file Stat sweep. Defaults to true.
+        type: boolean
+      include_library_streams:
+        description: |-
+          IncludeLibraryStreams when true checks and presents matching completed files
+          from your Altmount library as instant 0s stream options in Stremio. Defaults to true.
+        type: boolean
+      indexers:
+        allOf:
+        - $ref: '#/definitions/config.StremioIndexersConfig'
+        description: Indexers configures Prowlarr and direct Newsnab search providers.
+      max_fallback_releases:
+        description: |-
+          MaxFallbackReleases caps how many *extra* releases a single play request may try
+          after the first one fails. Set to 0 to disable fallback. Defaults to 2.
+        type: integer
+      max_retries:
+        description: MaxRetries is the maximum number of retry attempts for stream
+          fetching.
+        type: integer
       nzb_ttl_hours:
         description: |-
           NzbTTLHours controls how long a completed NZB result is cached before
@@ -1479,8 +2305,64 @@ definitions:
       prowlarr:
         allOf:
         - $ref: '#/definitions/config.ProwlarrConfig'
-        description: Prowlarr configures the Prowlarr indexer used by the Stremio
-          addon to search for NZBs.
+        description: Prowlarr configures the legacy Prowlarr indexer settings (retained
+          for compatibility).
+      scoring:
+        allOf:
+        - $ref: '#/definitions/config.StreamScoringConfig'
+        description: Scoring configures TRaSH format scoring and exclusions.
+      show_cached_indicator:
+        description: ShowCachedIndicator when true shows cached badges in stream titles.
+        type: boolean
+      stream_ttl_seconds:
+        description: StreamTTLSeconds is the stream cache expiration time in seconds.
+        type: integer
+    type: object
+  config.StremioIndexersConfig:
+    properties:
+      custom_user_agent:
+        type: string
+      newsnab:
+        items:
+          $ref: '#/definitions/config.NewsnabIndexerConfig'
+        type: array
+      provider:
+        description: '"prowlarr", "newsnab", "both"'
+        type: string
+      prowlarr:
+        $ref: '#/definitions/config.ProwlarrConfig'
+      user_agent_mode:
+        type: string
+    type: object
+  config.StuckCleanupRule:
+    properties:
+      action:
+        type: string
+      enabled:
+        type: boolean
+      message:
+        type: string
+    type: object
+  config.TrashCustomFormatConfig:
+    properties:
+      category:
+        type: string
+      enabled:
+        type: boolean
+      id:
+        type: string
+      invert:
+        type: boolean
+      is_custom:
+        type: boolean
+      name:
+        type: string
+      pattern:
+        type: string
+      pattern_type:
+        type: string
+      score:
+        type: integer
     type: object
   config.WebDAVConfig:
     properties:
@@ -1510,10 +2392,13 @@ definitions:
     - healthy
     - repair_triggered
     - corrupted
+    - degraded
     type: string
     x-enum-comments:
       HealthStatusChecking: File is currently being checked
       HealthStatusCorrupted: File has missing segments or is corrupted
+      HealthStatusDegraded: 'Missing segments only hit media payload: still playable,
+        no repair'
       HealthStatusHealthy: File passed health check
       HealthStatusPending: File has not been checked yet
       HealthStatusRepairTriggered: File repair has been triggered in Arrs
@@ -1523,12 +2408,14 @@ definitions:
     - File passed health check
     - File repair has been triggered in Arrs
     - File has missing segments or is corrupted
+    - 'Missing segments only hit media payload: still playable, no repair'
     x-enum-varnames:
     - HealthStatusPending
     - HealthStatusChecking
     - HealthStatusHealthy
     - HealthStatusRepairTriggered
     - HealthStatusCorrupted
+    - HealthStatusDegraded
   database.QueuePriority:
     enum:
     - 1
@@ -1615,8 +2502,7 @@ paths:
       - ARRs
   /arrs/health:
     get:
-      description: Returns health check results from all configured Sonarr/Radarr
-        instances.
+      description: Returns health check results from all configured ARR instances.
       produces:
       - application/json
       responses:
@@ -1631,7 +2517,7 @@ paths:
       - ARRs
   /arrs/instances:
     get:
-      description: Returns all configured Sonarr/Radarr instances.
+      description: Returns all configured ARR instances.
       produces:
       - application/json
       responses:
@@ -1646,9 +2532,10 @@ paths:
       - ARRs
   /arrs/instances/{type}/{name}:
     get:
-      description: Returns a specific Sonarr/Radarr instance by type and name.
+      description: Returns a specific ARR instance by type and name.
       parameters:
-      - description: Instance type (sonarr or radarr)
+      - description: Instance type (sonarr, radarr, lidarr, readarr, whisparr, or
+          sportarr)
         in: path
         name: type
         required: true
@@ -1678,7 +2565,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: Tests connectivity to a Sonarr/Radarr instance with given credentials.
+      description: Tests connectivity to an ARR instance with given credentials.
       parameters:
       - description: Instance connection details
         in: body
@@ -1721,7 +2608,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: Receives file-import webhook events from Sonarr/Radarr and triggers
+      description: Receives file-import webhook events from ARR instances and triggers
         health checks. Authenticated via API key query parameter.
       parameters:
       - description: AltMount API key
@@ -1754,7 +2641,7 @@ paths:
   /arrs/webhook/register:
     post:
       description: Automatically registers AltMount as a webhook connection in all
-        configured Sonarr/Radarr instances.
+        configured ARR instances.
       produces:
       - application/json
       responses:
@@ -1873,6 +2760,37 @@ paths:
           schema:
             $ref: '#/definitions/api.APIResponse'
       summary: Check registration status
+      tags:
+      - Auth
+  /auth/reset-admin-password:
+    post:
+      consumes:
+      - application/json
+      description: Resets the password for a direct-auth user. Only available when
+        login is disabled.
+      parameters:
+      - description: Reset credentials
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.ResetAdminPasswordRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.APIResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.APIResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/api.APIResponse'
+      summary: Reset admin password
       tags:
       - Auth
   /config:
@@ -1999,6 +2917,45 @@ paths:
       security:
       - BearerAuth: []
       summary: Test provider download speed
+      tags:
+      - Providers
+  /config/providers/{id}/tune-pipeline:
+    post:
+      description: Sweeps inflight depths against the provider and returns the recommended
+        inflight_requests value.
+      parameters:
+      - description: Provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/api.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/api.PipelineTuneResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.APIResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/api.APIResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Auto-tune provider pipeline depth
       tags:
       - Providers
   /config/reload:
@@ -2912,26 +3869,6 @@ paths:
       summary: Get library sync status
       tags:
       - Health
-  /health/regenerate-symlinks:
-    post:
-      description: Regenerates all library symlinks and STRM files for files that
-        already have metadata.
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/api.APIResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/api.APIResponse'
-      security:
-      - BearerAuth: []
-      summary: Regenerate library symlinks
-      tags:
-      - Health
   /health/reset-all:
     post:
       description: Resets all health records to pending status for a full re-check
@@ -3136,6 +4073,74 @@ paths:
       summary: Import from NZBDav source
       tags:
       - Import
+  /import/nzbdav/migrate-symlinks:
+    post:
+      consumes:
+      - application/json
+      description: Walks a library directory and rewrites symlinks that target the
+        nzbdav mount to point at the altmount path instead.
+      parameters:
+      - description: library_path, source_mount_path, dry_run
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.APIResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.APIResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Migrate NZBDav library symlinks
+      tags:
+      - Import
+  /import/nzbdav/migrations:
+    delete:
+      description: Deletes every import_migrations row for source='nzbdav' regardless
+        of status. Use to force a full re-import after the imported files have been
+        deleted from AltMount. This will cause the scanner to re-process every blob
+        on the next import.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Clear ALL NZBDav migration rows
+      tags:
+      - Import
+  /import/nzbdav/pending-migrations:
+    delete:
+      description: Deletes all import_migrations rows with status='pending' for source='nzbdav'.
+        Keeps imported/symlinks_migrated rows untouched. Use to remove orphaned rows
+        from a cancelled/failed import before re-importing.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Clear pending NZBDav migration rows
+      tags:
+      - Import
   /import/nzbdav/reset:
     post:
       description: Resets the NZBDav import state so a new import can be started.
@@ -3228,24 +4233,116 @@ paths:
       summary: Get scan status
       tags:
       - Import
+  /metadata/migration/cancel:
+    post:
+      description: Stops an in-flight migration after the current file.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.APIResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/api.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Cancel the metadata migration
+      tags:
+      - Metadata
+  /metadata/migration/dry-run:
+    post:
+      description: Converts against an isolated temporary root and reports measured
+        savings without touching the library.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.APIResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/api.APIResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/api.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Dry-run the metadata migration
+      tags:
+      - Metadata
+  /metadata/migration/start:
+    post:
+      description: Rewrites legacy .meta files to the v3 store-backed format in place.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.APIResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/api.APIResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/api.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Start the metadata migration
+      tags:
+      - Metadata
+  /metadata/migration/status:
+    get:
+      description: Returns the status of the legacy metadata → v3 migration worker.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.APIResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/api.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Get metadata migration status
+      tags:
+      - Metadata
   /nzb/streams:
     post:
       consumes:
       - multipart/form-data
-      description: Accepts an NZB file upload, queues it with high priority, and synchronously
-        waits for completion before returning Stremio-compatible stream URLs for all
-        media files found in the NZB output. Authenticated via download_key form field
-        (SHA256 of API key).
+      description: 'Accepts an NZB file (upload or URL), queues it with high priority,
+        and returns Stremio-compatible stream URLs as soon as the file is accessible
+        via VFS. Auth: download_key form field (SHA256 of API key) or X-Api-Key header
+        (raw API key). Returns _cached=true when served from an already-completed
+        item.'
       parameters:
-      - description: NZB file to process
+      - description: NZB file to process (mutually exclusive with nzb_url)
         in: formData
         name: file
-        required: true
         type: file
-      - description: SHA256 hash of the user's API key
+      - description: URL to download the NZB from (mutually exclusive with file)
+        in: formData
+        name: nzb_url
+        type: string
+      - description: 'SHA256 hash of the user''s API key (alternative: X-Api-Key header)'
         in: formData
         name: download_key
-        required: true
+        type: string
+      - description: Raw API key (alternative to download_key form field)
+        in: header
+        name: X-Api-Key
         type: string
       - description: 'Queue category (default: stremio)'
         in: formData
@@ -3255,6 +4352,19 @@ paths:
         in: formData
         name: timeout
         type: integer
+      - description: Season number for selecting one episode from a season pack
+        in: formData
+        name: season
+        type: integer
+      - description: Episode number for selecting one episode from a season pack
+        in: formData
+        name: episode
+        type: integer
+      - description: Stremio content id (e.g. tt1234567:1:5) as an alternative to
+          season/episode
+        in: formData
+        name: id
+        type: string
       produces:
       - application/json
       responses:
@@ -3374,6 +4484,52 @@ paths:
       summary: Update NNTP provider
       tags:
       - Providers
+  /providers/{id}/reset-quota:
+    post:
+      description: Resets the download quota counter for the specified provider, allowing
+        it to download again.
+      parameters:
+      - description: Provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.APIResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/api.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Reset provider download quota
+      tags:
+      - Providers
+  /providers/backbones:
+    get:
+      description: Returns a cached mapping of usenet hostnames to their upstream
+        backbone (storage group)
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Get provider backbone map
+      tags:
+      - providers
   /providers/reorder:
     put:
       consumes:
@@ -3436,6 +4592,34 @@ paths:
       summary: Test NNTP provider
       tags:
       - Providers
+  /prowlarr/indexers:
+    post:
+      consumes:
+      - application/json
+      description: Returns the usenet indexers configured in Prowlarr for the Stremio
+        addon.
+      parameters:
+      - description: Optional Prowlarr connection overrides
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/api.prowlarrIndexersRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.APIResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: List Prowlarr indexers
+      tags:
+      - Config
   /queue:
     get:
       description: Returns a paginated list of NZB download queue items with optional
@@ -3687,8 +4871,8 @@ paths:
       - Queue
   /queue/{id}/retry:
     post:
-      description: Resets a failed, pending, or completed queue item to pending and
-        triggers processing.
+      description: Resets a failed, pending, or completed queue item to pending so
+        it is picked up by the worker pool.
       parameters:
       - description: Queue item ID
         in: path
@@ -3793,6 +4977,55 @@ paths:
       security:
       - BearerAuth: []
       summary: Bulk cancel queue items
+      tags:
+      - Queue
+  /queue/bulk/priority:
+    patch:
+      consumes:
+      - application/json
+      description: Updates the priority for multiple queue items at once. Items currently
+        being processed are skipped.
+      parameters:
+      - description: 'IDs and priority: 1=high, 2=normal, 3=low'
+        in: body
+        name: body
+        required: true
+        schema:
+          properties:
+            ids:
+              items:
+                format: int64
+                type: integer
+              type: array
+            priority:
+              type: integer
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/api.APIResponse'
+            - properties:
+                data:
+                  properties:
+                    message:
+                      type: string
+                    skipped_count:
+                      type: integer
+                    updated_count:
+                      type: integer
+                  type: object
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Bulk update queue item priorities
       tags:
       - Queue
   /queue/bulk/restart:
@@ -4169,6 +5402,14 @@ paths:
         in: query
         name: title
         type: string
+      - description: Season number for selecting one episode from a season pack
+        in: query
+        name: season
+        type: integer
+      - description: Episode number for selecting one episode from a season pack
+        in: query
+        name: episode
+        type: integer
       produces:
       - application/json
       responses:
@@ -4323,6 +5564,62 @@ paths:
       security:
       - BearerAuth: []
       summary: Get NNTP pool metrics
+      tags:
+      - System
+  /system/provider-speed-history:
+    get:
+      description: Returns speed test history per provider over the given number of
+        days.
+      parameters:
+      - description: 'Number of days to fetch data for (default: 30)'
+        in: query
+        name: days
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/api.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/api.ProviderSpeedTestHistoryResponse'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get provider speed test history
+      tags:
+      - System
+  /system/provider-stats:
+    get:
+      description: Returns aggregated data usage per provider over the given number
+        of days.
+      parameters:
+      - description: 'Number of days to fetch data for (default: 30)'
+        in: query
+        name: days
+        type: integer
+      - description: Aggregation interval (daily, weekly, monthly, yearly)
+        in: query
+        name: interval
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/api.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/api.ProviderHistoricalStatsResponse'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get provider historical data usage stats
       tags:
       - System
   /system/restart:
