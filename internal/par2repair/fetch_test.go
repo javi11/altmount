@@ -209,18 +209,25 @@ func TestSweepStatConcurrencyRespectsRepairConnections(t *testing.T) {
 	cases := []struct {
 		name                string
 		poolWidth, maxConns int
+		streamsActive       bool
 		want                int
 	}{
-		{"repair cap binds", 4096, 10, 10 * sweepStatDepth},
-		{"pool budget binds", 30, 10, 30},
-		{"non-positive conns falls back to pool budget", 200, 0, 200},
-		{"non-positive pool width keeps conns bound", 0, 10, 10 * sweepStatDepth},
-		{"floor of one", 0, 0, 1},
+		{"repair cap binds", 4096, 10, false, 10 * sweepStatDepth},
+		{"pool budget binds", 30, 10, false, 30},
+		{"non-positive conns falls back to pool budget", 200, 0, false, 200},
+		{"non-positive pool width keeps conns bound", 0, 10, false, 10 * sweepStatDepth},
+		{"floor of one", 0, 0, false, 1},
+		// Playback active: a STAT for a missing article can park its connection
+		// for over a second, so the sweep must touch only a handful of
+		// connections and leave the rest clean for stream bodies.
+		{"streams active caps at yield width", 4096, 10, true, yieldStatWidth},
+		{"streams active keeps a narrower bound", 4, 10, true, 4},
+		{"streams active with no other bound uses yield width", 0, 0, true, yieldStatWidth},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := SweepStatConcurrency(tc.poolWidth, tc.maxConns); got != tc.want {
-				t.Fatalf("SweepStatConcurrency(%d, %d) = %d, want %d", tc.poolWidth, tc.maxConns, got, tc.want)
+			if got := SweepStatConcurrency(tc.poolWidth, tc.maxConns, tc.streamsActive); got != tc.want {
+				t.Fatalf("SweepStatConcurrency(%d, %d, %v) = %d, want %d", tc.poolWidth, tc.maxConns, tc.streamsActive, got, tc.want)
 			}
 		})
 	}

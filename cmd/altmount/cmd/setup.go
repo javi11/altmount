@@ -414,15 +414,16 @@ func startPar2RepairService(
 		}),
 		par2repair.ConnBudgetFunc(poolManager.AcquireImportConnection),
 	))
-	// Stream-aware sweep width (conservative while anything plays, bounded
-	// widening when idle), further capped by the repair's own connection
-	// budget so a 10-connection repair never floods every connection's STAT
-	// pipeline. See par2repair.SweepStatConcurrency.
+	// Stream-aware sweep width (a handful of connections while anything
+	// plays, bounded widening when idle), further capped by the repair's own
+	// connection budget so a 10-connection repair never floods every
+	// connection's STAT pipeline. See par2repair.SweepStatConcurrency.
 	fetcher.StatConcurrency = func() int {
 		c := configGetter()
 		return par2repair.SweepStatConcurrency(
 			poolManager.StatSweepConcurrency(c.StatConcurrency()),
 			c.Par2Repair.EffectiveMaxConnections(),
+			streamsActive(),
 		)
 	}
 	patchStore := par2repair.NewPatchStore(cfg.Par2Repair.EffectivePatchDir(cfg.Metadata.RootPath))

@@ -209,17 +209,32 @@ const statSweepConcurrency = 64
 // occupy every connection's STAT pipeline.
 const sweepStatDepth = 4
 
+// yieldStatWidth is the sweep's in-flight STAT bound while playback streams
+// are active. A STAT is not a cheap round trip when the article is gone:
+// Newshosting answers 430 in ~1.2 s and serialises those lookups per
+// connection, so a sweep over a mostly-dead release parks every connection it
+// touches for seconds and any stream body queued behind one (replies are FIFO)
+// waits it out. Observed live: playback at ~5 MB/s beside a 40-wide sweep
+// that found 95% of a release missing. This many outstanding keeps the sweep
+// to a handful of connections, leaving the rest clean for stream bodies —
+// slow (a 4.6k-article dead release takes ~15 min instead of ~4) but moving.
+const yieldStatWidth = 8
+
 // SweepStatConcurrency bounds a repair liveness sweep: the pool-wide sweep
 // budget (pool.Manager.StatSweepConcurrency) capped by the repair's own
-// connection budget × sweepStatDepth. Non-positive inputs fall back to the
-// other bound; the result is always at least 1.
-func SweepStatConcurrency(poolWidth, maxConns int) int {
+// connection budget × sweepStatDepth, and by yieldStatWidth while playback
+// streams are active. Non-positive inputs fall back to the other bound; the
+// result is always at least 1.
+func SweepStatConcurrency(poolWidth, maxConns int, streamsActive bool) int {
 	width := poolWidth
 	if maxConns > 0 {
 		repairCap := maxConns * sweepStatDepth
 		if width <= 0 || repairCap < width {
 			width = repairCap
 		}
+	}
+	if streamsActive && (width <= 0 || width > yieldStatWidth) {
+		width = yieldStatWidth
 	}
 	return max(width, 1)
 }
