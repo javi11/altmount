@@ -715,12 +715,12 @@ type ProviderConfig struct {
 	// existence checks). Its pool-wide aggregate (connections × depth, clamped to 4096)
 	// determines how much an idle-pool health sweep can widen: measured 24x sweep
 	// throughput improvement. While a stream is active the sweep is capped lower regardless.
-	StatInflightRequests     int        `yaml:"stat_inflight_requests" mapstructure:"stat_inflight_requests" json:"stat_inflight_requests"`
+	StatInflightRequests int `yaml:"stat_inflight_requests" mapstructure:"stat_inflight_requests" json:"stat_inflight_requests"`
 	// StreamInflightRequests caps streaming (priority-lane) bodies in flight
 	// per connection, so a playback read never queues behind a connection's
 	// worth of read-ahead. 0 defaults to 4; values above inflight_requests
 	// are capped to it.
-	StreamInflightRequests int `yaml:"stream_inflight_requests" mapstructure:"stream_inflight_requests" json:"stream_inflight_requests,omitempty"`
+	StreamInflightRequests   int        `yaml:"stream_inflight_requests" mapstructure:"stream_inflight_requests" json:"stream_inflight_requests,omitempty"`
 	TLS                      bool       `yaml:"tls" mapstructure:"tls" json:"tls"`
 	InsecureTLS              bool       `yaml:"insecure_tls" mapstructure:"insecure_tls" json:"insecure_tls"`
 	ProxyURL                 string     `yaml:"proxy_url" mapstructure:"proxy_url" json:"proxy_url,omitempty"`

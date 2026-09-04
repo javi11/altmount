@@ -73,7 +73,7 @@ func (hc *HealthChecker) classifyHoles(
 	// Persist newly observed holes so playback replay pre-pads them. Only on
 	// degraded verdicts: failed files head to repair/re-download anyway.
 	if verdict == holes.VerdictDegraded && acc.Total() > priorTotal {
-		if err := hc.metadataService.AddKnownHoles(filePath, observed); err != nil {
+		if err := hc.metadataService.AddKnownHoles(filePath, observed, hc.configGetter().ProviderFingerprint()); err != nil {
 			slog.WarnContext(ctx, "Failed to persist known holes",
 				"file_path", filePath,
 				"error", err)

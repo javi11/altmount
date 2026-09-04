@@ -286,7 +286,7 @@ func TestUpdateFileMetadata_PreservesModifiedAt(t *testing.T) {
 	assert.Equal(t, metapb.FileStatus_FILE_STATUS_DEGRADED, afterStatus.Status)
 	assert.Equal(t, fixedModifiedAt-60, afterStatus.CreatedAt)
 
-	require.NoError(t, ms.AddKnownHoles(virtualPath, []holes.Run{{Start: 10, Count: 2}}))
+	require.NoError(t, ms.AddKnownHoles(virtualPath, []holes.Run{{Start: 10, Count: 2}}, ""))
 
 	afterHoles, err := ms.ReadFileMetadata(virtualPath)
 	require.NoError(t, err)

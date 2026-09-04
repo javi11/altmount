@@ -288,18 +288,19 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 	// unknownFields + sizeCache + unused fields like NzbdavId). Slices are
 	// carried by reference; they stay alive only while the handle is open.
 	handleMeta := &fileHandleMeta{
-		FileSize:       fileMeta.FileSize,
-		ModifiedAt:     fileMeta.ModifiedAt,
-		SourceNzbPath:  fileMeta.SourceNzbPath,
-		Encryption:     fileMeta.Encryption,
-		Password:       fileMeta.Password,
-		Salt:           fileMeta.Salt,
-		AesKey:         fileMeta.AesKey,
-		AesIv:          fileMeta.AesIv,
-		SegmentData:    fileMeta.SegmentData,
-		NestedSources:  fileMeta.NestedSources,
-		ClipBoundaries: fileMeta.ClipBoundaries,
-		KnownHoles:     fileMeta.KnownHoles,
+		FileSize:                fileMeta.FileSize,
+		ModifiedAt:              fileMeta.ModifiedAt,
+		SourceNzbPath:           fileMeta.SourceNzbPath,
+		Encryption:              fileMeta.Encryption,
+		Password:                fileMeta.Password,
+		Salt:                    fileMeta.Salt,
+		AesKey:                  fileMeta.AesKey,
+		AesIv:                   fileMeta.AesIv,
+		SegmentData:             fileMeta.SegmentData,
+		NestedSources:           fileMeta.NestedSources,
+		ClipBoundaries:          fileMeta.ClipBoundaries,
+		KnownHoles:              fileMeta.KnownHoles,
+		HoleProviderFingerprint: fileMeta.HoleProviderFingerprint,
 	}
 
 	fileCtx, cancel := context.WithCancel(ctx)
@@ -831,6 +832,9 @@ type fileHandleMeta struct {
 	// KnownHoles is the persisted hole map: segments confirmed missing on all
 	// providers, zero-filled during streaming without a fetch round-trip.
 	KnownHoles []*metapb.HoleRun
+	// HoleProviderFingerprint is the provider set KnownHoles were confirmed
+	// against; runs recorded under another set are re-probed rather than padded.
+	HoleProviderFingerprint string
 }
 
 // MetadataVirtualFile implements afero.File for metadata-backed virtual files

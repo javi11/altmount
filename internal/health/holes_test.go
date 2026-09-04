@@ -207,7 +207,7 @@ func TestHealthCheckMergesPersistedHoles(t *testing.T) {
 	// persisted holes with newly observed ones, not the threshold itself.
 	env.cfg.Health.AcceptableMissingSegmentsPercentage = 1
 	// Seed a persisted hole (as if playback padded it earlier).
-	require.NoError(t, env.ms.AddKnownHoles(env.filePath, []holes.Run{{Start: 5, Count: 1}}))
+	require.NoError(t, env.ms.AddKnownHoles(env.filePath, []holes.Run{{Start: 5, Count: 1}}, env.cfg.ProviderFingerprint()))
 	// A fresh check finds a different missing segment.
 	env.markSegmentMissing(20)
 

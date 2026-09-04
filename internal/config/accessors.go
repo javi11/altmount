@@ -1,6 +1,13 @@
 package config
 
-import "time"
+import (
+	"crypto/sha1"
+	"encoding/hex"
+	"fmt"
+	"sort"
+	"strings"
+	"time"
+)
 
 // Health config accessor methods with default fallbacks.
 // These methods provide safe access to health configuration values
@@ -139,6 +146,23 @@ func (c *Config) GetAcceptableMissingSegmentsPercentage() float64 {
 // providers are configured it falls back to the enabled backup providers' sum
 // so the capacity is not zero while a usable pool exists. Returns 0 when no
 // providers are configured at all.
+// ProviderFingerprint names the set of enabled providers: SHA-1 over the
+// sorted "host:port" list, first 8 bytes hex. Hole records are trusted only
+// under the fingerprint that recorded them, because "missing" is an answer
+// about particular servers.
+func (c *Config) ProviderFingerprint() string {
+	hosts := make([]string, 0, len(c.Providers))
+	for _, p := range c.Providers {
+		if p.Enabled != nil && !*p.Enabled {
+			continue
+		}
+		hosts = append(hosts, fmt.Sprintf("%s:%d", p.Host, p.Port))
+	}
+	sort.Strings(hosts)
+	sum := sha1.Sum([]byte(strings.Join(hosts, "\n")))
+	return hex.EncodeToString(sum[:8])
+}
+
 func (c *Config) TotalProviderConnections() int {
 	primary := 0
 	backup := 0

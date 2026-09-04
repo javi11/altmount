@@ -3,6 +3,7 @@ package nzbfilesystem
 import (
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/javi11/altmount/internal/holes"
 	"github.com/javi11/altmount/internal/metadata"
@@ -20,6 +21,9 @@ type holeMetaSnapshot struct {
 	fileSize      int64
 	sourceNzbPath string
 	totalSegments int
+	// fingerprint names the provider set this handle's holes are judged
+	// against; persisted with every run it records.
+	fingerprint string
 }
 
 // holeEligible reports whether this file's missing segments may be
@@ -56,8 +60,14 @@ func (mvf *MetadataVirtualFile) holeHooks() *usenet.HoleHooks {
 			}
 			return
 		}
+		fingerprint := ""
+		if mvf.configGetter != nil {
+			fingerprint = mvf.configGetter().ProviderFingerprint()
+		}
 		acc := &holes.Accumulator{}
-		acc.Load(metadata.KnownHolesFromProto(mvf.meta.KnownHoles))
+		// Only holes confirmed recently, and against the providers configured
+		// now, are replayed without a fetch; anything else is asked for again.
+		acc.Load(metadata.LiveKnownHoles(mvf.meta.KnownHoles, mvf.meta.HoleProviderFingerprint, fingerprint, time.Now()))
 		mvf.holeAcc = acc
 		// Snapshot before any detached download goroutine exists — see the
 		// holeMetaSnapshot doc comment for why onHole must not read mvf.meta.
@@ -65,6 +75,7 @@ func (mvf *MetadataVirtualFile) holeHooks() *usenet.HoleHooks {
 			fileSize:      mvf.meta.FileSize,
 			sourceNzbPath: mvf.meta.SourceNzbPath,
 			totalSegments: len(mvf.meta.SegmentData),
+			fingerprint:   fingerprint,
 		}
 		mvf.holeHooksVal = &usenet.HoleHooks{
 			OnHole:     mvf.onHole,
@@ -138,6 +149,7 @@ func (mvf *MetadataVirtualFile) onHole(segIndex int, segID string) holes.Decisio
 			longest:       longest,
 			totalSegments: mvf.holeMeta.totalSegments,
 			segBytes:      segBytes,
+			fingerprint:   mvf.holeMeta.fingerprint,
 		})
 	}
 	return holes.DecisionPad
