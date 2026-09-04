@@ -64,6 +64,18 @@ type activeCheck struct {
 }
 
 // HealthWorker manages continuous health monitoring and manual check requests
+// Par2RepairEnqueuer queues a file for background PAR2 repair (implemented by
+// par2repair.Service).
+type Par2RepairEnqueuer interface {
+	Enqueue(ctx context.Context, filePath string, failingSegmentID string)
+}
+
+// SetPar2RepairEnqueuer wires the PAR2 repair queue into the degraded-verdict
+// path. Call during boot, before the worker starts.
+func (hw *HealthWorker) SetPar2RepairEnqueuer(re Par2RepairEnqueuer) {
+	hw.par2Repair = re
+}
+
 type HealthWorker struct {
 	healthChecker       *HealthChecker
 	healthRepo          *database.HealthRepository
@@ -72,6 +84,7 @@ type HealthWorker struct {
 	importerService     importer.ImportService
 	configGetter        config.ConfigGetter
 	progressBroadcaster *progress.ProgressBroadcaster // optional, may be nil
+	par2Repair          Par2RepairEnqueuer            // optional, may be nil
 
 	// Worker state
 	status       WorkerStatus
@@ -119,6 +132,7 @@ func NewHealthWorker(
 		stopChan:            make(chan struct{}),
 		activeChecks:        make(map[string]*activeCheck),
 		directCheckTimeout:  defaultDirectCheckTimeout,
+		// par2Repair is wired post-construction via SetPar2RepairEnqueuer.
 		stats: WorkerStats{
 			Status: WorkerStatusStopped,
 		},
@@ -535,11 +549,17 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 		update.ScheduledCheckAt = nextCheck
 
 		sideEffect = func() error {
-			slog.InfoContext(ctx, "File degraded: missing segments are within padding caps, skipping repair",
+			slog.InfoContext(ctx, "File degraded: missing segments are within padding caps, skipping ARR repair",
 				"file_path", fh.FilePath,
 				"total_missing", event.Classification.TotalMissing,
 				"longest_run", event.Classification.LongestRun,
 				"next_check", nextCheck)
+			// Degraded damage is exactly what background PAR2 repair exists
+			// for: attempt to restore the zero-filled bytes byte-exact. The
+			// repair queue dedups; ARR replacement stays out of the picture.
+			if hw.par2Repair != nil {
+				hw.par2Repair.Enqueue(ctx, fh.FilePath, "")
+			}
 			return hw.metadataService.UpdateFileStatus(fh.FilePath, metapb.FileStatus_FILE_STATUS_DEGRADED)
 		}
 		return update, sideEffect
@@ -557,12 +577,19 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 	}
 
 	repairEnabled := hw.configGetter().GetRepairEnabled()
-	markCorruptedNoRepair := func() (*database.HealthStatusUpdate, func() error) {
+	// par2Fallback: whether the file may fall back to PAR2 repair after the ARR
+	// path yields nothing. Only valid while the file's metadata is still in
+	// place — files already in repair_triggered may have had their metadata
+	// moved to the safety folder, which a PAR2 repair cannot read.
+	markCorruptedNoRepair := func(par2Fallback bool) (*database.HealthStatusUpdate, func() error) {
 		update.Type = database.UpdateTypeCorrupted
 		update.Status = database.HealthStatusCorrupted
 		return update, func() error {
-			slog.InfoContext(ctx, "File corrupted but repair is disabled; marking corrupted without triggering repair",
+			slog.InfoContext(ctx, "File corrupted but ARR repair is disabled; marking corrupted without triggering repair",
 				"file_path", fh.FilePath, "status", fh.Status)
+			if par2Fallback {
+				hw.enqueuePar2Fallback(ctx, fh.FilePath)
+			}
 			return nil
 		}
 	}
@@ -570,7 +597,7 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 	switch fh.Status {
 	case database.HealthStatusRepairTriggered:
 		if !repairEnabled {
-			return markCorruptedNoRepair()
+			return markCorruptedNoRepair(false)
 		}
 		if fh.RepairRetryCount >= hw.configGetter().GetMaxRepairRetries() {
 			sideEffect = hw.markCorruptedRepairExhausted(ctx, fh, update, errorMsg)
@@ -616,9 +643,10 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 				return update, sideEffect
 			}
 
-			// Repair disabled: finalize as corrupted instead of triggering an Arr rescan.
+			// Repair disabled: finalize as corrupted instead of triggering an Arr
+			// rescan — PAR2 repair, when enabled, is the only remaining option.
 			if !repairEnabled {
-				return markCorruptedNoRepair()
+				return markCorruptedNoRepair(true)
 			}
 
 			update.Type = database.UpdateTypeRepairTrigger
@@ -640,6 +668,14 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 
 				outcome, err := hw.triggerFileRepair(ctx, fh, errorMsg, event.Details)
 				applyRepairOutcome(update, outcome, err)
+				if outcome == repairOutcomeCorrupted {
+					// Nothing found in the ARRs (no instance configured, path
+					// unmatched, or the trigger failed): the metadata was not
+					// moved, so PAR2 repair gets its turn. A successful repair
+					// flips the record back to healthy; a failed one confirms
+					// the corrupted verdict written above.
+					hw.enqueuePar2Fallback(ctx, fh.FilePath)
+				}
 				return nil
 			}
 		} else {
@@ -1433,6 +1469,22 @@ func (hw *HealthWorker) retriggerFileRepair(ctx context.Context, item *database.
 
 	slog.InfoContext(ctx, "Successfully re-triggered ARR rescan", "file_path", filePath)
 	return repairOutcomeTriggered, nil
+}
+
+// enqueuePar2Fallback queues a PAR2 repair for a file whose ARR repair came up
+// empty — nothing found in the ARRs (no instance tracks the file, or none is
+// configured) or ARR repair is disabled. Gated by par2_repair.arr_first
+// (default on) so the fallback can be switched off; a no-op while PAR2 repair
+// itself is disabled. Only called on paths where the file's metadata is still
+// in place — a repair cannot read metadata that an earlier successful ARR
+// trigger moved to the safety folder.
+func (hw *HealthWorker) enqueuePar2Fallback(ctx context.Context, filePath string) {
+	cfg := hw.configGetter().Par2Repair
+	if hw.par2Repair == nil || cfg.Enabled == nil || !*cfg.Enabled || !cfg.EffectiveArrFirst() {
+		return
+	}
+	slog.InfoContext(ctx, "Nothing found in ARR repair, falling back to PAR2 repair", "file_path", filePath)
+	hw.par2Repair.Enqueue(ctx, filePath, "")
 }
 
 func (hw *HealthWorker) ensureMetadata(ctx context.Context, item *database.FileHealth) *string {

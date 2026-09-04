@@ -67,6 +67,7 @@ func (m *mockPoolManager) SetImportConnCapacity(_ int)                 {}
 func (m *mockPoolManager) ImportConnCapacity() int                     { return 0 }
 func (m *mockPoolManager) SetStreamSource(_ pool.StreamActivitySource) {}
 func (m *mockPoolManager) NotifyStreamChange()                         {}
+func (m *mockPoolManager) StatSweepConcurrency(conservative int) int   { return conservative }
 
 // mockARRsService captures TriggerFileRescan calls and returns a configurable error.
 type mockARRsService struct {
@@ -74,6 +75,8 @@ type mockARRsService struct {
 	calls     []triggerCall
 	returnErr error
 }
+
+func (m *mockPoolManager) SetStreamHeadroom(int) {}
 
 type triggerCall struct {
 	pathForRescan string
@@ -177,7 +180,7 @@ func newRepairTestEnvWithPool(t *testing.T, tempDir string, arrsErr error, poolM
 	cfg.Health.MaxConcurrentJobs = 1
 	cfg.Health.CheckIntervalSeconds = 3600
 	cfg.Health.SegmentSamplePercentage = 10
-	cfg.Health.MaxConnectionsForHealthChecks = 1
+	cfg.Health.MaxConcurrentSegmentChecks = ptr(1)
 
 	for _, fn := range configure {
 		fn(cfg)
@@ -578,3 +581,6 @@ func TestE2E_FileRepairTriggered_ARRReturnsPathNotFound(t *testing.T) {
 	require.NoError(t, readErr)
 	assert.NotNil(t, original, "metadata must be preserved when ARR returns ErrPathMatchFailed")
 }
+
+// ptr returns a pointer to v, for config fields that distinguish unset from zero.
+func ptr[T any](v T) *T { return &v }

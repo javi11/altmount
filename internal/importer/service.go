@@ -169,6 +169,62 @@ func isFileAlreadyProcessed(metadataService *metadata.MetadataService, filePath 
 	return false
 }
 
+// SetRepairEnqueuer wires the PAR2 repair queue into the import processor so
+// degraded imports can queue a repair. Call during boot.
+func (s *Service) SetRepairEnqueuer(re RepairEnqueuer) {
+	if s.processor != nil {
+		s.processor.SetRepairEnqueuer(re)
+	}
+}
+
+// ResumeWaitingRepair returns an import parked pending a PAR2 repair to the
+// pending queue, so the normal worker retries it — this time with the repaired
+// articles available from the local patch store.
+func (s *Service) ResumeWaitingRepair(ctx context.Context, nzbPath string) error {
+	item, err := s.database.Repository.GetQueueItemByNzbPath(ctx, nzbPath)
+	if err != nil {
+		return err
+	}
+	if item == nil || item.Status != database.QueueStatusWaitingRepair {
+		return nil
+	}
+	if err := s.database.Repository.UpdateQueueItemStatus(ctx, item.ID, database.QueueStatusPending, nil); err != nil {
+		return err
+	}
+	if s.broadcaster != nil {
+		s.broadcaster.BroadcastQueueChanged()
+	}
+	return nil
+}
+
+// FailWaitingRepair fails a parked import whose repair proved impossible,
+// which is the outcome it would have had before deferral existed.
+func (s *Service) FailWaitingRepair(ctx context.Context, nzbPath string, reason string) error {
+	item, err := s.database.Repository.GetQueueItemByNzbPath(ctx, nzbPath)
+	if err != nil {
+		return err
+	}
+	if item == nil || item.Status != database.QueueStatusWaitingRepair {
+		return nil
+	}
+	msg := "PAR2 repair could not rebuild the missing articles: " + reason
+	if err := s.database.Repository.UpdateQueueItemStatus(ctx, item.ID, database.QueueStatusFailed, &msg); err != nil {
+		return err
+	}
+	if s.broadcaster != nil {
+		s.broadcaster.NotifyComplete(int(item.ID), string(database.QueueStatusFailed))
+		s.broadcaster.BroadcastQueueChanged()
+	}
+	return nil
+}
+
+// SetPatchIndex wires the PAR2 patch store into the import availability sweep.
+func (s *Service) SetPatchIndex(idx validation.PatchIndex) {
+	if s.processor != nil {
+		s.processor.SetPatchIndex(idx)
+	}
+}
+
 // GetPostProcessor returns the post-processor coordinator
 func (s *Service) GetPostProcessor() *postprocessor.Coordinator {
 	return s.postProcessor
@@ -1389,35 +1445,52 @@ func (s *Service) OnItemClaimed(ctx context.Context, item *database.ImportQueueI
 
 // cleanupWrittenPaths deletes metadata files/directories written during a failed import,
 // along with any health records already scheduled for them.
-// Paths prefixed with "DIR:" indicate a whole directory should be removed; others are individual files.
+// Paths prefixed with "DIR:" indicate a directory that should be removed if empty; others are individual files.
 func (s *Service) cleanupWrittenPaths(ctx context.Context, itemID int64, paths []string) {
+	// Files first: a release folder is only ever removed once this job's own
+	// files are gone, so what remains in it belongs to another import.
+	var dirPaths []string
 	for _, p := range paths {
 		if after, ok := strings.CutPrefix(p, "DIR:"); ok {
-			dirPath := after
-			if delErr := s.metadataService.DeleteDirectory(dirPath); delErr != nil {
-				s.log.WarnContext(ctx, "Failed to clean up metadata directory after import failure",
-					"queue_id", itemID,
-					"dir", dirPath,
-					"error", delErr)
-			} else {
-				s.log.DebugContext(ctx, "Cleaned up metadata directory after import failure",
-					"queue_id", itemID,
-					"dir", dirPath)
-			}
-			s.cleanupHealthRecords(ctx, itemID, dirPath)
-		} else {
-			if delErr := s.metadataService.DeleteFileMetadata(ctx, p); delErr != nil {
-				s.log.WarnContext(ctx, "Failed to clean up metadata file after import failure",
-					"queue_id", itemID,
-					"path", p,
-					"error", delErr)
-			} else {
-				s.log.DebugContext(ctx, "Cleaned up metadata file after import failure",
-					"queue_id", itemID,
-					"path", p)
-			}
-			s.cleanupHealthRecords(ctx, itemID, p)
+			dirPaths = append(dirPaths, after)
+			continue
 		}
+
+		if delErr := s.metadataService.DeleteFileMetadata(ctx, p); delErr != nil {
+			s.log.WarnContext(ctx, "Failed to clean up metadata file after import failure",
+				"queue_id", itemID,
+				"path", p,
+				"error", delErr)
+		} else {
+			s.log.DebugContext(ctx, "Cleaned up metadata file after import failure",
+				"queue_id", itemID,
+				"path", p)
+		}
+		s.cleanupHealthRecords(ctx, itemID, p)
+	}
+
+	for _, dirPath := range dirPaths {
+		delErr := s.metadataService.DeleteDirectoryIfEmpty(dirPath)
+		switch {
+		case errors.Is(delErr, metadata.ErrDirectoryNotEmpty):
+			// A concurrent import still owns files here. Its health records live
+			// under the same prefix, so leave them alone too.
+			s.log.DebugContext(ctx, "Preserved metadata directory after import failure (contains files from another import)",
+				"queue_id", itemID,
+				"dir", dirPath)
+			continue
+		case delErr != nil:
+			s.log.WarnContext(ctx, "Failed to clean up metadata directory after import failure",
+				"queue_id", itemID,
+				"dir", dirPath,
+				"error", delErr)
+			continue
+		}
+
+		s.log.DebugContext(ctx, "Cleaned up empty metadata directory after import failure",
+			"queue_id", itemID,
+			"dir", dirPath)
+		s.cleanupHealthRecords(ctx, itemID, dirPath)
 	}
 }
 
@@ -1455,6 +1528,26 @@ func (s *Service) cleanupHealthRecords(ctx context.Context, itemID int64, virtua
 
 // handleProcessingFailure handles when processing fails
 func (s *Service) handleProcessingFailure(ctx context.Context, item *database.ImportQueueItem, processingErr error) {
+	// A deferral is not a failure: the release is parked while a PAR2 repair
+	// rebuilds its missing articles. The repair service returns it to pending
+	// on success, or fails it when the damage proves unrepairable.
+	if errors.Is(processingErr, ErrDeferredForRepair) {
+		msg := "waiting for PAR2 repair to rebuild missing articles"
+		if err := s.database.Repository.UpdateQueueItemStatus(ctx, item.ID, database.QueueStatusWaitingRepair, &msg); err != nil {
+			s.log.ErrorContext(ctx, "Failed to park item pending repair", "queue_id", item.ID, "error", err)
+			return
+		}
+		// Tell the UI: without this the row keeps showing its last progress
+		// stage until the user reloads the page.
+		if s.broadcaster != nil {
+			s.broadcaster.NotifyComplete(int(item.ID), string(database.QueueStatusWaitingRepair))
+			s.broadcaster.BroadcastQueueChanged()
+		}
+		s.log.InfoContext(ctx, "Import parked pending PAR2 repair",
+			"queue_id", item.ID, "file", item.NzbPath)
+		return
+	}
+
 	errorMessage := processingErr.Error()
 	if errors.Is(processingErr, validation.ErrFastFailInconclusive) {
 		// The provider never produced a conclusive answer within the validator's

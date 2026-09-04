@@ -130,7 +130,14 @@ func (sz *sevenZipProcessor) AnalyzeSevenZipContentFromNzb(ctx context.Context, 
 	// 7zip part files directly from Usenet without downloading. Header analysis only
 	// reads initial volume headers, so prefetch is capped at 1.
 	headerAnalysisPrefetch := 1
-	ufs := filesystem.NewUsenetFileSystem(ctx, sz.poolManager, sortedFiles, headerAnalysisPrefetch, progressTracker, readTimeout)
+	// Import-scoped segment cache: sevenzip.OpenReader drives the filesystem
+	// purely through ReadAt, which builds a brand-new UsenetReader per call
+	// (see UsenetFile.ReadAt) — without a shared cache, every central-directory
+	// or header probe that revisits an already-fetched segment re-downloads it.
+	// Bounded and released (by dropping the reference) when this pass returns.
+	segStore := filesystem.NewImportSegmentCache(0)
+	defer segStore.LogStats(ctx, sz.log, "7z-header")
+	ufs := filesystem.NewUsenetFileSystem(ctx, sz.poolManager, sortedFiles, headerAnalysisPrefetch, progressTracker, readTimeout, segStore)
 
 	// Extract filenames for first part detection
 	fileNames := make([]string, len(sortedFiles))
@@ -910,7 +917,10 @@ func (sz *sevenZipProcessor) processNestedRarContent(ctx context.Context, innerR
 	// Create filesystem for reading inner RAR volumes.
 	// Header analysis only reads initial volume headers, so prefetch is capped at 1.
 	headerAnalysisPrefetch := 1
-	dfs := filesystem.NewDecryptingFileSystem(ctx, sz.poolManager, entries, headerAnalysisPrefetch, readTimeout)
+	// Import-scoped segment cache, private to this nested-RAR analysis pass.
+	segStore := filesystem.NewImportSegmentCache(0)
+	defer segStore.LogStats(ctx, sz.log, "7z-nested")
+	dfs := filesystem.NewDecryptingFileSystem(ctx, sz.poolManager, entries, headerAnalysisPrefetch, readTimeout, segStore)
 
 	// Find the first inner RAR part
 	fileNames := make([]string, len(innerRarContents))

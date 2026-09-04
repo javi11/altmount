@@ -35,14 +35,14 @@ type tvmazeLookupResponse struct {
 // failure — callers must treat nil as "no aliases known".
 var seriesTitleAliasesCache seriesMetadataCache[[]string]
 
-func resolveSeriesTitleAliases(ctx context.Context, imdbID string) []string {
+func resolveSeriesTitleAliases(ctx context.Context, imdbID, userAgent string) []string {
 	if imdbID == "" {
 		return nil
 	}
 	if cached, ok := seriesTitleAliasesCache.get(imdbID); ok {
 		return cached
 	}
-	showID, err := tvmazeShowIDForIMDb(ctx, imdbID)
+	showID, err := tvmazeShowIDForIMDb(ctx, imdbID, userAgent)
 	if err != nil || showID <= 0 {
 		return cacheAliasMiss(imdbID)
 	}
@@ -52,7 +52,7 @@ func resolveSeriesTitleAliases(ctx context.Context, imdbID string) []string {
 		return cacheAliasMiss(imdbID)
 	}
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "altmount-stremio-tvdb-lookup")
+	req.Header.Set("User-Agent", userAgent)
 	resp, err := tvMetadataLookupClient.Do(req)
 	if err != nil {
 		return cacheAliasMiss(imdbID)
@@ -108,14 +108,14 @@ func (m seriesEpisodeMeta) absoluteFor(season, episode int) int {
 
 var seriesEpisodeMetaCache seriesMetadataCache[seriesEpisodeMeta]
 
-func resolveSeriesEpisodeMeta(ctx context.Context, imdbID string) seriesEpisodeMeta {
+func resolveSeriesEpisodeMeta(ctx context.Context, imdbID, userAgent string) seriesEpisodeMeta {
 	if imdbID == "" {
 		return seriesEpisodeMeta{}
 	}
 	if cached, ok := seriesEpisodeMetaCache.get(imdbID); ok {
 		return cached
 	}
-	showID, metaType, err := tvmazeShowForIMDb(ctx, imdbID)
+	showID, metaType, err := tvmazeShowForIMDb(ctx, imdbID, userAgent)
 	if err != nil || showID <= 0 {
 		return cacheEpisodeMetaMiss(imdbID)
 	}
@@ -126,7 +126,7 @@ func resolveSeriesEpisodeMeta(ctx context.Context, imdbID string) seriesEpisodeM
 		return cacheEpisodeMetaMiss(imdbID)
 	}
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "altmount-stremio-tvdb-lookup")
+	req.Header.Set("User-Agent", userAgent)
 	resp, err := tvMetadataLookupClient.Do(req)
 	if err != nil {
 		return cacheEpisodeMetaMiss(imdbID)
@@ -163,14 +163,14 @@ func resolveSeriesEpisodeMeta(ctx context.Context, imdbID string) seriesEpisodeM
 	return meta
 }
 
-func tvmazeShowForIMDb(ctx context.Context, imdbID string) (showID int, showType string, err error) {
+func tvmazeShowForIMDb(ctx context.Context, imdbID, userAgent string) (showID int, showType string, err error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		tvmazeBaseURL+"/lookup/shows?imdb="+url.QueryEscape(imdbID), nil)
 	if err != nil {
 		return 0, "", err
 	}
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "altmount-stremio-tvdb-lookup")
+	req.Header.Set("User-Agent", userAgent)
 	resp, err := tvMetadataLookupClient.Do(req)
 	if err != nil {
 		return 0, "", err
@@ -186,8 +186,8 @@ func tvmazeShowForIMDb(ctx context.Context, imdbID string) (showID int, showType
 	return data.ID, data.Type, nil
 }
 
-func tvmazeShowIDForIMDb(ctx context.Context, imdbID string) (int, error) {
-	id, _, err := tvmazeShowForIMDb(ctx, imdbID)
+func tvmazeShowIDForIMDb(ctx context.Context, imdbID, userAgent string) (int, error) {
+	id, _, err := tvmazeShowForIMDb(ctx, imdbID, userAgent)
 	return id, err
 }
 
@@ -199,7 +199,7 @@ type cinemetaLookupResponse struct {
 }
 
 // resolveSeriesMetadataFromIMDb resolves both TVDB ID and series title from an IMDb ID.
-func resolveSeriesMetadataFromIMDb(ctx context.Context, imdbID string) (tvdbID, title string, err error) {
+func resolveSeriesMetadataFromIMDb(ctx context.Context, imdbID, userAgent string) (tvdbID, title string, err error) {
 	if imdbID == "" {
 		return "", "", nil
 	}
@@ -213,7 +213,7 @@ func resolveSeriesMetadataFromIMDb(ctx context.Context, imdbID string) (tvdbID, 
 	)
 	if err == nil {
 		req.Header.Set("Accept", "application/json")
-		req.Header.Set("User-Agent", "altmount-stremio-tvdb-lookup")
+		req.Header.Set("User-Agent", userAgent)
 
 		if resp, err := tvMetadataLookupClient.Do(req); err == nil {
 			defer resp.Body.Close()
@@ -241,7 +241,7 @@ func resolveSeriesMetadataFromIMDb(ctx context.Context, imdbID string) (tvdbID, 
 	)
 	if err == nil {
 		req.Header.Set("Accept", "application/json")
-		req.Header.Set("User-Agent", "altmount-stremio-tvdb-lookup")
+		req.Header.Set("User-Agent", userAgent)
 
 		if resp, err := tvMetadataLookupClient.Do(req); err == nil {
 			defer resp.Body.Close()
@@ -269,7 +269,7 @@ type cinemetaMovieLookupResponse struct {
 }
 
 // resolveMovieMetadataFromIMDb resolves TMDB ID, movie title, and release year from an IMDb ID.
-func resolveMovieMetadataFromIMDb(ctx context.Context, imdbID string) (tmdbID int, title string, year string, err error) {
+func resolveMovieMetadataFromIMDb(ctx context.Context, imdbID, userAgent string) (tmdbID int, title string, year string, err error) {
 	if imdbID == "" {
 		return 0, "", "", nil
 	}
@@ -284,7 +284,7 @@ func resolveMovieMetadataFromIMDb(ctx context.Context, imdbID string) (tmdbID in
 		return 0, "", "", err
 	}
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "altmount-stremio-movie-lookup")
+	req.Header.Set("User-Agent", userAgent)
 
 	resp, err := tvMetadataLookupClient.Do(req)
 	if err != nil {

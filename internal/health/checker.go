@@ -410,6 +410,22 @@ func (hc *HealthChecker) CheckFile(ctx context.Context, filePath string, opts ..
 	return hc.judgeValidation(ctx, prep, result, err)
 }
 
+// statSweepConcurrency picks the sweep's in-flight STAT bound. An explicit
+// max_concurrent_segment_checks setting is the operator's hard cap and always
+// wins; otherwise the pool manager adapts between the conservative
+// single-connection depth (while streams are active) and the pool's aggregate
+// STAT pipeline capacity (when idle).
+//
+// The adaptive path used to be unreachable: the legacy knob defaulted to 100 and
+// validation rejected <= 0, so the operator branch always won and health sweeps
+// neither narrowed for playback nor widened on an idle pool. 0 now means adapt.
+func (hc *HealthChecker) statSweepConcurrency(cfg *config.Config) int {
+	if n := cfg.GetMaxConcurrentSegmentChecks(); n > 0 {
+		return n
+	}
+	return hc.poolManager.StatSweepConcurrency(cfg.StatConcurrency())
+}
+
 // batchOptions builds the sweep configuration for a set of prepared checks,
 // including the fast-fail policy. A file stops consuming stats as soon as its
 // confirmed missing segments irreversibly exceed the configured
@@ -426,7 +442,7 @@ func (hc *HealthChecker) batchOptions(preps []preparedCheck) usenet.BatchOptions
 	acceptable := cfg.GetAcceptableMissingSegmentsPercentage()
 
 	return usenet.BatchOptions{
-		MaxConnections: cfg.GetMaxConnectionsForHealthChecks(),
+		MaxConnections: hc.statSweepConcurrency(cfg),
 		Timeout:        cfg.GetHealthReadTimeout(),
 		ShouldStop: func(fileIdx int, result usenet.ValidationResult) bool {
 			if fileIdx >= len(preps) {

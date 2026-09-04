@@ -340,4 +340,3 @@ func TestGroupHasVolumeGap_NoR00Convention(t *testing.T) {
 		t.Errorf("groupHasVolumeGap with missing r02 = false, want true")
 	}
 }
-

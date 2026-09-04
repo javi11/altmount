@@ -162,6 +162,34 @@ func TestValidate_HealthVerifyContentTimeoutSeconds(t *testing.T) {
 	}
 }
 
+func TestDefaultConfig_MaxDownloadPrefetchMatches(t *testing.T) {
+	c := DefaultConfig()
+	got := c.GetMaxDownloadPrefetch()
+	if got != DefaultMaxDownloadPrefetch {
+		t.Errorf("DefaultConfig().GetMaxDownloadPrefetch() = %d, want %d (DefaultMaxDownloadPrefetch)", got, DefaultMaxDownloadPrefetch)
+	}
+}
+
+func TestGetMaxDownloadPrefetch_FallbackOnNonPositive(t *testing.T) {
+	for _, val := range []int{0, -1, -10} {
+		c := &Config{}
+		c.Import.MaxDownloadPrefetch = val
+		got := c.GetMaxDownloadPrefetch()
+		if got != DefaultMaxDownloadPrefetch {
+			t.Errorf("value=%d: GetMaxDownloadPrefetch() = %d, want %d fallback", val, got, DefaultMaxDownloadPrefetch)
+		}
+	}
+}
+
+func TestGetMaxDownloadPrefetch_ReturnsPositiveValue(t *testing.T) {
+	c := &Config{}
+	c.Import.MaxDownloadPrefetch = 25
+	got := c.GetMaxDownloadPrefetch()
+	if got != 25 {
+		t.Errorf("GetMaxDownloadPrefetch() = %d, want 25", got)
+	}
+}
+
 func TestStatConcurrency(t *testing.T) {
 	enabled := true
 	disabled := false
@@ -226,35 +254,5 @@ func TestStatConcurrency(t *testing.T) {
 				t.Fatalf("StatConcurrency() = %d, want %d", got, tt.want)
 			}
 		})
-	}
-}
-
-// A connection count and a STAT pipeline depth are different quantities:
-// stat_inflight_requests is how many checks nntppool pipelines down ONE
-// connection, so deriving a connection budget from it reports a number that
-// has nothing to do with how many connections exist.
-func TestGetMaxConnectionsForHealthChecks_FollowsProviderConnectionsWhenUnset(t *testing.T) {
-	enabled := true
-	cfg := &Config{Providers: []ProviderConfig{
-		{MaxConnections: 10, StatInflightRequests: 250, Enabled: &enabled},
-	}}
-
-	if got := cfg.GetMaxConnectionsForHealthChecks(); got != 10 {
-		t.Fatalf("GetMaxConnectionsForHealthChecks() = %d, want 10 (the providers' connection count)", got)
-	}
-
-	cfg.Health.MaxConnectionsForHealthChecks = 30
-	if got := cfg.GetMaxConnectionsForHealthChecks(); got != 30 {
-		t.Fatalf("GetMaxConnectionsForHealthChecks() = %d, want 30 (explicit setting wins)", got)
-	}
-}
-
-// TotalProviderConnections returns 0 when nothing is configured. Passing that
-// through would collapse a health sweep to a chunk size of 1.
-func TestGetMaxConnectionsForHealthChecks_FloorsWhenNoProviders(t *testing.T) {
-	cfg := &Config{}
-
-	if got := cfg.GetMaxConnectionsForHealthChecks(); got != defaultHealthCheckConnections {
-		t.Fatalf("GetMaxConnectionsForHealthChecks() = %d, want %d", got, defaultHealthCheckConnections)
 	}
 }

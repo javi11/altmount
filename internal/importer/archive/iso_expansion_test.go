@@ -46,15 +46,15 @@ func TestParseDiscNumber(t *testing.T) {
 	t.Parallel()
 
 	cases := map[string]int{
-		"1":     1,
-		"2":     2,
-		"10":    10,
-		"A":     1,
-		"a":     1,
-		"B":     2,
-		"":      0,
-		"AB":    0,
-		"foo":   0,
+		"1":   1,
+		"2":   2,
+		"10":  10,
+		"A":   1,
+		"a":   1,
+		"B":   2,
+		"":    0,
+		"AB":  0,
+		"foo": 0,
 	}
 	for in, want := range cases {
 		if got := parseDiscNumber(in); got != want {

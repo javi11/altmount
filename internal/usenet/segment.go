@@ -82,6 +82,12 @@ func (r *segmentRange) GetSegment(index int) (*segment, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	// Re-check bounds: a concurrent Clear() may have nil-ed the slice
+	// between releasing the read lock and acquiring the write lock.
+	if index >= len(r.segments) {
+		return nil, ErrSegmentLimit
+	}
+
 	// Double-check after acquiring write lock.
 	if r.segments[index] != nil {
 		return r.segments[index], nil

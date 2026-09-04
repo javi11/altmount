@@ -145,15 +145,18 @@ type ProviderAPIResponse struct {
 
 // ImportAPIResponse handles Import config for API responses
 type ImportAPIResponse struct {
-	MaxProcessorWorkers            int                   `json:"max_processor_workers"`
-	QueueProcessingIntervalSeconds int                   `json:"queue_processing_interval_seconds"` // Interval in seconds
-	AllowedFileExtensions          []string              `json:"allowed_file_extensions"`
-	MaxDownloadPrefetch            int                   `json:"max_download_prefetch"`
-	ReadTimeoutSeconds             int                   `json:"read_timeout_seconds"`
-	SegmentSamplePercentage        int                   `json:"segment_sample_percentage"` // Percentage of segments to check (1-100)
-	ImportStrategy                 config.ImportStrategy `json:"import_strategy"`
-	ImportDir                      *string               `json:"import_dir"`
-	WatchDir                       *string               `json:"watch_dir"`
+	MaxProcessorWorkers            int      `json:"max_processor_workers"`
+	QueueProcessingIntervalSeconds int      `json:"queue_processing_interval_seconds"` // Interval in seconds
+	AllowedFileExtensions          []string `json:"allowed_file_extensions"`
+	MaxDownloadPrefetch            int      `json:"max_download_prefetch"`
+	// StreamHeadroomConnections is nil when the reservation derives from pool
+	// size, and an explicit 0 when the operator has disabled it entirely.
+	StreamHeadroomConnections *int                  `json:"stream_headroom_connections,omitempty"`
+	ReadTimeoutSeconds        int                   `json:"read_timeout_seconds"`
+	SegmentSamplePercentage   int                   `json:"segment_sample_percentage"` // Percentage of segments to check (1-100)
+	ImportStrategy            config.ImportStrategy `json:"import_strategy"`
+	ImportDir                 *string               `json:"import_dir"`
+	WatchDir                  *string               `json:"watch_dir"`
 
 	WatchIntervalSeconds     *int  `json:"watch_interval_seconds,omitempty"`
 	AllowNestedRarExtraction *bool `json:"allow_nested_rar_extraction,omitempty"`
@@ -556,6 +559,7 @@ func ToImportAPIResponse(importConfig config.ImportConfig) ImportAPIResponse {
 		QueueProcessingIntervalSeconds: importConfig.QueueProcessingIntervalSeconds,
 		AllowedFileExtensions:          importConfig.AllowedFileExtensions,
 		MaxDownloadPrefetch:            importConfig.MaxDownloadPrefetch,
+		StreamHeadroomConnections:      importConfig.StreamHeadroomConnections,
 		ReadTimeoutSeconds:             importConfig.ReadTimeoutSeconds,
 		SegmentSamplePercentage:        importConfig.SegmentSamplePercentage,
 		ImportStrategy:                 importConfig.ImportStrategy,

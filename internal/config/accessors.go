@@ -22,35 +22,11 @@ func (c *Config) GetMaxConcurrentJobs() int {
 	return c.Health.MaxConcurrentJobs
 }
 
-// defaultHealthCheckConnections is the fallback when no providers are
-// configured, since TotalProviderConnections reports 0 in that case and a
-// health sweep would otherwise collapse to a chunk size of 1.
-const defaultHealthCheckConnections = 100
-
-// GetMaxConnectionsForHealthChecks returns how wide one health sweep asks to
-// run. When unset it follows the enabled providers' connection count.
-//
-// This is deliberately NOT StatConcurrency: that is the depth nntppool
-// pipelines STATs down a single connection, a different quantity entirely, and
-// sizing a connection budget from it reports a number unrelated to how many
-// connections exist. The two are consumed separately — this bounds one sweep,
-// StatConcurrency bounds the pool-wide STAT budget the sweeps are admitted
-// against.
-func (c *Config) GetMaxConnectionsForHealthChecks() int {
-	if c.Health.MaxConnectionsForHealthChecks > 0 {
-		return c.Health.MaxConnectionsForHealthChecks
-	}
-	if n := c.TotalProviderConnections(); n > 0 {
-		return n
-	}
-	return defaultHealthCheckConnections
-}
-
 // GetCheckBatchSize returns how many due files each health cycle fetches and
 // sweeps together in one cross-file StatMany call, with a default fallback.
-// Distinct from GetMaxConnectionsForHealthChecks: this bounds how many FILES
-// are batched into one sweep, while that bounds how many segment checks run
-// concurrently within a sweep.
+// Distinct from HealthStatConcurrency: this bounds how many FILES are batched
+// into one sweep, while that bounds how many segment checks run concurrently
+// within a sweep.
 func (c *Config) GetCheckBatchSize() int {
 	if c.Health.CheckBatchSize <= 0 {
 		return 50 // Default: 50 files per cycle
@@ -236,10 +212,75 @@ func (c *Config) GetMaxConcurrentImports() int {
 	return c.Import.MaxConcurrentImports
 }
 
+// GetMaxConcurrentSegmentChecks returns the operator's hard cap on in-flight
+// STAT checks during a health sweep, or 0 meaning "let the pool adapt".
+func (c *Config) GetMaxConcurrentSegmentChecks() int {
+	if c.Health.MaxConcurrentSegmentChecks == nil {
+		return 0
+	}
+	if n := *c.Health.MaxConcurrentSegmentChecks; n > 0 {
+		return n
+	}
+	return 0
+}
+
+// GetStreamHeadroomConnections returns the per-stream import reservation:
+// an explicit setting when present, otherwise a value derived from the pool size.
+func (c *Config) GetStreamHeadroomConnections() int {
+	if c.Import.StreamHeadroomConnections != nil {
+		if n := *c.Import.StreamHeadroomConnections; n > 0 {
+			return n
+		}
+		return 0 // explicitly disabled
+	}
+	return DefaultStreamHeadroom(c.TotalProviderConnections())
+}
+
+const (
+	// streamHeadroomFraction makes the default reservation a fixed SHARE of the
+	// pool rather than a fixed count. The cost of a reservation is the fraction
+	// of the pool it removes, so an absolute default cannot be right at more
+	// than one pool size: 8 connections is 8% of a 100-connection pool but 80%
+	// of a 10-connection one.
+	streamHeadroomFraction = 4
+
+	// minStreamHeadroom keeps a small pool's reservation meaningful without
+	// letting it dominate: at 8 connections or fewer the fraction would round
+	// toward nothing.
+	minStreamHeadroom = 2
+)
+
+// DefaultStreamHeadroom derives the per-stream import reservation from the
+// pool's connection count.
+//
+// On a saturated link the pool holds slack — connections that are not
+// converting into bytes because the wire, not the pool, is the limit — and
+// handing that slack to playback is close to free. Measured at 100 connections
+// behind a 400 MB/s ceiling: a reservation of 8 cost nothing (import 357 vs
+// 359 MB/s) for stream p50 190ms -> 179ms, and 32 cost 7-13% import throughput
+// during playback only for p50 147ms and p99 245ms -> 170ms.
+//
+// A quarter of the pool sits between those and, crucially, costs the same share
+// at every pool size. How much slack actually exists depends on the link rate,
+// which cannot be known statically — a small pool on a fast line has little, and
+// will pay something real for this. Set stream_headroom_connections explicitly
+// to override, or 0 to disable.
+func DefaultStreamHeadroom(connections int) int {
+	h := connections / streamHeadroomFraction
+	if h < minStreamHeadroom {
+		return minStreamHeadroom
+	}
+	return h
+}
+
+// DefaultMaxDownloadPrefetch is the default number of segments to prefetch ahead
+// during archive analysis and expansion. Must match the value in DefaultConfig.
+const DefaultMaxDownloadPrefetch = 10
+
 // GetMaxDownloadPrefetch returns max download prefetch with a default fallback.
 func (c *Config) GetMaxDownloadPrefetch() int {
 	if c.Import.MaxDownloadPrefetch <= 0 {
-		return 3 // Default: 3 segments prefetched ahead
+		return DefaultMaxDownloadPrefetch
 	}
 	return c.Import.MaxDownloadPrefetch
 }

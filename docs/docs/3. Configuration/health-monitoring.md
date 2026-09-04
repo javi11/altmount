@@ -84,7 +84,7 @@ Only a confirmed *article not found* response (NNTP 430/423) counts toward the t
 | Sync Interval | 360 min | Library sync frequency (0 = disabled) |
 | Health Check Loop | 5s | Worker polling interval |
 | Sync Concurrency | 5 | Parallel workers during sync |
-| Health Connections | 5 | NNTP connections for checks |
+| Max Concurrent Segment Checks | Adaptive | Upper bound on in-flight STAT checks during a health sweep. Leave at 0/unset to let the pool adapt (narrows while a stream is playing, widens to the pool's full STAT capacity when idle); set a positive number to pin a hard cap. |
 
 ---
 
@@ -287,7 +287,7 @@ health:
   library_dir: "/path/to/library"
   cleanup_orphaned_metadata: false
   check_interval_seconds: 5
-  max_connections_for_health_checks: 5
+  max_concurrent_segment_checks: 0 # 0/unset = adapt to stream activity (default); a positive number pins a hard cap. Renamed from max_connections_for_health_checks, which is migrated automatically.
   max_concurrent_jobs: 1
   segment_sample_percentage: 5
   library_sync_interval_minutes: 360

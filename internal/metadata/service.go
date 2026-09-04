@@ -2,6 +2,7 @@ package metadata
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -22,6 +23,10 @@ const (
 	// defaultMetadataCacheSize is the max number of file metadata entries to cache.
 	defaultMetadataCacheSize = 4096
 )
+
+// ErrDirectoryNotEmpty reports that DeleteDirectoryIfEmpty left a directory in place
+// because it still held entries.
+var ErrDirectoryNotEmpty = errors.New("metadata directory not empty")
 
 // metaMagicV3 is a 5-byte magic prefix prepended to v3 .meta files.
 // The leading 0x00 byte is an invalid proto tag byte, so v1 files (raw proto,
@@ -847,33 +852,11 @@ func (ms *MetadataService) DeleteDirectory(virtualPath string) error {
 	virtualPath = normalizeVirtualPath(virtualPath)
 	ctx := context.Background()
 
-	// Purge all cached entries under this directory.
-	//
-	// The prefix is built with a literal "/" rather than filepath.Separator
-	// because cache keys are normalized paths and normalizeVirtualPath always
-	// emits forward slashes. On Windows the separator is "\", so the prefix
-	// would be "movies\" against keys like "movies/file.mkv" and the purge
-	// would quietly match nothing at all.
-	//
-	// Trailing separators are trimmed for the same reason: "movies/" would
-	// otherwise produce "movies//" and match no key, leaving cached entries
-	// behind for files that are about to be deleted. A later read of one of
-	// them would be served stale metadata for a file that no longer exists.
-	if cacheDir := strings.TrimRight(virtualPath, "/"); cacheDir != "" {
-		prefix := cacheDir + "/"
-		for _, key := range ms.liteCache.Keys() {
-			if key == cacheDir || strings.HasPrefix(key, prefix) {
-				ms.liteCache.Remove(key)
-			}
-		}
-	}
+	ms.purgeCachedTree(virtualPath)
 
 	metadataDir := ms.metaDirPath(virtualPath)
-
-	// HARD SAFETY: Never delete the root metadata path
-	cleanMetadataDir := filepath.Clean(metadataDir)
-	if cleanMetadataDir == filepath.Clean(ms.rootPath) || cleanMetadataDir == "/" || cleanMetadataDir == "." {
-		return fmt.Errorf("safety block: refusing to remove root metadata directory: %s", cleanMetadataDir)
+	if err := ms.assertNotRootDir(metadataDir); err != nil {
+		return err
 	}
 
 	// Pre-pass: if refcounting is enabled, collect all v3 store refs before deletion.
@@ -924,6 +907,80 @@ func (ms *MetadataService) DeleteDirectory(virtualPath string) error {
 	}
 
 	return nil
+}
+
+// DeleteDirectoryIfEmpty deletes a metadata directory only if it holds no files or subdirectories,
+// so a release folder shared with a concurrent import is never removed from under it.
+// Returns ErrDirectoryNotEmpty when the directory was preserved for that reason.
+func (ms *MetadataService) DeleteDirectoryIfEmpty(virtualPath string) error {
+	metadataDir := filepath.Join(ms.rootPath, virtualPath)
+	if err := ms.assertNotRootDir(metadataDir); err != nil {
+		return err
+	}
+
+	if err := os.Remove(metadataDir); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		// rmdir reports a non-empty directory with a platform-specific errno
+		// (ENOTEMPTY, EEXIST, or ERROR_DIR_NOT_EMPTY), so probe the directory
+		// instead of matching them.
+		if notEmpty, probeErr := dirHasEntries(metadataDir); probeErr == nil && notEmpty {
+			return ErrDirectoryNotEmpty
+		}
+		return fmt.Errorf("failed to delete metadata directory: %w", err)
+	}
+
+	ms.purgeCachedTree(virtualPath)
+
+	return nil
+}
+
+// dirHasEntries reports whether path is a directory holding at least one entry.
+func dirHasEntries(path string) (bool, error) {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return false, err
+	}
+
+	return len(entries) > 0, nil
+}
+
+// assertNotRootDir blocks deletion of the metadata root itself, guarding against a
+// virtual path that resolves to the whole store.
+func (ms *MetadataService) assertNotRootDir(metadataDir string) error {
+	clean := filepath.Clean(metadataDir)
+	if clean == filepath.Clean(ms.rootPath) || clean == "/" || clean == "." {
+		return fmt.Errorf("safety block: refusing to remove root metadata directory: %s", clean)
+	}
+
+	return nil
+}
+
+// purgeCachedTree drops the cached entry for virtualPath and everything beneath it.
+// purgeCachedTree evicts the lite-cache entry for virtualPath and everything
+// beneath it.
+//
+// The prefix uses a literal "/" rather than filepath.Separator: cache keys are
+// normalized paths and normalizeVirtualPath always emits forward slashes, so on
+// Windows the separator would build "movies\" against keys like
+// "movies/file.mkv" and the purge would match nothing at all. Trailing
+// separators are trimmed for the same reason, since "movies/" would otherwise
+// build "movies//" and match nothing either. In both cases the directory is
+// removed from disk while its entries stay cached, and the next read is served
+// metadata for a file that is gone.
+func (ms *MetadataService) purgeCachedTree(virtualPath string) {
+	virtualPath = strings.TrimRight(normalizeVirtualPath(virtualPath), "/")
+	if virtualPath == "" {
+		return
+	}
+
+	prefix := virtualPath + "/"
+	for _, key := range ms.liteCache.Keys() {
+		if key == virtualPath || strings.HasPrefix(key, prefix) {
+			ms.liteCache.Remove(key)
+		}
+	}
 }
 
 // RenameFileMetadata atomically renames a metadata file (and its .id sidecar) from oldVirtualPath to newVirtualPath.
