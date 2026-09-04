@@ -31,12 +31,40 @@ func newRampReader(t *testing.T, ctx context.Context, fp *fakepool.Client, rg *s
 	return ur
 }
 
-// A fresh reader without streaming intent opens only a slip of read-ahead
-// until the caller consumes segments.
-func TestFreshReaderRampsFromABaseWindow(t *testing.T) {
+// A fresh reader on a large-article post holds the fan-out to a slip until
+// the first byte has been read, so the demand article has the wire to itself.
+func TestFreshReaderHoldsFanOutOnLargeArticles(t *testing.T) {
+	ctx := context.Background()
+	const nSegs, segSize, maxPrefetch = 4, largeArticleBytes, 60
+	fp := rampPool(nSegs, segSize, 0)
+	gate := make(chan struct{})
+	fp.SetBehavior(segments.MessageID(0), fakepool.SegmentBehavior{
+		Bytes: segments.Payload(0, segSize), ChunkSize: 64 << 10, TailGate: gate,
+	})
+	rg := buildEagerRange(ctx, t, nSegs, segSize)
+	ur := newRampReader(t, ctx, fp, rg, maxPrefetch)
+	ur.Start()
+
+	time.Sleep(100 * time.Millisecond)
+	if got := fp.BodyPriorityCalls(); got > largeArticleHoldSegments {
+		t.Fatalf("scheduled %d fetches before any byte was consumed, want <= %d", got, largeArticleHoldSegments)
+	}
+	close(gate)
+	got, err := io.ReadAll(ur)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, segments.FileBytes(nSegs, segSize)) {
+		t.Fatal("payload differs")
+	}
+}
+
+// A fresh reader on a small-article post opens the opening window, not the
+// full one, until the caller has read its first byte.
+func TestFreshReaderOpensTheOpeningWindowBeforeFirstByte(t *testing.T) {
 	ctx := context.Background()
 	const nSegs, segSize, maxPrefetch = 40, 256, 60
-	fp := rampPool(nSegs, segSize, 0)
+	fp := rampPool(nSegs, segSize, 10*time.Millisecond)
 	gate := make(chan struct{})
 	fp.SetBehavior(segments.MessageID(0), fakepool.SegmentBehavior{
 		Bytes: segments.Payload(0, segSize), ChunkSize: 64, TailGate: gate,
@@ -46,11 +74,11 @@ func TestFreshReaderRampsFromABaseWindow(t *testing.T) {
 	ur.Start()
 
 	time.Sleep(100 * time.Millisecond) // let the manager schedule what it will
-	if got := fp.BodyPriorityCalls(); got > rampBaseSegments {
-		t.Fatalf("scheduled %d fetches before any byte was consumed, want <= %d", got, rampBaseSegments)
+	if got := fp.BodyPriorityCalls(); got > openingSegments {
+		t.Fatalf("scheduled %d fetches before the first byte was read, want <= %d", got, openingSegments)
 	}
-	if got := ur.BufferedAhead(); got != int64(rampBaseSegments*segSize) {
-		t.Fatalf("BufferedAhead = %d, want %d", got, rampBaseSegments*segSize)
+	if got := ur.BufferedAhead(); got != int64(openingSegments*segSize) {
+		t.Fatalf("BufferedAhead = %d, want %d", got, openingSegments*segSize)
 	}
 
 	close(gate)
@@ -61,28 +89,11 @@ func TestFreshReaderRampsFromABaseWindow(t *testing.T) {
 	if !bytes.Equal(got, segments.FileBytes(nSegs, segSize)) {
 		t.Fatal("payload differs")
 	}
-	if fp.MaxInFlight() <= int32(rampBaseSegments) {
-		t.Fatalf("window never grew past the base: max in flight %d", fp.MaxInFlight())
+	if fp.MaxInFlight() <= int32(openingSegments) {
+		t.Fatalf("window never grew past the opening window: max in flight %d", fp.MaxInFlight())
 	}
 	if ur.BufferedAhead() != 0 {
 		t.Fatalf("BufferedAhead after full read = %d", ur.BufferedAhead())
-	}
-}
-
-// A range hint at or above the streaming-intent threshold opens the window
-// fully at once.
-func TestStreamSizedRangeHintSkipsTheRamp(t *testing.T) {
-	ctx := context.Background()
-	const nSegs, segSize, maxPrefetch = 30, 128, 12
-	fp := rampPool(nSegs, segSize, 30*time.Millisecond)
-	rg := buildEagerRange(ctx, t, nSegs, segSize)
-	ur := newRampReader(t, ctx, fp, rg, maxPrefetch, WithRangeHint(streamingIntentBytes))
-	ur.Start()
-	if _, err := io.ReadAll(ur); err != nil {
-		t.Fatal(err)
-	}
-	if fp.MaxInFlight() != int32(maxPrefetch) {
-		t.Fatalf("max in flight = %d, want the full window %d", fp.MaxInFlight(), maxPrefetch)
 	}
 }
 

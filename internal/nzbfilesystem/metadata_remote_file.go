@@ -1975,19 +1975,6 @@ func (mvf *MetadataVirtualFile) ensureReader() error {
 	return nil
 }
 
-// rangeHint is the request length a WebDAV client declared, or 0 when the
-// caller gave no range (FUSE), so the reader can tell playback from probing.
-// An open-ended range means "to the end of the file".
-func (mvf *MetadataVirtualFile) rangeHint(start, end int64) int64 {
-	if rangeStr, ok := mvf.ctx.Value(utils.RangeKey).(string); !ok || rangeStr == "" {
-		return 0
-	}
-	if end < 0 || end >= mvf.meta.FileSize {
-		end = mvf.meta.FileSize - 1
-	}
-	return max(end-start+1, 0)
-}
-
 // getRequestRange gets the range for reader creation based on HTTP range or current position
 // Implements intelligent range limiting to prevent excessive memory usage when end=-1 or ranges are too large
 func (mvf *MetadataVirtualFile) getRequestRange() (start, end int64) {
@@ -2073,8 +2060,7 @@ func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, e
 	// always). See holes.go.
 	ur, err := usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxPrefetch, mvf.streamTracker, mvf.streamID, mvf.segmentStore,
 		usenet.WithHoleHooks(mvf.holeHooks()),
-		usenet.WithSpeculativeBudget(mvf.poolManager.SpeculativeBudget()),
-		usenet.WithRangeHint(mvf.rangeHint(start, end)))
+		usenet.WithSpeculativeBudget(mvf.poolManager.SpeculativeBudget()))
 	if err != nil {
 		return nil, err
 	}

@@ -124,31 +124,23 @@ func WithSpeculativeBudget(b SpecBudget) ReaderOption {
 }
 
 const (
-	// rampBaseSegments is the read-ahead a fresh streaming reader opens with
-	// and keeps until the caller has read its first byte. Holding the fan-out
-	// back that long keeps the demand article from queueing behind a window
-	// of speculative ones on the same connections, and a probe that reads a
-	// few hundred KB and leaves drags almost nothing behind it.
-	rampBaseSegments = 2
-	// rampOpeningSegments is the window between the first byte and the first
-	// consumed segment: wide enough that startup runs near full speed, narrow
-	// enough that a probe reading a partial article does not fetch a whole
-	// window on the way out.
-	rampOpeningSegments = 16
-	// streamingIntentBytes is the declared request length at or above which
-	// a caller is playing, not probing: the window opens fully as soon as the
-	// first byte has been read. rclone's chunked reads declare 32 MB.
-	streamingIntentBytes = 8 << 20
+	// largeArticleHoldSegments is the read-ahead a fresh streaming reader
+	// opens with on large-article posts, kept until the caller has read its
+	// first byte. Holding the fan-out back keeps the demand article from
+	// queueing behind a window of speculative ones on the same connections;
+	// on 4 MiB parts that is the difference between seconds and one round
+	// trip to first byte. On small articles the queueing costs a few
+	// milliseconds and the hold would only slow startup, so it is skipped.
+	largeArticleHoldSegments = 2
+	// largeArticleBytes is the article size from which the hold applies.
+	largeArticleBytes = 2 << 20
+	// openingSegments is the window before the first byte on small-article
+	// posts: wide enough that startup runs at full speed once bytes flow,
+	// narrow enough that a handle closed before its first byte arrives has
+	// not fanned a whole window out. Any consumption opens the window fully;
+	// a narrower ramp was measured to cost 16-25 % of a 16 MB startup.
+	openingSegments = 16
 )
-
-// WithRangeHint tells the reader how many bytes the caller asked for. At or
-// above streamingIntentBytes the read-ahead window opens fully at once;
-// below it, or unknown (0), the window ramps from rampBaseSegments.
-func WithRangeHint(bytes int64) ReaderOption {
-	return func(r *UsenetReader) {
-		r.rangeHint = bytes
-	}
-}
 
 // ConnBudget grants connection tokens for import segment fetches.
 // Implemented by pool.Manager (AcquireImportConnection).
@@ -226,7 +218,7 @@ type UsenetReader struct {
 	priority       bool         // true (streaming) = priority lane; false (import) = normal lane
 	budget         ConnBudget   // optional; gates import fetches on the global connection budget
 	specBudget     SpecBudget   // optional; bounds speculative fetches pool-wide (streaming only)
-	rangeHint      int64        // bytes the caller asked for; 0 = unknown
+	articleSize    int64        // decoded size of the range's first article; drives the first-byte hold
 	scheduledBytes int64        // usable bytes of every segment scheduled so far
 	cond           *sync.Cond   // Signals downloadManager when reader advances
 
@@ -492,19 +484,14 @@ func IsArticleNotFound(err error) bool {
 
 // windowFor is how many segments may be scheduled ahead of the read position
 // given what the caller has read since the reader was created.
-func (b *UsenetReader) windowFor(bytesRead int64, consumedSegments int) int {
-	if !b.priority {
+func (b *UsenetReader) windowFor(bytesRead int64) int {
+	if !b.priority || bytesRead > 0 {
 		return b.maxPrefetch
 	}
-	w := b.maxPrefetch
-	switch {
-	case bytesRead == 0:
-		w = rampBaseSegments
-	case b.rangeHint >= streamingIntentBytes:
-	case consumedSegments == 0:
-		w = rampOpeningSegments
+	if b.articleSize >= largeArticleBytes {
+		return min(b.maxPrefetch, largeArticleHoldSegments)
 	}
-	return min(b.maxPrefetch, w)
+	return min(b.maxPrefetch, openingSegments)
 }
 
 // BufferedAhead reports bytes scheduled for fetch beyond what the caller has
@@ -728,6 +715,11 @@ func (b *UsenetReader) downloadManager(ctx context.Context) {
 	}
 
 	totalSegments := b.rg.Len()
+	if first, err := b.rg.GetSegment(0); err == nil && first != nil {
+		b.mu.Lock()
+		b.articleSize = first.SegmentSize
+		b.mu.Unlock()
+	}
 
 	for ctx.Err() == nil {
 		b.mu.Lock()
@@ -745,7 +737,7 @@ func (b *UsenetReader) downloadManager(ctx context.Context) {
 		// Limit how far ahead we prefetch beyond the current read position
 		currentRead := b.rg.GetCurrentIndex()
 		ahead := b.nextToDownload - currentRead
-		if ahead >= b.windowFor(b.totalBytesRead, currentRead) {
+		if ahead >= b.windowFor(b.totalBytesRead) {
 			b.cond.Wait()
 			b.mu.Unlock()
 			if ctx.Err() != nil {

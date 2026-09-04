@@ -8,7 +8,6 @@ import (
 
 	"github.com/javi11/altmount/internal/testsupport/fakepool"
 	"github.com/javi11/altmount/internal/testsupport/segments"
-	"github.com/javi11/altmount/internal/utils"
 )
 
 // A forward jump past what the shared reader has buffered reopens at the
@@ -73,52 +72,23 @@ func TestForwardSkipInsideBufferKeepsReader(t *testing.T) {
 	}
 }
 
-// An open-ended WebDAV range on a large file is playback: the window opens
-// fully rather than ramping.
-func TestOpenEndedRangeSkipsRamp(t *testing.T) {
-	ctx := context.WithValue(context.Background(), utils.RangeKey, "bytes=0-")
-	const n, segSize, maxPrefetch = 3000, 64 << 10, 16 // ~188 MB
-	fp := fakepool.New()
-	gate := make(chan struct{})
-	configurePoolForFile(fp, n, segSize, fakepool.SegmentBehavior{})
-	fp.SetBehavior(segments.MessageID(0), fakepool.SegmentBehavior{
-		Bytes: segments.Payload(0, segSize), ChunkSize: 4096, TailGate: gate,
-	})
-	mvf := newTestMVF(t, ctx, fp, n, segSize, maxPrefetch)
-	buf := make([]byte, 1024)
-	if _, err := mvf.ReadAt(buf, 0); err != nil {
-		t.Fatal(err)
-	}
-	// Segment 0's tail is still held; the manager keeps scheduling the rest of
-	// the window in the background, so give it a moment to get there.
-	deadline := time.Now().Add(2 * time.Second)
-	for fp.BodyPriorityCalls() < maxPrefetch && time.Now().Before(deadline) {
-		time.Sleep(5 * time.Millisecond)
-	}
-	if got := fp.BodyPriorityCalls(); got < maxPrefetch {
-		t.Fatalf("open-ended range must open the full window: %d fetches, want %d", got, maxPrefetch)
-	}
-	close(gate)
-}
-
-// Without a range (FUSE) the first read schedules only the base window.
-func TestNoRangeRamps(t *testing.T) {
+// Before the first byte of a head read arrives, a fresh handle has fanned
+// out no more than the opening window.
+func TestHeadReadFansOutAtMostTheOpeningWindowBeforeFirstByte(t *testing.T) {
 	ctx := context.Background()
-	const n, segSize, maxPrefetch = 3000, 64 << 10, 16
+	const n, segSize, maxPrefetch = 3000, 64 << 10, 60
 	fp := fakepool.New()
-	gate := make(chan struct{})
 	configurePoolForFile(fp, n, segSize, fakepool.SegmentBehavior{})
 	fp.SetBehavior(segments.MessageID(0), fakepool.SegmentBehavior{
-		Bytes: segments.Payload(0, segSize), ChunkSize: 4096, TailGate: gate,
+		Bytes: segments.Payload(0, segSize), Latency: 500 * time.Millisecond,
 	})
 	mvf := newTestMVF(t, ctx, fp, n, segSize, maxPrefetch)
 	buf := make([]byte, 1024)
-	if _, err := mvf.ReadAt(buf, 0); err != nil {
-		t.Fatal(err)
-	}
-	time.Sleep(100 * time.Millisecond) // the manager must not schedule more even given time
+	done := make(chan struct{})
+	go func() { _, _ = mvf.ReadAt(buf, 0); close(done) }()
+	time.Sleep(150 * time.Millisecond) // segment 0 has not delivered a byte yet
 	if got := fp.BodyPriorityCalls(); got > 16 {
-		t.Fatalf("a 1 KB probe scheduled %d fetches, want at most the opening window of 16", got)
+		t.Fatalf("fanned out %d fetches before the first byte, want at most 16", got)
 	}
-	close(gate)
+	<-done
 }
