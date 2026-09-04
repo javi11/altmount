@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -732,4 +733,48 @@ func TestImportBattery_NzbzStoredInConfigDir(t *testing.T) {
 			t.Errorf(".nzbz unexpectedly found in temp dir: %s", p)
 		}
 	}
+}
+
+// TestImportBattery_RarSidecarFileTrackedInWrittenPaths imports a RAR set alongside a
+// subtitle sidecar. In a RAR NZB every non-par2, non-sidecar file is marked as an archive
+// part, so the sidecar extensions are the only files that reach ProcessRegularFiles — and
+// only once one of them is allowed by config, as ".srt" is here. Those writes must land in
+// writtenPaths: rollback removes a release folder only after every path this job wrote is
+// gone, so an untracked sidecar both survives the rollback and keeps the folder from being
+// cleaned up at all.
+func TestImportBattery_RarSidecarFileTrackedInWrittenPaths(t *testing.T) {
+	entries := loadManifest(t, "rar_single")
+	env := newBatteryEnv(t)
+	env.cfg.Import.AllowedFileExtensions = append(env.cfg.Import.AllowedFileExtensions, ".srt")
+
+	rarBytes := loadFixture(t, filepath.Join("rar_single", "archive.rar"))
+	rarSegs := env.registerContent("rar-sidecar", rarBytes, archivePartSize, 1.0, nil)
+	srtSegs := env.registerContent("rar-sidecar-srt", []byte("1\n00:00:01,000 --> 00:00:02,000\nhi\n"), archivePartSize, 1.0, nil)
+
+	nzb := nzbbuild.Build(
+		nzbbuild.File{Subject: "archive.rar", Segments: rarSegs},
+		nzbbuild.File{Subject: "archive.srt", Segments: srtSegs},
+	)
+	result, written, err := env.runImport(nzb, "archive")
+	if err != nil {
+		t.Fatalf("import failed: %v", err)
+	}
+	if result != "/archive" {
+		t.Errorf("result = %q, want /archive", result)
+	}
+
+	// The sidecar must actually have been imported, or this proves nothing.
+	inner := env.listDir("/archive")
+	if !slices.Contains(inner, "archive.srt") {
+		t.Fatalf("sidecar was not imported into /archive, got %v", inner)
+	}
+
+	paths := filePaths(written)
+	if !slices.Contains(paths, "/archive/archive.srt") {
+		t.Errorf("writtenPaths is missing the sidecar /archive/archive.srt; paths: %v", paths)
+	}
+	if !slices.Contains(paths, "/archive/archive.bin") {
+		t.Errorf("writtenPaths is missing the extracted archive file; paths: %v", paths)
+	}
+	assertInnerFile(t, env, "/archive", entries)
 }

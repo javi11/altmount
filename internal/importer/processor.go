@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/javi11/nntppool/v4"
@@ -1149,7 +1150,9 @@ func (proc *Processor) processRarArchive(
 			return nzbFolder, writtenPaths, err
 		}
 
-		if _, err := multifile.ProcessRegularFiles(
+		// Track these even on error: rollback removes the release folder only once
+		// this job's own files are gone, so a partial write must be recorded.
+		regularWritten, err := multifile.ProcessRegularFiles(
 			ctx,
 			nzbFolder,
 			regularFiles,
@@ -1161,7 +1164,9 @@ func (proc *Processor) processRarArchive(
 			nil, // archive progress is tracked by the archive tracker below
 			storeIndex,
 			storeRef,
-		); err != nil {
+		)
+		writtenPaths = append(writtenPaths, regularWritten...)
+		if err != nil {
 			slog.DebugContext(ctx, "Failed to process regular files", "error", err)
 		}
 	}
@@ -1176,7 +1181,13 @@ func (proc *Processor) processRarArchive(
 
 		releaseDate := archiveFiles[0].ReleaseDate.Unix()
 
+		var writtenMu sync.Mutex
 		err := rar.ProcessArchive(ctx, rar.ProcessArchiveOptions{
+			OnMetadataWritten: func(vp string) {
+				writtenMu.Lock()
+				writtenPaths = append(writtenPaths, vp)
+				writtenMu.Unlock()
+			},
 			VirtualDir:             nzbFolder,
 			ArchiveFiles:           archiveFiles,
 			Password:               parsed.GetPassword(),
@@ -1283,7 +1294,9 @@ func (proc *Processor) processSevenZipArchive(
 			return nzbFolder, writtenPaths, err
 		}
 
-		if _, err := multifile.ProcessRegularFiles(
+		// Track these even on error: rollback removes the release folder only once
+		// this job's own files are gone, so a partial write must be recorded.
+		regularWritten, err := multifile.ProcessRegularFiles(
 			ctx,
 			nzbFolder,
 			regularFiles,
@@ -1295,7 +1308,9 @@ func (proc *Processor) processSevenZipArchive(
 			nil, // archive progress is tracked by the archive tracker below
 			storeIndex,
 			storeRef,
-		); err != nil {
+		)
+		writtenPaths = append(writtenPaths, regularWritten...)
+		if err != nil {
 			slog.DebugContext(ctx, "Failed to process regular files", "error", err)
 		}
 	}
@@ -1309,7 +1324,13 @@ func (proc *Processor) processSevenZipArchive(
 
 		releaseDate := archiveFiles[0].ReleaseDate.Unix()
 
+		var writtenMu sync.Mutex
 		err := sevenzip.ProcessArchive(ctx, sevenzip.ProcessArchiveOptions{
+			OnMetadataWritten: func(vp string) {
+				writtenMu.Lock()
+				writtenPaths = append(writtenPaths, vp)
+				writtenMu.Unlock()
+			},
 			VirtualDir:             nzbFolder,
 			ArchiveFiles:           archiveFiles,
 			Password:               parsed.GetPassword(),

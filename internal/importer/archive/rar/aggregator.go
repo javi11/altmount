@@ -106,6 +106,8 @@ type ProcessArchiveOptions struct {
 	// StoreRef is empty the aggregator falls back to v1 inline-segment metadata.
 	SegmentIndex map[string]int64
 	StoreRef     string
+	// OnMetadataWritten is invoked whenever a file's metadata is successfully written to disk.
+	OnMetadataWritten func(virtualPath string)
 }
 
 // ProcessArchive analyzes and processes RAR archive files, creating metadata for all extracted files.
@@ -401,6 +403,10 @@ func ProcessArchive(ctx context.Context, opts ProcessArchiveOptions) error {
 
 			if err := metadataService.WriteFileMetadataAuto(ctx, item.virtualFilePath, fileMeta, opts.SegmentIndex, opts.StoreRef); err != nil {
 				return fmt.Errorf("failed to write metadata for RAR file %s: %w", item.content.Filename, err)
+			}
+
+			if opts.OnMetadataWritten != nil {
+				opts.OnMetadataWritten(item.virtualFilePath)
 			}
 
 			slog.InfoContext(ctx, "Created metadata for RAR extracted file",
