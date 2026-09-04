@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -678,4 +679,83 @@ func TestDeleteDirectoryIfEmpty(t *testing.T) {
 		}
 		assert.DirExists(t, root)
 	})
+}
+
+// TestLongFilename_ReadPathMatchesWritePath covers a behaviour change that comes
+// with routing every accessor through metaFilePath: the read side now truncates
+// the same way the write side always did.
+//
+// Before, only WriteFileMetadata and FileExists truncated, so a name over the
+// 250-byte budget was written to the truncated path and then looked for at the
+// full one, which could not exist. Anything doing stat-then-delete-then-write on
+// such a name skipped its pre-delete silently and leaked the store refcount.
+func TestLongFilename_ReadPathMatchesWritePath(t *testing.T) {
+	root := t.TempDir()
+	ms := NewMetadataService(root)
+
+	// 300 bytes of base name, comfortably over the 250-byte budget.
+	longName := strings.Repeat("a", 300) + ".mkv"
+	virtualPath := filepath.Join("movies", longName)
+
+	meta := ms.CreateFileMetadata(
+		4096, "test.nzb", metapb.FileStatus_FILE_STATUS_HEALTHY,
+		nil, metapb.Encryption_NONE, "", "", nil, nil, 0, nil, "longname123",
+	)
+	require.NoError(t, ms.WriteFileMetadata(virtualPath, meta))
+
+	// The persisted name is truncated, so the full name is not on disk.
+	written := ms.GetMetadataFilePath(virtualPath)
+	require.FileExists(t, written)
+	assert.Less(t, len(filepath.Base(written)), len(longName),
+		"the .meta name should be truncated")
+
+	// Reads resolve to the same place the write went.
+	got, err := ms.ReadFileMetadata(virtualPath)
+	require.NoError(t, err)
+	require.NotNil(t, got, "a name over the truncation budget must still be readable")
+	assert.Equal(t, int64(4096), got.FileSize)
+
+	lite, err := ms.ReadFileMetadataLite(virtualPath)
+	require.NoError(t, err)
+	require.NotNil(t, lite, "the lite read path must truncate the same way")
+
+	// And so does delete, which is what makes stat-then-delete-then-write work.
+	require.NoError(t, ms.DeleteFileMetadata(context.Background(), virtualPath))
+	assert.NoFileExists(t, written)
+}
+
+// TestLongFilename_SharedPrefixCollides documents the hazard the read-side
+// truncation introduces, so a future change to truncateFilename has something to
+// break. Two names sharing their first 250 bytes and their extension truncate to
+// the same .meta path, so the second write is served for a read of the first.
+// Previously that read simply missed. Fixing it means a longer budget or a hash
+// suffix, which is a change of on-disk layout and out of scope here.
+func TestLongFilename_SharedPrefixCollides(t *testing.T) {
+	root := t.TempDir()
+	ms := NewMetadataService(root)
+
+	prefix := strings.Repeat("b", 260)
+	first := filepath.Join("movies", prefix+"-one.mkv")
+	second := filepath.Join("movies", prefix+"-two.mkv")
+
+	firstMeta := ms.CreateFileMetadata(
+		1111, "one.nzb", metapb.FileStatus_FILE_STATUS_HEALTHY,
+		nil, metapb.Encryption_NONE, "", "", nil, nil, 0, nil, "collide0001",
+	)
+	require.NoError(t, ms.WriteFileMetadata(first, firstMeta))
+
+	secondMeta := ms.CreateFileMetadata(
+		2222, "two.nzb", metapb.FileStatus_FILE_STATUS_HEALTHY,
+		nil, metapb.Encryption_NONE, "", "", nil, nil, 0, nil, "collide0002",
+	)
+	require.NoError(t, ms.WriteFileMetadata(second, secondMeta))
+
+	require.Equal(t, ms.GetMetadataFilePath(first), ms.GetMetadataFilePath(second),
+		"test premise: both names truncate to the same .meta path")
+
+	got, err := ms.ReadFileMetadata(first)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, int64(2222), got.FileSize,
+		"known limitation: the second write wins for both names")
 }

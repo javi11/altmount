@@ -139,7 +139,15 @@ func (ms *MetadataService) truncateFilename(filename string) string {
 	fileExt := filepath.Ext(filename)
 	filename = strings.TrimSuffix(filename, fileExt)
 
-	const maxLen = 250 // Leave room for .meta extension
+	// The persisted name is base + fileExt + ".meta" and must fit the 255-byte
+	// limit most filesystems enforce, so the budget for the base has to subtract
+	// both suffixes. Budgeting a flat 250 for the base left room for ".meta"
+	// only, so any name carrying an extension produced 255+len(fileExt) bytes and
+	// failed to write with "file name too long".
+	maxLen := 255 - len(".meta") - len(fileExt)
+	if maxLen < 0 {
+		maxLen = 0
+	}
 
 	if len(filename) <= maxLen {
 		return filename + fileExt
@@ -191,7 +199,6 @@ func (ms *MetadataService) WriteFileMetadata(virtualPath string, metadata *metap
 	if err := os.MkdirAll(metadataDir, 0755); err != nil {
 		return fmt.Errorf("failed to create metadata directory: %w", err)
 	}
-	truncatedFilename := ms.truncateFilename(filepath.Base(virtualPath))
 
 	// Sidecar ID handling for compatibility
 	// We don't write NzbdavId to the proto to maintain compatibility with versions that don't have field 14.
@@ -233,7 +240,15 @@ func (ms *MetadataService) WriteFileMetadata(virtualPath string, metadata *metap
 
 	// Write atomically using a uniquely-named temporary file so concurrent
 	// writes to the same final path don't race on the same .tmp name.
-	tmpFile, err := os.CreateTemp(metadataDir, "."+truncatedFilename+".*.tmp")
+	//
+	// The prefix deliberately does NOT include the filename. truncateFilename
+	// budgets 250 bytes to leave room for ".meta", but a temp name built from it
+	// also carries a leading dot, CreateTemp's random component and ".tmp",
+	// which together push past the 255-byte limit most filesystems enforce. Any
+	// name over roughly 235 bytes then failed to write at all with "file name
+	// too long". CreateTemp's randomness is what prevents the race, so the
+	// filename adds nothing here.
+	tmpFile, err := os.CreateTemp(metadataDir, ".meta-*.tmp")
 	if err != nil {
 		metadata.NzbdavId = nzbdavId
 		return fmt.Errorf("failed to create temporary metadata file: %w", err)
@@ -1096,30 +1111,28 @@ func (ms *MetadataService) MoveToCorrupted(ctx context.Context, virtualPath stri
 	virtualPath = normalizeVirtualPath(virtualPath)
 	ms.liteCache.Remove(virtualPath)
 
-	// Remove leading slashes to ensure it joins correctly. virtualPath is already
-	// backslash-normalized above, so the persisted/served name can't contain one.
-	cleanPath := filepath.FromSlash(strings.TrimPrefix(virtualPath, "/"))
-	dir := filepath.Dir(cleanPath)
-	filename := filepath.Base(cleanPath)
-
-	truncatedFilename := ms.truncateFilename(filename)
-	metadataPath := filepath.Join(ms.rootPath, dir, truncatedFilename+".meta")
+	// Source path comes from the chokepoint rather than being rebuilt here, so a
+	// later change to metaFilePath reaches this path too.
+	metadataPath := ms.metaFilePath(virtualPath)
 
 	// Check if source exists
 	if _, err := os.Stat(metadataPath); os.IsNotExist(err) {
 		return nil
 	}
 
-	// Define corrupted directory path (root/corrupted_metadata/...)
-	// We use a visible folder name as requested.
-	corruptedRoot := filepath.Join(ms.rootPath, "corrupted_metadata")
-	targetDir := filepath.Join(corruptedRoot, dir)
+	// Mirror the source's directory structure and truncated filename under a
+	// visible corrupted_metadata folder, both derived from the path above.
+	relDir, err := filepath.Rel(ms.rootPath, filepath.Dir(metadataPath))
+	if err != nil {
+		return fmt.Errorf("failed to derive corrupted metadata directory: %w", err)
+	}
+	targetDir := filepath.Join(ms.rootPath, "corrupted_metadata", relDir)
 
 	if err := os.MkdirAll(targetDir, 0755); err != nil {
 		return fmt.Errorf("failed to create corrupted metadata directory: %w", err)
 	}
 
-	targetPath := filepath.Join(targetDir, truncatedFilename+".meta")
+	targetPath := filepath.Join(targetDir, filepath.Base(metadataPath))
 
 	// Move the .meta file
 	if err := os.Rename(metadataPath, targetPath); err != nil {
