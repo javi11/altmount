@@ -8,19 +8,23 @@ import { Pagination } from "../components/ui/Pagination";
 import { useConfirm } from "../contexts/ModalContext";
 import { useToast } from "../contexts/ToastContext";
 import {
+	useCancelAllPar2Repairs,
 	useCancelHealthCheck,
+	useCancelPar2Repair,
 	useCleanupHealth,
 	useDeleteBulkHealthItems,
 	useDeleteHealthItem,
 	useDirectHealthCheck,
 	useHealth,
 	useHealthStats,
+	usePar2RepairJobs,
 	useRegenerateSymlinks,
 	useRepairBulkHealthItems,
 	useRepairHealthItem,
 	useResetAllHealthChecks,
 	useRestartBulkHealthItems,
 	useSetHealthPriority,
+	useTriggerPar2Repair,
 	useUnmaskHealthItem,
 } from "../hooks/useApi";
 import { useConfig } from "../hooks/useConfig";
@@ -41,6 +45,7 @@ import { HealthStatsCards } from "./HealthPage/components/HealthStatsCards";
 import { HealthStatusAlert } from "./HealthPage/components/HealthStatusAlert";
 import { HealthTable } from "./HealthPage/components/HealthTable/HealthTable";
 import { LibraryScanStatus } from "./HealthPage/components/LibraryScanStatus";
+import { Par2RepairSection } from "./HealthPage/components/Par2RepairSection";
 import type { CleanupConfig, SortBy, SortOrder } from "./HealthPage/types";
 
 type HealthTab = "files";
@@ -97,6 +102,10 @@ export function HealthPage() {
 	});
 
 	const { data: stats } = useHealthStats();
+	const { data: par2RepairJobs } = usePar2RepairJobs();
+	const triggerPar2Repair = useTriggerPar2Repair();
+	const cancelPar2Repair = useCancelPar2Repair();
+	const cancelAllPar2Repairs = useCancelAllPar2Repairs();
 	const deleteItem = useDeleteHealthItem();
 	const deleteBulkItems = useDeleteBulkHealthItems();
 	const restartBulkItems = useRestartBulkHealthItems();
@@ -363,6 +372,97 @@ export function HealthPage() {
 		},
 		[confirmAction, cancelHealthCheck],
 	);
+
+	const handlePar2Repair = useCallback(
+		async (filePath: string) => {
+			try {
+				await triggerPar2Repair.mutateAsync(filePath);
+				showToast({
+					title: "PAR2 Repair Queued",
+					message:
+						"Reconstruction runs in the background; watch its progress in the PAR2 Repairs card.",
+					type: "success",
+				});
+			} catch (err: unknown) {
+				const error = err as { message?: string };
+				console.error("Failed to queue PAR2 repair:", err);
+				showToast({
+					title: "PAR2 Repair Failed",
+					message: error.message || "Could not queue the repair",
+					type: "error",
+				});
+			}
+		},
+		[triggerPar2Repair, showToast],
+	);
+
+	const handleCancelPar2Repair = useCallback(
+		async (id: number) => {
+			const job = par2RepairJobs?.find((candidate) => candidate.id === id);
+			const name = job ? job.file_path.split("/").pop() || job.file_path : "this file";
+			const confirmed = await confirmAction(
+				"Cancel PAR2 Repair",
+				`Cancel the repair of ${name}? Progress so far is discarded. The repair may start again the next time the file is read.`,
+				{
+					type: "warning",
+					confirmText: "Cancel Repair",
+					confirmButtonClass: "btn-warning",
+				},
+			);
+			if (!confirmed) {
+				return;
+			}
+			try {
+				await cancelPar2Repair.mutateAsync(id);
+				showToast({
+					title: "PAR2 Repair Cancelled",
+					message: "The repair stopped and its temporary files were cleaned up.",
+					type: "success",
+				});
+			} catch (err: unknown) {
+				const error = err as { message?: string };
+				console.error("Failed to cancel PAR2 repair:", err);
+				showToast({
+					title: "Cancel Failed",
+					message: error.message || "Could not cancel the repair",
+					type: "error",
+				});
+			}
+		},
+		[par2RepairJobs, confirmAction, cancelPar2Repair, showToast],
+	);
+
+	const handleCancelAllPar2Repairs = useCallback(async () => {
+		const count = par2RepairJobs?.length ?? 0;
+		const confirmed = await confirmAction(
+			"Cancel All PAR2 Repairs",
+			`Cancel all ${count} queued and running repairs? Progress so far is discarded.`,
+			{
+				type: "warning",
+				confirmText: "Cancel All",
+				confirmButtonClass: "btn-warning",
+			},
+		);
+		if (!confirmed) {
+			return;
+		}
+		try {
+			const result = await cancelAllPar2Repairs.mutateAsync();
+			showToast({
+				title: "PAR2 Repairs Cancelled",
+				message: `Stopped ${result.cancelled} repair${result.cancelled === 1 ? "" : "s"}.`,
+				type: "success",
+			});
+		} catch (err: unknown) {
+			const error = err as { message?: string };
+			console.error("Failed to cancel PAR2 repairs:", err);
+			showToast({
+				title: "Cancel Failed",
+				message: error.message || "Could not cancel the repairs",
+				type: "error",
+			});
+		}
+	}, [par2RepairJobs, confirmAction, cancelAllPar2Repairs, showToast]);
 
 	const handleRepair = useCallback(
 		async (id: number) => {
@@ -808,6 +908,13 @@ export function HealthPage() {
 						<div className="space-y-6">
 							<HealthStatsCards stats={stats} />
 
+							<Par2RepairSection
+								jobs={par2RepairJobs}
+								onCancel={handleCancelPar2Repair}
+								onCancelAll={handleCancelAllPar2Repairs}
+								isCancelling={cancelPar2Repair.isPending || cancelAllPar2Repairs.isPending}
+							/>
+
 							<div className="card border-2 border-base-300/50 bg-base-100 shadow-md">
 								<div className="card-body p-4 sm:p-8">
 									<HealthFilters
@@ -853,6 +960,7 @@ export function HealthPage() {
 											onCancelCheck={handleCancelCheck}
 											onManualCheck={handleManualCheck}
 											onRepair={handleRepair}
+											onPar2Repair={handlePar2Repair}
 											onDelete={handleDelete}
 											onUnmask={handleUnmask}
 											onSetPriority={handleSetPriority}

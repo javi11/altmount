@@ -129,6 +129,7 @@ func TestFastFailReleaseProbeRetriesTransientFailure(t *testing.T) {
 		100,
 		1,
 		100*time.Millisecond,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("FastFailReleaseProbe error = %v, want nil after transient recovery", err)
@@ -153,6 +154,7 @@ func TestFastFailReleaseProbeDoesNotRetryDefinitiveMiss(t *testing.T) {
 		100,
 		1,
 		100*time.Millisecond,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("FastFailReleaseProbe error = %v, want nil for definitive miss", err)
@@ -180,6 +182,7 @@ func TestFastFailReleaseProbeCancellationWinsOverDefinitiveMiss(t *testing.T) {
 		100,
 		1,
 		100*time.Millisecond,
+		nil,
 	)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("FastFailReleaseProbe error = %v, want context.Canceled", err)
@@ -201,6 +204,7 @@ func TestFastFailCheckFilesRetriesOnlyTransientIDs(t *testing.T) {
 	results, err := FastFailCheckFiles(
 		context.Background(), files, fastFailPoolManager{client: client},
 		100, 2, 100*time.Millisecond, nil,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("FastFailCheckFiles error = %v, want nil after transient recovery", err)
@@ -226,6 +230,7 @@ func TestFastFailCheckFilesTransientExhaustionIsInconclusive(t *testing.T) {
 		[]FastFailFile{{Filename: "movie.mkv", Segments: makeTestSegments("down", 1)}},
 		fastFailPoolManager{client: client},
 		100, 1, 100*time.Millisecond, nil,
+		nil,
 	)
 	if err == nil {
 		t.Fatal("FastFailCheckFiles error = nil, want inconclusive error after retries are exhausted")
@@ -260,6 +265,7 @@ func TestFastFailReleaseProbeUsesSegmentSamplePercentage(t *testing.T) {
 		10,
 		1,
 		100*time.Millisecond,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("FastFailReleaseProbe returned error: %v", err)
@@ -295,6 +301,7 @@ func TestFastFailReleaseProbeReportsMissingOnUnreachableSegment(t *testing.T) {
 		100,
 		1,
 		100*time.Millisecond,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("FastFailReleaseProbe error = %v, want nil (a missing segment is not an error)", err)
@@ -312,6 +319,7 @@ func TestFastFailReleaseProbePoolUnavailableReturnsError(t *testing.T) {
 		100,
 		1,
 		100*time.Millisecond,
+		nil,
 	)
 	if err == nil {
 		t.Fatal("FastFailReleaseProbe returned nil error, want error for nil pool")
@@ -330,6 +338,7 @@ func TestFastFailReleaseProbeNoSegmentsIsHealthy(t *testing.T) {
 		100,
 		1,
 		100*time.Millisecond,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("FastFailReleaseProbe error = %v, want nil", err)
@@ -426,6 +435,7 @@ func TestFastFailCheckFilesAllReachable(t *testing.T) {
 		fastFailPoolManager{client: client},
 		100, 2, 100*time.Millisecond,
 		nil,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("FastFailCheckFiles error = %v, want nil", err)
@@ -455,6 +465,7 @@ func TestFastFailCheckFilesOneFileBroken(t *testing.T) {
 		context.Background(), files,
 		fastFailPoolManager{client: client},
 		100, 2, 100*time.Millisecond,
+		nil,
 		nil,
 	)
 	if err != nil {
@@ -489,6 +500,7 @@ func TestFastFailCheckFilesBrokenSidecarsAreReported(t *testing.T) {
 		fastFailPoolManager{client: client},
 		100, 2, 100*time.Millisecond,
 		nil,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("FastFailCheckFiles error = %v, want nil", err)
@@ -520,6 +532,7 @@ func TestFastFailCheckFilesBrokenSidecarIsReported(t *testing.T) {
 		fastFailPoolManager{client: client},
 		100, 1, 100*time.Millisecond,
 		nil,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("FastFailCheckFiles error = %v, want nil", err)
@@ -541,6 +554,7 @@ func TestFastFailCheckFilesPoolUnavailableReturnsError(t *testing.T) {
 		[]FastFailFile{{Filename: "movie.mkv", Segments: makeTestSegments("v", 1)}},
 		fastFailPoolManager{client: nil},
 		100, 1, 100*time.Millisecond,
+		nil,
 		nil,
 	)
 	if err == nil {
@@ -574,6 +588,7 @@ func TestFastFailCheckFilesFirstSegmentAlwaysChecked(t *testing.T) {
 		fastFailPoolManager{client: client},
 		0, 1, 100*time.Millisecond,
 		nil,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("FastFailCheckFiles error = %v, want nil", err)
@@ -604,6 +619,7 @@ func TestFastFailCheckFilesGroupPropagation(t *testing.T) {
 		context.Background(), files,
 		fastFailPoolManager{client: client},
 		100, 4, 100*time.Millisecond,
+		nil,
 		nil,
 	)
 	if err != nil {
@@ -648,6 +664,7 @@ func TestFastFailCheckFilesGroupShortCircuitSkipsStats(t *testing.T) {
 		fastFailPoolManager{client: client},
 		100, 1, 100*time.Millisecond, // single connection → deterministic ordering
 		nil,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("FastFailCheckFiles error = %v, want nil", err)
@@ -682,6 +699,7 @@ func TestFastFailCheckFilesEmptyGroupKeyNoPropagation(t *testing.T) {
 		fastFailPoolManager{client: client},
 		100, 2, 100*time.Millisecond,
 		nil,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("FastFailCheckFiles error = %v, want nil", err)
@@ -709,6 +727,7 @@ func TestFastFailCheckFilesIndexAligned(t *testing.T) {
 		context.Background(), files,
 		fastFailPoolManager{client: client},
 		100, 2, 100*time.Millisecond,
+		nil,
 		nil,
 	)
 	if err != nil {
@@ -742,6 +761,7 @@ func TestFastFailReleaseProbeTimeoutIsInconclusive(t *testing.T) {
 		100,
 		1,
 		10*time.Millisecond,
+		nil,
 	)
 	if err == nil {
 		t.Fatal("FastFailReleaseProbe error = nil, want inconclusive error after retries")
@@ -774,6 +794,7 @@ func TestFastFailReleaseProbeCallerCancellationReturnsError(t *testing.T) {
 		100,
 		1,
 		time.Minute,
+		nil,
 	)
 	if err == nil {
 		t.Fatal("FastFailReleaseProbe error = nil, want error when the caller cancelled")
@@ -800,6 +821,7 @@ func TestFastFailCheckFilesTimeoutIsInconclusive(t *testing.T) {
 		100,
 		1,
 		10*time.Millisecond,
+		nil,
 		nil,
 	)
 	if err == nil {

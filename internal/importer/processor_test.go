@@ -73,7 +73,7 @@ func TestPreParseFastFailSkipsOnlyMissingEpisode(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Import.SegmentSamplePercentage = 100
 
-	brokenIdx, missingIDs, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, nil)
+	brokenIdx, missingIDs, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, nil)
 	if err != nil {
 		t.Fatalf("preParseFastFail returned error: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestPreParseFastFailMarksWholeRarSetBroken(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Import.SegmentSamplePercentage = 100
 
-	brokenIdx, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, nil)
+	brokenIdx, _, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, nil)
 	if err != nil {
 		t.Fatalf("preParseFastFail returned error: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestPreParseFastFailAllRarSetsBrokenReturnsNoFilesProcessed(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Import.SegmentSamplePercentage = 100
 
-	_, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, nil)
+	_, _, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, nil)
 	if !errors.Is(err, multifile.ErrNoFilesProcessed) {
 		t.Fatalf("preParseFastFail error = %v, want ErrNoFilesProcessed", err)
 	}
@@ -175,7 +175,7 @@ func TestPreParseFastFailDoesNotStatPar2(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Import.SegmentSamplePercentage = 100
 
-	brokenIdx, missingIDs, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, nil)
+	brokenIdx, missingIDs, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, nil)
 	if err != nil {
 		t.Fatalf("preParseFastFail returned error: %v", err)
 	}
@@ -206,7 +206,7 @@ func TestPreParseFastFailAllMissingReturnsNoFilesProcessed(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Import.SegmentSamplePercentage = 100
 
-	_, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, nil)
+	_, _, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, nil)
 	if !errors.Is(err, multifile.ErrNoFilesProcessed) {
 		t.Fatalf("preParseFastFail error = %v, want ErrNoFilesProcessed", err)
 	}
@@ -234,7 +234,7 @@ func TestPreParseFastFailHealthyReleaseSkipsPerFileSweep(t *testing.T) {
 	n := buildTestNzb(files)
 	cfg := config.DefaultConfig() // default 1% sampling, capped at 55
 
-	brokenIdx, missingIDs, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, nil)
+	brokenIdx, missingIDs, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, nil)
 	if err != nil {
 		t.Fatalf("preParseFastFail returned error: %v", err)
 	}
@@ -605,7 +605,7 @@ func TestPreParseFastFailAcceptableThresholdImportsDegradedVideo(t *testing.T) {
 	cfg.Import.SegmentSamplePercentage = 100
 	cfg.Health.AcceptableMissingSegmentsPercentage = 5
 
-	brokenIdx, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, nil)
+	brokenIdx, _, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, nil)
 	if err != nil {
 		t.Fatalf("preParseFastFail returned error: %v", err)
 	}
@@ -627,7 +627,7 @@ func TestPreParseFastFailZeroToleranceFailsDegradedVideo(t *testing.T) {
 	cfg.Import.SegmentSamplePercentage = 100
 	cfg.Health.AcceptableMissingSegmentsPercentage = 0
 
-	brokenIdx, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, nil)
+	brokenIdx, _, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, nil)
 	if !errors.Is(err, multifile.ErrNoFilesProcessed) {
 		// Single file, and it's broken → all eligible broken → ErrNoFilesProcessed.
 		t.Fatalf("zero tolerance: err = %v, want ErrNoFilesProcessed", err)
@@ -650,7 +650,7 @@ func TestPreParseFastFailAcceptableThresholdStillFailsLongRun(t *testing.T) {
 	cfg.Import.SegmentSamplePercentage = 100
 	cfg.Health.AcceptableMissingSegmentsPercentage = 100
 
-	_, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, nil)
+	_, _, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, nil)
 	if !errors.Is(err, multifile.ErrNoFilesProcessed) {
 		t.Fatalf("raised threshold with long run: err = %v, want ErrNoFilesProcessed", err)
 	}
@@ -666,7 +666,7 @@ func TestPreParseFastFailStremioHeaderOnly(t *testing.T) {
 	cfg := config.DefaultConfig()
 	stremioCat := "stremio"
 
-	_, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, &stremioCat, nil)
+	_, _, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, &stremioCat, nil)
 	if !errors.Is(err, multifile.ErrNoFilesProcessed) {
 		t.Fatalf("stremio header fast-fail: err = %v, want ErrNoFilesProcessed", err)
 	}

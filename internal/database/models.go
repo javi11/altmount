@@ -16,6 +16,10 @@ const (
 	QueueStatusFailed     QueueStatus = "failed"
 	QueueStatusPaused     QueueStatus = "paused"
 	QueueStatusFallback   QueueStatus = "fallback" // Sent to external SABnzbd as fallback
+	// QueueStatusWaitingRepair marks an import parked while a PAR2 repair
+	// rebuilds its missing articles. The item holds no worker slot; the repair
+	// service returns it to pending on success or fails it as unrepairable.
+	QueueStatusWaitingRepair QueueStatus = "waiting_repair"
 )
 
 // QueuePriority represents the priority level of a queued import

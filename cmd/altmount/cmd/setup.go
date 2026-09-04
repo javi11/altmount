@@ -24,6 +24,7 @@ import (
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/nzbfilesystem"
 	"github.com/javi11/altmount/internal/nzbfilesystem/segcache"
+	"github.com/javi11/altmount/internal/par2repair"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/rclone"
@@ -33,9 +34,10 @@ import (
 
 // repositorySet holds all database repositories
 type repositorySet struct {
-	MainRepo   *database.Repository
-	HealthRepo *database.HealthRepository
-	UserRepo   *database.UserRepository
+	MainRepo       *database.Repository
+	HealthRepo     *database.HealthRepository
+	UserRepo       *database.UserRepository
+	Par2RepairRepo *database.Par2RepairRepository
 }
 
 // initializeDatabase creates and initializes the database
@@ -111,6 +113,7 @@ func initializeFilesystem(
 	configGetter config.ConfigGetter,
 	streamTracker nzbfilesystem.StreamTracker,
 	cacheSource *segcache.Source,
+	par2RepairService *par2repair.Service,
 ) *nzbfilesystem.NzbFilesystem {
 	// Reset all in-progress file health checks on start up
 	if err := healthRepo.ResetFileAllChecking(ctx); err != nil {
@@ -128,6 +131,13 @@ func initializeFilesystem(
 		streamTracker,
 		cacheSource,
 	)
+
+	// Serve PAR2-repaired article payloads on the hole read path, and queue
+	// repairs when playback hits missing articles.
+	if par2RepairService != nil {
+		metadataRemoteFile.SetPatchSource(par2RepairService.PatchStore())
+		metadataRemoteFile.SetRepairEnqueuer(par2RepairService)
+	}
 
 	// Create filesystem backed by metadata
 	return nzbfilesystem.NewNzbFilesystem(metadataRemoteFile)
@@ -209,9 +219,10 @@ func setupRepositories(ctx context.Context, db *database.DB) *repositorySet {
 	d := db.Dialect()
 
 	return &repositorySet{
-		MainRepo:   database.NewRepository(dbConn, d),
-		HealthRepo: database.NewHealthRepository(dbConn, d),
-		UserRepo:   database.NewUserRepository(dbConn, d),
+		MainRepo:       database.NewRepository(dbConn, d),
+		HealthRepo:     database.NewHealthRepository(dbConn, d),
+		UserRepo:       database.NewUserRepository(dbConn, d),
+		Par2RepairRepo: database.NewPar2RepairRepository(dbConn, d),
 	}
 }
 
@@ -378,6 +389,74 @@ func setupWebDAV(
 	return webdavHandler, nil
 }
 
+// startPar2RepairService wires and starts the background PAR2 repair service.
+// Always constructed (triggers no-op while disabled, and enable/disable is a
+// hot config change); the worker loop itself starts here.
+func startPar2RepairService(
+	ctx context.Context,
+	cfg *config.Config,
+	repo *database.Par2RepairRepository,
+	healthRepo *database.HealthRepository,
+	metadataService *metadata.MetadataService,
+	poolManager pool.Manager,
+	configGetter config.ConfigGetter,
+	streamsActive func() bool,
+) *par2repair.Service {
+	// Repair fetches hold both budgets: the repair's own cap (narrow, so at
+	// most that many fetches queue on the shared budget) and the pool-wide
+	// import connection budget, whose stream headroom makes repair yield to
+	// playback exactly as imports do.
+	fetcher := par2repair.NewPoolFetcher(func() (par2repair.BodyClient, error) {
+		return poolManager.GetPool()
+	}, par2repair.CombineBudgets(
+		par2repair.NewConnLimiter(func() int {
+			return configGetter().Par2Repair.EffectiveMaxConnections()
+		}),
+		par2repair.ConnBudgetFunc(poolManager.AcquireImportConnection),
+	))
+	// Stream-aware sweep width (conservative while anything plays, bounded
+	// widening when idle), further capped by the repair's own connection
+	// budget so a 10-connection repair never floods every connection's STAT
+	// pipeline. See par2repair.SweepStatConcurrency.
+	fetcher.StatConcurrency = func() int {
+		c := configGetter()
+		return par2repair.SweepStatConcurrency(
+			poolManager.StatSweepConcurrency(c.StatConcurrency()),
+			c.Par2Repair.EffectiveMaxConnections(),
+		)
+	}
+	patchStore := par2repair.NewPatchStore(cfg.Par2Repair.EffectivePatchDir(cfg.Metadata.RootPath))
+	service := par2repair.NewService(
+		repo,
+		par2repair.NewMetadataSource(metadataService),
+		fetcher,
+		patchStore,
+		func() par2repair.Config {
+			c := configGetter()
+			return par2repair.Config{
+				Enabled:           c.Par2Repair.Enabled != nil && *c.Par2Repair.Enabled,
+				MaxRepairRatio:    c.Par2Repair.MaxRepairRatio,
+				MaxMemoryMB:       c.Par2Repair.MaxMemoryMB,
+				MaxConcurrentJobs: c.Par2Repair.MaxConcurrentJobs,
+				MaxConnections:    c.Par2Repair.EffectiveMaxConnections(),
+				MinReleaseSizeMB:  c.Par2Repair.MinReleaseSizeMB,
+				MaxReleaseSizeMB:  c.Par2Repair.MaxReleaseSizeMB,
+				MaxPatchStoreMB:   c.Par2Repair.MaxPatchStoreMB,
+			}
+		},
+		slog.Default(),
+	)
+	if healthRepo != nil {
+		service.SetHealthStore(healthRepo)
+	}
+	// Jobs yield fetch depth and solver fold width to active playback streams.
+	service.SetStreamsActive(streamsActive)
+	go service.Start(ctx)
+	slog.InfoContext(ctx, "PAR2 repair service started",
+		"enabled", cfg.Par2Repair.Enabled != nil && *cfg.Par2Repair.Enabled)
+	return service
+}
+
 // startHealthWorker creates and starts the health monitoring worker
 func startHealthWorker(
 	ctx context.Context,
@@ -390,6 +469,7 @@ func startHealthWorker(
 	arrsService *arrs.Service,
 	importerService importer.ImportService,
 	broadcaster *progress.ProgressBroadcaster,
+	par2RepairService *par2repair.Service,
 	contentVerifyFS contentverify.Opener,
 ) (*health.HealthWorker, *health.LibrarySyncWorker, error) {
 	// The health and library-sync workers share the process-wide metadata service so
@@ -416,6 +496,13 @@ func startHealthWorker(
 		configManager.GetConfigGetter(),
 		broadcaster,
 	)
+
+	// Degraded verdicts attempt PAR2 repair before anything else; with
+	// arr_first (default on) it also picks up corrupted files the ARRs
+	// could not repair.
+	if par2RepairService != nil {
+		healthWorker.SetPar2RepairEnqueuer(par2RepairService)
+	}
 
 	// Create library sync worker (always create, but only start if enabled)
 	librarySyncWorker := health.NewLibrarySyncWorker(

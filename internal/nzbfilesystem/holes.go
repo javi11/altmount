@@ -2,6 +2,7 @@ package nzbfilesystem
 
 import (
 	"log/slog"
+	"strings"
 
 	"github.com/javi11/altmount/internal/holes"
 	"github.com/javi11/altmount/internal/metadata"
@@ -32,13 +33,27 @@ func (mvf *MetadataVirtualFile) holeEligible() bool {
 		len(mvf.meta.ClipBoundaries) == 0
 }
 
+// PatchSource serves repaired article payloads by message ID (implemented by
+// par2repair.PatchStore). Must be fast local I/O and concurrency-safe.
+type PatchSource interface {
+	Get(messageID string) ([]byte, bool)
+}
+
 // holeHooks returns the reader hooks that implement on-the-fly zero-fill for
 // this handle, or nil when the file is ineligible. The hooks are built once
 // per handle; the accumulator they share is seeded from the persisted hole
 // map so replay pre-pad works across opens.
+//
+// Files ineligible for zero-fill (encrypted, nested, non-video) still get
+// hooks carrying only PatchLookup when a patch source is configured: their
+// streams fail on new damage exactly as before, but articles repaired by a
+// PAR2 job serve byte-exact.
 func (mvf *MetadataVirtualFile) holeHooks() *usenet.HoleHooks {
 	mvf.holeOnce.Do(func() {
 		if !mvf.holeEligible() {
+			if mvf.patchSource != nil {
+				mvf.holeHooksVal = &usenet.HoleHooks{PatchLookup: mvf.patchLookup}
+			}
 			return
 		}
 		acc := &holes.Accumulator{}
@@ -55,8 +70,21 @@ func (mvf *MetadataVirtualFile) holeHooks() *usenet.HoleHooks {
 			OnHole:     mvf.onHole,
 			KnownHoles: mvf.isKnownHole,
 		}
+		if mvf.patchSource != nil {
+			mvf.holeHooksVal.PatchLookup = mvf.patchLookup
+		}
 	})
 	return mvf.holeHooksVal
+}
+
+// patchLookup adapts the patch source to the reader hook. Segment IDs are
+// normalized to the bare form the patch store keys on.
+func (mvf *MetadataVirtualFile) patchLookup(segID string) []byte {
+	p, ok := mvf.patchSource.Get(strings.Trim(segID, "<>"))
+	if !ok {
+		return nil
+	}
+	return p
 }
 
 // isKnownHole reports whether a segment is already in the hole map (replay
@@ -103,6 +131,7 @@ func (mvf *MetadataVirtualFile) onHole(segIndex int, segID string) holes.Decisio
 		mvf.padRecorder.enqueue(padEvent{
 			name:          mvf.name,
 			segIndex:      segIndex,
+			segID:         segID,
 			sourceNzbPath: mvf.holeMeta.sourceNzbPath,
 			fileSize:      mvf.holeMeta.fileSize,
 			total:         total,

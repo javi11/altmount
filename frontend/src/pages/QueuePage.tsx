@@ -23,6 +23,7 @@ import {
 	Search,
 	Settings,
 	Trash2,
+	Wrench,
 	XCircle,
 	XOctagon,
 } from "lucide-react";
@@ -58,13 +59,14 @@ import { useQueueStream } from "../hooks/useQueueStream";
 import { formatBytes, formatRelativeTime, truncateText } from "../lib/utils";
 import { type QueueItem, QueueStatus } from "../types/api";
 
-type QueueFilter = "" | "pending" | "processing" | "completed" | "failed";
+type QueueFilter = "" | "pending" | "processing" | "waiting_repair" | "completed" | "failed";
 type QueueView = "list" | "import";
 
 const QUEUE_SECTIONS = [
 	{ id: "", title: "All Items", icon: List },
 	{ id: "pending", title: "Pending", icon: Clock },
 	{ id: "processing", title: "Processing", icon: Activity },
+	{ id: "waiting_repair", title: "Waiting Repair", icon: Wrench },
 	{ id: "completed", title: "Completed", icon: CheckCircle2 },
 	{ id: "failed", title: "Failed", icon: XOctagon },
 ];

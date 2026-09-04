@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -479,4 +480,36 @@ stremio:
 	assert.Equal(t, 500, cfg.Stremio.Prowlarr.CustomScores[`\b(2160p|4k)\b.*\b(remux|bdremux)\b`])
 	assert.Equal(t, 350, cfg.Stremio.Prowlarr.CustomScores[`\b(dv|dovi|dolby[ ._-]?vision)\b`])
 	assert.Equal(t, -100, cfg.Stremio.Prowlarr.CustomScores[`\b(aac[ ._-]?2\.0|stereo|mp3)\b`])
+}
+
+// The patch directory defaults next to the metadata root but can be pointed
+// anywhere (e.g. a larger disk for patches and solver scratch files).
+func TestPar2RepairEffectivePatchDir(t *testing.T) {
+	cfg := Par2RepairConfig{}
+	assert.Equal(t, filepath.Join("/meta", "patches"), cfg.EffectivePatchDir("/meta"))
+
+	cfg.PatchDir = "/mnt/big-disk/altmount-patches"
+	assert.Equal(t, "/mnt/big-disk/altmount-patches", cfg.EffectivePatchDir("/meta"))
+}
+
+// PAR2 repair is beta: opt-in, so an install never streams whole releases
+// in the background until the user asks for it.
+func TestPar2RepairDisabledByDefault(t *testing.T) {
+	cfg := DefaultConfig()
+	assert.NotNil(t, cfg.Par2Repair.Enabled)
+	assert.False(t, *cfg.Par2Repair.Enabled, "PAR2 repair must be opt-in while in beta")
+}
+
+// ARR-first is on by default (including configs written before the knob
+// existed): corrupted files go to the ARRs first as always, with PAR2 repair
+// picking up whatever the ARRs cannot find.
+func TestPar2RepairArrFirstDefaultsOn(t *testing.T) {
+	assert.True(t, Par2RepairConfig{}.EffectiveArrFirst(), "unset must default to ARR-first")
+
+	off := false
+	assert.False(t, Par2RepairConfig{ArrFirst: &off}.EffectiveArrFirst())
+
+	cfg := DefaultConfig()
+	assert.NotNil(t, cfg.Par2Repair.ArrFirst)
+	assert.True(t, *cfg.Par2Repair.ArrFirst)
 }
