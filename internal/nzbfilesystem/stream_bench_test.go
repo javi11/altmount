@@ -101,7 +101,9 @@ func BenchmarkStreamColdOpen(b *testing.B) {
 				h.awaitQuietWire(500*time.Millisecond, 30*time.Second)
 				articles := float64(h.bodies()-before) / benchColdOpens
 				return []streambench.Metric{
-					{Name: "ttfb_mean", Unit: "ms", Value: ms(ttfb.Mean())},
+					// Same-code runs spread about 7 % on the mean (the demand article
+					// lands behind a varying number of speculative ones), so allow 10 %.
+					{Name: "ttfb_mean", Unit: "ms", Value: ms(ttfb.Mean()), Tolerance: 0.10},
 					info(streambench.Metric{Name: "ttfb_p50", Unit: "ms", Value: ms(ttfb.P(0.5))}),
 					info(streambench.Metric{Name: "ttfb_p99", Unit: "ms", Value: ms(ttfb.P(0.99))}),
 					info(streambench.Metric{Name: "articles", Unit: "count", Value: articles}),
