@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 )
 
@@ -14,6 +15,31 @@ type Metric struct {
 	Unit           string  `json:"unit"`
 	Value          float64 `json:"value"`
 	HigherIsBetter bool    `json:"higher_is_better"`
+	// Informational metrics are reported but never fail the regression gate:
+	// tail percentiles from small samples and counts that depend on timing.
+	Informational bool `json:"informational,omitempty"`
+}
+
+// Median returns the per-name median of several runs' metrics. Every run
+// must report the same metric names in the same order.
+func Median(runs [][]Metric) []Metric {
+	if len(runs) == 0 {
+		return nil
+	}
+	out := make([]Metric, len(runs[0]))
+	for i := range runs[0] {
+		vals := make([]float64, 0, len(runs))
+		for _, r := range runs {
+			if i < len(r) {
+				vals = append(vals, r[i].Value)
+			}
+		}
+		sort.Float64s(vals)
+		m := runs[0][i]
+		m.Value = vals[len(vals)/2]
+		out[i] = m
+	}
+	return out
 }
 
 type Scenario struct {

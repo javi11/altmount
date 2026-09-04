@@ -42,6 +42,24 @@ func TestCompareFlagsRegressions(t *testing.T) {
 	}
 }
 
+func TestMedianAndInformational(t *testing.T) {
+	runs := [][]Metric{
+		{{Name: "a", Value: 3}, {Name: "p99", Value: 100, Informational: true}},
+		{{Name: "a", Value: 1}, {Name: "p99", Value: 300, Informational: true}},
+		{{Name: "a", Value: 2}, {Name: "p99", Value: 200, Informational: true}},
+	}
+	med := Median(runs)
+	if med[0].Value != 2 || med[1].Value != 200 {
+		t.Fatalf("median = %+v", med)
+	}
+	base, nw := &Result{}, &Result{}
+	base.Add("S", Metric{Name: "p99", Value: 100, Informational: true})
+	nw.Add("S", Metric{Name: "p99", Value: 300, Informational: true})
+	if AnyRegressed(Compare(base, nw, 0.05)) {
+		t.Fatal("informational metrics must never regress")
+	}
+}
+
 func TestFormatTableMarksRegressions(t *testing.T) {
 	base, nw := twoResults()
 	out := FormatTable(Compare(base, nw, 0.05))
