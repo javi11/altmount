@@ -40,7 +40,9 @@ streaming:
 
 # Segment cache: decoded articles kept for reuse across handles and re-opens.
 segment_cache:
-  memory_mb: 256 # In-memory tier in front of the disk cache; on even when the disk cache is off (0 disables)
+  memory_mb: 256 # In-memory tier in front of the disk cache; on even when the disk cache is off (0 disables).
+  # The Go soft memory limit is set to memory_mb + 256 MB so evicted articles are collected promptly;
+  # set GOMEMLIMIT in the environment to take over that limit yourself.
   enabled: false # Disk tier
   cache_path: /tmp/altmount-segcache
   max_size_gb: 10

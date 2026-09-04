@@ -233,6 +233,24 @@ func (c SegmentCacheConfig) MemoryBytes() int64 {
 	return int64(max(*c.MemoryMB, 0)) << 20
 }
 
+// softMemoryHeadroomMB is what the process needs above the memory tier:
+// read-ahead windows, connection buffers, metadata, and the runtime itself.
+const softMemoryHeadroomMB = 256
+
+// SoftMemoryLimit is the Go soft memory limit to apply for this cache budget.
+// Without a limit the collector lets the heap reach twice the live set, so a
+// 256 MB tier costs 600+ MB of RSS. The limit makes the runtime collect the
+// evicted articles as soon as the heap nears budget plus headroom. It is 0
+// (leave the runtime alone) when the memory tier is off or the operator set
+// GOMEMLIMIT themselves.
+func (c SegmentCacheConfig) SoftMemoryLimit(gomemlimit string) int64 {
+	cache := c.MemoryBytes()
+	if cache == 0 || gomemlimit != "" {
+		return 0
+	}
+	return cache + int64(softMemoryHeadroomMB)<<20
+}
+
 // WebDAVConfig represents WebDAV server configuration
 type WebDAVConfig struct {
 	Port     int    `yaml:"port" mapstructure:"port" json:"port"`

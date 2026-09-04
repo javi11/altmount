@@ -138,6 +138,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if initialCache := initializeSegmentCache(ctx, cfg, cacheSource); initialCache != nil {
 		defer initialCache.Stop()
 	}
+	applySoftMemoryLimit(ctx, cfg)
 
 	// Background PAR2 repair: repairs missing articles and serves the patched
 	// payloads on the read path's hole branch.
@@ -201,6 +202,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Register segment cache config change handler for dynamic path/size/expiry changes.
 	// Enable/disable toggles take effect automatically via cacheSource.Store() at file-open time.
 	configManager.OnConfigChange(func(oldConfig, newConfig *config.Config) {
+		if oldConfig.SegmentCache.MemoryBytes() != newConfig.SegmentCache.MemoryBytes() {
+			applySoftMemoryLimit(ctx, newConfig)
+		}
 		structuralChange := oldConfig.SegmentCache.CachePath != newConfig.SegmentCache.CachePath ||
 			oldConfig.SegmentCache.MaxSizeGB != newConfig.SegmentCache.MaxSizeGB ||
 			intPtrValue(oldConfig.SegmentCache.ExpiryHours) != intPtrValue(newConfig.SegmentCache.ExpiryHours)
