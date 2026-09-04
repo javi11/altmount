@@ -33,7 +33,7 @@ metadata:
 
 # Streaming and download configuration
 streaming:
-  max_prefetch: 30 # Number of segments to prefetch ahead of current read position
+  max_prefetch: 60 # Segments to prefetch ahead of the read position (default: 60; also capped at 96 MB)
   failure_masking:
     enabled: true # Automatically hide files from mounts after repeated failures
     threshold: 3 # Number of streaming failures before masking a file

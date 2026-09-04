@@ -42,6 +42,10 @@ type openHandle struct {
 	path     string
 	closed   atomic.Bool
 	asyncBuf *backend.AsyncReadBuffer // nil when async read-ahead is disabled
+	// ctx lives as long as the handle; Release cancels it so a read parked on
+	// a stalled segment unblocks instead of waiting out the read timeout.
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // FS implements cgofuse.FileSystemInterface using NzbFilesystem.
@@ -131,6 +135,9 @@ func (f *FS) Destroy() {
 func (f *FS) closeHandle(h *openHandle) {
 	if !h.closed.CompareAndSwap(false, true) {
 		return
+	}
+	if h.cancel != nil {
+		h.cancel()
 	}
 	if h.stream != nil && f.cfg.StreamTracker != nil {
 		f.cfg.StreamTracker.Remove(h.stream.ID)
@@ -291,10 +298,13 @@ func (f *FS) OpenEx(path string, fi *cgofuse.FileInfo_t) int {
 		return -cgofuse.EIO
 	}
 
+	hctx, hcancel := context.WithCancel(context.Background())
 	h := &openHandle{
 		file:   file,
 		stream: stream,
 		path:   clean,
+		ctx:    hctx,
+		cancel: hcancel,
 	}
 
 	// Attach a read-ahead buffer for sufficiently large files. The buffer
@@ -336,7 +346,7 @@ func (f *FS) Read(path string, buff []byte, ofst int64, fh uint64) int {
 
 	var n int
 	var err error
-	ctx := context.Background()
+	ctx := h.ctx
 
 	if h.asyncBuf != nil {
 		n, err = h.asyncBuf.ReadAtContext(ctx, buff, ofst)
