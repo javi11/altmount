@@ -452,3 +452,69 @@ func TestDirectoryModTime_StableAcrossHealthSweep(t *testing.T) {
 	assert.True(t, ms.DirectoryModTime(dir).After(before),
 		"importing a new file must advance the directory mtime")
 }
+
+func TestDeleteDirectoryIfEmpty(t *testing.T) {
+	newService := func(t *testing.T) (*MetadataService, string) {
+		t.Helper()
+		root := t.TempDir()
+		return NewMetadataService(root), root
+	}
+
+	writeMeta := func(t *testing.T, ms *MetadataService, virtualPath string) {
+		t.Helper()
+		meta := ms.CreateFileMetadata(
+			1024, "test.nzb", metapb.FileStatus_FILE_STATUS_HEALTHY,
+			nil, metapb.Encryption_NONE, "", "", nil, nil, 0, nil, "",
+		)
+		require.NoError(t, ms.WriteFileMetadata(virtualPath, meta))
+	}
+
+	t.Run("removes empty directory and purges its cached tree", func(t *testing.T) {
+		ms, root := newService(t)
+
+		virtualPath := filepath.Join("movies", "Release", "file.mkv")
+		writeMeta(t, ms, virtualPath)
+		_, err := ms.ReadFileMetadataLite(virtualPath)
+		require.NoError(t, err)
+		require.NoError(t, os.Remove(ms.GetMetadataFilePath(virtualPath)))
+
+		require.NoError(t, ms.DeleteDirectoryIfEmpty(filepath.Join("movies", "Release")))
+
+		assert.NoDirExists(t, filepath.Join(root, "movies", "Release"))
+		_, cached := ms.liteCache.Get(virtualPath)
+		assert.False(t, cached, "cached entries under a removed directory must be purged")
+	})
+
+	t.Run("preserves a directory that still holds files", func(t *testing.T) {
+		ms, root := newService(t)
+
+		virtualPath := filepath.Join("movies", "Release", "sibling.mkv")
+		writeMeta(t, ms, virtualPath)
+		_, err := ms.ReadFileMetadataLite(virtualPath)
+		require.NoError(t, err)
+
+		err = ms.DeleteDirectoryIfEmpty(filepath.Join("movies", "Release"))
+
+		assert.ErrorIs(t, err, ErrDirectoryNotEmpty)
+		assert.DirExists(t, filepath.Join(root, "movies", "Release"))
+		require.FileExists(t, ms.GetMetadataFilePath(virtualPath))
+		_, cached := ms.liteCache.Get(virtualPath)
+		assert.True(t, cached, "a preserved directory must keep its cached entries")
+	})
+
+	t.Run("missing directory is not an error", func(t *testing.T) {
+		ms, _ := newService(t)
+
+		assert.NoError(t, ms.DeleteDirectoryIfEmpty(filepath.Join("movies", "Gone")))
+	})
+
+	t.Run("refuses to remove the metadata root", func(t *testing.T) {
+		ms, root := newService(t)
+
+		for _, p := range []string{"", ".", string(filepath.Separator)} {
+			err := ms.DeleteDirectoryIfEmpty(p)
+			assert.ErrorContains(t, err, "safety block", "must refuse virtual path %q", p)
+		}
+		assert.DirExists(t, root)
+	})
+}

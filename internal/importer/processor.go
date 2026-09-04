@@ -953,7 +953,9 @@ func (proc *Processor) processRarArchive(
 			return nzbFolder, writtenPaths, err
 		}
 
-		if _, err := multifile.ProcessRegularFiles(
+		// Track these even on error: rollback removes the release folder only once
+		// this job's own files are gone, so a partial write must be recorded.
+		regularWritten, err := multifile.ProcessRegularFiles(
 			ctx,
 			nzbFolder,
 			regularFiles,
@@ -965,7 +967,9 @@ func (proc *Processor) processRarArchive(
 			nil, // archive progress is tracked by the archive tracker below
 			storeIndex,
 			storeRef,
-		); err != nil {
+		)
+		writtenPaths = append(writtenPaths, regularWritten...)
+		if err != nil {
 			slog.DebugContext(ctx, "Failed to process regular files", "error", err)
 		}
 	}
@@ -1092,7 +1096,9 @@ func (proc *Processor) processSevenZipArchive(
 			return nzbFolder, writtenPaths, err
 		}
 
-		if _, err := multifile.ProcessRegularFiles(
+		// Track these even on error: rollback removes the release folder only once
+		// this job's own files are gone, so a partial write must be recorded.
+		regularWritten, err := multifile.ProcessRegularFiles(
 			ctx,
 			nzbFolder,
 			regularFiles,
@@ -1104,7 +1110,9 @@ func (proc *Processor) processSevenZipArchive(
 			nil, // archive progress is tracked by the archive tracker below
 			storeIndex,
 			storeRef,
-		); err != nil {
+		)
+		writtenPaths = append(writtenPaths, regularWritten...)
+		if err != nil {
 			slog.DebugContext(ctx, "Failed to process regular files", "error", err)
 		}
 	}

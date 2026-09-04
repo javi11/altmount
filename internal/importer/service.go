@@ -1391,38 +1391,49 @@ func (s *Service) OnItemClaimed(ctx context.Context, item *database.ImportQueueI
 // along with any health records already scheduled for them.
 // Paths prefixed with "DIR:" indicate a directory that should be removed if empty; others are individual files.
 func (s *Service) cleanupWrittenPaths(ctx context.Context, itemID int64, paths []string) {
+	// Files first: a release folder is only ever removed once this job's own
+	// files are gone, so what remains in it belongs to another import.
 	var dirPaths []string
 	for _, p := range paths {
 		if after, ok := strings.CutPrefix(p, "DIR:"); ok {
 			dirPaths = append(dirPaths, after)
-		} else {
-			// Pass 1: Delete all individual files written by this job
-			if delErr := s.metadataService.DeleteFileMetadata(ctx, p); delErr != nil {
-				s.log.WarnContext(ctx, "Failed to clean up metadata file after import failure",
-					"queue_id", itemID,
-					"path", p,
-					"error", delErr)
-			} else {
-				s.log.DebugContext(ctx, "Cleaned up metadata file after import failure",
-					"queue_id", itemID,
-					"path", p)
-			}
-			s.cleanupHealthRecords(ctx, itemID, p)
+			continue
 		}
+
+		if delErr := s.metadataService.DeleteFileMetadata(ctx, p); delErr != nil {
+			s.log.WarnContext(ctx, "Failed to clean up metadata file after import failure",
+				"queue_id", itemID,
+				"path", p,
+				"error", delErr)
+		} else {
+			s.log.DebugContext(ctx, "Cleaned up metadata file after import failure",
+				"queue_id", itemID,
+				"path", p)
+		}
+		s.cleanupHealthRecords(ctx, itemID, p)
 	}
 
-	// Pass 2: Now that this job's files have been removed, delete the directory
-	// ONLY if it is empty. If sibling files exist, it is preserved unharmed.
 	for _, dirPath := range dirPaths {
-		if delErr := s.metadataService.DeleteDirectoryIfEmpty(dirPath); delErr != nil {
+		delErr := s.metadataService.DeleteDirectoryIfEmpty(dirPath)
+		switch {
+		case errors.Is(delErr, metadata.ErrDirectoryNotEmpty):
+			// A concurrent import still owns files here. Its health records live
+			// under the same prefix, so leave them alone too.
 			s.log.DebugContext(ctx, "Preserved metadata directory after import failure (contains files from another import)",
 				"queue_id", itemID,
 				"dir", dirPath)
-		} else {
-			s.log.DebugContext(ctx, "Cleaned up empty metadata directory after import failure",
+			continue
+		case delErr != nil:
+			s.log.WarnContext(ctx, "Failed to clean up metadata directory after import failure",
 				"queue_id", itemID,
-				"dir", dirPath)
+				"dir", dirPath,
+				"error", delErr)
+			continue
 		}
+
+		s.log.DebugContext(ctx, "Cleaned up empty metadata directory after import failure",
+			"queue_id", itemID,
+			"dir", dirPath)
 		s.cleanupHealthRecords(ctx, itemID, dirPath)
 	}
 }
