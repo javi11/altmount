@@ -22,13 +22,15 @@ import (
 // `make bench-stream`; results land in bench/results/<sha>.json and are
 // compared by `make bench-compare BASE=<sha>`.
 const (
-	benchFileSegs   = 400
-	benchPrefetch   = 60 // config default streaming.max_prefetch
-	benchSeqBytes   = 200 << 20
-	benchSeekReads  = 20
-	benchSeekSize   = 64 << 10
-	benchColdOpens  = 20
-	benchPauseSleep = 5 * time.Second
+	benchFileSegs = 400
+	benchPrefetch = 60 // config default streaming.max_prefetch
+	benchSeqBytes = 200 << 20
+	// benchStartupBytes separates a stream's opening phase from steady state.
+	benchStartupBytes = 16 << 20
+	benchSeekReads    = 20
+	benchSeekSize     = 64 << 10
+	benchColdOpens    = 20
+	benchPauseSleep   = 5 * time.Second
 )
 
 var benchProfiles = []benchProfile{profilePremium750K, profileSlow4M}
@@ -126,12 +128,22 @@ func BenchmarkStreamSequential(b *testing.B) {
 				beforeBytes := h.bytesWritten()
 				start := time.Now()
 				var read int64
-				for read < benchSeqBytes {
+				var startupDone time.Time
+				// Read well past the prefetch window so steady state is the wire,
+				// not buffered bytes: 200 MB on 750 KB articles, 600 MB on 4 MiB.
+				seqBytes := int64(200 << 20)
+				if p.ArticleSize >= 4<<20 {
+					seqBytes = 600 << 20
+				}
+				for read < seqBytes {
 					n, err := mvf.ReadAt(buf, read)
 					if err != nil && err != io.EOF {
 						b.Fatalf("ReadAt(%d): %v", read, err)
 					}
 					read += int64(n)
+					if read >= benchStartupBytes && startupDone.IsZero() {
+						startupDone = time.Now()
+					}
 					if err == io.EOF {
 						break
 					}
@@ -140,8 +152,14 @@ func BenchmarkStreamSequential(b *testing.B) {
 				_ = mvf.Close()
 				h.awaitQuietWire(500*time.Millisecond, 30*time.Second)
 				fetched := h.bytesWritten() - beforeBytes
+				// Startup is the time to the first 16 MB, where a fresh reader's
+				// window is still opening; steady state is everything after it,
+				// which is what sustained playback runs at.
+				startup := startupDone.Sub(start)
 				return []streambench.Metric{
-					{Name: "throughput", Unit: "MB/s", Value: mbps(read, elapsed), HigherIsBetter: true},
+					{Name: "startup_ms", Unit: "ms", Value: ms(startup), Tolerance: 0.10},
+					{Name: "throughput", Unit: "MB/s", Value: mbps(read-benchStartupBytes, elapsed-startup), HigherIsBetter: true},
+					info(streambench.Metric{Name: "throughput_total", Unit: "MB/s", Value: mbps(read, elapsed), HigherIsBetter: true}),
 					{Name: "waste_ratio", Unit: "ratio", Value: float64(fetched) / float64(read)},
 				}
 			})
@@ -339,6 +357,7 @@ func BenchmarkStreamUnderContention(b *testing.B) {
 		var lat streambench.Samples
 		start := time.Now()
 		var off int64
+		var startupDone time.Time
 		for off < 100<<20 {
 			t0 := time.Now()
 			n, err := mvf.ReadAt(buf, off)
@@ -347,8 +366,12 @@ func BenchmarkStreamUnderContention(b *testing.B) {
 			}
 			lat.Add(time.Since(t0))
 			off += int64(n)
+			if off >= benchStartupBytes && startupDone.IsZero() {
+				startupDone = time.Now()
+			}
 		}
 		elapsed := time.Since(start)
+		startup := startupDone.Sub(start)
 		cancel()
 		iwg.Wait()
 		_ = mvf.Close()
@@ -356,7 +379,8 @@ func BenchmarkStreamUnderContention(b *testing.B) {
 		return []streambench.Metric{
 			// Single-stream throughput while an import saturates the normal lane.
 			// Read-ahead must keep its edge over import; 10 % covers run spread.
-			{Name: "stream_mbps", Unit: "MB/s", Value: mbps(off, elapsed), HigherIsBetter: true, Tolerance: 0.10},
+			{Name: "stream_mbps", Unit: "MB/s", Value: mbps(off-benchStartupBytes, elapsed-startup), HigherIsBetter: true, Tolerance: 0.10},
+			info(streambench.Metric{Name: "stream_startup_ms", Unit: "ms", Value: ms(startup)}),
 			info(streambench.Metric{Name: "stream_p50", Unit: "ms", Value: ms(lat.P(0.5))}),
 			info(streambench.Metric{Name: "stream_p99", Unit: "ms", Value: ms(lat.P(0.99))}),
 			{Name: "import_mbps", Unit: "MB/s", Value: mbps(importBytes.Load(), elapsed), HigherIsBetter: true},

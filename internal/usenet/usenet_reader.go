@@ -124,13 +124,23 @@ func WithSpeculativeBudget(b SpecBudget) ReaderOption {
 }
 
 const (
-	// rampBaseSegments is the read-ahead a fresh streaming reader opens with.
-	// It quadruples per consumed segment, so sustained reading reaches the
-	// full window within three articles while a probe that reads a couple of
-	// MB and leaves drags almost nothing behind it.
+	// rampBaseSegments is the read-ahead a fresh streaming reader opens with,
+	// and keeps until the caller has read its first byte. Holding the fan-out
+	// back that long also keeps the demand article from queueing behind a
+	// window of speculative ones on the same connections.
 	rampBaseSegments = 2
+	// rampStep1Bytes/rampStep2Bytes are the read positions at which the
+	// window widens to rampStep1Segments and rampStep2Segments before
+	// opening fully. A probe that reads a few hundred KB and leaves drags
+	// only a handful of articles behind it; a player is at full speed
+	// within its first couple of MB.
+	rampStep1Bytes    = 512 << 10
+	rampStep1Segments = 8
+	rampStep2Bytes    = 2 << 20
+	rampStep2Segments = 32
 	// streamingIntentBytes is the request length at or above which a caller
-	// is clearly playing, not probing, and gets the full window at once.
+	// is clearly playing, not probing: the window opens fully as soon as the
+	// first byte has been read.
 	streamingIntentBytes = 128 << 20
 )
 
@@ -411,9 +421,19 @@ func (b *UsenetReader) Read(p []byte) (int, error) {
 		n += nn
 
 		b.mu.Lock()
+		before := b.totalBytesRead
 		b.totalBytesRead += int64(nn)
 		totalRead := b.totalBytesRead
+		// The read-ahead window widens with bytes read; wake the manager when
+		// a step boundary is crossed so it is not left waiting for the next
+		// segment rotation.
+		widened := nn > 0 && (before == 0 ||
+			(before < rampStep1Bytes && totalRead >= rampStep1Bytes) ||
+			(before < rampStep2Bytes && totalRead >= rampStep2Bytes))
 		b.mu.Unlock()
+		if widened {
+			b.cond.Signal()
+		}
 
 		if err != nil {
 			if errors.Is(err, io.EOF) {
@@ -477,15 +497,22 @@ func IsArticleNotFound(err error) bool {
 }
 
 // windowFor is how many segments may be scheduled ahead of the read position
-// once consumed segments have been read since the reader was created.
-func (b *UsenetReader) windowFor(consumed int) int {
-	if !b.priority || b.rangeHint >= streamingIntentBytes {
+// given how many bytes the caller has read since the reader was created.
+func (b *UsenetReader) windowFor(bytesRead int64) int {
+	if !b.priority {
 		return b.maxPrefetch
 	}
-	if consumed >= 16 {
-		return b.maxPrefetch
+	w := b.maxPrefetch
+	switch {
+	case bytesRead == 0:
+		w = rampBaseSegments
+	case b.rangeHint >= streamingIntentBytes:
+	case bytesRead < rampStep1Bytes:
+		w = rampStep1Segments
+	case bytesRead < rampStep2Bytes:
+		w = rampStep2Segments
 	}
-	return min(b.maxPrefetch, rampBaseSegments<<(2*consumed))
+	return min(b.maxPrefetch, w)
 }
 
 // BufferedAhead reports bytes scheduled for fetch beyond what the caller has
@@ -726,7 +753,7 @@ func (b *UsenetReader) downloadManager(ctx context.Context) {
 		// Limit how far ahead we prefetch beyond the current read position
 		currentRead := b.rg.GetCurrentIndex()
 		ahead := b.nextToDownload - currentRead
-		if ahead >= b.windowFor(currentRead) {
+		if ahead >= b.windowFor(b.totalBytesRead) {
 			b.cond.Wait()
 			b.mu.Unlock()
 			if ctx.Err() != nil {
