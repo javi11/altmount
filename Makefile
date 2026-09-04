@@ -66,7 +66,7 @@ BENCH_OUT ?= bench/results/$(BENCH_SHA).json
 # Runs the streaming benchmarks against the simulated provider and writes
 # bench/results/<sha>.json. Takes several minutes.
 bench-stream:
-	ALTMOUNT_BENCH_OUT=$(BENCH_OUT) $(GO) test ./internal/nzbfilesystem/ -run '^$$' -bench 'BenchmarkStream' -benchtime 1x -timeout 60m
+	ALTMOUNT_BENCH_OUT=$(CURDIR)/$(BENCH_OUT) $(GO) test ./internal/nzbfilesystem/ -run '^$$' -bench 'BenchmarkStream' -benchtime 1x -timeout 60m
 
 # Compares BENCH_OUT against bench/results/$(BASE).json and fails on regression.
 # Usage: make bench-compare BASE=baseline-main
