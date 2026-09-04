@@ -5,8 +5,12 @@ import "testing"
 func TestSpeculativeBudgetCapacityFormula(t *testing.T) {
 	b := NewSpeculativeBudget()
 	b.SetCapacity(50)
-	if got := b.Capacity(); got != 149 {
-		t.Fatalf("Capacity(50 conns) = %d, want 149", got)
+	if got := b.Capacity(); got != 199 {
+		t.Fatalf("Capacity(50 conns) = %d, want 199", got)
+	}
+	b.SetCapacity(15)
+	if got := b.Capacity(); got != 59 {
+		t.Fatalf("Capacity(15 conns) = %d, want 59", got)
 	}
 	b.SetCapacity(0)
 	if got := b.Capacity(); got != 0 {
@@ -24,15 +28,17 @@ func TestSpeculativeBudgetCapacityFormula(t *testing.T) {
 
 func TestSpeculativeBudgetBoundsAndReleases(t *testing.T) {
 	b := NewSpeculativeBudget()
-	b.SetCapacity(1) // 1*3-1 = 2 slots
+	b.SetCapacity(1) // 1*4-1 = 3 slots
 	r1, ok1 := b.TryAcquire()
 	r2, ok2 := b.TryAcquire()
-	if !ok1 || !ok2 {
-		t.Fatal("two slots expected")
+	r3, ok3 := b.TryAcquire()
+	if !ok1 || !ok2 || !ok3 {
+		t.Fatal("three slots expected")
 	}
 	if _, ok := b.TryAcquire(); ok {
-		t.Fatal("third acquire must be refused")
+		t.Fatal("fourth acquire must be refused")
 	}
+	r3()
 	r1()
 	r1() // idempotent
 	if b.InFlight() != 1 {

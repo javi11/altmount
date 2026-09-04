@@ -15,12 +15,16 @@ type SpeculativeBudget struct {
 }
 
 // speculativeBodiesPerConn is how many speculative bodies a connection is
-// worth: the depth at which pipelining stops paying off.
-const speculativeBodiesPerConn = 3
+// worth: one below the default per-connection stream cap, so read-ahead can
+// fill every connection's pipeline while each still has a slot left for a
+// demand read. Providers that serve articles slowly are depth-bound, so a
+// smaller figure costs throughput directly: three per connection measured
+// about 15% below the full pipeline at a 15-connection budget.
+const speculativeBodiesPerConn = 4
 
 func NewSpeculativeBudget() *SpeculativeBudget { return &SpeculativeBudget{} }
 
-// SetCapacity derives the slot count from total provider connections: three
+// SetCapacity derives the slot count from total provider connections: four
 // bodies per connection, minus one so a demand read never finds every slot
 // taken by read-ahead. Zero or negative disables the budget (unlimited).
 func (b *SpeculativeBudget) SetCapacity(totalConns int) {

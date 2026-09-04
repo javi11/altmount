@@ -49,8 +49,13 @@ func TestToNNTPProviderSetsReconnectDelay(t *testing.T) {
 
 func TestToNNTPProviderStreamInflightDefaultsAndCaps(t *testing.T) {
 	p := tlsProvider()
-	if got := p.ToNNTPProvider().StreamInflight; got != 4 {
-		t.Fatalf("StreamInflight default = %d, want 4", got)
+	p.InflightRequests = 12
+	if got := p.ToNNTPProvider().StreamInflight; got != 12 {
+		t.Fatalf("StreamInflight default = %d, want inflight_requests (12)", got)
+	}
+	p.InflightRequests = 0
+	if got := p.ToNNTPProvider().StreamInflight; got != 10 {
+		t.Fatalf("StreamInflight default with inflight unset = %d, want 10", got)
 	}
 	p.StreamInflightRequests = 6
 	if got := p.ToNNTPProvider().StreamInflight; got != 6 {

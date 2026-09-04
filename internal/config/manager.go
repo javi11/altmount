@@ -39,9 +39,6 @@ const (
 	// providerReconnectDelay lets a provider dropped after a 502 rejoin the
 	// pool instead of staying out until restart.
 	providerReconnectDelay = 30 * time.Second
-	// defaultStreamInflightRequests bounds streaming bodies per connection so
-	// a demand read waits behind at most three read-ahead bodies.
-	defaultStreamInflightRequests = 4
 )
 
 const (
@@ -1505,11 +1502,14 @@ func (p *ProviderConfig) ToNNTPProvider() nntppool.Provider {
 		statInflight = 100
 	}
 
+	// Streaming bodies per connection default to the full pipeline depth.
+	// A tighter cap shortens how long a seek waits behind read-ahead on its
+	// connection, but providers that reward deep pipelines lose sequential
+	// throughput to it: capped at 4 a 15-connection account measured about
+	// 20% below the uncapped pipeline. Users who want the bounded wait set
+	// stream_inflight_requests explicitly.
 	streamInflight := p.StreamInflightRequests
-	if streamInflight <= 0 {
-		streamInflight = defaultStreamInflightRequests
-	}
-	if streamInflight > inflight {
+	if streamInflight <= 0 || streamInflight > inflight {
 		streamInflight = inflight
 	}
 
