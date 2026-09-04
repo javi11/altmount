@@ -1,6 +1,6 @@
 {
-  "git_sha": "1af9a6c3",
-  "timestamp": "2026-09-04T11:52:29.805591Z",
+  "git_sha": "0abaeac8",
+  "timestamp": "2026-09-04T12:02:09.562535Z",
   "scenarios": [
     {
       "name": "B1-cold-open/premium-750k",
@@ -8,27 +8,28 @@
         {
           "name": "ttfb_mean",
           "unit": "ms",
-          "value": 136.64426,
-          "higher_is_better": false
+          "value": 146.340258,
+          "higher_is_better": false,
+          "tolerance": 0.1
         },
         {
           "name": "ttfb_p50",
           "unit": "ms",
-          "value": 134.64125,
+          "value": 134.941333,
           "higher_is_better": false,
           "informational": true
         },
         {
           "name": "ttfb_p99",
           "unit": "ms",
-          "value": 186.349125,
+          "value": 246.99975,
           "higher_is_better": false,
           "informational": true
         },
         {
           "name": "articles",
           "unit": "count",
-          "value": 60.6,
+          "value": 60.55,
           "higher_is_better": false,
           "informational": true
         }
@@ -40,27 +41,28 @@
         {
           "name": "ttfb_mean",
           "unit": "ms",
-          "value": 4238.523454,
-          "higher_is_better": false
+          "value": 3906.546108,
+          "higher_is_better": false,
+          "tolerance": 0.1
         },
         {
           "name": "ttfb_p50",
           "unit": "ms",
-          "value": 4168.207208,
+          "value": 4182.876958,
           "higher_is_better": false,
           "informational": true
         },
         {
           "name": "ttfb_p99",
           "unit": "ms",
-          "value": 8797.573583,
+          "value": 7096.164417,
           "higher_is_better": false,
           "informational": true
         },
         {
           "name": "articles",
           "unit": "count",
-          "value": 79.95,
+          "value": 93.55,
           "higher_is_better": false,
           "informational": true
         }
@@ -72,7 +74,7 @@
         {
           "name": "throughput",
           "unit": "MB/s",
-          "value": 208.75795288081034,
+          "value": 219.13168414952017,
           "higher_is_better": true
         },
         {
@@ -89,13 +91,13 @@
         {
           "name": "throughput",
           "unit": "MB/s",
-          "value": 34.987405447210286,
+          "value": 35.2339251471859,
           "higher_is_better": true
         },
         {
           "name": "waste_ratio",
           "unit": "ratio",
-          "value": 2.2141357851028443,
+          "value": 2.214760785102844,
           "higher_is_better": false
         }
       ]
@@ -106,13 +108,13 @@
         {
           "name": "read_p50",
           "unit": "ms",
-          "value": 155.40875,
+          "value": 153.267833,
           "higher_is_better": false
         },
         {
           "name": "read_p99",
           "unit": "ms",
-          "value": 165.26375,
+          "value": 166.506208,
           "higher_is_better": false,
           "informational": true
         },
@@ -130,13 +132,13 @@
         {
           "name": "read_p50",
           "unit": "ms",
-          "value": 1651.422708,
+          "value": 1649.016458,
           "higher_is_better": false
         },
         {
           "name": "read_p99",
           "unit": "ms",
-          "value": 1670.565459,
+          "value": 1667.538208,
           "higher_is_better": false,
           "informational": true
         },
@@ -176,20 +178,20 @@
         {
           "name": "min_stream_mbps",
           "unit": "MB/s",
-          "value": 72.50064672570647,
+          "value": 77.65825417449518,
           "higher_is_better": true,
           "tolerance": 0.12
         },
         {
           "name": "max_stream_mbps",
           "unit": "MB/s",
-          "value": 91.32849627174245,
+          "value": 91.19992539846103,
           "higher_is_better": true
         },
         {
           "name": "stall_p99",
           "unit": "ms",
-          "value": 199.042917,
+          "value": 180.99875,
           "higher_is_better": false,
           "informational": true
         }
@@ -212,21 +214,21 @@
         {
           "name": "stream_p50",
           "unit": "ms",
-          "value": 0.029833,
+          "value": 0.026834,
           "higher_is_better": false,
           "informational": true
         },
         {
           "name": "stream_p99",
           "unit": "ms",
-          "value": 59.38475,
+          "value": 94.107542,
           "higher_is_better": false,
           "informational": true
         },
         {
           "name": "import_mbps",
           "unit": "MB/s",
-          "value": 137.1066449967831,
+          "value": 136.0790693216056,
           "higher_is_better": true
         }
       ]
@@ -237,14 +239,14 @@
         {
           "name": "miss_ttfb_mean",
           "unit": "ms",
-          "value": 168.561242,
+          "value": 168.033909,
           "higher_is_better": false,
           "tolerance": 0.1
         },
         {
           "name": "miss_ttfb_p50",
           "unit": "ms",
-          "value": 160.191917,
+          "value": 158.834209,
           "higher_is_better": false,
           "informational": true
         },
