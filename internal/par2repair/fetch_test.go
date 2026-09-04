@@ -202,6 +202,50 @@ func TestPoolFetcherStatIDsBoundsConcurrency(t *testing.T) {
 	}
 }
 
+// A repair configured for N connections must not occupy more than N
+// connections' worth of shallow STAT pipeline either: the sweep width is the
+// pool budget capped by the repair's own connection cap × sweepStatDepth.
+func TestSweepStatConcurrencyRespectsRepairConnections(t *testing.T) {
+	cases := []struct {
+		name                string
+		poolWidth, maxConns int
+		want                int
+	}{
+		{"repair cap binds", 4096, 10, 10 * sweepStatDepth},
+		{"pool budget binds", 30, 10, 30},
+		{"non-positive conns falls back to pool budget", 200, 0, 200},
+		{"non-positive pool width keeps conns bound", 0, 10, 10 * sweepStatDepth},
+		{"floor of one", 0, 0, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := SweepStatConcurrency(tc.poolWidth, tc.maxConns); got != tc.want {
+				t.Fatalf("SweepStatConcurrency(%d, %d) = %d, want %d", tc.poolWidth, tc.maxConns, got, tc.want)
+			}
+		})
+	}
+}
+
+// The sweep bound must follow the pool-wide stat budget when one is wired
+// (pool.Manager.StatSweepConcurrency: conservative while streams are active,
+// full STAT pipeline capacity when idle), not the static fallback.
+func TestPoolFetcherStatIDsUsesConfiguredStatConcurrency(t *testing.T) {
+	client := &concurrencyRecordingStatClient{fakeStatClient: fakeStatClient{articles: map[string]bool{"live@x": true}}}
+	f := NewPoolFetcher(func() (BodyClient, error) { return client, nil }, nil)
+	f.StatConcurrency = func() int { return 7 }
+
+	if _, err := f.StatIDs(context.Background(), []string{"live@x"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(client.opts) == 0 {
+		t.Fatal("StatMany never called")
+	}
+	for _, o := range client.opts {
+		if o.Concurrency != 7 {
+			t.Fatalf("Concurrency = %d, want 7 from the wired stat budget", o.Concurrency)
+		}
+	}
+}
 // bodyOnlyClient has no stat surface; StatIDs must degrade to a no-op.
 type bodyOnlyClient struct{}
 

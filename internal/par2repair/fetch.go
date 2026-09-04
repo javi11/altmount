@@ -180,6 +180,29 @@ const statPerItemBudget = 250 * time.Millisecond
 // the pool responsive for everything else running beside the repair.
 const statSweepConcurrency = 64
 
+// sweepStatDepth is how many STATs a repair sweep may keep outstanding per
+// repair connection. The repair's connection budget gates body fetches, but
+// STATs are pipelined, so "connections" alone is not the unit — this converts
+// the budget into a shallow pipeline that drains well inside the pool's
+// per-attempt window (a few RTTs), instead of letting a 10-connection repair
+// occupy every connection's STAT pipeline.
+const sweepStatDepth = 4
+
+// SweepStatConcurrency bounds a repair liveness sweep: the pool-wide sweep
+// budget (pool.Manager.StatSweepConcurrency) capped by the repair's own
+// connection budget × sweepStatDepth. Non-positive inputs fall back to the
+// other bound; the result is always at least 1.
+func SweepStatConcurrency(poolWidth, maxConns int) int {
+	width := poolWidth
+	if maxConns > 0 {
+		repairCap := maxConns * sweepStatDepth
+		if width <= 0 || repairCap < width {
+			width = repairCap
+		}
+	}
+	return max(width, 1)
+}
+
 // StatIDs implements ArticleStater over the pool's StatMany when the client
 // supports it; otherwise it reports the capability unavailable (nil, nil).
 //
@@ -246,9 +269,15 @@ func (p *PoolFetcher) statOnce(
 	statCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	conc := statSweepConcurrency
+	if p.StatConcurrency != nil {
+		if v := p.StatConcurrency(); v > 0 {
+			conc = v
+		}
+	}
 	resolved := make(map[string]bool, len(ids))
 	var firstErr error
-	for r := range sc.StatMany(statCtx, ids, nntppool.StatManyOptions{Concurrency: statSweepConcurrency}) {
+	for r := range sc.StatMany(statCtx, ids, nntppool.StatManyOptions{Concurrency: conc}) {
 		switch {
 		case errors.Is(r.Err, nntppool.ErrArticleNotFound):
 			missing[r.MessageID] = true

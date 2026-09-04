@@ -145,6 +145,10 @@ type Service struct {
 	health  HealthStore   // optional; nil skips health-record updates
 	resumer ImportResumer // optional; releases imports parked pending a repair
 
+	// streamsActive is the optional playback-activity signal jobs yield to
+	// (fetch depth and fold width); nil runs jobs at full speed.
+	streamsActive func() bool
+
 	// progress holds live stage progress per running job ID.
 	progressMu sync.Mutex
 	progress   map[int64]JobProgressSnapshot
@@ -194,6 +198,12 @@ func (s *Service) PatchStore() *PatchStore { return s.store }
 // SetHealthStore wires the optional health repository so successful repairs
 // flip the file's health record back to healthy. Nil-safe: unset skips it.
 func (s *Service) SetHealthStore(h HealthStore) { s.health = h }
+
+// SetStreamsActive wires the playback-activity signal (typically the stream
+// tracker's active count) so running jobs throttle their fetch depth and
+// solver fold width while anything is streaming. Nil-safe: unset means jobs
+// always run at full speed.
+func (s *Service) SetStreamsActive(active func() bool) { s.streamsActive = active }
 
 // SetImportResumer wires the import queue so NZB-mode repairs release the
 // import they were queued for. Nil-safe.
@@ -550,7 +560,8 @@ func (s *Service) executeJob(ctx context.Context, job *database.Par2RepairJob) e
 		return err
 	}
 	return RunJob(ctx, res.Plan, res.Index, res.Par2Files, s.fetcher, s.store, s.log,
-		WithProgress(progress), WithLiveConcurrency(func() int { return s.cfg().MaxConnections }))
+		WithProgress(progress), WithLiveConcurrency(func() int { return s.cfg().MaxConnections }),
+		WithYieldToStreams(s.streamsActive))
 }
 
 // jobProgress returns the JobProgress callback that publishes a job's live
@@ -620,7 +631,8 @@ func (s *Service) executeNzbJob(ctx context.Context, job *database.Par2RepairJob
 		return err
 	}
 	return RunJob(ctx, res.Plan, res.Index, res.Par2Files, s.fetcher, s.store, s.log,
-		WithProgress(progress), WithLiveConcurrency(func() int { return s.cfg().MaxConnections }))
+		WithProgress(progress), WithLiveConcurrency(func() int { return s.cfg().MaxConnections }),
+		WithYieldToStreams(s.streamsActive))
 }
 
 // resolveNzbFromDisk parses the NZB at nzbPath and plans a repair from it.

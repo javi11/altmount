@@ -564,9 +564,25 @@ func (m *manager) SetProviderIDs(mapping map[string]string) {
 	}
 }
 
+// idleStatSweepFactor bounds how far an idle-pool sweep widens past the
+// conservative (one-connection-pipeline) bound. The pool's full StatCapacity
+// is NOT safe here: nntppool stamps each STAT's per-attempt deadline (~2s
+// adaptive) at dispatch, and capacity-width dispatch fills every connection's
+// pipeline to StatInflight depth — the pipeline tail cannot drain before its
+// deadline, the reader's read timeout then closes the whole connection
+// (replies are FIFO), and every pipelined request on it fails with
+// "connection died". Observed live: a 4096-wide sweep against a 50-connection
+// pool left 3692 of 4147 STATs unresolved per pass and killed the pool for
+// minutes, taking concurrent playback to 0 B/s. Twice the conservative bound
+// keeps per-connection pipelines a few requests deep — drained well inside
+// the attempt window at realistic RTTs — while still sweeping a full release
+// in seconds.
+const idleStatSweepFactor = 2
+
 // StatSweepConcurrency picks the in-flight STAT bound for an availability
-// sweep: conservative while streams are active (or with no pool), the pool's
-// aggregate StatCapacity when idle.
+// sweep: conservative while streams are active (or with no pool); a bounded
+// widening — min(StatCapacity, idleStatSweepFactor × conservative) — when
+// idle. See idleStatSweepFactor for why the full capacity is never used.
 func (m *manager) StatSweepConcurrency(conservative int) int {
 	if m.budget.StreamsActive() {
 		return conservative
@@ -577,10 +593,8 @@ func (m *manager) StatSweepConcurrency(conservative int) int {
 	if m.pool == nil {
 		return conservative
 	}
-	if capacity := m.pool.StatCapacity(); capacity > conservative {
-		return capacity
-	}
-	return conservative
+	widened := min(m.pool.StatCapacity(), idleStatSweepFactor*conservative)
+	return max(widened, conservative)
 }
 
 // startQuotaWatcher starts the background quota watcher if not already running.

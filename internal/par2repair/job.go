@@ -100,8 +100,9 @@ type JobProgress func(stage Stage, done, total int)
 type JobOption func(*jobOptions)
 
 type jobOptions struct {
-	progress    JobProgress
-	concurrency func() int
+	progress      JobProgress
+	concurrency   func() int
+	streamsActive func() bool
 }
 
 // WithProgress reports job progress through cb. A re-sweep (singular-matrix
@@ -124,6 +125,27 @@ func WithLiveConcurrency(get func() int) JobOption {
 	return func(o *jobOptions) { o.concurrency = get }
 }
 
+// WithYieldToStreams wires a live playback-activity signal (typically the
+// stream tracker's count) into the job. While active() reports true, the
+// fetch pipeline collapses to yieldFetchDepth connections and the solver's
+// fold runs on a single goroutine, so a repair sharing the box with playback
+// costs it neither bandwidth nor CPU. Both bounds are re-read continuously —
+// a stream starting mid-sweep throttles the job at the next fetch/fold, and
+// its end restores full speed without restarting anything.
+func WithYieldToStreams(active func() bool) JobOption {
+	return func(o *jobOptions) { o.streamsActive = active }
+}
+
+// yieldFetchDepth is the fetch pipeline depth while playback streams are
+// active: enough to keep the sweep moving, small enough that the repair's
+// normal-lane bodies leave the link and the CPU to the streams.
+const yieldFetchDepth = 2
+
+// yieldFoldWorkers is the solver fold width while playback streams are
+// active. The fold's memory traffic is rows × input rate on every core it
+// gets; one goroutine keeps the repair correct while playback keeps the box.
+const yieldFoldWorkers = 1
+
 // maxFetchAhead caps the fetch concurrency however large the configured
 // connection count is. It is also the pipeline's buffer bound:
 // fetched-but-unconsumed payloads are held in memory, so maxFetchAhead x
@@ -141,7 +163,24 @@ func (o jobOptions) fetchDepth() func() int {
 				n = c
 			}
 		}
+		if o.streamsActive != nil && o.streamsActive() {
+			n = min(n, yieldFetchDepth)
+		}
 		return min(n, maxFetchAhead)
+	}
+}
+
+// foldWorkerLimit is the solver's live fold-width bound for this job: capped
+// at yieldFoldWorkers while playback streams are active, unbounded otherwise.
+func (o jobOptions) foldWorkerLimit() func() int {
+	if o.streamsActive == nil {
+		return nil
+	}
+	return func() int {
+		if o.streamsActive() {
+			return yieldFoldWorkers
+		}
+		return 0
 	}
 }
 
@@ -285,6 +324,7 @@ func RunJob(
 		if err != nil {
 			return err
 		}
+		solver.WorkerLimit = o.foldWorkerLimit()
 		// Attempts are bounded (spares and the corrupt-replan budget), so a
 		// deferred close per attempt cannot pile up.
 		defer solver.Close()

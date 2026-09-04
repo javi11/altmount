@@ -141,7 +141,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// Background PAR2 repair: repairs missing articles and serves the patched
 	// payloads on the read path's hole branch.
-	par2RepairService := startPar2RepairService(ctx, cfg, repos.Par2RepairRepo, repos.HealthRepo, metadataService, poolManager, configManager.GetConfigGetter())
+	par2RepairService := startPar2RepairService(ctx, cfg, repos.Par2RepairRepo, repos.HealthRepo, metadataService, poolManager, configManager.GetConfigGetter(), func() bool {
+		return streamTracker.ActiveStreams() > 0
+	})
 
 	// Let degraded imports queue a PAR2 repair (opt-in via repair_on_import),
 	// count locally repaired articles as available during the availability
