@@ -119,6 +119,7 @@ export interface SegmentCacheConfig {
 	cache_path: string;
 	max_size_gb: number;
 	expiry_hours: number;
+	memory_mb: number; // in-memory tier of decoded articles; 0 disables
 }
 
 // Health configuration

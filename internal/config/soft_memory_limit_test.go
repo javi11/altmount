@@ -34,3 +34,28 @@ func TestSoftMemoryLimitOffWhenMemoryTierDisabled(t *testing.T) {
 		t.Fatalf("SoftMemoryLimit with memory tier off = %d, want 0", got)
 	}
 }
+
+func TestValidate_SegmentCacheMemoryMB(t *testing.T) {
+	zero, negative, big := 0, -1, 4096
+	tests := []struct {
+		name    string
+		mb      *int
+		wantErr bool
+	}{
+		{"nil defaults", nil, false},
+		{"zero disables", &zero, false},
+		{"large is valid", &big, false},
+		{"negative is invalid", &negative, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := DefaultConfig()
+			c.Health.Enabled = nil
+			c.SegmentCache.MemoryMB = tt.mb
+			err := c.Validate()
+			if tt.wantErr != (err != nil) {
+				t.Fatalf("wantErr=%v, got %v", tt.wantErr, err)
+			}
+		})
+	}
+}

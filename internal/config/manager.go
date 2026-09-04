@@ -1056,6 +1056,8 @@ func (c *Config) Validate() error {
 	if c.SegmentCache.MemoryMB == nil {
 		memoryMB := defaultSegmentCacheMemoryMB
 		c.SegmentCache.MemoryMB = &memoryMB
+	} else if *c.SegmentCache.MemoryMB < 0 {
+		return fmt.Errorf("segment_cache memory_mb must be 0 or greater")
 	}
 
 	if c.Import.MaxProcessorWorkers <= 0 {
