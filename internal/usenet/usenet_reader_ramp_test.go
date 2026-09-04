@@ -23,7 +23,7 @@ func rampPool(n, segSize int, latency time.Duration) *fakepool.Client {
 func newRampReader(t *testing.T, ctx context.Context, fp *fakepool.Client, rg *segmentRange, maxPrefetch int, opts ...ReaderOption) *UsenetReader {
 	t.Helper()
 	getter := func() (pool.NntpClient, error) { return fp, nil }
-	ur, err := NewUsenetReader(ctx, getter, rg, maxPrefetch, noopMetrics{}, "ramp-test", nil, opts...)
+	ur, err := NewUsenetReader(ctx, getter, rg, maxPrefetch, noopMetrics{}, "ramp-test", nil, append([]ReaderOption{withFlightMap(newFlightMap())}, opts...)...)
 	if err != nil {
 		t.Fatal(err)
 	}

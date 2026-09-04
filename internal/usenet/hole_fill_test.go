@@ -20,7 +20,7 @@ import (
 func newReaderWithHooks(t testing.TB, ctx context.Context, fp *fakepool.Client, rg *segmentRange, maxPrefetch int, hooks *HoleHooks) *UsenetReader {
 	t.Helper()
 	getter := func() (pool.NntpClient, error) { return fp, nil }
-	ur, err := NewUsenetReader(ctx, getter, rg, maxPrefetch, noopMetrics{}, "test-stream", nil, WithHoleHooks(hooks))
+	ur, err := NewUsenetReader(ctx, getter, rg, maxPrefetch, noopMetrics{}, "test-stream", nil, WithHoleHooks(hooks), withFlightMap(newFlightMap()))
 	if err != nil {
 		t.Fatalf("NewUsenetReader: %v", err)
 	}
