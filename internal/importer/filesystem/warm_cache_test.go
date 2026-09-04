@@ -106,7 +106,8 @@ func TestWarmCacheServesPrefixWithoutNetwork(t *testing.T) {
 	}
 }
 
-func (m *fsFakePoolManager) SetStreamHeadroom(int) {}
+func (m *fsFakePoolManager) SetStreamHeadroom(int)                      {}
+func (m *fsFakePoolManager) SpeculativeBudget() *pool.SpeculativeBudget { return nil }
 
 // stubReadCloser is an in-memory ReadCloser for warmPrefixReader unit tests.
 type stubReadCloser struct {

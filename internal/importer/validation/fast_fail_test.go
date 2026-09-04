@@ -59,7 +59,8 @@ type scriptedStatClient struct {
 	calls    map[string]int
 }
 
-func (m fastFailPoolManager) SetStreamHeadroom(int) {}
+func (m fastFailPoolManager) SetStreamHeadroom(int)                      {}
+func (m fastFailPoolManager) SpeculativeBudget() *pool.SpeculativeBudget { return nil }
 
 type uncancelableStatClient struct {
 	pool.NntpClient

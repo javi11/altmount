@@ -493,7 +493,8 @@ func TestSeekResetsOriginalRangeEnd(t *testing.T) {
 	}
 }
 
-func (m *mockPoolManager) SetStreamHeadroom(int) {}
+func (m *mockPoolManager) SetStreamHeadroom(int)                      {}
+func (m *mockPoolManager) SpeculativeBudget() *pool.SpeculativeBudget { return nil }
 
 // TestSeekSamePositionDoesNotResetRange tests that seeking to the same position
 // does not reset originalRangeEnd (optimization)

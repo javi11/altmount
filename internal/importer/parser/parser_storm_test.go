@@ -68,7 +68,8 @@ func (m *fakeFullPoolManager) SetImportConnCapacity(total int) {
 	}
 }
 
-func (m *fakeFullPoolManager) SetStreamHeadroom(int) {}
+func (m *fakeFullPoolManager) SetStreamHeadroom(int)                      {}
+func (m *fakeFullPoolManager) SpeculativeBudget() *pool.SpeculativeBudget { return nil }
 func (m *fakeFullPoolManager) ImportConnCapacity() int {
 	if m.budget != nil {
 		return m.budget.Capacity()
