@@ -468,3 +468,41 @@ func BenchmarkStreamForwardSkip(b *testing.B) {
 		}
 	})
 }
+
+// BenchmarkStreamReplay reads the head of a file, closes it, and reads the
+// same head again through a fresh handle: the media-server pattern of a
+// probe followed by playback. With a memory tier the second pass should
+// fetch nothing.
+func BenchmarkStreamReplay(b *testing.B) {
+	p := profilePremium750K
+	h := newBenchHarness(b, p)
+	h.store = benchReplayStore()
+	const head = 32 << 20
+	readHead := func() time.Duration {
+		mvf := h.openFile(b, benchFileSegs, benchPrefetch, -1)
+		buf := make([]byte, 1<<20)
+		start := time.Now()
+		var off int64
+		for off < head {
+			n, err := mvf.ReadAt(buf, off)
+			if err != nil {
+				b.Fatalf("ReadAt: %v", err)
+			}
+			off += int64(n)
+		}
+		d := time.Since(start)
+		_ = mvf.Close()
+		h.awaitQuietWire(500*time.Millisecond, 30*time.Second)
+		return d
+	}
+	record(b, scenario("B10-replay", p), func() []streambench.Metric {
+		readHead()
+		before := h.bytesWritten()
+		replay := readHead()
+		fetched := float64(h.bytesWritten()-before) / (1 << 20)
+		return []streambench.Metric{
+			{Name: "replay_bytes_fetched_mb", Unit: "MB", Value: fetched},
+			{Name: "replay_read_ms", Unit: "ms", Value: ms(replay), Tolerance: 0.10},
+		}
+	})
+}

@@ -13,6 +13,7 @@ import (
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/streambench"
 	"github.com/javi11/altmount/internal/testsupport/nntpserver"
+	"github.com/javi11/altmount/internal/usenet"
 	"github.com/javi11/nntppool/v4"
 )
 
@@ -77,6 +78,9 @@ type benchHarness struct {
 	cancel  context.CancelFunc
 	profile benchProfile
 	streams *benchStreams
+	// store, when set, is handed to every file opened afterwards as its
+	// segment store (nil = no cache, the default for most scenarios).
+	store usenet.SegmentStore
 }
 
 // newBenchHarness starts one simulated provider per cfg (defaults to a
@@ -180,6 +184,7 @@ func (h *benchHarness) openFile(tb testing.TB, nSegs, maxPrefetch int, rangeEnd 
 		originalRangeEnd: rangeEnd,
 		streamTracker:    noopStreamTracker{},
 		streamID:         "bench-stream",
+		segmentStore:     h.store,
 	}
 	tb.Cleanup(func() { _ = mvf.Close() })
 	return mvf
