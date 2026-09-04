@@ -299,6 +299,7 @@ providers:
     min_connections_alive: 2 # Warm connections kept open for fast first byte (default: 2, -1 = connect on demand only)
     inflight_requests: 10 # Concurrent bodies per connection (memory ceiling, default: 10); typical depth 3-4, raising does not improve throughput
     stat_inflight_requests: 100 # STAT pipeline depth per connection (determines idle health-sweep concurrency, default: 100)
+    stream_inflight_requests: 4 # Streaming bodies per connection; a playback read waits behind at most this many minus one (default: 4)
     tls: true
     insecure_tls: false
     enabled: true # Enable/disable this provider (default: true)

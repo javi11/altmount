@@ -46,3 +46,18 @@ func TestToNNTPProviderSetsReconnectDelay(t *testing.T) {
 		t.Fatalf("ReconnectDelay = %v, want 30s so a provider removed on 502 comes back", got)
 	}
 }
+
+func TestToNNTPProviderStreamInflightDefaultsAndCaps(t *testing.T) {
+	p := tlsProvider()
+	if got := p.ToNNTPProvider().StreamInflight; got != 4 {
+		t.Fatalf("StreamInflight default = %d, want 4", got)
+	}
+	p.StreamInflightRequests = 6
+	if got := p.ToNNTPProvider().StreamInflight; got != 6 {
+		t.Fatalf("explicit StreamInflight = %d, want 6", got)
+	}
+	p.InflightRequests = 3
+	if got := p.ToNNTPProvider().StreamInflight; got != 3 {
+		t.Fatalf("StreamInflight must be capped at inflight_requests, got %d", got)
+	}
+}
