@@ -2045,7 +2045,8 @@ func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, e
 	// for eligible video files (nil for everything else — reads fail as
 	// always). See holes.go.
 	ur, err := usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxPrefetch, mvf.streamTracker, mvf.streamID, mvf.segmentStore,
-		usenet.WithHoleHooks(mvf.holeHooks()))
+		usenet.WithHoleHooks(mvf.holeHooks()),
+		usenet.WithSpeculativeBudget(mvf.poolManager.SpeculativeBudget()))
 	if err != nil {
 		return nil, err
 	}
@@ -2173,7 +2174,8 @@ func (mvf *MetadataVirtualFile) createUsenetReaderFromSegments(ctx context.Conte
 		return nil, fmt.Errorf("no segments cover range [%d, %d]", start, end)
 	}
 
-	ur, err := usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxPrefetch, mvf.streamTracker, mvf.streamID, mvf.segmentStore)
+	ur, err := usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxPrefetch, mvf.streamTracker, mvf.streamID, mvf.segmentStore,
+		usenet.WithSpeculativeBudget(mvf.poolManager.SpeculativeBudget()))
 	if err != nil {
 		return nil, err
 	}
