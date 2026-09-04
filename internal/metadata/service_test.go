@@ -759,3 +759,54 @@ func TestLongFilename_SharedPrefixCollides(t *testing.T) {
 	assert.Equal(t, int64(2222), got.FileSize,
 		"known limitation: the second write wins for both names")
 }
+
+// TestNormalizeVirtualPath_CanonicalShape pins that one file has exactly one key.
+// The metadata layer joins onto rootPath, so a leading slash carries no meaning,
+// but it used to survive into the liteCache key: "/movies/x.mkv" and
+// "movies/x.mkv" were two entries for the same file, and an eviction under one
+// shape could not reach the other.
+func TestNormalizeVirtualPath_CanonicalShape(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"movies/x.mkv", "movies/x.mkv"},
+		{"/movies/x.mkv", "movies/x.mkv"},
+		{"movies//x.mkv", "movies/x.mkv"},
+		{"/movies/./x.mkv", "movies/x.mkv"},
+		{`movies\x.mkv`, "movies/x.mkv"},
+		{`\movies\x.mkv`, "movies/x.mkv"},
+		{"movies/sub/../x.mkv", "movies/x.mkv"},
+		{"", ""},
+		{"/", ""},
+		{".", ""},
+	} {
+		assert.Equal(t, tc.want, normalizeVirtualPath(tc.in), "normalizeVirtualPath(%q)", tc.in)
+	}
+}
+
+// TestLiteCache_EvictionReachesEntryCachedUnderOtherShape is the consequence of
+// the above that actually bites: a writer using one shape must invalidate the
+// entry a reader cached under the other.
+func TestLiteCache_EvictionReachesEntryCachedUnderOtherShape(t *testing.T) {
+	root := t.TempDir()
+	ms := NewMetadataService(root)
+
+	withSlash := "/movies/shape.mkv"
+	withoutSlash := "movies/shape.mkv"
+
+	meta := ms.CreateFileMetadata(
+		1024, "test.nzb", metapb.FileStatus_FILE_STATUS_HEALTHY,
+		nil, metapb.Encryption_NONE, "", "", nil, nil, 0, nil, "shape123456",
+	)
+	require.NoError(t, ms.WriteFileMetadata(withSlash, meta))
+
+	// Populate the cache using the leading-slash shape, the way a FUSE reader does.
+	cached, err := ms.ReadFileMetadataLite(withSlash)
+	require.NoError(t, err)
+	require.NotNil(t, cached)
+
+	// Delete using the other shape, the way the migration path does.
+	require.NoError(t, ms.DeleteFileMetadata(context.Background(), withoutSlash))
+
+	after, err := ms.ReadFileMetadataLite(withSlash)
+	require.NoError(t, err)
+	assert.Nil(t, after, "a delete under one path shape must evict the entry cached under the other")
+}

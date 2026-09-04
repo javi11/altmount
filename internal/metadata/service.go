@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -133,8 +134,9 @@ func (ms *MetadataService) readStoreRef(metaFilePath string) string {
 	return fm.StoreRef
 }
 
-// truncateFilename truncates the filename if it's too long to prevent filesystem issues
-// when creating .meta files. Keeps filename under 250 characters.
+// truncateFilename truncates the filename if it's too long to prevent filesystem
+// issues when creating .meta files. Keeps the persisted name, including both the
+// original extension and the .meta suffix, within 255 bytes.
 func (ms *MetadataService) truncateFilename(filename string) string {
 	fileExt := filepath.Ext(filename)
 	filename = strings.TrimSuffix(filename, fileExt)
@@ -166,8 +168,28 @@ func (ms *MetadataService) truncateFilename(filename string) string {
 // (issue #660). Forward slash matches the convention already used by
 // nzbfilesystem.normalizePath so metadata writes and database lookups resolve to
 // the same key.
+//
+// It also canonicalizes the shape of the path, so that one file has exactly one
+// key. Without this, "/movies/x.mkv" and "movies/x.mkv" are two distinct
+// liteCache entries for the same file, and an eviction under one shape cannot
+// reach an entry cached under the other.
+//
+// path.Clean, not filepath.Clean: filepath.Clean rewrites separators to the OS
+// separator, which on Windows would turn the forward slashes right back into
+// backslashes and undo the fold above. Cleaning also resolves any ".." before
+// the result is joined onto rootPath.
 func normalizeVirtualPath(virtualPath string) string {
-	return strings.ReplaceAll(virtualPath, "\\", "/")
+	virtualPath = strings.ReplaceAll(virtualPath, "\\", "/")
+	virtualPath = path.Clean(virtualPath)
+	virtualPath = strings.TrimPrefix(virtualPath, "/")
+
+	// path.Clean maps "" to "." and leaves a bare "/" as itself; both mean the
+	// metadata root, which callers express as the empty path.
+	if virtualPath == "." {
+		return ""
+	}
+
+	return virtualPath
 }
 
 // metaFilePath returns the absolute on-disk path of the .meta file for a virtual
