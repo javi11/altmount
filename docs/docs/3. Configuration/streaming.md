@@ -127,7 +127,9 @@ Reads check memory first, then disk, then fetch from the provider:
 
 Disk eviction runs automatically every 5 minutes, removing expired entries and enforcing the size limit via LRU (least recently used). Files that are currently open are never evicted. The memory tier evicts the least recently used articles as soon as it reaches `memory_mb`.
 
-**RAM usage:** while streaming, AltMount uses roughly `memory_mb` plus 300 MB. The extra is read-ahead buffers, connections and the Go runtime; AltMount sets a soft memory limit of `memory_mb` + 256 MB so evicted articles are collected promptly. With the default of 256 MB expect around 500–550 MB. Lower `memory_mb` on small boxes (128 MB is a good balance), or set `GOMEMLIMIT` in the environment to take over the limit yourself.
+**RAM usage:** while streaming, AltMount uses roughly `memory_mb` plus 300 MB. The extra is read-ahead buffers, connections and the Go runtime. Lower `memory_mb` on small boxes (128 MB is a good balance).
+
+**Go memory limit:** AltMount sets a Go soft memory limit so evicted articles are collected promptly instead of letting the heap double before each collection. The top-level `memory_limit_mb` controls it: unset or `0` derives the limit from `segment_cache.memory_mb` plus the PAR2 solver budget (`par2_repair.max_memory_mb` × `max_concurrent_jobs`) plus 256 MB headroom, about 770 MB with defaults; a positive value pins the limit (for example `512` on a box where only one stream and no repairs run); `-1` leaves the Go default. `GOMEMLIMIT` in the environment always takes precedence, so Docker users can also set it there. Keep the limit above what the process actually holds live: if live memory exceeds a soft limit the collector runs continuously and costs CPU without freeing anything.
 
 ### Tips
 

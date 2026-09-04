@@ -2,36 +2,71 @@ package config
 
 import "testing"
 
-func TestSoftMemoryLimitDerivesFromCacheBudget(t *testing.T) {
-	mb := 256
-	c := SegmentCacheConfig{MemoryMB: &mb}
-	want := int64(256+softMemoryHeadroomMB) << 20
+func memLimitConfig(cacheMB int, par2MB, par2Jobs int) *Config {
+	c := DefaultConfig()
+	c.SegmentCache.MemoryMB = &cacheMB
+	c.Par2Repair.MaxMemoryMB = par2MB
+	c.Par2Repair.MaxConcurrentJobs = par2Jobs
+	return c
+}
+
+func TestSoftMemoryLimitAutoAddsCachePar2AndHeadroom(t *testing.T) {
+	c := memLimitConfig(256, 256, 1)
+	want := int64(256+256+softMemoryHeadroomMB) << 20
 	if got := c.SoftMemoryLimit(""); got != want {
 		t.Fatalf("SoftMemoryLimit = %d, want %d", got, want)
 	}
 }
 
-func TestSoftMemoryLimitUsesDefaultBudgetWhenUnset(t *testing.T) {
-	c := SegmentCacheConfig{}
-	want := int64(defaultSegmentCacheMemoryMB+softMemoryHeadroomMB) << 20
+func TestSoftMemoryLimitAutoScalesPar2ByConcurrentJobs(t *testing.T) {
+	c := memLimitConfig(128, 100, 3)
+	want := int64(128+300+softMemoryHeadroomMB) << 20
 	if got := c.SoftMemoryLimit(""); got != want {
 		t.Fatalf("SoftMemoryLimit = %d, want %d", got, want)
+	}
+}
+
+func TestSoftMemoryLimitAutoOffWhenMemoryTierDisabled(t *testing.T) {
+	c := memLimitConfig(0, 256, 1)
+	if got := c.SoftMemoryLimit(""); got != 0 {
+		t.Fatalf("SoftMemoryLimit with memory tier off = %d, want 0", got)
+	}
+}
+
+func TestSoftMemoryLimitExplicitValuePins(t *testing.T) {
+	c := memLimitConfig(256, 256, 1)
+	pinned := 1024
+	c.MemoryLimitMB = &pinned
+	if got := c.SoftMemoryLimit(""); got != int64(1024)<<20 {
+		t.Fatalf("SoftMemoryLimit = %d, want 1 GiB", got)
+	}
+}
+
+func TestSoftMemoryLimitNegativeDisables(t *testing.T) {
+	c := memLimitConfig(256, 256, 1)
+	off := -1
+	c.MemoryLimitMB = &off
+	if got := c.SoftMemoryLimit(""); got != 0 {
+		t.Fatalf("SoftMemoryLimit = %d, want 0", got)
+	}
+}
+
+func TestSoftMemoryLimitZeroMeansAuto(t *testing.T) {
+	c := memLimitConfig(256, 256, 1)
+	want := c.SoftMemoryLimit("")
+	auto := 0
+	c.MemoryLimitMB = &auto
+	if got := c.SoftMemoryLimit(""); got != want {
+		t.Fatalf("SoftMemoryLimit = %d, want auto-derived %d", got, want)
 	}
 }
 
 func TestSoftMemoryLimitDefersToOperatorGOMEMLIMIT(t *testing.T) {
-	mb := 256
-	c := SegmentCacheConfig{MemoryMB: &mb}
+	c := memLimitConfig(256, 256, 1)
+	pinned := 1024
+	c.MemoryLimitMB = &pinned
 	if got := c.SoftMemoryLimit("2GiB"); got != 0 {
 		t.Fatalf("SoftMemoryLimit with GOMEMLIMIT set = %d, want 0", got)
-	}
-}
-
-func TestSoftMemoryLimitOffWhenMemoryTierDisabled(t *testing.T) {
-	zero := 0
-	c := SegmentCacheConfig{MemoryMB: &zero}
-	if got := c.SoftMemoryLimit(""); got != 0 {
-		t.Fatalf("SoftMemoryLimit with memory tier off = %d, want 0", got)
 	}
 }
 

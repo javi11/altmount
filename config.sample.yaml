@@ -41,8 +41,6 @@ streaming:
 # Segment cache: decoded articles kept for reuse across handles and re-opens.
 segment_cache:
   memory_mb: 256 # In-memory tier in front of the disk cache; on even when the disk cache is off (0 disables).
-  # The Go soft memory limit is set to memory_mb + 256 MB so evicted articles are collected promptly;
-  # set GOMEMLIMIT in the environment to take over that limit yourself.
   enabled: false # Disk tier
   cache_path: /tmp/altmount-segcache
   max_size_gb: 10
@@ -200,6 +198,10 @@ health:
   resolve_repair_on_import: false # Automatically resolve pending repairs in the same directory when a new file is imported (default: false)
 
 # WebDAV mount path configuration
+# Go soft memory limit in MB. Unset or 0: derived from segment_cache.memory_mb plus the PAR2 solver
+# budget plus 256 MB headroom (about 770 MB with defaults). Positive: use exactly this value.
+# -1: leave the Go runtime default. GOMEMLIMIT in the environment always wins.
+memory_limit_mb: 0
 mount_path: '' # WebDAV mount path, Example: '/mnt/remotes/altmount' or '/mnt/unionfs'. Must be an absolute path.
                # Windows examples: 'Z:' (drive letter via WinFsp) or 'C:\altmount' (directory mount)
 

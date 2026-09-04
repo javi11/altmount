@@ -81,6 +81,11 @@ type Config struct {
 	MountPath       string           `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"`
 	MountType       MountType        `yaml:"mount_type" mapstructure:"mount_type" json:"mount_type"`
 	ProfilerEnabled bool             `yaml:"profiler_enabled" mapstructure:"profiler_enabled" json:"profiler_enabled" default:"false"`
+	// MemoryLimitMB is the Go soft memory limit. Unset or 0 derives it from
+	// the budgets that allocate (see SoftMemoryLimit); a positive value pins
+	// it; a negative value leaves the runtime default. GOMEMLIMIT in the
+	// environment always takes precedence.
+	MemoryLimitMB *int `yaml:"memory_limit_mb" mapstructure:"memory_limit_mb" json:"memory_limit_mb"`
 }
 
 // Par2RepairConfig configures background PAR2 repair of missing usenet
@@ -233,22 +238,33 @@ func (c SegmentCacheConfig) MemoryBytes() int64 {
 	return int64(max(*c.MemoryMB, 0)) << 20
 }
 
-// softMemoryHeadroomMB is what the process needs above the memory tier:
-// read-ahead windows, connection buffers, metadata, and the runtime itself.
+// softMemoryHeadroomMB is what the process needs above the configured
+// budgets: read-ahead windows, connection buffers, metadata, and the runtime.
 const softMemoryHeadroomMB = 256
 
-// SoftMemoryLimit is the Go soft memory limit to apply for this cache budget.
-// Without a limit the collector lets the heap reach twice the live set, so a
-// 256 MB tier costs 600+ MB of RSS. The limit makes the runtime collect the
-// evicted articles as soon as the heap nears budget plus headroom. It is 0
-// (leave the runtime alone) when the memory tier is off or the operator set
-// GOMEMLIMIT themselves.
-func (c SegmentCacheConfig) SoftMemoryLimit(gomemlimit string) int64 {
-	cache := c.MemoryBytes()
-	if cache == 0 || gomemlimit != "" {
+// SoftMemoryLimit is the Go soft memory limit to apply, or 0 to leave the
+// runtime alone. Without a limit the collector lets the heap reach twice the
+// live set, so a 256 MB memory tier costs 600+ MB of RSS. The automatic value
+// adds every budget that holds live heap (memory tier, PAR2 solver per
+// concurrent job) plus headroom, so the limit stays above the live set and the
+// collector never has to run back to back. A soft limit is only useful while
+// the memory tier is on: with it off the heap is small and bursty.
+func (c *Config) SoftMemoryLimit(gomemlimit string) int64 {
+	if gomemlimit != "" {
 		return 0
 	}
-	return cache + int64(softMemoryHeadroomMB)<<20
+	if c.MemoryLimitMB != nil && *c.MemoryLimitMB != 0 {
+		if *c.MemoryLimitMB < 0 {
+			return 0
+		}
+		return int64(*c.MemoryLimitMB) << 20
+	}
+	cache := c.SegmentCache.MemoryBytes()
+	if cache == 0 {
+		return 0
+	}
+	par2 := int64(max(c.Par2Repair.MaxMemoryMB, 0)) * int64(max(c.Par2Repair.MaxConcurrentJobs, 1))
+	return cache + (par2+softMemoryHeadroomMB)<<20
 }
 
 // WebDAVConfig represents WebDAV server configuration

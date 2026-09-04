@@ -18,7 +18,7 @@ func TestApplySoftMemoryLimitSetsRuntimeLimit(t *testing.T) {
 	cfg := &config.Config{SegmentCache: config.SegmentCacheConfig{MemoryMB: &mb}}
 	got := applySoftMemoryLimit(context.Background(), cfg)
 
-	want := cfg.SegmentCache.SoftMemoryLimit("")
+	want := cfg.SoftMemoryLimit("")
 	if got != want || debug.SetMemoryLimit(-1) != want {
 		t.Fatalf("applied %d, runtime %d, want %d", got, debug.SetMemoryLimit(-1), want)
 	}

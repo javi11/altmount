@@ -202,7 +202,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Register segment cache config change handler for dynamic path/size/expiry changes.
 	// Enable/disable toggles take effect automatically via cacheSource.Store() at file-open time.
 	configManager.OnConfigChange(func(oldConfig, newConfig *config.Config) {
-		if oldConfig.SegmentCache.MemoryBytes() != newConfig.SegmentCache.MemoryBytes() {
+		if oldConfig.SoftMemoryLimit("") != newConfig.SoftMemoryLimit("") {
 			applySoftMemoryLimit(ctx, newConfig)
 		}
 		structuralChange := oldConfig.SegmentCache.CachePath != newConfig.SegmentCache.CachePath ||
