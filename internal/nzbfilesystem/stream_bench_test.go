@@ -378,8 +378,9 @@ func BenchmarkStreamUnderContention(b *testing.B) {
 		h.awaitQuietWire(500*time.Millisecond, 30*time.Second)
 		return []streambench.Metric{
 			// Single-stream throughput while an import saturates the normal lane.
-			// Read-ahead must keep its edge over import; 10 % covers run spread.
-			{Name: "stream_mbps", Unit: "MB/s", Value: mbps(off-benchStartupBytes, elapsed-startup), HigherIsBetter: true, Tolerance: 0.10},
+			// Read-ahead must keep its edge over import. Same-code runs on a
+			// saturated simulated link spread 226-252 MB/s, so allow 15 %.
+			{Name: "stream_mbps", Unit: "MB/s", Value: mbps(off-benchStartupBytes, elapsed-startup), HigherIsBetter: true, Tolerance: 0.15},
 			info(streambench.Metric{Name: "stream_startup_ms", Unit: "ms", Value: ms(startup)}),
 			info(streambench.Metric{Name: "stream_p50", Unit: "ms", Value: ms(lat.P(0.5))}),
 			info(streambench.Metric{Name: "stream_p99", Unit: "ms", Value: ms(lat.P(0.99))}),
