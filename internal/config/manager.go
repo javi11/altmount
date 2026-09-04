@@ -213,6 +213,21 @@ type SegmentCacheConfig struct {
 	// eviction. Set to 0 to disable expiry (cache forever, bounded only by
 	// MaxSizeGB via LRU eviction). Left unset (nil) it defaults to 24 hours.
 	ExpiryHours *int `yaml:"expiry_hours" mapstructure:"expiry_hours" json:"expiry_hours"`
+	// MemoryMB bounds the in-memory tier of decoded articles that sits in
+	// front of the disk cache and is on even when the disk cache is off.
+	// Left unset (nil) it defaults to 256; an explicit 0 disables it.
+	MemoryMB *int `yaml:"memory_mb" mapstructure:"memory_mb" json:"memory_mb"`
+}
+
+// defaultSegmentCacheMemoryMB is the memory tier size when memory_mb is unset.
+const defaultSegmentCacheMemoryMB = 256
+
+// MemoryBytes is the memory tier budget in bytes (0 = disabled).
+func (c SegmentCacheConfig) MemoryBytes() int64 {
+	if c.MemoryMB == nil {
+		return int64(defaultSegmentCacheMemoryMB) << 20
+	}
+	return int64(max(*c.MemoryMB, 0)) << 20
 }
 
 // WebDAVConfig represents WebDAV server configuration
@@ -1011,6 +1026,10 @@ func (c *Config) Validate() error {
 	if c.SegmentCache.ExpiryHours == nil {
 		defaultExpiryHours := 24
 		c.SegmentCache.ExpiryHours = &defaultExpiryHours
+	}
+	if c.SegmentCache.MemoryMB == nil {
+		memoryMB := defaultSegmentCacheMemoryMB
+		c.SegmentCache.MemoryMB = &memoryMB
 	}
 
 	if c.Import.MaxProcessorWorkers <= 0 {
