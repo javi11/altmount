@@ -60,6 +60,19 @@ func TestMedianAndInformational(t *testing.T) {
 	}
 }
 
+func TestToleranceRaisesTheBar(t *testing.T) {
+	base, nw := &Result{}, &Result{}
+	base.Add("S", Metric{Name: "noisy", Value: 100, HigherIsBetter: true, Tolerance: 0.12})
+	nw.Add("S", Metric{Name: "noisy", Value: 90, HigherIsBetter: true, Tolerance: 0.12})
+	if AnyRegressed(Compare(base, nw, 0.05)) {
+		t.Fatal("a 10% drop inside a 12% tolerance must not regress")
+	}
+	nw.Scenarios[0].Metrics[0].Value = 85
+	if !AnyRegressed(Compare(base, nw, 0.05)) {
+		t.Fatal("a 15% drop outside a 12% tolerance must regress")
+	}
+}
+
 func TestFormatTableMarksRegressions(t *testing.T) {
 	base, nw := twoResults()
 	out := FormatTable(Compare(base, nw, 0.05))

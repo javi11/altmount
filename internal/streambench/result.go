@@ -18,6 +18,10 @@ type Metric struct {
 	// Informational metrics are reported but never fail the regression gate:
 	// tail percentiles from small samples and counts that depend on timing.
 	Informational bool `json:"informational,omitempty"`
+	// Tolerance, when non-zero, replaces the global threshold for this metric.
+	// It records measured run-to-run noise so a naturally jittery number does
+	// not fail the gate on noise alone.
+	Tolerance float64 `json:"tolerance,omitempty"`
 }
 
 // Median returns the per-name median of several runs' metrics. Every run

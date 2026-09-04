@@ -18,7 +18,8 @@ type Delta struct {
 }
 
 // Compare pairs metrics by scenario and name. A metric regresses when it
-// moves more than threshold (fraction, e.g. 0.05) in its bad direction.
+// moves more than threshold (fraction, e.g. 0.05) in its bad direction; a
+// metric-level Tolerance on either side raises that bar for that metric.
 // Metrics present in only one result are reported with a zero delta.
 func Compare(base, nw *Result, threshold float64) []Delta {
 	type key struct{ s, m string }
@@ -35,6 +36,7 @@ func Compare(base, nw *Result, threshold float64) []Delta {
 			if b, ok := baseIdx[key{sc.Name, m.Name}]; ok && b.Value != 0 {
 				d.Base = b.Value
 				d.Pct = (m.Value - b.Value) / b.Value
+				threshold := max(threshold, m.Tolerance, b.Tolerance)
 				switch {
 				case m.Informational:
 				case m.HigherIsBetter:
