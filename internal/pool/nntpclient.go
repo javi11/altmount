@@ -33,6 +33,13 @@ type NntpClient interface {
 	// reads use this so live playback isn't queued behind a background import.
 	BodyPriority(ctx context.Context, messageID string, onMeta ...func(nntppool.YEncMeta)) (*nntppool.ArticleBody, error)
 
+	// BodyStreamPriority fetches an article on the priority lane, writing
+	// decoded bytes to w as each wire read is decoded so a reader can serve
+	// the head of an article before its tail arrives. Bytes on the result is
+	// nil. After partial delivery the pool does not fail over to another
+	// provider; callers retry with a fresh writer.
+	BodyStreamPriority(ctx context.Context, messageID string, w io.Writer, onMeta ...func(nntppool.YEncMeta)) (*nntppool.ArticleBody, error)
+
 	// Stat checks whether an article exists on at least one provider without
 	// downloading the body. Used by health checks and validation.
 	Stat(ctx context.Context, messageID string) (*nntppool.StatResult, error)
