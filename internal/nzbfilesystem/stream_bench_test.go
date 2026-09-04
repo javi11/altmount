@@ -506,3 +506,45 @@ func BenchmarkStreamReplay(b *testing.B) {
 		}
 	})
 }
+
+// BenchmarkStreamSeekAndResume models a player jumping through a file: read
+// 8 MB, jump 500 MB forward, read 8 MB, five times. Each jump abandons the
+// previous reader's read-ahead; the bytes still fetched after that are the
+// cost of the abandoned window.
+func BenchmarkStreamSeekAndResume(b *testing.B) {
+	for _, p := range benchProfiles {
+		b.Run(p.Name, func(b *testing.B) {
+			h := newBenchHarness(b, p)
+			fileSegs := int(3<<30) / p.ArticleSize // ~3 GB so five 500 MB jumps fit
+			record(b, scenario("B11-seek-resume", p), func() []streambench.Metric {
+				before := h.bytesWritten()
+				mvf := h.openFile(b, fileSegs, benchPrefetch, -1)
+				buf := make([]byte, 1<<20)
+				readChunk := func(at int64) time.Duration {
+					start := time.Now()
+					for off := at; off < at+8<<20; {
+						n, err := mvf.ReadAt(buf, off)
+						if err != nil {
+							b.Fatalf("ReadAt(%d): %v", off, err)
+						}
+						off += int64(n)
+					}
+					return time.Since(start)
+				}
+				readChunk(0)
+				var seek streambench.Samples
+				pos := int64(0)
+				for i := 0; i < 5; i++ {
+					pos += 500 << 20
+					seek.Add(readChunk(pos))
+				}
+				_ = mvf.Close()
+				h.awaitQuietWire(500*time.Millisecond, 60*time.Second)
+				return []streambench.Metric{
+					{Name: "seek_read_ms", Unit: "ms", Value: ms(seek.Mean()), Tolerance: 0.10},
+					{Name: "bytes_fetched_mb", Unit: "MB", Value: float64(h.bytesWritten()-before) / (1 << 20)},
+				}
+			})
+		})
+	}
+}
