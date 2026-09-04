@@ -187,10 +187,12 @@ func (c *Client) TotalCalls() int64 { return c.totalCalls.Load() }
 // BodyCalls returns the count of Body invocations.
 func (c *Client) BodyCalls() int64 { return c.bodyCalls.Load() }
 
-// BodyPriorityCalls returns the count of BodyPriority invocations. This is
-// the most useful counter for streaming-path tests since UsenetReader uses
-// BodyPriority exclusively.
-func (c *Client) BodyPriorityCalls() int64 { return c.bodyPriCalls.Load() }
+// BodyPriorityCalls returns the count of priority-lane body invocations,
+// buffered (BodyPriority) and streamed (BodyStreamPriority) alike. Tests
+// asserting "streaming uses the priority lane" read this.
+func (c *Client) BodyPriorityCalls() int64 {
+	return c.bodyPriCalls.Load() + c.bodyStreamPriCalls.Load()
+}
 
 // BodyStreamPriorityCalls returns the count of BodyStreamPriority invocations.
 func (c *Client) BodyStreamPriorityCalls() int64 { return c.bodyStreamPriCalls.Load() }
