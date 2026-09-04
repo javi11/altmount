@@ -58,8 +58,23 @@ func initializeDatabase(ctx context.Context, cfg *config.Config) (*database.DB, 
 }
 
 // initializeMetadata creates metadata service and reader
-func initializeMetadata(cfg *config.Config) (*metadata.MetadataService, *metadata.MetadataReader) {
+func initializeMetadata(ctx context.Context, cfg *config.Config) (*metadata.MetadataService, *metadata.MetadataReader) {
 	metadataService := metadata.NewMetadataService(cfg.Metadata.RootPath)
+
+	// One-shot repair for metadata written before backslashes were normalized
+	// out of virtual paths. Those files are stranded once every accessor starts
+	// resolving the normalized name, so this runs before anything serves reads.
+	// It is idempotent and, on a tree that never hit the bug, is a directory walk
+	// that opens nothing. A failure is not fatal: the sweep repairs history, it
+	// is not required for correct operation of what follows.
+	if res, err := metadataService.MigrateBackslashPaths(ctx); err != nil {
+		slog.WarnContext(ctx, "Backslash metadata sweep did not complete; some files may remain unreachable",
+			"error", err)
+	} else if res.Skipped > 0 {
+		slog.WarnContext(ctx, "Some backslash metadata could not be relocated because the normalized name was taken",
+			"skipped", res.Skipped)
+	}
+
 	metadataReader := metadata.NewMetadataReader(metadataService)
 	return metadataService, metadataReader
 }
