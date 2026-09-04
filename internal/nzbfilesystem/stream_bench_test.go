@@ -27,7 +27,7 @@ const (
 	benchSeqBytes   = 200 << 20
 	benchSeekReads  = 20
 	benchSeekSize   = 64 << 10
-	benchColdOpens  = 10
+	benchColdOpens  = 20
 	benchPauseSleep = 5 * time.Second
 )
 
@@ -101,7 +101,8 @@ func BenchmarkStreamColdOpen(b *testing.B) {
 				h.awaitQuietWire(500*time.Millisecond, 30*time.Second)
 				articles := float64(h.bodies()-before) / benchColdOpens
 				return []streambench.Metric{
-					{Name: "ttfb_p50", Unit: "ms", Value: ms(ttfb.P(0.5))},
+					{Name: "ttfb_mean", Unit: "ms", Value: ms(ttfb.Mean())},
+					info(streambench.Metric{Name: "ttfb_p50", Unit: "ms", Value: ms(ttfb.P(0.5))}),
 					info(streambench.Metric{Name: "ttfb_p99", Unit: "ms", Value: ms(ttfb.P(0.99))}),
 					info(streambench.Metric{Name: "articles", Unit: "count", Value: articles}),
 				}
@@ -357,7 +358,8 @@ func BenchmarkStreamUnderContention(b *testing.B) {
 }
 
 // BenchmarkStreamFailover has provider A missing every tenth article and
-// provider B complete; it reports the first-byte cost of a miss.
+// provider B complete. Each miss is read on a fresh handle so the number is
+// the cost of the miss itself: the 430, the failover, and the body from B.
 func BenchmarkStreamFailover(b *testing.B) {
 	p := profilePremium750K
 	missing := map[string]struct{}{}
@@ -366,23 +368,24 @@ func BenchmarkStreamFailover(b *testing.B) {
 	}
 	h := newBenchHarness(b, p, nntpserver.Config{Missing: missing}, nntpserver.Config{})
 	record(b, scenario("B7-failover", p), func() []streambench.Metric {
-		mvf := h.openFile(b, benchFileSegs, 1, -1)
 		buf := make([]byte, 1)
 		var missLat streambench.Samples
 		before := h.bodies()
 		for i := 0; i < benchFileSegs; i += 10 {
+			mvf := h.openFile(b, benchFileSegs, 1, -1)
 			off := int64(i) * int64(p.ArticleSize)
 			start := time.Now()
 			if _, err := mvf.ReadAt(buf, off); err != nil {
 				b.Fatalf("ReadAt(%d): %v", off, err)
 			}
 			missLat.Add(time.Since(start))
+			_ = mvf.Close()
 		}
-		_ = mvf.Close()
 		h.awaitQuietWire(500*time.Millisecond, 30*time.Second)
 		return []streambench.Metric{
-			{Name: "miss_ttfb_p50", Unit: "ms", Value: ms(missLat.P(0.5))},
-			{Name: "bodies_per_miss", Unit: "count", Value: float64(h.bodies()-before) / float64(missLat.Count())},
+			{Name: "miss_ttfb_mean", Unit: "ms", Value: ms(missLat.Mean())},
+			info(streambench.Metric{Name: "miss_ttfb_p50", Unit: "ms", Value: ms(missLat.P(0.5))}),
+			info(streambench.Metric{Name: "bodies_per_miss", Unit: "count", Value: float64(h.bodies()-before) / float64(missLat.Count())}),
 		}
 	})
 }
