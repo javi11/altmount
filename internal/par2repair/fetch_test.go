@@ -202,6 +202,30 @@ func TestPoolFetcherStatIDsBoundsConcurrency(t *testing.T) {
 	}
 }
 
+// A repair configured for N connections must not occupy more than N
+// connections' worth of shallow STAT pipeline either: the sweep width is the
+// pool budget capped by the repair's own connection cap × sweepStatDepth.
+func TestSweepStatConcurrencyRespectsRepairConnections(t *testing.T) {
+	cases := []struct {
+		name                string
+		poolWidth, maxConns int
+		want                int
+	}{
+		{"repair cap binds", 4096, 10, 10 * sweepStatDepth},
+		{"pool budget binds", 30, 10, 30},
+		{"non-positive conns falls back to pool budget", 200, 0, 200},
+		{"non-positive pool width keeps conns bound", 0, 10, 10 * sweepStatDepth},
+		{"floor of one", 0, 0, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := SweepStatConcurrency(tc.poolWidth, tc.maxConns); got != tc.want {
+				t.Fatalf("SweepStatConcurrency(%d, %d) = %d, want %d", tc.poolWidth, tc.maxConns, got, tc.want)
+			}
+		})
+	}
+}
+
 // The sweep bound must follow the pool-wide stat budget when one is wired
 // (pool.Manager.StatSweepConcurrency: conservative while streams are active,
 // full STAT pipeline capacity when idle), not the static fallback.

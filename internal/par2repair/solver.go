@@ -51,6 +51,14 @@ type Solver struct {
 	alloc     bufAlloc
 	workers   int
 
+	// WorkerLimit, when set, is read live before each fold and caps how many
+	// goroutines FoldPresent uses. The fold is an all-cores memory-bandwidth
+	// workload proportional to rows × release size; a repair running beside
+	// active playback throttles here so streaming is not starved of CPU.
+	// Non-positive values (and values above the full width) mean no limit.
+	// Set before folding begins; not synchronized against concurrent folds.
+	WorkerLimit func() int
+
 	ctx  *gf16.Context   // primary context: Prepare/Finish and single-threaded folds
 	wctx []*gf16.Context // per-worker contexts for the parallel fold (lazy)
 	prep []byte          // scratch prepared-input buffer, reused across folds
@@ -219,7 +227,8 @@ func (s *Solver) FoldPresent(globalIdx int, slice []byte) {
 	s.ctx.Prepare(s.prep, slice)
 
 	bufSize := s.ctx.BufSize()
-	if s.workers > 1 && len(slice) >= minParallelFold && s.workerContexts() {
+	workers := s.foldWorkers()
+	if workers > 1 && len(slice) >= minParallelFold && s.workerContexts() {
 		// The accumulators are independent, so the fold parallelises cleanly.
 		// Splitting by stride-aligned byte range rather than by row keeps
 		// every worker on one span of the source across all rows — that span
@@ -227,7 +236,7 @@ func (s *Solver) FoldPresent(globalIdx int, slice []byte) {
 		// when there are fewer recovery rows than cores. Each worker uses its
 		// own context: Mul* calls share per-context scratch.
 		stride := s.ctx.Stride()
-		chunk := (bufSize + s.workers - 1) / s.workers
+		chunk := (bufSize + workers - 1) / workers
 		chunk = (chunk + stride - 1) / stride * stride
 
 		var wg sync.WaitGroup
@@ -246,6 +255,17 @@ func (s *Solver) FoldPresent(globalIdx int, slice []byte) {
 	}
 
 	s.foldRange(s.ctx, g, 0, bufSize)
+}
+
+// foldWorkers is the fold width for the next FoldPresent call: the full
+// worker count, capped by the live WorkerLimit when one is set.
+func (s *Solver) foldWorkers() int {
+	if s.WorkerLimit != nil {
+		if l := s.WorkerLimit(); l > 0 && l < s.workers {
+			return l
+		}
+	}
+	return s.workers
 }
 
 // workerContexts lazily creates one gf16 context per worker, reporting

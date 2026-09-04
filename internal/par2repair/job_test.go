@@ -765,6 +765,66 @@ func TestPrefetchArticlesHonorsLiveDepthRaise(t *testing.T) {
 	}
 }
 
+// While playback streams, the job's fetch depth collapses to the yield bound
+// regardless of the configured repair connection count, and recovers as soon
+// as the streams stop.
+func TestFetchDepthYieldsToStreams(t *testing.T) {
+	active := true
+	var o jobOptions
+	for _, opt := range []JobOption{
+		WithLiveConcurrency(func() int { return 20 }),
+		WithYieldToStreams(func() bool { return active }),
+	} {
+		opt(&o)
+	}
+	depth := o.fetchDepth()
+	if got := depth(); got != yieldFetchDepth {
+		t.Fatalf("streams active: depth = %d, want %d", got, yieldFetchDepth)
+	}
+	active = false
+	if got := depth(); got != 20 {
+		t.Fatalf("streams idle: depth = %d, want 20", got)
+	}
+
+	// A configured bound below the yield bound stays authoritative.
+	var narrow jobOptions
+	for _, opt := range []JobOption{
+		WithLiveConcurrency(func() int { return 1 }),
+		WithYieldToStreams(func() bool { return true }),
+	} {
+		opt(&narrow)
+	}
+	if got := narrow.fetchDepth()(); got != 1 {
+		t.Fatalf("narrow config while yielding: depth = %d, want 1", got)
+	}
+}
+
+// The yield getter plumbs through RunJob down to the sweep's fetch pipeline:
+// with a stream active the whole job must run at the yield bound.
+func TestRunJobYieldsToActiveStreams(t *testing.T) {
+	fx := mkRepairFixture(t, 1024, 512, 6, 1) // 32 sweep articles
+	fetch := &concurrencyFetcher{inner: fx.fetch}
+
+	plan, err := BuildPlan(fx.idx, fx.files, Caps{MaxRepairRatio: 0.5, MaxMemoryBytes: 64 << 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewPatchStore(t.TempDir())
+	err = RunJob(context.Background(), plan, fx.idx, fx.par2Files, fetch, store, testLogger(),
+		WithLiveConcurrency(func() int { return 8 }),
+		WithYieldToStreams(func() bool { return true }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := store.Get(fx.deadMsgID)
+	if !ok || !bytes.Equal(got, fx.deadOrig) {
+		t.Fatal("yielding sweep must still produce a byte-exact patch")
+	}
+	if fetch.maxInFlight > yieldFetchDepth {
+		t.Fatalf("max in-flight fetches = %d, want <= %d while streams are active", fetch.maxInFlight, yieldFetchDepth)
+	}
+}
+
 // WithLiveConcurrency plumbs a live getter through RunJob down to the sweep's
 // fetch pipeline: the bound must be honored end to end.
 func TestRunJobHonorsLiveConcurrencyGetter(t *testing.T) {

@@ -287,6 +287,78 @@ func TestSolverLargeSliceRoundTrip(t *testing.T) {
 	}
 }
 
+// TestSolverFoldWorkersHonorsLimit: a live worker limit throttles the
+// parallel fold so a repair running beside playback does not saturate every
+// core. Non-positive or over-wide limits fall back to the full width.
+func TestSolverFoldWorkersHonorsLimit(t *testing.T) {
+	s, err := NewSolver([]int{0}, []uint32{0}, 512)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	if got := s.foldWorkers(); got != s.workers {
+		t.Fatalf("no limit: foldWorkers = %d, want %d", got, s.workers)
+	}
+	s.WorkerLimit = func() int { return 1 }
+	if got := s.foldWorkers(); got != 1 {
+		t.Fatalf("limit 1: foldWorkers = %d, want 1", got)
+	}
+	s.WorkerLimit = func() int { return 0 }
+	if got := s.foldWorkers(); got != s.workers {
+		t.Fatalf("limit 0 (unset): foldWorkers = %d, want %d", got, s.workers)
+	}
+	s.WorkerLimit = func() int { return s.workers + 5 }
+	if got := s.foldWorkers(); got != s.workers {
+		t.Fatalf("limit above width: foldWorkers = %d, want %d", got, s.workers)
+	}
+}
+
+// TestSolverWorkerLimitedRoundTrip re-runs the parallel-fold round trip under
+// a worker limit: throttled folds must stay byte-exact, both on the limited
+// parallel path and when the limit collapses the fold to one goroutine.
+func TestSolverWorkerLimitedRoundTrip(t *testing.T) {
+	const sliceSize = 192<<10 + 4 // above minParallelFold, awkward chunking
+	const n = 5
+	for _, limit := range []int{1, 2} {
+		t.Run(strconv.Itoa(limit), func(t *testing.T) {
+			rng := rand.New(rand.NewSource(19))
+			slices := make([][]byte, n)
+			for j := range slices {
+				slices[j] = make([]byte, sliceSize)
+				rng.Read(slices[j])
+			}
+			missing := []int{1, 4}
+			exps := []uint32{0, 1}
+			rec := buildRecovery(slices, exps, sliceSize)
+
+			s, err := NewSolver(missing, exps, sliceSize)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.Close()
+			s.WorkerLimit = func() int { return limit }
+			for i, r := range rec {
+				if err := s.AddRecovery(i, r); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for j, sl := range slices {
+				if j != 1 && j != 4 {
+					s.FoldPresent(j, sl)
+				}
+			}
+			got, err := s.Solve()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(got[0], slices[1]) || !bytes.Equal(got[1], slices[4]) {
+				t.Fatal("worker-limited round trip failed")
+			}
+		})
+	}
+}
+
 func BenchmarkFoldPresent(b *testing.B) {
 	const sliceSize = 4 << 20
 	slice := make([]byte, sliceSize)

@@ -352,8 +352,15 @@ func TestManagerStatSweepConcurrency(t *testing.T) {
 	}
 	defer func() { _ = m.ClearPool() }()
 
-	if got := m.StatSweepConcurrency(100); got != 500 {
-		t.Fatalf("StatSweepConcurrency(100) = %d, want 500 (idle pool opens to StatCapacity)", got)
+	// Idle pool: wider than conservative, but never the pool's full STAT
+	// capacity — 5 conns × StatInflight 100 = 500 would stuff every pipeline
+	// past what the per-attempt window can drain (see StatSweepConcurrency).
+	if got := m.StatSweepConcurrency(100); got != 100*idleStatSweepFactor {
+		t.Fatalf("StatSweepConcurrency(100) = %d, want %d (idle width capped at factor x conservative)", got, 100*idleStatSweepFactor)
+	}
+	// A pool whose capacity is below the widened bound stays at capacity.
+	if got := m.StatSweepConcurrency(400); got != 500 {
+		t.Fatalf("StatSweepConcurrency(400) = %d, want 500 (StatCapacity caps the widened idle bound)", got)
 	}
 
 	src := &stubStreamSource{}

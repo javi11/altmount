@@ -400,6 +400,7 @@ func startPar2RepairService(
 	metadataService *metadata.MetadataService,
 	poolManager pool.Manager,
 	configGetter config.ConfigGetter,
+	streamsActive func() bool,
 ) *par2repair.Service {
 	// Repair fetches hold both budgets: the repair's own cap (narrow, so at
 	// most that many fetches queue on the shared budget) and the pool-wide
@@ -413,12 +414,16 @@ func startPar2RepairService(
 		}),
 		par2repair.ConnBudgetFunc(poolManager.AcquireImportConnection),
 	))
-	// Stream-aware sweep width, like health checks and import fast-fail: the
-	// conservative bound (one connection's STAT pipeline depth) while any
-	// stream plays, the pool's aggregate STAT capacity on an idle pool where
-	// a repair census flooding the dispatch window costs nobody anything.
+	// Stream-aware sweep width (conservative while anything plays, bounded
+	// widening when idle), further capped by the repair's own connection
+	// budget so a 10-connection repair never floods every connection's STAT
+	// pipeline. See par2repair.SweepStatConcurrency.
 	fetcher.StatConcurrency = func() int {
-		return poolManager.StatSweepConcurrency(configGetter().StatConcurrency())
+		c := configGetter()
+		return par2repair.SweepStatConcurrency(
+			poolManager.StatSweepConcurrency(c.StatConcurrency()),
+			c.Par2Repair.EffectiveMaxConnections(),
+		)
 	}
 	patchStore := par2repair.NewPatchStore(cfg.Par2Repair.EffectivePatchDir(cfg.Metadata.RootPath))
 	service := par2repair.NewService(
@@ -444,6 +449,8 @@ func startPar2RepairService(
 	if healthRepo != nil {
 		service.SetHealthStore(healthRepo)
 	}
+	// Jobs yield fetch depth and solver fold width to active playback streams.
+	service.SetStreamsActive(streamsActive)
 	go service.Start(ctx)
 	slog.InfoContext(ctx, "PAR2 repair service started",
 		"enabled", cfg.Par2Repair.Enabled != nil && *cfg.Par2Repair.Enabled)
