@@ -411,13 +411,17 @@ func (hc *HealthChecker) CheckFile(ctx context.Context, filePath string, opts ..
 }
 
 // statSweepConcurrency picks the sweep's in-flight STAT bound. An explicit
-// max_connections_for_health_checks setting is the operator's hard cap and
-// always wins; otherwise the pool manager adapts between the conservative
+// max_concurrent_segment_checks setting is the operator's hard cap and always
+// wins; otherwise the pool manager adapts between the conservative
 // single-connection depth (while streams are active) and the pool's aggregate
 // STAT pipeline capacity (when idle).
+//
+// The adaptive path used to be unreachable: the legacy knob defaulted to 100 and
+// validation rejected <= 0, so the operator branch always won and health sweeps
+// neither narrowed for playback nor widened on an idle pool. 0 now means adapt.
 func (hc *HealthChecker) statSweepConcurrency(cfg *config.Config) int {
-	if cfg.Health.MaxConnectionsForHealthChecks > 0 {
-		return cfg.Health.MaxConnectionsForHealthChecks
+	if n := cfg.GetMaxConcurrentSegmentChecks(); n > 0 {
+		return n
 	}
 	return hc.poolManager.StatSweepConcurrency(cfg.StatConcurrency())
 }

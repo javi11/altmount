@@ -98,6 +98,8 @@ func buildSegmentData(t testing.TB, n, segSize int) []*metapb.SegmentData {
 	return out
 }
 
+func (m *fakePoolManager) SetStreamHeadroom(int) {}
+
 // configurePoolForFile teaches the fakepool how to satisfy every segment
 // of a synthetic file built via buildSegmentData(n, segSize). Each
 // message-ID gets the deterministic payload and any latency the caller

@@ -140,22 +140,22 @@ func TestProcessArchivePreservesInternalFolderStructure(t *testing.T) {
 			}
 
 			err := ProcessArchive(ctx, ProcessArchiveOptions{
-				VirtualDir:              tt.virtualDir,
-				ArchiveFiles:            []parser.ParsedFile{{Filename: "archive.7z"}},
-				Password:                "",
-				ReleaseDate:             0,
-				NzbPath:                 tt.nzbPath,
-				Processor:               proc,
-				MetadataService:         svc,
+				VirtualDir:             tt.virtualDir,
+				ArchiveFiles:           []parser.ParsedFile{{Filename: "archive.7z"}},
+				Password:               "",
+				ReleaseDate:            0,
+				NzbPath:                tt.nzbPath,
+				Processor:              proc,
+				MetadataService:        svc,
 				PoolManager:            nil,
 				ArchiveProgressTracker: nil,
 				AllowedFileExtensions:  nil,
 				ExtractedFiles:         extracted,
-				MaxPrefetch:             1,
-				ReadTimeout:             30 * time.Second,
-				ExpandBlurayIso:         false,
-				FilterSamples:           false,
-				RenameToNzbName:         tt.renameToNzbName,
+				MaxPrefetch:            1,
+				ReadTimeout:            30 * time.Second,
+				ExpandBlurayIso:        false,
+				FilterSamples:          false,
+				RenameToNzbName:        tt.renameToNzbName,
 			})
 			require.NoError(t, err)
 

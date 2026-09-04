@@ -20,6 +20,7 @@ import type {
 	MetadataMigrationStatus,
 	NzbdavMigrateSymlinksRequest,
 	NzbdavMigrateSymlinksResponse,
+	Par2RepairJob,
 	PoolMetrics,
 	ProviderHistoricalStatsResponse,
 	ProviderSpeedTestHistoryResponse,
@@ -452,6 +453,31 @@ class APIClient {
 
 	async getHealthStats() {
 		return this.request<HealthStats>("/health/stats");
+	}
+
+	// PAR2 repair endpoints
+	async getPar2RepairJobs(limit?: number) {
+		const query = limit ? `?limit=${limit}` : "";
+		return this.request<Par2RepairJob[]>(`/par2repair${query}`);
+	}
+
+	async triggerPar2Repair(filePath: string) {
+		return this.request<{ message: string }>("/par2repair", {
+			method: "POST",
+			body: JSON.stringify({ file_path: filePath }),
+		});
+	}
+
+	async cancelPar2Repair(id: number) {
+		return this.request<{ message: string }>(`/par2repair/${id}`, {
+			method: "DELETE",
+		});
+	}
+
+	async cancelAllPar2Repairs() {
+		return this.request<{ cancelled: number }>("/par2repair", {
+			method: "DELETE",
+		});
 	}
 
 	async resetAllHealthChecks() {

@@ -66,7 +66,23 @@ type MetadataRemoteFile struct {
 	cacheSource      *segcache.Source         // Segment cache source (nil = no cache configured)
 	repairCoalescer  *RepairCoalescer         // Throttles streaming-failure repair triggers and rclone VFS refreshes
 	padRecorder      *padRecorder             // Process-lived worker persisting degraded-pad events
+	patchSource      PatchSource              // Repaired-article payloads (nil = PAR2 repair disabled)
+	repairEnqueuer   RepairEnqueuer           // Queues PAR2 repairs (nil = PAR2 repair disabled)
 	renameMu         sync.Mutex               // Mutex to protect rename operations from race conditions
+}
+
+// SetPatchSource wires the PAR2 repair patch store into the read path. Call
+// during boot, before the filesystem serves reads.
+func (mrf *MetadataRemoteFile) SetPatchSource(ps PatchSource) {
+	mrf.patchSource = ps
+}
+
+// SetRepairEnqueuer wires the PAR2 repair queue into both playback triggers:
+// degraded pads (zero-filled holes) and failed streams on missing articles.
+// Call during boot, before the filesystem serves reads.
+func (mrf *MetadataRemoteFile) SetRepairEnqueuer(re RepairEnqueuer) {
+	mrf.repairEnqueuer = re
+	mrf.padRecorder.repair = re
 }
 
 // Configuration is now accessed dynamically through config.ConfigGetter
@@ -297,6 +313,8 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 		rcloneClient:     mrf.rcloneClient,
 		repairCoalescer:  mrf.repairCoalescer,
 		padRecorder:      mrf.padRecorder,
+		patchSource:      mrf.patchSource,
+		repairEnqueuer:   mrf.repairEnqueuer,
 		configGetter:     mrf.configGetter,
 		poolManager:      mrf.poolManager,
 		ctx:              fileCtx,
@@ -825,6 +843,8 @@ type MetadataVirtualFile struct {
 	rcloneClient     rclonecli.RcloneRcClient // RClone RC client for VFS notifications
 	repairCoalescer  *RepairCoalescer         // Throttles repair triggers; may be nil in tests
 	padRecorder      *padRecorder             // Persists degraded-pad events; may be nil in tests
+	patchSource      PatchSource              // Repaired-article payloads; may be nil
+	repairEnqueuer   RepairEnqueuer           // Queues PAR2 repairs; may be nil
 	configGetter     config.ConfigGetter
 	poolManager      pool.Manager // Pool manager for dynamic pool access
 	ctx              context.Context
@@ -2339,6 +2359,14 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 	classification := mvf.classifyStreamingFailure(dataCorruptionErr)
 	isDegraded := healthEnabled && classification != nil &&
 		classification.Verdict == holes.VerdictDegraded
+
+	// A missing article is PAR2-repairable regardless of eligibility for
+	// zero-fill (RAR/AES streams fail here instead of padding). Queue a
+	// background repair; the repair queue dedups and the planner enforces
+	// caps, so this is safe to fire on every confirmed miss.
+	if mvf.repairEnqueuer != nil && usenet.IsArticleNotFound(dataCorruptionErr.UnderlyingErr) {
+		mvf.repairEnqueuer.Enqueue(ctx, mvf.name, dataCorruptionErr.SegmentID)
+	}
 
 	// Increment failure count for tracking/masking if explicitly enabled with a valid
 	// threshold. Masking must be opt-in: Enabled == nil means disabled (not on-by-default),

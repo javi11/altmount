@@ -67,6 +67,8 @@ func (m *fakeFullPoolManager) SetImportConnCapacity(total int) {
 		m.budget.SetCapacity(total)
 	}
 }
+
+func (m *fakeFullPoolManager) SetStreamHeadroom(int) {}
 func (m *fakeFullPoolManager) ImportConnCapacity() int {
 	if m.budget != nil {
 		return m.budget.Capacity()

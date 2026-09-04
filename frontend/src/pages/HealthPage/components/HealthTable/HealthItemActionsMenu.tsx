@@ -23,6 +23,7 @@ interface HealthItemActionsMenuProps {
 	onCancelCheck: (id: number) => void;
 	onManualCheck: (id: number) => void;
 	onRepair: (id: number) => void;
+	onPar2Repair?: (filePath: string) => void;
 	onDelete: (id: number) => void;
 	onUnmask: (id: number) => void;
 	onRegenerate?: (filePath: string) => void;
@@ -39,6 +40,7 @@ export function HealthItemActionsMenu({
 	onCancelCheck,
 	onManualCheck,
 	onRepair,
+	onPar2Repair,
 	onDelete,
 	onUnmask,
 	onRegenerate,
@@ -131,6 +133,18 @@ export function HealthItemActionsMenu({
 						Trigger Repair
 					</button>
 				</li>
+				{onPar2Repair && (
+					<li>
+						<button
+							type="button"
+							onClick={() => onPar2Repair(item.file_path)}
+							className="text-info"
+						>
+							<Wrench className="h-4 w-4" />
+							PAR2 Repair
+						</button>
+					</li>
+				)}
 				<li>
 					<button type="button" onClick={handleDownloadNZB} disabled={isDownloadPending}>
 						<Download className="h-4 w-4" />

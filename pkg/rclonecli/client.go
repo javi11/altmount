@@ -509,6 +509,12 @@ func (m *Manager) createConfig(ctx context.Context, configName, webdavURL string
 				"user":            user,
 				"pass":            pass,
 			},
+			// obscure tells rclone the password is plaintext. Without it,
+			// config/create guesses, and guesses wrong for any password that is
+			// itself revealable, storing it verbatim (#691).
+			"opt": map[string]any{
+				"obscure": true,
+			},
 		},
 	}
 

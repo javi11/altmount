@@ -23,11 +23,27 @@ export interface ConfigResponse {
 	providers: ProviderConfig[];
 	user_agent?: string;
 	network: NetworkConfig;
+	par2_repair: Par2RepairConfig;
 	mount_path: string;
 	mount_type: MountType;
 	api_key?: string;
 	download_key?: string;
 	profiler_enabled: boolean;
+}
+
+// Background PAR2 repair of missing usenet articles
+export interface Par2RepairConfig {
+	enabled?: boolean;
+	max_repair_ratio?: number; // fraction of a file's bytes repairable; PAR2 redundancy is the hard ceiling
+	max_memory_mb?: number; // in-heap solver budget per job; larger repairs spill to disk
+	max_concurrent_jobs?: number;
+	max_connections?: number; // NNTP connections repair fetches may use (shared across jobs); 0 = default 10
+	min_release_size_mb?: number; // releases smaller than this are not repaired; 0 = no minimum
+	max_release_size_mb?: number; // releases larger than this are not repaired; 0 = no maximum
+	max_patch_store_mb?: number; // total patch-store size cap; 0 = unlimited
+	patch_dir?: string; // where patches + solver scratch live; empty = <metadata_root>/patches
+	arr_first?: boolean; // corrupted files: ARR repair first, PAR2 as fallback when the ARRs come up empty (default true)
+	repair_on_import?: boolean; // queue a repair as soon as a damaged file imports
 }
 
 // WebDAV server configuration
@@ -111,6 +127,9 @@ export interface HealthConfig {
 	library_dir?: string;
 	cleanup_orphaned_metadata?: boolean;
 	check_interval_seconds?: number;
+	/** Max in-flight STAT checks per sweep. 0 or absent = adapt to pool + stream activity. */
+	max_concurrent_segment_checks?: number;
+	/** @deprecated renamed to max_concurrent_segment_checks; migrated automatically. */
 	max_connections_for_health_checks?: number;
 	check_batch_size?: number; // Files fetched and swept together per health-check cycle
 	max_concurrent_jobs?: number; // Max concurrent health check jobs
@@ -230,6 +249,11 @@ export type ImportStrategy = "NONE" | "SYMLINK" | "STRM";
 // Import configuration
 export interface ImportConfig {
 	max_processor_workers: number;
+	/**
+	 * Connections held back from import per active stream. `null`/absent
+	 * derives the reservation from pool size; an explicit `0` disables it.
+	 */
+	stream_headroom_connections?: number | null;
 	queue_processing_interval_seconds: number; // Interval in seconds for queue processing
 	allowed_file_extensions: string[];
 	max_download_prefetch: number;
@@ -345,6 +369,7 @@ export interface ConfigUpdateRequest {
 	providers?: ProviderUpdateRequest[];
 	user_agent?: string;
 	network?: NetworkConfig;
+	par2_repair?: Par2RepairConfig;
 	mount_path?: string;
 	mount_type?: MountType;
 	profiler_enabled?: boolean;
@@ -395,6 +420,9 @@ export interface HealthUpdateRequest {
 	library_dir?: string;
 	cleanup_orphaned_metadata?: boolean;
 	check_interval_seconds?: number; // Interval in seconds (optional)
+	/** Max in-flight STAT checks per sweep. 0 or absent = adapt to pool + stream activity. */
+	max_concurrent_segment_checks?: number;
+	/** @deprecated renamed to max_concurrent_segment_checks; migrated automatically. */
 	max_connections_for_health_checks?: number;
 	check_batch_size?: number; // Files fetched and swept together per health-check cycle
 	max_concurrent_jobs?: number; // Max concurrent health check jobs
@@ -542,6 +570,7 @@ export type ConfigSection =
 	| "arrs"
 	| "stremio"
 	| "network"
+	| "par2_repair"
 	| "system";
 
 // Form data interfaces for UI components
@@ -966,6 +995,12 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		description:
 			"HTTP/HTTPS proxy and indexer User-Agent for outbound indexer, Arrs, NZB grab, and SABnzbd fallback traffic",
 		icon: "Globe",
+		canEdit: true,
+	},
+	par2_repair: {
+		title: "PAR2 Repair",
+		description: "Background reconstruction of missing usenet articles from PAR2 recovery data",
+		icon: "Wrench",
 		canEdit: true,
 	},
 	system: {

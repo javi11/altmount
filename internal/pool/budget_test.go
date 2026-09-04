@@ -69,14 +69,20 @@ func TestImportBudget_StreamsShrinkEffectiveCap(t *testing.T) {
 	src := &stubStreamSource{}
 	b := NewImportBudget()
 	b.SetStreamSource(src)
-	b.SetCapacity(8)
 
-	// 2 streams -> reserve 2*streamHeadroom=4 -> effective cap 4.
-	src.set(2)
+	// Derive the sizes from defaultStreamHeadroom rather than hardcoding them, so the
+	// constant stays tunable: a capacity of 4x headroom keeps the reserve well
+	// clear of the capacity-1 clamp for the 2 streams below.
+	const streams = 2
+	capacity := 4 * defaultStreamHeadroom
+	wantCap := capacity - streams*defaultStreamHeadroom
+	b.SetCapacity(capacity)
+
+	src.set(streams)
 	b.NotifyStreamChange()
 
 	var releases []func()
-	for i := range 4 {
+	for i := range wantCap {
 		r, err := b.Acquire(context.Background())
 		if err != nil {
 			t.Fatalf("acquire %d: %v", i, err)
@@ -94,11 +100,12 @@ func TestImportBudget_StreamsShrinkEffectiveCap(t *testing.T) {
 	}()
 	select {
 	case <-blocked:
-		t.Fatal("fifth Acquire should block at effective cap 4 (capacity 8, 2 streams)")
+		t.Fatalf("acquire %d should block at effective cap %d (capacity %d, %d streams)",
+			wantCap+1, wantCap, capacity, streams)
 	case <-time.After(50 * time.Millisecond):
 	}
 
-	// Streams stop -> effective cap returns to 8, waiter granted.
+	// Streams stop -> effective cap returns to capacity, waiter granted.
 	src.set(0)
 	b.NotifyStreamChange()
 	select {
@@ -345,8 +352,15 @@ func TestManagerStatSweepConcurrency(t *testing.T) {
 	}
 	defer func() { _ = m.ClearPool() }()
 
-	if got := m.StatSweepConcurrency(100); got != 500 {
-		t.Fatalf("StatSweepConcurrency(100) = %d, want 500 (idle pool opens to StatCapacity)", got)
+	// Idle pool: wider than conservative, but never the pool's full STAT
+	// capacity — 5 conns × StatInflight 100 = 500 would stuff every pipeline
+	// past what the per-attempt window can drain (see StatSweepConcurrency).
+	if got := m.StatSweepConcurrency(100); got != 100*idleStatSweepFactor {
+		t.Fatalf("StatSweepConcurrency(100) = %d, want %d (idle width capped at factor x conservative)", got, 100*idleStatSweepFactor)
+	}
+	// A pool whose capacity is below the widened bound stays at capacity.
+	if got := m.StatSweepConcurrency(400); got != 500 {
+		t.Fatalf("StatSweepConcurrency(400) = %d, want 500 (StatCapacity caps the widened idle bound)", got)
 	}
 
 	src := &stubStreamSource{}

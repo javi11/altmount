@@ -44,6 +44,7 @@ func statIDsWithBoundedRetries(
 	maxConnections int,
 	timeout time.Duration,
 	stopOnMissing bool,
+	patchIdx PatchIndex,
 ) (map[string]error, error) {
 	remaining := make([]string, 0, len(ids))
 	seen := make(map[string]struct{}, len(ids))
@@ -69,6 +70,12 @@ func statIDsWithBoundedRetries(
 			}
 			reported[result.MessageID] = true
 			if result.Err == nil {
+				continue
+			}
+			// Repaired bytes live only in the local patch store, so an article
+			// the providers dropped is still available. Reported with no error
+			// recorded, it leaves the retry set as reachable.
+			if patched(patchIdx, result.MessageID) {
 				continue
 			}
 			if isDefinitiveFastFailMiss(result.Err) {
@@ -208,6 +215,20 @@ type FastFailFile struct {
 //     exactly which files are broken. Operational errors and timeouts are retried;
 //     exhaustion returns ErrFastFailInconclusive. A clean release returns
 //     (false, nil) and proceeds straight to parsing.
+//
+// PatchIndex reports whether a locally repaired copy of an article exists.
+// Repaired bytes live only in AltMount's patch store, never on usenet, so a
+// segment the providers have dropped still counts as available when patched —
+// without this a repaired release could never be (re-)imported.
+type PatchIndex interface {
+	Has(messageID string) bool
+}
+
+// patched reports whether idx has a local patch for the message ID.
+func patched(idx PatchIndex, messageID string) bool {
+	return idx != nil && idx.Has(messageID)
+}
+
 func FastFailReleaseProbe(
 	ctx context.Context,
 	files []FastFailFile,
@@ -215,6 +236,7 @@ func FastFailReleaseProbe(
 	segmentSamplePercentage int,
 	maxConnections int,
 	timeout time.Duration,
+	patchIdx PatchIndex,
 ) (bool, error) {
 	var segments []*metapb.SegmentData
 	for _, file := range files {
@@ -261,7 +283,7 @@ func FastFailReleaseProbe(
 	if probeTimeout > 2*time.Second {
 		probeTimeout = 2 * time.Second
 	}
-	missing, err := statIDsWithBoundedRetries(ctx, usenetPool, ids, maxConnections, probeTimeout, true)
+	missing, err := statIDsWithBoundedRetries(ctx, usenetPool, ids, maxConnections, probeTimeout, true, patchIdx)
 	if err != nil {
 		return false, err
 	}
@@ -298,6 +320,7 @@ func FastFailCheckFiles(
 	maxConnections int,
 	timeout time.Duration,
 	progressTracker progress.ProgressTracker,
+	patchIdx PatchIndex,
 ) ([]FastFailFileResult, error) {
 	if !poolManager.HasPool() {
 		return nil, fmt.Errorf("cannot fast-fail import: usenet connection pool is nil")
@@ -407,7 +430,7 @@ func FastFailCheckFiles(
 			ids[i] = job.segID
 		}
 
-		missingByID, err := statIDsWithBoundedRetries(ctx, usenetPool, ids, maxConnections, timeout, false)
+		missingByID, err := statIDsWithBoundedRetries(ctx, usenetPool, ids, maxConnections, timeout, false, patchIdx)
 		if err != nil {
 			return nil, err
 		}

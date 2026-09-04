@@ -188,6 +188,57 @@ export const useHealthStats = () => {
 	});
 };
 
+export const usePar2RepairJobs = () => {
+	return useQuery({
+		queryKey: ["par2repair", "jobs"],
+		queryFn: () => apiClient.getPar2RepairJobs(),
+		// Repairs are started by imports, playback and health checks, none of
+		// which the page hears about — polling is the only way this list learns
+		// a job exists, so it has to be quick enough to feel live.
+		refetchInterval: (query) =>
+			query.state.data?.some((job) => job.status === "running") ? 2000 : 5000,
+		// The interval pauses while the tab is hidden, and the app disables
+		// focus refetching globally; without this the list is frozen at whatever
+		// it showed when the user last looked away, and only a manual reload
+		// fixes it.
+		refetchOnWindowFocus: true,
+		staleTime: 0,
+	});
+};
+
+export const useTriggerPar2Repair = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: (filePath: string) => apiClient.triggerPar2Repair(filePath),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["par2repair"] });
+		},
+	});
+};
+
+export const useCancelPar2Repair = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: (id: number) => apiClient.cancelPar2Repair(id),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["par2repair"] });
+		},
+	});
+};
+
+export const useCancelAllPar2Repairs = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: () => apiClient.cancelAllPar2Repairs(),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["par2repair"] });
+		},
+	});
+};
+
 export const useResetAllHealthChecks = () => {
 	const queryClient = useQueryClient();
 

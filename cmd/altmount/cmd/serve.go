@@ -8,6 +8,7 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -26,6 +27,7 @@ import (
 	"github.com/javi11/altmount/internal/rclone"
 	"github.com/javi11/altmount/internal/slogutil"
 	"github.com/javi11/altmount/internal/stremio"
+	"github.com/javi11/altmount/internal/usenet"
 	"github.com/javi11/altmount/internal/webdav"
 	"github.com/spf13/cobra"
 )
@@ -137,7 +139,28 @@ func runServe(cmd *cobra.Command, args []string) error {
 		defer initialCache.Stop()
 	}
 
-	fs := initializeFilesystem(ctx, metadataService, repos.HealthRepo, arrsService, rcloneRCClient, poolManager, configManager.GetConfigGetter(), streamTracker, cacheSource)
+	// Background PAR2 repair: repairs missing articles and serves the patched
+	// payloads on the read path's hole branch.
+	par2RepairService := startPar2RepairService(ctx, cfg, repos.Par2RepairRepo, repos.HealthRepo, metadataService, poolManager, configManager.GetConfigGetter(), func() bool {
+		return streamTracker.ActiveStreams() > 0
+	})
+
+	// Let degraded imports queue a PAR2 repair (opt-in via repair_on_import),
+	// count locally repaired articles as available during the availability
+	// sweep, and serve repaired payloads to every reader that has no hooks of
+	// its own (the import path builds readers deep inside the parser).
+	importerService.SetRepairEnqueuer(par2RepairService)
+	importerService.SetPatchIndex(par2RepairService.PatchStore())
+	par2RepairService.SetImportResumer(importerService)
+	usenet.SetDefaultPatchLookup(func(segID string) []byte {
+		p, ok := par2RepairService.PatchStore().Get(strings.Trim(segID, "<>"))
+		if !ok {
+			return nil
+		}
+		return p
+	})
+
+	fs := initializeFilesystem(ctx, metadataService, repos.HealthRepo, arrsService, rcloneRCClient, poolManager, configManager.GetConfigGetter(), streamTracker, cacheSource, par2RepairService)
 	importerService.SetContentVerifyFilesystem(fs)
 
 	// 6. Setup web services
@@ -198,12 +221,18 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 	})
 
-	healthWorker, librarySyncWorker, err := startHealthWorker(ctx, cfg, metadataService, repos.HealthRepo, poolManager, configManager, rcloneRCClient, arrsService, importerService, progressBroadcaster, fs)
+	healthWorker, librarySyncWorker, err := startHealthWorker(ctx, cfg, metadataService, repos.HealthRepo, poolManager, configManager, rcloneRCClient, arrsService, importerService, progressBroadcaster, par2RepairService, fs)
 	if err != nil {
 		logger.Warn("Health worker initialization failed", "err", err)
 	}
 	if healthWorker != nil {
 		apiServer.SetHealthWorker(healthWorker)
+	}
+	if par2RepairService != nil {
+		apiServer.SetPar2RepairEnqueuer(par2RepairService)
+	}
+	if repos.Par2RepairRepo != nil {
+		apiServer.SetPar2RepairRepo(repos.Par2RepairRepo)
 	}
 	if librarySyncWorker != nil {
 		apiServer.SetLibrarySyncWorker(librarySyncWorker)
