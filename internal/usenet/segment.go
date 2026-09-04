@@ -1,7 +1,6 @@
 package usenet
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -205,16 +204,22 @@ type segment struct {
 	// keyed on it so persisted hole maps line up across reads.
 	loaderIdx int
 
-	// Data handoff fields (replaces io.Pipe)
-	data      []byte        // Downloaded segment data (set once by downloader)
-	dataErr   error         // Download error (set once by downloader)
-	dataReady chan struct{} // Closed when data or dataErr is set
-	readyOnce sync.Once     // Guards closing dataReady channel
+	// Progressive handoff. buf holds whatever the current attempt has
+	// decoded; ready is how much of it readers may see. A later attempt
+	// starts a fresh buf and swaps it in only once it has passed ready, so a
+	// reader that already consumed the prefix never sees it move.
+	buf       []byte
+	ready     int64
+	done      bool
+	dataErr   error
+	attempt   int
+	notify    chan struct{} // closed and replaced on every publish
+	dataReady chan struct{} // closed once, on completion or error
+	readyOnce sync.Once
 
-	limitedReader io.Reader  // Cached limited reader
-	readerReady   bool       // Whether limitedReader has been successfully initialized
-	mx            sync.Mutex // Protects released flag, limitedReader, readerReady
-	released      bool       // Tracks if segment data has been released
+	reader   *segmentReader
+	mx       sync.Mutex
+	released bool
 }
 
 // newSegment creates a segment with an initialized dataReady channel.
@@ -227,6 +232,7 @@ func newSegment(id string, start, end, segmentSize int64, groups []string, loade
 		SegmentSize: segmentSize,
 		groups:      groups,
 		loaderIdx:   loaderIdx,
+		notify:      make(chan struct{}),
 		dataReady:   make(chan struct{}),
 	}
 }
@@ -238,25 +244,97 @@ func (s *segment) signalReady() {
 	})
 }
 
-// SetData stores the downloaded data and signals readers.
+// wakeLocked releases every reader parked on notify. Caller holds mx.
+func (s *segment) wakeLocked() {
+	close(s.notify)
+	s.notify = make(chan struct{})
+}
+
+// segmentWriter is one fetch attempt's sink. Bytes written are published to
+// readers as they arrive.
+type segmentWriter struct {
+	s       *segment
+	attempt int
+	buf     []byte
+}
+
+// attemptWriter starts a new fetch attempt. Only the newest attempt can
+// publish, and only past what earlier attempts already made visible.
+func (s *segment) attemptWriter() *segmentWriter {
+	s.mx.Lock()
+	defer s.mx.Unlock()
+	s.attempt++
+	size := s.SegmentSize
+	if size < 0 {
+		size = 0
+	}
+	return &segmentWriter{s: s, attempt: s.attempt, buf: make([]byte, 0, size)}
+}
+
+func (w *segmentWriter) Write(p []byte) (int, error) {
+	w.buf = append(w.buf, p...)
+	w.s.publish(w)
+	return len(p), nil
+}
+
+// bytes returns everything this attempt received.
+func (w *segmentWriter) bytes() []byte { return w.buf }
+
+func (s *segment) publish(w *segmentWriter) {
+	s.mx.Lock()
+	if s.released || s.done || w.attempt != s.attempt || int64(len(w.buf)) <= s.ready {
+		s.mx.Unlock()
+		return
+	}
+	s.buf = w.buf
+	s.ready = int64(len(w.buf))
+	s.wakeLocked()
+	s.mx.Unlock()
+}
+
+// finish marks the segment complete with the bytes w received.
+func (s *segment) finish(w *segmentWriter) {
+	s.mx.Lock()
+	if s.released || s.done || w.attempt != s.attempt {
+		s.mx.Unlock()
+		return
+	}
+	s.buf = w.buf
+	s.ready = int64(len(w.buf))
+	s.done = true
+	s.wakeLocked()
+	s.mx.Unlock()
+	s.signalReady()
+}
+
+// published reports how many bytes readers may currently see.
+func (s *segment) published() int64 {
+	s.mx.Lock()
+	defer s.mx.Unlock()
+	return s.ready
+}
+
+// SetData stores a complete payload and signals readers.
 // Non-blocking, safe to call from any goroutine.
 func (s *segment) SetData(data []byte) {
 	if s == nil {
 		return
 	}
 	s.mx.Lock()
-	if s.released {
+	if s.released || s.done {
 		s.mx.Unlock()
 		return
 	}
-	s.data = data
+	s.buf = data
+	s.ready = int64(len(data))
+	s.done = true
+	s.wakeLocked()
 	s.mx.Unlock()
-
 	s.signalReady()
 }
 
-// SetError stores a download error and signals readers.
-// Non-blocking, safe to call from any goroutine.
+// SetError stores a download error and signals readers. Readers that were
+// already handed a prefix see the error once they reach the watermark.
 func (s *segment) SetError(err error) {
 	if s == nil || err == nil {
 		return
@@ -265,8 +343,8 @@ func (s *segment) SetError(err error) {
 	if s.dataErr == nil {
 		s.dataErr = err
 	}
+	s.wakeLocked()
 	s.mx.Unlock()
-
 	s.signalReady()
 }
 
@@ -280,97 +358,82 @@ func (s *segment) GetDownloadError() error {
 	return s.dataErr
 }
 
-// DataLen returns the length of the downloaded data.
-// Returns 0 if data hasn't been set yet.
+// DataLen returns how many decoded bytes are currently available.
 func (s *segment) DataLen() int {
 	if s == nil {
 		return 0
 	}
 	s.mx.Lock()
 	defer s.mx.Unlock()
-	return len(s.data)
+	return int(s.ready)
 }
 
-// GetReaderContext returns a reader for the segment data.
-// Blocks until data is available, an error is set, or the context is cancelled.
-// The reader is limited to the range [Start, End] within the segment.
-// If the context is cancelled before data arrives, returns an errorReader.
-// Subsequent calls with a valid context will retry if the previous attempt
-// was a context cancellation (unlike sync.Once which never retries).
+// segmentReader serves [Start, End] of the segment, waiting only for the
+// bytes each Read needs rather than for the whole article.
+type segmentReader struct {
+	s   *segment
+	ctx context.Context
+	off int64 // absolute offset into the article
+}
+
+// GetReaderContext returns the segment's reader. The context bounds waits
+// for bytes that have not arrived yet; a later call may supply a fresh one.
 func (s *segment) GetReaderContext(ctx context.Context) io.Reader {
 	s.mx.Lock()
-
-	// Fast path: reader already initialized successfully
-	if s.readerReady {
-		r := s.limitedReader
-		s.mx.Unlock()
-		return r
-	}
-
-	// Check if we already have a non-context error cached
-	if s.limitedReader != nil {
-		if er, ok := s.limitedReader.(*errorReader); ok {
-			// If it was a real error (not context), return it
-			if !errors.Is(er.err, context.Canceled) && !errors.Is(er.err, context.DeadlineExceeded) {
-				r := s.limitedReader
-				s.mx.Unlock()
-				return r
-			}
-			// Previous was a context error — allow retry
-			s.limitedReader = nil
-		}
-	}
-
-	s.mx.Unlock()
-
-	// Wait for data or context cancellation
-	select {
-	case <-s.dataReady:
-	case <-ctx.Done():
-		return &errorReader{err: ctx.Err()}
-	}
-
-	s.mx.Lock()
 	defer s.mx.Unlock()
-
-	// Double-check: another goroutine may have initialized while we waited
-	if s.readerReady {
-		return s.limitedReader
+	if s.reader == nil {
+		s.reader = &segmentReader{s: s, off: s.Start}
 	}
-
-	// Check for download error
-	if s.dataErr != nil {
-		s.limitedReader = &errorReader{err: s.dataErr}
-		s.readerReady = true
-		return s.limitedReader
-	}
-
-	// Create a reader over the full data
-	fullReader := bytes.NewReader(s.data)
-
-	// Skip to Start position
-	if s.Start > 0 {
-		if _, seekErr := fullReader.Seek(s.Start, io.SeekStart); seekErr != nil {
-			if s.dataErr == nil {
-				s.dataErr = seekErr
-			}
-			s.limitedReader = &errorReader{err: seekErr}
-			s.readerReady = true
-			return s.limitedReader
-		}
-	}
-
-	// Create LimitReader for the range [Start, End]
-	s.limitedReader = io.LimitReader(fullReader, s.End-s.Start+1)
-	s.readerReady = true
-	return s.limitedReader
+	s.reader.ctx = ctx
+	return s.reader
 }
 
-// GetReader returns a reader for the segment data.
-// Blocks indefinitely until data is available or an error is set.
-// Prefer GetReaderContext for cancellation support.
+// GetReader returns a reader that blocks without a cancellation bound.
+// Prefer GetReaderContext.
 func (s *segment) GetReader() io.Reader {
 	return s.GetReaderContext(context.Background())
+}
+
+func (r *segmentReader) Read(p []byte) (int, error) {
+	s := r.s
+	if r.off > s.End {
+		return 0, io.EOF
+	}
+	if len(p) == 0 {
+		return 0, nil
+	}
+	for {
+		s.mx.Lock()
+		if s.dataErr != nil && (s.released || s.ready <= r.off) {
+			err := s.dataErr
+			s.mx.Unlock()
+			return 0, err
+		}
+		if s.ready > r.off {
+			end := min(s.ready, s.End+1)
+			n := copy(p, s.buf[r.off:end])
+			r.off += int64(n)
+			s.mx.Unlock()
+			return n, nil
+		}
+		if s.done {
+			// A complete article shorter than the requested range ends the
+			// segment, matching the previous LimitReader behaviour.
+			s.mx.Unlock()
+			return 0, io.EOF
+		}
+		wait := s.notify
+		ctx := r.ctx
+		s.mx.Unlock()
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		select {
+		case <-wait:
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		}
+	}
 }
 
 // Release frees the segment data to allow GC. Safe to call multiple times.
@@ -385,13 +448,13 @@ func (s *segment) Release() {
 		return
 	}
 	s.released = true
-	s.data = nil
+	s.buf = nil
 	if s.dataErr == nil {
 		s.dataErr = io.ErrClosedPipe
 	}
+	s.wakeLocked()
 	s.mx.Unlock()
 
-	// Ensure dataReady is closed so any waiting readers unblock
 	s.signalReady()
 }
 
@@ -416,13 +479,4 @@ func (s *segment) ID() string {
 
 func (s *segment) Groups() []string {
 	return s.groups
-}
-
-// errorReader is a reader that always returns an error.
-type errorReader struct {
-	err error
-}
-
-func (r *errorReader) Read(_ []byte) (int, error) {
-	return 0, r.err
 }
