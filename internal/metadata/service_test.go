@@ -453,6 +453,27 @@ func TestDirectoryModTime_StableAcrossHealthSweep(t *testing.T) {
 		"importing a new file must advance the directory mtime")
 }
 
+func TestDeleteDirectory_RefusesToRemoveTheMetadataRoot(t *testing.T) {
+	root := t.TempDir()
+	ms := NewMetadataService(root)
+
+	virtualPath := filepath.Join("movies", "keep.mkv")
+	meta := ms.CreateFileMetadata(
+		1024, "test.nzb", metapb.FileStatus_FILE_STATUS_HEALTHY,
+		nil, metapb.Encryption_NONE, "", "", nil, nil, 0, nil, "",
+	)
+	require.NoError(t, ms.WriteFileMetadata(virtualPath, meta))
+
+	// A virtual path resolving to the store itself must never wipe the whole store.
+	for _, p := range []string{"", ".", string(filepath.Separator)} {
+		err := ms.DeleteDirectory(p)
+		assert.ErrorContains(t, err, "safety block", "must refuse virtual path %q", p)
+	}
+
+	assert.DirExists(t, root)
+	assert.FileExists(t, ms.GetMetadataFilePath(virtualPath), "the store's contents must survive a refused delete")
+}
+
 func TestDeleteDirectoryIfEmpty(t *testing.T) {
 	newService := func(t *testing.T) (*MetadataService, string) {
 		t.Helper()
