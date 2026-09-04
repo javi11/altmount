@@ -112,3 +112,21 @@ func TestImportReaderDoesNotRamp(t *testing.T) {
 		t.Fatalf("import max in flight = %d, want %d", fp.MaxInFlight(), maxPrefetch)
 	}
 }
+
+// The window is bounded in bytes too: on large articles far fewer than
+// maxPrefetch segments are in flight.
+func TestWindowIsCappedInBytesOnLargeArticles(t *testing.T) {
+	ctx := context.Background()
+	const nSegs, segSize, maxPrefetch = 40, 4 << 20, 60
+	fp := rampPool(nSegs, segSize, 50*time.Millisecond)
+	rg := buildEagerRange(ctx, t, nSegs, segSize)
+	ur := newRampReader(t, ctx, fp, rg, maxPrefetch)
+	ur.Start()
+	if _, err := io.ReadAll(ur); err != nil {
+		t.Fatal(err)
+	}
+	want := int32(readAheadBytesCap / segSize)
+	if fp.MaxInFlight() > want {
+		t.Fatalf("max in flight %d exceeds the byte cap of %d segments", fp.MaxInFlight(), want)
+	}
+}
