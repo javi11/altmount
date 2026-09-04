@@ -123,6 +123,26 @@ func WithSpeculativeBudget(b SpecBudget) ReaderOption {
 	}
 }
 
+const (
+	// rampBaseSegments is the read-ahead a fresh streaming reader opens with.
+	// It quadruples per consumed segment, so sustained reading reaches the
+	// full window within three articles while a probe that reads a couple of
+	// MB and leaves drags almost nothing behind it.
+	rampBaseSegments = 2
+	// streamingIntentBytes is the request length at or above which a caller
+	// is clearly playing, not probing, and gets the full window at once.
+	streamingIntentBytes = 128 << 20
+)
+
+// WithRangeHint tells the reader how many bytes the caller asked for. At or
+// above streamingIntentBytes the read-ahead window opens fully at once;
+// below it, or unknown (0), the window ramps from rampBaseSegments.
+func WithRangeHint(bytes int64) ReaderOption {
+	return func(r *UsenetReader) {
+		r.rangeHint = bytes
+	}
+}
+
 // ConnBudget grants connection tokens for import segment fetches.
 // Implemented by pool.Manager (AcquireImportConnection).
 type ConnBudget interface {
@@ -199,6 +219,8 @@ type UsenetReader struct {
 	priority       bool         // true (streaming) = priority lane; false (import) = normal lane
 	budget         ConnBudget   // optional; gates import fetches on the global connection budget
 	specBudget     SpecBudget   // optional; bounds speculative fetches pool-wide (streaming only)
+	rangeHint      int64        // bytes the caller asked for; 0 = unknown
+	scheduledBytes int64        // usable bytes of every segment scheduled so far
 	cond           *sync.Cond   // Signals downloadManager when reader advances
 
 	// Prefetch-based download tracking
@@ -454,6 +476,26 @@ func IsArticleNotFound(err error) bool {
 	return errors.Is(err, nntppool.ErrArticleNotFound)
 }
 
+// windowFor is how many segments may be scheduled ahead of the read position
+// once consumed segments have been read since the reader was created.
+func (b *UsenetReader) windowFor(consumed int) int {
+	if !b.priority || b.rangeHint >= streamingIntentBytes {
+		return b.maxPrefetch
+	}
+	if consumed >= 16 {
+		return b.maxPrefetch
+	}
+	return min(b.maxPrefetch, rampBaseSegments<<(2*consumed))
+}
+
+// BufferedAhead reports bytes scheduled for fetch beyond what the caller has
+// read: the distance a forward skip can cover without a new reader.
+func (b *UsenetReader) BufferedAhead() int64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return max(b.scheduledBytes-b.totalBytesRead, 0)
+}
+
 func (b *UsenetReader) GetBufferedOffset() int64 {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -684,7 +726,7 @@ func (b *UsenetReader) downloadManager(ctx context.Context) {
 		// Limit how far ahead we prefetch beyond the current read position
 		currentRead := b.rg.GetCurrentIndex()
 		ahead := b.nextToDownload - currentRead
-		if ahead >= b.maxPrefetch {
+		if ahead >= b.windowFor(currentRead) {
 			b.cond.Wait()
 			b.mu.Unlock()
 			if ctx.Err() != nil {
@@ -722,6 +764,9 @@ func (b *UsenetReader) downloadManager(ctx context.Context) {
 			releaseSlot()
 			continue
 		}
+		b.mu.Lock()
+		b.scheduledBytes += seg.End - seg.Start + 1
+		b.mu.Unlock()
 
 		b.inFlight.Add(1)
 		go func(segIdx int, s *segment) {
