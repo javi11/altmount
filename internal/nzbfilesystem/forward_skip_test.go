@@ -117,8 +117,8 @@ func TestNoRangeRamps(t *testing.T) {
 		t.Fatal(err)
 	}
 	time.Sleep(100 * time.Millisecond) // the manager must not schedule more even given time
-	if got := fp.BodyPriorityCalls(); got > 8 {
-		t.Fatalf("a 1 KB probe scheduled %d fetches, want at most the first ramp step of 8", got)
+	if got := fp.BodyPriorityCalls(); got > 16 {
+		t.Fatalf("a 1 KB probe scheduled %d fetches, want at most the opening window of 16", got)
 	}
 	close(gate)
 }

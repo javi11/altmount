@@ -124,24 +124,21 @@ func WithSpeculativeBudget(b SpecBudget) ReaderOption {
 }
 
 const (
-	// rampBaseSegments is the read-ahead a fresh streaming reader opens with,
+	// rampBaseSegments is the read-ahead a fresh streaming reader opens with
 	// and keeps until the caller has read its first byte. Holding the fan-out
-	// back that long also keeps the demand article from queueing behind a
-	// window of speculative ones on the same connections.
+	// back that long keeps the demand article from queueing behind a window
+	// of speculative ones on the same connections, and a probe that reads a
+	// few hundred KB and leaves drags almost nothing behind it.
 	rampBaseSegments = 2
-	// rampStep1Bytes/rampStep2Bytes are the read positions at which the
-	// window widens to rampStep1Segments and rampStep2Segments before
-	// opening fully. A probe that reads a few hundred KB and leaves drags
-	// only a handful of articles behind it; a player is at full speed
-	// within its first couple of MB.
-	rampStep1Bytes    = 512 << 10
-	rampStep1Segments = 8
-	rampStep2Bytes    = 2 << 20
-	rampStep2Segments = 32
-	// streamingIntentBytes is the request length at or above which a caller
-	// is clearly playing, not probing: the window opens fully as soon as the
-	// first byte has been read.
-	streamingIntentBytes = 128 << 20
+	// rampOpeningSegments is the window between the first byte and the first
+	// consumed segment: wide enough that startup runs near full speed, narrow
+	// enough that a probe reading a partial article does not fetch a whole
+	// window on the way out.
+	rampOpeningSegments = 16
+	// streamingIntentBytes is the declared request length at or above which
+	// a caller is playing, not probing: the window opens fully as soon as the
+	// first byte has been read. rclone's chunked reads declare 32 MB.
+	streamingIntentBytes = 8 << 20
 )
 
 // WithRangeHint tells the reader how many bytes the caller asked for. At or
@@ -424,12 +421,9 @@ func (b *UsenetReader) Read(p []byte) (int, error) {
 		before := b.totalBytesRead
 		b.totalBytesRead += int64(nn)
 		totalRead := b.totalBytesRead
-		// The read-ahead window widens with bytes read; wake the manager when
-		// a step boundary is crossed so it is not left waiting for the next
-		// segment rotation.
-		widened := nn > 0 && (before == 0 ||
-			(before < rampStep1Bytes && totalRead >= rampStep1Bytes) ||
-			(before < rampStep2Bytes && totalRead >= rampStep2Bytes))
+		// The read-ahead window widens once the first byte has been read; wake
+		// the manager so it is not left waiting for the next segment rotation.
+		widened := nn > 0 && before == 0
 		b.mu.Unlock()
 		if widened {
 			b.cond.Signal()
@@ -497,8 +491,8 @@ func IsArticleNotFound(err error) bool {
 }
 
 // windowFor is how many segments may be scheduled ahead of the read position
-// given how many bytes the caller has read since the reader was created.
-func (b *UsenetReader) windowFor(bytesRead int64) int {
+// given what the caller has read since the reader was created.
+func (b *UsenetReader) windowFor(bytesRead int64, consumedSegments int) int {
 	if !b.priority {
 		return b.maxPrefetch
 	}
@@ -507,10 +501,8 @@ func (b *UsenetReader) windowFor(bytesRead int64) int {
 	case bytesRead == 0:
 		w = rampBaseSegments
 	case b.rangeHint >= streamingIntentBytes:
-	case bytesRead < rampStep1Bytes:
-		w = rampStep1Segments
-	case bytesRead < rampStep2Bytes:
-		w = rampStep2Segments
+	case consumedSegments == 0:
+		w = rampOpeningSegments
 	}
 	return min(b.maxPrefetch, w)
 }
@@ -753,7 +745,7 @@ func (b *UsenetReader) downloadManager(ctx context.Context) {
 		// Limit how far ahead we prefetch beyond the current read position
 		currentRead := b.rg.GetCurrentIndex()
 		ahead := b.nextToDownload - currentRead
-		if ahead >= b.windowFor(b.totalBytesRead) {
+		if ahead >= b.windowFor(b.totalBytesRead, currentRead) {
 			b.cond.Wait()
 			b.mu.Unlock()
 			if ctx.Err() != nil {
