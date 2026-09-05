@@ -870,7 +870,10 @@ type MetadataVirtualFile struct {
 	// (nil when the active reader doesn't implement it), so the hot Read/ReadAt
 	// loops avoid repeating the type assertion every iteration. Kept in sync by
 	// setReader and the remux-wrap step; guarded by mvf.mu like reader.
-	bufOffReader      interface{ GetBufferedOffset() int64 }
+	bufOffReader interface{ GetBufferedOffset() int64 }
+	// bufAheadReader is mvf.reader pre-asserted to BufferedAhead, which says
+	// how far a forward skip can drain through the shared reader for free.
+	bufAheadReader    interface{ BufferedAhead() int64 }
 	readerInitialized bool
 	position          int64 // File position (what client sees after Seek)
 	originalRangeEnd  int64 // Original end requested by client (-1 for unbounded)
@@ -955,6 +958,7 @@ type interruptSlot struct{ i readerInterrupter }
 func (mvf *MetadataVirtualFile) setReader(r io.ReadCloser) {
 	mvf.reader = r
 	mvf.bufOffReader, _ = r.(interface{ GetBufferedOffset() int64 })
+	mvf.bufAheadReader, _ = r.(interface{ BufferedAhead() int64 })
 	slot := interruptSlot{}
 	if i, ok := r.(readerInterrupter); ok {
 		slot.i = i
@@ -1272,6 +1276,15 @@ func (mvf *MetadataVirtualFile) ReadAtContext(readCtx context.Context, p []byte,
 		mvf.readAtSharedNext >= 0 &&
 		off > mvf.readAtSharedNext &&
 		off-mvf.readAtSharedNext <= forwardSkipLimit
+	// Draining is only free while the gap sits inside bytes the reader has
+	// already scheduled; past that, every skipped article is a download the
+	// caller never wanted, and a reader opened at the target is cheaper.
+	if forwardSkip && mvf.bufAheadReader != nil && off-mvf.readAtSharedNext > mvf.bufAheadReader.BufferedAhead() {
+		mvf.closeCurrentReader()
+		mvf.position = off
+		mvf.readAtSharedNext = off
+		forwardSkip = false
+	}
 	useShared := forwardSkip ||
 		(mvf.readAtSharedNext >= 0 && off == mvf.readAtSharedNext) ||
 		(mvf.readAtSharedNext == 0 && !mvf.readerInitialized && off == mvf.position)
@@ -1956,6 +1969,7 @@ func (mvf *MetadataVirtualFile) ensureReader() error {
 		mvf.reader = newSkipLimitReader(mvf.reader, start-rawStart, end-start+1)
 	}
 	mvf.bufOffReader, _ = mvf.reader.(interface{ GetBufferedOffset() int64 })
+	mvf.bufAheadReader, _ = mvf.reader.(interface{ BufferedAhead() int64 })
 
 	mvf.readerInitialized = true
 	return nil

@@ -123,6 +123,25 @@ func WithSpeculativeBudget(b SpecBudget) ReaderOption {
 	}
 }
 
+const (
+	// largeArticleHoldSegments is the read-ahead a fresh streaming reader
+	// opens with on large-article posts, kept until the caller has read its
+	// first byte. Holding the fan-out back keeps the demand article from
+	// queueing behind a window of speculative ones on the same connections;
+	// on 4 MiB parts that is the difference between seconds and one round
+	// trip to first byte. On small articles the queueing costs a few
+	// milliseconds and the hold would only slow startup, so it is skipped.
+	largeArticleHoldSegments = 2
+	// largeArticleBytes is the article size from which the hold applies.
+	largeArticleBytes = 2 << 20
+	// openingSegments is the window before the first byte on small-article
+	// posts: wide enough that startup runs at full speed once bytes flow,
+	// narrow enough that a handle closed before its first byte arrives has
+	// not fanned a whole window out. Any consumption opens the window fully;
+	// a narrower ramp was measured to cost 16-25 % of a 16 MB startup.
+	openingSegments = 16
+)
+
 // ConnBudget grants connection tokens for import segment fetches.
 // Implemented by pool.Manager (AcquireImportConnection).
 type ConnBudget interface {
@@ -199,6 +218,8 @@ type UsenetReader struct {
 	priority       bool         // true (streaming) = priority lane; false (import) = normal lane
 	budget         ConnBudget   // optional; gates import fetches on the global connection budget
 	specBudget     SpecBudget   // optional; bounds speculative fetches pool-wide (streaming only)
+	articleSize    int64        // decoded size of the range's first article; drives the first-byte hold
+	scheduledBytes int64        // usable bytes of every segment scheduled so far
 	cond           *sync.Cond   // Signals downloadManager when reader advances
 
 	// Prefetch-based download tracking
@@ -389,9 +410,16 @@ func (b *UsenetReader) Read(p []byte) (int, error) {
 		n += nn
 
 		b.mu.Lock()
+		before := b.totalBytesRead
 		b.totalBytesRead += int64(nn)
 		totalRead := b.totalBytesRead
+		// The read-ahead window widens once the first byte has been read; wake
+		// the manager so it is not left waiting for the next segment rotation.
+		widened := nn > 0 && before == 0
 		b.mu.Unlock()
+		if widened {
+			b.cond.Signal()
+		}
 
 		if err != nil {
 			if errors.Is(err, io.EOF) {
@@ -452,6 +480,26 @@ func (b *UsenetReader) isArticleNotFoundError(err error) bool {
 // treats as a hole.
 func IsArticleNotFound(err error) bool {
 	return errors.Is(err, nntppool.ErrArticleNotFound)
+}
+
+// windowFor is how many segments may be scheduled ahead of the read position
+// given what the caller has read since the reader was created.
+func (b *UsenetReader) windowFor(bytesRead int64) int {
+	if !b.priority || bytesRead > 0 {
+		return b.maxPrefetch
+	}
+	if b.articleSize >= largeArticleBytes {
+		return min(b.maxPrefetch, largeArticleHoldSegments)
+	}
+	return min(b.maxPrefetch, openingSegments)
+}
+
+// BufferedAhead reports bytes scheduled for fetch beyond what the caller has
+// read: the distance a forward skip can cover without a new reader.
+func (b *UsenetReader) BufferedAhead() int64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return max(b.scheduledBytes-b.totalBytesRead, 0)
 }
 
 func (b *UsenetReader) GetBufferedOffset() int64 {
@@ -667,6 +715,11 @@ func (b *UsenetReader) downloadManager(ctx context.Context) {
 	}
 
 	totalSegments := b.rg.Len()
+	if first, err := b.rg.GetSegment(0); err == nil && first != nil {
+		b.mu.Lock()
+		b.articleSize = first.SegmentSize
+		b.mu.Unlock()
+	}
 
 	for ctx.Err() == nil {
 		b.mu.Lock()
@@ -684,7 +737,7 @@ func (b *UsenetReader) downloadManager(ctx context.Context) {
 		// Limit how far ahead we prefetch beyond the current read position
 		currentRead := b.rg.GetCurrentIndex()
 		ahead := b.nextToDownload - currentRead
-		if ahead >= b.maxPrefetch {
+		if ahead >= b.windowFor(b.totalBytesRead) {
 			b.cond.Wait()
 			b.mu.Unlock()
 			if ctx.Err() != nil {
@@ -722,6 +775,9 @@ func (b *UsenetReader) downloadManager(ctx context.Context) {
 			releaseSlot()
 			continue
 		}
+		b.mu.Lock()
+		b.scheduledBytes += seg.End - seg.Start + 1
+		b.mu.Unlock()
 
 		b.inFlight.Add(1)
 		go func(segIdx int, s *segment) {
