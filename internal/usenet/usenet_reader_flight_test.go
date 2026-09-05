@@ -69,8 +69,9 @@ func TestTwoReadersShareOneDownload(t *testing.T) {
 	}
 }
 
-// A leader closed mid-article hands the download to a follower, which
-// completes it with exact bytes.
+// A leader closed mid-article keeps the demand-window fetch running to
+// completion, so a follower reads exact bytes from the shared buffer
+// without a second fetch.
 func TestFollowerTakesOverWhenLeaderCloses(t *testing.T) {
 	ctx := context.Background()
 	const segSize = 4096
@@ -105,8 +106,8 @@ func TestFollowerTakesOverWhenLeaderCloses(t *testing.T) {
 	if !bytes.Equal(got, segments.Payload(0, segSize)) {
 		t.Fatalf("follower got %d bytes, want exact payload", len(got))
 	}
-	if calls := fp.BodyStreamPriorityCalls(); calls != 2 {
-		t.Fatalf("stream fetches = %d, want 2 (leader aborted, follower refetched)", calls)
+	if calls := fp.BodyStreamPriorityCalls(); calls != 1 {
+		t.Fatalf("stream fetches = %d, want 1 (closed leader finished the article for the follower)", calls)
 	}
 }
 

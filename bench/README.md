@@ -15,3 +15,12 @@ B9 forward skip, B10 close-and-reopen replay, B11 seek and resume.
 Results are committed per landed change so a PR description can cite its delta
 table; per-SHA files are scratch output. Run on an idle machine; the simulator
 is CPU-bound at high aggregate bandwidth. Full guide: `docs/docs/6. Development/setup.md`.
+
+## External comparison
+
+`bench/nzb-streaming-benchmarks/` holds a rerun of Viren070's public
+[nzb-streaming-benchmarks](https://github.com/Viren070/nzb-streaming-benchmarks)
+harness against AltMount and the other NZB streaming applications it covers.
+`RESULTS.md` is the generated report with a provenance preamble, `results.json` the
+raw run, `CORPUS.md` the local corpus. Numbers are comparable within that report
+only; the corpus differs from the published one.
