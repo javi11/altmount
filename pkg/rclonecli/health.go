@@ -20,8 +20,57 @@ const (
 	// maxConsecutiveProbeFailures is how many back-to-back failed liveness
 	// probes are required before the rcd subprocess is considered wedged and
 	// restarted. Prevents a single transient miss from nuking a healthy rcd.
+	//
+	// This is the fallback for rclone.rcd_restart_after; see
+	// restartAfterProbeFailures, which derives the count from that setting.
 	maxConsecutiveProbeFailures = 3
+
+	// probeTimeout bounds a single liveness probe.
+	probeTimeout = 5 * time.Second
 )
+
+// restartAfterProbeFailures returns how many consecutive failed probes must
+// accumulate before the rcd is restarted.
+//
+// The knob is expressed as a duration rather than a probe count because a count
+// is meaningless without healthCheckInterval, and exposing both invites
+// combinations that mean nothing. One duration, divided by the interval, keeps
+// the two in step.
+func (m *Manager) restartAfterProbeFailures() int {
+	if m.cfg == nil {
+		return maxConsecutiveProbeFailures
+	}
+
+	configured := m.cfg.GetConfig().RClone.RcdRestartAfter
+	if configured == "" {
+		return maxConsecutiveProbeFailures
+	}
+
+	after, err := time.ParseDuration(configured)
+	if err != nil || after <= 0 {
+		m.logger.WarnContext(m.ctx, "Ignoring unusable rclone.rcd_restart_after",
+			"value", configured, "using_probe_threshold", maxConsecutiveProbeFailures)
+		return maxConsecutiveProbeFailures
+	}
+
+	// Round up by dividing first and adjusting, rather than the usual
+	// (after + interval - 1) / interval. That form overflows for a duration near
+	// the maximum time.Duration, wrapping negative, and the clamp below would
+	// then turn the longest tolerance anyone can express into a threshold of 1:
+	// a restart on every failed probe, the exact opposite of what was asked for.
+	threshold := int(after / healthCheckInterval)
+	if after%healthCheckInterval != 0 {
+		threshold++
+	}
+
+	// A value shorter than one interval still means "restart on the first
+	// sustained failure" rather than "restart immediately, every tick".
+	if threshold < 1 {
+		threshold = 1
+	}
+
+	return threshold
+}
 
 // checkMountHealth checks if a specific mount is healthy
 func (m *Manager) checkMountHealth(provider string) bool {
@@ -131,11 +180,12 @@ func (m *Manager) performMountHealthCheck() {
 	// IsReady() only reflects startup state. Probe the rcd subprocess with a
 	// bounded timeout so a wedged rcd is detected even when no individual
 	// mount has failed yet.
-	if m.probe(m.ctx, 5*time.Second) {
+	if m.probe(m.ctx, probeTimeout) {
 		// Healthy probe: clear the failure streak and continue to per-mount checks.
 		m.consecutiveProbeFailures = 0
 	} else {
 		m.consecutiveProbeFailures++
+		restartAfter := m.restartAfterProbeFailures()
 
 		// Never kill the rcd during the startup grace period: right after
 		// startup it is busy initializing FUSE mounts, so a slow probe is
@@ -147,10 +197,10 @@ func (m *Manager) performMountHealthCheck() {
 		m.mu.RUnlock()
 		withinGrace := !readyAt.IsZero() && time.Since(readyAt) < startupGracePeriod
 
-		if withinGrace || m.consecutiveProbeFailures < maxConsecutiveProbeFailures {
+		if withinGrace || m.consecutiveProbeFailures < restartAfter {
 			m.logger.WarnContext(m.ctx, "rcd liveness probe failed; not restarting yet",
 				"consecutive_failures", m.consecutiveProbeFailures,
-				"threshold", maxConsecutiveProbeFailures,
+				"threshold", restartAfter,
 				"within_startup_grace", withinGrace)
 			// Skip per-mount recovery this tick: if rcd is slow, operations/list
 			// would fail too and could trigger a restart that bypasses this guard.
