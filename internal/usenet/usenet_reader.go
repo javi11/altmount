@@ -140,6 +140,11 @@ const (
 	// not fanned a whole window out. Any consumption opens the window fully;
 	// a narrower ramp was measured to cost 16-25 % of a 16 MB startup.
 	openingSegments = 16
+	// readAheadBytesCap bounds the window in bytes as well as segments. A
+	// 60-segment window is 45 MB on 750 KB posts but 240 MB on 4 MiB posts,
+	// where it starves the reader's own demand article for the link and
+	// leaves a quarter of a gigabyte to abandon on every seek.
+	readAheadBytesCap = 96 << 20
 )
 
 // withFlightMap gives the reader its own in-flight article map. Tests use it
@@ -495,13 +500,17 @@ func IsArticleNotFound(err error) bool {
 // windowFor is how many segments may be scheduled ahead of the read position
 // given what the caller has read since the reader was created.
 func (b *UsenetReader) windowFor(bytesRead int64) int {
+	full := b.maxPrefetch
+	if b.priority && b.articleSize > 0 {
+		full = max(min(full, int(readAheadBytesCap/b.articleSize)), largeArticleHoldSegments)
+	}
 	if !b.priority || bytesRead > 0 {
-		return b.maxPrefetch
+		return full
 	}
 	if b.articleSize >= largeArticleBytes {
-		return min(b.maxPrefetch, largeArticleHoldSegments)
+		return min(full, largeArticleHoldSegments)
 	}
-	return min(b.maxPrefetch, openingSegments)
+	return min(full, openingSegments)
 }
 
 // BufferedAhead reports bytes scheduled for fetch beyond what the caller has
