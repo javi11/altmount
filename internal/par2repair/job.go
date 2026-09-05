@@ -25,8 +25,8 @@ type ArticleFetcher interface {
 // fetchAhead is the default prefetch depth when no concurrency was
 // configured (WithConcurrency): how many article fetches a job keeps in
 // flight, and how many fetched-but-unconsumed payloads it buffers. Fetches
-// also pass through the repair connection budget, which is the real global
-// throttle.
+// ride the pool's background lane, which is what keeps them behind playback
+// and imports.
 const fetchAhead = 8
 
 // SweepDeadArticleError reports an article that was live at planning time but
@@ -127,19 +127,15 @@ func WithLiveConcurrency(get func() int) JobOption {
 
 // WithYieldToStreams wires a live playback-activity signal (typically the
 // stream tracker's count) into the job. While active() reports true, the
-// fetch pipeline collapses to yieldFetchDepth connections and the solver's
-// fold runs on a single goroutine, so a repair sharing the box with playback
-// costs it neither bandwidth nor CPU. Both bounds are re-read continuously —
-// a stream starting mid-sweep throttles the job at the next fetch/fold, and
-// its end restores full speed without restarting anything.
+// solver's fold runs on a single goroutine so a repair sharing the box with
+// playback costs it no CPU. Connections are not throttled here: repair
+// fetches ride the pool's background lane, and the pool keeps them behind
+// playback and imports itself. The bound is re-read continuously — a stream
+// starting mid-sweep narrows the fold at the next slice, and its end restores
+// full width without restarting anything.
 func WithYieldToStreams(active func() bool) JobOption {
 	return func(o *jobOptions) { o.streamsActive = active }
 }
-
-// yieldFetchDepth is the fetch pipeline depth while playback streams are
-// active: enough to keep the sweep moving, small enough that the repair's
-// normal-lane bodies leave the link and the CPU to the streams.
-const yieldFetchDepth = 2
 
 // yieldFoldWorkers is the solver fold width while playback streams are
 // active. The fold's memory traffic is rows × input rate on every core it
@@ -162,9 +158,6 @@ func (o jobOptions) fetchDepth() func() int {
 			if c := o.concurrency(); c > 0 {
 				n = c
 			}
-		}
-		if o.streamsActive != nil && o.streamsActive() {
-			n = min(n, yieldFetchDepth)
 		}
 		return min(n, maxFetchAhead)
 	}

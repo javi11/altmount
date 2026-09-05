@@ -18,7 +18,7 @@ type fakeStatClient struct {
 	articles map[string]bool
 }
 
-func (c *fakeStatClient) Body(_ context.Context, messageID string, _ ...func(nntppool.YEncMeta)) (*nntppool.ArticleBody, error) {
+func (c *fakeStatClient) BodyBackground(_ context.Context, messageID string, _ ...func(nntppool.YEncMeta)) (*nntppool.ArticleBody, error) {
 	if !c.articles[messageID] {
 		return nil, nntppool.ErrArticleNotFound
 	}
@@ -62,7 +62,7 @@ type flakyStatClient struct {
 	calls    map[string]int
 }
 
-func (c *flakyStatClient) Body(_ context.Context, messageID string, _ ...func(nntppool.YEncMeta)) (*nntppool.ArticleBody, error) {
+func (c *flakyStatClient) BodyBackground(_ context.Context, messageID string, _ ...func(nntppool.YEncMeta)) (*nntppool.ArticleBody, error) {
 	if !c.articles[messageID] {
 		return nil, nntppool.ErrArticleNotFound
 	}
@@ -246,10 +246,63 @@ func TestPoolFetcherStatIDsUsesConfiguredStatConcurrency(t *testing.T) {
 		}
 	}
 }
+
+// laneRecordingClient counts which body lane each fetch used.
+type laneRecordingClient struct {
+	normal, background atomic.Int32
+}
+
+func (c *laneRecordingClient) Body(_ context.Context, _ string, _ ...func(nntppool.YEncMeta)) (*nntppool.ArticleBody, error) {
+	c.normal.Add(1)
+	return &nntppool.ArticleBody{Bytes: []byte("payload")}, nil
+}
+
+func (c *laneRecordingClient) BodyBackground(_ context.Context, _ string, _ ...func(nntppool.YEncMeta)) (*nntppool.ArticleBody, error) {
+	c.background.Add(1)
+	return &nntppool.ArticleBody{Bytes: []byte("payload")}, nil
+}
+
+// Repair reads a whole release nobody is waiting on. Every article must go
+// through the pool's background lane, so the pool itself keeps playback and
+// imports ahead of it instead of the fetcher guessing at a connection share.
+func TestPoolFetcherFetchesOnBackgroundLane(t *testing.T) {
+	client := &laneRecordingClient{}
+	f := NewPoolFetcher(func() (BodyClient, error) { return client, nil }, nil)
+
+	if _, err := f.Fetch(context.Background(), "a@x"); err != nil {
+		t.Fatal(err)
+	}
+	if got := client.background.Load(); got != 1 {
+		t.Fatalf("BodyBackground calls = %d, want 1", got)
+	}
+	if got := client.normal.Load(); got != 0 {
+		t.Fatalf("Body calls = %d, want 0: repair must not ride the normal lane", got)
+	}
+}
+
+// The liveness census is the same kind of work: it sweeps on the background
+// lane so a full-release STAT burst never queues ahead of a stream's STAT.
+func TestPoolFetcherStatIDsUsesBackgroundLane(t *testing.T) {
+	client := &concurrencyRecordingStatClient{fakeStatClient: fakeStatClient{articles: map[string]bool{"live@x": true}}}
+	f := NewPoolFetcher(func() (BodyClient, error) { return client, nil }, nil)
+
+	if _, err := f.StatIDs(context.Background(), []string{"live@x", "gone@x"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(client.opts) == 0 {
+		t.Fatal("StatMany never called")
+	}
+	for _, o := range client.opts {
+		if !o.Background {
+			t.Fatal("StatMany called without Background: census must ride the background lane")
+		}
+	}
+}
+
 // bodyOnlyClient has no stat surface; StatIDs must degrade to a no-op.
 type bodyOnlyClient struct{}
 
-func (bodyOnlyClient) Body(_ context.Context, _ string, _ ...func(nntppool.YEncMeta)) (*nntppool.ArticleBody, error) {
+func (bodyOnlyClient) BodyBackground(_ context.Context, _ string, _ ...func(nntppool.YEncMeta)) (*nntppool.ArticleBody, error) {
 	return &nntppool.ArticleBody{}, nil
 }
 
@@ -274,7 +327,7 @@ type flakyBodyClient struct {
 	err      error
 }
 
-func (c *flakyBodyClient) Body(_ context.Context, messageID string, _ ...func(nntppool.YEncMeta)) (*nntppool.ArticleBody, error) {
+func (c *flakyBodyClient) BodyBackground(_ context.Context, messageID string, _ ...func(nntppool.YEncMeta)) (*nntppool.ArticleBody, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.calls == nil {

@@ -100,9 +100,10 @@ type Par2RepairConfig struct {
 	MaxConcurrentJobs int `yaml:"max_concurrent_jobs" mapstructure:"max_concurrent_jobs" json:"max_concurrent_jobs,omitempty"`
 	// MaxConnections bounds how many NNTP connections repair jobs use for
 	// article fetches (shared across concurrent jobs). Repair streams the
-	// whole release once, so this directly sets its download speed; it runs on
-	// the pool's normal lane, so streaming playback keeps priority either way.
-	// 0 (default) means 10.
+	// whole release once, so this directly sets its download speed on an idle
+	// pool. Fetches ride the pool's background lane: while anything streams
+	// or imports, the pool holds repair to a quarter of each provider's
+	// connections regardless of this value. 0 (default) means 10.
 	MaxConnections int `yaml:"max_connections" mapstructure:"max_connections" json:"max_connections,omitempty"`
 	// MinReleaseSizeMB / MaxReleaseSizeMB bound the size of releases repair
 	// takes on (content bytes, PAR2 files excluded). A repair downloads the
