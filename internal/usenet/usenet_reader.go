@@ -541,6 +541,9 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 				"segment_id", seg.Id,
 				"size_bytes", len(data),
 			)
+			// The fetch path publishes as it streams; a hit has nothing to
+			// stream, so hand the bytes to the segment here.
+			seg.SetData(data)
 			return data, nil
 		}
 	}

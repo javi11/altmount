@@ -38,6 +38,14 @@ streaming:
     enabled: true # Automatically hide files from mounts after repeated failures
     threshold: 3 # Number of streaming failures before masking a file
 
+# Segment cache: decoded articles kept for reuse across handles and re-opens.
+segment_cache:
+  memory_mb: 256 # In-memory tier in front of the disk cache; on even when the disk cache is off (0 disables)
+  enabled: false # Disk tier
+  cache_path: /tmp/altmount-segcache
+  max_size_gb: 10
+  expiry_hours: 24
+
 # RClone configuration (optional)
 rclone:
   # Base path for rclone configuration directory
