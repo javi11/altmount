@@ -21,6 +21,7 @@ type articleBuf struct {
 	err     error
 	attempt int
 	leading bool
+	lead    int // bumped on every claimLead; identifies the current leader
 	refs    int
 	size    int64
 	notify  chan struct{} // closed and replaced on every state change
@@ -137,13 +138,28 @@ func (a *articleBuf) claimLead() bool {
 		return false
 	}
 	a.leading = true
+	a.lead++
 	return true
 }
 
-// releaseLead lets a follower take over after a leader gave up without
-// finishing (its reader was closed mid-article).
-func (a *articleBuf) releaseLead() {
+// leadGen identifies the current lead. A leader takes it right after
+// claimLead and passes it to releaseLead, so a release that arrives after
+// the lead has already moved on to another fetch is ignored.
+func (a *articleBuf) leadGen() int {
 	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.lead
+}
+
+// releaseLead lets a follower take over after the leader holding gen gave up
+// without finishing (its reader was closed mid-article). A stale gen is a
+// no-op: the lead has already been handed on.
+func (a *articleBuf) releaseLead(gen int) {
+	a.mu.Lock()
+	if !a.leading || a.lead != gen {
+		a.mu.Unlock()
+		return
+	}
 	a.leading = false
 	a.wakeLocked()
 	a.mu.Unlock()

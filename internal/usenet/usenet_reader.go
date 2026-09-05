@@ -628,6 +628,7 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 	art := seg.attachShared(b.flights)
 	for {
 		if art.claimLead() {
+			lead := art.leadGen()
 			fetchCtx, cancelFetch := b.fetchContext(ctx, art, keepOnClose)
 			// A fetch that may outlive its reader keeps the article in the
 			// flight map for as long as it may still finish, so a reader
@@ -636,15 +637,17 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 			// the fetch returning: a wire call that never comes back must not
 			// hold the lead forever, or every later reader of the article
 			// would wait on it for its whole context.
-			if keepOnClose && b.flights.acquire(seg.Id, seg.SegmentSize) == art {
-				context.AfterFunc(fetchCtx, func() {
-					if ctx.Err() != nil {
-						art.releaseLead()
-					}
-					b.flights.release(seg.Id, art)
-				})
-			} else if keepOnClose {
-				b.flights.release(seg.Id, art)
+			if keepOnClose {
+				if kept := b.flights.acquire(seg.Id, seg.SegmentSize); kept == art {
+					context.AfterFunc(fetchCtx, func() {
+						if ctx.Err() != nil {
+							art.releaseLead(lead)
+						}
+						b.flights.release(seg.Id, art)
+					})
+				} else {
+					b.flights.release(seg.Id, kept)
+				}
 			}
 			data, err := b.fetchWithRetry(fetchCtx, cp, seg, art)
 			cancelFetch()
@@ -656,7 +659,7 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 				return data, nil
 			case ctx.Err() != nil && !errors.Is(err, nntppool.ErrArticleNotFound):
 				// This reader is going away; let a follower take over.
-				art.releaseLead()
+				art.releaseLead(lead)
 				return nil, err
 			default:
 				// A definite answer (gone everywhere, or every attempt failed):
