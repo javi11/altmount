@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/javi11/altmount/internal/config"
 )
 
 // newHealthTestManager builds a minimal Manager wired only with the fields
@@ -146,4 +148,69 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
+}
+
+// withRcdRestartAfter wires a config into the test manager so the derived
+// threshold can be asserted.
+func withRcdRestartAfter(t *testing.T, m *Manager, value string) {
+	t.Helper()
+
+	cfg := &config.Config{}
+	cfg.RClone.RcdRestartAfter = value
+	m.cfg = config.NewManager(cfg, "")
+}
+
+func TestRestartAfterProbeFailures_DerivesCountFromDuration(t *testing.T) {
+	for _, tc := range []struct {
+		configured string
+		want       int
+		why        string
+	}{
+		{"90s", 3, "the default, and the previous hard-coded behaviour"},
+		{"30s", 1, "exactly one interval"},
+		{"5m", 10, "a tolerant install riding out a long stall"},
+		{"45s", 2, "rounds up rather than truncating to one interval"},
+		{"1s", 1, "shorter than an interval still means one sustained failure"},
+		{"", 3, "unset falls back to the built-in default"},
+		{"nonsense", 3, "unparseable falls back rather than disabling the guard"},
+		{"-30s", 3, "negative falls back rather than restarting every tick"},
+	} {
+		m, _ := newHealthTestManager(t, false, time.Time{})
+		withRcdRestartAfter(t, m, tc.configured)
+
+		if got := m.restartAfterProbeFailures(); got != tc.want {
+			t.Errorf("rcd_restart_after=%q gave threshold %d, want %d (%s)",
+				tc.configured, got, tc.want, tc.why)
+		}
+	}
+}
+
+func TestRestartAfterProbeFailures_NoConfigUsesDefault(t *testing.T) {
+	m, _ := newHealthTestManager(t, false, time.Time{})
+	if got := m.restartAfterProbeFailures(); got != maxConsecutiveProbeFailures {
+		t.Errorf("with no config wired, threshold = %d, want %d", got, maxConsecutiveProbeFailures)
+	}
+}
+
+// TestPerformMountHealthCheck_HonoursConfiguredTolerance is the point of the
+// change: an install that configures more tolerance rides out a stall that the
+// default would have restarted the rcd for, tearing the mount out from under
+// every reader.
+func TestPerformMountHealthCheck_HonoursConfiguredTolerance(t *testing.T) {
+	m, restarts := newHealthTestManager(t, false, time.Now().Add(-time.Hour))
+	withRcdRestartAfter(t, m, "5m") // 10 probes
+
+	for range maxConsecutiveProbeFailures + 2 {
+		m.performMountHealthCheck()
+	}
+	if got := atomic.LoadInt32(restarts); got != 0 {
+		t.Fatalf("restarted %d times past the default threshold; the configured tolerance was ignored", got)
+	}
+
+	for range 5 {
+		m.performMountHealthCheck()
+	}
+	if got := atomic.LoadInt32(restarts); got != 1 {
+		t.Fatalf("restarts = %d after reaching the configured threshold, want 1", got)
+	}
 }
