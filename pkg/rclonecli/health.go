@@ -53,9 +53,18 @@ func (m *Manager) restartAfterProbeFailures() int {
 		return maxConsecutiveProbeFailures
 	}
 
-	// Round up: a value shorter than one interval still means "restart on the
-	// first sustained failure" rather than "restart immediately, every tick".
-	threshold := int((after + healthCheckInterval - 1) / healthCheckInterval)
+	// Round up by dividing first and adjusting, rather than the usual
+	// (after + interval - 1) / interval. That form overflows for a duration near
+	// the maximum time.Duration, wrapping negative, and the clamp below would
+	// then turn the longest tolerance anyone can express into a threshold of 1:
+	// a restart on every failed probe, the exact opposite of what was asked for.
+	threshold := int(after / healthCheckInterval)
+	if after%healthCheckInterval != 0 {
+		threshold++
+	}
+
+	// A value shorter than one interval still means "restart on the first
+	// sustained failure" rather than "restart immediately, every tick".
 	if threshold < 1 {
 		threshold = 1
 	}

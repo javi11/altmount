@@ -174,6 +174,10 @@ func TestRestartAfterProbeFailures_DerivesCountFromDuration(t *testing.T) {
 		{"", 3, "unset falls back to the built-in default"},
 		{"nonsense", 3, "unparseable falls back rather than disabling the guard"},
 		{"-30s", 3, "negative falls back rather than restarting every tick"},
+		// Near time.Duration's maximum. The obvious (x+interval-1)/interval form
+		// overflows here and collapses to 1, turning the longest tolerance
+		// expressible into a restart on every failed probe.
+		{"2562047h47m16.854775807s", 307445735, "an absurd but valid duration must not invert into no tolerance"},
 	} {
 		m, _ := newHealthTestManager(t, false, time.Time{})
 		withRcdRestartAfter(t, m, tc.configured)
