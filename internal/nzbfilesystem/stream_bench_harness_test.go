@@ -126,6 +126,7 @@ func newBenchHarness(tb testing.TB, p benchProfile, cfgs ...nntpserver.Config) *
 			MinConnections: p.Conns,
 			Inflight:       p.Inflight,
 			StatInflight:   p.StatInflight,
+			StreamInflight: p.Inflight,
 			SkipPing:       true,
 			IdleTimeout:    time.Hour,
 		})

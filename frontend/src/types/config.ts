@@ -26,6 +26,7 @@ export interface ConfigResponse {
 	par2_repair: Par2RepairConfig;
 	mount_path: string;
 	mount_type: MountType;
+	memory_limit_mb?: number | null; // Go soft memory limit; 0/unset auto, -1 off
 	api_key?: string;
 	download_key?: string;
 	profiler_enabled: boolean;
@@ -119,6 +120,7 @@ export interface SegmentCacheConfig {
 	cache_path: string;
 	max_size_gb: number;
 	expiry_hours: number;
+	memory_mb: number; // in-memory tier of decoded articles; 0 disables
 }
 
 // Health configuration

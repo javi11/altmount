@@ -83,6 +83,7 @@ fuse:
   max_read_ahead_mb: 128
 
 segment_cache:
+  memory_mb: 256
   enabled: true
   cache_path: /mnt/cache/altmount-segcache
   max_size_gb: 150
@@ -106,27 +107,33 @@ segment_cache:
 
 #### Segment Cache Options
 
-The segment cache provides a persistent on-disk caching layer shared by both FUSE and WebDAV. Each cached entry corresponds to one decoded Usenet article (~750 KB). Enabling it is **strongly recommended** for media playback.
+The segment cache keeps decoded Usenet articles (~750 KB each) for reuse, shared by FUSE and WebDAV. It has two tiers: an in-memory tier that is on by default, and an optional on-disk tier behind it. Enabling the disk tier is **strongly recommended** for media playback.
 
-| Parameter      | Default                    | Description                                                      |
-| -------------- | -------------------------- | ---------------------------------------------------------------- |
-| `enabled`      | `false`                    | Enables the segment cache — **set to `true` for streaming**      |
-| `cache_path`   | `/tmp/altmount-segcache`   | Directory for cached data (use a fast disk for best results)     |
-| `max_size_gb`  | `10`                       | Maximum disk space for the cache (adjust to your available disk) |
-| `expiry_hours` | `24`                       | How long cached segments are kept before eviction                |
+| Parameter      | Default                    | Description                                                                                  |
+| -------------- | -------------------------- | -------------------------------------------------------------------------------------------- |
+| `memory_mb`    | `256`                      | Size of the in-memory tier; `0` disables it. Also settable from the Streaming settings page  |
+| `enabled`      | `false`                    | Enables the disk tier — **set to `true` for streaming**                                      |
+| `cache_path`   | `/tmp/altmount-segcache`   | Directory for cached data (use a fast disk for best results)                                 |
+| `max_size_gb`  | `10`                       | Maximum disk space for the cache (adjust to your available disk)                             |
+| `expiry_hours` | `24`                       | How long cached segments are kept on disk before eviction                                    |
 
 ### How the Segment Cache Works
 
-When `enabled` is `true`, reads flow through a two-tier caching system:
+Reads check memory first, then disk, then fetch from the provider:
 
-1. **Cache hit** — Data is served directly from the local disk cache with no network round-trip.
-2. **Cache miss** — The requested segment is fetched from the backend, written to the disk cache, and returned to the reader.
+1. **Memory hit** — Recently played articles are served from RAM. This is what makes a rewind, a replay of the same file, or a second viewer of the same title instant.
+2. **Disk hit** — Data is served from the local disk cache with no network round-trip and promoted back into memory.
+3. **Miss** — The article is fetched from the provider, kept in memory, and written to the disk cache in the background.
 
-Cache eviction runs automatically every 5 minutes, removing expired entries and enforcing the size limit via LRU (least recently used). Files that are currently open are never evicted.
+Disk eviction runs automatically every 5 minutes, removing expired entries and enforcing the size limit via LRU (least recently used). Files that are currently open are never evicted. The memory tier evicts the least recently used articles as soon as it reaches `memory_mb`.
+
+**RAM usage:** while streaming, AltMount uses roughly `memory_mb` plus 300 MB. The extra is read-ahead buffers, connections and the Go runtime. Lower `memory_mb` on small boxes (128 MB is a good balance).
+
+**Go memory limit:** AltMount sets a Go soft memory limit so evicted articles are collected promptly instead of letting the heap double before each collection. The top-level `memory_limit_mb` controls it: unset or `0` derives the limit from `segment_cache.memory_mb` plus the PAR2 solver budget (`par2_repair.max_memory_mb` × `max_concurrent_jobs`) plus 256 MB headroom, about 770 MB with defaults; a positive value pins the limit (for example `512` on a box where only one stream and no repairs run); `-1` leaves the Go default. `GOMEMLIMIT` in the environment always takes precedence, so Docker users can also set it there. Keep the limit above what the process actually holds live: if live memory exceeds a soft limit the collector runs continuously and costs CPU without freeing anything.
 
 ### Tips
 
-- **Enable segment cache** for media playback. Without it, every read goes directly to the backend with no local caching, which will cause buffering.
+- **Enable the disk tier** for media playback. The memory tier alone only covers the last few minutes of video.
 - **Use a fast disk** for `cache_path`. An SSD or NVMe drive significantly improves cache read performance. Avoid placing the cache on the same slow storage you're mounting.
 - Increase `max_size_gb` based on your available disk space. For large libraries, `50`–`150` GB prevents frequent cache evictions during heavy usage.
 - Increase `expiry_hours` to `72` if you re-watch content frequently — this keeps popular segments cached longer.

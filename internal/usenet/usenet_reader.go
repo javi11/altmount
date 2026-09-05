@@ -521,24 +521,17 @@ func (b *UsenetReader) BufferedAhead() int64 {
 	return max(b.scheduledBytes-b.totalBytesRead, 0)
 }
 
+// GetBufferedOffset reports the file offset up to which this reader has
+// scheduled fetches: the range start plus every scheduled segment's usable
+// bytes. It reads counters only, so it never re-materialises a segment slot
+// the reader has already consumed and released.
 func (b *UsenetReader) GetBufferedOffset() int64 {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-
 	if b.rg == nil {
 		return 0
 	}
-
-	if b.nextToDownload == 0 {
-		return 0
-	}
-
-	idx := b.nextToDownload - 1
-	s, err := b.rg.GetSegment(idx)
-	if err != nil || s == nil {
-		return 0
-	}
-	return s.Start + int64(s.SegmentSize)
+	return b.rg.start + b.scheduledBytes
 }
 
 // downloadSegmentWithRetry attempts to download a segment with retry logic for pool unavailability

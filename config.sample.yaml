@@ -33,14 +33,14 @@ metadata:
 
 # Streaming and download configuration
 streaming:
-  max_prefetch: 30 # Number of segments to prefetch ahead of current read position
+  max_prefetch: 60 # Segments to prefetch ahead of the read position (default: 60; also capped at 96 MB)
   failure_masking:
     enabled: true # Automatically hide files from mounts after repeated failures
     threshold: 3 # Number of streaming failures before masking a file
 
 # Segment cache: decoded articles kept for reuse across handles and re-opens.
 segment_cache:
-  memory_mb: 256 # In-memory tier in front of the disk cache; on even when the disk cache is off (0 disables)
+  memory_mb: 256 # In-memory tier in front of the disk cache; on even when the disk cache is off (0 disables).
   enabled: false # Disk tier
   cache_path: /tmp/altmount-segcache
   max_size_gb: 10
@@ -198,6 +198,10 @@ health:
   resolve_repair_on_import: false # Automatically resolve pending repairs in the same directory when a new file is imported (default: false)
 
 # WebDAV mount path configuration
+# Go soft memory limit in MB. Unset or 0: derived from segment_cache.memory_mb plus the PAR2 solver
+# budget plus 256 MB headroom (about 770 MB with defaults). Positive: use exactly this value.
+# -1: leave the Go runtime default. GOMEMLIMIT in the environment always wins.
+memory_limit_mb: 0
 mount_path: '' # WebDAV mount path, Example: '/mnt/remotes/altmount' or '/mnt/unionfs'. Must be an absolute path.
                # Windows examples: 'Z:' (drive letter via WinFsp) or 'C:\altmount' (directory mount)
 
@@ -299,7 +303,7 @@ providers:
     min_connections_alive: 2 # Warm connections kept open for fast first byte (default: 2, -1 = connect on demand only)
     inflight_requests: 10 # Concurrent bodies per connection (memory ceiling, default: 10); typical depth 3-4, raising does not improve throughput
     stat_inflight_requests: 100 # STAT pipeline depth per connection (determines idle health-sweep concurrency, default: 100)
-    stream_inflight_requests: 4 # Streaming bodies per connection; a playback read waits behind at most this many minus one (default: 4)
+    # stream_inflight_requests: 4 # Optional cap on streaming bodies per connection so a seek waits behind fewer read-ahead bodies; costs sequential throughput on providers that reward deep pipelines (default: same as inflight_requests)
     tls: true
     insecure_tls: false
     enabled: true # Enable/disable this provider (default: true)
