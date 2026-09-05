@@ -88,6 +88,20 @@ type SegmentBehavior struct {
 	// FailErr is the transient error returned during the FailFirst window.
 	// Defaults to a generic "all providers exhausted"-style error when nil.
 	FailErr error
+
+	// ChunkSize splits a streamed payload (writer-based calls) into writes of
+	// this many bytes; zero writes the whole payload at once.
+	ChunkSize int
+
+	// TailGate, when non-nil, is waited on after the first chunk is written
+	// and before the rest, so a test can prove bytes were served while the
+	// article was provably still arriving. Close it to release the tail.
+	TailGate <-chan struct{}
+
+	// FailAfterFirstChunk makes the first call to this message-ID write one
+	// chunk and then return FailErr, modelling a connection lost mid-article.
+	// Later calls serve the payload normally.
+	FailAfterFirstChunk bool
 }
 
 // Client is a fake nntppool.Client suitable for unit and concurrency tests.
@@ -100,13 +114,14 @@ type Client struct {
 	hasFixedStats   bool
 
 	// Atomic counters for observability.
-	inFlight       atomic.Int32
-	maxInFlight    atomic.Int32
-	totalCalls     atomic.Int64
-	bodyCalls      atomic.Int64
-	bodyPriCalls   atomic.Int64
-	bodyAsyncCalls atomic.Int64
-	statCalls      atomic.Int64
+	inFlight           atomic.Int32
+	maxInFlight        atomic.Int32
+	totalCalls         atomic.Int64
+	bodyCalls          atomic.Int64
+	bodyPriCalls       atomic.Int64
+	bodyStreamPriCalls atomic.Int64
+	bodyAsyncCalls     atomic.Int64
+	statCalls          atomic.Int64
 
 	// Per-message-ID call counts (string → *atomic.Int64). Tests that need
 	// to assert how often a specific segment was requested (e.g. to detect
@@ -172,10 +187,15 @@ func (c *Client) TotalCalls() int64 { return c.totalCalls.Load() }
 // BodyCalls returns the count of Body invocations.
 func (c *Client) BodyCalls() int64 { return c.bodyCalls.Load() }
 
-// BodyPriorityCalls returns the count of BodyPriority invocations. This is
-// the most useful counter for streaming-path tests since UsenetReader uses
-// BodyPriority exclusively.
-func (c *Client) BodyPriorityCalls() int64 { return c.bodyPriCalls.Load() }
+// BodyPriorityCalls returns the count of priority-lane body invocations,
+// buffered (BodyPriority) and streamed (BodyStreamPriority) alike. Tests
+// asserting "streaming uses the priority lane" read this.
+func (c *Client) BodyPriorityCalls() int64 {
+	return c.bodyPriCalls.Load() + c.bodyStreamPriCalls.Load()
+}
+
+// BodyStreamPriorityCalls returns the count of BodyStreamPriority invocations.
+func (c *Client) BodyStreamPriorityCalls() int64 { return c.bodyStreamPriCalls.Load() }
 
 // BodyAsyncCalls returns the count of BodyAsync invocations.
 func (c *Client) BodyAsyncCalls() int64 { return c.bodyAsyncCalls.Load() }
@@ -205,6 +225,7 @@ func (c *Client) ResetCounters() {
 	c.totalCalls.Store(0)
 	c.bodyCalls.Store(0)
 	c.bodyPriCalls.Store(0)
+	c.bodyStreamPriCalls.Store(0)
 	c.bodyAsyncCalls.Store(0)
 	c.statCalls.Store(0)
 	c.perIDCalls.Range(func(k, _ any) bool {
@@ -294,6 +315,17 @@ func (c *Client) BodyPriority(ctx context.Context, messageID string, onMeta ...f
 	c.countMessage(messageID)
 	defer c.enter()()
 	return c.serveBody(ctx, messageID, nil, onMeta...)
+}
+
+// BodyStreamPriority satisfies pool.NntpClient. The payload is written to w
+// in ChunkSize pieces (one write when zero), pausing on TailGate after the
+// first chunk when set, and failing after the first chunk on the first call
+// when FailAfterFirstChunk is set.
+func (c *Client) BodyStreamPriority(ctx context.Context, messageID string, w io.Writer, onMeta ...func(nntppool.YEncMeta)) (*nntppool.ArticleBody, error) {
+	c.bodyStreamPriCalls.Add(1)
+	c.countMessage(messageID)
+	defer c.enter()()
+	return c.serveBody(ctx, messageID, w, onMeta...)
 }
 
 // BodyAsync streams the configured Bytes (or error) to w and yields a
@@ -412,8 +444,34 @@ func (c *Client) serveBody(ctx context.Context, messageID string, w io.Writer, o
 	}
 	payload := b.Bytes
 	if w != nil && len(payload) > 0 {
-		if _, err := w.Write(payload); err != nil {
-			return nil, err
+		chunk := b.ChunkSize
+		if chunk <= 0 || chunk > len(payload) {
+			chunk = len(payload)
+		}
+		for off := 0; off < len(payload); off += chunk {
+			end := min(off+chunk, len(payload))
+			if _, err := w.Write(payload[off:end]); err != nil {
+				return nil, err
+			}
+			if off != 0 {
+				continue
+			}
+			if b.FailAfterFirstChunk {
+				if n, ok := c.perIDCalls.Load(messageID); ok && n.(*atomic.Int64).Load() == 1 {
+					failErr := b.FailErr
+					if failErr == nil {
+						failErr = errTransientFakepool
+					}
+					return nil, failErr
+				}
+			}
+			if b.TailGate != nil {
+				select {
+				case <-b.TailGate:
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+			}
 		}
 	}
 	body := &nntppool.ArticleBody{

@@ -71,8 +71,8 @@ func TestStorm_RetryAmplifiesPerMessageCallCount(t *testing.T) {
 func TestStorm_RetryUsesFixedDelayInsteadOfExponentialBackoff(t *testing.T) {
 	t.Parallel()
 	const (
-		segSize  = 16
-		samples  = 30 // independent failing segments
+		segSize = 16
+		samples = 30 // independent failing segments
 	)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -157,6 +157,13 @@ func (r *multiRecordingClient) BodyPriority(ctx context.Context, messageID strin
 	r.arrivals[messageID] = append(r.arrivals[messageID], time.Now())
 	r.mu.Unlock()
 	return r.Client.BodyPriority(ctx, messageID, onMeta...)
+}
+
+func (r *multiRecordingClient) BodyStreamPriority(ctx context.Context, messageID string, w io.Writer, onMeta ...func(nntppool.YEncMeta)) (*nntppool.ArticleBody, error) {
+	r.mu.Lock()
+	r.arrivals[messageID] = append(r.arrivals[messageID], time.Now())
+	r.mu.Unlock()
+	return r.Client.BodyStreamPriority(ctx, messageID, w, onMeta...)
 }
 
 func meanStdev(xs []float64) (float64, float64) {

@@ -509,11 +509,16 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 			fetchStart := time.Now()
 			var result *nntppool.ArticleBody
 			var err error
+			var w *segmentWriter
 			if b.priority {
-				// Streaming: priority lane — connections serve these first.
-				result, err = cp.BodyPriority(attemptCtx, seg.Id)
+				// Streaming: priority lane, decoded bytes published to readers as
+				// each wire read lands. A failed attempt leaves its bytes visible;
+				// the next attempt starts a fresh buffer and only publishes once
+				// it has passed what readers already saw.
+				w = seg.attemptWriter()
+				result, err = cp.BodyStreamPriority(attemptCtx, seg.Id, w)
 			} else {
-				// Import: normal lane — always yields to streaming reads.
+				// Import: normal lane, buffered — always yields to streaming reads.
 				result, err = cp.Body(attemptCtx, seg.Id)
 			}
 			fetchDur := time.Since(fetchStart)
@@ -526,7 +531,10 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 				}
 
 				var bytesWritten int64
-				if result != nil {
+				switch {
+				case w != nil:
+					bytesWritten = int64(len(w.bytes()))
+				case result != nil:
 					bytesWritten = int64(result.BytesDecoded)
 				}
 
@@ -542,7 +550,12 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 				return err
 			}
 
-			resultBytes = result.Bytes
+			if w != nil {
+				seg.finish(w)
+				resultBytes = w.bytes()
+			} else {
+				resultBytes = result.Bytes
+			}
 			b.metricsTracker.IncArticlesDownloaded()
 			b.metricsTracker.UpdateDownloadProgress(b.streamID, int64(len(resultBytes)))
 
@@ -724,7 +737,8 @@ func (b *UsenetReader) downloadManager(ctx context.Context) {
 					}
 				}
 				s.SetError(err)
-			} else {
+			} else if !b.priority {
+				// Progressive readers were finished inside the fetch.
 				s.SetData(data)
 			}
 		}(idx, seg)
