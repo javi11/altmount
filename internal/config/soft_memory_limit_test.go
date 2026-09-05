@@ -7,7 +7,23 @@ func memLimitConfig(cacheMB int, par2MB, par2Jobs int) *Config {
 	c.SegmentCache.MemoryMB = &cacheMB
 	c.Par2Repair.MaxMemoryMB = par2MB
 	c.Par2Repair.MaxConcurrentJobs = par2Jobs
+	enabled := true
+	c.Par2Repair.Enabled = &enabled
 	return c
+}
+
+func TestSoftMemoryLimitIgnoresPar2BudgetWhenRepairDisabled(t *testing.T) {
+	c := memLimitConfig(256, 256, 1)
+	disabled := false
+	c.Par2Repair.Enabled = &disabled
+	want := int64(256+softMemoryHeadroomMB) << 20
+	if got := c.SoftMemoryLimit(""); got != want {
+		t.Fatalf("SoftMemoryLimit with repair disabled = %d, want %d", got, want)
+	}
+	c.Par2Repair.Enabled = nil
+	if got := c.SoftMemoryLimit(""); got != want {
+		t.Fatalf("SoftMemoryLimit with repair unset = %d, want %d", got, want)
+	}
 }
 
 func TestSoftMemoryLimitAutoAddsCachePar2AndHeadroom(t *testing.T) {

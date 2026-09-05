@@ -8,9 +8,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/javi11/altmount/internal/holes"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/testsupport/fakepool"
+	"github.com/javi11/altmount/internal/usenet"
 	"github.com/javi11/nntppool/v4"
 )
 
@@ -836,5 +838,155 @@ func TestFastFailCheckFilesTimeoutIsInconclusive(t *testing.T) {
 	}
 	if got := client.StatCalls(); got != fastFailStatMaxAttempts {
 		t.Fatalf("StatCalls = %d, want bounded maximum of %d", got, fastFailStatMaxAttempts)
+	}
+}
+
+// A sweep whose definitive answers are dominated by 430s is a dead release:
+// the unverified remainder cannot change the verdict, so the sweep condemns
+// the rest instead of surfacing an inconclusive error after full retries.
+func TestFastFailCheckFilesDeadReleaseSettlesWithoutWaitingForUnverified(t *testing.T) {
+	outcomes := make(map[string][]error)
+	var files []FastFailFile
+	for f := 0; f < 10; f++ {
+		segs := makeTestSegments(fmt.Sprintf("f%d", f), 1)
+		files = append(files, FastFailFile{Filename: fmt.Sprintf("part%02d.rar", f), Segments: segs, GroupKey: "set"})
+		if f < 8 {
+			outcomes[segs[0].Id] = []error{nntppool.ErrArticleNotFound}
+		} else {
+			outcomes[segs[0].Id] = []error{nntppool.ErrConnectionDied}
+		}
+	}
+	// A second, unrelated file that never gets STAT-ed once the release is
+	// condemned: it must come back Broken all the same.
+	tail := makeTestSegments("tail", 1)
+	files = append(files, FastFailFile{Filename: "tail.mkv", Segments: tail})
+	outcomes[tail[0].Id] = []error{nntppool.ErrConnectionDied}
+
+	client := newScriptedStatClient(outcomes)
+	results, err := FastFailCheckFiles(
+		context.Background(),
+		files,
+		fastFailPoolManager{client: client},
+		100, 10, 100*time.Millisecond, nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("FastFailCheckFiles error = %v, want nil for a dead release", err)
+	}
+	if len(results) != len(files) {
+		t.Fatalf("results = %d, want %d", len(results), len(files))
+	}
+	for i, r := range results {
+		if !r.Broken {
+			t.Fatalf("results[%d] (%s) not Broken", i, files[i].Filename)
+		}
+	}
+	if got := len(results[8].MissingSegmentIDs); got != 0 {
+		t.Fatalf("unverified file reported %d missing ids, want none (only observed misses are reported)", got)
+	}
+	if got := client.callCount(tail[0].Id); got != 0 {
+		t.Fatalf("tail STAT calls = %d, want 0 once the release is condemned", got)
+	}
+	if got := client.callCount("f8-0"); got != 1 {
+		t.Fatalf("unverified STAT attempts = %d, want 1 (no bounded retries once the release is dead)", got)
+	}
+}
+
+func TestReleaseLooksDead(t *testing.T) {
+	cases := []struct {
+		missing, reported int
+		want              bool
+	}{
+		{0, 0, false},
+		{7, 7, false},  // below the minimum miss count
+		{8, 8, true},   // all definitive answers are misses
+		{8, 16, true},  // exactly half
+		{8, 17, false}, // under half
+		{40, 100, false},
+	}
+	for _, c := range cases {
+		if got := releaseLooksDead(c.missing, c.reported); got != c.want {
+			t.Errorf("releaseLooksDead(%d, %d) = %v, want %v", c.missing, c.reported, got, c.want)
+		}
+	}
+}
+
+// Gap placeholders (articles the NZB never listed) are reported as observed
+// misses without a STAT, and do not condemn their set: the caller judges an
+// exactly-known gap against the hole caps.
+func TestFastFailCheckFilesPlaceholdersAreKnownMissesWithoutStat(t *testing.T) {
+	client := fakepool.New()
+	segs := makeTestSegments("vol2", 4)
+	segs[1] = &metapb.SegmentData{Id: holes.PlaceholderID(2, "vol2-0")}
+	files := []FastFailFile{
+		{Filename: "set.part01.rar", Segments: makeTestSegments("vol1", 3), GroupKey: "set"},
+		{Filename: "set.part02.rar", Segments: segs, GroupKey: "set"},
+	}
+
+	results, err := FastFailCheckFiles(
+		context.Background(), files,
+		fastFailPoolManager{client: client},
+		100, 8, 100*time.Millisecond, nil, nil,
+	)
+	if err != nil {
+		t.Fatalf("FastFailCheckFiles error = %v", err)
+	}
+	if results[0].Broken {
+		t.Fatal("sibling volume condemned by a declared gap; the caller decides that")
+	}
+	if !results[1].Broken || results[1].KnownGapCount != 1 || len(results[1].MissingSegmentIDs) != 1 {
+		t.Fatalf("results[1] = %+v, want Broken with one known gap", results[1])
+	}
+	if !holes.IsPlaceholderID(results[1].MissingSegmentIDs[0]) {
+		t.Fatalf("missing id %q is not the placeholder", results[1].MissingSegmentIDs[0])
+	}
+	if results[1].SampledCount != 3 {
+		t.Fatalf("SampledCount = %d, want 3 (placeholder excluded from the sample)", results[1].SampledCount)
+	}
+	if got := client.PerMessageCalls(segs[1].Id); got != 0 {
+		t.Fatalf("placeholder STAT-ed %d times, want 0", got)
+	}
+}
+
+func TestFastFailReleaseProbePlaceholderIsDamageWithoutStat(t *testing.T) {
+	client := fakepool.New()
+	segs := makeTestSegments("f", 3)
+	segs[2] = &metapb.SegmentData{Id: holes.PlaceholderID(3, "f-0")}
+	missing, err := FastFailReleaseProbe(
+		context.Background(),
+		[]FastFailFile{{Filename: "movie.mkv", Segments: segs}},
+		fastFailPoolManager{client: client},
+		100, 1, 100*time.Millisecond, nil,
+	)
+	if err != nil || !missing {
+		t.Fatalf("probe = (%v, %v), want (true, nil)", missing, err)
+	}
+	if client.StatCalls() != 0 {
+		t.Fatalf("StatCalls = %d, want 0", client.StatCalls())
+	}
+}
+
+func TestCapReleaseProbeSampleKeepsEdgesAndBounds(t *testing.T) {
+	segs := makeTestSegments("big", 400)
+	selected := usenet.SelectSegmentsForValidation(segs, 100)
+	capped := capReleaseProbeSample(selected)
+	if len(capped) != maxReleaseProbeSamples {
+		t.Fatalf("capped sample = %d, want %d", len(capped), maxReleaseProbeSamples)
+	}
+	for i := 0; i < 5; i++ {
+		if capped[i] != selected[i] {
+			t.Fatalf("edge pick %d changed: %v vs %v", i, capped[i].Id, selected[i].Id)
+		}
+	}
+	seen := make(map[string]struct{})
+	for _, s := range capped {
+		if _, dup := seen[s.Id]; dup {
+			t.Fatalf("duplicate id %s in capped sample", s.Id)
+		}
+		seen[s.Id] = struct{}{}
+	}
+	small := makeTestSegments("small", 20)
+	if got := capReleaseProbeSample(small); len(got) != 20 {
+		t.Fatalf("small sample must pass through untouched, got %d", len(got))
 	}
 }

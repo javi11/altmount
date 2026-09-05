@@ -93,15 +93,6 @@ func (c *Coordinator) HandleSuccess(ctx context.Context, item *database.ImportQu
 	c.notifyVFSWith(ctx, rcloneClient, resultingPath, false)
 	result.VFSNotified = true
 
-	// Small delay to allow FUSE mount propagation through kernel and into other containers
-	// This helps prevent race conditions where Sonarr tries to probe the file before it's visible.
-	select {
-	case <-ctx.Done():
-		return result, ctx.Err()
-	case <-time.After(1 * time.Second):
-		// Continue
-	}
-
 	// 2 & 3. Create symlinks and STRM files if configured
 	if shouldSkipPostImportLinks(item) {
 		c.log.DebugContext(ctx, "Skipping symlink/STRM creation (post-import links disabled)",
@@ -144,6 +135,10 @@ func (c *Coordinator) HandleSuccess(ctx context.Context, item *database.ImportQu
 		c.log.DebugContext(ctx, "ARR notification skipped (requested by caller)",
 			"queue_id", item.ID,
 			"path", resultingPath)
+	} else if arrsService == nil {
+		c.log.DebugContext(ctx, "ARR notification not sent", "path", resultingPath, "error", "ARRs disabled")
+	} else if err := c.waitForMountPropagation(ctx); err != nil {
+		return result, err
 	} else if err := c.notifyARRWith(ctx, arrsService, item, resultingPath); err != nil {
 		c.log.DebugContext(ctx, "ARR notification not sent",
 			"path", resultingPath,
@@ -154,6 +149,24 @@ func (c *Coordinator) HandleSuccess(ctx context.Context, item *database.ImportQu
 	}
 
 	return result, nil
+}
+
+// mountPropagationDelay is how long a freshly written file is given to
+// become visible through a FUSE mount, into other containers, before an
+// *arr is told to probe it. Only an ARR notification needs it: everything
+// else in post-processing reads the metadata store directly, and the queue
+// item (hence the SABnzbd history a client polls) is marked complete only
+// after HandleSuccess returns, so an unconditional wait here was a full
+// second added to every import's time to first byte.
+const mountPropagationDelay = 1 * time.Second
+
+func (c *Coordinator) waitForMountPropagation(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(mountPropagationDelay):
+		return nil
+	}
 }
 
 // HandleFailure performs cleanup and fallback for failed imports

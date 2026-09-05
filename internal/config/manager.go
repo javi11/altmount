@@ -260,7 +260,12 @@ func (c *Config) SoftMemoryLimit(gomemlimit string) int64 {
 	if cache == 0 {
 		return 0
 	}
-	par2 := int64(max(c.Par2Repair.MaxMemoryMB, 0)) * int64(max(c.Par2Repair.MaxConcurrentJobs, 1))
+	// Repair solvers only allocate when the feature is on; a disabled repair
+	// service must not raise the ceiling the collector works under.
+	var par2 int64
+	if c.Par2Repair.Enabled != nil && *c.Par2Repair.Enabled {
+		par2 = int64(max(c.Par2Repair.MaxMemoryMB, 0)) * int64(max(c.Par2Repair.MaxConcurrentJobs, 1))
+	}
 	return cache + (par2+softMemoryHeadroomMB)<<20
 }
 
@@ -2081,7 +2086,7 @@ func DefaultConfig(configDir ...string) *Config {
 			MaxProcessorWorkers:            2, // Default: 2 processor workers
 			QueueProcessingIntervalSeconds: 5, // Default: check for work every 5 seconds
 			AllowedFileExtensions: []string{ // Default: common media extensions
-				".mkv", ".mp4", ".avi", ".ts", ".m4v", ".mov", ".wmv", ".mpg", ".mpeg",
+				".mkv", ".mp4", ".avi", ".ts", ".m2ts", ".vob", ".m4v", ".mov", ".wmv", ".mpg", ".mpeg",
 				".xvid", ".rm", ".rmvb", ".asf", ".asx", ".wtv", ".mk3d", ".dvr-ms",
 				".mp3", ".flac", ".m4a", ".epub", ".pdf", ".cbz",
 			},

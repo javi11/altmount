@@ -13,9 +13,9 @@ import (
 	"github.com/javi11/nzbparser"
 )
 
-// maxIndexSegments is the upper bound for treating a PAR2 file as an index file
+// MaxIndexSegments is the upper bound for treating a PAR2 file as an index file
 // (no recovery blocks). Recovery block files have many more segments.
-const maxIndexSegments = 5
+const MaxIndexSegments = 5
 
 // nzbSegmentLoader adapts []nzbparser.NzbSegment into usenet.SegmentLoader.
 // Each raw NZB segment maps with Start=0, End=Bytes-1 (all data is usable).
@@ -60,7 +60,7 @@ func GetFileDescriptors(
 	}
 
 	// Read all small PAR2 files (index files) and merge their descriptors.
-	// Index files never contain recovery blocks so they have few segments (≤ maxIndexSegments).
+	// Index files never contain recovery blocks so they have few segments (≤ MaxIndexSegments).
 	// Recovery block files have many segments and are skipped.
 	// Merging handles releases with multiple PAR2 sets (e.g. main archive + sample).
 	for _, cachedData := range firstSegmentCache {
@@ -70,7 +70,7 @@ func GetFileDescriptors(
 		if !HasMagicBytes(cachedData.RawBytes) {
 			continue
 		}
-		if len(cachedData.File.Segments) > maxIndexSegments {
+		if len(cachedData.File.Segments) > MaxIndexSegments {
 			continue // Skip large recovery block files
 		}
 		fileDescriptors, err := readFileDescriptors(ctx, cachedData.File, poolManager)

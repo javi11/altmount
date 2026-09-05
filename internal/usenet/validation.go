@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"time"
 
+	"github.com/javi11/altmount/internal/holes"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/nntppool/v4"
@@ -19,7 +20,30 @@ var randPerm = rand.Perm
 // It returns the subset of segments that should be validated based on samplePercentage,
 // applying the same first-3 / last-2 / random-middle strategy used internally.
 func SelectSegmentsForValidation(segments []*metapb.SegmentData, samplePercentage int) []*metapb.SegmentData {
-	return selectSegmentsForValidation(segments, samplePercentage)
+	return selectSegmentsForValidation(withoutPlaceholders(segments), samplePercentage)
+}
+
+// withoutPlaceholders drops gap placeholders (articles the NZB never listed)
+// from a sweep's candidates: they name nothing a provider could answer for,
+// and their absence is already recorded as a known hole at import.
+func withoutPlaceholders(segments []*metapb.SegmentData) []*metapb.SegmentData {
+	n := 0
+	for _, seg := range segments {
+		if seg != nil && holes.IsPlaceholderID(seg.Id) {
+			n++
+		}
+	}
+	if n == 0 {
+		return segments
+	}
+	out := make([]*metapb.SegmentData, 0, len(segments)-n)
+	for _, seg := range segments {
+		if seg == nil || holes.IsPlaceholderID(seg.Id) {
+			continue
+		}
+		out = append(out, seg)
+	}
+	return out
 }
 
 // ValidationResult holds the outcome of a segment availability sweep for one
