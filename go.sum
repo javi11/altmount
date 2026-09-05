@@ -380,6 +380,12 @@ github.com/javi11/gopar-turbo v0.2.1 h1:0xUZtofwBcjxle6QIl9EZAwxmLtWkECMM69tQhmc
 github.com/javi11/gopar-turbo v0.2.1/go.mod h1:fOQZIbPz+ADJ8vGAzVLXvQhsOsE08hvAcev8nQvBFfY=
 github.com/javi11/nntppool/v4 v4.22.2 h1:JHE+78M3yqJp1AGbJQhFKglB0l4cm45XwwetskJQS+A=
 github.com/javi11/nntppool/v4 v4.22.2/go.mod h1:+UtisJLDFLXBSkW9R6uCRgdp3lS/+6pLAk7L+Wt6LMw=
+github.com/javi11/nntppool/v4 v4.22.3-0.20260905174153-b41f86bcc694 h1:+JMpLDUMTlbOulcR8oI4WPSlBmNaHacpomGqvc+M0JQ=
+github.com/javi11/nntppool/v4 v4.22.3-0.20260905174153-b41f86bcc694/go.mod h1:+UtisJLDFLXBSkW9R6uCRgdp3lS/+6pLAk7L+Wt6LMw=
+github.com/javi11/nntppool/v4 v4.22.3-0.20260905180010-2b928c3f6a9a h1:EF8NVzeaN/at+6ZO/51yNwLDsbFIWWtw54yW16J3qTA=
+github.com/javi11/nntppool/v4 v4.22.3-0.20260905180010-2b928c3f6a9a/go.mod h1:+UtisJLDFLXBSkW9R6uCRgdp3lS/+6pLAk7L+Wt6LMw=
+github.com/javi11/nntppool/v4 v4.22.3-0.20260905181219-f59773674c9b h1:FRcY+c9I9oy6Fy9U0Z2vfxIwFwHdIXWUlCkbjpDBweU=
+github.com/javi11/nntppool/v4 v4.22.3-0.20260905181219-f59773674c9b/go.mod h1:+UtisJLDFLXBSkW9R6uCRgdp3lS/+6pLAk7L+Wt6LMw=
 github.com/javi11/nxg v0.1.0 h1:CTThldYlaVIPIhpkrMw0HcTD0NLrW1uYMoDILjjEOtM=
 github.com/javi11/nxg v0.1.0/go.mod h1:+GvYpp+y1oq+qBOWxFMvfTjtin/0zCeomWfjiPkiu8A=
 github.com/javi11/nzbparser v0.5.5 h1:kMKyX0xNO7bIeIlQvSPGzdWs71MG2Krf+yojOj+FuUc=

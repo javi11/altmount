@@ -119,6 +119,7 @@ type Client struct {
 	totalCalls         atomic.Int64
 	bodyCalls          atomic.Int64
 	bodyPriCalls       atomic.Int64
+	bodyBgCalls        atomic.Int64
 	bodyStreamPriCalls atomic.Int64
 	bodyAsyncCalls     atomic.Int64
 	statCalls          atomic.Int64
@@ -193,6 +194,9 @@ func (c *Client) BodyCalls() int64 { return c.bodyCalls.Load() }
 func (c *Client) BodyPriorityCalls() int64 {
 	return c.bodyPriCalls.Load() + c.bodyStreamPriCalls.Load()
 }
+
+// BodyBackgroundCalls reports how many BodyBackground (repair) fetches were made.
+func (c *Client) BodyBackgroundCalls() int64 { return c.bodyBgCalls.Load() }
 
 // BodyStreamPriorityCalls returns the count of BodyStreamPriority invocations.
 func (c *Client) BodyStreamPriorityCalls() int64 { return c.bodyStreamPriCalls.Load() }
@@ -312,6 +316,15 @@ func (c *Client) Body(ctx context.Context, messageID string, onMeta ...func(nntp
 // distinguish streaming from importer traffic.
 func (c *Client) BodyPriority(ctx context.Context, messageID string, onMeta ...func(nntppool.YEncMeta)) (*nntppool.ArticleBody, error) {
 	c.bodyPriCalls.Add(1)
+	c.countMessage(messageID)
+	defer c.enter()()
+	return c.serveBody(ctx, messageID, nil, onMeta...)
+}
+
+// BodyBackground is identical to Body but counted separately so tests can
+// distinguish repair traffic from importer traffic.
+func (c *Client) BodyBackground(ctx context.Context, messageID string, onMeta ...func(nntppool.YEncMeta)) (*nntppool.ArticleBody, error) {
+	c.bodyBgCalls.Add(1)
 	c.countMessage(messageID)
 	defer c.enter()()
 	return c.serveBody(ctx, messageID, nil, onMeta...)

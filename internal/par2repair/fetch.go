@@ -11,17 +11,16 @@ import (
 	"github.com/javi11/nntppool/v4"
 )
 
-// BodyClient is the one pool method the fetcher needs: a normal-lane (import)
+// BodyClient is the one pool method the fetcher needs: a background-lane
 // article body fetch. Satisfied by pool.NntpClient.
 type BodyClient interface {
-	Body(ctx context.Context, messageID string, onMeta ...func(nntppool.YEncMeta)) (*nntppool.ArticleBody, error)
+	BodyBackground(ctx context.Context, messageID string, onMeta ...func(nntppool.YEncMeta)) (*nntppool.ArticleBody, error)
 }
 
 // ConnBudget bounds how many article fetches the repair keeps on the wire at
-// once. Repair traffic runs on the pool's normal lane (streaming reads use
-// the priority lane); the wired budget stacks the repair's own cap with the
-// pool-wide import connection budget, so repair both shapes background
-// bandwidth and yields headroom to active streams the way imports do.
+// once. Repair traffic rides the pool's background lane, which the pool
+// itself keeps behind playback and imports; the budget only shapes how much
+// of an idle pool a repair may fill.
 type ConnBudget interface {
 	Acquire(ctx context.Context) (release func(), err error)
 }
@@ -111,8 +110,8 @@ func (l *connLimiter) Acquire(ctx context.Context) (func(), error) {
 }
 
 // PoolFetcher fetches decoded article payloads through the NNTP pool's
-// normal request lane, budget-gated like imports. The client is resolved per
-// fetch so the fetcher survives pool reconfiguration and boot ordering.
+// background lane. The client is resolved per fetch so the fetcher survives
+// pool reconfiguration and boot ordering.
 type PoolFetcher struct {
 	getClient func() (BodyClient, error)
 	budget    ConnBudget // optional; nil skips budget gating
@@ -277,7 +276,7 @@ func (p *PoolFetcher) statOnce(
 	}
 	resolved := make(map[string]bool, len(ids))
 	var firstErr error
-	for r := range sc.StatMany(statCtx, ids, nntppool.StatManyOptions{Concurrency: conc}) {
+	for r := range sc.StatMany(statCtx, ids, nntppool.StatManyOptions{Concurrency: conc, Background: true}) {
 		switch {
 		case errors.Is(r.Err, nntppool.ErrArticleNotFound):
 			missing[r.MessageID] = true
@@ -360,7 +359,7 @@ func (p *PoolFetcher) fetchOnce(ctx context.Context, messageID string) ([]byte, 
 		return nil, fmt.Errorf("par2repair: nntp pool unavailable: %w", err)
 	}
 	// nntppool adds the angle brackets itself; message IDs here are bare.
-	body, err := client.Body(ctx, messageID)
+	body, err := client.BodyBackground(ctx, messageID)
 	if err != nil {
 		return nil, err
 	}

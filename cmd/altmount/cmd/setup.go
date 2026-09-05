@@ -402,18 +402,14 @@ func startPar2RepairService(
 	configGetter config.ConfigGetter,
 	streamsActive func() bool,
 ) *par2repair.Service {
-	// Repair fetches hold both budgets: the repair's own cap (narrow, so at
-	// most that many fetches queue on the shared budget) and the pool-wide
-	// import connection budget, whose stream headroom makes repair yield to
-	// playback exactly as imports do.
+	// Repair fetches ride the pool's background lane, which the pool keeps
+	// behind playback and imports on its own. The repair's cap only bounds how
+	// much of an idle pool one repair may fill.
 	fetcher := par2repair.NewPoolFetcher(func() (par2repair.BodyClient, error) {
 		return poolManager.GetPool()
-	}, par2repair.CombineBudgets(
-		par2repair.NewConnLimiter(func() int {
-			return configGetter().Par2Repair.EffectiveMaxConnections()
-		}),
-		par2repair.ConnBudgetFunc(poolManager.AcquireImportConnection),
-	))
+	}, par2repair.NewConnLimiter(func() int {
+		return configGetter().Par2Repair.EffectiveMaxConnections()
+	}))
 	// Stream-aware sweep width (conservative while anything plays, bounded
 	// widening when idle), further capped by the repair's own connection
 	// budget so a 10-connection repair never floods every connection's STAT
