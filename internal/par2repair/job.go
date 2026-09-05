@@ -750,7 +750,6 @@ func sweep(
 			}
 			local++
 			fill = 0
-			clear(buf)
 			return nil
 		}
 
@@ -819,8 +818,10 @@ func sweep(
 			}
 			artOff += a.Size
 		}
-		// Final partial slice: buf is already zero-padded past fill.
+		// Final partial slice: a full slice overwrites every byte of buf, so
+		// only this tail ever needs the zero padding PAR2 defines.
 		if fill > 0 {
+			clear(buf[fill:])
 			if err := completeSlice(); err != nil {
 				return err
 			}

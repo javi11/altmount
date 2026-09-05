@@ -297,6 +297,27 @@ func TestRunJobPrefetchSpansFileBoundaries(t *testing.T) {
 	}
 }
 
+// Files whose length is not a multiple of the slice size end in a partial
+// slice that PAR2 defines as zero-padded; the sweep must fold it padded, and
+// the repair must still be byte-exact.
+func TestRunJobRepairsWithPartialFinalSlice(t *testing.T) {
+	// One recovery slice for one missing slice: no margin row may quietly
+	// absorb a mis-padded tail as a corrupt slice.
+	fx := mkRepairFixture(t, 1020, 510, 1, 1) // 8192 % 1020 = 32-byte tail; dead article inside slice 0
+	plan, err := BuildPlan(fx.idx, fx.files, Caps{MaxRepairRatio: 0.5, MaxMemoryBytes: 64 << 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewPatchStore(t.TempDir())
+	if err := RunJob(context.Background(), plan, fx.idx, fx.par2Files, fx.fetch, store, testLogger()); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := store.Get(fx.deadMsgID)
+	if !ok || !bytes.Equal(got, fx.deadOrig) {
+		t.Fatal("partial-final-slice release must produce a byte-exact patch")
+	}
+}
+
 // A plan over the memory budget must still repair, backed by disk instead of
 // heap accumulators. maxInFlight and byte-exactness must both hold.
 func TestRunJobSpillToDiskRepairs(t *testing.T) {
