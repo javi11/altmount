@@ -628,15 +628,24 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 	art := seg.attachShared(b.flights)
 	for {
 		if art.claimLead() {
+			fetchCtx, cancelFetch := b.fetchContext(ctx, art, keepOnClose)
 			// A fetch that may outlive its reader keeps the article in the
-			// flight map until it ends, so a reader arriving after the close
-			// joins it as a follower instead of fetching the article again.
+			// flight map for as long as it may still finish, so a reader
+			// arriving after the close joins it as a follower instead of
+			// fetching the article again. The pin is tied to fetchCtx, not to
+			// the fetch returning: a wire call that never comes back must not
+			// hold the lead forever, or every later reader of the article
+			// would wait on it for its whole context.
 			if keepOnClose && b.flights.acquire(seg.Id, seg.SegmentSize) == art {
-				defer b.flights.release(seg.Id, art)
+				context.AfterFunc(fetchCtx, func() {
+					if ctx.Err() != nil {
+						art.releaseLead()
+					}
+					b.flights.release(seg.Id, art)
+				})
 			} else if keepOnClose {
 				b.flights.release(seg.Id, art)
 			}
-			fetchCtx, cancelFetch := b.fetchContext(ctx, art, keepOnClose)
 			data, err := b.fetchWithRetry(fetchCtx, cp, seg, art)
 			cancelFetch()
 			switch {

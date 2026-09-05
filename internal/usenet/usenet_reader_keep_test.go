@@ -216,3 +216,57 @@ func TestLateReaderJoinsFinishingArticle(t *testing.T) {
 	}
 	_ = late.Close()
 }
+
+// A closed reader's kept fetch that never returns must not pin the article
+// in the flight map: a reader opened later for the same message-ID would
+// otherwise join a leader that can never finish and hang for its whole
+// context. Once the kept fetch's window ends the article is dropped from the
+// map and its lead released, so the late reader fetches for itself.
+func TestLateReaderNotPinnedByHungKeptFetch(t *testing.T) {
+	const segSize = 4096
+	hung := fakepool.New()
+	hung.SetBehavior(segments.MessageID(0), fakepool.SegmentBehavior{Bytes: segments.Payload(0, segSize)})
+	hung.BlockUntil(make(chan struct{})) // never released, ignores ctx
+
+	fm := newFlightMap()
+	mk := func(fp *fakepool.Client) *UsenetReader {
+		rg := buildEagerRange(context.Background(), t, 1, segSize)
+		getter := func() (pool.NntpClient, error) { return fp, nil }
+		ur, err := NewUsenetReader(context.Background(), getter, rg, 4, noopMetrics{}, "pin-test", nil, withFlightMap(fm))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ur
+	}
+	first := mk(hung)
+	first.Start()
+	waitCalls(t, hung, 1)
+	// Close waits on the hung fetch; do not let that block the test.
+	go func() { _ = first.Close() }()
+
+	healthy := fakepool.New()
+	healthy.SetBehavior(segments.MessageID(0), fakepool.SegmentBehavior{Bytes: segments.Payload(0, segSize)})
+	late := mk(healthy)
+	late.Start()
+	defer func() { _ = late.Close() }()
+	buf := make([]byte, segSize)
+	done := make(chan error, 1)
+	go func() {
+		_, err := io.ReadFull(late, buf)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("late reader: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("late reader hung behind a closed reader's fetch that never returns")
+	}
+	if !bytes.Equal(buf, segments.Payload(0, segSize)) {
+		t.Fatal("late reader got wrong bytes")
+	}
+	if got := healthy.BodyStreamPriorityCalls(); got != 1 {
+		t.Fatalf("late reader fetches = %d, want 1", got)
+	}
+}
