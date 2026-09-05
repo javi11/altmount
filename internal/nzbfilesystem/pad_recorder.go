@@ -14,7 +14,7 @@ import (
 // padMetadataStore is the slice of metadata.MetadataService the pad recorder
 // needs; narrowed to an interface so tests can fake it.
 type padMetadataStore interface {
-	AddKnownHoles(virtualPath string, runs []holes.Run) error
+	AddKnownHoles(virtualPath string, runs []holes.Run, fingerprint string) error
 	UpdateFileStatus(virtualPath string, status metapb.FileStatus) error
 }
 
@@ -37,6 +37,7 @@ type padEvent struct {
 	longest       int
 	totalSegments int
 	segBytes      int64
+	fingerprint   string
 }
 
 // RepairEnqueuer queues a file for background PAR2 repair (implemented by
@@ -138,7 +139,7 @@ func (r *padRecorder) record(ev padEvent) {
 	}()
 
 	// Always persist the hole so the next open pre-pads it without a fetch.
-	if err := r.metadata.AddKnownHoles(ev.name, []holes.Run{{Start: ev.segIndex, Count: 1}}); err != nil {
+	if err := r.metadata.AddKnownHoles(ev.name, []holes.Run{{Start: ev.segIndex, Count: 1}}, ev.fingerprint); err != nil {
 		slog.Warn("Failed to persist known hole", "file", ev.name, "error", err)
 	}
 

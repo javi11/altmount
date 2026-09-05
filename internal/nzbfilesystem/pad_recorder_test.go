@@ -20,7 +20,7 @@ type fakePadMetadataStore struct {
 	statusRecorded chan struct{}
 }
 
-func (f *fakePadMetadataStore) AddKnownHoles(virtualPath string, runs []holes.Run) error {
+func (f *fakePadMetadataStore) AddKnownHoles(virtualPath string, runs []holes.Run, _ string) error {
 	f.mu.Lock()
 	panicNow := f.panicOnHoles
 	f.panicOnHoles = false

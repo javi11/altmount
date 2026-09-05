@@ -15,7 +15,12 @@ package holes
 import (
 	"path/filepath"
 	"strings"
+	"time"
 )
+
+// TTL is how long a confirmed miss is trusted before the article is asked
+// for again: providers backfill, releases get reposted, accounts get added.
+const TTL = 24 * time.Hour
 
 const (
 	// MaxPadRunSegments is the longest run of consecutive missing segments

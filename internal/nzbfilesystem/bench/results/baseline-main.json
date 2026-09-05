@@ -1,0 +1,222 @@
+{
+  "git_sha": "41c23f04",
+  "timestamp": "2026-09-04T10:46:49.726998Z",
+  "scenarios": [
+    {
+      "name": "B1-cold-open/premium-750k",
+      "metrics": [
+        {
+          "name": "ttfb_p50",
+          "unit": "ms",
+          "value": 135.664291,
+          "higher_is_better": false
+        },
+        {
+          "name": "ttfb_p99",
+          "unit": "ms",
+          "value": 170.482875,
+          "higher_is_better": false
+        },
+        {
+          "name": "articles",
+          "unit": "count",
+          "value": 60.4,
+          "higher_is_better": false
+        }
+      ]
+    },
+    {
+      "name": "B1-cold-open/slow-4m",
+      "metrics": [
+        {
+          "name": "ttfb_p50",
+          "unit": "ms",
+          "value": 4130.649375,
+          "higher_is_better": false
+        },
+        {
+          "name": "ttfb_p99",
+          "unit": "ms",
+          "value": 7145.618416,
+          "higher_is_better": false
+        },
+        {
+          "name": "articles",
+          "unit": "count",
+          "value": 75.1,
+          "higher_is_better": false
+        }
+      ]
+    },
+    {
+      "name": "B2-sequential/premium-750k",
+      "metrics": [
+        {
+          "name": "throughput",
+          "unit": "MB/s",
+          "value": 210.79316329263662,
+          "higher_is_better": true
+        },
+        {
+          "name": "waste_ratio",
+          "unit": "ratio",
+          "value": 1.1594038486480713,
+          "higher_is_better": false
+        }
+      ]
+    },
+    {
+      "name": "B2-sequential/slow-4m",
+      "metrics": [
+        {
+          "name": "throughput",
+          "unit": "MB/s",
+          "value": 34.865982354936484,
+          "higher_is_better": true
+        },
+        {
+          "name": "waste_ratio",
+          "unit": "ratio",
+          "value": 1.5626965904235839,
+          "higher_is_better": false
+        }
+      ]
+    },
+    {
+      "name": "B3-seek-storm/premium-750k",
+      "metrics": [
+        {
+          "name": "read_p50",
+          "unit": "ms",
+          "value": 147.57825,
+          "higher_is_better": false
+        },
+        {
+          "name": "read_p99",
+          "unit": "ms",
+          "value": 152.634958,
+          "higher_is_better": false
+        },
+        {
+          "name": "articles_per_read",
+          "unit": "count",
+          "value": 1.05,
+          "higher_is_better": false
+        }
+      ]
+    },
+    {
+      "name": "B3-seek-storm/slow-4m",
+      "metrics": [
+        {
+          "name": "read_p50",
+          "unit": "ms",
+          "value": 1571.383125,
+          "higher_is_better": false
+        },
+        {
+          "name": "read_p99",
+          "unit": "ms",
+          "value": 1590.4735,
+          "higher_is_better": false
+        },
+        {
+          "name": "articles_per_read",
+          "unit": "count",
+          "value": 1,
+          "higher_is_better": false
+        }
+      ]
+    },
+    {
+      "name": "B8-pause-resume/premium-750k",
+      "metrics": [
+        {
+          "name": "bytes_during_pause",
+          "unit": "MB",
+          "value": 0,
+          "higher_is_better": false
+        }
+      ]
+    },
+    {
+      "name": "B8-pause-resume/slow-4m",
+      "metrics": [
+        {
+          "name": "bytes_during_pause",
+          "unit": "MB",
+          "value": 1.5938844680786133,
+          "higher_is_better": false
+        }
+      ]
+    },
+    {
+      "name": "B4-four-streams/premium-750k",
+      "metrics": [
+        {
+          "name": "min_stream_mbps",
+          "unit": "MB/s",
+          "value": 84.11946775344892,
+          "higher_is_better": true
+        },
+        {
+          "name": "max_stream_mbps",
+          "unit": "MB/s",
+          "value": 91.40708994760483,
+          "higher_is_better": true
+        },
+        {
+          "name": "stall_p99",
+          "unit": "ms",
+          "value": 185.467292,
+          "higher_is_better": false
+        }
+      ]
+    },
+    {
+      "name": "B5-two-handles/premium-750k",
+      "metrics": [
+        {
+          "name": "duplicate_bodies",
+          "unit": "count",
+          "value": 127,
+          "higher_is_better": false
+        }
+      ]
+    },
+    {
+      "name": "B6-contention/premium-750k",
+      "metrics": [
+        {
+          "name": "stream_p99",
+          "unit": "ms",
+          "value": 90.281708,
+          "higher_is_better": false
+        },
+        {
+          "name": "import_mbps",
+          "unit": "MB/s",
+          "value": 137.86354571621322,
+          "higher_is_better": true
+        }
+      ]
+    },
+    {
+      "name": "B7-failover/premium-750k",
+      "metrics": [
+        {
+          "name": "miss_ttfb_p50",
+          "unit": "ms",
+          "value": 1487.7635,
+          "higher_is_better": false
+        },
+        {
+          "name": "bodies_per_miss",
+          "unit": "count",
+          "value": 9.775,
+          "higher_is_better": false
+        }
+      ]
+    }
+  ]
+}
