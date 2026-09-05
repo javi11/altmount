@@ -1108,13 +1108,14 @@ func (r *Repository) UpdateQueueItemsPriorityBulk(ctx context.Context, ids []int
 
 // AddImportHistory records a successful file import in the persistent history table
 func (r *Repository) AddImportHistory(ctx context.Context, history *ImportHistory) error {
+	virtualPath := normalizeHealthPath(history.VirtualPath)
 	query := `
 		INSERT INTO import_history (download_id, nzb_id, nzb_name, file_name, file_size, virtual_path, category, indexer, completed_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
 	`
 	_, err := r.db.ExecContext(ctx, query,
 		history.DownloadID, history.NzbID, history.NzbName, history.FileName, history.FileSize,
-		history.VirtualPath, history.Category, history.Indexer)
+		virtualPath, history.Category, history.Indexer)
 	if err != nil {
 		return fmt.Errorf("failed to add import history: %w", err)
 	}
@@ -1126,7 +1127,7 @@ func (r *Repository) GetImportHistoryByDownloadID(ctx context.Context, downloadI
 	query := `
 		SELECT h.id, h.download_id, h.nzb_id, h.nzb_name, h.file_name, h.file_size, h.virtual_path, f.library_path, h.category, h.metadata, h.indexer, h.completed_at
 		FROM import_history h
-		LEFT JOIN file_health f ON TRIM(h.virtual_path, '/') = TRIM(f.file_path, '/')
+		LEFT JOIN file_health f ON h.virtual_path = f.file_path
 		WHERE h.download_id = ?
 		LIMIT 1
 	`
@@ -1150,7 +1151,7 @@ func (r *Repository) GetImportHistoryByNzbID(ctx context.Context, nzbID int64) (
 	query := `
 		SELECT h.id, h.download_id, h.nzb_id, h.nzb_name, h.file_name, h.file_size, h.virtual_path, f.library_path, h.category, h.metadata, h.indexer, h.completed_at
 		FROM import_history h
-		LEFT JOIN file_health f ON TRIM(h.virtual_path, '/') = TRIM(f.file_path, '/')
+		LEFT JOIN file_health f ON h.virtual_path = f.file_path
 		WHERE h.nzb_id = ?
 		LIMIT 1
 	`
@@ -1169,11 +1170,12 @@ func (r *Repository) GetImportHistoryByNzbID(ctx context.Context, nzbID int64) (
 
 // GetImportHistoryByPath retrieves an import history item by its virtual path
 func (r *Repository) GetImportHistoryByPath(ctx context.Context, virtualPath string) (*ImportHistory, error) {
+	virtualPath = normalizeHealthPath(virtualPath)
 	query := `
 		SELECT h.id, h.download_id, h.nzb_id, h.nzb_name, h.file_name, h.file_size, h.virtual_path, f.library_path, h.category, h.metadata, h.indexer, h.completed_at
 		FROM import_history h
-		LEFT JOIN file_health f ON TRIM(h.virtual_path, '/') = TRIM(f.file_path, '/')
-		WHERE TRIM(h.virtual_path, '/') = TRIM(?, '/')
+		LEFT JOIN file_health f ON h.virtual_path = f.file_path
+		WHERE h.virtual_path = ?
 		LIMIT 1
 	`
 

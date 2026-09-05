@@ -482,13 +482,14 @@ func (r *QueueRepository) GetImportHistory(ctx context.Context, days int) ([]*Im
 
 // AddImportHistory records a successful file import in the persistent history table
 func (r *QueueRepository) AddImportHistory(ctx context.Context, history *ImportHistory) error {
+	virtualPath := normalizeHealthPath(history.VirtualPath)
 	query := `
 		INSERT INTO import_history (download_id, nzb_id, nzb_name, file_name, file_size, virtual_path, category, metadata, indexer, completed_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
 	`
 	_, err := r.db.ExecContext(ctx, query,
 		history.DownloadID, history.NzbID, history.NzbName, history.FileName, history.FileSize,
-		history.VirtualPath, history.Category, history.Metadata, history.Indexer)
+		virtualPath, history.Category, history.Metadata, history.Indexer)
 	if err != nil {
 		return fmt.Errorf("failed to add import history: %w", err)
 	}
