@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/javi11/altmount/internal/holes"
+	"github.com/javi11/altmount/internal/importer/validation"
 	"os"
 	"path/filepath"
 	"testing"
@@ -733,5 +735,98 @@ func TestCalculateVirtualDirectory(t *testing.T) {
 				t.Errorf("CalculateVirtualDirectory(%q, %q) = %q, want %q", tt.nzbPath, tt.relativePath, result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestKnownHoleRunsCollapsesMissingIndices(t *testing.T) {
+	segs := []*metapb.SegmentData{
+		{Id: "a"}, {Id: "b"}, {Id: "c"}, {Id: "d"}, {Id: "e"}, {Id: "f"},
+	}
+	missing := map[string]struct{}{"b": {}, "c": {}, "e": {}, "zzz": {}}
+	runs := knownHoleRuns(segs, missing)
+	if len(runs) != 2 {
+		t.Fatalf("runs = %+v, want 2 runs", runs)
+	}
+	if runs[0].Start != 1 || runs[0].Count != 2 {
+		t.Fatalf("runs[0] = %+v, want {1 2}", runs[0])
+	}
+	if runs[1].Start != 4 || runs[1].Count != 1 {
+		t.Fatalf("runs[1] = %+v, want {4 1}", runs[1])
+	}
+	if got := knownHoleRuns(segs, nil); len(got) != 0 {
+		t.Fatalf("runs with no missing ids = %+v, want none", got)
+	}
+}
+
+func TestFastFailDamageIsDegradedJudgesGapsExactly(t *testing.T) {
+	const segSize = 750000
+	mk := func(n int, gaps ...int) []*metapb.SegmentData {
+		segs := make([]*metapb.SegmentData, n)
+		for i := range segs {
+			segs[i] = &metapb.SegmentData{Id: fmt.Sprintf("s%d", i)}
+		}
+		for _, g := range gaps {
+			segs[g] = &metapb.SegmentData{Id: holes.PlaceholderID(g+1, "salt")}
+		}
+		return segs
+	}
+	fileBytes := int64(2000 * segSize)
+
+	// Two isolated gaps in a 2000-segment file: degraded.
+	segs := mk(2000, 100, 1400)
+	res := validation.FastFailFileResult{Broken: true, KnownGapCount: 2,
+		MissingSegmentIDs: []string{segs[100].Id, segs[1400].Id}}
+	if !fastFailDamageIsDegraded(segs, res, fileBytes, 5) {
+		t.Fatal("two isolated gaps must be degraded, not failed")
+	}
+
+	// A run of six consecutive gaps blows the run cap.
+	segs = mk(2000, 100, 101, 102, 103, 104, 105)
+	ids := make([]string, 0, 6)
+	for i := 100; i <= 105; i++ {
+		ids = append(ids, segs[i].Id)
+	}
+	res = validation.FastFailFileResult{Broken: true, KnownGapCount: 6, MissingSegmentIDs: ids}
+	if fastFailDamageIsDegraded(segs, res, fileBytes, 5) {
+		t.Fatal("a six-segment gap run must fail the file")
+	}
+
+	// A zero-tolerance ceiling refuses even one gap.
+	segs = mk(2000, 100)
+	res = validation.FastFailFileResult{Broken: true, KnownGapCount: 1, MissingSegmentIDs: []string{segs[100].Id}}
+	if fastFailDamageIsDegraded(segs, res, fileBytes, 0) {
+		t.Fatal("acceptable-missing 0 must refuse a gap")
+	}
+
+	// Nothing missing at all is not "degraded".
+	if fastFailDamageIsDegraded(mk(10), validation.FastFailFileResult{}, fileBytes, 5) {
+		t.Fatal("no damage must not be reported as degraded")
+	}
+}
+
+func TestClassifyDeclaredGaps(t *testing.T) {
+	const seg = int64(700000)
+	fileBytes := int64(7772) * seg
+	spread := func(n int) []holes.Run {
+		runs := make([]holes.Run, n)
+		for i := range runs {
+			runs[i] = holes.Run{Start: i * 50, Count: 1}
+		}
+		return runs
+	}
+	if got := classifyDeclaredGaps(nil, fileBytes, seg); got != holes.VerdictClean {
+		t.Fatalf("no gaps = %v, want clean", got)
+	}
+	if got := classifyDeclaredGaps(spread(84), fileBytes, seg); got != holes.VerdictDegraded {
+		t.Fatalf("84 single-segment gaps over 7772 (1.1%%) = %v, want degraded", got)
+	}
+	if got := classifyDeclaredGaps(spread(130), fileBytes, seg); got != holes.VerdictFailed {
+		t.Fatalf("130 gaps = %v, want failed (cumulative cap)", got)
+	}
+	if got := classifyDeclaredGaps([]holes.Run{{Start: 10, Count: 5}}, fileBytes, seg); got != holes.VerdictFailed {
+		t.Fatalf("five-segment run = %v, want failed (run cap)", got)
+	}
+	if got := classifyDeclaredGaps(spread(20), 500*seg, seg); got != holes.VerdictFailed {
+		t.Fatalf("20 gaps in a 500-segment file (4%%) = %v, want failed (ratio cap)", got)
 	}
 }

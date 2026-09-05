@@ -23,6 +23,7 @@ import (
 	"github.com/javi11/altmount/internal/encryption"
 	"github.com/javi11/altmount/internal/encryption/rclone"
 	"github.com/javi11/altmount/internal/errors"
+	"github.com/javi11/altmount/internal/holes"
 	"github.com/javi11/altmount/internal/importer/parser/fileinfo"
 	"github.com/javi11/altmount/internal/importer/parser/par2"
 	"github.com/javi11/altmount/internal/importer/rarname"
@@ -660,8 +661,12 @@ func shouldSkipFirstSegmentFetch(file *nzbparser.NzbFile) bool {
 		return false
 	}
 
-	// Only an unambiguous video container extension is trusted from the name alone.
-	if _, ok := skipEligibleVideoExtensions[strings.ToLower(filepath.Ext(name))]; !ok {
+	// Only an unambiguous video container extension is trusted from the name
+	// alone — or a 7z continuation volume: 7z analysis reads the first volume's
+	// head and the last volume's tail, so the leading bytes of every other
+	// volume are never looked at and buy nothing.
+	if _, ok := skipEligibleVideoExtensions[strings.ToLower(filepath.Ext(name))]; !ok &&
+		!isSevenZipContinuationVolume(name) && !isPar2RecoveryVolume(file) {
 		return false
 	}
 
@@ -674,6 +679,27 @@ func shouldSkipFirstSegmentFetch(file *nzbparser.NzbFile) bool {
 	// part the same size as the other non-last parts. Verify locally using the NZB's own
 	// encoded byte counts — no network needed.
 	return firstSegmentEncodedSizeUniform(file.Segments)
+}
+
+// isPar2RecoveryVolume reports a .par2 file too large to be an index: only
+// index files (≤ par2.MaxIndexSegments) are ever read for descriptors, so a
+// recovery volume's leading bytes are never looked at.
+func isPar2RecoveryVolume(file *nzbparser.NzbFile) bool {
+	return strings.HasSuffix(strings.ToLower(file.Filename), ".par2") && len(file.Segments) > par2.MaxIndexSegments
+}
+
+// sevenZipContinuationPattern matches split 7z volumes after the first
+// (.7z.002, .7z.003, …); the index is checked separately so .7z.001 and .7z stay
+// excluded.
+var sevenZipContinuationPattern = regexp.MustCompile(`(?i)\.7z\.(\d{3,})$`)
+
+func isSevenZipContinuationVolume(name string) bool {
+	m := sevenZipContinuationPattern.FindStringSubmatch(name)
+	if m == nil {
+		return false
+	}
+	idx, err := strconv.Atoi(m[1])
+	return err == nil && idx > 1
 }
 
 // firstSegmentEncodedSizeUniform reports whether the first segment's NZB-reported
@@ -954,6 +980,11 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 // transient errors — connection exhaustion, timeouts, resets — must not be
 // mistaken for a missing article, or one hiccup shatters a multi-volume set.
 func (p *Parser) fetchBodyWithRetry(ctx context.Context, cp pool.NntpClient, segmentID string) (*nntppool.ArticleBody, error) {
+	if holes.IsPlaceholderID(segmentID) {
+		// A gap placeholder names no article; asking a provider would only
+		// buy a slow 430.
+		return nil, nntppool.ErrArticleNotFound
+	}
 	if head, ok := p.heads.get(segmentID); ok && len(head.bytes) > 0 {
 		return &nntppool.ArticleBody{MessageID: segmentID, Bytes: head.bytes, YEnc: head.meta}, nil
 	}
@@ -1081,12 +1112,11 @@ func pickRepresentativeMiddleSegment(cache []*FirstSegmentData, notFoundIDs map[
 // hasPar2IndexCandidate reports whether any cached first segment looks like a
 // PAR2 index file (magic bytes + small segment count).
 func (p *Parser) hasPar2IndexCandidate(cache []*FirstSegmentData) bool {
-	const maxIndexSegments = 5
 	for _, d := range cache {
 		if d == nil || d.File == nil || d.MissingFirstSegment {
 			continue
 		}
-		if len(d.File.Segments) == 0 || len(d.File.Segments) > maxIndexSegments {
+		if len(d.File.Segments) == 0 || len(d.File.Segments) > par2.MaxIndexSegments {
 			continue
 		}
 		if par2.HasMagicBytes(d.RawBytes) {
@@ -1289,6 +1319,9 @@ func (p *Parser) fetchYencHeaders(ctx context.Context, segment nzbparser.NzbSegm
 
 	if head, ok := p.heads.get(segment.ID); ok && head.meta.PartSize > 0 {
 		return head.meta, nil
+	}
+	if holes.IsPlaceholderID(segment.ID) {
+		return nntppool.YEncMeta{}, nntppool.ErrArticleNotFound
 	}
 
 	cp, err := p.poolManager.GetPool()

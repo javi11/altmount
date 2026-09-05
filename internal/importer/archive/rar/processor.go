@@ -18,6 +18,7 @@ import (
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
+	"github.com/javi11/altmount/internal/usenet"
 	"github.com/javi11/rardecode/v2"
 )
 
@@ -153,6 +154,12 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 
 	if len(normalizedFiles) > 1 {
 		opts = append(opts, rardecode.ParallelRead(true), rardecode.MaxConcurrentVolumes(maxConcurrentVolumes))
+		// A volume whose headers were read but whose tail article is gone
+		// from every provider still describes its file layout. Keep the
+		// import going: the missing bytes surface as a hole at read time
+		// (zero-fill / PAR2 repair) instead of failing the whole release for
+		// an end-of-archive block nobody needs.
+		opts = append(opts, rardecode.TolerateVolumeTailError(usenet.IsArticleNotFound))
 	}
 
 	// Check context before expensive archive analysis operation

@@ -154,3 +154,70 @@ func TestReaderKnownHolePrePadsWithoutFetch(t *testing.T) {
 		t.Fatalf("OnHole called %d times for a known hole, want 0", n)
 	}
 }
+
+// A gap placeholder (an article the NZB never listed) is zero-filled without
+// any fetch and without consulting the hole hooks: its absence was already
+// judged at import.
+func TestReaderPlaceholderSegmentZeroFillsWithoutFetchOrHooks(t *testing.T) {
+	ctx := context.Background()
+	const n, segSize = 6, 4
+	fp := fillFakePool(n, segSize)
+
+	rg := buildEagerRange(ctx, t, n, segSize)
+	placeholder := holes.PlaceholderID(3, "salt")
+	rg.segments[2] = newSegment(placeholder, 0, int64(segSize-1), int64(segSize), nil, 2)
+	fp.SetBehavior(placeholder, fakepool.SegmentBehavior{Bytes: bytes.Repeat([]byte{9}, segSize)})
+
+	var onHoleCalls int32
+	hooks := &HoleHooks{
+		OnHole:     func(int, string) holes.Decision { atomic.AddInt32(&onHoleCalls, 1); return holes.DecisionFail },
+		KnownHoles: func(int) bool { return false },
+	}
+	ur := newReaderWithHooks(t, ctx, fp, rg, 60, hooks)
+
+	got, err := io.ReadAll(ur)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if len(got) != n*segSize {
+		t.Fatalf("read %d bytes, want %d", len(got), n*segSize)
+	}
+	for i := 0; i < n; i++ {
+		want := byte(i + 1)
+		if i == 2 {
+			want = 0
+		}
+		for j := 0; j < segSize; j++ {
+			if got[i*segSize+j] != want {
+				t.Fatalf("segment %d byte %d = %d, want %d", i, j, got[i*segSize+j], want)
+			}
+		}
+	}
+	if calls := fp.PerMessageCalls(placeholder); calls != 0 {
+		t.Fatalf("placeholder fetched %d times, want 0", calls)
+	}
+	if c := atomic.LoadInt32(&onHoleCalls); c != 0 {
+		t.Fatalf("OnHole called %d times for a placeholder, want 0", c)
+	}
+}
+
+// A reader without hole hooks (a non-video file, for instance) still serves
+// placeholders as zeros rather than failing the read.
+func TestReaderPlaceholderSegmentZeroFillsWithNilHooks(t *testing.T) {
+	ctx := context.Background()
+	const n, segSize = 4, 4
+	fp := fillFakePool(n, segSize)
+	rg := buildEagerRange(ctx, t, n, segSize)
+	rg.segments[1] = newSegment(holes.PlaceholderID(2, "salt"), 0, int64(segSize-1), int64(segSize), nil, 1)
+
+	ur := newReaderWithHooks(t, ctx, fp, rg, 60, nil)
+	got, err := io.ReadAll(ur)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	for j := 0; j < segSize; j++ {
+		if got[segSize+j] != 0 {
+			t.Fatalf("placeholder byte %d = %d, want 0", j, got[segSize+j])
+		}
+	}
+}

@@ -856,6 +856,20 @@ func (b *UsenetReader) downloadManager(ctx context.Context) {
 
 			taskCtx := slogutil.With(ctx, "segment_id", s.Id, "segment_idx", segIdx)
 
+			// A gap placeholder names no article: the NZB never listed one.
+			// Serve a repaired patch when there is one, else zeros, and never
+			// ask a provider. Unlike a discovered hole this is not subject to
+			// the owner's pad policy: the bytes were unavailable at import,
+			// which is when their damage was judged.
+			if holes.IsPlaceholderID(s.Id) {
+				if p := b.patchFor(taskCtx, s); p != nil {
+					s.SetData(p)
+					return
+				}
+				s.SetData(make([]byte, s.End+1))
+				return
+			}
+
 			// Replay pre-pad: a segment already known missing (persisted hole
 			// map) serves its repaired patch when one exists, else zero-fills
 			// immediately — either way with no fetch round-trip.

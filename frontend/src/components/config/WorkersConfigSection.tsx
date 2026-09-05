@@ -504,6 +504,8 @@ export function ImportConfigSection({
 										".mp4",
 										".avi",
 										".ts",
+										".m2ts",
+										".vob",
 										".m4v",
 										".mov",
 										".wmv",
