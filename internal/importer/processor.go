@@ -875,10 +875,24 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 				"placeholders", gaps, "file_path", filePath)
 		}
 
-		// Pre-parse Stat check — runs before any Body fetches.
+		// Pre-parse Stat check. The first-segment fetch the parse pass needs
+		// runs alongside it: on a healthy release, the common case, that
+		// hides the shorter of the two behind the longer; on a failed check
+		// the warm-up is cancelled and its cost is a few early 430s.
 		proc.updateProgressWithStage(queueID, 0, "Checking segment availability")
+		warmCtx, cancelWarm := context.WithCancel(ctx)
+		warmDone := make(chan struct{})
+		go func() {
+			defer close(warmDone)
+			proc.parser.WarmFirstSegments(warmCtx, n.Files)
+		}()
 		var fastFailErr error
 		brokenIdx, missingIDs, degradedFiles, fastFailErr = proc.preParseFastFail(ctx, n, cfg, queueID, category, downloadID)
+		if fastFailErr != nil {
+			cancelWarm()
+		}
+		<-warmDone
+		cancelWarm()
 		if fastFailErr != nil {
 			// A deferral is not a failure: propagate it so the service parks
 			// the queue item pending the repair. Checked before the

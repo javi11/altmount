@@ -534,8 +534,38 @@ func (b *UsenetReader) GetBufferedOffset() int64 {
 	return b.rg.start + b.scheduledBytes
 }
 
-// downloadSegmentWithRetry attempts to download a segment with retry logic for pool unavailability
-func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segment) ([]byte, error) {
+// keepFetchCompletionTimeout bounds how long a fetch may run on after its
+// reader closed. One attempt window is enough: the article was already
+// arriving when the reader left.
+const keepFetchCompletionTimeout = 15 * time.Second
+
+// fetchContext returns the context a streaming fetch runs under. Without
+// keepOnClose it is ctx itself. With it, the fetch survives ctx being
+// cancelled once the article has started arriving: the pool would otherwise
+// abort the body (and, past its drain limit, close the connection), and the
+// next open of the same head would fetch the whole article again. An
+// article with no bytes yet is still cancelled with ctx.
+func (b *UsenetReader) fetchContext(ctx context.Context, art *articleBuf, keepOnClose bool) (context.Context, context.CancelFunc) {
+	if !keepOnClose || art == nil {
+		return ctx, func() {}
+	}
+	fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), keepFetchCompletionTimeout)
+	go func() {
+		select {
+		case <-fetchCtx.Done():
+		case <-ctx.Done():
+			if art.published() == 0 {
+				cancel()
+			}
+		}
+	}()
+	return fetchCtx, cancel
+}
+
+// downloadSegmentWithRetry attempts to download a segment with retry logic for
+// pool unavailability. keepOnClose lets a started streaming fetch finish after
+// ctx is cancelled; see fetchContext.
+func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segment, keepOnClose bool) ([]byte, error) {
 	// Cache HIT: skip NNTP entirely
 	if b.segmentStore != nil {
 		if data, ok := b.segmentStore.Get(seg.Id); ok {
@@ -598,7 +628,29 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 	art := seg.attachShared(b.flights)
 	for {
 		if art.claimLead() {
-			data, err := b.fetchWithRetry(ctx, cp, seg, art)
+			lead := art.leadGen()
+			fetchCtx, cancelFetch := b.fetchContext(ctx, art, keepOnClose)
+			// A fetch that may outlive its reader keeps the article in the
+			// flight map for as long as it may still finish, so a reader
+			// arriving after the close joins it as a follower instead of
+			// fetching the article again. The pin is tied to fetchCtx, not to
+			// the fetch returning: a wire call that never comes back must not
+			// hold the lead forever, or every later reader of the article
+			// would wait on it for its whole context.
+			if keepOnClose {
+				if kept := b.flights.acquire(seg.Id, seg.SegmentSize); kept == art {
+					context.AfterFunc(fetchCtx, func() {
+						if ctx.Err() != nil {
+							art.releaseLead(lead)
+						}
+						b.flights.release(seg.Id, art)
+					})
+				} else {
+					b.flights.release(seg.Id, kept)
+				}
+			}
+			data, err := b.fetchWithRetry(fetchCtx, cp, seg, art)
+			cancelFetch()
 			switch {
 			case err == nil:
 				if b.segmentStore != nil && data != nil {
@@ -607,7 +659,7 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 				return data, nil
 			case ctx.Err() != nil && !errors.Is(err, nntppool.ErrArticleNotFound):
 				// This reader is going away; let a follower take over.
-				art.releaseLead()
+				art.releaseLead(lead)
 				return nil, err
 			default:
 				// A definite answer (gone everywhere, or every attempt failed):
@@ -831,6 +883,10 @@ func (b *UsenetReader) downloadManager(ctx context.Context) {
 		// Schedule next segment for download
 		idx := b.nextToDownload
 		b.nextToDownload++
+		// Demand-window articles are what a reopen of this position needs
+		// next, so they are worth finishing after a close; speculative
+		// read-ahead is not.
+		keepOnClose := b.priority && ahead < demandDepth
 		b.mu.Unlock()
 
 		seg, err := b.rg.GetSegment(idx)
@@ -896,7 +952,7 @@ func (b *UsenetReader) downloadManager(ctx context.Context) {
 				return
 			}
 
-			data, err := b.downloadSegmentWithRetry(taskCtx, s)
+			data, err := b.downloadSegmentWithRetry(taskCtx, s, keepOnClose)
 
 			if err != nil {
 				if errors.Is(err, nntppool.ErrArticleNotFound) {

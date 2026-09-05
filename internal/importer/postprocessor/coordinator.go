@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/javi11/altmount/internal/arrs"
+	"github.com/javi11/altmount/internal/arrs/model"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/errors"
@@ -137,6 +138,8 @@ func (c *Coordinator) HandleSuccess(ctx context.Context, item *database.ImportQu
 			"path", resultingPath)
 	} else if arrsService == nil {
 		c.log.DebugContext(ctx, "ARR notification not sent", "path", resultingPath, "error", "ARRs disabled")
+	} else if !shouldWaitForMountPropagation(arrsService, item) {
+		c.log.DebugContext(ctx, "ARR notification not sent", "path", resultingPath, "error", "no ARR instance would be notified")
 	} else if err := c.waitForMountPropagation(ctx); err != nil {
 		return result, err
 	} else if err := c.notifyARRWith(ctx, arrsService, item, resultingPath); err != nil {
@@ -159,6 +162,25 @@ func (c *Coordinator) HandleSuccess(ctx context.Context, item *database.ImportQu
 // after HandleSuccess returns, so an unconditional wait here was a full
 // second added to every import's time to first byte.
 const mountPropagationDelay = 1 * time.Second
+
+// arrInstanceLister is the slice of *arrs.Service the wait decision needs.
+type arrInstanceLister interface {
+	GetAllInstances() []*model.ConfigInstance
+}
+
+// shouldWaitForMountPropagation reports whether an ARR will actually be
+// notified for this item, which is the only reason to pay the propagation
+// delay. The service object exists even with no ARR configured, so its
+// presence alone must not cost every import a second.
+func shouldWaitForMountPropagation(lister arrInstanceLister, item *database.ImportQueueItem) bool {
+	if lister == nil || item == nil || len(lister.GetAllInstances()) == 0 {
+		return false
+	}
+	if item.TargetPath != nil && *item.TargetPath != "" {
+		return true
+	}
+	return item.Category != nil && *item.Category != ""
+}
 
 func (c *Coordinator) waitForMountPropagation(ctx context.Context) error {
 	select {

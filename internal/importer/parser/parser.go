@@ -975,6 +975,35 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 	return cache, notFoundIDs, nil
 }
 
+// WarmFirstSegments fetches the first article of every file that ParseNzb
+// would fetch, into the head cache, and returns when they have all landed or
+// ctx ends. It exists so the fetch can overlap the fast-fail probe instead of
+// following it: on a healthy release the parse pass then finds every head
+// already cached. Errors are not reported; the parse pass diagnoses them.
+func (p *Parser) WarmFirstSegments(ctx context.Context, files []nzbparser.NzbFile) {
+	if ctx.Err() != nil || p.poolManager == nil || !p.poolManager.HasPool() {
+		return
+	}
+	cp, err := p.poolManager.GetPool()
+	if err != nil {
+		return
+	}
+	maxFetch := max(min(min(len(files), p.getConfig().TotalProviderConnections()), maxFetchGoroutines), 1)
+	warm := concpool.New().WithMaxGoroutines(maxFetch).WithContext(ctx)
+	for i := range files {
+		file := &files[i]
+		if len(file.Segments) == 0 || shouldSkipFirstSegmentFetch(file) {
+			continue
+		}
+		id := file.Segments[0].ID
+		warm.Go(func(ctx context.Context) error {
+			_, _ = p.fetchBodyWithRetry(ctx, cp, id)
+			return nil
+		})
+	}
+	_ = warm.Wait()
+}
+
 // fetchBodyWithRetry fetches one article, retrying transient failures. A
 // genuine article-not-found (430/423) is permanent and returned at once:
 // transient errors — connection exhaustion, timeouts, resets — must not be
