@@ -142,6 +142,14 @@ const (
 	openingSegments = 16
 )
 
+// withFlightMap gives the reader its own in-flight article map. Tests use it
+// so parallel tests reusing message-IDs do not join each other's downloads.
+func withFlightMap(f *flightMap) ReaderOption {
+	return func(r *UsenetReader) {
+		r.flights = f
+	}
+}
+
 // ConnBudget grants connection tokens for import segment fetches.
 // Implemented by pool.Manager (AcquireImportConnection).
 type ConnBudget interface {
@@ -219,6 +227,7 @@ type UsenetReader struct {
 	budget         ConnBudget   // optional; gates import fetches on the global connection budget
 	specBudget     SpecBudget   // optional; bounds speculative fetches pool-wide (streaming only)
 	articleSize    int64        // decoded size of the range's first article; drives the first-byte hold
+	flights        *flightMap   // articles in flight, shared with every other streaming reader
 	scheduledBytes int64        // usable bytes of every segment scheduled so far
 	cond           *sync.Cond   // Signals downloadManager when reader advances
 
@@ -259,6 +268,7 @@ func NewUsenetReader(
 		metricsTracker: metricsTracker,
 		streamID:       streamID,
 		segmentStore:   segmentStore,
+		flights:        flights,
 		priority:       true, // streaming profile by default; WithImportProfile demotes
 	}
 	for _, opt := range opts {
@@ -567,6 +577,59 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 		defer release()
 	}
 
+	if !b.priority {
+		data, err := b.fetchWithRetry(ctx, cp, seg, nil)
+		if b.segmentStore != nil && data != nil && err == nil {
+			_ = b.segmentStore.Put(seg.Id, data)
+		}
+		return data, err
+	}
+
+	// Streaming: every reader wanting this article shares one buffer. The
+	// first to arrive leads and fetches; the rest follow and read the same
+	// bytes as they land. A leader whose reader closes mid-article hands the
+	// lead to a follower, which continues into a fresh attempt past the
+	// published watermark.
+	art := seg.attachShared(b.flights)
+	for {
+		if art.claimLead() {
+			data, err := b.fetchWithRetry(ctx, cp, seg, art)
+			switch {
+			case err == nil:
+				if b.segmentStore != nil && data != nil {
+					_ = b.segmentStore.Put(seg.Id, data)
+				}
+				return data, nil
+			case ctx.Err() != nil && !errors.Is(err, nntppool.ErrArticleNotFound):
+				// This reader is going away; let a follower take over.
+				art.releaseLead()
+				return nil, err
+			default:
+				// A definite answer (gone everywhere, or every attempt failed):
+				// the same providers would tell every follower the same thing.
+				art.setError(err)
+				return nil, err
+			}
+		}
+		err := art.waitDone(ctx)
+		if errors.Is(err, errNoLeader) {
+			continue
+		}
+		if err == nil {
+			// Bytes are already visible through the shared buffer.
+			return nil, nil
+		}
+		if errors.Is(err, nntppool.ErrArticleNotFound) {
+			b.log.DebugContext(ctx, "missing segment", "segment_id", seg.Id)
+		}
+		return nil, err
+	}
+}
+
+// fetchWithRetry runs the wire fetch for one segment. With art set the
+// decoded bytes stream into art as they arrive (priority lane); with art nil
+// the article is buffered on the normal lane for import.
+func (b *UsenetReader) fetchWithRetry(ctx context.Context, cp pool.NntpClient, seg *segment, art *articleBuf) ([]byte, error) {
 	segStart := time.Now()
 	var resultBytes []byte
 	err := retry.Do(
@@ -578,13 +641,13 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 			fetchStart := time.Now()
 			var result *nntppool.ArticleBody
 			var err error
-			var w *segmentWriter
-			if b.priority {
+			var w *articleWriter
+			if art != nil {
 				// Streaming: priority lane, decoded bytes published to readers as
 				// each wire read lands. A failed attempt leaves its bytes visible;
 				// the next attempt starts a fresh buffer and only publishes once
 				// it has passed what readers already saw.
-				w = seg.attemptWriter()
+				w = art.attemptWriter()
 				result, err = cp.BodyStreamPriority(attemptCtx, seg.Id, w)
 			} else {
 				// Import: normal lane, buffered — always yields to streaming reads.
@@ -620,7 +683,7 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 			}
 
 			if w != nil {
-				seg.finish(w)
+				art.finish(w)
 				resultBytes = w.bytes()
 			} else {
 				resultBytes = result.Bytes
@@ -665,11 +728,6 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 		}),
 		retry.Context(ctx),
 	)
-
-	// Cache WRITE: tee-write after successful download (fire-and-forget)
-	if b.segmentStore != nil && resultBytes != nil && err == nil {
-		_ = b.segmentStore.Put(seg.Id, resultBytes)
-	}
 
 	if errors.Is(err, nntppool.ErrArticleNotFound) {
 		b.log.DebugContext(ctx, "missing segment",

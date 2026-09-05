@@ -55,7 +55,7 @@ func (b *countingSpecBudget) max() int {
 func newBudgetReader(t *testing.T, ctx context.Context, fp *fakepool.Client, rg *segmentRange, maxPrefetch int, budget SpecBudget) *UsenetReader {
 	t.Helper()
 	getter := func() (pool.NntpClient, error) { return fp, nil }
-	ur, err := NewUsenetReader(ctx, getter, rg, maxPrefetch, noopMetrics{}, "budget-test", nil, WithSpeculativeBudget(budget))
+	ur, err := NewUsenetReader(ctx, getter, rg, maxPrefetch, noopMetrics{}, "budget-test", nil, WithSpeculativeBudget(budget), withFlightMap(newFlightMap()))
 	if err != nil {
 		t.Fatal(err)
 	}

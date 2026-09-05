@@ -146,11 +146,9 @@ func TestSegment_SetData_AfterRelease(t *testing.T) {
 	// Should not panic
 	seg.SetData([]byte("data"))
 
-	seg.mx.Lock()
-	if seg.buf != nil {
-		t.Error("Expected data to be nil after Release")
+	if seg.DataLen() != 0 {
+		t.Error("Expected no data after Release")
 	}
-	seg.mx.Unlock()
 }
 
 // TestSegment_DataLen(t *testing.T) verifies DataLen returns correct values

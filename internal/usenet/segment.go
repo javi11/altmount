@@ -204,25 +204,21 @@ type segment struct {
 	// keyed on it so persisted hole maps line up across reads.
 	loaderIdx int
 
-	// Progressive handoff. buf holds whatever the current attempt has
-	// decoded; ready is how much of it readers may see. A later attempt
-	// starts a fresh buf and swaps it in only once it has passed ready, so a
-	// reader that already consumed the prefix never sees it move.
-	buf       []byte
-	ready     int64
-	done      bool
-	dataErr   error
-	attempt   int
-	notify    chan struct{} // closed and replaced on every publish
-	dataReady chan struct{} // closed once, on completion or error
-	readyOnce sync.Once
-
+	// art holds the bytes this segment serves. It starts private and is
+	// swapped for the shared flight-map buffer when a fetch begins, so
+	// readers of the same article share one download. SetData/SetError
+	// detach back to a private buffer: a zero-filled hole or a patch is one
+	// reader's policy, not the article's content.
+	art      *articleBuf
+	shared   bool
+	fm       *flightMap // map the shared article was acquired from
 	reader   *segmentReader
+	notify   chan struct{} // closed and replaced when art is swapped or the segment released
 	mx       sync.Mutex
 	released bool
 }
 
-// newSegment creates a segment with an initialized dataReady channel.
+// newSegment creates a segment with a private, empty article buffer.
 // loaderIdx is the segment's index in the loader's segment space.
 func newSegment(id string, start, end, segmentSize int64, groups []string, loaderIdx int) *segment {
 	return &segment{
@@ -232,130 +228,123 @@ func newSegment(id string, start, end, segmentSize int64, groups []string, loade
 		SegmentSize: segmentSize,
 		groups:      groups,
 		loaderIdx:   loaderIdx,
+		art:         newArticleBuf(segmentSize),
 		notify:      make(chan struct{}),
-		dataReady:   make(chan struct{}),
 	}
 }
 
-// signalReady safely closes the dataReady channel exactly once.
-func (s *segment) signalReady() {
-	s.readyOnce.Do(func() {
-		close(s.dataReady)
-	})
-}
-
-// wakeLocked releases every reader parked on notify. Caller holds mx.
+// wakeLocked releases readers parked on this segment. Caller holds mx.
 func (s *segment) wakeLocked() {
 	close(s.notify)
 	s.notify = make(chan struct{})
 }
 
-// segmentWriter is one fetch attempt's sink. Bytes written are published to
-// readers as they arrive.
-type segmentWriter struct {
-	s       *segment
-	attempt int
-	buf     []byte
-}
-
-// attemptWriter starts a new fetch attempt. Only the newest attempt can
-// publish, and only past what earlier attempts already made visible.
-func (s *segment) attemptWriter() *segmentWriter {
+// attachShared points the segment at the article's shared buffer so a fetch
+// (by this reader or another) serves every segment wanting that article.
+// Returns the buffer to fetch into.
+func (s *segment) attachShared(fm *flightMap) *articleBuf {
 	s.mx.Lock()
 	defer s.mx.Unlock()
-	s.attempt++
-	size := s.SegmentSize
-	if size < 0 {
-		size = 0
+	if s.shared || s.released {
+		return s.art
 	}
-	return &segmentWriter{s: s, attempt: s.attempt, buf: make([]byte, 0, size)}
+	a := fm.acquire(s.Id, s.SegmentSize)
+	s.art = a
+	s.shared = true
+	s.fm = fm
+	s.wakeLocked()
+	return a
 }
 
-func (w *segmentWriter) Write(p []byte) (int, error) {
-	w.buf = append(w.buf, p...)
-	w.s.publish(w)
-	return len(p), nil
-}
-
-// bytes returns everything this attempt received.
-func (w *segmentWriter) bytes() []byte { return w.buf }
-
-func (s *segment) publish(w *segmentWriter) {
-	s.mx.Lock()
-	if s.released || s.done || w.attempt != s.attempt || int64(len(w.buf)) <= s.ready {
-		s.mx.Unlock()
+// detachLocked swaps a shared buffer for a fresh private one. Caller holds mx.
+func (s *segment) detachLocked() {
+	if !s.shared {
 		return
 	}
-	s.buf = w.buf
-	s.ready = int64(len(w.buf))
+	s.fm.release(s.Id, s.art)
+	s.art = newArticleBuf(s.SegmentSize)
+	s.shared = false
 	s.wakeLocked()
-	s.mx.Unlock()
 }
 
-// finish marks the segment complete with the bytes w received.
-func (s *segment) finish(w *segmentWriter) {
+// attemptWriter, finish and published operate on whatever buffer the segment
+// currently serves; the fetch path uses the shared buffer directly.
+func (s *segment) attemptWriter() *articleWriter {
 	s.mx.Lock()
-	if s.released || s.done || w.attempt != s.attempt {
-		s.mx.Unlock()
-		return
-	}
-	s.buf = w.buf
-	s.ready = int64(len(w.buf))
-	s.done = true
-	s.wakeLocked()
+	a := s.art
 	s.mx.Unlock()
-	s.signalReady()
+	return a.attemptWriter()
 }
 
-// published reports how many bytes readers may currently see.
+func (s *segment) finish(w *articleWriter) { w.a.finish(w) }
+
 func (s *segment) published() int64 {
 	s.mx.Lock()
-	defer s.mx.Unlock()
-	return s.ready
+	a := s.art
+	s.mx.Unlock()
+	return a.published()
 }
 
-// SetData stores a complete payload and signals readers.
+// SetData stores a complete payload for this segment only.
 // Non-blocking, safe to call from any goroutine.
 func (s *segment) SetData(data []byte) {
 	if s == nil {
 		return
 	}
 	s.mx.Lock()
-	if s.released || s.done {
+	if s.released {
 		s.mx.Unlock()
 		return
 	}
-	s.buf = data
-	s.ready = int64(len(data))
-	s.done = true
-	s.wakeLocked()
+	s.detachLocked()
+	a := s.art
 	s.mx.Unlock()
-	s.signalReady()
+	a.setData(data)
 }
 
-// SetError stores a download error and signals readers. Readers that were
-// already handed a prefix see the error once they reach the watermark.
+// SetError records a download error for this segment only. Readers already
+// handed a prefix see the error once they reach the watermark.
 func (s *segment) SetError(err error) {
 	if s == nil || err == nil {
 		return
 	}
 	s.mx.Lock()
-	if s.dataErr == nil {
-		s.dataErr = err
+	if s.released {
+		s.mx.Unlock()
+		return
 	}
-	s.wakeLocked()
+	if s.shared {
+		// Keep the bytes the shared article already delivered: swap in a
+		// private copy that ends in the error.
+		old := s.art
+		s.detachLocked()
+		old.mu.Lock()
+		s.art.buf, s.art.ready = old.buf, old.ready
+		old.mu.Unlock()
+	}
+	a := s.art
 	s.mx.Unlock()
-	s.signalReady()
+	a.setError(err)
 }
 
-// GetDownloadError returns any download error that occurred.
+// GetDownloadError returns any download error recorded for this segment.
 func (s *segment) GetDownloadError() error {
 	if s == nil {
 		return nil
 	}
 	s.mx.Lock()
-	defer s.mx.Unlock()
-	return s.dataErr
+	a := s.art
+	released := s.released
+	s.mx.Unlock()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.err != nil {
+		return a.err
+	}
+	if released {
+		return io.ErrClosedPipe
+	}
+	return nil
 }
 
 // DataLen returns how many decoded bytes are currently available.
@@ -363,9 +352,7 @@ func (s *segment) DataLen() int {
 	if s == nil {
 		return 0
 	}
-	s.mx.Lock()
-	defer s.mx.Unlock()
-	return int(s.ready)
+	return int(s.published())
 }
 
 // segmentReader serves [Start, End] of the segment, waiting only for the
@@ -404,58 +391,70 @@ func (r *segmentReader) Read(p []byte) (int, error) {
 	}
 	for {
 		s.mx.Lock()
-		if s.dataErr != nil && (s.released || s.ready <= r.off) {
-			err := s.dataErr
+		if s.released {
 			s.mx.Unlock()
-			return 0, err
+			return 0, io.ErrClosedPipe
 		}
-		if s.ready > r.off {
-			end := min(s.ready, s.End+1)
-			n := copy(p, s.buf[r.off:end])
-			r.off += int64(n)
-			s.mx.Unlock()
-			return n, nil
-		}
-		if s.done {
-			// A complete article shorter than the requested range ends the
-			// segment, matching the previous LimitReader behaviour.
-			s.mx.Unlock()
-			return 0, io.EOF
-		}
-		wait := s.notify
+		a := s.art
+		shared := s.shared
+		segWait := s.notify
 		ctx := r.ctx
 		s.mx.Unlock()
+
+		a.mu.Lock()
+		if a.err != nil && a.ready <= r.off && !shared {
+			err := a.err
+			a.mu.Unlock()
+			return 0, err
+		}
+		// A shared article's failure is not this reader's verdict: its owner
+		// decides to pad or fail and detaches either way, which wakes segWait.
+		if a.ready > r.off {
+			end := min(a.ready, s.End+1)
+			n := copy(p, a.buf[r.off:end])
+			r.off += int64(n)
+			a.mu.Unlock()
+			return n, nil
+		}
+		if a.done && a.err == nil {
+			// A complete article shorter than the requested range ends the
+			// segment, matching the previous LimitReader behaviour.
+			a.mu.Unlock()
+			return 0, io.EOF
+		}
+		artWait := a.notify
+		a.mu.Unlock()
 		if ctx == nil {
 			ctx = context.Background()
 		}
 		select {
-		case <-wait:
+		case <-artWait:
+		case <-segWait:
 		case <-ctx.Done():
 			return 0, ctx.Err()
 		}
 	}
 }
 
-// Release frees the segment data to allow GC. Safe to call multiple times.
+// Release drops this segment's hold on its bytes. Safe to call repeatedly.
+// A shared article stays alive for other readers still using it.
 func (s *segment) Release() {
 	if s == nil {
 		return
 	}
-
 	s.mx.Lock()
 	if s.released {
 		s.mx.Unlock()
 		return
 	}
 	s.released = true
-	s.buf = nil
-	if s.dataErr == nil {
-		s.dataErr = io.ErrClosedPipe
+	if s.shared {
+		s.fm.release(s.Id, s.art)
+		s.shared = false
 	}
+	s.art = newArticleBuf(0)
 	s.wakeLocked()
 	s.mx.Unlock()
-
-	s.signalReady()
 }
 
 // Close releases the segment data. Kept for API compatibility with segmentRange.

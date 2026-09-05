@@ -83,7 +83,7 @@ func TestImportReaderStillUsesBufferedBody(t *testing.T) {
 	fp.SetBehavior(segments.MessageID(0), fakepool.SegmentBehavior{Bytes: segments.Payload(0, 1024)})
 	rg := buildEagerRange(ctx, t, 1, 1024)
 	getter := func() (pool.NntpClient, error) { return fp, nil }
-	ur, err := NewUsenetReader(ctx, getter, rg, 1, noopMetrics{}, "import", nil, WithImportProfile(nil))
+	ur, err := NewUsenetReader(ctx, getter, rg, 1, noopMetrics{}, "import", nil, WithImportProfile(nil), withFlightMap(newFlightMap()))
 	if err != nil {
 		t.Fatal(err)
 	}
