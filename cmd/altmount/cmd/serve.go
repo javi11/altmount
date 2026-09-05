@@ -87,7 +87,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	repos := setupRepositories(ctx, db)
 	poolManager := pool.NewManager(ctx, repos.MainRepo)
 
-	metadataService, metadataReader := initializeMetadata(cfg)
+	metadataService, metadataReader := initializeMetadata(ctx, cfg)
 
 	// 4. Setup network services
 	if err := setupNNTPPool(ctx, cfg, poolManager); err != nil {

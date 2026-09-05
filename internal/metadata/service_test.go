@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -258,6 +259,146 @@ func TestReadFileMetadataLite_FallsBackOnLongHeader(t *testing.T) {
 	require.NotNil(t, lite)
 	assert.Equal(t, int64(1234), lite.FileSize)
 	assert.Equal(t, metapb.FileStatus_FILE_STATUS_HEALTHY, lite.Status)
+}
+
+// assertNoBackslashPersisted walks the metadata root and fails if any persisted
+// file or directory name contains a backslash. A backslash byte in a name is the
+// #660 trigger that deadlocks the FUSE page-cache layer on open().
+func assertNoBackslashPersisted(t *testing.T, root string) {
+	t.Helper()
+	err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		assert.NotContains(t, info.Name(), "\\",
+			"metadata entry must not be persisted with a backslash: %s", path)
+		return nil
+	})
+	require.NoError(t, err)
+}
+
+// TestWriteFileMetadata_NormalizesBackslashPath guards against issue #660: a
+// filename containing a backslash deadlocks the FUSE page-cache layer on open().
+// The metadata service must never persist or serve a backslash path, and a read
+// using the original backslash form must still resolve.
+func TestWriteFileMetadata_NormalizesBackslashPath(t *testing.T) {
+	root := t.TempDir()
+	ms := NewMetadataService(root)
+
+	// Final path component contains a literal backslash (the #660 trigger).
+	backslashPath := "movies/Release Name/file.mkv\\file.mkv"
+	normalizedPath := "movies/Release Name/file.mkv/file.mkv"
+
+	meta := ms.CreateFileMetadata(
+		2048, "test.nzb", metapb.FileStatus_FILE_STATUS_HEALTHY,
+		nil, metapb.Encryption_NONE, "", "", nil, nil, 0, nil, "zxcvb09876",
+	)
+	require.NoError(t, ms.WriteFileMetadata(backslashPath, meta))
+
+	assertNoBackslashPersisted(t, root)
+
+	// The .meta file lives at the normalized location.
+	require.FileExists(t, ms.GetMetadataFilePath(normalizedPath))
+
+	// Reading back via the original backslash path resolves to the same entry.
+	got, err := ms.ReadFileMetadata(backslashPath)
+	require.NoError(t, err)
+	require.NotNil(t, got, "metadata written under a backslash path must be readable")
+	assert.Equal(t, int64(2048), got.FileSize)
+
+	// And via the normalized forward-slash path.
+	gotNorm, err := ms.ReadFileMetadata(normalizedPath)
+	require.NoError(t, err)
+	require.NotNil(t, gotNorm)
+	assert.Equal(t, int64(2048), gotNorm.FileSize)
+}
+
+// TestRenameFileMetadata_NormalizesBackslashPath guards the rename path: renaming
+// a metadata file to a backslash-bearing virtual path must not persist a backslash
+// name (which would re-introduce #660), and the renamed entry must resolve via the
+// original backslash form.
+func TestRenameFileMetadata_NormalizesBackslashPath(t *testing.T) {
+	root := t.TempDir()
+	ms := NewMetadataService(root)
+
+	srcPath := "movies/old.mkv"
+	backslashDst := "movies/Release\\new.mkv"
+	normalizedDst := "movies/Release/new.mkv"
+
+	meta := ms.CreateFileMetadata(
+		4096, "test.nzb", metapb.FileStatus_FILE_STATUS_HEALTHY,
+		nil, metapb.Encryption_NONE, "", "", nil, nil, 0, nil, "rename12345",
+	)
+	require.NoError(t, ms.WriteFileMetadata(srcPath, meta))
+
+	require.NoError(t, ms.RenameFileMetadata(srcPath, backslashDst))
+
+	assertNoBackslashPersisted(t, root)
+
+	assert.NoFileExists(t, ms.GetMetadataFilePath(srcPath))
+	require.FileExists(t, ms.GetMetadataFilePath(normalizedDst))
+
+	// Resolvable via both the backslash and normalized forms.
+	got, err := ms.ReadFileMetadata(backslashDst)
+	require.NoError(t, err)
+	require.NotNil(t, got, "renamed metadata must be readable via the backslash path")
+	assert.Equal(t, int64(4096), got.FileSize)
+}
+
+// TestDeleteFileMetadata_NormalizesBackslashPath guards the delete path: a call
+// with a backslash virtual path must locate and remove the (normalized) persisted
+// .meta file rather than silently missing it.
+func TestDeleteFileMetadata_NormalizesBackslashPath(t *testing.T) {
+	root := t.TempDir()
+	ms := NewMetadataService(root)
+
+	backslashPath := "movies/Release\\file.mkv"
+	normalizedPath := "movies/Release/file.mkv"
+
+	meta := ms.CreateFileMetadata(
+		1024, "test.nzb", metapb.FileStatus_FILE_STATUS_HEALTHY,
+		nil, metapb.Encryption_NONE, "", "", nil, nil, 0, nil, "delete12345",
+	)
+	require.NoError(t, ms.WriteFileMetadata(backslashPath, meta))
+	require.FileExists(t, ms.GetMetadataFilePath(normalizedPath))
+
+	require.NoError(t, ms.DeleteFileMetadata(context.Background(), backslashPath))
+
+	assert.NoFileExists(t, ms.GetMetadataFilePath(normalizedPath))
+}
+
+// TestDeleteDirectory_PurgesCacheForTrailingSeparator covers the cache purge in
+// DeleteDirectory, which builds a prefix from the directory path.
+//
+// Two ways it could miss every key. A trailing separator makes the prefix double
+// up ("movies/" becomes "movies//"), and building it from filepath.Separator
+// matches nothing on Windows, where the separator is a backslash but cache keys
+// are always normalized to forward slashes. Either way the on-disk directory is
+// removed while its entries stay in the lite cache, and the next read of one of
+// them is served metadata for a file that is gone.
+func TestDeleteDirectory_PurgesCacheForTrailingSeparator(t *testing.T) {
+	root := t.TempDir()
+	ms := NewMetadataService(root)
+
+	filePath := "movies/Release/file.mkv"
+	meta := ms.CreateFileMetadata(
+		2048, "test.nzb", metapb.FileStatus_FILE_STATUS_HEALTHY,
+		nil, metapb.Encryption_NONE, "", "", nil, nil, 0, nil, "purge12345",
+	)
+	require.NoError(t, ms.WriteFileMetadata(filePath, meta))
+
+	// Populate the lite cache so a failed purge is observable.
+	lite, err := ms.ReadFileMetadataLite(filePath)
+	require.NoError(t, err)
+	require.NotNil(t, lite)
+
+	// Trailing backslash: normalization turns it into a trailing forward slash,
+	// which is exactly the shape that used to defeat the prefix match.
+	require.NoError(t, ms.DeleteDirectory("movies/Release\\"))
+
+	after, err := ms.ReadFileMetadataLite(filePath)
+	require.NoError(t, err)
+	assert.Nil(t, after, "lite cache must not serve metadata for a deleted directory's files")
 }
 
 // TestUpdateFileMetadata_PreservesModifiedAt ensures status and known-holes
@@ -538,4 +679,134 @@ func TestDeleteDirectoryIfEmpty(t *testing.T) {
 		}
 		assert.DirExists(t, root)
 	})
+}
+
+// TestLongFilename_ReadPathMatchesWritePath covers a behaviour change that comes
+// with routing every accessor through metaFilePath: the read side now truncates
+// the same way the write side always did.
+//
+// Before, only WriteFileMetadata and FileExists truncated, so a name over the
+// 250-byte budget was written to the truncated path and then looked for at the
+// full one, which could not exist. Anything doing stat-then-delete-then-write on
+// such a name skipped its pre-delete silently and leaked the store refcount.
+func TestLongFilename_ReadPathMatchesWritePath(t *testing.T) {
+	root := t.TempDir()
+	ms := NewMetadataService(root)
+
+	// 300 bytes of base name, comfortably over the 250-byte budget.
+	longName := strings.Repeat("a", 300) + ".mkv"
+	virtualPath := filepath.Join("movies", longName)
+
+	meta := ms.CreateFileMetadata(
+		4096, "test.nzb", metapb.FileStatus_FILE_STATUS_HEALTHY,
+		nil, metapb.Encryption_NONE, "", "", nil, nil, 0, nil, "longname123",
+	)
+	require.NoError(t, ms.WriteFileMetadata(virtualPath, meta))
+
+	// The persisted name is truncated, so the full name is not on disk.
+	written := ms.GetMetadataFilePath(virtualPath)
+	require.FileExists(t, written)
+	assert.Less(t, len(filepath.Base(written)), len(longName),
+		"the .meta name should be truncated")
+
+	// Reads resolve to the same place the write went.
+	got, err := ms.ReadFileMetadata(virtualPath)
+	require.NoError(t, err)
+	require.NotNil(t, got, "a name over the truncation budget must still be readable")
+	assert.Equal(t, int64(4096), got.FileSize)
+
+	lite, err := ms.ReadFileMetadataLite(virtualPath)
+	require.NoError(t, err)
+	require.NotNil(t, lite, "the lite read path must truncate the same way")
+
+	// And so does delete, which is what makes stat-then-delete-then-write work.
+	require.NoError(t, ms.DeleteFileMetadata(context.Background(), virtualPath))
+	assert.NoFileExists(t, written)
+}
+
+// TestLongFilename_SharedPrefixCollides documents the hazard the read-side
+// truncation introduces, so a future change to truncateFilename has something to
+// break. Two names sharing their first 250 bytes and their extension truncate to
+// the same .meta path, so the second write is served for a read of the first.
+// Previously that read simply missed. Fixing it means a longer budget or a hash
+// suffix, which is a change of on-disk layout and out of scope here.
+func TestLongFilename_SharedPrefixCollides(t *testing.T) {
+	root := t.TempDir()
+	ms := NewMetadataService(root)
+
+	prefix := strings.Repeat("b", 260)
+	first := filepath.Join("movies", prefix+"-one.mkv")
+	second := filepath.Join("movies", prefix+"-two.mkv")
+
+	firstMeta := ms.CreateFileMetadata(
+		1111, "one.nzb", metapb.FileStatus_FILE_STATUS_HEALTHY,
+		nil, metapb.Encryption_NONE, "", "", nil, nil, 0, nil, "collide0001",
+	)
+	require.NoError(t, ms.WriteFileMetadata(first, firstMeta))
+
+	secondMeta := ms.CreateFileMetadata(
+		2222, "two.nzb", metapb.FileStatus_FILE_STATUS_HEALTHY,
+		nil, metapb.Encryption_NONE, "", "", nil, nil, 0, nil, "collide0002",
+	)
+	require.NoError(t, ms.WriteFileMetadata(second, secondMeta))
+
+	require.Equal(t, ms.GetMetadataFilePath(first), ms.GetMetadataFilePath(second),
+		"test premise: both names truncate to the same .meta path")
+
+	got, err := ms.ReadFileMetadata(first)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, int64(2222), got.FileSize,
+		"known limitation: the second write wins for both names")
+}
+
+// TestNormalizeVirtualPath_CanonicalShape pins that one file has exactly one key.
+// The metadata layer joins onto rootPath, so a leading slash carries no meaning,
+// but it used to survive into the liteCache key: "/movies/x.mkv" and
+// "movies/x.mkv" were two entries for the same file, and an eviction under one
+// shape could not reach the other.
+func TestNormalizeVirtualPath_CanonicalShape(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"movies/x.mkv", "movies/x.mkv"},
+		{"/movies/x.mkv", "movies/x.mkv"},
+		{"movies//x.mkv", "movies/x.mkv"},
+		{"/movies/./x.mkv", "movies/x.mkv"},
+		{`movies\x.mkv`, "movies/x.mkv"},
+		{`\movies\x.mkv`, "movies/x.mkv"},
+		{"movies/sub/../x.mkv", "movies/x.mkv"},
+		{"", ""},
+		{"/", ""},
+		{".", ""},
+	} {
+		assert.Equal(t, tc.want, normalizeVirtualPath(tc.in), "normalizeVirtualPath(%q)", tc.in)
+	}
+}
+
+// TestLiteCache_EvictionReachesEntryCachedUnderOtherShape is the consequence of
+// the above that actually bites: a writer using one shape must invalidate the
+// entry a reader cached under the other.
+func TestLiteCache_EvictionReachesEntryCachedUnderOtherShape(t *testing.T) {
+	root := t.TempDir()
+	ms := NewMetadataService(root)
+
+	withSlash := "/movies/shape.mkv"
+	withoutSlash := "movies/shape.mkv"
+
+	meta := ms.CreateFileMetadata(
+		1024, "test.nzb", metapb.FileStatus_FILE_STATUS_HEALTHY,
+		nil, metapb.Encryption_NONE, "", "", nil, nil, 0, nil, "shape123456",
+	)
+	require.NoError(t, ms.WriteFileMetadata(withSlash, meta))
+
+	// Populate the cache using the leading-slash shape, the way a FUSE reader does.
+	cached, err := ms.ReadFileMetadataLite(withSlash)
+	require.NoError(t, err)
+	require.NotNil(t, cached)
+
+	// Delete using the other shape, the way the migration path does.
+	require.NoError(t, ms.DeleteFileMetadata(context.Background(), withoutSlash))
+
+	after, err := ms.ReadFileMetadataLite(withSlash)
+	require.NoError(t, err)
+	assert.Nil(t, after, "a delete under one path shape must evict the entry cached under the other")
 }
