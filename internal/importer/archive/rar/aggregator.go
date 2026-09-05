@@ -229,19 +229,15 @@ func ProcessArchive(ctx context.Context, opts ProcessArchiveOptions) error {
 	slog.InfoContext(ctx, "Starting RAR archive processing",
 		"total_files", len(rarContents))
 
-	// Determine if we should rename the file to match the NZB basename
-	// Only do this if there's exactly one media file in the archive
-	mediaFilesCount := 0
-	for _, content := range rarContents {
-		if !content.IsDirectory && (utils.IsAllowedFile(content.InternalPath, content.Size, allowedFileExtensions, filterSamples) ||
-			utils.IsAllowedFile(content.Filename, content.Size, allowedFileExtensions, filterSamples)) {
-			mediaFilesCount++
-		}
-	}
-
 	nzbName := filepath.Base(nzbPath)
 	releaseName := nzbtrim.TrimNzbExtension(nzbName)
-	shouldNormalizeName := renameToNzbName && mediaFilesCount == 1
+
+	// Present an obfuscated payload under the release name, SABnzbd-style:
+	// only the entry that is clearly the release, with its sidecars in tow.
+	var payloadRenames map[string]string
+	if renameToNzbName {
+		payloadRenames = archive.PayloadRenames(rarContents, releaseName)
+	}
 
 	// Count ISO-expanded files so single-file ISOs omit the index suffix.
 	isoExpandedCount := 0
@@ -299,12 +295,11 @@ func ProcessArchive(ctx context.Context, opts ProcessArchiveOptions) error {
 				"original", rarContent.Filename,
 				"renamed", baseFilename)
 			internalSubDir = "."
-		} else if shouldNormalizeName && (utils.IsAllowedFile(rarContent.InternalPath, rarContent.Size, allowedFileExtensions, filterSamples) ||
-			utils.IsAllowedFile(rarContent.Filename, rarContent.Size, allowedFileExtensions, filterSamples)) {
-			baseFilename = normalizeArchiveReleaseFilename(nzbName, baseFilename)
+		} else if renamed, ok := payloadRenames[rarContent.InternalPath]; ok {
 			slog.InfoContext(ctx, "Normalizing obfuscated filename in RAR archive",
 				"original", rarContent.Filename,
-				"normalized", baseFilename)
+				"normalized", renamed)
+			baseFilename = renamed
 			internalSubDir = "."
 		}
 
@@ -460,21 +455,4 @@ func GroupArchivesByBaseName(files []parser.ParsedFile) [][]parser.ParsedFile {
 	// recover a shared name) shatters into one single-file group per volume; fold it
 	// back into one ordered set using the volumes' own contiguous ordinals.
 	return reconcileObfuscatedVolumeSet(groups)
-}
-
-// normalizeArchiveReleaseFilename aligns the filename to the NZB basename while keeping the original extension.
-func normalizeArchiveReleaseFilename(nzbFilename, originalFilename string) string {
-	releaseName := nzbtrim.TrimNzbExtension(nzbFilename)
-	fileExt := filepath.Ext(originalFilename)
-
-	if fileExt == "" {
-		return releaseName
-	}
-
-	// If release name already contains the extension (e.g. Movie.mkv.nzb -> Movie.mkv), don't duplicate
-	if strings.HasSuffix(strings.ToLower(releaseName), strings.ToLower(fileExt)) {
-		return releaseName
-	}
-
-	return releaseName + fileExt
 }

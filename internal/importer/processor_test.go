@@ -353,6 +353,20 @@ func TestApplyNzbRename(t *testing.T) {
 			expected:         "sub/file.mkv",
 		},
 		{
+			name:             "true: clean filename is kept",
+			renameToNzbName:  true,
+			nzbName:          "release.nzb",
+			originalFilename: "My.Movie.2024.PROPER.1080p.mkv",
+			expected:         "My.Movie.2024.PROPER.1080p.mkv",
+		},
+		{
+			name:             "true: hash filename renamed",
+			renameToNzbName:  true,
+			nzbName:          "release.nzb",
+			originalFilename: "a3f9c1d2e4b5a6f7c8d9e0f1a2b3c4d5.mkv",
+			expected:         "release.mkv",
+		},
+		{
 			name:             "true: renames leaf only, preserves subdirectory",
 			renameToNzbName:  true,
 			nzbName:          "movie.nzb",

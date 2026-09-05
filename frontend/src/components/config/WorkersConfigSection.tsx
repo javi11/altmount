@@ -264,7 +264,9 @@ export function ImportConfigSection({
 								<div className="min-w-0">
 									<span className="block break-words font-bold text-xs">Rename to NZB Name</span>
 									<span className="mt-0.5 block break-words text-[11px] text-base-content/50 leading-snug">
-										Rename single-file imports to the NZB release name, not the obfuscated original.
+										Present an obfuscated payload under the NZB release name (SABnzbd rules): only
+										when its name says nothing and it clearly is the release; subtitles and samples
+										sharing its name follow it.
 									</span>
 								</div>
 							</label>

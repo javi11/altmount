@@ -326,3 +326,17 @@ func TestGetFileInfo_Gap5StillFiresWithoutPar2(t *testing.T) {
 		t.Errorf("Filename = %q, want %q (Gap 5 should still substitute the NZB stem)", info.Filename, "My.Show.S01E01")
 	}
 }
+
+// An NZB named after the file it carries ("The.Movie.2024.mkv.nzb") yields a stem
+// that already ends in the extension; Gap 5 must not produce "The.Movie.2024.mkv.mkv".
+func TestGetFileInfo_Gap5DoesNotDoubleExtension(t *testing.T) {
+	file := &NzbFileWithFirstSegment{
+		NzbFile:   &nzbparser.NzbFile{Filename: "b082fa0beaa644d3aa01045d5b8d0b36.mkv"},
+		First16KB: make([]byte, 16),
+	}
+
+	info := getFileInfo(file, nil, "The.Movie.2024.mkv")
+	if info.Filename != "The.Movie.2024.mkv" {
+		t.Errorf("Filename = %q, want %q", info.Filename, "The.Movie.2024.mkv")
+	}
+}
