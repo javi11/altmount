@@ -141,4 +141,5 @@ func TestStorm_SpeedTestBypassesPoolManager(t *testing.T) {
 	}
 }
 
-func (m *countingPoolManager) SetStreamHeadroom(int) {}
+func (m *countingPoolManager) SetStreamHeadroom(int)                      {}
+func (m *countingPoolManager) SpeculativeBudget() *pool.SpeculativeBudget { return nil }

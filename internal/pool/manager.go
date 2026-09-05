@@ -85,6 +85,9 @@ type Manager interface {
 	// SetStreamHeadroom sets how many connections the import budget holds back
 	// per active stream. See config.Config.StreamHeadroomConnections.
 	SetStreamHeadroom(perStream int)
+	// SpeculativeBudget bounds read-ahead fetches across every stream; nil
+	// (as returned by test fakes) means unlimited.
+	SpeculativeBudget() *SpeculativeBudget
 
 	// ImportConnCapacity returns the current budget capacity snapshot,
 	// useful for sizing import worker pools.
@@ -135,16 +138,18 @@ type manager struct {
 	quotaWatchCancel context.CancelFunc
 	admission        *ImportAdmission
 	budget           *ImportBudget
+	specBudget       *SpeculativeBudget
 }
 
 // NewManager creates a new pool manager
 func NewManager(ctx context.Context, repo StatsRepository) Manager {
 	return &manager{
-		ctx:       ctx,
-		repo:      repo,
-		logger:    slog.Default().With("component", "pool"),
-		admission: NewImportAdmission(),
-		budget:    NewImportBudget(),
+		ctx:        ctx,
+		repo:       repo,
+		logger:     slog.Default().With("component", "pool"),
+		admission:  NewImportAdmission(),
+		budget:     NewImportBudget(),
+		specBudget: NewSpeculativeBudget(),
 	}
 }
 
@@ -534,6 +539,11 @@ func (m *manager) SetImportConnCapacity(total int) {
 // SetStreamHeadroom sets the per-stream import connection reservation.
 func (m *manager) SetStreamHeadroom(perStream int) {
 	m.budget.SetHeadroom(perStream)
+}
+
+// SpeculativeBudget returns the pool-wide read-ahead budget.
+func (m *manager) SpeculativeBudget() *SpeculativeBudget {
+	return m.specBudget
 }
 
 // ImportConnCapacity returns the current budget capacity snapshot.

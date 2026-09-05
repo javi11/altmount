@@ -91,7 +91,8 @@ func TestPreParseFastFailSkipsOnlyMissingEpisode(t *testing.T) {
 	}
 }
 
-func (m processorTestPoolManager) SetStreamHeadroom(int) {}
+func (m processorTestPoolManager) SetStreamHeadroom(int)                      {}
+func (m processorTestPoolManager) SpeculativeBudget() *pool.SpeculativeBudget { return nil }
 
 // TestPreParseFastFailDoesNotStatPar2 verifies PAR2 segments are skipped entirely
 // from the fast-fail Stat sweep: an unreachable PAR2 segment must neither be

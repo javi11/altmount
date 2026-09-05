@@ -103,6 +103,26 @@ func WithHoleHooks(h *HoleHooks) ReaderOption {
 	}
 }
 
+// SpecBudget grants non-blocking read-ahead slots shared across every stream
+// on the pool. nil means unlimited. Implemented by *pool.SpeculativeBudget.
+type SpecBudget interface {
+	TryAcquire() (release func(), ok bool)
+}
+
+// demandDepth is how many segments at and just past the read position are
+// fetched unconditionally. Everything further ahead is speculative and must
+// find a free slot in the shared budget.
+const demandDepth = 2
+
+// WithSpeculativeBudget bounds this reader's read-ahead by a budget shared
+// with every other stream, so several handles cannot each open a full
+// window. Demand fetches never take a slot.
+func WithSpeculativeBudget(b SpecBudget) ReaderOption {
+	return func(r *UsenetReader) {
+		r.specBudget = b
+	}
+}
+
 // ConnBudget grants connection tokens for import segment fetches.
 // Implemented by pool.Manager (AcquireImportConnection).
 type ConnBudget interface {
@@ -178,6 +198,7 @@ type UsenetReader struct {
 	holeHooks      *HoleHooks   // optional, nil = missing segments fail the read
 	priority       bool         // true (streaming) = priority lane; false (import) = normal lane
 	budget         ConnBudget   // optional; gates import fetches on the global connection budget
+	specBudget     SpecBudget   // optional; bounds speculative fetches pool-wide (streaming only)
 	cond           *sync.Cond   // Signals downloadManager when reader advances
 
 	// Prefetch-based download tracking
@@ -672,6 +693,25 @@ func (b *UsenetReader) downloadManager(ctx context.Context) {
 			continue
 		}
 
+		// Segments beyond the demand depth are speculative: they run only
+		// when the pool-wide budget has a free slot right now. A refused slot
+		// parks the manager until the reader advances or a fetch completes,
+		// both of which signal cond, and the segment is reconsidered then —
+		// by which time it may have moved into the demand window.
+		releaseSlot := func() {}
+		if ahead >= demandDepth && b.priority && b.specBudget != nil {
+			release, ok := b.specBudget.TryAcquire()
+			if !ok {
+				b.cond.Wait()
+				b.mu.Unlock()
+				if ctx.Err() != nil {
+					return
+				}
+				continue
+			}
+			releaseSlot = release
+		}
+
 		// Schedule next segment for download
 		idx := b.nextToDownload
 		b.nextToDownload++
@@ -679,6 +719,7 @@ func (b *UsenetReader) downloadManager(ctx context.Context) {
 
 		seg, err := b.rg.GetSegment(idx)
 		if err != nil || seg == nil {
+			releaseSlot()
 			continue
 		}
 
@@ -686,6 +727,7 @@ func (b *UsenetReader) downloadManager(ctx context.Context) {
 		go func(segIdx int, s *segment) {
 			defer b.inFlight.Add(-1)
 			defer b.cond.Signal()
+			defer releaseSlot()
 			defer func() {
 				if p := recover(); p != nil {
 					b.log.ErrorContext(ctx, "Panic in download task:", "panic", p)

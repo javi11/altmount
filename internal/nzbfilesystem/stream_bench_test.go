@@ -354,7 +354,10 @@ func BenchmarkStreamUnderContention(b *testing.B) {
 		_ = mvf.Close()
 		h.awaitQuietWire(500*time.Millisecond, 30*time.Second)
 		return []streambench.Metric{
-			info(streambench.Metric{Name: "stream_p50", Unit: "ms", Value: ms(lat.P(0.5))}),
+			// Single-stream throughput while an import saturates the normal lane.
+		// Read-ahead must keep its edge over import; 10 % covers run spread.
+		{Name: "stream_mbps", Unit: "MB/s", Value: mbps(off, elapsed), HigherIsBetter: true, Tolerance: 0.10},
+		info(streambench.Metric{Name: "stream_p50", Unit: "ms", Value: ms(lat.P(0.5))}),
 			info(streambench.Metric{Name: "stream_p99", Unit: "ms", Value: ms(lat.P(0.99))}),
 			{Name: "import_mbps", Unit: "MB/s", Value: mbps(importBytes.Load(), elapsed), HigherIsBetter: true},
 		}

@@ -76,7 +76,8 @@ type mockARRsService struct {
 	returnErr error
 }
 
-func (m *mockPoolManager) SetStreamHeadroom(int) {}
+func (m *mockPoolManager) SetStreamHeadroom(int)                      {}
+func (m *mockPoolManager) SpeculativeBudget() *pool.SpeculativeBudget { return nil }
 
 type triggerCall struct {
 	pathForRescan string

@@ -162,7 +162,8 @@ func TestValidateSegmentAvailability_TransientErrorsAreInconclusive(t *testing.T
 	}
 }
 
-func (m *validationTestPoolManager) SetStreamHeadroom(int) {}
+func (m *validationTestPoolManager) SetStreamHeadroom(int)                      {}
+func (m *validationTestPoolManager) SpeculativeBudget() *pool.SpeculativeBudget { return nil }
 
 // TestValidateSegmentAvailability_ArticleNotFoundIsMissing keeps the genuine
 // miss path intact: only 430/423 proves the article is gone.

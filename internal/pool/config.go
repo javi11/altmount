@@ -14,6 +14,7 @@ func RegisterConfigHandlers(ctx context.Context, configManager *config.Manager, 
 	// Initial import connection budget: the pool's total connection capacity.
 	poolManager.SetImportConnCapacity(configManager.GetConfig().TotalProviderConnections())
 	poolManager.SetStreamHeadroom(configManager.GetConfig().GetStreamHeadroomConnections())
+	poolManager.SpeculativeBudget().SetCapacity(configManager.GetConfig().TotalProviderConnections())
 
 	configManager.OnConfigChange(func(oldConfig, newConfig *config.Config) {
 		slog.InfoContext(ctx, "Configuration updated")
@@ -25,6 +26,7 @@ func RegisterConfigHandlers(ctx context.Context, configManager *config.Manager, 
 		if capacity := newConfig.TotalProviderConnections(); capacity != oldConfig.TotalProviderConnections() {
 			slog.InfoContext(ctx, "Import connection budget updated", "capacity", capacity)
 			poolManager.SetImportConnCapacity(capacity)
+			poolManager.SpeculativeBudget().SetCapacity(capacity)
 		}
 
 		if h := newConfig.GetStreamHeadroomConnections(); h != oldConfig.GetStreamHeadroomConnections() {
