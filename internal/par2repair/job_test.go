@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"math/rand"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -236,6 +237,63 @@ func TestRunJobFetchesArticlesConcurrently(t *testing.T) {
 	}
 	if fetch.maxInFlight < 2 {
 		t.Fatalf("max in-flight fetches = %d, want concurrent fetching", fetch.maxInFlight)
+	}
+}
+
+// overlapFetcher records whether fetches from two different files were ever
+// in flight together.
+type overlapFetcher struct {
+	inner *fakeFetcher
+
+	mu       sync.Mutex
+	inFlight map[string]int // file prefix -> count
+	crossed  bool
+}
+
+func filePrefixOf(messageID string) string {
+	return messageID[:strings.IndexByte(messageID, '-')]
+}
+
+func (o *overlapFetcher) Fetch(ctx context.Context, messageID string) ([]byte, error) {
+	p := filePrefixOf(messageID)
+	o.mu.Lock()
+	o.inFlight[p]++
+	for other, n := range o.inFlight {
+		if other != p && n > 0 {
+			o.crossed = true
+		}
+	}
+	o.mu.Unlock()
+	time.Sleep(2 * time.Millisecond)
+	defer func() {
+		o.mu.Lock()
+		o.inFlight[p]--
+		o.mu.Unlock()
+	}()
+	return o.inner.Fetch(ctx, messageID)
+}
+
+// The sweep's prefetch must not drain at recovery-set file boundaries: the
+// first articles of the next file must already be in flight while the last
+// articles of the previous one are still downloading.
+func TestRunJobPrefetchSpansFileBoundaries(t *testing.T) {
+	fx := mkRepairFixture(t, 1024, 512, 6, 1) // 16 articles per file
+	fetch := &overlapFetcher{inner: fx.fetch, inFlight: map[string]int{}}
+
+	plan, err := BuildPlan(fx.idx, fx.files, Caps{MaxRepairRatio: 0.5, MaxMemoryBytes: 64 << 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewPatchStore(t.TempDir())
+	if err := RunJob(context.Background(), plan, fx.idx, fx.par2Files, fetch, store, testLogger(), WithConcurrency(8)); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := store.Get(fx.deadMsgID)
+	if !ok || !bytes.Equal(got, fx.deadOrig) {
+		t.Fatal("continuous sweep must still produce a byte-exact patch")
+	}
+	if !fetch.crossed {
+		t.Fatal("no fetch of the second file overlapped a fetch of the first: the pipeline drained at the file boundary")
 	}
 }
 

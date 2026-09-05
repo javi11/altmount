@@ -716,9 +716,19 @@ func sweep(
 	log *slog.Logger,
 ) error {
 	sliceSize := plan.SliceSize
+
+	// One pipeline over every article of the recovery set, so the prefetch
+	// stays full across file boundaries instead of draining at each one.
+	var all []Article
+	for _, f := range plan.Files {
+		all = append(all, f.Articles...)
+	}
+	slots, stop := prefetchArticles(ctx, fetch, all, depth)
+	defer stop()
+
+	buf := make([]byte, sliceSize)
 	for fi, f := range plan.Files {
 		checks := idx.SliceChecks[f.FileID]
-		buf := make([]byte, sliceSize)
 		fill := 0
 		local := 0
 
@@ -759,10 +769,8 @@ func sweep(
 		}
 
 		var artOff int64
-		slots, stop := prefetchArticles(ctx, fetch, f.Articles, depth)
 		for ai, a := range f.Articles {
 			if err := ctx.Err(); err != nil {
-				stop()
 				return err
 			}
 			if onArticle != nil {
@@ -772,7 +780,6 @@ func sweep(
 				// Zero-advance: the affected slices are in the missing set and
 				// will be skipped by completeSlice.
 				if err := feed(make([]byte, a.Size)); err != nil {
-					stop()
 					return err
 				}
 				artOff += a.Size
@@ -781,7 +788,6 @@ func sweep(
 			slot, ok := <-slots
 			if !ok {
 				// The prefetcher only closes early when the context ended.
-				stop()
 				return ctx.Err()
 			}
 			res := <-slot
@@ -796,29 +802,23 @@ func sweep(
 						log.WarnContext(ctx, "article died mid-sweep, absorbed on margin rows",
 							"message_id", a.MessageID)
 						if err := feed(make([]byte, a.Size)); err != nil {
-							stop()
 							return err
 						}
 						artOff += a.Size
 						continue
 					}
-					stop()
 					return &SweepDeadArticleError{MessageID: a.MessageID, Err: res.err}
 				}
-				stop()
 				return fmt.Errorf("par2repair: fetch article %s: %w", a.MessageID, res.err)
 			}
 			if int64(len(res.data)) != a.Size {
-				stop()
 				return fmt.Errorf("%w: article %s decoded to %d bytes, expected %d", ErrUnrepairable, a.MessageID, len(res.data), a.Size)
 			}
 			if err := feed(res.data); err != nil {
-				stop()
 				return err
 			}
 			artOff += a.Size
 		}
-		stop()
 		// Final partial slice: buf is already zero-padded past fill.
 		if fill > 0 {
 			if err := completeSlice(); err != nil {
