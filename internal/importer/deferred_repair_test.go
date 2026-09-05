@@ -151,3 +151,25 @@ func TestBailoutWhenNothingToRepairFrom(t *testing.T) {
 		t.Fatal("a fully damaged release with no PAR2 must still bail out")
 	}
 }
+
+// A header recovered from a later article marks the file degraded in the parser;
+// that must reach the repair queue alongside the fast-fail sweep's own findings.
+func TestMergeDegradedFilesCombinesSweepAndParserFindings(t *testing.T) {
+	sweep := map[string]string{"a.mkv": "seg-a"}
+	fromParser := map[string]string{"b.mkv": "seg-b", "a.mkv": "seg-a2"}
+
+	got := mergeDegradedFiles(sweep, fromParser)
+
+	if got["a.mkv"] != "seg-a" {
+		t.Errorf("sweep finding must win for a.mkv, got %q", got["a.mkv"])
+	}
+	if got["b.mkv"] != "seg-b" {
+		t.Errorf("parser finding missing for b.mkv, got %q", got["b.mkv"])
+	}
+	if nilMerge := mergeDegradedFiles(nil, map[string]string{"c.mkv": "seg-c"}); nilMerge["c.mkv"] != "seg-c" {
+		t.Errorf("merging into nil map lost c.mkv: %+v", nilMerge)
+	}
+	if empty := mergeDegradedFiles(nil, nil); empty != nil {
+		t.Errorf("merging two nil maps should stay nil, got %+v", empty)
+	}
+}

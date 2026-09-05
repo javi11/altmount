@@ -24,6 +24,7 @@ import (
 	"github.com/javi11/altmount/internal/importer/filesystem"
 	"github.com/javi11/altmount/internal/importer/multifile"
 	"github.com/javi11/altmount/internal/importer/parser"
+	"github.com/javi11/altmount/internal/importer/parser/fileinfo"
 	"github.com/javi11/altmount/internal/importer/singlefile"
 	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
 	"github.com/javi11/altmount/internal/importer/validation"
@@ -51,8 +52,8 @@ type Processor struct {
 	log               *slog.Logger
 	broadcaster       *progress.ProgressBroadcaster // WebSocket progress broadcaster
 	recorder          HistoryRecorder
-	par2Repair        RepairEnqueuer         // optional; queues PAR2 repairs at import time
-	patchIndex        validation.PatchIndex  // optional; locally repaired articles count as available
+	par2Repair        RepairEnqueuer        // optional; queues PAR2 repairs at import time
+	patchIndex        validation.PatchIndex // optional; locally repaired articles count as available
 
 	// Pre-compiled regex patterns for RAR file sorting
 	rarPartPattern  *regexp.Regexp // pattern.part###.rar
@@ -174,6 +175,23 @@ func (proc *Processor) queueImportRepairs(ctx context.Context, enabled bool, wri
 		}
 		proc.par2Repair.Enqueue(ctx, vp, segID)
 	}
+}
+
+// mergeDegradedFiles folds the parser's degraded files (dead first article,
+// header recovered from a later one) into the fast-fail sweep's findings. The
+// sweep's segment id wins on a clash: it is the one that proved the damage.
+func mergeDegradedFiles(sweep, fromParser map[string]string) map[string]string {
+	if len(fromParser) == 0 {
+		return sweep
+	}
+	merged := make(map[string]string, len(sweep)+len(fromParser))
+	for k, v := range fromParser {
+		merged[k] = v
+	}
+	for k, v := range sweep {
+		merged[k] = v
+	}
+	return merged
 }
 
 // NewProcessor creates a new NZB processor using metadata storage
@@ -454,7 +472,7 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 							"sampled", result.SampledCount)
 					}
 					if len(result.MissingSegmentIDs) > 0 {
-						degradedFiles[f.Filename] = result.MissingSegmentIDs[0]
+						degradedFiles[filepath.Base(f.Filename)] = result.MissingSegmentIDs[0]
 					}
 					continue // not broken: let it import
 				}
@@ -647,6 +665,7 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 		if err := proc.parser.ValidateNzb(parsed); err != nil {
 			return "", nil, NewNonRetryableError("NZB validation failed", err)
 		}
+		degradedFiles = mergeDegradedFiles(degradedFiles, parsed.DegradedFiles)
 	}
 
 	// Attach extracted files metadata if available (optimization)
@@ -1384,14 +1403,20 @@ func (proc *Processor) processSevenZipArchive(
 	return nzbFolder, writtenPaths, nil
 }
 
-// applyNzbRename renames the first file in files to match nzbName when renameToNzbName is true.
-// Returns the slice unchanged when renameToNzbName is false or files is empty.
+// applyNzbRename renames the first file in files to match nzbName when
+// renameToNzbName is true and its name says nothing (SABnzbd's rule): a clean
+// filename is kept, since the release name is not a better one. Returns the
+// slice unchanged otherwise.
 func applyNzbRename(renameToNzbName bool, nzbName string, files []parser.ParsedFile) []parser.ParsedFile {
 	if !renameToNzbName || len(files) == 0 {
 		return files
 	}
+	leaf := filepath.Base(files[0].Filename)
+	if !fileinfo.IsProbablyObfuscated(leaf) {
+		return files
+	}
 	originalDir := filepath.Dir(files[0].Filename)
-	normalizedBase := normalizeReleaseFilename(nzbName, filepath.Base(files[0].Filename))
+	normalizedBase := normalizeReleaseFilename(nzbName, leaf)
 	if originalDir != "." && originalDir != "" {
 		files[0].Filename = filepath.Join(originalDir, normalizedBase)
 	} else {

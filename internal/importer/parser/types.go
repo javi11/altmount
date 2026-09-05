@@ -47,6 +47,10 @@ type ParsedNzb struct {
 	ExtractedFiles []ExtractedFileInfo
 	Store          *metapb.NzbStore // NzbStore for this release (built at parse time)
 	SegmentIndex   map[string]int64 // message-id → flat store index
+	// DegradedFiles maps a parsed filename to the message-id of its dead first
+	// article, for files whose header was recovered from a later article. The
+	// processor merges it into the repair queue so the hole gets patched.
+	DegradedFiles map[string]string
 }
 
 // GetPassword returns the password for this NZB

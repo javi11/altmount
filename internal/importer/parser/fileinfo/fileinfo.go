@@ -83,7 +83,9 @@ func getFileInfo(
 	// RAR set whose first volume PAR2 named differently from its .rNN continuations.
 	if !fromPar2 && nzbFilenameStem != "" && (filename == "" || isProbablyObfuscated(filename)) {
 		ext := filepath.Ext(filename)
-		if ext != "" {
+		// An NZB named after its file ("The.Movie.mkv.nzb") already carries the
+		// extension in the stem; don't double it.
+		if ext != "" && !strings.EqualFold(filepath.Ext(nzbFilenameStem), ext) {
 			filename = nzbFilenameStem + ext
 		} else {
 			filename = nzbFilenameStem

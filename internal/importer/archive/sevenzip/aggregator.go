@@ -171,19 +171,15 @@ func ProcessArchive(ctx context.Context, opts ProcessArchiveOptions) error {
 	slog.InfoContext(ctx, "Starting 7zip archive processing",
 		"total_files", len(sevenZipContents))
 
-	// Determine if we should rename the file to match the NZB basename
-	// Only do this if there's exactly one media file in the archive
-	mediaFilesCount := 0
-	for _, content := range sevenZipContents {
-		if !content.IsDirectory && (utils.IsAllowedFile(content.InternalPath, content.Size, allowedFileExtensions, filterSamples) ||
-			utils.IsAllowedFile(content.Filename, content.Size, allowedFileExtensions, filterSamples)) {
-			mediaFilesCount++
-		}
-	}
-
 	nzbName := filepath.Base(nzbPath)
 	releaseName := nzbtrim.TrimNzbExtension(nzbName)
-	shouldNormalizeName := renameToNzbName && mediaFilesCount == 1
+
+	// Present an obfuscated payload under the release name, SABnzbd-style:
+	// only the entry that is clearly the release, with its sidecars in tow.
+	var payloadRenames map[string]string
+	if renameToNzbName {
+		payloadRenames = archive.PayloadRenames(sevenZipContents, releaseName)
+	}
 
 	// Count ISO-expanded files so single-file ISOs omit the index suffix.
 	isoExpandedCount := 0
@@ -230,12 +226,11 @@ func ProcessArchive(ctx context.Context, opts ProcessArchiveOptions) error {
 				"original", sevenZipContent.Filename,
 				"renamed", baseFilename)
 			internalSubDir = "."
-		} else if shouldNormalizeName && (utils.IsAllowedFile(sevenZipContent.InternalPath, sevenZipContent.Size, allowedFileExtensions, filterSamples) ||
-			utils.IsAllowedFile(sevenZipContent.Filename, sevenZipContent.Size, allowedFileExtensions, filterSamples)) {
-			baseFilename = normalizeArchiveReleaseFilename(nzbName, baseFilename)
+		} else if renamed, ok := payloadRenames[sevenZipContent.InternalPath]; ok {
 			slog.InfoContext(ctx, "Normalizing obfuscated filename in 7zip archive",
 				"original", sevenZipContent.Filename,
-				"normalized", baseFilename)
+				"normalized", renamed)
+			baseFilename = renamed
 			internalSubDir = "."
 		}
 
@@ -366,21 +361,4 @@ func ProcessArchive(ctx context.Context, opts ProcessArchiveOptions) error {
 		"files_processed", int(atomic.LoadInt32(&filesProcessed))+preProcessedCount)
 
 	return nil
-}
-
-// normalizeArchiveReleaseFilename aligns the filename to the NZB basename while keeping the original extension.
-func normalizeArchiveReleaseFilename(nzbFilename, originalFilename string) string {
-	releaseName := nzbtrim.TrimNzbExtension(nzbFilename)
-	fileExt := filepath.Ext(originalFilename)
-
-	if fileExt == "" {
-		return releaseName
-	}
-
-	// If release name already contains the extension (e.g. Movie.mkv.nzb -> Movie.mkv), don't duplicate
-	if strings.HasSuffix(strings.ToLower(releaseName), strings.ToLower(fileExt)) {
-		return releaseName
-	}
-
-	return releaseName + fileExt
 }
