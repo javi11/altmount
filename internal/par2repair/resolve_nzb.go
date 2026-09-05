@@ -92,7 +92,9 @@ func ResolveFromNzb(
 	}
 
 	started := time.Now()
-	hidden, err := statSweep(ctx, fetch, releaseArticleIDs(store, par2Files), dead, progress)
+	// store carries only content entries here, so nothing to exclude.
+	hidden, err := statSweepBudgeted(ctx, fetch, releaseArticleIDs(store, par2Files), dead,
+		newDamageBudget(store.Files, nil, caps), progress)
 	if err != nil {
 		return nil, err
 	}

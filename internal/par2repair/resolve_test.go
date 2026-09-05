@@ -407,6 +407,78 @@ func (s *sweepStater) StatIDs(_ context.Context, ids []string, onResult func(don
 	return out, nil
 }
 
+// uniformBudget is a damage budget over ids of equal size, for sweep tests.
+func uniformBudget(ids []string, maxRatio float64) *damageBudget {
+	b := &damageBudget{bytes: make(map[string]int64, len(ids)), maxRatio: maxRatio}
+	for _, id := range ids {
+		b.bytes[id] = 1000
+		b.total += 1000
+	}
+	return b
+}
+
+// When the sample alone proves the damage exceeds the repair cap, the sweep
+// stops there: STATing the remaining thousands of articles could only confirm
+// a verdict that is already certain, and costs minutes of a provider's time.
+func TestStatSweepSampleProvesUnrepairable(t *testing.T) {
+	ids := make([]string, statSampleSize*8)
+	missing := map[string]bool{}
+	for i := range ids {
+		ids[i] = fmt.Sprintf("a-%d@test", i)
+		missing[ids[i]] = true // total loss
+	}
+	st := &sweepStater{missing: missing}
+	dead := map[string]bool{}
+	_, err := statSweepBudgeted(context.Background(), st, ids, dead, uniformBudget(ids, 0.02), nil)
+	if !errors.Is(err, ErrUnrepairable) {
+		t.Fatalf("err = %v, want ErrUnrepairable from the sample alone", err)
+	}
+	if len(st.calls) != 1 || len(st.calls[0]) != statSampleSize {
+		t.Fatalf("StatIDs calls = %d, want exactly the %d-article sample", len(st.calls), statSampleSize)
+	}
+}
+
+// Damage near the cap is not provable from a sample, so the full census still
+// runs and the exact check decides.
+func TestStatSweepInconclusiveSampleRunsCensus(t *testing.T) {
+	ids := make([]string, statSampleSize*8)
+	missing := map[string]bool{}
+	for i := range ids {
+		ids[i] = fmt.Sprintf("a-%d@test", i)
+		if i%20 == 0 { // 5% dead against a 6% cap: the sample cannot prove the excess
+			missing[ids[i]] = true
+		}
+	}
+	st := &sweepStater{missing: missing}
+	dead := map[string]bool{}
+	if _, err := statSweepBudgeted(context.Background(), st, ids, dead, uniformBudget(ids, 0.06), nil); err != nil {
+		t.Fatalf("err = %v, want the census to run to completion", err)
+	}
+	if len(st.calls) != 2 {
+		t.Fatalf("StatIDs calls = %d, want sample + full census", len(st.calls))
+	}
+	if len(dead) != len(missing) {
+		t.Fatalf("dead = %d, want %d after a full census", len(dead), len(missing))
+	}
+}
+
+// The budget counts content bytes only: PAR2 articles are neither damage nor
+// denominator, since the ratio is about the bytes being streamed.
+func TestNewDamageBudgetExcludesPar2(t *testing.T) {
+	store := &metapb.NzbStore{Files: []*metapb.NzbFileEntry{
+		{Segments: []*metapb.NzbSeg{{Id: "<c1@x>", Bytes: 700}, {Id: "<c2@x>", Bytes: 300}}},
+		{Segments: []*metapb.NzbSeg{{Id: "<p1@x>", Bytes: 5000}}},
+	}}
+	par2 := []SetFile{{Articles: []Article{{MessageID: "p1@x", Size: 5000}}}}
+	b := newDamageBudget(store.Files, par2, Caps{MaxRepairRatio: 0.02})
+	if b == nil || b.total != 1000 || len(b.bytes) != 2 {
+		t.Fatalf("budget = %+v, want total 1000 over 2 content articles", b)
+	}
+	if newDamageBudget(store.Files, par2, Caps{}) != nil {
+		t.Fatal("no cap configured: budget must be nil so the sweep never aborts")
+	}
+}
+
 // A clean sample skips the full-release STAT sweep: the plan trusts the known
 // holes and the payload sweep's margin rows absorb any stragglers.
 func TestStatSweepCleanSampleSkipsFullSweep(t *testing.T) {

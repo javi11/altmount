@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"math/rand/v2"
 	"sort"
 	"strings"
@@ -84,7 +85,8 @@ func Resolve(
 	}
 
 	started := time.Now()
-	hidden, err := statSweep(ctx, fetch, releaseArticleIDs(store, par2Files), dead, progress)
+	hidden, err := statSweepBudgeted(ctx, fetch, releaseArticleIDs(store, par2Files), dead,
+		newDamageBudget(store.Files, par2Files, caps), progress)
 	if err != nil {
 		return nil, err
 	}
@@ -206,6 +208,14 @@ const statSampleSize = 512
 // exact damage picture: caps and recovery-count verdicts become accurate at
 // plan time instead of after downloading the recovery set.
 func statSweep(ctx context.Context, fetch ArticleFetcher, ids []string, dead map[string]bool, progress JobProgress) (int, error) {
+	return statSweepBudgeted(ctx, fetch, ids, dead, nil, progress)
+}
+
+// statSweepBudgeted is statSweep with an early verdict: when budget is set and
+// the sample alone proves the damage exceeds the repair cap, the sweep stops
+// with ErrUnrepairable instead of spending minutes confirming it article by
+// article. A nil budget never aborts.
+func statSweepBudgeted(ctx context.Context, fetch ArticleFetcher, ids []string, dead map[string]bool, budget *damageBudget, progress JobProgress) (int, error) {
 	stater, ok := fetch.(ArticleStater)
 	if !ok {
 		return 0, nil
@@ -241,6 +251,12 @@ func statSweep(ctx context.Context, fetch ArticleFetcher, ids []string, dead map
 	if len(rest) == 0 || len(missing) == 0 {
 		return 0, nil
 	}
+	if budget != nil {
+		if ratio, proven := budget.sampleProves(sample, dead); proven {
+			return 0, fmt.Errorf("%w: damage ratio at least %.4f exceeds max_repair_ratio %.4f (decided from a %d-article sample)",
+				ErrUnrepairable, ratio, budget.maxRatio, len(sample))
+		}
+	}
 
 	// The sample surfaced damage nothing declared. STATing the whole release
 	// would pin the damage exactly, but it costs one round trip per article —
@@ -264,6 +280,85 @@ func statSweep(ctx context.Context, fetch ArticleFetcher, ids []string, dead map
 		dead[id] = true
 	}
 	return 0, nil
+}
+
+// damageBudget is what the liveness sweep needs to call a release unrepairable
+// early: the encoded size of every content article, their sum, and the cap.
+type damageBudget struct {
+	bytes    map[string]int64
+	total    int64
+	maxRatio float64
+}
+
+// newDamageBudget builds the budget from the NZB layout, PAR2 articles
+// excluded on both sides of the ratio. nil when no cap is configured.
+func newDamageBudget(files []*metapb.NzbFileEntry, par2Files []SetFile, caps Caps) *damageBudget {
+	if caps.MaxRepairRatio <= 0 {
+		return nil
+	}
+	par2IDs := map[string]bool{}
+	for _, f := range par2Files {
+		for _, a := range f.Articles {
+			par2IDs[a.MessageID] = true
+		}
+	}
+	b := &damageBudget{bytes: map[string]int64{}, maxRatio: caps.MaxRepairRatio * ratioPrecheckMargin}
+	for _, f := range files {
+		if len(f.Segments) == 0 || par2IDs[normalizeMsgID(f.Segments[0].Id)] {
+			continue
+		}
+		for _, seg := range f.Segments {
+			id := normalizeMsgID(seg.Id)
+			b.bytes[id] = seg.Bytes
+			b.total += seg.Bytes
+		}
+	}
+	if b.total == 0 {
+		return nil
+	}
+	return b
+}
+
+// sampleProves reports whether the STATed sample already proves the damage
+// ratio exceeds the cap, and the ratio it proves. The dead fraction of the
+// sampled bytes is taken three standard errors low and applied to the bytes
+// not yet checked, known-dead bytes are added in full, and the result is
+// divided by every content byte — the largest denominator ratioPrecheck could
+// use. Each step errs towards "repairable": a wrong "unrepairable" here is a
+// wrong verdict, not just a slow one, so the bound is wide (about one release
+// in a thousand sitting exactly on the cap), while a 95%-dead release is still
+// decided from the sample alone.
+func (b *damageBudget) sampleProves(sample []string, dead map[string]bool) (float64, bool) {
+	var sampled, sampledDead int64
+	inSample := make(map[string]bool, len(sample))
+	for _, id := range sample {
+		n, ok := b.bytes[id]
+		if !ok {
+			continue
+		}
+		inSample[id] = true
+		sampled += n
+		if dead[id] {
+			sampledDead += n
+		}
+	}
+	if sampled == 0 {
+		return 0, false
+	}
+	var knownDead int64
+	for id := range dead {
+		if !inSample[id] {
+			knownDead += b.bytes[id]
+		}
+	}
+	p := float64(sampledDead) / float64(sampled)
+	lower := p - 3*math.Sqrt(p*(1-p)/float64(len(sample)))
+	if lower < 0 {
+		lower = 0
+	}
+	unknown := float64(b.total - sampled - knownDead)
+	ratio := (float64(sampledDead) + float64(knownDead) + lower*unknown) / float64(b.total)
+	return ratio, ratio > b.maxRatio
 }
 
 // par2Streams builds one lazy reader per PAR2 file, with the dead flags the
