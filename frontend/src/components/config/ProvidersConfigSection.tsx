@@ -558,7 +558,7 @@ export function ProvidersConfigSection({
 						<div className="flex min-w-0 items-center gap-3">
 							<div
 								className="tooltip min-w-[88px] text-left"
-								data-tip="Connections kept dialed and open at all times. 0 = disabled (connect on demand)."
+								data-tip="Connections kept dialed and open at all times. 0 = default (2), -1 = connect on demand only."
 							>
 								<span className="font-black text-[10px] text-base-content/50 uppercase tracking-widest">
 									Min Alive
@@ -575,7 +575,7 @@ export function ProvidersConfigSection({
 										Number.parseInt(e.target.value, 10) || 0,
 									)
 								}
-								min={0}
+								min={-1}
 								max={provider.max_connections}
 							/>
 						</div>

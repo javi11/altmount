@@ -29,6 +29,19 @@ const DefaultCategoryDir = "complete"
 type MountType string
 
 const (
+	// defaultMinConnectionsAlive keeps a couple of sockets warm so a stream
+	// started after an idle period does not pay TCP + TLS + AUTHINFO first.
+	// A negative min_connections_alive opts out entirely.
+	defaultMinConnectionsAlive = 2
+	// providerIdleTimeout stays under the idle cut most providers apply while
+	// keeping warm connections through short pauses.
+	providerIdleTimeout = 2 * time.Minute
+	// providerReconnectDelay lets a provider dropped after a 502 rejoin the
+	// pool instead of staying out until restart.
+	providerReconnectDelay = 30 * time.Second
+)
+
+const (
 	MountTypeNone           MountType = "none"
 	MountTypeRClone         MountType = "rclone"
 	MountTypeFuse           MountType = "fuse"
@@ -1402,7 +1415,21 @@ func (p *ProviderConfig) ToNNTPProvider() nntppool.Provider {
 		tlsCfg = &tls.Config{
 			InsecureSkipVerify: p.InsecureTLS,
 			ServerName:         p.Host,
+			// One cached session per connection the allowance permits, so every
+			// reconnect after the first is a resumption handshake.
+			ClientSessionCache: tls.NewLRUClientSessionCache(max(p.MaxConnections, 1)),
 		}
+	}
+
+	minConns := p.MinConnectionsAlive
+	switch {
+	case minConns < 0:
+		minConns = 0
+	case minConns == 0:
+		minConns = defaultMinConnectionsAlive
+	}
+	if minConns > p.MaxConnections {
+		minConns = p.MaxConnections
 	}
 
 	inflight := p.InflightRequests
@@ -1420,12 +1447,13 @@ func (p *ProviderConfig) ToNNTPProvider() nntppool.Provider {
 		TLSConfig:         tlsCfg,
 		Auth:              nntppool.Auth{Username: p.Username, Password: p.Password},
 		Connections:       p.MaxConnections,
-		MinConnections:    p.MinConnectionsAlive,
+		MinConnections:    minConns,
 		Backup:            isBackup,
 		StorageGroup:      p.StorageGroup,
 		Inflight:          inflight,
 		StatInflight:      statInflight,
-		IdleTimeout:       60 * time.Second,
+		IdleTimeout:       providerIdleTimeout,
+		ReconnectDelay:    providerReconnectDelay,
 		SkipPing:          p.SkipPing,
 		KeepaliveInterval: time.Duration(p.KeepaliveIntervalSeconds) * time.Second,
 		KeepaliveCommand:  p.KeepaliveCommand,
