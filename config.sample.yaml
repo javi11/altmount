@@ -104,6 +104,13 @@ rclone:
   vfs_read_ahead: '128M' # VFS read-ahead size (--vfs-read-ahead=128M)
   dir_cache_time: '10m' # Directory cache time (--dir-cache-time=10m)
 
+  # How long the rcd may stay unresponsive to liveness probes before it is killed
+  # and restarted. Restarting re-establishes the mount, which unmounts it out from
+  # under every process currently reading it, so raise this if your rcd goes
+  # briefly slow under load (large library scans, bursts of VFS refreshes) and you
+  # would rather ride the stall out than drop the mount.
+  rcd_restart_after: '90s'
+
   # Additional VFS settings (advanced configuration)
   vfs_cache_min_free_space: '1G' # Minimum free space for VFS cache
   vfs_disk_space_total: '1G' # Total disk space for VFS operations
