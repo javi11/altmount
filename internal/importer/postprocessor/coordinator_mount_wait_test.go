@@ -3,8 +3,8 @@ package postprocessor
 import (
 	"testing"
 
-	"github.com/javi11/altmount/internal/arrs/model"
-	"github.com/javi11/altmount/internal/database"
+	"github.com/kipsilabs/altmount/internal/arrs/model"
+	"github.com/kipsilabs/altmount/internal/database"
 )
 
 type fakeInstanceLister struct{ instances []*model.ConfigInstance }

@@ -45,7 +45,7 @@ const config: Config = {
 					sidebarPath: "./sidebars.ts",
 					// Please change this to your repo.
 					// Remove this to remove the "edit this page" links.
-					editUrl: "https://github.com/javi11/altmount/tree/main/docs/",
+					editUrl: "https://github.com/kipsilabs/altmount/tree/main/docs/",
 				},
 				blog: false,
 				theme: {
@@ -100,7 +100,7 @@ const config: Config = {
 					position: "left",
 				},
 				{
-					href: "https://github.com/javi11/altmount",
+					href: "https://github.com/kipsilabs/altmount",
 					label: "GitHub",
 					position: "right",
 				},
@@ -127,11 +127,11 @@ const config: Config = {
 					items: [
 						{
 							label: "GitHub Issues",
-							href: "https://github.com/javi11/altmount/issues",
+							href: "https://github.com/kipsilabs/altmount/issues",
 						},
 						{
 							label: "GitHub Discussions",
-							href: "https://github.com/javi11/altmount/discussions",
+							href: "https://github.com/kipsilabs/altmount/discussions",
 						},
 					],
 				},
@@ -140,11 +140,11 @@ const config: Config = {
 					items: [
 						{
 							label: "GitHub",
-							href: "https://github.com/javi11/altmount",
+							href: "https://github.com/kipsilabs/altmount",
 						},
 						{
-							label: "Docker Hub",
-							href: "https://hub.docker.com/r/javi11/altmount",
+							label: "Container Image",
+							href: "https://github.com/kipsilabs/altmount/pkgs/container/altmount",
 						},
 					],
 				},

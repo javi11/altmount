@@ -4,7 +4,7 @@ import (
 	"log/slog"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/javi11/altmount/internal/health"
+	"github.com/kipsilabs/altmount/internal/health"
 )
 
 // LibrarySyncHandlers holds the library sync-related request handlers

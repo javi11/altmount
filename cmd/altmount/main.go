@@ -6,7 +6,7 @@ import (
 	_ "net/http/pprof"
 	"os"
 
-	"github.com/javi11/altmount/cmd/altmount/cmd"
+	"github.com/kipsilabs/altmount/cmd/altmount/cmd"
 )
 
 func main() {

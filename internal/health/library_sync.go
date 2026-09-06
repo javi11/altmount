@@ -16,11 +16,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/metadata"
-	"github.com/javi11/altmount/internal/utils"
-	"github.com/javi11/altmount/pkg/rclonecli"
+	"github.com/kipsilabs/altmount/internal/config"
+	"github.com/kipsilabs/altmount/internal/database"
+	"github.com/kipsilabs/altmount/internal/metadata"
+	"github.com/kipsilabs/altmount/internal/utils"
+	"github.com/kipsilabs/altmount/pkg/rclonecli"
 	"github.com/sourcegraph/conc/pool"
 )
 

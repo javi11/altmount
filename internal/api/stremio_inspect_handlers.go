@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/javi11/altmount/internal/auth"
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/httpclient"
-	"github.com/javi11/altmount/internal/stremio"
+	"github.com/kipsilabs/altmount/internal/auth"
+	"github.com/kipsilabs/altmount/internal/database"
+	"github.com/kipsilabs/altmount/internal/httpclient"
+	"github.com/kipsilabs/altmount/internal/stremio"
 )
 
 // InspectSearchRequest represents a payload to inspect/rank indexer search results in real time.

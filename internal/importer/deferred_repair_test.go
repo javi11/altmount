@@ -7,7 +7,7 @@ import (
 	"github.com/javi11/nntppool/v4"
 	"github.com/javi11/rardecode/v2"
 
-	alterrors "github.com/javi11/altmount/internal/errors"
+	alterrors "github.com/kipsilabs/altmount/internal/errors"
 )
 
 // A damaged archive set with PAR2 files defers for repair instead of being

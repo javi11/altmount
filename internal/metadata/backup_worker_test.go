@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/javi11/altmount/internal/config"
+	"github.com/kipsilabs/altmount/internal/config"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -84,7 +84,7 @@ func TestBackupWorker_performBackup(t *testing.T) {
 // TestBackupWorker_performBackup_SkipsUnreadableDirs verifies that a single
 // inaccessible subdirectory (mimicking Windows "System Volume Information" or
 // a chmod-000 dir on Linux) does not abort the entire backup. Regression test
-// for https://github.com/javi11/altmount/issues/609.
+// for https://github.com/kipsilabs/altmount/issues/609.
 func TestBackupWorker_performBackup_SkipsUnreadableDirs(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("chmod-based permission denial is unreliable on Windows")

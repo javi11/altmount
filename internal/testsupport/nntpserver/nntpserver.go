@@ -42,7 +42,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/javi11/altmount/internal/testsupport/segments"
+	"github.com/kipsilabs/altmount/internal/testsupport/segments"
 	"github.com/mnightingale/rapidyenc"
 )
 

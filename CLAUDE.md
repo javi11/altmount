@@ -966,7 +966,7 @@ All REST API endpoints use a unified response format. Use the response builder f
 **Response Builder Functions:**
 
 ```go
-import "github.com/javi11/altmount/internal/api"
+import "github.com/kipsilabs/altmount/internal/api"
 
 // ✅ Good: Use response builders
 func (s *Server) handleGetItem(c *fiber.Ctx) error {

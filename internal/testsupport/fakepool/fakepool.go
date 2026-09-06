@@ -45,7 +45,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/javi11/altmount/internal/pool"
+	"github.com/kipsilabs/altmount/internal/pool"
 	"github.com/javi11/nntppool/v4"
 )
 

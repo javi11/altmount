@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/javi11/altmount/internal/utils"
+	"github.com/kipsilabs/altmount/internal/utils"
 	"github.com/javi11/nntppool/v4"
 	"github.com/spf13/afero"
 )

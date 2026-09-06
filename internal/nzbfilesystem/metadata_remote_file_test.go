@@ -6,8 +6,8 @@ import (
 	"sync"
 	"testing"
 
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/pool"
+	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
+	"github.com/kipsilabs/altmount/internal/pool"
 	"github.com/javi11/nntppool/v4"
 )
 

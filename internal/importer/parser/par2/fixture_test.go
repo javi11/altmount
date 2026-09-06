@@ -8,8 +8,8 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/javi11/altmount/internal/importer/parser/par2"
-	"github.com/javi11/altmount/internal/par2repair"
+	"github.com/kipsilabs/altmount/internal/importer/parser/par2"
+	"github.com/kipsilabs/altmount/internal/par2repair"
 )
 
 // The realtool fixture was produced by par2cmdline (par2 create -s1024 -c4

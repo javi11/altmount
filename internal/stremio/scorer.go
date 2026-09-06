@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/javi11/altmount/internal/prowlarr"
-	"github.com/javi11/altmount/internal/regexcache"
+	"github.com/kipsilabs/altmount/internal/prowlarr"
+	"github.com/kipsilabs/altmount/internal/regexcache"
 )
 
 // TrashCustomFormat defines a single scoring format rule.

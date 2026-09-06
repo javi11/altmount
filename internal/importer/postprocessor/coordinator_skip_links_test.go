@@ -3,7 +3,7 @@ package postprocessor
 import (
 	"testing"
 
-	"github.com/javi11/altmount/internal/database"
+	"github.com/kipsilabs/altmount/internal/database"
 )
 
 func TestShouldSkipPostImportLinks(t *testing.T) {

@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/javi11/altmount/internal/nzbfilesystem"
-	"github.com/javi11/altmount/internal/slogutil"
+	"github.com/kipsilabs/altmount/internal/nzbfilesystem"
+	"github.com/kipsilabs/altmount/internal/slogutil"
 )
 
 type fileSystem struct {

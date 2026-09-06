@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/javi11/altmount/internal/testsupport/fakepool"
-	"github.com/javi11/altmount/internal/testsupport/segments"
+	"github.com/kipsilabs/altmount/internal/testsupport/fakepool"
+	"github.com/kipsilabs/altmount/internal/testsupport/segments"
 )
 
 // GetBufferedOffset reports scheduled bytes from counters and never

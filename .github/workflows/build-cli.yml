@@ -100,7 +100,7 @@ jobs:
           go build \
             -trimpath \
             -tags=cli \
-            -ldflags="-s -w -X 'github.com/javi11/altmount/internal/version.Version=${{ inputs.version }}' -X 'github.com/javi11/altmount/internal/version.GitCommit=${{ inputs.commit }}' -X 'github.com/javi11/altmount/internal/version.Timestamp=${{ steps.ts.outputs.timestamp }}'" \
+            -ldflags="-s -w -X 'github.com/kipsilabs/altmount/internal/version.Version=${{ inputs.version }}' -X 'github.com/kipsilabs/altmount/internal/version.GitCommit=${{ inputs.commit }}' -X 'github.com/kipsilabs/altmount/internal/version.Timestamp=${{ steps.ts.outputs.timestamp }}'" \
             -o "altmount-cli-${{ matrix.goos }}-${{ matrix.goarch }}${EXT}" \
             ./cmd/altmount/main.go
 

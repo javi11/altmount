@@ -3,7 +3,7 @@ package api
 import (
 	"testing"
 
-	"github.com/javi11/altmount/internal/config"
+	"github.com/kipsilabs/altmount/internal/config"
 )
 
 // TestBuildCategoryPathNormalizesNames pins that a configured category resolves

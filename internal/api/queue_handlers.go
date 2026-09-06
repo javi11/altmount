@@ -15,12 +15,12 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/javi11/altmount/internal/database"
-	internalerrors "github.com/javi11/altmount/internal/errors"
-	"github.com/javi11/altmount/internal/httpclient"
-	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
-	"github.com/javi11/altmount/internal/nzbfile"
-	"github.com/javi11/altmount/internal/nzblnk"
+	"github.com/kipsilabs/altmount/internal/database"
+	internalerrors "github.com/kipsilabs/altmount/internal/errors"
+	"github.com/kipsilabs/altmount/internal/httpclient"
+	"github.com/kipsilabs/altmount/internal/importer/utils/nzbtrim"
+	"github.com/kipsilabs/altmount/internal/nzbfile"
+	"github.com/kipsilabs/altmount/internal/nzblnk"
 )
 
 // removeQueueNzbFiles deletes the on-disk NZB files for every non-empty path.

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/javi11/altmount/internal/pool"
+	"github.com/kipsilabs/altmount/internal/pool"
 )
 
 func TestUsenetReader_Race_Close_GetBufferedOffset(t *testing.T) {

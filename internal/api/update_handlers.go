@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/javi11/altmount/internal/auth"
-	"github.com/javi11/altmount/internal/version"
+	"github.com/kipsilabs/altmount/internal/auth"
+	"github.com/kipsilabs/altmount/internal/version"
 )
 
 // insideContainer reports whether the current process is running inside a

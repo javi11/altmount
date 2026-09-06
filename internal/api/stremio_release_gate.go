@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/javi11/altmount/internal/stremio"
+	"github.com/kipsilabs/altmount/internal/stremio"
 	"golang.org/x/text/runes"
 	"golang.org/x/text/transform"
 	"golang.org/x/text/unicode/norm"

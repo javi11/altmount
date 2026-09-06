@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
 )
 
 // sameResolvedSegments reports whether two resolved segment lists are

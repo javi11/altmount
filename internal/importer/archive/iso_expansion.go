@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/javi11/altmount/internal/importer/archive/iso"
-	"github.com/javi11/altmount/internal/pool"
-	"github.com/javi11/altmount/internal/progress"
+	"github.com/kipsilabs/altmount/internal/importer/archive/iso"
+	"github.com/kipsilabs/altmount/internal/pool"
+	"github.com/kipsilabs/altmount/internal/progress"
 )
 
 // analyzedISO bundles an ISO Content with its inspection result and its

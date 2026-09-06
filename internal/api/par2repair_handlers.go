@@ -8,8 +8,8 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/par2repair"
+	"github.com/kipsilabs/altmount/internal/database"
+	"github.com/kipsilabs/altmount/internal/par2repair"
 )
 
 // Par2RepairEnqueuer queues a file for background PAR2 repair (implemented by

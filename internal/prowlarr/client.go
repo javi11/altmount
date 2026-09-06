@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/javi11/altmount/internal/httpclient"
-	"github.com/javi11/altmount/internal/regexcache"
+	"github.com/kipsilabs/altmount/internal/httpclient"
+	"github.com/kipsilabs/altmount/internal/regexcache"
 	parsetorrentname "github.com/middelink/go-parse-torrent-name"
 	"golift.io/starr"
 	starrprowlarr "golift.io/starr/prowlarr"

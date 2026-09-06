@@ -11,13 +11,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/javi11/altmount/internal/arrs"
-	"github.com/javi11/altmount/internal/arrs/model"
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/errors"
-	"github.com/javi11/altmount/internal/metadata"
-	"github.com/javi11/altmount/pkg/rclonecli"
+	"github.com/kipsilabs/altmount/internal/arrs"
+	"github.com/kipsilabs/altmount/internal/arrs/model"
+	"github.com/kipsilabs/altmount/internal/config"
+	"github.com/kipsilabs/altmount/internal/database"
+	"github.com/kipsilabs/altmount/internal/errors"
+	"github.com/kipsilabs/altmount/internal/metadata"
+	"github.com/kipsilabs/altmount/pkg/rclonecli"
 )
 
 // Coordinator orchestrates all post-import processing steps

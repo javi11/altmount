@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"sync"
 
-	"github.com/javi11/altmount/internal/usenet"
+	"github.com/kipsilabs/altmount/internal/usenet"
 )
 
 // DefaultImportSegmentCacheBytes bounds the default size of an

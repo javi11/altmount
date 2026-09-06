@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"github.com/avast/retry-go/v4"
-	"github.com/javi11/altmount/internal/holes"
-	"github.com/javi11/altmount/internal/pool"
-	"github.com/javi11/altmount/internal/slogutil"
+	"github.com/kipsilabs/altmount/internal/holes"
+	"github.com/kipsilabs/altmount/internal/pool"
+	"github.com/kipsilabs/altmount/internal/slogutil"
 	"github.com/javi11/nntppool/v4"
 )
 

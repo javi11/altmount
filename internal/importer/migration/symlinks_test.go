@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/javi11/altmount/internal/importer/migration"
+	"github.com/kipsilabs/altmount/internal/importer/migration"
 )
 
 // mockLookup implements SymlinkLookup for testing.

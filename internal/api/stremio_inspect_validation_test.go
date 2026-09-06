@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/javi11/altmount/internal/stremio"
+	"github.com/kipsilabs/altmount/internal/stremio"
 )
 
 // TestValidateInspectScoring bounds the regex work a single inspect request can

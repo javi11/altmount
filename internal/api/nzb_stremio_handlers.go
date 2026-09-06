@@ -17,10 +17,10 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/javi11/altmount/internal/auth"
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/importer/parser/fileinfo"
-	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
+	"github.com/kipsilabs/altmount/internal/auth"
+	"github.com/kipsilabs/altmount/internal/database"
+	"github.com/kipsilabs/altmount/internal/importer/parser/fileinfo"
+	"github.com/kipsilabs/altmount/internal/importer/utils/nzbtrim"
 	"github.com/javi11/nzbparser"
 )
 

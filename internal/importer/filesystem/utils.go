@@ -7,10 +7,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/javi11/altmount/internal/importer/parser"
-	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
-	"github.com/javi11/altmount/internal/metadata"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	"github.com/kipsilabs/altmount/internal/importer/parser"
+	"github.com/kipsilabs/altmount/internal/importer/utils/nzbtrim"
+	"github.com/kipsilabs/altmount/internal/metadata"
+	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
 )
 
 // CalculateVirtualDirectory determines the virtual directory path based on NZB file location

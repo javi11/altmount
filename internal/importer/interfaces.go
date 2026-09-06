@@ -3,7 +3,7 @@ package importer
 import (
 	"context"
 
-	"github.com/javi11/altmount/internal/database"
+	"github.com/kipsilabs/altmount/internal/database"
 )
 
 // QueueManager manages the import queue worker lifecycle

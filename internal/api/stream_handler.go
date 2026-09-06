@@ -10,10 +10,10 @@ import (
 	"path/filepath"
 	"sync/atomic"
 
-	"github.com/javi11/altmount/internal/auth"
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/nzbfilesystem"
-	"github.com/javi11/altmount/internal/utils"
+	"github.com/kipsilabs/altmount/internal/auth"
+	"github.com/kipsilabs/altmount/internal/database"
+	"github.com/kipsilabs/altmount/internal/nzbfilesystem"
+	"github.com/kipsilabs/altmount/internal/utils"
 	"github.com/spf13/afero"
 )
 

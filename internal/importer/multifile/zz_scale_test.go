@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/javi11/altmount/internal/importer/parser"
-	"github.com/javi11/altmount/internal/metadata"
+	"github.com/kipsilabs/altmount/internal/importer/parser"
+	"github.com/kipsilabs/altmount/internal/metadata"
 )
 
 // TestProcessRegularFilesCollisionScaling guards against O(N^2) regressions in

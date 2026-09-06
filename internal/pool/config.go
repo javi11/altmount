@@ -4,7 +4,7 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/javi11/altmount/internal/config"
+	"github.com/kipsilabs/altmount/internal/config"
 )
 
 // RegisterConfigHandlers registers handlers for pool-related configuration changes

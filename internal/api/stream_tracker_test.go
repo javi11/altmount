@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/javi11/altmount/internal/nzbfilesystem"
+	"github.com/kipsilabs/altmount/internal/nzbfilesystem"
 	"github.com/stretchr/testify/assert"
 )
 

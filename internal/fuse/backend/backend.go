@@ -6,8 +6,8 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/nzbfilesystem"
+	"github.com/kipsilabs/altmount/internal/config"
+	"github.com/kipsilabs/altmount/internal/nzbfilesystem"
 )
 
 // Type identifies a FUSE backend implementation.

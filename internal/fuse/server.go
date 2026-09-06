@@ -9,9 +9,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/fuse/backend"
-	"github.com/javi11/altmount/internal/nzbfilesystem"
+	"github.com/kipsilabs/altmount/internal/config"
+	"github.com/kipsilabs/altmount/internal/fuse/backend"
+	"github.com/kipsilabs/altmount/internal/nzbfilesystem"
 )
 
 // StreamTracker is the subset of stream tracking needed by the FUSE layer.

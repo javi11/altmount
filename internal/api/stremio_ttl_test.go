@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/javi11/altmount/internal/config"
+	"github.com/kipsilabs/altmount/internal/config"
 )
 
 // TestStremioNzbTTLHoursZeroRoundTrip verifies that an explicit NzbTTLHours of 0

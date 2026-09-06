@@ -9,8 +9,8 @@ import (
 	"sync"
 
 	"github.com/hashicorp/golang-lru/v2/simplelru"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/nzb"
+	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
+	"github.com/kipsilabs/altmount/internal/nzb"
 	"github.com/klauspost/compress/zstd"
 	"google.golang.org/protobuf/proto"
 )

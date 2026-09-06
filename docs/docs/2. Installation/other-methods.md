@@ -29,7 +29,7 @@ import TabItem from '@theme/TabItem';
 
 ```bash
 # Download latest release
-wget https://github.com/javi11/altmount/releases/latest/download/altmount-linux-amd64
+wget https://github.com/kipsilabs/altmount/releases/latest/download/altmount-linux-amd64
 
 # Make executable
 chmod +x altmount-linux-amd64
@@ -43,7 +43,7 @@ sudo mv altmount-linux-amd64 /usr/local/bin/altmount
 
 ```bash
 # Download ARM64 version
-wget https://github.com/javi11/altmount/releases/latest/download/altmount-linux-arm64
+wget https://github.com/kipsilabs/altmount/releases/latest/download/altmount-linux-arm64
 
 # Make executable
 chmod +x altmount-linux-arm64
@@ -57,7 +57,7 @@ sudo mv altmount-linux-arm64 /usr/local/bin/altmount
 
 ```bash
 # Download for macOS
-wget https://github.com/javi11/altmount/releases/latest/download/altmount-darwin-amd64
+wget https://github.com/kipsilabs/altmount/releases/latest/download/altmount-darwin-amd64
 
 # Make executable
 chmod +x altmount-darwin-amd64
@@ -71,10 +71,10 @@ sudo mv altmount-darwin-amd64 /usr/local/bin/altmount
 
 ```powershell
 # Download using PowerShell
-Invoke-WebRequest -Uri "https://github.com/javi11/altmount/releases/latest/download/altmount-windows-amd64.exe" -OutFile "altmount.exe"
+Invoke-WebRequest -Uri "https://github.com/kipsilabs/altmount/releases/latest/download/altmount-windows-amd64.exe" -OutFile "altmount.exe"
 
 # Or download using curl (if available)
-curl -L -o altmount.exe https://github.com/javi11/altmount/releases/latest/download/altmount-windows-amd64.exe
+curl -L -o altmount.exe https://github.com/kipsilabs/altmount/releases/latest/download/altmount-windows-amd64.exe
 ```
 
   </TabItem>
@@ -88,7 +88,7 @@ If you prefer to build from source or need a custom build:
 
 ```bash
 # Prerequisites: Go 1.24.5+ and Bun
-git clone https://github.com/javi11/altmount.git
+git clone https://github.com/kipsilabs/altmount.git
 cd altmount
 
 # Build everything (frontend + backend)
@@ -111,7 +111,7 @@ make
 2. **Download sample configuration**:
 
    ```bash
-   wget https://raw.githubusercontent.com/javi11/altmount/main/config.sample.yaml -O config.yaml
+   wget https://raw.githubusercontent.com/kipsilabs/altmount/main/config.sample.yaml -O config.yaml
    ```
 
 3. **Create required directories**:

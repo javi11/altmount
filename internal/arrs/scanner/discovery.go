@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/javi11/altmount/internal/arrs/model"
+	"github.com/kipsilabs/altmount/internal/arrs/model"
 	"golift.io/starr"
 	"golift.io/starr/sonarr"
 )

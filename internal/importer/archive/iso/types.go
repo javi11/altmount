@@ -1,6 +1,6 @@
 package iso
 
-import metapb "github.com/javi11/altmount/internal/metadata/proto"
+import metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
 
 // ISOSource describes an ISO file's location within a RAR or 7zip archive.
 type ISOSource struct {

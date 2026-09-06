@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/javi11/altmount/internal/config"
+	"github.com/kipsilabs/altmount/internal/config"
 )
 
 // TestPerformMount_SendsDirCacheTimeAndCacheMinFreeSpace covers two settings

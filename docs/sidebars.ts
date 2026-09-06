@@ -19,7 +19,7 @@ const sidebars: SidebarsConfig = {
     {
       type: 'link',
       label: 'Report Issues',
-      href: 'https://github.com/javi11/altmount/issues',
+      href: 'https://github.com/kipsilabs/altmount/issues',
     },
   ],
 

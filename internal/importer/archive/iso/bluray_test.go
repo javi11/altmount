@@ -7,7 +7,7 @@ import (
 	"io"
 	"testing"
 
-	"github.com/javi11/altmount/internal/progress"
+	"github.com/kipsilabs/altmount/internal/progress"
 )
 
 // recordingBroadcaster captures progress updates for assertions in tests.

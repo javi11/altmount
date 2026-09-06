@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
 )
 
 // handleGetFileMetadata handles GET /files/info requests

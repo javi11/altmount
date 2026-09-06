@@ -5,8 +5,8 @@ import (
 	"encoding/xml"
 	"strconv"
 
-	"github.com/javi11/altmount/internal/holes"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	"github.com/kipsilabs/altmount/internal/holes"
+	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
 )
 
 const nzbHeader = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE nzb PUBLIC \"-//newzBin//DTD NZB 1.1//EN\" \"http://www.newzbin.com/DTD/nzb/nzb-1.1.dtd\">\n"

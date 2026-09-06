@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
+	"github.com/kipsilabs/altmount/internal/config"
+	"github.com/kipsilabs/altmount/internal/database"
+	"github.com/kipsilabs/altmount/internal/importer/utils/nzbtrim"
 )
 
 // WatchQueueAdder interface for adding items to the import queue from directory watcher

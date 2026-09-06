@@ -12,8 +12,8 @@ import (
 
 	"github.com/javi11/nntppool/v4"
 
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/testsupport/par2gen"
+	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
+	"github.com/kipsilabs/altmount/internal/testsupport/par2gen"
 )
 
 // mkResolveFixture builds metadata + NzbStore + fake articles for a release

@@ -19,13 +19,13 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
-	"github.com/javi11/altmount/internal/arrs"
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/httpclient"
-	"github.com/javi11/altmount/internal/importer/utils"
-	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
-	apputils "github.com/javi11/altmount/internal/utils"
+	"github.com/kipsilabs/altmount/internal/arrs"
+	"github.com/kipsilabs/altmount/internal/config"
+	"github.com/kipsilabs/altmount/internal/database"
+	"github.com/kipsilabs/altmount/internal/httpclient"
+	"github.com/kipsilabs/altmount/internal/importer/utils"
+	"github.com/kipsilabs/altmount/internal/importer/utils/nzbtrim"
+	apputils "github.com/kipsilabs/altmount/internal/utils"
 )
 
 // getDefaultCategory returns the Default category from config or a fallback

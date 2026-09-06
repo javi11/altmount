@@ -12,8 +12,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/javi11/altmount/internal/httpclient"
-	"github.com/javi11/altmount/internal/nzbfile"
+	"github.com/kipsilabs/altmount/internal/httpclient"
+	"github.com/kipsilabs/altmount/internal/nzbfile"
 )
 
 // SABnzbdClient handles communication with external SABnzbd instances

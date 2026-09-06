@@ -1,6 +1,6 @@
 package archive
 
-import "github.com/javi11/altmount/internal/importer/rarname"
+import "github.com/kipsilabs/altmount/internal/importer/rarname"
 
 // RAR / split-volume filename helpers re-exported from the dependency-free
 // rarname leaf package, which is the single source of truth. They are re-exported

@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/javi11/altmount/internal/newsnab"
+	"github.com/kipsilabs/altmount/internal/newsnab"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

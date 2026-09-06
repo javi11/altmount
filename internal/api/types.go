@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/javi11/altmount/internal/auth"
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/database"
+	"github.com/kipsilabs/altmount/internal/auth"
+	"github.com/kipsilabs/altmount/internal/config"
+	"github.com/kipsilabs/altmount/internal/database"
 )
 
 // nzbJobName returns the display name for an NZB job by stripping the .nzb or .nzb.gz

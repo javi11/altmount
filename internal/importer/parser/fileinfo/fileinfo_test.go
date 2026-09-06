@@ -4,7 +4,7 @@ import (
 	"crypto/md5"
 	"testing"
 
-	"github.com/javi11/altmount/internal/importer/parser/par2"
+	"github.com/kipsilabs/altmount/internal/importer/parser/par2"
 	"github.com/javi11/nntppool/v4"
 	"github.com/javi11/nzbparser"
 )

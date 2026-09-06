@@ -3,7 +3,7 @@ package segcache
 import (
 	"sync/atomic"
 
-	"github.com/javi11/altmount/internal/usenet"
+	"github.com/kipsilabs/altmount/internal/usenet"
 )
 
 // TieredStore is the SegmentStore readers see: a memory tier in front of an

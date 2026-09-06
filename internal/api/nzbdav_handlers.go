@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/importer"
-	"github.com/javi11/altmount/internal/importer/migration"
+	"github.com/kipsilabs/altmount/internal/database"
+	"github.com/kipsilabs/altmount/internal/importer"
+	"github.com/kipsilabs/altmount/internal/importer/migration"
 )
 
 // handleImportNzbdav handles POST /import/nzbdav

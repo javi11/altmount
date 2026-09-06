@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/nzb"
+	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
+	"github.com/kipsilabs/altmount/internal/nzb"
 	"github.com/javi11/nzbparser"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

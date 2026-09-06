@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/javi11/altmount/internal/nzbfile"
+	"github.com/kipsilabs/altmount/internal/nzbfile"
 	"github.com/stretchr/testify/assert"
 )
 

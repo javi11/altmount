@@ -8,8 +8,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/database"
+	"github.com/kipsilabs/altmount/internal/config"
+	"github.com/kipsilabs/altmount/internal/database"
 )
 
 // stubQueueAdder captures what processNzb passes to AddToQueue so the test

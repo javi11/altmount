@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/javi11/altmount/internal/config"
+	"github.com/kipsilabs/altmount/internal/config"
 	"github.com/robfig/cron/v3"
 )
 

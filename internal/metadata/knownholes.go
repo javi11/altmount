@@ -3,8 +3,8 @@ package metadata
 import (
 	"time"
 
-	"github.com/javi11/altmount/internal/holes"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	"github.com/kipsilabs/altmount/internal/holes"
+	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
 )
 
 // LiveKnownHoles returns the stored runs still trusted now: stamped within

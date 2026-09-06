@@ -2,7 +2,7 @@ openapi: 3.0.0
 info:
   contact:
     name: AltMount
-    url: https://github.com/javi11/altmount/issues
+    url: https://github.com/kipsilabs/altmount/issues
   description: REST API for AltMount — Usenet WebDAV server with NZB queue, health
     monitoring, ARR integration, FUSE/rclone mounting, and Stremio addon.
   license:

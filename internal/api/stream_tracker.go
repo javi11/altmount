@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/javi11/altmount/internal/nzbfilesystem"
-	"github.com/javi11/altmount/internal/usenet"
+	"github.com/kipsilabs/altmount/internal/nzbfilesystem"
+	"github.com/kipsilabs/altmount/internal/usenet"
 )
 
 // Default timeout for stale streams (4 hours - covers most movie lengths)

@@ -6,8 +6,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/pool"
+	"github.com/kipsilabs/altmount/internal/database"
+	"github.com/kipsilabs/altmount/internal/pool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

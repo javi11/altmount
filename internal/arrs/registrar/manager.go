@@ -7,8 +7,8 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/javi11/altmount/internal/arrs/clients"
-	"github.com/javi11/altmount/internal/arrs/instances"
+	"github.com/kipsilabs/altmount/internal/arrs/clients"
+	"github.com/kipsilabs/altmount/internal/arrs/instances"
 	"golift.io/starr"
 	"golift.io/starr/lidarr"
 	"golift.io/starr/radarr"

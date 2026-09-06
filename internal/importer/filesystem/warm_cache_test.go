@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/javi11/altmount/internal/importer/parser"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/pool"
-	"github.com/javi11/altmount/internal/testsupport/fakepool"
+	"github.com/kipsilabs/altmount/internal/importer/parser"
+	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
+	"github.com/kipsilabs/altmount/internal/pool"
+	"github.com/kipsilabs/altmount/internal/testsupport/fakepool"
 	"github.com/javi11/nntppool/v4"
 )
 

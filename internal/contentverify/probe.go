@@ -8,8 +8,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/javi11/altmount/internal/importer/parser/fileinfo"
-	"github.com/javi11/altmount/internal/utils"
+	"github.com/kipsilabs/altmount/internal/importer/parser/fileinfo"
+	"github.com/kipsilabs/altmount/internal/utils"
 	"github.com/javi11/nntppool/v4"
 	"github.com/spf13/afero"
 )

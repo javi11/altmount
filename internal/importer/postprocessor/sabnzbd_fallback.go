@@ -7,11 +7,11 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/httpclient"
-	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
-	"github.com/javi11/altmount/internal/nzbfile"
-	"github.com/javi11/altmount/internal/sabnzbd"
+	"github.com/kipsilabs/altmount/internal/database"
+	"github.com/kipsilabs/altmount/internal/httpclient"
+	"github.com/kipsilabs/altmount/internal/importer/utils/nzbtrim"
+	"github.com/kipsilabs/altmount/internal/nzbfile"
+	"github.com/kipsilabs/altmount/internal/sabnzbd"
 )
 
 // AttemptFallback tries to send a failed import to external SABnzbd

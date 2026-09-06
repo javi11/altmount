@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/javi11/altmount/internal/importer/archive"
+	"github.com/kipsilabs/altmount/internal/importer/archive"
 )
 
 var (

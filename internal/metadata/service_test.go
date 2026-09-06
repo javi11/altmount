@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/javi11/altmount/internal/holes"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	"github.com/kipsilabs/altmount/internal/holes"
+	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

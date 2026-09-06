@@ -8,8 +8,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/javi11/altmount/internal/pool"
-	"github.com/javi11/altmount/internal/usenet"
+	"github.com/kipsilabs/altmount/internal/pool"
+	"github.com/kipsilabs/altmount/internal/usenet"
 	"github.com/javi11/nzbparser"
 )
 

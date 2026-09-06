@@ -4,7 +4,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/javi11/altmount/internal/importer/parser/fileinfo"
+	"github.com/kipsilabs/altmount/internal/importer/parser/fileinfo"
 )
 
 // payloadDominanceFactor is how much bigger than the runner-up the largest

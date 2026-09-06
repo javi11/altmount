@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/javi11/altmount/internal/utils"
+	"github.com/kipsilabs/altmount/internal/utils"
 )
 
 // BlockSize is the AES block size in bytes (128 bits)

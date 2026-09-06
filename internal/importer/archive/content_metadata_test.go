@@ -4,7 +4,7 @@ import (
 	"testing"
 	"unsafe"
 
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
 	"google.golang.org/protobuf/proto"
 )
 

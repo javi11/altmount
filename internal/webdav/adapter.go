@@ -12,12 +12,12 @@ import (
 	"strings"
 
 	"github.com/go-pkgz/auth/v2/token"
-	"github.com/javi11/altmount/internal/api"
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/nzbfilesystem"
-	"github.com/javi11/altmount/internal/utils"
-	"github.com/javi11/altmount/internal/webdav/propfind"
+	"github.com/kipsilabs/altmount/internal/api"
+	"github.com/kipsilabs/altmount/internal/config"
+	"github.com/kipsilabs/altmount/internal/database"
+	"github.com/kipsilabs/altmount/internal/nzbfilesystem"
+	"github.com/kipsilabs/altmount/internal/utils"
+	"github.com/kipsilabs/altmount/internal/webdav/propfind"
 )
 
 // Handler provides WebDAV functionality as an HTTP handler

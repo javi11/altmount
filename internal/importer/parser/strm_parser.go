@@ -11,11 +11,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/javi11/altmount/internal/encryption"
-	"github.com/javi11/altmount/internal/encryption/rclone"
-	"github.com/javi11/altmount/internal/errors"
-	"github.com/javi11/altmount/internal/importer/parser/fileinfo"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	"github.com/kipsilabs/altmount/internal/encryption"
+	"github.com/kipsilabs/altmount/internal/encryption/rclone"
+	"github.com/kipsilabs/altmount/internal/errors"
+	"github.com/kipsilabs/altmount/internal/importer/parser/fileinfo"
+	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
 	"github.com/javi11/nxg"
 )
 

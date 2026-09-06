@@ -5,8 +5,8 @@ import (
 	"crypto/md5"
 	"testing"
 
-	"github.com/javi11/altmount/internal/importer/parser/par2"
-	"github.com/javi11/altmount/internal/testsupport/par2gen"
+	"github.com/kipsilabs/altmount/internal/importer/parser/par2"
+	"github.com/kipsilabs/altmount/internal/testsupport/par2gen"
 )
 
 func TestBuild_roundtrip(t *testing.T) {

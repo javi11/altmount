@@ -73,7 +73,7 @@ Error: config file "config.yaml" not found
 
    ```bash
    # Download sample configuration
-   wget https://raw.githubusercontent.com/javi11/altmount/main/config.sample.yaml -O config.yaml
+   wget https://raw.githubusercontent.com/kipsilabs/altmount/main/config.sample.yaml -O config.yaml
 
    # Edit with your settings
    nano config.yaml
@@ -736,7 +736,7 @@ _[Screenshot placeholder: Terminal showing database permission fix and successfu
 1. **Pull the latest AltMount image**:
 
    ```bash
-   docker pull javi11/altmount:latest
+   docker pull ghcr.io/kipsilabs/altmount:latest
    docker restart altmount
    ```
 
@@ -903,8 +903,8 @@ Before seeking help, gather this information:
 
 ### Support Channels
 
-- **GitHub Issues**: [https://github.com/javi11/altmount/issues](https://github.com/javi11/altmount/issues)
-- **GitHub Discussions**: [https://github.com/javi11/altmount/discussions](https://github.com/javi11/altmount/discussions)
+- **GitHub Issues**: [https://github.com/kipsilabs/altmount/issues](https://github.com/kipsilabs/altmount/issues)
+- **GitHub Discussions**: [https://github.com/kipsilabs/altmount/discussions](https://github.com/kipsilabs/altmount/discussions)
 - **Documentation**: This documentation site
 
 ### Issue Reporting Template

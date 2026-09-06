@@ -7,7 +7,7 @@ import (
 
 	"github.com/javi11/rardecode/v2"
 
-	alterrors "github.com/javi11/altmount/internal/errors"
+	alterrors "github.com/kipsilabs/altmount/internal/errors"
 )
 
 // IsCorruptionError must recognize rardecode's corruption sentinels through

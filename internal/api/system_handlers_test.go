@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/javi11/altmount/internal/pool"
+	"github.com/kipsilabs/altmount/internal/pool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )

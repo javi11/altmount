@@ -1,4 +1,4 @@
-module github.com/javi11/altmount
+module github.com/kipsilabs/altmount
 
 go 1.27.0
 

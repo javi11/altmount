@@ -6,8 +6,8 @@ import (
 	"os"
 	"sync/atomic"
 
-	"github.com/javi11/altmount/internal/nzbfilesystem"
-	"github.com/javi11/altmount/internal/utils"
+	"github.com/kipsilabs/altmount/internal/nzbfilesystem"
+	"github.com/kipsilabs/altmount/internal/utils"
 )
 
 type monitoredFileSystem struct {
