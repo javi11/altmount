@@ -18,6 +18,7 @@ import {
 } from "../../../../lib/utils";
 import { type FileHealth, HealthPriority } from "../../../../types/api";
 import { parseRepairReason } from "../par2RepairReason";
+import { ContentVerificationBadge } from "./ContentVerificationBadge";
 import { HealthItemActionsMenu } from "./HealthItemActionsMenu";
 import { PartialCheckBadge } from "./PartialCheckBadge";
 import { PlaybackImpactBadge } from "./PlaybackImpactBadge";
@@ -142,6 +143,7 @@ export const HealthItemCard = memo(function HealthItemCard({
 							<HealthBadge status={item.status} isMasked={item.is_masked} />
 							{playbackImpact && <PlaybackImpactBadge impact={playbackImpact} />}
 							{errorDetails && <PartialCheckBadge details={errorDetails} />}
+							{errorDetails && <ContentVerificationBadge details={errorDetails} />}
 
 							<button
 								type="button"
@@ -212,7 +214,9 @@ export const HealthItemCard = memo(function HealthItemCard({
 					</div>
 				)}
 
-				{item.error_details && item.error_details !== item.last_error && (
+				{/* Gated on an actual error: a healthy record now carries a
+				    content-verification envelope, which the badge above renders. */}
+				{item.last_error && item.error_details && item.error_details !== item.last_error && (
 					<div className="alert alert-warning px-3 py-2">
 						<AlertCircle className="h-4 w-4 shrink-0" />
 						<span className="text-xs">Technical: {truncateText(item.error_details, 80)}</span>

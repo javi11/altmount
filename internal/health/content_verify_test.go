@@ -95,8 +95,12 @@ func TestJudgeContentVerification_ProbeErrorReturnsNoEvent(t *testing.T) {
 	hc := newTestHealthCheckerWithVerifyContentEnabled(&fakeContentOpener{err: errors.New("connection reset")})
 	prep := preparedCheck{filePath: "/movie.mkv", currentStatus: database.HealthStatusPending}
 
-	if event := hc.judgeContentVerification(context.Background(), prep); event != nil {
+	event, healthyDetails := hc.judgeContentVerification(context.Background(), prep)
+	if event != nil {
 		t.Errorf("a transient probe error must produce no event, got %+v", *event)
+	}
+	if healthyDetails == nil {
+		t.Error("a transient probe error must still be recorded on the healthy result")
 	}
 }
 
