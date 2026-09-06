@@ -2378,28 +2378,6 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 	cfg := mvf.configGetter()
 	healthEnabled := cfg.GetHealthEnabled()
 
-	// A 430 mid-stream is not proof the article is gone. The reader never
-	// retries ErrArticleNotFound, so one provider answering 430 transiently
-	// (backend desync) was enough to move a healthy file's metadata into the
-	// corrupted folder and make the ARR redownload it, while re-importing the
-	// same NZB minutes later verified clean (issue #749). Re-STAT the segment
-	// once and bail out when it turns out to be reachable.
-	//
-	// Only a proven-present article stops the repair. An unresolved re-check
-	// (transport error, no pool) falls through to the previous behaviour, so a
-	// briefly unhealthy pool cannot silently suppress repairs — the same
-	// direction validation.go takes for sweep results (#861).
-	//
-	// The debounce token taken above stays spent: a genuine failure on this
-	// path can be delayed by at most one debounce window, and the read itself
-	// has already failed, so the next attempt re-triggers.
-	if !mvf.confirmSegmentMissing(ctx, dataCorruptionErr) {
-		slog.WarnContext(ctx, "Streaming failure not confirmed on re-check, skipping repair",
-			"file", mvf.name,
-			"segment_id", dataCorruptionErr.SegmentID)
-		return
-	}
-
 	// Classify playback impact via the hole model — the verdict decides
 	// whether this failure triggers a repair at all. Note that with hole
 	// hooks wired, within-caps misses are zero-filled and never reach this
@@ -2407,6 +2385,49 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 	classification := mvf.classifyStreamingFailure(dataCorruptionErr)
 	isDegraded := healthEnabled && classification != nil &&
 		classification.Verdict == holes.VerdictDegraded
+
+	// A 430 mid-stream is not proof the article is gone. The reader never
+	// retries ErrArticleNotFound, so one provider answering 430 transiently
+	// (backend desync) was enough to hide a healthy file behind
+	// FILE_STATUS_CORRUPTED and make the ARR redownload it, while re-importing
+	// the same NZB minutes later verified clean (issue #749). Re-STAT the
+	// segment once and stop here when it turns out to be reachable.
+	//
+	// This runs while the caller holds mvf.mu, so it must not be paid on reads
+	// that would not act on it anyway: a degraded verdict is zero-filled and
+	// still playable, and takes no destructive action below. Everything past
+	// this point does — even with the health system disabled the file is marked
+	// corrupted, which hides it from listings and blocks opens.
+	//
+	// Only a proven-present article stops the repair. An unresolved re-check
+	// (transport error, no pool) falls through to the previous behaviour, so a
+	// briefly unhealthy pool cannot silently suppress repairs — the same
+	// direction validation.go takes for sweep results (#861).
+	//
+	// The failure is still recorded as pending rather than dropped, so a
+	// segment that is only intermittently reachable is re-checked properly by
+	// the health worker instead of stalling playback forever with no repair.
+	// The debounce token taken above stays spent: a genuine failure here can be
+	// delayed by at most one debounce window, and the read has already failed,
+	// so the next attempt re-triggers.
+	if !isDegraded && !mvf.confirmSegmentMissing(ctx, dataCorruptionErr) {
+		slog.WarnContext(ctx, "Streaming failure not confirmed on re-check, deferring to the health worker",
+			"file", mvf.name,
+			"segment_id", dataCorruptionErr.SegmentID)
+
+		errMsg := dataCorruptionErr.Error()
+		sourceNzb := &mvf.meta.SourceNzbPath
+		if *sourceNzb == "" {
+			sourceNzb = nil
+		}
+		if err := mvf.healthRepository.UpdateFileHealthScheduled(ctx,
+			mvf.name, database.HealthStatusPending, &errMsg, sourceNzb, nil, true, time.Now().UTC(),
+		); err != nil {
+			slog.WarnContext(ctx, "Failed to schedule health re-check after an unconfirmed streaming failure",
+				"file", mvf.name, "error", err)
+		}
+		return
+	}
 
 	// A missing article is PAR2-repairable regardless of eligibility for
 	// zero-fill (RAR/AES streams fail here instead of padding). Queue a
@@ -2574,9 +2595,10 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 }
 
 // missRecheckTimeout bounds the single re-STAT that confirms a mid-stream
-// article miss. A 430 answer can take about a second on some providers, so this
-// is generous enough to get a verdict without eating the caller's 5 s budget.
-const missRecheckTimeout = 3 * time.Second
+// article miss. A 430 answer takes about a second on some providers, so this
+// leaves headroom for one while capping how long the caller's mvf.mu is held
+// against a provider that never answers.
+const missRecheckTimeout = 1500 * time.Millisecond
 
 // confirmSegmentMissing re-checks a segment that a stream read reported as
 // missing, returning false only when the article is provably still there.
