@@ -56,12 +56,12 @@ func (c *Coordinator) CreateSymlinks(ctx context.Context, item *database.ImportQ
 	actualPath := filepath.Join(cfg.MountPath, strings.TrimPrefix(originalResultingPath, "/"))
 
 	// Check the metadata directory to determine if this is a file or directory
-	metadataPath := filepath.Join(cfg.Metadata.RootPath, strings.TrimPrefix(originalResultingPath, "/"))
+	metadataPath := c.metadataService.GetMetadataDirectoryPath(originalResultingPath)
 	fileInfo, err := os.Stat(metadataPath)
 
 	// If stat fails, check if it's a .meta file (single file case)
 	if err != nil {
-		metaFile := metadataPath + ".meta"
+		metaFile := c.metadataService.GetMetadataFilePath(originalResultingPath)
 		if _, metaErr := os.Stat(metaFile); metaErr == nil {
 			return c.createSingleSymlink(actualPath, resultingPath)
 		}

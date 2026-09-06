@@ -11,6 +11,7 @@ import (
 
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/metadata"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -127,8 +128,9 @@ func TestCreateStrmFiles_HostConfiguration(t *testing.T) {
 
 			// Setup Coordinator
 			coord := NewCoordinator(Config{
-				ConfigGetter: configGetter,
-				UserRepo:     userRepo,
+				ConfigGetter:    configGetter,
+				UserRepo:        userRepo,
+				MetadataService: metadata.NewMetadataService(metadataDir),
 			})
 
 			// Call CreateStrmFiles
