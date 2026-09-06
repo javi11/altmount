@@ -103,6 +103,28 @@ func NewLibrarySyncWorker(
 
 const lastLibrarySyncResultKey = "last_library_sync_result"
 
+// recentSymlinkImportGuard is how long a freshly created symlink is protected
+// from orphan cleanup on the strength of its own age alone.
+//
+// Orphan cleanup also skips symlinks that still have an import_history row, but
+// that anchor is not permanent: deleting a queue item drops its history copy
+// (issue #586), and history is pruned wholesale at import.history_retention_days.
+// A user clearing the completed queue must not be able to strip the protection
+// off a symlink whose ARR import is still in flight, so the link's own mtime —
+// which no database cleanup can reach — backs the guard up.
+const recentSymlinkImportGuard = 24 * time.Hour
+
+// symlinkWithinImportGuard reports whether info describes a symlink young
+// enough that an ARR import may still be running for it. A mtime in the future
+// (clock skew, a restored backup) counts as recent: the guard fails safe
+// towards keeping the file.
+func symlinkWithinImportGuard(info os.FileInfo, now time.Time) bool {
+	if info == nil || info.Mode()&os.ModeSymlink == 0 {
+		return false
+	}
+	return info.ModTime().After(now.Add(-recentSymlinkImportGuard))
+}
+
 // LoadLastResult loads the last sync result from the database
 func (lsw *LibrarySyncWorker) LoadLastResult(ctx context.Context) error {
 	data, err := lsw.healthRepo.GetSystemState(ctx, lastLibrarySyncResultKey)
@@ -935,6 +957,14 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 						// Only delete if it's actually a symlink
 						if info.Mode()&os.ModeSymlink == 0 {
 							slog.WarnContext(ctx, "Skipped orphaned file deletion: not a symlink", "path", file)
+							continue
+						}
+
+						// Protect symlinks young enough that an ARR import may
+						// still be in flight, whatever the database says.
+						if symlinkWithinImportGuard(info, time.Now()) {
+							slog.InfoContext(ctx, "Skipping orphaned symlink deletion: created too recently for an ARR import to have finished",
+								"path", file, "created", info.ModTime())
 							continue
 						}
 
