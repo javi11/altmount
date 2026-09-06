@@ -9,6 +9,7 @@ import (
 
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/metadata"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -73,7 +74,8 @@ func TestCreateSymlinks_WithIsolation(t *testing.T) {
 
 	// Setup Coordinator
 	coord := NewCoordinator(Config{
-		ConfigGetter: configGetter,
+		ConfigGetter:    configGetter,
+		MetadataService: metadata.NewMetadataService(metadataDir),
 	})
 
 	// Call CreateSymlinks
@@ -153,8 +155,9 @@ func TestCreateStrmFiles_WithIsolation(t *testing.T) {
 
 	// Setup Coordinator
 	coord := NewCoordinator(Config{
-		ConfigGetter: configGetter,
-		UserRepo:     userRepo,
+		ConfigGetter:    configGetter,
+		UserRepo:        userRepo,
+		MetadataService: metadata.NewMetadataService(metadataDir),
 	})
 
 	// Call CreateStrmFiles
