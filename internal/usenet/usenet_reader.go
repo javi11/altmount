@@ -182,6 +182,8 @@ type DataCorruptionError struct {
 	FileOffset int64
 	// SegmentID is the message ID of the failing segment, when known.
 	SegmentID string
+	// MissVerdict says what a re-check of a missing article found.
+	MissVerdict MissVerdict
 }
 
 func (e *DataCorruptionError) Error() string {
@@ -190,6 +192,47 @@ func (e *DataCorruptionError) Error() string {
 
 func (e *DataCorruptionError) Unwrap() error {
 	return e.UnderlyingErr
+}
+
+// MissVerdict records what re-checking a missing article found. A 430 is not
+// proof the article is gone: backends desync and serve the same segment
+// moments later (issue #749). The reader re-checks once and reports what it
+// learned, so the health pipeline does not have to ask again.
+type MissVerdict uint8
+
+const (
+	// MissUnverified: no re-check ran (not a miss, no budget, no pool, import).
+	MissUnverified MissVerdict = iota
+	// MissConfirmed: a second existence check also said it is gone.
+	MissConfirmed
+	// MissUnresolved: the re-check could not answer. Callers must keep their
+	// pre-re-check behaviour — an unhealthy pool must not suppress repairs.
+	MissUnresolved
+	// MissUnfetchable: the article exists but a second fetch still failed, so
+	// it counts as a real miss rather than something to re-check forever.
+	MissUnfetchable
+)
+
+// missError annotates a miss with its segment and verdict without changing
+// what the error is: errors.Is(err, ErrArticleNotFound) still holds, so the
+// hole hooks and every existing miss branch behave as before.
+type missError struct {
+	segmentID string
+	verdict   MissVerdict
+	err       error
+}
+
+func (e *missError) Error() string { return e.err.Error() }
+func (e *missError) Unwrap() error { return e.err }
+
+// MissInfo reports the segment and verdict a miss was annotated with; ok is
+// false for errors that never went through the reader's miss path.
+func MissInfo(err error) (segmentID string, verdict MissVerdict, ok bool) {
+	var me *missError
+	if !errors.As(err, &me) {
+		return "", MissUnverified, false
+	}
+	return me.segmentID, me.verdict, true
 }
 
 // isCorruptionError reports whether err indicates the article body itself is
@@ -241,6 +284,10 @@ type UsenetReader struct {
 
 	// Tracing counters (atomic, no lock needed)
 	inFlight atomic.Int32 // goroutines actively downloading right now
+
+	// missRechecks counts re-checks attempted, refused ones included, so the
+	// budget holds under concurrent prefetch without a lock.
+	missRechecks atomic.Int32
 
 	mu sync.Mutex
 }
@@ -403,17 +450,9 @@ func (b *UsenetReader) Read(p []byte) (int, error) {
 
 		if b.isArticleNotFoundError(err) {
 			if totalRead > 0 {
-				return 0, &DataCorruptionError{
-					UnderlyingErr: err,
-					BytesRead:     totalRead,
-					FileOffset:    rg.start + totalRead,
-				}
+				return 0, corruptionFromMiss(err, totalRead, rg.start+totalRead)
 			} else {
-				return 0, &DataCorruptionError{
-					UnderlyingErr: err,
-					BytesRead:     0,
-					FileOffset:    rg.start,
-				}
+				return 0, corruptionFromMiss(err, 0, rg.start)
 			}
 		}
 		return 0, io.EOF
@@ -460,22 +499,14 @@ func (b *UsenetReader) Read(p []byte) (int, error) {
 
 					if b.isArticleNotFoundError(err) {
 						if totalRead > 0 {
-							return n, &DataCorruptionError{
-								UnderlyingErr: err,
-								BytesRead:     totalRead,
-								FileOffset:    rg.start + totalRead,
-							}
+							return n, corruptionFromMiss(err, totalRead, rg.start+totalRead)
 						}
 					}
 					return n, io.EOF
 				}
 			} else {
 				if b.isArticleNotFoundError(err) {
-					return n, &DataCorruptionError{
-						UnderlyingErr: err,
-						BytesRead:     totalRead,
-						FileOffset:    rg.start + totalRead,
-					}
+					return n, corruptionFromMiss(err, totalRead, rg.start+totalRead)
 				}
 				return n, err
 			}
@@ -483,6 +514,21 @@ func (b *UsenetReader) Read(p []byte) (int, error) {
 	}
 
 	return n, nil
+}
+
+// corruptionFromMiss builds the DataCorruptionError a missing article surfaces
+// as. Without the segment and verdict the download path recorded, the health
+// pipeline has no message-ID to re-check and cannot tell a transient 430 from
+// a real one (issue #749).
+func corruptionFromMiss(err error, bytesRead, fileOffset int64) *DataCorruptionError {
+	segmentID, verdict, _ := MissInfo(err)
+	return &DataCorruptionError{
+		UnderlyingErr: err,
+		BytesRead:     bytesRead,
+		FileOffset:    fileOffset,
+		SegmentID:     segmentID,
+		MissVerdict:   verdict,
+	}
 }
 
 // isArticleNotFoundError checks if the error indicates articles were not found in providers
@@ -683,10 +729,74 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 	}
 }
 
+// MissRecheckTimeout bounds the existence check that confirms a miss. A
+// present article STATs in tens of milliseconds; two seconds covers one
+// adaptive provider window without letting a silent provider hold a slot.
+const MissRecheckTimeout = 2 * time.Second
+
+// maxMissRechecks budgets re-checks per reader: one desynced segment needs
+// one, and a dead release must not pay ~1.2s per hole.
+const maxMissRechecks = 1
+
 // fetchWithRetry runs the wire fetch for one segment. With art set the
 // decoded bytes stream into art as they arrive (priority lane); with art nil
 // the article is buffered on the normal lane for import.
+//
+// A miss is re-checked once before it is allowed to stand: providers answer
+// 430 transiently, and giving up on that answer is what condemned a healthy
+// file in issue #749.
 func (b *UsenetReader) fetchWithRetry(ctx context.Context, cp pool.NntpClient, seg *segment, art *articleBuf) ([]byte, error) {
+	data, err := b.fetchAttempts(ctx, cp, seg, art)
+	if !errors.Is(err, nntppool.ErrArticleNotFound) {
+		return data, err
+	}
+
+	present, verdict := b.recheckMiss(ctx, cp, seg)
+	if !present {
+		return data, &missError{segmentID: seg.Id, verdict: verdict, err: err}
+	}
+
+	b.log.InfoContext(ctx, "article present on re-check, retrying transient miss",
+		"segment_id", seg.Id)
+	retryData, retryErr := b.fetchAttempts(ctx, cp, seg, art)
+	if retryErr == nil {
+		return retryData, nil
+	}
+
+	// Present but unfetchable: a real miss, or the file is re-checked forever
+	// and never repaired.
+	b.log.WarnContext(ctx, "article exists but a second fetch failed, treating the miss as real",
+		"segment_id", seg.Id, "error", retryErr)
+	return retryData, &missError{segmentID: seg.Id, verdict: MissUnfetchable, err: retryErr}
+}
+
+// recheckMiss asks the pool once whether a segment the fetch reported missing
+// is actually there. The verdict is meaningful only when present is false.
+//
+// Streaming only: the import path sweeps availability up front and fast-fails.
+func (b *UsenetReader) recheckMiss(ctx context.Context, cp pool.NntpClient, seg *segment) (present bool, verdict MissVerdict) {
+	if !b.priority || cp == nil || seg.Id == "" || holes.IsPlaceholderID(seg.Id) {
+		return false, MissUnverified
+	}
+	if b.missRechecks.Add(1) > maxMissRechecks {
+		return false, MissUnverified
+	}
+
+	statCtx, cancel := context.WithTimeout(ctx, MissRecheckTimeout)
+	defer cancel()
+
+	switch _, err := cp.StatPriority(statCtx, seg.Id); {
+	case err == nil:
+		return true, MissUnverified
+	case errors.Is(err, nntppool.ErrArticleNotFound):
+		return false, MissConfirmed
+	default:
+		return false, MissUnresolved
+	}
+}
+
+// fetchAttempts runs the retry loop for one wire fetch of a segment.
+func (b *UsenetReader) fetchAttempts(ctx context.Context, cp pool.NntpClient, seg *segment, art *articleBuf) ([]byte, error) {
 	segStart := time.Now()
 	var resultBytes []byte
 	err := retry.Do(

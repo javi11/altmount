@@ -19,17 +19,19 @@ import (
 // usenet_reader_retry_test.go pins the retry-policy invariants for the
 // segment download path.
 
-// TestRetry_ArticleNotFound_NoRetry pins the existing fast-fail policy:
-// nntppool.ErrArticleNotFound is a permanent failure and MUST NOT trigger
-// a retry. Retrying a missing article wastes provider connections for an
-// answer that will never change, and is a measurable contributor to
-// connection-storm conditions when whole batches of articles have expired.
+// TestRetry_ArticleNotFound_NoRetry pins the fast-fail policy for a body
+// fetch: nntppool.ErrArticleNotFound MUST NOT trigger a body retry. Re-pulling
+// a missing article wastes provider connections for an answer that will never
+// change, and is a measurable contributor to connection-storm conditions when
+// whole batches of articles have expired.
 //
-// The downloadSegmentWithRetry path uses retry.RetryIf to short-circuit
-// this error class; this test pins that exactly one BodyPriority call is
-// made even though retry.Attempts is 5.
+// The downloadSegmentWithRetry path uses retry.RetryIf to short-circuit this
+// error class; this test pins that exactly one BodyPriority call is made even
+// though retry.Attempts is 5.
 //
-// Should pass on current code.
+// The reader does spend one cheap existence check confirming the miss before
+// letting it stand (see transient_miss_test.go), which is why this asserts on
+// body calls rather than on every call to the message-ID.
 func TestRetry_ArticleNotFound_NoRetry(t *testing.T) {
 	t.Parallel()
 	const (
@@ -66,9 +68,9 @@ func TestRetry_ArticleNotFound_NoRetry(t *testing.T) {
 	// segments 1..N before segment 0's error short-circuited the reader).
 	time.Sleep(100 * time.Millisecond)
 
-	// segment 0 must have been requested exactly once: the retry policy
+	// segment 0 must have been fetched exactly once: the retry policy
 	// must NOT have re-issued the BodyPriority call.
-	if got := fp.PerMessageCalls(segments.MessageID(0)); got != 1 {
+	if got := fp.PerMessageBodyCalls(segments.MessageID(0)); got != 1 {
 		t.Errorf("segment 0 issued %d BodyPriority calls, want exactly 1 (no retry on ErrArticleNotFound)", got)
 	}
 }

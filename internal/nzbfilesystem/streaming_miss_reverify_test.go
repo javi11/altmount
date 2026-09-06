@@ -237,3 +237,88 @@ func TestUpdateFileHealthOnError_UnresolvedRecheckKeepsPreviousBehaviour(t *test
 		})
 	}
 }
+
+// The reader re-checks a miss before it reaches here (see
+// internal/usenet/transient_miss_test.go). When it has already answered, this
+// handler must reuse that answer rather than pay a second round trip under
+// mvf.mu — even though the article now STATs present, because the reader saw
+// the miss survive a full confirm-and-retry cycle.
+func TestUpdateFileHealthOnError_ReaderVerdictSkipsSecondCheck(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks not supported on Windows")
+	}
+
+	tests := []struct {
+		name    string
+		verdict usenet.MissVerdict
+	}{
+		{"confirmed gone by the reader", usenet.MissConfirmed},
+		{"present but unfetchable", usenet.MissUnfetchable},
+		{"reader could not resolve it", usenet.MissUnresolved},
+	}
+
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo, db, ms := setupStreamHealthEnv(t)
+			ctx := context.Background()
+
+			filePath := "series/stream.s01e3" + string(rune('0'+i)) + ".mkv"
+			seg := writeStreamMeta(t, ms, filePath)
+
+			// Deliberately present: a second check would say "transient" and
+			// wrongly defer a miss the reader already proved out.
+			fp := fakepool.New()
+			fp.SetBehavior(reverifySegmentID, fakepool.SegmentBehavior{Bytes: []byte("present")})
+
+			mvf := newImportedStreamFile(t, ctx, filePath, repo, db, ms, seg, fp)
+			mvf.updateFileHealthOnError(&usenet.DataCorruptionError{
+				UnderlyingErr: nntppool.ErrArticleNotFound,
+				SegmentID:     reverifySegmentID,
+				MissVerdict:   tt.verdict,
+				NoRetry:       true,
+				FileOffset:    -1,
+			}, true)
+
+			fh, err := repo.GetFileHealth(ctx, filePath)
+			require.NoError(t, err)
+			require.NotNil(t, fh)
+			assert.Equal(t, database.HealthStatusRepairTriggered, fh.Status,
+				"a miss the reader already settled must be repaired, not deferred")
+			assert.Zero(t, fp.StatCalls(),
+				"the reader's verdict must be reused, not re-asked under mvf.mu")
+		})
+	}
+}
+
+// Failures that reach here without a reader verdict (the crypt reader, older
+// call sites) still get their own check — on the priority lane, since a
+// normal-lane STAT can queue behind a large BODY for longer than its budget.
+func TestUpdateFileHealthOnError_FallbackRecheckUsesPriorityLane(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks not supported on Windows")
+	}
+	repo, db, ms := setupStreamHealthEnv(t)
+	ctx := context.Background()
+
+	filePath := "series/stream.s01e40.mkv"
+	seg := writeStreamMeta(t, ms, filePath)
+
+	fp := fakepool.New()
+	fp.SetBehavior(reverifySegmentID, fakepool.SegmentBehavior{Bytes: []byte("present")})
+
+	mvf := newImportedStreamFile(t, ctx, filePath, repo, db, ms, seg, fp)
+	mvf.updateFileHealthOnError(&usenet.DataCorruptionError{
+		UnderlyingErr: nntppool.ErrArticleNotFound,
+		SegmentID:     reverifySegmentID,
+		MissVerdict:   usenet.MissUnverified,
+		NoRetry:       true,
+		FileOffset:    -1,
+	}, true)
+
+	fh, err := repo.GetFileHealth(ctx, filePath)
+	require.NoError(t, err)
+	require.NotNil(t, fh)
+	assert.Equal(t, database.HealthStatusPending, fh.Status)
+	assert.Equal(t, int64(1), fp.StatPriorityCalls(),
+		"the fallback re-check must not queue behind a body fetch")
+}
