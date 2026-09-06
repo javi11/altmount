@@ -124,3 +124,20 @@ func TestRemoveFromQueue_MissingIDStillReportsNoRows(t *testing.T) {
 	require.NoError(t, listErr)
 	assert.Len(t, rows, 1, "a failed delete must leave the history row alone")
 }
+
+// The queue-delete history cleanup filters on import_history.nzb_id, which had
+// no index — every single, bulk and "clear completed" delete scanned the whole
+// history table. Migration 040 adds it.
+func TestMigration040_IndexesImportHistoryNzbID(t *testing.T) {
+	db, err := sql.Open("sqlite3", "file:mig040?mode=memory&cache=shared")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	require.NoError(t, runMigrations(db, DialectSQLite))
+
+	var n int
+	require.NoError(t, db.QueryRow(
+		`SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_import_history_nzb_id'`,
+	).Scan(&n))
+	assert.Equal(t, 1, n, "migration 040 must create the nzb_id index")
+}

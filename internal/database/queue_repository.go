@@ -42,12 +42,25 @@ func NewQueueRepository(db *sql.DB, d Dialect) *QueueRepository {
 	}
 }
 
-// RemoveFromQueue removes an item from the queue
+// RemoveFromQueue removes an item from the queue together with its
+// import_history copy.
+//
+// The two rows go together: the SABnzbd history view suppresses the history
+// copy only while the live completed queue row exists, so deleting the queue
+// row alone resurrects the job as a fresh "Completed" slot pointing at a path
+// the ARR already imported and deleted (issue #586). They are deleted in one
+// transaction so a half-applied delete cannot strand a ghost that no retry can
+// reach.
 func (r *QueueRepository) RemoveFromQueue(ctx context.Context, id int64) error {
-	query := `DELETE FROM import_queue WHERE id = ?`
-	_, err := r.db.ExecContext(ctx, query, id)
-
-	return err
+	return r.withQueueTransaction(ctx, func(txRepo *QueueRepository) error {
+		if _, err := txRepo.db.ExecContext(ctx, `DELETE FROM import_queue WHERE id = ?`, id); err != nil {
+			return fmt.Errorf("failed to remove from queue: %w", err)
+		}
+		if _, err := txRepo.db.ExecContext(ctx, `DELETE FROM import_history WHERE nzb_id = ?`, id); err != nil {
+			return fmt.Errorf("failed to remove import history for queue item %d: %w", id, err)
+		}
+		return nil
+	})
 }
 
 // RemoveFromQueueBulk removes multiple items from the queue in bulk
@@ -112,6 +125,16 @@ func (r *QueueRepository) RemoveFromQueueBulk(ctx context.Context, ids []int64) 
 
 			if len(deleteIDs) == 0 {
 				continue
+			}
+
+			// Drop the import_history copies in the same transaction, or the
+			// SABnzbd history view resurrects the deleted jobs (issue #586).
+			historyQuery := fmt.Sprintf(
+				`DELETE FROM import_history WHERE nzb_id IN (%s)`,
+				inPlaceholders(len(deleteIDs)),
+			)
+			if _, err := txRepo.db.ExecContext(ctx, historyQuery, deleteIDs...); err != nil {
+				return fmt.Errorf("failed to bulk delete import history: %w", err)
 			}
 
 			// One query: delete all eligible ids in the chunk.

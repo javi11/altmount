@@ -605,32 +605,36 @@ func (r *Repository) RemoveFromQueueBulk(ctx context.Context, ids []int64) (*Bul
 		}, fmt.Errorf("cannot delete %d items that are currently being processed", processingCount)
 	}
 
-	// Drop the import_history copies of the same jobs before their queue rows
-	// go away, or the SABnzbd history view resurrects them (issue #586).
+	// The history copies and the queue rows go together, in one transaction:
+	// a half-applied delete either resurrects the job in the SABnzbd history
+	// view or drops history with no queue cleanup to match (issue #586).
 	historyQuery := fmt.Sprintf(
 		`DELETE FROM import_history WHERE nzb_id IN (SELECT id FROM import_queue WHERE id IN (%s) AND status != ?)`,
 		strings.Join(placeholders, ","))
-	historyArgs := make([]any, 0, len(args)+1)
-	historyArgs = append(historyArgs, args...)
-	historyArgs = append(historyArgs, QueueStatusProcessing)
-	if _, err := r.db.ExecContext(ctx, historyQuery, historyArgs...); err != nil {
-		return nil, fmt.Errorf("failed to remove import history for queue items: %w", err)
-	}
-
-	// Delete items that are not processing
 	deleteQuery := fmt.Sprintf(`DELETE FROM import_queue WHERE id IN (%s) AND status != ?`, strings.Join(placeholders, ","))
-	deleteArgs := make([]any, 0, len(args)+1)
-	deleteArgs = append(deleteArgs, args...)
-	deleteArgs = append(deleteArgs, QueueStatusProcessing)
 
-	result, err := r.db.ExecContext(ctx, deleteQuery, deleteArgs...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to remove items from queue: %w", err)
-	}
+	txArgs := make([]any, 0, len(args)+1)
+	txArgs = append(txArgs, args...)
+	txArgs = append(txArgs, QueueStatusProcessing)
 
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get rows affected: %w", err)
+	var rowsAffected int64
+	if err := r.WithTransaction(ctx, func(tx *Repository) error {
+		if _, err := tx.db.ExecContext(ctx, historyQuery, txArgs...); err != nil {
+			return fmt.Errorf("failed to remove import history for queue items: %w", err)
+		}
+
+		result, err := tx.db.ExecContext(ctx, deleteQuery, txArgs...)
+		if err != nil {
+			return fmt.Errorf("failed to remove items from queue: %w", err)
+		}
+
+		rowsAffected, err = result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("failed to get rows affected: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 
 	return &BulkOperationResult{
@@ -1028,43 +1032,57 @@ func (r *Repository) clearQueueItemsByStatus(ctx context.Context, statuses ...Qu
 		args = append(args, s)
 	}
 
-	paths := []string{}
+	// The path listing and both deletes run in one transaction. Reading the
+	// paths outside it let a row that entered the target status in between be
+	// deleted without its nzb_path ever reaching the caller for on-disk
+	// cleanup, and splitting the two deletes could leave history dropped with
+	// the queue rows still present (issue #586).
 	selectQuery := fmt.Sprintf(`SELECT nzb_path FROM import_queue WHERE status IN (%s)`, placeholders)
-	rows, err := r.db.QueryContext(ctx, selectQuery, args...)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to list queue paths: %w", err)
-	}
-	for rows.Next() {
-		var p string
-		if err := rows.Scan(&p); err != nil {
-			rows.Close()
-			return nil, 0, fmt.Errorf("failed to scan queue path: %w", err)
-		}
-		if p != "" {
-			paths = append(paths, p)
-		}
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, 0, err
-	}
-
-	// Drop the import_history copies of the same jobs before their queue rows
-	// go away, or the SABnzbd history view resurrects them (issue #586).
 	historyQuery := fmt.Sprintf(
 		`DELETE FROM import_history WHERE nzb_id IN (SELECT id FROM import_queue WHERE status IN (%s))`, placeholders)
-	if _, err := r.db.ExecContext(ctx, historyQuery, args...); err != nil {
-		return nil, 0, fmt.Errorf("failed to clear import history for queue items: %w", err)
-	}
-
 	deleteQuery := fmt.Sprintf(`DELETE FROM import_queue WHERE status IN (%s)`, placeholders)
-	result, err := r.db.ExecContext(ctx, deleteQuery, args...)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to clear queue items: %w", err)
-	}
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to get rows affected: %w", err)
+
+	paths := []string{}
+	var rowsAffected int64
+	if err := r.WithTransaction(ctx, func(tx *Repository) error {
+		rows, err := tx.db.QueryContext(ctx, selectQuery, args...)
+		if err != nil {
+			return fmt.Errorf("failed to list queue paths: %w", err)
+		}
+		func() {
+			defer rows.Close()
+			for rows.Next() {
+				var p string
+				if err = rows.Scan(&p); err != nil {
+					return
+				}
+				if p != "" {
+					paths = append(paths, p)
+				}
+			}
+			if err == nil {
+				err = rows.Err()
+			}
+		}()
+		if err != nil {
+			return fmt.Errorf("failed to scan queue paths: %w", err)
+		}
+
+		if _, err := tx.db.ExecContext(ctx, historyQuery, args...); err != nil {
+			return fmt.Errorf("failed to clear import history for queue items: %w", err)
+		}
+
+		result, err := tx.db.ExecContext(ctx, deleteQuery, args...)
+		if err != nil {
+			return fmt.Errorf("failed to clear queue items: %w", err)
+		}
+		rowsAffected, err = result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("failed to get rows affected: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return nil, 0, err
 	}
 	return paths, int(rowsAffected), nil
 }
