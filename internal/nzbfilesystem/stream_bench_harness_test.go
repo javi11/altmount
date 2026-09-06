@@ -69,6 +69,9 @@ func (noopBenchStats) GetOldestStatDate(context.Context) (time.Time, error) {
 func (noopBenchStats) GetOldestProviderStatDates(context.Context) (map[string]time.Time, error) {
 	return map[string]time.Time{}, nil
 }
+func (noopBenchStats) MigrateSystemStats(context.Context, map[string]int64, []string) error {
+	return nil
+}
 
 type benchHarness struct {
 	srv     []*nntpserver.Server
