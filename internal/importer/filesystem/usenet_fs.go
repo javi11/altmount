@@ -16,12 +16,12 @@ import (
 
 	"github.com/spf13/afero"
 
-	"github.com/javi11/altmount/internal/importer/parser"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/pool"
-	"github.com/javi11/altmount/internal/progress"
-	"github.com/javi11/altmount/internal/slogutil"
-	"github.com/javi11/altmount/internal/usenet"
+	"github.com/kipsilabs/altmount/internal/importer/parser"
+	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
+	"github.com/kipsilabs/altmount/internal/pool"
+	"github.com/kipsilabs/altmount/internal/progress"
+	"github.com/kipsilabs/altmount/internal/slogutil"
+	"github.com/kipsilabs/altmount/internal/usenet"
 )
 
 // Compile-time interface checks

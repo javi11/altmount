@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/importer/utils"
-	"github.com/javi11/altmount/internal/progress"
+	"github.com/kipsilabs/altmount/internal/database"
+	"github.com/kipsilabs/altmount/internal/importer/utils"
+	"github.com/kipsilabs/altmount/internal/progress"
 )
 
 // SABnzbd-compatible API response structures

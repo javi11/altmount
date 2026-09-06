@@ -4,10 +4,10 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/javi11/altmount/internal/holes"
-	"github.com/javi11/altmount/internal/metadata"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/usenet"
+	"github.com/kipsilabs/altmount/internal/holes"
+	"github.com/kipsilabs/altmount/internal/metadata"
+	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
+	"github.com/kipsilabs/altmount/internal/usenet"
 )
 
 // classifyHoles turns a check's missing segments into a playback-impact

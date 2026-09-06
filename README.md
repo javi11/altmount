@@ -27,7 +27,7 @@ services:
   altmount:
     extra_hosts:
       - "host.docker.internal:host-gateway" # Optional if you rclone is outside the container
-    image: ghcr.io/javi11/altmount:latest
+    image: ghcr.io/kipsilabs/altmount:latest
     container_name: altmount
     environment:
       - PUID=1000
@@ -56,7 +56,7 @@ services:
 ### CLI Installation
 
 ```bash
-go install github.com/javi11/altmount@latest
+go install github.com/kipsilabs/altmount@latest
 altmount serve --config config.yaml
 ```
 
@@ -90,8 +90,8 @@ and your file manager — needs to be restarted to pick up the change.
 ## Links
 
 - 📚 [Documentation](https://altmount.kipsilabs.top)
-- 🐛 [Issues](https://github.com/javi11/altmount/issues)
-- 💬 [Discussions](https://github.com/javi11/altmount/discussions)
+- 🐛 [Issues](https://github.com/kipsilabs/altmount/issues)
+- 💬 [Discussions](https://github.com/kipsilabs/altmount/discussions)
 - 🎮 [Discord](https://discord.gg/vCWwuvm3F3)
 
 ## Contributing

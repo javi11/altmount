@@ -18,8 +18,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/Max-Sum/base32768"
-	"github.com/javi11/altmount/internal/encryption/rclone/pkcs7"
-	"github.com/javi11/altmount/internal/encryption/rclone/version"
+	"github.com/kipsilabs/altmount/internal/encryption/rclone/pkcs7"
+	"github.com/kipsilabs/altmount/internal/encryption/rclone/version"
 	"github.com/rfjakob/eme"
 	"golang.org/x/crypto/nacl/secretbox"
 	"golang.org/x/crypto/scrypt"

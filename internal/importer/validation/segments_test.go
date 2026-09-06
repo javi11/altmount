@@ -3,7 +3,7 @@ package validation
 import (
 	"testing"
 
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
 )
 
 // segmentsOfSize builds n segments each `size` bytes, with contiguous offsets.

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/javi11/altmount/internal/importer/rarname"
-	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
+	"github.com/kipsilabs/altmount/internal/importer/rarname"
+	"github.com/kipsilabs/altmount/internal/importer/utils/nzbtrim"
 )
 
 // volumeIndex resolves a requested RAR/split volume filename to the actual stored

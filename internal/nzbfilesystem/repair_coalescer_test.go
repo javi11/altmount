@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/javi11/altmount/internal/config"
+	"github.com/kipsilabs/altmount/internal/config"
 )
 
 // fakeRcloneClient counts RefreshDir calls and records every directory list it

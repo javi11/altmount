@@ -13,7 +13,7 @@ import (
 	"github.com/javi11/nntppool/v4"
 	"github.com/javi11/nzbparser"
 
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
 )
 
 // ResolveFromNzb builds a repair plan straight from a parsed NZB, for releases

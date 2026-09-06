@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/javi11/altmount/internal/newsnab"
-	"github.com/javi11/altmount/internal/prowlarr"
+	"github.com/kipsilabs/altmount/internal/newsnab"
+	"github.com/kipsilabs/altmount/internal/prowlarr"
 )
 
 // SearchParams contains the query parameters for a Stremio stream search.

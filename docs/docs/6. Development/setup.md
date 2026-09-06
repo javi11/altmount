@@ -40,7 +40,7 @@ altmount/
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/javi11/altmount.git
+git clone https://github.com/kipsilabs/altmount.git
 cd altmount
 ```
 
@@ -342,7 +342,7 @@ docker run -p 8080:8080 -v $(pwd)/config.yaml:/app/config.yaml altmount:dev
 
 - Check the [Troubleshooting Guide](../5. Troubleshooting/common-issues.md)
 - Review the [API Documentation](../4. API/endpoints.md)
-- Open an issue on [GitHub](https://github.com/javi11/altmount/issues)
+- Open an issue on [GitHub](https://github.com/kipsilabs/altmount/issues)
 
 ## Contributing
 

@@ -17,9 +17,9 @@ import (
 // symbols so the running binary reports its real release version.
 func TestDockerfilesInjectVersionLdflags(t *testing.T) {
 	symbols := []string{
-		"github.com/javi11/altmount/internal/version.Version=",
-		"github.com/javi11/altmount/internal/version.GitCommit=",
-		"github.com/javi11/altmount/internal/version.Timestamp=",
+		"github.com/kipsilabs/altmount/internal/version.Version=",
+		"github.com/kipsilabs/altmount/internal/version.GitCommit=",
+		"github.com/kipsilabs/altmount/internal/version.Timestamp=",
 	}
 
 	dockerfiles := []string{

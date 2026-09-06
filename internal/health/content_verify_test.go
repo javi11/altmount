@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/testsupport/fakepool"
-	"github.com/javi11/altmount/internal/usenet"
+	"github.com/kipsilabs/altmount/internal/config"
+	"github.com/kipsilabs/altmount/internal/database"
+	"github.com/kipsilabs/altmount/internal/testsupport/fakepool"
+	"github.com/kipsilabs/altmount/internal/usenet"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 )

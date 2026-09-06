@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/javi11/altmount/internal/prowlarr"
+	"github.com/kipsilabs/altmount/internal/prowlarr"
 )
 
 // Real release names captured from a live addon query for

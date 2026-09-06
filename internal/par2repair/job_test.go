@@ -17,8 +17,8 @@ import (
 
 	"github.com/javi11/nntppool/v4"
 
-	"github.com/javi11/altmount/internal/importer/parser/par2"
-	"github.com/javi11/altmount/internal/testsupport/par2gen"
+	"github.com/kipsilabs/altmount/internal/importer/parser/par2"
+	"github.com/kipsilabs/altmount/internal/testsupport/par2gen"
 )
 
 // fakeFetcher serves article payloads from a map; absent keys are dead.

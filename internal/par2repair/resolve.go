@@ -17,8 +17,8 @@ import (
 
 	"github.com/javi11/nntppool/v4"
 
-	"github.com/javi11/altmount/internal/importer/parser/par2"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	"github.com/kipsilabs/altmount/internal/importer/parser/par2"
+	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
 )
 
 // Resolution is everything RunJob needs, derived from a file's metadata.

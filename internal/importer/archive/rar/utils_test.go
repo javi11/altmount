@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/javi11/altmount/internal/importer/parser"
+	"github.com/kipsilabs/altmount/internal/importer/parser"
 )
 
 func TestSetKey(t *testing.T) {

@@ -5,8 +5,8 @@ import (
 	"io/fs"
 	"os"
 
-	"github.com/javi11/altmount/internal/slogutil"
-	"github.com/javi11/altmount/internal/utils"
+	"github.com/kipsilabs/altmount/internal/slogutil"
+	"github.com/kipsilabs/altmount/internal/utils"
 	"github.com/spf13/afero"
 )
 

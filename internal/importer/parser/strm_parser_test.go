@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

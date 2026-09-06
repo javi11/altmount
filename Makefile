@@ -113,7 +113,7 @@ build-cli: build-frontend
 	CGO_ENABLED=1 $(GO) build \
 		-trimpath \
 		-tags=cli \
-		-ldflags="-s -w -X 'github.com/javi11/altmount/internal/version.Version=$$VERSION' -X 'github.com/javi11/altmount/internal/version.GitCommit=$$COMMIT' -X 'github.com/javi11/altmount/internal/version.Timestamp=$$TIMESTAMP'" \
+		-ldflags="-s -w -X 'github.com/kipsilabs/altmount/internal/version.Version=$$VERSION' -X 'github.com/kipsilabs/altmount/internal/version.GitCommit=$$COMMIT' -X 'github.com/kipsilabs/altmount/internal/version.Timestamp=$$TIMESTAMP'" \
 		-o altmount \
 		./cmd/altmount/main.go
 
@@ -127,7 +127,7 @@ build-cli-windows: build-frontend
 		$(GO) build \
 		-trimpath \
 		-tags=cli \
-		-ldflags="-s -w -X 'github.com/javi11/altmount/internal/version.Version=$$VERSION' -X 'github.com/javi11/altmount/internal/version.GitCommit=$$COMMIT' -X 'github.com/javi11/altmount/internal/version.Timestamp=$$TIMESTAMP'" \
+		-ldflags="-s -w -X 'github.com/kipsilabs/altmount/internal/version.Version=$$VERSION' -X 'github.com/kipsilabs/altmount/internal/version.GitCommit=$$COMMIT' -X 'github.com/kipsilabs/altmount/internal/version.Timestamp=$$TIMESTAMP'" \
 		-o altmount.exe \
 		./cmd/altmount/main.go
 # Prerequisites for Windows build:

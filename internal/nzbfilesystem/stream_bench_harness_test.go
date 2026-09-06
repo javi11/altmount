@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/javi11/altmount/internal/pool"
-	"github.com/javi11/altmount/internal/streambench"
-	"github.com/javi11/altmount/internal/testsupport/nntpserver"
-	"github.com/javi11/altmount/internal/usenet"
+	"github.com/kipsilabs/altmount/internal/pool"
+	"github.com/kipsilabs/altmount/internal/streambench"
+	"github.com/kipsilabs/altmount/internal/testsupport/nntpserver"
+	"github.com/kipsilabs/altmount/internal/usenet"
 	"github.com/javi11/nntppool/v4"
 )
 

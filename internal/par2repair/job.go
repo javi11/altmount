@@ -13,7 +13,7 @@ import (
 
 	"github.com/javi11/nntppool/v4"
 
-	"github.com/javi11/altmount/internal/importer/parser/par2"
+	"github.com/kipsilabs/altmount/internal/importer/parser/par2"
 )
 
 // ArticleFetcher fetches one decoded article payload. Implementations must be

@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/health"
+	"github.com/kipsilabs/altmount/internal/database"
+	"github.com/kipsilabs/altmount/internal/health"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/require"
 )

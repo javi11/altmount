@@ -58,7 +58,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
     --mount=type=cache,target=/tmp/go-build-cache,sharing=locked \
     CGO_ENABLED=1 GOOS=linux \
     go build -a \
-    -ldflags "-linkmode external -extldflags \"-static\" -X 'github.com/javi11/altmount/internal/version.Version=${VERSION}' -X 'github.com/javi11/altmount/internal/version.GitCommit=${COMMIT}' -X 'github.com/javi11/altmount/internal/version.Timestamp=${BUILD_TIMESTAMP}'" \
+    -ldflags "-linkmode external -extldflags \"-static\" -X 'github.com/kipsilabs/altmount/internal/version.Version=${VERSION}' -X 'github.com/kipsilabs/altmount/internal/version.GitCommit=${COMMIT}' -X 'github.com/kipsilabs/altmount/internal/version.Timestamp=${BUILD_TIMESTAMP}'" \
     -o altmount cmd/altmount/main.go
 
 # Final stage - use custom base image with pre-installed packages
@@ -135,6 +135,6 @@ HEALTHCHECK --interval=5s --timeout=10s --start-period=5s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://localhost:${PORT}/live || exit 1
 
 # Labels
-LABEL org.opencontainers.image.source="https://github.com/javi11/altmount"
+LABEL org.opencontainers.image.source="https://github.com/kipsilabs/altmount"
 LABEL build_version="version: Build-date:- ${VERSION}  ${BUILD_DATE}"
 LABEL maintainer="javi11"

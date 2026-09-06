@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/pool"
-	"github.com/javi11/altmount/internal/progress"
+	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
+	"github.com/kipsilabs/altmount/internal/pool"
+	"github.com/kipsilabs/altmount/internal/progress"
 )
 
 // AnalyzeISO inspects the given ISO source and returns:

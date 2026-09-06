@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/importer"
+	"github.com/kipsilabs/altmount/internal/database"
+	"github.com/kipsilabs/altmount/internal/importer"
 )
 
 // handleStartManualScan handles POST /import/scan

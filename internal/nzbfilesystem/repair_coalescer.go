@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/pkg/rclonecli"
+	"github.com/kipsilabs/altmount/internal/config"
+	"github.com/kipsilabs/altmount/pkg/rclonecli"
 )
 
 // RepairCoalescer throttles per-file streaming-failure repair triggers and

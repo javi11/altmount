@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
 	"github.com/javi11/nzbparser"
 )
 

@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/metadata"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	"github.com/kipsilabs/altmount/internal/database"
+	"github.com/kipsilabs/altmount/internal/metadata"
+	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

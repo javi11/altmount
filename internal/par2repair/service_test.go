@@ -13,8 +13,8 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 
-	"github.com/javi11/altmount/internal/database"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	"github.com/kipsilabs/altmount/internal/database"
+	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
 )
 
 func newTestRepo(t *testing.T) *database.Par2RepairRepository {

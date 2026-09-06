@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/javi11/altmount/internal/importer/parser"
+	"github.com/kipsilabs/altmount/internal/importer/parser"
 )
 
 // sampleProofPattern matches filenames containing "sample" or "proof" as a standalone word.

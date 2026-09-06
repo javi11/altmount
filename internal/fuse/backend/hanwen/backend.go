@@ -12,7 +12,7 @@ import (
 
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
-	"github.com/javi11/altmount/internal/fuse/backend"
+	"github.com/kipsilabs/altmount/internal/fuse/backend"
 )
 
 const mountTimeout = 120 * time.Second

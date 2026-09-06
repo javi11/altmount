@@ -10,11 +10,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/javi11/altmount/internal/arrs/clients"
-	"github.com/javi11/altmount/internal/arrs/failures"
-	"github.com/javi11/altmount/internal/arrs/instances"
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/database"
+	"github.com/kipsilabs/altmount/internal/arrs/clients"
+	"github.com/kipsilabs/altmount/internal/arrs/failures"
+	"github.com/kipsilabs/altmount/internal/arrs/instances"
+	"github.com/kipsilabs/altmount/internal/config"
+	"github.com/kipsilabs/altmount/internal/database"
 	"golift.io/starr"
 )
 

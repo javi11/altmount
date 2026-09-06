@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/javi11/altmount/internal/config"
+	"github.com/kipsilabs/altmount/internal/config"
 	"github.com/spf13/cobra"
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/term"

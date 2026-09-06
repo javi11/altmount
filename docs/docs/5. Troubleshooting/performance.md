@@ -111,7 +111,7 @@ If media playback freezes or buffers frequently:
 1. **Update to the latest AltMount version**: Playback improvements are shipped regularly. Pull the latest image:
 
    ```bash
-   docker pull javi11/altmount:latest
+   docker pull ghcr.io/kipsilabs/altmount:latest
    docker restart altmount
    ```
 

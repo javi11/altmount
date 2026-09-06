@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/javi11/altmount/internal/config"
+	"github.com/kipsilabs/altmount/internal/config"
 )
 
 // defaultMigrationGroup is used when the config leaves default_group empty.

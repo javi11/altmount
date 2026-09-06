@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/testsupport/fakepool"
-	"github.com/javi11/altmount/internal/testsupport/goroutines"
-	"github.com/javi11/altmount/internal/testsupport/segments"
+	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
+	"github.com/kipsilabs/altmount/internal/testsupport/fakepool"
+	"github.com/kipsilabs/altmount/internal/testsupport/goroutines"
+	"github.com/kipsilabs/altmount/internal/testsupport/segments"
 )
 
 // slowCloseReader is a stand-in io.ReadCloser whose Close blocks for the

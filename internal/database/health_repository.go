@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/javi11/altmount/internal/arrs/model"
+	"github.com/kipsilabs/altmount/internal/arrs/model"
 )
 
 // HealthRepository handles file health database operations

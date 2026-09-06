@@ -7,7 +7,7 @@ import (
 	"os"
 	"runtime/debug"
 
-	"github.com/javi11/altmount/internal/config"
+	"github.com/kipsilabs/altmount/internal/config"
 )
 
 // applySoftMemoryLimit sets the configured Go soft memory limit and returns

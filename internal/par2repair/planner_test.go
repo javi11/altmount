@@ -7,8 +7,8 @@ import (
 	"io"
 	"testing"
 
-	"github.com/javi11/altmount/internal/importer/parser/par2"
-	"github.com/javi11/altmount/internal/testsupport/par2gen"
+	"github.com/kipsilabs/altmount/internal/importer/parser/par2"
+	"github.com/kipsilabs/altmount/internal/testsupport/par2gen"
 )
 
 // mkIndex builds a parsed PAR2 index over the given file contents.

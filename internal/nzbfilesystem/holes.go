@@ -5,10 +5,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/javi11/altmount/internal/holes"
-	"github.com/javi11/altmount/internal/metadata"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/usenet"
+	"github.com/kipsilabs/altmount/internal/holes"
+	"github.com/kipsilabs/altmount/internal/metadata"
+	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
+	"github.com/kipsilabs/altmount/internal/usenet"
 )
 
 // holeMetaSnapshot holds the mvf.meta fields the hole path needs, captured

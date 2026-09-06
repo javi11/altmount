@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/javi11/altmount/internal/importer/archive/iso"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	"github.com/kipsilabs/altmount/internal/importer/archive/iso"
+	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
 )
 
 func TestDiscGroupKey(t *testing.T) {

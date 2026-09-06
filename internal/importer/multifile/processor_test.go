@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/javi11/altmount/internal/importer/parser"
-	"github.com/javi11/altmount/internal/metadata"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/progress"
+	"github.com/kipsilabs/altmount/internal/importer/parser"
+	"github.com/kipsilabs/altmount/internal/metadata"
+	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
+	"github.com/kipsilabs/altmount/internal/progress"
 )
 
 // recordingBroadcaster captures progress updates for assertions.

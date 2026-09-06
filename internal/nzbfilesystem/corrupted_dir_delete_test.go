@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/metadata"
+	"github.com/kipsilabs/altmount/internal/config"
+	"github.com/kipsilabs/altmount/internal/metadata"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

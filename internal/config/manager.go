@@ -14,7 +14,7 @@ import (
 	"unicode"
 
 	"github.com/go-viper/mapstructure/v2"
-	"github.com/javi11/altmount/internal/utils"
+	"github.com/kipsilabs/altmount/internal/utils"
 	"github.com/javi11/nntppool/v4"
 	"github.com/jinzhu/copier"
 	"github.com/robfig/cron/v3"

@@ -3,10 +3,10 @@ package rar
 import (
 	"context"
 
-	"github.com/javi11/altmount/internal/importer/archive"
-	"github.com/javi11/altmount/internal/importer/parser"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/progress"
+	"github.com/kipsilabs/altmount/internal/importer/archive"
+	"github.com/kipsilabs/altmount/internal/importer/parser"
+	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
+	"github.com/kipsilabs/altmount/internal/progress"
 )
 
 // Content is an alias for archive.Content

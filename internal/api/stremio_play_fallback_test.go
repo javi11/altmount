@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/prowlarr"
+	"github.com/kipsilabs/altmount/internal/config"
+	"github.com/kipsilabs/altmount/internal/database"
+	"github.com/kipsilabs/altmount/internal/prowlarr"
 )
 
 func contains(haystack, needle string) bool { return strings.Contains(haystack, needle) }

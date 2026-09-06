@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/avast/retry-go/v4"
-	"github.com/javi11/altmount/internal/database"
+	"github.com/kipsilabs/altmount/internal/database"
 )
 
 // QueueRepository defines the interface for queue database operations

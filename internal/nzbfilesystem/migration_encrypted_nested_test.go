@@ -8,11 +8,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	aescipher "github.com/javi11/altmount/internal/encryption/aes"
-	"github.com/javi11/altmount/internal/metadata"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/testsupport/fakepool"
-	"github.com/javi11/altmount/internal/testsupport/segments"
+	aescipher "github.com/kipsilabs/altmount/internal/encryption/aes"
+	"github.com/kipsilabs/altmount/internal/metadata"
+	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
+	"github.com/kipsilabs/altmount/internal/testsupport/fakepool"
+	"github.com/kipsilabs/altmount/internal/testsupport/segments"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

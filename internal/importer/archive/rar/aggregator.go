@@ -15,17 +15,17 @@ import (
 
 	concpool "github.com/sourcegraph/conc/pool"
 
-	"github.com/javi11/altmount/internal/encryption/aes"
-	"github.com/javi11/altmount/internal/importer/archive"
-	"github.com/javi11/altmount/internal/importer/filesystem"
-	"github.com/javi11/altmount/internal/importer/parser"
-	"github.com/javi11/altmount/internal/importer/utils"
-	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
-	"github.com/javi11/altmount/internal/importer/validation"
-	"github.com/javi11/altmount/internal/metadata"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/pool"
-	"github.com/javi11/altmount/internal/progress"
+	"github.com/kipsilabs/altmount/internal/encryption/aes"
+	"github.com/kipsilabs/altmount/internal/importer/archive"
+	"github.com/kipsilabs/altmount/internal/importer/filesystem"
+	"github.com/kipsilabs/altmount/internal/importer/parser"
+	"github.com/kipsilabs/altmount/internal/importer/utils"
+	"github.com/kipsilabs/altmount/internal/importer/utils/nzbtrim"
+	"github.com/kipsilabs/altmount/internal/importer/validation"
+	"github.com/kipsilabs/altmount/internal/metadata"
+	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
+	"github.com/kipsilabs/altmount/internal/pool"
+	"github.com/kipsilabs/altmount/internal/progress"
 )
 
 var (

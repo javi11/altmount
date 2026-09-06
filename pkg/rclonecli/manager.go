@@ -16,8 +16,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/httpclient"
+	"github.com/kipsilabs/altmount/internal/config"
+	"github.com/kipsilabs/altmount/internal/httpclient"
 )
 
 // Manager handles the rclone RC server and provides mount operations

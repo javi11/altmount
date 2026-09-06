@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/javi11/altmount/internal/config"
+	"github.com/kipsilabs/altmount/internal/config"
 	"github.com/stretchr/testify/assert"
 )
 

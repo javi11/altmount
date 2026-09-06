@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/pkg/rclonecli"
+	"github.com/kipsilabs/altmount/internal/config"
+	"github.com/kipsilabs/altmount/pkg/rclonecli"
 )
 
 // NotifyVFS notifies rclone VFS about file changes

@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/javi11/altmount/internal/streambench"
+	"github.com/kipsilabs/altmount/internal/streambench"
 )
 
 func main() {

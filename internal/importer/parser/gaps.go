@@ -3,7 +3,7 @@ package parser
 import (
 	"sort"
 
-	"github.com/javi11/altmount/internal/holes"
+	"github.com/kipsilabs/altmount/internal/holes"
 	"github.com/javi11/nzbparser"
 )
 

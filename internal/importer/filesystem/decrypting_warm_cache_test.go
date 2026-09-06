@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/testsupport/fakepool"
+	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
+	"github.com/kipsilabs/altmount/internal/testsupport/fakepool"
 )
 
 // TestDecryptingWarmCacheReadsPastPrefix pins the invariant that the warm

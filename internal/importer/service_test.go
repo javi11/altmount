@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/javi11/altmount/internal/importer/queue"
+	"github.com/kipsilabs/altmount/internal/importer/queue"
 	"github.com/stretchr/testify/assert"
 )
 

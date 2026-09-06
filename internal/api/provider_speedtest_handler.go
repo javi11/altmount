@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/javi11/altmount/internal/config"
+	"github.com/kipsilabs/altmount/internal/config"
 	"github.com/javi11/nntppool/v4"
 )
 

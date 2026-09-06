@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/pool"
-	"github.com/javi11/altmount/internal/testsupport/fakepool"
+	"github.com/kipsilabs/altmount/internal/database"
+	"github.com/kipsilabs/altmount/internal/pool"
+	"github.com/kipsilabs/altmount/internal/testsupport/fakepool"
 	"github.com/javi11/nntppool/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

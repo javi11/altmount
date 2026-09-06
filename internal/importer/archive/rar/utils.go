@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/javi11/altmount/internal/importer/archive"
-	"github.com/javi11/altmount/internal/importer/parser"
+	"github.com/kipsilabs/altmount/internal/importer/archive"
+	"github.com/kipsilabs/altmount/internal/importer/parser"
 )
 
 var (

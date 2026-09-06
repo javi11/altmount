@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/javi11/altmount/internal/importer/parser"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	"github.com/kipsilabs/altmount/internal/importer/parser"
+	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
 	"github.com/javi11/rardecode/v2"
 	"github.com/stretchr/testify/require"
 )

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/javi11/altmount/internal/httpclient"
+	"github.com/kipsilabs/altmount/internal/httpclient"
 )
 
 const (

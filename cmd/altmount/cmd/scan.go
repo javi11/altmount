@@ -8,8 +8,8 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/httpclient"
+	"github.com/kipsilabs/altmount/internal/config"
+	"github.com/kipsilabs/altmount/internal/httpclient"
 	"github.com/spf13/cobra"
 )
 

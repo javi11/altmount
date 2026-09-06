@@ -5,7 +5,7 @@ import (
 	"log/slog"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/javi11/altmount/internal/metadata"
+	"github.com/kipsilabs/altmount/internal/metadata"
 )
 
 // MetadataMigrationHandlers holds the legacy-metadata migration handlers.

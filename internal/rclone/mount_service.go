@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/pkg/rclonecli"
+	"github.com/kipsilabs/altmount/internal/config"
+	"github.com/kipsilabs/altmount/pkg/rclonecli"
 )
 
 // MountService handles rclone mount operations using RC server

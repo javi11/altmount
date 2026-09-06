@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/holes"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	"github.com/kipsilabs/altmount/internal/database"
+	"github.com/kipsilabs/altmount/internal/holes"
+	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
 )
 
 // padMetadataStore is the slice of metadata.MetadataService the pad recorder

@@ -12,7 +12,7 @@ import (
 
 	cgofuse "github.com/winfsp/cgofuse/fuse"
 
-	"github.com/javi11/altmount/internal/fuse/backend"
+	"github.com/kipsilabs/altmount/internal/fuse/backend"
 )
 
 func init() {

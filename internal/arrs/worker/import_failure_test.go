@@ -9,9 +9,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/javi11/altmount/internal/arrs/clients"
-	"github.com/javi11/altmount/internal/arrs/instances"
-	"github.com/javi11/altmount/internal/config"
+	"github.com/kipsilabs/altmount/internal/arrs/clients"
+	"github.com/kipsilabs/altmount/internal/arrs/instances"
+	"github.com/kipsilabs/altmount/internal/config"
 )
 
 // fakeSonarrQueue serves a fixed Sonarr queue and records deletes/unmonitors.

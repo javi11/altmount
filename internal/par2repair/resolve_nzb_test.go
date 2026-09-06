@@ -11,8 +11,8 @@ import (
 
 	"github.com/javi11/nzbparser"
 
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/testsupport/par2gen"
+	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
+	"github.com/kipsilabs/altmount/internal/testsupport/par2gen"
 )
 
 // nzbFromFixture rebuilds the same release as an *nzbparser.Nzb, so the two

@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/metadata"
+	"github.com/kipsilabs/altmount/internal/config"
+	"github.com/kipsilabs/altmount/internal/database"
+	"github.com/kipsilabs/altmount/internal/metadata"
 )
 
 func TestSkipARRNotificationFromField(t *testing.T) {

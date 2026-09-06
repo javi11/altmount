@@ -12,10 +12,10 @@ import (
 
 	"github.com/javi11/nzbparser"
 
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/metadata"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/nzbfile"
+	"github.com/kipsilabs/altmount/internal/database"
+	"github.com/kipsilabs/altmount/internal/metadata"
+	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
+	"github.com/kipsilabs/altmount/internal/nzbfile"
 )
 
 // Config is the repair policy snapshot the service reads per job (so config

@@ -6,7 +6,7 @@ import (
 	"math"
 	"sort"
 
-	"github.com/javi11/altmount/internal/importer/parser/par2"
+	"github.com/kipsilabs/altmount/internal/importer/parser/par2"
 )
 
 // ErrUnrepairable marks damage that PAR2 repair cannot or may not fix:

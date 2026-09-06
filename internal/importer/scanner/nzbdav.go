@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/nzbdav"
+	"github.com/kipsilabs/altmount/internal/database"
+	"github.com/kipsilabs/altmount/internal/nzbdav"
 )
 
 // BatchQueueAdder defines the interface for batch queue operations

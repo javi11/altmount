@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/javi11/altmount/internal/httpclient"
+	"github.com/kipsilabs/altmount/internal/httpclient"
 )
 
 // IndexerConfig holds configuration for a single direct Newsnab/Newznab indexer.

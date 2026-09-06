@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/javi11/altmount/internal/arrs"
-	"github.com/javi11/altmount/internal/config"
+	"github.com/kipsilabs/altmount/internal/arrs"
+	"github.com/kipsilabs/altmount/internal/config"
 	"github.com/stretchr/testify/assert"
 )
 

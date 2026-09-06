@@ -9,11 +9,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/metadata"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/testsupport/fakepool"
-	"github.com/javi11/altmount/internal/testsupport/nzbbuild"
+	"github.com/kipsilabs/altmount/internal/config"
+	"github.com/kipsilabs/altmount/internal/metadata"
+	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
+	"github.com/kipsilabs/altmount/internal/testsupport/fakepool"
+	"github.com/kipsilabs/altmount/internal/testsupport/nzbbuild"
 	"github.com/javi11/nntppool/v4"
 	"github.com/javi11/nzbparser"
 )

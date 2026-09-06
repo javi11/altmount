@@ -7,8 +7,8 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/adaptor"
-	"github.com/javi11/altmount/internal/auth"
-	"github.com/javi11/altmount/internal/database"
+	"github.com/kipsilabs/altmount/internal/auth"
+	"github.com/kipsilabs/altmount/internal/database"
 )
 
 // AuthResponse represents authentication response data

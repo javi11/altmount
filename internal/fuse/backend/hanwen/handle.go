@@ -12,8 +12,8 @@ import (
 
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
-	"github.com/javi11/altmount/internal/fuse/backend"
-	"github.com/javi11/altmount/internal/nzbfilesystem"
+	"github.com/kipsilabs/altmount/internal/fuse/backend"
+	"github.com/kipsilabs/altmount/internal/nzbfilesystem"
 	"github.com/spf13/afero"
 )
 

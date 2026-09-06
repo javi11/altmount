@@ -6,7 +6,7 @@
 //	@termsOfService	http://altmount.kipsilabs.top
 //
 //	@contact.name	AltMount
-//	@contact.url	https://github.com/javi11/altmount/issues
+//	@contact.url	https://github.com/kipsilabs/altmount/issues
 //
 //	@license.name	MIT
 //

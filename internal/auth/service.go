@@ -13,7 +13,7 @@ import (
 	"github.com/go-pkgz/auth/v2"
 	"github.com/go-pkgz/auth/v2/avatar"
 	"github.com/go-pkgz/auth/v2/token"
-	"github.com/javi11/altmount/internal/database"
+	"github.com/kipsilabs/altmount/internal/database"
 	"golang.org/x/crypto/bcrypt"
 )
 

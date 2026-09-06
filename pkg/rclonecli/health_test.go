@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/javi11/altmount/internal/config"
+	"github.com/kipsilabs/altmount/internal/config"
 )
 
 // newHealthTestManager builds a minimal Manager wired only with the fields

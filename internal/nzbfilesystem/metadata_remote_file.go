@@ -17,20 +17,20 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/v2"
 
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/encryption"
-	"github.com/javi11/altmount/internal/encryption/aes"
-	"github.com/javi11/altmount/internal/encryption/rclone"
-	"github.com/javi11/altmount/internal/holes"
-	"github.com/javi11/altmount/internal/metadata"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/nzbfilesystem/segcache"
+	"github.com/kipsilabs/altmount/internal/config"
+	"github.com/kipsilabs/altmount/internal/database"
+	"github.com/kipsilabs/altmount/internal/encryption"
+	"github.com/kipsilabs/altmount/internal/encryption/aes"
+	"github.com/kipsilabs/altmount/internal/encryption/rclone"
+	"github.com/kipsilabs/altmount/internal/holes"
+	"github.com/kipsilabs/altmount/internal/metadata"
+	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
+	"github.com/kipsilabs/altmount/internal/nzbfilesystem/segcache"
 
-	"github.com/javi11/altmount/internal/pool"
-	"github.com/javi11/altmount/internal/usenet"
-	"github.com/javi11/altmount/internal/utils"
-	"github.com/javi11/altmount/pkg/rclonecli"
+	"github.com/kipsilabs/altmount/internal/pool"
+	"github.com/kipsilabs/altmount/internal/usenet"
+	"github.com/kipsilabs/altmount/internal/utils"
+	"github.com/kipsilabs/altmount/pkg/rclonecli"
 	"github.com/spf13/afero"
 )
 

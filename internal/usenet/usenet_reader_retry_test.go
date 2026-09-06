@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/javi11/altmount/internal/testsupport/fakepool"
-	"github.com/javi11/altmount/internal/testsupport/segments"
+	"github.com/kipsilabs/altmount/internal/testsupport/fakepool"
+	"github.com/kipsilabs/altmount/internal/testsupport/segments"
 	"github.com/javi11/nntppool/v4"
 	"github.com/stretchr/testify/assert"
 )

@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/javi11/altmount/internal/arrs"
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/database"
+	"github.com/kipsilabs/altmount/internal/arrs"
+	"github.com/kipsilabs/altmount/internal/config"
+	"github.com/kipsilabs/altmount/internal/database"
 )
 
 // NotifyARR notifies ARR applications about imported content

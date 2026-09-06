@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/importer/parser/fileinfo"
+	"github.com/kipsilabs/altmount/internal/config"
+	"github.com/kipsilabs/altmount/internal/database"
+	"github.com/kipsilabs/altmount/internal/importer/parser/fileinfo"
 )
 
 // maxDirExpansionDepth bounds the recursive walk of "DIR:" written-path entries.

@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
 )
 
 // LegacyMeta is one v1 (inline-segment) metadata file discovered by a scan.

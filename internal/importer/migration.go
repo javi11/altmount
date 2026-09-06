@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/javi11/altmount/internal/nzbfile"
+	"github.com/kipsilabs/altmount/internal/nzbfile"
 )
 
 const migrationSentinelFile = ".migration_nzb_compressed_v1"

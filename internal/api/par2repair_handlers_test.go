@@ -14,8 +14,8 @@ import (
 	"github.com/gofiber/fiber/v2"
 	_ "github.com/mattn/go-sqlite3"
 
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/par2repair"
+	"github.com/kipsilabs/altmount/internal/database"
+	"github.com/kipsilabs/altmount/internal/par2repair"
 )
 
 type fakeEnqueuer struct {

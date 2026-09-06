@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/javi11/altmount/internal/config"
+	"github.com/kipsilabs/altmount/internal/config"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 

@@ -4,7 +4,7 @@ package importer
 import (
 	"errors"
 
-	sharedErrors "github.com/javi11/altmount/internal/errors"
+	sharedErrors "github.com/kipsilabs/altmount/internal/errors"
 )
 
 // ErrContentProbeInconclusive means the media content probe could not reach a

@@ -8,9 +8,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"golift.io/starr"
 
-	"github.com/javi11/altmount/internal/arrs"
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/database"
+	"github.com/kipsilabs/altmount/internal/arrs"
+	"github.com/kipsilabs/altmount/internal/config"
+	"github.com/kipsilabs/altmount/internal/database"
 )
 
 // recordingPar2Enqueuer is a Par2RepairEnqueuer fake that records enqueues.
