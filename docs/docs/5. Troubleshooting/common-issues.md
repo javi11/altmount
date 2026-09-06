@@ -359,7 +359,7 @@ _[Screenshot placeholder: WebDAV client successfully connecting after authentica
 
    ```yaml
    streaming:
-     max_prefetch: 45 # Increase prefetch for better throughput
+     max_prefetch: 80 # Increase prefetch for better throughput
    ```
 
 2. **Provider Optimization**:
