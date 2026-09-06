@@ -2378,6 +2378,28 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 	cfg := mvf.configGetter()
 	healthEnabled := cfg.GetHealthEnabled()
 
+	// A 430 mid-stream is not proof the article is gone. The reader never
+	// retries ErrArticleNotFound, so one provider answering 430 transiently
+	// (backend desync) was enough to move a healthy file's metadata into the
+	// corrupted folder and make the ARR redownload it, while re-importing the
+	// same NZB minutes later verified clean (issue #749). Re-STAT the segment
+	// once and bail out when it turns out to be reachable.
+	//
+	// Only a proven-present article stops the repair. An unresolved re-check
+	// (transport error, no pool) falls through to the previous behaviour, so a
+	// briefly unhealthy pool cannot silently suppress repairs — the same
+	// direction validation.go takes for sweep results (#861).
+	//
+	// The debounce token taken above stays spent: a genuine failure on this
+	// path can be delayed by at most one debounce window, and the read itself
+	// has already failed, so the next attempt re-triggers.
+	if !mvf.confirmSegmentMissing(ctx, dataCorruptionErr) {
+		slog.WarnContext(ctx, "Streaming failure not confirmed on re-check, skipping repair",
+			"file", mvf.name,
+			"segment_id", dataCorruptionErr.SegmentID)
+		return
+	}
+
 	// Classify playback impact via the hole model — the verdict decides
 	// whether this failure triggers a repair at all. Note that with hole
 	// hooks wired, within-caps misses are zero-filled and never reach this
@@ -2549,6 +2571,37 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 	); err != nil {
 		slog.WarnContext(ctx, "Failed to update health database for streaming failure", "file", mvf.name, "error", err)
 	}
+}
+
+// missRecheckTimeout bounds the single re-STAT that confirms a mid-stream
+// article miss. A 430 answer can take about a second on some providers, so this
+// is generous enough to get a verdict without eating the caller's 5 s budget.
+const missRecheckTimeout = 3 * time.Second
+
+// confirmSegmentMissing re-checks a segment that a stream read reported as
+// missing, returning false only when the article is provably still there.
+//
+// Anything else — a confirmed 430, a transport error, no pool, no segment id,
+// or a failure that was never an article-not-found in the first place — returns
+// true so the caller proceeds exactly as it did before. See the call site for
+// why "unresolved" must not stop a repair.
+func (mvf *MetadataVirtualFile) confirmSegmentMissing(ctx context.Context, dcErr *usenet.DataCorruptionError) bool {
+	if !usenet.IsArticleNotFound(dcErr.UnderlyingErr) || dcErr.SegmentID == "" || mvf.poolManager == nil {
+		return true
+	}
+
+	usenetPool, err := mvf.poolManager.GetPool()
+	if err != nil || usenetPool == nil {
+		return true
+	}
+
+	statCtx, cancel := context.WithTimeout(ctx, missRecheckTimeout)
+	defer cancel()
+
+	if _, err := usenetPool.Stat(statCtx, dcErr.SegmentID); err != nil {
+		return true
+	}
+	return false
 }
 
 // readFullContext reads exactly len(buf) bytes from r, but returns early
