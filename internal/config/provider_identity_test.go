@@ -67,6 +67,45 @@ func TestMigrateProviderIDsAssignsBlankIDs(t *testing.T) {
 	}
 }
 
+// A whitespace-only id (e.g. `id: ' '` left over from hand-editing) is not a
+// usable id: Validate rejects it just like an empty one, so migration must
+// treat it the same way rather than treating it as already-set.
+func TestMigrateProviderIDsReplacesWhitespaceOnlyID(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Providers = []ProviderConfig{
+		{ID: "  ", Host: "news.example.test", Port: 563, MaxConnections: 1},
+	}
+
+	migrateProviderIDs(cfg)
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error after migration = %v", err)
+	}
+	if strings.TrimSpace(cfg.Providers[0].ID) == "" {
+		t.Fatalf("provider still has a whitespace-only id after migration: %q", cfg.Providers[0].ID)
+	}
+}
+
+// A reload must not keep reassigning ids on every call, or persisted quota
+// state (keyed by id) would drift each time the config is re-read from disk.
+func TestMigrateProviderIDsIsIdempotent(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Providers = []ProviderConfig{
+		{Host: "news.example.test", Port: 563, MaxConnections: 1},
+		{Host: "news.other.test", Port: 563, MaxConnections: 1},
+	}
+
+	migrateProviderIDs(cfg)
+	firstPass := []string{cfg.Providers[0].ID, cfg.Providers[1].ID}
+
+	migrateProviderIDs(cfg)
+	secondPass := []string{cfg.Providers[0].ID, cfg.Providers[1].ID}
+
+	if firstPass[0] != secondPass[0] || firstPass[1] != secondPass[1] {
+		t.Fatalf("migration is not idempotent: first pass %v, second pass %v", firstPass, secondPass)
+	}
+}
+
 func TestConfigValidateRequiresUniqueProviderIDs(t *testing.T) {
 	validProvider := func(id string) ProviderConfig {
 		return ProviderConfig{ID: id, Host: "news.example.test", Port: 563, MaxConnections: 1}
