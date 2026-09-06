@@ -80,6 +80,9 @@ func (noopStatsRepo) GetOldestStatDate(context.Context) (time.Time, error) {
 func (noopStatsRepo) GetOldestProviderStatDates(context.Context) (map[string]time.Time, error) {
 	return map[string]time.Time{}, nil
 }
+func (noopStatsRepo) MigrateSystemStats(context.Context, map[string]int64, []string) error {
+	return nil
+}
 
 // benchStreamSource is the StreamActivitySource the ImportBudget consults. The
 // benchmark drives the count itself instead of standing up api.StreamTracker.

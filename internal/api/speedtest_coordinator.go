@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"sync"
 	"time"
@@ -124,10 +123,7 @@ func (sc *speedtestCoordinator) sweepExpired() {
 // nntppool-side provider name (used by SpeedTest).
 func (sc *speedtestCoordinator) getOrBuildClient(ctx context.Context, p *config.ProviderConfig) (*nntppool.Client, string, error) {
 	host := fmt.Sprintf("%s:%d", p.Host, p.Port)
-	providerName := host
-	if p.Username != "" {
-		providerName = host + "+" + p.Username
-	}
+	providerName := p.NNTPPoolName()
 
 	sc.mu.Lock()
 	if entry, ok := sc.clients[p.ID]; ok && time.Now().Before(entry.expiresAt) {
@@ -174,23 +170,11 @@ func (sc *speedtestCoordinator) getOrBuildClient(ctx context.Context, p *config.
 
 // buildAdHocClient dials a throwaway single-provider client; the caller owns Close.
 func buildAdHocClient(ctx context.Context, p *config.ProviderConfig, connections, inflight int) (*nntppool.Client, error) {
-	var tlsCfg *tls.Config
-	if p.TLS {
-		tlsCfg = &tls.Config{
-			InsecureSkipVerify: p.InsecureTLS,
-			ServerName:         p.Host,
-		}
-	}
-	return nntppool.NewClient(ctx, []nntppool.Provider{
-		{
-			Host:        fmt.Sprintf("%s:%d", p.Host, p.Port),
-			TLSConfig:   tlsCfg,
-			Auth:        nntppool.Auth{Username: p.Username, Password: p.Password},
-			Connections: connections,
-			Inflight:    inflight,
-			IdleTimeout: 60 * time.Second,
-		},
-	})
+	provider := p.ToNNTPProvider()
+	provider.Connections = connections
+	provider.Inflight = inflight
+	provider.IdleTimeout = 60 * time.Second
+	return nntppool.NewClient(ctx, []nntppool.Provider{provider})
 }
 
 // run executes fn under the singleflight key for the given provider,

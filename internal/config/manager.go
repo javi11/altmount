@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/javi11/altmount/internal/utils"
@@ -742,6 +743,8 @@ type HealthConfig struct {
 
 // ProviderConfig represents a single NNTP provider configuration
 type ProviderConfig struct {
+	// ID is a stable public identifier used in pool names, metrics, and errors.
+	// It must never contain credentials or non-graphic characters.
 	ID                  string `yaml:"id" mapstructure:"id" json:"id"`
 	Name                string `yaml:"name" mapstructure:"name" json:"name,omitempty"`
 	Host                string `yaml:"host" mapstructure:"host" json:"host"`
@@ -913,6 +916,43 @@ func migrateGlobalUserAgent(config *Config) {
 		config.UserAgent = config.Nzblnk.UserAgent
 	}
 	config.Nzblnk = NzblnkConfig{}
+}
+
+// migrateProviderIDs assigns a stable "provider_N" id to any provider whose
+// id is empty. ID was optional until Validate started requiring it: earlier
+// docs told users it was fine to leave blank ("leave empty for
+// auto-generation"), but nothing ever actually generated one for a
+// hand-edited config.yaml — only the create-provider API did. Without this,
+// such a config now fails validation and the process refuses to start.
+//
+// Existing non-empty ids are left untouched and never reused, so this never
+// collides with an id a provider already has.
+func migrateProviderIDs(config *Config) {
+	used := make(map[string]struct{}, len(config.Providers))
+	for _, p := range config.Providers {
+		if id := strings.TrimSpace(p.ID); id != "" {
+			used[id] = struct{}{}
+		}
+	}
+
+	next := 1
+	for i := range config.Providers {
+		if strings.TrimSpace(config.Providers[i].ID) != "" {
+			continue
+		}
+		var id string
+		for {
+			id = fmt.Sprintf("provider_%d", next)
+			next++
+			if _, exists := used[id]; !exists {
+				break
+			}
+		}
+		used[id] = struct{}{}
+		config.Providers[i].ID = id
+		slog.Warn("Assigned a stable id to a provider with a blank id",
+			"index", i, "host", config.Providers[i].Host, "assigned_id", id)
+	}
 }
 
 // migrateArrsCleanup folds the legacy split cleanup config (separate stuck-rules
@@ -1367,7 +1407,22 @@ func (c *Config) Validate() error {
 	}
 
 	// Validate each provider
+	providerIDs := make(map[string]struct{}, len(c.Providers))
 	for i, provider := range c.Providers {
+		trimmedID := strings.TrimSpace(provider.ID)
+		if trimmedID == "" {
+			return fmt.Errorf("provider %d: id cannot be empty", i)
+		}
+		if trimmedID != provider.ID {
+			return fmt.Errorf("provider %d: id cannot have leading or trailing whitespace", i)
+		}
+		if strings.IndexFunc(provider.ID, func(r rune) bool { return !unicode.IsGraphic(r) }) >= 0 {
+			return fmt.Errorf("provider %d: id contains non-graphic characters", i)
+		}
+		if _, exists := providerIDs[provider.ID]; exists {
+			return fmt.Errorf("provider %d: id %q is duplicated", i, provider.ID)
+		}
+		providerIDs[provider.ID] = struct{}{}
 		if provider.Host == "" {
 			return fmt.Errorf("provider %d: host cannot be empty", i)
 		}
@@ -1463,14 +1518,9 @@ type ProviderChange struct {
 	NewProvider *ProviderConfig // nil for Removed
 }
 
-// NNTPPoolName returns the name nntppool v4 uses to identify this provider.
-// Format: "host:port" or "host:port+username" when username is set.
+// NNTPPoolName returns the stable ID nntppool uses to identify this provider.
 func (p *ProviderConfig) NNTPPoolName() string {
-	name := fmt.Sprintf("%s:%d", p.Host, p.Port)
-	if p.Username != "" {
-		name += "+" + p.Username
-	}
-	return name
+	return p.ID
 }
 
 // ToNNTPProvider converts a single ProviderConfig to an nntppool.Provider.
@@ -1528,6 +1578,7 @@ func (p *ProviderConfig) ToNNTPProvider() nntppool.Provider {
 
 	return nntppool.Provider{
 		Host:              host,
+		Name:              p.ID,
 		TLSConfig:         tlsCfg,
 		Auth:              nntppool.Auth{Username: p.Username, Password: p.Password},
 		Connections:       p.MaxConnections,
@@ -1873,6 +1924,7 @@ func (m *Manager) ReloadConfig() error {
 	migrateArrsCleanup(config)
 	migrateGlobalUserAgent(config)
 	migrateHealthSweepConcurrency(config)
+	migrateProviderIDs(config)
 
 	// Validate configuration
 	if err := config.Validate(); err != nil {
@@ -2385,6 +2437,7 @@ func LoadConfig(configFile string) (*Config, error) {
 	migrateArrsCleanup(config)
 	migrateGlobalUserAgent(config)
 	migrateHealthSweepConcurrency(config)
+	migrateProviderIDs(config)
 
 	// If log file was not explicitly set in the config file and we have a specific config file path,
 	// derive log file path from config file location
