@@ -2068,6 +2068,10 @@ func DefaultConfig(configDir ...string) *Config {
 			ReadOnly:      false, // Not specified in your command, so false
 			Syslog:        true,  // --syslog
 
+			// Matches the previous hard-coded behaviour: probes run every 30s and
+			// three consecutive failures triggered a restart.
+			RcdRestartAfter: "90s",
+
 			// VFS Cache Settings - matching your command
 			CacheDir:              cachePath, // VFS cache directory (defaults to <rclone_path>/cache)
 			VFSCacheMode:          "full",    // --vfs-cache-mode=full
@@ -2078,10 +2082,6 @@ func DefaultConfig(configDir ...string) *Config {
 			VFSReadChunkSizeLimit: "2G",      // --vfs-read-chunk-size-limit=2G
 			VFSReadAhead:          "128M",    // --vfs-read-ahead=128M (changed from 128k)
 			DirCacheTime:          "10m",     // --dir-cache-time=10m (changed from 5m)
-
-			// Matches the previous hard-coded behaviour: probes run every 30s and
-			// three consecutive failures triggered a restart.
-			RcdRestartAfter: "90s",
 
 			// Additional VFS Settings (not specified in your command, using sensible defaults)
 			VFSCacheMinFreeSpace: "1G",

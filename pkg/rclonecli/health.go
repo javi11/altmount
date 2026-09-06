@@ -122,7 +122,7 @@ func (m *Manager) RecoverMount(ctx context.Context, provider string) error {
 	// every subsequent RPC (mount/unmount, config/create, mount/mount) will
 	// hang on context deadline exceeded. Kill+respawn rcd before issuing
 	// recovery RPCs to break out of that wedge.
-	if !m.probe(ctx, 5*time.Second) {
+	if !m.probe(ctx, probeTimeout) {
 		m.logger.WarnContext(ctx, "rcd unresponsive during recovery, restarting subprocess", "provider", provider)
 		if err := m.restart(ctx); err != nil {
 			return fmt.Errorf("failed to restart wedged rcd: %w", err)

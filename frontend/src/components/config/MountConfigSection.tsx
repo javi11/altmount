@@ -744,6 +744,23 @@ function RCloneMountSubSection({ config, onFormDataChange }: RCloneSubSectionPro
 				</div>
 				<div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
 					<fieldset className="fieldset">
+						<legend className="fieldset-legend">RCD Restart Tolerance</legend>
+						<input
+							type="text"
+							className="input input-bordered w-full bg-base-100 text-sm"
+							value={mountFormData.rcd_restart_after}
+							onChange={(e) => handleMountInputChange("rcd_restart_after", e.target.value)}
+							placeholder="90s"
+						/>
+						<p className="label min-w-0 max-w-full whitespace-normal break-words text-base-content/70 text-xs">
+							How long the rcd may stay unresponsive before it's killed and restarted. Restarting
+							unmounts the drive out from under every reader, so raise this if your rcd goes
+							briefly slow under load (e.g., 5m).
+						</p>
+					</fieldset>
+				</div>
+				<div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+					<fieldset className="fieldset">
 						<legend className="fieldset-legend">User ID (UID)</legend>
 						<input
 							type="number"
@@ -1404,6 +1421,7 @@ function buildRCloneMountFormData(config: ConfigResponse): RCloneMountFormData {
 		read_only: config.rclone.read_only || false,
 		timeout: config.rclone.timeout || "10m",
 		syslog: config.rclone.syslog ?? true,
+		rcd_restart_after: config.rclone.rcd_restart_after || "90s",
 		log_level: config.rclone.log_level || "INFO",
 		uid: config.rclone.uid || 1000,
 		gid: config.rclone.gid || 1000,

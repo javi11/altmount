@@ -82,6 +82,10 @@ type RCloneAPIResponse struct {
 	Timeout       string `json:"timeout"`
 	Syslog        bool   `json:"syslog"`
 
+	// RcdRestartAfter is how long the rcd may stay unresponsive to liveness
+	// probes before it is killed and restarted. Empty means the built-in default.
+	RcdRestartAfter string `json:"rcd_restart_after"`
+
 	// System and filesystem options
 	LogLevel    string `json:"log_level"`
 	UID         int    `json:"uid"`
@@ -352,6 +356,8 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 		ReadOnly:      cfg.RClone.ReadOnly,
 		Timeout:       cfg.RClone.Timeout,
 		Syslog:        cfg.RClone.Syslog,
+
+		RcdRestartAfter: cfg.RClone.RcdRestartAfter,
 
 		// System and filesystem options
 		LogLevel:    cfg.RClone.LogLevel,

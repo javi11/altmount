@@ -198,6 +198,10 @@ export interface RCloneConfig {
 	timeout: string;
 	syslog: boolean;
 
+	// How long the rcd may stay unresponsive to liveness probes before it is
+	// killed and restarted. Empty means the built-in default (90s).
+	rcd_restart_after: string;
+
 	// System and filesystem options
 	log_level: string;
 	uid: number;
@@ -461,6 +465,7 @@ export interface RCloneUpdateRequest {
 	read_only?: boolean;
 	timeout?: string;
 	syslog?: boolean;
+	rcd_restart_after?: string;
 
 	// System and filesystem options
 	log_level?: string;
@@ -586,6 +591,7 @@ export interface RCloneMountFormData {
 	read_only: boolean;
 	timeout: string;
 	syslog: boolean;
+	rcd_restart_after: string;
 
 	// System and filesystem options
 	log_level: string;
