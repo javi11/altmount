@@ -451,11 +451,15 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 	}
 
 	// Report progress within the 0–10% band so the queue item doesn't appear
-	// frozen at "Checking segment availability" during the network sweep.
+	// frozen during the network sweep. NOT gated on HasSubscribers(): the
+	// tracker also persists the latest percentage for clients that connect
+	// mid-import, and this sweep can outlast the moment it starts.
 	var fastFailTracker *progress.Tracker
-	if proc.broadcaster != nil && proc.broadcaster.HasSubscribers() {
-		fastFailTracker = proc.broadcaster.CreateTracker(queueID, 0, 10).WithStage("Checking segment availability")
+	if proc.broadcaster != nil {
+		fastFailTracker = proc.broadcaster.CreateTracker(queueID, 0, 10).WithStage("Mapping missing segments")
 	}
+
+	acceptableMissingPercent := cfg.GetAcceptableMissingSegmentsPercentage()
 
 	results, err := validation.FastFailCheckFiles(
 		ctx,
@@ -466,6 +470,7 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 		proc.validationTimeout,
 		fastFailTracker,
 		proc.patchIndex,
+		acceptableMissingPercent == 0,
 	)
 	if err != nil {
 		return nil, nil, nil, err
@@ -486,7 +491,6 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 	}
 	missingIDs := make(map[string]struct{})
 	eligibleRegularCount := 0
-	acceptableMissingPercent := cfg.GetAcceptableMissingSegmentsPercentage()
 	// Archive-set members whose only misses are gaps the NZB declares,
 	// keyed by set; judged together below against the whole set's size.
 	gappedSets := make(map[string]*gappedSet)

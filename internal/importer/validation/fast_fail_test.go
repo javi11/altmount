@@ -208,6 +208,7 @@ func TestFastFailCheckFilesRetriesOnlyTransientIDs(t *testing.T) {
 		context.Background(), files, fastFailPoolManager{client: client},
 		100, 2, 100*time.Millisecond, nil,
 		nil,
+		false,
 	)
 	if err != nil {
 		t.Fatalf("FastFailCheckFiles error = %v, want nil after transient recovery", err)
@@ -234,6 +235,7 @@ func TestFastFailCheckFilesTransientExhaustionIsInconclusive(t *testing.T) {
 		fastFailPoolManager{client: client},
 		100, 1, 100*time.Millisecond, nil,
 		nil,
+		false,
 	)
 	if err == nil {
 		t.Fatal("FastFailCheckFiles error = nil, want inconclusive error after retries are exhausted")
@@ -439,6 +441,7 @@ func TestFastFailCheckFilesAllReachable(t *testing.T) {
 		100, 2, 100*time.Millisecond,
 		nil,
 		nil,
+		false,
 	)
 	if err != nil {
 		t.Fatalf("FastFailCheckFiles error = %v, want nil", err)
@@ -470,6 +473,7 @@ func TestFastFailCheckFilesOneFileBroken(t *testing.T) {
 		100, 2, 100*time.Millisecond,
 		nil,
 		nil,
+		false,
 	)
 	if err != nil {
 		t.Fatalf("FastFailCheckFiles error = %v, want nil", err)
@@ -504,6 +508,7 @@ func TestFastFailCheckFilesBrokenSidecarsAreReported(t *testing.T) {
 		100, 2, 100*time.Millisecond,
 		nil,
 		nil,
+		false,
 	)
 	if err != nil {
 		t.Fatalf("FastFailCheckFiles error = %v, want nil", err)
@@ -536,6 +541,7 @@ func TestFastFailCheckFilesBrokenSidecarIsReported(t *testing.T) {
 		100, 1, 100*time.Millisecond,
 		nil,
 		nil,
+		false,
 	)
 	if err != nil {
 		t.Fatalf("FastFailCheckFiles error = %v, want nil", err)
@@ -559,6 +565,7 @@ func TestFastFailCheckFilesPoolUnavailableReturnsError(t *testing.T) {
 		100, 1, 100*time.Millisecond,
 		nil,
 		nil,
+		false,
 	)
 	if err == nil {
 		t.Fatal("FastFailCheckFiles returned nil error, want error for nil pool")
@@ -592,6 +599,7 @@ func TestFastFailCheckFilesFirstSegmentAlwaysChecked(t *testing.T) {
 		0, 1, 100*time.Millisecond,
 		nil,
 		nil,
+		false,
 	)
 	if err != nil {
 		t.Fatalf("FastFailCheckFiles error = %v, want nil", err)
@@ -624,6 +632,7 @@ func TestFastFailCheckFilesGroupPropagation(t *testing.T) {
 		100, 4, 100*time.Millisecond,
 		nil,
 		nil,
+		false,
 	)
 	if err != nil {
 		t.Fatalf("FastFailCheckFiles error = %v, want nil", err)
@@ -668,6 +677,7 @@ func TestFastFailCheckFilesGroupShortCircuitSkipsStats(t *testing.T) {
 		100, 1, 100*time.Millisecond, // single connection → deterministic ordering
 		nil,
 		nil,
+		false,
 	)
 	if err != nil {
 		t.Fatalf("FastFailCheckFiles error = %v, want nil", err)
@@ -703,6 +713,7 @@ func TestFastFailCheckFilesEmptyGroupKeyNoPropagation(t *testing.T) {
 		100, 2, 100*time.Millisecond,
 		nil,
 		nil,
+		false,
 	)
 	if err != nil {
 		t.Fatalf("FastFailCheckFiles error = %v, want nil", err)
@@ -732,6 +743,7 @@ func TestFastFailCheckFilesIndexAligned(t *testing.T) {
 		100, 2, 100*time.Millisecond,
 		nil,
 		nil,
+		false,
 	)
 	if err != nil {
 		t.Fatalf("FastFailCheckFiles error = %v", err)
@@ -826,6 +838,7 @@ func TestFastFailCheckFilesTimeoutIsInconclusive(t *testing.T) {
 		10*time.Millisecond,
 		nil,
 		nil,
+		false,
 	)
 	if err == nil {
 		t.Fatal("FastFailCheckFiles error = nil, want inconclusive error after retries")
@@ -869,6 +882,7 @@ func TestFastFailCheckFilesDeadReleaseSettlesWithoutWaitingForUnverified(t *test
 		fastFailPoolManager{client: client},
 		100, 10, 100*time.Millisecond, nil,
 		nil,
+		false,
 	)
 	if err != nil {
 		t.Fatalf("FastFailCheckFiles error = %v, want nil for a dead release", err)
@@ -927,6 +941,7 @@ func TestFastFailCheckFilesPlaceholdersAreKnownMissesWithoutStat(t *testing.T) {
 		context.Background(), files,
 		fastFailPoolManager{client: client},
 		100, 8, 100*time.Millisecond, nil, nil,
+		false,
 	)
 	if err != nil {
 		t.Fatalf("FastFailCheckFiles error = %v", err)
@@ -988,5 +1003,174 @@ func TestCapReleaseProbeSampleKeepsEdgesAndBounds(t *testing.T) {
 	small := makeTestSegments("small", 20)
 	if got := capReleaseProbeSample(small); len(got) != 20 {
 		t.Fatalf("small sample must pass through untouched, got %d", len(got))
+	}
+}
+
+type recordingTracker struct {
+	mu      sync.Mutex
+	current int
+	total   int
+}
+
+func (r *recordingTracker) Update(current, total int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.current, r.total = current, total
+}
+
+func (r *recordingTracker) UpdateAbsolute(int) {}
+
+func (r *recordingTracker) last() (int, int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.current, r.total
+}
+
+// A standalone file (no GroupKey) is condemned by its first definitive miss:
+// the rest of its sample is never STAT-ed.
+func TestFastFailCheckFilesStopFileOnFirstMissSkipsRestOfFile(t *testing.T) {
+	client := fakepool.New()
+	client.SetBehavior("a-0", fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
+
+	files := []FastFailFile{
+		{Filename: "a.mkv", Segments: makeTestSegments("a", 3)},
+		{Filename: "b.mkv", Segments: makeTestSegments("b", 3)},
+	}
+
+	results, err := FastFailCheckFiles(
+		context.Background(), files,
+		fastFailPoolManager{client: client},
+		100, 1, 100*time.Millisecond, // single connection → deterministic ordering
+		nil,
+		nil,
+		true,
+	)
+	if err != nil {
+		t.Fatalf("FastFailCheckFiles error = %v, want nil", err)
+	}
+	if !results[0].Broken {
+		t.Error("results[0].Broken = false, want true")
+	}
+	if results[1].Broken {
+		t.Error("results[1].Broken = true, want false")
+	}
+	if got := client.PerMessageCalls("a-0"); got != 1 {
+		t.Errorf("a-0 STAT calls = %d, want 1", got)
+	}
+	for _, id := range []string{"a-1", "a-2"} {
+		if got := client.PerMessageCalls(id); got != 0 {
+			t.Errorf("%s STAT calls = %d, want 0 once the file is condemned", id, got)
+		}
+	}
+	if got := client.StatCalls(); got != 4 {
+		t.Errorf("StatCalls = %d, want 4 (1 for the condemned file, 3 for the healthy one)", got)
+	}
+}
+
+// Once every eligible file is condemned the sweep returns without STAT-ing the
+// remaining jobs, and progress still reports the full job count.
+func TestFastFailCheckFilesStopsWhenNoEligibleFilesRemain(t *testing.T) {
+	client := fakepool.New()
+	client.SetBehavior("a-0", fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
+	client.SetBehavior("b-0", fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
+
+	files := []FastFailFile{
+		{Filename: "a.mkv", Segments: makeTestSegments("a", 3)},
+		{Filename: "b.mkv", Segments: makeTestSegments("b", 3)},
+	}
+
+	tracker := &recordingTracker{}
+	results, err := FastFailCheckFiles(
+		context.Background(), files,
+		fastFailPoolManager{client: client},
+		100, 1, 100*time.Millisecond,
+		tracker,
+		nil,
+		true,
+	)
+	if err != nil {
+		t.Fatalf("FastFailCheckFiles error = %v, want nil", err)
+	}
+	for i, r := range results {
+		if !r.Broken {
+			t.Errorf("results[%d].Broken = false, want true", i)
+		}
+	}
+	if got := client.StatCalls(); got != 2 {
+		t.Errorf("StatCalls = %d, want 2 (one per file, then the sweep ends)", got)
+	}
+	if current, total := tracker.last(); current != total || total != 6 {
+		t.Errorf("progress = %d/%d, want 6/6", current, total)
+	}
+}
+
+// Regression guard: with stopFileOnFirstMiss disabled the sweep still checks
+// every selected segment of a broken file.
+func TestFastFailCheckFilesWithoutStopFileSweepsWholeSample(t *testing.T) {
+	client := fakepool.New()
+	client.SetBehavior("a-0", fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
+
+	files := []FastFailFile{
+		{Filename: "a.mkv", Segments: makeTestSegments("a", 3)},
+		{Filename: "b.mkv", Segments: makeTestSegments("b", 3)},
+	}
+
+	results, err := FastFailCheckFiles(
+		context.Background(), files,
+		fastFailPoolManager{client: client},
+		100, 1, 100*time.Millisecond,
+		nil,
+		nil,
+		false,
+	)
+	if err != nil {
+		t.Fatalf("FastFailCheckFiles error = %v, want nil", err)
+	}
+	if !results[0].Broken || results[1].Broken {
+		t.Fatalf("results = %+v, want only the first file broken", results)
+	}
+	if got := client.StatCalls(); got != 6 {
+		t.Errorf("StatCalls = %d, want 6 (full sample for both files)", got)
+	}
+	for _, id := range []string{"a-1", "a-2"} {
+		if got := client.PerMessageCalls(id); got != 1 {
+			t.Errorf("%s STAT calls = %d, want 1", id, got)
+		}
+	}
+}
+
+// A miss in one volume condemns every member of its set, so the sweep ends
+// without STAT-ing any sibling.
+func TestFastFailCheckFilesStopFileOnFirstMissCondemnsGroup(t *testing.T) {
+	client := fakepool.New()
+	client.SetBehavior("p0-0", fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
+
+	files := make([]FastFailFile, 3)
+	for i := range files {
+		files[i] = FastFailFile{
+			Filename: fmt.Sprintf("set.part%02d.rar", i+1),
+			Segments: makeTestSegments(fmt.Sprintf("p%d", i), 3),
+			GroupKey: "set",
+		}
+	}
+
+	results, err := FastFailCheckFiles(
+		context.Background(), files,
+		fastFailPoolManager{client: client},
+		100, 1, 100*time.Millisecond,
+		nil,
+		nil,
+		true,
+	)
+	if err != nil {
+		t.Fatalf("FastFailCheckFiles error = %v, want nil", err)
+	}
+	for i, r := range results {
+		if !r.Broken {
+			t.Errorf("results[%d].Broken = false, want true", i)
+		}
+	}
+	if got := client.StatCalls(); got != 1 {
+		t.Errorf("StatCalls = %d, want 1 (the whole set is condemned by the first miss)", got)
 	}
 }
