@@ -11,6 +11,9 @@ import (
 const (
 	// RootPath represents the root directory path
 	RootPath = "/"
+
+	// corruptedDirName is the metadata-root folder holding corrupted safety copies.
+	corruptedDirName = "corrupted_metadata"
 )
 
 // Error constants

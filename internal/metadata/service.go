@@ -348,14 +348,23 @@ func (ms *MetadataService) WriteFileMetadataV3(ctx context.Context, virtualPath 
 // problem on one file never blocks the import). With an empty storeRef it writes v1.
 // This is the single entry point import processors should use.
 func (ms *MetadataService) WriteFileMetadataAuto(ctx context.Context, virtualPath string, metadata *metapb.FileMetadata, index map[string]int64, storeRef string) error {
-	if storeRef == "" {
-		return ms.WriteFileMetadata(virtualPath, metadata)
+	write := func() error {
+		if storeRef == "" {
+			return ms.WriteFileMetadata(virtualPath, metadata)
+		}
+		if err := ms.WriteFileMetadataV3(ctx, virtualPath, metadata, index, storeRef); err != nil {
+			slog.WarnContext(ctx, "v3 metadata write failed; writing v1",
+				"path", virtualPath, "error", err)
+			return ms.WriteFileMetadata(virtualPath, metadata)
+		}
+		return nil
 	}
-	if err := ms.WriteFileMetadataV3(ctx, virtualPath, metadata, index, storeRef); err != nil {
-		slog.WarnContext(ctx, "v3 metadata write failed; writing v1",
-			"path", virtualPath, "error", err)
-		return ms.WriteFileMetadata(virtualPath, metadata)
+
+	if err := write(); err != nil {
+		return err
 	}
+
+	ms.removeCorruptedCopy(ctx, virtualPath)
 	return nil
 }
 
@@ -835,6 +844,7 @@ func (ms *MetadataService) DeleteCorruptedFile(ctx context.Context, virtualPath 
 	if err := ms.DeleteFileMetadata(ctx, virtualPath); err != nil {
 		return err
 	}
+	ms.removeCorruptedCopy(ctx, virtualPath)
 	if physicalPath == "" {
 		return nil
 	}
@@ -1114,6 +1124,15 @@ func (ms *MetadataService) MoveToCorrupted(ctx context.Context, virtualPath stri
 		return err
 	}
 
+	// The .meta's disk mtime is pinned to the proto's ModifiedAt (the import time),
+	// so left alone it would date the safety copy to the import rather than to the
+	// move. Retention counts from the move, so restart the clock here.
+	now := time.Now()
+	if err := os.Chtimes(targetPath, now, now); err != nil {
+		slog.DebugContext(ctx, "Failed to stamp corrupted metadata copy mtime",
+			"path", targetPath, "error", err)
+	}
+
 	// Also try to move the .id file if it exists
 	idPath := metadataPath + ".id"
 	if _, err := os.Stat(idPath); err == nil {
@@ -1124,6 +1143,162 @@ func (ms *MetadataService) MoveToCorrupted(ctx context.Context, virtualPath stri
 		"original", metadataPath,
 		"target", targetPath)
 	return nil
+}
+
+// PruneCorrupted removes safety copies under corrupted_metadata whose .meta is
+// older than maxAge, and reports how many were removed. A maxAge of zero or less
+// prunes every copy. A missing corrupted_metadata directory is not an error.
+func (ms *MetadataService) PruneCorrupted(ctx context.Context, maxAge time.Duration) (int, error) {
+	corruptedRoot := filepath.Join(ms.rootPath, "corrupted_metadata")
+	if _, err := os.Stat(corruptedRoot); os.IsNotExist(err) {
+		return 0, nil
+	}
+
+	cutoff := time.Now().Add(-maxAge)
+	removed := 0
+	prunedDirs := make(map[string]struct{})
+
+	err := filepath.WalkDir(corruptedRoot, func(path string, d fs.DirEntry, err error) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		if err != nil {
+			return nil // skip errors
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".meta") {
+			return nil
+		}
+
+		info, infoErr := d.Info()
+		if infoErr != nil {
+			return nil
+		}
+		if maxAge > 0 && info.ModTime().After(cutoff) {
+			return nil
+		}
+
+		pruned, pruneErr := ms.pruneCorruptedMeta(ctx, path)
+		if pruneErr != nil {
+			slog.WarnContext(ctx, "Failed to prune corrupted metadata copy", "path", path, "error", pruneErr)
+			return nil
+		}
+		if pruned {
+			removed++
+			prunedDirs[filepath.Dir(path)] = struct{}{}
+		}
+		return nil
+	})
+
+	for dir := range prunedDirs {
+		utils.RemoveEmptyDirs(corruptedRoot, dir)
+	}
+
+	if err != nil {
+		return removed, err
+	}
+
+	if removed > 0 {
+		slog.InfoContext(ctx, "Pruned corrupted metadata safety copies",
+			"removed", removed, "max_age", maxAge)
+	}
+
+	return removed, nil
+}
+
+// CorruptedStats reports how many safety copies corrupted_metadata currently holds
+// and how much disk they occupy.
+func (ms *MetadataService) CorruptedStats(ctx context.Context) (int, int64, error) {
+	corruptedRoot := filepath.Join(ms.rootPath, "corrupted_metadata")
+	if _, err := os.Stat(corruptedRoot); os.IsNotExist(err) {
+		return 0, 0, nil
+	}
+
+	count := 0
+	var totalBytes int64
+
+	err := filepath.WalkDir(corruptedRoot, func(path string, d fs.DirEntry, err error) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".meta") {
+			return nil
+		}
+		info, infoErr := d.Info()
+		if infoErr != nil {
+			return nil
+		}
+		count++
+		totalBytes += info.Size()
+		return nil
+	})
+	if err != nil {
+		return count, totalBytes, err
+	}
+
+	return count, totalBytes, nil
+}
+
+// pruneCorruptedMeta removes a single safety copy plus its .id sidecar, reporting
+// whether anything was there to remove.
+//
+// The store reference must be released here: MoveToCorrupted renames the .meta
+// without decrementing, so the copy is the only remaining holder of a reference to
+// the release's shared .nzbz store, and dropping it silently would pin that store
+// on disk forever.
+func (ms *MetadataService) pruneCorruptedMeta(ctx context.Context, metaPath string) (bool, error) {
+	storeRef := ms.readStoreRef(metaPath)
+
+	if err := os.Remove(metaPath); err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to delete corrupted metadata file: %w", err)
+	}
+
+	idPath := metaPath + ".id"
+	if removeErr := os.Remove(idPath); removeErr != nil && !os.IsNotExist(removeErr) {
+		slog.DebugContext(ctx, "Failed to remove .id sidecar file", "path", idPath, "error", removeErr)
+	}
+
+	if ms.storeRefCounter != nil && storeRef != "" {
+		newCount, tracked, err := ms.storeRefCounter.DecStoreRef(ctx, storeRef)
+		if err != nil {
+			slog.WarnContext(ctx, "failed to decrement store ref count",
+				"store_path", storeRef, "error", err)
+		} else if tracked && newCount == 0 {
+			if removeErr := os.Remove(storeRef); removeErr != nil && !os.IsNotExist(removeErr) {
+				slog.WarnContext(ctx, "failed to delete orphaned store file",
+					"store_path", storeRef, "error", removeErr)
+			}
+		}
+	}
+
+	return true, nil
+}
+
+// removeCorruptedCopy drops the safety copy shadowing a virtual path, if one exists,
+// so a successful re-import or an explicit delete leaves nothing behind.
+func (ms *MetadataService) removeCorruptedCopy(ctx context.Context, virtualPath string) {
+	v := normalizeVirtualPath(virtualPath)
+	corruptedRoot := filepath.Join(ms.rootPath, "corrupted_metadata")
+	copyDir := filepath.Join(corruptedRoot, filepath.Dir(strings.TrimPrefix(v, "/")))
+	copyPath := filepath.Join(copyDir, ms.truncateFilename(filepath.Base(v))+".meta")
+
+	pruned, err := ms.pruneCorruptedMeta(ctx, copyPath)
+	if err != nil {
+		slog.WarnContext(ctx, "Failed to remove corrupted metadata safety copy",
+			"path", copyPath, "error", err)
+		return
+	}
+	if pruned {
+		utils.RemoveEmptyDirs(corruptedRoot, copyDir)
+	}
 }
 
 // CleanupOrphanedIDSymlinks walks the .ids/ directory and removes symlinks whose

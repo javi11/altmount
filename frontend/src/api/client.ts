@@ -3,6 +3,7 @@ import type {
 	APIResponse,
 	AuthResponse,
 	ChangeOwnPasswordRequest,
+	CorruptedMetadataStats,
 	FileHealth,
 	FileMetadata,
 	FuseStatus,
@@ -142,6 +143,10 @@ class APIClient {
 				}
 
 				throw extractApiError(response.status, response.statusText, errorData);
+			}
+
+			if (response.status === 204) {
+				return undefined as T;
 			}
 
 			const data: APIResponse<T> = await response.json();
@@ -537,6 +542,14 @@ class APIClient {
 		return this.request<{ message: string }>("/health/library-sync/cancel", {
 			method: "POST",
 		});
+	}
+
+	async getCorruptedMetadataStats() {
+		return this.request<CorruptedMetadataStats>("/metadata/corrupted");
+	}
+
+	async purgeCorruptedMetadata() {
+		return this.request<void>("/metadata/corrupted", { method: "DELETE" });
 	}
 
 	async getMetadataMigrationStatus() {

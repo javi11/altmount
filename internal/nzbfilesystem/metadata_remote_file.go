@@ -169,7 +169,7 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 
 	// Force showCorrupted if we are inside the corrupted_metadata folder
 	// normalizedName is clean and has no trailing slashes
-	if strings.HasPrefix(normalizedName, "corrupted_metadata/") || normalizedName == "corrupted_metadata" {
+	if strings.HasPrefix(normalizedName, corruptedDirName+"/") || normalizedName == corruptedDirName {
 		showCorrupted = true
 	}
 
@@ -341,6 +341,12 @@ func (mrf *MetadataRemoteFile) RemoveFile(ctx context.Context, fileName string) 
 	// Prevent removal of root directory
 	if normalizedName == RootPath {
 		return false, ErrCannotRemoveRoot
+	}
+
+	// A recursive DELETE on the safety folder itself would wipe every corrupted
+	// copy at once; purging is an explicit action. Paths inside it stay removable.
+	if strings.EqualFold(strings.Trim(normalizedName, "/"), corruptedDirName) {
+		return false, os.ErrPermission
 	}
 
 	// Prevent removal of category folders

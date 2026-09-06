@@ -411,6 +411,11 @@ export interface LibrarySyncStatus {
 }
 
 // Metadata migration types (legacy inline-segment .meta → v3 shared NZB store)
+export interface CorruptedMetadataStats {
+	file_count: number;
+	total_bytes: number;
+}
+
 export interface MetadataMigrationProgress {
 	total_groups: number;
 	processed_groups: number;

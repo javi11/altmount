@@ -1179,6 +1179,12 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 		slog.WarnContext(ctx, "Failed to cleanup empty directories in metadata", "error", err)
 	}
 
+	if days := cfg.Health.CorruptedRetentionDays; days != nil && *days > 0 {
+		if _, err := hw.metadataService.PruneCorrupted(ctx, time.Duration(*days)*24*time.Hour); err != nil {
+			slog.WarnContext(ctx, "Failed to prune corrupted metadata safety copies", "error", err)
+		}
+	}
+
 	// Perform bulk database update
 	if len(results) > 0 {
 		if err := hw.healthRepo.UpdateHealthStatusBulk(ctx, results); err != nil {

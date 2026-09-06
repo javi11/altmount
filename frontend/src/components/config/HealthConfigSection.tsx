@@ -2,6 +2,7 @@ import { AlertTriangle, Info, Save, TestTube } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ConfigResponse, DryRunSyncResult, HealthConfig } from "../../types/config";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
+import { CorruptedMetadataCard } from "./CorruptedMetadataCard";
 
 interface HealthConfigSectionProps {
 	config: ConfigResponse;
@@ -205,6 +206,30 @@ export function HealthConfigSection({
 						</p>
 					</fieldset>
 
+					<fieldset className="fieldset mt-6 border-base-300/50 border-t pt-6">
+						<legend className="fieldset-legend font-semibold">
+							Corrupted Metadata Retention (Days)
+						</legend>
+						<input
+							type="number"
+							className="input input-bordered w-full bg-base-100 font-mono text-sm"
+							value={formData.corrupted_retention_days ?? 0}
+							disabled={isReadOnly}
+							onChange={(e) =>
+								handleInputChange(
+									"corrupted_retention_days",
+									Number.parseInt(e.target.value, 10) || 0,
+								)
+							}
+							min="0"
+						/>
+						<p className="label break-words text-[10px] text-base-content/50">
+							How long a corrupted file's metadata is kept in the corrupted_metadata safety folder
+							before the health cycle prunes it and releases the segment store it holds. 0 keeps
+							safety copies forever.
+						</p>
+					</fieldset>
+
 					<div className="mt-6 flex items-start justify-between gap-4 border-base-300/50 border-t pt-6">
 						<div className="min-w-0 flex-1">
 							<h4 className="break-words font-bold text-base-content text-sm">Repair Engine</h4>
@@ -321,6 +346,8 @@ export function HealthConfigSection({
 						</div>
 					)}
 				</div>
+
+				<CorruptedMetadataCard isReadOnly={isReadOnly} />
 
 				{/* Directory Configuration */}
 				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">

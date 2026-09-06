@@ -314,6 +314,8 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/health/library-sync/cancel", s.handleCancelLibrarySync)
 	api.Post("/health/library-sync/dry-run", s.handleDryRunLibrarySync)
 
+	api.Get("/metadata/corrupted", s.handleGetCorruptedMetadata)
+	api.Delete("/metadata/corrupted", s.handlePurgeCorruptedMetadata)
 	api.Get("/metadata/migration/status", s.handleGetMetadataMigrationStatus)
 	api.Post("/metadata/migration/dry-run", s.handleDryRunMetadataMigration)
 	api.Post("/metadata/migration/start", s.handleStartMetadataMigration)

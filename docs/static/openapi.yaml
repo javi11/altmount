@@ -1867,6 +1867,62 @@ paths:
       summary: Get scan status
       tags:
         - Import
+  /metadata/corrupted:
+    delete:
+      description: Removes every corrupted metadata safety copy and releases the
+        segment stores they hold.
+      responses:
+        "204":
+          description: No Content
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "503":
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+      summary: Purge corrupted metadata
+      tags:
+        - Metadata
+    get:
+      description: Returns how many corrupted metadata safety copies are retained and
+        how much disk they occupy.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/api.APIResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/api.CorruptedMetadataStatsResponse"
+                    type: object
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+        "503":
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/api.APIResponse"
+      security:
+        - BearerAuth: []
+      summary: Get corrupted metadata stats
+      tags:
+        - Metadata
   /metadata/migration/cancel:
     post:
       description: Stops an in-flight migration after the current file.
@@ -3930,6 +3986,17 @@ components:
           $ref: "#/components/schemas/api.ImportAPIResponse"
         log:
           $ref: "#/components/schemas/config.LogConfig"
+        memory_limit_mb:
+          description: >-
+            MemoryLimitMB is the Go soft memory limit. Unset or 0 derives it
+            from
+
+            the budgets that allocate (see SoftMemoryLimit); a positive value pins
+
+            it; a negative value leaves the runtime default. GOMEMLIMIT in the
+
+            environment always takes precedence.
+          type: integer
         metadata:
           $ref: "#/components/schemas/config.MetadataConfig"
         mount_path:
@@ -3938,6 +4005,8 @@ components:
           $ref: "#/components/schemas/config.MountType"
         network:
           $ref: "#/components/schemas/config.NetworkConfig"
+        par2_repair:
+          $ref: "#/components/schemas/config.Par2RepairConfig"
         profiler_enabled:
           type: boolean
         providers:
@@ -3969,6 +4038,13 @@ components:
           type: string
         webdav:
           $ref: "#/components/schemas/api.WebDAVAPIResponse"
+      type: object
+    api.CorruptedMetadataStatsResponse:
+      properties:
+        file_count:
+          type: integer
+        total_bytes:
+          type: integer
       type: object
     api.DailyStat:
       properties:
@@ -4361,7 +4437,8 @@ components:
         host:
           type: string
         id:
-          description: Stable public provider identifier; never credentials or non-graphic characters
+          description: ID is a stable public provider identifier; it is not an
+            authentication field.
           type: string
         inflight_requests:
           type: integer
@@ -4498,7 +4575,6 @@ components:
         host:
           type: string
         id:
-          description: Stable public provider identifier; never credentials or non-graphic characters
           type: string
         last_connection_attempt:
           type: string
@@ -4767,6 +4843,13 @@ components:
         rc_url:
           type: string
         rc_user:
+          type: string
+        rcd_restart_after:
+          description: >-
+            RcdRestartAfter is how long the rcd may stay unresponsive to
+            liveness
+
+            probes before it is killed and restarted. Empty means the built-in default.
           type: string
         read_only:
           type: boolean
@@ -5368,6 +5451,17 @@ components:
           type: integer
         cleanup_orphaned_metadata:
           type: boolean
+        corrupted_retention_days:
+          description: >-
+            CorruptedRetentionDays bounds how long the corrupted_metadata safety
+            copies
+
+            created by MoveToCorrupted are kept before the health cycle prunes them.
+
+            nil or 0 means keep forever, which is what every install did before this
+
+            setting existed.
+          type: integer
         corruption_action:
           description: >-
             CorruptionAction controls what happens when the health checker or a
@@ -5661,6 +5755,104 @@ components:
         weight:
           type: integer
       type: object
+    config.Par2RepairConfig:
+      properties:
+        arr_first:
+          description: >-
+            ArrFirst makes PAR2 repair the fallback for corrupted files: the
+            health
+
+            worker triggers the ARR rescan first exactly as before, and enqueues a
+
+            PAR2 repair only when nothing is found in the ARRs (no instance
+
+            configured, none tracks the file) or ARR repair is disabled. On by
+
+            default; disable to keep PAR2 out of the corrupted-file flow (degraded
+
+            files, playback holes and repair-on-import still repair via PAR2
+
+            directly).
+          type: boolean
+        enabled:
+          type: boolean
+        max_concurrent_jobs:
+          description: MaxConcurrentJobs bounds simultaneously running repair jobs.
+          type: integer
+        max_connections:
+          description: >-
+            MaxConnections bounds how many NNTP connections repair jobs use for
+
+            article fetches (shared across concurrent jobs). Repair streams the
+
+            whole release once, so this directly sets its download speed on an idle
+
+            pool. Fetches ride the pool's background lane: while anything streams
+
+            or imports, the pool holds repair to a quarter of each provider's
+
+            connections regardless of this value. 0 (default) means 10.
+          type: integer
+        max_memory_mb:
+          description: >-
+            MaxMemoryMB bounds one job's in-heap solver memory; jobs needing
+            more
+
+            still run, backed by memory-mapped scratch files next to the patch store.
+          type: integer
+        max_patch_store_mb:
+          description: >-
+            MaxPatchStoreMB bounds the on-disk patch store size; oldest patches
+            are
+
+            evicted first when the cap is exceeded. 0 (default) means unlimited.
+          type: integer
+        max_release_size_mb:
+          type: integer
+        max_repair_ratio:
+          description: >-
+            MaxRepairRatio caps how large a fraction of a file's bytes a repair
+            may
+
+            reconstruct. The release's PAR2 redundancy is always the hard ceiling.
+          type: number
+        min_release_size_mb:
+          description: >-
+            MinReleaseSizeMB / MaxReleaseSizeMB bound the size of releases
+            repair
+
+            takes on (content bytes, PAR2 files excluded). A repair downloads the
+
+            whole release once, so these let users skip releases too large to be
+
+            worth the bandwidth or too small to bother with. 0 (default) means
+
+            unbounded on that side — all sizes are repaired.
+          type: integer
+        patch_dir:
+          description: >-
+            PatchDir is where repaired article payloads (and the solver's
+            transient
+
+            scratch files) are stored. Empty (default) means <metadata_root>/patches.
+
+            Applied at startup; changing it does not move existing patches.
+          type: string
+        repair_on_import:
+          description: >-
+            RepairOnImport queues a repair as soon as an import completes with
+
+            confirmed missing segments, instead of waiting for the first playback or
+
+            a health check. Off by default: every repair costs one full release
+
+            download, so a large damaged backlog would be expensive. Worth enabling
+
+            when your library outlives article retention — a release's PAR2 volumes
+
+            are most likely to still be retrievable close to the post date.
+          type: boolean
+      type: object
     config.ProviderConfig:
       properties:
         account_expiration_date:
@@ -5670,6 +5862,11 @@ components:
         host:
           type: string
         id:
+          description: >-
+            ID is a stable public identifier used in pool names, metrics, and
+            errors.
+
+            It must never contain credentials or non-graphic characters.
           type: string
         inflight_requests:
           description: >-
@@ -5725,6 +5922,17 @@ components:
           type: integer
         storage_group:
           type: string
+        stream_inflight_requests:
+          description: >-
+            StreamInflightRequests caps streaming (priority-lane) bodies in
+            flight
+
+            per connection, so a playback read never queues behind a connection's
+
+            worth of read-ahead. 0 defaults to 4; values above inflight_requests
+
+            are capped to it.
+          type: integer
         tls:
           type: boolean
         user_agent:
@@ -5872,6 +6080,19 @@ components:
           type: string
         rc_user:
           type: string
+        rcd_restart_after:
+          description: >-
+            RcdRestartAfter is how long the rcd subprocess must stay
+            unresponsive to
+
+            liveness probes before it is killed and restarted. Empty means the built-in
+
+            default. Restarting is disruptive, because re-establishing the mount
+
+            unmounts it out from under every process reading it, so an install whose
+
+            rcd goes briefly slow under load can raise this to ride the stall out.
+          type: string
         read_only:
           type: boolean
         syslog:
@@ -5984,6 +6205,12 @@ components:
             MaxSizeGB via LRU eviction). Left unset (nil) it defaults to 24 hours.
           type: integer
         max_size_gb:
+          type: integer
+        memory_mb:
+          description: |-
+            MemoryMB bounds the in-memory tier of decoded articles that sits in
+            front of the disk cache and is on even when the disk cache is off.
+            Left unset (nil) it defaults to 256; an explicit 0 disables it.
           type: integer
       type: object
     config.StreamScoringConfig:
@@ -6246,6 +6473,7 @@ components:
         - failed
         - paused
         - fallback
+        - waiting_repair
       type: string
       x-enum-comments:
         QueueStatusFallback: Sent to external SABnzbd as fallback
@@ -6256,6 +6484,7 @@ components:
         - ""
         - ""
         - Sent to external SABnzbd as fallback
+        - ""
       x-enum-varnames:
         - QueueStatusPending
         - QueueStatusProcessing
@@ -6263,3 +6492,4 @@ components:
         - QueueStatusFailed
         - QueueStatusPaused
         - QueueStatusFallback
+        - QueueStatusWaitingRepair
