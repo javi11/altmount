@@ -19,12 +19,12 @@ _Streaming settings in the system configuration_
 
 | Parameter              | Description                                           | Default |
 | ---------------------- | ----------------------------------------------------- | ------- |
-| `max_prefetch`         | Number of segments to prefetch ahead during streaming | `30`    |
+| `max_prefetch`         | Number of segments to prefetch ahead during streaming | `60`    |
 | `read_timeout_seconds` | Maximum duration of a single read before it fails     | `120`   |
 
 ```yaml
 streaming:
-  max_prefetch: 30 # Number of segments prefetched ahead (default: 30)
+  max_prefetch: 60 # Number of segments prefetched ahead (default: 60; also capped at 96 MB)
   read_timeout_seconds: 120 # Fail a read that stalls this long (0 = default, -1 = disabled)
   failure_masking:
     enabled: true # Automatically hide files from mounts after repeated failures
