@@ -172,6 +172,28 @@ func releaseLooksDead(missing, reported int) bool {
 	return missing >= deadReleaseMinMisses && float64(missing) >= deadReleaseMissFraction*float64(reported)
 }
 
+// PlaceholderResults maps the damage an NZB declares itself: every file whose
+// segments include gap placeholders (articles the NZB never listed) is reported
+// Broken with those ids as known misses, without a single STAT. Index-aligned
+// with files; gap-free files get the zero result. The group is not condemned
+// here: an exactly-known gap is judged against the hole caps by the caller,
+// which can keep a lightly holed archive set importable.
+func PlaceholderResults(files []FastFailFile) []FastFailFileResult {
+	results := make([]FastFailFileResult, len(files))
+	for fileIdx, file := range files {
+		_, placeholders := splitPlaceholders(file.Segments)
+		if len(placeholders) == 0 {
+			continue
+		}
+		results[fileIdx].Broken = true
+		results[fileIdx].KnownGapCount = len(placeholders)
+		for _, ph := range placeholders {
+			results[fileIdx].MissingSegmentIDs = append(results[fileIdx].MissingSegmentIDs, ph.Id)
+		}
+	}
+	return results
+}
+
 // splitPlaceholders separates a file's real segments from gap placeholders.
 func splitPlaceholders(segments []*metapb.SegmentData) (real, placeholders []*metapb.SegmentData) {
 	for _, seg := range segments {
@@ -308,9 +330,10 @@ func FastFailReleaseProbe(
 				continue
 			}
 			if holes.IsPlaceholderID(segment.Id) {
-				// The NZB itself omits this article: damage known without a
-				// single STAT, so the per-file sweep can map it right away.
-				return true, nil
+				// A gap the NZB itself declares is not a provider miss: it is
+				// mapped without a STAT (PlaceholderResults), and the probe's
+				// job is still to answer for the articles the NZB does list.
+				continue
 			}
 			segments = append(segments, segment)
 		}
@@ -418,7 +441,7 @@ func FastFailCheckFiles(
 		maxConnections = 1
 	}
 
-	results := make([]FastFailFileResult, len(files))
+	results := PlaceholderResults(files)
 
 	// brokenGroups records group keys with at least one unreachable segment, so
 	// remaining Stats for those groups can be skipped in later chunks.
@@ -446,19 +469,7 @@ func FastFailCheckFiles(
 		if len(file.Segments) == 0 {
 			continue
 		}
-		real, placeholders := splitPlaceholders(file.Segments)
-		if len(placeholders) > 0 {
-			// Articles the NZB never listed are misses known before the
-			// sweep starts; they need no STAT and are reported as observed.
-			// The group is not condemned here: an exactly-known gap is
-			// judged against the hole caps by the caller, which can keep a
-			// lightly holed archive set importable.
-			results[fileIdx].Broken = true
-			results[fileIdx].KnownGapCount = len(placeholders)
-			for _, ph := range placeholders {
-				results[fileIdx].MissingSegmentIDs = append(results[fileIdx].MissingSegmentIDs, ph.Id)
-			}
-		}
+		real, _ := splitPlaceholders(file.Segments)
 		if len(real) == 0 {
 			continue
 		}

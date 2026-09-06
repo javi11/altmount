@@ -420,60 +420,72 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	acceptableMissingPercent := cfg.GetAcceptableMissingSegmentsPercentage()
+
+	var results []validation.FastFailFileResult
 	if !missing {
+		// The provider has everything the NZB lists. Gaps the NZB itself
+		// declares are mapped from their placeholders without a STAT; the
+		// per-file sweep would only re-learn what the probe just answered.
+		results = validation.PlaceholderResults(fastFailFiles)
+		if !anyBroken(results) {
+			if proc.log != nil {
+				proc.log.DebugContext(ctx, "Fast-fail release probe passed",
+					"files", len(fastFailFiles),
+					"duration", time.Since(probeStart))
+			}
+			return nil, nil, nil, nil
+		}
 		if proc.log != nil {
-			proc.log.DebugContext(ctx, "Fast-fail release probe passed",
+			proc.log.DebugContext(ctx, "Fast-fail release probe passed; mapping declared gaps without a per-file sweep",
 				"files", len(fastFailFiles),
 				"duration", time.Since(probeStart))
 		}
-		return nil, nil, nil, nil
-	}
+	} else {
+		isStremioImport := (category != nil && *category == "stremio") || (downloadID != nil && strings.HasPrefix(*downloadID, "stremio:"))
+		if isStremioImport && cfg.Stremio.EffectiveFastFailHeaderOnly() {
+			if proc.log != nil {
+				proc.log.InfoContext(ctx, "Fast-fail release probe failed for Stremio import; aborting immediately without per-file sweep",
+					"files", len(fastFailFiles),
+					"probe_duration", time.Since(probeStart))
+			}
+			return nil, nil, nil, multifile.ErrNoFilesProcessed
+		}
 
-	isStremioImport := (category != nil && *category == "stremio") || (downloadID != nil && strings.HasPrefix(*downloadID, "stremio:"))
-	if isStremioImport && cfg.Stremio.EffectiveFastFailHeaderOnly() {
+		// Phase 2 (escalation): the probe found an unreachable segment, so map
+		// exactly which files are broken. This sweeps a per-file sample of every
+		// file but only runs for releases that are already known to have missing
+		// segments — those imports skip Body work below, so the extra Stats are
+		// recovered.
 		if proc.log != nil {
-			proc.log.InfoContext(ctx, "Fast-fail release probe failed for Stremio import; aborting immediately without per-file sweep",
+			proc.log.DebugContext(ctx, "Fast-fail release probe found a missing segment, escalating to per-file sweep",
 				"files", len(fastFailFiles),
 				"probe_duration", time.Since(probeStart))
 		}
-		return nil, nil, nil, multifile.ErrNoFilesProcessed
-	}
 
-	// Phase 2 (escalation): the probe found an unreachable segment, so map
-	// exactly which files are broken. This sweeps a per-file sample of every
-	// file but only runs for releases that are already known to have missing
-	// segments — those imports skip Body work below, so the extra Stats are
-	// recovered.
-	if proc.log != nil {
-		proc.log.DebugContext(ctx, "Fast-fail release probe found a missing segment, escalating to per-file sweep",
-			"files", len(fastFailFiles),
-			"probe_duration", time.Since(probeStart))
-	}
+		// Report progress within the 0–10% band so the queue item doesn't appear
+		// frozen during the network sweep. NOT gated on HasSubscribers(): the
+		// tracker also persists the latest percentage for clients that connect
+		// mid-import, and this sweep can outlast the moment it starts.
+		var fastFailTracker *progress.Tracker
+		if proc.broadcaster != nil {
+			fastFailTracker = proc.broadcaster.CreateTracker(queueID, 0, 10).WithStage("Mapping missing segments")
+		}
 
-	// Report progress within the 0–10% band so the queue item doesn't appear
-	// frozen during the network sweep. NOT gated on HasSubscribers(): the
-	// tracker also persists the latest percentage for clients that connect
-	// mid-import, and this sweep can outlast the moment it starts.
-	var fastFailTracker *progress.Tracker
-	if proc.broadcaster != nil {
-		fastFailTracker = proc.broadcaster.CreateTracker(queueID, 0, 10).WithStage("Mapping missing segments")
-	}
-
-	acceptableMissingPercent := cfg.GetAcceptableMissingSegmentsPercentage()
-
-	results, err := validation.FastFailCheckFiles(
-		ctx,
-		fastFailFiles,
-		proc.poolManager,
-		cfg.Import.SegmentSamplePercentage,
-		concurrency,
-		proc.validationTimeout,
-		fastFailTracker,
-		proc.patchIndex,
-		acceptableMissingPercent == 0,
-	)
-	if err != nil {
-		return nil, nil, nil, err
+		results, err = validation.FastFailCheckFiles(
+			ctx,
+			fastFailFiles,
+			proc.poolManager,
+			cfg.Import.SegmentSamplePercentage,
+			concurrency,
+			proc.validationTimeout,
+			fastFailTracker,
+			proc.patchIndex,
+			acceptableMissingPercent == 0,
+		)
+		if err != nil {
+			return nil, nil, nil, err
+		}
 	}
 
 	brokenIdx := make(map[int]struct{})
@@ -671,8 +683,13 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 		return nil, nil, nil, multifile.ErrNoFilesProcessed
 	}
 
-	if len(brokenIdx) == 0 {
+	if len(brokenIdx) == 0 && len(missingIDs) == 0 && len(degradedFiles) == 0 {
 		return nil, nil, nil, nil
+	}
+	if len(brokenIdx) == 0 {
+		// Degraded only: nothing to exclude, but the caller still needs the
+		// misses and degraded files to persist known holes and queue repair.
+		return nil, missingIDs, degradedFiles, nil
 	}
 
 	if proc.log != nil {
@@ -737,6 +754,16 @@ type gappedSet struct {
 	members    []int // members with declared gaps
 	totalBytes int64 // whole set, gap-free volumes included
 	totalSegs  int
+}
+
+// anyBroken reports whether any fast-fail result marks its file broken.
+func anyBroken(results []validation.FastFailFileResult) bool {
+	for _, r := range results {
+		if r.Broken {
+			return true
+		}
+	}
+	return false
 }
 
 // fastFailDamageIsDegraded judges a file's confirmed damage against the hole

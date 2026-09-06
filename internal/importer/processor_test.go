@@ -830,3 +830,95 @@ func TestClassifyDeclaredGaps(t *testing.T) {
 		t.Fatalf("20 gaps in a 500-segment file (4%%) = %v, want failed (ratio cap)", got)
 	}
 }
+
+// buildGappedRarSetNzb builds a stored RAR set of volumeCount volumes with
+// segsPerVolume segments each, all reachable on the client, and replaces the
+// given 1-based segment numbers of gapVolume with declared-gap placeholders.
+func buildGappedRarSetNzb(volumeCount, segsPerVolume, gapVolume int, gapNumbers ...int) (*nzbparser.Nzb, []string) {
+	gaps := make(map[int]struct{}, len(gapNumbers))
+	for _, g := range gapNumbers {
+		gaps[g] = struct{}{}
+	}
+	var placeholders []string
+	files := make(nzbparser.NzbFiles, volumeCount)
+	for v := range files {
+		name := fmt.Sprintf("release.part%03d.rar", v+1)
+		segs := make(nzbparser.NzbSegments, segsPerVolume)
+		for j := range segs {
+			id := fmt.Sprintf("%s-seg-%d", name, j+1)
+			if _, gap := gaps[j+1]; gap && v+1 == gapVolume {
+				id = holes.PlaceholderID(j+1, name)
+				placeholders = append(placeholders, id)
+			}
+			segs[j] = nzbparser.NzbSegment{Bytes: 100, Number: j + 1, ID: id}
+		}
+		files[v] = nzbparser.NzbFile{Filename: name, Subject: name, Segments: segs}
+	}
+	return &nzbparser.Nzb{Files: files}, placeholders
+}
+
+// TestPreParseFastFailDeclaredGapsOnHealthyReleaseSkipsPerFileSweep pins that
+// gaps declared by the NZB itself do not buy a per-file STAT sweep: the
+// release-wide probe still runs against the provider, and when it passes the
+// gap mapping comes from the placeholders alone.
+func TestPreParseFastFailDeclaredGapsOnHealthyReleaseSkipsPerFileSweep(t *testing.T) {
+	client := fakepool.New() // every real segment reachable
+	proc := &Processor{
+		poolManager:       processorTestPoolManager{client: client},
+		validationTimeout: 100 * time.Millisecond,
+	}
+	const volumes = 100
+	n, placeholders := buildGappedRarSetNzb(volumes, 10, 50, 4, 5)
+	cfg := config.DefaultConfig() // 2% acceptable missing; 2 gaps of 1000 segments qualify
+
+	brokenIdx, missingIDs, degraded, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, nil)
+	if err != nil {
+		t.Fatalf("preParseFastFail returned error: %v", err)
+	}
+	if len(brokenIdx) != 0 {
+		t.Errorf("brokenIdx = %v, want empty (declared gaps within the hole caps import degraded)", brokenIdx)
+	}
+	for _, id := range placeholders {
+		if _, ok := missingIDs[id]; !ok {
+			t.Errorf("missingIDs lacks placeholder %s", id)
+		}
+	}
+	if _, ok := degraded["release.part050.rar"]; !ok {
+		t.Errorf("degradedFiles = %v, want the gapped volume", degraded)
+	}
+	// The per-file sweep round-robins at least one STAT per volume, so any
+	// count at or above the volume count means it ran.
+	if got := client.StatCalls(); got == 0 || got >= volumes {
+		t.Errorf("StatCalls = %d, want 0 < n < %d (release probe only, no per-file sweep)", got, volumes)
+	}
+}
+
+// TestPreParseFastFailDegradedVideoReturnsHolesForPersistence pins that a
+// release with degraded-but-importable damage and nothing broken still hands
+// its missing segments and degraded files back, so the caller can persist the
+// known holes and queue repair; an empty brokenIdx must not blank them.
+func TestPreParseFastFailDegradedVideoReturnsHolesForPersistence(t *testing.T) {
+	client := fakepool.New()
+	proc := &Processor{
+		poolManager:       processorTestPoolManager{client: client},
+		validationTimeout: 100 * time.Millisecond,
+	}
+	n := buildMultiSegmentNzb(client, "Movie.2024.mkv", 50, 25)
+	cfg := config.DefaultConfig()
+	cfg.Import.SegmentSamplePercentage = 100
+	cfg.Health.AcceptableMissingSegmentsPercentage = 5
+
+	brokenIdx, missingIDs, degraded, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, nil)
+	if err != nil {
+		t.Fatalf("preParseFastFail returned error: %v", err)
+	}
+	if len(brokenIdx) != 0 {
+		t.Fatalf("brokenIdx = %v, want empty", brokenIdx)
+	}
+	if _, ok := missingIDs["Movie.2024.mkv-seg-25"]; !ok {
+		t.Errorf("missingIDs = %v, want the sampled miss", missingIDs)
+	}
+	if _, ok := degraded["Movie.2024.mkv"]; !ok {
+		t.Errorf("degradedFiles = %v, want the degraded video", degraded)
+	}
+}
