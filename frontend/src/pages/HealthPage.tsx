@@ -341,9 +341,9 @@ export function HealthPage() {
 	};
 
 	const handleManualCheck = useCallback(
-		async (id: number) => {
+		async (id: number, verifyContent?: boolean) => {
 			try {
-				await directHealthCheck.mutateAsync(id);
+				await directHealthCheck.mutateAsync({ id, verifyContent });
 			} catch (err) {
 				console.error("Failed to perform direct health check:", err);
 			}

@@ -70,6 +70,16 @@ type Opener interface {
 // content is confirmed bad; ContentProbeError means the check itself
 // failed and must not be treated as a content failure.
 func Probe(ctx context.Context, opener Opener, path string, timeout time.Duration) ProbeResult {
+	res := probeOnce(ctx, opener, path, timeout)
+	if res.Result != ContentProbeError {
+		return res
+	}
+	// A probe costs a single article, so one immediate re-attempt is cheaper
+	// than letting a momentary provider hiccup stall the whole release.
+	return probeOnce(ctx, opener, path, timeout)
+}
+
+func probeOnce(ctx context.Context, opener Opener, path string, timeout time.Duration) ProbeResult {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	ctx = context.WithValue(ctx, utils.MaxPrefetchKey, 1)

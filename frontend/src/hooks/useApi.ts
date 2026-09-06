@@ -424,7 +424,8 @@ export const useDirectHealthCheck = () => {
 	const queryClient = useQueryClient();
 
 	return useMutation({
-		mutationFn: (id: number) => apiClient.directHealthCheck(id),
+		mutationFn: ({ id, verifyContent }: { id: number; verifyContent?: boolean }) =>
+			apiClient.directHealthCheck(id, verifyContent),
 		onSuccess: () => {
 			// Immediately refresh health data to show "checking" status
 			queryClient.invalidateQueries({ queryKey: ["health"] });
