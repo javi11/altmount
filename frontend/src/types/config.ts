@@ -165,6 +165,8 @@ export interface RepairConfig {
 	max_cooldown_hours: number;
 	max_repair_retries: number; // Max repair notification retries
 	exponential_backoff: boolean;
+	auto_search_wait_seconds: number; // Wait for the ARR's own redownload search before deleting the file record; 0 disables
+	file_delete_confirm_seconds: number; // Wait for the ARR to report the deleted file record as unlinked; 0 disables
 }
 
 // Dry run result for library sync

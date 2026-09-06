@@ -304,6 +304,8 @@ health:
     max_cooldown_hours: 24
     exponential_backoff: true
     max_repair_retries: 3
+    auto_search_wait_seconds: 120 # wait for the *arr's own automatic re-download search before deleting the file record; 0 = don't wait
+    file_delete_confirm_seconds: 15 # wait for the *arr to report the deleted file record as unlinked before searching; 0 = don't wait
 ```
 
 ---

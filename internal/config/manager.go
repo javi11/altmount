@@ -683,6 +683,16 @@ type RepairConfig struct {
 	MaxRepairRetries int   `yaml:"max_repair_retries" mapstructure:"max_repair_retries" json:"max_repair_retries"`
 
 	ExponentialBackoff *bool `yaml:"exponential_backoff" mapstructure:"exponential_backoff" json:"exponential_backoff,omitempty"`
+
+	// AutoSearchWaitSeconds bounds how long a repair waits for the ARR's own
+	// automatic redownload search — queued by the ARR the moment a release is
+	// blocklisted — to finish before the file record is deleted and AltMount
+	// issues its own targeted search. 0 disables the wait and restores the
+	// previous fire-and-forget ordering.
+	AutoSearchWaitSeconds int `yaml:"auto_search_wait_seconds" mapstructure:"auto_search_wait_seconds" json:"auto_search_wait_seconds"`
+	// FileDeleteConfirmSeconds bounds how long a repair waits for the ARR to
+	// report the deleted file record as unlinked before issuing its search.
+	FileDeleteConfirmSeconds int `yaml:"file_delete_confirm_seconds" mapstructure:"file_delete_confirm_seconds" json:"file_delete_confirm_seconds"`
 }
 
 // HealthConfig represents health checker configuration
@@ -1265,6 +1275,12 @@ func (c *Config) Validate() error {
 	}
 	if c.Health.CorruptedRetentionDays != nil && *c.Health.CorruptedRetentionDays < 0 {
 		return fmt.Errorf("health corrupted_retention_days must be zero (keep forever) or greater")
+	}
+	if c.Health.Repair.AutoSearchWaitSeconds < 0 {
+		return fmt.Errorf("health repair auto_search_wait_seconds must be zero (no wait) or greater")
+	}
+	if c.Health.Repair.FileDeleteConfirmSeconds < 0 {
+		return fmt.Errorf("health repair file_delete_confirm_seconds must be zero (no wait) or greater")
 	}
 
 	// Validate health configuration - requires library_dir when enabled and using a strategy other than NONE
@@ -2198,10 +2214,12 @@ func DefaultConfig(configDir ...string) *Config {
 			VerifyContentTimeoutSeconds:         &healthVerifyContentTimeoutSeconds, // Default: 15s per-file content probe timeout
 			CorruptedRetentionDays:              &healthCorruptedRetentionDays,      // Default: keep corrupted safety copies forever
 			Repair: RepairConfig{
-				Enabled:            &repairEnabled,
-				IntervalMinutes:    60,
-				MaxCoolDownHours:   24,
-				ExponentialBackoff: &repairExponentialBackoff,
+				Enabled:                  &repairEnabled,
+				IntervalMinutes:          60,
+				MaxCoolDownHours:         24,
+				ExponentialBackoff:       &repairExponentialBackoff,
+				AutoSearchWaitSeconds:    120,
+				FileDeleteConfirmSeconds: 15,
 			},
 		},
 		Par2Repair: Par2RepairConfig{

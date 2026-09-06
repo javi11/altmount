@@ -764,22 +764,16 @@ func (m *Manager) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 		"movie_path", targetMovie.Path,
 		"file_path", filePath)
 
+	failAt := time.Now()
+	blocklisted := false
+
 	// If we found the movie and have a file ID, try to blocklist and delete the file
 	if targetMovieFileID > 0 {
 		// Try to blocklist the release associated with this file
 		if err := m.blocklistRadarrMovieFile(ctx, client, targetMovie.ID, targetMovieFileID, relativePath, sceneName); err != nil {
 			slog.WarnContext(ctx, "Failed to blocklist Radarr release", "error", err)
 		}
-
-		// Delete the existing file from Radarr database
-		err = client.DeleteMovieFilesContext(ctx, targetMovieFileID)
-		if err != nil {
-			slog.WarnContext(ctx, "Failed to delete movie file from Radarr, continuing with search",
-				"instance", instanceName,
-				"movie_id", targetMovie.ID,
-				"file_id", targetMovieFileID,
-				"error", err)
-		}
+		blocklisted = true
 	} else {
 		slog.InfoContext(ctx, "Movie has no specific file ID linked in Radarr, attempting release blocklist using metadata",
 			"movie", targetMovie.Title)
@@ -787,7 +781,26 @@ func (m *Manager) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 			if err := m.blocklistRadarrMovieFile(ctx, client, targetMovie.ID, 0, relativePath, sceneName); err != nil {
 				slog.WarnContext(ctx, "Failed to blocklist Radarr release using metadata fallback", "error", err)
 			}
+			blocklisted = true
 		}
+	}
+
+	var autoSearch *arrCommand
+	if blocklisted {
+		auto, state, settleErr := m.settleRadarrAutoRedownload(ctx, client, instanceName, radarrRedownloadTarget{
+			movieID:     targetMovie.ID,
+			movieFileID: targetMovieFileID,
+		}, failAt)
+		if settleErr != nil {
+			return settleErr
+		}
+		switch state {
+		case redownloadHandled:
+			return nil
+		case redownloadSatisfied:
+			return model.ErrEpisodeAlreadySatisfied
+		}
+		autoSearch = auto
 	}
 
 	// Failure breaker: every targeted re-search counts one failure-driven action
@@ -799,14 +812,9 @@ func (m *Manager) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 	}
 
 	// Step 3: Trigger targeted search for the missing movie
-	searchCmd := &radarr.CommandRequest{
-		Name:     "MoviesSearch",
-		MovieIDs: []int64{targetMovie.ID},
-	}
-
-	response, err := client.SendCommandContext(ctx, searchCmd)
+	response, err := m.sendRadarrSearch(ctx, client, instanceName, targetMovie.ID, autoSearch)
 	if err != nil {
-		return fmt.Errorf("failed to trigger Radarr search for movie ID %d: %w", targetMovie.ID, err)
+		return err
 	}
 
 	slog.InfoContext(ctx, "Successfully triggered Radarr targeted search for re-download",
@@ -959,6 +967,7 @@ func (m *Manager) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 	}
 
 	var episodeIDs []int64
+	var autoSearch *arrCommand
 
 	// Get all episodes for this specific series
 	episodes, err := client.GetSeriesEpisodesContext(ctx, &sonarr.GetEpisode{
@@ -1001,19 +1010,28 @@ func (m *Manager) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 				"episode_count", len(episodeIDs),
 				"episode_file_id", targetEpisodeFileID)
 
+			failAt := time.Now()
+
 			// Try to blocklist the release associated with this file
 			if err := m.blocklistSonarrEpisodeFile(ctx, client, targetSeriesID, targetEpisodeFileID, relativePath, episodeIDs, sceneName); err != nil {
 				slog.WarnContext(ctx, "Failed to blocklist Sonarr release", "error", err)
 			}
 
-			// Delete the existing episode file from Sonarr database
-			err := client.DeleteEpisodeFileContext(ctx, targetEpisodeFileID)
+			auto, state, err := m.settleSonarrAutoRedownload(ctx, client, instanceName, sonarrRedownloadTarget{
+				seriesID:      targetSeriesID,
+				episodeIDs:    episodeIDs,
+				episodeFileID: targetEpisodeFileID,
+			}, failAt)
 			if err != nil {
-				slog.WarnContext(ctx, "Failed to delete episode file from Sonarr, continuing with search",
-					"instance", instanceName,
-					"episode_file_id", targetEpisodeFileID,
-					"error", err)
+				return err
 			}
+			switch state {
+			case redownloadHandled:
+				return nil
+			case redownloadSatisfied:
+				return model.ErrEpisodeAlreadySatisfied
+			}
+			autoSearch = auto
 		}
 	} else {
 		slog.WarnContext(ctx, "Series found but no matching episode file ID found, attempting queue-based failure",
@@ -1032,10 +1050,27 @@ func (m *Manager) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 				episodeIDs = append(episodeIDs, ep.Id)
 			}
 
+			failAt := time.Now()
+
 			// Try to blocklist the release associated with these episodes
 			if err := m.blocklistSonarrEpisodeFile(ctx, client, targetSeriesID, 0, relativePath, episodeIDs, sceneName); err != nil {
 				slog.WarnContext(ctx, "Failed to blocklist Sonarr release using metadata fallback", "error", err)
 			}
+
+			auto, state, err := m.settleSonarrAutoRedownload(ctx, client, instanceName, sonarrRedownloadTarget{
+				seriesID:   targetSeriesID,
+				episodeIDs: episodeIDs,
+			}, failAt)
+			if err != nil {
+				return err
+			}
+			switch state {
+			case redownloadHandled:
+				return nil
+			case redownloadSatisfied:
+				return model.ErrEpisodeAlreadySatisfied
+			}
+			autoSearch = auto
 		}
 	}
 
@@ -1053,14 +1088,9 @@ func (m *Manager) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 	}
 
 	// Trigger targeted episode search for the remaining episodes in this file
-	searchCmd := &sonarr.CommandRequest{
-		Name:       "EpisodeSearch",
-		EpisodeIDs: searchIDs,
-	}
-
-	response, err := client.SendCommandContext(ctx, searchCmd)
+	response, err := m.sendSonarrSearch(ctx, client, instanceName, searchIDs, autoSearch)
 	if err != nil {
-		return fmt.Errorf("failed to trigger Sonarr episode search: %w", err)
+		return err
 	}
 
 	slog.InfoContext(ctx, "Successfully triggered Sonarr targeted episode search for re-download",

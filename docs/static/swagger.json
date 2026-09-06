@@ -8716,11 +8716,19 @@
         "config.RepairConfig": {
             "type": "object",
             "properties": {
+                "auto_search_wait_seconds": {
+                    "description": "AutoSearchWaitSeconds bounds how long a repair waits for the ARR's own\nautomatic redownload search — queued by the ARR the moment a release is\nblocklisted — to finish before the file record is deleted and AltMount\nissues its own targeted search. 0 disables the wait and restores the\nprevious fire-and-forget ordering.",
+                    "type": "integer"
+                },
                 "enabled": {
                     "type": "boolean"
                 },
                 "exponential_backoff": {
                     "type": "boolean"
+                },
+                "file_delete_confirm_seconds": {
+                    "description": "FileDeleteConfirmSeconds bounds how long a repair waits for the ARR to\nreport the deleted file record as unlinked before issuing its search.",
+                    "type": "integer"
                 },
                 "interval_minutes": {
                     "type": "integer"
