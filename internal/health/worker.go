@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/javi11/altmount/internal/arrs"
@@ -87,12 +88,14 @@ type HealthWorker struct {
 	par2Repair          Par2RepairEnqueuer            // optional, may be nil
 
 	// Worker state
-	status       WorkerStatus
-	running      bool
-	cycleRunning bool // Flag to prevent overlapping cycles
-	stopChan     chan struct{}
-	wg           sync.WaitGroup
-	mu           sync.RWMutex
+	status   WorkerStatus
+	running  bool
+	stopChan chan struct{}
+	wg       sync.WaitGroup
+	mu       sync.RWMutex
+
+	// Kept off mu so the cycle can clear it while Stop is blocked in wg.Wait().
+	cycleRunning atomic.Bool
 
 	// Active checks tracking for cancellation
 	activeChecks   map[string]*activeCheck // filePath -> in-flight check
@@ -180,6 +183,7 @@ func (hw *HealthWorker) Start(ctx context.Context) error {
 	}
 
 	// Start the main worker goroutine
+	hw.stopChan = make(chan struct{})
 	hw.wg.Go(func() {
 		hw.run(ctx)
 	})
@@ -196,25 +200,31 @@ func (hw *HealthWorker) Start(ctx context.Context) error {
 // Stop gracefully stops the health worker
 func (hw *HealthWorker) Stop(ctx context.Context) error {
 	hw.mu.Lock()
-	defer hw.mu.Unlock()
-
 	if !hw.running {
+		hw.mu.Unlock()
 		return fmt.Errorf("health worker not running")
 	}
 
+	hw.running = false
 	hw.status = WorkerStatusStopping
+	stopCh := hw.stopChan
+	hw.mu.Unlock()
+
 	hw.updateStats(func(s *WorkerStats) {
 		s.Status = WorkerStatusStopping
 	})
 
 	slog.InfoContext(ctx, "Stopping health worker...")
-	close(hw.stopChan)
-	hw.running = false
+	close(stopCh)
 
-	// Wait for all goroutines to finish
+	// mu must not be held here: the worker goroutine can still need it to finish,
+	// which would deadlock Stop against the very goroutine it is waiting on.
 	hw.wg.Wait()
 
+	hw.mu.Lock()
 	hw.status = WorkerStatusStopped
+	hw.mu.Unlock()
+
 	hw.updateStats(func(s *WorkerStats) {
 		s.Status = WorkerStatusStopped
 		s.CurrentRunStartTime = nil
@@ -292,11 +302,7 @@ func (hw *HealthWorker) run(ctx context.Context) {
 			return
 		case <-ticker.C:
 			// Check if a cycle is already running
-			hw.mu.RLock()
-			isCycleRunning := hw.cycleRunning
-			hw.mu.RUnlock()
-
-			if isCycleRunning {
+			if hw.cycleRunning.Load() {
 				slog.DebugContext(ctx, "Skipping health check cycle - previous cycle still running")
 				continue
 			}
@@ -956,16 +962,10 @@ func (hw *HealthWorker) performDirectCheck(ctx context.Context, filePath string,
 // runHealthCheckCycle runs a single cycle of health checks
 func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 	// Set the cycle running flag
-	hw.mu.Lock()
-	hw.cycleRunning = true
-	hw.mu.Unlock()
+	hw.cycleRunning.Store(true)
 
 	// Ensure we clear the flag when done
-	defer func() {
-		hw.mu.Lock()
-		hw.cycleRunning = false
-		hw.mu.Unlock()
-	}()
+	defer hw.cycleRunning.Store(false)
 
 	now := time.Now().UTC()
 	hw.updateStats(func(s *WorkerStats) {
