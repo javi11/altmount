@@ -150,6 +150,10 @@ func runMigrations(db *sql.DB, d Dialect) error {
 
 	ensureSchemaIntegrity(db, d)
 
+	if err := normalizeVirtualPaths(context.Background(), db, d); err != nil {
+		return fmt.Errorf("failed to normalize virtual paths: %w", err)
+	}
+
 	return nil
 }
 
