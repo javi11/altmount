@@ -59,7 +59,7 @@ func TestCheckFilesTreatsPatchedSegmentAsAvailable(t *testing.T) {
 
 	results, err := FastFailCheckFiles(context.Background(), files,
 		fastFailPoolManager{client: client}, 100, 1, time.Second, nil,
-		fakePatchIndex{have: map[string]bool{dead: true}})
+		fakePatchIndex{have: map[string]bool{dead: true}}, false)
 	if err != nil {
 		t.Fatal(err)
 	}

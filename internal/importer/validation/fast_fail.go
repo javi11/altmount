@@ -390,6 +390,10 @@ type FastFailFileResult struct {
 // Operational failures are retried, and exhaustion returns
 // ErrFastFailInconclusive without marking files broken. progressTracker may be
 // nil; when set it reports completed Stats as work progresses.
+// stopFileOnFirstMiss condemns a file (and its group) on its first definitive
+// miss and ends the sweep once no eligible file is left. Callers running with
+// zero missing-segment tolerance set it: the extent of the damage cannot
+// change the verdict, so mapping the rest of a doomed file is wasted work.
 func FastFailCheckFiles(
 	ctx context.Context,
 	files []FastFailFile,
@@ -399,6 +403,7 @@ func FastFailCheckFiles(
 	timeout time.Duration,
 	progressTracker progress.ProgressTracker,
 	patchIdx PatchIndex,
+	stopFileOnFirstMiss bool,
 ) ([]FastFailFileResult, error) {
 	if !poolManager.HasPool() {
 		return nil, fmt.Errorf("cannot fast-fail import: usenet connection pool is nil")
@@ -418,6 +423,9 @@ func FastFailCheckFiles(
 	// brokenGroups records group keys with at least one unreachable segment, so
 	// remaining Stats for those groups can be skipped in later chunks.
 	brokenGroups := make(map[string]struct{})
+
+	// brokenFiles does the same per file, for stopFileOnFirstMiss.
+	brokenFiles := make(map[int]struct{})
 
 	// Build the flat work list first so we know the total up front for progress.
 	type statJob struct {
@@ -461,6 +469,15 @@ func FastFailCheckFiles(
 		}
 	}
 
+	// Files with no sample generate no jobs and are never eligible: PAR2 and
+	// other sidecars reach here with nil Segments to keep index alignment.
+	remaining := 0
+	for _, selected := range perFile {
+		if len(selected) > 0 {
+			remaining++
+		}
+	}
+
 	var jobs []statJob
 	for round := 0; round < maxSamples; round++ {
 		for fileIdx, selected := range perFile {
@@ -481,14 +498,24 @@ func FastFailCheckFiles(
 
 	var done, lastPct int
 	advance := func() {
+		done++
 		if progressTracker == nil {
 			return
 		}
-		done++
 		pct := done * 100 / total
 		if pct != lastPct {
 			lastPct = pct
 			progressTracker.Update(done, total)
+		}
+	}
+
+	condemnFile := func(fileIdx int) {
+		if _, already := brokenFiles[fileIdx]; already {
+			return
+		}
+		brokenFiles[fileIdx] = struct{}{}
+		if len(perFile[fileIdx]) > 0 {
+			remaining--
 		}
 	}
 
@@ -516,6 +543,12 @@ func FastFailCheckFiles(
 
 		toCheck := make([]statJob, 0, len(chunk))
 		for _, job := range chunk {
+			if stopFileOnFirstMiss {
+				if _, broken := brokenFiles[job.fileIdx]; broken {
+					advance()
+					continue
+				}
+			}
 			if job.groupKey != "" {
 				if _, broken := brokenGroups[job.groupKey]; broken {
 					// Group already doomed — skip the Stat but still advance
@@ -547,8 +580,29 @@ func FastFailCheckFiles(
 				if job.groupKey != "" {
 					brokenGroups[job.groupKey] = struct{}{}
 				}
+				if stopFileOnFirstMiss {
+					condemnFile(job.fileIdx)
+					if job.groupKey != "" {
+						for idx := range files {
+							if files[idx].GroupKey == job.groupKey {
+								condemnFile(idx)
+							}
+						}
+					}
+				}
 			}
 			advance()
+		}
+
+		if stopFileOnFirstMiss && remaining == 0 {
+			for range jobs[end:] {
+				advance()
+			}
+			slog.InfoContext(ctx, "Fast-fail sweep stopped early: no eligible files remain",
+				"files", len(files),
+				"checked", done,
+				"total", total)
+			break
 		}
 
 		if err == nil {
