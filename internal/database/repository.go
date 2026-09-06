@@ -496,31 +496,33 @@ func (r *Repository) DeleteQueueItemsByPath(ctx context.Context, path string) er
 
 // RemoveFromQueue removes an item from the queue
 func (r *Repository) RemoveFromQueue(ctx context.Context, id int64) error {
-	query := `DELETE FROM import_queue WHERE id = ?`
+	// The queue row and its import_history copy go together: the SABnzbd
+	// history view suppresses the history copy only while the live completed
+	// queue row exists, so a half-applied delete resurrects the job as a fresh
+	// "Completed" slot pointing at a path the ARR already imported and deleted
+	// (issue #586). Deleting the queue row alone would also be unrecoverable —
+	// a retry can no longer find the item to clean up after.
+	return r.WithTransaction(ctx, func(tx *Repository) error {
+		result, err := tx.db.ExecContext(ctx, `DELETE FROM import_queue WHERE id = ?`, id)
+		if err != nil {
+			return fmt.Errorf("failed to remove from queue: %w", err)
+		}
 
-	result, err := r.db.ExecContext(ctx, query, id)
-	if err != nil {
-		return fmt.Errorf("failed to remove from queue: %w", err)
-	}
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("failed to get rows affected: %w", err)
+		}
 
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to get rows affected: %w", err)
-	}
+		if rowsAffected == 0 {
+			return sql.ErrNoRows
+		}
 
-	if rowsAffected == 0 {
-		return sql.ErrNoRows
-	}
+		if _, err := tx.db.ExecContext(ctx, `DELETE FROM import_history WHERE nzb_id = ?`, id); err != nil {
+			return fmt.Errorf("failed to remove import history for queue item %d: %w", id, err)
+		}
 
-	// Drop the import_history copy of the same job. The SABnzbd history view
-	// suppresses that copy only while the live completed queue row exists, so
-	// leaving it behind resurrects the job as a fresh "Completed" slot pointing
-	// at a path the ARR already imported and deleted (issue #586).
-	if _, err := r.db.ExecContext(ctx, `DELETE FROM import_history WHERE nzb_id = ?`, id); err != nil {
-		return fmt.Errorf("failed to remove import history for queue item %d: %w", id, err)
-	}
-
-	return nil
+		return nil
+	})
 }
 
 // RemoveFromHistoryByDownloadID removes a record from import_history by its DownloadID
