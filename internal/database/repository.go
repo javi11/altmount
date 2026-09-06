@@ -512,6 +512,14 @@ func (r *Repository) RemoveFromQueue(ctx context.Context, id int64) error {
 		return sql.ErrNoRows
 	}
 
+	// Drop the import_history copy of the same job. The SABnzbd history view
+	// suppresses that copy only while the live completed queue row exists, so
+	// leaving it behind resurrects the job as a fresh "Completed" slot pointing
+	// at a path the ARR already imported and deleted (issue #586).
+	if _, err := r.db.ExecContext(ctx, `DELETE FROM import_history WHERE nzb_id = ?`, id); err != nil {
+		return fmt.Errorf("failed to remove import history for queue item %d: %w", id, err)
+	}
+
 	return nil
 }
 
@@ -595,9 +603,23 @@ func (r *Repository) RemoveFromQueueBulk(ctx context.Context, ids []int64) (*Bul
 		}, fmt.Errorf("cannot delete %d items that are currently being processed", processingCount)
 	}
 
+	// Drop the import_history copies of the same jobs before their queue rows
+	// go away, or the SABnzbd history view resurrects them (issue #586).
+	historyQuery := fmt.Sprintf(
+		`DELETE FROM import_history WHERE nzb_id IN (SELECT id FROM import_queue WHERE id IN (%s) AND status != ?)`,
+		strings.Join(placeholders, ","))
+	historyArgs := make([]any, 0, len(args)+1)
+	historyArgs = append(historyArgs, args...)
+	historyArgs = append(historyArgs, QueueStatusProcessing)
+	if _, err := r.db.ExecContext(ctx, historyQuery, historyArgs...); err != nil {
+		return nil, fmt.Errorf("failed to remove import history for queue items: %w", err)
+	}
+
 	// Delete items that are not processing
 	deleteQuery := fmt.Sprintf(`DELETE FROM import_queue WHERE id IN (%s) AND status != ?`, strings.Join(placeholders, ","))
-	deleteArgs := append(args, QueueStatusProcessing)
+	deleteArgs := make([]any, 0, len(args)+1)
+	deleteArgs = append(deleteArgs, args...)
+	deleteArgs = append(deleteArgs, QueueStatusProcessing)
 
 	result, err := r.db.ExecContext(ctx, deleteQuery, deleteArgs...)
 	if err != nil {
@@ -1023,6 +1045,14 @@ func (r *Repository) clearQueueItemsByStatus(ctx context.Context, statuses ...Qu
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, 0, err
+	}
+
+	// Drop the import_history copies of the same jobs before their queue rows
+	// go away, or the SABnzbd history view resurrects them (issue #586).
+	historyQuery := fmt.Sprintf(
+		`DELETE FROM import_history WHERE nzb_id IN (SELECT id FROM import_queue WHERE status IN (%s))`, placeholders)
+	if _, err := r.db.ExecContext(ctx, historyQuery, args...); err != nil {
+		return nil, 0, fmt.Errorf("failed to clear import history for queue items: %w", err)
 	}
 
 	deleteQuery := fmt.Sprintf(`DELETE FROM import_queue WHERE status IN (%s)`, placeholders)
