@@ -43,6 +43,7 @@ type SegmentCache struct {
 	logger    *slog.Logger
 	totalSize int64
 	dirty     atomic.Bool
+	evicting  atomic.Bool
 	ready     chan struct{}
 	readyOnce sync.Once
 }
@@ -150,16 +151,37 @@ func (c *SegmentCache) Put(messageID string, data []byte) error {
 
 	c.dirty.Store(true)
 
+	c.evictIfOver()
+
 	return nil
+}
+
+// evictLowWaterPercent is how far below MaxSizeBytes a sweep drives the cache,
+// so a stream at line rate does not re-trigger a sweep on every Put.
+const evictLowWaterPercent = 95
+
+func (c *SegmentCache) evictIfOver() {
+	c.mu.Lock()
+	over := c.totalSize > c.config.MaxSizeBytes
+	c.mu.Unlock()
+	if !over || !c.evicting.CompareAndSwap(false, true) {
+		return
+	}
+	defer c.evicting.Store(false)
+	c.evictTo(c.config.MaxSizeBytes * evictLowWaterPercent / 100)
 }
 
 // Evict removes the oldest entries (by LastAccess) until total size is within MaxSizeBytes.
 func (c *SegmentCache) Evict() {
 	c.waitReady()
+	c.evictTo(c.config.MaxSizeBytes)
+}
+
+func (c *SegmentCache) evictTo(target int64) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 
 	if c.totalSize <= c.config.MaxSizeBytes {
+		c.mu.Unlock()
 		return
 	}
 
@@ -177,18 +199,26 @@ func (c *SegmentCache) Evict() {
 		return sorted[i].e.LastAccess.Before(sorted[j].e.LastAccess)
 	})
 
-	removed := false
+	victims := make([]string, 0, len(sorted))
+	freed := int64(0)
 	for _, pair := range sorted {
-		if c.totalSize <= c.config.MaxSizeBytes {
+		if c.totalSize <= target {
 			break
 		}
-		_ = os.Remove(pair.e.DataPath)
+		victims = append(victims, pair.e.DataPath)
 		c.totalSize -= pair.e.Size
+		freed += pair.e.Size
 		delete(c.items, pair.id)
-		removed = true
 	}
-	if removed {
+	remaining := c.totalSize
+	c.mu.Unlock()
+
+	for _, p := range victims {
+		_ = os.Remove(p)
+	}
+	if len(victims) > 0 {
 		c.dirty.Store(true)
+		c.logger.Info("segcache: evicted segments", "count", len(victims), "freed_bytes", freed, "total_bytes", remaining)
 	}
 }
 

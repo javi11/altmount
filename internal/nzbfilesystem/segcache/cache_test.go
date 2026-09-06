@@ -1,9 +1,11 @@
 package segcache_test
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -53,23 +55,62 @@ func TestCacheGetMiss(t *testing.T) {
 }
 
 func TestCacheEvictLRU(t *testing.T) {
-	// Allow only 20 bytes total. Each entry is 10 bytes.
-	c := newTestCache(t, 20, 0)
+	// Allow 100 bytes total. Each entry is 10 bytes, so the 95% low-water
+	// mark (95 bytes) leaves room for several entries after a sweep.
+	const maxBytes = 100
+	c := newTestCache(t, maxBytes, 0)
 
 	require.NoError(t, c.Put("old@msg", []byte("0123456789"))) // 10 bytes — oldest
 	time.Sleep(5 * time.Millisecond)
-	require.NoError(t, c.Put("new@msg", []byte("abcdefghij"))) // 10 bytes
+	for i := 0; i < 9; i++ {
+		require.NoError(t, c.Put(fmt.Sprintf("fill-%d@msg", i), []byte("abcdefghij")))
+		time.Sleep(time.Millisecond)
+	}
 
-	assert.EqualValues(t, 2, c.ItemCount())
+	assert.EqualValues(t, 10, c.ItemCount())
+	assert.EqualValues(t, maxBytes, c.TotalSize())
 
-	// Adding a third entry should evict the oldest.
-	require.NoError(t, c.Put("newest@msg", []byte("ABCDEFGHIJ"))) // 10 bytes
-	c.Evict()
+	// Adding one more entry pushes past the budget and evicts the oldest.
+	require.NoError(t, c.Put("newest@msg", []byte("ABCDEFGHIJ")))
 
-	assert.EqualValues(t, 2, c.ItemCount())
 	assert.False(t, c.Has("old@msg"), "oldest entry should have been evicted")
-	assert.True(t, c.Has("new@msg"))
-	assert.True(t, c.Has("newest@msg"))
+	assert.True(t, c.Has("newest@msg"), "newest entry should be retained")
+	assert.LessOrEqual(t, c.TotalSize(), int64(maxBytes*95/100))
+}
+
+func TestCachePutEnforcesMaxSizeWithoutExplicitEvict(t *testing.T) {
+	const maxBytes = 100
+	c := newTestCache(t, maxBytes, 0)
+
+	// Write well past the budget; no explicit Evict() call anywhere.
+	for i := 0; i < 50; i++ {
+		require.NoError(t, c.Put(fmt.Sprintf("seg-%d@msg", i), []byte("0123456789")))
+		assert.LessOrEqual(t, c.TotalSize(), int64(maxBytes),
+			"cache exceeded MaxSizeBytes after Put %d", i)
+	}
+}
+
+func TestCacheConcurrentPutsRespectMaxSize(t *testing.T) {
+	const maxBytes = 1000
+	c := newTestCache(t, maxBytes, 0)
+
+	payload := make([]byte, 100)
+	var wg sync.WaitGroup
+	for w := 0; w < 8; w++ {
+		wg.Add(1)
+		go func(worker int) {
+			defer wg.Done()
+			for i := 0; i < 50; i++ {
+				assert.NoError(t, c.Put(fmt.Sprintf("w%d-seg-%d@msg", worker, i), payload))
+			}
+		}(w)
+	}
+	wg.Wait()
+
+	// A concurrent Put may land while a sweep is in flight, so the final size can
+	// sit above the low-water mark, but it must settle within the budget.
+	c.Evict()
+	assert.LessOrEqual(t, c.TotalSize(), int64(maxBytes))
 }
 
 func TestCacheCleanupExpiry(t *testing.T) {
