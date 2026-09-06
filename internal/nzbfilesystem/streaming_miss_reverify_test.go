@@ -1,0 +1,173 @@
+package nzbfilesystem
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"runtime"
+	"testing"
+
+	"github.com/javi11/nntppool/v4"
+	"github.com/kipsilabs/altmount/internal/config"
+	"github.com/kipsilabs/altmount/internal/database"
+	"github.com/kipsilabs/altmount/internal/metadata"
+	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
+	"github.com/kipsilabs/altmount/internal/testsupport/fakepool"
+	"github.com/kipsilabs/altmount/internal/usenet"
+	_ "github.com/mattn/go-sqlite3"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+const reverifySegmentID = "a@b.example.com"
+
+// newImportedStreamFile wires an mvf whose file is already imported (health row
+// carries a library_path), so the repair branch would move its metadata to the
+// corrupted safety folder.
+func newImportedStreamFile(
+	t *testing.T, ctx context.Context, filePath string,
+	repo *database.HealthRepository, db *sql.DB, ms *metadata.MetadataService,
+	seg []*metapb.SegmentData, fp *fakepool.Client,
+) *MetadataVirtualFile {
+	t.Helper()
+
+	_, err := db.Exec(
+		`INSERT INTO file_health (file_path, library_path, status, scheduled_check_at) VALUES (?, ?, 'healthy', datetime('now'))`,
+		filePath, "/media/library/"+filePath,
+	)
+	require.NoError(t, err)
+
+	enabled := true
+	cfg := config.DefaultConfig()
+	cfg.Health.Enabled = &enabled
+	cfg.MountPath = ""
+
+	mvf := newStreamFailureMVF(ctx, filePath, repo, ms, seg, cfg)
+	if fp != nil {
+		mvf.poolManager = newFakePoolManager(fp)
+	}
+	return mvf
+}
+
+// A single 430 mid-stream is not proof the article is gone: providers return it
+// transiently (backend desync), and the reader never retries an
+// ErrArticleNotFound. Condemning on that evidence moved a healthy file's
+// metadata into the corrupted folder and made the ARR redownload it, while
+// re-importing the very same NZB minutes later verified clean (issue #749).
+func TestUpdateFileHealthOnError_TransientMissIsNotCondemned(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks not supported on Windows")
+	}
+	repo, db, ms := setupStreamHealthEnv(t)
+	ctx := context.Background()
+
+	filePath := "series/stream.s01e10.mkv"
+	seg := writeStreamMeta(t, ms, filePath)
+
+	// The re-check finds the article present: the 430 was transient.
+	fp := fakepool.New()
+	fp.SetBehavior(reverifySegmentID, fakepool.SegmentBehavior{Bytes: []byte("present")})
+
+	mvf := newImportedStreamFile(t, ctx, filePath, repo, db, ms, seg, fp)
+	mvf.updateFileHealthOnError(&usenet.DataCorruptionError{
+		UnderlyingErr: nntppool.ErrArticleNotFound,
+		SegmentID:     reverifySegmentID,
+		NoRetry:       true,
+		FileOffset:    -1,
+	}, true)
+
+	fh, err := repo.GetFileHealth(ctx, filePath)
+	require.NoError(t, err)
+	if fh != nil {
+		assert.NotEqual(t, database.HealthStatusRepairTriggered, fh.Status,
+			"a re-check that finds the article present must not trigger a repair")
+	}
+
+	original, readErr := ms.ReadFileMetadata(filePath)
+	require.NoError(t, readErr)
+	assert.NotNil(t, original, "metadata must stay put when the miss is not confirmed")
+	assert.False(t, mvf.metadataGone.Load(), "handle must not latch closed on an unconfirmed miss")
+}
+
+// A re-check that confirms the 430 keeps the existing repair behavior.
+func TestUpdateFileHealthOnError_ConfirmedMissStillTriggersRepair(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks not supported on Windows")
+	}
+	repo, db, ms := setupStreamHealthEnv(t)
+	ctx := context.Background()
+
+	filePath := "series/stream.s01e11.mkv"
+	seg := writeStreamMeta(t, ms, filePath)
+
+	fp := fakepool.New()
+	fp.SetBehavior(reverifySegmentID, fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
+
+	mvf := newImportedStreamFile(t, ctx, filePath, repo, db, ms, seg, fp)
+	mvf.updateFileHealthOnError(&usenet.DataCorruptionError{
+		UnderlyingErr: nntppool.ErrArticleNotFound,
+		SegmentID:     reverifySegmentID,
+		NoRetry:       true,
+		FileOffset:    -1,
+	}, true)
+
+	fh, err := repo.GetFileHealth(ctx, filePath)
+	require.NoError(t, err)
+	require.NotNil(t, fh)
+	assert.Equal(t, database.HealthStatusRepairTriggered, fh.Status,
+		"a confirmed miss must still trigger the repair")
+
+	original, readErr := ms.ReadFileMetadata(filePath)
+	require.NoError(t, readErr)
+	assert.Nil(t, original, "a confirmed miss must still move the metadata away")
+}
+
+// When the re-check cannot resolve the question — transport error, no pool —
+// behaviour is unchanged: the failure is treated as before rather than newly
+// suppressing repairs whenever the pool is briefly unhealthy.
+func TestUpdateFileHealthOnError_UnresolvedRecheckKeepsPreviousBehaviour(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks not supported on Windows")
+	}
+
+	tests := []struct {
+		name string
+		pool func() *fakepool.Client
+	}{
+		{
+			name: "transport error during re-check",
+			pool: func() *fakepool.Client {
+				fp := fakepool.New()
+				fp.SetBehavior(reverifySegmentID, fakepool.SegmentBehavior{Err: errors.New("connection reset")})
+				return fp
+			},
+		},
+		{
+			name: "no pool configured",
+			pool: func() *fakepool.Client { return nil },
+		},
+	}
+
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo, db, ms := setupStreamHealthEnv(t)
+			ctx := context.Background()
+
+			filePath := "series/stream.s01e2" + string(rune('0'+i)) + ".mkv"
+			seg := writeStreamMeta(t, ms, filePath)
+
+			mvf := newImportedStreamFile(t, ctx, filePath, repo, db, ms, seg, tt.pool())
+			mvf.updateFileHealthOnError(&usenet.DataCorruptionError{
+				UnderlyingErr: nntppool.ErrArticleNotFound,
+				SegmentID:     reverifySegmentID,
+				NoRetry:       true,
+				FileOffset:    -1,
+			}, true)
+
+			fh, err := repo.GetFileHealth(ctx, filePath)
+			require.NoError(t, err)
+			require.NotNil(t, fh)
+			assert.Equal(t, database.HealthStatusRepairTriggered, fh.Status)
+		})
+	}
+}
