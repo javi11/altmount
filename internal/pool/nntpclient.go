@@ -50,6 +50,12 @@ type NntpClient interface {
 	// downloading the body. Used by health checks and validation.
 	Stat(ctx context.Context, messageID string) (*nntppool.StatResult, error)
 
+	// StatPriority is Stat on the priority lane, for an existence check with a
+	// playback read blocked on its result: on the normal lane it could spend
+	// its whole budget queued behind a large BODY rather than awaiting an
+	// answer. Used by the mid-stream miss re-check.
+	StatPriority(ctx context.Context, messageID string) (*nntppool.StatResult, error)
+
 	// StatMany checks the existence of many articles concurrently, streaming a
 	// result per message-id as each completes. Used by health checks and
 	// fast-fail import validation to batch existence sweeps instead of

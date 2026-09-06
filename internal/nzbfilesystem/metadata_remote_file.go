@@ -2386,6 +2386,46 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 	isDegraded := healthEnabled && classification != nil &&
 		classification.Verdict == holes.VerdictDegraded
 
+	// A 430 mid-stream is not proof the article is gone: one transient answer
+	// was enough to hide a healthy file behind FILE_STATUS_CORRUPTED and have
+	// the ARR redownload it (issue #749). The reader settles that before the
+	// read fails, so this is only the backstop for failures arriving without a
+	// verdict — and only a proven-present article stops the repair, since a
+	// briefly unhealthy pool must not be able to suppress one.
+	//
+	// Gated on !isDegraded because it can cost a round trip while the caller
+	// holds mvf.mu: a degraded verdict is zero-filled and still playable and
+	// takes no destructive action, while everything past this point does —
+	// even with health disabled the file is marked corrupted, which hides it
+	// from listings and blocks opens.
+	//
+	// Recording pending rather than dropping the failure hands an
+	// intermittently reachable segment to the health worker instead of
+	// stalling playback forever with no repair. The debounce token stays
+	// spent; the read has already failed, so the next attempt re-triggers.
+	if !isDegraded && !mvf.confirmSegmentMissing(ctx, dataCorruptionErr) {
+		// With health checking off nothing consumes the pending row. Still the
+		// right call — the article is provably there — but say so rather than
+		// promise a follow-up that will not happen.
+		slog.WarnContext(ctx, "Streaming failure not confirmed on re-check, not condemning the file",
+			"file", mvf.name,
+			"segment_id", dataCorruptionErr.SegmentID,
+			"deferred_to_health_worker", healthEnabled)
+
+		errMsg := dataCorruptionErr.Error()
+		sourceNzb := &mvf.meta.SourceNzbPath
+		if *sourceNzb == "" {
+			sourceNzb = nil
+		}
+		if err := mvf.healthRepository.UpdateFileHealthScheduled(ctx,
+			mvf.name, database.HealthStatusPending, &errMsg, sourceNzb, nil, true, time.Now().UTC(),
+		); err != nil {
+			slog.WarnContext(ctx, "Failed to schedule health re-check after an unconfirmed streaming failure",
+				"file", mvf.name, "error", err)
+		}
+		return
+	}
+
 	// A missing article is PAR2-repairable regardless of eligibility for
 	// zero-fill (RAR/AES streams fail here instead of padding). Queue a
 	// background repair; the repair queue dedups and the planner enforces
@@ -2549,6 +2589,42 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 	); err != nil {
 		slog.WarnContext(ctx, "Failed to update health database for streaming failure", "file", mvf.name, "error", err)
 	}
+}
+
+// confirmSegmentMissing re-checks a segment a stream read reported as missing,
+// returning false only when the article is provably still there. Anything else
+// returns true so the caller proceeds exactly as it did before.
+func (mvf *MetadataVirtualFile) confirmSegmentMissing(ctx context.Context, dcErr *usenet.DataCorruptionError) bool {
+	if !usenet.IsArticleNotFound(dcErr.UnderlyingErr) {
+		return true
+	}
+
+	// The reader already asked; asking again costs a round trip under mvf.mu
+	// for an answer we have. Every settled verdict means the miss stands,
+	// including present-but-unfetchable — re-checking that one forever would
+	// leave the file unplayable and unrepaired.
+	if dcErr.MissVerdict != usenet.MissUnverified {
+		return true
+	}
+
+	if dcErr.SegmentID == "" || mvf.poolManager == nil {
+		return true
+	}
+
+	usenetPool, err := mvf.poolManager.GetPool()
+	if err != nil || usenetPool == nil {
+		return true
+	}
+
+	statCtx, cancel := context.WithTimeout(ctx, usenet.MissRecheckTimeout)
+	defer cancel()
+
+	// Priority lane: a playback read is blocked behind this, so it must not
+	// spend its budget queued behind a large BODY on a busy connection.
+	if _, err := usenetPool.StatPriority(statCtx, dcErr.SegmentID); err != nil {
+		return true
+	}
+	return false
 }
 
 // readFullContext reads exactly len(buf) bytes from r, but returns early

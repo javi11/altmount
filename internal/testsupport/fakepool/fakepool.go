@@ -123,11 +123,16 @@ type Client struct {
 	bodyStreamPriCalls atomic.Int64
 	bodyAsyncCalls     atomic.Int64
 	statCalls          atomic.Int64
+	statPriCalls       atomic.Int64
 
 	// Per-message-ID call counts (string → *atomic.Int64). Tests that need
 	// to assert how often a specific segment was requested (e.g. to detect
 	// retry storms) read this map via PerMessageCalls.
 	perIDCalls sync.Map
+
+	// Per-message-ID body call counts, excluding existence checks, so a STAT
+	// alongside a fetch does not read as a retry.
+	perIDBodyCalls sync.Map
 }
 
 // New returns a fake client. Without further configuration it returns an
@@ -207,6 +212,10 @@ func (c *Client) BodyAsyncCalls() int64 { return c.bodyAsyncCalls.Load() }
 // StatCalls returns the count of Stat invocations.
 func (c *Client) StatCalls() int64 { return c.statCalls.Load() }
 
+// StatPriorityCalls reports existence checks made on the priority lane.
+// StatCalls counts those too, so "no STAT at all" assertions keep working.
+func (c *Client) StatPriorityCalls() int64 { return c.statPriCalls.Load() }
+
 // PerMessageCalls returns how many times the given message-ID was requested
 // across all method types (Body / BodyPriority / BodyAsync / Stat).
 //
@@ -214,7 +223,18 @@ func (c *Client) StatCalls() int64 { return c.statCalls.Load() }
 // re-issuing failed requests, the per-ID count climbs faster than the
 // number of distinct segments and the assertion fails.
 func (c *Client) PerMessageCalls(messageID string) int64 {
-	v, ok := c.perIDCalls.Load(messageID)
+	return loadCount(&c.perIDCalls, messageID)
+}
+
+// PerMessageBodyCalls returns how many times the message-ID was fetched,
+// ignoring existence checks. Use it to pin retry behaviour when the code under
+// test may also STAT the same article.
+func (c *Client) PerMessageBodyCalls(messageID string) int64 {
+	return loadCount(&c.perIDBodyCalls, messageID)
+}
+
+func loadCount(m *sync.Map, messageID string) int64 {
+	v, ok := m.Load(messageID)
 	if !ok {
 		return 0
 	}
@@ -232,22 +252,38 @@ func (c *Client) ResetCounters() {
 	c.bodyStreamPriCalls.Store(0)
 	c.bodyAsyncCalls.Store(0)
 	c.statCalls.Store(0)
-	c.perIDCalls.Range(func(k, _ any) bool {
-		c.perIDCalls.Delete(k)
-		return true
-	})
+	c.statPriCalls.Store(0)
+	for _, m := range []*sync.Map{&c.perIDCalls, &c.perIDBodyCalls} {
+		m.Range(func(k, _ any) bool {
+			m.Delete(k)
+			return true
+		})
+	}
 }
 
 // countMessage increments the per-ID counter atomically, lazily creating
 // the counter on first contact.
 func (c *Client) countMessage(messageID string) {
-	if v, ok := c.perIDCalls.Load(messageID); ok {
+	bumpCount(&c.perIDCalls, messageID)
+}
+
+// countBodyMessage records a fetch in both the all-methods and body-only
+// per-ID counters.
+func (c *Client) countBodyMessage(messageID string) {
+	bumpCount(&c.perIDCalls, messageID)
+	bumpCount(&c.perIDBodyCalls, messageID)
+}
+
+// bumpCount increments a per-ID counter atomically, lazily creating the
+// counter on first contact.
+func bumpCount(m *sync.Map, messageID string) {
+	if v, ok := m.Load(messageID); ok {
 		v.(*atomic.Int64).Add(1)
 		return
 	}
 	var fresh atomic.Int64
 	fresh.Add(1)
-	actual, loaded := c.perIDCalls.LoadOrStore(messageID, &fresh)
+	actual, loaded := m.LoadOrStore(messageID, &fresh)
 	if loaded {
 		actual.(*atomic.Int64).Add(1)
 	}
@@ -307,7 +343,7 @@ func waitOrCancel(ctx context.Context, d time.Duration) error {
 // ArticleBody filled with the configured Bytes after the configured latency.
 func (c *Client) Body(ctx context.Context, messageID string, onMeta ...func(nntppool.YEncMeta)) (*nntppool.ArticleBody, error) {
 	c.bodyCalls.Add(1)
-	c.countMessage(messageID)
+	c.countBodyMessage(messageID)
 	defer c.enter()()
 	return c.serveBody(ctx, messageID, nil, onMeta...)
 }
@@ -316,7 +352,7 @@ func (c *Client) Body(ctx context.Context, messageID string, onMeta ...func(nntp
 // distinguish streaming from importer traffic.
 func (c *Client) BodyPriority(ctx context.Context, messageID string, onMeta ...func(nntppool.YEncMeta)) (*nntppool.ArticleBody, error) {
 	c.bodyPriCalls.Add(1)
-	c.countMessage(messageID)
+	c.countBodyMessage(messageID)
 	defer c.enter()()
 	return c.serveBody(ctx, messageID, nil, onMeta...)
 }
@@ -325,7 +361,7 @@ func (c *Client) BodyPriority(ctx context.Context, messageID string, onMeta ...f
 // distinguish repair traffic from importer traffic.
 func (c *Client) BodyBackground(ctx context.Context, messageID string, onMeta ...func(nntppool.YEncMeta)) (*nntppool.ArticleBody, error) {
 	c.bodyBgCalls.Add(1)
-	c.countMessage(messageID)
+	c.countBodyMessage(messageID)
 	defer c.enter()()
 	return c.serveBody(ctx, messageID, nil, onMeta...)
 }
@@ -336,7 +372,7 @@ func (c *Client) BodyBackground(ctx context.Context, messageID string, onMeta ..
 // when FailAfterFirstChunk is set.
 func (c *Client) BodyStreamPriority(ctx context.Context, messageID string, w io.Writer, onMeta ...func(nntppool.YEncMeta)) (*nntppool.ArticleBody, error) {
 	c.bodyStreamPriCalls.Add(1)
-	c.countMessage(messageID)
+	c.countBodyMessage(messageID)
 	defer c.enter()()
 	return c.serveBody(ctx, messageID, w, onMeta...)
 }
@@ -345,7 +381,7 @@ func (c *Client) BodyStreamPriority(ctx context.Context, messageID string, w io.
 // BodyResult on the returned channel.
 func (c *Client) BodyAsync(ctx context.Context, messageID string, w io.Writer, onMeta ...func(nntppool.YEncMeta)) <-chan nntppool.BodyResult {
 	c.bodyAsyncCalls.Add(1)
-	c.countMessage(messageID)
+	c.countBodyMessage(messageID)
 	ch := make(chan nntppool.BodyResult, 1)
 	go func() {
 		defer c.enter()()
@@ -360,6 +396,18 @@ func (c *Client) BodyAsync(ctx context.Context, messageID string, w io.Writer, o
 // configured latency. If the behavior has Err set, it is returned.
 func (c *Client) Stat(ctx context.Context, messageID string) (*nntppool.StatResult, error) {
 	c.statCalls.Add(1)
+	return c.serveStat(ctx, messageID)
+}
+
+// StatPriority mirrors Stat on the priority lane, counting toward StatCalls
+// too so "no existence check happened" assertions hold for either lane.
+func (c *Client) StatPriority(ctx context.Context, messageID string) (*nntppool.StatResult, error) {
+	c.statCalls.Add(1)
+	c.statPriCalls.Add(1)
+	return c.serveStat(ctx, messageID)
+}
+
+func (c *Client) serveStat(ctx context.Context, messageID string) (*nntppool.StatResult, error) {
 	c.countMessage(messageID)
 	defer c.enter()()
 	b := c.behaviorFor(messageID)
