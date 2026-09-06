@@ -56,17 +56,29 @@ func (m *Manager) findInstanceForFilePath(ctx context.Context, filePath string, 
 
 	allInstances := m.instances.GetAllInstances()
 
-	// Strategy 1: Fast Path - Check Root Folders
+	// Strategy 1: Fast Path - Check Root Folders.
+	//
+	// Every instance is scored and the most specific (longest) matching root
+	// folder wins. First-match-wins sent files under "/media/tv-4k" to the
+	// instance rooted at "/media/tv" whenever that one happened to be listed
+	// first, and the same applies to a nested root such as "/media/tv/anime"
+	// (issue #749).
+	bestScore, bestType, bestName := 0, "", ""
 	for _, instance := range allInstances {
 		if !instance.Enabled {
 			continue
 		}
 
 		if client, err := m.clients.GetOrCreateClient(instance); err == nil {
-			if m.managesFile(ctx, instance.Type, client, filePath) {
-				return instance.Type, instance.Name, nil
+			if score := m.managesFile(ctx, instance.Type, client, filePath); score > bestScore {
+				bestScore, bestType, bestName = score, instance.Type, instance.Name
 			}
 		}
+	}
+	if bestScore > 0 {
+		slog.DebugContext(ctx, "Found managing instance by root folder",
+			"instance", bestName, "type", bestType, "root_len", bestScore)
+		return bestType, bestName, nil
 	}
 
 	// Strategy 2: Category Match - Check if file is in the staging/complete folder
@@ -120,40 +132,63 @@ func (m *Manager) findInstanceForFilePath(ctx context.Context, filePath string, 
 	return "", "", fmt.Errorf("no ARR instance found managing file path: %s", filePath)
 }
 
-func (m *Manager) managesFile(ctx context.Context, instanceType string, client any, filePath string) bool {
+// rootFolderScore reports how specifically rootPath claims filePath: the
+// length of the normalized root folder when filePath is that folder or lives
+// inside it, else 0. Bigger means more specific.
+//
+// Matching is on path-segment boundaries. A raw strings.HasPrefix made
+// "/media/tv" claim "/media/tv-4k/..." — sending repairs to an ARR that owns
+// no such series (issue #749).
+func rootFolderScore(filePath, rootPath string) int {
+	root := strings.TrimRight(filepath.ToSlash(rootPath), "/")
+	file := strings.TrimRight(filepath.ToSlash(filePath), "/")
+	if root == "" || file == "" {
+		return 0
+	}
+	if file == root || strings.HasPrefix(file, root+"/") {
+		return len(root)
+	}
+	return 0
+}
+
+// managesFile reports how specifically instanceType's root folders claim
+// filePath: the length of the longest matching root folder, or 0 when none
+// matches. Callers compare scores across instances so the most specific root
+// wins (see findInstanceForFilePath).
+func (m *Manager) managesFile(ctx context.Context, instanceType string, client any, filePath string) int {
 	switch instanceType {
 	case "radarr":
 		rc, ok := client.(*radarr.Radarr)
 		if !ok {
-			return false
+			return 0
 		}
 		return m.radarrManagesFile(ctx, rc, filePath)
 	case "sonarr":
 		sc, ok := client.(*sonarr.Sonarr)
 		if !ok {
-			return false
+			return 0
 		}
 		return m.sonarrManagesFile(ctx, sc, filePath)
 	case "lidarr":
 		lc, ok := client.(*lidarr.Lidarr)
 		if !ok {
-			return false
+			return 0
 		}
 		return m.lidarrManagesFile(ctx, lc, filePath)
 	case "readarr":
 		rc, ok := client.(*readarr.Readarr)
 		if !ok {
-			return false
+			return 0
 		}
 		return m.readarrManagesFile(ctx, rc, filePath)
 	case "whisparr":
 		wc, ok := client.(*sonarr.Sonarr)
 		if !ok {
-			return false
+			return 0
 		}
 		return m.sonarrManagesFile(ctx, wc, filePath)
 	default:
-		return false
+		return 0
 	}
 }
 
@@ -180,8 +215,9 @@ func (m *Manager) hasFile(ctx context.Context, instanceType string, client any, 
 	}
 }
 
-// radarrManagesFile checks if Radarr manages the given file path using root folders (checkrr approach)
-func (m *Manager) radarrManagesFile(ctx context.Context, client *radarr.Radarr, filePath string) bool {
+// radarrManagesFile scores how specifically Radarr's root folders claim
+// filePath (checkrr approach). See rootFolderScore for the match rule.
+func (m *Manager) radarrManagesFile(ctx context.Context, client *radarr.Radarr, filePath string) int {
 	slog.DebugContext(ctx, "Checking Radarr root folders for file ownership",
 		"file_path", filePath)
 
@@ -189,25 +225,27 @@ func (m *Manager) radarrManagesFile(ctx context.Context, client *radarr.Radarr, 
 	rootFolders, err := client.GetRootFoldersContext(ctx)
 	if err != nil {
 		slog.DebugContext(ctx, "Failed to get root folders from Radarr for file check", "error", err)
-		return false
+		return 0
 	}
 
-	// Check if file path starts with any root folder path
+	best := 0
 	for _, folder := range rootFolders {
 		slog.DebugContext(ctx, "Checking Radarr root folder", "folder_path", folder.Path, "file_path", filePath)
-		// Check for direct prefix match or if the filePath contains the folder.Path (common in Docker/Remote setups)
-		if strings.HasPrefix(filePath, folder.Path) {
+		if score := rootFolderScore(filePath, folder.Path); score > best {
 			slog.DebugContext(ctx, "File matches Radarr root folder", "folder_path", folder.Path)
-			return true
+			best = score
 		}
 	}
 
-	slog.DebugContext(ctx, "File does not match any Radarr root folders")
-	return false
+	if best == 0 {
+		slog.DebugContext(ctx, "File does not match any Radarr root folders")
+	}
+	return best
 }
 
-// sonarrManagesFile checks if Sonarr manages the given file path using root folders (checkrr approach)
-func (m *Manager) sonarrManagesFile(ctx context.Context, client *sonarr.Sonarr, filePath string) bool {
+// sonarrManagesFile scores how specifically Sonarr's root folders claim
+// filePath (checkrr approach). See rootFolderScore for the match rule.
+func (m *Manager) sonarrManagesFile(ctx context.Context, client *sonarr.Sonarr, filePath string) int {
 	slog.DebugContext(ctx, "Checking Sonarr root folders for file ownership",
 		"file_path", filePath)
 
@@ -215,52 +253,56 @@ func (m *Manager) sonarrManagesFile(ctx context.Context, client *sonarr.Sonarr, 
 	rootFolders, err := client.GetRootFoldersContext(ctx)
 	if err != nil {
 		slog.DebugContext(ctx, "Failed to get root folders from Sonarr for file check", "error", err)
-		return false
+		return 0
 	}
 
-	// Check if file path starts with any root folder path
+	best := 0
 	for _, folder := range rootFolders {
 		slog.DebugContext(ctx, "Checking Sonarr root folder", "folder_path", folder.Path, "file_path", filePath)
-		if strings.HasPrefix(filePath, folder.Path) {
+		if score := rootFolderScore(filePath, folder.Path); score > best {
 			slog.DebugContext(ctx, "File matches Sonarr root folder", "folder_path", folder.Path)
-			return true
+			best = score
 		}
 	}
 
-	slog.DebugContext(ctx, "File does not match any Sonarr root folders")
-	return false
+	if best == 0 {
+		slog.DebugContext(ctx, "File does not match any Sonarr root folders")
+	}
+	return best
 }
 
-// lidarrManagesFile checks if Lidarr manages the given file path using root folders
-func (m *Manager) lidarrManagesFile(ctx context.Context, client *lidarr.Lidarr, filePath string) bool {
+// lidarrManagesFile scores how specifically Lidarr's root folders claim filePath.
+func (m *Manager) lidarrManagesFile(ctx context.Context, client *lidarr.Lidarr, filePath string) int {
 	slog.DebugContext(ctx, "Checking Lidarr root folders for file ownership", "file_path", filePath)
 	rootFolders, err := client.GetRootFoldersContext(ctx)
 	if err != nil {
 		slog.DebugContext(ctx, "Failed to get root folders from Lidarr", "error", err)
-		return false
+		return 0
 	}
+	best := 0
 	for _, folder := range rootFolders {
-		if strings.HasPrefix(filePath, folder.Path) {
-			return true
+		if score := rootFolderScore(filePath, folder.Path); score > best {
+			best = score
 		}
 	}
-	return false
+	return best
 }
 
-// readarrManagesFile checks if Readarr manages the given file path using root folders
-func (m *Manager) readarrManagesFile(ctx context.Context, client *readarr.Readarr, filePath string) bool {
+// readarrManagesFile scores how specifically Readarr's root folders claim filePath.
+func (m *Manager) readarrManagesFile(ctx context.Context, client *readarr.Readarr, filePath string) int {
 	slog.DebugContext(ctx, "Checking Readarr root folders for file ownership", "file_path", filePath)
 	rootFolders, err := client.GetRootFoldersContext(ctx)
 	if err != nil {
 		slog.DebugContext(ctx, "Failed to get root folders from Readarr", "error", err)
-		return false
+		return 0
 	}
+	best := 0
 	for _, folder := range rootFolders {
-		if strings.HasPrefix(filePath, folder.Path) {
-			return true
+		if score := rootFolderScore(filePath, folder.Path); score > best {
+			best = score
 		}
 	}
-	return false
+	return best
 }
 
 // radarrHasFile checks if any movie in the instance contains the given relative path
