@@ -27,7 +27,7 @@ The streaming system has a single tuning parameter: `max_prefetch`, which contro
 
 ```yaml
 streaming:
-  max_prefetch: 60 # More prefetch for high-bandwidth setups
+  max_prefetch: 90 # More prefetch for high-bandwidth setups
 
 import:
   max_processor_workers: 4 # Multiple NZB processors
@@ -38,7 +38,7 @@ import:
 
 ```yaml
 streaming:
-  max_prefetch: 30 # Default — good balance
+  max_prefetch: 60 # Default — good balance
 
 import:
   max_processor_workers: 2 # Standard processing
@@ -119,7 +119,7 @@ If media playback freezes or buffers frequently:
 
    ```yaml
    streaming:
-     max_prefetch: 45 # Increase from default 30
+     max_prefetch: 80 # Increase from default 60
    ```
 
 3. **Tune rclone VFS settings** (if using rclone mount): Playback freezing is often caused by rclone VFS settings rather than AltMount itself. See the [Streaming Configuration rclone section](../3.%20Configuration/streaming.md#rclone-vfs-recommended-settings) for recommended settings. Key parameters:
