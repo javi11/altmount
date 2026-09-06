@@ -583,6 +583,13 @@ type RCloneConfig struct {
 	Timeout       string `yaml:"timeout" mapstructure:"timeout" json:"timeout"`
 	Syslog        bool   `yaml:"syslog" mapstructure:"syslog" json:"syslog"`
 
+	// RcdRestartAfter is how long the rcd subprocess must stay unresponsive to
+	// liveness probes before it is killed and restarted. Empty means the built-in
+	// default. Restarting is disruptive, because re-establishing the mount
+	// unmounts it out from under every process reading it, so an install whose
+	// rcd goes briefly slow under load can raise this to ride the stall out.
+	RcdRestartAfter string `yaml:"rcd_restart_after" mapstructure:"rcd_restart_after" json:"rcd_restart_after"`
+
 	// Advanced Settings
 	NoModTime          bool `yaml:"no_mod_time" mapstructure:"no_mod_time" json:"no_mod_time"`
 	NoChecksum         bool `yaml:"no_checksum" mapstructure:"no_checksum" json:"no_checksum"`
@@ -2066,6 +2073,10 @@ func DefaultConfig(configDir ...string) *Config {
 			AllowNonEmpty: true,  // --allow-non-empty
 			ReadOnly:      false, // Not specified in your command, so false
 			Syslog:        true,  // --syslog
+
+			// Matches the previous hard-coded behaviour: probes run every 30s and
+			// three consecutive failures triggered a restart.
+			RcdRestartAfter: "90s",
 
 			// VFS Cache Settings - matching your command
 			CacheDir:              cachePath, // VFS cache directory (defaults to <rclone_path>/cache)
