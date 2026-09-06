@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 	"time"
 
@@ -105,4 +106,21 @@ func TestRemoveFromQueue_LeavesUnlinkedHistoryAlone(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	assert.Equal(t, int64(101), rows[0].ID)
+}
+
+// Deleting an id that is not in the queue must still report sql.ErrNoRows (the
+// API turns that into a 404) and must not touch unrelated history rows.
+func TestRemoveFromQueue_MissingIDStillReportsNoRows(t *testing.T) {
+	repo, db := newSABHistoryRepo(t)
+	ctx := context.Background()
+	base := time.Now().UTC()
+
+	insertH(t, db, 100, 42, "movies", base) // history for a queue row that is long gone
+
+	err := repo.RemoveFromQueue(ctx, 42)
+	require.ErrorIs(t, err, sql.ErrNoRows)
+
+	rows, listErr := repo.ListSABnzbdHistory(ctx, "", 100, 0)
+	require.NoError(t, listErr)
+	assert.Len(t, rows, 1, "a failed delete must leave the history row alone")
 }
