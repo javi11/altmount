@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"runtime"
 	"testing"
 
@@ -20,6 +21,36 @@ import (
 )
 
 const reverifySegmentID = "a@b.example.com"
+
+// writeStreamMetaN writes metadata for a file of n equally sized segments, the
+// first of which carries reverifySegmentID. A single missing segment out of n
+// stays under every hole threshold, so it classifies as degraded rather than
+// failed — which writeStreamMeta's single-segment file cannot do.
+func writeStreamMetaN(t *testing.T, ms *metadata.MetadataService, filePath string, n int) []*metapb.SegmentData {
+	t.Helper()
+
+	const segSize = 1024
+	segs := make([]*metapb.SegmentData, n)
+	for i := range segs {
+		id := fmt.Sprintf("seg%d@example.com", i)
+		if i == 0 {
+			id = reverifySegmentID
+		}
+		segs[i] = &metapb.SegmentData{
+			Id:          id,
+			SegmentSize: segSize,
+			StartOffset: 0,
+			EndOffset:   segSize - 1,
+		}
+	}
+
+	meta := ms.CreateFileMetadata(
+		int64(n)*segSize, "test.nzb", metapb.FileStatus_FILE_STATUS_HEALTHY,
+		segs, metapb.Encryption_NONE, "", "", nil, nil, 0, nil, "",
+	)
+	require.NoError(t, ms.WriteFileMetadata(filePath, meta))
+	return meta.SegmentData
+}
 
 // newImportedStreamFile wires an mvf whose file is already imported (health row
 // carries a library_path), so the repair branch would move its metadata to the
@@ -78,15 +109,50 @@ func TestUpdateFileHealthOnError_TransientMissIsNotCondemned(t *testing.T) {
 
 	fh, err := repo.GetFileHealth(ctx, filePath)
 	require.NoError(t, err)
-	if fh != nil {
-		assert.NotEqual(t, database.HealthStatusRepairTriggered, fh.Status,
-			"a re-check that finds the article present must not trigger a repair")
-	}
+	require.NotNil(t, fh)
+	assert.Equal(t, database.HealthStatusPending, fh.Status,
+		"an unconfirmed miss must be handed to the health worker, not repaired and not forgotten")
 
 	original, readErr := ms.ReadFileMetadata(filePath)
 	require.NoError(t, readErr)
 	assert.NotNil(t, original, "metadata must stay put when the miss is not confirmed")
 	assert.False(t, mvf.metadataGone.Load(), "handle must not latch closed on an unconfirmed miss")
+}
+
+// The re-check costs a network round-trip while the caller holds mvf.mu, which
+// a concurrent foreground read on the same handle would block on. It must
+// therefore only run when something destructive would otherwise follow: a
+// degraded verdict is zero-filled and still playable, so it must not pay for a
+// STAT at all.
+func TestUpdateFileHealthOnError_DegradedMissSkipsTheRecheck(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks not supported on Windows")
+	}
+	repo, db, ms := setupStreamHealthEnv(t)
+	ctx := context.Background()
+
+	filePath := "series/stream.s01e12.mkv"
+	seg := writeStreamMetaN(t, ms, filePath, 512)
+
+	fp := fakepool.New()
+	fp.SetBehavior(reverifySegmentID, fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
+
+	mvf := newImportedStreamFile(t, ctx, filePath, repo, db, ms, seg, fp)
+	// A single missing segment in a large file classifies as degraded.
+	mvf.updateFileHealthOnError(&usenet.DataCorruptionError{
+		UnderlyingErr: nntppool.ErrArticleNotFound,
+		SegmentID:     reverifySegmentID,
+		NoRetry:       true,
+		FileOffset:    0,
+	}, true)
+
+	fh, err := repo.GetFileHealth(ctx, filePath)
+	require.NoError(t, err)
+	require.NotNil(t, fh)
+	require.Equal(t, database.HealthStatusDegraded, fh.Status,
+		"precondition: this failure must classify as degraded")
+	assert.Zero(t, fp.StatCalls(),
+		"a degraded (still playable) failure must not pay for a re-check on the read path")
 }
 
 // A re-check that confirms the 430 keeps the existing repair behavior.
