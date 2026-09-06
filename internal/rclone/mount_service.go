@@ -106,6 +106,7 @@ func (s *MountService) Unmount(ctx context.Context) error {
 	if s.mount != nil {
 		if err := s.mount.Unmount(ctx); err != nil {
 			slog.ErrorContext(ctx, "Failed to unmount", "error", err)
+			return err
 		}
 	}
 

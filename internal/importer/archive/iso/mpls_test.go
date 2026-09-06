@@ -105,8 +105,8 @@ func TestParseMPLS(t *testing.T) {
 				{ClipName: "00001", InTime: 0, OutTime: 45000},
 				{ClipName: "00002", InTime: 0, OutTime: 90000},
 			}, []byte{
-				0x02,                                     // num_angles
-				0x00,                                     // is_different_audios flags
+				0x02,                                              // num_angles
+				0x00,                                              // is_different_audios flags
 				'0', '0', '0', '0', '7', 'M', '2', 'T', 'S', 0x00, // one alt angle entry (10 bytes)
 			}),
 			wantItems: []MPLSPlayItem{

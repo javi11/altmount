@@ -1,0 +1,97 @@
+package streambench
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"sort"
+	"time"
+)
+
+// Metric is one measured value. HigherIsBetter drives the regression rule:
+// throughput is better when higher, latency and byte waste when lower.
+type Metric struct {
+	Name           string  `json:"name"`
+	Unit           string  `json:"unit"`
+	Value          float64 `json:"value"`
+	HigherIsBetter bool    `json:"higher_is_better"`
+	// Informational metrics are reported but never fail the regression gate:
+	// tail percentiles from small samples and counts that depend on timing.
+	Informational bool `json:"informational,omitempty"`
+	// Tolerance, when non-zero, replaces the global threshold for this metric.
+	// It records measured run-to-run noise so a naturally jittery number does
+	// not fail the gate on noise alone.
+	Tolerance float64 `json:"tolerance,omitempty"`
+}
+
+// Median returns the per-name median of several runs' metrics. Every run
+// must report the same metric names in the same order.
+func Median(runs [][]Metric) []Metric {
+	if len(runs) == 0 {
+		return nil
+	}
+	out := make([]Metric, len(runs[0]))
+	for i := range runs[0] {
+		vals := make([]float64, 0, len(runs))
+		for _, r := range runs {
+			if i < len(r) {
+				vals = append(vals, r[i].Value)
+			}
+		}
+		sort.Float64s(vals)
+		m := runs[0][i]
+		m.Value = vals[len(vals)/2]
+		out[i] = m
+	}
+	return out
+}
+
+type Scenario struct {
+	Name    string   `json:"name"`
+	Metrics []Metric `json:"metrics"`
+}
+
+type Result struct {
+	GitSHA    string     `json:"git_sha"`
+	Timestamp time.Time  `json:"timestamp"`
+	Profile   string     `json:"profile,omitempty"`
+	Scenarios []Scenario `json:"scenarios"`
+}
+
+// Add appends metrics to the named scenario, creating it on first use so
+// benchmarks can report in any order.
+func (r *Result) Add(scenario string, m ...Metric) {
+	for i := range r.Scenarios {
+		if r.Scenarios[i].Name == scenario {
+			r.Scenarios[i].Metrics = append(r.Scenarios[i].Metrics, m...)
+			return
+		}
+	}
+	r.Scenarios = append(r.Scenarios, Scenario{Name: scenario, Metrics: m})
+}
+
+func Save(path string, r *Result) error {
+	if r.Timestamp.IsZero() {
+		r.Timestamp = time.Now().UTC()
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(r, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
+}
+
+func Load(path string) (*Result, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var r Result
+	if err := json.Unmarshal(data, &r); err != nil {
+		return nil, err
+	}
+	return &r, nil
+}

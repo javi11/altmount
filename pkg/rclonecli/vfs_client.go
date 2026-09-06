@@ -112,6 +112,11 @@ func (c *rcloneRcClient) RefreshDir(ctx context.Context, provider string, dirs [
 		dirs = []string{"/"}
 	}
 
+	// rclone's VFS is forward-slash on every platform. Normalize here so a
+	// caller that built a directory with filepath cannot silently no-op:
+	// vfs/forget accepts any string and reports success either way.
+	dirs = ToVFSPaths(dirs)
+
 	baseUrl, err := buildRCUrl(cfg.RClone.RCUrl, cfg.RClone.RCUser, cfg.RClone.RCPass)
 	if err != nil {
 		return fmt.Errorf("invalid RC URL configuration: %w", err)

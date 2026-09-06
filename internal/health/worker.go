@@ -57,7 +57,25 @@ type WorkerStats struct {
 	ErrorCount             int64        `json:"error_count"`
 }
 
+// activeCheck is one in-flight health check. Registrations are compared by pointer so a
+// releasing owner never removes an entry another owner has since registered for the same path.
+type activeCheck struct {
+	cancel context.CancelFunc
+}
+
 // HealthWorker manages continuous health monitoring and manual check requests
+// Par2RepairEnqueuer queues a file for background PAR2 repair (implemented by
+// par2repair.Service).
+type Par2RepairEnqueuer interface {
+	Enqueue(ctx context.Context, filePath string, failingSegmentID string)
+}
+
+// SetPar2RepairEnqueuer wires the PAR2 repair queue into the degraded-verdict
+// path. Call during boot, before the worker starts.
+func (hw *HealthWorker) SetPar2RepairEnqueuer(re Par2RepairEnqueuer) {
+	hw.par2Repair = re
+}
+
 type HealthWorker struct {
 	healthChecker       *HealthChecker
 	healthRepo          *database.HealthRepository
@@ -66,6 +84,7 @@ type HealthWorker struct {
 	importerService     importer.ImportService
 	configGetter        config.ConfigGetter
 	progressBroadcaster *progress.ProgressBroadcaster // optional, may be nil
+	par2Repair          Par2RepairEnqueuer            // optional, may be nil
 
 	// Worker state
 	status       WorkerStatus
@@ -76,8 +95,12 @@ type HealthWorker struct {
 	mu           sync.RWMutex
 
 	// Active checks tracking for cancellation
-	activeChecks   map[string]context.CancelFunc // filePath -> cancel function
+	activeChecks   map[string]*activeCheck // filePath -> in-flight check
 	activeChecksMu sync.RWMutex
+
+	// directCheckTimeout bounds a single manual recheck. Overridable so tests
+	// can exercise the timeout path without waiting out the real budget.
+	directCheckTimeout time.Duration
 
 	// Statistics
 	stats   WorkerStats
@@ -107,7 +130,9 @@ func NewHealthWorker(
 		progressBroadcaster: broadcaster,
 		status:              WorkerStatusStopped,
 		stopChan:            make(chan struct{}),
-		activeChecks:        make(map[string]context.CancelFunc),
+		activeChecks:        make(map[string]*activeCheck),
+		directCheckTimeout:  defaultDirectCheckTimeout,
+		// par2Repair is wired post-construction via SetPar2RepairEnqueuer.
 		stats: WorkerStats{
 			Status: WorkerStatusStopped,
 		},
@@ -220,13 +245,13 @@ func (hw *HealthWorker) CancelHealthCheck(ctx context.Context, filePath string) 
 	hw.activeChecksMu.Lock()
 	defer hw.activeChecksMu.Unlock()
 
-	cancelFunc, exists := hw.activeChecks[filePath]
+	check, exists := hw.activeChecks[filePath]
 	if !exists {
 		return fmt.Errorf("no active health check found for file: %s", filePath)
 	}
 
 	// Cancel the context
-	cancelFunc()
+	check.cancel()
 
 	// Remove from active checks
 	delete(hw.activeChecks, filePath)
@@ -346,35 +371,70 @@ func (hw *HealthWorker) AddToHealthCheck(ctx context.Context, filePath string, s
 	return nil
 }
 
-// PerformBackgroundCheck starts a health check in background and returns immediately
-func (hw *HealthWorker) PerformBackgroundCheck(ctx context.Context, filePath string) error {
+// defaultDirectCheckTimeout bounds a single manual recheck.
+const defaultDirectCheckTimeout = 10 * time.Minute
+
+// PerformBackgroundCheck starts a manual recheck of filePath in the
+// background. currentStatus must be the file's HealthStatus as it was BEFORE
+// the caller transitioned the row to Checking (e.g. via SetFileCheckingByID);
+// it is threaded straight into CheckOptions.CurrentStatus so the automatic
+// Pending-only content-verification gate (see shouldVerifyContent) still
+// works on this path — re-reading the row inside performDirectCheck would
+// always observe Checking and make the gate unreachable. verifyContentOverride,
+// when non-nil, forces (true) or disables (false) content verification for
+// this check regardless of currentStatus or the configured default.
+func (hw *HealthWorker) PerformBackgroundCheck(ctx context.Context, filePath string, currentStatus database.HealthStatus, verifyContentOverride *bool) error {
 	if !hw.IsRunning() {
 		return fmt.Errorf("health worker is not running")
 	}
 
+	timeout := hw.directCheckTimeout
+	if timeout <= 0 {
+		timeout = defaultDirectCheckTimeout
+	}
+
 	// Start health check in background
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 
-		checkErr := hw.performDirectCheck(ctx, filePath)
+		checkErr := hw.performDirectCheck(ctx, filePath, currentStatus, verifyContentOverride)
 		if checkErr != nil {
+			if errors.Is(checkErr, context.Canceled) {
+				// CancelHealthCheck already parked the record on Pending on the
+				// user's behalf; re-writing it here would undo that decision.
+				slog.InfoContext(ctx, "Background health check cancelled", "file_path", filePath)
+				return
+			}
+
 			if errors.Is(checkErr, context.DeadlineExceeded) {
-				slog.ErrorContext(ctx, "Background health check timed out after 10 minutes", "file_path", filePath)
+				slog.ErrorContext(ctx, "Background health check timed out", "file_path", filePath, "timeout", timeout)
 			} else {
 				slog.ErrorContext(ctx, "Background health check failed", "file_path", filePath, "error", checkErr)
 			}
 
+			// ctx is already expired on the timeout path, so the recovery write
+			// needs a live context of its own.
+			recoverCtx, recoverCancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer recoverCancel()
+
 			// Get current health record to preserve source NZB path
-			fileHealth, getErr := hw.healthRepo.GetFileHealth(ctx, filePath)
+			fileHealth, getErr := hw.healthRepo.GetFileHealth(recoverCtx, filePath)
 			var sourceNzb *string
 			if getErr == nil && fileHealth != nil {
 				sourceNzb = fileHealth.SourceNzbPath
 			}
 
-			// Set status back to pending if the check failed
+			// A check that never reached a verdict says nothing about the file:
+			// restore the status captured before the row was set to 'checking'
+			// rather than demoting a degraded/repair_triggered record to pending.
+			restored := currentStatus
+			if restored == database.HealthStatusChecking || restored == "" {
+				restored = database.HealthStatusPending
+			}
+
 			errorMsg := checkErr.Error()
-			updateErr := hw.healthRepo.UpdateFileHealth(ctx, filePath, database.HealthStatusPending, &errorMsg, sourceNzb, nil, false)
+			updateErr := hw.healthRepo.UpdateFileHealth(recoverCtx, filePath, restored, &errorMsg, sourceNzb, nil, false)
 			if updateErr != nil {
 				slog.ErrorContext(ctx, "Failed to update status after failed check", "file_path", filePath, "error", updateErr)
 			}
@@ -383,6 +443,14 @@ func (hw *HealthWorker) PerformBackgroundCheck(ctx context.Context, filePath str
 
 	return nil
 }
+
+// inconclusiveRecheckDelay is how long a file waits after a health check that
+// reached no verdict — a provider outage, timeouts, or a sweep truncated
+// before every segment answered. Such a check produces no evidence, so the
+// record is left exactly as it was and only its next check is pushed out; the
+// delay keeps a provider-wide outage from turning into a tight recheck loop
+// across the whole library.
+const inconclusiveRecheckDelay = 30 * time.Minute
 
 // prepareUpdateForResult decides what DB update and side effects are needed based on the check result.
 func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database.FileHealth, event HealthEvent) (*database.HealthStatusUpdate, func() error) {
@@ -422,6 +490,38 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 		return update, sideEffect
 	}
 
+	// An inconclusive check says nothing about the file: the providers never
+	// answered for at least one segment. Restore the status the record held
+	// before the cycle set it to 'checking', push the next check out, and
+	// leave both retry counters alone — an outage must not consume the retry
+	// budget or escalate the file into repair (#861).
+	if event.Type == EventTypeCheckInconclusive {
+		status := fh.Status
+		if status == database.HealthStatusChecking || status == "" {
+			status = database.HealthStatusPending
+		}
+		nextCheck := time.Now().UTC().Add(inconclusiveRecheckDelay)
+
+		update.Type = database.UpdateTypeInconclusive
+		update.Status = status
+		update.ScheduledCheckAt = nextCheck
+		if event.Error != nil {
+			text := event.Error.Error()
+			update.ErrorMessage = &text
+		}
+		update.ErrorDetails = event.Details
+
+		sideEffect = func() error {
+			slog.WarnContext(ctx, "Health check inconclusive, rescheduling without counting a retry",
+				"file_path", fh.FilePath,
+				"status", status,
+				"next_check", nextCheck,
+				"error", event.Error)
+			return nil
+		}
+		return update, sideEffect
+	}
+
 	// Handle Corrupted or CheckFailed
 	var errorMsg *string
 	if event.Error != nil {
@@ -449,11 +549,17 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 		update.ScheduledCheckAt = nextCheck
 
 		sideEffect = func() error {
-			slog.InfoContext(ctx, "File degraded: missing segments are within padding caps, skipping repair",
+			slog.InfoContext(ctx, "File degraded: missing segments are within padding caps, skipping ARR repair",
 				"file_path", fh.FilePath,
 				"total_missing", event.Classification.TotalMissing,
 				"longest_run", event.Classification.LongestRun,
 				"next_check", nextCheck)
+			// Degraded damage is exactly what background PAR2 repair exists
+			// for: attempt to restore the zero-filled bytes byte-exact. The
+			// repair queue dedups; ARR replacement stays out of the picture.
+			if hw.par2Repair != nil {
+				hw.par2Repair.Enqueue(ctx, fh.FilePath, "")
+			}
 			return hw.metadataService.UpdateFileStatus(fh.FilePath, metapb.FileStatus_FILE_STATUS_DEGRADED)
 		}
 		return update, sideEffect
@@ -471,12 +577,19 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 	}
 
 	repairEnabled := hw.configGetter().GetRepairEnabled()
-	markCorruptedNoRepair := func() (*database.HealthStatusUpdate, func() error) {
+	// par2Fallback: whether the file may fall back to PAR2 repair after the ARR
+	// path yields nothing. Only valid while the file's metadata is still in
+	// place — files already in repair_triggered may have had their metadata
+	// moved to the safety folder, which a PAR2 repair cannot read.
+	markCorruptedNoRepair := func(par2Fallback bool) (*database.HealthStatusUpdate, func() error) {
 		update.Type = database.UpdateTypeCorrupted
 		update.Status = database.HealthStatusCorrupted
 		return update, func() error {
-			slog.InfoContext(ctx, "File corrupted but repair is disabled; marking corrupted without triggering repair",
+			slog.InfoContext(ctx, "File corrupted but ARR repair is disabled; marking corrupted without triggering repair",
 				"file_path", fh.FilePath, "status", fh.Status)
+			if par2Fallback {
+				hw.enqueuePar2Fallback(ctx, fh.FilePath)
+			}
 			return nil
 		}
 	}
@@ -484,7 +597,7 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 	switch fh.Status {
 	case database.HealthStatusRepairTriggered:
 		if !repairEnabled {
-			return markCorruptedNoRepair()
+			return markCorruptedNoRepair(false)
 		}
 		if fh.RepairRetryCount >= hw.configGetter().GetMaxRepairRetries() {
 			sideEffect = hw.markCorruptedRepairExhausted(ctx, fh, update, errorMsg)
@@ -530,9 +643,10 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 				return update, sideEffect
 			}
 
-			// Repair disabled: finalize as corrupted instead of triggering an Arr rescan.
+			// Repair disabled: finalize as corrupted instead of triggering an Arr
+			// rescan — PAR2 repair, when enabled, is the only remaining option.
 			if !repairEnabled {
-				return markCorruptedNoRepair()
+				return markCorruptedNoRepair(true)
 			}
 
 			update.Type = database.UpdateTypeRepairTrigger
@@ -554,6 +668,14 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 
 				outcome, err := hw.triggerFileRepair(ctx, fh, errorMsg, event.Details)
 				applyRepairOutcome(update, outcome, err)
+				if outcome == repairOutcomeCorrupted {
+					// Nothing found in the ARRs (no instance configured, path
+					// unmatched, or the trigger failed): the metadata was not
+					// moved, so PAR2 repair gets its turn. A successful repair
+					// flips the record back to healthy; a failed one confirms
+					// the corrupted verdict written above.
+					hw.enqueuePar2Fallback(ctx, fh.FilePath)
+				}
 				return nil
 			}
 		} else {
@@ -620,7 +742,7 @@ func (hw *HealthWorker) deleteCorruptedFile(ctx context.Context, fh *database.Fi
 				rootPath = *cfg.Health.LibraryDir
 			}
 		}
-		if err := hw.metadataService.DeleteCorruptedFile(ctx, fh.FilePath, cfg.Metadata.ShouldDeleteSourceNzb(), physicalPath, rootPath); err != nil {
+		if err := hw.metadataService.DeleteCorruptedFile(ctx, fh.FilePath, physicalPath, rootPath); err != nil {
 			slog.ErrorContext(ctx, "Failed to delete corrupted file", "file_path", fh.FilePath, "error", err)
 			return err
 		}
@@ -694,21 +816,64 @@ func (hw *HealthWorker) prepareRepairNotificationUpdate(ctx context.Context, fh 
 	return update, sideEffect
 }
 
-// performDirectCheck performs a health check on a single file using the HealthChecker
-func (hw *HealthWorker) performDirectCheck(ctx context.Context, filePath string) error {
+// beginBatchChecks registers a cancellable context per file of a cycle batch, so a file the
+// scheduled cycle is checking can be cancelled through CancelHealthCheck exactly like a manual
+// check-now. Each context is an independent child: cancelling one file neither aborts the shared
+// cross-file sweep nor disturbs the other files — the cancelled file's result is discarded
+// instead. Returns the per-file contexts and a release func that clears the registrations.
+func (hw *HealthWorker) beginBatchChecks(ctx context.Context, filePaths []string) (map[string]context.Context, func()) {
+	fileCtxs := make(map[string]context.Context, len(filePaths))
+	entries := make(map[string]*activeCheck, len(filePaths))
+
+	hw.activeChecksMu.Lock()
+	for _, filePath := range filePaths {
+		if _, exists := hw.activeChecks[filePath]; exists {
+			continue
+		}
+		fileCtx, cancel := context.WithCancel(ctx)
+		entry := &activeCheck{cancel: cancel}
+		fileCtxs[filePath] = fileCtx
+		entries[filePath] = entry
+		hw.activeChecks[filePath] = entry
+	}
+	hw.activeChecksMu.Unlock()
+
+	return fileCtxs, func() {
+		hw.activeChecksMu.Lock()
+		for filePath, entry := range entries {
+			if hw.activeChecks[filePath] == entry {
+				delete(hw.activeChecks, filePath)
+			}
+		}
+		hw.activeChecksMu.Unlock()
+
+		for _, entry := range entries {
+			entry.cancel()
+		}
+	}
+}
+
+// performDirectCheck performs a health check on a single file using the HealthChecker.
+// currentStatus is the file's HealthStatus as observed by the caller before the row was
+// transitioned to Checking; see PerformBackgroundCheck for why this cannot be re-derived
+// by re-reading the row here.
+func (hw *HealthWorker) performDirectCheck(ctx context.Context, filePath string, currentStatus database.HealthStatus, verifyContentOverride *bool) error {
 	// Create cancellable context for this check
 	checkCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	// Track active check
+	entry := &activeCheck{cancel: cancel}
 	hw.activeChecksMu.Lock()
-	hw.activeChecks[filePath] = cancel
+	hw.activeChecks[filePath] = entry
 	hw.activeChecksMu.Unlock()
 
 	// Ensure cleanup on exit
 	defer func() {
 		hw.activeChecksMu.Lock()
-		delete(hw.activeChecks, filePath)
+		if hw.activeChecks[filePath] == entry {
+			delete(hw.activeChecks, filePath)
+		}
 		hw.activeChecksMu.Unlock()
 	}()
 
@@ -728,7 +893,7 @@ func (hw *HealthWorker) performDirectCheck(ctx context.Context, filePath string)
 		return fmt.Errorf("file health record not found: %s", filePath)
 	}
 
-	opts := CheckOptions{}
+	opts := CheckOptions{CurrentStatus: currentStatus, VerifyContentOverride: verifyContentOverride}
 	// Delegate to HealthChecker
 	event := hw.healthChecker.CheckFile(checkCtx, filePath, opts)
 
@@ -739,7 +904,24 @@ func (hw *HealthWorker) performDirectCheck(ctx context.Context, filePath string)
 	default:
 	}
 
-	updatePtr, sideEffect := hw.prepareUpdateForResult(ctx, fh, event)
+	// The row is deliberately 'checking' while a manual recheck runs, but an
+	// inconclusive result says nothing about the file and must restore the state
+	// captured before that transition. Keep definitive-result handling unchanged:
+	// those paths can perform repair/delete side effects and need a broader
+	// ownership protocol before they can safely use a guarded write.
+	decisionHealth := *fh
+	if event.Type == EventTypeCheckInconclusive {
+		decisionHealth.Status = currentStatus
+	}
+	updatePtr, sideEffect := hw.prepareUpdateForResult(ctx, &decisionHealth, event)
+
+	if event.Type == EventTypeCheckInconclusive {
+		// A webhook or re-import may have changed the row while the NNTP sweep
+		// was running. Only restore the prior state if this check still owns the
+		// transient 'checking' row; otherwise the concurrent decision wins.
+		checkingStatus := database.HealthStatusChecking
+		updatePtr.ExpectedStatus = &checkingStatus
+	}
 	if sideEffect != nil {
 		if err := sideEffect(); err != nil {
 			slog.ErrorContext(ctx, "Side effect failed in direct check", "file_path", filePath, "error", err)
@@ -853,6 +1035,10 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 		slog.ErrorContext(ctx, "Failed to bulk-set files to checking", "count", len(checkingPaths), "error", err)
 	}
 
+	// Make every file of this batch cancellable for as long as it is 'checking'.
+	fileCtxs, releaseChecks := hw.beginBatchChecks(ctx, checkingPaths)
+	defer releaseChecks()
+
 	// Process files in parallel with bounded concurrency
 	p := pool.New().WithMaxGoroutines(maxJobs)
 	var results []database.HealthStatusUpdate
@@ -877,17 +1063,27 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 	discover.Wait()
 
 	paths := make([]string, len(unhealthyFiles))
+	statuses := make([]database.HealthStatus, len(unhealthyFiles))
 	for i, fh := range unhealthyFiles {
 		paths[i] = fh.FilePath
+		statuses[i] = fh.Status
 	}
-	events := hw.healthChecker.CheckFilesBatch(ctx, paths)
+	events := hw.healthChecker.CheckFilesBatch(ctx, paths, statuses)
 
 	// Phase B: per-file result handling (repair side effects, ARR API calls,
 	// VFS notifications), bounded by maxJobs.
 	for i, fileHealth := range unhealthyFiles {
 		fh := fileHealth // Capture for closure
 		event := events[i]
+		fileCtx := fileCtxs[fh.FilePath]
 		p.Go(func() {
+			// A cancelled check must not land its result: CancelHealthCheck already put the
+			// record back to pending, and the repair side effects below would undo that.
+			if fileCtx != nil && fileCtx.Err() != nil {
+				slog.InfoContext(ctx, "Discarding result of cancelled health check", "file_path", fh.FilePath)
+				return
+			}
+
 			updatePtr, sideEffect := hw.prepareUpdateForResult(ctx, fh, event)
 			updatePtr.ExpectedStatus = &checkingStatus
 			if sideEffect != nil {
@@ -1113,9 +1309,10 @@ func (hw *HealthWorker) cleanupZombieRecord(ctx context.Context, item *database.
 	relativePath := strings.TrimPrefix(item.FilePath, cfg.MountPath)
 	relativePath = strings.TrimPrefix(relativePath, "/")
 
-	deleteSourceNzb := cfg.Metadata.ShouldDeleteSourceNzb()
-	if delMetaErr := hw.metadataService.DeleteFileMetadataWithSourceNzb(ctx, relativePath, deleteSourceNzb); delMetaErr != nil {
+	if delMetaErr := hw.metadataService.DeleteFileMetadata(ctx, relativePath); delMetaErr != nil {
 		slog.ErrorContext(ctx, "Failed to delete metadata during cleanup", "file_path", item.FilePath, "error", delMetaErr)
+	} else {
+		hw.NotifyRcloneVFS(item.FilePath)
 	}
 }
 
@@ -1274,6 +1471,22 @@ func (hw *HealthWorker) retriggerFileRepair(ctx context.Context, item *database.
 	return repairOutcomeTriggered, nil
 }
 
+// enqueuePar2Fallback queues a PAR2 repair for a file whose ARR repair came up
+// empty — nothing found in the ARRs (no instance tracks the file, or none is
+// configured) or ARR repair is disabled. Gated by par2_repair.arr_first
+// (default on) so the fallback can be switched off; a no-op while PAR2 repair
+// itself is disabled. Only called on paths where the file's metadata is still
+// in place — a repair cannot read metadata that an earlier successful ARR
+// trigger moved to the safety folder.
+func (hw *HealthWorker) enqueuePar2Fallback(ctx context.Context, filePath string) {
+	cfg := hw.configGetter().Par2Repair
+	if hw.par2Repair == nil || cfg.Enabled == nil || !*cfg.Enabled || !cfg.EffectiveArrFirst() {
+		return
+	}
+	slog.InfoContext(ctx, "Nothing found in ARR repair, falling back to PAR2 repair", "file_path", filePath)
+	hw.par2Repair.Enqueue(ctx, filePath, "")
+}
+
 func (hw *HealthWorker) ensureMetadata(ctx context.Context, item *database.FileHealth) *string {
 	needsDiscovery := false
 	if item.Metadata == nil || *item.Metadata == "" {
@@ -1357,5 +1570,21 @@ func (hw *HealthWorker) moveMetadataToSafetyFolder(ctx context.Context, item *da
 	slog.InfoContext(ctx, "Moving metadata file for corrupted item to safety folder to trigger replacement", "file_path", item.FilePath)
 	if moveErr := hw.metadataService.MoveToCorrupted(ctx, relativePath); moveErr != nil {
 		slog.WarnContext(ctx, "Failed to move corrupted metadata file", "error", moveErr)
+	} else {
+		hw.NotifyRcloneVFS(item.FilePath)
+	}
+}
+
+// NotifyRcloneVFS notifies rclone VFS to forget and refresh the directory containing filePath.
+func (hw *HealthWorker) NotifyRcloneVFS(filePath string) {
+	if hw != nil && hw.healthChecker != nil {
+		hw.healthChecker.NotifyRcloneVFS(filePath)
+	}
+}
+
+// NotifyRcloneVFSDirs notifies rclone VFS to forget and refresh the specified directories.
+func (hw *HealthWorker) NotifyRcloneVFSDirs(dirs []string) {
+	if hw != nil && hw.healthChecker != nil {
+		hw.healthChecker.NotifyRcloneVFSDirs(dirs)
 	}
 }

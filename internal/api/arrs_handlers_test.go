@@ -245,4 +245,3 @@ func TestHandleArrsWebhook_WithInstanceName(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, true, result["success"])
 }
-

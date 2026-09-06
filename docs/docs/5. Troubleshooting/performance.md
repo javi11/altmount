@@ -146,9 +146,11 @@ If media playback freezes or buffers frequently:
 
 **Solutions**:
 
-1. **Reduce Prefetch**: Lower `streaming.max_prefetch` to use less memory
-2. **Limit Import Workers**: Reduce `import.max_processor_workers`
-3. **Check for Leaks**: Monitor for gradual memory increase over time
+1. **Shrink the memory cache**: Lower `segment_cache.memory_mb` (default 256). Streaming RAM is roughly this value plus 300 MB, so 128 MB lands near 400 MB total
+2. **Reduce Prefetch**: Lower `streaming.max_prefetch` to use less memory
+3. **Limit Import Workers**: Reduce `import.max_processor_workers`
+4. **Pin the Go memory limit**: Set the top-level `memory_limit_mb` (for example `512`) if the automatic limit is too generous for your box; see the streaming configuration page for how it is derived
+5. **Check for Leaks**: Monitor for gradual memory increase over time. A steady figure just under `memory_mb` + 300 MB is the cache doing its job, not a leak
 
 ### Poor Streaming Performance
 

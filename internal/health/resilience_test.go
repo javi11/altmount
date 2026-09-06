@@ -18,10 +18,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// newResilienceDB creates an in-memory SQLite database with the required schema.
+// newResilienceDB creates a per-test SQLite database with the required schema.
 func newResilienceDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("sqlite3", "file::memory:?cache=shared&mode=memory")
+	db, err := sql.Open("sqlite3", healthTestDSN(t))
 	require.NoError(t, err)
 	t.Cleanup(func() { db.Close() })
 

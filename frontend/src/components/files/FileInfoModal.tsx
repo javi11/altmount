@@ -439,7 +439,7 @@ export function FileInfoModal({
 			);
 		}
 
-		if (!metadata || !metadata.nested_sources || metadata.nested_sources.length === 0) {
+		if (!metadata?.nested_sources || metadata.nested_sources.length === 0) {
 			return (
 				<div className="py-8 text-center">
 					<Archive className="mx-auto mb-4 h-16 w-16 text-base-content/30" />

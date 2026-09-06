@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDeleteFileMetadataWithSourceNzb_RemovesMetadata(t *testing.T) {
+func TestDeleteFileMetadata_RemovesMetadata(t *testing.T) {
 	root := t.TempDir()
 	ms := NewMetadataService(root)
 
@@ -30,12 +30,12 @@ func TestDeleteFileMetadataWithSourceNzb_RemovesMetadata(t *testing.T) {
 	require.FileExists(t, metaPath)
 
 	ctx := context.Background()
-	require.NoError(t, ms.DeleteFileMetadataWithSourceNzb(ctx, virtualPath, false))
+	require.NoError(t, ms.DeleteFileMetadata(ctx, virtualPath))
 
 	assert.NoFileExists(t, metaPath)
 }
 
-func TestDeleteFileMetadataWithSourceNzb_NoIDSidecar_NoError(t *testing.T) {
+func TestDeleteFileMetadata_NoIDSidecar_NoError(t *testing.T) {
 	root := t.TempDir()
 	ms := NewMetadataService(root)
 
@@ -48,7 +48,7 @@ func TestDeleteFileMetadataWithSourceNzb_NoIDSidecar_NoError(t *testing.T) {
 	require.NoError(t, ms.WriteFileMetadata(virtualPath, meta))
 
 	ctx := context.Background()
-	err := ms.DeleteFileMetadataWithSourceNzb(ctx, virtualPath, false)
+	err := ms.DeleteFileMetadata(ctx, virtualPath)
 	assert.NoError(t, err, "delete should succeed even without .id sidecar")
 
 	assert.NoFileExists(t, ms.GetMetadataFilePath(virtualPath))
@@ -286,7 +286,7 @@ func TestUpdateFileMetadata_PreservesModifiedAt(t *testing.T) {
 	assert.Equal(t, metapb.FileStatus_FILE_STATUS_DEGRADED, afterStatus.Status)
 	assert.Equal(t, fixedModifiedAt-60, afterStatus.CreatedAt)
 
-	require.NoError(t, ms.AddKnownHoles(virtualPath, []holes.Run{{Start: 10, Count: 2}}))
+	require.NoError(t, ms.AddKnownHoles(virtualPath, []holes.Run{{Start: 10, Count: 2}}, ""))
 
 	afterHoles, err := ms.ReadFileMetadata(virtualPath)
 	require.NoError(t, err)
@@ -443,11 +443,99 @@ func TestDirectoryModTime_StableAcrossHealthSweep(t *testing.T) {
 	assert.Equal(t, before, ms.DirectoryModTime(dir),
 		"a no-op health sweep must not bump the directory mtime")
 
-	// A genuine import advances it.
+	// A genuine import advances it (allow at least 10ms for filesystem mtime tick).
+	time.Sleep(15 * time.Millisecond)
 	newMeta := ms.CreateFileMetadata(300, "3.nzb", metapb.FileStatus_FILE_STATUS_HEALTHY, nil, metapb.Encryption_NONE, "", "", nil, nil, 0, nil, "")
 	newMeta.ModifiedAt = 1_700_000_900
 	require.NoError(t, ms.WriteFileMetadata(filepath.Join(dir, "part4.mkv"), newMeta))
 
 	assert.True(t, ms.DirectoryModTime(dir).After(before),
 		"importing a new file must advance the directory mtime")
+}
+
+func TestDeleteDirectory_RefusesToRemoveTheMetadataRoot(t *testing.T) {
+	root := t.TempDir()
+	ms := NewMetadataService(root)
+
+	virtualPath := filepath.Join("movies", "keep.mkv")
+	meta := ms.CreateFileMetadata(
+		1024, "test.nzb", metapb.FileStatus_FILE_STATUS_HEALTHY,
+		nil, metapb.Encryption_NONE, "", "", nil, nil, 0, nil, "",
+	)
+	require.NoError(t, ms.WriteFileMetadata(virtualPath, meta))
+
+	// A virtual path resolving to the store itself must never wipe the whole store.
+	for _, p := range []string{"", ".", string(filepath.Separator)} {
+		err := ms.DeleteDirectory(p)
+		assert.ErrorContains(t, err, "safety block", "must refuse virtual path %q", p)
+	}
+
+	assert.DirExists(t, root)
+	assert.FileExists(t, ms.GetMetadataFilePath(virtualPath), "the store's contents must survive a refused delete")
+}
+
+func TestDeleteDirectoryIfEmpty(t *testing.T) {
+	newService := func(t *testing.T) (*MetadataService, string) {
+		t.Helper()
+		root := t.TempDir()
+		return NewMetadataService(root), root
+	}
+
+	writeMeta := func(t *testing.T, ms *MetadataService, virtualPath string) {
+		t.Helper()
+		meta := ms.CreateFileMetadata(
+			1024, "test.nzb", metapb.FileStatus_FILE_STATUS_HEALTHY,
+			nil, metapb.Encryption_NONE, "", "", nil, nil, 0, nil, "",
+		)
+		require.NoError(t, ms.WriteFileMetadata(virtualPath, meta))
+	}
+
+	t.Run("removes empty directory and purges its cached tree", func(t *testing.T) {
+		ms, root := newService(t)
+
+		virtualPath := filepath.Join("movies", "Release", "file.mkv")
+		writeMeta(t, ms, virtualPath)
+		_, err := ms.ReadFileMetadataLite(virtualPath)
+		require.NoError(t, err)
+		require.NoError(t, os.Remove(ms.GetMetadataFilePath(virtualPath)))
+
+		require.NoError(t, ms.DeleteDirectoryIfEmpty(filepath.Join("movies", "Release")))
+
+		assert.NoDirExists(t, filepath.Join(root, "movies", "Release"))
+		_, cached := ms.liteCache.Get(virtualPath)
+		assert.False(t, cached, "cached entries under a removed directory must be purged")
+	})
+
+	t.Run("preserves a directory that still holds files", func(t *testing.T) {
+		ms, root := newService(t)
+
+		virtualPath := filepath.Join("movies", "Release", "sibling.mkv")
+		writeMeta(t, ms, virtualPath)
+		_, err := ms.ReadFileMetadataLite(virtualPath)
+		require.NoError(t, err)
+
+		err = ms.DeleteDirectoryIfEmpty(filepath.Join("movies", "Release"))
+
+		assert.ErrorIs(t, err, ErrDirectoryNotEmpty)
+		assert.DirExists(t, filepath.Join(root, "movies", "Release"))
+		require.FileExists(t, ms.GetMetadataFilePath(virtualPath))
+		_, cached := ms.liteCache.Get(virtualPath)
+		assert.True(t, cached, "a preserved directory must keep its cached entries")
+	})
+
+	t.Run("missing directory is not an error", func(t *testing.T) {
+		ms, _ := newService(t)
+
+		assert.NoError(t, ms.DeleteDirectoryIfEmpty(filepath.Join("movies", "Gone")))
+	})
+
+	t.Run("refuses to remove the metadata root", func(t *testing.T) {
+		ms, root := newService(t)
+
+		for _, p := range []string{"", ".", string(filepath.Separator)} {
+			err := ms.DeleteDirectoryIfEmpty(p)
+			assert.ErrorContains(t, err, "safety block", "must refuse virtual path %q", p)
+		}
+		assert.DirExists(t, root)
+	})
 }

@@ -1,0 +1,258 @@
+{
+  "git_sha": "dceff0ed",
+  "timestamp": "2026-09-04T11:42:23.505104Z",
+  "scenarios": [
+    {
+      "name": "B1-cold-open/premium-750k",
+      "metrics": [
+        {
+          "name": "ttfb_mean",
+          "unit": "ms",
+          "value": 146.044164,
+          "higher_is_better": false
+        },
+        {
+          "name": "ttfb_p50",
+          "unit": "ms",
+          "value": 137.619667,
+          "higher_is_better": false,
+          "informational": true
+        },
+        {
+          "name": "ttfb_p99",
+          "unit": "ms",
+          "value": 201.887834,
+          "higher_is_better": false,
+          "informational": true
+        },
+        {
+          "name": "articles",
+          "unit": "count",
+          "value": 60.5,
+          "higher_is_better": false,
+          "informational": true
+        }
+      ]
+    },
+    {
+      "name": "B1-cold-open/slow-4m",
+      "metrics": [
+        {
+          "name": "ttfb_mean",
+          "unit": "ms",
+          "value": 3809.481175,
+          "higher_is_better": false
+        },
+        {
+          "name": "ttfb_p50",
+          "unit": "ms",
+          "value": 2880.618084,
+          "higher_is_better": false,
+          "informational": true
+        },
+        {
+          "name": "ttfb_p99",
+          "unit": "ms",
+          "value": 8316.269917,
+          "higher_is_better": false,
+          "informational": true
+        },
+        {
+          "name": "articles",
+          "unit": "count",
+          "value": 90.35,
+          "higher_is_better": false,
+          "informational": true
+        }
+      ]
+    },
+    {
+      "name": "B2-sequential/premium-750k",
+      "metrics": [
+        {
+          "name": "throughput",
+          "unit": "MB/s",
+          "value": 223.10830304521917,
+          "higher_is_better": true
+        },
+        {
+          "name": "waste_ratio",
+          "unit": "ratio",
+          "value": 1.2387559604644776,
+          "higher_is_better": false
+        }
+      ]
+    },
+    {
+      "name": "B2-sequential/slow-4m",
+      "metrics": [
+        {
+          "name": "throughput",
+          "unit": "MB/s",
+          "value": 34.97516242075892,
+          "higher_is_better": true
+        },
+        {
+          "name": "waste_ratio",
+          "unit": "ratio",
+          "value": 2.2141357851028443,
+          "higher_is_better": false
+        }
+      ]
+    },
+    {
+      "name": "B3-seek-storm/premium-750k",
+      "metrics": [
+        {
+          "name": "read_p50",
+          "unit": "ms",
+          "value": 143.936208,
+          "higher_is_better": false
+        },
+        {
+          "name": "read_p99",
+          "unit": "ms",
+          "value": 156.180334,
+          "higher_is_better": false,
+          "informational": true
+        },
+        {
+          "name": "articles_per_read",
+          "unit": "count",
+          "value": 1.05,
+          "higher_is_better": false
+        }
+      ]
+    },
+    {
+      "name": "B3-seek-storm/slow-4m",
+      "metrics": [
+        {
+          "name": "read_p50",
+          "unit": "ms",
+          "value": 1597.042,
+          "higher_is_better": false
+        },
+        {
+          "name": "read_p99",
+          "unit": "ms",
+          "value": 1658.215584,
+          "higher_is_better": false,
+          "informational": true
+        },
+        {
+          "name": "articles_per_read",
+          "unit": "count",
+          "value": 1,
+          "higher_is_better": false
+        }
+      ]
+    },
+    {
+      "name": "B8-pause-resume/premium-750k",
+      "metrics": [
+        {
+          "name": "bytes_during_pause",
+          "unit": "MB",
+          "value": 0,
+          "higher_is_better": false
+        }
+      ]
+    },
+    {
+      "name": "B8-pause-resume/slow-4m",
+      "metrics": [
+        {
+          "name": "bytes_during_pause",
+          "unit": "MB",
+          "value": 0,
+          "higher_is_better": false
+        }
+      ]
+    },
+    {
+      "name": "B4-four-streams/premium-750k",
+      "metrics": [
+        {
+          "name": "min_stream_mbps",
+          "unit": "MB/s",
+          "value": 72.73328753211541,
+          "higher_is_better": true
+        },
+        {
+          "name": "max_stream_mbps",
+          "unit": "MB/s",
+          "value": 91.31678574005694,
+          "higher_is_better": true
+        },
+        {
+          "name": "stall_p99",
+          "unit": "ms",
+          "value": 181.414958,
+          "higher_is_better": false,
+          "informational": true
+        }
+      ]
+    },
+    {
+      "name": "B5-two-handles/premium-750k",
+      "metrics": [
+        {
+          "name": "duplicate_bodies",
+          "unit": "count",
+          "value": 127,
+          "higher_is_better": false
+        }
+      ]
+    },
+    {
+      "name": "B6-contention/premium-750k",
+      "metrics": [
+        {
+          "name": "stream_p50",
+          "unit": "ms",
+          "value": 0.027042,
+          "higher_is_better": false
+        },
+        {
+          "name": "stream_p99",
+          "unit": "ms",
+          "value": 88.00575,
+          "higher_is_better": false,
+          "informational": true
+        },
+        {
+          "name": "import_mbps",
+          "unit": "MB/s",
+          "value": 140.34912595195084,
+          "higher_is_better": true
+        }
+      ]
+    },
+    {
+      "name": "B7-failover/premium-750k",
+      "metrics": [
+        {
+          "name": "miss_ttfb_mean",
+          "unit": "ms",
+          "value": 168.34991,
+          "higher_is_better": false
+        },
+        {
+          "name": "miss_ttfb_p50",
+          "unit": "ms",
+          "value": 158.799208,
+          "higher_is_better": false,
+          "informational": true
+        },
+        {
+          "name": "bodies_per_miss",
+          "unit": "count",
+          "value": 1,
+          "higher_is_better": false,
+          "informational": true
+        }
+      ]
+    }
+  ]
+}

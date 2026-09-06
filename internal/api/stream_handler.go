@@ -113,7 +113,6 @@ func (h *StreamHandler) authenticate(r *http.Request) (*database.User, bool) {
 	return nil, false
 }
 
-
 // GetHTTPHandler returns an http.Handler that serves files from NzbFilesystem
 // This handler:
 // - Requires authentication via download_key parameter

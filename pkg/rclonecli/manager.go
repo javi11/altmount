@@ -60,6 +60,10 @@ type Manager struct {
 	// restartMu serializes rcd subprocess restarts so the health checker and
 	// mount recovery paths cannot race each other through restartServer.
 	restartMu sync.Mutex
+	// recoveryMu prevents multiple health ticks from queueing stale recovery
+	// operations for the same provider.
+	recoveryMu sync.Mutex
+	recovering map[string]struct{}
 
 	// probe checks rcd liveness; defaults to pingServerWithTimeout. Injectable
 	// for testing the health-check decision logic without a live subprocess.
@@ -91,6 +95,7 @@ type MountInfo struct {
 	MountedAt  string `json:"mounted_at,omitempty"`
 	ConfigName string `json:"config_name"`
 	Error      string `json:"error,omitempty"`
+	desired    bool
 }
 
 type RCRequest struct {
@@ -129,6 +134,7 @@ func NewManager(cfm *config.Manager) *Manager {
 		httpClient:    httpclient.New(httpclient.WithTimeout(0)),
 		serverReady:   make(chan struct{}),
 		processExited: make(chan struct{}),
+		recovering:    make(map[string]struct{}),
 	}
 	m.probe = m.pingServerWithTimeout
 	m.restart = m.restartServer
@@ -151,6 +157,13 @@ func (m *Manager) Start(ctx context.Context) error {
 	if m.stopping {
 		return fmt.Errorf("rclone RC server is stopping")
 	}
+	// Every process generation owns fresh lifecycle channels. Reusing a closed
+	// channel from a failed or previously stopped generation makes a retry look
+	// ready before the new child has bound its port.
+	m.serverReady = make(chan struct{})
+	m.processExited = make(chan struct{})
+	m.lastStartErr = nil
+	m.readyAt = time.Time{}
 
 	cfg := m.cfg.GetConfig()
 	if !*cfg.RClone.RCEnabled {
@@ -333,10 +346,10 @@ func (m *Manager) Start(ctx context.Context) error {
 
 // Stop stops the rclone RC server and unmounts all mounts
 func (m *Manager) Stop() error {
-	m.restartMu.Lock()
-	defer m.restartMu.Unlock()
 	m.mountMu.Lock()
 	defer m.mountMu.Unlock()
+	m.restartMu.Lock()
+	defer m.restartMu.Unlock()
 
 	m.mu.Lock()
 	if !m.serverStarted {
@@ -391,9 +404,6 @@ func (m *Manager) Stop() error {
 		m.logger.WarnContext(m.ctx, "Timeout waiting for mounts to unmount, proceeding with shutdown")
 	}
 
-	// Cancel context and stop process
-	m.cancel()
-
 	m.mu.RLock()
 	cmd := m.cmd
 	exited := m.processExited
@@ -428,6 +438,9 @@ func (m *Manager) Stop() error {
 			}
 		}
 	}
+	// Cancel only after the graceful signal/kill path has completed. CommandContext
+	// otherwise turns the intended graceful shutdown into an immediate kill.
+	m.cancel()
 
 	// Clean up any remaining mount directories
 	cfg := m.cfg.GetConfig()
@@ -645,7 +658,13 @@ func (m *Manager) waitForPortFree(ctx context.Context, timeout time.Duration) {
 			return
 		}
 		_ = conn.Close()
-		time.Sleep(100 * time.Millisecond)
+		timer := time.NewTimer(100 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
 	}
 	m.logger.WarnContext(ctx, "RC port still in use after waiting; restarting rcd anyway", "rc_port", m.rcPort)
 }
@@ -688,6 +707,18 @@ func (m *Manager) restartServer(ctx context.Context) error {
 	if !wasStarted || cmd == nil || cmd.Process == nil {
 		return fmt.Errorf("rcd subprocess not running, cannot restart")
 	}
+
+	// The old process is about to be killed. Publish actual mount loss before
+	// attempting respawn so a failed restart cannot leave callers believing the
+	// FUSE mounts are still usable.
+	m.mountsMutex.Lock()
+	for _, mount := range m.mounts {
+		if mount.Mounted {
+			mount.Mounted = false
+			mount.Error = "rcd subprocess restarting"
+		}
+	}
+	m.mountsMutex.Unlock()
 
 	restartCtx, cancel := context.WithTimeout(m.ctx, 45*time.Second)
 	defer cancel()
@@ -736,15 +767,6 @@ func (m *Manager) restartServer(ctx context.Context) error {
 			"rc_port", m.rcPort)
 		return fmt.Errorf("rcd did not become ready after restart: %w", err)
 	}
-
-	// Mark all known mounts as unmounted so the next health-check tick
-	// re-establishes them against the fresh rcd.
-	m.mountsMutex.Lock()
-	for _, mount := range m.mounts {
-		mount.Mounted = false
-		mount.Error = "rcd subprocess restarted; awaiting remount"
-	}
-	m.mountsMutex.Unlock()
 
 	m.logger.InfoContext(ctx, "rcd subprocess restarted successfully")
 	return nil

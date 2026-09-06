@@ -51,6 +51,7 @@ func (m *fsFakePoolManager) SetImportConnCapacity(_ int)                 {}
 func (m *fsFakePoolManager) ImportConnCapacity() int                     { return 0 }
 func (m *fsFakePoolManager) SetStreamSource(_ pool.StreamActivitySource) {}
 func (m *fsFakePoolManager) NotifyStreamChange()                         {}
+func (m *fsFakePoolManager) StatSweepConcurrency(conservative int) int   { return conservative }
 
 // TestWarmCacheServesPrefixWithoutNetwork verifies that a read confined to a
 // file's warm first-segment bytes is served from memory, issuing zero wire calls.
@@ -73,7 +74,7 @@ func TestWarmCacheServesPrefixWithoutNetwork(t *testing.T) {
 		FirstSegmentBytes: want,
 	}
 
-	ufs := NewUsenetFileSystem(context.Background(), mgr, []parser.ParsedFile{file}, 1, nil, time.Minute)
+	ufs := NewUsenetFileSystem(context.Background(), mgr, []parser.ParsedFile{file}, 1, nil, time.Minute, nil)
 	f, err := ufs.Open("movie.part01.rar")
 	if err != nil {
 		t.Fatalf("Open: %v", err)
@@ -104,6 +105,9 @@ func TestWarmCacheServesPrefixWithoutNetwork(t *testing.T) {
 		t.Errorf("warm-cache read issued %d Body calls, want 0", got)
 	}
 }
+
+func (m *fsFakePoolManager) SetStreamHeadroom(int)                      {}
+func (m *fsFakePoolManager) SpeculativeBudget() *pool.SpeculativeBudget { return nil }
 
 // stubReadCloser is an in-memory ReadCloser for warmPrefixReader unit tests.
 type stubReadCloser struct {

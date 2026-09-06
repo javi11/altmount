@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/javi11/altmount/internal/holes"
+	"github.com/javi11/altmount/internal/importer/validation"
 	"os"
 	"path/filepath"
 	"testing"
@@ -56,6 +58,7 @@ func (m processorTestPoolManager) SetImportConnCapacity(int)                 {}
 func (m processorTestPoolManager) ImportConnCapacity() int                   { return 0 }
 func (m processorTestPoolManager) SetStreamSource(pool.StreamActivitySource) {}
 func (m processorTestPoolManager) NotifyStreamChange()                       {}
+func (m processorTestPoolManager) StatSweepConcurrency(conservative int) int { return conservative }
 
 func TestPreParseFastFailSkipsOnlyMissingEpisode(t *testing.T) {
 	client := fakepool.New()
@@ -72,7 +75,7 @@ func TestPreParseFastFailSkipsOnlyMissingEpisode(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Import.SegmentSamplePercentage = 100
 
-	brokenIdx, missingIDs, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, nil)
+	brokenIdx, missingIDs, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, nil)
 	if err != nil {
 		t.Fatalf("preParseFastFail returned error: %v", err)
 	}
@@ -89,6 +92,9 @@ func TestPreParseFastFailSkipsOnlyMissingEpisode(t *testing.T) {
 		t.Error("missingIDs missing 'missing-segment'")
 	}
 }
+
+func (m processorTestPoolManager) SetStreamHeadroom(int)                      {}
+func (m processorTestPoolManager) SpeculativeBudget() *pool.SpeculativeBudget { return nil }
 
 // TestPreParseFastFailDoesNotStatPar2 verifies PAR2 segments are skipped entirely
 // from the fast-fail Stat sweep: an unreachable PAR2 segment must neither be
@@ -112,7 +118,7 @@ func TestPreParseFastFailMarksWholeRarSetBroken(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Import.SegmentSamplePercentage = 100
 
-	brokenIdx, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, nil)
+	brokenIdx, _, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, nil)
 	if err != nil {
 		t.Fatalf("preParseFastFail returned error: %v", err)
 	}
@@ -151,7 +157,7 @@ func TestPreParseFastFailAllRarSetsBrokenReturnsNoFilesProcessed(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Import.SegmentSamplePercentage = 100
 
-	_, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, nil)
+	_, _, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, nil)
 	if !errors.Is(err, multifile.ErrNoFilesProcessed) {
 		t.Fatalf("preParseFastFail error = %v, want ErrNoFilesProcessed", err)
 	}
@@ -172,7 +178,7 @@ func TestPreParseFastFailDoesNotStatPar2(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Import.SegmentSamplePercentage = 100
 
-	brokenIdx, missingIDs, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, nil)
+	brokenIdx, missingIDs, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, nil)
 	if err != nil {
 		t.Fatalf("preParseFastFail returned error: %v", err)
 	}
@@ -203,7 +209,7 @@ func TestPreParseFastFailAllMissingReturnsNoFilesProcessed(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Import.SegmentSamplePercentage = 100
 
-	_, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, nil)
+	_, _, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, nil)
 	if !errors.Is(err, multifile.ErrNoFilesProcessed) {
 		t.Fatalf("preParseFastFail error = %v, want ErrNoFilesProcessed", err)
 	}
@@ -231,7 +237,7 @@ func TestPreParseFastFailHealthyReleaseSkipsPerFileSweep(t *testing.T) {
 	n := buildTestNzb(files)
 	cfg := config.DefaultConfig() // default 1% sampling, capped at 55
 
-	brokenIdx, missingIDs, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, nil)
+	brokenIdx, missingIDs, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, nil)
 	if err != nil {
 		t.Fatalf("preParseFastFail returned error: %v", err)
 	}
@@ -248,41 +254,22 @@ func TestPreParseFastFailHealthyReleaseSkipsPerFileSweep(t *testing.T) {
 	}
 }
 
-func TestFastFailConcurrency(t *testing.T) {
+// TestFastFailUsesStatPipelineDepthNotConnections pins the fast-fail sweep's
+// concurrency to the providers' STAT pipeline depth rather than their
+// connection count: STAT carries no body, so nntppool pipelines many per
+// connection (Provider.StatInflight). A two-connection pool must not throttle
+// the sweep to two in-flight STATs.
+func TestFastFailUsesStatPipelineDepthNotConnections(t *testing.T) {
 	enabled := true
-	disabled := false
-	tests := []struct {
-		name string
-		cfg  *config.Config
-		want int
-	}{
-		{
-			name: "sums enabled providers (nil Enabled counts as enabled)",
-			cfg:  &config.Config{Providers: []config.ProviderConfig{{MaxConnections: 10, Enabled: &enabled}, {MaxConnections: 20}}},
-			want: 30,
-		},
-		{
-			name: "skips disabled providers",
-			cfg:  &config.Config{Providers: []config.ProviderConfig{{MaxConnections: 10, Enabled: &disabled}, {MaxConnections: 20, Enabled: &enabled}}},
-			want: 20,
-		},
-		{
-			name: "floors at 1 when no capacity configured",
-			cfg:  &config.Config{},
-			want: 1,
-		},
-		{
-			name: "caps at 100",
-			cfg:  &config.Config{Providers: []config.ProviderConfig{{MaxConnections: 500, Enabled: &enabled}}},
-			want: 100,
-		},
+	cfg := &config.Config{Providers: []config.ProviderConfig{
+		{MaxConnections: 2, StatInflightRequests: 100, Enabled: &enabled},
+	}}
+
+	if got := cfg.TotalProviderConnections(); got != 2 {
+		t.Fatalf("fixture TotalProviderConnections = %d, want 2", got)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := fastFailConcurrency(tt.cfg); got != tt.want {
-				t.Fatalf("fastFailConcurrency = %d, want %d", got, tt.want)
-			}
-		})
+	if got := cfg.StatConcurrency(); got != 100 {
+		t.Fatalf("StatConcurrency = %d, want 100 (the configured pipeline depth)", got)
 	}
 }
 
@@ -366,6 +353,20 @@ func TestApplyNzbRename(t *testing.T) {
 			nzbName:          "movie.nzb",
 			originalFilename: "sub/file.mkv",
 			expected:         "sub/file.mkv",
+		},
+		{
+			name:             "true: clean filename is kept",
+			renameToNzbName:  true,
+			nzbName:          "release.nzb",
+			originalFilename: "My.Movie.2024.PROPER.1080p.mkv",
+			expected:         "My.Movie.2024.PROPER.1080p.mkv",
+		},
+		{
+			name:             "true: hash filename renamed",
+			renameToNzbName:  true,
+			nzbName:          "release.nzb",
+			originalFilename: "a3f9c1d2e4b5a6f7c8d9e0f1a2b3c4d5.mkv",
+			expected:         "release.mkv",
 		},
 		{
 			name:             "true: renames leaf only, preserves subdirectory",
@@ -606,31 +607,33 @@ func buildMultiSegmentNzb(client *fakepool.Client, fileName string, segCount int
 	}}}
 }
 
-// TestPreParseFastFailTolerantImportsDegradedVideo verifies a standalone video
-// file with a small hole imports (not broken) under the default tolerant policy.
-func TestPreParseFastFailTolerantImportsDegradedVideo(t *testing.T) {
+// TestPreParseFastFailAcceptableThresholdImportsDegradedVideo verifies a
+// standalone video file with a small hole imports (not broken) once the
+// acceptable-missing threshold is raised above the actual damage.
+func TestPreParseFastFailAcceptableThresholdImportsDegradedVideo(t *testing.T) {
 	client := fakepool.New()
 	proc := &Processor{
 		poolManager:       processorTestPoolManager{client: client},
 		validationTimeout: 100 * time.Millisecond,
 	}
-	// 200 segments, 1 missing (0.5%) — well within the pad caps.
+	// 50 segments, 1 missing (2%) — well within the pad caps.
 	n := buildMultiSegmentNzb(client, "Movie.2024.mkv", 50, 25)
 	cfg := config.DefaultConfig()
 	cfg.Import.SegmentSamplePercentage = 100
+	cfg.Health.AcceptableMissingSegmentsPercentage = 5
 
-	brokenIdx, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, nil)
+	brokenIdx, _, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, nil)
 	if err != nil {
 		t.Fatalf("preParseFastFail returned error: %v", err)
 	}
 	if len(brokenIdx) != 0 {
-		t.Fatalf("brokenIdx = %v, want empty (tolerant policy imports degraded video)", brokenIdx)
+		t.Fatalf("brokenIdx = %v, want empty (within acceptable-missing threshold)", brokenIdx)
 	}
 }
 
-// TestPreParseFastFailStrictFailsDegradedVideo verifies the same file is broken
-// under the strict policy.
-func TestPreParseFastFailStrictFailsDegradedVideo(t *testing.T) {
+// TestPreParseFastFailZeroToleranceFailsDegradedVideo verifies the same file
+// is broken when the acceptable-missing threshold is set to 0 (issue #813).
+func TestPreParseFastFailZeroToleranceFailsDegradedVideo(t *testing.T) {
 	client := fakepool.New()
 	proc := &Processor{
 		poolManager:       processorTestPoolManager{client: client},
@@ -639,19 +642,20 @@ func TestPreParseFastFailStrictFailsDegradedVideo(t *testing.T) {
 	n := buildMultiSegmentNzb(client, "Movie.2024.mkv", 50, 25)
 	cfg := config.DefaultConfig()
 	cfg.Import.SegmentSamplePercentage = 100
-	cfg.Import.DamagePolicy = "strict"
+	cfg.Health.AcceptableMissingSegmentsPercentage = 0
 
-	brokenIdx, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, nil)
+	brokenIdx, _, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, nil)
 	if !errors.Is(err, multifile.ErrNoFilesProcessed) {
 		// Single file, and it's broken → all eligible broken → ErrNoFilesProcessed.
-		t.Fatalf("strict policy: err = %v, want ErrNoFilesProcessed", err)
+		t.Fatalf("zero tolerance: err = %v, want ErrNoFilesProcessed", err)
 	}
 	_ = brokenIdx
 }
 
-// TestPreParseFastFailTolerantStillFailsLongRun verifies tolerant policy does
-// NOT rescue a file whose missing run exceeds the pad cap.
-func TestPreParseFastFailTolerantStillFailsLongRun(t *testing.T) {
+// TestPreParseFastFailAcceptableThresholdStillFailsLongRun verifies a raised
+// acceptable-missing threshold does NOT rescue a file whose missing run
+// exceeds the pad cap.
+func TestPreParseFastFailAcceptableThresholdStillFailsLongRun(t *testing.T) {
 	client := fakepool.New()
 	proc := &Processor{
 		poolManager:       processorTestPoolManager{client: client},
@@ -661,10 +665,11 @@ func TestPreParseFastFailTolerantStillFailsLongRun(t *testing.T) {
 	n := buildMultiSegmentNzb(client, "Movie.2024.mkv", 50, 20, 21, 22, 23, 24)
 	cfg := config.DefaultConfig()
 	cfg.Import.SegmentSamplePercentage = 100
+	cfg.Health.AcceptableMissingSegmentsPercentage = 100
 
-	_, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, nil)
+	_, _, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, nil)
 	if !errors.Is(err, multifile.ErrNoFilesProcessed) {
-		t.Fatalf("tolerant policy with long run: err = %v, want ErrNoFilesProcessed", err)
+		t.Fatalf("raised threshold with long run: err = %v, want ErrNoFilesProcessed", err)
 	}
 }
 
@@ -678,7 +683,7 @@ func TestPreParseFastFailStremioHeaderOnly(t *testing.T) {
 	cfg := config.DefaultConfig()
 	stremioCat := "stremio"
 
-	_, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, &stremioCat, nil)
+	_, _, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, &stremioCat, nil)
 	if !errors.Is(err, multifile.ErrNoFilesProcessed) {
 		t.Fatalf("stremio header fast-fail: err = %v, want ErrNoFilesProcessed", err)
 	}
@@ -730,5 +735,98 @@ func TestCalculateVirtualDirectory(t *testing.T) {
 				t.Errorf("CalculateVirtualDirectory(%q, %q) = %q, want %q", tt.nzbPath, tt.relativePath, result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestKnownHoleRunsCollapsesMissingIndices(t *testing.T) {
+	segs := []*metapb.SegmentData{
+		{Id: "a"}, {Id: "b"}, {Id: "c"}, {Id: "d"}, {Id: "e"}, {Id: "f"},
+	}
+	missing := map[string]struct{}{"b": {}, "c": {}, "e": {}, "zzz": {}}
+	runs := knownHoleRuns(segs, missing)
+	if len(runs) != 2 {
+		t.Fatalf("runs = %+v, want 2 runs", runs)
+	}
+	if runs[0].Start != 1 || runs[0].Count != 2 {
+		t.Fatalf("runs[0] = %+v, want {1 2}", runs[0])
+	}
+	if runs[1].Start != 4 || runs[1].Count != 1 {
+		t.Fatalf("runs[1] = %+v, want {4 1}", runs[1])
+	}
+	if got := knownHoleRuns(segs, nil); len(got) != 0 {
+		t.Fatalf("runs with no missing ids = %+v, want none", got)
+	}
+}
+
+func TestFastFailDamageIsDegradedJudgesGapsExactly(t *testing.T) {
+	const segSize = 750000
+	mk := func(n int, gaps ...int) []*metapb.SegmentData {
+		segs := make([]*metapb.SegmentData, n)
+		for i := range segs {
+			segs[i] = &metapb.SegmentData{Id: fmt.Sprintf("s%d", i)}
+		}
+		for _, g := range gaps {
+			segs[g] = &metapb.SegmentData{Id: holes.PlaceholderID(g+1, "salt")}
+		}
+		return segs
+	}
+	fileBytes := int64(2000 * segSize)
+
+	// Two isolated gaps in a 2000-segment file: degraded.
+	segs := mk(2000, 100, 1400)
+	res := validation.FastFailFileResult{Broken: true, KnownGapCount: 2,
+		MissingSegmentIDs: []string{segs[100].Id, segs[1400].Id}}
+	if !fastFailDamageIsDegraded(segs, res, fileBytes, 5) {
+		t.Fatal("two isolated gaps must be degraded, not failed")
+	}
+
+	// A run of six consecutive gaps blows the run cap.
+	segs = mk(2000, 100, 101, 102, 103, 104, 105)
+	ids := make([]string, 0, 6)
+	for i := 100; i <= 105; i++ {
+		ids = append(ids, segs[i].Id)
+	}
+	res = validation.FastFailFileResult{Broken: true, KnownGapCount: 6, MissingSegmentIDs: ids}
+	if fastFailDamageIsDegraded(segs, res, fileBytes, 5) {
+		t.Fatal("a six-segment gap run must fail the file")
+	}
+
+	// A zero-tolerance ceiling refuses even one gap.
+	segs = mk(2000, 100)
+	res = validation.FastFailFileResult{Broken: true, KnownGapCount: 1, MissingSegmentIDs: []string{segs[100].Id}}
+	if fastFailDamageIsDegraded(segs, res, fileBytes, 0) {
+		t.Fatal("acceptable-missing 0 must refuse a gap")
+	}
+
+	// Nothing missing at all is not "degraded".
+	if fastFailDamageIsDegraded(mk(10), validation.FastFailFileResult{}, fileBytes, 5) {
+		t.Fatal("no damage must not be reported as degraded")
+	}
+}
+
+func TestClassifyDeclaredGaps(t *testing.T) {
+	const seg = int64(700000)
+	fileBytes := int64(7772) * seg
+	spread := func(n int) []holes.Run {
+		runs := make([]holes.Run, n)
+		for i := range runs {
+			runs[i] = holes.Run{Start: i * 50, Count: 1}
+		}
+		return runs
+	}
+	if got := classifyDeclaredGaps(nil, fileBytes, seg); got != holes.VerdictClean {
+		t.Fatalf("no gaps = %v, want clean", got)
+	}
+	if got := classifyDeclaredGaps(spread(84), fileBytes, seg); got != holes.VerdictDegraded {
+		t.Fatalf("84 single-segment gaps over 7772 (1.1%%) = %v, want degraded", got)
+	}
+	if got := classifyDeclaredGaps(spread(130), fileBytes, seg); got != holes.VerdictFailed {
+		t.Fatalf("130 gaps = %v, want failed (cumulative cap)", got)
+	}
+	if got := classifyDeclaredGaps([]holes.Run{{Start: 10, Count: 5}}, fileBytes, seg); got != holes.VerdictFailed {
+		t.Fatalf("five-segment run = %v, want failed (run cap)", got)
+	}
+	if got := classifyDeclaredGaps(spread(20), 500*seg, seg); got != holes.VerdictFailed {
+		t.Fatalf("20 gaps in a 500-segment file (4%%) = %v, want failed (ratio cap)", got)
 	}
 }

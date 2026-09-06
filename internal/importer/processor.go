@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/javi11/nntppool/v4"
@@ -23,6 +24,7 @@ import (
 	"github.com/javi11/altmount/internal/importer/filesystem"
 	"github.com/javi11/altmount/internal/importer/multifile"
 	"github.com/javi11/altmount/internal/importer/parser"
+	"github.com/javi11/altmount/internal/importer/parser/fileinfo"
 	"github.com/javi11/altmount/internal/importer/singlefile"
 	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
 	"github.com/javi11/altmount/internal/importer/validation"
@@ -50,10 +52,195 @@ type Processor struct {
 	log               *slog.Logger
 	broadcaster       *progress.ProgressBroadcaster // WebSocket progress broadcaster
 	recorder          HistoryRecorder
+	par2Repair        RepairEnqueuer        // optional; queues PAR2 repairs at import time
+	patchIndex        validation.PatchIndex // optional; locally repaired articles count as available
 
 	// Pre-compiled regex patterns for RAR file sorting
 	rarPartPattern  *regexp.Regexp // pattern.part###.rar
 	rarPartPattern2 *regexp.Regexp // pattern.r###
+}
+
+// ErrDeferredForRepair reports that an import was parked pending a PAR2
+// repair rather than failed. Archive-set volumes with missing articles cannot
+// be zero-filled — a holed volume breaks extraction — but PAR2 can rebuild
+// them byte-exactly, so dropping the release outright throws away a repair
+// that is most likely to succeed right now, while the recovery volumes are
+// still retrievable.
+var ErrDeferredForRepair = errors.New("import deferred pending PAR2 repair")
+
+// shouldDeferForRepair decides whether a damaged release waits for a PAR2
+// repair instead of being dropped. Deferring needs the feature enabled, PAR2
+// files in the NZB to repair from, and actual damage to repair.
+func shouldDeferForRepair(enabled, hasPar2, brokenInSet bool) bool {
+	return enabled && hasPar2 && brokenInSet
+}
+
+// fastFailOutcome decides what the sweep does with a damaged release:
+// defer for repair, or bail out because nothing importable remains.
+//
+// Deferral is evaluated FIRST and deliberately: a fully damaged archive set —
+// every volume broken — is the canonical case PAR2 repair exists to rescue,
+// and it is exactly the case that trips the bail-out. Checking the bail-out
+// first would mean deferral never fires for the releases that need it most.
+func fastFailOutcome(enabled, hasPar2, brokenInSet bool, eligibleCount, brokenCount int) (defer_ bool, bailOut bool) {
+	if shouldDeferForRepair(enabled, hasPar2, brokenInSet) {
+		return true, false
+	}
+	return false, eligibleCount > 0 && brokenCount == eligibleCount
+}
+
+// shouldDeferCorruptArchive decides whether a failed archive analysis parks
+// the import for an NZB-mode PAR2 repair. The fast-fail sweep catches MISSING
+// articles before analysis; corrupt-but-present articles only surface here,
+// as rardecode corruption errors — and they are exactly what PAR2 rebuilds.
+// The repair's verify sweep locates the corrupt articles itself, so no
+// failing-segment hint is needed.
+func shouldDeferCorruptArchive(err error, enabled, hasPar2 bool) bool {
+	return enabled && hasPar2 && rar.IsCorruptionError(err)
+}
+
+// shouldDeferMissingArchive decides whether an archive analysis failure
+// caused by a genuinely MISSING article should also park the import for a
+// PAR2 repair. The fast-fail probe samples only a percentage of segments
+// (import.segment_sample_percentage), so it can pass clean on a release that
+// does have a missing article; when that happens, the miss only surfaces once
+// analysis actually walks into the hole. That is exactly the same damage the
+// fast-fail escalation path defers for, so it must not be treated as a
+// terminal failure just because it was discovered later.
+func shouldDeferMissingArchive(err error, enabled, hasPar2 bool) bool {
+	return enabled && hasPar2 && errors.Is(err, nntppool.ErrArticleNotFound)
+}
+
+// RepairEnqueuer queues a file for background PAR2 repair (implemented by
+// par2repair.Service). Implementations must be non-blocking.
+type RepairEnqueuer interface {
+	Enqueue(ctx context.Context, filePath string, failingSegmentID string)
+}
+
+// NzbRepairEnqueuer queues a repair planned from an NZB, for releases deferred
+// before they were ever imported.
+type NzbRepairEnqueuer interface {
+	EnqueueNzb(ctx context.Context, nzbPath string, failingSegmentID string)
+}
+
+// SetRepairEnqueuer wires the PAR2 repair queue. Call during boot, before
+// imports run.
+func (proc *Processor) SetRepairEnqueuer(re RepairEnqueuer) {
+	proc.par2Repair = re
+}
+
+// SetPatchIndex wires the PAR2 patch store so articles repaired locally count
+// as available during the fast-fail availability sweep.
+func (proc *Processor) SetPatchIndex(idx validation.PatchIndex) {
+	proc.patchIndex = idx
+}
+
+// queueNzbRepair queues an NZB-mode repair for a release that was deferred
+// before import, so the repair plans straight from the NZB (there is no file
+// metadata to plan from yet).
+func (proc *Processor) queueNzbRepair(ctx context.Context, nzbPath, failingSegmentID string) {
+	if proc.par2Repair == nil {
+		return
+	}
+	if nq, ok := proc.par2Repair.(NzbRepairEnqueuer); ok {
+		nq.EnqueueNzb(ctx, nzbPath, failingSegmentID)
+		return
+	}
+	if proc.log != nil {
+		proc.log.WarnContext(ctx, "Deferred import but the repair service cannot plan from an NZB",
+			"nzb", nzbPath)
+	}
+}
+
+// queueImportRepairs queues a PAR2 repair for every degraded file the import
+// actually wrote. degraded maps an NZB filename to its first confirmed-missing
+// segment ID; matching is by basename because import renames files (sanitizing,
+// PAR2 deobfuscation, rename-to-nzb-name).
+//
+// Repairing at import — rather than waiting for the first playback — matters
+// because the release's PAR2 volumes are most likely to still be retrievable
+// close to the post date. Opt-in via par2_repair.repair_on_import.
+func (proc *Processor) queueImportRepairs(ctx context.Context, enabled bool, writtenPaths []string, degraded map[string]string) {
+	if !enabled || proc.par2Repair == nil || len(degraded) == 0 {
+		return
+	}
+	for _, vp := range writtenPaths {
+		segID, ok := degraded[filepath.Base(vp)]
+		if !ok {
+			continue
+		}
+		if proc.log != nil {
+			proc.log.InfoContext(ctx, "Queueing PAR2 repair for degraded import",
+				"file", vp, "missing_segment", segID)
+		}
+		proc.par2Repair.Enqueue(ctx, vp, segID)
+	}
+}
+
+// persistKnownHoles records the fast-fail sweep's confirmed misses on each
+// degraded file's metadata, so the first playback through them zero-fills
+// (or serves a repair) immediately instead of re-discovering each hole with
+// a fetch that only comes back 430 after the provider's slow spool lookup.
+// Only files that actually imported (writtenPaths) and were sampled missing
+// (degraded) are touched; unsampled damage is still learned at read time.
+func (proc *Processor) persistKnownHoles(ctx context.Context, writtenPaths []string, degraded map[string]string, missingIDs map[string]struct{}, fingerprint string) {
+	if len(degraded) == 0 || len(missingIDs) == 0 || proc.metadataService == nil {
+		return
+	}
+	for _, vp := range writtenPaths {
+		if _, ok := degraded[filepath.Base(vp)]; !ok {
+			continue
+		}
+		meta, err := proc.metadataService.ReadFileMetadata(vp)
+		if err != nil || meta == nil {
+			continue
+		}
+		runs := knownHoleRuns(meta.SegmentData, missingIDs)
+		if len(runs) == 0 {
+			continue
+		}
+		if err := proc.metadataService.AddKnownHoles(vp, runs, fingerprint); err != nil {
+			if proc.log != nil {
+				proc.log.WarnContext(ctx, "Failed to persist known holes from import", "file", vp, "error", err)
+			}
+			continue
+		}
+		if proc.log != nil {
+			proc.log.InfoContext(ctx, "Persisted known holes from import sweep", "file", vp, "runs", len(runs))
+		}
+	}
+}
+
+// knownHoleRuns maps confirmed-missing segment IDs onto their indices in a
+// file's segment list and collapses them into runs.
+func knownHoleRuns(segments []*metapb.SegmentData, missingIDs map[string]struct{}) []holes.Run {
+	var acc holes.Accumulator
+	for i, seg := range segments {
+		if seg == nil {
+			continue
+		}
+		if _, missing := missingIDs[seg.Id]; missing {
+			acc.Add(i)
+		}
+	}
+	return acc.Runs()
+}
+
+// mergeDegradedFiles folds the parser's degraded files (dead first article,
+// header recovered from a later one) into the fast-fail sweep's findings. The
+// sweep's segment id wins on a clash: it is the one that proved the damage.
+func mergeDegradedFiles(sweep, fromParser map[string]string) map[string]string {
+	if len(fromParser) == 0 {
+		return sweep
+	}
+	merged := make(map[string]string, len(sweep)+len(fromParser))
+	for k, v := range fromParser {
+		merged[k] = v
+	}
+	for k, v := range sweep {
+		merged[k] = v
+	}
+	return merged
 }
 
 // NewProcessor creates a new NZB processor using metadata storage
@@ -176,9 +363,12 @@ func (proc *Processor) checkCancellation(ctx context.Context) error {
 // round-trips. Returns (brokenFileIndexes, knownMissingSegmentIDs, error).
 // Both maps are nil when no pool is available.
 // Returns ErrNoFilesProcessed (wrapped) when all eligible regular files are broken.
-func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, cfg *config.Config, queueID int, category *string, downloadID *string) (map[int]struct{}, map[string]struct{}, error) {
+// preParseFastFail returns the broken file indexes, the confirmed-missing
+// segment IDs, and degraded files (NZB filename -> first missing segment ID)
+// that import anyway under the tolerant damage policy.
+func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, cfg *config.Config, queueID int, category *string, downloadID *string) (map[int]struct{}, map[string]struct{}, map[string]string, error) {
 	if !proc.poolManager.HasPool() {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 
 	// Build the fast-fail input index-aligned with n.Files. PAR2 files keep their
@@ -206,9 +396,12 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 	}
 
 	// Stat is a cheap single round-trip on the pool's normal lane; excess
-	// requests queue and yield to streaming (priority lane). Run sweeps at the
-	// pool's full connection capacity so multi-part releases don't crawl.
-	concurrency := fastFailConcurrency(cfg)
+	// requests queue and yield to streaming (priority lane). Size the sweep by
+	// the providers' STAT pipeline depth, not their connection count — STAT is
+	// bodyless, so nntppool pipelines many per connection. While streams are
+	// active the sweep stays at one connection's depth; on an idle pool it
+	// widens to the pool's aggregate pipeline capacity (StatCapacity).
+	concurrency := proc.poolManager.StatSweepConcurrency(cfg.StatConcurrency())
 
 	// Phase 1: cheap release-level probe. Sample the whole release once
 	// (segment_sample_percentage of it) and fail fast. Healthy releases — the
@@ -222,9 +415,10 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 		cfg.Import.SegmentSamplePercentage,
 		concurrency,
 		proc.validationTimeout,
+		proc.patchIndex,
 	)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if !missing {
 		if proc.log != nil {
@@ -232,7 +426,7 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 				"files", len(fastFailFiles),
 				"duration", time.Since(probeStart))
 		}
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 
 	isStremioImport := (category != nil && *category == "stremio") || (downloadID != nil && strings.HasPrefix(*downloadID, "stremio:"))
@@ -242,7 +436,7 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 				"files", len(fastFailFiles),
 				"probe_duration", time.Since(probeStart))
 		}
-		return nil, nil, multifile.ErrNoFilesProcessed
+		return nil, nil, nil, multifile.ErrNoFilesProcessed
 	}
 
 	// Phase 2 (escalation): the probe found an unreachable segment, so map
@@ -271,15 +465,43 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 		concurrency,
 		proc.validationTimeout,
 		fastFailTracker,
+		proc.patchIndex,
 	)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	brokenIdx := make(map[int]struct{})
+	degradedFiles := make(map[string]string)
+	// Damage inside an archive set: those volumes cannot be zero-filled, but
+	// PAR2 can rebuild them — track it so the caller can defer for repair.
+	archiveSetDamaged := false
+	var firstArchiveMissingID string
+	nzbHasPar2 := false
+	for _, f := range n.Files {
+		if filesystem.IsPar2File(f.Filename) {
+			nzbHasPar2 = true
+			break
+		}
+	}
 	missingIDs := make(map[string]struct{})
 	eligibleRegularCount := 0
-	tolerant := cfg.GetImportDamagePolicyTolerant()
+	acceptableMissingPercent := cfg.GetAcceptableMissingSegmentsPercentage()
+	// Archive-set members whose only misses are gaps the NZB declares,
+	// keyed by set; judged together below against the whole set's size.
+	gappedSets := make(map[string]*gappedSet)
+	for i, ff := range fastFailFiles {
+		if ff.GroupKey == "" || filesystem.IsPar2File(n.Files[i].Filename) {
+			continue
+		}
+		sg := gappedSets[ff.GroupKey]
+		if sg == nil {
+			sg = &gappedSet{}
+			gappedSets[ff.GroupKey] = sg
+		}
+		sg.totalBytes += int64(n.Files[i].Bytes)
+		sg.totalSegs += len(ff.Segments)
+	}
 
 	for i, result := range results {
 		f := n.Files[i]
@@ -290,30 +512,51 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 		}
 
 		if result.Broken && !isPar2 {
-			// Tolerant damage policy: a standalone video file with SMALL
-			// confirmed damage imports as degraded rather than being dropped.
+			// Small confirmed damage, within the configured acceptable-missing
+			// threshold, imports as degraded rather than being dropped.
 			// Streaming zero-fills the gaps and the immediate post-import
 			// health check discovers + persists the holes and flags it
-			// degraded. Archive-set members (GroupKey != "") stay binary — a
-			// holed volume corrupts extraction and cannot be padded.
-			if tolerant && fastFailFiles[i].GroupKey == "" && holes.EligibleFile(f.Filename) {
-				verdict := holes.ClassifyProjected(
-					len(result.MissingSegmentIDs),
-					result.SampledCount,
-					len(f.Segments),
-					longestSampledRun(fastFailFiles[i].Segments, result.MissingSegmentIDs),
-				)
-				if verdict == holes.VerdictDegraded {
-					if proc.log != nil {
-						proc.log.InfoContext(ctx, "Importing video file as degraded despite missing segments (tolerant damage policy)",
-							"file", f.Filename,
-							"missing_sampled", len(result.MissingSegmentIDs),
-							"sampled", result.SampledCount)
-					}
-					continue // not broken: let it import
+			// degraded (or fails it, if the threshold changed since).
+			//
+			// Standalone video files qualify on sampled evidence. Archive-set
+			// members (GroupKey != "") qualify only when every miss is a gap
+			// the NZB itself declares: those are exact, sized placeholders,
+			// so the volume's remaining bytes keep their offsets and the
+			// extracted file simply carries a hole. Sampled misses inside a
+			// set stay binary — their extent is unknown and a holed header
+			// breaks extraction.
+			sampledMisses := len(result.MissingSegmentIDs) - result.KnownGapCount
+			if acceptableMissingPercent > 0 && fastFailFiles[i].GroupKey != "" && sampledMisses == 0 {
+				// A volume's gaps are a share of the whole extracted file, not
+				// of the volume: judged per set once every member is known.
+				sg := gappedSets[fastFailFiles[i].GroupKey]
+				sg.members = append(sg.members, i)
+				continue
+			}
+			tolerant := acceptableMissingPercent > 0 && fastFailFiles[i].GroupKey == "" && holes.EligibleFile(f.Filename)
+			if tolerant && fastFailDamageIsDegraded(fastFailFiles[i].Segments, result, int64(f.Bytes), acceptableMissingPercent) {
+				if proc.log != nil {
+					proc.log.InfoContext(ctx, "Importing file as degraded despite missing segments (within acceptable-missing threshold)",
+						"file", f.Filename,
+						"missing_sampled", sampledMisses,
+						"known_gaps", result.KnownGapCount,
+						"sampled", result.SampledCount)
 				}
+				if len(result.MissingSegmentIDs) > 0 {
+					degradedFiles[filepath.Base(f.Filename)] = result.MissingSegmentIDs[0]
+				}
+				for _, id := range result.MissingSegmentIDs {
+					missingIDs[id] = struct{}{}
+				}
+				continue // not broken: let it import
 			}
 
+			if fastFailFiles[i].GroupKey != "" {
+				archiveSetDamaged = true
+				if firstArchiveMissingID == "" && len(result.MissingSegmentIDs) > 0 {
+					firstArchiveMissingID = result.MissingSegmentIDs[0]
+				}
+			}
 			brokenIdx[i] = struct{}{}
 			for _, id := range result.MissingSegmentIDs {
 				missingIDs[id] = struct{}{}
@@ -325,15 +568,107 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 		}
 	}
 
+	// Sets whose damage is exactly known: every gap is a sized placeholder in
+	// a stored volume, so the extracted file carries holes at known offsets
+	// and nothing else moves. Within the hole caps the set imports degraded;
+	// beyond them every member is condemned, like a sampled miss would.
+	for key, sg := range gappedSets {
+		if len(sg.members) == 0 {
+			continue
+		}
+		// Runs are laid out over the set's concatenated segment space in NZB
+		// order, which is volume order for every sane post; a gap straddling
+		// two volumes is the only thing that could misjudge, and it is rare.
+		var runs []holes.Run
+		var offset, gapCount int
+		memberSet := make(map[int]struct{}, len(sg.members))
+		for _, i := range sg.members {
+			memberSet[i] = struct{}{}
+		}
+		for i, ff := range fastFailFiles {
+			if ff.GroupKey != key || filesystem.IsPar2File(n.Files[i].Filename) {
+				continue
+			}
+			if _, gapped := memberSet[i]; gapped {
+				for _, r := range placeholderRuns(ff.Segments) {
+					runs = append(runs, holes.Run{Start: r.Start + offset, Count: r.Count})
+				}
+				gapCount += results[i].KnownGapCount
+			}
+			offset += len(ff.Segments)
+		}
+		avgSeg := int64(0)
+		if sg.totalSegs > 0 {
+			avgSeg = sg.totalBytes / int64(sg.totalSegs)
+		}
+		degraded := classifyDeclaredGaps(runs, sg.totalBytes, avgSeg) == holes.VerdictDegraded &&
+			!holes.ExceedsAcceptableMissing(gapCount, sg.totalSegs, acceptableMissingPercent)
+		if proc.log != nil {
+			proc.log.InfoContext(ctx, "Archive set omits articles in its NZB",
+				"set", key, "gaps", gapCount, "set_segments", sg.totalSegs, "import_degraded", degraded)
+		}
+		for _, i := range sg.members {
+			for _, id := range results[i].MissingSegmentIDs {
+				missingIDs[id] = struct{}{}
+			}
+			if degraded {
+				if len(results[i].MissingSegmentIDs) > 0 {
+					degradedFiles[filepath.Base(n.Files[i].Filename)] = results[i].MissingSegmentIDs[0]
+				}
+				continue
+			}
+			archiveSetDamaged = true
+			if firstArchiveMissingID == "" && len(results[i].MissingSegmentIDs) > 0 {
+				firstArchiveMissingID = results[i].MissingSegmentIDs[0]
+			}
+			brokenIdx[i] = struct{}{}
+		}
+	}
+
+	// A volume condemned here for its declared gaps dooms its whole set, the
+	// same way the sweep propagates a sampled miss.
+	brokenSetKeys := make(map[string]struct{})
+	for i := range brokenIdx {
+		if key := fastFailFiles[i].GroupKey; key != "" {
+			brokenSetKeys[key] = struct{}{}
+		}
+	}
+	if len(brokenSetKeys) > 0 {
+		for i, ff := range fastFailFiles {
+			if _, broken := brokenIdx[i]; broken || ff.GroupKey == "" {
+				continue
+			}
+			if _, doomed := brokenSetKeys[ff.GroupKey]; doomed {
+				brokenIdx[i] = struct{}{}
+			}
+		}
+	}
+
+	// Deferral is decided before the bail-out below: a fully damaged archive
+	// set trips both, and repair is the better outcome. See fastFailOutcome.
+	deferForRepair, bailOut := fastFailOutcome(
+		cfg.Par2Repair.EffectiveRepairOnImport(), nzbHasPar2, archiveSetDamaged,
+		eligibleRegularCount, len(brokenIdx),
+	)
+	if deferForRepair {
+		if proc.log != nil {
+			proc.log.InfoContext(ctx, "Deferring import: archive set has missing articles, queueing PAR2 repair",
+				"files", len(fastFailFiles),
+				"broken_files", len(brokenIdx),
+				"missing_segment", firstArchiveMissingID)
+		}
+		return nil, nil, nil, &DeferredRepairError{FirstMissingSegmentID: firstArchiveMissingID}
+	}
+
 	// With set-level propagation, a broken set has all its parts in brokenIdx, so
 	// this equality is logical-unit accurate: it holds only when every RAR set and
 	// every standalone regular file is broken — nothing healthy remains to import.
-	if eligibleRegularCount > 0 && len(brokenIdx) == eligibleRegularCount {
-		return nil, nil, multifile.ErrNoFilesProcessed
+	if bailOut {
+		return nil, nil, nil, multifile.ErrNoFilesProcessed
 	}
 
 	if len(brokenIdx) == 0 {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 
 	if proc.log != nil {
@@ -349,7 +684,99 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 			"eligible_files", eligibleRegularCount)
 	}
 
-	return brokenIdx, missingIDs, nil
+	return brokenIdx, missingIDs, degradedFiles, nil
+}
+
+// DeferredRepairError carries the deferral out of the fast-fail sweep together
+// with the segment that proves the damage, so the repair plan has a starting
+// point.
+type DeferredRepairError struct {
+	FirstMissingSegmentID string
+}
+
+func (e *DeferredRepairError) Error() string { return ErrDeferredForRepair.Error() }
+func (e *DeferredRepairError) Unwrap() error { return ErrDeferredForRepair }
+
+// maxDeclaredGapSegments is the cumulative cap for gaps an NZB declares in an
+// archive set. Twice the playback padding cap: these holes are exact and
+// judged over the whole extracted file rather than discovered one stall at a
+// time, so the byte-ratio guard carries more of the weight. Beyond it the set
+// is condemned outright.
+const maxDeclaredGapSegments = 2 * holes.MaxPadTotalSegments
+
+// classifyDeclaredGaps applies the hole caps to a set's declared gaps with
+// the relaxed cumulative cap above; run and byte-ratio caps are unchanged.
+func classifyDeclaredGaps(runs []holes.Run, fileBytes, avgSegBytes int64) holes.Verdict {
+	total := 0
+	for _, r := range runs {
+		if r.Count > holes.MaxPadRunSegments {
+			return holes.VerdictFailed
+		}
+		total += r.Count
+	}
+	if total == 0 {
+		return holes.VerdictClean
+	}
+	if total > maxDeclaredGapSegments {
+		return holes.VerdictFailed
+	}
+	if fileBytes > 0 && avgSegBytes > 0 &&
+		float64(total)*float64(avgSegBytes) > holes.MaxPadFileBytesRatio*float64(fileBytes) {
+		return holes.VerdictFailed
+	}
+	return holes.VerdictDegraded
+}
+
+// gappedSet collects the members of one archive set whose fast-fail misses
+// are all gaps the NZB declares (index into the NZB's file list).
+type gappedSet struct {
+	members    []int // members with declared gaps
+	totalBytes int64 // whole set, gap-free volumes included
+	totalSegs  int
+}
+
+// fastFailDamageIsDegraded judges a file's confirmed damage against the hole
+// caps and the configured acceptable-missing ceiling. Sampled misses are
+// projected over the whole file; gap placeholders are exact and judged by
+// their real runs. Both parts must stay within the caps.
+func fastFailDamageIsDegraded(segments []*metapb.SegmentData, result validation.FastFailFileResult, fileBytes int64, acceptablePercent float64) bool {
+	sampledMisses := len(result.MissingSegmentIDs) - result.KnownGapCount
+	if sampledMisses > 0 {
+		verdict := holes.ClassifyProjected(
+			sampledMisses,
+			result.SampledCount,
+			len(segments),
+			longestSampledRun(segments, result.MissingSegmentIDs),
+		)
+		if verdict != holes.VerdictDegraded ||
+			holes.ExceedsAcceptableMissing(sampledMisses, result.SampledCount, acceptablePercent) {
+			return false
+		}
+	}
+	if result.KnownGapCount > 0 {
+		runs := placeholderRuns(segments)
+		avgSeg := int64(0)
+		if len(segments) > 0 {
+			avgSeg = fileBytes / int64(len(segments))
+		}
+		if holes.Classify(runs, fileBytes, avgSeg) != holes.VerdictDegraded ||
+			holes.ExceedsAcceptableMissing(result.KnownGapCount, len(segments), acceptablePercent) {
+			return false
+		}
+	}
+	return sampledMisses > 0 || result.KnownGapCount > 0
+}
+
+// placeholderRuns collapses the indices of a file's gap placeholders into
+// runs over its segment space.
+func placeholderRuns(segments []*metapb.SegmentData) []holes.Run {
+	var acc holes.Accumulator
+	for i, seg := range segments {
+		if seg != nil && holes.IsPlaceholderID(seg.Id) {
+			acc.Add(i)
+		}
+	}
+	return acc.Runs()
 }
 
 // longestSampledRun maps missing segment IDs back to their indices in the
@@ -372,22 +799,6 @@ func longestSampledRun(segments []*metapb.SegmentData, missingIDs []string) int 
 		}
 	}
 	return acc.LongestRun()
-}
-
-// fastFailConcurrency returns the goroutine cap for the fast-fail Stat sweep.
-// Stats are cheap and queue on the pool's normal lane, so we use the pool's
-// full connection capacity, bounded to keep goroutine counts sane.
-func fastFailConcurrency(cfg *config.Config) int {
-	const maxConcurrency = 100
-
-	capacity := cfg.TotalProviderConnections()
-	if capacity <= 0 {
-		capacity = 1
-	}
-	if capacity > maxConcurrency {
-		capacity = maxConcurrency
-	}
-	return capacity
 }
 
 // ProcessNzbFile processes an NZB or STRM file maintaining the folder structure relative to relative path.
@@ -425,6 +836,12 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 
 	var parsed *parser.ParsedNzb
 	var brokenIdx map[int]struct{}
+	// Degraded files (NZB filename -> first missing segment ID) that import
+	// anyway; used to queue PAR2 repairs once virtual paths are known.
+	var degradedFiles map[string]string
+	// Every segment the fast-fail sweep confirmed missing, persisted as known
+	// holes on the degraded files so playback pre-pads them without a fetch.
+	var missingIDs map[string]struct{}
 
 	// Determine file type and parse accordingly
 	if strings.HasSuffix(strings.ToLower(filePath), strmFileExtension) {
@@ -449,12 +866,45 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 
 		parser.SanitizeNzbFilenames(n)
 
-		// Pre-parse Stat check — runs before any Body fetches.
+		// Articles the NZB never listed become sized placeholders, so later
+		// bytes keep their offsets and the gaps are served as holes. Done
+		// before the fast-fail sweep so those known misses count without a
+		// STAT and before the store is built so they hold a store index.
+		if gaps := parser.InsertSegmentGapPlaceholders(n); gaps > 0 && proc.log != nil {
+			proc.log.InfoContext(ctx, "NZB omits articles; inserted gap placeholders",
+				"placeholders", gaps, "file_path", filePath)
+		}
+
+		// Pre-parse Stat check. The first-segment fetch the parse pass needs
+		// runs alongside it: on a healthy release, the common case, that
+		// hides the shorter of the two behind the longer; on a failed check
+		// the warm-up is cancelled and its cost is a few early 430s.
 		proc.updateProgressWithStage(queueID, 0, "Checking segment availability")
-		var missingIDs map[string]struct{}
+		warmCtx, cancelWarm := context.WithCancel(ctx)
+		warmDone := make(chan struct{})
+		go func() {
+			defer close(warmDone)
+			proc.parser.WarmFirstSegments(warmCtx, n.Files)
+		}()
 		var fastFailErr error
-		brokenIdx, missingIDs, fastFailErr = proc.preParseFastFail(ctx, n, cfg, queueID, category, downloadID)
+		brokenIdx, missingIDs, degradedFiles, fastFailErr = proc.preParseFastFail(ctx, n, cfg, queueID, category, downloadID)
 		if fastFailErr != nil {
+			cancelWarm()
+		}
+		<-warmDone
+		cancelWarm()
+		if fastFailErr != nil {
+			// A deferral is not a failure: propagate it so the service parks
+			// the queue item pending the repair. Checked before the
+			// inconclusive branch, which returns a hard error.
+			var deferred *DeferredRepairError
+			if errors.As(fastFailErr, &deferred) {
+				proc.queueNzbRepair(ctx, filePath, deferred.FirstMissingSegmentID)
+				return "", nil, fastFailErr
+			}
+			if errors.Is(fastFailErr, validation.ErrFastFailInconclusive) {
+				return "", nil, fmt.Errorf("fast-fail segment check inconclusive: %w", fastFailErr)
+			}
 			return "", nil, NewNonRetryableError("fast-fail segment check failed", fastFailErr)
 		}
 
@@ -471,6 +921,7 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 		if err := proc.parser.ValidateNzb(parsed); err != nil {
 			return "", nil, NewNonRetryableError("NZB validation failed", err)
 		}
+		degradedFiles = mergeDegradedFiles(degradedFiles, parsed.DegradedFiles)
 	}
 
 	// Attach extracted files metadata if available (optimization)
@@ -605,7 +1056,7 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 		if importCfg.ExpandBlurayIso != nil {
 			expandEnabled = *importCfg.ExpandBlurayIso
 		}
-		isoMaxPrefetch := importCfg.MaxDownloadPrefetch
+		isoMaxPrefetch := cfg.GetMaxDownloadPrefetch()
 		isoReadTimeout := time.Duration(importCfg.ReadTimeoutSeconds) * time.Second
 		if isoReadTimeout == 0 {
 			isoReadTimeout = 5 * time.Minute
@@ -686,7 +1137,22 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 
 	// Update progress: complete
 	if err == nil {
+		// Damaged-but-imported files get a PAR2 repair queued now, while the
+		// release's recovery volumes are most likely still retrievable.
+		proc.persistKnownHoles(ctx, writtenPaths, degradedFiles, missingIDs, cfg.ProviderFingerprint())
+		proc.queueImportRepairs(ctx, cfg.Par2Repair.EffectiveRepairOnImport(), writtenPaths, degradedFiles)
 		proc.updateProgress(queueID, 100)
+	} else if repairEnabled, hasPar2 := cfg.Par2Repair.EffectiveRepairOnImport(), len(par2Files) > 0; shouldDeferCorruptArchive(err, repairEnabled, hasPar2) || shouldDeferMissingArchive(err, repairEnabled, hasPar2) {
+		// Corrupt-but-present articles, or an article the fast-fail probe's
+		// sample missed, broke the archive analysis. Park the import for an
+		// NZB-mode repair whose verify sweep checks every article against the
+		// PAR2 checksums, patches the damaged ones, and resumes the import —
+		// or fails it when the release verifies intact (the failure is then
+		// not article damage) or proves unrepairable.
+		proc.log.InfoContext(ctx, "Deferring import: archive analysis hit damaged or missing article data, queueing PAR2 verify sweep",
+			"file_path", filePath, "error", err)
+		proc.queueNzbRepair(ctx, filePath, "")
+		return result, writtenPaths, &DeferredRepairError{}
 	} else if errors.Is(err, nntppool.ErrArticleNotFound) {
 		return result, writtenPaths, ErrArticlesNotFound
 	}
@@ -923,8 +1389,9 @@ func (proc *Processor) processRarArchive(
 	storeIndex map[string]int64,
 	storeRef string,
 ) (string, []string, error) {
-	importCfg := proc.configGetter().Import
-	maxPrefetch := importCfg.MaxDownloadPrefetch
+	cfg := proc.configGetter()
+	importCfg := cfg.Import
+	maxPrefetch := cfg.GetMaxDownloadPrefetch()
 	readTimeout := time.Duration(importCfg.ReadTimeoutSeconds) * time.Second
 	if readTimeout == 0 {
 		readTimeout = 5 * time.Minute
@@ -959,7 +1426,9 @@ func (proc *Processor) processRarArchive(
 			return nzbFolder, writtenPaths, err
 		}
 
-		if _, err := multifile.ProcessRegularFiles(
+		// Track these even on error: rollback removes the release folder only once
+		// this job's own files are gone, so a partial write must be recorded.
+		regularWritten, err := multifile.ProcessRegularFiles(
 			ctx,
 			nzbFolder,
 			regularFiles,
@@ -971,7 +1440,9 @@ func (proc *Processor) processRarArchive(
 			nil, // archive progress is tracked by the archive tracker below
 			storeIndex,
 			storeRef,
-		); err != nil {
+		)
+		writtenPaths = append(writtenPaths, regularWritten...)
+		if err != nil {
 			slog.DebugContext(ctx, "Failed to process regular files", "error", err)
 		}
 	}
@@ -986,7 +1457,13 @@ func (proc *Processor) processRarArchive(
 
 		releaseDate := archiveFiles[0].ReleaseDate.Unix()
 
+		var writtenMu sync.Mutex
 		err := rar.ProcessArchive(ctx, rar.ProcessArchiveOptions{
+			OnMetadataWritten: func(vp string) {
+				writtenMu.Lock()
+				writtenPaths = append(writtenPaths, vp)
+				writtenMu.Unlock()
+			},
 			VirtualDir:             nzbFolder,
 			ArchiveFiles:           archiveFiles,
 			Password:               parsed.GetPassword(),
@@ -1056,8 +1533,9 @@ func (proc *Processor) processSevenZipArchive(
 	storeIndex map[string]int64,
 	storeRef string,
 ) (string, []string, error) {
-	importCfg := proc.configGetter().Import
-	maxPrefetch := importCfg.MaxDownloadPrefetch
+	cfg := proc.configGetter()
+	importCfg := cfg.Import
+	maxPrefetch := cfg.GetMaxDownloadPrefetch()
 	readTimeout := time.Duration(importCfg.ReadTimeoutSeconds) * time.Second
 	if readTimeout == 0 {
 		readTimeout = 5 * time.Minute
@@ -1092,7 +1570,9 @@ func (proc *Processor) processSevenZipArchive(
 			return nzbFolder, writtenPaths, err
 		}
 
-		if _, err := multifile.ProcessRegularFiles(
+		// Track these even on error: rollback removes the release folder only once
+		// this job's own files are gone, so a partial write must be recorded.
+		regularWritten, err := multifile.ProcessRegularFiles(
 			ctx,
 			nzbFolder,
 			regularFiles,
@@ -1104,7 +1584,9 @@ func (proc *Processor) processSevenZipArchive(
 			nil, // archive progress is tracked by the archive tracker below
 			storeIndex,
 			storeRef,
-		); err != nil {
+		)
+		writtenPaths = append(writtenPaths, regularWritten...)
+		if err != nil {
 			slog.DebugContext(ctx, "Failed to process regular files", "error", err)
 		}
 	}
@@ -1118,7 +1600,13 @@ func (proc *Processor) processSevenZipArchive(
 
 		releaseDate := archiveFiles[0].ReleaseDate.Unix()
 
+		var writtenMu sync.Mutex
 		err := sevenzip.ProcessArchive(ctx, sevenzip.ProcessArchiveOptions{
+			OnMetadataWritten: func(vp string) {
+				writtenMu.Lock()
+				writtenPaths = append(writtenPaths, vp)
+				writtenMu.Unlock()
+			},
 			VirtualDir:             nzbFolder,
 			ArchiveFiles:           archiveFiles,
 			Password:               parsed.GetPassword(),
@@ -1172,14 +1660,20 @@ func (proc *Processor) processSevenZipArchive(
 	return nzbFolder, writtenPaths, nil
 }
 
-// applyNzbRename renames the first file in files to match nzbName when renameToNzbName is true.
-// Returns the slice unchanged when renameToNzbName is false or files is empty.
+// applyNzbRename renames the first file in files to match nzbName when
+// renameToNzbName is true and its name says nothing (SABnzbd's rule): a clean
+// filename is kept, since the release name is not a better one. Returns the
+// slice unchanged otherwise.
 func applyNzbRename(renameToNzbName bool, nzbName string, files []parser.ParsedFile) []parser.ParsedFile {
 	if !renameToNzbName || len(files) == 0 {
 		return files
 	}
+	leaf := filepath.Base(files[0].Filename)
+	if !fileinfo.IsProbablyObfuscated(leaf) {
+		return files
+	}
 	originalDir := filepath.Dir(files[0].Filename)
-	normalizedBase := normalizeReleaseFilename(nzbName, filepath.Base(files[0].Filename))
+	normalizedBase := normalizeReleaseFilename(nzbName, leaf)
 	if originalDir != "." && originalDir != "" {
 		files[0].Filename = filepath.Join(originalDir, normalizedBase)
 	} else {

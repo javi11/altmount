@@ -1,10 +1,13 @@
 package usenet
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"io"
 	"sync"
 	"testing"
+	"time"
 )
 
 // TestSegment_SetData_ThenGetReader verifies basic data flow: SetData -> GetReader -> Read
@@ -143,11 +146,9 @@ func TestSegment_SetData_AfterRelease(t *testing.T) {
 	// Should not panic
 	seg.SetData([]byte("data"))
 
-	seg.mx.Lock()
-	if seg.data != nil {
-		t.Error("Expected data to be nil after Release")
+	if seg.DataLen() != 0 {
+		t.Error("Expected no data after Release")
 	}
-	seg.mx.Unlock()
 }
 
 // TestSegment_DataLen(t *testing.T) verifies DataLen returns correct values
@@ -450,6 +451,44 @@ func TestSegmentRangeClear_ConcurrentSafety(t *testing.T) {
 	wg.Wait()
 }
 
+// TestSegmentRange_GetSegment_ConcurrentClear reproduces issue #870: GetSegment
+// validated the index under RLock, then re-acquired the write lock for lazy
+// creation and indexed r.segments without re-checking bounds. A concurrent
+// Clear() nil-ing the slice in that window panicked with index out of range.
+func TestSegmentRange_GetSegment_ConcurrentClear(t *testing.T) {
+	t.Parallel()
+
+	loader := &mockLoader{
+		segments: []Segment{{Id: "seg", Start: 0, End: 99, Size: 100}},
+		groups:   [][]string{nil},
+	}
+
+	for range 20000 {
+		sr := &segmentRange{
+			start:    0,
+			end:      99,
+			segments: make([]*segment, 1),
+			ctx:      context.Background(),
+			loader:   loader,
+		}
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			seg, err := sr.GetSegment(0)
+			if err == nil && seg == nil {
+				t.Error("GetSegment returned nil segment without error")
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			_ = sr.Clear()
+		}()
+		wg.Wait()
+	}
+}
+
 // BenchmarkClear benchmarks the Clear operation
 func BenchmarkClear(b *testing.B) {
 	for i := 0; i < b.N; i++ {
@@ -462,5 +501,123 @@ func BenchmarkClear(b *testing.B) {
 		b.StartTimer()
 
 		_ = sr.Clear()
+	}
+}
+
+func TestSegmentServesBytesBeforeFinish(t *testing.T) {
+	s := newSegment("id", 0, 9, 10, nil, 0)
+	w := s.attemptWriter()
+	_, _ = w.Write([]byte{1, 2, 3, 4})
+
+	r := s.GetReaderContext(context.Background())
+	buf := make([]byte, 3)
+	n, err := r.Read(buf)
+	if err != nil || n != 3 || !bytes.Equal(buf, []byte{1, 2, 3}) {
+		t.Fatalf("read before finish: n=%d err=%v buf=%v", n, err, buf)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		rest := make([]byte, 10)
+		total := 0
+		for total < 7 {
+			nn, err := r.Read(rest[total:])
+			total += nn
+			if err != nil {
+				t.Errorf("tail read: %v", err)
+				return
+			}
+		}
+		if !bytes.Equal(rest[:7], []byte{4, 5, 6, 7, 8, 9, 10}) {
+			t.Errorf("tail = %v", rest[:7])
+		}
+	}()
+	time.Sleep(20 * time.Millisecond)
+	_, _ = w.Write([]byte{5, 6, 7, 8, 9, 10})
+	s.finish(w)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("reader never got the tail")
+	}
+	if _, err := r.Read(make([]byte, 1)); err != io.EOF {
+		t.Fatalf("after full range want EOF, got %v", err)
+	}
+}
+
+func TestSegmentSecondAttemptDoesNotRewind(t *testing.T) {
+	s := newSegment("id", 0, 7, 8, nil, 0)
+	w1 := s.attemptWriter()
+	_, _ = w1.Write([]byte{1, 2, 3, 4})
+	if s.published() != 4 {
+		t.Fatalf("published = %d", s.published())
+	}
+	w2 := s.attemptWriter()
+	_, _ = w2.Write([]byte{1, 2})
+	if s.published() != 4 {
+		t.Fatalf("a shorter second attempt must not rewind: %d", s.published())
+	}
+	_, _ = w2.Write([]byte{3, 4, 5, 6})
+	if s.published() != 6 {
+		t.Fatalf("second attempt past the watermark must publish: %d", s.published())
+	}
+	_, _ = w2.Write([]byte{7, 8})
+	s.finish(w2)
+	got, err := io.ReadAll(s.GetReaderContext(context.Background()))
+	if err != nil || !bytes.Equal(got, []byte{1, 2, 3, 4, 5, 6, 7, 8}) {
+		t.Fatalf("got %v err %v", got, err)
+	}
+	if !bytes.Equal(w2.bytes(), got) {
+		t.Fatal("bytes() must return the finished buffer")
+	}
+}
+
+func TestSegmentTrimmedStartWaitsOnlyForItsFirstByte(t *testing.T) {
+	s := newSegment("id", 5, 9, 10, nil, 0)
+	w := s.attemptWriter()
+	_, _ = w.Write([]byte{0, 1, 2, 3, 4, 5, 6})
+	r := s.GetReaderContext(context.Background())
+	buf := make([]byte, 2)
+	n, err := r.Read(buf)
+	if err != nil || n != 2 || !bytes.Equal(buf, []byte{5, 6}) {
+		t.Fatalf("n=%d err=%v buf=%v", n, err, buf)
+	}
+}
+
+func TestSegmentReleaseAndCancelUnblockProgressiveReader(t *testing.T) {
+	s := newSegment("id", 0, 9, 10, nil, 0)
+	w := s.attemptWriter()
+	_, _ = w.Write([]byte{1})
+	r := s.GetReaderContext(context.Background())
+	_, _ = r.Read(make([]byte, 1))
+	errc := make(chan error, 1)
+	go func() { _, err := r.Read(make([]byte, 1)); errc <- err }()
+	time.Sleep(10 * time.Millisecond)
+	s.Release()
+	if err := <-errc; !errors.Is(err, io.ErrClosedPipe) {
+		t.Fatalf("release must unblock with ErrClosedPipe, got %v", err)
+	}
+
+	s2 := newSegment("id2", 0, 9, 10, nil, 0)
+	ctx, cancel := context.WithCancel(context.Background())
+	r2 := s2.GetReaderContext(ctx)
+	go func() { _, err := r2.Read(make([]byte, 1)); errc <- err }()
+	time.Sleep(10 * time.Millisecond)
+	cancel()
+	if err := <-errc; !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancel must unblock, got %v", err)
+	}
+}
+
+func TestSegmentSetDataStillWorks(t *testing.T) {
+	s := newSegment("id", 2, 5, 6, nil, 0)
+	s.SetData([]byte{0, 1, 2, 3, 4, 5})
+	got, err := io.ReadAll(s.GetReader())
+	if err != nil || !bytes.Equal(got, []byte{2, 3, 4, 5}) {
+		t.Fatalf("got %v err %v", got, err)
+	}
+	if s.DataLen() != 6 {
+		t.Fatalf("DataLen = %d", s.DataLen())
 	}
 }

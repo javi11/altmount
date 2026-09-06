@@ -205,7 +205,9 @@ func escapeXML(s string) string {
 
 func findResourceType(ctx context.Context, name string, fi os.FileInfo) (string, error) {
 	if fi.IsDir() {
-		return `<D:collection xmlns:D="DAV:"/>`, nil
+		// The multistatus root already declares xmlns:D. Repeating it here breaks
+		// clients that match the bare `<D:collection/>` form most servers emit.
+		return `<D:collection/>`, nil
 	}
 	return "", nil
 }

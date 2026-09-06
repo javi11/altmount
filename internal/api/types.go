@@ -82,6 +82,10 @@ type RCloneAPIResponse struct {
 	Timeout       string `json:"timeout"`
 	Syslog        bool   `json:"syslog"`
 
+	// RcdRestartAfter is how long the rcd may stay unresponsive to liveness
+	// probes before it is killed and restarted. Empty means the built-in default.
+	RcdRestartAfter string `json:"rcd_restart_after"`
+
 	// System and filesystem options
 	LogLevel    string `json:"log_level"`
 	UID         int    `json:"uid"`
@@ -115,6 +119,7 @@ type RCloneAPIResponse struct {
 
 // ProviderAPIResponse sanitizes Provider config for API responses
 type ProviderAPIResponse struct {
+	// ID is a stable public provider identifier; it is not an authentication field.
 	ID                       string     `json:"id"`
 	Name                     string     `json:"name,omitempty"`
 	Host                     string     `json:"host"`
@@ -145,15 +150,18 @@ type ProviderAPIResponse struct {
 
 // ImportAPIResponse handles Import config for API responses
 type ImportAPIResponse struct {
-	MaxProcessorWorkers            int                   `json:"max_processor_workers"`
-	QueueProcessingIntervalSeconds int                   `json:"queue_processing_interval_seconds"` // Interval in seconds
-	AllowedFileExtensions          []string              `json:"allowed_file_extensions"`
-	MaxDownloadPrefetch            int                   `json:"max_download_prefetch"`
-	ReadTimeoutSeconds             int                   `json:"read_timeout_seconds"`
-	SegmentSamplePercentage        int                   `json:"segment_sample_percentage"` // Percentage of segments to check (1-100)
-	ImportStrategy                 config.ImportStrategy `json:"import_strategy"`
-	ImportDir                      *string               `json:"import_dir"`
-	WatchDir                       *string               `json:"watch_dir"`
+	MaxProcessorWorkers            int      `json:"max_processor_workers"`
+	QueueProcessingIntervalSeconds int      `json:"queue_processing_interval_seconds"` // Interval in seconds
+	AllowedFileExtensions          []string `json:"allowed_file_extensions"`
+	MaxDownloadPrefetch            int      `json:"max_download_prefetch"`
+	// StreamHeadroomConnections is nil when the reservation derives from pool
+	// size, and an explicit 0 when the operator has disabled it entirely.
+	StreamHeadroomConnections *int                  `json:"stream_headroom_connections,omitempty"`
+	ReadTimeoutSeconds        int                   `json:"read_timeout_seconds"`
+	SegmentSamplePercentage   int                   `json:"segment_sample_percentage"` // Percentage of segments to check (1-100)
+	ImportStrategy            config.ImportStrategy `json:"import_strategy"`
+	ImportDir                 *string               `json:"import_dir"`
+	WatchDir                  *string               `json:"watch_dir"`
 
 	WatchIntervalSeconds     *int  `json:"watch_interval_seconds,omitempty"`
 	AllowNestedRarExtraction *bool `json:"allow_nested_rar_extraction,omitempty"`
@@ -350,6 +358,8 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 		Timeout:       cfg.RClone.Timeout,
 		Syslog:        cfg.RClone.Syslog,
 
+		RcdRestartAfter: cfg.RClone.RcdRestartAfter,
+
 		// System and filesystem options
 		LogLevel:    cfg.RClone.LogLevel,
 		UID:         cfg.RClone.UID,
@@ -452,7 +462,7 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 			ID:             n.ID,
 			Name:           n.Name,
 			URL:            n.URL,
-			APIKey:         n.APIKey,
+			APIKey:         "",
 			APIKeySet:      n.APIKey != "",
 			Categories:     n.Categories,
 			Weight:         n.Weight,
@@ -469,7 +479,7 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 	prowlarrResp := ProwlarrAPIResponse{
 		Enabled:               prowlarrCfg.Enabled != nil && *prowlarrCfg.Enabled,
 		Host:                  prowlarrCfg.Host,
-		APIKey:                prowlarrCfg.APIKey,
+		APIKey:                "",
 		APIKeySet:             prowlarrCfg.APIKey != "",
 		Categories:            prowlarrCfg.Categories,
 		Indexers:              prowlarrCfg.Indexers,
@@ -556,6 +566,7 @@ func ToImportAPIResponse(importConfig config.ImportConfig) ImportAPIResponse {
 		QueueProcessingIntervalSeconds: importConfig.QueueProcessingIntervalSeconds,
 		AllowedFileExtensions:          importConfig.AllowedFileExtensions,
 		MaxDownloadPrefetch:            importConfig.MaxDownloadPrefetch,
+		StreamHeadroomConnections:      importConfig.StreamHeadroomConnections,
 		ReadTimeoutSeconds:             importConfig.ReadTimeoutSeconds,
 		SegmentSamplePercentage:        importConfig.SegmentSamplePercentage,
 		ImportStrategy:                 importConfig.ImportStrategy,
@@ -1178,7 +1189,6 @@ type ProviderStatusResponse struct {
 	ID                      string     `json:"id"`
 	Name                    string     `json:"name,omitempty"`
 	Host                    string     `json:"host"`
-	Username                string     `json:"username"`
 	UsedConnections         int        `json:"used_connections"`
 	MaxConnections          int        `json:"max_connections"`
 	State                   string     `json:"state"`

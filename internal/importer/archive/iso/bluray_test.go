@@ -406,10 +406,10 @@ func TestResolveMainFeature(t *testing.T) {
 		// dedupes only for scoring; the output Streams slice must retain
 		// the playlist's actual playback order, including duplicates.
 		data := buildMPLS(t, "0200", []MPLSPlayItem{
-			{ClipName: "00001", InTime: 0, OutTime: 30 * 45000},  // A
-			{ClipName: "00002", InTime: 0, OutTime: 60 * 45000},  // B
-			{ClipName: "00001", InTime: 0, OutTime: 30 * 45000},  // A again
-			{ClipName: "00003", InTime: 0, OutTime: 90 * 45000},  // C
+			{ClipName: "00001", InTime: 0, OutTime: 30 * 45000}, // A
+			{ClipName: "00002", InTime: 0, OutTime: 60 * 45000}, // B
+			{ClipName: "00001", InTime: 0, OutTime: 30 * 45000}, // A again
+			{ClipName: "00003", InTime: 0, OutTime: 90 * 45000}, // C
 		}, nil)
 		rs := makeImage(t, map[uint32][]byte{100: data})
 

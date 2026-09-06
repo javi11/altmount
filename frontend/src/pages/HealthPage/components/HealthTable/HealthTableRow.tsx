@@ -7,7 +7,9 @@ import {
 	parseHealthErrorDetails,
 } from "../../../../lib/utils";
 import { type FileHealth, HealthPriority } from "../../../../types/api";
+import { parseRepairReason } from "../par2RepairReason";
 import { HealthItemActionsMenu } from "./HealthItemActionsMenu";
+import { PartialCheckBadge } from "./PartialCheckBadge";
 import { PlaybackImpactBadge } from "./PlaybackImpactBadge";
 
 interface HealthTableRowProps {
@@ -23,6 +25,7 @@ interface HealthTableRowProps {
 	onCancelCheck: (id: number) => void;
 	onManualCheck: (id: number) => void;
 	onRepair: (id: number) => void;
+	onPar2Repair?: (filePath: string) => void;
 	onDelete: (id: number) => void;
 	onUnmask: (id: number) => void;
 	onSetPriority: (id: number, priority: HealthPriority) => void;
@@ -42,6 +45,7 @@ export const HealthTableRow = memo(function HealthTableRow({
 	onCancelCheck,
 	onManualCheck,
 	onRepair,
+	onPar2Repair,
 	onDelete,
 	onUnmask,
 	onSetPriority,
@@ -56,10 +60,15 @@ export const HealthTableRow = memo(function HealthTableRow({
 		}
 	}, [item.metadata]);
 
-	const playbackImpact = useMemo(
-		() => parseHealthErrorDetails(item.error_details)?.playback_impact ?? null,
+	const errorDetails = useMemo(
+		() => parseHealthErrorDetails(item.error_details),
 		[item.error_details],
 	);
+	const repairReason = useMemo(
+		() => (item.last_error?.startsWith("par2repair:") ? parseRepairReason(item.last_error) : null),
+		[item.last_error],
+	);
+	const playbackImpact = errorDetails?.playback_impact ?? null;
 
 	const getNextPriority = (current: HealthPriority): HealthPriority => {
 		switch (current) {
@@ -180,10 +189,22 @@ export const HealthTableRow = memo(function HealthTableRow({
 				<div className="flex flex-wrap items-center gap-2">
 					<HealthBadge status={item.status} isMasked={item.is_masked} />
 					{playbackImpact && <PlaybackImpactBadge impact={playbackImpact} />}
+					{errorDetails && <PartialCheckBadge details={errorDetails} />}
 				</div>
-				{/* Show last_error for repair failures and general errors */}
-				{item.last_error && (
-					<div className="mt-1 break-all text-error text-xs">{item.last_error}</div>
+				{/* Show last_error for repair failures and general errors. PAR2
+				    repair verdicts land here when a repair proved impossible;
+				    render those in their translated, actionable form. */}
+				{repairReason ? (
+					<div className="mt-1 space-y-0.5 text-xs">
+						<div className="break-words text-error">Cannot repair: {repairReason.summary}</div>
+						{repairReason.hint && (
+							<div className="break-words text-base-content/70">{repairReason.hint}</div>
+						)}
+					</div>
+				) : (
+					item.last_error && (
+						<div className="mt-1 break-all text-error text-xs">{item.last_error}</div>
+					)
 				)}
 				{/* Show error_details for additional technical details */}
 				{item.error_details && item.error_details !== item.last_error && (
@@ -255,6 +276,7 @@ export const HealthTableRow = memo(function HealthTableRow({
 					onCancelCheck={onCancelCheck}
 					onManualCheck={onManualCheck}
 					onRepair={onRepair}
+					onPar2Repair={onPar2Repair}
 					onDelete={onDelete}
 					onUnmask={onUnmask}
 					onRegenerate={onRegenerate}

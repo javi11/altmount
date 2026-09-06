@@ -512,6 +512,50 @@ export function HealthConfigSection({
 										</div>
 									</label>
 								)}
+
+								<label className="flex cursor-pointer items-start gap-3 rounded-xl border border-base-300/60 bg-base-100/40 p-4">
+									<input
+										type="checkbox"
+										className="checkbox checkbox-sm checkbox-primary mt-0.5 shrink-0"
+										checked={formData.verify_content ?? false}
+										disabled={isReadOnly}
+										onChange={(e) => handleInputChange("verify_content", e.target.checked)}
+									/>
+									<div className="min-w-0 flex-1">
+										<span className="block break-words font-bold text-xs">
+											Verify Media Content
+										</span>
+										<span className="mt-0.5 block break-words text-[11px] text-base-content/50 leading-snug">
+											On a file's first health check, read its header through the serving stack and
+											mark it corrupted if no recognized media container signature is found.
+										</span>
+									</div>
+								</label>
+
+								{formData.verify_content && (
+									<fieldset className="fieldset">
+										<legend className="fieldset-legend font-semibold">
+											Content Probe Timeout (Seconds)
+										</legend>
+										<input
+											type="number"
+											className="input input-bordered w-full bg-base-100 font-mono text-sm"
+											value={formData.verify_content_timeout_seconds ?? 15}
+											disabled={isReadOnly}
+											onChange={(e) =>
+												handleInputChange(
+													"verify_content_timeout_seconds",
+													Number.parseInt(e.target.value, 10) || 15,
+												)
+											}
+											min="1"
+										/>
+										<p className="label break-words text-[10px] text-base-content/50">
+											Per-file deadline for the header probe. A timeout is treated as a transient
+											error, never as a corruption verdict.
+										</p>
+									</fieldset>
+								)}
 							</div>
 
 							{/* Sample Percentage Slider */}
@@ -733,22 +777,40 @@ export function HealthConfigSection({
 									<legend className="fieldset-legend font-semibold">
 										Max Concurrent Segment Checks
 									</legend>
+									<label className="mb-2 flex cursor-pointer items-center gap-3 rounded-xl border border-base-300/60 bg-base-100/40 p-3">
+										<input
+											type="checkbox"
+											className="toggle toggle-primary toggle-sm shrink-0"
+											checked={!formData.max_concurrent_segment_checks}
+											disabled={isReadOnly}
+											onChange={(e) =>
+												handleInputChange(
+													"max_concurrent_segment_checks",
+													e.target.checked ? 0 : formData.max_concurrent_segment_checks || 100,
+												)
+											}
+										/>
+										<span className="break-words font-bold text-xs">Adaptive (recommended)</span>
+									</label>
 									<input
 										type="number"
 										className="input input-bordered w-full bg-base-100 font-mono text-sm"
-										value={formData.max_connections_for_health_checks ?? 100}
-										disabled={isReadOnly}
+										value={formData.max_concurrent_segment_checks || ""}
+										disabled={isReadOnly || !formData.max_concurrent_segment_checks}
 										min={1}
+										placeholder="Adaptive"
 										onChange={(e) =>
 											handleInputChange(
-												"max_connections_for_health_checks",
-												Number.parseInt(e.target.value, 10) || 100,
+												"max_concurrent_segment_checks",
+												Number.parseInt(e.target.value, 10) || 1,
 											)
 										}
 									/>
 									<p className="label block whitespace-normal break-words text-base-content/70 text-xs">
 										How many segment existence checks run at once within a sweep. STAT requests are
 										cheap, so this can be much higher than your provider's connection count.
+										Adaptive narrows the sweep while a stream is playing and widens it on an idle
+										pool (up to 24x sweep throughput); a fixed cap pins it instead.
 									</p>
 								</fieldset>
 								<fieldset className="fieldset">

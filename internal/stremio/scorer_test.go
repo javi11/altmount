@@ -53,6 +53,51 @@ func TestEvaluateRelease_MatchingAndExclusions(t *testing.T) {
 	eval2 := EvaluateRelease(title2, cfg)
 	assert.True(t, eval2.Excluded)
 	assert.Contains(t, eval2.ExcludeReason, "CAM")
+
+	// 3. DTS-HD Remux release with TS in ExcludeKeywords - MUST NOT BE EXCLUDED
+	cfgWithTS := &StreamScoringConfig{
+		Preset:          "trash_recommended",
+		ExcludeKeywords: []string{"CAM", "TeleSync", "TS", ".sample", "sample"},
+		CustomFormats: []TrashCustomFormat{
+			{
+				ID:       "remux_1080p",
+				Name:     "1080p Remux",
+				Category: "source",
+				Pattern:  `\b1080p\b.*\b(remux|bdremux)\b|\b(remux|bdremux)\b.*\b1080p\b`,
+				Score:    350,
+				Enabled:  true,
+			},
+			{
+				ID:       "dts_hd_ma",
+				Name:     "DTS-HD MA",
+				Category: "audio",
+				Pattern:  `\b(dts[ ._-]hd([ ._-]ma)?|dts[ ._-]?x)\b`,
+				Score:    200,
+				Enabled:  true,
+			},
+			{
+				ID:       "tier1_groups",
+				Name:     "Tier 1 Groups",
+				Category: "release_group",
+				Pattern:  `-(FLUX|FraMeSToR|EPSiLON|DON)\b`,
+				Score:    150,
+				Enabled:  true,
+			},
+		},
+	}
+	title3 := "Infidelity.in.Suburbia.2017.1080p.BluRay.REMUX.AVC.DTS-HD.MA.5.1-EPSiLON"
+	eval3 := EvaluateRelease(title3, cfgWithTS)
+	assert.False(t, eval3.Excluded, "DTS-HD MA release must not be excluded by 'TS' keyword")
+	assert.Equal(t, 700, eval3.Score) // 350 + 200 + 150
+	assert.Contains(t, eval3.MatchedFormats, "1080p Remux")
+	assert.Contains(t, eval3.MatchedFormats, "DTS-HD MA")
+	assert.Contains(t, eval3.MatchedFormats, "Tier 1 Groups")
+
+	// 4. Actual TS release with TS in ExcludeKeywords - MUST BE EXCLUDED
+	title4 := "Infidelity.in.Suburbia.2017.TS.x264-GROUP"
+	eval4 := EvaluateRelease(title4, cfgWithTS)
+	assert.True(t, eval4.Excluded)
+	assert.Equal(t, "Matched exclude keyword: TS", eval4.ExcludeReason)
 }
 
 func TestRankAndFilterReleases(t *testing.T) {

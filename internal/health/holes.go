@@ -59,10 +59,21 @@ func (hc *HealthChecker) classifyHoles(
 		}
 	}
 
+	// The configured acceptable-missing threshold is a user-tunable ceiling
+	// independent of the fixed padding caps above: below it a file stays
+	// healthy/degraded, at or above it the file is failed so the repair path
+	// (worker.go) kicks in instead of leaving it degraded forever.
+	if verdict != holes.VerdictFailed {
+		acceptable := hc.configGetter().GetAcceptableMissingSegmentsPercentage()
+		if holes.ExceedsAcceptableMissing(acc.Total(), totalSegments, acceptable) {
+			verdict = holes.VerdictFailed
+		}
+	}
+
 	// Persist newly observed holes so playback replay pre-pads them. Only on
 	// degraded verdicts: failed files head to repair/re-download anyway.
 	if verdict == holes.VerdictDegraded && acc.Total() > priorTotal {
-		if err := hc.metadataService.AddKnownHoles(filePath, observed); err != nil {
+		if err := hc.metadataService.AddKnownHoles(filePath, observed, hc.configGetter().ProviderFingerprint()); err != nil {
 			slog.WarnContext(ctx, "Failed to persist known holes",
 				"file_path", filePath,
 				"error", err)

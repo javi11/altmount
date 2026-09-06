@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/testsupport/fakepool"
@@ -49,7 +48,7 @@ func TestValidateSegmentAvailabilityBatch(t *testing.T) {
 		mgr := &validationTestPoolManager{client: client}
 		perFile := [][]string{idList("a", 3), idList("b", 2), idList("c", 4)}
 
-		results, err := ValidateSegmentAvailabilityBatch(context.Background(), perFile, mgr, 4, time.Second)
+		results, err := ValidateSegmentAvailabilityBatch(context.Background(), perFile, mgr, batchOpts(4))
 		require.NoError(t, err)
 		require.Len(t, results, 3)
 		for i, r := range results {
@@ -69,7 +68,7 @@ func TestValidateSegmentAvailabilityBatch(t *testing.T) {
 		mgr := &validationTestPoolManager{client: client}
 		perFile := [][]string{idList("good", 3), broken, idList("also-good", 2)}
 
-		results, err := ValidateSegmentAvailabilityBatch(context.Background(), perFile, mgr, 8, time.Second)
+		results, err := ValidateSegmentAvailabilityBatch(context.Background(), perFile, mgr, batchOpts(8))
 		require.NoError(t, err)
 		assert.Equal(t, 0, results[0].MissingCount)
 		assert.Equal(t, 3, results[1].MissingCount)
@@ -82,7 +81,7 @@ func TestValidateSegmentAvailabilityBatch(t *testing.T) {
 		mgr := &validationTestPoolManager{client: client}
 		perFile := [][]string{idList("a", 2), nil, idList("c", 1)}
 
-		results, err := ValidateSegmentAvailabilityBatch(context.Background(), perFile, mgr, 2, time.Second)
+		results, err := ValidateSegmentAvailabilityBatch(context.Background(), perFile, mgr, batchOpts(2))
 		require.NoError(t, err)
 		require.Len(t, results, 3)
 		assert.Equal(t, 0, results[1].MissingCount)
@@ -96,7 +95,7 @@ func TestValidateSegmentAvailabilityBatch(t *testing.T) {
 		mgr := &validationTestPoolManager{client: client}
 		perFile := [][]string{idList("m", 60)}
 
-		results, err := ValidateSegmentAvailabilityBatch(context.Background(), perFile, mgr, 8, time.Second)
+		results, err := ValidateSegmentAvailabilityBatch(context.Background(), perFile, mgr, batchOpts(8))
 		require.NoError(t, err)
 		assert.Equal(t, 60, results[0].MissingCount)
 		assert.Len(t, results[0].MissingIDs, 50)
@@ -108,7 +107,7 @@ func TestValidateSegmentAvailabilityBatch(t *testing.T) {
 		mgr := &validationTestPoolManager{client: client}
 		perFile := [][]string{{"dup@test", "a-1@test"}, {"dup@test"}}
 
-		results, err := ValidateSegmentAvailabilityBatch(context.Background(), perFile, mgr, 1, time.Second)
+		results, err := ValidateSegmentAvailabilityBatch(context.Background(), perFile, mgr, batchOpts(1))
 		require.NoError(t, err)
 		assert.Equal(t, 1, results[0].MissingCount)
 		assert.Equal(t, 1, results[1].MissingCount)
@@ -117,7 +116,7 @@ func TestValidateSegmentAvailabilityBatch(t *testing.T) {
 
 func TestValidateSegmentAvailabilityBatch_PoolUnavailable(t *testing.T) {
 	mgr := &failingPoolManager{}
-	_, err := ValidateSegmentAvailabilityBatch(context.Background(), [][]string{idList("a", 2)}, mgr, 2, time.Second)
+	_, err := ValidateSegmentAvailabilityBatch(context.Background(), [][]string{idList("a", 2)}, mgr, batchOpts(2))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "pool unavailable")
 }
@@ -127,7 +126,7 @@ func TestValidateSegmentAvailabilityBatch_PoolUnavailable(t *testing.T) {
 // preparation must not fail on a down pool.
 func TestValidateSegmentAvailabilityBatch_EmptyInputSkipsPool(t *testing.T) {
 	mgr := &failingPoolManager{} // would error if the pool were acquired
-	results, err := ValidateSegmentAvailabilityBatch(context.Background(), [][]string{nil, {}}, mgr, 2, time.Second)
+	results, err := ValidateSegmentAvailabilityBatch(context.Background(), [][]string{nil, {}}, mgr, batchOpts(2))
 	require.NoError(t, err)
 	require.Len(t, results, 2)
 }
@@ -144,7 +143,7 @@ func TestValidateSegmentAvailabilityBatch_Interleaves(t *testing.T) {
 		{"c-0@test"},
 	}
 
-	_, err := ValidateSegmentAvailabilityBatch(context.Background(), perFile, mgr, 2, time.Second)
+	_, err := ValidateSegmentAvailabilityBatch(context.Background(), perFile, mgr, batchOpts(2))
 	require.NoError(t, err)
 
 	want := []string{"a-0@test", "b-0@test", "c-0@test", "a-1@test", "b-1@test", "a-2@test"}

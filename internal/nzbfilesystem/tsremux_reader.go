@@ -139,6 +139,12 @@ func (s *skipLimitReader) Read(p []byte) (int, error) {
 
 func (s *skipLimitReader) Close() error { return s.inner.Close() }
 
+func (s *skipLimitReader) Interrupt() {
+	if i, ok := s.inner.(interface{ Interrupt() }); ok {
+		i.Interrupt()
+	}
+}
+
 // tsRemuxReader wraps an underlying reader that yields the bytes of a
 // byte-concatenated multi-clip Blu-ray main feature starting at absolute offset
 // startOff. As bytes stream through, it frames them into BDAV/TS source packets
@@ -186,6 +192,12 @@ func newTSRemuxReader(inner io.ReadCloser, spans []clipSpan, startOff int64) *ts
 }
 
 func (r *tsRemuxReader) Close() error { return r.inner.Close() }
+
+func (r *tsRemuxReader) Interrupt() {
+	if i, ok := r.inner.(interface{ Interrupt() }); ok {
+		i.Interrupt()
+	}
+}
 
 // clipFor returns the span containing absolute offset off, or nil if past the
 // last clip (then bytes are passed through raw).

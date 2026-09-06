@@ -67,6 +67,9 @@ type Content struct {
 	// time a TS filter adds each clip's Delta90k to the timestamps inside
 	// its byte range to build one continuous timeline.
 	ClipBoundaries []ClipBoundary `json:"clip_boundaries,omitempty"`
+	// FirstSegmentBytes holds the warm yEnc-decoded bytes of the first segment
+	// captured during NZB parsing, allowing instant header analysis without wire calls.
+	FirstSegmentBytes []byte `json:"-"`
 }
 
 // ClipBoundary mirrors metapb.ClipBoundary at the archive layer: one clip in a

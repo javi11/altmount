@@ -73,6 +73,7 @@ func TestUsenetReader_ImportProfileUsesNormalLaneAndBudget(t *testing.T) {
 	budget := &recordingBudget{}
 	getter := func() (pool.NntpClient, error) { return fp, nil }
 	ur, err := NewUsenetReader(ctx, getter, rg, nSegs, noopMetrics{}, "test-import", nil,
+		withFlightMap(newFlightMap()),
 		WithImportProfile(budget))
 	if err != nil {
 		t.Fatalf("NewUsenetReader: %v", err)
@@ -109,6 +110,7 @@ func TestUsenetReader_ImportBudgetBoundsInFlightFetches(t *testing.T) {
 	budget.SetCapacity(2)
 	getter := func() (pool.NntpClient, error) { return fp, nil }
 	ur, err := NewUsenetReader(ctx, getter, rg, nSegs, noopMetrics{}, "test-import", nil,
+		withFlightMap(newFlightMap()),
 		WithImportProfile(budgetAdapter{budget}))
 	if err != nil {
 		t.Fatalf("NewUsenetReader: %v", err)

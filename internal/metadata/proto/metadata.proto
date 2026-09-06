@@ -73,6 +73,7 @@ message ClipBoundary {
 message HoleRun {
   int64 start_segment = 1;  // first missing segment index
   int64 count = 2;          // number of consecutive missing segments
+  int64 recorded_at = 3;    // unix seconds when the miss was confirmed; 0 = legacy, treated as expired
 }
 
 // FileMetadata represents a single virtual file in the filesystem
@@ -116,6 +117,7 @@ message FileMetadata {
   repeated SegmentRef segment_refs = 19; // v3 replacement for segment_data
   repeated SegmentRun segment_runs = 20; // compact run encoding; preferred over segment_refs when present
   repeated HoleRun known_holes = 21;    // segments confirmed missing on all providers (zero-filled during playback)
+  string hole_provider_fingerprint = 22; // provider set known_holes were confirmed against; records under another set are re-probed
 }
 
 // --- v3 shared-store types ---

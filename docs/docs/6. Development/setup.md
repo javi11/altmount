@@ -218,6 +218,64 @@ cd frontend
 bun test
 ```
 
+### Streaming Benchmarks
+
+Changes to the read path (`internal/usenet`, `internal/nzbfilesystem`, `internal/pool`) are gated by a reproducible streaming benchmark. It runs the real reader stack against an in-process Usenet provider simulator (`internal/testsupport/nntpserver`) that models round-trip time, per-connection bandwidth and aggregate bandwidth, so results do not depend on your provider or network.
+
+```bash
+# Run every scenario (about 7-10 minutes) and write bench/results/<short-sha>.json
+make bench-stream
+
+# Fail if any gated metric regressed against a stored result
+make bench-compare BASE=baseline-main
+```
+
+Run it on an idle machine: the simulator is CPU-bound at high aggregate bandwidth and a busy laptop shifts throughput figures by several percent.
+
+#### Provider profiles
+
+| Profile        | RTT    | Per connection | Aggregate | Connections | Models                        |
+| -------------- | ------ | -------------- | --------- | ----------- | ----------------------------- |
+| `premium-750k` | 40 ms  | 8 MB/s         | 400 MB/s  | 50          | Fast provider, 750 KB articles |
+| `slow-4m`      | 100 ms | 3 MB/s         | 60 MB/s   | 20          | Slow provider, 4 MiB articles  |
+
+#### Scenarios
+
+| ID  | Benchmark                        | What it measures                                                                   |
+| --- | -------------------------------- | ---------------------------------------------------------------------------------- |
+| B1  | `BenchmarkStreamColdOpen`        | Time to first byte on a fresh open, and articles fetched to get there              |
+| B2  | `BenchmarkStreamSequential`      | Startup time, steady-state throughput after 16 MB, and bytes fetched vs. delivered |
+| B3  | `BenchmarkStreamSeekStorm`       | Random 64 KB reads across a file: latency and articles per read                    |
+| B4  | `BenchmarkStreamFourConcurrent`  | Four players at once: slowest and fastest stream, stall p99                        |
+| B5  | `BenchmarkStreamTwoHandles`      | Two handles on one file: duplicate article downloads                               |
+| B6  | `BenchmarkStreamUnderContention` | One stream while an import saturates the pool: stream and import throughput        |
+| B7  | `BenchmarkStreamFailover`        | Reads that hit a missing article on the first provider: TTFB and bodies per miss   |
+| B8  | `BenchmarkStreamPauseResume`     | Bytes fetched while the player is paused                                           |
+| B9  | `BenchmarkStreamForwardSkip`     | Jump 100 MB ahead: read latency and articles fetched                               |
+| B10 | `BenchmarkStreamReplay`          | Close and reopen the same file: bytes refetched and replay read time               |
+| B11 | `BenchmarkStreamSeekAndResume`   | Five 500 MB jumps: seek read time and total bytes fetched                          |
+
+#### How the gate works
+
+- Each scenario runs three times (`ALTMOUNT_BENCH_REPS`) and records the median, which removes most run-to-run noise.
+- A metric fails when it moves more than 5 % in its bad direction. Noisy metrics carry a wider per-metric tolerance (for example 15 % on stream throughput under contention).
+- Tail metrics (p99, per-scenario article counts) are informational: they print in the table but never fail the gate.
+- `bench/results/` holds one committed result per landed change (`baseline-main.json`, `phase1-...json`, ...). Per-commit files named by short SHA are scratch output and are not committed.
+
+#### Runtime A/B without code changes
+
+The benchmark binary is a normal Go test, so runtime knobs apply to it. To measure a GC or memory setting, run with the environment variable and compare against the last committed result:
+
+```bash
+GOMEMLIMIT=512MiB ALTMOUNT_BENCH_OUT=$PWD/bench/results/memlimit.json \
+  go test ./internal/nzbfilesystem/ -run '^$' -bench 'BenchmarkStream' -benchtime 1x -timeout 60m
+make bench-compare BASE=phase9-housekeeping BENCH_OUT=bench/results/memlimit.json
+```
+
+#### Adding a scenario
+
+Scenarios live in `internal/nzbfilesystem/stream_bench_test.go` and share the harness in `stream_bench_harness_test.go`. Sample the new scenario on the base branch first and commit that result, so the PR that changes behaviour has a before number. Mark tails and counts with `info(...)` and give inherently noisy metrics a `Tolerance`.
+
 ## Linting and Code Quality
 
 ### Backend Linting

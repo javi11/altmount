@@ -247,7 +247,8 @@ export function StreamingConfigSection({
 			<div className="border-base-200 border-t pt-10">
 				<h3 className="font-bold text-base-content text-lg">Segment Cache</h3>
 				<p className="text-base-content/50 text-sm">
-					Cache decoded Usenet segments on disk so repeated reads avoid network round-trips.
+					Keep decoded Usenet segments in memory, and optionally on disk, so repeated reads avoid
+					network round-trips.
 				</p>
 				<p className="mt-1 text-base-content/60 text-sm">
 					The segment cache applies regardless of the mount option chosen. It is recommended to
@@ -256,12 +257,61 @@ export function StreamingConfigSection({
 			</div>
 
 			<div className="space-y-8">
+				{/* Memory tier slider */}
+				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+					<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+						<div className="min-w-0">
+							<h4 className="overflow-visible whitespace-normal font-bold text-base-content text-sm">
+								Memory Cache
+							</h4>
+							<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
+								Recently played articles kept in RAM so rewinds, replays and a second viewer of the
+								same file are served without downloading again. AltMount uses roughly this amount
+								plus 300 MB of RAM while streaming. Set to 0 to disable.
+							</p>
+						</div>
+						<div className="mt-1 flex shrink-0 items-center justify-start gap-3 sm:mt-0 sm:justify-end">
+							{cacheData.memory_mb === 0 ? (
+								<span className="font-black font-mono text-primary text-xl">Off</span>
+							) : (
+								<>
+									<span className="font-black font-mono text-primary text-xl">
+										{cacheData.memory_mb}
+									</span>
+									<span className="font-bold text-base-content/60 text-xs uppercase">MB</span>
+								</>
+							)}
+						</div>
+					</div>
+
+					<div className="space-y-4">
+						<input
+							type="range"
+							min="0"
+							max="1024"
+							value={cacheData.memory_mb}
+							step="64"
+							className="range range-primary range-sm w-full [&::-webkit-slider-runnable-track]:rounded-full"
+							disabled={isReadOnly}
+							onChange={(e) => handleCacheChange("memory_mb", Number.parseInt(e.target.value, 10))}
+						/>
+						<div className="flex justify-between px-2 font-black text-base-content/50 text-xs">
+							<span>Off</span>
+							<span>256 MB</span>
+							<span>512 MB</span>
+							<span>768 MB</span>
+							<span>1 GB</span>
+						</div>
+					</div>
+				</div>
+
 				{/* Enabled toggle */}
 				<div className="flex items-center justify-between rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="min-w-0">
-						<h4 className="font-bold text-base-content text-sm">Enable Segment Cache</h4>
+						<h4 className="font-bold text-base-content text-sm">Enable Disk Cache</h4>
 						<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
-							When enabled, decoded segments are stored on disk and shared by FUSE and WebDAV.
+							When enabled, decoded segments are also stored on disk behind the memory cache and
+							shared by FUSE and WebDAV.
 						</p>
 					</div>
 					<input

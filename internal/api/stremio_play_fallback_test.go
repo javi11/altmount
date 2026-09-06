@@ -112,6 +112,42 @@ func TestFilterStremioResults_ExcludesFailed(t *testing.T) {
 	}
 }
 
+func TestStremioContentKeySeparatesEpisodes(t *testing.T) {
+	s1e1 := &stremioEpisodeSelector{Season: 1, Episode: 1}
+	s1e2 := &stremioEpisodeSelector{Season: 1, Episode: 2}
+
+	if got, want := stremioContentKey("series", "tt123", s1e1), "series:tt123:1:1"; got != want {
+		t.Fatalf("content key = %q, want %q", got, want)
+	}
+	if stremioContentKey("series", "tt123", s1e1) == stremioContentKey("series", "tt123", s1e2) {
+		t.Fatal("different episodes must not share a content key")
+	}
+	if stremioContentKey("series", "tt123", nil) != "" {
+		t.Fatal("episode packs without a selector must not be coalesced")
+	}
+}
+
+func TestStremioQueueMetadataMatchesExactRelease(t *testing.T) {
+	contentKey := "movie:tt123:0:0"
+	candidate := stremioPlayCandidate{Title: "Movie 2024 1080p", DownloadURL: "https://indexer/a", Source: "prowlarr", Indexer: "one"}
+	metadata, err := encodeStremioQueueMetadata(stremioQueueMetadata{
+		ContentKey: contentKey,
+		ReleaseKey: stremioReleaseKey(candidate),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := &database.ImportQueueItem{Metadata: metadata}
+	if !stremioQueueMetadataMatches(item, contentKey, stremioReleaseKey(candidate)) {
+		t.Fatal("same content and release should match")
+	}
+	other := candidate
+	other.DownloadURL = "https://indexer/b"
+	if stremioQueueMetadataMatches(item, contentKey, stremioReleaseKey(other)) {
+		t.Fatal("different releases must not match")
+	}
+}
+
 func TestFilterStremioResults_NilPredicate(t *testing.T) {
 	got := filterStremioResults(resultsFromTitles("Alpha 2024 1080p"), nil, nil, nil, nil)
 	if len(got) != 1 {
@@ -134,19 +170,19 @@ func TestStremioFailedPredicate(t *testing.T) {
 	}{
 		{
 			name:     "failed within ttl is excluded",
-			failed:   []*database.ImportQueueItem{failedItem(path, now.Add(-1 * time.Hour))},
+			failed:   []*database.ImportQueueItem{failedItem(path, now.Add(-1*time.Hour))},
 			ttlHours: 24,
 			want:     true,
 		},
 		{
 			name:     "failed past ttl is not excluded",
-			failed:   []*database.ImportQueueItem{failedItem(path, now.Add(-48 * time.Hour))},
+			failed:   []*database.ImportQueueItem{failedItem(path, now.Add(-48*time.Hour))},
 			ttlHours: 24,
 			want:     false,
 		},
 		{
 			name:     "ttl zero excludes regardless of age",
-			failed:   []*database.ImportQueueItem{failedItem(path, now.Add(-1000 * time.Hour))},
+			failed:   []*database.ImportQueueItem{failedItem(path, now.Add(-1000*time.Hour))},
 			ttlHours: 0,
 			want:     true,
 		},

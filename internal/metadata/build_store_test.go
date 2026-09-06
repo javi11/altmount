@@ -1,4 +1,4 @@
-package parser
+package metadata
 
 import (
 	"sort"
@@ -18,7 +18,6 @@ func TestBuildStore(t *testing.T) {
 				Segments: nzbparser.NzbSegments{{ID: "p1@x", Number: 1, Bytes: 4096}}},
 		},
 	}
-	// Sort segments as the parser would
 	for i := range nzb.Files {
 		sort.Sort(nzb.Files[i].Segments)
 	}
@@ -34,7 +33,6 @@ func TestBuildStore(t *testing.T) {
 	assert.Equal(t, "m1@x", store.Files[0].Segments[0].Id)
 	assert.EqualValues(t, 700000, store.Files[0].Segments[0].Bytes)
 
-	// Flat index: file0 seg0=0, file0 seg1=1, file1 seg0=2
 	assert.EqualValues(t, 0, index["m1@x"])
 	assert.EqualValues(t, 1, index["m2@x"])
 	assert.EqualValues(t, 2, index["p1@x"])

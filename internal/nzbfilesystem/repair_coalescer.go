@@ -28,13 +28,19 @@ type RepairCoalescer struct {
 	rclone       rclonecli.RcloneRcClient
 	configGetter config.ConfigGetter
 
-	debounceTTL  time.Duration
-	flushDelay   time.Duration
-	refreshTO    time.Duration
+	debounceTTL time.Duration
+	flushDelay  time.Duration
+	refreshTO   time.Duration
 
 	mu      sync.Mutex
 	seen    map[string]time.Time
 	pending map[string]struct{}
+	// removed records paths whose metadata a repair has actually taken away, so
+	// that other handles on the same path can latch themselves closed even when
+	// their own failure is debounced. Same TTL as seen: once the debounce window
+	// lapses a handle takes the full path again, and MoveToCorrupted succeeds
+	// (it treats an already-moved source as a no-op), which sets the latch anyway.
+	removed map[string]time.Time
 
 	wakeCh chan struct{}
 	stopCh chan struct{}
@@ -59,12 +65,56 @@ func NewRepairCoalescer(rclone rclonecli.RcloneRcClient, configGetter config.Con
 		refreshTO:    defaultRefreshTimeout,
 		seen:         make(map[string]time.Time),
 		pending:      make(map[string]struct{}),
+		removed:      make(map[string]time.Time),
 		wakeCh:       make(chan struct{}, 1),
 		stopCh:       make(chan struct{}),
 	}
 	c.stopWg.Add(1)
 	go c.run()
 	return c
+}
+
+// MarkRemoved records that a repair has taken the metadata for path away. Safe
+// on a nil coalescer (test harness).
+func (c *RepairCoalescer) MarkRemoved(path string) {
+	if c == nil {
+		return
+	}
+	now := time.Now()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.removed[path] = now
+
+	if len(c.removed) > 1024 {
+		cutoff := now.Add(-c.debounceTTL)
+		for k, t := range c.removed {
+			if t.Before(cutoff) {
+				delete(c.removed, k)
+			}
+		}
+	}
+}
+
+// WasRemoved reports whether a repair took path away inside the current
+// debounce window. A handle whose own failure was debounced uses this to latch
+// itself closed, since the handle that did the removal only latched itself.
+func (c *RepairCoalescer) WasRemoved(path string) bool {
+	if c == nil {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	t, ok := c.removed[path]
+	if !ok {
+		return false
+	}
+	if time.Since(t) >= c.debounceTTL {
+		delete(c.removed, path)
+		return false
+	}
+	return true
 }
 
 // ShouldTrigger reports whether a streaming-failure repair should be fired for

@@ -268,4 +268,3 @@ func (s *Server) handleApplyUpdate(c *fiber.Ctx) error {
 			"")
 	}
 }
-

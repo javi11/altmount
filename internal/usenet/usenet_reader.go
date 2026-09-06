@@ -53,6 +53,43 @@ type HoleHooks struct {
 	// KnownHoles reports segments already known missing: those are
 	// zero-filled immediately, without any fetch (replay pre-pad).
 	KnownHoles func(segIndex int) bool
+	// PatchLookup returns the repaired payload for a missing segment, or nil.
+	// Consulted only on the hole path (known hole, or confirmed missing on
+	// every provider) — never on healthy reads. Must be fast local I/O and
+	// concurrency-safe. A payload whose size does not match the segment is
+	// ignored. May be set alone (without OnHole/KnownHoles) so repaired
+	// articles serve even for files ineligible for zero-fill.
+	PatchLookup func(segID string) []byte
+}
+
+// defaultPatchLookup serves PAR2-repaired article payloads to every reader
+// that has no explicit PatchLookup of its own — notably the import path, whose
+// readers are built deep inside the parser. Repaired payloads are byte-exact
+// and verified against the release's PAR2 checksums before being stored, and
+// they are only ever consulted for articles the providers have dropped, so
+// serving them anywhere is always correct.
+var defaultPatchLookup atomic.Pointer[func(segID string) []byte]
+
+// SetDefaultPatchLookup installs the process-wide patch lookup. Pass nil to
+// clear it. Call during boot, before readers are created.
+func SetDefaultPatchLookup(fn func(segID string) []byte) {
+	if fn == nil {
+		defaultPatchLookup.Store(nil)
+		return
+	}
+	defaultPatchLookup.Store(&fn)
+}
+
+// patchLookupFor returns the reader's own PatchLookup, falling back to the
+// process-wide default.
+func (b *UsenetReader) patchLookupFor() func(segID string) []byte {
+	if b.holeHooks != nil && b.holeHooks.PatchLookup != nil {
+		return b.holeHooks.PatchLookup
+	}
+	if fn := defaultPatchLookup.Load(); fn != nil {
+		return *fn
+	}
+	return nil
 }
 
 // ReaderOption customizes a UsenetReader.
@@ -63,6 +100,58 @@ type ReaderOption func(*UsenetReader)
 func WithHoleHooks(h *HoleHooks) ReaderOption {
 	return func(r *UsenetReader) {
 		r.holeHooks = h
+	}
+}
+
+// SpecBudget grants non-blocking read-ahead slots shared across every stream
+// on the pool. nil means unlimited. Implemented by *pool.SpeculativeBudget.
+type SpecBudget interface {
+	TryAcquire() (release func(), ok bool)
+}
+
+// demandDepth is how many segments at and just past the read position are
+// fetched unconditionally. Everything further ahead is speculative and must
+// find a free slot in the shared budget.
+const demandDepth = 2
+
+// WithSpeculativeBudget bounds this reader's read-ahead by a budget shared
+// with every other stream, so several handles cannot each open a full
+// window. Demand fetches never take a slot.
+func WithSpeculativeBudget(b SpecBudget) ReaderOption {
+	return func(r *UsenetReader) {
+		r.specBudget = b
+	}
+}
+
+const (
+	// largeArticleHoldSegments is the read-ahead a fresh streaming reader
+	// opens with on large-article posts, kept until the caller has read its
+	// first byte. Holding the fan-out back keeps the demand article from
+	// queueing behind a window of speculative ones on the same connections;
+	// on 4 MiB parts that is the difference between seconds and one round
+	// trip to first byte. On small articles the queueing costs a few
+	// milliseconds and the hold would only slow startup, so it is skipped.
+	largeArticleHoldSegments = 2
+	// largeArticleBytes is the article size from which the hold applies.
+	largeArticleBytes = 2 << 20
+	// openingSegments is the window before the first byte on small-article
+	// posts: wide enough that startup runs at full speed once bytes flow,
+	// narrow enough that a handle closed before its first byte arrives has
+	// not fanned a whole window out. Any consumption opens the window fully;
+	// a narrower ramp was measured to cost 16-25 % of a 16 MB startup.
+	openingSegments = 16
+	// readAheadBytesCap bounds the window in bytes as well as segments. A
+	// 60-segment window is 45 MB on 750 KB posts but 240 MB on 4 MiB posts,
+	// where it starves the reader's own demand article for the link and
+	// leaves a quarter of a gigabyte to abandon on every seek.
+	readAheadBytesCap = 96 << 20
+)
+
+// withFlightMap gives the reader its own in-flight article map. Tests use it
+// so parallel tests reusing message-IDs do not join each other's downloads.
+func withFlightMap(f *flightMap) ReaderOption {
+	return func(r *UsenetReader) {
+		r.flights = f
 	}
 }
 
@@ -103,6 +192,26 @@ func (e *DataCorruptionError) Unwrap() error {
 	return e.UnderlyingErr
 }
 
+// isCorruptionError reports whether err indicates the article body itself is
+// corrupt (as opposed to a transient network/pool failure), so it should be
+// wrapped as a DataCorruptionError and routed into the health/repair pipeline
+// instead of surfacing as an anonymous read error.
+//
+// nntppool.ErrCRCMismatch is checked by identity since it's an exported
+// sentinel (errors.New("nntp: yEnc CRC mismatch")), returned unwrapped from
+// finishBody. The substring fallback covers "data corruption detected",
+// rapidyenc's own corruption sentinel text, in case a future nntppool version
+// starts propagating it (today it does not: the decode error is discarded in
+// nntppool's reader).
+func isCorruptionError(err error) bool {
+	if errors.Is(err, nntppool.ErrCRCMismatch) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "data corruption detected") ||
+		strings.Contains(msg, "crc mismatch")
+}
+
 type UsenetReader struct {
 	log            *slog.Logger
 	wg             sync.WaitGroup
@@ -121,6 +230,10 @@ type UsenetReader struct {
 	holeHooks      *HoleHooks   // optional, nil = missing segments fail the read
 	priority       bool         // true (streaming) = priority lane; false (import) = normal lane
 	budget         ConnBudget   // optional; gates import fetches on the global connection budget
+	specBudget     SpecBudget   // optional; bounds speculative fetches pool-wide (streaming only)
+	articleSize    int64        // decoded size of the range's first article; drives the first-byte hold
+	flights        *flightMap   // articles in flight, shared with every other streaming reader
+	scheduledBytes int64        // usable bytes of every segment scheduled so far
 	cond           *sync.Cond   // Signals downloadManager when reader advances
 
 	// Prefetch-based download tracking
@@ -160,6 +273,7 @@ func NewUsenetReader(
 		metricsTracker: metricsTracker,
 		streamID:       streamID,
 		segmentStore:   segmentStore,
+		flights:        flights,
 		priority:       true, // streaming profile by default; WithImportProfile demotes
 	}
 	for _, opt := range opts {
@@ -311,9 +425,16 @@ func (b *UsenetReader) Read(p []byte) (int, error) {
 		n += nn
 
 		b.mu.Lock()
+		before := b.totalBytesRead
 		b.totalBytesRead += int64(nn)
 		totalRead := b.totalBytesRead
+		// The read-ahead window widens once the first byte has been read; wake
+		// the manager so it is not left waiting for the next segment rotation.
+		widened := nn > 0 && before == 0
 		b.mu.Unlock()
+		if widened {
+			b.cond.Signal()
+		}
 
 		if err != nil {
 			if errors.Is(err, io.EOF) {
@@ -376,28 +497,75 @@ func IsArticleNotFound(err error) bool {
 	return errors.Is(err, nntppool.ErrArticleNotFound)
 }
 
+// windowFor is how many segments may be scheduled ahead of the read position
+// given what the caller has read since the reader was created.
+func (b *UsenetReader) windowFor(bytesRead int64) int {
+	full := b.maxPrefetch
+	if b.priority && b.articleSize > 0 {
+		full = max(min(full, int(readAheadBytesCap/b.articleSize)), largeArticleHoldSegments)
+	}
+	if !b.priority || bytesRead > 0 {
+		return full
+	}
+	if b.articleSize >= largeArticleBytes {
+		return min(full, largeArticleHoldSegments)
+	}
+	return min(full, openingSegments)
+}
+
+// BufferedAhead reports bytes scheduled for fetch beyond what the caller has
+// read: the distance a forward skip can cover without a new reader.
+func (b *UsenetReader) BufferedAhead() int64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return max(b.scheduledBytes-b.totalBytesRead, 0)
+}
+
+// GetBufferedOffset reports the file offset up to which this reader has
+// scheduled fetches: the range start plus every scheduled segment's usable
+// bytes. It reads counters only, so it never re-materialises a segment slot
+// the reader has already consumed and released.
 func (b *UsenetReader) GetBufferedOffset() int64 {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-
 	if b.rg == nil {
 		return 0
 	}
-
-	if b.nextToDownload == 0 {
-		return 0
-	}
-
-	idx := b.nextToDownload - 1
-	s, err := b.rg.GetSegment(idx)
-	if err != nil || s == nil {
-		return 0
-	}
-	return s.Start + int64(s.SegmentSize)
+	return b.rg.start + b.scheduledBytes
 }
 
-// downloadSegmentWithRetry attempts to download a segment with retry logic for pool unavailability
-func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segment) ([]byte, error) {
+// keepFetchCompletionTimeout bounds how long a fetch may run on after its
+// reader closed. One attempt window is enough: the article was already
+// arriving when the reader left.
+const keepFetchCompletionTimeout = 15 * time.Second
+
+// fetchContext returns the context a streaming fetch runs under. Without
+// keepOnClose it is ctx itself. With it, the fetch survives ctx being
+// cancelled once the article has started arriving: the pool would otherwise
+// abort the body (and, past its drain limit, close the connection), and the
+// next open of the same head would fetch the whole article again. An
+// article with no bytes yet is still cancelled with ctx.
+func (b *UsenetReader) fetchContext(ctx context.Context, art *articleBuf, keepOnClose bool) (context.Context, context.CancelFunc) {
+	if !keepOnClose || art == nil {
+		return ctx, func() {}
+	}
+	fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), keepFetchCompletionTimeout)
+	go func() {
+		select {
+		case <-fetchCtx.Done():
+		case <-ctx.Done():
+			if art.published() == 0 {
+				cancel()
+			}
+		}
+	}()
+	return fetchCtx, cancel
+}
+
+// downloadSegmentWithRetry attempts to download a segment with retry logic for
+// pool unavailability. keepOnClose lets a started streaming fetch finish after
+// ctx is cancelled; see fetchContext.
+func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segment, keepOnClose bool) ([]byte, error) {
 	// Cache HIT: skip NNTP entirely
 	if b.segmentStore != nil {
 		if data, ok := b.segmentStore.Get(seg.Id); ok {
@@ -405,6 +573,9 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 				"segment_id", seg.Id,
 				"size_bytes", len(data),
 			)
+			// The fetch path publishes as it streams; a hit has nothing to
+			// stream, so hand the bytes to the segment here.
+			seg.SetData(data)
 			return data, nil
 		}
 	}
@@ -441,6 +612,81 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 		defer release()
 	}
 
+	if !b.priority {
+		data, err := b.fetchWithRetry(ctx, cp, seg, nil)
+		if b.segmentStore != nil && data != nil && err == nil {
+			_ = b.segmentStore.Put(seg.Id, data)
+		}
+		return data, err
+	}
+
+	// Streaming: every reader wanting this article shares one buffer. The
+	// first to arrive leads and fetches; the rest follow and read the same
+	// bytes as they land. A leader whose reader closes mid-article hands the
+	// lead to a follower, which continues into a fresh attempt past the
+	// published watermark.
+	art := seg.attachShared(b.flights)
+	for {
+		if art.claimLead() {
+			lead := art.leadGen()
+			fetchCtx, cancelFetch := b.fetchContext(ctx, art, keepOnClose)
+			// A fetch that may outlive its reader keeps the article in the
+			// flight map for as long as it may still finish, so a reader
+			// arriving after the close joins it as a follower instead of
+			// fetching the article again. The pin is tied to fetchCtx, not to
+			// the fetch returning: a wire call that never comes back must not
+			// hold the lead forever, or every later reader of the article
+			// would wait on it for its whole context.
+			if keepOnClose {
+				if kept := b.flights.acquire(seg.Id, seg.SegmentSize); kept == art {
+					context.AfterFunc(fetchCtx, func() {
+						if ctx.Err() != nil {
+							art.releaseLead(lead)
+						}
+						b.flights.release(seg.Id, art)
+					})
+				} else {
+					b.flights.release(seg.Id, kept)
+				}
+			}
+			data, err := b.fetchWithRetry(fetchCtx, cp, seg, art)
+			cancelFetch()
+			switch {
+			case err == nil:
+				if b.segmentStore != nil && data != nil {
+					_ = b.segmentStore.Put(seg.Id, data)
+				}
+				return data, nil
+			case ctx.Err() != nil && !errors.Is(err, nntppool.ErrArticleNotFound):
+				// This reader is going away; let a follower take over.
+				art.releaseLead(lead)
+				return nil, err
+			default:
+				// A definite answer (gone everywhere, or every attempt failed):
+				// the same providers would tell every follower the same thing.
+				art.setError(err)
+				return nil, err
+			}
+		}
+		err := art.waitDone(ctx)
+		if errors.Is(err, errNoLeader) {
+			continue
+		}
+		if err == nil {
+			// Bytes are already visible through the shared buffer.
+			return nil, nil
+		}
+		if errors.Is(err, nntppool.ErrArticleNotFound) {
+			b.log.DebugContext(ctx, "missing segment", "segment_id", seg.Id)
+		}
+		return nil, err
+	}
+}
+
+// fetchWithRetry runs the wire fetch for one segment. With art set the
+// decoded bytes stream into art as they arrive (priority lane); with art nil
+// the article is buffered on the normal lane for import.
+func (b *UsenetReader) fetchWithRetry(ctx context.Context, cp pool.NntpClient, seg *segment, art *articleBuf) ([]byte, error) {
 	segStart := time.Now()
 	var resultBytes []byte
 	err := retry.Do(
@@ -452,11 +698,16 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 			fetchStart := time.Now()
 			var result *nntppool.ArticleBody
 			var err error
-			if b.priority {
-				// Streaming: priority lane — connections serve these first.
-				result, err = cp.BodyPriority(attemptCtx, seg.Id)
+			var w *articleWriter
+			if art != nil {
+				// Streaming: priority lane, decoded bytes published to readers as
+				// each wire read lands. A failed attempt leaves its bytes visible;
+				// the next attempt starts a fresh buffer and only publishes once
+				// it has passed what readers already saw.
+				w = art.attemptWriter()
+				result, err = cp.BodyStreamPriority(attemptCtx, seg.Id, w)
 			} else {
-				// Import: normal lane — always yields to streaming reads.
+				// Import: normal lane, buffered — always yields to streaming reads.
 				result, err = cp.Body(attemptCtx, seg.Id)
 			}
 			fetchDur := time.Since(fetchStart)
@@ -469,11 +720,14 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 				}
 
 				var bytesWritten int64
-				if result != nil {
+				switch {
+				case w != nil:
+					bytesWritten = int64(len(w.bytes()))
+				case result != nil:
 					bytesWritten = int64(result.BytesDecoded)
 				}
 
-				if strings.Contains(err.Error(), "data corruption detected") {
+				if isCorruptionError(err) {
 					return &DataCorruptionError{
 						UnderlyingErr: err,
 						BytesRead:     bytesWritten,
@@ -485,7 +739,12 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 				return err
 			}
 
-			resultBytes = result.Bytes
+			if w != nil {
+				art.finish(w)
+				resultBytes = w.bytes()
+			} else {
+				resultBytes = result.Bytes
+			}
 			b.metricsTracker.IncArticlesDownloaded()
 			b.metricsTracker.UpdateDownloadProgress(b.streamID, int64(len(resultBytes)))
 
@@ -527,11 +786,6 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 		retry.Context(ctx),
 	)
 
-	// Cache WRITE: tee-write after successful download (fire-and-forget)
-	if b.segmentStore != nil && resultBytes != nil && err == nil {
-		_ = b.segmentStore.Put(seg.Id, resultBytes)
-	}
-
 	if errors.Is(err, nntppool.ErrArticleNotFound) {
 		b.log.DebugContext(ctx, "missing segment",
 			"segment_id", seg.Id,
@@ -539,6 +793,26 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 	}
 
 	return resultBytes, err
+}
+
+// patchFor returns the repaired payload for a segment when the owner's
+// PatchLookup has one of exactly the right size, else nil. Runs on download
+// goroutines; PatchLookup must be fast local I/O.
+func (b *UsenetReader) patchFor(ctx context.Context, s *segment) []byte {
+	lookup := b.patchLookupFor()
+	if lookup == nil {
+		return nil
+	}
+	p := lookup(s.Id)
+	if p == nil {
+		return nil
+	}
+	if int64(len(p)) != s.End+1 {
+		b.log.WarnContext(ctx, "Repaired payload size mismatch, ignoring patch",
+			"segment_id", s.Id, "patch_bytes", len(p), "want", s.End+1)
+		return nil
+	}
+	return p
 }
 
 func (b *UsenetReader) downloadManager(ctx context.Context) {
@@ -556,6 +830,11 @@ func (b *UsenetReader) downloadManager(ctx context.Context) {
 	}
 
 	totalSegments := b.rg.Len()
+	if first, err := b.rg.GetSegment(0); err == nil && first != nil {
+		b.mu.Lock()
+		b.articleSize = first.SegmentSize
+		b.mu.Unlock()
+	}
 
 	for ctx.Err() == nil {
 		b.mu.Lock()
@@ -573,7 +852,7 @@ func (b *UsenetReader) downloadManager(ctx context.Context) {
 		// Limit how far ahead we prefetch beyond the current read position
 		currentRead := b.rg.GetCurrentIndex()
 		ahead := b.nextToDownload - currentRead
-		if ahead >= b.maxPrefetch {
+		if ahead >= b.windowFor(b.totalBytesRead) {
 			b.cond.Wait()
 			b.mu.Unlock()
 			if ctx.Err() != nil {
@@ -582,20 +861,48 @@ func (b *UsenetReader) downloadManager(ctx context.Context) {
 			continue
 		}
 
+		// Segments beyond the demand depth are speculative: they run only
+		// when the pool-wide budget has a free slot right now. A refused slot
+		// parks the manager until the reader advances or a fetch completes,
+		// both of which signal cond, and the segment is reconsidered then —
+		// by which time it may have moved into the demand window.
+		releaseSlot := func() {}
+		if ahead >= demandDepth && b.priority && b.specBudget != nil {
+			release, ok := b.specBudget.TryAcquire()
+			if !ok {
+				b.cond.Wait()
+				b.mu.Unlock()
+				if ctx.Err() != nil {
+					return
+				}
+				continue
+			}
+			releaseSlot = release
+		}
+
 		// Schedule next segment for download
 		idx := b.nextToDownload
 		b.nextToDownload++
+		// Demand-window articles are what a reopen of this position needs
+		// next, so they are worth finishing after a close; speculative
+		// read-ahead is not.
+		keepOnClose := b.priority && ahead < demandDepth
 		b.mu.Unlock()
 
 		seg, err := b.rg.GetSegment(idx)
 		if err != nil || seg == nil {
+			releaseSlot()
 			continue
 		}
+		b.mu.Lock()
+		b.scheduledBytes += seg.End - seg.Start + 1
+		b.mu.Unlock()
 
 		b.inFlight.Add(1)
 		go func(segIdx int, s *segment) {
 			defer b.inFlight.Add(-1)
 			defer b.cond.Signal()
+			defer releaseSlot()
 			defer func() {
 				if p := recover(); p != nil {
 					b.log.ErrorContext(ctx, "Panic in download task:", "panic", p)
@@ -605,29 +912,64 @@ func (b *UsenetReader) downloadManager(ctx context.Context) {
 
 			taskCtx := slogutil.With(ctx, "segment_id", s.Id, "segment_idx", segIdx)
 
+			// A gap placeholder names no article: the NZB never listed one.
+			// Serve a repaired patch when there is one, else zeros, and never
+			// ask a provider. Unlike a discovered hole this is not subject to
+			// the owner's pad policy: the bytes were unavailable at import,
+			// which is when their damage was judged.
+			if holes.IsPlaceholderID(s.Id) {
+				if p := b.patchFor(taskCtx, s); p != nil {
+					s.SetData(p)
+					return
+				}
+				s.SetData(make([]byte, s.End+1))
+				return
+			}
+
 			// Replay pre-pad: a segment already known missing (persisted hole
-			// map) zero-fills immediately, with no fetch round-trip.
+			// map) serves its repaired patch when one exists, else zero-fills
+			// immediately — either way with no fetch round-trip.
 			if b.holeHooks != nil && b.holeHooks.KnownHoles != nil && b.holeHooks.KnownHoles(s.loaderIdx) {
+				if p := b.patchFor(taskCtx, s); p != nil {
+					b.log.DebugContext(taskCtx, "serving repaired payload for known-missing segment")
+					s.SetData(p)
+					return
+				}
 				b.log.DebugContext(taskCtx, "zero-filling known-missing segment without fetch")
 				s.SetData(make([]byte, s.End+1))
 				return
 			}
 
-			data, err := b.downloadSegmentWithRetry(taskCtx, s)
+			// A repaired patch takes precedence over a fetch: the wire copy
+			// can be corrupt-but-present (that damage is why the patch was
+			// built), while the patch is IFSC-verified byte-exact. This also
+			// covers articles that have vanished since the repair, with no
+			// fetch round-trip.
+			if p := b.patchFor(taskCtx, s); p != nil {
+				b.log.DebugContext(taskCtx, "serving repaired payload instead of fetching",
+					"file_segment_index", s.loaderIdx)
+				s.SetData(p)
+				return
+			}
+
+			data, err := b.downloadSegmentWithRetry(taskCtx, s, keepOnClose)
 
 			if err != nil {
-				// A confirmed-missing article may be zero-filled instead of
-				// failing the stream, when the owner's hole hook approves.
-				if b.holeHooks != nil && b.holeHooks.OnHole != nil &&
-					errors.Is(err, nntppool.ErrArticleNotFound) &&
-					b.holeHooks.OnHole(s.loaderIdx, s.Id) == holes.DecisionPad {
-					b.log.InfoContext(taskCtx, "zero-filling missing segment",
-						"file_segment_index", s.loaderIdx)
-					s.SetData(make([]byte, s.End+1))
-					return
+				if errors.Is(err, nntppool.ErrArticleNotFound) {
+					// A confirmed-missing article may be zero-filled instead
+					// of failing the stream, when the owner's hole hook
+					// approves.
+					if b.holeHooks != nil && b.holeHooks.OnHole != nil &&
+						b.holeHooks.OnHole(s.loaderIdx, s.Id) == holes.DecisionPad {
+						b.log.InfoContext(taskCtx, "zero-filling missing segment",
+							"file_segment_index", s.loaderIdx)
+						s.SetData(make([]byte, s.End+1))
+						return
+					}
 				}
 				s.SetError(err)
-			} else {
+			} else if !b.priority {
+				// Progressive readers were finished inside the fetch.
 				s.SetData(data)
 			}
 		}(idx, seg)

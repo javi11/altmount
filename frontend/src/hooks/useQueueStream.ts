@@ -92,7 +92,16 @@ export function useQueueStream(options: UseQueueStreamOptions = {}): UseQueueStr
 								return;
 							}
 
-							if (update.status === "completed" || update.status === "failed") {
+							// Terminal for progress purposes: the item stops being
+							// actively processed, so drop its progress entry and
+							// refresh the list. waiting_repair is included — a parked
+							// item would otherwise keep showing its last stage until
+							// the user reloads.
+							if (
+								update.status === "completed" ||
+								update.status === "failed" ||
+								update.status === "waiting_repair"
+							) {
 								onQueueChangedRef.current?.();
 								setProgress((prev) => {
 									const next = { ...prev };

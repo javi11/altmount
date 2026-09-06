@@ -112,8 +112,8 @@ func TestCleanupWrittenPaths_DeletesIndividualFile(t *testing.T) {
 		"metadata file should be deleted after cleanup (err=%v, got=%v)", err, got)
 }
 
-// TestCleanupWrittenPaths_DeletesDirectory verifies Fix 2:
-// a "DIR:"-prefixed path triggers deletion of the entire metadata directory.
+// TestCleanupWrittenPaths_DeletesDirectory verifies that once a job's own tracked files
+// are removed, its now-empty release directory is removed too.
 func TestCleanupWrittenPaths_DeletesDirectory(t *testing.T) {
 	svc, ms := newCleanupTestService(t)
 	ctx := context.Background()
@@ -124,11 +124,51 @@ func TestCleanupWrittenPaths_DeletesDirectory(t *testing.T) {
 
 	assert.True(t, ms.DirectoryExists("movies/MyMovie"), "directory should exist before cleanup")
 
-	// Cleanup the whole directory via DIR: prefix
-	svc.cleanupWrittenPaths(ctx, 2, []string{"DIR:movies/MyMovie"})
+	svc.cleanupWrittenPaths(ctx, 2, []string{
+		"movies/MyMovie/MyMovie.mkv",
+		"movies/MyMovie/MyMovie.en.srt",
+		"DIR:movies/MyMovie",
+	})
 
 	assert.False(t, ms.DirectoryExists("movies/MyMovie"),
-		"metadata directory should be deleted after DIR: cleanup")
+		"metadata directory should be deleted once its tracked files are gone")
+}
+
+// TestCleanupWrittenPaths_PreservesDirectoryWithSiblingFiles is the regression guard for
+// the rollback that ran os.RemoveAll on a shared release folder: a concurrent import
+// writing into the same folder must survive a failed job's cleanup untouched.
+func TestCleanupWrittenPaths_PreservesDirectoryWithSiblingFiles(t *testing.T) {
+	svc, ms := newCleanupTestService(t)
+	ctx := context.Background()
+
+	// The failing job's file, plus a sibling import's file in the same folder.
+	writeTestMeta(t, ms, "movies/Shared/failed.mkv")
+	writeTestMeta(t, ms, "movies/Shared/concurrent.mkv")
+	addPendingHealthRecord(t, svc.healthRepo, "movies/Shared/failed.mkv")
+	addPendingHealthRecord(t, svc.healthRepo, "movies/Shared/concurrent.mkv")
+
+	svc.cleanupWrittenPaths(ctx, 6, []string{
+		"movies/Shared/failed.mkv",
+		"DIR:movies/Shared",
+	})
+
+	assert.True(t, ms.DirectoryExists("movies/Shared"),
+		"directory must be preserved while a concurrent import still owns files in it")
+
+	failed, err := ms.ReadFileMetadata("movies/Shared/failed.mkv")
+	assert.True(t, err != nil || failed == nil, "the failed job's own file must be deleted")
+
+	survivor, err := ms.ReadFileMetadata("movies/Shared/concurrent.mkv")
+	require.NoError(t, err)
+	require.NotNil(t, survivor, "the concurrent import's file must not be deleted")
+
+	gone, err := svc.healthRepo.GetFileHealth(ctx, "movies/Shared/failed.mkv")
+	require.NoError(t, err)
+	assert.Nil(t, gone, "the failed job's own health record must be deleted")
+
+	kept, err := svc.healthRepo.GetFileHealth(ctx, "movies/Shared/concurrent.mkv")
+	require.NoError(t, err)
+	assert.NotNil(t, kept, "the concurrent import's health record must not be swept by the dir prefix")
 }
 
 // TestCleanupWrittenPaths_MixedPaths verifies that individual files and DIR: entries
@@ -142,6 +182,7 @@ func TestCleanupWrittenPaths_MixedPaths(t *testing.T) {
 
 	svc.cleanupWrittenPaths(ctx, 3, []string{
 		"movies/standalone.mkv",
+		"tv/Show/S01E01.mkv",
 		"DIR:tv/Show",
 	})
 
@@ -182,7 +223,11 @@ func TestCleanupWrittenPaths_DeletesHealthRecordsForDir(t *testing.T) {
 	// A record in a sibling release must survive the cleanup.
 	addPendingHealthRecord(t, svc.healthRepo, "tv/Other.S01.1080p-GRP/e01.mkv")
 
-	svc.cleanupWrittenPaths(ctx, 10, []string{"DIR:tv/Pack.S08.1080p-GRP"})
+	svc.cleanupWrittenPaths(ctx, 10, []string{
+		"tv/Pack.S08.1080p-GRP/e01.mkv",
+		"tv/Pack.S08.1080p-GRP/e02.mkv",
+		"DIR:tv/Pack.S08.1080p-GRP",
+	})
 
 	for _, p := range []string{
 		"tv/Pack.S08.1080p-GRP/e01.mkv",
@@ -222,7 +267,10 @@ func TestCleanupWrittenPaths_PreservesPriorSuccessfulImport(t *testing.T) {
 	addPendingHealthRecord(t, svc.healthRepo, "tv/Pack.S08.1080p-GRP/e03.mkv")
 	require.NoError(t, svc.healthRepo.MarkAsHealthy(ctx, "tv/Pack.S08.1080p-GRP/e03.mkv", time.Now().Add(time.Hour)))
 
-	svc.cleanupWrittenPaths(ctx, 20, []string{"DIR:tv/Pack.S08.1080p-GRP"})
+	svc.cleanupWrittenPaths(ctx, 20, []string{
+		"tv/Pack.S08.1080p-GRP/e01.mkv",
+		"DIR:tv/Pack.S08.1080p-GRP",
+	})
 
 	gone, err := svc.healthRepo.GetFileHealth(ctx, "tv/Pack.S08.1080p-GRP/e01.mkv")
 	require.NoError(t, err)

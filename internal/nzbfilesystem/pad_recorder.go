@@ -14,7 +14,7 @@ import (
 // padMetadataStore is the slice of metadata.MetadataService the pad recorder
 // needs; narrowed to an interface so tests can fake it.
 type padMetadataStore interface {
-	AddKnownHoles(virtualPath string, runs []holes.Run) error
+	AddKnownHoles(virtualPath string, runs []holes.Run, fingerprint string) error
 	UpdateFileStatus(virtualPath string, status metapb.FileStatus) error
 }
 
@@ -30,12 +30,21 @@ type padHealthStore interface {
 type padEvent struct {
 	name          string
 	segIndex      int
+	segID         string
 	sourceNzbPath string
 	fileSize      int64
 	total         int
 	longest       int
 	totalSegments int
 	segBytes      int64
+	fingerprint   string
+}
+
+// RepairEnqueuer queues a file for background PAR2 repair (implemented by
+// par2repair.Service). Implementations must be non-blocking and safe from any
+// goroutine.
+type RepairEnqueuer interface {
+	Enqueue(ctx context.Context, filePath string, failingSegmentID string)
 }
 
 // padRecorderQueueSize bounds the pending-event buffer. Pads are debounced
@@ -58,6 +67,7 @@ type padRecorder struct {
 	metadata  padMetadataStore
 	health    padHealthStore
 	coalescer *RepairCoalescer
+	repair    RepairEnqueuer // optional; set once at boot before traffic
 
 	stopCh chan struct{}
 	stopWg sync.WaitGroup
@@ -129,8 +139,14 @@ func (r *padRecorder) record(ev padEvent) {
 	}()
 
 	// Always persist the hole so the next open pre-pads it without a fetch.
-	if err := r.metadata.AddKnownHoles(ev.name, []holes.Run{{Start: ev.segIndex, Count: 1}}); err != nil {
+	if err := r.metadata.AddKnownHoles(ev.name, []holes.Run{{Start: ev.segIndex, Count: 1}}, ev.fingerprint); err != nil {
 		slog.Warn("Failed to persist known hole", "file", ev.name, "error", err)
+	}
+
+	// Queue a background PAR2 repair so the zero-filled bytes eventually come
+	// back byte-exact. Dedup lives in the repair queue itself.
+	if r.repair != nil {
+		r.repair.Enqueue(context.Background(), ev.name, ev.segID)
 	}
 
 	// Distinct debounce key from the repair path so pads never consume a

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
@@ -161,6 +162,51 @@ func TestUpdateFileHealthOnError_HealthEnabled_TriggersRepair(t *testing.T) {
 	assert.Nil(t, original, "health enabled must move metadata to the corrupted folder")
 }
 
+// TestUpdateFileHealthOnError_RepairLatchesHandleClosed pins the orphaned-reader fix:
+// once a repair has moved a file's metadata to the corrupted safety folder, the handle
+// that hit the failure must refuse further reads. Otherwise its prefetch pipeline keeps
+// fetching segments for a path that no longer exists and the client keeps reading
+// against it until the mount is restarted (issue #539).
+func TestUpdateFileHealthOnError_RepairLatchesHandleClosed(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks not supported on Windows")
+	}
+	repo, db, ms := setupStreamHealthEnv(t)
+	ctx := context.Background()
+
+	filePath := "series/stream.s01e04.mkv"
+	libraryPath := "/media/library/stream.s01e04.mkv"
+	seg := writeStreamMeta(t, ms, filePath)
+
+	_, err := db.Exec(
+		`INSERT INTO file_health (file_path, library_path, status, scheduled_check_at) VALUES (?, ?, 'healthy', datetime('now'))`,
+		filePath, libraryPath,
+	)
+	require.NoError(t, err)
+
+	enabled := true
+	cfg := config.DefaultConfig()
+	cfg.Health.Enabled = &enabled
+	cfg.MountPath = ""
+
+	mvf := newStreamFailureMVF(ctx, filePath, repo, ms, seg, cfg)
+	require.False(t, mvf.metadataGone.Load(), "handle must start out readable")
+
+	mvf.updateFileHealthOnError(&usenet.DataCorruptionError{UnderlyingErr: errors.New("article not found"), NoRetry: true}, true)
+
+	require.True(t, mvf.metadataGone.Load(), "moving the metadata away must latch the handle closed")
+
+	// Both read entry points must refuse: Read goes through ensureReader, while
+	// ReadAtContext's ephemeral path builds readers without it.
+	err = mvf.ensureReader()
+	require.Error(t, err, "ensureReader must not rebuild a reader for a file that was moved away")
+	assert.ErrorIs(t, err, ErrMetadataGone)
+
+	_, err = mvf.ReadAtContext(ctx, make([]byte, 16), 0)
+	require.Error(t, err, "ReadAtContext must refuse reads after the metadata is gone")
+	assert.ErrorIs(t, err, ErrMetadataGone)
+}
+
 // TestUpdateFileHealthOnError_FailureMasking_MasksRepair verifies that when failure masking
 // is enabled, a streaming failure below the threshold does not immediately trigger a repair
 // or move the metadata, but increments the failure count instead.
@@ -225,3 +271,53 @@ func TestUpdateFileHealthOnError_FailureMasking_MasksRepair(t *testing.T) {
 	assert.Nil(t, original, "metadata should be moved to corrupted folder now")
 }
 
+// TestUpdateFileHealthOnError_EnqueuesForwardSlashDir pins the directory handed to
+// the coalesced rclone refresh after a repair moves metadata to the safety folder.
+// rclone's VFS is forward-slash on every platform, so building this with
+// filepath.Dir sent "\dir" (or a bare "\" for a file at the mount root) on Windows,
+// which matches no node - and vfs/forget reports success regardless, so the refresh
+// silently did nothing.
+func TestUpdateFileHealthOnError_EnqueuesForwardSlashDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks not supported on Windows")
+	}
+	repo, db, ms := setupStreamHealthEnv(t)
+	ctx := context.Background()
+
+	filePath := "series/Show.S01E04/stream.s01e04.mkv"
+	libraryPath := "/media/library/stream.s01e04.mkv"
+	seg := writeStreamMeta(t, ms, filePath)
+
+	_, err := db.Exec(
+		`INSERT INTO file_health (file_path, library_path, status, scheduled_check_at) VALUES (?, ?, 'healthy', datetime('now'))`,
+		filePath, libraryPath,
+	)
+	require.NoError(t, err)
+
+	enabled := true
+	cfg := config.DefaultConfig()
+	cfg.Health.Enabled = &enabled
+	cfg.MountPath = ""
+
+	// A real coalescer, so the enqueued directory actually reaches a client.
+	client := &fakeRcloneClient{}
+	coalescer := newTestCoalescer(t, client)
+
+	mvf := newStreamFailureMVF(ctx, filePath, repo, ms, seg, cfg)
+	mvf.repairCoalescer = coalescer
+
+	mvf.updateFileHealthOnError(&usenet.DataCorruptionError{UnderlyingErr: errors.New("article not found"), NoRetry: true}, true)
+
+	require.Eventually(t, func() bool {
+		return len(client.collectedDirs()) > 0
+	}, 2*time.Second, 20*time.Millisecond, "a repair must enqueue a coalesced VFS refresh")
+
+	dirs := client.collectedDirs()
+	assert.Equal(t, []string{"series/Show.S01E04"}, dirs,
+		"the refresh directory must be the forward-slash parent of the repaired file")
+
+	for _, d := range dirs {
+		assert.NotContains(t, d, `\`, "no directory handed to rclone may carry a Windows separator")
+		assert.NotEmpty(t, d, "no empty directory may be enqueued")
+	}
+}

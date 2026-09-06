@@ -191,6 +191,11 @@ type SABnzbdVersionResponse struct {
 	Version string `json:"version"`
 }
 
+// SABnzbdCategoriesResponse represents the category list response for get_cats mode
+type SABnzbdCategoriesResponse struct {
+	Categories []string `json:"categories"`
+}
+
 // SABnzbdAddResponse represents the response from adding a download
 type SABnzbdAddResponse struct {
 	Status bool     `json:"status"`

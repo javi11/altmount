@@ -157,3 +157,59 @@ func TestRepairCoalescer_NilClient_NoPanic(t *testing.T) {
 	c.EnqueueRefresh("/foo")
 	time.Sleep(50 * time.Millisecond)
 }
+
+func TestRepairCoalescer_RemovalIsVisibleToOtherHandles(t *testing.T) {
+	c := newTestCoalescer(t, &fakeRcloneClient{})
+	const p = "/tv/Show.S01E01/ep.mkv"
+
+	if c.WasRemoved(p) {
+		t.Fatal("nothing removed yet")
+	}
+
+	// First handle wins the debounce and removes the file.
+	if !c.ShouldTrigger(p) {
+		t.Fatal("first trigger must win")
+	}
+	c.MarkRemoved(p)
+
+	// Second handle on the same path fails inside the debounce window: it gets
+	// no trigger of its own, but must still be able to see that the file is gone
+	// so it can latch itself closed.
+	if c.ShouldTrigger(p) {
+		t.Fatal("second trigger must be debounced")
+	}
+	if !c.WasRemoved(p) {
+		t.Fatal("debounced handle must observe the removal")
+	}
+
+	// An unrelated path is unaffected.
+	if c.WasRemoved("/tv/Other.S01E01/ep.mkv") {
+		t.Fatal("removal must be scoped to the path")
+	}
+}
+
+func TestRepairCoalescer_RemovalExpiresWithDebounceWindow(t *testing.T) {
+	c := newTestCoalescer(t, &fakeRcloneClient{}) // debounceTTL = 100ms
+	const p = "/movies/a.mkv"
+
+	c.MarkRemoved(p)
+	if !c.WasRemoved(p) {
+		t.Fatal("removal must be visible immediately")
+	}
+
+	// Once the window lapses a handle takes the full repair path again, where
+	// MoveToCorrupted no-ops on an already-moved source and sets the latch, so
+	// the recorded removal is no longer needed.
+	time.Sleep(150 * time.Millisecond)
+	if c.WasRemoved(p) {
+		t.Fatal("removal must expire with the debounce window")
+	}
+}
+
+func TestRepairCoalescer_RemovalNilReceiverIsSafe(t *testing.T) {
+	var c *RepairCoalescer
+	c.MarkRemoved("/x.mkv") // must not panic
+	if c.WasRemoved("/x.mkv") {
+		t.Fatal("nil coalescer must report nothing removed")
+	}
+}

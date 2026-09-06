@@ -45,16 +45,20 @@ func newMountTestManager(t *testing.T) (*Manager, *int32) {
 	return m, &restartCalls
 }
 
-func TestUnmount_RestartFailureIsReturned(t *testing.T) {
+func TestUnmount_SuccessDoesNotCallRestart(t *testing.T) {
 	m, _ := newMountTestManager(t)
 	m.mounts["altmount"] = &MountInfo{Provider: "altmount", LocalPath: "/mnt/test", Mounted: true}
+	var restartCalled atomic.Bool
 	m.restart = func(context.Context) error {
-		return errors.New("restart failed")
+		restartCalled.Store(true)
+		return errors.New("restart must not be called")
 	}
 
-	err := m.unmount(context.Background(), "altmount", true)
-	if err == nil || !strings.Contains(err.Error(), "restart failed") {
-		t.Fatalf("expected restart failure, got: %v", err)
+	if err := m.unmount(context.Background(), "altmount", true); err != nil {
+		t.Fatalf("unexpected unmount error: %v", err)
+	}
+	if restartCalled.Load() {
+		t.Fatal("successful unmount must not restart rcd")
 	}
 }
 
@@ -175,7 +179,7 @@ func TestMountWithRetry_ContextCancelledDuringRetry(t *testing.T) {
 	}
 }
 
-func TestUnmount_RestartsRCDToReclaimVFS(t *testing.T) {
+func TestUnmount_DoesNotRestartRCD(t *testing.T) {
 	m, restarts := newMountTestManager(t)
 	m.mounts["altmount"] = &MountInfo{Provider: "altmount", LocalPath: "/mnt/test", Mounted: true}
 
@@ -186,10 +190,8 @@ func TestUnmount_RestartsRCDToReclaimVFS(t *testing.T) {
 	if !ok || info.Mounted {
 		t.Fatal("mount must be marked unmounted after Unmount")
 	}
-	// rclone retains the VFS in-process after mount/unmount; a restart is
-	// required so a later mount does not create a second VFS instance.
-	if got := atomic.LoadInt32(restarts); got != 1 {
-		t.Fatalf("expected rcd restart after unmount, got %d", got)
+	if got := atomic.LoadInt32(restarts); got != 0 {
+		t.Fatalf("successful unmount must not restart rcd, got %d", got)
 	}
 }
 

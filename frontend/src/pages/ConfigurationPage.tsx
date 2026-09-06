@@ -25,6 +25,7 @@ import { HealthConfigSection } from "../components/config/HealthConfigSection";
 import { MetadataConfigSection } from "../components/config/MetadataConfigSection";
 import { MountConfigSection } from "../components/config/MountConfigSection";
 import { NetworkConfigSection } from "../components/config/NetworkConfigSection";
+import { Par2RepairConfigSection } from "../components/config/Par2RepairConfigSection";
 import { ProvidersConfigSection } from "../components/config/ProvidersConfigSection";
 import { SABnzbdConfigSection } from "../components/config/SABnzbdConfigSection";
 import { StreamingConfigSection } from "../components/config/StreamingConfigSection";
@@ -54,7 +55,7 @@ import type {
 	LogFormData,
 	MetadataConfig,
 	NetworkConfig,
-	NzblnkConfig,
+	Par2RepairConfig,
 	ProviderConfig,
 	SABnzbdConfig,
 	SegmentCacheConfig,
@@ -96,7 +97,7 @@ const SECTION_GROUPS = [
 	},
 	{
 		title: "Automation",
-		sections: ["sabnzbd", "arrs", "health", "stremio", "import"],
+		sections: ["sabnzbd", "arrs", "health", "par2_repair", "stremio", "import"],
 	},
 	{
 		title: "System",
@@ -272,15 +273,20 @@ export function ConfigurationPage() {
 					section: "providers",
 					config: { providers: data as unknown as ProviderConfig[] },
 				});
-			} else if (section === "nzblnk") {
+			} else if (section === "user_agent") {
 				await updateConfigSection.mutateAsync({
-					section: "nzblnk",
-					config: { nzblnk: data as unknown as NzblnkConfig },
+					section: "network",
+					config: { user_agent: data as unknown as string },
 				});
 			} else if (section === "network") {
 				await updateConfigSection.mutateAsync({
 					section: "network",
 					config: { network: data as unknown as NetworkConfig },
+				});
+			} else if (section === "par2_repair") {
+				await updateConfigSection.mutateAsync({
+					section: "par2_repair",
+					config: { par2_repair: data as unknown as Par2RepairConfig },
 				});
 			} else if (section === "log") {
 				const logData = data as unknown as LogFormData & { profiler_enabled?: boolean };
@@ -571,6 +577,13 @@ export function ConfigurationPage() {
 										isUpdating={updateConfigSection.isPending}
 									/>
 								)}
+								{activeSection === "par2_repair" && (
+									<Par2RepairConfigSection
+										config={config}
+										onUpdate={handleConfigUpdate}
+										isUpdating={updateConfigSection.isPending}
+									/>
+								)}
 								{![
 									"webdav",
 									"auth",
@@ -585,6 +598,7 @@ export function ConfigurationPage() {
 									"health",
 									"stremio",
 									"network",
+									"par2_repair",
 								].includes(activeSection) && (
 									<ComingSoonSection
 										sectionName={CONFIG_SECTIONS[activeSection]?.title || activeSection}

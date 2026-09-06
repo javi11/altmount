@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"path/filepath"
+	"path"
 	"time"
 
 	"github.com/javi11/altmount/internal/config"
+	"github.com/javi11/altmount/internal/contentverify"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/holes"
+	"github.com/javi11/altmount/internal/importer/parser/fileinfo"
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
@@ -26,6 +28,11 @@ const (
 	EventTypeFileCorrupted EventType = "file_corrupted"
 	EventTypeCheckFailed   EventType = "check_failed"
 	EventTypeFileRemoved   EventType = "file_removed"
+	// EventTypeCheckInconclusive means the check reached the network but the
+	// providers could not answer for at least one segment (outage, timeout,
+	// quota, auth, truncated sweep). It carries no verdict: the file keeps the
+	// status it had and is simply re-checked later.
+	EventTypeCheckInconclusive EventType = "check_inconclusive"
 )
 
 // HealthEvent represents a health check event
@@ -45,6 +52,15 @@ type HealthEvent struct {
 // CheckOptions defines options for health checking
 type CheckOptions struct {
 	ForceFullCheck bool
+	// CurrentStatus is the file's HealthStatus before this check started,
+	// used to gate content verification to first-time (Pending) checks.
+	// Set by the caller (HealthWorker), which already has the row loaded.
+	CurrentStatus database.HealthStatus
+	// VerifyContentOverride, when non-nil, forces (true) or disables
+	// (false) content verification for this check regardless of the
+	// file's current status or the configured default. Used by the
+	// manual recheck API to let a user force a re-probe.
+	VerifyContentOverride *bool
 }
 
 // HealthChecker manages file health checking logic
@@ -54,6 +70,7 @@ type HealthChecker struct {
 	poolManager     pool.Manager
 	configGetter    config.ConfigGetter
 	rcloneClient    rclonecli.RcloneRcClient // Optional rclone client for VFS notifications
+	contentVerifyFS contentverify.Opener     // Optional: real NzbFilesystem for content probing
 }
 
 // NewHealthChecker creates a new health checker
@@ -63,6 +80,7 @@ func NewHealthChecker(
 	poolManager pool.Manager,
 	configGetter config.ConfigGetter,
 	rcloneClient rclonecli.RcloneRcClient,
+	contentVerifyFS contentverify.Opener,
 ) *HealthChecker {
 	return &HealthChecker{
 		healthRepo:      healthRepo,
@@ -70,6 +88,7 @@ func NewHealthChecker(
 		poolManager:     poolManager,
 		configGetter:    configGetter,
 		rcloneClient:    rcloneClient,
+		contentVerifyFS: contentVerifyFS,
 	}
 }
 
@@ -106,6 +125,11 @@ type preparedCheck struct {
 	// it survives past preparation for error reporting without holding onto
 	// the segment slice itself during the network sweep.
 	totalSegments int
+	// currentStatus is the file's HealthStatus before this check started,
+	// used to gate content verification to first-time (Pending) checks
+	// unless verifyContentOverride forces it either way.
+	currentStatus         database.HealthStatus
+	verifyContentOverride *bool
 }
 
 // baseResultEvent builds the shared HealthEvent skeleton. SourceNzbPath is
@@ -126,6 +150,10 @@ func baseResultEvent(filePath, sourceNzbPath string) HealthEvent {
 // early terminal event or the sampled segment IDs for the network sweep.
 func (hc *HealthChecker) prepareCheck(ctx context.Context, filePath string, opts ...CheckOptions) preparedCheck {
 	prep := preparedCheck{filePath: filePath}
+	if len(opts) > 0 {
+		prep.currentStatus = opts[0].CurrentStatus
+		prep.verifyContentOverride = opts[0].VerifyContentOverride
+	}
 
 	// Get file metadata
 	fileMeta, err := hc.metadataService.ReadFileMetadata(filePath)
@@ -239,10 +267,35 @@ func (hc *HealthChecker) prepareCheck(ctx context.Context, filePath string, opts
 func (hc *HealthChecker) judgeValidation(ctx context.Context, prep preparedCheck, result usenet.ValidationResult, valErr error) HealthEvent {
 	event := baseResultEvent(prep.filePath, prep.sourceNzbPath)
 
-	if valErr != nil {
-		event.Type = EventTypeCheckFailed
-		event.Status = database.HealthStatusCorrupted
-		event.Error = fmt.Errorf("failed to validate segments: %w", valErr)
+	// An inconclusive sweep proves nothing. Reading a transient provider
+	// failure — whether the whole pool was unreachable or just a handful of
+	// segments hit a connection blip mid-sweep — as a missing article marked
+	// files degraded and wrote their segment ids into the permanent hole map,
+	// which no later clean check clears; treating it as a failed attempt
+	// instead still burned the retry budget and could escalate a perfectly
+	// good file into repair (#861). So this check must come before the
+	// missing-count verdict, even when the sweep also found genuine misses,
+	// and it must not consume a retry.
+	if valErr != nil || result.Inconclusive() {
+		event.Type = EventTypeCheckInconclusive
+		event.Status = database.HealthStatusPending
+		if valErr != nil {
+			event.Error = fmt.Errorf("segment check inconclusive: %w", valErr)
+		} else {
+			// TotalChecked counts only resolved segments, so the sampled total
+			// is the two buckets summed — otherwise a sweep where nothing
+			// resolved reports "1 of 0".
+			event.Error = fmt.Errorf("segment check inconclusive: %d of %d sampled segments could not be verified: %w",
+				result.UnresolvedCount, result.TotalChecked+result.UnresolvedCount, result.Err)
+		}
+		details := database.HealthErrorDetails{
+			ErrorType:          "check_inconclusive",
+			Message:            event.Error.Error(),
+			TotalArticles:      prep.totalSegments,
+			Sampled:            result.TotalChecked,
+			UnresolvedSegments: result.UnresolvedCount,
+		}
+		event.Details = details.Marshal()
 		return event
 	}
 
@@ -253,14 +306,27 @@ func (hc *HealthChecker) judgeValidation(ctx context.Context, prep preparedCheck
 			result.MissingCount, result.TotalChecked)
 		event.Classification = hc.classifyHoles(ctx, prep.filePath, result)
 		details := database.HealthErrorDetails{
-			ErrorType:       "missing_segments",
-			MissingArticles: result.MissingCount,
-			TotalArticles:   prep.totalSegments,
-			Sampled:         result.TotalChecked,
-			PlaybackImpact:  event.Classification,
+			ErrorType:          "missing_segments",
+			MissingArticles:    result.MissingCount,
+			TotalArticles:      prep.totalSegments,
+			Sampled:            result.TotalChecked,
+			UnresolvedSegments: result.UnresolvedCount,
+			PlaybackImpact:     event.Classification,
+			TerminatedEarly:    result.TerminatedEarly,
+		}
+		if result.TerminatedEarly {
+			details.TerminationReason = fmt.Sprintf(
+				"missing-segment threshold exceeded after %d of %d segments",
+				result.TotalChecked, prep.totalSegments)
 		}
 		event.Details = details.Marshal()
 		return event
+	}
+
+	if hc.shouldVerifyContent(prep) {
+		if verified := hc.judgeContentVerification(ctx, prep); verified != nil {
+			return *verified
+		}
 	}
 
 	// All checked segments are available - record will be deleted.
@@ -272,6 +338,57 @@ func (hc *HealthChecker) judgeValidation(ctx context.Context, prep preparedCheck
 	return event
 }
 
+// shouldVerifyContent decides whether judgeValidation should run a content
+// probe for this file: explicit override wins; otherwise only a first-time
+// (Pending) check is probed, so repeated repair-recheck cycles on an
+// already-flagged file don't re-probe on every pass.
+func (hc *HealthChecker) shouldVerifyContent(prep preparedCheck) bool {
+	if prep.verifyContentOverride != nil {
+		return *prep.verifyContentOverride
+	}
+	if hc.contentVerifyFS == nil || !hc.configGetter().GetHealthVerifyContent() {
+		return false
+	}
+	return prep.currentStatus == database.HealthStatusPending
+}
+
+// judgeContentVerification probes prep.filePath's content signature and, if
+// the result is definitive, returns a Corrupted event. A nil return means
+// either verification is not eligible for this file (not a verifiable media
+// type), passed, or failed only transiently — in all three cases the caller
+// proceeds to the normal healthy branch, since a transient probe error must
+// never mark a file corrupted.
+func (hc *HealthChecker) judgeContentVerification(ctx context.Context, prep preparedCheck) *HealthEvent {
+	if !fileinfo.IsVerifiableMediaFile(prep.filePath) {
+		return nil
+	}
+
+	cfg := hc.configGetter()
+	result := contentverify.Probe(ctx, hc.contentVerifyFS, prep.filePath, cfg.GetHealthVerifyContentTimeout())
+
+	var errType, message string
+	switch result.Result {
+	case contentverify.ContentValid, contentverify.ContentProbeError:
+		return nil
+	case contentverify.ContentInvalid:
+		errType = "content_invalid"
+		message = "no recognized media container signature was found in the file's header"
+	case contentverify.ContentSegmentMissing:
+		errType = "content_segment_missing"
+		message = "the article needed to read the file's header is missing from your Usenet provider"
+	default:
+		return nil
+	}
+
+	event := baseResultEvent(prep.filePath, prep.sourceNzbPath)
+	event.Type = EventTypeFileCorrupted
+	event.Status = database.HealthStatusCorrupted
+	event.Error = fmt.Errorf("content verification failed: %s", message)
+	details := database.HealthErrorDetails{ErrorType: errType, Message: message}
+	event.Details = details.Marshal()
+	return &event
+}
+
 // CheckFile checks the health of a specific file
 func (hc *HealthChecker) CheckFile(ctx context.Context, filePath string, opts ...CheckOptions) HealthEvent {
 	prep := hc.prepareCheck(ctx, filePath, opts...)
@@ -279,13 +396,11 @@ func (hc *HealthChecker) CheckFile(ctx context.Context, filePath string, opts ..
 		return *prep.earlyEvent
 	}
 
-	cfg := hc.configGetter()
 	results, err := usenet.ValidateSegmentAvailabilityBatch(
 		ctx,
 		[][]string{prep.sampledIDs},
 		hc.poolManager,
-		cfg.GetMaxConnectionsForHealthChecks(),
-		cfg.GetHealthReadTimeout(),
+		hc.batchOptions([]preparedCheck{prep}),
 	)
 
 	var result usenet.ValidationResult
@@ -295,10 +410,63 @@ func (hc *HealthChecker) CheckFile(ctx context.Context, filePath string, opts ..
 	return hc.judgeValidation(ctx, prep, result, err)
 }
 
+// statSweepConcurrency picks the sweep's in-flight STAT bound. An explicit
+// max_concurrent_segment_checks setting is the operator's hard cap and always
+// wins; otherwise the pool manager adapts between the conservative
+// single-connection depth (while streams are active) and the pool's aggregate
+// STAT pipeline capacity (when idle).
+//
+// The adaptive path used to be unreachable: the legacy knob defaulted to 100 and
+// validation rejected <= 0, so the operator branch always won and health sweeps
+// neither narrowed for playback nor widened on an idle pool. 0 now means adapt.
+func (hc *HealthChecker) statSweepConcurrency(cfg *config.Config) int {
+	if n := cfg.GetMaxConcurrentSegmentChecks(); n > 0 {
+		return n
+	}
+	return hc.poolManager.StatSweepConcurrency(cfg.StatConcurrency())
+}
+
+// batchOptions builds the sweep configuration for a set of prepared checks,
+// including the fast-fail policy. A file stops consuming stats as soon as its
+// confirmed missing segments irreversibly exceed the configured
+// acceptable-missing threshold: that predicate is monotonic in the miss count,
+// so no amount of further checking could bring the file back under it, and the
+// segments it would have checked cannot change the repair decision.
+//
+// Only confirmed article-not-found responses feed the count (the sweep never
+// classifies a transport failure as missing), and the file's full segment
+// count is the denominator, so the policy matches the one health.classifyHoles
+// applies to the final verdict.
+func (hc *HealthChecker) batchOptions(preps []preparedCheck) usenet.BatchOptions {
+	cfg := hc.configGetter()
+	acceptable := cfg.GetAcceptableMissingSegmentsPercentage()
+
+	return usenet.BatchOptions{
+		MaxConnections: hc.statSweepConcurrency(cfg),
+		Timeout:        cfg.GetHealthReadTimeout(),
+		ShouldStop: func(fileIdx int, result usenet.ValidationResult) bool {
+			if fileIdx >= len(preps) {
+				return false
+			}
+			return holes.ExceedsAcceptableMissing(
+				result.MissingCount, preps[fileIdx].totalSegments, acceptable)
+		},
+	}
+}
+
 // prepareConcurrency bounds the parallel metadata-read phase of a batch check.
 // Preparation is local disk I/O, so a small constant keeps seek pressure sane
 // regardless of batch size.
 const prepareConcurrency = 8
+
+// judgeConcurrency bounds the parallel judge phase of a batch check. Judging
+// a segment-availability result is cheap CPU-only work, but when content
+// verification is enabled judgeValidation also runs a real network probe per
+// file (see judgeContentVerification) bounded by the configured content-probe
+// timeout. Running that loop sequentially would serialize the whole batch
+// behind file_count * timeout of wall-clock time, so it is bounded-parallel
+// like the prepare stage instead.
+const judgeConcurrency = 8
 
 // CheckFilesBatch checks many files in one cycle: per-file preparation runs in
 // a small parallel pool, then every prepared file's sampled segments are
@@ -306,7 +474,13 @@ const prepareConcurrency = 8
 // own HealthEvent (index-aligned with filePaths). A sweep infrastructure
 // failure (pool unavailable) yields a CheckFailed event for every file that
 // reached the network stage; per-file early events are unaffected.
-func (hc *HealthChecker) CheckFilesBatch(ctx context.Context, filePaths []string, opts ...CheckOptions) []HealthEvent {
+// CheckFilesBatch checks the health of multiple files in a single sweep.
+// statuses, when non-nil, must be index-aligned with filePaths and carries
+// each file's current HealthStatus so content verification (when enabled)
+// only probes first-time (Pending) checks; a nil or short statuses slice
+// simply leaves those files' currentStatus at its zero value, disabling
+// content verification for them.
+func (hc *HealthChecker) CheckFilesBatch(ctx context.Context, filePaths []string, statuses []database.HealthStatus, opts ...CheckOptions) []HealthEvent {
 	if len(filePaths) == 0 {
 		return nil
 	}
@@ -316,6 +490,9 @@ func (hc *HealthChecker) CheckFilesBatch(ctx context.Context, filePaths []string
 	for i, filePath := range filePaths {
 		pl.Go(func() {
 			preps[i] = hc.prepareCheck(ctx, filePath, opts...)
+			if i < len(statuses) {
+				preps[i].currentStatus = statuses[i]
+			}
 		})
 	}
 	pl.Wait()
@@ -327,37 +504,37 @@ func (hc *HealthChecker) CheckFilesBatch(ctx context.Context, filePaths []string
 		}
 	}
 
-	cfg := hc.configGetter()
 	results, valErr := usenet.ValidateSegmentAvailabilityBatch(
 		ctx,
 		perFileIDs,
 		hc.poolManager,
-		cfg.GetMaxConnectionsForHealthChecks(),
-		cfg.GetHealthReadTimeout(),
+		hc.batchOptions(preps),
 	)
 
 	events := make([]HealthEvent, len(preps))
+	jl := concpool.New().WithMaxGoroutines(min(len(preps), judgeConcurrency))
 	for i := range preps {
-		if preps[i].earlyEvent != nil {
-			events[i] = *preps[i].earlyEvent
-			continue
-		}
-		var result usenet.ValidationResult
-		if valErr == nil {
-			result = results[i]
-		}
-		events[i] = hc.judgeValidation(ctx, preps[i], result, valErr)
+		jl.Go(func() {
+			if preps[i].earlyEvent != nil {
+				events[i] = *preps[i].earlyEvent
+				return
+			}
+			var result usenet.ValidationResult
+			if valErr == nil {
+				result = results[i]
+			}
+			events[i] = hc.judgeValidation(ctx, preps[i], result, valErr)
+		})
 	}
+	jl.Wait()
 	return events
 }
 
-// NotifyRcloneVFS notifies rclone VFS about a file status change (async, non-blocking)
-func (hc *HealthChecker) notifyRcloneVFS(filePath string, event HealthEvent) {
-	if hc.rcloneClient == nil {
-		return // No rclone client configured
+// NotifyRcloneVFS notifies rclone VFS to forget and refresh the directory containing filePath (async, non-blocking).
+func (hc *HealthChecker) NotifyRcloneVFS(filePath string) {
+	if hc == nil || hc.rcloneClient == nil {
+		return
 	}
-
-	// Only notify for rclone-based mounts; FUSE and none don't use rclone VFS
 	cfg := hc.configGetter()
 	switch cfg.MountType {
 	case config.MountTypeRClone, config.MountTypeRCloneExternal:
@@ -366,21 +543,45 @@ func (hc *HealthChecker) notifyRcloneVFS(filePath string, event HealthEvent) {
 		return
 	}
 
-	// Only notify on significant status changes (healthy <-> corrupted)
-	switch event.Type {
-	case EventTypeFileHealthy, EventTypeFileCorrupted:
-		// Continue with notification
+	// Virtual path, not an OS path: rclone's VFS is forward-slash on every
+	// platform. An OS-aware Dir would emit "\" separators on Windows, which never
+	// match a VFS node, and vfs/forget reports success regardless - so the
+	// invalidation silently does nothing. ToSlash also normalizes legacy rows
+	// that still carry backslashes. On POSIX both calls are no-ops.
+	virtualDir := path.Dir(rclonecli.ToVFSPath(filePath))
+	hc.NotifyRcloneVFSDirs([]string{virtualDir})
+}
+
+// NotifyRcloneVFSDirs notifies rclone VFS to forget and refresh the specified directories (async, non-blocking).
+func (hc *HealthChecker) NotifyRcloneVFSDirs(dirs []string) {
+	if hc == nil || hc.rcloneClient == nil || len(dirs) == 0 {
+		return
+	}
+	cfg := hc.configGetter()
+	switch cfg.MountType {
+	case config.MountTypeRClone, config.MountTypeRCloneExternal:
+		// continue
 	default:
-		return // No notification needed for other event types
+		return
 	}
 
-	// Start async notification
-	go func() {
-		// Extract directory path from file path for VFS refresh
-		virtualDir := filepath.Dir(filePath)
+	// Filter and deduplicate directories
+	uniqueDirs := make([]string, 0, len(dirs))
+	seen := make(map[string]bool)
+	for _, d := range dirs {
+		if d == "" {
+			d = "/"
+		}
+		if !seen[d] {
+			seen[d] = true
+			uniqueDirs = append(uniqueDirs, d)
+		}
+	}
+	if len(uniqueDirs) == 0 {
+		return
+	}
 
-		// Use background context with timeout for VFS notification
-		// Increased timeout to 60 seconds as vfs/refresh can be slow
+	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 
@@ -389,12 +590,21 @@ func (hc *HealthChecker) notifyRcloneVFS(filePath string, event HealthEvent) {
 			vfsName = config.MountProvider
 		}
 
-		// Refresh cache asynchronously to avoid blocking health checks
-		err := hc.rcloneClient.RefreshDir(ctx, vfsName, []string{virtualDir})
+		err := hc.rcloneClient.RefreshDir(ctx, vfsName, uniqueDirs)
 		if err != nil {
-			slog.ErrorContext(ctx, "Failed to notify rclone VFS about file status change", "file", filePath, "event", event.Type, "err", err)
+			slog.ErrorContext(ctx, "Failed to notify rclone VFS to forget/refresh directories", "dirs", uniqueDirs, "err", err)
 		}
 	}()
+}
+
+// notifyRcloneVFS notifies rclone VFS about a file status change (async, non-blocking)
+func (hc *HealthChecker) notifyRcloneVFS(filePath string, event HealthEvent) {
+	switch event.Type {
+	case EventTypeFileHealthy, EventTypeFileCorrupted:
+		hc.NotifyRcloneVFS(filePath)
+	default:
+		return
+	}
 }
 
 type metadataSegmentLoader struct {

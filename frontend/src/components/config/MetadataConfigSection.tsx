@@ -1,5 +1,5 @@
 import cronstrue from "cronstrue";
-import { Download, HardDrive, History, Save, ShieldAlert, Trash2 } from "lucide-react";
+import { Download, HardDrive, History, Save, ShieldAlert } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useBatchExportNZB } from "../../hooks/useConfig";
 import type { ConfigResponse, MetadataBackupConfig, MetadataConfig } from "../../types/config";
@@ -11,6 +11,7 @@ import {
 	type ScheduleType,
 } from "../../utils/cronSchedule";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
+import { MetadataMigrationCard } from "./MetadataMigrationCard";
 
 interface MetadataConfigSectionProps {
 	config: ConfigResponse;
@@ -39,12 +40,6 @@ export function MetadataConfigSection({
 	}, [config.metadata]);
 
 	const handleInputChange = (field: keyof MetadataConfig, value: string) => {
-		const newData = { ...formData, [field]: value };
-		setFormData(newData);
-		setHasChanges(JSON.stringify(newData) !== JSON.stringify(config.metadata));
-	};
-
-	const handleCheckboxChange = (field: keyof MetadataConfig, value: boolean) => {
 		const newData = { ...formData, [field]: value };
 		setFormData(newData);
 		setHasChanges(JSON.stringify(newData) !== JSON.stringify(config.metadata));
@@ -280,43 +275,6 @@ export function MetadataConfigSection({
 					</div>
 				</div>
 
-				{/* Retention Logic */}
-				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
-					<div className="flex items-center gap-2">
-						<Trash2 className="h-4 w-4 text-base-content/60" />
-						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
-							Source Cleanup
-						</h4>
-						<div className="h-px flex-1 bg-base-300/50" />
-					</div>
-					<p className="text-[11px] text-base-content/40 leading-relaxed">
-						Controls NZB source file retention during import. For orphaned file cleanup, see{" "}
-						<span className="font-semibold text-base-content/60">Health → Orphan Cleanup</span>.
-					</p>
-
-					<div className="space-y-4">
-						<label className="label cursor-pointer items-start justify-start gap-4">
-							<input
-								type="checkbox"
-								className="checkbox checkbox-primary checkbox-sm mt-1 shrink-0"
-								checked={formData.delete_source_nzb_on_removal ?? false}
-								disabled={isReadOnly}
-								onChange={(e) =>
-									handleCheckboxChange("delete_source_nzb_on_removal", e.target.checked)
-								}
-							/>
-							<div className="min-w-0 flex-1">
-								<span className="block whitespace-normal break-words font-bold text-xs">
-									Purge Source NZB
-								</span>
-								<span className="mt-1 block whitespace-normal break-words text-base-content/50 text-xs leading-relaxed">
-									Delete original NZB file when metadata is manually removed from AltMount.
-								</span>
-							</div>
-						</label>
-					</div>
-				</div>
-
 				{/* Utility Actions */}
 				<div className="space-y-6 rounded-2xl border border-warning/20 bg-warning/5 p-6">
 					<div className="flex items-center gap-2 text-warning">
@@ -348,6 +306,8 @@ export function MetadataConfigSection({
 					</div>
 				</div>
 			</div>
+
+			<MetadataMigrationCard />
 
 			{/* Save Button */}
 			{!isReadOnly && (

@@ -5,6 +5,7 @@ import (
 	"encoding/xml"
 	"strconv"
 
+	"github.com/javi11/altmount/internal/holes"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 )
 
@@ -28,6 +29,11 @@ func BuildNZB(store *metapb.NzbStore) []byte {
 		}
 		b.WriteString("    </groups>\n    <segments>\n")
 		for _, s := range f.Segments {
+			if holes.IsPlaceholderID(s.Id) {
+				// Synthesised gap fillers name no article; a regenerated NZB
+				// must list only what was actually posted.
+				continue
+			}
 			b.WriteString("      <segment bytes=\"" + strconv.FormatInt(s.Bytes, 10) +
 				"\" number=\"" + strconv.Itoa(int(s.Number)) + "\">")
 			xml.EscapeText(&b, []byte(s.Id)) //nolint:errcheck

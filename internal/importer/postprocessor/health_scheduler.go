@@ -68,9 +68,11 @@ func (c *Coordinator) ScheduleHealthCheck(ctx context.Context, item *database.Im
 
 	var indexer *string = nil
 	var downloadID *string = nil
+	var itemMetadata *string = nil
 	if item != nil {
 		indexer = item.Indexer
 		downloadID = item.DownloadID
+		itemMetadata = item.Metadata
 	}
 
 	var lastErr error
@@ -103,6 +105,7 @@ func (c *Coordinator) ScheduleHealthCheck(ctx context.Context, item *database.Im
 			MaxRetries:       cfg.GetMaxRetries(),
 			MaxRepairRetries: cfg.GetMaxRepairRetries(),
 			DownloadID:       downloadID,
+			Metadata:         itemMetadata,
 		})
 		repairDirs[filepath.Dir(p)] = struct{}{}
 	}

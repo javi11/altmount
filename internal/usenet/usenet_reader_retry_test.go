@@ -3,6 +3,7 @@ package usenet
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"sync"
@@ -191,6 +192,80 @@ func TestMissingSegment_EmitsDebugLog(t *testing.T) {
 		}
 	}
 	assert.True(t, found, "expected 'missing segment' debug log for segment_id=%q, got: %+v", segments.MessageID(0), captured)
+}
+
+// TestRetry_YEncCRCMismatch_ClassifiedAsCorruption pins the fix for a bug
+// where a yEnc CRC mismatch surviving all retries came back as a bare,
+// unclassified error instead of *DataCorruptionError. Only DataCorruptionError
+// routes into MetadataVirtualFile's health/repair pipeline (classifyReadError
+// / updateFileHealthOnError): an unclassified error left the file looking
+// healthy, so nothing ever marked it corrupted or queued a repair, and every
+// subsequent playback attempt re-fetched the same permanently-corrupt article
+// and failed the same way, forever.
+func TestRetry_YEncCRCMismatch_ClassifiedAsCorruption(t *testing.T) {
+	t.Parallel()
+	const (
+		segCount    = 1
+		segSize     = 16
+		maxPrefetch = 1
+	)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// The real sentinel nntppool returns on a CRC mismatch (errors.go:44),
+	// unwrapped, from finishBody — exactly what surfaces in the "segment
+	// download retry" log lines this test is guarding against.
+	crcErr := nntppool.ErrCRCMismatch
+
+	fp := fakepool.New()
+	fp.SetBehavior(segments.MessageID(0), fakepool.SegmentBehavior{Err: crcErr})
+
+	rg := buildEagerRange(ctx, t, segCount, segSize)
+	ur := newReaderForTest(t, ctx, fp, rg, maxPrefetch)
+	ur.Start()
+
+	_, err := io.ReadAll(ur)
+
+	var dcErr *DataCorruptionError
+	if !errors.As(err, &dcErr) {
+		t.Fatalf("expected *DataCorruptionError for exhausted yEnc CRC mismatch, got %v (%T)", err, err)
+	}
+	if !errors.Is(dcErr.UnderlyingErr, crcErr) {
+		t.Errorf("DataCorruptionError.UnderlyingErr = %v, want %v", dcErr.UnderlyingErr, crcErr)
+	}
+
+	// retry.Attempts(2): both attempts must be exhausted before the error
+	// surfaces classified — this must not short-circuit like ErrArticleNotFound.
+	if got := fp.PerMessageCalls(segments.MessageID(0)); got != 2 {
+		t.Errorf("segment 0 issued %d calls, want exactly 2 (retry.Attempts(2) exhausted)", got)
+	}
+}
+
+// TestIsCorruptionError pins which error strings downloadSegmentWithRetry
+// classifies as article-body corruption (and therefore wraps as
+// DataCorruptionError) versus a plain, unclassified failure.
+func TestIsCorruptionError(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nntppool.ErrCRCMismatch sentinel", nntppool.ErrCRCMismatch, true},
+		{"wrapped ErrCRCMismatch", fmt.Errorf("fetch failed: %w", nntppool.ErrCRCMismatch), true},
+		{"data corruption detected", errors.New("data corruption detected: short read"), true},
+		{"crc mismatch lowercase, different instance", errors.New("crc mismatch"), true},
+		{"CRC MISMATCH uppercase, different instance", errors.New("CRC MISMATCH"), true},
+		{"generic transient error", errors.New("connection reset by peer"), false},
+		{"article not found", nntppool.ErrArticleNotFound, false},
+		{"context deadline exceeded", context.DeadlineExceeded, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isCorruptionError(tc.err); got != tc.want {
+				t.Errorf("isCorruptionError(%q) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
 }
 
 // captureLogHandler is a minimal slog.Handler that invokes onHandle for

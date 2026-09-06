@@ -27,6 +27,7 @@ interface HealthTableProps {
 	onCancelCheck: (id: number) => void;
 	onManualCheck: (id: number) => void;
 	onRepair: (id: number) => void;
+	onPar2Repair?: (filePath: string) => void;
 	onDelete: (id: number) => void;
 	onUnmask: (id: number) => void;
 	onSetPriority: (id: number, priority: HealthPriority) => void;
@@ -54,6 +55,7 @@ export function HealthTable({
 	onCancelCheck,
 	onManualCheck,
 	onRepair,
+	onPar2Repair,
 	onDelete,
 	onUnmask,
 	onSetPriority,
@@ -83,6 +85,7 @@ export function HealthTable({
 									onCancelCheck={onCancelCheck}
 									onManualCheck={onManualCheck}
 									onRepair={onRepair}
+									onPar2Repair={onPar2Repair}
 									onDelete={onDelete}
 									onUnmask={onUnmask}
 									onRegenerate={onRegenerate}
@@ -131,6 +134,7 @@ export function HealthTable({
 											onCancelCheck={onCancelCheck}
 											onManualCheck={onManualCheck}
 											onRepair={onRepair}
+											onPar2Repair={onPar2Repair}
 											onDelete={onDelete}
 											onUnmask={onUnmask}
 											onSetPriority={onSetPriority}

@@ -62,7 +62,7 @@ func newReaderForTest(t testing.TB, ctx context.Context, fp *fakepool.Client, rg
 func newReaderForTestWithClient(t testing.TB, ctx context.Context, cp pool.NntpClient, rg *segmentRange, maxPrefetch int) *UsenetReader {
 	t.Helper()
 	getter := func() (pool.NntpClient, error) { return cp, nil }
-	ur, err := NewUsenetReader(ctx, getter, rg, maxPrefetch, noopMetrics{}, "test-stream", nil)
+	ur, err := NewUsenetReader(ctx, getter, rg, maxPrefetch, noopMetrics{}, "test-stream", nil, withFlightMap(newFlightMap()))
 	if err != nil {
 		t.Fatalf("NewUsenetReader: %v", err)
 	}

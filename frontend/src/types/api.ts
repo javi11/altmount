@@ -23,6 +23,7 @@ export const QueueStatus = {
 	PROCESSING: "processing",
 	COMPLETED: "completed",
 	FAILED: "failed",
+	WAITING_REPAIR: "waiting_repair",
 } as const;
 
 export type QueueStatus = (typeof QueueStatus)[keyof typeof QueueStatus];
@@ -211,6 +212,43 @@ export interface FileHealth {
 	metadata?: string;
 }
 
+// Only active jobs exist: finished repairs are translated to the file's
+// health record (or the import queue entry) and their rows deleted.
+export type Par2RepairStatus = "pending" | "running";
+
+export interface Par2RepairJob {
+	id: number;
+	file_path: string;
+	/**
+	 * Every file the job repairs: damaged files of one release share a single
+	 * job, since a repair sweeps the whole release anyway.
+	 */
+	file_paths?: string[];
+	status: Par2RepairStatus;
+	attempts: number;
+	last_error?: string;
+	next_attempt_at?: string;
+	started_at?: string;
+	finished_at?: string;
+	/** How long the last attempt ran: final when finished, elapsed while running. */
+	duration_seconds?: number;
+	created_at: string;
+	updated_at: string;
+	// Stage progress, present only while the job is running. Stage is
+	// "checking" (article liveness STATs), "planning" (PAR2 parse + file
+	// matching), "downloading" (recovery payloads) or "repairing"
+	// (verification sweep); counts are in that stage's units.
+	progress_stage?: string;
+	progress_done?: number;
+	progress_total?: number;
+	/**
+	 * How long the current stage has been running (a re-sweep restarts it with
+	 * the counter). ETAs must use this, not duration_seconds, which includes
+	 * earlier stages and would overstate the estimate.
+	 */
+	progress_stage_elapsed_seconds?: number;
+}
+
 export interface HealthStats {
 	total: number;
 	pending: number;
@@ -244,6 +282,13 @@ export interface HealthErrorDetails {
 	total_articles?: number;
 	sampled?: number;
 	playback_impact?: PlaybackImpact;
+	// Segments whose availability was never established (transport failures, or
+	// ids the sweep never reached). Deliberately not counted as missing.
+	unresolved_segments?: number;
+	// Set when the check stopped before examining every planned segment, which
+	// makes `sampled` a partial count and the missing-segment map incomplete.
+	terminated_early?: boolean;
+	termination_reason?: string;
 }
 
 export interface HealthCleanupRequest {
@@ -365,12 +410,46 @@ export interface LibrarySyncStatus {
 	last_sync_result?: LibrarySyncResult;
 }
 
+// Metadata migration types (legacy inline-segment .meta → v3 shared NZB store)
+export interface MetadataMigrationProgress {
+	total_groups: number;
+	processed_groups: number;
+	total_files: number;
+	processed_files: number;
+	current_release: string;
+	start_time: string;
+}
+
+export interface MetadataMigrationResult {
+	dry_run: boolean;
+	groups: number;
+	faithful_groups: number;
+	synthesized_groups: number;
+	files_migrated: number;
+	files_failed: number;
+	bytes_before: number;
+	bytes_after: number;
+	bytes_saved: number;
+	failures?: string[];
+	cancelled: boolean;
+	duration: number;
+	completed_at: string;
+}
+
+export interface MetadataMigrationStatus {
+	is_running: boolean;
+	legacy_files: number;
+	legacy_groups: number;
+	progress?: MetadataMigrationProgress;
+	last_result?: MetadataMigrationResult;
+	last_dry_run?: MetadataMigrationResult;
+}
+
 // Pool Metrics types
 export interface ProviderStatus {
 	id: string;
 	name?: string;
 	host: string;
-	username: string;
 	used_connections: number;
 	max_connections: number;
 	state: string;

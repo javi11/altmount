@@ -63,9 +63,9 @@ func TestUDFWalk_LogsWhenFileICBHasUnknownTag(t *testing.T) {
 	fid[19] = byte(1 + len(name))                   // L_FI (comp byte + ASCII chars)
 	binary.LittleEndian.PutUint32(fid[20:24], 2048) // long_ad.length
 	binary.LittleEndian.PutUint32(fid[24:28], bogusSector)
-	binary.LittleEndian.PutUint16(fid[28:30], 0)   // long_ad.partition (0 → partStart-relative)
-	binary.LittleEndian.PutUint16(fid[36:38], 0)   // L_IU (impl-use length)
-	fid[38] = 8                                    // CS0 compression code (8 = ASCII)
+	binary.LittleEndian.PutUint16(fid[28:30], 0) // long_ad.partition (0 → partStart-relative)
+	binary.LittleEndian.PutUint16(fid[36:38], 0) // L_IU (impl-use length)
+	fid[38] = 8                                  // CS0 compression code (8 = ASCII)
 	copy(fid[39:39+len(name)], name)
 	// Padded record length (38 header + 11 name = 49, padded to 52). We
 	// leave the trailing 3 bytes as zeros from the make().
@@ -176,9 +176,9 @@ func TestUDFWalk_FollowsIndirectEntryChain(t *testing.T) {
 			} else {
 				nextSector = feSector
 			}
-			binary.LittleEndian.PutUint32(ie[36:40], 2048)        // length
-			binary.LittleEndian.PutUint32(ie[40:44], nextSector)  // block
-			binary.LittleEndian.PutUint16(ie[44:46], 0)           // partition
+			binary.LittleEndian.PutUint32(ie[36:40], 2048)       // length
+			binary.LittleEndian.PutUint32(ie[40:44], nextSector) // block
+			binary.LittleEndian.PutUint16(ie[44:46], 0)          // partition
 		}
 
 		// Real File Entry at feSector: tag 261, allocType 0 (short_ad),
@@ -187,10 +187,10 @@ func TestUDFWalk_FollowsIndirectEntryChain(t *testing.T) {
 		binary.LittleEndian.PutUint16(fe[0:2], 261) // File Entry
 		fe[34] = 0                                  // allocType 0 = short_ad
 		binary.LittleEndian.PutUint64(fe[56:64], uint64(dataSize))
-		binary.LittleEndian.PutUint32(fe[168:172], 0)    // L_EA
-		binary.LittleEndian.PutUint32(fe[172:176], 8)    // L_AD = one short_ad
-		binary.LittleEndian.PutUint32(fe[176:180], dataSize)    // short_ad.length (adType 0 in high 2 bits)
-		binary.LittleEndian.PutUint32(fe[180:184], dataSector)  // short_ad.block
+		binary.LittleEndian.PutUint32(fe[168:172], 0)          // L_EA
+		binary.LittleEndian.PutUint32(fe[172:176], 8)          // L_AD = one short_ad
+		binary.LittleEndian.PutUint32(fe[176:180], dataSize)   // short_ad.length (adType 0 in high 2 bits)
+		binary.LittleEndian.PutUint32(fe[180:184], dataSector) // short_ad.block
 
 		dirICB := udfLongAD{length: iso9660SectorSize, loc: udfLBA{block: dirSector, part: 0}}
 		return image, dirICB
@@ -353,9 +353,9 @@ func TestLocalISO_CountExtentsForBigFiles(t *testing.T) {
 	// count its allocation descriptors. We can't reuse ListISOFiles output
 	// directly because isoFileEntry discards the ICB.
 	type probed struct {
-		path string
-		size uint64
-		ads  int // allocation descriptors observed (= number of on-disc extents)
+		path  string
+		size  uint64
+		ads   int // allocation descriptors observed (= number of on-disc extents)
 		alloc byte
 	}
 

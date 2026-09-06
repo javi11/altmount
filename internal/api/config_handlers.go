@@ -130,6 +130,11 @@ func (s *Server) handleUpdateConfig(c *fiber.Ctx) error {
 		return RespondValidationError(c, "Invalid JSON in request body", err.Error())
 	}
 
+	// API responses intentionally mask provider credentials. Preserve the
+	// stored value when a full-config update sends an empty masked field; a
+	// separate credential-rotation operation can still replace it explicitly.
+	preserveMaskedStremioCredentials(currentConfig, newConfig)
+
 	slog.DebugContext(c.Context(), "Updating configuration")
 
 	// Validate the new configuration with API restrictions
@@ -161,6 +166,25 @@ func (s *Server) handleUpdateConfig(c *fiber.Ctx) error {
 
 	response := ToConfigAPIResponse(newConfig, apiKey)
 	return RespondSuccess(c, response)
+}
+
+func preserveMaskedStremioCredentials(current, updated *config.Config) {
+	if current == nil || updated == nil {
+		return
+	}
+	if updated.Stremio.Prowlarr.APIKey == "" {
+		updated.Stremio.Prowlarr.APIKey = current.Stremio.Prowlarr.APIKey
+	}
+	if updated.Stremio.Indexers.Prowlarr.APIKey == "" {
+		updated.Stremio.Indexers.Prowlarr.APIKey = current.Stremio.Indexers.Prowlarr.APIKey
+	}
+	for i := range updated.Stremio.Indexers.Newsnab {
+		for _, existing := range current.Stremio.Indexers.Newsnab {
+			if existing.ID == updated.Stremio.Indexers.Newsnab[i].ID && updated.Stremio.Indexers.Newsnab[i].APIKey == "" {
+				updated.Stremio.Indexers.Newsnab[i].APIKey = existing.APIKey
+			}
+		}
+	}
 }
 
 // handlePatchConfigSection updates a specific configuration section
@@ -213,7 +237,7 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 				newConfig.Providers[i].Password = oldPwdByID[newConfig.Providers[i].ID]
 			}
 		}
-	case "webdav", "api", "auth", "database", "metadata", "streaming", "health", "rclone", "import", "log", "sabnzbd", "arrs", "fuse", "segment_cache", "system", "mount_path", "mount", "stremio", "nzblnk", "network":
+	case "webdav", "api", "auth", "database", "metadata", "streaming", "health", "rclone", "import", "log", "sabnzbd", "arrs", "fuse", "segment_cache", "system", "mount_path", "mount", "stremio", "network", "par2_repair":
 		err = c.BodyParser(newConfig)
 		// BodyParser will map fields like "profiler_enabled" from JSON to the root of newConfig
 		// because Config struct has it with `json:"profiler_enabled"`.
@@ -227,6 +251,10 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 		// The frontend sends password: "" when the user hasn't entered a new password.
 		if err == nil && newConfig.WebDAV.Password == "" {
 			newConfig.WebDAV.Password = currentConfig.WebDAV.Password
+		}
+		// Preserve existing Prowlarr and Newsnab credentials when patching the Stremio section.
+		if err == nil && section == "stremio" {
+			preserveMaskedStremioCredentials(currentConfig, newConfig)
 		}
 	default:
 		return RespondValidationError(c, fmt.Sprintf("Unknown configuration section: %s", section), "INVALID_SECTION")
@@ -401,6 +429,12 @@ func (s *Server) handleTestProvider(c *fiber.Ctx) error {
 	defer cancel()
 
 	host := fmt.Sprintf("%s:%d", testReq.Host, testReq.Port)
+	providerName := testReq.ProviderID
+	if providerName == "" {
+		// Ad-hoc tests have no persisted provider ID. Keep the endpoint context
+		// while preventing nntppool from deriving a name from Auth.Username.
+		providerName = host
+	}
 	var tlsCfg *tls.Config
 	if testReq.TLS {
 		tlsCfg = &tls.Config{
@@ -411,6 +445,7 @@ func (s *Server) handleTestProvider(c *fiber.Ctx) error {
 
 	result := nntppool.TestProvider(ctx, nntppool.Provider{
 		Host:      host,
+		Name:      providerName,
 		TLSConfig: tlsCfg,
 		Auth:      nntppool.Auth{Username: testReq.Username, Password: testReq.Password},
 		SkipPing:  testReq.SkipPing,
@@ -467,6 +502,22 @@ func (s *Server) handleTestProvider(c *fiber.Ctx) error {
 //	@Failure		400		{object}	APIResponse
 //	@Security		BearerAuth
 //	@Router			/providers [post]
+// nextProviderID picks the lowest-numbered "provider_N" id not already used
+// by an existing provider. Providers can be deleted, so the next free index
+// is not simply len(existing)+1 — that can collide with a surviving provider.
+func nextProviderID(existing []config.ProviderConfig) string {
+	used := make(map[string]struct{}, len(existing))
+	for _, p := range existing {
+		used[p.ID] = struct{}{}
+	}
+	for i := len(existing) + 1; ; i++ {
+		candidate := fmt.Sprintf("provider_%d", i)
+		if _, exists := used[candidate]; !exists {
+			return candidate
+		}
+	}
+}
+
 func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 	if s.configManager == nil {
 		return RespondServiceUnavailable(c, "Configuration management not available", "CONFIG_UNAVAILABLE")
@@ -525,8 +576,8 @@ func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 		return RespondValidationError(c, "MinConnectionsAlive must be between 0 and MaxConnections", "INVALID_MIN_CONNECTIONS_ALIVE")
 	}
 
-	// Generate new ID
-	newID := fmt.Sprintf("provider_%d", len(currentConfig.Providers)+1)
+	// Generate a new ID that doesn't collide with an existing one.
+	newID := nextProviderID(currentConfig.Providers)
 
 	// Create new provider
 	newProvider := config.ProviderConfig{

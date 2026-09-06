@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -479,4 +480,65 @@ stremio:
 	assert.Equal(t, 500, cfg.Stremio.Prowlarr.CustomScores[`\b(2160p|4k)\b.*\b(remux|bdremux)\b`])
 	assert.Equal(t, 350, cfg.Stremio.Prowlarr.CustomScores[`\b(dv|dovi|dolby[ ._-]?vision)\b`])
 	assert.Equal(t, -100, cfg.Stremio.Prowlarr.CustomScores[`\b(aac[ ._-]?2\.0|stereo|mp3)\b`])
+}
+
+// A provider written by hand with no "id" (or an empty one) predates the id
+// requirement and must not prevent the process from starting: LoadConfig
+// should migrate it to a stable id rather than failing Validate.
+func TestLoadConfig_ProviderWithBlankIDDoesNotFailStartup(t *testing.T) {
+	tempDir := t.TempDir()
+	configFile := tempDir + "/config.yaml"
+
+	yamlContent := `
+providers:
+  - id: ''
+    host: news.example.test
+    port: 563
+    max_connections: 5
+  - host: news.other.test
+    port: 119
+    max_connections: 5
+`
+	err := os.WriteFile(configFile, []byte(yamlContent), 0644)
+	assert.NoError(t, err)
+
+	cfg, err := LoadConfig(configFile)
+	assert.NoError(t, err)
+	assert.NotNil(t, cfg)
+
+	assert.NotEmpty(t, cfg.Providers[0].ID)
+	assert.NotEmpty(t, cfg.Providers[1].ID)
+	assert.NotEqual(t, cfg.Providers[0].ID, cfg.Providers[1].ID)
+}
+
+// The patch directory defaults next to the metadata root but can be pointed
+// anywhere (e.g. a larger disk for patches and solver scratch files).
+func TestPar2RepairEffectivePatchDir(t *testing.T) {
+	cfg := Par2RepairConfig{}
+	assert.Equal(t, filepath.Join("/meta", "patches"), cfg.EffectivePatchDir("/meta"))
+
+	cfg.PatchDir = "/mnt/big-disk/altmount-patches"
+	assert.Equal(t, "/mnt/big-disk/altmount-patches", cfg.EffectivePatchDir("/meta"))
+}
+
+// PAR2 repair is beta: opt-in, so an install never streams whole releases
+// in the background until the user asks for it.
+func TestPar2RepairDisabledByDefault(t *testing.T) {
+	cfg := DefaultConfig()
+	assert.NotNil(t, cfg.Par2Repair.Enabled)
+	assert.False(t, *cfg.Par2Repair.Enabled, "PAR2 repair must be opt-in while in beta")
+}
+
+// ARR-first is on by default (including configs written before the knob
+// existed): corrupted files go to the ARRs first as always, with PAR2 repair
+// picking up whatever the ARRs cannot find.
+func TestPar2RepairArrFirstDefaultsOn(t *testing.T) {
+	assert.True(t, Par2RepairConfig{}.EffectiveArrFirst(), "unset must default to ARR-first")
+
+	off := false
+	assert.False(t, Par2RepairConfig{ArrFirst: &off}.EffectiveArrFirst())
+
+	cfg := DefaultConfig()
+	assert.NotNil(t, cfg.Par2Repair.ArrFirst)
+	assert.True(t, *cfg.Par2Repair.ArrFirst)
 }

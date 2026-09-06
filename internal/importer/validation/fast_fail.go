@@ -2,16 +2,190 @@ package validation
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"math/rand"
 	"time"
 
+	"github.com/javi11/altmount/internal/holes"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/usenet"
 	"github.com/javi11/nntppool/v4"
 )
+
+const (
+	fastFailStatMaxAttempts = 3
+	fastFailRetryBaseDelay  = 100 * time.Millisecond
+)
+
+var (
+	// ErrFastFailInconclusive means bounded retries could not establish whether
+	// one or more sampled articles exist. It is deliberately distinct from a
+	// definitive NNTP 430/423 miss so callers do not discard files as broken.
+	ErrFastFailInconclusive = errors.New("fast-fail validation inconclusive")
+	errFastFailUnreported   = errors.New("STAT result was not reported")
+)
+
+func isDefinitiveFastFailMiss(err error) bool {
+	return errors.Is(err, nntppool.ErrArticleNotFound)
+}
+
+// statIDsWithBoundedRetries checks ids up to fastFailStatMaxAttempts times.
+// Successful and definitively missing ids leave the retry set immediately;
+// only operational errors and unreported ids are retried. The returned map
+// contains only definitive misses. When stopOnMissing is true the first such
+// miss ends the sweep, preserving the release probe's fast-fail behavior.
+func statIDsWithBoundedRetries(
+	ctx context.Context,
+	client pool.NntpClient,
+	ids []string,
+	maxConnections int,
+	timeout time.Duration,
+	stopOnMissing bool,
+	patchIdx PatchIndex,
+) (missing map[string]error, unverified []string, err error) {
+	remaining := make([]string, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		remaining = append(remaining, id)
+	}
+
+	missing = make(map[string]error)
+	var lastErr error
+
+	for attempt := 1; attempt <= fastFailStatMaxAttempts && len(remaining) > 0; attempt++ {
+		statCtx, cancel := context.WithTimeout(ctx, pool.StatManyTimeout(len(remaining), maxConnections, timeout))
+		reported := make(map[string]bool, len(remaining))
+		transient := make(map[string]error, len(remaining))
+
+		for result := range client.StatMany(statCtx, remaining, nntppool.StatManyOptions{Concurrency: maxConnections}) {
+			if _, wanted := seen[result.MessageID]; !wanted {
+				continue
+			}
+			reported[result.MessageID] = true
+			if result.Err == nil {
+				continue
+			}
+			// Repaired bytes live only in the local patch store, so an article
+			// the providers dropped is still available. Reported with no error
+			// recorded, it leaves the retry set as reachable.
+			if patched(patchIdx, result.MessageID) {
+				continue
+			}
+			if isDefinitiveFastFailMiss(result.Err) {
+				missing[result.MessageID] = result.Err
+				if stopOnMissing {
+					if ctxErr := ctx.Err(); ctxErr != nil {
+						cancel()
+						return nil, nil, ctxErr
+					}
+					cancel()
+					return missing, nil, nil
+				}
+				continue
+			}
+			transient[result.MessageID] = result.Err
+			lastErr = result.Err
+		}
+
+		statErr := statCtx.Err()
+		cancel()
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, nil, ctxErr
+		}
+
+		next := make([]string, 0, len(remaining))
+		for _, id := range remaining {
+			if _, definitive := missing[id]; definitive {
+				continue
+			}
+			if err, failed := transient[id]; failed {
+				lastErr = err
+				next = append(next, id)
+				continue
+			}
+			if !reported[id] {
+				if statErr != nil {
+					lastErr = statErr
+				} else {
+					lastErr = errFastFailUnreported
+				}
+				next = append(next, id)
+			}
+		}
+		remaining = next
+
+		if len(remaining) == 0 {
+			return missing, nil, nil
+		}
+		if attempt == fastFailStatMaxAttempts || releaseLooksDead(len(missing), len(ids)-len(remaining)) {
+			// Bounded retries exhausted, or the definitive answers so far
+			// already condemn the release: a sweep dominated by 430s is a dead
+			// post whose remaining STATs are only queued behind more 430s
+			// (each one costs the provider a slow spool lookup), so waiting
+			// them out adds tens of seconds and changes nothing.
+			return missing, remaining, fmt.Errorf("%w: %d segment(s) remained unverified after %d attempts: %w",
+				ErrFastFailInconclusive, len(remaining), attempt, lastErr)
+		}
+
+		delay := fastFailRetryBaseDelay << (attempt - 1)
+		slog.WarnContext(ctx, "Retrying inconclusive fast-fail STATs",
+			"attempt", attempt+1,
+			"remaining", len(remaining),
+			"delay", delay,
+			"error", lastErr,
+		)
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+
+	return missing, nil, nil
+}
+
+// maxSweepChunk is the most STATs the per-file sweep has outstanding at once.
+const maxSweepChunk = 64
+
+// Dead-post thresholds for releaseLooksDead: at least this many definitive
+// misses, making up at least this share of the definitive answers so far.
+const (
+	deadReleaseMinMisses    = 8
+	deadReleaseMissFraction = 0.5
+)
+
+// releaseLooksDead reports whether the definitive STAT answers collected so
+// far (missing out of reported) already prove the release unservable. A
+// release this damaged fails the holes policy regardless of how the
+// unverified remainder would answer, so the sweep can stop waiting for it.
+func releaseLooksDead(missing, reported int) bool {
+	return missing >= deadReleaseMinMisses && float64(missing) >= deadReleaseMissFraction*float64(reported)
+}
+
+// splitPlaceholders separates a file's real segments from gap placeholders.
+func splitPlaceholders(segments []*metapb.SegmentData) (real, placeholders []*metapb.SegmentData) {
+	for _, seg := range segments {
+		if seg == nil {
+			continue
+		}
+		if holes.IsPlaceholderID(seg.Id) {
+			placeholders = append(placeholders, seg)
+		} else {
+			real = append(real, seg)
+		}
+	}
+	return real, placeholders
+}
 
 // selectFastFailSegments picks a lightweight per-file sample for the fast-fail
 // reachability gate: always the first and last segment (DMCA/truncation
@@ -53,6 +227,30 @@ func selectFastFailSegments(segments []*metapb.SegmentData, samplePercentage int
 	return out
 }
 
+// maxReleaseProbeSamples bounds the release probe. It answers one question —
+// is anything missing? — and a release damaged enough to matter (the hole
+// caps sit near 2 %) is caught by a few dozen STATs with near certainty,
+// while the per-file sweep that follows a miss keeps the full sample. A
+// percentage-sized probe on a large release was hundreds of STATs and most
+// of a second on every import.
+const maxReleaseProbeSamples = 64
+
+// capReleaseProbeSample keeps the selector's edge picks (its first five are
+// the first three and last two segments) and thins the random middle to fit.
+func capReleaseProbeSample(selected []*metapb.SegmentData) []*metapb.SegmentData {
+	if len(selected) <= maxReleaseProbeSamples {
+		return selected
+	}
+	const edge = 5
+	keep := make([]*metapb.SegmentData, 0, maxReleaseProbeSamples)
+	keep = append(keep, selected[:edge]...)
+	middle := selected[edge:]
+	for _, i := range rand.Perm(len(middle))[:maxReleaseProbeSamples-edge] {
+		keep = append(keep, middle[i])
+	}
+	return keep
+}
+
 // FastFailFile is the minimal file surface needed for early segment reachability checks.
 type FastFailFile struct {
 	Filename string
@@ -69,15 +267,31 @@ type FastFailFile struct {
 // It flattens all candidate segments across the release and Stats a single
 // sample (usenet.SelectSegmentsForValidation: first 3 + last 2 + random middle,
 // min 5 for the whole release), cancelling the remaining Stats on the
-// first miss.
+// first definitive miss. Operational errors are retried before the probe is
+// declared inconclusive.
 //
 // Returns (missing, err):
-//   - err is reserved for infrastructure failures (pool unavailable/nil).
-//   - missing reports whether any sampled segment was unreachable. A 430 / Stat
-//     failure / timeout yields (true, nil) — not an error — so the caller can
-//     escalate to the per-file FastFailCheckFiles sweep to map exactly which
-//     files are broken. A clean release returns (false, nil) and the caller
-//     proceeds straight to parsing, paying only this sample's worth of Stats.
+//   - err reports infrastructure failures, caller cancellation, or operational
+//     STAT failures that remain inconclusive after bounded retries.
+//   - missing reports whether any sampled segment returned a definitive 430/423,
+//     so the caller can escalate to the per-file FastFailCheckFiles sweep to map
+//     exactly which files are broken. Operational errors and timeouts are retried;
+//     exhaustion returns ErrFastFailInconclusive. A clean release returns
+//     (false, nil) and proceeds straight to parsing.
+//
+// PatchIndex reports whether a locally repaired copy of an article exists.
+// Repaired bytes live only in AltMount's patch store, never on usenet, so a
+// segment the providers have dropped still counts as available when patched —
+// without this a repaired release could never be (re-)imported.
+type PatchIndex interface {
+	Has(messageID string) bool
+}
+
+// patched reports whether idx has a local patch for the message ID.
+func patched(idx PatchIndex, messageID string) bool {
+	return idx != nil && idx.Has(messageID)
+}
+
 func FastFailReleaseProbe(
 	ctx context.Context,
 	files []FastFailFile,
@@ -85,20 +299,27 @@ func FastFailReleaseProbe(
 	segmentSamplePercentage int,
 	maxConnections int,
 	timeout time.Duration,
+	patchIdx PatchIndex,
 ) (bool, error) {
 	var segments []*metapb.SegmentData
 	for _, file := range files {
 		for _, segment := range file.Segments {
-			if segment != nil && segment.Id != "" {
-				segments = append(segments, segment)
+			if segment == nil || segment.Id == "" {
+				continue
 			}
+			if holes.IsPlaceholderID(segment.Id) {
+				// The NZB itself omits this article: damage known without a
+				// single STAT, so the per-file sweep can map it right away.
+				return true, nil
+			}
+			segments = append(segments, segment)
 		}
 	}
 	if len(segments) == 0 {
 		return false, nil
 	}
 
-	selected := usenet.SelectSegmentsForValidation(segments, segmentSamplePercentage)
+	selected := capReleaseProbeSample(usenet.SelectSegmentsForValidation(segments, segmentSamplePercentage))
 	if len(selected) == 0 {
 		return false, nil
 	}
@@ -124,26 +345,34 @@ func FastFailReleaseProbe(
 		ids[i] = seg.Id
 	}
 
-	// Stat the sample via a single bulk sweep, cancelling the rest on the
-	// first miss. Infrastructure failures are handled above, so any error
-	// streamed back here indicates an unreachable segment.
-	statCtx, cancel := context.WithTimeout(ctx, pool.StatManyTimeout(len(ids), maxConnections, timeout))
-	defer cancel()
-
-	for r := range usenetPool.StatMany(statCtx, ids, nntppool.StatManyOptions{Concurrency: maxConnections}) {
-		if r.Err != nil {
-			cancel()
+	// Stat the sample via a bulk sweep, cancelling the rest on the first
+	// definitive miss. Operational errors retry only the affected IDs. Cap each
+	// attempt's probe timeout to 2 seconds per item so dead releases stay bounded.
+	probeTimeout := timeout
+	if probeTimeout > 2*time.Second {
+		probeTimeout = 2 * time.Second
+	}
+	missing, _, err := statIDsWithBoundedRetries(ctx, usenetPool, ids, maxConnections, probeTimeout, true, patchIdx)
+	if err != nil {
+		if len(missing) > 0 {
+			// The probe found a definitive miss before running out of
+			// patience for the rest; the answer is "damaged" either way.
 			return true, nil
 		}
+		return false, err
 	}
-	return false, nil
+	return len(missing) > 0, nil
 }
 
 // FastFailFileResult records the reachability outcome for a single FastFailFile.
 // Results from FastFailCheckFiles are index-aligned with the input slice.
 type FastFailFileResult struct {
 	Broken            bool
-	MissingSegmentIDs []string // segment IDs whose Stat failed
+	MissingSegmentIDs []string // segment IDs whose Stat failed, plus known gap placeholders
+	// KnownGapCount is how many of MissingSegmentIDs are gap placeholders:
+	// articles the NZB never listed, known missing without a STAT. Exact,
+	// not sampled, so callers judge them separately from the sample.
+	KnownGapCount int
 	// SampledCount is how many of the file's segments were Stat-checked (the
 	// sample size), needed to project the release-wide miss rate for the
 	// tolerant damage policy.
@@ -157,8 +386,10 @@ type FastFailFileResult struct {
 // index alignment while avoiding wasted Stat round-trips.
 // Returns one result per input file (index-aligned). Files with no segments
 // are skipped. Infrastructure failures (pool unavailable) are returned as an
-// error; per-segment Stat failures mark the owning file Broken. progressTracker
-// may be nil; when set it reports completed Stats as work progresses.
+// error; definitive article-not-found results mark the owning file Broken.
+// Operational failures are retried, and exhaustion returns
+// ErrFastFailInconclusive without marking files broken. progressTracker may be
+// nil; when set it reports completed Stats as work progresses.
 func FastFailCheckFiles(
 	ctx context.Context,
 	files []FastFailFile,
@@ -167,6 +398,7 @@ func FastFailCheckFiles(
 	maxConnections int,
 	timeout time.Duration,
 	progressTracker progress.ProgressTracker,
+	patchIdx PatchIndex,
 ) ([]FastFailFileResult, error) {
 	if !poolManager.HasPool() {
 		return nil, fmt.Errorf("cannot fast-fail import: usenet connection pool is nil")
@@ -206,7 +438,23 @@ func FastFailCheckFiles(
 		if len(file.Segments) == 0 {
 			continue
 		}
-		perFile[fileIdx] = selectFastFailSegments(file.Segments, segmentSamplePercentage)
+		real, placeholders := splitPlaceholders(file.Segments)
+		if len(placeholders) > 0 {
+			// Articles the NZB never listed are misses known before the
+			// sweep starts; they need no STAT and are reported as observed.
+			// The group is not condemned here: an exactly-known gap is
+			// judged against the hole caps by the caller, which can keep a
+			// lightly holed archive set importable.
+			results[fileIdx].Broken = true
+			results[fileIdx].KnownGapCount = len(placeholders)
+			for _, ph := range placeholders {
+				results[fileIdx].MissingSegmentIDs = append(results[fileIdx].MissingSegmentIDs, ph.Id)
+			}
+		}
+		if len(real) == 0 {
+			continue
+		}
+		perFile[fileIdx] = selectFastFailSegments(real, segmentSamplePercentage)
 		results[fileIdx].SampledCount = len(perFile[fileIdx])
 		if len(perFile[fileIdx]) > maxSamples {
 			maxSamples = len(perFile[fileIdx])
@@ -244,6 +492,10 @@ func FastFailCheckFiles(
 		}
 	}
 
+	// Definitive answers accumulated across chunks, so a sweep that turns
+	// inconclusive can still be settled when the release is plainly dead.
+	var definitiveMissing, definitiveReported int
+
 	// Walk the flat job list in maxConnections-sized chunks. Within a chunk,
 	// every not-yet-broken job is Stat-ed together via one StatMany call;
 	// brokenGroups is checked and updated between chunks, so a chunk size of 1
@@ -251,8 +503,15 @@ func FastFailCheckFiles(
 	// short-circuit the previous goroutine-pool implementation gave: the
 	// group is marked broken right after its first miss, and every later
 	// chunk skips the rest of that group's jobs without a network round-trip.
-	for start := 0; start < total; start += maxConnections {
-		end := min(start+maxConnections, total)
+	// Chunks are bounded below the pool's STAT pipeline capacity: a sweep that
+	// pipelines hundreds of STATs over a dead release parks every connection
+	// behind a queue of slow 430 lookups (each ~1 s on the server side), and
+	// abandoning them does not unqueue them — the next import's own probe then
+	// times out behind the backlog. Smaller waves let the dead-release verdict
+	// fire after one wave with little left outstanding.
+	chunkSize := min(maxConnections, maxSweepChunk)
+	for start := 0; start < total; start += chunkSize {
+		end := min(start+chunkSize, total)
 		chunk := jobs[start:end]
 
 		toCheck := make([]statJob, 0, len(chunk))
@@ -276,15 +535,13 @@ func FastFailCheckFiles(
 			ids[i] = job.segID
 		}
 
-		statCtx, cancel := context.WithTimeout(ctx, pool.StatManyTimeout(len(ids), maxConnections, timeout))
-		errByID := make(map[string]error, len(ids))
-		for r := range usenetPool.StatMany(statCtx, ids, nntppool.StatManyOptions{Concurrency: maxConnections}) {
-			errByID[r.MessageID] = r.Err
+		missingByID, unverified, err := statIDsWithBoundedRetries(ctx, usenetPool, ids, maxConnections, timeout, false, patchIdx)
+		if err != nil && !errors.Is(err, ErrFastFailInconclusive) {
+			return nil, err
 		}
-		cancel()
 
 		for _, job := range toCheck {
-			if statErr := errByID[job.segID]; statErr != nil {
+			if _, missing := missingByID[job.segID]; missing {
 				results[job.fileIdx].Broken = true
 				results[job.fileIdx].MissingSegmentIDs = append(results[job.fileIdx].MissingSegmentIDs, job.segID)
 				if job.groupKey != "" {
@@ -293,6 +550,42 @@ func FastFailCheckFiles(
 			}
 			advance()
 		}
+
+		if err == nil {
+			continue
+		}
+		definitiveMissing += len(missingByID)
+		definitiveReported += len(toCheck) - len(unverified)
+		if !releaseLooksDead(definitiveMissing, definitiveReported) {
+			return nil, err
+		}
+		// Dead release: every file still unverified is condemned with the
+		// rest rather than holding the import for STATs that cannot change
+		// the outcome. Only observed misses are reported as missing IDs.
+		unverifiedSet := make(map[string]struct{}, len(unverified))
+		for _, id := range unverified {
+			unverifiedSet[id] = struct{}{}
+		}
+		for _, job := range toCheck {
+			if _, ok := unverifiedSet[job.segID]; ok {
+				results[job.fileIdx].Broken = true
+				if job.groupKey != "" {
+					brokenGroups[job.groupKey] = struct{}{}
+				}
+			}
+		}
+		for _, job := range jobs[end:] {
+			results[job.fileIdx].Broken = true
+			if job.groupKey != "" {
+				brokenGroups[job.groupKey] = struct{}{}
+			}
+			advance()
+		}
+		slog.WarnContext(ctx, "Fast-fail sweep stopped early: release is dead",
+			"definitive_missing", definitiveMissing,
+			"definitive_reported", definitiveReported,
+			"unverified", len(unverified))
+		break
 	}
 
 	// Propagate set breakage: every file in a broken group is marked Broken so

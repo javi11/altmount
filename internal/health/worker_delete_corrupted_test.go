@@ -122,8 +122,8 @@ func TestPrepareUpdateForResultDeleteOnCorruption(t *testing.T) {
 	require.NoError(t, env.metadataService.WriteFileMetadata(filePath, meta))
 
 	fh := database.FileHealth{
-		FilePath:  filePath,
-		Status:    database.HealthStatusPending,
+		FilePath:   filePath,
+		Status:     database.HealthStatusPending,
 		RetryCount: 99,
 	}
 	event := HealthEvent{

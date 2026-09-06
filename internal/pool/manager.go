@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -51,7 +52,7 @@ type Manager interface {
 	// If no pool exists, a new one is created with this provider.
 	AddProvider(provider nntppool.Provider) error
 
-	// RemoveProvider removes a provider by its nntppool name (host:port or host:port+username).
+	// RemoveProvider removes a provider by its stable configuration ID.
 	// If the last provider is removed, the pool is closed.
 	RemoveProvider(name string) error
 
@@ -82,6 +83,13 @@ type Manager interface {
 	// total connection count (sum of provider max connections).
 	SetImportConnCapacity(total int)
 
+	// SetStreamHeadroom sets how many connections the import budget holds back
+	// per active stream. See config.Config.StreamHeadroomConnections.
+	SetStreamHeadroom(perStream int)
+	// SpeculativeBudget bounds read-ahead fetches across every stream; nil
+	// (as returned by test fakes) means unlimited.
+	SpeculativeBudget() *SpeculativeBudget
+
 	// ImportConnCapacity returns the current budget capacity snapshot,
 	// useful for sizing import worker pools.
 	ImportConnCapacity() int
@@ -93,12 +101,23 @@ type Manager interface {
 	// NotifyStreamChange must be called by the stream source whenever its
 	// active stream count changes, so the budget can re-evaluate.
 	NotifyStreamChange()
+
+	// StatSweepConcurrency returns how many STATs an availability sweep
+	// (import fast-fail, health check) should keep in flight. While streams
+	// are active it returns the caller's conservative bound — typically one
+	// connection's STAT pipeline depth, so sweeps never crowd playback — and
+	// on an idle pool it opens up to the pool's aggregate STAT pipeline
+	// capacity (nntppool's StatCapacity), where STAT's one-line replies make
+	// the extra width nearly free. Falls back to conservative when no pool
+	// exists or its capacity is below the conservative bound.
+	StatSweepConcurrency(conservative int) int
 }
 
 // StatsRepository defines the interface for persisting pool statistics
 type StatsRepository interface {
 	UpdateSystemStat(ctx context.Context, key string, value int64) error
 	BatchUpdateSystemStats(ctx context.Context, stats map[string]int64) error
+	MigrateSystemStats(ctx context.Context, stats map[string]int64, deleteKeys []string) error
 	GetSystemStats(ctx context.Context) (map[string]int64, error)
 	AddBytesDownloadedToDailyStat(ctx context.Context, bytes int64) error
 	AddProviderBytesToHourlyStat(ctx context.Context, providerID string, bytes int64) error
@@ -121,21 +140,30 @@ type manager struct {
 	quotaWatchCancel context.CancelFunc
 	admission        *ImportAdmission
 	budget           *ImportBudget
+	specBudget       *SpeculativeBudget
 }
 
 // NewManager creates a new pool manager
 func NewManager(ctx context.Context, repo StatsRepository) Manager {
 	return &manager{
-		ctx:       ctx,
-		repo:      repo,
-		logger:    slog.Default().With("component", "pool"),
-		admission: NewImportAdmission(),
-		budget:    NewImportBudget(),
+		ctx:        ctx,
+		repo:       repo,
+		logger:     slog.Default().With("component", "pool"),
+		admission:  NewImportAdmission(),
+		budget:     NewImportBudget(),
+		specBudget: NewSpeculativeBudget(),
 	}
 }
 
 // providerPoolName returns the lookup key nntppool uses for a provider.
 func providerPoolName(p nntppool.Provider) string {
+	if p.Name != "" {
+		return p.Name
+	}
+	return legacyProviderPoolName(p)
+}
+
+func legacyProviderPoolName(p nntppool.Provider) string {
 	name := p.Host
 	if p.Auth.Username != "" {
 		name += "+" + p.Auth.Username
@@ -168,12 +196,51 @@ func (m *manager) injectQuotaState(providers []nntppool.Provider) {
 		}
 	}
 
+	migrated := make(map[string]int64)
+	legacyKeys := make(map[string]struct{})
+	legacyProviderCounts := make(map[string]int)
 	for i := range providers {
 		name := providerPoolName(providers[i])
+		legacyName := legacyProviderPoolName(providers[i])
+		if name != legacyName {
+			legacyProviderCounts[legacyName]++
+		}
+	}
+
+	for i := range providers {
+		name := providerPoolName(providers[i])
+		legacyName := legacyProviderPoolName(providers[i])
+		used, hasUsed := quotaUsed[name]
+		resetNano, hasReset := quotaResetAt[name]
+		if name != legacyName {
+			if legacyProviderCounts[legacyName] == 1 {
+				// Provider IDs replaced host+username keys. Import each legacy value
+				// only when the new key does not already exist, so a restart cannot
+				// overwrite state written after a partial migration.
+				if !hasUsed {
+					used, hasUsed = quotaUsed[legacyName]
+					if hasUsed {
+						migrated["quota_used:"+name] = used
+					}
+				}
+				if !hasReset {
+					resetNano, hasReset = quotaResetAt[legacyName]
+					if hasReset {
+						migrated["quota_reset_at:"+name] = resetNano
+					}
+				}
+				if _, ok := quotaUsed[legacyName]; ok {
+					legacyKeys["quota_used:"+legacyName] = struct{}{}
+				}
+				if _, ok := quotaResetAt[legacyName]; ok {
+					legacyKeys["quota_reset_at:"+legacyName] = struct{}{}
+				}
+			}
+		}
 
 		hasResetTime := false
 		var resetTime time.Time
-		if resetNano, ok := quotaResetAt[name]; ok && resetNano > 0 {
+		if hasReset && resetNano > 0 {
 			resetTime = time.Unix(0, resetNano)
 			hasResetTime = true
 		}
@@ -181,7 +248,7 @@ func (m *manager) injectQuotaState(providers []nntppool.Provider) {
 		if hasResetTime {
 			if resetTime.After(time.Now()) {
 				// The quota period is still active: restore the used bytes and the reset time
-				if used, ok := quotaUsed[name]; ok && used > 0 {
+				if hasUsed && used > 0 {
 					providers[i].QuotaUsed = used
 				}
 				providers[i].QuotaResetAt = resetTime
@@ -192,9 +259,24 @@ func (m *manager) injectQuotaState(providers []nntppool.Provider) {
 			}
 		} else {
 			// No persisted reset time: restore whatever usage we have (fallback)
-			if used, ok := quotaUsed[name]; ok && used > 0 {
+			if hasUsed && used > 0 {
 				providers[i].QuotaUsed = used
 			}
+		}
+	}
+
+	if len(legacyKeys) > 0 {
+		keys := make([]string, 0, len(legacyKeys))
+		for key := range legacyKeys {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		if err := m.repo.MigrateSystemStats(m.ctx, migrated, keys); err != nil {
+			m.logger.ErrorContext(m.ctx, "Failed to migrate legacy provider quota state", "error_class", "repository")
+		}
+	} else if len(migrated) > 0 {
+		if err := m.repo.MigrateSystemStats(m.ctx, migrated, nil); err != nil {
+			m.logger.ErrorContext(m.ctx, "Failed to migrate legacy provider quota state", "error_class", "repository")
 		}
 	}
 }
@@ -449,15 +531,23 @@ func (m *manager) RemoveProvider(name string) error {
 	return nil
 }
 
-// resetProviderQuotaLocked performs the quota reset with m.mu already held.
-func (m *manager) resetProviderQuotaLocked(ctx context.Context, poolName string) error {
-	if m.pool == nil {
-		return fmt.Errorf("NNTP connection pool not available")
-	}
+// currentPool snapshots the pool pointer under a short read lock so callers can
+// use it without holding the manager lock across slow operations.
+func (m *manager) currentPool() *nntppool.Client {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
+	return m.pool
+}
+
+// resetProviderQuotaOn resets poolName's quota on the given pool and clears the
+// persisted quota state. Must be called without m.mu held: the repository write
+// can block, and holding the manager lock across it would stall GetPool on the
+// streaming/import hot path.
+func (m *manager) resetProviderQuotaOn(ctx context.Context, pool *nntppool.Client, poolName string) error {
 	m.logger.InfoContext(ctx, "Resetting provider quota", "provider", poolName)
 
-	if err := m.pool.ResetProviderQuota(poolName); err != nil {
+	if err := pool.ResetProviderQuota(poolName); err != nil {
 		return fmt.Errorf("failed to reset provider quota: %w", err)
 	}
 
@@ -477,10 +567,12 @@ func (m *manager) resetProviderQuotaLocked(ctx context.Context, poolName string)
 // ResetProviderQuota resets the download quota counter for a provider,
 // clearing its consumed-bytes counter and exceeded flag in-place.
 func (m *manager) ResetProviderQuota(ctx context.Context, poolName string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	pool := m.currentPool()
+	if pool == nil {
+		return fmt.Errorf("NNTP connection pool not available")
+	}
 
-	return m.resetProviderQuotaLocked(ctx, poolName)
+	return m.resetProviderQuotaOn(ctx, pool, poolName)
 }
 
 // AcquireImportSlot blocks until an import admission slot is available or ctx
@@ -505,6 +597,16 @@ func (m *manager) AcquireImportConnection(ctx context.Context) (func(), error) {
 // connection count.
 func (m *manager) SetImportConnCapacity(total int) {
 	m.budget.SetCapacity(total)
+}
+
+// SetStreamHeadroom sets the per-stream import connection reservation.
+func (m *manager) SetStreamHeadroom(perStream int) {
+	m.budget.SetHeadroom(perStream)
+}
+
+// SpeculativeBudget returns the pool-wide read-ahead budget.
+func (m *manager) SpeculativeBudget() *SpeculativeBudget {
+	return m.specBudget
 }
 
 // ImportConnCapacity returns the current budget capacity snapshot.
@@ -533,6 +635,39 @@ func (m *manager) SetProviderIDs(mapping map[string]string) {
 	if m.metricsTracker != nil {
 		m.metricsTracker.SetProviderIDs(mapping)
 	}
+}
+
+// idleStatSweepFactor bounds how far an idle-pool sweep widens past the
+// conservative (one-connection-pipeline) bound. The pool's full StatCapacity
+// is NOT safe here: nntppool stamps each STAT's per-attempt deadline (~2s
+// adaptive) at dispatch, and capacity-width dispatch fills every connection's
+// pipeline to StatInflight depth — the pipeline tail cannot drain before its
+// deadline, the reader's read timeout then closes the whole connection
+// (replies are FIFO), and every pipelined request on it fails with
+// "connection died". Observed live: a 4096-wide sweep against a 50-connection
+// pool left 3692 of 4147 STATs unresolved per pass and killed the pool for
+// minutes, taking concurrent playback to 0 B/s. Twice the conservative bound
+// keeps per-connection pipelines a few requests deep — drained well inside
+// the attempt window at realistic RTTs — while still sweeping a full release
+// in seconds.
+const idleStatSweepFactor = 2
+
+// StatSweepConcurrency picks the in-flight STAT bound for an availability
+// sweep: conservative while streams are active (or with no pool); a bounded
+// widening — min(StatCapacity, idleStatSweepFactor × conservative) — when
+// idle. See idleStatSweepFactor for why the full capacity is never used.
+func (m *manager) StatSweepConcurrency(conservative int) int {
+	if m.budget.StreamsActive() {
+		return conservative
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.pool == nil {
+		return conservative
+	}
+	widened := min(m.pool.StatCapacity(), idleStatSweepFactor*conservative)
+	return max(widened, conservative)
 }
 
 // startQuotaWatcher starts the background quota watcher if not already running.
@@ -574,15 +709,17 @@ func (m *manager) quotaWatchLoop(ctx context.Context) {
 // but whose quota counter was never cleared (because no new request arrived to
 // trigger nntppool's on-demand reset path).
 func (m *manager) checkAndResetExpiredQuotas(ctx context.Context) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.pool == nil {
+	// Snapshot the pool and do the rest unlocked: SetProviders/ClearPool may
+	// swap or close it meanwhile, but nntppool's accessors are concurrency-safe
+	// and resetting a quota on a replaced/closed pool is harmless (it either
+	// finds the provider or reports it as not found).
+	pool := m.currentPool()
+	if pool == nil {
 		return
 	}
 
 	now := time.Now()
-	for _, ps := range m.pool.Stats().Providers {
+	for _, ps := range pool.Stats().Providers {
 		// Skip providers with no quota configured or no tracked usage to reset.
 		// Without the QuotaUsed guard, providers that simply have a quota period
 		// configured but have never downloaded anything would trigger a spurious
@@ -596,7 +733,7 @@ func (m *manager) checkAndResetExpiredQuotas(ctx context.Context) {
 
 		m.logger.InfoContext(ctx, "Auto-resetting expired provider quota",
 			"provider", ps.Name, "reset_at", ps.QuotaResetAt)
-		if err := m.resetProviderQuotaLocked(ctx, ps.Name); err != nil {
+		if err := m.resetProviderQuotaOn(ctx, pool, ps.Name); err != nil {
 			m.logger.ErrorContext(ctx, "Failed to auto-reset provider quota",
 				"provider", ps.Name, "error", err)
 		}

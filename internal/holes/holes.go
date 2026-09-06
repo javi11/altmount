@@ -8,14 +8,19 @@
 //   - at PLAYBACK, the hole hooks decide per miss whether to zero-fill and
 //     keep streaming or to kill the stream and fail the file.
 //
-// Ported from AIOStreams' holes.ts. This package is imported by usenet,
-// importer, health and nzbfilesystem layers; it must stay dependency-free.
+// This package is imported by usenet, importer, health and nzbfilesystem
+// layers; it must stay dependency-free.
 package holes
 
 import (
 	"path/filepath"
 	"strings"
+	"time"
 )
+
+// TTL is how long a confirmed miss is trusted before the article is asked
+// for again: providers backfill, releases get reposted, accounts get added.
+const TTL = 24 * time.Hour
 
 const (
 	// MaxPadRunSegments is the longest run of consecutive missing segments
@@ -167,6 +172,24 @@ func ClassifyProjected(hits, sampled, totalSegments, longestObservedRun int) Ver
 		}
 	}
 	return VerdictDegraded
+}
+
+// ExceedsAcceptableMissing reports whether a confirmed-missing fraction
+// exceeds a configured acceptable-missing percentage (0-100, see
+// HealthConfig.AcceptableMissingSegmentsPercentage). A percentage of 0 means
+// zero tolerance: any missing segment exceeds it. Used both at import time
+// (projected sample fraction) and at health check (measured fraction of the
+// whole file) so exceeding the same user-configured ceiling always escalates
+// past VerdictDegraded to VerdictFailed, triggering repair instead of
+// leaving the file degraded indefinitely.
+func ExceedsAcceptableMissing(missing, total int, acceptablePercent float64) bool {
+	if total <= 0 || missing <= 0 {
+		return false
+	}
+	if acceptablePercent >= 100 {
+		return false
+	}
+	return float64(missing)/float64(total)*100 > acceptablePercent
 }
 
 // Accumulator incrementally merges missing segments into maximal

@@ -24,7 +24,6 @@ database:
 # Metadata filesystem configuration
 metadata:
   root_path: '/config/metadata' # Directory to store metadata files (required)
-  delete_source_nzb_on_removal: false # Delete source NZB file when metadata is removed (default: false)
   delete_completed_nzb: false # Delete NZB source file after successful import (default: false, DANGEROUS: prevents re-import)
   backup:
     enabled: false # Enable automatic metadata backups
@@ -34,10 +33,18 @@ metadata:
 
 # Streaming and download configuration
 streaming:
-  max_prefetch: 30 # Number of segments to prefetch ahead of current read position
+  max_prefetch: 60 # Segments to prefetch ahead of the read position (default: 60; also capped at 96 MB)
   failure_masking:
     enabled: true # Automatically hide files from mounts after repeated failures
     threshold: 3 # Number of streaming failures before masking a file
+
+# Segment cache: decoded articles kept for reuse across handles and re-opens.
+segment_cache:
+  memory_mb: 256 # In-memory tier in front of the disk cache; on even when the disk cache is off (0 disables).
+  enabled: false # Disk tier
+  cache_path: /tmp/altmount-segcache
+  max_size_gb: 10
+  expiry_hours: 24
 
 # RClone configuration (optional)
 rclone:
@@ -97,6 +104,13 @@ rclone:
   vfs_read_ahead: '128M' # VFS read-ahead size (--vfs-read-ahead=128M)
   dir_cache_time: '10m' # Directory cache time (--dir-cache-time=10m)
 
+  # How long the rcd may stay unresponsive to liveness probes before it is killed
+  # and restarted. Restarting re-establishes the mount, which unmounts it out from
+  # under every process currently reading it, so raise this if your rcd goes
+  # briefly slow under load (large library scans, bursts of VFS refreshes) and you
+  # would rather ride the stall out than drop the mount.
+  rcd_restart_after: '90s'
+
   # Additional VFS settings (advanced configuration)
   vfs_cache_min_free_space: '1G' # Minimum free space for VFS cache
   vfs_disk_space_total: '1G' # Total disk space for VFS operations
@@ -153,8 +167,17 @@ import:
     - '.epub'
     - '.pdf'
     - '.cbz'
+  # Connections held back from import per active stream. Omit to derive it from
+  # your pool size (a quarter of total connections, minimum 2) — the cost of a
+  # reservation is the SHARE of the pool it takes, so a fixed count cannot be
+  # right at more than one pool size.
+  # Measured at 100 connections behind a 400 MB/s link: 8 costs nothing and cuts
+  # stream p50 190ms->179ms; 32 costs 7-13% import throughput (during playback
+  # only) for p50 147ms and p99 245ms->170ms. Raise it if playback latency
+  # matters more than import speed. 0 disables the reservation.
+  # stream_headroom_connections: 25
   max_concurrent_imports: 0 # Cap on NZB imports running at once (0 = unlimited). NNTP connections are balanced automatically: imports use the pool's full capacity and always yield to streaming.
-  segment_sample_percentage: 1 # Percentage of segments to sample for validation (1-100)
+  segment_sample_percentage: 1 # Segments to sample during import-phase validation (RAR extraction, archive integrity) as a percentage 1-100; lower is faster (default: 1)
   import_strategy: 'NONE' # Import strategy: NONE (direct import), SYMLINK (create symlinks), STRM (create .strm files)
   import_dir: '' # Import directory (required when import_strategy is SYMLINK or STRM, must be absolute path)
                  # Windows example: 'C:\Users\user\Videos'
@@ -166,15 +189,26 @@ health:
   library_dir: '' # Library directory to monitor (required when health is enabled, must be absolute path)
   cleanup_orphaned_metadata: false # Clean up orphaned files, metadata, and empty directories (when false, no cleanup occurs; when true, deletes orphaned library files, metadata files, and removes empty directories from library, import, and metadata paths, default: false)
   check_interval_seconds: 5 # Health check interval in seconds (default: 5)
-  max_connections_for_health_checks: 100 # Max concurrent STAT checks within a single sweep (default: 100)
+  # Max concurrent STAT checks within a single sweep. Omit or set 0 to let the
+  # pool adapt: it narrows the sweep while a stream is playing and widens it to
+  # the pool's aggregate STAT pipeline capacity when idle (measured 24x the
+  # sweep throughput on an idle pool). Set a number to pin a hard cap.
+  # Renamed from max_connections_for_health_checks, which is migrated
+  # automatically — STAT is bodyless and pipelines many per connection, so
+  # connection count was never the right unit.
+  # max_concurrent_segment_checks: 0
   check_batch_size: 50 # Number of due files fetched and swept together per health-check cycle (default: 50)
-  segment_sample_percentage: 5 # Percentage of segments to sample for health validation (1-100, default: 5)
+  segment_sample_percentage: 5 # Segments to sample during health-check sweeps (post-import validation only) as a percentage 1-100; higher catches more corruption (default: 5)
   acceptable_missing_segments_percentage: 0 # Percentage of missing segments allowed before a file is marked as corrupted (0-100, default: 0)
   library_sync_interval_minutes: 360 # Library synchronization interval in minutes (default: 360 = 6 hours)
   library_sync_concurrency: 5 # Number of concurrent library sync operations (default: 5)
   resolve_repair_on_import: false # Automatically resolve pending repairs in the same directory when a new file is imported (default: false)
 
 # WebDAV mount path configuration
+# Go soft memory limit in MB. Unset or 0: derived from segment_cache.memory_mb plus the PAR2 solver
+# budget plus 256 MB headroom (about 770 MB with defaults). Positive: use exactly this value.
+# -1: leave the Go runtime default. GOMEMLIMIT in the environment always wins.
+memory_limit_mb: 0
 mount_path: '' # WebDAV mount path, Example: '/mnt/remotes/altmount' or '/mnt/unionfs'. Must be an absolute path.
                # Windows examples: 'Z:' (drive letter via WinFsp) or 'C:\altmount' (directory mount)
 
@@ -267,27 +301,29 @@ profiler_enabled: false # Enable performance profiling (default: false)
 # Configure multiple providers for redundancy and load balancing
 providers:
   # Primary provider with SSL
-  - id: 1 # Auto-generated hash ID based on host:port@username (leave empty for auto-generation)
+  - id: provider_primary # Stable public identifier; keep unique and free of credentials/non-graphic characters
     host: 'ssl-news.provider.com' # Replace with your provider's SSL hostname
     port: 563
     username: 'your_username' # Replace with your username
     password: 'your_password' # Replace with your password
     max_connections: 20
-    inflight_requests: 10 # Concurrent requests per connection (pipelining, default: 3)
-    stat_inflight_requests: 100 # Pipeline depth for bodyless STAT (existence check) requests (default: 100)
+    min_connections_alive: 2 # Warm connections kept open for fast first byte (default: 2, -1 = connect on demand only)
+    inflight_requests: 10 # Concurrent bodies per connection (memory ceiling, default: 10); typical depth 3-4, raising does not improve throughput
+    stat_inflight_requests: 100 # STAT pipeline depth per connection (determines idle health-sweep concurrency, default: 100)
+    # stream_inflight_requests: 4 # Optional cap on streaming bodies per connection so a seek waits behind fewer read-ahead bodies; costs sequential throughput on providers that reward deep pipelines (default: same as inflight_requests)
     tls: true
     insecure_tls: false
     enabled: true # Enable/disable this provider (default: true)
     is_backup_provider: false # Mark as backup provider (default: false)
 
   # Backup provider without SSL
-  - id: 2 # Auto-generated hash ID (leave empty for auto-generation)
+  - id: provider_backup # Stable public identifier; keep unique and free of credentials/non-graphic characters
     host: 'news.provider.com' # Replace with your provider's standard hostname
     port: 119
     username: 'your_username' # Replace with your username
     password: 'your_password' # Replace with your password
     max_connections: 10
-    inflight_requests: 10 # Concurrent requests per connection (pipelining, default: 3)
+    inflight_requests: 10 # Concurrent bodies per connection (memory ceiling, default: 10)
     tls: false
     insecure_tls: false
     enabled: true
@@ -295,7 +331,7 @@ providers:
 
 
   # Secondary provider (optional)
-  # - id: '' # Auto-generated
+  # - id: provider_secondary # Stable public identifier; keep unique and free of credentials/non-graphic characters
   #   host: "news.otherprovider.com"
   #   port: 563
   #   username: "other_username"

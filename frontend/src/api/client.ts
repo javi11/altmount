@@ -16,8 +16,11 @@ import type {
 	ImportStatusResponse,
 	LibrarySyncStatus,
 	ManualScanRequest,
+	MetadataMigrationResult,
+	MetadataMigrationStatus,
 	NzbdavMigrateSymlinksRequest,
 	NzbdavMigrateSymlinksResponse,
+	Par2RepairJob,
 	PoolMetrics,
 	ProviderHistoricalStatsResponse,
 	ProviderSpeedTestHistoryResponse,
@@ -29,10 +32,13 @@ import type {
 	UploadNZBLnkResponse,
 	User,
 } from "../types/api";
+
 import type {
 	ConfigResponse,
 	ConfigSection,
 	ConfigUpdateRequest,
+	InspectSearchRequest,
+	InspectSearchResponse,
 	PipelineTuneResponse,
 	ProviderBackbone,
 	ProviderConfig,
@@ -42,6 +48,7 @@ import type {
 	ProviderTestResponse,
 	ProviderUpdateRequest,
 } from "../types/config";
+
 import type { UpdateChannel, UpdateStatusResponse } from "../types/update";
 
 export interface LogEntry {
@@ -448,6 +455,31 @@ class APIClient {
 		return this.request<HealthStats>("/health/stats");
 	}
 
+	// PAR2 repair endpoints
+	async getPar2RepairJobs(limit?: number) {
+		const query = limit ? `?limit=${limit}` : "";
+		return this.request<Par2RepairJob[]>(`/par2repair${query}`);
+	}
+
+	async triggerPar2Repair(filePath: string) {
+		return this.request<{ message: string }>("/par2repair", {
+			method: "POST",
+			body: JSON.stringify({ file_path: filePath }),
+		});
+	}
+
+	async cancelPar2Repair(id: number) {
+		return this.request<{ message: string }>(`/par2repair/${id}`, {
+			method: "DELETE",
+		});
+	}
+
+	async cancelAllPar2Repairs() {
+		return this.request<{ cancelled: number }>("/par2repair", {
+			method: "DELETE",
+		});
+	}
+
 	async resetAllHealthChecks() {
 		return this.request<{
 			message: string;
@@ -503,6 +535,28 @@ class APIClient {
 
 	async cancelLibrarySync() {
 		return this.request<{ message: string }>("/health/library-sync/cancel", {
+			method: "POST",
+		});
+	}
+
+	async getMetadataMigrationStatus() {
+		return this.request<MetadataMigrationStatus>("/metadata/migration/status");
+	}
+
+	async dryRunMetadataMigration() {
+		return this.request<MetadataMigrationResult>("/metadata/migration/dry-run", {
+			method: "POST",
+		});
+	}
+
+	async startMetadataMigration() {
+		return this.request<{ message: string }>("/metadata/migration/start", {
+			method: "POST",
+		});
+	}
+
+	async cancelMetadataMigration() {
+		return this.request<{ message: string }>("/metadata/migration/cancel", {
 			method: "POST",
 		});
 	}
@@ -1039,6 +1093,14 @@ class APIClient {
 		if (params?.limit) searchParams.set("limit", params.limit.toString());
 		const query = searchParams.toString();
 		return this.request<LogEntry[]>(`/logs${query ? `?${query}` : ""}`);
+	}
+
+	// Stremio Search & Ranking Inspector
+	async inspectStremioSearch(payload: InspectSearchRequest): Promise<InspectSearchResponse> {
+		return this.request<InspectSearchResponse>("/stremio/search/inspect", {
+			method: "POST",
+			body: JSON.stringify(payload),
+		});
 	}
 }
 

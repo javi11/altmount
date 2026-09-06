@@ -33,6 +33,20 @@ func hashPath(path string) uint64 {
 	return h.Sum64()
 }
 
+// stableInode returns a deterministic, non-reserved inode number from a virtual path.
+// It maps empty string, ".", or "/" to root inode 1, and maps regular paths to
+// hashes avoiding reserved inode 0 (invalid) and 1 (reserved for FUSE root).
+func stableInode(path string) uint64 {
+	if path == "" || path == "." || path == "/" {
+		return 1
+	}
+	ino := hashPath(path)
+	if ino <= 1 {
+		return 2
+	}
+	return ino
+}
+
 // translateError maps OS-level errors to FUSE syscall.Errno values.
 // Does not log; callers should log unexpected errors before calling.
 func translateError(err error) syscall.Errno {

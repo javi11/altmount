@@ -141,7 +141,7 @@ func ProcessRegularFiles(
 
 			metadataPath := metadataService.GetMetadataFilePath(virtualPath)
 			if _, err := os.Stat(metadataPath); err == nil {
-				_ = metadataService.DeleteFileMetadata(virtualPath)
+				_ = metadataService.DeleteFileMetadata(ctx, virtualPath)
 			}
 
 			if err := metadataService.WriteFileMetadataAuto(ctx, virtualPath, fileMeta, storeIndex, storeRef); err != nil {

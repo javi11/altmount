@@ -8,6 +8,7 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -16,7 +17,7 @@ import (
 	"github.com/javi11/altmount/frontend"
 	"github.com/javi11/altmount/internal/api"
 	"github.com/javi11/altmount/internal/arrs"
-	"github.com/javi11/altmount/internal/stremio"
+	"github.com/javi11/altmount/internal/arrs/registrar"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/health"
 	"github.com/javi11/altmount/internal/metadata"
@@ -25,6 +26,8 @@ import (
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/rclone"
 	"github.com/javi11/altmount/internal/slogutil"
+	"github.com/javi11/altmount/internal/stremio"
+	"github.com/javi11/altmount/internal/usenet"
 	"github.com/javi11/altmount/internal/webdav"
 	"github.com/spf13/cobra"
 )
@@ -135,8 +138,31 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if initialCache := initializeSegmentCache(ctx, cfg, cacheSource); initialCache != nil {
 		defer initialCache.Stop()
 	}
+	applySoftMemoryLimit(ctx, cfg)
 
-	fs := initializeFilesystem(ctx, metadataService, repos.HealthRepo, arrsService, rcloneRCClient, poolManager, configManager.GetConfigGetter(), streamTracker, cacheSource)
+	// Background PAR2 repair: repairs missing articles and serves the patched
+	// payloads on the read path's hole branch.
+	par2RepairService := startPar2RepairService(ctx, cfg, repos.Par2RepairRepo, repos.HealthRepo, metadataService, poolManager, configManager.GetConfigGetter(), func() bool {
+		return streamTracker.ActiveStreams() > 0
+	})
+
+	// Let degraded imports queue a PAR2 repair (opt-in via repair_on_import),
+	// count locally repaired articles as available during the availability
+	// sweep, and serve repaired payloads to every reader that has no hooks of
+	// its own (the import path builds readers deep inside the parser).
+	importerService.SetRepairEnqueuer(par2RepairService)
+	importerService.SetPatchIndex(par2RepairService.PatchStore())
+	par2RepairService.SetImportResumer(importerService)
+	usenet.SetDefaultPatchLookup(func(segID string) []byte {
+		p, ok := par2RepairService.PatchStore().Get(strings.Trim(segID, "<>"))
+		if !ok {
+			return nil
+		}
+		return p
+	})
+
+	fs := initializeFilesystem(ctx, metadataService, repos.HealthRepo, arrsService, rcloneRCClient, poolManager, configManager.GetConfigGetter(), streamTracker, cacheSource, par2RepairService)
+	importerService.SetContentVerifyFilesystem(fs)
 
 	// 6. Setup web services
 	app, debugMode := createFiberApp(ctx, cfg)
@@ -176,6 +202,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Register segment cache config change handler for dynamic path/size/expiry changes.
 	// Enable/disable toggles take effect automatically via cacheSource.Store() at file-open time.
 	configManager.OnConfigChange(func(oldConfig, newConfig *config.Config) {
+		if oldConfig.SoftMemoryLimit("") != newConfig.SoftMemoryLimit("") {
+			applySoftMemoryLimit(ctx, newConfig)
+		}
 		structuralChange := oldConfig.SegmentCache.CachePath != newConfig.SegmentCache.CachePath ||
 			oldConfig.SegmentCache.MaxSizeGB != newConfig.SegmentCache.MaxSizeGB ||
 			intPtrValue(oldConfig.SegmentCache.ExpiryHours) != intPtrValue(newConfig.SegmentCache.ExpiryHours)
@@ -196,16 +225,28 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 	})
 
-	healthWorker, librarySyncWorker, err := startHealthWorker(ctx, cfg, repos.HealthRepo, poolManager, configManager, rcloneRCClient, arrsService, importerService, progressBroadcaster)
+	healthWorker, librarySyncWorker, err := startHealthWorker(ctx, cfg, metadataService, repos.HealthRepo, poolManager, configManager, rcloneRCClient, arrsService, importerService, progressBroadcaster, par2RepairService, fs)
 	if err != nil {
 		logger.Warn("Health worker initialization failed", "err", err)
 	}
 	if healthWorker != nil {
 		apiServer.SetHealthWorker(healthWorker)
 	}
+	if par2RepairService != nil {
+		apiServer.SetPar2RepairEnqueuer(par2RepairService)
+	}
+	if repos.Par2RepairRepo != nil {
+		apiServer.SetPar2RepairRepo(repos.Par2RepairRepo)
+	}
 	if librarySyncWorker != nil {
 		apiServer.SetLibrarySyncWorker(librarySyncWorker)
 	}
+
+	// Legacy metadata → v3 store migration. Manually triggered from the panel;
+	// creating the worker starts nothing.
+	apiServer.SetMetadataMigrationWorker(
+		metadata.NewMigrationWorker(metadataService, configManager.GetConfigGetter()),
+	)
 
 	// Register health system config change handler for dynamic enable/disable
 	if healthWorker != nil && librarySyncWorker != nil {
@@ -278,7 +319,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 
 		if apiKey != "" {
-			logger.InfoContext(bgCtx, "Triggering automatic ARR webhook registration", "webhook_url", cfg.GetWebhookBaseURL())
+			logger.InfoContext(bgCtx, "Triggering automatic ARR webhook registration", "webhook_url", registrar.RedactWebhookURLForLog(cfg.GetWebhookBaseURL()))
 			if err := arrsService.EnsureWebhookRegistration(bgCtx, cfg.GetWebhookBaseURL(), apiKey); err != nil {
 				logger.ErrorContext(bgCtx, "Failed to register ARR webhooks on startup", "error", err)
 			}
@@ -322,6 +363,17 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// Start graceful shutdown sequence
 	logger.InfoContext(ctx, "Starting graceful shutdown sequence")
+
+	// Stop the importer first so it stops claiming and processing new queue
+	// items immediately. Without this, the importer keeps running (it was
+	// only ever closed via a deferred Close() after runServe returns) for
+	// the full duration of the remaining shutdown steps below, including
+	// the HTTP server's graceful-shutdown timeout.
+	if err := importerService.Stop(ctx); err != nil {
+		logger.ErrorContext(ctx, "Failed to stop importer service", "error", err)
+	} else {
+		logger.InfoContext(ctx, "Importer service stopped")
+	}
 
 	// Shutdown API server and its managed resources (like FUSE)
 	apiServer.Shutdown(ctx)
@@ -438,7 +490,6 @@ func waitForHTTPServer(ctx context.Context, port int) error {
 		}
 	}
 }
-
 
 // intPtrValue returns the value pointed to by p, or 0 when p is nil. It is used
 // to compare optional integer config fields (e.g. segment cache ExpiryHours) by

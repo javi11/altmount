@@ -14,9 +14,11 @@ import (
 	"github.com/javi11/altmount/internal/importer/archive"
 	"github.com/javi11/altmount/internal/importer/filesystem"
 	"github.com/javi11/altmount/internal/importer/parser"
+	"github.com/javi11/altmount/internal/importer/parser/fileinfo"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
+	"github.com/javi11/altmount/internal/usenet"
 	"github.com/javi11/rardecode/v2"
 )
 
@@ -60,7 +62,6 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 	// Reader-parallelism bound only — actual connection use is gated by the
 	// pool manager's global import connection budget inside each reader.
 	maxConcurrentVolumes := max(min(cfg.TotalProviderConnections(), len(rarFiles)), 1)
-	maxPrefetch := cfg.Import.MaxDownloadPrefetch
 	readTimeout := time.Duration(cfg.Import.ReadTimeoutSeconds) * time.Second
 	if readTimeout == 0 {
 		readTimeout = 5 * time.Minute
@@ -115,8 +116,16 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 	}
 
 	// Create Usenet filesystem for RAR access - this enables the iterator to access
-	// RAR part files directly from Usenet without downloading
-	ufs := filesystem.NewUsenetFileSystem(ctx, rh.poolManager, normalizedFiles, maxPrefetch, progressTracker, readTimeout)
+	// RAR part files directly from Usenet without downloading. Header analysis only
+	// reads initial volume headers, so prefetch is capped at 1 to prevent downloading
+	// excess payload segments across multi-volume archives.
+	headerAnalysisPrefetch := 1
+	// Import-scoped segment cache: rardecode's parallel volume reads and repeated
+	// header probing frequently revisit the same leading segments across volumes.
+	// Bounded and released (by dropping the reference) when this analysis pass returns.
+	segStore := filesystem.NewImportSegmentCache(0)
+	defer segStore.LogStats(ctx, rh.log, "rar-header")
+	ufs := filesystem.NewUsenetFileSystem(ctx, rh.poolManager, normalizedFiles, headerAnalysisPrefetch, progressTracker, readTimeout, segStore)
 
 	// Extract filenames for first part detection
 	fileNames := make([]string, len(normalizedFiles))
@@ -145,6 +154,12 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 
 	if len(normalizedFiles) > 1 {
 		opts = append(opts, rardecode.ParallelRead(true), rardecode.MaxConcurrentVolumes(maxConcurrentVolumes))
+		// A volume whose headers were read but whose tail article is gone
+		// from every provider still describes its file layout. Keep the
+		// import going: the missing bytes surface as a hole at read time
+		// (zero-fill / PAR2 repair) instead of failing the whole release for
+		// an end-of-archive block nobody needs.
+		opts = append(opts, rardecode.TolerateVolumeTailError(usenet.IsArticleNotFound))
 	}
 
 	// Check context before expensive archive analysis operation
@@ -322,19 +337,49 @@ func checkAnalyzedContentCoverage(ctx context.Context, log *slog.Logger, content
 	return nil
 }
 
-// checkForCompressedFiles validates that no files in the archive are compressed
-// Returns an error if any compressed files are detected
+func isStreamableOrMediaFile(filename string) bool {
+	if fileinfo.IsVideoFile(filename) || fileinfo.IsRarFile(filename) || fileinfo.Is7zFile(filename) {
+		return true
+	}
+	switch strings.ToLower(filepath.Ext(filename)) {
+	case ".iso", ".flac", ".mp3", ".m4a", ".aac", ".wav", ".ogg", ".opus", ".m4b":
+		return true
+	}
+	return false
+}
+
+// checkForCompressedFiles validates that media files in the archive are not compressed.
+// Compressed media files cannot be streamed directly; non-media sidecars (such as .nfo or .txt)
+// are ignored so stored media files can proceed.
 func (rh *rarProcessor) checkForCompressedFiles(aggregatedFiles []rardecode.ArchiveFileInfo) error {
+	hasStoredMedia := false
 	for _, file := range aggregatedFiles {
+		isMedia := isStreamableOrMediaFile(file.Name)
 		if file.Compressed {
-			compressionInfo := ""
-			if file.CompressionMethod != "" {
-				compressionInfo = fmt.Sprintf(" (uses %s compression)", file.CompressionMethod)
+			if isMedia {
+				compressionInfo := ""
+				if file.CompressionMethod != "" {
+					compressionInfo = fmt.Sprintf(" (uses %s compression)", file.CompressionMethod)
+				}
+				return errors.NewNonRetryableError(
+					fmt.Sprintf("compressed media files are not supported: %s%s", file.Name, compressionInfo),
+					nil,
+				)
 			}
-			return errors.NewNonRetryableError(
-				fmt.Sprintf("compressed files are not supported: %s%s", file.Name, compressionInfo),
-				nil,
-			)
+		} else if isMedia {
+			hasStoredMedia = true
+		}
+	}
+	// If the archive contains ONLY non-media files and ALL of them are compressed,
+	// fail fast if none are stored.
+	if !hasStoredMedia {
+		for _, file := range aggregatedFiles {
+			if file.Compressed {
+				return errors.NewNonRetryableError(
+					fmt.Sprintf("compressed files are not supported: %s", file.Name),
+					nil,
+				)
+			}
 		}
 	}
 	return nil
@@ -509,6 +554,11 @@ func (rh *rarProcessor) convertAggregatedFilesToRarContent(ctx context.Context, 
 	out := make([]Content, 0, len(aggregatedFiles))
 
 	for _, af := range aggregatedFiles {
+		if af.Compressed {
+			rh.log.DebugContext(ctx, "Skipping compressed file in RAR archive", "file", af.Name)
+			continue
+		}
+
 		// Normalize backslashes in path (Windows-style paths in RAR archives)
 		normalizedName := strings.ReplaceAll(af.Name, "\\", "/")
 
@@ -516,6 +566,7 @@ func (rh *rarProcessor) convertAggregatedFilesToRarContent(ctx context.Context, 
 		// Each file can have its own encryption credentials
 		var aesKey, aesIV []byte
 		var nzbdavID string
+		var firstSegBytes []byte
 		if len(af.Parts) > 0 {
 			firstPart := af.Parts[0]
 			if firstPart.AesKey != nil {
@@ -523,20 +574,24 @@ func (rh *rarProcessor) convertAggregatedFilesToRarContent(ctx context.Context, 
 				aesIV = firstPart.AesIV
 			}
 
-			// Also extract ID from the first part
+			// Also extract ID and warm first-segment bytes from the first part
 			if pf, ok := fileIndex.get(firstPart.Path); ok {
 				nzbdavID = pf.NzbdavID
+				if firstPart.DataOffset == 0 && len(pf.FirstSegmentBytes) > 0 {
+					firstSegBytes = pf.FirstSegmentBytes
+				}
 			}
 		}
 
 		rc := Content{
-			InternalPath: normalizedName,
-			Filename:     filepath.Base(normalizedName),
-			Size:         af.TotalUnpackedSize,
-			PackedSize:   af.TotalPackedSize,
-			AesKey:       aesKey,
-			AesIV:        aesIV,
-			NzbdavID:     nzbdavID,
+			InternalPath:      normalizedName,
+			Filename:          filepath.Base(normalizedName),
+			Size:              af.TotalUnpackedSize,
+			PackedSize:        af.TotalPackedSize,
+			AesKey:            aesKey,
+			AesIV:             aesIV,
+			NzbdavID:          nzbdavID,
+			FirstSegmentBytes: firstSegBytes,
 		}
 
 		var fileSegments []*metapb.SegmentData
@@ -714,7 +769,6 @@ func (rh *rarProcessor) processNestedRarContent(ctx context.Context, innerRarCon
 	// Reader-parallelism bound only — actual connection use is gated by the
 	// pool manager's global import connection budget inside each reader.
 	maxConcurrentVolumes := max(min(cfg.TotalProviderConnections(), len(innerRarContents)), 1)
-	maxPrefetch := cfg.Import.MaxDownloadPrefetch
 	readTimeout := time.Duration(cfg.Import.ReadTimeoutSeconds) * time.Second
 	if readTimeout == 0 {
 		readTimeout = 5 * time.Minute
@@ -734,16 +788,22 @@ func (rh *rarProcessor) processNestedRarContent(ctx context.Context, innerRarCon
 		}
 
 		entries = append(entries, filesystem.DecryptingFileEntry{
-			Filename:      c.Filename,
-			Segments:      c.Segments,
-			DecryptedSize: decryptedSize,
-			AesKey:        c.AesKey,
-			AesIV:         c.AesIV,
+			Filename:          c.Filename,
+			Segments:          c.Segments,
+			DecryptedSize:     decryptedSize,
+			AesKey:            c.AesKey,
+			AesIV:             c.AesIV,
+			FirstSegmentBytes: c.FirstSegmentBytes,
 		})
 	}
 
-	// Create filesystem for reading inner RAR volumes
-	dfs := filesystem.NewDecryptingFileSystem(ctx, rh.poolManager, entries, maxPrefetch, readTimeout)
+	// Create filesystem for reading inner RAR volumes.
+	// Header analysis only reads initial volume headers, so prefetch is capped at 1.
+	headerAnalysisPrefetch := 1
+	// Import-scoped segment cache, private to this nested-RAR analysis pass.
+	segStore := filesystem.NewImportSegmentCache(0)
+	defer segStore.LogStats(ctx, rh.log, "rar-nested")
+	dfs := filesystem.NewDecryptingFileSystem(ctx, rh.poolManager, entries, headerAnalysisPrefetch, readTimeout, segStore)
 
 	// Find the first inner RAR part
 	fileNames := make([]string, len(innerRarContents))

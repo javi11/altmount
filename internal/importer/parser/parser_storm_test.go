@@ -67,6 +67,9 @@ func (m *fakeFullPoolManager) SetImportConnCapacity(total int) {
 		m.budget.SetCapacity(total)
 	}
 }
+
+func (m *fakeFullPoolManager) SetStreamHeadroom(int)                      {}
+func (m *fakeFullPoolManager) SpeculativeBudget() *pool.SpeculativeBudget { return nil }
 func (m *fakeFullPoolManager) ImportConnCapacity() int {
 	if m.budget != nil {
 		return m.budget.Capacity()
@@ -75,6 +78,7 @@ func (m *fakeFullPoolManager) ImportConnCapacity() int {
 }
 func (m *fakeFullPoolManager) SetStreamSource(_ pool.StreamActivitySource) {}
 func (m *fakeFullPoolManager) NotifyStreamChange()                         {}
+func (m *fakeFullPoolManager) StatSweepConcurrency(conservative int) int   { return conservative }
 
 // stormConfigGetter returns a ConfigGetter whose provider capacity is exactly
 // totalConnections. The parser sizes its fetch goroutine pool from

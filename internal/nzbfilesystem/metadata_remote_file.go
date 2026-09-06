@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -65,7 +66,23 @@ type MetadataRemoteFile struct {
 	cacheSource      *segcache.Source         // Segment cache source (nil = no cache configured)
 	repairCoalescer  *RepairCoalescer         // Throttles streaming-failure repair triggers and rclone VFS refreshes
 	padRecorder      *padRecorder             // Process-lived worker persisting degraded-pad events
+	patchSource      PatchSource              // Repaired-article payloads (nil = PAR2 repair disabled)
+	repairEnqueuer   RepairEnqueuer           // Queues PAR2 repairs (nil = PAR2 repair disabled)
 	renameMu         sync.Mutex               // Mutex to protect rename operations from race conditions
+}
+
+// SetPatchSource wires the PAR2 repair patch store into the read path. Call
+// during boot, before the filesystem serves reads.
+func (mrf *MetadataRemoteFile) SetPatchSource(ps PatchSource) {
+	mrf.patchSource = ps
+}
+
+// SetRepairEnqueuer wires the PAR2 repair queue into both playback triggers:
+// degraded pads (zero-filled holes) and failed streams on missing articles.
+// Call during boot, before the filesystem serves reads.
+func (mrf *MetadataRemoteFile) SetRepairEnqueuer(re RepairEnqueuer) {
+	mrf.repairEnqueuer = re
+	mrf.padRecorder.repair = re
 }
 
 // Configuration is now accessed dynamically through config.ConfigGetter
@@ -271,18 +288,19 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 	// unknownFields + sizeCache + unused fields like NzbdavId). Slices are
 	// carried by reference; they stay alive only while the handle is open.
 	handleMeta := &fileHandleMeta{
-		FileSize:       fileMeta.FileSize,
-		ModifiedAt:     fileMeta.ModifiedAt,
-		SourceNzbPath:  fileMeta.SourceNzbPath,
-		Encryption:     fileMeta.Encryption,
-		Password:       fileMeta.Password,
-		Salt:           fileMeta.Salt,
-		AesKey:         fileMeta.AesKey,
-		AesIv:          fileMeta.AesIv,
-		SegmentData:    fileMeta.SegmentData,
-		NestedSources:  fileMeta.NestedSources,
-		ClipBoundaries: fileMeta.ClipBoundaries,
-		KnownHoles:     fileMeta.KnownHoles,
+		FileSize:                fileMeta.FileSize,
+		ModifiedAt:              fileMeta.ModifiedAt,
+		SourceNzbPath:           fileMeta.SourceNzbPath,
+		Encryption:              fileMeta.Encryption,
+		Password:                fileMeta.Password,
+		Salt:                    fileMeta.Salt,
+		AesKey:                  fileMeta.AesKey,
+		AesIv:                   fileMeta.AesIv,
+		SegmentData:             fileMeta.SegmentData,
+		NestedSources:           fileMeta.NestedSources,
+		ClipBoundaries:          fileMeta.ClipBoundaries,
+		KnownHoles:              fileMeta.KnownHoles,
+		HoleProviderFingerprint: fileMeta.HoleProviderFingerprint,
 	}
 
 	fileCtx, cancel := context.WithCancel(ctx)
@@ -296,6 +314,8 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 		rcloneClient:     mrf.rcloneClient,
 		repairCoalescer:  mrf.repairCoalescer,
 		padRecorder:      mrf.padRecorder,
+		patchSource:      mrf.patchSource,
+		repairEnqueuer:   mrf.repairEnqueuer,
 		configGetter:     mrf.configGetter,
 		poolManager:      mrf.poolManager,
 		ctx:              fileCtx,
@@ -354,12 +374,10 @@ func (mrf *MetadataRemoteFile) RemoveFile(ctx context.Context, fileName string) 
 		}
 	}
 
-	// Check if we should delete the source NZB file
 	cfg := mrf.configGetter()
-	deleteSourceNzb := cfg.Metadata.ShouldDeleteSourceNzb()
 
-	// Use MetadataService's file delete operation with optional NZB deletion
-	err := mrf.metadataService.DeleteFileMetadataWithSourceNzb(ctx, normalizedName, deleteSourceNzb)
+	// Deletes the .meta and, once the last sibling is gone, the shared .nzbz store.
+	err := mrf.metadataService.DeleteFileMetadata(ctx, normalizedName)
 	if err != nil {
 		return true, err
 	}
@@ -814,6 +832,9 @@ type fileHandleMeta struct {
 	// KnownHoles is the persisted hole map: segments confirmed missing on all
 	// providers, zero-filled during streaming without a fetch round-trip.
 	KnownHoles []*metapb.HoleRun
+	// HoleProviderFingerprint is the provider set KnownHoles were confirmed
+	// against; runs recorded under another set are re-probed rather than padded.
+	HoleProviderFingerprint string
 }
 
 // MetadataVirtualFile implements afero.File for metadata-backed virtual files
@@ -826,6 +847,8 @@ type MetadataVirtualFile struct {
 	rcloneClient     rclonecli.RcloneRcClient // RClone RC client for VFS notifications
 	repairCoalescer  *RepairCoalescer         // Throttles repair triggers; may be nil in tests
 	padRecorder      *padRecorder             // Persists degraded-pad events; may be nil in tests
+	patchSource      PatchSource              // Repaired-article payloads; may be nil
+	repairEnqueuer   RepairEnqueuer           // Queues PAR2 repairs; may be nil
 	configGetter     config.ConfigGetter
 	poolManager      pool.Manager // Pool manager for dynamic pool access
 	ctx              context.Context
@@ -851,7 +874,10 @@ type MetadataVirtualFile struct {
 	// (nil when the active reader doesn't implement it), so the hot Read/ReadAt
 	// loops avoid repeating the type assertion every iteration. Kept in sync by
 	// setReader and the remux-wrap step; guarded by mvf.mu like reader.
-	bufOffReader      interface{ GetBufferedOffset() int64 }
+	bufOffReader interface{ GetBufferedOffset() int64 }
+	// bufAheadReader is mvf.reader pre-asserted to BufferedAhead, which says
+	// how far a forward skip can drain through the shared reader for free.
+	bufAheadReader    interface{ BufferedAhead() int64 }
 	readerInitialized bool
 	position          int64 // File position (what client sees after Seek)
 	originalRangeEnd  int64 // Original end requested by client (-1 for unbounded)
@@ -868,6 +894,17 @@ type MetadataVirtualFile struct {
 	// the 60-segment prefetch pipeline survives; after ephemeralStreakLimit
 	// consecutive misses the player has genuinely moved and we tear down.
 	ephemeralStreak int
+
+	// metadataGone is set once a streaming failure caused this file's metadata to
+	// be removed underneath the open handle (moved to the corrupted safety folder
+	// by a repair, or deleted by delete-on-corruption). The path this handle
+	// refers to no longer exists, so every subsequent read must fail instead of
+	// rebuilding a reader against segments already known to be missing.
+	//
+	// Atomic rather than mu-guarded: it is set from updateFileHealthOnError,
+	// which is reached both from the mu-holding read paths and from
+	// createUsenetReader closures that run on background goroutines.
+	metadataGone atomic.Bool
 
 	// Segment offset index for O(1) offset→segment lookup
 	segmentIndex *segmentOffsetIndex
@@ -925,6 +962,7 @@ type interruptSlot struct{ i readerInterrupter }
 func (mvf *MetadataVirtualFile) setReader(r io.ReadCloser) {
 	mvf.reader = r
 	mvf.bufOffReader, _ = r.(interface{ GetBufferedOffset() int64 })
+	mvf.bufAheadReader, _ = r.(interface{ BufferedAhead() int64 })
 	slot := interruptSlot{}
 	if i, ok := r.(readerInterrupter); ok {
 		slot.i = i
@@ -1225,6 +1263,12 @@ func (mvf *MetadataVirtualFile) ReadAtContext(readCtx context.Context, p []byte,
 		return 0, io.EOF
 	}
 
+	// The ephemeral path below builds its own reader without going through
+	// ensureReader, so it needs this guard of its own.
+	if err := mvf.metadataGoneErr(); err != nil {
+		return 0, err
+	}
+
 	// Determine whether this offset can reuse the shared reader.
 	// Shared path: offset matches the next expected sequential position, OR
 	// it is slightly ahead (forward-skip: gap ≤ forwardSkipLimit) — discard
@@ -1236,6 +1280,15 @@ func (mvf *MetadataVirtualFile) ReadAtContext(readCtx context.Context, p []byte,
 		mvf.readAtSharedNext >= 0 &&
 		off > mvf.readAtSharedNext &&
 		off-mvf.readAtSharedNext <= forwardSkipLimit
+	// Draining is only free while the gap sits inside bytes the reader has
+	// already scheduled; past that, every skipped article is a download the
+	// caller never wanted, and a reader opened at the target is cheaper.
+	if forwardSkip && mvf.bufAheadReader != nil && off-mvf.readAtSharedNext > mvf.bufAheadReader.BufferedAhead() {
+		mvf.closeCurrentReader()
+		mvf.position = off
+		mvf.readAtSharedNext = off
+		forwardSkip = false
+	}
 	useShared := forwardSkip ||
 		(mvf.readAtSharedNext >= 0 && off == mvf.readAtSharedNext) ||
 		(mvf.readAtSharedNext == 0 && !mvf.readerInitialized && off == mvf.position)
@@ -1797,6 +1850,11 @@ const closerWorkerCount = 4
 // Lazy-starts the worker goroutines on first call. Caller must hold
 // mvf.mu (so the lazy init is safe).
 func (mvf *MetadataVirtualFile) enqueueCloser(r io.Closer) {
+	// Interrupt first (idempotent) so in-flight downloads release the
+	// pool connection immediately before Close() waits on drain.
+	if i, ok := r.(readerInterrupter); ok {
+		i.Interrupt()
+	}
 	if mvf.closerCh == nil {
 		// Workers range over this local, not mvf.closerCh: Close() nils the
 		// field under mvf.mu, which the workers do not hold, so reading the
@@ -1817,17 +1875,33 @@ func (mvf *MetadataVirtualFile) enqueueCloser(r io.Closer) {
 		// Queue full — apply backpressure inline rather than letting
 		// the closer fan-out grow unbounded. This is the rare path; a
 		// real Seek burst stays under closerWorkerCount.
-		// Interrupt first (idempotent) so in-flight downloads release the
-		// pool connection before Close() waits on drain.
-		if i, ok := r.(readerInterrupter); ok {
-			i.Interrupt()
-		}
 		_ = r.Close()
+	}
+}
+
+// metadataGoneErr returns the terminal error for a handle whose file was removed
+// underneath it, tearing the reader down on first observation, or nil while the
+// handle is still valid. Doing the teardown here rather than at the point the
+// flag is set keeps it on a path that provably holds mvf.mu.
+//
+// Caller must hold mvf.mu.
+func (mvf *MetadataVirtualFile) metadataGoneErr() error {
+	if !mvf.metadataGone.Load() {
+		return nil
+	}
+	mvf.closeCurrentReader()
+	return &CorruptedFileError{
+		TotalExpected: mvf.meta.FileSize,
+		UnderlyingErr: ErrMetadataGone,
 	}
 }
 
 // ensureReader ensures we have a reader initialized for the current position with range support
 func (mvf *MetadataVirtualFile) ensureReader() error {
+	if err := mvf.metadataGoneErr(); err != nil {
+		return err
+	}
+
 	if mvf.readerInitialized {
 		return nil
 	}
@@ -1899,6 +1973,7 @@ func (mvf *MetadataVirtualFile) ensureReader() error {
 		mvf.reader = newSkipLimitReader(mvf.reader, start-rawStart, end-start+1)
 	}
 	mvf.bufOffReader, _ = mvf.reader.(interface{ GetBufferedOffset() int64 })
+	mvf.bufAheadReader, _ = mvf.reader.(interface{ BufferedAhead() int64 })
 
 	mvf.readerInitialized = true
 	return nil
@@ -1988,7 +2063,8 @@ func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, e
 	// for eligible video files (nil for everything else — reads fail as
 	// always). See holes.go.
 	ur, err := usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxPrefetch, mvf.streamTracker, mvf.streamID, mvf.segmentStore,
-		usenet.WithHoleHooks(mvf.holeHooks()))
+		usenet.WithHoleHooks(mvf.holeHooks()),
+		usenet.WithSpeculativeBudget(mvf.poolManager.SpeculativeBudget()))
 	if err != nil {
 		return nil, err
 	}
@@ -2116,7 +2192,8 @@ func (mvf *MetadataVirtualFile) createUsenetReaderFromSegments(ctx context.Conte
 		return nil, fmt.Errorf("no segments cover range [%d, %d]", start, end)
 	}
 
-	ur, err := usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxPrefetch, mvf.streamTracker, mvf.streamID, mvf.segmentStore)
+	ur, err := usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxPrefetch, mvf.streamTracker, mvf.streamID, mvf.segmentStore,
+		usenet.WithSpeculativeBudget(mvf.poolManager.SpeculativeBudget()))
 	if err != nil {
 		return nil, err
 	}
@@ -2176,6 +2253,12 @@ func (r *lazyNestedMultiReader) Close() error {
 		return err
 	}
 	return nil
+}
+
+func (r *lazyNestedMultiReader) Interrupt() {
+	if i, ok := r.current.(interface{ Interrupt() }); ok {
+		i.Interrupt()
+	}
 }
 
 // wrapWithEncryption wraps a usenet reader with encryption using metadata
@@ -2270,6 +2353,13 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 	// inside the debounce window. ShouldTrigger handles a nil coalescer
 	// (test harness) by returning true.
 	if !mvf.repairCoalescer.ShouldTrigger(mvf.name) {
+		// Another handle on this path may already have had the metadata taken
+		// away. Only that handle latched itself, so without this a second handle
+		// failing inside the debounce window keeps rebuilding readers for a file
+		// that is gone - exactly the wedge the latch exists to prevent.
+		if mvf.repairCoalescer.WasRemoved(mvf.name) {
+			mvf.metadataGone.Store(true)
+		}
 		slog.DebugContext(mvf.ctx, "Streaming failure repair already triggered recently, debouncing",
 			"file", mvf.name)
 		return
@@ -2289,6 +2379,14 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 	classification := mvf.classifyStreamingFailure(dataCorruptionErr)
 	isDegraded := healthEnabled && classification != nil &&
 		classification.Verdict == holes.VerdictDegraded
+
+	// A missing article is PAR2-repairable regardless of eligibility for
+	// zero-fill (RAR/AES streams fail here instead of padding). Queue a
+	// background repair; the repair queue dedups and the planner enforces
+	// caps, so this is safe to fire on every confirmed miss.
+	if mvf.repairEnqueuer != nil && usenet.IsArticleNotFound(dataCorruptionErr.UnderlyingErr) {
+		mvf.repairEnqueuer.Enqueue(ctx, mvf.name, dataCorruptionErr.SegmentID)
+	}
 
 	// Increment failure count for tracking/masking if explicitly enabled with a valid
 	// threshold. Masking must be opt-in: Enabled == nil means disabled (not on-by-default),
@@ -2367,10 +2465,18 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 			}
 		}
 
-		if err := mvf.metadataService.DeleteCorruptedFile(ctx, mvf.name, cfg.Metadata.ShouldDeleteSourceNzb(), physicalPath, rootPath); err != nil {
+		if err := mvf.metadataService.DeleteCorruptedFile(ctx, mvf.name, physicalPath, rootPath); err != nil {
 			slog.ErrorContext(ctx, "Failed to delete corrupted file after streaming failure", "file", mvf.name, "error", err)
-		} else if err := mvf.healthRepository.DeleteHealthRecord(ctx, mvf.name); err != nil {
-			slog.ErrorContext(ctx, "Failed to delete health record after deleting corrupted file", "file", mvf.name, "error", err)
+		} else {
+			// The file this handle is reading no longer exists; latch it closed,
+			// same as the repair path below, and publish the removal so other
+			// handles on this path latch too even if their failure is debounced.
+			mvf.metadataGone.Store(true)
+			mvf.repairCoalescer.MarkRemoved(mvf.name)
+
+			if err := mvf.healthRepository.DeleteHealthRecord(ctx, mvf.name); err != nil {
+				slog.ErrorContext(ctx, "Failed to delete health record after deleting corrupted file", "file", mvf.name, "error", err)
+			}
 		}
 		return
 	} else if healthEnabled && shouldRepair {
@@ -2390,12 +2496,24 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 				relativePath = strings.TrimPrefix(relativePath, "/")
 				slog.InfoContext(ctx, "Moving metadata file for corrupted item to safety folder to trigger replacement", "file_path", mvf.name)
 				if moveErr := mvf.metadataService.MoveToCorrupted(ctx, relativePath); moveErr == nil {
+					// This handle is streaming the file that was just moved away, so
+					// latch it closed. Without this its prefetch pipeline keeps
+					// fetching segments for a path that no longer exists and the
+					// client keeps reading against it (see issue #539).
+					mvf.metadataGone.Store(true)
+					// Publish the removal so other handles on this path latch
+					// themselves even if their own failure lands inside the
+					// debounce window and returns early above.
+					mvf.repairCoalescer.MarkRemoved(mvf.name)
 					// Successfully moved metadata, enqueue a coalesced rclone VFS
 					// refresh. Multiple files in the same directory collapse into a
 					// single RC call; concurrent failures across directories are
 					// batched into one call as well. EnqueueRefresh is a no-op on a
-					// nil coalescer (test harness).
-					mvf.repairCoalescer.EnqueueRefresh(filepath.Dir(mvf.name))
+					// nil coalescer (test harness). The directory is a virtual path
+					// and rclone's VFS is forward-slash on every platform, so
+					// filepath.Dir would enqueue "\dir" (or a bare "\" for a file at
+					// the mount root) on Windows and match nothing.
+					mvf.repairCoalescer.EnqueueRefresh(path.Dir(rclonecli.ToVFSPath(mvf.name)))
 				} else {
 					slog.WarnContext(ctx, "Failed to move corrupted metadata file, proceeding with repair trigger status", "error", moveErr)
 				}

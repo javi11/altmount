@@ -59,6 +59,21 @@ test-race: test
 test:
 	$(GO) test $(ARGS) ./...
 
+.PHONY: bench-stream bench-compare
+BENCH_SHA := $(shell git rev-parse --short HEAD)
+BENCH_OUT ?= bench/results/$(BENCH_SHA).json
+
+# Runs the streaming benchmarks against the simulated provider and writes
+# bench/results/<sha>.json. Takes several minutes.
+bench-stream:
+	ALTMOUNT_BENCH_OUT=$(CURDIR)/$(BENCH_OUT) $(GO) test ./internal/nzbfilesystem/ -run '^$$' -bench 'BenchmarkStream' -benchtime 1x -timeout 60m
+
+# Compares BENCH_OUT against bench/results/$(BASE).json and fails on regression.
+# Usage: make bench-compare BASE=baseline-main
+bench-compare:
+	@test -n "$(BASE)" || (echo "BASE=<name> required" && exit 2)
+	$(GO) run ./internal/streambench/cmd/compare bench/results/$(BASE).json $(BENCH_OUT)
+
 .PHONY: check
 check: generate go-mod-tidy golangci-lint test-race
 

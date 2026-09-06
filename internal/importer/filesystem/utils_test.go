@@ -151,6 +151,33 @@ func TestSeparateFiles_RAR_MultiPart(t *testing.T) {
 	}
 }
 
+// TestSeparateFiles_SidecarsOnlyReachRegularForRAR pins the asymmetry that decides
+// whether an archive import has regular files to write at all: a RAR NZB routes sidecars
+// (parser leaves IsRarArchive false on them) to regular, while a 7z NZB claims every
+// non-par2 file as an archive part because per-file 7z detection is unreliable across
+// split volumes. Only the RAR side reaches ProcessRegularFiles, so only it can contribute
+// the extra written paths that rollback has to track. If the 7z side starts yielding
+// regular files, its written paths must be tracked for cleanup too.
+func TestSeparateFiles_SidecarsOnlyReachRegularForRAR(t *testing.T) {
+	sidecars := []parser.ParsedFile{
+		{Filename: "release.srt"},
+		{Filename: "release.nfo"},
+		{Filename: "release.jpg"},
+	}
+
+	rarFiles := append([]parser.ParsedFile{{Filename: "release.rar", IsRarArchive: true}}, sidecars...)
+	regular, archive, par2 := SeparateFiles(rarFiles, parser.NzbTypeRarArchive)
+	assert.Len(t, regular, len(sidecars), "RAR sidecars must reach regular files")
+	assert.Len(t, archive, 1, "only the .rar volume is an archive part")
+	assert.Empty(t, par2)
+
+	sevenZipFiles := append([]parser.ParsedFile{{Filename: "release.7z", Is7zArchive: true}}, sidecars...)
+	regular, archive, par2 = SeparateFiles(sevenZipFiles, parser.NzbType7zArchive)
+	assert.Empty(t, regular, "a 7z NZB claims every non-par2 file as an archive part")
+	assert.Len(t, archive, len(sevenZipFiles))
+	assert.Empty(t, par2)
+}
+
 // ---------------------------------------------------------------------------
 // SeparateFiles — non-archive types
 // ---------------------------------------------------------------------------

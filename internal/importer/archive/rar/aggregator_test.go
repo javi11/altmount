@@ -306,6 +306,53 @@ func TestProcessArchivePreservesInternalFolderStructure(t *testing.T) {
 			notWantMetaPaths: []string{"movies/MyMovie/SubFolder/obfuscated.mkv"},
 		},
 		{
+			name:            "season pack with rename: similar-size files are left alone",
+			virtualDir:      "tv/Show.S01",
+			nzbPath:         "tv/Show.S01.nzb",
+			renameToNzbName: true,
+			contents: []Content{
+				{InternalPath: "a3f9c1d2e4b5a6f7c8d9e0f1a2b3c4d5.mkv", Filename: "a3f9c1d2e4b5a6f7c8d9e0f1a2b3c4d5.mkv", Size: 2000,
+					Segments: []*metapb.SegmentData{{Id: "seg1", StartOffset: 0, EndOffset: 1999}}},
+				{InternalPath: "b3f9c1d2e4b5a6f7c8d9e0f1a2b3c4d5.mkv", Filename: "b3f9c1d2e4b5a6f7c8d9e0f1a2b3c4d5.mkv", Size: 2100,
+					Segments: []*metapb.SegmentData{{Id: "seg2", StartOffset: 0, EndOffset: 2099}}},
+			},
+			wantMetaPaths: []string{
+				"tv/Show.S01/a3f9c1d2e4b5a6f7c8d9e0f1a2b3c4d5.mkv",
+				"tv/Show.S01/b3f9c1d2e4b5a6f7c8d9e0f1a2b3c4d5.mkv",
+			},
+			notWantMetaPaths: []string{"tv/Show.S01/Show.S01.mkv"},
+		},
+		{
+			name:            "rename: subtitle sharing the payload stem follows it",
+			virtualDir:      "movies/MyMovie",
+			nzbPath:         "movies/MyMovie.nzb",
+			renameToNzbName: true,
+			contents: []Content{
+				{InternalPath: "a3f9c1d2e4b5a6f7c8d9e0f1a2b3c4d5.mkv", Filename: "a3f9c1d2e4b5a6f7c8d9e0f1a2b3c4d5.mkv", Size: 20000,
+					Segments: []*metapb.SegmentData{{Id: "seg1", StartOffset: 0, EndOffset: 19999}}},
+				{InternalPath: "a3f9c1d2e4b5a6f7c8d9e0f1a2b3c4d5.eng.srt", Filename: "a3f9c1d2e4b5a6f7c8d9e0f1a2b3c4d5.eng.srt", Size: 100,
+					Segments: []*metapb.SegmentData{{Id: "seg2", StartOffset: 0, EndOffset: 99}}},
+			},
+			extractedFiles: []parser.ExtractedFileInfo{{Name: "MyMovie.mkv", Size: 20000}, {Name: "MyMovie.eng.srt", Size: 100}},
+			wantMetaPaths:  []string{"movies/MyMovie/MyMovie.mkv", "movies/MyMovie/MyMovie.eng.srt"},
+			notWantMetaPaths: []string{
+				"movies/MyMovie/a3f9c1d2e4b5a6f7c8d9e0f1a2b3c4d5.mkv",
+				"movies/MyMovie/a3f9c1d2e4b5a6f7c8d9e0f1a2b3c4d5.eng.srt",
+			},
+		},
+		{
+			name:            "rename: clean payload name is kept",
+			virtualDir:      "movies/MyMovie",
+			nzbPath:         "movies/MyMovie.nzb",
+			renameToNzbName: true,
+			contents: []Content{
+				{InternalPath: "My.Movie.2024.PROPER.1080p.mkv", Filename: "My.Movie.2024.PROPER.1080p.mkv", Size: 2000,
+					Segments: []*metapb.SegmentData{{Id: "seg1", StartOffset: 0, EndOffset: 1999}}},
+			},
+			wantMetaPaths:    []string{"movies/MyMovie/My.Movie.2024.PROPER.1080p.mkv"},
+			notWantMetaPaths: []string{"movies/MyMovie/MyMovie.mkv"},
+		},
+		{
 			name:       "windows-style backslash paths normalized",
 			virtualDir: "movies/MyMovie",
 			nzbPath:    "movies/MyMovie.nzb",

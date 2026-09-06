@@ -16,6 +16,10 @@ import (
 // MissingRateWarningThreshold is the missing articles per minute rate that triggers a warning.
 const MissingRateWarningThreshold = 10.0
 
+// providerBytes24hTTL is how long the 24h per-provider volume read from the
+// database is reused before another query is issued.
+const providerBytes24hTTL = 30 * time.Second
+
 // ProviderQuotaSnapshot holds the quota state for a single provider.
 type ProviderQuotaSnapshot struct {
 	QuotaBytes    int64     `json:"quota_bytes"`
@@ -77,6 +81,16 @@ type MetricsTracker struct {
 	cancel                    context.CancelFunc
 	wg                        sync.WaitGroup
 	logger                    *slog.Logger
+
+	// 24h provider volume cache, guarded by its own mutex so the database read
+	// never happens under mu.
+	bytes24hMu       sync.Mutex
+	bytes24hCache    map[string]int64
+	bytes24hFetched  time.Time
+	bytes24hInflight bool
+
+	// statsFn overrides the live pool counters; only set by tests.
+	statsFn func() nntppool.ClientStats
 }
 
 // metricsample represents a single metrics sample at a point in time
@@ -108,6 +122,60 @@ func NewMetricsTracker(pool *nntppool.Client, repo StatsRepository) *MetricsTrac
 	}
 
 	return mt
+}
+
+// poolStats reads the pool's cumulative counters. These are lifetime counters
+// that the pool itself cannot reset, so every reset path offsets them instead.
+func (mt *MetricsTracker) poolStats() nntppool.ClientStats {
+	if mt.statsFn != nil {
+		return mt.statsFn()
+	}
+	if mt.pool == nil {
+		return nntppool.ClientStats{}
+	}
+	return mt.pool.Stats()
+}
+
+// providerBytes24h returns the last 24h of per-provider volume, refreshing from
+// the database at most once per providerBytes24hTTL. It must be called without
+// holding mu: a slow query here would otherwise stall sampling and every caller
+// of GetSnapshot. While a refresh is in flight, other callers get the previous
+// value rather than queueing behind the database.
+func (mt *MetricsTracker) providerBytes24h(ctx context.Context) map[string]int64 {
+	if mt.repo == nil {
+		return make(map[string]int64)
+	}
+
+	mt.bytes24hMu.Lock()
+	fresh := mt.bytes24hCache != nil && time.Since(mt.bytes24hFetched) < providerBytes24hTTL
+	if fresh || mt.bytes24hInflight {
+		cached := copyProviderErrors(mt.bytes24hCache)
+		mt.bytes24hMu.Unlock()
+		if cached == nil {
+			return make(map[string]int64)
+		}
+		return cached
+	}
+	mt.bytes24hInflight = true
+	mt.bytes24hMu.Unlock()
+
+	stats24h, err := mt.repo.GetProviderHourlyStats(ctx, 24)
+
+	mt.bytes24hMu.Lock()
+	defer mt.bytes24hMu.Unlock()
+	mt.bytes24hInflight = false
+	if err != nil {
+		mt.logger.ErrorContext(ctx, "Failed to load 24h provider stats", "error", err)
+	} else {
+		mt.bytes24hCache = stats24h
+		mt.bytes24hFetched = time.Now()
+	}
+
+	cached := copyProviderErrors(mt.bytes24hCache)
+	if cached == nil {
+		return make(map[string]int64)
+	}
+	return cached
 }
 
 // Start begins collecting metrics samples
@@ -209,13 +277,15 @@ func (mt *MetricsTracker) Stop() {
 
 // GetSnapshot returns the current metrics with calculated speeds
 func (mt *MetricsTracker) GetSnapshot() MetricsSnapshot {
+	providerBytes24h := mt.providerBytes24h(context.Background())
+
 	mt.mu.Lock()
 	defer mt.mu.Unlock()
 
-	return mt.getSnapshot(time.Now(), mt.pool.Stats())
+	return mt.getSnapshot(time.Now(), mt.poolStats(), providerBytes24h)
 }
 
-func (mt *MetricsTracker) getSnapshot(now time.Time, stats nntppool.ClientStats) MetricsSnapshot {
+func (mt *MetricsTracker) getSnapshot(now time.Time, stats nntppool.ClientStats, providerBytes24h map[string]int64) MetricsSnapshot {
 	// Calculate total errors and provider errors/bytes from v4 stats
 	var totalErrors int64
 	providerErrors := make(map[string]int64)
@@ -340,15 +410,8 @@ func (mt *MetricsTracker) getSnapshot(now time.Time, stats nntppool.ClientStats)
 		}
 	}
 
-	// Fetch 24h provider stats from DB if repo is available
-	providerBytes24h := make(map[string]int64)
-	if mt.repo != nil {
-		// We use a background context or a timeout context here to avoid blocking speed calcs?
-		// For now, simple call is fine as it's infrequent or cached by DB
-		stats24h, err := mt.repo.GetProviderHourlyStats(context.Background(), 24)
-		if err == nil {
-			providerBytes24h = stats24h
-		}
+	if providerBytes24h == nil {
+		providerBytes24h = make(map[string]int64)
 	}
 
 	// Compute per-provider speeds
@@ -463,7 +526,7 @@ func (mt *MetricsTracker) saveStats(ctx context.Context) {
 	}
 
 	// Persist per-provider quota state for restore across restarts
-	poolStats := mt.pool.Stats()
+	poolStats := mt.poolStats()
 	for _, ps := range poolStats.Providers {
 		if ps.QuotaBytes > 0 {
 			stats["quota_used:"+ps.Name] = ps.QuotaUsed
@@ -533,6 +596,8 @@ func (mt *MetricsTracker) Reset(ctx context.Context, resetPeak bool, resetTotals
 	defer mt.mu.Unlock()
 
 	if resetTotals {
+		poolStats := mt.poolStats()
+
 		mt.initialBytesDownloaded = 0
 		mt.initialArticlesDownloaded = 0
 		mt.initialBytesUploaded = 0
@@ -540,11 +605,22 @@ func (mt *MetricsTracker) Reset(ctx context.Context, resetPeak bool, resetTotals
 		mt.articlesDownloaded.Store(0)
 		mt.articlesPosted.Store(0)
 		mt.liveBytesDownloaded.Store(0)
+		mt.lastSavedBytesDownloaded = 0
 		mt.startedAt = time.Now()
 		mt.initialProviderErrors = make(map[string]int64)
 		mt.initialProviderBytes = make(map[string]int64)
 		mt.initialProviderStartedAt = make(map[string]time.Time)
 		mt.lastSavedProviderBytes = make(map[string]int64)
+
+		// The pool's per-provider counters are cumulative for its whole lifetime
+		// and cannot be zeroed, so negate them: displayed = initial + live = 0.
+		// The delta baseline has to follow that merged total, otherwise the next
+		// save would charge the entire pool-lifetime volume to the current hour.
+		for _, ps := range poolStats.Providers {
+			mt.initialProviderBytes[ps.Name] = -ps.BytesConsumed
+			mt.initialProviderErrors[ps.Name] = -ps.Errors
+			mt.lastSavedProviderBytes[ps.Name] = 0
+		}
 
 		// Clear samples to reset speed calculation
 		mt.samples = make([]metricsample, 0, 60)
@@ -554,6 +630,11 @@ func (mt *MetricsTracker) Reset(ctx context.Context, resetPeak bool, resetTotals
 			if err := mt.repo.ClearProviderHourlyStats(ctx); err != nil {
 				mt.logger.ErrorContext(ctx, "Failed to clear provider hourly stats during reset", "error", err)
 			}
+
+			mt.bytes24hMu.Lock()
+			mt.bytes24hCache = nil
+			mt.bytes24hFetched = time.Time{}
+			mt.bytes24hMu.Unlock()
 		}
 	}
 
@@ -604,7 +685,7 @@ func (mt *MetricsTracker) ResetProviderErrors(ctx context.Context) error {
 	defer mt.mu.Unlock()
 
 	// Negate the live error counts so that displayed = initial + live = 0.
-	poolStats := mt.pool.Stats()
+	poolStats := mt.poolStats()
 	for _, ps := range poolStats.Providers {
 		mt.initialProviderErrors[ps.Name] = -ps.Errors
 	}
@@ -643,7 +724,7 @@ func (mt *MetricsTracker) SetProviderIDs(mapping map[string]string) {
 
 // takeSample captures a metrics snapshot and stores it
 func (mt *MetricsTracker) takeSample() {
-	stats := mt.pool.Stats()
+	stats := mt.poolStats()
 
 	mt.mu.Lock()
 	defer mt.mu.Unlock()
