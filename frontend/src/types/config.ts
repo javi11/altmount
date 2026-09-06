@@ -326,6 +326,7 @@ export interface PipelineDepthSample {
 
 export interface PipelineTuneResponse {
 	recommended_inflight: number;
+	recommended_stat_inflight: number;
 	baseline_mbps: number;
 	best_mbps: number;
 	improvement_pct: number;

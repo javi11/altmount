@@ -237,7 +237,7 @@ export function ProvidersConfigSection({
 		}
 
 		setPipelineTuning({ current: 0, total: targets.length });
-		const recommendations = new Map<string, number>();
+		const recommendations = new Map<string, { inflight: number; statInflight: number }>();
 		const skipped: string[] = [];
 
 		for (let i = 0; i < targets.length; i++) {
@@ -248,7 +248,10 @@ export function ProvidersConfigSection({
 				if (result.warning) {
 					skipped.push(`${provider.host}: ${result.warning}`);
 				} else {
-					recommendations.set(provider.id, result.recommended_inflight);
+					recommendations.set(provider.id, {
+						inflight: result.recommended_inflight,
+						statInflight: result.recommended_stat_inflight,
+					});
 				}
 			} catch (error) {
 				console.error("Failed to tune pipeline:", error);
@@ -266,11 +269,13 @@ export function ProvidersConfigSection({
 			return;
 		}
 
-		const newFormData = formData.map((p) =>
-			recommendations.has(p.id)
-				? { ...p, inflight_requests: recommendations.get(p.id) as number }
-				: p,
-		);
+		const newFormData = formData.map((p) => {
+			const rec = recommendations.get(p.id);
+			if (!rec) {
+				return p;
+			}
+			return { ...p, inflight_requests: rec.inflight, stat_inflight_requests: rec.statInflight };
+		});
 		setFormData(newFormData);
 
 		if (!onUpdate) {
@@ -298,7 +303,11 @@ export function ProvidersConfigSection({
 	};
 
 	const handleDisablePipelining = async () => {
-		const newFormData = formData.map((p) => ({ ...p, inflight_requests: 1 }));
+		const newFormData = formData.map((p) => ({
+			...p,
+			inflight_requests: 1,
+			stat_inflight_requests: 1,
+		}));
 		setFormData(newFormData);
 		if (!onUpdate) {
 			setHasChanges(true);
@@ -729,8 +738,8 @@ export function ProvidersConfigSection({
 					<h3 className="font-bold text-base-content text-lg tracking-tight">NNTP Pipeline</h3>
 					<p className="text-base-content/50 text-xs">
 						Auto-tune the pipeline depth (requests in flight per connection) by speed-testing each
-						enabled provider, or disable pipelining everywhere. Run when downloads are idle for the
-						most accurate result.
+						enabled provider, or disable pipelining everywhere. Both actions cover the body and STAT
+						pipeline depths. Run when downloads are idle for the most accurate result.
 					</p>
 				</div>
 				<div className="flex flex-wrap items-center gap-3">

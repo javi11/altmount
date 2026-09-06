@@ -19,6 +19,7 @@ const (
 	pipelineTuneSegments = 160
 	pipelineLevelTimeout = 20 * time.Second
 	pipelineWinFactor    = 1.10
+	defaultStatInflight  = 100
 )
 
 // pipelineTuneDepths are the inflight depths compared against the depth-1 baseline.
@@ -30,14 +31,15 @@ type PipelineDepthSample struct {
 }
 
 type PipelineTuneResponse struct {
-	RecommendedInflight int                   `json:"recommended_inflight"`
-	BaselineMbps        float64               `json:"baseline_mbps"`
-	BestMbps            float64               `json:"best_mbps"`
-	Improvement         float64               `json:"improvement_pct"`
-	Enabled             bool                  `json:"enabled"`
-	TestConnections     int                   `json:"test_connections"`
-	Tested              []PipelineDepthSample `json:"tested"`
-	Warning             string                `json:"warning,omitempty"`
+	RecommendedInflight     int                   `json:"recommended_inflight"`
+	RecommendedStatInflight int                   `json:"recommended_stat_inflight"`
+	BaselineMbps            float64               `json:"baseline_mbps"`
+	BestMbps                float64               `json:"best_mbps"`
+	Improvement             float64               `json:"improvement_pct"`
+	Enabled                 bool                  `json:"enabled"`
+	TestConnections         int                   `json:"test_connections"`
+	Tested                  []PipelineDepthSample `json:"tested"`
+	Warning                 string                `json:"warning,omitempty"`
 }
 
 // handleTunePipeline sweeps pipeline depths and recommends the best inflight (1 = off).
@@ -99,9 +101,15 @@ func (s *Server) runPipelineSweep(ctx context.Context, p *config.ProviderConfig)
 		current = 1
 	}
 
+	currentStat := p.StatInflightRequests
+	if currentStat <= 0 {
+		currentStat = defaultStatInflight
+	}
+
 	resp := &PipelineTuneResponse{
-		RecommendedInflight: current,
-		TestConnections:     conns,
+		RecommendedInflight:     current,
+		RecommendedStatInflight: currentStat,
+		TestConnections:         conns,
 	}
 
 	nzbBytes, err := fetchSpeedTestNZB(ctx)
@@ -125,7 +133,20 @@ func (s *Server) runPipelineSweep(ctx context.Context, p *config.ProviderConfig)
 
 	resp.RecommendedInflight, resp.Enabled, resp.Improvement, resp.BestMbps =
 		pickPipelineDepth(baseline, resp.Tested[1:])
+	resp.RecommendedStatInflight = pickStatDepth(resp.RecommendedStatInflight, resp.Enabled)
 	return resp, nil
+}
+
+// pickStatDepth keeps the configured STAT depth while bodies pipeline, and drops to 1
+// otherwise: a server that refuses pipelined bodies cannot absorb 100 pipelined STATs.
+func pickStatDepth(configured int, pipeliningEnabled bool) int {
+	if !pipeliningEnabled {
+		return 1
+	}
+	if configured <= 0 {
+		return defaultStatInflight
+	}
+	return configured
 }
 
 // pickPipelineDepth returns the smallest depth beating the baseline by the win factor, else 1.

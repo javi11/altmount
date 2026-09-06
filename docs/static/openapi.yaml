@@ -4302,6 +4302,8 @@ components:
           type: number
         recommended_inflight:
           type: integer
+        recommended_stat_inflight:
+          type: integer
         test_connections:
           type: integer
         tested:
