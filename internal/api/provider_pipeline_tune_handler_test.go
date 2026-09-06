@@ -48,3 +48,24 @@ func TestPickPipelineDepth(t *testing.T) {
 		})
 	}
 }
+
+func TestPickStatDepth(t *testing.T) {
+	tests := []struct {
+		name       string
+		configured int
+		enabled    bool
+		want       int
+	}{
+		{name: "pipelining off drops stat depth to 1", configured: 100, enabled: false, want: 1},
+		{name: "pipelining off drops tuned stat depth to 1", configured: 25, enabled: false, want: 1},
+		{name: "pipelining on preserves configured depth", configured: 25, enabled: true, want: 25},
+		{name: "pipelining on falls back to default", configured: 0, enabled: true, want: defaultStatInflight},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := pickStatDepth(tt.configured, tt.enabled); got != tt.want {
+				t.Fatalf("got %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
