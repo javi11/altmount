@@ -911,6 +911,43 @@ func migrateGlobalUserAgent(config *Config) {
 	config.Nzblnk = NzblnkConfig{}
 }
 
+// migrateProviderIDs assigns a stable "provider_N" id to any provider whose
+// id is empty. ID was optional until Validate started requiring it: earlier
+// docs told users it was fine to leave blank ("leave empty for
+// auto-generation"), but nothing ever actually generated one for a
+// hand-edited config.yaml — only the create-provider API did. Without this,
+// such a config now fails validation and the process refuses to start.
+//
+// Existing non-empty ids are left untouched and never reused, so this never
+// collides with an id a provider already has.
+func migrateProviderIDs(config *Config) {
+	used := make(map[string]struct{}, len(config.Providers))
+	for _, p := range config.Providers {
+		if id := strings.TrimSpace(p.ID); id != "" {
+			used[id] = struct{}{}
+		}
+	}
+
+	next := 1
+	for i := range config.Providers {
+		if strings.TrimSpace(config.Providers[i].ID) != "" {
+			continue
+		}
+		var id string
+		for {
+			id = fmt.Sprintf("provider_%d", next)
+			next++
+			if _, exists := used[id]; !exists {
+				break
+			}
+		}
+		used[id] = struct{}{}
+		config.Providers[i].ID = id
+		slog.Warn("Assigned a stable id to a provider with a blank id",
+			"index", i, "host", config.Providers[i].Host, "assigned_id", id)
+	}
+}
+
 // migrateArrsCleanup folds the legacy split cleanup config (separate stuck-rules
 // list, allowlist, enable flag and grace period) into the unified QueueCleanupRules
 // model, then clears the legacy fields so they are dropped from saved YAML.
@@ -1880,6 +1917,7 @@ func (m *Manager) ReloadConfig() error {
 	migrateArrsCleanup(config)
 	migrateGlobalUserAgent(config)
 	migrateHealthSweepConcurrency(config)
+	migrateProviderIDs(config)
 
 	// Validate configuration
 	if err := config.Validate(); err != nil {
@@ -2388,6 +2426,7 @@ func LoadConfig(configFile string) (*Config, error) {
 	migrateArrsCleanup(config)
 	migrateGlobalUserAgent(config)
 	migrateHealthSweepConcurrency(config)
+	migrateProviderIDs(config)
 
 	// If log file was not explicitly set in the config file and we have a specific config file path,
 	// derive log file path from config file location

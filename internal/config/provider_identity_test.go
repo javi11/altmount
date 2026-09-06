@@ -38,6 +38,35 @@ func TestProviderIdentityKeepsSameHostAccountsDistinct(t *testing.T) {
 	}
 }
 
+func TestMigrateProviderIDsAssignsBlankIDs(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Providers = []ProviderConfig{
+		{Host: "news.example.test", Port: 563, MaxConnections: 1},
+		{ID: "provider_2", Host: "news.other.test", Port: 563, MaxConnections: 1},
+		{Host: "news.third.test", Port: 563, MaxConnections: 1},
+	}
+
+	migrateProviderIDs(cfg)
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error after migration = %v", err)
+	}
+
+	seen := make(map[string]struct{}, len(cfg.Providers))
+	for i, p := range cfg.Providers {
+		if strings.TrimSpace(p.ID) == "" {
+			t.Fatalf("provider %d still has a blank id after migration", i)
+		}
+		if _, exists := seen[p.ID]; exists {
+			t.Fatalf("migration assigned duplicate id %q", p.ID)
+		}
+		seen[p.ID] = struct{}{}
+	}
+	if cfg.Providers[1].ID != "provider_2" {
+		t.Fatalf("migration changed an already-set id: got %q, want %q", cfg.Providers[1].ID, "provider_2")
+	}
+}
+
 func TestConfigValidateRequiresUniqueProviderIDs(t *testing.T) {
 	validProvider := func(id string) ProviderConfig {
 		return ProviderConfig{ID: id, Host: "news.example.test", Port: 563, MaxConnections: 1}

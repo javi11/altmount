@@ -324,7 +324,7 @@ providers:
 
 
   # Secondary provider (optional)
-  # - id: '' # Auto-generated
+  # - id: provider_secondary # Stable public identifier; keep unique and free of credentials/non-graphic characters
   #   host: "news.otherprovider.com"
   #   port: 563
   #   username: "other_username"
