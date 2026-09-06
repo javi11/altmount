@@ -203,6 +203,7 @@ health:
   library_sync_interval_minutes: 360 # Library synchronization interval in minutes (default: 360 = 6 hours)
   library_sync_concurrency: 5 # Number of concurrent library sync operations (default: 5)
   resolve_repair_on_import: false # Automatically resolve pending repairs in the same directory when a new file is imported (default: false)
+  corrupted_retention_days: 0 # Days a corrupted file's metadata is kept in the corrupted_metadata safety folder before it is pruned and its segment store released (0 = keep forever, default: 0)
 
 # WebDAV mount path configuration
 # Go soft memory limit in MB. Unset or 0: derived from segment_cache.memory_mb plus the PAR2 solver

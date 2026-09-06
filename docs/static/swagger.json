@@ -2866,6 +2866,87 @@
                 }
             }
         },
+        "/metadata/corrupted": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns how many corrupted metadata safety copies are retained and how much disk they occupy.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Metadata"
+                ],
+                "summary": "Get corrupted metadata stats",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/api.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/api.CorruptedMetadataStatsResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/api.APIResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/api.APIResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Removes every corrupted metadata safety copy and releases the segment stores they hold.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Metadata"
+                ],
+                "summary": "Purge corrupted metadata",
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/api.APIResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/api.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/metadata/migration/cancel": {
             "post": {
                 "security": [
@@ -5909,6 +5990,10 @@
                 "log": {
                     "$ref": "#/definitions/config.LogConfig"
                 },
+                "memory_limit_mb": {
+                    "description": "MemoryLimitMB is the Go soft memory limit. Unset or 0 derives it from\nthe budgets that allocate (see SoftMemoryLimit); a positive value pins\nit; a negative value leaves the runtime default. GOMEMLIMIT in the\nenvironment always takes precedence.",
+                    "type": "integer"
+                },
                 "metadata": {
                     "$ref": "#/definitions/config.MetadataConfig"
                 },
@@ -5920,6 +6005,9 @@
                 },
                 "network": {
                     "$ref": "#/definitions/config.NetworkConfig"
+                },
+                "par2_repair": {
+                    "$ref": "#/definitions/config.Par2RepairConfig"
                 },
                 "profiler_enabled": {
                     "type": "boolean"
@@ -5951,6 +6039,17 @@
                 },
                 "webdav": {
                     "$ref": "#/definitions/api.WebDAVAPIResponse"
+                }
+            }
+        },
+        "api.CorruptedMetadataStatsResponse": {
+            "type": "object",
+            "properties": {
+                "file_count": {
+                    "type": "integer"
+                },
+                "total_bytes": {
+                    "type": "integer"
                 }
             }
         },
@@ -6538,7 +6637,7 @@
                     "type": "string"
                 },
                 "id": {
-                    "description": "Stable public provider identifier; never credentials or non-graphic characters",
+                    "description": "ID is a stable public provider identifier; it is not an authentication field.",
                     "type": "string"
                 },
                 "inflight_requests": {
@@ -6747,7 +6846,6 @@
                     "type": "string"
                 },
                 "id": {
-                    "description": "Stable public provider identifier; never credentials or non-graphic characters",
                     "type": "string"
                 },
                 "last_connection_attempt": {
@@ -7149,6 +7247,10 @@
                     "type": "string"
                 },
                 "rc_user": {
+                    "type": "string"
+                },
+                "rcd_restart_after": {
+                    "description": "RcdRestartAfter is how long the rcd may stay unresponsive to liveness\nprobes before it is killed and restarted. Empty means the built-in default.",
                     "type": "string"
                 },
                 "read_only": {
@@ -7971,6 +8073,10 @@
                 "cleanup_orphaned_metadata": {
                     "type": "boolean"
                 },
+                "corrupted_retention_days": {
+                    "description": "CorruptedRetentionDays bounds how long the corrupted_metadata safety copies\ncreated by MoveToCorrupted are kept before the health cycle prunes them.\nnil or 0 means keep forever, which is what every install did before this\nsetting existed.",
+                    "type": "integer"
+                },
                 "corruption_action": {
                     "description": "CorruptionAction controls what happens when the health checker or a streaming read\nconfirms real (non-degraded) corruption: \"repair\" (default) triggers an Arr rescan;\n\"delete\" removes the file's metadata/NZB/health record and cleans up now-empty\nparent directories instead. Degraded files are never affected either way.",
                     "type": "string"
@@ -8252,6 +8358,53 @@
                 }
             }
         },
+        "config.Par2RepairConfig": {
+            "type": "object",
+            "properties": {
+                "arr_first": {
+                    "description": "ArrFirst makes PAR2 repair the fallback for corrupted files: the health\nworker triggers the ARR rescan first exactly as before, and enqueues a\nPAR2 repair only when nothing is found in the ARRs (no instance\nconfigured, none tracks the file) or ARR repair is disabled. On by\ndefault; disable to keep PAR2 out of the corrupted-file flow (degraded\nfiles, playback holes and repair-on-import still repair via PAR2\ndirectly).",
+                    "type": "boolean"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "max_concurrent_jobs": {
+                    "description": "MaxConcurrentJobs bounds simultaneously running repair jobs.",
+                    "type": "integer"
+                },
+                "max_connections": {
+                    "description": "MaxConnections bounds how many NNTP connections repair jobs use for\narticle fetches (shared across concurrent jobs). Repair streams the\nwhole release once, so this directly sets its download speed on an idle\npool. Fetches ride the pool's background lane: while anything streams\nor imports, the pool holds repair to a quarter of each provider's\nconnections regardless of this value. 0 (default) means 10.",
+                    "type": "integer"
+                },
+                "max_memory_mb": {
+                    "description": "MaxMemoryMB bounds one job's in-heap solver memory; jobs needing more\nstill run, backed by memory-mapped scratch files next to the patch store.",
+                    "type": "integer"
+                },
+                "max_patch_store_mb": {
+                    "description": "MaxPatchStoreMB bounds the on-disk patch store size; oldest patches are\nevicted first when the cap is exceeded. 0 (default) means unlimited.",
+                    "type": "integer"
+                },
+                "max_release_size_mb": {
+                    "type": "integer"
+                },
+                "max_repair_ratio": {
+                    "description": "MaxRepairRatio caps how large a fraction of a file's bytes a repair may\nreconstruct. The release's PAR2 redundancy is always the hard ceiling.",
+                    "type": "number"
+                },
+                "min_release_size_mb": {
+                    "description": "MinReleaseSizeMB / MaxReleaseSizeMB bound the size of releases repair\ntakes on (content bytes, PAR2 files excluded). A repair downloads the\nwhole release once, so these let users skip releases too large to be\nworth the bandwidth or too small to bother with. 0 (default) means\nunbounded on that side — all sizes are repaired.",
+                    "type": "integer"
+                },
+                "patch_dir": {
+                    "description": "PatchDir is where repaired article payloads (and the solver's transient\nscratch files) are stored. Empty (default) means \u003cmetadata_root\u003e/patches.\nApplied at startup; changing it does not move existing patches.",
+                    "type": "string"
+                },
+                "repair_on_import": {
+                    "description": "RepairOnImport queues a repair as soon as an import completes with\nconfirmed missing segments, instead of waiting for the first playback or\na health check. Off by default: every repair costs one full release\ndownload, so a large damaged backlog would be expensive. Worth enabling\nwhen your library outlives article retention — a release's PAR2 volumes\nare most likely to still be retrievable close to the post date.",
+                    "type": "boolean"
+                }
+            }
+        },
         "config.ProviderConfig": {
             "type": "object",
             "properties": {
@@ -8265,6 +8418,7 @@
                     "type": "string"
                 },
                 "id": {
+                    "description": "ID is a stable public identifier used in pool names, metrics, and errors.\nIt must never contain credentials or non-graphic characters.",
                     "type": "string"
                 },
                 "inflight_requests": {
@@ -8322,6 +8476,10 @@
                 },
                 "storage_group": {
                     "type": "string"
+                },
+                "stream_inflight_requests": {
+                    "description": "StreamInflightRequests caps streaming (priority-lane) bodies in flight\nper connection, so a playback read never queues behind a connection's\nworth of read-ahead. 0 defaults to 4; values above inflight_requests\nare capped to it.",
+                    "type": "integer"
                 },
                 "tls": {
                     "type": "boolean"
@@ -8492,6 +8650,10 @@
                 "rc_user": {
                     "type": "string"
                 },
+                "rcd_restart_after": {
+                    "description": "RcdRestartAfter is how long the rcd subprocess must stay unresponsive to\nliveness probes before it is killed and restarted. Empty means the built-in\ndefault. Restarting is disruptive, because re-establishing the mount\nunmounts it out from under every process reading it, so an install whose\nrcd goes briefly slow under load can raise this to ride the stall out.",
+                    "type": "string"
+                },
                 "read_only": {
                     "type": "boolean"
                 },
@@ -8638,6 +8800,10 @@
                     "type": "integer"
                 },
                 "max_size_gb": {
+                    "type": "integer"
+                },
+                "memory_mb": {
+                    "description": "MemoryMB bounds the in-memory tier of decoded articles that sits in\nfront of the disk cache and is on even when the disk cache is off.\nLeft unset (nil) it defaults to 256; an explicit 0 disables it.",
                     "type": "integer"
                 }
             }
@@ -8930,7 +9096,8 @@
                 "completed",
                 "failed",
                 "paused",
-                "fallback"
+                "fallback",
+                "waiting_repair"
             ],
             "x-enum-comments": {
                 "QueueStatusFallback": "Sent to external SABnzbd as fallback"
@@ -8941,7 +9108,8 @@
                 "",
                 "",
                 "",
-                "Sent to external SABnzbd as fallback"
+                "Sent to external SABnzbd as fallback",
+                ""
             ],
             "x-enum-varnames": [
                 "QueueStatusPending",
@@ -8949,7 +9117,8 @@
                 "QueueStatusCompleted",
                 "QueueStatusFailed",
                 "QueueStatusPaused",
-                "QueueStatusFallback"
+                "QueueStatusFallback",
+                "QueueStatusWaitingRepair"
             ]
         }
     },

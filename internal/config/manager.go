@@ -737,6 +737,11 @@ type HealthConfig struct {
 	// is found. Distinct from the unrelated, unused VerifyData field above.
 	VerifyContent               *bool `yaml:"verify_content" mapstructure:"verify_content" json:"verify_content,omitempty"`
 	VerifyContentTimeoutSeconds *int  `yaml:"verify_content_timeout_seconds" mapstructure:"verify_content_timeout_seconds" json:"verify_content_timeout_seconds,omitempty"`
+	// CorruptedRetentionDays bounds how long the corrupted_metadata safety copies
+	// created by MoveToCorrupted are kept before the health cycle prunes them.
+	// nil or 0 means keep forever, which is what every install did before this
+	// setting existed.
+	CorruptedRetentionDays *int `yaml:"corrupted_retention_days" mapstructure:"corrupted_retention_days" json:"corrupted_retention_days,omitempty"`
 }
 
 // Path validation functions have been moved to internal/utils/path.go
@@ -1257,6 +1262,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Health.VerifyContentTimeoutSeconds != nil && *c.Health.VerifyContentTimeoutSeconds <= 0 {
 		return fmt.Errorf("health verify_content_timeout_seconds must be greater than 0")
+	}
+	if c.Health.CorruptedRetentionDays != nil && *c.Health.CorruptedRetentionDays < 0 {
+		return fmt.Errorf("health corrupted_retention_days must be zero (keep forever) or greater")
 	}
 
 	// Validate health configuration - requires library_dir when enabled and using a strategy other than NONE
@@ -2021,6 +2029,7 @@ func DefaultConfig(configDir ...string) *Config {
 	importVerifyContentTimeoutSeconds := defaultVerifyContentTimeoutSeconds
 	healthVerifyContent := false // Content verification disabled by default (destructive if misfired)
 	healthVerifyContentTimeoutSeconds := defaultVerifyContentTimeoutSeconds
+	healthCorruptedRetentionDays := 0
 
 	// Set paths based on whether we're running in Docker or have a specific config directory
 	var dbPath, metadataPath, logPath, rclonePath, cachePath, backupPath string
@@ -2187,6 +2196,7 @@ func DefaultConfig(configDir ...string) *Config {
 			AcceptableMissingSegmentsPercentage: 2,                                  // Default: tolerate up to 2% missing segments
 			VerifyContent:                       &healthVerifyContent,               // Disabled by default
 			VerifyContentTimeoutSeconds:         &healthVerifyContentTimeoutSeconds, // Default: 15s per-file content probe timeout
+			CorruptedRetentionDays:              &healthCorruptedRetentionDays,      // Default: keep corrupted safety copies forever
 			Repair: RepairConfig{
 				Enabled:            &repairEnabled,
 				IntervalMinutes:    60,

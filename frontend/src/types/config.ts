@@ -154,6 +154,9 @@ export interface HealthConfig {
 	corruption_action?: "repair" | "delete";
 	verify_content?: boolean; // Probe each media file's header for a valid container signature during health checks
 	verify_content_timeout_seconds?: number; // Per-file content probe timeout (default 15s)
+	// Days a corrupted_metadata safety copy is kept before the health cycle prunes it.
+	// 0 or absent means keep forever.
+	corrupted_retention_days?: number;
 }
 
 export interface RepairConfig {
