@@ -8,6 +8,7 @@ import {
 } from "../../../../lib/utils";
 import { type FileHealth, HealthPriority } from "../../../../types/api";
 import { parseRepairReason } from "../par2RepairReason";
+import { ContentVerificationBadge } from "./ContentVerificationBadge";
 import { HealthItemActionsMenu } from "./HealthItemActionsMenu";
 import { PartialCheckBadge } from "./PartialCheckBadge";
 import { PlaybackImpactBadge } from "./PlaybackImpactBadge";
@@ -190,6 +191,7 @@ export const HealthTableRow = memo(function HealthTableRow({
 					<HealthBadge status={item.status} isMasked={item.is_masked} />
 					{playbackImpact && <PlaybackImpactBadge impact={playbackImpact} />}
 					{errorDetails && <PartialCheckBadge details={errorDetails} />}
+					{errorDetails && <ContentVerificationBadge details={errorDetails} />}
 				</div>
 				{/* Show last_error for repair failures and general errors. PAR2
 				    repair verdicts land here when a repair proved impossible;
@@ -206,8 +208,10 @@ export const HealthTableRow = memo(function HealthTableRow({
 						<div className="mt-1 break-all text-error text-xs">{item.last_error}</div>
 					)
 				)}
-				{/* Show error_details for additional technical details */}
-				{item.error_details && item.error_details !== item.last_error && (
+				{/* Show error_details for additional technical details. Gated on an
+				    actual error: a healthy record now carries a content-verification
+				    envelope, which the badge above already renders. */}
+				{item.last_error && item.error_details && item.error_details !== item.last_error && (
 					<div className="mt-1 break-all text-warning text-xs">Technical: {item.error_details}</div>
 				)}
 			</td>

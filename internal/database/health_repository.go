@@ -1317,7 +1317,7 @@ func (r *HealthRepository) UpdateHealthStatusBulk(ctx context.Context, updates [
 	stmtHealthy, err := tx.PrepareContext(ctx, `
 		UPDATE file_health
 		SET status = 'healthy', scheduled_check_at = ?, retry_count = 0,
-		    repair_retry_count = 0, last_error = NULL, error_details = NULL,
+		    repair_retry_count = 0, last_error = NULL, error_details = ?,
 		    updated_at = datetime('now'), last_checked = datetime('now')
 		WHERE file_path = ? AND (status = ? OR ? = '')
 	`)
@@ -1418,7 +1418,10 @@ func (r *HealthRepository) UpdateHealthStatusBulk(ctx context.Context, updates [
 		}
 		switch update.Type {
 		case UpdateTypeHealthy:
-			_, err = stmtHealthy.ExecContext(ctx, update.ScheduledCheckAt, filePath, expected, expected)
+			// error_details is normally nil here (clearing the column as a
+			// healthy result always did); a content-verification outcome is
+			// the one payload a healthy record keeps.
+			_, err = stmtHealthy.ExecContext(ctx, update.ScheduledCheckAt, update.ErrorDetails, filePath, expected, expected)
 		case UpdateTypeRetry:
 			_, err = stmtRetry.ExecContext(ctx, update.ErrorMessage, update.ErrorDetails, update.ScheduledCheckAt, filePath, expected, expected)
 		case UpdateTypeRepairTrigger:

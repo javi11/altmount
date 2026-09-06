@@ -11,7 +11,7 @@ import (
 // the frontend parses it to render playback-impact information. Legacy rows may
 // contain other ad-hoc JSON shapes or plain strings — parsers must tolerate that.
 type HealthErrorDetails struct {
-	ErrorType       string        `json:"error_type"`
+	ErrorType       string        `json:"error_type,omitempty"`
 	Message         string        `json:"message,omitempty"`
 	MissingArticles int           `json:"missing_articles,omitempty"`
 	TotalArticles   int           `json:"total_articles,omitempty"`
@@ -30,7 +30,28 @@ type HealthErrorDetails struct {
 
 	// TerminationReason explains why the check stopped early.
 	TerminationReason string `json:"termination_reason,omitempty"`
+
+	// ContentVerification records what the media-container header probe
+	// concluded, and is the one field also written on an otherwise-healthy
+	// record: without it a clean result is indistinguishable from a file that
+	// was never probed at all. Empty means verification did not run — the
+	// feature is off, or the file is not an eligible media type.
+	ContentVerification string `json:"content_verification,omitempty"`
 }
+
+// ContentVerification values for HealthErrorDetails.ContentVerification.
+const (
+	// ContentVerificationPassed: a recognized media container signature was
+	// found in the file's header.
+	ContentVerificationPassed = "passed"
+	// ContentVerificationFailed: the probe definitively rejected the file —
+	// no recognized signature, or its head article is missing.
+	ContentVerificationFailed = "failed"
+	// ContentVerificationUnavailable: the probe could not complete (transient
+	// provider, timeout, or connection error), so the file's content is
+	// unproven rather than bad.
+	ContentVerificationUnavailable = "unavailable"
+)
 
 // Marshal renders the envelope for storage, returning nil on the (practically
 // impossible) marshal error so callers can assign it directly to *string fields.

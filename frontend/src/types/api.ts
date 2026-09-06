@@ -289,7 +289,16 @@ export interface HealthErrorDetails {
 	// makes `sampled` a partial count and the missing-segment map incomplete.
 	terminated_early?: boolean;
 	termination_reason?: string;
+	// Outcome of the media-container header probe. Absent when verification
+	// never ran (feature off, or the file is not an eligible media type), and
+	// the one field a healthy record still carries.
+	content_verification?: ContentVerificationStatus;
 }
+
+// Outcome of the media-container header probe, recorded on both healthy and
+// corrupted results. "unavailable" means the probe itself could not complete,
+// so the content is unproven rather than bad.
+export type ContentVerificationStatus = "passed" | "failed" | "unavailable";
 
 export interface HealthCleanupRequest {
 	older_than?: string;

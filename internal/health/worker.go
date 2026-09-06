@@ -486,6 +486,9 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 		update.Type = database.UpdateTypeHealthy
 		update.Status = database.HealthStatusHealthy
 		update.ScheduledCheckAt = nextCheck
+		// Normally nil, which clears the column as before. A content-verification
+		// outcome is the one thing a healthy record still carries.
+		update.ErrorDetails = event.Details
 
 		sideEffect = func() error {
 			slog.InfoContext(ctx, "File is healthy", "file_path", fh.FilePath)
