@@ -431,6 +431,24 @@ func (c *Config) GetRepairMaxCoolDown() time.Duration {
 	return time.Duration(c.Health.Repair.MaxCoolDownHours) * time.Hour
 }
 
+// GetRepairAutoSearchWait returns how long a repair may wait for the ARR's own
+// automatic redownload search to finish. Zero means "do not wait".
+func (c *Config) GetRepairAutoSearchWait() time.Duration {
+	if c.Health.Repair.AutoSearchWaitSeconds <= 0 {
+		return 0
+	}
+	return time.Duration(c.Health.Repair.AutoSearchWaitSeconds) * time.Second
+}
+
+// GetRepairFileDeleteConfirm returns how long a repair may wait for the ARR to
+// report a deleted file record as unlinked. Zero means "do not wait".
+func (c *Config) GetRepairFileDeleteConfirm() time.Duration {
+	if c.Health.Repair.FileDeleteConfirmSeconds <= 0 {
+		return 0
+	}
+	return time.Duration(c.Health.Repair.FileDeleteConfirmSeconds) * time.Second
+}
+
 // GetRepairExponentialBackoff returns whether exponential backoff is enabled for repairs
 func (c *Config) GetRepairExponentialBackoff() bool {
 	if c.Health.Repair.ExponentialBackoff == nil {

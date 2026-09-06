@@ -2247,10 +2247,23 @@ definitions:
     type: object
   config.RepairConfig:
     properties:
+      auto_search_wait_seconds:
+        description: |-
+          AutoSearchWaitSeconds bounds how long a repair waits for the ARR's own
+          automatic redownload search — queued by the ARR the moment a release is
+          blocklisted — to finish before the file record is deleted and AltMount
+          issues its own targeted search. 0 disables the wait and restores the
+          previous fire-and-forget ordering.
+        type: integer
       enabled:
         type: boolean
       exponential_backoff:
         type: boolean
+      file_delete_confirm_seconds:
+        description: |-
+          FileDeleteConfirmSeconds bounds how long a repair waits for the ARR to
+          report the deleted file record as unlinked before issuing its search.
+        type: integer
       interval_minutes:
         type: integer
       max_cooldown_hours:
