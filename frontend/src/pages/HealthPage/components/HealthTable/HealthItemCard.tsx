@@ -28,7 +28,7 @@ interface HealthItemCardProps {
 	onSelectChange: (filePath: string, checked: boolean) => void;
 	onSetPriority: (id: number, priority: HealthPriority) => void;
 	onCancelCheck: (id: number) => void;
-	onManualCheck: (id: number) => void;
+	onManualCheck: (id: number, verifyContent?: boolean) => void;
 	onRepair: (id: number) => void;
 	onPar2Repair?: (filePath: string) => void;
 	onDelete: (id: number) => void;

@@ -4,6 +4,7 @@ import {
 	MoreHorizontal,
 	PlayCircle,
 	RefreshCw,
+	ScanSearch,
 	Trash2,
 	Wrench,
 	X,
@@ -21,7 +22,7 @@ interface HealthItemActionsMenuProps {
 	isUnmaskPending: boolean;
 	isRegeneratePending?: boolean;
 	onCancelCheck: (id: number) => void;
-	onManualCheck: (id: number) => void;
+	onManualCheck: (id: number, verifyContent?: boolean) => void;
 	onRepair: (id: number) => void;
 	onPar2Repair?: (filePath: string) => void;
 	onDelete: (id: number) => void;
@@ -98,16 +99,28 @@ export function HealthItemActionsMenu({
 						</button>
 					</li>
 				) : (
-					<li>
-						<button
-							type="button"
-							onClick={() => onManualCheck(item.id)}
-							disabled={isDirectCheckPending}
-						>
-							<PlayCircle className="h-4 w-4" />
-							Retry Check
-						</button>
-					</li>
+					<>
+						<li>
+							<button
+								type="button"
+								onClick={() => onManualCheck(item.id)}
+								disabled={isDirectCheckPending}
+							>
+								<PlayCircle className="h-4 w-4" />
+								Retry Check
+							</button>
+						</li>
+						<li>
+							<button
+								type="button"
+								onClick={() => onManualCheck(item.id, true)}
+								disabled={isDirectCheckPending}
+							>
+								<ScanSearch className="h-4 w-4" />
+								Verify Media Content
+							</button>
+						</li>
+					</>
 				)}
 				{onRegenerate && (
 					<li>

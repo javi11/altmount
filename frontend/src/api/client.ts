@@ -590,7 +590,7 @@ class APIClient {
 		);
 	}
 
-	async directHealthCheck(id: number) {
+	async directHealthCheck(id: number, verifyContent?: boolean) {
 		return this.request<{
 			message: string;
 			id: number;
@@ -601,6 +601,9 @@ class APIClient {
 			health_data: FileHealth;
 		}>(`/health/${id}/check-now`, {
 			method: "POST",
+			...(verifyContent === undefined
+				? {}
+				: { body: JSON.stringify({ verify_content: verifyContent }) }),
 		});
 	}
 

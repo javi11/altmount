@@ -3,6 +3,7 @@ package importer
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -176,6 +177,30 @@ func TestHandleFailure_FastFailInconclusiveSkipsDefinitiveFailureHandling(t *tes
 	require.NotNil(t, dbItem.ErrorMessage)
 	assert.Contains(t, *dbItem.ErrorMessage, validation.ErrFastFailInconclusive.Error())
 	assert.FileExists(t, item.NzbPath, "inconclusive validation must retain the NZB for manual retry")
+}
+
+func TestHandleFailure_ContentProbeInconclusiveSkipsDefinitiveFailureHandling(t *testing.T) {
+	svc := newMoveToFailedTestService(t)
+	ctx := context.Background()
+	item := &database.ImportQueueItem{
+		NzbPath: filepath.Join(t.TempDir(), "probe-inconclusive.nzb"),
+		Status:  database.QueueStatusPending,
+	}
+	require.NoError(t, os.WriteFile(item.NzbPath, []byte("<nzb/>"), 0644))
+	require.NoError(t, svc.database.Repository.AddToQueue(ctx, item))
+
+	// postProcessor is deliberately nil: HandleFailure/NoteImportFailure and the
+	// ARR notification would panic here, so reaching them fails this test.
+	svc.HandleFailure(ctx, item, fmt.Errorf("content verification could not complete for %q: %w: %w",
+		"movie.mkv", ErrContentProbeInconclusive, errors.New("connection reset")))
+
+	dbItem, err := svc.database.Repository.GetQueueItem(ctx, item.ID)
+	require.NoError(t, err)
+	require.NotNil(t, dbItem)
+	assert.Equal(t, database.QueueStatusFailed, dbItem.Status)
+	require.NotNil(t, dbItem.ErrorMessage)
+	assert.Contains(t, *dbItem.ErrorMessage, ErrContentProbeInconclusive.Error())
+	assert.FileExists(t, item.NzbPath, "an inconclusive content probe must retain the NZB for manual retry")
 }
 
 // TestCleanupFailedItems_RemovesNzbFile verifies that cleanupFailedItems deletes the

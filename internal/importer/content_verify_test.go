@@ -92,18 +92,36 @@ func TestVerifyWrittenContent_SkipsNonMediaFiles(t *testing.T) {
 	}
 }
 
-func TestVerifyWrittenContent_TransientErrorFailsAsRetryable(t *testing.T) {
+func TestVerifyWrittenContent_TransientErrorIsInconclusive(t *testing.T) {
 	enabled := true
 	s := &Service{
-		configGetter: func() *config.Config { return &config.Config{Import: config.ImportConfig{VerifyContent: &enabled}} },
+		configGetter:    func() *config.Config { return &config.Config{Import: config.ImportConfig{VerifyContent: &enabled}} },
 		contentVerifyFS: &fakeContentOpener{data: nil}, // Read returns os.ErrClosed immediately (transient, not a recognized-missing sentinel)
 	}
 	_ = time.Second // keep import used if timeout const changes
 	err := s.verifyWrittenContent(context.Background(), []string{"movie.mkv"})
 	if err == nil {
-		t.Fatal("expected a transient probe error to still return a non-nil error (routed through the existing retry path)")
+		t.Fatal("expected a transient probe error to still return a non-nil error")
+	}
+	if !errors.Is(err, ErrContentProbeInconclusive) {
+		t.Errorf("expected ErrContentProbeInconclusive, got %v", err)
 	}
 	if !errors.Is(err, os.ErrClosed) {
 		t.Errorf("expected wrapped os.ErrClosed, got %v", err)
+	}
+}
+
+func TestVerifyWrittenContent_DefinitiveFailuresAreNotInconclusive(t *testing.T) {
+	enabled := true
+	s := &Service{
+		configGetter:    func() *config.Config { return &config.Config{Import: config.ImportConfig{VerifyContent: &enabled}} },
+		contentVerifyFS: &fakeContentOpener{data: make([]byte, 512)}, // no recognized signature
+	}
+	err := s.verifyWrittenContent(context.Background(), []string{"movie.mkv"})
+	if err == nil {
+		t.Fatal("expected an error when content verification fails")
+	}
+	if errors.Is(err, ErrContentProbeInconclusive) {
+		t.Errorf("a definitive content failure must stay definitive, got %v", err)
 	}
 }

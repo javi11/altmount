@@ -2,8 +2,16 @@
 package importer
 
 import (
+	"errors"
+
 	sharedErrors "github.com/javi11/altmount/internal/errors"
 )
+
+// ErrContentProbeInconclusive means the media content probe could not reach a
+// verdict because of a transient provider, timeout, or connection error.
+// Nothing is known about the written content, so the release must not be
+// reported to the Arr app or counted towards its blocklist breaker.
+var ErrContentProbeInconclusive = errors.New("content verification inconclusive")
 
 // Re-export error types and functions from shared errors package
 // for backward compatibility with existing code.

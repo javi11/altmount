@@ -91,6 +91,15 @@ func TestJudgeValidation_ContentProbeErrorLeavesStatusUnchanged(t *testing.T) {
 	}
 }
 
+func TestJudgeContentVerification_ProbeErrorReturnsNoEvent(t *testing.T) {
+	hc := newTestHealthCheckerWithVerifyContentEnabled(&fakeContentOpener{err: errors.New("connection reset")})
+	prep := preparedCheck{filePath: "/movie.mkv", currentStatus: database.HealthStatusPending}
+
+	if event := hc.judgeContentVerification(context.Background(), prep); event != nil {
+		t.Errorf("a transient probe error must produce no event, got %+v", *event)
+	}
+}
+
 func TestJudgeValidation_SkipsProbeWhenNotPending(t *testing.T) {
 	hc := newTestHealthCheckerWithVerifyContentEnabled(&fakeContentOpener{data: make([]byte, 512)}) // would fail if probed
 	prep := preparedCheck{filePath: "/movie.mkv", currentStatus: database.HealthStatusDegraded}

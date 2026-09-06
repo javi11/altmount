@@ -39,14 +39,18 @@ type fakeOpener struct {
 	file        *fakeFile
 	err         error
 	capturedCtx context.Context
+	calls       int
 }
 
 func (o *fakeOpener) OpenFile(ctx context.Context, name string, flag int, perm os.FileMode) (afero.File, error) {
 	o.capturedCtx = ctx
+	o.calls++
 	if o.err != nil {
 		return nil, o.err
 	}
-	return o.file, nil
+	// Each attempt gets its own reader: a retried probe must not resume from
+	// the previous attempt's read offset.
+	return &fakeFile{data: o.file.data, readErr: o.file.readErr}, nil
 }
 
 func TestProbe_ValidSignature(t *testing.T) {
@@ -99,6 +103,39 @@ func TestProbe_OpenFileError(t *testing.T) {
 	res := Probe(context.Background(), opener, "movie.mkv", time.Second)
 	if res.Result != ContentProbeError {
 		t.Errorf("got %s, want %s", res.Result, ContentProbeError)
+	}
+}
+
+func TestProbe_TransientErrorIsRetriedOnce(t *testing.T) {
+	opener := &fakeOpener{file: &fakeFile{readErr: errors.New("connection reset by peer")}}
+	res := Probe(context.Background(), opener, "movie.mkv", time.Second)
+	if res.Result != ContentProbeError {
+		t.Fatalf("got %s, want %s", res.Result, ContentProbeError)
+	}
+	if opener.calls != 2 {
+		t.Errorf("got %d probe attempts, want 2 (one retry on a transient error)", opener.calls)
+	}
+}
+
+func TestProbe_MissingSegmentIsNotRetried(t *testing.T) {
+	opener := &fakeOpener{file: &fakeFile{readErr: nntppool.ErrArticleNotFound}}
+	res := Probe(context.Background(), opener, "movie.mkv", time.Second)
+	if res.Result != ContentSegmentMissing {
+		t.Fatalf("got %s, want %s", res.Result, ContentSegmentMissing)
+	}
+	if opener.calls != 1 {
+		t.Errorf("got %d probe attempts, want 1 (a definitive result must not be retried)", opener.calls)
+	}
+}
+
+func TestProbe_InvalidSignatureIsNotRetried(t *testing.T) {
+	opener := &fakeOpener{file: &fakeFile{data: make([]byte, 512)}}
+	res := Probe(context.Background(), opener, "movie.mkv", time.Second)
+	if res.Result != ContentInvalid {
+		t.Fatalf("got %s, want %s", res.Result, ContentInvalid)
+	}
+	if opener.calls != 1 {
+		t.Errorf("got %d probe attempts, want 1 (a definitive result must not be retried)", opener.calls)
 	}
 }
 

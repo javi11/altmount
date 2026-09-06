@@ -357,7 +357,9 @@ func (hc *HealthChecker) shouldVerifyContent(prep preparedCheck) bool {
 // either verification is not eligible for this file (not a verifiable media
 // type), passed, or failed only transiently — in all three cases the caller
 // proceeds to the normal healthy branch, since a transient probe error must
-// never mark a file corrupted.
+// never mark a file corrupted. A transient failure is logged, because a
+// healthy record is deleted and would otherwise leave no trace that
+// verification never actually ran.
 func (hc *HealthChecker) judgeContentVerification(ctx context.Context, prep preparedCheck) *HealthEvent {
 	if !fileinfo.IsVerifiableMediaFile(prep.filePath) {
 		return nil
@@ -368,7 +370,12 @@ func (hc *HealthChecker) judgeContentVerification(ctx context.Context, prep prep
 
 	var errType, message string
 	switch result.Result {
-	case contentverify.ContentValid, contentverify.ContentProbeError:
+	case contentverify.ContentValid:
+		return nil
+	case contentverify.ContentProbeError:
+		slog.WarnContext(ctx, "Content verification could not complete",
+			"file_path", prep.filePath,
+			"error", result.Err)
 		return nil
 	case contentverify.ContentInvalid:
 		errType = "content_invalid"
