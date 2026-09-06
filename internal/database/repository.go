@@ -1037,14 +1037,27 @@ func (r *Repository) clearQueueItemsByStatus(ctx context.Context, statuses ...Qu
 	// deleted without its nzb_path ever reaching the caller for on-disk
 	// cleanup, and splitting the two deletes could leave history dropped with
 	// the queue rows still present (issue #586).
-	selectQuery := fmt.Sprintf(`SELECT nzb_path FROM import_queue WHERE status IN (%s)`, placeholders)
+	//
+	// The history delete goes FIRST so the transaction opens with a write.
+	// SQLite transactions are DEFERRED: leading with the SELECT would take a
+	// read snapshot and only then try to upgrade to a write, and under WAL an
+	// upgrade whose snapshot a concurrent commit has invalidated returns
+	// SQLITE_BUSY_SNAPSHOT — which busy_timeout does not retry. A "clear
+	// completed" fired while the importer commits would simply fail with
+	// "database is locked". Writing first takes the write lock up front, which
+	// busy_timeout does wait for.
 	historyQuery := fmt.Sprintf(
 		`DELETE FROM import_history WHERE nzb_id IN (SELECT id FROM import_queue WHERE status IN (%s))`, placeholders)
+	selectQuery := fmt.Sprintf(`SELECT nzb_path FROM import_queue WHERE status IN (%s)`, placeholders)
 	deleteQuery := fmt.Sprintf(`DELETE FROM import_queue WHERE status IN (%s)`, placeholders)
 
 	paths := []string{}
 	var rowsAffected int64
 	if err := r.WithTransaction(ctx, func(tx *Repository) error {
+		if _, err := tx.db.ExecContext(ctx, historyQuery, args...); err != nil {
+			return fmt.Errorf("failed to clear import history for queue items: %w", err)
+		}
+
 		rows, err := tx.db.QueryContext(ctx, selectQuery, args...)
 		if err != nil {
 			return fmt.Errorf("failed to list queue paths: %w", err)
@@ -1066,10 +1079,6 @@ func (r *Repository) clearQueueItemsByStatus(ctx context.Context, statuses ...Qu
 		}()
 		if err != nil {
 			return fmt.Errorf("failed to scan queue paths: %w", err)
-		}
-
-		if _, err := tx.db.ExecContext(ctx, historyQuery, args...); err != nil {
-			return fmt.Errorf("failed to clear import history for queue items: %w", err)
 		}
 
 		result, err := tx.db.ExecContext(ctx, deleteQuery, args...)
