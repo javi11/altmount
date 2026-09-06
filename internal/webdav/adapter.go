@@ -280,6 +280,13 @@ func NewHandler(
 
 	// Create the main handler with authentication
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		loginRequired := true
+		if configGetter != nil {
+			if cfg := configGetter(); cfg != nil && cfg.Auth.LoginRequired != nil {
+				loginRequired = *cfg.Auth.LoginRequired
+			}
+		}
+
 		// Fallback to basic authentication if JWT failed
 		username, password, hasBasicAuth := r.BasicAuth()
 
@@ -321,7 +328,9 @@ func NewHandler(
 			}
 		}
 
-		if !authenticated {
+		// An explicit Basic credential is always verified: mounts configured with
+		// webdav.user/password must fail loudly rather than fall back to anonymous.
+		if !authenticated && (loginRequired || hasBasicAuth) {
 			slog.DebugContext(r.Context(), "WebDAV auth failed", "method", r.Method, "path", r.URL.Path, "has_basic", hasBasicAuth)
 			w.Header().Set("WWW-Authenticate", `Basic realm="BASIC WebDAV REALM"`)
 			w.WriteHeader(http.StatusUnauthorized)
