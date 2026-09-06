@@ -496,23 +496,33 @@ func (r *Repository) DeleteQueueItemsByPath(ctx context.Context, path string) er
 
 // RemoveFromQueue removes an item from the queue
 func (r *Repository) RemoveFromQueue(ctx context.Context, id int64) error {
-	query := `DELETE FROM import_queue WHERE id = ?`
+	// The queue row and its import_history copy go together: the SABnzbd
+	// history view suppresses the history copy only while the live completed
+	// queue row exists, so a half-applied delete resurrects the job as a fresh
+	// "Completed" slot pointing at a path the ARR already imported and deleted
+	// (issue #586). Deleting the queue row alone would also be unrecoverable —
+	// a retry can no longer find the item to clean up after.
+	return r.WithTransaction(ctx, func(tx *Repository) error {
+		result, err := tx.db.ExecContext(ctx, `DELETE FROM import_queue WHERE id = ?`, id)
+		if err != nil {
+			return fmt.Errorf("failed to remove from queue: %w", err)
+		}
 
-	result, err := r.db.ExecContext(ctx, query, id)
-	if err != nil {
-		return fmt.Errorf("failed to remove from queue: %w", err)
-	}
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("failed to get rows affected: %w", err)
+		}
 
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to get rows affected: %w", err)
-	}
+		if rowsAffected == 0 {
+			return sql.ErrNoRows
+		}
 
-	if rowsAffected == 0 {
-		return sql.ErrNoRows
-	}
+		if _, err := tx.db.ExecContext(ctx, `DELETE FROM import_history WHERE nzb_id = ?`, id); err != nil {
+			return fmt.Errorf("failed to remove import history for queue item %d: %w", id, err)
+		}
 
-	return nil
+		return nil
+	})
 }
 
 // RemoveFromHistoryByDownloadID removes a record from import_history by its DownloadID
@@ -595,18 +605,36 @@ func (r *Repository) RemoveFromQueueBulk(ctx context.Context, ids []int64) (*Bul
 		}, fmt.Errorf("cannot delete %d items that are currently being processed", processingCount)
 	}
 
-	// Delete items that are not processing
+	// The history copies and the queue rows go together, in one transaction:
+	// a half-applied delete either resurrects the job in the SABnzbd history
+	// view or drops history with no queue cleanup to match (issue #586).
+	historyQuery := fmt.Sprintf(
+		`DELETE FROM import_history WHERE nzb_id IN (SELECT id FROM import_queue WHERE id IN (%s) AND status != ?)`,
+		strings.Join(placeholders, ","))
 	deleteQuery := fmt.Sprintf(`DELETE FROM import_queue WHERE id IN (%s) AND status != ?`, strings.Join(placeholders, ","))
-	deleteArgs := append(args, QueueStatusProcessing)
 
-	result, err := r.db.ExecContext(ctx, deleteQuery, deleteArgs...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to remove items from queue: %w", err)
-	}
+	txArgs := make([]any, 0, len(args)+1)
+	txArgs = append(txArgs, args...)
+	txArgs = append(txArgs, QueueStatusProcessing)
 
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get rows affected: %w", err)
+	var rowsAffected int64
+	if err := r.WithTransaction(ctx, func(tx *Repository) error {
+		if _, err := tx.db.ExecContext(ctx, historyQuery, txArgs...); err != nil {
+			return fmt.Errorf("failed to remove import history for queue items: %w", err)
+		}
+
+		result, err := tx.db.ExecContext(ctx, deleteQuery, txArgs...)
+		if err != nil {
+			return fmt.Errorf("failed to remove items from queue: %w", err)
+		}
+
+		rowsAffected, err = result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("failed to get rows affected: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 
 	return &BulkOperationResult{
@@ -1004,35 +1032,66 @@ func (r *Repository) clearQueueItemsByStatus(ctx context.Context, statuses ...Qu
 		args = append(args, s)
 	}
 
-	paths := []string{}
+	// The path listing and both deletes run in one transaction. Reading the
+	// paths outside it let a row that entered the target status in between be
+	// deleted without its nzb_path ever reaching the caller for on-disk
+	// cleanup, and splitting the two deletes could leave history dropped with
+	// the queue rows still present (issue #586).
+	//
+	// The history delete goes FIRST so the transaction opens with a write.
+	// SQLite transactions are DEFERRED: leading with the SELECT would take a
+	// read snapshot and only then try to upgrade to a write, and under WAL an
+	// upgrade whose snapshot a concurrent commit has invalidated returns
+	// SQLITE_BUSY_SNAPSHOT — which busy_timeout does not retry. A "clear
+	// completed" fired while the importer commits would simply fail with
+	// "database is locked". Writing first takes the write lock up front, which
+	// busy_timeout does wait for.
+	historyQuery := fmt.Sprintf(
+		`DELETE FROM import_history WHERE nzb_id IN (SELECT id FROM import_queue WHERE status IN (%s))`, placeholders)
 	selectQuery := fmt.Sprintf(`SELECT nzb_path FROM import_queue WHERE status IN (%s)`, placeholders)
-	rows, err := r.db.QueryContext(ctx, selectQuery, args...)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to list queue paths: %w", err)
-	}
-	for rows.Next() {
-		var p string
-		if err := rows.Scan(&p); err != nil {
-			rows.Close()
-			return nil, 0, fmt.Errorf("failed to scan queue path: %w", err)
-		}
-		if p != "" {
-			paths = append(paths, p)
-		}
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, 0, err
-	}
-
 	deleteQuery := fmt.Sprintf(`DELETE FROM import_queue WHERE status IN (%s)`, placeholders)
-	result, err := r.db.ExecContext(ctx, deleteQuery, args...)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to clear queue items: %w", err)
-	}
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to get rows affected: %w", err)
+
+	paths := []string{}
+	var rowsAffected int64
+	if err := r.WithTransaction(ctx, func(tx *Repository) error {
+		if _, err := tx.db.ExecContext(ctx, historyQuery, args...); err != nil {
+			return fmt.Errorf("failed to clear import history for queue items: %w", err)
+		}
+
+		rows, err := tx.db.QueryContext(ctx, selectQuery, args...)
+		if err != nil {
+			return fmt.Errorf("failed to list queue paths: %w", err)
+		}
+		func() {
+			defer rows.Close()
+			for rows.Next() {
+				var p string
+				if err = rows.Scan(&p); err != nil {
+					return
+				}
+				if p != "" {
+					paths = append(paths, p)
+				}
+			}
+			if err == nil {
+				err = rows.Err()
+			}
+		}()
+		if err != nil {
+			return fmt.Errorf("failed to scan queue paths: %w", err)
+		}
+
+		result, err := tx.db.ExecContext(ctx, deleteQuery, args...)
+		if err != nil {
+			return fmt.Errorf("failed to clear queue items: %w", err)
+		}
+		rowsAffected, err = result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("failed to get rows affected: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return nil, 0, err
 	}
 	return paths, int(rowsAffected), nil
 }
