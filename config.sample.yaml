@@ -207,8 +207,11 @@ health:
 
 # WebDAV mount path configuration
 # Go soft memory limit in MB. Unset or 0: derived from segment_cache.memory_mb plus the PAR2 solver
-# budget plus 256 MB headroom (about 770 MB with defaults). Positive: use exactly this value.
-# -1: leave the Go runtime default. GOMEMLIMIT in the environment always wins.
+# budget plus headroom for three read-ahead windows, the provider connections' buffers and a 128 MB
+# base (about 930 MB with defaults and one 20-connection provider). Positive: use exactly this value.
+# -1: leave the Go runtime default. GOMEMLIMIT in the environment always wins. When the live heap
+# still presses on the limit, the segment cache memory tier is shrunk automatically so the collector
+# does not spin, and restored once the heap is calm.
 memory_limit_mb: 0
 mount_path: '' # WebDAV mount path, Example: '/mnt/remotes/altmount' or '/mnt/unionfs'. Must be an absolute path.
                # Windows examples: 'Z:' (drive letter via WinFsp) or 'C:\altmount' (directory mount)

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/avast/retry-go/v4"
+	"github.com/kipsilabs/altmount/internal/config"
 	"github.com/kipsilabs/altmount/internal/holes"
 	"github.com/kipsilabs/altmount/internal/pool"
 	"github.com/kipsilabs/altmount/internal/slogutil"
@@ -144,7 +145,7 @@ const (
 	// 60-segment window is 45 MB on 750 KB posts but 240 MB on 4 MiB posts,
 	// where it starves the reader's own demand article for the link and
 	// leaves a quarter of a gigabyte to abandon on every seek.
-	readAheadBytesCap = 96 << 20
+	readAheadBytesCap = config.StreamReadAheadBytesCap
 )
 
 // withFlightMap gives the reader its own in-flight article map. Tests use it
