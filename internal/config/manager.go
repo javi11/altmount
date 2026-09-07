@@ -237,17 +237,49 @@ func (c SegmentCacheConfig) MemoryBytes() int64 {
 	return int64(max(*c.MemoryMB, 0)) << 20
 }
 
-// softMemoryHeadroomMB is what the process needs above the configured
-// budgets: read-ahead windows, connection buffers, metadata, and the runtime.
-const softMemoryHeadroomMB = 256
+// StreamReadAheadBytesCap bounds one reader's read-ahead window in bytes.
+// The usenet reader enforces it; it lives here so the soft memory limit can
+// budget for the windows that are live while files stream.
+const StreamReadAheadBytesCap int64 = 96 << 20
+
+// Soft memory limit headroom: what the process holds live above the memory
+// tier and the PAR2 solver. Every term scales with what actually allocates
+// so the limit stays above the live set; a limit below it makes the
+// collector run back to back and burn CPU without freeing anything.
+const (
+	// softMemoryBaseMB covers the runtime, metadata, HTTP and pool bookkeeping.
+	softMemoryBaseMB = 128
+	// softMemoryStreams is how many full read-ahead windows are budgeted:
+	// a mount typically keeps two chunk readers open plus one being torn down.
+	softMemoryStreams = 3
+	// softMemoryPerConnectionBytes is the read and write buffers plus TLS
+	// record state each pool connection pins while open.
+	softMemoryPerConnectionBytes int64 = 256 << 10
+)
+
+// softMemoryHeadroom is the headroom for this config's read-ahead and
+// connection footprint.
+func (c *Config) softMemoryHeadroom() int64 {
+	conns := int64(0)
+	for _, p := range c.Providers {
+		if p.Enabled != nil && !*p.Enabled {
+			continue
+		}
+		conns += int64(max(p.MaxConnections, 0))
+	}
+	return int64(softMemoryBaseMB)<<20 +
+		softMemoryStreams*StreamReadAheadBytesCap +
+		conns*softMemoryPerConnectionBytes
+}
 
 // SoftMemoryLimit is the Go soft memory limit to apply, or 0 to leave the
 // runtime alone. Without a limit the collector lets the heap reach twice the
 // live set, so a 256 MB memory tier costs 600+ MB of RSS. The automatic value
 // adds every budget that holds live heap (memory tier, PAR2 solver per
-// concurrent job) plus headroom, so the limit stays above the live set and the
-// collector never has to run back to back. A soft limit is only useful while
-// the memory tier is on: with it off the heap is small and bursty.
+// concurrent job, read-ahead windows, connection buffers) plus a base, so
+// the limit stays above the live set and the collector never has to run back
+// to back. A soft limit is only useful while the memory tier is on: with it
+// off the heap is small and bursty.
 func (c *Config) SoftMemoryLimit(gomemlimit string) int64 {
 	if gomemlimit != "" {
 		return 0
@@ -268,7 +300,7 @@ func (c *Config) SoftMemoryLimit(gomemlimit string) int64 {
 	if c.Par2Repair.Enabled != nil && *c.Par2Repair.Enabled {
 		par2 = int64(max(c.Par2Repair.MaxMemoryMB, 0)) * int64(max(c.Par2Repair.MaxConcurrentJobs, 1))
 	}
-	return cache + (par2+softMemoryHeadroomMB)<<20
+	return cache + par2<<20 + c.softMemoryHeadroom()
 }
 
 // WebDAVConfig represents WebDAV server configuration

@@ -17,12 +17,42 @@ type Source struct {
 	getCfg config.ConfigGetter
 
 	once   sync.Once
-	tiered *TieredStore
+	tiered atomic.Pointer[TieredStore]
+
+	// ceiling caps the memory tier below its configured capacity while the
+	// pressure governor sees the heap pressing on the soft memory limit;
+	// noCeiling applies the configured value.
+	ceiling atomic.Int64
 }
 
 // NewSource creates a Source. getCfg must not be nil.
 func NewSource(getCfg config.ConfigGetter) *Source {
-	return &Source{getCfg: getCfg}
+	s := &Source{getCfg: getCfg}
+	s.ceiling.Store(noCeiling)
+	return s
+}
+
+// SetMemoryCeiling caps the memory tier at bytes (noCeiling removes the cap),
+// evicting immediately when the live tier is larger. The cap survives file
+// opens, which otherwise re-apply the configured capacity.
+func (s *Source) SetMemoryCeiling(bytes int64) {
+	if bytes < 0 {
+		bytes = noCeiling
+	}
+	s.ceiling.Store(bytes)
+	if t := s.tiered.Load(); t != nil {
+		t.Memory().SetCapacity(s.effectiveMemoryBytes(s.getCfg().SegmentCache.MemoryBytes()))
+	}
+}
+
+// MemoryCeiling is the current cap, or noCeiling.
+func (s *Source) MemoryCeiling() int64 { return s.ceiling.Load() }
+
+func (s *Source) effectiveMemoryBytes(configured int64) int64 {
+	if c := s.ceiling.Load(); c != noCeiling && c < configured {
+		return c
+	}
+	return configured
 }
 
 // Store resolves the current SegmentStore: nil only when both the memory
@@ -39,10 +69,12 @@ func (s *Source) Store() usenet.SegmentStore {
 	if memBytes <= 0 && disk == nil {
 		return nil
 	}
-	s.once.Do(func() { s.tiered = NewTieredStore(NewMemoryCache(memBytes)) })
-	s.tiered.Memory().SetCapacity(memBytes)
-	s.tiered.SetDisk(disk)
-	return s.tiered
+	memBytes = s.effectiveMemoryBytes(memBytes)
+	s.once.Do(func() { s.tiered.Store(NewTieredStore(NewMemoryCache(memBytes))) })
+	t := s.tiered.Load()
+	t.Memory().SetCapacity(memBytes)
+	t.SetDisk(disk)
+	return t
 }
 
 // Swap replaces the active manager. Pass nil to unload the current manager.
@@ -58,8 +90,9 @@ func (s *Source) Manager() *Manager {
 
 // Memory returns the memory tier for stats, or nil before the first open.
 func (s *Source) Memory() *MemoryCache {
-	if s.tiered == nil {
+	t := s.tiered.Load()
+	if t == nil {
 		return nil
 	}
-	return s.tiered.Memory()
+	return t.Memory()
 }

@@ -139,6 +139,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 		defer initialCache.Stop()
 	}
 	applySoftMemoryLimit(ctx, cfg)
+	// Keep the memory tier from pushing the live heap over the soft limit:
+	// under GC pressure the governor shrinks it, then restores it when calm.
+	go cacheSource.RunPressureGovernor(ctx)
 
 	// Background PAR2 repair: repairs missing articles and serves the patched
 	// payloads on the read path's hole branch.
