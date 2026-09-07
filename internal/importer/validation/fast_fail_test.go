@@ -963,24 +963,6 @@ func TestFastFailCheckFilesPlaceholdersAreKnownMissesWithoutStat(t *testing.T) {
 	}
 }
 
-func TestFastFailReleaseProbePlaceholderIsDamageWithoutStat(t *testing.T) {
-	client := fakepool.New()
-	segs := makeTestSegments("f", 3)
-	segs[2] = &metapb.SegmentData{Id: holes.PlaceholderID(3, "f-0")}
-	missing, err := FastFailReleaseProbe(
-		context.Background(),
-		[]FastFailFile{{Filename: "movie.mkv", Segments: segs}},
-		fastFailPoolManager{client: client},
-		100, 1, 100*time.Millisecond, nil,
-	)
-	if err != nil || !missing {
-		t.Fatalf("probe = (%v, %v), want (true, nil)", missing, err)
-	}
-	if client.StatCalls() != 0 {
-		t.Fatalf("StatCalls = %d, want 0", client.StatCalls())
-	}
-}
-
 func TestCapReleaseProbeSampleKeepsEdgesAndBounds(t *testing.T) {
 	segs := makeTestSegments("big", 400)
 	selected := usenet.SelectSegmentsForValidation(segs, 100)
@@ -1172,5 +1154,66 @@ func TestFastFailCheckFilesStopFileOnFirstMissCondemnsGroup(t *testing.T) {
 	}
 	if got := client.StatCalls(); got != 1 {
 		t.Errorf("StatCalls = %d, want 1 (the whole set is condemned by the first miss)", got)
+	}
+}
+
+// TestFastFailReleaseProbeIgnoresPlaceholders pins that a gap the NZB itself
+// declares is not a reason to skip the probe: the placeholder is never STATed
+// and the probe still answers for the provider's copy of the real segments.
+func TestFastFailReleaseProbeIgnoresPlaceholders(t *testing.T) {
+	client := fakepool.New()
+	placeholder := holes.PlaceholderID(2, "salt")
+	files := []FastFailFile{{
+		Filename: "release.part01.rar",
+		GroupKey: "release",
+		Segments: []*metapb.SegmentData{
+			{Id: "rar-1"},
+			{Id: placeholder},
+			{Id: "rar-3"},
+		},
+	}}
+
+	missing, err := FastFailReleaseProbe(context.Background(), files, fastFailPoolManager{client: client}, 100, 1, 100*time.Millisecond, nil)
+	if err != nil {
+		t.Fatalf("FastFailReleaseProbe error = %v", err)
+	}
+	if missing {
+		t.Fatal("missing = true, want false: every real segment is reachable and a declared gap is not a provider miss")
+	}
+	if got := client.PerMessageCalls(placeholder); got != 0 {
+		t.Errorf("placeholder STATed %d times, want 0", got)
+	}
+	if got := client.StatCalls(); got == 0 {
+		t.Error("StatCalls = 0, want the real segments probed")
+	}
+}
+
+// TestPlaceholderResultsMapsDeclaredGapsWithoutStats pins the STAT-free result
+// shape for a release whose only damage is declared in the NZB.
+func TestPlaceholderResultsMapsDeclaredGapsWithoutStats(t *testing.T) {
+	p1, p2 := holes.PlaceholderID(2, "s"), holes.PlaceholderID(3, "s")
+	files := []FastFailFile{
+		{Filename: "release.part01.rar", GroupKey: "release", Segments: []*metapb.SegmentData{{Id: "a-1"}, {Id: "a-2"}}},
+		{Filename: "release.part02.rar", GroupKey: "release", Segments: []*metapb.SegmentData{{Id: "b-1"}, {Id: p1}, {Id: p2}}},
+		{Filename: "release.par2"},
+	}
+
+	results := PlaceholderResults(files)
+
+	if len(results) != len(files) {
+		t.Fatalf("len(results) = %d, want %d (index-aligned)", len(results), len(files))
+	}
+	if results[0].Broken || results[0].KnownGapCount != 0 || len(results[0].MissingSegmentIDs) != 0 || results[0].SampledCount != 0 {
+		t.Errorf("gap-free file result = %+v, want zero value", results[0])
+	}
+	got := results[1]
+	if !got.Broken || got.KnownGapCount != 2 || got.SampledCount != 0 {
+		t.Errorf("gapped file result = %+v, want Broken with KnownGapCount 2 and no sample", got)
+	}
+	if len(got.MissingSegmentIDs) != 2 || got.MissingSegmentIDs[0] != p1 || got.MissingSegmentIDs[1] != p2 {
+		t.Errorf("MissingSegmentIDs = %v, want [%s %s]", got.MissingSegmentIDs, p1, p2)
+	}
+	if results[2].Broken {
+		t.Errorf("segment-less sidecar result = %+v, want zero value", results[2])
 	}
 }
