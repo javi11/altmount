@@ -12,8 +12,11 @@ import (
 
 const (
 	// hedgeReportedFraction is the share of a sweep that must have answered
-	// before the remainder counts as straggling.
-	hedgeReportedFraction = 0.9
+	// before the remainder counts as straggling. On a busy pool up to a
+	// seventh of a 64-STAT probe has been seen queued behind other traffic
+	// while the rest answered in ~150 ms; a uniformly slow or dead release
+	// never gets this far.
+	hedgeReportedFraction = 0.75
 	// hedgeGraceLatencyFactor scales the observed median STAT latency into the
 	// grace a straggler gets before it is re-issued.
 	hedgeGraceLatencyFactor = 3
@@ -89,8 +92,13 @@ func hedgedStatMany(ctx context.Context, client pool.NntpClient, ids []string, c
 				if len(stragglers) == 0 {
 					continue
 				}
+				// The stragglers are, by construction, queued behind other
+				// normal-lane traffic; a hedge on the same lane would join the
+				// queue. The priority lane lets an idle connection pick these
+				// few bodyless requests up ahead of it.
 				hedge = client.StatMany(sweepCtx, stragglers, nntppool.StatManyOptions{
 					Concurrency: len(stragglers),
+					Priority:    true,
 					Skip: func(id string) bool {
 						mu.Lock()
 						defer mu.Unlock()

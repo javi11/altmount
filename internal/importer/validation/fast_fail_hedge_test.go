@@ -162,3 +162,48 @@ func TestFastFailReleaseProbeHedgeRespectsCancellation(t *testing.T) {
 		t.Fatal("FastFailReleaseProbe error = nil, want caller cancellation to surface")
 	}
 }
+
+// optionsRecordingClient remembers the options of every StatMany sweep.
+type optionsRecordingClient struct {
+	*delayedStatClient
+	mu   sync.Mutex
+	opts []nntppool.StatManyOptions
+}
+
+func (c *optionsRecordingClient) StatMany(ctx context.Context, ids []string, opts nntppool.StatManyOptions) <-chan nntppool.StatManyResult {
+	c.mu.Lock()
+	c.opts = append(c.opts, opts)
+	c.mu.Unlock()
+	return c.delayedStatClient.StatMany(ctx, ids, opts)
+}
+
+// Nine of sixty-four STATs queued behind other traffic is the shape seen on a
+// busy pool; that many stragglers must still be hedged, and the hedge must go
+// down the priority lane or it just joins the same queue.
+func TestFastFailReleaseProbeHedgesLargerStragglerTailOnPriorityLane(t *testing.T) {
+	delays := make(map[string]time.Duration, 9)
+	for i := 40; i < 49; i++ {
+		delays[fmt.Sprintf("seg-%d", i)] = 5 * time.Second
+	}
+	client := &optionsRecordingClient{delayedStatClient: newDelayedStatClient(nil, delays)}
+
+	start := time.Now()
+	missing, err := FastFailReleaseProbe(context.Background(), probeFile(64), fastFailPoolManager{client: client}, 100, 64, 30*time.Second, nil)
+	if err != nil || missing {
+		t.Fatalf("FastFailReleaseProbe = (%v, %v), want (false, nil)", missing, err)
+	}
+	if elapsed := time.Since(start); elapsed > 1500*time.Millisecond {
+		t.Fatalf("probe took %s, want the nine stragglers hedged inside the 2 s ceiling", elapsed)
+	}
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	if len(client.opts) != 2 {
+		t.Fatalf("StatMany sweeps = %d, want 2 (primary + hedge)", len(client.opts))
+	}
+	if client.opts[0].Priority {
+		t.Fatal("primary sweep must stay on the normal lane")
+	}
+	if !client.opts[1].Priority {
+		t.Fatal("hedge sweep must use the priority lane")
+	}
+}
