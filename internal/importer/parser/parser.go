@@ -1005,9 +1005,10 @@ func (p *Parser) WarmFirstSegments(ctx context.Context, files []nzbparser.NzbFil
 	}
 	maxFetch := max(min(min(len(files), p.getConfig().TotalProviderConnections()), maxFetchGoroutines), 1)
 	warm := concpool.New().WithMaxGoroutines(maxFetch).WithContext(ctx)
+	primary := p.primaryVideoToWarm(files)
 	for i := range files {
 		file := &files[i]
-		if len(file.Segments) == 0 || shouldSkipFirstSegmentFetch(file) {
+		if len(file.Segments) == 0 || (shouldSkipFirstSegmentFetch(file) && i != primary) {
 			continue
 		}
 		id := file.Segments[0].ID
@@ -1017,6 +1018,31 @@ func (p *Parser) WarmFirstSegments(ctx context.Context, files []nzbparser.NzbFil
 		})
 	}
 	_ = warm.Wait()
+}
+
+// primaryVideoToWarm is the index of the largest video file whose first
+// segment the warm-up would otherwise skip, or -1. Clean-named videos skip the
+// fetch to save bandwidth, but the largest one is what a player opens first:
+// when a segment store can keep the article, warming just that file turns the
+// cold open into a cache hit for one article's worth of bandwidth.
+func (p *Parser) primaryVideoToWarm(files []nzbparser.NzbFile) int {
+	if p.segmentStore == nil || p.segmentStore() == nil {
+		return -1
+	}
+	best := -1
+	for i := range files {
+		file := &files[i]
+		if !shouldSkipFirstSegmentFetch(file) {
+			continue
+		}
+		if _, video := skipEligibleVideoExtensions[strings.ToLower(filepath.Ext(file.Filename))]; !video {
+			continue
+		}
+		if best < 0 || file.Bytes > files[best].Bytes {
+			best = i
+		}
+	}
+	return best
 }
 
 // fetchBodyWithRetry fetches one article, retrying transient failures. A
