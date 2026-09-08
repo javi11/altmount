@@ -20,6 +20,7 @@ import (
 	"github.com/kipsilabs/altmount/internal/arrs/registrar"
 	"github.com/kipsilabs/altmount/internal/config"
 	"github.com/kipsilabs/altmount/internal/health"
+	"github.com/kipsilabs/altmount/internal/importer/parser"
 	"github.com/kipsilabs/altmount/internal/metadata"
 	"github.com/kipsilabs/altmount/internal/nzbfilesystem/segcache"
 	"github.com/kipsilabs/altmount/internal/pool"
@@ -142,6 +143,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Keep the memory tier from pushing the live heap over the soft limit:
 	// under GC pressure the governor shrinks it, then restores it when calm.
 	go cacheSource.RunPressureGovernor(ctx)
+	importerService.SetSegmentStore(func() parser.SegmentStore {
+		if store := cacheSource.Store(); store != nil {
+			return store
+		}
+		return nil
+	})
 
 	// Background PAR2 repair: repairs missing articles and serves the patched
 	// payloads on the read path's hole branch.

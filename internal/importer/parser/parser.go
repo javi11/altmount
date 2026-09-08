@@ -75,12 +75,27 @@ type FirstSegmentData struct {
 	FirstArticleMissingID string
 }
 
+// SegmentStore is where decoded articles are kept for the streaming readers.
+// The parser only ever writes to it.
+type SegmentStore interface {
+	Put(messageID string, data []byte) error
+}
+
 // Parser handles NZB file parsing
 type Parser struct {
 	poolManager pool.Manager        // Pool manager for dynamic pool access
 	getConfig   config.ConfigGetter // Returns current config for connection limits
 	log         *slog.Logger        // Logger for debug/error messages
 	heads       *headCache          // what earlier parses learned from the wire
+	// segmentStore resolves the streaming segment store at fetch time (its
+	// capacity and tiers follow config), or nil when caching is off.
+	segmentStore func() SegmentStore
+}
+
+// SetSegmentStore lets first articles fetched at import be published to the
+// streaming segment store, so the cold open that follows is a cache hit.
+func (p *Parser) SetSegmentStore(resolve func() SegmentStore) {
+	p.segmentStore = resolve
 }
 
 // Use conc pool for parallel processing with proper error handling
@@ -1039,6 +1054,11 @@ func (p *Parser) fetchBodyWithRetry(ctx context.Context, cp pool.NntpClient, seg
 				p.poolManager.UpdateDownloadProgress("", int64(len(result.Bytes)))
 			}
 			p.heads.put(segmentID, articleHead{meta: result.YEnc, bytes: clipHead(result.Bytes)})
+			if p.segmentStore != nil {
+				if store := p.segmentStore(); store != nil {
+					_ = store.Put(segmentID, result.Bytes)
+				}
+			}
 			return result, nil
 		}
 		if stderrors.Is(fetchErr, nntppool.ErrArticleNotFound) {

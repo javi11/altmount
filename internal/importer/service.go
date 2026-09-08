@@ -225,6 +225,14 @@ func (s *Service) SetPatchIndex(idx validation.PatchIndex) {
 	}
 }
 
+// SetSegmentStore wires the streaming segment store into the importer so
+// articles fetched at import are already cached when playback starts.
+func (s *Service) SetSegmentStore(resolve func() parser.SegmentStore) {
+	if s.processor != nil {
+		s.processor.SetSegmentStore(resolve)
+	}
+}
+
 // GetPostProcessor returns the post-processor coordinator
 func (s *Service) GetPostProcessor() *postprocessor.Coordinator {
 	return s.postProcessor

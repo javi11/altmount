@@ -135,6 +135,12 @@ func (proc *Processor) SetPatchIndex(idx validation.PatchIndex) {
 	proc.patchIndex = idx
 }
 
+// SetSegmentStore publishes first articles fetched at import to the streaming
+// segment store, so the cold open right after an import is a cache hit.
+func (proc *Processor) SetSegmentStore(resolve func() parser.SegmentStore) {
+	proc.parser.SetSegmentStore(resolve)
+}
+
 // queueNzbRepair queues an NZB-mode repair for a release that was deferred
 // before import, so the repair plans straight from the NZB (there is no file
 // metadata to plan from yet).
