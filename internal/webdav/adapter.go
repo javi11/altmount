@@ -148,7 +148,15 @@ func (h *webdavMethods) handleGet(w http.ResponseWriter, r *http.Request) {
 	}
 	defer f.Close()
 
-	http.ServeContent(w, r, fi.Name(), fi.ModTime(), f)
+	tracked := &readTracker{File: f}
+	http.ServeContent(w, r, fi.Name(), fi.ModTime(), tracked)
+	if tracked.err != nil {
+		slog.WarnContext(ctx, "WebDAV stream ended on read error",
+			"path", reqPath,
+			"range", r.Header.Get("Range"),
+			"bytes_served", tracked.bytesRead,
+			"error", tracked.err)
+	}
 }
 
 func (h *webdavMethods) handleDelete(w http.ResponseWriter, r *http.Request) {
