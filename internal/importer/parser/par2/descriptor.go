@@ -51,6 +51,7 @@ func GetFileDescriptors(
 	ctx context.Context,
 	firstSegmentCache []*FirstSegmentData,
 	poolManager pool.Manager,
+	store usenet.SegmentStore,
 ) (map[[16]byte]*FileDescriptor, error) {
 	descriptors := make(map[[16]byte]*FileDescriptor)
 
@@ -73,7 +74,7 @@ func GetFileDescriptors(
 		if len(cachedData.File.Segments) > MaxIndexSegments {
 			continue // Skip large recovery block files
 		}
-		fileDescriptors, err := readFileDescriptors(ctx, cachedData.File, poolManager)
+		fileDescriptors, err := readFileDescriptors(ctx, cachedData.File, poolManager, store)
 		if err != nil {
 			slog.DebugContext(ctx, "Failed to read PAR2 file descriptors, skipping",
 				"error", err, "segments", len(cachedData.File.Segments))
@@ -97,6 +98,7 @@ func readFileDescriptors(
 	ctx context.Context,
 	par2File *nzbparser.NzbFile,
 	poolManager pool.Manager,
+	store usenet.SegmentStore,
 ) ([]FileDescriptor, error) {
 	var descriptors []FileDescriptor
 
@@ -120,7 +122,7 @@ func readFileDescriptors(
 
 	// Create UsenetReader (provides retry, prefetch, and metrics for free)
 	rg := usenet.GetSegmentsInRange(ctx, 0, totalSize-1, loader)
-	r, err := usenet.NewUsenetReader(ctx, poolManager.GetPool, rg, 5, poolManager, "", nil,
+	r, err := usenet.NewUsenetReader(ctx, poolManager.GetPool, rg, 5, poolManager, "", store,
 		usenet.WithImportProfile(poolManager))
 	if err != nil {
 		return descriptors, fmt.Errorf("failed to create usenet reader: %w", err)
