@@ -73,6 +73,8 @@ func statIDsWithBoundedRetries(
 		statCtx, cancel := context.WithTimeout(ctx, pool.StatManyTimeout(len(remaining), maxConnections, timeout))
 		reported := make(map[string]bool, len(remaining))
 		transient := make(map[string]error, len(remaining))
+		definitive := 0
+		deadEarly := false
 
 		for result := range hedgedStatMany(statCtx, client, remaining, maxConnections) {
 			if _, wanted := seen[result.MessageID]; !wanted {
@@ -80,16 +82,19 @@ func statIDsWithBoundedRetries(
 			}
 			reported[result.MessageID] = true
 			if result.Err == nil {
+				definitive++
 				continue
 			}
 			// Repaired bytes live only in the local patch store, so an article
 			// the providers dropped is still available. Reported with no error
 			// recorded, it leaves the retry set as reachable.
 			if patched(patchIdx, result.MessageID) {
+				definitive++
 				continue
 			}
 			if isDefinitiveFastFailMiss(result.Err) {
 				missing[result.MessageID] = result.Err
+				definitive++
 				if stopOnMissing {
 					if ctxErr := ctx.Err(); ctxErr != nil {
 						cancel()
@@ -97,6 +102,14 @@ func statIDsWithBoundedRetries(
 					}
 					cancel()
 					return missing, nil, nil
+				}
+				if releaseLooksDead(len(missing), definitive) {
+					// The answers so far already condemn the release; the
+					// STATs still in flight are slow 430 lookups that cannot
+					// change it and only hold the import and the connections.
+					deadEarly = true
+					cancel()
+					break
 				}
 				continue
 			}
@@ -134,6 +147,10 @@ func statIDsWithBoundedRetries(
 
 		if len(remaining) == 0 {
 			return missing, nil, nil
+		}
+		if deadEarly {
+			return missing, remaining, fmt.Errorf("%w: %d segment(s) left unverified once %d misses condemned the release",
+				ErrFastFailInconclusive, len(remaining), len(missing))
 		}
 		if stopOnMissing && len(missing) == 0 && len(remaining) <= tolerableUnverified(len(ids)) {
 			// The release probe answers "is this post damaged?" from a
@@ -181,6 +198,11 @@ func statIDsWithBoundedRetries(
 
 // maxSweepChunk is the most STATs the per-file sweep has outstanding at once.
 const maxSweepChunk = 64
+
+// firstSweepChunk bounds the sweep's opening wave: a dead post is condemned
+// by its first few misses, and every STAT past those is a slow 430 lookup left
+// pipelined on a connection for the next import to queue behind.
+const firstSweepChunk = 16
 
 // Dead-post thresholds for releaseLooksDead: at least this many definitive
 // misses, making up at least this share of the definitive answers so far.
@@ -523,8 +545,8 @@ func FastFailCheckFiles(
 	// times out behind the backlog. Smaller waves let the dead-release verdict
 	// fire after one wave with little left outstanding.
 	chunkSize := min(maxConnections, maxSweepChunk)
-	for start := 0; start < total; start += chunkSize {
-		end := min(start+chunkSize, total)
+	for start, size := 0, min(chunkSize, firstSweepChunk); start < total; start, size = start+size, chunkSize {
+		end := min(start+size, total)
 		chunk := jobs[start:end]
 
 		toCheck := make([]statJob, 0, len(chunk))
