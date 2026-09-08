@@ -5,6 +5,7 @@ import (
 	"errors"
 	"hash/fnv"
 	"sync"
+	"sync/atomic"
 )
 
 // articleBuf is one article's decoded bytes as they arrive. buf holds what
@@ -20,6 +21,7 @@ type articleBuf struct {
 	done    bool
 	err     error
 	attempt int
+	hedged  int // an earlier attempt still allowed to publish while a hedge runs alongside it
 	leading bool
 	lead    int // bumped on every claimLead; identifies the current leader
 	refs    int
@@ -43,9 +45,10 @@ func (a *articleBuf) wakeLocked() {
 
 // articleWriter is one fetch attempt's sink.
 type articleWriter struct {
-	a       *articleBuf
-	attempt int
-	buf     []byte
+	a        *articleBuf
+	attempt  int
+	buf      []byte
+	received atomic.Int64 // bytes written so far, readable off the writing goroutine
 }
 
 // attemptWriter starts a new fetch attempt. Only the newest attempt can
@@ -54,11 +57,29 @@ func (a *articleBuf) attemptWriter() *articleWriter {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.attempt++
+	a.hedged = 0
 	return &articleWriter{a: a, attempt: a.attempt, buf: make([]byte, 0, max(a.size, 0))}
+}
+
+// hedgeWriter starts a second attempt racing primary for the same article.
+// Both stay live: they decode the same bytes, so whichever is further ahead
+// publishes and whichever completes first finishes the article.
+func (a *articleBuf) hedgeWriter(primary *articleWriter) *articleWriter {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.attempt++
+	a.hedged = primary.attempt
+	return &articleWriter{a: a, attempt: a.attempt, buf: make([]byte, 0, max(a.size, 0))}
+}
+
+// liveLocked reports whether w may still publish. Caller holds mu.
+func (a *articleBuf) liveLocked(w *articleWriter) bool {
+	return w.attempt == a.attempt || (a.hedged != 0 && w.attempt == a.hedged)
 }
 
 func (w *articleWriter) Write(p []byte) (int, error) {
 	w.buf = append(w.buf, p...)
+	w.received.Store(int64(len(w.buf)))
 	w.a.publish(w)
 	return len(p), nil
 }
@@ -68,7 +89,7 @@ func (w *articleWriter) bytes() []byte { return w.buf }
 
 func (a *articleBuf) publish(w *articleWriter) {
 	a.mu.Lock()
-	if a.done || w.attempt != a.attempt || int64(len(w.buf)) <= a.ready {
+	if a.done || !a.liveLocked(w) || int64(len(w.buf)) <= a.ready {
 		a.mu.Unlock()
 		return
 	}
@@ -81,7 +102,7 @@ func (a *articleBuf) publish(w *articleWriter) {
 // finish marks the article complete with the bytes w received.
 func (a *articleBuf) finish(w *articleWriter) {
 	a.mu.Lock()
-	if a.done || w.attempt != a.attempt {
+	if a.done || !a.liveLocked(w) {
 		a.mu.Unlock()
 		return
 	}
