@@ -12,7 +12,6 @@ import (
 	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
 	"github.com/kipsilabs/altmount/internal/pool"
 	"github.com/kipsilabs/altmount/internal/progress"
-	"github.com/kipsilabs/altmount/internal/usenet"
 	"github.com/javi11/nntppool/v4"
 )
 
@@ -359,68 +358,8 @@ func FastFailReleaseProbe(
 	timeout time.Duration,
 	patchIdx PatchIndex,
 ) (bool, error) {
-	var segments []*metapb.SegmentData
-	for _, file := range files {
-		for _, segment := range file.Segments {
-			if segment == nil || segment.Id == "" {
-				continue
-			}
-			if holes.IsPlaceholderID(segment.Id) {
-				// A gap the NZB itself declares is not a provider miss: it is
-				// mapped without a STAT (PlaceholderResults), and the probe's
-				// job is still to answer for the articles the NZB does list.
-				continue
-			}
-			segments = append(segments, segment)
-		}
-	}
-	if len(segments) == 0 {
-		return false, nil
-	}
-
-	selected := capReleaseProbeSample(usenet.SelectSegmentsForValidation(segments, segmentSamplePercentage))
-	if len(selected) == 0 {
-		return false, nil
-	}
-
-	if !poolManager.HasPool() {
-		return false, fmt.Errorf("cannot fast-fail import: usenet connection pool is nil")
-	}
-
-	usenetPool, err := poolManager.GetPool()
-	if err != nil {
-		return false, fmt.Errorf("cannot fast-fail import: usenet connection pool unavailable: %w", err)
-	}
-	if usenetPool == nil {
-		return false, fmt.Errorf("cannot fast-fail import: usenet connection pool is nil")
-	}
-
-	if maxConnections <= 0 {
-		maxConnections = 1
-	}
-
-	ids := make([]string, len(selected))
-	for i, seg := range selected {
-		ids[i] = seg.Id
-	}
-
-	// Stat the sample via a bulk sweep, cancelling the rest on the first
-	// definitive miss. Operational errors retry only the affected IDs. Cap each
-	// attempt's probe timeout to 2 seconds per item so dead releases stay bounded.
-	probeTimeout := timeout
-	if probeTimeout > 2*time.Second {
-		probeTimeout = 2 * time.Second
-	}
-	missing, _, err := statIDsWithBoundedRetries(ctx, usenetPool, ids, maxConnections, probeTimeout, true, patchIdx)
-	if err != nil {
-		if len(missing) > 0 {
-			// The probe found a definitive miss before running out of
-			// patience for the rest; the answer is "damaged" either way.
-			return true, nil
-		}
-		return false, err
-	}
-	return len(missing) > 0, nil
+	v, err := FastFailReleaseProbeVerdict(ctx, files, poolManager, segmentSamplePercentage, maxConnections, timeout, patchIdx)
+	return v.Missing, err
 }
 
 // FastFailFileResult records the reachability outcome for a single FastFailFile.

@@ -129,8 +129,8 @@ func TestFastFailReleaseProbeDoesNotHedgeUniformlySlowSweep(t *testing.T) {
 	if missing {
 		t.Fatal("missing = true, want false")
 	}
-	if got := client.sweepCount(); got != 1 {
-		t.Fatalf("StatMany sweeps = %d, want 1: a uniformly slow provider has no stragglers to hedge", got)
+	if got := client.sweepCount(); got != 2 {
+		t.Fatalf("StatMany sweeps = %d, want 2 (first wave + rest): a uniformly slow provider has no stragglers to hedge", got)
 	}
 }
 
@@ -201,13 +201,13 @@ func TestFastFailReleaseProbeHedgesLargerStragglerTailOnPriorityLane(t *testing.
 	}
 	client.mu.Lock()
 	defer client.mu.Unlock()
-	if len(client.opts) != 2 {
-		t.Fatalf("StatMany sweeps = %d, want 2 (primary + hedge)", len(client.opts))
+	if len(client.opts) != 3 {
+		t.Fatalf("StatMany sweeps = %d, want 3 (first wave, rest, hedge)", len(client.opts))
 	}
-	if client.opts[0].Priority {
-		t.Fatal("primary sweep must stay on the normal lane")
+	if client.opts[0].Priority || client.opts[1].Priority {
+		t.Fatal("probe sweeps must stay on the normal lane")
 	}
-	if !client.opts[1].Priority {
+	if !client.opts[2].Priority {
 		t.Fatal("hedge sweep must use the priority lane")
 	}
 }
@@ -231,8 +231,8 @@ func TestFastFailReleaseProbeHedgesWhenArrivalsStall(t *testing.T) {
 	if elapsed := time.Since(start); elapsed > 1500*time.Millisecond {
 		t.Fatalf("probe took %s, want the 22 stalled STATs hedged inside the 2 s ceiling", elapsed)
 	}
-	if got := client.sweepCount(); got != 2 {
-		t.Fatalf("StatMany sweeps = %d, want 2 (primary + one hedge for every outstanding id)", got)
+	if got := client.sweepCount(); got != 3 {
+		t.Fatalf("StatMany sweeps = %d, want 3 (first wave, rest, one hedge for every outstanding id)", got)
 	}
 }
 
